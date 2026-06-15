@@ -289,6 +289,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Time:** column math + BSP walk ~1.5–3M — the dominant consumer alongside stores/reads.
 - **Space:** unrolled column code (**R-2**); visplane + clip arrays.
 - **Testing:** golden frames vs H5 (bit-exact); per-column math unit checks.
+- **Call discipline:** the BSP walk is **recursive** ⇒ needs a real **stack** (`stl.call`/`return` or an explicit iterative node stack), unlike the leaf `fcall` pixel bodies. Depth ~log(#nodes) (~15–20 for E1M1) ⇒ a small declared stack (OQ9 / §6 call-discipline). Per-column/per-pixel leaf work stays `fcall`-stackless.
 - **Open Qs:** OQ4 (does column math fully reduce to LUTs+adds? R1); visplane + clip-array design.
 
 #### F6 — Game loop & tic

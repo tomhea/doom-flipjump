@@ -679,7 +679,8 @@ the re-baseline.
 - **Correctness by reference model:** dump `SCREEN→PNG` (headless device) and **hash + diff against the
   host-side flat/textured reference**; the sim's state (player pos/angle after a scripted input sequence)
   must match the reference exactly. Per-region op-count profiling localizes overspend.
-- **End-to-end:** `fj doom.fjm --io pc` interactively, or `PcIO.headless(events_file, frames_dir)` with a
+- **End-to-end:** `fj doom.fjm --io pc` interactively (note that it requires pygame, and it's not supported on 
+  Windows py3.14, but py3.13 works fine), or `PcIO.headless(events_file, frames_dir)` with a
   **scripted key-event file** for CI — scene renders, movement/collision/fire behave per the reference,
   measured fps (device present-log) meets the tier; captured frames/video are the deliverable.
 

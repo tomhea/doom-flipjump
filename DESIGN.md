@@ -1,6 +1,9 @@
 # DOOM-on-FlipJump — Design Document
 
-> **Status: Stage 1 (Design) — IN PROGRESS.** Built iteratively through owner Q&A per the
+> **Status: Stage 1 (Design) — DRAFT COMPLETE, awaiting owner review.** All decisions D1–D13 resolved
+> (D14/D15 deferred to Stages 3/5); all components H1–H7 / F1–F9 fleshed to the §5 template; ledgers
+> seeded (concrete spans/ops filled by R0/R1 measurement). Next: owner review → Stage 2 contradiction hunt.
+> Built iteratively through owner Q&A per the
 > [implementation handoff](doom_implementation_handoff.md) §4–§5. Every decision is recorded in the
 > **Decisions** section below with an ID, rationale, and the measurement (if any) that settled it —
 > not in chat. Part II of the handoff is *input* to this document, not settled design; where an item
@@ -31,13 +34,13 @@
 Seeded from handoff §2 (estimates — **R-1**: measured at S5.3/R1 before R2 commits). Each component
 below adds/refines its own line as the design firms up.
 
-| Line | Per-frame cost (est.) | Technique | Settled by |
-|---|---|---|---|
-| Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px, static) | ~1.3M (est; R1 measures) | static stores §3.1, D3 deposit | D2/D3/R1 |
-| Texture + colormap reads (16K × ~100–200, dispatch-LUT) | ~1.6–3.2M | dispatch-LUTs §3.2 | D5/D11 |
-| Column math (160 cols) + visibility walk + game logic | ~1.5–3M | LUTs + adds, mul/div-free | D1/D6 |
-| Present (`update_screen` 0x03 memory-hook) + input poll | ~negligible (~70 + tens) | — | — |
-| **Total** | **~5–7M of 11.2M (~2× margin)** | | |
+| Line | Component | Per-frame cost (est.) | Technique | Settled by |
+|---|---|---|---|---|
+| Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px, static) | F4 | ~1.3M (est; R1 measures) | static stores §3.1, D3 deposit | D2/D3/R1 |
+| Texture + colormap reads (16K × ~100–200, dispatch-LUT) | F3/F5 | ~1.6–3.2M | dispatch-LUTs §3.2 | D5/D11 |
+| Column math (160 cols) + BSP walk + S0 logic | F5/H3/F6 | ~1.5–3M | LUTs + adds, mul/div-free | D1/D6 |
+| Present (`update_screen` 0x03 memory-hook) + input poll | F7 | ~negligible (~70 + tens) | — | — |
+| **Total** | | **~5–7M of 11.2M (~2× margin)** | | |
 
 ### 1.2 Address-span ledger (must sum < chosen `--flat-max-words`; **R-3**)
 
@@ -154,32 +157,182 @@ Per handoff §H / §3.5. Top to bottom:
 
 ## 6. Component inventory
 
-> Each component gets the §5 per-component template: **Purpose · Supplies · Depends-on · Assumes ·
-> Data & layout · Time · Space · Testing · Open questions.** Stubs below; filled through the Q&A.
+> Per-component template (§5): **Purpose · Supplies · Depends/related · Assumes · Data & layout ·
+> Time · Space · Testing · Open Qs.** Host components are one-time build tools (no fj-op budget);
+> fj components carry the runtime budget. Init order is called out under **Assumes** (contradiction-hunt §6).
 
 ### Host-side (Python, doom-flipjump repo)
-- **H1 — WAD parser/extractor** — levels (VERTEXES/LINEDEFS/SIDEDEFS/SECTORS/SEGS/SSECTORS/NODES/THINGS) + assets (PLAYPAL, COLORMAP, textures/patches, flats, sprites) per D7/D8 scope. *Fields: TBD.*
-- **H2 — LUT/dispatch generator** (from PR #1, upgraded) — emits **dispatch-code tables** (§3.2): **per-entry handlers as default** (D4), per-result-nibble as a per-table override, plus the legacy data tables (`generate_lut_fj`/`generate_byte_lut_fj`) and the custom +4-offset deposit table (D3). Alignment-aware (pow2 padding → span ledger). Each generated table emits a host-reference fixture for its per-table test. *Fields: TBD — this is the S5.1 generator upgrade.*
-- **H3 — Map compiler** — WAD level → baked `.fj` BSP structures (NODES / SSECTORS / SEGS / SECTORS / SIDEDEFS / LINEDEFS / VERTEXES) walked as sequential streams by F5. *Fields: TBD — D1 resolved (BSP); layout via D10.*
-- **H4 — Texture/colormap compiler** — D5's output format. *Fields: TBD — D5.*
-- **H5 — Reference model** — host-side (Python) golden implementation of *our exact integer* renderer + sim. **Bit-exact obligation (D12):** must reproduce every fixed-point truncation, LUT value, and colormap select/apply so its frame sha256 == the fj program's frame sha256, and its sim state == the fj sim state, exactly. Drives golden-frame + E2E diffing. *Fields: TBD.*
-- **H6 — Build system** — assemble pipeline (w=32, `--flat-max-words`, `--werror`), script/Makefile, CI. *Fields: TBD.*
-- **H7 — Test harness** — headless replays, golden-frame compare, per-table runner, ops-budget profiler. *Fields: TBD.*
+
+#### H1 — WAD parser/extractor
+- **Purpose:** Read a DOOM WAD and expose the level lumps + assets the compilers and reference model need.
+- **Supplies:** `parse_wad(path) -> WAD`; typed accessors for VERTEXES/LINEDEFS/SIDEDEFS/SECTORS/SEGS/SSECTORS/NODES/THINGS and PLAYPAL/COLORMAP/TEXTURE1+PNAMES+patches/flats (sprites later, S2).
+- **Depends/related:** none upstream; consumed by H3, H4, H5.
+- **Assumes:** valid IWAD/PWAD; shareware `doom1.wad` (dev) / Freedoom (redistributable) — D8.
+- **Data & layout:** host structures only; no span.
+- **Time / Space:** host, one-time; negligible.
+- **Testing:** unit-test lump offsets/counts + a few round-tripped records against `doom1.wad`/Freedoom fixtures; boundary (empty/odd-size lumps).
+- **Open Qs:** THINGS/sprite extraction scope (→ S2/D7).
+
+#### H2 — LUT/dispatch generator (PR #1, upgraded — the S5.1 work)
+- **Purpose:** Emit `.fj` lookup tables: dispatch-code tables (per-entry handlers default, D4) + per-result-nibble override + legacy data tables + the D3 +4-offset deposit table.
+- **Supplies:** `generate_dispatch_table_fj(label, values, mode, entry_nibbles, …)`, `generate_offset_deposit_table_fj(...)`, and PR #1's `generate_lut_fj`/`generate_byte_lut_fj`/`generate_reciprocal_lut_fj`/`generate_sine_lut_fj`/`encode_fixed_point`. Every emitter also returns a host-reference fixture for the per-table test.
+- **Depends/related:** extends PR #1 `lut_generator.py`; consumed by H4 and the trig/recip/yslope/viewangle builds; output assembled into the program.
+- **Assumes:** indices nibble-aligned (U6); pow2 alignment declared per table; values fit entry width; `hex.init` present at runtime for the dispatch machinery.
+- **Data & layout:** generated tables = pow2-aligned dispatch CODE (→ §1.2 span ledger); alignment-aware emit.
+- **Time:** host build; per-entry codegen O(entries × popcount).
+- **Space:** emitted `.fj` size feeds **R-2** (assemble time) + the span ledger; per-entry ~2–3× per-result-nibble on wide tables.
+- **Testing:** per-table generated tests (D12, bit-exact) over many indices incl. first/last/wrap; both emit modes covered.
+- **Open Qs:** texture-table span (OQ8); the per-table mode heuristic (D4 override).
+
+#### H3 — Map compiler
+- **Purpose:** Compile a WAD level into baked `.fj` BSP structures the fj renderer walks.
+- **Supplies:** `compile_map(wad, level) -> .fj` emitting NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES as sequential packed streams + the root-node entry point.
+- **Depends/related:** H1; consumed by F5; mirrored by H5.
+- **Assumes:** D1 = BSP; 16.16 coords (D6); coords fit w=32; F5 reads streams with `*_and_inc` (§3.4).
+- **Data & layout:** sequential streams in the data region (no pow2 align); span = Σ lump sizes (§1.2).
+- **Time / Space:** host build; stream span filled R0 (E1M1).
+- **Testing:** unit-test compiled structures vs parsed WAD (counts + sample records); the walk validated by golden frames (D12).
+- **Open Qs:** BSP traversal cost at E1M1 scale (R1); which seg/sidedef fields are actually needed.
+
+#### H4 — Texture/colormap compiler
+- **Purpose:** Compile WAD textures/flats + COLORMAP/PLAYPAL into the dispatch tables F3 reads + the palette F7 sends.
+- **Supplies:** `compile_textures`, `compile_colormaps`, `compile_palette` → `.fj` (via H2).
+- **Depends/related:** H1, H2; consumed by F3/F5 (sampling + lighting), F7 (palette).
+- **Assumes:** bpp=8 packed indices (D3); per-column-selected colormaps (D11); texel indices nibble-aligned (U6).
+- **Data & layout:** pow2-aligned dispatch tables; texture table likely largest → placed first (D10).
+- **Time / Space:** host build; **texture span = OQ8 risk** (R0/R1); downscale/reduce count if the ledger demands.
+- **Testing:** per-table generated tests (sample == WAD texel; colormap[light][texel] correct); palette round-trip; bit-exact.
+- **Open Qs:** texture count/resolution vs span (OQ8); flats rendered as spans.
+
+#### H5 — Reference model
+- **Purpose:** Host-side **exact-integer** golden renderer + sim — the test oracle (D12).
+- **Supplies:** `render_frame(state) -> palette-index bytes`, `step_sim(state, keys) -> state`.
+- **Depends/related:** H1/H3/H4 (same data); compared against the program in H7.
+- **Assumes:** reproduces every integer detail — fixed-point truncation, LUT values, colormap select/apply, BSP walk order — so frame sha256 and sim state match the program exactly.
+- **Data & layout / Time / Space:** host only.
+- **Testing:** it *is* the oracle; sanity-seeded against hand-computed values + a known reference frame, then trusted.
+- **Open Qs:** keeping it in lockstep as the fj pipeline evolves (a standing maintenance discipline).
+
+#### H6 — Build system
+- **Purpose:** One pipeline: run generators/compilers → assemble → `.fjm`; plus CI.
+- **Supplies:** a build script (Python/Make) (`w=32`, `--werror`, `--flat-max-words` as needed) + CI config.
+- **Depends/related:** all H*; flipjump 1.5.0 (frozen dep).
+- **Assumes:** w=32; flat path; `--werror` clean.
+- **Data & layout:** produces the `.fjm`; reports the span ledger.
+- **Time / Space:** **assemble time + `.fjm` size are tracked metrics** (R-2).
+- **Testing:** CI runs host unit + fj-macro + per-table + golden + replay tests; asserts `storage_mode == flat`; records assemble time / `.fjm` size / ops-frame.
+- **Open Qs:** assemble time at game scale (R-2) — measured S5.1/S5.3.
+
+#### H7 — Test harness
+- **Purpose:** Headless replays, golden-frame compares, per-table runs, ops profiling.
+- **Supplies:** wrappers over `assemble_and_run_test_output` / `run` + `FixedIO` / `InMemoryScreen` / `PcIO.headless`; sha256 golden compare vs H5; per-table runner; ops-budget profiler (`--profile`/featured loop on small builds).
+- **Depends/related:** flipjump APIs, H5 (oracle).
+- **Assumes:** deterministic runs; bit-exact (D12); scripted key-event files for E2E.
+- **Data & layout:** fixtures (golden frames, event scripts, table fixtures) in-repo (Freedoom-derived where redistributable).
+- **Time / Space:** CI cost.
+- **Testing:** harness self-checked on a trivial program.
+- **Open Qs:** **verify `PcIO.headless(events_file, frames_dir)` exists + its signature** — `InMemoryScreen` is screen-only (no input); input+screen headless replay needs `PcIO.headless` (handoff §1.1). Confirm in S5.2.
 
 ### FJ-side (the game program)
-- **F1 — Memory map / layout module** — the address plan; has invariants and tests. *Fields: TBD — D10.*
-- **F2 — Fixed-point math layer** — `fixed_point.fj` (PR #1): `fixed_mul`/`fixed_div` (full 2n-width product, D13) + `mul_const` (strength-reduced) + `read_table`/`read_table_byte` (pointer fallbacks). Default 16.16 (D6); 8.8 only per the precision ledger. `hex.scmp` for anything signable (§3.5). *Fields: partly specified by PR #1.*
-- **F3 — LUT access layer** — the dispatch-jumper idioms, one per table family (finesine/finecosine, reciprocal/scale, yslope, viewangletox/xtoviewangle, colormaps). **Includes the custom +4-offset 256-entry nibble table** used by F4's packed-byte deposit (D3). *Fields: TBD — D2/D4.*
-- **F4 — Framebuffer + pixel-store layer** — D2/D3's resolved design. **Invariant: the framebuffer is WRITE-ONLY during rendering** (color comes from textures + colormap + per-column scratch, never from a framebuffer read-back; the only classic-DOOM framebuffer readers — fuzz/spectre, translucency — are out of scope). Consequence: the cell encoding is chosen purely on *(device match) + (write/deposit cost)*; hex.vec offers no computational benefit, only a ~2×-cheaper deposit at 16 colors. Pairs with U10 ("no clear": every pixel written exactly once per frame, ceiling→wall→floor, no gaps). *Fields: TBD — D2/D3.*
-- **F5 — Renderer** — BSP front-to-back walk (D1), wall column renderer, floor/ceiling spans/visplanes, sprite renderer (flag-gated, D7), lighting/colormap point (D11). R2 ships walls + floors/ceilings textured. *Fields: TBD.*
-- **F6 — Game loop & tic** — tic:render 1:1 (D9): poll → update `keydown[]` → sim tic → render → present, every frame. R2 sim = S0 (turn / move / wall-slide collide). Doors/specials (S1), entities/AI (S2, §D), combat, level transitions all flag-gated (D7). *Fields: TBD.*
-- **F7 — Present layer** — drives the screen device over the output stream. **Device contract (read from `ScreenIO.py`, authoritative):**
-  - `[0x01][w:2][h:2][bpp:1][palette_size:2]` init (bpp ∈ {4,8}); `[0x02][palette_addr:w/8]` set_palette; `[0x03][screen_addr:w/8]` update_screen (primary present, memory-hook read, ~free); `[0x04][x,y,rw,rh:2 each][screen_addr:w/8]` update_rectangle (reads the *full-screen* base with screen stride — for status-bar/menu rects only); `[0x05]` raw in-stream pixels — **don't use**.
-  - **Framebuffer:** pixel `(px,py)` = packed byte at `screen_addr + (px + py·W)·dw`, masked to bpp bits. One byte per fj-op, stride `dw`, row-major.
+
+#### F1 — Memory map / layout module
+- **Purpose:** The address plan (D10) as fj labels/constants + its invariants.
+- **Supplies:** segment/label definitions, table-base constants, the largest-alignment-first ordering.
+- **Depends/related:** consumed by all fj components; defines the span.
+- **Assumes:** flat path; pow2 table alignment; w=32.
+- **Data & layout:** *is* the layout (§3); span = §1.2.
+- **Time:** n/a.
+- **Space:** the whole span ledger.
+- **Testing:** build asserts `storage_mode == flat` and span-sum < flat limit; alignment invariants checked.
+- **Open Qs:** final spans (R0).
+
+#### F2 — Fixed-point math layer (`fixed_point.fj`, PR #1)
+- **Purpose:** Signed Q-format math: `fixed_mul`/`fixed_div` + `mul_const` + pointer-fallback table reads.
+- **Supplies:** `hex.fixed_mul n,f,…`, `hex.fixed_div n,f,…,div0`, `hex.mul_const n,…,c`, `hex.read_table`/`read_table_byte` (fallbacks only).
+- **Depends/related:** `hex.*` STL; consumed by F5/F6.
+- **Assumes:** `0 < f <= n`; full 2n-width product (D13); default 16.16 (D6); `hex.init`; `hex.scmp` for signables (§3.5).
+- **Data & layout:** scratch `hex.vec` in F1's register region.
+- **Time / Space:** per PR #1's documented complexities (e.g. `fixed_mul` ≈ 4n²(5.5@+20)+…); div is expensive ⇒ **LUT it in hot paths**, never call per pixel/column.
+- **Testing:** PR #1's byte-exact tests (boundary inputs per path) — re-homed + CR'd in S5.0 (D15).
+- **Open Qs:** narrow-intermediate opt (D13) only if a hot mul needs it.
+
+#### F3 — LUT access layer
+- **Purpose:** The dispatch-jumper idioms that read the generated tables, one per family, + the packed-byte deposit primitive.
+- **Supplies:** `sample_texture`, `read_trig`, `read_reciprocal`/`read_scale`, `read_yslope`, `read_viewangle*`, `apply_colormap`, `deposit_pixel_byte` (D3: low-nibble std + high-nibble +4-offset table). Per-entry-handler dispatch (D4).
+- **Depends/related:** H2/H4 tables; consumed by F4/F5.
+- **Assumes:** indices nibble-aligned without runtime shift (U6); tables init'd before first use; shared `res`/`ret`.
+- **Data & layout:** reads code-region tables; owns the +4-offset 256-entry table.
+- **Time:** ~10@/dispatch (per-pixel sample+colormap; per-column trig/recip) — feeds the texture-read + column-math budget lines.
+- **Space:** small idiom code + the +4-offset table.
+- **Testing:** per-idiom byte-exact vs host reference; boundary/wrap indices.
+- **Open Qs:** OQ9 (`fcall` nesting if idioms chain > 1 level).
+
+#### F4 — Framebuffer + pixel-store layer
+- **Purpose:** The packed-byte framebuffer (D3) + the full-unroll static deposit (D2b).
+- **Supplies:** `framebuffer` base; `render_column x` (unrolled, fixed addresses); the deposit (via F3).
+- **Depends/related:** F3 (deposit table), F1 (layout); consumed by F5 (writes), F7 (present reads base).
+- **Assumes:** **write-only during render** (invariant); bpp=8 packed byte; **no clear** (U10 — every px written once, ceiling→wall→floor, no gaps); fixed compile-time addresses (D2b).
+- **Data & layout:** framebuffer = W·H = 16K packed-byte ops (data region).
+- **Time:** ~2 dispatches/px deposit (**R1 measures**) — store budget line ~1.3M (est).
+- **Space:** 16K-op framebuffer + the unrolled column code (**R-2** watch).
+- **Testing:** deposit byte-exact incl. the high nibble; golden frames.
+- **Open Qs:** D2 final (a vs b) settled by R1; deposit cost (R-1).
+
+#### F5 — Renderer
+- **Purpose:** BSP front-to-back walk (D1) → textured wall columns + floor/ceiling spans, lit (D11), into the 3D-view rect.
+- **Supplies:** `render_3d_view` (the §E pass), `draw_column`/`draw_span` (body chosen by the `TEXTURED` flag).
+- **Depends/related:** H3 (map), F3 (LUTs), F4 (framebuffer), F2 (math); first pass of the §E pipeline.
+- **Assumes:** front-to-back no-overdraw (upholds U10); per-column colormap select (D11); scale via reciprocal LUT (**no runtime divides**); 16.16 (D6); `hex.scmp` on signed deltas.
+- **Data & layout:** per-column scratch (top/bottom/colormap-sel) in fixed registers; reads map streams sequentially.
+- **Time:** column math + BSP walk ~1.5–3M — the dominant consumer alongside stores/reads.
+- **Space:** unrolled column code (**R-2**); visplane + clip arrays.
+- **Testing:** golden frames vs H5 (bit-exact); per-column math unit checks.
+- **Open Qs:** OQ4 (does column math fully reduce to LUTs+adds? R1); visplane + clip-array design.
+
+#### F6 — Game loop & tic
+- **Purpose:** The 1:1 loop (D9): poll → update `keydown[]` → S0 sim → render → present, every frame.
+- **Supplies:** `main_loop`, `poll_input`, `sim_tic` (S0: turn / move / wall-slide collide), present call.
+- **Depends/related:** F7 (poll/present), F5 (render), F4; S1/S2 flag-gated (D7, §D).
+- **Assumes:** no timer device — frame counter is the clock; tic:render 1:1; `keydown[]` in registers; signed deltas via `hex.scmp`.
+- **Data & layout:** player state (pos/angle/eye) + `keydown[]` in fixed registers.
+- **Time:** S0 ~few K ops/tic (cheap class: tile lookups, signed compares, adds).
+- **Space:** small.
+- **Testing:** scripted-replay E2E — sim state matches H5 exactly after a key sequence (D12); collision boundary cases.
+- **Open Qs:** collision model (axis-separated slide, §D); S1/S2 scope (D7).
+
+#### F7 — Present layer
+- **Purpose:** Drive the screen device over the output stream (init/palette/present/input).
+- **Supplies:** `init_screen`, `set_palette`, `present` (`update_screen` 0x03), input-poll helpers; `update_rectangle` (0x04) reserved for status-bar/menu rects.
+- **Depends/related:** F4 (framebuffer base), H4 (palette); the device (below).
+- **Assumes / Device contract (read from `ScreenIO.py`, authoritative):**
+  - `[0x01][w:2][h:2][bpp:1][palette_size:2]` init (bpp ∈ {4,8}); `[0x02][palette_addr:w/8]` set_palette; `[0x03][screen_addr:w/8]` update_screen (primary present, memory-hook, ~free); `[0x04][x,y,rw,rh:2 each][screen_addr:w/8]` update_rectangle (reads the *full-screen* base with screen stride — status-bar/menu only); `[0x05]` raw in-stream — **don't use**.
+  - **Framebuffer:** pixel `(px,py)` = packed byte at `screen_addr + (px + py·W)·dw`, masked to bpp. One byte/op, stride `dw`, row-major.
   - **Palette:** entry `k` = 3 packed bytes R,G,B at `palette_addr + 3k·dw`.
-  - Headless backend writes one PNG per present to `frames_dir` + a sha256 frame-hash log (golden tests; measured fps from present timestamps). *Fields: TBD.*
-- **F8 — HUD/status bar/menu/text passes** — compositor/pass pipeline + `blit_rect`/glyph design (§E). *Fields: TBD — D7.*
-- **F9 — Debug/diagnostics** — op-count probes, frame dumps, on-screen debug values. *Fields: TBD.*
+  - Keyboard (input side of `pc`): non-blocking, tic-based — one status poll (`0x0` none / `0x8` up / `0x9` down) then one keycode byte on events; keycodes ASCII-like `<0x80`, arrows/shift/ctrl/alt `0x80–0x86` (§1.1).
+- **Data & layout:** command bytes only; reads F4's framebuffer + H4's palette in memory.
+- **Time:** present ~70 fj-ops/frame; poll ~tens — negligible.
+- **Space:** negligible.
+- **Testing:** headless backend → one PNG/present + sha256 frame-hash log (golden + measured-fps); command-stream byte checks.
+- **Open Qs:** none open (contract is read from source).
+
+#### F8 — HUD / status-bar / menu / text passes (flag-gated, stubbed in R2)
+- **Purpose:** Overlay passes (§E) layered on the 3D view — API seams exist from day one (D7), bodies land R3+.
+- **Supplies:** `blit_rect(src,dx,dy,w,h,[transp])`, `draw_string(x,y,ptr)`, pass hooks `render_statusbar`/`render_text`/`render_menu` — **stubs** in R2.
+- **Depends/related:** F4 (framebuffer), F3 (glyph LUT / `hu_font`); §E compositor; `update_rectangle` for non-redrawn rects.
+- **Assumes:** 3D view writes `(VIEW_X,VIEW_Y,VIEW_W,VIEW_H)`; overlays own the remaining rows (no coordinate retrofit); framebuffer-write-heavy ⇒ enabled only at tiers whose budget pays.
+- **Data & layout:** glyph table + HUD graphics (flag-gated span).
+- **Time / Space:** per-pixel writes like walls — gated off in R2.
+- **Testing:** `blit_rect`/`draw_string` golden tests when enabled (R3).
+- **Open Qs:** which overlays ship when (D7/R3).
+
+#### F9 — Debug / diagnostics
+- **Purpose:** Op-count probes, frame dumps, on-screen debug values (cheap at this budget).
+- **Supplies:** probe macros; optional on-screen number print.
+- **Depends/related:** F4/F7; used by H7's profiler.
+- **Assumes:** compile-time-gated (off in release builds).
+- **Data & layout / Time / Space:** minimal; gated off normally.
+- **Testing:** exercised by the harness ops-budget profiling.
+- **Open Qs:** which probes pay off most at R1.
 
 ---
 

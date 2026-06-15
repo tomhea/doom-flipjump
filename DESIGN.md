@@ -54,7 +54,7 @@ zero per-op cost). Assert `storage_mode == flat` in the harness.
 | hex.init truth tables | ~fixed (or/and/mul/cmp/add/sub) | — | TBD | from `stl.startup_and_init_all` |
 | Unrolled renderer code (D2b) | ~16K px × stub size + 160 col × col-setup | — | **TBD (R-2 watch)** | the big code consumer; assemble time tracked |
 | Texture dispatch table(s) (D5) | pow2 ≥ Σ texel counts | pow2 pad | **TBD (OQ8 watch)** | likely largest table → placed first |
-| Trig (finesine/cosine/tangent) | pow2 ≥ entries, per-entry handlers (D4) | pow2 pad | TBD | per-result-nibble override if span tight |
+| Trig (finesine; cos = offset; tangent/viewangle) | N≈8192 (angle>>19; per-result-nibble, D4) | pow2 (N is pow2) | TBD (~0.5MB if 8192×8-nibble) | cosine shares the sine table; N is the R0 span knob (4096/2048) |
 | Reciprocal / scale | pow2 ≥ entries | pow2 pad | TBD | replaces divides |
 | yslope · viewangletox/xtoviewangle | pow2 ≥ entries | pow2 pad | TBD | |
 | Colormaps (D4 handlers) | pow2 ≥ 256·#maps, byte results | pow2 pad | TBD | per-column-selected (D11) |
@@ -260,6 +260,7 @@ Per handoff §H / §3.5. Top to bottom:
 #### F3 — LUT access layer
 - **Purpose:** The dispatch-jumper idioms that read the generated tables, one per family, + the packed-byte deposit primitive.
 - **Supplies:** `sample_texture`, `read_trig`, `read_reciprocal`/`read_scale`, `read_yslope`, `read_viewangle*`, `apply_colormap`, `deposit_pixel_byte` (D3: low-nibble std + high-nibble +4-offset table). Per-entry-handler dispatch (D4).
+- **Trig / angle quantization (NOT 2³² entries):** index by the **top bits** of the 32-bit BAM angle via a compile-time-constant shift — DOOM's `finesine[angle >> 19]` ⇒ **N = 8192** fine angles (N a pow2; 4096/2048 are span fallbacks — R0/R-3 fidelity knob). Multi-nibble index (4 nibbles): xor each index nibble into the jumper at offset `4i+6` (since `dw=2⁶`), then jump — generalizes the single-nibble `tables_init.fj` idiom. **Cosine is free** (`finecosine = finesine[(idx+N/4) & (N-1)]`, one table); `finetangent`/`viewangletox`/`xtoviewangle` quantize the same way. Trig is **per-column** (160×/frame, not per-pixel) ⇒ the canonical place for the **per-result-nibble override (D4)** to save span on its 32-bit (8-nibble) entries. Optional **quadrant fold** (N/4 + sign/reflect) = 4× smaller, deferred lever.
 - **Depends/related:** H2/H4 tables; consumed by F4/F5.
 - **Assumes:** indices nibble-aligned without runtime shift (U6); tables init'd before first use; shared `res`/`ret`.
 - **Data & layout:** reads code-region tables; owns the +4-offset 256-entry table.

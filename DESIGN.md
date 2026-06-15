@@ -78,15 +78,15 @@ reciprocal, yslope, viewangle maps, colormaps, textures), map/seg streams, frame
 > Format: **D# — title.** *Status.* Resolution + rationale + what measurement settled it (if any).
 > Owner leanings from the handoff are pre-recorded but **not** final until confirmed in the Q&A.
 
-- **D1 — Visibility model.** *OPEN.* BSP front-to-back walk (real DOOM maps, now affordable ~1.5–3M, settles U11) **vs** grid raycaster (simpler, lower-risk, the pre-1.5.0 default). Keystone: settles the map compiler and U11's fate.
+- **D1 — Visibility model.** *RESOLVED → **BSP front-to-back walk** (real DOOM geometry).* Now affordable post-rebaseline (~1.5–3M ops, shared with column math); no gridification, so **U11 is moot**. Accepts more renderer complexity (visplanes, clipping arrays, seg/node stream walk via sequential `*_and_inc` reads, §3.4). Settles H3 (map compiler bakes BSP NODES/SSECTORS/SEGS) and F5 (renderer is a BSP walk). Grid raycaster retained only as a documented last-resort fallback (would require a renderer rewrite — *not* a cheap fallback, noted for §6 fallback-reachability).
 - **D2 — Static-store design.** *OPEN (decided by R1 measurements: ops AND assemble time AND `.fjm` size).* (a) fixed-address column buffer + one sequential pass **vs** (b) full column unroll (zero pixel-path pointers, costs WIDTH× code). Owner leaning: hex-memory for pixels (see D3 criterion).
 - **D3 — Framebuffer encoding.** *OPEN — known tension (R-4).* Owner leaning **hex-memory** pixels; the screen device's primary read (`update_screen` 0x03 memory-hook) is a **packed-byte** framebuffer at bpp=8. Must co-resolve store layer ↔ device read format ↔ palette bpp. Resolve early (handoff §6).
 - **D4 — Per-table dispatch shape.** *OPEN, per-table.* Per-result-nibble aligned tables (8 cheap dispatches for 32-bit entries) **vs** per-entry handlers (1 dispatch + popcount flips).
 - **D5 — Texture storage.** *OPEN.* Dispatch tables **vs** sequential streams; texture count/resolution vs span ledger (**OQ8**).
 - **D6 — Precision per quantity.** *OPEN.* 16.16 vs 8.8 (~4× cheaper mul) per variable, validated against the reference model (wobble risk, **OQ5**).
-- **D7 — Feature scope at 160×100.** *OPEN.* What ships in the first playable vs flag-gated later: sprites/enemies (S2), HUD/status bar, menus, text, demo playback.
+- **D7 — Feature scope at 160×100.** *RESOLVED → first playable (R2) = **textured 3D view (walls + floors/ceilings) + S0 walk/collide**, auto-warp into the level.* Flag-gated for R3+: S1 doors+hitscan, S2 sprites/enemies, HUD/status bar, menus, text, demo playback. Rationale: prove the renderer + the §1.1 budget (the hard part) first; matches the §8 ladder. The compositor/pass pipeline and `blit_rect`/glyph API (§E, F8) are **stubbed flag-gated from day one** so later passes drop in without touching the 3D core.
 - **D8 — Maps & assets.** *OPEN.* Which level(s); full E1M1? entity counts. Handoff policy: shareware `doom1.wad` for dev, **Freedoom** for anything redistributed (CI fixtures) — confirm.
-- **D9 — Frame pacing.** *OPEN.* Strict 25 fps cap vs uncapped + measured fps; tic:render ratio (1:1?).
+- **D9 — Frame pacing.** *RESOLVED → **tic:render 1:1, budget-bound**.* One input poll = one tic = one rendered frame. There is no timer device (§1.1), so the program cannot self-pace to wall-clock time; "25 fps" = "hold ops/frame < 11.2M so the native engine *delivers* ~25 fps on the reference machine." Accept and **report** the measured wall-clock fps (present-log). Sim/render decoupling (render 1-of-N tics, G21) is a deferred hedge, not built in R2.
 - **D10 — Memory map.** *OPEN.* Concrete largest-alignment-first layout + span budget (→ §3, §1.2).
 - **D11 — Colormap/lighting application point.** *OPEN.* Per-pixel (inside the 100–200 op texture-read est.) **vs** per-column (flat mode). Naïve per-pixel colormap = a pointer read per pixel (~6M+/frame) — **U9**.
 - **D12 — Test granularity.** *OPEN.* What's unit-tested vs golden-framed; how many golden frames; demo scripts.
@@ -118,7 +118,7 @@ Per handoff §H / §3.5. Top to bottom:
 ### Host-side (Python, doom-flipjump repo)
 - **H1 — WAD parser/extractor** — levels (VERTEXES/LINEDEFS/SIDEDEFS/SECTORS/SEGS/SSECTORS/NODES/THINGS) + assets (PLAYPAL, COLORMAP, textures/patches, flats, sprites) per D7/D8 scope. *Fields: TBD.*
 - **H2 — LUT/dispatch generator** (from PR #1, upgraded) — emits **dispatch-code tables** (§3.2) *and* data tables; per-table emit modes (hypercube chain / per-entry handlers / per-result-nibble); alignment-aware. *Fields: TBD — D4.*
-- **H3 — Map compiler** — WAD level → baked `.fj` structures (BSP nodes/segs or grid). *Fields: TBD — D1.*
+- **H3 — Map compiler** — WAD level → baked `.fj` BSP structures (NODES / SSECTORS / SEGS / SECTORS / SIDEDEFS / LINEDEFS / VERTEXES) walked as sequential streams by F5. *Fields: TBD — D1 resolved (BSP); layout via D10.*
 - **H4 — Texture/colormap compiler** — D5's output format. *Fields: TBD — D5.*
 - **H5 — Reference model** — host-side golden implementation of *our exact* renderer + sim for frame/state diffing. *Fields: TBD.*
 - **H6 — Build system** — assemble pipeline (w=32, `--flat-max-words`, `--werror`), script/Makefile, CI. *Fields: TBD.*
@@ -129,8 +129,8 @@ Per handoff §H / §3.5. Top to bottom:
 - **F2 — Fixed-point math layer** — `fixed_point.fj` (PR #1): `fixed_mul`/`fixed_div` 16.16 + 8.8, plus D6/D13 intermediate-width handling. *Fields: partly specified by PR #1.*
 - **F3 — LUT access layer** — the dispatch-jumper idioms, one per table family (finesine/finecosine, reciprocal/scale, yslope, viewangletox/xtoviewangle, colormaps). *Fields: TBD — D2/D4.*
 - **F4 — Framebuffer + pixel-store layer** — D2/D3's resolved design. *Fields: TBD — D2/D3.*
-- **F5 — Renderer** — visibility (D1), wall column renderer, floor/ceiling spans/visplanes, sprite renderer (D7), lighting/colormap point (D11). *Fields: TBD.*
-- **F6 — Game loop & tic** — input poll + `keydown[]`, player move/collide, doors/specials, entities/AI (S0–S2 ladder §D), combat, level transitions. *Fields: TBD — D7.*
+- **F5 — Renderer** — BSP front-to-back walk (D1), wall column renderer, floor/ceiling spans/visplanes, sprite renderer (flag-gated, D7), lighting/colormap point (D11). R2 ships walls + floors/ceilings textured. *Fields: TBD.*
+- **F6 — Game loop & tic** — tic:render 1:1 (D9): poll → update `keydown[]` → sim tic → render → present, every frame. R2 sim = S0 (turn / move / wall-slide collide). Doors/specials (S1), entities/AI (S2, §D), combat, level transitions all flag-gated (D7). *Fields: TBD.*
 - **F7 — Present layer** — init/set_palette/update_screen; `update_rectangle` (0x04) only for status-bar/menus. *Fields: TBD.*
 - **F8 — HUD/status bar/menu/text passes** — compositor/pass pipeline + `blit_rect`/glyph design (§E). *Fields: TBD — D7.*
 - **F9 — Debug/diagnostics** — op-count probes, frame dumps, on-screen debug values. *Fields: TBD.*

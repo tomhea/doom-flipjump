@@ -36,7 +36,7 @@ below adds/refines its own line as the design firms up.
 
 | Line | Component | Per-frame cost (est.) | Technique | Settled by |
 |---|---|---|---|---|
-| Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px, static) | F4 | ~1.3M (est; R1 measures) | static stores §3.1, D3 deposit | D2/D3/R1 |
+| Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px, static) | F4 | ~1.0M (measured proxy ~63 ops/byte; R1 confirms) | static stores §3.1, D3 deposit | D2/D3/R1 |
 | Texture + colormap reads (16K × ~100–200, dispatch-LUT) | F3/F5 | ~1.6–3.2M | dispatch-LUTs §3.2 | D5/D11 |
 | Column math (160 cols) + BSP walk + S0 logic | F5/H3/F6 | ~1.5–3M | LUTs + adds, mul/div-free | D1/D6 |
 | Present (`update_screen` 0x03 memory-hook) + input poll | F7 | ~negligible (~70 + tens) | — | — |
@@ -274,7 +274,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Depends/related:** F3 (deposit table), F1 (layout); consumed by F5 (writes), F7 (present reads base).
 - **Assumes:** **write-only during render** (invariant); bpp=8 packed byte; **no clear** (U10 — every px written once, ceiling→wall→floor, no gaps); fixed compile-time addresses (D2b).
 - **Data & layout:** framebuffer = W·H = 16K packed-byte ops (data region).
-- **Time:** ~2 dispatches/px deposit (**R1 measures**) — store budget line ~1.3M (est).
+- **Time:** deposit ≈ 2 nibble dispatches. **Measured proxy (`hex.mov 2`, w=32) ≈ 63 ops/byte** → ~1.0M for 16K px — validates the ~1.3M est (and far below an earlier ~216-op guess). A custom mov-table (set fixed hex = runtime value in 1 dispatch/nibble, vs `hex.mov`'s zero+xor) could cut it further — R1.
 - **Space:** 16K-op framebuffer + the unrolled column code (**R-2** watch).
 - **Testing:** deposit byte-exact incl. the high nibble; golden frames.
 - **Open Qs:** D2 final (a vs b) settled by R1; deposit cost (R-1).
@@ -310,6 +310,7 @@ Per handoff §H / §3.5. Top to bottom:
   - **Framebuffer:** pixel `(px,py)` = packed byte at `screen_addr + (px + py·W)·dw`, masked to bpp. One byte/op, stride `dw`, row-major.
   - **Palette:** entry `k` = 3 packed bytes R,G,B at `palette_addr + 3k·dw`.
   - Keyboard (input side of `pc`): non-blocking, tic-based — one status poll (`0x0` none / `0x8` up / `0x9` down) then one keycode byte on events; keycodes ASCII-like `<0x80`, arrows/shift/ctrl/alt `0x80–0x86` (§1.1).
+- **Present-path rationale — memory-hook (0x03) over raw-stream (0x05):** *decisive reason = render order ≠ scan order.* The raw stream demands W·H bytes in **row-major** order; DOOM/BSP renders **column-major + front-to-back** with overdraw and multi-segment columns, so pixels are produced out of scan order. The framebuffer decouples render order from scan order; 0x03 then scans out the finished buffer for ~free (~70 ops/frame). *Measured per-byte (w=32):* output ≈ **34 ops**, deposit ≈ **63 ops** — so raw output *is* ~2× cheaper per pixel, BUT that only helps if you emit directly row-major with **no** framebuffer (forfeits incremental `frac+=step` column sampling, and is impossible for multi-segment BSP columns). *With* a framebuffer (which BSP requires), 0x03 (deposit + ~70/frame) beats 0x05 (deposit + 34/px ⇒ +~0.5M/frame). So 0x03 is strictly better here.
 - **Data & layout:** command bytes only; reads F4's framebuffer + H4's palette in memory.
 - **Time:** present ~70 fj-ops/frame; poll ~tens — negligible.
 - **Space:** negligible.

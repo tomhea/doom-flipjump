@@ -33,7 +33,7 @@ below adds/refines its own line as the design firms up.
 
 | Line | Per-frame cost (est.) | Technique | Settled by |
 |---|---|---|---|
-| Pixel stores (16K px × ~80 ops, static) | ~1.3M | static stores §3.1 | D2/R1 |
+| Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px, static) | ~1.3M (est; R1 measures) | static stores §3.1, D3 deposit | D2/D3/R1 |
 | Texture + colormap reads (16K × ~100–200, dispatch-LUT) | ~1.6–3.2M | dispatch-LUTs §3.2 | D5/D11 |
 | Column math (160 cols) + visibility walk + game logic | ~1.5–3M | LUTs + adds, mul/div-free | D1/D6 |
 | Present (`update_screen` 0x03 memory-hook) + input poll | ~negligible (~70 + tens) | — | — |
@@ -81,7 +81,10 @@ reciprocal, yslope, viewangle maps, colormaps, textures), map/seg streams, frame
 
 - **D1 — Visibility model.** *RESOLVED → **BSP front-to-back walk** (real DOOM geometry).* Now affordable post-rebaseline (~1.5–3M ops, shared with column math); no gridification, so **U11 is moot**. Accepts more renderer complexity (visplanes, clipping arrays, seg/node stream walk via sequential `*_and_inc` reads, §3.4). Settles H3 (map compiler bakes BSP NODES/SSECTORS/SEGS) and F5 (renderer is a BSP walk). Grid raycaster retained only as a documented last-resort fallback (would require a renderer rewrite — *not* a cheap fallback, noted for §6 fallback-reachability).
 - **D2 — Static-store design.** *RESOLVED (direction) → **lean hard to (b) full column unroll**; R1 measures both before final commit.* (b) `rep(SCREEN_WIDTH, x) render_column x` makes every framebuffer address a compile-time constant ⇒ **zero pixel-path pointers** (the §B "constant algorithm"); heavy color/select/pack logic factored into a shared `stl.fcall` leaf so it isn't duplicated WIDTH×. R1 measures (b)'s ops/frame **and** assemble time **and** `.fjm` size against (a) the fixed-address column buffer + one sequential pass. (a) is the **first-class relief valve** if R-2 (assembler scale) bites. Owner intent: make (b) work.
-- **D3 — Framebuffer encoding.** *OPEN — known tension (R-4).* Owner leaning **hex-memory** pixels; the screen device's primary read (`update_screen` 0x03 memory-hook) is a **packed-byte** framebuffer at bpp=8. Must co-resolve store layer ↔ device read format ↔ palette bpp. Resolve early (handoff §6).
+- **D3 — Framebuffer encoding.** *RESOLVED → **packed-byte, bpp=8** (256 colors), device-direct.* **R-4 closed.** Framebuffer = one packed byte/op, stride `dw`, row-major (matches `ScreenIO` `update_screen` exactly — zero present-time conversion). Written by D2(b) full-unroll fixed-address stores (pointer-free). The framebuffer is **write-only during rendering** (F4 invariant), so encoding is chosen on *(device match) + (deposit cost)* only.
+  - **Deposit mechanism (new component obligation, F3/F4):** a fixed-address packed-byte deposit of a runtime value = **low nibble** via the existing `hex` dispatch table (dbit-aligned) + **high nibble** via a custom **+4-offset 256-entry table** — a ~1-line variant of `hex.tables.clean_table_entry__table` (flip target `dst+dbit+4+(#d)-1`) plus its jumper. ~2 dispatches/pixel. TDD'd like any table.
+  - **Rejected alternatives:** `hex.vec 2` framebuffer (256 colors via 2 ops/px) is **dominated** — the device reads one packed byte/op so it can't read `hex.vec 2`, forcing a pack pass that needs the *same* +4-offset code anyway, plus ~2× deposit work and 2× span. `hex.vec-1 bpp=4` (16 colors, zero custom code, ~1 dispatch/px) is the documented **cost-fallback** if R1 shows the byte deposit is the budget-buster and 16 colors is acceptable.
+  - **R1 measures** the real per-pixel deposit cost before R2 commits (R-1).
 - **D4 — Per-table dispatch shape.** *OPEN, per-table.* Per-result-nibble aligned tables (8 cheap dispatches for 32-bit entries) **vs** per-entry handlers (1 dispatch + popcount flips).
 - **D5 — Texture storage.** *OPEN.* Dispatch tables **vs** sequential streams; texture count/resolution vs span ledger (**OQ8**).
 - **D6 — Precision per quantity.** *OPEN.* 16.16 vs 8.8 (~4× cheaper mul) per variable, validated against the reference model (wobble risk, **OQ5**).
@@ -128,8 +131,8 @@ Per handoff §H / §3.5. Top to bottom:
 ### FJ-side (the game program)
 - **F1 — Memory map / layout module** — the address plan; has invariants and tests. *Fields: TBD — D10.*
 - **F2 — Fixed-point math layer** — `fixed_point.fj` (PR #1): `fixed_mul`/`fixed_div` 16.16 + 8.8, plus D6/D13 intermediate-width handling. *Fields: partly specified by PR #1.*
-- **F3 — LUT access layer** — the dispatch-jumper idioms, one per table family (finesine/finecosine, reciprocal/scale, yslope, viewangletox/xtoviewangle, colormaps). *Fields: TBD — D2/D4.*
-- **F4 — Framebuffer + pixel-store layer** — D2/D3's resolved design. *Fields: TBD — D2/D3.*
+- **F3 — LUT access layer** — the dispatch-jumper idioms, one per table family (finesine/finecosine, reciprocal/scale, yslope, viewangletox/xtoviewangle, colormaps). **Includes the custom +4-offset 256-entry nibble table** used by F4's packed-byte deposit (D3). *Fields: TBD — D2/D4.*
+- **F4 — Framebuffer + pixel-store layer** — D2/D3's resolved design. **Invariant: the framebuffer is WRITE-ONLY during rendering** (color comes from textures + colormap + per-column scratch, never from a framebuffer read-back; the only classic-DOOM framebuffer readers — fuzz/spectre, translucency — are out of scope). Consequence: the cell encoding is chosen purely on *(device match) + (write/deposit cost)*; hex.vec offers no computational benefit, only a ~2×-cheaper deposit at 16 colors. Pairs with U10 ("no clear": every pixel written exactly once per frame, ceiling→wall→floor, no gaps). *Fields: TBD — D2/D3.*
 - **F5 — Renderer** — BSP front-to-back walk (D1), wall column renderer, floor/ceiling spans/visplanes, sprite renderer (flag-gated, D7), lighting/colormap point (D11). R2 ships walls + floors/ceilings textured. *Fields: TBD.*
 - **F6 — Game loop & tic** — tic:render 1:1 (D9): poll → update `keydown[]` → sim tic → render → present, every frame. R2 sim = S0 (turn / move / wall-slide collide). Doors/specials (S1), entities/AI (S2, §D), combat, level transitions all flag-gated (D7). *Fields: TBD.*
 - **F7 — Present layer** — drives the screen device over the output stream. **Device contract (read from `ScreenIO.py`, authoritative):**

@@ -61,7 +61,8 @@ zero per-op cost). Assert `storage_mode == flat` in the harness.
 - **nibble / hex / byte** — a `hex` = 4 data bits; a packed byte = 8 data bits in one op; register-form byte = two `hex` ops (low, then `+dw`). The two byte encodings do **not** interchange (see flipjump-dev skill).
 - **Fixed-point** — Q-format: 16.16 = `n=8,f=4`; 8.8 = `n=4,f=2`. Signed; compare with `hex.scmp`, never `hex.cmp` (§3.5).
 - **Static store** — a framebuffer write to a *compile-time-known* address (~7@), vs a runtime-address pointer write (~500–1300 ops).
-- **Dispatch-LUT** — the `hex.xor`-jumper table idiom (`tables_init.fj`): ~10@/lookup, 10–30× cheaper than `read_table`.
+- **Dispatch-LUT** — the `hex.xor`-jumper table idiom (`tables_init.fj`): ~10@/lookup, 10–30× cheaper than `read_table`. One dispatch sets a *fixed-address* hex = a *runtime* value (indexes on the current nibble), so it is the pointer-free deposit primitive.
+- **Cell width ⊥ pointer-freeness** (key D3 insight) — "packed byte" (8-bit cell, forced by bpp=8/256-color + the device read) is the framebuffer *cell width*; "pointer-free" is whether the *address* is compile-time-known (delivered by D2(b) full-unroll). Orthogonal: a packed-byte framebuffer can be written entirely by fixed-address stores. The runtime-value→fixed-address deposit cost scales with bits — a byte ≈ 2× a nibble — so bpp=4/hex.vec is the ~2×-cheaper-deposit / 16-color cost-fallback.
 
 ---
 
@@ -79,13 +80,13 @@ reciprocal, yslope, viewangle maps, colormaps, textures), map/seg streams, frame
 > Owner leanings from the handoff are pre-recorded but **not** final until confirmed in the Q&A.
 
 - **D1 — Visibility model.** *RESOLVED → **BSP front-to-back walk** (real DOOM geometry).* Now affordable post-rebaseline (~1.5–3M ops, shared with column math); no gridification, so **U11 is moot**. Accepts more renderer complexity (visplanes, clipping arrays, seg/node stream walk via sequential `*_and_inc` reads, §3.4). Settles H3 (map compiler bakes BSP NODES/SSECTORS/SEGS) and F5 (renderer is a BSP walk). Grid raycaster retained only as a documented last-resort fallback (would require a renderer rewrite — *not* a cheap fallback, noted for §6 fallback-reachability).
-- **D2 — Static-store design.** *OPEN (decided by R1 measurements: ops AND assemble time AND `.fjm` size).* (a) fixed-address column buffer + one sequential pass **vs** (b) full column unroll (zero pixel-path pointers, costs WIDTH× code). Owner leaning: hex-memory for pixels (see D3 criterion).
+- **D2 — Static-store design.** *RESOLVED (direction) → **lean hard to (b) full column unroll**; R1 measures both before final commit.* (b) `rep(SCREEN_WIDTH, x) render_column x` makes every framebuffer address a compile-time constant ⇒ **zero pixel-path pointers** (the §B "constant algorithm"); heavy color/select/pack logic factored into a shared `stl.fcall` leaf so it isn't duplicated WIDTH×. R1 measures (b)'s ops/frame **and** assemble time **and** `.fjm` size against (a) the fixed-address column buffer + one sequential pass. (a) is the **first-class relief valve** if R-2 (assembler scale) bites. Owner intent: make (b) work.
 - **D3 — Framebuffer encoding.** *OPEN — known tension (R-4).* Owner leaning **hex-memory** pixels; the screen device's primary read (`update_screen` 0x03 memory-hook) is a **packed-byte** framebuffer at bpp=8. Must co-resolve store layer ↔ device read format ↔ palette bpp. Resolve early (handoff §6).
 - **D4 — Per-table dispatch shape.** *OPEN, per-table.* Per-result-nibble aligned tables (8 cheap dispatches for 32-bit entries) **vs** per-entry handlers (1 dispatch + popcount flips).
 - **D5 — Texture storage.** *OPEN.* Dispatch tables **vs** sequential streams; texture count/resolution vs span ledger (**OQ8**).
 - **D6 — Precision per quantity.** *OPEN.* 16.16 vs 8.8 (~4× cheaper mul) per variable, validated against the reference model (wobble risk, **OQ5**).
 - **D7 — Feature scope at 160×100.** *RESOLVED → first playable (R2) = **textured 3D view (walls + floors/ceilings) + S0 walk/collide**, auto-warp into the level.* Flag-gated for R3+: S1 doors+hitscan, S2 sprites/enemies, HUD/status bar, menus, text, demo playback. Rationale: prove the renderer + the §1.1 budget (the hard part) first; matches the §8 ladder. The compositor/pass pipeline and `blit_rect`/glyph API (§E, F8) are **stubbed flag-gated from day one** so later passes drop in without touching the 3D core.
-- **D8 — Maps & assets.** *OPEN.* Which level(s); full E1M1? entity counts. Handoff policy: shareware `doom1.wad` for dev, **Freedoom** for anything redistributed (CI fixtures) — confirm.
+- **D8 — Maps & assets.** *RESOLVED.* **Asset source:** shareware `doom1.wad` for development; **Freedoom** WADs for anything redistributed (CI fixtures / golden frames). **Map ambition:** R1 renderer bring-up + measurement on a small (hand-built or smallest real) BSP map to keep the assemble/span/measure loop fast; **real E1M1 is the R2 target.** Entity counts: deferred to D7's S2 tier (sprites flag-gated; not in R2).
 - **D9 — Frame pacing.** *RESOLVED → **tic:render 1:1, budget-bound**.* One input poll = one tic = one rendered frame. There is no timer device (§1.1), so the program cannot self-pace to wall-clock time; "25 fps" = "hold ops/frame < 11.2M so the native engine *delivers* ~25 fps on the reference machine." Accept and **report** the measured wall-clock fps (present-log). Sim/render decoupling (render 1-of-N tics, G21) is a deferred hedge, not built in R2.
 - **D10 — Memory map.** *OPEN.* Concrete largest-alignment-first layout + span budget (→ §3, §1.2).
 - **D11 — Colormap/lighting application point.** *OPEN.* Per-pixel (inside the 100–200 op texture-read est.) **vs** per-column (flat mode). Naïve per-pixel colormap = a pointer read per pixel (~6M+/frame) — **U9**.
@@ -131,7 +132,11 @@ Per handoff §H / §3.5. Top to bottom:
 - **F4 — Framebuffer + pixel-store layer** — D2/D3's resolved design. *Fields: TBD — D2/D3.*
 - **F5 — Renderer** — BSP front-to-back walk (D1), wall column renderer, floor/ceiling spans/visplanes, sprite renderer (flag-gated, D7), lighting/colormap point (D11). R2 ships walls + floors/ceilings textured. *Fields: TBD.*
 - **F6 — Game loop & tic** — tic:render 1:1 (D9): poll → update `keydown[]` → sim tic → render → present, every frame. R2 sim = S0 (turn / move / wall-slide collide). Doors/specials (S1), entities/AI (S2, §D), combat, level transitions all flag-gated (D7). *Fields: TBD.*
-- **F7 — Present layer** — init/set_palette/update_screen; `update_rectangle` (0x04) only for status-bar/menus. *Fields: TBD.*
+- **F7 — Present layer** — drives the screen device over the output stream. **Device contract (read from `ScreenIO.py`, authoritative):**
+  - `[0x01][w:2][h:2][bpp:1][palette_size:2]` init (bpp ∈ {4,8}); `[0x02][palette_addr:w/8]` set_palette; `[0x03][screen_addr:w/8]` update_screen (primary present, memory-hook read, ~free); `[0x04][x,y,rw,rh:2 each][screen_addr:w/8]` update_rectangle (reads the *full-screen* base with screen stride — for status-bar/menu rects only); `[0x05]` raw in-stream pixels — **don't use**.
+  - **Framebuffer:** pixel `(px,py)` = packed byte at `screen_addr + (px + py·W)·dw`, masked to bpp bits. One byte per fj-op, stride `dw`, row-major.
+  - **Palette:** entry `k` = 3 packed bytes R,G,B at `palette_addr + 3k·dw`.
+  - Headless backend writes one PNG per present to `frames_dir` + a sha256 frame-hash log (golden tests; measured fps from present timestamps). *Fields: TBD.*
 - **F8 — HUD/status bar/menu/text passes** — compositor/pass pipeline + `blit_rect`/glyph design (§E). *Fields: TBD — D7.*
 - **F9 — Debug/diagnostics** — op-count probes, frame dumps, on-screen debug values. *Fields: TBD.*
 

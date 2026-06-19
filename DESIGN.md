@@ -42,11 +42,11 @@ the real @ at S5.3 before R2 commits). Per-pixel lines are ×16,000 px, optimize
 | Pixel stores (deposit, ~4@/px) | F4 | 64K@ | **1.6M** | static stores §3.1, D3 deposit |
 | Texture + colormap reads (2 dispatches, ~8@/px) | F3/F5 | 128K@ | **3.2M** | dispatch-LUTs §3.2 |
 | **Per-pixel arithmetic** (select ~3@ + DDA ~11@ + index ~2@ = ~16@/px) | F5 | 256K@ | **6.4M** | **mandatory** 8.8 fraction-accumulator DDA + `hex.sign` select |
-| Column math (160 cols) + BSP walk + S0 sim | F5/H3/F6 | ~100–200K@ | **~2.5–5M** | LUTs + adds, mul/div-free |
+| Column + BSP walk + S0 sim (rebuilt §1.1.3) | F5/H3/F6 | ~180K@ raw | **~4.5M raw → ~3M optimized** | reads dominate; BSP-as-code (§1.1.3) |
 | Present (`update_screen` 0x03) + input poll | F7 | ~negligible | **~0** | memory-hook |
-| **Total** | | **~548–648K@** | **≈ 13.7–16.2M of 11.2M** | **over budget at full fidelity** |
+| **Total** | | | **≈ 16M raw → ~11.4M all-opts** | **over budget without the opts + a fidelity lever** |
 
-**At @=25 the optimized per-pixel work alone is ~11.2M — it fills the entire 11.2M budget by itself**, so the full frame (~14–16M with column/BSP) is **clearly over the 25 fps budget**. Closing it needs *both* the **top-6 optimizations (§1.1.2)** *and* a fidelity lever. Concretely (§1.1.2): with optimizations **#1,2 (DDA 8.8+accumulator, `hex.sign` select)** the per-pixel is the ~11.2M above; adding **#3,5,6 (fuse texture→colormap, custom deposit, trim BSP fields)** lands the frame at **~12.4M**; **#4 (8.8 fracstep, ~1M)** → ~11.4M, ~at budget; a **flat-colored-floors** trim or **12.5 fps** then buys real margin. The earlier "~8–9M, 1.3× margin" was wrong — it used a too-low ~5@ DDA; the corrected DDA (~11@, each nibble-add ~4@) is the dominant line.
+**At @=25 the optimized per-pixel work alone is ~9.4M (opts #1,2,3,5 applied) and the rebuilt column/BSP is ~4.5M raw, so the frame is ~14–16M — clearly over the 25 fps budget.** Closing it takes the **whole optimization set (§1.1.2, now #1–9)** *and* a fidelity lever: with the per-pixel opts (#1–3,5) + the column opts (#6–9, esp. BSP-as-code) the frame lands **~12.4M**; **#4 (8.8 fracstep)** → **~11.4M, ~at budget**; a **flat-colored-floors** trim or **12.5 fps** then buys real margin. *(The earlier "~8–9M, 1.3× margin" was wrong — it used a too-low ~5@ DDA and a too-optimistic ~3M column; the corrected DDA is ~11@ and the rebuilt column is ~4.5M raw.)* **Owner-agreed (this review): #1–6.** Per-quantity widths are the **precision ledger (§1.1.4)** — most quantities are *not* 16.16.
 
 #### 1.1.1 Per-pixel arithmetic — reconstructed from the actual STL macro costs (S2)
 
@@ -65,7 +65,7 @@ So the budgeted "~12@/px" (2 dispatches + deposit) was **~2.5× low even optimiz
 
 > **@ is the dominant budget variable (U7/R-6).** The whole ledger is **@-proportional** — a dispatch is ~4@, a deposit ~4@/byte (§2 glossary), the column/BSP reads are dispatches too — and **@ grows with total program size (U7)**. The design computes at the working point **@ = 25** (≈ the §A "DOOM-scale" figure); at that @ the frame is **over budget at full fidelity** (above), which is why the §1.1.2 optimizations are load-bearing. The budget scales ~linearly: a lighter build (smaller @) buys margin, a heavier one (more LUTs/textures/unrolled code) costs it. **R-1 (S5.3) measures the real @ at game scale before R2 commits** — it is the single most important budget measurement; if @ lands materially above 25 the §2 fallbacks (flat-colored floors, flat-shaded, 12.5 fps, bpp=4) are the relief.
 
-#### 1.1.2 Optimization priorities — the top 6 flows by time-profit (@ = 25)
+#### 1.1.2 Optimization priorities — the flows by time-profit (@ = 25)
 
 Ranked by the per-frame ops *saved* vs a naïve implementation. **#1–2 take the per-pixel path from the naïve
 ~23.2M down to the optimized ~11.2M baseline — they are mandatory just to be in the game**; **#3,5,6 then
@@ -80,12 +80,51 @@ Profits are at @=25; they shrink/grow ~linearly with the measured @.
 | **4** | **per-column `fracstep`** (×160) | 16.16 `hex.mul` ~352@/col | 8.8 / `mul_const` shift-add ~80@/col | **~1.0M** | tiny (8.8 step) |
 | **5** | **deposit** (per-pixel) | `hex.mov 2` zero+xor ~4@ | custom *set-into-clean* table, 1 dispatch/nibble ~2.5@ | **~0.6M** (×2 at bpp=4) | none (bpp=4 → 16 colors) |
 | **6** | **BSP stream fields** (per node/seg) | every byte = `read_byte_and_inc` ~42@ | trim to the minimal per-node/seg record; pack so one walk reads it contiguously | **~0.3–0.6M** | none (data layout) |
+| **7** | **BSP-as-code, not data** (§1.1.3) | walk *reads* node partition+bbox (~1.8M of reads) | compile each node into a code block with the partition as **compile-time constants** — no reads, side test becomes `mul_const` | **~1.5M** | +program size / assemble (R-2), per-level recompile |
+| **8** | **16.0 integer BSP/visibility math** (§1.1.4) | 16.16 side-test mults (n=8) ~352@ | truncate to integer coords (sub-unit doesn't change the side) → n=4 mults ~88@ | **~0.3M** | none (visibility only) |
+| **9** | **incremental scale interpolation** | per-column scale via a mult | scale at the two seg ends, then `+=` per column (DDA-style adds) | **~0.3–0.5M** | none (exact) |
 
 Two structural levers sit *above* this table (they change which pixels pay at all, not how much each pays):
 **flat-colored floors/ceilings** removes texture+colormap+2-coord-DDA+index on ~40–50% of pixels (the single
 biggest single move, a fidelity tradeoff), and the **full-column unroll (D2b)** is what makes the per-pixel
 *address* free in the first place (without it every store is a ~41@ pointer write — §A — which alone would be
-~10× the deposit line). #1–6 are the *within-pixel* and *within-column* wins on top of those.
+~10× the deposit line). #1–9 are the *within-pixel*, *within-column*, and *within-BSP* wins on top of those.
+**Owner-agreed (this review): #1–6;** #7–9 emerged from the §1.1.3 rebuild and are roughly as valuable as #3–6.
+
+#### 1.1.3 Column + BSP + sim — rebuilt from the macros (@ = 25)
+
+Replaces the old soft "~2.5–5M" envelope. Assumptions: ~80 BSP nodes + ~60 wall-segs visible/frame (E1M1),
+R-1 measures the real counts. **The reads dominate, not the multiplies** — each streamed byte is
+`read_byte_and_inc` ≈ 42@, and a frame consumes ~1,700 bytes of node/seg/sector data:
+
+| Part | cost @=25 | note |
+|---|---|---|
+| Stream reads (node + seg + sector) | **~1.8M** | ~1,700 bytes × 42@ — the biggest single piece; **opt #6 trims it, opt #7 (BSP-as-code) ~eliminates it** |
+| Per-column setup (fracstep, interp, clip) ×160 | **~1.2M** | opt #4 (fracstep) + #9 (incremental scale) cut it |
+| Multiplies (BSP side tests, scale, angles) | **~0.7M** | opt #8 (16.0) halves the side-test mults |
+| Floor/ceiling visplane setup | **~0.6M** | per-span yslope + step |
+| Sim S0 (move + collide) | **~0.2M** | cheap class (adds, signed compares) |
+| **Total** | **~4.5M raw → ~3M with #6–9** | R-1 measures real node/seg counts |
+
+#### 1.1.4 Precision ledger (per-quantity widths) — most of the game is *not* 16.16 (D6)
+
+Drop below 16.16 wherever the reference model (H5) confirms acceptable wobble (D6). Width mismatches in one op
+read past the end (flipjump-dev skill) — align at the boundaries (e.g. 16.16 player vs 16.0 vertex), D13.
+
+| Quantity | width | why |
+|---|---|---|
+| Map geometry (vertices, linedefs, partitions) | **16.0** | DOOM stores these as integers |
+| BSP side-test math | **16.0** | sub-unit doesn't change the side (opt #8) |
+| Texture v-coord (wall DDA frac/step) | **8.8** | texel ≤256 + ~8 frac bits |
+| Floor/ceiling span u,v (DDA) | **8.8 / 6.8** | flats are 64×64 |
+| Wall scale / reciprocal output | **8.8–16.8** | pixel-accurate height |
+| Wall top/bottom (screen clip) | **8.0** | screen rows 0–100 |
+| Player angle | **~16.0 / 12-bit** | trig LUT uses only the top 12 bits |
+| Velocity / move delta | **8.8** | bounded speed |
+| Distance (recip / colormap index) | **12-bit index** | it's a bucket, no fraction |
+| Light level | **5-bit** | 0–31 |
+| Health / armor / ammo | **8.0–16.0** | small counters |
+| **Player position x,y** | **16.16** | the *only* genuine 16.16 — big world + smooth movement |
 
 ### 1.2 Address-span ledger (must sum < chosen `--flat-max-words`; **R-3**)
 
@@ -206,7 +245,7 @@ Concrete spans are tracked in the **§1.2 span ledger** (sizes filled by R0; pad
 - **D4 — Per-table dispatch shape.** *RESOLVED → **per-entry handlers (default)**; per-result-nibble as a per-table override.* Per-entry handler = 1 dispatch + popcount flips (≈4@+2W ops) — ~7× faster than per-result-nibble (W dispatches ≈ 4W@) for wide results, ~2× for a byte. Chosen because ops/frame is the scarce resource and the per-pixel colormap benefits most. **Cost it carries:** a more complex generator (custom per-entry flip code) and ~2–3× table space on wide tables (feeds **R-3** span). **Override:** large *cold* tables (e.g. trig) may use per-result-nibble to save span if the span ledger tightens — recorded per-table in the span ledger + the table's test. Both fit the shared `res`/`ret` machinery (handler XORs `value[k]` into `res`, caller `xor_zero`s out). **Construction (#5):** an over-alignable (`pad 2ⁿ`) `switch:` jump table (`;arg_k` per entry); each `arg_k:` **`xor_by`s (flips in) the entry's compile-time value into the shared *kept-zero* `res` — *not* `hex.set`** — and **cleans the jumped switch-op from within the table** (like stl's `clean_table_entry`, which also XORs rather than sets).
   - **Why not `hex.set` per entry — the trap (measured S2).** `hex.set` expands to `hex.zero` + `xor_by`, and `hex.zero` is itself a *table-dispatched* op (`@+12`/nibble) — so per-entry `hex.set` bakes a **value-independent zero into every entry**, ≈**32× the space** of a bare `xor_by` (~512 B vs 16 B/entry at w=32, measured). On the ~300K-entry texture table that is ~150 MB / ~19M ops (**over the flat limit — would break R-3**) vs ~5 MB. The fix costs **nothing in time**: `res` is held at zero by the caller's `xor_zero`-out (which also reads it into the destination), so the zero is paid once — in the read-out you do anyway — *not* per entry and *not* as a separate pre-zero. *(Per-entry `hex.set` is functionally correct; it is acceptable only where the entry count is small and space is abundant — for the big tables it is not. If a future construction ever does need an explicit pre-zero of a wide result, route it through one shared `fcall`'d zero-routine, never inline it per entry.)*
 - **D5 — Texture storage.** *RESOLVED → **dispatch-LUT textures**.* Textures baked as aligned dispatch table(s); per-pixel texel sample = **~4@ dispatch** (not a ~33@ `read_byte` pointer read). Per column the source column is fixed (selected once, amortized); per pixel the index = per-column base + texel (`frac>>FRACBITS`, a compile-time shift) — an add, nibble-aligned, no runtime shift (U6). **Span (texel count rounded to pow2, OQ8) is the open risk — measured in R0/R1**; fallbacks: sequential packed-byte streams, fewer/smaller textures. R2 bound to E1M1's real textures (downscale if the span ledger demands). Entry shape per D4.
-- **D6 — Precision per quantity.** *RESOLVED → **16.16 default, drop to 8.8 only with evidence**.* Every quantity is 16.16 (DOOM-faithful, correctness-first) unless a **per-quantity precision ledger** records a justified 8.8: justification = profiling shows the cost is material **and** the reference-model diff (OQ5) confirms acceptable wobble. The mostly-LUT'd hot path + ~2× margin make this low-risk.
+- **D6 — Precision per quantity.** *RESOLVED → **narrowest width the reference model validates; 16.16 only where genuinely needed**.* The **per-quantity precision ledger is §1.1.4** — and the S2 rebuild shows **most quantities are 8.8 / 16.0 / 8.0, not 16.16** (only player position is genuinely 16.16). These reductions are **load-bearing, not optional slack** — at @=25 the budget is ~at-limit (§1.1), so the narrow widths (8.8 DDA/scale, 16.0 map+BSP math, 8.0 screen coords) are part of *reaching* budget, not headroom. Each is still validated against the reference-model diff (OQ5/H5) for acceptable wobble; width mismatches at boundaries (16.16 player vs 16.0 vertex) handled per D13 / the flipjump-dev width-mismatch rule.
 - **D7 — Feature scope at 160×100.** *RESOLVED → first playable (R2) = **textured 3D view (walls + floors/ceilings) + S0 walk/collide**, auto-warp into the level.* Flag-gated for R3+: S1 doors+hitscan, S2 sprites/enemies, HUD/status bar, menus, text, demo playback. Rationale: prove the renderer + the §1.1 budget (the hard part) first; matches the §8 ladder. The compositor/pass pipeline and `blit_rect`/glyph API (§E, F8) are **stubbed flag-gated from day one** so later passes drop in without touching the 3D core.
 - **D8 — Maps & assets.** *RESOLVED.* **Asset source:** shareware `doom1.wad` for development; **Freedoom** WADs for anything redistributed (CI fixtures / golden frames). **Map ambition:** R1 renderer bring-up + measurement on a small (hand-built or smallest real) BSP map to keep the assemble/span/measure loop fast; **real E1M1 is the R2 target.** Entity counts: deferred to D7's S2 tier (sprites flag-gated; not in R2).
 - **D9 — Frame pacing.** *RESOLVED → **tic:render 1:1, budget-bound**.* One input poll = one tic = one rendered frame. There is no timer device (§1.1), so the program cannot self-pace to wall-clock time; "25 fps" = "hold ops/frame < 11.2M so the native engine *delivers* ~25 fps on the reference machine." Accept and **report** the measured wall-clock fps (present-log). Sim/render decoupling (render 1-of-N tics, G21) is a deferred hedge, not built in R2. **If frames run too fast** (likely on the native engine): wall-clock pacing can't be done in-program (no timer); the clean fix is a **device-side fps cap** — the screen device sleeps on present if too little wall-time elapsed ("aim for X fps"). Verified *not* in the stock pygame device ⇒ a candidate `fj==1.5.1` device extension (§2.1). R2: run uncapped + report fps; add the cap for a playable interactive build.
@@ -264,7 +303,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### H3 — Map compiler
 - **Purpose:** Compile a WAD level into baked `.fj` BSP structures the fj renderer walks.
-- **Supplies:** `compile_map(wad, level) -> .fj` emitting NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES as sequential packed streams + the root-node entry point.
+- **Supplies:** `compile_map(wad, level) -> .fj` emitting NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES as sequential packed streams + the root-node entry point. **Emit mode (opt #7, §1.1.3):** either packed **data streams** (small, ~42@/byte to walk) or **BSP-as-code** — each node compiled to a code block with its partition line as compile-time constants (no per-node reads; side test becomes a `mul_const`). Code is ~1.5M/frame cheaper but costs program size + assemble time (R-2) and recompiles per level; the generator supports both, R1 picks per the measured read cost.
 - **Depends/related:** H1; consumed by F5; mirrored by H5.
 - **Assumes:** D1 = BSP; 16.16 coords (D6); coords fit w=32; F5 reads streams with `*_and_inc` (§3.4).
 - **Data & layout:** sequential streams in the data region (no pow2 align); span = Σ lump sizes (§1.2).
@@ -419,7 +458,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 ## 7. Risks (handoff §10, live)
 
-- **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **At the @ = 25 working point the optimized per-pixel work alone is ~11.2M and the full frame ~14–16M — *over* the 11.2M budget at full fidelity** (§1.1): three optimisms were corrected in S2 — the budget is **@-proportional**, the per-pixel line was under-counted (DDA + select, §1.1.1), and the DDA's optimized cost was itself under-estimated (each nibble-add is ~4@, so the 8.8+accumulator DDA is ~11@/px, not ~5@). 160×100 textured @25 closes only by applying **all** the §1.1.2 top-6 optimizations (→ ~11.4M, ~at budget) **plus** a fidelity lever (flat-colored floors / 12.5 fps) for real margin — #1–2 are mandatory just to reach the ~11.2M per-pixel baseline. **Top R-1 tasks: measure @ *and* the real per-pixel DDA cost.** Fallbacks: flat-colored floors / flat-shaded / 12.5 fps / bpp=4.
+- **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **At the @ = 25 working point the optimized per-pixel work alone is ~11.2M and the full frame ~14–16M — *over* the 11.2M budget at full fidelity** (§1.1): three optimisms were corrected in S2 — the budget is **@-proportional**, the per-pixel line was under-counted (DDA + select, §1.1.1), and the DDA's optimized cost was itself under-estimated (each nibble-add is ~4@, so the 8.8+accumulator DDA is ~11@/px, not ~5@). 160×100 textured @25 closes only by applying the §1.1.2 optimization set (**#1–9**, incl. the §1.1.3 column rebuild's BSP-as-code) → ~11.4M, ~at budget — **plus** a fidelity lever (flat-colored floors / 12.5 fps) for real margin; #1–2 are mandatory just to reach the per-pixel baseline. **Top R-1 tasks: measure @ *and* the real per-pixel DDA cost.** Fallbacks: flat-colored floors / flat-shaded / 12.5 fps / bpp=4.
 - **R-2** — Assembler scalability is load-bearing (column-unroll + mega dispatch tables). Measure assemble time + `.fjm` size at game scale (S5.1/S5.3); relief valve = design (a) column buffer.
 - **R-3** — Span vs flat path: power-of-two padding can silently overflow → paged (~2.5× slower). Guards: span ledger + `storage_mode` assertion.
 - **R-4** — D3 encoding tension (hex-memory pixels vs packed-byte device read) — resolve in this doc, not in code.

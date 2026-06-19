@@ -41,11 +41,27 @@ below adds/refines its own line as the design firms up.
 |---|---|---|---|---|
 | Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px ≈ ~4@) | F4 | ~1.0M @ ledger-@≈15 | static stores §3.1, D3 deposit | D2/D3/R1 |
 | Texture + colormap reads (16K px, 2 dispatches/px ≈ ~8@) | F3/F5 | ~1.6–3.2M @ ledger-@≈15 | dispatch-LUTs §3.2 | D5/D11 |
+| **Per-pixel arithmetic** (DDA `frac+=step` + ceiling/wall/floor select) | F5 | **~2.4–3.8M @ ledger-@≈15** (see §1.1.1) | **mandatory** narrow-frac DDA + early-exit select | D6/R1 |
 | Column math (160 cols) + BSP walk + S0 logic | F5/H3/F6 | ~1.5–3M | LUTs + adds, mul/div-free | D1/D6 |
 | Present (`update_screen` 0x03 memory-hook) + input poll | F7 | ~negligible (~70 + tens) | — | — |
-| **Total** | | **~5–7M of 11.2M (~2× margin) — *at ledger-@≈15*** | | |
+| **Total** | | **~6.5–11M of 11.2M (~1.0–1.7× margin) — *at ledger-@≈15, with the mandatory per-pixel optimizations*** | | |
 
-> **@-sensitivity — the dominant budget variable (U7/R-6; the single most important R-1 measurement).** Nearly every line above is **@-proportional** — a dispatch is ~4@, a deposit ~4@/byte (§2 glossary), and the column-math/BSP reads are dispatches too — and **@ grows with total program size (U7)**. The lines are written at an implied **@≈15** (a small/medium build; back-solved from the inherited ~53–63 ops/byte and ~100–200 ops/px estimates). **At the §A "DOOM-scale" @≈27 the *entire* @-proportional ledger scales ~×1.8**, so the ~5–7M total becomes **~9–12.6M of 11.2M**: the optimistic end still fits (~1.2× margin) but the **pessimistic corner exceeds the budget** — exactly what the §2 fallbacks (flat-shaded drops the colormap dispatch ≈ −4@/px; 12.5 fps doubles the budget; bpp=4 halves the deposit) are for. The headline "~2× margin" holds only at the smaller @. **R-1 (S5.3) measures the real @ at game scale before R2 commits**; costs are stated in **@** (scale-invariant) in the components and converted at the measured @. *(This reconciles the §A @≈27 cost model with the inherited §2 ops-figures — formerly an un-converted @-vs-ops mismatch that hid the margin's @-dependence.)*
+#### 1.1.1 Per-pixel arithmetic — reconstructed from the actual STL macro costs (S2)
+
+The per-op costs in the design are **verified correct** against the 1.5.0 STL (S2): `hex.mul n=8`=`352@+1280`, `hex.div n=8`=`2304@+6400`, `hex.shl_hex n=8`=`8@+32`, `hex.write_byte`=`41@+197`, `hex.read_byte`=`33@+173`, `stl.fcall`=`@-1` — all match §A. **The gap was in the per-pixel *aggregation*, not the per-op numbers.** A textured wall pixel does more than the "2 dispatches" the texture line counted; reconstructing it from the real macros (`hex.add n`=`n(4@+12)`, `hex.cmp n`=`m(3@+8)` with early-exit, `hex.sign n`=`@-1`):
+
+| Per textured-wall-pixel | macro | optimized | naïve |
+|---|---|---|---|
+| ceiling/wall/floor **select** | 1–2× `hex.cmp` of 2-nibble screen coords (early-exit ⇒ `m≈1`) / `hex.sign` | ~3–5@ | n-width cmp ~6–12@ |
+| **DDA** `frac += step` | `hex.add n` | ~4–6@ (1–2-nibble *fraction-accumulator*, carry to a 2-nibble texel index) | ~16@ (8.8, n=4) … ~32@ (16.16, n=8) |
+| texel index assemble (col-base + texel) | `hex.xor_by` / small add | ~1–3@ | ~1–3@ |
+| texture sample + colormap | 2 dispatches | ~8@ | ~8@ |
+| deposit | 2 nibble-dispatches | ~4@ | ~4@ |
+| **per-pixel total** | | **~20–26@** | **~40–55@** |
+
+So the budgeted "~12@/px" (2 dispatches + deposit) was **~2× low even optimized, ~4× low naïve** — the new **Per-pixel arithmetic** line (above) carries the difference. Two consequences: **(1) the optimizations are *mandatory*, not optional** — a *narrow-width* DDA (8.8 or, better, a small fraction-accumulator that only carries into a 2-nibble texel index — D6/U5) and an *early-exit / `hex.sign`-based* surface select; with the full-16.16 `frac` add naïvely per pixel, the frame **does not fit even at @≈15**. **(2) floors/ceilings are heavier** — perspective spans step **two** coordinates (`u`,`v`) per pixel, so textured flats roughly double the DDA cost of walls (flat-colored floors avoid it; a fallback lever). R-1 (S5.3) **must measure the real per-pixel cost including the DDA**, and the `@`-note below still applies on top (everything here is `@`-proportional).
+
+> **@-sensitivity — the dominant budget variable (U7/R-6; the single most important R-1 measurement).** Nearly every line above is **@-proportional** — a dispatch is ~4@, a deposit ~4@/byte (§2 glossary), and the column-math/BSP reads are dispatches too — and **@ grows with total program size (U7)**. The lines are written at an implied **@≈15** (a small/medium build; back-solved from the inherited ~53–63 ops/byte and ~100–200 ops/px estimates). **At the §A "DOOM-scale" @≈27 the *entire* @-proportional ledger scales ~×1.8**, so the **~6.5–11M @≈15 total becomes ~12–20M — over the 11.2M budget across most of the range.** Combined with §1.1.1 (per-pixel arithmetic was ~2–4× under-counted), the realistic position is: **160×100 textured @25 fits only with the mandatory per-pixel optimizations *and* a modest @ (~15), and needs the §2 fallbacks at game-scale @** — flat-shaded (drops the colormap dispatch *and* the DDA where floors go flat-colored), 12.5 fps (doubles the budget), bpp=4 (halves the deposit). The earlier "~2× margin" was doubly optimistic (un-scaled @ **and** an under-counted per-pixel line). **R-1 (S5.3) measures the real @ at game scale before R2 commits**; costs are stated in **@** (scale-invariant) in the components and converted at the measured @. *(This reconciles the §A @≈27 cost model with the inherited §2 ops-figures — formerly an un-converted @-vs-ops mismatch that hid the margin's @-dependence.)*
 
 ### 1.2 Address-span ledger (must sum < chosen `--flat-max-words`; **R-3**)
 
@@ -379,7 +395,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 ## 7. Risks (handoff §10, live)
 
-- **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **Margin is @-proportional** (§1.1 @-note): ~2× at the ledger's @≈15 but only ~1–1.2× at the §A game-scale @≈27 — so **measuring @ at game scale is the top R-1 task**, and the pessimistic corner needs a fallback. Fallbacks: flat-shaded / 12.5 fps / bpp=4.
+- **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **Two compounding optimisms were corrected in S2:** (i) the margin is **@-proportional** (§1.1 @-note) — only ~1.0–1.7× at @≈15, over budget at @≈27; and (ii) the per-pixel line was **~2–4× under-counted** — it omitted the DDA `frac+=step` add and the surface select (§1.1.1, reconstructed from the verified STL macro costs). Net: 160×100 textured @25 needs the **mandatory** per-pixel optimizations (narrow/fraction-accumulator DDA, early-exit/`hex.sign` select) **and** likely the fallbacks at game-scale @. **Top R-1 tasks: measure @ *and* the real per-pixel DDA cost.** Fallbacks: flat-shaded / flat-colored floors / 12.5 fps / bpp=4.
 - **R-2** — Assembler scalability is load-bearing (column-unroll + mega dispatch tables). Measure assemble time + `.fjm` size at game scale (S5.1/S5.3); relief valve = design (a) column buffer.
 - **R-3** — Span vs flat path: power-of-two padding can silently overflow → paged (~2.5× slower). Guards: span ledger + `storage_mode` assertion.
 - **R-4** — D3 encoding tension (hex-memory pixels vs packed-byte device read) — resolve in this doc, not in code.

@@ -1,8 +1,11 @@
 # DOOM-on-FlipJump — Design Document
 
-> **Status: Stage 1 (Design) — DRAFT COMPLETE, awaiting owner review.** All decisions D1–D13 resolved
-> (D14/D15 deferred to Stages 3/5); all components H1–H7 / F1–F9 fleshed to the §5 template; ledgers
-> seeded (concrete spans/ops filled by R0/R1 measurement). Next: owner review → Stage 2 contradiction hunt.
+> **Status: Stage 2 (Contradiction hunt) — COMPLETE, awaiting owner re-approval.** All decisions D1–D13
+> resolved (D14/D15 deferred to Stages 3/5); all components H1–H7 / F1–F9 fleshed to the §5 template;
+> ledgers seeded (concrete spans/ops filled by R0/R1 measurement). The handoff §6 checklist was run
+> mechanically and adversarially; contradictions were fixed in-doc (load-bearing cost/device/macro
+> claims **verified by assembling+running probes on stock flipjump 1.5.0**, not just reasoned). Next:
+> owner re-approval → Stage 3 (directory tree).
 > Built iteratively through owner Q&A per the
 > [implementation handoff](doom_implementation_handoff.md) §4–§5. Every decision is recorded in the
 > **Decisions** section below with an ID, rationale, and the measurement (if any) that settled it —
@@ -13,8 +16,8 @@
 
 ## Process gates (handoff §4)
 
-1. **Stage 1 — this document.** Cover every component per the §5 spec. ← *we are here*
-2. **Stage 2 — contradiction hunt.** Adversarial pass (handoff §6 checklist); fix in-doc; re-approve → *final document*.
+1. **Stage 1 — this document.** Cover every component per the §5 spec. ✓ *done*
+2. **Stage 2 — contradiction hunt.** Adversarial pass (handoff §6 checklist); fix in-doc; re-approve → *final document*. ← *we are here (awaiting re-approval)*
 3. **Stage 3 — directory tree** (handoff §7).
 4. **Stage 4 — iterative stage cutting** (handoff §8).
 5. **Stage 5 — execution.** First item: CR-loop PR #1 into the Stage-3 tree (handoff §9), then execute.

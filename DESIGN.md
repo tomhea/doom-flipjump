@@ -24,7 +24,7 @@
 ## 1. Targets & budgets (living ledgers)
 
 **Primary target (owner decision, locked):** 160×100, textured, 256 colors, 25 fps.
-**Stretch:** 320×200 @ 25 fps textured — *only after* the jump-target speculation tier lands (~450–600M fj/s). Not a dependency.
+**Stretch:** 320×200 @ 25 fps textured — **no speculation tier** (we won't use it). Reachable instead if flat-run + the §2.1/§3 optimizations push the engine to **~400M+ fj/s**; revisit once R2's measured ops/frame are in. Not a dependency.
 **Fallbacks:** 160×100 flat-shaded · 160×100 textured @ 12.5 fps · flat→paged storage.
 
 **Budget:** ~280M fj/s (measured flat, native engine) ÷ 25 fps = **~11.2M fj-ops / frame.**
@@ -47,14 +47,14 @@ below adds/refines its own line as the design firms up.
 Power-of-two dispatch-table padding inflates the span — lay out **largest-alignment-first** (§3.3) and
 sum padding here, don't discover it. **OPEN — D10** (concrete memory map). Default flat limit = 2²³ words
 (64 MB); raise via `--flat-max-words` / `FLIPJUMP_FLAT_MAX_WORDS` if needed (cost = RAM + ~0.1 s/GB fill,
-zero per-op cost). Assert `storage_mode == flat` in the harness.
+zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |
 |---|---|---|---|---|
 | hex.init truth tables | ~fixed (or/and/mul/cmp/add/sub) | — | TBD | from `stl.startup_and_init_all` |
 | Unrolled renderer code (D2b) | ~16K px × stub size + 160 col × col-setup | — | **TBD (R-2 watch)** | the big code consumer; assemble time tracked |
 | Texture dispatch table(s) (D5) | pow2 ≥ Σ texel counts | pow2 pad | **TBD (OQ8 watch)** | likely largest table → placed first |
-| Trig (finesine; cos = offset; tangent/viewangle) | N≈8192 (angle>>19; per-result-nibble, D4) | pow2 (N is pow2) | TBD (~0.5MB if 8192×8-nibble) | cosine shares the sine table; N is the R0 span knob (4096/2048) |
+| Trig (finesine; cos = offset; tangent/viewangle) | **N=4096=16³** (top 3 nibbles, no shift §2.1; per-result-nibble, D4) | 16³-aligned | TBD (~0.25MB if 4096×8-nibble) | cosine shares the sine table (+N/4 = single-hex add); 256 = coarse fallback |
 | Reciprocal / scale | pow2 ≥ entries | pow2 pad | TBD | replaces divides |
 | yslope · viewangletox/xtoviewangle | pow2 ≥ entries | pow2 pad | TBD | |
 | Colormaps (D4 handlers) | pow2 ≥ 256·#maps, byte results | pow2 pad | TBD | per-column-selected (D11) |
@@ -79,6 +79,13 @@ zero per-op cost). Assert `storage_mode == flat` in the harness.
 - **Dispatch-LUT** — the `hex.xor`-jumper table idiom (`tables_init.fj`): ~10@/lookup, 10–30× cheaper than `read_table`. One dispatch sets a *fixed-address* hex = a *runtime* value (indexes on the current nibble), so it is the pointer-free deposit primitive.
 - **`P_Random` / determinism** — the game uses **no true RNG**. DOOM's "randomness" (combat/AI, R3+) is a deterministic 256-byte `rndtable` + advancing `rndindex` — a byte-LUT. The whole game is deterministic, which is *required* by D12 (bit-exact + replay). R2 uses no randomness at all.
 - **Cell width ⊥ pointer-freeness** (key D3 insight) — "packed byte" (8-bit cell, forced by bpp=8/256-color + the device read) is the framebuffer *cell width*; "pointer-free" is whether the *address* is compile-time-known (delivered by D2(b) full-unroll). Orthogonal: a packed-byte framebuffer can be written entirely by fixed-address stores. The runtime-value→fixed-address deposit cost scales with bits — a byte ≈ 2× a nibble — so bpp=4/hex.vec is the ~2×-cheaper-deposit / 16-color cost-fallback.
+
+## 2.1 Cross-cutting build techniques
+
+- **Dependency policy — flipjump 1.5.0 is near-frozen, but *extensible*.** Default: build only on stock 1.5.0; **no speculation tier** (we won't use it). If a device/engine change would *materially* help and stock-1.5.0 designs are exhausted, we **can** ship a tested `fj==1.5.1` — a deliberate, justified, last-resort lever, not a default (strong preference: don't). Candidate extensions, *only if measured to win*: a ScreenIO mode reading **two 4-bpp ops as one 8-bpp pixel** (would make a `hex.vec 2` framebuffer device-direct — reopens D3's rejected option); a **column-major bit-input stream** matching the program's compute order; a **device-side fps cap** (D9).
+- **16^x-sized shift-indexed LUTs (U6+).** When the index is *derived by shifting* a value (angle→sine: shift, then jump), size the table to a power of **16** (nibble-aligned entry count) so the index lands on nibble boundaries and **no runtime/sub-nibble shift is needed** (saves space + time). E.g. trig N = **4096 = 16³** (top 3 nibbles), not 8192 (2¹³, a 19-bit shift). Applies to every shift-indexed dispatch-LUT.
+- **Over-align very-hot dispatch-LUTs.** Align a hot 2ⁿ-entry table to 2ⁿ⁺¹ so the top alignment bit is always 0 → the jumper's `wflip` round-trip skips it (~0.5 op each way, ~1 op/lookup saved). Worth it **only** for per-pixel/per-column-hot tables (colormap, texture, deposit) — the 2× padding isn't worth it for cold tables (track in the span ledger).
+- **Call discipline — tiered `fcall`/`fret`, avoid the stack.** Prefer `fcall`/`fret` over `stl.call`/`return` (~2.5w@ + stack). A **non-leaf** function may `fcall` another using a **distinct `ret_reg` per call-graph level** (`ret_L0`, `ret_L1`, …) — so any *bounded, non-recursive* depth is stackless (**OQ9 resolved**). Reserve the stack for *genuine unbounded recursion*, and even there push it down the tree (F5's BSP walk takes its bottom levels stackless).
 
 ---
 
@@ -109,7 +116,7 @@ stl.loop   (halt)
       map/BSP streams    (NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES — sequential)
       state/scratch      (player pos/angle/eye; per-column top/bottom/colormap-sel scratch;
                           keydown[]; door/entity state [flag-gated]; precision ledger registers)
-      stack              (minimal — fcall is stackless; stl.stack only if recursion appears, OQ9)
+      stack              (minimal — tiered fcall/fret is stackless §2.1; stl.stack only for the BSP walk's upper levels, F5)
 ```
 
 Concrete spans are tracked in the **§1.2 span ledger** (sizes filled by R0; padding waste summed there).
@@ -127,15 +134,15 @@ Concrete spans are tracked in the **§1.2 span ledger** (sizes filled by R0; pad
   - **Deposit mechanism (new component obligation, F3/F4):** a fixed-address packed-byte deposit of a runtime value = **low nibble** via the existing `hex` dispatch table (dbit-aligned) + **high nibble** via a custom **+4-offset 256-entry table** — a ~1-line variant of `hex.tables.clean_table_entry__table` (flip target `dst+dbit+4+(#d)-1`) plus its jumper. ~2 dispatches/pixel. TDD'd like any table.
   - **Rejected alternatives:** `hex.vec 2` framebuffer (256 colors via 2 ops/px) is **dominated** — the device reads one packed byte/op so it can't read `hex.vec 2`, forcing a pack pass that needs the *same* +4-offset code anyway, plus ~2× deposit work and 2× span. `hex.vec-1 bpp=4` (16 colors, zero custom code, ~1 dispatch/px) is the documented **cost-fallback** if R1 shows the byte deposit is the budget-buster and 16 colors is acceptable.
   - **R1 measures** the real per-pixel deposit cost before R2 commits (R-1).
-- **D4 — Per-table dispatch shape.** *RESOLVED → **per-entry handlers (default)**; per-result-nibble as a per-table override.* Per-entry handler = 1 dispatch + popcount flips (≈4@+2W ops) — ~7× faster than per-result-nibble (W dispatches ≈ 4W@) for wide results, ~2× for a byte. Chosen because ops/frame is the scarce resource and the per-pixel colormap benefits most. **Cost it carries:** a more complex generator (custom per-entry flip code) and ~2–3× table space on wide tables (feeds **R-3** span). **Override:** large *cold* tables (e.g. trig) may use per-result-nibble to save span if the span ledger tightens — recorded per-table in the span ledger + the table's test. Both fit the shared `res`/`ret` machinery (handler XORs `value[k]` into `res`, caller `xor_zero`s out).
+- **D4 — Per-table dispatch shape.** *RESOLVED → **per-entry handlers (default)**; per-result-nibble as a per-table override.* Per-entry handler = 1 dispatch + popcount flips (≈4@+2W ops) — ~7× faster than per-result-nibble (W dispatches ≈ 4W@) for wide results, ~2× for a byte. Chosen because ops/frame is the scarce resource and the per-pixel colormap benefits most. **Cost it carries:** a more complex generator (custom per-entry flip code) and ~2–3× table space on wide tables (feeds **R-3** span). **Override:** large *cold* tables (e.g. trig) may use per-result-nibble to save span if the span ledger tightens — recorded per-table in the span ledger + the table's test. Both fit the shared `res`/`ret` machinery (handler XORs `value[k]` into `res`, caller `xor_zero`s out). **Construction (#5):** an over-alignable (`pad 2ⁿ`) `switch:` jump table (`;arg_k` per entry); each `arg_k:` does `hex.set` of the entry's compile-time value into the pre-zeroed result reg and **cleans the jumped switch-op from within the table** (like stl's `clean_table_entry`) — saving the external xors (space + time).
 - **D5 — Texture storage.** *RESOLVED → **dispatch-LUT textures**.* Textures baked as aligned dispatch table(s); per-pixel texel sample = ~10@ dispatch (not ~1000-op `read_table`). Per column the source column is fixed (selected once, amortized); per pixel the index = per-column base + texel (`frac>>FRACBITS`, a compile-time shift) — an add, nibble-aligned, no runtime shift (U6). **Span (texel count rounded to pow2, OQ8) is the open risk — measured in R0/R1**; fallbacks: sequential packed-byte streams, fewer/smaller textures. R2 bound to E1M1's real textures (downscale if the span ledger demands). Entry shape per D4.
 - **D6 — Precision per quantity.** *RESOLVED → **16.16 default, drop to 8.8 only with evidence**.* Every quantity is 16.16 (DOOM-faithful, correctness-first) unless a **per-quantity precision ledger** records a justified 8.8: justification = profiling shows the cost is material **and** the reference-model diff (OQ5) confirms acceptable wobble. The mostly-LUT'd hot path + ~2× margin make this low-risk.
 - **D7 — Feature scope at 160×100.** *RESOLVED → first playable (R2) = **textured 3D view (walls + floors/ceilings) + S0 walk/collide**, auto-warp into the level.* Flag-gated for R3+: S1 doors+hitscan, S2 sprites/enemies, HUD/status bar, menus, text, demo playback. Rationale: prove the renderer + the §1.1 budget (the hard part) first; matches the §8 ladder. The compositor/pass pipeline and `blit_rect`/glyph API (§E, F8) are **stubbed flag-gated from day one** so later passes drop in without touching the 3D core.
 - **D8 — Maps & assets.** *RESOLVED.* **Asset source:** shareware `doom1.wad` for development; **Freedoom** WADs for anything redistributed (CI fixtures / golden frames). **Map ambition:** R1 renderer bring-up + measurement on a small (hand-built or smallest real) BSP map to keep the assemble/span/measure loop fast; **real E1M1 is the R2 target.** Entity counts: deferred to D7's S2 tier (sprites flag-gated; not in R2).
-- **D9 — Frame pacing.** *RESOLVED → **tic:render 1:1, budget-bound**.* One input poll = one tic = one rendered frame. There is no timer device (§1.1), so the program cannot self-pace to wall-clock time; "25 fps" = "hold ops/frame < 11.2M so the native engine *delivers* ~25 fps on the reference machine." Accept and **report** the measured wall-clock fps (present-log). Sim/render decoupling (render 1-of-N tics, G21) is a deferred hedge, not built in R2.
+- **D9 — Frame pacing.** *RESOLVED → **tic:render 1:1, budget-bound**.* One input poll = one tic = one rendered frame. There is no timer device (§1.1), so the program cannot self-pace to wall-clock time; "25 fps" = "hold ops/frame < 11.2M so the native engine *delivers* ~25 fps on the reference machine." Accept and **report** the measured wall-clock fps (present-log). Sim/render decoupling (render 1-of-N tics, G21) is a deferred hedge, not built in R2. **If frames run too fast** (likely on the native engine): wall-clock pacing can't be done in-program (no timer); the clean fix is a **device-side fps cap** — the screen device sleeps on present if too little wall-time elapsed ("aim for X fps"). Verified *not* in the stock pygame device ⇒ a candidate `fj==1.5.1` device extension (§2.1). R2: run uncapped + report fps; add the cap for a playable interactive build.
 - **D10 — Memory map.** *RESOLVED (structure) → see §3 + the §1.2 span ledger.* Largest-alignment-first: hex.init tables → unrolled renderer code → pow2-aligned dispatch tables (texture first, then trig/recip/yslope/viewangle/colormaps/+4-offset) → `stl.loop` → framebuffer / palette / map streams / scratch / stack. Concrete spans filled by R0; flat-limit invariant guarded by the span ledger + `storage_mode` assertion.
 - **D11 — Colormap/lighting application point.** *RESOLVED → **per-column/span SELECT, per-pixel APPLY**.* The colormap (light level) is chosen once per column (walls) / per span (floors) — DOOM-faithful, ~160×/frame; it is then applied per pixel as a dispatch chained off the texel sample (texel → lit palette byte). Avoids the U9 trap (per-pixel light *recomputation* / pointer-read colormap, ~6M+/frame) while keeping correct per-pixel colormap application. Per-pixel light *recomputation* (smoother distance lighting) is a deferred fidelity option; flat-shaded (no colormap) is the fallback tier.
-- **D12 — Test granularity.** *RESOLVED → **bit-exact (sha256)** against an exact-integer reference model.* The reference model (H5) replicates our exact integer pipeline (fixed-point truncation, LUT values, colormap select/apply), so rendered frames must match byte-for-byte (sha256 equality — `ScreenIO` logs this hash per present) and sim state (pos/angle) must match exactly. Any diff = a real bug. Golden set: a small curated set (spawn + movement waypoints + near-wall), grown as features land; scripted key-event demos for E2E. Obligation: the reference model mirrors every integer detail. **Determinism is load-bearing:** the game uses no true RNG (DOOM's `P_Random` is a deterministic 256-byte table, §2 glossary / F6), so golden frames and replays are reproducible.
+- **D12 — Test granularity.** *RESOLVED → **bit-exact (sha256)** against an exact-integer reference model.* The reference model (H5) replicates our exact integer pipeline (fixed-point truncation, LUT values, colormap select/apply), so rendered frames must match byte-for-byte (sha256 equality — `ScreenIO` logs this hash per present) and sim state (pos/angle) must match exactly. Any diff = a real bug. Golden set: a small curated set (spawn + movement waypoints + near-wall), grown as features land; scripted key-event demos for E2E. Obligation: the reference model mirrors every integer detail. **Determinism is load-bearing:** the game uses no true RNG (DOOM's `P_Random` is a deterministic 256-byte table, §2 glossary / F6), so golden frames and replays are reproducible. **LUT test mandate (#8):** every generated LUT is tested on **every entry** (not just samples/boundaries) **and** with a **call-twice-per-entry** check (catches result-reg / in-table jumper-cleanup bugs from the #5 construction). Triple-check every table.
 - **D13 — Fixed-point intermediates.** *RESOLVED → **full 2n-nibble-width product** (PR #1's `hex.fixed_mul` approach is the standard).* Overflow-safe: compute the product at 2n nibbles, nibble-aligned fraction shift (no runtime-amount shift, U6), truncate to n. `@Assumes 0 < f <= n`. Narrow-intermediate optimization is opt-in per-call later only if a hot mul demands it.
 - **D14 — Directory tree.** *Deferred to Stage 3.*
 - **D15 — PR #1 CR surface.** *Deferred to Stage 5 / S5.0.* API/naming/test-style changes to `fixed_point.fj` + LUT generator.
@@ -148,7 +155,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 1. **Host unit tests (Python)** — WAD parser, LUT/dispatch generator, map/texture compilers, reference model. `pytest`.
 2. **Per-macro fj tests** — TDD, `--werror`, byte-exact via `flipjump.assemble_and_run_test_output`, **a boundary input per behavior path** (single green fixture proved insufficient 3× in the catalog), `hex.scmp` for anything signable.
-3. **Per-table generated tests** — each generated `.fj` table diffed vs a host reference over many indices incl. first/last/wrap.
+3. **Per-table generated tests** — each generated `.fj` table diffed vs a host reference on **every entry** (not just samples) **and** a **call-twice-per-entry** check (#8: result-reg/jumper cleanup); over-aligned variants too.
 4. **Golden-frame renderer tests** — headless `PcIO.headless(events_file, frames_dir)` / `InMemoryScreen`; hash + diff `SCREEN→PNG` vs host reference.
 5. **Headless scripted-replay E2E** — scripted key-event file drives movement/collision/fire; player state must match the reference exactly; measured fps (present-log) meets the tier.
 
@@ -179,10 +186,10 @@ Per handoff §H / §3.5. Top to bottom:
 - **Supplies:** `generate_dispatch_table_fj(label, values, mode, entry_nibbles, …)`, `generate_offset_deposit_table_fj(...)`, and PR #1's `generate_lut_fj`/`generate_byte_lut_fj`/`generate_reciprocal_lut_fj`/`generate_sine_lut_fj`/`encode_fixed_point`. Every emitter also returns a host-reference fixture for the per-table test.
 - **Depends/related:** extends PR #1 `lut_generator.py`; consumed by H4 and the trig/recip/yslope/viewangle builds; output assembled into the program.
 - **Assumes:** indices nibble-aligned (U6); pow2 alignment declared per table; values fit entry width; `hex.init` present at runtime for the dispatch machinery.
-- **Data & layout:** generated tables = pow2-aligned dispatch CODE (→ §1.2 span ledger); alignment-aware emit.
+- **Data & layout:** generated tables = pow2-aligned dispatch CODE (→ §1.2 span ledger); alignment-aware emit, **over-aligns very-hot tables** (§2.1); per-entry handlers use the **#5 `switch`+`hex.set`+in-table-clean** construction; **16^x sizing** for shift-indexed tables.
 - **Time:** host build; per-entry codegen O(entries × popcount).
 - **Space:** emitted `.fj` size feeds **R-2** (assemble time) + the span ledger; per-entry ~2–3× per-result-nibble on wide tables.
-- **Testing:** per-table generated tests (D12, bit-exact) over many indices incl. first/last/wrap; both emit modes covered.
+- **Testing:** per-table generated tests (D12, bit-exact): **every entry** + a **call-twice-per-entry** check (#8 — verifies result-reg/jumper cleanup), both emit modes, over-aligned and not.
 - **Open Qs:** texture-table span (OQ8); the per-table mode heuristic (D4 override).
 
 #### H3 — Map compiler
@@ -217,7 +224,7 @@ Per handoff §H / §3.5. Top to bottom:
 #### H6 — Build system
 - **Purpose:** One pipeline: run generators/compilers → assemble → `.fjm`; plus CI.
 - **Supplies:** a build script (Python/Make) (`w=32`, `--werror`, `--flat-max-words` as needed) + CI config.
-- **Depends/related:** all H*; flipjump 1.5.0 (frozen dep).
+- **Depends/related:** all H*; flipjump 1.5.0 (near-frozen but extensible — §2.1 dependency policy).
 - **Assumes:** w=32; flat path; `--werror` clean.
 - **Data & layout:** produces the `.fjm`; reports the span ledger.
 - **Time / Space:** **assemble time + `.fjm` size are tracked metrics** (R-2).
@@ -226,7 +233,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### H7 — Test harness
 - **Purpose:** Headless replays, golden-frame compares, per-table runs, ops profiling.
-- **Supplies:** wrappers over `assemble_and_run_test_output` / `run` + `FixedIO` / `InMemoryScreen` / `PcIO.headless`; sha256 golden compare vs H5; per-table runner; ops-budget profiler (`--profile`/featured loop on small builds).
+- **Supplies:** wrappers over `assemble_and_run_test_output` / `run` + `FixedIO` / `InMemoryScreen` / `PcIO.headless`; sha256 golden compare vs H5; per-table runner (#8: every-entry + call-twice). **Profilers:** `--profile` (run) = per-region op-count / *time*; `--stats` (assemble) = macro *code-size*/usage — textual **only if plotly is absent** (it currently IS, 5.17.0 → the build/CI env must uninstall plotly for textual output).
 - **Depends/related:** flipjump APIs, H5 (oracle).
 - **Assumes:** deterministic runs; bit-exact (D12); scripted key-event files for E2E.
 - **Data & layout:** fixtures (golden frames, event scripts, table fixtures) in-repo (Freedoom-derived where redistributable).
@@ -260,7 +267,7 @@ Per handoff §H / §3.5. Top to bottom:
 #### F3 — LUT access layer
 - **Purpose:** The dispatch-jumper idioms that read the generated tables, one per family, + the packed-byte deposit primitive.
 - **Supplies:** `sample_texture`, `read_trig`, `read_reciprocal`/`read_scale`, `read_yslope`, `read_viewangle*`, `apply_colormap`, `deposit_pixel_byte` (D3: low-nibble std + high-nibble +4-offset table). Per-entry-handler dispatch (D4).
-- **Trig / angle quantization (NOT 2³² entries):** index by the **top bits** of the 32-bit BAM angle via a compile-time-constant shift — DOOM's `finesine[angle >> 19]` ⇒ **N = 8192** fine angles (N a pow2; 4096/2048 are span fallbacks — R0/R-3 fidelity knob). Multi-nibble index (4 nibbles): xor each index nibble into the jumper at offset `4i+6` (since `dw=2⁶`), then jump — generalizes the single-nibble `tables_init.fj` idiom. **Cosine is free** (`finecosine = finesine[(idx+N/4) & (N-1)]`, one table); `finetangent`/`viewangletox`/`xtoviewangle` quantize the same way. Trig is **per-column** (160×/frame, not per-pixel) ⇒ the canonical place for the **per-result-nibble override (D4)** to save span on its 32-bit (8-nibble) entries. Optional **quadrant fold** (N/4 + sign/reflect) = 4× smaller, deferred lever.
+- **Trig / angle quantization (NOT 2³² entries):** index by the **top nibbles** of the 32-bit BAM angle, sized **N = 4096 = 16³** (top 3 nibbles — *no sub-nibble shift*, §2.1 16^x rule); 16² = 256 is the coarse span fallback. Multi-nibble index: xor each index nibble into the jumper at offset `4i+6` (`dw=2⁶`), then jump — generalizes the single-nibble `tables_init.fj` idiom. **Cosine shares the sine table** at `(idx + N/4) & (N-1)`, and the `+N/4` (=+1024=0x400) is a **single-hex add** (+4 to nibble 2), ~free — so a *separate* cosine LUT (≈+span) is **not** worth it (#9; revisit only if profiling disagrees). `finetangent`/`viewangletox`/`xtoviewangle` quantize the same way. Trig is **per-column** ⇒ the canonical **per-result-nibble override (D4)** site for its 32-bit entries. Optional **quadrant fold** (N/4 + sign/reflect) = 4× smaller, deferred lever. The very-hot per-pixel tables (colormap/texture/deposit), not trig, are the **over-align** candidates (§2.1).
 - **Depends/related:** H2/H4 tables; consumed by F4/F5.
 - **Assumes:** indices nibble-aligned without runtime shift (U6); tables init'd before first use; shared `res`/`ret`.
 - **Data & layout:** reads code-region tables; owns the +4-offset 256-entry table.
@@ -289,7 +296,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Time:** column math + BSP walk ~1.5–3M — the dominant consumer alongside stores/reads.
 - **Space:** unrolled column code (**R-2**); visplane + clip arrays.
 - **Testing:** golden frames vs H5 (bit-exact); per-column math unit checks.
-- **Call discipline:** the BSP walk is **recursive** ⇒ needs a real **stack** (`stl.call`/`return` or an explicit iterative node stack), unlike the leaf `fcall` pixel bodies. Depth ~log(#nodes) (~15–20 for E1M1) ⇒ a small declared stack (OQ9 / §6 call-discipline). Per-column/per-pixel leaf work stays `fcall`-stackless.
+- **Call discipline (#4/#11):** the BSP walk recurses, but **don't pay `stl.call`/`return` for most of it.** Use **tiered `fcall`/`fret`** (distinct `ret_reg` per level, §2.1) for the **bottom ~3 tree levels** — the bulk of node visits (~7/8 of a balanced tree) — and reserve the stack for the upper, unbounded-depth levels only. This strips the ~2.5w@ stack cost off most visits (big speedup). Per-column/per-pixel leaf bodies stay `fcall`-stackless.
 - **Open Qs:** OQ4 (does column math fully reduce to LUTs+adds? R1); visplane + clip-array design.
 
 #### F6 — Game loop & tic
@@ -346,7 +353,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **R-2** — Assembler scalability is load-bearing (column-unroll + mega dispatch tables). Measure assemble time + `.fjm` size at game scale (S5.1/S5.3); relief valve = design (a) column buffer.
 - **R-3** — Span vs flat path: power-of-two padding can silently overflow → paged (~2.5× slower). Guards: span ledger + `storage_mode` assertion.
 - **R-4** — D3 encoding tension (hex-memory pixels vs packed-byte device read) — resolve in this doc, not in code.
-- **R-5** — *(cleared)* flipjump 1.5.0 released; only WI-F speculation is future headroom.
+- **R-5** — *(cleared)* flipjump 1.5.0 released. We use **no speculation tier**; the 320×200 stretch instead rides flat-run + our own optimizations toward ~400M+ (revisit at R2). flipjump is near-frozen but **extensible** (§2.1) — a device/engine change is a justified last-resort lever, not a dependency.
 - **R-6** — Fidelity unknowns: 8.8 wobble (D6), 32×32→64 intermediates (U5/D13), `@` growth (U7) — survive re-baselining, now with more headroom.
 
 ---

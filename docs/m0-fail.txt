@@ -1,0 +1,19 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________________________ test_build_reports_flat ___________________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-568/test_build_reports_flat0')
+
+    def test_build_reports_flat(tmp_path):
+        m = build(out_fjm=tmp_path / "hello.fjm", metrics=tmp_path / "metrics.json")
+>       assert m["storage_mode"] == "flat"      # FAILs against the 'STUB' sentinel, PASSes on the real build
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: assert 'STUB' == 'flat'
+E         
+E         - flat
+E         + STUB
+
+tests\host\test_toolchain.py:5: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_toolchain.py::test_build_reports_flat - AssertionError...
+1 failed in 0.29s

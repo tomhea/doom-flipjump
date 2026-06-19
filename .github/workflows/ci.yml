@@ -1,0 +1,19 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }     # pygame-supported (§H); device milestones need it
+      - run: pip install -e ".[dev]"
+      - run: bash scripts/test.sh
+      - run: bash scripts/build.sh
+      - name: assert storage_mode == flat (R4)
+        run: |
+          python - <<'PY'
+          import json; m = json.load(open("build/metrics.json"))
+          assert m["storage_mode"] == "flat", m
+          print("flat OK:", m)
+          PY

@@ -36,7 +36,7 @@ below adds/refines its own line as the design firms up.
 
 | Line | Component | Per-frame cost (est.) | Technique | Settled by |
 |---|---|---|---|---|
-| Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px, static) | F4 | ~1.0M (measured proxy ~63 ops/byte; R1 confirms) | static stores §3.1, D3 deposit | D2/D3/R1 |
+| Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px, static) | F4 | ~1.0M (measured proxy ~53 ops/byte, budget ~63; R1 confirms) | static stores §3.1, D3 deposit | D2/D3/R1 |
 | Texture + colormap reads (16K × ~100–200, dispatch-LUT) | F3/F5 | ~1.6–3.2M | dispatch-LUTs §3.2 | D5/D11 |
 | Column math (160 cols) + BSP walk + S0 logic | F5/H3/F6 | ~1.5–3M | LUTs + adds, mul/div-free | D1/D6 |
 | Present (`update_screen` 0x03 memory-hook) + input poll | F7 | ~negligible (~70 + tens) | — | — |
@@ -101,8 +101,8 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
 - **w / dw / dbit** — word width (=**32**, confirmed: 16.16 fits one word) / `2w` (one op) / `w` (data-bit offset).
 - **nibble / hex / byte** — a `hex` = 4 data bits; a packed byte = 8 data bits in one op; register-form byte = two `hex` ops (low, then `+dw`). The two byte encodings do **not** interchange (see flipjump-dev skill).
 - **Fixed-point** — Q-format: 16.16 = `n=8,f=4`; 8.8 = `n=4,f=2`. Signed; compare with `hex.scmp`, never `hex.cmp` (§3.5).
-- **Static store** — a framebuffer write to a *compile-time-known* address (~7@), vs a runtime-address pointer write (~500–1300 ops).
-- **Dispatch-LUT** — the `hex.xor`-jumper table idiom (`tables_init.fj`): ~10@/lookup, 10–30× cheaper than `read_table`. One dispatch sets a *fixed-address* hex = a *runtime* value (indexes on the current nibble), so it is the pointer-free deposit primitive.
+- **Static store** — a framebuffer write to a *compile-time-known* address (the runtime-value byte deposit ≈ 2 nibble-dispatches; **measured ~53 ops/byte** at w=32 ≈ 2@, budget ~63), vs a runtime-address pointer write (~500–1300 ops). *(The handoff §A "~7@" single-byte-write estimate is superseded by this measurement.)*
+- **Dispatch-LUT** — the `hex.xor`-jumper table idiom (`tables_init.fj`): **measured ~46 fj-ops/lookup** at w=32 (≈ 1.7@; `jump_to_table_entry` = `4@+4` plus a `log(n)/2` in-table traversal), **~23× cheaper than a `read_byte` pointer read** (~1,064 ops). One dispatch sets a *fixed-address* hex = a *runtime* value (indexes on the current nibble), so it is the pointer-free deposit primitive. *(The "~10@/lookup" estimate carried from handoff §3.2 was ~6× high — the measured figure is what the §1.1 budget assumes.)*
 - **`P_Random` / determinism** — the game uses **no true RNG**. DOOM's "randomness" (combat/AI, R3+) is a deterministic 256-byte `rndtable` + advancing `rndindex` — a byte-LUT. The whole game is deterministic, which is *required* by D12 (bit-exact + replay). R2 uses no randomness at all.
 - **Cell width ⊥ pointer-freeness** (key D3 insight) — "packed byte" (8-bit cell, forced by bpp=8/256-color + the device read) is the framebuffer *cell width*; "pointer-free" is whether the *address* is compile-time-known (delivered by D2(b) full-unroll). Orthogonal: a packed-byte framebuffer can be written entirely by fixed-address stores. The runtime-value→fixed-address deposit cost scales with bits — a byte ≈ 2× a nibble — so bpp=4/hex.vec is the ~2×-cheaper-deposit / 16-color cost-fallback.
 
@@ -294,7 +294,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Depends/related:** H2/H4 tables; consumed by F4/F5.
 - **Assumes:** indices nibble-aligned without runtime shift (U6); tables init'd before first use; shared `res`/`ret`.
 - **Data & layout:** reads code-region tables; owns the +4-offset 256-entry table.
-- **Time:** ~10@/dispatch (per-pixel sample+colormap; per-column trig/recip) — feeds the texture-read + column-math budget lines.
+- **Time:** **~46 fj-ops/dispatch** (≈ 1.7@; measured S2, w=32) — per-pixel sample+colormap, per-column trig/recip; feeds the texture-read + column-math budget lines.
 - **Space:** small idiom code + the +4-offset table.
 - **Testing:** per-idiom byte-exact vs host reference; boundary/wrap indices.
 - **Open Qs:** OQ9 (`fcall` nesting if idioms chain > 1 level).
@@ -305,7 +305,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Depends/related:** F3 (deposit table), F1 (layout); consumed by F5 (writes), F7 (present reads base).
 - **Assumes:** **write-only during render** (invariant); bpp=8 packed byte; **no clear** (U10 — every px written once, ceiling→wall→floor, no gaps); fixed compile-time addresses (D2b).
 - **Data & layout:** framebuffer = W·H = 16K packed-byte ops (data region).
-- **Time:** deposit ≈ 2 nibble dispatches. **Measured proxy (`hex.mov 2`, w=32) ≈ 63 ops/byte** → ~1.0M for 16K px — validates the ~1.3M est (and far below an earlier ~216-op guess). A custom mov-table (set fixed hex = runtime value in 1 dispatch/nibble, vs `hex.mov`'s zero+xor) could cut it further — R1.
+- **Time:** deposit ≈ 2 nibble dispatches. **Measured proxy (`hex.mov 2`, w=32) ≈ 53 ops/byte** (budget ~63 for the real low-nibble + custom +4-offset deposit) → ~1.0M for 16K px — well under the ~1.3M est (and far below an earlier ~216-op guess). A custom mov-table (set fixed hex = runtime value in 1 dispatch/nibble, vs `hex.mov`'s zero+xor) could cut it further — R1.
 - **Space:** 16K-op framebuffer + the unrolled column code (**R-2** watch).
 - **Testing:** deposit byte-exact incl. the high nibble; golden frames.
 - **Open Qs:** D2 final (a vs b) settled by R1; deposit cost (R-1).

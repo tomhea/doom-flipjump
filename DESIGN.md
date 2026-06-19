@@ -6,7 +6,9 @@
 > was re-run mechanically and adversarially over the expanded document; the load-bearing per-op costs were
 > re-derived from the installed flipjump 1.5.0 STL source and four contradictions were fixed in-doc
 > (commits #20–23: frame-total/fps reconciliation, the §1.3 subtotal arithmetic, texture-span coherence,
-> and precision-ledger width propagation). Next: **Stage 3 (directory tree) — in progress.**
+> and precision-ledger width propagation). **Stage 3 (directory tree) — COMPLETE & owner-approved
+> (2026-06-20): see §9; D14 resolved, D15 keep-vs-rewrite policy set.** Next: **Stage 4 (iterative stage
+> cutting, handoff §8) — not started.**
 > Built iteratively through owner Q&A per the
 > [implementation handoff](doom_implementation_handoff.md) §4–§5. Every decision is recorded in the
 > **Decisions** section below with an ID, rationale, and the measurement (if any) that settled it —
@@ -19,8 +21,8 @@
 
 1. **Stage 1 — this document.** Cover every component per the §5 spec. ✓ *done*
 2. **Stage 2 — contradiction hunt.** Adversarial pass (handoff §6 checklist); fix in-doc; re-approve → *final document*. ✓ *done (re-approved 2026-06-20)*
-3. **Stage 3 — directory tree** (handoff §7). ← *we are here*
-4. **Stage 4 — iterative stage cutting** (handoff §8).
+3. **Stage 3 — directory tree** (handoff §7). ✓ *done (approved 2026-06-20 — §9, D14/D15)*
+4. **Stage 4 — iterative stage cutting** (handoff §8). ← *next*
 5. **Stage 5 — execution.** First item: CR-loop PR #1 into the Stage-3 tree (handoff §9), then execute.
 
 ---
@@ -272,8 +274,8 @@ Concrete spans are tracked in the **§1.2 span ledger** (sizes filled by R0; pad
 - **D11 — Colormap/lighting application point.** *RESOLVED → **per-column/span SELECT, per-pixel APPLY**.* The colormap (light level) is chosen once per column (walls) / per span (floors) — DOOM-faithful, ~160×/frame; it is then applied per pixel as a dispatch chained off the texel sample (texel → lit palette byte). Avoids the U9 trap (per-pixel light *recomputation* / pointer-read colormap, ~6M+/frame) while keeping correct per-pixel colormap application. Per-pixel light *recomputation* (smoother distance lighting) is a deferred fidelity option; flat-shaded (no colormap) is the fallback tier.
 - **D12 — Test granularity.** *RESOLVED → **bit-exact (sha256)** against an exact-integer reference model.* The reference model (H5) replicates our exact integer pipeline (fixed-point truncation, LUT values, colormap select/apply), so rendered frames must match byte-for-byte (sha256 equality — `ScreenIO` logs this hash per present) and sim state (pos/angle) must match exactly. Any diff = a real bug. Golden set: a small curated set (spawn + movement waypoints + near-wall), grown as features land; scripted key-event demos for E2E. Obligation: the reference model mirrors every integer detail. **Determinism is load-bearing:** the game uses no true RNG (DOOM's `P_Random` is a deterministic 256-byte table, §2 glossary / F6), so golden frames and replays are reproducible. **LUT test mandate (#8):** every generated LUT is tested on **every entry** (not just samples/boundaries) **and** with a **call-twice-per-entry** check (catches result-reg / in-table jumper-cleanup bugs from the #5 construction). Triple-check every table.
 - **D13 — Fixed-point intermediates.** *RESOLVED → **full 2n-nibble-width product** (PR #1's `hex.fixed_mul` approach is the standard).* Overflow-safe: compute the product at 2n nibbles, nibble-aligned fraction shift (no runtime-amount shift, U6), truncate to n. `@Assumes 0 < f <= n`. Narrow-intermediate optimization is opt-in per-call later only if a hot mul demands it.
-- **D14 — Directory tree.** *Deferred to Stage 3.*
-- **D15 — PR #1 CR surface.** *Deferred to Stage 5 / S5.0.* API/naming/test-style changes to `fixed_point.fj` + LUT generator.
+- **D14 — Directory tree.** *RESOLVED → see **§9** (approved 2026-06-20).* Unified `src/` root (`src/fj/` game, `src/doomfj/` host); generated output build-only (gitignored, regenerated deterministically); host↔fj single-source-of-truth via `config.py` + `tables.py`/`fixedpoint.py` (closes the D12 lockstep gap); metrics + memory-map-invariant test homes added.
+- **D15 — PR #1 CR surface (keep-vs-rewrite policy).** *RESOLVED (policy) → **the current design is the sole authority; PR #1 is reference material, never a basis.** Detail executes in S5.0.* The S5.0 CR-loop judges each PR #1 file **against this document** and keeps it **only where it independently earns its place on review**; anything misaligned, lower-quality, or merely convenient is **discarded and rewritten — "it's already written" is explicitly not a reason to keep it** (saving a bad implementation is a non-goal). *What reading the PR #1 diff this session established (provisional, pending the CR):* `fixed_point.fj` *appears* design-aligned — `fixed_mul`/`fixed_div` are D13's full-2n-width form, `mul_const` is opt #4, `read_table`/`read_table_byte` are the §3.4 fallback — so the working plan is **keep + adversarial CR**; `lut_generator.py` emits **data tables only**, so its **value kernel** (`encode_fixed_point` + sine/recip math) lifts into the shared `tables.py`/`fixedpoint.py` (G-a), its data-table emitters become the §3.4-fallback path, and the **primary dispatch-code emitter is written new** (S5.1). **All of this is provisional: if the CR finds any of it bad or off-design, it goes in the bin and is rebuilt to the design.**
 
 ---
 
@@ -493,3 +495,85 @@ OQ8 (map/texture dispatch tables small enough for compile+span? → D5/R-2/R-3) 
 non-reentrancy — **mechanism resolved** in §2.1: distinct `ret_reg` per call-graph level makes any
 bounded non-recursive depth stackless; what R1 still *measures* is the actual nesting depth of the
 hot call chains, which doesn't change the approach) · OQ10 (variable fps vs worst-case cap → D9).
+
+---
+
+## 9. Directory tree (Stage 3 — D14)
+
+> **Approved 2026-06-20 (handoff §7).** Layout: unified `src/` root; **generated output is build-only**
+> (gitignored, regenerated deterministically — D12 makes that safe); process docs stay at root. Components
+> map 1:1 to §6 (F1–F9 / H1–H7). The three gap-closing additions below (`config.py`, `tables.py`/
+> `fixedpoint.py`, plus the metrics + test homes) turn D12 bit-exactness from a "lockstep discipline" into
+> a structural guarantee.
+
+```
+doom-flipjump/
+├── README.md                       # build pipeline (w=32 · --werror · --flat-max-words), flat/paged knob, how to run
+├── DESIGN.md · doom_implementation_handoff.md · NEXT_SESSION_HANDOFF.md · LICENSE
+├── pyproject.toml                  # src-layout host pkg src/doomfj; deps flipjump[io]>=1.5.0, pytest, pillow
+├── .gitignore                      # build/  *.fjm  assets/doom1.wad
+├── .gitattributes                  # LF-normalize src; mark *.wad/*.fjm/*.png binary   (hygiene)
+├── .github/workflows/ci.yml        # host→fj-macro→table→golden→replay; assert storage_mode==flat; pin py3.13
+├── scripts/fetch_doom1.sh          # obtain the shareware WAD locally (gitignored target)
+│
+├── src/
+│   ├── fj/                         # ── FJ-SIDE game program (F1–F9) ──
+│   │   ├── memory_map.fj           # F1  entry `;main` + LOW data + base consts (incl. build/generated/fj_consts.fj) + span invariants (D10/§3)
+│   │   ├── fixed_point.fj          # F2  ← PR #1 (kept iff CR confirms — D15).  16.16+8.8 + mul_const + read_table fallback (D13)
+│   │   ├── lut_access.fj           # F3  sample_texture/read_trig/read_reciprocal/read_yslope/read_viewangle*/apply_colormap/deposit_pixel_byte
+│   │   ├── framebuffer.fj          # F4  packed-byte fb + full-unroll static deposit (render_column) (D2b/D3)
+│   │   ├── renderer.fj             # F5  BSP walk → draw_column/draw_span, lit (D1/D11); TEXTURED flag; (masked-column sprites R3 — G-j)
+│   │   ├── game_loop.fj            # F6  main/init; poll→sim_tic(S0)→render→present; level table + goto_level
+│   │   ├── present.fj              # F7  init_screen/set_palette/present(0x03)/poll; update_rectangle(0x04)
+│   │   ├── hud.fj                  # F8  blit_rect/draw_string + render_statusbar/text/menu — STUBS in R2 (glyph LUT R3 — G-i)
+│   │   └── debug.fj                # F9  op-count probes / frame dumps / on-screen values (compile-gated)
+│   │
+│   └── doomfj/                     # ── HOST-SIDE Python package (H1–H7) + shared source-of-truth ──
+│       ├── __init__.py
+│       ├── config.py               # SINGLE source: W/H/bpp/N/table sizes+bases/cmd-bytes/flat-max-words → emits fj_consts.fj  (G-b)
+│       ├── tables.py               # pure LUT *value* fns (sine/recip/yslope/viewangle/colormap) — shared by H2 emit + H5 oracle  (G-a)
+│       ├── fixedpoint.py           # Python mirror of fixed_point.fj truncation — host math == fj math  (G-a)
+│       ├── wad.py                  # H1  parse_wad + typed lump/asset accessors (+ STCFN glyphs / sprites, R3)
+│       ├── lut_generator.py        # H2  ← PR #1 value-kernel+data-fallback (kept iff CR confirms) + NEW dispatch-code emitter (S5.1)
+│       ├── map_compiler.py         # H3  WAD level → BSP streams OR BSP-as-code (#7) + root; emits the multi-level level table
+│       ├── texture_compiler.py     # H4  textures/flats/COLORMAP/PLAYPAL → dispatch tables + palette
+│       ├── reference_model.py      # H5  exact-integer golden renderer + sim (oracle); imports tables.py/fixedpoint.py
+│       ├── build.py                # H6  generators → ORDER assemble list (= §3 hot-low map) → .fjm; writes build/metrics.json
+│       └── harness.py              # H7  headless replay / golden compare / per-table runner / ops profiler
+│
+├── assets/
+│   ├── freedoom/  (+ LICENSE)      # redistributable → CI fixtures + golden (committed/fetched)   [D8]
+│   └── doom1.wad                   # shareware — DEV ONLY, GITIGNORED (fetch_doom1)               [D8]
+│
+├── build/                          # ── GITIGNORED — generated/derived ──
+│   ├── generated/                  # emitted .fj: fj_consts + trig/recip/yslope/viewangle/colormap/deposit tables, per-level BSP-as-code, texture tables, level table
+│   ├── metrics.json                # assemble-time / .fjm size / ops-frame / span ledger — CI threshold-checks (R-2/R-3 guards)
+│   └── doom.fjm                    # the all-9-E1-levels-in-one binary (D8/§1.2)
+│
+└── tests/
+    ├── conftest.py                 # shared fixtures (WAD load, tmp build dir, harness)
+    ├── host/                       # test_config · test_tables · test_fixedpoint · test_wad · test_lut_generator(←PR#1) · test_map_compiler · test_texture_compiler · test_reference_model · test_build(memory-map invariants) · test_harness
+    ├── fj/                         # test_fixed_point(←PR#1) · test_lut_access · test_framebuffer · test_renderer_units   # byte-exact, --werror, boundary-per-path
+    ├── tables/                     # test_generated_tables.py — EVERY entry + call-twice-per-entry (#8)
+    ├── golden/  (+ fixtures/)      # headless→PNG→sha256 vs H5 (D12); committed frame-hashes + key-event scripts
+    └── e2e/                        # test_replay.py — sim-state vs H5 exactly; fps report
+```
+
+**Settled policies (handoff §7):**
+- **Generated `.fj` → `build/` only, gitignored,** regenerated deterministically (D12); only small fixtures committed (golden hashes, key-event scripts).
+- **Assets (D8):** `doom1.wad` gitignored (shareware; `fetch_doom1`); **Freedoom** redistributable for CI golden, carries its own `LICENSE`.
+- **`build.py` (H6) owns the assemble-list order** — that ordered list *is* the linker-script realization of §3's hot-low / largest-alignment-first layout; `storage_mode == flat` asserted.
+- **Precision widths (8.8/16.0/8.0) are `fixed_point.fj` macro args**, not files.
+- **Host↔fj single source of truth** (closes the D12 lockstep gap): `config.py` is the one place for `W/H/bpp/N`, table sizes/bases, device command bytes, `--flat-max-words` — emitted to `build/generated/fj_consts.fj` that `memory_map.fj` consumes; `tables.py`/`fixedpoint.py` hold the pure value/semantics functions imported by **both** the emitter (H2/H4) **and** the oracle (H5), so they cannot drift.
+- **CI** runs the full pyramid, asserts flat storage, threshold-checks `build/metrics.json` (the R-2/R-3 guards), pins **py3.13** (pygame; §H/F7).
+
+**PR #1 → designed home (governed by D15 — the design is authority, not PR #1):**
+
+| PR #1 path | Designed home | Disposition |
+|---|---|---|
+| `stl/hex/fixed_point.fj` | `src/fj/fixed_point.fj` (F2) | **Keep iff S5.0 CR confirms** it matches D13/§3.4; else rewrite |
+| `lut_generator.py` value kernel (`encode_fixed_point`, sine/recip math) | `src/doomfj/tables.py` + `fixedpoint.py` (G-a) | **Lift iff CR confirms**; else rewrite |
+| `lut_generator.py` data-table emitters | `src/doomfj/lut_generator.py` (H2, §3.4 fallback path) | **Keep iff CR confirms**; the **primary dispatch-code emitter is written new** (S5.1) |
+| `programs/.../fixed_point/*.fj` + `*.out` | `tests/fj/test_fixed_point.py` | re-homed to harness style |
+| `tests/unit/test_lut_generator.py` | `tests/host/test_lut_generator.py` | re-homed |
+| `README.md` (PR #1) | superseded by the repo `README.md` | discard |

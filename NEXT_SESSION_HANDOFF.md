@@ -1,19 +1,21 @@
-# Handoff — Stage 4 (iterative stage cutting), then Stage 5 (execution)
+# Handoff — Stage 5 (execution), starting at M0
 
-**Audience:** a fresh session picking up DOOM-on-FlipJump after **Stages 1–3 are complete and owner-approved.**
-Your job starts at **Stage 4**. Bring fresh, adversarial eyes — but the *design itself is settled*; do not reopen it
-without a contradiction.
+**Audience:** a fresh session picking up DOOM-on-FlipJump after **Stages 1–4 are complete and owner-approved.**
+Your job starts at **Stage 5 — execution**, first item **M0**. The *design is settled* (`DESIGN.md` §1–§9) and the
+*ladder is settled* (`DESIGN.md` §10) — do not reopen either without a real contradiction.
 
 ---
 
 ## 0. Mission (TL;DR)
 
-1. **Run Stage 4 — iterative stage cutting** (`doom_implementation_handoff.md` §8). Slice the approved design into
-   small, independently testable execution stages, each with an explicit exit criterion. **Measurement stages come
-   before the designs they decide** (e.g. R1 settles D2 before R2 commits). Get the owner to **approve the slicing**.
-2. **STOP after Stage 4.** Do not start writing game code (Stage 5) until the slicing is approved.
-3. Then **Stage 5 — execution**, first item **S5.0: the PR #1 CR-loop** — run it *adversarially* per the D15 policy
-   below.
+1. **Stage 4 — iterative stage cutting: DONE & approved (2026-06-20).** The full ladder is **`DESIGN.md` §10**:
+   ~16 milestones **M0–M15** (+ an R3 fan-out), **full cr-tdd-ladder ceremony per milestone**, the **early unroll
+   spike Sᵤ before R0**, two measurement gates (**M10/R0**, **M11c/R1**).
+2. **Stage 5 — execution.** Start at **M0** (workflow + toolchain scaffold — the repo does **not** yet have the
+   cr-tdd infra: `docs/cr-rules.md`, `.claude/agents/crist.md`, branch protection, `versions/`). Then walk the
+   M-ladder in order. The **first feature milestone is M2** = the adversarial **PR #1 CR-loop** (D15 policy below).
+3. Each milestone ends in an **owner approval gate**; the two measurement gates (M10, M11c) must land their numbers
+   in-doc before anything downstream starts.
 
 ---
 
@@ -59,36 +61,27 @@ split (from reading the diff this session, *pending* the CR):
 
 ---
 
-## 3. Stage 4 — how to run it (handoff §8)
+## 3. The ladder (Stage 4 result — `DESIGN.md` §10)
 
-Slice the design into stages that are each **small, independently runnable, tested, and end in something
-demonstrable** (a passing suite, a rendered frame, a measured number). Each states its **exit criterion** up front.
-**Measurement before commitment** (R1 measures D2's static-store design — ops/frame *and* assemble time *and* `.fjm`
-size — before R2 builds on it).
-
-The handoff §8 sketch (non-binding — Stage 4 formalizes it), refined by the D15 policy and the §9 tree:
+Stage 4 is **done**; the authoritative ladder is **`DESIGN.md` §10** (M0–M15 + R3 fan-out, exit criteria,
+per-milestone cr-tdd ceremony, the R4–R6 CR-rule tuning, the two gates). Do not re-derive it here. The shape:
 
 ```
-S5.0  CR-loop PR #1 ADVERSARIALLY into the §9 tree (D15): keep fixed_point.fj iff it
-      matches D13/§3.4; lift the generator value-kernel into tables.py/fixedpoint.py;
-      else rewrite. Land fixed_point.fj (F2) + the host shared-truth modules.
-S5.1  LUT generator gains the dispatch-code emitter (per-entry default / per-result-nibble
-      override / +4-offset deposit / over-align / 16^x) + per-table tests (#8: every entry
-      + call-twice). Data-table emission stays as the §3.4 fallback.
-S5.2  R0: WAD pipeline (H1) + generated tables (trig/recip/yslope/viewangle/colormap) +
-      config.py/fj_consts wiring; fill the §1.2 span ledger + §1.3 entry counts with REAL
-      E1M1 numbers.
-S5.3  R1: renderer vertical slice — settle D2 (static-store: full-unroll vs column buffer)
-      with MEASURED ops/frame + assemble time + size; settle the per-pixel deposit/DDA cost
-      (R-1) and the real @ at game scale. This is the gate before R2.
-S5.4  R2: full renderer at 160×100 textured + S0 walk/collide; all-9-E1-levels-in-one binary;
-      report measured fps against the §1 floor↔fps curve (~14M ⇒ ~20 fps target).
-S5.5  R3: doors/combat/entities/HUD/glyphs/sprites per D7; device-side fps cap (D9) for an
-      interactive build.
+M0   workflow + toolchain scaffold (cr-tdd infra, src-layout, probe harness, CI py3.13)   ← START HERE
+M1   config.py SSOT → fj_consts.fj + F1 memory_map.fj + span-invariant test home
+M2   [S5.0a] adversarial PR #1 CR-loop → fixed_point.fj (F2) + fixedpoint.py mirror (D15)
+Sᵤ   SPIKE (early, not merged): full-unroll assemble-time/size scaling — de-risk D2/R-2
+M3   [R0] H1 WAD parser + fixtures            M7  H3 map compiler (BSP / BSP-as-code)
+M4   [S5.0b] tables.py value fns              M8  H4 texture/colormap/palette → MEASURE texture span
+M5   [S5.1] H2 dispatch-code emitter (#5/#8)  M9  H5 reference model (oracle)
+M6   F3 fj-side LUT access                    M10 R0 GATE: real §1.2/§1.3 ledgers, flat verified
+M11a F4 framebuffer + deposit  →  M11b F5 one textured column  →  M11c R1 GATE: decide D2 by measurement
+M12  F5 full BSP walls   M13 F5 textured floors/ceilings   M14 F6/F7 loop+S0+present   M15 R2: 9-level binary
+M16+ R3 (flag-gated): doors/hitscan · sprites/entities · HUD/text · fps cap · 320×200 — re-sliced when reached
 ```
 
-Each stage's exit criterion should name the artifact and the metric. Get the owner to **approve the slicing**, then
-**STOP** — Stage 5 execution is the next session.
+**M2 is the PR #1 CR-loop** (adversarial, D15 below). M10 and M11c are owner-approval **measurement gates** —
+their numbers land in-doc before anything downstream starts.
 
 ---
 
@@ -119,5 +112,7 @@ Each stage's exit criterion should name the artifact and the metric. Get the own
 - **`@`-vs-ops discipline.** Never compare a game-scale `@=25` figure to a raw small-program ops figure without
   converting (the doc's `@`-note).
 - **One logical change per commit**, message style `Stage N: … (#n)` (last was #24). Expect the harmless CRLF warning.
-- **Owner approves at each gate.** Stage-4 slicing approval opens Stage 5. **No game code before the slicing is
-  approved.** Stay on `stage-1-design`; do not merge to `main`.
+- **Owner approves at each gate.** The Stage-4 slicing is approved (§10), so Stage 5 is open. **M0 is the next
+  action** — it sets up the cr-tdd infra the rest of the ladder assumes. Execution work happens on per-milestone
+  `mN-…` branches off `main` (M0 establishes branch protection); the design branch `stage-1-design` holds the
+  docs until they merge.

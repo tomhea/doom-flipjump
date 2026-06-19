@@ -7,8 +7,10 @@
 > re-derived from the installed flipjump 1.5.0 STL source and four contradictions were fixed in-doc
 > (commits #20–23: frame-total/fps reconciliation, the §1.3 subtotal arithmetic, texture-span coherence,
 > and precision-ledger width propagation). **Stage 3 (directory tree) — COMPLETE & owner-approved
-> (2026-06-20): see §9; D14 resolved, D15 keep-vs-rewrite policy set.** Next: **Stage 4 (iterative stage
-> cutting, handoff §8) — not started.**
+> (2026-06-20): see §9; D14 resolved, D15 keep-vs-rewrite policy set.** **Stage 4 (iterative stage cutting,
+> handoff §8) — COMPLETE & owner-approved (2026-06-20): see §10** — the ~16-milestone ladder M0–M15 (+R3
+> fan-out), full cr-tdd-ladder ceremony per milestone, early unroll spike before R0. Next: **Stage 5
+> (execution) — first item M0, not started.**
 > Built iteratively through owner Q&A per the
 > [implementation handoff](doom_implementation_handoff.md) §4–§5. Every decision is recorded in the
 > **Decisions** section below with an ID, rationale, and the measurement (if any) that settled it —
@@ -22,8 +24,8 @@
 1. **Stage 1 — this document.** Cover every component per the §5 spec. ✓ *done*
 2. **Stage 2 — contradiction hunt.** Adversarial pass (handoff §6 checklist); fix in-doc; re-approve → *final document*. ✓ *done (re-approved 2026-06-20)*
 3. **Stage 3 — directory tree** (handoff §7). ✓ *done (approved 2026-06-20 — §9, D14/D15)*
-4. **Stage 4 — iterative stage cutting** (handoff §8). ← *next*
-5. **Stage 5 — execution.** First item: CR-loop PR #1 into the Stage-3 tree (handoff §9), then execute.
+4. **Stage 4 — iterative stage cutting** (handoff §8). ✓ *done (approved 2026-06-20 — §10)*
+5. **Stage 5 — execution.** First item: **M0** (workflow + toolchain scaffold), then the M-ladder (§10) in order. ← *next*
 
 ---
 
@@ -577,3 +579,104 @@ doom-flipjump/
 | `programs/.../fixed_point/*.fj` + `*.out` | `tests/fj/test_fixed_point.py` | re-homed to harness style |
 | `tests/unit/test_lut_generator.py` | `tests/host/test_lut_generator.py` | re-homed |
 | `README.md` (PR #1) | superseded by the repo `README.md` | discard |
+
+---
+
+## 10. Execution ladder (Stage 4 — iterative stage cutting)
+
+> **Approved 2026-06-20 (handoff §8).** The approved `DESIGN.md` sliced into small, independently-runnable,
+> tested milestones — each ending in something demonstrable (a passing suite, a rendered frame, a measured
+> number) with an explicit exit criterion. **Measurement comes before the designs it decides** (the unroll
+> spike + the M10/M11c gates). **Owner decisions this stage:** (1) **full cr-tdd-ladder ceremony per
+> milestone**; (2) **the unroll spike runs early, before R0**; (3) **the ~16-milestone grain below is
+> approved**. **Numbering:** cr-tdd `M`-numbers (execution convention) annotated with the §6 component /
+> §8 round (R0–R3) / §4 D-item each realizes.
+
+### 10.1 Process per milestone (full cr-tdd-ladder)
+
+Every milestone: a branch (`mN-feature-slug`) → a PR (`M<N>: …`) with **FAIL-then-PASS TDD evidence** in the
+body → a **CR-ist** subagent review against `docs/cr-rules.md` → a **literal merge commit** → an **annotated
+tag `v0.M<N>`** → an **archived build artifact in `versions/`** (the `.fjm` once one exists; a host-output
+tarball before). Hotfixes: `fix/<slug>` + `v0.M<N>.<sub>`. **Spikes** (`sN-<topic>`) are throwaway, *not*
+merged, documented in `docs/spikes.md`. The cr-tdd-ladder infra itself (`docs/cr-rules.md`, `.claude/agents/
+crist.md`, branch protection, `versions/`) **is M0's deliverable** — the repo does not yet have it.
+
+**Project-specific CR-rule tuning (M0 writes these into `docs/cr-rules.md`):** R1 TDD evidence = FAIL→PASS
+`pytest`/`assemble_and_run_test_output` logs; R2 integration evidence = a golden frame / op-count / measured
+fps for behavior changes; R3 = a test per touched logic file (fj-macro or host); **R4 = span/flat guard**
+(any new table/segment adds its §1.2-ledger line incl. align pad, build asserts `storage_mode==flat` and
+span<flat-limit — R-3); **R5 = signed-compare guard** (every compare on a signable uses `hex.scmp`/`hex.sign`,
+never `hex.cmp` — §3.5; every generated table tested **every-entry + call-twice**, #8); **R6 = single source
+of truth** (constants only via `config.py`/`fj_consts`; LUT values only via `tables.py`/`fixedpoint.py` shared
+by emitter **and** oracle — no duplicated constants); R7 naming; R8 = `--werror`-clean, zero new warnings.
+
+### 10.2 The ladder
+
+**Phase A — Foundation (workflow + host single-source-of-truth)**
+- **M0** *(infra)* — cr-tdd scaffold (`docs/cr-rules.md` w/ the R4–R6 tuning above, `crist.md`, branch
+  protection, `versions/`, `docs/spikes.md`), src-layout, `scripts/test`+`build`, probe harness
+  (`op_counter`/`storage_mode`, empty-loop baseline), CI pinned **py3.13**. **Exit:** CI green;
+  `storage_mode==flat` asserted on a hello-world `.fjm`; `metrics.json` emitted; tag `v0.M0`.
+- **M1** *(F1)* — `config.py` SSOT → `build/generated/fj_consts.fj`; `memory_map.fj` consumes it;
+  `test_build` span/alignment-invariant skeleton. **Exit:** config↔fj_consts round-trips; `memory_map.fj`
+  assembles; span-invariant test home live.
+- **M2** *(S5.0a / F2 / D15)* — **adversarial CR-loop of PR #1 `fixed_point.fj`** into `src/fj/` (keep-or-
+  rewrite per D15); `fixedpoint.py` host mirror + parity tests. **Exit:** `fixed_mul`/`div`/`mul_const`
+  byte-exact vs host mirror on boundary/signed/overflow inputs; D15 disposition recorded; tag.
+
+**Spike Sᵤ** *(early, before R0 — owner decision; not merged)* — full-column-unroll assemble-time/size
+scaling: `rep(N)` of a trivial fixed-address stub, N=100→16,000. **De-risks D2/R-2** before the R0 pipeline
+commits to a memory map that assumes full-unroll works. Outcome → `docs/spikes.md`.
+
+**Phase B — Host pipeline + tables (R0)**
+- **M3** *(S5.2 / H1)* — WAD parser + fixtures (doom1.wad dev / Freedoom CI). **Exit:** lump counts/sample
+  records vs fixtures; `fetch_doom1`.
+- **M4** *(S5.0b / shared)* — `tables.py` pure value fns (lift PR #1 value-kernel, CR'd). **Exit:** value fns
+  match hand-computed + DOOM samples (shared by emitter **and** oracle).
+- **M5** *(S5.1 / H2)* — dispatch-code emitter (per-entry **#5** construction — *not* `hex.set`; per-result-
+  nibble override; +4-offset deposit table; over-align; 16^x); data-table emitter kept as §3.4 fallback.
+  **Exit:** small dispatch table passes **every-entry + call-twice (#8)**, both modes; deposit table
+  byte-exact; size/assemble in metrics.
+- **M6** *(F3)* — fj-side LUT access (jumper idioms, cosine-offset, multi-nibble index) on a generated table.
+  **Exit:** read byte-exact vs `tables.py` on boundary/wrap; ~4@/lookup probed.
+- **M7** *(H3)* — map compiler (BSP streams + BSP-as-code #7 + level table) on a small map. **Exit:** compiled
+  BSP matches WAD counts/records; both emit modes.
+- **M8** *(H4)* — texture/colormap/palette compiler → dispatch tables. **Exit:** per-table tests
+  (texel/colormap/palette); **E1M1 texture span MEASURED → §1.2** (OQ8/R-3); downscale lever exercised if
+  over budget.
+- **M9** *(H5)* — reference model (oracle), imports `tables.py`/`fixedpoint.py`. **Exit:** reproduces a
+  hand-checked frame + sim step; bit-exact discipline structural.
+- **M10 — R0 GATE** — integrate all E1M1 tables in one `.fjm` via config; **fill §1.2 span + §1.3 entry
+  ledgers with REAL numbers**. **Exit:** one `.fjm`, `storage_mode==flat`, span<limit w/ measured headroom,
+  ledgers updated in-doc, R-3 green. *Owner approval gate.*
+
+**Phase C — Renderer vertical slice + the R1 gate**
+- **M11a** *(F4)* — framebuffer + deposit primitive (M5 table) + one fixed-address column fill. **Exit:**
+  golden solid-column frame vs H5; deposit cost + **real @** measured.
+- **M11b** *(F5)* — single textured wall column (DDA + select + sample + colormap apply). **Exit:** golden
+  textured column bit-exact vs H5; **per-pixel DDA cost measured (R-1)**.
+- **M11c — R1 GATE / D2** — bake-off: full-unroll (b) vs column-buffer (a) at WIDTH scale — ops/frame +
+  assemble + size. **Exit:** **D2 resolved-by-measurement, written in-doc**; §1.1 per-pixel ledger + real @
+  reconciled; metrics thresholds; R-1/R-2 status updated. *Owner approval gate before R2.*
+
+**Phase D — R2 full renderer + sim (first playable)**
+- **M12** *(F5)* — full BSP front-to-back walk: all visible walls, clip arrays, reciprocal-LUT scale,
+  per-column colormap, tiered `fcall`/stack. **Exit:** full-view walls bit-exact vs H5 (spawn frame); stack
+  depth measured.
+- **M13** *(F5)* — floors/ceilings (visplane spans, yslope, 2-coord DDA), full-res textured. **Exit:**
+  textured floors+ceilings bit-exact; **full-frame fps reported vs §1 curve** (~14M ⇒ ~20 fps).
+- **M14** *(F6/F7)* — game loop + S0 sim (turn/move/wall-slide) + present; auto-warp. **Exit:** headless
+  interactive walk; **replay sim-state bit-exact vs H5**; fps reported.
+- **M15 — R2 DELIVERABLE** — multi-level binary: 9 E1 levels + level table + `goto_level` + state reset.
+  **Exit:** all-9 `.fjm`, switch works, flat, span<limit; **first playable**; tag + archived `.fjm`.
+
+**Phase E — R3 (flag-gated; re-sliced at R2 exit using measured budgets)**
+- **M16+** — S1 doors+hitscan · S2 sprites/entities · F8 HUD/status-bar/menu/text+glyphs · D9 device-side
+  fps cap (candidate `fj==1.5.1`, §2.1) · 320×200 stretch revisit. Sliced into milestones when reached
+  (their detail depends on R2's measured numbers — iterative stage cutting continues here).
+
+### 10.3 The two measurement gates (the backbone)
+
+**M10 (R0)** fills the real §1.2 span / §1.3 entry ledgers before the renderer commits to the memory map;
+**M11c (R1)** decides D2 from measured ops/assemble/size + real @ before R2 builds the full renderer. Each
+ends in an owner approval gate; nothing downstream starts until the gate's measurement is in-doc.

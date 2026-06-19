@@ -280,8 +280,8 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### F2 — Fixed-point math layer (`fixed_point.fj`, PR #1)
 - **Purpose:** Signed Q-format math: `fixed_mul`/`fixed_div` + `mul_const` + pointer-fallback table reads.
-- **Supplies:** `hex.fixed_mul n,f,…`, `hex.fixed_div n,f,…,div0`, `hex.mul_const n,…,c`, `hex.read_table`/`read_table_byte` (fallbacks only).
-- **Depends/related:** `hex.*` STL; consumed by F5/F6.
+- **Supplies:** `hex.fixed_mul n,f,…`, `hex.fixed_div n,f,…,div0`, `hex.mul_const n,…,c`, and **PR #1's own** `read_table`/`read_table_byte` fallback wrappers. *(Note: `read_table`/`read_table_byte` are **not** stock 1.5.0 STL macros — verified S2; the STL pointer-read primitives are `hex.read_byte` / `read_nth_byte` (~1,064 ops each). PR #1 supplies the table-read wrappers over those; the handoff §1.1 mis-attributed them to the STL.)*
+- **Depends/related:** `hex.*` STL (incl. `read_byte`/`read_nth_byte`, the actual pointer-read primitives); consumed by F5/F6.
 - **Assumes:** `0 < f <= n`; full 2n-width product (D13); default 16.16 (D6); `hex.init`; `hex.scmp` for signables (§3.5).
 - **Data & layout:** scratch `hex.vec` in F1's register region.
 - **Time / Space:** per PR #1's documented complexities (e.g. `fixed_mul` ≈ 4n²(5.5@+20)+…); div is expensive ⇒ **LUT it in hot paths**, never call per pixel/column.

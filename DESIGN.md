@@ -180,9 +180,9 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
 | tantoangle | slope → angle (R_PointToAngle) | 2048 | angle | R2 | DOOM SLOPERANGE; R1 may refine |
 | viewangletox | view-angle → column | 2048 | 8-bit | R2 | FINEANGLES/2 at N=4096 |
 | xtoviewangle | column x → angle | 161 | angle | R2 | W+1 (pad 256) |
-| distscale | column x | 160 | 16.16 | R2 | fisheye 1/cos (pad 256; may fold) |
-| yslope | row y | 100 | 16.16 | R2 | floor/ceiling distance (pad 128) |
-| reciprocal / scale | distance | 4096 | 16.16 | R2 | 16³ buckets; kills the wall divide |
+| distscale | column x | 160 | ≤16.16 (§1.1.4; R1) | R2 | fisheye 1/cos (pad 256; may fold) |
+| yslope | row y | 100 | ≤16.16 (§1.1.4; R1) | R2 | floor/ceiling distance (pad 128) |
+| reciprocal / scale | distance | 4096 | 8.8–16.8 (§1.1.4) | R2 | 16³ buckets; kills the wall divide |
 | colormap | (light, texel) | **8192** (32×256) | byte | R2 | 32 light levels; per-pixel, over-align #3 |
 | +4-offset deposit | (old,new) hi-nibble | 256 | flips | R2 | D3 |
 | textures (wall+flat) | texel position | **~300,000** | byte | R2 | native E1M1 (D5/OQ8); R0 measures exact, downscale is the lever if over budget |
@@ -194,7 +194,7 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
 **+ colormap (32×256) = 8,192** → non-texture total **21,157**.
 **+ textures ≈ 300,000** (native E1M1 planning; R0 measures exact).
 **⇒ Unified R2 total ≈ 321,157 entries** — **textures are ~93% of it**; everything else sums to ~21K.
-*Span note (→ §1.2):* entry *count* ≠ span. Wide per-result-nibble tables multiply by result-nibbles (finesine/reciprocal ×8) and per-entry handlers cost ~popcount ops/entry; the **LUT span lands ≈1.5–2M ops** (textures dominate), comfortably under the 8.4M flat limit. **Span pressure vs assemble-time pressure are distinct, and live in different places:** for raw *span*, the LUTs/textures (≈1.5–2M) plus the leading alignment pad (§1.2) dominate; the unrolled renderer *code* is the **assemble-time** pressure (R-2 — ~16K macro expansions), with comparatively *small* span once the heavy logic is factored into the shared `fcall` leaf (~100–300K ops, §B/D2).
+*Span note (→ §1.2):* entry *count* ≠ span. Wide per-result-nibble tables multiply by result-nibbles (finesine ×8; reciprocal/scale ~×4–6 at 8.8–16.8, §1.1.4) and per-entry handlers cost ~popcount ops/entry; the **LUT span lands ≈1.5–2M ops** (textures dominate), comfortably under the 8.4M flat limit. **Span pressure vs assemble-time pressure are distinct, and live in different places:** for raw *span*, the LUTs/textures (≈1.5–2M) plus the leading alignment pad (§1.2) dominate; the unrolled renderer *code* is the **assemble-time** pressure (R-2 — ~16K macro expansions), with comparatively *small* span once the heavy logic is factored into the shared `fcall` leaf (~100–300K ops, §B/D2).
 
 *Sizing (#1 — bump where it helps):* sizes are **matched to the 160×100/256/32 output**, so more entries are *not* added where they wouldn't show. The **angular/projection tables already out-resolve the 160-column output ~6×** (finesine 4096 = 0.088°/entry vs ~0.56°/column; tantoangle/viewangletox feed a 160-wide result and get re-quantized). The **per-row/col tables are exactly one entry per column/row** (xtoviewangle=W+1, distscale=W, yslope=H). **reciprocal/scale** is the only map-dependent size — **R0 tunes it to E1M1's measured max sightline** (default 4096; bumped freely, LUT span has ~6M ops headroom); near-wall scale smoothness comes from **seg-scale interpolation** (R1), not a bigger table. colormap=32 (owner) and textures=native are at chosen/max fidelity. W/H-dependent tables auto-scale for the 320×200 stretch. *(Override any specific table for more margin.)*
 

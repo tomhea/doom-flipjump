@@ -297,7 +297,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Time:** **~46 fj-ops/dispatch** (≈ 1.7@; measured S2, w=32) — per-pixel sample+colormap, per-column trig/recip; feeds the texture-read + column-math budget lines.
 - **Space:** small idiom code + the +4-offset table.
 - **Testing:** per-idiom byte-exact vs host reference; boundary/wrap indices.
-- **Open Qs:** OQ9 (`fcall` nesting if idioms chain > 1 level).
+- **Open Qs:** OQ9 (`fcall` nesting if idioms chain > 1 level) — *mechanism resolved* (§2.1 tiered `ret_reg`s); R1 only measures the actual depth.
 
 #### F4 — Framebuffer + pixel-store layer
 - **Purpose:** The packed-byte framebuffer (D3) + the full-unroll static deposit (D2b).
@@ -385,5 +385,6 @@ Per handoff §H / §3.5. Top to bottom:
 
 OQ4 (does per-column math reduce fully to LUTs+adds? → D2/R1) · OQ5 (16.16 vs 8.8 wobble → D6) ·
 OQ8 (map/texture dispatch tables small enough for compile+span? → D5/R-2/R-3) · OQ9 (`fcall`
-non-reentrancy — any hot call chain > 1 nesting level? → R1 as the call graph forms) · OQ10 (variable
-fps vs worst-case cap → D9).
+non-reentrancy — **mechanism resolved** in §2.1: distinct `ret_reg` per call-graph level makes any
+bounded non-recursive depth stackless; what R1 still *measures* is the actual nesting depth of the
+hot call chains, which doesn't change the approach) · OQ10 (variable fps vs worst-case cap → D9).

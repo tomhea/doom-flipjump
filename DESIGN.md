@@ -30,21 +30,23 @@
 **Stretch:** 320×200 @ 25 fps textured — **no speculation tier** (we won't use it). Reachable instead if flat-run + the §2.1/§3 optimizations push the engine to **~400M+ fj/s**; revisit once R2's measured ops/frame are in. Not a dependency.
 **Fallbacks:** 160×100 flat-shaded · 160×100 textured @ 12.5 fps · flat→paged storage.
 
-**Budget:** ~280M fj/s (measured flat, native engine) ÷ 25 fps = **~11.2M fj-ops / frame.**
+**Budget:** ~280M fj/s (measured flat, native engine) ÷ 25 fps = **~11.2M fj-ops / frame** = **448K @** at the design's working **@ = 25** (≈ the §A game-scale figure; R-1 measures the real @, and the whole ledger scales ~linearly with it).
 
-### 1.1 Ops-per-frame ledger (must sum < 11.2M with stated margin)
+### 1.1 Ops-per-frame ledger (must sum < 11.2M with stated margin) — computed at **@ = 25**
 
-Seeded from handoff §2 (estimates — **R-1**: measured at S5.3/R1 before R2 commits). Each component
-below adds/refines its own line as the design firms up.
+Costs are stated in **@** (scale-invariant) and converted at **@ = 25** (the design working point; **R-1** measures
+the real @ at S5.3 before R2 commits). Per-pixel lines are ×16,000 px, optimized model (§1.1.1).
 
-| Line | Component | Per-frame cost (est.) | Technique | Settled by |
+| Line | Component | @/frame | Per-frame @ **@=25** | Technique |
 |---|---|---|---|---|
-| Pixel stores (16K px, packed-byte deposit ≈ 2 dispatches/px ≈ ~4@) | F4 | ~1.0M @ ledger-@≈15 | static stores §3.1, D3 deposit | D2/D3/R1 |
-| Texture + colormap reads (16K px, 2 dispatches/px ≈ ~8@) | F3/F5 | ~1.6–3.2M @ ledger-@≈15 | dispatch-LUTs §3.2 | D5/D11 |
-| **Per-pixel arithmetic** (DDA `frac+=step` + ceiling/wall/floor select, ≈ 8–14@/px) | F5 | **~2–3.4M @ ledger-@≈15** (see §1.1.1) | **mandatory** narrow-frac DDA + early-exit select | D6/R1 |
-| Column math (160 cols) + BSP walk + S0 logic | F5/H3/F6 | ~1.5–3M | LUTs + adds, mul/div-free | D1/D6 |
-| Present (`update_screen` 0x03 memory-hook) + input poll | F7 | ~negligible (~70 + tens) | — | — |
-| **Total** | | **~6–11M of 11.2M (~1.0–1.8× margin) — *at ledger-@≈15, with the mandatory per-pixel optimizations*** | | |
+| Pixel stores (deposit, ~4@/px) | F4 | 64K@ | **1.6M** | static stores §3.1, D3 deposit |
+| Texture + colormap reads (2 dispatches, ~8@/px) | F3/F5 | 128K@ | **3.2M** | dispatch-LUTs §3.2 |
+| **Per-pixel arithmetic** (select ~4@ + DDA ~5@ + index ~2@ = ~11@/px) | F5 | 176K@ | **4.4M** | **mandatory** narrow-frac DDA + `hex.sign` select |
+| Column math (160 cols) + BSP walk + S0 sim | F5/H3/F6 | ~100–200K@ | **~2.5–5M** | LUTs + adds, mul/div-free |
+| Present (`update_screen` 0x03) + input poll | F7 | ~negligible | **~0** | memory-hook |
+| **Total** | | **~468–568K@** | **≈ 11.7–14.2M of 11.2M** | **over budget at full fidelity** |
+
+**At @=25 the per-pixel work alone is ~9.2M (82% of the budget), and the full frame is ~12–14M — *over* the 25 fps budget.** So 160×100 textured @25 ships only by reclaiming ~1–3M through the **top-6 optimizations (§1.1.2)** *and/or* a fidelity fallback (flat-colored floors, flat-shaded, 12.5 fps, bpp=4). With the §1.1.2 optimizations applied (~4–5M profit) the frame lands ~8–9M (**~1.3× margin**); without them it does not hit 25 fps at full fidelity.
 
 #### 1.1.1 Per-pixel arithmetic — reconstructed from the actual STL macro costs (S2)
 
@@ -57,11 +59,33 @@ The per-op costs in the design are **verified correct** against the 1.5.0 STL (S
 | texel index assemble (col-base + texel) | `hex.xor_by` / small add | ~1–3@ | ~1–3@ |
 | texture sample + colormap | 2 dispatches | ~8@ | ~8@ |
 | deposit | 2 nibble-dispatches | ~4@ | ~4@ |
-| **per-pixel total** | | **~20–26@** | **~40–55@** |
+| **per-pixel total** | | **~23@** → **575 ops/px @ @=25** (×16K = **9.2M**) | **~47@** → **1,175 ops/px** (×16K = **18.8M**) |
 
-So the budgeted "~12@/px" (2 dispatches + deposit) was **~2× low even optimized, ~4× low naïve** — the new **Per-pixel arithmetic** line (above) carries the difference. Two consequences: **(1) the optimizations are *mandatory*, not optional** — a *narrow-width* DDA (8.8 or, better, a small fraction-accumulator that only carries into a 2-nibble texel index — D6/U5) and an *early-exit / `hex.sign`-based* surface select; with the full-16.16 `frac` add naïvely per pixel, the frame **does not fit even at @≈15**. **(2) floors/ceilings are heavier** — perspective spans step **two** coordinates (`u`,`v`) per pixel, so textured flats roughly double the DDA cost of walls (flat-colored floors avoid it; a fallback lever). R-1 (S5.3) **must measure the real per-pixel cost including the DDA**, and the `@`-note below still applies on top (everything here is `@`-proportional).
+So the budgeted "~12@/px" (2 dispatches + deposit) was **~2× low even optimized, ~4× low naïve** — the new **Per-pixel arithmetic** line carries the difference. Three consequences at @=25: **(1) the per-pixel path *is* the whole game** — 9.2M of the 11.2M budget optimized; the naïve full-16.16 version (~18.8M) is **almost 2× the entire budget**. **(2) the optimizations are *mandatory*, not optional** — a small fraction-accumulator DDA (carries into a 2-nibble texel index — D6/U5) and an `hex.sign`-based select. **(3) floors/ceilings are heavier** — perspective spans step **two** coordinates (`u`,`v`) per pixel, so textured flats ~double the DDA of walls (flat-colored floors avoid it; a fallback lever). R-1 (S5.3) **must measure the real per-pixel cost including the DDA**.
 
-> **@-sensitivity — the dominant budget variable (U7/R-6; the single most important R-1 measurement).** Nearly every line above is **@-proportional** — a dispatch is ~4@, a deposit ~4@/byte (§2 glossary), and the column-math/BSP reads are dispatches too — and **@ grows with total program size (U7)**. The lines are written at an implied **@≈15** (a small/medium build; back-solved from the inherited ~53–63 ops/byte and ~100–200 ops/px estimates). **At the §A "DOOM-scale" @≈27 the *entire* @-proportional ledger scales ~×1.8**, so the **~6–11M @≈15 total becomes ~11–20M — at or over the 11.2M budget across most of the range.** Combined with §1.1.1 (per-pixel arithmetic was ~2–4× under-counted), the realistic position is: **160×100 textured @25 fits only with the mandatory per-pixel optimizations *and* a modest @ (~15), and needs the §2 fallbacks at game-scale @** — flat-shaded (drops the colormap dispatch *and* the DDA where floors go flat-colored), 12.5 fps (doubles the budget), bpp=4 (halves the deposit). The earlier "~2× margin" was doubly optimistic (un-scaled @ **and** an under-counted per-pixel line). **R-1 (S5.3) measures the real @ at game scale before R2 commits**; costs are stated in **@** (scale-invariant) in the components and converted at the measured @. *(This reconciles the §A @≈27 cost model with the inherited §2 ops-figures — formerly an un-converted @-vs-ops mismatch that hid the margin's @-dependence.)*
+> **@ is the dominant budget variable (U7/R-6).** The whole ledger is **@-proportional** — a dispatch is ~4@, a deposit ~4@/byte (§2 glossary), the column/BSP reads are dispatches too — and **@ grows with total program size (U7)**. The design computes at the working point **@ = 25** (≈ the §A "DOOM-scale" figure); at that @ the frame is **over budget at full fidelity** (above), which is why the §1.1.2 optimizations are load-bearing. The budget scales ~linearly: a lighter build (smaller @) buys margin, a heavier one (more LUTs/textures/unrolled code) costs it. **R-1 (S5.3) measures the real @ at game scale before R2 commits** — it is the single most important budget measurement; if @ lands materially above 25 the §2 fallbacks (flat-colored floors, flat-shaded, 12.5 fps, bpp=4) are the relief.
+
+#### 1.1.2 Optimization priorities — the top 6 flows by time-profit (@ = 25)
+
+Ranked by the per-frame ops *saved* vs a naïve implementation. **#1–2 are why the optimized per-pixel
+baseline (9.2M) is far below the naïve (18.8M) — they are mandatory just to be in the game**; **#3–6 are
+the additional ~3–4M that takes the optimized-but-over-budget ~12–14M frame down to ~8–9M (≈1.3× margin)**.
+Profits are at @=25; they shrink/grow ~linearly with the measured @.
+
+| # | Flow (where the effort goes) | naïve | optimized | **profit @=25** | fidelity cost |
+|---|---|---|---|---|---|
+| **1** | **DDA `frac += step`** (per-pixel) | 16.16 add ~32@ | fraction-accumulator (1–2 nibble, carry to a 2-nibble texel index) ~5@ | **~10.8M** | none (exact) |
+| **2** | **ceiling/wall/floor select** (per-pixel) | n-width 2× `hex.cmp` ~12@ | `hex.sign` (`@-1`) + sticky region, 1 test/px ~3@ | **~3.6M** | none |
+| **3** | **fuse texture→colormap** (per-pixel) | 2 separate dispatches ~8@ | chain the texel handler into the colormap entry (skip the `xor`-bridge), or per-light composed table ~4–5@ | **~1.2–1.6M** | none (chain) / +span (composed) |
+| **4** | **per-column `fracstep`** (×160) | 16.16 `hex.mul` ~352@/col | 8.8 / `mul_const` shift-add ~80@/col | **~1.0M** | tiny (8.8 step) |
+| **5** | **deposit** (per-pixel) | `hex.mov 2` zero+xor ~4@ | custom *set-into-clean* table, 1 dispatch/nibble ~2.5@ | **~0.6M** (×2 at bpp=4) | none (bpp=4 → 16 colors) |
+| **6** | **BSP stream fields** (per node/seg) | every byte = `read_byte_and_inc` ~42@ | trim to the minimal per-node/seg record; pack so one walk reads it contiguously | **~0.3–0.6M** | none (data layout) |
+
+Two structural levers sit *above* this table (they change which pixels pay at all, not how much each pays):
+**flat-colored floors/ceilings** removes texture+colormap+2-coord-DDA+index on ~40–50% of pixels (the single
+biggest single move, a fidelity tradeoff), and the **full-column unroll (D2b)** is what makes the per-pixel
+*address* free in the first place (without it every store is a ~41@ pointer write — §A — which alone would be
+~10× the deposit line). #1–6 are the *within-pixel* and *within-column* wins on top of those.
 
 ### 1.2 Address-span ledger (must sum < chosen `--flat-max-words`; **R-3**)
 
@@ -118,13 +142,13 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
 *Sizing (#1 — bump where it helps):* sizes are **matched to the 160×100/256/32 output**, so more entries are *not* added where they wouldn't show. The **angular/projection tables already out-resolve the 160-column output ~6×** (finesine 4096 = 0.088°/entry vs ~0.56°/column; tantoangle/viewangletox feed a 160-wide result and get re-quantized). The **per-row/col tables are exactly one entry per column/row** (xtoviewangle=W+1, distscale=W, yslope=H). **reciprocal/scale** is the only map-dependent size — **R0 tunes it to E1M1's measured max sightline** (default 4096; bumped freely, LUT span has ~6M ops headroom); near-wall scale smoothness comes from **seg-scale interpolation** (R1), not a bigger table. colormap=32 (owner) and textures=native are at chosen/max fidelity. W/H-dependent tables auto-scale for the 320×200 stretch. *(Override any specific table for more margin.)*
 
 - **fj-op** — one assembled FlipJump op (flip-word + jump-word = `dw` bits). The budget unit.
-- **`@`** — the per-op cost constant (~27 at w=32); grows with total program size (**U7**). A figure in
+- **`@`** — the per-op cost constant (~27 at w=32; **the design computes at the working point @ = 25**, ≈ game scale — R-1 measures the real value); grows with total program size (**U7**). A figure in
   `@` is *not* comparable to a raw-ops figure without conversion (contradiction-hunt §6).
 - **w / dw / dbit** — word width (=**32**, confirmed: 16.16 fits one word) / `2w` (one op) / `w` (data-bit offset).
 - **nibble / hex / byte** — a `hex` = 4 data bits; a packed byte = 8 data bits in one op; register-form byte = two `hex` ops (low, then `+dw`). The two byte encodings do **not** interchange (see flipjump-dev skill).
 - **Fixed-point** — Q-format: 16.16 = `n=8,f=4`; 8.8 = `n=4,f=2`. **Signed-compare ladder (cheapest first, verified S2):** `hex.sign n` = **`@-1` (O(1), reads only the MSB)** for a *pure sign* test (is `x<0` / did it underflow) — use this wherever only the sign matters; `hex.scmp n` = **`n(7@+8)`** for a true two-operand signed *magnitude* compare (`a<b`); **never `hex.cmp` on signed values** (correctness — §3.5). Note `hex.cmp n` itself *early-exits* (`m(3@+8)`, `m` = count of differing high-nibble prefix), so unsigned compares of values that diverge high (e.g. screen coords) cost ~`3@`, not `3n@`.
-- **Static store** — a framebuffer write to a *compile-time-known* address. The runtime-value byte deposit ≈ 2 nibble-dispatches ≈ **~4@/byte** (STL `hex.mov 2` = `2·(2@)`; the real packed deposit adds the +4-offset hi-nibble table, ~comparable) — i.e. ~110 ops at the game-scale @≈27 (§A), ~53 ops in a small probe at its @≈9. Contrast a runtime-address pointer write (`write_byte` ≈ **41@**). *(The handoff §A "~7@" single-byte-write estimate is superseded.)*
-- **Dispatch-LUT** — the `hex.xor`-jumper table idiom (`tables_init.fj`): **~4@ per lookup** (STL `jump_to_table_entry` = `4@+4`, plus a cheap ~`log(n)/2`-**fj-op** in-table traversal; STL `hex.or` = `4@+10` end-to-end) — so **~9–10× cheaper than a `read_byte` pointer read** (`33@+173`). The cost is in **@** (scale-invariant): ~110 ops/lookup vs ~1,064 at game-scale @≈27; a small probe gives ~46 ops/lookup at its @≈9 (`storage_mode=flat`) — same `4@` structure, smaller @. One dispatch sets a *fixed-address* hex = a *runtime* value, so it is the pointer-free deposit primitive. *(The handoff §3.2 "~10@/lookup" double-counted the cheap fj-op traversal as @-units; the dispatch core is ~4@. **@-vs-ops:** never compare a game-scale @-figure to a small-program ops-figure — see §1.1's @-note.)*
+- **Static store** — a framebuffer write to a *compile-time-known* address. The runtime-value byte deposit ≈ 2 nibble-dispatches ≈ **~4@/byte** (STL `hex.mov 2` = `2·(2@)`; the real packed deposit adds the +4-offset hi-nibble table, ~comparable) — i.e. **~100 ops at @ = 25** (~53 ops measured in a small probe at its @≈9, confirming the `4@` structure). Contrast a runtime-address pointer write (`write_byte` ≈ **41@** ≈ 1,000 ops). *(The handoff §A "~7@" single-byte-write estimate is superseded.)*
+- **Dispatch-LUT** — the `hex.xor`-jumper table idiom (`tables_init.fj`): **~4@ per lookup** (STL `jump_to_table_entry` = `4@+4`, plus a cheap ~`log(n)/2`-**fj-op** in-table traversal; STL `hex.or` = `4@+10` end-to-end) — so **~9–10× cheaper than a `read_byte` pointer read** (`33@+173`). The cost is in **@** (scale-invariant): **~100 ops/lookup vs ~1,000 for `read_byte` at @ = 25**; a small probe gives ~46 ops/lookup at its @≈9 (`storage_mode=flat`) — same `4@` structure, smaller @. One dispatch sets a *fixed-address* hex = a *runtime* value, so it is the pointer-free deposit primitive. *(The handoff §3.2 "~10@/lookup" double-counted the cheap fj-op traversal as @-units; the dispatch core is ~4@. **@-vs-ops:** never compare a game-scale @-figure to a small-program ops-figure — see §1.1's @-note.)*
 - **`P_Random` / determinism** — the game uses **no true RNG**. DOOM's "randomness" (combat/AI, R3+) is a deterministic 256-byte `rndtable` + advancing `rndindex` — a byte-LUT. The whole game is deterministic, which is *required* by D12 (bit-exact + replay). R2 uses no randomness at all.
 - **Cell width ⊥ pointer-freeness** (key D3 insight) — "packed byte" (8-bit cell, forced by bpp=8/256-color + the device read) is the framebuffer *cell width*; "pointer-free" is whether the *address* is compile-time-known (delivered by D2(b) full-unroll). Orthogonal: a packed-byte framebuffer can be written entirely by fixed-address stores. The runtime-value→fixed-address deposit cost scales with bits — a byte ≈ 2× a nibble — so bpp=4/hex.vec is the ~2×-cheaper-deposit / 16-color cost-fallback.
 
@@ -317,7 +341,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Depends/related:** H2/H4 tables; consumed by F4/F5.
 - **Assumes:** indices nibble-aligned without runtime shift (U6); tables init'd before first use; shared `res`/`ret`.
 - **Data & layout:** reads code-region tables; owns the +4-offset 256-entry table.
-- **Time:** **~4@ per byte dispatch** (STL `hex.or` = `4@+10`; ≈110 ops at game-scale @≈27, ~46 ops in a small probe at @≈9) — per-pixel sample+colormap = 2 dispatches; a 32-bit per-column trig read via per-result-nibble (D4) = ~8 dispatches but only 160×/frame. Feeds the texture-read + column-math budget lines (in **@**, per §1.1's @-note).
+- **Time:** **~4@ per byte dispatch** (STL `hex.or` = `4@+10`; ≈ **100 ops at @ = 25**) — per-pixel sample+colormap = 2 dispatches; a 32-bit per-column trig read via per-result-nibble (D4) = ~8 dispatches but only 160×/frame. Feeds the texture-read + column-math budget lines (in **@**, per §1.1's @-note).
 - **Space:** small idiom code + the +4-offset table.
 - **Testing:** per-idiom byte-exact vs host reference; boundary/wrap indices.
 - **Open Qs:** OQ9 (`fcall` nesting if idioms chain > 1 level) — *mechanism resolved* (§2.1 tiered `ret_reg`s); R1 only measures the actual depth.
@@ -328,7 +352,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Depends/related:** F3 (deposit table), F1 (layout); consumed by F5 (writes), F7 (present reads base).
 - **Assumes:** **write-only during render** (invariant); bpp=8 packed byte; **no clear** (U10 — every px written once, ceiling→wall→floor, no gaps); fixed compile-time addresses (D2b).
 - **Data & layout:** framebuffer = W·H = 16K packed-byte ops (data region).
-- **Time:** deposit ≈ 2 nibble dispatches ≈ **~4@/byte** (STL `hex.mov 2` proxy = `2·(2@)`; the real low-nibble + custom +4-offset deposit is ~comparable). Small probe: ~53 ops/byte at @≈9. The §1.1 ~1.0M line is at the ledger's @≈15 (≈63 ops/byte); **at game-scale @≈27 the deposit is ~110 ops/byte ⇒ ~1.8M** — the @-sensitivity is the §1.1 @-note, not a separate risk. A custom mov-table (set fixed hex = runtime value in 1 dispatch/nibble, vs `hex.mov`'s zero+xor) could cut it — R1.
+- **Time:** deposit ≈ 2 nibble dispatches ≈ **~4@/byte** (STL `hex.mov 2` proxy = `2·(2@)`; the real low-nibble + custom +4-offset deposit is ~comparable). Small probe: ~53 ops/byte at @≈9. **At @ = 25 the deposit is ~100 ops/byte ⇒ ~1.6M for 16K px** (the §1.1 Pixel-stores line). The custom *set-into-clean* mov-table (1 dispatch/nibble vs `hex.mov`'s zero+xor) is **optimization #5** (§1.1.2) — cuts it to ~2.5@, ~0.6M profit (×2 at bpp=4).
 - **Space:** 16K-op framebuffer + the unrolled column code (**R-2** watch).
 - **Testing:** deposit byte-exact incl. the high nibble; golden frames.
 - **Open Qs:** D2 final (a vs b) settled by R1; deposit cost (R-1).
@@ -365,7 +389,7 @@ Per handoff §H / §3.5. Top to bottom:
   - **Framebuffer:** pixel `(px,py)` = packed byte at `screen_addr + (px + py·W)·dw`, masked to bpp. One byte/op, stride `dw`, row-major.
   - **Palette:** entry `k` = 3 packed bytes R,G,B at `palette_addr + 3k·dw`.
   - Keyboard (input side of `pc`): non-blocking, tic-based — one status poll (`0x0` none / `0x8` up / `0x9` down) then one keycode byte on events; keycodes ASCII-like `<0x80`, arrows/shift/ctrl/alt `0x80–0x86` (§1.1).
-- **Present-path rationale — memory-hook (0x03) over raw-stream (0x05):** *decisive reason = render order ≠ scan order.* The raw stream demands W·H bytes in **row-major** order; DOOM/BSP renders **column-major + front-to-back** with overdraw and multi-segment columns, so pixels are produced out of scan order. The framebuffer decouples render order from scan order; 0x03 then scans out the finished buffer for ~free (~70 ops/frame). *Per byte (@-invariant comparison):* raw output ≈ **~2@** vs deposit ≈ **~4@** — so raw output *is* ~2× cheaper per pixel, BUT that only helps if you emit directly row-major with **no** framebuffer (forfeits incremental `frac+=step` column sampling, and is impossible for multi-segment BSP columns). *With* a framebuffer (which BSP requires), 0x03 (deposit + ~70/frame) beats 0x05 (deposit + ~2@/px ⇒ +~0.5M/frame at @≈15, more at @≈27). So 0x03 is strictly better here.
+- **Present-path rationale — memory-hook (0x03) over raw-stream (0x05):** *decisive reason = render order ≠ scan order.* The raw stream demands W·H bytes in **row-major** order; DOOM/BSP renders **column-major + front-to-back** with overdraw and multi-segment columns, so pixels are produced out of scan order. The framebuffer decouples render order from scan order; 0x03 then scans out the finished buffer for ~free (~70 ops/frame). *Per byte (@-invariant comparison):* raw output ≈ **~2@** vs deposit ≈ **~4@** — so raw output *is* ~2× cheaper per pixel, BUT that only helps if you emit directly row-major with **no** framebuffer (forfeits incremental `frac+=step` column sampling, and is impossible for multi-segment BSP columns). *With* a framebuffer (which BSP requires), 0x03 (deposit + ~70/frame) beats 0x05 (deposit + ~2@/px ⇒ **+~0.8M/frame at @ = 25**). So 0x03 is strictly better here.
 - **Data & layout:** command bytes only; reads F4's framebuffer + H4's palette in memory.
 - **Time:** present ~70 fj-ops/frame; poll ~tens — negligible.
 - **Space:** negligible.
@@ -395,7 +419,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 ## 7. Risks (handoff §10, live)
 
-- **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **Two compounding optimisms were corrected in S2:** (i) the margin is **@-proportional** (§1.1 @-note) — only ~1.0–1.7× at @≈15, over budget at @≈27; and (ii) the per-pixel line was **~2–4× under-counted** — it omitted the DDA `frac+=step` add and the surface select (§1.1.1, reconstructed from the verified STL macro costs). Net: 160×100 textured @25 needs the **mandatory** per-pixel optimizations (narrow/fraction-accumulator DDA, early-exit/`hex.sign` select) **and** likely the fallbacks at game-scale @. **Top R-1 tasks: measure @ *and* the real per-pixel DDA cost.** Fallbacks: flat-shaded / flat-colored floors / 12.5 fps / bpp=4.
+- **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **At the @ = 25 working point the optimized frame is ~12–14M — *over* the 11.2M budget at full fidelity** (§1.1): two compounding optimisms were corrected in S2 — the budget is **@-proportional** (§1.1 @-note) and the per-pixel line was **~2–4× under-counted** (the DDA + select, §1.1.1). 160×100 textured @25 closes only by applying the **§1.1.2 top-6 optimizations** (~4–5M profit → ~8–9M, ~1.3× margin) — #1–2 (fraction-accumulator DDA, `hex.sign` select) are mandatory just to reach the 9.2M per-pixel baseline. **Top R-1 tasks: measure @ *and* the real per-pixel DDA cost.** Fallbacks if @ ≫ 25 or the opts underdeliver: flat-colored floors / flat-shaded / 12.5 fps / bpp=4.
 - **R-2** — Assembler scalability is load-bearing (column-unroll + mega dispatch tables). Measure assemble time + `.fjm` size at game scale (S5.1/S5.3); relief valve = design (a) column buffer.
 - **R-3** — Span vs flat path: power-of-two padding can silently overflow → paged (~2.5× slower). Guards: span ledger + `storage_mode` assertion.
 - **R-4** — D3 encoding tension (hex-memory pixels vs packed-byte device read) — resolve in this doc, not in code.

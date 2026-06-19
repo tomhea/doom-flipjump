@@ -122,7 +122,7 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
   `@` is *not* comparable to a raw-ops figure without conversion (contradiction-hunt §6).
 - **w / dw / dbit** — word width (=**32**, confirmed: 16.16 fits one word) / `2w` (one op) / `w` (data-bit offset).
 - **nibble / hex / byte** — a `hex` = 4 data bits; a packed byte = 8 data bits in one op; register-form byte = two `hex` ops (low, then `+dw`). The two byte encodings do **not** interchange (see flipjump-dev skill).
-- **Fixed-point** — Q-format: 16.16 = `n=8,f=4`; 8.8 = `n=4,f=2`. Signed; compare with `hex.scmp`, never `hex.cmp` (§3.5).
+- **Fixed-point** — Q-format: 16.16 = `n=8,f=4`; 8.8 = `n=4,f=2`. **Signed-compare ladder (cheapest first, verified S2):** `hex.sign n` = **`@-1` (O(1), reads only the MSB)** for a *pure sign* test (is `x<0` / did it underflow) — use this wherever only the sign matters; `hex.scmp n` = **`n(7@+8)`** for a true two-operand signed *magnitude* compare (`a<b`); **never `hex.cmp` on signed values** (correctness — §3.5). Note `hex.cmp n` itself *early-exits* (`m(3@+8)`, `m` = count of differing high-nibble prefix), so unsigned compares of values that diverge high (e.g. screen coords) cost ~`3@`, not `3n@`.
 - **Static store** — a framebuffer write to a *compile-time-known* address. The runtime-value byte deposit ≈ 2 nibble-dispatches ≈ **~4@/byte** (STL `hex.mov 2` = `2·(2@)`; the real packed deposit adds the +4-offset hi-nibble table, ~comparable) — i.e. ~110 ops at the game-scale @≈27 (§A), ~53 ops in a small probe at its @≈9. Contrast a runtime-address pointer write (`write_byte` ≈ **41@**). *(The handoff §A "~7@" single-byte-write estimate is superseded.)*
 - **Dispatch-LUT** — the `hex.xor`-jumper table idiom (`tables_init.fj`): **~4@ per lookup** (STL `jump_to_table_entry` = `4@+4`, plus a cheap ~`log(n)/2`-**fj-op** in-table traversal; STL `hex.or` = `4@+10` end-to-end) — so **~9–10× cheaper than a `read_byte` pointer read** (`33@+173`). The cost is in **@** (scale-invariant): ~110 ops/lookup vs ~1,064 at game-scale @≈27; a small probe gives ~46 ops/lookup at its @≈9 (`storage_mode=flat`) — same `4@` structure, smaller @. One dispatch sets a *fixed-address* hex = a *runtime* value, so it is the pointer-free deposit primitive. *(The handoff §3.2 "~10@/lookup" double-counted the cheap fj-op traversal as @-units; the dispatch core is ~4@. **@-vs-ops:** never compare a game-scale @-figure to a small-program ops-figure — see §1.1's @-note.)*
 - **`P_Random` / determinism** — the game uses **no true RNG**. DOOM's "randomness" (combat/AI, R3+) is a deterministic 256-byte `rndtable` + advancing `rndindex` — a byte-LUT. The whole game is deterministic, which is *required* by D12 (bit-exact + replay). R2 uses no randomness at all.
@@ -200,7 +200,7 @@ Concrete spans are tracked in the **§1.2 span ledger** (sizes filled by R0; pad
 Per handoff §H / §3.5. Top to bottom:
 
 1. **Host unit tests (Python)** — WAD parser, LUT/dispatch generator, map/texture compilers, reference model. `pytest`.
-2. **Per-macro fj tests** — TDD, `--werror`, byte-exact via `flipjump.assemble_and_run_test_output`, **a boundary input per behavior path** (single green fixture proved insufficient 3× in the catalog), `hex.scmp` for anything signable.
+2. **Per-macro fj tests** — TDD, `--werror`, byte-exact via `flipjump.assemble_and_run_test_output`, **a boundary input per behavior path** (single green fixture proved insufficient 3× in the catalog), the §2 signed-compare ladder (`hex.sign`/`hex.scmp`, never `hex.cmp`) for anything signable.
 3. **Per-table generated tests** — each generated `.fj` table diffed vs a host reference on **every entry** (not just samples) **and** a **call-twice-per-entry** check (#8: result-reg/jumper cleanup); over-aligned variants too.
 4. **Golden-frame renderer tests** — headless `PcIO.headless(events_file, frames_dir)` / `InMemoryScreen`; hash + diff `SCREEN→PNG` vs host reference.
 5. **Headless scripted-replay E2E** — scripted key-event file drives movement/collision/fire; player state must match the reference exactly; measured fps (present-log) meets the tier.
@@ -337,7 +337,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Purpose:** BSP front-to-back walk (D1) → textured wall columns + floor/ceiling spans, lit (D11), into the 3D-view rect.
 - **Supplies:** `render_3d_view` (the §E pass), `draw_column`/`draw_span` (body chosen by the `TEXTURED` flag).
 - **Depends/related:** H3 (map), F3 (LUTs), F4 (framebuffer), F2 (math); first pass of the §E pipeline.
-- **Assumes:** front-to-back no-overdraw (upholds U10); per-column colormap select (D11); scale via reciprocal LUT (**no runtime divides**); 16.16 (D6); `hex.scmp` on signed deltas.
+- **Assumes:** front-to-back no-overdraw (upholds U10); per-column colormap select (D11); scale via reciprocal LUT (**no runtime divides**); 16.16 (D6); §2 signed-compare ladder on signed deltas (`hex.sign` for the per-pixel select's sign tests, `hex.scmp` only for true magnitude compares).
 - **Data & layout:** per-column scratch (top/bottom/colormap-sel) in fixed registers; reads map streams sequentially.
 - **Time:** column math + BSP walk ~1.5–3M — the dominant consumer alongside stores/reads.
 - **Space:** unrolled column code (**R-2**); visplane + clip arrays.

@@ -21,8 +21,9 @@ Your job starts at **Stage 5 — execution**, first item **M0**. The *design is 
 
 ## 1. Where things stand
 
-- **Repo:** `tomhea/doom-flipjump` (this repo). **Branch: `stage-1-design`** — `DESIGN.md` lives here, not on `main`.
-  First thing: `git branch --show-current`.
+- **Repo:** `tomhea/doom-flipjump` (this repo). **Branch: `stage-1-design`** — `DESIGN.md` lives here, not yet on
+  `main`. First thing: `git branch --show-current`. **Pre-M0 merges it to `main`** (§10.2) before execution
+  branches start — the design stages were branch-only by design; Stage 5 needs the docs on `main`.
 - **Stage 1 (design doc): complete.** D1–D14 resolved; D15 set as a policy (deciding-detail at S5.0).
 - **Stage 2 (contradiction hunt): complete & re-approved (2026-06-20).** A fresh adversarial re-pass over the expanded
   doc fixed 4 contradictions (commits #20–23); the load-bearing per-op costs were **re-derived from the installed
@@ -67,7 +68,8 @@ Stage 4 is **done**; the authoritative ladder is **`DESIGN.md` §10** (M0–M15 
 per-milestone cr-tdd ceremony, the R4–R6 CR-rule tuning, the two gates). Do not re-derive it here. The shape:
 
 ```
-M0   workflow + toolchain scaffold (cr-tdd infra, src-layout, probe harness, CI py3.13)   ← START HERE
+pre  land stage-1-design → main; bootstrap branch protection + cr-rules.md + crist.md (direct)  ← START HERE
+M0   workflow + toolchain scaffold (src-layout, probe harness, CI py3.13) — first looped PR
 M1   config.py SSOT → fj_consts.fj + F1 memory_map.fj + span-invariant test home
 M2   [S5.0a] adversarial PR #1 CR-loop → fixed_point.fj (F2) + fixedpoint.py mirror (D15)
 Sᵤ   SPIKE (early, not merged): full-unroll assemble-time/size scaling — de-risk D2/R-2
@@ -112,7 +114,7 @@ their numbers land in-doc before anything downstream starts.
 - **`@`-vs-ops discipline.** Never compare a game-scale `@=25` figure to a raw small-program ops figure without
   converting (the doc's `@`-note).
 - **One logical change per commit**, message style `Stage N: … (#n)` (last was #24). Expect the harmless CRLF warning.
-- **Owner approves at each gate.** The Stage-4 slicing is approved (§10), so Stage 5 is open. **M0 is the next
-  action** — it sets up the cr-tdd infra the rest of the ladder assumes. Execution work happens on per-milestone
-  `mN-…` branches off `main` (M0 establishes branch protection); the design branch `stage-1-design` holds the
-  docs until they merge.
+- **Owner approves at each gate.** The Stage-4 slicing is approved (§10), so Stage 5 is open. **The next action
+  is Pre-M0** (`DESIGN.md` §10.2): **merge `stage-1-design` → `main`** (so the docs live where the loop branches
+  from) and bootstrap branch protection + `docs/cr-rules.md` + `.claude/agents/crist.md` as direct commits.
+  **Then M0** — the first PR to run the full loop. Execution then branches off `main` (`mN-…` per milestone).

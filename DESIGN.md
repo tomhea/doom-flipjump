@@ -326,7 +326,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### H3 — Map compiler
 - **Purpose:** Compile a WAD level into baked `.fj` BSP structures the fj renderer walks.
-- **Supplies:** `compile_map(wad, level) -> .fj` emitting NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES as sequential packed streams + the root-node entry point. **Emit mode (opt #7, §1.1.3):** either packed **data streams** (small, ~42@/byte to walk) or **BSP-as-code** — each node compiled to a code block with its partition line as compile-time constants (no per-node reads; side test becomes a `mul_const`). Code is ~1.5M/frame cheaper but costs program size + assemble time (R-2) and recompiles per level; the generator supports both, R1 picks per the measured read cost.
+- **Supplies:** `compile_map(wad, level) -> .fj` emitting NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES as sequential packed streams + the root-node entry point. **LINEDEFS/VERTEXES double as F6's line-collision data** (+ an optional small BLOCKMAP broadphase) — there is no tile grid (D1 = BSP); F6's S0 collision tests linedefs, not tiles. **Emit mode (opt #7, §1.1.3):** either packed **data streams** (small, ~42@/byte to walk) or **BSP-as-code** — each node compiled to a code block with its partition line as compile-time constants (no per-node reads; side test becomes a `mul_const`). Code is ~1.5M/frame cheaper but costs program size + assemble time (R-2) and recompiles per level; the generator supports both, R1 picks per the measured read cost.
 - **Depends/related:** H1; consumed by F5; mirrored by H5.
 - **Assumes:** D1 = BSP; 16.16 coords (D6); coords fit w=32; F5 reads streams with `*_and_inc` (§3.4).
 - **Data & layout:** sequential streams in the data region (no pow2 align); span = Σ lump sizes (§1.2).
@@ -433,14 +433,14 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### F6 — Game loop & tic
 - **Purpose:** The 1:1 loop (D9): poll → update `keydown[]` → S0 sim → render → present, every frame.
-- **Supplies:** the **program entry / mainline init** — `main: stl.startup_and_init_all` (§3) runs once before the loop, **supplying the `hex.init` + `stl.ptr_init` + `stl.stack_init 100` that F2/F3/F5/H2 *assume*** (hex truth tables for every dispatch/hex op, pointer machinery for the §3.4 sequential stream reads, and the call stack for F5's BSP upper levels). Then `main_loop`, `poll_input`, `sim_tic` (S0: turn / move / wall-slide collide), present call. **Level handling (multi-level binary):** a **level table** — one entry per baked level (E1M1–E1M9) holding its BSP-as-code root (+ later thing-list, par, sky) — indexed by `current_level`; `goto_level N` sets `current_bsp_root` + resets player state (a 9-entry dispatch, once per switch). **Per-frame cost: one indirect jump** to `current_bsp_root` (everything else — textures/LUTs/renderer/player — is shared, constant-address; §1.2 multi-level note). Switch triggers: **progression** (exit linedef/switch → `current_level++`, the DOOM-faithful default, S1-era logic) and a **select menu** (episode/level — F8/R3, or a minimal "warp 1–9" debug build early).
+- **Supplies:** the **program entry / mainline init** — `main: stl.startup_and_init_all` (§3) runs once before the loop, **supplying the `hex.init` + `stl.ptr_init` + `stl.stack_init 100` that F2/F3/F5/H2 *assume*** (hex truth tables for every dispatch/hex op, pointer machinery for the §3.4 sequential stream reads, and the call stack for F5's BSP upper levels). Then `main_loop`, `poll_input`, `sim_tic` (S0: turn / move / wall-slide collide), present call. **Collision is line-based, NOT tile-based — D1 (BSP, real geometry) supersedes §D's grid-era "destination tiles" wording:** there is no tile map; S0 tests the player's attempted move against nearby **linedefs** (DOOM's actual model, simplified to axis-separated wall-slide) via a broadphase over the current subsector's segs (or H3's optional small BLOCKMAP), using signed side-tests + adds — still the cheap op class, but its real cost is **re-budgeted at M14 (R-1)**, not assumed to be the old tile-lookup figure. **Level handling (multi-level binary):** a **level table** — one entry per baked level (E1M1–E1M9) holding its BSP-as-code root (+ later thing-list, par, sky) — indexed by `current_level`; `goto_level N` sets `current_bsp_root` + resets player state (a 9-entry dispatch, once per switch). **Per-frame cost: one indirect jump** to `current_bsp_root` (everything else — textures/LUTs/renderer/player — is shared, constant-address; §1.2 multi-level note). Switch triggers: **progression** (exit linedef/switch → `current_level++`, the DOOM-faithful default, S1-era logic) and a **select menu** (episode/level — F8/R3, or a minimal "warp 1–9" debug build early).
 - **Depends/related:** F7 (poll/present), F5 (render), F4; S1/S2 flag-gated (D7, §D). **Init order:** `stl.startup_and_init_all` is the first mainline op; the generated dispatch tables are static CODE laid out *below* `main` (jumped over by `;main`, §3) — present at assemble time, no runtime init — so every component's "tables init'd before first use" assumption reduces to "the startup ran," which it always has by the time the loop body executes.
 - **Assumes:** no timer device — frame counter is the clock; tic:render 1:1; `keydown[]` in registers; signed deltas via `hex.scmp`; **BSP recursion depth ≤ the `stl.stack_init 100` stack (E1M1 depth is well under 100; F5 also strips the bottom levels off the stack via tiered `fcall`)**. **Fully deterministic: no true RNG.** R2 (render + S0) uses no randomness at all. When combat/AI land (S1/S2, R3+) they use DOOM's deterministic `P_Random` — a hardcoded 256-byte `rndtable` + an advancing `rndindex` (`rndtable[++rndindex & 0xff]`) — emitted as a byte-LUT via H2, read via F3. This *preserves* D12 (a true RNG would break bit-exact golden frames + deterministic replay); H5 uses the same table + index so sequences match exactly.
-- **Data & layout:** player state (pos/angle/eye) + `keydown[]` in fixed registers.
-- **Time:** S0 ~few K ops/tic (cheap class: tile lookups, signed compares, adds).
+- **Data & layout:** player state (pos/angle/eye) + `keydown[]` in fixed registers; reads H3's linedef/blockmap collision data (no tile map).
+- **Time:** S0 ~few K ops/tic (cheap class: linedef side-tests, signed compares, adds — broadphase-bounded; M14/R-1 measures the real number).
 - **Space:** small.
 - **Testing:** scripted-replay E2E — sim state matches H5 exactly after a key sequence (D12); collision boundary cases.
-- **Open Qs:** collision model (axis-separated slide, §D); S1/S2 scope (D7); level-table layout + progression vs select-menu timing (multi-level, this review).
+- **Open Qs:** collision broadphase shape (subsector-segs vs small BLOCKMAP) + its real cost (line-based axis-separated slide, M14/R-1 — *not* §D's superseded tile model); S1/S2 scope (D7); level-table layout + progression vs select-menu timing (multi-level, this review).
 
 #### F7 — Present layer
 - **Purpose:** Drive the screen device over the output stream (init/palette/present/input).
@@ -610,13 +610,27 @@ never `hex.cmp` — §3.5; every generated table tested **every-entry + call-twi
 of truth** (constants only via `config.py`/`fj_consts`; LUT values only via `tables.py`/`fixedpoint.py` shared
 by emitter **and** oracle — no duplicated constants); R7 naming; R8 = `--werror`-clean, zero new warnings.
 
+**WAD & artifact policy (closes the dev/CI/redistribution split, D8 — resolves the licensing gap).** The
+**committed golden hashes, all CI runs, and every `versions/` artifact are Freedoom-built** (redistributable):
+`versions/` is whitelisted against §9's `*.fjm` ignore and holds the *Freedoom* `.fjm`; the dev-only doom1.wad
+build stays in gitignored `build/`. **E1M1-slot geometry exists in both** doom1.wad (shareware — dev eyeballing
+only) and **Freedoom Phase 1** (the golden/CI oracle source), so goldens are generated **and** checked against
+**Freedoom** — doom1.wad is never the oracle input (its geometry differs, so its frames would never match the
+committed Freedoom hashes). The reference model (H5) is WAD-agnostic; bit-exactness is per-WAD.
+
 ### 10.2 The ladder
 
 **Phase A — Foundation (workflow + host single-source-of-truth)**
-- **M0** *(infra)* — cr-tdd scaffold (`docs/cr-rules.md` w/ the R4–R6 tuning above, `crist.md`, branch
-  protection, `versions/`, `docs/spikes.md`), src-layout, `scripts/test`+`build`, probe harness
-  (`op_counter`/`storage_mode`, empty-loop baseline), CI pinned **py3.13**. **Exit:** CI green;
-  `storage_mode==flat` asserted on a hello-world `.fjm`; `metrics.json` emitted; tag `v0.M0`.
+- **Pre-M0 (bootstrap → `main`, direct commits — *no loop yet*).** **Merge `stage-1-design` → `main`** so the
+  design + ladder live on `main` (the rest of the ladder branches off `main`; until now the docs were branch-
+  only). Then bootstrap the cr-tdd infra that the loop *needs to already exist* — branch protection (skill §7),
+  `docs/cr-rules.md`, `.claude/agents/crist.md` — as direct commits, since they can't go through a loop that
+  doesn't exist yet. **M0's PR is the first to run the full loop.** (This resolves the "branch off `main`" vs
+  "docs live on `stage-1-design`" contradiction.)
+- **M0** *(infra)* — cr-tdd scaffold (src-layout, `scripts/test`+`build`, probe harness
+  (`op_counter`/`storage_mode`, empty-loop baseline), `versions/`, `docs/spikes.md`), CI pinned **py3.13**
+  (local dev also needs py3.13 — pygame/Windows-py3.14, §H). **Exit:** CI green; `storage_mode==flat` asserted
+  on a hello-world `.fjm`; `metrics.json` emitted (thresholds TBD until baselines — see M11c); tag `v0.M0`.
 - **M1** *(F1)* — `config.py` SSOT → `build/generated/fj_consts.fj`; `memory_map.fj` consumes it;
   `test_build` span/alignment-invariant skeleton. **Exit:** config↔fj_consts round-trips; `memory_map.fj`
   assembles; span-invariant test home live.
@@ -629,20 +643,26 @@ scaling: `rep(N)` of a trivial fixed-address stub, N=100→16,000. **De-risks D2
 commits to a memory map that assumes full-unroll works. Outcome → `docs/spikes.md`.
 
 **Phase B — Host pipeline + tables (R0)**
-- **M3** *(S5.2 / H1)* — WAD parser + fixtures (doom1.wad dev / Freedoom CI). **Exit:** lump counts/sample
-  records vs fixtures; `fetch_doom1`.
+- **M3** *(S5.2 / H1)* — WAD parser + fixtures (doom1.wad dev / Freedoom CI); **commit a minimal hand-built
+  test WAD** (or select the smallest real level) as the fast-loop R1 bring-up map (D8). **Exit:** lump
+  counts/sample records vs fixtures; `fetch_doom1`; the small test map parses.
 - **M4** *(S5.0b / shared)* — `tables.py` pure value fns (lift PR #1 value-kernel, CR'd). **Exit:** value fns
   match hand-computed + DOOM samples (shared by emitter **and** oracle).
 - **M5** *(S5.1 / H2)* — dispatch-code emitter (per-entry **#5** construction — *not* `hex.set`; per-result-
   nibble override; +4-offset deposit table; over-align; 16^x); data-table emitter kept as §3.4 fallback.
   **Exit:** small dispatch table passes **every-entry + call-twice (#8)**, both modes; deposit table
   byte-exact; size/assemble in metrics.
-- **M6** *(F3)* — fj-side LUT access (jumper idioms, cosine-offset, multi-nibble index) on a generated table.
-  **Exit:** read byte-exact vs `tables.py` on boundary/wrap; ~4@/lookup probed.
-- **M7** *(H3)* — map compiler (BSP streams + BSP-as-code #7 + level table) on a small map. **Exit:** compiled
-  BSP matches WAD counts/records; both emit modes.
-- **M8** *(H4)* — texture/colormap/palette compiler → dispatch tables. **Exit:** per-table tests
-  (texel/colormap/palette); **E1M1 texture span MEASURED → §1.2** (OQ8/R-3); downscale lever exercised if
+- **M6** *(F3 — non-texture idioms)* — fj-side LUT access (trig/recip/yslope/viewangle jumper idioms,
+  cosine-offset, multi-nibble index) on the M5-generated tables. **`sample_texture` is *deferred to M8***
+  (it needs the texture table, which M8 builds). **Exit:** read byte-exact vs `tables.py` on boundary/wrap;
+  ~4@/lookup probed.
+- **M7** *(H3)* — map compiler (BSP streams + BSP-as-code #7 + level table) on the M3 small test map (then
+  E1M1). **Also emits F6's collision data** — LINEDEFS/VERTEXES (+ optional small BLOCKMAP broadphase);
+  **line-based, no tile grid** (D1). **Exit:** compiled BSP + collision data match WAD counts/records; both
+  emit modes.
+- **M8** *(H4)* — texture/colormap/palette compiler → dispatch tables; **completes F3 `sample_texture`**
+  against the texture table (closes the F3 split). **Exit:** per-table tests (texel/colormap/palette) +
+  `sample_texture` byte-exact; **E1M1 texture span MEASURED → §1.2** (OQ8/R-3); downscale lever exercised if
   over budget.
 - **M9** *(H5)* — reference model (oracle), imports `tables.py`/`fixedpoint.py`. **Exit:** reproduces a
   hand-checked frame + sim step; bit-exact discipline structural.
@@ -651,13 +671,19 @@ commits to a memory map that assumes full-unroll works. Outcome → `docs/spikes
   ledgers updated in-doc, R-3 green. *Owner approval gate.*
 
 **Phase C — Renderer vertical slice + the R1 gate**
-- **M11a** *(F4)* — framebuffer + deposit primitive (M5 table) + one fixed-address column fill. **Exit:**
-  golden solid-column frame vs H5; deposit cost + **real @** measured.
+- **M11a** *(F4 + F7-present)* — framebuffer + deposit primitive (M5 table) + one fixed-address column fill;
+  **F7's present half** (`init_screen` / `set_palette` / `update_screen` 0x03) + headless capture (needed to
+  emit the golden PNG — only F7's *input poll* waits for M14). **Exit:** golden solid-column frame vs H5;
+  deposit cost + **real @** measured.
 - **M11b** *(F5)* — single textured wall column (DDA + select + sample + colormap apply). **Exit:** golden
   textured column bit-exact vs H5; **per-pixel DDA cost measured (R-1)**.
 - **M11c — R1 GATE / D2** — bake-off: full-unroll (b) vs column-buffer (a) at WIDTH scale — ops/frame +
-  assemble + size. **Exit:** **D2 resolved-by-measurement, written in-doc**; §1.1 per-pixel ledger + real @
-  reconciled; metrics thresholds; R-1/R-2 status updated. *Owner approval gate before R2.*
+  assemble + size. **Pre-committed decision rule:** choose **(b)** iff full-build *assemble time* ≤ the TDD-
+  loop budget **and** `.fjm` size ≤ the span/disk budget **and** (b)'s ops/frame ≤ (a)'s; **else (a)** (the
+  relief valve). The three concrete thresholds are **set here from M10's measured baselines** and written into
+  `metrics.json` as the R-2/R-3 CI guards (until set, the only guard is `storage_mode==flat` + span<64 MB).
+  **Exit:** **D2 resolved by the rule, written in-doc** with the numbers; §1.1 per-pixel ledger + real @
+  reconciled; thresholds committed; R-1/R-2 status updated. *Owner approval gate before R2.*
 
 **Phase D — R2 full renderer + sim (first playable)**
 - **M12** *(F5)* — full BSP front-to-back walk: all visible walls, clip arrays, reciprocal-LUT scale,
@@ -665,10 +691,16 @@ commits to a memory map that assumes full-unroll works. Outcome → `docs/spikes
   depth measured.
 - **M13** *(F5)* — floors/ceilings (visplane spans, yslope, 2-coord DDA), full-res textured. **Exit:**
   textured floors+ceilings bit-exact; **full-frame fps reported vs §1 curve** (~14M ⇒ ~20 fps).
-- **M14** *(F6/F7)* — game loop + S0 sim (turn/move/wall-slide) + present; auto-warp. **Exit:** headless
-  interactive walk; **replay sim-state bit-exact vs H5**; fps reported.
+- **M14** *(F6 + F7-input)* — game loop + **F7's input poll** (present already landed M11a) + S0 sim
+  (turn/move + **line-based collision** against M7's linedefs — *not* tiles, D1; axis-separated slide) +
+  auto-warp. **Exit:** headless interactive walk; **replay sim-state bit-exact vs H5**; collision cost
+  re-budgeted (R-1); fps reported.
 - **M15 — R2 DELIVERABLE** — multi-level binary: 9 E1 levels + level table + `goto_level` + state reset.
-  **Exit:** all-9 `.fjm`, switch works, flat, span<limit; **first playable**; tag + archived `.fjm`.
+  **Re-validate @/fps at full-program scale** (U7: @ grows with size, so the M11c slice @ was a lower bound —
+  confirm the budget still holds for the whole program; trip the §2 fidelity fallbacks if not). **Exit:** all-9
+  **Freedoom-built** `.fjm` (redistributable — the dev doom1.wad build stays gitignored), switch works, flat,
+  span<limit; full-scale @/fps reported; **first *walkable* version** (no doors/enemies/HUD yet, per D7);
+  tag + archived `.fjm` in `versions/`.
 
 **Phase E — R3 (flag-gated; re-sliced at R2 exit using measured budgets)**
 - **M16+** — S1 doors+hitscan · S2 sprites/entities · F8 HUD/status-bar/menu/text+glyphs · D9 device-side
@@ -680,3 +712,27 @@ commits to a memory map that assumes full-unroll works. Outcome → `docs/spikes
 **M10 (R0)** fills the real §1.2 span / §1.3 entry ledgers before the renderer commits to the memory map;
 **M11c (R1)** decides D2 from measured ops/assemble/size + real @ before R2 builds the full renderer. Each
 ends in an owner approval gate; nothing downstream starts until the gate's measurement is in-doc.
+
+### 10.4 Cross-cutting components & adversarial-review resolutions
+
+**Dissolved components (distributed, not dropped).** **H6** (build / assemble-list ordering = the §3 hot-low,
+largest-alignment-first memory-map realization) is built incrementally: `scripts/build` stub at M0, the full
+ordering exercised at **M10** and re-checked at **M15**. **H7** (golden-compare / per-table runner / replay /
+ops-profiler) lands per-need: probe at M0, per-table runner at M5, golden compare at M9/M11a, replay at M14.
+**F9** (debug/diagnostics) = M0's probe harness + on-screen values when first useful (M11+). Each is tested
+under the milestone that builds it; none is a standalone milestone.
+
+**Gaps closed from the §10 self-review (adversarial pass, 2026-06-20):**
+1. **Pre-M0** lands the design on `main` + bootstraps the cr-tdd infra before the loop starts (resolves the
+   "branch off `main`" vs "docs on `stage-1-design`" contradiction).
+2. **WAD/artifact licensing** (§10.1 policy): Freedoom for all golden/CI/`versions/` outputs; doom1.wad dev-only.
+3. **F7 present** moved to **M11a** (the golden PNG needs it); only F7's input poll waits for M14.
+4. **§D collision** corrected to **line-based** in F6/H3 (D1 = BSP ⇒ no tile grid); collision data emitted by H3.
+5. **M11c** carries a **pre-committed (b)-vs-(a) decision rule** + the metric thresholds (set from M10 baselines).
+6. **M15 re-validates @/fps at full-program scale** (U7: the M11c slice @ is only a lower bound).
+7. **F3 `sample_texture`** completes at **M8** (needs the texture table); **M6** does the non-texture idioms.
+8. **Test map** committed at **M3** for fast R1 bring-up; **local dev pinned to py3.13** at M0.
+9. **PR #1's D15 keep-vs-rewrite is one judgment** even though execution spans M2 (`fixed_point.fj`) / M4
+   (value-kernel → `tables.py`) / M5 (data-table emitters): record the single holistic disposition in D15 at M2.
+10. **Spike Sᵤ** measures a *placeholder* stub's unroll multiplier only — the real (fatter) deposit-stub cost
+    still lands at M11c; the spike de-risks the *mechanism*, not the final per-stub number.

@@ -89,7 +89,7 @@ Two structural levers sit *above* this table (they change which pixels pay at al
 biggest single move, a fidelity tradeoff), and the **full-column unroll (D2b)** is what makes the per-pixel
 *address* free in the first place (without it every store is a ~41@ pointer write — §A — which alone would be
 ~10× the deposit line). #1–9 are the *within-pixel*, *within-column*, and *within-BSP* wins on top of those.
-**Owner-agreed (this review): #1–6;** #7–9 emerged from the §1.1.3 rebuild and are roughly as valuable as #3–6.
+**Owner-agreed (this review): #1–8** (incl. the §1.1.4 precision-ledger widths = #8, and **#7 BSP-as-code**); **#9** (incremental scale) recommended, pending. With #1–9 the frame is ~11.4M (~at budget); a fidelity lever (flat-colored floors — owner-leaning — or 12.5 fps) then buys margin.
 
 #### 1.1.3 Column + BSP + sim — rebuilt from the macros (@ = 25)
 
@@ -146,9 +146,11 @@ zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables
 | +4-offset deposit table (D3) | 256 | pow2 pad | ~256 | |
 | Framebuffer | W·H = 160·100 = 16,000 | — | 16,000 | packed bytes, no align |
 | Palette | 256·3 = 768 | — | 768 | |
-| Map/BSP streams | Σ lump sizes (E1M1) | — | TBD | sequential |
+| Map/BSP (now **code**, opt #7) | ~470 nodes × ~40 ops | — | ~0.02–0.06M | replaces the data stream; +assemble time (R-2) |
 | State/scratch registers | small fixed set | — | TBD | hex.vec |
-| **Total** | | | **TBD < 8.4M (R0)** | else raise `--flat-max-words` |
+| **Total (estimate, R0 confirms)** | | | **~2.5–3M ops ≈ 20–24 MB flat RAM** | **< 64 MB limit, ~3× headroom (R-3 holds)** |
+
+**Program size (estimate, R0 measures):** ~2.5–3M ops ⇒ **~20–24 MB runtime flat-memory footprint** (well under the 64 MB / `2²³`-word default limit), and a **~6–10 MB compressed `.fjm`** on disk. **Textures dominate (~85%)** — dispatch-LUT textures trade ~6× space for cheap per-pixel reads (D5); halving texture resolution is the size/assemble lever if needed. **BSP-as-code (#7) adds little *size* (~0.2–0.5 MB) — its cost is assemble *time* (R-2) + per-level recompile.** **No runtime data loading:** FlipJump has no filesystem (only the keyboard input stream), so the **level is baked into `doom.fjm` at assemble time — one binary per level** (R2 = E1M1 only, D8); multi-level = either one `.fjm`/level (relaunch to switch) or all levels in one binary sharing the ~20 MB of textures (a scope decision, not R2).
 
 ### 1.3 LUT inventory & total entry count
 

@@ -44,8 +44,8 @@ below adds/refines its own line as the design firms up.
 
 ### 1.2 Address-span ledger (must sum < chosen `--flat-max-words`; **R-3**)
 
-Power-of-two dispatch-table padding inflates the span — lay out **largest-alignment-first** (§3.3) and
-sum padding here, don't discover it. **OPEN — D10** (concrete memory map). Default flat limit = 2²³ words
+Power-of-two dispatch-table padding inflates the span — lay out **hot-low + largest-alignment-first**
+(§3/#2) and sum padding here, don't discover it. **OPEN — D10** (concrete memory map). Default flat limit = 2²³ words
 (64 MB); raise via `--flat-max-words` / `FLIPJUMP_FLAT_MAX_WORDS` if needed (cost = RAM + ~0.1 s/GB fill,
 zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
 
@@ -93,6 +93,8 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
 **⇒ Unified R2 total ≈ 321,413 entries** — **textures are ~93% of it**; everything else sums to ~21K.
 *Span note (→ §1.2):* entry *count* ≠ span. Wide per-result-nibble tables multiply by result-nibbles (finesine/reciprocal ×8) and per-entry handlers cost ~popcount ops/entry; the **LUT span lands ≈1.5–2M ops** (textures dominate), comfortably under the 8.4M flat limit — the unrolled renderer *code* (R-2), not the LUTs, is the span/assemble pressure.
 
+*Sizing (#1 — bump where it helps):* sizes are **matched to the 160×100/256/32 output**, so more entries are *not* added where they wouldn't show. The **angular/projection tables already out-resolve the 160-column output ~6×** (finesine 4096 = 0.088°/entry vs ~0.56°/column; tantoangle/viewangletox feed a 160-wide result and get re-quantized). The **per-row/col tables are exactly one entry per column/row** (xtoviewangle=W+1, distscale=W, yslope=H). **reciprocal/scale** is the only map-dependent size — **R0 tunes it to E1M1's measured max sightline** (default 4096; bumped freely, LUT span has ~6M ops headroom); near-wall scale smoothness comes from **seg-scale interpolation** (R1), not a bigger table. colormap=32 (owner) and textures=native are at chosen/max fidelity. W/H-dependent tables auto-scale for the 320×200 stretch. *(Override any specific table for more margin.)*
+
 - **fj-op** — one assembled FlipJump op (flip-word + jump-word = `dw` bits). The budget unit.
 - **`@`** — the per-op cost constant (~27 at w=32); grows with total program size (**U7**). A figure in
   `@` is *not* comparable to a raw-ops figure without conversion (contradiction-hunt §6).
@@ -115,32 +117,29 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
 
 ## 3. Memory map (D10)
 
-**Layout principle (§3.3): largest-alignment-first** so pow2 table padding nests instead of summing.
-Dispatch tables are **pad-aligned CODE** (base low-bits zero, entry `k` at `base+k·dw`), so they live in
-the code region; the framebuffer/streams/registers are data (below `stl.loop`). Units: 1 fj-op = `dw` =
-64 bits at w=32 = one 8-byte span-word; default flat limit = 2²³ span-words (64 MB) ≈ **8.4M ops** (raise
-via `--flat-max-words` if needed — cost is RAM + ~0.1 s/GB fill, zero per-op). **Invariant: total span <
-flat limit; `storage_mode == flat` asserted in the harness (R-3).**
+**Layout principle (#2 + §3.3): hot LUTs / framebuffer / buffers at the LOWEST addresses; the entry op jumps over them.** Two goals: **(a) low = cheap** — the per-pixel hot targets (framebuffer, per-pixel dispatch tables, hot buffers) get the smallest addresses, so their `wflip`/store constants are tiny; this *also shrinks the unrolled renderer's compile-time address constants* (a real **R-2** size win). **(b) largest-alignment-first** among the pow2-aligned dispatch tables, so padding nests rather than sums. Dispatch tables are pad-aligned **CODE** (base low-bits zero, entry `k` at `base+k·dw`) — entered only via wflip-jumps, never fall-through; the framebuffer/buffers are data touched by stores/device. The program's **first op `;main` jumps over the whole low region** to the code. Units: 1 fj-op = `dw` = 64 bits at w=32 = one 8-byte span-word; default flat limit 2²³ span-words (64 MB) ≈ **8.4M ops** (raise via `--flat-max-words`). **Invariant: total span < flat limit; `storage_mode == flat` asserted (R-3).**
 
 ```
-0x0   stl.startup + hex.init truth tables          (from stl.startup_and_init_all)
-      [CODE] game loop · BSP walk · unrolled renderer (D2b) · present · input poll
-      [CODE] LUT-access idioms (F3)
-      --- pow2-aligned dispatch tables, LARGEST ALIGNMENT FIRST (CODE) ---
-      texture dispatch table(s)     (D5; align pow2 ≥ texel count — likely the largest)
-      trig: finesine/finecosine/finetangent
-      reciprocal / scale
-      yslope · viewangletox / xtoviewangle
-      colormaps                     (D4 per-entry handlers; byte results)
-      +4-offset packed-byte deposit table (256 entries, D3)
-stl.loop   (halt)
-      --- DATA (below stl.loop) ---
-      framebuffer        (W·H = 16K packed-byte ops; no pow2 alignment needed)
-      palette            (256 × 3 packed bytes)
-      map/BSP streams    (NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES — sequential)
-      state/scratch      (player pos/angle/eye; per-column top/bottom/colormap-sel scratch;
-                          keydown[]; door/entity state [flag-gated]; precision ledger registers)
-      stack              (minimal — tiered fcall/fret is stackless §2.1; stl.stack only for the BSP walk's upper levels, F5)
+0x0   ;main                                ENTRY: jump over the low region to the code
+      ── LOW ADDRESSES — hot, cheapest wflip/store targets ──
+      framebuffer (screen)       W·H = 16K packed bytes   (per-pixel store targets)
+      hot buffers                per-column scratch (top/bottom/colormap-sel) · player
+                                 state · keydown[] · BSP clip array
+      palette                    256×3 bytes (device-read)
+      ── pow2-aligned dispatch tables: hottest + largest-alignment first (CODE) ──
+      texture table(s)           per-pixel; ~300K → largest, sets the alignment
+      colormap                   per-pixel; over-aligned (#3)
+      +4-offset deposit table    per-pixel (256)
+      finesine(cos=offset) · reciprocal/scale · viewangletox · xtoviewangle ·
+        tantoangle · distscale · yslope                    (per-column)
+      hex.init truth tables      heavily used → also kept low (exact entry/startup
+                                 structuring is an R1 detail)
+main: stl.startup_and_init_all   CODE begins right after the tables
+      [CODE] game loop · BSP walk · unrolled renderer (D2b) · present · input · F3 idioms
+      stl.loop   (halt)
+      ── HIGHER / COLD ADDRESSES ──
+      map/BSP streams            NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES (seq.)
+      P_Random rndtable (R3) · stack (BSP upper levels only, F5)
 ```
 
 Concrete spans are tracked in the **§1.2 span ledger** (sizes filled by R0; padding waste summed there).
@@ -164,7 +163,7 @@ Concrete spans are tracked in the **§1.2 span ledger** (sizes filled by R0; pad
 - **D7 — Feature scope at 160×100.** *RESOLVED → first playable (R2) = **textured 3D view (walls + floors/ceilings) + S0 walk/collide**, auto-warp into the level.* Flag-gated for R3+: S1 doors+hitscan, S2 sprites/enemies, HUD/status bar, menus, text, demo playback. Rationale: prove the renderer + the §1.1 budget (the hard part) first; matches the §8 ladder. The compositor/pass pipeline and `blit_rect`/glyph API (§E, F8) are **stubbed flag-gated from day one** so later passes drop in without touching the 3D core.
 - **D8 — Maps & assets.** *RESOLVED.* **Asset source:** shareware `doom1.wad` for development; **Freedoom** WADs for anything redistributed (CI fixtures / golden frames). **Map ambition:** R1 renderer bring-up + measurement on a small (hand-built or smallest real) BSP map to keep the assemble/span/measure loop fast; **real E1M1 is the R2 target.** Entity counts: deferred to D7's S2 tier (sprites flag-gated; not in R2).
 - **D9 — Frame pacing.** *RESOLVED → **tic:render 1:1, budget-bound**.* One input poll = one tic = one rendered frame. There is no timer device (§1.1), so the program cannot self-pace to wall-clock time; "25 fps" = "hold ops/frame < 11.2M so the native engine *delivers* ~25 fps on the reference machine." Accept and **report** the measured wall-clock fps (present-log). Sim/render decoupling (render 1-of-N tics, G21) is a deferred hedge, not built in R2. **If frames run too fast** (likely on the native engine): wall-clock pacing can't be done in-program (no timer); the clean fix is a **device-side fps cap** — the screen device sleeps on present if too little wall-time elapsed ("aim for X fps"). Verified *not* in the stock pygame device ⇒ a candidate `fj==1.5.1` device extension (§2.1). R2: run uncapped + report fps; add the cap for a playable interactive build.
-- **D10 — Memory map.** *RESOLVED (structure) → see §3 + the §1.2 span ledger.* Largest-alignment-first: hex.init tables → unrolled renderer code → pow2-aligned dispatch tables (texture first, then trig/recip/yslope/viewangle/colormaps/+4-offset) → `stl.loop` → framebuffer / palette / map streams / scratch / stack. Concrete spans filled by R0; flat-limit invariant guarded by the span ledger + `storage_mode` assertion.
+- **D10 — Memory map.** *RESOLVED (structure) → see §3 + the §1.2 span ledger.* **Hot-low + largest-alignment-first (#2):** entry `;main` jumps over a LOW region = framebuffer + hot buffers + the pow2-aligned dispatch tables (per-pixel: texture[largest] / colormap / deposit; then per-column: trig / reciprocal / viewangle / yslope) + hex.init tables → `main` code → `stl.loop` → cold map streams / stack. Low addresses ⇒ cheap `wflip`/store constants (and smaller unrolled-code constants, an R-2 win). Concrete spans filled by R0; flat-limit guarded by the span ledger + `storage_mode` assertion.
 - **D11 — Colormap/lighting application point.** *RESOLVED → **per-column/span SELECT, per-pixel APPLY**.* The colormap (light level) is chosen once per column (walls) / per span (floors) — DOOM-faithful, ~160×/frame; it is then applied per pixel as a dispatch chained off the texel sample (texel → lit palette byte). Avoids the U9 trap (per-pixel light *recomputation* / pointer-read colormap, ~6M+/frame) while keeping correct per-pixel colormap application. Per-pixel light *recomputation* (smoother distance lighting) is a deferred fidelity option; flat-shaded (no colormap) is the fallback tier.
 - **D12 — Test granularity.** *RESOLVED → **bit-exact (sha256)** against an exact-integer reference model.* The reference model (H5) replicates our exact integer pipeline (fixed-point truncation, LUT values, colormap select/apply), so rendered frames must match byte-for-byte (sha256 equality — `ScreenIO` logs this hash per present) and sim state (pos/angle) must match exactly. Any diff = a real bug. Golden set: a small curated set (spawn + movement waypoints + near-wall), grown as features land; scripted key-event demos for E2E. Obligation: the reference model mirrors every integer detail. **Determinism is load-bearing:** the game uses no true RNG (DOOM's `P_Random` is a deterministic 256-byte table, §2 glossary / F6), so golden frames and replays are reproducible. **LUT test mandate (#8):** every generated LUT is tested on **every entry** (not just samples/boundaries) **and** with a **call-twice-per-entry** check (catches result-reg / in-table jumper-cleanup bugs from the #5 construction). Triple-check every table.
 - **D13 — Fixed-point intermediates.** *RESOLVED → **full 2n-nibble-width product** (PR #1's `hex.fixed_mul` approach is the standard).* Overflow-safe: compute the product at 2n nibbles, nibble-aligned fraction shift (no runtime-amount shift, U6), truncate to n. `@Assumes 0 < f <= n`. Narrow-intermediate optimization is opt-in per-call later only if a hot mul demands it.

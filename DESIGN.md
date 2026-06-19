@@ -256,13 +256,13 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### H7 — Test harness
 - **Purpose:** Headless replays, golden-frame compares, per-table runs, ops profiling.
-- **Supplies:** wrappers over `assemble_and_run_test_output` / `run` + `FixedIO` / `InMemoryScreen` / `PcIO.headless`; sha256 golden compare vs H5; per-table runner (#8: every-entry + call-twice). **Profilers:** `--profile` (run) = per-region op-count / *time*; `--stats` (assemble) = macro *code-size*/usage — textual **only if plotly is absent** (it currently IS, 5.17.0 → the build/CI env must uninstall plotly for textual output).
+- **Supplies:** wrappers over `assemble_and_run_test_output` / `run` + `FixedIO` / `InMemoryScreen` / `PcIO.headless`; sha256 golden compare vs H5; per-table runner (#8: every-entry + call-twice). **Profilers:** `--profile` (run) = per-region op-count / *time*; `--stats` (assemble) = macro *code-size*/usage — textual **only if plotly is absent** (verified absent in this environment — S2: `import plotly` fails — so textual output is available; keep plotly out of the build/CI env to preserve it).
 - **Depends/related:** flipjump APIs, H5 (oracle).
 - **Assumes:** deterministic runs; bit-exact (D12); scripted key-event files for E2E.
 - **Data & layout:** fixtures (golden frames, event scripts, table fixtures) in-repo (Freedoom-derived where redistributable).
 - **Time / Space:** CI cost.
 - **Testing:** harness self-checked on a trivial program.
-- **Open Qs:** **verify `PcIO.headless(events_file, frames_dir)` exists + its signature** — `InMemoryScreen` is screen-only (no input); input+screen headless replay needs `PcIO.headless` (handoff §1.1). Confirm in S5.2.
+- **Open Qs:** *(resolved S2)* `PcIO.headless(events_file, frames_dir)` **exists** — `flipjump.interpreter.io_devices.pygame_window.PcIO.headless`, signature exactly as the handoff §1.1 states; `InMemoryScreen` is screen-only (no input), so input+screen headless replay uses `PcIO.headless`. Residual: it **requires pygame** (not supported on Windows py3.14; py3.13 OK — §H), so CI pins a supported interpreter.
 
 ### FJ-side (the game program)
 

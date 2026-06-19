@@ -28,7 +28,7 @@
 
 **Primary target (owner decision, locked):** 160×100, textured, 256 colors, 25 fps.
 **Stretch:** 320×200 @ 25 fps textured — **no speculation tier** (we won't use it). Reachable instead if flat-run + the §2.1/§3 optimizations push the engine to **~400M+ fj/s**; revisit once R2's measured ops/frame are in. Not a dependency.
-**Fallbacks:** 160×100 flat-shaded · 160×100 textured @ 12.5 fps · flat→paged storage.
+**Fidelity ladder (mildest first — the lever for the ~at-budget margin, §1.1):** **flat-colored floors/ceilings** (walls stay textured; floors/ceilings = solid lit color — removes the heaviest per-pixel work, the 2-coord floor span DDA; **owner-leaning**) → **textured @ 12.5 fps** (full fidelity, half framerate via tic/render decoupling D9) → **flat-shaded** (walls *also* untextured) → **bpp=4** (16 colors) → **flat→paged storage**.
 
 **Budget:** ~280M fj/s (measured flat, native engine) ÷ 25 fps = **~11.2M fj-ops / frame** = **448K @** at the design's working **@ = 25** (≈ the §A game-scale figure; R-1 measures the real @, and the whole ledger scales ~linearly with it).
 
@@ -150,7 +150,9 @@ zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables
 | State/scratch registers | small fixed set | — | TBD | hex.vec |
 | **Total (estimate, R0 confirms)** | | | **~2.5–3M ops ≈ 20–24 MB flat RAM** | **< 64 MB limit, ~3× headroom (R-3 holds)** |
 
-**Program size (estimate, R0 measures):** ~2.5–3M ops ⇒ **~20–24 MB runtime flat-memory footprint** (well under the 64 MB / `2²³`-word default limit), and a **~6–10 MB compressed `.fjm`** on disk. **Textures dominate (~85%)** — dispatch-LUT textures trade ~6× space for cheap per-pixel reads (D5); halving texture resolution is the size/assemble lever if needed. **BSP-as-code (#7) adds little *size* (~0.2–0.5 MB) — its cost is assemble *time* (R-2) + per-level recompile.** **No runtime data loading:** FlipJump has no filesystem (only the keyboard input stream), so the **level is baked into `doom.fjm` at assemble time — one binary per level** (R2 = E1M1 only, D8); multi-level = either one `.fjm`/level (relaunch to switch) or all levels in one binary sharing the ~20 MB of textures (a scope decision, not R2).
+**Program size (estimate, R0 measures):** ~2.5–3M ops ⇒ **~20–24 MB runtime flat-memory footprint** (well under the 64 MB / `2²³`-word default limit), and a **~6–10 MB compressed `.fjm`** on disk. **Textures dominate (~85%)** — dispatch-LUT textures trade ~6× space for cheap per-pixel reads (D5); halving texture resolution is the size/assemble lever if needed. **BSP-as-code (#7) adds little *size* (~0.2–0.5 MB) — its cost is assemble *time* (R-2) + per-level recompile.** **No runtime data loading:** FlipJump has no filesystem (only the keyboard input stream), so the **level is baked into `doom.fjm` at assemble time** (R2 = E1M1 only, D8).
+
+**Level packaging — *owner-leaning: all levels in one binary*** (vs one `.fjm`/level). **Runtime fps is *unchanged* by level count** — the renderer walks only the *current* level's BSP; the others sit dormant (level-switch = re-point the BSP root + reset state, once per transition). Cost is space + assemble time only, and **textures are shared**, so it scales sub-linearly. **All 9 shareware E1 levels** (E1M1 Hangar · E1M2 Nuclear Plant · E1M3 Toxin Refinery · E1M4 Command Control · E1M5 Phobos Lab · E1M6 Central Processing · E1M7 Computer Station · E1M8 Phobos Anomaly · E1M9 Military Base) ≈ **~31–38 MB flat RAM** (texture *union* ~21–28 MB + 9× small BSP-code + shared LUTs/renderer; under the 64 MB limit, ~1.7× headroom) / **~12–18 MB `.fjm`**. **Watch item: assemble time** (~9× BSP blocks + the full texture union — R-2). The full game (Ultimate 36 / DOOM II 32) grows the texture union past 64 MB → raise `--flat-max-words` or downscale.
 
 ### 1.3 LUT inventory & total entry count
 

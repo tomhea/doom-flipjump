@@ -42,7 +42,7 @@
 
 **Budget:** ~280M fj/s (measured flat, native engine) ÷ fps. fps is continuous (no timer, D9): 25 fps = **11.2M**, **20 fps = 14M** (the **chosen** target — full-res textured floors land ~14M, §1 curve), 12.5 fps = 22.4M. The ledger below is in **@** (scale-invariant) at the working **@ = 25** (≈ §A game scale; R-1 measures the real @). *Note: the per-pixel lines use the textured-**wall** cost applied uniformly; the actual frame depends on the wall/floor split and floor mode — flat floors are far cheaper, textured floors heavier (§1 curve). The ~14M target reflects full-res textured floors.*
 
-### 1.1 Ops-per-frame ledger (must sum < 11.2M with stated margin) — computed at **@ = 25**
+### 1.1 Ops-per-frame ledger (sums to the chosen ~14M frame ⇒ ~20 fps; fps is continuous — §1/D9) — computed at **@ = 25**
 
 Costs are stated in **@** (scale-invariant) and converted at **@ = 25** (the design working point; **R-1** measures
 the real @ at S5.3 before R2 commits). Per-pixel lines are ×16,000 px, optimized model (§1.1.1).
@@ -54,7 +54,7 @@ the real @ at S5.3 before R2 commits). Per-pixel lines are ×16,000 px, optimize
 | **Per-pixel arithmetic** (select ~3@ + DDA ~11@ + index ~2@ = ~16@/px) | F5 | 256K@ | **6.4M** | **mandatory** 8.8 fraction-accumulator DDA + `hex.sign` select |
 | Column + BSP walk + S0 sim (rebuilt §1.1.3) | F5/H3/F6 | ~180K@ raw | **~4.5M raw → ~3M optimized** | reads dominate; BSP-as-code (§1.1.3) |
 | Present (`update_screen` 0x03) + input poll | F7 | ~negligible | **~0** | memory-hook |
-| **Total** | | | **≈ 16M raw → ~11.4M all-opts** | **over budget without the opts + a fidelity lever** |
+| **Total** | | | **≈ 16M raw → ~14M all-opts** (full-res textured floors ⇒ ~20 fps; ~9M flat floors ⇒ ~30 fps — **§1 curve**) | **the opts are what make even ~20 fps reachable; higher fps/margin is a fidelity lever** |
 
 **Putting it together (all opts #1–9, @=25), with the wall/floor split (§1 floor curve):** the per-pixel work depends on the floor mode — flat floors ~6M, full-res textured floors ~11M (floors are 2-coord spans, heavier than walls) — plus the rebuilt column/BSP ~2.5–3M (opts #6–9). So the frame is **~9M (flat floors, ~30 fps) … ~14M (full-res textured floors, ~20 fps — the chosen target)**. **Owner-agreed:** opts **#1–9**; **full-res textured floors at ~20 fps**; 2×2-block floors a perf toggle. *(History: my earlier "~8–9M, 1.3× margin @25fps" and "~11.4M at budget" were both wrong — the first used a too-low ~5@ DDA, the second mis-charged floors the cheap wall cost. The honest picture is the §1 floor↔fps curve.)* Per-quantity widths are the **precision ledger (§1.1.4)** — most quantities are *not* 16.16.
 
@@ -71,7 +71,7 @@ The per-op costs in the design are **verified correct** against the 1.5.0 STL (S
 | deposit | 2 nibble-dispatches | ~4@ | ~4@ |
 | **per-pixel total** | | **~28@** → **700 ops/px @ @=25** (×16K = **11.2M**) | **~58@** → **1,450 ops/px** (×16K = **23.2M**) |
 
-So the budgeted "~12@/px" (2 dispatches + deposit) was **~2.5× low even optimized, ~5× low naïve** — the new **Per-pixel arithmetic** line carries the difference. Three consequences at @=25: **(1) the per-pixel path *is* the whole game** — **~11.2M of the 11.2M budget optimized**, i.e. it fills the entire budget by itself before any column/BSP work; the naïve version (~23.2M) is ~2× the budget. **(2) the DDA is irreducibly the biggest line** — even optimized to 8.8 + accumulator it is ~11@/px (~4.4M), because a fixed-point add is *N* nibble-dispatches at ~4@ each. **(3) floors/ceilings are heavier** — perspective spans step **two** coordinates (`u`,`v`) per pixel (flat-colored floors avoid it; a fidelity lever). R-1 (S5.3) **must measure the real per-pixel cost including the DDA**.
+So the budgeted "~12@/px" (2 dispatches + deposit) was **~2.5× low even optimized, ~5× low naïve** — the new **Per-pixel arithmetic** line carries the difference. Three consequences at @=25: **(1) the per-pixel path *is* the whole game** — the optimized per-pixel work alone is **~11.2M**, i.e. it fills the entire *25-fps* (11.2M) budget by itself before any column/BSP work — **which is exactly why the chosen target is 20 fps / ~14M, not 25 fps** (§1); the naïve version (~23.2M) is ~2× even that. **(2) the DDA is irreducibly the biggest line** — even optimized to 8.8 + accumulator it is ~11@/px (~4.4M), because a fixed-point add is *N* nibble-dispatches at ~4@ each. **(3) floors/ceilings are heavier** — perspective spans step **two** coordinates (`u`,`v`) per pixel (flat-colored floors avoid it; a fidelity lever). R-1 (S5.3) **must measure the real per-pixel cost including the DDA**.
 > **Why the DDA add can't be made cheaper by being a *constant* (a settled question):** `step` is **runtime** (distance-dependent, differs per column), so it is genuinely variable+variable. And even if it were constant, **a constant nibble-add is *not* cheaper than a variable one in FlipJump** — the cost is the *carry dispatch* (a ~4@ table lookup needed whether the addend is constant or variable; a constant just makes it a 16-entry table instead of 256). So the only DDA wins are **narrower width (8.8, #2 precision ledger) + the fraction-accumulator (#1)**. A **countdown** (`counter -= 1`/pixel, texel++ on zero) *is* cheaper (~4@) but **aliases** (rounds texel spacing) unless done Bresenham-style, which costs ~8@ again — a quality-for-speed lever, not the default.
 
 > **@ is the dominant budget variable (U7/R-6).** The whole ledger is **@-proportional** — a dispatch is ~4@, a deposit ~4@/byte (§2 glossary), the column/BSP reads are dispatches too — and **@ grows with total program size (U7)**. The design computes at the working point **@ = 25** (≈ the §A "DOOM-scale" figure); at that @ the frame is **over budget at full fidelity** (above), which is why the §1.1.2 optimizations are load-bearing. The budget scales ~linearly: a lighter build (smaller @) buys margin, a heavier one (more LUTs/textures/unrolled code) costs it. **R-1 (S5.3) measures the real @ at game scale before R2 commits** — it is the single most important budget measurement; if @ lands materially above 25 the §2 fallbacks (flat-colored floors, flat-shaded, 12.5 fps, bpp=4) are the relief.
@@ -79,8 +79,11 @@ So the budgeted "~12@/px" (2 dispatches + deposit) was **~2.5× low even optimiz
 #### 1.1.2 Optimization priorities — the flows by time-profit (@ = 25)
 
 Ranked by the per-frame ops *saved* vs a naïve implementation. **#1–2 take the per-pixel path from the naïve
-~23.2M down to the optimized ~11.2M baseline — they are mandatory just to be in the game**; **#3,5,6 then
-trim ~2.3M (→ ~12.4M frame), and #4 ~1M (→ ~11.4M, ~at budget); a fidelity lever closes the rest.**
+~23.2M down to the optimized ~11.2M baseline — they are mandatory just to be in the game**; **#3–9 then trim
+the per-pixel and column/BSP work further so the full frame lands on the §1 floor↔fps curve: ~14M
+(full-res textured floors ⇒ ~20 fps, the chosen target) … ~9M (flat floors ⇒ ~30 fps).** The opts are what
+make even ~20 fps reachable; reaching 25 fps (~11.2M) or gaining margin is then a *fidelity lever*, not a
+further per-pixel optimization.
 Profits are at @=25; they shrink/grow ~linearly with the measured @.
 
 | # | Flow (where the effort goes) | naïve | optimized | **profit @=25** | fidelity cost |
@@ -473,7 +476,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 ## 7. Risks (handoff §10, live)
 
-- **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **At the @ = 25 working point the optimized per-pixel work alone is ~11.2M and the full frame ~14–16M — *over* the 11.2M budget at full fidelity** (§1.1): three optimisms were corrected in S2 — the budget is **@-proportional**, the per-pixel line was under-counted (DDA + select, §1.1.1), and the DDA's optimized cost was itself under-estimated (each nibble-add is ~4@, so the 8.8+accumulator DDA is ~11@/px, not ~5@). 160×100 textured @25 closes only by applying the §1.1.2 optimization set (**#1–9**, incl. the §1.1.3 column rebuild's BSP-as-code) → ~11.4M, ~at budget — **plus** a fidelity lever (flat-colored floors / 12.5 fps) for real margin; #1–2 are mandatory just to reach the per-pixel baseline. **Top R-1 tasks: measure @ *and* the real per-pixel DDA cost.** Fallbacks: flat-colored floors / flat-shaded / 12.5 fps / bpp=4.
+- **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **At the @ = 25 working point the optimized per-pixel work alone is ~11.2M and the full frame ~14–16M — *over* the 11.2M budget at full fidelity** (§1.1): three optimisms were corrected in S2 — the budget is **@-proportional**, the per-pixel line was under-counted (DDA + select, §1.1.1), and the DDA's optimized cost was itself under-estimated (each nibble-add is ~4@, so the 8.8+accumulator DDA is ~11@/px, not ~5@). fps is continuous (D9), so this isn't a hard wall: applying the §1.1.2 optimization set (**#1–9**, incl. the §1.1.3 column rebuild's BSP-as-code) lands the full-res-textured frame at **~14M ⇒ ~20 fps — the chosen target** (§1 curve); reaching 25 fps (~11.2M) or buying margin is then a **fidelity lever** (flat-colored floors ~9M ⇒ ~30 fps / 12.5 fps / bpp=4), not a further per-pixel optimization. #1–2 are mandatory just to reach the per-pixel baseline. **Top R-1 tasks: measure @ *and* the real per-pixel DDA cost.** Fallbacks: flat-colored floors / flat-shaded / 12.5 fps / bpp=4.
 - **R-2** — Assembler scalability is load-bearing (column-unroll + mega dispatch tables). Measure assemble time + `.fjm` size at game scale (S5.1/S5.3); relief valve = design (a) column buffer.
 - **R-3** — Span vs flat path: power-of-two padding can silently overflow → paged (~2.5× slower). Guards: span ledger + `storage_mode` assertion.
 - **R-4** — D3 encoding tension (hex-memory pixels vs packed-byte device read) — resolve in this doc, not in code.

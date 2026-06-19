@@ -1,5 +1,9 @@
 # Handoff — Stage 5 (execution), starting at M0
 
+> **▶ To actually start, follow [`HANDOFF_M0.md`](HANDOFF_M0.md)** — the step-by-step Pre-M0 (bootstrap) +
+> M0 (first looped PR) recipe with verified commands and copy-paste file templates. This file is the
+> orientation/overview; `HANDOFF_M0.md` is the do-it doc.
+
 **Audience:** a fresh session picking up DOOM-on-FlipJump after **Stages 1–4 are complete and owner-approved.**
 Your job starts at **Stage 5 — execution**, first item **M0**. The *design is settled* (`DESIGN.md` §1–§9) and the
 *ladder is settled* (`DESIGN.md` §10) — do not reopen either without a real contradiction.

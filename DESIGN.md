@@ -65,9 +65,30 @@ zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables
 | State/scratch registers | small fixed set | — | TBD | hex.vec |
 | **Total** | | | **TBD < 8.4M (R0)** | else raise `--flat-max-words` |
 
----
+### 1.3 LUT inventory & total entry count
 
-## 2. Glossary & conventions
+Every runtime LUT with its **logical entry count** (the index range). Result-width and pow2/over-align
+padding feed the §1.2 *span* ledger separately. STL infra (`hex.init` truth tables) is flipjump's own,
+listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing decision being consulted.
+
+| LUT (component) | index domain | #entries | result | tier | notes |
+|---|---|---|---|---|---|
+| finesine (cos = `+N/4` offset) | angle top-3-nibbles | 4096 | 32-bit | R2 | 16³ (#10); per-result-nibble (D4) |
+| tantoangle | slope → angle (R_PointToAngle) | 2048 | angle | R2 | DOOM SLOPERANGE; R1 may refine |
+| viewangletox | view-angle → column | 2048 | 8-bit | R2 | FINEANGLES/2 at N=4096 |
+| xtoviewangle | column x → angle | 161 | angle | R2 | W+1 (pad 256) |
+| distscale | column x | 160 | 16.16 | R2 | fisheye 1/cos (pad 256; may fold) |
+| yslope | row y | 100 | 16.16 | R2 | floor/ceiling distance (pad 128) |
+| reciprocal / scale | distance | 4096 | 16.16 | R2 | 16³ buckets; kills the wall divide |
+| colormap | (light, texel) | **L×256** | byte | R2 | **L PENDING**; per-pixel, over-align #3 |
+| +4-offset deposit | (old,new) hi-nibble | 256 | flips | R2 | D3 |
+| textures (wall+flat) | texel position | **T** | byte | R2 | **T PENDING** (D5/OQ8 — dominates) |
+| palette (device data) | index | 256 | 3 bytes | R2 | data, not a dispatch LUT |
+| P_Random `rndtable` | rndindex | 256 | byte | R3 | excluded from the R2 total |
+| — *STL infra*: `hex.init` | — | ~6×256 (+ mul) | — | infra | flipjump's own; counted apart |
+
+**R2 subtotal** (all fixed-size LUTs, *excl.* colormap `L` and textures `T`): 4096+2048+2048+161+160+100+4096+256+256 = **13,221 entries.**
+**Unified R2 total = 13,221 + L×256 + T** — finalized once `L` (colormap levels) and `T` (texture texels) are set below.
 
 - **fj-op** — one assembled FlipJump op (flip-word + jump-word = `dw` bits). The budget unit.
 - **`@`** — the per-op cost constant (~27 at w=32); grows with total program size (**U7**). A figure in

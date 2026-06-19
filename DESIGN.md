@@ -53,11 +53,11 @@ zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables
 |---|---|---|---|---|
 | hex.init truth tables | ~fixed (or/and/mul/cmp/add/sub) | — | TBD | from `stl.startup_and_init_all` |
 | Unrolled renderer code (D2b) | ~16K px × stub size + 160 col × col-setup | — | **TBD (R-2 watch)** | the big code consumer; assemble time tracked |
-| Texture dispatch table(s) (D5) | pow2 ≥ Σ texel counts | pow2 pad | **TBD (OQ8 watch)** | likely largest table → placed first |
+| Texture dispatch table(s) (D5) | ~300K texels (native E1M1; R0 exact) | pow2 pad | **~300K entries (OQ8 watch)** | likely largest → placed first; downscale is the lever |
 | Trig (finesine; cos = offset; tangent/viewangle) | **N=4096=16³** (top 3 nibbles, no shift §2.1; per-result-nibble, D4) | 16³-aligned | TBD (~0.25MB if 4096×8-nibble) | cosine shares the sine table (+N/4 = single-hex add); 256 = coarse fallback |
 | Reciprocal / scale | pow2 ≥ entries | pow2 pad | TBD | replaces divides |
 | yslope · viewangletox/xtoviewangle | pow2 ≥ entries | pow2 pad | TBD | |
-| Colormaps (D4 handlers) | pow2 ≥ 256·#maps, byte results | pow2 pad | TBD | per-column-selected (D11) |
+| Colormaps (D4 handlers) | 32×256 = 8192, byte results | pow2 pad | 8192 entries | per-column-selected (D11); over-align #3 |
 | +4-offset deposit table (D3) | 256 | pow2 pad | ~256 | |
 | Framebuffer | W·H = 160·100 = 16,000 | — | 16,000 | packed bytes, no align |
 | Palette | 256·3 = 768 | — | 768 | |
@@ -80,15 +80,18 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
 | distscale | column x | 160 | 16.16 | R2 | fisheye 1/cos (pad 256; may fold) |
 | yslope | row y | 100 | 16.16 | R2 | floor/ceiling distance (pad 128) |
 | reciprocal / scale | distance | 4096 | 16.16 | R2 | 16³ buckets; kills the wall divide |
-| colormap | (light, texel) | **L×256** | byte | R2 | **L PENDING**; per-pixel, over-align #3 |
+| colormap | (light, texel) | **8192** (32×256) | byte | R2 | 32 light levels; per-pixel, over-align #3 |
 | +4-offset deposit | (old,new) hi-nibble | 256 | flips | R2 | D3 |
-| textures (wall+flat) | texel position | **T** | byte | R2 | **T PENDING** (D5/OQ8 — dominates) |
+| textures (wall+flat) | texel position | **~300,000** | byte | R2 | native E1M1 (D5/OQ8); R0 measures exact, downscale is the lever if over budget |
 | palette (device data) | index | 256 | 3 bytes | R2 | data, not a dispatch LUT |
 | P_Random `rndtable` | rndindex | 256 | byte | R3 | excluded from the R2 total |
 | — *STL infra*: `hex.init` | — | ~6×256 (+ mul) | — | infra | flipjump's own; counted apart |
 
-**R2 subtotal** (all fixed-size LUTs, *excl.* colormap `L` and textures `T`): 4096+2048+2048+161+160+100+4096+256+256 = **13,221 entries.**
-**Unified R2 total = 13,221 + L×256 + T** — finalized once `L` (colormap levels) and `T` (texture texels) are set below.
+**R2 subtotal** (fixed-size LUTs, *excl.* colormap + textures): 4096+2048+2048+161+160+100+4096+256+256 = **13,221 entries.**
+**+ colormap (32×256) = 8,192** → non-texture total **21,413**.
+**+ textures ≈ 300,000** (native E1M1 planning; R0 measures exact).
+**⇒ Unified R2 total ≈ 321,413 entries** — **textures are ~93% of it**; everything else sums to ~21K.
+*Span note (→ §1.2):* entry *count* ≠ span. Wide per-result-nibble tables multiply by result-nibbles (finesine/reciprocal ×8) and per-entry handlers cost ~popcount ops/entry; the **LUT span lands ≈1.5–2M ops** (textures dominate), comfortably under the 8.4M flat limit — the unrolled renderer *code* (R-2), not the LUTs, is the span/assemble pressure.
 
 - **fj-op** — one assembled FlipJump op (flip-word + jump-word = `dw` bits). The budget unit.
 - **`@`** — the per-op cost constant (~27 at w=32); grows with total program size (**U7**). A figure in

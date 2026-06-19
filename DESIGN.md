@@ -244,9 +244,9 @@ Per handoff §H / §3.5. Top to bottom:
 - **Depends/related:** H1; consumed by F5; mirrored by H5.
 - **Assumes:** D1 = BSP; 16.16 coords (D6); coords fit w=32; F5 reads streams with `*_and_inc` (§3.4).
 - **Data & layout:** sequential streams in the data region (no pow2 align); span = Σ lump sizes (§1.2).
-- **Time / Space:** host build; stream span filled R0 (E1M1).
+- **Time / Space:** host build; stream span filled R0 (E1M1). **Per-element read cost (S2):** each streamed byte the walk consumes is a `hex.read_byte_and_inc` ≈ **42@** (`w(0.75@+5)+18@+27`, w=32) — the read is O(w) even sequentially; only the *re-indexing* is saved vs `read_nth_*` (~103@, O(w) *twice*). So per-node/per-seg field count is a first-order cost — **minimize streamed fields**, and pack multi-field records so one walk consumes them contiguously.
 - **Testing:** unit-test compiled structures vs parsed WAD (counts + sample records); the walk validated by golden frames (D12).
-- **Open Qs:** BSP traversal cost at E1M1 scale (R1); which seg/sidedef fields are actually needed.
+- **Open Qs:** BSP traversal cost at E1M1 scale (R1); which seg/sidedef fields are actually needed (each ≈ 42@/byte/visit — keep the per-node record minimal).
 
 #### H4 — Texture/colormap compiler
 - **Purpose:** Compile WAD textures/flats + COLORMAP/PLAYPAL into the dispatch tables F3 reads + the palette F7 sends.
@@ -302,7 +302,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 #### F2 — Fixed-point math layer (`fixed_point.fj`, PR #1)
 - **Purpose:** Signed Q-format math: `fixed_mul`/`fixed_div` + `mul_const` + pointer-fallback table reads.
-- **Supplies:** `hex.fixed_mul n,f,…`, `hex.fixed_div n,f,…,div0`, `hex.mul_const n,…,c`, and **PR #1's own** `read_table`/`read_table_byte` fallback wrappers. *(Note: `read_table`/`read_table_byte` are **not** stock 1.5.0 STL macros — verified S2; the STL pointer-read primitives are `hex.read_byte` / `read_nth_byte` (~1,064 ops each). PR #1 supplies the table-read wrappers over those; the handoff §1.1 mis-attributed them to the STL.)*
+- **Supplies:** `hex.fixed_mul n,f,…`, `hex.fixed_div n,f,…,div0`, **PR #1's own** `hex.mul_const n,…,c` and `read_table`/`read_table_byte` fallback wrappers. *(Note: `mul_const`, `read_table`, `read_table_byte` are **not** stock 1.5.0 STL macros — verified S2; the STL has only `hex.mul`/`hex.mul10`/`bit.mul` and the `read_byte`/`read_nth_byte` pointer primitives (~1,064 ops each). PR #1 supplies these wrappers; the handoff §1.1 mis-attributed them to the STL. The `×const → shifts+adds` technique is sound regardless: cost scales with `popcount(const)` shifted adds, so sparse constants are cheap — the `mul_const` wrapper just packages it.)*
 - **Depends/related:** `hex.*` STL (incl. `read_byte`/`read_nth_byte`, the actual pointer-read primitives); consumed by F5/F6.
 - **Assumes:** `0 < f <= n`; full 2n-width product (D13); default 16.16 (D6); `hex.init`; `hex.scmp` for signables (§3.5).
 - **Data & layout:** scratch `hex.vec` in F1's register region.

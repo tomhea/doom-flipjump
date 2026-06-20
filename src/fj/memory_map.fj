@@ -1,0 +1,18 @@
+// memory_map.fj — F1: program entry + LOW data region + segment base labels.
+// Consumes build/generated/fj_consts.fj (the config SSOT, §9). Uses ONLY generated constants
+// — no hardcoded resolution literal (the §1 2-const invariant, R6). The §3 hot-low layout
+// (framebuffer/palette at the lowest addresses, the entry op jumping over them) is sketched
+// here; the full largest-alignment-first assemble ordering lands at M10 (H6).
+
+stl.startup
+
+    ;main                       // §3: the first executable jump hops over the LOW data region
+
+// ── LOW data region (hot-low, §3): framebuffer + palette at the lowest addresses ──
+framebuffer:
+    hex.vec FB_SIZE, 0          // W*H packed bytes (one fj-op each), no align (§1.2)
+palette:
+    hex.vec PALETTE_SIZE, 0     // NCOLORS*3
+
+main:
+    stl.loop                    // halt — no game logic at M1 (skeleton)

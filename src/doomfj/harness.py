@@ -1,6 +1,7 @@
 """Probe harness: assemble + run a FlipJump program, report op_counter / storage_mode / .fjm size.
 Verified against flipjump 1.5.0 (native engine, storage_mode == 'flat')."""
 from __future__ import annotations
+import tempfile
 import time
 from pathlib import Path
 import flipjump as fj
@@ -19,10 +20,14 @@ def run_fjm(fjm_path: str | Path, *, flat_max_words: int | None = None):
     return fj.run(Path(fjm_path), print_time=False, print_termination=False, flat_max_words=flat_max_words)
 
 def probe(fj_paths: list[str | Path], *, flat_max_words: int | None = None):
-    """One-shot assemble+run; returns the TerminationStatistics (term.op_counter, term.storage_mode, ...)."""
+    """One-shot assemble+run; returns the TerminationStatistics (term.op_counter, term.storage_mode, ...).
+    Assembles to a temp .fjm then runs, because flat_max_words is a *run* param (fj.assemble_and_run
+    does not accept it)."""
     paths = [Path(p).resolve() for p in fj_paths]
-    return fj.assemble_and_run(paths, memory_width=W, print_time=False, print_termination=False,
-                               flat_max_words=flat_max_words)
+    with tempfile.TemporaryDirectory() as d:
+        out = Path(d) / "probe.fjm"
+        fj.assemble(paths, out, memory_width=W, print_time=False)
+        return fj.run(out, print_time=False, print_termination=False, flat_max_words=flat_max_words)
 
 def op_delta_vs_empty(fj_paths, empty_paths, **kw) -> int:
     """ops attributable to the program, minus an empty-loop baseline (DESIGN §11 / handoff §4)."""

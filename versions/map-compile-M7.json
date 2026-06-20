@@ -1,0 +1,26 @@
+{
+  "note": "M7 map-compiler (H3) artifact: BSP built from geometry (owner decision: build, not bake). Deterministic; from src/doomfj/mapcompiler.py.",
+  "square_room_MAP01": {
+    "segs": 4,
+    "subsectors": 1,
+    "nodes": 0,
+    "root": "0x8000",
+    "convex_one_subsector": true,
+    "seg_angles_bam16": [
+      0,
+      16384,
+      32768,
+      49152
+    ],
+    "compiled_fjm_bytes": 5761,
+    "storage_mode": "flat"
+  },
+  "concave_L_shape_split_demo": {
+    "input_segs": 6,
+    "output_segs": 7,
+    "nodes": 2,
+    "subsectors": 3,
+    "split_added_verts": 1,
+    "note": "concave loop -> recursive partition; every emitted subsector is convex"
+  }
+}

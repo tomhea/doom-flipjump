@@ -20,6 +20,7 @@ from doomfj.lut_generator import (
     generate_offset_deposit_table_fj,
     generate_reciprocal_lut_fj,
     generate_sine_lut_fj,
+    generate_trig_idioms_fj,
 )
 
 
@@ -134,3 +135,21 @@ class TestGenerateOffsetDepositTableFj:
         # +4-offset high-nibble flip target (D3) and no per-entry hex.set (D4 trap)
         assert "+4+w" in src or "+ 4 + w" in src or "acc+4" in src
         assert "hex.set" not in src
+
+
+class TestGenerateTrigIdiomsFj:
+    def test_emits_table_and_read_macros(self) -> None:
+        src = generate_trig_idioms_fj("fs", 4096, 16)
+        assert "def read_sin" in src
+        assert "def read_cos" in src
+        assert "fs.init" in src
+        # cosine offset = count/4 = 1024 = 0x400, on a 3-nibble index (count=16^3)
+        assert "hex.add_constant 3, ctmp, 0x400" in src
+        # trig is the canonical per-result-nibble override site (D4); R6 byte-exactness vs
+        # tables.sine_table is proven in tests/fj/test_lut_access.py
+        assert "per-result-nibble" in src
+        assert "hex.set" not in src
+
+    def test_count_must_be_power_of_16(self) -> None:
+        with pytest.raises(ValueError):
+            generate_trig_idioms_fj("fs", 2048, 16)  # 2^11, not 16^k

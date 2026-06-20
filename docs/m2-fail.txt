@@ -1,0 +1,30 @@
+    def test_mul_const(src, c, n, want):
+>       assert mul_const(src, c, n) == want
+E       assert -1 == 0
+E        +  where -1 = mul_const(2882339107, 0, 8)
+
+tests\host\test_fixedpoint.py:55: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_fixed_point.py::test_fixed_mul_parity - AssertionError: ...
+FAILED tests/fj/test_fixed_point.py::test_fixed_mul_aliasing - AssertionError...
+FAILED tests/fj/test_fixed_point.py::test_fixed_div_parity_and_div0 - Asserti...
+FAILED tests/fj/test_fixed_point.py::test_mul_const_parity - AssertionError: ...
+FAILED tests/host/test_fixedpoint.py::test_fixed_mul[98304-131072-8-4-196608]
+FAILED tests/host/test_fixedpoint.py::test_fixed_mul[4294868992-131072-8-4-4294770688]
+FAILED tests/host/test_fixedpoint.py::test_fixed_mul[4294868992-4294836224-8-4-196608]
+FAILED tests/host/test_fixedpoint.py::test_fixed_mul[1073741824-262144-8-4-0]
+FAILED tests/host/test_fixedpoint.py::test_fixed_mul[32768-32768-8-4-16384]
+FAILED tests/host/test_fixedpoint.py::test_fixed_mul[640-65024-4-2-64256] - a...
+FAILED tests/host/test_fixedpoint.py::test_fixed_mul[4294934528-4294934528-8-4-16384]
+FAILED tests/host/test_fixedpoint.py::test_fixed_div[196608-131072-8-4-98304]
+FAILED tests/host/test_fixedpoint.py::test_fixed_div[4294770688-131072-8-4-4294868992]
+FAILED tests/host/test_fixedpoint.py::test_fixed_div[4294901760-196608-8-4-4294945451]
+FAILED tests/host/test_fixedpoint.py::test_fixed_div[65536-196608-8-4-21845]
+FAILED tests/host/test_fixedpoint.py::test_fixed_div[64256-640-4-2-65024] - a...
+FAILED tests/host/test_fixedpoint.py::test_fixed_div[196608-4294836224-8-4-4294868992]
+FAILED tests/host/test_fixedpoint.py::test_fixed_div[4294770688-4294836224-8-4-98304]
+FAILED tests/host/test_fixedpoint.py::test_fixed_div_by_zero_returns_none - a...
+FAILED tests/host/test_fixedpoint.py::test_mul_const[4660-320-8-1491200] - as...
+FAILED tests/host/test_fixedpoint.py::test_mul_const[305419896-1-8-305419896]
+FAILED tests/host/test_fixedpoint.py::test_mul_const[4294967295-5-8-4294967291]
+FAILED tests/host/test_fixedpoint.py::test_mul_const[2882339107-0-8-0] - asse...

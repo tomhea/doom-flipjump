@@ -1,0 +1,32 @@
+// F5 (wall renderer, M11b) — one textured wall column, the texture-v DDA per screen row.
+//
+// `wall.column_step base, light` renders ONE row of a wall column:
+//   v   = (frac >> 8) & heightmask         // 8.8 texture v-coord -> texel row (pow2 height, D6/§1.1.4)
+//   idx = base + v                         // base = texcol*texheight (column-major M8 layout)
+//   pal = tex.sample(idx)                  // M8 texel dispatch table (F3, ~4@)
+//   lit = cm.apply((light<<8) | pal)       // M8 colormap dispatch (per-column light, D11)
+//   frac += step                           // advance the DDA (8.8)
+// and emits `lit` as two hex digits + '\n' (the M11b proof path — the per-pixel pipeline is verified
+// byte-exact vs the H5 oracle as text; M11c's D2 decision routes `lit` to the framebuffer deposit
+// instead). Driven by `rep(count, r) wall.column_step BASE, LIGHT`; the DDA state is the shared
+// scratch the includer declares: frac (hex.vec 4, 8.8), v3/idx (3 nibbles), pal/lit (2), cmidx (4),
+// step (hex.vec 4 = the 8.8 step), heightmask (texheight-1). The texel/colormap tables are compiled
+// as the namespaces `tex` and `cm` (M8). base/light are compile-time column constants.
+
+ns wall {
+    def column_step base, light < frac, v3, idx, pal, cmidx, lit, step, heightmask {
+        hex.zero 3, v3
+        hex.mov 2, v3, frac + 2*dw          // v3 = high byte of frac (the 8.8 integer part)
+        hex.and 3, v3, heightmask           // v &= texheight-1
+        hex.set 3, idx, base
+        hex.add 3, idx, v3                   // idx = base + v
+        tex.sample pal, idx
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx, pal
+        hex.set 2, cmidx + 2*dw, light       // cmidx = (light<<8) | pal
+        cm.apply lit, cmidx
+        hex.print_as_digit 2, lit, 0
+        stl.output 10
+        hex.add 4, frac, step                // advance the DDA
+    }
+}

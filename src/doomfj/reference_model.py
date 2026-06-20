@@ -134,6 +134,23 @@ class ReferenceModel:
             y = (y + fixed_mul(m, self.read_sin(angle), 8, 4)) & 0xFFFFFFFF
         return replace(state, x=x, y=y, angle=angle)
 
+    def render_textured_column(self, texels, texheight, texcol, colormap, light, *,
+                               count, frac0, step, fracbits=8):
+        """One textured wall column (F5 core) — the texture-v DDA. For `count` screen rows, sample the
+        texture's `texcol` column at v = (frac >> fracbits) & (texheight-1) (heightmask, pow2 height),
+        apply the colormap at `light`, accumulate frac += step in 8.8 (wraps mod 2**16). Returns the
+        lit palette bytes top-to-bottom. The fj renderer reproduces this exactly (D12); `texels` and
+        `colormap` are the shared M8 data (R6). texel index is column-major: col*texheight + v."""
+        out = bytearray()
+        frac = frac0
+        mask = texheight - 1
+        for _ in range(count):
+            v = (frac >> fracbits) & mask
+            pal = texels[texcol * texheight + v]
+            out.append(colormap[light][pal])
+            frac = (frac + step) & 0xFFFF
+        return bytes(out)
+
     def render_solid_column(self, col_x: int, color: int, *, bg: int = 0) -> bytes:
         """M11a's golden frame: a framebuffer cleared to `bg` with column `col_x` filled with `color`
         (row-major W*H palette indices). The simplest renderer-primitive frame — the fj program

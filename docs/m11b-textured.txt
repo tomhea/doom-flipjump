@@ -1,0 +1,18 @@
+M11b (F5) -- one textured wall column: the texture-v DDA, byte-exact vs H5
+==================================================================
+
+fj per-pixel pipeline (src/fj/wall_render.fj, wall.column_step), driven rep(count) over a column:
+  v = (frac>>8) & (texheight-1) ; idx = texcol*texheight + v ; pal = tex.sample(idx) (M8) ;
+  lit = cm.apply((light<<8)|pal) (M8) ; frac += step (8.8).
+
+Column: texture MC5 (2x downscaled, 64x64), texcol=5, light=20, 50 rows, step=327 (8.8).
+  fj output (lit bytes as text) == oracle.render_textured_column : BYTE-EXACT (D12)
+  golden lit sequence (first 8): [127, 6, 127, 8, 8, 127, 127, 127]
+
+Measured (R-1):
+  total ops (50 rows)  : 75316   storage=flat
+  PER-PIXEL DDA cost   : 1588 ops/pixel  (marginal; DDA + M8 sample + M8 colormap + output)
+
+Scope: M11b proves the per-pixel render math byte-exact (the genuinely new DDA logic + the R-1 cost).
+Routing these runtime pixels into the framebuffer (the per-pixel deposit) + presenting the textured
+column is the M11c D2 bake-off decision (full-unroll vs column-buffer + the deposit primitive).

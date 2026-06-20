@@ -17,3 +17,4 @@ packages = ["src/doomfj"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]          # so tests can import the tests/fixtures/* builders as a package

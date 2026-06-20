@@ -48,3 +48,17 @@ def mul_const(src: int, c: int, n: int) -> int:
     """dst[:n] = src[:n] * c  (c a compile-time constant; wraps mod 2^4n)."""
     bits = 4 * n
     return _wrap(_wrap(src, bits) * c, bits)
+
+
+def encode_fixed_point(value: float, fraction_bits: int, total_bits: int) -> int:
+    """Encode a real value as a two's-complement fixed-point word (16.16 = fraction_bits=16,
+    total_bits=32). Rounds to nearest; raises ValueError if it doesn't fit the signed format.
+    (Lifted from PR #1's value kernel, D15 keep — M4.)"""
+    scaled = round(value * (1 << fraction_bits))
+    signed_min, signed_max = -(1 << (total_bits - 1)), (1 << (total_bits - 1)) - 1
+    if not signed_min <= scaled <= signed_max:
+        raise ValueError(
+            f"value {value} (scaled {scaled}) does not fit a signed {total_bits}-bit "
+            f"fixed-point word with {fraction_bits} fraction bits"
+        )
+    return scaled & ((1 << total_bits) - 1)

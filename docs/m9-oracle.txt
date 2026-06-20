@@ -1,0 +1,17 @@
+M9 oracle (H5) -- hand-checked frame + sim step (integration evidence, R2)
+========================================================================
+Fixtures: tests/fixtures/test.wad (geometry) + freedoom_assets.wad (COLORMAP).
+
+Spawn state (THINGS player-1 @ 128,128 facing 90deg):
+  x=0x00800000 (128)  y=0x00800000 (128)  angle=0x40000000 (ANG90)
+
+Sim step (one tic, collision-free -- collision lands at M14):
+  forward  -> x=0x00800000 y=0x00b20000  (cos90=0 => x fixed; y += FORWARD_MOVE=0x320000)
+  back     -> x=0x00800000 y=0x004e0000  (y -= FORWARD_MOVE, signed FixedMul)
+  turn_left-> angle=0x42800000  (ANG90 + ANGLE_TURN=0x2800000)
+
+Spawn frame (W*H=16000 palette-index bytes; ceiling/floor bands, colormap row 160>>3=20):
+  band base indices: CEIL_BG=0 FLOOR_BG=96
+  shaded: ceiling=cm[20][0]=0  floor=cm[20][96]=109
+  frame length: 16000 bytes
+  frame sha256: b85579f68a137a8ed94c28c9cb8f1862f6e0174acd601a8bd660dd821ef723de

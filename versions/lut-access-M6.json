@@ -1,0 +1,24 @@
+{
+  "note": "M6 F3 trig-idiom artifact: per-lookup op-cost probe (deterministic; scripts/m6_evidence.py). read_sin/read_cos read the M5 dispatch tables.",
+  "metrics": {
+    "table_entries": 4096,
+    "result_nibbles": 8,
+    "lookups": 256,
+    "mode": "per_result_nibble",
+    "read_sin": {
+      "ops_per_lookup": 863.3,
+      "dispatches_per_lookup": 8,
+      "ops_per_dispatch": 107.9,
+      "implied_at": 27.0,
+      "storage_mode": "flat"
+    },
+    "read_cos": {
+      "ops_per_lookup": 1161.7,
+      "dispatches_per_lookup": 8,
+      "ops_per_dispatch": 145.2,
+      "implied_at": 36.3,
+      "storage_mode": "flat"
+    }
+  },
+  "finding": "read_sin ~4@/dispatch -> implied @~=27 (confirms design @~=25 at game scale). read_cos shares the sine table via +N/4 (hex.add_constant, #9), no separate cosine LUT."
+}

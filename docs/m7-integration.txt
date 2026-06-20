@@ -1,0 +1,12 @@
+M7 integration evidence (R2) — map compiler / BSP node builder (H3).
+Owner decision: BUILD the BSP from geometry (not bake). Source: src/doomfj/mapcompiler.py.
+
+Square room MAP01 (convex): 4 segs, 1 subsector, 0 nodes,
+  root=0x8000 (subsector 0). Seg angles (BAM>>16): [0, 16384, 32768, 49152] (E/N/W/S).
+  compile_map streams -> 5761-byte .fjm, storage_mode=flat (R4).
+
+Concave L-shape (split path): 6 input segs -> 7 segs (1 split vert),
+  2 partition nodes, 3 subsectors (all convex by construction).
+
+Both emit modes (packed-byte streams + BSP-as-code #7). LINEDEFS+VERTEXES double as F6 collision
+data (line-based, no tile grid, D1). E1M1's larger BSP build is the next H3 step (D8).

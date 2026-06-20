@@ -1,0 +1,16 @@
+>       raise FlipJumpPreprocessorException(error_str) from orig_exception
+E       flipjump.utils.exceptions.FlipJumpPreprocessorException: Macro Resolve Error:
+E         macro STUB is used but isn't defined. In file C:\Users\tomhe\AppData\Local\Temp\pytest-of-tomhe\pytest-605\test_compiled_streams_assemble0\map.fj (line 3).
+..\..\AppData\Local\Programs\Python\Python311\Lib\site-packages\flipjump\assembler\preprocessor.py:64: FlipJumpPreprocessorException
+=========================== short test summary info ===========================
+FAILED tests/host/test_mapcompiler.py::test_build_segs_square_room - assert 0...
+FAILED tests/host/test_mapcompiler.py::test_bam16_cardinals - assert -1 == 0
+FAILED tests/host/test_mapcompiler.py::test_convex_room_one_subsector - asser...
+FAILED tests/host/test_mapcompiler.py::test_concave_l_shape_splits - assert 0...
+FAILED tests/host/test_mapcompiler.py::test_traversal_lands_in_valid_subsector
+FAILED tests/host/test_mapcompiler.py::test_split_preserves_linedef_coverage
+FAILED tests/host/test_mapcompiler.py::test_compile_map_streams_counts_and_roundtrip
+FAILED tests/host/test_mapcompiler.py::test_compile_map_code_mode - Assertion...
+FAILED tests/host/test_mapcompiler.py::test_compile_map_unknown_mode_rejected
+FAILED tests/host/test_mapcompiler.py::test_compiled_streams_assemble_flat - ...
+10 failed in 0.69s

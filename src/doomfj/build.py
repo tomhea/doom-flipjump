@@ -148,5 +148,49 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
     return metrics
 
 
+def build_present_slice(wad_path, *, cfg=None, col_x, color, out_fjm, generated_dir):
+    """M11a (F4+F7): assemble the present slice — a packed-byte framebuffer with column `col_x` filled
+    `color` (F4 fixed stores), the real E1M1 palette, and the F7 0x03 present — then run it headless
+    through the screen device and capture the frame. Returns the device pixel_indices + per-frame
+    sha256 + op_counter + storage_mode + span_words."""
+    from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
+
+    cfg = cfg or Config()
+    wad = WadFile.from_path(wad_path)
+    gen = Path(generated_dir)
+    gen.mkdir(parents=True, exist_ok=True)
+
+    consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
+    palette = compile_palette("palette", wad)
+    main = "\n".join([
+        "stl.startup_and_init_all",
+        "present.init_screen",
+        f"fb.fill_column framebuffer, {col_x}, {color}",
+        "present.set_palette palette",
+        "present.update_screen framebuffer",
+        "stl.loop",
+        f"framebuffer: hex.vec {cfg.FB_SIZE}",   # W*H packed-byte ops (one op/pixel)
+        palette,
+    ])
+    (gen / "main.fj").write_text(main, encoding="utf-8")
+
+    paths = [consts, Path("src/fj/present.fj"), Path("src/fj/framebuffer.fj"), gen / "main.fj"]
+    out = Path(out_fjm)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False)
+
+    screen = InMemoryScreen()
+    term = fj.run(out, io_device=screen, print_time=False, print_termination=False)
+    return {
+        "storage_mode": str(term.storage_mode),
+        "span_words": _span_words(out),
+        "op_counter": term.op_counter,
+        "frame_count": screen.frame_count,
+        "pixel_indices": screen.pixel_indices,
+        "frame_hash": screen.frame_hashes[-1][1] if screen.frame_hashes else None,
+        "fjm_bytes": out.stat().st_size,
+    }
+
+
 if __name__ == "__main__":
     print(json.dumps(build(), indent=2))

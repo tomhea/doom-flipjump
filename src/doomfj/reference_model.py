@@ -86,6 +86,12 @@ def frame_hash(frame: bytes) -> str:
     return hashlib.sha256(frame).hexdigest()
 
 
+def screen_frame_hash(indices, palette_rgb) -> str:
+    """The device's per-frame sha256 (ScreenIO logs it per present, D12): sha256 over the raw palette
+    indices followed by the palette RGB bytes. The golden key M11a+ diffs against."""
+    return hashlib.sha256(bytes(indices) + bytes(palette_rgb)).hexdigest()
+
+
 class ReferenceModel:
     """Holds the config + the shared finesine table (built once) and exposes the oracle entry points
     `step_sim(state, keys) -> state` and `render_frame(state, scene) -> bytes` (the H5 signatures)."""
@@ -127,6 +133,16 @@ class ReferenceModel:
             x = (x + fixed_mul(m, self.read_cos(angle), 8, 4)) & 0xFFFFFFFF
             y = (y + fixed_mul(m, self.read_sin(angle), 8, 4)) & 0xFFFFFFFF
         return replace(state, x=x, y=y, angle=angle)
+
+    def render_solid_column(self, col_x: int, color: int, *, bg: int = 0) -> bytes:
+        """M11a's golden frame: a framebuffer cleared to `bg` with column `col_x` filled with `color`
+        (row-major W*H palette indices). The simplest renderer-primitive frame — the fj program
+        produces it bit-exactly via F4 fixed-address packed stores + the F7 0x03 present."""
+        cfg = self.cfg
+        fb = bytearray([bg]) * cfg.FB_SIZE
+        for row in range(cfg.H):
+            fb[row * cfg.W + col_x] = color
+        return bytes(fb)
 
     # ── BSP point location (R_PointInSubsector) ──
     def point_in_subsector(self, cmap: CompiledMap, x: int, y: int) -> int:

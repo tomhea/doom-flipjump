@@ -1,0 +1,14 @@
+M6 integration evidence (R2/R-1) — F3 trig idioms on the M5-generated finesine dispatch table.
+Source: scripts/m6_evidence.py (reproducible). Values from tables.py (R6 SSOT). Flat (R4).
+
+finesine: 4096 entries (16^3), 32-bit (8 nibbles), per_result_nibble mode; 256 lookups.
+
+read_sin: 863.3 ops/lookup = 8 dispatches x 107.9 ops/dispatch -> implied @ = 27.0 (dispatch core ~= 4@).
+          ~4@/dispatch CONFIRMS the design @~=25 working point at game scale (this 4096-table
+          program is moderately large; tiny probes ran at @~=9 in M5). storage_mode = flat.
+
+read_cos: 1161.7 ops/lookup = read_sin + ~298 ops for the +N/4 quarter-turn (hex.mov + hex.add_constant, #9). The cosine SHARES the sine table —
+          a separate cosine LUT (~+span) is not worth it. storage_mode = flat.
+
+Trig is per-column (~160x/frame), so 8 dispatches/read is affordable: ~160 x 863 ~= 138K ops/frame
+for sin reads (per_result_nibble is the canonical D4 override site for 32-bit per-column trig).

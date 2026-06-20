@@ -37,6 +37,7 @@ __all__ = [
     "generate_reciprocal_lut_fj",
     "generate_dispatch_table_fj",
     "generate_offset_deposit_table_fj",
+    "generate_trig_idioms_fj",
 ]
 
 
@@ -341,3 +342,53 @@ def generate_offset_deposit_table_fj(label: str) -> str:
           f"{label}.init",
           ""]
     return "\n".join(L)
+
+
+# ---------------------------------------------------------------------------
+# F3 — trig access idioms (read_sin / read_cos via the shared sine table, #9)
+# ---------------------------------------------------------------------------
+
+def generate_trig_idioms_fj(label: str, count: int, fraction_bits: int, *, result_nibbles: int = 8,
+                            mode: str = "per_result_nibble", over_align: bool = False) -> str:
+    """Emit the finesine dispatch table (`label`, values from `tables.sine_table` — R6 SSOT) plus the
+    F3 trig idioms `read_sin dst, idx` / `read_cos dst, idx`. `idx` is the angle's top nibbles (the
+    16^k-sized table is indexed with no sub-nibble shift, §2.1). Cosine SHARES the sine table:
+    cos = sin((idx + count/4) mod count) — a single `hex.add_constant` of `count/4` on the k-nibble
+    index, wrapping mod 16^k = count (#9; a separate cosine LUT is not worth the span).
+
+    `count` must be a power of 16 (16^k) so the +count/4 wrap is a plain k-nibble add. Trig is
+    per-column (~160x/frame) ⇒ `per_result_nibble` is the canonical mode (D4: span over speed)."""
+    k = 0
+    c = count
+    while c > 1:
+        if c % 16:
+            raise ValueError(f"{label}: count={count} must be a power of 16 (16^k) for trig (§2.1)")
+        c //= 16
+        k += 1
+    index_nibbles = max(1, k)
+    offset = count // 4  # +N/4 (the cosine quarter-turn)
+
+    values = sine_table(count, fraction_bits, 4 * result_nibbles)
+    table = generate_dispatch_table_fj(label, values, index_nibbles=index_nibbles,
+                                       result_nibbles=result_nibbles, mode=mode,
+                                       over_align=over_align)
+    # reopen the table's namespace with the read idioms (read_sin is the bare lookup; read_cos adds
+    # the shared-table quarter-turn offset, mod count via the k-nibble add).
+    idioms = [
+        f"// F3 trig idioms for \"{label}\" (read_sin / read_cos, cosine shares the table, #9)",
+        f"ns {label} {{",
+        "    def read_sin dst, idx {",
+        "        .lookup dst, idx",
+        "    }",
+        f"    def read_cos dst, idx @ ctmp, after {{",
+        "        ;after",
+        f"      ctmp: hex.vec {index_nibbles}",
+        "      after:",
+        f"        hex.mov {index_nibbles}, ctmp, idx",
+        f"        hex.add_constant {index_nibbles}, ctmp, {hex(offset)}",
+        "        .lookup dst, ctmp",
+        "    }",
+        "}",
+        "",
+    ]
+    return table + "\n".join(idioms)

@@ -1,0 +1,10 @@
+..\..\AppData\Local\Programs\Python\Python311\Lib\site-packages\flipjump\assembler\preprocessor.py:64: FlipJumpPreprocessorException
+---------------------------- Captured stdout call -----------------------------
+  parsing:         0.038s
+  macro resolve:   0.117s
+=========================== short test summary info ===========================
+FAILED tests/host/test_lut_generator.py::TestGenerateTrigIdiomsFj::test_emits_table_and_read_macros
+FAILED tests/host/test_lut_generator.py::TestGenerateTrigIdiomsFj::test_count_must_be_power_of_16
+FAILED tests/fj/test_lut_access.py::test_read_sin_byte_exact - flipjump.utils...
+FAILED tests/fj/test_lut_access.py::test_read_cos_byte_exact_with_wrap - flip...
+4 failed, 1 passed in 1.59s

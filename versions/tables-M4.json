@@ -1,0 +1,37 @@
+{
+  "note": "M4 LUT value-kernel sample dump (deterministic; from src/doomfj/tables.py)",
+  "sine_table(8,16,32)": [
+    "0x0",
+    "0xb505",
+    "0x10000",
+    "0xb505",
+    "0x0",
+    "0xffff4afb",
+    "0xffff0000",
+    "0xffff4afb"
+  ],
+  "sine_table(4096,16,32) anchors": {
+    "k=0": "0x0",
+    "k=1024 (pi/2)": "0x10000",
+    "k=2048 (pi)": "0x0",
+    "k=3072 (3pi/2)": "0xffff0000"
+  },
+  "reciprocal_table(16,16,32)": [
+    "0xffffffff",
+    "0x10000",
+    "0x8000",
+    "0x5555",
+    "0x4000",
+    "0x3333",
+    "0x2aab",
+    "0x2492",
+    "0x2000",
+    "0x1c72",
+    "0x199a",
+    "0x1746",
+    "0x1555",
+    "0x13b1",
+    "0x1249",
+    "0x1111"
+  ]
+}

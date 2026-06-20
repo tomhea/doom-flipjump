@@ -5,7 +5,7 @@ These anchor the mirror to hand-computed Q-format values (the same ground truth 
 together they prove the fj macros are correct (unit: host==truth, parity: fj==host)."""
 import pytest
 
-from doomfj.fixedpoint import fixed_mul, fixed_div, mul_const
+from doomfj.fixedpoint import fixed_mul, fixed_div, mul_const, encode_fixed_point
 
 # (a, b, n, f) -> expected raw n-nibble result (16.16 is n=8,f=4; 8.8 is n=4,f=2)
 MUL_CASES = [
@@ -53,3 +53,30 @@ def test_fixed_div_by_zero_returns_none():
 @pytest.mark.parametrize("src,c,n,want", MUL_CONST_CASES)
 def test_mul_const(src, c, n, want):
     assert mul_const(src, c, n) == want
+
+
+# encode_fixed_point: real value -> raw two's-complement fixed-point word (lifted from PR #1, M4)
+def test_encode_positive():
+    assert encode_fixed_point(1.0, fraction_bits=16, total_bits=32) == 0x10000
+    assert encode_fixed_point(1.5, fraction_bits=16, total_bits=32) == 0x18000
+
+
+def test_encode_negative_is_twos_complement():
+    assert encode_fixed_point(-1.0, fraction_bits=16, total_bits=32) == 0xFFFF0000
+    assert encode_fixed_point(-0.5, fraction_bits=16, total_bits=32) == 0xFFFF8000
+
+
+def test_encode_8_8():
+    assert encode_fixed_point(2.5, fraction_bits=8, total_bits=16) == 0x0280
+    assert encode_fixed_point(-2.5, fraction_bits=8, total_bits=16) == 0xFD80
+
+
+def test_encode_rounds_to_nearest():
+    assert encode_fixed_point(0.3, fraction_bits=16, total_bits=32) == round(0.3 * (1 << 16))
+
+
+def test_encode_out_of_range_raises():
+    with pytest.raises(ValueError):
+        encode_fixed_point(40000.0, fraction_bits=16, total_bits=32)
+    with pytest.raises(ValueError):
+        encode_fixed_point(-40000.0, fraction_bits=16, total_bits=32)

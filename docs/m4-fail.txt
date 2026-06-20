@@ -1,0 +1,15 @@
+    def test_encode_out_of_range_raises():
+>       with pytest.raises(ValueError):
+E       Failed: DID NOT RAISE <class 'ValueError'>
+
+tests\host\test_fixedpoint.py:79: Failed
+=========================== short test summary info ===========================
+FAILED tests/host/test_tables.py::test_sine_anchors_16_16 - assert 0 == 4096
+FAILED tests/host/test_tables.py::test_sine_matches_math_sin - IndexError: li...
+FAILED tests/host/test_tables.py::test_reciprocal_values_16_16 - assert 0 == 256
+FAILED tests/host/test_tables.py::test_reciprocal_clamps_when_over_max - Inde...
+FAILED tests/host/test_fixedpoint.py::test_encode_positive - assert -1 == 65536
+FAILED tests/host/test_fixedpoint.py::test_encode_negative_is_twos_complement
+FAILED tests/host/test_fixedpoint.py::test_encode_8_8 - assert -1 == 640
+FAILED tests/host/test_fixedpoint.py::test_encode_rounds_to_nearest - assert ...
+FAILED tests/host/test_fixedpoint.py::test_encode_out_of_range_raises - Faile...

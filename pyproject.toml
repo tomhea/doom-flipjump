@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "doomfj"
+version = "0.0.0"
+description = "DOOM on FlipJump — host tools (WAD/LUT/map/texture compilers, reference model, build, harness)"
+requires-python = ">=3.10,<3.14"          # flipjump abi3 is py3.10+; 3.14 unsupported for pygame (§H)
+dependencies = ["flipjump[io]>=1.5.0", "pillow"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/doomfj"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

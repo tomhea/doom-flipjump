@@ -1,0 +1,15 @@
+=== fixed_mul: actual fj stdout vs host mirror (16.16 / 8.8) ===
+  1.5*2.0        fj=00030000  host=00030000  OK
+  -1.5*2.0       fj=fffd0000  host=fffd0000  OK
+  -1.5*-2.0      fj=00030000  host=00030000  OK
+  overflow-wrap  fj=00000000  host=00000000  OK
+  8.8 2.5*-2.0   fj=fb00      host=fb00      OK
+
+=== fixed_div (incl. trunc-toward-zero, signed) ===
+  -1.0/3.0       fj=ffffaaab  host=ffffaaab  OK
+  1.0/3.0        fj=00005555  host=00005555  OK
+  3.0/-2.0       fj=fffe8000  host=fffe8000  OK
+
+=== mul_const (strength-reduced; 320 = DOOM screen stride) ===
+  0x1234*320  fj=0016c100  host=0016c100  OK
+  0xffffffff*5    fj=fffffffb  host=fffffffb  OK

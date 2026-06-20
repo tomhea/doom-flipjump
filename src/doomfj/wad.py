@@ -75,6 +75,32 @@ class Thing:
     flags: int
 
 
+@dataclass(frozen=True)
+class PatchRef:
+    originx: int      # placement of the patch within the texture
+    originy: int
+    patch: str        # PNAMES patch lump name
+
+
+@dataclass(frozen=True)
+class TextureDef:
+    name: str
+    width: int
+    height: int
+    patches: tuple    # tuple[PatchRef, ...]
+
+
+@dataclass(frozen=True)
+class Picture:
+    """A decoded DOOM picture (patch/sprite): column-major, with transparency. `columns[x]` is a list
+    of (y, palette_index) for the opaque pixels of column x (gaps are transparent)."""
+    width: int
+    height: int
+    leftoffset: int
+    topoffset: int
+    columns: tuple    # tuple[list[tuple[int, int]], ...], one per column
+
+
 def _records(data: bytes, fmt: str):
     """Yield struct-unpacked tuples for each fixed-size record packed in data."""
     size = struct.calcsize(fmt)
@@ -158,3 +184,70 @@ class WadFile:
 
     def things(self, mapname: str) -> list[Thing]:
         return [Thing(*r) for r in _records(self._map_lump(mapname, "THINGS").data, "<5h")]
+
+    # ── graphics lumps (H4 / M8): palette, colormap, textures, patches, flats ──
+    def playpal(self, index: int = 0) -> list[tuple[int, int, int]]:
+        """One 256-colour RGB palette (PLAYPAL holds 14; index 0 is the game palette)."""
+        data = self.get_data("PLAYPAL")
+        base = index * 768
+        return [(data[base + i * 3], data[base + i * 3 + 1], data[base + i * 3 + 2]) for i in range(256)]
+
+    def colormap(self) -> list[list[int]]:
+        """The COLORMAP light tables: a list of maps (34 in DOOM/Freedoom: 32 light levels + invuln +
+        all-black); map[i] = the palette index to display for colour i at that light level."""
+        data = self.get_data("COLORMAP")
+        return [list(data[m * 256:(m + 1) * 256]) for m in range(len(data) // 256)]
+
+    def pnames(self) -> list[str]:
+        """The PNAMES patch-name directory (texture patches are referenced by index into this)."""
+        data = self.get_data("PNAMES")
+        n = struct.unpack_from("<i", data, 0)[0]
+        return [_str8(data[4 + i * 8:12 + i * 8]) for i in range(n)]
+
+    def texture_defs(self, lump: str = "TEXTURE1") -> list[TextureDef]:
+        """Parse a TEXTUREx lump into texture definitions (name, size, composing patches)."""
+        data = self.get_data(lump)
+        names = self.pnames()
+        count = struct.unpack_from("<i", data, 0)[0]
+        offsets = struct.unpack_from(f"<{count}i", data, 4)
+        defs: list[TextureDef] = []
+        for off in offsets:
+            name = _str8(data[off:off + 8])
+            _masked, width, height, _coldir, npatch = struct.unpack_from("<ihhih", data, off + 8)
+            patches = []
+            for p in range(npatch):
+                ox, oy, pidx, _step, _cmap = struct.unpack_from("<5h", data, off + 22 + p * 10)
+                patches.append(PatchRef(ox, oy, names[pidx]))
+            defs.append(TextureDef(name, width, height, tuple(patches)))
+        return defs
+
+    def lumps_between(self, start: str, end: str) -> list[Lump]:
+        """Lumps strictly between two marker lumps (e.g. F_START/F_END for flats, P_START/P_END)."""
+        names = self.names()
+        s, e = names.index(start), names.index(end)
+        return self._lumps[s + 1:e]
+
+    def flat(self, name: str) -> bytes:
+        """A flat (floor/ceiling tile): raw 64x64 palette-index bytes, row-major (no header)."""
+        return self.get_data(name)
+
+
+def decode_picture(data: bytes) -> Picture:
+    """Decode the DOOM picture (patch) format: header (w, h, left, top) + per-column posts. Each post
+    is topdelta/length/pad + `length` palette-index bytes + pad; 0xFF topdelta ends a column. Gaps
+    between posts are transparent."""
+    width, height, left, top = struct.unpack_from("<4h", data, 0)
+    col_offs = struct.unpack_from(f"<{width}i", data, 8)
+    columns = []
+    for x in range(width):
+        pixels = []
+        pos = col_offs[x]
+        while data[pos] != 0xFF:
+            topdelta = data[pos]
+            length = data[pos + 1]
+            pos += 3  # topdelta, length, unused pad
+            for i in range(length):
+                pixels.append((topdelta + i, data[pos + i]))
+            pos += length + 1  # pixels + trailing unused pad
+        columns.append(pixels)
+    return Picture(width, height, left, top, tuple(columns))

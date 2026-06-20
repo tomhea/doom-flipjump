@@ -1,0 +1,15 @@
+{
+  "note": "M8 texture/colormap/palette compiler (H4) artifact. Assets from trimmed Freedoom (BSD). E1M1 span on dev Freedoom (gitignored). Deterministic; src/doomfj/texturecompiler.py.",
+  "fixture": "tests/fixtures/freedoom_assets.wad (palette + COLORMAP + A-YELLOW/STEP4 + patches + 2 flats)",
+  "e1m1_texture_span": {
+    "level": "E1M1",
+    "wall_textures_used": 102,
+    "flats_used": 44,
+    "wall_texel_count": 1105664,
+    "flat_texel_count": 180224,
+    "total_texture_texels": 1285888,
+    "note": "1 dispatch entry per texel (byte result); the \u00a71.3 textures-dominate-LUT-span line. Compare against the ~300K design estimate; downscale is the span lever if over budget.",
+    "compiled_texture_storage_mode": "flat"
+  },
+  "finding": "E1M1 full-res textures ~1.29M texels (~4x the ~300K design estimate) -> downscale lever (D5) likely needed; decided at R0 (M10)."
+}

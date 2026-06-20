@@ -5,3 +5,7 @@ assets/doom1.wad
 __pycache__/
 .pytest_cache/
 *.egg-info/
+assets/freedoom1.wad
+assets/freedoom2.wad
+assets/freedoom-*.zip
+assets/freedoom-*/

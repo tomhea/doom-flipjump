@@ -156,22 +156,19 @@ zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |
 |---|---|---|---|---|
-| hex.init truth tables | ~fixed (or/and/mul/cmp/add/sub) | — | TBD | from `stl.startup_and_init_all` |
+| hex.init truth tables (+ ptr/stack) | ~fixed (or/and/mul/cmp/add/sub) | — | **17,310** (R0) | from `stl.startup_and_init_all` |
 | Unrolled renderer code (D2b) | ~16K px × stub size + 160 col × col-setup | — | **TBD (R-2 watch)** | the big code consumer; assemble time tracked |
-| Texture dispatch table(s) (D5) | ~300K texels (native E1M1; R0 exact) | pow2 pad | **~300K entries (OQ8 watch)** | likely largest → placed first; downscale is the lever |
+| Texture dispatch table(s) (D5) | **351,936 texels** (E1M1, **2× downscaled**; full-res 1,407,744) | pow2 pad | **4,959,770 words** (R0; ~14.1 w/texel; 89.5% of span) | largest → placed first; **2× downscale lever applied** (= NATIVE/W, R0 decision) — full-res was 2.36× the flat limit |
 | **Leading alignment pad** (hot-low ⇄ largest table) | = (texture-table 2ⁿ boundary) − (low data + small tables end) | **dead span** | **TBD (R0); ~0.1–0.5M expected** | the hot-low data region (framebuffer/palette/buffers) + the small tables sit in `[0, 2ⁿ)`; the gap up to the texture table's 2ⁿ boundary is dead span — **RAM only, zero per-op cost** — summed here per §3.3, not discovered. Shrinks if the texture table is downscaled to a smaller 2ⁿ. |
-| Trig (finesine; cos = offset; tangent/viewangle) | **N=4096=16³** (top 3 nibbles, no shift §2.1; per-result-nibble, D4) | 16³-aligned | TBD (~0.25MB if 4096×8-nibble) | cosine shares the sine table (+N/4 = single-hex add); 256 = coarse fallback |
-| Reciprocal / scale | pow2 ≥ entries | pow2 pad | TBD | replaces divides |
+| Trig (finesine; cos = offset; tangent/viewangle) | **N=4096=16³** (top 3 nibbles, no shift §2.1; per-result-nibble, D4) | 16³-aligned | **212,650 words** (R0; finesine only) | cosine shares the sine table (+N/4 = single-hex add); 256 = coarse fallback |
+| Reciprocal / scale | pow2 ≥ entries | pow2 pad | **97,378 words** (R0; 4096×32b) | replaces divides |
 | yslope · viewangletox/xtoviewangle | pow2 ≥ entries | pow2 pad | TBD | |
-| Colormaps (D4 handlers) | 32×256 = 8192, byte results | pow2 pad | 8192 entries | per-column-selected (D11); over-align #3 |
-| +4-offset deposit table (D3) | 256 | pow2 pad | ~256 | |
-| Framebuffer | W·H = 160·100 = 16,000 | — | 16,000 | packed bytes, no align |
-| Palette | 256·3 = 768 | — | 768 | |
-| Map/BSP (now **code**, opt #7) | ~470 nodes × ~40 ops | — | ~0.02–0.06M | replaces the data stream; +assemble time (R-2) |
-| State/scratch registers | small fixed set | — | TBD | hex.vec |
-| **Total (estimate, R0 confirms)** | | | **~2.5–3M ops ≈ 20–24 MB flat RAM** | **< 64 MB limit, ~3× headroom (R-3 holds)** |
+| Colormaps (D4 handlers) | 32×256 = 8192, byte results | pow2 pad | **110,146 words** (R0) | per-column-selected (D11); over-align #3 |
+| +4-offset deposit table (D3) | 256 | pow2 pad | **3,170 words** (R0) | |
+| Palette + framebuffer + map geometry streams + pad | — | — | **139,824 words** (R0, lumped) | map = **geometry streams** (BSP-as-code deferred to M12) |
+| **Total (R0 MEASURED)** | | | **5,540,248 words ≈ 22.2 MB flat RAM** | **= 0.66× the 2²³ limit ⇒ 1.51× headroom (R-3 GREEN)** |
 
-**Program size (estimate, R0 measures):** ~2.5–3M ops ⇒ **~20–24 MB runtime flat-memory footprint** (well under the 64 MB / `2²³`-word default limit), and a **~6–10 MB compressed `.fjm`** on disk. **Textures dominate the table span** (~85% of the ≈1.5–2M LUT/table span, §1.3 — the single largest span consumer, ~½–⅔ of the whole program) — dispatch-LUT textures trade ~6× space for cheap per-pixel reads (D5); halving texture resolution is the size/assemble lever if needed. **BSP-as-code (#7) adds little *size* (~0.2–0.5 MB) — its cost is assemble *time* (R-2) + per-level recompile.** **No runtime data loading:** FlipJump has no filesystem (only the keyboard input stream), so the **level is baked into `doom.fjm` at assemble time** (R2 = E1M1 only, D8).
+**Program size (R0 MEASURED — E1M1, 2× textures):** **5,540,248 words ⇒ 22.2 MB runtime flat-memory footprint** (= 0.66× the 64 MB / `2²³`-word limit, **1.51× headroom**, `storage_mode==flat`), and a **1.66 MB compressed `.fjm`** on disk; assemble ~172 s. **Textures dominate the span** (**89.5%**: 4.96M of 5.54M words, §1.3) — dispatch-LUT textures trade space for cheap per-pixel reads (D5); the **2× downscale lever (= NATIVE/W) was applied at R0** (full-res was 2.36× the flat limit — did not fit). **BSP-as-code (#7) adds little *size* (~0.2–0.5 MB) — its cost is assemble *time* (R-2) + per-level recompile.** **No runtime data loading:** FlipJump has no filesystem (only the keyboard input stream), so the **level is baked into `doom.fjm` at assemble time** (R2 = E1M1 only, D8).
 
 **Level packaging — *owner-leaning: all levels in one binary*** (vs one `.fjm`/level). **Runtime fps is *unchanged* by level count** — the renderer walks only the *current* level's BSP; the others sit dormant (level-switch = re-point the BSP root + reset state, once per transition). Cost is space + assemble time only, and **textures are shared**, so it scales sub-linearly. **All 9 shareware E1 levels** (E1M1 Hangar · E1M2 Nuclear Plant · E1M3 Toxin Refinery · E1M4 Command Control · E1M5 Phobos Lab · E1M6 Central Processing · E1M7 Computer Station · E1M8 Phobos Anomaly · E1M9 Military Base) ≈ **~31–38 MB flat RAM** (texture *union* ~21–28 MB + 9× small BSP-code + shared LUTs/renderer; under the 64 MB limit, ~1.7× headroom) / **~12–18 MB `.fjm`**. **Watch item: assemble time** (~9× BSP blocks + the full texture union — R-2). The full game (Ultimate 36 / DOOM II 32) grows the texture union past 64 MB → raise `--flat-max-words` or downscale.
 
@@ -192,15 +189,15 @@ listed apart. `W=160, H=100`; trig `N=4096=16³` (§2.1). *PENDING* = a sizing d
 | reciprocal / scale | distance | 4096 | 8.8–16.8 (§1.1.4) | R2 | 16³ buckets; kills the wall divide |
 | colormap | (light, texel) | **8192** (32×256) | byte | R2 | 32 light levels; per-pixel, over-align #3 |
 | +4-offset deposit | (old,new) hi-nibble | 256 | flips | R2 | D3 |
-| textures (wall+flat) | texel position | **~300,000** | byte | R2 | native E1M1 (D5/OQ8); R0 measures exact, downscale is the lever if over budget |
+| textures (wall+flat) | texel position | **351,936** (R0) | byte | R2 | E1M1 **2× downscaled** (full-res 1,407,744; 114 walls + 43 flats); D5 lever applied |
 | palette (device data) | index | 256 | 3 bytes | R2 | data, not a dispatch LUT |
 | P_Random `rndtable` | rndindex | 256 | byte | R3 | excluded from the R2 total |
 | — *STL infra*: `hex.init` | — | ~6×256 (+ mul) | — | infra | flipjump's own; counted apart |
 
 **R2 subtotal** (fixed-size LUTs, *excl.* colormap + textures): 4096+2048+2048+161+160+100+4096+256 = **12,965 entries** (the 8 dispatch LUTs above; palette is data and rndtable is R3, both excluded).
 **+ colormap (32×256) = 8,192** → non-texture total **21,157**.
-**+ textures ≈ 300,000** (native E1M1 planning; R0 measures exact).
-**⇒ Unified R2 total ≈ 321,157 entries** — **textures are ~93% of it**; everything else sums to ~21K.
+**+ textures = 351,936** (R0 MEASURED: E1M1 2× downscaled; full-res would be 1,407,744).
+**⇒ Unified R2 total = 373,093 entries** — **textures are ~94% of it**; everything else sums to ~21K. *(Note: the M10 build integrates the entries with built generators — finesine/reciprocal/colormap/deposit/textures/palette; the projection LUTs tantoangle/viewangletox/xtoviewangle/distscale/yslope land with the F5 renderer, M11+.)*
 *Span note (→ §1.2):* entry *count* ≠ span. Wide per-result-nibble tables multiply by result-nibbles (finesine ×8; reciprocal/scale ~×4–6 at 8.8–16.8, §1.1.4) and per-entry handlers cost ~popcount ops/entry; the **LUT span lands ≈1.5–2M ops** (textures dominate), comfortably under the 8.4M flat limit. **Span pressure vs assemble-time pressure are distinct, and live in different places:** for raw *span*, the LUTs/textures (≈1.5–2M) plus the leading alignment pad (§1.2) dominate; the unrolled renderer *code* is the **assemble-time** pressure (R-2 — ~16K macro expansions), with comparatively *small* span once the heavy logic is factored into the shared `fcall` leaf (~100–300K ops, §B/D2).
 
 *Sizing (#1 — bump where it helps):* sizes are **matched to the 160×100/256/32 output**, so more entries are *not* added where they wouldn't show. The **angular/projection tables already out-resolve the 160-column output ~6×** (finesine 4096 = 0.088°/entry vs ~0.56°/column; tantoangle/viewangletox feed a 160-wide result and get re-quantized). The **per-row/col tables are exactly one entry per column/row** (xtoviewangle=W+1, distscale=W, yslope=H). **reciprocal/scale** is the only map-dependent size — **R0 tunes it to E1M1's measured max sightline** (default 4096; bumped freely, LUT span has ~6M ops headroom); near-wall scale smoothness comes from **seg-scale interpolation** (R1), not a bigger table. colormap=32 (owner) and textures=native are at chosen/max fidelity. W/H-dependent tables **and bit-widths** auto-scale for the 320×200 stretch — the 2-const invariant (§1); the screen-column result width is `⌈log₂W⌉`, not a fixed 8 (§1.1.4 — the one place a naïve W-change would otherwise overflow at 320). *(Override any specific table for more margin.)*
@@ -485,7 +482,7 @@ Per handoff §H / §3.5. Top to bottom:
 
 - **R-1** — Budget estimates are projections; S5.3 measures before R2 commits. **At the @ = 25 working point the optimized per-pixel work alone is ~11.2M and the full frame ~14–16M — *over* the 11.2M budget at full fidelity** (§1.1): three optimisms were corrected in S2 — the budget is **@-proportional**, the per-pixel line was under-counted (DDA + select, §1.1.1), and the DDA's optimized cost was itself under-estimated (each nibble-add is ~4@, so the 8.8+accumulator DDA is ~11@/px, not ~5@). fps is continuous (D9), so this isn't a hard wall: applying the §1.1.2 optimization set (**#1–9**, incl. the §1.1.3 column rebuild's BSP-as-code) lands the full-res-textured frame at **~14M ⇒ ~20 fps — the chosen target** (§1 curve); reaching 25 fps (~11.2M) or buying margin is then a **fidelity lever** (flat-colored floors ~9M ⇒ ~30 fps / 12.5 fps / bpp=4), not a further per-pixel optimization. #1–2 are mandatory just to reach the per-pixel baseline. **Top R-1 tasks: measure @ *and* the real per-pixel DDA cost.** Fallbacks: flat-colored floors / flat-shaded / 12.5 fps / bpp=4.
 - **R-2** — Assembler scalability is load-bearing (column-unroll + mega dispatch tables). Measure assemble time + `.fjm` size at game scale (S5.1/S5.3); relief valve = design (a) column buffer.
-- **R-3** — Span vs flat path: power-of-two padding can silently overflow → paged (~2.5× slower). Guards: span ledger + `storage_mode` assertion.
+- **R-3** — Span vs flat path: power-of-two padding can silently overflow → paged (~2.5× slower). Guards: span ledger + `storage_mode` assertion. **STATUS: GREEN (M10/R0).** E1M1 measured at **5,540,248 words = 0.66× the 2²³ limit (1.51× headroom), `storage_mode==flat`** — after applying the **2× texture downscale** (full-res was 2.36× over). `build.build_doom` asserts flat + span<limit (R4).
 - **R-4** — D3 encoding tension (hex-memory pixels vs packed-byte device read) — resolve in this doc, not in code.
 - **R-5** — *(cleared)* flipjump 1.5.0 released. We use **no speculation tier**; the 320×200 stretch instead rides flat-run + our own optimizations toward ~400M+ (revisit at R2). flipjump is near-frozen but **extensible** (§2.1) — a device/engine change is a justified last-resort lever, not a dependency.
 - **R-6** — Fidelity unknowns: 8.8 wobble (D6), 32×32→64 intermediates (U5/D13), `@` growth (U7) — survive re-baselining, now with more headroom.

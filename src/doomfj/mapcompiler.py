@@ -271,6 +271,25 @@ def compile_map(wad, mapname: str, *, mode: str = "streams") -> str:
     return "\n".join(out)
 
 
+def compile_geometry_streams(wad, mapname: str) -> str:
+    """Emit ONLY the raw WAD geometry streams (VERTEXES/LINEDEFS/SIDEDEFS/SECTORS) as packed-byte data
+    — the F6 line-collision data (D1) and the map's data-span contribution — WITHOUT building the BSP.
+
+    This is the M10/R0 map contribution: a conservative (streams ≥ BSP-code) span term that needs no
+    node builder. The BSP-as-code (#7) for a *full* level needs a balanced node builder; build_bsp
+    handles the convex/L-shape fixtures but its first-splitting-seg heuristic is unbalanced at
+    E1M1 scale (~1829 segs → deep recursion), so balanced E1M1 node-building is deferred to M12 (where
+    the BSP is actually walked front-to-back)."""
+    pfx = mapname.lower()
+    out = [f"// E1M1 geometry streams (collision data, D1; BSP-as-code deferred to M12) for {mapname!r}"]
+    out.append(_bytes_stream(f"{pfx}_vertexes",
+                             [(v.x & 0xFFFF, v.y & 0xFFFF) for v in wad.vertexes(mapname)], (2, 2)))
+    for lump, (getter, widths) in _LUMP_SPECS.items():
+        records = getter(getattr(wad, lump.lower())(mapname))
+        out.append(_bytes_stream(f"{pfx}_{lump.lower()}", records, widths))
+    return "\n".join(out)
+
+
 def _bsp_as_code(pfx: str, bsp: CompiledMap) -> str:
     """BSP-as-code (opt #7): each node a code block with its partition line as compile-time constants,
     so the side test is a `mul_const` (no per-node stream read). The leaves jump to per-subsector

@@ -1,0 +1,15 @@
+........................................................................ [ 59%]
+..................................................                       [100%]
+122 passed in 40.29s
+--- new-file detail ---
+cachedir: .pytest_cache
+tests/host/test_e1m1_integration.py::test_texture_downscale_is_config_derived PASSED [ 10%]
+tests/host/test_e1m1_integration.py::test_downscale_identity PASSED      [ 20%]
+tests/host/test_e1m1_integration.py::test_downscale_2x_subsample PASSED  [ 30%]
+tests/host/test_e1m1_integration.py::test_downscale_dims PASSED          [ 40%]
+tests/host/test_e1m1_integration.py::test_downscale_preserves_transparency PASSED [ 50%]
+tests/host/test_e1m1_integration.py::test_compile_texture_downscaled_texel_count PASSED [ 60%]
+tests/host/test_e1m1_integration.py::test_compile_flat_downscaled_assembles PASSED [ 70%]
+tests/host/test_e1m1_integration.py::test_oracle_shares_downscale_lever PASSED [ 80%]
+tests/host/test_e1m1_integration.py::test_fixture_is_full_e1m1 PASSED    [ 90%]
+tests/host/test_e1m1_integration.py::test_build_doom_subset_is_flat PASSED [100%]

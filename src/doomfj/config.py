@@ -23,6 +23,14 @@ class Config:
     # ── other base constants ──
     BPP: int = 8        # bits/pixel -> 256 colors
     TRIG_N: int = 4096  # trig LUT entries, 16**3 (§1.2/§2.1)
+    NATIVE_W: int = 320  # DOOM's native authoring width (the F8 UI + D5 texture downscale reference)
+
+    @property
+    def TEXTURE_DOWNSCALE(self) -> int:
+        """World-texture D5 span-lever factor = NATIVE_W // W: 2 at W=160 (the R0 decision), 1 at the
+        native 320 (no downscale — raise --flat-max-words instead, DESIGN §1.2 320 stretch). The single
+        bit-exact factor shared by the texture compiler (H4) and the oracle (H5) — R6/D12."""
+        return max(1, self.NATIVE_W // self.W)
 
     # ── resolution-derived (computed; NEVER hardcoded) ──
     @property

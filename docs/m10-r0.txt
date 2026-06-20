@@ -1,0 +1,47 @@
+M10 R0 GATE -- E1M1 integration: one flat .fjm + measured span ledger (R-3)
+===========================================================================
+Source assets: tests/fixtures/freedoom_e1m1.wad (committed, Freedoom 0.13.0, BSD) -- the FULL E1M1
+level: 114 wall textures (merged TEXTURE1+TEXTURE2) + 43 flats + 163 patches + PLAYPAL + COLORMAP +
+geometry (292 things / 1175 linedefs / 182 sectors). Built by build_doom (src/doomfj/build.py, H6).
+
+THE TEXTURE-SPAN DECISION (R-3 / OQ8, the live risk since M8)
+------------------------------------------------------------
+Full-res E1M1 = 1,407,744 texels. Per-texel dispatch span ~= 14.1 words/texel ->
+  full-res textures ~= 19.8M words = 2.36x the 2^23 (8,388,608-word) flat limit -- does NOT fit,
+  and ~10 min / ~173 MB-of-.fj to assemble (R-2).
+OWNER DECISION (R0): apply the D5 downscale lever at 2x (= NATIVE_W // W = 320/160), the config-derived
+factor. ONE shared bit-exact integer downscale (subsample, not average -- palette indices are
+categorical): texturecompiler.downscale_canvas, imported by the oracle (reference_model) too, so the
+program and the golden sample the same texels (R6/D12). 2x -> texels/4 = 351,936.
+
+MEASURED unified .fjm (build/doom_e1m1.fjm)
+-------------------------------------------
+  storage_mode : flat            <-- R4 green (no paged/hybrid fallback)
+  span         : 5,540,248 words = 0.66x the 8,388,608 limit  => 1.51x headroom
+  flat RAM     : ~22.2 MB        (well under the 64 MB / 2^23-word budget)
+  .fjm on disk : 1.66 MB
+  assemble     : ~172 s (~2.9 min) for the full level at 2x  (R-2 tracked)
+
+SPAN LEDGER (words, measured -- DESIGN section 1.2)
+--------------------------------------------------
+  startup (hex.init + ptr + stack) .........     17,310
+  finesine (4096, per_result_nibble x8) ....    212,650
+  reciprocal / scale (4096 x32b) ...........     97,378
+  colormap (32x256 = 8192) .................    110,146
+  deposit (+4-offset, 256) .................      3,170
+  palette + framebuffer + map streams + pad .   139,824
+  textures (114 walls + 43 flats, 2x) ......  4,959,770   <-- 89.5% of span (351,936 texels)
+  ------------------------------------------ ----------
+  TOTAL ....................................  5,540,248   = 0.66x limit, 1.51x headroom
+
+ENTRY LEDGER (DESIGN section 1.3): finesine 4096 + reciprocal 4096 + colormap 8192 + deposit 256 +
+palette 256 + textures 351,936 (downscaled) => textures are ~96% of entries; non-texture ~12,900.
+
+DEFERRED (not blocking the gate): BSP-as-code. The M7 node builder's first-splitting-seg heuristic is
+unbalanced at E1M1 scale (~1829 segs -> deep recursion). M10 emits the raw geometry streams instead (a
+conservative span term, the F6 collision data); a balanced E1M1 node builder lands at M12, where the
+BSP is actually walked front-to-back. Its span is ~negligible (<1%) vs textures, so the gate verdict
+is unaffected.
+
+VERDICT: R-3 GREEN. One flat E1M1 .fjm, span < limit with 1.51x measured headroom. The texture-span
+risk is resolved by the 2x downscale lever.

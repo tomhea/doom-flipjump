@@ -1,0 +1,54 @@
+{
+  "note": "M5 dispatch-CODE emitter (H2/S5.1) artifact: measured metrics + a readable construction sample (deterministic; from src/doomfj/lut_generator.py)",
+  "metrics": {
+    "table_entries": 4096,
+    "result_nibbles": 8,
+    "nlookups": 64,
+    "per_entry": {
+      "assemble_seconds": 5.65,
+      "fjm_bytes": 96417,
+      "op_counter": 22495,
+      "storage_mode": "flat"
+    },
+    "per_result_nibble": {
+      "assemble_seconds": 8.556,
+      "fjm_bytes": 80365,
+      "op_counter": 55148,
+      "storage_mode": "flat"
+    },
+    "deposit": {
+      "assemble_seconds": 0.406,
+      "fjm_bytes": 16356,
+      "op_counter": 11482,
+      "storage_mode": "flat"
+    }
+  },
+  "tradeoff": "per-entry: larger span (96KB), 1 dispatch/lookup (faster). per-result-nibble: ~2-3x smaller span (80KB), 8 dispatches/lookup (D4, confirmed). Both flat (R4).",
+  "sample_per_entry_1nibble_4entries_fj": [
+    "// dispatch table \"sample_pe\": 4 entries, per-entry mode, 1-nibble result (doomfj.lut_generator)",
+    "ns sample_pe {",
+    "    def lookup dst, idx @ return < hex.tables.ret, hex.tables.res, .dsp {",
+    "        rep(1, i) hex.xor .dsp + 4*i, idx + i*dw",
+    "        wflip hex.tables.ret+w, return, .dsp",
+    "      return:",
+    "        wflip hex.tables.ret+w, return",
+    "        hex.zero dst",
+    "        hex.xor_zero dst, hex.tables.res",
+    "    }",
+    "    def init @ switch, clean, end < hex.tables.res, hex.tables.ret > dsp {",
+    "        ;end",
+    "      dsp: ;switch",
+    "        pad 4",
+    "      switch:",
+    "        stl.wflip_macro hex.tables.res+w, 0xa*dw, clean+0*dw",
+    "        stl.wflip_macro hex.tables.res+w, 0x5*dw, clean+1*dw",
+    "        stl.wflip_macro hex.tables.res+w, 0xf*dw, clean+2*dw",
+    "        stl.wflip_macro hex.tables.res+w, 0x3*dw, clean+3*dw",
+    "      clean:",
+    "        hex.tables.clean_table_entry__table 4, .dsp, hex.tables.ret",
+    "      end:",
+    "    }",
+    "}",
+    "sample_pe.init"
+  ]
+}

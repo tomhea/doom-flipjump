@@ -5,8 +5,10 @@ the full Freedoom WAD is gitignored, so tests read the committed fixture, never 
 fj reads (sample_texture / apply_colormap) live in tests/fj/test_texture_sample.py."""
 from pathlib import Path
 
+import flipjump as fj
 import pytest
 
+from doomfj.harness import W
 from doomfj.wad import WadFile, decode_picture
 from doomfj.texturecompiler import (
     colormap_values,
@@ -102,3 +104,19 @@ def test_compile_flat_and_colormap_emit_idioms():
 def test_compile_texture_unknown_rejected():
     with pytest.raises(KeyError):
         compile_texture("t", _wad(), "NOPE")
+
+
+def test_compiled_graphics_assemble_flat(tmp_path):
+    # R4: compiled texture + flat + colormap must assemble + run on the flat path (no paged fallback).
+    # Uses the committed fixture so this runs in CI (the m8_evidence flat check needs dev Freedoom).
+    wad = _wad()
+    src = (compile_texture("tex", wad, "A-YELLOW") + "\n"
+           + compile_flat("flt", wad, "CEIL1_2") + "\n"
+           + compile_colormap("cm", wad, lights=2, over_align=False))
+    prog = "stl.startup_and_init_all\nstl.loop\n" + src + "\n"
+    p = tmp_path / "gfx.fj"
+    p.write_text(prog, encoding="utf-8")
+    out = tmp_path / "gfx.fjm"
+    fj.assemble([p.resolve()], out, memory_width=W, print_time=False)
+    term = fj.run(out, print_time=False, print_termination=False)
+    assert str(term.storage_mode) == "flat"

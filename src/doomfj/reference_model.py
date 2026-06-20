@@ -30,6 +30,7 @@ from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, _signed  # shared signed Q-format kernel (R6)
 from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, compile_bsp, _point_side  # shared geometry (R6)
 from doomfj.tables import sine_table
+from doomfj.texturecompiler import downscale_canvas  # shared D5 downscale lever (R6/D12)
 from doomfj.wad import WadFile
 
 # ── sim / angle constants (BAM: full turn = 2**32) ──
@@ -94,6 +95,7 @@ class ReferenceModel:
         self.sine = sine_table(self.cfg.TRIG_N, 16, 32)        # shared LUT values (R6)
         # finesine index = top log2(TRIG_N) bits of the BAM angle (config-derived, not a literal 20)
         self.angle_shift = 32 - (self.cfg.TRIG_N.bit_length() - 1)
+        self.downscale = self.cfg.TEXTURE_DOWNSCALE   # the shared D5 factor (used once textures sample, M11b)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
     def read_sin(self, angle: int) -> int:

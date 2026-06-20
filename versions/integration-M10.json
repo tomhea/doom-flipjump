@@ -1,0 +1,41 @@
+{
+  "note": "M10 R0-gate integration (H6). Full E1M1 table set assembled into ONE flat .fjm via src/doomfj/build.py:build_doom. Assets from committed tests/fixtures/freedoom_e1m1.wad (Freedoom 0.13.0, BSD). 2x D5 downscale (owner R0 decision; shared bit-exact lever in texturecompiler.downscale_canvas, imported by the oracle - R6/D12).",
+  "measured": {
+    "storage_mode": "flat",
+    "span_words": 5540248,
+    "flat_limit_words": 8388608,
+    "headroom_x": 1.514,
+    "flat_ram_MB": 22.2,
+    "fjm_bytes": 1657136,
+    "assemble_seconds": 171.9
+  },
+  "downscale": {
+    "factor": 2,
+    "rule": "NATIVE_W//W (320/160)",
+    "words_per_texel": 14.09
+  },
+  "texels": {
+    "full_res": 1407744,
+    "downscaled_2x": 351936
+  },
+  "entry_counts": {
+    "finesine": 4096,
+    "reciprocal": 4096,
+    "colormap": 8192,
+    "deposit": 256,
+    "textures_texels": 351936,
+    "texture_count": 114,
+    "flat_count": 43,
+    "palette": 256
+  },
+  "span_ledger_words": {
+    "startup (hex.init + ptr + stack)": 17310,
+    "finesine (4096, per_result_nibble x8)": 212650,
+    "reciprocal/scale (4096 x32b)": 97378,
+    "colormap (32x256=8192)": 110146,
+    "deposit (+4-offset, 256)": 3170,
+    "palette + framebuffer + map geometry streams + pad": 139824,
+    "textures (114 walls + 43 flats, 2x downscaled = 351936 texels)": 4959770
+  },
+  "verdict": "R-3 GREEN: one flat .fjm, span 5.54M words = 0.66x the 2^23 limit, 1.51x headroom. Texture-span risk (OQ8) resolved by the 2x downscale. BSP-as-code deferred to M12 (balanced E1M1 node builder); M10 uses conservative geometry streams."
+}

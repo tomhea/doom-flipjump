@@ -1,0 +1,36 @@
+// F7 (present layer, M11a) — drive the screen device over the output stream.
+// Device protocol (authoritative: flipjump InMemoryScreen / ScreenIO.py): command bytes on the
+// output stream; the memory-hook present (0x03) hands the device a framebuffer bit-address and it
+// DMA-reads W*H packed bytes (stride dw, row-major) straight from program memory (~free, D3/F7).
+// Screen geometry comes from fj_consts (W/H/BPP/NCOLORS — the config SSOT, R6). Input poll is M14.
+
+ns present {
+    // emit a w-bit label/address as w/8 little-endian bytes (includes zero bytes, unlike stl.output).
+    def emit_addr addr {
+        rep(w/8, i) stl.output_char (addr >> (8*i)) & 0xff
+    }
+
+    // init_screen: [0x01][W:2][H:2][BPP:1][palette_entries=NCOLORS:2]
+    def init_screen {
+        stl.output_char 0x01
+        stl.output_char W & 0xff
+        stl.output_char (W >> 8) & 0xff
+        stl.output_char H & 0xff
+        stl.output_char (H >> 8) & 0xff
+        stl.output_char BPP
+        stl.output_char NCOLORS & 0xff
+        stl.output_char (NCOLORS >> 8) & 0xff
+    }
+
+    // set_palette: [0x02][palette_addr: w/8] — `addr` is the packed-byte palette base (3 bytes/entry).
+    def set_palette addr {
+        stl.output_char 0x02
+        .emit_addr addr
+    }
+
+    // update_screen (present): [0x03][framebuffer_addr: w/8] — the device reads the finished frame.
+    def update_screen addr {
+        stl.output_char 0x03
+        .emit_addr addr
+    }
+}

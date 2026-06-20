@@ -1,0 +1,10 @@
+tests\host\test_present_slice.py:50: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_present_slice.py::test_oracle_render_solid_column - As...
+FAILED tests/host/test_present_slice.py::test_screen_frame_hash_formula - Ass...
+FAILED tests/host/test_present_slice.py::test_present_slice_bit_exact_vs_oracle
+3 failed in 0.28s
+=== full-suite tail (pre-existing still green) ===
+FAILED tests/host/test_present_slice.py::test_screen_frame_hash_formula - Ass...
+FAILED tests/host/test_present_slice.py::test_present_slice_bit_exact_vs_oracle
+3 failed, 122 passed in 40.77s

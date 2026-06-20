@@ -1,0 +1,18 @@
+M11a (F4 + F7-present) -- first golden frame vs the H5 oracle
+==================================================================
+
+fj pipeline: packed-byte framebuffer (hex.vec W*H, D3) + fixed-address column fill (F4, src/fj/
+framebuffer.fj) + screen device present 0x03 (F7, src/fj/present.fj). Captured headless via
+flipjump InMemoryScreen; the palette is the real Freedoom E1M1 PLAYPAL.
+
+Golden frame: 160x100, column x=80 = palette index 96, background 0.
+  device pixel_indices == oracle.render_solid_column (bit-exact, D12): YES
+  frame sha256 (= device hash = sha256(indices+palette)): a887db5601f83628e24b62a743c32407f05c6dc0eb6b60784e465887bc675259
+
+Measured (real @):
+  present-path ops : 346   (init_screen + fill_column + set_palette + present 0x03)
+                      constant column bakes at assemble (wflip) -> ~0 runtime ops; this is the device command stream
+  M5 deposit prim. : 152 ops / (deposit + readback)   -- the runtime per-pixel write cost (M11b uses it per texel)
+  storage_mode     : flat
+
+Golden PNG: docs/m11a-golden.png (rendered via the device backend).

@@ -1,0 +1,8 @@
+........................................................................ [ 57%]
+.....................................................                    [100%]
+125 passed in 41.29s
+--- new-file detail ---
+cachedir: .pytest_cache
+tests/host/test_present_slice.py::test_oracle_render_solid_column PASSED [ 33%]
+tests/host/test_present_slice.py::test_screen_frame_hash_formula PASSED  [ 66%]
+tests/host/test_present_slice.py::test_present_slice_bit_exact_vs_oracle PASSED [100%]

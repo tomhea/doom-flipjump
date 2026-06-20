@@ -1,0 +1,27 @@
+// F4 (framebuffer + pixel-store layer, M11a) — the packed-byte framebuffer write side (D3/D2b).
+//
+// The framebuffer is W*H packed-byte ops (one op per pixel, stride dw, row-major) — declared by the
+// includer as `<label>: hex.vec W*H` below stl.loop, matching the device's update_screen layout
+// exactly (zero present-time conversion, D3). Pixels are written pointer-free by FIXED-ADDRESS stores
+// (D2b full-unroll): a packed byte's data bits live at op_address + dbit, so `wflip base + k*dw + dbit,
+// value` sets pixel k (from the zero-init) to `value`. For a CONSTANT color that one wflip is the whole
+// store; depositing a RUNTIME byte is the M5 +4-offset deposit primitive (its per-pixel cost is the
+// M11a deposit measurement; it becomes the per-texel write in M11b).
+
+ns fb {
+    // store the constant palette index `color` into pixel `k` (row-major) of framebuffer `base`:
+    // one fixed-address packed store into the zero-init op's data byte (op_addr + dbit).
+    def store base, k, color {
+        wflip base + k*dw + dbit, color
+    }
+
+    // fill column `x` (all H rows) of framebuffer `base` with the constant palette index `color`.
+    def fill_column base, x, color {
+        rep(H, row) .store base, x + row*W, color
+    }
+
+    // clear the whole framebuffer `base` to the constant palette index `color` (W*H fixed stores).
+    def clear base, color {
+        rep(W*H, k) .store base, k, color
+    }
+}

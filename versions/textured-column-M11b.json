@@ -1,0 +1,31 @@
+{
+  "note": "M11b (F5) one textured wall column = the texture-v DDA + M8 sample + M8 colormap, byte-exact vs the H5 oracle (D12). src/fj/wall_render.fj (wall.column_step); build.build_textured_column. Per-pixel pipeline proof (text-output golden); the runtime framebuffer deposit/present is M11c (D2).",
+  "column": {
+    "texture": "MC5",
+    "downscale": 2,
+    "texheight": 64,
+    "texcol": 5,
+    "light": 20,
+    "rows": 50,
+    "step_8_8": 327,
+    "frac0": 0
+  },
+  "golden_lit_sequence_first8": [
+    127,
+    6,
+    127,
+    8,
+    8,
+    127,
+    127,
+    127
+  ],
+  "golden_len": 50,
+  "measured": {
+    "storage_mode": "flat",
+    "total_ops_50rows": 75316,
+    "per_pixel_ops": 1588,
+    "per_pixel_note": "DDA (frac>>8, &mask, +step) + M8 tex.sample (~4@) + M8 cm.apply (~4@) + output; R-1 per-pixel datapoint",
+    "deposit_note": "output is text (proof path); runtime framebuffer deposit of these pixels = M11c D2"
+  }
+}

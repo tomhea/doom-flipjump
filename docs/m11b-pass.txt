@@ -1,0 +1,7 @@
+........................................................................ [ 56%]
+.......................................................                  [100%]
+127 passed in 46.16s
+--- new-file detail ---
+cachedir: .pytest_cache
+tests/host/test_textured_column.py::test_oracle_textured_column PASSED   [ 50%]
+tests/host/test_textured_column.py::test_fj_textured_column_bit_exact PASSED [100%]

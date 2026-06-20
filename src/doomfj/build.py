@@ -192,5 +192,52 @@ def build_present_slice(wad_path, *, cfg=None, col_x, color, out_fjm, generated_
     }
 
 
+def build_textured_column(wad_path, texname, *, cfg=None, texcol, light, count, step, frac0=0,
+                          downscale=None, out_fjm, generated_dir):
+    """M11b (F5): assemble + run one textured wall column — the texture-v DDA (src/fj/wall_render.fj)
+    over the M8 texel + colormap dispatch tables — and capture its per-row lit bytes (emitted as text,
+    the proof path). Returns the captured output + op_counter + per-pixel op cost + storage_mode/span.
+    `texcol`/`light` are the column constants; `step` is the 8.8 DDA step; the texture is downscaled by
+    the shared D5 factor (matching the oracle)."""
+    from flipjump.interpreter.io_devices.FixedIO import FixedIO
+
+    cfg = cfg or Config()
+    factor = downscale if downscale is not None else cfg.TEXTURE_DOWNSCALE
+    wad = WadFile.from_path(wad_path)
+    defs = {d.name: d for d in wad.texture_defs()}
+    texheight = defs[texname].height // factor
+    base = texcol * texheight
+    gen = Path(generated_dir)
+    gen.mkdir(parents=True, exist_ok=True)
+
+    tex = compile_texture("tex", wad, texname, downscale=factor)
+    cm = compile_colormap("cm", wad, lights=max(32, light + 1), over_align=False)
+    main = "\n".join([
+        "stl.startup_and_init_all",
+        f"hex.set 4, frac, {frac0}",
+        f"rep({count}, r) wall.column_step {base}, {light}",
+        "stl.loop",
+        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "pal: hex.vec 2",
+        "cmidx: hex.vec 4", "lit: hex.vec 2", f"step: hex.vec 4, {step}",
+        f"heightmask: hex.vec 3, {texheight - 1}",
+        tex, cm,
+    ])
+    (gen / "main.fj").write_text(main, encoding="utf-8")
+
+    out = Path(out_fjm)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fj.assemble([Path("src/fj/wall_render.fj").resolve(), (gen / "main.fj").resolve()], out,
+                memory_width=W, print_time=False)
+    io = FixedIO(b"")
+    term = fj.run(out, io_device=io, print_time=False, print_termination=False)
+    return {
+        "storage_mode": str(term.storage_mode),
+        "span_words": _span_words(out),
+        "op_counter": term.op_counter,
+        "per_pixel_ops": term.op_counter // count,
+        "output": io.get_output(allow_incomplete_output=True),
+    }
+
+
 if __name__ == "__main__":
     print(json.dumps(build(), indent=2))

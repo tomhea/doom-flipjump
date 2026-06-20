@@ -1,0 +1,9 @@
+tests\host\test_textured_column.py:43: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_textured_column.py::test_oracle_textured_column - Asse...
+FAILED tests/host/test_textured_column.py::test_fj_textured_column_bit_exact
+2 failed in 0.28s
+=== full-suite tail (pre-existing still green) ===
+FAILED tests/host/test_textured_column.py::test_oracle_textured_column - Asse...
+FAILED tests/host/test_textured_column.py::test_fj_textured_column_bit_exact
+2 failed, 125 passed in 40.70s

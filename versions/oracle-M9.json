@@ -1,0 +1,44 @@
+{
+  "note": "M9 reference model / oracle (H5) artifact. Host-only exact-integer golden renderer + sim; src/doomfj/reference_model.py. Composes shared kernels (tables/fixedpoint/mapcompiler/config + WAD COLORMAP), R6/D12. Deterministic.",
+  "fixtures": "tests/fixtures/test.wad (square-room geometry) + freedoom_assets.wad (PLAYPAL/COLORMAP)",
+  "spawn_state": {
+    "x_1616": 8388608,
+    "y_1616": 8388608,
+    "x_units": 128,
+    "y_units": 128,
+    "angle_bam": 1073741824,
+    "angle_hex": "0x40000000",
+    "level": "MAP01"
+  },
+  "sim_step_one_tic": {
+    "forward": {
+      "x": 8388608,
+      "y": 11665408,
+      "angle": 1073741824
+    },
+    "back": {
+      "x": 8388608,
+      "y": 5111808,
+      "angle": 1073741824
+    },
+    "turn_left": {
+      "x": 8388608,
+      "y": 8388608,
+      "angle": 1115684864,
+      "angle_hex": "0x42800000"
+    },
+    "constants": {
+      "FORWARD_MOVE": 3276800,
+      "ANGLE_TURN": 41943040,
+      "ANG90": 1073741824
+    }
+  },
+  "spawn_frame": {
+    "bytes": 16000,
+    "colormap_row": 20,
+    "ceil_index": 0,
+    "floor_index": 109,
+    "sha256": "b85579f68a137a8ed94c28c9cb8f1862f6e0174acd601a8bd660dd821ef723de",
+    "note": "two-band colormap-shaded background; the M11+ golden key (D12)"
+  }
+}

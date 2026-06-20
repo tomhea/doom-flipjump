@@ -1,0 +1,112 @@
+FFFFFF...                                                                [100%]
+================================== FAILURES ===================================
+_______________________ test_memory_map_assembles_flat ________________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-571/test_memory_map_assembles_flat0')
+
+    def test_memory_map_assembles_flat(tmp_path):
+>       term = _assemble_memory_map(Config(), tmp_path)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\host\test_build.py:16: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\host\test_build.py:12: in _assemble_memory_map
+    return probe([consts, MEMORY_MAP])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fj_paths = [WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-571/test_memory_map_assembles_flat0/fj_consts.fj'), WindowsPath('src/fj/memory_map.fj')]
+
+    def probe(fj_paths: list[str | Path], *, flat_max_words: int | None = None):
+        """One-shot assemble+run; returns the TerminationStatistics (term.op_counter, term.storage_mode, ...)."""
+        paths = [Path(p).resolve() for p in fj_paths]
+>       return fj.assemble_and_run(paths, memory_width=W, print_time=False, print_termination=False,
+                                   flat_max_words=flat_max_words)
+E       TypeError: assemble_and_run() got an unexpected keyword argument 'flat_max_words'
+
+src\doomfj\harness.py:24: TypeError
+_____________ test_memory_map_assembles_flat_at_second_resolution _____________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-571/test_memory_map_assembles_flat1')
+
+    def test_memory_map_assembles_flat_at_second_resolution(tmp_path):
+        """fj-level resolution-parametricity guard: regenerate at 320x200 — the program must
+        recompile 'as if native' and still run flat (the §1 2-const invariant)."""
+>       term = _assemble_memory_map(Config(W=320, H=200), tmp_path)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\host\test_build.py:24: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\host\test_build.py:12: in _assemble_memory_map
+    return probe([consts, MEMORY_MAP])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+fj_paths = [WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-571/test_memory_map_assembles_flat1/fj_consts.fj'), WindowsPath('src/fj/memory_map.fj')]
+
+    def probe(fj_paths: list[str | Path], *, flat_max_words: int | None = None):
+        """One-shot assemble+run; returns the TerminationStatistics (term.op_counter, term.storage_mode, ...)."""
+        paths = [Path(p).resolve() for p in fj_paths]
+>       return fj.assemble_and_run(paths, memory_width=W, print_time=False, print_termination=False,
+                                   flat_max_words=flat_max_words)
+E       TypeError: assemble_and_run() got an unexpected keyword argument 'flat_max_words'
+
+src\doomfj\harness.py:24: TypeError
+_____________________ test_span_skeleton_under_flat_limit _____________________
+
+    def test_span_skeleton_under_flat_limit():
+        """Span/alignment-invariant HOME (the M1 skeleton). M10 (R0) fills the real per-table
+        numbers; M1 only checks the known segments and the R-3 ceiling."""
+        c = Config()
+        ledger = c.span_ledger()
+>       assert ledger["framebuffer"] == c.W * c.H     # framebuffer = W*H packed bytes (§1.2)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 1 == (160 * 100)
+E        +  where 160 = Config(W=160, H=100, BPP=8, TRIG_N=4096).W
+E        +  and   100 = Config(W=160, H=100, BPP=8, TRIG_N=4096).H
+
+tests\host\test_build.py:34: AssertionError
+_______________________ test_derived_constants_160x100 ________________________
+
+    def test_derived_constants_160x100():
+        c = DEFAULT
+        assert (c.W, c.H) == (160, 100)
+>       assert c.NCOLORS == 256
+E       assert 1 == 256
+E        +  where 1 = Config(W=160, H=100, BPP=8, TRIG_N=4096).NCOLORS
+
+tests\host\test_config.py:24: AssertionError
+____________________ test_resolution_parametricity_320x200 ____________________
+
+    def test_resolution_parametricity_320x200():
+        """The §1 2-const invariant: change ONLY W/H and everything resolution-derived tracks —
+        nothing silently keeps the 160x100 value or a width that assumes W/H <= 256."""
+        c = Config(W=320, H=200)
+>       assert c.COL_BITS == 9       # ceil(log2 320) — NOT a fixed 8
+        ^^^^^^^^^^^^^^^^^^^^^^
+E       assert -1 == 9
+E        +  where -1 = Config(W=320, H=200, BPP=8, TRIG_N=4096).COL_BITS
+
+tests\host\test_config.py:36: AssertionError
+________________________ test_col_bits_is_ceil_log2_w _________________________
+
+    def test_col_bits_is_ceil_log2_w():
+        for w in (160, 256, 320, 512):
+>           assert Config(W=w, H=100).COL_BITS == math.ceil(math.log2(w))
+E           assert -1 == 8
+E            +  where -1 = Config(W=160, H=100, BPP=8, TRIG_N=4096).COL_BITS
+E            +    where Config(W=160, H=100, BPP=8, TRIG_N=4096) = Config(W=160, H=100)
+E            +  and   8 = <built-in function ceil>(7.321928094887363)
+E            +    where <built-in function ceil> = math.ceil
+E            +    and   7.321928094887363 = <built-in function log2>(160)
+E            +      where <built-in function log2> = math.log2
+
+tests\host\test_config.py:47: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_build.py::test_memory_map_assembles_flat - TypeError: ...
+FAILED tests/host/test_build.py::test_memory_map_assembles_flat_at_second_resolution
+FAILED tests/host/test_build.py::test_span_skeleton_under_flat_limit - assert...
+FAILED tests/host/test_config.py::test_derived_constants_160x100 - assert 1 =...
+FAILED tests/host/test_config.py::test_resolution_parametricity_320x200 - ass...
+FAILED tests/host/test_config.py::test_col_bits_is_ceil_log2_w - assert -1 == 8
+6 failed, 3 passed in 0.92s

@@ -1,0 +1,14 @@
+........................................................................ [ 64%]
+........................................                                 [100%]
+112 passed in 23.14s
+--- new-file detail ---
+cachedir: .pytest_cache
+tests/host/test_reference_model.py::test_spawn_state PASSED              [ 11%]
+tests/host/test_reference_model.py::test_read_sin_cos PASSED             [ 22%]
+tests/host/test_reference_model.py::test_step_forward_at_spawn PASSED    [ 33%]
+tests/host/test_reference_model.py::test_step_back_at_spawn PASSED       [ 44%]
+tests/host/test_reference_model.py::test_step_turn_left PASSED           [ 55%]
+tests/host/test_reference_model.py::test_point_in_subsector_square PASSED [ 66%]
+tests/host/test_reference_model.py::test_point_in_subsector_node_walk PASSED [ 77%]
+tests/host/test_reference_model.py::test_render_frame_spawn PASSED       [ 88%]
+tests/host/test_reference_model.py::test_frame_hash_is_sha256 PASSED     [100%]

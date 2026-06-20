@@ -1,0 +1,17 @@
+M8 integration evidence (R2) — texture / colormap / palette compiler (H4).
+Assets: trimmed Freedoom (BSD) committed fixture; E1M1 span measured on the full dev Freedoom.
+
+Compiled (byte-exact vs the fixture, on the real engine):
+  - sample_texture: A-YELLOW (16x8) every texel x2 (#8); flat CEIL1_2 sampled; apply_colormap
+    (light<<8|colour) sampled. All read byte-exact; a compiled texture assembles flat (R4).
+
+E1M1 TEXTURE SPAN (OQ8 / R-3 -> DESIGN §1.2/§1.3):
+  wall textures used = 102, flats used = 44
+  wall texels = 1,105,664, flat texels = 180,224
+  TOTAL = 1,285,888 texels (~1 dispatch entry/texel)
+
+  ** 1286K texels is ~4x the ~300K native-DOOM design estimate. **
+  Freedoom's E1M1 textures are larger/more numerous. At ~3-5 ops/byte-entry (per_entry dispatch)
+  this is roughly 4-6M ops of texture span vs the 8.4M flat limit — tight. The DOWNSCALE lever
+  (D5, shared bit-exact host fn) and/or per_result_nibble texture mode are the span levers; the
+  R0 gate (M10) decides. This is exactly the OQ8 risk the design flagged for measurement here.

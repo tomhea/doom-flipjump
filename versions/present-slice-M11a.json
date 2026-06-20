@@ -1,0 +1,20 @@
+{
+  "note": "M11a (F4 framebuffer + F7 present) artifact. fj packed-byte framebuffer + fixed-address column fill + 0x03 present, captured headless via InMemoryScreen; bit-exact vs the H5 oracle (D12). src/fj/present.fj, src/fj/framebuffer.fj; build.build_present_slice.",
+  "golden_frame": {
+    "W": 160,
+    "H": 100,
+    "bpp": 8,
+    "col_x": 80,
+    "color_index": 96,
+    "bg": 0,
+    "frame_sha256": "a887db5601f83628e24b62a743c32407f05c6dc0eb6b60784e465887bc675259",
+    "note": "sha256(pixel_indices + palette_rgb); device==oracle, bit-exact"
+  },
+  "measured": {
+    "storage_mode": "flat",
+    "present_path_ops": 346,
+    "deposit_primitive_ops_per_cycle": 152,
+    "present_note": "constant column baked at assemble (wflip) -> ~0 runtime ops; present_path_ops is the device command stream",
+    "deposit_note": "M5 +4-offset deposit+readback (runtime byte write) -> the per-pixel cost M11b pays per texel"
+  }
+}

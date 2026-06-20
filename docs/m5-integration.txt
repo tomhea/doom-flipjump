@@ -1,0 +1,25 @@
+M5 integration evidence (R2) — generated dispatch tables assembled + run on flipjump 1.5.0 (w=32).
+Source: scripts/m5_evidence.py (reproducible). Values from tables.py (R6 SSOT). All flat (R4).
+
+finesine LUT: 4096 entries x 8 nibbles (32-bit); 64 lookups.
+
+[per_entry]
+  assemble_seconds = 5.65
+  fjm_bytes        = 96417
+  op_counter       = 22495  (64 lookups + startup_and_init_all)
+  storage_mode     = flat
+
+[per_result_nibble]
+  assemble_seconds = 8.556
+  fjm_bytes        = 80365
+  op_counter       = 55148  (64 lookups + startup_and_init_all)
+  storage_mode     = flat
+
+[deposit]
+  assemble_seconds = 0.406
+  fjm_bytes        = 16356
+  op_counter       = 11482  (64 lookups + startup_and_init_all)
+  storage_mode     = flat
+
+D4 tradeoff confirmed: per-entry has LARGER span (96KB) but 1 dispatch/lookup (fewer ops);
+per-result-nibble has ~2-3x SMALLER span (80KB) at 8 dispatches/lookup (~2.4x ops). Both flat.

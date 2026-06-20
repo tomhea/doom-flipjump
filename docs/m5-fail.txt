@@ -1,0 +1,28 @@
+..\..\AppData\Local\Programs\Python\Python311\Lib\site-packages\flipjump\assembler\preprocessor.py:64: FlipJumpPreprocessorException
+---------------------------- Captured stdout call -----------------------------
+  parsing:         0.034s
+  macro resolve:   0.113s
+=========================== short test summary info ===========================
+FAILED tests/host/test_lut_generator.py::TestEncodeFixedPoint::test_reexports_fixedpoint_ssot
+FAILED tests/host/test_lut_generator.py::TestEncodeFixedPoint::test_positive_value
+FAILED tests/host/test_lut_generator.py::TestEncodeFixedPoint::test_negative_value_is_twos_complement
+FAILED tests/host/test_lut_generator.py::TestEncodeFixedPoint::test_out_of_range_raises
+FAILED tests/host/test_lut_generator.py::TestGenerateLutFj::test_emits_label_and_entries
+FAILED tests/host/test_lut_generator.py::TestGenerateLutFj::test_value_must_fit_entry
+FAILED tests/host/test_lut_generator.py::TestGenerateLutFj::test_negative_values_rejected_encode_first
+FAILED tests/host/test_lut_generator.py::TestGenerateByteLutFj::test_emits_packed_byte_ops
+FAILED tests/host/test_lut_generator.py::TestGenerateByteLutFj::test_non_byte_values_rejected
+FAILED tests/host/test_lut_generator.py::TestCannedGeneratorsUseTablesSSOT::test_reciprocal_lut_values_match_tables
+FAILED tests/host/test_lut_generator.py::TestCannedGeneratorsUseTablesSSOT::test_sine_lut_values_match_tables
+FAILED tests/host/test_lut_generator.py::TestGenerateDispatchTableFj::test_per_entry_emits_table_and_lookup
+FAILED tests/host/test_lut_generator.py::TestGenerateDispatchTableFj::test_per_result_nibble_mode
+FAILED tests/host/test_lut_generator.py::TestGenerateDispatchTableFj::test_over_align_doubles_pad
+FAILED tests/host/test_lut_generator.py::TestGenerateDispatchTableFj::test_value_too_wide_rejected
+FAILED tests/host/test_lut_generator.py::TestGenerateDispatchTableFj::test_unknown_mode_rejected
+FAILED tests/host/test_lut_generator.py::TestGenerateOffsetDepositTableFj::test_emits_deposit_and_readback
+FAILED tests/fj/test_dispatch_tables.py::test_per_entry_single_nibble_every_entry_twice
+FAILED tests/fj/test_dispatch_tables.py::test_per_entry_multi_nibble_every_entry_twice
+FAILED tests/fj/test_dispatch_tables.py::test_per_result_nibble_multi_nibble_every_entry_twice
+FAILED tests/fj/test_dispatch_tables.py::test_per_entry_multi_nibble_index_every_entry_twice
+FAILED tests/fj/test_dispatch_tables.py::test_offset_deposit_byte_exact - fli...
+22 failed in 1.31s

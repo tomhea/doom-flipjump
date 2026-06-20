@@ -1,0 +1,125 @@
+{
+  "source": "tests/fixtures/test.wad",
+  "wad_type": "PWAD",
+  "numlumps": 6,
+  "lump_names": [
+    "MAP01",
+    "THINGS",
+    "LINEDEFS",
+    "SIDEDEFS",
+    "VERTEXES",
+    "SECTORS"
+  ],
+  "MAP01": {
+    "vertexes": [
+      {
+        "x": 0,
+        "y": 0
+      },
+      {
+        "x": 256,
+        "y": 0
+      },
+      {
+        "x": 256,
+        "y": 256
+      },
+      {
+        "x": 0,
+        "y": 256
+      }
+    ],
+    "linedefs": [
+      {
+        "v1": 0,
+        "v2": 1,
+        "flags": 1,
+        "special": 0,
+        "tag": 0,
+        "front": 0,
+        "back": -1
+      },
+      {
+        "v1": 1,
+        "v2": 2,
+        "flags": 1,
+        "special": 0,
+        "tag": 0,
+        "front": 1,
+        "back": -1
+      },
+      {
+        "v1": 2,
+        "v2": 3,
+        "flags": 1,
+        "special": 0,
+        "tag": 0,
+        "front": 2,
+        "back": -1
+      },
+      {
+        "v1": 3,
+        "v2": 0,
+        "flags": 1,
+        "special": 0,
+        "tag": 0,
+        "front": 3,
+        "back": -1
+      }
+    ],
+    "sidedefs": [
+      {
+        "x_off": 0,
+        "y_off": 0,
+        "upper": "-",
+        "lower": "-",
+        "middle": "STARTAN2",
+        "sector": 0
+      },
+      {
+        "x_off": 0,
+        "y_off": 0,
+        "upper": "-",
+        "lower": "-",
+        "middle": "STARTAN2",
+        "sector": 0
+      },
+      {
+        "x_off": 0,
+        "y_off": 0,
+        "upper": "-",
+        "lower": "-",
+        "middle": "STARTAN2",
+        "sector": 0
+      },
+      {
+        "x_off": 0,
+        "y_off": 0,
+        "upper": "-",
+        "lower": "-",
+        "middle": "STARTAN2",
+        "sector": 0
+      }
+    ],
+    "sectors": [
+      {
+        "floor_h": 0,
+        "ceil_h": 128,
+        "floor_tex": "FLOOR4_8",
+        "ceil_tex": "CEIL3_5",
+        "light": 160,
+        "special": 0,
+        "tag": 0
+      }
+    ],
+    "things": [
+      {
+        "x": 128,
+        "y": 128,
+        "angle": 90,
+        "type": 1,
+        "flags": 7
+      }
+    ]
+  }
+}

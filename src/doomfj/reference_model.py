@@ -41,6 +41,8 @@ ANG180 = FULL_CIRCLE // 2         # 0x80000000
 ANG270 = 3 * (FULL_CIRCLE // 4)   # 0xC0000000
 SLOPERANGE = 2048                 # R_PointToAngle slope quotient range (DOOM SLOPERANGE); tantoangle has +1
 DBITS = 5                          # FRACBITS(16) - SLOPEBITS(11): the FixedDiv→tantoangle index shift (R_PointToDist)
+SCALE_MIN = 256                    # R_ScaleFromGlobalAngle clamp floor (16.16)
+SCALE_MAX = 64 << 16               # R_ScaleFromGlobalAngle clamp ceiling = 64.0 (16.16)
 FORWARD_MOVE = 50 << 16           # 16.16 map-units per tic (DOOM run forwardmove 0x32); S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
@@ -177,6 +179,46 @@ class ReferenceModel:
         angle = (self.tantoangle[idx] + ANG90) & ANGLE_MASK
         sine = self.read_sin(angle)                                 # sin(atan(slope)+90deg) = cos(atan(slope))
         return fixed_div(dx, sine, 8, 4) if sine else 0
+
+    # ── wall scale (R_StoreWallRange setup + R_ScaleFromGlobalAngle, M12e) ──
+    def wall_setup(self, viewx: int, viewy: int, seg, verts) -> tuple:
+        """The per-wall projection setup (DOOM R_StoreWallRange): returns `(rw_normalangle, rw_distance)`.
+        `rw_normalangle = seg.angle_BAM - ANG90` (the wall's normal — the `-ANG90` matches OUR seg-angle
+        convention, empirically: it yields the true perpendicular distance + positive scale; DOOM's
+        +ANG90 is for its opposite winding). `rw_distance` = the perpendicular view→wall-line distance =
+        `hyp · sin(distangle)`, where hyp = point_to_dist(view, v1) and distangle = ANG90 - the clamped
+        normal↔v1 offset angle. `viewx/y` are 16.16; `verts` are 16.0 map coords (shifted <<16 here)."""
+        v1x, v1y = verts[seg.v1]
+        v1x <<= 16
+        v1y <<= 16
+        rw_normalangle = ((seg.angle << 16) - ANG90) & ANGLE_MASK
+        angle1 = self.point_to_angle(viewx, viewy, v1x, v1y)
+        offsetangle = (rw_normalangle - angle1) & ANGLE_MASK
+        if offsetangle > ANG180:
+            offsetangle = (-offsetangle) & ANGLE_MASK                # BAM abs (fold to [0, ANG180])
+        if offsetangle > ANG90:
+            offsetangle = ANG90
+        distangle = (ANG90 - offsetangle) & ANGLE_MASK
+        hyp = self.point_to_dist(viewx, viewy, v1x, v1y)
+        rw_distance = fixed_mul(hyp, self.read_sin(distangle), 8, 4)
+        return rw_normalangle, rw_distance
+
+    def scale_from_global_angle(self, visangle: int, viewangle: int,
+                                rw_normalangle: int, rw_distance: int) -> int:
+        """R_ScaleFromGlobalAngle: the wall's projected scale (16.16 pixels per world unit) for the screen
+        column whose ABSOLUTE view angle is `visangle`. scale = PROJECTION·sin(angleb) / (rw_distance·
+        sin(anglea)), where anglea = ANG90+(visangle-viewangle), angleb = ANG90+(visangle-rw_normalangle),
+        PROJECTION = CENTERX<<16. Clamped to [SCALE_MIN, SCALE_MAX]. At the centre of a perpendicular wall
+        (visangle=viewangle=rw_normalangle) this is exactly PROJECTION/rw_distance."""
+        anglea = (ANG90 + (visangle - viewangle)) & ANGLE_MASK
+        angleb = (ANG90 + (visangle - rw_normalangle)) & ANGLE_MASK
+        num = fixed_mul(self.cfg.CENTERX << 16, self.read_sin(angleb), 8, 4)
+        den = fixed_mul(rw_distance, self.read_sin(anglea), 8, 4)
+        if den == 0:
+            return SCALE_MAX
+        return max(SCALE_MIN, min(SCALE_MAX, fixed_div(num, den, 8, 4)))
+
+    # ── sim ──
     def step_sim(self, state: SimState, keys: dict) -> SimState:
         """One tic: turn then collision-free move (collision is M14). FixedMul(move, cos/sin) in 16.16
         (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path exactly; angle wraps mod 2**32."""

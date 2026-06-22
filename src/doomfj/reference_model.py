@@ -27,7 +27,7 @@ import hashlib
 from dataclasses import dataclass, replace
 
 from doomfj.config import Config
-from doomfj.fixedpoint import fixed_mul, _signed  # shared signed Q-format kernel (R6)
+from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
 from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, compile_bsp, _point_side  # shared geometry (R6)
 from doomfj.tables import sine_table, tantoangle_table, viewangletox_table
 from doomfj.texturecompiler import downscale_canvas  # shared D5 downscale lever (R6/D12)
@@ -40,6 +40,7 @@ ANG90 = FULL_CIRCLE // 4          # 0x40000000 — 90deg, sanity anchor for the 
 ANG180 = FULL_CIRCLE // 2         # 0x80000000
 ANG270 = 3 * (FULL_CIRCLE // 4)   # 0xC0000000
 SLOPERANGE = 2048                 # R_PointToAngle slope quotient range (DOOM SLOPERANGE); tantoangle has +1
+DBITS = 5                          # FRACBITS(16) - SLOPEBITS(11): the FixedDiv→tantoangle index shift (R_PointToDist)
 FORWARD_MOVE = 50 << 16           # 16.16 map-units per tic (DOOM run forwardmove 0x32); S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
@@ -161,7 +162,21 @@ class ReferenceModel:
         idx = max(0, min(len(self.viewangletox) - 1, idx))
         return self.viewangletox[idx]
 
-    # ── sim ──
+    def point_to_dist(self, viewx: int, viewy: int, x: int, y: int) -> int:
+        """R_PointToDist: the distance from (viewx,viewy) to (x,y) — `dist = dx / cos(atan(dy/dx))` =
+        sqrt(dx²+dy²), computed via tantoangle + finesine + FixedDiv (no sqrt). Fold to the major octant
+        (dx >= dy), index tantoangle by the FixedDiv slope >> DBITS, then divide dx by sin(angle+90°) =
+        cos(angle). Coords + result are 16.16 (the FixedDiv tuning is scale-dependent). Exact for
+        axis-aligned (dy=0 ⇒ dist=dx); ~quantization error off-axis. Returns 0 for the degenerate point."""
+        dx, dy = abs(x - viewx), abs(y - viewy)
+        if dy > dx:
+            dx, dy = dy, dx
+        if dx == 0:
+            return 0
+        idx = min((fixed_div(dy, dx, 8, 4) >> DBITS), SLOPERANGE)   # slope dy/dx in [0,1] -> [0,SLOPERANGE]
+        angle = (self.tantoangle[idx] + ANG90) & ANGLE_MASK
+        sine = self.read_sin(angle)                                 # sin(atan(slope)+90deg) = cos(atan(slope))
+        return fixed_div(dx, sine, 8, 4) if sine else 0
     def step_sim(self, state: SimState, keys: dict) -> SimState:
         """One tic: turn then collision-free move (collision is M14). FixedMul(move, cos/sin) in 16.16
         (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path exactly; angle wraps mod 2**32."""

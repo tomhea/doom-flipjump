@@ -1,0 +1,14 @@
+{
+  "note": "M12a (F5) — BSP front-to-back traversal oracle (R_RenderBSPNode), first sub-step of M12. reference_model.bsp_render_order(cmap, vx, vy) = near-first DFS (the viewer's side, via shared _point_side) -> subsectors nearest-first (the wall draw order for solid-seg clipping); visible_segs = segs flattened in that order. Iterative (explicit stack) -- the M7-built BSP is deep/unbalanced. Tested on the concave L-shape: permutation, viewer-subsector-first, near-subtree-before-far, segs-follow-order.",
+  "methods": ["bsp_render_order", "visible_segs"],
+  "tested_on": "concave L-shape (>=2 subsectors, >=1 node)",
+  "invariants": [
+    "order is a permutation of all subsectors",
+    "order[0] == point_in_subsector(viewpoint) (viewer drawn first)",
+    "root near-subtree fully drawn before far-subtree",
+    "visible_segs follows subsector order (firstseg..firstseg+numsegs each)"
+  ],
+  "known_blocker": "Building the full E1M1 BSP overflows the M7 RECURSIVE builder (mapcompiler.compile_bsp -> build_bsp -> recurse, ~1829 segs). M10 deferred BSP-as-code for this. NEXT STEP M12b: make compile_bsp iterative so E1M1 builds, enabling traversal + the renderer on E1M1.",
+  "tests": 4,
+  "suite_green": 133
+}

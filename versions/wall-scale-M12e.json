@@ -1,0 +1,10 @@
+{
+  "note": "M12e (F5) — the perspective scale (R_StoreWallRange setup + R_ScaleFromGlobalAngle). reference_model.wall_setup (rw_normalangle = seg.angle_BAM - ANG90 [our winding, empirically validated]; rw_distance = perpendicular view->wall distance = point_to_dist*sin(distangle)) + scale_from_global_angle (rw_scale = PROJECTION*sin(angleb)/(rw_distance*sin(anglea)), clamped [256, 64<<16]). Reuses point_to_angle/dist + finesine + fixed_mul/div (R6). PROJECTION via cfg.PROJECTION SSOT.",
+  "methods": ["wall_setup -> (rw_normalangle, rw_distance)", "scale_from_global_angle -> 16.16 scale"],
+  "convention": "rw_normalangle = seg.angle_BAM - ANG90 (validated: +ANG90 gave dist 0; -ANG90 gives true perpendicular 128 on the square room + positive scale)",
+  "constants": {"SCALE_MIN": 256, "SCALE_MAX": 4194304},
+  "validation": "square room (test.wad MAP01, centre view): all 4 walls perpendicular dist=128; perpendicular wall straight ahead scale = PROJECTION/dist = 80/128 = 0.625 (40960) EXACT",
+  "tested": ["rw_distance perpendicular", "scale centre-exact", "closer=bigger scale", "clamp bounds"],
+  "tests": 4,
+  "suite_green": 151
+}

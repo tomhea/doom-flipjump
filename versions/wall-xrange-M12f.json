@@ -1,0 +1,10 @@
+{
+  "note": "M12f (F5) — R_AddLine: wall screen x-range + 90deg FOV clip. reference_model.wall_x_range -> (x1,x2,rw_angle1) or None. Endpoints' absolute angles (point_to_angle), back-face cull (span>=ANG180), view-relative, clip to [-CLIPANGLE,CLIPANGLE] (CLIPANGLE=ANG45, FOV90) via DOOM tspan logic, angle_to_x -> columns, cull x1>=x2. Our segs wind CCW (opposite DOOM, same flip as M12e -ANG90 normal) so the seg's LEFT screen vertex is v2 (swapped).",
+  "method": "wall_x_range(viewx, viewy, viewangle, seg, verts) -> (x1, x2, rw_angle1) | None",
+  "consts": {"ANG45": "0x20000000", "CLIPANGLE": "ANG45 (half FOV90)"},
+  "validation": "square room (centre view): faced wall fills [0,160); all other walls culled (behind/edge-on)",
+  "winding": "CCW: left vertex = v2 (swapped vs DOOM v1)",
+  "tested": ["faced wall fills viewport", "wall behind culled", "range ordered+onscreen", "off-centre partial"],
+  "tests": 4,
+  "suite_green": 155
+}

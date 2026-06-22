@@ -1,0 +1,11 @@
+{
+  "note": "M12c (F5) — horizontal projection. config CENTERX/CENTERY/PROJECTION (derived: VIEW_W//2 etc.; FOV90 -> focal=CENTERX). tables.viewangletox_table (shared R6: view-relative fine angle -> screen column; FOV-90 perspective col=CENTERX-tan(angle)*PROJECTION; front-FOV half-table trig_n//2; clamped [-1,VIEW_W+1]). reference_model.angle_to_x = lookup at (angle+ANG90)>>angle_shift. The wall scale uses finesine (no runtime tangent LUT; tan folded into the build-time table).",
+  "projection_constants": {"CENTERX": 80, "CENTERY": 50, "PROJECTION": 80, "FOV_deg": 90},
+  "viewangletox_anchors": {"index_1024_centre": 80, "index_1536_+45deg": 0, "index_512_-45deg": 160},
+  "kernel": "viewangletox_table(view_w, trig_n) -> trig_n//2 entries",
+  "method": "angle_to_x(view_relative_bam) -> column in [-1, VIEW_W+1]",
+  "tested": ["projection constants config-derived", "table anchors + monotonic + clamp", "angle_to_x anchors", "angle_to_x table-consistency", "FOV monotonicity"],
+  "also": "tightened test_config resolution-leak guard (CENTERX=VIEW_W//2=160 at W=320 false-positived the blanket check; now by-name, stronger)",
+  "tests": 5,
+  "suite_green": 142
+}

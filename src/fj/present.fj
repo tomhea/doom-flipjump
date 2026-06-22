@@ -33,4 +33,14 @@ ns present {
         stl.output_char 0x03
         .emit_addr addr
     }
+
+    // update_screen_reg (present, REGISTER form, fj 1.5.1): [0x06][framebuffer_addr: w/8] — the device
+    // reads a `hex.vec 2` framebuffer (each pixel = two ops: low nibble at 2k, high at 2k+1, bpp 8).
+    // This is the format a colormap/texture `.lookup` writes DIRECTLY (its result-copy is register-form),
+    // so the full-unroll renderer (M11c, D2b) has NO deposit/pack step (the hex.vec2 simplification,
+    // §2.1). The framebuffer label must be declared `hex.vec 2*FB_SIZE`.
+    def update_screen_reg addr {
+        stl.output_char 0x06
+        .emit_addr addr
+    }
 }

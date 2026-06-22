@@ -1,0 +1,8 @@
+# M12g TDD FAIL — view_z stubbed to 0 and wall_screen_span to (0,0); tests written first.
+tests\host\test_wall_heights.py:43: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_wall_heights.py::test_view_z_is_floor_plus_eye_height
+FAILED tests/host/test_wall_heights.py::test_wall_screen_span_exact - assert ...
+FAILED tests/host/test_wall_heights.py::test_top_above_bottom_and_brackets_horizon
+FAILED tests/host/test_wall_heights.py::test_closer_wall_is_taller - assert (...
+4 failed in 0.19s

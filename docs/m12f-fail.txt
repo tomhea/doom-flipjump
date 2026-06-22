@@ -1,0 +1,8 @@
+# M12f TDD FAIL — wall_x_range stubbed to return a degenerate (0,0,0); tests written first.
+tests\host\test_wall_xrange.py:63: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_wall_xrange.py::test_faced_wall_fills_viewport - asser...
+FAILED tests/host/test_wall_xrange.py::test_wall_behind_is_culled - assert (0...
+FAILED tests/host/test_wall_xrange.py::test_visible_range_is_ordered_and_onscreen
+FAILED tests/host/test_wall_xrange.py::test_offcentre_view_clips_to_partial_range
+4 failed in 0.19s

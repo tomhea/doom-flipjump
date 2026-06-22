@@ -1,0 +1,7 @@
+### PASS — full suite with render_wall_frame composited (M12h) ###
+...............                                                          [100%]
+15 passed in 0.27s
+
+### full suite ###
+.............................                                            [100%]
+173 passed in 59.82s

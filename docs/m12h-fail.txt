@@ -1,0 +1,20 @@
+### FAIL — render_wall_frame stubbed to the bare M9 background (no walls composited) ###
+        assert len(frame) == cfg.FB_SIZE
+>           assert all(col[y] == wall for y in range(0, 76))      # wall rows 0..75
+E           assert False
+>       assert frame_hash(frame) == "0c406cce91e11922fd4d820ca7ff9002d04714a3edd03aec4ebff7b35750a96c"
+E       AssertionError: assert 'b85579f68a13...0dd821ef723de' == '0c406cce91e1...ff7b35750a96c'
+>           assert all(frame[y * W + x] == wall for y in range(0, 76))
+E           assert False
+        assert len(frame) == cfg.FB_SIZE
+>       assert cols_with_wall == W                                 # close perpendicular wall fills the screen
+E       assert 0 == 160
+        assert len(frame) == Config().FB_SIZE
+>       assert frame != bg
+E       AssertionError: assert b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00...oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo' != b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00...oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo'
+FAILED tests/host/test_wall_frame.py::test_spawn_frame_head_on_wall_is_rectangle
+FAILED tests/host/test_wall_frame.py::test_spawn_frame_golden_hash - Assertio...
+FAILED tests/host/test_wall_frame.py::test_only_faced_wall_drawn_others_culled
+FAILED tests/host/test_wall_frame.py::test_offcentre_view_still_fills_and_clips
+FAILED tests/host/test_wall_frame.py::test_e1m1_wall_frame_renders_and_is_deterministic
+5 failed, 2 passed in 0.36s

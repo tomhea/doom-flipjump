@@ -47,6 +47,26 @@ def viewangletox_table(view_w: int, trig_n: int) -> list[int]:
     return table
 
 
+def xtoviewangle_table(view_w: int, trig_n: int) -> list[int]:
+    """DOOM's `xtoviewangle[]` (the inverse of `viewangletox`): maps a screen column to the view-relative
+    BAM angle at that column's left edge. `view_w + 1` entries (a column can be the right edge of the last
+    wall). Built exactly as DOOM's R_InitTextureMapping: for column x, find the first fine index i with
+    `viewangletox[i] <= x`, then `xtoviewangle[x] = (i << angle_shift) - ANG90` (masked to 32-bit BAM).
+    Result: x=0 → ≈+ANG45 (leftmost = most-positive/CCW angle), centre → 0, x=view_w → ≈-ANG45. The
+    per-column wall scale (M12h) reads `viewangle + xtoviewangle[x]` at the seg's two endpoint columns to
+    seed DOOM's scale interpolation. Shared kernel (R6/D12): the oracle and the fj LUT both read it."""
+    vtox = viewangletox_table(view_w, trig_n)
+    angle_shift = 32 - (trig_n.bit_length() - 1)
+    ang90 = 1 << 30
+    table = []
+    for x in range(view_w + 1):
+        i = 0
+        while i < len(vtox) and vtox[i] > x:
+            i += 1
+        table.append(((i << angle_shift) - ang90) & 0xFFFFFFFF)
+    return table
+
+
 def tantoangle_table(slope_range: int = 2048) -> list[int]:
     """DOOM's `tantoangle[]`: the BAM angle whose tangent is `i/slope_range`, for i in [0, slope_range].
     `tantoangle[i] = atan(i/slope_range)` as a 32-bit BAM (full turn = 2^32) — so [0] = 0 and

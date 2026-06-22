@@ -29,7 +29,7 @@ from dataclasses import dataclass, replace
 from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
 from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side  # shared geometry (R6)
-from doomfj.tables import sine_table, tantoangle_table, viewangletox_table
+from doomfj.tables import sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table
 from doomfj.texturecompiler import downscale_canvas  # shared D5 downscale lever (R6/D12)
 from doomfj.wad import WadFile
 
@@ -49,9 +49,10 @@ VIEWHEIGHT = 41                    # DOOM player eye height above the floor (map
 FORWARD_MOVE = 50 << 16           # 16.16 map-units per tic (DOOM run forwardmove 0x32); S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
-# ── render: placeholder background band base indices (until real flats/visplanes, M13) ──
+# ── render: placeholder band base indices (until real flats/visplanes, M13 / wall textures) ──
 CEIL_BG = 0                       # ceiling band palette index (pre-colormap)
 FLOOR_BG = 96                     # floor band palette index (pre-colormap)
+WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap) until textures land
 LIGHT_SHIFT = 3                   # sector light (0..255) -> colormap row (0..31): light >> 3
 COLORMAP_LIGHTS = 32              # COLORMAP usable light rows (0..31; invuln/black sit past these)
 
@@ -115,6 +116,7 @@ class ReferenceModel:
         self.downscale = self.cfg.TEXTURE_DOWNSCALE   # the shared D5 factor (used once textures sample, M11b)
         self.tantoangle = tantoangle_table(SLOPERANGE)        # R_PointToAngle slope->BAM (M12b, shared R6)
         self.viewangletox = viewangletox_table(self.cfg.VIEW_W, self.cfg.TRIG_N)   # angle->column (M12c, R6)
+        self.xtoviewangle = xtoviewangle_table(self.cfg.VIEW_W, self.cfg.TRIG_N)   # column->angle (M12h, R6)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
     def read_sin(self, angle: int) -> int:
@@ -387,15 +389,20 @@ class ReferenceModel:
             segs.extend(range(s.firstseg, s.firstseg + s.numsegs))
         return segs
 
-    def _sector_light(self, scene: Scene, subsector: int) -> int:
-        """Light level of the sector the subsector belongs to: subsector -> first seg -> linedef side
-        -> sidedef -> sector (all from the same WAD geometry, R6)."""
-        ss = scene.cmap.subsectors[subsector]
-        seg = scene.cmap.segs[ss.firstseg]
-        ld = scene.map_wad.linedefs(scene.mapname)[seg.linedef]
+    @staticmethod
+    def _seg_sector(lds, sds, secs, seg):
+        """The sector a seg fronts: seg -> linedef -> (front|back) sidedef -> sector. `lds/sds/secs` are
+        the level's parsed LINEDEFS/SIDEDEFS/SECTORS (parsed once per frame and threaded in, R6)."""
+        ld = lds[seg.linedef]
         sd_idx = ld.front if seg.side == 0 else ld.back
-        sd = scene.map_wad.sidedefs(scene.mapname)[sd_idx]
-        return scene.map_wad.sectors(scene.mapname)[sd.sector].light
+        return secs[sds[sd_idx].sector]
+
+    def _sector_light(self, scene: Scene, subsector: int) -> int:
+        """Light level of the sector the subsector belongs to (subsector -> first seg -> sector)."""
+        seg = scene.cmap.segs[scene.cmap.subsectors[subsector].firstseg]
+        return self._seg_sector(scene.map_wad.linedefs(scene.mapname),
+                                scene.map_wad.sidedefs(scene.mapname),
+                                scene.map_wad.sectors(scene.mapname), seg).light
 
     # ── render ──
     def render_frame(self, state: SimState, scene: Scene) -> bytes:
@@ -422,4 +429,62 @@ class ReferenceModel:
             base = y * cfg.VIEW_W
             for x in range(cfg.VIEW_W):
                 fb[base + x] = val
+        return bytes(fb)
+
+    def render_wall_frame(self, state: SimState, scene: Scene) -> bytes:
+        """The first rendered 3D frame: composite every visible wall over the M9 two-band background
+        (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop, flat-shaded). Walk the BSP front-to-back;
+        for each seg: `wall_x_range` (skip culled) -> `wall_setup` -> DOOM's scale INTERPOLATION (scale at
+        column x1, then a linear `scalestep` to x2 via a plain truncated divide — NOT FixedDiv, exactly as
+        DOOM, so the fj renderer must divide the same way) -> per column `wall_screen_span`, clipped to
+        [0, VIEW_H), filled with the seg's sector colormap-shaded `WALL_BG`. Front-to-back **solid-seg
+        clipping**: a per-column `drawn` flag stops a farther wall overdrawing a nearer one (one-sided
+        walls are opaque). Ceiling/floor stay the M9 background (visplanes are M13; wall texturing is the
+        next milestone). Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces
+        it bit-exactly (D12)."""
+        cfg = self.cfg
+        fb = bytearray(self.render_frame(state, scene))      # start from the two-band background
+        colormap = scene.asset_wad.colormap()
+        lds = scene.map_wad.linedefs(scene.mapname)
+        sds = scene.map_wad.sidedefs(scene.mapname)
+        secs = scene.map_wad.sectors(scene.mapname)
+        verts = scene.cmap.vertexes
+
+        viewx, viewy, viewangle = state.x, state.y, state.angle
+        px = _signed(state.x, 32) >> 16
+        py = _signed(state.y, 32) >> 16
+        # the eye z = the player's own sector floor + VIEWHEIGHT
+        pss = scene.cmap.subsectors[self.point_in_subsector(scene.cmap, px, py)]
+        viewz = self.view_z(self._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
+
+        drawn = bytearray(cfg.VIEW_W)                        # per-column solid-seg clip (1 = already drawn)
+        for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
+            seg = scene.cmap.segs[seg_i]
+            rng = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
+            if rng is None:
+                continue
+            x1, x2, _ = rng
+            rw_normalangle, rw_distance = self.wall_setup(viewx, viewy, seg, verts)
+            scale = self.scale_from_global_angle((viewangle + self.xtoviewangle[x1]) & ANGLE_MASK,
+                                                 viewangle, rw_normalangle, rw_distance)
+            if x2 > x1:
+                scale2 = self.scale_from_global_angle((viewangle + self.xtoviewangle[x2]) & ANGLE_MASK,
+                                                      viewangle, rw_normalangle, rw_distance)
+                diff, span = scale2 - scale, x2 - x1
+                scalestep = -(abs(diff) // span) if diff < 0 else diff // span   # trunc toward zero
+            else:
+                scalestep = 0
+            sec = self._seg_sector(lds, sds, secs, seg)
+            light_row = max(0, min(COLORMAP_LIGHTS - 1, sec.light >> LIGHT_SHIFT))
+            fill = colormap[light_row][WALL_BG]
+            for x in range(x1, x2):
+                if not drawn[x]:
+                    top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz,
+                                                        scale & ANGLE_MASK)
+                    top = max(0, top)
+                    bottom = min(cfg.VIEW_H - 1, bottom)
+                    for y in range(top, bottom + 1):
+                        fb[y * cfg.VIEW_W + x] = fill
+                    drawn[x] = 1
+                scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
         return bytes(fb)

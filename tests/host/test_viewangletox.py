@@ -5,9 +5,14 @@ span (M12d) is two angle_to_x lookups; the fj renderer reads the same emitted ta
 """
 from doomfj.config import Config
 from doomfj.reference_model import ANG90, ReferenceModel
-from doomfj.tables import viewangletox_table
+from doomfj.tables import viewangletox_table, xtoviewangle_table
 
 ANG45 = ANG90 // 2
+FINE_STEP = 1 << (32 - (4096).bit_length() + 1)   # one fine-angle BAM step at TRIG_N=4096 (= 1<<20)
+
+
+def _signed(v):
+    return v - (1 << 32) if v >= (1 << 31) else v
 
 
 # ── projection constants (config-derived SSOT) ──────────────────────────────
@@ -55,3 +60,30 @@ def test_angle_to_x_monotonic_across_fov():
     rm = ReferenceModel()
     cols = [rm.angle_to_x((a) & 0xFFFFFFFF) for a in range(ANG45, -ANG45, -(ANG45 // 20))]
     assert all(cols[i] <= cols[i + 1] for i in range(len(cols) - 1))
+
+
+# ── xtoviewangle (the inverse: column -> view-relative angle, M12h) ─────────
+
+def test_xtoviewangle_shape_and_anchors():
+    # anchors land within ~one column's angular width (a fine-index plateau maps to one column);
+    # at ~0.56°/column that is ≈6.4 fine steps, so allow 8 (centre sits on the widest plateau).
+    t = xtoviewangle_table(160, 4096)
+    assert len(t) == 160 + 1                                              # one entry per column edge
+    assert abs(_signed(t[0]) - ANG45) <= 8 * FINE_STEP                    # leftmost col ≈ +45deg
+    assert abs(_signed(t[80])) <= 8 * FINE_STEP                           # centre ≈ straight ahead (0)
+    assert abs(_signed(t[160]) + ANG45) <= 8 * FINE_STEP                  # rightmost col ≈ -45deg
+
+
+def test_xtoviewangle_monotonic_non_increasing():
+    """Left→right columns give decreasing (signed) view angles (left = most-positive/CCW)."""
+    sv = [_signed(v) for v in xtoviewangle_table(160, 4096)]
+    assert all(sv[i] >= sv[i + 1] for i in range(len(sv) - 1))
+
+
+def test_xtoviewangle_inverts_angle_to_x():
+    """Round-trip: feeding each column's angle back through angle_to_x lands on (about) that column —
+    the two tables are inverses (within the half-table's ±1-column quantization)."""
+    rm = ReferenceModel()
+    t = xtoviewangle_table(rm.cfg.VIEW_W, rm.cfg.TRIG_N)
+    for x in range(0, rm.cfg.VIEW_W + 1, 8):
+        assert abs(rm.angle_to_x(t[x]) - x) <= 1

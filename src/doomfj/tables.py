@@ -25,3 +25,12 @@ def reciprocal_table(count: int, fraction_bits: int, total_bits: int) -> list[in
     table = [max_value]
     table += [min(round((1 << fraction_bits) / i), max_value) for i in range(1, count)]
     return table
+
+
+def tantoangle_table(slope_range: int = 2048) -> list[int]:
+    """DOOM's `tantoangle[]`: the BAM angle whose tangent is `i/slope_range`, for i in [0, slope_range].
+    `tantoangle[i] = atan(i/slope_range)` as a 32-bit BAM (full turn = 2^32) — so [0] = 0 and
+    [slope_range] = atan(1) = 45deg = ANG45 = 0x20000000. Indexed by R_PointToAngle's slope quotient
+    (a computed value in [0, SLOPERANGE], §1.3 — not a shift-extracted index). slope_range+1 entries.
+    Shared kernel: the oracle's `point_to_angle` and the fj angle LUT both read these (R6/D12)."""
+    return [round(math.atan(i / slope_range) / (2 * math.pi) * (1 << 32)) for i in range(slope_range + 1)]

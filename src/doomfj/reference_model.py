@@ -29,13 +29,17 @@ from dataclasses import dataclass, replace
 from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, _signed  # shared signed Q-format kernel (R6)
 from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, compile_bsp, _point_side  # shared geometry (R6)
-from doomfj.tables import sine_table
+from doomfj.tables import sine_table, tantoangle_table
 from doomfj.texturecompiler import downscale_canvas  # shared D5 downscale lever (R6/D12)
 from doomfj.wad import WadFile
 
 # ── sim / angle constants (BAM: full turn = 2**32) ──
 FULL_CIRCLE = 1 << 32
+ANGLE_MASK = FULL_CIRCLE - 1      # wrap BAM arithmetic to unsigned 32-bit
 ANG90 = FULL_CIRCLE // 4          # 0x40000000 — 90deg, sanity anchor for the trig index
+ANG180 = FULL_CIRCLE // 2         # 0x80000000
+ANG270 = 3 * (FULL_CIRCLE // 4)   # 0xC0000000
+SLOPERANGE = 2048                 # R_PointToAngle slope quotient range (DOOM SLOPERANGE); tantoangle has +1
 FORWARD_MOVE = 50 << 16           # 16.16 map-units per tic (DOOM run forwardmove 0x32); S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
@@ -102,6 +106,7 @@ class ReferenceModel:
         # finesine index = top log2(TRIG_N) bits of the BAM angle (config-derived, not a literal 20)
         self.angle_shift = 32 - (self.cfg.TRIG_N.bit_length() - 1)
         self.downscale = self.cfg.TEXTURE_DOWNSCALE   # the shared D5 factor (used once textures sample, M11b)
+        self.tantoangle = tantoangle_table(SLOPERANGE)        # R_PointToAngle slope->BAM (M12b, shared R6)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
     def read_sin(self, angle: int) -> int:
@@ -110,6 +115,41 @@ class ReferenceModel:
     def read_cos(self, angle: int) -> int:
         idx = (angle >> self.angle_shift) + self.cfg.TRIG_N // 4
         return self.sine[idx & (self.cfg.TRIG_N - 1)]
+
+    # ── projection angles (R_PointToAngle2, M12b) ──
+    @staticmethod
+    def _slope_div(num: int, den: int) -> int:
+        """DOOM SlopeDiv: the tantoangle index for slope num/den (num <= den, both >= 0). Tuned for
+        16.16 magnitudes — `den < 512` ⇒ the slope is ~0/clamped to SLOPERANGE; else `(num<<3)/(den>>8)`
+        clamped to SLOPERANGE. Inputs must be 16.16-scale (the renderer's world units) to match DOOM."""
+        if den < 512:
+            return SLOPERANGE
+        ans = (num << 3) // (den >> 8)
+        return ans if ans <= SLOPERANGE else SLOPERANGE
+
+    def point_to_angle(self, x1: int, y1: int, x2: int, y2: int) -> int:
+        """R_PointToAngle2: the BAM angle of the vector (x1,y1) -> (x2,y2). Octant fold + `tantoangle`
+        lookup on the SlopeDiv quotient (the shared kernel, R6) — no atan at runtime. Coords are 16.16
+        world units (the SlopeDiv tuning is scale-dependent). Returns a 32-bit BAM (East=0, North≈ANG90,
+        with DOOM's ±1 octant-boundary quirks; e.g. due north = ANG90-1). The fj renderer matches this."""
+        x, y = x2 - x1, y2 - y1
+        if x == 0 and y == 0:
+            return 0
+        t = self.tantoangle
+        if x >= 0:
+            if y >= 0:
+                return t[self._slope_div(y, x)] if x > y \
+                    else (ANG90 - 1 - t[self._slope_div(x, y)]) & ANGLE_MASK
+            y = -y
+            return (-t[self._slope_div(y, x)]) & ANGLE_MASK if x > y \
+                else (ANG270 + t[self._slope_div(x, y)]) & ANGLE_MASK
+        x = -x
+        if y >= 0:
+            return (ANG180 - 1 - t[self._slope_div(y, x)]) & ANGLE_MASK if x > y \
+                else (ANG90 + t[self._slope_div(x, y)]) & ANGLE_MASK
+        y = -y
+        return (ANG180 + t[self._slope_div(y, x)]) & ANGLE_MASK if x > y \
+            else (ANG270 - 1 - t[self._slope_div(x, y)]) & ANGLE_MASK
 
     # ── sim ──
     def step_sim(self, state: SimState, keys: dict) -> SimState:

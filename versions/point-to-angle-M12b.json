@@ -1,0 +1,11 @@
+{
+  "note": "M12b (F5) — projection angle primitive. tables.tantoangle_table (shared R6: BAM angle whose tangent is i/SLOPERANGE; [0]=0, [2048]=ANG45=0x20000000) + reference_model.point_to_angle (R_PointToAngle2: DOOM octant fold + SlopeDiv + tantoangle, no runtime atan) + _slope_div. The angle the wall projection (M12c) and the fj angle LUT build on.",
+  "kernel": "tantoangle_table(slope_range=2048) -> 2049 entries",
+  "method": "point_to_angle(x1,y1,x2,y2) -> 32-bit BAM",
+  "doom_faithful": "octant fold incl. +-1 boundary quirks (N=ANG90-1, W=ANG180-1, S=ANG270, NE diag=ANG45-1); SlopeDiv den<512 -> SLOPERANGE clamp; inputs are 16.16 world units",
+  "tantoangle_anchors": {"0": 0, "1024": 316933406, "2048": 536870912},
+  "tested": ["tantoangle anchors+monotonic", "DOOM-exact cardinals", "atan2 agreement within quantization", "origin-invariance"],
+  "tests": 4,
+  "suite_green": 137,
+  "note_units": "SlopeDiv tuning is 16.16-scale; the renderer's exact projection precision (D6) is settled in M12c"
+}

@@ -212,7 +212,7 @@ class ReferenceModel:
         (visangle=viewangle=rw_normalangle) this is exactly PROJECTION/rw_distance."""
         anglea = (ANG90 + (visangle - viewangle)) & ANGLE_MASK
         angleb = (ANG90 + (visangle - rw_normalangle)) & ANGLE_MASK
-        num = fixed_mul(self.cfg.CENTERX << 16, self.read_sin(angleb), 8, 4)
+        num = fixed_mul(self.cfg.PROJECTION << 16, self.read_sin(angleb), 8, 4)
         den = fixed_mul(rw_distance, self.read_sin(anglea), 8, 4)
         if den == 0:
             return SCALE_MAX

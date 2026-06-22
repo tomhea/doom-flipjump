@@ -190,6 +190,36 @@ class ReferenceModel:
             node = n.left if side > 0 else n.right
         return node & (NF_SUBSECTOR - 1)
 
+    def bsp_render_order(self, cmap: CompiledMap, vx: int, vy: int) -> list:
+        """R_RenderBSPNode: the front-to-back subsector visit order from viewpoint (vx, vy) [16.0 map
+        coords]. At each node the viewer's side (`_point_side > 0` ⇒ back/left, else front/right, R6) is
+        the NEAR child — descend it first, then the far child — so subsectors come out nearest-first (the
+        order walls are drawn for solid-seg clipping). Iterative (explicit stack): the M7-built BSP is
+        unbalanced/deep (~1829 segs on E1M1), so recursion would overflow — exactly why F5 reserves the
+        runtime stack for the BSP's upper levels (§2.1). Returns subsector indices."""
+        order = []
+        stack = [cmap.root]
+        while stack:
+            child = stack.pop()
+            if child & NF_SUBSECTOR:
+                order.append(child & (NF_SUBSECTOR - 1))
+            else:
+                n = cmap.nodes[child]
+                back = _point_side(n.x, n.y, n.dx, n.dy, vx, vy) > 0
+                near, far = (n.left, n.right) if back else (n.right, n.left)
+                stack.append(far)    # far pushed first ⇒ popped (drawn) after the whole near subtree
+                stack.append(near)   # near on top ⇒ drawn first (front-to-back)
+        return order
+
+    def visible_segs(self, cmap: CompiledMap, vx: int, vy: int) -> list:
+        """The seg indices (into `cmap.segs`) of every visible subsector, flattened in BSP front-to-back
+        order — the wall draw order. Each subsector contributes its `firstseg .. firstseg+numsegs`."""
+        segs = []
+        for ss in self.bsp_render_order(cmap, vx, vy):
+            s = cmap.subsectors[ss]
+            segs.extend(range(s.firstseg, s.firstseg + s.numsegs))
+        return segs
+
     def _sector_light(self, scene: Scene, subsector: int) -> int:
         """Light level of the sector the subsector belongs to: subsector -> first seg -> linedef side
         -> sidedef -> sector (all from the same WAD geometry, R6)."""

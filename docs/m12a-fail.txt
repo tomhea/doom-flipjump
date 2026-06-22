@@ -1,0 +1,7 @@
+tests\host\test_bsp_render_order.py:80: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_bsp_render_order.py::test_render_order_is_permutation
+FAILED tests/host/test_bsp_render_order.py::test_viewer_subsector_drawn_first
+FAILED tests/host/test_bsp_render_order.py::test_near_subtree_before_far - Va...
+FAILED tests/host/test_bsp_render_order.py::test_visible_segs_follow_subsector_order
+4 failed in 0.18s

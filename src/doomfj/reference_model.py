@@ -28,7 +28,7 @@ from dataclasses import dataclass, replace
 
 from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
-from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, compile_bsp, _point_side  # shared geometry (R6)
+from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side  # shared geometry (R6)
 from doomfj.tables import sine_table, tantoangle_table, viewangletox_table
 from doomfj.texturecompiler import downscale_canvas  # shared D5 downscale lever (R6/D12)
 from doomfj.wad import WadFile
@@ -72,8 +72,9 @@ class SimState:
 @dataclass(frozen=True)
 class Scene:
     """The static data a frame is rendered against — the SAME inputs the program is built from (R6).
-    `map_wad` carries geometry (VERTEXES/LINEDEFS/SIDEDEFS/SECTORS + the THINGS spawn); `asset_wad`
-    carries graphics (PLAYPAL/COLORMAP). `cmap` is the BSP built once by mapcompiler (H3)."""
+    `map_wad` carries geometry (VERTEXES/LINEDEFS/SIDEDEFS/SECTORS + the THINGS spawn + the baked
+    SEGS/SSECTORS/NODES); `asset_wad` carries graphics (PLAYPAL/COLORMAP). `cmap` is the BSP baked
+    once from those lumps by mapcompiler (H3)."""
     map_wad: WadFile
     asset_wad: WadFile
     mapname: str
@@ -81,8 +82,8 @@ class Scene:
 
 
 def build_scene(map_wad: WadFile, asset_wad: WadFile, mapname: str) -> Scene:
-    """Compile the level's BSP once and bundle the render inputs."""
-    return Scene(map_wad, asset_wad, mapname, compile_bsp(map_wad, mapname))
+    """Bake the level's BSP once (from the WAD's NODES/SSECTORS/SEGS) and bundle the render inputs."""
+    return Scene(map_wad, asset_wad, mapname, bake_bsp(map_wad, mapname))
 
 
 def spawn_state(wad: WadFile, mapname: str, *, player: int = 1) -> SimState:
@@ -186,15 +187,15 @@ class ReferenceModel:
     # ── wall scale (R_StoreWallRange setup + R_ScaleFromGlobalAngle, M12e) ──
     def wall_setup(self, viewx: int, viewy: int, seg, verts) -> tuple:
         """The per-wall projection setup (DOOM R_StoreWallRange): returns `(rw_normalangle, rw_distance)`.
-        `rw_normalangle = seg.angle_BAM - ANG90` (the wall's normal — the `-ANG90` matches OUR seg-angle
-        convention, empirically: it yields the true perpendicular distance + positive scale; DOOM's
-        +ANG90 is for its opposite winding). `rw_distance` = the perpendicular view→wall-line distance =
-        `hyp · sin(distangle)`, where hyp = point_to_dist(view, v1) and distangle = ANG90 - the clamped
-        normal↔v1 offset angle. `viewx/y` are 16.16; `verts` are 16.0 map coords (shifted <<16 here)."""
+        `rw_normalangle = seg.angle_BAM + ANG90` (the wall's normal — DOOM's native convention, valid now
+        the segs are BAKED with DOOM-standard winding; verified on real E1M1: it yields the true
+        perpendicular distance + positive scale, whereas -ANG90 gives 0). `rw_distance` = the perpendicular
+        view→wall-line distance = `hyp · sin(distangle)`, where hyp = point_to_dist(view, v1) and distangle
+        = ANG90 - the clamped normal↔v1 offset angle. `viewx/y` are 16.16; `verts` are 16.0 (shifted <<16)."""
         v1x, v1y = verts[seg.v1]
         v1x <<= 16
         v1y <<= 16
-        rw_normalangle = ((seg.angle << 16) - ANG90) & ANGLE_MASK
+        rw_normalangle = ((seg.angle << 16) + ANG90) & ANGLE_MASK
         angle1 = self.point_to_angle(viewx, viewy, v1x, v1y)
         offsetangle = (rw_normalangle - angle1) & ANGLE_MASK
         if offsetangle > ANG180:
@@ -229,10 +230,10 @@ class ReferenceModel:
         then make view-relative and clip to [-CLIPANGLE, CLIPANGLE] via DOOM's unsigned tspan logic, then
         map to columns via angle_to_x. `viewx/y/angle` are 16.16/BAM; `verts` are 16.0 (shifted <<16)."""
         v1, v2 = verts[seg.v1], verts[seg.v2]
-        # Our segs wind CCW (opposite DOOM, same flip as M12e's -ANG90 normal): the seg's LEFT screen
-        # vertex is v2, the RIGHT is v1 — so front-facing walls give span < ANG180 (else all cull).
-        angle1 = self.point_to_angle(viewx, viewy, v2[0] << 16, v2[1] << 16)   # left vertex
-        angle2 = self.point_to_angle(viewx, viewy, v1[0] << 16, v1[1] << 16)   # right vertex
+        # DOOM-standard winding (baked segs): v1 is the seg's LEFT screen vertex, v2 the RIGHT — so a
+        # front-facing wall gives span < ANG180 (verified on real E1M1; the M7-era v1/v2 swap is gone).
+        angle1 = self.point_to_angle(viewx, viewy, v1[0] << 16, v1[1] << 16)   # left vertex
+        angle2 = self.point_to_angle(viewx, viewy, v2[0] << 16, v2[1] << 16)   # right vertex
         span = (angle1 - angle2) & ANGLE_MASK
         if span >= ANG180:
             return None                                  # back-facing (or degenerate)

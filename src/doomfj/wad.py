@@ -76,6 +76,36 @@ class Thing:
 
 
 @dataclass(frozen=True)
+class WadSeg:
+    """A raw SEGS record (the WAD's precompiled BSP segs, baked by the level's node tool)."""
+    v1: int          # start vertex index
+    v2: int          # end vertex index
+    angle: int       # BAM >> 16 (0..0xFFFF), direction v1->v2
+    linedef: int     # source linedef index
+    direction: int   # 0 = seg runs with the linedef (front), 1 = against it (back)
+    offset: int      # distance along the linedef from its start to this seg's start
+
+
+@dataclass(frozen=True)
+class WadSubSector:
+    """A raw SSECTORS record: a run of segs forming one convex leaf."""
+    numsegs: int
+    firstseg: int    # index into the SEGS lump
+
+
+@dataclass(frozen=True)
+class WadNode:
+    """A raw NODES record (the partition line + two children; the bounding boxes are skipped).
+    A child ref with the 0x8000 bit set points to a subsector (low 15 bits), else a node index."""
+    x: int           # partition line start
+    y: int
+    dx: int          # partition line direction
+    dy: int
+    right: int       # right (front) child ref
+    left: int        # left (back) child ref
+
+
+@dataclass(frozen=True)
 class PatchRef:
     originx: int      # placement of the patch within the texture
     originy: int
@@ -184,6 +214,26 @@ class WadFile:
 
     def things(self, mapname: str) -> list[Thing]:
         return [Thing(*r) for r in _records(self._map_lump(mapname, "THINGS").data, "<5h")]
+
+    # ── baked BSP lumps (SEGS/SSECTORS/NODES) — the level's precompiled node tree (H3 bake) ──
+    def segs(self, mapname: str) -> list[WadSeg]:
+        """The SEGS lump: 12 bytes each (v1, v2, angle, linedef, direction, offset), all uint16."""
+        return [WadSeg(*r) for r in _records(self._map_lump(mapname, "SEGS").data, "<6H")]
+
+    def subsectors(self, mapname: str) -> list[WadSubSector]:
+        """The SSECTORS lump: 4 bytes each (numsegs, firstseg), uint16."""
+        return [WadSubSector(*r) for r in _records(self._map_lump(mapname, "SSECTORS").data, "<2H")]
+
+    def nodes(self, mapname: str) -> list[WadNode]:
+        """The NODES lump: 28 bytes each — partition line (x, y, dx, dy: int16), two 4-int16 child
+        bounding boxes (skipped), then right/left child refs (uint16, 0x8000 bit = subsector)."""
+        data = self._map_lump(mapname, "NODES").data
+        out = []
+        for off in range(0, len(data) - len(data) % 28, 28):
+            x, y, dx, dy = struct.unpack_from("<4h", data, off)
+            right, left = struct.unpack_from("<2H", data, off + 24)
+            out.append(WadNode(x, y, dx, dy, right, left))
+        return out
 
     # ── graphics lumps (H4 / M8): palette, colormap, textures, patches, flats ──
     def playpal(self, index: int = 0) -> list[tuple[int, int, int]]:

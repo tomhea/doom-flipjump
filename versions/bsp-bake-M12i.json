@@ -1,0 +1,42 @@
+{
+  "square_room": {
+    "segs": 4,
+    "subsectors": 1,
+    "nodes": 0,
+    "root": "0x8000",
+    "seg_angles": [
+      16384,
+      0,
+      49152,
+      32768
+    ],
+    "rw_distance_each_wall": [
+      128.0,
+      128.0,
+      128.0,
+      128.0
+    ],
+    "east_wall_facing_east_xrange": [
+      0,
+      160
+    ],
+    "east_wall_centre_scale": 40960,
+    "compiled_storage_mode": "flat",
+    "compiled_fjm_bytes": 5762
+  },
+  "e1m1": {
+    "segs": 2057,
+    "subsectors": 682,
+    "nodes": 681,
+    "root_is_node": true,
+    "root": 680,
+    "spawn_xy": [
+      -416,
+      256
+    ],
+    "spawn_subsector": 115,
+    "render_order_is_permutation": true,
+    "render_order_first": 115,
+    "segs_with_visible_xrange_from_spawn": 679
+  }
+}

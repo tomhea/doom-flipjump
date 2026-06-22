@@ -328,7 +328,7 @@ Per handoff §H / §3.5. Top to bottom:
 - **Open Qs:** texture-table span (OQ8); the per-table mode heuristic (D4 override).
 
 #### H3 — Map compiler
-- **Purpose:** Compile a WAD level into baked `.fj` BSP structures the fj renderer walks.
+- **Purpose:** Compile a WAD level into baked `.fj` BSP structures the fj renderer walks. **The BSP is PARSED from the WAD's precompiled NODES/SSECTORS/SEGS lumps (`bake_bsp`), not built** — real DOOM levels ship the node tree precomputed (the engine never built it at runtime either), so the segs carry DOOM-standard winding and the oracle uses DOOM's native projection conventions (no winding patches). *(History: the M7 "build the BSP from geometry" amendment was reverted at M12i — owner 2026-06-22 — after the recursive builder crashed on real E1M1; scope = Freedoom Phase 1 E1M1–E1M9.)*
 - **Supplies:** `compile_map(wad, level) -> .fj` emitting NODES/SSECTORS/SEGS/SECTORS/SIDEDEFS/LINEDEFS/VERTEXES as sequential packed streams + the root-node entry point. **LINEDEFS/VERTEXES double as F6's line-collision data** (+ an optional small BLOCKMAP broadphase) — there is no tile grid (D1 = BSP); F6's S0 collision tests linedefs, not tiles. **Emit mode (opt #7, §1.1.3):** either packed **data streams** (small, ~42@/byte to walk) or **BSP-as-code** — each node compiled to a code block with its partition line as compile-time constants (no per-node reads; side test becomes a `mul_const`). Code is ~1.5M/frame cheaper but costs program size + assemble time (R-2) and recompiles per level; the generator supports both, R1 picks per the measured read cost.
 - **Depends/related:** H1; consumed by F5; mirrored by H5.
 - **Assumes:** D1 = BSP; 16.16 coords (D6); coords fit w=32; F5 reads streams with `*_and_inc` (§3.4).

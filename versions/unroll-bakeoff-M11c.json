@@ -1,0 +1,38 @@
+{
+  "note": "M11c (F5/D2b, R1 gate) — D2 bake-off RESOLVED: full-unroll (b) CHOSEN. The full-unroll renderer writes the hex.vec2 register framebuffer (0x06, fj 1.5.1) so the per-pixel deposit is eliminated. THE load-bearing finding: the heavy per-pixel body must live in ONE shared stl.fcall leaf, NOT inlined per pixel — inlining (~1100 ops/px) makes the flat assemble super-linear (the flipjump assembler wflip-resolution pass is ~cubic) and blows the 160x100 frame to 541-623s (2x the 300s ceiling, the R-2 wall). Shared-leaf shell (fcall + fixed-addr xor_zero ~40 ops/px) cuts unrolled code ~25x -> 20.5s assemble. src/fj/frame_render.fj (frame.setup_col + frame.pixel + frame.leaf_body), present.update_screen_reg (0x06), reference_model.render_unroll_frame, build.build_unroll_frame, scripts/m11c_evidence.py. M12-representative: the leaf reads per-column base/light/step from registers.",
+  "d2_choice": "full-unroll (b)",
+  "frame": {
+    "scale": "160x100 (16000 px, full WIDTH-scale, synthetic full-width textured frame)",
+    "texture": "MC5",
+    "downscale": 2,
+    "light": 20,
+    "step_8_8": 327,
+    "frac0": 0,
+    "texcol_per_column": "x % texwidth"
+  },
+  "renderer": "full-unroll (b), shared stl.fcall leaf + hex.vec2 register framebuffer (0x06)",
+  "leaf_micro_opts": "kept-zero v3 (xor/xor_zero, no per-pixel hex.zero); single-nibble mask",
+  "measured": {
+    "storage_mode": "flat",
+    "full_artifact_flat": true,
+    "span_words": 3491328,
+    "flat_limit": 8388608,
+    "headroom": 2.403,
+    "assemble_seconds": 20.5,
+    "assemble_seconds_max": 300,
+    "fjm_bytes": 557536,
+    "per_pixel_ops": 1028,
+    "ops_per_frame": 16448000,
+    "golden_bit_exact": true,
+    "golden_hash_match": true
+  },
+  "bake_off_inlined_vs_leaf": {
+    "inlined_assemble_160x100_seconds": "541-623 (super-linear, R-2 wall, 2x over ceiling)",
+    "inlined_fjm_bytes": 11269576,
+    "inlined_ops_per_pixel": 1109,
+    "shared_leaf_assemble_seconds": 20.5,
+    "shared_leaf_fjm_bytes": 557536,
+    "speedup": "~25x assemble, ~20x smaller .fjm"
+  },
+  "gate": "R1 PASSED — assemble 20.5s <= 300s ceiling; (b) ops/frame <= (a) by construction; flat, golden bit-exact vs H5. Owner-approved 2026-06-22."
+}

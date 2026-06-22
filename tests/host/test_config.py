@@ -54,8 +54,11 @@ def test_fj_consts_roundtrip(tmp_path):
 
 
 def test_emit_has_no_hardcoded_resolution_literal(tmp_path):
-    """The generated file for a non-default resolution must not leak the default 160/100/16000."""
+    """The generated file for a non-default resolution must not leak the default W/H/FB. The resolution
+    *variables* must scale; check them by name — a blanket "no 160/100" is a false positive now that
+    derived constants legitimately alias defaults (e.g. CENTERX = VIEW_W//2 = 160 at W=320)."""
     p = Config(W=320, H=200).emit_fj_consts(tmp_path / "fj_consts.fj")
     text = p.read_text()
     assert "320" in text and "200" in text
-    assert "= 160\n" not in text and "= 100\n" not in text
+    for leaked in ("W = 160\n", "H = 100\n", "VIEW_W = 160\n", "VIEW_H = 100\n", "FB_SIZE = 16000\n"):
+        assert leaked not in text, leaked

@@ -57,6 +57,22 @@ class Config:
         return self.H
 
     @property
+    def CENTERX(self) -> int:
+        """Screen-centre column = VIEW_W//2 (the projection's horizontal vanishing point, M12)."""
+        return self.VIEW_W // 2
+
+    @property
+    def CENTERY(self) -> int:
+        """Screen-centre row = VIEW_H//2 (the horizon: wall top/bottom = CENTERY -/+ height*scale, M12)."""
+        return self.VIEW_H // 2
+
+    @property
+    def PROJECTION(self) -> int:
+        """Focal length in column units. FOV = 90deg => focal = CENTERX (tan 45deg = 1), so the screen
+        edges sit at +/-45deg (D6 projection setup; viewangletox is built from this)."""
+        return self.CENTERX
+
+    @property
     def FB_SIZE(self) -> int:
         """Framebuffer: W*H packed bytes, no align (§1.2)."""
         return self.W * self.H
@@ -72,6 +88,7 @@ class Config:
             "W": self.W, "H": self.H, "BPP": self.BPP, "TRIG_N": self.TRIG_N,
             "NCOLORS": self.NCOLORS, "COL_BITS": self.COL_BITS, "ROW_BITS": self.ROW_BITS,
             "VIEW_W": self.VIEW_W, "VIEW_H": self.VIEW_H,
+            "CENTERX": self.CENTERX, "CENTERY": self.CENTERY, "PROJECTION": self.PROJECTION,
             "FB_SIZE": self.FB_SIZE, "PALETTE_SIZE": self.PALETTE_SIZE,
         }
 

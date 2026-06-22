@@ -1,0 +1,7 @@
+
+tests\host\test_viewangletox.py:57: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_viewangletox.py::test_viewangletox_anchors_and_shape
+FAILED tests/host/test_viewangletox.py::test_angle_to_x_anchors - assert 1024...
+FAILED tests/host/test_viewangletox.py::test_angle_to_x_monotonic_across_fov
+3 failed, 2 passed in 0.18s

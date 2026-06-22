@@ -23,6 +23,7 @@ jobs:
           python - <<'PY'
           import json; m = json.load(open("build/metrics.json"))
           assert m["storage_mode"] == "flat", m
+          assert m.get("full_artifact_flat", True), m          # full 160x100 artifact span < flat limit (R4)
           if "assemble_seconds_max" in m:        # M11c bake-off guard (R-2)
               assert m["assemble_seconds"] < m["assemble_seconds_max"], m
           print("guards OK:", {k: m.get(k) for k in

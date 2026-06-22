@@ -54,7 +54,14 @@ def main() -> dict:
     ops_per_frame = per_pixel_ops * cfg.VIEW_W * cfg.VIEW_H
 
     assemble_ok = full["assemble_seconds"] < ASSEMBLE_SECONDS_MAX
-    flat_ok = small["storage_mode"] == "flat" and full["span_words"] < FLAT_MAX_WORDS
+    # R4 flat guard. storage_mode flips flat->hybrid iff flat_max_words < span (end_addr), so for the
+    # FULL 160x100 artifact `span < FLAT_MAX_WORDS` is EXACTLY `storage_mode == flat` — asserted below
+    # without the ~24M-op headless run. The small build additionally confirms actual flat EXECUTION of
+    # the identical segment structure (framebuffer/tables/renderer), so both the criterion and a real run
+    # are covered.
+    full_flat = full["span_words"] < FLAT_MAX_WORDS
+    small_flat = small["storage_mode"] == "flat"
+    flat_ok = full_flat and small_flat
     d2_choice = "full-unroll (b)" if assemble_ok else "FALLBACK: column-buffer (a)"
 
     metrics = {
@@ -62,6 +69,7 @@ def main() -> dict:
         "scale": f"{full['width']}x{full['count']} ({full['pixels']} px, full WIDTH-scale)",
         "renderer": "full-unroll (b), shared fcall leaf + hex.vec2 register framebuffer (0x06)",
         "storage_mode": small["storage_mode"],
+        "full_artifact_flat": full_flat,            # 160x100 span < flat limit  <=>  storage_mode flat
         "span_words": full["span_words"],
         "flat_limit": FLAT_MAX_WORDS,
         "headroom": round(FLAT_MAX_WORDS / full["span_words"], 3) if full["span_words"] else None,
@@ -80,7 +88,8 @@ def main() -> dict:
     METRICS.write_text(json.dumps(metrics, indent=2))
     print(json.dumps(metrics, indent=2))
 
-    assert flat_ok, f"R4: not flat / over span: {metrics}"
+    assert small_flat, f"R4: small build storage_mode != flat: {metrics}"
+    assert full_flat, f"R4: full 160x100 artifact span {full['span_words']} >= flat limit {FLAT_MAX_WORDS}"
     assert frame_ok and hash_ok, f"D12: golden frame not bit-exact vs oracle: {metrics}"
     assert assemble_ok, f"R-2: assemble {full['assemble_seconds']}s >= ceiling {ASSEMBLE_SECONDS_MAX}s"
     return metrics

@@ -1,0 +1,9 @@
+{
+  "note": "M12g (F5) — wall height projection (R_RenderSegLoop top/bottom). reference_model.view_z (= floor + VIEWHEIGHT=41, flat-level eye) + wall_screen_span (screen rows top/bottom = CENTERY - worldtop/bottom*scale; worldX = ceil/floor - viewz, 16.16). Signedness via _signed on the fixed_mul products so negative worldbottom projects below the horizon. Rows may be off-screen (M12h clips).",
+  "methods": ["view_z(floor_h) -> 16.16 eye z", "wall_screen_span(ceil_h, floor_h, viewz, scale) -> (top, bottom)"],
+  "VIEWHEIGHT": 41,
+  "validation": "square-room sector (ceil 128, floor 0, viewz 41): far wall (scale 0.25) -> (28,60) brackets CENTERY=50; near wall (scale ~1.43) -> (-75,108) overfills",
+  "tested": ["view_z = floor+41", "exact spans at 3 scales", "top<bottom + brackets horizon", "closer=taller"],
+  "tests": 4,
+  "suite_green": 159
+}

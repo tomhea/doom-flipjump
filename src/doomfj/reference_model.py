@@ -45,6 +45,7 @@ SLOPERANGE = 2048                 # R_PointToAngle slope quotient range (DOOM SL
 DBITS = 5                          # FRACBITS(16) - SLOPEBITS(11): the FixedDiv→tantoangle index shift (R_PointToDist)
 SCALE_MIN = 256                    # R_ScaleFromGlobalAngle clamp floor (16.16)
 SCALE_MAX = 64 << 16               # R_ScaleFromGlobalAngle clamp ceiling = 64.0 (16.16)
+VIEWHEIGHT = 41                    # DOOM player eye height above the floor (map units)
 FORWARD_MOVE = 50 << 16           # 16.16 map-units per tic (DOOM run forwardmove 0x32); S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
@@ -255,6 +256,26 @@ class ReferenceModel:
         if x1 >= x2:
             return None                                  # sub-column / not visible
         return x1, x2, rw_angle1
+
+    # ── wall heights (R_RenderSegLoop top/bottom projection, M12g) ──
+    @staticmethod
+    def view_z(floor_h: int) -> int:
+        """The view (eye) z in 16.16 — for a flat level the player z is the floor height, so the eye sits
+        VIEWHEIGHT(41) map units above it."""
+        return (floor_h + VIEWHEIGHT) << 16
+
+    def wall_screen_span(self, ceil_h: int, floor_h: int, viewz: int, scale: int) -> tuple:
+        """The screen rows `(top, bottom)` a wall column occupies, for the front sector's ceiling/floor
+        heights (map units), the eye `viewz` (16.16), and the column's `scale` (16.16). DOOM: worldtop =
+        ceiling - viewz, worldbottom = floor - viewz (16.16); top = CENTERY - worldtop·scale, bottom =
+        CENTERY - worldbottom·scale. Rows may be off-screen (< 0 or >= VIEW_H) — the render loop (M12h)
+        clips them. `top < bottom` always (ceiling above floor)."""
+        centeryfrac = self.cfg.CENTERY << 16
+        worldtop = (ceil_h << 16) - viewz
+        worldbottom = (floor_h << 16) - viewz
+        topfrac = centeryfrac - _signed(fixed_mul(worldtop, scale, 8, 4), 32)
+        bottomfrac = centeryfrac - _signed(fixed_mul(worldbottom, scale, 8, 4), 32)
+        return topfrac >> 16, bottomfrac >> 16
 
     # ── sim ──
     def step_sim(self, state: SimState, keys: dict) -> SimState:

@@ -1,0 +1,9 @@
+{
+  "note": "M12d (F5) — projection distance primitive. reference_model.point_to_dist (R_PointToDist): view->point distance sqrt(dx2+dy2) without a sqrt -- octant fold (dx>=dy), tantoangle index by FixedDiv(dy,dx)>>DBITS(5), dist=FixedDiv(dx, finesine[angle+ANG90]=cos(angle)). Reuses tantoangle (M12b) + finesine + fixed_div (R6). 16.16. Foundation for the wall perpendicular distance rw_distance (M12e -> R_ScaleFromGlobalAngle).",
+  "method": "point_to_dist(viewx, viewy, x, y) -> 16.16 distance",
+  "DBITS": 5,
+  "accuracy": "axis-aligned EXACT (cos0=1); 45deg within finesine quantization (diff 10 / 0.0001%); <=0.2% off-axis",
+  "tested": ["axis-aligned exact", "45deg near-exact", "off-axis vs Euclidean <=0.2%", "symmetry", "degenerate=0"],
+  "tests": 5,
+  "suite_green": 147
+}

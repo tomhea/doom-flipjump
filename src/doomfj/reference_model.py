@@ -29,7 +29,7 @@ from dataclasses import dataclass, replace
 from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, _signed  # shared signed Q-format kernel (R6)
 from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, compile_bsp, _point_side  # shared geometry (R6)
-from doomfj.tables import sine_table, tantoangle_table
+from doomfj.tables import sine_table, tantoangle_table, viewangletox_table
 from doomfj.texturecompiler import downscale_canvas  # shared D5 downscale lever (R6/D12)
 from doomfj.wad import WadFile
 
@@ -107,6 +107,7 @@ class ReferenceModel:
         self.angle_shift = 32 - (self.cfg.TRIG_N.bit_length() - 1)
         self.downscale = self.cfg.TEXTURE_DOWNSCALE   # the shared D5 factor (used once textures sample, M11b)
         self.tantoangle = tantoangle_table(SLOPERANGE)        # R_PointToAngle slope->BAM (M12b, shared R6)
+        self.viewangletox = viewangletox_table(self.cfg.VIEW_W, self.cfg.TRIG_N)   # angle->column (M12c, R6)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
     def read_sin(self, angle: int) -> int:
@@ -150,6 +151,15 @@ class ReferenceModel:
         y = -y
         return (ANG180 + t[self._slope_div(y, x)]) & ANGLE_MASK if x > y \
             else (ANG270 - 1 - t[self._slope_div(x, y)]) & ANGLE_MASK
+
+    def angle_to_x(self, view_relative_angle: int) -> int:
+        """Screen column for a view-relative BAM angle (0 = straight ahead, + = left, per the BAM/CCW
+        convention). Index `viewangletox` at `(angle + ANG90) >> angle_shift`; the angle should already be
+        clipped to the FOV [-ANG90, ANG90) by the wall path — out-of-range indices clamp to the table ends
+        (DOOM's off-screen sentinels). Returns a column in [-1, VIEW_W+1]."""
+        idx = ((view_relative_angle + ANG90) & ANGLE_MASK) >> self.angle_shift
+        idx = max(0, min(len(self.viewangletox) - 1, idx))
+        return self.viewangletox[idx]
 
     # ── sim ──
     def step_sim(self, state: SimState, keys: dict) -> SimState:

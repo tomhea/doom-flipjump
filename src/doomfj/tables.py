@@ -27,6 +27,26 @@ def reciprocal_table(count: int, fraction_bits: int, total_bits: int) -> list[in
     return table
 
 
+def viewangletox_table(view_w: int, trig_n: int) -> list[int]:
+    """DOOM's `viewangletox[]`: maps a view-relative fine angle to a screen column. Front-FOV table of
+    `trig_n//2` entries (§1.3). Entry j holds the column for view-relative angle `(j<<angle_shift) - ANG90`
+    (j=0 → -90°, j=trig_n//4 → straight ahead → CENTERX, j=trig_n//2 → +90°): `col = CENTERX - tan(angle)
+    * PROJECTION`, where FOV=90° ⇒ PROJECTION=CENTERX=view_w//2 (screen edges at ±45°). Clamped to
+    [-1, view_w+1] (DOOM's off-screen sentinels). Monotonic non-increasing. Shared kernel (R6): the oracle
+    `angle_to_x` and the fj LUT both read it. (The wall *scale* uses finesine, not finetangent, so no
+    runtime tangent LUT is needed — tan is folded into this build-time table.)"""
+    centerx = view_w // 2
+    projection = centerx
+    angle_shift = 32 - (trig_n.bit_length() - 1)      # config-derived (same as the finesine shift)
+    ang90 = 1 << 30
+    table = []
+    for j in range(trig_n // 2):
+        angle = (j << angle_shift) - ang90            # signed BAM in [-ANG90, +ANG90)
+        col = round(centerx - math.tan(angle / (1 << 32) * 2 * math.pi) * projection)
+        table.append(max(-1, min(view_w + 1, col)))
+    return table
+
+
 def tantoangle_table(slope_range: int = 2048) -> list[int]:
     """DOOM's `tantoangle[]`: the BAM angle whose tangent is `i/slope_range`, for i in [0, slope_range].
     `tantoangle[i] = atan(i/slope_range)` as a 32-bit BAM (full turn = 2^32) — so [0] = 0 and

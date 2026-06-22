@@ -16,7 +16,7 @@ from doomfj.reference_model import (
 )
 from doomfj.wad import WadFile
 
-MAP_WAD = "tests/fixtures/test.wad"        # geometry only (square room, DOOM names)
+MAP_WAD = "tests/fixtures/square_room.wad"  # DOOM-wound square room + baked BSP (same spawn/light as M3)
 ASSET_WAD = "tests/fixtures/freedoom_assets.wad"  # PLAYPAL + COLORMAP (graphics)
 
 

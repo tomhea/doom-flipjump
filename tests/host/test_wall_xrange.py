@@ -5,18 +5,18 @@ boundary) is culled. The wall's screen height (M12g) is drawn across this [x1, x
 """
 from pathlib import Path
 
-from doomfj.mapcompiler import compile_bsp
+from doomfj.mapcompiler import bake_bsp
 from doomfj.reference_model import ANG90, ReferenceModel
 from doomfj.wad import WadFile
 
-ROOM = Path("tests/fixtures/test.wad")
+ROOM = Path("tests/fixtures/square_room.wad")
 U = 1 << 16
-# seg index -> wall, for the square room (verts (0,0),(256,0),(256,256),(0,256))
-SOUTH, EAST, NORTH, WEST = 0, 1, 2, 3
+# seg index -> wall, for the DOOM-wound square room (CW boundary west,north,east,south)
+WEST, NORTH, EAST, SOUTH = 0, 1, 2, 3
 
 
 def _room():
-    return compile_bsp(WadFile.from_path(ROOM), "MAP01")
+    return bake_bsp(WadFile.from_path(ROOM), "MAP01")
 
 
 def _ranges(rm, cmap, viewangle):
@@ -41,6 +41,19 @@ def test_wall_behind_is_culled():
     cmap = _room()
     rm = ReferenceModel()
     assert rm.wall_x_range(128 * U, 128 * U, 0, cmap.segs[WEST], cmap.vertexes) is None
+
+
+def test_all_four_walls_visible_from_far_corner():
+    """Sanity that the DOOM-wound segs are NOT all back-face culled (the M7 bug the winding fix cures):
+    sweeping the view 360° from the centre, every one of the four walls is hit at some angle."""
+    cmap = _room()
+    rm = ReferenceModel()
+    seen = set()
+    for a in range(0, 1 << 32, (1 << 32) // 16):           # 16 view angles around the circle
+        for i, seg in enumerate(cmap.segs):
+            if rm.wall_x_range(128 * U, 128 * U, a, seg, cmap.vertexes) is not None:
+                seen.add(i)
+    assert seen == {WEST, NORTH, EAST, SOUTH}
 
 
 def test_visible_range_is_ordered_and_onscreen():

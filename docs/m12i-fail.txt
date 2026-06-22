@@ -1,0 +1,32 @@
+### FAIL part 1 — winding reverted to old -ANG90 + v1/v2 swap (the M7-era patches) ###
+>           assert nrm == ((seg.angle << 16) + ANG90) & ANGLE_MASK
+E           assert 0 == (((16384 << 16) + 1073741824) & 4294967295)
+>       assert nrm == 0 and abs(rwd - 128 * U) <= 4            # 128, within finesine quantization (~1 ULP)
+E       assert (2147483648 == 0)
+>       assert rm.scale_from_global_angle(0, 0, n2, d2) > rm.scale_from_global_angle(0, 0, n1, d1)
+E       assert 4194304 > 4194304
+>           assert ranges[faced] is not None
+E           assert None is not None
+>       assert seen == {WEST, NORTH, EAST, SOUTH}
+E       assert set() == {0, 1, 2, 3}
+>       assert r is not None
+E       assert None is not None
+>       assert r is not None
+E       assert None is not None
+FAILED tests/host/test_wall_scale.py::test_rw_distance_is_perpendicular - ass...
+FAILED tests/host/test_wall_scale.py::test_scale_perpendicular_centre_exact
+FAILED tests/host/test_wall_scale.py::test_scale_increases_when_closer - asse...
+FAILED tests/host/test_wall_xrange.py::test_faced_wall_fills_viewport - asser...
+FAILED tests/host/test_wall_xrange.py::test_all_four_walls_visible_from_far_corner
+FAILED tests/host/test_wall_xrange.py::test_visible_range_is_ordered_and_onscreen
+FAILED tests/host/test_wall_xrange.py::test_offcentre_view_clips_to_partial_range
+7 failed, 2 passed in 0.23s
+
+### FAIL part 2 — bake_bsp stubbed to an empty CompiledMap (net-new bake API) ###
+FAILED tests/host/test_mapbake.py::test_bake_square_room_one_subsector - asse...
+FAILED tests/host/test_mapbake.py::test_bake_e1m1_counts_and_node_root - asse...
+FAILED tests/host/test_mapbake.py::test_bake_e1m1_render_order_is_permutation
+FAILED tests/host/test_mapbake.py::test_bake_missing_bsp_lumps_raises - Faile...
+FAILED tests/host/test_mapbake.py::test_compile_map_streams_counts_and_roundtrip
+FAILED tests/host/test_mapbake.py::test_compile_map_code_mode - assert 'subse...
+6 failed, 5 passed in 0.58s

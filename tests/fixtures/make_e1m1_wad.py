@@ -21,7 +21,8 @@ from doomfj.wad import WadFile
 SRC = Path("assets/freedoom1.wad")
 DEST = Path(__file__).with_name("freedoom_e1m1.wad")
 MAP = "E1M1"
-MAP_LUMPS = ["THINGS", "LINEDEFS", "SIDEDEFS", "VERTEXES", "SECTORS"]  # we build the BSP ourselves (M7)
+# Full geometry incl. the baked BSP (M12i: we bake the WAD's precompiled node tree, not build it).
+MAP_LUMPS = ["THINGS", "LINEDEFS", "SIDEDEFS", "VERTEXES", "SEGS", "SSECTORS", "NODES", "SECTORS"]
 
 
 def _name8(s: str) -> bytes:

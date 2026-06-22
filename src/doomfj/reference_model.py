@@ -39,6 +39,8 @@ ANGLE_MASK = FULL_CIRCLE - 1      # wrap BAM arithmetic to unsigned 32-bit
 ANG90 = FULL_CIRCLE // 4          # 0x40000000 — 90deg, sanity anchor for the trig index
 ANG180 = FULL_CIRCLE // 2         # 0x80000000
 ANG270 = 3 * (FULL_CIRCLE // 4)   # 0xC0000000
+ANG45 = FULL_CIRCLE // 8          # 0x20000000
+CLIPANGLE = ANG45                 # half the 90° FOV — the view frustum's edge angle (R_AddLine clip)
 SLOPERANGE = 2048                 # R_PointToAngle slope quotient range (DOOM SLOPERANGE); tantoangle has +1
 DBITS = 5                          # FRACBITS(16) - SLOPEBITS(11): the FixedDiv→tantoangle index shift (R_PointToDist)
 SCALE_MIN = 256                    # R_ScaleFromGlobalAngle clamp floor (16.16)
@@ -217,6 +219,42 @@ class ReferenceModel:
         if den == 0:
             return SCALE_MAX
         return max(SCALE_MIN, min(SCALE_MAX, fixed_div(num, den, 8, 4)))
+
+    def wall_x_range(self, viewx: int, viewy: int, viewangle: int, seg, verts):
+        """R_AddLine: the seg's screen column range. Returns `(x1, x2, rw_angle1)` — x1 the left column,
+        x2 the right column (x1 < x2; the wall covers [x1, x2) per DOOM) and rw_angle1 the absolute angle
+        to v1 (for the per-column scale, M12g) — or None if the seg is back-facing or entirely outside the
+        90° FOV. Both seg endpoints' absolute angles (point_to_angle), back-face cull (span ≥ ANG180),
+        then make view-relative and clip to [-CLIPANGLE, CLIPANGLE] via DOOM's unsigned tspan logic, then
+        map to columns via angle_to_x. `viewx/y/angle` are 16.16/BAM; `verts` are 16.0 (shifted <<16)."""
+        v1, v2 = verts[seg.v1], verts[seg.v2]
+        # Our segs wind CCW (opposite DOOM, same flip as M12e's -ANG90 normal): the seg's LEFT screen
+        # vertex is v2, the RIGHT is v1 — so front-facing walls give span < ANG180 (else all cull).
+        angle1 = self.point_to_angle(viewx, viewy, v2[0] << 16, v2[1] << 16)   # left vertex
+        angle2 = self.point_to_angle(viewx, viewy, v1[0] << 16, v1[1] << 16)   # right vertex
+        span = (angle1 - angle2) & ANGLE_MASK
+        if span >= ANG180:
+            return None                                  # back-facing (or degenerate)
+        rw_angle1 = angle1
+        angle1 = (angle1 - viewangle) & ANGLE_MASK        # view-relative
+        angle2 = (angle2 - viewangle) & ANGLE_MASK
+        two_clip = 2 * CLIPANGLE                           # = ANG90 (full FOV)
+
+        tspan = (angle1 + CLIPANGLE) & ANGLE_MASK          # clip to the LEFT frustum edge
+        if tspan > two_clip:
+            if ((tspan - two_clip) & ANGLE_MASK) >= span:
+                return None                              # wall entirely off the left
+            angle1 = CLIPANGLE
+        tspan = (CLIPANGLE - angle2) & ANGLE_MASK          # clip to the RIGHT frustum edge
+        if tspan > two_clip:
+            if ((tspan - two_clip) & ANGLE_MASK) >= span:
+                return None                              # wall entirely off the right
+            angle2 = (-CLIPANGLE) & ANGLE_MASK
+
+        x1, x2 = self.angle_to_x(angle1), self.angle_to_x(angle2)
+        if x1 >= x2:
+            return None                                  # sub-column / not visible
+        return x1, x2, rw_angle1
 
     # ── sim ──
     def step_sim(self, state: SimState, keys: dict) -> SimState:

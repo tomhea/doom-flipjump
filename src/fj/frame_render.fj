@@ -1,0 +1,54 @@
+// F5 / D2b (full-unroll renderer, M11c) — the chosen D2 structure done RIGHT: every framebuffer pixel
+// address is a COMPILE-TIME constant (`rep(VIEW_W, x) ... rep(count, row) frame.pixel ...`), so the pixel
+// path carries ZERO pointers — BUT the heavy per-pixel body (DDA + texture sample + colormap apply) lives
+// in ONE shared `stl.fcall`'d leaf (`pixel_leaf`), NOT duplicated per pixel (D2: "heavy color/select/pack
+// logic factored into a shared stl.fcall leaf so it isn't duplicated WIDTH×"). This is the space lever:
+// the assembler is ~cubic in the number of unrolled ops, and an inlined body was ~1100 ops/pixel; the
+// shared-leaf shell is ~40 ops/pixel (an fcall + one fixed-address write) — ~25× less unrolled code.
+//
+// Per-pixel write uses the hex.vec2 register framebuffer (§2.1): the leaf renders the lit byte into the
+// shared scratch `lit`, and the shell XORs it straight into the pixel's zero-initialised hex.vec2 cell
+// (`hex.xor_zero 2, fb+pixel*2dw, lit`) — no per-pixel zero (the framebuffer's hex.vec is zero-init) and
+// NO deposit (the hex.vec2 simplification; deposit eliminated). Only the pixel ADDRESS is compile-time.
+//
+// Per-column state lives in registers (set once per column by `frame.setup_col`, read by the leaf): the
+// texture base `base_reg = texcol*texheight`, the colormap light in `cmidx`'s high byte, and the 8.8 DDA
+// `step`; `frac` is the DDA accumulator. This matches the real M12 renderer, where base/light/step are
+// the column's RUNTIME (BSP/perspective) values — only the leaf's inputs change, not its structure.
+//
+// Shared scratch the includer declares: frac (hex.vec 4, 8.8), v3 (3), idx (3), cmidx (4), lit (2),
+// base_reg (3), step (hex.vec 4), heightmask (texheight-1), pixel_ret (the fcall ret-reg, one op `;0`),
+// and the global label `pixel_leaf:` followed by `frame.leaf_body`. Tables = `tex`/`cm` (M8), `W` from
+// fj_consts.
+
+ns frame {
+    // per-column setup: load the column's constants into registers + reset the DDA (called once/column).
+    def setup_col base, light, step_val, frac0 < base_reg, cmidx, step, frac {
+        hex.set 3, base_reg, base
+        hex.zero 4, cmidx
+        hex.set 2, cmidx + 2*dw, light        // cmidx high byte = light (the leaf keeps it; tex writes low)
+        hex.set 4, step, step_val
+        hex.set 4, frac, frac0
+    }
+
+    // one pixel (the thin unrolled shell): fcall the shared leaf (which renders into `lit` + advances the
+    // DDA), then write `lit` straight into the pixel's hex.vec2 framebuffer cell (zero-init -> xor = set).
+    def pixel fbcell < lit, pixel_ret, pixel_leaf {
+        stl.fcall pixel_leaf, pixel_ret
+        hex.xor_zero 2, fbcell, lit
+    }
+
+    // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
+    // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
+    def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {
+        // v3 is held kept-zero between pixels (the xor_zero below restores it), so no per-pixel hex.zero.
+        hex.xor 2, v3, frac + 2*dw            // v3 = high byte of frac (the 8.8 integer part)
+        hex.and 1, v3 + 1*dw, heightmask + 1*dw   // mask only nibble 1 (nibble 0 & 0xF is a no-op; v<256)
+        hex.mov 3, idx, base_reg              // idx = base
+        hex.xor_zero 3, idx, v3               // idx = base | v = base + v (disjoint bits); v3 -> 0 (kept-zero)
+        tex.sample cmidx, idx                 // cmidx low byte = pal (high byte = light, preset per column)
+        cm.apply lit, cmidx                   // lit = colormapped palette byte
+        hex.add 4, frac, step                 // advance the DDA (8.8)
+        stl.fret pixel_ret
+    }
+}

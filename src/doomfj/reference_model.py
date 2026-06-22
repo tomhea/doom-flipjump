@@ -151,6 +151,23 @@ class ReferenceModel:
             frac = (frac + step) & 0xFFFF
         return bytes(out)
 
+    def render_unroll_frame(self, texels, texheight, texwidth, colormap, light, *,
+                            width, count, frac0, step, fracbits=8) -> bytes:
+        """The M11c synthetic full-unroll frame (the D2 bake-off workload): every screen column x in
+        [0, width) is the texture-v DDA over texcol = x % texwidth (a full-width texture splat), `count`
+        rows tall, at a constant column `light`. Returns a row-major W*H frame; the rendered region is
+        [row<count][x<width], everything else stays zero (the register framebuffer's zero-init). The fj
+        full-unroll renderer reproduces this bit-exactly (D12) — each column is render_textured_column,
+        placed row-major at (x, row)."""
+        cfg = self.cfg
+        fb = bytearray(cfg.FB_SIZE)
+        for x in range(width):
+            col = self.render_textured_column(texels, texheight, x % texwidth, colormap, light,
+                                              count=count, frac0=frac0, step=step, fracbits=fracbits)
+            for row in range(count):
+                fb[row * cfg.W + x] = col[row]
+        return bytes(fb)
+
     def render_solid_column(self, col_x: int, color: int, *, bg: int = 0) -> bytes:
         """M11a's golden frame: a framebuffer cleared to `bg` with column `col_x` filled with `color`
         (row-major W*H palette indices). The simplest renderer-primitive frame — the fj program

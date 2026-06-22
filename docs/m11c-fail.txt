@@ -1,0 +1,6 @@
+
+tests\host\test_unroll_frame.py:77: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_unroll_frame.py::test_oracle_unroll_frame_composition
+FAILED tests/host/test_unroll_frame.py::test_unroll_frame_bit_exact_vs_oracle
+2 failed in 0.27s

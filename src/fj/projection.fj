@@ -734,4 +734,48 @@ ns proj {
       cvh: hex.vec 8
       end:
     }
+
+    // proj.point_on_side back, vx, vy, px, py, dx, dy (R_PointOnSide / mapcompiler._point_side): the BSP
+    //   partition side test the bake-as-code walk (opt #7) branches on. back[:2] = 1 iff
+    //   dx*(vy-py) - dy*(vx-px) > 0 (the "back/left" side; <0 or ON the line -> front -> 0). vx,vy are the
+    //   viewer's 16.0 integer map coords (signed, 10-nibble sign-extended regs); px,py,dx,dy are the node's
+    //   partition line, passed as their 10-nibble (40-bit) two's-complement patterns (the emitter/test masks
+    //   them). Worked at 10 nibbles because int16 map coords bound the cross product by 2^32 (< 2^39), so the
+    //   40-bit signed result never overflows and its sign matches the oracle's full-precision sign byte-exact.
+    //   The cross product is genuinely SIGNED -> hex.scmp / hex.mul (R5). (The full bake will strength-reduce
+    //   the two products with mul_const on |dx|,|dy| + an emit-time add/sub by sign; this reusable macro uses
+    //   runtime hex.mul so one macro serves every node.) Mirrors mapcompiler._point_side EXACTLY. @requires hex.init
+    def point_on_side back, vx, vy, px, py, dx, dy \
+            @ cpx, cpy, cdx, cdy, dxv, dyv, p1, p2, czero, setback, front, end {
+        hex.set 10, cpx, px
+        hex.mov 10, dxv, vx
+        hex.sub 10, dxv, cpx              // dxv = vx - px   (signed)
+        hex.set 10, cpy, py
+        hex.mov 10, dyv, vy
+        hex.sub 10, dyv, cpy              // dyv = vy - py
+        hex.set 10, cdx, dx
+        hex.mul 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
+        hex.set 10, cdy, dy
+        hex.mul 10, p2, cdy, dxv          // p2 = dy*(vx-px)
+        hex.sub 10, p1, p2                // side = dx*(vy-py) - dy*(vx-px)
+        hex.set 10, czero, 0
+        hex.scmp 10, p1, czero, front, front, setback   // <0 & ==0 -> front(0); >0 -> back(1)
+      setback:
+        hex.set 2, back, 1
+        ;end
+      front:
+        hex.set 2, back, 0
+        ;end
+
+      cpx: hex.vec 10
+      cpy: hex.vec 10
+      cdx: hex.vec 10
+      cdy: hex.vec 10
+      dxv: hex.vec 10
+      dyv: hex.vec 10
+      p1: hex.vec 10
+      p2: hex.vec 10
+      czero: hex.vec 10
+      end:
+    }
 }

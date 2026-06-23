@@ -14,9 +14,13 @@ from doomfj.lut_generator import (
     generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj,
 )
 from doomfj.reference_model import ReferenceModel, SLOPERANGE, ANGLE_MASK
+from doomfj.mapcompiler import bake_bsp, _point_side
+from doomfj.wad import WadFile
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
 FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table + hex.fixed_div
+E1M1_WAD = Path("tests/fixtures/freedoom_e1m1.wad")
+MASK40 = (1 << 40) - 1   # 10-nibble two's-complement mask (point_on_side's working width)
 
 
 def _run(tmp_path, name, body, data, expected: bytes):
@@ -720,3 +724,47 @@ def test_column_render_params_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "column_render_params: fj output != oracle"
+
+
+# ── proj.point_on_side (R_PointOnSide / mapcompiler._point_side): the BSP partition side test ──
+# back = 1 iff dx*(vy-py) - dy*(vx-px) > 0 (the "back/left" side; on-the-line and front -> 0). This is
+# the geometry primitive the BSP-as-code walk branches on (opt #7). Computed at 10 nibbles (40-bit
+# signed): int16 map coords -> |cross product| <= 2^32, so it never overflows 40-bit signed and the fj
+# sign matches the oracle's full-precision sign byte-exact. Hand cases hit both signs, the on-the-line
+# (==0 -> front) case, negative dx/dy, and large magnitudes; then real baked E1M1 nodes.
+HAND_SIDE_CASES = [
+    # (px, py, dx, dy, vx, vy)
+    (0, 0, 0, 1, 5, 0),            # vertical partition, viewer on the right (front) -> 0
+    (0, 0, 0, 1, -5, 0),           # viewer on the left (back) -> 1
+    (0, 0, 1, 0, 5, 0),            # horizontal partition, viewer ON the line (==0 -> front) -> 0
+    (10, 20, -3, -4, 0, 0),        # negative dx,dy -> +20 -> 1
+    (10, 20, -3, -4, 100, 100),    # -> +120 -> 1
+    (10, 20, -3, -4, -100, -100),  # -> -80 -> 0
+    (32000, -32000, 30000, 25000, -30000, 31000),     # large magnitude (40-bit width stress)
+    (-32000, 32000, -30000, -25000, 30000, -31000),
+]
+
+
+def test_point_on_side_byte_exact_vs_oracle(tmp_path):
+    """proj.point_on_side's sign matches mapcompiler._point_side (>0 -> back) byte-exact, over hand
+    cases (both signs / on-the-line / negative dx,dy / large magnitude) and real baked E1M1 nodes
+    (root + a spread of indices) from several viewpoints. Each case run twice (R5 #8)."""
+    cmap = bake_bsp(WadFile.from_path(E1M1_WAD), "E1M1")
+    node_idxs = [cmap.root, 0, 100, 300, len(cmap.nodes) - 1]
+    viewpoints = [(-416, 256), (0, 256), (256, -256), (2048, -3680)]
+    cases = list(HAND_SIDE_CASES)
+    for ni in node_idxs:
+        n = cmap.nodes[ni]
+        cases += [(n.x, n.y, n.dx, n.dy, vx, vy) for vx, vy in viewpoints]
+
+    body, data, expected = [], [], b""
+    for k, (px, py, dx, dy, vx, vy) in enumerate(cases):
+        for _ in range(2):   # call twice per case (R5 #8)
+            body += [f"proj.point_on_side b, vx{k}, vy{k}, "
+                     f"{px & MASK40}, {py & MASK40}, {dx & MASK40}, {dy & MASK40}",
+                     "hex.print_as_digit 1, b, 0", "stl.output 10"]
+        data += [f"vx{k}: hex.vec 10, {vx & MASK40}", f"vy{k}: hex.vec 10, {vy & MASK40}"]
+        back = 1 if _point_side(px, py, dx, dy, vx, vy) > 0 else 0
+        expected += f"{back}\n".encode() * 2
+    data.append("b: hex.vec 2")
+    _run(tmp_path, "point_on_side", body, data, expected)

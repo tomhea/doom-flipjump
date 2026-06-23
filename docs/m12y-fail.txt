@@ -1,0 +1,56 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_________________ test_wall_scale_setup_byte_exact_vs_oracle __________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-788/test_wall_scale_setup_byte_exa0')
+
+    def test_wall_scale_setup_byte_exact_vs_oracle(tmp_path):
+        cmap = _square_room()
+        rm = ReferenceModel()
+        cfg = Config()
+        proj = cfg.PROJECTION << 16
+        U = 1 << 16
+        verts = cmap.vertexes
+        body, data, expected = [], [], b""
+        for k, (vxu, vyu, va, si) in enumerate(WSS_SETUP_CASES):
+            seg = cmap.segs[si]
+            rng = rm.wall_x_range(vxu * U, vyu * U, va, seg, verts)
+            assert rng is not None, f"case {k}: seg not visible"
+            x1, x2, _ = rng
+            rw_normalangle, rw_distance = rm.wall_setup(vxu * U, vyu * U, seg, verts)
+            s1, step = _oracle_wall_scale_setup(rm, va, rw_normalangle, rw_distance, x1, x2)
+            for _ in range(2):   # call twice (R5 #8)
+                body += [f"proj.wall_scale_setup sc1, sst, va{k}, nrm{k}, rd{k}, x1_{k}, x2_{k}, {proj}",
+                         "hex.print_as_digit 8, sc1, 0", "stl.output 10",
+                         "hex.print_as_digit 8, sst, 0", "stl.output 10"]
+            data += [f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
+                     f"nrm{k}: hex.vec 8, {rw_normalangle & 0xFFFFFFFF}",
+                     f"rd{k}: hex.vec 8, {rw_distance & 0xFFFFFFFF}",
+                     f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}"]
+            expected += f"{s1 & 0xFFFFFFFF:08x}\n{step & 0xFFFFFFFF:08x}\n".encode() * 2
+        data += ["sc1: hex.vec 8", "sst: hex.vec 8",
+                 generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
+                 generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "wall_scale_setup.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "wall_scale_setup: fj output != oracle"
+E       AssertionError: wall_scale_setup: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:649: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         4.083s
+  macro resolve:   1.994s
+  labels resolve:  0.440s
+  create binary:   1.645s
+  loading memory:  0.079s
+
+Finished by looping after 0.032s (23,897 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_wall_scale_setup_byte_exact_vs_oracle
+1 failed in 8.81s

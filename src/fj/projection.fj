@@ -680,4 +680,30 @@ ns proj {
       r0: hex.vec 8
       end:
     }
+
+    // proj.wall_scale_setup scale1, scalestep_out, viewangle, rw_normalangle, rw_distance, x1, x2,
+    //   projection (the per-seg scale interpolation seed, render_wall_frame lines 521-527): scale1 = the
+    //   column-x1 wall scale = scale_from_global_angle at visangle = viewangle + xtoviewangle[x1];
+    //   scalestep_out = the linear rw_scalestep from x1 to x2 (scale2 at x2, then trunc((scale2-scale1)/
+    //   (x2-x1))). The render loop then walks `scale += scalestep_out` across the columns. Composes the
+    //   xtoviewangle lookup + scale_from_global_angle (M12q) x2 + scalestep (M12u). x1/x2 are columns
+    //   (read as 2-nibble indices into xtoviewangle). `projection` is the compile-time Config arg (R6).
+    //   Mirrors the oracle EXACTLY. @requires hex.init & stl.ptr_init   (read_table + finesine.read_sin)
+    def wall_scale_setup scale1, scalestep_out, viewangle, rw_normalangle, rw_distance, x1, x2, projection \
+            @ vis1, vis2, scale2, end \
+            < xtoviewangle {
+        hex.read_table 8, vis1, xtoviewangle, 2, x1     // xtoviewangle[x1]
+        hex.add 8, vis1, viewangle                      // visangle@x1 = viewangle + xtoviewangle[x1]
+        .scale_from_global_angle scale1, vis1, viewangle, rw_normalangle, rw_distance, projection
+        hex.read_table 8, vis2, xtoviewangle, 2, x2     // xtoviewangle[x2]
+        hex.add 8, vis2, viewangle                      // visangle@x2
+        .scale_from_global_angle scale2, vis2, viewangle, rw_normalangle, rw_distance, projection
+        .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero
+        ;end
+
+      vis1: hex.vec 8
+      vis2: hex.vec 8
+      scale2: hex.vec 8
+      end:
+    }
 }

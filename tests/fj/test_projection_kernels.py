@@ -584,3 +584,66 @@ def test_column_setup_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "column_setup: fj output != oracle"
+
+
+# ── proj.wall_scale_setup (the per-seg scale interpolation seed, render_wall_frame lines 521-527): the
+# column-x1 scale (= scale_from_global_angle at visangle = viewangle + xtoviewangle[x1]) + the linear
+# rw_scalestep to x2. Composes the xtoviewangle lookup + scale_from_global_angle (x2) + scalestep. The
+# per-column scale is then scale1 accumulated by scalestep (the loop's `scale += scalestep`).
+def _oracle_wall_scale_setup(rm, viewangle, rw_normalangle, rw_distance, x1, x2):
+    s1 = rm.scale_from_global_angle((viewangle + rm.xtoviewangle[x1]) & ANGLE_MASK,
+                                    viewangle, rw_normalangle, rw_distance)
+    s2 = rm.scale_from_global_angle((viewangle + rm.xtoviewangle[x2]) & ANGLE_MASK,
+                                    viewangle, rw_normalangle, rw_distance)
+    if x2 > x1:
+        diff, span = s2 - s1, x2 - x1
+        step = -(abs(diff) // span) if diff < 0 else diff // span
+    else:
+        step = 0
+    return s1, step
+
+
+# (viewx_u, viewy_u, viewangle, seg_index) on the square room — visible segs (x1<x2 in [0,VIEW_W]).
+WSS_SETUP_CASES = [
+    (128, 128, 0, 2),            # facing east, EAST wall
+    (200, 128, 0, 2),            # closer to EAST wall (steeper scalestep)
+    (128, 128, 0x40000000, 1),   # facing north, NORTH wall
+    (128, 128, 0x80000000, 0),   # facing west, WEST wall
+]
+
+
+def test_wall_scale_setup_byte_exact_vs_oracle(tmp_path):
+    cmap = _square_room()
+    rm = ReferenceModel()
+    cfg = Config()
+    proj = cfg.PROJECTION << 16
+    U = 1 << 16
+    verts = cmap.vertexes
+    body, data, expected = [], [], b""
+    for k, (vxu, vyu, va, si) in enumerate(WSS_SETUP_CASES):
+        seg = cmap.segs[si]
+        rng = rm.wall_x_range(vxu * U, vyu * U, va, seg, verts)
+        assert rng is not None, f"case {k}: seg not visible"
+        x1, x2, _ = rng
+        rw_normalangle, rw_distance = rm.wall_setup(vxu * U, vyu * U, seg, verts)
+        s1, step = _oracle_wall_scale_setup(rm, va, rw_normalangle, rw_distance, x1, x2)
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.wall_scale_setup sc1, sst, va{k}, nrm{k}, rd{k}, x1_{k}, x2_{k}, {proj}",
+                     "hex.print_as_digit 8, sc1, 0", "stl.output 10",
+                     "hex.print_as_digit 8, sst, 0", "stl.output 10"]
+        data += [f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
+                 f"nrm{k}: hex.vec 8, {rw_normalangle & 0xFFFFFFFF}",
+                 f"rd{k}: hex.vec 8, {rw_distance & 0xFFFFFFFF}",
+                 f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}"]
+        expected += f"{s1 & 0xFFFFFFFF:08x}\n{step & 0xFFFFFFFF:08x}\n".encode() * 2
+    data += ["sc1: hex.vec 8", "sst: hex.vec 8",
+             generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
+             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "wall_scale_setup.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "wall_scale_setup: fj output != oracle"

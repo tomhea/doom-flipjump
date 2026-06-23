@@ -1,0 +1,13 @@
+### FAIL — wall texturing stubbed off (flat WALL_BG fallback, the pre-texture M12h behavior) ###
+>       assert len(set(band)) >= 3                                 # textured (not a constant fill)
+E       assert 1 >= 3
+>       assert frame_hash(frame) == "b7da67d5f0d8f1ea832038ad571442b986c8a6225fba1a270fb1efc1ed7208e8"
+E       AssertionError: assert '0c406cce91e1...ff7b35750a96c' == 'b7da67d5f0d8...1efc1ed7208e8'
+        assert len(frame) == Config().FB_SIZE
+        assert sum(1 for a, b in zip(frame, bg) if a != b) > 1000  # walls composited over the background
+>       assert len(set(frame)) >= 8                                # many palette indices ⇒ real textures
+E       AssertionError: assert 5 >= 8
+FAILED tests/host/test_wall_frame.py::test_spawn_frame_wall_is_textured_not_flat
+FAILED tests/host/test_wall_frame.py::test_spawn_frame_golden_hash - Assertio...
+FAILED tests/host/test_wall_frame.py::test_e1m1_wall_frame_textured_and_deterministic
+3 failed, 4 passed in 0.40s

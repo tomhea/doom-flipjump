@@ -67,6 +67,21 @@ def xtoviewangle_table(view_w: int, trig_n: int) -> list[int]:
     return table
 
 
+def finetangent_table(trig_n: int) -> list[int]:
+    """DOOM's `finetangent[]`: `tan(angle - 90°)` as signed 16.16, indexed by the same fine index as
+    finesine (`angle >> angle_shift`). The −90° offset is DOOM's (R_RenderSegLoop indexes it with
+    `rw_centerangle + xtoviewangle[x]`, which sits around ANG90 for a head-on wall) ⇒ `finetangent[ANG90]
+    = tan(0) = 0` (the wall's centre texel), rising to ±1.0 at ±45° from centre. Poles at angle 0°/180°
+    (tan(∓90°) = ∓∞) are clamped to the signed 32-bit range. The per-column texture u-coordinate is
+    `rw_offset − FixedMul(finetangent[angle], rw_distance)` (M12-textures). Shared kernel (R6/D12)."""
+    lo, hi = -(1 << 31), (1 << 31) - 1
+    out = []
+    for i in range(trig_n):
+        t = math.tan(2 * math.pi * i / trig_n - math.pi / 2)
+        out.append(max(lo, min(hi, round(t * (1 << 16)))) & 0xFFFFFFFF)
+    return out
+
+
 def tantoangle_table(slope_range: int = 2048) -> list[int]:
     """DOOM's `tantoangle[]`: the BAM angle whose tangent is `i/slope_range`, for i in [0, slope_range].
     `tantoangle[i] = atan(i/slope_range)` as a 32-bit BAM (full turn = 2^32) — so [0] = 0 and

@@ -22,8 +22,9 @@ LINEDEFS = [(0, 3, 1, 0, 0, 0, -1),   # WEST  wall x=0,    pointing north
             (3, 2, 1, 0, 0, 1, -1),   # NORTH wall y=256,  pointing east
             (2, 1, 1, 0, 0, 2, -1),   # EAST  wall x=256,  pointing south
             (1, 0, 1, 0, 0, 3, -1)]   # SOUTH wall y=0,    pointing west
-# x_off, y_off, upper, lower, middle, sector
-SIDEDEFS = [(0, 0, "-", "-", "STARTAN2", 0)] * 4
+# x_off, y_off, upper, lower, middle, sector. STEP4 is a real texture in freedoom_assets.wad (32x16),
+# so the wall-texture oracle (M12-textures) can sample it from that asset WAD on this hand-built room.
+SIDEDEFS = [(0, 0, "-", "-", "STEP4", 0)] * 4
 # floor_h, ceil_h, floor_tex, ceil_tex, light, special, tag
 SECTORS = [(0, 128, "FLOOR4_8", "CEIL3_5", 160, 0, 0)]
 # x, y, angle, type, flags  (type 1 = Player 1 start; flags 7 = easy/med/hard)

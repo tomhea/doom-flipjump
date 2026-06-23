@@ -1,0 +1,13 @@
+{
+  "square_room": {
+    "hash": "b7da67d5f0d8f1ea832038ad571442b986c8a6225fba1a270fb1efc1ed7208e8",
+    "distinct_palette_indices": 4,
+    "wall_texture": "STEP4"
+  },
+  "e1m1": {
+    "hash": "0b817e4a126026207f40327cb32b68685efd47572f79661ff7136e752e566c0e",
+    "distinct_palette_indices": 20,
+    "wall_pixels": 5287,
+    "total_pixels": 16000
+  }
+}

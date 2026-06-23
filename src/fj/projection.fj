@@ -430,4 +430,36 @@ ns proj {
       cnegclip: hex.vec 8, 0xE0000000     // -CLIPANGLE mod 2^32
       end:
     }
+
+    // proj.wall_screen_span top, bottom, ceilfix, floorfix, viewz, scale, centeryfix (R_RenderSegLoop's
+    //   vertical projection): the screen rows a wall column fills. top = (centeryfix - fixed_mul(ceilfix -
+    //   viewz, scale)) >> 16, bottom likewise from floorfix; ceilfix/floorfix = ceil_h/floor_h << 16
+    //   (16.16). The >>16 is ARITHMETIC (signed rows): logical shr 4 nibbles then sign_extend the low 4.
+    //   Outputs SIGNED row ints (8-nibble 2's-complement; the render loop clips off-screen rows). top <
+    //   bottom always. centeryfix = CENTERY<<16 (resolution-dependent) is a compile-time arg (R6). Mirrors
+    //   reference_model.wall_screen_span EXACTLY (the oracle's _signed(fixed_mul) wrap == fj's 2's-comp).
+    //   @requires hex.init
+    def wall_screen_span top, bottom, ceilfix, floorfix, viewz, scale, centeryfix \
+            @ wt, prod, end {
+        hex.mov 8, wt, ceilfix
+        hex.sub 8, wt, viewz                // worldtop = ceilfix - viewz
+        hex.fixed_mul 8, 4, prod, wt, scale
+        hex.set 8, top, centeryfix
+        hex.sub 8, top, prod                // topfrac = centeryfix - worldtop*scale
+        hex.shr_hex 8, 4, top               // >> 16 (logical) ...
+        hex.sign_extend 8, 4, top           //   ... + sign-extend low 4 nibbles = arithmetic >> 16
+
+        hex.mov 8, wt, floorfix
+        hex.sub 8, wt, viewz                // worldbottom = floorfix - viewz
+        hex.fixed_mul 8, 4, prod, wt, scale
+        hex.set 8, bottom, centeryfix
+        hex.sub 8, bottom, prod
+        hex.shr_hex 8, 4, bottom
+        hex.sign_extend 8, 4, bottom
+        ;end
+
+      wt: hex.vec 8
+      prod: hex.vec 8
+      end:
+    }
 }

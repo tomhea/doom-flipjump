@@ -339,3 +339,43 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "wall_x_range: fj output != oracle"
+
+
+# ── proj.wall_screen_span (R_RenderSegLoop top/bottom projection): the screen rows a wall column fills ──
+# top/bottom = (CENTERY<<16 - fixed_mul(ceil/floor<<16 - viewz, scale)) >> 16 (ARITHMETIC). Outputs are
+# SIGNED row ints (8-nibble 2's-complement; off-screen rows < 0 or >= VIEW_H are clipped by the loop).
+# centeryfix (resolution-dependent) is a compile-time arg from Config (R6). No LUTs needed.
+# (ceil_h, floor_h map units; viewz, scale 16.16) — incl. negative tops (sign-extension) + negative heights.
+WSS_CASES = [
+    (128, 0, 41 << 16, 0xA000),     # square-room perpendicular centre: (-5, 75)
+    (128, 0, 41 << 16, 0x10000),    # scale 1.0: (-37, 91)
+    (128, 0, 41 << 16, 0x100),      # SCALE_MIN (far): (49, 50)
+    (200, 64, 41 << 16, 0x20000),   # taller/closer: (-268, 4)
+    (128, 0, 41 << 16, 0x300000),   # huge scale: (-4126, 2018)
+    (-32, -128, 9 << 16, 0x18000),  # negative ceil/floor heights: (111, 255)
+]
+
+
+def test_wall_screen_span_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    centeryfix = cfg.CENTERY << 16        # resolution-dependent -> compile-time arg from Config (R6)
+    body, data, expected = [], [], b""
+    for k, (ch, fh, vz, sc) in enumerate(WSS_CASES):
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.wall_screen_span top, bot, cf{k}, ff{k}, vz{k}, sc{k}, {centeryfix}",
+                     "hex.print_as_digit 8, top, 0", "stl.output 10",
+                     "hex.print_as_digit 8, bot, 0", "stl.output 10"]
+        data += [f"cf{k}: hex.vec 8, {(ch << 16) & 0xFFFFFFFF}", f"ff{k}: hex.vec 8, {(fh << 16) & 0xFFFFFFFF}",
+                 f"vz{k}: hex.vec 8, {vz & 0xFFFFFFFF}", f"sc{k}: hex.vec 8, {sc & 0xFFFFFFFF}"]
+        top, bot = rm.wall_screen_span(ch, fh, vz, sc)
+        expected += f"{top & 0xFFFFFFFF:08x}\n{bot & 0xFFFFFFFF:08x}\n".encode() * 2
+    data += ["top: hex.vec 8", "bot: hex.vec 8"]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "wall_screen_span.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "wall_screen_span: fj output != oracle"

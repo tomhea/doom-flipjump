@@ -552,4 +552,60 @@ ns proj {
       cang180: hex.vec 8, 0x80000000
       end:
     }
+
+    // proj.texture_u dst, rw_centerangle, rw_offset, rw_distance, x, tw (per-column texture u-coord,
+    //   render_wall_frame lines 549-552): dst = the texture column [0, tw) for screen column x.
+    //   ang = rw_centerangle + xtoviewangle[x]; ft = finetangent[ang >> angle_shift(20)];
+    //   tcol = (rw_offset - fixed_mul(ft, rw_distance)) >> 16 (ARITHMETIC, signed); dst = tcol mod tw,
+    //   a FLOORED modulo (result in [0, tw) even for negative tcol). Implemented as an unsigned divide on
+    //   |tcol| then, when tcol<0 and the remainder != 0, dst = tw - remainder (= Python's tcol % tw).
+    //   Reads the M12l xtoviewangle (idx=column) + finetangent LUTs. Mirrors the oracle EXACTLY.
+    //   @requires hex.init & stl.ptr_init   (read_table x2)
+    def texture_u dst, rw_centerangle, rw_offset, rw_distance, x, tw \
+            @ ang, ft, prod, tcol, atcol, q, m, idx, czero, \
+              tpos, tneg, mzero, mnz, baddiv, end \
+            < xtoviewangle, finetangent {
+        hex.read_table 8, ang, xtoviewangle, 2, x      // xtoviewangle[x]   (idx = screen column)
+        hex.add 8, ang, rw_centerangle                 // ang = rw_centerangle + xtoviewangle[x]
+        hex.shr_hex 8, 5, ang                          // ang >> angle_shift(20) = 5 nibbles
+        hex.mov 3, idx, ang                            //   low 3 nibbles = the finetangent index
+        hex.read_table 8, ft, finetangent, 3, idx      // ft = finetangent[idx]  (signed)
+        hex.fixed_mul 8, 4, prod, ft, rw_distance      // prod = ft * rw_distance (signed)
+        hex.mov 8, tcol, rw_offset
+        hex.sub 8, tcol, prod                          // rw_offset - prod
+        hex.shr_hex 8, 4, tcol
+        hex.sign_extend 8, 4, tcol                     // arithmetic >> 16 -> signed texel column tcol
+
+        hex.sign 8, tcol, tneg, tpos                   // floored mod: tcol % tw -> [0, tw)
+      tpos:
+        hex.div 8, 8, q, m, tcol, tw, baddiv           // tcol >= 0: dst = tcol % tw (unsigned)
+        hex.mov 8, dst, m
+        ;end
+      tneg:
+        hex.mov 8, atcol, tcol
+        hex.neg 8, atcol                               // |tcol|
+        hex.div 8, 8, q, m, atcol, tw, baddiv          // m = |tcol| % tw
+        hex.cmp 8, m, czero, mnz, mzero, mnz           // m == 0 ? (unsigned magnitude)
+      mzero:
+        hex.zero 8, dst                                // exact multiple -> 0
+        ;end
+      mnz:
+        hex.mov 8, dst, tw
+        hex.sub 8, dst, m                              // dst = tw - (|tcol| % tw)  in (0, tw)
+        ;end
+      baddiv:                                          // tw == 0 unreachable; safe fallback
+        hex.zero 8, dst
+        ;end
+
+      ang: hex.vec 8
+      ft: hex.vec 8
+      prod: hex.vec 8
+      tcol: hex.vec 8
+      atcol: hex.vec 8
+      q: hex.vec 8
+      m: hex.vec 8
+      idx: hex.vec 3
+      czero: hex.vec 8, 0
+      end:
+    }
 }

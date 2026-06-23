@@ -1,0 +1,44 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_____________________ test_texture_u_byte_exact_vs_oracle _____________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-774/test_texture_u_byte_exact_vs_o0')
+
+    def test_texture_u_byte_exact_vs_oracle(tmp_path):
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        body, data, expected = [], [], b""
+        for k, (rca, roff, rdist, x, tw) in enumerate(TEXU_CASES):
+            for _ in range(2):   # call twice (R5 #8)
+                body += [f"proj.texture_u d, rca{k}, roff{k}, rd{k}, xx{k}, tw{k}",
+                         "hex.print_as_digit 8, d, 0", "stl.output 10"]
+            data += [f"rca{k}: hex.vec 8, {rca & 0xFFFFFFFF}", f"roff{k}: hex.vec 8, {roff & 0xFFFFFFFF}",
+                     f"rd{k}: hex.vec 8, {rdist & 0xFFFFFFFF}", f"xx{k}: hex.vec 2, {x}",
+                     f"tw{k}: hex.vec 8, {tw}"]
+            expected += f"{_oracle_texcol(rm, rca, roff, rdist, x, tw) & 0xFFFFFFFF:08x}\n".encode() * 2
+        data += ["d: hex.vec 8",
+                 generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
+                 generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)]
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "texture_u.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "texture_u: fj output != oracle"
+E       AssertionError: texture_u: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:534: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         0.300s
+  macro resolve:   0.662s
+  labels resolve:  0.145s
+  create binary:   1.094s
+  loading memory:  0.058s
+
+Finished by looping after 0.016s (32,764 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_texture_u_byte_exact_vs_oracle
+1 failed in 2.65s

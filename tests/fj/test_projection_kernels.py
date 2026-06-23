@@ -7,11 +7,13 @@ from pathlib import Path
 import flipjump as fj
 
 from doomfj.config import Config
+from doomfj.fixedpoint import fixed_mul, _signed
 from doomfj.harness import W
 from doomfj.lut_generator import (
     generate_tantoangle_lut_fj, generate_trig_idioms_fj, generate_viewangletox_lut_fj,
+    generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj,
 )
-from doomfj.reference_model import ReferenceModel, SLOPERANGE
+from doomfj.reference_model import ReferenceModel, SLOPERANGE, ANGLE_MASK
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
 FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table + hex.fixed_div
@@ -483,3 +485,50 @@ def test_wall_offset_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "wall_offset: fj output != oracle"
+
+
+# ── proj.texture_u (per-column texture u-coord, render_wall_frame lines 549-552): ang = rw_centerangle +
+# xtoviewangle[x]; ft = finetangent[ang>>angle_shift]; texcol = ((rw_offset - fixed_mul(ft, rw_distance))
+# signed >> 16) % tw — a FLOORED modulo (texcol in [0, tw)). Reads the xtoviewangle + finetangent LUTs.
+def _oracle_texcol(rm, rw_centerangle, rw_offset, rw_distance, x, tw):
+    cfg = rm.cfg
+    ang = (rw_centerangle + rm.xtoviewangle[x]) & ANGLE_MASK
+    ft = rm.finetangent[(ang >> rm.angle_shift) & (cfg.TRIG_N - 1)]
+    return (_signed((rw_offset - fixed_mul(ft, rw_distance, 8, 4)) & ANGLE_MASK, 32) >> 16) % tw
+
+
+# (rw_centerangle, rw_offset, rw_distance, x, tw) — incl. negative tcol (floored mod) + non-pow2 tw.
+TEXU_CASES = [
+    (0x40000000, 0x00000000, 128 << 16, 80, 64),
+    (0x40000000, 0x00400000, 128 << 16, 0, 64),
+    (0x40000000, 0x00400000, 128 << 16, 159, 64),
+    (0x40000000, 0xFFC00000, 100 << 16, 40, 128),   # rw_offset = -64.0 -> negative tcol -> floored mod
+    (0x40000000, 0x00100000, 200 << 16, 120, 96),   # non-pow2 tw=96
+    (0x50000000, 0x00800000, 64 << 16, 20, 256),
+    (0x40000000, 0x00000000, 50 << 16, 159, 64),
+]
+
+
+def test_texture_u_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    body, data, expected = [], [], b""
+    for k, (rca, roff, rdist, x, tw) in enumerate(TEXU_CASES):
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.texture_u d, rca{k}, roff{k}, rd{k}, xx{k}, tw{k}",
+                     "hex.print_as_digit 8, d, 0", "stl.output 10"]
+        data += [f"rca{k}: hex.vec 8, {rca & 0xFFFFFFFF}", f"roff{k}: hex.vec 8, {roff & 0xFFFFFFFF}",
+                 f"rd{k}: hex.vec 8, {rdist & 0xFFFFFFFF}", f"xx{k}: hex.vec 2, {x}",
+                 f"tw{k}: hex.vec 8, {tw}"]
+        expected += f"{_oracle_texcol(rm, rca, roff, rdist, x, tw) & 0xFFFFFFFF:08x}\n".encode() * 2
+    data += ["d: hex.vec 8",
+             generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
+             generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "texture_u.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "texture_u: fj output != oracle"

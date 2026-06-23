@@ -647,3 +647,76 @@ def test_wall_scale_setup_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "wall_scale_setup: fj output != oracle"
+
+
+# ── proj.column_render_params (the per-column render-parameter bundle, render_wall_frame lines 540-559):
+# wall_screen_span -> CLIP top=max(0,top)/bottom=min(VIEW_H-1,bottom) -> texture_u -> column_setup, all for
+# one column. Outputs (top, bottom [both clipped], texcol, frac0, step). The clip is the new logic (signed
+# hex.sign/scmp). centery/ds/VIEW_H-1 are compile-time Config args (R6); centeryfix = centery<<16 (expr).
+def _oracle_column_params(rm, scale, rw_centerangle, rw_offset, rw_distance, x, tw,
+                          ceil_h, floor_h, viewz, worldtop):
+    cfg = rm.cfg
+    top, bottom = rm.wall_screen_span(ceil_h, floor_h, viewz, scale & ANGLE_MASK)
+    top = max(0, top)
+    bottom = min(cfg.VIEW_H - 1, bottom)                  # clip to the screen
+    texcol = _oracle_texcol(rm, rw_centerangle, rw_offset, rw_distance, x, tw)
+    frac0, step = _oracle_column_setup(cfg.CENTERY, scale, worldtop, top, cfg.TEXTURE_DOWNSCALE)
+    return top, bottom, texcol, frac0, step
+
+
+def test_column_render_params_byte_exact_vs_oracle(tmp_path):
+    cmap = _square_room()
+    rm = ReferenceModel()
+    cfg = Config()
+    U = 1 << 16
+    verts = cmap.vertexes
+    ANG90 = 0x40000000
+    CEIL_H, FLOOR_H = 128, 0
+    viewz = 41 << 16                       # view_z for the square room (floor 0 + VIEWHEIGHT 41)
+    worldtop = CEIL_H - (viewz >> 16)      # 87
+    TW = 64
+    RW_OFFSET = 0x80000                    # synthetic texture u-origin (texture_u path already M12w-tested)
+    # (viewx_u, viewy_u, seg_index, column x)
+    CASES = [
+        (128, 128, 2, 0),      # east wall, x=0: top -5 -> 0 (top clip)
+        (128, 128, 2, 80),     # mid column
+        (200, 128, 2, 0),      # closer: top -75 -> 0, bottom 108 -> 99 (both clip)
+        (200, 128, 2, 159),    # closer, right edge
+        (200, 128, 2, 80),
+    ]
+    body, data, expected = [], [], b""
+    for k, (vxu, vyu, si, x) in enumerate(CASES):
+        seg = cmap.segs[si]
+        x1, x2, _ = rm.wall_x_range(vxu * U, vyu * U, 0, seg, verts)
+        nrm, rwd = rm.wall_setup(vxu * U, vyu * U, seg, verts)
+        s1, sstep = _oracle_wall_scale_setup(rm, 0, nrm, rwd, x1, x2)
+        scale = (s1 + (x - x1) * sstep) & ANGLE_MASK          # the loop's accumulated scale at column x
+        rca = (ANG90 + 0 - nrm) & ANGLE_MASK                  # rw_centerangle (viewangle 0)
+        top, bottom, texcol, frac0, step = _oracle_column_params(
+            rm, scale, rca, RW_OFFSET, rwd, x, TW, CEIL_H, FLOOR_H, viewz, worldtop)
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.column_render_params tp, bt, tc, f0, st, sc{k}, rca{k}, ro{k}, rd{k}, "
+                     f"xx{k}, tw{k}, cf{k}, ff{k}, vz{k}, wt{k}, {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}",
+                     "hex.print_as_digit 8, tp, 0", "stl.output 10",
+                     "hex.print_as_digit 8, bt, 0", "stl.output 10",
+                     "hex.print_as_digit 8, tc, 0", "stl.output 10",
+                     "hex.print_as_digit 4, f0, 0", "stl.output 10",
+                     "hex.print_as_digit 4, st, 0", "stl.output 10"]
+        data += [f"sc{k}: hex.vec 8, {scale & 0xFFFFFFFF}", f"rca{k}: hex.vec 8, {rca & 0xFFFFFFFF}",
+                 f"ro{k}: hex.vec 8, {RW_OFFSET & 0xFFFFFFFF}", f"rd{k}: hex.vec 8, {rwd & 0xFFFFFFFF}",
+                 f"xx{k}: hex.vec 2, {x}", f"tw{k}: hex.vec 8, {TW}",
+                 f"cf{k}: hex.vec 8, {(CEIL_H << 16) & 0xFFFFFFFF}", f"ff{k}: hex.vec 8, {(FLOOR_H << 16) & 0xFFFFFFFF}",
+                 f"vz{k}: hex.vec 8, {viewz & 0xFFFFFFFF}", f"wt{k}: hex.vec 8, {worldtop & 0xFFFFFFFF}"]
+        expected += (f"{top & 0xFFFFFFFF:08x}\n{bottom & 0xFFFFFFFF:08x}\n{texcol & 0xFFFFFFFF:08x}\n"
+                     f"{frac0:04x}\n{step:04x}\n").encode() * 2
+    data += ["tp: hex.vec 8", "bt: hex.vec 8", "tc: hex.vec 8", "f0: hex.vec 4", "st: hex.vec 4",
+             generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
+             generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "column_render_params.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "column_render_params: fj output != oracle"

@@ -13,12 +13,15 @@ import flipjump as fj
 import pytest
 
 from doomfj.harness import W
-from doomfj.mapcompiler import NF_SUBSECTOR, bake_bsp, compile_map
+from doomfj.mapcompiler import (
+    NF_SUBSECTOR, MASK40, CompiledMap, Node, SubSector, bake_bsp, compile_map, _bsp_as_code,
+)
 from doomfj.reference_model import ReferenceModel
 from doomfj.wad import WadFile, WadSeg, WadSubSector, WadNode
 
 ROOM = Path("tests/fixtures/square_room.wad")            # pre-baked DOOM-wound square room
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")          # full real level (baked node tree)
+PROJECTION_FJ = Path("src/fj/projection.fj")             # provides proj.point_on_side (the side test)
 
 
 def _room():
@@ -127,3 +130,73 @@ def test_compiled_streams_assemble_flat(tmp_path):
     fj.assemble([p.resolve()], out, memory_width=W, print_time=False)
     term = fj.run(out, print_time=False, print_termination=False)
     assert str(term.storage_mode) == "flat"  # R4
+
+
+# ── BSP-as-code WALK: emitted front-to-back order byte-exact vs bsp_render_order (M12ff) ──
+# _bsp_as_code emits the BSP traversal as fj CODE (opt #7): per node a proj.point_on_side test ->
+# branch to the NEAR child subtree first (per-node stl.fcall/fret recursion), leaves emit their
+# subsector index (4 hex digits + newline). The emitted walk reads the viewer from globals vx,vy and
+# halts via `bsp_done`. Verified on small hand-built trees: convex (no nodes), a single partition node,
+# and a 2-level tree (root node -> two child nodes -> 4 leaves) that exercises the fcall recursion +
+# return. The printed order must match reference_model.bsp_render_order exactly, from several viewpoints.
+
+def _convex_map():
+    """No nodes — the whole map is subsector 0 (like the square room). Order is always [0]."""
+    return CompiledMap(vertexes=[(0, 0)], segs=[], subsectors=[SubSector(1, 0)], nodes=[], root=0 | NF_SUBSECTOR)
+
+
+def _two_leaf_map():
+    """One vertical partition (x=0, dir +y) over two leaf subsectors. side>0 (x<0) -> left."""
+    node = Node(x=0, y=0, dx=0, dy=1, right=0 | NF_SUBSECTOR, left=1 | NF_SUBSECTOR)
+    return CompiledMap(vertexes=[(0, 0)], segs=[], subsectors=[SubSector(1, 0), SubSector(1, 1)],
+                       nodes=[node], root=0)
+
+
+def _deep_map():
+    """A 2-level tree exercising recursion: root (node 2, vertical x=0) -> node 0 (front, horizontal
+    y=10) over subsectors 0/1 and node 1 (back, horizontal y=-10) over subsectors 2/3."""
+    n0 = Node(x=0, y=10,  dx=1, dy=0, right=0 | NF_SUBSECTOR, left=1 | NF_SUBSECTOR)
+    n1 = Node(x=0, y=-10, dx=1, dy=0, right=2 | NF_SUBSECTOR, left=3 | NF_SUBSECTOR)
+    root = Node(x=0, y=0, dx=0, dy=1, right=0, left=1)   # right=node0, left=node1
+    return CompiledMap(vertexes=[(0, 0)], segs=[],
+                       subsectors=[SubSector(1, i) for i in range(4)], nodes=[n0, n1, root], root=2)
+
+
+def _run_bsp_walk(tmp_path, name, cmap, vx, vy):
+    """Emit cmap's BSP-as-code, run the walk from (vx,vy), assert the printed subsector order matches
+    reference_model.bsp_render_order byte-exact."""
+    code = _bsp_as_code(name, cmap, done_label="bsp_done")
+    prog = "\n".join([
+        "stl.startup_and_init_all",
+        f"hex.set 10, vx, {vx & MASK40}", f"hex.set 10, vy, {vy & MASK40}",
+        f";{name}_bspcode_walk",
+        "bsp_done:", "stl.loop",
+        "vx: hex.vec 10", "vy: hex.vec 10",
+        code,
+    ]) + "\n"
+    p = tmp_path / f"{name}.fj"
+    p.write_text(prog, encoding="utf-8")
+    expected = "".join(f"{ss:04x}\n" for ss in ReferenceModel().bsp_render_order(cmap, vx, vy)).encode()
+    ok = fj.assemble_and_run_test_output(
+        [PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, f"{name} @ ({vx},{vy}): emitted BSP order != bsp_render_order"
+
+
+VIEWPOINTS = [(5, 20), (-5, -20), (5, -20), (-5, 20), (0, 0), (5, 0)]
+
+
+def test_bsp_code_convex_walk(tmp_path):
+    for vx, vy in VIEWPOINTS:
+        _run_bsp_walk(tmp_path, "cvx", _convex_map(), vx, vy)
+
+
+def test_bsp_code_two_leaf_walk(tmp_path):
+    for vx, vy in VIEWPOINTS:
+        _run_bsp_walk(tmp_path, "two", _two_leaf_map(), vx, vy)
+
+
+def test_bsp_code_deep_walk(tmp_path):
+    """The 2-level tree: exercises stl.fcall into a child node + fret return, both near/far branches."""
+    for vx, vy in VIEWPOINTS:
+        _run_bsp_walk(tmp_path, "deep", _deep_map(), vx, vy)

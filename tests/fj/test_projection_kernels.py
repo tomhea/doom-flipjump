@@ -539,39 +539,41 @@ def test_texture_u_byte_exact_vs_oracle(tmp_path):
 # textured-column leaf consumes. iscale = fixed_div(1<<16, scale)//ds (texels/pixel); texturemid =
 # (worldtop<<16)//ds; frac = texturemid + (top-CENTERY)*iscale; frac0 = (frac>>8)&0xFFFF, step =
 # (iscale>>8)&0xFFFF. ds = TEXTURE_DOWNSCALE = 2 (engine invariant). CENTERY a compile-time arg (R6).
-def _oracle_column_setup(rm, scale, worldtop, top):
-    cfg = rm.cfg
-    ds = cfg.TEXTURE_DOWNSCALE
+def _oracle_column_setup(cy, scale, worldtop, top, ds):
     iscale = fixed_div(1 << 16, scale & ANGLE_MASK, 8, 4) // ds
-    texturemid = (worldtop << 16) // ds
-    frac = texturemid + (top - cfg.CENTERY) * iscale
+    texturemid = (worldtop << 16) // ds      # FLOORED (Python //) — negative worldtop floors toward -inf
+    frac = texturemid + (top - cy) * iscale
     return (frac >> 8) & 0xFFFF, (iscale >> 8) & 0xFFFF
 
 
-# (scale, worldtop, top) — incl. negative worldtop (ceiling below eye) + negative top (row above centre).
+# (scale, worldtop, top, ds). ds=2 is the real config (TEXTURE_DOWNSCALE @ W=160); the ds=3 (non-pow2)
+# cases exercise the GENERAL floored divide — incl. the negative-worldtop floor-correction branch that a
+# pow2 ds (worldtop<<16 always even) never triggers. Also covers negative top (row above centre).
 COLSETUP_CASES = [
-    (0xA000, 87, 0),      # square-room perpendicular centre
-    (0x10000, 87, 10),    # scale 1.0
-    (0x100, 87, 49),      # SCALE_MIN (far)
-    (0x20000, 50, -5),    # negative top
-    (0xA000, -20, 30),    # negative worldtop (ceiling below the eye)
-    (0x40000, 87, 75),    # scale 4.0
+    (0xA000, 87, 0, 2),      # square-room perpendicular centre (real ds=2)
+    (0x10000, 87, 10, 2),    # scale 1.0
+    (0x100, 87, 49, 2),      # SCALE_MIN (far)
+    (0x20000, 50, -5, 2),    # negative top
+    (0xA000, -20, 30, 2),    # negative worldtop (ceiling below the eye)
+    (0x40000, 87, 75, 2),    # scale 4.0
+    (0x10000, 50, 10, 3),    # ds=3: positive worldtop, non-pow2 floored divide
+    (0x10000, -17, 60, 3),   # ds=3 + negative worldtop -> the floor-correction (radj) branch
 ]
 
 
 def test_column_setup_byte_exact_vs_oracle(tmp_path):
     cfg = Config()
-    rm = ReferenceModel(cfg)
     cy = cfg.CENTERY
+    assert cfg.TEXTURE_DOWNSCALE == 2     # the real config; the ds is threaded as an arg, not hardcoded
     body, data, expected = [], [], b""
-    for k, (sc, wt, top) in enumerate(COLSETUP_CASES):
+    for k, (sc, wt, top, ds) in enumerate(COLSETUP_CASES):
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.column_setup f0, st, sc{k}, wt{k}, tp{k}, {cy}",
+            body += [f"proj.column_setup f0, st, sc{k}, wt{k}, tp{k}, {cy}, {ds}",
                      "hex.print_as_digit 4, f0, 0", "stl.output 10",
                      "hex.print_as_digit 4, st, 0", "stl.output 10"]
         data += [f"sc{k}: hex.vec 8, {sc & 0xFFFFFFFF}", f"wt{k}: hex.vec 8, {wt & 0xFFFFFFFF}",
                  f"tp{k}: hex.vec 8, {top & 0xFFFFFFFF}"]
-        frac0, step = _oracle_column_setup(rm, sc, wt, top)
+        frac0, step = _oracle_column_setup(cy, sc, wt, top, ds)
         expected += f"{frac0:04x}\n{step:04x}\n".encode() * 2
     data += ["f0: hex.vec 4", "st: hex.vec 4"]
 

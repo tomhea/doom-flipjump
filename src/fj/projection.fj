@@ -609,27 +609,42 @@ ns proj {
       end:
     }
 
-    // proj.column_setup frac0, step, scale, worldtop, top, centery (the per-column texture-v DDA setup,
-    //   render_wall_frame lines 553-559): from a column's `scale` (16.16), the wall's `worldtop` (=
-    //   sec.ceil_h - viewz_world, signed map units) and the clipped `top` screen row (signed), compute
+    // proj.column_setup frac0, step, scale, worldtop, top, centery, ds (the per-column texture-v DDA
+    //   setup, render_wall_frame lines 553-559): from a column's `scale` (16.16), the wall's `worldtop`
+    //   (= sec.ceil_h - viewz_world, signed map units) and the clipped `top` screen row (signed), compute
     //   the 8.8 DDA params the textured-column leaf consumes. iscale = fixed_div(1<<16, scale) // ds
     //   (texels/pixel 16.16); texturemid = (worldtop<<16) // ds; frac = texturemid + (top-CENTERY)*iscale;
-    //   frac0 = (frac>>8)&0xFFFF, step = (iscale>>8)&0xFFFF (both 8.8, 16-bit). ds = TEXTURE_DOWNSCALE = 2
-    //   (a fixed engine invariant baked into the M8 texture pipeline): //ds => iscale>>1 (positive) and
-    //   texturemid = worldtop<<15 (= (worldtop<<16)//2, exact). (top-CENTERY)*iscale is a PLAIN signed
-    //   multiply (2's-complement mod 2^32 via hex.mul), NOT fixed_mul. CENTERY is a compile-time arg (R6).
-    //   Mirrors the oracle EXACTLY. @requires hex.init
-    def column_setup frac0, step, scale, worldtop, top, centery \
-            @ iscale, texmid, tc, ccy, prod, frac, c1fix, baddiv, end {
-        hex.fixed_div 8, 4, iscale, c1fix, scale, baddiv   // iscale = (1<<16<<16)/scale = (1<<32)/scale
-        hex.shr_bit 8, iscale                              // // ds (=2): positive, logical >>1
+    //   frac0 = (frac>>8)&0xFFFF, step = (iscale>>8)&0xFFFF (both 8.8, 16-bit). `ds` (= TEXTURE_DOWNSCALE,
+    //   which is RESOLUTION-dependent: max(1, NATIVE_W//W)) and CENTERY are both compile-time args from
+    //   the Config SSOT (R6 — NOT hardcoded). The `// ds` is a FLOORED divide (Python //): iscale is
+    //   positive so a plain divide suffices; texturemid (signed, ceiling-below-eye) uses sign-aware
+    //   flooring (-qmag, minus 1 more when the magnitude divide leaves a remainder). (top-CENTERY)*iscale
+    //   is a PLAIN signed multiply (2's-complement mod 2^32 via hex.mul), NOT fixed_mul. Mirrors the
+    //   oracle EXACTLY. @requires hex.init
+    def column_setup frac0, step, scale, worldtop, top, centery, ds \
+            @ ipre, iscale, wtf, awtf, qmag, rmag, texmid, tc, ccy, prod, frac, \
+              c1fix, cds, czero, r0, wpos, wneg, radj, tm_done, baddiv, end {
+        hex.fixed_div 8, 4, ipre, c1fix, scale, baddiv     // ipre = (1<<16<<16)/scale = (1<<32)/scale (>0)
+        hex.set 8, cds, ds
+        hex.div 8, 8, iscale, r0, ipre, cds, baddiv        // iscale = ipre // ds (positive: trunc == floor)
 
-        hex.mov 8, texmid, worldtop                        // texturemid = (worldtop<<16)//2 = worldtop<<15
-        hex.shl_hex 8, 3, texmid                           //   << 12 ...
-        hex.shl_bit 8, texmid
-        hex.shl_bit 8, texmid
-        hex.shl_bit 8, texmid                              //   ... + 3 = << 15
-
+        hex.mov 8, wtf, worldtop                           // wtf = worldtop << 16  (16.16, signed)
+        hex.shl_hex 8, 4, wtf
+        hex.sign 8, wtf, wneg, wpos                        // texturemid = wtf // ds  (FLOORED)
+      wpos:
+        hex.div 8, 8, texmid, r0, wtf, cds, baddiv         //   wtf >= 0: plain divide
+        ;tm_done
+      wneg:
+        hex.mov 8, awtf, wtf
+        hex.neg 8, awtf                                    //   |wtf|
+        hex.div 8, 8, qmag, rmag, awtf, cds, baddiv        //   qmag = |wtf|//ds, rmag = |wtf|%ds
+        hex.mov 8, texmid, qmag
+        hex.neg 8, texmid                                  //   -qmag
+        hex.cmp 8, rmag, czero, radj, tm_done, radj        //   rmag != 0 -> floor one more
+      radj:
+        hex.dec 8, texmid                                  //   -(qmag+1)  (floored toward -inf)
+        ;tm_done
+      tm_done:
         hex.set 8, ccy, centery
         hex.mov 8, tc, top
         hex.sub 8, tc, ccy                                 // tc = top - CENTERY (signed)
@@ -643,18 +658,26 @@ ns proj {
         hex.mov 4, frac0, frac
         ;end
 
-      baddiv:                                              // scale==0 unreachable (>= SCALE_MIN); safe
+      baddiv:                                              // scale==0 / ds==0 unreachable; safe fallback
         hex.zero 4, frac0
         hex.zero 4, step
         ;end
 
+      ipre: hex.vec 8
       iscale: hex.vec 8
+      wtf: hex.vec 8
+      awtf: hex.vec 8
+      qmag: hex.vec 8
+      rmag: hex.vec 8
       texmid: hex.vec 8
       tc: hex.vec 8
       ccy: hex.vec 8
       prod: hex.vec 8
       frac: hex.vec 8
       c1fix: hex.vec 8, 0x10000          // 1 << 16 (the fixed_div numerator)
+      cds: hex.vec 8
+      czero: hex.vec 8, 0
+      r0: hex.vec 8
       end:
     }
 }

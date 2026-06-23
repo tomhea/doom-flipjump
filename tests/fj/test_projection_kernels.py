@@ -8,7 +8,9 @@ import flipjump as fj
 
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.lut_generator import generate_tantoangle_lut_fj, generate_trig_idioms_fj
+from doomfj.lut_generator import (
+    generate_tantoangle_lut_fj, generate_trig_idioms_fj, generate_viewangletox_lut_fj,
+)
 from doomfj.reference_model import ReferenceModel, SLOPERANGE
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
@@ -245,3 +247,38 @@ def test_scale_from_global_angle_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "scale_from_global_angle: fj output != oracle"
+
+
+# ── proj.angle_to_x (R_PointToX / viewangletox lookup): view-relative BAM angle -> screen column ──
+# idx = (angle + ANG90) >> angle_shift(20), clamped to [0, len(viewangletox)-1]; result = the signed
+# column (2's-complement 8-nibble; the off-screen ends carry -1 / VIEW_W+1 sentinels). Covers straight
+# ahead, the ±ANG45 FOV edges, beyond-FOV angles that clamp to the table ends, and a spread.
+A2X_CASES = [
+    0x00000000,   # straight ahead -> centre column
+    0x20000000,   # +ANG45 (left FOV edge)
+    0xE0000000,   # -ANG45 (right FOV edge)
+    0x40000000,   # +ANG90 (beyond left) -> idx clamps to len-1
+    0xC0000000,   # -ANG90 (beyond right) -> idx 0
+    0x10000000, 0x30000000, 0x08000000, 0xF0000000, 0x80000000,
+]
+
+
+def test_angle_to_x_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    body, data, expected = [], [], b""
+    for k, a in enumerate(A2X_CASES):
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.angle_to_x d, a{k}", "hex.print_as_digit 8, d, 0", "stl.output 10"]
+        data.append(f"a{k}: hex.vec 8, {a & 0xFFFFFFFF}")
+        expected += f"{rm.angle_to_x(a) & 0xFFFFFFFF:08x}\n".encode() * 2
+    data += ["d: hex.vec 8",
+             generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "angle_to_x.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "angle_to_x: fj output != oracle"

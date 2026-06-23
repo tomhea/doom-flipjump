@@ -1,0 +1,40 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+____________________ test_angle_to_x_byte_exact_vs_oracle _____________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-752/test_angle_to_x_byte_exact_vs_0')
+
+    def test_angle_to_x_byte_exact_vs_oracle(tmp_path):
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        body, data, expected = [], [], b""
+        for k, a in enumerate(A2X_CASES):
+            for _ in range(2):   # call twice (R5 #8)
+                body += [f"proj.angle_to_x d, a{k}", "hex.print_as_digit 8, d, 0", "stl.output 10"]
+            data.append(f"a{k}: hex.vec 8, {a & 0xFFFFFFFF}")
+            expected += f"{rm.angle_to_x(a) & 0xFFFFFFFF:08x}\n".encode() * 2
+        data += ["d: hex.vec 8",
+                 generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)]
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "angle_to_x.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "angle_to_x: fj output != oracle"
+E       AssertionError: angle_to_x: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:284: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         0.234s
+  macro resolve:   0.331s
+  labels resolve:  0.055s
+  create binary:   0.454s
+  loading memory:  0.023s
+
+Finished by looping after 0.006s (7,620 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_angle_to_x_byte_exact_vs_oracle
+1 failed in 1.42s

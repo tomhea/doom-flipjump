@@ -330,4 +330,31 @@ ns proj {
       csmax: hex.vec 8, 0x400000          // SCALE_MAX = 64.0
       end:
     }
+
+    // proj.angle_to_x dst, angle (the viewangletox lookup, R_RenderSegLoop's column map): dst[:8] = the
+    //   screen column for a view-relative BAM `angle` (0 = straight ahead, + = left). idx = (angle +
+    //   ANG90) >> angle_shift(20), clamped to [0, len(viewangletox)-1 = 0x7FF = TRIG_N/2 - 1]; the result
+    //   is the SIGNED column (2's-complement; off-screen ends carry the -1 / VIEW_W+1 sentinels). idx is
+    //   unsigned so the low (max-0) clamp is automatic. Mirrors reference_model.angle_to_x EXACTLY.
+    //   @requires hex.init & stl.ptr_init   (read_table)
+    def angle_to_x dst, angle \
+            @ t, vidx, cang90, cmaxidx, clampmax, keep, end \
+            < viewangletox {
+        hex.mov 8, t, angle
+        hex.add 8, t, cang90               // angle + ANG90 (mod 2^32)
+        hex.shr_hex 8, 5, t                // >> angle_shift = 20 bits (5 nibbles)
+        hex.mov 3, vidx, t                 // idx = top 12 bits of (angle+ANG90)  (low 3 nibbles)
+        hex.cmp 3, vidx, cmaxidx, keep, keep, clampmax   // idx > len-1 ? -> clamp (unsigned; idx>=0)
+      clampmax:
+        hex.set 3, vidx, 0x7ff
+      keep:
+        hex.read_table 8, dst, viewangletox, 3, vidx     // the signed column (2's-complement)
+        ;end
+
+      t: hex.vec 8
+      vidx: hex.vec 3
+      cang90: hex.vec 8, 0x40000000
+      cmaxidx: hex.vec 3, 0x7ff           // len(viewangletox)-1 = TRIG_N/2 - 1
+      end:
+    }
 }

@@ -50,24 +50,24 @@ ns frame {
         hex.xor_zero 2, fbcell, lit
     }
 
-    // CLIPPED pixel (M12bb): the wall renderer unrolls ALL screen rows per column at COMPILE-TIME pixel
-    // addresses (the M11c zero-pointer structure), but a wall only covers the RUNTIME rows [top, bottom].
-    // `y` (compile-time row) is rendered iff top <= y <= bottom: render = fcall the leaf (which advances
-    // the DDA) + write; skip = neither (so the DDA only advances over the wall's rows, frac0 at `top`,
-    // exactly as render_textured_column). top/bottom are signed rows (can be off-screen) -> hex.scmp.
+    // CLIPPED pixel (M12bb, optimized M12dd): the wall renderer unrolls ALL screen rows per column at
+    // COMPILE-TIME pixel addresses (the M11c zero-pointer structure), but a wall only covers the RUNTIME
+    // rows [top, bottom]. Render `y` (compile-time row) iff top <= y <= bottom.
+    //  - The row constant `y` is read straight from the shared `rows` table (`rows[k] = k`, 2 nibbles) at
+    //    the COMPILE-TIME address `rows + 2*dw*y` -> no per-pixel hex.set.
+    //  - top/bottom are clamped to [0, VIEW_H-1] by the column setup, so they fit 2 nibbles and are
+    //    non-negative -> cheap UNSIGNED `hex.cmp 2` (never scmp).
+    //  - The more-probable below-wall skip (`bottom < y`) is checked FIRST so it exits in one compare.
+    //  - render = fcall the leaf (advances the DDA) + write; a skip falls straight to `end` with NO fcall
+    //    (so the DDA only advances over the wall's rows, frac0 aligned to `top`, as render_textured_column).
     def pixel_clipped y, fbcell, top, bottom \
-            @ cy, lo_ok, render, skip, end < lit, pixel_ret, pixel_leaf {
-        hex.set 8, cy, y
-        hex.scmp 8, top, cy, lo_ok, lo_ok, skip       // top > y -> skip (top <= y: lt/eq -> continue)
+            @ lo_ok, render, end < lit, pixel_ret, pixel_leaf, rows {
+        hex.cmp 2, bottom, rows + 2*dw*y, end, lo_ok, lo_ok   // bottom < y -> skip (below the wall)
       lo_ok:
-        hex.scmp 8, bottom, cy, skip, render, render  // bottom < y -> skip (bottom >= y: eq/gt -> render)
+        hex.cmp 2, top, rows + 2*dw*y, render, render, end    // top > y -> skip (above the wall)
       render:
         stl.fcall pixel_leaf, pixel_ret
         hex.xor_zero 2, fbcell, lit
-        ;end
-      skip:
-        ;end                                          // not in the wall's span: no render, no DDA advance
-      cy: hex.vec 8
       end:
     }
 
@@ -93,6 +93,31 @@ ns frame {
       frac0: hex.vec 4
       stepv: hex.vec 4
       end:
+    }
+
+    // the shared per-COLUMN leaf (M12dd), emitted ONCE at the global label `column_leaf:` and fcall'd per
+    // column — so the heavy `proj.column_render_params` is inlined ONCE, not WIDTH× (the assemble lever,
+    // like pixel_leaf). It is the register form of `wall_column`: reads the per-column runtime inputs
+    // (scale, x, the per-seg rw_*/light/ceilfix/floorfix/viewz/worldtop/tw) from the includer's registers,
+    // computes the column params, loads the pixel-leaf's per-column registers (base_reg/cmidx/step/frac),
+    // and writes the clipped top/bottom — then returns via fret. texheight/centery/ds/viewh1 are the
+    // compile-time Config/texture consts (single-texture; multi-seg texheight goes runtime later). `tw` is
+    // a REGISTER (a hex.div memory operand). @requires hex.init & stl.ptr_init.
+    def column_leaf_body texheight, centery, ds, viewh1 \
+            @ texcol, frac0, stepv \
+            < scale, x, rw_centerangle, rw_offset, rw_distance, light, ceilfix, floorfix, viewz, worldtop, \
+              tw, top, bottom, base_reg, cmidx, step, frac, col_ret {
+        proj.column_render_params top, bottom, texcol, frac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        hex.mul_const 3, base_reg, texcol, texheight    // base_reg = texcol * texheight (column-major M8)
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx + 2*dw, light                  // cmidx high byte = light
+        hex.mov 4, step, stepv
+        hex.mov 4, frac, frac0
+        stl.fret col_ret                                // return (the data below is never fallen into)
+
+      texcol: hex.vec 8
+      frac0: hex.vec 4
+      stepv: hex.vec 4
     }
 
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column

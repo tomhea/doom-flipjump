@@ -191,7 +191,8 @@ def test_frame_pixel_clipped_runtime_span(tmp_path):
         f"top_in: hex.vec 8, {top}", f"bottom_in: hex.vec 8, {bottom}",
         "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
         "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
-        f"heightmask: hex.vec 3, {th - 1}", "pixel_ret: ;0", tex, cm, palette,
+        f"heightmask: hex.vec 3, {th - 1}", "pixel_ret: ;0",
+        f"rows: rep({cfg.H}, i) hex.vec 2, i", tex, cm, palette,   # row-constant table for pixel_clipped
     ])
     p = tmp_path / "clipcol.fj"
     p.write_text(main, encoding="utf-8")

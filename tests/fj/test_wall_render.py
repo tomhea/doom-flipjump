@@ -128,11 +128,107 @@ def test_wall_render_seg_columns_byte_exact(tmp_path):
         "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
         "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
         f"heightmask: hex.vec 3, {th - 1}", "pixel_ret: ;0",
+        f"rows: rep({cfg.H}, i) hex.vec 2, i",   # row-constant table for pixel_clipped (rows[k]=k)
         tex, cm, palette, xtoviewangle, finetangent, finesine,
     ])
     p = tmp_path / "wallrender.fj"
     p.write_text(main, encoding="utf-8")
     out = tmp_path / "wallrender.fjm"
+    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+    screen = InMemoryScreen()
+    fj.run(out, io_device=screen, print_time=False, print_termination=False)
+
+    assert bytes(screen.pixel_indices) == bytes(want)
+
+
+def test_wall_render_full_width_via_column_leaf(tmp_path):
+    """M12dd: render the FULL column range [x1,x2) of a real seg via the shared fcall COLUMN-LEAF
+    (frame.column_leaf_body) — column_render_params is inlined ONCE in the leaf, not WIDTH× (the assemble
+    lever). Per column: fcall column_leaf -> the leaf sets top/bottom + the pixel-leaf regs; then the
+    clipped row loop. Byte-exact vs the oracle's textured columns for the whole wall."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    U = 1 << 16
+    cmap = bake_bsp(WadFile.from_path(ROOM), "MAP01")
+    wad = WadFile.from_path(ASSET)
+    d = {t.name: t for t in wad.texture_defs()}[TEX]
+    canvas = composite_texture(wad, d)
+    texels, th, tw = texture_texels(canvas), len(canvas), len(canvas[0])
+    colormap = wad.colormap()
+
+    seg = cmap.segs[2]
+    vx, vy, va = 200, 128, 0
+    x1, x2, _ = rm.wall_x_range(vx * U, vy * U, va, seg, cmap.vertexes)
+    nrm, rwd = rm.wall_setup(vx * U, vy * U, seg, cmap.vertexes)
+    ANG90 = 0x40000000
+    rca = (ANG90 + va - nrm) & ANGLE_MASK
+    rw_off = 0x80000
+    light = 1
+    ceil_h, floor_h = 128, 0
+    viewz = (floor_h + 41) << 16
+    worldtop = ceil_h - (viewz >> 16)
+    proj = cfg.PROJECTION << 16
+
+    s1 = rm.scale_from_global_angle((va + rm.xtoviewangle[x1]) & ANGLE_MASK, va, nrm, rwd)
+    s2 = rm.scale_from_global_angle((va + rm.xtoviewangle[x2]) & ANGLE_MASK, va, nrm, rwd)
+    diff, span = s2 - s1, x2 - x1
+    sstep = (-(abs(diff) // span) if diff < 0 else diff // span) if x2 > x1 else 0
+
+    want = bytearray(cfg.FB_SIZE)
+    for i in range(x2 - x1):
+        x = x1 + i
+        scale = (s1 + i * sstep) & ANGLE_MASK
+        top, bottom, texcol, frac0, step = _col_params(rm, scale, rca, rw_off, rwd, x, tw,
+                                                        ceil_h, floor_h, viewz, worldtop)
+        if top > bottom:
+            continue
+        col = rm.render_textured_column(texels, th, texcol, colormap, light,
+                                        count=bottom - top + 1, frac0=frac0, step=step)
+        for r in range(bottom - top + 1):
+            want[(top + r) * cfg.W + x] = col[r]
+
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    tex = compile_texture("tex", wad, TEX, over_align=True, downscale=1)
+    cm = compile_colormap("cm", wad, lights=2, over_align=True)
+    palette = compile_palette("palette", wad)
+    xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
+
+    # register names must match column_leaf_body's `<` extern clause exactly (x, rw_centerangle, ...)
+    render = [f"proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1_in, x2_in, {proj}"]
+    for i in range(x2 - x1):
+        render.append("stl.fcall column_leaf, col_ret")    # the shared per-column leaf
+        for y in range(cfg.H):
+            render.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + (x1 + i))}*dw, top, bottom")
+        render.append("hex.inc 2, x")
+        render.append("hex.add 8, scale, scalestep")
+    main = "\n".join([
+        "stl.startup_and_init_all", "present.init_screen", *render,
+        "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
+        "pixel_leaf:", "frame.leaf_body",
+        f"column_leaf:", f"frame.column_leaf_body {th}, {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}",
+        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+        "scale: hex.vec 8", "scalestep: hex.vec 8", "top: hex.vec 8", "bottom: hex.vec 8",
+        f"x: hex.vec 2, {x1}",
+        f"viewangle: hex.vec 8, {va & 0xFFFFFFFF}", f"normalangle: hex.vec 8, {nrm & 0xFFFFFFFF}",
+        f"rw_distance: hex.vec 8, {rwd & 0xFFFFFFFF}", f"x1_in: hex.vec 8, {x1}", f"x2_in: hex.vec 8, {x2}",
+        f"rw_centerangle: hex.vec 8, {rca & 0xFFFFFFFF}", f"rw_offset: hex.vec 8, {rw_off & 0xFFFFFFFF}",
+        f"light: hex.vec 2, {light}", f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}",
+        f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}", f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}",
+        f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}", f"tw: hex.vec 8, {tw}",
+        "col_ret: ;0",
+        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
+        "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
+        f"heightmask: hex.vec 3, {th - 1}", "pixel_ret: ;0",
+        f"rows: rep({cfg.H}, i) hex.vec 2, i",   # row-constant table for pixel_clipped (rows[k]=k)
+        tex, cm, palette, xtoviewangle, finetangent, finesine,
+    ])
+    p = tmp_path / "wallfull.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / "wallfull.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
                 out, memory_width=W, print_time=False)

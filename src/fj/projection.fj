@@ -217,4 +217,53 @@ ns proj {
       cang90: hex.vec 8, 0x40000000
       done:
     }
+
+    // proj.wall_setup rw_normalangle, rw_distance, viewx, viewy, segangle, v1x, v1y (R_StoreWallRange):
+    //   the per-wall projection setup. Writes rw_normalangle (the wall's normal BAM = (segangle<<16)+
+    //   ANG90, DOOM's native winding) and rw_distance (the perpendicular view->wall-line distance,
+    //   16.16). segangle is the 16-bit seg BAM (WAD `angle>>16`); viewx/y + v1x/v1y are 16.16. Mirrors
+    //   reference_model.wall_setup EXACTLY: offsetangle = (normalangle - angle1) BAM-abs'd then clamped
+    //   to ANG90; rw_distance = fixed_mul(point_to_dist(view,v1), read_sin(ANG90 - offsetangle)).
+    //   NOTE: BAM angles are UNSIGNED modular 32-bit, so the angle compares use hex.cmp (NOT scmp) — the
+    //   high bit is magnitude, not sign (R5 is about signed numbers; matches the oracle's `& ANGLE_MASK`).
+    //   @requires hex.init & stl.ptr_init   (inlines point_to_angle/point_to_dist + finesine.read_sin)
+    def wall_setup rw_normalangle, rw_distance, viewx, viewy, segangle, v1x, v1y \
+            @ angle1, offsetangle, distangle, hyp, sidx, sinv, cang90, cang180, \
+              gt180, le180, gt90, le90, end {
+        hex.zero 8, rw_normalangle
+        hex.mov 4, rw_normalangle + 4*dw, segangle      // rw_normalangle = segangle << 16 ...
+        hex.add 8, rw_normalangle, cang90               //   ... + ANG90 (the wall normal)
+
+        .point_to_angle angle1, viewx, viewy, v1x, v1y  // absolute angle to v1
+        hex.mov 8, offsetangle, rw_normalangle
+        hex.sub 8, offsetangle, angle1                  // offsetangle = (rw_normalangle - angle1) mod 2^32
+
+        hex.cmp 8, offsetangle, cang180, le180, le180, gt180   // > ANG180 ? -> BAM abs (unsigned cmp)
+      gt180:
+        hex.neg 8, offsetangle                          // offsetangle = (-offsetangle) mod 2^32
+      le180:
+        hex.cmp 8, offsetangle, cang90, le90, le90, gt90       // > ANG90 ? -> clamp to ANG90
+      gt90:
+        hex.mov 8, offsetangle, cang90
+      le90:
+        hex.mov 8, distangle, cang90
+        hex.sub 8, distangle, offsetangle               // distangle = ANG90 - offsetangle
+
+        .point_to_dist hyp, viewx, viewy, v1x, v1y      // hyp = view->v1 distance
+        hex.shr_hex 8, 5, distangle                     // read_sin(distangle): idx = distangle >> 20 ...
+        hex.mov 3, sidx, distangle                      //   (5 nibbles; low 3 = the finesine index)
+        finesine.read_sin sinv, sidx
+        hex.fixed_mul 8, 4, rw_distance, hyp, sinv      // rw_distance = hyp * sin(distangle)
+        ;end                                            // skip the data block (else it runs as code)
+
+      angle1: hex.vec 8
+      offsetangle: hex.vec 8
+      distangle: hex.vec 8
+      hyp: hex.vec 8
+      sidx: hex.vec 3
+      sinv: hex.vec 8
+      cang90: hex.vec 8, 0x40000000
+      cang180: hex.vec 8, 0x80000000
+      end:
+    }
 }

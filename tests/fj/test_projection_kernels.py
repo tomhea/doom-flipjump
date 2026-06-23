@@ -146,3 +146,57 @@ def test_point_to_dist_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "point_to_dist: fj output != oracle"
+
+
+# ── proj.wall_setup (R_StoreWallRange): rw_normalangle + rw_distance for a seg ──
+# Driven on the committed DOOM-wound square room (256x256, verts (0,0)..(256,256)) from a few view
+# positions: straight-on (offsetangle≈0), near/far, and oblique (exercises the BAM-abs fold + the
+# ANG90 clamp). wall_setup INLINES point_to_angle + point_to_dist (heavy read_table bodies) per call,
+# so we keep the case count small to stay well under the 300s assemble ceiling — the renderer-scale
+# call sites route through a shared leaf later (the integration rung). Byte-exact vs ReferenceModel.
+def _square_room():
+    from doomfj.mapcompiler import bake_bsp
+    from doomfj.wad import WadFile
+    return bake_bsp(WadFile.from_path(Path("tests/fixtures/square_room.wad")), "MAP01")
+
+
+# (viewx_units, viewy_units, seg_index) — seg 0..3 = west,north,east,south (CW DOOM winding)
+WALL_SETUP_CASES = [
+    (128, 128, 2),   # east wall straight ahead from centre: offsetangle≈0, dist 128
+    (128, 128, 0),   # west wall (behind/normal flipped) from centre
+    (128, 128, 1),   # north wall from centre
+    (200, 128, 2),   # east wall, closer (dist 56), straight-on
+    (200, 128, 1),   # north wall seen obliquely (large offsetangle / clamp)
+    (64, 180, 3),    # south wall from an off-centre point (oblique)
+]
+
+
+def test_wall_setup_byte_exact_vs_oracle(tmp_path):
+    cmap = _square_room()
+    rm = ReferenceModel()
+    U = 1 << 16
+    body, data, expected = [], [], b""
+    for k, (vxu, vyu, si) in enumerate(WALL_SETUP_CASES):
+        seg = cmap.segs[si]
+        v1x, v1y = cmap.vertexes[seg.v1]
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.wall_setup nrm, rwd, vx{k}, vy{k}, sa{k}, v1x{k}, v1y{k}",
+                     "hex.print_as_digit 8, nrm, 0", "stl.output 10",
+                     "hex.print_as_digit 8, rwd, 0", "stl.output 10"]
+        data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
+                 f"sa{k}: hex.vec 4, {seg.angle & 0xFFFF}",
+                 f"v1x{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}",
+                 f"v1y{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}"]
+        nrm, rwd = rm.wall_setup(vxu * U, vyu * U, seg, cmap.vertexes)
+        expected += (f"{nrm:08x}\n{rwd:08x}\n".encode()) * 2
+    data += ["nrm: hex.vec 8", "rwd: hex.vec 8",
+             generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+             generate_trig_idioms_fj("finesine", Config().TRIG_N, 16)]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "wall_setup.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "wall_setup: fj output != oracle"

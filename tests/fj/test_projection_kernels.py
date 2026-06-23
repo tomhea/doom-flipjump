@@ -7,9 +7,11 @@ from pathlib import Path
 import flipjump as fj
 
 from doomfj.harness import W
-from doomfj.reference_model import ReferenceModel
+from doomfj.lut_generator import generate_tantoangle_lut_fj
+from doomfj.reference_model import ReferenceModel, SLOPERANGE
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
+FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table (tantoangle lookup)
 
 
 def _run(tmp_path, name, body, data, expected: bytes):
@@ -46,3 +48,57 @@ def test_slope_div_byte_exact_vs_oracle(tmp_path):
     expected = b"".join(f"{ReferenceModel._slope_div(num, den):03x}\n".encode() * 2
                         for num, den in SLOPE_CASES)
     _run(tmp_path, "slope_div", body, data, expected)
+
+
+# ── proj.point_to_angle (R_PointToAngle2): octant-fold wrapper around slope_div + tantoangle ──
+F = 0x10000   # 1.0 in 16.16 world units
+
+# (x1, y1, x2, y2) 16.16 coords. Hits all 8 octants (idx = sx*4+sy*2+gt) + (0,0) + the axis/diagonal
+# boundary quirks (due-E=0, due-N=ANG90-1, due-W=ANG180-1, due-S=ANG270, NE-diag=ANG45-1) + a
+# non-origin base point so the dx/dy subtraction is exercised.
+P2A_CASES = [
+    (0, 0, 0, 0),               # both deltas zero -> 0
+    # the 8 octants from the origin
+    (0, 0,  F,  3*F),           # sx0 sy0 gt0 : |dx|<=|dy|, dy>0
+    (0, 0,  3*F,  F),           # sx0 sy0 gt1 : |dx|>|dy|
+    (0, 0,  F, -3*F),           # sx0 sy1 gt0
+    (0, 0,  3*F, -F),           # sx0 sy1 gt1
+    (0, 0, -F,  3*F),           # sx1 sy0 gt0
+    (0, 0, -3*F,  F),           # sx1 sy0 gt1
+    (0, 0, -F, -3*F),           # sx1 sy1 gt0
+    (0, 0, -3*F, -F),           # sx1 sy1 gt1
+    # axis boundaries (the DOOM ±1 quirks)
+    (0, 0,  F, 0),              # due east  -> 0
+    (0, 0, 0,  F),              # due north -> ANG90-1
+    (0, 0, -F, 0),              # due west  -> ANG180-1
+    (0, 0, 0, -F),              # due south -> ANG270
+    # exact diagonals (dx==dy boundary -> not-gt branch)
+    (0, 0,  2*F,  2*F),         # NE diagonal -> ANG45-1
+    (0, 0, -2*F,  2*F),         # NW diagonal
+    # non-origin base point + a larger spread
+    (2*F, 5*F, 9*F, 8*F),       # general NE-ish from (2,5)
+    (10*F, 10*F, 3*F, 2*F),     # general SW from (10,10)
+    (0, 0, 7*F, 7*F),           # another exact diagonal, bigger magnitude
+]
+
+
+def test_point_to_angle_byte_exact_vs_oracle(tmp_path):
+    rm = ReferenceModel()
+    body, data = [], []
+    for k, (x1, y1, x2, y2) in enumerate(P2A_CASES):
+        for _ in range(2):   # call twice per case (R5 #8): catches scratch/result-reg cleanup bugs
+            body += [f"proj.point_to_angle d, x1_{k}, y1_{k}, x2_{k}, y2_{k}",
+                     "hex.print_as_digit 8, d, 0", "stl.output 10"]
+        data += [f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"y1_{k}: hex.vec 8, {y1 & 0xFFFFFFFF}",
+                 f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}", f"y2_{k}: hex.vec 8, {y2 & 0xFFFFFFFF}"]
+    data += ["d: hex.vec 8", generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)]
+    expected = b"".join(f"{rm.point_to_angle(x1, y1, x2, y2):08x}\n".encode() * 2
+                        for (x1, y1, x2, y2) in P2A_CASES)
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "point_to_angle.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "point_to_angle: fj output != oracle"

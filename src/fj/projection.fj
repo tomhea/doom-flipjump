@@ -42,4 +42,110 @@ ns proj {
       csr: hex.vec 12, 0x800
       done:
     }
+
+    // proj.point_to_angle dst, x1, y1, x2, y2 (R_PointToAngle2): dst[:8] = the 32-bit BAM angle of the
+    //   vector (x1,y1)->(x2,y2). All coords are 16.16 signed world units (the SlopeDiv tuning is
+    //   scale-dependent). Octant-fold around proj.slope_div + a tantoangle lookup — no atan at runtime.
+    //   Mirrors reference_model.point_to_angle EXACTLY (incl. DOOM's ±1 octant-boundary quirks, e.g.
+    //   due-N = ANG90-1). Reads the shared `tantoangle` LUT (M12l, read_table data table) by that label.
+    //   Algorithm: dx=x2-x1, dy=y2-y1; fold to the major octant by sign+magnitude into
+    //   idx = sxneg*4 + syneg*2 + (|dx|>|dy|); base = tantoangle[slope_div(min(|dx|,|dy|), max)];
+    //   result = p2a_off[idx] (+ or -, per p2a_neg[idx]) base, mod 2^32. (0,0) -> 0.
+    //   @requires hex.init & stl.ptr_init   (read_table needs the pointer init)
+    def point_to_angle dst, x1, y1, x2, y2 \
+            @ dx, dy, num, den, idx, sidx, base, off, neg, c1, c2, c4, czero, \
+              sxn, sxp, sxd, syn, syp, syd, dxz, bothz, nz, gt_, ndx, numden, addb, subb, \
+              p2a_off, p2a_neg, done \
+            < tantoangle {
+        hex.mov 8, dx, x2
+        hex.sub 8, dx, x1                        // dx = x2 - x1   (signed 16.16)
+        hex.mov 8, dy, y2
+        hex.sub 8, dy, y1                        // dy = y2 - y1
+        hex.set 1, idx, 0
+
+        hex.sign 8, dx, sxn, sxp                 // sxneg ? fold x negative, set the idx bit
+      sxn:
+        hex.add 1, idx, c4                       // idx |= 4
+        hex.neg 8, dx                            // dx = |dx|
+        ;sxd
+      sxp:
+      sxd:
+        hex.sign 8, dy, syn, syp
+      syn:
+        hex.add 1, idx, c2                       // idx |= 2
+        hex.neg 8, dy                            // dy = |dy|
+        ;syd
+      syp:
+      syd:
+        // dx,dy are now non-negative magnitudes. zero check (unsigned, R5-ok): both zero -> angle 0.
+        hex.cmp 8, dx, czero, nz, dxz, nz
+      dxz:
+        hex.cmp 8, dy, czero, nz, bothz, nz
+      bothz:
+        hex.zero 8, dst
+        ;done
+      nz:
+        // gt = |dx| > |dy| (magnitudes, unsigned cmp R5-ok). num=min, den=max (slope_div needs num<=den).
+        hex.cmp 8, dx, dy, ndx, ndx, gt_
+      gt_:
+        hex.add 1, idx, c1                       // idx |= 1
+        hex.mov 8, num, dy                        // num = |dy| (smaller), den = |dx| (larger)
+        hex.mov 8, den, dx
+        ;numden
+      ndx:                                        // |dx| <= |dy|
+        hex.mov 8, num, dx
+        hex.mov 8, den, dy
+        ;numden
+      numden:
+        .slope_div sidx, num, den                 // sidx = tantoangle index for the slope
+        hex.read_table 8, base, tantoangle, 3, sidx   // base = tantoangle[sidx]   (shared LUT, M12l)
+        hex.read_table 8, off, p2a_off, 1, idx        // octant offset
+        hex.read_table 1, neg, p2a_neg, 1, idx        // octant sign: 1 -> subtract base, 0 -> add
+        hex.cmp 1, neg, c1, addb, subb, subb          // neg flag (unsigned, R5-ok)
+      addb:
+        hex.mov 8, dst, off
+        hex.add 8, dst, base                      // result = off + base (mod 2^32)
+        ;done
+      subb:
+        hex.mov 8, dst, off
+        hex.sub 8, dst, base                      // result = off - base (mod 2^32)
+        ;done
+
+      dx: hex.vec 8
+      dy: hex.vec 8
+      num: hex.vec 8
+      den: hex.vec 8
+      idx: hex.vec 1
+      sidx: hex.vec 3
+      base: hex.vec 8
+      off: hex.vec 8
+      neg: hex.vec 1
+      c1: hex.vec 1, 1
+      c2: hex.vec 1, 2
+      c4: hex.vec 1, 4
+      czero: hex.vec 8, 0
+      // octant table, indexed by idx = sxneg*4 + syneg*2 + (|dx|>|dy|). offset & sign DERIVED from the
+      // oracle's 8 return formulas (ANG90=0x40000000, ANG180=0x80000000, ANG270=0xC0000000):
+      //   0: -base+(ANG90-1)  1: +base       2: +base+ANG270   3: -base
+      //   4: +base+ANG90      5: -base+(ANG180-1) 6: -base+(ANG270-1) 7: +base+ANG180
+      p2a_off:
+        hex.vec 8, 0x3FFFFFFF
+        hex.vec 8, 0x00000000
+        hex.vec 8, 0xC0000000
+        hex.vec 8, 0x00000000
+        hex.vec 8, 0x40000000
+        hex.vec 8, 0x7FFFFFFF
+        hex.vec 8, 0xBFFFFFFF
+        hex.vec 8, 0x80000000
+      p2a_neg:
+        hex.vec 1, 1
+        hex.vec 1, 0
+        hex.vec 1, 0
+        hex.vec 1, 1
+        hex.vec 1, 0
+        hex.vec 1, 1
+        hex.vec 1, 1
+        hex.vec 1, 0
+      done:
+    }
 }

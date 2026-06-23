@@ -1,0 +1,58 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________________ test_wall_x_range_byte_exact_vs_oracle ____________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-756/test_wall_x_range_byte_exact_v0')
+
+    def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
+        cmap = _square_room()
+        rm = ReferenceModel()
+        U = 1 << 16
+        body, data, expected = [], [], b""
+        for k, (vxu, vyu, va, si) in enumerate(WXR_CASES):
+            seg = cmap.segs[si]
+            v1x, v1y = cmap.vertexes[seg.v1]
+            v2x, v2y = cmap.vertexes[seg.v2]
+            for _ in range(2):   # call twice (R5 #8)
+                body += [f"proj.wall_x_range vis, x1, x2, rwa, vx{k}, vy{k}, va{k}, "
+                         f"a{k}, b{k}, c{k}, e{k}",
+                         "hex.print_as_digit 1, vis, 0", "stl.output 10",
+                         "hex.print_as_digit 8, x1, 0", "stl.output 10",
+                         "hex.print_as_digit 8, x2, 0", "stl.output 10",
+                         "hex.print_as_digit 8, rwa, 0", "stl.output 10"]
+            data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
+                     f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
+                     f"a{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"b{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
+                     f"c{k}: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"e{k}: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}"]
+            res = rm.wall_x_range(vxu * U, vyu * U, va, seg, cmap.vertexes)
+            if res is None:
+                expected += b"0\n00000000\n00000000\n00000000\n" * 2
+            else:
+                x1, x2, rwa = res
+                expected += f"1\n{x1 & 0xFFFFFFFF:08x}\n{x2 & 0xFFFFFFFF:08x}\n{rwa:08x}\n".encode() * 2
+        data += ["vis: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
+                 generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+                 generate_viewangletox_lut_fj("viewangletox", Config().VIEW_W, Config().TRIG_N)]
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "wall_x_range.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "wall_x_range: fj output != oracle"
+E       AssertionError: wall_x_range: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:341: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         0.300s
+  macro resolve:   0.694s
+  labels resolve:  0.182s
+  create binary:   1.145s
+  loading memory:  0.057s
+
+Finished by looping after 0.021s (42,056 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_wall_x_range_byte_exact_vs_oracle
+1 failed in 2.76s

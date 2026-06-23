@@ -282,3 +282,60 @@ def test_angle_to_x_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "angle_to_x: fj output != oracle"
+
+
+# ── proj.wall_x_range (R_AddLine): seg -> (visible, x1, x2, rw_angle1) ──
+# Drives the square room from views that produce a back-face cull, an outside-FOV cull, a clipped-but-
+# visible wall, and straight-on visible walls. The fj writes a `visible` flag (0 = the oracle's None) and
+# zeroes x1/x2/rw_angle1 on any cull, so culled cases compare as (0,0,0,0). Inlines point_to_angle x2 +
+# angle_to_x x2 per call, so the case count is kept small (300s ceiling). Byte-exact vs the oracle.
+_ANG90 = 0x40000000
+_ANG45 = 0x20000000
+# (viewx_u, viewy_u, viewangle, seg_index)
+WXR_CASES = [
+    (128, 128, 0, 2),         # facing east, EAST wall straight ahead -> visible
+    (128, 128, 0, 0),         # facing east, WEST wall behind -> back-face cull (span>=ANG180)
+    (128, 128, 0, 1),         # facing east, NORTH wall to the side -> outside FOV cull
+    (128, 128, _ANG90, 1),    # facing north, NORTH wall straight ahead -> visible
+    (200, 128, 0, 2),         # facing east, EAST wall closer -> visible (wider span)
+    (128, 128, _ANG45, 2),    # facing NE, EAST wall at the FOV edge -> clipped but visible
+]
+
+
+def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
+    cmap = _square_room()
+    rm = ReferenceModel()
+    U = 1 << 16
+    body, data, expected = [], [], b""
+    for k, (vxu, vyu, va, si) in enumerate(WXR_CASES):
+        seg = cmap.segs[si]
+        v1x, v1y = cmap.vertexes[seg.v1]
+        v2x, v2y = cmap.vertexes[seg.v2]
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.wall_x_range vis, x1, x2, rwa, vx{k}, vy{k}, va{k}, "
+                     f"a{k}, b{k}, c{k}, e{k}",
+                     "hex.print_as_digit 1, vis, 0", "stl.output 10",
+                     "hex.print_as_digit 8, x1, 0", "stl.output 10",
+                     "hex.print_as_digit 8, x2, 0", "stl.output 10",
+                     "hex.print_as_digit 8, rwa, 0", "stl.output 10"]
+        data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
+                 f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
+                 f"a{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"b{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
+                 f"c{k}: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"e{k}: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}"]
+        res = rm.wall_x_range(vxu * U, vyu * U, va, seg, cmap.vertexes)
+        if res is None:
+            expected += b"0\n00000000\n00000000\n00000000\n" * 2
+        else:
+            x1, x2, rwa = res
+            expected += f"1\n{x1 & 0xFFFFFFFF:08x}\n{x2 & 0xFFFFFFFF:08x}\n{rwa:08x}\n".encode() * 2
+    data += ["vis: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
+             generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+             generate_viewangletox_lut_fj("viewangletox", Config().VIEW_W, Config().TRIG_N)]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "wall_x_range.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "wall_x_range: fj output != oracle"

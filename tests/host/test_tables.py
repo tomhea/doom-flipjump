@@ -4,7 +4,8 @@ Anchored to hand-computed / DOOM-convention sample values (sin/recip), and to ma
 These value fns are the single source shared by the emitter (H2/H4, M5) and the oracle (H5, M9)."""
 import math
 
-from doomfj.tables import sine_table, reciprocal_table
+from doomfj.fixedpoint import _signed
+from doomfj.tables import sine_table, reciprocal_table, finetangent_table
 
 
 def test_sine_anchors_16_16():
@@ -38,3 +39,22 @@ def test_reciprocal_clamps_when_over_max():
     r = reciprocal_table(4, 16, 8)
     assert r[0] == 0xFF
     assert r[1] == 0xFF  # 65536 clamped to 0xFF
+
+
+def test_finetangent_offset_and_anchors_16_16():
+    """finetangent[i] = tan(angle_i - 90deg): 0 at ANG90 (head-on wall centre), ±1 at ±45deg from it."""
+    N = 4096
+    t = finetangent_table(N)
+    assert len(t) == N
+    assert _signed(t[N // 4], 32) == 0                       # ANG90 -> tan(0) = 0
+    assert _signed(t[N * 3 // 8], 32) == 1 << 16             # ANG135 -> tan(45) = +1.0
+    assert _signed(t[N // 8], 32) == -(1 << 16)             # ANG45 -> tan(-45) = -1.0
+
+
+def test_finetangent_poles_clamped():
+    """The poles (angle 0deg/180deg ⇒ tan(∓90deg) = ∓∞) clamp to the signed 32-bit range, no overflow."""
+    N = 4096
+    t = finetangent_table(N)
+    assert _signed(t[0], 32) == -(1 << 31)                   # tan(-90) -> clamp low
+    assert _signed(t[N // 2], 32) == (1 << 31) - 1           # tan(+90) -> clamp high
+    assert all(-(1 << 31) <= _signed(v, 32) <= (1 << 31) - 1 for v in t)

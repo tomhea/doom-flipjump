@@ -1,0 +1,7 @@
+### PASS — wall texturing live (M12j) ###
+.............                                                            [100%]
+13 passed in 0.49s
+
+### full suite ###
+...............................                                          [100%]
+175 passed in 75.05s (0:01:15)

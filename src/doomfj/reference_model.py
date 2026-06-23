@@ -29,8 +29,12 @@ from dataclasses import dataclass, replace
 from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
 from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side  # shared geometry (R6)
-from doomfj.tables import sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table
-from doomfj.texturecompiler import downscale_canvas  # shared D5 downscale lever (R6/D12)
+from doomfj.tables import (
+    sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
+)
+from doomfj.texturecompiler import (  # shared D5 downscale lever + texture compositing (R6/D12)
+    downscale_canvas, composite_texture, texture_texels,
+)
 from doomfj.wad import WadFile
 
 # ── sim / angle constants (BAM: full turn = 2**32) ──
@@ -117,6 +121,7 @@ class ReferenceModel:
         self.tantoangle = tantoangle_table(SLOPERANGE)        # R_PointToAngle slope->BAM (M12b, shared R6)
         self.viewangletox = viewangletox_table(self.cfg.VIEW_W, self.cfg.TRIG_N)   # angle->column (M12c, R6)
         self.xtoviewangle = xtoviewangle_table(self.cfg.VIEW_W, self.cfg.TRIG_N)   # column->angle (M12h, R6)
+        self.finetangent = finetangent_table(self.cfg.TRIG_N)   # tan(angle-90°) for texture-u (M12tex, R6)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
     def read_sin(self, angle: int) -> int:
@@ -431,17 +436,59 @@ class ReferenceModel:
                 fb[base + x] = val
         return bytes(fb)
 
+    def _wall_offset(self, viewx, viewy, viewangle, seg, verts, rw_normalangle, rw_angle1, sd):
+        """R_StoreWallRange's texture-horizontal setup: returns `(rw_offset, rw_centerangle)` (both BAM/
+        16.16). `rw_offset` (16.16 texels) is the wall-space horizontal coordinate of v1 = ±hyp·sin(the
+        clamped normal↔v1 offset angle), signed by which side v1 is on, plus the seg + sidedef texture
+        offsets; `rw_centerangle = ANG90 + viewangle - rw_normalangle` seeds the per-column finetangent
+        lookup. hyp = point_to_dist(view, v1)."""
+        v1x, v1y = verts[seg.v1]
+        hyp = self.point_to_dist(viewx, viewy, v1x << 16, v1y << 16)
+        offsetangle = (rw_normalangle - rw_angle1) & ANGLE_MASK
+        oa = (-offsetangle) & ANGLE_MASK if offsetangle > ANG180 else offsetangle   # BAM abs
+        if oa > ANG90:
+            oa = ANG90
+        rw_offset = fixed_mul(hyp, self.read_sin(oa), 8, 4)
+        if offsetangle < ANG180:                              # DOOM sign rule (uses the unfolded angle)
+            rw_offset = (-rw_offset) & ANGLE_MASK
+        rw_offset = (rw_offset + (seg.offset << 16) + (sd.x_off << 16)) & ANGLE_MASK
+        rw_centerangle = (ANG90 + viewangle - rw_normalangle) & ANGLE_MASK
+        return rw_offset, rw_centerangle
+
+    def _wall_texture(self, asset_wad, name, cache):
+        """Composite + downscale (the shared D5 lever) a wall texture by name → (texels, height, width),
+        column-major texels (R6). Cached per frame; returns None for an empty/absent texture ('-' or a
+        name not in TEXTURE1) so the caller falls back to the flat shade."""
+        key = name.upper()
+        if key in cache:
+            return cache[key]
+        defs = cache.get("__defs__")
+        if defs is None:
+            defs = {d.name.upper(): d for d in asset_wad.texture_defs("TEXTURE1")}
+            cache["__defs__"] = defs
+        if not key or key == "-" or key not in defs:
+            cache[key] = None
+            return None
+        canvas = downscale_canvas(composite_texture(asset_wad, defs[key]), self.downscale)
+        cache[key] = (texture_texels(canvas), len(canvas), len(canvas[0]))
+        return cache[key]
+
     def render_wall_frame(self, state: SimState, scene: Scene) -> bytes:
-        """The first rendered 3D frame: composite every visible wall over the M9 two-band background
-        (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop, flat-shaded). Walk the BSP front-to-back;
-        for each seg: `wall_x_range` (skip culled) -> `wall_setup` -> DOOM's scale INTERPOLATION (scale at
-        column x1, then a linear `scalestep` to x2 via a plain truncated divide — NOT FixedDiv, exactly as
-        DOOM, so the fj renderer must divide the same way) -> per column `wall_screen_span`, clipped to
-        [0, VIEW_H), filled with the seg's sector colormap-shaded `WALL_BG`. Front-to-back **solid-seg
-        clipping**: a per-column `drawn` flag stops a farther wall overdrawing a nearer one (one-sided
-        walls are opaque). Ceiling/floor stay the M9 background (visplanes are M13; wall texturing is the
-        next milestone). Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces
-        it bit-exactly (D12)."""
+        """The first rendered 3D frame, TEXTURED: composite every visible wall over the M9 two-band
+        background (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
+        each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
+        (scale at x1, linear `scalestep` to x2 via a plain truncated divide — NOT FixedDiv — so the fj
+        renderer must divide the same way) -> per column the textured wall column:
+          * texture u = `(rw_offset - FixedMul(finetangent[rw_centerangle + xtoviewangle[x]], rw_distance))
+            >> 16`, taken mod the texture width;
+          * the vertical texture DDA (M11b `render_textured_column`, 8.8): `iscale` = FixedDiv(1, scale) /
+            downscale (downscaled-texels per screen pixel), `texturemid` = (ceil - viewz) / downscale (the
+            texel-v at the horizon), `frac0` = texturemid + (top - CENTERY)·iscale, both converted 16.16->8.8;
+          * `wall_screen_span` gives the [top, bottom] rows, clipped to [0, VIEW_H).
+        Front-to-back **solid-seg clipping** via a per-column `drawn` flag (one-sided walls opaque). A wall
+        with no middle texture falls back to the flat `WALL_BG` shade. Ceiling/floor stay the M9 background
+        (visplanes are M13). Returns W*H packed palette-index bytes (row-major, D3); the fj renderer
+        reproduces this bit-exactly (D12)."""
         cfg = self.cfg
         fb = bytearray(self.render_frame(state, scene))      # start from the two-band background
         colormap = scene.asset_wad.colormap()
@@ -449,6 +496,7 @@ class ReferenceModel:
         sds = scene.map_wad.sidedefs(scene.mapname)
         secs = scene.map_wad.sectors(scene.mapname)
         verts = scene.cmap.vertexes
+        texcache: dict = {}
 
         viewx, viewy, viewangle = state.x, state.y, state.angle
         px = _signed(state.x, 32) >> 16
@@ -456,14 +504,19 @@ class ReferenceModel:
         # the eye z = the player's own sector floor + VIEWHEIGHT
         pss = scene.cmap.subsectors[self.point_in_subsector(scene.cmap, px, py)]
         viewz = self.view_z(self._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
+        viewz_world = _signed(viewz, 32) >> 16
+        centery, ds = cfg.CENTERY, self.downscale
 
         drawn = bytearray(cfg.VIEW_W)                        # per-column solid-seg clip (1 = already drawn)
         for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
             seg = scene.cmap.segs[seg_i]
+            ld = lds[seg.linedef]
+            if ld.back != -1:
+                continue                                     # two-sided (opening/window): not a solid wall
             rng = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
             if rng is None:
                 continue
-            x1, x2, _ = rng
+            x1, x2, rw_angle1 = rng
             rw_normalangle, rw_distance = self.wall_setup(viewx, viewy, seg, verts)
             scale = self.scale_from_global_angle((viewangle + self.xtoviewangle[x1]) & ANGLE_MASK,
                                                  viewangle, rw_normalangle, rw_distance)
@@ -476,15 +529,36 @@ class ReferenceModel:
                 scalestep = 0
             sec = self._seg_sector(lds, sds, secs, seg)
             light_row = max(0, min(COLORMAP_LIGHTS - 1, sec.light >> LIGHT_SHIFT))
-            fill = colormap[light_row][WALL_BG]
+            sd = sds[ld.front if seg.side == 0 else ld.back]
+            rw_offset, rw_centerangle = self._wall_offset(viewx, viewy, viewangle, seg, verts,
+                                                          rw_normalangle, rw_angle1, sd)
+            tex = self._wall_texture(scene.asset_wad, sd.middle, texcache)
+            worldtop = sec.ceil_h - viewz_world              # world units the ceiling is above the eye
+            flat_fill = colormap[light_row][WALL_BG]
             for x in range(x1, x2):
                 if not drawn[x]:
-                    top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz,
-                                                        scale & ANGLE_MASK)
+                    top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz, scale & ANGLE_MASK)
                     top = max(0, top)
                     bottom = min(cfg.VIEW_H - 1, bottom)
-                    for y in range(top, bottom + 1):
-                        fb[y * cfg.VIEW_W + x] = fill
+                    if top <= bottom:
+                        if tex is None:
+                            for y in range(top, bottom + 1):
+                                fb[y * cfg.VIEW_W + x] = flat_fill
+                        else:
+                            texels, th, tw = tex
+                            ang = (rw_centerangle + self.xtoviewangle[x]) & ANGLE_MASK
+                            ft = self.finetangent[(ang >> self.angle_shift) & (cfg.TRIG_N - 1)]
+                            texcol = (_signed((rw_offset - fixed_mul(ft, rw_distance, 8, 4)) & ANGLE_MASK,
+                                              32) >> 16) % tw
+                            iscale = fixed_div(1 << 16, scale & ANGLE_MASK, 8, 4) // ds   # texels/pixel 16.16
+                            texturemid = (worldtop << 16) // ds                           # texels at horizon
+                            frac = texturemid + (top - centery) * iscale                  # 16.16 texel-v
+                            col = self.render_textured_column(
+                                texels, th, texcol, colormap, light_row,
+                                count=bottom - top + 1, frac0=(frac >> 8) & 0xFFFF,
+                                step=(iscale >> 8) & 0xFFFF)
+                            for k, y in enumerate(range(top, bottom + 1)):
+                                fb[y * cfg.VIEW_W + x] = col[k]
                     drawn[x] = 1
                 scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
         return bytes(fb)

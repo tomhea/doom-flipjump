@@ -1,0 +1,6 @@
+### PASS — projection LUT emitters read byte-exact vs the host tables (M12l) ###
+.........................                                                [100%]
+25 passed in 25.57s
+
+### full suite ###
+198 passed in 85.67s (0:01:25)

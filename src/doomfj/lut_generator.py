@@ -27,7 +27,10 @@ from __future__ import annotations
 from typing import List, Sequence
 
 from doomfj.fixedpoint import encode_fixed_point
-from doomfj.tables import reciprocal_table, sine_table
+from doomfj.tables import (
+    reciprocal_table, sine_table, tantoangle_table, viewangletox_table,
+    xtoviewangle_table, finetangent_table,
+)
 
 __all__ = [
     "encode_fixed_point",
@@ -38,6 +41,10 @@ __all__ = [
     "generate_dispatch_table_fj",
     "generate_offset_deposit_table_fj",
     "generate_trig_idioms_fj",
+    "generate_tantoangle_lut_fj",
+    "generate_finetangent_lut_fj",
+    "generate_xtoviewangle_lut_fj",
+    "generate_viewangletox_lut_fj",
 ]
 
 
@@ -101,6 +108,36 @@ def generate_sine_lut_fj(label: str, count: int, fraction_bits: int, entry_nibbl
     """Emit a sine table (entry k = sin(2*pi*k/count), two's-complement). Values come from
     `tables.sine_table` — the SSOT shared with the oracle (R6)."""
     return generate_lut_fj(label, sine_table(count, fraction_bits, 4 * entry_nibbles), entry_nibbles)
+
+
+# ── projection LUTs the fj wall renderer reads (read_table data tables; the M12* tables, R6 SSOT) ──
+
+def generate_tantoangle_lut_fj(label: str, slope_range: int = 2048) -> str:
+    """tantoangle (R_PointToAngle: slope quotient -> BAM angle), slope_range+1 entries of 32-bit BAM
+    (8 nibbles). Values from `tables.tantoangle_table` (all non-negative, < 2**32). Read once per wall."""
+    return generate_lut_fj(label, tantoangle_table(slope_range), 8)
+
+
+def generate_finetangent_lut_fj(label: str, trig_n: int) -> str:
+    """finetangent (tan(angle-90°) as 16.16 two's-complement, 8 nibbles), trig_n entries. Values from
+    `tables.finetangent_table` (already 32-bit two's-complement encoded). Read once per wall column."""
+    return generate_lut_fj(label, finetangent_table(trig_n), 8)
+
+
+def generate_xtoviewangle_lut_fj(label: str, view_w: int, trig_n: int) -> str:
+    """xtoviewangle (screen column -> view-relative BAM angle), view_w+1 entries of 32-bit BAM (8
+    nibbles). Values from `tables.xtoviewangle_table` (already 32-bit encoded). The wall-scale endpoints."""
+    return generate_lut_fj(label, xtoviewangle_table(view_w, trig_n), 8)
+
+
+def generate_viewangletox_lut_fj(label: str, view_w: int, trig_n: int, *, entry_nibbles: int = 8) -> str:
+    """viewangletox (view-relative fine angle -> screen column), trig_n//2 entries. The columns are
+    SIGNED ([-1, view_w+1] with off-screen sentinels), so they are encoded two's-complement in
+    `entry_nibbles` (default 8 = uniform with the other projection LUTs). Values from
+    `tables.viewangletox_table` (R6 SSOT). The fj angle->column lookup the wall x-range reads."""
+    mask = (1 << (4 * entry_nibbles)) - 1
+    values = [v & mask for v in viewangletox_table(view_w, trig_n)]
+    return generate_lut_fj(label, values, entry_nibbles)
 
 
 # ---------------------------------------------------------------------------

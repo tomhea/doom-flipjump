@@ -379,3 +379,44 @@ def test_wall_screen_span_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "wall_screen_span: fj output != oracle"
+
+
+# ── proj.scalestep (the per-column rw_scalestep, render_wall_frame lines 523-529): the linear scale
+# increment from column x1 to x2 = trunc((scale2-scale1)/(x2-x1)) TOWARD ZERO (a plain truncated divide,
+# NOT FixedDiv), or 0 if x2<=x1. scale1/scale2 are 16.16; x1/x2 are signed columns. Result is signed.
+def _oracle_scalestep(s1, s2, x1, x2):
+    if x2 > x1:
+        diff, span = s2 - s1, x2 - x1
+        return -(abs(diff) // span) if diff < 0 else diff // span   # trunc toward zero
+    return 0
+
+
+SCALESTEP_CASES = [
+    (0xA000, 0x12000, 10, 50),    # diff>0, span 40
+    (0x12000, 0xA000, 10, 50),    # diff<0 -> negative step (trunc toward zero)
+    (0xA000, 0xA000, 10, 50),     # diff==0 -> 0
+    (0xA000, 0x12000, 50, 50),    # x2==x1 -> 0 (the guard)
+    (0x100, 0x400000, -1, 159),   # full span, x1=-1 (signed), big positive diff
+    (0x400000, 0x100, 0, 80),     # big negative diff
+    (0xA005, 0xA000, 5, 12),      # small negative diff, span 7 -> truncation
+]
+
+
+def test_scalestep_byte_exact_vs_oracle(tmp_path):
+    body, data, expected = [], [], b""
+    for k, (s1, s2, x1, x2) in enumerate(SCALESTEP_CASES):
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.scalestep d, s1_{k}, s2_{k}, x1_{k}, x2_{k}",
+                     "hex.print_as_digit 8, d, 0", "stl.output 10"]
+        data += [f"s1_{k}: hex.vec 8, {s1 & 0xFFFFFFFF}", f"s2_{k}: hex.vec 8, {s2 & 0xFFFFFFFF}",
+                 f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}"]
+        expected += f"{_oracle_scalestep(s1, s2, x1, x2) & 0xFFFFFFFF:08x}\n".encode() * 2
+    data.append("d: hex.vec 8")
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "scalestep.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "scalestep: fj output != oracle"

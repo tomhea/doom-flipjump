@@ -1,0 +1,5 @@
+### FAIL — xtoviewangle emitter draws the WRONG host table (tantoangle); the byte-exact read tests catch it ###
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_luts.py::test_xtoviewangle_lut_byte_exact - A...
+FAILED tests/host/test_lut_generator.py::TestCannedGeneratorsUseTablesSSOT::test_projection_luts_match_tables
+2 failed, 23 deselected in 5.67s

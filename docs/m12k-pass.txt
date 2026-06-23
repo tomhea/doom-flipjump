@@ -1,0 +1,6 @@
+### PASS — all new isolated fj-macro tests pass; full suite green (M12k) ###
+...............................                                          [100%]
+31 passed in 39.44s
+
+### full suite ###
+192 passed in 85.67s (0:01:25)

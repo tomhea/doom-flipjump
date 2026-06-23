@@ -1,0 +1,8 @@
+### FAIL — representative macro bugs injected; the new isolated tests catch each ###
+--- present.init_screen command byte 0x01 -> 0x09 ---
+2 failed, 5 passed in 4.63s
+--- fb.store pixel address k -> k+1 (off-by-one) ---
+4 failed in 3.38s
+--- maybe_add_shifted: dst += shifted -> dst += dst ---
+1 failed in 1.00s
+--- (all macros reverted) ---

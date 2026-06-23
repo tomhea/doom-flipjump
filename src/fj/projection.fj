@@ -148,4 +148,73 @@ ns proj {
         hex.vec 1, 0
       done:
     }
+
+    // proj.point_to_dist dst, viewx, viewy, x, y (R_PointToDist): dst[:8] = the 16.16 distance from
+    //   (viewx,viewy) to (x,y) — sqrt(dx²+dy²) computed via tantoangle + finesine + two FixedDivs (no
+    //   sqrt). Fold to the major octant (dx>=dy), index tantoangle by the slope dy/dx >> DBITS, take
+    //   angle+ANG90, divide dx by sin(that)=cos(atan(slope)). Mirrors reference_model.point_to_dist
+    //   EXACTLY. Coords + result are 16.16. Reads the shared `tantoangle` LUT (M12l) + the `finesine`
+    //   trig idiom (M6); exact for axis-aligned (dy=0 -> dist=dx), ~quantization off-axis. (0,0)->0.
+    //   @requires hex.init & stl.ptr_init   (read_table + finesine.read_sin)
+    def point_to_dist dst, viewx, viewy, x, y \
+            @ dx, dy, tmp, slope, sidx, angle, sine, czero, csr3, cang90, \
+              do_swap, no_swap, swapped, dx_zero, dx_nz, clamp_idx, keep_idx, \
+              sine_zero, sine_nz, baddiv, done \
+            < tantoangle {
+        hex.mov 8, dx, x
+        hex.sub 8, dx, viewx
+        hex.abs 8, dx                            // dx = |x - viewx|
+        hex.mov 8, dy, y
+        hex.sub 8, dy, viewy
+        hex.abs 8, dy                            // dy = |y - viewy|
+
+        hex.cmp 8, dy, dx, no_swap, no_swap, do_swap   // dy > dx ? -> fold to the major octant (dx>=dy)
+      do_swap:
+        hex.mov 8, tmp, dx
+        hex.mov 8, dx, dy
+        hex.mov 8, dy, tmp
+        ;swapped
+      no_swap:
+      swapped:
+        hex.cmp 8, dx, czero, dx_nz, dx_zero, dx_nz    // dx == 0 ? (both deltas were 0) -> degenerate
+      dx_zero:
+        hex.zero 8, dst
+        ;done
+      dx_nz:
+        hex.fixed_div 8, 4, slope, dy, dx, baddiv      // slope = (dy<<16)/dx  in [0, 0x10000] (dy<=dx)
+        hex.shr_hex 8, 1, slope                        // >> DBITS = >> 5 bits: one nibble (4) ...
+        hex.shr_bit 8, slope                           //   ... + one bit
+        hex.mov 3, sidx, slope                         // idx = slope (low 3 nibbles; value <= 0x800)
+        hex.cmp 3, sidx, csr3, keep_idx, keep_idx, clamp_idx   // min(idx, SLOPERANGE) (oracle safety)
+      clamp_idx:
+        hex.set 3, sidx, 0x800
+      keep_idx:
+        hex.read_table 8, angle, tantoangle, 3, sidx   // tantoangle[idx]
+        hex.add 8, angle, cang90                        // angle = tantoangle[idx] + ANG90
+        hex.shr_hex 8, 5, angle                         // finesine index = angle >> 20 bits (= 5 nibbles;
+        hex.mov 3, sidx, angle                          //   32 - log2(TRIG_N=4096) = 20). low 3 nibbles.
+        finesine.read_sin sine, sidx                    // sin(atan(slope)+90deg) = cos(atan(slope))
+        hex.cmp 8, sine, czero, sine_nz, sine_zero, sine_nz   // sine==0 guard (oracle: returns 0)
+      sine_zero:
+        hex.zero 8, dst
+        ;done
+      sine_nz:
+        hex.fixed_div 8, 4, dst, dx, sine, baddiv       // dist = (dx<<16)/sine
+        ;done
+      baddiv:                                           // unreachable (dx!=0, sine!=0); safe fallback
+        hex.zero 8, dst
+        ;done
+
+      dx: hex.vec 8
+      dy: hex.vec 8
+      tmp: hex.vec 8
+      slope: hex.vec 8
+      sidx: hex.vec 3
+      angle: hex.vec 8
+      sine: hex.vec 8
+      czero: hex.vec 8, 0
+      csr3: hex.vec 3, 0x800
+      cang90: hex.vec 8, 0x40000000
+      done:
+    }
 }

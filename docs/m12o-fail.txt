@@ -1,0 +1,44 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________________ test_point_to_dist_byte_exact_vs_oracle ___________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-738/test_point_to_dist_byte_exact_0')
+
+    def test_point_to_dist_byte_exact_vs_oracle(tmp_path):
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        body, data = [], []
+        for k, (vx, vy, x, y) in enumerate(P2D_CASES):
+            for _ in range(2):   # call twice per case (R5 #8): catches scratch/result-reg cleanup bugs
+                body += [f"proj.point_to_dist d, vx{k}, vy{k}, x{k}, y{k}",
+                         "hex.print_as_digit 8, d, 0", "stl.output 10"]
+            data += [f"vx{k}: hex.vec 8, {vx & 0xFFFFFFFF}", f"vy{k}: hex.vec 8, {vy & 0xFFFFFFFF}",
+                     f"x{k}: hex.vec 8, {x & 0xFFFFFFFF}", f"y{k}: hex.vec 8, {y & 0xFFFFFFFF}"]
+        data += ["d: hex.vec 8",
+                 generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+                 generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+        expected = b"".join(f"{rm.point_to_dist(vx, vy, x, y):08x}\n".encode() * 2
+                            for (vx, vy, x, y) in P2D_CASES)
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "point_to_dist.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "point_to_dist: fj output != oracle"
+E       AssertionError: point_to_dist: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:148: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         3.802s
+  macro resolve:   2.234s
+  labels resolve:  0.472s
+  create binary:   2.328s
+  loading memory:  0.095s
+
+Finished by looping after 0.033s (42,075 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_point_to_dist_byte_exact_vs_oracle
+1 failed in 9.44s

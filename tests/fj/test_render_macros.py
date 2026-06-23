@@ -12,7 +12,7 @@ from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.reference_model import ReferenceModel
+from doomfj.reference_model import ReferenceModel, CEIL_BG, FLOOR_BG
 from doomfj.texturecompiler import compile_colormap, compile_texture, composite_texture, texture_texels
 from doomfj.wad import WadFile
 
@@ -219,8 +219,7 @@ def test_render_background_two_band_byte_exact(tmp_path):
     rows ceil, the rest floor), using real colormapped band colors at a chosen light row."""
     cfg = Config()
     colormap = WadFile.from_path(ASSET).colormap()
-    CEIL_BG, FLOOR_BG = 0, 96                 # render_frame's pre-colormap band indices
-    row = 1                                   # a valid colormap light row
+    row = 1                                   # a valid colormap light row (CEIL_BG/FLOOR_BG from the oracle)
     ceil_color, floor_color = colormap[row][CEIL_BG], colormap[row][FLOOR_BG]
     assert ceil_color != floor_color          # the bands must be distinguishable
     horizon = cfg.VIEW_H // 2

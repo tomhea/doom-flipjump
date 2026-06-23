@@ -71,6 +71,30 @@ ns frame {
       end:
     }
 
+    // per-column orchestrator (M12cc): compute the column's render params (clipped top/bottom + texcol +
+    // the 8.8 DDA frac0/step) via proj.column_render_params, then load the shared leaf's per-column
+    // registers (base_reg = texcol*texheight, cmidx light byte, step, frac) ready for the row loop. Writes
+    // the clipped top/bottom for the caller's `rep(H, y) frame.pixel_clipped y, <fbcell>, top, bottom`.
+    // Runtime per-column inputs: scale (accumulated by the caller) + x. Per-seg inputs (rw_centerangle,
+    // rw_offset, rw_distance, light, ceilfix, floorfix, viewz, worldtop, tw) pass through as REGISTERS;
+    // texheight/centery/ds/viewh1 are compile-time Config/texture consts (R6). NOTE tw is a REGISTER (it
+    // is a hex.div memory operand in texture_u), not a compile-time literal. @requires hex.init & stl.ptr_init.
+    def wall_column top, bottom, scale, x, rw_centerangle, rw_offset, rw_distance, light, ceilfix, floorfix, viewz, worldtop, tw, texheight, centery, ds, viewh1 \
+            @ texcol, frac0, stepv, end < base_reg, cmidx, step, frac {
+        proj.column_render_params top, bottom, texcol, frac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        hex.mul_const 3, base_reg, texcol, texheight    // base_reg = texcol * texheight (column-major M8)
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx + 2*dw, light                  // cmidx high byte = light
+        hex.mov 4, step, stepv
+        hex.mov 4, frac, frac0
+        ;end
+
+      texcol: hex.vec 8
+      frac0: hex.vec 4
+      stepv: hex.vec 4
+      end:
+    }
+
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
     // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
     def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {

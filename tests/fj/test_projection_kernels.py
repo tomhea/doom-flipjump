@@ -6,12 +6,13 @@ from pathlib import Path
 
 import flipjump as fj
 
+from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.lut_generator import generate_tantoangle_lut_fj
+from doomfj.lut_generator import generate_tantoangle_lut_fj, generate_trig_idioms_fj
 from doomfj.reference_model import ReferenceModel, SLOPERANGE
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
-FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table (tantoangle lookup)
+FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table + hex.fixed_div
 
 
 def _run(tmp_path, name, body, data, expected: bytes):
@@ -102,3 +103,46 @@ def test_point_to_angle_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "point_to_angle: fj output != oracle"
+
+
+# ── proj.point_to_dist (R_PointToDist): perpendicular-free distance via tantoangle + finesine + 2 divides ─
+# (viewx, viewy, x, y) 16.16. Covers: axis-aligned (dy=0 -> dist=dx exact), dy>dx (the swap branch),
+# dy<dx, dy==dx (slope 1.0 -> SLOPERANGE), the degenerate point (dx==0 -> 0), abs of negative deltas,
+# the 3-4-5 triangle (dist≈5), and a non-origin view point + a larger spread.
+P2D_CASES = [
+    (0, 0, 0, 0),               # degenerate -> 0
+    (0, 0,  F, 0),              # due east, axis-aligned -> dist == F
+    (0, 0, 0,  F),              # due north -> swap (dy>dx) -> dist == F
+    (0, 0,  F,  F),             # exact diagonal: slope 1.0 -> SLOPERANGE; dist == F*sqrt(2)
+    (0, 0,  3*F,  4*F),         # 3-4-5: dy>dx swap -> dist ≈ 5F
+    (0, 0, -3*F, -4*F),         # abs of negatives -> same 5F
+    (0, 0,  4*F,  3*F),         # dy<dx, no swap -> dist ≈ 5F
+    (2*F, 2*F, 5*F, 6*F),       # non-origin view: dx=3F,dy=4F -> ≈ 5F
+    (0, 0, 100*F, 30*F),        # larger spread
+    (0, 0,  F,  2*F),           # dy>dx swap, off-axis
+]
+
+
+def test_point_to_dist_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    body, data = [], []
+    for k, (vx, vy, x, y) in enumerate(P2D_CASES):
+        for _ in range(2):   # call twice per case (R5 #8): catches scratch/result-reg cleanup bugs
+            body += [f"proj.point_to_dist d, vx{k}, vy{k}, x{k}, y{k}",
+                     "hex.print_as_digit 8, d, 0", "stl.output 10"]
+        data += [f"vx{k}: hex.vec 8, {vx & 0xFFFFFFFF}", f"vy{k}: hex.vec 8, {vy & 0xFFFFFFFF}",
+                 f"x{k}: hex.vec 8, {x & 0xFFFFFFFF}", f"y{k}: hex.vec 8, {y & 0xFFFFFFFF}"]
+    data += ["d: hex.vec 8",
+             generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+    expected = b"".join(f"{rm.point_to_dist(vx, vy, x, y):08x}\n".encode() * 2
+                        for (vx, vy, x, y) in P2D_CASES)
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "point_to_dist.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "point_to_dist: fj output != oracle"

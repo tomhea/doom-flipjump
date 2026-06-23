@@ -133,4 +133,16 @@ ns frame {
         hex.add 4, frac, step                 // advance the DDA (8.8)
         stl.fret pixel_ret
     }
+
+    // frame.render_background base, ceil_color, floor_color, view_w, view_h, horizon — the M9 two-band
+    // background (R_DrawViewBorder / the empty-view clear, oracle reference_model.render_frame): fill the
+    // top `horizon` rows of the hex.vec2 framebuffer `base` with the (already colormapped) ceiling byte and
+    // the remaining rows with the floor byte. Each pixel k is a hex.vec2 cell at base + 2*k*dw (low nibble
+    // 2k, high 2k+1); the constant colors are compile-time, so each pixel is one `hex.set 2`. view_w/view_h/
+    // horizon are compile-time Config args (R6; horizon = VIEW_H//2). This is what the wall renderer paints
+    // over (and what visplanes replace in M13). @requires hex.init.
+    def render_background base, ceil_color, floor_color, view_w, view_h, horizon {
+        rep(horizon*view_w, k) hex.set 2, base + 2*k*dw, ceil_color
+        rep((view_h - horizon)*view_w, k) hex.set 2, base + 2*(horizon*view_w + k)*dw, floor_color
+    }
 }

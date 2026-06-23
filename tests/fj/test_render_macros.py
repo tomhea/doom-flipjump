@@ -12,7 +12,7 @@ from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.reference_model import ReferenceModel
+from doomfj.reference_model import ReferenceModel, CEIL_BG, FLOOR_BG
 from doomfj.texturecompiler import compile_colormap, compile_texture, composite_texture, texture_texels
 from doomfj.wad import WadFile
 
@@ -207,4 +207,42 @@ def test_frame_pixel_clipped_runtime_span(tmp_path):
     want = bytearray(cfg.FB_SIZE)
     for r in range(count):
         want[(top + r) * cfg.W + x] = col[r]
+    assert bytes(screen.pixel_indices) == bytes(want)
+
+
+# ── frame.render_background (M12hh): the M9 two-band background fill, byte-exact vs render_frame ──
+
+def test_render_background_two_band_byte_exact(tmp_path):
+    """frame.render_background fills the hex.vec2 framebuffer's top `horizon` rows with the (already
+    colormapped) ceiling byte and the rest with the floor byte — the empty-view two-band clear the wall
+    renderer paints over. Byte-exact vs the band layout of reference_model.render_frame (top VIEW_H//2
+    rows ceil, the rest floor), using real colormapped band colors at a chosen light row."""
+    cfg = Config()
+    colormap = WadFile.from_path(ASSET).colormap()
+    row = 1                                   # a valid colormap light row (CEIL_BG/FLOOR_BG from the oracle)
+    ceil_color, floor_color = colormap[row][CEIL_BG], colormap[row][FLOOR_BG]
+    assert ceil_color != floor_color          # the bands must be distinguishable
+    horizon = cfg.VIEW_H // 2
+
+    want = bytearray(cfg.FB_SIZE)
+    for y in range(cfg.VIEW_H):
+        c = ceil_color if y < horizon else floor_color
+        for x in range(cfg.VIEW_W):
+            want[y * cfg.VIEW_W + x] = c
+
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    main = "\n".join([
+        "stl.startup_and_init_all", "present.init_screen",
+        f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
+        f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
+        "present.update_screen_reg framebuffer", "stl.loop",
+        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+    ]) + "\n"
+    p = tmp_path / "bg.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / "bg.fjm"
+    fj.assemble([consts.resolve(), PRESENT_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+    screen = InMemoryScreen()
+    fj.run(out, io_device=screen, print_time=False, print_termination=False)
     assert bytes(screen.pixel_indices) == bytes(want)

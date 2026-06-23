@@ -1,0 +1,8 @@
+E         
+E         At index 7840 diff: b'a' != b'\x00'
+E         Use -v to get more diff
+
+tests\fj\test_render_macros.py:249: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_render_macros.py::test_render_background_two_band_byte_exact
+1 failed in 10.61s

@@ -67,8 +67,9 @@ ns frame {
         hex.cmp 2, top, rows + 2*dw*y, render, render, end    // top > y -> skip (above the wall)
       render:
         stl.fcall pixel_leaf, pixel_ret
-        hex.xor_zero 2, fbcell, lit
-      end:
+        hex.zero 2, fbcell                                    // OVERWRITE: clear the cell first so the wall
+        hex.xor_zero 2, fbcell, lit                           // composes OVER a filled background (M12ii), not
+      end:                                                    // just zero-init cells (zeroing a zero cell is a no-op)
     }
 
     // per-column orchestrator (M12cc): compute the column's render params (clipped top/bottom + texcol +

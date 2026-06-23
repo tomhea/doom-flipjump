@@ -1,0 +1,10 @@
+>       assert bytes(screen.pixel_indices) == bytes(want)
+E       AssertionError: assert b'aaaaaaa`\x0...mmmmmmmmmmmmm' == b'ddddddde\x0...mmmmmmmmmmmmm'
+E         
+E         At index 0 diff: b'a' != b'd'
+E         Use -v to get more diff
+
+tests\fj\test_wall_render.py:342: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_wall_render.py::test_wall_render_composes_over_background
+1 failed in 24.74s

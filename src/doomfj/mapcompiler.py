@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import List, Sequence, Tuple
 
 NF_SUBSECTOR = 0x8000  # high bit of a BSP child ref ⇒ it points to a subsector, not a node
+MASK40 = (1 << 40) - 1  # proj.point_on_side's 10-nibble working width (int16 coords ⇒ cross product < 2^39)
 
 
 @dataclass(frozen=True)
@@ -152,18 +153,51 @@ def compile_geometry_streams(wad, mapname: str) -> str:
     return "\n".join(out)
 
 
-def _bsp_as_code(pfx: str, bsp: CompiledMap) -> str:
-    """BSP-as-code (opt #7): each node a code block with its partition line as compile-time constants,
-    so the side test is a `mul_const` (no per-node stream read). The leaves jump to per-subsector
-    handlers. For the convex single-subsector map this is just the root subsector entry."""
+def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done") -> str:
+    """BSP-as-code (opt #7): emit the front-to-back BSP walk as fj CODE. Each node becomes a code block
+    whose partition line is baked as compile-time constants, so the side test is `proj.point_on_side`
+    (no per-node stream read). The block visits the NEAR child subtree first (the side the viewer is on),
+    then the FAR, so subsectors come out nearest-first — byte-exact vs reference_model.bsp_render_order
+    (R_RenderBSPNode). Recursion uses a per-node `stl.fcall`/`stl.fret` return register: the baked tree is
+    finite and each node is entered exactly once (by its single parent), so one ret reg per node suffices —
+    no runtime stack. A LEAF visit emits its subsector index (4 hex digits + newline) — the order-
+    verification leaf action (M12ff); the wall-render milestone replaces it with the per-seg raster. The
+    walk reads the viewer's 16.0 map coords from globals `vx`,`vy` and jumps to `done_label` when finished.
+    Flat labels prefixed `<pfx>_bspcode_` (self-contained but for vx/vy/done_label). px,py,dx,dy are passed
+    to point_on_side as their 10-nibble two's-complement patterns. @requires hex.init (+ proj in scope)."""
+    L = f"{pfx}_bspcode"
     lines = [f'// BSP-as-code for "{pfx}" (opt #7): {len(bsp.nodes)} node blocks, '
-             f"{len(bsp.subsectors)} subsector leaves"]
-    lines.append(f"ns {pfx}_bspcode {{")
+             f"{len(bsp.subsectors)} subsector leaves; walk reads vx,vy -> emits front-to-back order"]
+
+    def visit(child: int) -> list:
+        if child & NF_SUBSECTOR:                          # leaf: emit the subsector index
+            s = child & (NF_SUBSECTOR - 1)
+            return [f"    hex.set 4, {L}_ss, {s}", f"    hex.print_as_digit 4, {L}_ss, 0",
+                    f"    stl.output 10    // subsector {s}"]
+        return [f"    stl.fcall {L}_n{child}, {L}_r{child}"]   # interior node: recurse
+
+    # entry: visit the root, then halt via done_label
+    lines.append(f"{L}_walk:")
+    lines += visit(bsp.root)
+    lines.append(f"    ;{done_label}")
+
+    # one code block per node: side test -> NEAR child first, FAR second, then return
     for i, n in enumerate(bsp.nodes):
-        lines.append(f"    // node {i}: partition ({n.x},{n.y})+t({n.dx},{n.dy}) "
-                     f"right={hex(n.right)} left={hex(n.left)}")
-    for i, ss in enumerate(bsp.subsectors):
-        lines.append(f"    // subsector {i}: {ss.numsegs} segs from {ss.firstseg}")
-    lines.append(f"    // root = {hex(bsp.root)}")
-    lines.append("}")
+        px, py, dx, dy = n.x & MASK40, n.y & MASK40, n.dx & MASK40, n.dy & MASK40
+        lines.append(f"{L}_n{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
+        lines.append(f"    proj.point_on_side {L}_side, vx, vy, {px}, {py}, {dx}, {dy}")
+        lines.append(f"    hex.if0 2, {L}_side, {L}_nf{i}")   # back==0 (front) -> jump; else fall to back path
+        lines += visit(n.left)                             # back (side>0): near=left, far=right
+        lines += visit(n.right)
+        lines.append(f"    stl.fret {L}_r{i}")
+        lines.append(f"{L}_nf{i}:")                         # front: near=right, far=left
+        lines += visit(n.right)
+        lines += visit(n.left)
+        lines.append(f"    stl.fret {L}_r{i}")
+
+    # data — never fallen into (every code path above ends in stl.fret or `;done_label`)
+    lines.append(f"{L}_side: hex.vec 2")
+    lines.append(f"{L}_ss: hex.vec 4")
+    for i in range(len(bsp.nodes)):
+        lines.append(f"{L}_r{i}: ;0")                      # per-node fcall/fret return register
     return "\n".join(lines) + "\n"

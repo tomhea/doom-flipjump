@@ -1,0 +1,6 @@
+
+Finished by looping after 0.001s (796 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/host/test_mapbake.py::test_bsp_code_two_leaf_walk - AssertionErr...
+FAILED tests/host/test_mapbake.py::test_bsp_code_deep_walk - AssertionError: ...
+2 failed, 1 passed, 11 deselected in 3.41s

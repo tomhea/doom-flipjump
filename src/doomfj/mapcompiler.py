@@ -181,11 +181,22 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done") ->
     lines += visit(bsp.root)
     lines.append(f"    ;{done_label}")
 
-    # one code block per node: side test -> NEAR child first, FAR second, then return
+    # the side test is a SHARED fcall leaf (mantra #9): emit the heavy point_on_side math ONCE, not
+    # unrolled per node (681 copies of two hex.mul 10 blow up the assemble). Each node sets the partition
+    # const regs then fcalls it; the leaf writes `_side` and returns.
+    if bsp.nodes:
+        lines.append(f"{L}_pos_leaf:")
+        lines.append(f"    proj.point_on_side_leaf {L}_side, vx, vy, "
+                     f"{L}_cpx, {L}_cpy, {L}_cdx, {L}_cdy, {L}_pos_ret")
+
+    # one code block per node: load partition consts -> fcall side test -> NEAR child first, FAR second
     for i, n in enumerate(bsp.nodes):
-        px, py, dx, dy = n.x & MASK40, n.y & MASK40, n.dx & MASK40, n.dy & MASK40
         lines.append(f"{L}_n{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
-        lines.append(f"    proj.point_on_side {L}_side, vx, vy, {px}, {py}, {dx}, {dy}")
+        lines.append(f"    hex.set 10, {L}_cpx, {n.x & MASK40}")
+        lines.append(f"    hex.set 10, {L}_cpy, {n.y & MASK40}")
+        lines.append(f"    hex.set 10, {L}_cdx, {n.dx & MASK40}")
+        lines.append(f"    hex.set 10, {L}_cdy, {n.dy & MASK40}")
+        lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
         lines.append(f"    hex.if0 2, {L}_side, {L}_nf{i}")   # back==0 (front) -> jump; else fall to back path
         lines += visit(n.left)                             # back (side>0): near=left, far=right
         lines += visit(n.right)
@@ -196,7 +207,11 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done") ->
         lines.append(f"    stl.fret {L}_r{i}")
 
     # data — never fallen into (every code path above ends in stl.fret or `;done_label`)
-    lines.append(f"{L}_side: hex.vec 2")
+    if bsp.nodes:
+        for nm in ("cpx", "cpy", "cdx", "cdy"):
+            lines.append(f"{L}_{nm}: hex.vec 10")          # shared per-node partition const regs
+        lines.append(f"{L}_side: hex.vec 2")
+        lines.append(f"{L}_pos_ret: ;0")                   # the side-test leaf's fcall/fret return register
     lines.append(f"{L}_ss: hex.vec 4")
     for i in range(len(bsp.nodes)):
         lines.append(f"{L}_r{i}: ;0")                      # per-node fcall/fret return register

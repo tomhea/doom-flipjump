@@ -778,4 +778,37 @@ ns proj {
       czero: hex.vec 10
       end:
     }
+
+    // proj.point_on_side_leaf back, vx, vy, cpx, cpy, cdx, cdy, pos_ret — the REGISTER form of
+    //   point_on_side for the BSP-as-code shared fcall leaf (mantra #9): the heavy side math is emitted
+    //   ONCE at a global label and fcall'd per node, NOT unrolled per node (unrolling 681× blew up the
+    //   E1M1 assemble — the two hex.mul 10 dominate). The node's partition (cpx,cpy,cdx,cdy) and the
+    //   viewer (vx,vy) are 10-nibble two's-complement REGISTERS the caller sets before the fcall; this
+    //   writes back(0/1) to `back` and returns via stl.fret pos_ret. Same math/precision as
+    //   point_on_side (40-bit signed cross product; signed -> hex.scmp / hex.mul, R5). @requires hex.init.
+    def point_on_side_leaf back, vx, vy, cpx, cpy, cdx, cdy, pos_ret \
+            @ dxv, dyv, p1, p2, czero, setback, front, end {
+        hex.mov 10, dxv, vx
+        hex.sub 10, dxv, cpx              // dxv = vx - px   (signed)
+        hex.mov 10, dyv, vy
+        hex.sub 10, dyv, cpy              // dyv = vy - py
+        hex.mul 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
+        hex.mul 10, p2, cdy, dxv          // p2 = dy*(vx-px)
+        hex.sub 10, p1, p2                // side = dx*(vy-py) - dy*(vx-px)
+        hex.set 10, czero, 0
+        hex.scmp 10, p1, czero, front, front, setback   // <0 & ==0 -> front(0); >0 -> back(1)
+      setback:
+        hex.set 2, back, 1
+        ;end
+      front:
+        hex.set 2, back, 0
+      end:
+        stl.fret pos_ret                  // return (the data below is never fallen into — fret exits first)
+
+      dxv: hex.vec 10
+      dyv: hex.vec 10
+      p1: hex.vec 10
+      p2: hex.vec 10
+      czero: hex.vec 10
+    }
 }

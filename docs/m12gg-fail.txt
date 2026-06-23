@@ -1,0 +1,12 @@
+>           assert ok, f"E1M1 BSP-as-code order @ ({vx},{vy}) != bsp_render_order"
+E           AssertionError: E1M1 BSP-as-code order @ (-416,256) != bsp_render_order
+E           assert False
+
+tests\host\test_mapbake.py:233: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  loading memory:  0.682s
+
+Finished by looping after 0.264s (2,646,236 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/host/test_mapbake.py::test_bsp_code_e1m1_order_byte_exact_vs_oracle
+1 failed in 11.35s

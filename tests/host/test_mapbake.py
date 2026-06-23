@@ -200,3 +200,34 @@ def test_bsp_code_deep_walk(tmp_path):
     """The 2-level tree: exercises stl.fcall into a child node + fret return, both near/far branches."""
     for vx, vy in VIEWPOINTS:
         _run_bsp_walk(tmp_path, "deep", _deep_map(), vx, vy)
+
+
+def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
+    """The full real E1M1 bake (681 nodes, 682 subsectors): _bsp_as_code emits the whole BSP walk as
+    code; the shared proj.point_on_side_leaf fcall leaf (mantra #9) keeps it assemblable (~10s, ~0.6MB
+    .fjm — vs the >10-min blow-up of unrolling the side math per node). The emitted front-to-back
+    subsector order is byte-exact vs reference_model.bsp_render_order from several viewpoints. Assembled
+    ONCE (the viewer is read from stdin as signed decimal) and re-run per viewpoint."""
+    import time
+    cmap = bake_bsp(WadFile.from_path(E1M1), "E1M1")
+    assert len(cmap.nodes) == 681 and len(cmap.subsectors) == 682
+    code = _bsp_as_code("e1m1", cmap, done_label="bsp_done")
+    prog = "\n".join([
+        "stl.startup_and_init_all",
+        "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
+        ";e1m1_bspcode_walk", "bsp_done:", "stl.loop", "bad:", "stl.loop",
+        "vx: hex.vec 10", "vy: hex.vec 10", code,
+    ]) + "\n"
+    p = tmp_path / "e1m1_bsp.fj"
+    p.write_text(prog, encoding="utf-8")
+    out = tmp_path / "e1m1_bsp.fjm"
+    t = time.perf_counter()
+    fj.assemble([PROJECTION_FJ.resolve(), p.resolve()], out, memory_width=W, print_time=False)
+    assemble_s = time.perf_counter() - t
+    assert assemble_s < 120, f"E1M1 BSP-as-code assemble {assemble_s:.0f}s exceeds the R-2 CI guard"
+    rm = ReferenceModel()
+    for vx, vy in [(-416, 256), (0, 256), (256, -256), (2048, -3680)]:
+        expected = "".join(f"{s:04x}\n" for s in rm.bsp_render_order(cmap, vx, vy)).encode()
+        ok = fj.run_test_output(out, f"{vx}\n{vy}\n".encode(), expected,
+                                should_raise_assertion_error=False)
+        assert ok, f"E1M1 BSP-as-code order @ ({vx},{vy}) != bsp_render_order"

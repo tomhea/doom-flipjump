@@ -200,3 +200,47 @@ def test_wall_setup_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "wall_setup: fj output != oracle"
+
+
+# ── proj.scale_from_global_angle (R_ScaleFromGlobalAngle): the per-column wall scale ──
+# (visangle, viewangle, rw_normalangle, rw_distance) BAM/16.16. Covers: den==0 -> SCALE_MAX, clamp-up,
+# clamp-down (far), the exact perpendicular-centre scale (0.625=40960), a closer wall, off-angle
+# visangle/viewangle/normalangle, and a NEGATIVE-den case (sine of an angle past ANG180 is negative ->
+# scale negative -> clamped to SCALE_MIN; this is why the clamp compares are signed, hex.scmp). PROJECTION
+# (=CENTERX, resolution-dependent) is passed as a compile-time arg from Config (R6 SSOT), not hardcoded.
+_AU = 1 << 16
+SCALE_CASES = [
+    (0, 0, 0, 0),                          # den 0 -> SCALE_MAX
+    (0, 0, 0, 1 * _AU),                    # very close -> clamp up to SCALE_MAX
+    (0, 0, 0, 30000 * _AU),                # very far -> clamp down to SCALE_MIN
+    (0, 0, 0, 128 * _AU),                  # perpendicular centre: PROJECTION/128 = 0.625 = 40960 exact
+    (0, 0, 0, 56 * _AU),                   # closer wall -> larger scale
+    (0x10000000, 0, 0, 100 * _AU),         # off-angle visangle
+    (0, 0x10000000, 0, 100 * _AU),         # viewangle offset (anglea != ANG90)
+    (0, 0, 0x20000000, 100 * _AU),         # oblique wall (angleb != ANG90)
+    (0, 0xA0000000, 0, 100 * _AU),         # anglea past ANG180 -> sin<0 -> den<0 -> SCALE_MIN (signed)
+    (0x08000000, 0x04000000, 0x10000000, 200 * _AU),   # general mix
+]
+
+
+def test_scale_from_global_angle_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    proj = cfg.PROJECTION << 16            # the R6 SSOT value, passed as a compile-time macro arg
+    body, data, expected = [], [], b""
+    for k, (vis, view, nrm, rwd) in enumerate(SCALE_CASES):
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, {proj}",
+                     "hex.print_as_digit 8, s, 0", "stl.output 10"]
+        data += [f"vis{k}: hex.vec 8, {vis & 0xFFFFFFFF}", f"vw{k}: hex.vec 8, {view & 0xFFFFFFFF}",
+                 f"nrm{k}: hex.vec 8, {nrm & 0xFFFFFFFF}", f"rwd{k}: hex.vec 8, {rwd & 0xFFFFFFFF}"]
+        expected += f"{rm.scale_from_global_angle(vis, view, nrm, rwd):08x}\n".encode() * 2
+    data += ["s: hex.vec 8", generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "scale.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "scale_from_global_angle: fj output != oracle"

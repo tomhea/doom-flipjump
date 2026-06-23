@@ -266,4 +266,68 @@ ns proj {
       cang180: hex.vec 8, 0x80000000
       end:
     }
+
+    // proj.scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection
+    //   (R_ScaleFromGlobalAngle): scale[:8] = the wall's projected 16.16 scale (pixels per world unit)
+    //   for the column whose ABSOLUTE view angle is visangle. scale = PROJECTION*sin(angleb) /
+    //   (rw_distance*sin(anglea)), anglea = ANG90+(visangle-viewangle), angleb = ANG90+(visangle-
+    //   rw_normalangle); clamped to [SCALE_MIN, SCALE_MAX]; den==0 -> SCALE_MAX. Mirrors
+    //   reference_model.scale_from_global_angle EXACTLY. `projection` is a COMPILE-TIME arg = PROJECTION
+    //   <<16 (= CENTERX<<16; resolution-dependent, so the caller supplies it from the config SSOT, R6).
+    //   NOTE: the oracle's fixed_mul/fixed_div return UNSIGNED-wrapped 32-bit values (a negative result
+    //   wraps to a huge positive), and its min/max clamp + den==0 test compare those as unsigned — so the
+    //   compares here are hex.cmp (NOT scmp). Verified: a negative-den case (anglea past ANG180) wraps to
+    //   a huge unsigned scale and clamps to SCALE_MAX, exactly as the oracle does (scmp would give
+    //   SCALE_MIN and diverge). anglea/b are unsigned-modular BAM that only feed read_sin (bit extract).
+    //   @requires hex.init & stl.ptr_init   (finesine.read_sin)
+    def scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection \
+            @ anglea, angleb, num, den, sidx, sinv, cproj, cang90, czero, csmin, csmax, \
+              den_zero, den_nz, chk_min, set_max, set_min, end {
+        hex.mov 8, anglea, visangle
+        hex.sub 8, anglea, viewangle
+        hex.add 8, anglea, cang90               // anglea = ANG90 + (visangle - viewangle)
+        hex.mov 8, angleb, visangle
+        hex.sub 8, angleb, rw_normalangle
+        hex.add 8, angleb, cang90               // angleb = ANG90 + (visangle - rw_normalangle)
+
+        hex.shr_hex 8, 5, angleb                // num = fixed_mul(PROJECTION<<16, read_sin(angleb))
+        hex.mov 3, sidx, angleb                 //   read_sin idx = angleb >> 20 (low 3 nibbles)
+        finesine.read_sin sinv, sidx
+        hex.set 8, cproj, projection            //   PROJECTION<<16 (compile-time, from Config)
+        hex.fixed_mul 8, 4, num, cproj, sinv
+
+        hex.shr_hex 8, 5, anglea                // den = fixed_mul(rw_distance, read_sin(anglea))
+        hex.mov 3, sidx, anglea
+        finesine.read_sin sinv, sidx
+        hex.fixed_mul 8, 4, den, rw_distance, sinv
+
+        hex.cmp 8, den, czero, den_nz, den_zero, den_nz    // den == 0 ? (unsigned) -> SCALE_MAX
+      den_zero:
+        hex.mov 8, scale, csmax
+        ;end
+      den_nz:
+        hex.fixed_div 8, 4, scale, num, den, den_zero      // scale = num / den (div0 -> SCALE_MAX)
+        hex.cmp 8, scale, csmax, chk_min, chk_min, set_max    // min(SCALE_MAX, scale): > -> clamp (unsigned)
+      set_max:
+        hex.mov 8, scale, csmax
+        ;end                                    // SCALE_MAX > SCALE_MIN, so the min-clamp is satisfied
+      chk_min:
+        hex.cmp 8, scale, csmin, set_min, end, end            // max(SCALE_MIN, scale): < -> clamp (unsigned)
+      set_min:
+        hex.mov 8, scale, csmin
+        ;end
+
+      anglea: hex.vec 8
+      angleb: hex.vec 8
+      num: hex.vec 8
+      den: hex.vec 8
+      sidx: hex.vec 3
+      sinv: hex.vec 8
+      cproj: hex.vec 8
+      cang90: hex.vec 8, 0x40000000
+      czero: hex.vec 8, 0
+      csmin: hex.vec 8, 0x100             // SCALE_MIN (16.16 engine constant)
+      csmax: hex.vec 8, 0x400000          // SCALE_MAX = 64.0
+      end:
+    }
 }

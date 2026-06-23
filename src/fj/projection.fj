@@ -462,4 +462,44 @@ ns proj {
       prod: hex.vec 8
       end:
     }
+
+    // proj.scalestep dst, scale1, scale2, x1, x2 (the per-column rw_scalestep, render_wall_frame): the
+    //   linear scale increment dst = trunc((scale2 - scale1) / (x2 - x1)) TOWARD ZERO — a PLAIN truncated
+    //   integer divide, NOT FixedDiv (the oracle + fj must divide identically). 0 if x2 <= x1. scale1/2
+    //   are 16.16 (positive, clamped); x1/x2 are signed columns; dst is signed (8-nibble 2's-comp).
+    //   The x2>x1 guard is signed (hex.scmp), diff's sign uses hex.sign, the divide is on magnitudes
+    //   (unsigned hex.div), and a negative diff negates the quotient (-(|diff|//span) = trunc toward 0).
+    //   @requires hex.init
+    def scalestep dst, scale1, scale2, x1, x2 \
+            @ diff, span, q, r, le_, gt_, neg_, pos_, baddiv, end {
+        hex.scmp 8, x2, x1, le_, le_, gt_   // x2 > x1 ? (signed columns) — else step 0
+      le_:
+        hex.zero 8, dst
+        ;end
+      gt_:
+        hex.mov 8, span, x2
+        hex.sub 8, span, x1                 // span = x2 - x1  (> 0)
+        hex.mov 8, diff, scale2
+        hex.sub 8, diff, scale1             // diff = scale2 - scale1 (signed)
+        hex.sign 8, diff, neg_, pos_
+      neg_:
+        hex.neg 8, diff                     // |diff|
+        hex.div 8, 8, q, r, diff, span, baddiv
+        hex.mov 8, dst, q
+        hex.neg 8, dst                      // dst = -(|diff| // span)  (trunc toward zero)
+        ;end
+      pos_:
+        hex.div 8, 8, q, r, diff, span, baddiv   // dst = diff // span
+        hex.mov 8, dst, q
+        ;end
+      baddiv:                               // unreachable (span > 0); safe fallback
+        hex.zero 8, dst
+        ;end
+
+      diff: hex.vec 8
+      span: hex.vec 8
+      q: hex.vec 8
+      r: hex.vec 8
+      end:
+    }
 }

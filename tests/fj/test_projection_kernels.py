@@ -768,3 +768,27 @@ def test_point_on_side_byte_exact_vs_oracle(tmp_path):
         expected += f"{back}\n".encode() * 2
     data.append("b: hex.vec 2")
     _run(tmp_path, "point_on_side", body, data, expected)
+
+
+def test_point_on_side_leaf_byte_exact_vs_oracle(tmp_path):
+    """proj.point_on_side_leaf — the register / shared-fcall-leaf form of the side test used by the
+    BSP-as-code walk — matches mapcompiler._point_side byte-exact over the hand cases. Set the viewer +
+    partition const regs, fcall the leaf, print back; each case twice (R5 #8)."""
+    body, expected = [], b""
+    for px, py, dx, dy, vx, vy in HAND_SIDE_CASES:
+        for _ in range(2):
+            body += [f"hex.set 10, vx, {vx & MASK40}", f"hex.set 10, vy, {vy & MASK40}",
+                     f"hex.set 10, cpx, {px & MASK40}", f"hex.set 10, cpy, {py & MASK40}",
+                     f"hex.set 10, cdx, {dx & MASK40}", f"hex.set 10, cdy, {dy & MASK40}",
+                     "stl.fcall pos_leaf, pos_ret", "hex.print_as_digit 1, b, 0", "stl.output 10"]
+        expected += f"{1 if _point_side(px, py, dx, dy, vx, vy) > 0 else 0}\n".encode() * 2
+    tail = ["pos_leaf: proj.point_on_side_leaf b, vx, vy, cpx, cpy, cdx, cdy, pos_ret",
+            "b: hex.vec 2", "vx: hex.vec 10", "vy: hex.vec 10", "cpx: hex.vec 10", "cpy: hex.vec 10",
+            "cdx: hex.vec 10", "cdy: hex.vec 10", "pos_ret: ;0"]
+    prog = "stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(tail) + "\n"
+    p = tmp_path / "pos_leaf.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "point_on_side_leaf: fj output != oracle"

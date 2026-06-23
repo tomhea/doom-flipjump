@@ -1,0 +1,8 @@
+  labels resolve:  0.336s
+  create binary:   1.486s
+  loading memory:  0.089s
+
+Finished by looping after 0.034s (76,592 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_point_on_side_byte_exact_vs_oracle
+1 failed in 3.14s

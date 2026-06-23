@@ -206,7 +206,8 @@ def test_wall_setup_byte_exact_vs_oracle(tmp_path):
 # (visangle, viewangle, rw_normalangle, rw_distance) BAM/16.16. Covers: den==0 -> SCALE_MAX, clamp-up,
 # clamp-down (far), the exact perpendicular-centre scale (0.625=40960), a closer wall, off-angle
 # visangle/viewangle/normalangle, and a NEGATIVE-den case (sine of an angle past ANG180 is negative ->
-# scale negative -> clamped to SCALE_MIN; this is why the clamp compares are signed, hex.scmp). PROJECTION
+# the oracle's fixed_div returns it UNSIGNED-wrapped to a huge value -> clamps to SCALE_MAX; this is why
+# the clamp compares are UNSIGNED hex.cmp, NOT scmp — scmp would wrongly give SCALE_MIN). PROJECTION
 # (=CENTERX, resolution-dependent) is passed as a compile-time arg from Config (R6 SSOT), not hardcoded.
 _AU = 1 << 16
 SCALE_CASES = [
@@ -218,7 +219,7 @@ SCALE_CASES = [
     (0x10000000, 0, 0, 100 * _AU),         # off-angle visangle
     (0, 0x10000000, 0, 100 * _AU),         # viewangle offset (anglea != ANG90)
     (0, 0, 0x20000000, 100 * _AU),         # oblique wall (angleb != ANG90)
-    (0, 0xA0000000, 0, 100 * _AU),         # anglea past ANG180 -> sin<0 -> den<0 -> SCALE_MIN (signed)
+    (0, 0xA0000000, 0, 100 * _AU),         # anglea past ANG180 -> sin<0 -> den<0 -> wraps -> SCALE_MAX (unsigned)
     (0x08000000, 0x04000000, 0x10000000, 200 * _AU),   # general mix
 ]
 

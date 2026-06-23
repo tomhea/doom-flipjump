@@ -1,0 +1,3 @@
+### PASS — proj.slope_div byte-exact vs the oracle; full suite green (M12m) ###
+1 passed in 5.03s
+full suite: 199 passed

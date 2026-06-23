@@ -1,7 +1,6 @@
-### PASS — wall texturing live (M12j) ###
-.............                                                            [100%]
-13 passed in 0.49s
+### PASS — wall texturing live (M12j), incl. finetangent every-entry parity (R5) ###
+...............                                                          [100%]
+15 passed in 0.51s
 
 ### full suite ###
-...............................                                          [100%]
-175 passed in 75.05s (0:01:15)
+177 passed in 92.07s (0:01:32)

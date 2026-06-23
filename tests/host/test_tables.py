@@ -58,3 +58,19 @@ def test_finetangent_poles_clamped():
     assert _signed(t[0], 32) == -(1 << 31)                   # tan(-90) -> clamp low
     assert _signed(t[N // 2], 32) == (1 << 31) - 1           # tan(+90) -> clamp high
     assert all(-(1 << 31) <= _signed(v, 32) <= (1 << 31) - 1 for v in t)
+
+
+def test_finetangent_matches_math_tan_every_entry():
+    """R5: every entry equals the clamped 16.16 math.tan(angle-90deg) (the shared emitter+oracle source)."""
+    N = 256
+    t = finetangent_table(N)
+    assert len(t) == N
+    lo, hi = -(1 << 31), (1 << 31) - 1
+    for i in range(N):
+        want = max(lo, min(hi, round(math.tan(2 * math.pi * i / N - math.pi / 2) * (1 << 16)))) & 0xFFFFFFFF
+        assert t[i] == want
+
+
+def test_finetangent_deterministic():
+    """Built twice (the emitter and the oracle each build it once) ⇒ byte-identical, so they can't drift."""
+    assert finetangent_table(512) == finetangent_table(512)

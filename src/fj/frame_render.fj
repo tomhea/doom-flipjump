@@ -31,6 +31,18 @@ ns frame {
         hex.set 4, frac, frac0
     }
 
+    // RUNTIME per-column setup (M12aa): same as setup_col, but base/light/step_val/frac0 are RUNTIME
+    // registers (the M12 renderer computes them via the projection macros — base=texcol*texheight, light
+    // the sector light, step/frac0 from column_setup), not compile-time literals. The leaf body is
+    // identical (it only reads the registers). base is hex[:3], light hex[:2], step_val/frac0 hex[:4] (8.8).
+    def setup_col_reg base, light, step_val, frac0 < base_reg, cmidx, step, frac {
+        hex.mov 3, base_reg, base
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx + 2*dw, light        // cmidx high byte = light (runtime)
+        hex.mov 4, step, step_val
+        hex.mov 4, frac, frac0
+    }
+
     // one pixel (the thin unrolled shell): fcall the shared leaf (which renders into `lit` + advances the
     // DDA), then write `lit` straight into the pixel's hex.vec2 framebuffer cell (zero-init -> xor = set).
     def pixel fbcell < lit, pixel_ret, pixel_leaf {

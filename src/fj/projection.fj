@@ -706,4 +706,32 @@ ns proj {
       scale2: hex.vec 8
       end:
     }
+
+    // proj.column_render_params top, bottom, texcol, frac0, step, <runtime per-column inputs>, centery,
+    //   ds, viewh1 (the per-column render-parameter bundle, render_wall_frame lines 540-559): for one
+    //   screen column, composes wall_screen_span -> CLIP (top=max(0,top), bottom=min(VIEW_H-1,bottom)) ->
+    //   texture_u -> column_setup, yielding the column's (top, bottom [both clipped], texcol, frac0, step).
+    //   The clip is the new logic: top/bottom are SIGNED rows so the clamps use hex.sign (max 0) and
+    //   hex.scmp (min VIEW_H-1). centery / ds / viewh1(=VIEW_H-1) are compile-time Config args (R6);
+    //   centeryfix is the compile-time expr centery*0x10000. column_setup gets the CLIPPED top (oracle
+    //   line 541 clips before frac). Mirrors the oracle EXACTLY. @requires hex.init & stl.ptr_init
+    def column_render_params top, bottom, texcol, frac0, step, scale, rw_centerangle, rw_offset, rw_distance, x, tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1 \
+            @ cvh, tneg, tok, bok, bhi, end {
+        .wall_screen_span top, bottom, ceilfix, floorfix, viewz, scale, centery*0x10000
+        hex.sign 8, top, tneg, tok          // top = max(0, top)  (signed)
+      tneg:
+        hex.zero 8, top
+      tok:
+        hex.set 8, cvh, viewh1              // bottom = min(VIEW_H-1, bottom)  (signed)
+        hex.scmp 8, bottom, cvh, bok, bok, bhi
+      bhi:
+        hex.mov 8, bottom, cvh
+      bok:
+        .texture_u texcol, rw_centerangle, rw_offset, rw_distance, x, tw
+        .column_setup frac0, step, scale, worldtop, top, centery, ds   // uses the CLIPPED top
+        ;end
+
+      cvh: hex.vec 8
+      end:
+    }
 }

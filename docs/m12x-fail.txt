@@ -1,0 +1,48 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________________ test_column_setup_byte_exact_vs_oracle ____________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-779/test_column_setup_byte_exact_v0')
+
+    def test_column_setup_byte_exact_vs_oracle(tmp_path):
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        cy = cfg.CENTERY
+        body, data, expected = [], [], b""
+        for k, (sc, wt, top) in enumerate(COLSETUP_CASES):
+            for _ in range(2):   # call twice (R5 #8)
+                body += [f"proj.column_setup f0, st, sc{k}, wt{k}, tp{k}, {cy}",
+                         "hex.print_as_digit 4, f0, 0", "stl.output 10",
+                         "hex.print_as_digit 4, st, 0", "stl.output 10"]
+            data += [f"sc{k}: hex.vec 8, {sc & 0xFFFFFFFF}", f"wt{k}: hex.vec 8, {wt & 0xFFFFFFFF}",
+                     f"tp{k}: hex.vec 8, {top & 0xFFFFFFFF}"]
+            frac0, step = _oracle_column_setup(rm, sc, wt, top)
+            expected += f"{frac0:04x}\n{step:04x}\n".encode() * 2
+        data += ["f0: hex.vec 4", "st: hex.vec 4"]
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "column_setup.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "column_setup: fj output != oracle"
+E       AssertionError: column_setup: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:584: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         0.167s
+  macro resolve:   0.157s
+  labels resolve:  0.058s
+  create binary:   0.211s
+  loading memory:  0.018s
+
+Program's output before it was terminated:  b''
+
+Finished by ip<2w after 0.005s (499 ops executed).
+
+**** Re-run with --debug-ops-list N (or the -d debug flags) to see the last executed ops ****
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_column_setup_byte_exact_vs_oracle
+1 failed in 0.93s

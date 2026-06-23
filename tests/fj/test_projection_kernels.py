@@ -7,7 +7,7 @@ from pathlib import Path
 import flipjump as fj
 
 from doomfj.config import Config
-from doomfj.fixedpoint import fixed_mul, _signed
+from doomfj.fixedpoint import fixed_mul, fixed_div, _signed
 from doomfj.harness import W
 from doomfj.lut_generator import (
     generate_tantoangle_lut_fj, generate_trig_idioms_fj, generate_viewangletox_lut_fj,
@@ -532,3 +532,53 @@ def test_texture_u_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "texture_u: fj output != oracle"
+
+
+# ── proj.column_setup (the per-column texture-v DDA setup, render_wall_frame lines 553-559): from a
+# column's scale + the wall's worldtop + the clipped top row, compute the 8.8 DDA params (frac0, step) the
+# textured-column leaf consumes. iscale = fixed_div(1<<16, scale)//ds (texels/pixel); texturemid =
+# (worldtop<<16)//ds; frac = texturemid + (top-CENTERY)*iscale; frac0 = (frac>>8)&0xFFFF, step =
+# (iscale>>8)&0xFFFF. ds = TEXTURE_DOWNSCALE = 2 (engine invariant). CENTERY a compile-time arg (R6).
+def _oracle_column_setup(rm, scale, worldtop, top):
+    cfg = rm.cfg
+    ds = cfg.TEXTURE_DOWNSCALE
+    iscale = fixed_div(1 << 16, scale & ANGLE_MASK, 8, 4) // ds
+    texturemid = (worldtop << 16) // ds
+    frac = texturemid + (top - cfg.CENTERY) * iscale
+    return (frac >> 8) & 0xFFFF, (iscale >> 8) & 0xFFFF
+
+
+# (scale, worldtop, top) — incl. negative worldtop (ceiling below eye) + negative top (row above centre).
+COLSETUP_CASES = [
+    (0xA000, 87, 0),      # square-room perpendicular centre
+    (0x10000, 87, 10),    # scale 1.0
+    (0x100, 87, 49),      # SCALE_MIN (far)
+    (0x20000, 50, -5),    # negative top
+    (0xA000, -20, 30),    # negative worldtop (ceiling below the eye)
+    (0x40000, 87, 75),    # scale 4.0
+]
+
+
+def test_column_setup_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    cy = cfg.CENTERY
+    body, data, expected = [], [], b""
+    for k, (sc, wt, top) in enumerate(COLSETUP_CASES):
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.column_setup f0, st, sc{k}, wt{k}, tp{k}, {cy}",
+                     "hex.print_as_digit 4, f0, 0", "stl.output 10",
+                     "hex.print_as_digit 4, st, 0", "stl.output 10"]
+        data += [f"sc{k}: hex.vec 8, {sc & 0xFFFFFFFF}", f"wt{k}: hex.vec 8, {wt & 0xFFFFFFFF}",
+                 f"tp{k}: hex.vec 8, {top & 0xFFFFFFFF}"]
+        frac0, step = _oracle_column_setup(rm, sc, wt, top)
+        expected += f"{frac0:04x}\n{step:04x}\n".encode() * 2
+    data += ["f0: hex.vec 4", "st: hex.vec 4"]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "column_setup.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "column_setup: fj output != oracle"

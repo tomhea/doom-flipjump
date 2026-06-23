@@ -608,4 +608,53 @@ ns proj {
       czero: hex.vec 8, 0
       end:
     }
+
+    // proj.column_setup frac0, step, scale, worldtop, top, centery (the per-column texture-v DDA setup,
+    //   render_wall_frame lines 553-559): from a column's `scale` (16.16), the wall's `worldtop` (=
+    //   sec.ceil_h - viewz_world, signed map units) and the clipped `top` screen row (signed), compute
+    //   the 8.8 DDA params the textured-column leaf consumes. iscale = fixed_div(1<<16, scale) // ds
+    //   (texels/pixel 16.16); texturemid = (worldtop<<16) // ds; frac = texturemid + (top-CENTERY)*iscale;
+    //   frac0 = (frac>>8)&0xFFFF, step = (iscale>>8)&0xFFFF (both 8.8, 16-bit). ds = TEXTURE_DOWNSCALE = 2
+    //   (a fixed engine invariant baked into the M8 texture pipeline): //ds => iscale>>1 (positive) and
+    //   texturemid = worldtop<<15 (= (worldtop<<16)//2, exact). (top-CENTERY)*iscale is a PLAIN signed
+    //   multiply (2's-complement mod 2^32 via hex.mul), NOT fixed_mul. CENTERY is a compile-time arg (R6).
+    //   Mirrors the oracle EXACTLY. @requires hex.init
+    def column_setup frac0, step, scale, worldtop, top, centery \
+            @ iscale, texmid, tc, ccy, prod, frac, c1fix, baddiv, end {
+        hex.fixed_div 8, 4, iscale, c1fix, scale, baddiv   // iscale = (1<<16<<16)/scale = (1<<32)/scale
+        hex.shr_bit 8, iscale                              // // ds (=2): positive, logical >>1
+
+        hex.mov 8, texmid, worldtop                        // texturemid = (worldtop<<16)//2 = worldtop<<15
+        hex.shl_hex 8, 3, texmid                           //   << 12 ...
+        hex.shl_bit 8, texmid
+        hex.shl_bit 8, texmid
+        hex.shl_bit 8, texmid                              //   ... + 3 = << 15
+
+        hex.set 8, ccy, centery
+        hex.mov 8, tc, top
+        hex.sub 8, tc, ccy                                 // tc = top - CENTERY (signed)
+        hex.mul 8, prod, tc, iscale                        // (top-CENTERY)*iscale (signed, 2's-comp mod 2^32)
+        hex.mov 8, frac, texmid
+        hex.add 8, frac, prod                              // frac = texturemid + (top-CENTERY)*iscale
+
+        hex.shr_hex 8, 2, iscale                           // step = (iscale >> 8) & 0xFFFF
+        hex.mov 4, step, iscale
+        hex.shr_hex 8, 2, frac                             // frac0 = (frac >> 8) & 0xFFFF
+        hex.mov 4, frac0, frac
+        ;end
+
+      baddiv:                                              // scale==0 unreachable (>= SCALE_MIN); safe
+        hex.zero 4, frac0
+        hex.zero 4, step
+        ;end
+
+      iscale: hex.vec 8
+      texmid: hex.vec 8
+      tc: hex.vec 8
+      ccy: hex.vec 8
+      prod: hex.vec 8
+      frac: hex.vec 8
+      c1fix: hex.vec 8, 0x10000          // 1 << 16 (the fixed_div numerator)
+      end:
+    }
 }

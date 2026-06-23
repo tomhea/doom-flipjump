@@ -357,4 +357,77 @@ ns proj {
       cmaxidx: hex.vec 3, 0x7ff           // len(viewangletox)-1 = TRIG_N/2 - 1
       end:
     }
+
+    // proj.wall_x_range visible, x1, x2, rw_angle1, viewx, viewy, viewangle, v1x, v1y, v2x, v2y (R_AddLine):
+    //   the seg's screen column range. Writes visible=1 + (x1,x2,rw_angle1) when the seg is on-screen,
+    //   else visible=0 (the oracle's None) with x1/x2/rw_angle1 zeroed. v1 is the seg's LEFT screen
+    //   vertex, v2 the RIGHT (DOOM-wound baked segs). Mirrors reference_model.wall_x_range EXACTLY:
+    //   back-face cull (span >= ANG180), view-relative, two-edge frustum clip (CLIPANGLE=ANG45) via
+    //   DOOM's unsigned tspan logic, then angle_to_x. All the angle/span/tspan compares are UNSIGNED
+    //   (modular BAM) -> hex.cmp; only the final x1>=x2 column test is SIGNED (columns can be -1) ->
+    //   hex.scmp. Outputs are computed into temps and committed only on the visible path.
+    //   @requires hex.init & stl.ptr_init   (inlines point_to_angle x2 + angle_to_x x2)
+    def wall_x_range visible, x1, x2, rw_angle1, viewx, viewy, viewangle, v1x, v1y, v2x, v2y \
+            @ a1, a2, span, tspan, diff, rwa, tx1, tx2, \
+              cang180, cclip, c2clip, cnegclip, \
+              notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end {
+        hex.set 1, visible, 0              // default: culled (None)
+        hex.zero 8, x1
+        hex.zero 8, x2
+        hex.zero 8, rw_angle1
+
+        .point_to_angle a1, viewx, viewy, v1x, v1y    // absolute angle to v1 (left)
+        .point_to_angle a2, viewx, viewy, v2x, v2y    // absolute angle to v2 (right)
+        hex.mov 8, span, a1
+        hex.sub 8, span, a2                            // span = (a1 - a2) mod 2^32
+        hex.cmp 8, span, cang180, notback, end, end    // span >= ANG180 -> back-facing, cull
+      notback:
+        hex.mov 8, rwa, a1                             // rw_angle1 = absolute a1 (committed on success)
+        hex.sub 8, a1, viewangle                       // a1 view-relative
+        hex.sub 8, a2, viewangle                       // a2 view-relative
+
+        hex.mov 8, tspan, a1                           // LEFT edge: tspan = a1 + CLIPANGLE
+        hex.add 8, tspan, cclip
+        hex.cmp 8, tspan, c2clip, leftok, leftok, leftclip   // tspan > 2*CLIP ?
+      leftclip:
+        hex.mov 8, diff, tspan
+        hex.sub 8, diff, c2clip
+        hex.cmp 8, diff, span, setleft, end, end       // (tspan-2*CLIP) >= span -> off the left, cull
+      setleft:
+        hex.mov 8, a1, cclip                           // a1 = CLIPANGLE
+      leftok:
+        hex.mov 8, tspan, cclip                        // RIGHT edge: tspan = CLIPANGLE - a2
+        hex.sub 8, tspan, a2
+        hex.cmp 8, tspan, c2clip, rightok, rightok, rightclip
+      rightclip:
+        hex.mov 8, diff, tspan
+        hex.sub 8, diff, c2clip
+        hex.cmp 8, diff, span, setright, end, end      // off the right, cull
+      setright:
+        hex.mov 8, a2, cnegclip                        // a2 = -CLIPANGLE (0xE0000000)
+      rightok:
+        .angle_to_x tx1, a1
+        .angle_to_x tx2, a2
+        hex.scmp 8, tx1, tx2, visok, end, end          // x1 >= x2 -> sub-column, cull (SIGNED columns)
+      visok:
+        hex.set 1, visible, 1
+        hex.mov 8, x1, tx1
+        hex.mov 8, x2, tx2
+        hex.mov 8, rw_angle1, rwa
+        ;end
+
+      a1: hex.vec 8
+      a2: hex.vec 8
+      span: hex.vec 8
+      tspan: hex.vec 8
+      diff: hex.vec 8
+      rwa: hex.vec 8
+      tx1: hex.vec 8
+      tx2: hex.vec 8
+      cang180: hex.vec 8, 0x80000000
+      cclip: hex.vec 8, 0x20000000        // CLIPANGLE = ANG45
+      c2clip: hex.vec 8, 0x40000000       // 2*CLIPANGLE = ANG90 (the full FOV)
+      cnegclip: hex.vec 8, 0xE0000000     // -CLIPANGLE mod 2^32
+      end:
+    }
 }

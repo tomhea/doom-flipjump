@@ -50,6 +50,27 @@ ns frame {
         hex.xor_zero 2, fbcell, lit
     }
 
+    // CLIPPED pixel (M12bb): the wall renderer unrolls ALL screen rows per column at COMPILE-TIME pixel
+    // addresses (the M11c zero-pointer structure), but a wall only covers the RUNTIME rows [top, bottom].
+    // `y` (compile-time row) is rendered iff top <= y <= bottom: render = fcall the leaf (which advances
+    // the DDA) + write; skip = neither (so the DDA only advances over the wall's rows, frac0 at `top`,
+    // exactly as render_textured_column). top/bottom are signed rows (can be off-screen) -> hex.scmp.
+    def pixel_clipped y, fbcell, top, bottom \
+            @ cy, lo_ok, render, skip, end < lit, pixel_ret, pixel_leaf {
+        hex.set 8, cy, y
+        hex.scmp 8, top, cy, lo_ok, lo_ok, skip       // top > y -> skip (top <= y: lt/eq -> continue)
+      lo_ok:
+        hex.scmp 8, bottom, cy, skip, render, render  // bottom < y -> skip (bottom >= y: eq/gt -> render)
+      render:
+        stl.fcall pixel_leaf, pixel_ret
+        hex.xor_zero 2, fbcell, lit
+        ;end
+      skip:
+        ;end                                          // not in the wall's span: no render, no DDA advance
+      cy: hex.vec 8
+      end:
+    }
+
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
     // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
     def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {

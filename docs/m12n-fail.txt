@@ -1,0 +1,41 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__________________ test_point_to_angle_byte_exact_vs_oracle ___________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-733/test_point_to_angle_byte_exact0')
+
+    def test_point_to_angle_byte_exact_vs_oracle(tmp_path):
+        rm = ReferenceModel()
+        body, data = [], []
+        for k, (x1, y1, x2, y2) in enumerate(P2A_CASES):
+            for _ in range(2):   # call twice per case (R5 #8): catches scratch/result-reg cleanup bugs
+                body += [f"proj.point_to_angle d, x1_{k}, y1_{k}, x2_{k}, y2_{k}",
+                         "hex.print_as_digit 8, d, 0", "stl.output 10"]
+            data += [f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"y1_{k}: hex.vec 8, {y1 & 0xFFFFFFFF}",
+                     f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}", f"y2_{k}: hex.vec 8, {y2 & 0xFFFFFFFF}"]
+        data += ["d: hex.vec 8", generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)]
+        expected = b"".join(f"{rm.point_to_angle(x1, y1, x2, y2):08x}\n".encode() * 2
+                            for (x1, y1, x2, y2) in P2A_CASES)
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "point_to_angle.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "point_to_angle: fj output != oracle"
+E       AssertionError: point_to_angle: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:104: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         0.243s
+  macro resolve:   0.748s
+  labels resolve:  0.306s
+  create binary:   1.529s
+  loading memory:  0.092s
+
+Finished by looping after 0.034s (80,884 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_point_to_angle_byte_exact_vs_oracle
+1 failed in 3.37s

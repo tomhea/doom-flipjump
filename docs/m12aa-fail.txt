@@ -1,0 +1,64 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________________ test_frame_setup_col_reg_runtime_column ___________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-799/test_frame_setup_col_reg_runti0')
+
+    def test_frame_setup_col_reg_runtime_column(tmp_path):
+        """Render ONE wall column with RUNTIME params (base/light/step/frac0 sourced from memory registers via
+        frame.setup_col_reg, as the M12 renderer will) into column `x` rows [top, top+count) of the register
+        framebuffer, then present (0x06). The device pixels match the oracle's render_textured_column placed at
+        that column — proving the shared leaf works with runtime (not compile-time-inlined) per-column params."""
+        cfg = Config()
+        wad = WadFile.from_path(ASSET)
+        texels, th, _tw = _texels()
+        colormap = wad.colormap()
+        # step 0.5/row over 16 rows keeps the texel-v in [0,7] for the th=8 test texture (the M11c leaf masks
+        # the heightmask in nibble 1, valid for texheight>=16 or v<th; real wall textures are >=16 tall).
+        texcol, light, count, step, frac0, top, x = 3, 1, 16, 0x0080, 0x0000, 20, 5
+        base = texcol * th                                   # = texcol*texheight (the renderer's base_reg)
+    
+        consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+        tex = compile_texture("tex", wad, TEX, over_align=True, downscale=1)
+        cm = compile_colormap("cm", wad, lights=2, over_align=True)
+        from doomfj.texturecompiler import compile_palette
+        palette = compile_palette("palette", wad)
+    
+        # base/light/step/frac0 live in memory (runtime), moved into the leaf regs by setup_col_reg.
+        render = ["frame.setup_col_reg base_in, light_in, step_in, frac0_in"]
+        for row in range(count):
+            render.append(f"frame.pixel framebuffer + {2 * ((top + row) * cfg.W + x)}*dw")
+        main = "\n".join([
+            "stl.startup_and_init_all", "present.init_screen", *render,
+            "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
+            "pixel_leaf:", "frame.leaf_body",
+            f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+            f"base_in: hex.vec 3, {base}", f"light_in: hex.vec 2, {light}",
+            f"step_in: hex.vec 4, {step}", f"frac0_in: hex.vec 4, {frac0}",
+            "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
+            "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
+            f"heightmask: hex.vec 3, {th - 1}", "pixel_ret: ;0", tex, cm, palette,
+        ])
+        p = tmp_path / "rtcol.fj"
+        p.write_text(main, encoding="utf-8")
+        out = tmp_path / "rtcol.fjm"
+        fj.assemble([consts.resolve(), PRESENT_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
+                    out, memory_width=W, print_time=False)
+        screen = InMemoryScreen()
+        fj.run(out, io_device=screen, print_time=False, print_termination=False)
+    
+        col = ReferenceModel().render_textured_column(texels, th, texcol, colormap, light,
+                                                      count=count, frac0=frac0, step=step)
+        want = bytearray(cfg.FB_SIZE)
+        for r in range(count):
+            want[(top + r) * cfg.W + x] = col[r]
+>       assert bytes(screen.pixel_indices) == bytes(want)
+E       AssertionError: assert b'\x00\x00\x0...0\x00\x00\x00' == b'\x00\x00\x0...0\x00\x00\x00'
+E         
+E         At index 3205 diff: b'd' != b'\x03'
+E         Use -v to get more diff
+
+tests\fj\test_render_macros.py:157: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_render_macros.py::test_frame_setup_col_reg_runtime_column
+1 failed in 1.28s

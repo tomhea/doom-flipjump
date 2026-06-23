@@ -6,3 +6,10 @@
 --- maybe_add_shifted: dst += shifted -> dst += dst ---
 1 failed in 1.00s
 --- (all macros reverted) ---
+--- wall.column_step DDA: frac += step -> frac += frac ---
+1 failed in 2.78s
+--- frame.leaf_body DDA: frac += step -> frac += frac ---
+1 failed in 0.89s
+--- read_table_byte entry stride dw -> 2*dw ---
+1 failed in 2.73s
+--- (all macros reverted; src/fj byte-identical) ---

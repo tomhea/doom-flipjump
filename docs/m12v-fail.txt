@@ -1,0 +1,63 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+____________________ test_wall_offset_byte_exact_vs_oracle ____________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-769/test_wall_offset_byte_exact_vs0')
+
+    def test_wall_offset_byte_exact_vs_oracle(tmp_path):
+        cmap = _square_room()
+        wad = _square_room_wad()
+        rm = ReferenceModel()
+        U = 1 << 16
+        lds = wad.linedefs("MAP01")
+        sds = wad.sidedefs("MAP01")
+        verts = cmap.vertexes
+        body, data, expected = [], [], b""
+        for k, (vxu, vyu, va, si) in enumerate(WOFF_CASES):
+            seg = cmap.segs[si]
+            v1x, v1y = verts[seg.v1]
+            rw_angle1 = rm.point_to_angle(vxu * U, vyu * U, v1x << 16, v1y << 16)
+            rw_normalangle, _ = rm.wall_setup(vxu * U, vyu * U, seg, verts)
+            ld = lds[seg.linedef]
+            sd = sds[ld.front if seg.side == 0 else ld.back]
+            rw_offset, rw_centerangle = rm._wall_offset(vxu * U, vyu * U, va, seg, verts,
+                                                        rw_normalangle, rw_angle1, sd)
+            texoff = (seg.offset + sd.x_off) << 16
+            for _ in range(2):   # call twice (R5 #8)
+                body += [f"proj.wall_offset roff, rca, vx{k}, vy{k}, va{k}, nrm{k}, ra{k}, "
+                         f"a{k}, b{k}, toff{k}",
+                         "hex.print_as_digit 8, roff, 0", "stl.output 10",
+                         "hex.print_as_digit 8, rca, 0", "stl.output 10"]
+            data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
+                     f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
+                     f"nrm{k}: hex.vec 8, {rw_normalangle & 0xFFFFFFFF}",
+                     f"ra{k}: hex.vec 8, {rw_angle1 & 0xFFFFFFFF}",
+                     f"a{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"b{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
+                     f"toff{k}: hex.vec 8, {texoff & 0xFFFFFFFF}"]
+            expected += f"{rw_offset & 0xFFFFFFFF:08x}\n{rw_centerangle & 0xFFFFFFFF:08x}\n".encode() * 2
+        data += ["roff: hex.vec 8", "rca: hex.vec 8",
+                 generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+                 generate_trig_idioms_fj("finesine", Config().TRIG_N, 16)]
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "wall_offset.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "wall_offset: fj output != oracle"
+E       AssertionError: wall_offset: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:485: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         3.681s
+  macro resolve:   2.198s
+  labels resolve:  0.475s
+  create binary:   2.423s
+  loading memory:  0.122s
+
+Finished by looping after 0.040s (42,638 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_wall_offset_byte_exact_vs_oracle
+1 failed in 9.50s

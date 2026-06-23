@@ -502,4 +502,54 @@ ns proj {
       r: hex.vec 8
       end:
     }
+
+    // proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, rw_normalangle, rw_angle1,
+    //   v1x, v1y, texoff (R_StoreWallRange texture-horizontal setup, _wall_offset): writes rw_offset (the
+    //   16.16 wall-space horizontal coord of v1) and rw_centerangle (seeds the per-column finetangent).
+    //   offsetangle = rw_normalangle - rw_angle1; rw_offset = fixed_mul(point_to_dist(view,v1),
+    //   read_sin(BAM-abs(offsetangle) clamped to ANG90)); NEGATE if the UNFOLDED offsetangle < ANG180
+    //   (DOOM's sign rule); then += texoff (= (seg.offset + sd.x_off)<<16). rw_centerangle = ANG90 +
+    //   viewangle - rw_normalangle. All angle compares are unsigned BAM (hex.cmp). Mirrors the oracle
+    //   exactly. @requires hex.init & stl.ptr_init  (inlines point_to_dist + finesine.read_sin)
+    def wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, rw_normalangle, rw_angle1, v1x, v1y, texoff \
+            @ offsetangle, oa, hyp, sidx, sinv, cang90, cang180, \
+              gt180, le180, gt90, le90, doneg, skipneg, end {
+        .point_to_dist hyp, viewx, viewy, v1x, v1y     // hyp = view->v1 distance
+        hex.mov 8, offsetangle, rw_normalangle
+        hex.sub 8, offsetangle, rw_angle1              // offsetangle = rw_normalangle - rw_angle1
+
+        hex.mov 8, oa, offsetangle                     // oa = BAM abs(offsetangle), clamp to ANG90
+        hex.cmp 8, oa, cang180, le180, le180, gt180
+      gt180:
+        hex.neg 8, oa
+      le180:
+        hex.cmp 8, oa, cang90, le90, le90, gt90
+      gt90:
+        hex.mov 8, oa, cang90
+      le90:
+        hex.shr_hex 8, 5, oa                           // read_sin(oa): idx = oa >> 20 (low 3 nibbles)
+        hex.mov 3, sidx, oa
+        finesine.read_sin sinv, sidx
+        hex.fixed_mul 8, 4, rw_offset, hyp, sinv       // rw_offset = hyp * sin(oa)
+
+        hex.cmp 8, offsetangle, cang180, doneg, skipneg, skipneg   // UNFOLDED offsetangle < ANG180 -> negate
+      doneg:
+        hex.neg 8, rw_offset
+      skipneg:
+        hex.add 8, rw_offset, texoff                   // += (seg.offset + sd.x_off) << 16
+
+        hex.mov 8, rw_centerangle, viewangle           // rw_centerangle = ANG90 + viewangle - rw_normalangle
+        hex.add 8, rw_centerangle, cang90
+        hex.sub 8, rw_centerangle, rw_normalangle
+        ;end
+
+      offsetangle: hex.vec 8
+      oa: hex.vec 8
+      hyp: hex.vec 8
+      sidx: hex.vec 3
+      sinv: hex.vec 8
+      cang90: hex.vec 8, 0x40000000
+      cang180: hex.vec 8, 0x80000000
+      end:
+    }
 }

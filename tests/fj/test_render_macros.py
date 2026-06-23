@@ -155,3 +155,55 @@ def test_frame_setup_col_reg_runtime_column(tmp_path):
     for r in range(count):
         want[(top + r) * cfg.W + x] = col[r]
     assert bytes(screen.pixel_indices) == bytes(want)
+
+
+# ── frame.pixel_clipped: RUNTIME [top,bottom] row clip over a full unrolled column (M12bb) ──
+
+def test_frame_pixel_clipped_runtime_span(tmp_path):
+    """Unroll ALL screen rows of one column through frame.pixel_clipped with a RUNTIME [top,bottom] span
+    (in registers); only rows top..bottom render (the leaf advances the DDA only there, frac0 at `top`).
+    The device frame matches render_textured_column placed at [top,bottom], everything else background 0."""
+    cfg = Config()
+    wad = WadFile.from_path(ASSET)
+    texels, th, _tw = _texels()
+    colormap = wad.colormap()
+    texcol, light, step, frac0, x = 3, 1, 0x0080, 0x0000, 5
+    top, bottom = 20, 35                                  # runtime span; count = 16 rows, texel-v in [0,7]
+    count = bottom - top + 1
+    base = texcol * th
+
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    tex = compile_texture("tex", wad, TEX, over_align=True, downscale=1)
+    cm = compile_colormap("cm", wad, lights=2, over_align=True)
+    from doomfj.texturecompiler import compile_palette
+    palette = compile_palette("palette", wad)
+
+    render = ["frame.setup_col_reg base_in, light_in, step_in, frac0_in"]
+    for y in range(cfg.H):                               # unroll EVERY row; the clip picks [top,bottom]
+        render.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + x)}*dw, top_in, bottom_in")
+    main = "\n".join([
+        "stl.startup_and_init_all", "present.init_screen", *render,
+        "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
+        "pixel_leaf:", "frame.leaf_body",
+        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+        f"base_in: hex.vec 3, {base}", f"light_in: hex.vec 2, {light}",
+        f"step_in: hex.vec 4, {step}", f"frac0_in: hex.vec 4, {frac0}",
+        f"top_in: hex.vec 8, {top}", f"bottom_in: hex.vec 8, {bottom}",
+        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
+        "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
+        f"heightmask: hex.vec 3, {th - 1}", "pixel_ret: ;0", tex, cm, palette,
+    ])
+    p = tmp_path / "clipcol.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / "clipcol.fjm"
+    fj.assemble([consts.resolve(), PRESENT_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+    screen = InMemoryScreen()
+    fj.run(out, io_device=screen, print_time=False, print_termination=False)
+
+    col = ReferenceModel().render_textured_column(texels, th, texcol, colormap, light,
+                                                  count=count, frac0=frac0, step=step)
+    want = bytearray(cfg.FB_SIZE)
+    for r in range(count):
+        want[(top + r) * cfg.W + x] = col[r]
+    assert bytes(screen.pixel_indices) == bytes(want)

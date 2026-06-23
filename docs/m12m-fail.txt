@@ -1,0 +1,3 @@
+### FAIL — slope_div den>>8 shift corrupted (>>2 nibbles -> >>1); byte-exact test catches it ###
+FAILED tests/fj/test_projection_kernels.py::test_slope_div_byte_exact_vs_oracle
+1 failed in 5.23s

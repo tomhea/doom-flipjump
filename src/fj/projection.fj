@@ -1,0 +1,45 @@
+// F5 (projection kernels, M12m+) — the runtime projection math the fj wall renderer needs, each a
+// byte-exact mirror of the H5 oracle (src/doomfj/reference_model.py). The shared LUTs (tantoangle,
+// finesine, viewangletox, xtoviewangle, finetangent) are emitted as read_table data tables (M12l).
+//
+// proj.slope_div (R_PointToAngle's SlopeDiv): dst[:3] = the tantoangle index for slope num/den.
+//   num, den are NON-NEGATIVE hex[:8] (16.16 magnitudes; the caller has abs'd them).
+//     if den < 512:           dst = SLOPERANGE (2048 = 0x800)
+//     else: dst = (num<<3) / (den>>8), clamped to SLOPERANGE.
+//   Mirrors reference_model.ReferenceModel._slope_div exactly (unsigned divide, truncating).
+//   @requires hex.init
+
+ns proj {
+    def slope_div dst, num, den @ wnum, sden, q, r, c512, csr, lt, ge, keep, clamp, baddiv0, done {
+        hex.cmp 8, den, c512, lt, ge, ge        // den < 512 ?  lt -> small (clamp to SLOPERANGE)
+      lt:
+        hex.set 3, dst, 0x800
+        ;done
+      ge:
+        hex.zero 12, wnum
+        hex.mov 8, wnum, num
+        rep(3, i) hex.shl_bit 12, wnum          // wnum = num << 3
+        hex.zero 12, sden
+        hex.mov 8, sden, den
+        hex.shr_hex 12, 2, sden                 // sden = den >> 8 (>> 2 nibbles)
+        hex.div 12, 12, q, r, wnum, sden, baddiv0   // q = (num<<3) / (den>>8)   (unsigned)
+        hex.cmp 12, q, csr, keep, keep, clamp   // q > SLOPERANGE ?  gt -> clamp
+      keep:
+        hex.mov 3, dst, q
+        ;done
+      clamp:
+        hex.set 3, dst, 0x800
+        ;done
+      baddiv0:                                  // unreachable (den>=512 => sden>=2); safe fallback
+        hex.set 3, dst, 0x800
+        ;done
+
+      wnum: hex.vec 12
+      sden: hex.vec 12
+      q: hex.vec 12
+      r: hex.vec 12
+      c512: hex.vec 8, 512
+      csr: hex.vec 12, 0x800
+      done:
+    }
+}

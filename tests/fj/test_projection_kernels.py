@@ -420,3 +420,66 @@ def test_scalestep_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "scalestep: fj output != oracle"
+
+
+# ── proj.wall_offset (R_StoreWallRange texture-horizontal setup, _wall_offset): rw_offset + rw_centerangle.
+# rw_offset = ±fixed_mul(hyp, read_sin(BAM-abs+clamp(rw_normalangle - rw_angle1))) + texoff, sign by the
+# UNFOLDED offsetangle < ANG180; rw_centerangle = ANG90 + viewangle - rw_normalangle. Inlines point_to_dist
+# + finesine. Driven on the square room (real seg.offset + sidedef x_off), byte-exact vs rm._wall_offset.
+def _square_room_wad():
+    from doomfj.wad import WadFile
+    return WadFile.from_path(Path("tests/fixtures/square_room.wad"))
+
+
+# (viewx_u, viewy_u, viewangle, seg_index)
+WOFF_CASES = [
+    (128, 128, 0, 2),
+    (128, 128, 0x40000000, 1),
+    (200, 128, 0, 2),
+    (64, 180, 0x20000000, 3),
+    (128, 128, 0, 0),
+]
+
+
+def test_wall_offset_byte_exact_vs_oracle(tmp_path):
+    cmap = _square_room()
+    wad = _square_room_wad()
+    rm = ReferenceModel()
+    U = 1 << 16
+    lds = wad.linedefs("MAP01")
+    sds = wad.sidedefs("MAP01")
+    verts = cmap.vertexes
+    body, data, expected = [], [], b""
+    for k, (vxu, vyu, va, si) in enumerate(WOFF_CASES):
+        seg = cmap.segs[si]
+        v1x, v1y = verts[seg.v1]
+        rw_angle1 = rm.point_to_angle(vxu * U, vyu * U, v1x << 16, v1y << 16)
+        rw_normalangle, _ = rm.wall_setup(vxu * U, vyu * U, seg, verts)
+        ld = lds[seg.linedef]
+        sd = sds[ld.front if seg.side == 0 else ld.back]
+        rw_offset, rw_centerangle = rm._wall_offset(vxu * U, vyu * U, va, seg, verts,
+                                                    rw_normalangle, rw_angle1, sd)
+        texoff = (seg.offset + sd.x_off) << 16
+        for _ in range(2):   # call twice (R5 #8)
+            body += [f"proj.wall_offset roff, rca, vx{k}, vy{k}, va{k}, nrm{k}, ra{k}, "
+                     f"a{k}, b{k}, toff{k}",
+                     "hex.print_as_digit 8, roff, 0", "stl.output 10",
+                     "hex.print_as_digit 8, rca, 0", "stl.output 10"]
+        data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
+                 f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
+                 f"nrm{k}: hex.vec 8, {rw_normalangle & 0xFFFFFFFF}",
+                 f"ra{k}: hex.vec 8, {rw_angle1 & 0xFFFFFFFF}",
+                 f"a{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"b{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
+                 f"toff{k}: hex.vec 8, {texoff & 0xFFFFFFFF}"]
+        expected += f"{rw_offset & 0xFFFFFFFF:08x}\n{rw_centerangle & 0xFFFFFFFF:08x}\n".encode() * 2
+    data += ["roff: hex.vec 8", "rca: hex.vec 8",
+             generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+             generate_trig_idioms_fj("finesine", Config().TRIG_N, 16)]
+
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    p = tmp_path / "wall_offset.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "wall_offset: fj output != oracle"

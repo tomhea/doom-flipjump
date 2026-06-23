@@ -1,0 +1,44 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_________________ test_wall_screen_span_byte_exact_vs_oracle __________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-760/test_wall_screen_span_byte_exa0')
+
+    def test_wall_screen_span_byte_exact_vs_oracle(tmp_path):
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        centeryfix = cfg.CENTERY << 16        # resolution-dependent -> compile-time arg from Config (R6)
+        body, data, expected = [], [], b""
+        for k, (ch, fh, vz, sc) in enumerate(WSS_CASES):
+            for _ in range(2):   # call twice (R5 #8)
+                body += [f"proj.wall_screen_span top, bot, cf{k}, ff{k}, vz{k}, sc{k}, {centeryfix}",
+                         "hex.print_as_digit 8, top, 0", "stl.output 10",
+                         "hex.print_as_digit 8, bot, 0", "stl.output 10"]
+            data += [f"cf{k}: hex.vec 8, {(ch << 16) & 0xFFFFFFFF}", f"ff{k}: hex.vec 8, {(fh << 16) & 0xFFFFFFFF}",
+                     f"vz{k}: hex.vec 8, {vz & 0xFFFFFFFF}", f"sc{k}: hex.vec 8, {sc & 0xFFFFFFFF}"]
+            top, bot = rm.wall_screen_span(ch, fh, vz, sc)
+            expected += f"{top & 0xFFFFFFFF:08x}\n{bot & 0xFFFFFFFF:08x}\n".encode() * 2
+        data += ["top: hex.vec 8", "bot: hex.vec 8"]
+    
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+        p = tmp_path / "wall_screen_span.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "wall_screen_span: fj output != oracle"
+E       AssertionError: wall_screen_span: fj output != oracle
+E       assert False
+
+tests\fj\test_projection_kernels.py:381: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         0.162s
+  macro resolve:   0.219s
+  labels resolve:  0.113s
+  create binary:   0.408s
+  loading memory:  0.034s
+
+Finished by looping after 0.009s (29,038 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_projection_kernels.py::test_wall_screen_span_byte_exact_vs_oracle
+1 failed in 1.27s

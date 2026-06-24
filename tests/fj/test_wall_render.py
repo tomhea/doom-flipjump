@@ -1231,3 +1231,201 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
         fj.run(out, io_device=screen, print_time=False, print_termination=False)
         assert bytes(screen.pixel_indices) == bytes(want), f"M12mm2 @ ({vx},{vy},{va}) != oracle"
+
+
+def _oracle_multilight_frame(rm, cmap, lds, sds, seg_tex, seg_light, texinfo, texdata, colormap,
+                             ceil_h, floor_h, viewz, worldtop, ceil_color, floor_color, vx, vy, va):
+    """render_wall_frame for the square room with PER-SEG TEXTURES *and* PER-SEG LIGHT (seg_light[si] = the
+    colormap row for seg si). Each seg's textured column is colormapped at its OWN light; a None (WALL_BG)
+    seg flat-fills colormap[seg_light][WALL_BG]. Background stays the compile-time two-band fill (runtime bg
+    is M12nn-b). Shared drawn[] (convex => no clipping). texdata[name]=(texels,th,tw)."""
+    cfg = rm.cfg
+    U = 1 << 16
+    verts = cmap.vertexes
+    horizon = cfg.VIEW_H // 2
+    want = bytearray(cfg.FB_SIZE)
+    for y in range(cfg.VIEW_H):
+        c = ceil_color if y < horizon else floor_color
+        for x in range(cfg.VIEW_W):
+            want[y * cfg.VIEW_W + x] = c
+    drawn = bytearray(cfg.VIEW_W)
+    one_sided = [si for si in range(len(cmap.segs)) if lds[cmap.segs[si].linedef].back == -1]
+    for si in one_sided:
+        seg = cmap.segs[si]
+        rng = rm.wall_x_range(vx * U, vy * U, va, seg, verts)
+        if rng is None:
+            continue
+        x1, x2, rwa = rng
+        nrm, rwd = rm.wall_setup(vx * U, vy * U, seg, verts)
+        s1 = rm.scale_from_global_angle((va + rm.xtoviewangle[x1]) & ANGLE_MASK, va, nrm, rwd)
+        s2 = rm.scale_from_global_angle((va + rm.xtoviewangle[x2]) & ANGLE_MASK, va, nrm, rwd)
+        diff, span = s2 - s1, x2 - x1
+        sstep = (-(abs(diff) // span) if diff < 0 else diff // span) if x2 > x1 else 0
+        ld = lds[seg.linedef]
+        sd = sds[ld.front if seg.side == 0 else ld.back]
+        rw_off, rca = rm._wall_offset(vx * U, vy * U, va, seg, verts, nrm, rwa, sd)
+        name = seg_tex[si]
+        lt = seg_light[si]                                    # the seg's own colormap row
+        tw = texinfo[name if name else "__WALLBG__"][2]
+        flat = colormap[lt][WALL_BG]
+        for i in range(x2 - x1):
+            x = x1 + i
+            if not drawn[x]:
+                scale = (s1 + i * sstep) & ANGLE_MASK
+                top, bottom, texcol, frac0, step = _col_params(rm, scale, rca, rw_off, rwd, x, tw,
+                                                               ceil_h, floor_h, viewz, worldtop)
+                if top <= bottom:
+                    if name is None:
+                        for y in range(top, bottom + 1):
+                            want[y * cfg.W + x] = flat
+                    else:
+                        texels, th, _ = texdata[name]
+                        col = rm.render_textured_column(texels, th, texcol, colormap, lt,
+                                                        count=bottom - top + 1, frac0=frac0, step=step)
+                        for r in range(bottom - top + 1):
+                            want[(top + r) * cfg.W + x] = col[r]
+                drawn[x] = 1
+    return want
+
+
+def test_wall_render_multilight_byte_exact(tmp_path):
+    """M12nn-a — PER-SEG MULTI-LIGHT: each wall is colormapped at its OWN sector light (the cmidx high byte /
+    colormap row varies per column, not one baked value). Built on the M12mm2 multi-texture path: pass 1 now
+    stores col_light[x] = the seg's baked light row (seg_pass1_leaf_body_mtl), and pass 2 reads col_light[x]
+    into cmidx's high byte (load_col_mt's light_src) instead of a single light_baked. The square room is one
+    sector, so per-seg lights are OVERRIDDEN in the test (seg_light = [1,9,17,25]) exactly as M12mm2 overrode
+    per-seg textures; the WALL_BG fallback is colormapped at the seg's light too. ONE assemble, several stdin
+    viewpoints showing different wall pairs (so different light pairs are exercised), byte-exact vs the oracle's
+    per-seg-light render_wall_frame path. This isolates the col_light store/load contract that full E1M1 needs."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    cmap = bake_bsp(WadFile.from_path(ROOM), "MAP01")
+    verts = cmap.vertexes
+    wad = WadFile.from_path(ASSET)
+    colormap = wad.colormap()
+    lds = WadFile.from_path(ROOM).linedefs("MAP01")
+    sds = WadFile.from_path(ROOM).sidedefs("MAP01")
+
+    seg_tex = ["STEP4", "A-YELLOW", "STEP4", None]            # per-seg texture (None = '-' -> WALL_BG)
+    seg_light = [1, 9, 17, 25]                                # per-seg colormap row (OVERRIDDEN; one-sector room)
+    combined, texinfo = _build_combined_textures(wad, ["STEP4", "A-YELLOW", None])
+    texdata = {nm: (texture_texels(c := composite_texture(wad, {t.name: t for t in wad.texture_defs()}[nm])),
+                    len(c), len(c[0])) for nm in ("STEP4", "A-YELLOW")}
+
+    ceil_h, floor_h = 128, 0
+    viewz = (floor_h + 41) << 16
+    worldtop = ceil_h - (viewz >> 16)
+    ceil_color, floor_color = 5, 109
+    horizon = cfg.VIEW_H // 2
+    proj = cfg.PROJECTION << 16
+    A45, A135, A225, A315 = 0x20000000, 0x60000000, 0xA0000000, 0xE0000000
+
+    VIEWPOINTS = [
+        (128, 128, A45),     # walls {1,2} -> lights {9,17}
+        (128, 128, A135),    # walls {0,1} -> lights {1,9}
+        (128, 128, A225),    # walls {3,0} -> lights {25,1}: WALL_BG flat fill at light 25
+        (128, 128, A315),    # walls {2,3} -> lights {17,25}
+        (200, 128, A45),     # walls {1,2}, uneven split: lights {9,17} at different scales
+    ]
+
+    tex = _texel_table("tex", combined, "per_entry", over_align=True)
+    cm = compile_colormap("cm", wad, lights=32, over_align=True)   # 32 light rows (per-seg lights span them)
+    palette = compile_palette("palette", wad)
+    tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
+    xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
+
+    def subsector_action(s):
+        ss = cmap.subsectors[s]
+        out = []
+        for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
+            seg = cmap.segs[si]
+            ld = lds[seg.linedef]
+            if ld.back != -1:
+                continue
+            v1x, v1y = verts[seg.v1]
+            v2x, v2y = verts[seg.v2]
+            sd = sds[ld.front if seg.side == 0 else ld.back]
+            texoff = (seg.offset + sd.x_off) << 16
+            name = seg_tex[si]
+            texbase, th_s, tw_s = texinfo[name if name else "__WALLBG__"]
+            out += [f"    hex.set 8, seg_v1x, {(v1x << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v1y, {(v1y << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
+                    f"    hex.set 4, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
+                    f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
+                    f"    hex.set 2, seg_light, {seg_light[si]}",
+                    "    stl.fcall seg_pass1_leaf, seg_ret"]
+        return out
+
+    bsp = _bsp_as_code("room", cmap, done_label="bsp_done", subsector_action=subsector_action)
+
+    pass1 = [
+        "hex.input_dec_int 8, vx_raw, bad", "hex.input_dec_int 8, vy_raw, bad",
+        "hex.input_dec_uint 8, viewangle, bad",
+        "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
+        "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
+        f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
+        ";room_bspcode_walk", "bsp_done:",
+    ]
+    pass2 = []
+    for x in range(cfg.VIEW_W):
+        pass2.append(f"frame.load_col_mt col_top + {4 * x}*dw, col_bottom + {4 * x}*dw, col_base + {4 * x}*dw, "
+                     f"col_light + {4 * x}*dw, col_step + {4 * x}*dw, col_frac0 + {4 * x}*dw, "
+                     f"col_heightmask + {4 * x}*dw")
+        for y in range(cfg.H):
+            pass2.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + x)}*dw, top, bottom")
+
+    main = "\n".join([
+        "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
+        "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
+        "bad: stl.loop",
+        "pixel_leaf:", "frame.leaf_body",
+        "seg_pass1_leaf:",
+        f"frame.seg_pass1_leaf_body_mtl {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
+        bsp,
+        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+        "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+        "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_texbase: hex.vec 4", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
+        "seg_light: hex.vec 2",
+        f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
+        f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}", f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}",
+        "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
+        "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
+        "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
+        "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 4",
+        "seg_ret: ;0",
+        "top: hex.vec 8", "bottom: hex.vec 8",
+        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
+        "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
+        "heightmask: hex.vec 3", "pixel_ret: ;0",
+        f"rows: rep({cfg.H}, i) hex.vec 2, i",
+        f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        f"col_light: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+    ])
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    p = tmp_path / "multilight.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / "multilight.fjm"
+    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+
+    for vx, vy, va in VIEWPOINTS:
+        want = _oracle_multilight_frame(rm, cmap, lds, sds, seg_tex, seg_light, texinfo, texdata, colormap,
+                                        ceil_h, floor_h, viewz, worldtop, ceil_color, floor_color, vx, vy, va)
+        screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+        fj.run(out, io_device=screen, print_time=False, print_termination=False)
+        assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-a @ ({vx},{vy},{va}) != oracle"

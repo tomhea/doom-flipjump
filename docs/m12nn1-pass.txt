@@ -1,0 +1,12 @@
+M12nn-a (per-seg MULTI-LIGHT) — TDD PASS log.
+
+After reverting the FAIL stub (subsector_action bakes the real per-seg colormap row
+seg_light[si] = [1,9,17,25] instead of the constant 5), pass 1 stores col_light[x] =
+the seg's own light and pass 2 reads it into cmidx's high byte (load_col_mt's
+light_src). All 5 stdin viewpoints (showing different wall pairs => different light
+pairs, incl. a WALL_BG wall flat-filled at light 25) are byte-exact vs the per-seg-
+light oracle (_oracle_multilight_frame). ONE assemble, many viewpoints.
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_multilight_byte_exact -x -q
+.                                                                        [100%]
+1 passed in 223.75s (0:03:43)

@@ -1,0 +1,29 @@
+M12nn-a (per-seg MULTI-LIGHT) — TDD FAIL log.
+
+FAIL STUB: the BSP subsector_action bakes a CONSTANT seg_light (= 5) for every seg
+instead of the per-seg colormap row seg_light[si] = [1,9,17,25]. So pass 1 stores
+col_light[x] = 5 for all columns and pass 2 colormaps every wall at light row 5 —
+which mismatches the per-seg-light oracle (_oracle_multilight_frame).
+
+The binary ASSEMBLES and RUNS cleanly (the new frame.seg_pass1_leaf_body_mtl macro's
+@/< clauses are valid); the failure is a behavior/pixel mismatch, not a parse error —
+exactly the R1 discipline (a behavior stub, not a werror).
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_multilight_byte_exact -x -q
+
+        for vx, vy, va in VIEWPOINTS:
+            want = _oracle_multilight_frame(rm, cmap, lds, sds, seg_tex, seg_light, texinfo, texdata, colormap,
+                                            ceil_h, floor_h, viewz, worldtop, ceil_color, floor_color, vx, vy, va)
+            screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+            fj.run(out, io_device=screen, print_time=False, print_termination=False)
+>           assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-a @ ({vx},{vy},{va}) != oracle"
+E           AssertionError: M12nn-a @ (128,128,536870912) != oracle
+E           assert b'jffffff\xa4...mmmmmmmmmmmmm' == b'l\x03\x03\x...mmmmmmmmmmmmm'
+E
+E             At index 0 diff: b'j' != b'l'
+E             Use -v to get more diff
+
+tests\fj\test_wall_render.py:1431: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_wall_render.py::test_wall_render_multilight_byte_exact
+1 failed in 168.73s (0:02:48)

@@ -329,6 +329,54 @@ ns frame {
       sidx: hex.vec w/4
     }
 
+    // PASS-1 per-SEG shared leaf, MULTI-TEXTURE + MULTI-LIGHT (M12nn) — seg_pass1_leaf_body_mt plus the per-seg
+    // sector LIGHT goes per-column. In E1M1 a frame's visible segs span sectors of different light, so the
+    // colormap row (the cmidx high byte the pixel leaf keeps) must vary per column, not be one baked value.
+    // The caller bakes seg_light (= the seg's sector light row, sec.light>>LIGHT_SHIFT clamped); this leaf
+    // stores it into col_light[x] alongside the other 6 fields, mirroring how _mt added col_heightmask. Pass 2
+    // then reads col_light[x] into cmidx's high byte (load_col_mt's light_src). The WALL_BG flat-fill samples
+    // the same tex.sample with that per-column light, so the fallback is colormapped at the seg's own light too
+    // (oracle: colormap[seg_light][WALL_BG]). The per-pixel leaf is UNCHANGED. @requires hex.init & stl.ptr_init.
+    def seg_pass1_leaf_body_mtl centery, ds, viewh1, projection \
+            @ loop, body, skipcol, ret, sidx \
+            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_texoff, \
+              seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, worldtop, \
+              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
+              top, bottom, texcol, cfrac0, stepv, base, \
+              col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, drawn, seg_ret {
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        hex.if0 1, visible, ret
+        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_v1x, seg_v1y
+        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
+        hex.mov 8, x, x1
+      loop:
+        hex.scmp 8, x, x2, body, ret, ret
+      body:
+        .skip_if_drawn x, drawn, skipcol
+        proj.column_render_params top, bottom, texcol, cfrac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, seg_tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        hex.mul 4, base, texcol, seg_texheight
+        hex.add 4, base, seg_texbase
+        hex.mov w/4, sidx, x
+        hex.shl_bit w/4, sidx
+        hex.shl_bit w/4, sidx                       // sidx = x*4 (the per-column array digit offset)
+        .store_col_field col_top, sidx, top
+        .store_col_field col_bottom, sidx, bottom
+        .store_col_field col_base, sidx, base
+        .store_col_field col_step, sidx, stepv
+        .store_col_field col_frac0, sidx, cfrac0
+        .store_col_field col_heightmask, sidx, seg_hm
+        .store_col_field col_light, sidx, seg_light     // per-column colormap row (the seg's sector light)
+        .mark_drawn x, drawn
+      skipcol:
+        hex.inc 8, x
+        hex.add 8, scale, scalestep
+        ;loop
+      ret:
+        stl.fret seg_ret
+      sidx: hex.vec w/4
+    }
+
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
     // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
     def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {

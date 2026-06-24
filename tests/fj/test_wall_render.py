@@ -2092,6 +2092,12 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
     for k, (vx, vy, va) in enumerate(VIEWPOINTS):
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)
         screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+        # R4 note: the production flat-span budget (storage_mode==flat under FLAT_MAX_WORDS=2**23) is enforced
+        # on the SHIPPED binary by build_doom (build.py:35), which uses the hot-low / over_align=False production
+        # layout (DESIGN §1.2 ledger: 5.54M words < 2**23). This correctness/golden test deliberately uses the
+        # leaf's over_align=True table layout + the full 16K-pixel pass-2 unroll, whose span exceeds 2**23 (a
+        # non-production footprint), so it is run on the default (paged-capable) path -- byte-exactness is
+        # independent of the storage mode. The flat-budget guard belongs to the build_doom wiring rung.
         fj.run(out, io_device=screen, print_time=False, print_termination=False)
         got = bytes(screen.pixel_indices)
         assert got == bytes(want), f"M12nn @ ({vx},{vy},{va}) != oracle"

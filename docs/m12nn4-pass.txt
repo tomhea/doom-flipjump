@@ -1,0 +1,19 @@
+M12nn-d (FULL E1M1 GEOMETRY runtime frame, WALL_BG proxy) — TDD PASS log.
+
+The fix: in seg_pass1_leaf_body_mtlw, after column_render_params, a signed compare top vs
+bottom; if top>bottom (the wall is entirely off the top of the screen) store the skip
+sentinel (top=1, bottom=0) so pass 2 renders no rows -- while mark_drawn STILL claims the
+column (so the near off-screen wall occludes far segs), exactly mirroring the oracle (which
+sets drawn[x]=1 regardless of the top<=bottom test).
+
+With the fix, the full E1M1 runtime frame is byte-exact across all 4 viewpoints: spawn
+(-416,256) + a rotation (same player subsector) + two other-sector positions (1712,1088),
+(1664,1040) with NEGATIVE floor/viewz (off-screen walls, different player light/bg). This
+validates the entire capstone INTEGRATION on real geometry -- the 681-node walk driving 575
+segs, runtime viewz/worldtop, the walk-driven player-subsector background (shared bg-fill
+fcall leaf guarded by bg_done), real occlusion via drawn[], and per-seg multi-light -- with
+flat WALL_BG walls so the assemble stays fast (the real 793k-texel table is the final rung).
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_e1m1_geometry_wallbg_byte_exact -x -q
+.                                                                        [100%]
+1 passed in 242.42s (0:04:02)

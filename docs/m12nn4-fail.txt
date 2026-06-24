@@ -1,0 +1,26 @@
+M12nn-d (FULL E1M1 GEOMETRY runtime frame, WALL_BG proxy) — TDD FAIL log.
+
+The new test drives the REAL 681-node E1M1 BSP walk over all 575 one-sided segs with the
+runtime player-subsector logic (viewz + walk-driven background) and per-seg worldtop. The
+FAIL is a genuine RENDERER BUG it caught: when a wall projects ABOVE the screen (both rows
+clip so top>bottom — common in E1M1, e.g. high ledges seen from a sunken sector with
+negative floor/viewz), the oracle's "if top<=bottom" SKIPS it, but the two-pass fj stored
+the clipped bottom in only 2 nibbles, so a negative bottom (e.g. -23 = 0x..E9) became 233
+and pass 2 painted the FULL column. The spawn viewpoint (positive viewz, no off-screen
+walls) passes; the other-sector viewpoints (floor_h = -144 => negative viewz) fail.
+
+(Two spawn-position viewpoints already passed byte-exact at this point — the walk / runtime
+viewz / occlusion / multi-light integration is correct; only the off-screen-wall clip was
+missing.)
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_e1m1_geometry_wallbg_byte_exact -x -q
+
+>           assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-d @ ({vx},{vy},{va}) != oracle"
+E           AssertionError: M12nn-d @ (1712,1088,0) != oracle
+E           assert b'mmmmmmmmmmm...8\x08\x08\x08' == b'mmmmmmmmmmm...8\x08\x08\x08'
+E             At index 20 diff: b'\x06' != b'\x00'
+
+Diagnostic (geometry of the failure) confirmed it was off-screen walls painting full columns:
+  VP (1712,1088,0): 2600 diffs; cols 20..45 (n=26); rows 0..99; col20 oracle=[0,0,...] got=[6,6,...]
+  VP (1664,1040,0): 1200 diffs; cols 18..42 (n=12); rows 0..99; col18 oracle=[0,0,...] got=[6,6,...]
+(segs with ceil=536/floor=450 viewed from a -144 floor project to top=-34..bottom=-23 => oracle skips).

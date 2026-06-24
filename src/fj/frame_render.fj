@@ -404,4 +404,17 @@ ns frame {
         rep(horizon*view_w, k) hex.set 2, base + 2*k*dw, ceil_color
         rep((view_h - horizon)*view_w, k) hex.set 2, base + 2*(horizon*view_w + k)*dw, floor_color
     }
+
+    // frame.render_background_reg base, ceil_reg, floor_reg, view_w, view_h, horizon — the RUNTIME-color two-band
+    // background (M12nn). Same two-band fill as render_background, but the ceiling/floor bytes are RUNTIME
+    // REGISTERS (already colormapped), not compile-time literals. In E1M1 the player moves between sectors of
+    // different light, so the bg colors are computed per frame (player subsector -> sector light -> colormap row
+    // -> cm.apply at CEIL_BG / FLOOR_BG) and passed in as registers. Each pixel is a compile-time-ADDRESS
+    // hex.mov 2 of the runtime byte (vs render_background's hex.set of a literal) — the destination stays a
+    // wflip at a fixed address, so pass-2 walls still OVERWRITE it. view_w/view_h/horizon are compile-time
+    // Config args (R6; horizon = VIEW_H//2). ceil_reg/floor_reg are 2-nibble. @requires hex.init.
+    def render_background_reg base, ceil_reg, floor_reg, view_w, view_h, horizon {
+        rep(horizon*view_w, k) hex.mov 2, base + 2*k*dw, ceil_reg
+        rep((view_h - horizon)*view_w, k) hex.mov 2, base + 2*(horizon*view_w + k)*dw, floor_reg
+    }
 }

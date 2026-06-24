@@ -153,27 +153,33 @@ def compile_geometry_streams(wad, mapname: str) -> str:
     return "\n".join(out)
 
 
-def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done") -> str:
+def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
+                 subsector_action=None) -> str:
     """BSP-as-code (opt #7): emit the front-to-back BSP walk as fj CODE. Each node becomes a code block
     whose partition line is baked as compile-time constants, so the side test is `proj.point_on_side`
     (no per-node stream read). The block visits the NEAR child subtree first (the side the viewer is on),
     then the FAR, so subsectors come out nearest-first — byte-exact vs reference_model.bsp_render_order
     (R_RenderBSPNode). Recursion uses a per-node `stl.fcall`/`stl.fret` return register: the baked tree is
     finite and each node is entered exactly once (by its single parent), so one ret reg per node suffices —
-    no runtime stack. A LEAF visit emits its subsector index (4 hex digits + newline) — the order-
-    verification leaf action (M12ff); the wall-render milestone replaces it with the per-seg raster. The
-    walk reads the viewer's 16.0 map coords from globals `vx`,`vy` and jumps to `done_label` when finished.
-    Flat labels prefixed `<pfx>_bspcode_` (self-contained but for vx/vy/done_label). px,py,dx,dy are passed
-    to point_on_side as their 10-nibble two's-complement patterns. @requires hex.init (+ proj in scope)."""
+    no runtime stack. A LEAF visit runs `subsector_action(s)` — a caller-supplied callback returning the fj
+    lines emitted when subsector `s` is visited (front-to-back). The DEFAULT action (None) emits the
+    subsector index (4 hex digits + newline) — the M12ff order-verification action; the wall renderer (M12ll+)
+    passes an action that fills the per-column param arrays for that subsector's one-sided segs (the
+    walk-driven pass 1). The walk reads the viewer's 16.0 map coords from globals `vx`,`vy` and jumps to
+    `done_label` when finished. Flat labels prefixed `<pfx>_bspcode_` (self-contained but for vx/vy/done_label
+    + whatever the action references). px,py,dx,dy are passed to point_on_side as their 10-nibble two's-
+    complement patterns. @requires hex.init (+ proj in scope)."""
     L = f"{pfx}_bspcode"
     lines = [f'// BSP-as-code for "{pfx}" (opt #7): {len(bsp.nodes)} node blocks, '
-             f"{len(bsp.subsectors)} subsector leaves; walk reads vx,vy -> emits front-to-back order"]
+             f"{len(bsp.subsectors)} subsector leaves; walk reads vx,vy -> front-to-back subsector visits"]
 
     def visit(child: int) -> list:
-        if child & NF_SUBSECTOR:                          # leaf: emit the subsector index
+        if child & NF_SUBSECTOR:                          # leaf: run the subsector action (front-to-back)
             s = child & (NF_SUBSECTOR - 1)
-            return [f"    hex.set 4, {L}_ss, {s}", f"    hex.print_as_digit 4, {L}_ss, 0",
-                    f"    stl.output 10    // subsector {s}"]
+            if subsector_action is None:                  # default: emit the subsector index (M12ff order)
+                return [f"    hex.set 4, {L}_ss, {s}", f"    hex.print_as_digit 4, {L}_ss, 0",
+                        f"    stl.output 10    // subsector {s}"]
+            return list(subsector_action(s))              # M12ll+: the caller's per-subsector fj lines
         return [f"    stl.fcall {L}_n{child}, {L}_r{child}"]   # interior node: recurse
 
     # entry: visit the root, then halt via done_label

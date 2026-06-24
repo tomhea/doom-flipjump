@@ -182,6 +182,86 @@ ns frame {
       end:
     }
 
+    // PASS-1 solid-seg clip (M12ll) — the runtime per-column `drawn[]` flag (render_wall_frame's front-to-
+    // back occlusion). `drawn` is a VIEW_W array of 4-nibble flags (uniform stride, idx = x*4); a column is
+    // CLAIMED by the FIRST (nearest) seg that reaches it. skip_if_drawn: if drawn[x] != 0 (already claimed by
+    // a nearer seg) jump to `skip` (the caller skips the store but STILL advances scale, oracle line 563);
+    // else fall through to the store. mark_drawn: set drawn[x] = 1 (claim the column). For a CONVEX scene
+    // (square room) the segs cover disjoint x-ranges so drawn[] never blocks — but the mechanism RUNS (M12ll);
+    // it actually clips in M12mm (occlusion). @requires hex.init & stl.ptr_init.
+    def skip_if_drawn x, drawn, skip @ idx, aptr, cell, dval, cont, end {
+        hex.mov w/4, idx, x
+        hex.shl_bit w/4, idx
+        hex.shl_bit w/4, idx                       // idx = x*4 (drawn shares the col arrays' 4-nibble stride)
+        hex.set w/4, aptr, drawn
+        hex.ptr_index cell, aptr, idx
+        hex.read_hex 2, dval, cell                 // dval = drawn[x] (low 2 nibbles)
+        hex.if0 2, dval, cont                      // drawn[x] == 0 -> not claimed, continue to the store
+        ;skip                                      // already claimed -> skip the store (scale still advances)
+      cont:
+        ;end
+      idx: hex.vec w/4
+      aptr: hex.vec w/4
+      cell: hex.vec w/4
+      dval: hex.vec 2
+      end:
+    }
+
+    def mark_drawn x, drawn @ idx, aptr, cell, one, end {
+        hex.mov w/4, idx, x
+        hex.shl_bit w/4, idx
+        hex.shl_bit w/4, idx
+        hex.set w/4, aptr, drawn
+        hex.ptr_index cell, aptr, idx
+        hex.set 2, one, 1
+        hex.write_hex 2, cell, one                 // drawn[x] = 1 (claim the column)
+        ;end
+      idx: hex.vec w/4
+      aptr: hex.vec w/4
+      cell: hex.vec w/4
+      one: hex.vec 2
+      end:
+    }
+
+    // PASS-1 per-SEG shared leaf (M12ll) — the walk-driven multi-seg fill, emitted ONCE at a global label
+    // and fcall'd per one-sided seg (mantra #9: the whole projection front-end + the per-column loop are NOT
+    // unrolled per seg). The caller (the BSP walk's subsector action) sets the seg's BAKED consts into the
+    // registers (seg_v1x/seg_v1y/seg_v2x/seg_v2y/seg_segangle/seg_texoff) then fcalls this; it RELOADS the
+    // projection for that seg from the RUNTIME viewpoint (viewx/viewy/viewangle): wall_x_range (cull ->
+    // fret), wall_setup, wall_scale_setup, wall_offset, then the runtime per-column loop — drawn[] clip ->
+    // column_render_params -> base=texcol*texheight -> store_col -> mark_drawn; scale += step over EVERY
+    // column. tw/ceilfix/floorfix/viewz/worldtop are per-seg registers (single-sector square room bakes them
+    // once; M12mm makes texture/light per-seg). texheight/centery/ds/viewh1/projection are compile-time
+    // Config args (R6). Returns via stl.fret seg_ret. @requires hex.init & stl.ptr_init.
+    def seg_pass1_leaf_body texheight, centery, ds, viewh1, projection \
+            @ loop, body, skipcol, ret \
+            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_texoff, \
+              tw, ceilfix, floorfix, viewz, worldtop, \
+              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
+              top, bottom, texcol, cfrac0, stepv, base, \
+              col_top, col_bottom, col_base, col_step, col_frac0, drawn, seg_ret {
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        hex.if0 1, visible, ret                    // culled seg -> nothing to fill
+        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_v1x, seg_v1y
+        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
+        hex.mov 8, x, x1
+      loop:
+        hex.scmp 8, x, x2, body, ret, ret          // x < x2 ? body, else done (fret)
+      body:
+        .skip_if_drawn x, drawn, skipcol           // claimed by a nearer seg -> skip the store
+        proj.column_render_params top, bottom, texcol, cfrac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        hex.mul_const 4, base, texcol, texheight
+        .store_col x, col_top, col_bottom, col_base, col_step, col_frac0, top, bottom, base, stepv, cfrac0
+        .mark_drawn x, drawn
+      skipcol:
+        hex.inc 8, x
+        hex.add 8, scale, scalestep                // scale advances over EVERY column (incl. claimed)
+        ;loop
+      ret:
+        stl.fret seg_ret
+    }
+
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
     // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
     def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {

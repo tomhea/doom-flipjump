@@ -161,6 +161,22 @@ ns frame {
         hex.mov 3, heightmask, hm_src                // per-column texheight-1 (the leaf masks v by this)
     }
 
+    // MULTI-TEXTURE pass-2 per-column setup, WIDE-INDEX (M12nn) — load_col_mt for a full E1M1-scale COMBINED
+    // table: base_reg is 5 nibbles (col_base[x] = an absolute texel index up to ~793k), read from an 8-nibble
+    // col array element. All other fields are read from their (now 8-nibble) elements at their natural widths
+    // (the high nibbles are 0). Pairs with leaf_body_w (5-nibble idx). @requires hex.init & stl.ptr_init.
+    def load_col_mtw top_src, bottom_src, base_src, light_src, step_src, frac0_src, hm_src \
+            < top, bottom, base_reg, cmidx, step, frac, heightmask {
+        hex.mov 2, top, top_src
+        hex.mov 2, bottom, bottom_src
+        hex.mov 5, base_reg, base_src                // 5-nibble absolute texel index into the combined table
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx + 2*dw, light_src
+        hex.mov 4, step, step_src
+        hex.mov 4, frac, frac0_src
+        hex.mov 3, heightmask, hm_src
+    }
+
     // PASS-1 per-column runtime STORE (M12kk) — the write-side analog of load_col. The seg-major pass 1
     // computes a column's render params (proj.column_render_params) and writes them to the per-column
     // param ARRAYS at the RUNTIME column index x; pass 2 then reads col_*[x] at compile-time addresses
@@ -196,6 +212,20 @@ ns frame {
         hex.ptr_index cell, aptr, idx
         hex.write_hex 4, cell, src
         ;end                                       // skip the scratch data (lesson #2)
+      aptr: hex.vec w/4
+      cell: hex.vec w/4
+      end:
+    }
+
+    // store_col_field, 5-nibble variant (M12nn) — for col_base only, which in a full E1M1-scale COMBINED
+    // texture table holds an ABSOLUTE texel index up to ~10^6 (793k texels) = 5 nibbles, too wide for a
+    // 4-nibble element. The WIDE pass-1 leaf gives every col array an 8-nibble stride (idx = x*8) so this
+    // 5-nibble write fits (high 3 nibbles of the element stay 0 from init). @requires hex.init & stl.ptr_init.
+    def store_col_field5 array, idx, src @ aptr, cell, end {
+        hex.set w/4, aptr, array
+        hex.ptr_index cell, aptr, idx
+        hex.write_hex 5, cell, src
+        ;end
       aptr: hex.vec w/4
       cell: hex.vec w/4
       end:
@@ -377,6 +407,55 @@ ns frame {
       sidx: hex.vec w/4
     }
 
+    // PASS-1 per-SEG shared leaf, MULTI-TEXTURE + MULTI-LIGHT + WIDE-INDEX (M12nn) — seg_pass1_leaf_body_mtl
+    // for a full E1M1-scale COMBINED texture table. The absolute texel index base = seg_texbase +
+    // texcol*texheight reaches ~793k (5 nibbles), too wide for a 4-nibble col array element, so EVERY col
+    // array gets an 8-nibble stride (idx = x*8) and col_base is written with the 5-nibble store_col_field5.
+    // base is computed at 5 nibbles (zero -> mul 4 (texcol*texheight, <=4 nibbles) -> add 5 the texbase).
+    // drawn[] keeps its own 4-nibble stride (skip_if_drawn/mark_drawn unchanged). Pairs with load_col_mtw +
+    // leaf_body_w. @requires hex.init & stl.ptr_init.
+    def seg_pass1_leaf_body_mtlw centery, ds, viewh1, projection \
+            @ loop, body, skipcol, ret, sidx \
+            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_texoff, \
+              seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, worldtop, \
+              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
+              top, bottom, texcol, cfrac0, stepv, base, \
+              col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, drawn, seg_ret {
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        hex.if0 1, visible, ret
+        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_v1x, seg_v1y
+        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
+        hex.mov 8, x, x1
+      loop:
+        hex.scmp 8, x, x2, body, ret, ret
+      body:
+        .skip_if_drawn x, drawn, skipcol
+        proj.column_render_params top, bottom, texcol, cfrac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, seg_tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        hex.zero 5, base
+        hex.mul 4, base, texcol, seg_texheight       // base = texcol*texheight (<= 4 nibbles)
+        hex.add 5, base, seg_texbase                 // + the seg slice offset = absolute combined idx (5 nibbles)
+        hex.mov w/4, sidx, x
+        hex.shl_bit w/4, sidx
+        hex.shl_bit w/4, sidx
+        hex.shl_bit w/4, sidx                        // sidx = x*8 (the uniform WIDE 8-nibble array stride)
+        .store_col_field col_top, sidx, top
+        .store_col_field col_bottom, sidx, bottom
+        .store_col_field5 col_base, sidx, base       // 5-nibble absolute texel index
+        .store_col_field col_step, sidx, stepv
+        .store_col_field col_frac0, sidx, cfrac0
+        .store_col_field col_heightmask, sidx, seg_hm
+        .store_col_field col_light, sidx, seg_light
+        .mark_drawn x, drawn
+      skipcol:
+        hex.inc 8, x
+        hex.add 8, scale, scalestep
+        ;loop
+      ret:
+        stl.fret seg_ret
+      sidx: hex.vec w/4
+    }
+
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
     // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
     def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {
@@ -390,6 +469,22 @@ ns frame {
         tex.sample cmidx, idx                 // cmidx low byte = pal (high byte = light, preset per column)
         cm.apply lit, cmidx                   // lit = colormapped palette byte
         hex.add 4, frac, step                 // advance the DDA (8.8)
+        stl.fret pixel_ret
+    }
+
+    // the shared heavy body, WIDE-INDEX (M12nn) — leaf_body with a 5-nibble texel index for a full E1M1-scale
+    // COMBINED texture table (~793k texels). base_reg/idx are 5 nibbles (vs 3); the texel-v offset (v3, masked
+    // by heightmask, < texheight <= 256 => 2 nibbles) is OR'd into the low bits. The texture table's own
+    // sample reads only its index_nibbles, so a wider idx with zero high nibbles is correct for small tables
+    // too. Pairs with load_col_mtw + seg_pass1_leaf_body_mtlw. @requires hex.init, stl.ptr_init.
+    def leaf_body_w < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {
+        hex.xor 2, v3, frac + 2*dw            // v3 = high byte of frac (the 8.8 integer part)
+        hex.and 2, v3, heightmask             // v = v & (texheight-1)
+        hex.mov 5, idx, base_reg              // idx = base (5 nibbles)
+        hex.xor_zero 2, idx, v3               // idx = base | v (v < texheight <= 256 => low 2 nibbles); v3 -> 0
+        tex.sample cmidx, idx
+        cm.apply lit, cmidx
+        hex.add 4, frac, step
         stl.fret pixel_ret
     }
 

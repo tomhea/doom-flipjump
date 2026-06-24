@@ -142,6 +142,25 @@ ns frame {
         hex.mov 4, frac, frac0_src
     }
 
+    // MULTI-TEXTURE pass-2 per-column setup (M12mm2) — load_col + the per-column HEIGHTMASK. With per-seg
+    // textures the texel v-mask (texheight-1) varies per column, so it is read from col_heightmask[x] into
+    // the shared `heightmask` register (which the pixel leaf's `hex.and 2, v3, heightmask` consumes). The
+    // texture is selected purely via base_reg = the ABSOLUTE texel index in the single combined dispatch
+    // table (col_base[x] = seg_texbase + texcol*texheight, computed in pass 1) — so the per-pixel fetch is
+    // UNCHANGED (one `tex.sample` over the combined table), honouring the hoisting rule (no per-pixel texture
+    // re-select). hm_src is the col_heightmask[x] address (4-nibble element). @requires hex.init & stl.ptr_init.
+    def load_col_mt top_src, bottom_src, base_src, light_src, step_src, frac0_src, hm_src \
+            < top, bottom, base_reg, cmidx, step, frac, heightmask {
+        hex.mov 2, top, top_src
+        hex.mov 2, bottom, bottom_src
+        hex.mov 3, base_reg, base_src
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx + 2*dw, light_src
+        hex.mov 4, step, step_src
+        hex.mov 4, frac, frac0_src
+        hex.mov 3, heightmask, hm_src                // per-column texheight-1 (the leaf masks v by this)
+    }
+
     // PASS-1 per-column runtime STORE (M12kk) — the write-side analog of load_col. The seg-major pass 1
     // computes a column's render params (proj.column_render_params) and writes them to the per-column
     // param ARRAYS at the RUNTIME column index x; pass 2 then reads col_*[x] at compile-time addresses
@@ -262,12 +281,62 @@ ns frame {
         stl.fret seg_ret
     }
 
+    // PASS-1 per-SEG shared leaf, MULTI-TEXTURE (M12mm2) — seg_pass1_leaf_body with PER-SEG textures. The
+    // seg's texture is one slice of a single COMBINED dispatch table; the caller bakes seg_texbase (the
+    // slice's absolute texel offset, aligned to texheight so the leaf's base|v OR == base+v), seg_texheight
+    // (runtime, so base = texcol*texheight uses hex.mul not mul_const), seg_tw (texture width, for the
+    // texture_u mod), seg_hm (= texheight-1, the per-column v-mask). Per column: base = seg_texbase +
+    // texcol*texheight (absolute combined-table index) -> col_base[x]; col_heightmask[x] = seg_hm. A '-' /
+    // missing texture is baked as a 1x1 WALL_BG sentinel slice (texheight=1, tw=1, seg_hm=0) so the SAME path
+    // flat-fills WALL_BG (v masked to 0 -> samples the single sentinel texel every row) — no per-pixel
+    // branch. Light stays single (1-sector test; multi-light is E1M1). @requires hex.init & stl.ptr_init.
+    def seg_pass1_leaf_body_mt centery, ds, viewh1, projection \
+            @ loop, body, skipcol, ret, sidx \
+            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_texoff, \
+              seg_texbase, seg_texheight, seg_tw, seg_hm, ceilfix, floorfix, viewz, worldtop, \
+              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
+              top, bottom, texcol, cfrac0, stepv, base, \
+              col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, drawn, seg_ret {
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        hex.if0 1, visible, ret
+        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_v1x, seg_v1y
+        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
+        hex.mov 8, x, x1
+      loop:
+        hex.scmp 8, x, x2, body, ret, ret
+      body:
+        .skip_if_drawn x, drawn, skipcol
+        proj.column_render_params top, bottom, texcol, cfrac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, seg_tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        hex.mul 4, base, texcol, seg_texheight     // base = texcol*texheight (RUNTIME: per-seg texheight)
+        hex.add 4, base, seg_texbase                // + the seg texture's slice offset (absolute combined idx)
+        hex.mov w/4, sidx, x
+        hex.shl_bit w/4, sidx
+        hex.shl_bit w/4, sidx                       // sidx = x*4 (the per-column array digit offset)
+        .store_col_field col_top, sidx, top
+        .store_col_field col_bottom, sidx, bottom
+        .store_col_field col_base, sidx, base
+        .store_col_field col_step, sidx, stepv
+        .store_col_field col_frac0, sidx, cfrac0
+        .store_col_field col_heightmask, sidx, seg_hm   // per-column texheight-1 (the v-mask)
+        .mark_drawn x, drawn
+      skipcol:
+        hex.inc 8, x
+        hex.add 8, scale, scalestep
+        ;loop
+      ret:
+        stl.fret seg_ret                            // return (the data below is never fallen into)
+      sidx: hex.vec w/4
+    }
+
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
     // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
     def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {
         // v3 is held kept-zero between pixels (the xor_zero below restores it), so no per-pixel hex.zero.
         hex.xor 2, v3, frac + 2*dw            // v3 = high byte of frac (the 8.8 integer part)
-        hex.and 1, v3 + 1*dw, heightmask + 1*dw   // mask only nibble 1 (nibble 0 & 0xF is a no-op; v<256)
+        hex.and 2, v3, heightmask             // v = v & (texheight-1). FULL 2-nibble and (M12mm2): correct for
+                                              // texheight<16 too (heightmask in nibble 0). For texheight>=16 the
+                                              // low nibble of heightmask is 0xF so this == the old nibble-1-only and.
         hex.mov 3, idx, base_reg              // idx = base
         hex.xor_zero 3, idx, v3               // idx = base | v = base + v (disjoint bits); v3 -> 0 (kept-zero)
         tex.sample cmidx, idx                 // cmidx low byte = pal (high byte = light, preset per column)

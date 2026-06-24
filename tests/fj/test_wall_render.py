@@ -1518,7 +1518,7 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
         "hex.mov 2, bgrow, player_light",
-        "hex.shr_bit 2, bgrow", "hex.shr_bit 2, bgrow", "hex.shr_bit 2, bgrow",   # row = light>>LIGHT_SHIFT(3)
+        f"rep({LIGHT_SHIFT}, i) hex.shr_bit 2, bgrow",   # row = light >> LIGHT_SHIFT (single source of truth)
         "hex.zero 4, bgidx", "hex.mov 2, bgidx + 2*dw, bgrow",                     # bgidx = row<<8 | 0(CEIL_BG)
         f"hex.set 2, bgidx, {CEIL_BG}", "cm.apply bgceil, bgidx",
         f"hex.set 2, bgidx, {FLOOR_BG}", "cm.apply bgfloor, bgidx",               # bgidx hi byte still = row

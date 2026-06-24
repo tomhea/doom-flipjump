@@ -1,0 +1,24 @@
+M12nn (CAPSTONE: full E1M1 runtime wall frame, REAL textures + golden) — TDD FAIL log.
+
+FAIL STUB: every seg's texinfo is forced to the WALL_BG sentinel (seg_texinfo[si] =
+info["__WALLBG__"]) instead of its real texture slice — i.e. the M12nn-d proxy behavior
+(flat WALL_BG walls). Run against the REAL-texture oracle render_wall_frame, the flat walls
+mismatch the textured walls: at the spawn viewpoint the first wall pixel that differs is a
+flat shade (0x63) where the real texture has 0x06. The byte-exact assert fires before the
+golden-hash check, so the stub also fails the published golden.
+
+The whole frame ASSEMBLES and RUNS cleanly (the 198k-texel combined table, the wide
+multilight leaf, the 681-node walk) — the failure is a wrong-texel mismatch (flat vs real
+texture), a behavior stub, not a werror.
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_e1m1_full_frame_golden -x -q
+
+>           assert got == bytes(want), f"M12nn @ ({vx},{vy},{va}) != oracle"
+E           AssertionError: M12nn @ (-416,256,0) != oracle
+E           assert b'\x00\x00\x0...ooooooooooooo' == b'\x00\x00\x0...ooooooooooooo'
+E             At index 960 diff: b'c' != b'\x06'
+
+tests\fj\test_wall_render.py:2097: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_wall_render.py::test_wall_render_e1m1_full_frame_golden
+1 failed in 363.67s (0:06:03)

@@ -1,0 +1,28 @@
+M12nn-b (RUNTIME BACKGROUND COLORS) — TDD FAIL log.
+
+FAIL STUB: the two CEIL_BG / FLOOR_BG palette indices are SWAPPED in the runtime
+colormap lookup, so the ceiling band gets the floor's colormapped color and vice
+versa (bgceil = colormap[row][FLOOR_BG], bgfloor = colormap[row][CEIL_BG]). The rows
+stay in valid range and every bg register is still used, so the binary ASSEMBLES and
+RUNS cleanly (frame.render_background_reg + cm.apply at the bg indices + the
+hex.shr_bit row computation all work) — the failure is a band-color mismatch, a
+behavior stub, not a werror.
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_runtimebg_byte_exact -x -q
+
+        for vx, vy, va, plight in VIEWPOINTS:
+            row = max(0, min(COLORMAP_LIGHTS - 1, plight >> LIGHT_SHIFT))
+            ceil_color, floor_color = colormap[row][CEIL_BG], colormap[row][FLOOR_BG]
+            want = _oracle_multilight_frame(rm, cmap, lds, sds, seg_tex, seg_light, texinfo, texdata, colormap,
+                                            ceil_h, floor_h, viewz, worldtop, ceil_color, floor_color, vx, vy, va)
+            screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n{plight}\n".encode())
+            fj.run(out, io_device=screen, print_time=False, print_termination=False)
+>           assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-b @ ({vx},{vy},{va},L{plight}) != oracle"
+E           AssertionError: M12nn-b @ (128,128,536870912,L8) != oracle
+E           assert b'l\x03\x03\x...0\x00\x00\x00' == b'l\x03\x03\x...aaaaaaaaaaaaa'
+E             At index 58 diff: b'a' != b'\x00'
+
+tests\fj\test_wall_render.py:1585: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_wall_render.py::test_wall_render_runtimebg_byte_exact
+1 failed in 128.77s (0:02:08)

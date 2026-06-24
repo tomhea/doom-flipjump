@@ -26,7 +26,8 @@ from doomfj.lut_generator import (
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj,
 )
 from doomfj.mapcompiler import bake_bsp, _bsp_as_code, Seg, SubSector, Node, CompiledMap, NF_SUBSECTOR
-from doomfj.reference_model import ReferenceModel, ANGLE_MASK, SLOPERANGE, WALL_BG
+from doomfj.reference_model import (ReferenceModel, ANGLE_MASK, SLOPERANGE, WALL_BG,
+                                    CEIL_BG, FLOOR_BG, COLORMAP_LIGHTS, LIGHT_SHIFT)
 from doomfj.texturecompiler import (compile_texture, compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table)
 from doomfj.wad import WadFile
@@ -1429,3 +1430,156 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
         fj.run(out, io_device=screen, print_time=False, print_termination=False)
         assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-a @ ({vx},{vy},{va}) != oracle"
+
+
+def test_wall_render_runtimebg_byte_exact(tmp_path):
+    """M12nn-b — RUNTIME BACKGROUND COLORS: the two-band ceiling/floor background is colormapped at the PLAYER's
+    sector light at RUNTIME (render_frame's path), not baked at compile time. fj computes the bg bytes per frame:
+    row = player_light >> LIGHT_SHIFT (clamped), then cm.apply at CEIL_BG / FLOOR_BG -> two runtime registers ->
+    frame.render_background_reg fills the framebuffer with them. To ISOLATE the runtime lookup+fill on the fast
+    square room (one sector => the BSP-derived player light wouldn't vary), the player light is fed as a 4th
+    stdin value and VARIED across viewpoints (=> the bg band color varies); the full E1M1 rung replaces the
+    stdin read with the BSP walk's order[0] subsector -> sector light. Walls keep the M12nn-a per-seg multi-light
+    overlay. ONE assemble, several stdin viewpoints (different player lights => different bg), byte-exact vs the
+    oracle (render_frame bg colors + the per-seg-light wall overlay)."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    cmap = bake_bsp(WadFile.from_path(ROOM), "MAP01")
+    verts = cmap.vertexes
+    wad = WadFile.from_path(ASSET)
+    colormap = wad.colormap()
+    lds = WadFile.from_path(ROOM).linedefs("MAP01")
+    sds = WadFile.from_path(ROOM).sidedefs("MAP01")
+
+    seg_tex = ["STEP4", "A-YELLOW", "STEP4", None]
+    seg_light = [1, 9, 17, 25]
+    combined, texinfo = _build_combined_textures(wad, ["STEP4", "A-YELLOW", None])
+    texdata = {nm: (texture_texels(c := composite_texture(wad, {t.name: t for t in wad.texture_defs()}[nm])),
+                    len(c), len(c[0])) for nm in ("STEP4", "A-YELLOW")}
+
+    ceil_h, floor_h = 128, 0
+    viewz = (floor_h + 41) << 16
+    worldtop = ceil_h - (viewz >> 16)
+    horizon = cfg.VIEW_H // 2
+    proj = cfg.PROJECTION << 16
+    A45, A135, A225, A315 = 0x20000000, 0x60000000, 0xA0000000, 0xE0000000
+
+    # (vx, vy, va, player_light): player_light varies -> bg row = light>>3 varies (8->1, 80->10, 160->20,
+    # 248->31, 16->2), so the runtime bg-color path is exercised across viewpoints.
+    VIEWPOINTS = [
+        (128, 128, A45, 8),
+        (128, 128, A135, 80),
+        (128, 128, A225, 160),
+        (128, 128, A315, 248),
+        (200, 128, A45, 16),
+    ]
+
+    tex = _texel_table("tex", combined, "per_entry", over_align=True)
+    cm = compile_colormap("cm", wad, lights=COLORMAP_LIGHTS, over_align=True)
+    palette = compile_palette("palette", wad)
+    tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
+    xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
+
+    def subsector_action(s):
+        ss = cmap.subsectors[s]
+        out = []
+        for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
+            seg = cmap.segs[si]
+            ld = lds[seg.linedef]
+            if ld.back != -1:
+                continue
+            v1x, v1y = verts[seg.v1]
+            v2x, v2y = verts[seg.v2]
+            sd = sds[ld.front if seg.side == 0 else ld.back]
+            texoff = (seg.offset + sd.x_off) << 16
+            name = seg_tex[si]
+            texbase, th_s, tw_s = texinfo[name if name else "__WALLBG__"]
+            out += [f"    hex.set 8, seg_v1x, {(v1x << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v1y, {(v1y << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
+                    f"    hex.set 4, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
+                    f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
+                    f"    hex.set 2, seg_light, {seg_light[si]}",
+                    "    stl.fcall seg_pass1_leaf, seg_ret"]
+        return out
+
+    bsp = _bsp_as_code("room", cmap, done_label="bsp_done", subsector_action=subsector_action)
+
+    # runtime bg: read player_light (4th stdin), row = light>>3, cm.apply at CEIL_BG / FLOOR_BG -> regs -> fill.
+    pass1 = [
+        "hex.input_dec_int 8, vx_raw, bad", "hex.input_dec_int 8, vy_raw, bad",
+        "hex.input_dec_uint 8, viewangle, bad", "hex.input_dec_uint 8, player_light, bad",
+        "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
+        "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        "hex.mov 2, bgrow, player_light",
+        "hex.shr_bit 2, bgrow", "hex.shr_bit 2, bgrow", "hex.shr_bit 2, bgrow",   # row = light>>LIGHT_SHIFT(3)
+        "hex.zero 4, bgidx", "hex.mov 2, bgidx + 2*dw, bgrow",                     # bgidx = row<<8 | 0(CEIL_BG)
+        f"hex.set 2, bgidx, {CEIL_BG}", "cm.apply bgceil, bgidx",
+        f"hex.set 2, bgidx, {FLOOR_BG}", "cm.apply bgfloor, bgidx",               # bgidx hi byte still = row
+        f"frame.render_background_reg framebuffer, bgceil, bgfloor, {cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
+        ";room_bspcode_walk", "bsp_done:",
+    ]
+    pass2 = []
+    for x in range(cfg.VIEW_W):
+        pass2.append(f"frame.load_col_mt col_top + {4 * x}*dw, col_bottom + {4 * x}*dw, col_base + {4 * x}*dw, "
+                     f"col_light + {4 * x}*dw, col_step + {4 * x}*dw, col_frac0 + {4 * x}*dw, "
+                     f"col_heightmask + {4 * x}*dw")
+        for y in range(cfg.H):
+            pass2.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + x)}*dw, top, bottom")
+
+    main = "\n".join([
+        "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
+        "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
+        "bad: stl.loop",
+        "pixel_leaf:", "frame.leaf_body",
+        "seg_pass1_leaf:",
+        f"frame.seg_pass1_leaf_body_mtl {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
+        bsp,
+        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+        "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+        "player_light: hex.vec 8", "bgrow: hex.vec 2", "bgidx: hex.vec 4", "bgceil: hex.vec 2", "bgfloor: hex.vec 2",
+        "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_texbase: hex.vec 4", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
+        "seg_light: hex.vec 2",
+        f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
+        f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}", f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}",
+        "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
+        "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
+        "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
+        "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 4",
+        "seg_ret: ;0",
+        "top: hex.vec 8", "bottom: hex.vec 8",
+        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
+        "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
+        "heightmask: hex.vec 3", "pixel_ret: ;0",
+        f"rows: rep({cfg.H}, i) hex.vec 2, i",
+        f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        f"col_light: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+    ])
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    p = tmp_path / "runtimebg.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / "runtimebg.fjm"
+    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+
+    for vx, vy, va, plight in VIEWPOINTS:
+        row = max(0, min(COLORMAP_LIGHTS - 1, plight >> LIGHT_SHIFT))
+        ceil_color, floor_color = colormap[row][CEIL_BG], colormap[row][FLOOR_BG]
+        want = _oracle_multilight_frame(rm, cmap, lds, sds, seg_tex, seg_light, texinfo, texdata, colormap,
+                                        ceil_h, floor_h, viewz, worldtop, ceil_color, floor_color, vx, vy, va)
+        screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n{plight}\n".encode())
+        fj.run(out, io_device=screen, print_time=False, print_termination=False)
+        assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-b @ ({vx},{vy},{va},L{plight}) != oracle"

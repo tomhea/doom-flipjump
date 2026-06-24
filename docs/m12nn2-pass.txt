@@ -1,0 +1,14 @@
+M12nn-b (RUNTIME BACKGROUND COLORS) — TDD PASS log.
+
+After reverting the FAIL stub (CEIL_BG then FLOOR_BG, the correct order), fj computes the
+two-band background colors at RUNTIME each frame: row = player_light >> LIGHT_SHIFT (via
+hex.shr_bit x3), then cm.apply at CEIL_BG / FLOOR_BG -> bgceil / bgfloor registers ->
+frame.render_background_reg fills the framebuffer. The player light is fed as a 4th stdin
+value and VARIED across the 5 viewpoints (8/80/160/248/16 -> rows 1/10/20/31/2), so the bg
+band color varies per frame; the walls keep the M12nn-a per-seg multi-light overlay. All 5
+viewpoints are byte-exact vs the oracle (render_frame's runtime bg colors + the per-seg-light
+wall overlay). ONE assemble, many viewpoints.
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_runtimebg_byte_exact -x -q
+.                                                                        [100%]
+1 passed in 157.71s (0:02:37)

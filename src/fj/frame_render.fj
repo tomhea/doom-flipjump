@@ -142,6 +142,46 @@ ns frame {
         hex.mov 4, frac, frac0_src
     }
 
+    // PASS-1 per-column runtime STORE (M12kk) — the write-side analog of load_col. The seg-major pass 1
+    // computes a column's render params (proj.column_render_params) and writes them to the per-column
+    // param ARRAYS at the RUNTIME column index x; pass 2 then reads col_*[x] at compile-time addresses
+    // (load_col). ALL arrays use a UNIFORM 4-nibble element stride, so the digit offset is x*4 — computed
+    // ONCE here and reused for every field. Built on the stl runtime-indexed write (ptr_index -> write_hex,
+    // .store_col_field). These per-column writes are the ONLY runtime-indexed (pointer) writes in the
+    // renderer (<=VIEW_W per frame); the framebuffer stays the compile-time wflip path (pass 2). col_top/
+    // col_bottom/col_base/col_step/col_frac0 are the array base labels (compile-time addresses); the
+    // values are REGISTERS (top/bottom hex[:8] clamped rows, base hex[:4]=texcol*texheight, step/frac0
+    // hex[:4] 8.8). light is per-SEG (baked) in M12kk so it is NOT stored here (pass 2 reads one light
+    // reg); it goes per-column in M12mm. @requires hex.init & stl.ptr_init (ptr_index / write_hex).
+    def store_col x, col_top, col_bottom, col_base, col_step, col_frac0, top, bottom, base, step, frac0 \
+            @ idx, end {
+        hex.mov w/4, idx, x
+        hex.shl_bit w/4, idx
+        hex.shl_bit w/4, idx                       // idx = x*4 (the uniform 4-nibble element digit offset)
+        .store_col_field col_top, idx, top
+        .store_col_field col_bottom, idx, bottom
+        .store_col_field col_base, idx, base
+        .store_col_field col_step, idx, step
+        .store_col_field col_frac0, idx, frac0
+        ;end                                       // skip the scratch data (else it runs as code, lesson #2)
+      idx: hex.vec w/4
+      end:
+    }
+
+    // one runtime-indexed array write: array[x] = src[:4], where `array` holds 4-nibble elements and
+    // `idx` (= x*4) is the precomputed digit offset. `array` is the base label (compile-time address); the
+    // stl ptr machinery forms array + idx*dw at runtime (ptr_index needs a SEPARATE result reg from the
+    // base — an in-place ptr_index clobbers the base before the add). @requires hex.init & stl.ptr_init.
+    def store_col_field array, idx, src @ aptr, cell, end {
+        hex.set w/4, aptr, array
+        hex.ptr_index cell, aptr, idx
+        hex.write_hex 4, cell, src
+        ;end                                       // skip the scratch data (lesson #2)
+      aptr: hex.vec w/4
+      cell: hex.vec w/4
+      end:
+    }
+
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
     // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
     def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {

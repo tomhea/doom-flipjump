@@ -1,19 +1,20 @@
-M12nn (CAPSTONE: full E1M1 runtime wall frame, REAL textures + golden) — TDD PASS log.
+M12nn (CAPSTONE: full E1M1 runtime wall frame, REAL textures + golden + R4 flat) — TDD PASS log.
 
-After reverting the FAIL stub (each seg samples its OWN real texture out of the combined
-table, not the WALL_BG sentinel), the full E1M1 runtime wall renderer is byte-exact vs the
-oracle render_wall_frame across all 4 viewpoints (spawn + a rotation + two other-sector
-positions with negative viewz), AND the spawn frame hashes to the published golden key
-0b817e4a126026207f40327cb32b68685efd47572f79661ff7136e752e566c0e (tests/host/test_wall_frame.py).
+The full E1M1 runtime wall renderer is byte-exact vs the oracle render_wall_frame across all 4
+viewpoints (spawn + a rotation + two other-sector positions with negative viewz), the spawn frame
+hashes to the published golden 0b817e4a126026207f40327cb32b68685efd47572f79661ff7136e752e566c0e,
+AND it runs on the FLAT path (R4: storage_mode == flat, no silent paged/hybrid fallback).
 
-Everything composed at runtime: the real 681-node BSP walk drives pass 1 over all 575
-one-sided segs; the walk-driven player subsector sets viewz and fills the background at the
-player's sector light; each seg samples its own texture (downscaled, like _wall_texture) out
-of a single COMBINED dispatch table of all 70 E1M1 wall textures (~198k texels => the
-5-nibble wide-index path); per-seg multi-light; drawn[] occlusion; the off-screen-wall
-sentinel; pass 2 the unrolled raster over the runtime background. ONE assemble (~6.7min,
-the 198k texel table dominates), any viewpoint at runtime.
+Each seg samples its own texture (downscaled like _wall_texture) out of a single COMBINED dispatch
+table of all 70 E1M1 wall textures (~198k texels), built with the PRODUCTION over_align=False layout.
 
-$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_e1m1_full_frame_golden -x -q
+R4 / R-3 measurement: the renderer's flat span = 40,338,322 words (~38.5M / ~320MB) -- 5x over the
+2**23 (64MB) default, dominated by the single combined table's 5-nibble index (16**5-slot space) =
+~7x build_doom's narrow per-texture ledger. Per DESIGN §1.2 the flat limit is RAISED (2**26, RAM-only
+cost) and storage_mode==flat is asserted there. The combined-table footprint (and the per-texture
+alternative that would fit 2**23) is documented as a tracked optimization in DESIGN §1.2.
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_e1m1_full_frame_golden -x -q -s
+M12nn renderer flat span = 40,338,322 words (38.47M; default FLAT_MAX_WORDS = 8,388,608 = 2**23)
 .                                                                        [100%]
-1 passed in 401.45s (0:06:41)
+1 passed in 410.67s (0:06:50)

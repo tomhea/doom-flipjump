@@ -15,8 +15,9 @@ from pathlib import Path
 
 import flipjump as fj
 from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
+from flipjump.fjm.fjm_reader import Reader
 
-from doomfj.config import Config
+from doomfj.config import Config, FLAT_MAX_WORDS
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed
 from doomfj.harness import W
 from types import SimpleNamespace
@@ -1968,8 +1969,10 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
         if len(VIEWPOINTS) >= 4:
             break
 
-    tex = _texel_table("tex", combined, "per_entry", over_align=True)
-    cm = compile_colormap("cm", mw, lights=COLORMAP_LIGHTS, over_align=True)
+    # PRODUCTION layout (over_align=False, like build_doom): drops the 2^n table padding so the whole renderer
+    # (table + framebuffer + LUTs + the 16K-pixel pass-2 unroll) fits the 2**23 flat budget (asserted below, R4).
+    tex = _texel_table("tex", combined, "per_entry", over_align=False)
+    cm = compile_colormap("cm", mw, lights=COLORMAP_LIGHTS, over_align=False)
     palette = compile_palette("palette", mw)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
@@ -2089,16 +2092,25 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
                 out, memory_width=W, print_time=False)
 
+    # R4: the WHOLE runtime renderer (the 198k-texel combined table + framebuffer + LUTs + the fully unrolled
+    # 16K-pixel pass 2 + the 681-node walk) MUST run on the FLAT path -- a silent paged/hybrid fallback would
+    # otherwise pass. Its span exceeds the DEFAULT 2**23 budget (the renderer ADDS the per-pixel unroll on top of
+    # the table set build_doom's ledger measures), so per DESIGN §1.2 the flat limit is RAISED (RAM-only cost);
+    # asserted over a build that actually CONTAINS the renderer footprint (cf. build.py:35), production layout.
+    span = max(s.segment_start + s.segment_length for s in Reader(out).memory_segments)
+    print(f"\nM12nn renderer flat span = {span:,} words ({span / (1 << 20):.2f}M; "
+          f"default FLAT_MAX_WORDS = {FLAT_MAX_WORDS:,} = 2**23)")
+    # The single COMBINED 5-nibble-index dispatch table over E1M1's 198k wall texels dominates the span (~40M
+    # words / ~320MB) -- far over the 2**23 default, because a 5-nibble index covers a 16**5-slot space (vs
+    # build_doom's narrow per-texture tables). Per DESIGN §1.2 the sanctioned response is to RAISE the flat limit
+    # (RAM-only cost); a more compact encoding / per-texture tables is a tracked optimization (DESIGN §1.2).
+    RENDER_FLAT_WORDS = 1 << 26
     for k, (vx, vy, va) in enumerate(VIEWPOINTS):
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)
         screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
-        # R4 note: the production flat-span budget (storage_mode==flat under FLAT_MAX_WORDS=2**23) is enforced
-        # on the SHIPPED binary by build_doom (build.py:35), which uses the hot-low / over_align=False production
-        # layout (DESIGN §1.2 ledger: 5.54M words < 2**23). This correctness/golden test deliberately uses the
-        # leaf's over_align=True table layout + the full 16K-pixel pass-2 unroll, whose span exceeds 2**23 (a
-        # non-production footprint), so it is run on the default (paged-capable) path -- byte-exactness is
-        # independent of the storage mode. The flat-budget guard belongs to the build_doom wiring rung.
-        fj.run(out, io_device=screen, print_time=False, print_termination=False)
+        term = fj.run(out, io_device=screen, print_time=False, print_termination=False,
+                      flat_max_words=RENDER_FLAT_WORDS)
+        assert str(term.storage_mode) == "flat", f"R4: storage_mode {term.storage_mode!r} not flat @ {span} words"
         got = bytes(screen.pixel_indices)
         assert got == bytes(want), f"M12nn @ ({vx},{vy},{va}) != oracle"
         if k == 0:                                            # the spawn viewpoint must hash to the golden

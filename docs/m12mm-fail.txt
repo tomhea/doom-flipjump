@@ -1,0 +1,141 @@
+F
+================================== FAILURES ===================================
+______________ test_wall_render_occlusion_drawn_clips_byte_exact ______________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-858/test_wall_render_occlusion_dra0')
+
+    def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
+        """M12mm — OCCLUSION: `drawn[]` actually CLIPS, driven by a real BSP NODE walk (the convex square room
+        never exercised either). A hand-built 2-seg / 1-node occluder (two crossing one-sided walls + a vertical
+        partition) — `point_on_side` orders the segs at runtime, so a nearer seg CLAIMS its columns (drawn[]) and
+        the farther seg is clipped there; the scale still advances over the clipped columns. ONE assemble, 5 stdin
+        viewpoints chosen so BOTH orderings occur (seg0 occludes seg1 from the right, seg1 occludes seg0 from the
+        left) and the occluded-column pattern varies, each byte-exact vs the oracle's bsp_render_order + drawn[]
+        path. (Single texture/light; per-seg textures are a later rung.)"""
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        cmap = _occluder_map()
+        verts = cmap.vertexes
+        wad = WadFile.from_path(ASSET)
+        d = {t.name: t for t in wad.texture_defs()}[TEX]
+        canvas = composite_texture(wad, d)
+        texels, th, tw = texture_texels(canvas), len(canvas), len(canvas[0])
+        colormap = wad.colormap()
+    
+        light = 1
+        ceil_h, floor_h = 128, 0
+        viewz = (floor_h + 41) << 16
+        worldtop = ceil_h - (viewz >> 16)
+        ceil_color, floor_color = 5, 109
+        horizon = cfg.VIEW_H // 2
+        proj = cfg.PROJECTION << 16
+        A90 = 0x40000000
+    
+        VIEWPOINTS = [
+            (50, 0, A90),     # order [seg0, seg1]: seg0 occludes seg1 (~35 cols)
+            (-50, 0, A90),    # order [seg1, seg0]: seg1 occludes seg0 (the SWAP)
+            (0, 0, A90),      # order [seg0, seg1]: larger overlap (~54 cols)
+            (90, 20, A90),    # order [seg0, seg1]: small overlap (~8 cols)
+            (-90, 20, A90),   # order [seg1, seg0]: small overlap (swap, ~7 cols)
+        ]
+    
+        consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+        tex = compile_texture("tex", wad, TEX, over_align=True, downscale=1)
+        cm = compile_colormap("cm", wad, lights=2, over_align=True)
+        palette = compile_palette("palette", wad)
+        tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+        finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
+        finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+        viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
+        xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
+    
+        def subsector_action(s):
+            """Per subsector: for each seg (all one-sided here), set baked consts + fcall the shared pass-1 leaf."""
+            ss = cmap.subsectors[s]
+            out = []
+            for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
+                seg = cmap.segs[si]
+                v1x, v1y = verts[seg.v1]
+                v2x, v2y = verts[seg.v2]
+                out += [f"    hex.set 8, seg_v1x, {(v1x << 16) & 0xFFFFFFFF}",
+                        f"    hex.set 8, seg_v1y, {(v1y << 16) & 0xFFFFFFFF}",
+                        f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
+                        f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
+                        f"    hex.set 8, seg_segangle, {seg.angle}",
+                        "    hex.set 8, seg_texoff, 0",
+                        "    stl.fcall seg_pass1_leaf, seg_ret"]
+            return out
+    
+        bsp = _bsp_as_code("occ", cmap, done_label="bsp_done", subsector_action=subsector_action)
+    
+        pass1 = [
+            "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",   # 10-nibble map coords (for the walk)
+            "hex.input_dec_uint 8, viewangle, bad",
+            "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",                  # viewx = vx << 16 (16.16 for projection)
+            "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
+            f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
+            f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
+            ";occ_bspcode_walk",                                                # the walk (with a NODE) drives pass 1
+            "bsp_done:",
+        ]
+        pass2 = []
+        for x in range(cfg.VIEW_W):
+            pass2.append(f"frame.load_col col_top + {4 * x}*dw, col_bottom + {4 * x}*dw, col_base + {4 * x}*dw, "
+                         f"light_baked, col_step + {4 * x}*dw, col_frac0 + {4 * x}*dw")
+            for y in range(cfg.H):
+                pass2.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + x)}*dw, top, bottom")
+    
+        main = "\n".join([
+            "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
+            "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
+            "bad: stl.loop",
+            "pixel_leaf:", "frame.leaf_body",
+            "seg_pass1_leaf:",
+            f"frame.seg_pass1_leaf_body {th}, {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
+            bsp,
+            f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+            "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+            "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
+            "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+            f"tw: hex.vec 8, {tw}", f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}",
+            f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}", f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}",
+            f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}", f"light_baked: hex.vec 2, {light}",
+            "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
+            "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
+            "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
+            "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 4",
+            "seg_ret: ;0",
+            "top: hex.vec 8", "bottom: hex.vec 8",
+            "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 3", "cmidx: hex.vec 4",
+            "lit: hex.vec 2", "base_reg: hex.vec 3", "step: hex.vec 4",
+            f"heightmask: hex.vec 3, {th - 1}", "pixel_ret: ;0",
+            f"rows: rep({cfg.H}, i) hex.vec 2, i",
+            f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+            f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+            f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+            tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        ])
+        p = tmp_path / "occlusion.fj"
+        p.write_text(main, encoding="utf-8")
+        out = tmp_path / "occlusion.fjm"
+        fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                     PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
+                    out, memory_width=W, print_time=False)
+    
+        for vx, vy, va in VIEWPOINTS:
+            want = _oracle_occlusion_frame(rm, cmap, tw, th, texels, colormap, light, ceil_h, floor_h, viewz,
+                                           worldtop, ceil_color, floor_color, vx, vy, va)
+            screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+            fj.run(out, io_device=screen, print_time=False, print_termination=False)
+>           assert bytes(screen.pixel_indices) == bytes(want), f"M12mm @ ({vx},{vy},{va}) != oracle"
+E           AssertionError: M12mm @ (50,0,1073741824) != oracle
+E           assert b'\x05\x05\x0...mmmmmmmmmmmmm' == b'\x05\x05\x0...mmmmmmmmmmmmm'
+E             
+E             At index 27 diff: b'd' != b'\x05'
+E             Use -v to get more diff
+
+tests\fj\test_wall_render.py:1015: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_wall_render.py::test_wall_render_occlusion_drawn_clips_byte_exact
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 111.81s (0:01:51)

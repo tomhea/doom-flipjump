@@ -1,0 +1,30 @@
+M12nn-c (WIDE TEXEL INDEX) — TDD FAIL log.
+
+FAIL STUB: the per-pixel leaf is the NARROW frame.leaf_body (3-nibble texel index)
+instead of the new frame.leaf_body_w (5-nibble). The square-room combined texture
+table is PADDED with 65536 leading texels so every seg_texbase > 65535 (needs 5
+nibbles); the 3-nibble leaf truncates the absolute texel index (base & 0xFFF) and
+samples the leading PADDING (zeros) instead of the wall texel -> the wall pixels come
+out 0x00 instead of the real colormapped texel.
+
+The whole frame ASSEMBLES and RUNS cleanly (the new wide macros seg_pass1_leaf_body_mtlw
++ store_col_field5 + load_col_mtw + the 8-nibble col-array stride + the 66k-entry
+texture table all assemble), so the failure is a wrong-texel mismatch, a behavior stub,
+not a werror.
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_wideindex_byte_exact -x -q
+
+        for vx, vy, va in VIEWPOINTS:
+            want = _oracle_multilight_frame(rm, cmap, lds, sds, seg_tex, seg_light, texinfo, texdata, colormap,
+                                            ceil_h, floor_h, viewz, worldtop, ceil_color, floor_color, vx, vy, va)
+            screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+            fj.run(out, io_device=screen, print_time=False, print_termination=False)
+>           assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-c @ ({vx},{vy},{va}) != oracle"
+E           AssertionError: M12nn-c @ (128,128,536870912) != oracle
+E           assert b'\x00\x00\x0...mmmmmmmmmmmmm' == b'l\x03\x03\x...mmmmmmmmmmmmm'
+E             At index 0 diff: b'\x00' != b'l'
+
+tests\fj\test_wall_render.py:1728: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_wall_render.py::test_wall_render_wideindex_byte_exact
+1 failed in 174.09s (0:02:54)

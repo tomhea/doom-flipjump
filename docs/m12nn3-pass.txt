@@ -1,0 +1,15 @@
+M12nn-c (WIDE TEXEL INDEX) — TDD PASS log.
+
+After reverting the FAIL stub (the per-pixel leaf is now frame.leaf_body_w, the 5-nibble
+variant), the wide renderer path handles the 5-nibble absolute texel index correctly:
+seg_pass1_leaf_body_mtlw computes base = seg_texbase + texcol*texheight at 5 nibbles and
+stores it into the 8-nibble-stride col_base (store_col_field5); load_col_mtw reads it back
+into a 5-nibble base_reg; leaf_body_w samples the combined table at the 5-nibble idx. With
+the combined table PADDED by 65536 (every seg_texbase > 65535), all 5 viewpoints are
+byte-exact vs the same per-seg-texture/per-seg-light oracle. ONE assemble (incl. the 66k-
+entry texture table), many viewpoints. The narrow macros / their tests are untouched
+(additive).
+
+$ python -m pytest tests/fj/test_wall_render.py::test_wall_render_wideindex_byte_exact -x -q
+.                                                                        [100%]
+1 passed in 201.83s (0:03:21)

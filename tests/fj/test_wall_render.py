@@ -27,7 +27,8 @@ from doomfj.lut_generator import (
 )
 from doomfj.mapcompiler import bake_bsp, _bsp_as_code, Seg, SubSector, Node, CompiledMap, NF_SUBSECTOR
 from doomfj.reference_model import (ReferenceModel, ANGLE_MASK, SLOPERANGE, WALL_BG,
-                                    CEIL_BG, FLOOR_BG, COLORMAP_LIGHTS, LIGHT_SHIFT)
+                                    CEIL_BG, FLOOR_BG, COLORMAP_LIGHTS, LIGHT_SHIFT,
+                                    SimState, build_scene, spawn_state)
 from doomfj.texturecompiler import (compile_texture, compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table)
 from doomfj.wad import WadFile
@@ -1726,3 +1727,174 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
         fj.run(out, io_device=screen, print_time=False, print_termination=False)
         assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-c @ ({vx},{vy},{va}) != oracle"
+
+
+E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
+
+
+def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
+    """M12nn-d — FULL E1M1 GEOMETRY runtime frame (proxy for the capstone): the REAL 681-node BSP walk drives
+    pass 1 over ALL 575 one-sided segs of E1M1, with the runtime player-subsector logic that the square room
+    couldn't exercise — at the FIRST subsector visited (= the player's subsector, order[0]) it sets the runtime
+    viewz (player sector floor + VIEWHEIGHT) used by every seg's worldtop/span AND fills the two-band background
+    at that subsector's sector light (a shared fcall bg-fill leaf = render_background_reg, guarded by a runtime
+    bg_done flag). Each seg uses its OWN baked sector ceil/floor/light with worldtop = seg_ceil - viewz_world
+    (runtime). drawn[] now CLIPS real occlusion across 575 segs. To keep the assemble fast (the real 793k-texel
+    table is the FINAL capstone rung), every wall is the flat WALL_BG sentinel (1x1) and the oracle's
+    _wall_texture is forced to None — so this validates the whole walk/viewz/bg/light/occlusion INTEGRATION on
+    real geometry, byte-exact, without the big texture table. Several viewpoints (spawn + rotations + other
+    sectors => the player-subsector viewz/light/bg vary)."""
+    cfg = Config()
+    mw = WadFile.from_path(E1M1_WAD)
+    cmap = bake_bsp(mw, "E1M1")
+    verts = cmap.vertexes
+    lds = mw.linedefs("E1M1"); sds = mw.sidedefs("E1M1"); secs = mw.sectors("E1M1")
+    scene = build_scene(mw, mw, "E1M1")
+    rm = ReferenceModel(cfg)
+    rm._wall_texture = lambda *a, **k: None                  # proxy: every wall flat-fills WALL_BG
+
+    horizon = cfg.VIEW_H // 2
+    proj = cfg.PROJECTION << 16
+
+    sp = spawn_state(mw, "E1M1")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    things = mw.things("E1M1")
+    VIEWPOINTS = [(spx, spy, sp.angle),
+                  (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
+    seen = {(spx, spy)}
+    for t in things:                                          # other sectors -> player viewz/light/bg vary
+        if (t.x, t.y) not in seen:
+            seen.add((t.x, t.y)); VIEWPOINTS.append((t.x, t.y, sp.angle))
+        if len(VIEWPOINTS) >= 4:
+            break
+
+    combined = [WALL_BG]                                      # the 1x1 WALL_BG sentinel (the only texel)
+    tex = _texel_table("tex", combined, "per_entry", over_align=True)
+    cm = compile_colormap("cm", mw, lights=COLORMAP_LIGHTS, over_align=True)
+    palette = compile_palette("palette", mw)
+    tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
+    xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
+
+    def lrow(light):
+        return max(0, min(COLORMAP_LIGHTS - 1, light >> LIGHT_SHIFT))
+
+    colormap = scene.asset_wad.colormap()
+    _cid = [0]                                                # unique label id per EMISSION (a leaf is emitted
+    #                                                           twice by _bsp_as_code — once per node branch)
+
+    def subsector_action(s):
+        ss = cmap.subsectors[s]
+        cid = _cid[0]; _cid[0] += 1
+        # player-subsector setup (runs only at the FIRST subsector visited = order[0] = the player's):
+        psec = rm._seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
+        viewz_val = rm.view_z(psec.floor_h)
+        viewzw_val = viewz_val >> 16
+        prow = lrow(psec.light)
+        out = [
+            f"    hex.if0 1, bg_done, e1pset{cid}",          # bg_done==0 (first/player subsector) -> set player state
+            f"    ;e1psegs{cid}",
+            f"  e1pset{cid}:",
+            f"    hex.set 8, viewz, {viewz_val & 0xFFFFFFFF}",
+            f"    hex.set 8, viewzw, {viewzw_val & 0xFFFFFFFF}",
+            f"    hex.set 2, bgceil, {colormap[prow][CEIL_BG]}",
+            f"    hex.set 2, bgfloor, {colormap[prow][FLOOR_BG]}",
+            "    stl.fcall bg_fill_leaf, bg_ret",
+            "    hex.set 1, bg_done, 1",
+            f"  e1psegs{cid}:",
+        ]
+        for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
+            seg = cmap.segs[si]
+            ld = lds[seg.linedef]
+            if ld.back != -1:
+                continue
+            v1x, v1y = verts[seg.v1]
+            v2x, v2y = verts[seg.v2]
+            sd = sds[ld.front if seg.side == 0 else ld.back]
+            texoff = (seg.offset + sd.x_off) << 16
+            ssec = rm._seg_sector(lds, sds, secs, seg)
+            out += [f"    hex.set 8, seg_v1x, {(v1x << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v1y, {(v1y << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
+                    "    hex.set 5, seg_texbase, 0", "    hex.set 4, seg_texheight, 1",
+                    "    hex.set 8, seg_tw, 1", "    hex.set 3, seg_hm, 0",      # WALL_BG sentinel (proxy)
+                    f"    hex.set 2, seg_light, {lrow(ssec.light)}",
+                    f"    hex.set 8, ceilfix, {(ssec.ceil_h << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, floorfix, {(ssec.floor_h << 16) & 0xFFFFFFFF}",
+                    f"    hex.set 8, worldtop, {ssec.ceil_h & 0xFFFFFFFF}",
+                    "    hex.sub 8, worldtop, viewzw",          # worldtop = seg_ceil - player viewz_world (runtime)
+                    "    stl.fcall seg_pass1_leaf, seg_ret"]
+        return out
+
+    bsp = _bsp_as_code("e1", cmap, done_label="bsp_done", subsector_action=subsector_action)
+
+    pass1 = [
+        "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
+        "hex.input_dec_uint 8, viewangle, bad",
+        "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",   # viewx = (low 8 of the map coord) << 16 (16.16)
+        "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
+        ";e1_bspcode_walk", "bsp_done:",                      # the walk fills col arrays + (player ss) the bg
+    ]
+    pass2 = []
+    for x in range(cfg.VIEW_W):
+        pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
+                     f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
+                     f"col_heightmask + {8 * x}*dw")
+        for y in range(cfg.H):
+            pass2.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + x)}*dw, top, bottom")
+
+    main = "\n".join([
+        "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
+        "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
+        "bad: stl.loop",
+        "pixel_leaf:", "frame.leaf_body_w",
+        "seg_pass1_leaf:",
+        f"frame.seg_pass1_leaf_body_mtlw {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
+        "bg_fill_leaf:",
+        f"frame.render_background_reg framebuffer, bgceil, bgfloor, {cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
+        "stl.fret bg_ret",
+        bsp,
+        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+        "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+        "viewz: hex.vec 8", "viewzw: hex.vec 8", "bgceil: hex.vec 2", "bgfloor: hex.vec 2",
+        "bg_done: hex.vec 1", "bg_ret: ;0",
+        "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
+        "seg_light: hex.vec 2",
+        "ceilfix: hex.vec 8", "floorfix: hex.vec 8", "worldtop: hex.vec 8",
+        "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
+        "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
+        "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
+        "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 5",
+        "seg_ret: ;0",
+        "top: hex.vec 8", "bottom: hex.vec 8",
+        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
+        "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
+        "heightmask: hex.vec 3", "pixel_ret: ;0",
+        f"rows: rep({cfg.H}, i) hex.vec 2, i",
+        f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+        f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+        f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+        f"col_light: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+        f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+    ])
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    p = tmp_path / "e1m1geo.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / "e1m1geo.fjm"
+    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+
+    for vx, vy, va in VIEWPOINTS:
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)
+        screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+        fj.run(out, io_device=screen, print_time=False, print_termination=False)
+        assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-d @ ({vx},{vy},{va}) != oracle"

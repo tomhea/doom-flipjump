@@ -415,7 +415,7 @@ ns frame {
     // drawn[] keeps its own 4-nibble stride (skip_if_drawn/mark_drawn unchanged). Pairs with load_col_mtw +
     // leaf_body_w. @requires hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_mtlw centery, ds, viewh1, projection \
-            @ loop, body, skipcol, ret, sidx \
+            @ loop, body, skipcol, ret, sidx, tbskip, tbok \
             < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_texoff, \
               seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, worldtop, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
@@ -432,6 +432,11 @@ ns frame {
       body:
         .skip_if_drawn x, drawn, skipcol
         proj.column_render_params top, bottom, texcol, cfrac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, seg_tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        hex.scmp 8, top, bottom, tbok, tbok, tbskip   // oracle "if top<=bottom": top>bottom (wall off the top of
+      tbskip:                                         // the screen, both rows clipped) -> store the skip sentinel
+        hex.set 8, top, 1                             // (top=1>bottom=0) so pass 2 renders NO rows; mark_drawn still
+        hex.zero 8, bottom                            // CLAIMS the column (the near off-screen wall occludes far segs)
+      tbok:
         hex.zero 5, base
         hex.mul 4, base, texcol, seg_texheight       // base = texcol*texheight (<= 4 nibbles)
         hex.add 5, base, seg_texbase                 // + the seg slice offset = absolute combined idx (5 nibbles)

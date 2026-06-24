@@ -121,6 +121,27 @@ ns frame {
       stepv: hex.vec 4
     }
 
+    // PASS-2 per-column setup from the param ARRAYS (M12jj, the array bridge). The two-pass renderer (B')
+    // splits "decide each column's content" (pass 1, runtime, seg-major) from "paint pixels" (pass 2,
+    // unrolled). Pass 1 (runtime, later) fills the per-column arrays col_top/col_bottom/col_base/col_light/
+    // col_step/col_frac0; pass 2 reads a column's entry HERE at a COMPILE-TIME address — x is the unroll
+    // (rep) index, so each `*_src` is a constant address (zero pointers, lessons #11-12) — and loads the
+    // shared leaf's per-column registers: top/bottom for the row clip (pixel_clipped); base_reg/cmidx-light/
+    // step/frac for the pixel leaf. This REPLACES column_leaf_body's runtime compute with an array read —
+    // the pass-1<->pass-2 contract. The per-column read happens ONCE here (the HOISTING invariant); the
+    // pixel leaf only advances the DDA per pixel. Array element widths: top/bottom = the clamped
+    // [0,VIEW_H-1] rows (2 nibbles), base = texcol*texheight (3), light (2), step/frac0 = 8.8 (4).
+    def load_col top_src, bottom_src, base_src, light_src, step_src, frac0_src \
+            < top, bottom, base_reg, cmidx, step, frac {
+        hex.mov 2, top, top_src
+        hex.mov 2, bottom, bottom_src
+        hex.mov 3, base_reg, base_src
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx + 2*dw, light_src          // cmidx high byte = light (the leaf keeps it)
+        hex.mov 4, step, step_src
+        hex.mov 4, frac, frac0_src
+    }
+
     // the shared heavy body, emitted ONCE at the global label `pixel_leaf:`. Reads the per-column
     // registers + the DDA, writes the lit palette byte into `lit`, advances the DDA, returns via fret.
     def leaf_body < frac, v3, idx, cmidx, lit, base_reg, step, heightmask, pixel_ret {

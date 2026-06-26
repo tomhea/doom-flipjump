@@ -45,10 +45,143 @@ ns plane {
       ys: hex.vec 8
       dist: hex.vec 8
       zidx: hex.vec 3
-      lvl: hex.vec 2
+      lvl: hex.vec 3                                    // read at 3 nibbles by mul_const 3 (high nibble kept 0)
       zlidx: hex.vec 3
       zrow: hex.vec 2
       cmidx: hex.vec 4
       c127: hex.vec 3
+    }
+
+    // M13d — the TEXTURED floor/ceiling span (DOOM R_MapPlane + R_DrawSpan). One horizontal span [x1,x2] at
+    // screen row y: perspective-correct flat texturing via the 2-coord (u,v) DDA, distance-lit (zlight), each
+    // pixel written to the framebuffer at the RUNTIME address `fbase + 2*(y*VIEW_W + x)*dw`. Mirrors the oracle
+    // reference_model._draw_span byte-for-byte:
+    //   distance = FixedMul(planeheight, yslope[y])              // 16.16
+    //   xstep = FixedMul(distance, basexscale); ystep = FixedMul(distance, baseyscale)   // per-frame seeds
+    //   length = FixedMul(distance, distscale[x1])
+    //   idx = ((viewangle + xtoviewangle[x1]) >> 20) & 0xFFF     // the span-left view angle (fine index)
+    //   xfrac = viewx + FixedMul(finecos[idx], length)           // 16.16, wraps mod 2^32
+    //   yfrac = -(viewy + FixedMul(finesin[idx], length))
+    //   row   = zlight[(light>>4)*128 + min(127, distance>>20)]  // the distance colormap row (R_PlaneZLight)
+    //   per x in [x1,x2]: spot = ((yfrac>>16)&63)*64 + ((xfrac>>16)&63); pal = flat[flatbase+spot];
+    //                     fb = colormap[row][pal]; xfrac += xstep; yfrac += ystep
+    // basexscale/baseyscale are per-frame (R_ClearPlanes) REGISTERS the caller computes once. The flat texels
+    // live in a combined dispatch table read by `flat.sample` (64x64 each, NO downscale; the `&63` wraps),
+    // `flatbase` = the seg's flat slice offset. Shared LUTs the includer emits (R6): yslope/distscale/
+    // xtoviewangle (8nib read_tables), zlight (2nib), finesine (read_sin/read_cos), the colormap ns `cm`, and
+    // the flat ns. VIEW_W is from fj_consts. Returns via stl.fret BEFORE the @-local data (lesson #2).
+    // @requires hex.init & stl.ptr_init.
+    def draw_span fbase, view_w \
+            @ ys, dist, xstep, ystep, dscale, length, xta, ang, idx, fc, fs, prod, xfrac, yfrac, \
+              zidx, lvl, zlidx, zrow, c127, tt, c3f, u, vv, spot, fidx, pal, cmidx, lit, \
+              xx, yp, pixp, off, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
+            < planeheight, light, basexscale, baseyscale, viewx, viewy, viewangle, y, x1, x2, flatbase, \
+              yslope, distscale, xtoviewangle, zlight, span_ret {
+        hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
+        hex.fixed_mul 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
+        hex.fixed_mul 8, 4, xstep, dist, basexscale      // xstep = FixedMul(distance, basexscale)
+        hex.fixed_mul 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
+        hex.read_table 8, dscale, distscale, 2, x1
+        hex.fixed_mul 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
+        hex.read_table 8, xta, xtoviewangle, 2, x1
+        hex.mov 8, ang, viewangle
+        hex.add 8, ang, xta                              // viewangle + xtoviewangle[x1] (mod 2^32)
+        hex.shr_hex 8, 5, ang                            // >> 20 (angle_shift): the fine index
+        hex.mov 3, idx, ang                              // idx = (.. >> 20) & 0xFFF (3 nibbles)
+        finesine.read_cos fc, idx
+        hex.fixed_mul 8, 4, prod, fc, length
+        hex.mov 8, xfrac, viewx
+        hex.add 8, xfrac, prod                           // xfrac = viewx + FixedMul(finecos[idx], length)
+        finesine.read_sin fs, idx
+        hex.fixed_mul 8, 4, prod, fs, length
+        hex.mov 8, yfrac, viewy
+        hex.add 8, yfrac, prod
+        hex.neg 8, yfrac                                 // yfrac = -(viewy + FixedMul(finesin[idx], length))
+        hex.mov 8, tt, dist                              // the distance colormap row (zlight), as in draw_pixel
+        hex.shr_hex 8, 5, tt                             // distance >> 20 (LIGHTZSHIFT)
+        hex.mov 3, zidx, tt
+        hex.set 3, c127, 127
+        hex.cmp 3, zidx, c127, zok, zok, zclamp          // zidx = min(127, distance>>20)  (unsigned, R5 OK)
+      zclamp:
+        hex.mov 3, zidx, c127
+      zok:
+        hex.mov 2, lvl, light
+        hex.shr_hex 2, 1, lvl                            // lvl = light >> 4 (LIGHTSEGSHIFT)
+        hex.mul_const 3, zlidx, lvl, 128
+        hex.add 3, zlidx, zidx
+        hex.read_table 2, zrow, zlight, 3, zlidx         // row = zlight[lvl*128 + zidx]
+        hex.set 2, c3f, 0x3f
+        hex.mov 8, xx, x1
+      sloop:
+        hex.scmp 8, xx, x2, sbody, sbody, sdone          // for x in [x1, x2]  (inclusive)
+      sbody:
+        hex.mov 8, tt, xfrac
+        hex.shr_hex 8, 4, tt                             // xfrac >> 16
+        hex.mov 2, u, tt
+        hex.and 2, u, c3f                                // u = (xfrac>>16) & 63
+        hex.mov 8, tt, yfrac
+        hex.shr_hex 8, 4, tt                             // yfrac >> 16
+        hex.mov 2, vv, tt
+        hex.and 2, vv, c3f                               // v = (yfrac>>16) & 63
+        hex.mul_const 3, spot, vv, 64
+        hex.add 3, spot, u                               // spot = v*64 + u  (flats are 64x64)
+        hex.mov 4, fidx, flatbase
+        hex.add 4, fidx, spot                            // absolute flat texel index
+        flat.sample pal, fidx                            // pal = flat[flatbase + spot]
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx, pal
+        hex.mov 2, cmidx + 2*dw, zrow                    // cmidx = (row<<8) | pal
+        cm.apply lit, cmidx                              // lit = colormap[row][pal]
+        hex.zero 8, yp
+        hex.mov 2, yp, y
+        hex.mul_const 8, pixp, yp, view_w               // pixp = y * VIEW_W
+        hex.add 8, pixp, xx                              // + x  -> the pixel index
+        hex.zero w/4, off
+        hex.mov 8, off, pixp
+        hex.shl_bit w/4, off                             // off = 2*pixp (the hex.vec2 cell digit offset)
+        hex.set w/4, fbptr, fbase
+        hex.ptr_index cell, fbptr, off
+        hex.write_hex 2, cell, lit                       // fb[y*VIEW_W + x] = lit
+        hex.add 8, xfrac, xstep
+        hex.add 8, yfrac, ystep                          // step the u,v DDA
+        hex.inc 8, xx
+        ;sloop
+      sdone:
+        stl.fret span_ret
+
+      ys: hex.vec 8
+      dist: hex.vec 8
+      xstep: hex.vec 8
+      ystep: hex.vec 8
+      dscale: hex.vec 8
+      length: hex.vec 8
+      xta: hex.vec 8
+      ang: hex.vec 8
+      idx: hex.vec 3
+      fc: hex.vec 8
+      fs: hex.vec 8
+      prod: hex.vec 8
+      xfrac: hex.vec 8
+      yfrac: hex.vec 8
+      zidx: hex.vec 3
+      lvl: hex.vec 3                                    // read at 3 nibbles by mul_const (high nibble kept 0)
+      zlidx: hex.vec 3
+      zrow: hex.vec 2
+      c127: hex.vec 3
+      tt: hex.vec 8
+      c3f: hex.vec 2
+      u: hex.vec 3                                      // read at 3 nibbles by add 3 (high nibble kept 0)
+      vv: hex.vec 3                                     // read at 3 nibbles by mul_const 3 (high nibble kept 0)
+      spot: hex.vec 4                                   // read at 4 nibbles by add 4 (high nibble kept 0)
+      fidx: hex.vec 4
+      pal: hex.vec 2
+      cmidx: hex.vec 4
+      lit: hex.vec 2
+      xx: hex.vec 8
+      yp: hex.vec 8
+      pixp: hex.vec 8
+      off: hex.vec w/4
+      fbptr: hex.vec w/4
+      cell: hex.vec w/4
     }
 }

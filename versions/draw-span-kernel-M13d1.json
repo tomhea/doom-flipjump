@@ -1,0 +1,9 @@
+{
+  "milestone": "M13d1",
+  "what": "fj plane.draw_span: the TEXTURED floor/ceiling span kernel (DOOM R_MapPlane + R_DrawSpan) -- the 2-coord (u,v) perspective DDA + per-pixel flat sample + distance light, byte-exact vs the oracle reference_model._draw_span",
+  "algorithm": "distance=FixedMul(planeheight,yslope[y]); xstep/ystep=FixedMul(distance,base?scale); length=FixedMul(distance,distscale[x1]); idx=(viewangle+xtoviewangle[x1])>>20; xfrac=viewx+FixedMul(finecos[idx],length); yfrac=-(viewy+FixedMul(finesin[idx],length)); row=zlight[(light>>4)*128+min(127,distance>>20)]; per x in [x1,x2]: spot=((yfrac>>16)&63)*64+((xfrac>>16)&63); fb=colormap[row][flat[flatbase+spot]]; xfrac+=xstep; yfrac+=ystep",
+  "write": "each pixel written to the framebuffer at the RUNTIME address fbase + 2*(y*VIEW_W+x)*dw via hex.ptr_index + hex.write_hex (the per-row span is runtime, unlike the per-column compile-time wall/flat passes)",
+  "test": "tests/fj/test_plane_kernel.py::test_plane_draw_span_byte_exact_vs_oracle: 5 spans (varied angle/row/height floor+ceiling/span-width incl. 1-pixel and screen-edge), byte-exact vs _draw_span",
+  "bug_found": "register read WIDER than allocated -> reads adjacent memory: hex.mul_const 3 / hex.add 3,4 on hex.vec 2/3 regs (vv/u/lvl/spot) read a stale nibble of the NEXT register. Layout-dependent Heisenbug (prints shifted it). Fixed by widening u/vv->3, spot->4, lvl->3 (incl. the same latent bug in draw_pixel). See fj-lessons R11.",
+  "next": "M13d2: runtime per-row span grouping (R_MakeSpans) + combined flat texel table + per-frame basexscale/baseyscale (R_ClearPlanes), wire into emit_wall_renderer, byte-exact vs the textured golden db5d3da8 + report first fps"
+}

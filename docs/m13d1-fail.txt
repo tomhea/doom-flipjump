@@ -1,0 +1,74 @@
+F
+================================== FAILURES ===================================
+__________________ test_plane_draw_span_byte_exact_vs_oracle __________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-940/test_plane_draw_span_byte_exac0')
+
+    def test_plane_draw_span_byte_exact_vs_oracle(tmp_path):
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        Wd = cfg.VIEW_W
+        asset = WadFile.from_path(str(ASSET))
+        colormap = asset.colormap()
+        flat_texels = rm._flat_texels(asset, FLAT, {})                        # raw 64x64 (4096 bytes)
+    
+        yslope = generate_yslope_lut_fj("yslope", cfg.VIEW_W, cfg.VIEW_H)
+        distscale = generate_distscale_lut_fj("distscale", cfg.VIEW_W, cfg.TRIG_N)
+        xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
+        zlight = generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS)
+        finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
+        cm = compile_colormap("cm", asset, lights=COLORMAP_LIGHTS)
+        flat = _texel_table("flat", list(flat_texels), "per_entry", over_align=False)
+    
+        body, data, expected = [], [], b""
+        for k, (vx, vy, va, height, light, y, x1, x2) in enumerate(SPANS):
+            viewx, viewy = (vx * U) & 0xFFFFFFFF, (vy * U) & 0xFFFFFFFF
+            bxs, bys = _base_scales(rm, va)
+            ph = abs((height << 16) - VIEWZ)
+            # oracle: render the span into a fresh frame, then read its pixels back
+            fb = bytearray(cfg.FB_SIZE)
+            rm._draw_span(fb, colormap, flat_texels, height, light, viewx, viewy, va, VIEWZ,
+                          bxs, bys, y, x1, x2)
+            body += [
+                f"hex.set 8, planeheight, {ph}", f"hex.set 2, light, {light}",
+                f"hex.set 8, basexscale, {bxs}", f"hex.set 8, baseyscale, {bys}",
+                f"hex.set 8, viewx, {viewx}", f"hex.set 8, viewy, {viewy}",
+                f"hex.set 8, viewangle, {va}", f"hex.set 2, y, {y}",
+                f"hex.set 8, x1, {x1}", f"hex.set 8, x2, {x2}", "hex.set 4, flatbase, 0",
+                "stl.fcall draw_span_leaf, span_ret",
+            ]
+            for x in range(x1, x2 + 1):
+                body += [f"hex.print_as_digit 2, framebuffer + {2 * (y * Wd + x)}*dw, 0", "stl.output 10"]
+                expected += f"{fb[y * Wd + x]:02x}\n".encode()
+    
+        data += [
+            "planeheight: hex.vec 8", "light: hex.vec 2", "basexscale: hex.vec 8", "baseyscale: hex.vec 8",
+            "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8", "y: hex.vec 2",
+            "x1: hex.vec 8", "x2: hex.vec 8", "flatbase: hex.vec 4", "span_ret: ;0",
+            f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+            yslope, distscale, xtoviewangle, zlight, finesine, cm, flat,
+        ]
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n"
+                + f"draw_span_leaf: plane.draw_span framebuffer, {cfg.VIEW_W}\n" + "\n".join(data) + "\n")
+        p = tmp_path / "draw_span.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [PLANE_FJ.resolve(), FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "plane.draw_span: fj output != oracle _draw_span"
+E       AssertionError: plane.draw_span: fj output != oracle _draw_span
+E       assert False
+
+tests\fj\test_plane_kernel.py:157: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         6.677s
+  macro resolve:   4.650s
+  labels resolve:  1.098s
+  create binary:   5.917s
+  loading memory:  0.228s
+
+Finished by looping after 0.089s (1,938,126 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_plane_kernel.py::test_plane_draw_span_byte_exact_vs_oracle
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 19.38s

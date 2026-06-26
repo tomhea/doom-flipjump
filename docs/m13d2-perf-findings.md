@@ -55,20 +55,24 @@ cost is proportional to the **number of nibble-operations** the per-pixel body i
 ## Frame composition (E1M1 spawn)
 
 - 10,381 plane (floor/ceiling) pixels · 5,619 wall pixels · 1,357 spans · 16,000 total.
-- Floor pass estimate (isolated-kernel rates): 10,381 × 13,446 + 1,357 × 123,000 ≈ **306 M** (140 M per-pixel
-  + **167 M span setup**).
-- Walls + BSP walk ≈ the remaining **~860 M** (the wall pass-2 trampoline runs `pixel_tramp`+`compare_y` for
-  ALL 16,000 pixels — even the 10,381 the plane pass repaints — plus `leaf_body_w` on wall rows + the
-  575-seg walk + per-column `column_render_params`). NOTE: isolated-kernel rates UNDERESTIMATE the full
-  renderer (larger program ⇒ larger @); the measured walls-vs-floors split is below.
+- **MEASURED** (real renderer, below): FLOOR pass = **820 M (70.4%)**, walls + BSP walk = **345 M (29.6%)**.
+- The floor 820 M ÷ 10,381 px = ~79 k ops per plane pixel-equivalent (per-pixel body + the per-span DDA
+  re-seed amortized over 1,357 spans). Isolated-kernel rates (13.4 k/px, 123 k/span) UNDERESTIMATE — the full
+  renderer's @ is larger; treat the isolated numbers as a lower bound on the optimization opportunity.
 
-### Measured walls-vs-floors split (real renderer, plane pass on vs off)
+### Measured walls-vs-floors split (real renderer, plane pass on vs off — `scratchpad/split_e1m1.py`)
 
-Run `scratchpad/split_e1m1.py` (emit_wall_renderer full vs with the `clear_leaf` fcall + `render_planes_spans`
-removed) for the exact split. Estimate from the isolated-kernel rates: floors ≈ 306 M (~26%), walls + BSP
-walk ≈ 860 M (~74%) of the 1.165 B frame — but isolated-kernel rates underestimate the full program (larger
-@), so the real floor share is likely higher. The walls being the larger half means the wall per-pixel path
-(`frame.leaf_body_w`) and the all-16,000-pixel pass-2 trampoline are first-class optimization targets too.
+```
+FULL (walls+floors): 1,165,180,455 ops
+WALLS+WALK only:       344,792,345 ops  (29.6%)   <- the M12 wall renderer alone = ~0.81 fps
+FLOOR pass (delta):    820,388,110 ops  (70.4%)   <- the textured visplane pass DOMINATES
+```
+
+**The FLOOR pass is 70% of the frame — the #1 target by a wide margin.** (My isolated-kernel estimate of
+~306 M was 2.7× low: the full-renderer @ is larger AND the per-span setup is heavier at full scale.) 820 M
+over 10,381 plane px + 1,357 spans ⇒ ~the per-pixel body and the per-span DDA re-seed in `plane.draw_span` /
+`frame.render_planes_spans` are where the optimization effort pays off most. Walls (`leaf_body_w` + the
+all-16,000-px pass-2 trampoline + the 575-seg walk) are the secondary 30%.
 
 ## Optimization targets (the perf-reduction phase works from these)
 

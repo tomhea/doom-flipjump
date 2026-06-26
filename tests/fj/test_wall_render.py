@@ -1678,14 +1678,15 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
                      f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
                      f"col_heightmask + {8 * x}*dw")
-        for y in range(cfg.H):
-            pass2.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + x)}*dw, top, bottom")
+        for y in range(cfg.H):                            # M12oo: the shared-compare trampoline (y runtime, set by load_col)
+            pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
 
     main = "\n".join([
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
         "pixel_leaf:", "frame.leaf_body_w",
+        "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtlw {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
         bsp,
@@ -1703,10 +1704,10 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 5",
         "seg_ret: ;0",
         "top: hex.vec 8", "bottom: hex.vec 8",
+        "y: hex.vec 2", "ret_reg: ;0",                    # M12oo trampoline: runtime row counter + shared return reg
         "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
         "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
         "heightmask: hex.vec 3", "pixel_ret: ;0",
-        f"rows: rep({cfg.H}, i) hex.vec 2, i",
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
@@ -1846,14 +1847,15 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
         pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
                      f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
                      f"col_heightmask + {8 * x}*dw")
-        for y in range(cfg.H):
-            pass2.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + x)}*dw, top, bottom")
+        for y in range(cfg.H):                            # M12oo: the shared-compare trampoline (y runtime, set by load_col)
+            pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
 
     main = "\n".join([
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
         "pixel_leaf:", "frame.leaf_body_w",
+        "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtlw {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
         "bg_fill_leaf:",
@@ -1875,10 +1877,10 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
         "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 5",
         "seg_ret: ;0",
         "top: hex.vec 8", "bottom: hex.vec 8",
+        "y: hex.vec 2", "ret_reg: ;0",                    # M12oo trampoline: runtime row counter + shared return reg
         "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
         "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
         "heightmask: hex.vec 3", "pixel_ret: ;0",
-        f"rows: rep({cfg.H}, i) hex.vec 2, i",
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
@@ -2044,14 +2046,15 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
         pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
                      f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
                      f"col_heightmask + {8 * x}*dw")
-        for y in range(cfg.H):
-            pass2.append(f"frame.pixel_clipped {y}, framebuffer + {2 * (y * cfg.W + x)}*dw, top, bottom")
+        for y in range(cfg.H):                            # M12oo: the shared-compare trampoline (y runtime, set by load_col)
+            pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
 
     main = "\n".join([
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
         "pixel_leaf:", "frame.leaf_body_w",
+        "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtlw {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
         "bg_fill_leaf:",
@@ -2073,10 +2076,10 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
         "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 5",
         "seg_ret: ;0",
         "top: hex.vec 8", "bottom: hex.vec 8",
+        "y: hex.vec 2", "ret_reg: ;0",                    # M12oo trampoline: runtime row counter + shared return reg
         "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
         "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
         "heightmask: hex.vec 3", "pixel_ret: ;0",
-        f"rows: rep({cfg.H}, i) hex.vec 2, i",
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
@@ -2100,10 +2103,13 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
     span = max(s.segment_start + s.segment_length for s in Reader(out).memory_segments)
     print(f"\nM12nn renderer flat span = {span:,} words ({span / (1 << 20):.2f}M; "
           f"default FLAT_MAX_WORDS = {FLAT_MAX_WORDS:,} = 2**23)")
-    # The single COMBINED 5-nibble-index dispatch table over E1M1's 198k wall texels dominates the span (~40M
-    # words / ~320MB) -- far over the 2**23 default, because a 5-nibble index covers a 16**5-slot space (vs
-    # build_doom's narrow per-texture tables). Per DESIGN §1.2 the sanctioned response is to RAISE the flat limit
-    # (RAM-only cost); a more compact encoding / per-texture tables is a tracked optimization (DESIGN §1.2).
+    # SPAN BREAKDOWN (bisected via Reader.memory_segments, corrected -- the combined table is NOT the dominant
+    # chunk, an earlier wrong guess): the ~40M pre-M12oo span was ~21M the BSP WALK (575 segs' baked per-seg/
+    # per-node hex.set constants, emitted twice per leaf) + ~16M the fully-unrolled 16K-pixel PASS-2 clip + only
+    # ~3.5M the combined texel table. M12oo replaced the inlined per-pixel pass-2 clip (two hex.cmp x 16K) with
+    # the SHARED-COMPARE TRAMPOLINE (one compare_y body + a cheap per-pixel wflip), dropping the MEASURED span
+    # from ~40.3M to ~31.2M words (-9M / ~23%). The remaining bloat is the WALK (M12pp/qq/rr) + the table; per
+    # DESIGN §1.2 the flat limit stays RAISED (RAM-only cost) until those land. (Don't promise a number -- MEASURE.)
     RENDER_FLAT_WORDS = 1 << 26
     for k, (vx, vy, va) in enumerate(VIEWPOINTS):
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)

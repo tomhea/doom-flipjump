@@ -72,6 +72,48 @@ ns frame {
       end:                                                    // just zero-init cells (zeroing a zero cell is a no-op)
     }
 
+    // PASS-2 SHARED-COMPARE TRAMPOLINE (M12oo) — the space-optimized replacement for pixel_clipped. The old
+    // pixel_clipped INLINED two `hex.cmp 2` per pixel; unrolled over VIEW_W*VIEW_H (~16K) pixels that clip is
+    // ~16M words (bisected). This moves BOTH compares into ONE shared `compare_y` body (emitted once at the
+    // global label `compare_y:` via compare_y_body) that every pixel JUMPS INTO via a cheap wflip trampoline,
+    // so the heavy compare setup is emitted once, not 16K times. `y` is now a RUNTIME register (zeroed per
+    // column by load_col_mtw, incremented at the END of each pixel here), replacing the compile-time `rows`
+    // table. Per pixel: set ret_reg's jump word to THIS pixel's `ret`, jump compare_y; it returns to *ret_reg
+    // (= `ret`, the SKIP op) or, on render, redirects ret_reg to `ret+dw` (the RENDER op) by flipping the
+    // dw-valued bit of ret_reg's jump word at offset `w + log2(dw)` (= `w + #dw - 1`); `pad 2` aligns `ret`
+    // to 2*dw so that single-bit flip is carry-free. ret_reg self-cleans (the render op flips the bit back;
+    // `end` xors `ret` back out), so it is 0 between pixels. ~2 wflips + an inc per pixel vs ~490 inlined ops.
+    // Globals: ret_reg (a `;0` op), compare_y (the body label), y (hex.vec 2), + the pixel-leaf regs. The
+    // off-screen sentinel (top=1,bottom=0) still skips every row. top/bottom are compared at 2 nibbles (clamped
+    // [0,VIEW_H-1]). @requires hex.init.
+    def pixel_tramp fbcell @ ret, end < ret_reg, compare_y, lit, pixel_ret, pixel_leaf, y {
+        wflip ret_reg + w, ret, compare_y     // ret_reg -> this pixel's `ret`; jump the shared compare_y
+        pad 2                                 // align `ret` to 2*dw so the redirect-bit flip is carry-free
+      ret:
+        ; end                                 // SKIP target (op at ret): render nothing, fall to `end`
+        ret_reg + w + (#dw - 1) ;             // RENDER target (op at ret+dw): un-redirect ret_reg (self-clean)
+        stl.fcall pixel_leaf, pixel_ret       // sample + colormap -> lit, advance the DDA
+        hex.zero 2, fbcell                    // OVERWRITE so the wall composes over the filled background (M12ii)
+        hex.xor_zero 2, fbcell, lit
+      end:
+        wflip ret_reg + w, ret                // clear ret_reg back to 0 (xor `ret` out)
+        hex.inc 2, y                          // advance the row (INC AT END, so frac0 aligns to `top`)
+    }
+
+    // the SHARED compare_y body (M12oo), emitted ONCE at the global label `compare_y:` and JUMPED INTO by every
+    // pixel_tramp. Decides render vs skip from the runtime row `y` against the column's clipped [top,bottom]
+    // (same logic as pixel_clipped): on skip jump *ret_reg (= the pixel's `ret`); on render fall to `next`,
+    // which redirects ret_reg to `ret+dw` (the RENDER op) and jumps it. top/bottom compared at 2 nibbles. The
+    // body never falls through (every path jumps to ret_reg), so it is safe to place after stl.loop. @requires
+    // hex.init.
+    def compare_y_body @ lo_ok, next < bottom, y, ret_reg, top {
+        hex.cmp 2, bottom, y, ret_reg, lo_ok, lo_ok   // bottom < y -> skip (below the wall): jump *ret_reg
+      lo_ok:
+        hex.cmp 2, top, y, next, next, ret_reg        // top > y -> skip (above the wall); else fall to `next` (render)
+      next:
+        ret_reg + w + (#dw - 1) ; ret_reg             // redirect ret_reg: ret -> ret+dw, jump it (render)
+    }
+
     // per-column orchestrator (M12cc): compute the column's render params (clipped top/bottom + texcol +
     // the 8.8 DDA frac0/step) via proj.column_render_params, then load the shared leaf's per-column
     // registers (base_reg = texcol*texheight, cmidx light byte, step, frac) ready for the row loop. Writes
@@ -166,7 +208,7 @@ ns frame {
     // col array element. All other fields are read from their (now 8-nibble) elements at their natural widths
     // (the high nibbles are 0). Pairs with leaf_body_w (5-nibble idx). @requires hex.init & stl.ptr_init.
     def load_col_mtw top_src, bottom_src, base_src, light_src, step_src, frac0_src, hm_src \
-            < top, bottom, base_reg, cmidx, step, frac, heightmask {
+            < top, bottom, base_reg, cmidx, step, frac, heightmask, y {
         hex.mov 2, top, top_src
         hex.mov 2, bottom, bottom_src
         hex.mov 5, base_reg, base_src                // 5-nibble absolute texel index into the combined table
@@ -175,6 +217,7 @@ ns frame {
         hex.mov 4, step, step_src
         hex.mov 4, frac, frac0_src
         hex.mov 3, heightmask, hm_src
+        hex.zero 2, y                                // reset the pass-2 trampoline row counter for this column (M12oo)
     }
 
     // PASS-1 per-column runtime STORE (M12kk) — the write-side analog of load_col. The seg-major pass 1

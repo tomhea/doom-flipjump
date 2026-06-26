@@ -1,0 +1,5 @@
+# M12oo TDD PASS — compare_y_body fixed to the correct [top,bottom] clip.
+# pixel_tramp (trampoline) is byte-exact vs render_textured_column placement; old pixel_clipped test also still passes.
+
+..                                                                       [100%]
+2 passed in 2.70s

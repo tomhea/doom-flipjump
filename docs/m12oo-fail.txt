@@ -1,0 +1,18 @@
+# M12oo TDD FAIL — compare_y_body stubbed to ALWAYS RENDER (ignores top/bottom clip).
+# The wall fills the whole column instead of rows [20,35] -> row 0 (index 5) is a wall texel 0x03, not bg 0x00.
+
+        col = ReferenceModel().render_textured_column(texels, th, texcol, colormap, light,
+                                                      count=count, frac0=frac0, step=step)
+        want = bytearray(cfg.FB_SIZE)
+        for r in range(count):
+            want[(top + r) * cfg.W + x] = col[r]
+>       assert bytes(screen.pixel_indices) == bytes(want)
+E       AssertionError: assert b'\x00\x00\x0...0\x00\x00\x00' == b'\x00\x00\x0...0\x00\x00\x00'
+E         
+E         At index 5 diff: b'\x03' != b'\x00'
+E         Use -v to get more diff
+
+tests\fj\test_render_macros.py:269: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_render_macros.py::test_frame_pixel_tramp_runtime_span - ...
+1 failed in 1.59s

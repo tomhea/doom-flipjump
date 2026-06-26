@@ -14,8 +14,9 @@ from __future__ import annotations
 from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj,
-    generate_yslope_lut_fj, generate_zlight_lut_fj,
+    generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
 )
+from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import bake_bsp, _bsp_as_code
 from doomfj.reference_model import (ReferenceModel, WALL_BG,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
@@ -67,7 +68,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     scene = build_scene(map_wad, asset_wad, mapname)
     colormap = scene.asset_wad.colormap()
     proj = cfg.PROJECTION << 16
-    flatcache: dict = {}                                      # _flat_base per-frame cache (the flat's [0] texel)
     defs = {d.name.upper(): d for d in asset_wad.texture_defs("TEXTURE1")}
 
     # the combined dispatch table over every distinct wall texture the one-sided segs use (downscaled to match
@@ -103,6 +103,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         seg_texinfo[si] = info[sd.middle.upper()] if t is not None else info["__WALLBG__"]
 
     tex = _texel_table("tex", combined, "per_entry", over_align=over_align)
+
+    # M13d2 — the combined FLAT texel table over every distinct ceil/floor flat the one-sided seg sectors use
+    # (64x64 RAW, NO downscale; the `&63` wraps). Each flat gets a SLICE offset; the textured span pass samples
+    # `flat[slice_offset + (v&63)*64 + (u&63)]`. Missing flats (e.g. the sky placeholder before M16) become a
+    # uniform WALL_BG tile via _flat_texels — identical to the oracle. Per-seg bakes the ceil/floor slice offset.
+    flat_texcache: dict = {}
+    flat_names = set()
+    for si, seg in enumerate(cmap.segs):
+        ld = lds[seg.linedef]
+        if ld.back != -1:
+            continue
+        fsec = rm._seg_sector(lds, sds, secs, seg)
+        flat_names.add(fsec.ceil_tex.upper()); flat_names.add(fsec.floor_tex.upper())
+    flat_combined, flat_slice = [], {}
+    for nm in sorted(flat_names):
+        flat_slice[nm] = len(flat_combined)
+        flat_combined += list(rm._flat_texels(asset_wad, nm, flat_texcache))
+    flat_table = _texel_table("flat", flat_combined, "per_entry", over_align=over_align)
+
     cm = compile_colormap("cm", asset_wad, lights=COLORMAP_LIGHTS, over_align=over_align)
     palette = compile_palette("palette", asset_wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
@@ -153,9 +172,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                       ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
                       ("seg_ceil", 8, ssec.ceil_h & 0xFFFFFFFF),   # M12pp: worldtop = seg_ceil - viewzw in-leaf
                       ("seg_floor", 8, ssec.floor_h & 0xFFFFFFFF),  # M13c3: floor planeheight = |floor_h<<16 - viewz|
-                      ("seg_plight", 2, ssec.light & 0xFF),         # RAW sector light (plane.draw_pixel does >>4)
-                      ("seg_ceilbase", 2, rm._flat_base(asset_wad, ssec.ceil_tex, flatcache)),
-                      ("seg_floorbase", 2, rm._flat_base(asset_wad, ssec.floor_tex, flatcache))]
+                      ("seg_plight", 2, ssec.light & 0xFF),         # RAW sector light (zlight does >>4)
+                      ("seg_ceilbase", 5, flat_slice[ssec.ceil_tex.upper()]),   # M13d2 flat SLICE offset
+                      ("seg_floorbase", 5, flat_slice[ssec.floor_tex.upper()])]
             xorby_blocks[si] = _seg_xorby_block(si, fields)
             out += _seg_xorby_use(si)
         return out
@@ -177,16 +196,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                      f"col_heightmask + {8 * x}*dw")
         for y in range(cfg.H):                                # M12oo: the shared-compare trampoline (y runtime)
             pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
-    plane_pass = []                                       # pass 2b: floor/ceiling visplanes (M13c3 plane_tramp)
-    for x in range(cfg.VIEW_W):
-        plane_pass.append(f"frame.load_col_plane col_cexcl + {8 * x}*dw, col_fstart + {8 * x}*dw, "
-                          f"col_ceil_ph + {8 * x}*dw, col_floor_ph + {8 * x}*dw, col_plight + {8 * x}*dw, "
-                          f"col_ceilbase + {8 * x}*dw, col_floorbase + {8 * x}*dw")
-        for y in range(cfg.H):
-            plane_pass.append(f"frame.plane_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
+    # pass 2b: floor/ceiling visplanes (M13d2) — the per-frame clear_planes seeds + the runtime per-ROW
+    # R_MakeSpans textured span pass (replaces the M13c3 per-column plane_tramp unroll).
+    plane_pass = ["stl.fcall clear_leaf, clear_ret",
+                  f"frame.render_planes_spans {cfg.VIEW_W}, {cfg.VIEW_H}"]
 
     yslope = generate_yslope_lut_fj("yslope", cfg.VIEW_W, cfg.VIEW_H)
     zlight = generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS)
+    distscale = generate_distscale_lut_fj("distscale", cfg.VIEW_W, cfg.TRIG_N)
 
     main = "\n".join([
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2, *plane_pass,
@@ -194,8 +211,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "bad: stl.loop",
         "pixel_leaf:", "frame.leaf_body_w",
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
-        "plane_leaf:", "plane.draw_pixel",                # M13c3 the distance-lit flat-colored plane pixel
-        "plane_compare:", "frame.plane_compare_body",     # M13c3 shared floor/ceiling/skip select (emitted once)
+        "span_leaf:", f"plane.draw_span framebuffer, {cfg.VIEW_W}",   # M13d2 textured u,v span (R_DrawSpan)
+        "clear_leaf:", f"plane.clear_planes {cfg.CENTERX << 16}, {ANG90}",  # M13d2 per-frame R_ClearPlanes seeds
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}",
         *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
@@ -209,8 +226,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
         "ceilfix: hex.vec 8", "floorfix: hex.vec 8",
         "seg_ceil: hex.vec 8", "worldtop: hex.vec 8",     # M12pp: seg_ceil baked (pure); worldtop leaf-computed
-        "seg_floor: hex.vec 8", "seg_plight: hex.vec 2",  # M13c3 plane bakes (pure floor_h + raw light + flat bases)
-        "seg_ceilbase: hex.vec 2", "seg_floorbase: hex.vec 2",
+        "seg_floor: hex.vec 8", "seg_plight: hex.vec 2",  # M13d2 plane bakes (pure floor_h + raw light + flat slices)
+        "seg_ceilbase: hex.vec 5", "seg_floorbase: hex.vec 5",   # 5-nib flat slice offsets
         "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
         "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
         "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
@@ -221,10 +238,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
         "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
         "heightmask: hex.vec 3", "pixel_ret: ;0",
-        # M13c3 pass-2 plane registers (load_col_plane fills these per column; plane_compare/plane.draw_pixel read them)
-        "planeheight: hex.vec 8", "light: hex.vec 2", "pbase: hex.vec 2",
-        "cexcl: hex.vec 2", "fstart: hex.vec 2", "ceil_ph: hex.vec 8", "floor_ph: hex.vec 8",
-        "ceil_base: hex.vec 2", "floor_base: hex.vec 2", "plane_ret: ;0",
+        # M13d2 pass-2b textured-plane registers (render_planes_spans sets these per span; draw_span reads them)
+        "planeheight: hex.vec 8", "light: hex.vec 2", "flatbase: hex.vec 5",
+        "basexscale: hex.vec 8", "baseyscale: hex.vec 8",   # per-frame R_ClearPlanes seeds (clear_leaf)
+        "span_ret: ;0", "clear_ret: ;0",
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
@@ -235,6 +252,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         f"col_plight: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_ceilbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_floorbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette, yslope, zlight,
+        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
     ])
     return main

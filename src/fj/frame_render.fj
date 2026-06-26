@@ -649,8 +649,8 @@ ns frame {
     // wall span [top,bottom], it records the plane regions (oracle: ceiling rows y < cexcl = min(top,VIEW_H),
     // floor rows y >= fstart = max(bottom+1,0)) and the per-seg plane shading consts: the ceil/floor
     // planeheight cph/fph = |(plane_z<<16) - viewz| (computed ONCE per seg from the PURE baked seg_ceil/
-    // seg_floor + the runtime player eye viewz), the RAW sector light seg_plight, and the ceil/floor flat base
-    // palette index seg_ceilbase/seg_floorbase. These are stored alongside the 7 wall fields (same x*8 stride),
+    // seg_floor + the runtime player eye viewz), the RAW sector light seg_plight, and the ceil/floor flat SLICE
+    // offset seg_ceilbase/seg_floorbase (into the combined flat table; M13d2 textured). Stored alongside the wall fields (same x*8 stride),
     // for the pass-2 load_col_plane + plane_tramp fill. The wall path is byte-identical to _mtlw (incl. the
     // off-screen top=1/bottom=0 sentinel). viewh = VIEW_H (compile-time). @requires hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_mtlwp centery, ds, viewh1, viewh, projection \
@@ -719,8 +719,8 @@ ns frame {
         .store_col_field8 col_ceil_ph, sidx, cph
         .store_col_field8 col_floor_ph, sidx, fph
         .store_col_field col_plight, sidx, seg_plight
-        .store_col_field col_ceilbase, sidx, seg_ceilbase
-        .store_col_field col_floorbase, sidx, seg_floorbase
+        .store_col_field5 col_ceilbase, sidx, seg_ceilbase   // M13d2: 5-nibble flat SLICE offset (combined
+        .store_col_field5 col_floorbase, sidx, seg_floorbase //   flat table, ~151k texels for E1M1 -> idx_n=5)
         .mark_drawn x, drawn
       skipcol:
         hex.inc 8, x

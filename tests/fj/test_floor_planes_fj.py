@@ -1,15 +1,15 @@
-"""M13c3a (F5) — the fj FLOOR/CEILING (visplane) FLAT-COLORED raster wired into the SHARED
-`emit_wall_renderer`, byte-exact vs the host oracle `render_wall_frame(floor_texturing=False)` (the M13a
-flat tier). The two-band M9 background (`render_background_reg`) is replaced by a per-column visplane fill:
-pass 1 stores the per-column plane params (ceiling region `cexcl`, floor region `fstart`, the ceil/floor
-planeheights, the RAW sector light, and the ceil/floor flat base index) via the new
-`seg_pass1_leaf_body_mtlwp`; a second unrolled pass-2 (`load_col_plane` + `plane_tramp` + the shared
-`plane_compare_body` / `plane.draw_pixel` kernel) paints the floor/ceiling bands around each wall.
+"""M13d2 (F5) — the fj FLOOR/CEILING (visplane) TEXTURED raster wired into the SHARED `emit_wall_renderer`,
+byte-exact vs the host oracle `render_wall_frame()` (the textured DEFAULT, R_DrawPlanes). Pass 1 stores the
+per-column plane params (ceiling region `cexcl`, floor region `fstart`, the ceil/floor planeheights, the RAW
+sector light, and the ceil/floor flat SLICE offset) via `seg_pass1_leaf_body_mtlwp`; the per-frame
+`plane.clear_planes` seeds basexscale/baseyscale, and the runtime per-ROW `frame.render_planes_spans`
+(R_MakeSpans) groups same-visplane columns into spans rasterized by `plane.draw_span` (the 2-coord u,v DDA
+sampling the combined FLAT texel table, distance-lit) — replacing the M13c3 per-column flat-colored
+`plane_tramp`.
 
-The square room (one real STEP4 wall texture -> a tiny combined table -> a fast assemble) lets this run
-through the EXACT shared emitter `build_doom` ships (R6), byte-exact vs the oracle over several runtime
-viewpoints, with the spawn frame matching the published flat-tier golden. E1M1 (the slow full-texture
-assemble) is M13c3b.
+The square room (one real STEP4 wall texture -> a tiny combined table -> a fast assemble) runs through the
+EXACT shared emitter `build_doom` ships (R6), byte-exact vs the oracle over several runtime viewpoints, the
+spawn frame matching the published textured golden. The full E1M1 frame is the heavy multi-sector capstone.
 """
 from pathlib import Path
 
@@ -34,13 +34,13 @@ ROOM = "tests/fixtures/square_room.wad"
 ASSET = "tests/fixtures/freedoom_assets.wad"
 E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 
-# the M13a flat-colored square-room golden (tests/host/test_floor_planes.py::test_square_flatcolored_floor_golden_hash)
-SQUARE_FLAT_GOLDEN = "aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463"
-# the M13a flat-colored E1M1 spawn golden (tests/host/test_floor_planes.py::test_e1m1_flatcolored_floor_golden_hash)
-E1M1_FLAT_GOLDEN = "9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01"
+# the M13b textured square-room golden (tests/host/test_floor_planes.py::test_square_textured_floor_golden_hash)
+SQUARE_TEX_GOLDEN = "00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12"
+# the M13b textured E1M1 spawn golden (tests/host/test_floor_planes.py::test_e1m1_textured_floor_golden_hash)
+E1M1_TEX_GOLDEN = "db5d3da80a52c3ea78a8f599d121aaeb450bdfb84ca96b4656f0c267302ef0b2"
 
 
-def test_square_flat_planes_byte_exact_vs_oracle(tmp_path):
+def test_square_textured_planes_byte_exact_vs_oracle(tmp_path):
     cfg = Config()
     rm = ReferenceModel(cfg)
     mw = WadFile.from_path(ROOM)
@@ -68,27 +68,26 @@ def test_square_flat_planes_byte_exact_vs_oracle(tmp_path):
                 out, memory_width=W, print_time=False)
 
     for k, (vx, vy, va) in enumerate(VIEWPOINTS):
-        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene, floor_texturing=False)
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene)   # textured DEFAULT
         screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
         fj.run(out, io_device=screen, print_time=False, print_termination=False)
         got = bytes(screen.pixel_indices)
-        assert got == bytes(want), f"M13c3a @ ({vx},{vy},{va}) != oracle flat planes"
-        if k == 0:                                            # the spawn frame must hash to the flat golden
-            assert frame_hash(got) == SQUARE_FLAT_GOLDEN, f"M13c3a spawn hash {frame_hash(got)} != golden"
+        assert got == bytes(want), f"M13d2 @ ({vx},{vy},{va}) != oracle textured planes"
+        if k == 0:                                            # the spawn frame must hash to the textured golden
+            assert frame_hash(got) == SQUARE_TEX_GOLDEN, f"M13d2 spawn hash {frame_hash(got)} != golden"
 
 
-def test_e1m1_flat_planes_full_frame_byte_exact_and_golden(tmp_path):
-    """M13c3b — THE FULL E1M1 flat-colored floor/ceiling frame through the SHARED emit_wall_renderer (the same
-    emitter build_doom ships, R6), byte-exact vs the host oracle render_wall_frame(floor_texturing=False) and
-    matching the published M13a E1M1 spawn golden 9569a547. This is the MULTI-SECTOR validation the single-sector
-    square room cannot give: across E1M1's 575 one-sided segs the per-seg ceil/floor heights, flats, and RAW
-    sector light all VARY, so the per-column plane params (cexcl/fstart/ceil_ph/floor_ph/plight/ceil_base/
-    floor_base) are baked per seg via the xor_by involution and stored per claimed column, plus the off-screen
-    wall sentinel + drawn[] occlusion interact with the plane regions. One assemble (the 198k-texel combined
-    wall table dominates ~259 s; R4-gated flat under 2**26), several stdin viewpoints (spawn + a rotation + two
-    other-sector positions, so the player-subsector viewz/light vary) each byte-exact, the spawn frame hashing
-    to the flat golden. (M13d swaps the flat plane base for the perspective u,v flat sample -> the textured
-    golden db5d3da8 + re-enables the two M13d-targeted skipped goldens.)"""
+def test_e1m1_textured_planes_full_frame_byte_exact_and_golden(tmp_path):
+    """M13d2 — THE FULL E1M1 TEXTURED floor/ceiling frame through the SHARED emit_wall_renderer (the same
+    emitter build_doom ships, R6), byte-exact vs the host oracle render_wall_frame() (textured DEFAULT) and
+    matching the published M13b E1M1 spawn golden db5d3da8. The MULTI-SECTOR capstone the single-sector square
+    room cannot give: across E1M1's 575 one-sided segs the per-seg ceil/floor heights, flats (the 37-slice
+    combined flat table -> 5-nibble slice offsets), and RAW sector light all VARY; the per-column plane params
+    are baked per seg via the xor_by involution + stored per claimed column, then the runtime per-ROW span pass
+    (R_MakeSpans) groups same-visplane columns and the u,v DDA samples each flat. One assemble (the 198k-texel
+    wall table + the 151k-texel flat table dominate; R4-gated flat under 2**26), several stdin viewpoints (spawn
+    + a rotation + two other-sector positions) each byte-exact, the spawn frame hashing to the textured golden,
+    and the spawn-frame ops/frame reported (the FIRST fps data point: fps ~= 280M fj/s / ops_per_frame)."""
     cfg = Config()
     rm = ReferenceModel(cfg)
     mw = WadFile.from_path(E1M1_WAD)
@@ -115,19 +114,28 @@ def test_e1m1_flat_planes_full_frame_byte_exact_and_golden(tmp_path):
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), PLANE_FJ.resolve(), p.resolve()],
                 out, memory_width=W, print_time=False)
 
-    # R4: the WHOLE runtime renderer (combined table + framebuffer + LUTs + the TWO 16K-pixel pass-2 unrolls +
-    # the 681-node walk) must run flat; the visplane pass pushed the span to ~24.7M, under the raised 2**26.
+    # R4: the WHOLE runtime renderer (combined wall + flat tables + framebuffer + LUTs + the 16K-pixel wall
+    # pass-2 unroll + the runtime span pass + the 681-node walk) must run flat under the raised 2**26.
     RENDER_FLAT_WORDS = 1 << 26
     span = max(s.segment_start + s.segment_length for s in Reader(out).memory_segments)
     assert span < RENDER_FLAT_WORDS, f"R4: span {span} >= {RENDER_FLAT_WORDS}"
+    assert 20_000_000 < span < 40_000_000, f"R4 sanity: span {span} (textured: wall+flat tables)"
 
     for k, (vx, vy, va) in enumerate(VIEWPOINTS):
-        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene, floor_texturing=False)
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)   # textured DEFAULT
         screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
         term = fj.run(out, io_device=screen, print_time=False, print_termination=False,
                       flat_max_words=RENDER_FLAT_WORDS)
         assert str(term.storage_mode) == "flat", f"R4: storage_mode {term.storage_mode!r} not flat @ {span} words"
         got = bytes(screen.pixel_indices)
-        assert got == bytes(want), f"M13c3b @ ({vx},{vy},{va}) != oracle flat planes"
-        if k == 0:                                            # the spawn viewpoint must hash to the flat golden
-            assert frame_hash(got) == E1M1_FLAT_GOLDEN, f"M13c3b spawn hash {frame_hash(got)} != golden"
+        assert got == bytes(want), f"M13d2 @ ({vx},{vy},{va}) != oracle textured planes"
+        if k == 0:                                            # the spawn viewpoint must hash to the textured golden
+            assert frame_hash(got) == E1M1_TEX_GOLDEN, f"M13d2 spawn hash {frame_hash(got)} != golden"
+            ops = term.op_counter                             # FIRST fps data point (DESIGN §1: fps ~ 280M/ops)
+            print(f"\nM13d2 E1M1 spawn frame: {ops:,} ops/frame  ~= {280_000_000 / ops:.2f} fps "
+                  f"(span {span:,} words)")
+            # MEASURED BASELINE (M13d2): ~1.165e9 ops/frame ~= 0.24 fps at 280M fj/s -- ~83x over the DESIGN
+            # ~14M/20fps estimate. NOT @-at-scale (@~25-30); a per-pixel hot-path cost (~13.4k ops/pixel, the
+            # nibble-op dispatch count -- table size is irrelevant). The PERF-REDUCTION PHASE addresses this;
+            # see the handoff. Loose bound = a regression backstop, not the target.
+            assert 0 < ops < 2_000_000_000, f"ops/frame {ops}"

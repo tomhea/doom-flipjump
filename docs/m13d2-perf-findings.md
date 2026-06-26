@@ -157,6 +157,60 @@ compile-time address). Tag: **[exact]** keeps the goldens; **[re-bless]** change
 14. **Method:** first MEASURE the floor pass's setup-vs-pixel-vs-walk split (one targeted run) to order 1–8;
     then each change → re-assert goldens (or re-bless) → re-measure fps.
 
+## Op + width audit of `plane.draw_span` (the 70% hot path)
+
+Two questions: (1) is each mul/div/complex-macro really needed? (2) what is the minimum nibble width of each
+register? Cost is ~linear in nibble width, and an N-nibble op = N truth-table dispatches.
+
+### (1) mul / div / complex-macro necessity
+PER-PIXEL (lines 155-186) — runs ~10,381×/frame:
+- `mul_const 8, pixp, yp, view_w` (y·VIEW_W) — **NOT NEEDED.** y is span-constant; the address is monotone →
+  **running fb pointer (`+= 2*dw`/px)**. Deletes the multiply + `zero yp/off`, `mov yp/off`, `shl`, `set fbptr`,
+  `ptr_index` (≈9 ops, several 8-nibble). **[exact]**
+- `mul_const 3, spot, vv, 64` — ×64 is a single-bit constant ⇒ `mul_const` already strength-reduces it to one
+  shift (not a real multiply). Keep or fold into the `fidx` write. Cheap.
+- `flat.sample`, `cm.apply` — needed, measured cheap (~36/33 ops). NOT the problem.
+- `ptr_index`+`write_hex` — the write is unavoidable; the ADDRESS REBUILD is not → running pointer (above).
+- **Net: the per-pixel body needs ZERO real multiplies and ZERO per-pixel address math.**
+
+PER-SPAN setup (lines 118-152) — the 6 `fixed_mul`s:
+- `dist=ph·yslope[y]`, `xstep=dist·basexscale`, `ystep=dist·baseyscale` — depend only on (planeheight,y) →
+  **hoist to once per (row,visplane)** (identical for same-visplane spans in a row). **[exact]**
+- `length=dist·distscale[x1]`, `finecos·length`, `finesin·length` — x1-dependent. Eliminated by the
+  **continuous per-row DDA** (seed once/row/visplane, step across) — **[re-bless]**; else stay per-span.
+- The zlight-row block (`zidx`/clamp/`lvl`/`zlidx`/`zrow` read) also depends only on (dist,light) → **hoist to
+  per (row,visplane)**. The `yslope[y]` read → **once per row**. **[exact]**
+- `clear_planes` 2 `fixed_div` are PER-FRAME — fine. `draw_span` has NO divide.
+
+### (2) minimum register widths (current → min)
+| reg(s) | now | min | basis | tag |
+| --- | --- | --- | --- | --- |
+| `x1`,`x2`,`xx` (loop) | 8 | **2** | column 0-159 < 256; loop guard `scmp 8`→`scmp 2`, `inc 8`→`inc 2` (or count-down a 2-nib width) | [exact] |
+| `xfrac`,`yfrac` | 8 | **6** | only bits 0-21 feed `(>>16)&63`; add carries up only, so mod 2²⁴ ≡ mod 2³² for bits 16-21 | [exact] |
+| `xstep`,`ystep` | 8 | **6** | added into the 6-nib accumulators (read low 6) | [exact] |
+| `u`,`vv` | 3 | **2** | 0-63 (6-bit); the 3rd nib was only for the old `mul_const`/`add 3` read | [exact] |
+| `spot` | 5 | **3** | v·64+u ≤ 4095 (12-bit); flat slices are 4096-aligned ⇒ `fidx`low3 = spot OR-disjoint (no carry) → write spot into `fidx`'s low 3 nibs, `flatbase>>12` preset once/span | [exact] |
+| `tt` (shift scratch) | 8 | **— delete** | replace `mov 8 tt,xfrac; shr_hex 8,4 tt` with `mov 2 u, xfrac+4*dw` (read nibbles 4-5 directly) — no 8-nib mov/shift per coord | [exact] |
+| `yp`,`pixp`,`off` | 8/8/w4 | **— delete** | subsumed by the running fb pointer | [exact] |
+| `cmidx` rebuild | 4 | per-pixel **2** | `zrow` (light) is span-constant → set `cmidx` high byte once/span; per-pixel only `mov 2 cmidx,pal` | [exact] |
+| `planeheight`,`dist`,`ys`,`length` | 8 | 8 | genuine 16.16, large near horizon — keep | — |
+| `fc`,`fs` | 8 | ~5 | finesine entries are 16-bit (sign-extended) — narrowable with care | [exact, later] |
+| `idx`,`zidx`,`lvl`,`zlidx` | 3 | 3 | ok | — |
+| `zrow`,`pal`,`lit` | 2 | 2 | ok | — |
+
+Net per-pixel after (1)+(2): drop ~6 eight-nibble ops (the two `mov8`+`shr8` extracts, the `mul_const 8`, the
+address rebuild) + narrow the two DDA adds 8→6 + the loop guard 8→2. Per-pixel ≈ **13.4k → ~3-4k ops** (the
+remaining: 2× narrow extract, spot, `flat.sample`, `cm.apply`, `write_hex`, 2× `add 6`, pointer `+=`, counter).
+
+### `frame.render_planes_spans` widths
+`xcur`,`cVW`,`xm1`,`spanx1` are 8-nibble but ≤160 → **2 nibbles**; `cmp 8 xcur,cVW`→`cmp 2`. `spanph`/`cph`
+stay 8 (planeheight). **[exact]**
+
+### Wall path
+`leaf_body_w` is already narrow (2-nib ops + the 8.8 DDA `add 4`). `proj.column_render_params` has per-column
+`fixed_div` (iscale=1/scale) + `hex.div` (texcol%tw) — needed, PER-COLUMN (right tier); a reciprocal LUT for
+`1/scale` is the later lever.
+
 ## How to reproduce
 
 - `scratchpad/prof_drawspan.py` — per-pixel ops vs span width vs flat-table size (native engine, fast).

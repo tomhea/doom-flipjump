@@ -211,6 +211,38 @@ stay 8 (planeheight). **[exact]**
 `fixed_div` (iscale=1/scale) + `hex.div` (texcol%tw) — needed, PER-COLUMN (right tier); a reciprocal LUT for
 `1/scale` is the later lever.
 
+## Gaps / risks in the optimization ideas (adversarial self-review)
+
+Before coding, the traps in each idea. Type: **correct** = could break byte-exactness; **leverage** = the
+gain is unmeasured / may be near-zero; **cost** = a hidden cost the idea ignores; **dep** = depends on / overlaps
+another change; **scope** = something not yet audited.
+
+| # | Optimization | Gap / hidden issue | Type | Mitigation |
+| --- | --- | --- | --- | --- |
+| 1 | Hoist `dist/xstep/ystep/zrow` to per-(row,visplane) | Only helps rows where a visplane is **chopped into ≥2 spans**. If avg spans-per-visplane-per-row ≈ 1, gain ≈ 0. Needs a per-row cache keyed by `planeheight` (8-nib compares) + crosses the draw_span/render_planes_spans boundary. | leverage | **Measure the chop rate first** (spans ÷ distinct visplanes per row). Skip if ~1. |
+| 2 | Continuous per-row DDA (no per-span re-seed) | Deviates from DOOM/oracle (continuous ≠ per-span re-seed) → owner must accept the visual. Skipping a wall gap of width g costs **g adds or a multiply** (not free). First seed/row/visplane still full. | correct, cost | Owner sign-off on re-bless; only worth it if chop rate (gap 1) is high. |
+| 3 | Running fb pointer (`+= 2*dw`/px) | Still needs a per-span seed = `y*VIEW_W` (a multiply) → push it to a **per-ROW base pointer** (`+= VIEW_W`/row) or it just moves the mul from per-pixel to per-span. The advance unit (digit vs bit) is easy to get wrong → **silent frame corruption**. | cost, correct | Per-row base pointer; verify the advance unit against the FB layout (the golden catches it). |
+| 4 | Narrow `xfrac/yfrac` 8→6 nib | **[exact] ONLY if the SEED `fixed_mul` stays 8-nib.** Computing the seed at 6 nib changes fractional bits 0-15 → different carries into bit 16 → breaks bits 16-21. | correct | Narrow only the per-pixel **add** to 6; keep the seed multiply at 8. |
+| 5 | "Narrow DDA to 8.8 (4 nib)" | This is a **different, [re-bless]** change (drops fractional precision), NOT the same as the 6-nib [exact] narrowing. Conflating them silently changes pixels. | correct | Treat as two separate ideas; 6-nib first (exact), 8.8 only if needed (re-bless). |
+| 6 | `spot` 5→3 + OR-disjoint into `fidx` | The OR trick assumes **every flat slice is 4096-aligned** (low 3 nib = 0). A future non-4096 flat / odd sentinel breaks it silently (lost carry). | correct | `assert` 4096-alignment in the emitter, or keep `add` (carry-safe). |
+| 7 | `spot = v*64+u` "remove the multiply" | `mul_const ×64` is a single set bit ⇒ already strength-reduced to **one shift**. The "win" is tiny; the real win is the width narrow. | leverage | Don't prioritize; it's ~free already. |
+| 8 | Direct-offset extract `mov 2 u, xfrac+4*dw` | The `+4*dw` offset is in **digit units** (nibble 4 = bits 16-19); an off-by-unit reads the wrong nibbles. | correct | Verify the offset; golden catches it. |
+| 9 | Hoist span-constant `cmidx` hi-byte / `fidx` hi | Register **lifetime**: the per-pixel body must touch ONLY the low bytes; any intervening clobber of the preset high bytes corrupts every pixel after. | correct | Audit no intervening writes to `cmidx+2dw` / `fidx` high. |
+| 10 | Classify-walk: read each column once | The clean version needs the **column-incremental R_MakeSpans** (H open-span entries; a substantially different, trickier algorithm). The cheap "packed visplane-key" only cuts the extend compare 3→1 — it does **NOT** remove the per-cell `cexcl/fstart` reads (region needs y). **The walk's share of the 820M is unmeasured.** | leverage, cost, scope | Measure the walk's share first; try the packed-key (small) before the full rewrite. |
+| 11 | Wall pass-2 → per-column `[top,bottom]` loop | Trades **compile-time FB addressing** (the M12 design win = zero pointer math) for runtime pointers. Net win = (10,381 skipped trampolines) − (pointer math on 5,619 real px); could be marginal. Reopens the tuned M12oo assemble-time/span tradeoffs. | cost, dep | Measure the per-skip trampoline cost vs the pointer cost before committing. |
+| 12 | Reciprocal LUT for `1/scale` | `scale` is a wide-range 16.16 input → a LUT needs many entries or interpolation; may not beat `fixed_div`. | leverage | Prototype + compare; low priority (per-column, not per-pixel). |
+| 13 | `rowbase[y]=y*VIEW_W` LUT | **Redundant** with the running per-row base pointer (#3). Pick one. | dep | Use the running pointer; drop the LUT. |
+| 14 | All per-pixel/per-span savings estimates | Measured at **isolated-kernel scale** (~2.5× below the full renderer's @). The real frame delta differs. | leverage | Re-measure on the real renderer per rung; isolated = a lower bound on opportunity. |
+| 15 | Program-size feedback | Un-unrolling (wall loop, #11) **shrinks @ globally** (a win not in the local estimates); new LUTs grow span/@ (a cost). | cost | Prioritize size-reducing changes for the @ ripple; budget LUT span (R4). |
+| 16 | All the draw_span [exact] tweaks (#3-9) | They touch the **same** per-pixel loop and overlap → doing them as separate rungs causes rework + repeated 5-min E1M1 re-verification. | dep | Bundle the [exact] draw_span changes into ONE rung; iterate on the fast SQUARE golden, capstone on E1M1. |
+| 17 | The [re-bless] changes (#2, #5) | Need oracle + both goldens + every byte-exact test updated **in lockstep**; can't be incremental without re-blessing each time. | dep | Do all [exact] first; batch [re-bless] into one rung with a single re-bless. |
+| 18 | Wall side (`column_render_params`, BSP walk) | **Not yet op/width-audited** — it's the 30% (345M). The floor audit doesn't cover it. | scope | Audit after the floor wins land. |
+| 19 | Narrow `fc/fs` to ~5 nib | finesine entries are **signed**; narrowing must sign-extend correctly into `fixed_mul` — subtle. | correct | Defer; verify sign handling. |
+
+**Two gaps gate the whole plan and should be measured BEFORE coding:** the **chop rate** (gaps 1-2 — is per-span
+setup even hoistable?) and the **floor pass's setup-vs-pixel-vs-walk split** (gaps 10, 14 — which half to attack).
+Both are one host-side count + one targeted renderer run.
+
 ## How to reproduce
 
 - `scratchpad/prof_drawspan.py` — per-pixel ops vs span width vs flat-table size (native engine, fast).

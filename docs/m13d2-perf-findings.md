@@ -97,6 +97,29 @@ Ordered roughly by leverage. None change correctness (the byte-exact goldens sta
    (¼ the textured pixels), flat-colored floors (no u,v DDA), render-1-of-N tics, lower res. These trade look
    for fps and are the documented fallbacks.
 
+## Perf-reduction phase — progress ([exact] only, owner chose no re-bless)
+
+| Rung | ops/frame | fps @280M | vs baseline | what |
+| --- | --- | --- | --- | --- |
+| baseline (textured) | 1,165,180,455 | 0.24 | — | M13d2c byte-exact |
+| opt1 per-pixel | 1,093,029,378 | 0.26 | 1.07× | draw_span per-pixel: running fb pointer, direct-offset u/v extract, span-constant presets, 6-nib DDA, count-down loop (per-pixel 13.4k→4.2k ops, but per-pixel was only ~9% of the frame). +fix: clear stale `tt` before the x1 seed (register-lifetime bug at far spans, caught at E1M1 (-416,256)). |
+| **opt2 walk unroll** | **645,575,343** | **0.43** | **1.81×** | `render_planes_spans` column scan UNROLLED (`rep(view_w,x) plane_col x`) → compile-time addresses, no `ptr_index`. WALK 312M→23M (13.3×); whole floor pass 540M→267M (2.0×). |
+
+Both byte-exact (square `00de1aaa`, E1M1 `db5d3da8`). Span after opt2 = 23.6M words (< 2²⁶).
+
+**New floor breakdown (isolated spawn, post-opt2):** FULL 267M = per-span SETUP ~200M (75%) + per-pixel ~43M
+(16%) + walk ~23M (9%). The per-span setup (6 `fixed_mul`s × 1,357 spans) is now the floor's giant; the walk
+is solved. Frame ~645M ≈ floor (~300M full) + walls/BSP-walk (~345M, UNTOUCHED).
+
+**Remaining [exact] levers (modest + complex; the big wins are done):**
+- Per-span setup cache (2-slot ceil/floor, dedupe `dist/xstep/ystep/zrow` for the ~885 chopped spans, chop
+  rate 2.875) → ~44M isolated / ~70M full. Needs a draw_span split (setup_rv leaf) + cache logic + ~14 globals.
+- Per-row fb cell base (move `y*VIEW_W` out of draw_span's per-span seed to render_planes_spans per row) → ~12M.
+- Wall pass-2 restructure (the 16K-pixel unrolled trampoline → per-column [top,bottom] runtime loop): skips
+  ~10,381 non-wall iterations AND shrinks the program (→ lower @ globally, gap #15). Net uncertain — measure first.
+- Width narrowing in plane_col/the seed. Small.
+- **Estimated [exact] ceiling ≈ 450–550M (~0.5–0.6 fps).** 20M needs the re-bless/algorithmic levers (declined).
+
 ## Optimization backlog (macro-by-macro; ordered by leverage)
 
 Principles: take work OFF the per-pixel path → do it once per row/column/span; replace multiplies with

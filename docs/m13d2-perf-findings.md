@@ -97,6 +97,66 @@ Ordered roughly by leverage. None change correctness (the byte-exact goldens sta
    (¼ the textured pixels), flat-colored floors (no u,v DDA), render-1-of-N tics, lower res. These trade look
    for fps and are the documented fallbacks.
 
+## Optimization backlog (macro-by-macro; ordered by leverage)
+
+Principles: take work OFF the per-pixel path → do it once per row/column/span; replace multiplies with
+incremental adds or precomputed LUT entries; do NOT rebuild a screen address per pixel (running pointer or
+compile-time address). Tag: **[exact]** keeps the goldens; **[re-bless]** changes pixels → re-bless square
+`00de1aaa` + E1M1 `db5d3da8` deliberately. Re-assert goldens + re-measure ops/frame after each.
+
+### TIER 1 — `plane.draw_span` per-SPAN setup (~half the 70% floor pass; 1,357 spans × ~123k)
+1. **Hoist the row/visplane-invariant seeds out of per-span.** `dist=FixedMul(planeheight,yslope[y])`,
+   `xstep=FixedMul(dist,basexscale)`, `ystep=FixedMul(dist,baseyscale)`, and the zlight colormap-row depend
+   only on `(planeheight,y[,light])` — identical for every same-visplane span in a row. Compute once per
+   (row, distinct visplane); removes ~3 of the 6 eight-nibble `fixed_mul`s + a lookup per span. **[exact]**
+2. **Continuous per-row DDA — kill per-span re-seeding entirely.** Re-architect `render_planes_spans`+
+   `draw_span`: per row, seed each visplane's DDA ONCE at its first column and step `xfrac/yfrac += xstep/
+   ystep` continuously left→right, stepping PAST wall columns without writing. No per-span `length`/`finecos`/
+   `finesin`/`xfrac`/`yfrac` recompute (the other ~2-3 fixed_muls + 2 trig lookups). Drops setup from ~1,357
+   spans to ~one seed per (row,visplane) (~200-400/frame). Needs the oracle to step continuously too.
+   **[re-bless]** — the biggest single floor win.
+
+### TIER 2 — `plane.draw_span` per-PIXEL body (~half the floor pass; ~13.4k ops/px)
+3. **Running framebuffer pointer, not a per-pixel address rebuild.** Today each pixel does `pixp=y*VIEW_W`
+   (`mul_const 8` — the priciest per-pixel op) + `zero off`/`mov`/`shl_bit`/`set fbptr`/`ptr_index`. Replace
+   with a pointer seeded once per span (or row) and `+= 2*dw`/pixel, then `write_hex`. Kills the multiply +
+   the address math. **[exact]**
+4. **`spot = v*64+u` with no multiply:** `((yfrac>>10)&0xFC0) | ((xfrac>>16)&63)` (the ×64 folds into the
+   shift — matches the oracle `(yfrac>>10)&4032`). Drops the per-pixel `mul_const 3`. **[exact]**
+5. **Hoist the span-constant lookups.** `zrow` (distance light) is constant per span → take the colormap-row
+   base once per span, then per-pixel index by `pal` only (1-level, no per-pixel `cmidx` rebuild). `flatbase`
+   is span-constant. **[exact]**
+6. **Narrow per-pixel registers.** xfrac/yfrac at 8.8 (4-nib) not 16.16 (8-nib) halves the dominant per-pixel
+   `add` **[re-bless]**; the loop guard `scmp 8 xx,x2` + `inc 8 xx` → 2-nibble or a count-down counter
+   **[exact]**; extract u/v from only the needed nibbles.
+
+### TIER 3 — `frame.render_planes_spans` classify walk (16,000 cells/frame via pointer reads)
+7. **Stop re-reading column-constant arrays per row.** col_cexcl/col_fstart/col_ceil_ph/col_ceilbase/col_plight
+   are set once in pass-1, identical across all 100 rows → the walk re-reads them ~100× via `ptr_index`+
+   `read_hex`. Either switch to DOOM's column-incremental R_MakeSpans (touch each column once; open/close spans
+   across rows), or precompute a single packed **per-column visplane-key** so the extend test is ONE compare
+   (not three: ph,base,light) and the full params are read only at span starts. **[exact]**
+8. **Compile-time column addressing in the walk** where the column index can be unrolled (no `ptr_index`).
+
+### TIER 4 — Wall pass-2 (`pixel_tramp`+`compare_y`, runs all 16,000 px; part of the 30%)
+9. **Don't iterate all H rows per column.** ~10,381 of 16,000 pixel_tramp iterations are non-wall skips that
+   still pay the trampoline + 2 `cmp`. Re-architect pass-2 as a **per-column runtime loop over [top,bottom]
+   only**, running fb pointer down the column (`+= VIEW_W*2*dw`/row). Removes the wasted iterations AND shrinks
+   the program (16K unroll → a loop) ⇒ faster assemble + smaller span. **[exact]**
+10. `leaf_body_w` is already lean (2-nibble ops + the 8.8 add); width-audit only.
+
+### TIER 5 — `proj.column_render_params` (per claimed column × seg; right tier, but heavy)
+11. Per-column `fixed_div` (iscale=1/scale) + `fixed_mul`/`hex.div` (texcol, scale). `scale` is already
+    incremental. Consider a reciprocal LUT / Newton step for `1/scale`; lower priority (per-column, not pixel).
+
+### TIER 6 — cross-cutting
+12. **Precompute per-row LUTs** to kill per-pixel/per-span multiplies: `rowbase[y]=y*VIEW_W` (100 entries),
+    the row fb base address. Read once per row. **[exact]**
+13. **Width audit (DESIGN §1.1.4 precision ledger):** every op's nibble width = the minimum the quantity needs;
+    cost is ~linear in width.
+14. **Method:** first MEASURE the floor pass's setup-vs-pixel-vs-walk split (one targeted run) to order 1–8;
+    then each change → re-assert goldens (or re-bless) → re-measure fps.
+
 ## How to reproduce
 
 - `scratchpad/prof_drawspan.py` — per-pixel ops vs span width vs flat-table size (native engine, fast).

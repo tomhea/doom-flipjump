@@ -31,6 +31,7 @@ from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-f
 from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side  # shared geometry (R6)
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
+    yslope_table, zlight_table, LIGHTLEVELS, LIGHTSEGSHIFT, MAXLIGHTZ, LIGHTZSHIFT,
 )
 from doomfj.texturecompiler import (  # shared D5 downscale lever + texture compositing (R6/D12)
     downscale_canvas, composite_texture, texture_texels,
@@ -122,6 +123,8 @@ class ReferenceModel:
         self.viewangletox = viewangletox_table(self.cfg.VIEW_W, self.cfg.TRIG_N)   # angle->column (M12c, R6)
         self.xtoviewangle = xtoviewangle_table(self.cfg.VIEW_W, self.cfg.TRIG_N)   # column->angle (M12h, R6)
         self.finetangent = finetangent_table(self.cfg.TRIG_N)   # tan(angle-90°) for texture-u (M12tex, R6)
+        self.yslope = yslope_table(self.cfg.VIEW_W, self.cfg.VIEW_H)   # row -> distance slope (M13, R6)
+        self.zlight = zlight_table(self.cfg.VIEW_W, COLORMAP_LIGHTS)   # (light,z) -> colormap row (M13, R6)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
     def read_sin(self, angle: int) -> int:
@@ -473,6 +476,37 @@ class ReferenceModel:
         cache[key] = (texture_texels(canvas), len(canvas), len(canvas[0]))
         return cache[key]
 
+    def _flat_base(self, asset_wad, name, cache):
+        """The flat-colored representative palette index of a flat (M13a fidelity tier — the cheaper
+        floor mode, DESIGN §1/§2): the flat's top-left texel (texel 0,0), pre-colormap. The per-pixel
+        distance light (zlight) then shades it. A missing flat (e.g. the sky placeholder before M16) maps
+        to WALL_BG so the column is still a defined fill. Cached per frame."""
+        key = name.upper()
+        if key in cache:
+            return cache[key]
+        try:
+            base = asset_wad.flat(key)[0]
+        except (KeyError, ValueError, IndexError):
+            base = WALL_BG
+        cache[key] = base
+        return base
+
+    def plane_light_row(self, light: int, distance: int) -> int:
+        """R_MapPlane's distance-based colormap-row select (zlight): bucket the 16.16 `distance` by
+        `>> LIGHTZSHIFT` (clamped to MAXLIGHTZ-1) and the sector `light` by `>> LIGHTSEGSHIFT` (clamped to
+        LIGHTLEVELS-1); the further the span, the darker the row. Distinct from the per-seg wall light
+        (which is `light >> LIGHT_SHIFT` directly)."""
+        zidx = min(MAXLIGHTZ - 1, distance >> LIGHTZSHIFT)
+        lvl = min(LIGHTLEVELS - 1, light >> LIGHTSEGSHIFT)
+        return self.zlight[lvl][zidx]
+
+    def _plane_pixel(self, colormap, planeheight: int, light: int, flat_base: int, y: int) -> int:
+        """One flat-colored floor/ceiling pixel at screen row y (M13a): `distance =
+        FixedMul(planeheight, yslope[y])` (planeheight = |plane_z - viewz|, 16.16), distance-light the
+        flat's base index. The textured u,v DDA replaces `flat_base` with a per-pixel sample at M13b."""
+        distance = fixed_mul(planeheight, self.yslope[y], 8, 4)
+        return colormap[self.plane_light_row(light, distance)][flat_base]
+
     def render_wall_frame(self, state: SimState, scene: Scene) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the M9 two-band
         background (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -486,12 +520,16 @@ class ReferenceModel:
             texel-v at the horizon), `frac0` = texturemid + (top - CENTERY)·iscale, both converted 16.16->8.8;
           * `wall_screen_span` gives the [top, bottom] rows, clipped to [0, VIEW_H).
         Front-to-back **solid-seg clipping** via a per-column `drawn` flag (one-sided walls opaque). A wall
-        with no middle texture falls back to the flat `WALL_BG` shade. Ceiling/floor stay the M9 background
-        (visplanes are M13). Returns W*H packed palette-index bytes (row-major, D3); the fj renderer
-        reproduces this bit-exactly (D12)."""
+        with no middle texture falls back to the flat `WALL_BG` shade. **Ceiling/floor are M13 visplanes**:
+        when a column is first claimed by a one-sided wall covering screen rows [top,bottom], the rows ABOVE
+        (0..top-1) get that sector's ceiling flat and the rows BELOW (bottom+1..H-1) its floor flat, each
+        distance-lit (zlight). M13a renders them **flat-colored** (the flat's base index per `_plane_pixel`,
+        the cheaper §1 floor tier); the perspective u,v texture sample lands at M13b. Returns W*H packed
+        palette-index bytes (row-major, D3); the fj renderer reproduces this bit-exactly (D12)."""
         cfg = self.cfg
-        fb = bytearray(self.render_frame(state, scene))      # start from the two-band background
+        fb = bytearray(cfg.FB_SIZE)                          # zero-init; visplanes + walls fill every column
         colormap = scene.asset_wad.colormap()
+        flatcache: dict = {}
         lds = scene.map_wad.linedefs(scene.mapname)
         sds = scene.map_wad.sidedefs(scene.mapname)
         secs = scene.map_wad.sectors(scene.mapname)
@@ -535,6 +573,11 @@ class ReferenceModel:
             tex = self._wall_texture(scene.asset_wad, sd.middle, texcache)
             worldtop = sec.ceil_h - viewz_world              # world units the ceiling is above the eye
             flat_fill = colormap[light_row][WALL_BG]
+            # M13 visplane data for this seg's sector: planeheight = |plane_z - viewz| (16.16) + flat base
+            ceil_ph = abs((sec.ceil_h << 16) - viewz)
+            floor_ph = abs((sec.floor_h << 16) - viewz)
+            ceil_base = self._flat_base(scene.asset_wad, sec.ceil_tex, flatcache)
+            floor_base = self._flat_base(scene.asset_wad, sec.floor_tex, flatcache)
             for x in range(x1, x2):
                 if not drawn[x]:
                     top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz, scale & ANGLE_MASK)
@@ -559,6 +602,13 @@ class ReferenceModel:
                                 step=(iscale >> 8) & 0xFFFF)
                             for k, y in enumerate(range(top, bottom + 1)):
                                 fb[y * cfg.VIEW_W + x] = col[k]
+                    # M13 ceiling visplane = rows above the wall [0, top-1]; floor = below [bottom+1, H-1]
+                    ceil_hi = min(top, cfg.VIEW_H) - 1
+                    for y in range(0, ceil_hi + 1):
+                        fb[y * cfg.VIEW_W + x] = self._plane_pixel(colormap, ceil_ph, sec.light, ceil_base, y)
+                    floor_lo = max(bottom + 1, 0)
+                    for y in range(floor_lo, cfg.VIEW_H):
+                        fb[y * cfg.VIEW_W + x] = self._plane_pixel(colormap, floor_ph, sec.light, floor_base, y)
                     drawn[x] = 1
                 scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
         return bytes(fb)

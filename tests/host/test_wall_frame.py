@@ -39,16 +39,16 @@ def test_spawn_frame_head_on_wall_band(rm, scene):
     whole viewport. A perpendicular wall head-on has CONSTANT scale (anglea==angleb ⇒ the sines cancel ⇒
     scale = PROJECTION/dist = 80/128 = 0.625), so it covers the same rows in every column.
     wall_screen_span(ceil 128, floor 0, viewz=(0+41)<<16, 0.625): top = 50 - 87*0.625 = -5 (clip 0),
-    bottom = 50 + 41*0.625 = 75. So rows [0, 75] are the (textured) wall and [76, 99] stay the floor
-    background — in EVERY column."""
+    bottom = 50 + 41*0.625 = 75. So rows [0, 75] are the (textured) wall and [76, 99] are the floor
+    visplane (M13: a distance-lit flat, no longer the two-band background) — in EVERY column."""
     cfg = Config()
     frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene)
     bg = rm.render_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene)
     assert len(frame) == cfg.FB_SIZE
     W, H = cfg.VIEW_W, cfg.VIEW_H
     for x in range(W):
-        # floor band below the wall is the untouched background
-        assert all(frame[y * W + x] == bg[y * W + x] for y in range(WALL_BOT + 1, H))
+        # floor band below the wall is the M13 floor visplane (differs from the M9 two-band bg)
+        assert any(frame[y * W + x] != bg[y * W + x] for y in range(WALL_BOT + 1, H))
         # the wall band differs from the background (it was drawn over)
         assert any(frame[y * W + x] != bg[y * W + x] for y in range(WALL_TOP, WALL_BOT + 1))
 
@@ -66,9 +66,10 @@ def test_spawn_frame_wall_is_textured_not_flat(rm, scene):
 
 
 def test_spawn_frame_golden_hash(rm, scene):
-    """Byte-exact textured golden (the key the fj renderer diffs against, D12)."""
+    """Byte-exact textured golden (the key the fj renderer diffs against, D12). Re-blessed at M13a:
+    floors/ceilings are now distance-lit flat-colored visplanes instead of the M9 two-band background."""
     frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene)
-    assert frame_hash(frame) == "b7da67d5f0d8f1ea832038ad571442b986c8a6225fba1a270fb1efc1ed7208e8"
+    assert frame_hash(frame) == "aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463"
 
 
 def test_only_faced_wall_drawn_others_culled(rm, scene):
@@ -108,7 +109,7 @@ def test_e1m1_wall_frame_textured_and_deterministic():
     assert sum(1 for a, b in zip(frame, bg) if a != b) > 1000  # walls composited over the background
     assert len(set(frame)) >= 8                                # many palette indices ⇒ real textures
     assert frame == rm.render_wall_frame(state, scene)         # deterministic (D12)
-    assert frame_hash(frame) == "0b817e4a126026207f40327cb32b68685efd47572f79661ff7136e752e566c0e"
+    assert frame_hash(frame) == "9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01"
 
 
 def test_e1m1_every_pixel_is_a_valid_palette_index():

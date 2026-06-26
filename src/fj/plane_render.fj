@@ -109,10 +109,18 @@ ns plane {
     // xtoviewangle (8nib read_tables), zlight (2nib), finesine (read_sin/read_cos), the colormap ns `cm`, and
     // the flat ns. VIEW_W is from fj_consts. Returns via stl.fret BEFORE the @-local data (lesson #2).
     // @requires hex.init & stl.ptr_init.
+    // M13opt1 — per-pixel [exact] optimizations (perf phase): the per-pixel loop now does NO multiply, NO
+    // framebuffer-address rebuild, and narrower ops. Span-constant values (the zlight colormap row, the flat
+    // slice high nibbles, the fb cell pointer) are computed ONCE in setup; the per-pixel body is: direct-offset
+    // u/v extract (read nibbles 4-5 of xfrac/yfrac — no 8-nib shift), spot, flat.sample, cm.apply (only the pal
+    // low byte updated), a SEQUENTIAL fb write via a running pointer (write_hex_and_inc), and the 6-nibble DDA
+    // step (only bits 0-23 matter for (>>16)&63, so mod 2^24 == mod 2^32 for those bits). Byte-exact vs the
+    // oracle _draw_span. flat slices are 4096-aligned (every flat is exactly 4096 texels) so fidx low 3 = spot
+    // is OR-disjoint with the preset flatbase high nibbles.
     def draw_span fbase, view_w \
             @ ys, dist, xstep, ystep, dscale, length, xta, ang, idx, fc, fs, prod, xfrac, yfrac, \
               zidx, lvl, zlidx, zrow, c127, tt, c3f, u, vv, spot, fidx, pal, cmidx, lit, \
-              xx, yp, pixp, off, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
+              count, pixp, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
             < planeheight, light, basexscale, baseyscale, viewx, viewy, viewangle, y, x1, x2, flatbase, \
               yslope, distscale, xtoviewangle, zlight, span_ret {
         hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
@@ -129,7 +137,7 @@ ns plane {
         finesine.read_cos fc, idx
         hex.fixed_mul 8, 4, prod, fc, length
         hex.mov 8, xfrac, viewx
-        hex.add 8, xfrac, prod                           // xfrac = viewx + FixedMul(finecos[idx], length)
+        hex.add 8, xfrac, prod                           // xfrac = viewx + FixedMul(finecos[idx], length)  (seed @8)
         finesine.read_sin fs, idx
         hex.fixed_mul 8, 4, prod, fs, length
         hex.mov 8, yfrac, viewy
@@ -147,42 +155,41 @@ ns plane {
         hex.shr_hex 2, 1, lvl                            // lvl = light >> 4 (LIGHTSEGSHIFT)
         hex.mul_const 3, zlidx, lvl, 128
         hex.add 3, zlidx, zidx
-        hex.read_table 2, zrow, zlight, 3, zlidx         // row = zlight[lvl*128 + zidx]
+        hex.read_table 2, zrow, zlight, 3, zlidx         // row = zlight[lvl*128 + zidx]  (SPAN-constant)
+        // --- per-span PRESETS for the per-pixel loop (computed once) ---
         hex.set 2, c3f, 0x3f
-        hex.mov 8, xx, x1
-      sloop:
-        hex.scmp 8, xx, x2, sbody, sbody, sdone          // for x in [x1, x2]  (inclusive)
-      sbody:
-        hex.mov 8, tt, xfrac
-        hex.shr_hex 8, 4, tt                             // xfrac >> 16
-        hex.mov 2, u, tt
-        hex.and 2, u, c3f                                // u = (xfrac>>16) & 63
-        hex.mov 8, tt, yfrac
-        hex.shr_hex 8, 4, tt                             // yfrac >> 16
-        hex.mov 2, vv, tt
-        hex.and 2, vv, c3f                               // v = (yfrac>>16) & 63
-        hex.mul_const 3, spot, vv, 64
-        hex.add 3, spot, u                               // spot = v*64 + u  (flats are 64x64; high nibbles stay 0)
-        hex.mov 5, fidx, flatbase                        // flatbase is a 5-nibble slice offset (combined flat table
-        hex.add 5, fidx, spot                            //   up to ~151k texels for E1M1 -> idx_n=5; R11 width)
-        flat.sample pal, fidx                            // pal = flat[flatbase + spot]
         hex.zero 4, cmidx
-        hex.mov 2, cmidx, pal
-        hex.mov 2, cmidx + 2*dw, zrow                    // cmidx = (row<<8) | pal
-        cm.apply lit, cmidx                              // lit = colormap[row][pal]
-        hex.zero 8, yp
-        hex.mov 2, yp, y
-        hex.mul_const 8, pixp, yp, view_w               // pixp = y * VIEW_W
-        hex.add 8, pixp, xx                              // + x  -> the pixel index
-        hex.zero w/4, off
-        hex.mov 8, off, pixp
-        hex.shl_bit w/4, off                             // off = 2*pixp (the hex.vec2 cell digit offset)
+        hex.mov 2, cmidx + 2*dw, zrow                    // cmidx high byte = the zlight row (constant per span)
+        hex.mov 5, fidx, flatbase                        // fidx high = flatbase (4096-aligned -> low 3 hold spot)
+        hex.zero 8, pixp
+        hex.mov 2, pixp, y
+        hex.mul_const 8, pixp, pixp, view_w              // pixp = y*VIEW_W  (the only y*W multiply, ONCE per span)
+        hex.mov 2, tt, x1
+        hex.add 8, pixp, tt                              // + x1  -> the pixel index of (y, x1)
+        hex.shl_bit 8, pixp                              // *2  -> the hex.vec2 cell digit offset
         hex.set w/4, fbptr, fbase
-        hex.ptr_index cell, fbptr, off
-        hex.write_hex 2, cell, lit                       // fb[y*VIEW_W + x] = lit
-        hex.add 8, xfrac, xstep
-        hex.add 8, yfrac, ystep                          // step the u,v DDA
-        hex.inc 8, xx
+        hex.ptr_index cell, fbptr, pixp                  // cell -> &fb[y*VIEW_W + x1]  (the running write pointer)
+        hex.mov 2, count, x2
+        hex.sub 2, count, x1
+        hex.inc 2, count                                 // count = x2 - x1 + 1  (span width, <= VIEW_W)
+      sloop:
+        hex.if0 2, count, sdone                          // count==0 -> done
+      sbody:
+        hex.mov 2, u, xfrac + 4*dw                       // nibbles 4-5 = bits 16-23 of xfrac (no shift)
+        hex.and 2, u, c3f                                // u = (xfrac>>16) & 63
+        hex.mov 2, vv, yfrac + 4*dw                      // nibbles 4-5 = bits 16-23 of yfrac
+        hex.and 2, vv, c3f                               // v = (yfrac>>16) & 63
+        hex.mul_const 3, spot, vv, 64                    // (single-bit const -> one shift)
+        hex.add 3, spot, u                               // spot = v*64 + u
+        hex.mov 3, fidx, spot                            // fidx low 3 = spot (high 2 = flatbase>>12, preset)
+        flat.sample pal, fidx                            // pal = flat[flatbase + spot]
+        hex.mov 2, cmidx, pal                            // cmidx low byte = pal (high byte = zrow, preset)
+        cm.apply lit, cmidx                              // lit = colormap[row][pal]
+        hex.write_hex_and_inc cell, lit                  // *cell = lit low nibble, cell++
+        hex.write_hex_and_inc cell, lit + 1*dw           // *cell = lit high nibble, cell++  -> next pixel
+        hex.add 6, xfrac, xstep                          // step the DDA (low 6 nibbles; bits 16-21 stay exact)
+        hex.add 6, yfrac, ystep
+        hex.dec 2, count
         ;sloop
       sdone:
         stl.fret span_ret
@@ -199,7 +206,7 @@ ns plane {
       fc: hex.vec 8
       fs: hex.vec 8
       prod: hex.vec 8
-      xfrac: hex.vec 8
+      xfrac: hex.vec 8                                  // seed @8; per-pixel add @6 (only bits 0-23 feed the mask)
       yfrac: hex.vec 8
       zidx: hex.vec 3
       lvl: hex.vec 3                                    // read at 3 nibbles by mul_const (high nibble kept 0)
@@ -208,17 +215,15 @@ ns plane {
       c127: hex.vec 3
       tt: hex.vec 8
       c3f: hex.vec 2
-      u: hex.vec 3                                      // read at 3 nibbles by add 3 (high nibble kept 0)
-      vv: hex.vec 3                                     // read at 3 nibbles by mul_const 3 (high nibble kept 0)
-      spot: hex.vec 5                                   // 5-nib: v*64+u in low 3, high 2 stay 0 (added into fidx)
+      u: hex.vec 3                                      // read at 3 by add 3 (mov 2 writes low 2; nibble 2 = 0)
+      vv: hex.vec 3                                     // read at 3 by mul_const 3 (nibble 2 = 0)
+      spot: hex.vec 3                                   // v*64+u <= 4095 (3 nibbles)
       fidx: hex.vec 5
       pal: hex.vec 2
       cmidx: hex.vec 4
       lit: hex.vec 2
-      xx: hex.vec 8
-      yp: hex.vec 8
+      count: hex.vec 2
       pixp: hex.vec 8
-      off: hex.vec w/4
       fbptr: hex.vec w/4
       cell: hex.vec w/4
     }

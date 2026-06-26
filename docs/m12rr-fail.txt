@@ -1,0 +1,7 @@
+# M12rr (build_doom wiring) TDD FAIL — build_wall_renderer's R0 gate at the DEFAULT 2**23 limit.
+# The shipped renderer (~21.8M words) exceeds 2**23 (8.4M), so the load falls to hybrid storage and the
+# gate's 'assert storage_mode == flat' fires. (At the raised 2**26 limit it is flat -> PASS.)
+
+default FLAT_MAX_WORDS = 8388608 = 2**23
+EXPECTED FAIL (R0 gate caught the over-budget build at 2**23):
+   R4: storage_mode 'hybrid' != flat

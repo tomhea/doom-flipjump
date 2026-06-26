@@ -32,6 +32,7 @@ from doomfj.reference_model import (ReferenceModel, ANGLE_MASK, SLOPERANGE, WALL
                                     SimState, build_scene, spawn_state, frame_hash)
 from doomfj.texturecompiler import (compile_texture, compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas)
+from doomfj.wall_renderer import emit_wall_renderer, _seg_xorby_block, _seg_xorby_use
 from doomfj.wad import WadFile
 
 PRESENT_FJ = Path("src/fj/present.fj")
@@ -43,37 +44,9 @@ ASSET = "tests/fixtures/freedoom_assets.wad"
 TEX = "STEP4"   # 32x16 -> texheight 16 (pow2, >=16 so the leaf heightmask is exact), texwidth 32
 
 
-# ── M12pp: walk xor_by + xor-involution self-zeroing ──────────────────────────────────────────────
-# Replace the per-seg baked `hex.set` constants (each pays an @-dispatch to zero a register it overwrites)
-# with `hex.xor_by` (no @). Correct ONLY on a zero register, so the per-seg consts live in ONE shared block
-# fcall'd BEFORE (0 -> vals) and AFTER (vals -> 0) the leaf — `xor_by val` twice cancels (involution), and
-# the seg regs (declared hex.vec, zero-init) self-restore to 0 each iteration. The leaf only READS those regs
-# (verified: wall_x_range/wall_setup/wall_offset/column_render_params take them as read-only operands), and
-# every baked field is a PURE compile-time constant (worldtop = seg_ceil - viewzw is NOT pure -> seg_ceil is
-# baked here and worldtop is computed inside the leaf). The block label is keyed on the seg index (each seg is
-# in one subsector) so the BSP double-emission (R7b) fcalls it twice but emits it once.
-
-def _seg_xorby_block(idx, fields):
-    """The shared seg{idx}_xorby block (emitted ONCE, fcall'd twice per visible seg). `fields` = list of
-    (regname, width, value) PURE compile-time constants."""
-    lines = [f"  seg{idx}_xorby:"]
-    for reg, wdt, val in fields:
-        lines.append(f"    hex.xor_by {wdt}, {reg}, {val}")
-    lines.append("    stl.fret xb_ret")
-    return lines
-
-
-def _seg_xorby_use(idx, clear=True):
-    """The SET / USE / CLEAR fcall sequence at the call site. `clear=False` drops the involution CLEAR (the
-    M12pp TDD FAIL stub: seg regs accumulate across segs -> wrong values for every seg after the first)."""
-    seq = [f"    stl.fcall seg{idx}_xorby, xb_ret",      # SET  (0 -> vals)
-           "    stl.fcall seg_pass1_leaf, seg_ret"]      # USE  (leaf reads the seg regs)
-    if clear:
-        seq.append(f"    stl.fcall seg{idx}_xorby, xb_ret")   # CLEAR (vals -> 0, the xor involution)
-    return seq
-
-
-# Toggle for the M12pp TDD FAIL evidence: when False, the involution CLEAR is dropped (regs accumulate).
+# M12pp: the xor_by + xor-involution self-zeroing walk helpers now live in doomfj.wall_renderer (shared with
+# build_doom, R6); imported above. Toggle for the M12pp TDD FAIL evidence: when False, the involution CLEAR is
+# dropped (regs accumulate). The square-room/geometry tests below pass it to _seg_xorby_use.
 _M12PP_CLEAR = True
 
 
@@ -1954,46 +1927,7 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
     cfg = Config()
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     mw = WadFile.from_path(E1M1_WAD)
-    cmap = bake_bsp(mw, "E1M1")
-    verts = cmap.vertexes
-    lds = mw.linedefs("E1M1"); sds = mw.sidedefs("E1M1"); secs = mw.sectors("E1M1")
     scene = build_scene(mw, mw, "E1M1")
-    colormap = scene.asset_wad.colormap()
-    horizon = cfg.VIEW_H // 2
-    proj = cfg.PROJECTION << 16
-    defs = {d.name.upper(): d for d in mw.texture_defs("TEXTURE1")}
-
-    # the combined dispatch table over every distinct wall texture the one-sided segs use (downscaled to match
-    # the oracle's _wall_texture), plus the 1x1 WALL_BG sentinel; per-seg texinfo precomputed via the oracle rule.
-    cache = {}
-    seg_texinfo = {}                                         # si -> (texbase, texheight, texwidth)
-    names = set()
-    for si, seg in enumerate(cmap.segs):
-        ld = lds[seg.linedef]
-        if ld.back != -1:
-            continue
-        sd = sds[ld.front if seg.side == 0 else ld.back]
-        if rm._wall_texture(mw, sd.middle, cache) is not None:
-            names.add(sd.middle.upper())
-    combined, info = [], {}
-    for nm in sorted(names) + [None]:
-        key = nm if nm else "__WALLBG__"
-        if nm is None:
-            th, tw, texels = 1, 1, [WALL_BG]
-        else:
-            c = downscale_canvas(composite_texture(mw, defs[nm]), rm.downscale)
-            th, tw, texels = len(c), len(c[0]), texture_texels(c)
-        while len(combined) % th != 0:                        # align the slice to its texheight (the OR-trick)
-            combined.append(0)
-        info[key] = (len(combined), th, tw)
-        combined += texels
-    for si, seg in enumerate(cmap.segs):
-        ld = lds[seg.linedef]
-        if ld.back != -1:
-            continue
-        sd = sds[ld.front if seg.side == 0 else ld.back]
-        t = rm._wall_texture(mw, sd.middle, cache)
-        seg_texinfo[si] = info[sd.middle.upper()] if t is not None else info["__WALLBG__"]
 
     sp = spawn_state(mw, "E1M1")
     spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
@@ -2007,122 +1941,10 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
         if len(VIEWPOINTS) >= 4:
             break
 
-    # PRODUCTION layout (over_align=False, like build_doom): drops the 2^n table padding so the whole renderer
-    # (table + framebuffer + LUTs + the 16K-pixel pass-2 unroll) fits the 2**23 flat budget (asserted below, R4).
-    tex = _texel_table("tex", combined, "per_entry", over_align=False)
-    cm = compile_colormap("cm", mw, lights=COLORMAP_LIGHTS, over_align=False)
-    palette = compile_palette("palette", mw)
-    tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
-    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
-    viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
-    xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
-
-    def lrow(light):
-        return max(0, min(COLORMAP_LIGHTS - 1, light >> LIGHT_SHIFT))
-
-    _cid = [0]
-    xorby_blocks = {}                                         # M12pp: seg{si}_xorby blocks, emitted once each
-
-    def subsector_action(s):
-        ss = cmap.subsectors[s]
-        cid = _cid[0]; _cid[0] += 1
-        psec = rm._seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
-        viewz_val = rm.view_z(psec.floor_h)
-        prow = lrow(psec.light)
-        out = [
-            f"    hex.if0 1, bg_done, e1pset{cid}",
-            f"    ;e1psegs{cid}",
-            f"  e1pset{cid}:",
-            f"    hex.set 8, viewz, {viewz_val & 0xFFFFFFFF}",
-            f"    hex.set 8, viewzw, {(viewz_val >> 16) & 0xFFFFFFFF}",
-            f"    hex.set 2, bgceil, {colormap[prow][CEIL_BG]}",
-            f"    hex.set 2, bgfloor, {colormap[prow][FLOOR_BG]}",
-            "    stl.fcall bg_fill_leaf, bg_ret",
-            "    hex.set 1, bg_done, 1",
-            f"  e1psegs{cid}:",
-        ]
-        for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
-            seg = cmap.segs[si]
-            ld = lds[seg.linedef]
-            if ld.back != -1:
-                continue
-            v1x, v1y = verts[seg.v1]
-            v2x, v2y = verts[seg.v2]
-            sd = sds[ld.front if seg.side == 0 else ld.back]
-            texoff = (seg.offset + sd.x_off) << 16
-            ssec = rm._seg_sector(lds, sds, secs, seg)
-            tb, th, tw = seg_texinfo[si]
-            fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
-                      ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
-                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
-                      ("seg_texbase", 5, tb), ("seg_texheight", 4, th), ("seg_tw", 8, tw),
-                      ("seg_hm", 3, th - 1), ("seg_light", 2, lrow(ssec.light)),
-                      ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
-                      ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
-                      ("seg_ceil", 8, ssec.ceil_h & 0xFFFFFFFF)]   # M12pp: worldtop = seg_ceil - viewzw in-leaf
-            xorby_blocks[si] = _seg_xorby_block(si, fields)
-            out += _seg_xorby_use(si, clear=_M12PP_CLEAR)
-        return out
-
-    bsp = _bsp_as_code("e1", cmap, done_label="bsp_done", subsector_action=subsector_action)
-    xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # M12pp: the shared per-seg xorby blocks (once)
-
-    pass1 = [
-        "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
-        "hex.input_dec_uint 8, viewangle, bad",
-        "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
-        "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
-        ";e1_bspcode_walk", "bsp_done:",
-    ]
-    pass2 = []
-    for x in range(cfg.VIEW_W):
-        pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
-                     f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
-                     f"col_heightmask + {8 * x}*dw")
-        for y in range(cfg.H):                            # M12oo: the shared-compare trampoline (y runtime, set by load_col)
-            pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
-
-    main = "\n".join([
-        "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
-        "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
-        "bad: stl.loop",
-        "pixel_leaf:", "frame.leaf_body_w",
-        "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
-        "seg_pass1_leaf:",
-        f"frame.seg_pass1_leaf_body_mtlw {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
-        "bg_fill_leaf:",
-        f"frame.render_background_reg framebuffer, bgceil, bgfloor, {cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
-        "stl.fret bg_ret",
-        *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
-        bsp,
-        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
-        "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
-        "viewz: hex.vec 8", "viewzw: hex.vec 8", "bgceil: hex.vec 2", "bgfloor: hex.vec 2",
-        "bg_done: hex.vec 1", "bg_ret: ;0",
-        "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
-        "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
-        "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
-        "ceilfix: hex.vec 8", "floorfix: hex.vec 8",
-        "seg_ceil: hex.vec 8", "worldtop: hex.vec 8",     # M12pp: seg_ceil baked (pure); worldtop leaf-computed
-        "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
-        "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
-        "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
-        "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 5",
-        "seg_ret: ;0",
-        "top: hex.vec 8", "bottom: hex.vec 8",
-        "y: hex.vec 2", "ret_reg: ;0",                    # M12oo trampoline: runtime row counter + shared return reg
-        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
-        "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
-        "heightmask: hex.vec 3", "pixel_ret: ;0",
-        f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_light: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
-    ])
+    # M12rr: the renderer is emitted by the SHARED emit_wall_renderer -- build_doom ships the SAME emitter
+    # (R6 single source), so this golden byte-exact + hash check verifies the production renderer too.
+    # PRODUCTION layout (over_align=False) -- drops the 2^n table padding to fit the flat budget.
+    main = emit_wall_renderer(mw, "E1M1", cfg, over_align=False)
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "e1m1full.fj"
     p.write_text(main, encoding="utf-8")

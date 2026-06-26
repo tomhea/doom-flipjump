@@ -460,7 +460,7 @@ ns frame {
     def seg_pass1_leaf_body_mtlw centery, ds, viewh1, projection \
             @ loop, body, skipcol, ret, sidx, tbskip, tbok \
             < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_texoff, \
-              seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, worldtop, \
+              seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, viewzw, seg_ceil, worldtop, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, drawn, seg_ret {
@@ -469,6 +469,8 @@ ns frame {
         proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_v1x, seg_v1y
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
+        hex.mov 8, worldtop, seg_ceil           // M12pp: worldtop = seg_ceil - viewzw computed IN-LEAF, so the baked
+        hex.sub 8, worldtop, viewzw             // field is the PURE const seg_ceil (xor_by/involution-bakeable), not worldtop
         hex.mov 8, x, x1
       loop:
         hex.scmp 8, x, x2, body, ret, ret

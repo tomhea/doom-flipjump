@@ -24,6 +24,11 @@ from doomfj.mapcompiler import compile_geometry_streams
 from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
+from doomfj.wall_renderer import emit_wall_renderer
+
+_SRC_FJ = Path("src/fj")
+# the fixed include set the runtime wall renderer assembles against (before the emitted main)
+_RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj"]
 
 
 def build(fj_src="src/fj/hello.fj", out_fjm="build/hello.fjm", metrics="build/metrics.json") -> dict:
@@ -143,6 +148,48 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
         "entry_counts": entry_counts,
     }
     # R4: no silent paged-mode fallback; the program must fit flat under the limit.
+    assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
+    assert span < limit, f"R4: span {span} >= flat limit {limit}"
+    return metrics
+
+
+def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
+                        flat_max_words=None) -> dict:
+    """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
+    `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
+    `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
+    (R6 single source) — so every space optimization (M12oo pass-2 trampoline, M12pp/qq xor_by + xor-involution
+    walk) ships here for free. Assembles against the fixed renderer include set, then R0-gates: assert
+    `storage_mode == flat` and `span < limit`. The renderer's fully-unrolled pass-2 + BSP walk push the span
+    past the 2**23 default, so pass a RAISED `flat_max_words` (2**26) per DESIGN §1.2 (RAM-only cost). The
+    viewpoint `(vx,vy,va)` is read from stdin at runtime; the gate run feeds an invalid byte so the input
+    parser jumps to `bad:` and halts immediately (the span/storage_mode are load-time, so no full render is
+    needed for the gate — the golden test does the byte-exact render)."""
+    from flipjump.interpreter.io_devices.FixedIO import FixedIO
+    cfg = cfg or Config()
+    wad = WadFile.from_path(wad_path)
+    limit = flat_max_words or FLAT_MAX_WORDS
+    gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
+
+    main = emit_wall_renderer(wad, mapname, cfg, over_align=False)
+    consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
+    main_p = gen / "renderer_main.fj"
+    main_p.write_text(main, encoding="utf-8")
+    paths = [consts] + [_SRC_FJ / f for f in _RENDERER_INCLUDES] + [main_p]
+
+    out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
+    t = time.perf_counter()
+    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False)
+    assemble_seconds = round(time.perf_counter() - t, 3)
+    term = fj.run(out, io_device=FixedIO(b"q\n"), print_time=False, print_termination=False,
+                  flat_max_words=limit)                    # 'q' is not a digit -> input parser -> bad: -> halt
+    span = _span_words(out)
+    metrics = {
+        "map": mapname, "downscale": cfg.TEXTURE_DOWNSCALE,
+        "storage_mode": str(term.storage_mode), "span_words": span, "flat_limit": limit,
+        "headroom": round(limit / span, 3) if span else None,
+        "fjm_bytes": out.stat().st_size, "assemble_seconds": assemble_seconds,
+    }
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
     assert span < limit, f"R4: span {span} >= flat limit {limit}"
     return metrics

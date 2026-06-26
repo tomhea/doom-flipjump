@@ -1,0 +1,7 @@
+# M12rr (build_doom wiring) TDD PASS — build_wall_renderer at the raised 2**26 limit is flat + under budget,
+# and the golden test renders byte-exact + spawn-hash through the SAME shared emit_wall_renderer (span identical
+# 21,789,996 words), proving the extraction is faithful (R6).
+
+test_build_wall_renderer_e1m1_flat : 1 passed in 245.40s
+test_wall_render_e1m1_full_frame_golden (via emit_wall_renderer): 1 passed in 236.62s, span 21,789,996, hash == golden
+test_wall_render_wideindex / e1m1_geometry (shared helpers): 2 passed in 301.25s

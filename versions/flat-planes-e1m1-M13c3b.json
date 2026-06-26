@@ -1,0 +1,12 @@
+{
+  "milestone": "M13c3b",
+  "what": "full E1M1 flat-colored floor/ceiling frame through the SHARED emit_wall_renderer, byte-exact vs the oracle render_wall_frame(floor_texturing=False) + the M13a E1M1 spawn golden 9569a547 (the multi-sector validation the single-sector square room cannot give)",
+  "test": "tests/fj/test_floor_planes_fj.py::test_e1m1_flat_planes_full_frame_byte_exact_and_golden: 4 stdin viewpoints (spawn + rotation + 2 other-sector positions) byte-exact, spawn hashes to the golden, span flat under 2^26",
+  "e1m1_flat_golden": "9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01",
+  "e1m1_renderer_span_words": 24660968,
+  "e1m1_storage_mode": "flat",
+  "e1m1_assemble_seconds": 259.0,
+  "render_seconds_per_frame": 11.0,
+  "multi_sector_note": "the TDD FAIL (seg_floorbase from ceil_tex) was caught at viewpoint (-416,256), a DIFFERENT sector than spawn -- exactly the per-seg ceil/floor/light variation the square room (1 sector) cannot exercise",
+  "next": "M13d: swap the flat plane base for the perspective u,v flat sample (textured floors) -> golden db5d3da8, re-enable the two M13d-targeted skipped goldens, report first fps"
+}

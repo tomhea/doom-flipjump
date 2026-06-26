@@ -1,0 +1,69 @@
+"""M13c1 (F5) — the floor/ceiling (visplane) LUTs the fj plane raster reads, emitted as `.fj` read_table
+data tables (yslope / distscale / zlight). Each is the SAME host kernel the M13 oracle uses (tables.py,
+R6 SSOT); here we assemble the emitted table, read a spread of entries TWICE each (R5 #8 — catches
+pointer/result-reg cleanup bugs), and assert byte-exact equality with the host value. So the fj floor
+raster (M13c/d) and the oracle (`_plane_pixel`/`_draw_span`) index identical visplane data (D12).
+"""
+from pathlib import Path
+
+import flipjump as fj
+
+from doomfj.config import Config
+from doomfj.harness import W
+from doomfj.lut_generator import (
+    generate_yslope_lut_fj, generate_distscale_lut_fj, generate_zlight_lut_fj,
+)
+from doomfj.tables import yslope_table, distscale_table, zlight_table, MAXLIGHTZ, LIGHTLEVELS
+
+FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table
+COLORMAP_LIGHTS = 32
+
+
+def _read_lut(tmp_path, name, lut_fj, host_values, picks, *, entry_nibbles, idx_nibbles):
+    """Assemble `lut_fj` + a driver that reads each picked index twice via hex.read_table, then compare
+    the printed entry_nibbles-digit output to the host values (masked to the entry width)."""
+    mask = (1 << (4 * entry_nibbles)) - 1
+    body, data, expected = [], [], b""
+    for k, idx in enumerate(picks):
+        for _ in range(2):
+            body += [f"hex.read_table {entry_nibbles}, d, {name}, {idx_nibbles}, q{k}",
+                     f"hex.print_as_digit {entry_nibbles}, d, 0", "stl.output 10"]
+            expected += f"{host_values[idx] & mask:0{entry_nibbles}x}\n".encode()
+        data.append(f"q{k}: hex.vec {idx_nibbles}, {idx}")
+    data += [f"d: hex.vec {entry_nibbles}", lut_fj]
+    prog = "stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n"
+    p = tmp_path / f"{name}.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, f"{name}: fj read_table output != host table"
+
+
+def test_yslope_lut_byte_exact(tmp_path):
+    cfg = Config()
+    host = yslope_table(cfg.VIEW_W, cfg.VIEW_H)
+    picks = [0, 1, cfg.CENTERY - 1, cfg.CENTERY, cfg.CENTERY + 1, cfg.VIEW_H - 1]   # incl. the horizon peak
+    _read_lut(tmp_path, "yslope", generate_yslope_lut_fj("yslope", cfg.VIEW_W, cfg.VIEW_H),
+              host, picks, entry_nibbles=8, idx_nibbles=2)
+
+
+def test_distscale_lut_byte_exact(tmp_path):
+    cfg = Config()
+    host = distscale_table(cfg.VIEW_W, cfg.TRIG_N)
+    picks = [0, 1, cfg.CENTERX, cfg.VIEW_W - 1]                  # incl. the straight-ahead centre (cos~1)
+    _read_lut(tmp_path, "distscale", generate_distscale_lut_fj("distscale", cfg.VIEW_W, cfg.TRIG_N),
+              host, picks, entry_nibbles=8, idx_nibbles=2)
+
+
+def test_zlight_lut_byte_exact_flattened(tmp_path):
+    """zlight is the LIGHTLEVELS x MAXLIGHTZ grid flattened row-major; read entry `lvl*MAXLIGHTZ + zidx`.
+    Exercise the corners (brightest near / darkest far) + an interior point, twice each (R5)."""
+    cfg = Config()
+    grid = zlight_table(cfg.VIEW_W, COLORMAP_LIGHTS)
+    flat = [v for row in grid for v in row]
+    cells = [(0, 0), (0, MAXLIGHTZ - 1), (LIGHTLEVELS - 1, 0), (LIGHTLEVELS - 1, MAXLIGHTZ - 1),
+             (8, 64), (15, 1)]
+    picks = [lvl * MAXLIGHTZ + zidx for (lvl, zidx) in cells]
+    _read_lut(tmp_path, "zlight", generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS),
+              flat, picks, entry_nibbles=2, idx_nibbles=3)

@@ -1,0 +1,20 @@
+{
+  "milestone": "M13c1",
+  "what": "fj read_table LUTs for the floor/ceiling visplane raster (yslope/distscale/zlight), byte-exact vs the tables.py host SSOT (R6)",
+  "luts": {
+    "yslope": {
+      "entries": 100,
+      "nibbles": 8
+    },
+    "distscale": {
+      "entries": 160,
+      "nibbles": 8
+    },
+    "zlight": {
+      "entries": 2048,
+      "nibbles": 2,
+      "shape": "16x128 flattened"
+    }
+  },
+  "note": "standalone read_table tables (tests/fj/test_floor_luts.py: per-entry + call-twice, R5); wired into the renderer at M13c2/3"
+}

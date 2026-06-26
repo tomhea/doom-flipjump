@@ -29,7 +29,7 @@ from typing import List, Sequence
 from doomfj.fixedpoint import encode_fixed_point
 from doomfj.tables import (
     reciprocal_table, sine_table, tantoangle_table, viewangletox_table,
-    xtoviewangle_table, finetangent_table,
+    xtoviewangle_table, finetangent_table, yslope_table, distscale_table, zlight_table,
 )
 
 __all__ = [
@@ -45,6 +45,9 @@ __all__ = [
     "generate_finetangent_lut_fj",
     "generate_xtoviewangle_lut_fj",
     "generate_viewangletox_lut_fj",
+    "generate_yslope_lut_fj",
+    "generate_distscale_lut_fj",
+    "generate_zlight_lut_fj",
 ]
 
 
@@ -138,6 +141,31 @@ def generate_viewangletox_lut_fj(label: str, view_w: int, trig_n: int, *, entry_
     mask = (1 << (4 * entry_nibbles)) - 1
     values = [v & mask for v in viewangletox_table(view_w, trig_n)]
     return generate_lut_fj(label, values, entry_nibbles)
+
+
+# ── M13 floor/ceiling (visplane) LUTs the fj plane raster reads (read_table data tables, R6 SSOT) ──
+
+def generate_yslope_lut_fj(label: str, view_w: int, view_h: int) -> str:
+    """yslope (R_MapPlane: screen row -> distance slope, 16.16, 8 nibbles), view_h entries. Values from
+    `tables.yslope_table` (all positive). `distance = FixedMul(planeheight, yslope[y])`. Read once per
+    plane row. Index by the screen row y (idx fits ceil(log2 view_h) nibbles)."""
+    return generate_lut_fj(label, yslope_table(view_w, view_h), 8)
+
+
+def generate_distscale_lut_fj(label: str, view_w: int, trig_n: int) -> str:
+    """distscale (R_MapPlane: screen column -> 1/|cos| fisheye, 16.16, 8 nibbles), view_w entries. Values
+    from `tables.distscale_table` (all positive). `length = FixedMul(distance, distscale[x1])` seeds the
+    span-left u,v. Read once per span."""
+    return generate_lut_fj(label, distscale_table(view_w, trig_n), 8)
+
+
+def generate_zlight_lut_fj(label: str, view_w: int, num_colormaps: int) -> str:
+    """zlight (R_MapPlane distance light), the LIGHTLEVELS x MAXLIGHTZ grid FLATTENED row-major to
+    `LIGHTLEVELS*MAXLIGHTZ` entries of 2 nibbles (a COLORMAP row 0..num_colormaps-1). Read entry
+    `(light>>LIGHTSEGSHIFT)*MAXLIGHTZ + min(MAXLIGHTZ-1, distance>>LIGHTZSHIFT)` with `hex.read_table`.
+    Values from `tables.zlight_table` (R6 SSOT)."""
+    flat = [row for lvl in zlight_table(view_w, num_colormaps) for row in lvl]
+    return generate_lut_fj(label, flat, 2)
 
 
 # ---------------------------------------------------------------------------

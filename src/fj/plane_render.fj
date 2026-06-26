@@ -164,6 +164,7 @@ ns plane {
         hex.zero 8, pixp
         hex.mov 2, pixp, y
         hex.mul_const 8, pixp, pixp, view_w              // pixp = y*VIEW_W  (the only y*W multiply, ONCE per span)
+        hex.zero 8, tt                                   // CLEAR tt (it still holds dist>>20 from the zlight calc)
         hex.mov 2, tt, x1
         hex.add 8, pixp, tt                              // + x1  -> the pixel index of (y, x1)
         hex.shl_bit 8, pixp                              // *2  -> the hex.vec2 cell digit offset

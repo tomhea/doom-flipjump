@@ -1,0 +1,23 @@
+{
+  "milestone": "M13a",
+  "what": "flat-colored distance-lit floors/ceilings (oracle); fj span raster is M13c/d",
+  "floor_mode": "flat-colored (flat base index per pixel, distance-lit via zlight)",
+  "luts": {
+    "yslope": {
+      "entries": 100,
+      "horizon_max": 10485760,
+      "edge_min": 105916
+    },
+    "zlight": {
+      "light_levels": 16,
+      "z_buckets": 128,
+      "row_min": 0,
+      "row_max": 31
+    }
+  },
+  "goldens": {
+    "square_room_spawn": "aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463",
+    "e1m1_spawn": "9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01"
+  },
+  "note": "oracle-only rung; the two live-oracle E1M1 fj golden tests are skipped until M13d"
+}

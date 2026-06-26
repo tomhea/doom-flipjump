@@ -172,7 +172,7 @@ def test_plane_draw_span_byte_exact_vs_oracle(tmp_path):
             f"hex.set 8, basexscale, {bxs}", f"hex.set 8, baseyscale, {bys}",
             f"hex.set 8, viewx, {viewx}", f"hex.set 8, viewy, {viewy}",
             f"hex.set 8, viewangle, {va}", f"hex.set 2, y, {y}",
-            f"hex.set 8, x1, {x1}", f"hex.set 8, x2, {x2}", "hex.set 4, flatbase, 0",
+            f"hex.set 8, x1, {x1}", f"hex.set 8, x2, {x2}", "hex.set 5, flatbase, 0",
             "stl.fcall draw_span_leaf, span_ret",
         ]
         for x in range(x1, x2 + 1):
@@ -182,7 +182,7 @@ def test_plane_draw_span_byte_exact_vs_oracle(tmp_path):
     data += [
         "planeheight: hex.vec 8", "light: hex.vec 2", "basexscale: hex.vec 8", "baseyscale: hex.vec 8",
         "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8", "y: hex.vec 2",
-        "x1: hex.vec 8", "x2: hex.vec 8", "flatbase: hex.vec 4", "span_ret: ;0",
+        "x1: hex.vec 8", "x2: hex.vec 8", "flatbase: hex.vec 5", "span_ret: ;0",
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         yslope, distscale, xtoviewangle, zlight, finesine, cm, flat,
     ]

@@ -1,0 +1,12 @@
+>       assert got == bytes(want), "frame.render_planes_spans != oracle _render_planes_textured"
+E       AssertionError: frame.render_planes_spans != oracle _render_planes_textured
+E       assert b'mmmmmmmmnlm...8\x08\x08\x08' == b'mmmmmmmmnlm...8\x08\x08\x06'
+E         
+E         At index 11240 diff: b'\x0e' != b'o'
+E         Use -v to get more diff
+
+tests\fj\test_plane_span_pass.py:161: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_plane_span_pass.py::test_render_planes_spans_byte_exact_vs_oracle
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 21.62s

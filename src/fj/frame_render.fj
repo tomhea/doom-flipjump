@@ -735,4 +735,136 @@ ns frame {
       cph: hex.vec 8
       fph: hex.vec 8
     }
+
+    // ── M13d2 R_MakeSpans — the runtime per-ROW TEXTURED floor/ceiling span pass. REPLACES the M13c3 per-
+    //    column plane_tramp: for each screen row y, walk x at RUNTIME, GROUP consecutive columns that share the
+    //    same visplane (region + plane-height + flat-slice + light) into a horizontal span [x1,x2], and raster
+    //    each span via the shared span_leaf (plane.draw_span). Mirrors the oracle reference_model.
+    //    _render_planes_textured grouping byte-for-byte: the u,v DDA RE-SEEDS per span off x1, so the span
+    //    BOUNDARIES must match exactly. A column is FLOOR at row y if y >= col_fstart[x], CEILING if y <
+    //    col_cexcl[x] (floor checked first, matching the flat tier; the bands never overlap), else WALL (skip —
+    //    already painted by pass 2a). The per-frame seeds basexscale/baseyscale (clear_planes) + viewx/viewy/
+    //    viewangle/viewz are the globals plane.draw_span reads; this macro sets, per span, the globals
+    //    planeheight/light/flatbase/y/x1/x2 then fcalls span_leaf. The 7 per-column arrays have an 8-nibble
+    //    stride (idx = x*8). view_w/view_h are compile-time Config. @requires hex.init & stl.ptr_init. ─────────
+    def render_planes_spans view_w, view_h \
+            @ yloop, ybody, ynext, done, end, xloop, xrowend, classify, cl_ckceil, cl_floor, cl_ceil, cl_skip, \
+              cl_done, start, extend, e_cph, e_cfb, e_clt, breakspan, emit, advance, \
+              idx, aptr, cell, cexcl, fstart, cR, cph, cfb, clt, \
+              inspan, spanR, spanph, spanfb, spanlt, spanx1, xcur, xm1, cVH, cVW \
+            < y, planeheight, light, flatbase, x1, x2, span_leaf, span_ret, \
+              col_cexcl, col_fstart, col_ceil_ph, col_floor_ph, col_plight, col_ceilbase, col_floorbase {
+        hex.set 2, cVH, view_h
+        hex.set 8, cVW, view_w
+        hex.zero 2, y
+      yloop:
+        hex.cmp 2, y, cVH, ybody, done, done             // y < view_h ? render the row : done
+      ybody:
+        hex.zero 8, xcur
+        hex.zero 1, inspan
+      xloop:
+        hex.cmp 8, xcur, cVW, classify, xrowend, xrowend // xcur < view_w ? classify : end-of-row
+      xrowend:
+        hex.if0 1, inspan, ynext                         // no open span -> next row; else close the trailing span
+        ;emit
+      classify:                                          // classify(xcur) -> (cR, cph, cfb, clt) at row y
+        hex.mov w/4, idx, xcur
+        hex.shl_bit w/4, idx
+        hex.shl_bit w/4, idx
+        hex.shl_bit w/4, idx                             // idx = xcur*8 (the 8-nibble col-array stride)
+        hex.set w/4, aptr, col_cexcl
+        hex.ptr_index cell, aptr, idx
+        hex.read_hex 2, cexcl, cell                      // cexcl = col_cexcl[xcur]  (<= view_h, 2 nibbles)
+        hex.set w/4, aptr, col_fstart
+        hex.ptr_index cell, aptr, idx
+        hex.read_hex 2, fstart, cell                     // fstart = col_fstart[xcur]
+        hex.set w/4, aptr, col_plight
+        hex.ptr_index cell, aptr, idx
+        hex.read_hex 2, clt, cell                        // clt = col_plight[xcur]  (RAW sector light)
+        hex.cmp 2, y, fstart, cl_ckceil, cl_floor, cl_floor   // y >= fstart -> floor (rows are non-negative)
+      cl_ckceil:
+        hex.cmp 2, y, cexcl, cl_ceil, cl_skip, cl_skip   // y < cexcl -> ceiling; else WALL (skip)
+      cl_floor:
+        hex.set 2, cR, 2
+        hex.set w/4, aptr, col_floor_ph
+        hex.ptr_index cell, aptr, idx
+        hex.read_hex 8, cph, cell                        // cph = col_floor_ph[xcur]  (16.16 |floor_z - viewz|)
+        hex.set w/4, aptr, col_floorbase
+        hex.ptr_index cell, aptr, idx
+        hex.read_hex 5, cfb, cell                        // cfb = col_floorbase[xcur]  (flat slice offset)
+        ;cl_done
+      cl_ceil:
+        hex.set 2, cR, 1
+        hex.set w/4, aptr, col_ceil_ph
+        hex.ptr_index cell, aptr, idx
+        hex.read_hex 8, cph, cell
+        hex.set w/4, aptr, col_ceilbase
+        hex.ptr_index cell, aptr, idx
+        hex.read_hex 5, cfb, cell
+        ;cl_done
+      cl_skip:
+        hex.zero 2, cR                                   // cR = 0 (wall row -> not a plane pixel)
+      cl_done:
+        hex.if0 1, inspan, start                         // not currently in a span -> maybe START one
+        ;extend                                          // in a span -> does xcur EXTEND it?
+      start:
+        hex.if0 2, cR, advance                           // skip column -> just advance
+        hex.mov 2, spanR, cR                             // open a new span at xcur
+        hex.mov 8, spanph, cph
+        hex.mov 5, spanfb, cfb
+        hex.mov 2, spanlt, clt
+        hex.mov 8, spanx1, xcur
+        hex.set 1, inspan, 1
+        ;advance
+      extend:                                            // extend iff region+height+flat-slice+light all match
+        hex.cmp 2, cR, spanR, breakspan, e_cph, breakspan
+      e_cph:
+        hex.cmp 8, cph, spanph, breakspan, e_cfb, breakspan
+      e_cfb:
+        hex.cmp 5, cfb, spanfb, breakspan, e_clt, breakspan
+      e_clt:
+        hex.cmp 2, clt, spanlt, breakspan, advance, breakspan   // all equal -> extend (advance); else break
+      breakspan:
+        ;emit                                            // close [spanx1, xcur-1], then REPROCESS xcur
+      emit:
+        hex.mov 8, x1, spanx1
+        hex.mov 8, xm1, xcur
+        hex.dec 8, xm1                                   // x2 = xcur - 1
+        hex.mov 8, x2, xm1
+        hex.mov 8, planeheight, spanph
+        hex.mov 2, light, spanlt
+        hex.mov 5, flatbase, spanfb
+        stl.fcall span_leaf, span_ret                    // rasterize the span (re-seeds the DDA off x1)
+        hex.zero 1, inspan
+        ;xloop                                           // do NOT advance: reprocess xcur as the next span start
+      advance:                                           //   (trailing close: xcur==view_w -> xrowend -> ynext)
+        hex.inc 8, xcur
+        ;xloop
+      ynext:
+        hex.inc 2, y
+        ;yloop
+      done:
+        ;end                                             // jump over the @-local data (lesson #2; inline macro)
+
+      idx: hex.vec w/4
+      aptr: hex.vec w/4
+      cell: hex.vec w/4
+      cexcl: hex.vec 2
+      fstart: hex.vec 2
+      cR: hex.vec 2
+      cph: hex.vec 8
+      cfb: hex.vec 5
+      clt: hex.vec 2
+      inspan: hex.vec 1
+      spanR: hex.vec 2
+      spanph: hex.vec 8
+      spanfb: hex.vec 5
+      spanlt: hex.vec 2
+      spanx1: hex.vec 8
+      xcur: hex.vec 8
+      xm1: hex.vec 8
+      cVH: hex.vec 2
+      cVW: hex.vec 8
+      end:
+    }
 }

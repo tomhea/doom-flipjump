@@ -162,9 +162,9 @@ ns plane {
         hex.mov 2, vv, tt
         hex.and 2, vv, c3f                               // v = (yfrac>>16) & 63
         hex.mul_const 3, spot, vv, 64
-        hex.add 3, spot, u                               // spot = v*64 + u  (flats are 64x64)
-        hex.mov 4, fidx, flatbase
-        hex.add 4, fidx, spot                            // absolute flat texel index
+        hex.add 3, spot, u                               // spot = v*64 + u  (flats are 64x64; high nibbles stay 0)
+        hex.mov 5, fidx, flatbase                        // flatbase is a 5-nibble slice offset (combined flat table
+        hex.add 5, fidx, spot                            //   up to ~151k texels for E1M1 -> idx_n=5; R11 width)
         flat.sample pal, fidx                            // pal = flat[flatbase + spot]
         hex.zero 4, cmidx
         hex.mov 2, cmidx, pal
@@ -210,8 +210,8 @@ ns plane {
       c3f: hex.vec 2
       u: hex.vec 3                                      // read at 3 nibbles by add 3 (high nibble kept 0)
       vv: hex.vec 3                                     // read at 3 nibbles by mul_const 3 (high nibble kept 0)
-      spot: hex.vec 4                                   // read at 4 nibbles by add 4 (high nibble kept 0)
-      fidx: hex.vec 4
+      spot: hex.vec 5                                   // 5-nib: v*64+u in low 3, high 2 stay 0 (added into fidx)
+      fidx: hex.vec 5
       pal: hex.vec 2
       cmidx: hex.vec 4
       lit: hex.vec 2

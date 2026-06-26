@@ -1,0 +1,5 @@
+tests/fj/test_plane_span_pass.py::test_render_planes_spans_byte_exact_vs_oracle PASSED [ 25%]
+tests/fj/test_plane_kernel.py::test_plane_draw_pixel_byte_exact_vs_oracle PASSED [ 50%]
+tests/fj/test_plane_kernel.py::test_plane_clear_planes_byte_exact_vs_oracle PASSED [ 75%]
+tests/fj/test_plane_kernel.py::test_plane_draw_span_byte_exact_vs_oracle PASSED [100%]
+============================= 4 passed in 51.62s ==============================

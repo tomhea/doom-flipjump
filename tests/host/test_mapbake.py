@@ -231,3 +231,34 @@ def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
         ok = fj.run_test_output(out, f"{vx}\n{vy}\n".encode(), expected,
                                 should_raise_assertion_error=False)
         assert ok, f"E1M1 BSP-as-code order @ ({vx},{vy}) != bsp_render_order"
+
+
+def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
+    """M12qq — the node partition consts (cpx/cpy/cdx/cdy) are baked with hex.xor_by + xor-INVOLUTION
+    self-zeroing: each node SETs them (0->vals), the side test READS them, then a second fcall CLEARs them
+    (vals->0) before recursing. So after the whole walk every partition reg must be back to 0 — the
+    involution invariant. A missing CLEAR would leave them at the XOR-accumulation of every visited node's
+    consts (nonzero for the deep tree: cpy = 10 ^ -10 ^ 0, cdy = 0 ^ 0 ^ 1), so this directly catches a
+    broken/absent involution (the M12qq regression). Distinct from the order tests (which catch the WRONG
+    side test) — this asserts the post-walk zero state."""
+    cmap = _deep_map()                                       # 3 nodes with distinct partition consts
+    # empty subsector action: the nodes still run their SET/USE/CLEAR (what we test), but the leaves print
+    # nothing, so the only output is the post-walk partition-reg dump below.
+    code = _bsp_as_code("z", cmap, done_label="bsp_done", subsector_action=lambda s: [])
+    prog = "\n".join([
+        "stl.startup_and_init_all",
+        "hex.set 10, vx, 5", "hex.set 10, vy, 20",
+        ";z_bspcode_walk", "bsp_done:",
+        # after the walk, the involution must have returned every partition reg to 0 (40 '0' digits total).
+        # the shared partition-const regs are {pfx}_bspcode_{cpx,cpy,cdx,cdy} (here pfx="z").
+        "hex.print_as_digit 10, z_bspcode_cpx, 0", "hex.print_as_digit 10, z_bspcode_cpy, 0",
+        "hex.print_as_digit 10, z_bspcode_cdx, 0", "hex.print_as_digit 10, z_bspcode_cdy, 0",
+        "stl.loop",
+        "vx: hex.vec 10", "vy: hex.vec 10", code,
+    ]) + "\n"
+    p = tmp_path / "selfzero.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [PROJECTION_FJ.resolve(), p.resolve()], b"", b"0" * 40,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "node partition consts did not self-zero after the walk (broken xor-involution)"

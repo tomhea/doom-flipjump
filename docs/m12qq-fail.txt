@@ -1,8 +1,7 @@
-# M12qq TDD FAIL — node involution CLEAR fcall dropped: cpx/cpy/cdx/cdy ACCUMULATE across nodes
-# (each node's SET xor_by never cancelled) -> wrong side test -> wrong subsector order. The 3-node deep tree
-# catches it; the 1-node and 0-node cases can't accumulate so they still pass.
+# M12qq TDD FAIL — node involution CLEAR fcall dropped. The NEW test asserts the partition consts
+# (cpx/cpy/cdx/cdy) self-zero after the walk; without CLEAR they hold the XOR-accumulation of every
+# visited node (nonzero) -> the print is not 40 zeros. (The deep-walk ORDER test also fails.)
 
-E       AssertionError: deep @ (5,20): emitted BSP order != bsp_render_order
-tests\host\test_mapbake.py:183: AssertionError
+FAILED tests/host/test_mapbake.py::test_bsp_code_node_consts_self_zero_after_walk
 FAILED tests/host/test_mapbake.py::test_bsp_code_deep_walk - AssertionError: ...
-1 failed, 2 passed in 6.67s
+2 failed in 1.75s

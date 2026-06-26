@@ -43,6 +43,40 @@ ASSET = "tests/fixtures/freedoom_assets.wad"
 TEX = "STEP4"   # 32x16 -> texheight 16 (pow2, >=16 so the leaf heightmask is exact), texwidth 32
 
 
+# ── M12pp: walk xor_by + xor-involution self-zeroing ──────────────────────────────────────────────
+# Replace the per-seg baked `hex.set` constants (each pays an @-dispatch to zero a register it overwrites)
+# with `hex.xor_by` (no @). Correct ONLY on a zero register, so the per-seg consts live in ONE shared block
+# fcall'd BEFORE (0 -> vals) and AFTER (vals -> 0) the leaf — `xor_by val` twice cancels (involution), and
+# the seg regs (declared hex.vec, zero-init) self-restore to 0 each iteration. The leaf only READS those regs
+# (verified: wall_x_range/wall_setup/wall_offset/column_render_params take them as read-only operands), and
+# every baked field is a PURE compile-time constant (worldtop = seg_ceil - viewzw is NOT pure -> seg_ceil is
+# baked here and worldtop is computed inside the leaf). The block label is keyed on the seg index (each seg is
+# in one subsector) so the BSP double-emission (R7b) fcalls it twice but emits it once.
+
+def _seg_xorby_block(idx, fields):
+    """The shared seg{idx}_xorby block (emitted ONCE, fcall'd twice per visible seg). `fields` = list of
+    (regname, width, value) PURE compile-time constants."""
+    lines = [f"  seg{idx}_xorby:"]
+    for reg, wdt, val in fields:
+        lines.append(f"    hex.xor_by {wdt}, {reg}, {val}")
+    lines.append("    stl.fret xb_ret")
+    return lines
+
+
+def _seg_xorby_use(idx, clear=True):
+    """The SET / USE / CLEAR fcall sequence at the call site. `clear=False` drops the involution CLEAR (the
+    M12pp TDD FAIL stub: seg regs accumulate across segs -> wrong values for every seg after the first)."""
+    seq = [f"    stl.fcall seg{idx}_xorby, xb_ret",      # SET  (0 -> vals)
+           "    stl.fcall seg_pass1_leaf, seg_ret"]      # USE  (leaf reads the seg regs)
+    if clear:
+        seq.append(f"    stl.fcall seg{idx}_xorby, xb_ret")   # CLEAR (vals -> 0, the xor involution)
+    return seq
+
+
+# Toggle for the M12pp TDD FAIL evidence: when False, the involution CLEAR is dropped (regs accumulate).
+_M12PP_CLEAR = True
+
+
 def _col_params(rm, scale, rca, rw_off, rwd, x, tw, ceil_h, floor_h, viewz, worldtop):
     """The oracle per-column params (render_wall_frame 540-559), mirrored: clipped (top,bottom) + texcol +
     8.8 (frac0, step)."""
@@ -1636,6 +1670,8 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
     xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
 
+    xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
+
     def subsector_action(s):
         ss = cmap.subsectors[s]
         out = []
@@ -1650,19 +1686,17 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
             texoff = (seg.offset + sd.x_off) << 16
             name = seg_tex[si]
             texbase, th_s, tw_s = texinfo[name if name else "__WALLBG__"]
-            out += [f"    hex.set 8, seg_v1x, {(v1x << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v1y, {(v1y << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_segangle, {seg.angle}",
-                    f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
-                    f"    hex.set 5, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
-                    f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
-                    f"    hex.set 2, seg_light, {seg_light[si]}",
-                    "    stl.fcall seg_pass1_leaf, seg_ret"]
+            fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
+                      ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
+                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
+                      ("seg_texbase", 5, texbase), ("seg_texheight", 4, th_s), ("seg_tw", 8, tw_s),
+                      ("seg_hm", 3, th_s - 1), ("seg_light", 2, seg_light[si])]
+            xorby_blocks[si] = _seg_xorby_block(si, fields)  # ceilfix/floorfix/seg_ceil/viewzw are static (1 sector)
+            out += _seg_xorby_use(si, clear=_M12PP_CLEAR)
         return out
 
     bsp = _bsp_as_code("room", cmap, done_label="bsp_done", subsector_action=subsector_action)
+    xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (emitted once)
 
     pass1 = [
         "hex.input_dec_int 8, vx_raw, bad", "hex.input_dec_int 8, vy_raw, bad",
@@ -1689,15 +1723,17 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtlw {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
+        *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
         "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
-        "seg_light: hex.vec 2",
+        "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: the xorby block's fcall/fret return register
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
-        f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}", f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}",
+        f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}", f"viewzw: hex.vec 8, {(viewz >> 16) & 0xFFFFFFFF}",
+        f"seg_ceil: hex.vec 8, {ceil_h & 0xFFFFFFFF}", "worldtop: hex.vec 8",   # M12pp: worldtop now leaf-computed
         "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
         "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
         "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
@@ -1786,6 +1822,7 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
     colormap = scene.asset_wad.colormap()
     _cid = [0]                                                # unique label id per EMISSION (a leaf is emitted
     #                                                           twice by _bsp_as_code — once per node branch)
+    xorby_blocks = {}                                         # M12pp: seg{si}_xorby blocks, emitted once each
 
     def subsector_action(s):
         ss = cmap.subsectors[s]
@@ -1817,23 +1854,20 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
             sd = sds[ld.front if seg.side == 0 else ld.back]
             texoff = (seg.offset + sd.x_off) << 16
             ssec = rm._seg_sector(lds, sds, secs, seg)
-            out += [f"    hex.set 8, seg_v1x, {(v1x << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v1y, {(v1y << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_segangle, {seg.angle}",
-                    f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
-                    "    hex.set 5, seg_texbase, 0", "    hex.set 4, seg_texheight, 1",
-                    "    hex.set 8, seg_tw, 1", "    hex.set 3, seg_hm, 0",      # WALL_BG sentinel (proxy)
-                    f"    hex.set 2, seg_light, {lrow(ssec.light)}",
-                    f"    hex.set 8, ceilfix, {(ssec.ceil_h << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, floorfix, {(ssec.floor_h << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, worldtop, {ssec.ceil_h & 0xFFFFFFFF}",
-                    "    hex.sub 8, worldtop, viewzw",          # worldtop = seg_ceil - player viewz_world (runtime)
-                    "    stl.fcall seg_pass1_leaf, seg_ret"]
+            fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
+                      ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
+                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
+                      ("seg_texbase", 5, 0), ("seg_texheight", 4, 1), ("seg_tw", 8, 1), ("seg_hm", 3, 0),
+                      ("seg_light", 2, lrow(ssec.light)),                # WALL_BG sentinel (proxy) tex fields
+                      ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
+                      ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
+                      ("seg_ceil", 8, ssec.ceil_h & 0xFFFFFFFF)]        # M12pp: worldtop = seg_ceil - viewzw in-leaf
+            xorby_blocks[si] = _seg_xorby_block(si, fields)
+            out += _seg_xorby_use(si, clear=_M12PP_CLEAR)
         return out
 
     bsp = _bsp_as_code("e1", cmap, done_label="bsp_done", subsector_action=subsector_action)
+    xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # M12pp: the shared per-seg xorby blocks (once)
 
     pass1 = [
         "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
@@ -1861,6 +1895,7 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
         "bg_fill_leaf:",
         f"frame.render_background_reg framebuffer, bgceil, bgfloor, {cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         "stl.fret bg_ret",
+        *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
@@ -1869,8 +1904,9 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
         "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
-        "seg_light: hex.vec 2",
-        "ceilfix: hex.vec 8", "floorfix: hex.vec 8", "worldtop: hex.vec 8",
+        "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
+        "ceilfix: hex.vec 8", "floorfix: hex.vec 8",
+        "seg_ceil: hex.vec 8", "worldtop: hex.vec 8",     # M12pp: seg_ceil baked (pure); worldtop leaf-computed
         "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
         "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
         "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
@@ -1986,6 +2022,7 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
         return max(0, min(COLORMAP_LIGHTS - 1, light >> LIGHT_SHIFT))
 
     _cid = [0]
+    xorby_blocks = {}                                         # M12pp: seg{si}_xorby blocks, emitted once each
 
     def subsector_action(s):
         ss = cmap.subsectors[s]
@@ -2016,23 +2053,20 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
             texoff = (seg.offset + sd.x_off) << 16
             ssec = rm._seg_sector(lds, sds, secs, seg)
             tb, th, tw = seg_texinfo[si]
-            out += [f"    hex.set 8, seg_v1x, {(v1x << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v1y, {(v1y << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, seg_segangle, {seg.angle}",
-                    f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
-                    f"    hex.set 5, seg_texbase, {tb}", f"    hex.set 4, seg_texheight, {th}",
-                    f"    hex.set 8, seg_tw, {tw}", f"    hex.set 3, seg_hm, {th - 1}",
-                    f"    hex.set 2, seg_light, {lrow(ssec.light)}",
-                    f"    hex.set 8, ceilfix, {(ssec.ceil_h << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, floorfix, {(ssec.floor_h << 16) & 0xFFFFFFFF}",
-                    f"    hex.set 8, worldtop, {ssec.ceil_h & 0xFFFFFFFF}",
-                    "    hex.sub 8, worldtop, viewzw",
-                    "    stl.fcall seg_pass1_leaf, seg_ret"]
+            fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
+                      ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
+                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
+                      ("seg_texbase", 5, tb), ("seg_texheight", 4, th), ("seg_tw", 8, tw),
+                      ("seg_hm", 3, th - 1), ("seg_light", 2, lrow(ssec.light)),
+                      ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
+                      ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
+                      ("seg_ceil", 8, ssec.ceil_h & 0xFFFFFFFF)]   # M12pp: worldtop = seg_ceil - viewzw in-leaf
+            xorby_blocks[si] = _seg_xorby_block(si, fields)
+            out += _seg_xorby_use(si, clear=_M12PP_CLEAR)
         return out
 
     bsp = _bsp_as_code("e1", cmap, done_label="bsp_done", subsector_action=subsector_action)
+    xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # M12pp: the shared per-seg xorby blocks (once)
 
     pass1 = [
         "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
@@ -2060,6 +2094,7 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
         "bg_fill_leaf:",
         f"frame.render_background_reg framebuffer, bgceil, bgfloor, {cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         "stl.fret bg_ret",
+        *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
@@ -2068,8 +2103,9 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
         "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
-        "seg_light: hex.vec 2",
-        "ceilfix: hex.vec 8", "floorfix: hex.vec 8", "worldtop: hex.vec 8",
+        "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
+        "ceilfix: hex.vec 8", "floorfix: hex.vec 8",
+        "seg_ceil: hex.vec 8", "worldtop: hex.vec 8",     # M12pp: seg_ceil baked (pure); worldtop leaf-computed
         "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
         "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
         "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
@@ -2107,9 +2143,12 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
     # chunk, an earlier wrong guess): the ~40M pre-M12oo span was ~21M the BSP WALK (575 segs' baked per-seg/
     # per-node hex.set constants, emitted twice per leaf) + ~16M the fully-unrolled 16K-pixel PASS-2 clip + only
     # ~3.5M the combined texel table. M12oo replaced the inlined per-pixel pass-2 clip (two hex.cmp x 16K) with
-    # the SHARED-COMPARE TRAMPOLINE (one compare_y body + a cheap per-pixel wflip), dropping the MEASURED span
-    # from ~40.3M to ~31.2M words (-9M / ~23%). The remaining bloat is the WALK (M12pp/qq/rr) + the table; per
-    # DESIGN §1.2 the flat limit stays RAISED (RAM-only cost) until those land. (Don't promise a number -- MEASURE.)
+    # the SHARED-COMPARE TRAMPOLINE (one compare_y body + a cheap per-pixel wflip): 40.3M -> 31.2M (-9M / ~23%).
+    # M12pp then replaced the per-seg baked hex.set walk constants (each pays an @-dispatch) with hex.xor_by +
+    # xor-INVOLUTION self-zeroing (no @): 31.2M -> 23.4M (-7.8M / ~25%), and the assemble 1090s -> 262s (the @
+    # dispatches were super-linearly expensive). Cumulative since M12nn: 40.3M -> 23.4M (-42%). Remaining levers:
+    # the BSP NODE consts + skeleton (M12qq single-emission, M12rr shrink) + the table; flat limit stays RAISED
+    # (RAM-only cost) until those land. (Don't promise a number -- MEASURE.)
     RENDER_FLAT_WORDS = 1 << 26
     for k, (vx, vy, va) in enumerate(VIEWPOINTS):
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)

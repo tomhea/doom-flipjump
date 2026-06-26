@@ -1,0 +1,5 @@
+# M12pp TDD PASS — involution CLEAR restored (clear=True): seg regs self-zero each iteration (xor_by twice cancels).
+# wideindex byte-exact across 5 viewpoints; assemble 158s (was 298s w/ hex.set baking).
+
+.                                                                        [100%]
+1 passed in 158.84s (0:02:38)

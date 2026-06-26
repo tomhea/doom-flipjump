@@ -1,0 +1,15 @@
+# M12pp TDD FAIL — involution CLEAR dropped (_seg_xorby_use clear=False): per-seg xor_by consts ACCUMULATE
+# across segs (each seg's SET is never cancelled), so every seg after the first reads corrupted geometry -> wrong frame.
+
+            fj.run(out, io_device=screen, print_time=False, print_termination=False)
+>           assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-c @ ({vx},{vy},{va}) != oracle"
+E           AssertionError: M12nn-c @ (128,128,536870912) != oracle
+E           assert b'\x05\x05\x0...mmmmmmmmmmmmm' == b'l\x03\x03\x...mmmmmmmmmmmmm'
+E             
+E             At index 0 diff: b'\x05' != b'l'
+E             Use -v to get more diff
+
+tests\fj\test_wall_render.py:1767: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_wall_render.py::test_wall_render_wideindex_byte_exact - ...
+1 failed in 149.72s (0:02:29)

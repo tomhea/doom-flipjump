@@ -66,10 +66,10 @@ def test_spawn_frame_wall_is_textured_not_flat(rm, scene):
 
 
 def test_spawn_frame_golden_hash(rm, scene):
-    """Byte-exact textured golden (the key the fj renderer diffs against, D12). Re-blessed at M13a:
-    floors/ceilings are now distance-lit flat-colored visplanes instead of the M9 two-band background."""
+    """Byte-exact textured golden (the key the fj renderer diffs against, D12). Re-blessed at M13b:
+    floors/ceilings are now full-res perspective-textured visplanes (R_DrawPlanes) over the M13a flat tier."""
     frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene)
-    assert frame_hash(frame) == "aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463"
+    assert frame_hash(frame) == "00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12"
 
 
 def test_only_faced_wall_drawn_others_culled(rm, scene):
@@ -109,7 +109,7 @@ def test_e1m1_wall_frame_textured_and_deterministic():
     assert sum(1 for a, b in zip(frame, bg) if a != b) > 1000  # walls composited over the background
     assert len(set(frame)) >= 8                                # many palette indices ⇒ real textures
     assert frame == rm.render_wall_frame(state, scene)         # deterministic (D12)
-    assert frame_hash(frame) == "9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01"
+    assert frame_hash(frame) == "db5d3da80a52c3ea78a8f599d121aaeb450bdfb84ca96b4656f0c267302ef0b2"
 
 
 def test_e1m1_every_pixel_is_a_valid_palette_index():

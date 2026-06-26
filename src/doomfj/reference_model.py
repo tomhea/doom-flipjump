@@ -31,7 +31,7 @@ from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-f
 from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side  # shared geometry (R6)
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
-    yslope_table, zlight_table, LIGHTLEVELS, LIGHTSEGSHIFT, MAXLIGHTZ, LIGHTZSHIFT,
+    yslope_table, zlight_table, distscale_table, LIGHTLEVELS, LIGHTSEGSHIFT, MAXLIGHTZ, LIGHTZSHIFT,
 )
 from doomfj.texturecompiler import (  # shared D5 downscale lever + texture compositing (R6/D12)
     downscale_canvas, composite_texture, texture_texels,
@@ -125,6 +125,7 @@ class ReferenceModel:
         self.finetangent = finetangent_table(self.cfg.TRIG_N)   # tan(angle-90°) for texture-u (M12tex, R6)
         self.yslope = yslope_table(self.cfg.VIEW_W, self.cfg.VIEW_H)   # row -> distance slope (M13, R6)
         self.zlight = zlight_table(self.cfg.VIEW_W, COLORMAP_LIGHTS)   # (light,z) -> colormap row (M13, R6)
+        self.distscale = distscale_table(self.cfg.VIEW_W, self.cfg.TRIG_N)  # col -> 1/cos fisheye (M13b, R6)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
     def read_sin(self, angle: int) -> int:
@@ -133,6 +134,13 @@ class ReferenceModel:
     def read_cos(self, angle: int) -> int:
         idx = (angle >> self.angle_shift) + self.cfg.TRIG_N // 4
         return self.sine[idx & (self.cfg.TRIG_N - 1)]
+
+    # finesine/finecosine indexed by an ALREADY-shifted fine index (R_MapPlane / R_ClearPlanes idiom)
+    def _finesin_idx(self, idx: int) -> int:
+        return self.sine[idx & (self.cfg.TRIG_N - 1)]
+
+    def _finecos_idx(self, idx: int) -> int:
+        return self.sine[(idx + self.cfg.TRIG_N // 4) & (self.cfg.TRIG_N - 1)]
 
     # ── projection angles (R_PointToAngle2, M12b) ──
     @staticmethod
@@ -491,6 +499,23 @@ class ReferenceModel:
         cache[key] = base
         return base
 
+    def _flat_texels(self, asset_wad, name, cache):
+        """A flat's raw 64×64 palette-index texels (4096 bytes, row-major `[v*64+u]`, no patch composite,
+        no downscale — flats stay native, the `&63` masks wrap them). M13b textured floors sample this per
+        pixel. A missing flat (the sky placeholder before M16) → a uniform WALL_BG tile so the column is
+        still a defined fill. Cached per frame under a distinct key from `_flat_base`."""
+        key = ("texels", name.upper())
+        if key in cache:
+            return cache[key]
+        try:
+            data = bytes(asset_wad.flat(name.upper()))
+        except (KeyError, ValueError):
+            data = b""
+        if len(data) != 4096:                                   # pad/truncate to the 64×64 the &63 assumes
+            data = (data + bytes([WALL_BG]) * 4096)[:4096]
+        cache[key] = data
+        return data
+
     def plane_light_row(self, light: int, distance: int) -> int:
         """R_MapPlane's distance-based colormap-row select (zlight): bucket the 16.16 `distance` by
         `>> LIGHTZSHIFT` (clamped to MAXLIGHTZ-1) and the sector `light` by `>> LIGHTSEGSHIFT` (clamped to
@@ -507,9 +532,9 @@ class ReferenceModel:
         distance = fixed_mul(planeheight, self.yslope[y], 8, 4)
         return colormap[self.plane_light_row(light, distance)][flat_base]
 
-    def render_wall_frame(self, state: SimState, scene: Scene) -> bytes:
-        """The first rendered 3D frame, TEXTURED: composite every visible wall over the M9 two-band
-        background (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
+    def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True) -> bytes:
+        """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
+        visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
         (scale at x1, linear `scalestep` to x2 via a plain truncated divide — NOT FixedDiv — so the fj
         renderer must divide the same way) -> per column the textured wall column:
@@ -522,11 +547,14 @@ class ReferenceModel:
         Front-to-back **solid-seg clipping** via a per-column `drawn` flag (one-sided walls opaque). A wall
         with no middle texture falls back to the flat `WALL_BG` shade. **Ceiling/floor are M13 visplanes**:
         when a column is first claimed by a one-sided wall covering screen rows [top,bottom], the rows ABOVE
-        (0..top-1) get that sector's ceiling flat and the rows BELOW (bottom+1..H-1) its floor flat, each
-        distance-lit (zlight). M13a renders them **flat-colored** (the flat's base index per `_plane_pixel`,
-        the cheaper §1 floor tier); the perspective u,v texture sample lands at M13b. Returns W*H packed
-        palette-index bytes (row-major, D3); the fj renderer reproduces this bit-exactly (D12)."""
+        (0..top-1) record that sector's ceiling flat and the rows BELOW (bottom+1..H-1) its floor flat. After
+        the walk they are rasterized: `floor_texturing=True` (M13b/default) = the full DOOM perspective u,v
+        span raster (R_MapPlane/R_DrawSpan — per-row spans, `yslope`/`distscale`/`basexscale` DDA, distance-
+        lit); `floor_texturing=False` (M13a) = the cheaper flat-colored tier (the flat's base index per
+        `_plane_pixel`). Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces
+        this bit-exactly (D12)."""
         cfg = self.cfg
+        W, H = cfg.VIEW_W, cfg.VIEW_H
         fb = bytearray(cfg.FB_SIZE)                          # zero-init; visplanes + walls fill every column
         colormap = scene.asset_wad.colormap()
         flatcache: dict = {}
@@ -544,6 +572,12 @@ class ReferenceModel:
         viewz = self.view_z(self._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
         viewz_world = _signed(viewz, 32) >> 16
         centery, ds = cfg.CENTERY, self.downscale
+
+        # per-column visplane records (claimed columns only): ceiling = rows [0, ceil_hi], floor = [floor_lo, H-1]
+        ceil_hi = [-1] * W                                   # -1 / H = "no region in this column"
+        floor_lo = [H] * W
+        col_ch = [0] * W; col_fh = [0] * W; col_lt = [0] * W            # per-col ceil/floor height + sector light
+        col_cf: list = [None] * W; col_ff: list = [None] * W           # per-col ceil/floor flat name
 
         drawn = bytearray(cfg.VIEW_W)                        # per-column solid-seg clip (1 = already drawn)
         for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
@@ -573,11 +607,6 @@ class ReferenceModel:
             tex = self._wall_texture(scene.asset_wad, sd.middle, texcache)
             worldtop = sec.ceil_h - viewz_world              # world units the ceiling is above the eye
             flat_fill = colormap[light_row][WALL_BG]
-            # M13 visplane data for this seg's sector: planeheight = |plane_z - viewz| (16.16) + flat base
-            ceil_ph = abs((sec.ceil_h << 16) - viewz)
-            floor_ph = abs((sec.floor_h << 16) - viewz)
-            ceil_base = self._flat_base(scene.asset_wad, sec.ceil_tex, flatcache)
-            floor_base = self._flat_base(scene.asset_wad, sec.floor_tex, flatcache)
             for x in range(x1, x2):
                 if not drawn[x]:
                     top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz, scale & ANGLE_MASK)
@@ -602,13 +631,104 @@ class ReferenceModel:
                                 step=(iscale >> 8) & 0xFFFF)
                             for k, y in enumerate(range(top, bottom + 1)):
                                 fb[y * cfg.VIEW_W + x] = col[k]
-                    # M13 ceiling visplane = rows above the wall [0, top-1]; floor = below [bottom+1, H-1]
-                    ceil_hi = min(top, cfg.VIEW_H) - 1
-                    for y in range(0, ceil_hi + 1):
-                        fb[y * cfg.VIEW_W + x] = self._plane_pixel(colormap, ceil_ph, sec.light, ceil_base, y)
-                    floor_lo = max(bottom + 1, 0)
-                    for y in range(floor_lo, cfg.VIEW_H):
-                        fb[y * cfg.VIEW_W + x] = self._plane_pixel(colormap, floor_ph, sec.light, floor_base, y)
+                    # record the M13 visplane regions for this column (ceiling above, floor below the wall)
+                    ceil_hi[x] = min(top, cfg.VIEW_H) - 1
+                    floor_lo[x] = max(bottom + 1, 0)
+                    col_ch[x], col_fh[x], col_lt[x] = sec.ceil_h, sec.floor_h, sec.light
+                    col_cf[x], col_ff[x] = sec.ceil_tex, sec.floor_tex
                     drawn[x] = 1
                 scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
+
+        planes = (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff)
+        if floor_texturing:
+            self._render_planes_textured(fb, colormap, scene.asset_wad, flatcache,
+                                         viewx, viewy, viewangle, viewz, *planes)
+        else:
+            self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz, *planes)
         return bytes(fb)
+
+    # ── M13 floor/ceiling visplane rasterizers (consume the per-column region records above) ──
+    def _render_planes_flat(self, fb, colormap, asset_wad, flatcache, viewz,
+                            ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff):
+        """M13a flat-colored tier (the cheaper §1 floor mode): each claimed column's ceiling rows
+        [0, ceil_hi] and floor rows [floor_lo, H-1] are filled with the flat's base index, distance-lit
+        per row (`_plane_pixel`). No horizontal DDA — each pixel is independent."""
+        cfg = self.cfg
+        W, H = cfg.VIEW_W, cfg.VIEW_H
+        for x in range(W):
+            if ceil_hi[x] >= 0:
+                ph = abs((col_ch[x] << 16) - viewz)
+                base, lt = self._flat_base(asset_wad, col_cf[x], flatcache), col_lt[x]
+                for y in range(0, ceil_hi[x] + 1):
+                    fb[y * W + x] = self._plane_pixel(colormap, ph, lt, base, y)
+            if floor_lo[x] < H:
+                ph = abs((col_fh[x] << 16) - viewz)
+                base, lt = self._flat_base(asset_wad, col_ff[x], flatcache), col_lt[x]
+                for y in range(floor_lo[x], H):
+                    fb[y * W + x] = self._plane_pixel(colormap, ph, lt, base, y)
+
+    @staticmethod
+    def _plane_region_at(x, y, ceil_hi, floor_lo):
+        """Which visplane (if any) column x belongs to at screen row y: 'c' (ceiling, y above the wall),
+        'f' (floor, y below the wall), or None (the wall band / an unclaimed column)."""
+        if y <= ceil_hi[x]:
+            return 'c'
+        if y >= floor_lo[x]:
+            return 'f'
+        return None
+
+    def _render_planes_textured(self, fb, colormap, asset_wad, flatcache,
+                                viewx, viewy, viewangle, viewz,
+                                ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff):
+        """M13b full-res textured tier (the chosen §1 default): DOOM's R_DrawPlanes. For each screen row,
+        group consecutive columns sharing the same visplane (region + flat + plane-height + light) into a
+        horizontal span and rasterize it with the perspective u,v DDA (R_MapPlane/R_DrawSpan). `basexscale`/
+        `baseyscale` are the per-frame R_ClearPlanes seeds; the span start's `length`/angle seed `xfrac`/
+        `yfrac`, then `+= xstep/ystep` per pixel; the flat is sampled `&63` and distance-lit (zlight)."""
+        cfg = self.cfg
+        W, H = cfg.VIEW_W, cfg.VIEW_H
+        cxfrac = cfg.CENTERX << 16                           # centerxfrac (R_ClearPlanes)
+        ang_b = ((viewangle - ANG90) & ANGLE_MASK) >> self.angle_shift
+        basexscale = fixed_div(self._finecos_idx(ang_b), cxfrac, 8, 4)
+        baseyscale = (-fixed_div(self._finesin_idx(ang_b), cxfrac, 8, 4)) & ANGLE_MASK
+        viewx32, viewy32 = viewx & 0xFFFFFFFF, viewy & 0xFFFFFFFF
+        for y in range(H):
+            x = 0
+            while x < W:
+                region = self._plane_region_at(x, y, ceil_hi, floor_lo)
+                if region is None:
+                    x += 1
+                    continue
+                ch, cf = (col_ch, col_cf) if region == 'c' else (col_fh, col_ff)
+                height, flat, light = ch[x], cf[x], col_lt[x]
+                x2 = x                                       # extend the span over same-visplane columns
+                while x2 + 1 < W and self._plane_region_at(x2 + 1, y, ceil_hi, floor_lo) == region \
+                        and ch[x2 + 1] == height and cf[x2 + 1] == flat and col_lt[x2 + 1] == light:
+                    x2 += 1
+                self._draw_span(fb, colormap, self._flat_texels(asset_wad, flat, flatcache),
+                                height, light, viewx32, viewy32, viewangle, viewz,
+                                basexscale, baseyscale, y, x, x2)
+                x = x2 + 1
+
+    def _draw_span(self, fb, colormap, texels, height, light, viewx32, viewy32, viewangle, viewz,
+                   basexscale, baseyscale, y, x1, x2):
+        """R_MapPlane + R_DrawSpan for one horizontal span [x1,x2] at row y: distance = FixedMul(planeheight,
+        yslope[y]); the per-pixel step xstep/ystep = FixedMul(distance, base?scale); the span-left seed
+        xfrac/yfrac from the slant length (FixedMul(distance, distscale[x1])) + the column's view angle;
+        then per pixel sample `flat[(yfrac>>10 & 63*64) + (xfrac>>16 & 63)]`, distance-lit, and step the
+        DDA. All coords are unsigned 32-bit modular (what the fj computes)."""
+        W = self.cfg.VIEW_W
+        planeheight = abs((height << 16) - viewz)
+        distance = fixed_mul(planeheight, self.yslope[y], 8, 4)
+        xstep = fixed_mul(distance, basexscale, 8, 4)
+        ystep = fixed_mul(distance, baseyscale, 8, 4)
+        length = fixed_mul(distance, self.distscale[x1], 8, 4)
+        idx = ((viewangle + self.xtoviewangle[x1]) & ANGLE_MASK) >> self.angle_shift
+        xfrac = (viewx32 + fixed_mul(self._finecos_idx(idx), length, 8, 4)) & 0xFFFFFFFF
+        yfrac = (-viewy32 - fixed_mul(self._finesin_idx(idx), length, 8, 4)) & 0xFFFFFFFF
+        row = colormap[self.plane_light_row(light, distance)]
+        for x in range(x1, x2 + 1):
+            spot = ((yfrac >> 10) & 4032) + ((xfrac >> 16) & 63)   # DOOM R_DrawSpan: v*64 + u, flats are 64x64
+            fb[y * W + x] = row[texels[spot]]
+            xfrac = (xfrac + xstep) & 0xFFFFFFFF
+            yfrac = (yfrac + ystep) & 0xFFFFFFFF

@@ -1,0 +1,33 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+___________________ test_square_textured_floor_golden_hash ____________________
+
+    def test_square_textured_floor_golden_hash():
+        rm = ReferenceModel()
+        scene = build_scene(WadFile.from_path(ROOM), WadFile.from_path(ASSET), "MAP01")
+        frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene)
+>       assert frame_hash(frame) == "00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12"
+E       AssertionError: assert 'aeeb82a8bea7...b00a1702d1463' == '00de1aaadf35...5d856eb973a12'
+E         
+E         - 00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12
+E         + aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463
+
+tests\host\test_floor_planes.py:114: AssertionError
+____________________ test_e1m1_textured_floor_golden_hash _____________________
+
+    def test_e1m1_textured_floor_golden_hash():
+        rm = ReferenceModel()
+        map_wad = WadFile.from_path(E1M1)
+        scene = build_scene(map_wad, map_wad, "E1M1")
+        frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene)
+>       assert frame_hash(frame) == "db5d3da80a52c3ea78a8f599d121aaeb450bdfb84ca96b4656f0c267302ef0b2"
+E       AssertionError: assert '9569a547c0fe...feae82f576d01' == 'db5d3da80a52...0c267302ef0b2'
+E         
+E         - db5d3da80a52c3ea78a8f599d121aaeb450bdfb84ca96b4656f0c267302ef0b2
+E         + 9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01
+
+tests\host\test_floor_planes.py:122: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_floor_planes.py::test_square_textured_floor_golden_hash
+FAILED tests/host/test_floor_planes.py::test_e1m1_textured_floor_golden_hash
+2 failed, 8 deselected in 0.42s

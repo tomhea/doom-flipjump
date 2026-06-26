@@ -1,0 +1,54 @@
+// M13c (F5) — the floor/ceiling (visplane) raster. M13c2 lands the FLAT-COLORED plane pixel (the cheaper
+// §1 floor tier): one ceiling/floor pixel whose colour is the flat's base index, distance-lit via DOOM's
+// zlight (R_MapPlane). The perspective u,v texture sample (M13d) replaces the base index with a per-pixel
+// flat sample; this kernel is the distance-light spine both tiers share.
+//
+// Mirrors the oracle reference_model._plane_pixel byte-for-byte (D12):
+//   distance = FixedMul(planeheight, yslope[y])          // 16.16, wraps mod 2^32 (the oracle wraps too)
+//   zidx     = min(MAXLIGHTZ-1, distance >> LIGHTZSHIFT)  // the distance bucket, clamped to 127
+//   lvl      = light >> LIGHTSEGSHIFT                     // sector light -> zlight light bucket (0..15)
+//   zrow     = zlight[lvl*MAXLIGHTZ + zidx]               // the distance-darkened COLORMAP row
+//   lit      = colormap[zrow][pbase]                      // distance-lit flat base colour
+//
+// Shared LUTs the includer emits (R6 SSOT, doomfj.lut_generator): yslope (row->slope, 8nib), zlight
+// (LIGHTLEVELS*MAXLIGHTZ flattened, 2nib), and the colormap ns `cm` (cm.apply). LIGHTZSHIFT=20 (5 nibbles),
+// LIGHTSEGSHIFT=4 (1 nibble), MAXLIGHTZ=128, COLORMAP rows 0..31. @requires hex.init & stl.ptr_init.
+
+ns plane {
+    // one flat-colored floor/ceiling pixel -> `lit`. Inputs (registers): planeheight (8, 16.16 |plane_z-viewz|),
+    // light (2, the RAW sector light 0..255), pbase (2, the flat base palette index), y (2, screen row).
+    // Reads the yslope/zlight tables + cm.apply. Returns via stl.fret plane_ret (the data below is never
+    // fallen into — lesson #2). The @-local data regs are allocated after the fret.
+    def draw_pixel \
+            @ ys, dist, zidx, lvl, zlidx, zrow, cmidx, c127, ok, clamp \
+            < planeheight, light, pbase, y, lit, yslope, zlight, plane_ret {
+        hex.read_table 8, ys, yslope, 2, y           // ys = yslope[y]   (y in [0, VIEW_H) -> 2-nibble index)
+        hex.fixed_mul 8, 4, dist, planeheight, ys    // dist = FixedMul(planeheight, ys) (16.16, wraps mod 2^32)
+        hex.shr_hex 8, 5, dist                       // dist >>= 20 (LIGHTZSHIFT): the distance bucket
+        hex.mov 3, zidx, dist                        // zidx = bucket (the low 3 nibbles; the high nibbles are 0)
+        hex.set 3, c127, 127                         // MAXLIGHTZ-1
+        hex.cmp 3, zidx, c127, ok, ok, clamp         // zidx > 127 -> clamp to 127 (min)
+      clamp:
+        hex.mov 3, zidx, c127
+      ok:
+        hex.mov 2, lvl, light
+        hex.shr_hex 2, 1, lvl                        // lvl = light >> 4 (LIGHTSEGSHIFT) -> 0..15
+        hex.mul_const 3, zlidx, lvl, 128             // zlidx = lvl * MAXLIGHTZ
+        hex.add 3, zlidx, zidx                       // + zidx (disjoint: zidx<128) -> lvl*128 + zidx
+        hex.read_table 2, zrow, zlight, 3, zlidx     // zrow = zlight[lvl*MAXLIGHTZ + zidx]
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx, pbase                      // cmidx low byte = the flat base colour
+        hex.mov 2, cmidx + 2*dw, zrow                // cmidx high byte = the zlight colormap row
+        cm.apply lit, cmidx                          // lit = colormap[zrow][pbase]
+        stl.fret plane_ret
+
+      ys: hex.vec 8
+      dist: hex.vec 8
+      zidx: hex.vec 3
+      lvl: hex.vec 2
+      zlidx: hex.vec 3
+      zrow: hex.vec 2
+      cmidx: hex.vec 4
+      c127: hex.vec 3
+    }
+}

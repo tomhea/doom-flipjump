@@ -1,0 +1,7 @@
+{
+  "milestone": "M13c2",
+  "what": "fj flat-colored plane pixel kernel (plane.draw_pixel), byte-exact vs the oracle _plane_pixel",
+  "kernel": "distance=FixedMul(planeheight,yslope[y]); zidx=min(127,distance>>20); lvl=light>>4; zrow=zlight[lvl*128+zidx]; lit=colormap[zrow][pbase]",
+  "test": "tests/fj/test_plane_kernel.py: 8 (planeheight,light,pbase,y) cases x2 (R5), near/far/clamp + light spread + horizon/edges",
+  "note": "standalone kernel (de-risks the M13c flat-color math); wired into emit_wall_renderer at M13c3 (replacing render_background_reg)"
+}

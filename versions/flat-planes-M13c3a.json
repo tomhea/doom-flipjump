@@ -1,0 +1,22 @@
+{
+  "milestone": "M13c3a",
+  "what": "fj flat-colored floor/ceiling (visplane) raster wired into the SHARED emit_wall_renderer, replacing the M9 two-band background; byte-exact vs the oracle render_wall_frame(floor_texturing=False) on the square room",
+  "algorithm": "per column the wall tiles rows [top,bottom]; ceiling = rows y<cexcl (cexcl=min(top,VIEW_H)), floor = rows y>=fstart (fstart=max(bottom+1,0)); each plane pixel distance-lit via plane.draw_pixel (M13c2). The three bands tile every pixel (oracle _render_planes_flat).",
+  "new_macros": [
+    "frame.store_col_field8",
+    "frame.load_col_plane",
+    "frame.plane_compare_body (shared floor/ceiling/skip select)",
+    "frame.plane_tramp (per-pixel trampoline, mirrors M12oo pixel_tramp)",
+    "frame.seg_pass1_leaf_body_mtlwp (pass-1 stores 7 per-column plane params)"
+  ],
+  "emitter_change": "emit_wall_renderer(map_wad, mapname, cfg, asset_wad=None): geometry-vs-assets split; drops render_background_reg; adds the plane pass-2 + yslope/zlight LUTs + the per-column plane param arrays",
+  "test": "tests/fj/test_floor_planes_fj.py: square room, 4 runtime viewpoints byte-exact vs render_wall_frame(floor_texturing=False) + spawn flat golden",
+  "square_flat_golden": "aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463",
+  "e1m1_renderer_span_words": 24660968,
+  "e1m1_span_M": 23.52,
+  "e1m1_storage_mode": "flat",
+  "e1m1_headroom_vs_2_26": 2.721,
+  "e1m1_assemble_seconds": 259.0,
+  "span_note": "21.8M -> 24.66M: bg-fill -4.10M, visplane pass-2 +~7M; flat under the raised 2^26 limit (R4). DESIGN s1.2 updated.",
+  "next": "M13c3b: byte-exact E1M1 full-render golden 9569a547 (flat tier) via the same shared emitter (the slow full-texture assemble)"
+}

@@ -562,4 +562,177 @@ ns frame {
         rep(horizon*view_w, k) hex.mov 2, base + 2*k*dw, ceil_reg
         rep((view_h - horizon)*view_w, k) hex.mov 2, base + 2*(horizon*view_w + k)*dw, floor_reg
     }
+
+    // ── M13c3 FLOOR/CEILING (visplane) FLAT-COLORED raster — the pass-2 plane fill that REPLACES the M9
+    //    two-band background. The walls tile screen rows [top,bottom] per column; the ceiling is the rows
+    //    ABOVE (y < cexcl) and the floor the rows BELOW (y >= fstart) — together the three bands cover every
+    //    pixel (oracle reference_model._render_planes_flat). Each plane pixel is distance-lit via the shared
+    //    plane.draw_pixel kernel (plane_render.fj, M13c2). ──────────────────────────────────────────────
+
+    // store_col_field, 8-nibble variant (M13c3) — for the per-column plane heights col_ceil_ph/col_floor_ph
+    // (16.16 |plane_z - viewz|, up to 8 nibbles). The WIDE pass-1 leaf's 8-nibble array stride (idx = x*8)
+    // holds it exactly. @requires hex.init & stl.ptr_init.
+    def store_col_field8 array, idx, src @ aptr, cell, end {
+        hex.set w/4, aptr, array
+        hex.ptr_index cell, aptr, idx
+        hex.write_hex 8, cell, src
+        ;end
+      aptr: hex.vec w/4
+      cell: hex.vec w/4
+      end:
+    }
+
+    // PASS-2 per-column PLANE setup (M13c3) — the floor/ceiling analog of load_col_mtw. Loads a column's
+    // visplane params (filled by seg_pass1_leaf_body_mtlwp): cexcl (ceiling fills rows y < cexcl), fstart
+    // (floor fills rows y >= fstart), the ceil/floor planeheights (16.16 |plane_z - viewz|), the RAW sector
+    // light (plane.draw_pixel does the >>LIGHTSEGSHIFT itself), and the ceil/floor flat base palette index.
+    // Resets the trampoline row counter y. Reads from 8-nibble col array elements at their natural widths.
+    // @requires hex.init & stl.ptr_init.
+    def load_col_plane cexcl_src, fstart_src, ceil_ph_src, floor_ph_src, plight_src, ceil_base_src, floor_base_src \
+            < cexcl, fstart, ceil_ph, floor_ph, light, ceil_base, floor_base, y {
+        hex.mov 2, cexcl, cexcl_src
+        hex.mov 2, fstart, fstart_src
+        hex.mov 8, ceil_ph, ceil_ph_src
+        hex.mov 8, floor_ph, floor_ph_src
+        hex.mov 2, light, plight_src
+        hex.mov 2, ceil_base, ceil_base_src
+        hex.mov 2, floor_base, floor_base_src
+        hex.zero 2, y                                // reset the pass-2 trampoline row counter for this column
+    }
+
+    // the SHARED plane-select body (M13c3), emitted ONCE at the global label `plane_compare:` and JUMPED INTO
+    // by every plane_tramp (the M12oo trampoline pattern). From the runtime row y + the column's clipped region
+    // bounds, decide FLOOR (y >= fstart) / CEILING (y < cexcl) / SKIP (a wall row, already painted by pass 2a).
+    // Floor is checked FIRST so it wins the off-screen overlap (oracle _render_planes_flat fills ceiling THEN
+    // floor). On a plane row it loads that plane's (planeheight, pbase) into the shared regs plane.draw_pixel
+    // reads, then falls to render (redirect ret_reg -> ret+dw); a wall row jumps *ret_reg (the skip op). The
+    // body never falls through (every path jumps ret_reg), so it is safe after stl.loop. @requires hex.init.
+    def plane_compare_body @ ck_ceil, do_floor, do_ceil, render \
+            < y, cexcl, fstart, planeheight, pbase, ceil_ph, floor_ph, ceil_base, floor_base, ret_reg {
+        hex.cmp 2, y, fstart, ck_ceil, do_floor, do_floor   // y >= fstart -> floor
+      ck_ceil:
+        hex.cmp 2, y, cexcl, do_ceil, ret_reg, ret_reg      // y < cexcl -> ceiling; else SKIP (jump *ret_reg)
+      do_floor:
+        hex.mov 8, planeheight, floor_ph
+        hex.mov 2, pbase, floor_base
+        ;render
+      do_ceil:
+        hex.mov 8, planeheight, ceil_ph
+        hex.mov 2, pbase, ceil_base
+      render:
+        ret_reg + w + (#dw - 1) ; ret_reg                   // redirect ret -> ret+dw, jump it (render)
+    }
+
+    // PASS-2 PLANE trampoline (M13c3) — the floor/ceiling analog of pixel_tramp. Per (column,row): redirect
+    // ret_reg to this pixel's `ret`, jump the shared plane_compare (decides floor/ceiling/skip + loads the
+    // plane's planeheight/pbase). On skip ret_reg returns to `ret` (render nothing — the cell keeps the wall
+    // pixel or stays zero); on a plane row plane_compare redirects ret_reg to `ret+dw` (render): fcall
+    // plane_leaf (plane.draw_pixel -> lit), xor lit into the cell. The plane pass runs AFTER the wall pass, and
+    // plane rows are disjoint from wall rows, so plane cells are still zero -> xor = set (no overwrite needed).
+    // ret_reg self-cleans; y advances at the end. Globals: ret_reg, plane_compare, lit, plane_ret, plane_leaf,
+    // y. @requires hex.init.
+    def plane_tramp fbcell @ ret, end < ret_reg, plane_compare, lit, plane_ret, plane_leaf, y {
+        wflip ret_reg + w, ret, plane_compare     // ret_reg -> this pixel's `ret`; jump the shared plane_compare
+        pad 2                                     // align `ret` to 2*dw so the redirect-bit flip is carry-free
+      ret:
+        ; end                                     // SKIP target (op at ret): render nothing, fall to `end`
+        ret_reg + w + (#dw - 1) ;                 // RENDER target (op at ret+dw): un-redirect ret_reg (self-clean)
+        stl.fcall plane_leaf, plane_ret           // plane.draw_pixel: distance-lit flat pixel -> lit
+        hex.xor_zero 2, fbcell, lit
+      end:
+        wflip ret_reg + w, ret                    // clear ret_reg back to 0 (xor `ret` out)
+        hex.inc 2, y                              // advance the row
+    }
+
+    // PASS-1 per-SEG shared leaf, MULTI-TEXTURE + MULTI-LIGHT + WIDE-INDEX + PLANES (M13c3) —
+    // seg_pass1_leaf_body_mtlw plus the per-column FLOOR/CEILING visplane params. After clipping each column's
+    // wall span [top,bottom], it records the plane regions (oracle: ceiling rows y < cexcl = min(top,VIEW_H),
+    // floor rows y >= fstart = max(bottom+1,0)) and the per-seg plane shading consts: the ceil/floor
+    // planeheight cph/fph = |(plane_z<<16) - viewz| (computed ONCE per seg from the PURE baked seg_ceil/
+    // seg_floor + the runtime player eye viewz), the RAW sector light seg_plight, and the ceil/floor flat base
+    // palette index seg_ceilbase/seg_floorbase. These are stored alongside the 7 wall fields (same x*8 stride),
+    // for the pass-2 load_col_plane + plane_tramp fill. The wall path is byte-identical to _mtlw (incl. the
+    // off-screen top=1/bottom=0 sentinel). viewh = VIEW_H (compile-time). @requires hex.init & stl.ptr_init.
+    def seg_pass1_leaf_body_mtlwp centery, ds, viewh1, viewh, projection \
+            @ loop, body, skipcol, ret, sidx, tbskip, tbok, cge, cdone, fneg, fdone, cVH, cexcl, fstart, cph, fph \
+            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_texoff, \
+              seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, viewzw, seg_ceil, seg_floor, worldtop, \
+              seg_plight, seg_ceilbase, seg_floorbase, \
+              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
+              top, bottom, texcol, cfrac0, stepv, base, \
+              col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, \
+              col_cexcl, col_fstart, col_ceil_ph, col_floor_ph, col_plight, col_ceilbase, col_floorbase, drawn, seg_ret {
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        hex.if0 1, visible, ret
+        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_v1x, seg_v1y
+        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
+        hex.mov 8, worldtop, seg_ceil           // worldtop = seg_ceil - viewzw (M12pp; seg_ceil baked PURE)
+        hex.sub 8, worldtop, viewzw
+        hex.mov 8, cph, seg_ceil                // cph = |(ceil_h<<16) - viewz| (16.16), computed ONCE per seg
+        hex.shl_hex 8, 4, cph
+        hex.sub 8, cph, viewz
+        hex.abs 8, cph
+        hex.mov 8, fph, seg_floor               // fph = |(floor_h<<16) - viewz|
+        hex.shl_hex 8, 4, fph
+        hex.sub 8, fph, viewz
+        hex.abs 8, fph
+        hex.mov 8, x, x1
+      loop:
+        hex.scmp 8, x, x2, body, ret, ret
+      body:
+        .skip_if_drawn x, drawn, skipcol
+        proj.column_render_params top, bottom, texcol, cfrac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, seg_tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        hex.set 8, cVH, viewh                   // cexcl = min(top, VIEW_H)  (top is the clipped >=0 row)
+        hex.mov 8, cexcl, top
+        hex.scmp 8, top, cVH, cdone, cge, cge   // top < VIEW_H -> keep top; else clamp to VIEW_H
+      cge:
+        hex.mov 8, cexcl, cVH
+      cdone:
+        hex.mov 8, fstart, bottom               // fstart = max(bottom+1, 0)
+        hex.inc 8, fstart
+        hex.sign 8, fstart, fneg, fdone         // (bottom+1) < 0 -> 0
+      fneg:
+        hex.zero 8, fstart
+      fdone:
+        hex.scmp 8, top, bottom, tbok, tbok, tbskip   // off-screen wall (top>bottom) -> the skip sentinel
+      tbskip:
+        hex.set 8, top, 1
+        hex.zero 8, bottom
+      tbok:
+        hex.zero 5, base
+        hex.mul 4, base, texcol, seg_texheight
+        hex.add 5, base, seg_texbase
+        hex.mov w/4, sidx, x
+        hex.shl_bit w/4, sidx
+        hex.shl_bit w/4, sidx
+        hex.shl_bit w/4, sidx                   // sidx = x*8 (the uniform WIDE 8-nibble array stride)
+        .store_col_field col_top, sidx, top
+        .store_col_field col_bottom, sidx, bottom
+        .store_col_field5 col_base, sidx, base
+        .store_col_field col_step, sidx, stepv
+        .store_col_field col_frac0, sidx, cfrac0
+        .store_col_field col_heightmask, sidx, seg_hm
+        .store_col_field col_light, sidx, seg_light
+        .store_col_field col_cexcl, sidx, cexcl
+        .store_col_field col_fstart, sidx, fstart
+        .store_col_field8 col_ceil_ph, sidx, cph
+        .store_col_field8 col_floor_ph, sidx, fph
+        .store_col_field col_plight, sidx, seg_plight
+        .store_col_field col_ceilbase, sidx, seg_ceilbase
+        .store_col_field col_floorbase, sidx, seg_floorbase
+        .mark_drawn x, drawn
+      skipcol:
+        hex.inc 8, x
+        hex.add 8, scale, scalestep
+        ;loop
+      ret:
+        stl.fret seg_ret
+      sidx: hex.vec w/4
+      cVH: hex.vec 8
+      cexcl: hex.vec 8
+      fstart: hex.vec 8
+      cph: hex.vec 8
+      fph: hex.vec 8
+    }
 }

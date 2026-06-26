@@ -1,0 +1,50 @@
+F
+================================== FAILURES ===================================
+________________ test_square_flat_planes_byte_exact_vs_oracle _________________
+
+tmp_path = WindowsPath('C:/Users/tomhe/AppData/Local/Temp/pytest-of-tomhe/pytest-930/test_square_flat_planes_byte_e0')
+
+    def test_square_flat_planes_byte_exact_vs_oracle(tmp_path):
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        mw = WadFile.from_path(ROOM)
+        aw = WadFile.from_path(ASSET)
+        scene = build_scene(mw, aw, "MAP01")
+    
+        sp = spawn_state(mw, "MAP01")
+        spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+        A45 = 0x20000000
+        VIEWPOINTS = [
+            (spx, spy, sp.angle),     # spawn (the golden viewpoint FIRST) — head-on N wall, floor band below
+            (spx, spy, A45),          # rotated 45deg: a different wall set, ceiling + floor bands both visible
+            (200, 128, 0),            # off-centre, close wall (large scale, uneven split)
+            (128, 128, A45),          # centre, angled: two walls, even split
+        ]
+    
+        # the SHARED emitter build_doom ships (R6); geometry from the square-room wad, assets from the asset wad.
+        main = emit_wall_renderer(mw, "MAP01", cfg, asset_wad=aw, over_align=False)
+        consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+        p = tmp_path / "squareflat.fj"
+        p.write_text(main, encoding="utf-8")
+        out = tmp_path / "squareflat.fjm"
+        fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                     PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), PLANE_FJ.resolve(), p.resolve()],
+                    out, memory_width=W, print_time=False)
+    
+        for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+            want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene, floor_texturing=False)
+            screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+            fj.run(out, io_device=screen, print_time=False, print_termination=False)
+            got = bytes(screen.pixel_indices)
+>           assert got == bytes(want), f"M13c3a @ ({vx},{vy},{va}) != oracle flat planes"
+E           AssertionError: M13c3a @ (128,128,1073741824) != oracle flat planes
+E           assert b'\x05\x05\x0...0\x00\x00\x00' == b'\x05\x05\x0...mmmmmmmmmmmmm'
+E             
+E             At index 12160 diff: b'\x00' != b'n'
+E             Use -v to get more diff
+
+tests\fj\test_floor_planes_fj.py:71: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/fj/test_floor_planes_fj.py::test_square_flat_planes_byte_exact_vs_oracle
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 68.01s (0:01:08)

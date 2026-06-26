@@ -28,7 +28,7 @@ from doomfj.wall_renderer import emit_wall_renderer
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
-_RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj"]
+_RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj"]
 
 
 def build(fj_src="src/fj/hello.fj", out_fjm="build/hello.fjm", metrics="build/metrics.json") -> dict:

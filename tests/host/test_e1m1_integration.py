@@ -111,15 +111,17 @@ def test_build_doom_subset_is_flat(tmp_path):
 # ── M12rr: the SHIPPED runtime wall renderer (build_wall_renderer) is flat under the RAISED limit ──
 
 def test_build_wall_renderer_e1m1_flat(tmp_path):
-    """M12rr (build_doom wiring) — the SHIPPED runtime wall renderer assembles flat and under the RAISED 2**26
-    flat limit (R0/R4). build_wall_renderer emits via the SHARED doomfj.wall_renderer.emit_wall_renderer — the
-    SAME optimized renderer (M12oo trampoline + M12pp/qq xor_by-involution walk) the byte-exact golden test
-    renders through (R6) — so this gates the production build. The full-E1M1 span is ~21.8M words post-M12qq
-    (DESIGN §1.2); the renderer's pass-2 unroll + walk exceed the 2**23 default, hence the raised limit (RAM-
-    only cost). ~4 min (the 198k-texel table + 16K-pixel pass-2 dominate the assemble)."""
+    """M12rr/M13c3 (build_doom wiring) — the SHIPPED runtime wall+floor/ceiling renderer assembles flat and
+    under the RAISED 2**26 flat limit (R0/R4). build_wall_renderer emits via the SHARED
+    doomfj.wall_renderer.emit_wall_renderer — the SAME optimized renderer (M12oo trampoline + M12pp/qq
+    xor_by-involution walk + the M13c3 plane_tramp visplane raster) the byte-exact golden test renders through
+    (R6) — so this gates the production build. M13c3 replaced the M9 two-band background (the 4.10M bg-fill
+    unroll) with the floor/ceiling visplane pass-2 (a second 16K-pixel plane_tramp unroll + the per-column
+    plane param arrays + yslope/zlight LUTs): the span moved ~21.8M -> ~24.7M words (DESIGN §1.2), still flat
+    under 2**26 (RAM-only cost). ~4-5 min (the 198k-texel table + the two 16K-pixel pass-2 unrolls dominate)."""
     m = build_wall_renderer(E1M1, "E1M1", out_fjm=tmp_path / "renderer.fjm",
                             generated_dir=tmp_path / "gen", flat_max_words=1 << 26)
     assert m["storage_mode"] == "flat", m
     assert m["span_words"] < (1 << 26)
     assert m["headroom"] > 1.0
-    assert 15_000_000 < m["span_words"] < 25_000_000, m   # ~21.8M post-M12qq (sanity bound)
+    assert 20_000_000 < m["span_words"] < 28_000_000, m   # ~24.7M post-M13c3 (bg-fill -> visplane pass; sanity bound)

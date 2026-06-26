@@ -74,7 +74,7 @@ Flat-colored tier preserved byte-exact under `floor_texturing=False` (square `ae
 `9569a547…`). Rendered E1M1 spawn frame (perspective-textured floors converging to the horizon, full
 DOOM look):
 
-![E1M1 textured floors](https://github.com/tomhea/doom-flipjump/raw/COMMITSHA/docs/m13b-e1m1-textured-floors.png)
+![E1M1 textured floors](https://github.com/tomhea/doom-flipjump/raw/088d6dbd079f74611e4b5ad0eb5d610c58ec3ea5/docs/m13b-e1m1-textured-floors.png)
 
 ## R-by-R self-check
 

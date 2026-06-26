@@ -195,14 +195,18 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
         lines.append(f"    proj.point_on_side_leaf {L}_side, vx, vy, "
                      f"{L}_cpx, {L}_cpy, {L}_cdx, {L}_cdy, {L}_pos_ret")
 
-    # one code block per node: load partition consts -> fcall side test -> NEAR child first, FAR second
+    # one code block per node: SET the partition consts (M12qq: via xor_by + xor-involution self-zeroing,
+    # NOT hex.set -- the per-node hex.set 10 each paid an @-dispatch to zero a reg it overwrites; xor_by has
+    # no @) -> fcall the side test -> CLEAR (xor_by again cancels, cpx..cdy back to 0) -> branch on the already-
+    # computed side -> NEAR child first, FAR second. The CLEAR happens BEFORE recursion, so the children SET
+    # cpx..cdy from a known-zero state (the involution's zero invariant). point_on_side_leaf only READS
+    # cpx..cdy (verified), so the CLEAR exactly cancels the SET. The xb{i} block is emitted once and fcall'd
+    # twice (SET + CLEAR); {L}_xbret is its shared fcall/fret return reg (dead after each fret, like pos_ret).
     for i, n in enumerate(bsp.nodes):
         lines.append(f"{L}_n{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
-        lines.append(f"    hex.set 10, {L}_cpx, {n.x & MASK40}")
-        lines.append(f"    hex.set 10, {L}_cpy, {n.y & MASK40}")
-        lines.append(f"    hex.set 10, {L}_cdx, {n.dx & MASK40}")
-        lines.append(f"    hex.set 10, {L}_cdy, {n.dy & MASK40}")
+        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
         lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
+        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # CLEAR (vals -> 0, the xor involution)
         lines.append(f"    hex.if0 2, {L}_side, {L}_nf{i}")   # back==0 (front) -> jump; else fall to back path
         lines += visit(n.left)                             # back (side>0): near=left, far=right
         lines += visit(n.right)
@@ -211,6 +215,12 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
         lines += visit(n.right)
         lines += visit(n.left)
         lines.append(f"    stl.fret {L}_r{i}")
+        lines.append(f"{L}_xb{i}:    // the node's partition-const xor_by block (emitted once, fcall'd SET+CLEAR)")
+        lines.append(f"    hex.xor_by 10, {L}_cpx, {n.x & MASK40}")
+        lines.append(f"    hex.xor_by 10, {L}_cpy, {n.y & MASK40}")
+        lines.append(f"    hex.xor_by 10, {L}_cdx, {n.dx & MASK40}")
+        lines.append(f"    hex.xor_by 10, {L}_cdy, {n.dy & MASK40}")
+        lines.append(f"    stl.fret {L}_xbret")
 
     # data — never fallen into (every code path above ends in stl.fret or `;done_label`)
     if bsp.nodes:
@@ -218,6 +228,7 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             lines.append(f"{L}_{nm}: hex.vec 10")          # shared per-node partition const regs
         lines.append(f"{L}_side: hex.vec 2")
         lines.append(f"{L}_pos_ret: ;0")                   # the side-test leaf's fcall/fret return register
+        lines.append(f"{L}_xbret: ;0")                     # the node xor_by block's fcall/fret return register (M12qq)
     lines.append(f"{L}_ss: hex.vec 4")
     for i in range(len(bsp.nodes)):
         lines.append(f"{L}_r{i}: ;0")                      # per-node fcall/fret return register

@@ -1,0 +1,10 @@
+# M12qq TDD PASS — node involution CLEAR restored. Order byte-exact (small trees + E1M1 681-node walk),
+# golden byte-exact + spawn hash preserved, span 23.39M -> 21.79M words (-1.6M).
+
+--- order tests (small + E1M1 full walk) ---
+3 passed in 10.07s
+tests/host/test_mapbake.py + test_bsp_render_order.py : 21 passed
+
+--- golden ---
+M12nn renderer flat span = 21,789,996 words (20.78M; default FLAT_MAX_WORDS = 8,388,608 = 2**23)
+1 passed in 249.58s (0:04:09)

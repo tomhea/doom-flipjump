@@ -1,0 +1,21 @@
+{
+  "milestone": "M13b",
+  "what": "full-res perspective-textured floors/ceilings in the oracle (R_DrawPlanes/R_MapPlane/R_DrawSpan: per-row spans + yslope/distscale/basexscale + 2-coord u,v DDA, distance-lit)",
+  "floor_mode": "textured (default); flat-colored retained behind floor_texturing=False",
+  "new_lut": {
+    "distscale": {
+      "entries": 160,
+      "centre": 65537,
+      "edge": 92398
+    }
+  },
+  "goldens_textured": {
+    "square_room_spawn": "00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12",
+    "e1m1_spawn": "db5d3da80a52c3ea78a8f599d121aaeb450bdfb84ca96b4656f0c267302ef0b2"
+  },
+  "goldens_flatcolored_preserved": {
+    "square_room_spawn": "aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463",
+    "e1m1_spawn": "9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01"
+  },
+  "note": "oracle-only rung; the two live-oracle E1M1 fj golden tests remain skipped until M13d (fj span raster)"
+}

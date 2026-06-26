@@ -8,7 +8,7 @@ fj-text emission (`hex.vec` entries / packed-byte ops) is a separate concern —
 from __future__ import annotations
 import math
 
-from doomfj.fixedpoint import encode_fixed_point, fixed_div
+from doomfj.fixedpoint import encode_fixed_point, fixed_div, _signed
 
 
 # ── DOOM floor/ceiling (visplane) light constants (R_InitLightTables / R_MapPlane, M13) ──
@@ -124,6 +124,25 @@ def finetangent_table(trig_n: int) -> list[int]:
     for i in range(trig_n):
         t = math.tan(2 * math.pi * i / trig_n - math.pi / 2)
         out.append(max(lo, min(hi, round(t * (1 << 16)))) & 0xFFFFFFFF)
+    return out
+
+
+def distscale_table(view_w: int, trig_n: int) -> list[int]:
+    """DOOM's `distscale[]` (R_ExecuteSetViewSize): the per-column fisheye correction `1/|cos(view-relative
+    angle at column x)|` = `FixedDiv(FRACUNIT, |finecosine[xtoviewangle[x] >> angle_shift]|)`, 16.16. Used
+    by R_MapPlane to turn a row's perpendicular `distance` into the slant `length` to the span's left edge
+    (`length = FixedMul(distance, distscale[x1])`). `view_w` entries. The view-relative angles span only the
+    ±FOV/2 frustum, so `cos` never reaches 0 (no div0). Shared kernel (R6): the oracle and the fj LUT both
+    read it."""
+    vtoa = xtoviewangle_table(view_w, trig_n)
+    sine = sine_table(trig_n, 16, 32)
+    angle_shift = 32 - (trig_n.bit_length() - 1)
+    out = []
+    for x in range(view_w):
+        idx = (vtoa[x] & 0xFFFFFFFF) >> angle_shift
+        cos = sine[(idx + trig_n // 4) & (trig_n - 1)]          # finecosine = finesine shifted +N/4
+        cosadj = max(1, abs(_signed(cos, 32)))                  # |cos|; clamp away from 0 (no div0)
+        out.append(fixed_div(1 << 16, cosadj, 8, 4))            # FixedDiv(FRACUNIT, |cos|)
     return out
 
 

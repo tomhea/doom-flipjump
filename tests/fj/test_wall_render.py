@@ -2145,10 +2145,13 @@ def test_wall_render_e1m1_full_frame_golden(tmp_path):
     # ~3.5M the combined texel table. M12oo replaced the inlined per-pixel pass-2 clip (two hex.cmp x 16K) with
     # the SHARED-COMPARE TRAMPOLINE (one compare_y body + a cheap per-pixel wflip): 40.3M -> 31.2M (-9M / ~23%).
     # M12pp then replaced the per-seg baked hex.set walk constants (each pays an @-dispatch) with hex.xor_by +
-    # xor-INVOLUTION self-zeroing (no @): 31.2M -> 23.4M (-7.8M / ~25%), and the assemble 1090s -> 262s (the @
-    # dispatches were super-linearly expensive). Cumulative since M12nn: 40.3M -> 23.4M (-42%). Remaining levers:
-    # the BSP NODE consts + skeleton (M12qq single-emission, M12rr shrink) + the table; flat limit stays RAISED
-    # (RAM-only cost) until those land. (Don't promise a number -- MEASURE.)
+    # xor-INVOLUTION self-zeroing (no @): 31.2M -> 23.4M (-7.8M / ~25%), assemble 1090s -> 262s (the @ dispatches
+    # were super-linearly expensive). M12qq applied the SAME involution to the 681 BSP NODE partition consts
+    # (cpx/cpy/cdx/cdy in _bsp_as_code): 23.4M -> 21.8M (-1.6M). Cumulative since M12nn: 40.3M -> 21.8M (-46%).
+    # (Single-emission of subsectors -- the original M12qq plan -- is negligible post-M12pp: the seg bodies are
+    # already shared xorby blocks, so the BSP double-emission only duplicates cheap fcalls.) Remaining levers: the
+    # ~3.5M table (a floor) + the pass-2 unroll + partition-const width shrink; flat limit stays RAISED (RAM-only
+    # cost). (Don't promise a number -- MEASURE.)
     RENDER_FLAT_WORDS = 1 << 26
     for k, (vx, vy, va) in enumerate(VIEWPOINTS):
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)

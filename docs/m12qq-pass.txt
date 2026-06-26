@@ -1,0 +1,6 @@
+# M12qq TDD PASS — node involution CLEAR restored. The new self-zero test + order tests + golden all pass.
+
+...                                                                      [100%]
+3 passed in 11.67s
+
+golden: span 23.39M -> 21.79M words, byte-exact + spawn hash preserved (see prior run)

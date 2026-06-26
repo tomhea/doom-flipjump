@@ -1,0 +1,25 @@
+        ]
+        prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n"
+                + f"clear_leaf: plane.clear_planes {centerxfix}, {ANG90}\n" + "\n".join(data) + "\n")
+        p = tmp_path / "clear_planes.fj"
+        p.write_text(prog, encoding="utf-8")
+        ok = fj.assemble_and_run_test_output(
+            [PLANE_FJ.resolve(), FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+            memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+>       assert ok, "plane.clear_planes: fj seeds != oracle basexscale/baseyscale"
+E       AssertionError: plane.clear_planes: fj seeds != oracle basexscale/baseyscale
+E       assert False
+
+tests\fj\test_plane_kernel.py:142: AssertionError
+---------------------------- Captured stdout call -----------------------------
+  parsing:         3.890s
+  macro resolve:   1.887s
+  labels resolve:  0.764s
+  create binary:   2.157s
+  loading memory:  0.082s
+
+Finished by looping after 0.036s (1,673,102 ops executed).
+=========================== short test summary info ===========================
+FAILED tests/fj/test_plane_kernel.py::test_plane_clear_planes_byte_exact_vs_oracle
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!
+1 failed in 9.33s

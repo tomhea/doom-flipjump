@@ -103,6 +103,45 @@ def _base_scales(rm, viewangle):
     return bxs, bys
 
 
+# ── M13d2a: the per-frame R_ClearPlanes seeds plane.clear_planes, byte-exact vs the oracle ───────
+# a spread of view angles (the four cardinals + arbitrary in-betweens): the basexscale/baseyscale seeds
+# are FixedDiv(finecos/finesin[(viewangle-ANG90)>>20], CENTERX<<16), the second negated.
+CLEAR_ANGLES = [0x00000000, 0x20000000, 0x40000000, 0x60000000,
+                0x80000000, 0xA0000000, 0xC0000000, 0xE0000000, 0x12340000, 0xDEAD0000]
+
+
+def test_plane_clear_planes_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
+    centerxfix = cfg.CENTERX << 16
+
+    body, data, expected = [], [], b""
+    for k, va in enumerate(CLEAR_ANGLES):
+        bxs, bys = _base_scales(rm, va)
+        for _ in range(2):   # call twice per case (R5 #8)
+            body += [
+                f"hex.set 8, viewangle, {va}",
+                f"stl.fcall clear_leaf, clear_ret",
+                "hex.print_as_digit 8, basexscale, 0", "stl.output 10",
+                "hex.print_as_digit 8, baseyscale, 0", "stl.output 10",
+            ]
+            expected += f"{bxs:08x}\n{bys:08x}\n".encode()
+
+    data += [
+        "viewangle: hex.vec 8", "basexscale: hex.vec 8", "baseyscale: hex.vec 8", "clear_ret: ;0",
+        finesine,
+    ]
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n"
+            + f"clear_leaf: plane.clear_planes {centerxfix}, {ANG90}\n" + "\n".join(data) + "\n")
+    p = tmp_path / "clear_planes.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [PLANE_FJ.resolve(), FIXED_POINT_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "plane.clear_planes: fj seeds != oracle basexscale/baseyscale"
+
+
 def test_plane_draw_span_byte_exact_vs_oracle(tmp_path):
     cfg = Config()
     rm = ReferenceModel(cfg)

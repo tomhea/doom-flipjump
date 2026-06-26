@@ -52,6 +52,44 @@ ns plane {
       c127: hex.vec 3
     }
 
+    // M13d2 — the per-frame R_ClearPlanes seeds basexscale/baseyscale (DOOM R_ClearPlanes). Computed ONCE per
+    // frame from the view angle; every span's xstep/ystep = FixedMul(distance, base?scale). Mirrors the oracle
+    // reference_model._render_planes_textured seed lines byte-for-byte:
+    //   ang_b      = ((viewangle - ANG90) & ANGLE_MASK) >> 20           // the down-view fine angle (3 nibbles)
+    //   basexscale = FixedDiv(finecos[ang_b], CENTERX<<16)              // 16.16
+    //   baseyscale = (-FixedDiv(finesin[ang_b], CENTERX<<16)) & MASK    // negated mod 2^32
+    // `centerxfix` = CENTERX<<16 (a nonzero constant -> the FixedDiv never divides by zero), `ang90` = ANG90
+    // (0x40000000). Reads the finesine table (read_cos/read_sin). Returns via stl.fret clear_ret BEFORE the
+    // @-local data (lesson #2). @requires hex.init & stl.ptr_init.
+    def clear_planes centerxfix, ang90 \
+            @ angf, t90, angb, fc, fs, cxf, baddiv, done \
+            < viewangle, basexscale, baseyscale, clear_ret {
+        hex.mov 8, angf, viewangle
+        hex.set 8, t90, ang90
+        hex.sub 8, angf, t90             // (viewangle - ANG90) mod 2^32  (== & ANGLE_MASK)
+        hex.shr_hex 8, 5, angf           // >> 20 (angle_shift): the down-view fine angle
+        hex.mov 3, angb, angf            // ang_b in [0, TRIG_N)
+        hex.set 8, cxf, centerxfix       // CENTERX<<16 (nonzero -> FixedDiv never hits baddiv)
+        finesine.read_cos fc, angb
+        hex.fixed_div 8, 4, basexscale, fc, cxf, baddiv   // basexscale = FixedDiv(finecos[ang_b], CENTERX<<16)
+        finesine.read_sin fs, angb
+        hex.fixed_div 8, 4, baseyscale, fs, cxf, baddiv   // FixedDiv(finesin[ang_b], CENTERX<<16)
+        hex.neg 8, baseyscale            // baseyscale = -FixedDiv(...) mod 2^32 (R_ClearPlanes negates yscale)
+        ;done
+      baddiv:                            // unreachable (centerxfix != 0); safe fallback
+        hex.zero 8, basexscale
+        hex.zero 8, baseyscale
+      done:
+        stl.fret clear_ret
+
+      angf: hex.vec 8
+      t90: hex.vec 8
+      angb: hex.vec 3
+      fc: hex.vec 8
+      fs: hex.vec 8
+      cxf: hex.vec 8
+    }
+
     // M13d — the TEXTURED floor/ceiling span (DOOM R_MapPlane + R_DrawSpan). One horizontal span [x1,x2] at
     // screen row y: perspective-correct flat texturing via the 2-coord (u,v) DDA, distance-lit (zlight), each
     // pixel written to the framebuffer at the RUNTIME address `fbase + 2*(y*VIEW_W + x)*dw`. Mirrors the oracle

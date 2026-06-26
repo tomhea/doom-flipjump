@@ -8,7 +8,52 @@ fj-text emission (`hex.vec` entries / packed-byte ops) is a separate concern —
 from __future__ import annotations
 import math
 
-from doomfj.fixedpoint import encode_fixed_point
+from doomfj.fixedpoint import encode_fixed_point, fixed_div
+
+
+# ── DOOM floor/ceiling (visplane) light constants (R_InitLightTables / R_MapPlane, M13) ──
+LIGHTLEVELS = 16        # zlight light buckets (sector light >> LIGHTSEGSHIFT)
+LIGHTSEGSHIFT = 4       # sector light (0..255) -> zlight light bucket (0..15)
+MAXLIGHTZ = 128         # zlight distance buckets (distance >> LIGHTZSHIFT)
+LIGHTZSHIFT = 20        # distance (16.16) -> zlight distance bucket
+LIGHTSCALESHIFT = 12    # DOOM R_InitLightTables intermediate shift
+DISTMAP = 2             # DOOM distance-darkening rate divisor
+
+
+def yslope_table(view_w: int, view_h: int) -> list[int]:
+    """DOOM's `yslope[]` (R_ExecuteSetViewSize): per screen-row y, `FixedDiv(centerx*FRACUNIT, |dy|)`
+    where `dy = ((y - view_h//2) << 16) + FRACUNIT/2` (the +0.5 keeps the horizon row non-zero, so no
+    div0). 16.16. `distance = FixedMul(planeheight, yslope[y])` is the world distance to the floor/ceiling
+    pixel in row y (planeheight = |plane_z - viewz|). centerx = view_w//2 (PROJECTION, FOV=90°). Shared
+    kernel (R6): the oracle and the fj LUT both read it."""
+    centerx = view_w // 2
+    centery = view_h // 2
+    out = []
+    for y in range(view_h):
+        dy = abs(((y - centery) << 16) + (1 << 15))
+        out.append(fixed_div(centerx << 16, dy, 8, 4))    # FixedDiv(centerx<<16, dy) -> 16.16
+    return out
+
+
+def zlight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
+    """DOOM's `zlight[]` (R_InitLightTables): the distance-based floor/ceiling light map. Returns a
+    `LIGHTLEVELS × MAXLIGHTZ` grid of COLORMAP row indices (0..num_colormaps-1). Index it as
+    `zlight[light >> LIGHTSEGSHIFT][min(MAXLIGHTZ-1, distance >> LIGHTZSHIFT)]` (R_MapPlane). Farther
+    spans (larger distance bucket j) get a darker row. centerx = view_w//2 (our PROJECTION analog of
+    DOOM's SCREENWIDTH/2). Shared kernel (R6): the oracle and the fj LUT both read it."""
+    centerx = view_w // 2
+    grid = []
+    for i in range(LIGHTLEVELS):
+        startmap = ((LIGHTLEVELS - 1 - i) * 2) * num_colormaps // LIGHTLEVELS
+        row = []
+        for j in range(MAXLIGHTZ):
+            scale = fixed_div(centerx << 16, (j + 1) << LIGHTZSHIFT, 8, 4)   # FixedDiv(centerx<<16, ...)
+            scale >>= LIGHTSCALESHIFT
+            level = startmap - scale // DISTMAP
+            level = max(0, min(num_colormaps - 1, level))
+            row.append(level)
+        grid.append(row)
+    return grid
 
 
 def sine_table(count: int, fraction_bits: int, total_bits: int) -> list[int]:

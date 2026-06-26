@@ -1,0 +1,77 @@
+..FFFF                                                                   [100%]
+================================== FAILURES ===================================
+___________ test_square_floor_is_distance_lit_flat_not_two_band_bg ____________
+
+    def test_square_floor_is_distance_lit_flat_not_two_band_bg():
+        """Spawn in the square room facing the head-on north wall (covers rows [0,75]). The floor band
+        [76,99] used to be the M9 two-band background (a single constant FLOOR_BG shade). It is now the
+        sector's floor flat, distance-lit: it (a) differs from the two-band bg, and (b) varies down the
+        column (the zlight gradient — nearer rows brighter)."""
+        cfg = Config()
+        rm = ReferenceModel()
+        scene = build_scene(WadFile.from_path(ROOM), WadFile.from_path(ASSET), "MAP01")
+        state = spawn_state(WadFile.from_path(ROOM), "MAP01")
+        frame = rm.render_wall_frame(state, scene)
+        bg = rm.render_frame(state, scene)                          # the old M9 two-band background
+        W, H = cfg.VIEW_W, cfg.VIEW_H
+        col = W // 2
+        band = [frame[y * W + col] for y in range(WALL_BOT + 1, H)]
+>       assert any(frame[y * W + col] != bg[y * W + col] for y in range(WALL_BOT + 1, H))  # not the two-band bg
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert False
+E        +  where False = any(<generator object test_square_floor_is_distance_lit_flat_not_two_band_bg.<locals>.<genexpr> at 0x000001DE96FA1F40>)
+
+tests\host\test_floor_planes.py:64: AssertionError
+______________ test_e1m1_floors_ceilings_replace_the_background _______________
+
+    def test_e1m1_floors_ceilings_replace_the_background():
+        """E1M1 spawn: every column is claimed (no black holes) and the floors/ceilings now overwrite the
+        M9 background almost everywhere — far more pixels differ from the two-band bg than the walls alone."""
+        cfg = Config()
+        rm = ReferenceModel()
+        map_wad = WadFile.from_path(E1M1)
+        scene = build_scene(map_wad, map_wad, "E1M1")
+        state = spawn_state(map_wad, "E1M1")
+        frame = rm.render_wall_frame(state, scene)
+        bg = rm.render_frame(state, scene)
+        W, H = cfg.VIEW_W, cfg.VIEW_H
+        assert all(any(frame[y * W + x] != 0 for y in range(H)) for x in range(W))  # no all-zero column
+>       assert sum(1 for a, b in zip(frame, bg) if a != b) > 12000  # walls+floors+ceilings, not walls alone
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       assert 5287 > 12000
+E        +  where 5287 = sum(<generator object test_e1m1_floors_ceilings_replace_the_background.<locals>.<genexpr> at 0x000001DE96FAF3E0>)
+
+tests\host\test_floor_planes.py:80: AssertionError
+________________________ test_square_floor_golden_hash ________________________
+
+    def test_square_floor_golden_hash():
+        rm = ReferenceModel()
+        scene = build_scene(WadFile.from_path(ROOM), WadFile.from_path(ASSET), "MAP01")
+        frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene)
+>       assert frame_hash(frame) == "aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463"
+E       AssertionError: assert 'b7da67d5f0d8...1efc1ed7208e8' == 'aeeb82a8bea7...b00a1702d1463'
+E         
+E         - aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463
+E         + b7da67d5f0d8f1ea832038ad571442b986c8a6225fba1a270fb1efc1ed7208e8
+
+tests\host\test_floor_planes.py:89: AssertionError
+_________________________ test_e1m1_floor_golden_hash _________________________
+
+    def test_e1m1_floor_golden_hash():
+        rm = ReferenceModel()
+        map_wad = WadFile.from_path(E1M1)
+        scene = build_scene(map_wad, map_wad, "E1M1")
+        frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene)
+>       assert frame_hash(frame) == "9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01"
+E       AssertionError: assert '0b817e4a1260...36e752e566c0e' == '9569a547c0fe...feae82f576d01'
+E         
+E         - 9569a547c0fef22416fcc3549f0c0bc96bdc1ea3aa8f1eca2b8feae82f576d01
+E         + 0b817e4a126026207f40327cb32b68685efd47572f79661ff7136e752e566c0e
+
+tests\host\test_floor_planes.py:97: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_floor_planes.py::test_square_floor_is_distance_lit_flat_not_two_band_bg
+FAILED tests/host/test_floor_planes.py::test_e1m1_floors_ceilings_replace_the_background
+FAILED tests/host/test_floor_planes.py::test_square_floor_golden_hash - Asser...
+FAILED tests/host/test_floor_planes.py::test_e1m1_floor_golden_hash - Asserti...
+4 failed, 2 passed in 0.47s

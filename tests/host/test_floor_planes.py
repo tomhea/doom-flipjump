@@ -111,7 +111,8 @@ def test_square_textured_floor_golden_hash():
     rm = ReferenceModel()
     scene = build_scene(WadFile.from_path(ROOM), WadFile.from_path(ASSET), "MAP01")
     frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene)
-    assert frame_hash(frame) == "00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12"
+    # Phase 2 re-bless: log-bucketed floor u,v seed (was 00de1aaa, byte-exact perspective)
+    assert frame_hash(frame) == "661061c691898c2b389d863344cc7cb7966e56cfcc562d25476f5caa3368d438"
 
 
 def test_e1m1_textured_floor_golden_hash():
@@ -119,7 +120,8 @@ def test_e1m1_textured_floor_golden_hash():
     map_wad = WadFile.from_path(E1M1)
     scene = build_scene(map_wad, map_wad, "E1M1")
     frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene)
-    assert frame_hash(frame) == "db5d3da80a52c3ea78a8f599d121aaeb450bdfb84ca96b4656f0c267302ef0b2"
+    # Phase 2 re-bless: log-bucketed floor u,v seed (was db5d3da8, byte-exact perspective)
+    assert frame_hash(frame) == "5f470107f1c0ad7f5be7643f0ba389a874a5b5ca201be7023218d18ee67ff200"
 
 
 # ── M13a flat-colored tier preserved under floor_texturing=False (the cheaper §1 fallback) ────

@@ -168,6 +168,76 @@ is solved. Frame ~645M ≈ floor (~300M full) + walls/BSP-walk (~345M, UNTOUCHED
 - Width narrowing in plane_col/the seed. Small.
 - **Estimated [exact] ceiling ≈ 450–550M (~0.5–0.6 fps).** 20M needs the re-bless/algorithmic levers (declined).
 
+## MASTER LIST — all optimizations from the perf session (consolidated)
+
+Tags: **[done]** shipped this session · **[next]** decided, do now · **[M14]** needs the sim · **[exact]** keeps
+pixels · **[rebless]** changes pixels (re-bless goldens) · impact = rough ops/frame.
+
+### A. Implemented this session
+1. **[done][exact] Phase 1 geometry early-out** — `full` flag + occlusion pre-scan in
+   `seg_pass1_leaf_body_mtlwp`. 645.6M→515.2M (1.25×). Goldens preserved. KEEP.
+2. **[done→REVERT][rebless] Phase 2 log-bucketed floor** — 515.2M→444.5M but **vertical-replication artifact
+   (owner rejected)**. Revert (commits `69df2ed`/`f7f4409`/`01060f8` + goldens).
+3. **[declined] Phase 3 vertical-pattern walls** — ~8M for a visual downgrade; the per-column divides run
+   ~160×/frame not per-pixel, and the raster leaf isn't sped by vertical patterns.
+
+### B. Immediate next (decided)
+4. **[next][exact] Revert Phase 2** → back to byte-exact perspective floors (515.2M / 0.54 fps).
+5. **[next][exact] per-(row,visplane) floor span cache** — dedupe `dist/xstep/ystep/zlight-row` across the
+   ~885 chopped same-row same-visplane spans. **~70M, NO visual change.** The clean floor win bucketing should
+   have been. (Replaces the per-span 3-of-6 `fixed_mul`s.)
+
+### C. The BSP walk — [M14] dispatch-incremental
+6. **[M14][exact-ish] dispatch-incremental side test** — maintain `side_i = a_i·vx+b_i·vy+c_i` (integer, exact,
+   no drift); per tic `side_i += dispatch_a[dvx] + dispatch_b[dvy]` (precomputed products, `@`-routed, no mul,
+   no `ptr_index`). Decision = `sign(side_i)`. ~204 shared tables (98 `dx` + 106 `dy`), ~12k cells. Walk
+   ~7M→~1.1M.
+7. **[decided] DROP sign-first entirely** — it's the stateless from-scratch method; superseded by #6. (Only
+   had value pre-M14; owner cares only about M14+ walking fps.)
+8. **[M14] seed = full-mul `point_on_side`, once** — needs the magnitude (can't be sign-first). Re-seed ONLY on
+   teleport (E1M1 = 0; doors/lifts/exit move heights not vertices → never reseed). Negligible.
+
+### D. Per-seg geometry — [rebless] (only ~26 segs contribute; `wall_x_range` culls 432)
+9. **[rebless] affine `rw_distance`** — perpendicular distance = `a'·vx+b'·vy+c'` (baked coeffs). Kills
+   `point_to_dist` (96k, 2 divides) in BOTH `wall_setup` + `wall_offset`. [M14: maintain incrementally.]
+10. **[rebless] affine back-face cull (the `rw_distance` SIGN)** — skip both atans for back-facing segs BEFORE
+    paying them → cuts the 432-seg / 864-atan bulk (~71M) hard.
+11. **[rebless] Montgomery batch inversion** — all per-seg reciprocals (`scale`, `iscale`, atan slope) via
+    **1 divide/frame + ~3n muls** (no `1/y` table; division O(1)/frame not O(seg)). Needs block-FP normalize
+    (narrow mantissa muls) + a gather-then-use restructure.
+12. **[M14] Newton-Raphson incremental reciprocal** — maintain `1/D` per seg, 1 step (2 muls)/frame, divide
+    only on a newly-visible seed. No divide in steady walking.
+13. **[rebless] atan** — batch-invert the slope `den` (#11), `.lookup` `tantoangle` (16ˣ) → divide-free,
+    O(1)/frame. (CORDIC considered, ≈ same as the divide here — not a win.)
+14. **[rebless] fold compile-time-const muls into 16ˣ tables** — `PROJECTION·sin(angleb)` → one `projsin[ ]`
+    lookup (no mul).
+
+### E. Cross-cutting LAWS (apply to every table / op)
+15. **[LAW] Table Design Law** — index a **16ˣ table by the top x nibbles XOR'd into the dispatch address**
+    (`.lookup dst, var+offset*dw`): no shift, no clamp, no `read_table` arithmetic. Tables are **16ˣ sized**
+    (smaller x for less precision); **≤16³ (4096) without owner permission**.
+16. **[next][exact] kill avoidable whole-nibble shifts** — `shr_hex`/`shl_hex` used to extract an index → read
+    at the compile-time offset instead (`var+k*dw`). ~331 ops each; opt1 did u/v only. (Subsumed by #15 where
+    a table is involved.)
+17. **[rebless] convert non-16ˣ tables to 16ˣ** — `zlight` 128→256 (kills `>>20`+`min(127,·)`), `viewangletox`
+    160→256. (`finesine`=4096=16³, `tantoangle`=2048 OK.)
+18. **[exact] `.lookup` dispatch, not `read_table`** — ~35 ops vs ~thousands (it computes the address
+    arithmetically). 
+19. **[principle] narrow every op to its real width** + fold compile-time constants into tables. Muls don't
+    batch (no "1 mul for n") — only narrow / fold / reduce-count.
+
+### F. Per-pixel raster — the 12M FLOOR (undesigned)
+20. **The 16,000 screen pixels dominate 12M (~750 ops/px budget).** Current ~4.2k/px must fall ~5.6×. Two
+    paths: (a) narrow the per-pixel DDA/sample/colormap/write to the bone; (b) draw FEWER pixels (2×2 blocks →
+    4,000 px → ~3k/px budget, a visual tradeoff). **This is the one undecided tier and the whole 12M ballgame.**
+
+### The 5 cross-cutting principles (the "why")
+1. **Affine + dispatch** — replace muls/divs with adds + `@`-routed lookups (walk, `rw_distance`, back-face).
+2. **Batch inversion** — n divides → 1/frame (no per-op reciprocal).
+3. **16ˣ top-nibble `.lookup`** — deletes shift + clamp + `read_table` (one ~35-op dispatch).
+4. **Narrow + fold** — minimum width per op; compile-time constants → tables.
+5. **Per-pixel is the floor** — 16k px × ~750 ops is the 12M budget; everything above is amortized setup.
+
 ## Path to 12M ops/frame — the irreducible algorithm + per-component plan (design, not built)
 
 The renderer's algorithm STAYS (BSP walk + perspective projection + textured raster); we optimize each stage,

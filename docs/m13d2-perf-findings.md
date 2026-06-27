@@ -217,6 +217,46 @@ resolution/▢-block tradeoff: 2×2 blocks → 4,000 px → a 3k-ops/px budget).
 the affine projection pieces (`rw_distance`) are cheap via the dispatch-incremental trick; the genuinely hard,
 dominant work is the per-pixel raster — that's where the next deep design effort belongs.
 
+### DECIDED — eliminate ALL divides in the per-seg projection ([re-bless])
+
+Divides are the per-seg cost. **Measured primitives:** `fixed_mul 8,4` = 11,493; `fixed_div 8,4` = **41,324**
+(~3.6× a mul); `point_to_angle` (atan) = **73,455** (a `hex.div 12` + `tantoangle`); `point_to_dist` =
+**95,583** (TWO `fixed_div`s); `angle_to_x` = 9,049. The three per-seg macros: `wall_x_range` ≈ 165k (2 atans),
+`wall_setup` ≈ 180k (atan + dist), `wall_scale_setup` ≈ 170k (3 divides).
+
+**Measured seg-complexity (E1M1 spawn, fj + Phase 1):**
+- `wall_x_range` runs on **432 segs** (Phase-1 `full` cut it from 575) — **2 atans each = 864 atans ≈ ~71M, the
+  dominant geometry cost**. 116 pass (visible).
+- **The full projection (`wall_setup`/`wall_scale_setup`/`wall_offset`) runs on ONLY ~26 segs/frame** (the
+  occlusion pre-scan + `drawn[]` mean only the ~26 front-most contributing segs project). ~27 at other vps.
+- per-column `column_render_params` (the `iscale` divide): 160 columns.
+
+So "kill the divides" is two problems of very different size:
+
+1. **The 26-seg full projection — easy + cheap to make divide-free.** Replace every divide with a reciprocal
+   LUT (`1/x` table + a `fixed_mul` ≈ 12k, vs the 41k divide) or the affine form:
+   - **`rw_distance` → affine, NO divide.** Perpendicular distance to a seg line = `a'·vx + b'·vy + c'` with
+     baked coefficients (`a'=segdy/seglen` etc., computed once at level load). Replaces `point_to_dist` (96k,
+     2 divides) in BOTH `wall_setup` and `wall_offset`. ⚠ coefficients are fixed-point (not integer like the
+     side test) → maintain incrementally with periodic re-seed OR recompute per-frame as `(cross product)·
+     (baked 1/seglen)` (2 `mul_const` + a `mul_const` — no divide). [re-bless: sub-bit rounding vs the oracle's
+     divide path — verify PNG-identical, re-bless.]
+   - **`scale`'s `1/(rw_distance·sin)` → reciprocal LUT / one Newton step** (you already track `rw_distance`).
+   - **`iscale = 1/scale` and `texcol % tw` → reciprocal LUT / mask** (`tw` is a power of 2 → mask, not mod).
+   - Net: ~26 segs × (~250k divide-free vs ~457k) ≈ **~6.5M instead of ~12M**, and the per-column divide gone.
+2. **The 432-seg `wall_x_range` cull — the real bulk (~71M), a different problem.** Two levers:
+   - **Back-face cull BEFORE the 2 atans, using the affine `rw_distance` SIGN** (which side of the seg line the
+     eye is on — the same cheap affine test, no atan, no divide). Skips both atans for back-facing segs
+     (roughly half) → far fewer atans.
+   - The surviving atans: replace `point_to_angle`'s slope divide (`dy/dx`) with a **reciprocal LUT for `1/dx`**
+     → atan ~73k → ~44k. [re-bless.]
+   - Better still: most of these 432 never contribute (only 26 do) — a cheaper cull (affine side/back-face +
+     the existing `full`/occlusion) should cut the 432 toward the ~26+frustum set before paying any atan.
+
+**Verdict:** divide-free projection is a [re-bless] (reciprocal LUTs + the affine `rw_distance`), low-risk
+(sub-bit value shifts, no visual artifact like the floor banding). The 26-seg full projection becomes ~6.5M;
+the 432-seg `wall_x_range` needs the affine back-face cull to really fall. Both reuse the affine machinery.
+
 ## Optimization backlog (macro-by-macro; ordered by leverage)
 
 Principles: take work OFF the per-pixel path → do it once per row/column/span; replace multiplies with

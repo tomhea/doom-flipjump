@@ -340,7 +340,7 @@ ns proj {
       end:
     }
 
-    // proj.wall_x_range visible, x1, x2, rw_angle1, viewx, viewy, viewangle, v1x, v1y, v2x, v2y (R_AddLine):
+    // proj.wall_x_range visible, x1, x2, rw_angle1, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, a, b, c (R_AddLine):
     //   the seg's screen column range. Writes visible=1 + (x1,x2,rw_angle1) when the seg is on-screen,
     //   else visible=0 (the oracle's None) with x1/x2/rw_angle1 zeroed. v1 is the seg's LEFT screen
     //   vertex, v2 the RIGHT (DOOM-wound baked segs). Mirrors reference_model.wall_x_range EXACTLY:
@@ -349,8 +349,8 @@ ns proj {
     //   (modular BAM) -> hex.cmp; only the final x1>=x2 column test is SIGNED (columns can be -1) ->
     //   hex.scmp. Outputs are computed into temps and committed only on the visible path.
     //   @requires hex.init & stl.ptr_init   (inlines point_to_angle x2 + angle_to_x x2)
-    def wall_x_range visible, x1, x2, rw_angle1, viewx, viewy, viewangle, v1x, v1y, v2x, v2y \
-            @ a1, a2, span, tspan, diff, rwa, tx1, tx2, \
+    def wall_x_range visible, x1, x2, rw_angle1, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, a, b, c \
+            @ a1, a2, span, tspan, diff, rwa, tx1, tx2, sgn, sgnt, czero, frontok, \
               cang180, cclip, c2clip, cnegclip, \
               notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end {
         hex.set 1, visible, 0              // default: culled (None)
@@ -358,6 +358,17 @@ ns proj {
         hex.zero 8, x2
         hex.zero 8, rw_angle1
 
+        // perf #10 [exact]: affine back-face PRE-cull BEFORE the two atans. sgn = a*viewx + b*viewy + c
+        // (the signed perpendicular distance to the seg line, seg_affine_coeffs). >0 iff the eye is on the
+        // wall's FRONT side; a one-sided wall whose front faces away (sgn<=0) is invisible -> cull without
+        // paying point_to_angle x2. Byte-exact: every seg this culls that span<ANG180 would keep is
+        // frustum-culled anyway (verified across viewpoints). SIGNED compare (sgn is a 2's-complement dist).
+        hex.fixed_mul 8, 4, sgn, a, viewx
+        hex.fixed_mul 8, 4, sgnt, b, viewy
+        hex.add 8, sgn, sgnt
+        hex.add 8, sgn, c
+        hex.scmp 8, sgn, czero, end, end, frontok     // sgn <= 0 (lt or eq) -> back-facing, cull (visible=0)
+      frontok:
         .point_to_angle a1, viewx, viewy, v1x, v1y    // absolute angle to v1 (left)
         .point_to_angle a2, viewx, viewy, v2x, v2y    // absolute angle to v2 (right)
         hex.mov 8, span, a1
@@ -406,6 +417,9 @@ ns proj {
       rwa: hex.vec 8
       tx1: hex.vec 8
       tx2: hex.vec 8
+      sgn: hex.vec 8
+      sgnt: hex.vec 8
+      czero: hex.vec 8, 0
       cang180: hex.vec 8, 0x80000000
       cclip: hex.vec 8, 0x20000000        // CLIPANGLE = ANG45
       c2clip: hex.vec 8, 0x40000000       // 2*CLIPANGLE = ANG90 (the full FOV)

@@ -248,6 +248,14 @@ class ReferenceModel:
         then make view-relative and clip to [-CLIPANGLE, CLIPANGLE] via DOOM's unsigned tspan logic, then
         map to columns via angle_to_x. `viewx/y/angle` are 16.16/BAM; `verts` are 16.0 (shifted <<16)."""
         v1, v2 = verts[seg.v1], verts[seg.v2]
+        # perf #10 [exact]: affine back-face PRE-cull BEFORE the two atans. The signed affine distance
+        # (seg_affine_coeffs) is >0 iff the eye is on the seg-line's FRONT side; a one-sided wall whose
+        # front faces away (signed<=0) is invisible, so cull it without paying point_to_angle×2. Verified
+        # byte-exact: every seg this culls that DOOM's span<ANG180 test would keep is frustum-culled
+        # (wall_x_range would return None anyway) — so the rendered frame is unchanged.
+        a, b, c = seg_affine_coeffs(seg, verts)
+        if _signed((fixed_mul(a, viewx, 8, 4) + fixed_mul(b, viewy, 8, 4) + c) & ANGLE_MASK, 32) <= 0:
+            return None
         # DOOM-standard winding (baked segs): v1 is the seg's LEFT screen vertex, v2 the RIGHT — so a
         # front-facing wall gives span < ANG180 (verified on real E1M1; the M7-era v1/v2 swap is gone).
         angle1 = self.point_to_angle(viewx, viewy, v1[0] << 16, v1[1] << 16)   # left vertex

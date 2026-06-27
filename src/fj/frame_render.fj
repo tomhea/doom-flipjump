@@ -332,7 +332,7 @@ ns frame {
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, drawn, seg_ret {
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret                    // culled seg -> nothing to fill
         proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
@@ -370,7 +370,7 @@ ns frame {
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, drawn, seg_ret {
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
@@ -417,7 +417,7 @@ ns frame {
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, drawn, seg_ret {
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
@@ -464,7 +464,7 @@ ns frame {
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, drawn, seg_ret {
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
@@ -666,7 +666,7 @@ ns frame {
         hex.if0 1, full, work                   // M13opt-P1: screen already full (all VIEW_W cols claimed) -> this
         stl.fret seg_ret                         // seg (and every later, farther seg) paints nothing. Byte-exact:
       work:                                      // front-to-back drawn[] means its cols are all occluded already.
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         hex.mov 8, x, x1                          // M13opt-P1 occlusion pre-scan: if EVERY column in [x1,x2) is
       occscan:                                    // already claimed by a nearer seg, this seg paints nothing ->

@@ -314,9 +314,10 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
         seg = cmap.segs[si]
         v1x, v1y = cmap.vertexes[seg.v1]
         v2x, v2y = cmap.vertexes[seg.v2]
+        fa, fb, fc = seg_affine_coeffs(seg, cmap.vertexes)   # perf #10: affine back-face cull coeffs
         for _ in range(2):   # call twice (R5 #8)
             body += [f"proj.wall_x_range vis, x1, x2, rwa, vx{k}, vy{k}, va{k}, "
-                     f"a{k}, b{k}, c{k}, e{k}",
+                     f"a{k}, b{k}, c{k}, e{k}, fa{k}, fb{k}, fc{k}",
                      "hex.print_as_digit 1, vis, 0", "stl.output 10",
                      "hex.print_as_digit 8, x1, 0", "stl.output 10",
                      "hex.print_as_digit 8, x2, 0", "stl.output 10",
@@ -324,7 +325,8 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
         data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
                  f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
                  f"a{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"b{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
-                 f"c{k}: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"e{k}: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}"]
+                 f"c{k}: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"e{k}: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}",
+                 f"fa{k}: hex.vec 8, {fa}", f"fb{k}: hex.vec 8, {fb}", f"fc{k}: hex.vec 8, {fc}"]
         res = rm.wall_x_range(vxu * U, vyu * U, va, seg, cmap.vertexes)
         if res is None:
             expected += b"0\n00000000\n00000000\n00000000\n" * 2

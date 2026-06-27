@@ -582,7 +582,7 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
-        "proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, v1x, v1y, v2x, v2y",
+        "proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, acoef, bcoef, ccoef",
         "hex.if0 1, visible, pass2",                             # culled -> pass 2 (background only)
         "proj.wall_setup normalangle, rw_distance, viewx, viewy, segangle, acoef, bcoef, ccoef",
         f"proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, {proj}",

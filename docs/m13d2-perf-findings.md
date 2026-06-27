@@ -229,10 +229,26 @@ pixels · **[rebless]** changes pixels (re-bless goldens) · impact = rough ops/
 19. **[principle] narrow every op to its real width** + fold compile-time constants into tables. Muls don't
     batch (no "1 mul for n") — only narrow / fold / reduce-count.
 
-### F. Per-pixel raster — the 12M FLOOR (undesigned)
-20. **The 16,000 screen pixels dominate 12M (~750 ops/px budget).** Current ~4.2k/px must fall ~5.6×. Two
-    paths: (a) narrow the per-pixel DDA/sample/colormap/write to the bone; (b) draw FEWER pixels (2×2 blocks →
-    4,000 px → ~3k/px budget, a visual tradeoff). **This is the one undecided tier and the whole 12M ballgame.**
+### F. Per-pixel raster — MEASURED: full-res 12M is IMPOSSIBLE; needs fewer pixels
+20. **Per-pixel feasibility (MEASURED).** Irreducible per textured pixel = `flat.sample` (391) + `cm.apply`
+    (399) + framebuffer write. The write DOMINATES and depends on addressing: **runtime pointer
+    `write_hex_and_inc` ×2 = 1564** (what the floor uses) vs **compile-time-address `xor_zero` = 284** (the
+    wall pass-2 way) — a **5.5×** gap. So:
+    - floor today (runtime ptr): sample+apply+write = **2352 ops/px** → 16k px ≈ **38M** just for pixels.
+    - best case (compile-time-addr write): **1074 ops/px** → 16k px ≈ **17M** — STILL over the whole 12M budget.
+    - → **Full-resolution (16,000 px) 12M is physically impossible**, even with zero geometry/walk/DDA. The
+      binding constraint is the PIXEL COUNT, not the per-pixel cost (already near its floor).
+    - **12M requires ~4× fewer pixels** (a quality tradeoff): **2×2 blocks → 4,000 px** × ~1074 (compile-addr) ≈
+      **4.3M** for pixels (reachable); or lower resolution; or **flat-colored floors** (drop `flat.sample`,
+      span-constant color → ~284/px write-only → ~4.5M, but no floor texture).
+21. **Biggest full-res per-pixel lever (doesn't reach 12M but ~halves the floor):** switch the floor raster from
+    the runtime pointer to **compile-time-address writes** (unroll like wall pass-2) — write 1564→284. Costs a
+    large unrolled program (assemble time), like the wall's 16k unroll.
+
+**VERDICT for 12M:** it's a *resolution/quality* decision, not an arithmetic one. Full-res textured = ~17-38M on
+pixels alone. To hit 12M: 2×2 blocks (chunkier but textured), lower res, or flat-colored floors. The geometry/
+walk re-bless campaign (items 6-19) is only worth its cost AFTER picking the pixel budget — at full res nothing
+gets under ~17M.
 
 ### The 5 cross-cutting principles (the "why")
 1. **Affine + dispatch** — replace muls/divs with adds + `@`-routed lookups (walk, `rw_distance`, back-face).

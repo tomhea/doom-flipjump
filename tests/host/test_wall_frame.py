@@ -69,7 +69,7 @@ def test_spawn_frame_golden_hash(rm, scene):
     """Byte-exact textured golden (the key the fj renderer diffs against, D12). Re-blessed at M13b:
     floors/ceilings are now full-res perspective-textured visplanes (R_DrawPlanes) over the M13a flat tier."""
     frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene)
-    assert frame_hash(frame) == "661061c691898c2b389d863344cc7cb7966e56cfcc562d25476f5caa3368d438"  # Phase 2 bucketed floor
+    assert frame_hash(frame) == "00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12"
 
 
 def test_only_faced_wall_drawn_others_culled(rm, scene):
@@ -109,7 +109,7 @@ def test_e1m1_wall_frame_textured_and_deterministic():
     assert sum(1 for a, b in zip(frame, bg) if a != b) > 1000  # walls composited over the background
     assert len(set(frame)) >= 8                                # many palette indices ⇒ real textures
     assert frame == rm.render_wall_frame(state, scene)         # deterministic (D12)
-    assert frame_hash(frame) == "5f470107f1c0ad7f5be7643f0ba389a874a5b5ca201be7023218d18ee67ff200"  # Phase 2 bucketed floor
+    assert frame_hash(frame) == "db5d3da80a52c3ea78a8f599d121aaeb450bdfb84ca96b4656f0c267302ef0b2"
 
 
 def test_e1m1_every_pixel_is_a_valid_palette_index():

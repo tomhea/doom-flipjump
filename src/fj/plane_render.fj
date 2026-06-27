@@ -90,75 +90,6 @@ ns plane {
       cxf: hex.vec 8
     }
 
-    // Phase 2 — the floor distance BAND key (block-FP log bucket, MANT=4), mirrors reference_model.floor_band:
-    //   k = index of the highest nonzero nibble of the 16.16 distance `d`;  band = 64*k + band_lo[topbyte]
-    //   where topbyte = (nibble_k<<4)|nibble_{k-1} (the 2 nibbles at d+(k-1)*dw). The single 256-entry band_lo
-    //   LUT + a compile-time 64*k add reproduces (bitlen(d)<<4)|top-4-mantissa-bits with NO runtime variable
-    //   shift. d<16 (k==0) -> band = d (the e<=4 small case). `band` is 3 nibbles (max 527). @requires hex.init.
-    def floor_band band, d \
-            @ k6, k5, k4, k3, k2, k1, k0, done < band_lo {
-        hex.zero 3, band
-        hex.if0 1, d + 7*dw, k6
-        hex.read_table 2, band, band_lo, 2, d + 6*dw     // topbyte = nibbles 6,7
-        hex.add_constant 3, band, 64*7
-        ;done
-      k6:
-        hex.if0 1, d + 6*dw, k5
-        hex.read_table 2, band, band_lo, 2, d + 5*dw
-        hex.add_constant 3, band, 64*6
-        ;done
-      k5:
-        hex.if0 1, d + 5*dw, k4
-        hex.read_table 2, band, band_lo, 2, d + 4*dw
-        hex.add_constant 3, band, 64*5
-        ;done
-      k4:
-        hex.if0 1, d + 4*dw, k3
-        hex.read_table 2, band, band_lo, 2, d + 3*dw
-        hex.add_constant 3, band, 64*4
-        ;done
-      k3:
-        hex.if0 1, d + 3*dw, k2
-        hex.read_table 2, band, band_lo, 2, d + 2*dw
-        hex.add_constant 3, band, 64*3
-        ;done
-      k2:
-        hex.if0 1, d + 2*dw, k1
-        hex.read_table 2, band, band_lo, 2, d + 1*dw
-        hex.add_constant 3, band, 64*2
-        ;done
-      k1:
-        hex.if0 1, d + 1*dw, k0
-        hex.read_table 2, band, band_lo, 2, d + 0*dw
-        hex.add_constant 3, band, 64*1
-        ;done
-      k0:
-        hex.mov 1, band, d                               // d < 16: band = d (and d==0 -> 0)
-      done:
-    }
-
-    // Phase 2 — one runtime-indexed 8-nibble seed-table access (idx = band*8 digit offset). Mirrors
-    // frame.store_col_field8 but kept ns-local so plane.draw_span needs no cross-ns dependency. @requires
-    // hex.init & stl.ptr_init.
-    def write_seed8 arr, idx, src @ aptr, cell, end {
-        hex.set w/4, aptr, arr
-        hex.ptr_index cell, aptr, idx
-        hex.write_hex 8, cell, src
-        ;end
-      aptr: hex.vec w/4
-      cell: hex.vec w/4
-      end:
-    }
-    def read_seed8 arr, idx, dst @ aptr, cell, end {
-        hex.set w/4, aptr, arr
-        hex.ptr_index cell, aptr, idx
-        hex.read_hex 8, dst, cell
-        ;end
-      aptr: hex.vec w/4
-      cell: hex.vec w/4
-      end:
-    }
-
     // M13d — the TEXTURED floor/ceiling span (DOOM R_MapPlane + R_DrawSpan). One horizontal span [x1,x2] at
     // screen row y: perspective-correct flat texturing via the 2-coord (u,v) DDA, distance-lit (zlight), each
     // pixel written to the framebuffer at the RUNTIME address `fbase + 2*(y*VIEW_W + x)*dw`. Mirrors the oracle
@@ -189,66 +120,29 @@ ns plane {
     def draw_span fbase, view_w \
             @ ys, dist, xstep, ystep, dscale, length, xta, ang, idx, fc, fs, prod, xfrac, yfrac, \
               zidx, lvl, zlidx, zrow, c127, tt, c3f, u, vv, spot, fidx, pal, cmidx, lit, \
-              count, pixp, fbptr, cell, sloop, sbody, sdone, zclamp, zok, \
-              band, bw, bidx, bbp, bbcell, bb, xf0, yf0, x1pad, dobuild, seedx1 \
+              count, pixp, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
             < planeheight, light, basexscale, baseyscale, viewx, viewy, viewangle, y, x1, x2, flatbase, \
-              yslope, distscale, xtoviewangle, zlight, span_ret, \
-              band_built, xstep_tab, ystep_tab, xf0_tab, yf0_tab {
+              yslope, distscale, xtoviewangle, zlight, span_ret {
         hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
         hex.fixed_mul 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
-        // Phase 2 — per-band shared u,v seed (replaces the per-span 5-fixed_mul reseed). The band's seed
-        // (xstep/ystep + the column-0 DDA xfrac0/yfrac0) is computed ONCE at the band's first-hit distance
-        // and cached; a span at x1 derives xfrac = xfrac0 + x1*xstep (== the continuous DDA, exact mod 2^32).
-        .floor_band band, dist                           // band = floor_band(distance)
-        hex.zero w/4, bw
-        hex.mov 3, bw, band                              // bw = band (zero-extended to the w/4 ptr_index width)
-        hex.mov w/4, bidx, bw
-        hex.shl_bit w/4, bidx
-        hex.shl_bit w/4, bidx
-        hex.shl_bit w/4, bidx                            // bidx = band*8 (8-nibble seed element digit offset)
-        hex.set w/4, bbp, band_built
-        hex.ptr_index bbcell, bbp, bw                    // &band_built[band] (1-nibble elements: idx = band)
-        hex.read_hex 1, bb, bbcell
-        hex.if0 1, bb, dobuild                           // band not yet seeded this frame -> build it
-        .read_seed8 xstep_tab, bidx, xstep               // cached: read this band's seed
-        .read_seed8 ystep_tab, bidx, ystep
-        .read_seed8 xf0_tab, bidx, xf0
-        .read_seed8 yf0_tab, bidx, yf0
-        ;seedx1
-      dobuild:
         hex.fixed_mul 8, 4, xstep, dist, basexscale      // xstep = FixedMul(distance, basexscale)
         hex.fixed_mul 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
-        hex.mov 8, dscale, distscale                     // distscale[0]  (the column-0 continuous-DDA seed)
-        hex.fixed_mul 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[0])
-        hex.mov 8, xta, xtoviewangle                     // xtoviewangle[0]
+        hex.read_table 8, dscale, distscale, 2, x1
+        hex.fixed_mul 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
+        hex.read_table 8, xta, xtoviewangle, 2, x1
         hex.mov 8, ang, viewangle
-        hex.add 8, ang, xta                              // viewangle + xtoviewangle[0] (mod 2^32)
+        hex.add 8, ang, xta                              // viewangle + xtoviewangle[x1] (mod 2^32)
         hex.shr_hex 8, 5, ang                            // >> 20 (angle_shift): the fine index
-        hex.mov 3, idx, ang                              // idx0 = (.. >> 20) & 0xFFF (3 nibbles)
+        hex.mov 3, idx, ang                              // idx = (.. >> 20) & 0xFFF (3 nibbles)
         finesine.read_cos fc, idx
         hex.fixed_mul 8, 4, prod, fc, length
-        hex.mov 8, xf0, viewx
-        hex.add 8, xf0, prod                             // xfrac0 = viewx + FixedMul(finecos[idx0], length)
+        hex.mov 8, xfrac, viewx
+        hex.add 8, xfrac, prod                           // xfrac = viewx + FixedMul(finecos[idx], length)  (seed @8)
         finesine.read_sin fs, idx
         hex.fixed_mul 8, 4, prod, fs, length
-        hex.mov 8, yf0, viewy
-        hex.add 8, yf0, prod
-        hex.neg 8, yf0                                   // yfrac0 = -(viewy + FixedMul(finesin[idx0], length))
-        .write_seed8 xstep_tab, bidx, xstep              // cache this band's seed (built once / band / frame)
-        .write_seed8 ystep_tab, bidx, ystep
-        .write_seed8 xf0_tab, bidx, xf0
-        .write_seed8 yf0_tab, bidx, yf0
-        hex.set 1, bb, 1
-        hex.write_hex 1, bbcell, bb                      // band_built[band] = 1
-      seedx1:
-        hex.zero 8, x1pad
-        hex.mov 2, x1pad, x1
-        hex.mul 8, prod, x1pad, xstep                    // prod = x1*xstep (low 8 nibbles = mod 2^32)
-        hex.mov 8, xfrac, xf0
-        hex.add 8, xfrac, prod                           // xfrac = xfrac0 + x1*xstep (continuous DDA @ x1)
-        hex.mul 8, prod, x1pad, ystep
-        hex.mov 8, yfrac, yf0
-        hex.add 8, yfrac, prod                           // yfrac = yfrac0 + x1*ystep
+        hex.mov 8, yfrac, viewy
+        hex.add 8, yfrac, prod
+        hex.neg 8, yfrac                                 // yfrac = -(viewy + FixedMul(finesin[idx], length))
         hex.mov 8, tt, dist                              // the distance colormap row (zlight), as in draw_pixel
         hex.shr_hex 8, 5, tt                             // distance >> 20 (LIGHTZSHIFT)
         hex.mov 3, zidx, tt
@@ -333,14 +227,5 @@ ns plane {
       pixp: hex.vec 8
       fbptr: hex.vec w/4
       cell: hex.vec w/4
-      band: hex.vec 3                                 // Phase 2 floor band key (<= 527)
-      bw: hex.vec w/4                                 // band, zero-extended for ptr_index (band_built)
-      bidx: hex.vec w/4                               // band*8 (seed-table digit offset, ptr_index width)
-      bbp: hex.vec w/4
-      bbcell: hex.vec w/4
-      bb: hex.vec 1
-      xf0: hex.vec 8                                  // the band's column-0 DDA seed (xfrac0/yfrac0)
-      yf0: hex.vec 8
-      x1pad: hex.vec 8                                // x1 zero-extended to 8 nibbles for hex.mul
     }
 }

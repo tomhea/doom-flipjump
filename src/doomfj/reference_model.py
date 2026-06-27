@@ -60,21 +60,6 @@ FLOOR_BG = 96                     # floor band palette index (pre-colormap)
 WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap) until textures land
 LIGHT_SHIFT = 3                   # sector light (0..255) -> colormap row (0..31): light >> 3
 COLORMAP_LIGHTS = 32              # COLORMAP usable light rows (0..31; invuln/black sit past these)
-FLOOR_MANT = 4                    # Phase 2: floor distance log-bucket mantissa bits (16 bands/octave). The
-                                  # u,v span seed is shared across all spans whose distance shares a band key
-                                  # (block-FP: key = (bitlen<<FLOOR_MANT)|top-mantissa-bits), seeded once per
-                                  # band at its first-hit distance -> kills the per-span 5-fixed_mul DDA reseed.
-
-
-def floor_band(d: int) -> int:
-    """Phase 2 floor distance bucket key (log / block-floating-point). Spans whose 16.16 distance maps to the
-    same key share one precomputed u,v DDA seed (subtle 'snapping' between bands; PNG-validated at MANT=4)."""
-    if d <= 0:
-        return 0
-    e = d.bit_length()
-    if e <= FLOOR_MANT:
-        return d
-    return (e << FLOOR_MANT) | ((d >> (e - 1 - FLOOR_MANT)) & ((1 << FLOOR_MANT) - 1))
 
 
 def _deg_to_bam(deg: int) -> int:
@@ -707,26 +692,6 @@ class ReferenceModel:
         basexscale = fixed_div(self._finecos_idx(ang_b), cxfrac, 8, 4)
         baseyscale = (-fixed_div(self._finesin_idx(ang_b), cxfrac, 8, 4)) & ANGLE_MASK
         viewx32, viewy32 = viewx & 0xFFFFFFFF, viewy & 0xFFFFFFFF
-
-        # Phase 2 — per-band shared u,v seed. Each distinct band key is seeded ONCE (lazily, at its first-hit
-        # distance) with the column-0 DDA value + the per-pixel xstep/ystep; a span at column x1 derives its
-        # seed as xfrac0 + x1*xstep (== the continuous DDA value, exact mod 2^32). This replaces the per-span
-        # 5-fixed_mul reseed (length/finecos/finesin/xstep/ystep) with one band lookup. Spans are visited
-        # row-major left->right (== the fj render_planes_spans order), so first-hit distances match the fj.
-        band_seed: dict = {}
-
-        def get_seed(band, d):
-            s = band_seed.get(band)
-            if s is None:
-                xstep = fixed_mul(d, basexscale, 8, 4)
-                ystep = fixed_mul(d, baseyscale, 8, 4)
-                length = fixed_mul(d, self.distscale[0], 8, 4)
-                idx = ((viewangle + self.xtoviewangle[0]) & ANGLE_MASK) >> self.angle_shift
-                xfrac0 = (viewx32 + fixed_mul(self._finecos_idx(idx), length, 8, 4)) & 0xFFFFFFFF
-                yfrac0 = (-viewy32 - fixed_mul(self._finesin_idx(idx), length, 8, 4)) & 0xFFFFFFFF
-                s = band_seed[band] = (xfrac0, yfrac0, xstep, ystep)
-            return s
-
         for y in range(H):
             x = 0
             while x < W:
@@ -740,18 +705,9 @@ class ReferenceModel:
                 while x2 + 1 < W and self._plane_region_at(x2 + 1, y, ceil_hi, floor_lo) == region \
                         and ch[x2 + 1] == height and cf[x2 + 1] == flat and col_lt[x2 + 1] == light:
                     x2 += 1
-                planeheight = abs((height << 16) - viewz)
-                distance = fixed_mul(planeheight, self.yslope[y], 8, 4)
-                xfrac0, yfrac0, xstep, ystep = get_seed(floor_band(distance), distance)
-                xfrac = (xfrac0 + x * xstep) & 0xFFFFFFFF    # x == x1; xfrac0 + x1*xstep = continuous DDA @ x1
-                yfrac = (yfrac0 + x * ystep) & 0xFFFFFFFF
-                row = colormap[self.plane_light_row(light, distance)]
-                texels = self._flat_texels(asset_wad, flat, flatcache)
-                for xx in range(x, x2 + 1):
-                    spot = ((yfrac >> 10) & 4032) + ((xfrac >> 16) & 63)   # v*64 + u (64x64 flat)
-                    fb[y * W + xx] = row[texels[spot]]
-                    xfrac = (xfrac + xstep) & 0xFFFFFFFF
-                    yfrac = (yfrac + ystep) & 0xFFFFFFFF
+                self._draw_span(fb, colormap, self._flat_texels(asset_wad, flat, flatcache),
+                                height, light, viewx32, viewy32, viewangle, viewz,
+                                basexscale, baseyscale, y, x, x2)
                 x = x2 + 1
 
     def _draw_span(self, fb, colormap, texels, height, light, viewx32, viewy32, viewangle, viewz,

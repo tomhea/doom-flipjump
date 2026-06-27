@@ -263,6 +263,22 @@ slope (`num·(1/den)`, block-FP recip table) → atan ~73k → ~15-20k [re-bless
 divide-free atan but ≈50k here — same as the divide — since fj divides AND CORDIC iterations are both
 width-bound; the reciprocal-LUT is the actual win.)
 
+### DECIDED — TABLE DESIGN LAW (owner rules, binding for all optimization tables)
+
+1. **Index a 16ˣ table by the top x nibbles, XOR'd straight into the dispatch (wflip) address** — `.lookup
+   dst, var + offset*dw` (the `.lookup` body does `rep(x,i) hex.xor .dsp+4*i, idx+i*dw`, reading each nibble
+   at its offset). **No `shr_hex`, no `read_table` arithmetic, no mask/clamp** — the nibbles are already there.
+2. **Tables are 16ˣ sized.** Fewer entries / less precision ⇒ a *smaller x* (fewer top nibbles), NEVER a
+   non-16ˣ size (a non-16ˣ size is exactly what forces the shift+clamp).
+3. **≤ 16³ (4096) without owner permission.** Bigger = a "big table," ask first.
+
+Consequence: this supersedes the shift-audit below — the right pattern isn't "shift less," it's "size the table
+16ˣ and `.lookup` by the top nibbles," which deletes the shift AND the clamp AND the ~thousand-op `read_table`
+(→ ~35-op dispatch). Existing NON-16ˣ tables to convert ([re-bless], ≤1 nibble coarser): `zlight` 128→256
+(kills `>>20` + `min(127,·)`), `tantoangle` 2048→? , `viewangletox` 160→256. (`finesine` = 4096 = 16³ already.)
+Reciprocal `1/den`: normalize (top-nibble leading-digit find) → top-3-significant-nibble `.lookup` → exponent
+via offset, all within 16³; if a clean reciprocal needs > 16³, ASK first.
+
 ### DECIDED — cross-cutting: kill avoidable SHIFTS (whole-nibble → offset addressing) [exact]
 
 Shifts are NOT free: `hex.shr_hex 8,5` = **331 ops**, `hex.shl_bit 8` = 346 (~30× a nibble op). A **whole-nibble

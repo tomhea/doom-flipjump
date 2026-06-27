@@ -183,9 +183,12 @@ pixels · **[rebless]** changes pixels (re-bless goldens) · impact = rough ops/
 
 ### B. Immediate next (decided)
 4. **[next][exact] Revert Phase 2** → back to byte-exact perspective floors (515.2M / 0.54 fps).
-5. **[next][exact] per-(row,visplane) floor span cache** — dedupe `dist/xstep/ystep/zlight-row` across the
-   ~885 chopped same-row same-visplane spans. **~70M, NO visual change.** The clean floor win bucketing should
-   have been. (Replaces the per-span 3-of-6 `fixed_mul`s.)
+5. **[DEFERRED][exact] per-(row,visplane) floor span cache** — MEASURED (spawn): the ~3.9 visplanes/row are
+   **interleaved** across 13.6 spans/row, not consecutive, so a **1-slot cache hits only 10% (~0.3M, built +
+   byte-exact + reverted as useless)**. A **direct-mapped** cache (idx=ph) plateaus at **41% (~20M)** due to
+   collisions; a **full associative** (per-row, remember-all) cache hits **71% (~33M)** but needs a runtime-
+   indexed fill (`ptr_index`) + per-row reset — complex, byte-exact-debugging at 6-min gates, for ~1.04-1.07×.
+   Owner: **skip for now**, pick up later if wanted. Floors stay at Phase-1 (515M, correct).
 
 ### C. The BSP walk — [M14] dispatch-incremental
 6. **[M14][exact-ish] dispatch-incremental side test** — maintain `side_i = a_i·vx+b_i·vy+c_i` (integer, exact,

@@ -21,7 +21,7 @@ from doomfj.fixedpoint import fixed_div
 from doomfj.harness import W
 from doomfj.lut_generator import (generate_yslope_lut_fj, generate_zlight_lut_fj,
                                   generate_distscale_lut_fj, generate_xtoviewangle_lut_fj,
-                                  generate_trig_idioms_fj)
+                                  generate_trig_idioms_fj, generate_floor_band_lut_fj)
 from doomfj.reference_model import ReferenceModel, ANG90, ANGLE_MASK
 from doomfj.texturecompiler import compile_colormap, compile_palette, _texel_table
 from doomfj.wad import WadFile
@@ -146,6 +146,11 @@ def test_render_planes_spans_byte_exact_vs_oracle(tmp_path):
         "inspan: hex.vec 1", "spanR: hex.vec 2", "spanph: hex.vec 8", "spanfb: hex.vec 5",
         "spanlt: hex.vec 2", "spanx1: hex.vec 2", "cR: hex.vec 2", "cph: hex.vec 8", "cfb: hex.vec 5",
         "clt: hex.vec 2", "cexcl: hex.vec 2", "fstart: hex.vec 2",
+        # Phase 2 floor band seed cache (640 bands; built lazily per frame, zero-init for this 1-frame test)
+        "band_built: rep(640, i) hex.vec 1, 0",
+        "xstep_tab: rep(640, i) hex.vec 8", "ystep_tab: rep(640, i) hex.vec 8",
+        "xf0_tab: rep(640, i) hex.vec 8", "yf0_tab: rep(640, i) hex.vec 8",
+        generate_floor_band_lut_fj("band_lo"),
         _col_array("col_cexcl", cexcl), _col_array("col_fstart", fstart),
         _col_array("col_ceil_ph", ceil_ph), _col_array("col_floor_ph", floor_ph),
         _col_array("col_plight", col_lt), _col_array("col_ceilbase", ceilbase),

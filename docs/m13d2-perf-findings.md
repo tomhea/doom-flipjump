@@ -106,8 +106,10 @@ Ordered roughly by leverage. None change correctness (the byte-exact goldens sta
 | **opt2 walk unroll** | **645,575,343** | **0.43** | **1.81×** | `render_planes_spans` column scan UNROLLED (`rep(view_w,x) plane_col x`) → compile-time addresses, no `ptr_index`. WALK 312M→23M (13.3×); whole floor pass 540M→267M (2.0×). |
 | Phase 1a `full` early-out | 580,447,590 | 0.48 | 2.01× | DESIGN Phase 1 step 1-2: count newly-claimed columns in `seg_pass1_leaf_body_mtlwp`; once all VIEW_W claimed set `full`, then later (farther) segs `fret` immediately (skip `wall_x_range` + projection + loop). Saved ~65M — far below the spec's est. (R1 materialized: the per-seg projection is NOT the geometry bulk, and the screen fills late at spawn). |
 | **Phase 1b occlusion pre-scan** | **515,248,614** | **0.54** | **2.26×** | DESIGN Phase 1 step 3: after `wall_x_range` gives [x1,x2), scan `drawn[x1..x2)`; if ALL claimed, `fret` (skip projection) — catches fully-occluded segs processed BEFORE the screen fills. Another ~65M. **Phase 1 total: 645.6M→515.2M (1.25×), byte-exact.** |
+| **Phase 2 bucketed floor** [re-bless] | **444,515,210** | **0.63** | **2.62×** | DESIGN Phase 2: the per-span u,v DDA seed (5 of the 6 `fixed_mul`s) replaced by a per-band shared seed — distance log-bucketed (block-FP, MANT=4), the seed built once per band at its first-hit distance, a span deriving `xfrac0 + x1*xstep`. Floor setup ~200M→~130M; saved ~71M (1.16× more). Re-blessed goldens (square `661061c6`, E1M1 `5f470107`); PNG-validated clean floor. Below the spec's ~9M floor target — the per-span distance `fixed_mul` + the `x1*xstep` muls + the band-table `ptr_index` access remain. |
 
-Both byte-exact (square `00de1aaa`, E1M1 `db5d3da8`). Span after Phase 1 = 23,635,002 words (< 2²⁶).
+Phase 1 byte-exact (square `00de1aaa`, E1M1 `db5d3da8`). Phase 2 re-blessed (square `661061c6`, E1M1
+`5f470107`). Span after Phase 2 = 24,228,804 words (< 2²⁶). **Combined 1.165B → 444.5M = 2.62× (0.24→0.63 fps).**
 
 **Phase 1 verdict (vs the DESIGN ~370M target):** the byte-exact geometry early-out is worth ~130M (1.25×), not the
 ~270M the spec hoped — confirming DESIGN R1. The per-seg *projection* that the early-out removes is NOT where the

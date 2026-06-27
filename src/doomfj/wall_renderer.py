@@ -15,6 +15,7 @@ from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
+    generate_floor_band_lut_fj,
 )
 from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import bake_bsp, _bsp_as_code
@@ -188,6 +189,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
         "hex.zero 2, n_drawn", "hex.zero 1, full",   # M13opt-P1: reset the drawn-column counter + full flag per frame
+        "rep(640, i) hex.zero 1, band_built + i*dw",  # Phase 2: clear the floor band-seed cache for this frame
         f";{_pfx(mapname)}_bspcode_walk", "bsp_done:",
     ]
     pass2 = []                                            # pass 2a: walls (M12oo shared-compare trampoline)
@@ -242,6 +244,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # M13d2 pass-2b textured-plane registers (render_planes_spans sets these per span; draw_span reads them)
         "planeheight: hex.vec 8", "light: hex.vec 2", "flatbase: hex.vec 5",
         "basexscale: hex.vec 8", "baseyscale: hex.vec 8",   # per-frame R_ClearPlanes seeds (clear_leaf)
+        # Phase 2 floor distance-band u,v seed cache (640 bands >= max 527 for a 32-bit distance; lazy/frame)
+        "band_built: rep(640, i) hex.vec 1, 0",
+        "xstep_tab: rep(640, i) hex.vec 8", "ystep_tab: rep(640, i) hex.vec 8",
+        "xf0_tab: rep(640, i) hex.vec 8", "yf0_tab: rep(640, i) hex.vec 8",
         "span_ret: ;0", "clear_ret: ;0",
         # M13opt2 span-scan state + classify scratch (globals shared by render_planes_spans + plane_col)
         "inspan: hex.vec 1", "spanR: hex.vec 2", "spanph: hex.vec 8", "spanfb: hex.vec 5",
@@ -261,5 +267,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
         tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
         yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
+        generate_floor_band_lut_fj("band_lo"),        # Phase 2 floor distance-band low-part LUT
     ])
     return main

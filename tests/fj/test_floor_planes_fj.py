@@ -34,10 +34,9 @@ ROOM = "tests/fixtures/square_room.wad"
 ASSET = "tests/fixtures/freedoom_assets.wad"
 E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 
-# the M13b textured square-room golden (tests/host/test_floor_planes.py::test_square_textured_floor_golden_hash)
-SQUARE_TEX_GOLDEN = "00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12"
-# the M13b textured E1M1 spawn golden (tests/host/test_floor_planes.py::test_e1m1_textured_floor_golden_hash)
-E1M1_TEX_GOLDEN = "db5d3da80a52c3ea78a8f599d121aaeb450bdfb84ca96b4656f0c267302ef0b2"
+# Phase 2 re-blessed textured goldens (log-bucketed floor u,v seed); tests/host/test_floor_planes.py
+SQUARE_TEX_GOLDEN = "661061c691898c2b389d863344cc7cb7966e56cfcc562d25476f5caa3368d438"
+E1M1_TEX_GOLDEN = "5f470107f1c0ad7f5be7643f0ba389a874a5b5ca201be7023218d18ee67ff200"
 
 
 def test_square_textured_planes_byte_exact_vs_oracle(tmp_path):

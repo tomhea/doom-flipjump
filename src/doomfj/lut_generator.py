@@ -168,6 +168,24 @@ def generate_zlight_lut_fj(label: str, view_w: int, num_colormaps: int) -> str:
     return generate_lut_fj(label, flat, 2)
 
 
+def generate_floor_band_lut_fj(label: str, mant: int = 4) -> str:
+    """Phase 2 floor band low-part LUT (256 entries of 2 nibbles). Index by the distance's top BYTE
+    `topbyte = (nibble_k<<4)|nibble_{k-1}` where nibble_k is the highest nonzero nibble; the full band key
+    is `band = 64*k + band_lo[topbyte]` (so a single LUT + a compile-time `64*k` add yields the block-FP
+    log bucket, no runtime variable shift). `band_lo[topbyte] = e_local*16 + ((topbyte >> (e_local-1)) &
+    ((1<<mant)-1))` where `e_local = bitlen(nibble_k)` (1..4). Mirrors reference_model.floor_band."""
+    vals = []
+    for vn in range(256):
+        v = vn >> 4
+        if v == 0:                                       # unused (nibble_k is always >= 1 in the ladder)
+            vals.append(0)
+        else:
+            el = v.bit_length()                          # 1..4
+            mantissa = (vn >> (el - 1)) & ((1 << mant) - 1)
+            vals.append((el << mant) | mantissa)         # == el*16+mantissa for mant=4
+    return generate_lut_fj(label, vals, 2)
+
+
 # ---------------------------------------------------------------------------
 # Dispatch-CODE tables (per-entry / per-result-nibble, D4)
 # ---------------------------------------------------------------------------

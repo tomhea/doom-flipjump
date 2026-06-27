@@ -279,6 +279,26 @@ Consequence: this supersedes the shift-audit below — the right pattern isn't "
 Reciprocal `1/den`: normalize (top-nibble leading-digit find) → top-3-significant-nibble `.lookup` → exponent
 via offset, all within 16³; if a clean reciprocal needs > 16³, ASK first.
 
+### DECIDED — per-seg reciprocals via BATCH INVERSION (1 divide/frame, no 1/y table)
+
+Owner: a `1/y` reciprocal table won't work; **division is OK at O(1)/frame, NOT O(seg).** Answer =
+**Montgomery batch inversion**: invert all `n` per-seg denominators with ONE divide + ~3n muls —
+prefix-products `Pᵢ=Pᵢ₋₁·Dᵢ`, one `R=1/Pₙ`, back-substitute `Dᵢ⁻¹=R·Pᵢ₋₁ ; R=R·Dᵢ`. Applies to ALL per-seg
+reciprocals at once: `scale` (`1/(rw_distance·sin)`), `iscale=1/scale`, the **atan slope** (`min/max` →
+batch-invert the `max`es, `slope=min·(1/max)`). So the whole per-seg projection = **one division per frame**.
+- ⚠ **Overflow**: `Pₙ` = product of ~26-116 distances → must run **block-FP** (normalized mantissa = top
+  nibbles per the table law + a running exponent sum; final `1/Pₙ` = mantissa-reciprocal + exponent offset).
+  Bonus: mantissa muls are NARROW (~3 nib ≈ 2.5k vs 11.5k) → ~3n narrow muls ≈ ~0.9M/116 segs vs ~4.75M for
+  116 divides (~5×) AND O(1) divides.
+- ⚠ needs a **gather-then-use restructure** (pass A: affine `rw_distance` + denominators for all visible segs
+  → batch-invert → pass B: use) — fits the two-pass renderer.
+- **Alternative (M14, stateful): Newton-Raphson incremental reciprocal** — maintain `1/Dᵢ` per seg, 1 step
+  `r←r·(2−D·r)` (2 muls, no divide)/frame on the affinely-tracked `D`; real divide only on the SEED when a seg
+  becomes newly visible (amortized O(1)/frame walking, O(new-segs) turning). No divide in steady state.
+
+This supersedes the reciprocal-LUT bullets above (no `1/y` table). The atan: batch-invert the slope `den`,
+`.lookup` tantoangle (16ˣ) → atan divide-free + O(1)/frame.
+
 ### DECIDED — cross-cutting: kill avoidable SHIFTS (whole-nibble → offset addressing) [exact]
 
 Shifts are NOT free: `hex.shr_hex 8,5` = **331 ops**, `hex.shl_bit 8` = 346 (~30× a nibble op). A **whole-nibble

@@ -257,6 +257,23 @@ So "kill the divides" is two problems of very different size:
 (sub-bit value shifts, no visual artifact like the floor banding). The 26-seg full projection becomes ~6.5M;
 the 432-seg `wall_x_range` needs the affine back-face cull to really fall. Both reuse the affine machinery.
 
+**`tantoangle` is the only ratio-keyed table** (so the only one needing a divide to index — others key off a
+shift of angle/distance/row). The atan's 73k is 69% one `hex.div 12` (the slope `dy/dx`); reciprocal-LUT the
+slope (`num·(1/den)`, block-FP recip table) → atan ~73k → ~15-20k [re-bless]. (CORDIC is the textbook
+divide-free atan but ≈50k here — same as the divide — since fj divides AND CORDIC iterations are both
+width-bound; the reciprocal-LUT is the actual win.)
+
+### DECIDED — cross-cutting: kill avoidable SHIFTS (whole-nibble → offset addressing) [exact]
+
+Shifts are NOT free: `hex.shr_hex 8,5` = **331 ops**, `hex.shl_bit 8` = 346 (~30× a nibble op). A **whole-nibble
+shift used to extract an index** (`distance>>20`=5 nib for zlight, `angle>>20`, `den>>8`, even `vx<<16`=4 nib)
+is pure waste — the bits are already there; **read them at the compile-time offset** (`hex.mov 3, idx,
+src + 5*dw`, or feed `src + k*dw` straight to `read_table`). opt1 did this for `draw_span`'s u/v but NOWHERE
+else. Audit + delete the avoidable `shr_hex`/`shl_hex` in `draw_span` (zlight index, per-span ×1357),
+`clear_planes`, `scale_from_global_angle`, `slope_div`, `point_to_angle/dist`. Each ~331 saved; ~a few M/frame
+aggregate — **[exact]** (same value, just addressed not shifted). Only BIT-granular shifts (`shl_bit`, `>>1`,
+non-nibble `>>10`) genuinely need a shift.
+
 ## Optimization backlog (macro-by-macro; ordered by leverage)
 
 Principles: take work OFF the per-pixel path → do it once per row/column/span; replace multiplies with

@@ -662,8 +662,33 @@ ns proj {
     //   oracle EXACTLY. @requires hex.init
     def column_setup frac0, step, scale, worldtop, top, centery, ds \
             @ ipre, iscale, wtf, awtf, qmag, rmag, texmid, tc, ccy, prod, frac, \
-              c1fix, cds, czero, r0, wpos, wneg, radj, tm_done, baddiv, end {
-        hex.fixed_div 8, 4, ipre, c1fix, scale, baddiv     // ipre = (1<<16<<16)/scale = (1<<32)/scale (>0)
+              cds, czero, r0, wpos, wneg, radj, tm_done, baddiv, end, \
+              isc_nrm, isc_more, isc_done, isc_sh, isc_shm, isc_shd, sscale, rc, irecip, cfff, czero2i \
+            < slopediv_recip {
+        // perf #11 [re-bless]: ipre = (1<<32)//scale via the block-FP reciprocal (numerator 2^32 is a
+        // power of 2 -> a pure SHIFT of recip[m], NO divide, NO mul). scale is the clamped wall scale
+        // (>= SCALE_MIN=256), so only right-normalize: bring scale's top 3 nibbles to m (counting rc),
+        // recip = slopediv_recip[m], ipre = (recip << 2 nibbles) >> rc nibbles. Mirrors _recip_div32.
+        hex.mov 8, sscale, scale
+        hex.set 2, rc, 0
+      isc_nrm:
+        hex.cmp 8, sscale, cfff, isc_done, isc_done, isc_more   // sscale > 0xFFF ?  gt -> shift right
+      isc_more:
+        hex.shr_hex 8, 1, sscale
+        hex.inc 2, rc
+        ;isc_nrm
+      isc_done:
+        hex.read_table 5, irecip, slopediv_recip, 3, sscale     // recip[m]  (m = sscale, low 3 nibbles)
+        hex.zero 8, ipre
+        hex.mov 5, ipre, irecip
+        hex.shl_hex 8, 2, ipre                                  // recip << 2 nibbles
+      isc_sh:
+        hex.cmp 2, rc, czero2i, isc_shd, isc_shd, isc_shm       // rc > 0 ?  gt -> shift right
+      isc_shm:
+        hex.shr_hex 8, 1, ipre
+        hex.dec 2, rc
+        ;isc_sh
+      isc_shd:                                                  // ipre = (recip<<2) >> rc = recip<<(2-rc)
         hex.set 8, cds, ds
         hex.div 8, 8, iscale, r0, ipre, cds, baddiv        // iscale = ipre // ds (positive: trunc == floor)
 
@@ -713,7 +738,11 @@ ns proj {
       ccy: hex.vec 8
       prod: hex.vec 8
       frac: hex.vec 8
-      c1fix: hex.vec 8, 0x10000          // 1 << 16 (the fixed_div numerator)
+      sscale: hex.vec 8                  // perf #11: block-FP reciprocal scratch
+      rc: hex.vec 2
+      irecip: hex.vec 5
+      cfff: hex.vec 8, 0xfff
+      czero2i: hex.vec 2, 0
       cds: hex.vec 8
       czero: hex.vec 8, 0
       r0: hex.vec 8

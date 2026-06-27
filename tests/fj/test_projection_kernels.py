@@ -546,7 +546,7 @@ def test_texture_u_byte_exact_vs_oracle(tmp_path):
 # (worldtop<<16)//ds; frac = texturemid + (top-CENTERY)*iscale; frac0 = (frac>>8)&0xFFFF, step =
 # (iscale>>8)&0xFFFF. ds = TEXTURE_DOWNSCALE = 2 (engine invariant). CENTERY a compile-time arg (R6).
 def _oracle_column_setup(cy, scale, worldtop, top, ds):
-    iscale = fixed_div(1 << 16, scale & ANGLE_MASK, 8, 4) // ds
+    iscale = ReferenceModel._recip_div32(scale & ANGLE_MASK) // ds   # perf #11: block-FP reciprocal
     texturemid = (worldtop << 16) // ds      # FLOORED (Python //) — negative worldtop floors toward -inf
     frac = texturemid + (top - cy) * iscale
     return (frac >> 8) & 0xFFFF, (iscale >> 8) & 0xFFFF
@@ -581,7 +581,8 @@ def test_column_setup_byte_exact_vs_oracle(tmp_path):
                  f"tp{k}: hex.vec 8, {top & 0xFFFFFFFF}"]
         frac0, step = _oracle_column_setup(cy, sc, wt, top, ds)
         expected += f"{frac0:04x}\n{step:04x}\n".encode() * 2
-    data += ["f0: hex.vec 4", "st: hex.vec 4"]
+    data += ["f0: hex.vec 4", "st: hex.vec 4",
+             generate_slopediv_recip_lut_fj("slopediv_recip")]   # perf #11
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
     p = tmp_path / "column_setup.fj"
@@ -717,6 +718,7 @@ def test_column_render_params_byte_exact_vs_oracle(tmp_path):
                      f"{frac0:04x}\n{step:04x}\n").encode() * 2
     data += ["tp: hex.vec 8", "bt: hex.vec 8", "tc: hex.vec 8", "f0: hex.vec 4", "st: hex.vec 4",
              generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
+             generate_slopediv_recip_lut_fj("slopediv_recip"),   # perf #11 (column_setup iscale reciprocal)
              generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)]
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")

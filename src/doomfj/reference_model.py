@@ -172,6 +172,22 @@ class ReferenceModel:
         ans = ((num << 3) * _SLOPEDIV_RECIP[m]) >> sh
         return ans if ans <= SLOPERANGE else SLOPERANGE
 
+    @staticmethod
+    def _recip_div32(divisor: int) -> int:
+        """perf #11 [re-bless]: (1<<32)//divisor via the SHARED slopediv_recip block-FP table — i.e.
+        fixed_div(1<<16, divisor, 8, 4) without the divide. Used for the per-column `iscale = 1/scale`
+        (the numerator 1<<32 is a power of 2, so the fj side is a pure shift of the reciprocal, no mul).
+        `divisor` (the clamped, interpolated wall scale) is > 0. Same nibble-normalize + table as
+        _slope_div; the fj column_setup mirrors this EXACTLY."""
+        P = (divisor.bit_length() - 1) // 4
+        if P >= 2:
+            m = (divisor >> (4 * (P - 2))) & 0xFFF
+            sh = SLOPEDIV_RECIP_RK + 4 * (P - 2)
+        else:
+            m = (divisor << (4 * (2 - P))) & 0xFFF
+            sh = SLOPEDIV_RECIP_RK - 4 * (2 - P)
+        return ((1 << 32) * _SLOPEDIV_RECIP[m]) >> sh
+
     def point_to_angle(self, x1: int, y1: int, x2: int, y2: int) -> int:
         """R_PointToAngle2: the BAM angle of the vector (x1,y1) -> (x2,y2). Octant fold + `tantoangle`
         lookup on the SlopeDiv quotient (the shared kernel, R6) — no atan at runtime. Coords are 16.16
@@ -647,7 +663,7 @@ class ReferenceModel:
                             ft = self.finetangent[(ang >> self.angle_shift) & (cfg.TRIG_N - 1)]
                             texcol = (_signed((rw_offset - fixed_mul(ft, rw_distance, 8, 4)) & ANGLE_MASK,
                                               32) >> 16) % tw
-                            iscale = fixed_div(1 << 16, scale & ANGLE_MASK, 8, 4) // ds   # texels/pixel 16.16
+                            iscale = self._recip_div32(scale & ANGLE_MASK) // ds   # perf #11: texels/pixel 16.16
                             texturemid = (worldtop << 16) // ds                           # texels at horizon
                             frac = texturemid + (top - centery) * iscale                  # 16.16 texel-v
                             col = self.render_textured_column(

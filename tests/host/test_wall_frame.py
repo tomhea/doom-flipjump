@@ -109,9 +109,9 @@ def test_e1m1_wall_frame_textured_and_deterministic():
     assert sum(1 for a, b in zip(frame, bg) if a != b) > 1000  # walls composited over the background
     assert len(set(frame)) >= 8                                # many palette indices ⇒ real textures
     assert frame == rm.render_wall_frame(state, scene)         # deterministic (D12)
-    # perf #9 [re-bless]: affine rw_distance (cross-product perpendicular distance, no atan/divide) —
-    # sub-pixel shift vs the old tantoangle-quantized point_to_dist path; PNG-verified clean.
-    assert frame_hash(frame) == "6e1b671053830350d07607eb5013780bcb9ef0db72df2e490408b11940af275d"
+    # perf #9 affine rw_distance + #11 [re-bless] block-FP reciprocal iscale (1/scale, no divide) —
+    # sub-pixel texture-DDA shift; PNG-verified clean. (Square golden unchanged at both.)
+    assert frame_hash(frame) == "3f0133d9f13a8e9f5ca907da9687055de213ea5ed5ead96847b0df9e80435db6"
 
 
 def test_e1m1_every_pixel_is_a_valid_palette_index():

@@ -119,9 +119,9 @@ def test_e1m1_textured_floor_golden_hash():
     map_wad = WadFile.from_path(E1M1)
     scene = build_scene(map_wad, map_wad, "E1M1")
     frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene)
-    # perf #9 [re-bless]: affine rw_distance (see test_wall_frame). Square golden above is unchanged
-    # (axis-aligned segs ⇒ affine == the exact divide path), only E1M1 re-blesses.
-    assert frame_hash(frame) == "6e1b671053830350d07607eb5013780bcb9ef0db72df2e490408b11940af275d"
+    # perf #9 affine rw_distance + #11 block-FP reciprocal iscale [re-bless] (see test_wall_frame).
+    # Square golden above is unchanged at both; only E1M1 re-blesses.
+    assert frame_hash(frame) == "3f0133d9f13a8e9f5ca907da9687055de213ea5ed5ead96847b0df9e80435db6"
 
 
 # ── M13a flat-colored tier preserved under floor_texturing=False (the cheaper §1 fallback) ────
@@ -138,4 +138,4 @@ def test_e1m1_flatcolored_floor_golden_hash():
     map_wad = WadFile.from_path(E1M1)
     scene = build_scene(map_wad, map_wad, "E1M1")
     frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene, floor_texturing=False)
-    assert frame_hash(frame) == "a9d265b443d55d732933c9f65613e87d28c8059c1527955e8b8feb6b878bf469"  # perf #9 [re-bless]
+    assert frame_hash(frame) == "6d5baf9eda47761d804d2127c85fad7a924aa6903f0217cbb2c988269dc8f88e"  # perf #9+#11 [re-bless]

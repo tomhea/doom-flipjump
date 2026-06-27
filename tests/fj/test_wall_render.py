@@ -63,7 +63,7 @@ def _col_params(rm, scale, rca, rw_off, rwd, x, tw, ceil_h, floor_h, viewz, worl
     ang = (rca + rm.xtoviewangle[x]) & ANGLE_MASK
     ft = rm.finetangent[(ang >> rm.angle_shift) & (cfg.TRIG_N - 1)]
     texcol = (_signed((rw_off - fixed_mul(ft, rwd, 8, 4)) & ANGLE_MASK, 32) >> 16) % tw
-    iscale = fixed_div(1 << 16, scale & ANGLE_MASK, 8, 4) // ds
+    iscale = rm._recip_div32(scale & ANGLE_MASK) // ds   # perf #11: block-FP reciprocal (matches the fj)
     texturemid = (worldtop << 16) // ds
     frac = texturemid + (top - cfg.CENTERY) * iscale
     return top, bottom, texcol, (frac >> 8) & 0xFFFF, (iscale >> 8) & 0xFFFF

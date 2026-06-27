@@ -106,7 +106,31 @@ Ordered roughly by leverage. None change correctness (the byte-exact goldens sta
 | **opt2 walk unroll** | **645,575,343** | **0.43** | **1.81×** | `render_planes_spans` column scan UNROLLED (`rep(view_w,x) plane_col x`) → compile-time addresses, no `ptr_index`. WALK 312M→23M (13.3×); whole floor pass 540M→267M (2.0×). |
 | Phase 1a `full` early-out | 580,447,590 | 0.48 | 2.01× | DESIGN Phase 1 step 1-2: count newly-claimed columns in `seg_pass1_leaf_body_mtlwp`; once all VIEW_W claimed set `full`, then later (farther) segs `fret` immediately (skip `wall_x_range` + projection + loop). Saved ~65M — far below the spec's est. (R1 materialized: the per-seg projection is NOT the geometry bulk, and the screen fills late at spawn). |
 | **Phase 1b occlusion pre-scan** | **515,248,614** | **0.54** | **2.26×** | DESIGN Phase 1 step 3: after `wall_x_range` gives [x1,x2), scan `drawn[x1..x2)`; if ALL claimed, `fret` (skip projection) — catches fully-occluded segs processed BEFORE the screen fills. Another ~65M. **Phase 1 total: 645.6M→515.2M (1.25×), byte-exact.** |
-| **Phase 2 bucketed floor** [re-bless] | **444,515,210** | **0.63** | **2.62×** | DESIGN Phase 2: the per-span u,v DDA seed (5 of the 6 `fixed_mul`s) replaced by a per-band shared seed — distance log-bucketed (block-FP, MANT=4), the seed built once per band at its first-hit distance, a span deriving `xfrac0 + x1*xstep`. Floor setup ~200M→~130M; saved ~71M (1.16× more). Re-blessed goldens (square `661061c6`, E1M1 `5f470107`); PNG-validated clean floor. Below the spec's ~9M floor target — the per-span distance `fixed_mul` + the `x1*xstep` muls + the band-table `ptr_index` access remain. |
+| **Phase 2 bucketed floor** [re-bless] ⚠**TO REVERT** | **444,515,210** | **0.63** | **2.62×** | DESIGN Phase 2: the per-span u,v DDA seed (5 of the 6 `fixed_mul`s) replaced by a per-band shared seed — distance log-bucketed (block-FP, MANT=4), the seed built once per band at its first-hit distance, a span deriving `xfrac0 + x1*xstep`. Floor setup ~200M→~130M; saved ~71M (1.16× more). Re-blessed goldens (square `661061c6`, E1M1 `5f470107`). ⚠ **VISUALLY BAD — owner rejected.** See the revert note below. |
+
+### ⚠ Phase 2 is being REVERTED (visual artifact) — NEXT STEP
+
+**The bug in the idea (not the code):** floor distance is a function of the screen ROW
+(`distance = FixedMul(planeheight, yslope[y])`), so a "distance band" is a *range of rows*; every span in a band
+shares one u,v seed ⇒ **all rows in the band render IDENTICALLY** (each floor pixel equals the one below it —
+vertical replication, worst near the horizon where many rows fall in one band). This is inherent to
+distance-bucketing: the speed win *is* seed-sharing across rows, which *is* the vertical stretch. The MANT=4 PNG
+validation (3× upscaled) was too lenient; the owner rejected it on the real frame.
+
+**NEXT STEP (decided, not yet started) — revert Phase 2, then a CLEAN [exact] recovery:**
+1. **Revert the Phase 2 commits** (oracle `69df2ed`, fj `f7f4409`, the prototype `01060f8`, and the goldens):
+   restore the byte-exact perspective floor + the original goldens (square `00de1aaa`, E1M1 `db5d3da8`) in
+   `reference_model._render_planes_textured`/`_draw_span`, `plane.draw_span` (drop `floor_band`/`build`/the
+   band tables/the emitter band globals), and `test_floor_planes.py` / `test_wall_frame.py` /
+   `test_floor_planes_fj.py`. Keep ALL of Phase 1 (it is byte-exact — zero visual change). Back to **515.2M /
+   0.54 fps / 2.26×**, correct floors.
+2. **Then the [exact] per-(row, visplane) span cache** (TIER-1 #1 below): within ONE row, walls chop a floor
+   plane into ≈2.9 spans that all share `dist/xstep/ystep/zlight-row` (these depend only on `(planeheight, y)`);
+   only `xfrac/yfrac` (the x1 seed) differ. Cache them per (row, distinct planeheight) → dedupe the ~885 chopped
+   spans' 3 shared `fixed_mul`s. **~70M, NO visual change** (each row keeps its EXACT distance — no vertical
+   replication). Needs a `draw_span` split (a `setup_rv` leaf + ~a few cache globals keyed by planeheight,
+   reset per row in `render_planes_spans`). Lands back near ~445M but correct-looking. This is the floor lever
+   that should have been chosen over bucketing (bucketing's real win was only 71M AND ugly).
 
 Phase 1 byte-exact (square `00de1aaa`, E1M1 `db5d3da8`). Phase 2 re-blessed (square `661061c6`, E1M1
 `5f470107`). Span after Phase 2 = 24,228,804 words (< 2²⁶). **Combined 1.165B → 444.5M = 2.62× (0.24→0.63 fps).**

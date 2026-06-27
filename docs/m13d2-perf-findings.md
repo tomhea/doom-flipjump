@@ -168,6 +168,55 @@ is solved. Frame ~645M ≈ floor (~300M full) + walls/BSP-walk (~345M, UNTOUCHED
 - Width narrowing in plane_col/the seed. Small.
 - **Estimated [exact] ceiling ≈ 450–550M (~0.5–0.6 fps).** 20M needs the re-bless/algorithmic levers (declined).
 
+## Path to 12M ops/frame — the irreducible algorithm + per-component plan (design, not built)
+
+The renderer's algorithm STAYS (BSP walk + perspective projection + textured raster); we optimize each stage,
+we do not replace the pipeline. Two structural facts frame the whole effort:
+
+**(A) The side test is AFFINE in the viewpoint, and so is the wall distance.** `side_i = a_i·vx + b_i·vy + c_i`
+(`a_i=−dy_i`, `b_i=dx_i`, all baked). `rw_distance` to a seg is the same shape (signed distance to a baked
+line). Affine ⇒ exact integer incremental maintenance as the viewpoint moves (`+= a_i·dvx + b_i·dvy`, no drift),
+and `dvx,dvy ∈ [−30,30]` (a signed byte; `MAXMOVE` caps every tic incl. knockback).
+
+**(B) At 12M, the 16,000 screen pixels dominate.** `12M ÷ 16,000 px ≈ 750 ops/pixel`. Everything else (walk
+~681 nodes, projection ~visible segs, per-column ~160) is *amortized setup* that can be driven cheap; the
+per-pixel raster is the irreducible floor. Current per-pixel ≈ 4.2k ⇒ must fall ~5.6× (width narrowing; or a
+resolution/▢-block tradeoff: 2×2 blocks → 4,000 px → a 3k-ops/px budget).
+
+### The BSP walk — DECIDED design (build at M14, with the sim)
+
+- **Per tic = dispatch-step (incremental).** Maintain `side_i` (full signed value) for all 681 nodes; each tic
+  `side_i += dispatch_a[dvx] + dispatch_b[dvy]` where the two dispatch tables hold the *precomputed* products
+  `a_i·dvx`, `b_i·dvy` (no multiply, no `ptr_index` — `@`-routed). Tables are SHARED by equal `dx`/`dy`
+  (E1M1: 98 distinct `dx`, 106 distinct `dy` ⇒ ~204 tables × ~61 cells for ±30 ≈ ~12k baked cells). Side
+  decision = read `sign(side_i)` (`>0`→back, `≤0`→front). Per node ≈ 2 dispatch + 2 adds ≈ ~1.7k ⇒ walk ≈ ~1.1M.
+- **NO sign-first, NO conditional multiply.** Those are the *stateless* method; maintaining `side_i` makes the
+  3-valued sign reconstruction and the same-sign-only-multiply both unnecessary. **Sign-first is dropped entirely**
+  (owner decision: only M14+ walking fps matters; pre-M14 single-frame speed is not a goal worth throwaway work).
+- **Seed = the existing full-mul `point_on_side`, once.** It needs the magnitude, so it can't be sign-first.
+  Re-seed only on a position jump that overshoots the table — i.e. **only teleports** (normal move ≤ MAXMOVE
+  never overshoots). **E1M1 has 0 teleports** (and doors/lifts/exit move sector *heights*, never vertices, so
+  the BSP is static and they trigger NOTHING). So for E1M1 the seed runs exactly once, at load; elsewhere a
+  teleport sets a "re-seed next frame" flag → one ~4.8M full-mul pass, a few times per playthrough. Negligible.
+
+### Irreducible must-stay stages + their optimization angle
+
+| Stage | runs ×/frame | must stay because | optimization angle |
+| --- | --- | --- | --- |
+| BSP walk side test | 681 nodes | visibility order | dispatch-incremental (above) → ~1.1M |
+| `wall_x_range` (cull + screen x-span) | per visible seg | which columns a wall covers | angle-based (nonlinear) — coherence harder; revisit |
+| `wall_setup` `rw_distance` | per visible seg | perspective distance | **AFFINE → same dispatch-incremental as the walk** |
+| `wall_scale_setup` scale/step | per visible seg | perspective foreshortening | scale ∝ 1/distance·cos; incremental candidate |
+| `column_render_params` | ~160 cols | per-column texcol + scale | scale already incremental; `iscale=1/scale` → reciprocal LUT/Newton |
+| **wall per-pixel** (`leaf_body_w`) | ~5,619 px | drawing wall texels | **the 12M floor** — width narrow + `[top,bottom]`-only pass |
+| **floor per-pixel** (`draw_span`) | ~10,381 px | drawing flat texels | **the 12M floor** — width narrow; per-(row,visplane) setup cache |
+| span grouping (`render_planes_spans`) | 100 rows | R_MakeSpans | already unrolled (opt2) |
+| occlusion (`drawn[]`) | per col/seg | front-to-back clip | already cheap |
+
+**Takeaway:** 12M is won or lost in the two **per-pixel** rows (≈16k px, the ~750-ops/px budget). The walk and
+the affine projection pieces (`rw_distance`) are cheap via the dispatch-incremental trick; the genuinely hard,
+dominant work is the per-pixel raster — that's where the next deep design effort belongs.
+
 ## Optimization backlog (macro-by-macro; ordered by leverage)
 
 Principles: take work OFF the per-pixel path → do it once per row/column/span; replace multiplies with

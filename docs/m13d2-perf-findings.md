@@ -235,7 +235,11 @@ pixels · **[rebless]** changes pixels (re-bless goldens) · impact = rough ops/
     `write_hex_and_inc` ×2 = 1564** (what the floor uses) vs **compile-time-address `xor_zero` = 284** (the
     wall pass-2 way) — a **5.5×** gap. So:
     - floor today (runtime ptr): sample+apply+write = **2352 ops/px** → 16k px ≈ **38M** just for pixels.
-    - best case (compile-time-addr write): **1074 ops/px** → 16k px ≈ **17M** — STILL over the whole 12M budget.
+    - ⚠ CORRECTION: 1074 = sample+apply+write ONLY. A real FLOOR pixel ALSO pays the u,v DDA step (`add 6` ×2 =
+      1075) + the coord extract (`mov2`+`and2` ×2 = 584) + spot — irreducible for perspective texturing (narrow,
+      not remove). So an *optimized* floor pixel ≈ **~2700-3000**, a wall pixel ≈ ~2000.
+    - Full-res FULLY optimized (compile-addr writes, narrowed, batch-inverted geometry): floor 10,381×~2700 ≈
+      28M + wall 5,619×~2000 ≈ 11M + geometry ≈ 5M = **~44M ≈ ~6-7 fps**. NOT ~17M (that omitted the DDA/extract).
     - → **Full-resolution (16,000 px) 12M is physically impossible**, even with zero geometry/walk/DDA. The
       binding constraint is the PIXEL COUNT, not the per-pixel cost (already near its floor).
     - **12M requires ~4× fewer pixels** (a quality tradeoff): **2×2 blocks → 4,000 px** × ~1074 (compile-addr) ≈
@@ -245,10 +249,11 @@ pixels · **[rebless]** changes pixels (re-bless goldens) · impact = rough ops/
     the runtime pointer to **compile-time-address writes** (unroll like wall pass-2) — write 1564→284. Costs a
     large unrolled program (assemble time), like the wall's 16k unroll.
 
-**VERDICT for 12M:** it's a *resolution/quality* decision, not an arithmetic one. Full-res textured = ~17-38M on
-pixels alone. To hit 12M: 2×2 blocks (chunkier but textured), lower res, or flat-colored floors. The geometry/
-walk re-bless campaign (items 6-19) is only worth its cost AFTER picking the pixel budget — at full res nothing
-gets under ~17M.
+**VERDICT for 12M (corrected):** full-res textured, FULLY optimized ≈ **~40-50M ≈ ~6-7 fps** (~10× over 515M,
+no quality loss). **12M is NOT reachable at full res** — it needs ~4× fewer textured pixels: 2×2 blocks
+(~12-15M, ~20 fps, chunkier) or flat-colored floors (~10-15M, no floor texture). So 12M = a deliberate quality
+tradeoff. The geometry/walk re-bless campaign (items 6-19) only matters once the pixel budget is chosen; full-res
+it can't beat ~40M (the textured per-pixel floor dominates).
 
 ### The 5 cross-cutting principles (the "why")
 1. **Affine + dispatch** — replace muls/divs with adds + `@`-routed lookups (walk, `rw_distance`, back-face).

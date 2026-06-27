@@ -14,7 +14,7 @@ from doomfj.lut_generator import (
     generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj,
 )
 from doomfj.reference_model import ReferenceModel, SLOPERANGE, ANGLE_MASK
-from doomfj.mapcompiler import bake_bsp, _point_side
+from doomfj.mapcompiler import bake_bsp, _point_side, seg_affine_coeffs
 from doomfj.wad import WadFile
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
@@ -186,20 +186,17 @@ def test_wall_setup_byte_exact_vs_oracle(tmp_path):
     body, data, expected = [], [], b""
     for k, (vxu, vyu, si) in enumerate(WALL_SETUP_CASES):
         seg = cmap.segs[si]
-        v1x, v1y = cmap.vertexes[seg.v1]
+        a, b, c = seg_affine_coeffs(seg, cmap.vertexes)   # perf #9: baked affine coeffs (shared SSOT)
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.wall_setup nrm, rwd, vx{k}, vy{k}, sa{k}, v1x{k}, v1y{k}",
+            body += [f"proj.wall_setup nrm, rwd, vx{k}, vy{k}, sa{k}, a{k}, b{k}, c{k}",
                      "hex.print_as_digit 8, nrm, 0", "stl.output 10",
                      "hex.print_as_digit 8, rwd, 0", "stl.output 10"]
         data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
                  f"sa{k}: hex.vec 4, {seg.angle & 0xFFFF}",
-                 f"v1x{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}",
-                 f"v1y{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}"]
+                 f"a{k}: hex.vec 8, {a}", f"b{k}: hex.vec 8, {b}", f"c{k}: hex.vec 8, {c}"]
         nrm, rwd = rm.wall_setup(vxu * U, vyu * U, seg, cmap.vertexes)
         expected += (f"{nrm:08x}\n{rwd:08x}\n".encode()) * 2
-    data += ["nrm: hex.vec 8", "rwd: hex.vec 8",
-             generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
-             generate_trig_idioms_fj("finesine", Config().TRIG_N, 16)]
+    data += ["nrm: hex.vec 8", "rwd: hex.vec 8"]   # perf #9: affine wall_setup needs no tantoangle/finesine
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
     p = tmp_path / "wall_setup.fj"

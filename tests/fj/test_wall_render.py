@@ -27,7 +27,8 @@ from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj,
 )
-from doomfj.mapcompiler import bake_bsp, _bsp_as_code, Seg, SubSector, Node, CompiledMap, NF_SUBSECTOR
+from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, Seg, SubSector, Node, CompiledMap, NF_SUBSECTOR,
+                                seg_affine_coeffs)
 from doomfj.reference_model import (ReferenceModel, ANGLE_MASK, SLOPERANGE, WALL_BG,
                                     CEIL_BG, FLOOR_BG, COLORMAP_LIGHTS, LIGHT_SHIFT,
                                     SimState, build_scene, spawn_state, frame_hash)
@@ -583,7 +584,7 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         "proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, v1x, v1y, v2x, v2y",
         "hex.if0 1, visible, pass2",                             # culled -> pass 2 (background only)
-        "proj.wall_setup normalangle, rw_distance, viewx, viewy, segangle, v1x, v1y",
+        "proj.wall_setup normalangle, rw_distance, viewx, viewy, segangle, acoef, bcoef, ccoef",
         f"proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, {proj}",
         "proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, "
         "v1x, v1y, texoff",   # texoff is a hex.add MEMORY operand -> must be a register (lesson #1)
@@ -622,6 +623,9 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         f"v1x: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"v1y: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
         f"v2x: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"v2y: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}",
         f"segangle: hex.vec 8, {seg.angle}", f"tw: hex.vec 8, {tw}", f"texoff: hex.vec 8, {texoff & 0xFFFFFFFF}",
+        # perf #9: baked affine rw_distance coeffs (shared SSOT)
+        f"acoef: hex.vec 8, {seg_affine_coeffs(seg, verts)[0]}", f"bcoef: hex.vec 8, {seg_affine_coeffs(seg, verts)[1]}",
+        f"ccoef: hex.vec 8, {seg_affine_coeffs(seg, verts)[2]}",
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
         f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}", f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}",
         f"light_baked: hex.vec 2, {light}",
@@ -764,6 +768,9 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
                     "    stl.fcall seg_pass1_leaf, seg_ret"]
         return out
@@ -799,7 +806,8 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         # per-seg baked consts (set by the walk's subsector_action before each fcall)
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         # scene consts (single sector -> baked once)
         f"tw: hex.vec 8, {tw}", f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}",
         f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}", f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}",
@@ -959,6 +967,9 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     "    hex.set 8, seg_texoff, 0",
                     "    stl.fcall seg_pass1_leaf, seg_ret"]
         return out
@@ -993,7 +1004,8 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         f"tw: hex.vec 8, {tw}", f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}",
         f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}", f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}",
         f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}", f"light_baked: hex.vec 2, {light}",
@@ -1172,6 +1184,9 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
                     f"    hex.set 4, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
                     f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
@@ -1207,7 +1222,8 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 4", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
         f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}", f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}",
@@ -1367,6 +1383,9 @@ def test_wall_render_multilight_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
                     f"    hex.set 4, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
                     f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
@@ -1404,7 +1423,8 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 4", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2",
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
@@ -1512,6 +1532,9 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
                     f"    hex.set 4, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
                     f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
@@ -1555,7 +1578,8 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "player_light: hex.vec 8", "bgrow: hex.vec 2", "bgidx: hex.vec 4", "bgceil: hex.vec 2", "bgfloor: hex.vec 2",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 4", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2",
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
@@ -1662,7 +1686,9 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
             texbase, th_s, tw_s = texinfo[name if name else "__WALLBG__"]
             fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
                       ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
-                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
+                      ("seg_segangle", 8, seg.angle),
+                      *[(n, 8, v) for n, v in zip(("seg_a", "seg_b", "seg_c"), seg_affine_coeffs(seg, verts))],
+                      ("seg_texoff", 8, texoff & 0xFFFFFFFF),
                       ("seg_texbase", 5, texbase), ("seg_texheight", 4, th_s), ("seg_tw", 8, tw_s),
                       ("seg_hm", 3, th_s - 1), ("seg_light", 2, seg_light[si])]
             xorby_blocks[si] = _seg_xorby_block(si, fields)  # ceilfix/floorfix/seg_ceil/viewzw are static (1 sector)
@@ -1702,7 +1728,8 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: the xorby block's fcall/fret return register
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
@@ -1834,7 +1861,9 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
             ssec = rm._seg_sector(lds, sds, secs, seg)
             fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
                       ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
-                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
+                      ("seg_segangle", 8, seg.angle),
+                      *[(n, 8, v) for n, v in zip(("seg_a", "seg_b", "seg_c"), seg_affine_coeffs(seg, verts))],
+                      ("seg_texoff", 8, texoff & 0xFFFFFFFF),
                       ("seg_texbase", 5, 0), ("seg_texheight", 4, 1), ("seg_tw", 8, 1), ("seg_hm", 3, 0),
                       ("seg_light", 2, lrow(ssec.light)),                # WALL_BG sentinel (proxy) tex fields
                       ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
@@ -1880,7 +1909,8 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
         "viewz: hex.vec 8", "viewzw: hex.vec 8", "bgceil: hex.vec 2", "bgfloor: hex.vec 2",
         "bg_done: hex.vec 1", "bg_ret: ;0",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
         "ceilfix: hex.vec 8", "floorfix: hex.vec 8",

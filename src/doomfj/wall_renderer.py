@@ -17,7 +17,7 @@ from doomfj.lut_generator import (
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
 )
 from doomfj.reference_model import ANG90
-from doomfj.mapcompiler import bake_bsp, _bsp_as_code
+from doomfj.mapcompiler import bake_bsp, _bsp_as_code, seg_affine_coeffs
 from doomfj.reference_model import (ReferenceModel, WALL_BG,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
@@ -163,9 +163,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             texoff = (seg.offset + sd.x_off) << 16
             ssec = rm._seg_sector(lds, sds, secs, seg)
             tb, th, tw = seg_texinfo[si]
+            sa, sb, sc = seg_affine_coeffs(seg, verts)   # perf #9: baked affine rw_distance coeffs (SSOT)
             fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
                       ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
-                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
+                      ("seg_segangle", 8, seg.angle), ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc),
+                      ("seg_texoff", 8, texoff & 0xFFFFFFFF),
                       ("seg_texbase", 5, tb), ("seg_texheight", 4, th), ("seg_tw", 8, tw),
                       ("seg_hm", 3, th - 1), ("seg_light", 2, lrow(ssec.light)),
                       ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
@@ -222,7 +224,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "viewz: hex.vec 8", "viewzw: hex.vec 8", "vz_set: hex.vec 1",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
         "ceilfix: hex.vec 8", "floorfix: hex.vec 8",

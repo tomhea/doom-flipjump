@@ -28,7 +28,9 @@ from dataclasses import dataclass, replace
 
 from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
-from doomfj.mapcompiler import NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side  # shared geometry (R6)
+from doomfj.mapcompiler import (  # shared geometry (R6)
+    NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
+)
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
     yslope_table, zlight_table, distscale_table, LIGHTLEVELS, LIGHTSEGSHIFT, MAXLIGHTZ, LIGHTZSHIFT,
@@ -206,23 +208,21 @@ class ReferenceModel:
     def wall_setup(self, viewx: int, viewy: int, seg, verts) -> tuple:
         """The per-wall projection setup (DOOM R_StoreWallRange): returns `(rw_normalangle, rw_distance)`.
         `rw_normalangle = seg.angle_BAM + ANG90` (the wall's normal — DOOM's native convention, valid now
-        the segs are BAKED with DOOM-standard winding; verified on real E1M1: it yields the true
-        perpendicular distance + positive scale, whereas -ANG90 gives 0). `rw_distance` = the perpendicular
-        view→wall-line distance = `hyp · sin(distangle)`, where hyp = point_to_dist(view, v1) and distangle
-        = ANG90 - the clamped normal↔v1 offset angle. `viewx/y` are 16.16; `verts` are 16.0 (shifted <<16)."""
-        v1x, v1y = verts[seg.v1]
-        v1x <<= 16
-        v1y <<= 16
+        the segs are BAKED with DOOM-standard winding). `rw_distance` = the perpendicular view→wall-line
+        distance, 16.16.
+
+        **perf #9 [re-bless]:** rw_distance is now the AFFINE signed distance `|fixed_mul(a,viewx) +
+        fixed_mul(b,viewy) + c|` using baked per-seg coeffs (`seg_affine_coeffs`, the shared SSOT) — the
+        cross-product perpendicular distance — instead of `hyp·sin(distangle)` (point_to_angle + the
+        two-divide point_to_dist + finesine). Same geometric quantity, but exact-affine with no atan/divide;
+        the value differs from the old tantoangle-quantized divide path at the sub-bit level (verified
+        sub-pixel downstream on E1M1 — a deliberate re-bless, not a divide). Front-facing segs (those that
+        survive wall_x_range's span<ANG180 cull) give signed>0, so abs is a no-op; the pre-abs SIGN is what
+        perf #10's back-face cull will test. `viewx/y` are 16.16; `verts` are 16.0."""
         rw_normalangle = ((seg.angle << 16) + ANG90) & ANGLE_MASK
-        angle1 = self.point_to_angle(viewx, viewy, v1x, v1y)
-        offsetangle = (rw_normalangle - angle1) & ANGLE_MASK
-        if offsetangle > ANG180:
-            offsetangle = (-offsetangle) & ANGLE_MASK                # BAM abs (fold to [0, ANG180])
-        if offsetangle > ANG90:
-            offsetangle = ANG90
-        distangle = (ANG90 - offsetangle) & ANGLE_MASK
-        hyp = self.point_to_dist(viewx, viewy, v1x, v1y)
-        rw_distance = fixed_mul(hyp, self.read_sin(distangle), 8, 4)
+        a, b, c = seg_affine_coeffs(seg, verts)
+        signed = (fixed_mul(a, viewx, 8, 4) + fixed_mul(b, viewy, 8, 4) + c) & ANGLE_MASK
+        rw_distance = abs(_signed(signed, 32))
         return rw_normalangle, rw_distance
 
     def scale_from_global_angle(self, visangle: int, viewangle: int,

@@ -68,6 +68,35 @@ def _point_side(px: int, py: int, dx: int, dy: int, x: int, y: int) -> int:
     return dx * (y - py) - dy * (x - px)
 
 
+def seg_affine_coeffs(seg: "Seg", verts: Sequence[Tuple[int, int]]) -> Tuple[int, int, int]:
+    """The SSOT affine coefficients (a, b, c) for a seg's signed perpendicular view→wall-line distance
+    (perf #9, [re-bless]). The signed distance, in 16.16 map units, is
+
+        signed_dist = fixed_mul(a, viewx) + fixed_mul(b, viewy) + c        (32-bit wrap)
+
+    where a = segdy/seglen, b = -segdx/seglen are the unit-normal components and c = -(a·v1x + b·v1y)
+    references the line through v1. This is the cross product ((view−v1)×segdir)/seglen — exact integer
+    affine in the viewpoint, with the same value the divide path (point_to_dist·sin) approximates, but
+    without the atan/divide. For a FRONT-facing seg (those that survive wall_x_range's span<ANG180 cull)
+    signed_dist > 0, so rw_distance = signed_dist directly (abs is a no-op); the SIGN is what perf #10's
+    back-face cull tests. Returned a/b/c are raw 32-bit two's-complement words ready to bake — both the
+    oracle and the fj emitter consume THIS function so they cannot drift (R6). `c` is the perpendicular
+    distance from the origin to the wall line; encode_fixed_point raises if it exceeds the signed 16.16
+    range (|c| < 32768 map units), which would need a wider representation."""
+    from doomfj.fixedpoint import encode_fixed_point   # local import: avoid a module cycle
+    v1x, v1y = verts[seg.v1]
+    v2x, v2y = verts[seg.v2]
+    segdx, segdy = v2x - v1x, v2y - v1y
+    seglen = (segdx * segdx + segdy * segdy) ** 0.5
+    if seglen == 0:
+        return 0, 0, 0                                   # degenerate zero-length seg
+    af, bf = segdy / seglen, -segdx / seglen
+    a = encode_fixed_point(af, 16, 32)
+    b = encode_fixed_point(bf, 16, 32)
+    c = encode_fixed_point(-(af * v1x + bf * v1y), 16, 32)
+    return a, b, c
+
+
 # ── BSP bake (parse the WAD's precompiled NODES/SSECTORS/SEGS) ──
 
 def bake_bsp(wad, mapname: str) -> CompiledMap:

@@ -168,6 +168,48 @@ is solved. Frame ~645M ≈ floor (~300M full) + walls/BSP-walk (~345M, UNTOUCHED
 - Width narrowing in plane_col/the seed. Small.
 - **Estimated [exact] ceiling ≈ 450–550M (~0.5–0.6 fps).** 20M needs the re-bless/algorithmic levers (declined).
 
+## ★ NEXT-SESSION FOCUS — cheap procedural color (the ONLY measured path to 12M at full res)
+
+**Thesis (owner direction):** the floor's two giants — the **per-span perspective SETUP (~167-200M)** and the
+**per-pixel u,v DDA + `flat.sample` (~43M+)** — exist *only* to do **1:1-Doom perspective texture mapping**. We
+do NOT need 1:1 Doom (re-bless is OK). Replace the perspective texel with a **cheap screen-space procedural
+function** of `(x, y)` and BOTH giants vanish:
+- no perspective ⇒ **no per-span setup** (the 6 `fixed_mul`s seed gone) — the single biggest chunk (~35% of frame).
+- no texture coord ⇒ **no per-pixel u,v DDA** (`add 6` ×2 = 1075/px) and **no `flat.sample`** (391/px) — gone.
+- KEEP only: distance lighting (`zlight`/`cm.apply`, what makes it read as 3D) + the framebuffer write.
+
+**Why this is the path to 12M (measured):** full-res *exact* bottoms out ~290M (~1 fps) — the per-span seeds +
+the textured per-pixel DDA can't compress below ~70-100M for the floor. A procedural pixel is just
+**cheap-compute + colormap + write ≈ ~700-1000 ops/px** ⇒ 16k px ≈ **~11-16M**, *plus the setup is gone*. That's
+the first thing in this whole analysis that actually crosses the 12M line at full resolution.
+
+**Candidate cheap patterns (screen-space, `[re-bless]`, PNG-gated):**
+- **Distance-banded gradient + cheap noise:** texel = `f(zlight-band, (x^y)&M)` — receding shaded floor with a
+  repeating "texture-ish" break-up. ~a few ops/px.
+- **XOR / checkerboard:** `((x>>k) ^ (y>>k)) & 1` → tiles; or a small **16ˣ pattern LUT** indexed by cheap
+  screen bits (per the Table Design Law — top-nibble `.lookup`, no shift).
+- **Fold the colormap into the pattern:** precompute a *lit* pattern (pattern already colormapped at the band)
+  → per-pixel = `pattern_lookup + write` ≈ ~500/px ⇒ ~8M.
+- Same idea for WALLS (subsumes/replaces the declined Phase-3 vertical-pattern: do it as cheap `f(texrow,
+  seg_seed)` with NO `texcol` divide).
+
+**The honest tradeoff:** floors/walls become *procedural* (repeating patterns under distance lighting), not real
+Doom textures. With the shading they can still read as 3D corridors — **the oracle PNG decides** (and unlike the
+bucketing's vertical-replication, screen-space patterns have no perspective artifact; they're just "not Doom").
+This is a deliberate look change for ~25× the speed. **De-risk exactly like before: build the procedural oracle
+first, render PNGs (square + E1M1 spawn), confirm it reads acceptably, bless new goldens, THEN mirror in fj.**
+
+**Sequencing for the procedural path:**
+1. Oracle: a procedural floor/ceiling color `f(x, y, distance-band, light)` replacing the u,v sample. PNG-gate.
+2. fj: a `draw_span` (or unrolled raster) that does NO per-span setup and NO per-pixel DDA — per pixel just the
+   cheap pattern compute (16ˣ `.lookup` by screen bits) + `cm.apply` (or pre-lit) + a **compile-time-address
+   write** (unroll like wall pass-2 → write 1564→284). Target floor ≈ ~8-16M.
+3. Same for walls. Then measure → expect the frame to approach ~12-20M.
+4. Layer the geometry/walk wins (items 6-19 below) once the pixel budget lands — at that point they matter again.
+
+**Open questions to resolve next session:** which pattern reads best (PNG bake-off); whether to keep ANY
+perspective cue (e.g. distance-banded pattern *scale*) cheaply; and whether walls+floors share one pattern engine.
+
 ## MASTER LIST — all optimizations from the perf session (consolidated)
 
 Tags: **[done]** shipped this session · **[next]** decided, do now · **[M14]** needs the sim · **[exact]** keeps
@@ -189,6 +231,18 @@ pixels · **[rebless]** changes pixels (re-bless goldens) · impact = rough ops/
    collisions; a **full associative** (per-row, remember-all) cache hits **71% (~33M)** but needs a runtime-
    indexed fill (`ptr_index`) + per-row reset — complex, byte-exact-debugging at 6-min gates, for ~1.04-1.07×.
    Owner: **skip for now**, pick up later if wanted. Floors stay at Phase-1 (515M, correct).
+5b. **[exact-ish/rebless] continuous-per-row DDA** (the floor SETUP lever, ~167-200M target — the #1 non-pixel
+   cost). Seed the u,v DDA once per **(row, visplane)** and step continuously across the row, **stepping over
+   wall gaps without drawing**, instead of re-seeding 6 `fixed_mul`s per span. Re-seeds 1357→~390 → ~75-138M
+   saved (range: simple `xfrac0+x1·xstep` per span ~75M / true continuous step-over-gaps ~138M). ⚠ GAPS: needs
+   the SAME associative per-(row,visplane) structure as the cache (#5, interleaved visplanes) + DDA-carry +
+   gap-stepping (adds ~5M or mul/gap ~22M); `[rebless]` (rounding-level, no artifact, PNG-clean). **NOTE: if the
+   procedural path (above) is taken, this is MOOT — procedural floors have no per-span setup at all.**
+5c. **[rebless] narrow the floor seed/DDA muls** (DESIGN §1.1.4 precision ledger) — the u,v only feeds
+   `(xfrac>>16)&63` (~22 bits), so `fixed_mul` 8→~5-6 nibbles ≈ halves them. Floor setup → ~30M after 5b. Also
+   MOOT under the procedural path.
+   (Multiplies do NOT batch like divides — narrow / fold-to-table / reduce-count only. The exact-floor floor is
+   ~30-60M setup + ~30-43M pixel ≈ ~70-100M; only PROCEDURAL or fewer-pixels goes lower.)
 
 ### C. The BSP walk — [M14] dispatch-incremental
 6. **[M14][exact-ish] dispatch-incremental side test** — maintain `side_i = a_i·vx+b_i·vy+c_i` (integer, exact,

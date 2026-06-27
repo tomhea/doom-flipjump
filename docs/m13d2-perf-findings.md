@@ -104,8 +104,17 @@ Ordered roughly by leverage. None change correctness (the byte-exact goldens sta
 | baseline (textured) | 1,165,180,455 | 0.24 | — | M13d2c byte-exact |
 | opt1 per-pixel | 1,093,029,378 | 0.26 | 1.07× | draw_span per-pixel: running fb pointer, direct-offset u/v extract, span-constant presets, 6-nib DDA, count-down loop (per-pixel 13.4k→4.2k ops, but per-pixel was only ~9% of the frame). +fix: clear stale `tt` before the x1 seed (register-lifetime bug at far spans, caught at E1M1 (-416,256)). |
 | **opt2 walk unroll** | **645,575,343** | **0.43** | **1.81×** | `render_planes_spans` column scan UNROLLED (`rep(view_w,x) plane_col x`) → compile-time addresses, no `ptr_index`. WALK 312M→23M (13.3×); whole floor pass 540M→267M (2.0×). |
+| Phase 1a `full` early-out | 580,447,590 | 0.48 | 2.01× | DESIGN Phase 1 step 1-2: count newly-claimed columns in `seg_pass1_leaf_body_mtlwp`; once all VIEW_W claimed set `full`, then later (farther) segs `fret` immediately (skip `wall_x_range` + projection + loop). Saved ~65M — far below the spec's est. (R1 materialized: the per-seg projection is NOT the geometry bulk, and the screen fills late at spawn). |
+| **Phase 1b occlusion pre-scan** | **515,248,614** | **0.54** | **2.26×** | DESIGN Phase 1 step 3: after `wall_x_range` gives [x1,x2), scan `drawn[x1..x2)`; if ALL claimed, `fret` (skip projection) — catches fully-occluded segs processed BEFORE the screen fills. Another ~65M. **Phase 1 total: 645.6M→515.2M (1.25×), byte-exact.** |
 
-Both byte-exact (square `00de1aaa`, E1M1 `db5d3da8`). Span after opt2 = 23.6M words (< 2²⁶).
+Both byte-exact (square `00de1aaa`, E1M1 `db5d3da8`). Span after Phase 1 = 23,635,002 words (< 2²⁶).
+
+**Phase 1 verdict (vs the DESIGN ~370M target):** the byte-exact geometry early-out is worth ~130M (1.25×), not the
+~270M the spec hoped — confirming DESIGN R1. The per-seg *projection* that the early-out removes is NOT where the
+295M "geometry" lives; the unremovable residual is `wall_x_range`-on-many-segs + the per-claimed-column work + the
+baked 681-node walk. **The single dominant remaining cost is the FLOOR per-span setup (~200M, 6 `fixed_mul`s ×
+~1357 spans)** — only DESIGN Phase 2 (distance-bucketed floor, [re-bless]) reaches it. Geometry/walls beyond this
+need DESIGN Phase 3 ([re-bless]) or node-level walk culling.
 
 **New floor breakdown (isolated spawn, post-opt2):** FULL 267M = per-span SETUP ~200M (75%) + per-pixel ~43M
 (16%) + walk ~23M (9%). The per-span setup (6 `fixed_mul`s × 1,357 spans) is now the floor's giant; the walk

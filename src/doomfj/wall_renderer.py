@@ -187,6 +187,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
+        "hex.zero 2, n_drawn", "hex.zero 1, full",   # M13opt-P1: reset the drawn-column counter + full flag per frame
         f";{_pfx(mapname)}_bspcode_walk", "bsp_done:",
     ]
     pass2 = []                                            # pass 2a: walls (M12oo shared-compare trampoline)
@@ -256,6 +257,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         f"col_plight: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_ceilbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_floorbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
+        # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
+        "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
         tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
         yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
     ])

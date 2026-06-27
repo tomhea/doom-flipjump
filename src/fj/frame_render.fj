@@ -654,16 +654,32 @@ ns frame {
     // for the pass-2 load_col_plane + plane_tramp fill. The wall path is byte-identical to _mtlw (incl. the
     // off-screen top=1/bottom=0 sentinel). viewh = VIEW_H (compile-time). @requires hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_mtlwp centery, ds, viewh1, viewh, projection \
-            @ loop, body, skipcol, ret, sidx, tbskip, tbok, cge, cdone, fneg, fdone, cVH, cexcl, fstart, cph, fph \
+            @ loop, body, skipcol, ret, sidx, tbskip, tbok, cge, cdone, fneg, fdone, cVH, cexcl, fstart, cph, fph, work, sfull, occscan, occchk, occnext, occdone, occproc \
             < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_texoff, \
               seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, viewzw, seg_ceil, seg_floor, worldtop, \
               seg_plight, seg_ceilbase, seg_floorbase, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, \
-              col_cexcl, col_fstart, col_ceil_ph, col_floor_ph, col_plight, col_ceilbase, col_floorbase, drawn, seg_ret {
+              col_cexcl, col_fstart, col_ceil_ph, col_floor_ph, col_plight, col_ceilbase, col_floorbase, drawn, seg_ret, \
+              full, n_drawn, vieww {
+        hex.if0 1, full, work                   // M13opt-P1: screen already full (all VIEW_W cols claimed) -> this
+        stl.fret seg_ret                         // seg (and every later, farther seg) paints nothing. Byte-exact:
+      work:                                      // front-to-back drawn[] means its cols are all occluded already.
         proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y
         hex.if0 1, visible, ret
+        hex.mov 8, x, x1                          // M13opt-P1 occlusion pre-scan: if EVERY column in [x1,x2) is
+      occscan:                                    // already claimed by a nearer seg, this seg paints nothing ->
+        hex.scmp 8, x, x2, occchk, occdone, occdone   // skip its projection. x<x2 ? test : scanned-all-drawn -> skip
+      occchk:
+        .skip_if_drawn x, drawn, occnext          // drawn[x]!=0 -> keep scanning; ==0 -> an unclaimed col exists
+        ;occproc                                  // found an unclaimed column -> must render this seg
+      occnext:
+        hex.inc 8, x
+        ;occscan
+      occdone:
+        stl.fret seg_ret                          // fully occluded (every col in range drawn) -> byte-exact skip
+      occproc:
         proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_v1x, seg_v1y
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
@@ -722,6 +738,10 @@ ns frame {
         .store_col_field5 col_ceilbase, sidx, seg_ceilbase   // M13d2: 5-nibble flat SLICE offset (combined
         .store_col_field5 col_floorbase, sidx, seg_floorbase //   flat table, ~151k texels for E1M1 -> idx_n=5)
         .mark_drawn x, drawn
+        hex.inc 2, n_drawn                       // M13opt-P1: count this newly-claimed column (mark_drawn only
+        hex.cmp 2, n_drawn, vieww, skipcol, sfull, skipcol   // runs on a NEW claim) -> when all VIEW_W claimed, full=1
+      sfull:
+        hex.set 1, full, 1
       skipcol:
         hex.inc 8, x
         hex.add 8, scale, scalestep

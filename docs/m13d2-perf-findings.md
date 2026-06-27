@@ -97,7 +97,7 @@ Ordered roughly by leverage. None change correctness (the byte-exact goldens sta
    (¼ the textured pixels), flat-colored floors (no u,v DDA), render-1-of-N tics, lower res. These trade look
    for fps and are the documented fallbacks.
 
-## Perf-reduction phase — progress ([exact] only, owner chose no re-bless)
+## Perf-reduction phase — progress (Phase 1 [exact]; Phase 2 [re-bless], owner-approved)
 
 | Rung | ops/frame | fps @280M | vs baseline | what |
 | --- | --- | --- | --- | --- |
@@ -117,6 +117,19 @@ Phase 1 byte-exact (square `00de1aaa`, E1M1 `db5d3da8`). Phase 2 re-blessed (squ
 baked 681-node walk. **The single dominant remaining cost is the FLOOR per-span setup (~200M, 6 `fixed_mul`s ×
 ~1357 spans)** — only DESIGN Phase 2 (distance-bucketed floor, [re-bless]) reaches it. Geometry/walls beyond this
 need DESIGN Phase 3 ([re-bless]) or node-level walk culling.
+
+**Phase 3 (vertical-pattern walls) — ASSESSED, NOT IMPLEMENTED.** The DESIGN Phase 3 raster/divide win is
+mostly illusory in this renderer: `proj.column_render_params` (which holds the per-column `texture_u` divide
+and the `iscale` `fixed_div` that Phase 3 deletes) runs ONLY on newly-claimed columns — **~160/frame total**
+(`skip_if_drawn` skips the rest), so deleting both divides saves only ~8M; and the per-pixel raster leaf
+(`leaf_body_w`) is NOT sped by a vertical-only pattern (the texture *sample* was never the cost — it's the
+nibble-op count of `cm.apply`/the add/the writes). So vertical-pattern walls would **degrade wall visuals for
+~8M (~1.8%)** — a bad trade, declined. The real wall lever is the **[exact] pass-2 restructure** (the 16K-pixel
+unrolled trampoline → a per-column `[top,bottom]` runtime loop, skipping the ~10,381 non-wall iterations,
+≤~25M, NO visual change) — but it is "net uncertain" (trades compile-time FB addressing for runtime pointers,
+reopens the M12oo assemble/span tradeoffs); left as a separate focused effort. The dominant remaining cost is
+the GEOMETRY (~165M post-Phase-1: `wall_x_range`-on-many-segs + the baked 681-node walk), reachable only by
+node-level walk culling (a bigger change).
 
 **New floor breakdown (isolated spawn, post-opt2):** FULL 267M = per-span SETUP ~200M (75%) + per-pixel ~43M
 (16%) + walk ~23M (9%). The per-span setup (6 `fixed_mul`s × 1,357 spans) is now the floor's giant; the walk

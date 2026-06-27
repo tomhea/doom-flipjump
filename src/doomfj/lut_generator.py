@@ -30,6 +30,7 @@ from doomfj.fixedpoint import encode_fixed_point
 from doomfj.tables import (
     reciprocal_table, sine_table, tantoangle_table, viewangletox_table,
     xtoviewangle_table, finetangent_table, yslope_table, distscale_table, zlight_table,
+    slopediv_recip_table,
 )
 
 __all__ = [
@@ -119,6 +120,13 @@ def generate_tantoangle_lut_fj(label: str, slope_range: int = 2048) -> str:
     """tantoangle (R_PointToAngle: slope quotient -> BAM angle), slope_range+1 entries of 32-bit BAM
     (8 nibbles). Values from `tables.tantoangle_table` (all non-negative, < 2**32). Read once per wall."""
     return generate_lut_fj(label, tantoangle_table(slope_range), 8)
+
+
+def generate_slopediv_recip_lut_fj(label: str) -> str:
+    """perf #13: SlopeDiv's block-FP reciprocal table (4096 entries, m in [0x100,0xFFF] -> (1<<24)//m;
+    rest 0). 5 nibbles/entry (max recip = 65536 = 17 bits). Values from `tables.slopediv_recip_table`
+    (SSOT, R6). Indexed by the top-3-nibble mantissa of (den>>8)."""
+    return generate_lut_fj(label, slopediv_recip_table(), 5)
 
 
 def generate_finetangent_lut_fj(label: str, trig_n: int) -> str:

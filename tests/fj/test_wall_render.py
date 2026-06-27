@@ -25,7 +25,7 @@ from types import SimpleNamespace
 
 from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
-    generate_tantoangle_lut_fj, generate_viewangletox_lut_fj,
+    generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
 )
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, Seg, SubSector, Node, CompiledMap, NF_SUBSECTOR,
                                 seg_affine_coeffs)
@@ -570,6 +570,7 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -639,7 +640,7 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "pass1fill.fj"
     p.write_text(main, encoding="utf-8")
@@ -745,6 +746,7 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -828,7 +830,7 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "multiseg.fj"
     p.write_text(main, encoding="utf-8")
@@ -949,6 +951,7 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1022,7 +1025,7 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "occlusion.fj"
     p.write_text(main, encoding="utf-8")
@@ -1160,6 +1163,7 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1242,7 +1246,7 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "multitex.fj"
@@ -1359,6 +1363,7 @@ def test_wall_render_multilight_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=32, over_align=True)   # 32 light rows (per-seg lights span them)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1444,7 +1449,7 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_light: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "multilight.fj"
@@ -1508,6 +1513,7 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=COLORMAP_LIGHTS, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1599,7 +1605,7 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_light: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "runtimebg.fj"
@@ -1663,6 +1669,7 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=COLORMAP_LIGHTS, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1750,7 +1757,7 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_light: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "wideindex.fj"
@@ -1816,6 +1823,7 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
     cm = compile_colormap("cm", mw, lights=COLORMAP_LIGHTS, over_align=True)
     palette = compile_palette("palette", mw)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1930,7 +1938,7 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_light: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "e1m1geo.fj"

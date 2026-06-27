@@ -10,36 +10,79 @@
 //   @requires hex.init
 
 ns proj {
-    def slope_div dst, num, den @ wnum, sden, q, r, c512, csr, lt, ge, keep, clamp, baddiv0, done {
+    // perf #13 [re-bless]: the divide is replaced by a BLOCK-FP RECIPROCAL (the owner table-law form).
+    //   sden = den>>8 is normalized to a top-3-nibble mantissa m in [0x100,0xFFF] (counting the nibble
+    //   shift into `fsh`), recip = slopediv_recip[m] (= (1<<24)//m, the shared SSOT table), then
+    //   q = ((num<<3)*recip) >> (4+P) nibbles, clamped. No hex.div. Mirrors reference_model._slope_div
+    //   EXACTLY (same table, same integer steps). The final shift is always whole-nibble (RK=24 is 6
+    //   nibbles; the exponent is nibble-granular), and >=4 nibbles, so `fsh` (init 2 = 6-4) only counts
+    //   the variable part. @requires hex.init + hex.read_table.
+    def slope_div dst, num, den \
+            @ lt, ge, nrm_hi, hi_more, hi_done, nrm_lo, lo_more, lo_done, \
+              fsh_loop, fsh_more, fsh_done, keep, clamp, done, \
+              sden, wnum, recipw, recip, prod, fsh, c512, cfff, c100, czero2, csr \
+            < slopediv_recip {
         hex.cmp 8, den, c512, lt, ge, ge        // den < 512 ?  lt -> small (clamp to SLOPERANGE)
       lt:
         hex.set 3, dst, 0x800
         ;done
       ge:
-        hex.zero 12, wnum
-        hex.mov 8, wnum, num
-        rep(3, i) hex.shl_bit 12, wnum          // wnum = num << 3
-        hex.zero 12, sden
+        hex.zero 8, sden
         hex.mov 8, sden, den
-        hex.shr_hex 12, 2, sden                 // sden = den >> 8 (>> 2 nibbles)
-        hex.div 12, 12, q, r, wnum, sden, baddiv0   // q = (num<<3) / (den>>8)   (unsigned)
-        hex.cmp 12, q, csr, keep, keep, clamp   // q > SLOPERANGE ?  gt -> clamp
+        hex.shr_hex 8, 2, sden                  // sden = den >> 8   (>= 2)
+
+        hex.set 2, fsh, 2                        // fsh = 2 (= 6-4): the variable nibble-shift past the base 4
+      nrm_hi:                                    // right-normalize: while sden > 0xFFF, sden >>= 1 nib, fsh++
+        hex.cmp 8, sden, cfff, hi_done, hi_done, hi_more   // sden > 0xFFF ?  gt -> shift
+      hi_more:
+        hex.shr_hex 8, 1, sden
+        hex.inc 2, fsh
+        ;nrm_hi
+      hi_done:                                   // left-normalize: while sden < 0x100, sden <<= 1 nib, fsh--
+        hex.cmp 8, sden, c100, lo_more, lo_done, lo_done   // sden < 0x100 ?  lt -> shift
+      lo_more:
+        hex.shl_hex 8, 1, sden
+        hex.dec 2, fsh
+        ;nrm_lo
+      nrm_lo:
+        hex.cmp 8, sden, c100, lo_more, lo_done, lo_done
+      lo_done:
+        hex.read_table 5, recip, slopediv_recip, 3, sden   // recip = slopediv_recip[m]  (m = sden, 3 nib)
+
+        hex.zero 13, wnum
+        hex.mov 8, wnum, num
+        rep(3, i) hex.shl_bit 13, wnum          // wnum = num << 3   (13 nibbles, no overflow)
+        hex.zero 13, recipw
+        hex.mov 5, recipw, recip
+        hex.mul 13, prod, wnum, recipw          // prod = (num<<3) * recip   (full product, no wrap)
+
+        hex.shr_hex 13, 4, prod                 // base shift = 4 nibbles (RK=24=6 nib, minus the <=4 P-bias)
+      fsh_loop:                                  // then fsh (the variable part) more nibbles
+        hex.cmp 2, fsh, czero2, fsh_done, fsh_done, fsh_more   // fsh > 0 ?  gt -> shift
+      fsh_more:
+        hex.shr_hex 13, 1, prod
+        hex.dec 2, fsh
+        ;fsh_loop
+      fsh_done:
+        hex.cmp 13, prod, csr, keep, keep, clamp   // prod > SLOPERANGE ?  gt -> clamp
       keep:
-        hex.mov 3, dst, q
+        hex.mov 3, dst, prod
         ;done
       clamp:
         hex.set 3, dst, 0x800
         ;done
-      baddiv0:                                  // unreachable (den>=512 => sden>=2); safe fallback
-        hex.set 3, dst, 0x800
-        ;done
 
-      wnum: hex.vec 12
-      sden: hex.vec 12
-      q: hex.vec 12
-      r: hex.vec 12
+      sden: hex.vec 8
+      wnum: hex.vec 13
+      recipw: hex.vec 13
+      recip: hex.vec 5
+      prod: hex.vec 13
+      fsh: hex.vec 2
       c512: hex.vec 8, 512
-      csr: hex.vec 12, 0x800
+      cfff: hex.vec 8, 0xfff
+      c100: hex.vec 8, 0x100
+      czero2: hex.vec 2, 0
+      csr: hex.vec 13, 0x800
       done:
     }
 

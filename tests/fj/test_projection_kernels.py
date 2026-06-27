@@ -11,7 +11,7 @@ from doomfj.fixedpoint import fixed_mul, fixed_div, _signed
 from doomfj.harness import W
 from doomfj.lut_generator import (
     generate_tantoangle_lut_fj, generate_trig_idioms_fj, generate_viewangletox_lut_fj,
-    generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj,
+    generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj, generate_slopediv_recip_lut_fj,
 )
 from doomfj.reference_model import ReferenceModel, SLOPERANGE, ANGLE_MASK
 from doomfj.mapcompiler import bake_bsp, _point_side, seg_affine_coeffs
@@ -28,7 +28,7 @@ def _run(tmp_path, name, body, data, expected: bytes):
     p = tmp_path / f"{name}.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"{name}: fj output != oracle"
 
@@ -54,6 +54,7 @@ def test_slope_div_byte_exact_vs_oracle(tmp_path):
             body += [f"proj.slope_div d, n{k}, m{k}", "hex.print_as_digit 3, d, 0", "stl.output 10"]
         data += [f"n{k}: hex.vec 8, {num}", f"m{k}: hex.vec 8, {den}"]
     data.append("d: hex.vec 3")
+    data.append(generate_slopediv_recip_lut_fj("slopediv_recip"))   # perf #13: the reciprocal table
     expected = b"".join(f"{ReferenceModel._slope_div(num, den):03x}\n".encode() * 2
                         for num, den in SLOPE_CASES)
     _run(tmp_path, "slope_div", body, data, expected)
@@ -100,7 +101,8 @@ def test_point_to_angle_byte_exact_vs_oracle(tmp_path):
                      "hex.print_as_digit 8, d, 0", "stl.output 10"]
         data += [f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"y1_{k}: hex.vec 8, {y1 & 0xFFFFFFFF}",
                  f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}", f"y2_{k}: hex.vec 8, {y2 & 0xFFFFFFFF}"]
-    data += ["d: hex.vec 8", generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)]
+    data += ["d: hex.vec 8", generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+             generate_slopediv_recip_lut_fj("slopediv_recip")]   # perf #13
     expected = b"".join(f"{rm.point_to_angle(x1, y1, x2, y2):08x}\n".encode() * 2
                         for (x1, y1, x2, y2) in P2A_CASES)
 
@@ -335,6 +337,7 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
             expected += f"1\n{x1 & 0xFFFFFFFF:08x}\n{x2 & 0xFFFFFFFF:08x}\n{rwa:08x}\n".encode() * 2
     data += ["vis: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
              generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+             generate_slopediv_recip_lut_fj("slopediv_recip"),   # perf #13
              generate_viewangletox_lut_fj("viewangletox", Config().VIEW_W, Config().TRIG_N)]
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")

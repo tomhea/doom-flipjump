@@ -34,6 +34,7 @@ from doomfj.mapcompiler import (  # shared geometry (R6)
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
     yslope_table, zlight_table, distscale_table, LIGHTLEVELS, LIGHTSEGSHIFT, MAXLIGHTZ, LIGHTZSHIFT,
+    slopediv_recip_table, SLOPEDIV_RECIP_RK,
 )
 from doomfj.texturecompiler import (  # shared D5 downscale lever + texture compositing (R6/D12)
     downscale_canvas, composite_texture, texture_texels,
@@ -62,6 +63,7 @@ FLOOR_BG = 96                     # floor band palette index (pre-colormap)
 WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap) until textures land
 LIGHT_SHIFT = 3                   # sector light (0..255) -> colormap row (0..31): light >> 3
 COLORMAP_LIGHTS = 32              # COLORMAP usable light rows (0..31; invuln/black sit past these)
+_SLOPEDIV_RECIP = slopediv_recip_table()   # perf #13: shared block-FP reciprocal table for _slope_div
 
 
 def _deg_to_bam(deg: int) -> int:
@@ -148,11 +150,26 @@ class ReferenceModel:
     @staticmethod
     def _slope_div(num: int, den: int) -> int:
         """DOOM SlopeDiv: the tantoangle index for slope num/den (num <= den, both >= 0). Tuned for
-        16.16 magnitudes — `den < 512` ⇒ the slope is ~0/clamped to SLOPERANGE; else `(num<<3)/(den>>8)`
-        clamped to SLOPERANGE. Inputs must be 16.16-scale (the renderer's world units) to match DOOM."""
+        16.16 magnitudes — `den < 512` ⇒ the slope is ~0/clamped to SLOPERANGE.
+
+        **perf #13 [re-bless]:** the exact `(num<<3)//(den>>8)` divide is replaced by a BLOCK-FP
+        RECIPROCAL (the owner table-law form, NOT a naive 1/y table): normalize `sden = den>>8` to a
+        top-3-nibble mantissa `m` with a nibble-exponent, `recip = slopediv_recip_table[m]` (= (1<<24)//m),
+        then `ans = ((num<<3)*recip) >> (24 + 4*nibble_exp)`. No divide. De-risked PNG-clean on E1M1: the
+        spawn AND square goldens stay byte-identical, off-spawn viewpoints shift sub-pixel. The fj
+        `slope_div` macro mirrors THIS exactly (same shared table, same integer steps) so they cannot
+        drift (R6)."""
         if den < 512:
             return SLOPERANGE
-        ans = (num << 3) // (den >> 8)
+        sden = den >> 8                                  # >= 2
+        P = (sden.bit_length() - 1) // 4                 # leading-nibble index (0..4 for E1M1 magnitudes)
+        if P >= 2:
+            m = (sden >> (4 * (P - 2))) & 0xFFF          # top 3 nibbles (m in [0x100, 0xFFF])
+            sh = SLOPEDIV_RECIP_RK + 4 * (P - 2)
+        else:
+            m = (sden << (4 * (2 - P))) & 0xFFF          # left-normalize small sden into 3 nibbles
+            sh = SLOPEDIV_RECIP_RK - 4 * (2 - P)
+        ans = ((num << 3) * _SLOPEDIV_RECIP[m]) >> sh
         return ans if ans <= SLOPERANGE else SLOPERANGE
 
     def point_to_angle(self, x1: int, y1: int, x2: int, y2: int) -> int:

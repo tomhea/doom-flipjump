@@ -153,3 +153,20 @@ def tantoangle_table(slope_range: int = 2048) -> list[int]:
     (a computed value in [0, SLOPERANGE], §1.3 — not a shift-extracted index). slope_range+1 entries.
     Shared kernel: the oracle's `point_to_angle` and the fj angle LUT both read these (R6/D12)."""
     return [round(math.atan(i / slope_range) / (2 * math.pi) * (1 << 32)) for i in range(slope_range + 1)]
+
+
+SLOPEDIV_RECIP_RK = 24   # perf #13: reciprocal table scale (recip[m] = (1<<RK)//m); RK=24 => <=17-bit entries
+
+
+def slopediv_recip_table() -> list[int]:
+    """perf #13 [re-bless]: the block-FP reciprocal table that replaces SlopeDiv's `hex.div` with a
+    normalize + lookup + mul. `m` is the top-3-nibble (12-bit) mantissa of `sden = den>>8` (leading nibble
+    non-zero, so m in [0x100, 0xFFF]); `recip[m] = (1<<24)//m`. The reciprocal of any sden is then
+    `recip[m] >> (exponent)`, and SlopeDiv = `((num<<3) * recip[m]) >> (24 + 4*nibble_exp)`, clamped to
+    SLOPERANGE. 4096 entries (m<0x100 unused -> 0). De-risked PNG-clean on E1M1 (spawn + square goldens
+    byte-identical; off-spawn viewpoints shift sub-pixel). Shared SSOT: the oracle's `_slope_div` and the
+    fj `slope_div` macro both consume THESE values (R6)."""
+    t = [0] * 4096
+    for m in range(0x100, 0x1000):
+        t[m] = (1 << SLOPEDIV_RECIP_RK) // m
+    return t

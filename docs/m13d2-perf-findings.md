@@ -210,6 +210,32 @@ first, render PNGs (square + E1M1 spawn), confirm it reads acceptably, bless new
 **Open questions to resolve next session:** which pattern reads best (PNG bake-off); whether to keep ANY
 perspective cue (e.g. distance-banded pattern *scale*) cheaply; and whether walls+floors share one pattern engine.
 
+## ★ GEOMETRY-CAMPAIGN RESULTS (2026-07-03 session) — the master list is now RESOLVED
+
+Four rungs LANDED on `m13opt3-early-out`, all byte-exact-gated (E1M1 capstone + square suite green):
+
+| Rung | Commit | Win | Goldens |
+| --- | --- | --- | --- |
+| #9a affine `rw_distance` | `d383016` | atan+2-divide out of wall_setup | [re-bless] E1M1→`6e1b6710`; square UNCHANGED |
+| #10 affine back-face cull | `f285840` | ~508 atans/frame skipped (44% of segs) | **[exact]** — proven across 6 viewpoints |
+| #13 SlopeDiv block-FP reciprocal | `3aa7738` | ~484 atans divide-free (~10× cheaper) | goldens PRESERVED (spawn+square byte-identical) |
+| #11 iscale block-FP reciprocal | `033757a` | per-column 1/scale = pure shift, no divide | [re-bless] E1M1→`3f0133d9` (+flatcolored `6d5baf9e`); square UNCHANGED |
+
+**MEASURED: 515.2M → 462,742,550 ops/frame = 0.605 fps (1.113×, 2.52× vs the 1.165B baseline).
+Span 23.57M words (unchanged — the recip table is 0.08%). Build ~10.1 min (assemble 605.6s;
+95% of the 2.23M-line program is the combined texture table — pre-existing, not this session).**
+
+**The geometry well is DRY.** Assessed-and-skipped (all <0.5% of frame or disproportionate):
+#14 projsin fold (0.6M — tried, needs a param-removal cascade through 8 macros, reverted);
+#16 shifts (~0.06M in geometry; the few-M is floor = moot under procedural); #17 16ˣ tables
+(viewangletox shifts columns visibly; zlight is floor); scale-den reciprocal (~2M, de-risked
+PNG-clean-ish but shifts WALL EDGES ±1px at some viewpoints — sensitive, skipped); #9b rw_offset
+affine (~2.5M, 65-texel texture shift — bad trade); point_to_dist recip (~2M, signed-fiddly).
+The remaining 462M is ~70% floor — only the PROCEDURAL path (above) reaches 12M.
+
+Consolidated-PNG-bless state: #9a+#11 moved E1M1 sub-pixel (~25px, ±1-8 palette) — rendered PNGs
+visually indistinguishable; square never changed. Owner batch sign-off pending (2-min look).
+
 ## MASTER LIST — all optimizations from the perf session (consolidated)
 
 Tags: **[done]** shipped this session · **[next]** decided, do now · **[M14]** needs the sim · **[exact]** keeps

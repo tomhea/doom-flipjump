@@ -46,17 +46,20 @@ M13p0 splits it). Two hard facts frame the ladder:
 
 1. **Procedural color deletes both floor giants at once.** A flat/pattern span needs NO u,v seed (the 6
    `fixed_mul`s per span vanish) and NO per-pixel DDA/sample — only zlight + the write survive. That is
-   the single biggest step available anywhere: ~300M → ~65M in one easy rung (M13p1), then ~65M → ~15-20M
-   with follow-up squeezes (M13p3).
+   the single biggest step available anywhere: ~300M → ~65M in one easy rung (M13p1), then ~65M → ~45M
+   with the cheap squeezes (M13p3a-c). **Below ~45M the floor is pinned by the runtime-pointer write
+   (1,564/px) + the span/walk machinery — only the unrolled compile-address cell pass (p3d) or fewer
+   pixels (p7) go lower.** p3d is therefore load-bearing for any frame below ~200M, not optional.
 2. **12M is won or lost outside the floor after that.** The wall/geometry lump (~162M) must fall to
    ~10M. Its composition is unmeasured — M13p0's split sizes M13p4-p6. Two honest scenarios:
    - If the lump is mostly pass-2 trampoline + per-seg column iteration + `wall_x_range` (all
-     restructurable), the static frame lands **~25-45M ≈ 6-11 fps** after M13p6.
-   - The last stretch to ~12M then comes from M13p7 (2×2 blocks / fewer pixels) **and/or** the
-     [M14] dispatch-incremental walk+`rw_distance` (~15M of walk/cull cost → ~1-2M — already designed,
-     needs the sim's dvx/dvy). Owner has already ruled only M14+ *walking* fps matters, so quoting the
-     projected M14 steady-state per rung is legitimate: **report BOTH numbers from M13p4 on** (static
-     frame ops, and static minus the M14-incremental-eligible walk/cull share).
+     restructurable), the static frame lands **~45-90M ≈ 3-6 fps** after M13p6 (see the ladder table).
+   - The last stretch toward ~12M then comes from M13p7 (2×2 blocks / row-dup, on floors AND walls)
+     **and/or** the [M14] dispatch-incremental walk+`rw_distance` (the p0-stub-measured walk/cull
+     share → ~1-2M — already designed, needs the sim's dvx/dvy). Owner has already ruled only M14+
+     *walking* fps matters, so quoting the projected M14 steady-state per rung is legitimate:
+     **report BOTH numbers from M13p4a on** (static frame ops, and static minus the M14-incremental-
+     eligible walk/cull share).
 
 Every rung below ships a measured win regardless of where the ladder stops; the owner calls "playable"
 whenever satisfied.
@@ -67,14 +70,22 @@ whenever satisfied.
 | --- | --- | --- | --- | --- |
 | — | baseline | — | 462.7M | 0.605 |
 | M13p0 | measure split + PNG bake-off + owner picks | none | 462.7M | — |
-| M13p1 | fj flat-colored floors | [exact vs flat goldens] | **~220-240M** | ~1.2 |
+| M13p1 | fj flat-colored floors | [exact vs flat goldens] | **~225-240M** | ~1.2 |
 | M13p2 | pattern floors (if owner picks a pattern) | [re-bless, PNG-gated] | +~5-10M over p1 | ~1.15 |
-| M13p3 | floor residue crush (walk key, row ptr, zrow) | [exact] + one [re-bless] | **~170-195M** | ~1.5 |
-| M13p4 | procedural walls + DELETE the texture table | [re-bless, PNG-gated] | ~155-180M, **build ~10min → ~1-2min** | ~1.7 |
-| M13p5 | pass-2 per-column loop (kill the 16K trampoline) | [exact] | ~135-160M | ~1.9 |
-| M13p6 | geometry endgame at the new scale (p0-split-ordered) | mixed | **~25-60M** (split-dependent) | 5-11 |
-| M13p7 | 2×2 blocks / fewer pixels (only if still short) | [re-bless, PNG-gated] | ~12-25M | 11-23 |
+| M13p3a-c | floor residue squeezes (row base, walk key, zrow) | [exact] + one [re-bless] | ~205-220M (floor ~45M) | ~1.3 |
+| M13p3d | unrolled compile-addr plane cell pass (floor → ~10-18M) | [exact vs flat goldens] | **~175-190M** | ~1.5 |
+| M13p4a | tiny per-seg wall textures — DELETE the 793k-texel table | [re-bless, PNG-gated] | ~170-185M, **build ~10min → ~1-2min** | ~1.6 |
+| M13p4b+p5 | write-only wall raster + pass-2 per-column loop (one restructure) | [exact after p4a] | ~140-160M | ~1.9 |
+| M13p6 | geometry endgame at the new scale (p0-split-ordered) | mixed | **~45-90M** (split decides; the lump is ~130M unsplit) | 3-6 |
+| M13p7 | 2×2 blocks / row-dup (floors AND walls) | [re-bless, PNG-gated] | ~25-60M | 5-11 |
+| — | + the [M14] dispatch-incremental walk/cull share (designed, needs the sim) | [M14] | **~12-30M steady-state** | 9-23 |
 | M13p8 | flip defaults, re-bless, merge to main | — | — | — |
+
+**Convergence honesty:** the static single-frame 12M pre-M14 is NOT promised by this table — it requires
+p6 to cut the (unmeasured) ~130M pass-1/walk/present lump by ~90%, which only the p0 split can confirm.
+What IS promised: every rung is a measured win, the frame passes ~1 fps at p1, ~2 fps by p5, and the
+M14 steady-state number (the one the owner ruled matters) lands in the ~12-30M band if p6+p7 go as
+estimated. Re-anchor this table on real numbers at every rung.
 
 ---
 
@@ -160,13 +171,24 @@ if __name__ == "__main__":
     main()
 ```
 
-- [ ] **Step 3: run the split** (4 background runs; each ≈ 11 min for E1M1). Record in the appendix:
+- [ ] **Step 3: run the split** (background runs; ≈ 11 min each for E1M1). ⚠ Ablation is only valid
+  **cumulatively from the END of the pipeline** (removing a later block never changes an earlier one;
+  the reverse is false — ablating pass-1 leaves pass-2/planes running on zero-filled column arrays,
+  which distorts their cost). So:
   - full (`--ablate ""`) — must reproduce ~462.7M (sanity)
-  - `--ablate planes` → wall-side lump
-  - `--ablate planes,pass2` → pass-1 geometry + walk + present residue
-  - `--ablate planes,pass2,pass1` → walk + init/present floor cost
-  Derive: floor pass, pass-2 (trampoline + wall raster), pass-1 (x_range/projection/claim loops),
-  walk+present. **These four numbers order M13p3-p6.**
+  - `--ablate planes` → delta = the floor pass
+  - `--ablate planes,pass2` → delta = pass-2 (trampoline + wall raster)
+  - `--ablate planes,pass2,pass1` → the init + input-parse + present residue (NOT "the walk" — the
+    BSP walk is inside pass-1 and leaves with it)
+- [ ] **Step 3b: split pass-1 internally with STUB variants** (the walk and the per-seg work
+  interleave, so block ablation cannot separate them — and p6's ordering plus the "M14-eligible
+  share" reporting need exactly this split). Add two stub modes to the same `ablate` set:
+  - `"segstub"` — the seg subsector-action leaf `fret`s immediately → the bare walk skeleton (node
+    side tests + dispatch) + call overhead;
+  - `"xrstub"` — `wall_x_range` replaced by an immediate cull-fail → walk + per-seg entry overhead
+    without the atan/cull math.
+  Derive: walk skeleton, wall_x_range+cull bulk, projection+claim residue (= pass-1 − the stubs).
+  **These numbers order M13p4b-p6 and define the M14-incremental-eligible share.**
 
 - [ ] **Step 4: write `scripts/bakeoff_planes.py`** — oracle-only PNG contact set (lift `_save_png` from
   `scripts/m12j_evidence.py:19`, scale=5). Render square-spawn + E1M1-spawn + E1M1-rotated-45° for:
@@ -176,11 +198,18 @@ if __name__ == "__main__":
   - **P2 checker:** `pal = base if ((x >> 2) ^ (y >> 2)) & 1 == 0 else base2`, `base = texels[0]`,
     `base2 = texels[32*64 + 32]`;
   - **P3 xor-noise:** `pal = pat[(x ^ (y << 1) ^ (y >> 2)) & 15]` (same `pat` as P1, busier break-up);
-  - **W1 walls:** per-seg solid color = the mean palette index of the seg's downscaled texture
-    (baked), existing column light kept; **W2:** W1 + `pat[(texrow) & 15]` vertical 16-banding.
-  Implement each as a tiny local override of `_plane_pixel`/the wall texel in a subclassed
-  `ReferenceModel` inside the script — NO oracle edits at this rung (the chosen one gets a real oracle
-  mode in M13p2/p4).
+  - **W1 walls:** per-seg solid color = the **MODE texel** (most common palette index) of the seg's
+    downscaled texture — NOT the mean (palette indices are not luminance-ordered; a mean index is a
+    random hue), existing column light kept; **W2:** a 16-tall vertical band strip (see the hook below).
+  Hooks (verified against the oracle at `8d175d2`):
+  - Floor patterns P1-P3: override **`_render_planes_flat`** in a script-local `ReferenceModel`
+    subclass — `_plane_pixel` does NOT receive `x`, so it cannot host an (x,y) pattern; keep its
+    distance/zlight math and swap only the `flat_base` argument per (x,y).
+  - Walls W1/W2: override **`_wall_texture`** to return a tiny synthetic canvas — **1×1** (the mode
+    texel) for W1, **1×16** (16 band texels sampled from the real texture's column 0) for W2. The
+    whole textured pipeline (`texcol % tw` → 0, heightmask wrap on th=16) renders it unchanged — this
+    same trick is the fj rung M13p4a, so the bake-off previews exactly what ships.
+  NO oracle edits at this rung (the chosen looks get real oracle modes in M13p2/p4).
 - [ ] **Step 5: include the OWED #9a+#11 consolidated bless PNGs** in the same contact set (textured
   E1M1 current vs pre-campaign — the ~25px sub-pixel drift the owner still has to batch-look at).
 - [ ] **Step 6: owner gate (the one real decision):** owner picks floor look (F / P1 / P2 / P3) and wall
@@ -402,18 +431,21 @@ M13p0, SKIP this task entirely — the ladder proceeds to M13p3 unchanged.
 
 ---
 
-## Task M13p3: crush the floor residue to ≤ ~20M
+## Task M13p3: crush the floor residue (a-c: cheap squeezes to ~45M; d: the cell-pass endgame to ~10-18M)
 
-After p1/p2 the floor pass ≈ 65M: classify walk ~23M + span setup ~23M + pixels ~20M. Three
-independent sub-rungs, each measured; do them in this order and STOP when the floor pass ≤ ~20M
-(diminishing returns vs M13p4-p6 which are bigger).
+After p1/p2 the floor pass ≈ 65M: classify walk ~23M + span setup ~25M + pixels ~20M. **The a-c
+squeezes bottom out around ~45M** (the runtime-pointer write pins the pixels at ~1.9k each); the real
+floor endgame is **p3d**, the unrolled compile-address cell pass. Do a-c first only if p3d's program-
+word cost needs deferring past M13p4a's table deletion (which frees ~3.5M words of span headroom);
+otherwise a reasonable path is p1 → p4a → p3d, skipping a-c entirely. Decide on p0's numbers.
 
-- [ ] **p3a [exact] per-ROW fb base pointer.** In `render_planes_spans` (frame_render.fj:768): seed a
-  row pointer ONCE per row (`rowp += VIEW_W*2*dw` per row via a preset add), and in
-  `draw_span_flat/_pat` replace the `pixp = y*VIEW_W` `mul_const 8` + 8-nib add + `shl_bit` + `ptr_index`
-  seed with `ptr_index` from the ROW base and the 2-nibble `2*x1` offset (`hex.mov 2` + `shl_bit 3`).
-  Saves ~2.5-3k × 1,357 spans ≈ **~4M**. Gate: square flat test + E1M1 capstone (byte-exact — address
-  math only). ⚠ the advance unit (digit vs bit) trap — the golden catches it (gap #3 note).
+- [ ] **p3a [exact] per-ROW `rowbase` cache.** In `render_planes_spans` (frame_render.fj:768): compute
+  `rowbase = y*VIEW_W` ONCE per row (100 `mul_const`/frame instead of 1,357), keep it in a global; in
+  `draw_span_flat/_pat` the seed becomes `pixp = rowbase + x1` (8-nib mov + 2-nib add) + the existing
+  `shl_bit` + `ptr_index` — the per-span `mul_const 8` (~900) + the zero/mov chain go. NO new pointer
+  primitive needed (keeps `ptr_index` as-is). Saves ~1.5-2k × 1,357 ≈ **~2.5M**. Gate: square flat
+  test + E1M1 capstone (byte-exact — address math only). ⚠ the advance unit (digit vs bit) trap — the
+  golden catches it (gap #3 note).
 - [ ] **p3b [exact, flat/pattern modes only] packed visplane KEY in the classify walk.** `plane_col`
   (frame_render.fj:801) compares 4 fields per open-span cell (`cmp 2 + cmp 8 + cmp 5 + cmp 2`). Both
   ph and flatbase and light are SECTOR-determined, so bake a per-seg 3-nibble
@@ -431,49 +463,72 @@ independent sub-rungs, each measured; do them in this order and STOP when the fl
   **~13M**. ⚠ zidx may shift ±1 at light-band boundaries → [re-bless]: PNG both maps, owner look,
   re-bless the two flat goldens (square likely unchanged — single planeheight). ONLY do this rung if
   p3a+p3b left the floor > ~25M.
+- [ ] **p3d [exact-vs-flat-goldens] the unrolled compile-address plane CELL pass — the floor endgame.**
+  Replaces spans + classify walk + span leaf entirely for flat/pattern modes: unroll
+  `rep(view_h, y) rep(view_w, x) plane_cell x, y` (16,000 cells, like wall pass-2). Per cell, ALL of
+  (x, y, fb address, pattern index) are COMPILE-TIME: classify = 2× `cmp 2` vs `col_cexcl/col_fstart +
+  8*x*dw` (compile-time addresses), then write `lit_col_strip` via `xor_zero` at the compile-time fb
+  address (~284). The one runtime input is the lit color: keep a per-COLUMN 2-nibble `col_litc/col_litf`
+  pair (ceil/floor lit color at the column's zrow... which varies per ROW) — so the cell body reads a
+  per-(column,row-band) value. Two candidate designs, prototype ONE row-block first and measure:
+  - (d-i) keep zrow per-row-per-column via a pass-1.5: for each column, a tiny runtime loop fills a
+    100-entry per-column lit strip? — REJECTED on sight: that's 16k fills again. Only viable if strips
+    are per-VISPLANE (few): pass-1.5 builds `lit_strip[sector][y]` (n_sectors×100 fills, ~dozens of
+    visible sectors ⇒ ~2-6k fills × ~1.5k ≈ 3-9M) into a runtime-written table; the cell reads
+    `lit_strip + (key*100 + y)*dw`-style at a compile-time y offset with a runtime key — needs
+    `ptr_index`-free keyed read (dispatch by key, 16ˣ table law) — design carefully against R4/R5x
+    runtime-write idioms.
+  - (d-ii) cheaper: accept per-cell `cm.apply` (399) with a per-column preset zrow?? zrow varies by
+    row — same problem. So (d-i)'s per-visplane strip is the shape; the fallback if it fights fj is
+    2×2/row-dup (p7) which halves the strip AND the cells.
+  Cost: cells 16,000 × ~(2 cmp + strip read + write) ≈ ~600-1,100 ⇒ **floor ≈ 10-18M all-in** (strips
+  included), program +~1.5-3M words (do AFTER p4a's −3.5M table deletion; re-check the 2²⁶ span gate).
+  Byte-exact vs the flat goldens (same values, new addressing). This rung is LOAD-BEARING for any
+  frame < ~200M — it is a real design task; prototype the strip read standalone (fast square gate)
+  before committing the 16k unroll.
 - [ ] **Measure after each sub-rung** (`scripts/measure_frame.py --floor-mode flat`), record, commit
   each separately (`"M13p3a: ..."` etc.).
 
-**Deliberately NOT here:** the full 16k-cell unrolled plane pass (compile-time-address `xor_zero`
-writes, ~284/px). It's another ~10M below the span design but costs a ~+2-4M-word program, a per-cell
-zrow strategy, and a new pass structure — disproportionate while M13p4-p6 hold bigger wins. Revisit
-ONLY as part of M13p7 if the final gap demands it.
+---
+
+## Task M13p4: procedural walls — TWO sub-rungs (p4a table deletion; p4b write-only raster)
+
+Per the owner's W1/W2 pick at M13p0 (if the owner keeps textured walls, p4a still lands as a mode
+flag + measurement, default off, and the ladder re-evaluates after M13p6). The two wins are
+SEPARABLE and deserve separate rungs:
+
+- [ ] **p4a [re-bless, PNG-gated at p0] tiny per-seg textures — DELETE the 793k-texel table.**
+  The cheapest patch in the whole plan: replace each wall texture with a tiny synthetic canvas —
+  **1×1** (the seg texture's MODE texel — most common palette index; NOT the mean, palette indices
+  are not luminance-ordered) for W1, or **1×16** (16 band texels from the real texture's column 0)
+  for W2. NOTHING else changes: the oracle override is `_wall_texture` returning the tiny canvas
+  (exactly the p0 bake-off hook, so the PNG previewed exactly this); the emitter change is the
+  `combined` build loop in `emit_wall_renderer` (wall_renderer.py:85-96) compositing the tiny canvas
+  instead of the full one (`th ∈ {1,16}` are powers of 2 — the heightmask/`% tw` path is untouched).
+  The fj kernels, `column_render_params`, pass-2 — ALL unchanged; the combined table just shrinks
+  793,344 → ~70-1,120 texels. Bless new goldens (host + fj capstone). Ops win small (@ ripple only);
+  the prize: **assemble ~605s → ~1-2min (measure it), span −~3.5M words — EVERY LATER RUNG ITERATES
+  ~5× FASTER.** Do this rung EARLY (right after p1 is also defensible) — it buys iteration speed for
+  p3d/p5/p6.
+- [ ] **p4b [exact after p4a] write-only wall raster.** With a 1×1 texel the per-pixel wall body's
+  sample + `cm.apply` + v-DDA are computing a COLUMN-CONSTANT value 5,619 times: hoist the lit color
+  into `column_render_params` (once per ~160 claimed columns), drop `col_step/col_frac0/
+  col_heightmask` stores, and reduce `leaf_body_w` to the fb write + row advance. For W2 (1×16), keep
+  a narrowed 8.8 v-DDA + a 16¹ band `.lookup`. ⚠ do p4b TOGETHER WITH M13p5 (they rewrite the same
+  pass-2 code region — separate rungs = rework; one restructure, one gate). Expect **−10-20M** with
+  p5's share included.
+- [ ] **From p4a on, report the TWO numbers** (static frame; static minus the M14-incremental-
+  eligible walk/cull share from the p0 stub split) in every measurement.
+
+**Files (both):** `src/doomfj/reference_model.py` (`wall_mode` kwarg — the tiny-canvas rule VERBATIM
+from the p0 pick), `src/doomfj/wall_renderer.py` (`wall_mode`; tiny-canvas combined table; p4b: the
+column hoist + dropped col stores), `src/fj/frame_render.fj` (p4b only: `leaf_body_w` variant +
+pass-2 loop with M13p5), `src/doomfj/build.py` (pass-through). Tests: `tests/host/test_wall_frame.py`
+(+wall-mode goldens, blessed after the p0 PNG), fj square 4-viewpoint + E1M1 capstone per rung.
 
 ---
 
-## Task M13p4: procedural walls — `wall_mode="pattern"` + DELETE the combined texture table
-
-Per the owner's W1/W2 pick at M13p0 (if the owner keeps textured walls, this rung still lands the
-mode flag + measurement, default off, and the ladder re-evaluates after M13p6). Twin wins: the wall
-texel becomes column-constant (per-pixel = write only), and the combined wall texture table — 95% of
-the program's source lines, the reason the build is ~10.1 min — is not emitted at all.
-
-**Files:**
-- Modify: `src/doomfj/reference_model.py` (`wall_mode` kwarg: the wall texel → the seg's baked color
-  [W1] or `color ^ band[texrow & 15]`-style [W2] — the p0-picked formula VERBATIM),
-  `src/doomfj/wall_renderer.py` (`wall_mode`; bake `seg_color` = mean palette index of the downscaled
-  texture instead of `seg_texinfo`; skip `tex`/`_texel_table`), `src/fj/frame_render.fj` (a
-  `leaf_body_w` flat variant: `proj.column_render_params` keeps top/bottom/scale but drops
-  `texcol`/`frac0`/`step`; per-pixel = the lit column color write + row advance),
-  `src/doomfj/build.py` (pass-through).
-- Test: `tests/host/test_wall_frame.py` (+2 wall-pattern goldens, blessed after the p0 PNG),
-  `tests/fj/test_wall_render.py` or `test_floor_planes_fj.py` (square 4-viewpoint + E1M1 capstone).
-
-**Interfaces:**
-- Consumes: the p0 wall pick; the pass-2 column machinery unchanged (`col_top/col_bottom` etc. stay;
-  `col_base/col_step/col_frac0/col_heightmask` become the baked color / vanish for W1).
-- Produces: `wall_mode="textured"|"pattern"`; a build whose assemble is **~1-2 min** (measure it) and
-  whose span drops ~3.5M words — EVERY LATER RUNG ITERATES ~5× FASTER. Report ops/frame AND the new
-  assemble time + span.
-
-- [ ] **Steps:** oracle mode + host goldens (bless) → fj variant + emitter flag → square 4-viewpoint
-  byte-exact → E1M1 capstone → measure (expect **−10-20M** ops; the real prize is the build) → commit.
-- [ ] **From this rung on, report the TWO numbers** (static frame; static minus the M14-incremental-
-  eligible walk/cull share from the p0 split) in every measurement.
-
----
-
-## Task M13p5: wall pass-2 restructure — per-column [top,bottom] runtime loop [exact]
+## Task M13p5: wall pass-2 restructure — per-column [top,bottom] runtime loop [exact; ONE rung with p4b]
 
 The 16K-pixel unrolled `pixel_tramp`+`compare_y` trampoline runs for every screen pixel though only
 ~5,619 are wall pixels. Replace with a per-column runtime loop over `[top, bottom]` with a running fb
@@ -569,3 +624,18 @@ render-1-of-N tics, or 80×50 (a cfg change rippling through every golden — mo
 - Estimates use isolated-kernel op costs, which the findings doc shows UNDERESTIMATE full-renderer
   cost (~2.5× @ gap) — hence every rung re-anchors on `measure_frame.py`, and no later rung's
   decision rule depends on an estimate alone.
+
+## Adversarial gap review (second pass, 2026-07-03 — corrections already folded into the tasks above)
+
+| # | Gap found | Type | Resolution (in-plan) |
+| --- | --- | --- | --- |
+| G1 | **The v1 ladder table didn't converge**: p3a-c bottom the floor at ~45M (pixels are pinned at ~1.9k/px by the runtime-pointer write), yet the table claimed 170-195M after p3 — the excluded cell-unroll was silently load-bearing. | arithmetic | Table recomputed; **p3d** (compile-addr cell pass) promoted to an explicit, load-bearing rung with its program-word cost and a prototype-first step; convergence-honesty paragraph added. |
+| G2 | **Block ablation cannot split pass-1 internally** (the walk and seg actions interleave), and ablating pass-1 distorts downstream passes (zero-filled col arrays) — yet p6's ordering and the "M14-eligible share" depended on that split. | method | Step 3 rewritten (cumulative-from-the-END only); **Step 3b stub variants** (`segstub`, `xrstub`) added to split walk / wall_x_range / projection+claim. |
+| G3 | **The bake-off hook was wrong**: `_plane_pixel` never receives `x` (reference_model.py:569) — it cannot host an (x,y) pattern. | correct | Hooks respecified: patterns override `_render_planes_flat`; walls override `_wall_texture`. |
+| G4 | **Walls-as-tiny-textures insight**: `_wall_texture` → `% tw` + heightmask renders a 1×1/1×16 canvas through the UNCHANGED pipeline — the bake-off preview, the oracle mode, and the easiest fj rung are all the same mechanism. The v1 plan bundled the table deletion with the raster rewrite. | scope | **p4 split into p4a** (tiny textures — trivial, deletes the table, buys the ~5× build speedup early) **and p4b** (write-only raster, merged with p5 — same code region, one restructure). |
+| G5 | **W1 "mean palette index" is not a color** — palette indices aren't luminance-ordered; a mean index is a random hue. | correct | W1 = the MODE texel (most common index; `_flat_base`'s texel(0,0) is the precedent for "cheap representative"). |
+| G6 | **p3a assumed an unverified pointer primitive** (advancing a cell pointer by a runtime `2*x1` without `ptr_index`). | correct | p3a redesigned: cache `rowbase = y*VIEW_W` once per row (a global), span seed = `rowbase + x1` + the existing `shl_bit`/`ptr_index` — only verified ops; win re-estimated ~2.5M (was ~4M). |
+| G7 | p3b's key needs `sector_index < 256` (2 nibbles) — E1M1 has ~85 sectors, but this must be ASSERTED at emit time; and the square room is a single sector, so the square gate is DEGENERATE for p3b — E1M1 is the only meaningful gate. | correct | Noted here; add the emit-time assert + rely on the E1M1 capstone when implementing p3b. |
+| G8 | Flat mode still emits the now-unused `distscale`/`xtoviewangle` LUT data (span words, no ops). | cost | Free cleanup — fold into p3 or whenever the emitter is next touched. |
+| G9 | Mode-combination golden matrix (floor_mode × wall_mode) could explode the heavy-test count. | cost | Gate only (a) the full-textured combo (regression net) and (b) the SHIPPED combo; do not bless off-diagonal combos. |
+| G10 | The handoff's open question "distance-banded pattern *scale* as a perspective cue" got no bake-off candidate; and suite time grows with each new heavy fj test. | scope | Optional P4 candidate at the owner's request during p0; heavy tests carry the existing skip-marker convention (plan p1 step 6 already says copy it verbatim). |

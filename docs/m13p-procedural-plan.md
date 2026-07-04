@@ -744,12 +744,18 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
     predicted, and MUCH higher: ~2.9× the ~130M midpoint estimate, WORSE than the 265.7M
     framebuffer-flat state.** The overshoot is the per-column band building: 2 `build_bands` calls ×
     ~160 columns ≈ 320 full window walks/frame (the LS2 ledger line assumed ~20-30 per-VISPLANE
-    walks) at a heavier-than-estimated per-row walk body. NEXT (the pS2 close-out's remaining gate):
-    crush the band cost — candidates: (a) skip the classify zrow-lookup on rows where zidx didn't
-    move (most rows; provably byte-identical since zrow only changes when zidx does), (b) narrow the
-    walk compares (ys vs threshold at fewer nibbles), (c) per-seg/per-visplane sharing with
-    per-column window clipping at emit time (the plan's original shape). Only after that does the
-    "~110-140M" ladder row hold and pG start from its intended base.
+    walks) at a heavier-than-estimated per-row walk body. **Band-crush PHASE 1 (same day, byte-
+    identical, goldens bit-unchanged): hoisted the per-row `mul_const zlidx=lvl*128` to a per-call
+    `zlbase` (an R12-class unhoisted invariant), skip the classify zlight-lookup on rows where zidx
+    didn't move (a `moved` flag set in the bump loops — zrow is a pure function of the call-fixed
+    lvl and zidx), hoisted the per-ascloop `c127` set, `threshold_hi = threshold_lo + step` (one
+    `hex.mul 8`/call saved), and the seed row is now classified AT the seed with the loop starting
+    at the second row — mirroring the host walk's `rows[1:]` structure exactly (also kills a latent
+    first-row spurious-bump risk the old walk-row-0 shape had). MEASURED: 381.6M → 323,454,089
+    ops/frame (−15.2%).** REMAINING to reach the ~110-140M row: (b) narrow the walk compares/reads
+    (ys fits 6 nibbles), (c) per-seg/per-visplane band sharing with per-column window clipping at
+    emit time (the plan's original LS2 shape — the big lever: 320 walks → ~20-30), and pG3's
+    projection+claim crush (~112M of pass-1 residue) — pG starts from ~323M, not the intended base.
 
 ---
 

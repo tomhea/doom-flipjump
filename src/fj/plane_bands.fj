@@ -59,8 +59,8 @@ ns plane {
     // cm-index `zrow<<8|base` decomposes into exactly these two bytes, so no combine is needed here).
     // @requires hex.init & stl.ptr_init.
     def build_bands \
-            @ i, y, ys, zidx, step, threshold_hi, threshold_lo, zplus1, zidx8, lvl, zlidx, zrow, \
-              cur_zrow, runlen, ptr, c127, dist, \
+            @ i, y, ys, zidx, step, threshold_hi, threshold_lo, zidx8, lvl, zlbase, zlidx, zrow, \
+              cur_zrow, runlen, ptr, c127, dist, moved, \
               empty, phzero, seed, seedclamp, seedok, bloop, bbody, ascloop, ascmaybe, ascbump, ascstop, \
               descloop, descmaybe, descbump, descstop, classify, samezidx, diffzidx, cont2, \
               flush_final, writeentry, done \
@@ -110,33 +110,39 @@ ns plane {
         hex.zero 8, step
         hex.mov 8, step, bb_recip_out
         hex.shl_hex 8, 1, step                          // step = recip << 1 nibble ( *16 )
-        hex.zero 8, zplus1
-        hex.mov 3, zplus1, zidx
-        hex.inc 8, zplus1
-        hex.mul 8, threshold_hi, step, zplus1           // threshold_hi = step*(zidx+1)
         hex.zero 8, zidx8
         hex.mov 3, zidx8, zidx
         hex.mul 8, threshold_lo, step, zidx8            // threshold_lo = step*zidx
-        hex.mul_const 3, zlidx, lvl, 128                // seed cur_zrow = zlight[lvl*128+zidx]
+        hex.mov 8, threshold_hi, threshold_lo           // threshold_hi = step*(zidx+1) = lo + step
+        hex.add 8, threshold_hi, step                   //   (one hex.mul saved per call)
+        hex.mul_const 3, zlbase, lvl, 128               // zlbase = lvl*128 -- CALL-invariant, hoisted
+        hex.mov 3, zlidx, zlbase                        //   out of the per-row classify (R12)
         hex.add 3, zlidx, zidx
-        hex.read_table 2, cur_zrow, zlight, 3, zlidx
-        hex.zero 2, runlen
-        hex.zero 2, i
+        hex.read_table 2, cur_zrow, zlight, 3, zlidx    // seed cur_zrow = zlight[lvl*128+zidx]
+        hex.set 3, c127, 127                            // hoisted out of ascloop (was re-set per check)
+        // row y0 is classified AT the seed (runlen=1) and the loop starts at the SECOND row --
+        // mirroring the host `_zidx_band_walk` exactly (out=[seed]; walk only rows[1:]). Walking row
+        // y0 too (the old shape) also risked a spurious first-row bump whenever the approximate
+        // threshold undercuts the exact seed's own yslope.
+        hex.set 2, runlen, 1
+        hex.set 2, i, 1
         hex.mov 2, y, bb_y0
+        hex.inc 2, y
 
       bloop:
         hex.cmp 2, i, bb_count, bbody, flush_final, flush_final
       bbody:
         hex.read_table 8, ys, yslope, 2, y
+        hex.zero 1, moved                               // did the walk move zidx THIS row?
         hex.if0 2, bb_ascending, descloop
       ascloop:
-        hex.set 3, c127, 127
         hex.cmp 3, zidx, c127, ascmaybe, ascstop, ascstop
       ascmaybe:
         hex.cmp 8, ys, threshold_hi, ascstop, ascbump, ascbump
       ascbump:
         hex.inc 3, zidx
         hex.add 8, threshold_hi, step
+        hex.set 1, moved, 1
         ;ascloop
       ascstop:
         ;classify
@@ -147,15 +153,19 @@ ns plane {
       descbump:
         hex.dec 3, zidx
         hex.sub 8, threshold_lo, step
+        hex.set 1, moved, 1
         ;descloop
       descstop:
         ;classify
       classify:
+        // zidx unmoved this row => zrow unmoved (zrow is a pure function of the call-fixed lvl and
+        // zidx) => extend the current run WITHOUT the zlight lookup -- most rows take this path.
+        hex.if0 1, moved, samezidx
         // GROUP BY ZROW, not zidx: distinct zidx buckets can share the same darkest/lightest colormap
         // row (zlight clamps), and the oracle's `_expected_bands`/_zidx_band_walk grouping does too --
         // comparing raw zidx here under-merges bands (measured: a single "clamped" band split into
         // dozens of 1-row entries near the horizon before this fix).
-        hex.mul_const 3, zlidx, lvl, 128
+        hex.mov 3, zlidx, zlbase
         hex.add 3, zlidx, zidx
         hex.read_table 2, zrow, zlight, 3, zlidx
         hex.cmp 2, zrow, cur_zrow, diffzidx, samezidx, diffzidx
@@ -198,10 +208,11 @@ ns plane {
       step: hex.vec 8
       threshold_hi: hex.vec 8
       threshold_lo: hex.vec 8
-      zplus1: hex.vec 8
       zidx8: hex.vec 8
       lvl: hex.vec 3
+      zlbase: hex.vec 3
       zlidx: hex.vec 3
+      moved: hex.vec 1
       zrow: hex.vec 2
       cur_zrow: hex.vec 2
       runlen: hex.vec 2

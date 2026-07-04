@@ -6,18 +6,21 @@
 
 **Goal (owner-set, HARD):** Ladder the renderer from the measured **462,742,550 ops/frame (0.605 fps
 @280M)** down to **≤ 12,000,000 ops/frame** — the static E1M1 spawn frame as reported by
-`scripts/measure_frame.py`, under the same measurement convention as the 462.7M baseline (fresh run,
-known-zero framebuffer). Procedural screen-space color (floors first, then walls) buys the first ~10×;
-the last ~3× is a **hard per-stage budget ledger** (below) that forces three structural redesigns: the
-unified composite raster (pC), the until-full walk/geometry (pG), and — if any ledger line overshoots —
-the named fidelity valves (pV). Still a ladder: **each rung measured, non-empty, shippable.**
+`scripts/measure_frame.py` (ops convention unchanged from the 462.7M baseline). Procedural
+screen-space color (floors first, then walls) buys the first ~10×; the last ~3× is a **hard per-stage
+budget ledger** (below) built on the owner's v4 directive — **we control flipjump 1.5.1's ScreenIO
+device** — which turns pixel delivery into a device RUN stream: the column-stream raster (pS,
+~1,300-2,000 RLE runs instead of 16,000 register writes), the until-full walk/geometry (pG), and —
+now only as insurance — the fidelity valves (pV). Still a ladder: **each rung measured, non-empty,
+shippable.**
 
 **Architecture:** The pipeline stays (BSP walk → pass-1 geometry → raster). Each rung swaps ONE kernel
 or bakes ONE table cheaper, behind an emitter *mode flag* mirrored in the oracle, so the textured path
 stays in-tree and testable the whole time. De-risk order per rung: oracle change → PNG → owner look-OK
-→ fj mirror → byte-exact gate → **measure ops/frame** → commit. At pC the two raster passes (wall
-pass-2 + plane pass) merge into ONE unrolled composite pass — the only structural rewrite, and it is
-itself laddered (prototype → floors-only → unified).
+→ fj mirror → byte-exact gate → **measure ops/frame** → commit. At pS the two raster passes (wall
+pass-2 + plane pass) are replaced by ONE per-column run-stream emitter feeding the device — the only
+structural rewrite, itself laddered (protocol → prototype → ship). The v3 composite-fb design (pC) is
+retained verbatim as the fallback if the device protocol is rejected.
 
 **Tech stack:** Python emitter (`src/doomfj/wall_renderer.py`) + fj macros (`src/fj/plane_render.fj`,
 `src/fj/frame_render.fj`), flipjump 1.5.1 assembler/runner, pytest gates, `term.op_counter` measurement.
@@ -28,6 +31,12 @@ itself laddered (prototype → floors-only → unified).
   endgame rung (M13p8) — owner policy 2026-07-03.
 - **Owner direction (verbatim intent):** can sacrifice looks; wants easy-to-implement patches that each
   give a non-empty improvement. NOT one big-bang rewrite.
+- **Owner directives (2026-07-04):** (a) the **ScreenIO device in flipjump 1.5.1 is OURS to extend**
+  — new commands, IO-flip output paths ("write_pixel", "write_column", stream modes), and hot tables
+  regenerated to flip IO+0/1 instead of xoring a result register — "if it saves time, definitely do
+  that, with most fj ops saved"; (b) **16-color mode is pre-approved** (turns out unneeded under RLE
+  — kept as a valve); (c) **row-dup floors only if the result does not look vertically stretched**
+  (the PNG gate decides).
 - **Every pixel-changing rung ([re-bless]) is PNG-gated by the owner before fj work starts.** Byte-exact
   rungs ([exact]) gate on the existing goldens.
 - **Table Design Law:** tables are 16ˣ sized, indexed by top nibbles via `.lookup` (no shift, no clamp,
@@ -43,75 +52,78 @@ itself laddered (prototype → floors-only → unified).
   `write_hex_and_inc` ×2 (one fb pixel) = 1,564 · compile-time-address `xor_zero` write = 284 ·
   `cm.apply` ≈ 399 · `flat.sample` ≈ 391 · `shr_hex 8,5` = 331 · `read_table` ≈ thousands, `.lookup` ≈ 35.
 
-## ★ THE 12M LEDGER (the hard budget; every endgame rung is accepted against its line)
+## ★ THE 12M LEDGER v4 (the hard budget; every endgame rung is accepted against its line)
 
-`12M ÷ 16,000 px ≈ 750 ops/pixel, EVERYTHING included.` Four structural facts set the floor:
+`12M ÷ 16,000 px ≈ 750 ops/pixel, EVERYTHING included.` Five structural facts set the economics —
+F1/F3 changed completely on the owner's 2026-07-04 device directive:
 
-- **F1 — the write floor.** Copying one runtime 8-bit pixel to a compile-time fb address costs
-  **284 ops (`xor_zero`)**; 16,000 px × 284 = **4.55M just for writes — 38% of the whole budget**.
-  Runtime-pointer writes (1,564/px) are banned from every hot path. Nothing reduces the write COUNT
-  except lower resolution (pV3) or fewer bits per pixel (pV2 — 16-color halves it to 142/px).
-- **F2 — present is FREE.** `present.update_screen_reg` (present.fj:42, the 0x06 command) hands the
-  device the `hex.vec 2` framebuffer ADDRESS and the device DMA-reads it — there is NO per-pixel
-  present copy. The rasters write the final frame in place; the residue line covers only init/input.
-- **F3 — the known-zero convention.** `xor_zero` assumes a zero destination — true today (fresh run,
-  zero-init fb; the 462.7M baseline banks the same assumption in pass-2), and the 12M target is
-  measured under that convention. ⚠ **M14 liability, on record:** a LOOPING game re-renders into a
-  dirty fb — writes become clear+set (~×2 ⇒ +~4.5M at full res) or need a per-frame clear (same
-  cost). The valves (pV2/pV3) cover it; decide at M14, not now.
-- **F4 — exact per-row distance-light is unaffordable.** zrow needs `zidx = (ph·yslope[y])>>20`; the
-  exact `fixed_mul 8,4` is 11.5k — even at ~1,400 computes/frame that is 16M, alone over budget. The
-  ledger FORCES block-FP zrow (~2.5-3.5k, band boundaries may shift ≤1 row) — a [re-bless] with a
-  PNG gate. (Unlike the rejected Phase-2 bucketing, every row keeps its own distance — only the
-  BOUNDARY ROUNDING between light bands moves; vertical replication cannot occur.)
+- **F5 — THE DEVICE IS PROGRAMMABLE (the v4 game-changer).** We control flipjump 1.5.1's ScreenIO:
+  new commands may be added, and pixels may leave the program as IO output bits (flipping IO/IO+1)
+  instead of framebuffer register writes. The device decodes host-side in Python — **zero fj ops**.
+- **F1′ — the write economics under F5.** Copying a RUNTIME byte to a register/fb costs ~284 (two
+  nibble dispatches) — that was v3's 4.55M floor. But OUTPUTTING a compile-time-KNOWN value costs
+  ~1 op/bit, and every dispatch-table cell knows its value at bake time. So the hot tables are
+  regenerated as **EMIT tables** (the handler flips its baked byte into IO instead of xoring a
+  result register — the owner's instruction verbatim; `generate_dispatch_table_fj`'s per-entry
+  handler with a different body, lut_generator.py:321). A runtime color OUTPUT ≈ one dispatch
+  (~100-150); with a device-side RUN command (`[count][color]`), pixel cost becomes **per RUN, not
+  per PIXEL** — and this frame is naturally run-structured (light bands = row-runs per column, W1
+  walls = one run per column): 16,000 pixels ≈ **~1,300-2,000 runs**. The v3 write floor DISSOLVES.
+- **F2 — present is FREE** (unchanged mechanism, extended): the device already DMA-reads
+  (present.fj:42); under F5 it additionally decodes the run stream into its own buffer and presents.
+- **F3 — RESOLVED by F5.** With no fj framebuffer at all, the known-zero write convention and the
+  M14 dirty-frame liability (v3's +~4.5M/frame) disappear — every frame streams complete and the
+  device rebuilds its buffer. Nothing to decide at M14.
+- **F4 — block-FP light bands still forced** (unchanged): exact per-row zrow muls (11.5k each) are
+  unaffordable at any count the frame needs; the band machinery = one reciprocal per visplane +
+  threshold walks over the baked `yslope` — ONE [re-bless], PNG-gated (band boundaries may shift
+  ≤1 row; rows keep distinct distances — not the rejected Phase-2 vertical replication).
 
-### The ledger (static E1M1 spawn frame; measured convention = the 462.7M baseline's)
+### The ledger v4 (static E1M1 spawn frame; ops convention unchanged)
 
 | Line | Stage | Budget | Basis |
 | --- | --- | --- | --- |
-| L1 | floor+ceiling pixel writes (10,381 × 284) | 2.95M | F1 |
-| L2 | wall pixel writes (5,619 × 284) | 1.60M | F1 |
-| L3 | composite-pass overhead (classify/dispatch/glue over 16k cells) | ≤ 1.80M | pC variant choice |
-| L4 | lit colors (block-FP zrow + cm, span/band-coherent, ~0.4-1.4k computes) | ≤ 1.50M | F4 |
+| LS1 | column-stream raster: per-run `byte.emit`+`cm.emit` + clip/advance logic (~1.3-2k runs × ~600-900) | ≤ 2.20M | F1′/F5 |
+| LS2 | lit-band machinery (1 block-FP recip + yslope threshold walk + band lists, ~20-30 visplanes) | ≤ 0.80M | F4 |
 | L5 | pass-1 geometry, until-full (x_range + projection + claim) | ≤ 2.00M | pG |
 | L6 | BSP walk, until-full + abort (narrowed muls) | ≤ 1.20M | pG |
-| L7 | init + input parse + clear_planes + present residue | ≤ 0.50M | F2 |
-| L8 | slack (estimate error, @ ripple, misc) | 0.45M | — |
+| L7 | init + input parse + stream/protocol residue | ≤ 0.50M | F2 |
+| L8 | slack / headroom | 5.30M | — |
 | — | **TOTAL** | **12.00M** | — |
 
-**Valve triggers (pV):** if after pG the measured frame is >12M, apply valves in look-cost order until
-under: **pV1 row-dup floors** (−~½ of L3+L4's floor share ≈ −1.0-1.5M), **pV2 16-color mode** (halves
-L1+L2: −2.3M — owner permission, big look change), **pV3 80×50** (quarters L1-L4: −~5M — the only
-write-COUNT cutter; most invasive, every golden re-blesses). The ledger with pV1 alone covers a
-~1.5M overshoot; pV2 covers ~3.8M; the target is reachable without pV3 if L3-L6 land on their lines.
+**The headroom is the point:** v3 closed at 12.00M with 0.45M slack and leaned on the valves; v4
+budgets ~6.7M of work against the 12M line — a ~1.8× estimate-error cushion. The valves become
+INSURANCE, not plan: **16-color is owner-approved but likely unnecessary** (under RLE the color cost
+is per-run, so the full 256-palette look survives); **row-dup only if it looks unstretched** (owner
+constraint, PNG gate); 80×50 is almost certainly moot.
 
-**[M14] upside (not counted):** the dispatch-incremental walk + affine maintenance replaces L5+L6's
-until-full work with ~1-2M steady-state — headroom, not a dependency. The plan no longer NEEDS the
-M14 number to claim 12M; it is the buffer that keeps 12M true while walking.
+**[M14] upside (not counted):** the dispatch-incremental walk + affine maintenance replaces L5+L6
+(~3.2M) with ~1-2M while walking — on top of the 5.3M slack.
 
-### Expected ladder v3 (estimates; re-anchor on the measured number at every rung)
+### Expected ladder v4 (estimates; re-anchor on the measured number at every rung)
 
 | Rung | What | Tag | Frame after (est) | fps @280M |
 | --- | --- | --- | --- | --- |
 | — | baseline | — | 462.7M | 0.605 |
 | M13p0 | measure split + stub split + until-full counts + PNG bake-off → owner picks | none | 462.7M | — |
-| M13p1 | fj flat-colored floors (`draw_span_flat`) | [exact vs flat goldens] | **~225-240M** | ~1.2 |
-| M13p4a | tiny 1×1/1×16 per-seg wall textures — DELETE the 793k-texel table | [re-bless, PNG-gated] | ~220-235M, **build ~10min → ~1-2min** | ~1.25 |
+| M13p1 | fj flat-colored floors (`draw_span_flat` — interim kernels, big fast win) | [exact vs flat goldens] | **~225-240M** | ~1.2 |
+| M13p4a | tiny 1×1/1×16 per-seg wall textures + `col_lit` — table DELETED, **build ~10min → ~1-2min** | [re-bless, PNG-gated] | ~220-235M | ~1.25 |
 | M13p2 | pattern floors (only if the owner picks a pattern) | [re-bless, PNG-gated] | +~5-10M | ~1.2 |
-| (M13p3a-c) | OPTIONAL interim floor squeezes — shippable wins while pC is prototyped | [exact] | ~205-220M | ~1.3 |
-| M13pC1 | composite-pass PROTOTYPE: variants measured on the square room, idioms de-risked | none (scratch) | — | — |
-| M13pC2 | composite pass, FLOORS+CEILINGS (plane pass + classify walk deleted) | [re-bless: block-FP zrow, PNG-gated] | **~160-175M** (floor ≈ L1+L3f+L4) | ~1.7 |
-| M13pC3 | walls folded in — old pass-2 unroll DELETED (program −~16M words, span↓, @↓) | [exact vs pC2 goldens] | **~130-150M** | ~2 |
+| (M13p3a-c) | OPTIONAL interim floor squeezes — only if pS stretches over sessions | [exact] | ~205-220M | ~1.3 |
+| M13pS0 | ScreenIO column-stream protocol: owner sign-off, device impl + tests, EMIT tables | host+device, no frame change | — | — |
+| M13pS1 | stream prototype: one column end-to-end, per-run cost MEASURED | none (scratch) | — | — |
+| M13pS2 | THE COLUMN-STREAM COMPOSITE — fb, pass-2 unroll (~16M words) and ALL plane machinery DELETED | [re-bless once: block-FP bands, PNG-gated] | **~110-140M** | ~2.2 |
 | M13pG1 | walk+pass-1 FULL-ABORT (stop the walk when all columns claimed) | [exact] | −(p0-measured post-full share) | — |
-| M13pG2-5 | until-full geometry crush to L5+L6 (narrow muls, cheap x_range, residue) | mixed | **~14-20M** | ~15 |
-| M13pV | valves, only if >12M: pV1 row-dup → pV2 16-color → pV3 80×50 | [re-bless, owner-gated] | **≤ 12.0M** | **≥ 23** |
-| M13p8 | flip defaults, re-bless, merge to main | — | — | — |
+| M13pG2-5 | until-full geometry crush to L5-L7 (narrow muls, cheap x_range, residue) | mixed | **~8-14M** | ~23 |
+| M13pV | INSURANCE only, if >12M: row-dup (unstretched-looking) / 16-color (approved) / 80×50 | [re-bless, owner-gated] | **≤ 12.0M** | **≥ 23** |
+| M13p8 | flip defaults, ship the flipjump device change, re-bless, merge to main | — | — | — |
 
-**Where the convergence claim now lives:** L1+L2 (4.55M) are arithmetic, not estimates. L3+L4 are
-bounded by the pC variant that pC1 MEASURES before the 16k unroll is committed. L5+L6 are bounded by
-the until-full counts that p0 measures host-side (the walk/geometry cost collapses to "work done
-before the screen fills" once pG1 lands). L7 is F2 plus small change. If any line's measured reality
-exceeds its budget, the delta is named and a valve covers it — **the ladder cannot silently stall.**
+**Where the convergence claim lives (v4):** LS1's per-run cost is MEASURED at pS1 before pS2 is
+built; LS2's band machinery is measured standalone at pS0/pS1; L5+L6 are sized by p0's host-side
+until-full counts before any fj geometry work (pG1 collapses walk/geometry to "work done before the
+screen fills"); L7 is F2 plus small change. With **5.3M of slack**, any single line missing by 2-3×
+is absorbed without touching a valve — **the ladder cannot silently stall, and the valves are
+insurance, not plan.**
 
 ---
 
@@ -463,14 +475,14 @@ M13p0, SKIP this task entirely — the ladder proceeds to M13p3 unchanged.
 
 ---
 
-## Task M13p3 (OPTIONAL interim): cheap floor squeezes — shippable wins while pC is prototyped
+## Task M13p3 (OPTIONAL interim): cheap floor squeezes — shippable wins while pS is prototyped
 
 After p1/p2 the floor pass ≈ 65M: classify walk ~23M + span setup ~25M + pixels ~20M. The a-c
 squeezes bottom out around ~45M (the runtime-pointer write pins the pixels at ~1.9k each) and are
-ALL deleted by M13pC2 — do them only as interim shippable wins if pC1's prototyping stretches over
-multiple sessions; skipping straight from p1/p4a to pC is the faster path to 12M. **Exception: p3b's
-sector-key machinery is NOT throwaway — the same baked per-column key is pC's lit-cache key; building
-it here de-risks pC.**
+ALL deleted by M13pS2 — do them only as interim shippable wins if pS0/pS1 stretch over multiple
+sessions; skipping straight from p1/p4a to pS is the faster path to 12M. **Exception: p3b's
+sector-key machinery is NOT throwaway — the same baked per-column key is how the pS2 emitter selects
+a column's visplane band lists; building it here de-risks pS.**
 
 - [ ] **p3a [exact] per-ROW `rowbase` cache.** In `render_planes_spans` (frame_render.fj:768): compute
   `rowbase = y*VIEW_W` ONCE per row (100 `mul_const`/frame instead of 1,357), keep it in a global; in
@@ -499,9 +511,9 @@ it here de-risks pC.**
 - [ ] **Measure after each sub-rung** (`scripts/measure_frame.py --floor-mode flat`), record, commit
   each separately (`"M13p3a: ..."` etc.).
 
-*(The former p3d "cell pass" is superseded by **Task M13pC** below — the 12M ledger forces the cell
-pass to be the ONE composite raster for floors AND walls, with a per-cell budget the span design
-can't meet; see pC for the full design and its measured variant choice.)*
+*(The former p3d "cell pass" is superseded by **Task M13pS** below — under the v4 device directive
+the raster is a per-column RUN STREAM, no cell unroll at all; the v3 cell-pass design survives only
+as the M13pC fallback.)*
 
 ---
 
@@ -523,12 +535,12 @@ that is a stop-the-line conversation, not a silent re-plan. The two wall wins ar
   793,344 → ~70-1,120 texels. Bless new goldens (host + fj capstone). Ops win small (@ ripple only);
   the prize: **assemble ~605s → ~1-2min (measure it), span −~3.5M words — EVERY LATER RUNG ITERATES
   ~5× FASTER.** Do this rung EARLY (right after p1, per the ladder table) — it buys iteration speed
-  for pC/pG.
+  for pS/pG.
 - [ ] **The write-only wall raster is NOT a separate rung anymore** — with a 1×1 texel the wall lit
   color is COLUMN-CONSTANT (one `cm.apply` per ~160 claimed columns, computed in
   `column_render_params`, stored as a 2-nibble `col_lit`); the per-pixel raster that consumes it is
-  **M13pC3** (the composite pass). p4a only needs to additionally store `col_lit` (and, for W2, the
-  16 band texels' lit variants) so pC3 can consume it.
+  **M13pS2** (the column-stream composite; pC3 in the fallback). p4a only needs to additionally store `col_lit` (and, for W2, the
+  16 band texels' lit variants) so pS2 can consume it.
 - [ ] **From p4a on, report the TWO numbers** (static frame; static minus the M14-incremental-
   eligible walk/cull share from the p0 stub split) in every measurement.
 
@@ -539,9 +551,84 @@ goldens, blessed after the p0 PNG), fj square 4-viewpoint + E1M1 capstone.
 
 ---
 
-## Task M13pC: THE COMPOSITE PASS — one unrolled raster for ceiling/wall/floor (ledger L1-L4)
+## Task M13pS: THE COLUMN-STREAM COMPOSITE — pixels leave as a device RUN stream (LS1+LS2)
 
-The 12M pixel engine. Replaces BOTH the wall pass-2 (16K `pixel_tramp`+`compare_y` trampoline) and
+The v4 pixel engine (supersedes the v3 composite fb raster, kept below as fallback). Everything the
+frame shows is emitted as a **column-major RLE run stream** to a new ScreenIO command; the device
+(host-side Python — zero fj ops) decodes runs into its buffer and presents. DELETED outright at pS2:
+the `hex.vec 2` framebuffer, the 16K pass-2 unroll (~16M words per the M12 bisect),
+`render_planes_spans`/`plane_col`/`draw_span_flat`(/`_pat`) — the program shrinks by ~16M+ words on
+top of p4a's table deletion (span↓, @↓, assemble↓), and NO 16k-cell unroll replaces it: the emitter
+is a 160-column loop.
+
+### The protocol (proposed; pS0 gets the owner's explicit sign-off before implementation)
+
+- `0x07` **BEGIN_FRAME_STREAM** — the device resets its cursor to (column 0, row 0).
+- Then, for each of the 160 columns in order: runs of `[count:1 byte][color:1 byte]`; the counts sum
+  to exactly H=100 per column; the device advances to the next column when one fills and
+  auto-presents after column 159 (no separate present command — confirm with the owner).
+- Colors stay 8-bit/256-palette: under RLE the color cost is per-run, so 16-color (approved) is not
+  needed for ops — it remains a pV valve only.
+- Future, NOT built now (M16 sprites/HUD): the owner's `write_pixel` suggestion
+  (`0x08 [x:1][y:1][color:1]`) as a sparse overlay on the streamed frame.
+
+### fj-side machinery (pS0) — the owner's "IO+0/1 flips instead of xoring to a result variable"
+
+1. **EMIT tables**: `generate_dispatch_table_fj` (lut_generator.py:321) gains a `handler="emit_io"`
+   mode — each per-entry cell flips its BAKED byte's bits straight into IO (~8-12 ops in-cell,
+   ~1 op/bit) instead of xor-copying to a register. Regenerate on top of it:
+   - `cm.emit idx` — the colormap variant of `cm.apply` (compile_colormap, texturecompiler.py:126):
+     one dispatch on `(zrow, pal)` and the LIT byte is already on the wire. Color output ≈ ~150-400
+     incl. index build (vs v3's cm.apply 399 + xor_zero 284 ≈ ~680).
+   - `byte.emit v` — a 16² (256-cell) byte-output table for run COUNTS (≤100). Emitting a runtime
+     byte drops from ~230-280 (bitwise) to ~one dispatch ≈ ~100-150.
+2. **The device side**: implement the command for BOTH the graphical ScreenIO and the test
+   `InMemoryScreen`, with a pure-Python unit test (synthetic stream → expected pixel grid).
+   ⚠ Delivery mechanics: prototype as an in-repo `InMemoryScreen` SUBCLASS (tests already pass
+   `io_device=` explicitly, so byte-exact gates need NO package edit); upstream the command into the
+   owner's flipjump 1.5.1 before M13p8 so the real viewer decodes it — keep the package diff
+   in-repo (`patches/`) either way.
+
+### The emitter (pS2) — per column x, unrolled ×160 (compile-time col-array addresses, small bodies)
+
+Read `col_cexcl / col_fstart / col_lit / col_key` (pass-1 outputs). Emit three windows:
+1. **CEILING `[0, cexcl)`**: walk the column's ceiling-visplane BAND LIST (from LS2 — zidx is
+   monotone in y, so ~≤14 runs): per band overlapping the window,
+   `byte.emit (min(band_end, cexcl) − cur)` then `cm.emit (band_zrow, base)`.
+2. **WALL `[cexcl, fstart)`**: ONE run — `byte.emit (fstart − cexcl)` + `cm.emit` of `col_lit`'s
+   index (W1). W2's ≤16 vertical bands reuse the SAME band-walk shape (costed: ~+1.5-2M — the
+   bake-off pick decides whether it fits LS1).
+3. **FLOOR `[fstart, 100)`**: the floor-visplane band list, as (1).
+Per column ≈ ~5-12 runs × ~600-900 (two emits + narrow clip/advance ops) ≈ ~5-8k ⇒ **LS1 ≈
+1.0-1.6M**. The band lists come from the SAME lit-band machinery as v3 (one block-FP reciprocal per
+visplane — `slopediv_recip_table` machinery — + a threshold walk over the baked monotone `yslope`,
+~25k per visplane × ~20-30 ⇒ **LS2 ≈ 0.5-0.8M**; the F4 [re-bless], PNG-gated).
+
+### Sub-rungs (each gated)
+
+- [ ] **pS0 — protocol + device + tables (ships nothing visible).** Owner signs the protocol (and
+  the auto-present question); implement the subclass device + pure-Python decode tests; add
+  `handler="emit_io"` to `generate_dispatch_table_fj` + regenerate `cm.emit`/`byte.emit`; a micro fj
+  test emits a known 3-run column and asserts the device grid. MEASURE `byte.emit`/`cm.emit`
+  standalone; record in the appendix.
+- [ ] **pS1 — one-column prototype (scratch).** A synthetic column (fixed cexcl/fstart/band list)
+  through the REAL emitter body; byte-exact vs a hand-computed column; MEASURE per-run and
+  per-column cost → appendix. **Gate: LS1's line must hold here, before pS2 is built.**
+- [ ] **pS2 — the composite stream ships.** Wire the 160-column emitter after pass-1; DELETE fb +
+  pass-2 + all plane machinery; oracle re-expressed via the same recip+threshold band arithmetic;
+  **re-bless the flat goldens once** (F4, PNG-gated). Gates: square 4-viewpoint + E1M1 capstone,
+  byte-exact = the DEVICE's decoded grid equals the oracle frame. Measure (expect **~110-140M**;
+  LS1+LS2 now real); record the new span/assemble (expect big drops); commit.
+
+---
+
+## Task M13pC (FALLBACK — build ONLY if the pS protocol is rejected): the v3 composite fb raster
+
+*(Retained verbatim from plan v3; its L1-L4 ledger references are the v3 ledger — see `18330ca`.
+If the owner declines device-side RLE decoding, this is the no-device-change path to ~12-14M with
+the v3 valves. Do NOT build both.)*
+
+The v3 pixel engine. Replaces BOTH the wall pass-2 (16K `pixel_tramp`+`compare_y` trampoline) and
 the whole plane machinery (classify walk + span leaves) with ONE pass over the 16,000 cells, every
 fb write at a **compile-time address** (`xor_zero`, 284 — F1). Program effect: the old pass-2 unroll
 (~16M words per the M12 bisect) and the plane code are DELETED; the new cells are ~150-350 words each
@@ -618,8 +705,9 @@ fj stays byte-exact vs the NEW goldens.
 
 ## Task M13pG: geometry to the ledger — L5 (pass-1 ≤ 2.0M) + L6 (walk ≤ 1.2M) + L7 (residue ≤ 0.5M)
 
-After pC3 the frame ≈ pixels (L1-L4, ~7.9M) + the ENTIRE old wall/geometry lump minus pass-2
-(~100-130M — p0's stub split has the real number). This campaign crushes it to ~3.7M. The structural
+After pS2 the frame ≈ the stream raster (LS1+LS2, ~2-3M) + the ENTIRE old wall/geometry lump minus
+pass-2 (~100-130M — p0's stub split has the real number). This campaign crushes it to L5+L6+L7 ≈
+3.7M, landing the frame at **~8-14M — the 12M gate is expected to CLOSE here** (pV is insurance). The structural
 insight: **front-to-back walk + the `full` flag mean all geometry cost after the screen fills is pure
 waste** — Phase 1a already frets SEGS post-full, but the WALK (node side tests, subsector dispatch)
 runs to completion. p0's Step 3c counts say how much is post-full (expected: most of it — the 681-node
@@ -648,8 +736,9 @@ walk visits everything; a spawn view fills within a fraction).
   whatever p0's residue run shows above ~0.5M (candidates: the stdin digit parser, table init loops).
 - [ ] **pG5: `_bsp_as_code` single-emission** (each leaf emitted twice — M12 finding): mostly a
   program/span/@ win; do it here if pG1's guard doubled per-node code or the span gate tightens.
-- [ ] Measure + commit each; record every SKIP with its number. **Exit criterion: frame ≤ ~14-20M
-  and L5+L6+L7 each at/below its line at ALL THREE p0 viewpoints.**
+- [ ] Measure + commit each; record every SKIP with its number. **Exit criterion: frame ≤ 12.0M
+  (expected ~8-14M) with L5/L6/L7 each at/below its line at ALL THREE p0 viewpoints; if >12M, enter
+  pV with the overshoot named per line.**
 
 **Explicitly deferred to M14 (unchanged owner decision):** the dispatch-incremental walk + affine
 maintenance. Post-pG they become pure headroom (~L5+L6 → ~1-2M while walking) — the 12M static claim
@@ -657,38 +746,39 @@ does NOT depend on them.
 
 ---
 
-## Task M13pV: the valves — apply IN ORDER until the measured frame ≤ 12.0M
+## Task M13pV: the valves — INSURANCE ONLY (entered only if pG exits > 12.0M)
 
-Only entered if pG's exit measurement is > 12M. Each valve's arithmetic is exact (F1: only pV3 cuts
-the write COUNT); each is an oracle mode + PNG gate + re-bless, same cycle as every rung. All are
-owner-sanctioned in principle ("can sacrifice looks") but pV2/pV3 need an explicit fresh OK.
+Under the v4 ledger (5.3M slack) these should not fire; they stay fully specified so an overshoot
+has a named, sized answer. Each is an oracle mode + PNG gate + re-bless.
 
-- [ ] **pV1 — row-dup floors [re-bless].** The composite renders even rows' plane cells and writes
-  each value to rows y and y+1 (two `xor_zero`s, both compile-time — in variant C the odd-row cell
-  simply joins the chain with the same source reg). Write count UNCHANGED (F1); saves the odd rows'
-  share of L3 glue + halves the band-walk rows. **≈ −0.7-1.5M.** Look: floors slightly blockier
-  vertically; walls untouched.
-- [ ] **pV2 — 16-color mode [re-bless + owner permission].** Quantize the palette to 16 colors
-  (colormap folds to 4-bit) → every pixel write is ONE nibble: `xor_zero` 284 → ~142. **L1+L2:
-  4.55M → 2.3M (−2.3M).** The single biggest valve. Look: Doom's 256-palette shading drops to 16 —
-  big; bake the 16 entries from the E1M1 histogram and PNG-gate. (Also halves the F3 dirty-frame
-  liability for M14.)
-- [ ] **pV3 — 80×50 half-resolution [re-bless + owner permission].** The only write-COUNT cutter:
-  4,000 px × 284 = 1.14M writes; L1-L4 all quarter (**≈ −6M from the pixel side**). `cfg` change
-  (VIEW_W/VIEW_H) rippling through every LUT + golden — the most invasive change in the plan; the
-  present device init takes the new W/H (F2 — the device renders whatever geometry init_screen
-  declares). Use only if pV1+pV2 fall short (they shouldn't: ledger math says pG-exit ~14-20M − pV1
-  − pV2 ≈ 10.5-16.5M... if the top of that range holds, pV3 IS the closer — hence it stays in the
-  plan, fully specified, not hand-waved).
-- [ ] Also available to the owner (orthogonal, no re-bless): render-1-of-N tics — an fps
-  multiplier at M14, not an ops/frame reduction; listed for completeness, does NOT satisfy the 12M
-  ops/frame target.
+- [ ] **pV1 — row-dup floors [re-bless, PNG-gated].** Halve the band-walk rows and emit each floor
+  run's count doubled over row PAIRS (in the run stream this is nearly free to express — counts just
+  come from a half-resolution band walk). **⚠ Owner constraint (2026-07-04, verbatim intent): only
+  if it does NOT look vertically stretched** — the PNG bake-off decides; if it reads stretched,
+  skip to pV2. Saves ~half of LS2 + a slice of LS1 ≈ **−0.5-1.0M** (less than v3 promised — the
+  stream already collapsed per-pixel cost, so there is less for row-dup to save).
+- [ ] **pV2 — 16-color mode [re-bless; owner APPROVED 2026-07-04].** Under RLE this no longer
+  halves a 4.55M write bill (colors are per-run) — it saves only ~a nibble per color emit,
+  **≈ −0.1-0.3M**, at a big look cost. Approved but demoted: use only if pV1 fell short AND the
+  overshoot is small. (Its v3 rationale — halving fb writes — died with the fb.)
+- [ ] **pV3 — 80×50 half-resolution [re-bless + fresh owner permission].** Still the biggest
+  hammer: halves the columns (LS1, L5's per-column work) and the band rows (LS2) ⇒ **≈ −1.5-2.5M**
+  plus geometry ripple. Most invasive (cfg + every LUT + every golden). Only for a large overshoot.
+- [ ] Orthogonal, no re-bless: render-1-of-N tics — an M14 fps multiplier, does NOT reduce
+  ops/frame; listed for completeness only.
+
+*(Note the inversion vs v3: the stream design flipped the valve order's value — pV1/pV3 now save
+run-STRUCTURE work, not writes, and pV2 barely matters. If pG somehow exits far above 12M, the
+first response is to re-measure LS1/L5/L6 against their lines, not to burn look.)*
 
 ---
 
 ## Task M13p8: endgame — flip defaults, re-bless the shipped goldens, merge to main
 
 - [ ] Flip `build_doom` defaults to the owner-chosen `floor_mode`/`wall_mode` (+ any pV valves).
+- [ ] **Ship the ScreenIO change:** upstream the column-stream command into flipjump 1.5.1 (owner's
+  package) so the real viewer decodes it; pin the version; keep the in-repo subclass as the test
+  device and the diff under `patches/`.
 - [ ] The deferred merge checklist (owner policy): re-enable the 2 skipped E1M1 tests in
   `tests/fj/test_wall_render.py`; update `E1M1_GOLDEN` `0b817e4a…` → current; fix the R0-gate span
   bound in `tests/host/test_e1m1_integration.py`; full suite green (heavy gates in background).
@@ -710,8 +800,10 @@ owner-sanctioned in principle ("can sacrifice looks") but pV2/pV3 need an explic
 | `segstub` → walk skeleton (L6 raw) | | p0 |
 | `xrstub` → x_range+cull bulk (L5 raw, part) | | p0 |
 | until-full counts: nodes / segs before all-claimed (3 viewpoints) | | p0 step 3c |
-| pC1: per-cell cost, variant A vs C; band machinery standalone | | pC1 |
-| pC1: patched-chain enter/exit idiom cost | | pC1 |
+| pS0: `byte.emit` / `cm.emit` standalone cost | | pS0 |
+| pS0: protocol signed by owner (auto-present? counts encoding?) | | pS0 |
+| pS1: per-run + per-column emitter cost; band machinery standalone | | pS1 |
+| (fallback only) pC1: per-cell cost, variant A vs C; patched-chain idiom | | pC1 |
 | owner picks (floor / wall / #9a+#11 bless) | | p0 |
 | p1 flat floors | | p1 |
 | … | | |
@@ -725,13 +817,14 @@ owner-sanctioned in principle ("can sacrifice looks") but pV2/pV3 need an explic
   for `floor_mode="textured"` (encoded in the task).
 - Rungs p2/p4a/pV cannot carry final code before the owner's p0 pick — each instead carries the exact
   candidate formulas (P1-P3/W1-W2, specified to the texel) and the fixed implementation shape, so the
-  pick drops in verbatim. pC1's variant choice is the other deliberate late-binding — bound by a
-  measurement, not a placeholder.
+  pick drops in verbatim. The other deliberate late-bindings: the pS0 protocol sign-off (the owner
+  owns the device) and pS1's measured per-run cost — both bound by an explicit gate, not a
+  placeholder.
 - Estimates use isolated-kernel op costs, which the findings doc shows UNDERESTIMATE full-renderer
   cost (~2.5× @ gap) — hence every rung re-anchors on `measure_frame.py`, and no later rung's
   decision rule depends on an estimate alone.
 
-## Adversarial gap review (second pass, 2026-07-03 — corrections already folded into the tasks above)
+## Adversarial gap review (v2 pass 2026-07-03 G1-G10; v3 pass 2026-07-03 G11-G13; v4 pass 2026-07-04 G14 — all corrections folded into the tasks above)
 
 | # | Gap found | Type | Resolution (in-plan) |
 | --- | --- | --- | --- |
@@ -748,3 +841,4 @@ owner-sanctioned in principle ("can sacrifice looks") but pV2/pV3 need an explic
 | G11 | **The known-zero fb convention is load-bearing and frame-scoped** (found in the v3 hard-12M pass): `xor_zero` writes assume a zero destination — true per fresh run, but a LOOPING game (M14) re-renders into a dirty fb: writes become ~×2 or need a ~4.5M/frame clear. Any 12M/frame claim silently banked this. | correct | Named as ledger fact **F3** with the M14 liability on record; pV2/pV3 sized to cover it; decision explicitly deferred to M14. |
 | G12 | **The write floor is arithmetic, not design**: 16,000 × 284 = 4.55M (38% of 12M) no matter how clever the kernels; and the exact per-row zlight mul (11.5k) is unaffordable at ANY compute count the frame needs — so full-res 12M FORCES both compile-addr writes everywhere AND block-FP zrow ([re-bless]). The v2 plan treated the cell pass and the zrow change as optional. | arithmetic | The LEDGER section (F1, F4) makes both forced moves explicit; pC2 carries the one-time flat-golden re-bless with the PNG gate and the no-vertical-replication argument. |
 | G13 | The v2 endgame (p4b/p5/p6) still spent per-cell classify + per-column runtime-pointer loops that can't meet 750 ops/px; and the walk ran to completion after the screen filled (Phase 1a only frets SEGS post-full — the 681-node walk itself never stops). | design | v3 restructures: **pC** unified composite pass (variants A/B/C, measured at pC1; variant C's patched-window chains reuse the M5/M6 dispatch-code + R4/R5x runtime-write idioms); **pG1** full-abort guards every node on the existing `full` flag; p0 step 3c measures the until-full share host-side before any fj work. |
+| G14 | **v3 optimized inside a wrong constraint** (v4 pass, on the owner's device directive): the 284/px write floor exists only because pixels were copied as runtime values into an fj framebuffer — but the ScreenIO device is OURS to extend, dispatch-table cells can OUTPUT their baked bytes for ~1 op/bit, and a device RUN command makes cost per-run (~1.3-2k runs) instead of per-pixel (16k). F1 dissolved, F3 (and its M14 dirty-frame liability) dissolved with the fb itself, the 16k-cell unroll became unnecessary, and the ledger gained 5.3M of slack. | constraint | v4: **F5/F1′** in the ledger; **pS** (protocol sign-off → EMIT tables → one-column prototype → composite stream) replaces pC, which is retained as the no-device-change fallback; pV demoted to insurance with pV2's rationale re-derived (it barely matters under RLE). |

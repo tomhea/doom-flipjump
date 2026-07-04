@@ -809,17 +809,19 @@ first response is to re-measure LS1/L5/L6 against their lines, not to burn look.
 | Measurement | Value | Rung / date |
 | --- | --- | --- |
 | baseline full frame | 462,742,550 | pre-p0 (2026-07-03) |
-| `--ablate planes` → floor pass | | p0 |
-| `--ablate planes,pass2` → pass-2 | | p0 |
-| `--ablate planes,pass2,pass1` → init+input+present residue (L7 raw) | | p0 |
-| `segstub` → walk skeleton (L6 raw) | | p0 |
-| `xrstub` → x_range+cull bulk (L5 raw, part) | | p0 |
-| until-full counts: nodes / segs before all-claimed (3 viewpoints) | | p0 step 3c |
+| `--ablate planes` → floor pass | *running (background)* | p0, 2026-07-04 |
+| `--ablate planes,pass2` → pass-2 | *running (background)* | p0, 2026-07-04 |
+| `--ablate planes,pass2,pass1` → init+input+present residue (L7 raw) | *running (background)* | p0, 2026-07-04 |
+| `--ablate planes,pass2,segstub` → walk skeleton (L6 raw) | *running (background)* | p0, 2026-07-04 |
+| `--ablate planes,pass2,xrstub` → walk+entry, no atans (L6+part-L5) | *running (background)* | p0, 2026-07-04 |
+| ⚠ correction (mechanics validation, square room): `segstub`/`xrstub` ALONE (not combined with `planes,pass2`) inflate wildly (137.97M/137.98M vs 123.1M baseline) — the plane pass renders the WHOLE screen as floor when `col_fstart` stays 0 (garbage init). Always combine stubs with `planes,pass2`. | fixed in `scripts/measure_frame.py` usage | p0 |
+| **until-full counts (E1M1, host-side, step 3c, 3 viewpoints):** spawn 682 subsectors/463 until-full (32.1% post-full), 575 segs visited/432 until-full (24.9% post-full), 160 pass x_range/116 until-full · rot45: 205/682 until-full (69.9% post-full), 306/575 segs (46.8% post-full) · othersector: 212/682 (68.9% post-full), **only 74/575 segs visited until-full (87.1% post-full!)**. Confirms pG1 full-abort is a large, viewpoint-dependent win — worst case (othersector) wastes work on 501 of 575 segs. | measured | p0, 2026-07-04 |
 | pS0: `byte.emit` / `cm.emit` standalone cost | | pS0 |
-| pS0: protocol signed by owner (auto-present? counts encoding?) | | pS0 |
+| pS0: protocol signed by owner (auto-present? counts encoding?) | **SIGNED 2026-07-04**: `flush_mode` config byte in `init_screen`, default per-frame; owner: protocol is ours to keep evolving | p0 |
 | pS1: per-run + per-column emitter cost; band machinery standalone | | pS1 |
 | (fallback only) pC1: per-cell cost, variant A vs C; patched-chain idiom | | pC1 |
-| owner picks (floor / wall / #9a+#11 bless) | | p0 |
+| owner picks (floor / wall / #9a+#11 bless) | *bake-off PNGs rendered, awaiting owner pick* | p0, 2026-07-04 |
+| #9a+#11 bless diff (measured, not just re-quoting the commit messages): square 0/16000 px changed (0.0%, confirms axis-aligned segs ⇒ affine==exact divide, as `d383016` claimed); E1M1 spawn 1,049/16,000 px changed (6.56%), max raw palette-index delta 246, mean delta 23.16 (raw index deltas are NOT a perceptual distance — palette indices are categorical; the diff-highlight PNG is the real evidence) | measured | p0, 2026-07-04 |
 | p1 flat floors | | p1 |
 | … | | |
 

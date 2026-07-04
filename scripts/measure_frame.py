@@ -1,0 +1,71 @@
+"""M13p0 — measure E1M1 (or square-room) spawn ops/frame through the SHARED emitter, with component
+ablation (see doomfj.wall_renderer.emit_wall_renderer's `ablate` kwarg for the full mode list).
+
+Usage:
+    python scripts/measure_frame.py                          # full frame (sanity: should be ~462.7M for E1M1)
+    python scripts/measure_frame.py --ablate planes
+    python scripts/measure_frame.py --ablate planes,pass2,pass1
+    python scripts/measure_frame.py --ablate segstub
+    python scripts/measure_frame.py --wad tests/fixtures/square_room.wad --map MAP01 --asset tests/fixtures/freedoom_assets.wad
+
+E1M1 assemble is ~605s (> the Bash tool's 600s timeout) -- run this via run_in_background with NO
+shell `timeout` wrapper; the harness notifies on completion.
+"""
+import argparse
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
+
+import flipjump as fj
+from doomfj.config import Config
+from doomfj.fixedpoint import _signed
+from doomfj.harness import W
+from doomfj.reference_model import spawn_state
+from doomfj.wad import WadFile
+from doomfj.wall_renderer import emit_wall_renderer
+from tests.fj.test_wall_render import _ScreenWithInput
+
+SRC = [ROOT / "src/fj" / f for f in
+       ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj")]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ablate", default="", help="comma list: planes,pass2,pass1,segstub,xrstub")
+    ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
+    ap.add_argument("--map", default="E1M1")
+    ap.add_argument("--asset", default=None, help="asset wad (defaults to --wad)")
+    ap.add_argument("--vx", type=int, default=None)
+    ap.add_argument("--vy", type=int, default=None)
+    ap.add_argument("--va", type=int, default=None, help="viewangle (defaults to the spawn angle)")
+    args = ap.parse_args()
+    ablate = frozenset(x for x in args.ablate.split(",") if x)
+
+    cfg = Config()
+    mw = WadFile.from_path(str(ROOT / args.wad))
+    aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
+    main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False, ablate=ablate)
+
+    tmp = Path(tempfile.mkdtemp())
+    consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
+    (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
+    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], (tmp / "m.fj").resolve()],
+                tmp / "m.fjm", memory_width=W, print_time=False)
+
+    sp = spawn_state(mw, args.map)
+    vx = args.vx if args.vx is not None else _signed(sp.x, 32) >> 16
+    vy = args.vy if args.vy is not None else _signed(sp.y, 32) >> 16
+    va = args.va if args.va is not None else sp.angle
+    screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+    term = fj.run(tmp / "m.fjm", io_device=screen, print_time=False, print_termination=False)
+
+    label = ",".join(sorted(ablate)) or "none"
+    print(f"map={args.map} viewpoint=({vx},{vy},{va}) ablate={label} ops/frame={term.op_counter:,}")
+
+
+if __name__ == "__main__":
+    main()

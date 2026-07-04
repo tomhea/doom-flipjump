@@ -51,7 +51,11 @@ def _seg_xorby_use(idx, clear=True):
     return seq
 
 
-def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False) -> str:
+_ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub"})
+
+
+def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
+                       ablate: frozenset = frozenset()) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -59,7 +63,23 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     decimal) at runtime. Geometry comes from `map_wad`; textures/colormap/palette/flats from `asset_wad`
     (defaults to `map_wad` — E1M1 is self-contained; the square-room test passes a separate asset wad).
     `over_align` pads dispatch tables to a 2^n boundary (test layout); pass False for the production
-    (build_doom) layout."""
+    (build_doom) layout.
+
+    `ablate` (M13p0, measurement-only — NEVER set for build_doom/the golden tests) drops components so
+    `scripts/measure_frame.py` can isolate their ops/frame cost by delta:
+      - "planes"  — drop the floor/ceiling visplane pass (pass 2b) from the mainline.
+      - "pass2"   — drop the wall raster (pass 2a, the per-column trampoline) from the mainline.
+      - "pass1"   — skip the BSP-walk jump entirely (pass-1 never runs; col arrays stay zero-init),
+                    isolating init/input-parse/present residue. Valid ONLY combined with "planes"+"pass2"
+                    (ablating pass1 alone leaves pass2/planes rendering garbage zero-filled columns).
+      - "segstub" — the per-seg leaf `stl.fret`s immediately (no full-flag check, no wall_x_range) =
+                    the bare walk skeleton (node side tests + subsector dispatch + the SET/CLEAR xorby
+                    call overhead), isolating the walk from every per-seg cost.
+      - "xrstub"  — the per-seg leaf keeps the `full`-flag pre-check but replaces `wall_x_range` with an
+                    immediate cull-fail (no atans, no cull math) = walk + per-seg entry overhead only.
+    "segstub"/"xrstub" are mutually exclusive and independent of "planes"/"pass2"/"pass1"."""
+    assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
+    assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -191,19 +211,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
         "hex.zero 2, n_drawn", "hex.zero 1, full",   # M13opt-P1: reset the drawn-column counter + full flag per frame
-        f";{_pfx(mapname)}_bspcode_walk", "bsp_done:",
     ]
+    if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
+        pass1.append("bsp_done:")
+    else:
+        pass1 += [f";{_pfx(mapname)}_bspcode_walk", "bsp_done:"]
     pass2 = []                                            # pass 2a: walls (M12oo shared-compare trampoline)
-    for x in range(cfg.VIEW_W):
-        pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
-                     f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
-                     f"col_heightmask + {8 * x}*dw")
-        for y in range(cfg.H):                                # M12oo: the shared-compare trampoline (y runtime)
-            pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
+    if "pass2" not in ablate:                             # M13p0: drop the wall raster to isolate its cost
+        for x in range(cfg.VIEW_W):
+            pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
+                         f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
+                         f"col_heightmask + {8 * x}*dw")
+            for y in range(cfg.H):                                # M12oo: the shared-compare trampoline (y runtime)
+                pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
     # pass 2b: floor/ceiling visplanes (M13d2) — the per-frame clear_planes seeds + the runtime per-ROW
     # R_MakeSpans textured span pass (replaces the M13c3 per-column plane_tramp unroll).
-    plane_pass = ["stl.fcall clear_leaf, clear_ret",
-                  f"frame.render_planes_spans {cfg.VIEW_W}, {cfg.VIEW_H}"]
+    plane_pass = []
+    if "planes" not in ablate:                            # M13p0: drop the plane pass to isolate its cost
+        plane_pass = ["stl.fcall clear_leaf, clear_ret",
+                      f"frame.render_planes_spans {cfg.VIEW_W}, {cfg.VIEW_H}"]
 
     yslope = generate_yslope_lut_fj("yslope", cfg.VIEW_W, cfg.VIEW_H)
     zlight = generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS)
@@ -217,8 +243,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "span_leaf:", f"plane.draw_span framebuffer, {cfg.VIEW_W}",   # M13d2 textured u,v span (R_DrawSpan)
         "clear_leaf:", f"plane.clear_planes {cfg.CENTERX << 16}, {ANG90}",  # M13d2 per-frame R_ClearPlanes seeds
-        "seg_pass1_leaf:",
-        f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}",
+        *(["seg_pass1_leaf:", "stl.fret seg_ret"] if "segstub" in ablate else
+          ["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
+           "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"] if "xrstub" in ablate else
+          ["seg_pass1_leaf:",
+           f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),
         *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",

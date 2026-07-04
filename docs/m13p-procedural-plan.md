@@ -561,12 +561,25 @@ the `hex.vec 2` framebuffer, the 16K pass-2 unroll (~16M words per the M12 bisec
 top of p4a's table deletion (span↓, @↓, assemble↓), and NO 16k-cell unroll replaces it: the emitter
 is a 160-column loop.
 
-### The protocol (proposed; pS0 gets the owner's explicit sign-off before implementation)
+### The protocol (SIGNED OFF by the owner, 2026-07-04 — ours to keep evolving)
+
+⚠ **This protocol is not frozen.** The owner's explicit standing permission: "you determine this
+protocol — if you need to modify it in the future to meet your needs, it's something that you can
+and are allowed to do." Treat `init_stream_mode` below as versioned, not sacred — if pS0/pS1
+prototyping finds a cheaper shape, change it and update this section + the device + the tests
+together (same rung, one gate).
 
 - `0x07` **BEGIN_FRAME_STREAM** — the device resets its cursor to (column 0, row 0).
 - Then, for each of the 160 columns in order: runs of `[count:1 byte][color:1 byte]`; the counts sum
-  to exactly H=100 per column; the device advances to the next column when one fills and
-  auto-presents after column 159 (no separate present command — confirm with the owner).
+  to exactly H=100 per column.
+- **Flush granularity is a CONFIG VALUE, sent once at init** (owner, 2026-07-04): `0x01`
+  `init_screen` (present.fj:14) gains one more byte, `flush_mode` — `0` = **flush the physical
+  display once per FULL FRAME** (after column 159 fills; **the default**), `1` = flush once per
+  COLUMN (after each column fills — useful for debugging/streaming a partial frame, not needed for
+  the ops target). fj always emits the same 160-column stream regardless of `flush_mode` — the byte
+  only tells the DEVICE when to blit its internal buffer to the actual screen; **ops/frame is
+  identical either way** (no per-column emit cost changes), so the ladder's numbers don't depend on
+  this choice. Default per-frame per the owner's instruction.
 - Colors stay 8-bit/256-palette: under RLE the color cost is per-run, so 16-color (approved) is not
   needed for ops — it remains a pV valve only.
 - Future, NOT built now (M16 sprites/HUD): the owner's `write_pixel` suggestion
@@ -606,11 +619,13 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
 
 ### Sub-rungs (each gated)
 
-- [ ] **pS0 — protocol + device + tables (ships nothing visible).** Owner signs the protocol (and
-  the auto-present question); implement the subclass device + pure-Python decode tests; add
-  `handler="emit_io"` to `generate_dispatch_table_fj` + regenerate `cm.emit`/`byte.emit`; a micro fj
-  test emits a known 3-run column and asserts the device grid. MEASURE `byte.emit`/`cm.emit`
-  standalone; record in the appendix.
+- [ ] **pS0 — protocol + device + tables (ships nothing visible).** Protocol SIGNED (above, incl.
+  `flush_mode`, default per-frame); implement the subclass device (BEGIN_FRAME_STREAM decode +
+  flush_mode-gated blit) + pure-Python decode tests; wire `init_screen`'s extra byte
+  (`present.fj:14`) + the emitter; add `handler="emit_io"` to `generate_dispatch_table_fj` +
+  regenerate `cm.emit`/`byte.emit`; a micro fj test emits a known 3-run column and asserts the
+  device grid under BOTH flush_mode values. MEASURE `byte.emit`/`cm.emit` standalone; record in the
+  appendix.
 - [ ] **pS1 — one-column prototype (scratch).** A synthetic column (fixed cexcl/fstart/band list)
   through the REAL emitter body; byte-exact vs a hand-computed column; MEASURE per-run and
   per-column cost → appendix. **Gate: LS1's line must hold here, before pS2 is built.**

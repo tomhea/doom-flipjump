@@ -1,0 +1,212 @@
+// M13pS2c — the LS2 per-column ceiling/floor BAND LIST builder (the column-stream design's floor
+// raster). Replaces the row-major `render_planes_spans`/`plane_col`/`plane.draw_span_flat` (M13c3/p1)
+// with a per-COLUMN walk: seed the window's first row EXACTLY (one real `hex.fixed_mul`, matching
+// `plane.draw_pixel`'s zidx derivation bit-for-bit) then advance via a cheap threshold walk
+// (add/compare only) for the rest — mirrors `ReferenceModel._zidx_band_walk` (R15) exactly, so the fj
+// kernel and the oracle stay byte-identical. @requires hex.init & stl.ptr_init.
+
+ns plane {
+    // perf #11-style: dst = (1<<32)//ph via the SHARED block-FP reciprocal table (`slopediv_recip`,
+    // perf #13's SSOT — the SAME table `proj.slope_div`/`column_setup`'s `ipre` already use). Mirrors
+    // `ReferenceModel._recip_div32` — RIGHT-NORMALIZE ONLY (no left-normalize branch): valid because
+    // any REAL planeheight (16.16, >=1 world unit) has magnitude >= 0x10000, always above the table's
+    // 0xFFF threshold, exactly like `column_setup`'s wall-scale `ipre` (SCALE_MIN=256 gives the same
+    // guarantee). ⚠ scope limit: an implausibly tiny nonzero planeheight (< 0x100, i.e. under ~0.004
+    // world units — never seen in real E1M1 data) would hit the table's unpopulated (zero) region;
+    // not guarded, matching how M13pS2a's oracle prototype also only validated realistic magnitudes.
+    def recip32 @ sph, rc, cfff, czero2, irecip, nrm, more, done, shloop, shmore, shdone \
+            < bb_recip_ph, bb_recip_out, slopediv_recip, plane_recip_ret {
+        hex.mov 8, sph, bb_recip_ph
+        hex.set 2, rc, 0
+        hex.set 8, cfff, 0xFFF
+        hex.set 2, czero2, 0
+      nrm:
+        hex.cmp 8, sph, cfff, done, done, more   // sph > 0xFFF ? gt -> shift right
+      more:
+        hex.shr_hex 8, 1, sph
+        hex.inc 2, rc
+        ;nrm
+      done:
+        hex.read_table 5, irecip, slopediv_recip, 3, sph   // recip[m] (m = sph, 3 nibbles)
+        hex.zero 8, bb_recip_out
+        hex.mov 5, bb_recip_out, irecip
+        hex.shl_hex 8, 2, bb_recip_out             // recip << 2 nibbles
+      shloop:
+        hex.cmp 2, rc, czero2, shdone, shdone, shmore
+      shmore:
+        hex.shr_hex 8, 1, bb_recip_out
+        hex.dec 2, rc
+        ;shloop
+      shdone:                                       // bb_recip_out = (recip<<2) >> rc = recip<<(2-rc)
+        stl.fret plane_recip_ret
+
+      sph: hex.vec 8
+      rc: hex.vec 2
+      cfff: hex.vec 8
+      czero2: hex.vec 2
+      irecip: hex.vec 5
+    }
+
+    // Build ONE column's ceiling/floor BAND LIST: mirrors `ReferenceModel._zidx_band_walk` (R15)
+    // exactly. Inputs (globals, caller-set): bb_ph (planeheight, 8nib), bb_light (RAW sector light
+    // 0..255, 2nib), bb_base (flat base palette index, 2nib), bb_y0 (window start row, 2nib),
+    // bb_count (window length, 2nib — 0 means no window, writes nothing), bb_ascending (2nib, 1 =
+    // ceiling/yslope increasing, 0 = floor/yslope decreasing), bb_arr (packed-byte output buffer
+    // base, w/4nib, caller-owned, sized for the worst case — see the emitter's MAX_BANDS). Output:
+    // bb_n (band-entry count written, 2nib). Each written entry is 3 PACKED bytes (run-length,
+    // base — constant, repeated per entry so the reader's format stays uniform — , zrow), read back
+    // by `stream.emit_band_list` via `hex.read_byte_and_inc` (byte order: count, base, zrow — the
+    // cm-index `zrow<<8|base` decomposes into exactly these two bytes, so no combine is needed here).
+    // @requires hex.init & stl.ptr_init.
+    def build_bands \
+            @ i, y, ys, zidx, step, threshold_hi, threshold_lo, zplus1, zidx8, lvl, zlidx, zrow, \
+              cur_zrow, runlen, ptr, c127, dist, \
+              empty, phzero, seed, seedclamp, seedok, loop, body, ascloop, ascmaybe, ascbump, ascstop, \
+              descloop, descmaybe, descbump, descstop, classify, samezidx, diffzidx, cont2, \
+              flush_final, writeentry, done \
+            < bb_ph, bb_light, bb_base, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, \
+              bb_recip_ph, bb_recip_out, yslope, zlight, recip32_leaf, plane_recip_ret, \
+              plane_band_ret {
+        hex.zero 2, bb_n
+        hex.if0 2, bb_count, empty
+        hex.mov w/4, ptr, bb_arr   // bb_arr is a RUNTIME register holding the buffer address (set by
+                                   // the caller per call) -- NOT itself a compile-time array label, so
+                                   // this must be hex.mov (copy the held value), never hex.set (which
+                                   // would bake bb_arr's OWN storage address as a literal instead of
+                                   // reading what's stored there -- the R11-adjacent trap that
+                                   // corrupted memory starting at bb_arr's own location, eventually
+                                   // smashing adjacent globals/code and crashing with ip<2w).
+        hex.zero 3, lvl
+        hex.mov 2, lvl, bb_light
+        hex.shr_hex 3, 1, lvl                       // lvl = light >> 4 (LIGHTSEGSHIFT)
+        hex.if0 8, bb_ph, phzero
+        ;seed
+
+      phzero:                                        // ph==0 -> ONE band covering the whole window, zidx=0
+        hex.zero 3, zidx
+        hex.mul_const 3, zlidx, lvl, 128
+        hex.read_table 2, zrow, zlight, 3, zlidx
+        hex.write_byte_and_inc ptr, bb_count
+        hex.write_byte_and_inc ptr, bb_base
+        hex.write_byte_and_inc ptr, zrow
+        hex.inc 2, bb_n
+        ;done
+
+      seed:                                          // exact zidx at row y0 (mirrors plane.draw_pixel)
+        hex.zero 2, y
+        hex.mov 2, y, bb_y0
+        hex.read_table 8, ys, yslope, 2, y
+        hex.fixed_mul 8, 4, dist, bb_ph, ys
+        hex.shr_hex 8, 5, dist
+        hex.set 3, c127, 127
+        hex.zero 3, zidx
+        hex.mov 3, zidx, dist
+        hex.cmp 3, zidx, c127, seedok, seedok, seedclamp   // zidx>127 -> clamp
+      seedclamp:
+        hex.mov 3, zidx, c127
+      seedok:
+        hex.mov 8, bb_recip_ph, bb_ph
+        stl.fcall recip32_leaf, plane_recip_ret
+        hex.zero 8, step
+        hex.mov 8, step, bb_recip_out
+        hex.shl_hex 8, 1, step                          // step = recip << 1 nibble ( *16 )
+        hex.zero 8, zplus1
+        hex.mov 3, zplus1, zidx
+        hex.inc 8, zplus1
+        hex.mul 8, threshold_hi, step, zplus1           // threshold_hi = step*(zidx+1)
+        hex.zero 8, zidx8
+        hex.mov 3, zidx8, zidx
+        hex.mul 8, threshold_lo, step, zidx8            // threshold_lo = step*zidx
+        hex.mul_const 3, zlidx, lvl, 128                // seed cur_zrow = zlight[lvl*128+zidx]
+        hex.add 3, zlidx, zidx
+        hex.read_table 2, cur_zrow, zlight, 3, zlidx
+        hex.zero 2, runlen
+        hex.zero 2, i
+        hex.mov 2, y, bb_y0
+
+      loop:
+        hex.cmp 2, i, bb_count, body, flush_final, flush_final
+      body:
+        hex.read_table 8, ys, yslope, 2, y
+        hex.if0 2, bb_ascending, descloop
+      ascloop:
+        hex.set 3, c127, 127
+        hex.cmp 3, zidx, c127, ascmaybe, ascstop, ascstop
+      ascmaybe:
+        hex.cmp 8, ys, threshold_hi, ascstop, ascbump, ascbump
+      ascbump:
+        hex.inc 3, zidx
+        hex.add 8, threshold_hi, step
+        ;ascloop
+      ascstop:
+        ;classify
+      descloop:
+        hex.if0 3, zidx, descstop
+      descmaybe:
+        hex.cmp 8, ys, threshold_lo, descbump, descstop, descstop
+      descbump:
+        hex.dec 3, zidx
+        hex.sub 8, threshold_lo, step
+        ;descloop
+      descstop:
+        ;classify
+      classify:
+        // GROUP BY ZROW, not zidx: distinct zidx buckets can share the same darkest/lightest colormap
+        // row (zlight clamps), and the oracle's `_expected_bands`/_zidx_band_walk grouping does too --
+        // comparing raw zidx here under-merges bands (measured: a single "clamped" band split into
+        // dozens of 1-row entries near the horizon before this fix).
+        hex.mul_const 3, zlidx, lvl, 128
+        hex.add 3, zlidx, zidx
+        hex.read_table 2, zrow, zlight, 3, zlidx
+        hex.cmp 2, zrow, cur_zrow, diffzidx, samezidx, diffzidx
+      samezidx:
+        hex.inc 2, runlen
+        ;cont2
+      diffzidx:
+        ;writeentry
+      cont2:
+        hex.inc 2, i
+        hex.inc 2, y
+        ;loop
+
+      writeentry:
+        hex.write_byte_and_inc ptr, runlen
+        hex.write_byte_and_inc ptr, bb_base
+        hex.write_byte_and_inc ptr, cur_zrow
+        hex.inc 2, bb_n
+        hex.mov 2, cur_zrow, zrow
+        hex.set 2, runlen, 1
+        ;cont2
+
+      flush_final:
+        hex.write_byte_and_inc ptr, runlen
+        hex.write_byte_and_inc ptr, bb_base
+        hex.write_byte_and_inc ptr, cur_zrow
+        hex.inc 2, bb_n
+        ;done
+
+      empty:
+        ;done
+
+      done:
+        stl.fret plane_band_ret
+
+      i: hex.vec 2
+      y: hex.vec 2
+      ys: hex.vec 8
+      zidx: hex.vec 3
+      step: hex.vec 8
+      threshold_hi: hex.vec 8
+      threshold_lo: hex.vec 8
+      zplus1: hex.vec 8
+      zidx8: hex.vec 8
+      lvl: hex.vec 3
+      zlidx: hex.vec 3
+      zrow: hex.vec 2
+      cur_zrow: hex.vec 2
+      runlen: hex.vec 2
+      ptr: hex.vec w/4
+      c127: hex.vec 3
+      dist: hex.vec 8
+    }
+}

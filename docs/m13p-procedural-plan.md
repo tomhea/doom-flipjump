@@ -688,29 +688,54 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
     happens at pS2b/c when the fj stream emitter is ready to consume the identical arithmetic. NOT
     validated for implausibly tall sectors (~3000+ world units, where 32-bit FixedMul itself wraps) —
     E1M1's tallest is 495 units; a future map needing taller sectors should re-run the prototype first.
-  - [ ] **pS2b — wire `_zidx_band_walk` into BOTH `_render_planes_flat` AND a NEW fj band-list kernel
-    together, one rung, one re-bless.** The fj kernel mirrors `_zidx_band_walk` exactly (seed via one
-    real `hex.fixed_mul` for the window's first row — reuse `plane.draw_pixel`'s zidx derivation — then
-    walk via `hex.add`/`hex.cmp` using `step = 16 * <the shared block-FP reciprocal, already emitted
-    for the wall-side divide-elimination campaign>`); square 4-viewpoint + E1M1 capstone re-blessed
-    against the NEW (band-walked) oracle output. This still renders through the OLD row-major
-    `draw_span_flat`/`render_planes_spans` pipeline (per-SPAN, i.e. one row at a time) UNLESS the span
-    grouping is also changed — clarify at implementation time whether pS2b keeps the span raster (one
-    `_zidx_band_walk` call per span, which is degenerate to the single-row case and so is BYTE-
-    IDENTICAL to today with no re-bless needed at all!) and defers the real multi-row window walk +
-    re-bless to pS2c (when the column-major stream emitter actually needs one call per whole window).
-    ⚠ **re-derive this ordering decision before writing code** — pS2a's finding implies the re-bless is
-    only forced once something calls `_zidx_band_walk` with a MULTI-row window, which is a pS2c-only
-    need; pS2b may turn out to be a no-op / mergeable into pS2c.
-  - [ ] **pS2c — the real per-column band-list construction + `stream.emit_column` wiring.** Pass-1,
-    per claimed column: build the ceiling/floor band lists (packed-byte arrays, `stream_render.fj`'s
-    format) via the fj band-walk kernel, store per column (or per seg + a per-column pointer/index —
-    decide by measuring the per-column COPY cost, which the pS1 ledger estimate did not separately
-    account for); call `stream.emit_column` per column after `present.begin_frame_stream`. DELETE the
-    framebuffer + old pass-2 (`pixel_tramp`/`leaf_body_w`) + `render_planes_spans`/`plane_col`/
-    `draw_span_flat` entirely. Byte-exact vs the device's decoded grid == the (now band-walked) oracle
-    frame. Measure (~110-140M expected); this is where pS1's LS1 estimate (2.02-3.18M, see pS1's
-    finding above) gets its FIRST real (non-synthetic) measurement.
+  - [x] **pS2b — RESOLVED as a no-op, folds into pS2c.** Confirmed at implementation time (as pS2a
+    flagged as the open question): `_zidx_band_walk` called with a single-row window is byte-IDENTICAL
+    to the always-exact formula (no drift possible — there's nothing to walk), so wiring it into the
+    OLD row-major per-span path would force zero re-bless and change nothing. The re-bless is only
+    forced once something calls the walk with a genuine MULTI-row window — that's pS2c alone. No
+    separate pS2b rung needed.
+  - [x] **pS2c-kernel — the fj band-list-building kernel, standalone + validated. DONE, 2026-07-04.**
+    `src/fj/plane_bands.fj`: `plane.recip32` (the fj mirror of `_recip_div32`, reusing the SAME shared
+    `slopediv_recip` block-FP table the wall-scale divide-elimination campaign already emits — right-
+    normalize only, valid for any real planeheight) + `plane.build_bands` (seed the window's first row
+    EXACTLY via `hex.fixed_mul`, matching `plane.draw_pixel`'s zidx derivation bit-for-bit, then walk
+    every subsequent row via `hex.add`/`hex.cmp` against a `step = 16*recip32(ph)` threshold, writing
+    packed-byte `(run-length, base, zrow)` entries). **Validated in `tests/fj/test_plane_bands_fj.py`
+    (4/4 pass) against `ReferenceModel._zidx_band_walk` (R15) across a REAL 12-planeheight × 3-light ×
+    (ceiling+floor) matrix (72 cases) plus the ph==0 and empty-window edge cases — byte-exact.**
+    **Two real bugs found and fixed** (full detail in `fj-lessons` R16): (1) `hex.set w/4, ptr, bb_arr`
+    baked `bb_arr`'s own STORAGE ADDRESS as a compile-time literal instead of copying the RUNTIME VALUE
+    held there — since `bb_arr` is a caller-set register, not a compile-time array label, this needs
+    `hex.mov`; the bug silently corrupted memory starting at `bb_arr`'s own location on every write,
+    eventually smashing adjacent globals/code and crashing with `ip<2w` (traced via `fj -d
+    --debug-ops-list N` + inline print-marker instrumentation — the "de-risk with a debug print
+    ladder" method, since the stock 10-line trace alone didn't localize it). (2) band grouping compared
+    raw `zidx` instead of the resulting `zrow` (colormap row) — since `zlight`'s clamp maps MANY distinct
+    zidx values to the SAME darkest/lightest row, grouping on zidx under-merged bands (a single clamped
+    band split into dozens of spurious 1-row entries near the horizon); fixed by computing `zrow` every
+    row and classifying on ITS equality, matching the oracle's own grouping. NOT yet wired into pass-1
+    or the emit phase — this is the CONSUMER (`stream.emit_column`) side proven standalone; the
+    PRODUCER (pass-1 populating real per-column band arrays from real segs) is the remaining pS2c work.
+  - [ ] **pS2c-wiring — the real per-column band-list construction + `stream.emit_column` wiring
+    (REMAINING).** Pass-1, per claimed column: call `plane.build_bands` (ceiling window `[0,cexcl)`,
+    ascending=1; floor window `[fstart,100)`, ascending=0) using the ALREADY-STORED `col_ceil_ph`/
+    `col_floor_ph`/`col_plight`/`col_ceilbase`/`col_floorbase`/`col_cexcl`/`col_fstart` fields (all
+    exist today, per `frame_render.fj`'s `seg_pass1_leaf_body_mtlwp`) into a per-column packed-byte
+    buffer (size MAX_BANDS*3, MAX_BANDS=50 proven safe in the kernel test) + a per-column band count;
+    ALSO bake `col_lit` (the W1 wall's fully-constant FINAL PALETTE BYTE — light+texel both known at
+    Python emit time, so no runtime colormap lookup is needed at all; update `stream.emit_column`'s
+    wall-run line from `cm.emit wall_cidx` to `byte.emit wall_lit` to match). Then, after pass-1: wire
+    `present.init_screen_stream`/`begin_frame_stream` + a `rep(VIEW_W,x) stream.emit_column ...` compile-
+    time-unrolled loop reading each column's fields at compile-time addresses. DELETE the framebuffer +
+    old pass-2 (`pixel_tramp`/`leaf_body_w`) + `render_planes_spans`/`plane_col`/`draw_span_flat`
+    entirely. Wire `_zidx_band_walk` into `_render_planes_flat` (the pS2a change, reverted then —
+    re-apply now that the fj consumer exists) and re-bless the flat goldens (measured shift in pS2a:
+    79/16,000 E1M1 pixels, 0.49%, ≤1 row). Byte-exact vs the device's decoded grid == the (now
+    band-walked) oracle frame. Measure (~110-140M expected); this is where pS1's LS1 estimate
+    (2.02-3.18M, see pS1's finding above) gets its FIRST real (non-synthetic) measurement — decide
+    per-column-vs-per-seg band computation by MEASURING first (per-column is simpler and should be
+    tried first; the ledger's "~20-30/frame" estimate assumed per-seg, so expect this rung's real
+    number to run higher until/unless a per-seg-shared refinement is measured necessary).
 
 ---
 

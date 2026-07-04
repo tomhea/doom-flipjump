@@ -587,20 +587,44 @@ together (same rung, one gate).
 
 ### fj-side machinery (pS0) — the owner's "IO+0/1 flips instead of xoring to a result variable"
 
-1. **EMIT tables**: `generate_dispatch_table_fj` (lut_generator.py:321) gains a `handler="emit_io"`
-   mode — each per-entry cell flips its BAKED byte's bits straight into IO (~8-12 ops in-cell,
-   ~1 op/bit) instead of xor-copying to a register. Regenerate on top of it:
-   - `cm.emit idx` — the colormap variant of `cm.apply` (compile_colormap, texturecompiler.py:126):
-     one dispatch on `(zrow, pal)` and the LIT byte is already on the wire. Color output ≈ ~150-400
-     incl. index build (vs v3's cm.apply 399 + xor_zero 284 ≈ ~680).
-   - `byte.emit v` — a 16² (256-cell) byte-output table for run COUNTS (≤100). Emitting a runtime
-     byte drops from ~230-280 (bitwise) to ~one dispatch ≈ ~100-150.
-2. **The device side**: implement the command for BOTH the graphical ScreenIO and the test
-   `InMemoryScreen`, with a pure-Python unit test (synthetic stream → expected pixel grid).
-   ⚠ Delivery mechanics: prototype as an in-repo `InMemoryScreen` SUBCLASS (tests already pass
-   `io_device=` explicitly, so byte-exact gates need NO package edit); upstream the command into the
-   owner's flipjump 1.5.1 before M13p8 so the real viewer decodes it — keep the package diff
-   in-repo (`patches/`) either way.
+**DONE, MEASURED 2026-07-04** (commit follows this rung):
+1. **EMIT tables**: a new `generate_emit_dispatch_table_fj` (`src/doomfj/lut_generator.py`, alongside
+   `generate_dispatch_table_fj` rather than an extra mode on it — the emit case has no `dst`/`.res` at
+   all, a genuinely different shape) — the SAME per-entry dispatch-CODE structure, but each entry's
+   handler is 8 `stl.output_bit` calls (the compile-time-constant primitive `stl.output_char` already
+   uses internally) + 1 jump-to-clean, instead of wflipping the value into a kept-zero result register.
+   No `dst`, nothing to read out — the byte already left as IO.
+   - `cm.emit idx` — built from the SAME `colormap_values(...)` list `compile_colormap`'s `.apply`
+     table uses (no drift), just fed through the emit generator. **MEASURED: 329.5 ops/call** (real
+     8,192-entry E1M1 colormap) — est. was ~150-400, landed mid-range. **2.07× cheaper than the OLD
+     cm.apply(399)+xor_zero(284)=683 combo**, since there's no register write to pay for afterward.
+   - `byte.emit v` — a 256-entry IDENTITY table (`values=range(256)`) for run counts/raw bytes.
+     **MEASURED: 283.6 ops/call** — est. was ~100-150, landed higher (dispatch overhead dominates the
+     handler-body difference more than expected). Not concerning: LS1's per-run budget (~600-900,
+     TWO emits + narrow clip/advance) still holds — 283.6+329.5≈613 is within range before the
+     clip/advance ops are even added.
+   - Verified end-to-end (not just eyeballed): a smoke assemble+run confirmed a 4-entry identity table
+     dispatches idx→byte correctly (`b"ABCD"`), before committing to the cost measurement.
+2. **The device side**: `tests/fj/stream_screen.py::StreamScreen(InMemoryScreen)` — an in-repo
+   subclass (per the plan: "tests already pass `io_device=` explicitly, so byte-exact gates need NO
+   package edit"). Decodes the EXTENDED 9-byte `0x01` (the stock 8 bytes + `flush_mode`) and the new
+   `0x07` `BEGIN_FRAME_STREAM`, which puts the device into a stateful column-major run-stream mode —
+   raw `[count][color]` byte pairs with NO per-run command-byte framing (the device knows the total
+   pixel count `width*height` from init, so the LAST run naturally completes the frame; no end
+   marker needed). `flush_mode=0` presents once after the whole stream (the shipped default);
+   `flush_mode=1` presents once per completed column (100-pixel boundary) — a debug aid, same fj op
+   cost either way (flush_mode only changes when the DEVICE blits, never what fj emits). 6 pure-Python
+   unit tests (`tests/fj/test_stream_screen.py`, no fj assembly, feeding synthetic byte streams via
+   `write_bit`) plus 2 fj-level integration tests (the SAME 3-run 2×3 grid emitted by a real
+   `present.init_screen_stream`/`present.begin_frame_stream`/`byte.emit` program, decoded by
+   `StreamScreen` — both `flush_mode` values) — 8/8 pass, closing the loop end-to-end (fj emission →
+   device decode). Upstream the command into the owner's flipjump 1.5.1 before M13p8; package diff
+   stays in-repo (`tests/fj/stream_screen.py`) until then.
+3. **`present.fj` additions (ADDITIVE ONLY):** `present.init_screen_stream flush_mode` (9-byte 0x01)
+   and `present.begin_frame_stream` (bare 0x07) — the EXISTING `present.init_screen`/
+   `update_screen*` macros are byte-identical, untouched; every other test + `build_doom` keeps using
+   the stock 8-byte init + the stock `InMemoryScreen`. Verified the exact wire bytes match
+   (`01<W><H><BPP><NCOLORS><flush_mode>` then `07`) before writing any device code.
 
 ### The emitter (pS2) — per column x, unrolled ×160 (compile-time col-array addresses, small bodies)
 
@@ -619,13 +643,13 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
 
 ### Sub-rungs (each gated)
 
-- [ ] **pS0 — protocol + device + tables (ships nothing visible).** Protocol SIGNED (above, incl.
-  `flush_mode`, default per-frame); implement the subclass device (BEGIN_FRAME_STREAM decode +
-  flush_mode-gated blit) + pure-Python decode tests; wire `init_screen`'s extra byte
-  (`present.fj:14`) + the emitter; add `handler="emit_io"` to `generate_dispatch_table_fj` +
-  regenerate `cm.emit`/`byte.emit`; a micro fj test emits a known 3-run column and asserts the
-  device grid under BOTH flush_mode values. MEASURE `byte.emit`/`cm.emit` standalone; record in the
-  appendix.
+- [x] **pS0 — protocol + device + tables (ships nothing visible). DONE, MEASURED 2026-07-04.**
+  `generate_emit_dispatch_table_fj` (own function, not a mode flag — see above) + `StreamScreen`
+  device subclass (`tests/fj/stream_screen.py`) + `present.init_screen_stream`/
+  `present.begin_frame_stream` (additive, `present.fj`) + 6 pure-Python decode tests + 2 fj-level
+  integration tests (known 3-run column, both flush_mode values) — all 8 pass. MEASURED:
+  `byte.emit` 283.6 ops/call, `cm.emit` 329.5 ops/call (2.07× cheaper than the old cm.apply+xor_zero
+  combo). Nothing visible ships yet (no renderer wiring) — this rung only proves the mechanism.
 - [ ] **pS1 — one-column prototype (scratch).** A synthetic column (fixed cexcl/fstart/band list)
   through the REAL emitter body; byte-exact vs a hand-computed column; MEASURE per-run and
   per-column cost → appendix. **Gate: LS1's line must hold here, before pS2 is built.**
@@ -827,8 +851,9 @@ first response is to re-measure LS1/L5/L6 against their lines, not to burn look.
 | **DERIVED SPLIT (E1M1 spawn, % of the 453.2M frame):** floor pass (planes delta) **302,803,061 (66.8%)** · wall pass-2 raster (pass2 delta) **22,948,863 (5.1%)** · pass-1 total = geometry+walk (pass1 delta) **127,469,258 (28.1%)**, of which: walk skeleton (segstub) **14,906,830 (3.3%)**, wall_x_range+cull-only bulk (xrstub−segstub) **105,242 (0.02%, tiny)**, and **pass-1 projection+claim residue (pass1−xrstub) = 112,457,186 (24.8% of the WHOLE frame, 88% of pass-1)**. ★ **Finding not anticipated by the v3/v4 pG task write-up:** the walk itself is cheap; the dominant pass-1 cost is the per-seg PROJECTION math (wall_setup/wall_scale_setup/wall_offset) + per-column CLAIM loop (column_render_params + store_col_field writes) for the ~26-troops-of-160-claimed segs that survive the cull — **8× the walk's own cost**. This re-orders pG's priority: pG3 (projection+claim crush) matters far more than pG1/pG2 (walk abort/narrowing) at the OPS level, though pG1 still matters most for the [M14]-steady-state share (post-full node visits are pure waste regardless of their per-node cost). | measured + derived, p0, 2026-07-04 | |
 | Sequential timing (no contention): 6 runs × ~7-11 min each, ~63 min wall-clock total, vs the EARLIER parallel attempt that ran 100+ min with ZERO completions (disk queue length 188, %Disk Time 12341% — confirmed I/O thrash from 6 concurrent large `.fjm` writes). **Lesson: never run more than one E1M1 heavy build at a time on this machine.** | measured, p0, 2026-07-04 | |
 | **until-full counts (E1M1, host-side, step 3c, 3 viewpoints):** spawn 682 subsectors/463 until-full (32.1% post-full), 575 segs visited/432 until-full (24.9% post-full), 160 pass x_range/116 until-full · rot45: 205/682 until-full (69.9% post-full), 306/575 segs (46.8% post-full) · othersector: 212/682 (68.9% post-full), **only 74/575 segs visited until-full (87.1% post-full!)**. Confirms pG1 full-abort is a large, viewpoint-dependent win — worst case (othersector) wastes work on 501 of 575 segs. | measured | p0, 2026-07-04 |
-| pS0: `byte.emit` / `cm.emit` standalone cost | | pS0 |
+| pS0: `byte.emit` / `cm.emit` standalone cost | **MEASURED (`scratchpad/measure_emit.py`): byte.emit 283.6 ops/call (256-entry identity table), cm.emit 329.5 ops/call (real 8,192-entry E1M1 colormap)** — both landed higher than the ~100-150/~150-400 estimates individually, but the SUM (613) is still within the ~600-900 per-run LS1 budget before clip/advance ops; cm.emit alone is 2.07× cheaper than the old cm.apply(399)+xor_zero(284)=683 combo | pS0, 2026-07-04 |
 | pS0: protocol signed by owner (auto-present? counts encoding?) | **SIGNED 2026-07-04**: `flush_mode` config byte in `init_screen`, default per-frame; owner: protocol is ours to keep evolving | p0 |
+| pS0: mechanism proven end-to-end | **8/8 tests pass** (6 pure-Python `StreamScreen` decode tests, no fj; 2 fj-level integration tests emitting a known 3-run column via real `present.init_screen_stream`/`begin_frame_stream`/`byte.emit`, both flush_mode values) — `tests/fj/test_stream_screen.py` | pS0, 2026-07-04 |
 | pS1: per-run + per-column emitter cost; band machinery standalone | | pS1 |
 | (fallback only) pC1: per-cell cost, variant A vs C; patched-chain idiom | | pC1 |
 | owner picks (floor / wall / #9a+#11 bless) | *bake-off PNGs rendered, awaiting owner pick* | p0, 2026-07-04 |

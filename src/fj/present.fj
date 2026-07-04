@@ -43,4 +43,38 @@ ns present {
         stl.output_char 0x06
         .emit_addr addr
     }
+
+    // M13pS0 — the column-stream device protocol (owned by us; NOT frozen — see the plan's note on
+    // evolving it). ADDITIVE ONLY: `init_screen`/`update_screen*` above are UNCHANGED and every
+    // existing test/build_doom keeps using the stock 8-byte init_screen + the stock InMemoryScreen
+    // device. These two new macros are consumed ONLY by the new stream-composite renderer (M13pS2)
+    // against the in-repo `StreamScreen(InMemoryScreen)` subclass (tests/fj/stream_screen.py), which
+    // expects the EXTENDED 9-byte init and decodes 0x07 — the stock device never sees either.
+
+    // init_screen_stream: [0x01][W:2][H:2][BPP:1][NCOLORS:2][flush_mode:1]. `flush_mode` is a
+    // COMPILE-TIME constant (0 or 1, decided once by the Python emitter, never per-frame) — 0 = flush
+    // the device's presented frame once per FULL FRAME (after column VIEW_W-1 fills; the shipped
+    // default), 1 = flush once per COLUMN (debugging/streaming a partial frame). `stl.output_char`
+    // requires a compile-time operand, so `flush_mode` cannot be a runtime register.
+    def init_screen_stream flush_mode {
+        stl.output_char 0x01
+        stl.output_char W & 0xff
+        stl.output_char (W >> 8) & 0xff
+        stl.output_char H & 0xff
+        stl.output_char (H >> 8) & 0xff
+        stl.output_char BPP
+        stl.output_char NCOLORS & 0xff
+        stl.output_char (NCOLORS >> 8) & 0xff
+        stl.output_char flush_mode & 0xff
+    }
+
+    // begin_frame_stream: [0x07] — resets the device's write cursor to (column 0, row 0). Every byte
+    // that follows, until exactly VIEW_W*VIEW_H pixels have been placed, is consumed as the raw
+    // column-major run stream `[count:1][color:1]` (no per-run command-byte framing — the device
+    // knows the total pixel count from init_screen_stream, so the last run naturally completes the
+    // frame with no explicit end marker). `byte.emit`/`cm.emit`-style EMIT tables are what actually
+    // produce those bytes (see doomfj.lut_generator.generate_emit_dispatch_table_fj).
+    def begin_frame_stream {
+        stl.output_char 0x07
+    }
 }

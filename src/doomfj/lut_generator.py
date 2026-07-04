@@ -40,6 +40,7 @@ __all__ = [
     "generate_sine_lut_fj",
     "generate_reciprocal_lut_fj",
     "generate_dispatch_table_fj",
+    "generate_emit_dispatch_table_fj",
     "generate_offset_deposit_table_fj",
     "generate_trig_idioms_fj",
     "generate_tantoangle_lut_fj",
@@ -337,6 +338,65 @@ def generate_dispatch_table_fj(label: str, values: Sequence[int], *, index_nibbl
     if mode == "per_result_nibble":
         return _per_result_nibble_table(label, values, index_nibbles, result_nibbles, pad, align)
     raise ValueError(f"{label}: unknown mode {mode!r} (per_entry | per_result_nibble)")
+
+
+def generate_emit_dispatch_table_fj(label: str, values: Sequence[int], *, index_nibbles: int,
+                                    over_align: bool = False) -> str:
+    """M13pS0 — the EMIT variant of the per-entry dispatch table (D4): the SAME dispatch-CODE shape
+    (`switch` jumped through by `xor`ing the index into the dispatch op, `hex.tables.clean_table_entry`
+    un-corrupts it, `hex.tables.ret` returns), but each entry's handler OUTPUTS its baked byte directly
+    — 8 `stl.output_bit` ops (~1 op/bit, the owner's "IO+0/1 flips instead of xoring to a result
+    variable" directive) — instead of XOR-flipping the value into a kept-zero result register. There is
+    no `dst`/`.res`/`xor_zero`: the byte already left the program as IO, nothing to read out. `values`
+    are raw 0-255 bytes (a `byte.emit` run-count table is the IDENTITY map `values=range(256)`; a
+    `cm.emit` lit-color table reuses a colormap's existing `values` — same list `compile_colormap`'s
+    `.apply` table uses, just a different handler on top). `<label>.emit idx` triggers one dispatch +
+    the byte's 8 output bits + cleanup."""
+    pad = _validate_values(label, values, 2)              # bytes are always 2 nibbles
+    if 4 * index_nibbles < max(1, (pad - 1).bit_length()):
+        raise ValueError(
+            f"{label}: index_nibbles={index_nibbles} too narrow for {pad}-entry table")
+    align = pad * 2 if over_align else pad
+    return _per_entry_emit_table(label, values, index_nibbles, pad, align)
+
+
+def _per_entry_emit_table(label: str, values: Sequence[int], index_nibbles: int,
+                          pad: int, align: int) -> str:
+    """Per-entry EMIT dispatch table body — see `generate_emit_dispatch_table_fj`. Each handler slot is
+    9 ops wide (8 `stl.output_bit` calls, lsb-first — matching `stl.output_char`'s bit order — + 1 jump
+    to `clean`), mirroring `_per_entry_table`'s wide-result handler shape (`result_nibbles` wflips + 1
+    jump), just with output instead of a result flip."""
+    HSTRIDE = 9   # 8 output_bit ops + 1 jump-to-clean
+    lines = [f"// EMIT dispatch table \"{label}\": {len(values)} entries, per-entry mode, byte OUTPUT "
+             f"(doomfj.lut_generator, M13pS0)",
+             f"ns {label} {{",
+             "    def emit idx @ return < hex.tables.ret, .dsp {",
+             f"        rep({index_nibbles}, i) hex.xor .dsp + 4*i, idx + i*dw",
+             "        wflip hex.tables.ret+w, return, .dsp",
+             "      return:",
+             "        wflip hex.tables.ret+w, return",
+             "    }",
+             "    def init @ switch, handlers, clean, end < hex.tables.ret > dsp {",
+             "        ;end",
+             "      dsp: ;switch",
+             f"        pad {align}",
+             "      switch:"]
+    for d in range(pad):
+        lines.append(f"        ;handlers + {d}*{HSTRIDE}*dw")
+    lines.append("      handlers:")
+    for d in range(pad):
+        v = values[d] if d < len(values) else 0
+        for bit in range(8):
+            lines.append(f"        stl.output_bit {(v >> bit) & 1}")
+        lines.append(f"        ;clean + {d}*dw")
+    lines += [
+        "      clean:",
+        f"        hex.tables.clean_table_entry__table {pad}, .dsp, hex.tables.ret",
+        "      end:",
+        "    }",
+        "}", f"{label}.init", "",
+    ]
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

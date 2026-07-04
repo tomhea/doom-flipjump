@@ -1,22 +1,32 @@
-"""M13pS2c-wiring -- the pass-1 wiring of plane.build_bands into the REAL renderer
-(seg_pass1_leaf_body_stream, raster_mode="stream"). Not a full capstone yet (no emit-loop, no deletion
-of the old raster) -- this proves the WIRING alone: after a real square-room render, read back
-col_ceil_n/col_ceil_bands/col_floor_n/col_floor_bands/col_lit for representative columns and compare
-against a Python-computed expected band list (the SAME `_zidx_band_walk` + zrow-grouping the standalone
-kernel test already validated, R15/R16), fed with the REAL per-column ph/light/base this scene produces.
+"""M13pS2 -- THE COLUMN-STREAM COMPOSITE gates: the full raster_mode="stream" renderer (pass-1 builds
+per-column band lists via plane.build_bands; the frame leaves the program as the device run-stream --
+present.begin_frame_stream + one stream.emit_column per column; NO framebuffer, NO pass-2, NO plane
+machinery), decoded by StreamScreen and compared byte-exact against the (band-walked, F4 re-blessed)
+oracle `render_wall_frame(floor_texturing=False, wall_mode="W1")`.
+
+Supersedes the pS2c-wiring band-list dump test (the producer plumbing is now exercised end-to-end:
+band-list bytes ARE the frame) and the legacy framebuffer-flat gates in test_floor_planes_fj.py
+(skipped there -- the walked oracle intentionally diverges from the legacy exact-per-row
+draw_span_flat kernel by <=1-row band edges).
+
+The corner viewpoint (24,24)@0x20000000 is load-bearing: at the square spawn every wall reaches the
+screen top (cexcl=0 -> the ceiling build_bands call takes its empty early-exit), so spawn alone would
+leave the CEILING band path vacuously untested (fj-lessons R17); the corner viewpoint has cexcl>0 AND
+fstart<VIEW_H across the frame, so both band calls write and both windows emit.
 """
 from pathlib import Path
 
 import flipjump as fj
+from flipjump.fjm.fjm_reader import Reader
 
 from doomfj.config import Config
 from doomfj.fixedpoint import _signed
 from doomfj.harness import W
-from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
+from doomfj.reference_model import (ReferenceModel, SimState, build_scene, spawn_state, frame_hash)
 from doomfj.wad import WadFile
-from doomfj.wall_renderer import BAND_STRIDE, emit_wall_renderer
+from doomfj.wall_renderer import emit_wall_renderer
 
-from tests.fj.test_wall_render import _ScreenWithInput
+from tests.fj.stream_screen import StreamScreen
 
 PRESENT_FJ = Path("src/fj/present.fj")
 FRAME_FJ = Path("src/fj/frame_render.fj")
@@ -24,59 +34,40 @@ PROJECTION_FJ = Path("src/fj/projection.fj")
 FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")
 PLANE_BANDS_FJ = Path("src/fj/plane_bands.fj")
 PLANE_FJ = Path("src/fj/plane_render.fj")
+STREAM_RENDER_FJ = Path("src/fj/stream_render.fj")
 ROOM = "tests/fixtures/square_room.wad"
 ASSET = "tests/fixtures/freedoom_assets.wad"
+E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 
-CHECK_COLUMNS = [10, 120]
-
-
-def _expected_bands(rm, ph, light, base, y0, count):
-    rows = list(range(y0, y0 + count))
-    zidxs = rm._zidx_band_walk(ph, rows)
-    lvl = min(15, light >> 4)
-    bands = []
-    for z in zidxs:
-        zrow = rm.zlight[lvl][z]
-        if bands and bands[-1][1] == zrow:
-            bands[-1] = (bands[-1][0] + 1, zrow)
-        else:
-            bands.append((1, zrow))
-    return [(c, base, zrow) for c, zrow in bands]
+# the W1-wall + flat-floor + band-walked-zidx spawn goldens (M13pS2 -- a NEW mode combination; the
+# flat-floor F4 re-bless is folded in, see tests/host/test_floor_planes.py's e1m1 hash note)
+SQUARE_STREAM_GOLDEN = "39e7d42eba95e1bb3587ae0b46f3281f791faeabb70edc0e74826b956c27d631"
+E1M1_STREAM_GOLDEN = "690fb5a5707e3360c0e5518029d1b17561305fbd512525d8367a5ede17d7b5d5"
 
 
-PER_COL_SIZE = 6 + BAND_STRIDE + BAND_STRIDE   # n_ceil, n_floor, lit, cexcl_lo, ceilbase_lo, top_lo, bands
+def _assemble_stream(tmp_path, map_wad, mapname, cfg, asset_wad=None):
+    main = emit_wall_renderer(map_wad, mapname, cfg, asset_wad=asset_wad, over_align=False,
+                              floor_mode="flat", wall_mode="W1", raster_mode="stream")
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    p = tmp_path / "stream.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / "stream.fjm"
+    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), PLANE_BANDS_FJ.resolve(),
+                 PLANE_FJ.resolve(), STREAM_RENDER_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+    return out
 
 
-def _dump_code(ci, x):
-    """Copy column x's band-list report into framebuffer PIXELS starting at ci*PER_COL_SIZE (a spare
-    region of the frame we'll read back via screen.pixel_indices after the run -- InMemoryScreen only
-    understands the device command stream, so `stl.output`-based text printing can't coexist with
-    `present.update_screen_reg`; encoding the dump as extra framebuffer pixels reuses the ALREADY-
-    correct pixel decode path instead of inventing a second one). Must run BEFORE update_screen_reg."""
-    base = ci * PER_COL_SIZE
-    lines = [
-        # direct compile-time-address reads (same idiom as render_planes_spans' `hex.mov 2, cexcl,
-        # col_cexcl + 8*x*dw` elsewhere in this file) -- no pointer indirection needed since x is
-        # known at emit time.
-        f"hex.mov 2, framebuffer + {2 * (base + 0)}*dw, col_ceil_n + 8*{x}*dw",
-        f"hex.mov 2, framebuffer + {2 * (base + 1)}*dw, col_floor_n + 8*{x}*dw",
-        f"hex.mov 2, framebuffer + {2 * (base + 2)}*dw, col_lit + 8*{x}*dw",
-        f"hex.mov 2, framebuffer + {2 * (base + 3)}*dw, col_cexcl + 8*{x}*dw",       # sanity: already-proven field
-        f"hex.mov 2, framebuffer + {2 * (base + 4)}*dw, col_ceilbase + 8*{x}*dw",    # sanity: already-proven field
-        f"hex.mov 2, framebuffer + {2 * (base + 5)}*dw, col_top + 8*{x}*dw",         # sanity: already-proven field
-        f"hex.set w/4, dumpptr, col_ceil_bands + {BAND_STRIDE}*{x}*dw",
-    ]
-    for k in range(BAND_STRIDE):
-        lines += ["hex.read_byte_and_inc dumpbyte, dumpptr",
-                  f"hex.mov 2, framebuffer + {2 * (base + 6 + k)}*dw, dumpbyte"]
-    lines.append(f"hex.set w/4, dumpptr, col_floor_bands + {BAND_STRIDE}*{x}*dw")
-    for k in range(BAND_STRIDE):
-        lines += ["hex.read_byte_and_inc dumpbyte, dumpptr",
-                  f"hex.mov 2, framebuffer + {2 * (base + 6 + BAND_STRIDE + k)}*dw, dumpbyte"]
-    return "\n".join(lines)
+def _run_stream(out, vx, vy, va):
+    screen = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+    term = fj.run(out, io_device=screen, print_time=False, print_termination=False)
+    return screen, term
 
 
-def test_stream_pass1_wiring_matches_expected_bands(tmp_path):
+def test_square_stream_frame_byte_exact_vs_oracle(tmp_path):
+    """ONE assemble, 5 stdin viewpoints (the 4 legacy flat-gate viewpoints + the non-vacuous-ceiling
+    corner one), each decoded StreamScreen grid byte-exact vs the oracle; spawn matches the golden."""
     cfg = Config()
     rm = ReferenceModel(cfg)
     mw = WadFile.from_path(ROOM)
@@ -84,97 +75,55 @@ def test_stream_pass1_wiring_matches_expected_bands(tmp_path):
     scene = build_scene(mw, aw, "MAP01")
     sp = spawn_state(mw, "MAP01")
     spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    A45 = 0x20000000
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45),
+                  (24, 24, A45)]                          # the cexcl>0 ceiling-exercising corner
+    out = _assemble_stream(tmp_path, mw, "MAP01", cfg, asset_wad=aw)
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
+                                    floor_texturing=False, wall_mode="W1")
+        screen, _term = _run_stream(out, vx, vy, va)
+        got = bytes(screen.pixel_indices)
+        assert got == bytes(want), f"stream @ ({vx},{vy},{va:#x}) != oracle W1/flat frame"
+        assert screen.frame_count == 1 and screen.flush_count == 1
+        if k == 0:
+            assert frame_hash(got) == SQUARE_STREAM_GOLDEN, \
+                f"stream spawn hash {frame_hash(got)} != golden"
 
-    main = emit_wall_renderer(mw, "MAP01", cfg, asset_wad=aw, over_align=False,
-                             floor_mode="flat", wall_mode="W1", raster_mode="stream")
-    dump = "\n".join(_dump_code(ci, x) for ci, x in enumerate(CHECK_COLUMNS))
-    marker = "present.set_palette palette\npresent.update_screen_reg framebuffer\nstl.loop"
-    assert main.count(marker) == 1, "expected marker not found verbatim -- emitter text changed"
-    main = main.replace(marker, dump + "\n" + marker, 1)
-    main += "\ndumpptr: hex.vec w/4\ndumpbyte: hex.vec 2\n"
 
-    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
-    p = tmp_path / "streamwire.fj"
-    p.write_text(main, encoding="utf-8")
-    out = tmp_path / "streamwire.fjm"
-    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
-                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), PLANE_BANDS_FJ.resolve(), PLANE_FJ.resolve(),
-                 p.resolve()],
-                out, memory_width=W, print_time=False)
+def test_e1m1_stream_full_frame_byte_exact_and_golden(tmp_path):
+    """THE pS2 CAPSTONE: the full E1M1 column-stream frame -- byte-exact vs the oracle over
+    spawn + rotation + 2 other-viewpoint frames, spawn matching the stream golden. Reports
+    ops/frame (the pS2 MEASURE gate: expect ~110-140M vs the 265.7M flat+W1 framebuffer state)
+    and the span (no fb, no pass-2 unroll, no plane machinery -- expect a big drop from 20.1M)."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(E1M1_WAD)
+    scene = build_scene(mw, mw, "E1M1")
 
-    # ONE assemble, re-run over several stdin viewpoints (the suite's established pattern). The spawn
-    # viewpoint has cexcl=0 at BOTH check columns (walls reach the screen top) -- it exercises ONLY the
-    # floor call; the ceiling call takes build_bands' empty early-exit there (a VACUOUS pass for the
-    # ceiling wiring, the exact trap that hid the pS2c bidx bug: an isolation experiment that never
-    # reaches the write path proves nothing about it, fj-lessons R17). The (24,24)@0x20000000 corner
-    # viewpoint (probed host-side) has cexcl>0 AND fstart<VIEW_H at both columns, so BOTH calls write.
-    viewpoints = [(spx, spy, sp.angle), (24, 24, 0x20000000)]
+    sp = spawn_state(mw, "E1M1")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    things = mw.things("E1M1")
+    VIEWPOINTS = [(spx, spy, sp.angle),
+                  (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
+    seen = {(spx, spy)}
+    for t in things:
+        if (t.x, t.y) not in seen:
+            seen.add((t.x, t.y)); VIEWPOINTS.append((t.x, t.y, sp.angle))
+        if len(VIEWPOINTS) >= 4:
+            break
 
-    lds, sds, secs = mw.linedefs("MAP01"), mw.sidedefs("MAP01"), mw.sectors("MAP01")
-    flatcache = {}
-    orig = ReferenceModel._render_planes_flat
-    failures = []
-    for vx, vy, va in viewpoints:
-        screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
-        fj.run(out, io_device=screen, print_time=False, print_termination=False)
-        px = bytes(screen.pixel_indices)
+    out = _assemble_stream(tmp_path, mw, "E1M1", cfg)
+    span = max(s.segment_start + s.segment_length for s in Reader(out).memory_segments)
+    print(f"[pS2] E1M1 stream span = {span:,} words")
 
-        # the REAL per-column (cexcl, fstart, ph_c, ph_f, light, base_c, base_f) this scene's frame
-        # produces -- captured DIRECTLY from a real render_wall_frame call (monkeypatching
-        # _render_planes_flat to intercept its arguments, R13: don't re-derive the claim/clip formulas,
-        # reuse the oracle's own numbers) instead of re-deriving cexcl/fstart from scratch (an earlier
-        # version of this test WRONGLY assumed the ceiling/floor windows are always [0,centery)/
-        # [centery,100) -- they're not; cexcl/fstart depend on the wall's actual projected top/bottom,
-        # which for the square-room spawn (a floor-to-ceiling wall filling the whole column) can be 0).
-        captured = {}
-
-        def _capture(self, fb, colormap, asset_wad, flatcache_, viewz_, ceil_hi, floor_lo, col_ch,
-                     col_fh, col_lt, col_cf, col_ff):
-            captured["args"] = (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff)
-            return orig(self, fb, colormap, asset_wad, flatcache_, viewz_, ceil_hi, floor_lo, col_ch,
-                        col_fh, col_lt, col_cf, col_ff)
-
-        ReferenceModel._render_planes_flat = _capture
-        try:
-            rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
-                                 floor_texturing=False, wall_mode="W1")
-        finally:
-            ReferenceModel._render_planes_flat = orig
-        ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff = captured["args"]
-
-        pss = scene.cmap.subsectors[rm.point_in_subsector(scene.cmap, vx, vy)]
-        viewz = rm.view_z(rm._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
-
-        for ci, x in enumerate(CHECK_COLUMNS):
-            base = ci * PER_COL_SIZE
-            n_ceil, n_floor, lit, cexcl_lo, ceilbase_lo, top_lo = (px[base], px[base + 1], px[base + 2],
-                                                                  px[base + 3], px[base + 4], px[base + 5])
-            ceil_bytes = px[base + 6: base + 6 + n_ceil * 3]
-            floor_bytes = px[base + 6 + BAND_STRIDE: base + 6 + BAND_STRIDE + n_floor * 3]
-            got_ceil = [tuple(ceil_bytes[i:i + 3]) for i in range(0, len(ceil_bytes), 3)]
-            got_floor = [tuple(floor_bytes[i:i + 3]) for i in range(0, len(floor_bytes), 3)]
-
-            cexcl = min(ceil_hi[x] + 1, cfg.VIEW_H) if ceil_hi[x] >= 0 else 0
-            fstart = floor_lo[x] if floor_lo[x] < cfg.VIEW_H else cfg.VIEW_H
-            ph_c = abs((col_ch[x] << 16) - viewz) if ceil_hi[x] >= 0 else None
-            ph_f = abs((col_fh[x] << 16) - viewz) if floor_lo[x] < cfg.VIEW_H else None
-            base_c = rm._flat_base(scene.asset_wad, col_cf[x], flatcache) if col_cf[x] else None
-            base_f = rm._flat_base(scene.asset_wad, col_ff[x], flatcache) if col_ff[x] else None
-            lt = col_lt[x]
-
-            exp_ceil = _expected_bands(rm, ph_c, lt, base_c, 0, cexcl) if ph_c is not None and cexcl > 0 else []
-            exp_floor = (_expected_bands(rm, ph_f, lt, base_f, fstart, cfg.VIEW_H - fstart)
-                        if ph_f is not None and fstart < cfg.VIEW_H else [])
-            vp = f"vp=({vx},{vy},{va:#x})"
-            print(f"{vp} col {x}: cexcl={cexcl} fstart={fstart} n_ceil={n_ceil}(want {len(exp_ceil)}) "
-                  f"n_floor={n_floor}(want {len(exp_floor)}) lit={lit} cexcl_lo(sanity)={cexcl_lo} "
-                  f"ceilbase_lo(sanity)={ceilbase_lo}(want {base_c}) top_lo(sanity)={top_lo}")
-            if n_ceil != len(exp_ceil):
-                failures.append(f"{vp} col {x}: n_ceil {n_ceil} != expected {len(exp_ceil)} ({exp_ceil})")
-            if n_floor != len(exp_floor):
-                failures.append(f"{vp} col {x}: n_floor {n_floor} != expected {len(exp_floor)} ({exp_floor})")
-            if got_ceil != exp_ceil:
-                failures.append(f"{vp} col {x}: ceil bands {got_ceil} != expected {exp_ceil}")
-            if got_floor != exp_floor:
-                failures.append(f"{vp} col {x}: floor bands {got_floor} != expected {exp_floor}")
-    assert not failures, "\n".join(failures)
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
+                                    floor_texturing=False, wall_mode="W1")
+        screen, term = _run_stream(out, vx, vy, va)
+        got = bytes(screen.pixel_indices)
+        assert got == bytes(want), f"stream @ ({vx},{vy},{va:#x}) != oracle E1M1 W1/flat frame"
+        if k == 0:
+            assert frame_hash(got) == E1M1_STREAM_GOLDEN, \
+                f"stream spawn hash {frame_hash(got)} != golden"
+            print(f"[pS2] E1M1 stream spawn frame = {term.op_counter:,} ops")

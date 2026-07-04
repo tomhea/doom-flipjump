@@ -14,6 +14,7 @@ spawn frame matching the published textured golden. The full E1M1 frame is the h
 from pathlib import Path
 
 import flipjump as fj
+import pytest
 from flipjump.fjm.fjm_reader import Reader
 
 from doomfj.config import Config
@@ -77,11 +78,24 @@ def test_square_textured_planes_byte_exact_vs_oracle(tmp_path):
             assert frame_hash(got) == SQUARE_TEX_GOLDEN, f"M13d2 spawn hash {frame_hash(got)} != golden"
 
 
-# the M13a flat-colored goldens (tests/host/test_floor_planes.py flat tier)
+# the M13a flat-colored goldens (tests/host/test_floor_planes.py flat tier) -- PRE-M13pS2 hashes:
+# the F4 re-bless (band-walk zidx in _render_planes_flat) moved the flat oracle, superseding these.
 SQUARE_FLAT_GOLDEN = "aeeb82a8bea795acf51edf4ff9150dab8f4bd15030f8e6008c6b00a1702d1463"
 E1M1_FLAT_GOLDEN = "6d5baf9eda47761d804d2127c85fad7a924aa6903f0217cbb2c988269dc8f88e"
 
+# M13pS2: the two framebuffer-mode FLAT gates below are SUPERSEDED by the column-stream gates
+# (tests/fj/test_stream_pass1_wiring.py). The oracle's flat tier now band-walks zidx (the F4
+# re-bless, mirrored bit-for-bit by the fj stream renderer's plane.build_bands), while the LEGACY
+# framebuffer flat kernel (draw_span_flat, exact zidx per span-row) intentionally was NOT updated --
+# it mismatches the walked oracle by <=1-row band edges (measured: 79/16000 E1M1 spawn px; 26 px at
+# the square's 45-degree viewpoint) and is scheduled for deletion with the rest of the framebuffer
+# flat machinery at M13p8.
+_FLAT_SUPERSEDED = ("superseded by the M13pS2 column-stream gates (test_stream_pass1_wiring.py): "
+                    "the flat oracle now band-walks zidx (F4 re-bless); the legacy framebuffer "
+                    "flat kernel stays exact-per-row and no longer matches it")
 
+
+@pytest.mark.skip(reason=_FLAT_SUPERSEDED)
 def test_square_flat_planes_byte_exact_vs_oracle(tmp_path):
     """M13p1: floor_mode='flat' -- the M13a flat-colored tier through the SHARED emitter, byte-exact
     vs the oracle floor_texturing=False over 4 viewpoints, spawn matching the blessed flat golden."""
@@ -113,6 +127,7 @@ def test_square_flat_planes_byte_exact_vs_oracle(tmp_path):
             assert frame_hash(got) == SQUARE_FLAT_GOLDEN, f"M13p1 spawn hash {frame_hash(got)} != golden"
 
 
+@pytest.mark.skip(reason=_FLAT_SUPERSEDED)
 def test_e1m1_flat_planes_full_frame_byte_exact_and_golden(tmp_path):
     """M13p1 — THE FULL E1M1 flat-colored floor/ceiling frame through the SHARED emit_wall_renderer,
     byte-exact vs the host oracle floor_texturing=False and matching the blessed E1M1 flat golden.

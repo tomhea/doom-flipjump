@@ -768,7 +768,8 @@ ns frame {
     // hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_stream centery, ds, viewh1, viewh, projection, band_stride \
             @ loop, body, skipcol, ret, sidx, bidx, tbskip, tbok, cge, cdone, fneg, fdone, cVH, cexcl, \
-              fstart, cph, fph, fcount, work, sfull, occscan, occchk, occnext, occdone, occproc \
+              fstart, cph, fph, fcount, cC, nacc, nadv, csplit, conehalf, cdone2, fsplit, fonehalf, fdone2, \
+              work, sfull, occscan, occchk, occnext, occdone, occproc \
             < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
               seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, viewzw, seg_ceil, seg_floor, worldtop, \
               seg_plight, seg_ceilbase, seg_floorbase, seg_lit, \
@@ -845,16 +846,41 @@ ns frame {
         // bidx is a RAW ADDRESS offset for the hex.add below, so the byte-slot count x*band_stride
         // must be scaled by dw (one packed byte per dw-slot, the ptr_index/ptr_inc address model) --
         // adding the unscaled slot count misaligns the pointer for every x>0 (the pS2c-wiring ip<2w).
+        // STRADDLE SPLIT (mirrors _zidx_band_walk's): yslope is monotone only per horizon half
+        // ([0,centery) ascending / [centery,viewh) descending); a window crossing centery (negative-
+        // viewz areas: a floor above the eye starts at fstart<centery, a ceiling below it ends at
+        // cexcl>centery) is walked as TWO build_bands calls, the second appending after the first's
+        // 3-byte entries. Pixels are identical to a single merged list (the seam band just emits as
+        // two adjacent same-colour runs).
         hex.mul_const w/4, bidx, x, band_stride*dw
+        hex.set 8, cC, centery
         hex.set w/4, bb_arr, col_ceil_bands       // col_ceil_bands IS a compile-time array label (hex.set correct)
         hex.add w/4, bb_arr, bidx
         hex.mov 8, bb_ph, cph
         hex.mov 2, bb_light, seg_plight
         hex.mov 2, bb_base, seg_ceilbase          // narrow read of the wider (5-nibble) field -- safe (R11)
         hex.zero 2, bb_y0
-        hex.mov 2, bb_count, cexcl                // narrow read of the 8-nibble cexcl -- safe (window <= VIEW_H)
+        hex.cmp 8, cexcl, cC, conehalf, conehalf, csplit   // cexcl > centery -> the window straddles
+      csplit:
+        hex.set 2, bb_count, centery              // first half [0, centery), ascending
         hex.set 2, bb_ascending, 1
         stl.fcall build_bands_leaf, plane_band_ret
+        hex.zero w/4, nacc
+        hex.mov 2, nacc, bb_n                     // (wide-zeroed so the w/4 mul_const read is clean, R11)
+        hex.mul_const w/4, nadv, nacc, 3*dw       // advance bb_arr past the first half's 3-byte entries
+        hex.add w/4, bb_arr, nadv
+        hex.set 2, bb_y0, centery                 // second half [centery, cexcl), descending
+        hex.mov 2, bb_count, cexcl
+        hex.sub 2, bb_count, cC                   // cexcl - centery (<= viewh-centery, fits 2 nibbles)
+        hex.zero 2, bb_ascending
+        stl.fcall build_bands_leaf, plane_band_ret
+        hex.add 2, bb_n, nacc                     // total entries = n1 + n2 (<= 64, fits 2 nibbles)
+        ;cdone2
+      conehalf:
+        hex.mov 2, bb_count, cexcl                // narrow read of the 8-nibble cexcl -- safe (R11)
+        hex.set 2, bb_ascending, 1
+        stl.fcall build_bands_leaf, plane_band_ret
+      cdone2:
         .store_col_field col_ceil_n, sidx, bb_n
 
         hex.set w/4, bb_arr, col_floor_bands
@@ -862,12 +888,31 @@ ns frame {
         hex.mov 8, bb_ph, fph
         hex.mov 2, bb_light, seg_plight
         hex.mov 2, bb_base, seg_floorbase
+        hex.cmp 8, fstart, cC, fsplit, fonehalf, fonehalf   // fstart < centery -> the window straddles
+      fsplit:
+        hex.mov 2, bb_y0, fstart                  // first half [fstart, centery), ascending
+        hex.mov 2, bb_count, cC
+        hex.sub 2, bb_count, fstart               // centery - fstart (narrow reads safe: both < viewh)
+        hex.set 2, bb_ascending, 1
+        stl.fcall build_bands_leaf, plane_band_ret
+        hex.zero w/4, nacc
+        hex.mov 2, nacc, bb_n
+        hex.mul_const w/4, nadv, nacc, 3*dw
+        hex.add w/4, bb_arr, nadv
+        hex.set 2, bb_y0, centery                 // second half [centery, viewh), descending
+        hex.set 2, bb_count, viewh - centery
+        hex.zero 2, bb_ascending
+        stl.fcall build_bands_leaf, plane_band_ret
+        hex.add 2, bb_n, nacc
+        ;fdone2
+      fonehalf:
         hex.mov 2, bb_y0, fstart
         hex.set 8, fcount, viewh
         hex.sub 8, fcount, fstart                 // fcount = viewh - fstart (the floor window's row count)
         hex.mov 2, bb_count, fcount
         hex.zero 2, bb_ascending
         stl.fcall build_bands_leaf, plane_band_ret
+      fdone2:
         .store_col_field col_floor_n, sidx, bb_n
 
         .store_col_field col_lit, sidx, seg_lit   // the W1 wall's fully-baked constant lit byte
@@ -905,6 +950,9 @@ ns frame {
       cph: hex.vec 8
       fph: hex.vec 8
       fcount: hex.vec 8
+      cC: hex.vec 8
+      nacc: hex.vec w/4
+      nadv: hex.vec w/4
     }
 
     // ── M13opt2 R_MakeSpans (compile-time-column) — the per-ROW TEXTURED floor/ceiling span pass. For each

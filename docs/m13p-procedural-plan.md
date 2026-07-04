@@ -663,11 +663,12 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
   DATA was still declared `hex.vec` (register form) reads garbage — packed and register-form byte
   encodings are NOT interchangeable; fixed by declaring the band-list arrays as packed bytes
   (`;value*dw`, the same idiom `read_table_byte`/`generate_byte_lut_fj` use).
-- [ ] **pS2 — the composite stream ships.** Wire the 160-column emitter after pass-1; DELETE fb +
-  pass-2 + all plane machinery; oracle re-expressed via the same recip+threshold band arithmetic;
-  **re-bless the flat goldens once** (F4, PNG-gated). Gates: square 4-viewpoint + E1M1 capstone,
-  byte-exact = the DEVICE's decoded grid equals the oracle frame. Measure (expect **~110-140M**;
-  LS1+LS2 now real); record the new span/assemble (expect big drops); commit.
+- [x] **pS2 — the composite stream ships (STRUCTURALLY DONE 2026-07-05; the ops target did NOT
+  close — see pS2c-wiring below).** Wired, deleted, re-blessed, byte-exact-gated exactly as
+  specified. Measured **381.6M ops/frame** vs the expected ~110-140M (span DID drop big:
+  20.1M→10.8M words): the per-COLUMN band building (320 window walks/frame vs the ledger's ~20-30
+  per-visplane assumption) dominates. A band-cost crush rung must precede pG — candidates in the
+  pS2c-wiring entry.
   Laddered into sub-rungs (each committed separately, mirroring p0/p1/p4a/pS0/pS1's granularity):
   - [x] **pS2a — the LS2 band-walk algorithm, validated + tested, NOT YET WIRED. DONE, 2026-07-04.**
     `ReferenceModel._zidx_band_walk(planeheight, rows)` (`src/doomfj/reference_model.py`): seed the
@@ -716,26 +717,39 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
     row and classifying on ITS equality, matching the oracle's own grouping. NOT yet wired into pass-1
     or the emit phase — this is the CONSUMER (`stream.emit_column`) side proven standalone; the
     PRODUCER (pass-1 populating real per-column band arrays from real segs) is the remaining pS2c work.
-  - [ ] **pS2c-wiring — the real per-column band-list construction + `stream.emit_column` wiring
-    (REMAINING).** Pass-1, per claimed column: call `plane.build_bands` (ceiling window `[0,cexcl)`,
-    ascending=1; floor window `[fstart,100)`, ascending=0) using the ALREADY-STORED `col_ceil_ph`/
-    `col_floor_ph`/`col_plight`/`col_ceilbase`/`col_floorbase`/`col_cexcl`/`col_fstart` fields (all
-    exist today, per `frame_render.fj`'s `seg_pass1_leaf_body_mtlwp`) into a per-column packed-byte
-    buffer (size MAX_BANDS*3, MAX_BANDS=50 proven safe in the kernel test) + a per-column band count;
-    ALSO bake `col_lit` (the W1 wall's fully-constant FINAL PALETTE BYTE — light+texel both known at
-    Python emit time, so no runtime colormap lookup is needed at all; update `stream.emit_column`'s
-    wall-run line from `cm.emit wall_cidx` to `byte.emit wall_lit` to match). Then, after pass-1: wire
-    `present.init_screen_stream`/`begin_frame_stream` + a `rep(VIEW_W,x) stream.emit_column ...` compile-
-    time-unrolled loop reading each column's fields at compile-time addresses. DELETE the framebuffer +
-    old pass-2 (`pixel_tramp`/`leaf_body_w`) + `render_planes_spans`/`plane_col`/`draw_span_flat`
-    entirely. Wire `_zidx_band_walk` into `_render_planes_flat` (the pS2a change, reverted then —
-    re-apply now that the fj consumer exists) and re-bless the flat goldens (measured shift in pS2a:
-    79/16,000 E1M1 pixels, 0.49%, ≤1 row). Byte-exact vs the device's decoded grid == the (now
-    band-walked) oracle frame. Measure (~110-140M expected); this is where pS1's LS1 estimate
-    (2.02-3.18M, see pS1's finding above) gets its FIRST real (non-synthetic) measurement — decide
-    per-column-vs-per-seg band computation by MEASURING first (per-column is simpler and should be
-    tried first; the ledger's "~20-30/frame" estimate assumed per-seg, so expect this rung's real
-    number to run higher until/unless a per-seg-shared refinement is measured necessary).
+  - [x] **pS2c-wiring — DONE, 2026-07-05 (two commits: `ee55660` the pass-1 band-list producer;
+    the emit-loop + deletion + re-bless capstone commit follows it).** Shipped as specified: pass-1
+    per claimed column calls `plane.build_bands` twice into per-column packed-byte slices (bidx must
+    be `x*BAND_STRIDE*dw` — RAW address units, the *dw trap, fj-lessons R17); `col_lit` baked
+    (emit-time colormap, `stream.emit_column`'s wall run switched `cm.emit`→`byte.emit` + a
+    zero-length-wall-run guard so a trailing 0-count pair can't leak past the device's pixel count);
+    `raster_mode="stream"` emits `init_screen_stream` + walk + `set_palette` + `begin_frame_stream` +
+    160 unrolled `stream.emit_column` calls, and DELETES fb + pass-2 + all plane machinery (the `cm`
+    label carries the EMIT tables instead of `compile_colormap`'s apply table — same label, mutually
+    exclusive). `_zidx_band_walk` wired into `_render_planes_flat` (F4 re-bless: E1M1 flat host golden
+    → `1da1fdb6…`, 79/16,000 px; square spawn unchanged; the two LEGACY framebuffer-flat fj gates are
+    skipped as superseded — the walk also moves 26 px at the square's 45° viewpoint, so both, not
+    just E1M1). **A domain bug pS2a's spawn-only validation missed:** negative-viewz areas produce
+    HORIZON-STRADDLING windows (a floor above the eye ⇒ fstart<centery; a ceiling below ⇒
+    cexcl>centery) where yslope is non-monotone — the host auto-detect plateaued while the fj
+    hardcoded direction diverged (29 cols × 13 rows wrong at an E1M1 other-sector viewpoint). Fix =
+    SPLIT straddling windows at centery on BOTH sides (host `_zidx_band_walk` recurses; the fj leaf
+    makes two `build_bands` calls, the second appended after the first's entries; MAX_BANDS 50→64) —
+    pixels identical to a merged list, spawn goldens unchanged. **Gates: square 5-viewpoint (incl. a
+    probed corner viewpoint with cexcl>0 at the check columns — spawn alone leaves the ceiling path
+    VACUOUSLY untested) + the E1M1 4-viewpoint capstone, all byte-exact vs the device-decoded grid ==
+    the band-walked oracle, spawn hashes pinned (`39e7d42e…` square / `690fb5a5…` E1M1,
+    tests/fj/test_stream_pass1_wiring.py). MEASURED: span 20.1M→10,836,330 words (−46%), E1M1
+    assemble ~79s→~60s, ops/frame = 381,570,505 — the "per-column runs higher" case this task
+    predicted, and MUCH higher: ~2.9× the ~130M midpoint estimate, WORSE than the 265.7M
+    framebuffer-flat state.** The overshoot is the per-column band building: 2 `build_bands` calls ×
+    ~160 columns ≈ 320 full window walks/frame (the LS2 ledger line assumed ~20-30 per-VISPLANE
+    walks) at a heavier-than-estimated per-row walk body. NEXT (the pS2 close-out's remaining gate):
+    crush the band cost — candidates: (a) skip the classify zrow-lookup on rows where zidx didn't
+    move (most rows; provably byte-identical since zrow only changes when zidx does), (b) narrow the
+    walk compares (ys vs threshold at fewer nibbles), (c) per-seg/per-visplane sharing with
+    per-column window clipping at emit time (the plan's original shape). Only after that does the
+    "~110-140M" ladder row hold and pG start from its intended base.
 
 ---
 

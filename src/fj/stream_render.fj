@@ -62,18 +62,24 @@ ns stream {
     }
 
     // One column's 3 windows: ceiling band list [0,cexcl) · ONE wall run [cexcl,fstart) · floor band
-    // list [fstart,H). `cexcl`/`fstart` are 2-nibble RUNTIME registers (pS2 will feed these from
-    // pass-1's per-column arrays, read at a compile-time column address — free; here they are plain
-    // registers so the prototype exercises the same op shapes). `wall_cidx` is the column's W1 lit
-    // colour index (col_lit).
-    def emit_column ceil_bands, ceil_n, cexcl, fstart, wall_cidx, floor_bands, floor_n \
-            @ wlen, skip {
+    // list [fstart,H). `cexcl`/`fstart` are 2-nibble RUNTIME registers (pS2 feeds these from pass-1's
+    // per-column arrays, read at a compile-time column address — free). `wall_lit` is the column's W1
+    // wall FINAL palette byte (col_lit, fully baked at Python emit time — light row + mode texel are
+    // both per-seg constants — so the wall run needs NO runtime colormap lookup: `byte.emit`, not
+    // `cm.emit`; M13pS2c). A ZERO-length wall run (an off-screen wall: cexcl==fstart) emits NOTHING —
+    // mid-stream a 0-count pair is merely 2 wasted emits, but on the frame's LAST column a trailing
+    // pair would arrive AFTER the device's width*height pixels completed and leak into command-byte
+    // decode.
+    def emit_column ceil_bands, ceil_n, cexcl, fstart, wall_lit, floor_bands, floor_n \
+            @ wlen, nowall, skip {
         .emit_band_list ceil_bands, ceil_n
         hex.zero 2, wlen
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, cexcl                    // wlen = fstart - cexcl (the ONE wall run's length)
+        hex.if0 2, wlen, nowall
         byte.emit wlen
-        cm.emit wall_cidx
+        byte.emit wall_lit
+      nowall:
         .emit_band_list floor_bands, floor_n
         ;skip
       wlen: hex.vec 2

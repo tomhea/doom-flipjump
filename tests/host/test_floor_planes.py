@@ -138,4 +138,4 @@ def test_e1m1_flatcolored_floor_golden_hash():
     map_wad = WadFile.from_path(E1M1)
     scene = build_scene(map_wad, map_wad, "E1M1")
     frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene, floor_texturing=False)
-    assert frame_hash(frame) == "6d5baf9eda47761d804d2127c85fad7a924aa6903f0217cbb2c988269dc8f88e"  # perf #9+#11 [re-bless]
+    assert frame_hash(frame) == "1da1fdb62c9c8ed341d4808e95fe6f5ea380236576adacb7446e358239af2e5e"  # M13pS2 F4 [re-bless]: band-walk zidx (79/16000 px, each <=1 row vs exact; diff PNG in scratchpad/bakeoff)

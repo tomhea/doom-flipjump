@@ -626,6 +626,15 @@ class ReferenceModel:
             return []
         if planeheight == 0:
             return [0] * len(rows)
+        # M13pS2 straddle split: yslope is non-decreasing on [0, CENTERY) and non-increasing on
+        # [CENTERY, H) (peak at CENTERY-1, with ys[CENTERY-1]==ys[CENTERY]); a window crossing
+        # CENTERY (a floor above the eye / a ceiling below it -- negative-viewz areas produce these)
+        # violates the single-monotonic-window contract below, so walk each half separately. The fj
+        # stream leaf (seg_pass1_leaf_body_stream) mirrors this split at its build_bands call sites.
+        P = self.cfg.CENTERY
+        if rows[0] < P <= rows[-1]:
+            k = P - rows[0]
+            return self._zidx_band_walk(planeheight, rows[:k]) + self._zidx_band_walk(planeheight, rows[k:])
         recip = self._recip_div32(planeheight)
         step = 16 * recip
         y0 = rows[0]
@@ -771,28 +780,32 @@ class ReferenceModel:
                             ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff):
         """M13a flat-colored tier (the cheaper §1 floor mode): each claimed column's ceiling rows
         [0, ceil_hi] and floor rows [floor_lo, H-1] are filled with the flat's base index, distance-lit
-        per row (`_plane_pixel`). No horizontal DDA — each pixel is independent.
-        ⚠ Stays on the always-EXACT per-pixel `_plane_pixel` for now (byte-exact vs the shipped flat
-        goldens + the CURRENT fj `draw_span_flat`/`render_planes_spans`, which also compute zidx
-        exactly per span-row). `_zidx_band_walk` (below) is the validated M13pS2 (LS2) replacement —
-        it must be wired in TOGETHER with the new fj column-stream emitter that consumes it (pS2c),
-        not here in isolation: `_zidx_band_walk` only diverges from `_plane_pixel` across a MULTI-ROW
-        window walked in one pass (a span here is always a single row, so switching this call site
-        alone would be byte-IDENTICAL and pointless); wiring it here now, before the fj side is ready,
-        would just re-bless the goldens for no consumer and break the still-row-major fj tests."""
+        per row. No horizontal DDA — each pixel is independent.
+        M13pS2 (the F4 [re-bless], applied WITH the fj column-stream consumer): the per-row zidx comes
+        from `_zidx_band_walk` — the SAME seed-then-threshold-walk arithmetic the fj
+        `plane.build_bands` kernel mirrors bit-for-bit — instead of the per-row always-exact
+        `_plane_pixel` FixedMul. Measured vs exact at pS2a: 79/16,000 E1M1 spawn flat pixels shift
+        (each ≤1 row, an adjacent-colormap-row shade); the square-room frames are unchanged.
+        ⚠ This intentionally diverges from the LEGACY framebuffer-mode fj flat kernel
+        (`draw_span_flat`, still exact per span-row) — that path's E1M1 flat gate is superseded by
+        the stream capstone (see tests/fj/test_floor_planes_fj.py)."""
         cfg = self.cfg
         W, H = cfg.VIEW_W, cfg.VIEW_H
         for x in range(W):
             if ceil_hi[x] >= 0:
                 ph = abs((col_ch[x] << 16) - viewz)
-                base, lt = self._flat_base(asset_wad, col_cf[x], flatcache), col_lt[x]
-                for y in range(0, ceil_hi[x] + 1):
-                    fb[y * W + x] = self._plane_pixel(colormap, ph, lt, base, y)
+                base = self._flat_base(asset_wad, col_cf[x], flatcache)
+                lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)
+                rows = list(range(0, ceil_hi[x] + 1))
+                for y, z in zip(rows, self._zidx_band_walk(ph, rows)):
+                    fb[y * W + x] = colormap[self.zlight[lvl][z]][base]
             if floor_lo[x] < H:
                 ph = abs((col_fh[x] << 16) - viewz)
-                base, lt = self._flat_base(asset_wad, col_ff[x], flatcache), col_lt[x]
-                for y in range(floor_lo[x], H):
-                    fb[y * W + x] = self._plane_pixel(colormap, ph, lt, base, y)
+                base = self._flat_base(asset_wad, col_ff[x], flatcache)
+                lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)
+                rows = list(range(floor_lo[x], H))
+                for y, z in zip(rows, self._zidx_band_walk(ph, rows)):
+                    fb[y * W + x] = colormap[self.zlight[lvl][z]][base]
 
     @staticmethod
     def _plane_region_at(x, y, ceil_hi, floor_lo):

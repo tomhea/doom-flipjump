@@ -58,15 +58,16 @@ def _band_list_fj(label, bands):
     return "\n".join(lines)
 
 
-def _emit_data_fj():
+def _emit_data_fj(wad: WadFile):
     cexcl = sum(r for r, _, _ in CEIL_BANDS)
     fstart = cexcl + WALL_ROWS
-    return "\n".join([
+    wall_lit = wad.colormap()[WALL_LIGHT][WALL_COLOUR]   # the FINAL lit byte, baked host-side (pS2c:
+    return "\n".join([                                   # col_lit -- the wall run is byte.emit, no cm lookup)
         _band_list_fj("ceil_bands", CEIL_BANDS),
         _band_list_fj("floor_bands", FLOOR_BANDS),
         f"cexcl: hex.vec 2, {cexcl}",
         f"fstart: hex.vec 2, {fstart}",
-        f"wall_cidx: hex.vec 4, {_cidx(WALL_LIGHT, WALL_COLOUR)}",
+        f"wall_lit: hex.vec 2, {wall_lit}",
         f"ceil_n: hex.vec 2, {len(CEIL_BANDS)}",
         f"floor_n: hex.vec 2, {len(FLOOR_BANDS)}",
     ])
@@ -83,9 +84,9 @@ def _assemble_and_run_one_column(tmp_path, wad: WadFile):
         "stl.startup_and_init_all",
         "present.init_screen_stream 0",
         "present.begin_frame_stream",
-        "stream.emit_column ceil_bands, ceil_n, cexcl, fstart, wall_cidx, floor_bands, floor_n",
+        "stream.emit_column ceil_bands, ceil_n, cexcl, fstart, wall_lit, floor_bands, floor_n",
         "stl.loop",
-        _emit_data_fj(),
+        _emit_data_fj(wad),
         byte_table,
         cm_table,
     ])

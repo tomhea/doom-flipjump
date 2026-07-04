@@ -15,13 +15,15 @@ from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
+    generate_emit_dispatch_table_fj,
 )
 from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import bake_bsp, _bsp_as_code, seg_affine_coeffs
 from doomfj.reference_model import (ReferenceModel, WALL_BG,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
-                                    texture_texels, _texel_table, downscale_canvas)
+                                    texture_texels, _texel_table, downscale_canvas,
+                                    colormap_values, _index_nibbles)
 
 
 def _pfx(mapname: str) -> str:
@@ -53,7 +55,10 @@ def _seg_xorby_use(idx, clear=True):
 
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub"})
 
-MAX_BANDS = 50                    # M13pS2c: worst-case band-list slots/column/region (window <= 50 rows)
+MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Bound: a monotone half-window's
+                                  # zidx walk gives <=32 distinct zrow runs (zlight[lvl][zidx] is monotone in
+                                  # zidx with values in [0,31]); a horizon-STRADDLING window (negative-viewz
+                                  # areas) is built as TWO half-window walks appended -> <=64 entries.
 BAND_STRIDE = MAX_BANDS * 3        # packed bytes per column per region (run-length, base, zrow each entry)
 
 
@@ -94,16 +99,23 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     vertical band strip). `column_render_params`/pass-2/`leaf_body_w` are UNCHANGED — they just sample a
     much smaller table (793,344 texels → tens-to-low-hundreds).
 
-    `raster_mode` (M13pS2c, scaffolding — NOT wired to any output yet): "framebuffer" (default, the
-    UNCHANGED pass-1/pass-2/plane-pass pipeline above) or "stream" — pass-1 ALSO builds each claimed
-    column's ceiling/floor packed-byte BAND LISTS (`plane.build_bands`, `src/fj/plane_bands.fj`) and
-    bakes the W1 wall's fully-constant lit BYTE (`seg_lit`, computed here at Python emit time from the
-    real colormap — no runtime lookup needed), storing them in `col_ceil_bands`/`col_ceil_n`/
-    `col_floor_bands`/`col_floor_n`/`col_lit`. Requires `wall_mode="W1"` and `floor_mode="flat"` (the
-    only combination pS2c targets — W2's per-band wall lighting and textured floors are out of scope).
-    This is ADDITIVE-ONLY per the pS2c-wiring task: nothing in the existing framebuffer/pass-2/plane-
-    pass output depends on these new arrays yet (the emit-loop consuming them, and the deletion of the
-    old raster, land in a follow-up rung)."""
+    `raster_mode` (M13pS2): "framebuffer" (default, the UNCHANGED pass-1/pass-2/plane-pass pipeline
+    above) or "stream" — THE COLUMN-STREAM COMPOSITE. Pass-1 builds each claimed column's ceiling/
+    floor packed-byte BAND LISTS (`plane.build_bands`, `src/fj/plane_bands.fj`) and bakes the W1
+    wall's fully-constant lit BYTE (`seg_lit`, computed here at Python emit time from the real
+    colormap — no runtime lookup needed), storing them in `col_ceil_bands`/`col_ceil_n`/
+    `col_floor_bands`/`col_floor_n`/`col_lit`; then, instead of any framebuffer raster, the frame is
+    EMITTED as the device run-stream (`present.begin_frame_stream` + an unrolled
+    `rep(VIEW_W,x) stream.emit_column ...` — `src/fj/stream_render.fj`, which the assemble include
+    list must therefore contain in this mode), decoded by `StreamScreen`. The framebuffer, the pass-2
+    wall trampoline, and ALL plane-pass machinery (`render_planes_spans`/`draw_span*`/`clear_planes`)
+    are NOT EMITTED in this mode; the `cm`-label table is the EMIT dispatch table (`cm.emit`, run
+    colours) plus the `byte.emit` identity table, replacing `compile_colormap`'s `cm.apply` table
+    (same label — they cannot coexist, and nothing calls `cm.apply` here). Requires `wall_mode="W1"`
+    and `floor_mode="flat"` (the only combination pS2 targets — W2's per-band wall lighting and
+    textured floors are out of scope). ⚠ every column must be CLAIMED by pass-1 (a closed level
+    always does) — an unclaimed column would emit 0 of its VIEW_H rows and stall the device's
+    pixel count."""
     assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
     assert floor_mode in ("textured", "flat"), f"unknown floor_mode: {floor_mode!r}"
@@ -186,7 +198,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         return (flat_slice[name.upper()] if floor_mode == "textured"
                 else rm._flat_base(asset_wad, name, flat_basecache))
 
-    cm = compile_colormap("cm", asset_wad, lights=COLORMAP_LIGHTS, over_align=over_align)
+    if raster_mode == "stream":
+        # M13pS2: nothing calls `cm.apply` in stream mode -- the `cm` label carries the EMIT dispatch
+        # table instead (`cm.emit`, band-run colours; same flattened light<<8|colour values), plus the
+        # `byte.emit` identity table (run counts + the baked col_lit wall bytes). Same label as
+        # compile_colormap's table, so the two are mutually exclusive per program.
+        cmv = colormap_values(asset_wad, lights=COLORMAP_LIGHTS)
+        cm = "\n".join([
+            generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
+            generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
+                                            over_align=True),
+        ])
+    else:
+        cm = compile_colormap("cm", asset_wad, lights=COLORMAP_LIGHTS, over_align=over_align)
     palette = compile_palette("palette", asset_wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
@@ -265,7 +289,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     else:
         pass1 += [f";{_pfx(mapname)}_bspcode_walk", "bsp_done:"]
     pass2 = []                                            # pass 2a: walls (M12oo shared-compare trampoline)
-    if "pass2" not in ablate:                             # M13p0: drop the wall raster to isolate its cost
+    if "pass2" not in ablate and raster_mode != "stream":   # M13p0 ablate / M13pS2: stream has NO fb raster
         for x in range(cfg.VIEW_W):
             pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
                          f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
@@ -275,7 +299,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # pass 2b: floor/ceiling visplanes (M13d2) — the per-frame clear_planes seeds + the runtime per-ROW
     # R_MakeSpans textured span pass (replaces the M13c3 per-column plane_tramp unroll).
     plane_pass = []
-    if "planes" not in ablate:                            # M13p0: drop the plane pass to isolate its cost
+    if "planes" not in ablate and raster_mode != "stream":   # M13pS2: planes render via the band lists instead
         plane_pass = ["stl.fcall clear_leaf, clear_ret",
                       f"frame.render_planes_spans {cfg.VIEW_W}, {cfg.VIEW_H}"]
 
@@ -283,16 +307,31 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     zlight = generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS)
     distscale = generate_distscale_lut_fj("distscale", cfg.VIEW_W, cfg.TRIG_N)
 
-    main = "\n".join([
-        "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2, *plane_pass,
-        "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
-        "bad: stl.loop",
+    stream = raster_mode == "stream"
+    # M13pS2: the stream present -- the frame leaves the program AS the emitted run bytes (device
+    # DMA decode); one unrolled emit_column per screen column, every col_* read at a compile-time
+    # address. Replaces update_screen_reg + the whole fb/pass-2/plane-pass raster.
+    present_tail = (["present.begin_frame_stream",
+                     *(f"stream.emit_column col_ceil_bands + {BAND_STRIDE * x}*dw, col_ceil_n + {8 * x}*dw, "
+                       f"col_cexcl + {8 * x}*dw, col_fstart + {8 * x}*dw, col_lit + {8 * x}*dw, "
+                       f"col_floor_bands + {BAND_STRIDE * x}*dw, col_floor_n + {8 * x}*dw"
+                       for x in range(cfg.VIEW_W))]
+                    if stream else ["present.update_screen_reg framebuffer"])
+    fb_leaves = [] if stream else [                      # the fb-raster shared leaves -- stream emits none of them
         "pixel_leaf:", "frame.leaf_body_w",
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "span_leaf:",
         (f"plane.draw_span framebuffer, {cfg.VIEW_W}" if floor_mode == "textured"      # M13d2 textured u,v span
          else f"plane.draw_span_flat framebuffer, {cfg.VIEW_W}"),                      # M13p1 flat-colored span
         "clear_leaf:", f"plane.clear_planes {cfg.CENTERX << 16}, {ANG90}",  # M13d2 per-frame R_ClearPlanes seeds
+    ]
+    main = "\n".join([
+        "stl.startup_and_init_all",
+        "present.init_screen_stream 0" if stream else "present.init_screen",
+        *pass1, *pass2, *plane_pass,
+        "present.set_palette palette", *present_tail, "stl.loop",
+        "bad: stl.loop",
+        *fb_leaves,
         *(["seg_pass1_leaf:", "stl.fret seg_ret"] if "segstub" in ablate else
           ["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
            "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"] if "xrstub" in ablate else
@@ -303,7 +342,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),
         *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
-        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
+        *([] if stream else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # M13pS2: no fb in stream mode
         "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "viewz: hex.vec 8", "viewzw: hex.vec 8", "vz_set: hex.vec 1",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",

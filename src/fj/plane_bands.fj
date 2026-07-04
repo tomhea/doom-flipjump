@@ -61,7 +61,7 @@ ns plane {
     def build_bands \
             @ i, y, ys, zidx, step, threshold_hi, threshold_lo, zplus1, zidx8, lvl, zlidx, zrow, \
               cur_zrow, runlen, ptr, c127, dist, \
-              empty, phzero, seed, seedclamp, seedok, loop, body, ascloop, ascmaybe, ascbump, ascstop, \
+              empty, phzero, seed, seedclamp, seedok, bloop, bbody, ascloop, ascmaybe, ascbump, ascstop, \
               descloop, descmaybe, descbump, descstop, classify, samezidx, diffzidx, cont2, \
               flush_final, writeentry, done \
             < bb_ph, bb_light, bb_base, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, \
@@ -124,9 +124,9 @@ ns plane {
         hex.zero 2, i
         hex.mov 2, y, bb_y0
 
-      loop:
-        hex.cmp 2, i, bb_count, body, flush_final, flush_final
-      body:
+      bloop:
+        hex.cmp 2, i, bb_count, bbody, flush_final, flush_final
+      bbody:
         hex.read_table 8, ys, yslope, 2, y
         hex.if0 2, bb_ascending, descloop
       ascloop:
@@ -167,7 +167,7 @@ ns plane {
       cont2:
         hex.inc 2, i
         hex.inc 2, y
-        ;loop
+        ;bloop
 
       writeentry:
         hex.write_byte_and_inc ptr, runlen

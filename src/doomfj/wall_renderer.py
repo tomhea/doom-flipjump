@@ -53,10 +53,13 @@ def _seg_xorby_use(idx, clear=True):
 
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub"})
 
+MAX_BANDS = 50                    # M13pS2c: worst-case band-list slots/column/region (window <= 50 rows)
+BAND_STRIDE = MAX_BANDS * 3        # packed bytes per column per region (run-length, base, zrow each entry)
+
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
-                       wall_mode: str = "textured") -> str:
+                       wall_mode: str = "textured", raster_mode: str = "framebuffer") -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -89,11 +92,26 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     texture is reduced to a tiny synthetic canvas (`ReferenceModel._tiny_wall_canvas`, the SAME helper
     the oracle uses, R6) before it enters the combined table: W1 = 1×1 (the mode texel), W2 = 1×16 (a
     vertical band strip). `column_render_params`/pass-2/`leaf_body_w` are UNCHANGED — they just sample a
-    much smaller table (793,344 texels → tens-to-low-hundreds)."""
+    much smaller table (793,344 texels → tens-to-low-hundreds).
+
+    `raster_mode` (M13pS2c, scaffolding — NOT wired to any output yet): "framebuffer" (default, the
+    UNCHANGED pass-1/pass-2/plane-pass pipeline above) or "stream" — pass-1 ALSO builds each claimed
+    column's ceiling/floor packed-byte BAND LISTS (`plane.build_bands`, `src/fj/plane_bands.fj`) and
+    bakes the W1 wall's fully-constant lit BYTE (`seg_lit`, computed here at Python emit time from the
+    real colormap — no runtime lookup needed), storing them in `col_ceil_bands`/`col_ceil_n`/
+    `col_floor_bands`/`col_floor_n`/`col_lit`. Requires `wall_mode="W1"` and `floor_mode="flat"` (the
+    only combination pS2c targets — W2's per-band wall lighting and textured floors are out of scope).
+    This is ADDITIVE-ONLY per the pS2c-wiring task: nothing in the existing framebuffer/pass-2/plane-
+    pass output depends on these new arrays yet (the emit-loop consuming them, and the deletion of the
+    old raster, land in a follow-up rung)."""
     assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
     assert floor_mode in ("textured", "flat"), f"unknown floor_mode: {floor_mode!r}"
     assert wall_mode in ("textured", "W1", "W2"), f"unknown wall_mode: {wall_mode!r}"
+    assert raster_mode in ("framebuffer", "stream"), f"unknown raster_mode: {raster_mode!r}"
+    if raster_mode == "stream":
+        assert wall_mode == "W1" and floor_mode == "flat", \
+            "raster_mode='stream' only supports wall_mode='W1' + floor_mode='flat' (pS2c scope)"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -224,6 +242,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                       ("seg_plight", 2, ssec.light & 0xFF),         # RAW sector light (zlight does >>4)
                       ("seg_ceilbase", 5, _flatval(ssec.ceil_tex)),   # M13d2 slice offset / M13p1 base index
                       ("seg_floorbase", 5, _flatval(ssec.floor_tex))]
+            if raster_mode == "stream":
+                # M13pS2c: the W1 wall's lit colour is fully constant (one texel, one light row) --
+                # bake the FINAL palette byte at Python emit time (no runtime colormap lookup at all).
+                fields.append(("seg_lit", 2, colormap[lrow(ssec.light)][combined[tb]]))
             xorby_blocks[si] = _seg_xorby_block(si, fields)
             out += _seg_xorby_use(si)
         return out
@@ -275,6 +297,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           ["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
            "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"] if "xrstub" in ablate else
           ["seg_pass1_leaf:",
+           f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
+          if raster_mode == "stream" else
+          ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),
         *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
@@ -320,7 +345,28 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
+        *(_stream_mode_decls(cfg) if raster_mode == "stream" else []),
         tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
         yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
     ])
     return main
+
+
+def _stream_mode_decls(cfg) -> list[str]:
+    """M13pS2c: the raster_mode="stream" per-column band-list storage + the shared band-building leaves'
+    scratch registers. `col_ceil_bands`/`col_floor_bands` are ONE flat packed-byte buffer per region,
+    VIEW_W*BAND_STRIDE entries; column x's slice starts at byte-slot x*BAND_STRIDE, i.e. RAW ADDRESS
+    offset x*BAND_STRIDE*dw (one packed byte per dw-slot -- the fj leaf's `hex.mul_const` must include
+    the *dw, and the test-side readback mirrors it as `col_*_bands + BAND_STRIDE*x*dw`)."""
+    packed_zeros = "\n".join(";0 * dw" for _ in range(cfg.VIEW_W * BAND_STRIDE))
+    return [
+        "seg_lit: hex.vec 2",                          # M13pS2c: the W1 wall's fully-baked constant lit byte
+        f"col_lit: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+        f"col_ceil_n: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_floor_n: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+        f"col_ceil_bands:\n{packed_zeros}", f"col_floor_bands:\n{packed_zeros}",
+        "bb_ph: hex.vec 8", "bb_light: hex.vec 2", "bb_base: hex.vec 2", "bb_y0: hex.vec 2",
+        "bb_count: hex.vec 2", "bb_ascending: hex.vec 2", "bb_arr: hex.vec w/4", "bb_n: hex.vec 2",
+        "bb_recip_ph: hex.vec 8", "bb_recip_out: hex.vec 8",   # plane.recip32's own I/O globals
+        "plane_recip_ret: ;0", "plane_band_ret: ;0",
+        "recip32_leaf: plane.recip32", "build_bands_leaf: plane.build_bands",
+    ]

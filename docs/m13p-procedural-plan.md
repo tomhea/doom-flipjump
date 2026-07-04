@@ -650,9 +650,19 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
   integration tests (known 3-run column, both flush_mode values) — all 8 pass. MEASURED:
   `byte.emit` 283.6 ops/call, `cm.emit` 329.5 ops/call (2.07× cheaper than the old cm.apply+xor_zero
   combo). Nothing visible ships yet (no renderer wiring) — this rung only proves the mechanism.
-- [ ] **pS1 — one-column prototype (scratch).** A synthetic column (fixed cexcl/fstart/band list)
-  through the REAL emitter body; byte-exact vs a hand-computed column; MEASURE per-run and
-  per-column cost → appendix. **Gate: LS1's line must hold here, before pS2 is built.**
+- [x] **pS1 — one-column prototype (scratch). DONE, MEASURED 2026-07-04.** `src/fj/stream_render.fj`
+  (`stream.emit_band_list` + `stream.emit_column`, the REAL body pS2 will wire per-column) + a
+  synthetic-column byte-exact test (`tests/fj/test_stream_render.py`, vs a Python-computed column
+  through the real colormap) + `scratchpad/measure_stream_column.py` (the per-run/per-column delta
+  measurement). **Gate result: LS1's line does NOT cleanly hold — see the ledger correction below —
+  but the overshoot fits inside the v4 ledger's 5.3M slack, so pS2 proceeds.** Two real traps found
+  and fixed along the way (both now documented in `fj-lessons` R14): (1) `hex.read_hex n, dst, ptr`
+  PEEKS (no net pointer advance — a compensating `ptr_sub` at the end), so walking an array with it
+  re-reads entry 0 forever; fix = `rep(n,k) hex.read_hex_and_inc` per nibble. (2) Switching to
+  `hex.read_byte_and_inc` (packed-byte reads, half the dereferences of nibble-wise reads) while the
+  DATA was still declared `hex.vec` (register form) reads garbage — packed and register-form byte
+  encodings are NOT interchangeable; fixed by declaring the band-list arrays as packed bytes
+  (`;value*dw`, the same idiom `read_table_byte`/`generate_byte_lut_fj` use).
 - [ ] **pS2 — the composite stream ships.** Wire the 160-column emitter after pass-1; DELETE fb +
   pass-2 + all plane machinery; oracle re-expressed via the same recip+threshold band arithmetic;
   **re-bless the flat goldens once** (F4, PNG-gated). Gates: square 4-viewpoint + E1M1 capstone,
@@ -864,6 +874,8 @@ first response is to re-measure LS1/L5/L6 against their lines, not to burn look.
 | p4a span: textured-floor+W1 20,145,938 words / +W2 20,172,470 words (vs textured-floor+textured-wall 23,599,940 — a ~3.45-3.5M word drop, matching the ~3.5M estimate almost exactly) | measured | p4a, 2026-07-04 |
 | p4a byte-exactness: both W1 and W2 pass square (4 viewpoints) + E1M1 capstone (4 viewpoints) vs NEW goldens in `tests/host/test_wall_frame.py` + `tests/fj/test_floor_planes_fj.py` — hashes cross-validated against the M13p0 bake-off's independent preview (exact match, zero drift) | measured | p4a, 2026-07-04 |
 | owner's W1-vs-W2 pick: still pending — both built as parallel infra, neither is the shipped default yet (stays "textured" until M13p8) | pending | p4a |
+| pS1: per-run/per-column cost, THREE successive versions (the two traps' fixes each re-measured) — `scratchpad/measure_stream_column.py`, delta technique at n=1/3/5 ceil+floor bands (3/7/11 runs/column): **v0 `hex.ptr_index` per field** ~7,795 ops/run (10x the ~600-900 estimate) · **v1 `hex.read_hex_and_inc` per nibble, register-form data** ~3,860 ops/run · **v2 (SHIPPED) `hex.read_byte_and_inc` per packed byte, packed-byte data (3 dereferences/run vs v1's 6)** ~2,074 ops/run, byte-exact. Linear fit (3 vs 11 runs): ~2,074/run, ~0 fixed per-column part (within 2-point-fit noise). | measured | pS1, 2026-07-04 |
+| pS1: LS1 estimate at E1M1 scale (160 cols × the pS-spec's "~5-12 runs/column"): **~2.02M ops/frame @ ~5-8 runs/col, ~3.18M @ ~8-12 runs/col** — vs the ledger's LS1 ≤ 2.20M line. ⚠ **CORRECTION: LS1's line does not cleanly hold** (the plan's ~600-900 ops/run estimate was ~2.3-3.5x optimistic — pointer dereferences to walk a runtime band list cost more than "two emits + narrow clip/advance" accounted for, even at the packed-byte-optimized v2). **Verdict: proceed to pS2 anyway** — the v4 ledger carries 5.3M of slack specifically for per-line estimate error, and LS1's worst-case overshoot (~1.0M over its own line, less if the real per-column run count sits nearer 5-8 than 8-12) is well inside that cushion; re-anchor on pS2's REAL measured LS1 (from actual pass-1 band lists, not this synthetic column) before deciding whether a valve is needed. | measured + derived | pS1, 2026-07-04 |
 | … | | |
 
 ## Self-review notes (plan-time)

@@ -32,10 +32,18 @@ from tests.fj.test_wall_render import _ScreenWithInput
 SRC = [ROOT / "src/fj" / f for f in
        ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj")]
 
+# R4/DESIGN §1.2: the renderer's span (~20-24M words) exceeds doomfj.config.FLAT_MAX_WORDS (2**23 default)
+# -- every fj.run of this program (build_wall_renderer, the E1M1 capstone test) raises the limit to 2**26.
+# BUG FOUND (2026-07-04): the first version of this script omitted this, so fj.run silently fell back to a
+# non-flat storage mode with a DIFFERENT op cost (453.2M measured vs the true 462.7M baseline) -- always
+# pass this explicitly; never trust a measurement that didn't.
+RENDER_FLAT_WORDS = 1 << 26
+
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ablate", default="", help="comma list: planes,pass2,pass1,segstub,xrstub")
+    ap.add_argument("--floor-mode", default="textured", choices=["textured", "flat"])
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None, help="asset wad (defaults to --wad)")
@@ -48,7 +56,8 @@ def main():
     cfg = Config()
     mw = WadFile.from_path(str(ROOT / args.wad))
     aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
-    main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False, ablate=ablate)
+    main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False, ablate=ablate,
+                                  floor_mode=args.floor_mode)
 
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
@@ -61,10 +70,14 @@ def main():
     vy = args.vy if args.vy is not None else _signed(sp.y, 32) >> 16
     va = args.va if args.va is not None else sp.angle
     screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
-    term = fj.run(tmp / "m.fjm", io_device=screen, print_time=False, print_termination=False)
+    term = fj.run(tmp / "m.fjm", io_device=screen, print_time=False, print_termination=False,
+                  flat_max_words=RENDER_FLAT_WORDS)
+    assert str(term.storage_mode) == "flat", (
+        f"R4: storage_mode {term.storage_mode!r} != flat -- ops/frame is NOT comparable to the baseline")
 
     label = ",".join(sorted(ablate)) or "none"
-    print(f"map={args.map} viewpoint=({vx},{vy},{va}) ablate={label} ops/frame={term.op_counter:,}")
+    print(f"map={args.map} floor_mode={args.floor_mode} viewpoint=({vx},{vy},{va}) "
+          f"ablate={label} storage_mode={term.storage_mode} ops/frame={term.op_counter:,}")
 
 
 if __name__ == "__main__":

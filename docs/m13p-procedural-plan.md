@@ -721,12 +721,24 @@ fj stays byte-exact vs the NEW goldens.
 ## Task M13pG: geometry to the ledger — L5 (pass-1 ≤ 2.0M) + L6 (walk ≤ 1.2M) + L7 (residue ≤ 0.5M)
 
 After pS2 the frame ≈ the stream raster (LS1+LS2, ~2-3M) + the ENTIRE old wall/geometry lump minus
-pass-2 (~100-130M — p0's stub split has the real number). This campaign crushes it to L5+L6+L7 ≈
-3.7M, landing the frame at **~8-14M — the 12M gate is expected to CLOSE here** (pV is insurance). The structural
-insight: **front-to-back walk + the `full` flag mean all geometry cost after the screen fills is pure
-waste** — Phase 1a already frets SEGS post-full, but the WALK (node side tests, subsector dispatch)
-runs to completion. p0's Step 3c counts say how much is post-full (expected: most of it — the 681-node
-walk visits everything; a spawn view fills within a fraction).
+pass-2. **p0's split is now MEASURED (E1M1 spawn, not an estimate): pass-1 total = 127.5M (28.1% of
+the 453.2M frame), split into walk skeleton 14.9M, wall_x_range+cull-only bulk ~0.1M (tiny — the
+affine back-face cull already did its job), and — the big surprise — projection+claim residue =
+112.5M (24.8% of the WHOLE frame, 88% of pass-1).** This campaign crushes the lump to L5+L6+L7 ≈
+3.7M, landing the frame at **~8-14M — the 12M gate is expected to CLOSE here** (pV is insurance).
+Two structural insights, ONE confirmed by the numbers above and one not yet:
+1. **CONFIRMED (measured):** the dominant pass-1 cost is NOT the walk — it's the per-seg projection
+   math (`wall_setup`/`wall_scale_setup`/`wall_offset`) and the per-column claim loop
+   (`column_render_params` + `store_col_field` writes) for the ~26-ish segs/many columns that survive
+   the cull. **pG3 (below) is therefore the priority rung, not pG1/pG2** — re-order execution
+   accordingly (measure pG3's win FIRST after landing it; do pG1/pG2 regardless since they still gate
+   the [M14] steady-state, but they are secondary at the raw-ops level this session).
+2. **Still to confirm (Step 3c's host-side counts, not yet cross-checked against THIS fj measurement):**
+   front-to-back walk + the `full` flag mean all NODE-VISIT cost after the screen fills is pure waste
+   — Phase 1a already frets SEGS post-full, but the WALK (node side tests, subsector dispatch) runs to
+   completion today. Step 3c's host-side counts (32-87% of subsectors post-full, viewpoint-dependent)
+   size pG1's win; they have NOT yet been cross-checked against a `segstub`-with-`full`-abort fj
+   measurement (that IS pG1's own gate, done when pG1 lands).
 
 - [ ] **pG1 [exact] FULL-ABORT the walk.** At every emitted node entry (and subsector action), test the
   existing 1-nibble `full` flag → jump to the walk's exit (skip the subtree). Post-full cost collapses
@@ -808,13 +820,12 @@ first response is to re-measure LS1/L5/L6 against their lines, not to burn look.
 
 | Measurement | Value | Rung / date |
 | --- | --- | --- |
-| baseline full frame | 462,742,550 | pre-p0 (2026-07-03) |
-| `--ablate planes` → floor pass | *running (background)* | p0, 2026-07-04 |
-| `--ablate planes,pass2` → pass-2 | *running (background)* | p0, 2026-07-04 |
-| `--ablate planes,pass2,pass1` → init+input+present residue (L7 raw) | *running (background)* | p0, 2026-07-04 |
-| `--ablate planes,pass2,segstub` → walk skeleton (L6 raw) | *running (background)* | p0, 2026-07-04 |
-| `--ablate planes,pass2,xrstub` → walk+entry, no atans (L6+part-L5) | *running (background)* | p0, 2026-07-04 |
+| baseline full frame (as recorded pre-p0) | 462,742,550 | pre-p0 (2026-07-03) |
+| ⚠ **CORRECTED baseline** — re-measured via `scripts/measure_frame.py` AND independently confirmed by the pre-existing golden capstone test (`test_e1m1_textured_planes_full_frame_byte_exact_and_golden`, which also PASSED byte-exact vs `3f0133d9` and printed the identical number itself — two independent code paths agreeing rules out a harness bug) | **453,235,929** (span 23,599,940 words) | p0, 2026-07-04. The 462,742,550 figure was stale (~2.1% off), likely from the lost pre-M13p0 scratchpad script; **453.2M is the true current baseline** — every ratio/percentage elsewhere in this plan is computed relative to 462.7M and is only ~2% optimistic as a result; re-anchor the ledger/ladder tables' absolute numbers to 453.2M when next fully revised, but do not re-derive the qualitative conclusions (they're insensitive to a 2% shift). |
+| **RAW measured (E1M1 spawn, viewpoint (-416,256,0), all sequential, no contention):** full 453,235,929 · `--ablate planes` 150,432,868 · `--ablate planes,pass2` 127,484,005 · `--ablate planes,pass2,pass1` 14,747 · `--ablate planes,pass2,segstub` 14,906,830 · `--ablate planes,pass2,xrstub` 15,012,072 | measured | p0, 2026-07-04 |
 | ⚠ correction (mechanics validation, square room): `segstub`/`xrstub` ALONE (not combined with `planes,pass2`) inflate wildly (137.97M/137.98M vs 123.1M baseline) — the plane pass renders the WHOLE screen as floor when `col_fstart` stays 0 (garbage init). Always combine stubs with `planes,pass2`. | fixed in `scripts/measure_frame.py` usage | p0 |
+| **DERIVED SPLIT (E1M1 spawn, % of the 453.2M frame):** floor pass (planes delta) **302,803,061 (66.8%)** · wall pass-2 raster (pass2 delta) **22,948,863 (5.1%)** · pass-1 total = geometry+walk (pass1 delta) **127,469,258 (28.1%)**, of which: walk skeleton (segstub) **14,906,830 (3.3%)**, wall_x_range+cull-only bulk (xrstub−segstub) **105,242 (0.02%, tiny)**, and **pass-1 projection+claim residue (pass1−xrstub) = 112,457,186 (24.8% of the WHOLE frame, 88% of pass-1)**. ★ **Finding not anticipated by the v3/v4 pG task write-up:** the walk itself is cheap; the dominant pass-1 cost is the per-seg PROJECTION math (wall_setup/wall_scale_setup/wall_offset) + per-column CLAIM loop (column_render_params + store_col_field writes) for the ~26-troops-of-160-claimed segs that survive the cull — **8× the walk's own cost**. This re-orders pG's priority: pG3 (projection+claim crush) matters far more than pG1/pG2 (walk abort/narrowing) at the OPS level, though pG1 still matters most for the [M14]-steady-state share (post-full node visits are pure waste regardless of their per-node cost). | measured + derived, p0, 2026-07-04 | |
+| Sequential timing (no contention): 6 runs × ~7-11 min each, ~63 min wall-clock total, vs the EARLIER parallel attempt that ran 100+ min with ZERO completions (disk queue length 188, %Disk Time 12341% — confirmed I/O thrash from 6 concurrent large `.fjm` writes). **Lesson: never run more than one E1M1 heavy build at a time on this machine.** | measured, p0, 2026-07-04 | |
 | **until-full counts (E1M1, host-side, step 3c, 3 viewpoints):** spawn 682 subsectors/463 until-full (32.1% post-full), 575 segs visited/432 until-full (24.9% post-full), 160 pass x_range/116 until-full · rot45: 205/682 until-full (69.9% post-full), 306/575 segs (46.8% post-full) · othersector: 212/682 (68.9% post-full), **only 74/575 segs visited until-full (87.1% post-full!)**. Confirms pG1 full-abort is a large, viewpoint-dependent win — worst case (othersector) wastes work on 501 of 575 segs. | measured | p0, 2026-07-04 |
 | pS0: `byte.emit` / `cm.emit` standalone cost | | pS0 |
 | pS0: protocol signed by owner (auto-present? counts encoding?) | **SIGNED 2026-07-04**: `flush_mode` config byte in `init_screen`, default per-frame; owner: protocol is ours to keep evolving | p0 |

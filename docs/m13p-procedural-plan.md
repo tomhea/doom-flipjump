@@ -107,7 +107,7 @@ constraint, PNG gate); 80×50 is almost certainly moot.
 | — | baseline (⚠ CORRECTED 2026-07-04, was recorded 462.7M — stale) | — | **453,235,929** | 0.617 |
 | M13p0 | measure split + stub split + until-full counts + PNG bake-off → owner picks | none | 453.2M (unchanged) | — |
 | M13p1 | fj flat-colored floors (`draw_span_flat`) — **DONE, MEASURED 2026-07-04, byte-exact vs `6d5baf9e`, two independent measurements agree (capstone test + `measure_frame.py`)** | [exact vs flat goldens] | **264,777,325** (est. was ~225-240M — came in ~10-17% higher; span 23.6M→20.0M words) | **1.06** |
-| M13p4a | tiny 1×1/1×16 per-seg wall textures + `col_lit` — table DELETED, **build ~10min → ~1-2min** | [re-bless, PNG-gated] | ~260M (re-anchor on measurement; downstream ests not yet re-based off the corrected p1 number) | ~1.3 |
+| M13p4a | tiny 1×1/1×16 per-seg wall textures — table shrunk — **DONE, MEASURED 2026-07-04, byte-exact vs new W1/W2 goldens, both modes built alongside floor_mode=flat (owner pick still pending, ships neither as default yet)** | [re-bless vs new W1/W2 goldens] | wall_mode ALONE (textured floors): W1 453,906,555 / W2 453,886,700 (barely moved, as predicted — ops win is @ ripple only). **Combined with p1's flat floors: W1 265,676,539 / W2 265,654,364** (both ≈ +0.34% over p1 alone — negligible). **Assemble: 605s → 78.7-78.8s, a 7.7× speedup** (beat the ~1-2min estimate) | ~1.05 (combined) |
 | M13p2 | pattern floors (only if the owner picks a pattern) | [re-bless, PNG-gated] | +~5-10M | ~1.2 |
 | (M13p3a-c) | OPTIONAL interim floor squeezes — only if pS stretches over sessions | [exact] | ~205-220M | ~1.3 |
 | M13pS0 | ScreenIO column-stream protocol: owner sign-off, device impl + tests, EMIT tables | host+device, no frame change | — | — |
@@ -833,7 +833,12 @@ first response is to re-measure LS1/L5/L6 against their lines, not to burn look.
 | (fallback only) pC1: per-cell cost, variant A vs C; patched-chain idiom | | pC1 |
 | owner picks (floor / wall / #9a+#11 bless) | *bake-off PNGs rendered, awaiting owner pick* | p0, 2026-07-04 |
 | #9a+#11 bless diff (measured, not just re-quoting the commit messages): square 0/16000 px changed (0.0%, confirms axis-aligned segs ⇒ affine==exact divide, as `d383016` claimed); E1M1 spawn 1,049/16,000 px changed (6.56%), max raw palette-index delta 246, mean delta 23.16 (raw index deltas are NOT a perceptual distance — palette indices are categorical; the diff-highlight PNG is the real evidence) | measured | p0, 2026-07-04 |
-| p1 flat floors | | p1 |
+| p1 flat floors: 453,235,929 → **264,777,325** (41.6% cut, span 23.6M→20.0M words); cross-validated by the E1M1 capstone test AND `measure_frame.py` independently, identical numbers | measured | p1, 2026-07-04 |
+| p4a wall_mode alone (textured floors, isolating the wall change): W1 **453,906,555**, W2 **453,886,700** (both ~+0.15-0.17% over the 453.2M textured baseline — negligible, ops win is @ ripple only, as predicted) | measured | p4a, 2026-07-04 |
+| p4a COMBINED with p1 (floor_mode=flat + wall_mode): W1 **265,676,539** (78.7s assemble), W2 **265,654,364** (78.8s assemble) — both ≈+0.34% over p1 alone. **Assemble 605s → 78.7-78.8s = 7.7× faster**, beating the ~1-2min estimate | measured | p4a, 2026-07-04 |
+| p4a span: textured-floor+W1 20,145,938 words / +W2 20,172,470 words (vs textured-floor+textured-wall 23,599,940 — a ~3.45-3.5M word drop, matching the ~3.5M estimate almost exactly) | measured | p4a, 2026-07-04 |
+| p4a byte-exactness: both W1 and W2 pass square (4 viewpoints) + E1M1 capstone (4 viewpoints) vs NEW goldens in `tests/host/test_wall_frame.py` + `tests/fj/test_floor_planes_fj.py` — hashes cross-validated against the M13p0 bake-off's independent preview (exact match, zero drift) | measured | p4a, 2026-07-04 |
+| owner's W1-vs-W2 pick: still pending — both built as parallel infra, neither is the shipped default yet (stays "textured" until M13p8) | pending | p4a |
 | … | | |
 
 ## Self-review notes (plan-time)

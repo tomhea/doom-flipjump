@@ -55,7 +55,8 @@ _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub"})
 
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
-                       ablate: frozenset = frozenset(), floor_mode: str = "textured") -> str:
+                       ablate: frozenset = frozenset(), floor_mode: str = "textured",
+                       wall_mode: str = "textured") -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -82,10 +83,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     `floor_mode` (M13p1): "textured" (default, M13b/M13d2 perspective u,v floors) or "flat" (M13a/M13p1
     flat-colored floors — no per-span DDA seed, no per-pixel sample; `seg_ceilbase`/`seg_floorbase` bake
     the flat's 2-nibble BASE palette index instead of a 5-nibble combined-table slice offset, and the
-    combined flat texel table is not emitted at all)."""
+    combined flat texel table is not emitted at all).
+
+    `wall_mode` (M13p4a): "textured" (default, the real per-seg wall texture) or "W1"/"W2" — every wall
+    texture is reduced to a tiny synthetic canvas (`ReferenceModel._tiny_wall_canvas`, the SAME helper
+    the oracle uses, R6) before it enters the combined table: W1 = 1×1 (the mode texel), W2 = 1×16 (a
+    vertical band strip). `column_render_params`/pass-2/`leaf_body_w` are UNCHANGED — they just sample a
+    much smaller table (793,344 texels → tens-to-low-hundreds)."""
     assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
     assert floor_mode in ("textured", "flat"), f"unknown floor_mode: {floor_mode!r}"
+    assert wall_mode in ("textured", "W1", "W2"), f"unknown wall_mode: {wall_mode!r}"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -106,7 +114,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         if ld.back != -1:
             continue
         sd = sds[ld.front if seg.side == 0 else ld.back]
-        if rm._wall_texture(asset_wad, sd.middle, cache) is not None:
+        if rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=wall_mode) is not None:
             names.add(sd.middle.upper())
     combined, info = [], {}
     for nm in sorted(names) + [None]:
@@ -116,6 +124,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         else:
             c = downscale_canvas(composite_texture(asset_wad, defs[nm]), rm.downscale)
             th, tw, texels = len(c), len(c[0]), texture_texels(c)
+            if wall_mode != "textured":                        # M13p4a: shrink to the tiny synthetic canvas
+                texels, th, tw = rm._tiny_wall_canvas(texels, th, wall_mode)
         while len(combined) % th != 0:                        # align the slice to its texheight (the OR-trick)
             combined.append(0)
         info[key] = (len(combined), th, tw)
@@ -125,7 +135,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         if ld.back != -1:
             continue
         sd = sds[ld.front if seg.side == 0 else ld.back]
-        t = rm._wall_texture(asset_wad, sd.middle, cache)
+        t = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=wall_mode)
         seg_texinfo[si] = info[sd.middle.upper()] if t is not None else info["__WALLBG__"]
 
     tex = _texel_table("tex", combined, "per_entry", over_align=over_align)

@@ -507,10 +507,15 @@ class ReferenceModel:
         rw_centerangle = (ANG90 + viewangle - rw_normalangle) & ANGLE_MASK
         return rw_offset, rw_centerangle
 
-    def _wall_texture(self, asset_wad, name, cache):
+    def _wall_texture(self, asset_wad, name, cache, *, wall_mode="textured"):
         """Composite + downscale (the shared D5 lever) a wall texture by name → (texels, height, width),
         column-major texels (R6). Cached per frame; returns None for an empty/absent texture ('-' or a
-        name not in TEXTURE1) so the caller falls back to the flat shade."""
+        name not in TEXTURE1) so the caller falls back to the flat shade.
+
+        `wall_mode` (M13p4a): "textured" (default, the real texture) or "W1"/"W2" — a tiny synthetic
+        canvas (`_tiny_wall_canvas`, the SAME helper `wall_renderer.emit_wall_renderer` calls, so the fj
+        combined table can never drift from this oracle). A single `render_wall_frame` call always uses
+        ONE wall_mode for its whole duration, so caching by name alone (no mode in the key) is safe."""
         key = name.upper()
         if key in cache:
             return cache[key]
@@ -522,8 +527,35 @@ class ReferenceModel:
             cache[key] = None
             return None
         canvas = downscale_canvas(composite_texture(asset_wad, defs[key]), self.downscale)
-        cache[key] = (texture_texels(canvas), len(canvas), len(canvas[0]))
+        texels, th, tw = texture_texels(canvas), len(canvas), len(canvas[0])
+        if wall_mode != "textured":
+            texels, th, tw = self._tiny_wall_canvas(texels, th, wall_mode)
+        cache[key] = (texels, th, tw)
         return cache[key]
+
+    @staticmethod
+    def _mode_texel(texels) -> int:
+        """The most common palette index in a texel list — a real representative color (M13p4a W1;
+        NOT a mean index, palette indices aren't luminance-ordered, so a mean is a random hue)."""
+        from collections import Counter
+        return Counter(texels).most_common(1)[0][0]
+
+    @staticmethod
+    def _tiny_wall_canvas(texels, th: int, wall_mode: str):
+        """M13p4a — reduce a full (column-major `texels`, height `th`) wall texture to a tiny synthetic
+        canvas: "W1" = 1×1 (the MODE texel, `_mode_texel`) or "W2" = 1×16 (a vertical band strip sampled
+        from the real texture's column 0). Both keep the wall raster pipeline (`texcol % tw`, the
+        heightmask wrap) completely unchanged — `tw=1` and `th∈{1,16}` (powers of 2) sail through it.
+        Shared by both this oracle and `wall_renderer.emit_wall_renderer`'s combined table build, so the
+        two can never drift (R6)."""
+        if wall_mode == "W1":
+            return [ReferenceModel._mode_texel(texels)], 1, 1
+        if wall_mode == "W2":
+            col0 = texels[:th]                                  # column-major: the first `th` entries = column 0
+            n = 16
+            band = [col0[min(th - 1, r * th // n)] for r in range(n)]
+            return band, n, 1
+        raise ValueError(f"unknown wall_mode: {wall_mode!r}")
 
     def _flat_base(self, asset_wad, name, cache):
         """The flat-colored representative palette index of a flat (M13a fidelity tier — the cheaper
@@ -573,7 +605,8 @@ class ReferenceModel:
         distance = fixed_mul(planeheight, self.yslope[y], 8, 4)
         return colormap[self.plane_light_row(light, distance)][flat_base]
 
-    def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True) -> bytes:
+    def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True,
+                          wall_mode: str = "textured") -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -592,8 +625,11 @@ class ReferenceModel:
         the walk they are rasterized: `floor_texturing=True` (M13b/default) = the full DOOM perspective u,v
         span raster (R_MapPlane/R_DrawSpan — per-row spans, `yslope`/`distscale`/`basexscale` DDA, distance-
         lit); `floor_texturing=False` (M13a) = the cheaper flat-colored tier (the flat's base index per
-        `_plane_pixel`). Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces
-        this bit-exactly (D12)."""
+        `_plane_pixel`). `wall_mode` (M13p4a) picks the wall TEXTURE tier: "textured" (default, the real
+        texture) or "W1"/"W2" (a tiny synthetic canvas — see `_tiny_wall_canvas`); the rest of the wall
+        raster (texture-v DDA, heightmask, screen span) is untouched, just sampling a smaller texture.
+        Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces this
+        bit-exactly (D12)."""
         cfg = self.cfg
         W, H = cfg.VIEW_W, cfg.VIEW_H
         fb = bytearray(cfg.FB_SIZE)                          # zero-init; visplanes + walls fill every column
@@ -645,7 +681,7 @@ class ReferenceModel:
             sd = sds[ld.front if seg.side == 0 else ld.back]
             rw_offset, rw_centerangle = self._wall_offset(viewx, viewy, viewangle, seg, verts,
                                                           rw_normalangle, rw_angle1, sd)
-            tex = self._wall_texture(scene.asset_wad, sd.middle, texcache)
+            tex = self._wall_texture(scene.asset_wad, sd.middle, texcache, wall_mode=wall_mode)
             worldtop = sec.ceil_h - viewz_world              # world units the ceiling is above the eye
             flat_fill = colormap[light_row][WALL_BG]
             for x in range(x1, x2):

@@ -154,7 +154,7 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
 
 
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
-                        flat_max_words=None, floor_mode="textured") -> dict:
+                        flat_max_words=None, floor_mode="textured", wall_mode="textured") -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
@@ -164,15 +164,17 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     past the 2**23 default, so pass a RAISED `flat_max_words` (2**26) per DESIGN §1.2 (RAM-only cost). The
     viewpoint `(vx,vy,va)` is read from stdin at runtime; the gate run feeds an invalid byte so the input
     parser jumps to `bad:` and halts immediately (the span/storage_mode are load-time, so no full render is
-    needed for the gate — the golden test does the byte-exact render). `floor_mode` (M13p1) is a pass-through
-    to `emit_wall_renderer`; stays "textured" (the shipped default) until M13p8 flips it."""
+    needed for the gate — the golden test does the byte-exact render). `floor_mode`/`wall_mode` (M13p1/
+    M13p4a) are pass-throughs to `emit_wall_renderer`; both stay "textured" (the shipped default) until
+    M13p8 flips them."""
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
     cfg = cfg or Config()
     wad = WadFile.from_path(wad_path)
     limit = flat_max_words or FLAT_MAX_WORDS
     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
 
-    main = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode)
+    main = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode,
+                              wall_mode=wall_mode)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     main_p = gen / "renderer_main.fj"
     main_p.write_text(main, encoding="utf-8")

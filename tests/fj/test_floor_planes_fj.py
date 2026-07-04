@@ -226,3 +226,103 @@ def test_e1m1_textured_planes_full_frame_byte_exact_and_golden(tmp_path):
             # nibble-op dispatch count -- table size is irrelevant). The PERF-REDUCTION PHASE addresses this;
             # see the handoff. Loose bound = a regression backstop, not the target.
             assert 0 < ops < 2_000_000_000, f"ops/frame {ops}"
+
+
+# ── M13p4a: tiny-canvas wall candidates (W1 = 1x1 mode texel, W2 = 1x16 vertical band) ──────────
+# the M13p0 bake-off-previewed / tests/host/test_wall_frame.py-blessed goldens, now through the SHARED
+# emitter. Byte-exact vs the oracle wall_mode="W1"/"W2" (floors stay textured -- orthogonal tiers).
+
+SQUARE_W1_GOLDEN = "3654df94845798acb1d5dfb9a5b7d5248155d1668e0203df72df1c8de6d487fc"
+SQUARE_W2_GOLDEN = "ee03e5c08f080e7879e212600b3af48bf50b000fab1e7f6e1d2b7f4ac5dc9719"
+E1M1_W1_GOLDEN = "1e9bb32680e77398b01867f586ac1be77465d8e0d083af6a1c4e4a284b233b9c"
+E1M1_W2_GOLDEN = "c6bbdc34fc9fc0d7426d30e70b28763f8a9b24a4eda2d30125e5ae5c7e8be90e"
+
+
+def _square_wall_mode_byte_exact(tmp_path, wall_mode, golden):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(ROOM)
+    aw = WadFile.from_path(ASSET)
+    scene = build_scene(mw, aw, "MAP01")
+    sp = spawn_state(mw, "MAP01")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    A45 = 0x20000000
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45)]
+    main = emit_wall_renderer(mw, "MAP01", cfg, asset_wad=aw, over_align=False, wall_mode=wall_mode)
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    p = tmp_path / f"sq{wall_mode}.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / f"sq{wall_mode}.fjm"
+    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), PLANE_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene, wall_mode=wall_mode)
+        screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+        fj.run(out, io_device=screen, print_time=False, print_termination=False)
+        got = bytes(screen.pixel_indices)
+        assert got == bytes(want), f"M13p4a {wall_mode} @ ({vx},{vy},{va}) != oracle"
+        if k == 0:
+            assert frame_hash(got) == golden, f"M13p4a {wall_mode} spawn hash {frame_hash(got)} != golden"
+
+
+def test_square_wall_mode_w1_byte_exact_vs_oracle(tmp_path):
+    _square_wall_mode_byte_exact(tmp_path, "W1", SQUARE_W1_GOLDEN)
+
+
+def test_square_wall_mode_w2_byte_exact_vs_oracle(tmp_path):
+    _square_wall_mode_byte_exact(tmp_path, "W2", SQUARE_W2_GOLDEN)
+
+
+def _e1m1_wall_mode_byte_exact_and_golden(tmp_path, wall_mode, golden):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(E1M1_WAD)
+    scene = build_scene(mw, mw, "E1M1")
+
+    sp = spawn_state(mw, "E1M1")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    things = mw.things("E1M1")
+    VIEWPOINTS = [(spx, spy, sp.angle),
+                  (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
+    seen = {(spx, spy)}
+    for t in things:
+        if (t.x, t.y) not in seen:
+            seen.add((t.x, t.y)); VIEWPOINTS.append((t.x, t.y, sp.angle))
+        if len(VIEWPOINTS) >= 4:
+            break
+
+    main = emit_wall_renderer(mw, "E1M1", cfg, over_align=False, wall_mode=wall_mode)
+    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
+    p = tmp_path / f"e1m1{wall_mode}.fj"
+    p.write_text(main, encoding="utf-8")
+    out = tmp_path / f"e1m1{wall_mode}.fjm"
+    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
+                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), PLANE_FJ.resolve(), p.resolve()],
+                out, memory_width=W, print_time=False)
+
+    RENDER_FLAT_WORDS = 1 << 26
+    span = max(s.segment_start + s.segment_length for s in Reader(out).memory_segments)
+    assert span < RENDER_FLAT_WORDS, f"R4: span {span} >= {RENDER_FLAT_WORDS}"
+
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene, wall_mode=wall_mode)
+        screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
+        term = fj.run(out, io_device=screen, print_time=False, print_termination=False,
+                      flat_max_words=RENDER_FLAT_WORDS)
+        assert str(term.storage_mode) == "flat", f"R4: storage_mode {term.storage_mode!r} not flat @ {span} words"
+        got = bytes(screen.pixel_indices)
+        assert got == bytes(want), f"M13p4a {wall_mode} @ ({vx},{vy},{va}) != oracle"
+        if k == 0:
+            assert frame_hash(got) == golden, f"M13p4a {wall_mode} spawn hash {frame_hash(got)} != golden"
+            ops = term.op_counter
+            print(f"\nM13p4a E1M1 spawn frame (wall_mode={wall_mode}): {ops:,} ops/frame  "
+                  f"~= {280_000_000 / ops:.2f} fps (span {span:,} words)")
+
+
+def test_e1m1_wall_mode_w1_byte_exact_and_golden(tmp_path):
+    _e1m1_wall_mode_byte_exact_and_golden(tmp_path, "W1", E1M1_W1_GOLDEN)
+
+
+def test_e1m1_wall_mode_w2_byte_exact_and_golden(tmp_path):
+    _e1m1_wall_mode_byte_exact_and_golden(tmp_path, "W2", E1M1_W2_GOLDEN)

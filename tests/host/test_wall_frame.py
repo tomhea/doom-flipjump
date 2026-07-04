@@ -120,3 +120,52 @@ def test_e1m1_every_pixel_is_a_valid_palette_index():
     scene = build_scene(map_wad, map_wad, "E1M1")
     frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene)
     assert all(0 <= b < 256 for b in frame)
+
+
+# ── M13p4a: tiny-canvas wall candidates (W1 = 1x1 mode texel, W2 = 1x16 vertical band) ──────────
+# Each is an ORTHOGONAL tier (like the M13a flat-floor tier): tested with floor_texturing at its own
+# default, so the golden isolates the wall change alone. The oracle+emitter share `_tiny_wall_canvas`
+# (R6) so these are the SAME candidates the M13p0 bake-off previewed and M13p4a ships in fj.
+
+def test_wall_mode_w1_differs_from_textured(rm, scene):
+    """W1 (the seg's MODE texel) renders a visibly different, less-varied WALL BAND than the real
+    texture -- fewer distinct palette indices in the band alone (the floor/ceiling variety in the
+    whole frame would otherwise mask the difference)."""
+    cfg = Config()
+    state = spawn_state(WadFile.from_path(ROOM), "MAP01")
+    textured = rm.render_wall_frame(state, scene)
+    w1 = rm.render_wall_frame(state, scene, wall_mode="W1")
+    assert w1 != textured
+    W = cfg.VIEW_W
+    band_slice = slice(WALL_TOP * W, (WALL_BOT + 1) * W)
+    assert len(set(w1[band_slice])) < len(set(textured[band_slice]))
+
+
+def test_square_w1_wall_golden_hash(rm, scene):
+    frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene, wall_mode="W1")
+    # matches the M13p0 bake-off's independent WallModel preview exactly (W1_square_room_spawn)
+    assert frame_hash(frame) == "3654df94845798acb1d5dfb9a5b7d5248155d1668e0203df72df1c8de6d487fc"
+
+
+def test_square_w2_wall_golden_hash(rm, scene):
+    frame = rm.render_wall_frame(spawn_state(WadFile.from_path(ROOM), "MAP01"), scene, wall_mode="W2")
+    # matches the M13p0 bake-off's independent WallModel preview exactly (W2_square_room_spawn)
+    assert frame_hash(frame) == "ee03e5c08f080e7879e212600b3af48bf50b000fab1e7f6e1d2b7f4ac5dc9719"
+
+
+def test_e1m1_w1_wall_golden_hash():
+    rm = ReferenceModel()
+    map_wad = WadFile.from_path(E1M1)
+    scene = build_scene(map_wad, map_wad, "E1M1")
+    frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene, wall_mode="W1")
+    # matches the M13p0 bake-off's independent WallModel preview exactly (W1_freedoom_e1m1_spawn)
+    assert frame_hash(frame) == "1e9bb32680e77398b01867f586ac1be77465d8e0d083af6a1c4e4a284b233b9c"
+
+
+def test_e1m1_w2_wall_golden_hash():
+    rm = ReferenceModel()
+    map_wad = WadFile.from_path(E1M1)
+    scene = build_scene(map_wad, map_wad, "E1M1")
+    frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene, wall_mode="W2")
+    # matches the M13p0 bake-off's independent WallModel preview exactly (W2_freedoom_e1m1_spawn)
+    assert frame_hash(frame) == "c6bbdc34fc9fc0d7426d30e70b28763f8a9b24a4eda2d30125e5ae5c7e8be90e"

@@ -102,12 +102,12 @@ constraint, PNG gate); 80×50 is almost certainly moot.
 
 ### Expected ladder v4 (estimates; re-anchor on the measured number at every rung)
 
-| Rung | What | Tag | Frame after (est) | fps @280M |
+| Rung | What | Tag | Frame after (est/MEASURED) | fps @280M |
 | --- | --- | --- | --- | --- |
-| — | baseline | — | 462.7M | 0.605 |
-| M13p0 | measure split + stub split + until-full counts + PNG bake-off → owner picks | none | 462.7M | — |
-| M13p1 | fj flat-colored floors (`draw_span_flat` — interim kernels, big fast win) | [exact vs flat goldens] | **~225-240M** | ~1.2 |
-| M13p4a | tiny 1×1/1×16 per-seg wall textures + `col_lit` — table DELETED, **build ~10min → ~1-2min** | [re-bless, PNG-gated] | ~220-235M | ~1.25 |
+| — | baseline (⚠ CORRECTED 2026-07-04, was recorded 462.7M — stale) | — | **453,235,929** | 0.617 |
+| M13p0 | measure split + stub split + until-full counts + PNG bake-off → owner picks | none | 453.2M (unchanged) | — |
+| M13p1 | fj flat-colored floors (`draw_span_flat`) — **DONE, MEASURED 2026-07-04, byte-exact vs `6d5baf9e`, two independent measurements agree (capstone test + `measure_frame.py`)** | [exact vs flat goldens] | **264,777,325** (est. was ~225-240M — came in ~10-17% higher; span 23.6M→20.0M words) | **1.06** |
+| M13p4a | tiny 1×1/1×16 per-seg wall textures + `col_lit` — table DELETED, **build ~10min → ~1-2min** | [re-bless, PNG-gated] | ~260M (re-anchor on measurement; downstream ests not yet re-based off the corrected p1 number) | ~1.3 |
 | M13p2 | pattern floors (only if the owner picks a pattern) | [re-bless, PNG-gated] | +~5-10M | ~1.2 |
 | (M13p3a-c) | OPTIONAL interim floor squeezes — only if pS stretches over sessions | [exact] | ~205-220M | ~1.3 |
 | M13pS0 | ScreenIO column-stream protocol: owner sign-off, device impl + tests, EMIT tables | host+device, no frame change | — | — |

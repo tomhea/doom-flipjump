@@ -55,7 +55,7 @@ _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub"})
 
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
-                       ablate: frozenset = frozenset()) -> str:
+                       ablate: frozenset = frozenset(), floor_mode: str = "textured") -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -77,9 +77,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                     call overhead), isolating the walk from every per-seg cost.
       - "xrstub"  — the per-seg leaf keeps the `full`-flag pre-check but replaces `wall_x_range` with an
                     immediate cull-fail (no atans, no cull math) = walk + per-seg entry overhead only.
-    "segstub"/"xrstub" are mutually exclusive and independent of "planes"/"pass2"/"pass1"."""
+    "segstub"/"xrstub" are mutually exclusive and independent of "planes"/"pass2"/"pass1".
+
+    `floor_mode` (M13p1): "textured" (default, M13b/M13d2 perspective u,v floors) or "flat" (M13a/M13p1
+    flat-colored floors — no per-span DDA seed, no per-pixel sample; `seg_ceilbase`/`seg_floorbase` bake
+    the flat's 2-nibble BASE palette index instead of a 5-nibble combined-table slice offset, and the
+    combined flat texel table is not emitted at all)."""
     assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
+    assert floor_mode in ("textured", "flat"), f"unknown floor_mode: {floor_mode!r}"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -128,19 +134,29 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # (64x64 RAW, NO downscale; the `&63` wraps). Each flat gets a SLICE offset; the textured span pass samples
     # `flat[slice_offset + (v&63)*64 + (u&63)]`. Missing flats (e.g. the sky placeholder before M16) become a
     # uniform WALL_BG tile via _flat_texels — identical to the oracle. Per-seg bakes the ceil/floor slice offset.
+    # M13p1: floor_mode="flat" bakes the flat's 2-nibble BASE palette index instead (M13a tier, `_flat_base`)
+    # and skips the combined flat table entirely (not sampled by draw_span_flat).
     flat_texcache: dict = {}
-    flat_names = set()
-    for si, seg in enumerate(cmap.segs):
-        ld = lds[seg.linedef]
-        if ld.back != -1:
-            continue
-        fsec = rm._seg_sector(lds, sds, secs, seg)
-        flat_names.add(fsec.ceil_tex.upper()); flat_names.add(fsec.floor_tex.upper())
-    flat_combined, flat_slice = [], {}
-    for nm in sorted(flat_names):
-        flat_slice[nm] = len(flat_combined)
-        flat_combined += list(rm._flat_texels(asset_wad, nm, flat_texcache))
-    flat_table = _texel_table("flat", flat_combined, "per_entry", over_align=over_align)
+    flat_basecache: dict = {}
+    flat_slice: dict = {}
+    flat_table = ""
+    if floor_mode == "textured":
+        flat_names = set()
+        for si, seg in enumerate(cmap.segs):
+            ld = lds[seg.linedef]
+            if ld.back != -1:
+                continue
+            fsec = rm._seg_sector(lds, sds, secs, seg)
+            flat_names.add(fsec.ceil_tex.upper()); flat_names.add(fsec.floor_tex.upper())
+        flat_combined = []
+        for nm in sorted(flat_names):
+            flat_slice[nm] = len(flat_combined)
+            flat_combined += list(rm._flat_texels(asset_wad, nm, flat_texcache))
+        flat_table = _texel_table("flat", flat_combined, "per_entry", over_align=over_align)
+
+    def _flatval(name: str) -> int:
+        return (flat_slice[name.upper()] if floor_mode == "textured"
+                else rm._flat_base(asset_wad, name, flat_basecache))
 
     cm = compile_colormap("cm", asset_wad, lights=COLORMAP_LIGHTS, over_align=over_align)
     palette = compile_palette("palette", asset_wad)
@@ -196,8 +212,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                       ("seg_ceil", 8, ssec.ceil_h & 0xFFFFFFFF),   # M12pp: worldtop = seg_ceil - viewzw in-leaf
                       ("seg_floor", 8, ssec.floor_h & 0xFFFFFFFF),  # M13c3: floor planeheight = |floor_h<<16 - viewz|
                       ("seg_plight", 2, ssec.light & 0xFF),         # RAW sector light (zlight does >>4)
-                      ("seg_ceilbase", 5, flat_slice[ssec.ceil_tex.upper()]),   # M13d2 flat SLICE offset
-                      ("seg_floorbase", 5, flat_slice[ssec.floor_tex.upper()])]
+                      ("seg_ceilbase", 5, _flatval(ssec.ceil_tex)),   # M13d2 slice offset / M13p1 base index
+                      ("seg_floorbase", 5, _flatval(ssec.floor_tex))]
             xorby_blocks[si] = _seg_xorby_block(si, fields)
             out += _seg_xorby_use(si)
         return out
@@ -241,7 +257,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "bad: stl.loop",
         "pixel_leaf:", "frame.leaf_body_w",
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
-        "span_leaf:", f"plane.draw_span framebuffer, {cfg.VIEW_W}",   # M13d2 textured u,v span (R_DrawSpan)
+        "span_leaf:",
+        (f"plane.draw_span framebuffer, {cfg.VIEW_W}" if floor_mode == "textured"      # M13d2 textured u,v span
+         else f"plane.draw_span_flat framebuffer, {cfg.VIEW_W}"),                      # M13p1 flat-colored span
         "clear_leaf:", f"plane.clear_planes {cfg.CENTERX << 16}, {ANG90}",  # M13d2 per-frame R_ClearPlanes seeds
         *(["seg_pass1_leaf:", "stl.fret seg_ret"] if "segstub" in ablate else
           ["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",

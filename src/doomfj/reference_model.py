@@ -605,6 +605,48 @@ class ReferenceModel:
         distance = fixed_mul(planeheight, self.yslope[y], 8, 4)
         return colormap[self.plane_light_row(light, distance)][flat_base]
 
+    def _zidx_band_walk(self, planeheight: int, rows: list) -> list:
+        """M13pS2 (LS2, the F4 [re-bless]): the per-row zidx (MAXLIGHTZ distance bucket) for a WINDOW
+        of screen rows, computed via ONE exact evaluation (seeding the window's first row bit-for-bit,
+        the same FixedMul `_plane_pixel` uses) plus a cheap per-row THRESHOLD WALK for every
+        subsequent row — the SAME block-FP reciprocal(planeheight) the wall-side divide-elimination
+        campaign already shares (`_recip_div32`, perf #11's table), stepping the zidx bucket boundary
+        by `step = 16*recip` instead of re-evaluating FixedMul per row (that per-row FixedMul, at
+        ~11.5k ops each, is exactly what LS2 exists to avoid — see docs/m13p-procedural-plan.md's pS
+        section). `rows` MUST be a run of screen rows in EMISSION order (ascending y) drawn from a
+        SINGLE monotonic window: `yslope[]` increases with y in the ceiling half and decreases with y
+        in the floor half (never monotonic across the whole screen), so a window may not straddle the
+        horizon row.
+        ⚠ Validated (`scratchpad/proto_plane_bands.py`) against every REAL E1M1 spawn-frame
+        planeheight: max |approx-exact| shift = 1 row — this is the ledger's accepted F4 bound, not an
+        exact match; re-bless whatever goldens change. NOT validated for implausibly tall sectors
+        (~3000+ world units, where 32-bit FixedMul itself wraps) — E1M1's tallest is 495 units; a
+        future map needing taller sectors should re-run the prototype's synthetic sweep first."""
+        if not rows:
+            return []
+        if planeheight == 0:
+            return [0] * len(rows)
+        recip = self._recip_div32(planeheight)
+        step = 16 * recip
+        y0 = rows[0]
+        zidx = min(MAXLIGHTZ - 1, fixed_mul(planeheight, self.yslope[y0], 8, 4) >> LIGHTZSHIFT)
+        ascending = len(rows) < 2 or self.yslope[rows[1]] >= self.yslope[y0]
+        threshold_hi = step * (zidx + 1)
+        threshold_lo = step * zidx
+        out = [zidx]
+        for y in rows[1:]:
+            ys = self.yslope[y]
+            if ascending:
+                while zidx < MAXLIGHTZ - 1 and ys >= threshold_hi:
+                    zidx += 1
+                    threshold_hi += step
+            else:
+                while zidx > 0 and ys < threshold_lo:
+                    zidx -= 1
+                    threshold_lo -= step
+            out.append(zidx)
+        return out
+
     def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True,
                           wall_mode: str = "textured") -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
@@ -729,7 +771,15 @@ class ReferenceModel:
                             ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff):
         """M13a flat-colored tier (the cheaper §1 floor mode): each claimed column's ceiling rows
         [0, ceil_hi] and floor rows [floor_lo, H-1] are filled with the flat's base index, distance-lit
-        per row (`_plane_pixel`). No horizontal DDA — each pixel is independent."""
+        per row (`_plane_pixel`). No horizontal DDA — each pixel is independent.
+        ⚠ Stays on the always-EXACT per-pixel `_plane_pixel` for now (byte-exact vs the shipped flat
+        goldens + the CURRENT fj `draw_span_flat`/`render_planes_spans`, which also compute zidx
+        exactly per span-row). `_zidx_band_walk` (below) is the validated M13pS2 (LS2) replacement —
+        it must be wired in TOGETHER with the new fj column-stream emitter that consumes it (pS2c),
+        not here in isolation: `_zidx_band_walk` only diverges from `_plane_pixel` across a MULTI-ROW
+        window walked in one pass (a span here is always a single row, so switching this call site
+        alone would be byte-IDENTICAL and pointless); wiring it here now, before the fj side is ready,
+        would just re-bless the goldens for no consumer and break the still-row-major fj tests."""
         cfg = self.cfg
         W, H = cfg.VIEW_W, cfg.VIEW_H
         for x in range(W):

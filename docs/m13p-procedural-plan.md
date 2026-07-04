@@ -668,6 +668,49 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
   **re-bless the flat goldens once** (F4, PNG-gated). Gates: square 4-viewpoint + E1M1 capstone,
   byte-exact = the DEVICE's decoded grid equals the oracle frame. Measure (expect **~110-140M**;
   LS1+LS2 now real); record the new span/assemble (expect big drops); commit.
+  Laddered into sub-rungs (each committed separately, mirroring p0/p1/p4a/pS0/pS1's granularity):
+  - [x] **pS2a — the LS2 band-walk algorithm, validated + tested, NOT YET WIRED. DONE, 2026-07-04.**
+    `ReferenceModel._zidx_band_walk(planeheight, rows)` (`src/doomfj/reference_model.py`): seed the
+    window's FIRST row EXACTLY (one real FixedMul, matching `_plane_pixel` bit-for-bit), then advance
+    every subsequent row via `threshold += step` (`step = 16 * _recip_div32(ph)`, reusing perf #11's
+    shared block-FP reciprocal table) compared against the row's `yslope[y]` — additions + compares
+    only, no per-row FixedMul. **Validated against every REAL E1M1 spawn-frame planeheight**
+    (`scratchpad/proto_plane_bands.py`, promoted into `tests/host/test_plane_bands.py`, 5/5 pass): max
+    `|approx-exact|` shift = **1 row** (exactly the ledger's accepted F4 bound), and wiring it into
+    `_render_planes_flat` would change only **79/16,000 E1M1 flat-floor pixels (0.49%)**, confined to
+    4 rows, each an adjacent-colormap-row shade shift (diff PNG in `scratchpad/bakeoff/
+    pS2a_e1m1_flat_bandwalk_diff_highlight.png`) — the square golden is UNCHANGED (single sector, no
+    boundary in view). **NOT wired into `_render_planes_flat` yet** — a first attempt wired it in
+    immediately and broke the currently-green E1M1 flat golden test with no compensating fj-side fix
+    (the OLD row-major fj kernel still computes zidx exactly per span-row, so it no longer matched the
+    new oracle); reverted. **Lesson: a shared oracle helper's approximation must land TOGETHER with
+    its fj-side consumer, not in isolation** — the re-bless (and the golden/test updates it forces)
+    happens at pS2b/c when the fj stream emitter is ready to consume the identical arithmetic. NOT
+    validated for implausibly tall sectors (~3000+ world units, where 32-bit FixedMul itself wraps) —
+    E1M1's tallest is 495 units; a future map needing taller sectors should re-run the prototype first.
+  - [ ] **pS2b — wire `_zidx_band_walk` into BOTH `_render_planes_flat` AND a NEW fj band-list kernel
+    together, one rung, one re-bless.** The fj kernel mirrors `_zidx_band_walk` exactly (seed via one
+    real `hex.fixed_mul` for the window's first row — reuse `plane.draw_pixel`'s zidx derivation — then
+    walk via `hex.add`/`hex.cmp` using `step = 16 * <the shared block-FP reciprocal, already emitted
+    for the wall-side divide-elimination campaign>`); square 4-viewpoint + E1M1 capstone re-blessed
+    against the NEW (band-walked) oracle output. This still renders through the OLD row-major
+    `draw_span_flat`/`render_planes_spans` pipeline (per-SPAN, i.e. one row at a time) UNLESS the span
+    grouping is also changed — clarify at implementation time whether pS2b keeps the span raster (one
+    `_zidx_band_walk` call per span, which is degenerate to the single-row case and so is BYTE-
+    IDENTICAL to today with no re-bless needed at all!) and defers the real multi-row window walk +
+    re-bless to pS2c (when the column-major stream emitter actually needs one call per whole window).
+    ⚠ **re-derive this ordering decision before writing code** — pS2a's finding implies the re-bless is
+    only forced once something calls `_zidx_band_walk` with a MULTI-row window, which is a pS2c-only
+    need; pS2b may turn out to be a no-op / mergeable into pS2c.
+  - [ ] **pS2c — the real per-column band-list construction + `stream.emit_column` wiring.** Pass-1,
+    per claimed column: build the ceiling/floor band lists (packed-byte arrays, `stream_render.fj`'s
+    format) via the fj band-walk kernel, store per column (or per seg + a per-column pointer/index —
+    decide by measuring the per-column COPY cost, which the pS1 ledger estimate did not separately
+    account for); call `stream.emit_column` per column after `present.begin_frame_stream`. DELETE the
+    framebuffer + old pass-2 (`pixel_tramp`/`leaf_body_w`) + `render_planes_spans`/`plane_col`/
+    `draw_span_flat` entirely. Byte-exact vs the device's decoded grid == the (now band-walked) oracle
+    frame. Measure (~110-140M expected); this is where pS1's LS1 estimate (2.02-3.18M, see pS1's
+    finding above) gets its FIRST real (non-synthetic) measurement.
 
 ---
 
@@ -876,6 +919,7 @@ first response is to re-measure LS1/L5/L6 against their lines, not to burn look.
 | owner's W1-vs-W2 pick: still pending — both built as parallel infra, neither is the shipped default yet (stays "textured" until M13p8) | pending | p4a |
 | pS1: per-run/per-column cost, THREE successive versions (the two traps' fixes each re-measured) — `scratchpad/measure_stream_column.py`, delta technique at n=1/3/5 ceil+floor bands (3/7/11 runs/column): **v0 `hex.ptr_index` per field** ~7,795 ops/run (10x the ~600-900 estimate) · **v1 `hex.read_hex_and_inc` per nibble, register-form data** ~3,860 ops/run · **v2 (SHIPPED) `hex.read_byte_and_inc` per packed byte, packed-byte data (3 dereferences/run vs v1's 6)** ~2,074 ops/run, byte-exact. Linear fit (3 vs 11 runs): ~2,074/run, ~0 fixed per-column part (within 2-point-fit noise). | measured | pS1, 2026-07-04 |
 | pS1: LS1 estimate at E1M1 scale (160 cols × the pS-spec's "~5-12 runs/column"): **~2.02M ops/frame @ ~5-8 runs/col, ~3.18M @ ~8-12 runs/col** — vs the ledger's LS1 ≤ 2.20M line. ⚠ **CORRECTION: LS1's line does not cleanly hold** (the plan's ~600-900 ops/run estimate was ~2.3-3.5x optimistic — pointer dereferences to walk a runtime band list cost more than "two emits + narrow clip/advance" accounted for, even at the packed-byte-optimized v2). **Verdict: proceed to pS2 anyway** — the v4 ledger carries 5.3M of slack specifically for per-line estimate error, and LS1's worst-case overshoot (~1.0M over its own line, less if the real per-column run count sits nearer 5-8 than 8-12) is well inside that cushion; re-anchor on pS2's REAL measured LS1 (from actual pass-1 band lists, not this synthetic column) before deciding whether a valve is needed. | measured + derived | pS1, 2026-07-04 |
+| pS2a: `_zidx_band_walk` validated against every REAL E1M1 spawn-frame planeheight (41 distinct values): **max shift = 1 row** (the ledger's F4 bound, exactly met, not exceeded); wiring it into `_render_planes_flat` would flip **79/16,000 E1M1 flat-floor pixels (0.49%)** across only 4 rows, each an adjacent colormap-row (not a random palette jump) — diff PNG `scratchpad/bakeoff/pS2a_e1m1_flat_bandwalk_diff_highlight.png`; the square golden is byte-IDENTICAL (single sector, no boundary crosses the view). ⚠ correction to the initial approach: `zidx ≈ (yslope[y] * recip(ph)) >> 32` is WRONG (that's `yslope/ph`, not what's needed) — the correct relation seeds the window's first row EXACTLY then advances `threshold += step` where `step = 16 * recip(ph)` (`recip(ph) ≈ 2^32/ph`, so `step ≈ 2^36/ph`, matching the `>>36` in `zidx = (ph*yslope[y])>>36`). First validation pass also used a SYNTHETIC sector-height cross-product and found spurious max-shift-127 cases — turned out to be genuine 32-bit `FixedMul` WRAPAROUND at implausible planeheights (~3701 world units) that no real E1M1 frame ever produces (E1M1's tallest is 495); switching to REAL per-frame planeheights resolved it — a reminder that synthetic parameter sweeps can manufacture non-issues indistinguishable from real bugs until checked against real data. NOT wired into any render path yet (see the pS2a/b/c task split above for why). | measured | pS2a, 2026-07-04 |
 | … | | |
 
 ## Self-review notes (plan-time)

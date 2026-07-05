@@ -59,9 +59,14 @@ def _assemble_stream(tmp_path, map_wad, mapname, cfg, asset_wad=None):
     return out
 
 
+RENDER_FLAT_WORDS = 1 << 26   # R4: measure in FLAT storage or the op count isn't baseline-comparable
+
+
 def _run_stream(out, vx, vy, va):
     screen = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
-    term = fj.run(out, io_device=screen, print_time=False, print_termination=False)
+    term = fj.run(out, io_device=screen, print_time=False, print_termination=False,
+                  flat_max_words=RENDER_FLAT_WORDS)
+    assert str(term.storage_mode) == "flat", f"R4: storage_mode {term.storage_mode!r} != flat"
     return screen, term
 
 

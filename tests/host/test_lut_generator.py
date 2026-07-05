@@ -89,8 +89,14 @@ class TestCannedGeneratorsUseTablesSSOT:
         # sin(6/8 * 2pi) is negative -> two's-complement encoded
         assert sine_table(8, 16, 32)[6] > 0x80000000
 
+    @staticmethod
+    def _packed_entry(v: int, nbytes: int) -> str:
+        """The generate_packed_lut_fj entry encoding: nbytes little-endian `;byte * dw` lines."""
+        return chr(10).join(f"    ;{hex((v >> (8 * k)) & 0xFF)} * dw" for k in range(nbytes))
+
     def test_projection_luts_match_tables(self) -> None:
-        """R6: the M12* projection emitters draw from tables.py (the oracle's SSOT), 8-nibble entries."""
+        """R6: the M12* projection emitters draw from tables.py (the oracle's SSOT). M13-lutpack:
+        entries are PACKED BYTES (4/entry for the 32-bit LUTs), little-endian `;byte * dw` runs."""
         from doomfj.lut_generator import (
             generate_tantoangle_lut_fj, generate_finetangent_lut_fj,
             generate_xtoviewangle_lut_fj, generate_viewangletox_lut_fj,
@@ -101,22 +107,23 @@ class TestCannedGeneratorsUseTablesSSOT:
         tan = generate_tantoangle_lut_fj("tantoangle", 16)
         assert "tantoangle:" in tan
         for v in tantoangle_table(16):
-            assert f"hex.vec 8, {hex(v)}" in tan
+            assert self._packed_entry(v, 4) in tan
         ft = generate_finetangent_lut_fj("finetangent", 64)
         for v in finetangent_table(64):
-            assert f"hex.vec 8, {hex(v)}" in ft
+            assert self._packed_entry(v, 4) in ft
         xt = generate_xtoviewangle_lut_fj("xtoviewangle", 16, 64)
         for v in xtoviewangle_table(16, 64):
-            assert f"hex.vec 8, {hex(v)}" in xt
+            assert self._packed_entry(v, 4) in xt
 
     def test_viewangletox_lut_encodes_signed_sentinels(self) -> None:
-        """viewangletox columns are signed (the -1 sentinel) ⇒ two's-complement encoded to the width."""
+        """viewangletox columns are signed (the -1 sentinel) ⇒ two's-complement encoded to the width
+        (M13-lutpack: 4 packed little-endian bytes)."""
         from doomfj.lut_generator import generate_viewangletox_lut_fj
         from doomfj.tables import viewangletox_table
         src = generate_viewangletox_lut_fj("viewangletox", 16, 64)
         for v in viewangletox_table(16, 64):
-            assert f"hex.vec 8, {hex(v & 0xFFFFFFFF)}" in src
-        assert "hex.vec 8, 0xffffffff" in src        # the -1 off-screen sentinel
+            assert self._packed_entry(v & 0xFFFFFFFF, 4) in src
+        assert self._packed_entry(0xFFFFFFFF, 4) in src   # the -1 off-screen sentinel
 
 
 # ---------- dispatch-CODE + deposit emitters (structural) ----------

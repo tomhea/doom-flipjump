@@ -47,7 +47,7 @@ ns proj {
       nrm_lo:
         hex.cmp 8, sden, c100, lo_more, lo_done, lo_done
       lo_done:
-        hex.read_table 5, recip, slopediv_recip, 3, sden   // recip = slopediv_recip[m]  (m = sden, 3 nib)
+        hex.read_table_packed 3, recip, slopediv_recip, 3, sden   // recip = slopediv_recip[m] (packed, M13-lutpack)
 
         hex.zero 13, wnum
         hex.mov 8, wnum, num
@@ -79,7 +79,7 @@ ns proj {
       sden: hex.vec 8
       wnum: hex.vec 13
       recipw: hex.vec 13
-      recip: hex.vec 5
+      recip: hex.vec 6
       prod: hex.vec 13
       fsh: hex.vec 2
       c512: hex.vec 8, 512
@@ -145,7 +145,7 @@ ns proj {
         ;numden
       numden:
         .slope_div sidx, num, den                 // sidx = tantoangle index for the slope
-        hex.read_table 8, base, tantoangle, 3, sidx   // base = tantoangle[sidx]   (shared LUT, M12l)
+        hex.read_table_packed 4, base, tantoangle, 3, sidx   // base = tantoangle[sidx]   (shared LUT, M12l)
         // M13-p2acrush: the octant offset+sign, previously two read_tables (8-nib ~10.4k + 1-nib)
         // on idx, is now a 3-deep COMPARE TREE to 8 constant tails (same formulas, ~1k). idx =
         // sxneg*4 + syneg*2 + (|dx|>|dy|); the oracle's 8 returns (ANG90=0x40000000 etc.):
@@ -245,7 +245,7 @@ ns proj {
       clamp_idx:
         hex.set 3, sidx, 0x800
       keep_idx:
-        hex.read_table 8, angle, tantoangle, 3, sidx   // tantoangle[idx]
+        hex.read_table_packed 4, angle, tantoangle, 3, sidx   // tantoangle[idx]
         hex.add 8, angle, cang90                        // angle = tantoangle[idx] + ANG90
         hex.shr_hex 8, 5, angle                         // finesine index = angle >> 20 bits (= 5 nibbles;
         hex.mov 3, sidx, angle                          //   32 - log2(TRIG_N=4096) = 20). low 3 nibbles.
@@ -386,7 +386,7 @@ ns proj {
       clampmax:
         hex.set 3, vidx, 0x7ff
       keep:
-        hex.read_table 8, dst, viewangletox, 3, vidx     // the signed column (2's-complement)
+        hex.read_table_packed 4, dst, viewangletox, 3, vidx     // the signed column (2's-complement)
         ;end
 
       t: hex.vec 8
@@ -617,11 +617,11 @@ ns proj {
             @ ang, ft, prod, tcol, atcol, q, m, idx, czero, \
               tpos, tneg, mzero, mnz, baddiv, end \
             < xtoviewangle, finetangent {
-        hex.read_table 8, ang, xtoviewangle, 2, x      // xtoviewangle[x]   (idx = screen column)
+        hex.read_table_packed 4, ang, xtoviewangle, 2, x      // xtoviewangle[x]   (idx = screen column)
         hex.add 8, ang, rw_centerangle                 // ang = rw_centerangle + xtoviewangle[x]
         hex.shr_hex 8, 5, ang                          // ang >> angle_shift(20) = 5 nibbles
         hex.mov 3, idx, ang                            //   low 3 nibbles = the finetangent index
-        hex.read_table 8, ft, finetangent, 3, idx      // ft = finetangent[idx]  (signed)
+        hex.read_table_packed 4, ft, finetangent, 3, idx      // ft = finetangent[idx]  (signed)
         hex.fixed_mul_lo 8, 4, prod, ft, rw_distance      // prod = ft * rw_distance (signed)
         hex.mov 8, tcol, rw_offset
         hex.sub 8, tcol, prod                          // rw_offset - prod
@@ -691,7 +691,7 @@ ns proj {
         hex.inc 2, rc
         ;isc_nrm
       isc_done:
-        hex.read_table 5, irecip, slopediv_recip, 3, sscale     // recip[m]  (m = sscale, low 3 nibbles)
+        hex.read_table_packed 3, irecip, slopediv_recip, 3, sscale     // recip[m]  (m = sscale, low 3 nibbles)
         hex.zero 8, ipre
         hex.mov 5, ipre, irecip
         hex.shl_hex 8, 2, ipre                                  // recip << 2 nibbles
@@ -753,7 +753,7 @@ ns proj {
       frac: hex.vec 8
       sscale: hex.vec 8                  // perf #11: block-FP reciprocal scratch
       rc: hex.vec 2
-      irecip: hex.vec 5
+      irecip: hex.vec 6
       cfff: hex.vec 8, 0xfff
       czero2i: hex.vec 2, 0
       cds: hex.vec 8
@@ -773,10 +773,10 @@ ns proj {
     def wall_scale_setup scale1, scalestep_out, viewangle, rw_normalangle, rw_distance, x1, x2, projection \
             @ vis1, vis2, scale2, end \
             < xtoviewangle {
-        hex.read_table 8, vis1, xtoviewangle, 2, x1     // xtoviewangle[x1]
+        hex.read_table_packed 4, vis1, xtoviewangle, 2, x1     // xtoviewangle[x1]
         hex.add 8, vis1, viewangle                      // visangle@x1 = viewangle + xtoviewangle[x1]
         .scale_from_global_angle scale1, vis1, viewangle, rw_normalangle, rw_distance, projection
-        hex.read_table 8, vis2, xtoviewangle, 2, x2     // xtoviewangle[x2]
+        hex.read_table_packed 4, vis2, xtoviewangle, 2, x2     // xtoviewangle[x2]
         hex.add 8, vis2, viewangle                      // visangle@x2
         .scale_from_global_angle scale2, vis2, viewangle, rw_normalangle, rw_distance, projection
         .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero

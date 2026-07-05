@@ -23,13 +23,14 @@ FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table
 
 
 def _read_lut(tmp_path, name, lut_fj, host_values, picks, *, entry_nibbles, idx_nibbles):
-    """Assemble `lut_fj` + a driver that reads each picked index twice via hex.read_table, then compare
-    the printed entry_nibbles-digit output to the host values (masked to the entry width)."""
+    """Assemble `lut_fj` + a driver that reads each picked index twice via hex.read_table_packed
+    (M13-lutpack: the generators emit packed-byte entries), then compare the printed
+    entry_nibbles-digit output to the host values (masked to the entry width)."""
     mask = (1 << (4 * entry_nibbles)) - 1
     body, data, expected = [], [], b""
     for k, idx in enumerate(picks):
         for _ in range(2):
-            body += [f"hex.read_table {entry_nibbles}, d, {name}, {idx_nibbles}, q{k}",
+            body += [f"hex.read_table_packed {entry_nibbles // 2}, d, {name}, {idx_nibbles}, q{k}",
                      f"hex.print_as_digit {entry_nibbles}, d, 0", "stl.output 10"]
             expected += f"{host_values[idx] & mask:0{entry_nibbles}x}\n".encode()
         data.append(f"q{k}: hex.vec {idx_nibbles}, {idx}")

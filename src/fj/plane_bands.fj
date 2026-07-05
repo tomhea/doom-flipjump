@@ -27,7 +27,7 @@ ns plane {
         hex.inc 2, rc
         ;nrm
       done:
-        hex.read_table 5, irecip, slopediv_recip, 3, sph   // recip[m] (m = sph, 3 nibbles)
+        hex.read_table_packed 3, irecip, slopediv_recip, 3, sph   // recip[m] (packed, M13-lutpack)
         hex.zero 8, bb_recip_out
         hex.mov 5, bb_recip_out, irecip
         hex.shl_hex 8, 2, bb_recip_out             // recip << 2 nibbles
@@ -44,7 +44,7 @@ ns plane {
       rc: hex.vec 2
       cfff: hex.vec 8
       czero2: hex.vec 2
-      irecip: hex.vec 5
+      irecip: hex.vec 6
     }
 
     // Build ONE column's ceiling/floor BAND LIST: mirrors `ReferenceModel._zidx_band_walk` (R15)

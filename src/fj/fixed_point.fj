@@ -138,6 +138,24 @@ ns hex {
     // The entry address is computed with the strength-reduced mul_const (no runtime-amount
     //  shift), then read through a pointer.
     // @requires hex.init & stl.ptr_init
+    // M13-lutpack — dst[:2*nb] = table[idx] for a PACKED-byte LUT (entry = nb consecutive bytes,
+    //  little-endian, one dw-slot per byte: doomfj generate_packed_lut_fj). Same values as the
+    //  read_table form, ~600 ops/BYTE (read_byte_and_inc) instead of ~1.1k/NIBBLE (read_hex's
+    //  per-nibble pointer re-derivation) — delta-measured, R19-era. dst must not alias idx.
+    // @requires hex.init & stl.ptr_init
+    def read_table_packed nb, dst, table, idx_n, idx @ ptr, table_address, end {
+        .zero w/4, ptr
+        .mov idx_n, ptr, idx
+        .mul_const w/4, ptr, ptr, nb*dw
+        .add w/4, ptr, table_address
+        rep(nb, k) .read_byte_and_inc dst + 2*k*dw, ptr
+        ;end
+
+      ptr: .vec w/4
+      table_address: .vec w/4, table
+      end:
+    }
+
     def read_table n, dst, table, idx_n, idx @ ptr, table_address, end {
         .zero w/4, ptr
         .mov idx_n, ptr, idx

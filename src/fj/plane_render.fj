@@ -129,7 +129,7 @@ ns plane {
         hex.fixed_mul_lo 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
         hex.read_table 8, dscale, distscale, 2, x1
         hex.fixed_mul_lo 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
-        hex.read_table 8, xta, xtoviewangle, 2, x1
+        hex.read_table_packed 4, xta, xtoviewangle, 2, x1
         hex.mov 8, ang, viewangle
         hex.add 8, ang, xta                              // viewangle + xtoviewangle[x1] (mod 2^32)
         hex.shr_hex 8, 5, ang                            // >> 20 (angle_shift): the fine index

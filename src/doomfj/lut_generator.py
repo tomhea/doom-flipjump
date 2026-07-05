@@ -43,6 +43,7 @@ __all__ = [
     "generate_emit_dispatch_table_fj",
     "generate_offset_deposit_table_fj",
     "generate_trig_idioms_fj",
+    "generate_packed_lut_fj",
     "generate_tantoangle_lut_fj",
     "generate_finetangent_lut_fj",
     "generate_xtoviewangle_lut_fj",
@@ -102,6 +103,22 @@ def generate_byte_lut_fj(label: str, values: Sequence[int]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def generate_packed_lut_fj(label: str, values, nbytes: int) -> str:
+    """M13-lutpack: entry k = `nbytes` consecutive packed BYTES (little-endian) at label +
+    k*nbytes*dw, one dw-slot per byte (the `;value*dw` idiom — the yslope_packed precedent
+    generalized). Read with `hex.read_table_packed nbytes, dst, label, idx_n, idx` (dst =
+    2*nbytes nibbles): ~600 ops/byte via read_byte_and_inc instead of hex.read_table's ~1.1k
+    per NIBBLE pointer re-derivation (delta-measured: read_table 8 @ 3-nib idx ~= 10.4k)."""
+    lines = [f'// packed LUT "{label}": {len(values)} entries x {nbytes} bytes (doomfj.lut_generator)',
+             f"{label}:"]
+    for index, value in enumerate(values):
+        if not 0 <= value < (1 << (8 * nbytes)):
+            raise ValueError(f"{label}[{index}] = {value:#x} exceeds {nbytes} packed bytes")
+        for k in range(nbytes):
+            lines.append(f"    ;{hex((value >> (8 * k)) & 0xFF)} * dw")
+    return "\n".join(lines) + "\n"
+
+
 def generate_reciprocal_lut_fj(label: str, count: int, fraction_bits: int, entry_nibbles: int) -> str:
     """Emit a reciprocal table (entry i = round(2^fraction_bits / i), entry 0 clamped). Values come
     from `tables.reciprocal_table` — the SSOT shared with the oracle (R6)."""
@@ -118,38 +135,43 @@ def generate_sine_lut_fj(label: str, count: int, fraction_bits: int, entry_nibbl
 # ── projection LUTs the fj wall renderer reads (read_table data tables; the M12* tables, R6 SSOT) ──
 
 def generate_tantoangle_lut_fj(label: str, slope_range: int = 2048) -> str:
-    """tantoangle (R_PointToAngle: slope quotient -> BAM angle), slope_range+1 entries of 32-bit BAM
-    (8 nibbles). Values from `tables.tantoangle_table` (all non-negative, < 2**32). Read once per wall."""
-    return generate_lut_fj(label, tantoangle_table(slope_range), 8)
+    """tantoangle (R_PointToAngle: slope quotient -> BAM angle), slope_range+1 entries of 32-bit BAM.
+    M13-lutpack: 4 PACKED BYTES/entry (read_table_packed 4). Values from `tables.tantoangle_table`
+    (all non-negative, < 2**32). Read once per wall."""
+    return generate_packed_lut_fj(label, tantoangle_table(slope_range), 4)
 
 
 def generate_slopediv_recip_lut_fj(label: str) -> str:
     """perf #13: SlopeDiv's block-FP reciprocal table (4096 entries, m in [0x100,0xFFF] -> (1<<24)//m;
-    rest 0). 5 nibbles/entry (max recip = 65536 = 17 bits). Values from `tables.slopediv_recip_table`
-    (SSOT, R6). Indexed by the top-3-nibble mantissa of (den>>8)."""
-    return generate_lut_fj(label, slopediv_recip_table(), 5)
+    rest 0). M13-lutpack: 3 PACKED BYTES/entry (max recip = 65536 = 17 bits; read_table_packed 3 into
+    a 6-nibble register). Values from `tables.slopediv_recip_table` (SSOT, R6). Indexed by the
+    top-3-nibble mantissa of (den>>8)."""
+    return generate_packed_lut_fj(label, slopediv_recip_table(), 3)
 
 
 def generate_finetangent_lut_fj(label: str, trig_n: int) -> str:
-    """finetangent (tan(angle-90°) as 16.16 two's-complement, 8 nibbles), trig_n entries. Values from
-    `tables.finetangent_table` (already 32-bit two's-complement encoded). Read once per wall column."""
-    return generate_lut_fj(label, finetangent_table(trig_n), 8)
+    """finetangent (tan(angle-90°) as 16.16 two's-complement), trig_n entries. M13-lutpack: 4 PACKED
+    BYTES/entry. Values from `tables.finetangent_table` (already 32-bit two's-complement encoded).
+    Read once per wall column."""
+    return generate_packed_lut_fj(label, finetangent_table(trig_n), 4)
 
 
 def generate_xtoviewangle_lut_fj(label: str, view_w: int, trig_n: int) -> str:
-    """xtoviewangle (screen column -> view-relative BAM angle), view_w+1 entries of 32-bit BAM (8
-    nibbles). Values from `tables.xtoviewangle_table` (already 32-bit encoded). The wall-scale endpoints."""
-    return generate_lut_fj(label, xtoviewangle_table(view_w, trig_n), 8)
+    """xtoviewangle (screen column -> view-relative BAM angle), view_w+1 entries of 32-bit BAM.
+    M13-lutpack: 4 PACKED BYTES/entry. Values from `tables.xtoviewangle_table` (already 32-bit
+    encoded). The wall-scale endpoints."""
+    return generate_packed_lut_fj(label, xtoviewangle_table(view_w, trig_n), 4)
 
 
 def generate_viewangletox_lut_fj(label: str, view_w: int, trig_n: int, *, entry_nibbles: int = 8) -> str:
     """viewangletox (view-relative fine angle -> screen column), trig_n//2 entries. The columns are
-    SIGNED ([-1, view_w+1] with off-screen sentinels), so they are encoded two's-complement in
-    `entry_nibbles` (default 8 = uniform with the other projection LUTs). Values from
+    SIGNED ([-1, view_w+1] with off-screen sentinels), encoded two's-complement in `entry_nibbles`
+    (8 = 32-bit, the uniform width). M13-lutpack: entry_nibbles/2 PACKED BYTES/entry. Values from
     `tables.viewangletox_table` (R6 SSOT). The fj angle->column lookup the wall x-range reads."""
+    assert entry_nibbles % 2 == 0, "packed entries are whole bytes"
     mask = (1 << (4 * entry_nibbles)) - 1
     values = [v & mask for v in viewangletox_table(view_w, trig_n)]
-    return generate_lut_fj(label, values, entry_nibbles)
+    return generate_packed_lut_fj(label, values, entry_nibbles // 2)
 
 
 # ── M13 floor/ceiling (visplane) LUTs the fj plane raster reads (read_table data tables, R6 SSOT) ──

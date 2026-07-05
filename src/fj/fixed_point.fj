@@ -39,6 +39,41 @@ ns hex {
     }
 
 
+    // M13-mulcrush — BYTE-EXACT-identical to `fixed_mul n, f, dst, a, b`, ~3x cheaper: the full
+    //  2n-nibble product is TRUNCATED-SCHOOLBOOK'd at n+f nibbles (the only nibbles fixed_mul's
+    //  [f, f+n) result slice can see). Row j adds wa[0..m-j)*wb[j] at offset j with add_mul's own
+    //  mod-16^(m-j) ripple — every pair with i+j < m lands exactly, columns >= m are dropped, so
+    //  res[0..m) == the full product's low m nibbles and dst == fixed_mul's dst, bit for bit.
+    //  Zero-digit rows (e.g. the sign-extension nibbles of small positive operands) skip their
+    //  add_mul behind a 1-nibble if0. No dst/src shifting, no count_bits (hex.mul's per-iteration
+    //  overhead), compile-time offsets throughout.
+    // @Assumes: 0 < f <= n.
+    // @requires hex.init
+    def fixed_mul_lo n, f, dst, a, b @ wide_a, wide_b, res, end {
+        .mov n, wide_a, a
+        .sign_extend n+f, n, wide_a
+        .mov n, wide_b, b
+        .sign_extend n+f, n, wide_b
+        .zero n+f, res
+        rep(n+f, j) .fixed_mul_lo.row n+f, j, res, wide_a, wide_b
+        .mov n, dst, res + f*dw
+        ;end
+
+      wide_a: .vec n+f
+      wide_b: .vec n+f
+      res: .vec n+f
+      end:
+    }
+    ns fixed_mul_lo {
+        // one truncated-schoolbook row: res[j..m) += wa[0..m-j) * wb[j]  (skipped when wb[j]==0)
+        def row m, j, res, wa, wb @ skip {
+            ..if0 1, wb + j*dw, skip
+            ..add_mul m-j, res + j*dw, wa, wb + j*dw
+          skip:
+        }
+    }
+
+
     //  Time Complexity: n^2(76@+216) + n(15@+50)
     // Space Complexity: n(45@+600)
     //   if b==0: goto div0

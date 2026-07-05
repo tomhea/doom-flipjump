@@ -23,7 +23,7 @@ ns plane {
             @ ys, dist, zidx, lvl, zlidx, zrow, cmidx, c127, ok, clamp \
             < planeheight, light, pbase, y, lit, yslope, zlight, plane_ret {
         hex.read_table 8, ys, yslope, 2, y           // ys = yslope[y]   (y in [0, VIEW_H) -> 2-nibble index)
-        hex.fixed_mul 8, 4, dist, planeheight, ys    // dist = FixedMul(planeheight, ys) (16.16, wraps mod 2^32)
+        hex.fixed_mul_lo 8, 4, dist, planeheight, ys    // dist = FixedMul(planeheight, ys) (16.16, wraps mod 2^32)
         hex.shr_hex 8, 5, dist                       // dist >>= 20 (LIGHTZSHIFT): the distance bucket
         hex.mov 3, zidx, dist                        // zidx = bucket (the low 3 nibbles; the high nibbles are 0)
         hex.set 3, c127, 127                         // MAXLIGHTZ-1
@@ -124,22 +124,22 @@ ns plane {
             < planeheight, light, basexscale, baseyscale, viewx, viewy, viewangle, y, x1, x2, flatbase, \
               yslope, distscale, xtoviewangle, zlight, span_ret {
         hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
-        hex.fixed_mul 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
-        hex.fixed_mul 8, 4, xstep, dist, basexscale      // xstep = FixedMul(distance, basexscale)
-        hex.fixed_mul 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
+        hex.fixed_mul_lo 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
+        hex.fixed_mul_lo 8, 4, xstep, dist, basexscale      // xstep = FixedMul(distance, basexscale)
+        hex.fixed_mul_lo 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
         hex.read_table 8, dscale, distscale, 2, x1
-        hex.fixed_mul 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
+        hex.fixed_mul_lo 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
         hex.read_table 8, xta, xtoviewangle, 2, x1
         hex.mov 8, ang, viewangle
         hex.add 8, ang, xta                              // viewangle + xtoviewangle[x1] (mod 2^32)
         hex.shr_hex 8, 5, ang                            // >> 20 (angle_shift): the fine index
         hex.mov 3, idx, ang                              // idx = (.. >> 20) & 0xFFF (3 nibbles)
         finesine.read_cos fc, idx
-        hex.fixed_mul 8, 4, prod, fc, length
+        hex.fixed_mul_lo 8, 4, prod, fc, length
         hex.mov 8, xfrac, viewx
         hex.add 8, xfrac, prod                           // xfrac = viewx + FixedMul(finecos[idx], length)  (seed @8)
         finesine.read_sin fs, idx
-        hex.fixed_mul 8, 4, prod, fs, length
+        hex.fixed_mul_lo 8, 4, prod, fs, length
         hex.mov 8, yfrac, viewy
         hex.add 8, yfrac, prod
         hex.neg 8, yfrac                                 // yfrac = -(viewy + FixedMul(finesin[idx], length))
@@ -242,7 +242,7 @@ ns plane {
               count, pixp, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
             < planeheight, light, y, x1, x2, flatbase, yslope, zlight, span_ret {
         hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
-        hex.fixed_mul 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
+        hex.fixed_mul_lo 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
         hex.mov 8, tt, dist
         hex.shr_hex 8, 5, tt                             // distance >> 20 (LIGHTZSHIFT)
         hex.mov 3, zidx, tt

@@ -803,6 +803,28 @@ ns proj {
       end:
     }
 
+    // M13pS2/pG3-stream — the STREAM-mode column params: just the projected+clipped [top, bottom]
+    // rows (wall_screen_span + the two clips). The texture u (a hex.div!) and the vertical DDA
+    // setup (column_setup) are DEAD in the column-stream renderer's W1 mode (the wall run is one
+    // baked lit byte; planes come from the shared band lists), so this variant skips them — the
+    // measured bulk of the old per-column cost.
+    def column_render_params_stream top, bottom, scale, ceilfix, floorfix, viewz, centery, viewh1 \
+            @ cvh, tneg, tok, bok, bhi, end {
+        .wall_screen_span top, bottom, ceilfix, floorfix, viewz, scale, centery*0x10000
+        hex.sign 8, top, tneg, tok          // top = max(0, top)  (signed)
+      tneg:
+        hex.zero 8, top
+      tok:
+        hex.set 8, cvh, viewh1              // bottom = min(VIEW_H-1, bottom)  (signed)
+        hex.scmp 8, bottom, cvh, bok, bok, bhi
+      bhi:
+        hex.mov 8, bottom, cvh
+      bok:
+        ;end
+      cvh: hex.vec 8
+      end:
+    }
+
     // proj.point_on_side back, vx, vy, px, py, dx, dy (R_PointOnSide / mapcompiler._point_side): the BSP
     //   partition side test the bake-as-code walk (opt #7) branches on. back[:2] = 1 iff
     //   dx*(vy-py) - dy*(vx-px) > 0 (the "back/left" side; <0 or ON the line -> front -> 0). vx,vy are the

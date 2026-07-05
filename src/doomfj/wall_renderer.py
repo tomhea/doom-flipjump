@@ -349,7 +349,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           ["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
            "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"] if "xrstub" in ablate else
           ["seg_pass1_leaf:",
-           f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
+           f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
           if raster_mode == "stream" else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),

@@ -766,19 +766,18 @@ ns frame {
     // emitter's BAND_STRIDE). NOTHING here changes the wall/pass-1 fields above — this is additive-only,
     // a separate leaf so the existing `_mtlwp` (framebuffer raster_mode) is untouched. @requires
     // hex.init & stl.ptr_init.
-    def seg_pass1_leaf_body_stream centery, ds, viewh1, viewh, projection, band_stride \
-            @ loop, body, skipcol, ret, sidx, tbskip, tbok, cge, cdone, fneg, fdone, cVH, cexcl, \
+    def seg_pass1_leaf_body_stream centery, viewh1, viewh, projection, band_stride \
+            @ loop, body, skipcol, ret, sidx, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cph, fph, nacc, nadv, vpp, vpb, cbufaddr, fbufaddr, \
               cbuild, cbuilt, fbuild, fbuilt, \
               work, sfull, occscan, occchk, occnext, occdone, occproc \
-            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
-              seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, viewzw, seg_ceil, seg_floor, worldtop, \
+            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
+              ceilfix, floorfix, viewz, seg_ceil, seg_floor, \
               seg_plight, seg_ceilbase, seg_floorbase, seg_lit, seg_cvpidx, seg_fvpidx, \
-              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
-              top, bottom, texcol, cfrac0, stepv, base, \
-              col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, \
-              col_cexcl, col_fstart, col_ceil_ph, col_floor_ph, col_plight, col_ceilbase, col_floorbase, \
-              col_lit, col_cbands, col_fbands, vpc_bufs, vpf_bufs, vpc_flags, vpf_flags, drawn, seg_ret, \
+              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
+              top, bottom, \
+              col_cexcl, col_fstart, col_lit, col_cbands, col_fbands, \
+              vpc_bufs, vpf_bufs, vpc_flags, vpf_flags, drawn, seg_ret, \
               full, n_drawn, vieww, \
               bb_ph, bb_light, bb_base, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, build_bands_leaf, \
               plane_band_ret {
@@ -801,9 +800,7 @@ ns frame {
       occproc:
         proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
-        proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
-        hex.mov 8, worldtop, seg_ceil           // worldtop = seg_ceil - viewzw (M12pp; seg_ceil baked PURE)
-        hex.sub 8, worldtop, viewzw
+        // pG3-stream: wall_offset (texture-u inputs) + worldtop (the DDA texturemid) are DEAD here
         hex.mov 8, cph, seg_ceil                // cph = |(ceil_h<<16) - viewz| (16.16), computed ONCE per seg
         hex.shl_hex 8, 4, cph
         hex.sub 8, cph, viewz
@@ -888,7 +885,7 @@ ns frame {
         hex.scmp 8, x, x2, body, ret, ret
       body:
         .skip_if_drawn x, drawn, skipcol
-        proj.column_render_params top, bottom, texcol, cfrac0, stepv, scale, rw_centerangle, rw_offset, rw_distance, x, seg_tw, ceilfix, floorfix, viewz, worldtop, centery, ds, viewh1
+        proj.column_render_params_stream top, bottom, scale, ceilfix, floorfix, viewz, centery, viewh1
         hex.set 8, cVH, viewh                   // cexcl = min(top, VIEW_H)  (top is the clipped >=0 row)
         hex.mov 8, cexcl, top
         hex.scmp 8, top, cVH, cdone, cge, cge   // top < VIEW_H -> keep top; else clamp to VIEW_H
@@ -901,14 +898,8 @@ ns frame {
       fneg:
         hex.zero 8, fstart
       fdone:
-        hex.scmp 8, top, bottom, tbok, tbok, tbskip   // off-screen wall (top>bottom) -> the skip sentinel
-      tbskip:
-        hex.set 8, top, 1
-        hex.zero 8, bottom
-      tbok:
-        hex.zero 5, base
-        hex.mul 4, base, texcol, seg_texheight
-        hex.add 5, base, seg_texbase
+        // pG3-stream: the off-screen top/bottom sentinel + the wall texel base are DEAD (no fb
+        // raster; cexcl/fstart, computed above from the CLIPPED rows, are all the emit needs)
         hex.mov w/4, sidx, x
         hex.shl_bit w/4, sidx
         hex.shl_bit w/4, sidx
@@ -921,20 +912,8 @@ ns frame {
 
         .store_col_field col_lit, sidx, seg_lit   // the W1 wall's fully-baked constant lit byte
 
-        .store_col_field col_top, sidx, top
-        .store_col_field col_bottom, sidx, bottom
-        .store_col_field5 col_base, sidx, base
-        .store_col_field col_step, sidx, stepv
-        .store_col_field col_frac0, sidx, cfrac0
-        .store_col_field col_heightmask, sidx, seg_hm
-        .store_col_field col_light, sidx, seg_light
         .store_col_field col_cexcl, sidx, cexcl
         .store_col_field col_fstart, sidx, fstart
-        .store_col_field8 col_ceil_ph, sidx, cph
-        .store_col_field8 col_floor_ph, sidx, fph
-        .store_col_field col_plight, sidx, seg_plight
-        .store_col_field5 col_ceilbase, sidx, seg_ceilbase
-        .store_col_field5 col_floorbase, sidx, seg_floorbase
         .mark_drawn x, drawn
         hex.inc 2, n_drawn                       // M13opt-P1: count this newly-claimed column (mark_drawn only
         hex.cmp 2, n_drawn, vieww, skipcol, sfull, skipcol   // runs on a NEW claim) -> when all VIEW_W claimed, full=1

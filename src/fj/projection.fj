@@ -54,7 +54,11 @@ ns proj {
         rep(3, i) hex.shl_bit 13, wnum          // wnum = num << 3   (13 nibbles, no overflow)
         hex.zero 13, recipw
         hex.mov 5, recipw, recip
-        hex.mul 13, prod, wnum, recipw          // prod = (num<<3) * recip   (full product, no wrap)
+        // M13-p2acrush: recip is only 5 nibbles, so the mod-16^13 product is 5 truncated-schoolbook
+        // rows (fixed_mul_lo.row: add_mul (13-j) at offset j == hex.mul 13's wrap, bit-identical)
+        // instead of hex.mul 13's 13 add_mul-13 iterations + per-iteration shl/shr 13.
+        hex.zero 13, prod
+        rep(5, j) hex.fixed_mul_lo.row 13, j, prod, wnum, recipw
 
         hex.shr_hex 13, 4, prod                 // base shift = 4 nibbles (RK=24=6 nib, minus the <=4 P-bias)
       fsh_loop:                                  // then fsh (the variable part) more nibbles
@@ -96,9 +100,9 @@ ns proj {
     //   result = p2a_off[idx] (+ or -, per p2a_neg[idx]) base, mod 2^32. (0,0) -> 0.
     //   @requires hex.init & stl.ptr_init   (read_table needs the pointer init)
     def point_to_angle dst, x1, y1, x2, y2 \
-            @ dx, dy, num, den, idx, sidx, base, off, neg, c1, c2, c4, czero, \
-              sxn, sxp, sxd, syn, syp, syd, dxz, bothz, nz, gt_, ndx, numden, addb, subb, \
-              p2a_off, p2a_neg, done \
+            @ dx, dy, num, den, idx, sidx, base, c1, c2, c4, c6, czero, \
+              sxn, sxp, sxd, syn, syp, syd, dxz, bothz, nz, gt_, ndx, numden, \
+              lo4, lo2, hi4, oct0, oct1, oct2, oct3, oct4, oct5, oct6, oct7, done \
             < tantoangle {
         hex.mov 8, dx, x2
         hex.sub 8, dx, x1                        // dx = x2 - x1   (signed 16.16)
@@ -142,16 +146,48 @@ ns proj {
       numden:
         .slope_div sidx, num, den                 // sidx = tantoangle index for the slope
         hex.read_table 8, base, tantoangle, 3, sidx   // base = tantoangle[sidx]   (shared LUT, M12l)
-        hex.read_table 8, off, p2a_off, 1, idx        // octant offset
-        hex.read_table 1, neg, p2a_neg, 1, idx        // octant sign: 1 -> subtract base, 0 -> add
-        hex.cmp 1, neg, c1, addb, subb, subb          // neg flag (unsigned, R5-ok)
-      addb:
-        hex.mov 8, dst, off
-        hex.add 8, dst, base                      // result = off + base (mod 2^32)
+        // M13-p2acrush: the octant offset+sign, previously two read_tables (8-nib ~10.4k + 1-nib)
+        // on idx, is now a 3-deep COMPARE TREE to 8 constant tails (same formulas, ~1k). idx =
+        // sxneg*4 + syneg*2 + (|dx|>|dy|); the oracle's 8 returns (ANG90=0x40000000 etc.):
+        //   0: (ANG90-1)-base   1: +base            2: ANG270+base    3: -base
+        //   4: ANG90+base       5: (ANG180-1)-base  6: (ANG270-1)-base 7: ANG180+base
+        hex.cmp 1, idx, c4, lo4, oct4, hi4
+      lo4:
+        hex.cmp 1, idx, c2, lo2, oct2, oct3
+      lo2:
+        hex.cmp 1, idx, c1, oct0, oct1, oct1
+      hi4:
+        hex.cmp 1, idx, c6, oct5, oct6, oct7
+      oct0:
+        hex.set 8, dst, 0x3FFFFFFF
+        hex.sub 8, dst, base
         ;done
-      subb:
-        hex.mov 8, dst, off
-        hex.sub 8, dst, base                      // result = off - base (mod 2^32)
+      oct1:
+        hex.mov 8, dst, base
+        ;done
+      oct2:
+        hex.set 8, dst, 0xC0000000
+        hex.add 8, dst, base
+        ;done
+      oct3:
+        hex.zero 8, dst
+        hex.sub 8, dst, base
+        ;done
+      oct4:
+        hex.set 8, dst, 0x40000000
+        hex.add 8, dst, base
+        ;done
+      oct5:
+        hex.set 8, dst, 0x7FFFFFFF
+        hex.sub 8, dst, base
+        ;done
+      oct6:
+        hex.set 8, dst, 0xBFFFFFFF
+        hex.sub 8, dst, base
+        ;done
+      oct7:
+        hex.set 8, dst, 0x80000000
+        hex.add 8, dst, base
         ;done
 
       dx: hex.vec 8
@@ -161,34 +197,11 @@ ns proj {
       idx: hex.vec 1
       sidx: hex.vec 3
       base: hex.vec 8
-      off: hex.vec 8
-      neg: hex.vec 1
       c1: hex.vec 1, 1
       c2: hex.vec 1, 2
       c4: hex.vec 1, 4
+      c6: hex.vec 1, 6
       czero: hex.vec 8, 0
-      // octant table, indexed by idx = sxneg*4 + syneg*2 + (|dx|>|dy|). offset & sign DERIVED from the
-      // oracle's 8 return formulas (ANG90=0x40000000, ANG180=0x80000000, ANG270=0xC0000000):
-      //   0: -base+(ANG90-1)  1: +base       2: +base+ANG270   3: -base
-      //   4: +base+ANG90      5: -base+(ANG180-1) 6: -base+(ANG270-1) 7: +base+ANG180
-      p2a_off:
-        hex.vec 8, 0x3FFFFFFF
-        hex.vec 8, 0x00000000
-        hex.vec 8, 0xC0000000
-        hex.vec 8, 0x00000000
-        hex.vec 8, 0x40000000
-        hex.vec 8, 0x7FFFFFFF
-        hex.vec 8, 0xBFFFFFFF
-        hex.vec 8, 0x80000000
-      p2a_neg:
-        hex.vec 1, 1
-        hex.vec 1, 0
-        hex.vec 1, 0
-        hex.vec 1, 1
-        hex.vec 1, 0
-        hex.vec 1, 1
-        hex.vec 1, 1
-        hex.vec 1, 0
       done:
     }
 

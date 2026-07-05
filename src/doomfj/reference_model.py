@@ -791,20 +791,32 @@ class ReferenceModel:
         the stream capstone (see tests/fj/test_floor_planes_fj.py)."""
         cfg = self.cfg
         W, H = cfg.VIEW_W, cfg.VIEW_H
+        # M13pS2-crush2b (per-VISPLANE sharing): every column slices ONE shared full-range walk
+        # (rows [0,H), split at CENTERY inside _zidx_band_walk) instead of walking its own window --
+        # the fj side builds each visplane's full-range band list once per frame and clips it per
+        # column at emit time (ceiling = a PREFIX of the list, floor = a SUFFIX). Ceiling prefixes
+        # are bit-identical to per-window walks (same row-0 seed, deterministic march); floor
+        # suffixes take their zidx from the shared CENTERY-seeded half instead of a per-window
+        # fstart seed -- an F4-class <=1-row band-edge shift, re-blessed with the fj consumer.
+        walk_cache: dict = {}
+
+        def full_walk(ph):
+            if ph not in walk_cache:
+                walk_cache[ph] = self._zidx_band_walk(ph, list(range(H)))
+            return walk_cache[ph]
+
         for x in range(W):
             if ceil_hi[x] >= 0:
                 ph = abs((col_ch[x] << 16) - viewz)
                 base = self._flat_base(asset_wad, col_cf[x], flatcache)
                 lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)
-                rows = list(range(0, ceil_hi[x] + 1))
-                for y, z in zip(rows, self._zidx_band_walk(ph, rows)):
+                for y, z in enumerate(full_walk(ph)[:ceil_hi[x] + 1]):
                     fb[y * W + x] = colormap[self.zlight[lvl][z]][base]
             if floor_lo[x] < H:
                 ph = abs((col_fh[x] << 16) - viewz)
                 base = self._flat_base(asset_wad, col_ff[x], flatcache)
                 lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)
-                rows = list(range(floor_lo[x], H))
-                for y, z in zip(rows, self._zidx_band_walk(ph, rows)):
+                for y, z in zip(range(floor_lo[x], H), full_walk(ph)[floor_lo[x]:]):
                     fb[y * W + x] = colormap[self.zlight[lvl][z]][base]
 
     @staticmethod

@@ -42,7 +42,7 @@ E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 # the W1-wall + flat-floor + band-walked-zidx spawn goldens (M13pS2 -- a NEW mode combination; the
 # flat-floor F4 re-bless is folded in, see tests/host/test_floor_planes.py's e1m1 hash note)
 SQUARE_STREAM_GOLDEN = "39e7d42eba95e1bb3587ae0b46f3281f791faeabb70edc0e74826b956c27d631"
-E1M1_STREAM_GOLDEN = "690fb5a5707e3360c0e5518029d1b17561305fbd512525d8367a5ede17d7b5d5"
+E1M1_STREAM_GOLDEN = "229b80e123daa2e57a8e332e53fe6c11d3e7177fc96e347008f0b0dd54552b93"  # crush2b shared-walk floors
 
 
 def _assemble_stream(tmp_path, map_wad, mapname, cfg, asset_wad=None):

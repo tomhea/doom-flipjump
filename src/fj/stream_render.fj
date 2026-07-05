@@ -10,79 +10,111 @@
 // emit_table`; no separate init call needed here).
 
 ns stream {
-    // Walk n RUNTIME band-list entries SEQUENTIALLY (pS2's real per-column band lists vary in length
-    // — this is a genuine runtime loop, not a compile-time unroll, even though pS2's per-column CALL
-    // site is unrolled ×160). `arr` holds n entries of 3 PACKED bytes each (count, cidx-low, cidx-
-    // high — cidx up to 65535 covers the real E1M1 colormap's ~8,192-entry index, D11), back-to-back,
-    // ONE dw-slot per byte (`;value*dw`, the SAME idiom `lut_generator.generate_byte_lut_fj`/
-    // `hex.read_table_byte` use — NOT `hex.vec` register form, which is TWO dw-slots per nibble-pair
-    // and needs 2x the dereferences for the same data, see the trap note below). ONE pointer walks
-    // the whole array via `hex.read_byte_and_inc` (ptr_inc advances exactly one dw-slot per call,
-    // packed or not — memory-model note: a bit/hex/byte all fit in one dw-slot's data bits, so a
-    // packed BYTE read gets 8 data bits per dw-slot vs a nibble read's 4 — half the dereferences for
-    // the same payload). Per-entry cost is ONLY 3 dereferences (1 byte for count + 2 bytes for cidx)
-    // + the two emits, no per-entry index recompute.
-    // ⚠ TRAP #1 (cost ~20min): `hex.read_hex n, dst, ptr` (the STL's own n-nibble multi-read) does
-    // NOT net-advance ptr — its body is `rep(n,i) read_hex_and_inc ...` followed by a compensating
-    // `ptr_sub ptr, n`, i.e. it PEEKS n nibbles at the CURRENT position and restores ptr (by design,
-    // so repeated reads of the same field don't drift). Using it here made every entry re-read the
-    // array's FIRST nibbles forever (byte-exact test caught it immediately — a constant-colour column
-    // instead of the synthetic bands).
-    // ⚠ TRAP #2 (cost ~15min): switching to `read_byte_and_inc` while the DATA was still declared as
-    // `hex.vec` register form (nibble-per-dw-slot) reads garbage — packed-byte reads expect ONE
-    // dw-slot per BYTE (8 data bits), not per nibble (4 data bits); mixing the two encodings is
-    // exactly the register-vs-packed trap the flipjump-dev skill warns about. Fix: declare the array
-    // with `;value*dw` packed-byte ops (see the test's `_band_list_fj`/measure script's `_band_list`).
-    // (v0 of this macro used `hex.ptr_index` per field per entry — MEASURED at ~7.8k ops/run, ~10x
-    // the ~600-900 LS1 estimate, because ptr_index is O(w) per call; v1 (nibble-wise read_hex_and_inc,
-    // register-form data) measured ~3.9k ops/run; this packed-byte version measures ~2.1k ops/run —
-    // see scratchpad/measure_stream_column.py for the full ladder.) Per entry: byte.emit(count) then
-    // cm.emit(colour) — mirrors the pS2 spec's "per band ... byte.emit(...) then cm.emit(...)"
-    // (docs/m13p-procedural-plan.md, the pS section).
-    def emit_band_list arr, n \
-            @ i, ptr, cnt, cidx, loop, body, done, skip {
-        hex.set w/4, ptr, arr
-        hex.zero w/4, i
-      loop:
-        hex.cmp 2, i, n, body, done, done
-      body:
-        hex.read_byte_and_inc cnt, ptr                    // cnt = *ptr (packed byte); ptr += dw
+    // M13pS2-crush2b — emit a PREFIX of a shared FULL-RANGE band list: the first `take_src` rows.
+    // `arr_cell` is a RUNTIME cell (a per-column col array slot) holding the visplane buffer's
+    // ADDRESS (slot 0 = the entry count n, entries from slot 1); the list's counts sum to VIEW_H, so
+    // take<=VIEW_H always exhausts before the list does and n itself is not needed here. take==0
+    // emits nothing and never dereferences the buffer (an UNCLAIMED column's cell is 0).
+    def emit_prefix arr_cell, take_src \
+            @ ptr, cnt, cidx, take, ploop, pemitcnt, pemittake, pdone, pskip {
+        hex.zero 2, take
+        hex.mov 2, take, take_src
+        hex.if0 2, take, pdone
+        hex.mov w/4, ptr, arr_cell                 // the buffer ADDRESS stored per column (mov, R16)
+        hex.read_byte_and_inc cnt, ptr             // consume the n header byte (value unused here)
+      ploop:
+        hex.read_byte_and_inc cnt, ptr
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
+        hex.cmp 2, cnt, take, pemitcnt, pemitcnt, pemittake
+      pemitcnt:                                    // cnt <= take: emit the whole band, continue
         byte.emit cnt
-        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr // cidx = *ptr (2 packed bytes); ptr += 2*dw
         cm.emit cidx
-        hex.inc w/4, i
-        ;loop
-      done:
-        ;skip                                     // skip past the trailing @-local data (lesson #2)
-      i: hex.vec w/4
+        hex.sub 2, take, cnt
+        hex.if0 2, take, pdone
+        ;ploop
+      pemittake:                                   // cnt > take: emit the remaining rows, done
+        byte.emit take
+        cm.emit cidx
+        ;pdone
+      pdone:
+        ;pskip
       ptr: hex.vec w/4
       cnt: hex.vec 2
       cidx: hex.vec 4
-      skip:
+      take: hex.vec 2
+      pskip:
     }
 
-    // One column's 3 windows: ceiling band list [0,cexcl) · ONE wall run [cexcl,fstart) · floor band
-    // list [fstart,H). `cexcl`/`fstart` are 2-nibble RUNTIME registers (pS2 feeds these from pass-1's
-    // per-column arrays, read at a compile-time column address — free). `wall_lit` is the column's W1
-    // wall FINAL palette byte (col_lit, fully baked at Python emit time — light row + mode texel are
-    // both per-seg constants — so the wall run needs NO runtime colormap lookup: `byte.emit`, not
-    // `cm.emit`; M13pS2c). A ZERO-length wall run (an off-screen wall: cexcl==fstart) emits NOTHING —
-    // mid-stream a 0-count pair is merely 2 wasted emits, but on the frame's LAST column a trailing
-    // pair would arrive AFTER the device's width*height pixels completed and leak into command-byte
-    // decode.
-    def emit_column ceil_bands, ceil_n, cexcl, fstart, wall_lit, floor_bands, floor_n \
-            @ wlen, nowall, skip {
-        .emit_band_list ceil_bands, ceil_n
+    // Emit a SUFFIX of a shared FULL-RANGE band list: everything after the first `skip_src` rows
+    // (the list sums to VIEW_H, so the emitted total is exactly VIEW_H - skip with no extra
+    // bookkeeping). A zero buffer address (an UNCLAIMED column) emits nothing.
+    def emit_suffix arr_cell, skip_src \
+            @ ptr, n, i, cnt, cidx, skp, sloop, sbody, sskipall, spartial, semit, scont, sdone, sskip {
+        hex.mov w/4, ptr, arr_cell
+        hex.if0 w/4, ptr, sdone
+        hex.read_byte_and_inc n, ptr               // the entry count
+        hex.zero 2, skp
+        hex.mov 2, skp, skip_src
+        hex.zero 2, i
+      sloop:
+        hex.cmp 2, i, n, sbody, sdone, sdone
+      sbody:
+        hex.read_byte_and_inc cnt, ptr
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
+        hex.if0 2, skp, semit                      // done skipping -> emit the whole band
+        hex.cmp 2, skp, cnt, spartial, sskipall, sskipall
+      sskipall:                                    // skip >= cnt: this band is entirely above the window
+        hex.sub 2, skp, cnt
+        ;scont
+      spartial:                                    // 0 < skip < cnt: emit the band's remainder
+        hex.sub 2, cnt, skp
+        hex.zero 2, skp
+      semit:
+        byte.emit cnt
+        cm.emit cidx
+      scont:
+        hex.inc 2, i
+        ;sloop
+      sdone:
+        ;sskip
+      ptr: hex.vec w/4
+      n: hex.vec 2
+      i: hex.vec 2
+      cnt: hex.vec 2
+      cidx: hex.vec 4
+      skp: hex.vec 2
+      sskip:
+    }
+
+    // One column's 3 windows over the SHARED per-visplane full-range lists (M13pS2-crush2b):
+    // ceiling = the ceiling visplane list's PREFIX [0, min(cexcl, fstart)) — the min gives the
+    // oracle's floor-wins semantics on (theoretical) off-screen-sentinel overlap columns — then ONE
+    // wall run [cexcl', fstart), then floor = the floor visplane list's SUFFIX [fstart, VIEW_H).
+    // `cbuf_cell`/`fbuf_cell` are per-column col-array cells holding the visplane buffer addresses;
+    // `wall_lit` is the column's W1 wall FINAL palette byte (baked at Python emit time). A
+    // ZERO-length wall run emits NOTHING — mid-stream a 0-count pair is merely 2 wasted emits, but
+    // on the frame's LAST column a trailing pair would arrive AFTER the device's width*height pixels
+    // completed and leak into command-byte decode.
+    def emit_column cbuf_cell, cexcl, fstart, wall_lit, fbuf_cell \
+            @ wlen, ctake, cclamp, cok, nowall, skip {
+        hex.zero 2, ctake
+        hex.mov 2, ctake, cexcl
+        hex.cmp 2, ctake, fstart, cok, cok, cclamp   // ctake = min(cexcl, fstart)
+      cclamp:
+        hex.mov 2, ctake, fstart
+      cok:
+        .emit_prefix cbuf_cell, ctake
         hex.zero 2, wlen
         hex.mov 2, wlen, fstart
-        hex.sub 2, wlen, cexcl                    // wlen = fstart - cexcl (the ONE wall run's length)
+        hex.sub 2, wlen, ctake                    // wlen = fstart - ctake (>= 0 by the clamp)
         hex.if0 2, wlen, nowall
         byte.emit wlen
         byte.emit wall_lit
       nowall:
-        .emit_band_list floor_bands, floor_n
+        .emit_suffix fbuf_cell, fstart
         ;skip
       wlen: hex.vec 2
+      ctake: hex.vec 2
       skip:
     }
 }

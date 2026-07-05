@@ -224,6 +224,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
 
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
+    # M13pS2-crush2b: per-seg VISPLANE ids -- segs sharing (plane height, light, flat base) share ONE
+    # full-range band list per frame (built on first claim, sliced per column at emit). Keyed on the
+    # BAKED triple (planeheight derives from height+runtime viewz identically for equal heights).
+    cvp_ids: dict = {}
+    fvp_ids: dict = {}
 
     def subsector_action(s):
         ss = cmap.subsectors[s]
@@ -270,6 +275,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 # M13pS2c: the W1 wall's lit colour is fully constant (one texel, one light row) --
                 # bake the FINAL palette byte at Python emit time (no runtime colormap lookup at all).
                 fields.append(("seg_lit", 2, colormap[lrow(ssec.light)][combined[tb]]))
+                # M13pS2-crush2b: the seg's ceiling/floor visplane indices (shared band lists)
+                ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex))
+                fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex))
+                fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
+                fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
             xorby_blocks[si] = _seg_xorby_block(si, fields)
             out += _seg_xorby_use(si)
         return out
@@ -284,6 +294,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
         "hex.zero 2, n_drawn", "hex.zero 1, full",   # M13opt-P1: reset the drawn-column counter + full flag per frame
     ]
+    if raster_mode == "stream":
+        # M13pS2-crush2b: per-frame reset of the visplane built-flags (compile-time-unrolled zeroing)
+        pass1 += [f"rep({max(1, len(cvp_ids))}, v) hex.zero 1, vpc_flags + v*dw",
+                  f"rep({max(1, len(fvp_ids))}, v) hex.zero 1, vpf_flags + v*dw"]
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
     else:
@@ -312,9 +326,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # DMA decode); one unrolled emit_column per screen column, every col_* read at a compile-time
     # address. Replaces update_screen_reg + the whole fb/pass-2/plane-pass raster.
     present_tail = (["present.begin_frame_stream",
-                     *(f"stream.emit_column col_ceil_bands + {BAND_STRIDE * x}*dw, col_ceil_n + {8 * x}*dw, "
-                       f"col_cexcl + {8 * x}*dw, col_fstart + {8 * x}*dw, col_lit + {8 * x}*dw, "
-                       f"col_floor_bands + {BAND_STRIDE * x}*dw, col_floor_n + {8 * x}*dw"
+                     *(f"stream.emit_column col_cbands + {8 * x}*dw, col_cexcl + {8 * x}*dw, "
+                       f"col_fstart + {8 * x}*dw, col_lit + {8 * x}*dw, col_fbands + {8 * x}*dw"
                        for x in range(cfg.VIEW_W))]
                     if stream else ["present.update_screen_reg framebuffer"])
     fb_leaves = [] if stream else [                      # the fb-raster shared leaves -- stream emits none of them
@@ -384,31 +397,37 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
-        *(_stream_mode_decls(cfg) if raster_mode == "stream" else []),
+        *(_stream_mode_decls(cfg, max(1, len(cvp_ids)), max(1, len(fvp_ids)))
+          if raster_mode == "stream" else []),
         tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
         yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
     ])
     return main
 
 
-def _stream_mode_decls(cfg) -> list[str]:
-    """M13pS2c: the raster_mode="stream" per-column band-list storage + the shared band-building leaves'
-    scratch registers. `col_ceil_bands`/`col_floor_bands` are ONE flat packed-byte buffer per region,
-    VIEW_W*BAND_STRIDE entries; column x's slice starts at byte-slot x*BAND_STRIDE, i.e. RAW ADDRESS
-    offset x*BAND_STRIDE*dw (one packed byte per dw-slot -- the fj leaf's `hex.mul_const` must include
-    the *dw, and the test-side readback mirrors it as `col_*_bands + BAND_STRIDE*x*dw`)."""
-    packed_zeros = "\n".join(";0 * dw" for _ in range(cfg.VIEW_W * BAND_STRIDE))
+def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
+    """M13pS2-crush2b: the raster_mode="stream" per-VISPLANE band storage + the shared band-building
+    leaves' scratch registers. Each of the map's nvpc ceiling / nvpf floor visplanes gets ONE
+    full-range packed-byte buffer (slot 0 = the entry count n, then up to MAX_BANDS 3-byte entries)
+    built at most once per frame (`vpc_flags`/`vpf_flags`, reset in pass-1); each claimed column
+    stores its planes' buffer ADDRESSES in `col_cbands`/`col_fbands` and the emit pass slices the
+    shared lists (prefix/suffix)."""
+    vp_slots = 1 + 3 * MAX_BANDS
+    vpc_zeros = "\n".join(";0 * dw" for _ in range(nvpc * vp_slots))
+    vpf_zeros = "\n".join(";0 * dw" for _ in range(nvpf * vp_slots))
     return [
         "seg_lit: hex.vec 2",                          # M13pS2c: the W1 wall's fully-baked constant lit byte
+        "seg_cvpidx: hex.vec 8", "seg_fvpidx: hex.vec 8",   # crush2b: the seg's visplane indices (baked)
         f"col_lit: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_ceil_n: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_floor_n: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_ceil_bands:\n{packed_zeros}", f"col_floor_bands:\n{packed_zeros}",
+        f"col_cbands: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_fbands: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+        f"vpc_flags: rep({nvpc}, i) hex.vec 1, 0", f"vpf_flags: rep({nvpf}, i) hex.vec 1, 0",
+        f"vpc_bufs:\n{vpc_zeros}", f"vpf_bufs:\n{vpf_zeros}",
         "bb_ph: hex.vec 8", "bb_light: hex.vec 2", "bb_base: hex.vec 2", "bb_y0: hex.vec 2",
         "bb_count: hex.vec 2", "bb_ascending: hex.vec 2", "bb_arr: hex.vec w/4", "bb_n: hex.vec 2",
         "bb_recip_ph: hex.vec 8", "bb_recip_out: hex.vec 8",   # plane.recip32's own I/O globals
         "plane_recip_ret: ;0", "plane_band_ret: ;0",
         "recip32_leaf: plane.recip32", "build_bands_leaf: plane.build_bands",
-        # M13pS2-crush2: build_bands walks yslope through ONE incrementing packed-byte pointer
+        # M13pS2-crush2a: build_bands walks yslope through ONE incrementing packed-byte pointer
         # (3 bytes/row) instead of a per-row read_table 8 -- the packed twin of the 8-nib table.
         generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H),
     ]

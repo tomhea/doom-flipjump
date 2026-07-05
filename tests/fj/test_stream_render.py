@@ -1,7 +1,9 @@
-"""M13pS1 -- the one-column stream-emitter prototype: a SYNTHETIC column (fixed ceiling/floor band
-lists + one wall run) through the REAL `stream.emit_column` body (src/fj/stream_render.fj), decoded
-by the real device (StreamScreen) and checked byte-exact against an independently Python-computed
-column. No pass-1/LS2 wiring yet (that's pS2) -- this only proves + measures the emitter mechanism.
+"""M13pS1/pS2-crush2b -- the one-column stream-emitter prototype: a SYNTHETIC column through the
+REAL `stream.emit_column` body (src/fj/stream_render.fj -- the crush2b PREFIX/SUFFIX clip over
+shared FULL-RANGE band lists), decoded by the real device (StreamScreen) and checked byte-exact
+against an independently Python-computed column. The ceiling list carries a below-cexcl filler band
+(prefix-clipped away) and the floor list an above-fstart filler band (suffix-skipped) -- proving the
+clip logic, not just the happy path.
 """
 from pathlib import Path
 
@@ -45,11 +47,11 @@ def _expected_column(wad: WadFile):
 
 
 def _band_list_fj(label, bands):
-    """`bands` entries as 3 PACKED bytes each (count, cidx-low, cidx-high), read by
-    stream.emit_band_list via hex.read_byte_and_inc -- NOT hex.vec register form (that's 2*dw apart
-    per nibble; packed bytes are ONE dw apart, one full byte's data bits per op -- see
-    doomfj.lut_generator.generate_byte_lut_fj / hex.read_table_byte for the same `;value*dw` idiom)."""
-    lines = [f"{label}:"]
+    """A crush2b FULL-RANGE visplane buffer: slot 0 = the entry count n (one packed byte), then 3
+    PACKED bytes per entry (count, cidx-low, cidx-high), read by stream.emit_prefix/emit_suffix via
+    hex.read_byte_and_inc -- NOT hex.vec register form (packed bytes are ONE dw apart, one full
+    byte's data bits per op, the `;value*dw` idiom)."""
+    lines = [f"{label}:", f"  ;{len(bands)} * dw"]
     for rows, light, colour in bands:
         cidx = _cidx(light, colour)
         lines.append(f"  ;{rows} * dw")
@@ -62,14 +64,19 @@ def _emit_data_fj(wad: WadFile):
     cexcl = sum(r for r, _, _ in CEIL_BANDS)
     fstart = cexcl + WALL_ROWS
     wall_lit = wad.colormap()[WALL_LIGHT][WALL_COLOUR]   # the FINAL lit byte, baked host-side (pS2c:
+    # FULL-RANGE lists (each sums to HEIGHT): the ceiling list gains a filler band BELOW cexcl (the
+    # prefix clip must drop it) and the floor list a filler band ABOVE fstart (the suffix must skip
+    # it) -- so the test proves the clip logic, not just the happy path.
+    ceil_full = CEIL_BANDS + [(HEIGHT - cexcl, 31, 99)]
+    floor_full = [(fstart, 30, 77)] + FLOOR_BANDS
     return "\n".join([                                   # col_lit -- the wall run is byte.emit, no cm lookup)
-        _band_list_fj("ceil_bands", CEIL_BANDS),
-        _band_list_fj("floor_bands", FLOOR_BANDS),
+        _band_list_fj("ceil_bands", ceil_full),
+        _band_list_fj("floor_bands", floor_full),
         f"cexcl: hex.vec 2, {cexcl}",
         f"fstart: hex.vec 2, {fstart}",
         f"wall_lit: hex.vec 2, {wall_lit}",
-        f"ceil_n: hex.vec 2, {len(CEIL_BANDS)}",
-        f"floor_n: hex.vec 2, {len(FLOOR_BANDS)}",
+        "cbuf_cell: hex.vec 8, ceil_bands",
+        "fbuf_cell: hex.vec 8, floor_bands",
     ])
 
 
@@ -84,7 +91,7 @@ def _assemble_and_run_one_column(tmp_path, wad: WadFile):
         "stl.startup_and_init_all",
         "present.init_screen_stream 0",
         "present.begin_frame_stream",
-        "stream.emit_column ceil_bands, ceil_n, cexcl, fstart, wall_lit, floor_bands, floor_n",
+        "stream.emit_column cbuf_cell, cexcl, fstart, wall_lit, fbuf_cell",
         "stl.loop",
         _emit_data_fj(wad),
         byte_table,

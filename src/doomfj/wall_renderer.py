@@ -15,7 +15,7 @@ from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
-    generate_emit_dispatch_table_fj,
+    generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj,
 )
 from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import bake_bsp, _bsp_as_code, seg_affine_coeffs
@@ -408,4 +408,7 @@ def _stream_mode_decls(cfg) -> list[str]:
         "bb_recip_ph: hex.vec 8", "bb_recip_out: hex.vec 8",   # plane.recip32's own I/O globals
         "plane_recip_ret: ;0", "plane_band_ret: ;0",
         "recip32_leaf: plane.recip32", "build_bands_leaf: plane.build_bands",
+        # M13pS2-crush2: build_bands walks yslope through ONE incrementing packed-byte pointer
+        # (3 bytes/row) instead of a per-row read_table 8 -- the packed twin of the 8-nib table.
+        generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H),
     ]

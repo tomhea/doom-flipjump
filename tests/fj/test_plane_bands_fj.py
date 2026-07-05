@@ -9,7 +9,7 @@ import flipjump as fj
 
 from doomfj.harness import W
 from doomfj.lut_generator import (
-    generate_slopediv_recip_lut_fj, generate_yslope_lut_fj, generate_zlight_lut_fj,
+    generate_slopediv_recip_lut_fj, generate_yslope_packed_lut_fj, generate_zlight_lut_fj,
 )
 from doomfj.reference_model import COLORMAP_LIGHTS, ReferenceModel
 from doomfj.config import Config
@@ -113,7 +113,7 @@ def _build_bands_program(cases):
         "dzrow: hex.vec 2",
         "recip32_leaf: plane.recip32", "build_bands_leaf: plane.build_bands",
         generate_slopediv_recip_lut_fj("slopediv_recip"),
-        generate_yslope_lut_fj("yslope", Config().VIEW_W, Config().VIEW_H),
+        generate_yslope_packed_lut_fj("yslope_packed", Config().VIEW_W, Config().VIEW_H),
         generate_zlight_lut_fj("zlight", Config().VIEW_W, COLORMAP_LIGHTS),
     ]
     return body, data

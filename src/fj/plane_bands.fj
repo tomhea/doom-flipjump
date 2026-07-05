@@ -59,13 +59,16 @@ ns plane {
     // cm-index `zrow<<8|base` decomposes into exactly these two bytes, so no combine is needed here).
     // @requires hex.init & stl.ptr_init.
     def build_bands \
-            @ i, y, ys, zidx, step, threshold_hi, threshold_lo, zidx8, lvl, zlbase, zlidx, zrow, \
+            @ i, ys, ysptr, y0w, yadv, zidx, step, threshold_hi, threshold_lo, thi6, tlo6, cFFF6, \
+              zidx8, lvl, zlbase, zlidx, zrow, \
               cur_zrow, runlen, ptr, c127, dist, moved, \
-              empty, phzero, seed, seedclamp, seedok, bloop, bbody, ascloop, ascmaybe, ascbump, ascstop, \
+              empty, phzero, seed, seedclamp, seedok, chi_gt, chi_ok, chi_done, clo_gt, clo_ok, clo_done, \
+              bhi_gt, bhi_ok, ascbump2, blo_gt, blo_ok, descbump2, \
+              bloop, bbody, ascloop, ascmaybe, ascbump, ascstop, \
               descloop, descmaybe, descbump, descstop, classify, samezidx, diffzidx, cont2, \
               flush_final, writeentry, done \
             < bb_ph, bb_light, bb_base, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, \
-              bb_recip_ph, bb_recip_out, yslope, zlight, recip32_leaf, plane_recip_ret, \
+              bb_recip_ph, bb_recip_out, yslope_packed, zlight, recip32_leaf, plane_recip_ret, \
               plane_band_ret {
         hex.zero 2, bb_n
         hex.if0 2, bb_count, empty
@@ -93,10 +96,17 @@ ns plane {
         ;done
 
       seed:                                          // exact zidx at row y0 (mirrors plane.draw_pixel)
-        hex.zero 2, y
-        hex.mov 2, y, bb_y0
-        hex.read_table 8, ys, yslope, 2, y
-        hex.fixed_mul 8, 4, dist, bb_ph, ys
+        // the yslope walk: ONE incrementing packed-byte pointer over yslope_packed (3 bytes/row,
+        // little-endian, 6 nibbles -- max real yslope is 0xA00000). MEASURED: the old per-row
+        // `hex.read_table 8` re-derived the full pointer every row at ~10k of the ~12.6k ops/row;
+        // 3x read_byte_and_inc through a running pointer is ~4-7x cheaper (R14's array-walk lesson).
+        hex.set w/4, ysptr, yslope_packed
+        hex.zero w/4, y0w
+        hex.mov 2, y0w, bb_y0
+        hex.mul_const w/4, yadv, y0w, 3*dw
+        hex.add w/4, ysptr, yadv                        // ysptr -> yslope_packed[y0]
+        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys[0:6] = yslope[y0]; ptr -> y0+1
+        hex.fixed_mul 8, 4, dist, bb_ph, ys             // ys[6:8] stay zero-init (R11-safe wide read)
         hex.shr_hex 8, 5, dist
         hex.set 3, c127, 127
         hex.zero 3, zidx
@@ -115,33 +125,57 @@ ns plane {
         hex.mul 8, threshold_lo, step, zidx8            // threshold_lo = step*zidx
         hex.mov 8, threshold_hi, threshold_lo           // threshold_hi = step*(zidx+1) = lo + step
         hex.add 8, threshold_hi, step                   //   (one hex.mul saved per call)
+        // the per-row compares run at 6 NIBBLES against CLAMPED copies of the thresholds: ys is at
+        // most 0xA00000 < 0xFFFFFF, so min(threshold, 0xFFFFFF) preserves EVERY comparison outcome
+        // (a true threshold above 2^24 compares the same as 0xFFFFFF against any real ys), and the
+        // clamped copies only need refreshing when a bump changes the threshold -- rare, vs the
+        // per-row compare. Byte-identical to comparing the full-width thresholds.
+        hex.set 8, cFFF6, 0xFFFFFF
+        hex.cmp 8, threshold_hi, cFFF6, chi_ok, chi_ok, chi_gt
+      chi_gt:
+        hex.set 6, thi6, 0xFFFFFF
+        ;chi_done
+      chi_ok:
+        hex.mov 6, thi6, threshold_hi
+      chi_done:
+        hex.cmp 8, threshold_lo, cFFF6, clo_ok, clo_ok, clo_gt
+      clo_gt:
+        hex.set 6, tlo6, 0xFFFFFF
+        ;clo_done
+      clo_ok:
+        hex.mov 6, tlo6, threshold_lo
+      clo_done:
         hex.mul_const 3, zlbase, lvl, 128               // zlbase = lvl*128 -- CALL-invariant, hoisted
         hex.mov 3, zlidx, zlbase                        //   out of the per-row classify (R12)
         hex.add 3, zlidx, zidx
         hex.read_table 2, cur_zrow, zlight, 3, zlidx    // seed cur_zrow = zlight[lvl*128+zidx]
-        hex.set 3, c127, 127                            // hoisted out of ascloop (was re-set per check)
         // row y0 is classified AT the seed (runlen=1) and the loop starts at the SECOND row --
         // mirroring the host `_zidx_band_walk` exactly (out=[seed]; walk only rows[1:]). Walking row
         // y0 too (the old shape) also risked a spurious first-row bump whenever the approximate
         // threshold undercuts the exact seed's own yslope.
         hex.set 2, runlen, 1
         hex.set 2, i, 1
-        hex.mov 2, y, bb_y0
-        hex.inc 2, y
 
       bloop:
         hex.cmp 2, i, bb_count, bbody, flush_final, flush_final
       bbody:
-        hex.read_table 8, ys, yslope, 2, y
+        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys = yslope[y]; ptr -> next row
         hex.zero 1, moved                               // did the walk move zidx THIS row?
         hex.if0 2, bb_ascending, descloop
       ascloop:
         hex.cmp 3, zidx, c127, ascmaybe, ascstop, ascstop
       ascmaybe:
-        hex.cmp 8, ys, threshold_hi, ascstop, ascbump, ascbump
+        hex.cmp 6, ys, thi6, ascstop, ascbump, ascbump
       ascbump:
         hex.inc 3, zidx
         hex.add 8, threshold_hi, step
+        hex.cmp 8, threshold_hi, cFFF6, bhi_ok, bhi_ok, bhi_gt   // refresh the clamped compare copy
+      bhi_gt:
+        hex.set 6, thi6, 0xFFFFFF
+        ;ascbump2
+      bhi_ok:
+        hex.mov 6, thi6, threshold_hi
+      ascbump2:
         hex.set 1, moved, 1
         ;ascloop
       ascstop:
@@ -149,10 +183,17 @@ ns plane {
       descloop:
         hex.if0 3, zidx, descstop
       descmaybe:
-        hex.cmp 8, ys, threshold_lo, descbump, descstop, descstop
+        hex.cmp 6, ys, tlo6, descbump, descstop, descstop
       descbump:
         hex.dec 3, zidx
         hex.sub 8, threshold_lo, step
+        hex.cmp 8, threshold_lo, cFFF6, blo_ok, blo_ok, blo_gt   // refresh the clamped compare copy
+      blo_gt:
+        hex.set 6, tlo6, 0xFFFFFF
+        ;descbump2
+      blo_ok:
+        hex.mov 6, tlo6, threshold_lo
+      descbump2:
         hex.set 1, moved, 1
         ;descloop
       descstop:
@@ -176,7 +217,6 @@ ns plane {
         ;writeentry
       cont2:
         hex.inc 2, i
-        hex.inc 2, y
         ;bloop
 
       writeentry:
@@ -202,12 +242,17 @@ ns plane {
         stl.fret plane_band_ret
 
       i: hex.vec 2
-      y: hex.vec 2
       ys: hex.vec 8
+      ysptr: hex.vec w/4
+      y0w: hex.vec w/4
+      yadv: hex.vec w/4
       zidx: hex.vec 3
       step: hex.vec 8
       threshold_hi: hex.vec 8
       threshold_lo: hex.vec 8
+      thi6: hex.vec 6
+      tlo6: hex.vec 6
+      cFFF6: hex.vec 8
       zidx8: hex.vec 8
       lvl: hex.vec 3
       zlbase: hex.vec 3

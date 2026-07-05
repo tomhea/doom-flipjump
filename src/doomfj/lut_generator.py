@@ -161,6 +161,22 @@ def generate_yslope_lut_fj(label: str, view_w: int, view_h: int) -> str:
     return generate_lut_fj(label, yslope_table(view_w, view_h), 8)
 
 
+def generate_yslope_packed_lut_fj(label: str, view_w: int, view_h: int) -> str:
+    """M13pS2-crush2: yslope as PACKED BYTES -- 3 bytes (little-endian, 6 nibbles; max real value
+    0xA00000) per screen row, one dw-slot per byte (the `;value*dw` idiom) -- so `plane.build_bands`
+    walks the rows with a SINGLE incrementing pointer (3x `hex.read_byte_and_inc` per row) instead of
+    a per-row `hex.read_table 8` that re-derives the full pointer each row (MEASURED at ~10k of the
+    old ~12.6k ops/row -- the band walk's dominant cost). Same `tables.yslope_table` values (R6
+    SSOT) as the 8-nibble `read_table` variant above."""
+    vals = yslope_table(view_w, view_h)
+    lines = [f"{label}:"]
+    for v in vals:
+        assert 0 <= v < (1 << 24), f"yslope {v:#x} exceeds 3 packed bytes"
+        for k in range(3):
+            lines.append(f";{(v >> (8 * k)) & 0xFF} * dw")
+    return "\n".join(lines)
+
+
 def generate_distscale_lut_fj(label: str, view_w: int, trig_n: int) -> str:
     """distscale (R_MapPlane: screen column -> 1/|cos| fisheye, 16.16, 8 nibbles), view_w entries. Values
     from `tables.distscale_table` (all positive). `length = FixedMul(distance, distscale[x1])` seeds the

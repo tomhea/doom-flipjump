@@ -282,9 +282,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
             xorby_blocks[si] = _seg_xorby_block(si, fields)
             out += _seg_xorby_use(si)
+        if raster_mode == "stream":
+            # M13pG1: skip the whole action (incl. every seg's xorby SET/CLEAR pair) once the screen
+            # is full -- the leaf would fret per seg anyway, but the involution flips aren't free.
+            out = ([f"    hex.if0 1, full, e1sact{cid}", f"    ;e1sskip{cid}", f"  e1sact{cid}:"]
+                   + out + [f"  e1sskip{cid}:"])
         return out
 
-    bsp = _bsp_as_code(_pfx(mapname), cmap, done_label="bsp_done", subsector_action=subsector_action)
+    bsp = _bsp_as_code(_pfx(mapname), cmap, done_label="bsp_done", subsector_action=subsector_action,
+                       full_abort_label="full" if raster_mode == "stream" else None)   # M13pG1 (stream only)
     xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (once)
 
     pass1 = [

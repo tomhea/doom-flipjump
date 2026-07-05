@@ -49,7 +49,7 @@ ns stream {
     // (the list sums to VIEW_H, so the emitted total is exactly VIEW_H - skip with no extra
     // bookkeeping). A zero buffer address (an UNCLAIMED column) emits nothing.
     def emit_suffix arr_cell, skip_src \
-            @ ptr, n, i, cnt, cidx, skp, sloop, sbody, sskipall, spartial, semit, scont, sdone, sskip {
+            @ ptr, n, i, cnt, cidx, skp, sloop, sbody, sskipall, spartial, sread, scont, sdone, sskip {
         hex.mov w/4, ptr, arr_cell
         hex.if0 w/4, ptr, sdone
         hex.read_byte_and_inc n, ptr               // the entry count
@@ -60,16 +60,17 @@ ns stream {
         hex.cmp 2, i, n, sbody, sdone, sdone
       sbody:
         hex.read_byte_and_inc cnt, ptr
-        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
-        hex.if0 2, skp, semit                      // done skipping -> emit the whole band
+        hex.if0 2, skp, sread                      // done skipping -> read the colour + emit the band
         hex.cmp 2, skp, cnt, spartial, sskipall, sskipall
-      sskipall:                                    // skip >= cnt: this band is entirely above the window
-        hex.sub 2, skp, cnt
+      sskipall:                                    // skip >= cnt: the band is entirely above the window --
+        hex.sub 2, skp, cnt                        // HOP its 2 colour bytes without the (expensive)
+        hex.ptr_add ptr, 2                         // pointer READS (the skip-scan dominated the emit cost)
         ;scont
       spartial:                                    // 0 < skip < cnt: emit the band's remainder
         hex.sub 2, cnt, skp
         hex.zero 2, skp
-      semit:
+      sread:
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
         byte.emit cnt
         cm.emit cidx
       scont:

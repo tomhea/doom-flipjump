@@ -183,7 +183,7 @@ def compile_geometry_streams(wad, mapname: str) -> str:
 
 
 def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
-                 subsector_action=None) -> str:
+                 subsector_action=None, full_abort_label: str = None) -> str:
     """BSP-as-code (opt #7): emit the front-to-back BSP walk as fj CODE. Each node becomes a code block
     whose partition line is baked as compile-time constants, so the side test is `proj.point_on_side`
     (no per-node stream read). The block visits the NEAR child subtree first (the side the viewer is on),
@@ -233,6 +233,10 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
     # twice (SET + CLEAR); {L}_xbret is its shared fcall/fret return reg (dead after each fret, like pos_ret).
     for i, n in enumerate(bsp.nodes):
         lines.append(f"{L}_n{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
+        if full_abort_label:                               # M13pG1: the screen is full -> the whole subtree
+            lines.append(f"    hex.if0 1, {full_abort_label}, {L}_go{i}")   # paints nothing (front-to-back
+            lines.append(f"    stl.fret {L}_r{i}")         # occlusion) -> prune it. Byte-exact: the per-seg
+            lines.append(f"{L}_go{i}:")                    # leaf would have fret'd on `full` for every seg.
         lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
         lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
         lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # CLEAR (vals -> 0, the xor involution)

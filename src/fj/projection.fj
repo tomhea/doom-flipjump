@@ -902,24 +902,76 @@ ns proj {
       end:
     }
 
-    // proj.point_on_side_leaf back, vx, vy, cpx, cpy, cdx, cdy, pos_ret — the REGISTER form of
-    //   point_on_side for the BSP-as-code shared fcall leaf (mantra #9): the heavy side math is emitted
-    //   ONCE at a global label and fcall'd per node, NOT unrolled per node (unrolling 681× blew up the
-    //   E1M1 assemble — the two hex.mul 10 dominate). The node's partition (cpx,cpy,cdx,cdy) and the
-    //   viewer (vx,vy) are 10-nibble two's-complement REGISTERS the caller sets before the fcall; this
-    //   writes back(0/1) to `back` and returns via stl.fret pos_ret. Same math/precision as
-    //   point_on_side (40-bit signed cross product; signed -> hex.scmp / hex.mul, R5). @requires hex.init.
-    def point_on_side_leaf back, vx, vy, cpx, cpy, cdx, cdy, pos_ret \
-            @ dxv, dyv, p1, p2, czero, setback, front, end {
+    // proj.point_on_side_leaf back, vx, vy, cpx, cpy, cdx_mag, cdy_mag, sign_dx, sign_dy, pos_ret —
+    //   the REGISTER form of point_on_side for the BSP-as-code shared fcall leaf (mantra #9): the heavy
+    //   side math is emitted ONCE at a global label and fcall'd per node, NOT unrolled per node
+    //   (unrolling 681x blew up the E1M1 assemble). The node's near point (cpx,cpy) is still a 10-nibble
+    //   two's-complement REGISTER (it feeds a further signed subtract against the viewer), but the
+    //   partition DIRECTION (dx,dy) never re-enters a subtract — only a product — so M13-possignmag
+    //   bakes it as an 8-nibble zero-extended MAGNITUDE (cdx_mag/cdy_mag) + a 1-nibble sign flag
+    //   (sign_dx/sign_dy, 1 iff the original dx/dy was negative). side = dx*(vy-py) - dy*(vx-px) > 0 ->
+    //   back; writing it as signA*|dx|*|dyv| - signB*|dy|*|dxv| (signA = sign(dx)^sign(dyv), signB =
+    //   sign(dy)^sign(dxv), both XORs of a baked bit with a runtime hex.sign test) turns the two
+    //   hex.mul_lo 10 signed cross-products into two hex.mul_lo 8 UNSIGNED magnitude products (int16 map
+    //   coords -> every difference/delta magnitude fits 5 nibbles, product fits 8 -- no overflow) plus a
+    //   4-way sign-pair dispatch that replaces the final signed subtract+compare with a single unsigned
+    //   hex.cmp 8 (or no compare at all in the two single-sign cases). Exact: same true integer sign,
+    //   no mod-16^n wraparound anywhere. cdx_mag/cdy_mag as the mul_lo 'b' operand additionally gets
+    //   fixed_mul_lo.row's built-in zero-digit skip on their always-zero high nibbles for free.
+    //   Writes back(0/1) to `back` and returns via stl.fret pos_ret. @requires hex.init.
+    def point_on_side_leaf back, vx, vy, cpx, cpy, cdx_mag, cdy_mag, sign_dx, sign_dy, pos_ret \
+            @ dyv_neg, dyv_pos, dyv_done, dxv_neg, dxv_pos, dxv_done, \
+              a0, a1, cmp_pp, mixed01, chk_p2, cmp_pp2, setback, front, end, \
+              dxv, dyv, dxv_mag, dyv_mag, sign_dxv, sign_dyv, signA, signB, p1, p2 {
         hex.mov 10, dxv, vx
-        hex.sub 10, dxv, cpx              // dxv = vx - px   (signed)
+        hex.sub 10, dxv, cpx              // dxv = vx - px   (signed, 10-nib -- unchanged width)
         hex.mov 10, dyv, vy
         hex.sub 10, dyv, cpy              // dyv = vy - py
-        hex.mul_lo 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
-        hex.mul_lo 10, p2, cdy, dxv          // p2 = dy*(vx-px)
-        hex.sub 10, p1, p2                // side = dx*(vy-py) - dy*(vx-px)
-        hex.set 10, czero, 0
-        hex.scmp 10, p1, czero, front, front, setback   // <0 & ==0 -> front(0); >0 -> back(1)
+
+        hex.sign 10, dyv, dyv_neg, dyv_pos
+      dyv_neg:
+        hex.set 1, sign_dyv, 1
+        hex.neg 5, dyv                     // magnitude fits 5 nibbles (int16 coords => diff <= 65535);
+        ;dyv_done                          // negating only the low 5 nibbles == the true magnitude
+      dyv_pos:                             // (two's-complement truncation identity)
+        hex.set 1, sign_dyv, 0
+      dyv_done:
+        hex.zero 8, dyv_mag
+        hex.mov 5, dyv_mag, dyv
+
+        hex.sign 10, dxv, dxv_neg, dxv_pos
+      dxv_neg:
+        hex.set 1, sign_dxv, 1
+        hex.neg 5, dxv
+        ;dxv_done
+      dxv_pos:
+        hex.set 1, sign_dxv, 0
+      dxv_done:
+        hex.zero 8, dxv_mag
+        hex.mov 5, dxv_mag, dxv
+
+        hex.mul_lo 8, p1, dyv_mag, cdx_mag   // p1 = |dx|*|dyv|
+        hex.mul_lo 8, p2, dxv_mag, cdy_mag   // p2 = |dy|*|dxv|
+
+        hex.mov 1, signA, sign_dx
+        hex.xor 1, signA, sign_dyv          // signA = sign(dx*dyv)
+        hex.mov 1, signB, sign_dy
+        hex.xor 1, signB, sign_dxv          // signB = sign(dy*dxv)
+
+        hex.if 1, signA, a0, a1
+      a0:                                    // signA==0 (p1 contributes +|p1|)
+        hex.if 1, signB, cmp_pp, mixed01
+      cmp_pp:                               // (+,+): side = |p1|-|p2| -> back = p1>p2
+        hex.cmp 8, p1, p2, front, front, setback
+      mixed01:                              // (+,-): side = |p1|+|p2| -> back unless both zero
+        hex.if 8, p1, chk_p2, setback
+      chk_p2:
+        hex.if 8, p2, front, setback
+      a1:                                    // signA==1 (p1 contributes -|p1|)
+        hex.if 1, signB, front, cmp_pp2      // (-,+): side = -|p1|-|p2| <= 0 -> always front
+      cmp_pp2:                              // (-,-): side = |p2|-|p1| -> back = p2>p1 (p1<p2)
+        hex.cmp 8, p1, p2, setback, front, front
+
       setback:
         hex.set 2, back, 1
         ;end
@@ -930,8 +982,13 @@ ns proj {
 
       dxv: hex.vec 10
       dyv: hex.vec 10
-      p1: hex.vec 10
-      p2: hex.vec 10
-      czero: hex.vec 10
+      dxv_mag: hex.vec 8
+      dyv_mag: hex.vec 8
+      sign_dxv: hex.vec 1
+      sign_dyv: hex.vec 1
+      signA: hex.vec 1
+      signB: hex.vec 1
+      p1: hex.vec 8
+      p2: hex.vec 8
     }
 }

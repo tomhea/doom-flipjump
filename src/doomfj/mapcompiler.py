@@ -222,7 +222,7 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
     if bsp.nodes:
         lines.append(f"{L}_pos_leaf:")
         lines.append(f"    proj.point_on_side_leaf {L}_side, vx, vy, "
-                     f"{L}_cpx, {L}_cpy, {L}_cdx, {L}_cdy, {L}_pos_ret")
+                     f"{L}_cpx, {L}_cpy, {L}_cdx_mag, {L}_cdy_mag, {L}_sign_dx, {L}_sign_dy, {L}_pos_ret")
 
     # one code block per node: SET the partition consts (M12qq: via xor_by + xor-involution self-zeroing,
     # NOT hex.set -- the per-node hex.set 10 each paid an @-dispatch to zero a reg it overwrites; xor_by has
@@ -251,14 +251,23 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
         lines.append(f"{L}_xb{i}:    // the node's partition-const xor_by block (emitted once, fcall'd SET+CLEAR)")
         lines.append(f"    hex.xor_by 10, {L}_cpx, {n.x & MASK40}")
         lines.append(f"    hex.xor_by 10, {L}_cpy, {n.y & MASK40}")
-        lines.append(f"    hex.xor_by 10, {L}_cdx, {n.dx & MASK40}")
-        lines.append(f"    hex.xor_by 10, {L}_cdy, {n.dy & MASK40}")
+        # M13-possignmag: dx/dy never re-enter a subtract (only a product), so bake them as an
+        # 8-nibble zero-extended MAGNITUDE + a 1-nibble sign flag instead of a 10-nibble two's-comp
+        # pattern -- lets point_on_side_leaf's cross-product run at 8 nibbles, not 10.
+        lines.append(f"    hex.xor_by 8, {L}_cdx_mag, {abs(n.dx)}")
+        lines.append(f"    hex.xor_by 8, {L}_cdy_mag, {abs(n.dy)}")
+        lines.append(f"    hex.xor_by 1, {L}_sign_dx, {1 if n.dx < 0 else 0}")
+        lines.append(f"    hex.xor_by 1, {L}_sign_dy, {1 if n.dy < 0 else 0}")
         lines.append(f"    stl.fret {L}_xbret")
 
     # data — never fallen into (every code path above ends in stl.fret or `;done_label`)
     if bsp.nodes:
-        for nm in ("cpx", "cpy", "cdx", "cdy"):
+        for nm in ("cpx", "cpy"):
             lines.append(f"{L}_{nm}: hex.vec 10")          # shared per-node partition const regs
+        for nm in ("cdx_mag", "cdy_mag"):
+            lines.append(f"{L}_{nm}: hex.vec 8")           # shared per-node partition magnitude regs
+        for nm in ("sign_dx", "sign_dy"):
+            lines.append(f"{L}_{nm}: hex.vec 1")           # shared per-node partition sign flags
         lines.append(f"{L}_side: hex.vec 2")
         lines.append(f"{L}_pos_ret: ;0")                   # the side-test leaf's fcall/fret return register
         lines.append(f"{L}_xbret: ;0")                     # the node xor_by block's fcall/fret return register (M12qq)

@@ -746,6 +746,17 @@ HAND_SIDE_CASES = [
     (10, 20, -3, -4, -100, -100),  # -> -80 -> 0
     (32000, -32000, 30000, 25000, -30000, 31000),     # large magnitude (40-bit width stress)
     (-32000, 32000, -30000, -25000, 30000, -31000),
+    # M13-possignmag sign-pair coverage: each of the 4 (signA,signB) branches, plus the "viewer exactly
+    # on the node's reference point" degenerate case (dxv==dyv==0) for all 4 dx/dy sign combos.
+    (0, 0, 5, 5, 10, 10),          # (+,+) equal magnitudes -> on-the-line -> front
+    (0, 0, 5, 1, 10, 10),          # (+,+) p1>p2 -> back
+    (0, 0, 1, 5, 10, 10),          # (+,+) p1<p2 -> front
+    (0, 0, 5, 5, -10, 10),         # (+,-) both magnitudes nonzero -> back
+    (0, 0, 0, 5, -10, 10),         # (+,-) p1==0 (dx==0), p2!=0 -> back
+    (0, 10, 5, 5, 0, 10),          # dxv==dyv==0, dx>=0,dy>=0 (+,+) -> front
+    (0, 10, -5, 5, 0, 10),         # dxv==dyv==0, dx<0,dy>=0 (-,+) -> always front
+    (0, 10, 5, -5, 0, 10),         # dxv==dyv==0, dx>=0,dy<0 (+,-) both zero -> front
+    (0, 10, -5, -5, 0, 10),        # dxv==dyv==0, dx<0,dy<0 (-,-) -> front
 ]
 
 
@@ -777,18 +788,22 @@ def test_point_on_side_byte_exact_vs_oracle(tmp_path):
 def test_point_on_side_leaf_byte_exact_vs_oracle(tmp_path):
     """proj.point_on_side_leaf — the register / shared-fcall-leaf form of the side test used by the
     BSP-as-code walk — matches mapcompiler._point_side byte-exact over the hand cases. Set the viewer +
-    partition const regs, fcall the leaf, print back; each case twice (R5 #8)."""
+    partition const regs (M13-possignmag: dx/dy baked as an 8-nibble magnitude + a 1-nibble sign flag,
+    not a 10-nibble two's-complement pattern), fcall the leaf, print back; each case twice (R5 #8)."""
     body, expected = [], b""
     for px, py, dx, dy, vx, vy in HAND_SIDE_CASES:
         for _ in range(2):
             body += [f"hex.set 10, vx, {vx & MASK40}", f"hex.set 10, vy, {vy & MASK40}",
                      f"hex.set 10, cpx, {px & MASK40}", f"hex.set 10, cpy, {py & MASK40}",
-                     f"hex.set 10, cdx, {dx & MASK40}", f"hex.set 10, cdy, {dy & MASK40}",
+                     f"hex.set 8, cdx_mag, {abs(dx)}", f"hex.set 8, cdy_mag, {abs(dy)}",
+                     f"hex.set 1, sign_dx, {1 if dx < 0 else 0}",
+                     f"hex.set 1, sign_dy, {1 if dy < 0 else 0}",
                      "stl.fcall pos_leaf, pos_ret", "hex.print_as_digit 1, b, 0", "stl.output 10"]
         expected += f"{1 if _point_side(px, py, dx, dy, vx, vy) > 0 else 0}\n".encode() * 2
-    tail = ["pos_leaf: proj.point_on_side_leaf b, vx, vy, cpx, cpy, cdx, cdy, pos_ret",
+    tail = ["pos_leaf: proj.point_on_side_leaf b, vx, vy, cpx, cpy, cdx_mag, cdy_mag, sign_dx, sign_dy, pos_ret",
             "b: hex.vec 2", "vx: hex.vec 10", "vy: hex.vec 10", "cpx: hex.vec 10", "cpy: hex.vec 10",
-            "cdx: hex.vec 10", "cdy: hex.vec 10", "pos_ret: ;0"]
+            "cdx_mag: hex.vec 8", "cdy_mag: hex.vec 8", "sign_dx: hex.vec 1", "sign_dy: hex.vec 1",
+            "pos_ret: ;0"]
     prog = "stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(tail) + "\n"
     p = tmp_path / "pos_leaf.fj"
     p.write_text(prog, encoding="utf-8")

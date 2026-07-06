@@ -22,6 +22,7 @@ from doomfj.wad import WadFile, WadSeg, WadSubSector, WadNode
 ROOM = Path("tests/fixtures/square_room.wad")            # pre-baked DOOM-wound square room
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")          # full real level (baked node tree)
 PROJECTION_FJ = Path("src/fj/projection.fj")             # provides proj.point_on_side (the side test)
+FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")           # provides hex.mul_lo (point_on_side_leaf's cross product)
 
 
 def _room():
@@ -178,7 +179,7 @@ def _run_bsp_walk(tmp_path, name, cmap, vx, vy):
     p.write_text(prog, encoding="utf-8")
     expected = "".join(f"{ss:04x}\n" for ss in ReferenceModel().bsp_render_order(cmap, vx, vy)).encode()
     ok = fj.assemble_and_run_test_output(
-        [PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"{name} @ ({vx},{vy}): emitted BSP order != bsp_render_order"
 
@@ -222,7 +223,7 @@ def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
     p.write_text(prog, encoding="utf-8")
     out = tmp_path / "e1m1_bsp.fjm"
     t = time.perf_counter()
-    fj.assemble([PROJECTION_FJ.resolve(), p.resolve()], out, memory_width=W, print_time=False)
+    fj.assemble([FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], out, memory_width=W, print_time=False)
     assemble_s = time.perf_counter() - t
     assert assemble_s < 120, f"E1M1 BSP-as-code assemble {assemble_s:.0f}s exceeds the R-2 CI guard"
     rm = ReferenceModel()
@@ -234,13 +235,15 @@ def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
 
 
 def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
-    """M12qq — the node partition consts (cpx/cpy/cdx/cdy) are baked with hex.xor_by + xor-INVOLUTION
-    self-zeroing: each node SETs them (0->vals), the side test READS them, then a second fcall CLEARs them
-    (vals->0) before recursing. So after the whole walk every partition reg must be back to 0 — the
-    involution invariant. A missing CLEAR would leave them at the XOR-accumulation of every visited node's
-    consts (nonzero for the deep tree: cpy = 10 ^ -10 ^ 0, cdy = 0 ^ 0 ^ 1), so this directly catches a
-    broken/absent involution (the M12qq regression). Distinct from the order tests (which catch the WRONG
-    side test) — this asserts the post-walk zero state."""
+    """M12qq — the node partition consts (cpx/cpy/cdx_mag/cdy_mag/sign_dx/sign_dy) are baked with
+    hex.xor_by + xor-INVOLUTION self-zeroing: each node SETs them (0->vals), the side test READS them,
+    then a second fcall CLEARs them (vals->0) before recursing. So after the whole walk every partition
+    reg must be back to 0 — the involution invariant. A missing CLEAR would leave them at the
+    XOR-accumulation of every visited node's consts (nonzero for the deep tree: cpy = 10 ^ -10 ^ 0,
+    sign_dy = 0 ^ 0 ^ 0), so this directly catches a broken/absent involution (the M12qq regression).
+    Distinct from the order tests (which catch the WRONG side test) — this asserts the post-walk zero
+    state. M13-possignmag: cdx/cdy became cdx_mag/cdy_mag (8-nibble magnitudes) + sign_dx/sign_dy
+    (1-nibble flags); the involution property is unchanged (xor_by is still self-inverse either way)."""
     cmap = _deep_map()                                       # 3 nodes with distinct partition consts
     # empty subsector action: the nodes still run their SET/USE/CLEAR (what we test), but the leaves print
     # nothing, so the only output is the post-walk partition-reg dump below.
@@ -249,16 +252,18 @@ def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
         "stl.startup_and_init_all",
         "hex.set 10, vx, 5", "hex.set 10, vy, 20",
         ";z_bspcode_walk", "bsp_done:",
-        # after the walk, the involution must have returned every partition reg to 0 (40 '0' digits total).
-        # the shared partition-const regs are {pfx}_bspcode_{cpx,cpy,cdx,cdy} (here pfx="z").
+        # after the walk, the involution must have returned every partition reg to 0 (38 '0' digits total:
+        # cpx(10)+cpy(10)+cdx_mag(8)+cdy_mag(8)+sign_dx(1)+sign_dy(1)).
+        # the shared partition-const regs are {pfx}_bspcode_{cpx,cpy,cdx_mag,cdy_mag,sign_dx,sign_dy} (pfx="z").
         "hex.print_as_digit 10, z_bspcode_cpx, 0", "hex.print_as_digit 10, z_bspcode_cpy, 0",
-        "hex.print_as_digit 10, z_bspcode_cdx, 0", "hex.print_as_digit 10, z_bspcode_cdy, 0",
+        "hex.print_as_digit 8, z_bspcode_cdx_mag, 0", "hex.print_as_digit 8, z_bspcode_cdy_mag, 0",
+        "hex.print_as_digit 1, z_bspcode_sign_dx, 0", "hex.print_as_digit 1, z_bspcode_sign_dy, 0",
         "stl.loop",
         "vx: hex.vec 10", "vy: hex.vec 10", code,
     ]) + "\n"
     p = tmp_path / "selfzero.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [PROJECTION_FJ.resolve(), p.resolve()], b"", b"0" * 40,
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", b"0" * 38,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "node partition consts did not self-zero after the walk (broken xor-involution)"

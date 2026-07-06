@@ -19,8 +19,8 @@ ns proj {
     //   the variable part. @requires hex.init + hex.read_table.
     def slope_div dst, num, den \
             @ lt, ge, nrm_hi, hi_more, hi_done, nrm_lo, lo_more, lo_done, \
-              fsh_loop, fsh_more, fsh_done, keep, clamp, done, \
-              sden, wnum, recipw, recip, prod, fsh, c512, cfff, c100, czero2, csr \
+              flo3, fhi3, fs0, fs1, fs2, fs3, fs4, fs5, fsh_done, keep, clamp, done, \
+              sden, wnum, recipw, recip, prod, fsh, c512, cfff, c100, cone2, c3two, c5two, csr \
             < slopediv_recip {
         hex.cmp 8, den, c512, lt, ge, ge        // den < 512 ?  lt -> small (clamp to SLOPERANGE)
       lt:
@@ -61,12 +61,30 @@ ns proj {
         rep(5, j) hex.fixed_mul_lo.row 13, j, prod, wnum, recipw
 
         hex.shr_hex 13, 4, prod                 // base shift = 4 nibbles (RK=24=6 nib, minus the <=4 P-bias)
-      fsh_loop:                                  // then fsh (the variable part) more nibbles
-        hex.cmp 2, fsh, czero2, fsh_done, fsh_done, fsh_more   // fsh > 0 ?  gt -> shift
-      fsh_more:
+        // fshbranch: fsh (the variable shift, 0..5) via a compare tree instead of a decrement loop —
+        // shr_hex n,k is ONE O(n) pass for any k, so we only need ONE such call, picked by the tree.
+        hex.cmp 2, fsh, c3two, flo3, fs3, fhi3   // fsh<3 -> flo3{0,1,2}; ==3 -> fs3; >3 -> fhi3{4,5}
+      flo3:
+        hex.cmp 2, fsh, cone2, fs0, fs1, fs2     // fsh<1 -> fs0; ==1 -> fs1; ==2 -> fs2
+      fhi3:
+        hex.cmp 2, fsh, c5two, fs4, fs5, fs5     // fsh==4 -> fs4; ==5 (or unreachable >5) -> fs5
+      fs0:
+        ;fsh_done
+      fs1:
         hex.shr_hex 13, 1, prod
-        hex.dec 2, fsh
-        ;fsh_loop
+        ;fsh_done
+      fs2:
+        hex.shr_hex 13, 2, prod
+        ;fsh_done
+      fs3:
+        hex.shr_hex 13, 3, prod
+        ;fsh_done
+      fs4:
+        hex.shr_hex 13, 4, prod
+        ;fsh_done
+      fs5:
+        hex.shr_hex 13, 5, prod
+        ;fsh_done
       fsh_done:
         hex.cmp 13, prod, csr, keep, keep, clamp   // prod > SLOPERANGE ?  gt -> clamp
       keep:
@@ -85,7 +103,9 @@ ns proj {
       c512: hex.vec 8, 512
       cfff: hex.vec 8, 0xfff
       c100: hex.vec 8, 0x100
-      czero2: hex.vec 2, 0
+      cone2: hex.vec 2, 1
+      c3two: hex.vec 2, 3
+      c5two: hex.vec 2, 5
       csr: hex.vec 13, 0x800
       done:
     }

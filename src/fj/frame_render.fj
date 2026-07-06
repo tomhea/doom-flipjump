@@ -767,17 +767,17 @@ ns frame {
     // a separate leaf so the existing `_mtlwp` (framebuffer raster_mode) is untouched. @requires
     // hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_stream centery, viewh1, viewh, projection, band_stride \
-            @ loop, body, skipcol, ret, sidx, cge, cdone, fneg, fdone, cVH, cexcl, \
+            @ loop, body, notdrawn, skipcol, ret, sidx, cptr, cbase, dval, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cph, fph, nacc, nadv, vpp, vpb, cbufaddr, fbufaddr, \
               cbuild, cbuilt, fbuild, fbuilt, \
-              work, sfull, occscan, occchk, occnext, occdone, occproc \
+              work, sfull, occscan, occchk, occdone, occproc \
             < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
               ceilfix, floorfix, viewz, seg_ceil, seg_floor, \
               seg_plight, seg_ceilbase, seg_floorbase, seg_lit, seg_cvpidx, seg_fvpidx, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
               top, bottom, \
-              col_cexcl, col_fstart, col_lit, col_cvp, col_fvp, \
-              vpc_bufs, vpf_bufs, vpc_flags, vpf_flags, drawn, seg_ret, \
+              col_struct, \
+              vpc_bufs, vpf_bufs, vpc_flags, vpf_flags, seg_ret, \
               full, n_drawn, vieww, \
               bb_ph, bb_light, bb_base, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, build_bands_leaf, \
               plane_band_ret {
@@ -786,13 +786,22 @@ ns frame {
       work:                                      // front-to-back drawn[] means its cols are all occluded already.
         proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
+        // M13-colstruct: the per-column fields (drawn,cexcl,fstart,lit,cvp,fvp) live PACKED in ONE
+        // combined byte struct (col_struct, stride 11 dw/column: 1 packed byte for drawn + 5 fields x
+        // 2-nibble-vec each -- byte.emit's dispatch needs a 2-NIBBLE-VEC cell, not a packed byte, see
+        // the write-chain comment below). ptr_index (cost scales with the address width, R20) runs
+        // ONCE per seg to aim at column x1; every column after that is a cheap ptr_add/read_byte/
+        // write_hex_and_inc walk, not a fresh per-field dereference.
         hex.mov 8, x, x1                          // M13opt-P1 occlusion pre-scan: if EVERY column in [x1,x2) is
-      occscan:                                    // already claimed by a nearer seg, this seg paints nothing ->
-        hex.scmp 8, x, x2, occchk, occdone, occdone   // skip its projection. x<x2 ? test : scanned-all-drawn -> skip
+        hex.mul_const w/4, sidx, x1, 11           // already claimed by a nearer seg, this seg paints nothing ->
+        hex.set w/4, cbase, col_struct            // skip its projection. x<x2 ? test : scanned-all-drawn -> skip
+        hex.ptr_index cptr, cbase, sidx           // cptr -> &col_struct[x1].drawn
+      occscan:
+        hex.scmp 8, x, x2, occchk, occdone, occdone
       occchk:
-        .skip_if_drawn x, drawn, occnext          // drawn[x]!=0 -> keep scanning; ==0 -> an unclaimed col exists
-        ;occproc                                  // found an unclaimed column -> must render this seg
-      occnext:
+        hex.read_byte dval, cptr                  // dval = drawn[x] (packed byte, no ptr_index)
+        hex.if0 2, dval, occproc                  // ==0 -> an unclaimed column exists -> must render this seg
+        hex.ptr_add cptr, 11                      // claimed -> advance to the next column's slot, keep scanning
         hex.inc 8, x
         ;occscan
       occdone:
@@ -881,10 +890,18 @@ ns frame {
         hex.write_hex 1, vpp, vpb
       fbuilt:
         hex.mov 8, x, x1
+        hex.mul_const w/4, sidx, x1, 11
+        hex.set w/4, cbase, col_struct
+        hex.ptr_index cptr, cbase, sidx           // cptr -> &col_struct[x1].drawn (ONE ptr_index for the whole seg)
+        hex.set 2, one, 1                         // the drawn=1 constant, hoisted out of the per-column loop
       loop:
         hex.scmp 8, x, x2, body, ret, ret
       body:
-        .skip_if_drawn x, drawn, skipcol
+        hex.read_byte dval, cptr                  // peek drawn[x] (a lone packed byte -- never emit'd, so it
+        hex.if0 2, dval, notdrawn                 // doesn't need byte.emit's 2-nibble-vec layout, see below)
+        hex.ptr_add cptr, 11                      // already claimed -> advance past this column's slot
+        ;skipcol
+      notdrawn:
         proj.column_render_params_stream top, bottom, scale, ceilfix, floorfix, viewz, centery, viewh1
         hex.set 8, cVH, viewh                   // cexcl = min(top, VIEW_H)  (top is the clipped >=0 row)
         hex.mov 8, cexcl, top
@@ -898,25 +915,28 @@ ns frame {
       fneg:
         hex.zero 8, fstart
       fdone:
-        // pG3-stream: the off-screen top/bottom sentinel + the wall texel base are DEAD (no fb
-        // raster; cexcl/fstart, computed above from the CLIPPED rows, are all the emit needs)
-        hex.mov w/4, sidx, x
-        hex.shl_bit w/4, sidx
-        hex.shl_bit w/4, sidx
-        hex.shl_bit w/4, sidx                   // sidx = x*8 (the uniform WIDE 8-nibble array stride)
-
-        // M13-planesproto: the column stores its planes' VISPLANE INDICES (the device holds the
-        // shared lists after emit_vp_bank and does the per-column clipping itself); cbufaddr/
-        // fbufaddr remain build-phase locals only. col_fvp's 0xFF init is the UNCLAIMED sentinel.
-        .store_col_field col_cvp, sidx, seg_cvpidx
-        .store_col_field col_fvp, sidx, seg_fvpidx
-
-        .store_col_field col_lit, sidx, seg_lit   // the W1 wall's fully-baked constant lit byte
-
-        .store_col_field col_cexcl, sidx, cexcl
-        .store_col_field col_fstart, sidx, fstart
-        .mark_drawn x, drawn
-        hex.inc 2, n_drawn                       // M13opt-P1: count this newly-claimed column (mark_drawn only
+        // M13-colstruct: one sequential write chain through the held pointer -- drawn (ONE packed byte,
+        // internal-only) then 5 fields each as a 2-NIBBLE-VEC pair (cexcl,fstart,lit,cvp,fvp) -- the
+        // emit side (present_tail's byte.emit) reads its cell as idx/idx+1*dw, i.e. TWO SEPARATE NIBBLE
+        // dw-slots, not one packed byte, so every emit'd field must keep that layout (byte.emit doesn't
+        // dereference through a register; it XORs the two nibble ADDRESSES straight into the dispatch
+        // op, so the addresses it's given must actually hold nibble-vec data). No per-field
+        // ptr_index/hex.set-array-base either way; cptr ends exactly at the NEXT column's slot
+        // (11 dw advanced == the struct stride), so `skipcol` needs no extra pointer work
+        // for this path. col_fvp's 0xF,0xF init (0xFF, the struct's offset 9-10) is the UNCLAIMED
+        // sentinel; the device does the per-column prefix/suffix clipping via cvp/fvp.
+        hex.write_byte_and_inc cptr, one          // drawn = 1 (packed byte)
+        hex.write_hex_and_inc cptr, cexcl
+        hex.write_hex_and_inc cptr, cexcl + 1*dw
+        hex.write_hex_and_inc cptr, fstart
+        hex.write_hex_and_inc cptr, fstart + 1*dw
+        hex.write_hex_and_inc cptr, seg_lit        // the W1 wall's fully-baked constant lit byte
+        hex.write_hex_and_inc cptr, seg_lit + 1*dw
+        hex.write_hex_and_inc cptr, seg_cvpidx
+        hex.write_hex_and_inc cptr, seg_cvpidx + 1*dw
+        hex.write_hex_and_inc cptr, seg_fvpidx
+        hex.write_hex_and_inc cptr, seg_fvpidx + 1*dw
+        hex.inc 2, n_drawn                       // M13opt-P1: count this newly-claimed column (only
         hex.cmp 2, n_drawn, vieww, skipcol, sfull, skipcol   // runs on a NEW claim) -> when all VIEW_W claimed, full=1
       sfull:
         hex.set 1, full, 1
@@ -927,6 +947,10 @@ ns frame {
       ret:
         stl.fret seg_ret
       sidx: hex.vec w/4
+      cptr: hex.vec w/4
+      cbase: hex.vec w/4
+      dval: hex.vec 2
+      one: hex.vec 2
       cVH: hex.vec 8
       cexcl: hex.vec 8
       fstart: hex.vec 8

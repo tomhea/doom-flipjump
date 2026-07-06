@@ -339,8 +339,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                      f"stream.emit_vp_bank vpc_bufs, {max(1, len(cvp_ids))}, {BAND_STRIDE}",
                      f"stl.output_char {max(1, len(fvp_ids))}",
                      f"stream.emit_vp_bank vpf_bufs, {max(1, len(fvp_ids))}, {BAND_STRIDE}",
-                     *(f"stream.emit_column_rec col_cexcl + {8 * x}*dw, col_fstart + {8 * x}*dw, "
-                       f"col_lit + {8 * x}*dw, col_cvp + {8 * x}*dw, col_fvp + {8 * x}*dw"
+                     # M13-colstruct: col_struct's per-column stride is 11 dw: offset 0 = drawn (packed byte,
+                     # not read here), 1-10 = cexcl/fstart/lit/cvp/fvp each a 2-nibble-vec pair -- byte.emit
+                     # wants the pair's LOW-nibble address (idx/idx+1*dw are its two nibbles).
+                     *(f"stream.emit_column_rec col_struct + {11 * x + 1}*dw, col_struct + {11 * x + 3}*dw, "
+                       f"col_struct + {11 * x + 5}*dw, col_struct + {11 * x + 7}*dw, col_struct + {11 * x + 9}*dw"
                        for x in range(cfg.VIEW_W))]
                     if stream else ["present.update_screen_reg framebuffer"])
     fb_leaves = [] if stream else [                      # the fb-raster shared leaves -- stream emits none of them
@@ -432,19 +435,34 @@ def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
     """M13pS2-crush2b: the raster_mode="stream" per-VISPLANE band storage + the shared band-building
     leaves' scratch registers. Each of the map's nvpc ceiling / nvpf floor visplanes gets ONE
     full-range packed-byte buffer (slot 0 = the entry count n, then up to MAX_BANDS 3-byte entries)
-    built at most once per frame (`vpc_flags`/`vpf_flags`, reset in pass-1); each claimed column
-    stores its planes' VISPLANE INDICES in `col_cvp`/`col_fvp` (M13-planesproto: the device holds
-    the emitted shared lists and does the per-column prefix/suffix clipping itself)."""
+    built at most once per frame (`vpc_flags`/`vpf_flags`, reset in pass-1).
+
+    M13-colstruct: each claimed column's fields (drawn flag, clipped cexcl/fstart rows, the baked W1
+    lit byte, the ceiling/floor visplane indices) live PACKED in ONE combined struct `col_struct`
+    (stride 11 dw/column) instead of 6 separate arrays (the shared `drawn` array + col_cexcl/
+    col_fstart, still declared elsewhere for the fb-mode leaf, goes unused here). Layout: offset 0 =
+    drawn, a single PACKED byte (1 dw slot) -- it's only ever read/written internally (read_byte/
+    write_byte_and_inc), never emitted. Offsets 1-10 = cexcl,fstart,lit,cvp,fvp, each a 2-NIBBLE-VEC
+    pair (2 dw slots: low nibble then high nibble) -- NOT a packed byte, because present_tail's
+    `byte.emit`/`cm.emit` dispatch reads its cell as idx/idx+1*dw (two separate nibble dw-slots) by
+    XORing those two ADDRESSES directly into the dispatch op; it never dereferences through a register,
+    so the address it's given must actually hold nibble-vec data, matching the OLD col_cexcl-style
+    hex.vec arrays' low 2 nibbles. One struct load lets the stream leaf walk all 6 fields with a single
+    held pointer instead of a fresh ptr_index per field per column (ptr_index's cost scales with the
+    address width, ptr_add's doesn't -- R20/fj-lessons). fvp's 0xFF sentinel (UNCLAIMED, both nibbles
+    0xF) sits at offsets 9-10 of each column's slot."""
     vp_slots = 1 + 3 * MAX_BANDS
     vpc_zeros = "\n".join(";0 * dw" for _ in range(nvpc * vp_slots))
     vpf_zeros = "\n".join(";0 * dw" for _ in range(nvpf * vp_slots))
+    # per-column init: [drawn=0 (packed byte), cexcl=00, fstart=00, lit=00, cvp=00, fvp=FF] as nibbles
+    _COL_SLOT_NIBBLES = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0xF, 0xF]   # 1 packed byte + 5 nibble-vec pairs
+    col_struct_zeros = "\n".join(
+        f";{v:#x} * dw"
+        for _ in range(cfg.VIEW_W) for v in _COL_SLOT_NIBBLES)
     return [
         "seg_lit: hex.vec 2",                          # M13pS2c: the W1 wall's fully-baked constant lit byte
         "seg_cvpidx: hex.vec 8", "seg_fvpidx: hex.vec 8",   # crush2b: the seg's visplane indices (baked)
-        f"col_lit: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        # M13-planesproto: per-column VISPLANE INDICES (the 0x09 record's cvp/fvp bytes); fvp's
-        # 0xFF init is the UNCLAIMED sentinel (the device paints nothing for such a column).
-        f"col_cvp: rep({cfg.VIEW_W}, i) hex.vec 8, 0xFF", f"col_fvp: rep({cfg.VIEW_W}, i) hex.vec 8, 0xFF",
+        f"col_struct:\n{col_struct_zeros}",
         f"vpc_flags: rep({nvpc}, i) hex.vec 1, 0", f"vpf_flags: rep({nvpf}, i) hex.vec 1, 0",
         f"vpc_bufs:\n{vpc_zeros}", f"vpf_bufs:\n{vpf_zeros}",
         "bb_ph: hex.vec 8", "bb_light: hex.vec 2", "bb_base: hex.vec 2", "bb_y0: hex.vec 2",

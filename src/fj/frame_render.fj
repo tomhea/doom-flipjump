@@ -776,7 +776,7 @@ ns frame {
               seg_plight, seg_ceilbase, seg_floorbase, seg_lit, seg_cvpidx, seg_fvpidx, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
               top, bottom, \
-              col_cexcl, col_fstart, col_lit, col_cbands, col_fbands, \
+              col_cexcl, col_fstart, col_lit, col_cvp, col_fvp, \
               vpc_bufs, vpf_bufs, vpc_flags, vpf_flags, drawn, seg_ret, \
               full, n_drawn, vieww, \
               bb_ph, bb_light, bb_base, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, build_bands_leaf, \
@@ -905,10 +905,11 @@ ns frame {
         hex.shl_bit w/4, sidx
         hex.shl_bit w/4, sidx                   // sidx = x*8 (the uniform WIDE 8-nibble array stride)
 
-        // M13pS2-crush2b: the column just POINTS at its planes' shared full-range lists (built
-        // once per visplane above); the emit pass clips them per column (prefix/suffix).
-        .store_col_field8 col_cbands, sidx, cbufaddr
-        .store_col_field8 col_fbands, sidx, fbufaddr
+        // M13-planesproto: the column stores its planes' VISPLANE INDICES (the device holds the
+        // shared lists after emit_vp_bank and does the per-column clipping itself); cbufaddr/
+        // fbufaddr remain build-phase locals only. col_fvp's 0xFF init is the UNCLAIMED sentinel.
+        .store_col_field col_cvp, sidx, seg_cvpidx
+        .store_col_field col_fvp, sidx, seg_fvpidx
 
         .store_col_field col_lit, sidx, seg_lit   // the W1 wall's fully-baked constant lit byte
 

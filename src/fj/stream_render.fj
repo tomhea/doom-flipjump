@@ -10,6 +10,48 @@
 // emit_table`; no separate init call needed here).
 
 ns stream {
+    // M13-planesproto — emit ONE visplane bank's band lists for the 0x09 BEGIN_FRAME_PLANES frame.
+    // `base` = the bank's buffer label (compile-time), `nvps`/`stride` compile-time; per vp:
+    // [n:1B] then n x ([count:1B] via byte.emit + the (base,zrow) pair collapsed to ONE final
+    // colour byte via cm.emit — the colormap lookup now runs once per VISPLANE ENTRY (~dozens),
+    // not once per emitted column run). An unbuilt vp's slot0 is still 0-init => emits just [0].
+    def emit_vp_bank base, nvps, stride {
+        rep(nvps, v) .emit_vp_list base + v*(1+stride)*dw
+    }
+    def emit_vp_list buf @ ptr, n, i, cnt, cidx, vloop, vbody, vdone, vskip {
+        hex.set w/4, ptr, buf
+        hex.read_byte_and_inc n, ptr
+        byte.emit n
+        hex.zero 2, i
+      vloop:
+        hex.cmp 2, i, n, vbody, vdone, vdone
+      vbody:
+        hex.read_byte_and_inc cnt, ptr
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
+        byte.emit cnt
+        cm.emit cidx
+        hex.inc 2, i
+        ;vloop
+      vdone:
+        ;vskip
+      ptr: hex.vec w/4
+      n: hex.vec 2
+      i: hex.vec 2
+      cnt: hex.vec 2
+      cidx: hex.vec 4
+      vskip:
+    }
+
+    // One column's 5-byte record: [cexcl][fstart][lit][cvp][fvp] — five compile-time-cell reads,
+    // five byte.emits, no loops, no pointer derefs. The device does the rest.
+    def emit_column_rec cexcl_cell, fstart_cell, lit_cell, cvp_cell, fvp_cell {
+        byte.emit cexcl_cell
+        byte.emit fstart_cell
+        byte.emit lit_cell
+        byte.emit cvp_cell
+        byte.emit fvp_cell
+    }
+
     // M13pS2-crush2b — emit a PREFIX of a shared FULL-RANGE band list: the first `take_src` rows.
     // `arr_cell` is a RUNTIME cell (a per-column col array slot) holding the visplane buffer's
     // ADDRESS (slot 0 = the entry count n, entries from slot 1); the list's counts sum to VIEW_H, so

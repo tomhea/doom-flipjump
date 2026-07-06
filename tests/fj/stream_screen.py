@@ -22,6 +22,8 @@ from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 from flipjump.utils.exceptions import IOReadOnEOF
 
 CMD_BEGIN_FRAME_STREAM = 0x07
+CMD_BEGIN_FRAME_PLANES = 0x09      # M13-planesproto (0x08 stays reserved for M16 write_pixel)
+UNCLAIMED_FVP = 0xFF               # a column record with fvp == 0xFF paints nothing
 
 
 class StreamScreen(InMemoryScreen):
@@ -35,6 +37,7 @@ class StreamScreen(InMemoryScreen):
         self._stream_pixels_filled = 0
         self._stream_pending_count = None
         self.flush_count = 0                       # how many times _present() actually ran (verification aid)
+        self._planes_buf = None                    # M13-planesproto: accumulating payload bytes (None = off)
 
     # ---------------------------------------------------------------- input stream (optional)
 
@@ -56,6 +59,8 @@ class StreamScreen(InMemoryScreen):
             return 1 + 2 + 2 + 1 + 2 + 1
         if command == CMD_BEGIN_FRAME_STREAM:
             return 1
+        if command == CMD_BEGIN_FRAME_PLANES:
+            return 1
         return super()._command_length(command)
 
     def _execute_command(self, command: int, payload) -> None:
@@ -66,13 +71,86 @@ class StreamScreen(InMemoryScreen):
         if command == CMD_BEGIN_FRAME_STREAM:
             self._begin_frame_stream()
             return
+        if command == CMD_BEGIN_FRAME_PLANES:
+            self._require_initialized_screen()
+            self._planes_buf = bytearray()
+            return
         super()._execute_command(command, payload)
 
     def _handle_byte(self, byte: int) -> None:
+        if self._planes_buf is not None:
+            self._planes_buf.append(byte)
+            if self._planes_payload_complete():
+                self._decode_planes_frame()
+            return
         if self._in_pixel_stream:
             self._handle_stream_byte(byte)
             return
         super()._handle_byte(byte)
+
+    # ------------------------------------------------- M13-planesproto: the per-visplane frame
+    # Payload (all bytes): [n_cvps][each list: n_entries, then n x (count, colour)]
+    #                      [n_fvps][same]  then width x 5-byte column records
+    #                      [cexcl][fstart][lit][cvp][fvp]   (fvp==0xFF -> unclaimed, paints nothing).
+    # The device reconstructs each column EXACTLY like stream.emit_column's window semantics:
+    # ceiling = the cvp list's PREFIX [0, min(cexcl, fstart)), then one wall run of `lit` up to
+    # fstart, then floor = the fvp list's SUFFIX skipping its first fstart rows. Colours arrive
+    # FINAL (the fj side cm.emit-maps each list entry once per VISPLANE, not per column).
+
+    def _planes_payload_complete(self) -> bool:
+        b = self._planes_buf
+        pos = 0
+        for _bank in range(2):
+            if len(b) <= pos:
+                return False
+            nvp = b[pos]; pos += 1
+            for _ in range(nvp):
+                if len(b) <= pos:
+                    return False
+                pos += 1 + 2 * b[pos]              # n_entries byte + n x (count, colour)
+                if len(b) < pos:
+                    return False
+        return len(b) >= pos + 5 * self.width
+
+    def _decode_planes_frame(self) -> None:
+        b = self._planes_buf; self._planes_buf = None
+        pos = 0
+        banks = []
+        for _bank in range(2):
+            nvp = b[pos]; pos += 1
+            lists = []
+            for _ in range(nvp):
+                n = b[pos]; pos += 1
+                lists.append([(b[pos + 2 * k], b[pos + 2 * k + 1]) for k in range(n)])
+                pos += 2 * n
+            banks.append(lists)
+        cvps, fvps = banks
+        for x in range(self.width):
+            cexcl, fstart, lit, cvp, fvp = b[pos:pos + 5]; pos += 5
+            if fvp == UNCLAIMED_FVP:
+                continue
+            ctake = min(cexcl, fstart)
+            y = 0
+            if ctake > 0:                          # (mirrors emit_prefix's take==0 no-deref guard)
+                for count, colour in cvps[cvp]:    # ceiling PREFIX [0, ctake)
+                    if y >= ctake:
+                        break
+                    for _ in range(min(count, ctake - y)):
+                        self.pixel_indices[y * self.width + x] = colour
+                        y += 1
+            y = ctake
+            while y < fstart:                      # the wall run
+                self.pixel_indices[y * self.width + x] = lit
+                y += 1
+            skip = fstart                          # floor SUFFIX: skip the list's first fstart rows
+            for count, colour in fvps[fvp]:
+                take = count - skip if count > skip else 0
+                skip = skip - count if skip >= count else 0
+                for _ in range(take):
+                    self.pixel_indices[y * self.width + x] = colour
+                    y += 1
+        self._present()
+        self.flush_count += 1
 
     # ---------------------------------------------------------------- the run-stream decode
 

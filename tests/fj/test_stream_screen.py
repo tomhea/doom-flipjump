@@ -89,6 +89,61 @@ def test_stdin_feed_still_works_alongside_the_stream_decode():
 
 # ── the fj-level integration test: emit the SAME 2x3 grid via the real macros + emit table ─────
 
+
+# ---------------- M13-planesproto: the per-visplane frame command (0x09) ----------------
+# a 2x6 screen (width=2, height=6). One ceiling vp list [(2, 0x11), (4, 0x22)] (sums to 6),
+# one floor vp list [(3, 0x33), (3, 0x44)].
+# col 0: cexcl=2, fstart=4, lit=0x55, cvp=0, fvp=0
+#   ceiling prefix [0, min(2,4)=2): rows 0-1 = 0x11
+#   wall [2,4): rows 2-3 = 0x55
+#   floor suffix skipping 4 rows of [(3,0x33),(3,0x44)]: skip 3 (all of 0x33) + 1 of 0x44
+#     -> rows 4-5 = 0x44
+# col 1: unclaimed (fvp=0xFF) -> stays 0
+PLANES_PAYLOAD = bytes([
+    1,                     # n_cvps
+    2, 2, 0x11, 4, 0x22,   # cvp0: 2 entries
+    1,                     # n_fvps
+    2, 3, 0x33, 3, 0x44,   # fvp0: 2 entries
+    2, 4, 0x55, 0, 0,      # col 0 record: cexcl, fstart, lit, cvp, fvp
+    0, 0, 0, 0, 0xFF,      # col 1 record: unclaimed
+])
+PLANES_EXPECTED = [0x11, 0, 0x11, 0, 0x55, 0, 0x55, 0, 0x44, 0, 0x44, 0]   # row-major 2x6
+
+
+def test_planes_frame_decodes_columns_from_shared_vp_lists():
+    screen = StreamScreen()
+    _feed(screen, _init_stream_bytes(2, 6, 8, 16, 0))
+    _feed(screen, bytes([0x09]))
+    _feed(screen, PLANES_PAYLOAD)
+    assert screen.pixel_indices == PLANES_EXPECTED
+    assert screen.flush_count == 1 and screen.frame_count == 1
+
+
+def test_planes_frame_ceiling_clips_at_fstart_and_empty_lists_are_fine():
+    """cexcl > fstart -> the ceiling prefix stops at fstart (the min); n=0 vp lists parse."""
+    screen = StreamScreen()
+    _feed(screen, _init_stream_bytes(1, 6, 8, 16, 0))
+    _feed(screen, bytes([0x09]))
+    payload = bytes([
+        2, 1, 6, 0x11, 0,        # cvp0 = [(6, 0x11)], cvp1 = [] (empty list parses)
+        1, 1, 6, 0x22,           # fvp0 = [(6, 0x22)]
+        5, 3, 0x77, 0, 0,        # cexcl=5 > fstart=3 -> ceiling rows 0-2, no wall, floor rows 3-5
+    ])
+    _feed(screen, payload)
+    assert screen.pixel_indices == [0x11, 0x11, 0x11, 0x22, 0x22, 0x22]
+
+
+def test_planes_frame_reverts_to_command_parsing():
+    """After the payload completes, normal command decode resumes (a second 0x09 works)."""
+    screen = StreamScreen()
+    _feed(screen, _init_stream_bytes(1, 2, 8, 16, 0))
+    for colour in (0x0A, 0x0B):
+        _feed(screen, bytes([0x09]))
+        _feed(screen, bytes([0, 1, 1, 2, colour, 0, 0, 0x00, 0, 0]))   # fstart=0 -> all-floor column
+    assert screen.pixel_indices == [0x0B, 0x0B]
+    assert screen.frame_count == 2
+
+
 from pathlib import Path
 
 import flipjump as fj

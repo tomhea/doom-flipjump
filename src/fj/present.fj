@@ -77,4 +77,13 @@ ns present {
     def begin_frame_stream {
         stl.output_char 0x07
     }
+
+    // begin_frame_planes: [0x09] (M13-planesproto) — the whole frame arrives as SHARED per-visplane
+    // band lists + one 5-byte record per column ([cexcl][fstart][lit][cvp][fvp]; fvp=0xFF =
+    // unclaimed, paints nothing); the device does the per-column prefix/suffix clipping that
+    // stream.emit_column used to pay fj ops for. Payload layout + exact column semantics:
+    // tests/fj/stream_screen.py::_decode_planes_frame (upstream with the 0x01/0x07 extension).
+    def begin_frame_planes {
+        stl.output_char 0x09
+    }
 }

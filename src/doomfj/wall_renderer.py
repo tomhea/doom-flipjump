@@ -331,9 +331,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # M13pS2: the stream present -- the frame leaves the program AS the emitted run bytes (device
     # DMA decode); one unrolled emit_column per screen column, every col_* read at a compile-time
     # address. Replaces update_screen_reg + the whole fb/pass-2/plane-pass raster.
-    present_tail = (["present.begin_frame_stream",
-                     *(f"stream.emit_column col_cbands + {8 * x}*dw, col_cexcl + {8 * x}*dw, "
-                       f"col_fstart + {8 * x}*dw, col_lit + {8 * x}*dw, col_fbands + {8 * x}*dw"
+    # M13-planesproto: the frame leaves as SHARED per-visplane band lists (each entry's colour
+    # cm.emit-mapped ONCE) + one 5-byte record per column -- the device does the per-column
+    # prefix/suffix clipping that stream.emit_column paid ~15M fj ops/frame for.
+    present_tail = (["present.begin_frame_planes",
+                     f"stl.output_char {max(1, len(cvp_ids))}",
+                     f"stream.emit_vp_bank vpc_bufs, {max(1, len(cvp_ids))}, {BAND_STRIDE}",
+                     f"stl.output_char {max(1, len(fvp_ids))}",
+                     f"stream.emit_vp_bank vpf_bufs, {max(1, len(fvp_ids))}, {BAND_STRIDE}",
+                     *(f"stream.emit_column_rec col_cexcl + {8 * x}*dw, col_fstart + {8 * x}*dw, "
+                       f"col_lit + {8 * x}*dw, col_cvp + {8 * x}*dw, col_fvp + {8 * x}*dw"
                        for x in range(cfg.VIEW_W))]
                     if stream else ["present.update_screen_reg framebuffer"])
     fb_leaves = [] if stream else [                      # the fb-raster shared leaves -- stream emits none of them
@@ -426,8 +433,8 @@ def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
     leaves' scratch registers. Each of the map's nvpc ceiling / nvpf floor visplanes gets ONE
     full-range packed-byte buffer (slot 0 = the entry count n, then up to MAX_BANDS 3-byte entries)
     built at most once per frame (`vpc_flags`/`vpf_flags`, reset in pass-1); each claimed column
-    stores its planes' buffer ADDRESSES in `col_cbands`/`col_fbands` and the emit pass slices the
-    shared lists (prefix/suffix)."""
+    stores its planes' VISPLANE INDICES in `col_cvp`/`col_fvp` (M13-planesproto: the device holds
+    the emitted shared lists and does the per-column prefix/suffix clipping itself)."""
     vp_slots = 1 + 3 * MAX_BANDS
     vpc_zeros = "\n".join(";0 * dw" for _ in range(nvpc * vp_slots))
     vpf_zeros = "\n".join(";0 * dw" for _ in range(nvpf * vp_slots))
@@ -435,7 +442,9 @@ def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
         "seg_lit: hex.vec 2",                          # M13pS2c: the W1 wall's fully-baked constant lit byte
         "seg_cvpidx: hex.vec 8", "seg_fvpidx: hex.vec 8",   # crush2b: the seg's visplane indices (baked)
         f"col_lit: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_cbands: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_fbands: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+        # M13-planesproto: per-column VISPLANE INDICES (the 0x09 record's cvp/fvp bytes); fvp's
+        # 0xFF init is the UNCLAIMED sentinel (the device paints nothing for such a column).
+        f"col_cvp: rep({cfg.VIEW_W}, i) hex.vec 8, 0xFF", f"col_fvp: rep({cfg.VIEW_W}, i) hex.vec 8, 0xFF",
         f"vpc_flags: rep({nvpc}, i) hex.vec 1, 0", f"vpf_flags: rep({nvpf}, i) hex.vec 1, 0",
         f"vpc_bufs:\n{vpc_zeros}", f"vpf_bufs:\n{vpf_zeros}",
         "bb_ph: hex.vec 8", "bb_light: hex.vec 2", "bb_base: hex.vec 2", "bb_y0: hex.vec 2",

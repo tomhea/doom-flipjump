@@ -344,8 +344,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
          else f"plane.draw_span_flat framebuffer, {cfg.VIEW_W}"),                      # M13p1 flat-colored span
         "clear_leaf:", f"plane.clear_planes {cfg.CENTERX << 16}, {ANG90}",  # M13d2 per-frame R_ClearPlanes seeds
     ]
+    # M13-hotdata (stream only, R20): pointer-deref/dispatch wflip cost scales with the ADDRESS's
+    # set bits, so the hot pointer-walked data (per-visplane band buffers, the packed LUTs, the
+    # cm/byte EMIT tables) moves from the ~20M-word program tail to just after startup, behind a
+    # jump guard (the static tables' own `;end` headers only matter on fall-through, which the
+    # guard prevents). Measured: 78.54M -> 76.39M ops/frame, frame byte-identical.
+    hotdata = ([";__hot_end"]
+               + _stream_mode_decls(cfg, max(1, len(cvp_ids)), max(1, len(fvp_ids)))
+               + [tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle,
+                  tex, cm, "__hot_end:"]) if stream else []
     main = "\n".join([
         "stl.startup_and_init_all",
+        *hotdata,
         "present.init_screen_stream 0" if stream else "present.init_screen",
         *pass1, *pass2, *plane_pass,
         "present.set_palette palette", *present_tail, "stl.loop",
@@ -403,9 +413,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
-        *(_stream_mode_decls(cfg, max(1, len(cvp_ids)), max(1, len(fvp_ids)))
-          if raster_mode == "stream" else []),
-        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        *([] if stream else                        # M13-hotdata: in stream mode these sit up front
+          [tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
+        palette,
         yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
     ])
     return main

@@ -793,6 +793,6 @@ def test_point_on_side_leaf_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "pos_leaf.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "point_on_side_leaf: fj output != oracle"

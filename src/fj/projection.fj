@@ -536,12 +536,12 @@ ns proj {
         hex.sign 8, diff, neg_, pos_
       neg_:
         hex.neg 8, diff                     // |diff|
-        hex.div 8, 8, q, r, diff, span, baddiv
+        hex.div 8, 2, q, r, diff, span, baddiv   // M13: span = x2-x1 <= VIEW_W fits 2 nibbles
         hex.mov 8, dst, q
         hex.neg 8, dst                      // dst = -(|diff| // span)  (trunc toward zero)
         ;end
       pos_:
-        hex.div 8, 8, q, r, diff, span, baddiv   // dst = diff // span
+        hex.div 8, 2, q, r, diff, span, baddiv   // dst = diff // span (2-nib divisor)
         hex.mov 8, dst, q
         ;end
       baddiv:                               // unreachable (span > 0); safe fallback
@@ -857,9 +857,9 @@ ns proj {
         hex.mov 10, dyv, vy
         hex.sub 10, dyv, cpy              // dyv = vy - py
         hex.set 10, cdx, dx
-        hex.mul 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
+        hex.mul_lo 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
         hex.set 10, cdy, dy
-        hex.mul 10, p2, cdy, dxv          // p2 = dy*(vx-px)
+        hex.mul_lo 10, p2, cdy, dxv          // p2 = dy*(vx-px)
         hex.sub 10, p1, p2                // side = dx*(vy-py) - dy*(vx-px)
         hex.set 10, czero, 0
         hex.scmp 10, p1, czero, front, front, setback   // <0 & ==0 -> front(0); >0 -> back(1)
@@ -895,8 +895,8 @@ ns proj {
         hex.sub 10, dxv, cpx              // dxv = vx - px   (signed)
         hex.mov 10, dyv, vy
         hex.sub 10, dyv, cpy              // dyv = vy - py
-        hex.mul 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
-        hex.mul 10, p2, cdy, dxv          // p2 = dy*(vx-px)
+        hex.mul_lo 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
+        hex.mul_lo 10, p2, cdy, dxv          // p2 = dy*(vx-px)
         hex.sub 10, p1, p2                // side = dx*(vy-py) - dy*(vx-px)
         hex.set 10, czero, 0
         hex.scmp 10, p1, czero, front, front, setback   // <0 & ==0 -> front(0); >0 -> back(1)

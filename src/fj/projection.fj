@@ -524,7 +524,7 @@ ns proj {
     //   fcall/fret pair and the outc round-trip, cost more than the body itself. Every path exits by
     //   a jump, so the trailing data block is never fallen into. @requires hex.init
     def wedge_qt vx, vy, q, n, wex, wey, weyx, wexy, insid, outsid \
-            @ s, qlo, qhi, qq0, qq1, qq2, qq3, qdone, posform, c1, c2, c3, czero {
+            @ s, qlo, qhi, qq0, qq1, qq2, qq3, qdone, posform, negnz, c1, c2, c3 {
         hex.cmp 1, q, c2, qlo, qq2, qhi
       qlo:
         hex.cmp 1, q, c1, qq0, qq1, qq1
@@ -549,16 +549,20 @@ ns proj {
         hex.sub 8, s, wexy
         ;qdone
       qdone:
+        // sign/if0 rather than scmp-against-zero: hex.scmp 8 is ~700 ops, hex.sign 8 and hex.if0 8
+        // are ~258 each (measured, scratchpad/prim_costs.py). Same three-way outcome.
         hex.if0 1, n, posform
-        hex.scmp 8, s, czero, insid, insid, outsid    // negated test: outside iff Q > 0
+        hex.sign 8, s, insid, negnz            // negated test: outside iff Q > 0
+      negnz:
+        hex.if0 8, s, insid
+        ;outsid
       posform:
-        hex.scmp 8, s, czero, outsid, insid, insid    // plain test:   outside iff Q < 0
+        hex.sign 8, s, outsid, insid           // plain test:   outside iff Q < 0
 
       s: hex.vec 8
       c1: hex.vec 1, 1
       c2: hex.vec 1, 2
       c3: hex.vec 1, 3
-      czero: hex.vec 8, 0
     }
 
     // proj.point_to_dist dst, viewx, viewy, x, y (R_PointToDist): dst[:8] = the 16.16 distance from
@@ -688,12 +692,17 @@ ns proj {
         hex.mov 3, sidx, angleb                 //   read_sin idx = angleb >> 20 (low 3 nibbles)
         finesine.read_sin sinv, sidx
         hex.set 8, cproj, projection            //   PROJECTION<<16 (compile-time, from Config)
-        hex.fixed_mul_lo 8, 4, num, cproj, sinv
+        // M13-mulorder: operands SWAPPED vs the obvious order. fixed_mul_lo runs one schoolbook row
+        // per NONZERO nibble of its SECOND operand, and a negative 16.16 sine sign-extends to a dense
+        // 12-nibble pattern (~10k ops as a multiplier) while cproj = PROJECTION<<16 has ONE nonzero
+        // nibble (~1.9k). Multiplication is commutative and the macro takes the same mod-16^12 low
+        // product either way, so this is BIT-IDENTICAL -- purely a row-count choice.
+        hex.fixed_mul_lo 8, 4, num, sinv, cproj
 
         hex.shr_hex 8, 5, anglea                // den = fixed_mul(rw_distance, read_sin(anglea))
         hex.mov 3, sidx, anglea
         finesine.read_sin sinv, sidx
-        hex.fixed_mul_lo 8, 4, den, rw_distance, sinv
+        hex.fixed_mul_lo 8, 4, den, sinv, rw_distance   // same swap: rw_distance is the sparse operand
 
         hex.cmp 8, den, czero, den_nz, den_zero, den_nz    // den == 0 ? (unsigned) -> SCALE_MAX
       den_zero:

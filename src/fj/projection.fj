@@ -225,6 +225,359 @@ ns proj {
       done:
     }
 
+    // proj.coarse_bracket lo, hi, vx, vy, viewx, viewy (M13-raster coarse cull): a DIVISION-FREE
+    //   conservative [lo,hi] BAM interval bracketing atan2(vy-viewy, vx-viewx). Uses ONLY sign-folds +
+    //   integer magnitude compares (NO slope_div): octant idx (sign(dx)*4+sign(dy)*2+(|dx|>|dy|),
+    //   matching point_to_angle) + a wedge idx (0..7) from a 3-deep compare tree on the ratio
+    //   min/max (smaller*8 vs larger*{1..7}, exact integer, no divide). combined=idx*8+wedge indexes
+    //   the BAKED `coarse_bounds` table (doomfj.coarse_cull, interleaved 8-nibble lo,hi pairs -> entry
+    //   2*combined = lo, 2*combined+1 = hi). The interval is a guaranteed SUPERSET of the true angle
+    //   (baked guard covers tantoangle quantization), so a seg both of whose vertices' intervals miss
+    //   the frustum is provably invisible -> cullable without the division. @requires hex.init & stl.ptr_init
+    def coarse_bracket lo, hi, vx, vy, viewx, viewy \
+            @ dx, dy, idx, smaller, larger, s8, lk, comb, cidx, \
+              dxneg, dxpos, dyneg, dypos, dxgt, dxle, havesl, \
+              whi, w67, w7yes, w45, w5yes, wlo, w23, w3yes, w01, w1yes, wdone, \
+              b1, b2, b4, kone, ktwo, end \
+            < coarse_bounds {
+        hex.mov 8, dx, vx
+        hex.sub 8, dx, viewx                     // dx = vx - viewx  (signed)
+        hex.mov 8, dy, vy
+        hex.sub 8, dy, viewy                     // dy = vy - viewy
+        hex.set 2, idx, 0
+        hex.sign 8, dx, dxneg, dxpos
+      dxneg:
+        hex.add 2, idx, b4                       // idx |= 4
+        hex.neg 8, dx
+        ;dxpos
+      dxpos:
+        hex.sign 8, dy, dyneg, dypos
+      dyneg:
+        hex.add 2, idx, b2                       // idx |= 2
+        hex.neg 8, dy
+        ;dypos
+      dypos:
+        hex.cmp 8, dx, dy, dxle, dxle, dxgt      // |dx| > |dy| ? (unsigned magnitudes)
+      dxgt:
+        hex.add 2, idx, b1                       // idx |= 1
+        hex.zero 9, smaller
+        hex.mov 8, smaller, dy                   // smaller = |dy| (min)
+        hex.zero 9, larger
+        hex.mov 8, larger, dx                    // larger  = |dx| (max)
+        ;havesl
+      dxle:
+        hex.zero 9, smaller
+        hex.mov 8, smaller, dx
+        hex.zero 9, larger
+        hex.mov 8, larger, dy
+        ;havesl
+      havesl:
+        hex.mul_const 9, s8, smaller, 8          // s8 = smaller*8  (no overflow: 9 nibbles)
+        hex.mul_const 2, comb, idx, 8            // comb = idx*8  (wedge added below)
+        // wedge (0..7): comb += largest k in {0..7} with s8 >= larger*k
+        hex.mul_const 9, lk, larger, 4
+        hex.cmp 9, s8, lk, wlo, whi, whi         // s8 >= larger*4 ?
+      whi:
+        hex.add 2, comb, b4
+        hex.mul_const 9, lk, larger, 6
+        hex.cmp 9, s8, lk, w45, w67, w67         // s8 >= larger*6 ?
+      w67:
+        hex.add 2, comb, ktwo
+        hex.mul_const 9, lk, larger, 7
+        hex.cmp 9, s8, lk, wdone, w7yes, w7yes   // s8 >= larger*7 ?
+      w7yes:
+        hex.add 2, comb, kone
+        ;wdone
+      w45:
+        hex.mul_const 9, lk, larger, 5
+        hex.cmp 9, s8, lk, wdone, w5yes, w5yes   // s8 >= larger*5 ?
+      w5yes:
+        hex.add 2, comb, kone
+        ;wdone
+      wlo:
+        hex.mul_const 9, lk, larger, 2
+        hex.cmp 9, s8, lk, w01, w23, w23         // s8 >= larger*2 ?
+      w23:
+        hex.add 2, comb, ktwo
+        hex.mul_const 9, lk, larger, 3
+        hex.cmp 9, s8, lk, wdone, w3yes, w3yes   // s8 >= larger*3 ?
+      w3yes:
+        hex.add 2, comb, kone
+        ;wdone
+      w01:
+        hex.mov 9, lk, larger                    // larger*1
+        hex.cmp 9, s8, lk, wdone, w1yes, w1yes   // s8 >= larger*1 ?
+      w1yes:
+        hex.add 2, comb, kone
+        ;wdone
+      wdone:
+        hex.mul_const 2, cidx, comb, 2           // interleaved: lo @ 2*comb, hi @ 2*comb+1
+        hex.read_table 8, lo, coarse_bounds, 2, cidx
+        hex.add 2, cidx, kone
+        hex.read_table 8, hi, coarse_bounds, 2, cidx
+        ;end
+
+      dx: hex.vec 8
+      dy: hex.vec 8
+      idx: hex.vec 2
+      smaller: hex.vec 9
+      larger: hex.vec 9
+      s8: hex.vec 9
+      lk: hex.vec 9
+      comb: hex.vec 2
+      cidx: hex.vec 2
+      b1: hex.vec 2, 1
+      b2: hex.vec 2, 2
+      b4: hex.vec 2, 4
+      kone: hex.vec 2, 1
+      ktwo: hex.vec 2, 2
+      end:
+    }
+
+    // proj.frustum_sector sect, lo, hi, viewangle (M13-raster coarse cull): classify the coarse
+    //   angle interval [lo,hi] relative to the view frustum. sect = 1 (LEFT) if the whole bracket is
+    //   view-relative-angle > +ANG45, 2 (RIGHT) if < -ANG45, else 0 (touches/near the frustum, or
+    //   ambiguous). A seg is cullable ONLY if BOTH vertices are in the SAME non-zero sector — a wall
+    //   whose vertices straddle the frustum (opposite sectors) SPANS the view and is visible, so
+    //   "both vertices outside" alone is NOT sufficient to cull (that wrongly blanks close spanning
+    //   walls). Signed view-relative compares (rl,rh = lo-va, hi-va as 2's-complement); because the
+    //   bracket is a narrow CCW arc, requiring BOTH ends past the same ±ANG45 edge keeps it exact.
+    def frustum_sector sect, lo, hi, viewangle \
+            @ rl, rh, leftrh, chkright, rightrh, setL, setR, setnone, cang45, cnang45, end {
+        hex.mov 8, rl, lo
+        hex.sub 8, rl, viewangle                 // rl = lo - va  (signed view-relative)
+        hex.mov 8, rh, hi
+        hex.sub 8, rh, viewangle                 // rh = hi - va
+        hex.scmp 8, rl, cang45, chkright, chkright, leftrh    // rl > +ANG45 ? (signed)
+      leftrh:
+        hex.scmp 8, rh, cang45, chkright, chkright, setL      // rh > +ANG45 ? -> LEFT
+      chkright:
+        hex.scmp 8, rl, cnang45, rightrh, setnone, setnone    // rl < -ANG45 ? (signed)
+      rightrh:
+        hex.scmp 8, rh, cnang45, setR, setnone, setnone       // rh < -ANG45 ? -> RIGHT
+      setL:
+        hex.set 1, sect, 1
+        ;end
+      setR:
+        hex.set 1, sect, 2
+        ;end
+      setnone:
+        hex.set 1, sect, 0
+        ;end
+
+      rl: hex.vec 8
+      rh: hex.vec 8
+      cang45: hex.vec 8, 0x20000000
+      cnang45: hex.vec 8, 0xE0000000
+      end:
+    }
+
+    // ── M13-wedge: the MULTIPLY-FREE conservative FOV pre-cull (proj.wedge_setup + proj.wedge_reject)
+    //
+    // The true FOV is the wedge [viewangle-ANG45, viewangle+ANG45]. Round it OUTWARD to multiples of
+    // 45° and you get a wedge of width 90°..135° that strictly CONTAINS the FOV — so a seg lying
+    // entirely outside it is provably invisible and skipping it is BYTE-EXACT (no re-bless): the
+    // frame is identical, we just stop paying for it. The payoff is that a 45°-multiple wedge is the
+    // intersection of two half-planes whose interior tests are pure integer compares — NO multiply,
+    // no table, no divide:
+    //
+    //   plane m (boundary direction m*45°, interior = the CCW side): cross(dir_m, v - eye) >= 0
+    //     m=0: dy>=0   m=1: dy-dx>=0   m=2: -dx>=0   m=3: -(dx+dy)>=0
+    //     m=4: -dy>=0  m=5: dx-dy>=0   m=6: dx>=0    m=7: dx+dy>=0
+    //   so with Q0=dy, Q1=dy-dx, Q2=dx, Q3=dx+dy the test is ±Q[m&3] >= 0, negated for 2<=m<=5.
+    //
+    // Measured on the E1M1 spawn frame (scratchpad/wedge_dirs.py, host): 173 of 432 segs and 198 of
+    // 488 point_to_angle calls rejected, with the visible-seg and emitted-seg sets IDENTICAL.
+    // Finer boundary sets (16/24 directions) cull no better at the spawn angle, so 8 it is.
+
+    // proj.wedge_setup qa, na, qb, nb, viewangle — ONCE PER FRAME. Writes the two half-plane
+    //   descriptors (q = the base quantity 0..3, n = 1 iff the test is negated) bounding the
+    //   outward-rounded FOV wedge. lo = floor((va-ANG45)/ANG45), hi = ceil((va+ANG45)/ANG45) via the
+    //   integer identity ceil(a/b) = floor((a+b-1)/b); plane B is (hi+4) mod 8 (the far edge's
+    //   half-plane points inward), and since +4 leaves m&3 alone, qb = wsel(hi).q while nb is
+    //   wsel(hi).n INVERTED. All arithmetic is mod 2^32, which is exactly the BAM circle.
+    //   @requires hex.init
+    def wedge_setup qa, na, qb, nb, viewangle \
+            @ m, t, wsel, qout, nout, wret, \
+              slo4, shi4, slo2, m0, m1, m2, m3, m4, m5, m6, m7, sdone, \
+              nb0, nbdone, c1, c2, c4, c6, cang45, cang90m1, end {
+        hex.mov 8, t, viewangle
+        hex.sub 8, t, cang45                // (va - ANG45) mod 2^32
+        hex.shr_hex 8, 7, t                 // >> 28 bits ...
+        hex.shr_bit 8, t                    //   ... then >> 1 = floor(./ANG45), in [0,7]
+        hex.mov 1, m, t
+        stl.fcall wsel, wret
+        hex.mov 1, qa, qout
+        hex.mov 1, na, nout
+
+        hex.mov 8, t, viewangle
+        hex.add 8, t, cang90m1              // va + ANG45 + (ANG45-1)  =>  ceil((va+ANG45)/ANG45)
+        hex.shr_hex 8, 7, t
+        hex.shr_bit 8, t
+        hex.mov 1, m, t
+        stl.fcall wsel, wret
+        hex.mov 1, qb, qout
+        hex.if0 1, nout, nb0                // nb = 1 - wsel(hi).n  (the +4 half-plane flip)
+        hex.set 1, nb, 0
+        ;nbdone
+      nb0:
+        hex.set 1, nb, 1
+      nbdone:
+        ;end
+
+      wsel:                                 // m (0..7) -> qout = m&3, nout = (2 <= m <= 5)
+        hex.cmp 1, m, c4, slo4, m4, shi4
+      slo4:
+        hex.cmp 1, m, c2, slo2, m2, m3
+      slo2:
+        hex.cmp 1, m, c1, m0, m1, m1
+      shi4:
+        hex.cmp 1, m, c6, m5, m6, m7
+      m0:
+        hex.set 1, qout, 0
+        hex.set 1, nout, 0
+        ;sdone
+      m1:
+        hex.set 1, qout, 1
+        hex.set 1, nout, 0
+        ;sdone
+      m2:
+        hex.set 1, qout, 2
+        hex.set 1, nout, 1
+        ;sdone
+      m3:
+        hex.set 1, qout, 3
+        hex.set 1, nout, 1
+        ;sdone
+      m4:
+        hex.set 1, qout, 0
+        hex.set 1, nout, 1
+        ;sdone
+      m5:
+        hex.set 1, qout, 1
+        hex.set 1, nout, 1
+        ;sdone
+      m6:
+        hex.set 1, qout, 2
+        hex.set 1, nout, 0
+        ;sdone
+      m7:
+        hex.set 1, qout, 3
+        hex.set 1, nout, 0
+        ;sdone
+      sdone:
+        stl.fret wret
+
+      m: hex.vec 1
+      t: hex.vec 8
+      qout: hex.vec 1
+      nout: hex.vec 1
+      wret: ;0
+      c1: hex.vec 1, 1
+      c2: hex.vec 1, 2
+      c4: hex.vec 1, 4
+      c6: hex.vec 1, 6
+      cang45: hex.vec 8, 0x20000000
+      cang90m1: hex.vec 8, 0x3FFFFFFF
+      end:
+    }
+
+    // proj.wedge_reject rej, viewx, viewy, v1x, v1y, v2x, v2y, qa, na, qb, nb — PER SEG.
+    //   rej[:1] = 1 iff BOTH seg endpoints are strictly outside the SAME bounding half-plane, i.e.
+    //   the whole seg misses the conservative wedge. (Both-outside-but-different-planes does NOT
+    //   cull: such a seg spans the view.) Ordered to reject in two tests and to accept in two:
+    //   plane A on v1 → (v2) → plane B on v1 → (v2). @requires hex.init
+    def wedge_reject rej, viewx, viewy, v1x, v1y, v2x, v2y, qa, na, qb, nb \
+            @ dx1, dy1, dx2, dy2, dxc, dyc, qcur, ncur, outc, s, qret, \
+              qtest, qlo, qhi, qq0, qq1, qq2, qq3, qdone, posform, insid, outsid, \
+              tb, rejlab, done, c1, c2, c3, czero, end {
+        hex.set 1, rej, 0
+        hex.mov 8, dx1, v1x
+        hex.sub 8, dx1, viewx
+        hex.mov 8, dy1, v1y
+        hex.sub 8, dy1, viewy
+        hex.mov 8, dx2, v2x
+        hex.sub 8, dx2, viewx
+        hex.mov 8, dy2, v2y
+        hex.sub 8, dy2, viewy
+
+        hex.mov 1, qcur, qa                 // ── plane A
+        hex.mov 1, ncur, na
+        hex.mov 8, dxc, dx1
+        hex.mov 8, dyc, dy1
+        stl.fcall qtest, qret
+        hex.if0 1, outc, tb                 // v1 inside A -> A cannot reject
+        hex.mov 8, dxc, dx2
+        hex.mov 8, dyc, dy2
+        stl.fcall qtest, qret
+        hex.if0 1, outc, tb                 // v2 inside A -> A cannot reject
+        ;rejlab
+      tb:
+        hex.mov 1, qcur, qb                 // ── plane B
+        hex.mov 1, ncur, nb
+        hex.mov 8, dxc, dx1
+        hex.mov 8, dyc, dy1
+        stl.fcall qtest, qret
+        hex.if0 1, outc, done
+        hex.mov 8, dxc, dx2
+        hex.mov 8, dyc, dy2
+        stl.fcall qtest, qret
+        hex.if0 1, outc, done
+      rejlab:
+        hex.set 1, rej, 1
+      done:
+        ;end
+
+      qtest:                                // outc = 1 iff (dxc,dyc) is OUTSIDE plane (qcur,ncur)
+        hex.cmp 1, qcur, c2, qlo, qq2, qhi
+      qlo:
+        hex.cmp 1, qcur, c1, qq0, qq1, qq1
+      qhi:
+        hex.cmp 1, qcur, c3, qq2, qq3, qq3
+      qq0:
+        hex.mov 8, s, dyc                   // Q0 = dy
+        ;qdone
+      qq1:
+        hex.mov 8, s, dyc                   // Q1 = dy - dx
+        hex.sub 8, s, dxc
+        ;qdone
+      qq2:
+        hex.mov 8, s, dxc                   // Q2 = dx
+        ;qdone
+      qq3:
+        hex.mov 8, s, dxc                   // Q3 = dx + dy
+        hex.add 8, s, dyc
+        ;qdone
+      qdone:
+        hex.if0 1, ncur, posform
+        hex.scmp 8, s, czero, insid, insid, outsid    // negated test: outside iff Q > 0
+      posform:
+        hex.scmp 8, s, czero, outsid, insid, insid    // plain test:   outside iff Q < 0
+      insid:
+        hex.set 1, outc, 0
+        stl.fret qret
+      outsid:
+        hex.set 1, outc, 1
+        stl.fret qret
+
+      dx1: hex.vec 8
+      dy1: hex.vec 8
+      dx2: hex.vec 8
+      dy2: hex.vec 8
+      dxc: hex.vec 8
+      dyc: hex.vec 8
+      s: hex.vec 8
+      qcur: hex.vec 1
+      ncur: hex.vec 1
+      outc: hex.vec 1
+      qret: ;0
+      c1: hex.vec 1, 1
+      c2: hex.vec 1, 2
+      c3: hex.vec 1, 3
+      czero: hex.vec 8, 0
+      end:
+    }
+
     // proj.point_to_dist dst, viewx, viewy, x, y (R_PointToDist): dst[:8] = the 16.16 distance from
     //   (viewx,viewy) to (x,y) — sqrt(dx²+dy²) computed via tantoangle + finesine + two FixedDivs (no
     //   sqrt). Fold to the major octant (dx>=dy), index tantoangle by the slope dy/dx >> DBITS, take

@@ -86,4 +86,53 @@ ns present {
     def begin_frame_planes {
         stl.output_char 0x09
     }
+
+    // begin_frame_spans: [0x0A] (M13-spanfill) — the DUMB-SCREEN protocol. The whole frame arrives as
+    // a flat list of explicit fillCol records [x:1][y1:1][y2:1][colour:1], terminated by a sentinel
+    // record whose x == 0xFF. The device does NOTHING but fill: for each record it sets column `x`,
+    // rows [y1, y2), to palette index `colour` — no cursor state, no band lists, no clipping, no
+    // lookups. fj does all the geometry/lighting/clipping and hands the device only straight coloured
+    // vertical strips. (A horizontal-span twin — fillRow [x1][x2][y][colour] — is the natural
+    // extension for a row-major floor pass; not emitted yet.) Decode: stream_screen.py::_decode_spans_frame.
+    def begin_frame_spans {
+        stl.output_char 0x0A
+    }
+
+    // M13-raster — the DEVICE RASTERIZER. fj stays the "brain" (BSP walk, visibility/occlusion
+    // DECISIONS, per-seg projection setup); the device does pure rendering MECHANICS from compact
+    // records: a wall-column DDA (2 adds/column: scale+=scalestep, then a fixed_mul+shift for
+    // top/bottom), a first-writer-wins fill, and a distance-light shade (a threshold march +
+    // table lookups — the SAME arithmetic `plane.build_bands`/`_zidx_band_walk` already do, just
+    // executed device-side instead of costing fj ops). No game state, no visibility decisions: the
+    // walk's front-to-back EMIT ORDER is what encodes occlusion; the device only refuses to
+    // overwrite an already-painted column.
+
+    // load_raster_tables: [0x0C][yslope_addr:w/8][zlight_addr:w/8][colormap_addr:w/8] — ONCE per
+    // program (not per frame, right after set_palette): hands the device the addresses of three
+    // STATIC fj-baked tables it DMA-reads directly (zero fj ops, exactly like set_palette/
+    // update_screen's existing address-handoff DMA). yslope_addr: packed-byte, 3 bytes/row,
+    // VIEW_H rows (the SAME table `plane.build_bands` used, see generate_yslope_packed_lut_fj).
+    // zlight_addr: packed-byte, 2 bytes/entry (wait: nibble-vec 2, 1 byte via read_table), the
+    // LIGHTLEVELS*MAXLIGHTZ flattened distance-light grid (generate_zlight_lut_fj). colormap_addr:
+    // packed-byte, COLORMAP_LIGHTS*256 raw palette-index bytes, ROW-MAJOR [light_row][texel]
+    // (generate_colormap_table_fj — NEW, a raw addressable twin of the flattened cm.emit dispatch).
+    def load_raster_tables yslope_addr, zlight_addr, colormap_addr {
+        stl.output_char 0x0C
+        .emit_addr yslope_addr
+        .emit_addr zlight_addr
+        .emit_addr colormap_addr
+    }
+
+    // begin_frame_raster: [0x0D] — starts the per-frame raster stream. What follows (interleaved,
+    // in BSP front-to-back walk order — no separate "buffer then emit" phase needed since ordering
+    // alone encodes occlusion) is: per newly-referenced visplane, ONE record
+    // [0xFE][planeheight:4][light:1][base:1] (the 0xFE tag disambiguates a visplane record from a
+    // seg record in the flat interleaved stream); per surviving seg, ONE record
+    // [x1:1][x2:1][scale1:4][scalestep:4][wt_ceil:4][wt_floor:4][lit:1][cvp_idx:1][fvp_idx:1]
+    // (21 bytes; x1 != 0xFE so the device can tell it apart from a visplane record by its first
+    // byte). The stream ends with ONE terminator byte 0xFF (never a valid x1 or tag). Decode:
+    // stream_screen.py::_decode_raster_frame.
+    def begin_frame_raster {
+        stl.output_char 0x0D
+    }
 }

@@ -964,6 +964,163 @@ ns frame {
       fbufaddr: hex.vec w/4
     }
 
+    // M13-raster — the DEVICE RASTERIZER leaf body: fj stays the "brain" (BSP walk, visibility/
+    // occlusion DECISIONS, per-seg projection setup); the device does the per-column wall DDA, the
+    // first-writer-wins fill, and the distance-light shading. build_bands, column_render_params_stream
+    // and the 11-field col_struct writes are ALL GONE, replaced by two small emitted records: one per
+    // NEWLY-referenced visplane ([0xFE/0xFD tag][vp_idx][planeheight:4][light][base] — vp_idx/light/
+    // base are the SAME per-seg xorby-baked runtime registers seg_cvpidx/seg_fvpidx/seg_plight/
+    // seg_ceilbase/seg_floorbase already carry today, just byte.emit'd instead of stored; only the
+    // tag is a true compile-time literal since this leaf is SHARED/fcall'd, not unrolled per seg) and
+    // one per surviving seg ([x1][x2][scale1:4][scalestep:4][wt_ceil:4 signed][wt_floor:4 signed]
+    // [lit][cvp_idx][fvp_idx]). `drawn` is a lone packed byte per column (colstruct-style: ONE
+    // ptr_index per seg to aim at column x1, then ptr_add per column) so the walk's until-full early-
+    // abort and the "skip a fully-occluded seg's emit" optimization both survive; the DEVICE
+    // separately tracks its own per-column painted[] to do the fine-grained first-wins fill within a
+    // seg's range (fj only coarsely pre-scans "does ANY unclaimed column exist"). vpc_flags/vpf_flags
+    // are the existing per-visplane "already emitted this frame" flags (same access pattern as
+    // seg_pass1_leaf_body_stream's build-once check). wt_ceil/wt_floor stay SIGNED throughout (cph/
+    // fph hold the separate |wt| copies for the visplane record, so the seg record's own wt_ceil/
+    // wt_floor emit is never clobbered). Verified byte-exact against the oracle over a broad random-
+    // viewpoint sweep (scratchpad/proto_device_rasterizer.py + scratchpad/verify_stream_screen_
+    // raster.py) before this macro was written. @requires hex.init & stl.ptr_init.
+    def seg_pass1_leaf_body_raster projection \
+            @ ret, dptr, dbase, dval, \
+              wtc, wtf, cph, fph, \
+              work, wok, occscan, occchk, occdone, occproc, \
+              cvpp, cnadv, cvpb, cbuild, cbuilt, fvpp, fnadv, fvpb, fbuild, fbuilt, \
+              mloop, mbody, mnext, msfull, mnext2 \
+            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
+              viewz, seg_ceil, seg_floor, seg_plight, seg_ceilbase, seg_floorbase, seg_lit, \
+              seg_cvpidx, seg_fvpidx, \
+              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
+              drawn, vpc_flags, vpf_flags, seg_ret, full, n_drawn, vieww, \
+              wrej, wqa, wna, wqb, wnb {
+        hex.if0 1, full, work                   // M13opt-P1: screen already full -> paint nothing
+        stl.fret seg_ret
+      work:
+        // M13-wedge: the multiply-free conservative FOV pre-cull, BEFORE the affine back-face test
+        // (2 fixed_mul) and the two atans. Byte-exact -- the wedge strictly contains the FOV, so a
+        // seg it rejects contributes no pixel. Measured at spawn: 173/432 segs never reach the mul.
+        proj.wedge_reject wrej, viewx, viewy, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb
+        hex.if0 1, wrej, wok
+        stl.fret seg_ret
+      wok:
+        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        hex.if0 1, visible, ret
+        hex.mov 8, x, x1
+        hex.set w/4, dbase, drawn
+        hex.ptr_index dptr, dbase, x1              // dptr -> &drawn[x1] (1 packed byte/column, stride 1)
+      occscan:
+        hex.scmp 8, x, x2, occchk, occdone, occdone
+      occchk:
+        hex.read_byte dval, dptr                   // peek drawn[x] (no advance)
+        hex.if0 2, dval, occproc                   // ==0 -> an unclaimed column exists -> must emit this seg
+        hex.ptr_add dptr, 1                        // claimed -> advance, keep scanning
+        hex.inc 8, x
+        ;occscan
+      occdone:
+        stl.fret seg_ret                           // fully occluded -> byte-exact skip (no emit at all)
+      occproc:
+        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
+        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        hex.mov 8, wtc, seg_ceil                   // wt_ceil = (ceil_h<<16) - viewz   (SIGNED -- the
+        hex.shl_hex 8, 4, wtc                      // device's own DDA needs the true signed value;
+        hex.sub 8, wtc, viewz                      // never overwritten again below)
+        hex.mov 8, wtf, seg_floor                  // wt_floor = (floor_h<<16) - viewz
+        hex.shl_hex 8, 4, wtf
+        hex.sub 8, wtf, viewz
+
+        // ceiling visplane: emit [0xFE][vp_idx][planeheight:4][light][base] on first reference this
+        // frame. planeheight = |wt_ceil|, computed into the SEPARATE cph register (wtc itself stays
+        // signed for the seg record emitted further down).
+        hex.mul_const w/4, cnadv, seg_cvpidx, dw
+        hex.set w/4, cvpp, vpc_flags
+        hex.add w/4, cvpp, cnadv
+        hex.read_hex 1, cvpb, cvpp
+        hex.if0 1, cvpb, cbuild
+        ;cbuilt
+      cbuild:
+        hex.mov 8, cph, wtc
+        hex.abs 8, cph
+        stl.output_char 0xFE
+        byte.emit seg_cvpidx
+        stream.emit_bytes4 cph
+        byte.emit seg_plight
+        byte.emit seg_ceilbase
+        hex.set 1, cvpb, 1
+        hex.write_hex 1, cvpp, cvpb
+      cbuilt:
+        hex.mul_const w/4, fnadv, seg_fvpidx, dw
+        hex.set w/4, fvpp, vpf_flags
+        hex.add w/4, fvpp, fnadv
+        hex.read_hex 1, fvpb, fvpp
+        hex.if0 1, fvpb, fbuild
+        ;fbuilt
+      fbuild:
+        hex.mov 8, fph, wtf
+        hex.abs 8, fph
+        stl.output_char 0xFD
+        byte.emit seg_fvpidx
+        stream.emit_bytes4 fph
+        byte.emit seg_plight
+        byte.emit seg_floorbase
+        hex.set 1, fvpb, 1
+        hex.write_hex 1, fvpp, fvpb
+      fbuilt:
+        // the seg record: [x1][x2][scale1:4][scalestep:4][wt_ceil:4][wt_floor:4][lit][cvp_idx][fvp_idx]
+        byte.emit x1
+        byte.emit x2
+        stream.emit_bytes4 scale
+        stream.emit_bytes4 scalestep
+        stream.emit_bytes4 wtc
+        stream.emit_bytes4 wtf
+        byte.emit seg_lit
+        byte.emit seg_cvpidx
+        byte.emit seg_fvpidx
+
+        // mark [x1,x2) drawn (cheap: no DDA/clip/store — the device's own painted[] does the
+        // fine-grained per-column fill decision) + count NEWLY-claimed columns toward the until-full
+        // abort, exactly mirroring seg_pass1_leaf_body_stream's own bookkeeping. dptr must be
+        // RE-AIMED at x1 here: the occlusion pre-scan above left it wherever it stopped (the first
+        // unclaimed column found), not necessarily x1.
+        hex.mov 8, x, x1
+        hex.ptr_index dptr, dbase, x1
+      mloop:
+        hex.scmp 8, x, x2, mbody, ret, ret
+      mbody:
+        hex.read_byte dval, dptr
+        hex.if0 2, dval, mnext
+        hex.ptr_add dptr, 1
+        hex.inc 8, x
+        ;mloop
+      mnext:
+        hex.set 2, dval, 1
+        hex.write_byte_and_inc dptr, dval
+        hex.inc 2, n_drawn
+        hex.cmp 2, n_drawn, vieww, mnext2, msfull, mnext2
+      msfull:
+        hex.set 1, full, 1
+      mnext2:
+        hex.inc 8, x
+        ;mloop
+      ret:
+        stl.fret seg_ret
+      dbase: hex.vec w/4
+      dptr: hex.vec w/4
+      dval: hex.vec 2
+      wtc: hex.vec 8
+      wtf: hex.vec 8
+      cph: hex.vec 8
+      fph: hex.vec 8
+      cvpp: hex.vec w/4
+      cnadv: hex.vec w/4
+      cvpb: hex.vec 1
+      fvpp: hex.vec w/4
+      fnadv: hex.vec w/4
+      fvpb: hex.vec 1
+    }
+
     // ── M13opt2 R_MakeSpans (compile-time-column) — the per-ROW TEXTURED floor/ceiling span pass. For each
     //    screen row y, the COLUMN scan is UNROLLED (`rep(view_w, x) plane_col x`) so every per-column array read
     //    is a DIRECT mov from a COMPILE-TIME address `col_X + 8*x*dw` — NO runtime `ptr_index` (the M13d2 runtime

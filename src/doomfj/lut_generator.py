@@ -199,6 +199,18 @@ def generate_yslope_packed_lut_fj(label: str, view_w: int, view_h: int) -> str:
     return "\n".join(lines)
 
 
+def generate_zlight_packed_lut_fj(label: str, view_w: int, num_colormaps: int) -> str:
+    """M13-raster: zlight as a raw PACKED-BYTE array (1 dw-slot/entry via `generate_byte_lut_fj`),
+    NOT the nibble-vec `hex.vec 2` form `generate_zlight_lut_fj` emits. The device rasterizer DMA-reads
+    this directly (`InMemoryScreen._read_packed_bytes`, the same one-byte-per-dw-slot convention as
+    `yslope_packed`/the new raw colormap table) -- the nibble-vec form isn't addressable that way (each
+    entry would straddle 2 dw-slots as separate low/high nibbles). Same `tables.zlight_table` values
+    (R6 SSOT) as the nibble-vec variant; every entry is a colormap row index (0..num_colormaps-1), so
+    it always fits a byte."""
+    flat = [row for lvl in zlight_table(view_w, num_colormaps) for row in lvl]
+    return generate_byte_lut_fj(label, flat)
+
+
 def generate_distscale_lut_fj(label: str, view_w: int, trig_n: int) -> str:
     """distscale (R_MapPlane: screen column -> 1/|cos| fisheye, 16.16, 8 nibbles), view_w entries. Values
     from `tables.distscale_table` (all positive). `length = FixedMul(distance, distscale[x1])` seeds the

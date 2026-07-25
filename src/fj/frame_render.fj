@@ -995,14 +995,14 @@ ns frame {
               seg_cvpidx, seg_fvpidx, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
               drawn, vpc_flags, vpf_flags, seg_ret, full, n_drawn, vieww, \
-              wrej, wqa, wna, wqb, wnb {
+              wrej, wqa, wna, wqb, wnb, wex, wey, weyx, wexy {
         hex.if0 1, full, work                   // M13opt-P1: screen already full -> paint nothing
         stl.fret seg_ret
       work:
         // M13-wedge: the multiply-free conservative FOV pre-cull, BEFORE the affine back-face test
         // (2 fixed_mul) and the two atans. Byte-exact -- the wedge strictly contains the FOV, so a
         // seg it rejects contributes no pixel. Measured at spawn: 173/432 segs never reach the mul.
-        proj.wedge_reject wrej, viewx, viewy, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb
+        proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy
         hex.if0 1, wrej, wok
         stl.fret seg_ret
       wok:

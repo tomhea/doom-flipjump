@@ -54,7 +54,7 @@ def _seg_xorby_use(idx, clear=True):
     return seq
 
 
-_ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub"})
+_ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub"})
 
 MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Bound: a monotone half-window's
                                   # zidx walk gives <=32 distinct zrow runs (zlight[lvl][zidx] is monotone in
@@ -327,7 +327,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # M13-wedge: the per-frame half-plane descriptors for the conservative FOV pre-cull (the
         # outward-rounded 45-degree wedge that strictly contains the FOV). Once per frame; the
         # per-seg test that uses them is multiply-free.
-        pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, viewangle")
+        pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
         pass1.append("present.begin_frame_raster")   # M13-raster: starts the per-frame record stream;
                                                        # the walk below emits vp/seg records INLINE
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
@@ -436,6 +436,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "bad: stl.loop",
         *fb_leaves,
         *(["seg_pass1_leaf:", "stl.fret seg_ret"] if "segstub" in ablate else
+          # M13-wedge attribution: segstub + the wedge test only. (segstub - wedgestub)/segs gives the
+          # test's true in-context unit cost; both walk the WHOLE tree (`full` is never set).
+          ["seg_pass1_leaf:",
+           "proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy",
+           "stl.fret seg_ret"] if "wedgestub" in ablate else
           ["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
            "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"] if "xrstub" in ablate else
           ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_raster {proj}"]
@@ -513,6 +518,7 @@ def _raster_mode_decls(cfg, asset_wad, nvpc: int, nvpf: int) -> list[str]:
         "seg_cvpidx: hex.vec 8", "seg_fvpidx: hex.vec 8",   # the seg's visplane indices (baked)
         # M13-wedge: the conservative FOV pre-cull's per-frame half-plane descriptors + per-seg verdict
         "wrej: hex.vec 1", "wqa: hex.vec 1", "wna: hex.vec 1", "wqb: hex.vec 1", "wnb: hex.vec 1",
+        "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
         "drawn:\n" + "\n".join(";0 * dw" for _ in range(cfg.VIEW_W)),
         f"vpc_flags: rep({nvpc}, i) hex.vec 1, 0", f"vpf_flags: rep({nvpf}, i) hex.vec 1, 0",
         generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H),

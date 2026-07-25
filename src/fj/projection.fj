@@ -390,17 +390,28 @@ ns proj {
     // 488 point_to_angle calls rejected, with the visible-seg and emitted-seg sets IDENTICAL.
     // Finer boundary sets (16/24 directions) cull no better at the spawn angle, so 8 it is.
 
-    // proj.wedge_setup qa, na, qb, nb, viewangle — ONCE PER FRAME. Writes the two half-plane
-    //   descriptors (q = the base quantity 0..3, n = 1 iff the test is negated) bounding the
-    //   outward-rounded FOV wedge. lo = floor((va-ANG45)/ANG45), hi = ceil((va+ANG45)/ANG45) via the
-    //   integer identity ceil(a/b) = floor((a+b-1)/b); plane B is (hi+4) mod 8 (the far edge's
-    //   half-plane points inward), and since +4 leaves m&3 alone, qb = wsel(hi).q while nb is
-    //   wsel(hi).n INVERTED. All arithmetic is mod 2^32, which is exactly the BAM circle.
+    // proj.wedge_setup qa, na, qb, nb, wex, wey, weyx, wexy, viewangle, viewx, viewy — ONCE PER
+    //   FRAME. Writes the two half-plane descriptors (q = the base quantity 0..3, n = 1 iff the test
+    //   is negated) bounding the outward-rounded FOV wedge, plus the four EYE terms the per-seg test
+    //   subtracts (wex=viewx, wey=viewy, weyx=viewy-viewx, wexy=viewx+viewy) so that each Q is one
+    //   subtraction off the raw vertex — no per-seg dx/dy staging.
+    //   lo = floor((va-ANG45)/ANG45), hi = ceil((va+ANG45)/ANG45) via the integer identity
+    //   ceil(a/b) = floor((a+b-1)/b); plane B is (hi+4) mod 8 (the far edge's half-plane points
+    //   inward), and since +4 leaves m&3 alone, qb = wsel(hi).q while nb is wsel(hi).n INVERTED.
+    //   All arithmetic is mod 2^32, which is exactly the BAM circle. wexy/weyx cannot overflow: the
+    //   map's max |x|+|y| is 5440 units = 3.6e8 in 16.16, well inside the signed 32-bit range.
     //   @requires hex.init
-    def wedge_setup qa, na, qb, nb, viewangle \
+    def wedge_setup qa, na, qb, nb, wex, wey, weyx, wexy, viewangle, viewx, viewy \
             @ m, t, wsel, qout, nout, wret, \
               slo4, shi4, slo2, m0, m1, m2, m3, m4, m5, m6, m7, sdone, \
               nb0, nbdone, c1, c2, c4, c6, cang45, cang90m1, end {
+        hex.mov 8, wex, viewx
+        hex.mov 8, wey, viewy
+        hex.mov 8, weyx, viewy
+        hex.sub 8, weyx, viewx              // weyx = viewy - viewx
+        hex.mov 8, wexy, viewx
+        hex.add 8, wexy, viewy              // wexy = viewx + viewy
+
         hex.mov 8, t, viewangle
         hex.sub 8, t, cang45                // (va - ANG45) mod 2^32
         hex.shr_hex 8, 7, t                 // >> 28 bits ...
@@ -482,100 +493,72 @@ ns proj {
       end:
     }
 
-    // proj.wedge_reject rej, viewx, viewy, v1x, v1y, v2x, v2y, qa, na, qb, nb — PER SEG.
+    // proj.wedge_reject rej, v1x, v1y, v2x, v2y, qa, na, qb, nb, wex, wey, weyx, wexy — PER SEG.
     //   rej[:1] = 1 iff BOTH seg endpoints are strictly outside the SAME bounding half-plane, i.e.
     //   the whole seg misses the conservative wedge. (Both-outside-but-different-planes does NOT
-    //   cull: such a seg spans the view.) Ordered to reject in two tests and to accept in two:
-    //   plane A on v1 → (v2) → plane B on v1 → (v2). @requires hex.init
-    def wedge_reject rej, viewx, viewy, v1x, v1y, v2x, v2y, qa, na, qb, nb \
-            @ dx1, dy1, dx2, dy2, dxc, dyc, qcur, ncur, outc, s, qret, \
-              qtest, qlo, qhi, qq0, qq1, qq2, qq3, qdone, posform, insid, outsid, \
-              tb, rejlab, done, c1, c2, c3, czero, end {
+    //   cull: such a seg spans the view.) Ordered so the common cases finish in TWO tests -- reject
+    //   on (A:v1, A:v2), accept on (A:v1, B:v1) -- and so vertex 2 is never touched when v1 alone
+    //   decides. Each test is one mov + one or two 8-nibble adds against a per-frame eye term:
+    //     Q0 = v.y - viewy   Q1 = (v.y - v.x) - weyx   Q2 = v.x - viewx   Q3 = (v.x + v.y) - wexy
+    //   which is exactly cross(dir_m, v - eye) up to the sign carried by `n`. @requires hex.init
+    def wedge_reject rej, v1x, v1y, v2x, v2y, qa, na, qb, nb, wex, wey, weyx, wexy \
+            @ a1out, b1out, tb, rejlab, done, end {
         hex.set 1, rej, 0
-        hex.mov 8, dx1, v1x
-        hex.sub 8, dx1, viewx
-        hex.mov 8, dy1, v1y
-        hex.sub 8, dy1, viewy
-        hex.mov 8, dx2, v2x
-        hex.sub 8, dx2, viewx
-        hex.mov 8, dy2, v2y
-        hex.sub 8, dy2, viewy
-
-        hex.mov 1, qcur, qa                 // ── plane A
-        hex.mov 1, ncur, na
-        hex.mov 8, dxc, dx1
-        hex.mov 8, dyc, dy1
-        stl.fcall qtest, qret
-        hex.if0 1, outc, tb                 // v1 inside A -> A cannot reject
-        hex.mov 8, dxc, dx2
-        hex.mov 8, dyc, dy2
-        stl.fcall qtest, qret
-        hex.if0 1, outc, tb                 // v2 inside A -> A cannot reject
-        ;rejlab
+        .wedge_qt v1x, v1y, qa, na, wex, wey, weyx, wexy, tb, a1out       // v1 inside A -> A can't reject
+      a1out:
+        .wedge_qt v2x, v2y, qa, na, wex, wey, weyx, wexy, tb, rejlab      // both outside A -> REJECT
       tb:
-        hex.mov 1, qcur, qb                 // ── plane B
-        hex.mov 1, ncur, nb
-        hex.mov 8, dxc, dx1
-        hex.mov 8, dyc, dy1
-        stl.fcall qtest, qret
-        hex.if0 1, outc, done
-        hex.mov 8, dxc, dx2
-        hex.mov 8, dyc, dy2
-        stl.fcall qtest, qret
-        hex.if0 1, outc, done
+        .wedge_qt v1x, v1y, qb, nb, wex, wey, weyx, wexy, done, b1out
+      b1out:
+        .wedge_qt v2x, v2y, qb, nb, wex, wey, weyx, wexy, done, rejlab
       rejlab:
         hex.set 1, rej, 1
       done:
         ;end
+      end:
+    }
 
-      qtest:                                // outc = 1 iff (dxc,dyc) is OUTSIDE plane (qcur,ncur)
-        hex.cmp 1, qcur, c2, qlo, qq2, qhi
+    // proj.wedge_qt vx, vy, q, n, wex, wey, weyx, wexy, insid, outsid — ONE half-plane test on ONE
+    //   vertex, jumping straight to `insid`/`outsid`. Inlined (four copies inside wedge_reject)
+    //   rather than shared: the two `hex.mov 8` needed to stage a vertex into a shared body, plus the
+    //   fcall/fret pair and the outc round-trip, cost more than the body itself. Every path exits by
+    //   a jump, so the trailing data block is never fallen into. @requires hex.init
+    def wedge_qt vx, vy, q, n, wex, wey, weyx, wexy, insid, outsid \
+            @ s, qlo, qhi, qq0, qq1, qq2, qq3, qdone, posform, c1, c2, c3, czero {
+        hex.cmp 1, q, c2, qlo, qq2, qhi
       qlo:
-        hex.cmp 1, qcur, c1, qq0, qq1, qq1
+        hex.cmp 1, q, c1, qq0, qq1, qq1
       qhi:
-        hex.cmp 1, qcur, c3, qq2, qq3, qq3
+        hex.cmp 1, q, c3, qq2, qq3, qq3
       qq0:
-        hex.mov 8, s, dyc                   // Q0 = dy
+        hex.mov 8, s, vy                    // Q0 = vy - viewy
+        hex.sub 8, s, wey
         ;qdone
       qq1:
-        hex.mov 8, s, dyc                   // Q1 = dy - dx
-        hex.sub 8, s, dxc
+        hex.mov 8, s, vy                    // Q1 = (vy - vx) - (viewy - viewx)
+        hex.sub 8, s, vx
+        hex.sub 8, s, weyx
         ;qdone
       qq2:
-        hex.mov 8, s, dxc                   // Q2 = dx
+        hex.mov 8, s, vx                    // Q2 = vx - viewx
+        hex.sub 8, s, wex
         ;qdone
       qq3:
-        hex.mov 8, s, dxc                   // Q3 = dx + dy
-        hex.add 8, s, dyc
+        hex.mov 8, s, vx                    // Q3 = (vx + vy) - (viewx + viewy)
+        hex.add 8, s, vy
+        hex.sub 8, s, wexy
         ;qdone
       qdone:
-        hex.if0 1, ncur, posform
+        hex.if0 1, n, posform
         hex.scmp 8, s, czero, insid, insid, outsid    // negated test: outside iff Q > 0
       posform:
         hex.scmp 8, s, czero, outsid, insid, insid    // plain test:   outside iff Q < 0
-      insid:
-        hex.set 1, outc, 0
-        stl.fret qret
-      outsid:
-        hex.set 1, outc, 1
-        stl.fret qret
 
-      dx1: hex.vec 8
-      dy1: hex.vec 8
-      dx2: hex.vec 8
-      dy2: hex.vec 8
-      dxc: hex.vec 8
-      dyc: hex.vec 8
       s: hex.vec 8
-      qcur: hex.vec 1
-      ncur: hex.vec 1
-      outc: hex.vec 1
-      qret: ;0
       c1: hex.vec 1, 1
       c2: hex.vec 1, 2
       c3: hex.vec 1, 3
       czero: hex.vec 8, 0
-      end:
     }
 
     // proj.point_to_dist dst, viewx, viewy, x, y (R_PointToDist): dst[:8] = the 16.16 distance from

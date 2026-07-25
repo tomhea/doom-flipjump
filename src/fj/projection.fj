@@ -18,11 +18,15 @@ ns proj {
     //   nibbles; the exponent is nibble-granular), and >=4 nibbles, so `fsh` (init 2 = 6-4) only counts
     //   the variable part. @requires hex.init + hex.read_table.
     def slope_div dst, num, den \
-            @ lt, ge, nrm_hi, hi_more, hi_done, nrm_lo, lo_more, lo_done, \
+            @ lt, ge, denlo, prodlo, nrm_hi, hi_more, hi_done, nrm_lo, lo_more, lo_done, \
               flo3, fhi3, fs0, fs1, fs2, fs3, fs4, fs5, fsh_done, keep, clamp, done, \
-              sden, wnum, recipw, recip, prod, fsh, c512, cfff, c100, cone2, c3two, c5two, csr \
+              sden, wnum, recipw, recip, prod, fsh, c512s, csr3, cone2, c3two, c5two \
             < slopediv_recip {
-        hex.cmp 8, den, c512, lt, ge, ge        // den < 512 ?  lt -> small (clamp to SLOPERANGE)
+        // den < 0x200 <=> nibbles 3..7 are all zero AND the low 3 nibbles are < 0x200
+        hex.if0 5, den + 3*dw, denlo
+        ;ge
+      denlo:
+        hex.cmp 3, den, c512s, lt, ge, ge        // den < 512 ?  lt -> small (clamp to SLOPERANGE)
       lt:
         hex.set 3, dst, 0x800
         ;done
@@ -33,19 +37,19 @@ ns proj {
 
         hex.set 2, fsh, 2                        // fsh = 2 (= 6-4): the variable nibble-shift past the base 4
       nrm_hi:                                    // right-normalize: while sden > 0xFFF, sden >>= 1 nib, fsh++
-        hex.cmp 8, sden, cfff, hi_done, hi_done, hi_more   // sden > 0xFFF ?  gt -> shift
+        hex.if0 5, sden + 3*dw, hi_done          // sden <= 0xFFF <=> nibbles 3..7 all zero
       hi_more:
         hex.shr_hex 8, 1, sden
         hex.inc 2, fsh
         ;nrm_hi
       hi_done:                                   // left-normalize: while sden < 0x100, sden <<= 1 nib, fsh--
-        hex.cmp 8, sden, c100, lo_more, lo_done, lo_done   // sden < 0x100 ?  lt -> shift
+      nrm_lo:
+        hex.if0 6, sden + 2*dw, lo_more          // sden < 0x100 <=> nibbles 2..7 all zero
+        ;lo_done
       lo_more:
         hex.shl_hex 8, 1, sden
         hex.dec 2, fsh
         ;nrm_lo
-      nrm_lo:
-        hex.cmp 8, sden, c100, lo_more, lo_done, lo_done
       lo_done:
         hex.read_table_packed 3, recip, slopediv_recip, 3, sden   // recip = slopediv_recip[m] (packed, M13-lutpack)
 
@@ -86,7 +90,10 @@ ns proj {
         hex.shr_hex 13, 5, prod
         ;fsh_done
       fsh_done:
-        hex.cmp 13, prod, csr, keep, keep, clamp   // prod > SLOPERANGE ?  gt -> clamp
+        hex.if0 10, prod + 3*dw, prodlo            // any nibble above 2 set => certainly > 0x800
+        ;clamp
+      prodlo:
+        hex.cmp 3, prod, csr3, keep, keep, clamp   // prod > SLOPERANGE ?  gt -> clamp
       keep:
         hex.mov 3, dst, prod
         ;done
@@ -100,13 +107,11 @@ ns proj {
       recip: hex.vec 6
       prod: hex.vec 13
       fsh: hex.vec 2
-      c512: hex.vec 8, 512
-      cfff: hex.vec 8, 0xfff
-      c100: hex.vec 8, 0x100
+      c512s: hex.vec 3, 512
       cone2: hex.vec 2, 1
       c3two: hex.vec 2, 3
       c5two: hex.vec 2, 5
-      csr: hex.vec 13, 0x800
+      csr3: hex.vec 3, 0x800
       done:
     }
 
@@ -145,9 +150,11 @@ ns proj {
       syp:
       syd:
         // dx,dy are now non-negative magnitudes. zero check (unsigned, R5-ok): both zero -> angle 0.
-        hex.cmp 8, dx, czero, nz, dxz, nz
+        hex.if0 8, dx, dxz
+        ;nz
       dxz:
-        hex.cmp 8, dy, czero, nz, bothz, nz
+        hex.if0 8, dy, bothz
+        ;nz
       bothz:
         hex.zero 8, dst
         ;done
@@ -794,7 +801,7 @@ ns proj {
         .point_to_angle a2, viewx, viewy, v2x, v2y    // absolute angle to v2 (right)
         hex.mov 8, span, a1
         hex.sub 8, span, a2                            // span = (a1 - a2) mod 2^32
-        hex.cmp 8, span, cang180, notback, end, end    // span >= ANG180 -> back-facing, cull
+        hex.sign 8, span, end, notback                 // span >= ANG180 <=> bit 31 set -> cull
       notback:
         hex.mov 8, rwa, a1                             // rw_angle1 = absolute a1 (committed on success)
         hex.sub 8, a1, viewangle                       // a1 view-relative

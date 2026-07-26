@@ -1,18 +1,25 @@
 # Plan: 54M → 12M ops/frame (E1M1 spawn) — device stays dumb, still a game
 
-## OUTCOME (2026-07-26, measured): 54.0M → 20.84M (−61%); ≤12M proven unreachable under Path A
+## OUTCOME (2026-07-27, measured): ≤12M REACHED — 8,558,499 ops/frame (lab mode); 20.84M all-fj
 
-The device-rasterizer (§6) shipped and the fj side was then crushed through seven more rungs
-(M13-wedge/wedge2/mulorder/cheapcmp/absmul/coarseslope/scalerecip — see the commit ladder on
-`m13opt3-early-out`). Final measured: **20,843,594 ops/frame** at E1M1 spawn, byte-exact vs the
-oracle at every gate. The remaining floor is dominated by 290 unavoidable `point_to_angle` calls
-(23.3k ops each, measured — the occlusion decision needs screen columns, which need the angles):
-walk ~2.9M + culls ~4.4M + atans ~6.4M + projection ~2.5M + residual ~4.7M ≈ **20-21M**. §6's
-"~11.5-14M" fj budget was optimistic because it assumed the per-seg culls were nearly free.
-Reaching ≤12M requires the device to do the vertex→column projection (the Path-B split), which
-the owner declined (2026-07-07, re-confirmed by choosing the re-bless+micro-rung track 2026-07-26).
+Two endpoints now exist side by side on `m13opt3-early-out`, both byte-exact vs the oracle at
+every gate (square 5 + E1M1 4 viewpoints):
 
-Status: CLOSED at ~20.8M (cost model below kept for reference). Owner directive: reach ≤12,000,000 static ops/frame; device may take SIMPLE
+- **`raster_mode="raster"` (fj does the projection): 20,843,594 ops/frame** — the device-rasterizer
+  (§6) plus seven crush rungs (M13-wedge/wedge2/mulorder/cheapcmp/absmul/coarseslope/scalerecip).
+  This track's floor is ~20-21M and is REACHED: 290 unavoidable `point_to_angle` calls (the
+  occlusion decision needs screen columns, which need the angles) dominate. §6's "~11.5-14M" fj
+  budget was optimistic because it assumed the per-seg culls were nearly free.
+- **`raster_mode="proj"` (the Path-B split, commit b8f2d41): 8,558,499 ops/frame** — the device
+  holds the static per-seg geometry table (0x0E DMA, 30 B/seg) and does the vertex→column
+  projection itself; fj keeps the full BSP walk (front-to-back order), the wedge pre-cull and the
+  back-face cull, and emits a 2-byte seg id per survivor. Assemble ~15 s.
+
+`proj` is a NON-DEFAULT lab mode: it crosses the device-boundary the owner earlier declined (the
+device's painted[] makes the fine occlusion call). The priced trade — 8.56M (~7.0 fps @60M ops/s)
+vs 20.84M (~2.9 fps) — awaits the owner's default pick; no shipped default was flipped.
+
+Status: target met in the lab mode; cost model below kept for reference. Owner directive: reach ≤12,000,000 static ops/frame; device may take SIMPLE
 mechanical additions but NO game logic (walk/cull/projection/occlusion-decisions stay in fj); still
 look like a game with game features; "game standards good enough" ⇒ sub-pixel/±1px re-bless (PNG-gated)
 and pre-approved resolution reduction are acceptable.

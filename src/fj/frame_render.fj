@@ -327,14 +327,14 @@ ns frame {
     // Config args (R6). Returns via stl.fret seg_ret. @requires hex.init & stl.ptr_init.
     def seg_pass1_leaf_body texheight, centery, ds, viewh1, projection \
             @ loop, body, skipcol, ret \
-            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
               tw, ceilfix, floorfix, viewz, worldtop, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, drawn, seg_ret {
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret                    // culled seg -> nothing to fill
-        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle   // M13-absmul: sgn from wall_x_range
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
         hex.mov 8, x, x1
@@ -365,14 +365,14 @@ ns frame {
     // branch. Light stays single (1-sector test; multi-light is E1M1). @requires hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_mt centery, ds, viewh1, projection \
             @ loop, body, skipcol, ret, sidx \
-            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
               seg_texbase, seg_texheight, seg_tw, seg_hm, ceilfix, floorfix, viewz, worldtop, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, drawn, seg_ret {
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
-        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle   // M13-absmul: sgn from wall_x_range
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
         hex.mov 8, x, x1
@@ -412,14 +412,14 @@ ns frame {
     // (oracle: colormap[seg_light][WALL_BG]). The per-pixel leaf is UNCHANGED. @requires hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_mtl centery, ds, viewh1, projection \
             @ loop, body, skipcol, ret, sidx \
-            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
               seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, worldtop, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, drawn, seg_ret {
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
-        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle   // M13-absmul: sgn from wall_x_range
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
         hex.mov 8, x, x1
@@ -459,14 +459,14 @@ ns frame {
     // leaf_body_w. @requires hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_mtlw centery, ds, viewh1, projection \
             @ loop, body, skipcol, ret, sidx, tbskip, tbok \
-            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
               seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, viewzw, seg_ceil, worldtop, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
               top, bottom, texcol, cfrac0, stepv, base, \
               col_top, col_bottom, col_base, col_step, col_frac0, col_heightmask, col_light, drawn, seg_ret {
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
-        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle   // M13-absmul: sgn from wall_x_range
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
         hex.mov 8, worldtop, seg_ceil           // M12pp: worldtop = seg_ceil - viewzw computed IN-LEAF, so the baked
@@ -655,7 +655,7 @@ ns frame {
     // off-screen top=1/bottom=0 sentinel). viewh = VIEW_H (compile-time). @requires hex.init & stl.ptr_init.
     def seg_pass1_leaf_body_mtlwp centery, ds, viewh1, viewh, projection \
             @ loop, body, skipcol, ret, sidx, tbskip, tbok, cge, cdone, fneg, fdone, cVH, cexcl, fstart, cph, fph, work, sfull, occscan, occchk, occnext, occdone, occproc \
-            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, seg_texoff, \
               seg_texbase, seg_texheight, seg_tw, seg_hm, seg_light, ceilfix, floorfix, viewz, viewzw, seg_ceil, seg_floor, worldtop, \
               seg_plight, seg_ceilbase, seg_floorbase, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, rw_offset, rw_centerangle, x, \
@@ -666,7 +666,7 @@ ns frame {
         hex.if0 1, full, work                   // M13opt-P1: screen already full (all VIEW_W cols claimed) -> this
         stl.fret seg_ret                         // seg (and every later, farther seg) paints nothing. Byte-exact:
       work:                                      // front-to-back drawn[] means its cols are all occluded already.
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         hex.mov 8, x, x1                          // M13opt-P1 occlusion pre-scan: if EVERY column in [x1,x2) is
       occscan:                                    // already claimed by a nearer seg, this seg paints nothing ->
@@ -680,7 +680,7 @@ ns frame {
       occdone:
         stl.fret seg_ret                          // fully occluded (every col in range drawn) -> byte-exact skip
       occproc:
-        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle   // M13-absmul: sgn from wall_x_range
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, seg_v1x, seg_v1y, seg_texoff
         hex.mov 8, worldtop, seg_ceil           // worldtop = seg_ceil - viewzw (M12pp; seg_ceil baked PURE)
@@ -771,7 +771,7 @@ ns frame {
               fstart, cph, fph, nacc, nadv, vpp, vpb, cbufaddr, fbufaddr, \
               cbuild, cbuilt, fbuild, fbuilt, \
               work, sfull, occscan, occchk, occdone, occproc \
-            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
               ceilfix, floorfix, viewz, seg_ceil, seg_floor, \
               seg_plight, seg_ceilbase, seg_floorbase, seg_lit, seg_cvpidx, seg_fvpidx, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
@@ -784,7 +784,7 @@ ns frame {
         hex.if0 1, full, work                   // M13opt-P1: screen already full (all VIEW_W cols claimed) -> this
         stl.fret seg_ret                         // seg (and every later, farther seg) paints nothing. Byte-exact:
       work:                                      // front-to-back drawn[] means its cols are all occluded already.
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         // M13-colstruct: the per-column fields (drawn,cexcl,fstart,lit,cvp,fvp) live PACKED in ONE
         // combined byte struct (col_struct, stride 11 dw/column: 1 packed byte for drawn + 5 fields x
@@ -807,7 +807,7 @@ ns frame {
       occdone:
         stl.fret seg_ret                          // fully occluded (every col in range drawn) -> byte-exact skip
       occproc:
-        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle   // M13-absmul: sgn from wall_x_range
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         // pG3-stream: wall_offset (texture-u inputs) + worldtop (the DDA texturemid) are DEAD here
         hex.mov 8, cph, seg_ceil                // cph = |(ceil_h<<16) - viewz| (16.16), computed ONCE per seg
@@ -990,7 +990,7 @@ ns frame {
               work, wok, occscan, occchk, occdone, occproc, \
               cvpp, cnadv, cvpb, cbuild, cbuilt, fvpp, fnadv, fvpb, fbuild, fbuilt, \
               mloop, mbody, mnext, msfull, mnext2 \
-            < viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
               viewz, seg_ceil, seg_floor, seg_plight, seg_ceilbase, seg_floorbase, seg_lit, \
               seg_cvpidx, seg_fvpidx, \
               visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
@@ -1006,7 +1006,7 @@ ns frame {
         hex.if0 1, wrej, wok
         stl.fret seg_ret
       wok:
-        proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         hex.mov 8, x, x1
         hex.set w/4, dbase, drawn
@@ -1022,7 +1022,7 @@ ns frame {
       occdone:
         stl.fret seg_ret                           // fully occluded -> byte-exact skip (no emit at all)
       occproc:
-        proj.wall_setup normalangle, rw_distance, viewx, viewy, seg_segangle, seg_a, seg_b, seg_c
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle   // M13-absmul: sgn from wall_x_range
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         hex.mov 8, wtc, seg_ceil                   // wt_ceil = (ceil_h<<16) - viewz   (SIGNED -- the
         hex.shl_hex 8, 4, wtc                      // device's own DDA needs the true signed value;

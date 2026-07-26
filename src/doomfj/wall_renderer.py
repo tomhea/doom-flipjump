@@ -317,6 +317,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: per-frame |viewx|/|viewy| + sign flags. fixed_mul_lo's cost is one schoolbook
+        # row per nonzero nibble of the MULTIPLIER, and a negative 16.16 view coord sign-extends to
+        # a dense pattern -- so the per-seg affine cull multiplies by these sparse abs values and
+        # negates the product on the flag (bit-identical; see proj.wall_x_range).
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         "hex.zero 2, n_drawn", "hex.zero 1, full",   # M13opt-P1: reset the drawn-column counter + full flag per frame
     ]
     if stream or raster:
@@ -454,6 +462,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         bsp,
         *([] if (stream or raster) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster mode
         "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+        # M13-absmul: the per-frame abs/sign forms of the view coords + the shared affine-distance
+        # output of wall_x_range (consumed by wall_setup_sgn as rw_distance-pre-abs)
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "viewz: hex.vec 8", "viewzw: hex.vec 8", "vz_set: hex.vec 1",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
         "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9

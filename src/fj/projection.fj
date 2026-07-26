@@ -672,6 +672,24 @@ ns proj {
       end:
     }
 
+    // proj.wall_setup_sgn rw_normalangle, rw_distance, sgn, segangle (M13-absmul): wall_setup for a
+    //   caller that ALREADY has the signed affine distance -- wall_x_range now exports it (its `sgn`
+    //   output IS fixed_mul(a,viewx)+fixed_mul(b,viewy)+c, the exact quantity wall_setup recomputes
+    //   with two more fixed_muls). rw_distance = abs(sgn); rw_normalangle as in wall_setup.
+    //   BIT-IDENTICAL to wall_setup by construction. @requires hex.init
+    def wall_setup_sgn rw_normalangle, rw_distance, sgn, segangle \
+            @ cang90, end {
+        hex.zero 8, rw_normalangle
+        hex.mov 4, rw_normalangle + 4*dw, segangle      // rw_normalangle = segangle << 16 ...
+        hex.add 8, rw_normalangle, cang90               //   ... + ANG90 (the wall normal)
+        hex.mov 8, rw_distance, sgn
+        hex.abs 8, rw_distance                          // front-facing => sgn>0 => abs is a no-op
+        ;end
+
+      cang90: hex.vec 8, 0x40000000
+      end:
+    }
+
     // proj.scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection
     //   (R_ScaleFromGlobalAngle): scale[:8] = the wall's projected 16.16 scale (pixels per world unit)
     //   for the column whose ABSOLUTE view angle is visangle. scale = PROJECTION*sin(angleb) /
@@ -777,8 +795,9 @@ ns proj {
     //   (modular BAM) -> hex.cmp; only the final x1>=x2 column test is SIGNED (columns can be -1) ->
     //   hex.scmp. Outputs are computed into temps and committed only on the visible path.
     //   @requires hex.init & stl.ptr_init   (inlines point_to_angle x2 + angle_to_x x2)
-    def wall_x_range visible, x1, x2, rw_angle1, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, a, b, c \
-            @ a1, a2, span, tspan, diff, rwa, tx1, tx2, sgn, sgnt, czero, frontok, \
+    def wall_x_range visible, x1, x2, rw_angle1, sgn, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, v1x, v1y, v2x, v2y, a, b, c \
+            @ a1, a2, span, tspan, diff, rwa, tx1, tx2, sgnt, frontok, \
+              xadone, yadone, \
               cang180, cclip, c2clip, cnegclip, \
               notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end {
         hex.set 1, visible, 0              // default: culled (None)
@@ -790,13 +809,29 @@ ns proj {
         // (the signed perpendicular distance to the seg line, seg_affine_coeffs). >0 iff the eye is on the
         // wall's FRONT side; a one-sided wall whose front faces away (sgn<=0) is invisible -> cull without
         // paying point_to_angle x2. Byte-exact: every seg this culls that span<ANG180 would keep is
-        // frustum-culled anyway (verified across viewpoints). SIGNED compare (sgn is a 2's-complement dist).
-        hex.fixed_mul_lo 8, 4, sgn, a, viewx
-        hex.fixed_mul_lo 8, 4, sgnt, b, viewy
+        // frustum-culled anyway (verified across viewpoints).
+        // M13-absmul (the [[fj-cost-model]] ROW RULE): fixed_mul_lo runs one schoolbook row per NONZERO
+        // nibble of its SECOND operand, and a negative 16.16 viewx sign-extends to a dense 12-nibble
+        // pattern (4,984 ops) where |viewx| has 2-3 nonzero nibbles (2,632). So multiply by the
+        // per-frame ABS registers (viewxa/viewya, computed once at frame start alongside their sign
+        // flags) and negate the product when the sign flag says so. BIT-IDENTICAL: viewx/viewy are
+        // always map<<16, so the product's low 4 nibbles are zero and two's-complement negation of
+        // the truncated product equals truncation of the negated product (verified over 401 viewpoints
+        // x 575 segs, scratchpad session 2026-07-25). sgn is an OUTPUT (pre-abs): wall_setup's
+        // rw_distance is abs(sgn), so the caller can skip wall_setup's identical 2-mul recompute.
+        hex.fixed_mul_lo 8, 4, sgn, a, viewxa
+        hex.if0 1, viewxs, xadone
+        hex.neg 8, sgn
+      xadone:
+        hex.fixed_mul_lo 8, 4, sgnt, b, viewya
+        hex.if0 1, viewys, yadone
+        hex.neg 8, sgnt
+      yadone:
         hex.add 8, sgn, sgnt
         hex.add 8, sgn, c
-        hex.scmp 8, sgn, czero, end, end, frontok     // sgn <= 0 (lt or eq) -> back-facing, cull (visible=0)
+        hex.sign 8, sgn, end, frontok      // sgn < 0 -> back-facing, cull (visible=0)
       frontok:
+        hex.if0 8, sgn, end                // sgn == 0 -> on the line, cull
         .point_to_angle a1, viewx, viewy, v1x, v1y    // absolute angle to v1 (left)
         .point_to_angle a2, viewx, viewy, v2x, v2y    // absolute angle to v2 (right)
         hex.mov 8, span, a1
@@ -845,9 +880,7 @@ ns proj {
       rwa: hex.vec 8
       tx1: hex.vec 8
       tx2: hex.vec 8
-      sgn: hex.vec 8
       sgnt: hex.vec 8
-      czero: hex.vec 8, 0
       cang180: hex.vec 8, 0x80000000
       cclip: hex.vec 8, 0x20000000        // CLIPANGLE = ANG45
       c2clip: hex.vec 8, 0x40000000       // 2*CLIPANGLE = ANG90 (the full FOV)

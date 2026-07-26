@@ -1121,6 +1121,43 @@ ns frame {
       fvpb: hex.vec 1
     }
 
+    // M13-proj (Path B lab mode) — the PER-SEG leaf when the DEVICE does the vertex->column
+    // projection. fj keeps every per-seg decision it can make from world coordinates alone: the
+    // multiply-free wedge pre-cull, then the abs-form affine back-face cull. A survivor emits ONLY
+    // its 2-byte compact seg id -- the device holds the seg's whole geometry row (0x0E DMA) and runs
+    // wall_x_range/scale/DDA/fill/shade itself, first-writer-wins in walk order, so the pixels are
+    // identical to the 0x0D raster mode by construction. No drawn[], no until-full accounting: fj
+    // cannot know which columns the device claimed, so the walk always visits the full tree (the
+    // ~4M full-walk baseline is the price of the offload). @requires hex.init & stl.ptr_init.
+    def seg_pass1_leaf_body_proj \
+            @ ret, chkz, work, pxad, pyad, sgnt \
+            < viewxa, viewxs, viewya, viewys, \
+              seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c, seg_sid, seg_ret, sgn_aff, \
+              wrej, wqa, wna, wqb, wnb, wex, wey, weyx, wexy {
+        proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy
+        hex.if0 1, wrej, chkz
+        stl.fret seg_ret
+      chkz:
+        hex.fixed_mul_lo 8, 4, sgn_aff, seg_a, viewxa   // the abs-form affine back-face cull
+        hex.if0 1, viewxs, pxad
+        hex.neg 8, sgn_aff
+      pxad:
+        hex.fixed_mul_lo 8, 4, sgnt, seg_b, viewya
+        hex.if0 1, viewys, pyad
+        hex.neg 8, sgnt
+      pyad:
+        hex.add 8, sgn_aff, sgnt
+        hex.add 8, sgn_aff, seg_c
+        hex.sign 8, sgn_aff, ret, work                  // sgn < 0 -> back-facing, cull
+      work:
+        hex.if0 8, sgn_aff, ret                         // sgn == 0 -> on the line, cull
+        byte.emit seg_sid                               // the whole record: the 2-byte compact id
+        byte.emit seg_sid + 2*dw
+      ret:
+        stl.fret seg_ret
+      sgnt: hex.vec 8
+    }
+
     // ── M13opt2 R_MakeSpans (compile-time-column) — the per-ROW TEXTURED floor/ceiling span pass. For each
     //    screen row y, the COLUMN scan is UNROLLED (`rep(view_w, x) plane_col x`) so every per-column array read
     //    is a DIRECT mov from a COMPILE-TIME address `col_X + 8*x*dw` — NO runtime `ptr_index` (the M13d2 runtime

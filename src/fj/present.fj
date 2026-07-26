@@ -135,4 +135,27 @@ ns present {
     def begin_frame_raster {
         stl.output_char 0x0D
     }
+
+    // M13-proj (Path B, lab mode): [0x0E][seg_geom addr][count:2] — hand the device the STATIC
+    // per-one-sided-seg geometry table (packed bytes, 30 B/row: v1x,v1y,v2x,v2y,segangle each 2 B,
+    // a,b,c each 4 B, ceil_h,floor_h each 2 B, light,lit,ceilbase,floorbase each 1 B) ONCE per
+    // program, DMA-read like load_raster_tables' three. With the geometry resident device-side, the
+    // per-frame seg record collapses to a 2-byte compact seg id.
+    def load_proj_tables seg_geom_addr, count {
+        stl.output_char 0x0E
+        .emit_addr seg_geom_addr
+        stl.output_char count & 0xff
+        stl.output_char (count >> 8) & 0xff
+    }
+
+    // begin_frame_proj: [0x0F] — the vertex->column PROJECTION frame (Path B). Framing after the
+    // command byte is positional (no tags): [viewx_map:2 signed][viewy_map:2 signed][viewangle:4]
+    // then [viewz:4] (emitted by the walk's player-subsector block, always before any seg id), then
+    // 2-byte little-endian compact seg ids in BSP front-to-back walk order (fj has already applied
+    // the wedge + affine back-face culls; the device does wall_x_range/scale/DDA/fill/shade from the
+    // resident geometry, first-writer-wins per column), terminated by [0xFF][0xFF] (id hi byte is
+    // never 0xFF: counts are < 0xFF00 segs). Decode: stream_screen.py::_handle_proj_byte.
+    def begin_frame_proj {
+        stl.output_char 0x0F
+    }
 }

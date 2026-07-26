@@ -19,7 +19,7 @@ from doomfj.lut_generator import (
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
 from doomfj.reference_model import ANG90
-from doomfj.mapcompiler import bake_bsp, _bsp_as_code, seg_affine_coeffs
+from doomfj.mapcompiler import bake_bsp, _bsp_as_code, _bytes_stream, seg_affine_coeffs
 from doomfj.reference_model import (ReferenceModel, WALL_BG,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
@@ -122,7 +122,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
     assert floor_mode in ("textured", "flat"), f"unknown floor_mode: {floor_mode!r}"
     assert wall_mode in ("textured", "W1", "W2"), f"unknown wall_mode: {wall_mode!r}"
-    assert raster_mode in ("framebuffer", "stream", "spans", "raster"), f"unknown raster_mode: {raster_mode!r}"
+    assert raster_mode in ("framebuffer", "stream", "spans", "raster", "proj"), \
+        f"unknown raster_mode: {raster_mode!r}"
     # M13-spanfill: "spans" shares the ENTIRE stream pipeline (pass-1 band lists + col_struct + the
     # planesproto band buffers) and differs ONLY in the final present_tail: instead of the 0x09
     # planes protocol (device does the per-column clip), it emits explicit fillCol spans over the 0x0A
@@ -135,9 +136,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # cvp_ids/fvp_ids, until-full abort" plumbing with stream/spans (the `stream or raster` checks
     # below) but has its OWN present_tail/decls/leaf-body.
     raster = raster_mode == "raster"
-    if stream or raster:
+    # M13-proj (Path B LAB MODE, NOT a shipped default): the device holds the whole static per-seg
+    # geometry table (0x0E) and does the vertex->column projection itself; fj keeps the walk + the
+    # wedge and back-face culls and emits a 2-byte compact seg id per survivor. Built behind this
+    # flag per the bake-off precedent ("keep building ladder infra behind mode flags; only the final
+    # default-flip needs the owner's pick") -- flipping any default remains the owner's call.
+    projm = raster_mode == "proj"
+    if stream or raster or projm:
         assert wall_mode == "W1" and floor_mode == "flat", \
-            "raster_mode='stream'/'spans'/'raster' only supports wall_mode='W1' + floor_mode='flat'"
+            "raster_mode='stream'/'spans'/'raster'/'proj' only supports wall_mode='W1' + floor_mode='flat'"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -184,6 +191,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
 
     tex = _texel_table("tex", combined, "per_entry", over_align=over_align)
 
+    # M13-proj: compact one-sided-seg ids (walk-independent, seg-index order) for the 2-byte wire
+    # records + the device-resident geometry table (30 B/row packed bytes via _bytes_stream --
+    # stream_screen.PROJ_ROW_BYTES must match this layout).
+    proj_sid = {}
+    proj_geom_txt = ""
+    if projm:
+        for si, seg in enumerate(cmap.segs):
+            if lds[seg.linedef].back == -1:
+                proj_sid[si] = len(proj_sid)
+
     # M13d2 — the combined FLAT texel table over every distinct ceil/floor flat the one-sided seg sectors use
     # (64x64 RAW, NO downscale; the `&63` wraps). Each flat gets a SLICE offset; the textured span pass samples
     # `flat[slice_offset + (v&63)*64 + (u&63)]`. Missing flats (e.g. the sky placeholder before M16) become a
@@ -211,6 +228,22 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     def _flatval(name: str) -> int:
         return (flat_slice[name.upper()] if floor_mode == "textured"
                 else rm._flat_base(asset_wad, name, flat_basecache))
+    # M13-proj: the device-resident geometry rows (needs _flatval, hence built here)
+    if projm:
+            rows = []
+            for si in proj_sid:
+                seg = cmap.segs[si]
+                v1x, v1y = verts[seg.v1]
+                v2x, v2y = verts[seg.v2]
+                sa, sb, sc = seg_affine_coeffs(seg, verts)
+                gsec = rm._seg_sector(lds, sds, secs, seg)
+                gtb = seg_texinfo[si][0]
+                rows.append((v1x & 0xFFFF, v1y & 0xFFFF, v2x & 0xFFFF, v2y & 0xFFFF, seg.angle,
+                             sa, sb, sc, gsec.ceil_h & 0xFFFF, gsec.floor_h & 0xFFFF,
+                             gsec.light & 0xFF,
+                             colormap[max(0, min(COLORMAP_LIGHTS - 1, gsec.light >> LIGHT_SHIFT))][combined[gtb]],
+                             _flatval(gsec.ceil_tex), _flatval(gsec.floor_tex)))
+            proj_geom_txt = _bytes_stream("seg_geom", rows, (2, 2, 2, 2, 2, 4, 4, 4, 2, 2, 1, 1, 1, 1))
 
     if stream:
         # M13pS2: nothing calls `cm.apply` in stream mode -- the `cm` label carries the EMIT dispatch
@@ -223,10 +256,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                             over_align=True),
         ])
-    elif raster:
-        # M13-raster: nothing calls cm.emit OR cm.apply -- the device does its OWN colormap lookup
-        # from the raw packed colormap table (present.load_raster_tables); only byte.emit (arbitrary
-        # runtime-byte emit, used for every field of the per-seg/per-visplane records) is needed.
+    elif raster or projm:
+        # M13-raster/proj: nothing calls cm.emit OR cm.apply -- the device does its OWN colormap
+        # lookup from the raw packed colormap table (present.load_raster_tables); only byte.emit
+        # (runtime-byte emit: record fields / header bytes / seg ids) is needed.
         cm = generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)
     else:
         cm = compile_colormap("cm", asset_wad, lights=COLORMAP_LIGHTS, over_align=over_align)
@@ -263,6 +296,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"  e1pset{cid}:",
             f"    hex.set 8, viewz, {viewz_val & 0xFFFFFFFF}",
             f"    hex.set 8, viewzw, {(viewz_val >> 16) & 0xFFFFFFFF}",
+            # M13-proj: the device's positional framing expects viewz right after the 8-byte header,
+            # before any seg id -- the first visited subsector's block runs before its segs emit.
+            *(["    stream.emit_bytes4 viewz"] if projm else []),
             "    hex.set 1, vz_set, 1",
             f"  e1psegs{cid}:",
         ]
@@ -278,6 +314,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             ssec = rm._seg_sector(lds, sds, secs, seg)
             tb, th, tw = seg_texinfo[si]
             sa, sb, sc = seg_affine_coeffs(seg, verts)   # perf #9: baked affine rw_distance coeffs (SSOT)
+            if projm:
+                # M13-proj: the leaf only needs the wedge + back-face inputs and the wire id --
+                # everything else lives in the device-resident geometry table.
+                fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
+                          ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
+                          ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc),
+                          ("seg_sid", 4, proj_sid[si])]
+                xorby_blocks[si] = _seg_xorby_block(si, fields)
+                out += _seg_xorby_use(si)
+                continue
             fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
                       ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
                       ("seg_segangle", 8, seg.angle), ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc),
@@ -340,12 +386,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
         pass1.append("present.begin_frame_raster")   # M13-raster: starts the per-frame record stream;
                                                        # the walk below emits vp/seg records INLINE
+    if projm:
+        # M13-proj: same per-frame wedge descriptors, then the 0x0F frame + the positional 8-byte
+        # header (viewx/viewy as signed 16-bit map units -- exactly the parsed vx/vy low bytes --
+        # then the 4-byte viewangle); viewz follows from the player-subsector block inside the walk.
+        pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
+        pass1 += ["present.begin_frame_proj",
+                  "byte.emit vx", "byte.emit vx + 2*dw",
+                  "byte.emit vy", "byte.emit vy + 2*dw",
+                  "stream.emit_bytes4 viewangle"]
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
     else:
         pass1 += [f";{_pfx(mapname)}_bspcode_walk", "bsp_done:"]
     pass2 = []                                            # pass 2a: walls (M12oo shared-compare trampoline)
-    if "pass2" not in ablate and not (stream or raster):   # M13p0 ablate / M13pS2: stream/raster have NO fb raster
+    if "pass2" not in ablate and not (stream or raster or projm):   # M13p0 ablate / M13pS2: stream/raster have NO fb raster
         for x in range(cfg.VIEW_W):
             pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
                          f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
@@ -355,7 +410,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # pass 2b: floor/ceiling visplanes (M13d2) — the per-frame clear_planes seeds + the runtime per-ROW
     # R_MakeSpans textured span pass (replaces the M13c3 per-column plane_tramp unroll).
     plane_pass = []
-    if "planes" not in ablate and not (stream or raster):   # M13pS2/raster: planes render via bands/device instead
+    if "planes" not in ablate and not (stream or raster or projm):   # M13pS2/raster: planes render via bands/device instead
         plane_pass = ["stl.fcall clear_leaf, clear_ret",
                       f"frame.render_planes_spans {cfg.VIEW_W}, {cfg.VIEW_H}"]
 
@@ -395,9 +450,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # is JUST the frame terminator (a seg record's own x1 is always < RASTER_TAG_FLOOR_VP=0xFD, so
         # 0xFF can never collide with real data).
         present_tail = ["stl.output_char 0xFF"]
+    elif projm:
+        # M13-proj: seg ids were emitted inline during the walk; the terminator is [0xFF][0xFF]
+        # (a compact id's hi byte is never 0xFF).
+        present_tail = ["stl.output_char 0xFF", "stl.output_char 0xFF"]
     else:
         present_tail = ["present.update_screen_reg framebuffer"]
-    fb_leaves = [] if (stream or raster) else [          # the fb-raster shared leaves -- stream/raster emit none
+    fb_leaves = [] if (stream or raster or projm) else [          # the fb-raster shared leaves -- stream/raster emit none
         "pixel_leaf:", "frame.leaf_body_w",
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "span_leaf:",
@@ -420,6 +479,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _raster_mode_decls(cfg, asset_wad, max(1, len(cvp_ids)), max(1, len(fvp_ids)))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, "__hot_end:"])
+    elif projm:
+        hotdata = ([";__hot_end"]
+                  + _proj_mode_decls(cfg, asset_wad, proj_geom_txt)
+                  + [cm, "__hot_end:"])
     else:
         hotdata = []
     # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,
@@ -433,13 +496,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         prelude = ["present.set_palette palette",
                   f"present.load_raster_tables {yslope_packed_addr}, {zlight_packed_addr}, {colormap_packed_addr}"]
         postlude_palette = []
+    elif projm:
+        # M13-proj: same inline-emission constraint as raster -- palette + BOTH DMA handoffs must
+        # precede pass1's begin_frame_proj.
+        prelude = ["present.set_palette palette",
+                  "present.load_raster_tables yslope_packed, zlight_packed, colormap_packed",
+                  f"present.load_proj_tables seg_geom, {len(proj_sid)}"]
+        postlude_palette = []
     else:
         prelude = []
         postlude_palette = ["present.set_palette palette"]
     main = "\n".join([
         "stl.startup_and_init_all",
         *hotdata,
-        "present.init_screen_stream 0" if (stream or raster) else "present.init_screen",
+        "present.init_screen_stream 0" if (stream or raster or projm) else "present.init_screen",
         *prelude,
         *pass1, *pass2, *plane_pass,
         *postlude_palette, *present_tail, "stl.loop",
@@ -455,6 +525,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"] if "xrstub" in ablate else
           ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_raster {proj}"]
           if raster else
+          ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
+          if projm else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
           if stream else
@@ -462,7 +534,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),
         *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
-        *([] if (stream or raster) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster mode
+        *([] if (stream or raster or projm) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
         "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         # M13-absmul: the per-frame abs/sign forms of the view coords + the shared affine-distance
         # output of wall_x_range (consumed by wall_setup_sgn as rw_distance-pre-abs)
@@ -510,7 +582,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([] if raster else [f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0"]),
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
-        *([] if (stream or raster) else      # M13-hotdata: in stream/raster mode these sit up front
+        *([] if (stream or raster or projm) else      # M13-hotdata: in stream/raster/proj mode these sit up front
           [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
         palette,
         yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
@@ -535,6 +607,23 @@ def _raster_mode_decls(cfg, asset_wad, nvpc: int, nvpf: int) -> list[str]:
         "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
         "drawn:\n" + "\n".join(";0 * dw" for _ in range(cfg.VIEW_W)),
         f"vpc_flags: rep({nvpc}, i) hex.vec 1, 0", f"vpf_flags: rep({nvpf}, i) hex.vec 1, 0",
+        generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H),
+        generate_zlight_packed_lut_fj("zlight_packed", cfg.VIEW_W, COLORMAP_LIGHTS),
+        generate_colormap_packed_table_fj("colormap_packed", asset_wad, lights=COLORMAP_LIGHTS),
+    ]
+
+
+def _proj_mode_decls(cfg, asset_wad, seg_geom_txt: str) -> list[str]:
+    """M13-proj (Path B lab mode): the per-frame scratch + the DEVICE-resident tables -- the same
+    three packed shade tables as raster mode (0x0C) plus the static per-seg geometry table (0x0E,
+    30 B/row via mapcompiler._bytes_stream; stream_screen.PROJ_ROW_BYTES matches). No drawn[], no
+    vp flags, no col_struct: fj emits only 2-byte seg ids."""
+    return [
+        "seg_sid: hex.vec 4",                          # the seg's compact wire id (baked per seg)
+        # the wedge pre-cull's per-frame half-plane descriptors + per-seg verdict (shared w/ raster)
+        "wrej: hex.vec 1", "wqa: hex.vec 1", "wna: hex.vec 1", "wqb: hex.vec 1", "wnb: hex.vec 1",
+        "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
+        seg_geom_txt,
         generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H),
         generate_zlight_packed_lut_fj("zlight_packed", cfg.VIEW_W, COLORMAP_LIGHTS),
         generate_colormap_packed_table_fj("colormap_packed", asset_wad, lights=COLORMAP_LIGHTS),

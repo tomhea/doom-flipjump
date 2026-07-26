@@ -32,13 +32,13 @@ E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 RENDER_FLAT_WORDS = 1 << 26
 
 
-def _assemble_raster(tmp_path, map_wad, mapname, cfg, asset_wad=None):
+def _assemble_raster(tmp_path, map_wad, mapname, cfg, asset_wad=None, raster_mode="raster"):
     main = emit_wall_renderer(map_wad, mapname, cfg, asset_wad=asset_wad, over_align=False,
-                              floor_mode="flat", wall_mode="W1", raster_mode="raster")
+                              floor_mode="flat", wall_mode="W1", raster_mode=raster_mode)
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
-    p = tmp_path / "raster.fj"
+    p = tmp_path / f"{raster_mode}.fj"
     p.write_text(main, encoding="utf-8")
-    out = tmp_path / "raster.fjm"
+    out = tmp_path / f"{raster_mode}.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), STREAM_RENDER_FJ.resolve(), p.resolve()],
                 out, memory_width=W, print_time=False)
@@ -101,3 +101,54 @@ def test_e1m1_raster_frame_byte_exact_vs_oracle(tmp_path):
         assert got == bytes(want), f"raster @ ({vx},{vy},{va:#x}) != oracle E1M1 W1/flat frame"
         if k == 0:
             print(f"[raster] E1M1 spawn frame = {term.op_counter:,} ops")
+
+
+# ── M13-proj (Path B LAB MODE, not a shipped default): the device does the vertex->column
+# projection from its resident geometry table; fj keeps the walk + wedge + back-face culls and
+# emits 2-byte seg ids. Pixels must equal the oracle's exactly (the device runs the oracle's own
+# projection pipeline), so the gates mirror the raster ones verbatim. ─────────────────────────────
+
+def test_square_proj_frame_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(ROOM)
+    aw = WadFile.from_path(ASSET)
+    scene = build_scene(mw, aw, "MAP01")
+    sp = spawn_state(mw, "MAP01")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    A45 = 0x20000000
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45), (24, 24, A45)]
+    out = _assemble_raster(tmp_path, mw, "MAP01", cfg, asset_wad=aw, raster_mode="proj")
+    for vx, vy, va in VIEWPOINTS:
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
+                                    floor_texturing=False, wall_mode="W1")
+        screen, _term = _run_raster(out, vx, vy, va)
+        got = bytes(screen.pixel_indices)
+        assert got == bytes(want), f"proj @ ({vx},{vy},{va:#x}) != oracle W1/flat frame"
+        assert screen.frame_count == 1 and screen.flush_count == 1
+
+
+def test_e1m1_proj_frame_byte_exact_vs_oracle(tmp_path):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(E1M1_WAD)
+    scene = build_scene(mw, mw, "E1M1")
+    sp = spawn_state(mw, "E1M1")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
+    things = mw.things("E1M1")
+    seen = {(spx, spy)}
+    for t in things:
+        if (t.x, t.y) not in seen:
+            seen.add((t.x, t.y)); VIEWPOINTS.append((t.x, t.y, sp.angle))
+        if len(VIEWPOINTS) >= 4:
+            break
+    out = _assemble_raster(tmp_path, mw, "E1M1", cfg, raster_mode="proj")
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
+                                    floor_texturing=False, wall_mode="W1")
+        screen, term = _run_raster(out, vx, vy, va)
+        got = bytes(screen.pixel_indices)
+        assert got == bytes(want), f"proj @ ({vx},{vy},{va:#x}) != oracle E1M1 W1/flat frame"
+        if k == 0:
+            print(f"[proj] E1M1 spawn frame = {term.op_counter:,} ops")

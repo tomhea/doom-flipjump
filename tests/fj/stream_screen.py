@@ -33,6 +33,10 @@ CMD_BEGIN_FRAME_PLANES = 0x09      # M13-planesproto (0x08 stays reserved for M1
 CMD_BEGIN_FRAME_SPANS = 0x0A       # M13-spanfill: dumb-screen fillCol span list
 CMD_LOAD_RASTER_TABLES = 0x0C      # M13-raster: hand the device yslope/zlight/colormap addresses (once)
 CMD_BEGIN_FRAME_RASTER = 0x0D      # M13-raster: the device rasterizer per-frame record stream
+CMD_LOAD_PROJ_TABLES = 0x0E        # M13-proj: hand the device the static per-seg geometry table (once)
+CMD_BEGIN_FRAME_PROJ = 0x0F        # M13-proj: the vertex->column projection frame (Path B lab mode)
+PROJ_ROW_BYTES = 30                # seg_geom row: 5x2B (v1x,v1y,v2x,v2y,segangle) + 3x4B (a,b,c)
+                                   #   + 2x2B (ceil_h,floor_h) + 4x1B (light,lit,ceilbase,floorbase)
 UNCLAIMED_FVP = 0xFF               # a column record with fvp == 0xFF paints nothing
 SPANS_END_X = 0xFF                 # a fillCol record with x == 0xFF terminates the frame
 
@@ -70,6 +74,15 @@ class StreamScreen(InMemoryScreen):
         self._raster_ceil_vp = {}                  # vp_idx -> (planeheight, light, base)
         self._raster_floor_vp = {}
         self._raster_lut_cache = {}                 # vp key -> the [0,H) row->color array (memoized)
+        # M13-proj (Path B lab mode): the static per-seg geometry (loaded once via 0x0E) + per-frame
+        # decode state. The projection math lives in a lazily-built ReferenceModel (pure Config math
+        # -- trig/projection LUTs, no wad/asset data -- the same import rule as slopediv_recip above).
+        self._proj_geom = None                     # list of per-seg dict rows
+        self._proj_active = False
+        self._proj_buf = bytearray()               # positional header/viewz bytes being collected
+        self._proj_state = None                    # "header" | "viewz" | "segs"
+        self._proj_view = None                     # (viewx, viewy, viewangle, viewz)
+        self._proj_rm = None
 
     # ---------------------------------------------------------------- input stream (optional)
 
@@ -98,6 +111,10 @@ class StreamScreen(InMemoryScreen):
         if command == CMD_LOAD_RASTER_TABLES:
             return 1 + 3 * self._address_bytes()
         if command == CMD_BEGIN_FRAME_RASTER:
+            return 1
+        if command == CMD_LOAD_PROJ_TABLES:
+            return 1 + self._address_bytes() + 2
+        if command == CMD_BEGIN_FRAME_PROJ:
             return 1
         return super()._command_length(command)
 
@@ -144,9 +161,34 @@ class StreamScreen(InMemoryScreen):
             self._raster_cvp_of = [None] * self.width
             self._raster_fvp_of = [None] * self.width
             return
+        if command == CMD_LOAD_PROJ_TABLES:
+            self._require_initialized_screen()
+            addr = self._read_address(payload, 0)
+            count = int.from_bytes(payload[self._address_bytes():self._address_bytes() + 2], "little")
+            raw = self._read_packed_bytes(addr, PROJ_ROW_BYTES * count)
+            self._proj_geom = [self._decode_proj_row(raw[PROJ_ROW_BYTES * i:PROJ_ROW_BYTES * (i + 1)])
+                               for i in range(count)]
+            return
+        if command == CMD_BEGIN_FRAME_PROJ:
+            self._require_initialized_screen()
+            self._proj_active = True
+            self._proj_buf = bytearray()
+            self._proj_state = "header"
+            self._proj_view = None
+            # per-frame raster state is shared with the 0x0D pipeline (same fill/shade back end)
+            self._raster_lut_cache = {}
+            self._raster_painted = bytearray(self.width)
+            self._raster_ceil_hi = [-1] * self.width
+            self._raster_floor_lo = [self.height] * self.width
+            self._raster_cvp_of = [None] * self.width   # holds vp KEYS here (no indices on the wire)
+            self._raster_fvp_of = [None] * self.width
+            return
         super()._execute_command(command, payload)
 
     def _handle_byte(self, byte: int) -> None:
+        if self._proj_active:
+            self._handle_proj_byte(byte)
+            return
         if self._raster_active:
             self._handle_raster_byte(byte)
             return
@@ -341,6 +383,143 @@ class StreamScreen(InMemoryScreen):
             m = (divisor << (4 * (2 - P))) & 0xFFF
             sh = SLOPEDIV_RECIP_RK - 4 * (2 - P)
         return ((1 << 32) * table[m]) >> sh
+
+    # ------------------------------------------------- M13-proj (Path B lab mode): device projection
+    # fj keeps the BRAIN (BSP walk order + the wedge and affine back-face culls) and sends 2-byte
+    # compact seg ids; the device turns each id's RESIDENT geometry row (0x0E DMA table) into screen
+    # columns exactly the way the oracle does -- point_to_angle x2, the span/frustum/x1<x2 tests,
+    # scale interpolation, then the SAME wall DDA + first-writer-wins fill + distance-light shade the
+    # 0x0D raster back end already runs. The projection math is a lazily-built ReferenceModel (pure
+    # Config trig/projection LUTs -- no wad/asset data crosses this boundary).
+
+    @staticmethod
+    def _decode_proj_row(row: bytes) -> dict:
+        s16 = lambda off: int.from_bytes(row[off:off + 2], "little", signed=True)
+        u32 = lambda off: int.from_bytes(row[off:off + 4], "little", signed=False)
+        return dict(v1x=s16(0), v1y=s16(2), v2x=s16(4), v2y=s16(6), segangle=int.from_bytes(row[8:10], "little"),
+                    a=u32(10), b=u32(14), c=u32(18), ceil_h=s16(22), floor_h=s16(24),
+                    light=row[26], lit=row[27], ceilbase=row[28], floorbase=row[29])
+
+    def _proj_model(self):
+        if self._proj_rm is None:
+            from doomfj.config import Config
+            from doomfj.reference_model import ReferenceModel
+            self._proj_rm = ReferenceModel(Config())
+        return self._proj_rm
+
+    def _handle_proj_byte(self, byte: int) -> None:
+        buf = self._proj_buf
+        buf.append(byte)
+        if self._proj_state == "header":
+            if len(buf) == 8:
+                vx = int.from_bytes(buf[0:2], "little", signed=True)
+                vy = int.from_bytes(buf[2:4], "little", signed=True)
+                va = int.from_bytes(buf[4:8], "little")
+                # SIGNED 16.16, exactly the oracle's convention (SimState carries vx<<16 unmasked;
+                # point_to_angle/fixed_mul rely on signed operands -- masking here broke E1M1's
+                # negative-x spawn while the all-positive square room hid it)
+                self._proj_view = [vx << 16, vy << 16, va, None]
+                self._proj_state = "viewz"
+                self._proj_buf = bytearray()
+            return
+        if self._proj_state == "viewz":
+            if len(buf) == 4:
+                self._proj_view[3] = int.from_bytes(buf, "little")
+                self._proj_state = "segs"
+                self._proj_buf = bytearray()
+            return
+        if len(buf) == 2:
+            sid = int.from_bytes(buf, "little")
+            self._proj_buf = bytearray()
+            if buf[1] == 0xFF:                     # [0xFF][0xFF] terminator (id hi byte never 0xFF)
+                self._finish_proj_frame()
+                return
+            self._proj_process_seg(sid)
+
+    def _proj_process_seg(self, sid: int) -> None:
+        """The oracle projection pipeline on one resident geometry row -- mirrors
+        reference_model.wall_x_range / wall_setup / scale_from_global_angle / the render loop's
+        scalestep truncation EXACTLY (same helpers where importable), then the raster fill."""
+        from doomfj.fixedpoint import _signed, fixed_mul
+        from doomfj.reference_model import ANG90, ANG180, ANGLE_MASK, CLIPANGLE
+        rm = self._proj_model()
+        g = self._proj_geom[sid]
+        viewx, viewy, va, viewz = self._proj_view
+        M = ANGLE_MASK
+        sgn = _signed((fixed_mul(g["a"], viewx, 8, 4) + fixed_mul(g["b"], viewy, 8, 4) + g["c"]) & M, 32)
+        if sgn <= 0:
+            return                                  # back-facing (fj pre-culled; kept for totality)
+        angle1 = rm.point_to_angle(viewx, viewy, g["v1x"] << 16, g["v1y"] << 16)   # signed, like the oracle
+        angle2 = rm.point_to_angle(viewx, viewy, g["v2x"] << 16, g["v2y"] << 16)
+        span = (angle1 - angle2) & M
+        if span >= ANG180:
+            return
+        a1 = (angle1 - va) & M
+        a2 = (angle2 - va) & M
+        two_clip = 2 * CLIPANGLE
+        tspan = (a1 + CLIPANGLE) & M
+        if tspan > two_clip:
+            if ((tspan - two_clip) & M) >= span:
+                return
+            a1 = CLIPANGLE
+        tspan = (CLIPANGLE - a2) & M
+        if tspan > two_clip:
+            if ((tspan - two_clip) & M) >= span:
+                return
+            a2 = (-CLIPANGLE) & M
+        x1, x2 = rm.angle_to_x(a1), rm.angle_to_x(a2)
+        if x1 >= x2:
+            return
+        rw_normalangle = ((g["segangle"] << 16) + ANG90) & M
+        rw_distance = abs(sgn)
+        scale = rm.scale_from_global_angle((va + rm.xtoviewangle[x1]) & M, va, rw_normalangle, rw_distance)
+        if x2 > x1:
+            scale2 = rm.scale_from_global_angle((va + rm.xtoviewangle[x2]) & M, va, rw_normalangle, rw_distance)
+            diff, colspan = scale2 - scale, x2 - x1
+            scalestep = -(abs(diff) // colspan) if diff < 0 else diff // colspan
+        else:
+            scalestep = 0
+        wt_ceil = _signed(((g["ceil_h"] << 16) - viewz) & M, 32)
+        wt_floor = _signed(((g["floor_h"] << 16) - viewz) & M, 32)
+        ckey = (abs(wt_ceil), g["light"], g["ceilbase"])
+        fkey = (abs(wt_floor), g["light"], g["floorbase"])
+        centeryfix = (self.height // 2) << 16
+        painted = self._raster_painted
+        scale &= 0xFFFFFFFF
+        x1c, x2c = max(0, x1), min(self.width, x2)
+        # DOOM accumulates rw_scale from x1 even when x1 < 0 -- but the oracle render loop starts
+        # its scale at x1 and only touches drawn columns; mirror render_wall_frame's loop exactly:
+        for x in range(x1, x2):
+            if 0 <= x < self.width and not painted[x]:
+                top = self._signed32(centeryfix - self._fixed_mul(wt_ceil, scale)) >> 16
+                bot = self._signed32(centeryfix - self._fixed_mul(wt_floor, scale)) >> 16
+                if top < 0:
+                    top = 0
+                if bot > self.height - 1:
+                    bot = self.height - 1
+                if top <= bot:
+                    for y in range(top, bot + 1):
+                        self.pixel_indices[y * self.width + x] = g["lit"]
+                self._raster_ceil_hi[x] = min(top, self.height) - 1
+                self._raster_floor_lo[x] = max(bot + 1, 0)
+                self._raster_cvp_of[x] = ckey
+                self._raster_fvp_of[x] = fkey
+                painted[x] = 1
+            scale = (scale + scalestep) & 0xFFFFFFFF
+
+    def _finish_proj_frame(self) -> None:
+        for x in range(self.width):
+            if self._raster_cvp_of[x] is None:
+                continue
+            cL = self._row_colour_lut(self._raster_cvp_of[x])
+            for y in range(0, self._raster_ceil_hi[x] + 1):
+                self.pixel_indices[y * self.width + x] = cL[y]
+            fL = self._row_colour_lut(self._raster_fvp_of[x])
+            for y in range(self._raster_floor_lo[x], self.height):
+                self.pixel_indices[y * self.width + x] = fL[y]
+        self._proj_active = False
+        self._present()
+        self.flush_count += 1
 
     def _finish_raster_frame(self) -> None:
         """The shading pass: once every seg is in, slice each column's ceiling/floor region out of

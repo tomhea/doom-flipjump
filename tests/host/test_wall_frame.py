@@ -111,7 +111,7 @@ def test_e1m1_wall_frame_textured_and_deterministic():
     assert frame == rm.render_wall_frame(state, scene)         # deterministic (D12)
     # perf #9 affine rw_distance + #11 [re-bless] block-FP reciprocal iscale (1/scale, no divide) —
     # sub-pixel texture-DDA shift; PNG-verified clean. (Square golden unchanged at both.)
-    assert frame_hash(frame) == "3f0133d9f13a8e9f5ca907da9687055de213ea5ed5ead96847b0df9e80435db6"
+    assert frame_hash(frame) == "b7a28e38c3ee4a22d615e6bc64cd990c4076f4ce1b06f61ab6241311a48ac4c6"  # M13-scalerecip [re-bless]: block-FP recip scale, 20 px (sub-pixel texel shifts)
 
 
 def test_e1m1_every_pixel_is_a_valid_palette_index():
@@ -168,4 +168,4 @@ def test_e1m1_w2_wall_golden_hash():
     scene = build_scene(map_wad, map_wad, "E1M1")
     frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene, wall_mode="W2")
     # matches the M13p0 bake-off's independent WallModel preview exactly (W2_freedoom_e1m1_spawn)
-    assert frame_hash(frame) == "c6bbdc34fc9fc0d7426d30e70b28763f8a9b24a4eda2d30125e5ae5c7e8be90e"
+    assert frame_hash(frame) == "1a4314039aaaa1089a0617ae4f8f622278889f589abae24591875ba6b66db90c"  # M13-scalerecip [re-bless]: 13 px

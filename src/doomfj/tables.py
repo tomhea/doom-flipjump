@@ -170,3 +170,12 @@ def slopediv_recip_table() -> list[int]:
     for m in range(0x100, 0x1000):
         t[m] = (1 << SLOPEDIV_RECIP_RK) // m
     return t
+
+
+def slopediv_recip8_table() -> list[int]:
+    """M13-coarseslope [re-bless, owner-approved ±1 column]: `slopediv_recip` with SlopeDiv's own
+    <<3 (DBITS) pre-folded into each entry — `recip8[m] = ((1<<24)//m) << 3`, NOT (1<<27)//m (the
+    floor-then-shift order is what the coarse `_slope_div` computes, and the fj macro must match it
+    bit for bit, R6). Lets the fj slope_div multiply the 3-nibble normalized numerator directly
+    (3 schoolbook rows) with no shl_bit at all. Max entry 0x80000 (20 bits, 3 packed bytes)."""
+    return [r << 3 for r in slopediv_recip_table()]

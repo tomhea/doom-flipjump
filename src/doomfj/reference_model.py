@@ -154,22 +154,32 @@ class ReferenceModel:
 
         **perf #13 [re-bless]:** the exact `(num<<3)//(den>>8)` divide is replaced by a BLOCK-FP
         RECIPROCAL (the owner table-law form, NOT a naive 1/y table): normalize `sden = den>>8` to a
-        top-3-nibble mantissa `m` with a nibble-exponent, `recip = slopediv_recip_table[m]` (= (1<<24)//m),
-        then `ans = ((num<<3)*recip) >> (24 + 4*nibble_exp)`. No divide. De-risked PNG-clean on E1M1: the
-        spawn AND square goldens stay byte-identical, off-spawn viewpoints shift sub-pixel. The fj
-        `slope_div` macro mirrors THIS exactly (same shared table, same integer steps) so they cannot
-        drift (R6)."""
+        top-3-nibble mantissa `m` with a nibble-exponent, `recip = slopediv_recip_table[m]` (= (1<<24)//m).
+
+        **M13-coarseslope [re-bless, owner-approved ±1 column, 2026-07-26]:** the NUMERATOR is now
+        normalized by the SAME shift as the denominator, truncating it to den's 3-nibble mantissa
+        frame BEFORE the multiply — `wnum = (num >> (8+k)) << 3` (right-normalize) or
+        `((num>>8) << k) << 3` (left-normalize) — so `ans = (wnum * recip) >> (RK-8)` needs only a
+        3-nibble multiplier and a FIXED final shift (no per-exponent shift tree in fj). Precision:
+        the extra num truncation costs ≤ 1/mantissa ≤ 1/256 of the slope ⇒ ≤ ~8 tantoangle-idx
+        ⇒ ≤ 1 screen column (measured: max deviation 1 column over 73,600 real seg evaluations ×
+        128 viewpoints; every golden-gate frame — square+E1M1, W1/flat AND textured — is PIXEL-
+        IDENTICAL, scratchpad/coarse_gate_check.py). The fj `slope_div` macro mirrors THIS exactly
+        (same table values via the <<3-prefolded `slopediv_recip8`, same integer steps) so they
+        cannot drift (R6)."""
         if den < 512:
             return SLOPERANGE
         sden = den >> 8                                  # >= 2
         P = (sden.bit_length() - 1) // 4                 # leading-nibble index (0..4 for E1M1 magnitudes)
         if P >= 2:
-            m = (sden >> (4 * (P - 2))) & 0xFFF          # top 3 nibbles (m in [0x100, 0xFFF])
-            sh = SLOPEDIV_RECIP_RK + 4 * (P - 2)
+            k = 4 * (P - 2)
+            m = (sden >> k) & 0xFFF                      # top 3 nibbles (m in [0x100, 0xFFF])
+            wnum = (num >> (8 + k)) << 3
         else:
-            m = (sden << (4 * (2 - P))) & 0xFFF          # left-normalize small sden into 3 nibbles
-            sh = SLOPEDIV_RECIP_RK - 4 * (2 - P)
-        ans = ((num << 3) * _SLOPEDIV_RECIP[m]) >> sh
+            k = 4 * (2 - P)
+            m = (sden << k) & 0xFFF                      # left-normalize small sden into 3 nibbles
+            wnum = ((num >> 8) << k) << 3
+        ans = (wnum * _SLOPEDIV_RECIP[m]) >> (SLOPEDIV_RECIP_RK - 8)
         return ans if ans <= SLOPERANGE else SLOPERANGE
 
     @staticmethod
@@ -258,20 +268,50 @@ class ReferenceModel:
         rw_distance = abs(_signed(signed, 32))
         return rw_normalangle, rw_distance
 
+    @staticmethod
+    def _scale_recip_div(num_abs: int, den_abs: int) -> int:
+        """M13-scalerecip [re-bless]: `(num_abs<<16) // den_abs` via the SHARED slopediv_recip
+        block-FP table — the fj `proj.scale_recip_div` macro's integer recipe, bit for bit (R6):
+        normalize den_abs to a 3-nibble mantissa (fsh counts whole nibbles, base 6 = RK/4), take the
+        14-NIBBLE truncated product with recip[m], ONE whole-nibble shift, low 8 nibbles. 14 nibbles
+        is the measured-exact width for real scale operands (12 truncates); precision vs the exact
+        divide: 0.29% max relative over the 320 real spawn scale calls = sub-pixel wall-edge shift
+        (<0.3px), re-blessed under the owner's 'game standards' rule."""
+        sden = den_abs
+        fsh = 6
+        while sden > 0xFFF:
+            sden >>= 4
+            fsh += 1
+        while sden < 0x100:
+            sden <<= 4
+            fsh -= 1
+        wnum = (num_abs << 16) & (16 ** 14 - 1)
+        prod = (wnum * _SLOPEDIV_RECIP[sden & 0xFFF]) & (16 ** 14 - 1)
+        return (prod >> (4 * fsh)) & 0xFFFFFFFF
+
     def scale_from_global_angle(self, visangle: int, viewangle: int,
                                 rw_normalangle: int, rw_distance: int) -> int:
         """R_ScaleFromGlobalAngle: the wall's projected scale (16.16 pixels per world unit) for the screen
         column whose ABSOLUTE view angle is `visangle`. scale = PROJECTION·sin(angleb) / (rw_distance·
         sin(anglea)), where anglea = ANG90+(visangle-viewangle), angleb = ANG90+(visangle-rw_normalangle),
         PROJECTION = CENTERX<<16. Clamped to [SCALE_MIN, SCALE_MAX]. At the centre of a perpendicular wall
-        (visangle=viewangle=rw_normalangle) this is exactly PROJECTION/rw_distance."""
+        (visangle=viewangle=rw_normalangle) this is exactly PROJECTION/rw_distance.
+
+        **M13-scalerecip [re-bless, 2026-07-26]:** the signed `fixed_div` is re-expressed as a
+        sign-split + `_scale_recip_div` on the magnitudes. A sign MISMATCH (negative true quotient)
+        returns SCALE_MAX directly — PROVEN identical to the old unsigned-wraparound-then-clamp
+        behavior (any negative 32-bit quotient's unsigned reading is in [2^31, 2^32-1], always above
+        SCALE_MAX=0x400000, so it always clamped to SCALE_MAX). The fj macro mirrors this exactly."""
         anglea = (ANG90 + (visangle - viewangle)) & ANGLE_MASK
         angleb = (ANG90 + (visangle - rw_normalangle)) & ANGLE_MASK
         num = fixed_mul(self.cfg.PROJECTION << 16, self.read_sin(angleb), 8, 4)
         den = fixed_mul(rw_distance, self.read_sin(anglea), 8, 4)
         if den == 0:
             return SCALE_MAX
-        return max(SCALE_MIN, min(SCALE_MAX, fixed_div(num, den, 8, 4)))
+        sn, sd = _signed(num, 32), _signed(den, 32)
+        if (sn < 0) != (sd < 0):
+            return SCALE_MAX
+        return max(SCALE_MIN, min(SCALE_MAX, self._scale_recip_div(abs(sn), abs(sd))))
 
     def wall_x_range(self, viewx: int, viewy: int, viewangle: int, seg, verts):
         """R_AddLine: the seg's screen column range. Returns `(x1, x2, rw_angle1)` — x1 the left column,

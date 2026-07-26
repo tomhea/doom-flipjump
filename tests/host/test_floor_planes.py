@@ -121,7 +121,7 @@ def test_e1m1_textured_floor_golden_hash():
     frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene)
     # perf #9 affine rw_distance + #11 block-FP reciprocal iscale [re-bless] (see test_wall_frame).
     # Square golden above is unchanged at both; only E1M1 re-blesses.
-    assert frame_hash(frame) == "3f0133d9f13a8e9f5ca907da9687055de213ea5ed5ead96847b0df9e80435db6"
+    assert frame_hash(frame) == "b7a28e38c3ee4a22d615e6bc64cd990c4076f4ce1b06f61ab6241311a48ac4c6"
 
 
 # ── M13a flat-colored tier preserved under floor_texturing=False (the cheaper §1 fallback) ────
@@ -138,4 +138,4 @@ def test_e1m1_flatcolored_floor_golden_hash():
     map_wad = WadFile.from_path(E1M1)
     scene = build_scene(map_wad, map_wad, "E1M1")
     frame = rm.render_wall_frame(spawn_state(map_wad, "E1M1"), scene, floor_texturing=False)
-    assert frame_hash(frame) == "213689c79296f8d84b1d7cfcdb9e5c0692b4919c2c647df4c44835e4da025edb"  # M13pS2 F4 [re-bless]: SHARED full-range band-walk zidx (crush2b -- floor suffixes slice the CENTERY-seeded walk; <=1-row band edges vs exact)
+    assert frame_hash(frame) == "01a1f74f64887861c2092d811834eabb54420882a10172c17240252c3c6ea843"  # M13pS2 F4 [re-bless]: SHARED full-range band-walk zidx (crush2b -- floor suffixes slice the CENTERY-seeded walk; <=1-row band edges vs exact)

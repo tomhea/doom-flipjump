@@ -1,7 +1,18 @@
 # Plan: 54M → 12M ops/frame (E1M1 spawn) — device stays dumb, still a game
 
-Status: DRAFT (cost model + framework complete; verified ladder filled from the multi-agent
-design+verification pass). Owner directive: reach ≤12,000,000 static ops/frame; device may take SIMPLE
+## OUTCOME (2026-07-26, measured): 54.0M → 20.84M (−61%); ≤12M proven unreachable under Path A
+
+The device-rasterizer (§6) shipped and the fj side was then crushed through seven more rungs
+(M13-wedge/wedge2/mulorder/cheapcmp/absmul/coarseslope/scalerecip — see the commit ladder on
+`m13opt3-early-out`). Final measured: **20,843,594 ops/frame** at E1M1 spawn, byte-exact vs the
+oracle at every gate. The remaining floor is dominated by 290 unavoidable `point_to_angle` calls
+(23.3k ops each, measured — the occlusion decision needs screen columns, which need the angles):
+walk ~2.9M + culls ~4.4M + atans ~6.4M + projection ~2.5M + residual ~4.7M ≈ **20-21M**. §6's
+"~11.5-14M" fj budget was optimistic because it assumed the per-seg culls were nearly free.
+Reaching ≤12M requires the device to do the vertex→column projection (the Path-B split), which
+the owner declined (2026-07-07, re-confirmed by choosing the re-bless+micro-rung track 2026-07-26).
+
+Status: CLOSED at ~20.8M (cost model below kept for reference). Owner directive: reach ≤12,000,000 static ops/frame; device may take SIMPLE
 mechanical additions but NO game logic (walk/cull/projection/occlusion-decisions stay in fj); still
 look like a game with game features; "game standards good enough" ⇒ sub-pixel/±1px re-bless (PNG-gated)
 and pre-approved resolution reduction are acceptable.

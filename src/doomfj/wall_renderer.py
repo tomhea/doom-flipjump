@@ -14,6 +14,7 @@ from __future__ import annotations
 from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
+    generate_slopediv_recip8_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
@@ -232,6 +233,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     palette = compile_palette("palette", asset_wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip8 = generate_slopediv_recip8_lut_fj("slopediv_recip8")  # M13-coarseslope
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -411,12 +413,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     if stream:
         hotdata = ([";__hot_end"]
                   + _stream_mode_decls(cfg, max(1, len(cvp_ids)), max(1, len(fvp_ids)))
-                  + [tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle,
+                  + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, "__hot_end:"])
     elif raster:
         hotdata = ([";__hot_end"]
                   + _raster_mode_decls(cfg, asset_wad, max(1, len(cvp_ids)), max(1, len(fvp_ids)))
-                  + [tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle,
+                  + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, "__hot_end:"])
     else:
         hotdata = []
@@ -509,7 +511,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
         *([] if (stream or raster) else      # M13-hotdata: in stream/raster mode these sit up front
-          [tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
+          [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
         palette,
         yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
     ])

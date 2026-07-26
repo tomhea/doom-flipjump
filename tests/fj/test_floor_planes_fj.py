@@ -38,7 +38,7 @@ E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 # the M13b textured square-room golden (tests/host/test_floor_planes.py::test_square_textured_floor_golden_hash)
 SQUARE_TEX_GOLDEN = "00de1aaadf358eae11ddbf75fd54e44c04549942cb8a6322ea35d856eb973a12"
 # the M13b textured E1M1 spawn golden (tests/host/test_floor_planes.py::test_e1m1_textured_floor_golden_hash)
-E1M1_TEX_GOLDEN = "3f0133d9f13a8e9f5ca907da9687055de213ea5ed5ead96847b0df9e80435db6"  # perf #9+#11 [re-bless]
+E1M1_TEX_GOLDEN = "b7a28e38c3ee4a22d615e6bc64cd990c4076f4ce1b06f61ab6241311a48ac4c6"  # perf #9+#11 [re-bless]
 
 
 def test_square_textured_planes_byte_exact_vs_oracle(tmp_path):
@@ -250,7 +250,7 @@ def test_e1m1_textured_planes_full_frame_byte_exact_and_golden(tmp_path):
 SQUARE_W1_GOLDEN = "3654df94845798acb1d5dfb9a5b7d5248155d1668e0203df72df1c8de6d487fc"
 SQUARE_W2_GOLDEN = "ee03e5c08f080e7879e212600b3af48bf50b000fab1e7f6e1d2b7f4ac5dc9719"
 E1M1_W1_GOLDEN = "1e9bb32680e77398b01867f586ac1be77465d8e0d083af6a1c4e4a284b233b9c"
-E1M1_W2_GOLDEN = "c6bbdc34fc9fc0d7426d30e70b28763f8a9b24a4eda2d30125e5ae5c7e8be90e"
+E1M1_W2_GOLDEN = "1a4314039aaaa1089a0617ae4f8f622278889f589abae24591875ba6b66db90c"
 
 
 def _square_wall_mode_byte_exact(tmp_path, wall_mode, golden):

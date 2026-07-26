@@ -10,18 +10,20 @@
 //   @requires hex.init
 
 ns proj {
-    // perf #13 [re-bless]: the divide is replaced by a BLOCK-FP RECIPROCAL (the owner table-law form).
-    //   sden = den>>8 is normalized to a top-3-nibble mantissa m in [0x100,0xFFF] (counting the nibble
-    //   shift into `fsh`), recip = slopediv_recip[m] (= (1<<24)//m, the shared SSOT table), then
-    //   q = ((num<<3)*recip) >> (4+P) nibbles, clamped. No hex.div. Mirrors reference_model._slope_div
-    //   EXACTLY (same table, same integer steps). The final shift is always whole-nibble (RK=24 is 6
-    //   nibbles; the exponent is nibble-granular), and >=4 nibbles, so `fsh` (init 2 = 6-4) only counts
-    //   the variable part. @requires hex.init + hex.read_table.
+    // perf #13 [re-bless] + M13-coarseslope [re-bless, owner-approved +-1 column]: the divide is a
+    //   BLOCK-FP RECIPROCAL, and the NUMERATOR is normalized ALONGSIDE the denominator: both take
+    //   the same nibble shifts in the normalize loop, so wnum ends <= 3 nibbles in sden's mantissa
+    //   frame and the quotient is (wnum * recip8[m]) >> (RK-8) with a FIXED 4-nibble final shift --
+    //   no 13-nibble product, no fsh shift tree. recip8 = slopediv_recip8 (the <<3-DBITS-prefolded
+    //   twin of slopediv_recip), so no shl_bit on wnum either; the product is 3 schoolbook rows at
+    //   width 8. Mirrors reference_model._slope_div EXACTLY (same integer steps, same table values,
+    //   R6): +-1 screen column vs the old exact-numerator form at worst, and every golden-gate
+    //   frame is pixel-identical (scratchpad/coarse_gate_check.py). @requires hex.init & stl.ptr_init.
     def slope_div dst, num, den \
-            @ lt, ge, denlo, prodlo, nrm_hi, hi_more, hi_done, nrm_lo, lo_more, lo_done, \
-              flo3, fhi3, fs0, fs1, fs2, fs3, fs4, fs5, fsh_done, keep, clamp, done, \
-              sden, wnum, recipw, recip, prod, fsh, c512s, csr3, cone2, c3two, c5two \
-            < slopediv_recip {
+            @ lt, ge, denlo, prodlo, nrm_hi, hi_done, nrm_lo, lo_more, lo_done, wok, \
+              keep, clamp, done, \
+              sden, wnum, recipw, recip, prod, c512s, csr3 \
+            < slopediv_recip8 {
         // den < 0x200 <=> nibbles 3..7 are all zero AND the low 3 nibbles are < 0x200
         hex.if0 5, den + 3*dw, denlo
         ;ge
@@ -31,66 +33,41 @@ ns proj {
         hex.set 3, dst, 0x800
         ;done
       ge:
-        hex.zero 8, sden
-        hex.mov 8, sden, den
-        hex.shr_hex 8, 2, sden                  // sden = den >> 8   (>= 2)
-
-        hex.set 2, fsh, 2                        // fsh = 2 (= 6-4): the variable nibble-shift past the base 4
-      nrm_hi:                                    // right-normalize: while sden > 0xFFF, sden >>= 1 nib, fsh++
-        hex.if0 5, sden + 3*dw, hi_done          // sden <= 0xFFF <=> nibbles 3..7 all zero
-      hi_more:
-        hex.shr_hex 8, 1, sden
-        hex.inc 2, fsh
+        hex.zero 6, sden
+        hex.mov 6, sden, den + 2*dw              // sden = den >> 8   (den <= 8 nibbles -> sden <= 6)
+        hex.zero 6, wnum
+        hex.mov 6, wnum, num + 2*dw              // wnum = num >> 8   (num <= den, same bound)
+      nrm_hi:                                    // right-normalize: while sden > 0xFFF, BOTH >>= 1 nib
+        hex.if0 3, sden + 3*dw, hi_done          // sden <= 0xFFF <=> nibbles 3..5 all zero
+        hex.shr_hex 6, 1, sden
+        hex.shr_hex 6, 1, wnum
         ;nrm_hi
-      hi_done:                                   // left-normalize: while sden < 0x100, sden <<= 1 nib, fsh--
+      hi_done:                                   // left-normalize: while sden < 0x100, BOTH <<= 1 nib
       nrm_lo:
-        hex.if0 6, sden + 2*dw, lo_more          // sden < 0x100 <=> nibbles 2..7 all zero
+        hex.if0 4, sden + 2*dw, lo_more          // sden < 0x100 <=> nibbles 2..5 all zero
         ;lo_done
       lo_more:
-        hex.shl_hex 8, 1, sden
-        hex.dec 2, fsh
+        hex.shl_hex 6, 1, sden
+        hex.shl_hex 6, 1, wnum
         ;nrm_lo
       lo_done:
-        hex.read_table_packed 3, recip, slopediv_recip, 3, sden   // recip = slopediv_recip[m] (packed, M13-lutpack)
+        // slope >= 1 guard: post-normalize wnum >= 0x1000 (nibbles 3..5 set) can only happen when
+        // num > den (the callers' num<=den contract keeps wnum <= sden <= 0xFFF); the oracle's
+        // answer is then always exactly SLOPERANGE (wnum_o >= 0x8000, R[m] >= 0x1001 => ans >= 0x800
+        // => clamp), so jumping straight to the clamp is oracle-equivalent, not an approximation.
+        hex.if0 3, wnum + 3*dw, wok
+        ;clamp
+      wok:
+        hex.read_table_packed 3, recip, slopediv_recip8, 3, sden   // recip8[m] = ((1<<24)//m) << 3
 
-        hex.zero 13, wnum
-        hex.mov 8, wnum, num
-        rep(3, i) hex.shl_bit 13, wnum          // wnum = num << 3   (13 nibbles, no overflow)
-        hex.zero 13, recipw
-        hex.mov 5, recipw, recip
-        // M13-p2acrush: recip is only 5 nibbles, so the mod-16^13 product is 5 truncated-schoolbook
-        // rows (fixed_mul_lo.row: add_mul (13-j) at offset j == hex.mul 13's wrap, bit-identical)
-        // instead of hex.mul 13's 13 add_mul-13 iterations + per-iteration shl/shr 13.
-        hex.zero 13, prod
-        rep(5, j) hex.fixed_mul_lo.row 13, j, prod, wnum, recipw
+        hex.zero 8, recipw
+        hex.mov 6, recipw, recip
+        // the mod-16^8 product needs only wnum's 3 post-normalize nibbles as multiplier rows
+        hex.zero 8, prod
+        rep(3, j) hex.fixed_mul_lo.row 8, j, prod, recipw, wnum
+        hex.shr_hex 8, 4, prod                   // >> (RK-8 = 16 bits): the FIXED final shift
 
-        hex.shr_hex 13, 4, prod                 // base shift = 4 nibbles (RK=24=6 nib, minus the <=4 P-bias)
-        // fshbranch: fsh (the variable shift, 0..5) via a compare tree instead of a decrement loop —
-        // shr_hex n,k is ONE O(n) pass for any k, so we only need ONE such call, picked by the tree.
-        hex.cmp 2, fsh, c3two, flo3, fs3, fhi3   // fsh<3 -> flo3{0,1,2}; ==3 -> fs3; >3 -> fhi3{4,5}
-      flo3:
-        hex.cmp 2, fsh, cone2, fs0, fs1, fs2     // fsh<1 -> fs0; ==1 -> fs1; ==2 -> fs2
-      fhi3:
-        hex.cmp 2, fsh, c5two, fs4, fs5, fs5     // fsh==4 -> fs4; ==5 (or unreachable >5) -> fs5
-      fs0:
-        ;fsh_done
-      fs1:
-        hex.shr_hex 13, 1, prod
-        ;fsh_done
-      fs2:
-        hex.shr_hex 13, 2, prod
-        ;fsh_done
-      fs3:
-        hex.shr_hex 13, 3, prod
-        ;fsh_done
-      fs4:
-        hex.shr_hex 13, 4, prod
-        ;fsh_done
-      fs5:
-        hex.shr_hex 13, 5, prod
-        ;fsh_done
-      fsh_done:
-        hex.if0 10, prod + 3*dw, prodlo            // any nibble above 2 set => certainly > 0x800
+        hex.if0 1, prod + 3*dw, prodlo           // nibble 3 set => >= 0x1000 > 0x800 -> clamp
         ;clamp
       prodlo:
         hex.cmp 3, prod, csr3, keep, keep, clamp   // prod > SLOPERANGE ?  gt -> clamp
@@ -101,16 +78,12 @@ ns proj {
         hex.set 3, dst, 0x800
         ;done
 
-      sden: hex.vec 8
-      wnum: hex.vec 13
-      recipw: hex.vec 13
+      sden: hex.vec 6
+      wnum: hex.vec 6
+      recipw: hex.vec 8
       recip: hex.vec 6
-      prod: hex.vec 13
-      fsh: hex.vec 2
+      prod: hex.vec 8
       c512s: hex.vec 3, 512
-      cone2: hex.vec 2, 1
-      c3two: hex.vec 2, 3
-      c5two: hex.vec 2, 5
       csr3: hex.vec 3, 0x800
       done:
     }
@@ -690,6 +663,92 @@ ns proj {
       end:
     }
 
+    // proj.scale_recip_div q, num, den (M13-scalerecip [re-bless]): q[:8] = (num<<16)//den via the
+    //   SHARED slopediv_recip block-FP table. num, den are NON-NEGATIVE magnitudes (the caller has
+    //   sign-split; den > 0). Recipe (mirrors reference_model._scale_recip_div EXACTLY, R6):
+    //   normalize den to a 3-nibble mantissa m in [0x100,0xFFF] with fsh counting whole nibbles
+    //   (base 6 = RK/4; range [4,11] for any 32-bit den), 14-NIBBLE truncated product wnum*recip[m]
+    //   (5 schoolbook rows, recip <= 5 nibbles), ONE whole-nibble shift picked by a compare tree,
+    //   low 8 nibbles out. 14 nibbles is the measured-exact width (12 truncates real operands).
+    //   @requires hex.init & stl.ptr_init
+    def scale_recip_div q, num, den \
+            @ nrm_hi, hi_done, nrm_lo, lo_more, lo_done, \
+              tlo, tlo67, thi, fs4, fs5, fs6, fs7, fs8, fs9, fs10, fs11, fsh_done, done, \
+              sden, wnum, recipw, recip, prod, fsh, c5t, c6t, c8t, c10t \
+            < slopediv_recip {
+        hex.zero 8, sden
+        hex.mov 8, sden, den
+        hex.set 2, fsh, 6                        // base shift = RK/4 = 6 nibbles; +- the exponent below
+      nrm_hi:                                    // right-normalize: while sden > 0xFFF, >>= 1 nib, fsh++
+        hex.if0 5, sden + 3*dw, hi_done          // sden <= 0xFFF <=> nibbles 3..7 all zero
+        hex.shr_hex 8, 1, sden
+        hex.inc 2, fsh
+        ;nrm_hi
+      hi_done:                                   // left-normalize: while sden < 0x100, <<= 1 nib, fsh--
+      nrm_lo:
+        hex.if0 6, sden + 2*dw, lo_more          // sden < 0x100 <=> nibbles 2..7 all zero
+        ;lo_done
+      lo_more:
+        hex.shl_hex 8, 1, sden
+        hex.dec 2, fsh
+        ;nrm_lo
+      lo_done:
+        hex.read_table_packed 3, recip, slopediv_recip, 3, sden   // recip[m] = (1<<24)//m
+        hex.zero 14, wnum
+        hex.mov 8, wnum + 4*dw, num              // wnum = num << 16 (4 nibbles, by placement)
+        hex.zero 14, recipw
+        hex.mov 6, recipw, recip
+        hex.zero 14, prod
+        rep(5, j) hex.fixed_mul_lo.row 14, j, prod, wnum, recipw   // prod = wnum*recip mod 16^14
+        // fsh in [4,11]: den has 1..8 significant nibbles -> at most 5 right- or 2 left-shifts
+        hex.cmp 2, fsh, c8t, tlo, fs8, thi
+      tlo:
+        hex.cmp 2, fsh, c5t, fs4, fs5, tlo67
+      tlo67:
+        hex.cmp 2, fsh, c6t, fs6, fs6, fs7       // lt unreachable (fsh >= 6 here)
+      thi:
+        hex.cmp 2, fsh, c10t, fs9, fs10, fs11
+      fs4:
+        hex.shr_hex 14, 4, prod
+        ;fsh_done
+      fs5:
+        hex.shr_hex 14, 5, prod
+        ;fsh_done
+      fs6:
+        hex.shr_hex 14, 6, prod
+        ;fsh_done
+      fs7:
+        hex.shr_hex 14, 7, prod
+        ;fsh_done
+      fs8:
+        hex.shr_hex 14, 8, prod
+        ;fsh_done
+      fs9:
+        hex.shr_hex 14, 9, prod
+        ;fsh_done
+      fs10:
+        hex.shr_hex 14, 10, prod
+        ;fsh_done
+      fs11:
+        hex.shr_hex 14, 11, prod
+        ;fsh_done
+      fsh_done:
+        hex.mov 8, q, prod
+        ;done
+
+      sden: hex.vec 8
+      wnum: hex.vec 14
+      recipw: hex.vec 14
+      recip: hex.vec 6
+      prod: hex.vec 14
+      fsh: hex.vec 2
+      c5t: hex.vec 2, 5
+      c6t: hex.vec 2, 6
+      c8t: hex.vec 2, 8
+      c10t: hex.vec 2, 10
+      done:
+    }
+
     // proj.scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection
     //   (R_ScaleFromGlobalAngle): scale[:8] = the wall's projected 16.16 scale (pixels per world unit)
     //   for the column whose ABSOLUTE view angle is visangle. scale = PROJECTION*sin(angleb) /
@@ -704,8 +763,8 @@ ns proj {
     //   SCALE_MIN and diverge). anglea/b are unsigned-modular BAM that only feed read_sin (bit extract).
     //   @requires hex.init & stl.ptr_init   (finesine.read_sin)
     def scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection \
-            @ anglea, angleb, num, den, sidx, sinv, cproj, cang90, czero, csmin, csmax, \
-              den_zero, den_nz, chk_min, set_max, set_min, end {
+            @ anglea, angleb, num, den, sidx, sinv, cproj, cang90, csmin, csmax, qneg, \
+              den_zero, numn, nump, denn, denp, dodiv, chk_min, set_max, set_min, end {
         hex.mov 8, anglea, visangle
         hex.sub 8, anglea, viewangle
         hex.add 8, anglea, cang90               // anglea = ANG90 + (visangle - viewangle)
@@ -729,12 +788,28 @@ ns proj {
         finesine.read_sin sinv, sidx
         hex.fixed_mul_lo 8, 4, den, sinv, rw_distance   // same swap: rw_distance is the sparse operand
 
-        hex.cmp 8, den, czero, den_nz, den_zero, den_nz    // den == 0 ? (unsigned) -> SCALE_MAX
+        hex.if0 8, den, den_zero                // den == 0 -> SCALE_MAX
+        // M13-scalerecip [re-bless]: sign-split + block-FP reciprocal replaces the signed
+        // fixed_div (38.5k -> ~19k ops). A sign MISMATCH (negative true quotient) goes straight
+        // to SCALE_MAX -- proven identical to the old unsigned-wraparound-then-clamp (any negative
+        // quotient's unsigned reading is >= 2^31 > SCALE_MAX). Mirrors the oracle exactly.
+        hex.set 1, qneg, 0
+        hex.sign 8, num, numn, nump
+      numn:
+        hex.neg 8, num
+        hex.xor_by 1, qneg, 1
+      nump:
+        hex.sign 8, den, denn, denp
+      denn:
+        hex.neg 8, den
+        hex.xor_by 1, qneg, 1
+      denp:
+        hex.if0 1, qneg, dodiv
       den_zero:
         hex.mov 8, scale, csmax
         ;end
-      den_nz:
-        hex.fixed_div 8, 4, scale, num, den, den_zero      // scale = num / den (div0 -> SCALE_MAX)
+      dodiv:
+        .scale_recip_div scale, num, den
         hex.cmp 8, scale, csmax, chk_min, chk_min, set_max    // min(SCALE_MAX, scale): > -> clamp (unsigned)
       set_max:
         hex.mov 8, scale, csmax
@@ -753,7 +828,7 @@ ns proj {
       sinv: hex.vec 8
       cproj: hex.vec 8
       cang90: hex.vec 8, 0x40000000
-      czero: hex.vec 8, 0
+      qneg: hex.vec 1
       csmin: hex.vec 8, 0x100             // SCALE_MIN (16.16 engine constant)
       csmax: hex.vec 8, 0x400000          // SCALE_MAX = 64.0
       end:

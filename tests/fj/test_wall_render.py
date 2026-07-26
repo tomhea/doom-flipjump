@@ -25,7 +25,7 @@ from types import SimpleNamespace
 
 from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
-    generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
+    generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj, generate_slopediv_recip8_lut_fj,
 )
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, Seg, SubSector, Node, CompiledMap, NF_SUBSECTOR,
                                 seg_affine_coeffs)
@@ -119,7 +119,7 @@ def test_wall_render_seg_columns_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
-    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N) + chr(10) + generate_slopediv_recip_lut_fj("slopediv_recip")   # M13-scalerecip
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
 
     render = [f"proj.wall_scale_setup scale, scalestep, va_in, nrm_in, rwd_in, x1_in, x2_in, {proj}"]
@@ -211,7 +211,7 @@ def test_wall_render_full_width_via_column_leaf(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
-    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N) + chr(10) + generate_slopediv_recip_lut_fj("slopediv_recip")   # M13-scalerecip
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
 
     # register names must match column_leaf_body's `<` extern clause exactly (x, rw_centerangle, ...)
@@ -419,7 +419,7 @@ def test_wall_render_composes_over_background(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
-    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N) + chr(10) + generate_slopediv_recip_lut_fj("slopediv_recip")   # M13-scalerecip
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
 
     # register names must match column_leaf_body's `<` extern clause exactly (as in the full-width test)
@@ -570,7 +570,7 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -581,9 +581,14 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",                  # va = BAM (unsigned)
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",   # viewx = vx << 16
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
-        "proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, acoef, bcoef, ccoef",
+        "proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, v1x, v1y, v2x, v2y, acoef, bcoef, ccoef",
         "hex.if0 1, visible, pass2",                             # culled -> pass 2 (background only)
         "proj.wall_setup normalangle, rw_distance, viewx, viewy, segangle, acoef, bcoef, ccoef",
         f"proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, {proj}",
@@ -612,6 +617,8 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         # pass-1 input + temps
@@ -746,7 +753,7 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -784,6 +791,11 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk",                                 # pass 1: the walk drives the multi-seg fill
@@ -800,6 +812,8 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body {th}, {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -951,7 +965,7 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -984,6 +998,11 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",                  # viewx = vx << 16 (16.16 for projection)
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";occ_bspcode_walk",                                                # the walk (with a NODE) drives pass 1
@@ -1000,6 +1019,8 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body {th}, {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -1163,7 +1184,7 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1204,6 +1225,11 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1219,6 +1245,8 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mt {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -1363,7 +1391,7 @@ def test_wall_render_multilight_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=32, over_align=True)   # 32 light rows (per-seg lights span them)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1405,6 +1433,11 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1421,6 +1454,8 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtl {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -1513,7 +1548,7 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=COLORMAP_LIGHTS, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1556,6 +1591,11 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad", "hex.input_dec_uint 8, player_light, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         "hex.mov 2, bgrow, player_light",
         f"rep({LIGHT_SHIFT}, i) hex.shr_bit 2, bgrow",   # row = light >> LIGHT_SHIFT (single source of truth)
         "hex.zero 4, bgidx", "hex.mov 2, bgidx + 2*dw, bgrow",                     # bgidx = row<<8 | 0(CEIL_BG)
@@ -1576,6 +1616,8 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtl {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -1669,7 +1711,7 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=COLORMAP_LIGHTS, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1710,6 +1752,11 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1726,6 +1773,8 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body_w",
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "seg_pass1_leaf:",
@@ -1823,7 +1872,7 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
     cm = compile_colormap("cm", mw, lights=COLORMAP_LIGHTS, over_align=True)
     palette = compile_palette("palette", mw)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1889,6 +1938,11 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",   # viewx = (low 8 of the map coord) << 16 (16.16)
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
+        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
+        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
+        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
+        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         ";e1_bspcode_walk", "bsp_done:",                      # the walk fills col arrays + (player ss) the bg
     ]
     pass2 = []
@@ -1903,6 +1957,8 @@ def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body_w",
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "seg_pass1_leaf:",

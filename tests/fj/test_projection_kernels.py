@@ -10,6 +10,7 @@ from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed
 from doomfj.harness import W
 from doomfj.lut_generator import (
+    generate_slopediv_recip8_lut_fj,
     generate_tantoangle_lut_fj, generate_trig_idioms_fj, generate_viewangletox_lut_fj,
     generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj, generate_slopediv_recip_lut_fj,
 )
@@ -54,7 +55,8 @@ def test_slope_div_byte_exact_vs_oracle(tmp_path):
             body += [f"proj.slope_div d, n{k}, m{k}", "hex.print_as_digit 3, d, 0", "stl.output 10"]
         data += [f"n{k}: hex.vec 8, {num}", f"m{k}: hex.vec 8, {den}"]
     data.append("d: hex.vec 3")
-    data.append(generate_slopediv_recip_lut_fj("slopediv_recip"))   # perf #13: the reciprocal table
+    data += [generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8")]   # perf #13: the reciprocal table
     expected = b"".join(f"{ReferenceModel._slope_div(num, den):03x}\n".encode() * 2
                         for num, den in SLOPE_CASES)
     _run(tmp_path, "slope_div", body, data, expected)
@@ -102,7 +104,8 @@ def test_point_to_angle_byte_exact_vs_oracle(tmp_path):
         data += [f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"y1_{k}: hex.vec 8, {y1 & 0xFFFFFFFF}",
                  f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}", f"y2_{k}: hex.vec 8, {y2 & 0xFFFFFFFF}"]
     data += ["d: hex.vec 8", generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
-             generate_slopediv_recip_lut_fj("slopediv_recip")]   # perf #13
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8")]   # perf #13
     expected = b"".join(f"{rm.point_to_angle(x1, y1, x2, y2):08x}\n".encode() * 2
                         for (x1, y1, x2, y2) in P2A_CASES)
 
@@ -243,7 +246,8 @@ def test_scale_from_global_angle_byte_exact_vs_oracle(tmp_path):
         data += [f"vis{k}: hex.vec 8, {vis & 0xFFFFFFFF}", f"vw{k}: hex.vec 8, {view & 0xFFFFFFFF}",
                  f"nrm{k}: hex.vec 8, {nrm & 0xFFFFFFFF}", f"rwd{k}: hex.vec 8, {rwd & 0xFFFFFFFF}"]
         expected += f"{rm.scale_from_global_angle(vis, view, nrm, rwd):08x}\n".encode() * 2
-    data += ["s: hex.vec 8", generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+    data += ["s: hex.vec 8", generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16),
+             generate_slopediv_recip_lut_fj("slopediv_recip")]   # M13-scalerecip
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
     p = tmp_path / "scale.fj"
@@ -343,7 +347,8 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
     data += ["vis: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
              "sgnr: hex.vec 8",
              generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
-             generate_slopediv_recip_lut_fj("slopediv_recip"),   # perf #13
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8"),   # perf #13
              generate_viewangletox_lut_fj("viewangletox", Config().VIEW_W, Config().TRIG_N)]
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
@@ -588,7 +593,8 @@ def test_column_setup_byte_exact_vs_oracle(tmp_path):
         frac0, step = _oracle_column_setup(cy, sc, wt, top, ds)
         expected += f"{frac0:04x}\n{step:04x}\n".encode() * 2
     data += ["f0: hex.vec 4", "st: hex.vec 4",
-             generate_slopediv_recip_lut_fj("slopediv_recip")]   # perf #11
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8")]   # perf #11
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
     p = tmp_path / "column_setup.fj"
@@ -651,7 +657,8 @@ def test_wall_scale_setup_byte_exact_vs_oracle(tmp_path):
         expected += f"{s1 & 0xFFFFFFFF:08x}\n{step & 0xFFFFFFFF:08x}\n".encode() * 2
     data += ["sc1: hex.vec 8", "sst: hex.vec 8",
              generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
-             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16),
+             generate_slopediv_recip_lut_fj("slopediv_recip")]   # M13-scalerecip
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
     p = tmp_path / "wall_scale_setup.fj"
@@ -724,7 +731,8 @@ def test_column_render_params_byte_exact_vs_oracle(tmp_path):
                      f"{frac0:04x}\n{step:04x}\n").encode() * 2
     data += ["tp: hex.vec 8", "bt: hex.vec 8", "tc: hex.vec 8", "f0: hex.vec 4", "st: hex.vec 4",
              generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
-             generate_slopediv_recip_lut_fj("slopediv_recip"),   # perf #11 (column_setup iscale reciprocal)
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8"),   # perf #11 (column_setup iscale reciprocal)
              generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)]
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")

@@ -31,6 +31,7 @@ from doomfj.tables import (
     reciprocal_table, sine_table, tantoangle_table, viewangletox_table,
     xtoviewangle_table, finetangent_table, yslope_table, distscale_table, zlight_table,
     slopediv_recip_table,
+    slopediv_recip8_table,
 )
 
 __all__ = [
@@ -147,6 +148,12 @@ def generate_slopediv_recip_lut_fj(label: str) -> str:
     a 6-nibble register). Values from `tables.slopediv_recip_table` (SSOT, R6). Indexed by the
     top-3-nibble mantissa of (den>>8)."""
     return generate_packed_lut_fj(label, slopediv_recip_table(), 3)
+
+
+def generate_slopediv_recip8_lut_fj(label: str) -> str:
+    """M13-coarseslope: the <<3-prefolded twin of `slopediv_recip` (tables.slopediv_recip8_table,
+    SSOT R6) consumed ONLY by proj.slope_div's coarse form. 3 PACKED BYTES/entry (max 0x80000)."""
+    return generate_packed_lut_fj(label, slopediv_recip8_table(), 3)
 
 
 def generate_finetangent_lut_fj(label: str, trig_n: int) -> str:

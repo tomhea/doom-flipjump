@@ -51,7 +51,7 @@ def main():
     ap.add_argument("--floor-mode", default="textured", choices=["textured", "flat"])
     ap.add_argument("--wall-mode", default="textured", choices=["textured", "W1", "W2"])
     ap.add_argument("--raster-mode", default="framebuffer",
-                    choices=["framebuffer", "stream", "spans", "raster", "proj"])
+                    choices=["framebuffer", "stream", "spans", "raster", "proj", "lines"])
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None, help="asset wad (defaults to --wad)")
@@ -68,7 +68,7 @@ def main():
                                   floor_mode=args.floor_mode, wall_mode=args.wall_mode,
                                   raster_mode=args.raster_mode)
 
-    src = SRC + (STREAM_SRC if args.raster_mode in ("stream", "spans", "raster", "proj") else [])
+    src = SRC + (STREAM_SRC if args.raster_mode in ("stream", "spans", "raster", "proj", "lines") else [])
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
@@ -82,7 +82,7 @@ def main():
     vy = args.vy if args.vy is not None else _signed(sp.y, 32) >> 16
     va = args.va if args.va is not None else sp.angle
     stdin = f"{vx}\n{vy}\n{va}\n".encode()
-    screen = (StreamScreen(stdin=stdin) if args.raster_mode in ("stream", "spans", "raster", "proj")
+    screen = (StreamScreen(stdin=stdin) if args.raster_mode in ("stream", "spans", "raster", "proj", "lines")
              else _ScreenWithInput(stdin))
     term = fj.run(tmp / "m.fjm", io_device=screen, print_time=False, print_termination=False,
                   flat_max_words=RENDER_FLAT_WORDS)

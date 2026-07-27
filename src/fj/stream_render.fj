@@ -306,4 +306,151 @@ ns stream {
       ctake: hex.vec 2
       skip:
     }
+
+    // M13-lines (the DUMB-DEVICE mode): one claimed column's three windows emitted as raw fillCol
+    // [x][y1][y2][colour] records over the 0x0A spans protocol, at CLAIM TIME inside the walk leaf.
+    // M13-lines2 (half-lazy): each visplane's band list lives as TWO half-window lists (asc =
+    // rows [0,centery), desc = [centery,H)), entries 2 bytes [runlen][zrow]; the flat BASE colour
+    // arrives from the seg's own register (cbase/fbase) and joins zrow at cm.emit time -- cidx =
+    // (zrow<<8)|base is exactly the colormap dispatch index. The ceiling prefix [0,ctake) walks
+    // asc then (straddle only) desc; the floor suffix [fstart,H) starts in asc when fstart <
+    // centery (straddle) else in desc with the skip rebased. The device does NOTHING but paint the
+    // given rows. @requires hex.init & stl.ptr_init
+    def emit_col_lines centery, x, cexcl, fstart, wall_lit, cbase, fbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc, cdesc2, cprefdone, pwalk, ploop, pemit_full, pemit_part, pdone, pret, swalk, sloop, sbody, sskipall, spartial, sread, scont, sdone, sret, ctake, ycur, y2, ptr, cnt, cntN, iP, take, wlen, curb, cidx, ccy, end {
+        hex.zero 2, ctake
+        hex.mov 2, ctake, cexcl
+        hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
+      cclamp:
+        hex.mov 2, ctake, fstart
+      cok:
+        hex.set 2, ccy, centery
+        hex.zero 2, ycur
+        hex.mov 2, curb, cbase                   // ceiling colours use the seg's ceiling base
+        // ── ceiling PREFIX over [0, ctake): asc list first (covers [0,centery) fully)
+        hex.if0 2, ctake, wall
+        hex.mov 2, take, ctake
+        hex.cmp 2, ctake, ccy, cprefdone, cprefdone, cdesc   // ctake <= centery -> asc only
+      cdesc:
+        hex.mov 2, take, ccy                     // straddle: consume ALL of asc (centery rows) ...
+      cprefdone:
+        hex.mov w/4, ptr, cbufa
+        stl.fcall pwalk, pret
+        hex.cmp 2, ctake, ccy, wall, wall, cdesc2 // ... then the remainder from desc
+      cdesc2:
+        hex.mov 2, take, ctake
+        hex.sub 2, take, ccy
+        hex.mov w/4, ptr, cbufd
+        stl.fcall pwalk, pret
+        ;wall
+      wall:                                      // ── wall run [ctake, fstart)
+        hex.zero 2, wlen
+        hex.mov 2, wlen, fstart
+        hex.sub 2, wlen, ctake
+        hex.if0 2, wlen, floor
+        byte.emit x
+        byte.emit ctake
+        byte.emit fstart
+        byte.emit wall_lit
+      floor:                                     // ── floor SUFFIX over [fstart, view_h)
+        hex.mov 2, ycur, fstart
+        hex.mov 2, curb, fbase                   // floor colours use the seg's floor base
+        hex.cmp 2, fstart, ccy, fasc, fdesc, fdesc
+      fasc:                                      // straddle: start in asc (skip fstart rows) ...
+        hex.mov 2, take, fstart
+        hex.mov w/4, ptr, fbufa
+        stl.fcall swalk, sret
+        hex.zero 2, take                         // ... then ALL of desc
+        hex.mov w/4, ptr, fbufd
+        stl.fcall swalk, sret
+        ;fdone
+      fdesc:                                     // normal: desc only, skip rebased to centery
+        hex.mov 2, take, fstart
+        hex.sub 2, take, ccy
+        hex.mov w/4, ptr, fbufd
+        stl.fcall swalk, sret
+      fdone:
+        ;end
+
+      // pwalk: emit `take` rows of the 2-byte-entry list at ptr as fillCol records (prefix walk).
+      // ycur advances; curb carries the flat base. take==0 -> nothing.
+      pwalk:
+        hex.if0 2, take, pdone
+        hex.read_byte_and_inc cnt, ptr           // the list's count header
+      ploop:
+        hex.read_byte_and_inc cnt, ptr           // run length
+        hex.read_byte_and_inc cidx + 2*dw, ptr   // zrow -> cidx high byte
+        hex.cmp 2, cnt, take, pemit_full, pemit_full, pemit_part
+      pemit_full:
+        byte.emit x
+        byte.emit ycur
+        hex.mov 2, y2, ycur
+        hex.add 2, y2, cnt
+        byte.emit y2
+        hex.mov 2, cidx, curb                    // cidx = (zrow<<8) | base
+        cm.emit cidx
+        hex.mov 2, ycur, y2
+        hex.sub 2, take, cnt
+        hex.if0 2, take, pdone
+        ;ploop
+      pemit_part:                                // band longer than the window: emit the rest
+        byte.emit x
+        byte.emit ycur
+        hex.mov 2, y2, ycur
+        hex.add 2, y2, take
+        byte.emit y2
+        hex.mov 2, cidx, curb
+        cm.emit cidx
+        hex.mov 2, ycur, y2
+      pdone:
+        stl.fret pret
+
+      // swalk: skip `take` rows of the list at ptr, then emit every remaining band (suffix walk).
+      swalk:
+        hex.read_byte_and_inc cntN, ptr          // entry count
+        hex.zero 2, iP
+      sloop:
+        hex.cmp 2, iP, cntN, sbody, sdone, sdone
+      sbody:
+        hex.read_byte_and_inc cnt, ptr
+        hex.if0 2, take, sread
+        hex.cmp 2, take, cnt, spartial, sskipall, sskipall
+      sskipall:                                  // whole band above the window: hop its zrow byte
+        hex.sub 2, take, cnt
+        hex.ptr_add ptr, 1
+        ;scont
+      spartial:
+        hex.sub 2, cnt, take
+        hex.zero 2, take
+      sread:
+        hex.read_byte_and_inc cidx + 2*dw, ptr   // zrow
+        byte.emit x
+        byte.emit ycur
+        hex.mov 2, y2, ycur
+        hex.add 2, y2, cnt
+        byte.emit y2
+        hex.mov 2, cidx, curb
+        cm.emit cidx
+        hex.mov 2, ycur, y2
+      scont:
+        hex.inc 2, iP
+        ;sloop
+      sdone:
+        stl.fret sret
+
+      ctake: hex.vec 2
+      ycur: hex.vec 2
+      y2: hex.vec 2
+      ptr: hex.vec w/4
+      cnt: hex.vec 2
+      cntN: hex.vec 2
+      iP: hex.vec 2
+      take: hex.vec 2
+      wlen: hex.vec 2
+      curb: hex.vec 2
+      cidx: hex.vec 4
+      ccy: hex.vec 2
+      pret: ;0
+      sret: ;0
+      end:
+    }
 }

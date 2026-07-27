@@ -1158,6 +1158,228 @@ ns frame {
       sgnt: hex.vec 8
     }
 
+    // M13-lines — the DUMB-DEVICE leaf body: fj does EVERYTHING (projection, per-column clip,
+    // occlusion, band boundaries, colours) and the device only paints explicit fillCol lines
+    // ([x][y1][y2][colour], the 0x0A spans protocol). Structure = the stream leaf's front end
+    // (wedge pre-cull + wall_x_range + occlusion pre-scan + wall_setup_sgn/wall_scale_setup + the
+    // crush2b per-visplane shared band-list build) but NO col_struct and NO separate present pass:
+    // each column is claimed AND emitted right here, at claim time, via stream.emit_col_lines
+    // (walk order is front-to-back, each column claimed exactly once, so records never overlap and
+    // the device needs no first-writer logic at all). `drawn` is the raster leaf's stride-1 packed
+    // byte per column. @requires hex.init & stl.ptr_init
+    // half_slots = 1 + 2*MAX_BANDS/2 dw per HALF-window list ([count][<=32 x 2-byte entries]); a
+    // vp's buffer = [asc half][desc half], stride 2*half_slots. M13-lines2 (HALF-LAZY BUILDS): a
+    // ceiling normally shows only above the horizon and a floor only below it, so per seg only the
+    // ASC half (ceiling, rows [0,centery)) / DESC half (floor, rows [centery,H)) is built; the
+    // OTHER half is built lazily in the claim loop on the rare straddling column (negative-viewz
+    // areas). Entries are 2 bytes [runlen][zrow] (build_bands basewidth=0) -- the flat BASE colour
+    // is applied at emit time from the seg's own register, which is why visplane ids in this mode
+    // are keyed (height, light) WITHOUT the base: equal-key planes share one list even when their
+    // flat colour differs.
+    def seg_pass1_leaf_body_lines centery, viewh1, viewh, projection, half_slots \
+            @ loop, body, notdrawn, skipcol, ret, dptr, dbase, dval, one, cge, cdone, fneg, fdone, cVH, cexcl, \
+              fstart, cph, fph, nadv, vpp, vpb, cbufa, cbufd, fbufa, fbufd, \
+              cbuild, cbuilt, fbuild, fbuilt, cdbuild, cdbuilt, cdgo, fabuild, fabuilt, fago, ccy, \
+              work, wok, sfull, occscan, occchk, occdone, occproc \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
+              ceilfix, floorfix, viewz, seg_ceil, seg_floor, \
+              seg_plight, seg_ceilbase, seg_floorbase, seg_lit, seg_cvpidx, seg_fvpidx, \
+              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
+              top, bottom, \
+              drawn, \
+              vpc_bufs, vpf_bufs, vpca_flags, vpcd_flags, vpfa_flags, vpfd_flags, seg_ret, \
+              full, n_drawn, vieww, \
+              bb_ph, bb_light, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, build_bands_leaf, \
+              plane_band_ret, \
+              wrej, wqa, wna, wqb, wnb, wex, wey, weyx, wexy {
+        hex.if0 1, full, work                   // screen already full -> paint nothing
+        stl.fret seg_ret
+      work:
+        // M13-wedge: the multiply-free conservative FOV pre-cull, before the affine cull + atans
+        proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy
+        hex.if0 1, wrej, wok
+        stl.fret seg_ret
+      wok:
+        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        hex.if0 1, visible, ret
+        hex.mov 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
+        hex.set w/4, dbase, drawn
+        hex.ptr_index dptr, dbase, x1
+      occscan:
+        hex.scmp 8, x, x2, occchk, occdone, occdone
+      occchk:
+        hex.read_byte dval, dptr
+        hex.if0 2, dval, occproc                // an unclaimed column exists -> render this seg
+        hex.ptr_add dptr, 1
+        hex.inc 8, x
+        ;occscan
+      occdone:
+        stl.fret seg_ret                        // fully occluded -> byte-exact skip
+      occproc:
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle
+        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        hex.mov 8, cph, seg_ceil                // cph = |(ceil_h<<16) - viewz|, once per seg
+        hex.shl_hex 8, 4, cph
+        hex.sub 8, cph, viewz
+        hex.abs 8, cph
+        hex.mov 8, fph, seg_floor
+        hex.shl_hex 8, 4, fph
+        hex.sub 8, fph, viewz
+        hex.abs 8, fph
+
+        // the four half-buffer addresses (asc+desc per region), once per seg
+        hex.mul_const w/4, cbufa, seg_cvpidx, 2*half_slots*dw
+        hex.set w/4, vpp, vpc_bufs
+        hex.add w/4, cbufa, vpp
+        hex.mov w/4, cbufd, cbufa
+        hex.add_constant w/4, cbufd, half_slots*dw
+        hex.mul_const w/4, fbufa, seg_fvpidx, 2*half_slots*dw
+        hex.set w/4, vpp, vpf_bufs
+        hex.add w/4, fbufa, vpp
+        hex.mov w/4, fbufd, fbufa
+        hex.add_constant w/4, fbufd, half_slots*dw
+
+        // ceiling ASC half (rows [0,centery)) -- the half a ceiling normally needs
+        hex.mul_const w/4, vpp, seg_cvpidx, dw
+        hex.set w/4, nadv, vpca_flags
+        hex.add w/4, vpp, nadv
+        hex.read_hex 1, vpb, vpp
+        hex.if0 1, vpb, cbuild
+        ;cbuilt
+      cbuild:
+        hex.mov 8, bb_ph, cph
+        hex.mov 2, bb_light, seg_plight
+        hex.mov w/4, bb_arr, cbufa
+        hex.add_constant w/4, bb_arr, dw
+        hex.set 2, bb_y0, 0
+        hex.set 2, bb_count, centery
+        hex.set 2, bb_ascending, 1
+        stl.fcall build_bands_leaf, plane_band_ret
+        hex.write_byte cbufa, bb_n
+        hex.set 1, vpb, 1
+        hex.write_hex 1, vpp, vpb
+      cbuilt:
+        // floor DESC half (rows [centery,H)) -- the half a floor normally needs
+        hex.mul_const w/4, vpp, seg_fvpidx, dw
+        hex.set w/4, nadv, vpfd_flags
+        hex.add w/4, vpp, nadv
+        hex.read_hex 1, vpb, vpp
+        hex.if0 1, vpb, fbuild
+        ;fbuilt
+      fbuild:
+        hex.mov 8, bb_ph, fph
+        hex.mov 2, bb_light, seg_plight
+        hex.mov w/4, bb_arr, fbufd
+        hex.add_constant w/4, bb_arr, dw
+        hex.set 2, bb_y0, centery
+        hex.set 2, bb_count, viewh - centery
+        hex.zero 2, bb_ascending
+        stl.fcall build_bands_leaf, plane_band_ret
+        hex.write_byte fbufd, bb_n
+        hex.set 1, vpb, 1
+        hex.write_hex 1, vpp, vpb
+      fbuilt:
+        hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
+        hex.ptr_index dptr, dbase, x1
+        hex.set 2, one, 1
+      loop:
+        hex.scmp 8, x, x2, body, ret, ret
+      body:
+        hex.read_byte dval, dptr
+        hex.if0 2, dval, notdrawn
+        hex.ptr_add dptr, 1                     // already claimed -> next column
+        ;skipcol
+      notdrawn:
+        proj.column_render_params_stream top, bottom, scale, ceilfix, floorfix, viewz, centery, viewh1
+        hex.set 8, cVH, viewh                   // cexcl = min(top, VIEW_H)
+        hex.mov 8, cexcl, top
+        hex.scmp 8, top, cVH, cdone, cge, cge
+      cge:
+        hex.mov 8, cexcl, cVH
+      cdone:
+        hex.mov 8, fstart, bottom               // fstart = max(bottom+1, 0)
+        hex.inc 8, fstart
+        hex.sign 8, fstart, fneg, fdone
+      fneg:
+        hex.zero 8, fstart
+      fdone:
+        // the rare straddling halves (negative-viewz areas): a ceiling reaching below the horizon
+        // needs its DESC half; a floor reaching above needs its ASC half. Lazily built, once per vp.
+        hex.set 2, ccy, centery
+        hex.cmp 2, cexcl, ccy, cdbuilt, cdbuilt, cdbuild   // ceiling past centery? (only then are
+      cdbuild:                                             //  desc rows of the prefix ever read)
+        hex.mul_const w/4, vpp, seg_cvpidx, dw
+        hex.set w/4, nadv, vpcd_flags
+        hex.add w/4, vpp, nadv
+        hex.read_hex 1, vpb, vpp
+        hex.if0 1, vpb, cdgo                    // 0 = not built -> build
+        ;cdbuilt
+      cdgo:
+        hex.mov 8, bb_ph, cph
+        hex.mov 2, bb_light, seg_plight
+        hex.mov w/4, bb_arr, cbufd
+        hex.add_constant w/4, bb_arr, dw
+        hex.set 2, bb_y0, centery
+        hex.set 2, bb_count, viewh - centery
+        hex.zero 2, bb_ascending
+        stl.fcall build_bands_leaf, plane_band_ret
+        hex.write_byte cbufd, bb_n
+        hex.set 1, vpb, 1
+        hex.write_hex 1, vpp, vpb
+      cdbuilt:
+        hex.cmp 2, fstart, ccy, fabuild, fabuilt, fabuilt  // floor starting above centery?
+      fabuild:
+        hex.mul_const w/4, vpp, seg_fvpidx, dw
+        hex.set w/4, nadv, vpfa_flags
+        hex.add w/4, vpp, nadv
+        hex.read_hex 1, vpb, vpp
+        hex.if0 1, vpb, fago                    // 0 = not built -> build
+        ;fabuilt
+      fago:
+        hex.mov 8, bb_ph, fph
+        hex.mov 2, bb_light, seg_plight
+        hex.mov w/4, bb_arr, fbufa
+        hex.add_constant w/4, bb_arr, dw
+        hex.set 2, bb_y0, 0
+        hex.set 2, bb_count, centery
+        hex.set 2, bb_ascending, 1
+        stl.fcall build_bands_leaf, plane_band_ret
+        hex.write_byte fbufa, bb_n
+        hex.set 1, vpb, 1
+        hex.write_hex 1, vpp, vpb
+      fabuilt:
+        // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
+        stream.emit_col_lines centery, x, cexcl, fstart, seg_lit, seg_ceilbase, seg_floorbase, cbufa, cbufd, fbufa, fbufd
+        hex.write_byte_and_inc dptr, one        // drawn = 1 (advances to the next column's slot)
+        hex.inc 2, n_drawn
+        hex.cmp 2, n_drawn, vieww, skipcol, sfull, skipcol
+      sfull:
+        hex.set 1, full, 1
+      skipcol:
+        hex.inc 8, x
+        hex.add 8, scale, scalestep
+        ;loop
+      ret:
+        stl.fret seg_ret
+      dptr: hex.vec w/4
+      dbase: hex.vec w/4
+      dval: hex.vec 2
+      one: hex.vec 2
+      cVH: hex.vec 8
+      cexcl: hex.vec 8
+      fstart: hex.vec 8
+      cph: hex.vec 8
+      fph: hex.vec 8
+      nadv: hex.vec w/4
+      vpp: hex.vec w/4
+      vpb: hex.vec 1
+      ccy: hex.vec 2
+      cbufa: hex.vec w/4
+      cbufd: hex.vec w/4
+      fbufa: hex.vec w/4
+      fbufd: hex.vec w/4
+    }
+
     // ── M13opt2 R_MakeSpans (compile-time-column) — the per-ROW TEXTURED floor/ceiling span pass. For each
     //    screen row y, the COLUMN scan is UNROLLED (`rep(view_w, x) plane_col x`) so every per-column array read
     //    is a DIRECT mov from a COMPILE-TIME address `col_X + 8*x*dw` — NO runtime `ptr_index` (the M13d2 runtime

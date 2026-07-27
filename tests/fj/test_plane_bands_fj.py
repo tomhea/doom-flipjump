@@ -111,7 +111,7 @@ def _build_bands_program(cases):
         "plane_recip_ret: ;0", "plane_band_ret: ;0",
         "dumpptr: hex.vec w/4", "dumpi: hex.vec 2", "dcnt: hex.vec 2", "dbase: hex.vec 2",
         "dzrow: hex.vec 2",
-        "recip32_leaf: plane.recip32", "build_bands_leaf: plane.build_bands",
+        "recip32_leaf: plane.recip32", "build_bands_leaf: plane.build_bands 1",
         generate_slopediv_recip_lut_fj("slopediv_recip"),
         generate_yslope_packed_lut_fj("yslope_packed", Config().VIEW_W, Config().VIEW_H),
         generate_zlight_lut_fj("zlight", Config().VIEW_W, COLORMAP_LIGHTS),

@@ -58,7 +58,11 @@ ns plane {
     // by `stream.emit_band_list` via `hex.read_byte_and_inc` (byte order: count, base, zrow — the
     // cm-index `zrow<<8|base` decomposes into exactly these two bytes, so no combine is needed here).
     // @requires hex.init & stl.ptr_init.
-    def build_bands \
+    // `basewidth` (compile-time 0/1): how many copies of bb_base each entry carries. stream/spans
+    // pass 1 (3-byte entries [runlen][base][zrow] -- the 0x09/0x0A present reads base+zrow as the
+    // colormap index); M13-lines passes 0 (2-byte entries [runlen][zrow] -- the flat base joins at
+    // EMIT time from the seg's own register, letting visplanes sharing (height,light) share a list).
+    def build_bands basewidth \
             @ i, ys, ysptr, y0w, yadv, zidx, step, threshold_hi, threshold_lo, thi6, tlo6, cFFF6, \
               zidx8, lvl, zlbase, zlidx, zrow, \
               cur_zrow, runlen, ptr, c127, dist, moved, \
@@ -79,6 +83,9 @@ ns plane {
                                    // reading what's stored there -- the R11-adjacent trap that
                                    // corrupted memory starting at bb_arr's own location, eventually
                                    // smashing adjacent globals/code and crashing with ip<2w).
+        // basewidth=0 leaves bb_base unread -- this dummy read (overwritten right below)
+        // keeps the extern used so warning-as-error doesn't trip. rep(0,..) when basewidth=1.
+        rep(1-basewidth, k) hex.mov 2, lvl, bb_base
         hex.zero 3, lvl
         hex.mov 2, lvl, bb_light
         hex.shr_hex 3, 1, lvl                       // lvl = light >> 4 (LIGHTSEGSHIFT)
@@ -90,7 +97,7 @@ ns plane {
         hex.mul_const 3, zlidx, lvl, 128
         hex.read_table 2, zrow, zlight, 3, zlidx
         hex.write_byte_and_inc ptr, bb_count
-        hex.write_byte_and_inc ptr, bb_base
+        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
         hex.write_byte_and_inc ptr, zrow
         hex.inc 2, bb_n
         ;done
@@ -221,7 +228,7 @@ ns plane {
 
       writeentry:
         hex.write_byte_and_inc ptr, runlen
-        hex.write_byte_and_inc ptr, bb_base
+        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
         hex.write_byte_and_inc ptr, cur_zrow
         hex.inc 2, bb_n
         hex.mov 2, cur_zrow, zrow
@@ -230,7 +237,7 @@ ns plane {
 
       flush_final:
         hex.write_byte_and_inc ptr, runlen
-        hex.write_byte_and_inc ptr, bb_base
+        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
         hex.write_byte_and_inc ptr, cur_zrow
         hex.inc 2, bb_n
         ;done

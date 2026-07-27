@@ -1,9 +1,21 @@
 # Plan: 54M → 12M ops/frame (E1M1 spawn) — device stays dumb, still a game
 
-## OUTCOME (2026-07-27, measured): ≤12M REACHED — 8,558,499 ops/frame (lab mode); 20.84M all-fj
+## FINAL OUTCOME (2026-07-27, owner ruling): the DUMB-DEVICE mode ships — 29,469,755 ops/frame
 
-Two endpoints now exist side by side on `m13opt3-early-out`, both byte-exact vs the oracle at
-every gate (square 5 + E1M1 4 viewpoints):
+The owner's final device boundary (stricter than every earlier reading): NO device projection, NO
+DDA, NO shading, NO resident geometry, NO per-column clipping — the device may only PRINT explicit
+lines/rectangles/pixels it is handed. That retires 0x0C/0x0D (raster), 0x0E/0x0F (proj) AND 0x09
+(planesproto) from the shipping path. Target <30M all-in-fj: **DELIVERED —
+`raster_mode="lines"` = 29,469,755 ops/frame** (~2.0 fps @60M), byte-exact vs the W1/flat oracle
+on all 9 gate viewpoints (`tests/fj/test_lines_render.py`), certified by the full 294-test suite
+(commits `14c0887` + `51c9edb`). Protocol: 0x0B packed column-runs — per column `[x]` +
+`[y2][colour]` pairs filling rows top-down, `[x][0xFE]` = ditto (copy column x-1, the approved
+rectangle-widening; 58% of spawn columns), `0xFF` terminators. fj does everything: walk, wedge +
+abs-mul culls, bit-identical map-unit atans, per-column clip, claim-time occlusion, half-lazy
+per-visplane band lists, colormap dispatch.
+
+The two SMART-DEVICE endpoints below remain in tree as NON-DEFAULT lab modes for reference; both
+now sit OUTSIDE the owner's device boundary:
 
 - **`raster_mode="raster"` (fj does the projection): 20,843,594 ops/frame** — the device-rasterizer
   (§6) plus seven crush rungs (M13-wedge/wedge2/mulorder/cheapcmp/absmul/coarseslope/scalerecip).
@@ -15,11 +27,11 @@ every gate (square 5 + E1M1 4 viewpoints):
   projection itself; fj keeps the full BSP walk (front-to-back order), the wedge pre-cull and the
   back-face cull, and emits a 2-byte seg id per survivor. Assemble ~15 s.
 
-`proj` is a NON-DEFAULT lab mode: it crosses the device-boundary the owner earlier declined (the
-device's painted[] makes the fine occlusion call). The priced trade — 8.56M (~7.0 fps @60M ops/s)
-vs 20.84M (~2.9 fps) — awaits the owner's default pick; no shipped default was flipped.
+Priced menu, final: lines 29.47M (~2.0 fps, owner-compliant) · raster 20.84M (~2.9 fps, device
+rasterizes) · proj 8.56M (~7.0 fps, device projects). The owner picked the first.
 
-Status: target met in the lab mode; cost model below kept for reference. Owner directive: reach ≤12,000,000 static ops/frame; device may take SIMPLE
+Status: CLOSED — the dumb-device target met. Cost model below kept for reference. The ORIGINAL
+directive this plan was written against: reach ≤12,000,000 static ops/frame; device may take SIMPLE
 mechanical additions but NO game logic (walk/cull/projection/occlusion-decisions stay in fj); still
 look like a game with game features; "game standards good enough" ⇒ sub-pixel/±1px re-bless (PNG-gated)
 and pre-approved resolution reduction are acceptable.

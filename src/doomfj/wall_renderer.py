@@ -17,6 +17,7 @@ from doomfj.lut_generator import (
     generate_slopediv_recip8_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
+    generate_zlight_cuts_fj,
 )
 from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import bake_bsp, _bsp_as_code, _bytes_stream, seg_affine_coeffs
@@ -56,6 +57,13 @@ def _seg_xorby_use(idx, clear=True):
 
 
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub"})
+
+# M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
+# uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
+# seg, so each dead field costs twice per seg. Keep in sync with seg_pass1_leaf_body_lines's `<`
+# list. (ceilfix/floorfix STAY: column_render_params_stream reads them.)
+_LINES_DEAD_FIELDS = frozenset({"seg_texoff", "seg_texbase", "seg_texheight", "seg_tw",
+                                "seg_hm", "seg_light", "seg_ceil", "seg_floor"})
 
 MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Bound: a monotone half-window's
                                   # zidx walk gives <=32 distinct zrow runs (zlight[lvl][zidx] is monotone in
@@ -359,6 +367,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                     fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex))
                 fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
                 fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
+            if lines:
+                fields = [f for f in fields if f[0] not in _LINES_DEAD_FIELDS]
             xorby_blocks[si] = _seg_xorby_block(si, fields)
             out += _seg_xorby_use(si)
         if stream or raster or lines:
@@ -417,7 +427,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # M13-lines: wedge descriptors, then the 0x0A spans frame opens BEFORE the walk -- the
         # leaf emits fillCol records inline at column-claim time.
         pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
-        pass1.append("present.begin_frame_spans")
+        pass1.append("present.begin_frame_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
     else:

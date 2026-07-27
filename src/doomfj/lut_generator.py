@@ -218,6 +218,27 @@ def generate_zlight_packed_lut_fj(label: str, view_w: int, num_colormaps: int) -
     return generate_byte_lut_fj(label, flat)
 
 
+def generate_zlight_cuts_fj(label_next: str, label_prev: str, view_w: int,
+                            num_colormaps: int) -> str:
+    """M13-lines4: the zlight CUT-POINT tables for the binary-search band builder
+    (plane.build_bands_bs). For each light level lvl and zidx z:
+      nextcut[lvl*128+z] = the smallest k > z with zlight[lvl][k] != zlight[lvl][z]  (0xFF: none)
+      prevcut[lvl*128+z] = the largest  k < z with zlight[lvl][k] != zlight[lvl][z]  (0xFF: none)
+    i.e. exactly the zidx values where the colormap ROW changes -- the only thresholds whose row
+    boundaries the band list needs. Values from tables.zlight_table (R6 SSOT); both packed-byte."""
+    zt = zlight_table(view_w, num_colormaps)
+    nxt, prv = [], []
+    for lvl in range(len(zt)):
+        row = zt[lvl]
+        n = len(row)
+        for z in range(n):
+            k = next((k for k in range(z + 1, n) if row[k] != row[z]), None)
+            nxt.append(0xFF if k is None else k)
+            k = next((k for k in range(z - 1, -1, -1) if row[k] != row[z]), None)
+            prv.append(0xFF if k is None else k)
+    return generate_byte_lut_fj(label_next, nxt) + chr(10) + generate_byte_lut_fj(label_prev, prv)
+
+
 def generate_distscale_lut_fj(label: str, view_w: int, trig_n: int) -> str:
     """distscale (R_MapPlane: screen column -> 1/|cos| fisheye, 16.16, 8 nibbles), view_w entries. Values
     from `tables.distscale_table` (all positive). `length = FixedMul(distance, distscale[x1])` seeds the

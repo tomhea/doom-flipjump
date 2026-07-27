@@ -98,6 +98,19 @@ ns present {
         stl.output_char 0x0A
     }
 
+    // M13-lines3 — begin_frame_collines: [0x0B]. The PACKED form of the 0x0A dumb-screen frame:
+    // the device still only prints what it's told, but the wire format drops the redundant per-
+    // record x/y1. Records, tagged by their first byte:
+    //   x < 0xF0: a COLUMN RUN-LIST -- [x], then pairs [y2:1][colour:1] filling rows [prev,y2)
+    //             top-down starting at prev=0, terminated by a single [0xFF] (y2 is <= VIEW_H=100
+    //             for real pairs, so 0xFF is unambiguous).
+    //   0xFF:     end of frame -> present.
+    // (0xFE is reserved for a rect record.) No clipping, no lookups, no decisions device-side:
+    // every row range and colour was computed in fj.
+    def begin_frame_collines {
+        stl.output_char 0x0B
+    }
+
     // M13-raster — the DEVICE RASTERIZER. fj stays the "brain" (BSP walk, visibility/occlusion
     // DECISIONS, per-seg projection setup); the device does pure rendering MECHANICS from compact
     // records: a wall-column DDA (2 adds/column: scale+=scalestep, then a fixed_mul+shift for

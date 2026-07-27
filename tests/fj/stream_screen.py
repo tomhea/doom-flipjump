@@ -31,6 +31,7 @@ from doomfj.tables import slopediv_recip_table, SLOPEDIV_RECIP_RK
 CMD_BEGIN_FRAME_STREAM = 0x07
 CMD_BEGIN_FRAME_PLANES = 0x09      # M13-planesproto (0x08 stays reserved for M16 write_pixel)
 CMD_BEGIN_FRAME_SPANS = 0x0A       # M13-spanfill: dumb-screen fillCol span list
+CMD_BEGIN_FRAME_COLLINES = 0x0B    # M13-lines3: the PACKED dumb-screen frame (column run-lists)
 CMD_LOAD_RASTER_TABLES = 0x0C      # M13-raster: hand the device yslope/zlight/colormap addresses (once)
 CMD_BEGIN_FRAME_RASTER = 0x0D      # M13-raster: the device rasterizer per-frame record stream
 CMD_LOAD_PROJ_TABLES = 0x0E        # M13-proj: hand the device the static per-seg geometry table (once)
@@ -65,6 +66,13 @@ class StreamScreen(InMemoryScreen):
         self.flush_count = 0                       # how many times _present() actually ran (verification aid)
         self._planes_buf = None                    # M13-planesproto: accumulating payload bytes (None = off)
         self._spans_active = False                 # M13-spanfill: inside a 0x0A fillCol span list
+        # M13-lines3: inside a 0x0B packed column-run frame. _cl_x = the current column (None =
+        # expecting a record tag byte); _cl_y = the fill cursor within the column; _cl_pend = a
+        # pending y2 byte awaiting its colour mate.
+        self._cl_active = False
+        self._cl_x = None
+        self._cl_y = 0
+        self._cl_pend = None
         self._spans_rec = bytearray()              # the current 4-byte [x][y1][y2][colour] record being read
         # M13-raster: the device rasterizer's static tables (loaded once via 0x0C, DMA-read directly
         # from fj memory -- see _execute_command) + per-frame state (reset each 0x0D).
@@ -108,6 +116,8 @@ class StreamScreen(InMemoryScreen):
             return 1
         if command == CMD_BEGIN_FRAME_SPANS:
             return 1
+        if command == CMD_BEGIN_FRAME_COLLINES:
+            return 1
         if command == CMD_LOAD_RASTER_TABLES:
             return 1 + 3 * self._address_bytes()
         if command == CMD_BEGIN_FRAME_RASTER:
@@ -134,6 +144,13 @@ class StreamScreen(InMemoryScreen):
             self._require_initialized_screen()
             self._spans_active = True
             self._spans_rec = bytearray()
+            return
+        if command == CMD_BEGIN_FRAME_COLLINES:
+            self._require_initialized_screen()
+            self._cl_active = True
+            self._cl_x = None
+            self._cl_y = 0
+            self._cl_pend = None
             return
         if command == CMD_LOAD_RASTER_TABLES:
             self._require_initialized_screen()
@@ -195,6 +212,9 @@ class StreamScreen(InMemoryScreen):
         if self._spans_active:
             self._handle_spans_byte(byte)
             return
+        if self._cl_active:
+            self._handle_collines_byte(byte)
+            return
         if self._planes_buf is not None:
             self._planes_buf.append(byte)
             if self._planes_payload_complete():
@@ -224,6 +244,41 @@ class StreamScreen(InMemoryScreen):
             for y in range(y1, y2):
                 self.pixel_indices[y * self.width + x] = colour
             self._spans_rec = bytearray()
+
+    # ------------------------------------------------- M13-lines3: the PACKED dumb-screen frame
+    # Records tagged by their first byte: x < 0xF0 opens a COLUMN RUN-LIST -- pairs [y2][colour]
+    # fill rows [cursor, y2) of column x top-down starting at cursor=0, a single 0xFF ends the
+    # column (y2 <= VIEW_H = 100 for real pairs, so 0xFF is unambiguous); 0xFF at tag position ends
+    # the frame. The device holds only the fill cursor -- no clipping, no lookups, no decisions.
+
+    def _handle_collines_byte(self, byte: int) -> None:
+        if self._cl_x is None:                         # expecting a record tag
+            if byte == 0xFF:                           # end of frame
+                self._cl_active = False
+                self._present()
+                self.flush_count += 1
+                return
+            self._cl_x = byte
+            self._cl_y = 0
+            self._cl_pend = None
+            return
+        if self._cl_pend is None:
+            if byte == 0xFF:                           # end of this column's list
+                self._cl_x = None
+                return
+            if byte == 0xFE:                           # DITTO: copy column x-1 (owner-approved
+                x = self._cl_x                         # "rectangles" -- widen the previous lines
+                for y in range(self.height):           # by one column; a pure mechanical copy)
+                    self.pixel_indices[y * self.width + x] =                         self.pixel_indices[y * self.width + x - 1]
+                self._cl_x = None
+                return
+            self._cl_pend = byte                       # y2, awaiting its colour
+            return
+        y2, colour = self._cl_pend, byte
+        for y in range(self._cl_y, y2):
+            self.pixel_indices[y * self.width + self._cl_x] = colour
+        self._cl_y = y2
+        self._cl_pend = None
 
     # ------------------------------------------------- M13-raster: the DEVICE RASTERIZER frame
     # fj stays the "brain" (BSP walk, visibility/occlusion decisions, per-seg projection setup) and

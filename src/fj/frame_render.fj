@@ -1180,11 +1180,12 @@ ns frame {
             @ loop, body, notdrawn, skipcol, ret, dptr, dbase, dval, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cph, fph, nadv, vpp, vpb, cbufa, cbufd, fbufa, fbufd, \
               cbuild, cbuilt, fbuild, fbuilt, cdbuild, cdbuilt, cdgo, fabuild, fabuilt, fago, ccy, \
+              dfull, dchk2, dsame, demitted, dvalid, dct, dfs, \
               work, wok, sfull, occscan, occchk, occdone, occproc \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_segangle, seg_a, seg_b, seg_c, \
-              ceilfix, floorfix, viewz, seg_ceil, seg_floor, \
+              ceilfix, floorfix, viewz, \
               seg_plight, seg_ceilbase, seg_floorbase, seg_lit, seg_cvpidx, seg_fvpidx, \
-              visible, x1, x2, rwa, normalangle, rw_distance, scale, scalestep, x, \
+              visible, x1, x2, normalangle, rw_distance, scale, scalestep, x, \
               top, bottom, \
               drawn, \
               vpc_bufs, vpf_bufs, vpca_flags, vpcd_flags, vpfa_flags, vpfd_flags, seg_ret, \
@@ -1200,30 +1201,31 @@ ns frame {
         hex.if0 1, wrej, wok
         stl.fret seg_ret
       wok:
-        proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        // M13-mapunits: the map-unit variant -- 4-nibble atan front end, no rwa (dead here)
+        proj.wall_x_range_m visible, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         hex.mov 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
         hex.ptr_index dptr, dbase, x1
+        // M13-lines3: x/x2 are clipped columns in [0,161] here -- 2-nibble unsigned compares and
+        // incs replace the 8-nibble signed forms in both hot loops (~2.4x cheaper each, measured).
       occscan:
-        hex.scmp 8, x, x2, occchk, occdone, occdone
+        hex.cmp 2, x, x2, occchk, occdone, occdone
       occchk:
         hex.read_byte dval, dptr
         hex.if0 2, dval, occproc                // an unclaimed column exists -> render this seg
         hex.ptr_add dptr, 1
-        hex.inc 8, x
+        hex.inc 2, x
         ;occscan
       occdone:
         stl.fret seg_ret                        // fully occluded -> byte-exact skip
       occproc:
         proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
-        hex.mov 8, cph, seg_ceil                // cph = |(ceil_h<<16) - viewz|, once per seg
-        hex.shl_hex 8, 4, cph
-        hex.sub 8, cph, viewz
-        hex.abs 8, cph
-        hex.mov 8, fph, seg_floor
-        hex.shl_hex 8, 4, fph
+        hex.mov 8, cph, ceilfix                 // cph = |ceilfix - viewz| (ceilfix = ceil_h<<16
+        hex.sub 8, cph, viewz                   // already -- seg_ceil/seg_floor are NOT baked in
+        hex.abs 8, cph                          // lines mode, saving 2 8-nibble xorby fields on
+        hex.mov 8, fph, floorfix                // every walked seg)
         hex.sub 8, fph, viewz
         hex.abs 8, fph
 
@@ -1282,12 +1284,14 @@ ns frame {
         hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
         hex.ptr_index dptr, dbase, x1
         hex.set 2, one, 1
+        hex.set 1, dvalid, 0                    // M13-ditto: no previous emitted column yet
       loop:
-        hex.scmp 8, x, x2, body, ret, ret
+        hex.cmp 2, x, x2, body, ret, ret
       body:
         hex.read_byte dval, dptr
         hex.if0 2, dval, notdrawn
         hex.ptr_add dptr, 1                     // already claimed -> next column
+        hex.set 1, dvalid, 0                    // M13-ditto: a gap breaks x-adjacency
         ;skipcol
       notdrawn:
         proj.column_render_params_stream top, bottom, scale, ceilfix, floorfix, viewz, centery, viewh1
@@ -1348,15 +1352,31 @@ ns frame {
         hex.set 1, vpb, 1
         hex.write_hex 1, vpp, vpb
       fabuilt:
+        // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
+        // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
+        // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
+        hex.if0 1, dvalid, dfull
+        hex.cmp 2, cexcl, dct, dfull, dchk2, dfull
+      dchk2:
+        hex.cmp 2, fstart, dfs, dfull, dsame, dfull
+      dsame:
+        byte.emit x
+        stl.output_char 0xFE
+        ;demitted
+      dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
         stream.emit_col_lines centery, x, cexcl, fstart, seg_lit, seg_ceilbase, seg_floorbase, cbufa, cbufd, fbufa, fbufd
+        hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
+        hex.mov 2, dfs, fstart
+        hex.set 1, dvalid, 1
+      demitted:
         hex.write_byte_and_inc dptr, one        // drawn = 1 (advances to the next column's slot)
         hex.inc 2, n_drawn
         hex.cmp 2, n_drawn, vieww, skipcol, sfull, skipcol
       sfull:
         hex.set 1, full, 1
       skipcol:
-        hex.inc 8, x
+        hex.inc 2, x
         hex.add 8, scale, scalestep
         ;loop
       ret:
@@ -1374,6 +1394,9 @@ ns frame {
       vpp: hex.vec w/4
       vpb: hex.vec 1
       ccy: hex.vec 2
+      dvalid: hex.vec 1
+      dct: hex.vec 2
+      dfs: hex.vec 2
       cbufa: hex.vec w/4
       cbufd: hex.vec w/4
       fbufa: hex.vec w/4

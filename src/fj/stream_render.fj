@@ -173,7 +173,6 @@ ns stream {
         hex.set w/4, ptr, vpf_bufs
         hex.add w/4, fbuf, ptr
         // ctake = min(cexcl, fstart) ; ycur = 0
-        hex.zero 2, ctake
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp
       cclamp:
@@ -211,7 +210,6 @@ ns stream {
         hex.mov 2, ycur, y2
         ;wall
       wall:                                            // ycur == ctake here; wall run [ctake, fstart)
-        hex.zero 2, wlen
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, ctake
         hex.if0 2, wlen, floor
@@ -323,6 +321,7 @@ ns stream {
       cclamp:
         hex.mov 2, ctake, fstart
       cok:
+        byte.emit x                              // M13-lines3: ONE x header for the whole column
         hex.set 2, ccy, centery
         hex.zero 2, ycur
         hex.mov 2, curb, cbase                   // ceiling colours use the seg's ceiling base
@@ -347,8 +346,6 @@ ns stream {
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, ctake
         hex.if0 2, wlen, floor
-        byte.emit x
-        byte.emit ctake
         byte.emit fstart
         byte.emit wall_lit
       floor:                                     // ── floor SUFFIX over [fstart, view_h)
@@ -369,6 +366,7 @@ ns stream {
         hex.mov w/4, ptr, fbufd
         stl.fcall swalk, sret
       fdone:
+        stl.output_char 0xFF                     // ends this column's pair list (y2 is never 0xFF)
         ;end
 
       // pwalk: emit `take` rows of the 2-byte-entry list at ptr as fillCol records (prefix walk).
@@ -381,8 +379,6 @@ ns stream {
         hex.read_byte_and_inc cidx + 2*dw, ptr   // zrow -> cidx high byte
         hex.cmp 2, cnt, take, pemit_full, pemit_full, pemit_part
       pemit_full:
-        byte.emit x
-        byte.emit ycur
         hex.mov 2, y2, ycur
         hex.add 2, y2, cnt
         byte.emit y2
@@ -393,8 +389,6 @@ ns stream {
         hex.if0 2, take, pdone
         ;ploop
       pemit_part:                                // band longer than the window: emit the rest
-        byte.emit x
-        byte.emit ycur
         hex.mov 2, y2, ycur
         hex.add 2, y2, take
         byte.emit y2
@@ -423,8 +417,6 @@ ns stream {
         hex.zero 2, take
       sread:
         hex.read_byte_and_inc cidx + 2*dw, ptr   // zrow
-        byte.emit x
-        byte.emit ycur
         hex.mov 2, y2, ycur
         hex.add 2, y2, cnt
         byte.emit y2

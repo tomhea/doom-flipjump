@@ -742,6 +742,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([] if (raster or lines) else [f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0"]),
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
+        *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_key_ids)] if lines else []),
         *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
           [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
         palette,
@@ -846,7 +847,6 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict) -> li
         "drawn:" + NLJ + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
         "wrej: hex.vec 1", "wqa: hex.vec 1", "wna: hex.vec 1", "wqb: hex.vec 1", "wnb: hex.vec 1",
         "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
-        _lines_bake_bank(rm, cfg, asset_wad, vz_classes, key_ids),
     ]
 
 def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:

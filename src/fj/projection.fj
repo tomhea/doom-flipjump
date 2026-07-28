@@ -1507,7 +1507,7 @@ ns proj {
     //   the 16.16 values >> 16). Bit-identical to slope_div(num<<16, den<<16): den<<16 < 0x200
     //   <=> den == 0, and sden/wnum are built as den<<8 / num<<8 (= the original's (v<<16)>>8) --
     //   from there the body is the coarseslope slope_div verbatim.
-    def slope_div_m dst, num, den             @ lt, ge, prodlo, nrm_hi, hi_done, nrm_lo, lo_more, lo_done, wok,               keep, clamp, done,               sden, wnum, recipw, recip, prod, csr3             < slopediv_recip8 {
+    def slope_div_m dst, num, den @ lt, ge, prodlo, k1, k2, k3, norm_done, wok, keep, clamp, done, sden, wnum, recipw, recip, prod, csr3 < slopediv_recip8 {
         hex.if0 4, den, lt                       // den<<16 < 512 <=> den == 0
         ;ge
       lt:
@@ -1518,20 +1518,26 @@ ns proj {
         hex.mov 4, sden + 2*dw, den              // sden = den << 8  (== (den<<16) >> 8)
         hex.zero 6, wnum
         hex.mov 4, wnum + 2*dw, num              // wnum = num << 8
-      nrm_hi:                                    // right-normalize: while sden > 0xFFF, BOTH >>= 1 nib
-        hex.if0 3, sden + 3*dw, hi_done
+        // M13-slopetree: den is a 4-nibble map-unit magnitude >= 1, so sden's leading nibble
+        // sits at position 2+k where k = den's leading-nibble index -- FOUR cases, decided by
+        // three if0 slice tests; the left-normalize can never trigger (sden >= 0x100 always).
+        // Replaces the shift LOOP with at most one fixed-amount shift pair. Bit-identical.
+        hex.if0 3, den + 1*dw, norm_done         // k=0: den <= 0xF -> already normalized
+        hex.if0 2, den + 2*dw, k1                // k=1: one shift
+        hex.if0 1, den + 3*dw, k2                // k=2: two shifts
+      k3:
+        hex.shr_hex 6, 3, sden
+        hex.shr_hex 6, 3, wnum
+        ;norm_done
+      k2:
+        hex.shr_hex 6, 2, sden
+        hex.shr_hex 6, 2, wnum
+        ;norm_done
+      k1:
         hex.shr_hex 6, 1, sden
         hex.shr_hex 6, 1, wnum
-        ;nrm_hi
-      hi_done:
-      nrm_lo:                                    // left-normalize: while sden < 0x100, BOTH <<= 1 nib
-        hex.if0 4, sden + 2*dw, lo_more
-        ;lo_done
-      lo_more:
-        hex.shl_hex 6, 1, sden
-        hex.shl_hex 6, 1, wnum
-        ;nrm_lo
-      lo_done:
+        ;norm_done
+      norm_done:
         hex.if0 3, wnum + 3*dw, wok              // slope>=1 guard: oracle-equivalent clamp
         ;clamp
       wok:
@@ -1666,6 +1672,7 @@ ns proj {
     // proj.wall_x_range_m — the lines-mode variant: map-unit atans (point_to_angle_m on the
     //   4-nibble slices), NO rw_angle1 output (dead in lines mode), no cull-path output zeroing
     //   (the leaf frets on !visible without reading x1/x2), and the final column compare at
+
     //   2 nibbles (post-clip columns are in [0, VIEW_W+1]). Everything else mirrors wall_x_range.
     def wall_x_range_m visible, x1, x2, sgn, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, v1x, v1y, v2x, v2y, a, b, c \
             @ a1, a2, span, tspan, diff, tx1, tx2, sgnt, frontok, \

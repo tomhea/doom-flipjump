@@ -134,7 +134,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
     assert floor_mode in ("textured", "flat"), f"unknown floor_mode: {floor_mode!r}"
-    assert wall_mode in ("textured", "W1", "W2"), f"unknown wall_mode: {wall_mode!r}"
+    assert wall_mode in ("textured", "W1", "W2", "W2S"), f"unknown wall_mode: {wall_mode!r}"
     assert raster_mode in ("framebuffer", "stream", "spans", "raster", "proj", "lines"), \
         f"unknown raster_mode: {raster_mode!r}"
     # M13-spanfill: "spans" shares the ENTIRE stream pipeline (pass-1 band lists + col_struct + the
@@ -160,9 +160,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # colormap -- and emits raw fillCol [x][y1][y2][colour] records (the 0x0A spans protocol)
     # inline at column-claim time. No col_struct, no present-tail pass.
     lines = raster_mode == "lines"
+    w2s_flag = 1 if wall_mode == "W2S" else 0   # M13-W2S tier select for the lines leaf
     if stream or raster or projm or lines:
-        assert wall_mode == "W1" and floor_mode == "flat", \
-            "raster_mode='stream'/'spans'/'raster'/'proj'/'lines' only supports wall_mode='W1' + floor_mode='flat'"
+        assert wall_mode in ("W1", "W2S") and floor_mode == "flat", \
+            "the run-stream modes support wall_mode='W1' (all) or 'W2S' (lines only) + floor_mode='flat'"
+        assert wall_mode != "W2S" or lines, "wall_mode='W2S' is a lines-mode tier"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -350,6 +352,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 f"    hex.set w/4, vzbank, vpbank + "
                 f"{lines_vz_classes[_vz] * len(lines_key_ids) * 130}*dw"]
 
+    # M13-W2S: the per-seg wall colour strips (only when the lines mode asks for the W2S tier)
+    lines_wstrip_off, lines_wstrip_txt = {}, ""
+    if lines and wall_mode == "W2S":
+        lines_wstrip_off, lines_wstrip_txt = _lines_wall_strips(
+            rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap, lrow)
+
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
     # M13pS2-crush2b: per-seg VISPLANE ids -- segs sharing (plane height, light, flat base) share ONE
@@ -385,6 +393,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                            ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
                            ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc)]
                 rfields = [("seg_segangle", 8, seg.angle),
+                           *([("seg_wstrip", "w/4", f"{lines_wstrip_off[si]}*dw")]
+                             if wall_mode == "W2S" else []),
                            ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
                            ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
                            ("seg_lit", 2, colormap[lrow(ssec.light)][combined[tb]]),
@@ -539,6 +549,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # frame opens BEFORE the walk -- the leaf emits records inline at column-claim time.
         pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
         pass1 += [f";{_pfx(mapname)}_dsc_walk", "dsc_done:"]
+        if wall_mode == "W2S":
+            pass1.append("hex.set w/4, wstripbase, wstrips")
         pass1.append("present.begin_frame_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
@@ -634,7 +646,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + [cm, "__hot_end:"])
     elif lines:
         hotdata = ([";__hot_end"]
-                  + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_key_ids)
+                  + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_key_ids,
+                                      wall_mode == "W2S")
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, "__hot_end:"])
     else:
@@ -689,7 +702,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           if projm else
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_lines",
            "seg_pass2_leaf:",
-           f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {LINES_HALF_SLOTS}"]
+           f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
+           f"{LINES_HALF_SLOTS}, {w2s_flag}"]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -747,6 +761,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_key_ids)] if lines else []),
+        *([lines_wstrip_txt] if lines_wstrip_txt else []),
         *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
           [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
         palette,
@@ -836,13 +851,56 @@ def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict) -> str
     return NLJ.join(out) + NLJ
 
 
-def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict) -> list[str]:
+def _lines_wall_strips(rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap, lrow):
+    """M13-W2S: per-seg RUN-MERGED wall colour strips + their bank text.
+
+    Each one-sided seg's 16-texel strip (the shared `_tiny_wall_canvas` reduction, R6) is
+    colormapped at its sector's light level and then run-merged into entries
+    `[cum_band:1][colour:1]` -- cum_band is the CUMULATIVE band index (1..16) at which the colour
+    changes, so the emit computes `y2 = top + ((cum*h) >> 4)` with no divide. Segs whose strip is
+    one flat colour (83 of 575 on E1M1) collapse to a single entry, i.e. exactly today's W1 cost.
+    Returns (offsets_by_seg, bank_text); STRIDE dw per seg keeps the offsets baked constants."""
+    STRIDE = 1 + 2 * 16                       # [n][ (cum,colour) x <=16 ]
+    cache = {}
+    off_by_seg, lines_out, k = {}, ["// M13-W2S: per-seg run-merged wall colour strips", "wstrips:"], 0
+    for si, seg in enumerate(cmap.segs):
+        if lds[seg.linedef].back != -1:
+            continue
+        sd = sds[lds[seg.linedef].front if seg.side == 0 else lds[seg.linedef].back]
+        sec = rm._seg_sector(lds, sds, secs, seg)
+        lr = lrow(sec.light)
+        tex = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=wall_mode)
+        if tex is None:
+            cols = [colormap[lr][WALL_BG]]
+        else:
+            texels, th, _tw = tex
+            cols = [colormap[lr][texels[i]] for i in range(min(16, len(texels)))]
+        runs = []
+        for j, c in enumerate(cols):
+            if runs and runs[-1][1] == c:
+                runs[-1][0] = j + 1
+            else:
+                runs.append([j + 1, c])
+        runs[-1][0] = 16                      # the last run always reaches the wall bottom
+        off_by_seg[si] = k * STRIDE
+        body = [len(runs)] + [b for r in runs for b in r]
+        for b in body:
+            lines_out.append(f";{b:#x} * dw")
+        for _ in range(STRIDE - len(body)):
+            lines_out.append(";0 * dw")
+        k += 1
+    return off_by_seg, NLJ.join(lines_out) + NLJ
+
+
+def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
+                      w2s: bool = False) -> list[str]:
     """M13-lines decls, post-bakedbands: the baked bank + the frame's bank pointer. No
     build_bands, no recip32, no built-flags, no planeheight math, no yslope table -- the lists
     are static data. `drawn` stays the stride-1 packed byte; wedge registers shared-named with
     raster/proj."""
     return [
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
+        "seg_wstrip: hex.vec w/4", "wstripbase: hex.vec w/4",   # M13-W2S strip bank
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
         "vzbank: hex.vec w/4",                         # set per frame by the player-subsector block
         # M13-splitxb: part-1/part-2 shared state + the rest-block gate

@@ -1215,13 +1215,13 @@ ns frame {
     // M13-splitxb part 2 -- the EMIT HALF: projection setup, baked-bank addresses, the claim
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
-    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots \
+    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, \
               dfull, dchk2, dsame, demitted, dvalid, dct, dfs \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
-              seg_lit, seg_cvpidx, seg_fvpidx, \
+              seg_lit, seg_wstrip, wstripbase, seg_cvpidx, seg_fvpidx, \
               x1, x2, x, dbase, dptr, dval8, \
               normalangle, rw_distance, scale, scalestep, \
               top, bottom, \
@@ -1288,7 +1288,7 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, x, cexcl, fstart, seg_lit, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, w2s, x, cexcl, fstart, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
         hex.set 1, dvalid, 1

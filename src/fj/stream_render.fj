@@ -305,6 +305,60 @@ ns stream {
       skip:
     }
 
+    // M13-lines wall tiers. W1: the wall is ONE flat run -> a single [y2][colour] pair.
+    def w1_wall fstart, wall_lit {
+        byte.emit fstart
+        byte.emit wall_lit
+    }
+
+    // M13-W2S: the seg's run-merged 16-band colour strip STRETCHED over the wall span. Entry j is
+    // [cum_j:1][colour:1]; its band ends at y2 = ctake + ((cum_j * wlen) >> 4) -- an exact integer
+    // split (the 1/16 IS the >>4), no divide, no v-DDA, and a function of (seg, ctake, fstart)
+    // alone, so the ditto key is unchanged and the 93 ditto columns stay free. Bands that don't
+    // advance y2 (thin walls) emit nothing. @requires hex.init & stl.ptr_init
+    def w2s_wall ctake, wlen, wstrip, wstripbase \
+            @ ptr, cntN, iP, ycur, y2r, colr, wprod, wprodb, wprod2, \
+              wsloop, wsbody, wsemit, wsnext, wsdone, end {
+        hex.mov w/4, ptr, wstripbase               // bank base (per frame) + the seg's baked offset
+        hex.add w/4, ptr, wstrip
+        hex.read_byte_and_inc cntN, ptr
+        hex.zero 2, iP
+        hex.mov 2, ycur, ctake
+      wsloop:
+        hex.cmp 2, iP, cntN, wsbody, wsdone, wsdone
+      wsbody:
+        hex.read_byte_and_inc y2r, ptr             // cum band index (1..16)
+        hex.read_byte_and_inc colr, ptr            // the band's final palette byte
+        hex.zero 4, wprod                          // both operands zero-extended to the mul width
+        hex.mov 2, wprod, y2r                      // (mul_lo n reads n nibbles from BOTH sources)
+        hex.zero 4, wprodb
+        hex.mov 2, wprodb, wlen
+        hex.mul_lo 4, wprod2, wprod, wprodb        // cum * wlen  (<=16 x <=100)
+        hex.shr_hex 4, 1, wprod2                   // >> 4 bits = the 1/16 split
+        hex.mov 2, y2r, wprod2
+        hex.add 2, y2r, ctake                      // y2 = ctake + ((cum*wlen) >> 4)
+        hex.cmp 2, y2r, ycur, wsnext, wsnext, wsemit   // no advance -> skip this band
+      wsemit:
+        byte.emit y2r
+        byte.emit colr
+        hex.mov 2, ycur, y2r
+      wsnext:
+        hex.inc 2, iP
+        ;wsloop
+      wsdone:
+        ;end
+      ptr: hex.vec w/4
+      cntN: hex.vec 2
+      iP: hex.vec 2
+      ycur: hex.vec 2
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      wprod: hex.vec 4
+      wprodb: hex.vec 4
+      wprod2: hex.vec 4
+      end:
+    }
+
     // M13-lines (the DUMB-DEVICE mode): one claimed column's three windows emitted at CLAIM
     // TIME as the 0x0B packed column-run frame. M13-bakedbands: the per-visplane lists are
     // COMPILE-TIME data with [y2_absolute][final_colour] pairs (colours pre-composed through
@@ -313,7 +367,7 @@ ns stream {
     // pairs until one crosses ctake (clamped there); the floor SUFFIX skips pairs at or below
     // fstart and streams the rest (the device cursor is already at fstart after the wall pair).
     // @requires hex.init & stl.ptr_init
-    def emit_col_lines centery, x, cexcl, fstart, wall_lit, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, end {
+    def emit_col_lines centery, w2s, x, cexcl, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, end {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
@@ -335,8 +389,8 @@ ns stream {
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, ctake
         hex.if0 2, wlen, floor
-        byte.emit fstart
-        byte.emit wall_lit
+        rep(1-w2s, k) .w1_wall fstart, wall_lit
+        rep(w2s, k) .w2s_wall ctake, wlen, wstrip, wstripbase
       floor:                                     // -- floor SUFFIX over [fstart, view_h)
         hex.cmp 2, fstart, ccy, fasc, fdesc, fdesc
       fasc:                                      // straddle: skip within asc, then all of desc

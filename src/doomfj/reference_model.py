@@ -590,7 +590,10 @@ class ReferenceModel:
         two can never drift (R6)."""
         if wall_mode == "W1":
             return [ReferenceModel._mode_texel(texels)], 1, 1
-        if wall_mode == "W2":
+        if wall_mode in ("W2", "W2S"):
+            # M13-W2S shares W2's 16-texel strip; the tiers differ only in how a wall column MAPS
+            # it (W2 = the real v-DDA tiling; W2S = the strip STRETCHED over [top,bottom], see
+            # render_wall_frame). Sharing the strip keeps one texture-reduction SSOT (R6).
             col0 = texels[:th]                                  # column-major: the first `th` entries = column 0
             n = 16
             band = [col0[min(th - 1, r * th // n)] for r in range(n)]
@@ -780,7 +783,19 @@ class ReferenceModel:
                     top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz, scale & ANGLE_MASK)
                     top = max(0, top)
                     bottom = min(cfg.VIEW_H - 1, bottom)
-                    if top <= bottom:
+                    if top <= bottom and wall_mode == "W2S":
+                        # M13-W2S: band j of the strip covers rows [top + (j*h>>4), top + ((j+1)*h>>4))
+                        # with h = bottom-top+1 -- an exact integer split, no v-DDA, no divide, and a
+                        # function of (seg, top, bottom) ALONE so the ditto structure survives.
+                        texels_s, th_s, tw_s = tex if tex is not None else ([WALL_BG], 1, 1)
+                        hh = bottom - top + 1
+                        for j in range(th_s):
+                            ya = top + ((j * hh) >> 4 if th_s == 16 else (j * hh) // th_s)
+                            yb = top + (((j + 1) * hh) >> 4 if th_s == 16 else ((j + 1) * hh) // th_s)
+                            c = colormap[light_row][texels_s[j]]
+                            for y in range(ya, min(yb, bottom + 1)):
+                                fb[y * cfg.VIEW_W + x] = c
+                    elif top <= bottom:
                         if tex is None:
                             for y in range(top, bottom + 1):
                                 fb[y * cfg.VIEW_W + x] = flat_fill

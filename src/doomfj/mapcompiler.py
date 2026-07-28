@@ -220,7 +220,8 @@ def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: st
 
 
 def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
-                 subsector_action=None, full_abort_label: str = None, prune=None) -> str:
+                 subsector_action=None, full_abort_label: str = None, prune=None,
+                 inline_side: bool = False) -> str:
     """BSP-as-code (opt #7): emit the front-to-back BSP walk as fj CODE. Each node becomes a code block
     whose partition line is baked as compile-time constants, so the side test is `proj.point_on_side`
     (no per-node stream read). The block visits the NEAR child subtree first (the side the viewer is on),
@@ -291,10 +292,59 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             lines.append(f"    hex.if0 1, {full_abort_label}, {L}_go{i}")   # paints nothing (front-to-back
             lines.append(f"    stl.fret {L}_r{i}")         # occlusion) -> prune it. Byte-exact: the per-seg
             lines.append(f"{L}_go{i}:")                    # leaf would have fret'd on `full` for every seg.
-        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
-        lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
-        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # CLEAR (vals -> 0, the xor involution)
-        lines.append(f"    hex.if0 2, {L}_side, {L}_nf{i}")   # back==0 (front) -> jump; else fall to back path
+        if inline_side:
+            # M13-inlinenodes: the side test SPECIALIZED per node -- baked-const subtracts and
+            # baked-magnitude multiplies, no shared-leaf fcalls, no xor_by SET/CLEAR involution.
+            # Same fold/compare structure as point_on_side_leaf at the same widths -> byte-exact.
+            # is1/is2 = the two product terms' signs (sign_d XOR sign_partition-delta); the 4-way
+            # sign-pair compare mirrors the leaf verbatim. xb{i}/pos_leaf stay emitted for the
+            # descend pre-walk, which still routes through them.
+            e = lines.append
+            e(f"    hex.mov 10, {L}_idyv, vy")
+            e(f"    hex.add_constant 10, {L}_idyv, {(-n.y) & MASK40}")   # dyv = vy - py
+            e(f"    hex.sign 10, {L}_idyv, {L}_iyn{i}, {L}_iyp{i}")
+            e(f"{L}_iyn{i}:")                                 # dyv < 0: |dyv| via the 5-nibble identity
+            e(f"    hex.neg 5, {L}_idyv")
+            e(f"    hex.zero 3, {L}_idyv + 5*dw")             # clear the sign-extension for the mul
+            e(f"    hex.set 1, {L}_is1, {0 if n.dx < 0 else 1}")   # is1 = 1 XOR sign_dx
+            e(f"    ;{L}_imy{i}")
+            e(f"{L}_iyp{i}:")                                 # dyv >= 0: already a clean magnitude
+            e(f"    hex.set 1, {L}_is1, {1 if n.dx < 0 else 0}")   # is1 = sign_dx
+            e(f"{L}_imy{i}:")
+            e(f"    hex.mul_const 8, {L}_ip1, {L}_idyv, {abs(n.dx)}")   # p1 = |dx| * |dyv|
+            e(f"    hex.mov 10, {L}_idxv, vx")
+            e(f"    hex.add_constant 10, {L}_idxv, {(-n.x) & MASK40}")   # dxv = vx - px
+            e(f"    hex.sign 10, {L}_idxv, {L}_ixn{i}, {L}_ixp{i}")
+            e(f"{L}_ixn{i}:")
+            e(f"    hex.neg 5, {L}_idxv")
+            e(f"    hex.zero 3, {L}_idxv + 5*dw")
+            e(f"    hex.set 1, {L}_is2, {0 if n.dy < 0 else 1}")   # is2 = 1 XOR sign_dy
+            e(f"    ;{L}_imx{i}")
+            e(f"{L}_ixp{i}:")
+            e(f"    hex.set 1, {L}_is2, {1 if n.dy < 0 else 0}")   # is2 = sign_dy
+            e(f"{L}_imx{i}:")
+            e(f"    hex.mul_const 8, {L}_ip2, {L}_idxv, {abs(n.dy)}")   # p2 = |dy| * |dxv|
+            e(f"    hex.if 1, {L}_is1, {L}_ia0{i}, {L}_ia1{i}")
+            e(f"{L}_ia0{i}:")                                 # p1 term positive
+            e(f"    hex.if 1, {L}_is2, {L}_ipp{i}, {L}_ipm{i}")
+            e(f"{L}_ipp{i}:")                                 # (+,+): back = p1 > p2
+            e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_nf{i}, {L}_nf{i}, {L}_ib{i}")
+            e(f"{L}_ipm{i}:")                                 # (+,-): back unless both magnitudes 0
+            e(f"    hex.if0 8, {L}_ip1, {L}_ipz{i}")
+            e(f"    ;{L}_ib{i}")
+            e(f"{L}_ipz{i}:")
+            e(f"    hex.if0 8, {L}_ip2, {L}_nf{i}")
+            e(f"    ;{L}_ib{i}")
+            e(f"{L}_ia1{i}:")                                 # p1 term negative
+            e(f"    hex.if 1, {L}_is2, {L}_nf{i}, {L}_imm{i}")     # (-,+): always front
+            e(f"{L}_imm{i}:")                                 # (-,-): back = p2 > p1
+            e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_ib{i}, {L}_nf{i}, {L}_nf{i}")
+            e(f"{L}_ib{i}:")                                  # back path falls through
+        else:
+            lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
+            lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
+            lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # CLEAR (vals -> 0, the xor involution)
+            lines.append(f"    hex.if0 2, {L}_side, {L}_nf{i}")   # back==0 (front) -> jump; else fall to back path
         lines += visit(n.left)                             # back (side>0): near=left, far=right
         lines += visit(n.right)
         lines.append(f"    stl.fret {L}_r{i}")
@@ -323,6 +373,9 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
         for nm in ("sign_dx", "sign_dy"):
             lines.append(f"{L}_{nm}: hex.vec 1")           # shared per-node partition sign flags
         lines.append(f"{L}_side: hex.vec 2")
+        if inline_side:                                    # M13-inlinenodes shared scratch
+            for nm, wd in (("idxv", 10), ("idyv", 10), ("ip1", 8), ("ip2", 8), ("is1", 1), ("is2", 1)):
+                lines.append(f"{L}_{nm}: hex.vec {wd}")
         lines.append(f"{L}_pos_ret: ;0")                   # the side-test leaf's fcall/fret return register
         lines.append(f"{L}_xbret: ;0")                     # the node xor_by block's fcall/fret return register (M12qq)
     lines.append(f"{L}_ss: hex.vec 4")

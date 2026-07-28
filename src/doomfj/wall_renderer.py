@@ -491,7 +491,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
 
     bsp = _bsp_as_code(_pfx(mapname), cmap, done_label="bsp_done", subsector_action=subsector_action,
                        full_abort_label="full" if (stream or raster or lines) else None,   # M13pG1
-                       prune=_lines_prune if lines else None)
+                       # inline_side=True measured +0.42M on E1M1 (code bloat beats the
+                       # fcall savings -- the layout tax again); kept available, OFF.
+                       prune=_lines_prune if lines else None, inline_side=False)
     if lines:
         bsp += _bsp_descend_code(_pfx(mapname), cmap, _lines_descend_leaf, done_label="dsc_done")
     xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (once)
@@ -671,12 +673,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *postlude_palette, *present_tail, "stl.loop",
         "bad: stl.loop",
         *fb_leaves,
-        *(["seg_pass1_leaf:", "stl.fret seg_ret"] if "segstub" in ablate else
+        *((["seg_pass1_leaf:", "stl.fret seg_ret"]
+           + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "segstub" in ablate else
           # M13-wedge attribution: segstub + the wedge test only. (segstub - wedgestub)/segs gives the
           # test's true in-context unit cost; both walk the WHOLE tree (`full` is never set).
-          ["seg_pass1_leaf:",
-           "proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy",
-           "stl.fret seg_ret"] if "wedgestub" in ablate else
+          (["seg_pass1_leaf:",
+            "proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy",
+            "stl.fret seg_ret"]
+           + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "wedgestub" in ablate else
           ["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
            "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"] if "xrstub" in ablate else
           ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_raster {proj}"]

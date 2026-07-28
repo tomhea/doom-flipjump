@@ -697,7 +697,7 @@ class ReferenceModel:
         return out
 
     def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True,
-                          wall_mode: str = "textured", col_subsample: int = 1) -> bytes:
+                          wall_mode: str = "textured") -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -747,12 +747,7 @@ class ReferenceModel:
         col_ch = [0] * W; col_fh = [0] * W; col_lt = [0] * W            # per-col ceil/floor height + sector light
         col_cf: list = [None] * W; col_ff: list = [None] * W           # per-col ceil/floor flat name
 
-        # M13-subsample (col_subsample == 2, the owner-approved PNG-gated quality lever): claiming
-        # and occlusion run at column-PAIR granularity -- a pair p is claimable by a seg iff its
-        # EVEN column 2p lies in [x1, x2); the pair's params come from column 2p's scale and BOTH
-        # columns paint identically (the fj build emits column 2p then [2p+1][0xFE] ditto).
-        assert col_subsample in (1, 2), col_subsample
-        drawn = bytearray(cfg.VIEW_W // col_subsample)       # per-column(/pair) solid-seg clip
+        drawn = bytearray(cfg.VIEW_W)                        # per-column solid-seg clip (1 = already drawn)
         for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
             seg = scene.cmap.segs[seg_i]
             ld = lds[seg.linedef]
@@ -780,14 +775,8 @@ class ReferenceModel:
             tex = self._wall_texture(scene.asset_wad, sd.middle, texcache, wall_mode=wall_mode)
             worldtop = sec.ceil_h - viewz_world              # world units the ceiling is above the eye
             flat_fill = colormap[light_row][WALL_BG]
-            if col_subsample == 2:
-                xs = x1 + (x1 & 1)                           # first even column in [x1, x2)
-                scale = (scale + (xs - x1) * scalestep) & ANGLE_MASK
-                xiter = range(xs, x2, 2)
-            else:
-                xiter = range(x1, x2)
-            for x in xiter:
-                if not drawn[x >> 1 if col_subsample == 2 else x]:
+            for x in range(x1, x2):
+                if not drawn[x]:
                     top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz, scale & ANGLE_MASK)
                     top = max(0, top)
                     bottom = min(cfg.VIEW_H - 1, bottom)
@@ -815,19 +804,8 @@ class ReferenceModel:
                     floor_lo[x] = max(bottom + 1, 0)
                     col_ch[x], col_fh[x], col_lt[x] = sec.ceil_h, sec.floor_h, sec.light
                     col_cf[x], col_ff[x] = sec.ceil_tex, sec.floor_tex
-                    if col_subsample == 2:
-                        # the pair's odd column: EXACTLY the device's ditto -- copy column x's
-                        # painted pixels and duplicate its visplane records
-                        for y in range(cfg.VIEW_H):
-                            fb[y * cfg.VIEW_W + x + 1] = fb[y * cfg.VIEW_W + x]
-                        ceil_hi[x + 1] = ceil_hi[x]
-                        floor_lo[x + 1] = floor_lo[x]
-                        col_ch[x + 1], col_fh[x + 1], col_lt[x + 1] = col_ch[x], col_fh[x], col_lt[x]
-                        col_cf[x + 1], col_ff[x + 1] = col_cf[x], col_ff[x]
-                        drawn[x >> 1] = 1
-                    else:
-                        drawn[x] = 1
-                scale = (scale + col_subsample * scalestep) & ANGLE_MASK   # DOOM's rw_scale accumulation
+                    drawn[x] = 1
+                scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
 
         planes = (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff)
         if floor_texturing:

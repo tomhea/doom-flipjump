@@ -1172,8 +1172,8 @@ ns frame {
     // = 1 iff the seg survives everything, so the REST block's SET+CLEAR (and part 2) never
     // happens for the 375 of 432 walked segs that stop here. dbase/dptr/x are globals -- part
     // 2 continues the same registers.
-    def seg_pass1_leaf_body_lines sub \
-            @ ret, pidx, work, wok, occscan, occchk, occdone, occproc \
+    def seg_pass1_leaf_body_lines \
+            @ ret, work, wok, occscan, occchk, occdone, occproc \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
               seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c, \
               visible, x1, x2, x, dbase, dptr, dval8, \
@@ -1191,18 +1191,9 @@ ns frame {
         // M13-mapunits: the map-unit variant -- 4-nibble atan front end, no rwa (dead here)
         proj.wall_x_range_m visible, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
-        // M13-subsample (sub=2): claiming at column-PAIR granularity -- x walks the EVEN
-        // columns of [x1,x2), drawn[] holds one slot per pair. The rep(sub-1,..) lines vanish
-        // when sub=1, leaving the plain per-column scan.
-        hex.mov 2, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
-        rep(sub-1, k) hex.inc 2, x
-        rep(sub-1, k) hex.shr_bit 2, x
-        rep(sub-1, k) hex.shl_bit 2, x          // x = the first even column in [x1,x2)
-        hex.zero w/4, pidx                      // ptr_index reads its index at w/4 width
-        hex.mov 2, pidx, x
-        rep(sub-1, k) hex.shr_bit 2, pidx       // the pair index
+        hex.mov 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
-        hex.ptr_index dptr, dbase, pidx
+        hex.ptr_index dptr, dbase, x1
         // M13-lines3: x/x2 are clipped columns in [0,161] here -- 2-nibble unsigned compares and
         // incs replace the 8-nibble signed forms in both hot loops (~2.4x cheaper each, measured).
       occscan:
@@ -1211,7 +1202,7 @@ ns frame {
         hex.read_byte dval8, dptr
         hex.if0 2, dval8, occproc                // an unclaimed column exists -> render this seg
         hex.ptr_add dptr, 1
-        rep(sub, k) hex.inc 2, x
+        hex.inc 2, x
         ;occscan
       occdone:
         stl.fret seg_ret                        // fully occluded -> byte-exact skip (proceed=0)
@@ -1219,14 +1210,13 @@ ns frame {
         hex.set 1, proceed, 1
       ret:
         stl.fret seg_ret
-      pidx: hex.vec w/4
     }
 
     // M13-splitxb part 2 -- the EMIT HALF: projection setup, baked-bank addresses, the claim
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
-    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, sub \
-            @ loop, body, notdrawn, skipcol, ret, one, pidx2, sstep, dsx, dsx1, cge, cdone, fneg, fdone, cVH, cexcl, \
+    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots \
+            @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, \
               dfull, dchk2, dsame, demitted, dvalid, dct, dfs \
             < viewangle, seg_segangle, sgn_aff, \
@@ -1259,20 +1249,8 @@ ns frame {
         hex.add w/4, fbufa, seg_fvpidx
         hex.mov w/4, fbufd, fbufa
         hex.add_constant w/4, fbufd, half_slots*dw
-        hex.mov 2, x, x1                        // the claim loop: pair-granular under sub=2
-        rep(sub-1, k) hex.inc 2, x
-        rep(sub-1, k) hex.shr_bit 2, x
-        rep(sub-1, k) hex.shl_bit 2, x          // x = the first even column; == x1 when sub=1
-        hex.zero w/4, pidx2                     // ptr_index reads its index at w/4 width
-        hex.mov 2, pidx2, x
-        rep(sub-1, k) hex.shr_bit 2, pidx2
-        hex.ptr_index dptr, dbase, pidx2
-        hex.mov 8, sstep, scalestep             // effective per-iteration step = sub * scalestep
-        rep(sub-1, k) hex.shl_bit 8, sstep
-        hex.cmp 2, x, x1, dsx, dsx, dsx1        // odd x1 rounded up -> scale advances one column
-      dsx1:
-        hex.add 8, scale, scalestep
-      dsx:
+        hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
+        hex.ptr_index dptr, dbase, x1
         hex.set 2, one, 1
         hex.set 1, dvalid, 0                    // M13-ditto: no previous emitted column yet
       loop:
@@ -1315,15 +1293,14 @@ ns frame {
         hex.mov 2, dfs, fstart
         hex.set 1, dvalid, 1
       demitted:
-        rep(sub-1, k) stream.ditto_next x       // the pair's odd column: one [x+1][0xFE] record
-        hex.write_byte_and_inc dptr, one        // drawn = 1 (advances to the next pair's slot)
+        hex.write_byte_and_inc dptr, one        // drawn = 1 (advances to the next column's slot)
         hex.inc 2, n_drawn
         hex.cmp 2, n_drawn, vieww, skipcol, sfull, skipcol
       sfull:
         hex.set 1, full, 1
       skipcol:
-        rep(sub, k) hex.inc 2, x
-        hex.add 8, scale, sstep
+        hex.inc 2, x
+        hex.add 8, scale, scalestep
         ;loop
       ret:
         stl.fret seg_ret2
@@ -1334,8 +1311,6 @@ ns frame {
       dvalid: hex.vec 1
       dct: hex.vec 2
       dfs: hex.vec 2
-      pidx2: hex.vec w/4
-      sstep: hex.vec 8
       wtc8: hex.vec 8
       wtf8: hex.vec 8
       cbufa: hex.vec w/4

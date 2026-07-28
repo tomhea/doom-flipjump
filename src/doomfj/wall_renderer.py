@@ -79,8 +79,7 @@ BAND_STRIDE = MAX_BANDS * 3        # packed bytes per column per region (run-len
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
-                       wall_mode: str = "textured", raster_mode: str = "framebuffer",
-                       lines_subsample: int = 1) -> str:
+                       wall_mode: str = "textured", raster_mode: str = "framebuffer") -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -161,9 +160,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # colormap -- and emits raw fillCol [x][y1][y2][colour] records (the 0x0A spans protocol)
     # inline at column-claim time. No col_struct, no present-tail pass.
     lines = raster_mode == "lines"
-    # M13-subsample (owner-approved, PNG-gated): 2 = column-pair rendering, odd columns as
-    # unconditional 0xFE ditto records. Default 1 (full resolution) until the owner's look-check.
-    assert lines_subsample in (1, 2) and (lines_subsample == 1 or lines), lines_subsample
     if stream or raster or projm or lines:
         assert wall_mode == "W1" and floor_mode == "flat", \
             "raster_mode='stream'/'spans'/'raster'/'proj'/'lines' only supports wall_mode='W1' + floor_mode='flat'"
@@ -638,7 +634,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + [cm, "__hot_end:"])
     elif lines:
         hotdata = ([";__hot_end"]
-                  + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_key_ids, lines_subsample)
+                  + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_key_ids)
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, "__hot_end:"])
     else:
@@ -691,10 +687,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           if raster else
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
           if projm else
-          ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {lines_subsample}",
+          ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_lines",
            "seg_pass2_leaf:",
-           f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
-           f"{LINES_HALF_SLOTS}, {lines_subsample}"]
+           f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {LINES_HALF_SLOTS}"]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -750,8 +745,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # -- this shared nibble-vec (stride 4) declaration is for fb-mode/stream-mode only.
         *([] if (raster or lines) else [f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0"]),
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
-        "n_drawn: hex.vec 2", "full: hex.vec 1",
-        f"vieww: hex.vec 2, {cfg.VIEW_W // (lines_subsample if lines else 1)}",
+        "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_key_ids)] if lines else []),
         *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
           [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
@@ -842,7 +836,7 @@ def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict) -> str
     return NLJ.join(out) + NLJ
 
 
-def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict, sub: int = 1) -> list[str]:
+def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict) -> list[str]:
     """M13-lines decls, post-bakedbands: the baked bank + the frame's bank pointer. No
     build_bands, no recip32, no built-flags, no planeheight math, no yslope table -- the lists
     are static data. `drawn` stays the stride-1 packed byte; wedge registers shared-named with
@@ -854,7 +848,7 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict, sub: 
         # M13-splitxb: part-1/part-2 shared state + the rest-block gate
         "proceed: hex.vec 1", "dbase: hex.vec w/4", "dptr: hex.vec w/4", "dval8: hex.vec 2",
         "seg_ret2: ;0",
-        "drawn:" + NLJ + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W // sub)),
+        "drawn:" + NLJ + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
         "wrej: hex.vec 1", "wqa: hex.vec 1", "wna: hex.vec 1", "wqb: hex.vec 1", "wnb: hex.vec 1",
         "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
     ]

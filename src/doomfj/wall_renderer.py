@@ -29,6 +29,9 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
 from doomfj.coarse_cull import generate_coarse_bounds_fj
 
 
+NLJ = chr(10)   # newline constant for generated .fj text
+
+
 def _pfx(mapname: str) -> str:
     """The BSP-as-code label prefix for a map (lowercased, flipjump-legal)."""
     return mapname.lower().replace("-", "_")
@@ -63,7 +66,8 @@ _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wed
 # seg, so each dead field costs twice per seg. Keep in sync with seg_pass1_leaf_body_lines's `<`
 # list. (ceilfix/floorfix STAY: column_render_params_stream reads them.)
 _LINES_DEAD_FIELDS = frozenset({"seg_texoff", "seg_texbase", "seg_texheight", "seg_tw",
-                                "seg_hm", "seg_light", "seg_ceil", "seg_floor"})
+                                "seg_hm", "seg_light", "seg_ceil", "seg_floor", "seg_plight",
+                                "seg_ceilbase", "seg_floorbase"})
 
 MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Bound: a monotone half-window's
                                   # zidx walk gives <=32 distinct zrow runs (zlight[lvl][zidx] is monotone in
@@ -288,6 +292,29 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     def lrow(light):
         return max(0, min(COLORMAP_LIGHTS - 1, light >> LIGHT_SHIFT))
 
+    # M13-bakedbands (the 12M campaign's LUT play): in lines mode EVERY POSSIBLE band list is
+    # baked at compile time -- one list per (viewz class) x (height, light, flat-base) key, with
+    # the FINAL palette colour folded in (colormap[zrow][base]) and CUMULATIVE absolute y2 per
+    # entry -- so the runtime build machinery (build_bands, recip32, built-flags, planeheight)
+    # vanishes entirely. Adjacent zrows sharing a final colour merge, so baked lists are also
+    # SHORTER than the runtime-built ones (identical pixels). Layout: vpbank +
+    # class_idx*(nkeys*130*dw) + key_idx*130*dw; each list = [nA][(y2,colour)xnA] at +0 and the
+    # desc half at +65*dw, mirroring the old half-buffer layout.
+    lines_key_ids: dict = {}
+    lines_vz_classes: dict = {}
+    if lines:
+        for _ss in cmap.subsectors:
+            _sec = rm._seg_sector(lds, sds, secs, cmap.segs[_ss.firstseg])
+            lines_vz_classes.setdefault(rm.view_z(_sec.floor_h), len(lines_vz_classes))
+        for _seg in cmap.segs:
+            if lds[_seg.linedef].back != -1:
+                continue
+            _sec = rm._seg_sector(lds, sds, secs, _seg)
+            lines_key_ids.setdefault((_sec.ceil_h, _sec.light & 0xFF, _flatval(_sec.ceil_tex)),
+                                     len(lines_key_ids))
+            lines_key_ids.setdefault((_sec.floor_h, _sec.light & 0xFF, _flatval(_sec.floor_tex)),
+                                     len(lines_key_ids))
+
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
     # M13pS2-crush2b: per-seg VISPLANE ids -- segs sharing (plane height, light, flat base) share ONE
@@ -312,6 +339,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             # M13-proj: the device's positional framing expects viewz right after the 8-byte header,
             # before any seg id -- the first visited subsector's block runs before its segs emit.
             *(["    stream.emit_bytes4 viewz"] if projm else []),
+            # M13-bakedbands: aim the frame's band-list bank at this subsector's viewz class
+            *([f"    hex.set w/4, vzbank, vpbank + "
+               f"{lines_vz_classes[viewz_val] * len(lines_key_ids) * 130}*dw"] if lines else []),
             "    hex.set 1, vz_set, 1",
             f"  e1psegs{cid}:",
         ]
@@ -360,13 +390,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 # base colour is applied at emit time from the seg's own register, so planes
                 # differing only in flat share one band list.
                 if lines:
-                    ckey = (ssec.ceil_h, ssec.light & 0xFF)
-                    fkey = (ssec.floor_h, ssec.light & 0xFF)
+                    # baked DW-OFFSETS into the frame's viewz bank (list stride 130 dw)
+                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex))
+                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex))
+                    fields.append(("seg_cvpidx", "w/4", f"{lines_key_ids[ckey] * 130}*dw"))
+                    fields.append(("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw"))
                 else:
                     ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex))
                     fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex))
-                fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
-                fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
+                    fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
+                    fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
             if lines:
                 fields = [f for f in fields if f[0] not in _LINES_DEAD_FIELDS]
             xorby_blocks[si] = _seg_xorby_block(si, fields)
@@ -401,12 +434,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # M13pS2-crush2b: per-frame reset of the visplane built-flags (compile-time-unrolled zeroing)
         pass1 += [f"rep({max(1, len(cvp_ids))}, v) hex.zero 1, vpc_flags + v*dw",
                   f"rep({max(1, len(fvp_ids))}, v) hex.zero 1, vpf_flags + v*dw"]
-    if lines:
-        # M13-lines2: four half-window built-flag banks (asc/desc x ceil/floor)
-        pass1 += [f"rep({max(1, len(cvp_ids))}, v) hex.zero 1, vpca_flags + v*dw",
-                  f"rep({max(1, len(cvp_ids))}, v) hex.zero 1, vpcd_flags + v*dw",
-                  f"rep({max(1, len(fvp_ids))}, v) hex.zero 1, vpfa_flags + v*dw",
-                  f"rep({max(1, len(fvp_ids))}, v) hex.zero 1, vpfd_flags + v*dw"]
+    # M13-bakedbands: lines mode has NO per-frame band state to reset (the lists are static data)
     if raster:
         # M13-wedge: the per-frame half-plane descriptors for the conservative FOV pre-cull (the
         # outward-rounded 45-degree wedge that strictly contains the FOV). Once per frame; the
@@ -522,7 +550,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + [cm, "__hot_end:"])
     elif lines:
         hotdata = ([";__hot_end"]
-                  + _lines_mode_decls(cfg, max(1, len(cvp_ids)), max(1, len(fvp_ids)))
+                  + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_key_ids)
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, "__hot_end:"])
     else:
@@ -679,36 +707,61 @@ def _proj_mode_decls(cfg, asset_wad, seg_geom_txt: str) -> list[str]:
     ]
 
 
-LINES_HALF_SLOTS = 1 + 2 * (MAX_BANDS // 2)   # per half-window list: [count] + <=32 x 2-byte entries
+LINES_HALF_SLOTS = 1 + 2 * (MAX_BANDS // 2)   # per half-window list: [count] + <=32 x 2-byte pairs
 
 
-def _lines_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
-    """M13-lines: the DUMB-DEVICE mode's storage. Per-visplane band lists live as TWO HALF-WINDOW
-    buffers (asc = rows [0,centery), desc = [centery,H)) with 2-byte entries [runlen][zrow]
-    (build_bands basewidth=0; the flat base colour joins at emit time) and FOUR built-flag banks
-    (asc/desc x ceil/floor) so each half is built only when a column actually needs it (half-lazy).
-    No col_struct: columns are claimed and emitted inline in the leaf; `drawn` is the raster leaf's
-    stride-1 packed byte per column. Wedge pre-cull registers shared-named with raster/proj."""
+def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict) -> str:
+    """M13-bakedbands: the compile-time band-list bank. For every (viewz class, (h,light,base))
+    pair, both half-window lists ([0,centery) asc + [centery,H) desc) with entries
+    [y2_absolute:1B][final_colour:1B], grouped by FINAL colour (adjacent zrows sharing a colour
+    merge -- identical pixels, fewer pairs). Values from the SAME host walk the fj runtime build
+    mirrored (rm._zidx_band_walk + zlight + colormap), so frames are byte-identical to the
+    runtime-built ones. Layout: list (class,key) at (class*len(keys)+key)*130 dw; asc half at +0
+    ([n][pairs]), desc half at +65 dw."""
+    from doomfj.fixedpoint import _signed as _sgn
+    colormap = asset_wad.colormap()
+    H, CY = cfg.VIEW_H, cfg.CENTERY
     half = LINES_HALF_SLOTS
-    vpc_zeros = "\n".join(";0 * dw" for _ in range(nvpc * 2 * half))
-    vpf_zeros = "\n".join(";0 * dw" for _ in range(nvpf * 2 * half))
+    out = [f"// M13-bakedbands: {len(vz_classes)} viewz classes x {len(key_ids)} keys, 130 dw/list",
+           "vpbank:"]
+    for vz in vz_classes:                                    # insertion order == class index
+        vzs = _sgn(vz, 32)
+        for (h, light, base) in key_ids:                     # insertion order == key index
+            ph = abs((h << 16) - vzs)
+            lvl = max(0, min(15, light >> 4))
+            for rows in (list(range(0, CY)), list(range(CY, H))):
+                zidx = rm._zidx_band_walk(ph, rows)
+                cols = [colormap[rm.zlight[lvl][z]][base] for z in zidx]
+                pairs = []
+                for k, colr in enumerate(cols):
+                    y2 = rows[k] + 1
+                    if pairs and pairs[-1][1] == colr:
+                        pairs[-1][0] = y2
+                    else:
+                        pairs.append([y2, colr])
+                assert len(pairs) <= MAX_BANDS // 2, f"half list overflow: {len(pairs)}"
+                cell = [len(pairs)] + [b for pr in pairs for b in pr]
+                for b in cell:
+                    out.append(f";{b:#x} * dw")
+                for _ in range(half - len(cell)):
+                    out.append(";0 * dw")
+    return NLJ.join(out) + NLJ
+
+
+def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict) -> list[str]:
+    """M13-lines decls, post-bakedbands: the baked bank + the frame's bank pointer. No
+    build_bands, no recip32, no built-flags, no planeheight math, no yslope table -- the lists
+    are static data. `drawn` stays the stride-1 packed byte; wedge registers shared-named with
+    raster/proj."""
     return [
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
-        "seg_cvpidx: hex.vec 8", "seg_fvpidx: hex.vec 8",   # crush2b: the seg's visplane indices
-        "drawn:\n" + "\n".join(";0 * dw" for _ in range(cfg.VIEW_W)),
+        "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
+        "vzbank: hex.vec w/4",                         # set per frame by the player-subsector block
+        "drawn:" + NLJ + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
         "wrej: hex.vec 1", "wqa: hex.vec 1", "wna: hex.vec 1", "wqb: hex.vec 1", "wnb: hex.vec 1",
         "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
-        f"vpca_flags: rep({nvpc}, i) hex.vec 1, 0", f"vpcd_flags: rep({nvpc}, i) hex.vec 1, 0",
-        f"vpfa_flags: rep({nvpf}, i) hex.vec 1, 0", f"vpfd_flags: rep({nvpf}, i) hex.vec 1, 0",
-        f"vpc_bufs:\n{vpc_zeros}", f"vpf_bufs:\n{vpf_zeros}",
-        "bb_ph: hex.vec 8", "bb_light: hex.vec 2", "bb_base: hex.vec 2", "bb_y0: hex.vec 2",
-        "bb_count: hex.vec 2", "bb_ascending: hex.vec 2", "bb_arr: hex.vec w/4", "bb_n: hex.vec 2",
-        "bb_recip_ph: hex.vec 8", "bb_recip_out: hex.vec 8",
-        "plane_recip_ret: ;0", "plane_band_ret: ;0",
-        "recip32_leaf: plane.recip32", "build_bands_leaf: plane.build_bands 0",
-        generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H),
+        _lines_bake_bank(rm, cfg, asset_wad, vz_classes, key_ids),
     ]
-
 
 def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
     """M13pS2-crush2b: the raster_mode="stream" per-VISPLANE band storage + the shared band-building

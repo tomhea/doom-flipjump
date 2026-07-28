@@ -9,8 +9,7 @@ Controls:  W/S or Up/Down = forward/back    A/D = strafe    Left/Right = turn
 
 Frame rate = however fast the Python fj interpreter chews ~18-20M ops (tens of seconds/frame on
 CPython -- a slideshow, but a REAL one). Run:
-    python scripts/walk_e1m1.py                 # E1M1, subsample x2 (fastest)
-    python scripts/walk_e1m1.py --subsample 1   # full resolution
+    python scripts/walk_e1m1.py
     python scripts/walk_e1m1.py --wad tests/fixtures/square_room.wad --map MAP01 \\
            --asset tests/fixtures/freedoom_assets.wad
 """
@@ -46,18 +45,16 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None)
-    ap.add_argument("--subsample", type=int, default=2, choices=[1, 2])
     args = ap.parse_args()
 
     cfg = Config()
     mw = WadFile.from_path(str(ROOT / args.wad))
     aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
 
-    print(f"assembling the fj renderer ({args.map}, lines mode, subsample={args.subsample}) ...")
+    print(f"assembling the fj renderer ({args.map}, lines mode) ...")
     t0 = time.perf_counter()
     main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
-                                  floor_mode="flat", wall_mode="W1", raster_mode="lines",
-                                  lines_subsample=args.subsample)
+                                  floor_mode="flat", wall_mode="W1", raster_mode="lines")
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")

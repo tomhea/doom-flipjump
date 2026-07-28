@@ -45,16 +45,20 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None)
+    ap.add_argument("--wall-mode", default="W2S", choices=["W1", "W2S"])
+    ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
     args = ap.parse_args()
 
     cfg = Config()
     mw = WadFile.from_path(str(ROOT / args.wad))
     aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
 
-    print(f"assembling the fj renderer ({args.map}, lines mode) ...")
+    print(f"assembling the fj renderer ({args.map}, lines mode, "
+          f"{args.wall_mode}+{args.floor_mode}) ...")
     t0 = time.perf_counter()
     main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
-                                  floor_mode="flat", wall_mode="W1", raster_mode="lines")
+                                  floor_mode=args.floor_mode, wall_mode=args.wall_mode,
+                                  raster_mode="lines")
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")

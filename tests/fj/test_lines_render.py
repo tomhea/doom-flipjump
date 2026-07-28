@@ -30,9 +30,10 @@ E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 RENDER_FLAT_WORDS = 1 << 26
 
 
-def _assemble_lines(tmp_path, map_wad, mapname, cfg, asset_wad=None):
+def _assemble_lines(tmp_path, map_wad, mapname, cfg, asset_wad=None,
+                    wall_mode="W1", floor_mode="flat"):
     main = emit_wall_renderer(map_wad, mapname, cfg, asset_wad=asset_wad, over_align=False,
-                              floor_mode="flat", wall_mode="W1", raster_mode="lines")
+                              floor_mode=floor_mode, wall_mode=wall_mode, raster_mode="lines")
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "lines.fj"
     p.write_text(main, encoding="utf-8")
@@ -97,3 +98,46 @@ def test_e1m1_lines_frame_byte_exact_vs_oracle(tmp_path):
             f"lines @ ({vx},{vy},{va:#x}) != oracle E1M1 W1/flat frame"
         if k == 0:
             print(f"[lines] E1M1 spawn frame = {term.op_counter:,} ops")
+
+
+def test_square_lines_w2s_ft1_byte_exact_vs_oracle(tmp_path):
+    """The W2S+FT1 visual tier (owner call 2026-07-29: the plain look should gain wall texture and
+    floor variety while staying under 24M). W2S = the 16-texel wall strip stretched over each
+    wall's span; FT1 = each distance band taking the flat's band-ordinal diagonal texel instead of
+    one shared base colour. Byte-exact vs the same-tier oracle on the 5 square viewpoints."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(ROOM)
+    aw = WadFile.from_path(ASSET)
+    scene = build_scene(mw, aw, "MAP01")
+    sp = spawn_state(mw, "MAP01")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    A45 = 0x20000000
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45), (24, 24, A45)]
+    out = _assemble_lines(tmp_path, mw, "MAP01", cfg, asset_wad=aw,
+                          wall_mode="W2S", floor_mode="FT1")
+    for vx, vy, va in VIEWPOINTS:
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
+                                    floor_texturing=False, wall_mode="W2S", floor_mode_ft1=True)
+        screen, _term = _run_lines(out, vx, vy, va)
+        assert bytes(screen.pixel_indices) == bytes(want),             f"lines W2S+FT1 @ ({vx},{vy},{va:#x}) != oracle"
+
+
+def test_e1m1_lines_w2s_ft1_byte_exact_vs_oracle(tmp_path):
+    """E1M1 spawn + rotation at the W2S+FT1 tier, byte-exact vs the oracle. Reports ops/frame
+    (23.16M at the time of writing, against the 24M ceiling and the 20.64M W1/flat tier)."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(E1M1_WAD)
+    scene = build_scene(mw, mw, "E1M1")
+    sp = spawn_state(mw, "E1M1")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
+    out = _assemble_lines(tmp_path, mw, "E1M1", cfg, wall_mode="W2S", floor_mode="FT1")
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
+                                    floor_texturing=False, wall_mode="W2S", floor_mode_ft1=True)
+        screen, term = _run_lines(out, vx, vy, va)
+        assert bytes(screen.pixel_indices) == bytes(want),             f"lines W2S+FT1 @ ({vx},{vy},{va:#x}) != E1M1 oracle"
+        if k == 0:
+            print(f"[lines W2S+FT1] E1M1 spawn frame = {term.op_counter:,} ops")

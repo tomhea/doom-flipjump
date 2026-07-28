@@ -700,7 +700,7 @@ class ReferenceModel:
         return out
 
     def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True,
-                          wall_mode: str = "textured") -> bytes:
+                          wall_mode: str = "textured", floor_mode_ft1: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -823,7 +823,10 @@ class ReferenceModel:
                 scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
 
         planes = (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff)
-        if floor_texturing:
+        if floor_mode_ft1:
+            self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz, *planes,
+                                     ft1=True)
+        elif floor_texturing:
             self._render_planes_textured(fb, colormap, scene.asset_wad, flatcache,
                                          viewx, viewy, viewangle, viewz, *planes)
         else:
@@ -832,7 +835,8 @@ class ReferenceModel:
 
     # ── M13 floor/ceiling visplane rasterizers (consume the per-column region records above) ──
     def _render_planes_flat(self, fb, colormap, asset_wad, flatcache, viewz,
-                            ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff):
+                            ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff,
+                            *, ft1: bool = False):
         """M13a flat-colored tier (the cheaper §1 floor mode): each claimed column's ceiling rows
         [0, ceil_hi] and floor rows [floor_lo, H-1] are filled with the flat's base index, distance-lit
         per row. No horizontal DDA — each pixel is independent.
@@ -845,7 +849,7 @@ class ReferenceModel:
         (`draw_span_flat`, still exact per span-row) — that path's E1M1 flat gate is superseded by
         the stream capstone (see tests/fj/test_floor_planes_fj.py)."""
         cfg = self.cfg
-        W, H = cfg.VIEW_W, cfg.VIEW_H
+        W, H, CY_ = cfg.VIEW_W, cfg.VIEW_H, cfg.CENTERY
         # M13pS2-crush2b (per-VISPLANE sharing): every column slices ONE shared full-range walk
         # (rows [0,H), split at CENTERY inside _zidx_band_walk) instead of walking its own window --
         # the fj side builds each visplane's full-range band list once per frame and clips it per
@@ -854,6 +858,16 @@ class ReferenceModel:
         # suffixes take their zidx from the shared CENTERY-seeded half instead of a per-window
         # fstart seed -- an F4-class <=1-row band-edge shift, re-blessed with the fj consumer.
         walk_cache: dict = {}
+
+        def band_colour(name, base, zrows, k):
+            """M13-FT1: band ORDINAL k takes the flat's k-th diagonal texel instead of every band
+            sharing the flat's single base texel -- the free floor-texture tier, mirroring
+            `wall_renderer._lines_bake_bank(ft1=True)` byte for byte (R6)."""
+            if not ft1:
+                return colormap[zrows[k]][base]
+            tx = self._flat_texels(asset_wad, name, flatcache)
+            ordinal = sum(1 for i in range(1, k + 1) if zrows[i] != zrows[i - 1])
+            return colormap[zrows[k]][tx[((ordinal & 63) * 64 + (ordinal & 63)) % len(tx)]]
 
         def full_walk(ph):
             if ph not in walk_cache:
@@ -865,14 +879,21 @@ class ReferenceModel:
                 ph = abs((col_ch[x] << 16) - viewz)
                 base = self._flat_base(asset_wad, col_cf[x], flatcache)
                 lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)
-                for y, z in enumerate(full_walk(ph)[:ceil_hi[x] + 1]):
-                    fb[y * W + x] = colormap[self.zlight[lvl][z]][base]
+                zr_all = [self.zlight[lvl][z] for z in full_walk(ph)]
+                zr_half = zr_all[:CY_] + zr_all[CY_:]          # ordinals restart per half-window
+                for y in range(min(ceil_hi[x] + 1, H)):
+                    k0 = y if y < CY_ else y - CY_
+                    seq = zr_all[:CY_] if y < CY_ else zr_all[CY_:]
+                    fb[y * W + x] = band_colour(col_cf[x], base, seq, k0)
             if floor_lo[x] < H:
                 ph = abs((col_fh[x] << 16) - viewz)
                 base = self._flat_base(asset_wad, col_ff[x], flatcache)
                 lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)
-                for y, z in zip(range(floor_lo[x], H), full_walk(ph)[floor_lo[x]:]):
-                    fb[y * W + x] = colormap[self.zlight[lvl][z]][base]
+                zr_all = [self.zlight[lvl][z] for z in full_walk(ph)]
+                for y in range(floor_lo[x], H):
+                    k0 = y if y < CY_ else y - CY_
+                    seq = zr_all[:CY_] if y < CY_ else zr_all[CY_:]
+                    fb[y * W + x] = band_colour(col_ff[x], base, seq, k0)
 
     @staticmethod
     def _plane_region_at(x, y, ceil_hi, floor_lo):

@@ -133,7 +133,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     pixel count."""
     assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
-    assert floor_mode in ("textured", "flat"), f"unknown floor_mode: {floor_mode!r}"
+    assert floor_mode in ("textured", "flat", "FT1"), f"unknown floor_mode: {floor_mode!r}"
     assert wall_mode in ("textured", "W1", "W2", "W2S"), f"unknown wall_mode: {wall_mode!r}"
     assert raster_mode in ("framebuffer", "stream", "spans", "raster", "proj", "lines"), \
         f"unknown raster_mode: {raster_mode!r}"
@@ -162,9 +162,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     lines = raster_mode == "lines"
     w2s_flag = 1 if wall_mode == "W2S" else 0   # M13-W2S tier select for the lines leaf
     if stream or raster or projm or lines:
-        assert wall_mode in ("W1", "W2S") and floor_mode == "flat", \
-            "the run-stream modes support wall_mode='W1' (all) or 'W2S' (lines only) + floor_mode='flat'"
+        assert wall_mode in ("W1", "W2S") and floor_mode in ("flat", "FT1"), \
+            "the run-stream modes support wall_mode='W1'/'W2S' + floor_mode='flat'/'FT1'"
         assert wall_mode != "W2S" or lines, "wall_mode='W2S' is a lines-mode tier"
+        assert floor_mode != "FT1" or lines, "floor_mode='FT1' is a lines-mode tier"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -313,10 +314,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             if lds[_seg.linedef].back != -1:
                 continue
             _sec = rm._seg_sector(lds, sds, secs, _seg)
-            lines_key_ids.setdefault((_sec.ceil_h, _sec.light & 0xFF, _flatval(_sec.ceil_tex)),
-                                     len(lines_key_ids))
-            lines_key_ids.setdefault((_sec.floor_h, _sec.light & 0xFF, _flatval(_sec.floor_tex)),
-                                     len(lines_key_ids))
+            lines_key_ids.setdefault(
+                (_sec.ceil_h, _sec.light & 0xFF, _flatval(_sec.ceil_tex), _sec.ceil_tex.upper()),
+                len(lines_key_ids))
+            lines_key_ids.setdefault(
+                (_sec.floor_h, _sec.light & 0xFF, _flatval(_sec.floor_tex), _sec.floor_tex.upper()),
+                len(lines_key_ids))
 
     # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be
     # skipped by the main walk entirely (byte-exact -- it would emit nothing and touch nothing).
@@ -385,8 +388,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 ssec = rm._seg_sector(lds, sds, secs, seg)
                 tb, th, tw = seg_texinfo[si]
                 sa, sb, sc = seg_affine_coeffs(seg, verts)
-                ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex))
-                fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex))
+                # the band-bank key carries the flat NAME too, so M13-FT1 can sample its texels
+                ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
+                        ssec.ceil_tex.upper())
+                fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
+                        ssec.floor_tex.upper())
                 # M13-splitxb: GEOM block (part 1's cull inputs) vs REST block (part 2 only) --
                 # 375 of 432 walked segs stop in part 1, never paying the rest block's SET+CLEAR.
                 gfields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
@@ -479,13 +485,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 # differing only in flat share one band list.
                 if lines:
                     # baked DW-OFFSETS into the frame's viewz bank (list stride 130 dw)
-                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex))
-                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex))
+                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
+                            ssec.ceil_tex.upper())
+                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
+                            ssec.floor_tex.upper())
                     fields.append(("seg_cvpidx", "w/4", f"{lines_key_ids[ckey] * 130}*dw"))
                     fields.append(("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw"))
                 else:
-                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex))
-                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex))
+                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
+                            ssec.ceil_tex.upper())
+                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
+                            ssec.floor_tex.upper())
                     fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
                     fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
             if lines:
@@ -760,7 +770,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([] if (raster or lines) else [f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0"]),
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
-        *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_key_ids)] if lines else []),
+        *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_key_ids,
+                            floor_mode == "FT1")] if lines else []),
         *([lines_wstrip_txt] if lines_wstrip_txt else []),
         *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
           [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
@@ -813,7 +824,8 @@ def _proj_mode_decls(cfg, asset_wad, seg_geom_txt: str) -> list[str]:
 LINES_HALF_SLOTS = 1 + 2 * (MAX_BANDS // 2)   # per half-window list: [count] + <=32 x 2-byte pairs
 
 
-def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict) -> str:
+def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict,
+                     ft1: bool = False) -> str:
     """M13-bakedbands: the compile-time band-list bank. For every (viewz class, (h,light,base))
     pair, both half-window lists ([0,centery) asc + [centery,H) desc) with entries
     [y2_absolute:1B][final_colour:1B], grouped by FINAL colour (adjacent zrows sharing a colour
@@ -823,21 +835,35 @@ def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict) -> str
     ([n][pairs]), desc half at +65 dw."""
     from doomfj.fixedpoint import _signed as _sgn
     colormap = asset_wad.colormap()
+    flatcache: dict = {}
     H, CY = cfg.VIEW_H, cfg.CENTERY
     half = LINES_HALF_SLOTS
     out = [f"// M13-bakedbands: {len(vz_classes)} viewz classes x {len(key_ids)} keys, 130 dw/list",
            "vpbank:"]
     for vz in vz_classes:                                    # insertion order == class index
         vzs = _sgn(vz, 32)
-        for (h, light, base) in key_ids:                     # insertion order == key index
+        for (h, light, base, flatname) in key_ids:            # insertion order == key index
             ph = abs((h << 16) - vzs)
             lvl = max(0, min(15, light >> 4))
+            # M13-FT1: the flat's DIAGONAL texels -- band ordinal j takes texel strip[j & 63]
+            # instead of every band sharing the flat's single base texel. Costs ZERO runtime ops
+            # (it only changes which byte is baked), and gives the floor real depth-varying texel
+            # colour on top of the distance shading. Sampling by band ORDINAL (not world u,v) is
+            # what keeps it free -- see docs/plan-w2-ft1.md for the honest scope statement.
+            strip = None
+            if ft1:
+                tx = rm._flat_texels(asset_wad, flatname, flatcache)
+                strip = [tx[(i * 64 + i) % len(tx)] for i in range(64)]
             for rows in (list(range(0, CY)), list(range(CY, H))):
                 zidx = rm._zidx_band_walk(ph, rows)
-                cols = [colormap[rm.zlight[lvl][z]][base] for z in zidx]
-                pairs = []
-                for k, colr in enumerate(cols):
+                zrows = [rm.zlight[lvl][z] for z in zidx]
+                pairs, ordinal, prev_z = [], 0, None
+                for k, zr in enumerate(zrows):
                     y2 = rows[k] + 1
+                    if prev_z is not None and zr != prev_z:
+                        ordinal += 1
+                    prev_z = zr
+                    colr = (colormap[zr][strip[ordinal & 63]] if ft1 else colormap[zr][base])
                     if pairs and pairs[-1][1] == colr:
                         pairs[-1][0] = y2
                     else:

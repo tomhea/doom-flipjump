@@ -1,6 +1,6 @@
 # Plan: 54M → 12M ops/frame (E1M1 spawn) — device stays dumb, still a game
 
-## FINAL OUTCOME (2026-07-27, owner ruling): the DUMB-DEVICE mode ships — 29,469,755 ops/frame
+## FINAL OUTCOME (2026-07-28): the DUMB-DEVICE mode ships — 20,641,469 ops/frame
 
 The owner's final device boundary (stricter than every earlier reading): NO device projection, NO
 DDA, NO shading, NO resident geometry, NO per-column clipping — the device may only PRINT explicit

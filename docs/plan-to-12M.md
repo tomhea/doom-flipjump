@@ -5,10 +5,14 @@
 The owner's final device boundary (stricter than every earlier reading): NO device projection, NO
 DDA, NO shading, NO resident geometry, NO per-column clipping — the device may only PRINT explicit
 lines/rectangles/pixels it is handed. That retires 0x0C/0x0D (raster), 0x0E/0x0F (proj) AND 0x09
-(planesproto) from the shipping path. Target <30M all-in-fj: **DELIVERED —
-`raster_mode="lines"` = 29,469,755 ops/frame** (~2.0 fps @60M), byte-exact vs the W1/flat oracle
-on all 9 gate viewpoints (`tests/fj/test_lines_render.py`), certified by the full 294-test suite
-(commits `14c0887` + `51c9edb`). Protocol: 0x0B packed column-runs — per column `[x]` +
+(planesproto) from the shipping path. Target <30M all-in-fj: **DELIVERED, then pushed
+further by the 12M campaign to `raster_mode="lines"` = 20,641,469 ops/frame** (~2.9 fps @60M),
+byte-exact vs the W1/flat oracle on all 9 gate viewpoints (`tests/fj/test_lines_render.py`),
+certified by the full 294-test suite (ladder commits `14c0887`..`74ed5cd`). The campaign's wins
+were all bakes/deletions (baked band-list LUTs -4.7M, bank-to-tail layout -1.4M, map-unit twins
+-1.9M, subtree pruning + descend pre-walk -0.9M); ~20M is the measured pixel-identical floor of
+this architecture -- reaching ~12-14M now requires the PRE-APPROVED quality levers (column
+subsample via unconditional 0xFE ditto records, PNG-gate owed to the owner). Protocol: 0x0B packed column-runs — per column `[x]` +
 `[y2][colour]` pairs filling rows top-down, `[x][0xFE]` = ditto (copy column x-1, the approved
 rectangle-widening; 58% of spawn columns), `0xFF` terminators. fj does everything: walk, wedge +
 abs-mul culls, bit-identical map-unit atans, per-column clip, claim-time occlusion, half-lazy

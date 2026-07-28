@@ -55,6 +55,8 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None, help="asset wad (defaults to --wad)")
+    ap.add_argument("--subsample", type=int, default=1, choices=[1, 2],
+                    help="lines mode: column-pair rendering via ditto records (PNG-gated)")
     ap.add_argument("--vx", type=int, default=None)
     ap.add_argument("--vy", type=int, default=None)
     ap.add_argument("--va", type=int, default=None, help="viewangle (defaults to the spawn angle)")
@@ -66,7 +68,7 @@ def main():
     aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
     main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False, ablate=ablate,
                                   floor_mode=args.floor_mode, wall_mode=args.wall_mode,
-                                  raster_mode=args.raster_mode)
+                                  raster_mode=args.raster_mode, lines_subsample=args.subsample)
 
     src = SRC + (STREAM_SRC if args.raster_mode in ("stream", "spans", "raster", "proj", "lines") else [])
     tmp = Path(tempfile.mkdtemp())

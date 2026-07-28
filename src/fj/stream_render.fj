@@ -305,6 +305,17 @@ ns stream {
       skip:
     }
 
+    // M13-subsample: the odd column of a claimed pair -- one unconditional ditto record
+    // [x+1][0xFE] (copy column x). The pre-approved quality lever's whole device story.
+    def ditto_next x @ xod, end {
+        hex.mov 2, xod, x
+        hex.inc 2, xod
+        byte.emit xod
+        stl.output_char 0xFE
+        ;end
+      xod: hex.vec 2
+      end:
+    }
     // M13-lines (the DUMB-DEVICE mode): one claimed column's three windows emitted at CLAIM
     // TIME as the 0x0B packed column-run frame. M13-bakedbands: the per-visplane lists are
     // COMPILE-TIME data with [y2_absolute][final_colour] pairs (colours pre-composed through

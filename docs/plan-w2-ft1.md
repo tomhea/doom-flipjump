@@ -37,27 +37,39 @@ decision per ROW (2230 pairs, per-pixel cost), and stretching depends only on `(
   boundary formula, so fj vs oracle stays byte-exact and the existing W1/W2/textured tiers are
   untouched.
 
-## Rung 2 — FT1 minor textured floors (est +0.6M → ~22.5M)
+## Rung 2 — FT1 minor textured floors — SHIPPED as a ZERO-COST bake (+0.67M → 23,161,421)
 
-Keep the distance-light band structure exactly as today (236+422 pairs, no new pairs); change only
-where each band's COLOUR comes from.
+⚠ **The design below changed during execution; this section records what actually shipped and why.**
 
-- The baked band bank switches its entry from `[y2][final_colour]` to `[y2][zrow]`.
-- Bake per flat a **64-entry texel strip** sampled from the real flat.
-- Emit: `texel = strip[(x + off + band_index*13) & 63]`, `colour = cm.emit(zrow<<8 | texel)`.
-  `off` is a **per-frame constant** derived from viewangle/viewx/viewy, so the pattern slides as
-  the camera moves/turns instead of being welded to the screen.
-- Cost per band pair: +1 read (~600) + index build (~200) + cm.emit vs byte.emit (~+50) ≈ **+850**.
-- **Honest limitation, to state plainly to the owner:** this is a *moving pattern sampled from the
-  real flat*, NOT perspective-correct floor texturing. True per-pixel u,v costs 3–9M (measured
-  reasoning in the campaign notes) and cannot fit under 24M. FT1 buys "the floor has texture and
-  it moves with you"; it does not buy "the texture is nailed to the world".
+*Planned (built, then discarded):* keep the band structure, switch the bank entry to `[y2][zrow]`,
+bake a 64-texel strip per flat, and at emit time take `texel = strip[(x + off + band*13) & 63]`
+with `off` a per-frame constant so the pattern slides with the camera. This was fully implemented
+and debugged to byte-exact, then **measured at 27.1M — over the owner's 24M ceiling** — and
+reverted. Two costs the plan under-priced: `ft1_colour` runs ~3.4k/pair (ptr_index + read_byte +
+cm.emit + index math, on 658 pairs), and switching the bank to `[y2][zrow]` *splits* bands that
+colour-merging had merged, adding pairs on top.
 
-## Execution order (each rung: implement → square smoke → E1M1 measure → gate → commit)
+*Shipped instead:* sample the flat by **band ORDINAL** rather than by column — band j of a
+half-window list takes the flat's j-th diagonal texel. Because the index no longer depends on `x`,
+the texel is a compile-time function of the band, so it folds straight into the colour byte the
+bank already bakes. **Runtime cost: zero ops.** The +0.67M against the W2S tier is purely the
+slightly different band merging.
 
-1. Bank + oracle for W2S; fj emit; measure; `test_lines_render` extended with a W2S gate.
-2. Band-bank format change to `[y2][zrow]` + flat strips + FT1 emit; measure; gate.
-3. PNG set (W1/flat today vs W2S+FT1) sent to the owner; full-suite certification; push.
+**Honest scope (unchanged):** depth-varying real texel colour, NOT perspective-correct floor
+texturing. The pattern varies with distance, not world position, so it does not slide under the
+player. True per-pixel u,v measured 3–9M and cannot fit the <24M budget.
+
+## Outcome (all three tiers byte-exact vs their own oracle mirrors, 296-test suite green)
+
+| tier | ops/frame | commit |
+|---|---|---|
+| W1 + flat | 20,641,469 | unchanged, still selectable and bit-identical |
+| W2S + flat | 22,491,671 | `3f89fc4` |
+| **W2S + FT1** | **23,161,421** | `d64563a` — the shipping look, under the 24M ceiling |
+
+Gates: `tests/fj/test_lines_render.py` 4/4 (square 5 viewpoints incl. the negative-viewz straddle
++ E1M1 2 viewpoints, per tier). `scripts/walk_e1m1.py` defaults to W2S+FT1 and takes
+`--wall-mode`/`--floor-mode` to switch. `measure_frame.py` accepts both new tier flags.
 
 ## Rollback
 

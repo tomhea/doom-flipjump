@@ -20,7 +20,8 @@ from doomfj.lut_generator import (
     generate_zlight_cuts_fj,
 )
 from doomfj.reference_model import ANG90
-from doomfj.mapcompiler import bake_bsp, _bsp_as_code, _bytes_stream, seg_affine_coeffs
+from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
+                                NF_SUBSECTOR, seg_affine_coeffs)
 from doomfj.reference_model import (ReferenceModel, WALL_BG,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
@@ -315,6 +316,40 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             lines_key_ids.setdefault((_sec.floor_h, _sec.light & 0xFF, _flatval(_sec.floor_tex)),
                                      len(lines_key_ids))
 
+    # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be
+    # skipped by the main walk entirely (byte-exact -- it would emit nothing and touch nothing).
+    lines_onesided_below: dict = {}
+    if lines:
+        def _cnt(child):
+            if child & NF_SUBSECTOR:
+                _ss = cmap.subsectors[child & (NF_SUBSECTOR - 1)]
+                return sum(1 for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs)
+                           if lds[cmap.segs[_si].linedef].back == -1)
+            _n = cmap.nodes[child]
+            tot = _cnt(_n.left) + _cnt(_n.right)
+            lines_onesided_below[child] = tot
+            return tot
+        import sys as _sys
+        _old_rl = _sys.getrecursionlimit()
+        _sys.setrecursionlimit(20000)
+        _cnt(cmap.root)
+        _sys.setrecursionlimit(_old_rl)
+
+    def _lines_prune(child):
+        if child & NF_SUBSECTOR:
+            _ss = cmap.subsectors[child & (NF_SUBSECTOR - 1)]
+            return not any(lds[cmap.segs[_si].linedef].back == -1
+                           for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs))
+        return lines_onesided_below.get(child, 1) == 0
+
+    def _lines_descend_leaf(s):
+        # the descend pre-walk's landing action: bake this subsector's viewz + band-bank pointer
+        _sec = rm._seg_sector(lds, sds, secs, cmap.segs[cmap.subsectors[s].firstseg])
+        _vz = rm.view_z(_sec.floor_h)
+        return [f"    hex.set 8, viewz, {_vz & 0xFFFFFFFF}",
+                f"    hex.set w/4, vzbank, vpbank + "
+                f"{lines_vz_classes[_vz] * len(lines_key_ids) * 130}*dw"]
+
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
     # M13pS2-crush2b: per-seg VISPLANE ids -- segs sharing (plane height, light, flat base) share ONE
@@ -328,6 +363,49 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         cid = _cid[0]; _cid[0] += 1
         psec = rm._seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
         viewz_val = rm.view_z(psec.floor_h)
+        if lines:
+            # M13-prune: viewz/vzbank are set by the descend pre-walk, so leaves carry ONLY the
+            # per-seg emission (and empty leaves nothing at all).
+            out = []
+            for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
+                seg = cmap.segs[si]
+                ld = lds[seg.linedef]
+                if ld.back != -1:
+                    continue
+                v1x, v1y = verts[seg.v1]
+                v2x, v2y = verts[seg.v2]
+                ssec = rm._seg_sector(lds, sds, secs, seg)
+                tb, th, tw = seg_texinfo[si]
+                sa, sb, sc = seg_affine_coeffs(seg, verts)
+                ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex))
+                fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex))
+                # M13-splitxb: GEOM block (part 1's cull inputs) vs REST block (part 2 only) --
+                # 375 of 432 walked segs stop in part 1, never paying the rest block's SET+CLEAR.
+                gfields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
+                           ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
+                           ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc)]
+                rfields = [("seg_segangle", 8, seg.angle),
+                           ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
+                           ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
+                           ("seg_lit", 2, colormap[lrow(ssec.light)][combined[tb]]),
+                           ("seg_cvpidx", "w/4", f"{lines_key_ids[ckey] * 130}*dw"),
+                           ("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw")]
+                xorby_blocks[si] = (_seg_xorby_block(f"{si}G", gfields)
+                                    + _seg_xorby_block(f"{si}R", rfields))
+                # e1sk label keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
+                # leaf's action once per parent branch, so seg-index labels would collide (R6m).
+                out += [f"    stl.fcall seg{si}G_xorby, xb_ret",
+                        "    stl.fcall seg_pass1_leaf, seg_ret",
+                        f"    hex.if0 1, proceed, e1sk{cid}_{si}",
+                        f"    stl.fcall seg{si}R_xorby, xb_ret",
+                        "    stl.fcall seg_pass2_leaf, seg_ret2",
+                        f"    stl.fcall seg{si}R_xorby, xb_ret",
+                        f"  e1sk{cid}_{si}:",
+                        f"    stl.fcall seg{si}G_xorby, xb_ret"]
+            if out:
+                out = ([f"    hex.if0 1, full, e1sact{cid}", f"    ;e1sskip{cid}", f"  e1sact{cid}:"]
+                       + out + [f"  e1sskip{cid}:"])
+            return out
         # player-subsector setup (runs only at the FIRST subsector visited = order[0] = the player's): set the
         # runtime viewz (player sector floor + VIEWHEIGHT) that every seg's worldtop + ceil/floor planeheight use.
         out = [
@@ -412,7 +490,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         return out
 
     bsp = _bsp_as_code(_pfx(mapname), cmap, done_label="bsp_done", subsector_action=subsector_action,
-                       full_abort_label="full" if (stream or raster or lines) else None)   # M13pG1
+                       full_abort_label="full" if (stream or raster or lines) else None,   # M13pG1
+                       prune=_lines_prune if lines else None)
+    if lines:
+        bsp += _bsp_descend_code(_pfx(mapname), cmap, _lines_descend_leaf, done_label="dsc_done")
     xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (once)
 
     pass1 = [
@@ -452,9 +533,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   "byte.emit vy", "byte.emit vy + 2*dw",
                   "stream.emit_bytes4 viewangle"]
     if lines:
-        # M13-lines: wedge descriptors, then the 0x0A spans frame opens BEFORE the walk -- the
-        # leaf emits fillCol records inline at column-claim time.
+        # M13-lines: wedge descriptors, the descend pre-walk (viewz + band bank), then the 0x0B
+        # frame opens BEFORE the walk -- the leaf emits records inline at column-claim time.
         pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
+        pass1 += [f";{_pfx(mapname)}_dsc_walk", "dsc_done:"]
         pass1.append("present.begin_frame_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
@@ -601,8 +683,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           if raster else
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
           if projm else
-          ["seg_pass1_leaf:",
-           f"frame.seg_pass1_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {LINES_HALF_SLOTS}"]
+          ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_lines",
+           "seg_pass2_leaf:",
+           f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {LINES_HALF_SLOTS}"]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -757,6 +840,9 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict) -> li
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
         "vzbank: hex.vec w/4",                         # set per frame by the player-subsector block
+        # M13-splitxb: part-1/part-2 shared state + the rest-block gate
+        "proceed: hex.vec 1", "dbase: hex.vec w/4", "dptr: hex.vec w/4", "dval8: hex.vec 2",
+        "seg_ret2: ;0",
         "drawn:" + NLJ + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
         "wrej: hex.vec 1", "wqa: hex.vec 1", "wna: hex.vec 1", "wqb: hex.vec 1", "wnb: hex.vec 1",
         "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",

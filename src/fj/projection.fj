@@ -1321,6 +1321,44 @@ ns proj {
       end:
     }
 
+    // proj.column_params_m top, bottom, scale, wtc8, wtf8, centeryfix_c, viewh1 -- the lines-mode
+    //   per-column projection: wtc8/wtf8 are the PER-SEG HOISTED map-unit world heights
+    //   ((ceilfix-viewz)>>16, sign-extended to 8 nibbles once per seg), so the per-column work is
+    //   just prod = wt*scale (EXACT: wt<<16 * scale >> 16 == wt*scale, the mapmul identity),
+    //   top = (centeryfix - prod) >> 16 arithmetic, and the clips. The multiplies run as 6
+    //   schoolbook rows with SCALE as the multiplier (<= 3 nonzero nibbles; zero rows if0-skip).
+    //   Bit-identical to wall_screen_span + clips on the same inputs. @requires hex.init
+    def column_params_m top, bottom, scale, wtc8, wtf8, centeryfix_c, viewh1 \
+            @ prod, cvh, ccyf, tneg, tok, bok, bhi, end {
+        hex.zero 8, prod
+        rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wtc8, scale
+        hex.set 8, ccyf, centeryfix_c
+        hex.mov 8, top, ccyf
+        hex.sub 8, top, prod                // topfrac = centeryfix - wt*scale
+        hex.shr_hex 8, 4, top               // >> 16 arithmetic:
+        hex.sign_extend 8, 4, top           //   logical shift + sign-extend the low half
+        hex.zero 8, prod
+        rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wtf8, scale
+        hex.mov 8, bottom, ccyf
+        hex.sub 8, bottom, prod
+        hex.shr_hex 8, 4, bottom
+        hex.sign_extend 8, 4, bottom
+        hex.sign 8, top, tneg, tok          // top = max(0, top)
+      tneg:
+        hex.zero 8, top
+      tok:
+        hex.set 8, cvh, viewh1              // bottom = min(VIEW_H-1, bottom)
+        hex.scmp 8, bottom, cvh, bok, bok, bhi
+      bhi:
+        hex.mov 8, bottom, cvh
+      bok:
+        ;end
+      prod: hex.vec 8
+      cvh: hex.vec 8
+      ccyf: hex.vec 8
+      end:
+    }
+
     // proj.point_on_side back, vx, vy, px, py, dx, dy (R_PointOnSide / mapcompiler._point_side): the BSP
     //   partition side test the bake-as-code walk (opt #7) branches on. back[:2] = 1 iff
     //   dx*(vy-py) - dy*(vx-px) > 0 (the "back/left" side; <0 or ON the line -> front -> 0). vx,vy are the

@@ -182,8 +182,45 @@ def compile_geometry_streams(wad, mapname: str) -> str:
     return "\n".join(out)
 
 
+def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: str) -> str:
+    """M13-prune: a DESCEND-ONLY point-location walk (R_PointInSubsector): from the root, take the
+    NEAR child at every node and never visit the far side -- the leaf reached is the subsector
+    containing the eye. Runs BEFORE the main walk to set the per-frame player-subsector state
+    (viewz + the baked band-bank pointer), so the main walk needs no per-leaf guard blocks and
+    empty subtrees can be pruned from it safely. Reuses the main walk's shared xb{i} const blocks
+    and pos_leaf (same labels); path length ~tree depth (~10-20 nodes), once per frame.
+    `leaf_action(s)` returns the fj lines for landing in subsector s (must end by falling
+    through); the emitted code jumps to `done_label` afterwards."""
+    L = f"{pfx}_bspcode"
+    D = f"{pfx}_dsc"
+    lines = [f"// descend-only point-location pre-walk ({len(bsp.nodes)} node blocks)"]
+    lines.append(f"{D}_walk:")
+    root = bsp.root
+    if root & NF_SUBSECTOR:
+        lines += list(leaf_action(root & (NF_SUBSECTOR - 1)))
+        lines.append(f"    ;{done_label}")
+        return chr(10).join(lines) + chr(10)
+    lines.append(f"    ;{D}_n{root}")
+    for i, n in enumerate(bsp.nodes):
+        lines.append(f"{D}_n{i}:")
+        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")     # SET the shared partition consts
+        lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
+        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")     # CLEAR (involution)
+        lines.append(f"    hex.if0 2, {L}_side, {D}_nf{i}")
+        for child, tag in ((n.left, ""), (n.right, "f")):       # back -> left is near; front -> right
+            if tag == "f":
+                lines.append(f"{D}_nf{i}:")
+            if child & NF_SUBSECTOR:
+                lines += ["  " + ln if not ln.startswith(" ") else ln
+                          for ln in leaf_action(child & (NF_SUBSECTOR - 1))]
+                lines.append(f"    ;{done_label}")
+            else:
+                lines.append(f"    ;{D}_n{child}")
+    return chr(10).join(lines) + chr(10)
+
+
 def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
-                 subsector_action=None, full_abort_label: str = None) -> str:
+                 subsector_action=None, full_abort_label: str = None, prune=None) -> str:
     """BSP-as-code (opt #7): emit the front-to-back BSP walk as fj CODE. Each node becomes a code block
     whose partition line is baked as compile-time constants, so the side test is `proj.point_on_side`
     (no per-node stream read). The block visits the NEAR child subtree first (the side the viewer is on),
@@ -203,6 +240,13 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
              f"{len(bsp.subsectors)} subsector leaves; walk reads vx,vy -> front-to-back subsector visits"]
 
     def visit(child: int) -> list:
+        # M13-prune (the 12M campaign): a subtree that can contribute NOTHING to the frame (zero
+        # one-sided segs anywhere below, per the caller's `prune` predicate) is skipped ENTIRELY --
+        # no fcall, no node block. Byte-exact: such a subtree emits nothing and never touches
+        # drawn[]/full, so removing its traversal cannot change any later decision. (The player-
+        # subsector viewz setup must NOT rely on the walk when pruning -- see _bsp_descend_code.)
+        if prune is not None and prune(child):
+            return []
         if child & NF_SUBSECTOR:                          # leaf: run the subsector action (front-to-back)
             s = child & (NF_SUBSECTOR - 1)
             if subsector_action is None:                  # default: emit the subsector index (M12ff order)
@@ -232,6 +276,16 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
     # cpx..cdy (verified), so the CLEAR exactly cancels the SET. The xb{i} block is emitted once and fcall'd
     # twice (SET + CLEAR); {L}_xbret is its shared fcall/fret return reg (dead after each fret, like pos_ret).
     for i, n in enumerate(bsp.nodes):
+        if prune is not None and prune(i):                 # pruned subtree: no walk block (its xb
+            lines.append(f"{L}_xb{i}:    // (pruned walk block; xb kept for the descend pre-walk)")
+            lines.append(f"    hex.xor_by 10, {L}_cpx, {n.x & MASK40}")
+            lines.append(f"    hex.xor_by 10, {L}_cpy, {n.y & MASK40}")
+            lines.append(f"    hex.xor_by 8, {L}_cdx_mag, {abs(n.dx)}")
+            lines.append(f"    hex.xor_by 8, {L}_cdy_mag, {abs(n.dy)}")
+            lines.append(f"    hex.xor_by 1, {L}_sign_dx, {1 if n.dx < 0 else 0}")
+            lines.append(f"    hex.xor_by 1, {L}_sign_dy, {1 if n.dy < 0 else 0}")
+            lines.append(f"    stl.fret {L}_xbret")
+            continue
         lines.append(f"{L}_n{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
         if full_abort_label:                               # M13pG1: the screen is full -> the whole subtree
             lines.append(f"    hex.if0 1, {full_abort_label}, {L}_go{i}")   # paints nothing (front-to-back

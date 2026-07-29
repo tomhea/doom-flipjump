@@ -22,7 +22,7 @@ from doomfj.lut_generator import (
 from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
                                 NF_SUBSECTOR, seg_affine_coeffs)
-from doomfj.reference_model import (ReferenceModel, WALL_BG,
+from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
@@ -108,6 +108,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     the flat's 2-nibble BASE palette index instead of a 5-nibble combined-table slice offset, and the
     combined flat texel table is not emitted at all).
 
+    `wall_mode` "WPX" (M13-WPX, the lines-mode SHIPPING tier) is different in kind: the wall texels
+    never enter the combined table at all (it stays at the W1 tier — see `tex_mode`). Instead
+    `_lines_wall_pix_bank` bakes a per-(texture,light) × per-exact-height RUN-LIST bank, giving one
+    texture texel per screen pixel down each column for one add per colour run at runtime.
+
     `wall_mode` (M13p4a): "textured" (default, the real per-seg wall texture) or "W1"/"W2" — every wall
     texture is reduced to a tiny synthetic canvas (`ReferenceModel._tiny_wall_canvas`, the SAME helper
     the oracle uses, R6) before it enters the combined table: W1 = 1×1 (the mode texel), W2 = 1×16 (a
@@ -134,7 +139,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
     assert floor_mode in ("textured", "flat", "FT1"), f"unknown floor_mode: {floor_mode!r}"
-    assert wall_mode in ("textured", "W1", "W2", "W2S"), f"unknown wall_mode: {wall_mode!r}"
+    assert wall_mode in ("textured", "W1", "W2", "W2S", "WPX"), f"unknown wall_mode: {wall_mode!r}"
+    # M13-WPX carries its real texels in its OWN per-height bank, so the shared combined table
+    # (and `seg_lit`) stays at the W1 tier -- one mode texel per texture, not the 793k-texel one.
+    tex_mode = "W1" if wall_mode == "WPX" else wall_mode
     assert raster_mode in ("framebuffer", "stream", "spans", "raster", "proj", "lines"), \
         f"unknown raster_mode: {raster_mode!r}"
     # M13-spanfill: "spans" shares the ENTIRE stream pipeline (pass-1 band lists + col_struct + the
@@ -161,10 +169,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # inline at column-claim time. No col_struct, no present-tail pass.
     lines = raster_mode == "lines"
     w2s_flag = 1 if wall_mode == "W2S" else 0   # M13-W2S tier select for the lines leaf
+    wpx_flag = 1 if wall_mode == "WPX" else 0   # M13-WPX (1x1 vertical) tier select
     if stream or raster or projm or lines:
-        assert wall_mode in ("W1", "W2S") and floor_mode in ("flat", "FT1"), \
-            "the run-stream modes support wall_mode='W1'/'W2S' + floor_mode='flat'/'FT1'"
-        assert wall_mode != "W2S" or lines, "wall_mode='W2S' is a lines-mode tier"
+        assert wall_mode in ("W1", "W2S", "WPX") and floor_mode in ("flat", "FT1"), \
+            "the run-stream modes support wall_mode='W1'/'W2S'/'WPX' + floor_mode='flat'/'FT1'"
+        assert wall_mode == "W1" or lines, f"wall_mode={wall_mode!r} is a lines-mode tier"
         assert floor_mode != "FT1" or lines, "floor_mode='FT1' is a lines-mode tier"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
@@ -186,7 +195,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         if ld.back != -1:
             continue
         sd = sds[ld.front if seg.side == 0 else ld.back]
-        if rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=wall_mode) is not None:
+        if rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=tex_mode) is not None:
             names.add(sd.middle.upper())
     combined, info = [], {}
     for nm in sorted(names) + [None]:
@@ -196,8 +205,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         else:
             c = downscale_canvas(composite_texture(asset_wad, defs[nm]), rm.downscale)
             th, tw, texels = len(c), len(c[0]), texture_texels(c)
-            if wall_mode != "textured":                        # M13p4a: shrink to the tiny synthetic canvas
-                texels, th, tw = rm._tiny_wall_canvas(texels, th, wall_mode)
+            if tex_mode != "textured":                         # M13p4a: shrink to the tiny synthetic canvas
+                texels, th, tw = rm._tiny_wall_canvas(texels, th, tex_mode)
         while len(combined) % th != 0:                        # align the slice to its texheight (the OR-trick)
             combined.append(0)
         info[key] = (len(combined), th, tw)
@@ -207,7 +216,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         if ld.back != -1:
             continue
         sd = sds[ld.front if seg.side == 0 else ld.back]
-        t = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=wall_mode)
+        t = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=tex_mode)
         seg_texinfo[si] = info[sd.middle.upper()] if t is not None else info["__WALLBG__"]
 
     tex = _texel_table("tex", combined, "per_entry", over_align=over_align)
@@ -360,6 +369,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     if lines and wall_mode == "W2S":
         lines_wstrip_off, lines_wstrip_txt = _lines_wall_strips(
             rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap, lrow)
+    elif lines and wall_mode == "WPX":
+        lines_wstrip_off, lines_wstrip_txt = _lines_wall_pix_bank(
+            rm, asset_wad, cmap, lds, sds, secs, colormap, lrow, cfg.VIEW_H)
 
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
@@ -400,7 +412,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                            ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc)]
                 rfields = [("seg_segangle", 8, seg.angle),
                            *([("seg_wstrip", "w/4", f"{lines_wstrip_off[si]}*dw")]
-                             if wall_mode == "W2S" else []),
+                             if wall_mode in ("W2S", "WPX") else []),
                            ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
                            ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
                            ("seg_lit", 2, colormap[lrow(ssec.light)][combined[tb]]),
@@ -561,6 +573,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         pass1 += [f";{_pfx(mapname)}_dsc_walk", "dsc_done:"]
         if wall_mode == "W2S":
             pass1.append("hex.set w/4, wstripbase, wstrips")
+        elif wall_mode == "WPX":
+            pass1.append("hex.set w/4, wstripbase, wpxstrips")
         pass1.append("present.begin_frame_collines")
     if "pass1" in ablate:                              # M13p0: skip the walk entirely (residue-only measurement)
         pass1.append("bsp_done:")
@@ -657,7 +671,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     elif lines:
         hotdata = ([";__hot_end"]
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_key_ids,
-                                      wall_mode == "W2S")
+                                      wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, "__hot_end:"])
     else:
@@ -713,7 +727,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_lines",
            "seg_pass2_leaf:",
            f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
-           f"{LINES_HALF_SLOTS}, {w2s_flag}"]
+           f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}"]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -916,6 +930,51 @@ def _lines_wall_strips(rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap,
             lines_out.append(";0 * dw")
         k += 1
     return off_by_seg, NLJ.join(lines_out) + NLJ
+
+
+def _lines_wall_pix_bank(rm, asset_wad, cmap, lds, sds, secs, colormap, lrow, view_h,
+                         cap: int = WPX_RUN_CAP):
+    """M13-WPX: the fully-baked 1×1 wall bank + its per-seg block offsets.
+
+    One BLOCK per distinct (wall texture, sector light row) — 575 E1M1 segs collapse to ~120
+    blocks, since a texture at a given light always renders the same column. A block holds one
+    run-list per possible wall height h (0..view_h) at a UNIFORM stride of `2*cap` words, so the
+    fj emit indexes it with a single `mul_const` by the height: no offset table, no search.
+
+    Each list is `[(rel, colour) × n][0][last_colour]` where `rel` is the run's end row measured
+    from the wall's top. The final run always ends exactly at the wall bottom, which fj already
+    holds in `fstart`, so its `rel` is never stored — which frees `rel == 0` to be the list
+    TERMINATOR (every real run ends at row >= 1), so the fj loop needs no counter and no
+    per-run compare. Baking per EXACT height is
+    what makes this true 1×1: every boundary is pixel-exact, and a short wall's list is short
+    (a 5px wall can hold at most 5 runs), so far geometry costs almost nothing.
+
+    The run-lists come from `ReferenceModel.wpx_strip` — the same call the oracle paints from, so
+    the two cannot drift (R6). Returns (offsets_by_seg, bank_text)."""
+    STRIDE = 2 * cap                              # [n] + (cap-1) pairs + [last_colour]
+    cache, blocks, off_by_seg = {}, {}, {}
+    out = [f"// M13-WPX: 1x1 wall run-lists, per (texture,light) block x wall height "
+           f"(stride {STRIDE} dw, run cap {cap})", "wpxstrips:"]
+    for si, seg in enumerate(cmap.segs):
+        if lds[seg.linedef].back != -1:
+            continue
+        sd = sds[lds[seg.linedef].front if seg.side == 0 else lds[seg.linedef].back]
+        lr = lrow(rm._seg_sector(lds, sds, secs, seg).light)
+        tex = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode="WPX")
+        key = (sd.middle.upper() if tex is not None else None, lr)
+        if key not in blocks:
+            blocks[key] = len(blocks) * (view_h + 1) * STRIDE
+            texels, th, tw = tex if tex is not None else (None, 0, 0)
+            for h in range(view_h + 1):
+                runs = rm.wpx_strip(texels, th, tw, colormap, lr, max(1, h), cap=cap)
+                body = []
+                for rel, c in runs[:-1]:
+                    body += [rel, c]
+                body += [0, runs[-1][1]]                  # rel==0 sentinel, then the last colour
+                assert len(body) <= STRIDE, f"WPX list overflows its stride: {len(body)} > {STRIDE}"
+                out += [f";{v:#x} * dw" for v in body] + [";0 * dw"] * (STRIDE - len(body))
+        off_by_seg[si] = blocks[key]
+    return off_by_seg, NLJ.join(out) + NLJ
 
 
 def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,

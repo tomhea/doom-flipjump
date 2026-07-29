@@ -45,7 +45,7 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None)
-    ap.add_argument("--wall-mode", default="W2S", choices=["W1", "W2S"])
+    ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
     args = ap.parse_args()
 

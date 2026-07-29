@@ -49,7 +49,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--ablate", default="", help="comma list: planes,pass2,pass1,segstub,xrstub")
     ap.add_argument("--floor-mode", default="textured", choices=["textured", "flat", "FT1"])
-    ap.add_argument("--wall-mode", default="textured", choices=["textured", "W1", "W2", "W2S"])
+    ap.add_argument("--wall-mode", default="textured", choices=["textured", "W1", "W2", "W2S", "WPX"])
     ap.add_argument("--raster-mode", default="framebuffer",
                     choices=["framebuffer", "stream", "spans", "raster", "proj", "lines"])
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")

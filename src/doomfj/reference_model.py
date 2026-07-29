@@ -61,6 +61,8 @@ ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left ad
 CEIL_BG = 0                       # ceiling band palette index (pre-colormap)
 FLOOR_BG = 96                     # floor band palette index (pre-colormap)
 WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap) until textures land
+WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column (ops + bank knob)
+WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 LIGHT_SHIFT = 3                   # sector light (0..255) -> colormap row (0..31): light >> 3
 COLORMAP_LIGHTS = 32              # COLORMAP usable light rows (0..31; invuln/black sit past these)
 _SLOPEDIV_RECIP = slopediv_recip_table()   # perf #13: shared block-FP reciprocal table for _slope_div
@@ -568,7 +570,7 @@ class ReferenceModel:
             return None
         canvas = downscale_canvas(composite_texture(asset_wad, defs[key]), self.downscale)
         texels, th, tw = texture_texels(canvas), len(canvas), len(canvas[0])
-        if wall_mode != "textured":
+        if wall_mode not in ("textured", "WPX"):     # WPX samples the REAL texture (see wpx_strip)
             texels, th, tw = self._tiny_wall_canvas(texels, th, wall_mode)
         cache[key] = (texels, th, tw)
         return cache[key]
@@ -579,6 +581,51 @@ class ReferenceModel:
         NOT a mean index, palette indices aren't luminance-ordered, so a mean is a random hue)."""
         from collections import Counter
         return Counter(texels).most_common(1)[0][0]
+
+    @staticmethod
+    def wpx_texcol(tw, h, scale=WPX_U_SCALE):
+        """M13-WPX horizontal: which texture COLUMN an `h`-pixel-tall wall column samples.
+
+        For a flat wall the screen height goes as h ∝ 1/z, and (this is the real DOOM relation)
+        the texture coordinate is affine in the depth z — so u ∝ 1/h is the perspective-SHAPED
+        advance: the texture compresses exactly where the wall recedes. Deriving u from h instead
+        of from x is what makes it free — the run-list bank is already indexed by height, so the
+        horizontal detail costs no runtime op, no extra bank, and (being a function of the clip
+        rows alone) it does not break a single ditto column. `scale` sets how many texture widths
+        a wall sweeps across its depth range; it is a look knob, not a correctness one."""
+        return (scale // max(1, h)) % tw
+
+    @staticmethod
+    def wpx_strip(texels, th, tw, colormap, light_row, h, *, cap=WPX_RUN_CAP):
+        """M13-WPX — the 1×1 run-list of an `h`-pixel-tall wall column: entry j is
+        `[rel_end_exclusive, colour]`, the last one ending exactly at `rel = h`.
+
+        The column is sampled at FULL vertical resolution (row r of the wall takes texture texel
+        `r*th//h`, i.e. one texel per PIXEL, no 16-band stretch) through the sector's colormap row,
+        then RUN-MERGED — so the cost is the number of visible colour CHANGES, not the pixel count.
+        The texture COLUMN comes from `wpx_texcol(tw, h)` -- horizontal detail for free (see there).
+
+        `cap` bounds the run count (and hence both the fj loop and the baked bank): while over
+        budget, the SHORTEST run is absorbed into its neighbour, which drops single-pixel noise
+        first and keeps the big structural bands. Shared verbatim by this oracle and
+        `wall_renderer._lines_wall_pix_bank`, so fj and oracle can never drift (R6)."""
+        if texels is None:
+            return [[h, colormap[light_row][WALL_BG]]]
+        col = texels[ReferenceModel.wpx_texcol(tw, h) * th:][:th]
+        px = [colormap[light_row][col[min(th - 1, (r * th) // h)]] for r in range(h)]
+        runs: list[list[int]] = []
+        for j, c in enumerate(px):
+            if runs and runs[-1][1] == c:
+                runs[-1][0] = j + 1
+            else:
+                runs.append([j + 1, c])
+        while len(runs) > cap:
+            lens = [runs[i][0] - (runs[i - 1][0] if i else 0) for i in range(len(runs))]
+            i = lens.index(min(lens))                 # deterministic: the FIRST shortest run
+            if i:
+                runs[i - 1][0] = runs[i][0]           # the run above absorbs it
+            runs.pop(i)                               # (i == 0: the run below just starts at 0)
+        return runs
 
     @staticmethod
     def _tiny_wall_canvas(texels, th: int, wall_mode: str):
@@ -783,7 +830,17 @@ class ReferenceModel:
                     top, bottom = self.wall_screen_span(sec.ceil_h, sec.floor_h, viewz, scale & ANGLE_MASK)
                     top = max(0, top)
                     bottom = min(cfg.VIEW_H - 1, bottom)
-                    if top <= bottom and wall_mode == "W2S":
+                    if top <= bottom and wall_mode == "WPX":
+                        # M13-WPX: the 1×1 run-list baked for this column's EXACT height -- one
+                        # texture texel per screen pixel, run-merged, last run ending at `bottom`.
+                        texels_p, th_p, tw_p = tex if tex is not None else (None, 0, 0)
+                        ya = top
+                        for rel, c in self.wpx_strip(texels_p, th_p, tw_p, colormap, light_row,
+                                                     bottom - top + 1):
+                            for y in range(ya, top + rel):
+                                fb[y * cfg.VIEW_W + x] = c
+                            ya = top + rel
+                    elif top <= bottom and wall_mode == "W2S":
                         # M13-W2S: band j of the strip covers rows [top + (j*h>>4), top + ((j+1)*h>>4))
                         # with h = bottom-top+1 -- an exact integer split, no v-DDA, no divide, and a
                         # function of (seg, top, bottom) ALONE so the ditto structure survives.

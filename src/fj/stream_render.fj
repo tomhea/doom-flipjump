@@ -359,6 +359,42 @@ ns stream {
       end:
     }
 
+    // M13-WPX: TRUE 1x1 vertical wall texturing. The seg's block holds one FULLY-BAKED run-list
+    // per possible wall height (0..view_h, uniform stride `wpxstride` words), each list =
+    // [n][(rel,colour) x n][last_colour], where `rel` is the run's END row measured from the wall
+    // TOP. So the whole emit is: index the block by wlen (one mul_const -- no table read, no
+    // search), then per run `y2 = ctake + rel` -- ONE ADD, no multiply, no v-DDA, no divide. The
+    // last run always ends exactly at fstart, so it is emitted straight from the register and
+    // needs no baked rel. The list is baked at the wall's EXACT height, so every run boundary is
+    // pixel-exact and the run count self-limits on short walls (a 5px wall walks <=5 runs).
+    // Output stays a function of (seg, ctake, fstart) alone -> the ditto columns are still free.
+    // @requires hex.init & stl.ptr_init
+    def wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride \
+            @ ptr, y2r, colr, wloop, wdone, end {
+        hex.zero w/4, ptr
+        hex.mov 2, ptr, wlen
+        hex.mul_const w/4, ptr, ptr, wpxstride*dw      // the list baked for THIS exact height
+        hex.add w/4, ptr, wstripbase
+        hex.add w/4, ptr, wstrip                       // + the seg's baked block offset
+      wloop:
+        hex.read_byte_and_inc y2r, ptr                 // this run's end row, relative to the top
+        hex.if0 2, y2r, wdone                          // rel==0 SENTINEL: every real run ends >=1,
+        hex.read_byte_and_inc colr, ptr                // so no counter register, no per-run compare
+        hex.add 2, y2r, ctake
+        byte.emit y2r
+        byte.emit colr
+        ;wloop
+      wdone:
+        hex.read_byte_and_inc colr, ptr                // the last run ends exactly at fstart
+        byte.emit fstart
+        byte.emit colr
+        ;end
+      ptr: hex.vec w/4
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      end:
+    }
+
     // M13-lines (the DUMB-DEVICE mode): one claimed column's three windows emitted at CLAIM
     // TIME as the 0x0B packed column-run frame. M13-bakedbands: the per-visplane lists are
     // COMPILE-TIME data with [y2_absolute][final_colour] pairs (colours pre-composed through
@@ -367,7 +403,7 @@ ns stream {
     // pairs until one crosses ctake (clamped there); the floor SUFFIX skips pairs at or below
     // fstart and streams the rest (the device cursor is already at fstart after the wall pair).
     // @requires hex.init & stl.ptr_init
-    def emit_col_lines centery, w2s, x, cexcl, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, end {
+    def emit_col_lines centery, w2s, wpx, wpxstride, x, cexcl, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, end {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
@@ -389,8 +425,9 @@ ns stream {
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, ctake
         hex.if0 2, wlen, floor
-        rep(1-w2s, k) .w1_wall fstart, wall_lit
+        rep(1-w2s-wpx, k) .w1_wall fstart, wall_lit
         rep(w2s, k) .w2s_wall ctake, wlen, wstrip, wstripbase
+        rep(wpx, k) .wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride
       floor:                                     // -- floor SUFFIX over [fstart, view_h)
         hex.cmp 2, fstart, ccy, fasc, fdesc, fdesc
       fasc:                                      // straddle: skip within asc, then all of desc

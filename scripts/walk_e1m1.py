@@ -7,8 +7,10 @@ collision and turning are host-side stand-ins while the RENDERING is 100% the re
 Controls:  W/S or Up/Down = forward/back    A/D = strafe    Left/Right = turn
            Q or Esc = quit                  P = save a screenshot PNG next to this script
 
-Frame rate = however fast the Python fj interpreter chews ~18-20M ops (tens of seconds/frame on
-CPython -- a slideshow, but a REAL one). Run:
+Frame rate: the fj program runs on the NATIVE (C) engine at ~220M ops/s, and `doomfj.fastrun`
+loads the .fjm ONCE instead of once per frame (`flipjump.run` re-parses the file and rebuilds the
+memory image on every call -- 96% of its wall time here), so an E1M1 frame costs ~0.19s instead of
+~2.6s: walkable, not a slideshow. Run:
     python scripts/walk_e1m1.py
     python scripts/walk_e1m1.py --wad tests/fixtures/square_room.wad --map MAP01 \\
            --asset tests/fixtures/freedoom_assets.wad
@@ -25,6 +27,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import flipjump as fj
 from doomfj.config import Config
+from doomfj.fastrun import FjmRunner
 from doomfj.fixedpoint import _signed
 from doomfj.harness import W
 from doomfj.reference_model import spawn_state
@@ -65,7 +68,10 @@ def main():
     fjm = tmp / "m.fjm"
     fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], (tmp / "m.fj").resolve()],
                 fjm, memory_width=W, print_time=False)
-    print(f"assembled in {time.perf_counter() - t0:.0f}s -- opening the window")
+    print(f"assembled in {time.perf_counter() - t0:.0f}s -- loading the program")
+    runner = FjmRunner(fjm)          # parse + memory-image prep ONCE, not once per frame
+    print("engine: " + ("native (C)" if runner.native else
+                        "pure-python FALLBACK -- ~14x slower") + " -- opening the window")
 
     pal = aw.playpal()
     sp = spawn_state(mw, args.map)
@@ -77,28 +83,30 @@ def main():
     pygame.init()
     win = pygame.display.set_mode((cfg.VIEW_W * SCALE, cfg.VIEW_H * SCALE))
     pygame.display.set_caption("doom-flipjump  --  every frame rendered by FlipJump")
-    surf = pygame.Surface((cfg.VIEW_W, cfg.VIEW_H))
+    # palette as 256 ready-made RGB triples: the blit is then one C-level map+join instead of
+    # 16,000 per-pixel surf.set_at calls (which cost about as much as the fj run itself now)
+    pal3 = [bytes(pal[i]) for i in range(256)]
 
     def render():
         t = time.perf_counter()
         screen = StreamScreen(stdin=f"{px}\n{py}\n{ang}\n".encode())
-        term = fj.run(fjm, io_device=screen, print_time=False, print_termination=False,
-                      flat_max_words=1 << 26)
-        pix = screen.pixel_indices
-        for y in range(cfg.VIEW_H):
-            for x in range(cfg.VIEW_W):
-                surf.set_at((x, y), pal[pix[y * cfg.VIEW_W + x]])
-        pygame.transform.scale(surf, win.get_size(), win)
+        ops = runner.run(screen)
+        frame = pygame.image.frombuffer(b"".join(map(pal3.__getitem__, screen.pixel_indices)),
+                                        (cfg.VIEW_W, cfg.VIEW_H), "RGB")
+        # .convert(win): frombuffer hands back a 24-bit surface, and scaling INTO the 32-bit
+        # display surface needs a matching format
+        pygame.transform.scale(frame.convert(win), win.get_size(), win)
         pygame.display.flip()
         dt = time.perf_counter() - t
         pygame.display.set_caption(
             f"doom-flipjump  ({px},{py}) ang={ang:#010x}  "
-            f"{term.op_counter:,} fj ops in {dt:.1f}s")
-        return term.op_counter, dt
+            f"{ops:,} fj ops in {dt * 1000:.0f}ms ({1 / dt:.1f} fps)")
+        return ops, dt
 
     import math
     ops, dt = render()
-    print(f"first frame: {ops:,} fj ops in {dt:.1f}s -- W/S move, A/D strafe, arrows turn, Q quits")
+    print(f"first frame: {ops:,} fj ops in {dt * 1000:.0f}ms ({1 / dt:.1f} fps)"
+          f" -- W/S move, A/D strafe, arrows turn, Q quits")
     running = True
     while running:
         moved = False

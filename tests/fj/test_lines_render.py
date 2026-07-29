@@ -100,6 +100,33 @@ def test_e1m1_lines_frame_byte_exact_vs_oracle(tmp_path):
             print(f"[lines] E1M1 spawn frame = {term.op_counter:,} ops")
 
 
+def test_fjm_runner_matches_flipjump_run(tmp_path):
+    """`doomfj.fastrun.FjmRunner` (the walker's engine: load the .fjm ONCE, run it per frame) must
+    produce EXACTLY what `flipjump.run` produces — same pixels, same op count, across repeated runs.
+
+    The repetition is the real assertion: FlipJump programs self-modify (`wflip`, and this
+    renderer's whole `xor_by` machinery), so the runner has to restore a pristine memory image
+    before each run. A regression there does not crash, it silently renders a different frame —
+    measured, a second run on a reused image halts after 9 ops."""
+    from doomfj.fastrun import FjmRunner
+    cfg = Config()
+    mw = WadFile.from_path(ROOM)
+    aw = WadFile.from_path(ASSET)
+    sp = spawn_state(mw, "MAP01")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    VIEWPOINTS = [(spx, spy, sp.angle), (24, 24, 0x20000000), (200, 128, 0), (24, 24, 0x20000000)]
+    out = _assemble_lines(tmp_path, mw, "MAP01", cfg, asset_wad=aw,
+                          wall_mode="WPX", floor_mode="FT1")
+    want = [(bytes(s.pixel_indices), t.op_counter)
+            for s, t in (_run_lines(out, *vp) for vp in VIEWPOINTS)]
+    runner = FjmRunner(out, flat_max_words=RENDER_FLAT_WORDS)
+    for vp, (want_px, want_ops) in zip(VIEWPOINTS, want):
+        screen = StreamScreen(stdin=f"{vp[0]}\n{vp[1]}\n{vp[2]}\n".encode())
+        ops = runner.run(screen)
+        assert ops == want_ops, f"FjmRunner op count {ops:,} != {want_ops:,} @ {vp}"
+        assert bytes(screen.pixel_indices) == want_px, f"FjmRunner pixels differ @ {vp}"
+
+
 def test_square_lines_wpx_ft1_byte_exact_vs_oracle(tmp_path):
     """The WPX+FT1 visual tier (owner call 2026-07-29: "can the walls get 1x1 pixel textures and
     still be <25M"). WPX = one texture texel per screen pixel down each wall column, run-merged and

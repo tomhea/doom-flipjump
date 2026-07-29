@@ -371,7 +371,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap, lrow)
     elif lines and wall_mode == "WPX":
         lines_wstrip_off, lines_wstrip_txt = _lines_wall_pix_bank(
-            rm, asset_wad, cmap, lds, sds, secs, colormap, lrow, cfg.VIEW_H)
+            rm, asset_wad, cmap, lds, sds, secs, colormap, verts, cfg.VIEW_H)
 
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
@@ -932,12 +932,12 @@ def _lines_wall_strips(rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap,
     return off_by_seg, NLJ.join(lines_out) + NLJ
 
 
-def _lines_wall_pix_bank(rm, asset_wad, cmap, lds, sds, secs, colormap, lrow, view_h,
+def _lines_wall_pix_bank(rm, asset_wad, cmap, lds, sds, secs, colormap, verts, view_h,
                          cap: int = WPX_RUN_CAP):
     """M13-WPX: the fully-baked 1×1 wall bank + its per-seg block offsets.
 
-    One BLOCK per distinct (wall texture, sector light row) — 575 E1M1 segs collapse to ~120
-    blocks, since a texture at a given light always renders the same column. A block holds one
+    One BLOCK per distinct (wall texture, seg light level, sector wall span) — 575 E1M1 segs
+    collapse to ~185 blocks, since those three determine every column the seg can ever draw. A block holds one
     run-list per possible wall height h (0..view_h) at a UNIFORM stride of `2*cap` words, so the
     fj emit indexes it with a single `mul_const` by the height: no offset table, no search.
 
@@ -959,13 +959,20 @@ def _lines_wall_pix_bank(rm, asset_wad, cmap, lds, sds, secs, colormap, lrow, vi
         if lds[seg.linedef].back != -1:
             continue
         sd = sds[lds[seg.linedef].front if seg.side == 0 else lds[seg.linedef].back]
-        lr = lrow(rm._seg_sector(lds, sds, secs, seg).light)
+        sec = rm._seg_sector(lds, sds, secs, seg)
+        # M13-WPXLIGHT: the block key carries the seg's DOOM light level (sector level + FAKE
+        # CONTRAST, both per-seg constants) and the sector's ceiling-to-floor span in map units --
+        # the span is what lets each baked height h recover its own projection scale, and hence its
+        # scalelight row. So distance lighting and fake contrast are pure BAKE: zero runtime ops.
+        lightnum = rm.wall_lightnum(sec.light, rm.wall_fake_contrast(verts[seg.v1], verts[seg.v2]))
+        wall_units = sec.ceil_h - sec.floor_h
         tex = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode="WPX")
-        key = (sd.middle.upper() if tex is not None else None, lr)
+        key = (sd.middle.upper() if tex is not None else None, lightnum, wall_units)
         if key not in blocks:
             blocks[key] = len(blocks) * (view_h + 1) * STRIDE
             texels, th, tw = tex if tex is not None else (None, 0, 0)
             for h in range(view_h + 1):
+                lr = rm.wall_light_row(lightnum, max(1, h), wall_units)
                 runs = rm.wpx_strip(texels, th, tw, colormap, lr, max(1, h), cap=cap)
                 body = []
                 for rel, c in runs[:-1]:

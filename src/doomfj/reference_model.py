@@ -33,7 +33,8 @@ from doomfj.mapcompiler import (  # shared geometry (R6)
 )
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
-    yslope_table, zlight_table, distscale_table, LIGHTLEVELS, LIGHTSEGSHIFT, MAXLIGHTZ, LIGHTZSHIFT,
+    yslope_table, zlight_table, scalelight_table, distscale_table, LIGHTLEVELS, LIGHTSEGSHIFT,
+    MAXLIGHTSCALE, MAXLIGHTZ, LIGHTZSHIFT, LIGHTSCALESHIFT,
     slopediv_recip_table, SLOPEDIV_RECIP_RK,
 )
 from doomfj.texturecompiler import (  # shared D5 downscale lever + texture compositing (R6/D12)
@@ -131,6 +132,7 @@ class ReferenceModel:
         self.finetangent = finetangent_table(self.cfg.TRIG_N)   # tan(angle-90°) for texture-u (M12tex, R6)
         self.yslope = yslope_table(self.cfg.VIEW_W, self.cfg.VIEW_H)   # row -> distance slope (M13, R6)
         self.zlight = zlight_table(self.cfg.VIEW_W, COLORMAP_LIGHTS)   # (light,z) -> colormap row (M13, R6)
+        self.scalelight = scalelight_table(self.cfg.VIEW_W, COLORMAP_LIGHTS)   # (light,scale) -> row, WALLS (M13-WPXLIGHT)
         self.distscale = distscale_table(self.cfg.VIEW_W, self.cfg.TRIG_N)  # col -> 1/cos fisheye (M13b, R6)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
@@ -583,6 +585,45 @@ class ReferenceModel:
         return Counter(texels).most_common(1)[0][0]
 
     @staticmethod
+    def wall_fake_contrast(v1, v2) -> int:
+        """DOOM's FAKE CONTRAST (R_StoreWallRange): an AXIS-ALIGNED wall is shaded one light level
+        down if it runs east-west and one up if it runs north-south.
+
+        This exists in DOOM for exactly the complaint it answers -- two walls meeting at a corner
+        otherwise render as one flat expanse of identical colour, with no visible edge between them.
+        It is per-SEG and orientation-only, so it costs nothing at runtime here: the light level is
+        part of the baked block key."""
+        if v1[1] == v2[1]:
+            return -1                                  # east-west wall: one level darker
+        if v1[0] == v2[0]:
+            return 1                                   # north-south wall: one level brighter
+        return 0                                       # diagonal: unchanged
+
+    @staticmethod
+    def wall_lightnum(sec_light: int, contrast: int) -> int:
+        """The seg's DOOM light level (0..LIGHTLEVELS-1): the sector's level plus fake contrast.
+        A per-seg constant, so it is part of the baked block key, never a runtime value."""
+        return max(0, min(LIGHTLEVELS - 1, (sec_light >> LIGHTSEGSHIFT) + contrast))
+
+    def wall_light_row(self, lightnum: int, h: int, wall_units: int) -> int:
+        """The colormap row for a wall column `h` pixels tall in a sector whose ceiling-to-floor
+        span is `wall_units` map units — DOOM's `scalelight[lightnum][rw_scale >> LIGHTSCALESHIFT]`.
+
+        The column's projection scale is recovered from its own height: `h ≈ wall_units * scale >>
+        16`, so `scale ≈ (h << 16) / wall_units`. That is what makes the whole thing FREE — the WPX
+        bank is already indexed by h, so the distance light folds into the baked colour byte and
+        costs zero runtime ops (the same lever as `wpx_texcol`).
+
+        ⚠ APPROXIMATION: `h` is the CLIPPED on-screen height, so a wall extending past the top or
+        bottom of the view reports a smaller h than its true extent and is shaded as if it were
+        further away. The error only affects the very nearest walls, it is constant down each such
+        column, and it is monotone in h — so near still reads brighter than far, which is the cue
+        that matters. Fixing it exactly would need the UNCLIPPED height as the bank index, which
+        costs a per-run clip compare in the fj emit."""
+        scale = (max(1, h) << 16) // max(1, wall_units)
+        return self.scalelight[lightnum][min(MAXLIGHTSCALE - 1, scale >> LIGHTSCALESHIFT)]
+
+    @staticmethod
     def wpx_texcol(tw, h, scale=WPX_U_SCALE):
         """M13-WPX horizontal: which texture COLUMN an `h`-pixel-tall wall column samples.
 
@@ -823,6 +864,8 @@ class ReferenceModel:
             rw_offset, rw_centerangle = self._wall_offset(viewx, viewy, viewangle, seg, verts,
                                                           rw_normalangle, rw_angle1, sd)
             tex = self._wall_texture(scene.asset_wad, sd.middle, texcache, wall_mode=wall_mode)
+            # M13-WPXLIGHT: DOOM's per-seg fake contrast (orientation only -> a baked constant)
+            wall_contrast = self.wall_fake_contrast(verts[seg.v1], verts[seg.v2])
             worldtop = sec.ceil_h - viewz_world              # world units the ceiling is above the eye
             flat_fill = colormap[light_row][WALL_BG]
             for x in range(x1, x2):
@@ -833,9 +876,13 @@ class ReferenceModel:
                     if top <= bottom and wall_mode == "WPX":
                         # M13-WPX: the 1×1 run-list baked for this column's EXACT height -- one
                         # texture texel per screen pixel, run-merged, last run ending at `bottom`.
+                        # M13-WPXLIGHT: the colormap row is DOOM's scalelight (near = bright) plus
+                        # fake contrast, both derived from h + per-seg constants, so both are free.
                         texels_p, th_p, tw_p = tex if tex is not None else (None, 0, 0)
+                        wrow = self.wall_light_row(self.wall_lightnum(sec.light, wall_contrast),
+                                                   bottom - top + 1, sec.ceil_h - sec.floor_h)
                         ya = top
-                        for rel, c in self.wpx_strip(texels_p, th_p, tw_p, colormap, light_row,
+                        for rel, c in self.wpx_strip(texels_p, th_p, tw_p, colormap, wrow,
                                                      bottom - top + 1):
                             for y in range(ya, top + rel):
                                 fb[y * cfg.VIEW_W + x] = c
@@ -889,6 +936,168 @@ class ReferenceModel:
         else:
             self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz, *planes)
         return bytes(fb)
+
+    def render_frame_2s(self, state: SimState, scene: Scene, *, ft1: bool = True) -> bytes:
+        """M16-2S — the TWO-SIDED renderer: DOOM's R_RenderSegLoop window model.
+
+        `render_wall_frame` draws only ONE-SIDED linedefs, which on E1M1 is 575 of 2057 segs: every
+        step face, ledge front, door frame and window sill was missing (at spawn the absent wall area
+        exceeded the drawn area), and because a column's plane record came from whichever wall claimed
+        it, one continuous floor got painted in several different shades. This method fixes both.
+
+        Per column it keeps DOOM's `ceilingclip` (highest row still unpainted from the top) and
+        `floorclip` (lowest still unpainted from the bottom), and for each seg front-to-back paints
+            front-sector CEILING region | upper wall | (opening) | lower wall | front FLOOR region
+        narrowing the window from both ends. A one-sided seg fills what is left and closes the column.
+        Each plane region carries the bounding seg's OWN front sector, so equal-distance floor pixels
+        finally get equal shades (see `_render_plane_regions_flat`).
+
+        A two-sided seg whose two sectors share BOTH ceiling and floor can never draw anything — 773
+        of E1M1's 1482 two-sided segs — and is skipped up front; in fj that becomes a baked flag, so
+        it costs nothing at runtime. Walls use the shipped WPX 1x1 tier (`wpx_strip` +
+        `wall_light_row`), upper/lower portions sampling the sidedef's upper/lower texture.
+
+        Anything still open when the walk ends stays as the zero fill (sky / an unclosed window);
+        real sky rendering is later work."""
+        cfg = self.cfg
+        W, H = cfg.VIEW_W, cfg.VIEW_H
+        fb = bytearray(cfg.FB_SIZE)
+        colormap = scene.asset_wad.colormap()
+        lds = scene.map_wad.linedefs(scene.mapname)
+        sds = scene.map_wad.sidedefs(scene.mapname)
+        secs = scene.map_wad.sectors(scene.mapname)
+        verts = scene.cmap.vertexes
+        texcache, flatcache = {}, {}
+        viewx, viewy, viewangle = state.x, state.y, state.angle
+        px, py = _signed(state.x, 32) >> 16, _signed(state.y, 32) >> 16
+        pss = scene.cmap.subsectors[self.point_in_subsector(scene.cmap, px, py)]
+        viewz = self.view_z(self._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
+
+        ceilclip = [-1] * W
+        floorclip = [H] * W
+        regions: list = []                       # (x, y1, y2, plane_h, light, flat)
+
+        def wallrun(x, y1, y2, texname, sec, wall_units):
+            """one WPX 1x1-textured, scalelight-shaded wall run over rows [y1, y2]."""
+            y1, y2 = max(0, y1), min(H - 1, y2)
+            if y1 > y2:
+                return
+            h = y2 - y1 + 1
+            tex = self._wall_texture(scene.asset_wad, texname, texcache, wall_mode="WPX")
+            texels, th, tw = tex if tex is not None else (None, 0, 0)
+            lr = self.wall_light_row(self.wall_lightnum(sec.light, 0), h, max(1, wall_units))
+            ya = y1
+            for rel, c in self.wpx_strip(texels, th, tw, colormap, lr, h):
+                for y in range(ya, min(y1 + rel, y2 + 1)):
+                    fb[y * W + x] = c
+                ya = y1 + rel
+
+        for seg_i in self.visible_segs(scene.cmap, px, py):
+            seg = scene.cmap.segs[seg_i]
+            ld = lds[seg.linedef]
+            two = ld.back != -1
+            sd = sds[ld.front if seg.side == 0 else ld.back]
+            fsec = secs[sd.sector]
+            bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector] if two else None
+            if two and not (fsec.ceil_h > bsec.ceil_h or bsec.floor_h > fsec.floor_h):
+                continue                                  # can never draw (baked flag in fj)
+            rng = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
+            if rng is None:
+                continue
+            x1, x2, _rw_angle1 = rng
+            rw_normalangle, rw_distance = self.wall_setup(viewx, viewy, seg, verts)
+            scale = self.scale_from_global_angle((viewangle + self.xtoviewangle[x1]) & ANGLE_MASK,
+                                                viewangle, rw_normalangle, rw_distance)
+            if x2 > x1:
+                scale2 = self.scale_from_global_angle(
+                    (viewangle + self.xtoviewangle[x2]) & ANGLE_MASK, viewangle,
+                    rw_normalangle, rw_distance)
+                diff, span = scale2 - scale, x2 - x1
+                scalestep = -(abs(diff) // span) if diff < 0 else diff // span
+            else:
+                scalestep = 0
+            for x in range(x1, x2):
+                if 0 <= x < W and ceilclip[x] + 1 <= floorclip[x] - 1:
+                    sc = scale & ANGLE_MASK
+                    top, bot = self.wall_screen_span(fsec.ceil_h, fsec.floor_h, viewz, sc)
+                    c_hi, c_lo = ceilclip[x] + 1, min(top - 1, floorclip[x] - 1)
+                    if c_hi <= c_lo:
+                        regions.append((x, c_hi, c_lo, fsec.ceil_h, fsec.light, fsec.ceil_tex))
+                        ceilclip[x] = c_lo
+                    f_lo, f_hi = floorclip[x] - 1, max(bot + 1, ceilclip[x] + 1)
+                    if f_hi <= f_lo:
+                        regions.append((x, f_hi, f_lo, fsec.floor_h, fsec.light, fsec.floor_tex))
+                        floorclip[x] = f_hi
+                    win_hi, win_lo = ceilclip[x] + 1, floorclip[x] - 1
+                    if win_hi <= win_lo:
+                        if not two:
+                            wallrun(x, max(top, win_hi), min(bot, win_lo), sd.middle, fsec,
+                                    fsec.ceil_h - fsec.floor_h)
+                            ceilclip[x], floorclip[x] = H, -1        # column finished
+                        else:
+                            if fsec.ceil_h > bsec.ceil_h:            # upper: lintel / step-down
+                                _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h, viewz, sc)
+                                lo = min(ub - 1, win_lo)
+                                if win_hi <= lo:
+                                    wallrun(x, win_hi, lo, sd.upper, fsec,
+                                            fsec.ceil_h - bsec.ceil_h)
+                                    ceilclip[x] = lo
+                                    win_hi = lo + 1
+                            if bsec.floor_h > fsec.floor_h:          # lower: step / ledge face
+                                lt, _b = self.wall_screen_span(bsec.floor_h, fsec.floor_h, viewz, sc)
+                                hi = max(lt, win_hi)
+                                if hi <= win_lo:
+                                    wallrun(x, hi, win_lo, sd.lower, fsec,
+                                            bsec.floor_h - fsec.floor_h)
+                                    floorclip[x] = hi
+                scale = (scale + scalestep) & ANGLE_MASK
+        self._render_plane_regions_flat(fb, colormap, scene.asset_wad, flatcache, viewz, regions,
+                                       ft1=ft1)
+        return bytes(fb)
+
+    def _render_plane_regions_flat(self, fb, colormap, asset_wad, flatcache, viewz, regions,
+                                   *, ft1: bool = False):
+        """M16-2S: rasterize an explicit LIST of plane regions instead of one ceiling + one floor
+        region per column.
+
+        Why this exists: the per-column model took each column's plane height/light from whichever
+        WALL claimed the column, which is wrong as soon as the claiming wall lives in a different
+        sector from the surface you are actually looking at. Measured at E1M1 spawn row 80, every
+        column had the same planeheight 41 (the floor underfoot) yet came out in zlight rows
+        19/7/15/12, because the claiming sectors' light levels were 150/192/160 — one continuous
+        floor painted in three shades. DOOM cannot do that: a visplane belongs to a SECTOR SURFACE
+        and carries that surface's light, not to a column claim. Here each region carries its own
+        (planeheight, light, flat) from the seg that bounded it, so equal-distance floor pixels get
+        equal shades again.
+
+        `regions` = [(x, y1, y2, plane_h_mapunits, light, flat_name)]. The per-row band arithmetic is
+        the SAME shared full-range `_zidx_band_walk` + `band_colour` the per-column tier uses (R6), so
+        a region is bit-identical to the corresponding slice of the old whole-column fill."""
+        cfg = self.cfg
+        W, H, CY_ = cfg.VIEW_W, cfg.VIEW_H, cfg.CENTERY
+        walk_cache: dict = {}
+
+        def band_colour(name, base, zrows, k):
+            if not ft1:
+                return colormap[zrows[k]][base]
+            tx = self._flat_texels(asset_wad, name, flatcache)
+            ordinal = sum(1 for i in range(1, k + 1) if zrows[i] != zrows[i - 1])
+            return colormap[zrows[k]][tx[((ordinal & 63) * 64 + (ordinal & 63)) % len(tx)]]
+
+        def full_walk(ph):
+            if ph not in walk_cache:
+                walk_cache[ph] = self._zidx_band_walk(ph, list(range(H)))
+            return walk_cache[ph]
+
+        for x, y1, y2, plane_h, light, flat in regions:
+            ph = abs((plane_h << 16) - viewz)
+            base = self._flat_base(asset_wad, flat, flatcache)
+            lvl = min(LIGHTLEVELS - 1, light >> LIGHTSEGSHIFT)
+            zr_all = [self.zlight[lvl][z] for z in full_walk(ph)]
+            for y in range(max(0, y1), min(H, y2 + 1)):
+                k0 = y if y < CY_ else y - CY_
+                seq = zr_all[:CY_] if y < CY_ else zr_all[CY_:]
+                fb[y * W + x] = band_colour(flat, base, seq, k0)
 
     # ── M13 floor/ceiling visplane rasterizers (consume the per-column region records above) ──
     def _render_planes_flat(self, fb, colormap, asset_wad, flatcache, viewz,

@@ -17,6 +17,8 @@ LIGHTSEGSHIFT = 4       # sector light (0..255) -> zlight light bucket (0..15)
 MAXLIGHTZ = 128         # zlight distance buckets (distance >> LIGHTZSHIFT)
 LIGHTZSHIFT = 20        # distance (16.16) -> zlight distance bucket
 LIGHTSCALESHIFT = 12    # DOOM R_InitLightTables intermediate shift
+MAXLIGHTSCALE = 48      # DOOM scalelight[] scale buckets (rw_scale >> LIGHTSCALESHIFT)
+DOOM_SCREENWIDTH = 320  # DOOM's reference view width -- scalelight's own view-size compensation
 DISTMAP = 2             # DOOM distance-darkening rate divisor
 
 
@@ -52,6 +54,36 @@ def zlight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
             level = startmap - scale // DISTMAP
             level = max(0, min(num_colormaps - 1, level))
             row.append(level)
+        grid.append(row)
+    return grid
+
+
+def scalelight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
+    """DOOM's `scalelight[]` (R_ExecuteSetViewSize): the WALL distance-light map — the sibling of
+    `zlight_table`, indexed by the column's projection SCALE instead of a plane distance. Returns a
+    `LIGHTLEVELS × MAXLIGHTSCALE` grid of COLORMAP row indices.
+
+    Index it as `scalelight[light >> LIGHTSEGSHIFT][min(MAXLIGHTSCALE-1, scale >> LIGHTSCALESHIFT)]`
+    (DOOM R_RenderSegLoop). A NEARER column has a larger scale, so a larger bucket j, so a lower
+    (brighter) colormap row — near walls are bright, far walls fade into the dark. This is the cue
+    that makes depth readable, and until M13-WPXLIGHT our walls had none of it: they used the
+    sector's light level alone, flat all the way to the horizon.
+
+    `view_w` is load-bearing, not decoration: DOOM's own formula is
+    `level = startmap - j*SCREENWIDTH/viewwidth/DISTMAP`, and that `SCREENWIDTH/viewwidth` term is
+    what keeps the falloff right on a narrower view. Our projection is `view_w/2`, so at 160 wide our
+    scales are HALF DOOM's at the same distance — drop the term and every wall lands ~6 colormap rows
+    too dark, which is most of a 32-row range. (`zlight_table` takes `view_w` for the same reason.)
+
+    Note `startmap` is 0 for a fully-lit sector (light 255), so DOOM gives such sectors no wall
+    falloff at all — that is DOOM's behaviour, faithfully reproduced, not a bug here."""
+    grid = []
+    for i in range(LIGHTLEVELS):
+        startmap = ((LIGHTLEVELS - 1 - i) * 2) * num_colormaps // LIGHTLEVELS
+        row = []
+        for j in range(MAXLIGHTSCALE):
+            level = startmap - j * (DOOM_SCREENWIDTH // view_w) // DISTMAP
+            row.append(max(0, min(num_colormaps - 1, level)))
         grid.append(row)
     return grid
 

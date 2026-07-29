@@ -71,6 +71,50 @@ under the 25M ask but by only 0.4%; a viewpoint outside the sample could exceed 
   flattens the walls; the 1px grain is what reads as texture at 160×100. Rejected as against the
   ask, not as unaffordable.
 
+## M13-WPXLIGHT — making depth readable (owner: "hard to distinguish close and far walls")
+
+Owner report after first playing it: *"there is not a clear difference between walls... sometimes
+it's hard to distinguish close and far ones, the outlines aren't strong or don't exist... difference
+between far wall and a close column, for example too."*
+
+**This was a fidelity gap, not a style choice.** Real DOOM has TWO cues for exactly this, and this
+renderer had neither — walls were shaded by their sector's light level alone, dead flat from the
+player's nose to the horizon (`light_row = sec.light >> LIGHT_SHIFT`, at every wall tier):
+
+1. **`scalelight` (R_RenderSegLoop)** — DOOM shades each wall column by its projection scale:
+   `dc_colormap = walllights[rw_scale >> LIGHTSCALESHIFT]`. Nearer column, larger scale, brighter
+   row. This is what separates a close column from a far wall. Our floors already had the sibling
+   `zlight`; the walls had nothing.
+2. **Fake contrast (R_StoreWallRange)** — `lightnum--` for an east-west wall, `lightnum++` for a
+   north-south one. It is *called* fake contrast in the DOOM source, and it exists precisely so two
+   walls meeting at a corner don't render as one flat expanse with no visible edge.
+
+So the answer to "do DOOM players complain about this?" is no — DOOM solves it, and we had skipped
+both halves of the solution. Nothing here is an invented effect; both are ported.
+
+**Both are FREE, by the same lever as `wpx_texcol`.** Fake contrast is per-seg and orientation-only.
+Distance light needs the column's scale — and `h ≈ wall_units * scale >> 16`, so scale is recoverable
+from the height the bank is ALREADY indexed by, provided the sector's ceiling-to-floor span is part
+of the block key. So the block key goes from (texture, light row) to (texture, **light level incl.
+contrast**, **wall span in map units**), each baked height looks up its own `scalelight` row, and the
+runtime op count does not change at all — only which colour byte was baked.
+
+| | before | after |
+|---|---|---|
+| E1M1 spawn | 23,063,650 | 23,309,174 (+1.1%) |
+| worst of 63 viewpoints | 24,896,617 | **24,843,494** (slightly cheaper) |
+| bank blocks / words | 120 / 582k | 185 / 897k (1.5x) |
+
+⚠ **The one approximation, stated plainly:** `h` is the CLIPPED on-screen height, so a wall running
+off the top or bottom of the view reports less than its true extent and is shaded as if further
+away. It affects only the very nearest walls, it is constant down each such column, and it stays
+monotone in `h` — near still reads brighter than far, which is the cue that was missing. Exact
+scale would need the UNCLIPPED height as the bank index, which costs a per-run clip compare in the
+fj emit (the current emit relies on the list spanning exactly `[ctake, fstart)`).
+
+Also faithful-by-accident: `startmap` is 0 for a fully-lit sector, so DOOM gives such sectors no
+wall falloff whatsoever. That is DOOM's behaviour, reproduced, not a bug to fix here.
+
 ## Gates
 
 `tests/fj/test_lines_render.py` — `test_square_lines_wpx_ft1_byte_exact_vs_oracle` (5 square

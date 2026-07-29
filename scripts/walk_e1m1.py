@@ -50,6 +50,9 @@ def main():
     ap.add_argument("--asset", default=None)
     ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
+    ap.add_argument("--frames", type=int, default=0, metavar="N",
+                    help="render N frames HEADLESSLY (no window) and report timings, then exit"
+                         " -- use this to check the fj side independently of pygame")
     args = ap.parse_args()
 
     cfg = Config()
@@ -68,10 +71,10 @@ def main():
     fjm = tmp / "m.fjm"
     fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], (tmp / "m.fj").resolve()],
                 fjm, memory_width=W, print_time=False)
-    print(f"assembled in {time.perf_counter() - t0:.0f}s -- loading the program")
+    print(f"assembled in {time.perf_counter() - t0:.0f}s -- loading the program", flush=True)
     runner = FjmRunner(fjm)          # parse + memory-image prep ONCE, not once per frame
     print("engine: " + ("native (C)" if runner.native else
-                        "pure-python FALLBACK -- ~14x slower") + " -- opening the window")
+                        "pure-python FALLBACK -- ~14x slower"), flush=True)
 
     pal = aw.playpal()
     sp = spawn_state(mw, args.map)
@@ -79,10 +82,32 @@ def main():
     py = _signed(sp.y, 32) >> 16
     ang = sp.angle
 
+    if args.frames:                      # headless: fj only, no pygame, no window
+        for i in range(args.frames):
+            t = time.perf_counter()
+            screen = StreamScreen(stdin=f"{px}\n{py}\n{ang}\n".encode())
+            ops = runner.run(screen)
+            dt = time.perf_counter() - t
+            print(f"  frame {i + 1}: {ops:,} fj ops in {dt * 1000:.0f}ms ({1 / dt:.1f} fps)",
+                  flush=True)
+            ang = (ang + ANG_STEP) & 0xFFFFFFFF
+        return
+
     import pygame
-    pygame.init()
+    # display.init(), NOT pygame.init(): the latter also spins up the AUDIO MIXER, which can block
+    # for a long time (or forever) on a Windows box with a flaky/absent audio device -- and the
+    # symptom is exactly "the pygame banner printed and then no window ever appeared". Nothing here
+    # makes a sound, so there is no reason to touch the mixer at all.
+    print("  pygame.display.init() ...", flush=True)
+    pygame.display.init()
     win = pygame.display.set_mode((cfg.VIEW_W * SCALE, cfg.VIEW_H * SCALE))
-    pygame.display.set_caption("doom-flipjump  --  every frame rendered by FlipJump")
+    pygame.display.set_caption("doom-flipjump  --  rendering the first frame ...")
+    # paint + pump BEFORE the first render, so the window is on screen immediately instead of
+    # staying invisible (or "not responding") for however long that first frame takes
+    win.fill((24, 24, 28))
+    pygame.display.flip()
+    pygame.event.pump()
+    print(f"  window open ({pygame.display.get_driver()}) -- rendering the first frame", flush=True)
     # palette as 256 ready-made RGB triples: the blit is then one C-level map+join instead of
     # 16,000 per-pixel surf.set_at calls (which cost about as much as the fj run itself now)
     pal3 = [bytes(pal[i]) for i in range(256)]

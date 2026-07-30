@@ -1507,7 +1507,7 @@ ns proj {
     //   the 16.16 values >> 16). Bit-identical to slope_div(num<<16, den<<16): den<<16 < 0x200
     //   <=> den == 0, and sden/wnum are built as den<<8 / num<<8 (= the original's (v<<16)>>8) --
     //   from there the body is the coarseslope slope_div verbatim.
-    def slope_div_m dst, num, den @ lt, ge, prodlo, k1, k2, k3, norm_done, wok, keep, clamp, done, sden, wnum, recipw, recip, prod, csr3 < slopediv_recip8 {
+    def slope_div_m dst, num, den @ lt, ge, prodlo, k1, k2, k3, norm_done, wok, keep, clamp, done, sden, wnum, recipw, recip, prod, csr3 {
         hex.if0 4, den, lt                       // den<<16 < 512 <=> den == 0
         ;ge
       lt:
@@ -1541,7 +1541,9 @@ ns proj {
         hex.if0 3, wnum + 3*dw, wok              // slope>=1 guard: oracle-equivalent clamp
         ;clamp
       wok:
-        hex.read_table_packed 3, recip, slopediv_recip8, 3, sden
+        // M13-ATANDISP: the reciprocal through the D4 dispatch table too -- 3 x
+        // read_byte_and_inc (42@ each) + a mul_const ~ 247@ becomes a ~20@ lookup.
+        sdrecip.lookup recip, sden
         hex.zero 8, recipw
         hex.mov 6, recipw, recip
         hex.zero 8, prod
@@ -1573,7 +1575,7 @@ ns proj {
             @ dx, dy, num, den, idx, sidx, base, c1, c2, c4, c6, \
               sxn, sxp, sxd, syn, syp, syd, dxz, bothz, nz, gt_, ndx, numden, \
               lo4, lo2, hi4, oct0, oct1, oct2, oct3, oct4, oct5, oct6, oct7, done \
-            < tantoangle {
+            {
         hex.mov 4, dx, x2
         hex.sub 4, dx, x1                        // dx = x2 - x1   (signed map units)
         hex.mov 4, dy, y2
@@ -1616,8 +1618,13 @@ ns proj {
       numden:
         .slope_div_m sidx, num, den
         rep(dsl, q) .slope_div_m sidx, num, den        // ablate: price the divide
-        hex.read_table_packed 4, base, tantoangle, 3, sidx
-        rep(dtb, q) hex.read_table_packed 4, base, tantoangle, 3, sidx   // ablate: price the LUT read
+        // M13-ATANDISP: base = tantoangle[sidx] through the D4 per-entry DISPATCH table
+        // instead of `hex.read_table_packed 4` -- the stl's own complexities say that read is
+        // 4 x read_byte_and_inc (42@ each) + a mul_const = ~289@, the single most expensive
+        // item in the atan; a dispatch lookup is ~3 hex.xor + zero + xor_zero. Same values,
+        // so the frames stay byte-exact.
+        ttang.lookup base, sidx
+        rep(dtb, q) ttang.lookup base, sidx                  // ablate: price the LUT lookup
         hex.cmp 1, idx, c4, lo4, oct4, hi4
       lo4:
         hex.cmp 1, idx, c2, lo2, oct2, oct3

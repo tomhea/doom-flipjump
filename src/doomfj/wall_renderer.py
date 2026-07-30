@@ -12,6 +12,7 @@ unrolled pass 2 rasters them through the shared-compare trampoline.
 from __future__ import annotations
 
 from doomfj.lut_generator import (
+    generate_dispatch_table_fj,
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
     generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj,
     generate_slopediv_recip8_lut_fj,
@@ -28,6 +29,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.coarse_cull import generate_coarse_bounds_fj
+from doomfj.tables import tantoangle_table, slopediv_recip8_table
 from doomfj.config import PNEAR_SEG_BUDGET
 
 
@@ -336,6 +338,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         cm = compile_colormap("cm", asset_wad, lights=COLORMAP_LIGHTS, over_align=over_align)
     palette = compile_palette("palette", asset_wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    # M13-ATANDISP (lines mode): the SAME tantoangle values as a D4 per-entry dispatch table, so
+    # point_to_angle_m can trade its ~289@ packed read (4x read_byte_and_inc + a mul_const, per the
+    # stl's documented complexities) for a ~20@ lookup. Byte-exact by construction: same values.
+    ttang = (generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE),
+                                        index_nibbles=3, result_nibbles=8) if lines else "")
+    sdrecip = (generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(),
+                                          index_nibbles=3, result_nibbles=6) if lines else "")
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     slopediv_recip8 = generate_slopediv_recip8_lut_fj("slopediv_recip8")  # M13-coarseslope
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
@@ -861,7 +870,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                     tex, cm, "__hot_end:"])
+                     tex, cm, ttang, sdrecip, "__hot_end:"])
     else:
         hotdata = []
     # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,

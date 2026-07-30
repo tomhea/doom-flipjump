@@ -457,6 +457,57 @@ old verdict was right for the right reason, which §4 doubted. **Retire the idea
   columns get attributed, so it needs the oracle mirrored and a fresh look at the near floor.
 - The band emit (§12) is 4.7% and `byte.emit` is ~27 ops/pair: not a target.
 
+## 14. M13-ATANDISP — read the stl's COMPLEXITY DOCS, not the tea leaves: −3.8M/frame
+
+Owner's correction mid-session: *"before trying new improvements, trust the complexity
+documentation"*. The stl annotates every macro with its time complexity, and reading them off
+immediately explained §13's numbers and pointed at the fix. At w=32:
+
+| macro | documented time | note |
+|---|---|---|
+| `hex.set n, dst, val` | **@+4** | CHEAP — not per-nibble |
+| `hex.mov n, dst, src` | **n(2@)** → 16@ at n=8 | dearer than `set` |
+| `hex.xor n` | **@** | ~free |
+| `hex.add/sub n` | n(4@+12) → 32@+96 at n=8 | |
+| `hex.cmp n` | m(3@+8), m from the first differing nibble | cheap on early differences |
+| `hex.zero n`, `hex.sign n` | @, @−1 | ~free |
+| `read_byte_and_inc` | **42@+187** | |
+| `ptr_index` | **72@+168** | |
+| `hex.read_table_packed nb=4` | 4 × read_byte_and_inc + `mul_const` ≈ **289@** | **the atan's biggest item** |
+
+That last line is the whole story: `point_to_angle_m` spent ~289@ reading `tantoangle[sidx]`, and
+`slope_div_m` another ~247@ reading `slopediv_recip8[sden]`. The repo already had the cheaper idiom —
+the **D4 per-entry dispatch table** (`generate_dispatch_table_fj`, the same machinery behind `cm.apply`
+and `byte.emit`), whose `.lookup dst, idx` is 3 `hex.xor` + a jump + `zero` + `xor_zero` ≈ 20@. Same
+values, so byte-exact by construction:
+
+| E1M1 spawn, WPX+FT1+plane_near | ops | delta |
+|---|---|---|
+| before | 25,516,636 | |
+| `tantoangle` → `ttang.lookup` | 24,012,214 | **−1.50M** |
+| `slopediv_recip8` → `sdrecip.lookup` | **21,730,429** | **−2.28M** |
+
+| | worst of the 65-viewpoint sweep |
+|---|---|
+| rung 3a as shipped | 30,998,786 |
+| **+ M13-ATANDISP** | **26,551,706 (−4.45M)** |
+
+**The two-sided plane attribution is now CHEAPER than the renderer was before it existed** (spawn
+21.73M vs the pre-rung-3a 23.21M), and the headroom under the owner's ceiling goes 2.0M → 6.4M —
+which is what rung 3b needs. Cost: the two dispatch tables add ~2.5M chars of generated program
+(4096 entries each); lines mode only, the other tiers keep the packed reads and are untouched.
+
+⚠ Counter-example from the same session, for calibration: an "obvious" rewrite of the octant tails
+(`hex.set 8` + `hex.add/sub 8` → `hex.mov 8` + `hex.xor_by 8`, justified by an exact carry-free
+XOR identity) measured +69k — a WASH — because `set` is @+4 while `mov` is 16@. It was reverted. The
+docs say which ops are dear; guessing does not.
+
+### Every remaining `read_table*` in the LINES path is gone
+
+The others live in `plane_bands.fj` (the runtime band builder — lines mode uses BAKED bands),
+`plane_render.fj` (the framebuffer/textured-plane tier) and the coarse-cull bounds (off). The same
+conversion is available for those tiers if they are ever revived.
+
 ### Still open
 
 - Rung 3b (§6) — the upper/lower wall runs. Unchanged by this rung except that the per-column plane

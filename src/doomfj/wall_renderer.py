@@ -60,7 +60,8 @@ def _seg_xorby_use(idx, clear=True):
     return seq
 
 
-_ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub"})
+_ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub",
+                           "tsprobe"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -394,6 +395,30 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 seg = cmap.segs[si]
                 ld = lds[seg.linedef]
                 if ld.back != -1:
+                    # M16-2S probe (ablate "tsprobe"): walk the DRAWABLE two-sided segs through the
+                    # cheap cull only -- GEOM block + pass 1, no emit. This prices the one thing that
+                    # decides whether any two-sided emit design can fit the ops ceiling: what it
+                    # costs merely to VISIT 1284 segs instead of 432. A two-sided seg whose sectors
+                    # share BOTH ceiling and floor can never draw (773 of E1M1's 1482) and is
+                    # excluded, exactly as the real implementation will exclude it via a baked flag.
+                    if "tsprobe" not in ablate:
+                        continue
+                    _fs = secs[sds[ld.front if seg.side == 0 else ld.back].sector]
+                    _bs = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
+                    if not (_fs.ceil_h > _bs.ceil_h or _bs.floor_h > _fs.floor_h):
+                        continue
+                    _v1x, _v1y = verts[seg.v1]
+                    _v2x, _v2y = verts[seg.v2]
+                    _sa, _sb, _sc = seg_affine_coeffs(seg, verts)
+                    xorby_blocks[si] = _seg_xorby_block(f"{si}G", [
+                        ("seg_v1x", 8, (_v1x << 16) & 0xFFFFFFFF),
+                        ("seg_v1y", 8, (_v1y << 16) & 0xFFFFFFFF),
+                        ("seg_v2x", 8, (_v2x << 16) & 0xFFFFFFFF),
+                        ("seg_v2y", 8, (_v2y << 16) & 0xFFFFFFFF),
+                        ("seg_a", 8, _sa), ("seg_b", 8, _sb), ("seg_c", 8, _sc)])
+                    out += [f"    stl.fcall seg{si}G_xorby, xb_ret",
+                            "    stl.fcall seg_pass1_leaf, seg_ret",
+                            f"    stl.fcall seg{si}G_xorby, xb_ret"]
                     continue
                 v1x, v1y = verts[seg.v1]
                 v2x, v2y = verts[seg.v2]

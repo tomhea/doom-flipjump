@@ -1185,7 +1185,7 @@ ns frame {
     // before tsstop and 1386 after it (measured; walking all of them through this front end costs
     // +11.9M, over the ceiling -- see docs/handoff-m13-2s.md §4).
     // Returns via stl.fret seg_ret. @requires hex.init & stl.ptr_init
-    def seg_pass1_leaf_body_ts budget \
+    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb \
             @ ret, bok, bstop, wok, wlo, wahi, wbhi, wbok, scan, nolow, dolow, nohigh, dohigh, \
               loop, body, claim, next, pdone, xa, xb, pm1, bcap \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
@@ -1207,7 +1207,7 @@ ns frame {
         hex.if0 1, wrej, wok
         stl.fret seg_ret
       wok:
-        proj.wall_x_range_m visible, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         // Clip the scan to the UNATTRIBUTED WINDOW [pmin, pmax]. Every column below pmin / above
         // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
@@ -1363,7 +1363,7 @@ ns frame {
     // = 1 iff the seg survives everything, so the REST block's SET+CLEAR (and part 2) never
     // happens for the 375 of 432 walked segs that stop here. dbase/dptr/x are globals -- part
     // 2 continues the same registers.
-    def seg_pass1_leaf_body_lines \
+    def seg_pass1_leaf_body_lines dbl, dsl, dtb \
             @ ret, work, wok, occscan, occchk, occdone, occproc \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
               seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c, \
@@ -1380,7 +1380,7 @@ ns frame {
         stl.fret seg_ret
       wok:
         // M13-mapunits: the map-unit variant -- 4-nibble atan front end, no rwa (dead here)
-        proj.wall_x_range_m visible, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        proj.wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
         hex.mov 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn

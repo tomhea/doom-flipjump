@@ -63,7 +63,8 @@ def _seg_xorby_use(idx, clear=True):
 
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub",
                            "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull",
-                           "emitnopair", "emitnowalk"})
+                           "emitnopair", "emitnowalk", "atantwice",
+                           "slopetwice", "tabletwice"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -191,6 +192,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # two byte.emit dispatches), 2 = skip the band walks entirely (prices the whole per-pair path:
     # two hex.read_byte_and_inc pointer reads + the loop + the dispatches). Renders wrong on purpose.
     eabl_flag = 2 if "emitnowalk" in ablate else (1 if "emitnopair" in ablate else 0)
+    # M13-EMIT rung 3 (measurement only): run each seg's two vertex atans TWICE, the second time
+    # into a dead register. Everything downstream stays bit-identical (the frames must still come
+    # out byte-exact), so the delta IS the frame's point_to_angle cost.
+    atan_dbl = 1 if "atantwice" in ablate else 0
+    # ... and the same trick INSIDE point_to_angle_m, to split the atan into its two halves: the
+    # slope divide vs the packed tantoangle LUT read (4 pointer byte-reads).
+    slope_dbl = 1 if "slopetwice" in ablate else 0
+    table_dbl = 1 if "tabletwice" in ablate else 0
     w2s_flag = 1 if wall_mode == "W2S" else 0   # M13-W2S tier select for the lines leaf
     wpx_flag = 1 if wall_mode == "WPX" else 0   # M13-WPX (1x1 vertical) tier select
     if stream or raster or projm or lines:
@@ -906,9 +915,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           if raster else
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
           if projm else
-          ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_lines",
+          ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}",
            *(["seg_pass1_ts_leaf:",
-              f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}"] if plane_near else []),
+              f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
+              f"{table_dbl}"] if plane_near else []),
            "seg_pass2_leaf:",
            f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
            f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "

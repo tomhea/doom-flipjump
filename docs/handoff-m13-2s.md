@@ -412,6 +412,51 @@ predates both this atan load and rung 3a's up-to-128-seg budget) — but per thi
 MEASURE the atan share of that 70% before building it (an ablate that stubs `point_to_angle` inside
 `wall_x_range_m` would isolate it).
 
+## 13. The atan is 21–25% of the frame — and the memo is CONFIRMED DEAD
+
+Measured by ADDING work, not removing it: `atantwice` runs each seg's two vertex atans a second time
+into a dead register, `slopetwice` re-runs only `slope_div_m`, `tabletwice` only the packed
+`tantoangle` read. Everything downstream stays bit-identical, and the probes assert the frames are
+**byte-exact** — so each delta is that component's cost and nothing else.
+
+| E1M1, WPX+FT1+plane_near | spawn | (−309,−44,0) |
+|---|---|---|
+| shipped | 25,516,636 | 31,007,093 |
+| + the whole atan pair again | 30,990,444 | 38,909,987 |
+| + only the slope divide again | 26,908,029 | 34,053,027 |
+| + only the tantoangle read again | 26,413,990 | 33,107,512 |
+
+| component | spawn | share of the atan | (−309,−44,0) |
+|---|---|---|---|
+| **all `point_to_angle`** | **5,473,808 (21% of frame)** | 100% | **7,902,894 (25%)** |
+| the slope divide | 1,391,393 | 25% | 3,045,934 |
+| the packed tantoangle LUT read (4 byte-reads) | 897,354 | 16% | 2,100,419 |
+| the rest: dx/dy, sign/negate, octant select, the 8-nibble folds | 3,185,061 | **58%** | 2,756,541 |
+
+`scratchpad/atan_count.py` counts the calls: 548 at spawn (274 segs × 2), 630 at (−309,−44) —
+so **~10.0k / ~12.5k ops per `point_to_angle`**, against §4's estimate of 19–23k.
+
+### The per-vertex angle memo (§4's reserve item) is dead — do not build it
+
+A memo hit must READ a stored 32-bit angle: `ptr_index` (72@) + `read_hex 8` (320@) ≈ 400@, which at
+this program's @ is the same order as the ~10k atan it replaces (fj-lessons R37: a wide pointer read
+costs what the computation costs). At the measured 42% hit rate the expected saving is
+`0.42 × 10k − ~4-5k ≈ 0` per angle, and the misses still pay the probe plus a store. That is exactly
+the +0.73M LOSS the earlier session measured, and the arithmetic does NOT flip at 1398 angles — the
+old verdict was right for the right reason, which §4 doubted. **Retire the idea.**
+
+### What is actually left to cut
+
+- **58% of the atan is not the divide or the lookup** — it is the surrounding 4-/8-nibble
+  arithmetic and the octant dispatch. A micro-optimisation rung on `point_to_angle_m` itself is worth
+  ~1–3M, and unlike the memo it does not need a hit rate to pay off.
+- **Fewer atan payers.** The ts (plane-attribution) path spends up to `PNEAR_SEG_BUDGET` = 128 segs ×
+  2 atans; at spawn that is ~47% of all atan calls (128 of 274 segs). Attribution does not actually
+  need `wall_x_range`'s exact columns — only that the ORACLE and the fj agree — so a cheaper
+  conservative column range for the ts path alone could remove up to ~2.6M at spawn. It changes which
+  columns get attributed, so it needs the oracle mirrored and a fresh look at the near floor.
+- The band emit (§12) is 4.7% and `byte.emit` is ~27 ops/pair: not a target.
+
 ### Still open
 
 - Rung 3b (§6) — the upper/lower wall runs. Unchanged by this rung except that the per-column plane

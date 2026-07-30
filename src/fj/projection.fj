@@ -1569,7 +1569,7 @@ ns proj {
 
     // proj.point_to_angle_m dst, x1, y1, x2, y2 — the map-unit twin: x1/y1/x2/y2 are addresses of
     //   the 16.16 registers' HIGH 4-NIBBLE slices (pass reg + 4*dw). Bit-identical output.
-    def point_to_angle_m dst, x1, y1, x2, y2 \
+    def point_to_angle_m dsl, dtb, dst, x1, y1, x2, y2 \
             @ dx, dy, num, den, idx, sidx, base, c1, c2, c4, c6, \
               sxn, sxp, sxd, syn, syp, syd, dxz, bothz, nz, gt_, ndx, numden, \
               lo4, lo2, hi4, oct0, oct1, oct2, oct3, oct4, oct5, oct6, oct7, done \
@@ -1615,7 +1615,9 @@ ns proj {
         ;numden
       numden:
         .slope_div_m sidx, num, den
+        rep(dsl, q) .slope_div_m sidx, num, den        // ablate: price the divide
         hex.read_table_packed 4, base, tantoangle, 3, sidx
+        rep(dtb, q) hex.read_table_packed 4, base, tantoangle, 3, sidx   // ablate: price the LUT read
         hex.cmp 1, idx, c4, lo4, oct4, hi4
       lo4:
         hex.cmp 1, idx, c2, lo2, oct2, oct3
@@ -1674,8 +1676,17 @@ ns proj {
     //   (the leaf frets on !visible without reading x1/x2), and the final column compare at
 
     //   2 nibbles (post-clip columns are in [0, VIEW_W+1]). Everything else mirrors wall_x_range.
-    def wall_x_range_m visible, x1, x2, sgn, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, v1x, v1y, v2x, v2y, a, b, c \
-            @ a1, a2, span, tspan, diff, tx1, tx2, sgnt, frontok, \
+    // M13-EMIT rung 3 (ablate "atantwice", measurement only): run the seg's TWO vertex atans a
+    // second time into a dead register. Measuring by ADDING keeps everything downstream --
+    // culls, columns, emission -- bit-identical, so the delta is the frame's atan cost and
+    // nothing else (the gate frames must stay byte-exact, which is the check).
+    def atan_dup dst, viewx, viewy, v1x, v1y, v2x, v2y {
+        .point_to_angle_m 0, 0, dst, viewx + 4*dw, viewy + 4*dw, v1x + 4*dw, v1y + 4*dw
+        .point_to_angle_m 0, 0, dst, viewx + 4*dw, viewy + 4*dw, v2x + 4*dw, v2y + 4*dw
+    }
+
+    def wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, v1x, v1y, v2x, v2y, a, b, c \
+            @ adup, a1, a2, span, tspan, diff, tx1, tx2, sgnt, frontok, \
               xadone, yadone, \
               cclip, c2clip, cnegclip, \
               notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end {
@@ -1699,8 +1710,9 @@ ns proj {
         hex.sign 8, sgn, end, frontok
       frontok:
         hex.if0 8, sgn, end
-        .point_to_angle_m a1, viewx + 4*dw, viewy + 4*dw, v1x + 4*dw, v1y + 4*dw
-        .point_to_angle_m a2, viewx + 4*dw, viewy + 4*dw, v2x + 4*dw, v2y + 4*dw
+        .point_to_angle_m dsl, dtb, a1, viewx + 4*dw, viewy + 4*dw, v1x + 4*dw, v1y + 4*dw
+        .point_to_angle_m dsl, dtb, a2, viewx + 4*dw, viewy + 4*dw, v2x + 4*dw, v2y + 4*dw
+        rep(dbl, k) .atan_dup adup, viewx, viewy, v1x, v1y, v2x, v2y
         hex.mov 8, span, a1
         hex.sub 8, span, a2
         hex.sign 8, span, end, notback
@@ -1737,6 +1749,7 @@ ns proj {
         hex.mov 8, x2, tx2
         ;end
 
+      adup: hex.vec 8
       a1: hex.vec 8
       a2: hex.vec 8
       span: hex.vec 8

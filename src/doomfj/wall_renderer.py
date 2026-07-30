@@ -62,7 +62,7 @@ def _seg_xorby_use(idx, clear=True):
 
 
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub",
-                           "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk"})
+                           "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -203,6 +203,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     proj = cfg.PROJECTION << 16
     defs = {d.name.upper(): d for d in asset_wad.texture_defs("TEXTURE1")}
 
+    def _ts_draws_wall_early(seg) -> bool:
+        """_seg_draws_wall, needed by the texture/WPX bakes that run before it is defined."""
+        ld_ = lds[seg.linedef]
+        if ld_.back == -1:
+            return False
+        fs_ = secs[sds[ld_.front if seg.side == 0 else ld_.back].sector]
+        bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
+        return fs_.ceil_h > bs_.ceil_h or bs_.floor_h > fs_.floor_h
+
     # the combined dispatch table over every distinct wall texture the one-sided segs use (downscaled to match
     # the oracle's _wall_texture), plus the 1x1 WALL_BG sentinel; per-seg texinfo precomputed via the oracle rule.
     cache = {}
@@ -210,7 +219,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     names = set()
     for si, seg in enumerate(cmap.segs):
         ld = lds[seg.linedef]
-        if ld.back != -1:
+        if ld.back != -1 and not ("tsfull" in ablate and secs and _ts_draws_wall_early(seg)):
             continue
         sd = sds[ld.front if seg.side == 0 else ld.back]
         if rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=tex_mode) is not None:
@@ -231,7 +240,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         combined += texels
     for si, seg in enumerate(cmap.segs):
         ld = lds[seg.linedef]
-        if ld.back != -1:
+        if ld.back != -1 and not ("tsfull" in ablate and _ts_draws_wall_early(seg)):
             continue
         sd = sds[ld.front if seg.side == 0 else ld.back]
         t = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=tex_mode)
@@ -346,6 +355,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
                 != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
 
+    def _seg_draws_wall(seg) -> bool:
+        """M13-2S rung 3b (ablate "tsfull", measurement only): would this two-sided seg draw an
+        upper or a lower wall run? (front ceiling above back ceiling / back floor above front
+        floor). "tsfull" routes exactly these through the ONE-SIDED emission path -- full projection,
+        scale setup, per-column params, WPX emit -- to price rung 3b's walk+emit BEFORE building it
+        (R23/R32: the coarse-cull pre-pass was built before being priced and cost +24.7M). It emits
+        FULL-HEIGHT walls instead of upper/lower slices, so it over-emits pixels and does NOT include
+        rung 3b's per-column pair BUFFERING: read it as the projection/emit floor, not a bound."""
+        ld_ = lds[seg.linedef]
+        if ld_.back == -1:
+            return False
+        fs_ = secs[sds[ld_.front if seg.side == 0 else ld_.back].sector]
+        bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
+        return fs_.ceil_h > bs_.ceil_h or bs_.floor_h > fs_.floor_h
+
+    def _seg_as_solid(seg) -> bool:
+        """Does this seg go down the one-sided (wall-emitting) path?"""
+        return lds[seg.linedef].back == -1 or ("tsfull" in ablate and _seg_draws_wall(seg))
+
     def _seg_in_walk(seg) -> bool:
         """Does the emitted walk do per-seg work for this seg? (the prune predicate's unit)
 
@@ -354,7 +382,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         wrong (claims inside pruned subtrees are lost) -- never ship it."""
         if "pnearprune" in ablate:
             return lds[seg.linedef].back == -1
-        return lds[seg.linedef].back == -1 or (plane_near and _seg_marks(seg))
+        return (_seg_as_solid(seg) or (plane_near and _seg_marks(seg))
+                or lds[seg.linedef].back == -1)
 
     lines_key_ids: dict = {}
     lines_vz_classes: dict = {}
@@ -412,7 +441,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         _old_rl = _sys.getrecursionlimit()
         _sys.setrecursionlimit(20000)
         _cnt(cmap.root, _seg_in_walk, lines_walk_below)
-        _cnt(cmap.root, lambda s: lds[s.linedef].back == -1, lines_solid_below)
+        _cnt(cmap.root, _seg_as_solid, lines_solid_below)
         _sys.setrecursionlimit(_old_rl)
 
     def _lines_prune(child):
@@ -441,7 +470,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap, lrow)
     elif lines and wall_mode == "WPX":
         lines_wstrip_off, lines_wstrip_txt = _lines_wall_pix_bank(
-            rm, asset_wad, cmap, lds, sds, secs, colormap, verts, cfg.VIEW_H)
+            rm, asset_wad, cmap, lds, sds, secs, colormap, verts, cfg.VIEW_H,
+            solid=_ts_draws_wall_early if "tsfull" in ablate else None)
 
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
@@ -463,7 +493,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
                 seg = cmap.segs[si]
                 ld = lds[seg.linedef]
-                if ld.back != -1:
+                if ld.back != -1 and not _seg_as_solid(seg):
                     # M13-2S probe (ablate "tsprobe"): walk the DRAWABLE two-sided segs through the
                     # cheap cull only -- GEOM block + pass 1, no emit. This prices the one thing that
                     # decides whether any two-sided emit design can fit the ops ceiling: what it
@@ -1090,7 +1120,7 @@ def _lines_wall_strips(rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap,
 
 
 def _lines_wall_pix_bank(rm, asset_wad, cmap, lds, sds, secs, colormap, verts, view_h,
-                         cap: int = WPX_RUN_CAP):
+                         cap: int = WPX_RUN_CAP, solid=None):
     """M13-WPX: the fully-baked 1×1 wall bank + its per-seg block offsets.
 
     One BLOCK per distinct (wall texture, seg light level, sector wall span) — 575 E1M1 segs
@@ -1113,7 +1143,9 @@ def _lines_wall_pix_bank(rm, asset_wad, cmap, lds, sds, secs, colormap, verts, v
     out = [f"// M13-WPX: 1x1 wall run-lists, per (texture,light) block x wall height "
            f"(stride {STRIDE} dw, run cap {cap})", "wpxstrips:"]
     for si, seg in enumerate(cmap.segs):
-        if lds[seg.linedef].back != -1:
+        # `solid` (ablate "tsfull", measurement only) lets the WALL-DRAWABLE two-sided segs into the
+        # bank as well, so they can be priced through the one-sided emission path.
+        if lds[seg.linedef].back != -1 and not (solid is not None and solid(seg)):
             continue
         sd = sds[lds[seg.linedef].front if seg.side == 0 else lds[seg.linedef].back]
         sec = rm._seg_sector(lds, sds, secs, seg)

@@ -328,6 +328,49 @@ this floor's. If they want the near floor warmer, that is a LOOK decision on the
 texel each distance band samples), not this bug. `scratchpad/rung3a_before_after.png` is the
 side-by-side.
 
+## 11. Rung 3b is PRICED, and as designed it does NOT fit under 33M
+
+Rung 3a used the headroom §4 had budgeted for 3b's emit (worst-of-65 24.84M -> 31.0M, ceiling 33M), so
+3b was priced before building it (R23/R32). Two independent measurements:
+
+**(a) `scratchpad/rung3b_volume.py` — the emit volume, straight from the two oracles** (no fj build,
+no confounds). The lines tier's cost is dominated by emitted `[y2][colour]` pairs at ~3.7k ops each;
+counting each frame's per-column colour runs gives what each tier must emit:
+
+| viewpoint | rung 3a runs | rung 3b runs | extra EMIT alone |
+|---|---|---|---|
+| spawn | 3,655 | 4,705 | **+3.88M** |
+| spawn +90° | 4,947 | 5,224 | +1.02M |
+| (−309,636,0) | 2,541 | 2,605 | +0.24M |
+| (−309,−44,0) — the sweep's worst, 31.0M today | 2,662 | 3,652 | **+3.66M** |
+
+So the two heaviest frames break 33M on the extra PIXELS alone, before counting any of rung 3b's new
+machinery: the full pass-2 projection for the wall-drawable two-sided segs (scale setup + per-column
+params, which rung 3a never pays — it only attributes), the per-column buffered pair lists, and the
+sub-range plane walks.
+
+**(b) ablate `"tsfull"`** routes the 709 wall-drawable two-sided segs through the one-sided emission
+path — full projection, scale, per-column params, WPX emit: spawn **40,262,818**. ⚠ It is NOT a bound
+in either direction: it draws FULL-HEIGHT walls, so it over-emits pixels AND over-occludes (columns
+that real 3b leaves open close early, which makes its walk cheaper — hence the misleadingly LOW
+19.7M / 12.1M at the other two viewpoints). Read (a), not (b); (b) only agrees that the gap is several
+M, not marginal.
+
+### The choice this puts in front of the owner
+
+1. **Raise the ceiling.** 33M ≈ 6.7 fps on the native engine (~220M ops/s); 40M ≈ 5.5 fps.
+2. **Buy headroom first.** The per-vertex angle memo is still in reserve (§4: avoids 42% of 1398
+   vertex angles; its old +0.73M verdict was measured in a 471-atan era and never re-tested — the
+   rung-3a budget now pays up to 128 segs' worth of atans, so re-measure it HERE). Cheaper still:
+   `PNEAR_SEG_BUDGET` 128 → 64 trades far attribution for ops.
+3. **Halve rung 3b: LOWER walls only** (steps and ledge fronts — the most legible missing geometry;
+   105 of spawn's 252 runs). It still needs the buffered per-column pair lists, because a lower run
+   arrives before the far wall that must precede it in the record.
+4. **Attack the ~3.7k/pair unit cost of the emit protocol**, which would buy headroom for everything,
+   not just 3b.
+
+Recommended: (2) then (3), i.e. re-measure the memo, then land lowers before uppers.
+
 ### Still open
 
 - Rung 3b (§6) — the upper/lower wall runs. Unchanged by this rung except that the per-column plane

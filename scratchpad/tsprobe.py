@@ -1,4 +1,4 @@
-"""M16-2S: what does it cost the walk merely to VISIT the drawable two-sided segs?"""
+"""M13-2S: what does it cost the walk merely to VISIT the drawable two-sided segs?"""
 import sys, tempfile, time
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]

@@ -938,7 +938,7 @@ class ReferenceModel:
         return bytes(fb)
 
     def render_frame_2s(self, state: SimState, scene: Scene, *, ft1: bool = True) -> bytes:
-        """M16-2S — the TWO-SIDED renderer: DOOM's R_RenderSegLoop window model.
+        """M13-2S — the TWO-SIDED renderer: DOOM's R_RenderSegLoop window model.
 
         `render_wall_frame` draws only ONE-SIDED linedefs, which on E1M1 is 575 of 2057 segs: every
         step face, ledge front, door frame and window sill was missing (at spawn the absent wall area
@@ -1057,7 +1057,7 @@ class ReferenceModel:
 
     def _render_plane_regions_flat(self, fb, colormap, asset_wad, flatcache, viewz, regions,
                                    *, ft1: bool = False):
-        """M16-2S: rasterize an explicit LIST of plane regions instead of one ceiling + one floor
+        """M13-2S: rasterize an explicit LIST of plane regions instead of one ceiling + one floor
         region per column.
 
         Why this exists: the per-column model took each column's plane height/light from whichever

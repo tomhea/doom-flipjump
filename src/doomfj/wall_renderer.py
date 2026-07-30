@@ -395,7 +395,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 seg = cmap.segs[si]
                 ld = lds[seg.linedef]
                 if ld.back != -1:
-                    # M16-2S probe (ablate "tsprobe"): walk the DRAWABLE two-sided segs through the
+                    # M13-2S probe (ablate "tsprobe"): walk the DRAWABLE two-sided segs through the
                     # cheap cull only -- GEOM block + pass 1, no emit. This prices the one thing that
                     # decides whether any two-sided emit design can fit the ops ceiling: what it
                     # costs merely to VISIT 1284 segs instead of 432. A two-sided seg whose sectors

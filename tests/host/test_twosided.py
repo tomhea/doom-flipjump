@@ -1,4 +1,4 @@
-"""M16-2S host gates for `ReferenceModel.render_frame_2s` — the two-sided wall + plane-region model.
+"""M13-2S host gates for `ReferenceModel.render_frame_2s` — the two-sided wall + plane-region model.
 
 These encode the two defects the owner's playtest exposed, so neither can come back silently:
   1. two-sided linedefs were skipped entirely (72% of E1M1's segs), so every step face, ledge front

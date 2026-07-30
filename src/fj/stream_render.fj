@@ -403,7 +403,19 @@ ns stream {
     // pairs until one crosses ctake (clamped there); the floor SUFFIX skips pairs at or below
     // fstart and streams the rest (the device cursor is already at fstart after the wall pair).
     // @requires hex.init & stl.ptr_init
-    def emit_col_lines centery, w2s, wpx, wpxstride, x, cexcl, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, end {
+    def call_walk leaf, ret {
+        stl.fcall leaf, ret
+    }
+
+    // M13-EMIT rung 1 (ablate, measurement only) -- the per-pair OUTPUT, isolated so it can be
+    // switched off while the list walk still runs: the difference prices the two byte.emit
+    // dispatches against the two hex.read_byte_and_inc pointer reads that feed them.
+    def pair_out a, b {
+        byte.emit a
+        byte.emit b
+    }
+
+    def emit_col_lines centery, w2s, wpx, wpxstride, eabl, x, cexcl, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, end {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
@@ -415,11 +427,11 @@ ns stream {
         hex.if0 2, ctake, wall
         hex.mov 2, bound, ctake
         hex.mov w/4, ptr, cbufa
-        stl.fcall pwalk, pret
+        rep(1-eabl/2, k) .call_walk pwalk, pret     // eabl=2: no band walk at all
         hex.cmp 2, ctake, ccy, wall, wall, cdesc2
       cdesc2:
         hex.mov w/4, ptr, cbufd
-        stl.fcall pwalk, pret
+        rep(1-eabl/2, k) .call_walk pwalk, pret
         ;wall
       wall:                                      // -- wall run [ctake, fstart)
         hex.mov 2, wlen, fstart
@@ -432,13 +444,13 @@ ns stream {
         hex.cmp 2, fstart, ccy, fasc, fdesc, fdesc
       fasc:                                      // straddle: skip within asc, then all of desc
         hex.mov w/4, ptr, fbufa
-        stl.fcall swalk, sret
+        rep(1-eabl/2, k) .call_walk swalk, sret
         hex.mov w/4, ptr, fbufd
-        stl.fcall swalk, sret
+        rep(1-eabl/2, k) .call_walk swalk, sret
         ;fdone
       fdesc:                                     // normal: desc only
         hex.mov w/4, ptr, fbufd
-        stl.fcall swalk, sret
+        rep(1-eabl/2, k) .call_walk swalk, sret
       fdone:
         stl.output_char 0xFF                     // ends this column's pair list
         ;end
@@ -456,17 +468,14 @@ ns stream {
         hex.read_byte_and_inc colr, ptr
         hex.cmp 2, y2r, bound, pemit, plast, pclamp
       pemit:
-        byte.emit y2r
-        byte.emit colr
+        rep(1-eabl%2, k) .pair_out y2r, colr    // eabl=1: walk but emit nothing
         hex.inc 2, iP
         ;ploop
       plast:                                     // y2 == bound: emit and stop
-        byte.emit y2r
-        byte.emit colr
+        rep(1-eabl%2, k) .pair_out y2r, colr
         ;pdone
       pclamp:                                    // y2 > bound: emit the clamped pair and stop
-        byte.emit bound
-        byte.emit colr
+        rep(1-eabl%2, k) .pair_out bound, colr
       pdone:
         stl.fret pret
 
@@ -484,8 +493,7 @@ ns stream {
         hex.inc 2, iP
         ;sloop
       semit:
-        byte.emit y2r
-        byte.emit colr
+        rep(1-eabl%2, k) .pair_out y2r, colr
         hex.inc 2, iP
         ;sloop
       sdone:

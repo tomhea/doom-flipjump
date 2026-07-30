@@ -62,7 +62,8 @@ def _seg_xorby_use(idx, clear=True):
 
 
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub",
-                           "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull"})
+                           "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull",
+                           "emitnopair", "emitnowalk"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -186,6 +187,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # walk still emitted); "pnearwalk" prices the walk alone (claim sites dropped, per-column ON).
     # Both render wrong on purpose -- measurement only.
     pnear_flag = 1 if (plane_near and "pnearcol" not in ablate) else 0
+    # M13-EMIT rung 1 (measurement only): 1 = walk the baked band lists but emit no pairs (prices the
+    # two byte.emit dispatches), 2 = skip the band walks entirely (prices the whole per-pair path:
+    # two hex.read_byte_and_inc pointer reads + the loop + the dispatches). Renders wrong on purpose.
+    eabl_flag = 2 if "emitnowalk" in ablate else (1 if "emitnopair" in ablate else 0)
     w2s_flag = 1 if wall_mode == "W2S" else 0   # M13-W2S tier select for the lines leaf
     wpx_flag = 1 if wall_mode == "WPX" else 0   # M13-WPX (1x1 vertical) tier select
     if stream or raster or projm or lines:
@@ -892,8 +897,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             "proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy",
             "stl.fret seg_ret"]
            + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "wedgestub" in ablate else
-          ["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
-           "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"] if "xrstub" in ablate else
+          (["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
+            "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"]
+           # lines mode fcalls a pass-2 leaf too, so the stub ladder has to define one (it is never
+           # reached: part 1 always leaves `proceed` = 0 here).
+           + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "xrstub" in ablate else
           ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_raster {proj}"]
           if raster else
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
@@ -903,13 +911,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}"] if plane_near else []),
            "seg_pass2_leaf:",
            f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
-           f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}"]
+           f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
+           f"{eabl_flag}"]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
           if stream else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),
+        # the stub ablations replace the lines leaves wholesale, so the two-sided claim leaf the
+        # plane_near call sites jump to has to be stubbed alongside them (measurement only).
+        *(["seg_pass1_ts_leaf:", "stl.fret seg_ret"]
+          if (plane_near and (ablate & {"segstub", "xrstub", "wedgestub"})) else []),
         *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
         *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode

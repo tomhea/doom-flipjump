@@ -1407,7 +1407,7 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear \
+            pnear, eabl \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, \
               dfull, dchk2, dpl, dsame, demitted, dvalid, dct, dfs, dpid \
@@ -1483,7 +1483,7 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, w2s, wpx, wpxstride, x, cexcl, fstart, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, w2s, wpx, wpxstride, eabl, x, cexcl, fstart, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
         rep(pnear, k) .lines_save_plane pval8, dpid

@@ -371,6 +371,47 @@ M, not marginal.
 
 Recommended: (2) then (3), i.e. re-measure the memo, then land lowers before uppers.
 
+## 12. ⚠ CORRECTION — "one emitted pair = ~3.7k ops" (§4) is WRONG, and it changes the plan
+
+The owner picked "attack the ~3.7k/pair emit cost first". Measuring it first (ablate `emitnopair` =
+walk the baked lists but emit no pairs; `emitnowalk` = skip the band walks entirely) says that lever
+does not exist:
+
+| E1M1, WPX+FT1+plane_near | spawn | (−309,−44,0) |
+|---|---|---|
+| full emit (shipped) | 25,494,558 | 30,998,786 |
+| walk the lists, emit NO pairs | 25,396,585 | 30,896,145 |
+| no band walk at all | 24,302,004 | 29,736,835 |
+
+- the two `byte.emit` dispatches per pair cost **~27 ops** (97,973 over spawn's 3,655 pairs);
+- the WHOLE ceiling+floor band emit — pointer reads, loop, compares and dispatches — is
+  **1.19M of a 25.49M frame (4.7%)**, i.e. **~330 ops/pair, not 3,700**.
+
+Making pairs *free* would buy 1.19M. §4's 3.7k figure must have been measured over something larger
+(a whole per-column path), and two conclusions rested on it — both now retracted:
+
+1. **§11's rung-3b emit estimate is wrong.** +1050 runs at spawn is ~+0.35M, not +3.88M. Rung 3b's
+   emit is CHEAP; what makes `tsfull` cost +14.8M is the wall-drawable two-sided segs' PROJECTION and
+   per-column work (pass-2 setup + `column_params_m` per column), not the pixels.
+2. **The emit protocol is not the place to buy headroom.**
+
+### Where the frame's ops actually are (the ablation ladder, same build/tier)
+
+| stage | spawn | (−309,−44,0) | share of spawn |
+|---|---|---|---|
+| BSP walk skeleton + per-seg xorby SET/CLEAR (`segstub`) | 4,953,547 | 4,981,851 | 19% |
+| + per-seg leaf entry (`xrstub`) | 4,950,443 | 4,979,621 | — (free) |
+| + the wedge pre-cull (`wedgestub`) | 6,533,988 | 6,664,193 | +6% |
+| + projection, per-column params, occlusion, WPX wall emit, plane attribution (`emitnowalk`) | 24,302,004 | 29,736,835 | **+70%** |
+| + the ceiling/floor band emit (full) | 25,494,558 | 30,998,786 | +5% |
+
+**70% of the frame is per-seg projection + per-column work.** That is the only place headroom of the
+size rung 3b needs can come from. The obvious first candidate is still the per-vertex angle MEMO
+(§4: avoids 42% of 1398 vertex angles at ~19–23k per `point_to_angle`, and its old +0.73M loss verdict
+predates both this atan load and rung 3a's up-to-128-seg budget) — but per this section's own lesson,
+MEASURE the atan share of that 70% before building it (an ablate that stubs `point_to_angle` inside
+`wall_x_range_m` would isolate it).
+
 ### Still open
 
 - Rung 3b (§6) — the upper/lower wall runs. Unchanged by this rung except that the per-column plane

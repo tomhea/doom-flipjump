@@ -356,6 +356,23 @@ that real 3b leaves open close early, which makes its walk cheaper — hence the
 19.7M / 12.1M at the other two viewpoints). Read (a), not (b); (b) only agrees that the gap is several
 M, not marginal.
 
+### RE-PRICED after M13-ATANDISP (§14): rung 3b now fits — barely
+
+The `tsfull` proxy, re-run on the faster baseline:
+
+| viewpoint | shipped (rung 3a + ATANDISP) | `tsfull` | delta |
+|---|---|---|---|
+| spawn | 21,730,429 | **31,168,051** | +9.44M |
+| (−309,−44,0) | 26,551,706 | **32,614,637** | +6.06M |
+| (−309,636,0) | 24,734,560 | 16,957,981 | −7.78M ⚠ the over-occlusion artefact |
+
+40.26M → 31.17M at spawn: cutting the atan moved rung 3b from *clearly over* the ceiling to *inside*
+it. The same caveat as before applies — `tsfull` draws FULL-HEIGHT walls, so it over-emits pixels
+(real upper/lower slices are smaller) and over-occludes (columns real 3b leaves open close early,
+which is why (−309,636) comes out BELOW the shipped frame). It models neither the per-column buffered
+pair lists nor the sub-range band walks. Treat 31–33M as "plausible, not proven", and note the
+`PNEAR_SEG_BUDGET` dial below is worth ~2.9M at the heavy viewpoints if 3b needs the room.
+
 ### The choice this puts in front of the owner
 
 1. **Raise the ceiling.** 33M ≈ 6.7 fps on the native engine (~220M ops/s); 40M ≈ 5.5 fps.

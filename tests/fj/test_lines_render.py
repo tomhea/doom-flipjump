@@ -31,9 +31,10 @@ RENDER_FLAT_WORDS = 1 << 26
 
 
 def _assemble_lines(tmp_path, map_wad, mapname, cfg, asset_wad=None,
-                    wall_mode="W1", floor_mode="flat"):
+                    wall_mode="W1", floor_mode="flat", plane_near=False):
     main = emit_wall_renderer(map_wad, mapname, cfg, asset_wad=asset_wad, over_align=False,
-                              floor_mode=floor_mode, wall_mode=wall_mode, raster_mode="lines")
+                              floor_mode=floor_mode, wall_mode=wall_mode, raster_mode="lines",
+                              plane_near=plane_near)
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "lines.fj"
     p.write_text(main, encoding="utf-8")
@@ -171,6 +172,67 @@ def test_e1m1_lines_wpx_ft1_byte_exact_vs_oracle(tmp_path):
         if k == 0:
             print(f"[lines WPX+FT1] E1M1 spawn frame = {term.op_counter:,} ops")
             assert term.op_counter < 25_000_000, "WPX+FT1 broke the 25M ceiling"
+
+
+def test_square_lines_wpx_ft1_plane_near_byte_exact_vs_oracle(tmp_path):
+    """M13-2S rung 3a on the square room: the per-column PLANE ATTRIBUTION path (the claim byte, the
+    stored band-list addresses, the widened ditto key) must be byte-exact vs the `plane_near=True`
+    oracle, and leave no unpainted pixel. The room has no two-sided linedefs at all, so this gate
+    isolates the new emit-half machinery from the two-sided walk: every column takes the "I am the
+    nearest marking seg" branch, and the frame must come out exactly as before."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(ROOM)
+    aw = WadFile.from_path(ASSET)
+    scene = build_scene(mw, aw, "MAP01")
+    sp = spawn_state(mw, "MAP01")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    A45 = 0x20000000
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45), (24, 24, A45)]
+    out = _assemble_lines(tmp_path, mw, "MAP01", cfg, asset_wad=aw,
+                          wall_mode="WPX", floor_mode="FT1", plane_near=True)
+    for vx, vy, va in VIEWPOINTS:
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
+                                    floor_texturing=False, wall_mode="WPX", floor_mode_ft1=True,
+                                    plane_near=True)
+        screen, _term = _run_lines(out, vx, vy, va)
+        assert bytes(screen.pixel_indices) == bytes(want), \
+            f"lines WPX+FT1 plane_near @ ({vx},{vy},{va:#x}) != oracle"
+        assert 0 not in screen.pixel_indices, "an unpainted pixel: a clip/attribution range is wrong"
+
+
+def test_e1m1_lines_wpx_ft1_plane_near_byte_exact_vs_oracle(tmp_path):
+    """M13-2S rung 3a on E1M1 — the owner-visible fix: the near floor gets ONE surface again, because
+    the nearest MARKING seg (two-sided included) attributes the column instead of whichever distant
+    one-sided wall claimed it. Byte-exact vs the `plane_near=True` oracle, inside the owner's 33M
+    ops/frame ceiling.
+
+    The last two viewpoints are the heavy ones, and they are here on purpose: (-309,636) visits 310
+    marking segs, so it EXERCISES `config.PNEAR_SEG_BUDGET` (128) -- i.e. it fails if the oracle's
+    mirror of the budget or of the two stop conditions drifts from the fj's -- and (-309,-44) is the
+    worst of the 65-viewpoint sweep (31.0M). Without the budget an open-view frame like those measured
+    69.6M; without the `tsstop` early-out, 35.1M (docs/handoff-m13-2s.md §4, §10)."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(E1M1_WAD)
+    scene = build_scene(mw, mw, "E1M1")
+    sp = spawn_state(mw, "E1M1")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF),
+                  (-309, 636, 0), (-309, -44, 0)]
+    out = _assemble_lines(tmp_path, mw, "E1M1", cfg, wall_mode="WPX", floor_mode="FT1",
+                          plane_near=True)
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
+                                    floor_texturing=False, wall_mode="WPX", floor_mode_ft1=True,
+                                    plane_near=True)
+        screen, term = _run_lines(out, vx, vy, va)
+        assert bytes(screen.pixel_indices) == bytes(want), \
+            f"lines WPX+FT1 plane_near @ ({vx},{vy},{va:#x}) != E1M1 oracle"
+        if k == 0:
+            print(f"[lines WPX+FT1 plane_near] E1M1 spawn frame = {term.op_counter:,} ops")
+        assert term.op_counter < 33_000_000, \
+            f"M13-2S rung 3a broke the owner's 33M ceiling @ ({vx},{vy},{va:#x}): {term.op_counter:,}"
 
 
 def test_square_lines_w2s_ft1_byte_exact_vs_oracle(tmp_path):

@@ -28,6 +28,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.coarse_cull import generate_coarse_bounds_fj
+from doomfj.config import PNEAR_SEG_BUDGET
 
 
 NLJ = chr(10)   # newline constant for generated .fj text
@@ -61,7 +62,7 @@ def _seg_xorby_use(idx, clear=True):
 
 
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub",
-                           "tsprobe"})
+                           "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -80,7 +81,8 @@ BAND_STRIDE = MAX_BANDS * 3        # packed bytes per column per region (run-len
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
-                       wall_mode: str = "textured", raster_mode: str = "framebuffer") -> str:
+                       wall_mode: str = "textured", raster_mode: str = "framebuffer",
+                       plane_near: bool = False) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -119,6 +121,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     the oracle uses, R6) before it enters the combined table: W1 = 1×1 (the mode texel), W2 = 1×16 (a
     vertical band strip). `column_render_params`/pass-2/`leaf_body_w` are UNCHANGED — they just sample a
     much smaller table (793,344 texels → tens-to-low-hundreds).
+
+    `plane_near` (M13-2S rung 3a, lines mode only): attribute each column's floor/ceiling surface to
+    the nearest MARKING seg -- two-sided included -- instead of to the one-sided wall that claims the
+    column. That claiming wall is generally in another room, which is the owner's "the close floor in
+    the middle is gray, yet the sides are yellow" bug (docs/handoff-m13-2s.md §2). Marking = DOOM's
+    R_StoreWallRange markfloor/markceiling test: the two sides differ in the band-bank key
+    (height, light, flat). It CHANGES rendered output, so it is opt-in: without it every tier renders
+    byte-identically to before (the `pnear` compile-time flag emits none of the added ops and the bank
+    keeps the old shared-key layout; the only residue is +4.7k ops/frame of address-layout tax from
+    the added per-column arrays, measured on E1M1 spawn: 23,204,595 -> 23,209,289).
 
     `raster_mode` (M13pS2): "framebuffer" (default, the UNCHANGED pass-1/pass-2/plane-pass pipeline
     above) or "stream" — THE COLUMN-STREAM COMPOSITE. Pass-1 builds each claimed column's ceiling/
@@ -169,6 +181,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # colormap -- and emits raw fillCol [x][y1][y2][colour] records (the 0x0A spans protocol)
     # inline at column-claim time. No col_struct, no present-tail pass.
     lines = raster_mode == "lines"
+    assert not plane_near or lines, "plane_near is a lines-mode tier (M13-2S rung 3a)"
+    # ablate "pnearcol" prices the emit half alone (per-column attribution OFF, the two-sided claim
+    # walk still emitted); "pnearwalk" prices the walk alone (claim sites dropped, per-column ON).
+    # Both render wrong on purpose -- measurement only.
+    pnear_flag = 1 if (plane_near and "pnearcol" not in ablate) else 0
     w2s_flag = 1 if wall_mode == "W2S" else 0   # M13-W2S tier select for the lines leaf
     wpx_flag = 1 if wall_mode == "WPX" else 0   # M13-WPX (1x1 vertical) tier select
     if stream or raster or projm or lines:
@@ -314,48 +331,100 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # SHORTER than the runtime-built ones (identical pixels). Layout: vpbank +
     # class_idx*(nkeys*130*dw) + key_idx*130*dw; each list = [nA][(y2,colour)xnA] at +0 and the
     # desc half at +65*dw, mirroring the old half-buffer layout.
+    # M13-2S rung 3a: does this seg MARK its front sector's planes? One-sided always does; a
+    # two-sided one only when its two sides differ in a band-bank key (height, light, flat) --
+    # DOOM's R_StoreWallRange markfloor/markceiling test. Equal on both sides => attributing the
+    # plane to either sector renders identically, so skipping it is free of error BY CONSTRUCTION.
+    def _seg_marks(seg) -> bool:
+        ld_ = lds[seg.linedef]
+        if ld_.back == -1:
+            return True
+        fs_ = secs[sds[ld_.front if seg.side == 0 else ld_.back].sector]
+        bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
+        return ((fs_.ceil_h, fs_.light & 0xFF, fs_.ceil_tex.upper())
+                != (bs_.ceil_h, bs_.light & 0xFF, bs_.ceil_tex.upper())
+                or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
+                != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
+
+    def _seg_in_walk(seg) -> bool:
+        """Does the emitted walk do per-seg work for this seg? (the prune predicate's unit)
+
+        ablate "pnearprune" (measurement only): keep the PRE-rung-3a one-sided prune rule while
+        still emitting the two-sided claim sites, to price what the wider prune costs. Renders
+        wrong (claims inside pruned subtrees are lost) -- never ship it."""
+        if "pnearprune" in ablate:
+            return lds[seg.linedef].back == -1
+        return lds[seg.linedef].back == -1 or (plane_near and _seg_marks(seg))
+
     lines_key_ids: dict = {}
     lines_vz_classes: dict = {}
+    lines_pid: dict = {}                       # M13-2S rung 3a: (ceil key, floor key) -> pid (1-based)
+    lines_bank_keys: list = []                 # the bank's key order (a LIST: pid pairs repeat keys)
+
+    def _plane_keys(sec):
+        return ((sec.ceil_h, sec.light & 0xFF, _flatval(sec.ceil_tex), sec.ceil_tex.upper()),
+                (sec.floor_h, sec.light & 0xFF, _flatval(sec.floor_tex), sec.floor_tex.upper()))
+
     if lines:
         for _ss in cmap.subsectors:
             _sec = rm._seg_sector(lds, sds, secs, cmap.segs[_ss.firstseg])
             lines_vz_classes.setdefault(rm.view_z(_sec.floor_h), len(lines_vz_classes))
         for _seg in cmap.segs:
-            if lds[_seg.linedef].back != -1:
+            # M13-2S rung 3a: a marking two-sided seg attributes ITS front sector's planes, so that
+            # sector's two band lists must be in the bank too (E1M1: 159 -> 227 distinct keys).
+            if not _seg_in_walk(_seg):
                 continue
-            _sec = rm._seg_sector(lds, sds, secs, _seg)
-            lines_key_ids.setdefault(
-                (_sec.ceil_h, _sec.light & 0xFF, _flatval(_sec.ceil_tex), _sec.ceil_tex.upper()),
-                len(lines_key_ids))
-            lines_key_ids.setdefault(
-                (_sec.floor_h, _sec.light & 0xFF, _flatval(_sec.floor_tex), _sec.floor_tex.upper()),
-                len(lines_key_ids))
+            _ck, _fk = _plane_keys(rm._seg_sector(lds, sds, secs, _seg))
+            lines_key_ids.setdefault(_ck, len(lines_key_ids))
+            lines_key_ids.setdefault(_fk, len(lines_key_ids))
+            if (_ck, _fk) not in lines_pid:
+                lines_pid[(_ck, _fk)] = len(lines_pid) + 1     # 1-based: 0 == "not attributed yet"
+        # M13-2S rung 3a — the bank LAYOUT. With per-column attribution the emit half has to recover
+        # a column's two band lists from ONE byte, so `plane_near` lays the bank out per SECTOR PLANE
+        # PAIR (pid): pid p's ceiling list is slot 2(p-1), its floor list 2(p-1)+1, hence
+        #   ceil = vzbank + (p-1)*4*half_slots*dw   and   floor = ceil + 2*half_slots*dw
+        # -- one mul_const plus adds. The alternative (per-column address cells read back with
+        # hex.ptr_index + hex.read_hex 8) measured ~780 dispatches per column, +5M/frame. Keys stop
+        # being shared between pids, so the bank grows (E1M1 1.42M -> 1.91M words); without
+        # plane_near the layout is EXACTLY the old shared-key one.
+        lines_bank_keys = ([k for pair in lines_pid for k in pair] if plane_near
+                           else list(lines_key_ids))
+    n_bank_keys = max(1, len(lines_bank_keys))
 
     # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be
     # skipped by the main walk entirely (byte-exact -- it would emit nothing and touch nothing).
-    lines_onesided_below: dict = {}
+    # M13-2S rung 3a: two counts now -- `_walk_below` (segs the walk does ANY work for, the compile-
+    # time prune) and `_solid_below` (one-sided segs only: zero => the subtree can only ATTRIBUTE
+    # planes, so it is dead once `tsstop` and gets the runtime tsstop gate instead).
+    lines_walk_below: dict = {}
+    lines_solid_below: dict = {}
     if lines:
-        def _cnt(child):
+        def _cnt(child, pred, memo):
             if child & NF_SUBSECTOR:
                 _ss = cmap.subsectors[child & (NF_SUBSECTOR - 1)]
                 return sum(1 for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs)
-                           if lds[cmap.segs[_si].linedef].back == -1)
+                           if pred(cmap.segs[_si]))
             _n = cmap.nodes[child]
-            tot = _cnt(_n.left) + _cnt(_n.right)
-            lines_onesided_below[child] = tot
+            tot = _cnt(_n.left, pred, memo) + _cnt(_n.right, pred, memo)
+            memo[child] = tot
             return tot
         import sys as _sys
         _old_rl = _sys.getrecursionlimit()
         _sys.setrecursionlimit(20000)
-        _cnt(cmap.root)
+        _cnt(cmap.root, _seg_in_walk, lines_walk_below)
+        _cnt(cmap.root, lambda s: lds[s.linedef].back == -1, lines_solid_below)
         _sys.setrecursionlimit(_old_rl)
 
     def _lines_prune(child):
         if child & NF_SUBSECTOR:
             _ss = cmap.subsectors[child & (NF_SUBSECTOR - 1)]
-            return not any(lds[cmap.segs[_si].linedef].back == -1
+            return not any(_seg_in_walk(cmap.segs[_si])
                            for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs))
-        return lines_onesided_below.get(child, 1) == 0
+        return lines_walk_below.get(child, 1) == 0
+
+    def _lines_plane_gate(node_i):
+        """Node blocks whose subtree holds no one-sided seg: skippable at runtime once tsstop."""
+        return lines_solid_below.get(node_i, 1) == 0
 
     def _lines_descend_leaf(s):
         # the descend pre-walk's landing action: bake this subsector's viewz + band-bank pointer
@@ -363,7 +432,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         _vz = rm.view_z(_sec.floor_h)
         return [f"    hex.set 8, viewz, {_vz & 0xFFFFFFFF}",
                 f"    hex.set w/4, vzbank, vpbank + "
-                f"{lines_vz_classes[_vz] * len(lines_key_ids) * 130}*dw"]
+                f"{lines_vz_classes[_vz] * n_bank_keys * 130}*dw"]
 
     # M13-W2S: the per-seg wall colour strips (only when the lines mode asks for the W2S tier)
     lines_wstrip_off, lines_wstrip_txt = {}, ""
@@ -401,11 +470,55 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                     # costs merely to VISIT 1284 segs instead of 432. A two-sided seg whose sectors
                     # share BOTH ceiling and floor can never draw (773 of E1M1's 1482) and is
                     # excluded, exactly as the real implementation will exclude it via a baked flag.
-                    if "tsprobe" not in ablate:
+                    # M13-2S rung 3a (ablate "tsmark"): the same probe, but with the cull the PLANE
+                    # attribution actually needs. "Can never draw a WALL" (tsprobe) is too strong for
+                    # planes: it drops the boundary between two sectors of equal heights but
+                    # different flats/lights, which is precisely where the near floor changes
+                    # surface -- measured at spawn, tsprobe's cull left 3 flats claiming the near
+                    # floor, this one leaves exactly 1. It is DOOM's R_AddLine/R_StoreWallRange
+                    # markfloor/markceiling test: skip only when BOTH band-bank keys
+                    # (height, light, flat) are equal on the two sides, in which case attributing
+                    # the plane to the back sector renders identically anyway.
+                    if plane_near:
+                        # M13-2S rung 3a — THE REAL THING (not a probe): a marking two-sided seg
+                        # attributes the near floor/ceiling surface of the columns it covers. Guarded
+                        # by `tsstop` BEFORE the xorby block, so once attribution can no longer
+                        # change anything (every column attributed, or the per-frame seg BUDGET spent)
+                        # each remaining two-sided seg costs one 1-nibble test -- 1386 of E1M1 spawn's
+                        # 1445 land there, and visiting them all costs +11.9M, over the ceiling.
+                        # Writes only the attribution state -- never drawn/n_drawn/full.
+                        if not _seg_marks(seg) or "pnearwalk" in ablate:
+                            continue                     # the compile-time cull (see _seg_marks)
+                        _v1x, _v1y = verts[seg.v1]
+                        _v2x, _v2y = verts[seg.v2]
+                        _sa, _sb, _sc = seg_affine_coeffs(seg, verts)
+                        xorby_blocks[si] = _seg_xorby_block(f"{si}T", [
+                            ("seg_v1x", 8, (_v1x << 16) & 0xFFFFFFFF),
+                            ("seg_v1y", 8, (_v1y << 16) & 0xFFFFFFFF),
+                            ("seg_v2x", 8, (_v2x << 16) & 0xFFFFFFFF),
+                            ("seg_v2y", 8, (_v2y << 16) & 0xFFFFFFFF),
+                            ("seg_a", 8, _sa), ("seg_b", 8, _sb), ("seg_c", 8, _sc),
+                            ("seg_pid", 2,
+                             lines_pid[_plane_keys(rm._seg_sector(lds, sds, secs, seg))])])
+                        out += [f"    hex.if0 1, tsstop, e2go{cid}_{si}",
+                                f"    ;e2sk{cid}_{si}",
+                                f"  e2go{cid}_{si}:",
+                                f"    stl.fcall seg{si}T_xorby, xb_ret",
+                                "    stl.fcall seg_pass1_ts_leaf, seg_ret",
+                                f"    stl.fcall seg{si}T_xorby, xb_ret",
+                                f"  e2sk{cid}_{si}:"]
+                        continue
+                    if not (ablate & {"tsprobe", "tsmark"}):
                         continue
                     _fs = secs[sds[ld.front if seg.side == 0 else ld.back].sector]
                     _bs = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
-                    if not (_fs.ceil_h > _bs.ceil_h or _bs.floor_h > _fs.floor_h):
+                    if "tsmark" in ablate:
+                        if ((_fs.ceil_h, _fs.light & 0xFF, _fs.ceil_tex.upper())
+                                == (_bs.ceil_h, _bs.light & 0xFF, _bs.ceil_tex.upper())
+                                and (_fs.floor_h, _fs.light & 0xFF, _fs.floor_tex.upper())
+                                == (_bs.floor_h, _bs.light & 0xFF, _bs.floor_tex.upper())):
+                            continue
+                    elif not (_fs.ceil_h > _bs.ceil_h or _bs.floor_h > _fs.floor_h):
                         continue
                     _v1x, _v1y = verts[seg.v1]
                     _v2x, _v2y = verts[seg.v2]
@@ -441,8 +554,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                            ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
                            ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
                            ("seg_lit", 2, colormap[lrow(ssec.light)][combined[tb]]),
-                           ("seg_cvpidx", "w/4", f"{lines_key_ids[ckey] * 130}*dw"),
-                           ("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw")]
+                           # M13-2S rung 3a: the emit half derives both list addresses from the
+                           # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
+                           # (and the same byte is what this seg writes when it claims a column).
+                           *([("seg_pid", 2, lines_pid[(ckey, fkey)])] if plane_near else
+                             [("seg_cvpidx", "w/4", f"{lines_key_ids[ckey] * 130}*dw"),
+                              ("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw")])]
                 xorby_blocks[si] = (_seg_xorby_block(f"{si}G", gfields)
                                     + _seg_xorby_block(f"{si}R", rfields))
                 # e1sk label keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
@@ -472,7 +589,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             *(["    stream.emit_bytes4 viewz"] if projm else []),
             # M13-bakedbands: aim the frame's band-list bank at this subsector's viewz class
             *([f"    hex.set w/4, vzbank, vpbank + "
-               f"{lines_vz_classes[viewz_val] * len(lines_key_ids) * 130}*dw"] if lines else []),
+               f"{lines_vz_classes[viewz_val] * n_bank_keys * 130}*dw"] if lines else []),
             "    hex.set 1, vz_set, 1",
             f"  e1psegs{cid}:",
         ]
@@ -550,7 +667,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        full_abort_label="full" if (stream or raster or lines) else None,   # M13pG1
                        # inline_side=True measured +0.42M on E1M1 (code bloat beats the
                        # fcall savings -- the layout tax again); kept available, OFF.
-                       prune=_lines_prune if lines else None, inline_side=False)
+                       prune=_lines_prune if lines else None, inline_side=False,
+                       plane_gate=_lines_plane_gate if (lines and plane_near) else None,
+                       plane_gate_label="tsstop")
     if lines:
         bsp += _bsp_descend_code(_pfx(mapname), cmap, _lines_descend_leaf, done_label="dsc_done")
     xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (once)
@@ -695,7 +814,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + [cm, "__hot_end:"])
     elif lines:
         hotdata = ([";__hot_end"]
-                  + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_key_ids,
+                  + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, "__hot_end:"])
@@ -750,9 +869,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
           if projm else
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_lines",
+           *(["seg_pass1_ts_leaf:",
+              f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}"] if plane_near else []),
            "seg_pass2_leaf:",
            f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
-           f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}"]
+           f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}"]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -809,7 +930,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([] if (raster or lines) else [f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0"]),
         # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
         "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
-        *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_key_ids,
+        # M13-2S rung 3a: the per-column PLANE ATTRIBUTION state -- ONE byte per column holding the
+        # claiming seg's plane-pair id (0 = not attributed yet), a stride-1 packed-byte array walked
+        # in lockstep with `drawn`. `tsstop` = attribution can no longer change (every column done,
+        # or the seg budget spent) -- the early-out that makes
+        # the extra two-sided walk affordable.
+        *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+           "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
+           "n_claimed: hex.vec 2", "n_tsv: hex.vec 2", "tsstop: hex.vec 1",
+           "cpid: hex.vec 2",
+           # the UNATTRIBUTED-COLUMN WINDOW: every column < pmin or > pmax is attributed already
+           "pmin: hex.vec 2, 0", f"pmax: hex.vec 2, {cfg.VIEW_W - 1}"] if lines else []),
+        *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                             floor_mode == "FT1")] if lines else []),
         *([lines_wstrip_txt] if lines_wstrip_txt else []),
         *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
@@ -1019,6 +1151,7 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
         "seg_wstrip: hex.vec w/4", "wstripbase: hex.vec w/4",   # M13-W2S strip bank
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
+        "seg_pid: hex.vec 2",                          # M13-2S rung 3a: baked plane-pair id (1-based)
         "vzbank: hex.vec w/4",                         # set per frame by the player-subsector block
         # M13-splitxb: part-1/part-2 shared state + the rest-block gate
         "proceed: hex.vec 1", "dbase: hex.vec w/4", "dptr: hex.vec w/4", "dval8: hex.vec 2",

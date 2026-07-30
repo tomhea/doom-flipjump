@@ -26,7 +26,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass, replace
 
-from doomfj.config import Config
+from doomfj.config import Config, PNEAR_SEG_BUDGET
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
 from doomfj.mapcompiler import (  # shared geometry (R6)
     NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
@@ -788,7 +788,8 @@ class ReferenceModel:
         return out
 
     def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True,
-                          wall_mode: str = "textured", floor_mode_ft1: bool = False) -> bytes:
+                          wall_mode: str = "textured", floor_mode_ft1: bool = False,
+                          plane_near: bool = False, planes_out: list | None = None) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -810,6 +811,18 @@ class ReferenceModel:
         `_plane_pixel`). `wall_mode` (M13p4a) picks the wall TEXTURE tier: "textured" (default, the real
         texture) or "W1"/"W2" (a tiny synthetic canvas — see `_tiny_wall_canvas`); the rest of the wall
         raster (texture-v DDA, heightmask, screen span) is untouched, just sampling a smaller texture.
+
+        `plane_near` (M13-2S rung 3a, OPT-IN because it changes pixels): the plane record above comes
+        from whichever wall CLAIMS the column, and since two-sided linedefs draw no wall, the claimer
+        is usually a wall in another room -- measured at E1M1 spawn, the flat the player is standing
+        on (AQF054) appeared in 27 of 160 columns; the rest took other rooms' flat, height AND light
+        ("the close floor in the middle is gray, yet the sides are yellow"). With `plane_near` the
+        nearest MARKING seg (two-sided included) sets the record instead, marking being DOOM's
+        R_StoreWallRange markfloor/markceiling test: the two sides differ in (height, light, flat).
+        The region EXTENTS still come from the one-sided wall, so each column keeps ONE ceiling and
+        one floor region and there are no upper/lower wall runs (that is rung 3b). `planes_out`, if
+        given, receives the per-column plane records
+        (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff) for the gates to inspect.
         Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces this
         bit-exactly (D12)."""
         cfg = self.cfg
@@ -839,11 +852,48 @@ class ReferenceModel:
         col_cf: list = [None] * W; col_ff: list = [None] * W           # per-col ceil/floor flat name
 
         drawn = bytearray(cfg.VIEW_W)                        # per-column solid-seg clip (1 = already drawn)
+        pclaim = bytearray(cfg.VIEW_W)                        # M13-2S rung 3a: plane record claimed?
+        n_claimed = 0                                         # ... and its two STOP conditions, both of
+        n_ts = 0                                              # which the fj mirrors (see below)
         for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
             seg = scene.cmap.segs[seg_i]
             ld = lds[seg.linedef]
             if ld.back != -1:
-                continue                                     # two-sided (opening/window): not a solid wall
+                if not plane_near:
+                    continue                                 # two-sided (opening/window): not a solid wall
+                # M13-2S rung 3a — a two-sided seg paints no wall here, but it still BOUNDS the near
+                # plane surface, and that is what the owner's "the close floor in the middle is gray,
+                # yet the sides are yellow" bug is: the plane record used to come from whichever
+                # (necessarily one-sided, hence distant) wall claimed the column, so a single
+                # continuous floor was painted with several other rooms' flat/height/light.
+                # MARKING test = DOOM's R_StoreWallRange markfloor/markceiling: the two sides differ
+                # in the band-bank key (height, light, flat). When they are equal the seg is skipped
+                # (a baked compile-time flag in fj) and that is free of error BY CONSTRUCTION --
+                # attributing the plane to the back sector then renders identically.
+                fsec = self._seg_sector(lds, sds, secs, seg)
+                bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
+                if ((fsec.ceil_h, fsec.light, fsec.ceil_tex)
+                        == (bsec.ceil_h, bsec.light, bsec.ceil_tex)
+                        and (fsec.floor_h, fsec.light, fsec.floor_tex)
+                        == (bsec.floor_h, bsec.light, bsec.floor_tex)):
+                    continue
+                # the two STOP conditions the fj shares (one `tsstop` flag there): every column
+                # attributed, or the per-frame seg BUDGET spent. The budget is what bounds the cost
+                # when part of the view is open sky/void so the first condition never fires --
+                # see config.PNEAR_SEG_BUDGET.
+                if n_claimed == cfg.VIEW_W or n_ts >= PNEAR_SEG_BUDGET:
+                    continue
+                n_ts += 1
+                rng2 = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
+                if rng2 is None:
+                    continue
+                for x in range(rng2[0], rng2[1]):
+                    if not pclaim[x]:
+                        col_ch[x], col_fh[x], col_lt[x] = fsec.ceil_h, fsec.floor_h, fsec.light
+                        col_cf[x], col_ff[x] = fsec.ceil_tex, fsec.floor_tex
+                        pclaim[x] = 1
+                        n_claimed += 1
+                continue
             rng = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
             if rng is None:
                 continue
@@ -921,12 +971,19 @@ class ReferenceModel:
                     # record the M13 visplane regions for this column (ceiling above, floor below the wall)
                     ceil_hi[x] = min(top, cfg.VIEW_H) - 1
                     floor_lo[x] = max(bottom + 1, 0)
-                    col_ch[x], col_fh[x], col_lt[x] = sec.ceil_h, sec.floor_h, sec.light
-                    col_cf[x], col_ff[x] = sec.ceil_tex, sec.floor_tex
+                    # M13-2S rung 3a: the region EXTENTS (ceil_hi/floor_lo) still come from this
+                    # one-sided wall, only the surface ATTRIBUTION moves to the nearest marking seg.
+                    if not pclaim[x]:
+                        col_ch[x], col_fh[x], col_lt[x] = sec.ceil_h, sec.floor_h, sec.light
+                        col_cf[x], col_ff[x] = sec.ceil_tex, sec.floor_tex
+                        pclaim[x] = 1
+                        n_claimed += 1
                     drawn[x] = 1
                 scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
 
         planes = (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff)
+        if planes_out is not None:
+            planes_out.append(planes)                        # the per-column records, for the gates
         if floor_mode_ft1:
             self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz, *planes,
                                      ft1=True)

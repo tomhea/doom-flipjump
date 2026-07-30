@@ -50,6 +50,10 @@ def main():
     ap.add_argument("--asset", default=None)
     ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
+    ap.add_argument("--no-plane-near", action="store_true",
+                    help="turn OFF M13-2S rung 3a (attribute each column's floor/ceiling to the"
+                         " nearest MARKING seg instead of to the wall that claims the column) --"
+                         " i.e. go back to the pre-rung-3a look, for comparison")
     ap.add_argument("--frames", type=int, default=0, metavar="N",
                     help="render N frames HEADLESSLY (no window) and report timings, then exit"
                          " -- use this to check the fj side independently of pygame")
@@ -60,11 +64,12 @@ def main():
     aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
 
     print(f"assembling the fj renderer ({args.map}, lines mode, "
-          f"{args.wall_mode}+{args.floor_mode}) ...")
+          f"{args.wall_mode}+{args.floor_mode}"
+          f"{'' if args.no_plane_near else '+plane_near'}) ...")
     t0 = time.perf_counter()
     main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
                                   floor_mode=args.floor_mode, wall_mode=args.wall_mode,
-                                  raster_mode="lines")
+                                  raster_mode="lines", plane_near=not args.no_plane_near)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")

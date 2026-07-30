@@ -18,7 +18,7 @@ mw=WadFile.from_path(str(ROOT/"tests/fixtures/freedoom_e1m1.wad"))
 sp=spawn_state(mw,"E1M1"); sx,sy=_signed(sp.x,32)>>16,_signed(sp.y,32)>>16
 cfg=Config()
 VPS=[(sx,sy,sp.angle),(-309,636,0),(-480,256,0)]
-for ab in (frozenset(), frozenset({"tsprobe"})):
+for ab in (frozenset(), frozenset({"tsprobe"}), frozenset({"tsmark"})):
     t0=time.time()
     main=emit_wall_renderer(mw,"E1M1",cfg,asset_wad=mw,over_align=False,floor_mode="FT1",
                             wall_mode="WPX",raster_mode="lines",ablate=ab)
@@ -31,5 +31,7 @@ for ab in (frozenset(), frozenset({"tsprobe"})):
     for vx,vy,va in VPS:
         s=StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
         ops.append(r.run(s))
-    tag="with two-sided segs walked+culled" if ab else "baseline (one-sided only)      "
+    tag = ("tsmark  (plane-mark cull, 2020 segs) " if "tsmark" in ab else
+           "tsprobe (wall cull, 1284 segs)      " if ab else
+           "baseline (one-sided only, 575 segs) ")
     print(f"{tag}: " + "  ".join(f"{o:,}" for o in ops) + f"   (build {time.time()-t0:.0f}s)", flush=True)

@@ -14,6 +14,18 @@ from pathlib import Path
 # Default flat-limit (span-words) — flipjump's 2**23 (64 MB at w=32), §1.2. The R-3 budget ceiling.
 FLAT_MAX_WORDS = 1 << 23
 
+# M13-2S rung 3a — how many MARKING TWO-SIDED segs may attribute floor/ceiling surfaces in one frame
+# (see ReferenceModel.render_wall_frame's `plane_near` and wall_renderer's ts leaf). A hard budget, in
+# the spirit of vanilla DOOM's MAXVISPLANES/MAXDRAWSEGS: without one the cost is unbounded, because
+# the natural stopping condition ("every column attributed") never fires when part of the view is open
+# sky or void -- measured on E1M1, 13 of the sweep's 65 viewpoints never attribute all 160 columns and
+# one of them cost 69.6M ops/frame, more than double the owner's 33M ceiling. Segs are visited
+# nearest-first, so the budget only ever costs FAR attribution: those columns fall back to the
+# claiming wall's sector, which is the pre-rung-3a behaviour. 128 was chosen by measurement --
+# scratchpad/rung3a_budget.py: it bounds the worst frame while every viewpoint that closes the view
+# (52 of the 65) needs far fewer. Shared by the oracle and the emitter so they cannot drift (R6).
+PNEAR_SEG_BUDGET = 128
+
 
 @dataclass(frozen=True)
 class Config:

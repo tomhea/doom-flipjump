@@ -233,3 +233,104 @@ inventing an effect"), `fj-cost-model.md` (per-primitive costs + the ROW RULE).
 - Full suite green.
 - The near floor is one continuous colour family across the frame, still darkening with distance.
 - Then: **M14 input + simulation.**
+
+---
+
+## 10. Rung 3a — DONE (this session): the near floor is one surface again
+
+**Shipped in the lines tier behind `plane_near=True`** (`emit_wall_renderer(..., plane_near=True)`,
+`ReferenceModel.render_wall_frame(..., plane_near=True)`); the walker turns it ON by default
+(`--no-plane-near` goes back to the old look). Everything without the flag is untouched, so no
+stored golden re-blesses.
+
+### The cull in §3/§5 was WRONG for planes — and that is why the floor was still wrong
+
+"A two-sided seg whose two sectors share both ceiling and floor can never draw anything" is right for
+WALLS but too strong for PLANES: it drops the boundary between two sectors of EQUAL heights but
+different flats or lights, which at E1M1 spawn is exactly where the near floor changes surface. Under
+that cull the near floor still came out as 3 flats. The correct test is DOOM's
+`R_StoreWallRange` markfloor/markceiling: the two sides differ in the band-bank key
+`(height, light, flat)`. Then attributing a skipped seg's plane to either side is identical BY
+CONSTRUCTION, and at spawn all 160 columns get the player's own surfaces:
+
+| | floor claims at E1M1 spawn |
+|---|---|
+| shipped (wall claims the column) | 7 surfaces: AQF018/AQF024/AQF054/FLOOR5_2, heights 0/16/−128, lights 150/160/192 |
+| wall-cull two-sided (§3's cull) | 6 surfaces |
+| **marking cull (this rung)** | **1: (0, 192, AQF054) in all 160 columns** — and (128, 192, SLIME14) for the ceiling |
+
+### Cost — measured, and the two things that make it fit
+
+`tsmark` (a new ablate mode) prices the naive form: walk every marking seg through the cull front
+end = **35.09M / 37.22M / 37.14M** at the three §4 viewpoints — 2–4M OVER the ceiling. Two levers
+bring it back:
+
+1. **`pfull`** — once all 160 columns are attributed, no later seg can change anything. At spawn 59
+   marking two-sided segs are reached before that point and **1386 after it**, and the caller tests
+   `pfull` BEFORE the seg's xorby block, so those cost one 1-nibble test each. Because including
+   two-sided segs in the walk also kills the M13-prune compile-time prune (145 prunable subtrees → 2),
+   subtrees with NO one-sided segs get the same gate at the NODE level (`plane_gate` in
+   `_bsp_as_code`): the compile-time prune became a runtime one.
+2. **the unattributed-column window `[pmin, pmax]`** — every column outside it is already attributed,
+   so the claim scan clips to it: at (−309,636) 769 column reads → 201, and 37 of 60 projected segs
+   exit outright. The bounds are updated with two compares and NO reads (after a scan of [xa,xb)
+   that whole range is attributed, so if it started at `pmin` the bound jumps to `xb`).
+
+3. **`config.PNEAR_SEG_BUDGET` = 128 marking segs/frame** — and this one is not an optimization, it
+   is what makes the cost BOUNDED. "Every column attributed" never happens when part of the view is
+   open sky or void: 13 of the sweep's 65 viewpoints never attribute all 160 columns, and the worst
+   of them (−309,−724) walked all 1445 marking segs for **69,638,352 ops** — 2× the ceiling — because
+   `full` never fires there either, so nothing bounded the walk at all. Two cheaper ideas were
+   MEASURED AND REJECTED first: a distance cull on the attribution path (at maxdist 2048 it changes
+   no frame but only takes 2020 projections down to 1911 — E1M1 fits inside 2048 units of any
+   viewpoint), and capping on *projected* rather than *visited* segs (the atans are paid before a seg
+   projects, so it saves almost nothing). Segs arrive nearest-first, so the budget only ever costs
+   FAR attribution: those columns fall back to the claiming wall's sector, i.e. the pre-rung-3a
+   behaviour, in the distant part of the frame. `scratchpad/rung3a_budget.py` has the numbers behind
+   128; the oracle mirrors the budget and both stop conditions, so the gates test the mirror too.
+
+Two design mistakes worth not repeating (both measured, not guessed):
+
+- storing the two band-list ADDRESSES per column and reading them back with
+  `hex.ptr_index` + `hex.read_hex 8` costs ~780 dispatches per column (+5M/frame). The claim state is
+  now ONE byte per column: the claiming seg's **plane-pair id**, and the bank is laid out per pid
+  (ceiling list at slot 2p, floor at 2p+1) so both addresses are one strength-reduced multiply.
+  Cost: keys stop being shared between pids, bank 1.42M → 1.91M words.
+- that multiply is ~15 shifts of w/4 and cost +1.1M/frame when paid per column; the addresses depend
+  on the pid ALONE, so a one-entry cache (`cpid`) drops it to the handful of surface changes per frame.
+
+### Where it landed
+
+| | spawn | (−309,636,0) | (−480,256,0) | worst of the 65-viewpoint sweep |
+|---|---|---|---|---|
+| baseline (no plane_near) | 23,209,289 | 24,874,548 | 24,771,650 | 24,843,494 (the shipped tier's published number) |
+| first working version | 33,153,404 | — | — | — |
+| + pid bank, cache, window | 25,438,444 | 32,220,803 | 27,639,003 | 69,638,352 ⚠ (the open-view viewpoint) |
+| **rung 3a as shipped** | **25,494,558** | **29,294,483** | **27,685,988** | **30,998,786 @ (−309,−44,0) — UNDER 33M** |
+
+All 15 gate viewpoints of `scratchpad/pnear_sweep.py` are byte-exact vs the `plane_near=True` oracle
+(the budget and both stop conditions are mirrored there, so the gates test the mirror too).
+
+⚠ Two fj bugs cost time, both the SAME root cause and both already in fj-lessons: a macro's scratch
+`hex.vec` data must be jumped over when the body is INLINE in a loop (lesson #2), and `mul_const` /
+`ptr_index` read `w/4` nibbles of their source/index register, so a 2-nibble register must be
+zero-extended first (R11). Symptom in both cases: `term=ip<2w` a few hundred k ops in, frame all
+zeros.
+
+### ⚠ What the owner will SEE, stated exactly
+
+At spawn the near floor becomes ONE surface — the flat the player is actually standing on, `AQF054`,
+whose base colour is neutral grey (palette 108 = rgb 55,55,55). **The yellow was the bug**: `AQF018`
+(rgb 175,123,31) is another room's floor, and it was being painted over the near floor by the wall
+that claimed those columns. So the owner's "it should all be the same yellowish colour" resolves to
+"all the same GREY-ish colour" — same-ness achieved, yellow removed, because the yellow was never
+this floor's. If they want the near floor warmer, that is a LOOK decision on the FT1 tier (which
+texel each distance band samples), not this bug. `scratchpad/rung3a_before_after.png` is the
+side-by-side.
+
+### Still open
+
+- Rung 3b (§6) — the upper/lower wall runs. Unchanged by this rung except that the per-column plane
+  attribution it needs now exists (and `pclm` already carries a per-column surface id).
+- The residual attribution error is now at the FAR end of a column's floor strip (a column's strip is
+  still ONE region), which is what rung 3b's sub-range plane regions fix.

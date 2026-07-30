@@ -221,7 +221,8 @@ def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: st
 
 def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
                  subsector_action=None, full_abort_label: str = None, prune=None,
-                 inline_side: bool = False) -> str:
+                 inline_side: bool = False, plane_gate=None,
+                 plane_gate_label: str = "tsstop") -> str:
     """BSP-as-code (opt #7): emit the front-to-back BSP walk as fj CODE. Each node becomes a code block
     whose partition line is baked as compile-time constants, so the side test is `proj.point_on_side`
     (no per-node stream read). The block visits the NEAR child subtree first (the side the viewer is on),
@@ -292,6 +293,16 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             lines.append(f"    hex.if0 1, {full_abort_label}, {L}_go{i}")   # paints nothing (front-to-back
             lines.append(f"    stl.fret {L}_r{i}")         # occlusion) -> prune it. Byte-exact: the per-seg
             lines.append(f"{L}_go{i}:")                    # leaf would have fret'd on `full` for every seg.
+        if plane_gate is not None and plane_gate(i):
+            # M13-2S rung 3a: this subtree has NO one-sided segs, so it can only contribute PLANE
+            # ATTRIBUTION -- nothing to draw, nothing that touches drawn[]/full. Once every column
+            # is attributed (`tsstop`) it is therefore dead, and one 1-nibble test skips it whole.
+            # This restores the M13-prune win that including two-sided segs in the walk removed:
+            # those 145 E1M1 subtrees are no longer prunable at COMPILE time (they do matter until
+            # attribution stops), so they are pruned at RUNTIME instead.
+            lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_pgo{i}")
+            lines.append(f"    stl.fret {L}_r{i}")
+            lines.append(f"{L}_pgo{i}:")
         if inline_side:
             # M13-inlinenodes: the side test SPECIALIZED per node -- baked-const subtracts and
             # baked-magnitude multiplies, no shared-leaf fcalls, no xor_by SET/CLEAR involution.

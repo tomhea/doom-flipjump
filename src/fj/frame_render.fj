@@ -1167,6 +1167,197 @@ ns frame {
     // (walk order is front-to-back, each column claimed exactly once, so records never overlap and
     // the device needs no first-writer logic at all). `drawn` is the raster leaf's stride-1 packed
     // byte per column. @requires hex.init & stl.ptr_init
+    // ── M13-2S rung 3a — the TWO-SIDED PLANE-CLAIM leaf ────────────────────────────────────────
+    // A two-sided seg paints no wall in this tier, but it still BOUNDS the near floor/ceiling
+    // SURFACE, and that is the owner's "the close floor in the middle is gray, yet the sides are
+    // yellow" bug: the per-column plane record used to come from whichever one-sided (hence
+    // distant) wall claimed the column, so one continuous floor was painted with several other
+    // rooms' flat/height/light. Here the NEAREST MARKING seg attributes the column instead --
+    // marking = the seg's two sides differ in the band-bank key (height, light, flat), DOOM's
+    // R_StoreWallRange markfloor/markceiling test; segs equal on both sides are excluded at COMPILE
+    // time and attributing those to either side is identical anyway.
+    //
+    // It writes ONLY the attribution state -- one byte per column, `pclm[x]` = the claiming seg's
+    // PLANE-PAIR ID -- never `drawn`/`n_drawn`/`full`: the region EXTENTS still come from the
+    // one-sided wall that closes the column. Once every column is attributed nothing later can
+    // change anything, so it sets `tsstop` -- and the caller tests that BEFORE the xorby block,
+    // which is what makes this affordable: at E1M1 spawn 59 marking two-sided segs are reached
+    // before tsstop and 1386 after it (measured; walking all of them through this front end costs
+    // +11.9M, over the ceiling -- see docs/handoff-m13-2s.md §4).
+    // Returns via stl.fret seg_ret. @requires hex.init & stl.ptr_init
+    def seg_pass1_leaf_body_ts budget \
+            @ ret, bok, bstop, wok, wlo, wahi, wbhi, wbok, scan, nolow, dolow, nohigh, dohigh, \
+              loop, body, claim, next, pdone, xa, xb, pm1, bcap \
+            < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
+              seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c, seg_pid, \
+              pclm, visible, x1, x2, x, pbase, pptr, pval8, pmin, pmax, \
+              n_claimed, n_tsv, tsstop, vieww, seg_ret, \
+              wrej, wqa, wna, wqb, wnb, wex, wey, weyx, wexy {
+        // Spend one unit of the per-frame attribution BUDGET (config.PNEAR_SEG_BUDGET). Segs arrive
+        // nearest-first, so the budget only ever costs FAR attribution -- and it is what BOUNDS the
+        // cost of a frame whose view never closes: with open sky or void on screen `n_claimed` never
+        // reaches VIEW_W, and one such E1M1 viewpoint measured 69.6M ops/frame before this existed.
+        hex.inc 2, n_tsv
+        hex.set 2, bcap, budget
+        hex.cmp 2, n_tsv, bcap, bok, bstop, bok
+      bstop:
+        hex.set 1, tsstop, 1                    // this seg is the last one the budget allows
+      bok:
+        proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy
+        hex.if0 1, wrej, wok
+        stl.fret seg_ret
+      wok:
+        proj.wall_x_range_m visible, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
+        hex.if0 1, visible, ret
+        // Clip the scan to the UNATTRIBUTED WINDOW [pmin, pmax]. Every column below pmin / above
+        // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
+        // byte: at (-309,636) that is 769 column reads cut to 201, and 37 of the 60 projected segs
+        // exit here outright. The bounds are maintained WITHOUT any extra reads -- see below.
+        hex.mov 2, xa, x1
+        hex.cmp 2, xa, pmin, wlo, wahi, wahi    // xa = max(x1, pmin)
+      wlo:
+        hex.mov 2, xa, pmin
+      wahi:
+        hex.mov 2, pm1, pmax
+        hex.inc 2, pm1
+        hex.mov 2, xb, x2
+        hex.cmp 2, xb, pm1, wbok, wbok, wbhi    // xb = min(x2, pmax+1)
+      wbhi:
+        hex.mov 2, xb, pm1
+      wbok:
+        hex.cmp 2, xa, xb, scan, ret, ret       // window empty for this seg -> nothing to attribute
+      scan:
+        // After this scan [xa, xb) is attributed in full, so if the scan STARTS at pmin the bound
+        // can jump to xb, and if it ENDS at pmax+1 the bound can drop to xa-1 -- a conservative
+        // update that costs two compares and no memory reads. (pmax underflowing to 0xFF is fine:
+        // it makes pm1 = 0, so every later seg finds an empty window, which is exactly the truth.)
+        hex.cmp 2, xa, pmin, nolow, dolow, nolow
+      dolow:
+        hex.mov 2, pmin, xb
+      nolow:
+        hex.cmp 2, xb, pm1, nohigh, dohigh, nohigh
+      dohigh:
+        hex.mov 2, pmax, xa
+        hex.dec 2, pmax
+      nohigh:
+        hex.zero 8, x
+        hex.mov 2, x, xa                        // the claim scan over the stride-1 pclm[]
+        hex.set w/4, pbase, pclm
+        hex.ptr_index pptr, pbase, x            // ptr_index reads w/4 nibbles of its index (R11)
+      loop:
+        hex.cmp 2, x, xb, body, ret, ret
+      body:
+        hex.read_byte pval8, pptr
+        hex.if0 2, pval8, claim
+        hex.ptr_add pptr, 1                     // a nearer seg already attributed this column
+        ;next
+      claim:
+        hex.write_byte_and_inc pptr, seg_pid    // pclm[x] = this seg's plane-pair id (advances too)
+        hex.inc 2, n_claimed
+        hex.cmp 2, n_claimed, vieww, next, pdone, next
+      pdone:
+        hex.set 1, tsstop, 1                    // every column attributed: nothing later matters
+      next:
+        hex.inc 2, x
+        ;loop
+      ret:
+        stl.fret seg_ret
+      xa: hex.vec 2
+      xb: hex.vec 2
+      pm1: hex.vec 2
+      bcap: hex.vec 2
+    }
+
+    // M13-2S rung 3a — a column's two band-list addresses FROM ITS PLANE-PAIR ID. The bank is laid
+    // out per pid (1-based): pid p's ceiling list is slot 2(p-1), its floor list 2(p-1)+1, so both
+    // addresses are one strength-reduced constant multiply (the stride has 2 set bits) plus adds off
+    // the frame's bank pointer. That is the whole reason the claim state is a single BYTE: the
+    // alternative -- per-column address cells read back with hex.ptr_index + hex.read_hex 8 -- costs
+    // ~780 dispatches per column (w(2.25@) + 8x(24@)), measured at +5M/frame.
+    def lines_pid_addrs pidreg, half_slots, cbufa, cbufd, fbufa, fbufd < vzbank {
+        hex.zero w/4, cbufa                                // widen the 2-nibble pid first: mul_const
+        hex.mov 2, cbufa, pidreg                           // reads w/4 nibbles of its source (R11)
+        hex.mul_const w/4, cbufa, cbufa, 4*half_slots*dw
+        hex.add w/4, cbufa, vzbank
+        hex.sub_constant w/4, cbufa, 4*half_slots*dw       // pids are 1-based (0 = unattributed)
+        hex.mov w/4, cbufd, cbufa
+        hex.add_constant w/4, cbufd, half_slots*dw
+        hex.mov w/4, fbufa, cbufa
+        hex.add_constant w/4, fbufa, 2*half_slots*dw
+        hex.mov w/4, fbufd, fbufa
+        hex.add_constant w/4, fbufd, half_slots*dw
+    }
+
+    // M13-2S rung 3a — this column's plane attribution, in the EMIT half. The nearest marking seg's
+    // stored pid wins; if none reached the column yet then THIS seg is the nearest, so it uses its
+    // own baked pid and claims the column (which is what lets `tsstop` ever become true -- most
+    // columns are first reached by a one-sided wall). `pptr` walks pclm[] in lockstep with the
+    // drawn[] pointer, so there is no per-column ptr_index (w(2.25@)) at all.
+    def lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd \
+            @ own, have, recalc, pdone, end \
+            < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
+        hex.read_byte pval8, pptr
+        hex.if0 2, pval8, own
+        ;have
+      own:
+        hex.write_byte pptr, seg_pid            // claim this column for this seg's front sector
+        hex.mov 2, pval8, seg_pid
+        hex.inc 2, n_claimed
+        hex.cmp 2, n_claimed, vieww, have, pdone, have
+      pdone:
+        hex.set 1, tsstop, 1
+      have:
+        hex.ptr_add pptr, 1                     // in lockstep with dptr: one column per iteration
+        // the four addresses are a function of the pid ALONE, so keep the last pid computed and
+        // recompute only when it changes: a frame's 160 columns cover a handful of distinct
+        // surfaces, and the strength-reduced multiply is ~15 shifts of w/4 (measured +1.1M/frame
+        // when paid per column).
+        hex.cmp 2, pval8, cpid, recalc, end, recalc
+      recalc:
+        hex.mov 2, cpid, pval8
+        .lines_pid_addrs pval8, half_slots, cbufa, cbufd, fbufa, fbufd
+      end:
+    }
+
+    // per-SEG setup / per-column advance of the pclm[] pointer (the lockstep partner of dptr).
+    def lines_plane_ptr x1 < pclm, pbase, pptr {
+        hex.set w/4, pbase, pclm
+        hex.ptr_index pptr, pbase, x1
+    }
+
+    def lines_plane_step < pptr {
+        hex.ptr_add pptr, 1
+    }
+
+    // the pre-rung-3a form: the plane addresses are the SEG's own, computed once per seg.
+    def lines_seg_plane half_slots, cbufa, cbufd, fbufa, fbufd \
+            < vzbank, seg_cvpidx, seg_fvpidx {
+        hex.mov w/4, cbufa, vzbank
+        hex.add w/4, cbufa, seg_cvpidx
+        hex.mov w/4, cbufd, cbufa
+        hex.add_constant w/4, cbufd, half_slots*dw
+        hex.mov w/4, fbufa, vzbank
+        hex.add w/4, fbufa, seg_fvpidx
+        hex.mov w/4, fbufd, fbufa
+        hex.add_constant w/4, fbufd, half_slots*dw
+    }
+
+    // M13-2S rung 3a: with per-column attribution the ditto test ("same as column x-1, emit 0xFE")
+    // must also require the same plane surfaces -- two adjacent columns can share clip rows yet sit
+    // on different floors. Without pnear the plane addresses are per-SEG constants, so the test is
+    // unchanged and these two helpers cost nothing.
+    def lines_jmp there {
+        ;there
+    }
+
+    def lines_ditto_plane pval8, dpid, same, diff {
+        hex.cmp 2, pval8, dpid, diff, same, diff
+    }
+
+    def lines_save_plane pval8, dpid {
+        hex.mov 2, dpid, pval8
+    }
+
     // M13-splitxb part 1 -- the CULL HALF: wedge pre-cull, map-unit projection/frustum cull,
     // occlusion pre-scan. Reads ONLY the geometry xorby block (v1..v2, a,b,c); sets `proceed`
     // = 1 iff the seg survives everything, so the REST block's SET+CLEAR (and part 2) never
@@ -1215,17 +1406,18 @@ ns frame {
     // M13-splitxb part 2 -- the EMIT HALF: projection setup, baked-bank addresses, the claim
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
-    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride \
+    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
+            pnear \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, \
-              dfull, dchk2, dsame, demitted, dvalid, dct, dfs \
+              dfull, dchk2, dpl, dsame, demitted, dvalid, dct, dfs, dpid \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
-              seg_lit, seg_wstrip, wstripbase, seg_cvpidx, seg_fvpidx, \
-              x1, x2, x, dbase, dptr, dval8, \
+              seg_lit, seg_wstrip, wstripbase, \
+              x1, x2, x, dbase, dptr, dval8, pval8, \
               normalangle, rw_distance, scale, scalestep, \
               top, bottom, \
-              vzbank, seg_ret2, \
+              seg_ret2, \
               full, n_drawn, vieww {
         proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle
         proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
@@ -1241,16 +1433,12 @@ ns frame {
         // M13-bakedbands: the four half-list addresses -- pure adds off the per-frame bank
         // pointer (vzbank, set once by the player-subsector block); the offsets are BAKED per
         // seg. No build calls, no built-flags, no planeheight: the lists are compile-time data.
-        hex.mov w/4, cbufa, vzbank
-        hex.add w/4, cbufa, seg_cvpidx
-        hex.mov w/4, cbufd, cbufa
-        hex.add_constant w/4, cbufd, half_slots*dw
-        hex.mov w/4, fbufa, vzbank
-        hex.add w/4, fbufa, seg_fvpidx
-        hex.mov w/4, fbufd, fbufa
-        hex.add_constant w/4, fbufd, half_slots*dw
+        // M13-2S rung 3a (pnear): the plane surfaces are no longer this seg's -- they are the
+        // NEAREST MARKING seg's, per column, so the addresses move into the loop below.
+        rep(1-pnear, k) .lines_seg_plane half_slots, cbufa, cbufd, fbufa, fbufd
         hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
         hex.ptr_index dptr, dbase, x1
+        rep(pnear, k) .lines_plane_ptr x1       // ... and pclm[], walked in lockstep with it
         hex.set 2, one, 1
         hex.set 1, dvalid, 0                    // M13-ditto: no previous emitted column yet
       loop:
@@ -1259,6 +1447,7 @@ ns frame {
         hex.read_byte dval8, dptr
         hex.if0 2, dval8, notdrawn
         hex.ptr_add dptr, 1                     // already claimed -> next column
+        rep(pnear, k) .lines_plane_step
         hex.set 1, dvalid, 0                    // M13-ditto: a gap breaks x-adjacency
         ;skipcol
       notdrawn:
@@ -1275,13 +1464,19 @@ ns frame {
       fneg:
         hex.zero 8, fstart
       fdone:
+        // M13-2S rung 3a: which SURFACES this column's plane regions belong to (see lines_col_plane)
+        rep(pnear, k) .lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
         hex.if0 1, dvalid, dfull
         hex.cmp 2, cexcl, dct, dfull, dchk2, dfull
       dchk2:
-        hex.cmp 2, fstart, dfs, dfull, dsame, dfull
+        hex.cmp 2, fstart, dfs, dfull, dpl, dfull
+      dpl:
+        // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
+        rep(1-pnear, k) .lines_jmp dsame
+        rep(pnear, k) .lines_ditto_plane pval8, dpid, dsame, dfull
       dsame:
         byte.emit x
         stl.output_char 0xFE
@@ -1291,6 +1486,7 @@ ns frame {
         stream.emit_col_lines centery, w2s, wpx, wpxstride, x, cexcl, fstart, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
+        rep(pnear, k) .lines_save_plane pval8, dpid
         hex.set 1, dvalid, 1
       demitted:
         hex.write_byte_and_inc dptr, one        // drawn = 1 (advances to the next column's slot)
@@ -1311,6 +1507,7 @@ ns frame {
       dvalid: hex.vec 1
       dct: hex.vec 2
       dfs: hex.vec 2
+      dpid: hex.vec 2
       wtc8: hex.vec 8
       wtf8: hex.vec 8
       cbufa: hex.vec w/4

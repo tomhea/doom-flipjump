@@ -1,4 +1,4 @@
-# Session handoff — the four visual features (3 of 4 shipped in fj, V4's oracle done)
+# Session handoff — the four visual features (V1-V3 shipped in fj, V4 half-landed)
 
 **Branch:** `m13opt3-early-out`.
 
@@ -131,28 +131,37 @@ Measured effect: 1 of 108 projected rows moves at spawn, 10 of 210 at the worst 
 * **`wall_renderer._lines_sprite_bank`** — the bank generator. Measured: 31 sprite kinds,
   17,216 blocks, **5.08M characters** (program 36M → ~41M).
 * **`proj.project_thing`** — R_ProjectSprite in this repo's fixed point (one `hex.fixed_div` ≈ 38.5k
-  plus a block-FP reciprocal and five multiplies ⇒ ~60k per thing). Parses; never instantiated yet.
+  plus a block-FP reciprocal and five multiplies ⇒ ~60k per thing), wired and running.
 
-### Left to do
+### Left to do — increment B, the EMIT half
 
-1. Per-thing xorby blocks (`sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_base, sp_dw, sp_lt`) emitted
-   into each subsector's leaf, gated on `numsegs > 0` (the oracle only reaches a subsector's things
-   through its first seg).
-2. The record loop: project, bucket the height, walk `[x1, x2]` with the `frac += istep` texture-column
-   DDA, and store the fragment for unclaimed, unfragmented columns —
-   `[sy1][sy2p1][y0+128][blk_lo][blk_hi][lightrow]` at a 16-byte stride, plus a 1-byte `sprflag[x]`.
-   `y0` is biased by 128 because a near sprite's top is off the top of the view (h ≤ VIEW_H bounds
-   it to ±99).
-3. The emit. This is the part V3 did NOT have to do: a sprite can straddle the ceiling region, the
-   wall and the floor region, so the column becomes `region(0, sy1)` + the sprite runs +
+1. **Trim the record half first.** Worst is 37.0M against a 35M ceiling and the emit is still to
+   come. The 24 projections are only ~1.4M of the +4.86M; the rest is the per-column loop's two byte
+   reads over up to 24 things' full column ranges, at a viewpoint whose view never closes so
+   `n_claimed == VIEW_W` never fires. Either lower `THING_BUDGET`, or add the missing early-out:
+   stop when every column is drawn OR fragmented (count fragments, and stop the walk the way
+   `tsstop` stops the two-sided claim).
+2. **The emit splice** — the part V3 did NOT have to do. A sprite straddles the ceiling region, the
+   wall and the floor region, so a fragmented column becomes `region(0, sy1)` + the sprite runs +
    `region(sy2+1, VIEW_H)`, where `region(lo, hi)` is the ceiling `half_walk`, a **windowed**
    `wpx_wall`, and the floor `half_walk`. Keep the existing no-sprite path untouched beside it —
-   the wall run-list walk is where most of the frame's pairs are, and it must not get slower.
-4. The `dgchk` entry (see §3.2).
+   the wall run-list walk is where most of the frame's pairs are and it must not get slower.
+   The sprite runs go out through `cm.emit` with the fragment's shade row in the high byte (V1's
+   grain mechanism), but from a **separate index register** — reusing the grain's `cmidx` would give
+   the wall emitted after the sprite the sprite's light row.
+3. **The `dgchk` ditto entry** — the FIFTH feature to need it. Compare the fragment's stored values
+   (zeroed when absent); do NOT refuse the ditto (§3.2).
+
+The fragment layout already in the tree: `sprflag[x]` one byte, `spslot[x]` =
+`[sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row]` at a 16-byte stride. `y0` is biased by 128 because
+a near sprite's top sits above row 0 (h ≤ VIEW_H bounds it to ±99). A block is
+`[r0][last_rel][n][(rel_end, RAW texel) × n]` at a 32-dw stride — `r0`/`last_rel` are in the header
+precisely so the record half can bound the fragment with two byte reads instead of pre-walking.
 
 ### Before starting: the headroom question
 
-The worst viewpoint is 32.14M and V4 is priced at +2.8M ⇒ ~35M, at the top of the band. The
+V4's record half alone put the worst viewpoint at 37.0M — **already past the ceiling**, and the
++2.8M V4 estimate was for the whole feature. This is now a blocker, not a caution. The
 paydown levers, in order, are still: `slopediv_recip`'s `read_table_packed 3` → dispatch (the 4th
 application of the conversion that paid −1.14M), a ROW-RULE operand-order check on
 `column_params_m`'s two multiplies (160 calls × 11.9k), and the two `hex.fixed_div 8,4` in

@@ -691,9 +691,7 @@ ns stream {
 
     // ptr += n ENTRIES of 5 bytes; n is a runtime count and hex.ptr_add only takes a constant.
     def entry_ptr_add ptr, n @ t, end {
-        hex.zero w/4, t
-        hex.mov 2, t, n
-        hex.mul_const w/4, t, t, 5*dw
+        entoff.lookup t, n                       // same dispatch as the append side
         hex.add w/4, ptr, t
         ;end
       t: hex.vec w/4

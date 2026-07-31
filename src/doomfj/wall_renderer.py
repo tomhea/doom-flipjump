@@ -76,6 +76,7 @@ _LINES_DEAD_FIELDS = frozenset({"seg_texoff", "seg_texbase", "seg_texheight", "s
                                 "seg_hm", "seg_light", "seg_ceil", "seg_floor", "seg_plight",
                                 "seg_ceilbase", "seg_floorbase"})
 
+DW_BITS = 64                   # `dw` in address units at w=32 (2w), for baked dw-offsets
 TS_ECAP = 24                   # M13-2S rung 3b: buffered REGIONS per column per side,
                                # 5 bytes each ([kind][arg:2][y1][yend]). Measured worst
                                # over 30 E1M1 viewpoints: 14 top / 10 bottom.
@@ -350,6 +351,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # M13-ATANDISP (lines mode): the SAME tantoangle values as a D4 per-entry dispatch table, so
     # point_to_angle_m can trade its ~289@ packed read (4x read_byte_and_inc + a mul_const, per the
     # stl's documented complexities) for a ~20@ lookup. Byte-exact by construction: same values.
+    # M13-2S rung 3b: entry index -> byte offset (5 bytes per region entry), by dispatch. The
+    # multiply it replaces is 9 shifts of w/4 and the append path runs ~1,600 times a frame.
+    entoff = (generate_dispatch_table_fj("entoff", [5 * i * DW_BITS for i in range(TS_ECAP + 2)],
+                                         index_nibbles=2, result_nibbles=8) if two_sided else "")
     ttang = (generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE),
                                         index_nibbles=3, result_nibbles=8) if lines else "")
     sdrecip = (generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(),
@@ -919,7 +924,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                     tex, cm, ttang, sdrecip, "__hot_end:"])
+                     tex, cm, ttang, sdrecip, entoff, "__hot_end:"])
     else:
         hotdata = []
     # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,
@@ -1071,6 +1076,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
            "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
            "n_claimed: hex.vec 2", "n_tsv: hex.vec 2", "tsstop: hex.vec 1",
+           "viewh_stub: hex.vec 2, 100",
            "cpid: hex.vec 2",
            # the UNATTRIBUTED-COLUMN WINDOW: every column < pmin or > pmax is attributed already
            "pmin: hex.vec 2, 0", f"pmax: hex.vec 2, {cfg.VIEW_W - 1}"] if lines else []),

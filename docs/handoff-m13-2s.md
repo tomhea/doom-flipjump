@@ -565,7 +565,7 @@ too many -- it was 644 pixels at spawn).
 | E1M1 | spawn | rotated |
 |---|---|---|
 | rung 3a + ATANDISP (the SHIPPED tier) | 21,730,429 | 19,529,379 |
-| **rung 3b** | **137,320,223** | **50,132,022** |
+| **rung 3b** | **131,060,211** | **46,222,635** |
 
 Optimisations already applied, in order of what they bought at spawn: restoring the `drawn[]` write so
 pass 1's occlusion prescan fires again (187M → 148M), skipping the back-sector projection for segs
@@ -573,12 +573,40 @@ with neither an upper nor a lower (148M → 142M), and the flush's DITTO path �
 list is byte-identical to its neighbour's, emit `[x][0xFE]` and skip the whole expansion (142M →
 137M; on the square room 16.3M → 10.9M).
 
-Measured split at spawn: **walk + pass 2 = 93.6M, the flush = 44M**. The flush's cost is dominated by
+A fourth landed after that: the entry-offset multiply in the append path (`mul_const` by `5*dw` =
+9 shifts of w/4, ~72@) became a **dispatch lookup**, the same trick as §14 (137M → 131M, and the
+square room 10.9M → 9.8M).
+
+| E1M1 spawn | ops |
+|---|---|
+| first working rung 3b | 187,750,215 |
+| + `drawn[]` write restored (pass-1 prescan fires) | 148,067,199 |
+| + back projection only when there IS an upper/lower | 141,658,924 |
+| + the flush's ditto path | 137,320,223 |
+| + entry offsets by dispatch | **131,060,211** |
+
+Measured split at spawn: **walk + pass 2 = 93.6M, the flush = 44M**, and within the first number the
+BSP walk with all its early-outs is only **4.83M** (ablate `colstub`) — so **88.8M is the per-column
+body**, ~79k ops per column visit over ~1,120 visits. The flush's cost is dominated by
 re-walking a surface's whole baked band list for every region (a 3-row region still walks up to 32
-entries, two pointer byte-reads each), which a per-list row→offset index would cut ~10x. The 93.6M is
-NOT the BSP walk (only 114 segs reach pass 2 at spawn, over ~1,120 column visits) — it is the
-per-column body, and the next step is to price its pieces the way §13 priced the atan, because at
-~78k ops per visit something in it is far dearer than the stl complexities predict.
+entries, two pointer byte-reads each), which a per-list row→offset index would cut ~10x. ### What is left, and why it needs a design step rather than another tweak
+
+79k ops per column visit, with ~1,600 region appends a frame, says the cost IS the buffering: a
+`write_byte_and_inc` is 50@, an entry is 5 of them plus the count read/write, and **at this program's
+size @ is worth roughly 150 ops** — so one buffered region costs ~40k. That also explains why the
+pair-buffered first attempt was hopeless.
+
+Ranked, with what each is worth:
+1. **Shrink the entry.** 5 bytes → 4 (pack `kind` into the arg's spare nibble) or → 3 (a top entry's
+   `y1` is the previous entry's `yend`, since top regions tile contiguously; the bottom needs a
+   one-entry lookahead to do the same). ~20–40% of 88.8M.
+2. **Index the baked band lists by row.** The flush re-walks a surface's whole 32-entry list for a
+   3-row region; a per-list row→offset byte table makes it one indexed read. Most of the 44M flush.
+3. **Don't buffer at all** — the real fix, and a design step: a column's record could be emitted at
+   close time if the pieces arrived in order, which they do NOT in a seg-major walk. A column-major
+   pass over the drawable segs would, at the cost of re-projecting per column.
+
+None of these is a tweak away from 33M: rung 3b is ~4x over, and closing that gap is its own rung.
 
 **So rung 3b is correct and gated, but it is 4x the owner's ceiling and is NOT the shipped tier.**
 `plane_near` (rung 3a) still ships; `two_sided=True` is opt-in.

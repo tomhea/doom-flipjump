@@ -16,8 +16,7 @@ SRC=[ROOT/"src/fj"/f for f in ("fixed_point.fj","present.fj","projection.fj","fr
      "plane_render.fj","plane_bands.fj","stream_render.fj")]
 cfg=Config(); mw=WadFile.from_path('tests/fixtures/freedoom_e1m1.wad')
 sp=spawn_state(mw,"E1M1"); sx,sy=_signed(sp.x,32)>>16,_signed(sp.y,32)>>16
-for tag,ab in (("walk + loop only   ",frozenset({"noflush","colstub"})),
-               ("no walk (flush only)",frozenset({"pass1","noflush"}))):
+for tag,ab in (("everything but the per-column body",frozenset({"noflush","colstub"})),):
     t0=time.time()
     main=emit_wall_renderer(mw,"E1M1",cfg,asset_wad=mw,over_align=False,floor_mode="FT1",
                             wall_mode="WPX",raster_mode="lines",two_sided=True,ablate=ab)

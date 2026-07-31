@@ -1559,17 +1559,14 @@ ns frame {
         hex.ptr_sub cstp, 1
     }
 
-    def buf_top_open @ idx, end < cstp, cbfp, tcnt, tptr {
+    def buf_top_open @ end < cstp, cbfp, tcnt, tptr, idx {
         hex.ptr_add cstp, 2
         hex.read_byte tcnt, cstp
         hex.ptr_sub cstp, 2
-        hex.zero w/4, idx
-        hex.mov 2, idx, tcnt
-        hex.mul_const w/4, idx, idx, 5*dw
-        hex.mov w/4, tptr, cbfp
-        hex.add w/4, tptr, idx
+        entoff.lookup idx, tcnt                  // entry index -> byte offset, by DISPATCH:
+        hex.mov w/4, tptr, cbfp                  // mul_const is 9 shifts of w/4 (~72@) and this
+        hex.add w/4, tptr, idx                   // is a handful (fj-cost-model, M13-ATANDISP)
         ;end
-      idx: hex.vec w/4
       end:
     }
 
@@ -1579,18 +1576,15 @@ ns frame {
         hex.ptr_sub cstp, 2
     }
 
-    def buf_bot_open ecap @ idx, end < cstp, cbfp, bcnt, bptr {
+    def buf_bot_open ecap @ end < cstp, cbfp, bcnt, bptr, idx {
         hex.ptr_add cstp, 3
         hex.read_byte bcnt, cstp
         hex.ptr_sub cstp, 3
-        hex.zero w/4, idx
-        hex.mov 2, idx, bcnt
-        hex.mul_const w/4, idx, idx, 5*dw
+        entoff.lookup idx, bcnt
         hex.mov w/4, bptr, cbfp
         hex.add_constant w/4, bptr, 5*ecap*dw
         hex.add w/4, bptr, idx
         ;end
-      idx: hex.vec w/4
       end:
     }
 
@@ -1646,6 +1640,14 @@ ns frame {
       end:
     }
 
+    // ablate "colstub" (measurement only): a column visit that does the bookkeeping a one-sided
+    // wall would -- close the window -- but none of the projection, region or buffer work. The
+    // delta against the full body prices that work with the walk's early-outs still firing.
+    def ts_stub_close < chi, flo, viewh_stub {
+        hex.mov 2, chi, viewh_stub
+        hex.zero 2, flo
+    }
+
     // ══ M13-2S rung 3b — the TWO-SIDED per-column body ══════════════════════════════════════
     // DOOM's R_RenderSegLoop window, per column, per seg, front-to-back:
     //     front CEILING region | upper wall | (opening) | lower wall | front FLOOR region
@@ -1686,7 +1688,7 @@ ns frame {
         .col_state_load                          // chi, flo (2 packed bytes at cstp)
         hex.cmp 2, chi, flo, work, nextcol, nextcol
       work:
-        rep(colstub, k) .lines_jmp nowin        // ablate: loop + state only, no projection/regions
+        rep(colstub, k) .ts_stub_close          // ablate: close as a solid wall would, no work
         proj.column_params_m top, bottom, scale, wtc8, wtf8, centery*0x10000, viewh1
         .row_clamp_top ctake, top, viewh
         .row_clamp_bot fstart, bottom, viewh

@@ -65,13 +65,34 @@ measured pair counts are within 2% of each other, so **use 2×2**.
 
 ---
 
-## 2. Sky
+## 2. Sky — ✅ ORACLE DONE, fj design settled
 
 Ceilings whose flat is `F_SKY1` (19 sectors in E1M1) take a texture column chosen by the VIEW ANGLE
 and no distance lighting. **Sky has no perspective**, so its run-list bakes once per sky texture
-column — 128 lists, ~9 runs each — and the per-column runtime cost is an add + shift + mask for `u`
-plus one dispatch. Measured: 139 sky columns at the courtyard viewpoint, +8.7 pairs each. **+0.7M
-where sky is visible, 0 indoors.**
+column. Measured: SKY1 downscales to **128 wide × 64 tall**; 139 sky columns at the courtyard
+viewpoint, +8.7 pairs each; **0 pixels change indoors** (byte-exact) and 2,111 in the courtyard.
+
+### The fj shape — sky is a per-column CHOICE OF CEILING BAND LIST, nothing more
+
+The ceiling is already emitted by walking a baked `[y2_cumulative][colour]` band list whose address
+sits in `cbufa`. A sky column is **exactly the same walk against a different list**, because a sky
+column has no perspective and no lighting — so it IS just a band list. Therefore:
+
+1. Bake `skybands`: 128 lists (one per sky texture column) over rows [0, H), same format as the
+   plane band lists. ~9 runs each, so ~1,150 pairs of static data — trivial beside the 8.9M-char
+   wall bank.
+2. Per frame: `skybase = (viewangle >> 23) & 127` — one shift and mask.
+3. Per column: `u = (skybase + skyoff[x]) & 127` where `skyoff[x]` is a **compile-time** constant
+   (a dispatch table over x, exactly like `wnoise`), then `cbufa = skybands + u*stride`.
+4. The existing prefix walk emits it. **No new emit path at all.**
+
+`ReferenceModel.sky_texel` already takes this same base+offset decomposition, so the oracle stays
+authoritative bit for bit.
+
+⚠ **Sky columns must join the DITTO chain** (the V1 lesson): two adjacent sky columns have different
+`u`, so they render differently even with identical clip rows and plane id. Compare `u` — or simply
+refuse the ditto when the column is sky — or the frame diverges exactly as V1's did at columns 12
+and 144.
 
 ---
 
@@ -102,17 +123,39 @@ height). Needs a per-column **depth byte**, which the renderer does not keep tod
 
 ---
 
+## 4a. ⚠ THE DITTO CHAIN — the trap every remaining feature will hit
+
+The `0xFE` record means "copy column x−1", and its guard (`frame_render.fj`, label `dgchk`) compares
+only the clip rows and the plane id. **Anything that changes a column's CONTENT without changing its
+CLIP ROWS must be added to that chain**, or the renderer emits a ditto for two columns that now
+differ and the frame diverges from the oracle.
+
+V1 hit this and it cost a build cycle: the first differing pixels were at column 12 and column 144,
+both exactly ≡ 0 (mod 4) — the `x>>2` grain-group boundaries. The fix pattern is now in the tree:
+lift the per-column value's lookup into pass 2 (it must be known BEFORE the emit/ditto decision),
+add a compare to the chain, and save it alongside `dct`/`dfs` on the emit path.
+
+Still to do, each for the same reason: **sky `u`** (V2), the **step-face slots** (V3), the
+**sprite fragments** (V4).
+
 ## 5. Order, and the paydown if the worst case runs hot
 
 Build in this order — cheapest and most self-contained first, so the emit path is understood before
 the architectural change:
 
-| rung | feature | gate |
+| rung | feature | state |
 |---|---|---|
-| V1 | pseudo-random texture | oracle re-bless (it changes the frame by design), spawn ≤ 22.5M |
-| V2 | sky | byte-exact indoors; courtyard viewpoint ≤ +1M |
-| V3 | step faces | per `handoff-m13-2s-fast.md` ladder |
-| V4 | things | byte-exact where no thing is visible |
+| **V1** | pseudo-random texture | ✅ **SHIPPED, BYTE-EXACT — 22,192,782 spawn / 26,405,793 worst** |
+| **V2** | sky | oracle ✅ done + verified; fj design settled (§2), not yet wired |
+| V3 | step faces | oracle + fj to do, per `handoff-m13-2s-fast.md` §2c |
+| V4 | things | oracle + fj to do, per §4 — pre-pass, never an overlay |
+
+**Measured after V1:** 22.19M spawn / 26.41M worst. Remaining budget to the owner's 30–35M: ~8M
+typical. V2 +0.7M, V3 +1.3M, V4 +2.8M ⇒ **~27M typical / ~31M worst**.
+
+⚠ V1's real price was **+1.6M / +1.1M**, not the +58k an intermediate build reported — that build
+was cheap *because* its ditto was broken and skipping columns it should have emitted. **A
+performance number taken from a build that is not byte-exact is not a performance number.**
 
 **Paydown, if the worst viewpoint runs past ~33M.** The last big unaudited block is the **BSP walk
 skeleton (3.88M) and wedge cull (2.02M)** — both stub-measured, and stub measurements have been

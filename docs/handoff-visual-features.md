@@ -229,3 +229,35 @@ walk (candidate 2), not the branch.
 visible** (22,192,782 → 23,492,508). `lines_sky_base` runs per column and does a `hex.mov 8` +
 `hex.shr_hex 8,6` + `hex.mov 2`; hoisting it to once per FRAME is the obvious fix and should recover
 most of that.
+
+
+---
+
+## V2 STATUS UPDATE — three bugs fixed, one left, and it is understood
+
+| build | courtyard diff | what changed |
+|---|---:|---|
+| wired | 2,111 px | — |
+| + `hex.set` label base | 2,111 px | base was fine |
+| + 3x bank (unmasked range) | 2,111 px | real bug, but not this one |
+| **+ count header (plane format)** | **2,039 px** | ✅ real: 72 px now correct |
+
+Spawn is **BYTE-EXACT at every one of these** (22,608,094 now), so nothing has ever escaped the
+feature.
+
+### The remaining 2,039: the ceiling is TWO half-lists, and sky only fills one
+
+`emit_col_lines` walks `cbufa` for the ascending half and, when `ctake > CENTERY`, falls through to
+`cdesc2` which walks **`cbufd`** — the plane bank keeps four half-lists per pid (ceiling asc,
+ceiling desc, floor asc, floor desc), each `half_slots` long, because the zlight ordinals restart at
+CENTERY. `lines_sky_ceil` currently overrides only `cbufa`, so any sky column reaching past row
+CENTERY emits SKY above the horizon and PLANE BANDS below it.
+
+**Fix:** bake the sky bank as two halves per texture column — rows [0, CENTERY) and [CENTERY, H) —
+laid out exactly like a pid's ceiling pair, and point both `cbufa` and `cbufd` at them. Sky has no
+perspective so the split is purely mechanical (it exists only to match the walker's layout), but the
+walker's layout is not optional.
+
+This is the same lesson as the other three V2 bugs, for the fourth time: **the consumer's format is
+the specification.** Bank size, label idiom, list format and now half-list layout were each assumed
+from a neighbouring subsystem rather than read off `emit_col_lines`.

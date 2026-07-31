@@ -611,6 +611,14 @@ None of these is a tweak away from 33M: rung 3b is ~4x over, and closing that ga
 **So rung 3b is correct and gated, but it is 4x the owner's ceiling and is NOT the shipped tier.**
 `plane_near` (rung 3a) still ships; `two_sided=True` is opt-in.
 
+### ★ NEXT: rung 3c — docs/handoff-m13-2s-fast.md
+
+The owner's ruling on §15's 131M: it must be 20–30M, and visual ACCURACY may be spent to get there so
+long as visual CLEARNESS survives. That handoff also corrects this file's cost arithmetic: **@ is
+25–30 ops, not 150**, which moves the blame from the region buffer (~23M) to the **per-column
+projection (~43.5M)** and makes the fix structural — keep rung 3a's frame, splice in only the NEAREST
+upper/lower per column, and the buffer and flush pass disappear entirely.
+
 ### Still open
 
 - Rung 3b (§6) — the upper/lower wall runs. Unchanged by this rung except that the per-column plane

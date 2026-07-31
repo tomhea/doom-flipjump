@@ -1359,7 +1359,7 @@ ns proj {
     //   reciprocal and five multiplies — which is why THING_BUDGET exists.
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
     def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds \
-            @ ok1, ok2, okd, okx, okx2, okh1, okh2, okv, bad, done, end, \
+            @ ok1, ok2, okd, okx, okx2, okh1, okh2, okv, tvcalc, tvhave, tvset, bad, done, end, \
               trx, try8, ang, sidx, vsin, vcos, gxt, gyt, tz, xsc, txv, atx, tzl, \
               txl, txr, tmp, gz, one16, cminz, cproj, cxf, cyf, cvw, cvh \
             < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh {
@@ -1368,11 +1368,20 @@ ns proj {
         hex.sub 8, trx, viewx
         hex.mov 8, try8, sp_y
         hex.sub 8, try8, viewy
+        // sin/cos of the VIEW angle: constant for the whole frame, but this leaf runs once per
+        // THING (250 of them on E1M1). A `finesine` lookup carries result_nibbles=8, i.e. EIGHT
+        // dispatches, so the pair costs ~8.6k ops -- against a 1-nibble `if0` to reuse them. A
+        // macro's locals are program statics, so the cache needs nothing but the flag.
+        hex.if0 1, tvset, tvcalc
+        ;tvhave
+      tvcalc:
         hex.mov 8, ang, viewangle                       // finesine index = angle >> 20 bits
         hex.shr_hex 8, 5, ang
         hex.mov 3, sidx, ang
         finesine.read_sin vsin, sidx
         finesine.read_cos vcos, sidx
+        hex.set 1, tvset, 1
+      tvhave:
         // tz = trx*cos + try*sin  (DOOM: gxt - gyt with gyt = -FixedMul(tr_y, viewsin))
         // ⚠ OPERANDS SWAPPED (the M13-mulorder lever). `fixed_mul_lo` runs one schoolbook row
         // per NONZERO NIBBLE OF THE SECOND OPERAND, and trx/try8 are differences of
@@ -1488,6 +1497,7 @@ ns proj {
       cyf: hex.vec 8
       cvw: hex.vec 8
       cvh: hex.vec 8
+      tvset: hex.vec 1                                // V4: sin/cos already cached this frame?
       end:
     }
 

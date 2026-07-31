@@ -225,3 +225,31 @@ many things they hold — so the per-thing cost is what matters, and there are 2
 | V4 complete | 28,104,383 | 36,010,624 | 45,252,666 | 39,448,264 |
 | **after EXP-1..4** | **27,836,730** | **33,899,355** | **38,476,150** | **37,099,879** |
 | | −0.27M | −2.11M | **−6.78M** | −2.35M |
+
+## EXP-5 — cache sin/cos of the VIEW angle across things ✅ **KEEP** (and one idea that cannot work)
+
+`project_thing` re-derived `finesine[viewangle>>20]` and its cosine on every call, though the view
+angle is constant for the frame and the leaf runs once per THING. A macro's locals are program
+statics, so the cache is a 1-nibble flag and nothing else.
+
+| viewpoint | before | after | delta |
+|---|---:|---:|---:|
+| spawn | 27,836,730 | 27,823,804 | −12,926 |
+| courtyard | 33,899,355 | 33,859,325 | −40,030 |
+| tree | 38,476,150 | **37,933,652** | **−542,498** |
+| worst | 37,099,879 | 37,003,252 | −96,627 |
+
+**BYTE-EXACT at all four.** Predicted −2.1M, delivered −0.54M: a `finesine` lookup with
+`result_nibbles=8` is NOT eight independent dispatches — `per_result_nibble` mode shares most of the
+walk. Worth recording, because the same wrong model would over-value every other wide-result table.
+
+### ❌ Bundled with it and REVERTED: constant vectors instead of per-call `hex.set`
+
+`project_thing` did six `hex.set 8, c*, <compile-time expr>` per call (~250 ops each). Replacing them
+with initialised declarations — `cminz: hex.vec 8, minz` — **does not assemble**: the assembler does
+not count a `hex.vec` INITIALISER as a use of a macro parameter, so `minz`, `projection`, `centerx`,
+`centery`, `vieww` and `viewh` all became "unused labels", which is a hard error.
+
+**`hex.vec n, <expr>` cannot carry a macro parameter.** To hoist a parameter-derived constant out of
+a hot macro it has to be passed in already-materialised, or set once behind a flag like the sin/cos
+cache above.

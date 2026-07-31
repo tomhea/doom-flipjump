@@ -57,15 +57,28 @@ scale setup if it *has* an upper or lower. At spawn only 2 of 59 do.
 
 ## 1a. Unit prices, measured by DOUBLING (frame byte-exact — `scratchpad/xtadisp.py`)
 
-| kernel | calls/frame | spawn | worst | share of the frame |
-|---|---:|---:|---:|---:|
-| `proj.column_params_m` | 160 | **11,853** | **11,426** | 9.2% / 7.2% |
-| `proj.wall_scale_setup_m` (post-2a) | 169 / 202 | **15,372** | **23,642** | 12.6% / **18.9%** |
+⚠ **The call count matters as much as the total.** `wall_scale_setup_m` lives in pass 2, which runs
+only when pass 1 set `proceed` — i.e. only for segs with at least one unclaimed column: **28 at
+spawn, 51 at the worst**, NOT the 169/202 in-frustum segs. (The in-frustum count gives 15.4k vs
+23.6k — a 1.5× spread for identical code, which is the tell that the count is wrong.)
 
-**`wall_scale_setup_m` is now the single largest item in the frame** (18.9% at the worst viewpoint,
-and it is where its cost is data-dependent — 15.4k vs 23.6k for the same code). It is two
-`scale_from_global_angle` (each with a `fixed_div`) plus a `scalestep` divide. It is out of scope for
-this rung, but it is **the next lever after 3c** and worth more than anything left in §5.
+| kernel | calls/frame | spawn | worst | frame share |
+|---|---:|---:|---:|---:|
+| `proj.column_params_m` | 160 / 160 | **11,853** | **11,426** | 9.2% / 7.2% |
+| `proj.wall_scale_setup_m` | 28 / 51 | **92,781** | **93,640** | 12.6% / **18.9%** |
+
+The two viewpoints agree to 0.9%, and the price reconciles exactly with the measured primitives in
+`fj-cost-model`:
+
+```
+2 x hex.fixed_div 8,4   = 2 x 38,500 = 77,000      <- 83% of it
++ scalestep hex.div 8,2 =              9,361
++ finesine / muls / folds             ~7,000
+                                 total ~93,400     (measured: 92,781 / 93,640)
+```
+
+**So the single biggest item in the frame is two 32-bit divides per seg.** `hex.fixed_div 8,4` is the
+most expensive primitive in the whole cost table. That is rung 3d (§8), not this rung.
 
 ---
 
@@ -96,7 +109,25 @@ complexity docs for the ORDER, not the constant.**
 
 `plane_render.fj:132` reads the same table per span and is still unconverted — a leftover lever.
 
-### 2b. Clip pass 2's column loop to the unclaimed window (−1.0M / −0.75M)
+### 2b. ~~Clip pass 2's column loop to the unclaimed window~~ — ❌ **MEASURED AND DROPPED**
+
+Worth **≤0.08M**, and negative once the mandatory fix is paid. Two reasons, both measured
+(`scratchpad/prefix_len.py`):
+
+1. **Pass 2 barely walks anything.** Only 28/51 segs reach it, visiting ~207/200 columns of which
+   160 are useful. The "840 visits, 680 wasted (81%)" figure in §1 counts columns walked by pass 1's
+   **prescan**, which then rejects those segs outright — that work is not pass 2's and it already
+   pays for itself many times over (removing the prescan costs +9.5M). Prefix is 6/26 columns and
+   suffix 37/14 across the whole frame.
+2. **Skipping the prefix is not free.** `scale` accumulates `scale += scalestep` on EVERY column
+   including drawn ones, so starting at the prescan's column needs `scale += scalestep * (x - x1)`
+   once per seg (~3.5k) — more than the ~0.2 prefix columns per seg are worth. I built this, and it
+   came back NOT byte-exact for exactly this reason.
+
+Recorded so nobody rebuilds it. The END clip needs no scale fix, but at 37/14 columns it is worth
+~0.07M — also not worth the `[dmin, dmax]` machinery.
+
+### 2b-OLD (superseded, kept for the reasoning)
 
 76–81% of pass-2 column visits are already-drawn columns whose body is a no-op — but each still pays
 `read_byte drawn[x]`, the ditto invalidation, the pointer step and the loop test (~1.5k).
@@ -138,11 +169,16 @@ Costed on **measured unit prices** (doubling, byte-exact — see §1a), not esti
 
 | item | count spawn / worst | unit | spawn | worst |
 |---|---|---:|---:|---:|
-| extra `wall_scale_setup_m` (face-carrying segs) | 2 / 24 | 15.4k / 23.6k | 0.03M | 0.57M |
+| extra `wall_scale_setup_m` (face-carrying segs) | 2 / 12 | **93k** | 0.19M | 1.12M |
 | back-sector projection, **sparse-delta** (below) | 54 / 108 | ~3.8k | 0.21M | 0.41M |
 | slot checks over the claim scan's pairs | 245 / 247 | ~0.5k | 0.12M | 0.12M |
 | the per-column splice test | 160 / 160 | ~1k | 0.16M | 0.16M |
-| | | | **+0.52M** | **+1.26M** |
+| | | | **+0.68M** | **+1.81M** |
+
+⚠ **`STEP_SEG_BUDGET` is 12, not 24** — at 93k per face-carrying seg it is the dominant term at the
+worst viewpoint (24 segs would be +2.94M). At spawn only **2** segs want a face, so the budget costs
+nothing there and only trims the heavy viewpoint. Tune it against the prototype's picture, not
+against the arithmetic.
 
 ⚠ **Use the ROW RULE for the back projection.** A full `column_params_m` measures **11.9k** (it runs
 `rep(6,j) fixed_mul_lo.row` twice, over `scale`'s six nibbles). The back row is
@@ -163,23 +199,24 @@ lacked and had to retrofit (`PNEAR_SEG_BUDGET`). Set it once; no viewpoint can b
 |---|---:|---:|---|
 | rung 3a, as it shipped | 21,736,934 | 26,557,125 | |
 | **− 2a `xtoviewangle` dispatch** | **−1,142,316** | **−1,237,255** | ✅ **measured, byte-exact** |
-| = the new baseline | **20,594,618** | **25,319,870** | ✅ **in the tree now** |
-| − 2b clip pass 2 to the unclaimed window | −1.0M | −0.75M | estimated |
-| + 2c step faces, K=1, flat-shaded | +0.52M | +1.26M | measured units, modelled counts |
-| **= rung 3c** | **≈20.1M** | **≈25.8M** | |
-| (textured faces instead of flat) | ≈21.1M | ≈27.0M | |
-| (− W1 flat-coloured walls, §5) | ≈17.3M | ≈24.1M | |
+| = the baseline in the tree now | **20,594,618** | **25,319,870** | ✅ |
+| ~~− 2b column-loop clip~~ | ~~−1.0M~~ | ~~−0.75M~~ | ❌ measured ≤0.08M — dropped |
+| + 2c step faces, K=1, flat, budget 12 | +0.68M | +1.81M | measured units, counted populations |
+| **= rung 3c** | **≈21.3M** | **≈27.1M** | |
+| (textured faces instead of flat) | ≈22.3M | ≈28.3M | |
+| **then rung 3d (§8), the two divides** | **≈19.4M** | **≈23.7M** | the route to ≤20M |
+| (or −W1 flat-coloured walls instead, §5) | ≈18.4M | ≈25.4M | owner's look call |
 
-**Confidence:**
-- **~85%** that spawn lands **at or about 20M**. Only 2b is unmeasured now, and even at *zero* the
-  frame is 21.1M — the step faces cost less than 2a already saved.
-- **~95%** that *every* viewpoint stays inside the owner's **20–30M band**. Worst case with 2b
-  delivering nothing and textured faces: 26.6M.
-- **~0%** that the worst viewpoint reaches 20M without a culling redesign — there `wall_scale_setup_m`
-  alone is 4.78M and the walk skeleton plus wedge cull are 6.0M. **Do not promise it.**
-
-The margin comes from a real place: **2a alone paid for the whole rung.** Step faces cost less than
-the one optimisation that preceded them.
+**Confidence, stated on measured ground:**
+- **~90%** that rung 3c lands **inside the owner's 20–30M band at every viewpoint** — every term is
+  now either measured or a counted population times a measured unit price.
+- **~75%** that spawn lands **at about 21M**, i.e. *close to* 20M but **not under it**. I am no
+  longer claiming ≤20M for rung 3c alone: 2a's −1.14M was real but 2b's −1.0M was not, and the step
+  faces cost more than I first priced because `wall_scale_setup_m` is 93k, not 15k.
+- **≤20M needs one more lever** — either rung 3d (§8, the two `fixed_div`s, worth ~1.9M/~3.4M) or
+  W1 flat-coloured walls (−2.86M/−1.69M, measured, but it changes the look). **Rung 3d is the
+  honest route and it is a proven pattern; W1 is the owner's call.**
+- **~0%** that the worst viewpoint reaches 20M without a culling redesign. **Do not promise it.**
 
 ---
 
@@ -260,3 +297,32 @@ fill time), or two columns with identical clip rows and different steps will dit
 - **A generated dispatch table self-invokes its `init`** (the text ends with `<label>.init`), so
   there is nothing to wire at startup — but the `.lookup` index register must be exactly
   `index_nibbles` wide, same as the `read_table_packed` it replaces.
+- **`scale` accumulates on EVERY column, drawn or not.** Any change to pass 2's column loop bounds
+  must carry `scale` forward or the frame silently shifts. This killed 2b.
+- **The assembler rejects an unused label**, so removing the last user of a `<`-list global is a
+  hard error, not a warning to ignore.
+- **The Windows console is cp1255** — a `⚠` in a probe's `print` raises `UnicodeEncodeError` and can
+  destroy the diagnostic you actually needed. Keep probe output ASCII.
+
+---
+
+## 8. Rung 3d — the two divides. This is the route to ≤20M.
+
+§1a's reconciliation says **two `hex.fixed_div 8,4` are 77k of `wall_scale_setup_m`'s 93k**, i.e.
+**2.16M at spawn and 3.93M at the worst viewpoint** — the largest single item in the frame by a wide
+margin, and `fixed_div 8,4` at 38,500 ops is the most expensive primitive in the cost table.
+
+`scale_from_global_angle` computes `FixedDiv(projection·sin, den)` twice per seg (at x1 and at x2).
+The lever is the same reciprocal-dispatch pattern that already worked for `slopediv_recip8` and
+`tantoangle` and `xtoviewangle`: a table of reciprocals indexed by the denominator's high bits, then
+a multiply.
+
+⚠ **Unlike 2a, this is NOT byte-exact.** DOOM's `SlopeDiv` genuinely *is* a coarse table, which is
+why `slopediv_recip8` was exact; `FixedDiv` here is a true 32-bit division, so a reciprocal changes
+low bits and occasionally shifts a row by 1. **The oracle must adopt it too**, and the gates re-bless
+against the new oracle — the same deal rung 3c already makes for the step faces. Estimated
+**−1.5M to −1.9M spawn / −2.8M to −3.4M worst**, which is what takes the frame under 20M.
+
+Cheaper byte-exact fallback worth measuring first: `hex.div n` is **n²(10@+20)**, so narrowing the
+divide's width where the operand ranges genuinely allow it is quadratic in payoff and changes
+nothing. Check the actual ranges of `num`/`den` before assuming 8 nibbles are needed.

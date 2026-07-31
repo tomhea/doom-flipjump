@@ -64,6 +64,7 @@ FLOOR_BG = 96                     # floor band palette index (pre-colormap)
 WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap) until textures land
 WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column (ops + bank knob)
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
+WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
 LIGHT_SHIFT = 3                   # sector light (0..255) -> colormap row (0..31): light >> 3
 COLORMAP_LIGHTS = 32              # COLORMAP usable light rows (0..31; invuln/black sit past these)
 _SLOPEDIV_RECIP = slopediv_recip_table()   # perf #13: shared block-FP reciprocal table for _slope_div
@@ -637,6 +638,34 @@ class ReferenceModel:
         return (scale // max(1, h)) % tw
 
     @staticmethod
+    def wall_noise(x: int, run: int) -> int:
+        """V1 — the PSEUDO-RANDOM wall grain: how many colormap steps to darken run `run` of screen
+        column `x` by. The owner's idea, and the cheap answer to wall texturing: a real texture
+        needs a texel fetch per wall row (5,612 rows a frame at ~1.4k each = +19.6M) whereas this
+        needs no lookup at all.
+
+        ⚠ It darkens through the COLORMAP, it does NOT xor the palette index. DOOM's palette runs
+        dark→bright with the index, so `0 ^ 3` turns black into light grey and a dark wall erupts in
+        white confetti — the first prototype did exactly that. A colormap step is by construction
+        the same colour, dimmer, so the grain always reads as surface roughness.
+
+        XORs and constant shifts ONLY: those are ~27 ops each in fj, where a `read_byte` is ~1,060
+        and a multiply is thousands. The fj emit loop reproduces this expression exactly (R6).
+
+        Two constants were chosen by MEASUREMENT, not taste (5 variants swept, spawn + (-480,256)):
+
+        * **the grain is keyed on `x >> 2`, not `x`.** Per-column noise breaks DITTO — one differing
+          pixel forces the whole column to be emitted — and ditto is worth 4.83M. Grouping four
+          columns keeps ditto alive (100 → 76 columns rather than 100 → 44) and costs +375 pairs
+          instead of +1,198, i.e. a THIRD of the emit for MORE visible grain.
+        * **the step is `<< 2`, so 0/4/8/12 rows, not 0..3.** Colormap row 0 is the identity and one
+          step barely moves an already-dark colour: at 0..3 only 375 pixels changed on the whole
+          frame. At 0/4/8/12 it is 2,896 — 7.7x the effect for less than a third of the pairs."""
+        h = (x >> 2) ^ (x >> 4) ^ (run * 5) ^ (run << 1)
+        h ^= h >> 3
+        return (h & ((1 << WALL_NOISE_BITS) - 1)) << 2
+
+    @staticmethod
     def wpx_strip(texels, th, tw, colormap, light_row, h, *, cap=WPX_RUN_CAP):
         """M13-WPX — the 1×1 run-list of an `h`-pixel-tall wall column: entry j is
         `[rel_end_exclusive, colour]`, the last one ending exactly at `rel = h`.
@@ -789,7 +818,8 @@ class ReferenceModel:
 
     def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True,
                           wall_mode: str = "textured", floor_mode_ft1: bool = False,
-                          plane_near: bool = False, planes_out: list | None = None) -> bytes:
+                          plane_near: bool = False, planes_out: list | None = None,
+                          wall_noise: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -932,10 +962,14 @@ class ReferenceModel:
                         wrow = self.wall_light_row(self.wall_lightnum(sec.light, wall_contrast),
                                                    bottom - top + 1, sec.ceil_h - sec.floor_h)
                         ya = top
-                        for rel, c in self.wpx_strip(texels_p, th_p, tw_p, colormap, wrow,
-                                                     bottom - top + 1):
+                        for ri, (rel, c) in enumerate(self.wpx_strip(texels_p, th_p, tw_p, colormap,
+                                                                     wrow, bottom - top + 1)):
+                            # V1: the pseudo-random grain -- one colormap step-down per RUN, keyed on
+                            # the screen column, so the fj emit loop needs exactly one cm.apply per
+                            # pair it was already emitting (no run splitting, no extra bank).
+                            cc = colormap[self.wall_noise(x, ri)][c] if wall_noise else c
                             for y in range(ya, top + rel):
-                                fb[y * cfg.VIEW_W + x] = c
+                                fb[y * cfg.VIEW_W + x] = cc
                             ya = top + rel
                     elif top <= bottom and wall_mode == "W2S":
                         # M13-W2S: band j of the strip covers rows [top + (j*h>>4), top + ((j+1)*h>>4))

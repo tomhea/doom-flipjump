@@ -14,7 +14,8 @@
 | **+ V3 step faces** | **26,545,502** | **27,604,046** | **32,137,393** |
 
 All three **BYTE-EXACT** vs `render_wall_frame(..., wall_noise=True, sky=True, near_steps=True)`
-(`scratchpad/v3_check.py`). The worst viewpoint sits inside the owner's accepted 30–35M band but
+(`scratchpad/v3_check.py`), and the full suite is green: **`tests/fj/test_lines_render.py` 11/11
+passed in 13:51** on this tree. The worst viewpoint sits inside the owner's accepted 30–35M band but
 with ~3M of headroom, and V4 is priced at +2.8M — see §4 before starting it.
 
 ---

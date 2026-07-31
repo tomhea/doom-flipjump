@@ -1342,6 +1342,7 @@ class ReferenceModel:
                                 fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
             if things_out is not None:
                 things_out.append(sfrag)                 # the per-column fragments, for the gates
+                things_out.append(n_thing)               # ... and how many things the budget let in
             if things:
                 # V4 - splice the sprite fragments. Each is ONE contiguous block of runs at
                 # `[y0 + rel]`, clipped to the screen exactly the way the fj emit clips it: runs

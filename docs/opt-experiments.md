@@ -347,7 +347,29 @@ Two things fall out of this, and the first is more useful than the second:
 * At 16, **both sprite-heavy viewpoints land inside the owner's 30–35M band** (31.8M and 35.2M),
   against 37.2M / 36.4M at 24.
 
-**Left at 24.** This is the one lever in the campaign that buys ops with PICTURE — it drops the eight
-furthest things at a crowded viewpoint — and V4 exists to make things visible. It is one constant
-(`reference_model.THING_BUDGET`), the oracle follows it automatically, and the numbers above are what
-it is worth, so the call is the owner's and it costs one build to take.
+### What it actually costs in PICTURE (`scratchpad/thing_budget_demo.py`, oracle-side, seconds)
+
+⚠ My first write-up of this said the budget "drops the eight furthest things at a crowded
+viewpoint", which counted right and implied wrong. Rendered:
+
+| viewpoint | things projectable | budget 24 | budget 16 | budget 8 |
+|---|---:|---|---|---|
+| spawn | 0 | — | — | — |
+| courtyard | 12 | 0 px | 0 px | 122 px |
+| tree | 30 | **0 px** | 41 px | 421 px |
+| worst | 51 | 85 px | 104 px | 141 px |
+
+(px = pixels differing from the unbounded frame, out of 16,000.)
+
+* **At the courtyard and spawn the budget never binds** — 12 and 0 projectable things.
+* **At the tree, 24 is already LOSSLESS.** Thirty things project; the six the budget turns away are
+  behind geometry or off-screen and change nothing. Dropping to 16 costs **41 pixels — 0.26% of the
+  frame — for −5.4M ops.**
+* **At the worst viewpoint the shipped 24 already costs 85 px** (51 project, 24 get in). Going to 16
+  costs 19 pixels more and −1.2M ops.
+
+**So the honest recommendation is 16, not 24.** The trade at the tree is 41 pixels against 5.4M ops,
+and at the worst viewpoint 19 pixels against 1.2M — and 16 is what puts both frames inside the
+owner's 30–35M band. Still the owner's call, because it is a picture change, but the earlier framing
+("this is the lever that costs picture") overstated it: what the budget drops are, almost entirely,
+things that were never visible.

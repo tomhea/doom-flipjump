@@ -67,7 +67,7 @@ _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wed
                            "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull",
                            "emitnopair", "emitnowalk", "atantwice",
                            "slopetwice", "tabletwice", "noflush", "colstub",
-                           "noprescan", "noproj", "projtwice", "scaletwice"})
+                           "noprescan", "noproj", "projtwice", "scaletwice", "skyall"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -1024,7 +1024,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
             f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
             f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
-            f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * (cfg.VIEW_H + 1)}")]
+            f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * (cfg.VIEW_H + 1)}, "
+            f"{1 if 'skyall' in ablate else 0}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -1405,6 +1406,9 @@ def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
     ]
 
 
+SKY_BANK_MUL = 3
+
+
 def _lines_sky_bank(rm, asset_wad, cfg):
     """V2 — the SKY bank: one `[y2_cumulative][colour]` band list per sky texture column, plus the
     compile-time per-column offset table.
@@ -1430,11 +1434,11 @@ def _lines_sky_bank(rm, asset_wad, cfg):
     if tex is None:
         return "", ""
     _texels, _th, tw = tex
-    stride = 2 * (H + 1)                      # worst case: a colour change every row, + terminator
-    out = [f"// V2 sky bank: {2 * tw} lists (tw={tw}, doubled so skybase+skyoff needs NO mask) "
+    stride = 2 * (H + 1) + 1                  # worst case: a change every row, + the count header
+    out = [f"// V2 sky bank: {SKY_BANK_MUL * tw} lists (tw={tw}, x{SKY_BANK_MUL} so the UNMASKED skybase+skyoff needs no mask) "
            f"x {H} rows, [y2_cumulative][colour] (stride {stride} dw)",
            "skybands:"]
-    for u in range(2 * tw):
+    for u in range(SKY_BANK_MUL * tw):
         body, prev = [], None
         for y in range(H):
             c = rm.sky_texel_u(asset_wad, {}, u, y)
@@ -1443,7 +1447,11 @@ def _lines_sky_bank(rm, asset_wad, cfg):
                     body[-2] = y                    # close the previous run at this row
                 body += [H, c]                      # provisional end, patched by the next change
                 prev = c
-        body += [0, 0]                              # rel==0 terminator, matching the WPX bank form
+        # !! The PLANE band format is [n][y2][colour]... -- a COUNT HEADER then exactly n pairs
+        # (`pwalk`: read_byte_and_inc cntN, then loop while iP < cntN). It is NOT the WPX bank's
+        # rel==0-sentinel form. Emitting the WPX shape here made the walker read the first pair's
+        # y2 AS THE COUNT and desynchronise, so every sky pixel came out wrong.
+        body = [len(body) // 2] + body
         assert len(body) <= stride, f"sky list overflows its stride: {len(body)} > {stride}"
         out.extend([f";{v:#x} * dw" for v in body] + [";0 * dw"] * (stride - len(body)))
     offs = generate_dispatch_table_fj(

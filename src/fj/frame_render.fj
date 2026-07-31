@@ -1311,9 +1311,9 @@ ns frame {
     // ceiling prefix walk streams it unchanged.
     // `u = skybase + skyoff[x]` needs NO MASK: both addends are <= 127 and the bank holds 256
     // lists with entry u carrying sky column (u & 127), so the sum can never leave it (max 253).
-    def lines_sky_ceil skystride, cbufa, x, skb, soff, issky, pidreg @ notsky, tskb, end < skybands {
+    def lines_sky_ceil skystride, skyall, cbufa, x, skb, soff, issky, pidreg @ notsky, tskb, end < skybands {
         skypid.lookup issky, pidreg
-        hex.if0 2, issky, notsky
+        rep(1-skyall, k) hex.if0 2, issky, notsky   // skyall=1: force it (bisect probe)
         skyoff.lookup soff, x
         hex.add 2, soff, skb
         hex.zero w/4, cbufa                     // widen before mul_const (R11 reads w/4 nibbles)
@@ -1445,7 +1445,7 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride \
+            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
               dfull, dchk2, dgchk, dschk, dpl, dsame, demitted, dvalid, dct, dfs, dpid, \
@@ -1516,7 +1516,7 @@ ns frame {
         // M13-2S rung 3a: which SURFACES this column's plane regions belong to (see lines_col_plane)
         rep(pnear, k) .lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd
         rep(sky, k) .lines_sky_base skb
-        rep(sky, k) .lines_sky_ceil skystride, cbufa, x, skb, soff, issky, pval8
+        rep(sky, k) .lines_sky_ceil skystride, skyall, cbufa, x, skb, soff, issky, pval8
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.

@@ -26,6 +26,27 @@ still ~9M at the tree, because every one of E1M1's 250 things gets projected.
 
 ---
 
+## 1a. ⚠ HOW TO SEE IT — the features are OPT-IN, and only the walker is wired
+
+Every one of V1–V4 is a keyword flag on `emit_wall_renderer`, defaulting to **False**. That is why
+`python scripts/walk_e1m1.py` showed the pre-V1 tier: it did not pass them.
+
+**`scripts/walk_e1m1.py` now turns all four ON by default** (`--no-grain`, `--no-sky`, `--no-steps`,
+`--no-things` to drop any of them). Sprite art comes from `--sprites assets/freedoom1.wad`; the
+cut-down fixture wad has no sprite lumps at all, so if that file is missing V4 turns itself off with
+a warning instead of failing to build. ⚠ **Expect ~10 minutes to assemble** — the sprite bank makes
+it a ~42M-character program.
+
+### Still NOT wired (deliberately, and each needs a decision)
+
+| entry point | state | what it needs |
+|---|---|---|
+| `doomfj.build.build_wall_renderer` (the SHIPPED binary) | passes no feature flags | flags + a re-check of its R0 gate: it asserts `span < flat_max_words` (2²⁶) and the sprite bank grows the program ~5.5M characters |
+| `tests/fj/test_lines_render.py` (the 11-test gate) | tests the flag-OFF tier | it is the ungated-build regression net, which is worth keeping; V1–V4 are gated by `scratchpad/v4_check.py` instead |
+| a committed regression test for V1–V4 | **none exists** | the four-viewpoint gate lives in `scratchpad/v4_check.py`. Promoting it to `tests/` is the single most valuable piece of unfinished work here |
+
+---
+
 ## 2. What V4 looks like
 
 `render_wall_frame(..., things=True, sprite_wad=...)` and
@@ -94,9 +115,33 @@ runs, against the cached binary.
 
 ---
 
-## 5. Where to start
+## 5. What is left, in the order I would do it
 
-1. `docs/opt-experiments.md`, section "What is left, ranked by measured upside".
-2. The two gates above.
-3. If touching per-column storage, prove the model in Python first (`v3_slotmodel.py` is the
-   pattern) — EXP-6 lost a build cycle by not doing that.
+1. **Promote `scratchpad/v4_check.py` to a committed test.** V1–V4 have no regression net in
+   `tests/`. Everything else on this list can break them silently. It is four viewpoints against the
+   oracle and it already caches its binary.
+2. **Wire the flags into `build_wall_renderer`** and re-check its R0 gate (`span < 2**26`). The
+   sprite bank adds ~5.5M characters; if the span goes over, either raise the limit (DESIGN §1.2
+   allows it, RAM-only) or ship with `things=False` until the bank shrinks.
+3. **Decide `THING_BUDGET`** — EXP-8 in `docs/opt-experiments.md` has the curve. 24 → 16 is worth
+   −5.4M at the tree and −1.2M at the worst point and **exactly zero** at spawn and the courtyard,
+   at the price of the eight furthest things at a crowded viewpoint. One constant; the oracle
+   follows it.
+4. **The emit half, ~8.1M at the tree** (`docs/opt-experiments.md`, "What is left"). A fragmented
+   column walks the ceiling list, the wall run-list and the floor list twice — once per region. The
+   fix is a RESUMABLE walker: `qwalk` already stops mid-list holding `ptr`/`iP`/`y2r`, so a second
+   entry point that skips the count header and re-emits the held pair against a new bound would let
+   region 2 continue where region 1 stopped. Intricate; measure with `--reconly` either side of it.
+5. **`project_thing`, still ~7M at the tree.** After EXP-7 the remaining rejects are DOOM's
+   `|tx| > tz<<2`, which is a 4× FOV bound. The real screen test is `x2 < 0 or x1 >= VIEW_W`, i.e.
+   roughly `|tx| <= tz + sprite half-width` — a much tighter reject, and it would skip the
+   reciprocal for far more things. Derive the bound exactly and **verify it exhaustively in Python
+   before building**, the way EXP-7's was.
+6. **V3's step faces have had no optimisation pass at all** (+5.7M at the worst viewpoint).
+
+### Two rules this session paid for
+
+* **Prove a storage model in Python before spending a build on it.** `scratchpad/v3_slotmodel.py`
+  is the pattern; EXP-6 skipped it and lost a cycle.
+* **Run the parse-only check before every real build** — the fj sources against a two-line `main`,
+  ~40 seconds, catches every unused-label and arity error. A real build is ~10 minutes.

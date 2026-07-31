@@ -59,6 +59,21 @@ def main():
                     help="turn OFF M13-2S rung 3a (attribute each column's floor/ceiling to the"
                          " nearest MARKING seg instead of to the wall that claims the column) --"
                          " i.e. go back to the pre-rung-3a look, for comparison")
+    # ── the four VISUAL FEATURES (V1-V4). ON by default: they are what the renderer looks like
+    # now, and every one is byte-exact against the oracle. Each costs ops, so each has an off
+    # switch -- docs/opt-experiments.md has what they are worth.
+    ap.add_argument("--no-grain", action="store_true",
+                    help="V1 OFF: no pseudo-random wall texture grain")
+    ap.add_argument("--no-sky", action="store_true",
+                    help="V2 OFF: sky-flat ceilings go back to a plain plane")
+    ap.add_argument("--no-steps", action="store_true",
+                    help="V3 OFF: no step faces (stair risers, ledge fronts, door lintels)")
+    ap.add_argument("--no-things", action="store_true",
+                    help="V4 OFF: no thing sprites")
+    ap.add_argument("--sprites", default="assets/freedoom1.wad", metavar="WAD",
+                    help="wad to take SPRITE art from. The cut-down test fixture has no sprite"
+                         " lumps at all, so things need a full wad here; if it is missing, V4"
+                         " turns itself off with a warning rather than failing to build.")
     ap.add_argument("--frames", type=int, default=0, metavar="N",
                     help="render N frames HEADLESSLY (no window) and report timings, then exit"
                          " -- use this to check the fj side independently of pygame")
@@ -68,14 +83,37 @@ def main():
     mw = WadFile.from_path(str(ROOT / args.wad))
     aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
 
+    # V1-V4 ride on the rung-3a (plane_near) lines tier; the rung-3b two-sided tier is a different
+    # emit path that none of them was written against, so they are off there.
+    feats = not args.two_sided
+    spr_path = ROOT / args.sprites
+    want_things = feats and not args.no_things
+    if want_things and not spr_path.exists():
+        print(f"  !! {args.sprites} not found -- V4 things OFF"
+              " (the cut-down fixture wad has no sprite lumps)")
+        want_things = False
+    spr = WadFile.from_path(str(spr_path)) if want_things else None
+    on = [n for n, f in (("grain", feats and not args.no_grain),
+                         ("sky", feats and not args.no_sky),
+                         ("steps", feats and not args.no_steps),
+                         ("things", want_things)) if f]
+
     print(f"assembling the fj renderer ({args.map}, lines mode, "
           f"{args.wall_mode}+{args.floor_mode}"
-          f"{'+two_sided' if args.two_sided else '' if args.no_plane_near else '+plane_near'}) ...")
+          f"{'+two_sided' if args.two_sided else '' if args.no_plane_near else '+plane_near'}"
+          f"{'+' + '+'.join(on) if on else ''}) ...")
+    if want_things:
+        print("  (the sprite bank makes this a ~42M-character program:"
+              " expect ~10 minutes to assemble)", flush=True)
     t0 = time.perf_counter()
     main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
                                   floor_mode=args.floor_mode, wall_mode=args.wall_mode,
                                   raster_mode="lines", two_sided=args.two_sided,
-                                  plane_near=(not args.no_plane_near) and not args.two_sided)
+                                  plane_near=(not args.no_plane_near) and not args.two_sided,
+                                  wall_noise=feats and not args.no_grain,
+                                  sky=feats and not args.no_sky,
+                                  steps=feats and not args.no_steps,
+                                  things=want_things, sprite_wad=spr)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")

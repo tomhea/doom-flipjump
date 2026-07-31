@@ -579,7 +579,7 @@ ns stream {
         hex.mul_const w/4, woff, woff, wpxblock*dw       // block index -> bank offset
         hex.mov 2, wlen, yend
         hex.sub 2, wlen, y1
-        .wpx_wall y1, wlen, yend, woff, wstripbase, wpxstride
+        .wpx_wall y1, wlen, yend, woff, wstripbase, wpxstride, 0, 0   // 2S tier: no grain
       done:
         stl.fret exp_ret
       kind: hex.vec 2

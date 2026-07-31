@@ -253,3 +253,50 @@ not count a `hex.vec` INITIALISER as a use of a macro parameter, so `minz`, `pro
 **`hex.vec n, <expr>` cannot carry a macro parameter.** To hoist a parameter-derived constant out of
 a hot macro it has to be passed in already-materialised, or set once behind a flag like the sin/cos
 cache above.
+
+## EXP-6 — per-column fragment slot as HEX CELLS instead of packed bytes ❌ **REVERTED**
+
+The record half writes six bytes per fragment and the emit reads them back. `write_byte` is 41@ and
+`write_hex` is `w(0.75@+5)+20@+39`, so one hex cell — eight nibbles, four bytes' worth — costs about
+what 1.3 byte writes do. Two cells should replace six byte writes and six byte reads.
+
+**It does not render.** The tree lost every sprite pixel again (2,013 px, the exact sprite count) and
+picked up 11 non-monotone pairs. The layouts look self-consistent on paper — 16 slots per column,
+two 8-slot cells, the same index arithmetic on both sides — so the mismatch is somewhere in how a
+packed-BYTE array (one dw slot holds a whole byte) and a hex cell (one dw slot holds one NIBBLE)
+share an address space, and it was not worth more build cycles for a lever worth ~1M.
+
+Reverted; the EXP-5 binary was still in the cache, so re-verifying the revert took seconds.
+
+**If it is retried:** prove the storage model in Python first, the way `scratchpad/v3_slotmodel.py`
+did for V3 — write a cell, read it back through the same address arithmetic, and check the bytes,
+before spending a build.
+
+---
+
+## Campaign summary
+
+| | spawn | courtyard | tree | worst |
+|---|---:|---:|---:|---:|
+| V4 complete (start) | 28,104,383 | 36,010,624 | 45,252,666 | 39,448,264 |
+| **now** | **27,823,804** | **33,859,325** | **37,933,652** | **37,003,252** |
+| | −0.28M | −2.15M | **−7.32M (−16%)** | −2.45M |
+
+Every step byte-exact. Five experiments kept, two reverted, and both reverts are written up above
+because the reasons generalise.
+
+### What is left, ranked by measured upside
+
+1. **`project_thing`, still ~9M at the tree.** Every one of E1M1's 250 things is projected at an
+   open viewpoint — the BSP bounds which subsectors are visited, not how many things they hold. A
+   conservative reject cheaper than the four multiplies is the biggest single lever left. ⚠ The
+   obvious ones do NOT work: a distance bound can only ACCEPT (tz is not bounded below by the
+   distance), and the seg path's `wedge_reject` is not conservative for a sprite, which has width
+   the centre point does not know about.
+2. **The emit half, 8.1M at the tree.** A fragmented column walks the ceiling list, the wall
+   run-list and the floor list TWICE — once per region. Walking each list once and emitting around
+   the sprite is a real restructure, but it is where the emit's cost is.
+3. **`THING_BUDGET`.** The straight cost knob: 24 → 16 would take roughly a third off both halves at
+   a sprite-heavy viewpoint, at the price of the furthest things. This is the owner's call, not a
+   correctness question.
+4. **V3's step faces, +5.7M at the worst viewpoint**, have had no optimisation pass at all.

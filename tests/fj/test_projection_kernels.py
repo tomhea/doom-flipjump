@@ -241,7 +241,7 @@ def test_scale_from_global_angle_byte_exact_vs_oracle(tmp_path):
     body, data, expected = [], [], b""
     for k, (vis, view, nrm, rwd) in enumerate(SCALE_CASES):
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, {proj}",
+            body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, {proj}, 0",
                      "hex.print_as_digit 8, s, 0", "stl.output 10"]
         data += [f"vis{k}: hex.vec 8, {vis & 0xFFFFFFFF}", f"vw{k}: hex.vec 8, {view & 0xFFFFFFFF}",
                  f"nrm{k}: hex.vec 8, {nrm & 0xFFFFFFFF}", f"rwd{k}: hex.vec 8, {rwd & 0xFFFFFFFF}"]

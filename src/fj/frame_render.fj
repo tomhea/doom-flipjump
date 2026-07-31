@@ -1185,7 +1185,172 @@ ns frame {
     // before tsstop and 1386 after it (measured; walking all of them through this front end costs
     // +11.9M, over the ceiling -- see docs/handoff-m13-2s.md §4).
     // Returns via stl.fret seg_ret. @requires hex.init & stl.ptr_init
-    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb \
+    // ── V3 step faces — the RECORD half ────────────────────────────────────────────────────────
+    // A two-sided boundary whose front ceiling is HIGHER (an upper face: a door lintel, a window
+    // head) or whose back floor is HIGHER (a lower face: a stair riser, a ledge front) shows a
+    // vertical strip of wall that this tier otherwise never draws -- without it a step you can walk
+    // up is invisible, the floor just changes colour where it rises.
+    //
+    // The leaf this lives in had NO projection machinery at all (its inputs are geometry and claim
+    // state), so this is a projection path ADDED to a claim walk, not a splice into an existing one.
+    // Two things bound the cost. `STEP_SEG_BUDGET` gates the per-seg SETUP -- a face-carrying seg
+    // pays a full ~93k wall_scale_setup_m, and at a heavy viewpoint every marking seg would
+    // otherwise qualify. And the slots are WRITE-ONCE, which is what makes "nearest wins" free: the
+    // walk is front-to-back, so the FIRST writer is the nearest.
+    //
+    // The scale is INTERPOLATED across the seg (one setup, then `+= scalestep` per column) exactly
+    // as the wall path's is -- an exact per-column scale_from_global_angle is ~40k ops per COLUMN
+    // against ~93k once per SEG. The oracle interpolates identically (ReferenceModel.render_wall_frame).
+    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride \
+            @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ust1, ust2, ust3, uclz, \
+              ukhi, uhicl, uwr, lskip, ldo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
+              fcap, fnorm, fdist, fscale, fsstep, fwu1, fwu2, fwl1, fwl2, fra, frb, fcvh, \
+              fx, fdb, fdp, fdv, fsb, fsp, fsv, fbb, fbp, fidx, fy1, fy2, end \
+            < viewangle, viewz, sgn_aff, x1, x2, n_face, drawn, sfflag, sfslot, \
+              seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls {
+        hex.if0 2, seg_fmask, nofaces           // this boundary carries no face at all (compile-time)
+        hex.set 2, fcap, budget
+        hex.cmp 2, n_face, fcap, dofaces, nofaces, nofaces
+      dofaces:
+        hex.inc 2, n_face
+        proj.wall_setup_sgn fnorm, fdist, sgn_aff, seg_segangle
+        proj.wall_scale_setup_m fscale, fsstep, viewangle, fnorm, fdist, x1, x2, projection
+        // the four world heights as map-unit deltas from the eye, hoisted once per seg exactly as
+        // pass 2 hoists wtc8/wtf8. Upper face = [row(front ceil), row(back ceil) - 1]; lower face =
+        // [row(back floor), row(front floor)] -- the oracle's wall_screen_span pairs, verbatim.
+        hex.mov 4, fwu1, seg_uh1
+        hex.sub 4, fwu1, viewz + 4*dw
+        hex.sign_extend 8, 4, fwu1
+        hex.mov 4, fwu2, seg_uh2
+        hex.sub 4, fwu2, viewz + 4*dw
+        hex.sign_extend 8, 4, fwu2
+        hex.mov 4, fwl1, seg_lh1
+        hex.sub 4, fwl1, viewz + 4*dw
+        hex.sign_extend 8, 4, fwl1
+        hex.mov 4, fwl2, seg_lh2
+        hex.sub 4, fwl2, viewz + 4*dw
+        hex.sign_extend 8, 4, fwl2
+        hex.set 8, fcvh, viewh1
+        hex.zero 8, fx
+        hex.mov 2, fx, x1
+        hex.set w/4, fdb, drawn                 // the occlusion flag, read but never written here
+        hex.ptr_index fdp, fdb, fx
+        hex.set w/4, fsb, sfflag                // one byte per column: which slots are filled
+        hex.ptr_index fsp, fsb, fx
+        hex.zero w/4, fidx
+        hex.mov 2, fidx, fx
+        hex.shl_hex w/4, 1, fidx                // slotstride = 16 bytes -> a whole-nibble shift
+        hex.set w/4, fbb, sfslot
+        hex.ptr_index fbp, fbb, fidx
+      floop:
+        hex.cmp 2, fx, x2, fbody, nofaces, nofaces
+      fbody:
+        hex.read_byte fdv, fdp
+        hex.if0 2, fdv, fwork                   // already painted by a nearer wall -> nothing to show
+        ;fnext
+      fwork:
+        hex.read_byte fsv, fsp
+        // ---- the UPPER face -------------------------------------------------------------------
+        hex.if0 1, seg_fmask, uskip             // nibble 0 = has an upper face
+        hex.if0 1, fsv, udo                     // nibble 0 = this column's upper slot is filled
+        ;uskip
+      udo:
+        proj.step_rows fra, frb, fscale, fwu1, fwu2, centeryfix_c
+        hex.dec 8, frb                          // ... ends one row ABOVE the back ceiling
+        // the slot stores BYTES, so emptiness is decided HERE rather than at the splice:
+        // valid <=> A <= B and B >= 0 and A <= VIEW_H-1, stored as (max(A,0), min(B,VIEW_H-1)).
+        // (Proven equivalent to the oracle's store-raw-then-clip at every gate viewpoint --
+        // scratchpad/v3_slotmodel.py.)
+        hex.scmp 8, fra, frb, ust1, ust1, uskip
+      ust1:
+        hex.sign 8, frb, uskip, ust2
+      ust2:
+        hex.scmp 8, fra, fcvh, ust3, ust3, uskip
+      ust3:
+        hex.mov 8, fy1, fra
+        hex.sign 8, fra, uclz, ukhi
+      uclz:
+        hex.zero 8, fy1
+      ukhi:
+        hex.mov 8, fy2, frb
+        hex.scmp 8, frb, fcvh, uwr, uwr, uhicl
+      uhicl:
+        hex.mov 8, fy2, fcvh
+      uwr:
+        hex.write_byte_and_inc fbp, fy1
+        hex.write_byte_and_inc fbp, fy2
+        hex.write_byte_and_inc fbp, seg_ucls
+        hex.ptr_sub fbp, 3
+        hex.set 1, fsv, 1                       // nibble 0: the upper slot is now filled
+        hex.write_byte fsp, fsv
+      uskip:
+        // ---- the LOWER face -------------------------------------------------------------------
+        hex.if0 1, seg_fmask + 1*dw, lskip
+        hex.if0 1, fsv + 1*dw, ldo
+        ;lskip
+      ldo:
+        proj.step_rows fra, frb, fscale, fwl1, fwl2, centeryfix_c
+        hex.scmp 8, fra, frb, lst1, lst1, lskip
+      lst1:
+        hex.sign 8, frb, lskip, lst2
+      lst2:
+        hex.scmp 8, fra, fcvh, lst3, lst3, lskip
+      lst3:
+        hex.mov 8, fy1, fra
+        hex.sign 8, fra, lclz, lkhi
+      lclz:
+        hex.zero 8, fy1
+      lkhi:
+        hex.mov 8, fy2, frb
+        hex.scmp 8, frb, fcvh, lwr, lwr, lhicl
+      lhicl:
+        hex.mov 8, fy2, fcvh
+      lwr:
+        hex.ptr_add fbp, 3
+        hex.write_byte_and_inc fbp, fy1
+        hex.write_byte_and_inc fbp, fy2
+        hex.write_byte_and_inc fbp, seg_lcls
+        hex.ptr_sub fbp, 6
+        hex.set 1, fsv + 1*dw, 1                // nibble 1: the lower slot is now filled
+        hex.write_byte fsp, fsv
+      lskip:
+      fnext:
+        hex.ptr_add fdp, 1
+        hex.ptr_add fsp, 1
+        hex.ptr_add fbp, slotstride
+        hex.inc 2, fx
+        hex.add 8, fscale, fsstep               // the interpolated scale advances on EVERY column
+        ;floop
+      nofaces:
+        ;end
+      fcap: hex.vec 2
+      fnorm: hex.vec 8
+      fdist: hex.vec 8
+      fscale: hex.vec 8
+      fsstep: hex.vec 8
+      fwu1: hex.vec 8
+      fwu2: hex.vec 8
+      fwl1: hex.vec 8
+      fwl2: hex.vec 8
+      fra: hex.vec 8
+      frb: hex.vec 8
+      fcvh: hex.vec 8
+      fx: hex.vec 8
+      fdb: hex.vec w/4
+      fdp: hex.vec w/4
+      fdv: hex.vec 2
+      fsb: hex.vec w/4
+      fsp: hex.vec w/4
+      fsv: hex.vec 2
+      fbb: hex.vec w/4
+      fbp: hex.vec w/4
+      fidx: hex.vec w/4
+      fy1: hex.vec 8
+      fy2: hex.vec 8
+      end:
+    }
+
+    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride \
             @ ret, bok, bstop, wok, wlo, wahi, wbhi, wbok, scan, nolow, dolow, nohigh, dohigh, \
               loop, body, claim, next, pdone, xa, xb, pm1, bcap \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
@@ -1209,6 +1374,10 @@ ns frame {
       wok:
         proj.wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
+        // V3: record this boundary's step faces over its FULL column range -- deliberately BEFORE
+        // the [pmin, pmax] window clip below, which is an attribution optimisation only: a column
+        // outside the unattributed window can still be undrawn, and the oracle records a face there.
+        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride
         // Clip the scan to the UNATTRIBUTED WINDOW [pmin, pmax]. Every column below pmin / above
         // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
         // byte: at (-309,636) that is 769 column reads cut to 201, and 37 of the 60 projected segs
@@ -1334,6 +1503,117 @@ ns frame {
       end:
     }
 
+    // V3 -- the per-face SHADE. A step face is flat-shaded, but it still takes DOOM's scalelight row
+    // for its own on-screen height exactly as a wall column does, so the colour is a pure function
+    // of (light class, CLIPPED height) -- which makes it a baked table, `stepcol`, 256 bytes per
+    // class so the class offset is a whole-nibble shift and the whole lookup is one ptr_index.
+    // ⚠ The height is the CLIPPED one, so this cannot be folded into the slot at record time.
+    def step_shade cls, y1, y2, cpb @ sh_idx, sh_p, end {
+        hex.zero w/4, sh_idx
+        hex.mov 2, sh_idx + 2*dw, cls           // idx = class<<8 | h
+        hex.mov 2, sh_idx, y2
+        hex.sub 2, sh_idx, y1
+        hex.inc 2, sh_idx                       // h = y2 - y1 + 1, in [1, VIEW_H]
+        hex.ptr_index sh_p, cpb, sh_idx
+        hex.read_byte cls, sh_p                 // in place: the class byte becomes the colour byte
+        ;end
+      sh_idx: hex.vec w/4
+      sh_p: hex.vec w/4
+      end:
+    }
+
+    // V3 -- this column's step faces, read back from the write-once slots the two-sided claim leaf
+    // filled, then CLIPPED to the regions the claiming wall actually left open (ceiling [0, ctake),
+    // floor [fstart, VIEW_H)) and shaded. Clipping here rather than in the emit keeps the emitted
+    // column MONOTONE by construction: each face is proven to land strictly inside its own region.
+    // The overwhelming majority of columns carry no face, and they pay ONE byte read for it.
+    def lines_step_load stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, x, cexcl, fstart \
+            @ ct0, cth, unone, uhave, uclamp, ustart, udraw, uskip, \
+              lnone, lhave, lclamp, lstart, ldraw, lskip, \
+              sfb, sfp, sbb, sbp, sidx, cpb, ctake, ct1, end \
+            < sfflag, sfslot, stepcol {
+        hex.zero 1, ufl
+        hex.zero 1, lfl
+        // ⚠ ZEROED, not left stale: these six are the column's DITTO SIGNATURE (see dstchk), and a
+        // leftover value from the previous column would make two identical columns compare
+        // different. `uy2p1`/`ly2p1` are exclusive end rows, so a real face always has them >= 1 --
+        // which is what lets the signature be the six values alone, with no separate "has a face"
+        // bit in the compare.
+        hex.zero 2, uy1
+        hex.zero 2, uy2p1
+        hex.zero 2, ucol
+        hex.zero 2, ly1
+        hex.zero 2, ly2p1
+        hex.zero 2, lcol
+        hex.set w/4, sfb, sfflag
+        hex.ptr_index sfp, sfb, x
+        hex.read_byte stv, sfp
+        hex.if0 2, stv, end                     // no face in this column -- the common case
+        hex.mov 2, ctake, cexcl                 // ctake = min(cexcl, fstart), as the emit computes it
+        hex.cmp 2, ctake, fstart, ct0, ct0, cth
+      cth:
+        hex.mov 2, ctake, fstart
+      ct0:
+        hex.zero w/4, sidx
+        hex.mov 2, sidx, x
+        hex.shl_hex w/4, 1, sidx                // 16 bytes per column -> a whole-nibble shift
+        hex.set w/4, sbb, sfslot
+        hex.ptr_index sbp, sbb, sidx
+        hex.set w/4, cpb, stepcol
+        // ---- UPPER: [uy1, min(uy2, ctake-1)], inside the ceiling region
+        hex.if0 1, stv, unone
+        hex.read_byte_and_inc uy1, sbp
+        hex.read_byte_and_inc uy2p1, sbp
+        hex.read_byte_and_inc ucol, sbp         // the face's colour CLASS until step_shade runs
+        ;uhave
+      unone:
+        hex.ptr_add sbp, 3
+        ;uskip
+      uhave:
+        hex.if0 2, ctake, uskip                 // no ceiling region at all in this column
+        hex.mov 2, ct1, ctake
+        hex.dec 2, ct1
+        hex.cmp 2, uy2p1, ct1, ustart, ustart, uclamp
+      uclamp:
+        hex.mov 2, uy2p1, ct1
+      ustart:
+        hex.cmp 2, uy1, uy2p1, udraw, udraw, uskip
+      udraw:
+        .step_shade ucol, uy1, uy2p1, cpb
+        hex.inc 2, uy2p1                        // the pair's EXCLUSIVE end row
+        hex.set 1, ufl, 1
+      uskip:
+        // ---- LOWER: [max(ly1, fstart), ly2], inside the floor region
+        hex.if0 1, stv + 1*dw, lnone
+        hex.read_byte_and_inc ly1, sbp
+        hex.read_byte_and_inc ly2p1, sbp
+        hex.read_byte_and_inc lcol, sbp
+        ;lhave
+      lnone:
+        ;lskip
+      lhave:
+        hex.cmp 2, ly1, fstart, lclamp, lstart, lstart
+      lclamp:
+        hex.mov 2, ly1, fstart
+      lstart:
+        hex.cmp 2, ly1, ly2p1, ldraw, ldraw, lskip
+      ldraw:
+        .step_shade lcol, ly1, ly2p1, cpb
+        hex.inc 2, ly2p1
+        hex.set 1, lfl, 1
+      lskip:
+        ;end
+      sfb: hex.vec w/4
+      sfp: hex.vec w/4
+      sbb: hex.vec w/4
+      sbp: hex.vec w/4
+      sidx: hex.vec w/4
+      cpb: hex.vec w/4
+      ctake: hex.vec 2
+      ct1: hex.vec 2
+      end:
+    }
+
     def lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd \
             @ own, have, recalc, pdone, end \
             < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
@@ -1449,11 +1729,14 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall \
+            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
-              dfull, dchk2, dgchk, dschk, dpl, dsame, demitted, dvalid, dct, dfs, dpid, \
-              gnrow, dgn, skb, soff, issky, dsoff \
+              dfull, dchk2, dgchk, dschk, dstchk, dst2, dst3, dst4, dst5, dst6, \
+              dpl, dsame, demitted, dvalid, dct, dfs, dpid, \
+              gnrow, dgn, skb, soff, issky, dsoff, \
+              stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, \
+              duy1, duy2, ducol, dly1, dly2, dlcol \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
               seg_lit, seg_wstrip, wstripbase, \
@@ -1521,6 +1804,10 @@ ns frame {
         rep(pnear, k) .lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd
         rep(sky, k) .lines_sky_base skb
         rep(sky, k) .lines_sky_ceil skystride, half_slots, skyall, cbufa, cbufd, x, skb, soff, issky, pval8
+        // V3: this column's step faces, clipped to the regions this wall leaves open and shaded.
+        // Must run BEFORE the ditto decision -- a face changes a column's CONTENT without changing
+        // its clip rows, the third feature in a row to hit that (see dgchk).
+        rep(steps, k) .lines_step_load stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, x, cexcl, fstart
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
@@ -1538,7 +1825,26 @@ ns frame {
         // this chain -- that includes the step faces and the sprite fragments still to come.
         rep(noise, k) hex.cmp 2, gnrow, dgn, dfull, dschk, dfull
       dschk:
-        rep(sky, k) hex.cmp 2, soff, dsoff, dfull, dpl, dfull
+        rep(sky, k) hex.cmp 2, soff, dsoff, dfull, dstchk, dfull
+      dstchk:
+        // V3: ... and the same STEP FACES. A face is a run whose rows come from a DIFFERENT seg's
+        // projection, so two neighbours can share clip rows, plane and grain and still differ.
+        // ⚠ COMPARE them, do not refuse the ditto outright: the first build did refuse, stayed
+        // byte-exact, and cost +4.06M/+9.16M -- because at an outdoor viewpoint nearly every column
+        // carries a face, so "no ditto on a face column" is "no ditto", and ditto is worth ~4.8M.
+        // The six values below are exactly the emit's face inputs, so equal signature => identical
+        // pair list; the projection changes slowly across a flat surface, so long runs still ditto.
+        rep(steps, k) hex.cmp 2, uy1, duy1, dfull, dst2, dfull
+      dst2:
+        rep(steps, k) hex.cmp 2, uy2p1, duy2, dfull, dst3, dfull
+      dst3:
+        rep(steps, k) hex.cmp 2, ucol, ducol, dfull, dst4, dfull
+      dst4:
+        rep(steps, k) hex.cmp 2, ly1, dly1, dfull, dst5, dfull
+      dst5:
+        rep(steps, k) hex.cmp 2, ly2p1, dly2, dfull, dst6, dfull
+      dst6:
+        rep(steps, k) hex.cmp 2, lcol, dlcol, dfull, dpl, dfull
       dpl:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
         rep(1-pnear, k) .lines_jmp dsame
@@ -1549,9 +1855,15 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, w2s, wpx, wpxstride, eabl, noise, gnrow, x, cexcl, fstart, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, viewh, w2s, wpx, wpxstride, eabl, noise, steps, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
+        hex.mov 2, duy1, uy1                    // V3: the face signature, unconditional (same
+        hex.mov 2, duy2, uy2p1                  // reason as dgn -- an unused label is an error)
+        hex.mov 2, ducol, ucol
+        hex.mov 2, dly1, ly1
+        hex.mov 2, dly2, ly2p1
+        hex.mov 2, dlcol, lcol
         hex.mov 2, dsoff, soff                  // V2: unconditional, same reason as dgn
         hex.mov 2, dgn, gnrow                   // V1: unconditional so `dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
@@ -1586,6 +1898,21 @@ ns frame {
       issky: hex.vec 2
       gnrow: hex.vec 2                          // V1: this column's grain row
       dgn: hex.vec 2                            // ... and the previously emitted one
+      stv: hex.vec 2                            // V3: which step-face slots this column holds
+      ufl: hex.vec 1                            // V3: draw an upper face in this column?
+      uy1: hex.vec 2                            // ... its first row,
+      uy2p1: hex.vec 2                          // ... its exclusive end row,
+      ucol: hex.vec 2                           // ... and its shade
+      lfl: hex.vec 1                            // V3: the same four for the lower face
+      ly1: hex.vec 2
+      ly2p1: hex.vec 2
+      lcol: hex.vec 2
+      duy1: hex.vec 2                           // ... and the previously emitted column's six, the
+      duy2: hex.vec 2                           // DITTO SIGNATURE
+      ducol: hex.vec 2
+      dly1: hex.vec 2
+      dly2: hex.vec 2
+      dlcol: hex.vec 2
       dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs
       dbot: hex.vec 8
       dscale: hex.vec 8                         // ablate "scaletwice" only: dead scale-setup outputs

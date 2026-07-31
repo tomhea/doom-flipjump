@@ -730,7 +730,55 @@ ns stream {
         byte.emit b
     }
 
-    def emit_col_lines centery, w2s, wpx, wpxstride, eabl, noise, gnrow, x, cexcl, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
+    // V3 -- ONE half-pair region walk over the window [qlo, qbound). The plane bank keeps a region
+    // as TWO half-lists split at CENTERY (the zlight ordinals restart there), so a window is walked
+    // as: the asc half iff it can contribute (qlo < CENTERY -- every asc pair ends at or before
+    // CENTERY, so a window starting at/after it skips them all), then the desc half iff the window
+    // reaches past CENTERY. Empty windows return without touching memory, which is what lets the
+    // face splice ask for a zero-width piece without emitting a wasted pair.
+    def half_walk bufa, bufd, qlo, qbound, ptr, ccy, qwalk, qret @ ha, hasc, hd, hdo, end {
+        hex.cmp 2, qlo, qbound, ha, end, end   // empty window -> touch nothing
+      ha:
+        hex.cmp 2, qlo, ccy, hasc, hd, hd      // qlo >= CENTERY -> the asc half cannot contribute
+      hasc:
+        hex.mov w/4, ptr, bufa
+        stl.fcall qwalk, qret
+      hd:
+        hex.cmp 2, qbound, ccy, end, end, hdo  // qbound > CENTERY -> the desc half is needed
+      hdo:
+        hex.mov w/4, ptr, bufd
+        stl.fcall qwalk, qret
+      end:
+    }
+
+    // V3 -- the two-piece splice, ceiling side: emit the face's own [y2][colour] pair, then re-aim
+    // the window at [uy2+1, ctake) so the REST of the ceiling still reaches ctake. The list is
+    // re-walked from its head rather than resumed, which is why qwalk needs a skip bound at all:
+    // the 0x0B cursor only ever moves forward, so re-emitting an already-covered pair would rewind
+    // it and repaint over the face.
+    def face_splice fl, y2f, colf, hi, qlo, qbound, ptr, ccy, qwalk, qret, bufa, bufd, eabl \
+            @ none, end {
+        hex.if0 1, fl, none
+        .pair_out y2f, colf
+        hex.mov 2, qlo, y2f
+        hex.mov 2, qbound, hi
+        rep(1-eabl/2, k) .half_walk bufa, bufd, qlo, qbound, ptr, ccy, qwalk, qret
+      none:
+        ;end
+      end:
+    }
+
+    // V3 -- the face's [y1, y2] becomes the FIRST piece's end bound: the region walk stops at y1 so
+    // the face pair lands exactly on the cursor.
+    def face_bound fl, y1, qbound @ none, end {
+        hex.if0 1, fl, none
+        hex.mov 2, qbound, y1
+      none:
+        ;end
+      end:
+    }
+
+    def emit_col_lines centery, viewh, w2s, wpx, wpxstride, eabl, noise, steps, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
@@ -743,16 +791,14 @@ ns stream {
         // cm.apply is indexed by light<<8 | colour, leaving only the low byte to move per run.
         rep(noise, k) .wpx_grain_col gnrow, cmidx
         hex.set 2, ccy, centery
-        // -- ceiling PREFIX over [0, ctake): asc list, then (straddle only) desc
+        // -- ceiling PREFIX over [0, ctake), split around this column's UPPER step face (V3)
         hex.if0 2, ctake, wall
-        hex.mov 2, bound, ctake
-        hex.mov w/4, ptr, cbufa
-        rep(1-eabl/2, k) .call_walk pwalk, pret     // eabl=2: no band walk at all
-        hex.cmp 2, ctake, ccy, wall, wall, cdesc2
-      cdesc2:
-        hex.mov w/4, ptr, cbufd
-        rep(1-eabl/2, k) .call_walk pwalk, pret
-        ;wall
+        hex.zero 2, qlo
+        hex.mov 2, qhi, ctake
+        hex.mov 2, qbound, qhi
+        rep(steps, k) .face_bound ufl, uy1, qbound
+        rep(1-eabl/2, k) .half_walk cbufa, cbufd, qlo, qbound, ptr, ccy, qwalk, qret
+        rep(steps, k) .face_splice ufl, uy2p1, ucol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, cbufa, cbufd, eabl
       wall:                                      // -- wall run [ctake, fstart)
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, ctake
@@ -760,67 +806,51 @@ ns stream {
         rep(1-w2s-wpx, k) .w1_wall fstart, wall_lit
         rep(w2s, k) .w2s_wall ctake, wlen, wstrip, wstripbase
         rep(wpx, k) .wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride, noise, cmidx
-      floor:                                     // -- floor SUFFIX over [fstart, view_h)
-        hex.cmp 2, fstart, ccy, fasc, fdesc, fdesc
-      fasc:                                      // straddle: skip within asc, then all of desc
-        hex.mov w/4, ptr, fbufa
-        rep(1-eabl/2, k) .call_walk swalk, sret
-        hex.mov w/4, ptr, fbufd
-        rep(1-eabl/2, k) .call_walk swalk, sret
-        ;fdone
-      fdesc:                                     // normal: desc only
-        hex.mov w/4, ptr, fbufd
-        rep(1-eabl/2, k) .call_walk swalk, sret
+      floor:                                     // -- floor SUFFIX over [fstart, view_h), split
+        hex.mov 2, qlo, fstart                   //    around this column's LOWER step face (V3)
+        hex.set 2, qhi, viewh
+        hex.mov 2, qbound, qhi
+        rep(steps, k) .face_bound lfl, ly1, qbound
+        rep(1-eabl/2, k) .half_walk fbufa, fbufd, qlo, qbound, ptr, ccy, qwalk, qret
+        rep(steps, k) .face_splice lfl, ly2p1, lcol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, fbufa, fbufd, eabl
       fdone:
         stl.output_char 0xFF                     // ends this column's pair list
         ;end
 
-      // pwalk: stream pairs while y2 < bound; the pair crossing bound emits [bound] and stops.
-      // A pair with y2 == bound emits as-is and stops. List exhausted -> return (caller may
-      // continue into the next half with the same bound).
-      pwalk:
+      // qwalk: over the window [qlo, qbound) -- skip pairs ending at or before qlo, stream the rest
+      // while y2 < qbound; the pair crossing qbound emits [qbound] and stops, one ending exactly at
+      // qbound emits as-is and stops. List exhausted -> return (the caller may continue into the
+      // other half with the same window).
+      qwalk:
         hex.read_byte_and_inc cntN, ptr
         hex.zero 2, iP
-      ploop:
-        hex.cmp 2, iP, cntN, pcont, pdone, pdone
-      pcont:
+      qloop:
+        hex.cmp 2, iP, cntN, qcont, qdone, qdone
+      qcont:
         hex.read_byte_and_inc y2r, ptr
         hex.read_byte_and_inc colr, ptr
-        hex.cmp 2, y2r, bound, pemit, plast, pclamp
-      pemit:
+        hex.cmp 2, y2r, qlo, qskip, qskip, qtest   // y2 <= qlo -> entirely above the window
+      qskip:
+        hex.inc 2, iP
+        ;qloop
+      qtest:
+        hex.cmp 2, y2r, qbound, qemit, qlast, qclamp
+      qemit:
         rep(1-eabl%2, k) .pair_out y2r, colr    // eabl=1: walk but emit nothing
         hex.inc 2, iP
-        ;ploop
-      plast:                                     // y2 == bound: emit and stop
+        ;qloop
+      qlast:                                     // y2 == qbound: emit and stop
         rep(1-eabl%2, k) .pair_out y2r, colr
-        ;pdone
-      pclamp:                                    // y2 > bound: emit the clamped pair and stop
-        rep(1-eabl%2, k) .pair_out bound, colr
-      pdone:
-        stl.fret pret
-
-      // swalk: skip pairs with y2 <= fstart, stream the rest verbatim.
-      swalk:
-        hex.read_byte_and_inc cntN, ptr
-        hex.zero 2, iP
-      sloop:
-        hex.cmp 2, iP, cntN, sbody, sdone, sdone
-      sbody:
-        hex.read_byte_and_inc y2r, ptr
-        hex.read_byte_and_inc colr, ptr
-        hex.cmp 2, y2r, fstart, sskip, sskip, semit   // y2 <= fstart -> entirely above the window
-      sskip:
-        hex.inc 2, iP
-        ;sloop
-      semit:
-        rep(1-eabl%2, k) .pair_out y2r, colr
-        hex.inc 2, iP
-        ;sloop
-      sdone:
-        stl.fret sret
+        ;qdone
+      qclamp:                                    // y2 > qbound: emit the clamped pair and stop
+        rep(1-eabl%2, k) .pair_out qbound, colr
+      qdone:
+        stl.fret qret
 
       ctake: hex.vec 2
-      bound: hex.vec 2
+      qlo: hex.vec 2
+      qbound: hex.vec 2
+      qhi: hex.vec 2                           // V3: the region's true end, kept while qbound moves
       ptr: hex.vec w/4
       cntN: hex.vec 2
       iP: hex.vec 2
@@ -829,8 +859,7 @@ ns stream {
       wlen: hex.vec 2
       ccy: hex.vec 2
       cmidx: hex.vec 4                         // V1: light<<8 | colour, the cm.apply index
-      pret: ;0
-      sret: ;0
+      qret: ;0
       end:
     }
 }

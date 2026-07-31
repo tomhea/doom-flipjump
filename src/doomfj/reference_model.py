@@ -40,7 +40,7 @@ from doomfj.tables import (
 from doomfj.texturecompiler import (  # shared D5 downscale lever + texture compositing (R6/D12)
     downscale_canvas, composite_texture, texture_texels,
 )
-from doomfj.wad import WadFile
+from doomfj.wad import WadFile, decode_picture
 
 # ── sim / angle constants (BAM: full turn = 2**32) ──
 FULL_CIRCLE = 1 << 32
@@ -73,6 +73,49 @@ STEP_FACE_BASE = 96               # V3: flat-shaded step-face texel. NOT WALL_BG
 # TURN=2 gives 24 (exactly 6 nibbles, one `hex.shr_hex 8, 6`) while TURN=4 gives 23 and would cost a
 # bit-shift chain per frame. Pick the knob that lands on a nibble.
 SKY_TURN = 2
+
+# ── V4 THINGS ────────────────────────────────────────────────────────────────────────────────────
+# One frame, one rotation per thing type -- enough to make the level's 292 things VISIBLE, which is
+# what the feature is for. The fj bakes a run-list per (sprite, texture column, height BUCKET), so
+# both of those bounds matter to the bank size, not just to the look.
+THING_SPRITE = {
+    2014: "BON1", 2015: "BON2", 2035: "BAR1", 47: "SMIT", 3001: "TROO", 2008: "SHEL",
+    54: "TRE2", 9: "SPOS", 43: "TRE1", 3004: "POSS", 3002: "SARG", 2010: "ROCK",
+    2028: "COLU", 2011: "STIM", 2012: "MEDI", 2018: "ARM1", 2019: "ARM2", 2001: "SHOT",
+    2002: "MGUN", 2005: "CSAW", 2006: "BFUG", 2003: "LAUN", 2004: "PLAS", 2013: "SOUL",
+    2022: "PINV", 2023: "PSTR", 2024: "PINS", 2025: "SUIT", 2026: "PMAP", 2045: "PVIS",
+    2007: "CLIP", 2048: "AMMO", 2046: "BROK", 2047: "CELL", 2049: "SBOX", 8: "BPAK",
+    34: "CAND", 35: "CBRA", 44: "TBLU", 45: "TGRN", 46: "TRED", 55: "SMBT", 56: "SMGT",
+    57: "SMRT", 48: "ELEC", 30: "COL1", 31: "COL2", 32: "COL3", 33: "COL4", 36: "COL5",
+    37: "COL6", 41: "CEYE", 42: "FSKU", 49: "GOR1", 50: "GOR2",
+}
+SPRITE_HEIGHT_BUCKETS = 32        # V4: on-screen heights the sprite bank bakes a run-list for.
+                                  # ~700 (sprite, downscaled column) blocks x 101 EXACT heights (the
+                                  # WPX wall bank's shape) would be ~17M characters against a program
+                                  # already at 36M and an assembler that is ~cubic. 32 buckets is 3px
+                                  # of quantisation on a full-height sprite and 1/3 the bank.
+SPRITE_MINZ = 4 << 16             # DOOM's MINZ: nearer than this the projection blows up
+SPRITE_RUN_CAP = 12               # colour runs per baked sprite column (as WPX_RUN_CAP is for walls)
+THING_BUDGET = 24                 # V4: things PROJECTED per frame. Each pays ~47k fj ops (4 FixedMuls
+                                  # + 2 FixedDivs), so this is the knob that bounds the feature the
+                                  # way STEP_SEG_BUDGET bounds V3 -- and, as there, the walk is
+                                  # front-to-back so what the budget drops is the FURTHEST things.
+
+
+def sprite_bucket(h: int, view_h: int) -> int:
+    """Which baked height bucket a sprite `h` screen pixels tall renders at."""
+    return min(SPRITE_HEIGHT_BUCKETS - 1,
+               max(0, ((h - 1) * SPRITE_HEIGHT_BUCKETS) // (view_h + 1)))
+
+
+def sprite_bucket_height(b: int, view_h: int) -> int:
+    """The exact pixel height bucket `b` renders at — the largest h that maps to it, so a sprite is
+    never drawn SHORTER than the bucket below it and the ladder stays monotone."""
+    hi = 1
+    for h in range(1, view_h + 1):
+        if sprite_bucket(h, view_h) == b:
+            hi = h
+    return hi
 
 
 def _sky_shift(tw: int) -> int:
@@ -716,6 +759,126 @@ class ReferenceModel:
             runs.pop(i)                               # (i == 0: the run below just starts at 0)
         return runs
 
+    # ── V4 THINGS: sprite art, and the run-list the fj bank bakes from it ─────────────────────────
+    def sprite_art(self, sprite_wad, kind: int, cache: dict):
+        """A thing type's sprite, DOWNSCALED like a wall texture: `(cols, dh, dw, wpx, wph, left,
+        top)` where `cols[u]` is a `dh`-long list of palette indices with -1 for transparent, and
+        `wpx/wph/left/top` are the ORIGINAL picture's world size and offsets (a DOOM sprite pixel is
+        one map unit, so the geometry must not be downscaled — only the sampling is).
+
+        Returns None for a type with no sprite in this wad (starts, teleport spots, and — in the
+        cut-down test fixture — everything, which is why `sprite_wad` is a separate argument)."""
+        if kind in cache:
+            return cache[kind]
+        pre = THING_SPRITE.get(kind)
+        pic = None
+        if pre is not None:
+            for suffix in ("A0", "A1", "A2A8", "A1D1"):
+                try:
+                    pic = decode_picture(sprite_wad.get_data(pre + suffix))
+                    break
+                except (KeyError, ValueError, IndexError):
+                    continue
+        if pic is None:
+            cache[kind] = None
+            return None
+        ds = self.downscale
+        dw, dh = max(1, pic.width // ds), max(1, pic.height // ds)
+        cols = []
+        for u in range(dw):
+            dense = [-1] * pic.height
+            for (v, t) in pic.columns[min(pic.width - 1, u * ds)]:
+                if 0 <= v < pic.height:
+                    dense[v] = t
+            cols.append([dense[min(pic.height - 1, v * ds)] for v in range(dh)])
+        cache[kind] = (cols, dh, dw, pic.width, pic.height, pic.leftoffset, pic.topoffset)
+        return cache[kind]
+
+    @staticmethod
+    def sprite_strip(col, dh: int, h: int, *, cap=SPRITE_RUN_CAP):
+        """V4 — one sprite column drawn `h` screen pixels tall, as `(r0, runs)`: `r0` is the first
+        screen row (relative to the sprite's top) the column paints, and `runs` is
+        `[rel_end_exclusive, RAW texel]` measured from `r0`, run-merged exactly as `wpx_strip` does.
+        Returns None for a fully transparent column.
+
+        ⚠ Only the column's OPAQUE EXTENT is painted, and INTERIOR gaps take the nearest opaque
+        texel ABOVE them. That is not an aesthetic choice — the 0x0B column protocol fills forward
+        from a cursor that never moves back, so a transparent run in the MIDDLE of a fragment would
+        need background the emit has already passed. The visible cost is small (it fattens holes in
+        open sprites like trees); the alternative is a second pass over every column.
+
+        Texels are RAW: the light row is applied at emit time through `cm.emit`, exactly as V1's
+        grain is, so the bank is shared by every light level instead of multiplied by it."""
+        idx = [v for v, t in enumerate(col) if t >= 0]
+        if not idx or h <= 0:
+            return None
+        v0, v1 = idx[0], idx[-1]
+        filled, last = list(col), col[v0]
+        for v in range(v0, v1 + 1):
+            if col[v] >= 0:
+                last = col[v]
+            else:
+                filled[v] = last
+        rows = [r for r in range(h) if v0 <= min(dh - 1, (r * dh) // h) <= v1]
+        if not rows:
+            return None
+        r0 = rows[0]
+        px = [filled[min(dh - 1, (r * dh) // h)] for r in rows]
+        runs: list[list[int]] = []
+        for j, c in enumerate(px):
+            if runs and runs[-1][1] == c:
+                runs[-1][0] = j + 1
+            else:
+                runs.append([j + 1, c])
+        while len(runs) > cap:                        # identical reduction to wpx_strip's
+            lens = [runs[i][0] - (runs[i - 1][0] if i else 0) for i in range(len(runs))]
+            i = lens.index(min(lens))
+            if i:
+                runs[i - 1][0] = runs[i][0]
+            runs.pop(i)
+        return r0, runs
+
+    def project_thing(self, viewx, viewy, viewangle, viewz, tx_map, ty_map, tz_map, art):
+        """V4 — R_ProjectSprite in this repo's fixed point: the billboard's screen box.
+
+        Returns `(x1, x2, ytop, h, istep)` — inclusive column range, the screen row of the sprite's
+        top, its exact on-screen pixel height, and the DOWNSCALED-texel-per-column DDA step — or
+        None if the thing is behind the eye, too near, or outside the view. Mirrors DOOM: the two
+        rotated coordinates `tz` (depth) and `tx` (lateral) from one cos/sin pair and four
+        FixedMuls, then ONE FixedDiv for the scale."""
+        cfg = self.cfg
+        _cols, dh, _dw, wpx, wph, left, top = art
+        tr_x = _signed((tx_map << 16) - viewx, 32)
+        tr_y = _signed((ty_map << 16) - viewy, 32)
+        vcos, vsin = self.read_cos(viewangle), self.read_sin(viewangle)
+        gxt = _signed(fixed_mul(tr_x & ANGLE_MASK, vcos, 8, 4), 32)
+        gyt = -_signed(fixed_mul(tr_y & ANGLE_MASK, vsin, 8, 4), 32)
+        tz = gxt - gyt
+        if tz < SPRITE_MINZ:
+            return None
+        xscale = fixed_div(cfg.PROJECTION << 16, tz, 8, 4)
+        gxt2 = -_signed(fixed_mul(tr_x & ANGLE_MASK, vsin, 8, 4), 32)
+        gyt2 = _signed(fixed_mul(tr_y & ANGLE_MASK, vcos, 8, 4), 32)
+        tx = -(gyt2 + gxt2)
+        if abs(tx) > (tz << 2):                       # DOOM's off-screen reject
+            return None
+        cxf = cfg.CENTERX << 16
+        txl = tx - (left << 16)
+        x1 = (cxf + _signed(fixed_mul(txl & ANGLE_MASK, xscale, 8, 4), 32)) >> 16
+        x2 = ((cxf + _signed(fixed_mul((txl + (wpx << 16)) & ANGLE_MASK, xscale, 8, 4), 32)) >> 16) - 1
+        if x2 < 0 or x1 >= cfg.VIEW_W or x2 < x1:
+            return None
+        gzt = ((tz_map + top) << 16) - viewz
+        ytop = (cfg.CENTERY << 16) - _signed(fixed_mul(gzt & ANGLE_MASK, xscale, 8, 4), 32)
+        h = _signed(fixed_mul((wph << 16) & ANGLE_MASK, xscale, 8, 4), 32) >> 16
+        if h <= 0 or h > cfg.VIEW_H:
+            return None                               # too small to see / too near to bucket
+        # the texture-column DDA step, through the SAME block-FP reciprocal `proj.scale_recip_div`
+        # already implements (not `_recip_div32`, which is a different normalise/shift recipe --
+        # reusing the macro that exists beats adding a second one for a sub-texel difference).
+        istep = self._scale_recip_div(1 << 16, xscale) // self.downscale
+        return x1, x2, ytop >> 16, h, istep
+
     @staticmethod
     def _tiny_wall_canvas(texels, th: int, wall_mode: str):
         """M13p4a — reduce a full (column-major `texels`, height `th`) wall texture to a tiny synthetic
@@ -839,7 +1002,8 @@ class ReferenceModel:
                           wall_mode: str = "textured", floor_mode_ft1: bool = False,
                           plane_near: bool = False, planes_out: list | None = None,
                           wall_noise: bool = False, sky: bool = False,
-                          near_steps: bool = False) -> bytes:
+                          near_steps: bool = False, things: bool = False,
+                          sprite_wad=None) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -908,7 +1072,58 @@ class ReferenceModel:
         n_face = [0]                  # V3: face-carrying boundaries used, vs STEP_SEG_BUDGET
         n_claimed = 0                                         # ... and its two STOP conditions, both of
         n_ts = 0                                              # which the fj mirrors (see below)
+        # V4 THINGS — one write-once SPRITE FRAGMENT per column, `(y0, runs, light_row)`. Recorded
+        # during the walk, at the moment it reaches the thing's own subsector, and only into columns
+        # no wall has claimed yet: front-to-back order is what makes "the first writer is the
+        # nearest" true, and it is also the whole occlusion test (a wall nearer than the thing has
+        # already claimed the column, so the thing simply cannot record there). That is the same
+        # trick V3's step faces use, and it is what lets a WRITE-ONCE, forward-only column protocol
+        # show sprites at all: DOOM draws them last, back-to-front, and this cannot.
+        sfrag: list = [None] * W
+        n_thing = 0
+        spr_cache: dict = {}
+        things_by_ss: dict = {}
+        ss_first: dict = {}
+        if things:
+            assert sprite_wad is not None, "things=True needs sprite_wad (the fixture wad has none)"
+            for t in scene.map_wad.things(scene.mapname):
+                if THING_SPRITE.get(t.type) is None:
+                    continue                                  # a start / teleport spot / unknown
+                things_by_ss.setdefault(
+                    self.point_in_subsector(scene.cmap, t.x, t.y), []).append(t)
+            for _si, _ss in enumerate(scene.cmap.subsectors):
+                if _ss.numsegs and _si in things_by_ss:
+                    ss_first[_ss.firstseg] = _si              # the walk's arrival point for its things
         for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
+            if things and seg_i in ss_first:
+                for t in things_by_ss[ss_first[seg_i]]:
+                    if n_thing >= THING_BUDGET or n_claimed == W:
+                        break
+                    art = self.sprite_art(sprite_wad, t.type, spr_cache)
+                    if art is None:
+                        continue
+                    tss = scene.cmap.subsectors[ss_first[seg_i]]
+                    tsec = self._seg_sector(lds, sds, secs, scene.cmap.segs[tss.firstseg])
+                    pr = self.project_thing(viewx, viewy, viewangle, viewz,
+                                            t.x, t.y, tsec.floor_h, art)
+                    if pr is None:
+                        continue
+                    n_thing += 1
+                    tx1, tx2, ytop, th_px, istep = pr
+                    bkt = sprite_bucket(th_px, H)
+                    hb = sprite_bucket_height(bkt, H)
+                    ytop_b = ytop + th_px - hb                # FEET planted: the bucket moves the top
+                    lr = self.wall_light_row(self.wall_lightnum(tsec.light, 0), hb, art[4])
+                    frac = (max(0, tx1) - tx1) * istep
+                    for x in range(max(0, tx1), min(W, tx2 + 1)):
+                        u = min(art[2] - 1, max(0, frac >> 16))
+                        frac += istep
+                        if drawn[x] or sfrag[x] is not None:
+                            continue
+                        st = self.sprite_strip(art[0][u], art[1], hb)
+                        if st is None:
+                            continue
+                        sfrag[x] = (ytop_b + st[0], st[1], lr)
             seg = scene.cmap.segs[seg_i]
             ld = lds[seg.linedef]
             if ld.back != -1:
@@ -955,20 +1170,35 @@ class ReferenceModel:
                 if face_seg:
                     n_face[0] += 1
                     rwn2, rwd2 = self.wall_setup(viewx, viewy, seg, verts)
+                    # The face scale is INTERPOLATED across the seg, exactly as the one-sided wall
+                    # path's is (fj: proj.wall_scale_setup_m once, then `scale += scalestep` per
+                    # column) -- and exactly as DOOM's own rw_scale is. An EXACT per-column
+                    # scale_from_global_angle is what a first draft of this used, and it is not
+                    # affordable: ~40k fj ops per COLUMN against ~93k once per SEG. Measured
+                    # (scratchpad/v3_pop.py) the interpolation moves 1 of 108 projected rows at
+                    # spawn and 10 of 210 at the worst viewpoint, each by a row.
+                    sc2 = self.scale_from_global_angle(
+                        (viewangle + self.xtoviewangle[rng2[0]]) & ANGLE_MASK, viewangle, rwn2, rwd2)
+                    if rng2[1] > rng2[0]:
+                        sc2b = self.scale_from_global_angle(
+                            (viewangle + self.xtoviewangle[rng2[1]]) & ANGLE_MASK, viewangle,
+                            rwn2, rwd2)
+                        d2, sp2 = sc2b - sc2, rng2[1] - rng2[0]
+                        st2 = -(abs(d2) // sp2) if d2 < 0 else d2 // sp2   # trunc toward zero
+                    else:
+                        st2 = 0
                 for x in range(rng2[0], rng2[1]):
                     if face_seg and not drawn[x] and not (
                             (not has_up or ups[x]) and (not has_lo or los[x])):
-                        sc2 = self.scale_from_global_angle(
-                            (viewangle + self.xtoviewangle[x]) & ANGLE_MASK, viewangle,
-                            rwn2, rwd2) & ANGLE_MASK
+                        sc2m = sc2 & ANGLE_MASK
                         if has_up and ups[x] is None:
-                            t0, _b = self.wall_screen_span(fsec.ceil_h, fsec.ceil_h, viewz, sc2)
-                            _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h, viewz, sc2)
+                            t0, _b = self.wall_screen_span(fsec.ceil_h, fsec.ceil_h, viewz, sc2m)
+                            _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h, viewz, sc2m)
                             if t0 <= ub - 1:
                                 ups[x] = (t0, ub - 1, fsec, fsec.ceil_h - bsec.ceil_h)
                         if has_lo and los[x] is None:
-                            lt, _b2 = self.wall_screen_span(bsec.floor_h, fsec.floor_h, viewz, sc2)
-                            _t2, b0 = self.wall_screen_span(fsec.floor_h, fsec.floor_h, viewz, sc2)
+                            lt, _b2 = self.wall_screen_span(bsec.floor_h, fsec.floor_h, viewz, sc2m)
+                            _t2, b0 = self.wall_screen_span(fsec.floor_h, fsec.floor_h, viewz, sc2m)
                             if lt <= b0:
                                 los[x] = (lt, b0, fsec, bsec.floor_h - fsec.floor_h)
                     if not pclaim[x]:
@@ -976,6 +1206,8 @@ class ReferenceModel:
                         col_cf[x], col_ff[x] = fsec.ceil_tex, fsec.floor_tex
                         pclaim[x] = 1
                         n_claimed += 1
+                    if face_seg:
+                        sc2 = (sc2 + st2) & ANGLE_MASK     # the DDA advances on EVERY column
                 continue
             rng = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
             if rng is None:
@@ -1083,6 +1315,12 @@ class ReferenceModel:
                 # drops a non-monotone pair.
                 c_hi, f_lo = planes[0], planes[1]
                 for x in range(cfg.VIEW_W):
+                    if sfrag[x] is not None:
+                        # V4: ONE overlay per column, and the sprite wins. A column already carries
+                        # its ceiling/wall/floor as three windows; splicing a face AND a sprite into
+                        # it would mean composing five, and the sprite is in front of the face
+                        # anyway (it was recorded into an unclaimed column by a nearer subsector).
+                        continue
                     if ups[x] is not None:
                         y1, y2, fsc, units = ups[x]
                         y1, y2 = max(y1, 0), min(y2, c_hi[x])
@@ -1099,6 +1337,20 @@ class ReferenceModel:
                                                      y2 - y1 + 1, max(1, units))
                             for y in range(y1, y2 + 1):
                                 fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
+            if things:
+                # V4 - splice the sprite fragments. Each is ONE contiguous block of runs at
+                # `[y0 + rel]`, clipped to the screen exactly the way the fj emit clips it: runs
+                # ending at or above row 0 are skipped outright (a near sprite whose top is off the
+                # top of the view) and the last one is clamped at VIEW_H.
+                for x in range(cfg.VIEW_W):
+                    if sfrag[x] is None:
+                        continue
+                    y0, runs, lr = sfrag[x]
+                    prev = 0
+                    for (rel, texel) in runs:
+                        for y in range(max(0, y0 + prev), min(cfg.VIEW_H, y0 + rel)):
+                            fb[y * cfg.VIEW_W + x] = colormap[lr][texel]
+                        prev = rel
         elif floor_texturing:
             self._render_planes_textured(fb, colormap, scene.asset_wad, flatcache,
                                          viewx, viewy, viewangle, viewz, *planes)

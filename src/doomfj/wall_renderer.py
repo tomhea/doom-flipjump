@@ -23,7 +23,9 @@ from doomfj.lut_generator import (
 from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
                                 NF_SUBSECTOR, seg_affine_coeffs)
-from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP,
+from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_FACE_BASE,
+                                    STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
+                                    sprite_bucket_height,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
@@ -92,7 +94,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
                        wall_mode: str = "textured", raster_mode: str = "framebuffer",
                        plane_near: bool = False, two_sided: bool = False,
-                       wall_noise: bool = False, sky: bool = False) -> str:
+                       wall_noise: bool = False, sky: bool = False, steps: bool = False) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -375,6 +377,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # offset table; the frame supplies `skybase` and the existing prefix walk does the rest.
     skybands, skyoff = _lines_sky_bank(rm, asset_wad, cfg) if (lines and sky) else ("", "")
     skypid = ""                     # filled below, once the pid map exists
+    # V3: the step-face shade bank + the (light, wall-units) class each face-carrying boundary bakes.
+    stepcol, step_cls = (_lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs)
+                         if (lines and steps) else ("", {}))
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -600,12 +605,37 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                             ("seg_a", 8, _sa), ("seg_b", 8, _sb), ("seg_c", 8, _sc),
                             ("seg_pid", 2,
                              lines_pid[_plane_keys(rm._seg_sector(lds, sds, secs, seg))])])
+                        # V3: a SECOND block, emitted only for boundaries that actually carry a step
+                        # face (709 of E1M1's marking two-sided segs). `seg_fmask` is 0 for the rest,
+                        # which is what the leaf tests -- so a face-less boundary pays one 2-nibble
+                        # if0 and nothing else, and never pays this block's SET+CLEAR at all.
+                        _fsec = rm._seg_sector(lds, sds, secs, seg)
+                        _bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
+                        _hu = _fsec.ceil_h > _bsec.ceil_h
+                        _hl = _bsec.floor_h > _fsec.floor_h
+                        _tsq = [f"    stl.fcall seg{si}T_xorby, xb_ret"]
+                        _tsu = [f"    stl.fcall seg{si}T_xorby, xb_ret"]
+                        if steps and (_hu or _hl):
+                            _ln = rm.wall_lightnum(_fsec.light, 0)
+                            xorby_blocks[si] = xorby_blocks[si] + _seg_xorby_block(f"{si}F", [
+                                ("seg_segangle", 8, seg.angle),
+                                ("seg_fmask", 2, (1 if _hu else 0) | ((1 if _hl else 0) << 4)),
+                                ("seg_uh1", 4, _fsec.ceil_h & 0xFFFF),
+                                ("seg_uh2", 4, _bsec.ceil_h & 0xFFFF),
+                                ("seg_lh1", 4, _bsec.floor_h & 0xFFFF),
+                                ("seg_lh2", 4, _fsec.floor_h & 0xFFFF),
+                                ("seg_ucls", 2, step_cls.get(
+                                    (_ln, max(1, _fsec.ceil_h - _bsec.ceil_h)), 0) if _hu else 0),
+                                ("seg_lcls", 2, step_cls.get(
+                                    (_ln, max(1, _bsec.floor_h - _fsec.floor_h)), 0) if _hl else 0)])
+                            _tsq.append(f"    stl.fcall seg{si}F_xorby, xb_ret")
+                            _tsu.append(f"    stl.fcall seg{si}F_xorby, xb_ret")
                         out += [f"    hex.if0 1, tsstop, e2go{cid}_{si}",
                                 f"    ;e2sk{cid}_{si}",
                                 f"  e2go{cid}_{si}:",
-                                f"    stl.fcall seg{si}T_xorby, xb_ret",
+                                *_tsq,
                                 "    stl.fcall seg_pass1_ts_leaf, seg_ret",
-                                f"    stl.fcall seg{si}T_xorby, xb_ret",
+                                *_tsu,
                                 f"  e2sk{cid}_{si}:"]
                         continue
                     if not (ablate & {"tsprobe", "tsmark"}):
@@ -1016,7 +1046,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"{2 * WPX_RUN_CAP}, {(cfg.VIEW_H + 1) * 2 * WPX_RUN_CAP}"] if two_sided else []),
            *(["seg_pass1_ts_leaf:",
               f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
-              f"{table_dbl}"] if plane_near else []),
+              f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
+              f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}"] if plane_near else []),
            "seg_pass2_leaf:",
            (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
             f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
@@ -1025,7 +1056,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
             f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
             f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
-            f"{1 if 'skyall' in ablate else 0}")]
+            f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -1115,6 +1146,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "cpid: hex.vec 2",
            # the UNATTRIBUTED-COLUMN WINDOW: every column < pmin or > pmax is attributed already
            "pmin: hex.vec 2, 0", f"pmax: hex.vec 2, {cfg.VIEW_W - 1}"] if lines else []),
+        # V3 step faces: the per-column WRITE-ONCE slots. `sfflag[x]` is one byte (nibble 0 = an
+        # upper face is stored, nibble 1 = a lower one) so a column with no face costs ONE read on
+        # the emit path; `sfslot[x]` holds [uy1][uy2][ucls][ly1][ly2][lcls] at a power-of-16 stride
+        # so its byte offset is a whole-nibble shift. `n_face` is the per-frame SEG budget counter
+        # (STEP_SEG_BUDGET) -- separate from n_tsv, because it must count only the boundaries that
+        # actually pay a wall_scale_setup_m.
+        *([f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+           f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
+                                      for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
+           "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
+           "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
+           "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
+           "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
+           stepcol] if (lines and steps) else []),
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                             floor_mode == "FT1")] if lines else []),
         *([lines_wstrip_txt] if lines_wstrip_txt else []),
@@ -1404,6 +1449,92 @@ def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
         # (3 bytes/row) instead of a per-row read_table 8 -- the packed twin of the 8-nib table.
         generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H),
     ]
+
+
+STEP_SLOT_STRIDE = 16      # V3: bytes per column in `sfslot` -- 6 used, rounded to a POWER OF 16 so
+                           # the per-column byte offset is `x << 1 nibble`, not a mul_const (~72@).
+STEP_COL_STRIDE = 256      # ... and bytes per light class in `stepcol`, same whole-nibble reason.
+
+
+def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs):
+    """V3 — the step-face SHADE bank, plus the (lightnum, units) -> class map the segs bake.
+
+    A step face is flat-shaded: one palette index for the whole run. But it still takes DOOM's
+    scalelight row for its own on-screen height, exactly as a wall column does (near reads
+    brighter), and that row is `wall_light_row(lightnum, h, units)` — a pure function of two
+    COMPILE-TIME per-seg facts and the run's clipped height. So the whole thing bakes: one
+    `STEP_COL_STRIDE`-byte row per class, indexed by h.
+
+    ⚠ `STEP_FACE_BASE` (96), NOT `WALL_BG` (4). A palette INDEX carries no brightness ordering you
+    can guess at — DOOM's ramp puts 4 near WHITE, and the first version of this blew every face out
+    (the same bug as V1's confetti grain, twice).
+
+    Values come from `ReferenceModel.wall_light_row`, so oracle and fj cannot drift (R6)."""
+    colormap = asset_wad.colormap()
+    cls_of: dict = {}
+    for seg in cmap.segs:
+        ld = lds[seg.linedef]
+        if ld.back == -1:
+            continue
+        fsec = rm._seg_sector(lds, sds, secs, seg)
+        bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
+        ln = rm.wall_lightnum(fsec.light, 0)
+        if fsec.ceil_h > bsec.ceil_h:
+            cls_of.setdefault((ln, max(1, fsec.ceil_h - bsec.ceil_h)), len(cls_of))
+        if bsec.floor_h > fsec.floor_h:
+            cls_of.setdefault((ln, max(1, bsec.floor_h - fsec.floor_h)), len(cls_of))
+    assert len(cls_of) * STEP_COL_STRIDE <= 0x10000, f"step classes overflow the 4-nibble index: {len(cls_of)}"
+    out = [f"// V3 step-face shades: {len(cls_of)} (light, wall-units) classes x "
+           f"{STEP_COL_STRIDE} dw, indexed class<<8 | height", "stepcol:"]
+    for (ln, units) in cls_of:                      # insertion order == class index
+        row = [0] * STEP_COL_STRIDE
+        for h in range(1, cfg.VIEW_H + 1):
+            row[h] = colormap[rm.wall_light_row(ln, h, units)][STEP_FACE_BASE]
+        out += [f";{v:#x} * dw" for v in row]
+    return NLJ.join(out) + NLJ, cls_of
+
+
+SPR_BLOCK_STRIDE = 32      # V4: dw per baked sprite-column block -- [n][ (rel,texel) x <=cap ] with
+                           # SPRITE_RUN_CAP = 12 needs 25, and a POWER OF TWO stride turns the block
+                           # index into a shl_bit instead of a mul_const.
+SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot` (6 used), a power of 16 so the
+                           # per-column byte offset is a whole-nibble shift.
+
+
+def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
+    """V4 — the sprite bank: one RAW-texel run-list per (thing sprite, downscaled texture column,
+    on-screen height BUCKET), plus the per-thing block bases.
+
+    This is the WPX wall bank's shape, applied to billboards: a wall column bakes per (texture,
+    light, exact height) because its content depends on nothing else, and a sprite column bakes per
+    (sprite, u, height) for the same reason -- a billboard has no perspective within itself. The two
+    differences are both forced by size: heights are BUCKETED (`SPRITE_HEIGHT_BUCKETS`) because the
+    sprite key already carries a texture column, and texels are stored RAW with the light row
+    applied at emit time through `cm.emit` (V1's grain mechanism), so one bank serves every light
+    level instead of being multiplied by 16.
+
+    Returns `(bank_text, base_of_kind, dw_of_kind)` — the bank's fj text, each thing type's first
+    block index, and its downscaled width (blocks for a type are laid out u-major, bucket-minor).
+    Run-lists come from `ReferenceModel.sprite_strip`, so oracle and fj cannot drift (R6)."""
+    cache: dict = {}
+    kinds = sorted({t.type for t in map_wad.things(mapname)
+                    if rm.sprite_art(sprite_wad, t.type, cache) is not None})
+    out = ["// V4 sprite bank: [r0][n][ (rel_end, RAW texel) x n ] per (sprite, column, height "
+           f"bucket), stride {SPR_BLOCK_STRIDE} dw", "sprbank:"]
+    base_of, dw_of, blk = {}, {}, 0
+    for kind in kinds:
+        cols, dh, dwid, _wpx, _wph, _left, _top = rm.sprite_art(sprite_wad, kind, cache)
+        base_of[kind], dw_of[kind] = blk, dwid
+        for u in range(dwid):
+            for b in range(SPRITE_HEIGHT_BUCKETS):
+                st = rm.sprite_strip(cols[u], dh, sprite_bucket_height(b, cfg.VIEW_H))
+                body = [0, 0] if st is None else (
+                    [st[0], len(st[1])] + [v for pr in st[1] for v in pr])
+                assert len(body) <= SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"
+                out += [f";{v:#x} * dw" for v in body]
+                out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
+                blk += 1
+    return NLJ.join(out) + NLJ, base_of, dw_of
 
 
 SKY_BANK_MUL = 3

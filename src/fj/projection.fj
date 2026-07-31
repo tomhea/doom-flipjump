@@ -1344,6 +1344,159 @@ ns proj {
       end:
     }
 
+    // proj.project_thing (V4 THINGS) — R_ProjectSprite: one billboard's screen box.
+    //   Sets `vis` = 1 and (x1o, x2o, ytopo, hpxo, istepo) = the inclusive column range, the screen
+    //   row of the sprite's top, its on-screen pixel height, and the DOWNSCALED-texel-per-column DDA
+    //   step; `vis` = 0 if the thing is behind the eye, nearer than MINZ, off screen, or scaled to
+    //   nothing. Per-thing inputs are BAKED (`sp_*`, all compile-time): the world position, the
+    //   sprite's top z, its left offset, and its width/height in map units (a DOOM sprite pixel IS
+    //   one map unit, so the geometry never downscales — only the sampling does).
+    //   Cost is ONE `hex.fixed_div` (~38.5k, the dearest primitive here) plus one block-FP
+    //   reciprocal and five multiplies — which is why THING_BUDGET exists.
+    //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
+    def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds \
+            @ ok1, ok2, okx, okx2, okh1, okh2, okv, bad, done, end, \
+              trx, try8, ang, sidx, vsin, vcos, gxt, gyt, tz, xsc, txv, atx, tzl, \
+              txl, txr, tmp, gz, one16, cminz, cproj, cxf, cyf, cvw, cvh \
+            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh {
+        hex.set 1, vis, 0
+        hex.mov 8, trx, sp_x
+        hex.sub 8, trx, viewx
+        hex.mov 8, try8, sp_y
+        hex.sub 8, try8, viewy
+        hex.mov 8, ang, viewangle                       // finesine index = angle >> 20 bits
+        hex.shr_hex 8, 5, ang
+        hex.mov 3, sidx, ang
+        finesine.read_sin vsin, sidx
+        finesine.read_cos vcos, sidx
+        // tz = trx*cos + try*sin  (DOOM: gxt - gyt with gyt = -FixedMul(tr_y, viewsin))
+        hex.fixed_mul_lo 8, 4, gxt, trx, vcos
+        hex.fixed_mul_lo 8, 4, gyt, try8, vsin
+        hex.mov 8, tz, gxt
+        hex.add 8, tz, gyt
+        hex.set 8, cminz, minz
+        hex.scmp 8, tz, cminz, bad, ok1, ok1
+      ok1:
+        hex.set 8, cproj, projection*0x10000            // centerxfrac
+        hex.fixed_div 8, 4, xsc, cproj, tz, bad         // xscale = FixedDiv(projection, tz)
+        // tx = trx*sin - try*cos  (DOOM: -(gyt + gxt) with both negated)
+        hex.fixed_mul_lo 8, 4, gxt, trx, vsin
+        hex.fixed_mul_lo 8, 4, gyt, try8, vcos
+        hex.mov 8, txv, gxt
+        hex.sub 8, txv, gyt
+        hex.mov 8, atx, txv                             // |tx| > tz<<2 -> outside the view
+        hex.abs 8, atx
+        hex.mov 8, tzl, tz
+        hex.shl_bit 8, tzl
+        hex.shl_bit 8, tzl
+        hex.cmp 8, atx, tzl, ok2, ok2, bad
+      ok2:
+        hex.set 8, cxf, centerx*0x10000
+        hex.mov 8, txl, txv
+        hex.sub 8, txl, sp_left
+        hex.fixed_mul_lo 8, 4, tmp, txl, xsc
+        hex.add 8, tmp, cxf
+        hex.shr_hex 8, 4, tmp
+        hex.sign_extend 8, 4, tmp
+        hex.mov 8, x1o, tmp
+        hex.mov 8, txr, txl
+        hex.add 8, txr, sp_w
+        hex.fixed_mul_lo 8, 4, tmp, txr, xsc
+        hex.add 8, tmp, cxf
+        hex.shr_hex 8, 4, tmp
+        hex.sign_extend 8, 4, tmp
+        hex.dec 8, tmp
+        hex.mov 8, x2o, tmp
+        hex.sign 8, x2o, bad, okx                       // x2 < 0 -> entirely off the left
+      okx:
+        hex.set 8, cvw, vieww
+        hex.scmp 8, x1o, cvw, okx2, bad, bad            // x1 >= VIEW_W -> entirely off the right
+      okx2:
+        hex.scmp 8, x2o, x1o, bad, okh1, okh1           // x2 < x1 -> sub-column
+      okh1:
+        hex.mov 8, gz, sp_z                             // gzt = (thing floor + sprite top) - viewz
+        hex.sub 8, gz, viewz
+        hex.fixed_mul_lo 8, 4, tmp, gz, xsc
+        hex.set 8, cyf, centery*0x10000
+        hex.mov 8, ytopo, cyf
+        hex.sub 8, ytopo, tmp
+        hex.shr_hex 8, 4, ytopo
+        hex.sign_extend 8, 4, ytopo
+        hex.fixed_mul_lo 8, 4, tmp, sp_hh, xsc
+        hex.shr_hex 8, 4, tmp
+        hex.sign_extend 8, 4, tmp
+        hex.mov 8, hpxo, tmp
+        hex.sign 8, hpxo, bad, okh2
+      okh2:
+        hex.if0 8, hpxo, bad
+        hex.set 8, cvh, viewh
+        hex.scmp 8, hpxo, cvh, okv, okv, bad            // taller than the screen -> skip (unbucketable)
+      okv:
+        hex.set 8, one16, 0x10000
+        .scale_recip_div istepo, one16, xsc             // (1<<32)/xscale = texels per screen column
+        rep(ds/2, k) hex.shr_bit 8, istepo              // ... in DOWNSCALED texels
+        hex.set 1, vis, 1
+        ;done
+      bad:
+        hex.set 1, vis, 0
+      done:
+        ;end
+      trx: hex.vec 8
+      try8: hex.vec 8
+      ang: hex.vec 8
+      sidx: hex.vec 3
+      vsin: hex.vec 8
+      vcos: hex.vec 8
+      gxt: hex.vec 8
+      gyt: hex.vec 8
+      tz: hex.vec 8
+      xsc: hex.vec 8
+      txv: hex.vec 8
+      atx: hex.vec 8
+      tzl: hex.vec 8
+      txl: hex.vec 8
+      txr: hex.vec 8
+      tmp: hex.vec 8
+      gz: hex.vec 8
+      one16: hex.vec 8
+      cminz: hex.vec 8
+      cproj: hex.vec 8
+      cxf: hex.vec 8
+      cyf: hex.vec 8
+      cvw: hex.vec 8
+      cvh: hex.vec 8
+      end:
+    }
+
+    // proj.step_rows ra, rb, scale, wta8, wtb8, centeryfix_c (V3 step faces) -- `column_params_m`
+    //   WITHOUT the two clips: the raw SIGNED screen rows two world heights project to in this
+    //   column. The clips have to go because a step face is bounded by a DIFFERENT pair of heights
+    //   than the wall's, and its emptiness test compares the two raw rows: `column_params_m` clamps
+    //   `bottom` to VIEW_H-1, which silently loses the one row a face reaching the very bottom of
+    //   the ceiling region needs (min(H-2, B) instead of min(H-1, B)). Same two 6-row multiplies,
+    //   same >>16-arithmetic fold, so the cost is `column_params_m`'s (~11.9k) less the clamps.
+    //   wta8/wtb8 are the PER-SEG hoisted map-unit heights, exactly as wtc8/wtf8 are. @requires hex.init
+    def step_rows ra, rb, scale, wta8, wtb8, centeryfix_c \
+            @ prod, ccyf, end {
+        hex.zero 8, prod
+        rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wta8, scale
+        hex.set 8, ccyf, centeryfix_c
+        hex.mov 8, ra, ccyf
+        hex.sub 8, ra, prod                 // rowfrac = centeryfix - wt*scale
+        hex.shr_hex 8, 4, ra                // >> 16 arithmetic:
+        hex.sign_extend 8, 4, ra            //   logical shift + sign-extend the low half
+        hex.zero 8, prod
+        rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wtb8, scale
+        hex.mov 8, rb, ccyf
+        hex.sub 8, rb, prod
+        hex.shr_hex 8, 4, rb
+        hex.sign_extend 8, 4, rb
+        ;end
+      prod: hex.vec 8
+      ccyf: hex.vec 8
+      end:
+    }
+
     // proj.column_params_m top, bottom, scale, wtc8, wtf8, centeryfix_c, viewh1 -- the lines-mode
     //   per-column projection: wtc8/wtf8 are the PER-SEG HOISTED map-unit world heights
     //   ((ceilfix-viewz)>>16, sign-extended to 8 nibbles once per seg), so the per-column work is

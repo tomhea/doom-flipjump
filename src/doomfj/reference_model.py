@@ -65,6 +65,7 @@ WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap
 WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column (ops + bank knob)
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
+STEP_SEG_BUDGET = 12              # V3: boundaries allowed a step face (the NEAREST ones)
 # V2: sky-texture widths swept per full 360 turn. A LOOK knob, but not a free one -- it sets the
 # BAM shift, and fj only shifts cheaply by whole NIBBLES. With tw=128, shift = 32-7-log2(TURN), so
 # TURN=2 gives 24 (exactly 6 nibbles, one `hex.shr_hex 8, 6`) while TURN=4 gives 23 and would cost a
@@ -835,7 +836,8 @@ class ReferenceModel:
     def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True,
                           wall_mode: str = "textured", floor_mode_ft1: bool = False,
                           plane_near: bool = False, planes_out: list | None = None,
-                          wall_noise: bool = False, sky: bool = False) -> bytes:
+                          wall_noise: bool = False, sky: bool = False,
+                          near_steps: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -899,6 +901,9 @@ class ReferenceModel:
 
         drawn = bytearray(cfg.VIEW_W)                        # per-column solid-seg clip (1 = already drawn)
         pclaim = bytearray(cfg.VIEW_W)                        # M13-2S rung 3a: plane record claimed?
+        ups: list = [None] * W        # V3: this column's nearest upper step face (write-once)
+        los: list = [None] * W        # V3: ... and its nearest lower one (the STAIR RISER)
+        n_face = [0]                  # V3: face-carrying boundaries used, vs STEP_SEG_BUDGET
         n_claimed = 0                                         # ... and its two STOP conditions, both of
         n_ts = 0                                              # which the fj mirrors (see below)
         for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
@@ -933,7 +938,37 @@ class ReferenceModel:
                 rng2 = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
                 if rng2 is None:
                     continue
+                # V3 - STEP FACES: the upper/lower wall pieces of a two-sided boundary (stair
+                # risers, ledge fronts, door lintels). Without them a step you can walk up is
+                # invisible: the floor just changes colour where it rises.
+                # Only the NEAREST run per column is kept -- write-once slots, and the walk is
+                # front-to-back so the first writer IS the nearest -- and only the first
+                # STEP_SEG_BUDGET boundaries that actually HAVE a face may place one. That second
+                # bound is what makes the cost viewpoint-INDEPENDENT: a face-carrying seg pays a
+                # full ~93k wall_scale_setup, and at a heavy viewpoint 128 marking segs would all
+                # otherwise qualify. Measured: only 2 boundaries at spawn have a face at all.
+                has_up = fsec.ceil_h > bsec.ceil_h
+                has_lo = bsec.floor_h > fsec.floor_h
+                face_seg = near_steps and (has_up or has_lo) and n_face[0] < STEP_SEG_BUDGET
+                if face_seg:
+                    n_face[0] += 1
+                    rwn2, rwd2 = self.wall_setup(viewx, viewy, seg, verts)
                 for x in range(rng2[0], rng2[1]):
+                    if face_seg and not drawn[x] and not (
+                            (not has_up or ups[x]) and (not has_lo or los[x])):
+                        sc2 = self.scale_from_global_angle(
+                            (viewangle + self.xtoviewangle[x]) & ANGLE_MASK, viewangle,
+                            rwn2, rwd2) & ANGLE_MASK
+                        if has_up and ups[x] is None:
+                            t0, _b = self.wall_screen_span(fsec.ceil_h, fsec.ceil_h, viewz, sc2)
+                            _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h, viewz, sc2)
+                            if t0 <= ub - 1:
+                                ups[x] = (t0, ub - 1, fsec, fsec.ceil_h - bsec.ceil_h)
+                        if has_lo and los[x] is None:
+                            lt, _b2 = self.wall_screen_span(bsec.floor_h, fsec.floor_h, viewz, sc2)
+                            _t2, b0 = self.wall_screen_span(fsec.floor_h, fsec.floor_h, viewz, sc2)
+                            if lt <= b0:
+                                los[x] = (lt, b0, fsec, bsec.floor_h - fsec.floor_h)
                     if not pclaim[x]:
                         col_ch[x], col_fh[x], col_lt[x] = fsec.ceil_h, fsec.floor_h, fsec.light
                         col_cf[x], col_ff[x] = fsec.ceil_tex, fsec.floor_tex

@@ -1,149 +1,168 @@
-# Session handoff — the four visual features (2 of 4 shipped)
+# Session handoff — the four visual features (3 of 4 shipped in fj, V4's oracle done)
 
-**Branch:** `m13opt3-early-out`. Both build configurations green, full lines gate **11/11**.
+**Branch:** `m13opt3-early-out`.
 
 ---
 
 ## 1. Where the frame is
 
-| build | spawn | courtyard (1400,1200) | state |
-|---|---:|---:|---|
-| session start | 21,736,934 | — | |
-| M13-XTADISP | 20,594,618 | — | ✅ byte-exact |
-| default (features off) | 20,597,739 | — | ✅ byte-exact |
-| **V1 grain + V2 sky** | **23,536,484** | **20,134,978** | ✅ **11/11 gate** |
+| build | spawn | courtyard (1400,1200) | worst (-309,-44) |
+|---|---:|---:|---:|
+| session start (pre-V1) | 21,736,934 | — | 26,557,125 |
+| M13-XTADISP | 20,594,618 | — | 25,319,870 |
+| V1 grain + V2 sky | 23,536,484 | 20,134,978 | 26,405,793 |
+| **+ V3 step faces** | **26,545,502** | **27,604,046** | **32,137,393** |
 
-The renderer gained textured walls and sky **and is faster than at session start**. Inside the
-owner's 25–30M hope; ~6.5M of headroom remains to the 30–35M ceiling for V3 (+1.3M) and V4 (+2.8M).
-
----
-
-## 2. What shipped
-
-### M13-XTADISP — `xtoviewangle` by dispatch (−1.14M / −1.24M, byte-exact)
-`wall_scale_setup` opened with two `read_table_packed 4` reads of a 161-entry table, once per
-in-frustum seg. Converted to a D4 dispatch table behind a lines-only `proj.wall_scale_setup_m`.
-
-### V1 — pseudo-random wall texture (the owner's idea; +1.6M vs +19.6M for real sampling)
-Don't FETCH a texel, DERIVE one. The baked per-(texture, height) run-list still supplies colours and
-vertical structure; each run is pushed down `wall_noise(x)` colormap rows. No lookup table at all.
-
-Three things measurement overturned, all counter to the obvious choice:
-- **XOR on a PALETTE INDEX is wrong** — DOOM's palette runs dark→bright with the index, so `0^3`
-  turns black into light grey and the walls erupt in white confetti. The **colormap** is the right
-  operator: "same colour, N steps darker", in-hue by construction.
-- **Key the hash on `x>>2`, not `x`.** Per-column noise breaks DITTO (100 → 44 columns; ditto is
-  worth 4.83M). Grouping four columns: ditto holds at 76 and the emit delta is +375 pairs instead of
-  +1,198 — a third of the cost for *more* visible grain.
-- **Step 0/4/8/12, not 0..3.** Colormap row 0 is the identity, so a small jitter barely moves an
-  already-dark colour: 375 px changed vs **2,896**.
-
-In the lines tier `cm.emit` colormaps AND emits in one dispatch, so the grain REPLACES a `byte.emit`
-rather than adding beside it.
-
-### V2 — sky (byte-exact both viewpoints)
-Sky is the only surface with no perspective and no distance lighting, so a sky column depends on the
-texture column `u` alone → **it IS just a band list**, and the feature reduces to a per-column choice
-of ceiling band-list address with **no new emit path**.
-
-- `skybase = viewangle >> 24` once per frame (SKY_TURN=2 chosen so the shift is exactly 6 nibbles —
-  fj shifts cheaply only by whole nibbles).
-- `u = skybase + skyoff[x]`, `skyoff` a compile-time dispatch table. **No mask**: the bank holds
-  `3*tw` lists with entry `u` carrying column `u & (tw-1)`, so the sum can never leave it.
-- `cbufa`/`cbufd` point at the sky pair; the existing prefix walk emits it.
+All three **BYTE-EXACT** vs `render_wall_frame(..., wall_noise=True, sky=True, near_steps=True)`
+(`scratchpad/v3_check.py`). The worst viewpoint sits inside the owner's accepted 30–35M band but
+with ~3M of headroom, and V4 is priced at +2.8M — see §4 before starting it.
 
 ---
 
-## 3. What did NOT ship
+## 2. What shipped this session
 
-**V3 step faces** — oracle DONE and rendering (463 / 654 / 154 face px at spawn / (-480,256) /
-(-309,-44); `scratchpad/v3_steps.png`). `render_wall_frame(..., near_steps=True)`. **fj unwired.**
+### V3 — step faces (fj), byte-exact, +3.01M / +7.47M / +5.73M
 
-**V4 things** — designed against counted populations and measured unit prices. **Not started.**
+Three parts, and each one moved for a measured reason:
 
-### V3 fj — scope, measured from the code
+**RECORD** — `frame.ts_step_faces` (`src/fj/frame_render.fj`). `seg_pass1_leaf_body_ts` had **no
+projection machinery at all**, so V3 is a projection path *added* to a claim walk. Per face-carrying
+boundary: `proj.wall_setup_sgn` + `proj.wall_scale_setup_m` (~93k — exactly what
+`STEP_SEG_BUDGET = 12` gates), then per column two `proj.step_rows`.
 
-`seg_pass1_leaf_body_ts` (`frame_render.fj:1188`) is where a marking seg claims columns, and it has
-**no projection machinery at all** — its `<` list is geometry and claim state only. So V3 is not a
-splice into existing code; it adds a projection path to a leaf that has never projected:
+`proj.step_rows` is `column_params_m` **without its two clips**, and the clips genuinely had to go:
+a face is bounded by a different pair of world heights than the wall's, and its emptiness test
+compares the two RAW rows — `column_params_m` clamps `bottom` to `VIEW_H-1`, which silently loses
+the one row a face reaching the bottom of the ceiling region needs (`min(H-2, B)` for `min(H-1, B)`).
 
-1. `proj.wall_setup_sgn` + `proj.wall_scale_setup_m` per face-carrying seg (**~93k each** — which is
-   why `STEP_SEG_BUDGET = 12` must gate the SETUP, not the fill)
-2. a back-sector `column_params_m` per candidate column (11.9k; use the ROW-RULE sparse-delta form
-   `back_row = front_row + (wt_front − wt_back)*scale` with the baked delta SECOND ⇒ ~3.8k)
-3. write-once slots `ustep[x]`/`lstep[x]` + the fill
-4. a face-seg budget counter, separate from `n_tsv`
-5. the two-piece splice in `stream.emit_col_lines`
-6. the `dgchk` ditto-chain entry
+**STORE** — a slot is bytes, so emptiness is decided at record time:
 
-**The fill site** is the claim loop at `frame_render.fj:1247-1262` — labels `loop → body → claim →
-next`, walking `pclm[]` with `pptr`. `claim:` is where a column is first attributed, i.e. exactly
-where "the first writer is the nearest" holds. Land it in increments: **storage + fill first (it is
-byte-exact, because nothing reads the slots yet)**, then the splice.
+```
+valid  <=>  A <= B  and  B >= 0  and  A <= VIEW_H-1
+store  =    (max(A, 0), min(B, VIEW_H-1))
+```
 
-Calibration: **V2 reused an existing walk, added no new machinery, and still took six builds.**
-V3 is strictly larger.
+`scratchpad/v3_slotmodel.py` proves that identical to the oracle's store-raw-then-clip at five
+viewpoints — **before** a build was spent on it, and it also asserts each clipped face lands strictly
+inside its own region, which is what keeps the emitted column monotone.
 
----
+**EMIT** — `stream.emit_col_lines`. `pwalk` and `swalk` collapsed into ONE `qwalk` over a window
+`[qlo, qbound)` plus `half_walk` (which half-lists to walk). The ceiling prefix and floor suffix are
+special cases of it, and the face splice needs it anyway: the list is **re-walked from its head**,
+not resumed, because the 0x0B cursor only moves forward — re-emitting an already-covered pair would
+rewind it and repaint over the face.
 
-## 4. Prices (counted populations × measured unit prices)
+### V4 — the THINGS oracle (`render_wall_frame(..., things=True, sprite_wad=...)`)
 
-Emit costs **~330 ops per `[y2][colour]` pair**; the frame is ~1,434 pairs / 100 ditto columns.
+Renders E1M1's 292 things as billboards: 849 px / 53 columns at the courtyard, 2,013 px / 119
+columns at the tree viewpoint (`scratchpad/v4_oracle.py` → `scratchpad/v4_things.png`).
+**Every decision in it was made so the fj can follow it** — see §4.
 
-| kernel | calls/frame | ops each |
-|---|---:|---:|
-| `proj.column_params_m` | 160 (one per column, ever) | 11,853 |
-| `proj.wall_scale_setup_m` | 28 spawn / 51 worst | **92,781** |
-
-⚠ **Get the call COUNT right.** `wall_scale_setup_m` is in pass 2, which runs only for segs with an
-unclaimed column — 28/51, NOT the 169/202 in-frustum segs. With the wrong count it reads 15.4k vs
-23.6k; **a 1.5× spread for identical straight-line code is the tell that the count is wrong.**
-
-Feature costs: V3 **+1.3M**, V4 **+2.8M** ⇒ ~27.6M projected.
-
-⚠ **True texture mapping is +19.6M, not the +0.6M an earlier artifact claimed.** 5,612 wall rows are
-on screen, each needing a texel fetch + colormap + run-merge (~3.2k), and it kills all 100 ditto
-columns. Baking it away is also out: the wall bank is already 8.9M chars / 897k lines and the
-assembler is ~cubic. That retraction is why the pseudo-random approach exists.
+⚠ The test fixture wad has NO sprite lumps (223 lumps, no `S_START`). Sprite art comes from
+`assets/freedoom1.wad` via a separate `sprite_wad` argument; geometry, flats and colormap stay on
+the fixture so nothing else moves.
 
 ---
 
-## 5. Lessons (in memory as R38–R43) — the ones that cost builds here
+## 3. The two numbers that were wrong, and why
 
-1. **The consumer's format is the specification.** V2 cost four builds to bank size, label idiom
-   (`hex.set` not `add_constant` for a label base), list format (the walker reads a COUNT header,
-   not the WPX sentinel) and half-list layout (asc/desc PAIR split at CENTERY). Each was assumed
-   from a neighbouring subsystem instead of read off `emit_col_lines`.
-2. **Narrow probes verify the path you're on; only the SUITE covers the ones you aren't.** V1's
-   arity change to `wpx_wall` broke the opt-in 2S tier and survived **five "byte-exact" builds**.
-   `tests/fj/test_lines_render.py` (11 tests, ~16 min) found it in one run. Run it BEFORE starting.
-3. **A gated feature can break the ungated build** — an unused label is a hard assembler error, so a
-   register referenced only inside `rep(flag,k)` breaks the flag-off build.
-   `scratchpad/default_build_check.py` covers that in one build.
-4. **A performance number from a build that is not byte-exact is not a performance number.** V1 was
-   reported at +58k from a broken-ditto build; the true cost is +1.6M — 25× out.
-5. **When elimination stalls, force the EFFECT.** Three builds went into "the sky branch never
-   fires"; an ablate flag forcing the branch showed spawn (no sky) moving 4,011 px, proving the path
-   ran and reframing it as "fires and produces garbage".
-6. **Grep for the code you think you wrote.** A silent string-replacement failure meant V3's splice
-   was never inserted; I committed a diagnosis blaming a clamp that was never executing.
-7. **Verify a property on the side that will RUN it.** The sky bank's no-mask bound was proven with
-   the ORACLE's masked base; fj's is unmasked, so the real index reached 382 against a 256-entry
-   bank. Values agreed, ranges did not.
-8. **A palette INDEX carries no brightness ordering you can guess at** — bit V1 (confetti) and V3
-   (blown-out white faces, `WALL_BG`=4 is near-white; use `STEP_FACE_BASE`=96).
+1. **V3 was priced at +1.3M / +2.7M; it is +3.0M / +5.7M.** The estimate counted the projections and
+   the setups but not the columns they run over, and not the ditto. Populations are now measured —
+   `scratchpad/v3_pop.py`: 2 face segs / 54 face columns at spawn, 12 / 262 at the courtyard,
+   12 / 79 at the worst.
+
+2. **The ditto chain must COMPARE the face state, never refuse the ditto.** The first working build
+   refused it (`stv != 0 → no ditto`), stayed byte-exact, and cost **+4.06M / +9.16M**. At an outdoor
+   viewpoint nearly every column carries a face, so "no ditto on a face column" is "no ditto", and
+   ditto is worth ~4.8M. Comparing the six emit inputs (`uy1, uy2p1, ucol, ly1, ly2p1, lcol`,
+   **zeroed** when absent so a stale value cannot make two identical columns compare different)
+   recovered 1.05M / 1.69M / 0.46M. **This is the fourth feature to hit the ditto chain
+   (`dgchk`); V4's fragments will be the fifth.**
+
+Also settled: the ORACLE now **interpolates** the face scale across the seg (one setup, then
+`+= scalestep` per column) rather than calling `scale_from_global_angle` per column. That is what
+DOOM does and the only affordable option — ~40k fj ops per COLUMN against ~93k once per SEG.
+Measured effect: 1 of 108 projected rows moves at spawn, 10 of 210 at the worst viewpoint.
+
+---
+
+## 4. V4 — what is done, what is left
+
+### Done and committed
+
+* **The oracle**, with every fj-forced decision already taken:
+  * fragments are recorded **during the walk**, at the moment it reaches the thing's own subsector,
+    and only into columns no wall has claimed yet. Front-to-back order is what makes "the first
+    writer is the nearest" true **and** is the entire occlusion test — the same trick V3 uses, and
+    the reason a write-once forward-only column protocol can show sprites at all (DOOM draws them
+    last, back-to-front, and this cannot).
+  * sprite columns bake per **(sprite, downscaled column, height BUCKET)** —
+    `SPRITE_HEIGHT_BUCKETS = 32`. Exact heights (the WPX wall bank's shape) would be ~17M characters
+    against a program already at 36M and an assembler that is ~cubic.
+  * texels are stored **RAW** and colormapped at emit through `cm.emit` (V1's grain mechanism), so
+    one bank serves all 16 light levels instead of being multiplied by them.
+  * **interior transparent gaps take the nearest opaque texel above.** Not aesthetics — a
+    transparent run in the middle of a fragment would need background the emit has already passed.
+  * **one overlay per column, and the sprite wins**: a column with a fragment draws no step face.
+  * `THING_BUDGET = 24` bounds the per-frame projection cost the way `STEP_SEG_BUDGET` bounds V3.
+* **`wall_renderer._lines_sprite_bank`** — the bank generator. Measured: 31 sprite kinds,
+  17,216 blocks, **5.08M characters** (program 36M → ~41M).
+* **`proj.project_thing`** — R_ProjectSprite in this repo's fixed point (one `hex.fixed_div` ≈ 38.5k
+  plus a block-FP reciprocal and five multiplies ⇒ ~60k per thing). Parses; never instantiated yet.
+
+### Left to do
+
+1. Per-thing xorby blocks (`sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_base, sp_dw, sp_lt`) emitted
+   into each subsector's leaf, gated on `numsegs > 0` (the oracle only reaches a subsector's things
+   through its first seg).
+2. The record loop: project, bucket the height, walk `[x1, x2]` with the `frac += istep` texture-column
+   DDA, and store the fragment for unclaimed, unfragmented columns —
+   `[sy1][sy2p1][y0+128][blk_lo][blk_hi][lightrow]` at a 16-byte stride, plus a 1-byte `sprflag[x]`.
+   `y0` is biased by 128 because a near sprite's top is off the top of the view (h ≤ VIEW_H bounds
+   it to ±99).
+3. The emit. This is the part V3 did NOT have to do: a sprite can straddle the ceiling region, the
+   wall and the floor region, so the column becomes `region(0, sy1)` + the sprite runs +
+   `region(sy2+1, VIEW_H)`, where `region(lo, hi)` is the ceiling `half_walk`, a **windowed**
+   `wpx_wall`, and the floor `half_walk`. Keep the existing no-sprite path untouched beside it —
+   the wall run-list walk is where most of the frame's pairs are, and it must not get slower.
+4. The `dgchk` entry (see §3.2).
+
+### Before starting: the headroom question
+
+The worst viewpoint is 32.14M and V4 is priced at +2.8M ⇒ ~35M, at the top of the band. The
+paydown levers, in order, are still: `slopediv_recip`'s `read_table_packed 3` → dispatch (the 4th
+application of the conversion that paid −1.14M), a ROW-RULE operand-order check on
+`column_params_m`'s two multiplies (160 calls × 11.9k), and the two `hex.fixed_div 8,4` in
+`wall_scale_setup_m` (2.16M/3.93M — the single biggest item in the frame).
+
+---
+
+## 5. Lessons this session added
+
+1. **An unused macro PARAMETER is a hard assembler error, exactly like an unused label.** Two builds
+   were lost to `sh_idx`/`sh_p` missing from a `@` list and to a `vieww` parameter I stopped using.
+   `scratchpad/`-style parse-only check (assemble the fj sources against a two-line `main`) costs
+   ~40 seconds and catches all of it — **run it before every real build.**
+2. **`fj.assemble` reads the `.fj` files when it is CALLED, not when the script starts.** Editing a
+   shared `.fj` while a verification build is in flight killed a 10-minute run with a syntax error
+   from a feature that build does not even use. Python modules are safe (imported once); `.fj` is not.
+3. **A performance number from a byte-exact build can still be the wrong design.** The refuse-the-ditto
+   build was byte-exact at all three viewpoints and 4M too expensive. Byte-exactness proves
+   correctness, not that the mechanism is the right one.
+4. Everything in `docs/handoff-visual-features.md` §5's lesson list still holds — in particular
+   **the consumer's format is the specification**, which is why `qwalk` had to be a generalisation of
+   the existing walkers and not a new path beside them.
 
 ---
 
 ## 6. Where to start
 
-1. `python -m pytest tests/fj/test_lines_render.py -q` — establish the baseline is green.
-2. V3 increment A: slot storage + fill at `frame_render.fj:1254` (`claim:`), gated. **Must be
-   byte-exact** — nothing reads the slots.
-3. V3 increment B: the splice + the `dgchk` ditto entry. Gate against
-   `render_wall_frame(..., near_steps=True)`.
-4. V4 per §4 of `handoff-visual-features.md` — a per-column fragment PRE-PASS, never an overlay:
-   the 0x0B column is write-once, top-down.
+1. `python -m pytest tests/fj/test_lines_render.py -q` — the 11-test gate, ~17 min.
+2. The parse-only check (§5.1) before every build.
+3. V4 per §4, in increments: **the record path first with nothing reading the fragments** (that is
+   byte-exact against today's oracle and prices the record half alone), then the emit.
 
-Probes: `scratchpad/v2_check.py` (two-viewpoint, fast), `scratchpad/default_build_check.py`
-(flag-off), `scratchpad/feature_cost_audit.py` (pair counts).
+Probes: `scratchpad/v3_check.py` (three viewpoints, the V3 gate), `scratchpad/v3_pop.py`
+(populations), `scratchpad/v3_slotmodel.py` (the storage model, no build needed),
+`scratchpad/v4_oracle.py` (the things oracle + its pair/ditto deltas),
+`scratchpad/default_build_check.py` (the flag-off build).

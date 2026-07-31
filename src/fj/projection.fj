@@ -674,7 +674,7 @@ ns proj {
     //   (5 schoolbook rows, recip <= 5 nibbles), ONE whole-nibble shift picked by a compare tree,
     //   low 8 nibbles out. 14 nibbles is the measured-exact width (12 truncates real operands).
     //   @requires hex.init & stl.ptr_init
-    def scale_recip_div q, num, den \
+    def scale_recip_div q, num, den, disp \
             @ nrm_hi, hi_done, nrm_lo, lo_more, lo_done, \
               tlo, tlo67, thi, fs4, fs5, fs6, fs7, fs8, fs9, fs10, fs11, fsh_done, done, \
               sden, wnum, recipw, recip, prod, fsh, c5t, c6t, c8t, c10t \
@@ -696,7 +696,11 @@ ns proj {
         hex.dec 2, fsh
         ;nrm_lo
       lo_done:
-        hex.read_table_packed 3, recip, slopediv_recip, 3, sden   // recip[m] = (1<<24)//m
+        // M13-SRDISP (the D4 dispatch lever, 4th application): 3 x read_byte_and_inc (42@ each)
+        // + a mul_const ~ 247@ becomes a ~20@ lookup. `disp` is a COMPILE-TIME flag, so the
+        // non-lines tiers -- which have no `srdisp` table -- keep the packed read.
+        rep(1-disp, k) hex.read_table_packed 3, recip, slopediv_recip, 3, sden   // recip[m]=(1<<24)//m
+        rep(disp, k) srdisp.lookup recip, sden
         hex.zero 14, wnum
         hex.mov 8, wnum + 4*dw, num              // wnum = num << 16 (4 nibbles, by placement)
         hex.zero 14, recipw
@@ -752,7 +756,7 @@ ns proj {
       done:
     }
 
-    // proj.scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection
+    // proj.scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection, 0
     //   (R_ScaleFromGlobalAngle): scale[:8] = the wall's projected 16.16 scale (pixels per world unit)
     //   for the column whose ABSOLUTE view angle is visangle. scale = PROJECTION*sin(angleb) /
     //   (rw_distance*sin(anglea)), anglea = ANG90+(visangle-viewangle), angleb = ANG90+(visangle-
@@ -765,7 +769,7 @@ ns proj {
     //   a huge unsigned scale and clamps to SCALE_MAX, exactly as the oracle does (scmp would give
     //   SCALE_MIN and diverge). anglea/b are unsigned-modular BAM that only feed read_sin (bit extract).
     //   @requires hex.init & stl.ptr_init   (finesine.read_sin)
-    def scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection \
+    def scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection, disp \
             @ anglea, angleb, num, den, sidx, sinv, cproj, cang90, csmin, csmax, qneg, \
               den_zero, numn, nump, denn, denp, dodiv, chk_min, set_max, set_min, end {
         hex.mov 8, anglea, visangle
@@ -812,7 +816,7 @@ ns proj {
         hex.mov 8, scale, csmax
         ;end
       dodiv:
-        .scale_recip_div scale, num, den
+        .scale_recip_div scale, num, den, disp
         hex.cmp 8, scale, csmax, chk_min, chk_min, set_max    // min(SCALE_MAX, scale): > -> clamp (unsigned)
       set_max:
         hex.mov 8, scale, csmax
@@ -1258,10 +1262,10 @@ ns proj {
             < xtoviewangle {
         hex.read_table_packed 4, vis1, xtoviewangle, 2, x1     // xtoviewangle[x1]
         hex.add 8, vis1, viewangle                      // visangle@x1 = viewangle + xtoviewangle[x1]
-        .scale_from_global_angle scale1, vis1, viewangle, rw_normalangle, rw_distance, projection
+        .scale_from_global_angle scale1, vis1, viewangle, rw_normalangle, rw_distance, projection, 0
         hex.read_table_packed 4, vis2, xtoviewangle, 2, x2     // xtoviewangle[x2]
         hex.add 8, vis2, viewangle                      // visangle@x2
-        .scale_from_global_angle scale2, vis2, viewangle, rw_normalangle, rw_distance, projection
+        .scale_from_global_angle scale2, vis2, viewangle, rw_normalangle, rw_distance, projection, 0
         .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero
         ;end
 
@@ -1281,10 +1285,10 @@ ns proj {
             @ vis1, vis2, scale2, end {
         xtadisp.lookup vis1, x1                         // xtoviewangle[x1]
         hex.add 8, vis1, viewangle                      // visangle@x1 = viewangle + xtoviewangle[x1]
-        .scale_from_global_angle scale1, vis1, viewangle, rw_normalangle, rw_distance, projection
+        .scale_from_global_angle scale1, vis1, viewangle, rw_normalangle, rw_distance, projection, 1
         xtadisp.lookup vis2, x2                         // xtoviewangle[x2]
         hex.add 8, vis2, viewangle                      // visangle@x2
-        .scale_from_global_angle scale2, vis2, viewangle, rw_normalangle, rw_distance, projection
+        .scale_from_global_angle scale2, vis2, viewangle, rw_normalangle, rw_distance, projection, 1
         .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero
         ;end
 
@@ -1355,7 +1359,7 @@ ns proj {
     //   reciprocal and five multiplies — which is why THING_BUDGET exists.
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
     def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds \
-            @ ok1, ok2, okx, okx2, okh1, okh2, okv, bad, done, end, \
+            @ ok1, ok2, okd, okx, okx2, okh1, okh2, okv, bad, done, end, \
               trx, try8, ang, sidx, vsin, vcos, gxt, gyt, tz, xsc, txv, atx, tzl, \
               txl, txr, tmp, gz, one16, cminz, cproj, cxf, cyf, cvw, cvh \
             < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh {
@@ -1377,14 +1381,6 @@ ns proj {
         hex.set 8, cminz, minz
         hex.scmp 8, tz, cminz, bad, ok1, ok1
       ok1:
-        hex.set 8, cproj, projection                    // centerxfrac -- `projection` ALREADY
-                                                        // carries the <<16 (wall_renderer's
-                                                        // `proj = cfg.PROJECTION << 16`), and
-                                                        // shifting it again truncated it to 0,
-                                                        // so xscale was 0 and EVERY thing failed
-                                                        // projection -- the frame then differed
-                                                        // from the oracle by exactly its sprites.
-        hex.fixed_div 8, 4, xsc, cproj, tz, bad         // xscale = FixedDiv(projection, tz)
         // tx = trx*sin - try*cos  (DOOM: -(gyt + gxt) with both negated)
         hex.fixed_mul_lo 8, 4, gxt, trx, vsin
         hex.fixed_mul_lo 8, 4, gyt, try8, vcos
@@ -1395,7 +1391,18 @@ ns proj {
         hex.mov 8, tzl, tz
         hex.shl_bit 8, tzl
         hex.shl_bit 8, tzl
-        hex.cmp 8, atx, tzl, ok2, ok2, bad
+        // ⚠ this reject runs BEFORE the divide, where DOOM runs it after. It needs only tz
+        // and tx and rejects exactly the same set either way -- so the frame is unchanged
+        // and every off-screen thing stops paying a `hex.fixed_div 8,4` (38,500 ops, the
+        // dearest primitive in the table).
+        hex.cmp 8, atx, tzl, okd, okd, bad
+      okd:
+        hex.set 8, cproj, projection                    // centerxfrac -- `projection` ALREADY
+                                                        // carries the <<16 (wall_renderer's
+                                                        // `proj = cfg.PROJECTION << 16`); shifting
+                                                        // it again truncated it to 0, so xscale was
+                                                        // 0 and EVERY thing failed projection.
+        hex.fixed_div 8, 4, xsc, cproj, tz, bad         // xscale = FixedDiv(projection, tz)
       ok2:
         hex.set 8, cxf, centerx*0x10000
         hex.mov 8, txl, txv
@@ -1439,7 +1446,7 @@ ns proj {
         hex.scmp 8, hpxo, cvh, okv, okv, bad            // taller than the screen -> skip (unbucketable)
       okv:
         hex.set 8, one16, 0x10000
-        .scale_recip_div istepo, one16, xsc             // (1<<32)/xscale = texels per screen column
+        .scale_recip_div istepo, one16, xsc, 1          // (1<<32)/xscale = texels per screen column
         rep(ds/2, k) hex.shr_bit 8, istepo              // ... in DOWNSCALED texels
         hex.set 1, vis, 1
         ;done

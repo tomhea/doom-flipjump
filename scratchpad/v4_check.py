@@ -31,6 +31,7 @@ SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
 EMIT = "--emit" in sys.argv
+NOTHINGS = "--nothings" in sys.argv   # build WITHOUT things: the V3 baseline at every viewpoint
 TRACE = "--trace" in sys.argv
 cfg = Config()
 mw = WadFile.from_path('tests/fixtures/freedoom_e1m1.wad')
@@ -42,7 +43,7 @@ VPS = [(sx, sy, sp.angle, "spawn"), (1400, 1200, 0, "courtyard"),
 WAS = [26_545_502, 27_604_046, None, 32_137_393]     # V1+V2+V3, before V4
 
 FLAGS = dict(floor_mode="FT1", wall_mode="WPX", raster_mode="lines", plane_near=True,
-             wall_noise=True, sky=True, steps=True, things=True)
+             wall_noise=True, sky=True, steps=True, things=not NOTHINGS)
 
 
 class TraceScreen(StreamScreen):
@@ -101,7 +102,7 @@ scene = build_scene(mw, mw, "E1M1")
 WANT = [bytes(rm.render_wall_frame(SimState(x=vx << 16, y=vy << 16, angle=va, level="E1M1"),
                                    scene, wall_mode="WPX", floor_mode_ft1=True, plane_near=True,
                                    wall_noise=True, sky=True, near_steps=True,
-                                   things=EMIT, sprite_wad=art))
+                                   things=EMIT and not NOTHINGS, sprite_wad=art))
         for vx, vy, va, _ in VPS]
 print("oracle frames:", [hashlib.sha256(w).hexdigest()[:12] for w in WANT], flush=True)
 

@@ -31,7 +31,8 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.coarse_cull import generate_coarse_bounds_fj
-from doomfj.tables import tantoangle_table, slopediv_recip8_table, xtoviewangle_table
+from doomfj.tables import (tantoangle_table, slopediv_recip8_table, slopediv_recip_table,
+                           xtoviewangle_table)
 from doomfj.config import PNEAR_SEG_BUDGET
 
 
@@ -364,6 +365,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                         index_nibbles=3, result_nibbles=8) if lines else "")
     sdrecip = (generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(),
                                           index_nibbles=3, result_nibbles=6) if lines else "")
+    # M13-SRDISP: the SAME lever, FOURTH application. `proj.scale_recip_div` opens with a
+    # `read_table_packed 3` of `slopediv_recip` (~247@), and it runs twice per pass-2 seg, twice
+    # per step-face seg and once per projected thing.
+    srdisp = (generate_dispatch_table_fj("srdisp", slopediv_recip_table(),
+                                         index_nibbles=3, result_nibbles=6) if lines else "")
     # M13-XTADISP: the SAME lever, third application. `proj.wall_scale_setup` runs once per
     # in-frustum seg (169 at E1M1 spawn, 202 at the worst sweep viewpoint) and opens by reading
     # xtoviewangle at x1 AND at x2 -- two ~289@ packed reads = ~15.6k ops per seg, ~2.6M/3.2M a
@@ -1046,7 +1052,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                     tex, cm, ttang, sdrecip, xtadisp, wnoise, skybands, skyoff, skypid,
+                     tex, cm, ttang, sdrecip, srdisp, xtadisp, wnoise, skybands, skyoff, skypid,
                      entoff, "__hot_end:"])
     else:
         hotdata = []

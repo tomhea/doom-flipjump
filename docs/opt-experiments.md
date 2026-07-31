@@ -77,3 +77,70 @@ Both predicates now treat a thing-carrying leaf as live.
 
 **Any pruning a feature does not know about is a feature that silently does not run.** That is the
 general form, and it will bite the next per-subsector feature too.
+
+---
+
+## EXP-1 — `slopediv_recip`: `read_table_packed 3` → D4 dispatch ✅ **KEEP**
+
+The dispatch lever's **fourth** application (after tantoangle, slopediv_recip8 and xtoviewangle).
+`proj.scale_recip_div` opened with a `read_table_packed 3` (~247@ = 3 × `read_byte_and_inc` plus a
+`mul_const`); it runs twice per pass-2 seg, twice per step-face seg and once per projected thing.
+Threaded as a COMPILE-TIME `disp` flag so the non-lines tiers, which have no `srdisp` table, keep
+the packed read.
+
+| viewpoint | before | after | delta |
+|---|---:|---:|---:|
+| spawn | 28,104,383 | 28,026,843 | **−77,540** |
+| courtyard | 36,010,624 | 34,662,751 | **−1,347,873** |
+| tree | 45,252,666 | 43,458,960 | **−1,793,706** |
+| worst | 39,448,264 | 38,468,873 | **−979,391** |
+
+**BYTE-EXACT at all four.** Cost: +1.06M characters of program (41.70M → 42.76M).
+
+The spawn delta is small because spawn has few pass-2 segs and no visible things; the lever scales
+with the number of *projections*, which is exactly what a sprite-heavy frame has most of. That makes
+it worth more, not less, once enemies are in.
+
+## EXP-1a — attribution: what V4 actually costs (`--nothings` build) 📏
+
+Building the same tree with `things=False` gives V4's price at every viewpoint cleanly (both frames
+byte-exact, so neither number is contaminated):
+
+| viewpoint | V3 only | V3+V4 | **V4 costs** |
+|---|---:|---:|---:|
+| spawn | 25,896,401 | 28,026,843 | +2.13M |
+| courtyard | 27,112,631 | 34,662,751 | +7.55M |
+| **tree** | **17,917,814** | **43,458,960** | **+25.54M** |
+| worst | 31,389,542 | 38,468,873 | +7.08M |
+
+**The tree viewpoint is the whole problem** — a cheap 17.9M frame becomes 43.5M once 24 large,
+near billboards are projected and recorded. That is also the frame most like a future firefight, so
+it is the right one to optimise against.
+
+`scratchpad/v4_check.py --nothings` builds and gates the no-things tier; both binaries stay in the
+cache, so the pair can be re-measured for free after any change.
+
+## EXP-2 — reject before the divide, and test the cheaper flag first ✅ **KEEP**
+
+Two independent reorderings, both **free** (they change no result, only when work happens):
+
+1. `proj.project_thing` ran DOOM's `|tx| > tz<<2` off-screen reject AFTER `FixedDiv(projection, tz)`.
+   The test needs only `tz` and `tx`, and rejects exactly the same set either way — so moving it
+   BEFORE the divide costs nothing and saves a `hex.fixed_div 8,4` (**38,500 ops**, the dearest
+   primitive in the table) for every thing that is off-screen. At a viewpoint where the budget binds,
+   most things reached are off-screen.
+2. The record loop read `drawn[x]` then `sprflag[x]`. The conjunction is symmetric, so reading the
+   SPRITE flag first means a column a nearer thing already claimed costs one byte read, not two.
+
+| viewpoint | before | after | delta |
+|---|---:|---:|---:|
+| spawn | 28,026,843 | 28,051,295 | +24,452 (noise) |
+| courtyard | 34,662,751 | 34,333,993 | **−328,758** |
+| tree | 43,458,960 | 40,714,308 | **−2,744,652** |
+| worst | 38,468,873 | 38,030,062 | **−438,811** |
+
+**BYTE-EXACT at all four.** Zero added program text.
+
+The lesson generalises past this kernel: **an early-out is worth what it skips, so it belongs as
+early as its inputs allow — not where the reference implementation happens to put it.** DOOM does
+the divide first because on a 486 the divide was not 38,500× a compare.

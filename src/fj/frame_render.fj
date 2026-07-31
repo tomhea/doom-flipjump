@@ -1408,9 +1408,9 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear, eabl, noproj \
+            pnear, eabl, noproj, ptwice, stwice \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
-              fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, \
+              fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
               dfull, dchk2, dpl, dsame, demitted, dvalid, dct, dfs, dpid \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
@@ -1421,7 +1421,11 @@ ns frame {
               seg_ret2, \
               full, n_drawn, vieww {
         proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle
-        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        proj.wall_scale_setup_m scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        // ablate "scaletwice" (measurement only): the same setup, same operands, dead outputs. This
+        // is what rung 3c's step faces must pay for each marking seg they decorate, so it is THE
+        // number that sets STEP_SEG_BUDGET. Frame stays byte-exact (asserted by the probe).
+        rep(stwice, k) proj.wall_scale_setup_m dscale, dsstep, viewangle, normalangle, rw_distance, x1, x2, projection
         // M13-paramhoist: the map-unit world heights, once per seg (the per-column subtracts and
         // the 12-nibble fixed_mul width both die; see proj.column_params_m).
         hex.mov 4, wtc8, ceilfix + 4*dw
@@ -1454,6 +1458,11 @@ ns frame {
       notdrawn:
         rep(1-noproj, k) .lines_projcall centery*0x10000, viewh1, top, bottom, scale, wtc8, wtf8
         rep(noproj, k) .lines_projstub centery, top, bottom
+        // ablate "projtwice" (measurement only): the SAME call with the SAME operands into dead
+        // destinations. Measuring by ADDING keeps the frame byte-exact -- unlike "noproj", whose
+        // stub shrinks every wall and so changes the WPX emit volume too (its delta is NOT the
+        // projection's cost; see docs/handoff-m13-2s-fast.md §1).
+        rep(ptwice, k) .lines_projcall centery*0x10000, viewh1, dtop, dbot, scale, wtc8, wtf8
         hex.set 8, cVH, viewh                   // cexcl = min(top, VIEW_H)
         hex.mov 8, cexcl, top
         hex.scmp 8, top, cVH, cdone, cge, cge
@@ -1512,6 +1521,10 @@ ns frame {
       dpid: hex.vec 2
       wtc8: hex.vec 8
       wtf8: hex.vec 8
+      dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs
+      dbot: hex.vec 8
+      dscale: hex.vec 8                         // ablate "scaletwice" only: dead scale-setup outputs
+      dsstep: hex.vec 8
       cbufa: hex.vec w/4
       cbufd: hex.vec w/4
       fbufa: hex.vec w/4
@@ -1676,7 +1689,7 @@ ns frame {
     // `seg_flags` bit 0 = two-sided, bit 1 = has upper, bit 2 = has lower (baked per seg).
     def seg_pass2_leaf_body_2s centery, viewh1, viewh, projection, half_slots, ecap, colstub @ loop, body, work, nextcol, ret, cdone, cge, doceil, noceil, fdone, fhi, dofloor, nofloor, haswin, nowin, solid, twosided, ckl, doproj, dosolid, nosolid, didclose, doup, uclip, upck, upno, dolo, lohi, lock, lono, sfull, cVH, ctake, fstart, cend, fbeg, wtop, wend, uend, lbeg, ltak, ubot, ltop, wtc8, wtf8, wbc8, wbf8, one, cbufa, cbufd, fbufa, fbufd < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, bceilfix, bfloorfix, viewz, seg_flags, seg_pid, seg_wstrip, seg_wsupper, seg_wslower, x1, x2, x, chi, flo, tcnt, bcnt, tptr, bptr, dptr, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww {
         proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle
-        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        proj.wall_scale_setup_m scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         hex.mov 4, wtc8, ceilfix + 4*dw
         hex.sub 4, wtc8, viewz + 4*dw
         hex.sign_extend 8, 4, wtc8

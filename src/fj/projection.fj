@@ -1271,6 +1271,29 @@ ns proj {
       end:
     }
 
+    // proj.wall_scale_setup_m — the LINES-mode wall_scale_setup (M13-XTADISP). Identical values and
+    // identical output, but the two xtoviewangle reads go through the D4 per-entry DISPATCH table
+    // `xtadisp` (~20@) instead of hex.read_table_packed 4 (~289@ per the stl's documented
+    // complexities, so ~15.6k ops saved per in-frustum seg). The same lever M13-ATANDISP applied to
+    // tantoangle and slopediv_recip8; byte-exact by construction, same values.
+    // x1/x2 are 2-nibble column indices in [0, VIEW_W] -- exactly the dispatch table's index width.
+    def wall_scale_setup_m scale1, scalestep_out, viewangle, rw_normalangle, rw_distance, x1, x2, projection \
+            @ vis1, vis2, scale2, end {
+        xtadisp.lookup vis1, x1                         // xtoviewangle[x1]
+        hex.add 8, vis1, viewangle                      // visangle@x1 = viewangle + xtoviewangle[x1]
+        .scale_from_global_angle scale1, vis1, viewangle, rw_normalangle, rw_distance, projection
+        xtadisp.lookup vis2, x2                         // xtoviewangle[x2]
+        hex.add 8, vis2, viewangle                      // visangle@x2
+        .scale_from_global_angle scale2, vis2, viewangle, rw_normalangle, rw_distance, projection
+        .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero
+        ;end
+
+      vis1: hex.vec 8
+      vis2: hex.vec 8
+      scale2: hex.vec 8
+      end:
+    }
+
     // proj.column_render_params top, bottom, texcol, frac0, step, <runtime per-column inputs>, centery,
     //   ds, viewh1 (the per-column render-parameter bundle, render_wall_frame lines 540-559): for one
     //   screen column, composes wall_screen_span -> CLIP (top=max(0,top), bottom=min(VIEW_H-1,bottom)) ->

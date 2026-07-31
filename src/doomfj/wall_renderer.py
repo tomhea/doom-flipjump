@@ -29,7 +29,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.coarse_cull import generate_coarse_bounds_fj
-from doomfj.tables import tantoangle_table, slopediv_recip8_table
+from doomfj.tables import tantoangle_table, slopediv_recip8_table, xtoviewangle_table
 from doomfj.config import PNEAR_SEG_BUDGET
 
 
@@ -67,7 +67,7 @@ _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wed
                            "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull",
                            "emitnopair", "emitnowalk", "atantwice",
                            "slopetwice", "tabletwice", "noflush", "colstub",
-                           "noprescan", "noproj"})
+                           "noprescan", "noproj", "projtwice", "scaletwice"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -360,6 +360,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                         index_nibbles=3, result_nibbles=8) if lines else "")
     sdrecip = (generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(),
                                           index_nibbles=3, result_nibbles=6) if lines else "")
+    # M13-XTADISP: the SAME lever, third application. `proj.wall_scale_setup` runs once per
+    # in-frustum seg (169 at E1M1 spawn, 202 at the worst sweep viewpoint) and opens by reading
+    # xtoviewangle at x1 AND at x2 -- two ~289@ packed reads = ~15.6k ops per seg, ~2.6M/3.2M a
+    # frame spent reading a 161-entry table. As a dispatch table each read is ~20@. Only 161
+    # entries, so this costs ~1/25 the program size of the tantoangle conversion.
+    xtadisp = (generate_dispatch_table_fj("xtadisp", xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N),
+                                          index_nibbles=2, result_nibbles=8) if lines else "")
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     slopediv_recip8 = generate_slopediv_recip8_lut_fj("slopediv_recip8")  # M13-coarseslope
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
@@ -925,7 +932,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                     tex, cm, ttang, sdrecip, entoff, "__hot_end:"])
+                     tex, cm, ttang, sdrecip, xtadisp, entoff, "__hot_end:"])
     else:
         hotdata = []
     # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,
@@ -992,7 +999,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
            (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
             f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
-            f"{eabl_flag}, {1 if 'noproj' in ablate else 0}")]
+            f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
+            f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]

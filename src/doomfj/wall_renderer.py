@@ -91,7 +91,8 @@ BAND_STRIDE = MAX_BANDS * 3        # packed bytes per column per region (run-len
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
                        wall_mode: str = "textured", raster_mode: str = "framebuffer",
-                       plane_near: bool = False, two_sided: bool = False) -> str:
+                       plane_near: bool = False, two_sided: bool = False,
+                       wall_noise: bool = False) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -367,6 +368,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # entries, so this costs ~1/25 the program size of the tantoangle conversion.
     xtadisp = (generate_dispatch_table_fj("xtadisp", xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N),
                                           index_nibbles=2, result_nibbles=8) if lines else "")
+    # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
+    # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
+    # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
+    wnoise = (generate_dispatch_table_fj(
+        "wnoise", [rm.wall_noise(x) for x in range(cfg.VIEW_W + 1)],
+        index_nibbles=2, result_nibbles=2) if lines and wall_noise else "")
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     slopediv_recip8 = generate_slopediv_recip8_lut_fj("slopediv_recip8")  # M13-coarseslope
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
@@ -932,7 +939,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                     tex, cm, ttang, sdrecip, xtadisp, entoff, "__hot_end:"])
+                     tex, cm, ttang, sdrecip, xtadisp, wnoise, entoff, "__hot_end:"])
     else:
         hotdata = []
     # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,
@@ -1000,7 +1007,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
             f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
             f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
-            f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}")]
+            f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
+            f"{1 if wall_noise else 0}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]

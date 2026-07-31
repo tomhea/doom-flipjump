@@ -1408,10 +1408,11 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear, eabl, noproj, ptwice, stwice \
+            pnear, eabl, noproj, ptwice, stwice, noise \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
-              dfull, dchk2, dpl, dsame, demitted, dvalid, dct, dfs, dpid \
+              dfull, dchk2, dgchk, dpl, dsame, demitted, dvalid, dct, dfs, dpid, \
+              gnrow, dgn \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
               seg_lit, seg_wstrip, wstripbase, \
@@ -1480,10 +1481,19 @@ ns frame {
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
+        rep(noise, k) wnoise.lookup gnrow, x    // V1: this column's grain row, before the ditto test
         hex.if0 1, dvalid, dfull
         hex.cmp 2, cexcl, dct, dfull, dchk2, dfull
       dchk2:
-        hex.cmp 2, fstart, dfs, dfull, dpl, dfull
+        hex.cmp 2, fstart, dfs, dfull, dgchk, dfull
+      dgchk:
+        // V1: ... and the same GRAIN row. The grain varies per x>>2 group, so two adjacent columns
+        // can share clip rows and plane yet render differently -- without this the ditto ("copy
+        // column x-1") fires across a group boundary and the frame diverges. Measured before the
+        // fix: the first differing pixel sat at column 12 and at column 144, both x = 0 (mod 4).
+        // ⚠ EVERY feature that changes a column's CONTENT without changing its CLIP ROWS must join
+        // this chain -- that includes the step faces and the sprite fragments still to come.
+        rep(noise, k) hex.cmp 2, gnrow, dgn, dfull, dpl, dfull
       dpl:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
         rep(1-pnear, k) .lines_jmp dsame
@@ -1494,9 +1504,10 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, w2s, wpx, wpxstride, eabl, x, cexcl, fstart, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, w2s, wpx, wpxstride, eabl, noise, gnrow, x, cexcl, fstart, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
+        rep(noise, k) hex.mov 2, dgn, gnrow
         rep(pnear, k) .lines_save_plane pval8, dpid
         hex.set 1, dvalid, 1
       demitted:
@@ -1521,6 +1532,8 @@ ns frame {
       dpid: hex.vec 2
       wtc8: hex.vec 8
       wtf8: hex.vec 8
+      gnrow: hex.vec 2                          // V1: this column's grain row
+      dgn: hex.vec 2                            // ... and the previously emitted one
       dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs
       dbot: hex.vec 8
       dscale: hex.vec 8                         // ablate "scaletwice" only: dead scale-setup outputs

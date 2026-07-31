@@ -369,7 +369,14 @@ ns stream {
     // pixel-exact and the run count self-limits on short walls (a 5px wall walks <=5 runs).
     // Output stays a function of (seg, ctake, fstart) alone -> the ditto columns are still free.
     // @requires hex.init & stl.ptr_init
-    def wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride \
+    // V1 (`noise`=1): the PSEUDO-RANDOM WALL GRAIN. Each run's baked colour is pushed down
+    // `wnoise` colormap rows before it goes out -- the same colour, dimmer, so the grain always
+    // reads as surface roughness and never as a hue jump. `wnoise` is a COLUMN-GROUP constant the
+    // caller has already computed (rm.wall_noise: keyed on x>>2 so ditto survives, stepping
+    // 0/4/8/12 so it is actually visible), pre-shifted into the high byte of `cmidx`. So the whole
+    // per-run cost is rebuilding the LOW byte and one cm.apply -- no hash, no table, no per-run
+    // state. Mirrors ReferenceModel.wall_noise exactly (R6).
+    def wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride, noise, cmidx \
             @ ptr, y2r, colr, wloop, wdone, end {
         hex.zero w/4, ptr
         hex.mov 2, ptr, wlen
@@ -382,17 +389,34 @@ ns stream {
         hex.read_byte_and_inc colr, ptr                // so no counter register, no per-run compare
         hex.add 2, y2r, ctake
         byte.emit y2r
-        byte.emit colr
+        rep(1-noise, k) byte.emit colr
+        rep(noise, k) .wpx_grain colr, cmidx
         ;wloop
       wdone:
         hex.read_byte_and_inc colr, ptr                // the last run ends exactly at fstart
         byte.emit fstart
-        byte.emit colr
+        rep(1-noise, k) byte.emit colr
+        rep(noise, k) .wpx_grain colr, cmidx
         ;end
       ptr: hex.vec w/4
       y2r: hex.vec 2
       colr: hex.vec 2
       end:
+    }
+
+    // one grained run: cmidx's HIGH byte already holds the column's colormap row (set once per
+    // column by the caller), so only the low byte moves. `cm.emit` colormaps AND emits in a single
+    // dispatch (indexed by light<<8 | colour) -- the lines tier has no `cm.apply`, and wanting one
+    // would have been the wrong shape anyway: this replaces a byte.emit rather than adding to it.
+    def wpx_grain colr, cmidx {
+        hex.mov 2, cmidx, colr
+        cm.emit cmidx
+    }
+
+    // once per column: look this column's grain row up and park it in cmidx's high byte.
+    def wpx_grain_col gnrow, cmidx {
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx + 2*dw, gnrow
     }
 
     // M13-lines (the DUMB-DEVICE mode): one claimed column's three windows emitted at CLAIM
@@ -706,13 +730,18 @@ ns stream {
         byte.emit b
     }
 
-    def emit_col_lines centery, w2s, wpx, wpxstride, eabl, x, cexcl, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, end {
+    def emit_col_lines centery, w2s, wpx, wpxstride, eabl, noise, gnrow, x, cexcl, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, wall, floor, fasc, fdesc, fdone, cdesc2, pwalk, ploop, pcont, pemit, plast, pclamp, pdone, pret, swalk, sloop, sbody, sskip, semit, sdone, sret, ctake, bound, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
         hex.mov 2, ctake, fstart
       cok:
         byte.emit x                              // ONE x header for the whole column
+        // V1: this column's grain row, ONCE. `wnoise` is a 161-entry dispatch table baked straight
+        // from ReferenceModel.wall_noise, so the hash lives at compile time and costs one lookup
+        // (~20@) rather than the shifts and xors it encodes. It lands in cmidx's HIGH byte because
+        // cm.apply is indexed by light<<8 | colour, leaving only the low byte to move per run.
+        rep(noise, k) .wpx_grain_col gnrow, cmidx
         hex.set 2, ccy, centery
         // -- ceiling PREFIX over [0, ctake): asc list, then (straddle only) desc
         hex.if0 2, ctake, wall
@@ -730,7 +759,7 @@ ns stream {
         hex.if0 2, wlen, floor
         rep(1-w2s-wpx, k) .w1_wall fstart, wall_lit
         rep(w2s, k) .w2s_wall ctake, wlen, wstrip, wstripbase
-        rep(wpx, k) .wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride
+        rep(wpx, k) .wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride, noise, cmidx
       floor:                                     // -- floor SUFFIX over [fstart, view_h)
         hex.cmp 2, fstart, ccy, fasc, fdesc, fdesc
       fasc:                                      // straddle: skip within asc, then all of desc
@@ -799,6 +828,7 @@ ns stream {
       colr: hex.vec 2
       wlen: hex.vec 2
       ccy: hex.vec 2
+      cmidx: hex.vec 4                         // V1: light<<8 | colour, the cm.apply index
       pret: ;0
       sret: ;0
       end:

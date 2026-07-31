@@ -144,3 +144,40 @@ Two independent reorderings, both **free** (they change no result, only when wor
 The lesson generalises past this kernel: **an early-out is worth what it skips, so it belongs as
 early as its inputs allow — not where the reference implementation happens to put it.** DOOM does
 the divide first because on a 486 the divide was not 38,500× a compare.
+
+## EXP-2a — where V4's cost sits: RECORD vs EMIT (`--reconly` build) 📏
+
+New ablate `sprnoemit` keeps the record half and never reads the fragments back. The frame is then
+identical to a things=False build — byte-exact — so the delta prices the record half ALONE, by
+subtraction from a correct frame rather than by stubbing something the rest of the frame depends on.
+
+| viewpoint | no things | record only | full | **record** | **emit** |
+|---|---:|---:|---:|---:|---:|
+| spawn | 25,896,401 | 27,375,283 | 28,051,295 | +1.48M | +0.68M |
+| courtyard | 27,112,631 | 31,414,759 | 34,333,993 | +4.30M | +2.92M |
+| **tree** | 17,917,814 | 32,606,272 | 40,714,308 | **+14.69M** | **+8.11M** |
+| worst | 31,389,542 | 36,582,246 | 38,030,062 | +5.19M | +1.45M |
+
+The record half is roughly twice the emit half everywhere. That is where to spend.
+
+## EXP-3 — two record/emit micro-levers: one wins, one LOSES ❌ **half reverted**
+
+Bundled two byte-exact changes and measured **+420k at the tree** — a regression. Splitting them:
+
+| variant | tree | vs EXP-2 |
+|---|---:|---:|
+| EXP-2 (baseline) | 40,714,308 | — |
+| hoist + empty-fragment fast path | 41,133,941 | +419,633 ❌ |
+| **hoist alone** | **40,594,163** | **−120,145** ✅ |
+
+* **KEPT — hoist the per-thing block base out of the column loop.** `blk = (sp_base + bucket) + u*BUCKETS`,
+  and `(sp_base + bucket)` is constant per thing. −120k tree, −50k courtyard, 0 at spawn.
+* **REVERTED — a one-region fast path for EMPTY fragments** (a billboard that projects entirely off
+  the view still takes the sprite path, because it must suppress the column's step faces, but has
+  no runs to walk). Cost **+540k at the tree**. Two reasons, both worth remembering: empty fragments
+  turned out to be RARE, so the added compare was nearly pure overhead; and `emit_region(0, VIEW_H)`
+  is not cheaper than `emit_region(0, sy1)` + `emit_region(sy1, VIEW_H)` — the split version's
+  pieces each exit early against a narrow window, while the single wide region walks everything.
+
+**A "fast path" for a case you have not counted is a slow path.** The empty-fragment population was
+assumed, never measured; the measurement would have cost one Python probe against the cached binary.

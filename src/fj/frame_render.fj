@@ -1203,7 +1203,7 @@ ns frame {
               tfree, tfree2, tblkok, tnext, \
               tsy1z, tsy1k, tsy1h, tsy2c, tsy2z, tsy2k0, tsy2h, tsy2k, tdraw, \
               tcap, vis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
-              tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tidx, tlr, tr0, trl, trw, \
+              tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tcon, tidx, tlr, tr0, trl, trw, \
               tsy1, tsy2, tb8, tneg, tcvh, end \
             < n_thing, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
               sp_base, sp_dw, sp_lt, thing_ret {
@@ -1217,6 +1217,11 @@ ns frame {
         hex.inc 2, n_thing
         // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][bucket:2]
         sprbkt.lookup tbkt, thpx
+        hex.zero w/4, tcon                      // the per-thing block base: sp_base + bucket,
+        hex.mov 4, tcon, sp_base                // WIDENED first (a narrow add cannot carry out
+        hex.zero w/4, tidx                      // of its own nibbles)
+        hex.mov 2, tidx, tbkt
+        hex.add w/4, tcon, tidx
         hex.zero 8, thb                         // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT
         hex.mov 2, thb, tbkt + 2*dw             // nibbles of src, so a 2-nibble register would
         hex.mov 8, ty0, tytop                   // drag its neighbours in as high nibbles.
@@ -1269,15 +1274,12 @@ ns frame {
         ;tnext
       tblkok:
         // block = sp_base + u*buckets + bucket, at a POWER-OF-TWO stride so the address is a shift
+        // blk = (base + bucket) + u*BUCKETS -- and (base + bucket) is a per-THING constant, so
+        // only the `u*BUCKETS` term belongs in the column loop. `tcon` is that constant, hoisted.
         hex.zero w/4, tblk
         hex.mov 2, tblk, tu
         hex.mul_const w/4, tblk, tblk, buckets
-        hex.zero w/4, tidx                      // ... + the type's base block, WIDENED first: a
-        hex.mov 4, tidx, sp_base                // narrow add cannot carry out of its own nibbles
-        hex.add w/4, tblk, tidx
-        hex.zero w/4, tidx
-        hex.mov 2, tidx, tbkt
-        hex.add w/4, tblk, tidx
+        hex.add w/4, tblk, tcon
         // ⚠ `tblk` stays the RAW block INDEX -- that is what the slot stores and what the emit
         // shifts. Shifting it here as well double-multiplied the address by the stride AND
         // overflowed the slot's 4 nibbles, which read back as an all-zero block header and made
@@ -1377,6 +1379,7 @@ ns frame {
       tbb: hex.vec w/4
       tbp: hex.vec w/4
       tblk: hex.vec w/4
+      tcon: hex.vec w/4
       tbo: hex.vec w/4
       tidx: hex.vec w/4
       tlr: hex.vec 2
@@ -1971,7 +1974,7 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift \
+            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift, spremit \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
               dfull, dchk2, dgchk, dschk, dstchk, dst2, dst3, dst4, dst5, dst6, \
@@ -2052,7 +2055,11 @@ ns frame {
         // Must run BEFORE the ditto decision -- a face changes a column's CONTENT without changing
         // its clip rows, the third feature in a row to hit that (see dgchk).
         rep(steps, k) .lines_step_load stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, x, cexcl, fstart
-        rep(things, k) .lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, x
+        // ablate "sprnoemit" (measurement only): keep the RECORD half, never read the
+        // fragments back. The frame is then identical to a things=False build, so the
+        // delta against one prices the record half ALONE -- by subtraction from a
+        // byte-exact frame, not by stubbing something the rest of the frame depends on.
+        rep(things*spremit, k) .lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, x
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.

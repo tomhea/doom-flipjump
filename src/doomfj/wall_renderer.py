@@ -70,7 +70,8 @@ _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wed
                            "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull",
                            "emitnopair", "emitnowalk", "atantwice",
                            "slopetwice", "tabletwice", "noflush", "colstub",
-                           "noprescan", "noproj", "projtwice", "scaletwice", "skyall"})
+                           "noprescan", "noproj", "projtwice", "scaletwice", "skyall",
+                           "sprnoemit"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -1130,7 +1131,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
             f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
             f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
-            f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}")]
+            f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
+            f"{0 if 'sprnoemit' in ablate else 1}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]

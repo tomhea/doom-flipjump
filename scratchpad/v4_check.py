@@ -33,6 +33,7 @@ SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection
 EMIT = "--emit" in sys.argv
 NOTHINGS = "--nothings" in sys.argv   # build WITHOUT things: the V3 baseline at every viewpoint
 TRACE = "--trace" in sys.argv
+RECONLY = "--reconly" in sys.argv   # keep the RECORD half, disable the emit: prices record alone
 cfg = Config()
 mw = WadFile.from_path('tests/fixtures/freedoom_e1m1.wad')
 art = WadFile.from_path('assets/freedoom1.wad')
@@ -42,6 +43,7 @@ VPS = [(sx, sy, sp.angle, "spawn"), (1400, 1200, 0, "courtyard"),
        (2432, 1344, 3221225472, "tree"), (-309, -44, 0, "worst")]
 WAS = [26_545_502, 27_604_046, None, 32_137_393]     # V1+V2+V3, before V4
 
+ABL = frozenset({"sprnoemit"}) if RECONLY else frozenset()
 FLAGS = dict(floor_mode="FT1", wall_mode="WPX", raster_mode="lines", plane_near=True,
              wall_noise=True, sky=True, steps=True, things=not NOTHINGS)
 
@@ -75,7 +77,7 @@ def build():
     key = hashlib.sha256()
     for p in SRC + [ROOT / "src/doomfj/wall_renderer.py", ROOT / "src/doomfj/reference_model.py"]:
         key.update(p.read_bytes())
-    key.update(repr(sorted(FLAGS.items())).encode())
+    key.update(repr(sorted(FLAGS.items())).encode()); key.update(repr(sorted(ABL)).encode())
     tag = key.hexdigest()[:16]
     cache = ROOT / "scratchpad" / "fjmcache"
     cache.mkdir(exist_ok=True)
@@ -85,7 +87,7 @@ def build():
         return fjm
     t0 = time.time()
     main = emit_wall_renderer(mw, "E1M1", cfg, asset_wad=mw, over_align=False,
-                              sprite_wad=art, **FLAGS)
+                              sprite_wad=art, ablate=ABL, **FLAGS)
     print(f"emitted {len(main):,} chars ({time.time() - t0:.0f}s)", flush=True)
     consts = cfg.emit_fj_consts(cache / "fj_consts.fj")
     mp = cache / f"v4_{tag}.fj"
@@ -102,7 +104,8 @@ scene = build_scene(mw, mw, "E1M1")
 WANT = [bytes(rm.render_wall_frame(SimState(x=vx << 16, y=vy << 16, angle=va, level="E1M1"),
                                    scene, wall_mode="WPX", floor_mode_ft1=True, plane_near=True,
                                    wall_noise=True, sky=True, near_steps=True,
-                                   things=EMIT and not NOTHINGS, sprite_wad=art))
+                                   things=EMIT and not NOTHINGS and not RECONLY,
+                                   sprite_wad=art))
         for vx, vy, va, _ in VPS]
 print("oracle frames:", [hashlib.sha256(w).hexdigest()[:12] for w in WANT], flush=True)
 

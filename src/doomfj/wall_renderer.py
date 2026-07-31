@@ -1024,7 +1024,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
             f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
             f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
-            f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * (cfg.VIEW_H + 1)}, "
+            f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
             f"{1 if 'skyall' in ablate else 0}")]
           if lines else
           ["seg_pass1_leaf:",
@@ -1434,25 +1434,33 @@ def _lines_sky_bank(rm, asset_wad, cfg):
     if tex is None:
         return "", ""
     _texels, _th, tw = tex
-    stride = 2 * (H + 1) + 1                  # worst case: a change every row, + the count header
-    out = [f"// V2 sky bank: {SKY_BANK_MUL * tw} lists (tw={tw}, x{SKY_BANK_MUL} so the UNMASKED skybase+skyoff needs no mask) "
-           f"x {H} rows, [y2_cumulative][colour] (stride {stride} dw)",
+    CY = cfg.CENTERY
+    stride = 2 * LINES_HALF_SLOTS             # one pid-shaped CEILING PAIR: [asc half][desc half]
+    out = [f"// V2 sky bank: {SKY_BANK_MUL * tw} lists (tw={tw}, x{SKY_BANK_MUL} so the UNMASKED "
+           f"skybase+skyoff needs no mask), each an [asc][desc] half pair of {LINES_HALF_SLOTS} dw",
            "skybands:"]
-    for u in range(SKY_BANK_MUL * tw):
+
+    def half(u, y0, y1):
+        """One half-window band list in the PLANE format: [n] then n x [absolute y2][colour].
+
+        The ceiling is TWO halves split at CENTERY -- emit_col_lines walks cbufa and then, when
+        ctake > CENTERY, continues into cbufd via cdesc2. The plane bank splits there because the
+        zlight ordinals restart per half-window; sky has no perspective and needs no split at all,
+        but THE WALKER'S LAYOUT IS NOT OPTIONAL, so the sky lists are shaped to match."""
         body, prev = [], None
-        for y in range(H):
+        for y in range(y0, y1):
             c = rm.sky_texel_u(asset_wad, {}, u, y)
             if c != prev:
                 if prev is not None:
-                    body[-2] = y                    # close the previous run at this row
-                body += [H, c]                      # provisional end, patched by the next change
+                    body[-2] = y
+                body += [y1, c]
                 prev = c
-        # !! The PLANE band format is [n][y2][colour]... -- a COUNT HEADER then exactly n pairs
-        # (`pwalk`: read_byte_and_inc cntN, then loop while iP < cntN). It is NOT the WPX bank's
-        # rel==0-sentinel form. Emitting the WPX shape here made the walker read the first pair's
-        # y2 AS THE COUNT and desynchronise, so every sky pixel came out wrong.
         body = [len(body) // 2] + body
-        assert len(body) <= stride, f"sky list overflows its stride: {len(body)} > {stride}"
+        assert len(body) <= LINES_HALF_SLOTS, f"sky half overflows: {len(body)}"
+        return body + [0] * (LINES_HALF_SLOTS - len(body))
+
+    for u in range(SKY_BANK_MUL * tw):
+        body = half(u, 0, CY) + half(u, CY, H)
         out.extend([f";{v:#x} * dw" for v in body] + [";0 * dw"] * (stride - len(body)))
     offs = generate_dispatch_table_fj(
         "skyoff", [rm.sky_col_off(x, tw) for x in range(cfg.VIEW_W + 1)],

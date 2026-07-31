@@ -1311,7 +1311,7 @@ ns frame {
     // ceiling prefix walk streams it unchanged.
     // `u = skybase + skyoff[x]` needs NO MASK: both addends are <= 127 and the bank holds 256
     // lists with entry u carrying sky column (u & 127), so the sum can never leave it (max 253).
-    def lines_sky_ceil skystride, skyall, cbufa, x, skb, soff, issky, pidreg @ notsky, tskb, end < skybands {
+    def lines_sky_ceil skystride, halfslots, skyall, cbufa, cbufd, x, skb, soff, issky, pidreg @ notsky, tskb, end < skybands {
         skypid.lookup issky, pidreg
         rep(1-skyall, k) hex.if0 2, issky, notsky   // skyall=1: force it (bisect probe)
         skyoff.lookup soff, x
@@ -1322,6 +1322,10 @@ ns frame {
         hex.set w/4, tskb, skybands             // a LABEL base goes through hex.set (the proven
         hex.add w/4, cbufa, tskb                // idiom -- cf. `hex.set w/4, dbase, drawn`), not
                                                 // through add_constant
+        hex.mov w/4, cbufd, cbufa               // ... and the DESC half, which emit_col_lines walks
+        hex.add_constant w/4, cbufd, halfslots*dw   // via cdesc2 once ctake > CENTERY. Overriding
+                                                // only cbufa left sky above the horizon and PLANE
+                                                // bands below it.
         ;end
       notsky:
         hex.zero 2, soff                        // non-sky columns share soff=0 so the ditto test
@@ -1516,7 +1520,7 @@ ns frame {
         // M13-2S rung 3a: which SURFACES this column's plane regions belong to (see lines_col_plane)
         rep(pnear, k) .lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd
         rep(sky, k) .lines_sky_base skb
-        rep(sky, k) .lines_sky_ceil skystride, skyall, cbufa, x, skb, soff, issky, pval8
+        rep(sky, k) .lines_sky_ceil skystride, half_slots, skyall, cbufa, cbufd, x, skb, soff, issky, pval8
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.

@@ -68,8 +68,12 @@ wrong width or the wrong scale**. Worth having in front of you before writing mo
 assembled `.fjm` keyed on a hash of the sources, and `--trace` decodes the 0x0B stream and reports
 the first structural anomaly. Diagnosis went from ~10 minutes per hypothesis to seconds.
 
-Remaining residual: fj records no fragment where the oracle does, at the tree (cols 24-37) and a
-few worst-viewpoint columns. Ruled out by measurement: `THING_BUDGET` (raising it to 96 changes
-nothing at the tree), BSP subtree pruning (fixed anyway — a thing-carrying leaf now counts as live),
-the bank contents, and the bucket/`u` arithmetic. Next suspect is the order in which columns get
-claimed in `sprflag` — i.e. which thing reaches a column first.
+**RESOLVED — V4 is now BYTE-EXACT at all four viewpoints.** The seventh bug was the same shape as
+the sixth: fj's BSP walk drops subtrees with no one-sided seg **twice over** — `_lines_prune` at
+compile time and `_lines_plane_gate`'s `tsstop` node gate at RUNTIME. Making a thing-carrying leaf
+count as live for the compile-time prune alone changed nothing, because the runtime gate was still
+skipping the node; the sprites in E1M1's open, purely two-sided courtyard were never projected.
+Both predicates now treat a thing-carrying leaf as live.
+
+**Any pruning a feature does not know about is a feature that silently does not run.** That is the
+general form, and it will bite the next per-subsector feature too.

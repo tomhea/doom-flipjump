@@ -524,9 +524,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             if child & NF_SUBSECTOR:
                 _si0 = child & (NF_SUBSECTOR - 1)
                 _ss = cmap.subsectors[_si0]
-                # V4: a THING-carrying leaf counts as live for the WALK prune, or the node above
-                # it is skipped and its sprites are never projected (see _lines_prune).
-                if pred is _seg_in_walk and _si0 in things_by_ss:
+                # V4: a THING-carrying leaf counts as live for BOTH subtree predicates. The walk
+                # prune drops the node at COMPILE time; the `tsstop` plane gate skips it at RUNTIME
+                # once attribution is finished. Either one silently loses every sprite in an open,
+                # purely two-sided area -- at the tree viewpoint, most of them.
+                if _si0 in things_by_ss:
                     return 1
                 return sum(1 for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs)
                            if pred(cmap.segs[_si]))

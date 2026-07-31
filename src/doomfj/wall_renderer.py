@@ -374,6 +374,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # [y2_cumulative][colour] form the plane bands already use, plus a compile-time per-column
     # offset table; the frame supplies `skybase` and the existing prefix walk does the rest.
     skybands, skyoff = _lines_sky_bank(rm, asset_wad, cfg) if (lines and sky) else ("", "")
+    skypid = ""                     # filled below, once the pid map exists
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -476,6 +477,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # plane_near the layout is EXACTLY the old shared-key one.
         lines_bank_keys = ([k for pair in lines_pid for k in pair] if plane_near
                            else list(lines_key_ids))
+        # ... and which PIDs are sky at all. A pid is (ceiling key, floor key) and the ceiling key
+        # carries the flat NAME, so sky-ness is decided entirely at compile time: one dispatch per
+        # column tells the emit loop whether to take the sky list or the plane list. pids are 1-based
+        # (0 = "not attributed yet"), so slot 0 is a non-sky filler.
+        skypid = (generate_dispatch_table_fj(
+        "skypid",
+        [0] + [1 if ck[3] == "F_SKY1" else 0 for (ck, _fk) in lines_pid],
+        index_nibbles=2, result_nibbles=2) if (lines and sky and plane_near) else "")
     n_bank_keys = max(1, len(lines_bank_keys))
 
     # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be

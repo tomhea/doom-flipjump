@@ -66,6 +66,11 @@ WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
 SKY_TURN = 4                      # V2: sky-texture widths swept per full 360 turn (a look knob)
+
+
+def _sky_shift(tw: int) -> int:
+    """BAM bits to drop so a 32-bit angle indexes `tw` sky columns, `SKY_TURN` widths per turn."""
+    return 32 - tw.bit_length() + 1 - SKY_TURN.bit_length() + 1
 LIGHT_SHIFT = 3                   # sector light (0..255) -> colormap row (0..31): light >> 3
 COLORMAP_LIGHTS = 32              # COLORMAP usable light rows (0..31; invuln/black sit past these)
 _SLOPEDIV_RECIP = slopediv_recip_table()   # perf #13: shared block-FP reciprocal table for _slope_div
@@ -1221,15 +1226,33 @@ class ReferenceModel:
         shift, a mask and one dispatch.
 
         `SKY_TURN` sky widths per full turn is the look knob (DOOM uses 1 across its 90° FOV, i.e. 4
-        per turn); it is not a correctness constant."""
+        per turn); it is not a correctness constant.
+
+        The column is SPLIT into a per-frame base plus a per-column offset —
+            u = (sky_base(viewangle) + sky_col_off(x)) & (tw-1)
+        — rather than shifting the runtime sum `viewangle + xtoviewangle[x]`. Both halves are then
+        cheap in fj: the base is one shift-and-mask per FRAME, and the offset is a compile-time
+        constant per column (xtoviewangle is compile-time), so the per-column cost is an add and a
+        mask. Dropping the carry between the two halves can move `u` by one texel versus the exact
+        sum; on a 128-wide cloud texture that is invisible, and the oracle takes the SAME
+        decomposition so fj still has to match it bit for bit (R6)."""
         tex = self._wall_texture(asset_wad, "SKY1", texcache if texcache is not None else {},
                                  wall_mode="textured")
         if tex is None:
             return CEIL_BG
         texels, th, tw = tex
-        ang = (viewangle + self.xtoviewangle[x]) & ANGLE_MASK
-        u = ((ang >> 16) * tw * SKY_TURN >> 16) % tw
+        u = (self.sky_base(viewangle, tw) + self.sky_col_off(x, tw)) & (tw - 1)
         return texels[u * th + min(th - 1, y * th // max(1, self.cfg.VIEW_H))]
+
+    @staticmethod
+    def sky_base(viewangle: int, tw: int) -> int:
+        """The frame's sky scroll: which texture column screen column 0's view ray starts from.
+        One shift and mask, once per frame."""
+        return (viewangle >> _sky_shift(tw)) & (tw - 1)
+
+    def sky_col_off(self, x: int, tw: int) -> int:
+        """The per-column sky offset — a COMPILE-TIME constant, since xtoviewangle is."""
+        return (self.xtoviewangle[x] >> _sky_shift(tw)) & (tw - 1)
 
     def _render_planes_flat(self, fb, colormap, asset_wad, flatcache, viewz,
                             ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff,

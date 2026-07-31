@@ -66,6 +66,8 @@ WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
 STEP_SEG_BUDGET = 12              # V3: boundaries allowed a step face (the NEAREST ones)
+STEP_FACE_BASE = 96               # V3: flat-shaded step-face texel. NOT WALL_BG (=4),
+                                  # which is near-WHITE in DOOM's ramp and blows out
 # V2: sky-texture widths swept per full 360 turn. A LOOK knob, but not a free one -- it sets the
 # BAM shift, and fj only shifts cheaply by whole NIBBLES. With tw=128, shift = 32-7-log2(TURN), so
 # TURN=2 gives 24 (exactly 6 nibbles, one `hex.shr_hex 8, 6`) while TURN=4 gives 23 and would cost a
@@ -1072,6 +1074,31 @@ class ReferenceModel:
         if floor_mode_ft1:
             self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz, *planes,
                                      ft1=True, sky=sky, viewangle=viewangle, texcache=texcache)
+            if near_steps:
+                # V3 - splice the STEP FACES into the plane regions. Flat-shaded: one distance-lit
+                # colour per run rather than a 1x1 texture strip, which is the accuracy this rung
+                # trades away. Each run is clipped to the region the claiming wall actually left
+                # open (ceiling above ceil_hi, floor below floor_lo) so the emitted column stays
+                # MONOTONE top-down -- the 0x0B device only moves its cursor forward and silently
+                # drops a non-monotone pair.
+                c_hi, f_lo = planes[0], planes[1]
+                for x in range(cfg.VIEW_W):
+                    if ups[x] is not None:
+                        y1, y2, fsc, units = ups[x]
+                        y1, y2 = max(y1, 0), min(y2, c_hi[x])
+                        if y1 <= y2:
+                            lr = self.wall_light_row(self.wall_lightnum(fsc.light, 0),
+                                                     y2 - y1 + 1, max(1, units))
+                            for y in range(y1, y2 + 1):
+                                fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
+                    if los[x] is not None:
+                        y1, y2, fsc, units = los[x]
+                        y1, y2 = max(y1, f_lo[x]), min(y2, cfg.VIEW_H - 1)
+                        if y1 <= y2:
+                            lr = self.wall_light_row(self.wall_lightnum(fsc.light, 0),
+                                                     y2 - y1 + 1, max(1, units))
+                            for y in range(y1, y2 + 1):
+                                fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
         elif floor_texturing:
             self._render_planes_textured(fb, colormap, scene.asset_wad, flatcache,
                                          viewx, viewy, viewangle, viewz, *planes)

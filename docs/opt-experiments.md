@@ -181,3 +181,47 @@ Bundled two byte-exact changes and measured **+420k at the tree** — a regressi
 
 **A "fast path" for a case you have not counted is a slow path.** The empty-fragment population was
 assumed, never measured; the measurement would have cost one Python probe against the cached binary.
+
+## EXP-3a — where the RECORD half's 14.7M goes (`thingtwice` doubling) 📏
+
+New ablate `thingtwice` runs `proj.project_thing` a SECOND time with the same operands into dead
+registers. The frame stays byte-exact, so the delta is that kernel alone.
+
+| viewpoint | baseline | doubled | **all projections cost** |
+|---|---:|---:|---:|
+| spawn | 28,051,295 | 28,168,607 | +0.12M |
+| courtyard | 34,284,050 | 37,176,207 | +2.89M |
+| **tree** | 40,594,163 | 52,527,377 | **+11.93M** |
+| worst | 38,025,214 | 42,149,824 | +4.12M |
+
+**81% of the record half is the projection itself**, not the per-column store. Every thing in the
+level gets projected at an open viewpoint — the BSP bounds *which subsectors* are visited, not how
+many things they hold — so the per-thing cost is what matters, and there are 250 of them.
+
+## EXP-4 — the two dearest lines in `project_thing` ✅ **KEEP**
+
+1. **ROW RULE, operand order.** `fixed_mul_lo` runs one schoolbook row per nonzero nibble of the
+   SECOND operand. All four multiplies had a dense 16.16 finesine value there and `tr_x`/`tr_y` —
+   differences of `(map unit << 16)`, so their low FOUR nibbles are always zero — as the first.
+   Swapped. Commutative, same low product: **bit-identical**.
+2. **`hex.fixed_div 8,4` → the shared block-FP reciprocal** (`proj.scale_recip_div`). 38,500 ops
+   against ~12k, for every thing that survives the FOV reject. NOT bit-identical, so the ORACLE
+   takes the same path — the same re-bless the wall scale took at M13-scalerecip, not something fj
+   invented on its own.
+
+| viewpoint | before | after | delta |
+|---|---:|---:|---:|
+| spawn | 28,051,295 | 27,836,730 | −214,565 |
+| courtyard | 34,284,050 | 33,899,355 | −384,695 |
+| **tree** | 40,594,163 | **38,476,150** | **−2,118,013** |
+| worst | 38,025,214 | 37,099,879 | −925,335 |
+
+**BYTE-EXACT at all four** (the tree's oracle hash moves with the re-bless, and fj matches it).
+
+### Campaign so far
+
+| | spawn | courtyard | tree | worst |
+|---|---:|---:|---:|---:|
+| V4 complete | 28,104,383 | 36,010,624 | 45,252,666 | 39,448,264 |
+| **after EXP-1..4** | **27,836,730** | **33,899,355** | **38,476,150** | **37,099,879** |
+| | −0.27M | −2.11M | **−6.78M** | −2.35M |

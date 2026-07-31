@@ -71,7 +71,7 @@ _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wed
                            "emitnopair", "emitnowalk", "atantwice",
                            "slopetwice", "tabletwice", "noflush", "colstub",
                            "noprescan", "noproj", "projtwice", "scaletwice", "skyall",
-                           "sprnoemit"})
+                           "sprnoemit", "thingtwice"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -1120,7 +1120,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            *(["thing_leaf:",
               f"frame.thing_record_body {THING_BUDGET}, {SPRITE_MINZ}, {proj}, {cfg.CENTERX}, "
               f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
-              f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}"]
+              f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
+              f"{1 if 'thingtwice' in ablate else 0}"]
              if _do_things else []),
            "seg_pass2_leaf:",
            (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "

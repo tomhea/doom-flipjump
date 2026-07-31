@@ -1198,11 +1198,11 @@ ns frame {
     // so `tstop` short-circuits every later thing at its call site for one 1-nibble test.
     // Mirrors ReferenceModel.render_wall_frame's things pre-pass EXACTLY.
     def thing_record_body budget, minz, projection, centerx, centery, viewwc, viewh, ds, \
-            buckets, slotstride \
+            buckets, slotstride, ttwice \
             @ tgo, tgo2, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
               tfree, tfree2, tblkok, tnext, \
               tsy1z, tsy1k, tsy1h, tsy2c, tsy2z, tsy2k0, tsy2h, tsy2k, tdraw, \
-              tcap, vis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
+              tcap, vis, dvis, dtx1, dtx2, dtyt, dthp, dtis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
               tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tcon, tidx, tlr, tr0, trl, trw, \
               tsy1, tsy2, tb8, tneg, tcvh, end \
             < n_thing, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
@@ -1213,6 +1213,10 @@ ns frame {
         hex.cmp 2, n_claimed, vieww, tgo2, tstopset, tgo2   // every column claimed -> nothing left
       tgo2:
         proj.project_thing vis, tx1, tx2, tytop, thpx, tistep, minz, projection, centerx, centery, viewwc, viewh, ds
+        // ablate "thingtwice" (measurement only): the SAME projection, SAME operands, dead
+        // outputs. Pricing by ADDING keeps the frame byte-exact -- a stub would price itself
+        // plus everything downstream (fj-cost-model, the `noproj` retraction).
+        rep(ttwice, k) proj.project_thing dvis, dtx1, dtx2, dtyt, dthp, dtis, minz, projection, centerx, centery, viewwc, viewh, ds
         hex.if0 1, vis, tret
         hex.inc 2, n_thing
         // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][bucket:2]
@@ -1357,6 +1361,12 @@ ns frame {
         stl.fret thing_ret
       tcap: hex.vec 2
       vis: hex.vec 1
+      dvis: hex.vec 1
+      dtx1: hex.vec 8
+      dtx2: hex.vec 8
+      dtyt: hex.vec 8
+      dthp: hex.vec 8
+      dtis: hex.vec 8
       tx1: hex.vec 8
       tx2: hex.vec 8
       tytop: hex.vec 8

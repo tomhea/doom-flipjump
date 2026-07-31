@@ -43,7 +43,9 @@ VPS = [(sx, sy, sp.angle, "spawn"), (1400, 1200, 0, "courtyard"),
        (2432, 1344, 3221225472, "tree"), (-309, -44, 0, "worst")]
 WAS = [26_545_502, 27_604_046, None, 32_137_393]     # V1+V2+V3, before V4
 
-ABL = frozenset({"sprnoemit"}) if RECONLY else frozenset()
+TTWICE = "--thingtwice" in sys.argv   # price ALL project_thing calls by DOUBLING them
+ABL = (frozenset({"sprnoemit"}) if RECONLY else
+       frozenset({"thingtwice"}) if TTWICE else frozenset())
 FLAGS = dict(floor_mode="FT1", wall_mode="WPX", raster_mode="lines", plane_near=True,
              wall_noise=True, sky=True, steps=True, things=not NOTHINGS)
 

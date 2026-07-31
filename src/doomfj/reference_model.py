@@ -856,7 +856,10 @@ class ReferenceModel:
         tz = gxt - gyt
         if tz < SPRITE_MINZ:
             return None
-        xscale = fixed_div(cfg.PROJECTION << 16, tz, 8, 4)
+        # the shared block-FP reciprocal, NOT a true divide: `hex.fixed_div 8,4` is 38,500 fj ops
+        # and this runs for every thing that survives the FOV reject. Same re-bless the wall scale
+        # took (M13-scalerecip); `proj.scale_recip_div` mirrors this bit for bit (R6).
+        xscale = self._scale_recip_div(cfg.PROJECTION << 16, tz)
         gxt2 = -_signed(fixed_mul(tr_x & ANGLE_MASK, vsin, 8, 4), 32)
         gyt2 = _signed(fixed_mul(tr_y & ANGLE_MASK, vcos, 8, 4), 32)
         tx = -(gyt2 + gxt2)

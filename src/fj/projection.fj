@@ -1374,16 +1374,21 @@ ns proj {
         finesine.read_sin vsin, sidx
         finesine.read_cos vcos, sidx
         // tz = trx*cos + try*sin  (DOOM: gxt - gyt with gyt = -FixedMul(tr_y, viewsin))
-        hex.fixed_mul_lo 8, 4, gxt, trx, vcos
-        hex.fixed_mul_lo 8, 4, gyt, try8, vsin
+        // ⚠ OPERANDS SWAPPED (the M13-mulorder lever). `fixed_mul_lo` runs one schoolbook row
+        // per NONZERO NIBBLE OF THE SECOND OPERAND, and trx/try8 are differences of
+        // (map-unit << 16) values -- their low FOUR nibbles are always zero -- while a finesine
+        // value is a dense 16.16. Commutative and the same mod-16^12 low product, so this is
+        // BIT-IDENTICAL: purely a row-count choice.
+        hex.fixed_mul_lo 8, 4, gxt, vcos, trx
+        hex.fixed_mul_lo 8, 4, gyt, vsin, try8
         hex.mov 8, tz, gxt
         hex.add 8, tz, gyt
         hex.set 8, cminz, minz
         hex.scmp 8, tz, cminz, bad, ok1, ok1
       ok1:
         // tx = trx*sin - try*cos  (DOOM: -(gyt + gxt) with both negated)
-        hex.fixed_mul_lo 8, 4, gxt, trx, vsin
-        hex.fixed_mul_lo 8, 4, gyt, try8, vcos
+        hex.fixed_mul_lo 8, 4, gxt, vsin, trx          // same swap, same reason
+        hex.fixed_mul_lo 8, 4, gyt, vcos, try8
         hex.mov 8, txv, gxt
         hex.sub 8, txv, gyt
         hex.mov 8, atx, txv                             // |tx| > tz<<2 -> outside the view
@@ -1402,7 +1407,12 @@ ns proj {
                                                         // `proj = cfg.PROJECTION << 16`); shifting
                                                         // it again truncated it to 0, so xscale was
                                                         // 0 and EVERY thing failed projection.
-        hex.fixed_div 8, 4, xsc, cproj, tz, bad         // xscale = FixedDiv(projection, tz)
+        // M13-scalerecip applied to sprites: `hex.fixed_div 8,4` is 38,500 ops -- the dearest
+        // primitive there is -- and it runs for every thing that survives the FOV reject. The
+        // shared block-FP reciprocal is roughly a third of that. ⚠ NOT bit-identical (a true divide
+        // against a table reciprocal), so the ORACLE takes the same path: this is the same re-bless
+        // the wall scale already took, not an approximation fj invented on its own.
+        .scale_recip_div xsc, cproj, tz, 1              // xscale = (projection<<16) / tz
       ok2:
         hex.set 8, cxf, centerx*0x10000
         hex.mov 8, txl, txv

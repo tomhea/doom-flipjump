@@ -25,7 +25,7 @@ from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _byte
                                 NF_SUBSECTOR, seg_affine_coeffs)
 from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_FACE_BASE,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
-                                    sprite_bucket_height,
+                                    SPRITE_MINZ, sprite_bucket, sprite_bucket_height,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
@@ -94,7 +94,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
                        wall_mode: str = "textured", raster_mode: str = "framebuffer",
                        plane_near: bool = False, two_sided: bool = False,
-                       wall_noise: bool = False, sky: bool = False, steps: bool = False) -> str:
+                       wall_noise: bool = False, sky: bool = False, steps: bool = False,
+                       things: bool = False, sprite_wad=None) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -380,6 +381,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # V3: the step-face shade bank + the (light, wall-units) class each face-carrying boundary bakes.
     stepcol, step_cls = (_lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs)
                          if (lines and steps) else ("", {}))
+    # V4: the sprite run-list bank + the shade-row bank, and the per-type block bases the things bake.
+    _do_things = lines and things
+    assert not (things and sprite_wad is None), "things=True needs sprite_wad (see _lines_sprite_bank)"
+    sprbank, spr_base, spr_dw = (_lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname)
+                                 if _do_things else ("", {}, {}))
+    sprlight, spr_cls = (_lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname,
+                                             cmap, lds, sds, secs) if _do_things else ("", {}))
+    # h -> [bucket_height:2][bucket:2], the one runtime step of the height quantisation
+    sprbkt = (generate_dispatch_table_fj(
+        "sprbkt", [0] + [sprite_bucket(h, cfg.VIEW_H) | (sprite_bucket_height(
+            sprite_bucket(h, cfg.VIEW_H), cfg.VIEW_H) << 8) for h in range(1, cfg.VIEW_H + 1)],
+        index_nibbles=2, result_nibbles=4) if _do_things else "")
+    spr_cache: dict = {}
+    things_by_ss: dict = {}
+    if _do_things:
+        for _t in map_wad.things(mapname):
+            if rm.sprite_art(sprite_wad, _t.type, spr_cache) is None:
+                continue
+            things_by_ss.setdefault(rm.point_in_subsector(cmap, _t.x, _t.y), []).append(_t)
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -563,6 +583,34 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             # M13-prune: viewz/vzbank are set by the descend pre-walk, so leaves carry ONLY the
             # per-seg emission (and empty leaves nothing at all).
             out = []
+            # V4 THINGS: this subsector's things, projected the moment the walk ARRIVES here --
+            # before its own segs, so a thing standing in a room is in front of that room's walls.
+            # Front-to-back arrival order is the whole occlusion test (see frame.thing_record_body).
+            # `tstop` gates the xorby block, exactly as `tsstop` does for the two-sided claim: both
+            # of the oracle's stop conditions (the budget spent, every column claimed) are monotone,
+            # so once the leaf sets it no later thing can matter and none pays its SET+CLEAR.
+            if _do_things and ss.numsegs:
+                for _ti, _t in enumerate(things_by_ss.get(s, ())):
+                    _art = rm.sprite_art(sprite_wad, _t.type, spr_cache)
+                    _tsec = _thing_sector(rm, cmap, lds, sds, secs, _t)
+                    _tag = f"{s}_{_ti}"
+                    xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"{_tag}S", [
+                        ("sp_x", 8, (_t.x << 16) & 0xFFFFFFFF),
+                        ("sp_y", 8, (_t.y << 16) & 0xFFFFFFFF),
+                        ("sp_z", 8, ((_tsec.floor_h + _art[6]) << 16) & 0xFFFFFFFF),
+                        ("sp_left", 8, (_art[5] << 16) & 0xFFFFFFFF),
+                        ("sp_w", 8, (_art[3] << 16) & 0xFFFFFFFF),
+                        ("sp_hh", 8, (_art[4] << 16) & 0xFFFFFFFF),
+                        ("sp_base", 4, spr_base[_t.type]),
+                        ("sp_dw", 2, spr_dw[_t.type]),
+                        ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])])
+                    out += [f"    hex.if0 1, tstop, tgo{cid}_{_ti}",
+                            f"    ;tsk{cid}_{_ti}",
+                            f"  tgo{cid}_{_ti}:",
+                            f"    stl.fcall seg{_tag}S_xorby, xb_ret",
+                            "    stl.fcall thing_leaf, thing_ret",
+                            f"    stl.fcall seg{_tag}S_xorby, xb_ret",
+                            f"  tsk{cid}_{_ti}:"]
             for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
                 seg = cmap.segs[si]
                 ld = lds[seg.linedef]
@@ -1048,6 +1096,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
               f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}"] if plane_near else []),
+           *(["thing_leaf:",
+              f"frame.thing_record_body {THING_BUDGET}, {SPRITE_MINZ}, {proj}, {cfg.CENTERX}, "
+              f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
+              f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}"]
+             if _do_things else []),
            "seg_pass2_leaf:",
            (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
             f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
@@ -1160,6 +1213,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
            "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
            stepcol] if (lines and steps) else []),
+        # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (nonzero =
+        # this column carries one) so a column without a sprite costs ONE read on the emit path;
+        # `spslot[x]` holds [sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row] at a power-of-16 stride.
+        # `y0` is BIASED by 128 because a near sprite's top sits above row 0 and the slot is bytes;
+        # h <= VIEW_H bounds it to +-99. `n_thing`/`tstop` are the budget and its monotone early-out.
+        *([f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+           f"spslot:{NLJ}" + NLJ.join(";0 * dw"
+                                      for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
+           "n_thing: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
+           "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
+           "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
+           "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
+           sprbkt, sprlight, sprbank] if _do_things else []),
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                             floor_mode == "FT1")] if lines else []),
         *([lines_wstrip_txt] if lines_wstrip_txt else []),
@@ -1513,14 +1579,19 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
     applied at emit time through `cm.emit` (V1's grain mechanism), so one bank serves every light
     level instead of being multiplied by 16.
 
+    A block is `[r0][last_rel][n][ (rel_end, texel) x n ]`. `r0` and `last_rel` sit in the HEADER so
+    the RECORD half can bound the fragment's screen rows with two byte reads instead of pre-walking
+    the run-list — the emit needs those bounds before it emits anything (it composes the column
+    around them), and walking twice would double the only per-fragment loop there is.
+
     Returns `(bank_text, base_of_kind, dw_of_kind)` — the bank's fj text, each thing type's first
     block index, and its downscaled width (blocks for a type are laid out u-major, bucket-minor).
     Run-lists come from `ReferenceModel.sprite_strip`, so oracle and fj cannot drift (R6)."""
     cache: dict = {}
     kinds = sorted({t.type for t in map_wad.things(mapname)
                     if rm.sprite_art(sprite_wad, t.type, cache) is not None})
-    out = ["// V4 sprite bank: [r0][n][ (rel_end, RAW texel) x n ] per (sprite, column, height "
-           f"bucket), stride {SPR_BLOCK_STRIDE} dw", "sprbank:"]
+    out = ["// V4 sprite bank: [r0][last_rel][n][ (rel_end, RAW texel) x n ] per (sprite, column, "
+           f"height bucket), stride {SPR_BLOCK_STRIDE} dw", "sprbank:"]
     base_of, dw_of, blk = {}, {}, 0
     for kind in kinds:
         cols, dh, dwid, _wpx, _wph, _left, _top = rm.sprite_art(sprite_wad, kind, cache)
@@ -1528,13 +1599,46 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
         for u in range(dwid):
             for b in range(SPRITE_HEIGHT_BUCKETS):
                 st = rm.sprite_strip(cols[u], dh, sprite_bucket_height(b, cfg.VIEW_H))
-                body = [0, 0] if st is None else (
-                    [st[0], len(st[1])] + [v for pr in st[1] for v in pr])
+                body = [0, 0, 0] if st is None else (
+                    [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
                 assert len(body) <= SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"
                 out += [f";{v:#x} * dw" for v in body]
                 out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
                 blk += 1
     return NLJ.join(out) + NLJ, base_of, dw_of
+
+
+def _thing_sector(rm, cmap, lds, sds, secs, t):
+    """The sector a thing stands in — its floor is the sprite's base and its light the sprite's."""
+    ss = cmap.subsectors[rm.point_in_subsector(cmap, t.x, t.y)]
+    return rm._seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
+
+
+def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, secs):
+    """V4 — the sprite SHADE-ROW bank + the (lightnum, sprite world height) class each thing bakes.
+
+    A billboard takes DOOM's scalelight row for its own on-screen height, exactly as a wall column
+    and a V3 step face do, so the row is a function of (sector light, sprite height, BUCKETED screen
+    height) and bakes out. Rows, not colours: sprite texels stay RAW in `sprbank` and go through
+    `cm.emit` at emit time (V1's grain mechanism), which is what keeps ONE bank serving all 16 light
+    levels instead of being multiplied by them."""
+    cache: dict = {}
+    cls_of: dict = {}
+    for t in map_wad.things(mapname):
+        art = rm.sprite_art(sprite_wad, t.type, cache)
+        if art is None:
+            continue
+        sec = _thing_sector(rm, cmap, lds, sds, secs, t)
+        cls_of.setdefault((rm.wall_lightnum(sec.light, 0), max(1, art[4])), len(cls_of))
+    assert len(cls_of) * STEP_COL_STRIDE <= 0x10000, f"sprite light classes overflow: {len(cls_of)}"
+    out = [f"// V4 sprite shade rows: {len(cls_of)} (light, sprite-height) classes x "
+           f"{STEP_COL_STRIDE} dw, indexed class<<8 | bucket height", "sprlight:"]
+    for (ln, units) in cls_of:
+        row = [0] * STEP_COL_STRIDE
+        for h in range(1, cfg.VIEW_H + 1):
+            row[h] = rm.wall_light_row(ln, h, units)
+        out += [f";{v:#x} * dw" for v in row]
+    return NLJ.join(out) + NLJ, cls_of
 
 
 SKY_BANK_MUL = 3

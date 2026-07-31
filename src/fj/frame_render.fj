@@ -1185,6 +1185,184 @@ ns frame {
     // before tsstop and 1386 after it (measured; walking all of them through this front end costs
     // +11.9M, over the ceiling -- see docs/handoff-m13-2s.md §4).
     // Returns via stl.fret seg_ret. @requires hex.init & stl.ptr_init
+    // ── V4 THINGS — the RECORD half ─────────────────────────────────────────────────────────────
+    // One thing, projected the moment the BSP walk arrives at its subsector, into WRITE-ONCE
+    // per-column fragment slots. Front-to-back arrival is doing two jobs at once: it makes "the
+    // first writer is the nearest" true, and it IS the occlusion test -- a wall nearer than the
+    // thing has already claimed the column, so the thing simply cannot record there. That is what
+    // lets a write-once, forward-only column protocol show sprites at all; DOOM draws them last,
+    // back-to-front, and this renderer cannot.
+    //
+    // Cost is one `hex.fixed_div` (~38.5k) plus a block-FP reciprocal and five multiplies per
+    // thing, which is what THING_BUDGET bounds. Both of the oracle's stop conditions are monotone,
+    // so `tstop` short-circuits every later thing at its call site for one 1-nibble test.
+    // Mirrors ReferenceModel.render_wall_frame's things pre-pass EXACTLY.
+    def thing_record_body budget, minz, projection, centerx, centery, viewwc, viewh, ds, \
+            buckets, slotstride \
+            @ tgo, tgo2, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
+              tfree, tfree2, tblkok, tnext, \
+              tsy1z, tsy1k, tsy2c, tsy2h, tsy2k, tdraw, \
+              tcap, vis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tfrac, tu, tdwm, \
+              tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tidx, tlr, tr0, trl, \
+              tsy1, tsy2, tb8, tneg, tcvh, end \
+            < n_thing, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
+              sp_base, sp_dw, sp_lt, thing_ret {
+        hex.set 2, tcap, budget
+        hex.cmp 2, n_thing, tcap, tgo, tstopset, tstopset
+      tgo:
+        hex.cmp 2, n_claimed, vieww, tgo2, tstopset, tgo2   // every column claimed -> nothing left
+      tgo2:
+        proj.project_thing vis, tx1, tx2, tytop, thpx, tistep, minz, projection, centerx, centery, viewwc, viewh, ds
+        hex.if0 1, vis, tret
+        hex.inc 2, n_thing
+        // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][bucket:2]
+        sprbkt.lookup tbkt, thpx
+        hex.mov 2, thb, tbkt + 2*dw
+        hex.mov 8, ty0, tytop                   // FEET planted: the bucket moves the sprite's TOP
+        hex.add 8, ty0, thpx
+        hex.sub 8, ty0, thb
+        // the shade row: (light, sprite height) class << 8 | bucket height, one baked byte
+        hex.zero w/4, tidx
+        hex.mov 2, tidx + 2*dw, sp_lt
+        hex.mov 2, tidx, thb
+        hex.set w/4, tbb, sprlight
+        hex.ptr_index tbp, tbb, tidx
+        hex.read_byte tlr, tbp
+        // the column DDA: frac starts at (clamped x1 - x1) * istep, exactly as the oracle's does
+        hex.mov 8, tx, tx1
+        hex.zero 8, tfrac
+        hex.sign 8, tx1, tlx, tlxo
+      tlx:
+        hex.zero 8, tx
+        hex.mov 8, tneg, tx1
+        hex.neg 8, tneg
+        hex.mul_lo 8, tfrac, tneg, tistep
+      tlxo:
+        hex.set 8, tcvh, viewwc                 // x2 is INCLUSIVE, so clamp it to VIEW_W-1
+        hex.dec 8, tcvh
+        hex.scmp 8, tx2, tcvh, thxo, thxo, tclamp
+      tclamp:
+        hex.mov 8, tx2, tcvh
+      thxo:
+        hex.mov 2, tdwm, sp_dw
+        hex.dec 2, tdwm                         // the last downscaled texture column
+        hex.set w/4, tdb, drawn
+        hex.ptr_index tdp, tdb, tx
+        hex.set w/4, tfb, sprflag
+        hex.ptr_index tfp, tfb, tx
+      tloop:
+        hex.cmp 2, tx, tx2, tbody, tbody, tret
+      tbody:
+        hex.mov 8, tu, tfrac                    // u = min(dw-1, frac >> 16)
+        hex.shr_hex 8, 4, tu
+        hex.cmp 2, tu, tdwm, tfree, tfree, tuclamp
+      tuclamp:
+        hex.mov 2, tu, tdwm
+      tfree:
+        hex.read_byte tdv, tdp
+        hex.if0 2, tdv, tfree2                  // a nearer wall owns this column -> the thing is hidden
+        ;tnext
+      tfree2:
+        hex.read_byte tfv, tfp
+        hex.if0 2, tfv, tblkok                  // a nearer thing already claimed this column
+        ;tnext
+      tblkok:
+        // block = sp_base + u*buckets + bucket, at a POWER-OF-TWO stride so the address is a shift
+        hex.zero w/4, tblk
+        hex.mov 2, tblk, tu
+        hex.mul_const w/4, tblk, tblk, buckets
+        hex.zero w/4, tidx                      // ... + the type's base block, WIDENED first: a
+        hex.mov 4, tidx, sp_base                // narrow add cannot carry out of its own nibbles
+        hex.add w/4, tblk, tidx
+        hex.zero w/4, tidx
+        hex.mov 2, tidx, tbkt
+        hex.add w/4, tblk, tidx
+        rep(5, k) hex.shl_bit w/4, tblk         // x SPR_BLOCK_STRIDE (32 dw), a power of two
+        hex.set w/4, tbb, sprbank
+        hex.ptr_index tbp, tbb, tblk
+        hex.read_byte tr0, tbp                  // the block HEADER: first row, last row
+        hex.ptr_add tbp, 1
+        hex.read_byte trl, tbp
+        hex.ptr_sub tbp, 1
+        hex.if0 2, trl, tnext                   // a fully transparent sprite column
+        // sy1 = max(y0 + r0, 0), sy2p1 = min(y0 + last_rel, VIEW_H); empty -> nothing to store
+        hex.mov 8, tsy1, ty0
+        hex.add 8, tsy1, tr0
+        hex.sign 8, tsy1, tsy1z, tsy1k
+      tsy1z:
+        hex.zero 8, tsy1
+      tsy1k:
+        hex.set 8, tcvh, viewh
+        hex.scmp 8, tsy1, tcvh, tsy2c, tnext, tnext
+      tsy2c:
+        hex.mov 8, tsy2, ty0
+        hex.add 8, tsy2, trl
+        hex.scmp 8, tsy2, tcvh, tsy2k, tsy2k, tsy2h
+      tsy2h:
+        hex.mov 8, tsy2, tcvh
+      tsy2k:
+        hex.scmp 8, tsy1, tsy2, tdraw, tnext, tnext
+      tdraw:
+        hex.mov 8, tb8, ty0                     // y0 + 128: a near sprite's top is above row 0
+        hex.add_constant 8, tb8, 128
+        hex.set w/4, tidx, 0
+        hex.mov 2, tidx, tx
+        rep(slotstride/16, k) hex.shl_hex w/4, 1, tidx   // a power-of-16 stride: whole-nibble shift
+        hex.set w/4, tbb, spslot
+        hex.ptr_index tbp, tbb, tidx
+        hex.write_byte_and_inc tbp, tsy1
+        hex.write_byte_and_inc tbp, tsy2
+        hex.write_byte_and_inc tbp, tb8
+        hex.write_byte_and_inc tbp, tblk
+        hex.write_byte_and_inc tbp, tblk + 2*dw
+        hex.write_byte_and_inc tbp, tlr
+        hex.set 2, tfv, 1
+        hex.write_byte tfp, tfv
+      tnext:
+        hex.ptr_add tdp, 1
+        hex.ptr_add tfp, 1
+        hex.inc 2, tx
+        hex.add 8, tfrac, tistep
+        ;tloop
+      tstopset:
+        hex.set 1, tstop, 1
+      tret:
+        stl.fret thing_ret
+      tcap: hex.vec 2
+      vis: hex.vec 1
+      tx1: hex.vec 8
+      tx2: hex.vec 8
+      tytop: hex.vec 8
+      thpx: hex.vec 8
+      tistep: hex.vec 8
+      tbkt: hex.vec 4
+      thb: hex.vec 2
+      ty0: hex.vec 8
+      tfrac: hex.vec 8
+      tu: hex.vec 8
+      tdwm: hex.vec 2
+      tx: hex.vec 8
+      tdb: hex.vec w/4
+      tdp: hex.vec w/4
+      tdv: hex.vec 2
+      tfb: hex.vec w/4
+      tfp: hex.vec w/4
+      tfv: hex.vec 2
+      tbb: hex.vec w/4
+      tbp: hex.vec w/4
+      tblk: hex.vec w/4
+      tidx: hex.vec w/4
+      tlr: hex.vec 2
+      tr0: hex.vec 2
+      trl: hex.vec 2
+      tsy1: hex.vec 8
+      tsy2: hex.vec 8
+      tb8: hex.vec 8
+      tneg: hex.vec 8
+      tcvh: hex.vec 8
+      end:
+    }
+
     // ── V3 step faces — the RECORD half ────────────────────────────────────────────────────────
     // A two-sided boundary whose front ceiling is HIGHER (an upper face: a door lintel, a window
     // head) or whose back floor is HIGHER (a lower face: a stair riser, a ledge front) shows a

@@ -91,6 +91,28 @@ Measured effect: 1 of 108 projected rows moves at spawn, 10 of 210 at the worst 
 
 ### Done and committed
 
+* **Increment A — the RECORD half, in fj, BYTE-EXACT at four viewpoints** (`scratchpad/v4_check.py`).
+  Nothing reads `spslot`/`sprflag` yet, so the frame must equal the V3 frame — which makes the ops
+  delta the record half's price on its own, with none of the "a stub prices itself plus everything
+  downstream" contamination:
+
+  | viewpoint | ops | vs V3 |
+  |---|---:|---:|
+  | spawn | 25,689,298 | −856,204 |
+  | courtyard | 28,722,844 | +1,118,798 |
+  | tree (2432,1344) | 25,058,919 | — |
+  | worst (-309,-44) | **36,992,405** | **+4,855,012** |
+
+  ⚠ **Two things to read off this before writing increment B.**
+  (a) The worst viewpoint is now **37.0M, over the owner's 35M ceiling, with the emit half still to
+  come.** `THING_BUDGET = 24` projections at ~60k each is only ~1.4M of that +4.86M; the rest is the
+  per-column record loop (two byte reads per scanned column, over up to 24 things' full column
+  ranges) at a viewpoint where the view never closes so `n_claimed == VIEW_W` never fires. Trim
+  before adding emit: lower the budget, or stop the loop once every column is drawn or fragmented.
+  (b) spawn came out **cheaper**, which no added work can be — the program grew 36.2M → 41.7M
+  characters and that is layout drift at the few-percent level. Do not read a −856k as a saving;
+  the honest statement is "unchanged at spawn within layout noise".
+
 * **The oracle**, with every fj-forced decision already taken:
   * fragments are recorded **during the walk**, at the moment it reaches the thing's own subsector,
     and only into columns no wall has claimed yet. Front-to-back order is what makes "the first

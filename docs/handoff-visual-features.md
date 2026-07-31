@@ -205,9 +205,25 @@ macros are emitted and running), and the `if0` polarity is right (jump-when-zero
 2. **The ceiling prefix is skipped entirely.** `emit_col_lines` does `hex.if0 2, ctake, wall` — if
    `ctake` is 0 for these columns the sky list is never walked no matter how right the address is.
    Print `ctake` for a known sky column at the courtyard.
-3. **The `hex.add_constant w/4, cbufa, skybands` label arithmetic** — the one construct here not used
-   elsewhere in this file. `lines_pid_addrs` adds a REGISTER (`vzbank`) instead. If a label is not
-   valid as an `add_constant` operand it may silently add the wrong base.
+3. ~~The `hex.add_constant` label arithmetic~~ — **DISPROVEN.** Switched to the proven
+   `hex.set w/4, tskb, skybands` + `hex.add` idiom; the ops moved (23,492,508 → 23,369,785, so the
+   code really did change) and the diff is still **exactly 2,111**. Not the base address.
+
+### ⚠ A SECOND, INDEPENDENT BUG found by re-reading (fix it regardless)
+
+`lines_sky_ceil` overrides only **`cbufa`**, the ASCENDING ceiling list. But `emit_col_lines` walks
+`cbufd` — the DESCENDING list — for the straddle case when `ctake > CENTERY`
+(`hex.cmp 2, ctake, ccy, wall, wall, cdesc2`). So any sky column tall enough to cross the horizon
+would emit plane bands for its lower part even once the main bug is fixed. Override `cbufd` too, or
+point both at the sky list (sky has no horizon split — that's the whole reason it is a single
+unperspectived list).
+
+**That this did not change the pixel count (still exactly 2,111 = every sky pixel) is itself
+evidence**: it means the sky path contributes NOTHING at all, so the failure is upstream of the
+address — at the `skypid.lookup`/`if0` branch, or at whether the ceiling prefix runs for these
+columns at all. Test next, cheapest first: make `lines_sky_ceil` unconditionally take the sky branch
+(delete the `if0`) and rebuild — if the courtyard still shows no sky, the fault is in the prefix
+walk (candidate 2), not the branch.
 
 ⚠ Also worth pricing before shipping V2: the sky machinery costs **+1.30M at spawn where NO sky is
 visible** (22,192,782 → 23,492,508). `lines_sky_base` runs per column and does a `hex.mov 8` +

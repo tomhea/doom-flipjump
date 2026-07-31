@@ -66,7 +66,8 @@ def _seg_xorby_use(idx, clear=True):
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub",
                            "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull",
                            "emitnopair", "emitnowalk", "atantwice",
-                           "slopetwice", "tabletwice", "noflush", "colstub"})
+                           "slopetwice", "tabletwice", "noflush", "colstub",
+                           "noprescan", "noproj"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -978,7 +979,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           if raster else
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
           if projm else
-          ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}",
+          ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
+           f"{1 if 'noprescan' in ablate else 0}",
            *(["expand_leaf:",
               f"stream.entry_expand_body {cfg.CENTERY}, {LINES_HALF_SLOTS}, "
               f"{2 * WPX_RUN_CAP}, {(cfg.VIEW_H + 1) * 2 * WPX_RUN_CAP}"] if two_sided else []),
@@ -990,7 +992,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
            (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
             f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
-            f"{eabl_flag}")]
+            f"{eabl_flag}, {1 if 'noproj' in ablate else 0}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]

@@ -1363,7 +1363,7 @@ ns frame {
     // = 1 iff the seg survives everything, so the REST block's SET+CLEAR (and part 2) never
     // happens for the 375 of 432 walked segs that stop here. dbase/dptr/x are globals -- part
     // 2 continues the same registers.
-    def seg_pass1_leaf_body_lines dbl, dsl, dtb \
+    def seg_pass1_leaf_body_lines dbl, dsl, dtb, noscan \
             @ ret, work, wok, occscan, occchk, occdone, occproc \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
               seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c, \
@@ -1385,6 +1385,7 @@ ns frame {
         hex.mov 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
         hex.ptr_index dptr, dbase, x1
+        rep(noscan, k) .lines_jmp occproc        // ablate: what does the pre-scan actually buy?
         // M13-lines3: x/x2 are clipped columns in [0,161] here -- 2-nibble unsigned compares and
         // incs replace the 8-nibble signed forms in both hot loops (~2.4x cheaper each, measured).
       occscan:
@@ -1407,7 +1408,7 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear, eabl \
+            pnear, eabl, noproj \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, \
               dfull, dchk2, dpl, dsame, demitted, dvalid, dct, dfs, dpid \
@@ -1451,7 +1452,8 @@ ns frame {
         hex.set 1, dvalid, 0                    // M13-ditto: a gap breaks x-adjacency
         ;skipcol
       notdrawn:
-        proj.column_params_m top, bottom, scale, wtc8, wtf8, centery*0x10000, viewh1
+        rep(1-noproj, k) .lines_projcall centery*0x10000, viewh1, top, bottom, scale, wtc8, wtf8
+        rep(noproj, k) .lines_projstub centery, top, bottom
         hex.set 8, cVH, viewh                   // cexcl = min(top, VIEW_H)
         hex.mov 8, cexcl, top
         hex.scmp 8, top, cVH, cdone, cge, cge
@@ -1514,6 +1516,15 @@ ns frame {
       cbufd: hex.vec w/4
       fbufa: hex.vec w/4
       fbufd: hex.vec w/4
+    }
+
+    def lines_projcall centeryfix_c, viewh1, top, bottom, scale, wtc8, wtf8 {
+        proj.column_params_m top, bottom, scale, wtc8, wtf8, centeryfix_c, viewh1
+    }
+
+    def lines_projstub centery, top, bottom {
+        hex.set 8, top, 10
+        hex.set 8, bottom, centery
     }
 
     // ── M13-2S rung 3b helpers: the per-column STATE and the two pair BUFFERS ─────────────────

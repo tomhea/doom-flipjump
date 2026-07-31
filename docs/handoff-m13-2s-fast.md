@@ -8,189 +8,203 @@ ops/frame** at E1M1 spawn against a shipped tier at **21,730,429**. The owner's 
 > this level, in the expense of visual-accuracy (but still leave visual-clearness — i.e. where is the
 > wall leading, clear difference between wall and floor and ceiling and other walls)."*
 
-So this rung is allowed to render something DIFFERENT from `render_frame_2s`. It is not allowed to be
-unreadable, and it is not allowed to be unmeasured.
+So this rung may render something DIFFERENT from `render_frame_2s`. It may not be unreadable, and no
+claim in it may be unmeasured.
+
+> ⚠ **This document is v2.** v1 proposed "keep exactly one upper and one lower run per column" and
+> budgeted ~36M. Measuring it against E1M1 (`scratchpad/rung3c_check.py`) broke three of its
+> assumptions — see §3. The design below is what survived.
 
 ---
 
 ## 1. ⚠ Correct the cost model first — `@` is 25–30 ops, not 150
 
-An earlier session (this one) inferred `@ ≈ 150` from a division and then blamed rung 3b's cost on
-the region buffer. **The owner corrected it: `@` is 25–30 ops.** Everything below uses `@ = 27`, and
-it moves the blame:
+An earlier session inferred `@ ≈ 150` by dividing a measured total by a MODELLED visit count, and
+then blamed rung 3b's cost on its region buffer. **The owner corrected it: `@` is 25–30 ops.** With
+`@ = 27` the same measurement (per-column body 88.8M over ~1,120 column visits = 79,286 ops =
+2,937@ each) blames something else:
 
-| per-column item | cost | ops at @=27 |
+| per-column item | @ | ops |
 |---|---|---|
-| `col_state_load` (2 `read_byte` + ptr moves) | 92@ | 2,484 |
-| **`column_params_m` ONCE** (two 6-row muls + the folds) | ~720@ | **19,440** |
-| **`column_params_m` TWICE** (a two-sided seg with an upper or lower) | ~1,440@ | **38,880** |
-| the two row clamps | 120@ | 3,240 |
-| one region append (5 `write_byte_and_inc` + count r/w + offset lookup) | ~330@ | 8,910 |
-| `col_state_store` | 108@ | 2,916 |
-| pointer steps + loop | 90@ | 2,430 |
+| **`column_params_m` once** (two 6-row muls + the folds) | ~720 | **19,440** |
+| **`column_params_m` twice** (a two-sided seg with an upper or lower) | ~1,440 | **38,880** |
+| one buffered region (5 `write_byte_and_inc` + count r/w + offset lookup) | ~330 | 8,910 |
+| `col_state_load` / `col_state_store` | 92 / 108 | 2,484 / 2,916 |
+| the two row clamps | 120 | 3,240 |
 
-Measured: the per-column body is **88.8M over ~1,120 column visits = 79,286 ops (2,937@) per visit**,
-and the model above lands at ~63k for a visit with two projections and ~1.5 appends. Close enough to
-name the villain:
-
-- **the per-column PROJECTION is ~43.5M of the 88.8M** — `column_params_m`, run once per column per
-  seg and TWICE for two-sided segs that have an upper or a lower;
-- the region buffer round-trip (append + flush read, ~1,600 entries) is **~23M**;
-- everything else in the body is ~20M.
-
-Plus the flush's band/run expansion at **~40M**, and a BSP walk that is only **4.83M** (ablate
-`colstub`).
-
-**The lever is therefore the NUMBER of per-column projections, not the buffer.** Rung 3b projects for
-every marking seg × every column it covers. Rung 3a projected only for the ~160 columns it emitted.
+**The per-column PROJECTION is ~43.5M of the 88.8M; the region buffer is ~23M.** Plus the flush's
+expansion at ~40M and a BSP walk that is only **4.83M** (ablate `colstub`).
 
 ---
 
-## 2. The design: keep rung 3a's frame, splice in the NEAREST step per column
+## 2. ★ The lever v1 missed: DOOM does not multiply per column
 
-Rung 3a already ships at 21.7M and the owner approved its look. Rung 3c keeps it whole and adds the
-one thing rung 3b is actually for — the wall faces of two-sided boundaries — under a hard rule:
-
-> **Per column, at most ONE upper run and ONE lower run: the nearest one. Plane regions stay exactly
-> as rung 3a computes them (one ceiling + one floor per column, attributed to the nearest marking
-> seg).**
-
-That rule is what buys the 100M, because it converts "project every seg at every column" into "the
-first wall-drawable seg to reach a column projects it, everyone after reads one byte and leaves".
-
-### What the frame is made of, per column
+`column_params_m` computes `top = centery - (worldtop * scale >> 16)` with a 6-row multiply, once per
+column per seg. DOOM instead keeps `topfrac` in 16.16 and adds a per-seg `topstep`:
 
 ```
-[ceiling bands 0 .. up_y1)         from the near sector's baked band list  (rung 3a)
-[upper run    up_y1 .. up_y2)      the NEAREST upper, WPX list for its exact height
-[ceiling bands up_y2 .. ctake)     same list, sub-range walk                (rung 3b machinery)
-[wall         ctake .. fstart)     the one-sided wall that closes the column (rung 3a)
-[floor bands  fstart .. lo_y1)     near sector's floor list, sub-range
-[lower run    lo_y1 .. lo_y2)      the NEAREST lower
-[floor bands  lo_y2 .. VIEW_H)     same list, sub-range
+topstep  = -FixedMul(worldtop, scalestep)          once per seg
+topfrac  =  centeryfix - FixedMul(worldtop, scale_at_x1)
+per column:  top = topfrac >> 16 ;  topfrac += topstep
 ```
 
-Every piece is known **at claim time** (when the one-sided wall closes the column), because the
-upper/lower slots were filled earlier by nearer segs. **So there is no per-column region buffer and no
-flush pass at all** — the record is emitted inline exactly like rung 3a, which also means rung 3a's
-ditto path keeps working unchanged.
+Same shape as the existing `wall_scale_setup`/`scale += scalestep` the renderer already trusts. Cost
+per column: **~120@ ≈ 3.2k ops instead of ~720@ ≈ 19.4k — 6× cheaper**, and it needs four accumulators
+(front ceil/floor, back ceil/floor) instead of two `column_params_m` calls.
 
-### Per-column state (replaces rung 3b's 5-byte entry lists)
+It is NOT bit-identical to the per-column multiply (different rounding, occasionally ±1 row), so the
+ORACLE adopts it too and the gates stay byte-exact against the new oracle. This is the single biggest
+item in the whole rung and it also would have halved rung 3b — do it FIRST, and measure it on the
+shipped rung-3a tier before touching anything else (rung 3a runs ~160 of these a frame; expect ~−2M
+there alone, byte-exact only against a re-blessed oracle).
 
-Two fixed slots per column, write-once (first writer is the nearest):
+---
 
-| field | bytes | meaning |
+## 3. What the measurements did to v1 of this plan
+
+`scratchpad/rung3c_check.py`, five E1M1 viewpoints:
+
+| finding | number | consequence |
 |---|---|---|
-| `up_blk` | 2 | WPX bank block index of the nearest upper (0 = none) |
-| `up_y1`, `up_y2` | 2 | its row range, exclusive end |
-| `lo_blk` | 2 | ... and the same for the nearest lower |
-| `lo_y1`, `lo_y2` | 2 | |
+| "nearest upper/lower only" drops runs | **707 of 1,615 = 44%** (56% at (−309,−44)) | v1's core rule is too lossy — staircases lose most risers |
+| the naive splice goes NON-MONOTONE | **296 columns** (mostly lowers: 23–69 per viewpoint) | a near step's face overlaps the closing wall's band; needs an occlusion-correct clamp, and it is not an edge case |
+| closed doors that would self-close a column | 0–5 columns | v1's "free win" is not one; drop it from the design |
+| columns never closed by a one-sided wall | 0 | rung 3a's black-column case doesn't bite at these viewpoints |
 
-8 bytes per column, 1,280 total. A seg that finds both slots already filled costs **one `read_byte`
-plus a branch** and skips its projection entirely.
+Distribution of runs per column at spawn: uppers `{0:76, 1:34, 2:34, 3:16}`, lowers
+`{0:80, 1:55, 2:12, 3:9, 4:4}`. So **two slots per side captures the large majority**; three captures
+nearly all.
 
-### What is kept and what is lost, stated plainly
-
-**Kept (the owner's "visual clearness"):**
-- step faces, ledge fronts and door frames appear — you can see where a wall leads;
-- walls, floors and ceilings stay distinct: the wall keeps its WPX texture and its scalelight row,
-  the planes keep their zlight distance banding;
-- rung 3a's near-floor attribution (the fix the owner asked for) is untouched;
-- fake contrast on every wall run.
-
-**Lost (the "visual accuracy" being traded):**
-- only the nearest step per column — a staircase seen edge-on shows its first riser, not all four;
-- plane regions are not per-seg: a column's floor/ceiling bands use the NEAR sector's height, light
-  and flat for the whole strip, so a distant room's floor is shaded as if it were the near one's
-  surface (this is precisely rung 3a's approved behaviour, not a new regression);
-- windows/openings deeper than one boundary are not walked, so nothing behind the first two-sided
-  boundary is drawn.
+Because §2 makes per-column projection 6× cheaper, more slots are now affordable — which is exactly
+the trade v1 could not make.
 
 ---
 
-## 3. The budget, computed the same way §1 was
+## 4. The design
 
-| item | count at spawn | unit | ops |
-|---|---|---|---|
-| rung 3a as it ships today | — | — | **21,730,429** |
-| per-column projection for wall-drawable segs (first writer only) | ~320 column-first-touches | 720@ | ~6.2M |
-| the write-once slot reads for everyone else | ~800 visits | ~40@ | ~0.9M |
-| upper/lower run emission (WPX pairs) | ~252 runs × ~10 pairs | ~90@/pair | ~6.1M |
-| the extra band sub-ranges around the runs | ~160 columns × 2 | ~110@ | ~0.9M |
-| **projected total** | | | **~36M** |
+Keep rung 3a's frame whole — it ships at 21.7M and the owner approved its look — and splice in the
+**nearest K upper and K lower runs per column**, held in write-once slots. Start with **K = 2** and
+measure; K is a compile-time constant, so K = 1 and K = 3 are one rebuild away.
 
-That is over the target, so the rung ships with two more accuracy trades already designed. Apply them
-in order and stop when the sweep is inside 30M:
+### Per-column state (replaces rung 3b's entry lists, its flush pass, and its buffer entirely)
 
-1. **Flat-shade the step faces** (`up`/`lo` runs emit ONE pair — the block's mid-texel at the run's
-   scalelight row — instead of the WPX 1×1 list). Removes ~5.5M of the 6.1M. A step face becomes a
-   solid shaded band, which still reads as "there is a face here, this wall leads up/down"; the
-   TEXTURE detail on it is what is lost. **Do this one first — it is the cheapest 5M in the design.**
-2. **Skip runs shorter than 2 rows.** Distant hairline steps vanish; they were sub-pixel noise.
-   Worth ~0.5M and it also cuts the number of columns that project.
-3. If still over: **cap the projections per frame** (a `PNEAR_SEG_BUDGET`-style bound on the
-   wall-drawable segs, nearest-first). ⚠ The owner disliked forcing that knob for rung 3a — reach for
-   it last, and report what it costs visually rather than silently lowering it.
+Per column, per side, K slots of `[blk:2][y1][y2]` = 4 bytes; K=2 ⇒ 16 bytes/column, 2,560 total.
+Slots fill nearest-first (the walk is front-to-back), and a seg whose slots are all full costs one
+`read_byte` and a branch.
 
-With (1) and (2): **~30M at spawn**, and the heavy viewpoints scale with the same rung-3a factor
-(worst-of-65 was 26.55M for rung 3a, so expect ~34M worst — measure, don't assume).
+### The emitted record, in one pass at claim time
 
----
+Every piece is known when the one-sided wall closes the column, so **there is no buffer and no flush
+pass**, the emit stays inline exactly like rung 3a, and rung 3a's ditto path keeps working:
 
-## 4. The oracle comes first, and it is a NEW mode
-
-Rung 3c does not match `render_frame_2s`, so **it needs its own oracle** — and the fj must be
-byte-exact against it, exactly like every other tier here. Add to `ReferenceModel`:
-
-```python
-render_wall_frame(..., plane_near=True, near_steps=True)   # rung 3c
+```
+ceiling bands [0, u1_y1)            near sector's baked list        (rung 3a)
+upper run     [u1_y1, u1_y2)        nearest upper, WPX for its exact height
+ceiling bands [u1_y2, u2_y1)        same list, SUB-RANGE walk       (rung 3b machinery, reuse it)
+upper run     [u2_y1, u2_y2)        second-nearest upper
+ceiling bands [u2_y2, wall_top)
+wall          [wall_top, wall_bot)  the one-sided wall
+lower runs + floor bands            mirrored, bottom-up
 ```
 
-i.e. extend the SHIPPED rung-3a path (not `render_frame_2s`) with:
-- the per-column `up_*`/`lo_*` write-once slots, filled while walking marking segs front-to-back
-  using the same `wall_screen_span` calls rung 3b uses (front.ceil→back.ceil for the upper,
-  back.floor→front.floor for the lower);
-- the splice into the emitted column (the 7 pieces in §2), with the same clamps;
-- the flat-shade option from §3.1 behind its own flag so the trade is measurable, not baked in.
+### ⚠ The splice must be OCCLUSION-CORRECT, not naive (296 columns depend on it)
 
-⚠ **The upper wall's end is `ub` with NO +1** — DOOM's `min(ub - 1, win_lo)` is an inclusive end.
-Getting this wrong is 644 pixels at spawn and it cost a build cycle in rung 3b. The lower's start is
-`max(lt, win_hi)`, no adjustment.
+The step faces are NEARER than the wall that closes the column, so where they overlap, the step wins
+and the wall shrinks:
 
-Gate it the way rung 3b is gated: square room 5 viewpoints (it has no two-sided lines, so the gate
-proves the splice didn't disturb rung 3a) + E1M1 spawn and rotated + the 65-viewpoint sweep for the
-worst case.
+```
+wall_top = max(ctake, last_upper_y2)      wall_bot = min(fstart, first_lower_y1)
+```
+
+and every piece is emitted only if its range is non-empty, with each piece's start clamped to the
+previous piece's end so the y2 sequence is strictly monotone (the 0x0B device only moves its cursor
+forward — a non-monotone pair paints nothing and the error is silent).
+
+### ⚠ The ditto test must include the slots
+
+Rung 3a's ditto compares `(cexcl, fstart)` and the plane pid. Two adjacent columns can share those
+and differ in their steps, so the comparison grows by the K×2 slots (or by a per-column signature
+byte maintained at fill time — cheaper, and it is the same trick as `pclm`).
+
+### What is kept and what is traded
+
+**Kept (the owner's "visual clearness"):** step faces, ledge fronts and door frames — you can see
+where a wall leads; walls keep their WPX texture, scalelight row and fake contrast; planes keep their
+zlight distance banding, so wall/floor/ceiling stay distinct; rung 3a's near-floor fix untouched.
+
+**Traded:** only the nearest K steps per column (at K=2, ~20% of runs are dropped rather than v1's
+44%); plane regions are not per-seg, so a distant room's floor is shaded with the near sector's
+surface (rung 3a's approved behaviour, not a new regression); nothing behind the first two-sided
+boundary is drawn; ±1-row differences from the incremental projection.
 
 ---
 
-## 5. Ladder
+## 5. Budget — and an honest answer about "20M"
+
+| item | ops |
+|---|---|
+| rung 3a as it ships | 21.7M |
+| + slot fills, ~1,000 contributing column visits × ~200@ (incremental projection + clamps + writes) | 5.4M |
+| + step faces, WPX textured (~180 runs × ~10 pairs) | 4.4M |
+| + the extra band sub-ranges around them | 1.0M |
+| **= textured** | **~32M** |
+| **= with flat-shaded step faces** (one pair per run instead of the WPX list) | **~28.5M** |
+
+Minus whatever §2's incremental stepping gives back on rung 3a's own ~160 projections (~−2M).
+
+**So: ~26–30M at spawn is realistic; 20M is not, without also making rung 3a itself cheaper.** The
+honest framing for the owner is "the low end of your band needs a second rung on the 3a path", and
+§2 is the obvious candidate there too. Do not promise 20M on the back of this design; measure at
+3c-4 and report the number.
+
+Worst-of-65 will be higher than spawn (rung 3a's worst is 26.55M vs 21.73M spawn — a 1.22× factor),
+so expect **~32–37M worst** and be ready to spend one of these, in order: flat-shaded faces (already
+counted), K=1 for the uppers only (lowers are the common case in E1M1 and read as steps), then drop
+runs shorter than 2 rows.
+
+---
+
+## 6. Ladder
 
 | rung | what | gate |
 |---|---|---|
-| 3c-1 | the oracle: `near_steps` on the rung-3a path, both flavours (WPX runs / flat-shaded) | host gates: the near floor is still 1 surface at spawn; steps present; PNG for the owner |
-| 3c-2 | fj: the 8-byte per-column slots + the write-once fill in the two-sided leaf (no emit change yet) | byte-exact vs rung 3a still (slots written, nothing read) — proves the fill is free of side effects |
-| 3c-3 | fj: the emit splice (7 pieces) | byte-exact vs the 3c oracle, square + E1M1 |
-| 3c-4 | flat-shade + the 2-row floor, measure, sweep 65 viewpoints | worst < 30M, full suite |
+| 3c-0 | **incremental per-column projection** (§2) on the SHIPPED rung-3a path, oracle first | re-blessed rung-3a goldens; measure the delta; full suite |
+| 3c-1 | oracle: `render_wall_frame(..., near_steps=K)` — the slots, the occlusion-correct splice, and the flat-shade flag | host gates: near floor still 1 surface at spawn; step count vs `render_frame_2s`; a PNG for the owner |
+| 3c-2 | fj: the per-column slots + write-once fill in the two-sided leaf, nothing read yet | byte-exact vs rung 3a — proves the fill has no side effects |
+| 3c-3 | fj: the emit splice | byte-exact vs the 3c oracle, square room + E1M1 |
+| 3c-4 | flat-shade, the 2-row floor, K sweep, 65-viewpoint sweep | worst < 30M if it can be had; full suite; report the real number |
 
-Reuse from rung 3b, which is already written and gated: the sub-range band walk
-(`stream.band_range`, the general form of pwalk/swalk), `stream.wall_run`, the WPX bank's upper/lower
-blocks (`_lines_wall_pix_bank(..., two_sided=...)`, 622 blocks on E1M1), the per-seg baked
-`seg_flags`/`bceilfix`/`bfloorfix`/`seg_wsupper`/`seg_wslower`, and the `entoff` dispatch. Rung 3b
-itself stays in the tree as the accuracy reference — it is the thing 3c is measured against for
-*look*, and `render_frame_2s` remains its oracle.
+Reusable from rung 3b (written and gated already): `stream.band_range` (the general sub-range band
+walk), `stream.wall_run`, the WPX bank's upper/lower blocks (`_lines_wall_pix_bank(..., two_sided=)`,
+622 blocks on E1M1), the per-seg `seg_flags`/`bceilfix`/`bfloorfix`/`seg_wsupper`/`seg_wslower` bakes,
+and the `entoff` dispatch. Rung 3b stays in the tree as the ACCURACY reference (`--two-sided`), with
+`render_frame_2s` as its oracle.
 
 ---
 
-## 6. Pitfalls that already cost build cycles (each ~5–10 min)
+## 7. Will it ship?
 
-- **`mul_const` / `ptr_index` read `w/4` nibbles of their source** — a 2-nibble register must be
-  zero-extended first (fj-lessons R11). Symptom: `term=ip<2w`, frame all zeros.
+That is the owner's call and it turns on one thing: **at K=2 a staircase seen along its axis shows
+its two nearest risers and then a smooth distance-shaded floor.** That is the visual risk of the
+whole design, and it is worth putting a PNG of exactly that case (E1M1's stairs) in front of the
+owner at rung 3c-1 — *before* the fj work — because if it reads badly, the answer is a different
+trade (e.g. per-seg plane regions but no upper/lower textures), not a tuning knob.
+
+The rest of the picture is unaffected: near floor correct, walls/floors/ceilings distinct, steps and
+door frames present.
+
+---
+
+## 8. Pitfalls that already cost build cycles (5–10 min each)
+
+- **`mul_const` / `ptr_index` read `w/4` nibbles of their source** — zero-extend a 2-nibble register
+  first (fj-lessons R11). Symptom: `term=ip<2w`, frame all zeros.
 - **A macro body inlined in a loop must `;end` over its own scratch `hex.vec` data** (lesson #2).
-  Same symptom.
 - **`hex.set n` is @+4 but `hex.mov n` is n(2@)** — set from a constant, don't mov.
-- **Multiplying a COUNT by `5*dw` instead of 5** made a compare loop run 320× too long. `dw` belongs
-  in address arithmetic only.
-- **The square room has no two-sided linedefs** — it cannot catch a bug in the two-sided path. Only
-  E1M1 exercises it.
-- **Price before building** (R23/R32/§13): rung 3b's own 187M would have been caught by pricing the
-  per-column projection count first.
+- **Multiplying a COUNT by `5*dw` instead of 5** ran a compare loop 320× too long. `dw` belongs in
+  address arithmetic only.
+- **DOOM's upper-wall end is `ub`, with NO +1** (`min(ub - 1, win_lo)` is inclusive) — 644 pixels.
+- **The square room has no two-sided linedefs**, so it cannot catch a bug in the two-sided path; only
+  E1M1 exercises it. It is still the right first gate for everything else.
+- **Price before building** (R23/R32/§13): both of this rung's course corrections came from a
+  10-minute host measurement, not from a build.

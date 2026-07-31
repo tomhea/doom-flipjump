@@ -307,3 +307,23 @@ Each face is one `[y2][colour]` pair (flat-shaded), so ~+404 pairs/frame ≈ +0.
 `STEP_FACE_BASE = 96`, NOT `WALL_BG` (=4, near-WHITE in DOOM's ramp — the faces blew out). A
 palette INDEX carries no brightness ordering you can guess at; that is the same bug as V1's
 confetti, twice.
+
+### V3 fj — scope, measured from the code (read this before estimating)
+
+`seg_pass1_leaf_body_ts` (frame_render.fj:1188) is where a marking seg claims columns, and it has
+**no projection machinery at all** — its `<` list is geometry and claim state only (`seg_v1x..seg_c`,
+`pclm`, `pmin/pmax`, `n_claimed`, `tsstop`). V3 is therefore not a splice into existing code; it
+ADDS a projection path to a leaf that has never projected:
+
+1. `proj.wall_setup_sgn` + `proj.wall_scale_setup_m` per face-carrying seg (~93k each — this is
+   exactly why `STEP_SEG_BUDGET = 12` exists, and why the budget must gate the SETUP, not the fill)
+2. a back-sector `column_params_m` per candidate column (~11.9k; use the ROW-RULE sparse-delta form,
+   `back_row = front_row + (wt_front − wt_back)*scale` with the baked delta SECOND, ⇒ ~3.8k)
+3. write-once slot storage `ustep[x]`/`lstep[x]` + the fill
+4. a face-seg budget counter, separate from `n_tsv`
+5. the two-piece splice in `stream.emit_col_lines`
+6. the `dgchk` ditto-chain entry
+
+Six interacting changes across two files. For calibration: **V2 reused an existing walk, added no new
+machinery, and still took six builds.** V3 is strictly larger — budget accordingly and land it in
+increments (storage+fill byte-exact first, since nothing reads the slots, then the splice).

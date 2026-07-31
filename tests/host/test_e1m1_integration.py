@@ -16,6 +16,11 @@ from doomfj.texturecompiler import (
 from doomfj.wad import WadFile
 
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")
+SPRITE_WAD = Path("assets/freedoom1.wad")     # V4 art: the cut-down fixture has no sprite lumps
+SPAN_LO, SPAN_HI = 9_000_000, 18_000_000      # sanity band around the measured shipping-tier span
+                                              # (12.89M words: the lines raster deletes both 16K-pixel
+                                              # framebuffer unrolls, which more than pays for the
+                                              # sprite bank -- the pre-lines tier was ~24.7M)
 
 
 # ── the downscale factor is config-derived (R6) ─────────────────────────────
@@ -110,18 +115,41 @@ def test_build_doom_subset_is_flat(tmp_path):
 
 # ── M12rr: the SHIPPED runtime wall renderer (build_wall_renderer) is flat under the RAISED limit ──
 
+@pytest.mark.skipif(not SPRITE_WAD.exists(),
+                    reason=f"{SPRITE_WAD} absent -- the shipped tier's V4 things need sprite lumps")
 def test_build_wall_renderer_e1m1_flat(tmp_path):
     """M12rr/M13c3 (build_doom wiring) — the SHIPPED runtime wall+floor/ceiling renderer assembles flat and
     under the RAISED 2**26 flat limit (R0/R4). build_wall_renderer emits via the SHARED
     doomfj.wall_renderer.emit_wall_renderer — the SAME optimized renderer (M12oo trampoline + M12pp/qq
     xor_by-involution walk + the M13c3 plane_tramp visplane raster) the byte-exact golden test renders through
-    (R6) — so this gates the production build. M13c3 replaced the M9 two-band background (the 4.10M bg-fill
-    unroll) with the floor/ceiling visplane pass-2 (a second 16K-pixel plane_tramp unroll + the per-column
-    plane param arrays + yslope/zlight LUTs): the span moved ~21.8M -> ~24.7M words (DESIGN §1.2), still flat
-    under 2**26 (RAM-only cost). ~4-5 min (the 198k-texel table + the two 16K-pixel pass-2 unrolls dominate)."""
+    (R6) — so this gates the production build.
+
+    The shipped defaults are now the LINES tier with all four visual features on (WPX walls + FT1 floors
+    + plane_near + V1 grain / V2 sky / V3 step faces / V4 things), which is what walk_e1m1 shows and what
+    tests/fj/test_visual_features.py proves byte-exact. The sprite bank dominates the span; the bound
+    below is the sanity band around the measured figure, not a target. ⚠ SLOW (~10 min): the V4 build is
+    a ~42M-character program against a ~cubic assembler."""
     m = build_wall_renderer(E1M1, "E1M1", out_fjm=tmp_path / "renderer.fjm",
                             generated_dir=tmp_path / "gen", flat_max_words=1 << 26)
     assert m["storage_mode"] == "flat", m
     assert m["span_words"] < (1 << 26)
     assert m["headroom"] > 1.0
-    assert 20_000_000 < m["span_words"] < 28_000_000, m   # ~24.7M post-M13c3 (bg-fill -> visplane pass; sanity bound)
+    assert m["features"] == {"wall_noise": True, "sky": True, "steps": True, "things": True}, m
+    assert m["tier"] == "lines/WPX/FT1+plane_near", m
+    assert SPAN_LO < m["span_words"] < SPAN_HI, m
+
+
+def test_shipped_sprite_wad_resolution():
+    """V4's art source resolves explicitly or RAISES — it never silently ships things=True with an
+    empty sprite bank. The cut-down fixture has no S_START..S_END at all, which is the whole reason
+    `sprite_wad` is a separate argument."""
+    from doomfj.build import _resolve_sprite_wad
+
+    fixture = WadFile.from_path(E1M1)
+    assert "S_START" not in fixture.names()               # the premise
+    with pytest.raises(ValueError, match="sprite"):
+        _resolve_sprite_wad(fixture, "no/such/file.wad")  # absent default + a spriteless map wad
+    with pytest.raises(ValueError, match="S_START"):
+        _resolve_sprite_wad(fixture, fixture)             # explicitly handed a spriteless wad
+    if SPRITE_WAD.exists():
+        assert "S_START" in _resolve_sprite_wad(fixture, SPRITE_WAD).names()

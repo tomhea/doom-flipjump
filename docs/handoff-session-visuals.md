@@ -12,7 +12,9 @@
 | V1 grain + V2 sky | 23,536,484 | 20,134,978 | — | 26,405,793 |
 | + V3 step faces | 26,545,502 | 27,604,046 | — | 32,137,393 |
 | + V4 things | 28,104,383 | 36,010,624 | 45,252,666 | 39,448,264 |
-| **+ optimisation campaign** | **27,823,804** | **33,859,325** | **37,933,652** | **37,003,252** |
+| + optimisation campaign (EXP-1..5) | 27,823,804 | 33,859,325 | 37,933,652 | 37,003,252 |
+| + EXP-7 far-thing reject | 27,631,269 | 33,820,592 | 37,224,868 | 36,433,309 |
+| **+ EXP-8 `THING_BUDGET`=16 (SHIPPED)** | **27,631,269** | **33,820,592** | **31,826,978** | **35,216,185** |
 
 Every row is **BYTE-EXACT** against the oracle at every viewpoint listed
 (`scratchpad/v4_check.py --emit`). Gates green on this tree: `tests/fj/test_lines_render.py` and
@@ -20,9 +22,12 @@ Every row is **BYTE-EXACT** against the oracle at every viewpoint listed
 
 **All four features are in**: V1 pseudo-random wall grain, V2 sky, V3 step faces, V4 things.
 
-The frame is still over the owner's 30–35M band at the two sprite-heavy viewpoints. The ranked list
-of what remains is in `docs/opt-experiments.md`; the short version is that `proj.project_thing` is
-still ~9M at the tree, because every one of E1M1's 250 things gets projected.
+**Every viewpoint is now inside the owner's 30–35M band** — the worst one only just (35.22M), so it
+is the frame still worth spending on. The budget is the owner's call, taken 2026-08-01: 16 costs 41
+pixels at the tree and 19 at the worst point, out of 16,000, and nothing at all at spawn or the
+courtyard where it never binds (EXP-8 in `docs/opt-experiments.md` has the rendered comparison).
+The ranked list of what remains is in the same file; the short version is that `proj.project_thing`
+is still the largest kernel, because every one of E1M1's 250 things gets projected.
 
 ---
 
@@ -37,13 +42,29 @@ cut-down fixture wad has no sprite lumps at all, so if that file is missing V4 t
 a warning instead of failing to build. ⚠ **Expect ~10 minutes to assemble** — the sprite bank makes
 it a ~42M-character program.
 
-### Still NOT wired (deliberately, and each needs a decision)
+### Wiring status (all three items below are now DONE)
 
-| entry point | state | what it needs |
-|---|---|---|
-| `doomfj.build.build_wall_renderer` (the SHIPPED binary) | passes no feature flags | flags + a re-check of its R0 gate: it asserts `span < flat_max_words` (2²⁶) and the sprite bank grows the program ~5.5M characters |
-| `tests/fj/test_lines_render.py` (the 11-test gate) | tests the flag-OFF tier | it is the ungated-build regression net, which is worth keeping; V1–V4 are gated by `scratchpad/v4_check.py` instead |
-| a committed regression test for V1–V4 | **none exists** | the four-viewpoint gate lives in `scratchpad/v4_check.py`. Promoting it to `tests/` is the single most valuable piece of unfinished work here |
+| entry point | state |
+|---|---|
+| `doomfj.build.build_wall_renderer` (the SHIPPED binary) | **WIRED.** Its defaults are now the shipping tier — `raster_mode="lines"`, `wall_mode="WPX"`, `floor_mode="FT1"`, `plane_near=True` — with all four features ON, and every one is a keyword pass-through so the older tiers stay reachable. V4's art comes from a new `sprite_wad` argument (default `assets/freedoom1.wad`), and `_resolve_sprite_wad` **raises** rather than silently shipping `things=True` with an empty bank. R0 gate re-measured below. |
+| `tests/fj/test_lines_render.py` (the 11-test gate) | tests the flag-OFF tier, deliberately: it is the ungated-build regression net, and an unused label in a gated feature is still a hard assembler error there |
+| a committed regression test for V1–V4 | **`tests/fj/test_visual_features.py`** — one binary, four viewpoints, byte-exact against the oracle. ⚠ ~10 min to assemble, so run it explicitly |
+
+**R0 re-measured, and the number went the other way.** The worry was that the sprite bank (~5.5M
+characters) would push the span past 2²⁶. It did not — the shipped span **FELL, 24.7M → 12.89M
+words**, headroom 5.21× under the raised limit and comfortably under 2²⁴ as well:
+
+```
+{"tier": "lines/WPX/FT1+plane_near", "span_words": 12887798, "storage_mode": "flat",
+ "headroom": 5.207, "fjm_bytes": 3747340, "assemble_seconds": 190.8,
+ "features": {"wall_noise": true, "sky": true, "steps": true, "things": true}}
+```
+
+The reason is the tier, not the features: the lines raster emits a 0x0B column stream instead of a
+framebuffer, which deletes **both** 16K-pixel pass-2 unrolls (the wall trampoline and the M13c3
+plane pass), and those were the bulk of the old span. The sprite bank is small against what went
+away. So the shipped binary got a newer picture *and* half the memory. `flat_max_words=2**26` is
+now far more headroom than this tier needs — worth revisiting only if something re-adds an unroll.
 
 ---
 
@@ -117,27 +138,25 @@ runs, against the cached binary.
 
 ## 5. What is left, in the order I would do it
 
-1. **Promote `scratchpad/v4_check.py` to a committed test.** V1–V4 have no regression net in
-   `tests/`. Everything else on this list can break them silently. It is four viewpoints against the
-   oracle and it already caches its binary.
-2. **Wire the flags into `build_wall_renderer`** and re-check its R0 gate (`span < 2**26`). The
-   sprite bank adds ~5.5M characters; if the span goes over, either raise the limit (DESIGN §1.2
-   allows it, RAM-only) or ship with `things=False` until the bank shrinks.
-3. **Decide `THING_BUDGET`** — EXP-8 in `docs/opt-experiments.md` has the curve. 24 → 16 is worth
-   −5.4M at the tree and −1.2M at the worst point and **exactly zero** at spawn and the courtyard,
-   at the price of the eight furthest things at a crowded viewpoint. One constant; the oracle
-   follows it.
-4. **The emit half, ~8.1M at the tree** (`docs/opt-experiments.md`, "What is left"). A fragmented
+Items 1–3 of the previous list are **done**: the V1–V4 regression test is committed
+(`tests/fj/test_visual_features.py`), the flags are wired into `build_wall_renderer` with its R0
+gate re-measured, and `THING_BUDGET` is **16**.
+
+1. **The emit half, ~8.1M at the tree** (`docs/opt-experiments.md`, "What is left"). A fragmented
    column walks the ceiling list, the wall run-list and the floor list twice — once per region. The
    fix is a RESUMABLE walker: `qwalk` already stops mid-list holding `ptr`/`iP`/`y2r`, so a second
    entry point that skips the count header and re-emits the held pair against a new bound would let
    region 2 continue where region 1 stopped. Intricate; measure with `--reconly` either side of it.
-5. **`project_thing`, still ~7M at the tree.** After EXP-7 the remaining rejects are DOOM's
-   `|tx| > tz<<2`, which is a 4× FOV bound. The real screen test is `x2 < 0 or x1 >= VIEW_W`, i.e.
-   roughly `|tx| <= tz + sprite half-width` — a much tighter reject, and it would skip the
-   reciprocal for far more things. Derive the bound exactly and **verify it exhaustively in Python
-   before building**, the way EXP-7's was.
-6. **V3's step faces have had no optimisation pass at all** (+5.7M at the worst viewpoint).
+2. **V3's step faces have had no optimisation pass at all** (+5.7M at the worst viewpoint). This is
+   now the biggest single item at the **only frame still at the band's edge** (35.22M), which is why
+   it moves up the list: `THING_BUDGET` took 5.4M off the tree but only 1.2M off the worst point.
+3. **`project_thing`.** After EXP-7 the remaining rejects are DOOM's `|tx| > tz<<2`, which is a 4×
+   FOV bound. The real screen test is `x2 < 0 or x1 >= VIEW_W`, i.e. roughly
+   `|tx| <= tz + sprite half-width` — a much tighter reject, and it would skip the reciprocal for
+   far more things. Derive the bound exactly and **verify it exhaustively in Python before
+   building**, the way EXP-7's was. ⚠ Re-price it before writing any fj: a failed projection does
+   not increment `n_thing`, but the budget still ends the walk sooner at 16 than at 24, so some of
+   the calls this lever would have skipped are already gone.
 
 ### Two rules this session paid for
 

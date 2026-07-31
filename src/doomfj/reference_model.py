@@ -96,10 +96,15 @@ SPRITE_HEIGHT_BUCKETS = 32        # V4: on-screen heights the sprite bank bakes 
                                   # of quantisation on a full-height sprite and 1/3 the bank.
 SPRITE_MINZ = 4 << 16             # DOOM's MINZ: nearer than this the projection blows up
 SPRITE_RUN_CAP = 12               # colour runs per baked sprite column (as WPX_RUN_CAP is for walls)
-THING_BUDGET = 24                 # V4: things PROJECTED per frame. Each pays ~47k fj ops (4 FixedMuls
+THING_BUDGET = 16                 # V4: things PROJECTED per frame. Each pays ~47k fj ops (4 FixedMuls
                                   # + 2 FixedDivs), so this is the knob that bounds the feature the
                                   # way STEP_SEG_BUDGET bounds V3 -- and, as there, the walk is
                                   # front-to-back so what the budget drops is the FURTHEST things.
+                                  # 16, not DOOM's unbounded, per EXP-8 (docs/opt-experiments.md):
+                                  # it does not bind at all at spawn or the courtyard, and at the two
+                                  # sprite-heavy viewpoints it buys -5.4M / -1.2M ops for 41 / 19
+                                  # pixels of a 16,000-pixel frame -- which lands both inside the
+                                  # 30-35M band. Owner's call, taken 2026-08-01.
 
 
 def sprite_bucket(h: int, view_h: int) -> int:

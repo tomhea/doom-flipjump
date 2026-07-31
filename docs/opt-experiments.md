@@ -279,11 +279,13 @@ before spending a build.
 | | spawn | courtyard | tree | worst |
 |---|---:|---:|---:|---:|
 | V4 complete (start) | 28,104,383 | 36,010,624 | 45,252,666 | 39,448,264 |
-| **now** | **27,823,804** | **33,859,325** | **37,933,652** | **37,003,252** |
-| | −0.28M | −2.15M | **−7.32M (−16%)** | −2.45M |
+| after EXP-1..5 | 27,823,804 | 33,859,325 | 37,933,652 | 37,003,252 |
+| **after EXP-7 + EXP-8 (shipped)** | **27,631,269** | **33,820,592** | **31,826,978** | **35,216,185** |
+| | −0.47M | −2.19M | **−13.43M (−30%)** | **−4.23M (−11%)** |
 
-Every step byte-exact. Five experiments kept, two reverted, and both reverts are written up above
-because the reasons generalise.
+Every step byte-exact. Six experiments kept, two reverted, and both reverts are written up above
+because the reasons generalise. Only EXP-8 changes the picture (41 px at the tree, 19 at the worst
+point, 0 elsewhere) and it is the one the owner signed off on.
 
 ### What is left, ranked by measured upside
 
@@ -296,10 +298,9 @@ because the reasons generalise.
 2. **The emit half, 8.1M at the tree.** A fragmented column walks the ceiling list, the wall
    run-list and the floor list TWICE — once per region. Walking each list once and emitting around
    the sprite is a real restructure, but it is where the emit's cost is.
-3. **`THING_BUDGET`.** The straight cost knob: 24 → 16 would take roughly a third off both halves at
-   a sprite-heavy viewpoint, at the price of the furthest things. This is the owner's call, not a
-   correctness question.
-4. **V3's step faces, +5.7M at the worst viewpoint**, have had no optimisation pass at all.
+3. ~~**`THING_BUDGET`.**~~ **DONE — 16, see EXP-8 below.**
+4. **V3's step faces, +5.7M at the worst viewpoint**, have had no optimisation pass at all. With the
+   budget applied this is the largest single item at the frame that is still at the band's edge.
 
 ## EXP-7 — an EXACT far-thing reject, before the lateral multiplies ✅ **KEEP**
 
@@ -329,7 +330,7 @@ This is the same shape as EXP-2's reordering and the generalisation is worth sta
 is usually not the one the reference implementation uses.** DOOM rejects on height at the very end
 because on a 486 nothing in that chain cost 20,000 times a compare.
 
-## EXP-8 — the `THING_BUDGET` cost curve 📏 **measured, NOT applied**
+## EXP-8 — the `THING_BUDGET` cost curve 📏 **measured → APPLIED (16), 2026-08-01**
 
 The straight knob. Both builds byte-exact against their own oracle.
 
@@ -373,3 +374,21 @@ and at the worst viewpoint 19 pixels against 1.2M — and 16 is what puts both f
 owner's 30–35M band. Still the owner's call, because it is a picture change, but the earlier framing
 ("this is the lever that costs picture") overstated it: what the budget drops are, almost entirely,
 things that were never visible.
+
+### APPLIED — the owner took 16 (2026-08-01)
+
+`reference_model.THING_BUDGET = 16`. One constant: the oracle reads the module global and the fj
+emit passes the same value to `frame.thing_record_body`, so there is nothing to keep in step.
+Re-gated on a fresh build (`scratchpad/v4_check.py --emit`, cache miss, 441 s assemble) — the ops
+reproduce EXP-8's measurement **to the op**, and all four viewpoints are **BYTE-EXACT** against the
+budget-16 oracle:
+
+| viewpoint | shipped ops | vs budget 24 |
+|---|---:|---:|
+| spawn | 27,631,269 | 0 |
+| courtyard | 33,820,592 | 0 |
+| tree | **31,826,978** | −5,397,890 |
+| worst | **35,216,185** | −1,217,124 |
+
+The worst frame sits at the very top of the 30–35M band, so it is the one still worth spending on;
+the tree now has ~3M of headroom it did not have.

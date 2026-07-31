@@ -29,6 +29,34 @@ from doomfj.wall_renderer import emit_wall_renderer
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
 _RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj"]
+# ... plus these two for raster_mode="lines" (the shipping tier): the packed-byte ceiling/floor BAND
+# lists pass-1 builds, and the 0x0B column-stream present that replaces the framebuffer raster.
+_LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]
+# V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
+DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
+
+
+def _resolve_sprite_wad(map_wad, sprite_wad):
+    """The wad V4 takes SPRITE art from: an already-loaded `WadFile`, a path, or the default —
+    falling back to the map wad, and RAISING if nothing in reach carries an S_START..S_END block.
+    Explicit failure, not a silent `things=False`: a feature that quietly does not run is the bug
+    class this renderer has paid for twice (the V4 courtyard, both BSP prunes)."""
+    def _has_sprites(w):
+        return "S_START" in w.names() and "S_END" in w.names()
+
+    if isinstance(sprite_wad, WadFile):
+        if not _has_sprites(sprite_wad):
+            raise ValueError("things=True: the given sprite_wad has no S_START..S_END lumps")
+        return sprite_wad
+    if sprite_wad is not None and Path(sprite_wad).exists():
+        w = WadFile.from_path(str(sprite_wad))
+        if _has_sprites(w):
+            return w
+    if _has_sprites(map_wad):
+        return map_wad
+    raise ValueError(
+        f"things=True needs sprite art: {sprite_wad!r} is absent or carries no sprite lumps, and "
+        f"the map wad has none either. Pass sprite_wad=<a full wad> or build with things=False.")
 
 
 def build(fj_src="src/fj/hello.fj", out_fjm="build/hello.fjm", metrics="build/metrics.json") -> dict:
@@ -154,31 +182,49 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
 
 
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
-                        flat_max_words=None, floor_mode="textured", wall_mode="textured") -> dict:
+                        flat_max_words=None, floor_mode="FT1", wall_mode="WPX",
+                        raster_mode="lines", plane_near=True, wall_noise=True, sky=True,
+                        steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
     (R6 single source) — so every space optimization (M12oo pass-2 trampoline, M12pp/qq xor_by + xor-involution
-    walk) ships here for free. Assembles against the fixed renderer include set, then R0-gates: assert
+    walk) ships here for free. Assembles against the renderer include set, then R0-gates: assert
     `storage_mode == flat` and `span < limit`. The renderer's fully-unrolled pass-2 + BSP walk push the span
     past the 2**23 default, so pass a RAISED `flat_max_words` (2**26) per DESIGN §1.2 (RAM-only cost). The
     viewpoint `(vx,vy,va)` is read from stdin at runtime; the gate run feeds an invalid byte so the input
     parser jumps to `bad:` and halts immediately (the span/storage_mode are load-time, so no full render is
-    needed for the gate — the golden test does the byte-exact render). `floor_mode`/`wall_mode` (M13p1/
-    M13p4a) are pass-throughs to `emit_wall_renderer`; both stay "textured" (the shipped default) until
-    M13p8 flips them."""
+    needed for the gate — the golden test does the byte-exact render).
+
+    **The defaults are the SHIPPING tier**, i.e. what `scripts/walk_e1m1.py` puts on screen: the lines
+    raster with WPX 1x1-texel walls + FT1 floors + rung-3a `plane_near`, and all four VISUAL FEATURES
+    (V1 `wall_noise` grain, V2 `sky`, V3 `steps` faces, V4 `things` sprites) ON. Every one is byte-exact
+    against the oracle (`tests/fj/test_visual_features.py`); before this they were emitter keywords that
+    only the walker and that test ever passed, so the shipped binary rendered a strictly older picture
+    than the project's own screenshots. The older tiers stay reachable by keyword
+    (`raster_mode="framebuffer", floor_mode="textured", wall_mode="textured"` is the pre-lines build).
+
+    ⚠ V4 needs SPRITE ART, and a cut-down map wad has no sprite lumps at all — hence `sprite_wad`,
+    which defaults to `assets/freedoom1.wad` and falls back to the map wad when that file is absent.
+    If neither carries sprites this RAISES rather than quietly dropping the feature: a silently
+    not-running feature is exactly the class of bug that cost this repo the most (docs/opt-experiments.md).
+    """
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
     cfg = cfg or Config()
     wad = WadFile.from_path(wad_path)
     limit = flat_max_words or FLAT_MAX_WORDS
     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
+    spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
 
     main = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode,
-                              wall_mode=wall_mode)
+                              wall_mode=wall_mode, raster_mode=raster_mode, plane_near=plane_near,
+                              wall_noise=wall_noise, sky=sky, steps=steps, things=things,
+                              sprite_wad=spr)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     main_p = gen / "renderer_main.fj"
     main_p.write_text(main, encoding="utf-8")
-    paths = [consts] + [_SRC_FJ / f for f in _RENDERER_INCLUDES] + [main_p]
+    includes = _RENDERER_INCLUDES + (_LINES_INCLUDES if raster_mode == "lines" else [])
+    paths = [consts] + [_SRC_FJ / f for f in includes] + [main_p]
 
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
@@ -192,6 +238,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         "storage_mode": str(term.storage_mode), "span_words": span, "flat_limit": limit,
         "headroom": round(limit / span, 3) if span else None,
         "fjm_bytes": out.stat().st_size, "assemble_seconds": assemble_seconds,
+        "tier": f"{raster_mode}/{wall_mode}/{floor_mode}" + ("+plane_near" if plane_near else ""),
+        "features": {"wall_noise": wall_noise, "sky": sky, "steps": steps, "things": things},
     }
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
     assert span < limit, f"R4: span {span} >= flat limit {limit}"

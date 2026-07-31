@@ -190,12 +190,24 @@ Ruled out already:
   flats (32 distinct names).
 - `hex.if0 2, issky, notsky` has the right polarity (jump when zero = not sky).
 
-**Next step: dump the generated `skypid` table and confirm any entry is 1.** The likeliest remaining
-causes, in order: (a) `lines_pid` keys the pid on the pair `(ceil_key, floor_key)` and the list
-comprehension iterates `lines_pid` — check the ORDER matches the pid VALUES (pids are
-`len(lines_pid)+1` at insertion, so the dict order is insertion order and index `pid` must line up
-with `[0] + [...]`); (b) the table is generated under `plane_near` but indexed before the pid is
-stored; (c) `index_nibbles=2` truncating if pids exceed 255.
+**Hypothesis (a) is DISPROVEN — do not re-test it.** The generated table is correct: 152 pids, 153
+entries, **19 sky entries** at pids 41, 42, 64, 65, 69, 70, 73, 74, 75, 76, 77, 81, … and 152 < 255
+so `index_nibbles=2` does not truncate. The data is right; the *lookup or the branch* is wrong.
+
+Also disproven: `sky` reaches the macro (spawn cost rose +1.30M, which only happens if the sky
+macros are emitted and running), and the `if0` polarity is right (jump-when-zero = not sky).
+
+**Remaining candidates, in order:**
+1. **`cbufa` is recomputed or overwritten after `lines_sky_ceil` runs.** `lines_col_plane` caches on
+   `cpid` and only calls `lines_pid_addrs` when the pid CHANGES — so for a run of same-pid columns
+   the plane address is stale-but-valid, while the sky override is applied every column. Check
+   nothing downstream re-derives `cbufa` between the override and `emit_col_lines`.
+2. **The ceiling prefix is skipped entirely.** `emit_col_lines` does `hex.if0 2, ctake, wall` — if
+   `ctake` is 0 for these columns the sky list is never walked no matter how right the address is.
+   Print `ctake` for a known sky column at the courtyard.
+3. **The `hex.add_constant w/4, cbufa, skybands` label arithmetic** — the one construct here not used
+   elsewhere in this file. `lines_pid_addrs` adds a REGISTER (`vzbank`) instead. If a label is not
+   valid as an `add_constant` operand it may silently add the wrong base.
 
 ⚠ Also worth pricing before shipping V2: the sky machinery costs **+1.30M at spawn where NO sky is
 visible** (22,192,782 → 23,492,508). `lines_sky_base` runs per column and does a `hex.mov 8` +

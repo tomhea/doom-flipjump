@@ -65,7 +65,11 @@ WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap
 WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column (ops + bank knob)
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
-SKY_TURN = 4                      # V2: sky-texture widths swept per full 360 turn (a look knob)
+# V2: sky-texture widths swept per full 360 turn. A LOOK knob, but not a free one -- it sets the
+# BAM shift, and fj only shifts cheaply by whole NIBBLES. With tw=128, shift = 32-7-log2(TURN), so
+# TURN=2 gives 24 (exactly 6 nibbles, one `hex.shr_hex 8, 6`) while TURN=4 gives 23 and would cost a
+# bit-shift chain per frame. Pick the knob that lands on a nibble.
+SKY_TURN = 2
 
 
 def _sky_shift(tw: int) -> int:

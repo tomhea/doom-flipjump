@@ -1404,18 +1404,27 @@ def _lines_sky_bank(rm, asset_wad, cfg):
     of static data — nothing beside the 8.9M-character wall bank — and it slots into the ceiling
     prefix walk that already exists, so V2 adds no emit path.
 
-    At runtime: `u = (skybase + skyoff[x]) & (tw-1)` with `skybase = (viewangle >> shift) & (tw-1)`
-    computed once per frame, then the ceiling list address becomes `skybands + u*stride`.
-    Values come from `ReferenceModel.sky_texel`, so oracle and fj cannot drift (R6)."""
+    At runtime: `u = skybase + skyoff[x]` with `skybase = (viewangle >> shift) & (tw-1)` computed
+    once per frame, then the ceiling list address is `skybands + u*stride`.
+
+    ⚠ The bank holds **2*tw** lists, entry `u` carrying sky column `u & (tw-1)`. Both addends are
+    already in [0, tw-1], so their sum never exceeds 2*tw-2 and **the wrap needs no mask at all** —
+    which matters because fj has no cheap AND: masking would cost a dispatch or a compare-and-
+    subtract per column, while the duplicate half costs only static text (~477k characters against
+    the 8.9M-character wall bank). Trading a little baked data for an omitted runtime op is the same
+    bargain the wall bank already makes.
+
+    Values come from `ReferenceModel.sky_texel_u`, so oracle and fj cannot drift (R6)."""
     H = cfg.VIEW_H
     tex = rm._wall_texture(asset_wad, "SKY1", {}, wall_mode="textured")
     if tex is None:
         return "", ""
     _texels, _th, tw = tex
     stride = 2 * (H + 1)                      # worst case: a colour change every row, + terminator
-    out = [f"// V2 sky bank: {tw} columns x {H} rows, [y2_cumulative][colour] (stride {stride} dw)",
+    out = [f"// V2 sky bank: {2 * tw} lists (tw={tw}, doubled so skybase+skyoff needs NO mask) "
+           f"x {H} rows, [y2_cumulative][colour] (stride {stride} dw)",
            "skybands:"]
-    for u in range(tw):
+    for u in range(2 * tw):
         body, prev = [], None
         for y in range(H):
             c = rm.sky_texel_u(asset_wad, {}, u, y)

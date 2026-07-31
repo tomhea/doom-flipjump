@@ -261,3 +261,49 @@ walker's layout is not optional.
 This is the same lesson as the other three V2 bugs, for the fourth time: **the consumer's format is
 the specification.** Bank size, label idiom, list format and now half-list layout were each assumed
 from a neighbouring subsystem rather than read off `emit_col_lines`.
+
+---
+
+## V3 fj — the design, ready to wire (oracle is DONE and rendering)
+
+Oracle: `render_wall_frame(..., near_steps=True)` draws 463 / 654 / 154 face pixels at spawn /
+(-480,256) / (-309,-44). Default hash unchanged, so V1+V2 stay byte-exact.
+
+### Data (compile time)
+Nothing new. A step face reuses the WPX wall bank: it is a wall run of the seg's lower/upper
+texture, flat-shaded, so it needs only the block index the bank already assigns.
+
+### Per-column state (runtime)
+Two write-once slots per column, filled by the claim walk in `lines_col_plane`'s neighbourhood:
+`ustep[x] = [y1][y2]`, `lstep[x] = [y1][y2]` — 4 bytes each, 0 = empty. Write-once is what makes
+"nearest" free: the walk is front-to-back, so the FIRST writer is the nearest.
+
+Bound it with `STEP_SEG_BUDGET = 12` face-carrying segs (a counter register, not a per-seg flag).
+That bound is load-bearing: a face-carrying seg pays a full ~93k `wall_scale_setup`, and at a heavy
+viewpoint all 128 marking segs would otherwise qualify. Measured: only **2** boundaries at spawn
+have a face at all, so the budget costs nothing there and only trims the worst case.
+
+### Emit (the splice)
+`emit_col_lines` composes top-down; insert the faces as two extra pieces, each clipped to the
+previous piece's end so the column stays MONOTONE:
+
+```
+ceiling prefix [0, min(ctake, up_y1))     upper face [up_y1, up_y2]     ceiling rest to ctake
+wall [ctake, fstart)
+floor prefix [fstart, lo_y1)              lower face [lo_y1, lo_y2]     floor suffix to VIEW_H
+```
+
+Each face is one `[y2][colour]` pair (flat-shaded), so ~+404 pairs/frame ≈ +0.13M emit.
+
+### ⚠ The two traps this rung inherits
+1. **The ditto chain.** `ustep[x]`/`lstep[x]` change a column's CONTENT without changing its CLIP
+   ROWS, so they MUST join the `dgchk` compare or the frame diverges — exactly as V1's grain did at
+   columns 12 and 144. Third feature, same trap.
+2. **The consumer's format is the specification.** V2 cost four builds to bank size, label idiom,
+   list format and half-list layout, each assumed from a neighbouring subsystem. Read the emit path
+   before baking anything.
+
+### And one from V3's own oracle
+`STEP_FACE_BASE = 96`, NOT `WALL_BG` (=4, near-WHITE in DOOM's ramp — the faces blew out). A
+palette INDEX carries no brightness ordering you can guess at; that is the same bug as V1's
+confetti, twice.

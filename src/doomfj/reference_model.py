@@ -1254,6 +1254,16 @@ class ReferenceModel:
         """The per-column sky offset — a COMPILE-TIME constant, since xtoviewangle is."""
         return (self.xtoviewangle[x] >> _sky_shift(tw)) & (tw - 1)
 
+    def sky_texel_u(self, asset_wad, texcache, u: int, y: int) -> int:
+        """One sky pixel addressed by TEXTURE COLUMN rather than screen column — what the fj bank
+        bakes, one list per `u`. `sky_texel` is this composed with the u computation."""
+        tex = self._wall_texture(asset_wad, "SKY1", texcache if texcache is not None else {},
+                                 wall_mode="textured")
+        if tex is None:
+            return CEIL_BG
+        texels, th, tw = tex
+        return texels[(u % tw) * th + min(th - 1, y * th // max(1, self.cfg.VIEW_H))]
+
     def _render_planes_flat(self, fb, colormap, asset_wad, flatcache, viewz,
                             ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff,
                             *, ft1: bool = False, sky: bool = False, viewangle: int = 0,

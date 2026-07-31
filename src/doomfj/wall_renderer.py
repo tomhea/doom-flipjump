@@ -92,7 +92,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
                        wall_mode: str = "textured", raster_mode: str = "framebuffer",
                        plane_near: bool = False, two_sided: bool = False,
-                       wall_noise: bool = False) -> str:
+                       wall_noise: bool = False, sky: bool = False) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -368,6 +368,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # entries, so this costs ~1/25 the program size of the tantoangle conversion.
     xtadisp = (generate_dispatch_table_fj("xtadisp", xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N),
                                           index_nibbles=2, result_nibbles=8) if lines else "")
+    # V2: the SKY bank. A sky column has no perspective and no distance lighting, so it is just a
+    # band list -- which makes "sky" nothing more than a per-column CHOICE OF CEILING BAND LIST, and
+    # needs no new emit path at all. One list per sky texture column, in the same
+    # [y2_cumulative][colour] form the plane bands already use, plus a compile-time per-column
+    # offset table; the frame supplies `skybase` and the existing prefix walk does the rest.
+    skybands, skyoff = _lines_sky_bank(rm, asset_wad, cfg) if (lines and sky) else ("", "")
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -1387,3 +1393,41 @@ def _stream_mode_decls(cfg, nvpc: int, nvpf: int) -> list[str]:
         # (3 bytes/row) instead of a per-row read_table 8 -- the packed twin of the 8-nib table.
         generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H),
     ]
+
+
+def _lines_sky_bank(rm, asset_wad, cfg):
+    """V2 — the SKY bank: one `[y2_cumulative][colour]` band list per sky texture column, plus the
+    compile-time per-column offset table.
+
+    Sky is the one surface with NO perspective and NO distance lighting, so a sky column depends on
+    the texture column `u` ALONE. That makes it bakeable outright: 128 lists of ~9 runs, ~1,150 pairs
+    of static data — nothing beside the 8.9M-character wall bank — and it slots into the ceiling
+    prefix walk that already exists, so V2 adds no emit path.
+
+    At runtime: `u = (skybase + skyoff[x]) & (tw-1)` with `skybase = (viewangle >> shift) & (tw-1)`
+    computed once per frame, then the ceiling list address becomes `skybands + u*stride`.
+    Values come from `ReferenceModel.sky_texel`, so oracle and fj cannot drift (R6)."""
+    H = cfg.VIEW_H
+    tex = rm._wall_texture(asset_wad, "SKY1", {}, wall_mode="textured")
+    if tex is None:
+        return "", ""
+    _texels, _th, tw = tex
+    stride = 2 * (H + 1)                      # worst case: a colour change every row, + terminator
+    out = [f"// V2 sky bank: {tw} columns x {H} rows, [y2_cumulative][colour] (stride {stride} dw)",
+           "skybands:"]
+    for u in range(tw):
+        body, prev = [], None
+        for y in range(H):
+            c = rm.sky_texel_u(asset_wad, {}, u, y)
+            if c != prev:
+                if prev is not None:
+                    body[-2] = y                    # close the previous run at this row
+                body += [H, c]                      # provisional end, patched by the next change
+                prev = c
+        body += [0, 0]                              # rel==0 terminator, matching the WPX bank form
+        assert len(body) <= stride, f"sky list overflows its stride: {len(body)} > {stride}"
+        out.extend([f";{v:#x} * dw" for v in body] + [";0 * dw"] * (stride - len(body)))
+    offs = generate_dispatch_table_fj(
+        "skyoff", [rm.sky_col_off(x, tw) for x in range(cfg.VIEW_W + 1)],
+        index_nibbles=2, result_nibbles=2)
+    return "\n".join(out), offs

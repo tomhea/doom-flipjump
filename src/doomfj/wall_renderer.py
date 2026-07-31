@@ -66,7 +66,7 @@ def _seg_xorby_use(idx, clear=True):
 _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub",
                            "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull",
                            "emitnopair", "emitnowalk", "atantwice",
-                           "slopetwice", "tabletwice"})
+                           "slopetwice", "tabletwice", "noflush", "colstub"})
 
 # M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
 # uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
@@ -76,6 +76,9 @@ _LINES_DEAD_FIELDS = frozenset({"seg_texoff", "seg_texbase", "seg_texheight", "s
                                 "seg_hm", "seg_light", "seg_ceil", "seg_floor", "seg_plight",
                                 "seg_ceilbase", "seg_floorbase"})
 
+TS_ECAP = 24                   # M13-2S rung 3b: buffered REGIONS per column per side,
+                               # 5 bytes each ([kind][arg:2][y1][yend]). Measured worst
+                               # over 30 E1M1 viewpoints: 14 top / 10 bottom.
 MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Bound: a monotone half-window's
                                   # zidx walk gives <=32 distinct zrow runs (zlight[lvl][zidx] is monotone in
                                   # zidx with values in [0,31]); a horizon-STRADDLING window (negative-viewz
@@ -86,7 +89,7 @@ BAND_STRIDE = MAX_BANDS * 3        # packed bytes per column per region (run-len
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
                        wall_mode: str = "textured", raster_mode: str = "framebuffer",
-                       plane_near: bool = False) -> str:
+                       plane_near: bool = False, two_sided: bool = False) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -186,6 +189,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # inline at column-claim time. No col_struct, no present-tail pass.
     lines = raster_mode == "lines"
     assert not plane_near or lines, "plane_near is a lines-mode tier (M13-2S rung 3a)"
+    # M13-2S rung 3b: the TWO-SIDED renderer -- DOOM's R_RenderSegLoop window per column, upper
+    # and lower wall runs, and one plane region per bounding SEG. It supersedes plane_near (whose
+    # attribution it includes) and targets ReferenceModel.render_frame_2s.
+    assert not two_sided or lines, "two_sided is a lines-mode tier (M13-2S rung 3b)"
+    assert not (two_sided and plane_near), "two_sided already includes plane_near's attribution"
+    plane_near = plane_near or two_sided
     # ablate "pnearcol" prices the emit half alone (per-column attribution OFF, the two-sided claim
     # walk still emitted); "pnearwalk" prices the walk alone (claim sites dropped, per-column ON).
     # Both render wrong on purpose -- measurement only.
@@ -494,7 +503,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     elif lines and wall_mode == "WPX":
         lines_wstrip_off, lines_wstrip_txt = _lines_wall_pix_bank(
             rm, asset_wad, cmap, lds, sds, secs, colormap, verts, cfg.VIEW_H,
-            solid=_ts_draws_wall_early if "tsfull" in ablate else None)
+            solid=_ts_draws_wall_early if "tsfull" in ablate else None,
+            two_sided=_seg_marks if two_sided else None)
 
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
@@ -516,7 +526,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
                 seg = cmap.segs[si]
                 ld = lds[seg.linedef]
-                if ld.back != -1 and not _seg_as_solid(seg):
+                if ld.back != -1 and two_sided and not _seg_marks(seg):
+                    continue                     # the compile-time cull (DOOM's R_AddLine reject)
+                if ld.back != -1 and not _seg_as_solid(seg) and not two_sided:
                     # M13-2S probe (ablate "tsprobe"): walk the DRAWABLE two-sided segs through the
                     # cheap cull only -- GEOM block + pass 1, no emit. This prices the one thing that
                     # decides whether any two-sided emit design can fit the ops ceiling: what it
@@ -589,7 +601,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 v1x, v1y = verts[seg.v1]
                 v2x, v2y = verts[seg.v2]
                 ssec = rm._seg_sector(lds, sds, secs, seg)
-                tb, th, tw = seg_texinfo[si]
+                tb, th, tw = seg_texinfo.get(si, (0, 1, 1))
                 sa, sb, sc = seg_affine_coeffs(seg, verts)
                 # the band-bank key carries the flat NAME too, so M13-FT1 can sample its texels
                 ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
@@ -601,6 +613,39 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 gfields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
                            ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
                            ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc)]
+                if two_sided:
+                    # M13-2S rung 3b: the seg's own geometry PLUS its back sector's two heights and
+                    # its upper/lower WPX blocks. seg_flags nibble 0 = two-sided, 1 = has upper,
+                    # 2 = has lower -- all compile-time facts, so the leaf's branches are 1-nibble
+                    # tests on baked constants. A one-sided seg bakes zeros for the back fields, and
+                    # xor_by of 0 emits nothing, so it costs what it did before.
+                    _mid, _up, _lo = lines_wstrip_off[si]
+                    _bs = (secs[sds[ld.back if seg.side == 0 else ld.front].sector]
+                           if ld.back != -1 else ssec)
+                    _two = 1 if ld.back != -1 else 0
+                    _hasu = 1 if (_two and ssec.ceil_h > _bs.ceil_h) else 0
+                    _hasl = 1 if (_two and _bs.floor_h > ssec.floor_h) else 0
+                    rfields = [("seg_segangle", 8, seg.angle),
+                               ("seg_wstrip", 4, _mid),          # WPX bank BLOCK INDICES: a
+                               ("seg_wsupper", 4, _up),          # buffered region entry carries
+                               ("seg_wslower", 4, _lo),          # the index in two bytes
+                               ("seg_flags", 3, _two | (_hasu << 4) | (_hasl << 8)),
+                               ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
+                               ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
+                               ("bceilfix", 8, (_bs.ceil_h << 16) & 0xFFFFFFFF),
+                               ("bfloorfix", 8, (_bs.floor_h << 16) & 0xFFFFFFFF),
+                               ("seg_pid", 4, lines_pid[_plane_keys(ssec)])]
+                    xorby_blocks[si] = (_seg_xorby_block(f"{si}G", gfields)
+                                        + _seg_xorby_block(f"{si}R", rfields))
+                    out += [f"    stl.fcall seg{si}G_xorby, xb_ret",
+                            "    stl.fcall seg_pass1_leaf, seg_ret",
+                            f"    hex.if0 1, proceed, e1sk{cid}_{si}",
+                            f"    stl.fcall seg{si}R_xorby, xb_ret",
+                            "    stl.fcall seg_pass2_leaf, seg_ret2",
+                            f"    stl.fcall seg{si}R_xorby, xb_ret",
+                            f"  e1sk{cid}_{si}:",
+                            f"    stl.fcall seg{si}G_xorby, xb_ret"]
+                    continue
                 rfields = [("seg_segangle", 8, seg.angle),
                            *([("seg_wstrip", "w/4", f"{lines_wstrip_off[si]}*dw")]
                              if wall_mode in ("W2S", "WPX") else []),
@@ -788,6 +833,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # pass 2b: floor/ceiling visplanes (M13d2) — the per-frame clear_planes seeds + the runtime per-ROW
     # R_MakeSpans textured span pass (replaces the M13c3 per-column plane_tramp unroll).
     plane_pass = []
+    if two_sided and "noflush" not in ablate:
+        # M13-2S rung 3b: the record assembler. One unrolled pass over the columns AFTER the walk --
+        # the walk cannot emit any more, because a column's pairs arrive from both ends.
+        plane_pass = [f"stream.flush_frame {cfg.VIEW_W}, {TS_ECAP}, colst, colbuf"]
     if "planes" not in ablate and not (stream or raster or projm or lines):   # M13pS2/raster: planes render via bands/device instead
         plane_pass = ["stl.fcall clear_leaf, clear_ret",
                       f"frame.render_planes_spans {cfg.VIEW_W}, {cfg.VIEW_H}"]
@@ -925,13 +974,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
           if projm else
           ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}",
+           *(["expand_leaf:",
+              f"stream.entry_expand_body {cfg.CENTERY}, {LINES_HALF_SLOTS}, "
+              f"{2 * WPX_RUN_CAP}, {(cfg.VIEW_H + 1) * 2 * WPX_RUN_CAP}"] if two_sided else []),
            *(["seg_pass1_ts_leaf:",
               f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
               f"{table_dbl}"] if plane_near else []),
            "seg_pass2_leaf:",
-           f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
-           f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
-           f"{eabl_flag}"]
+           (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
+            f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
+           (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
+            f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
+            f"{eabl_flag}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -997,6 +1051,23 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # in lockstep with `drawn`. `tsstop` = attribution can no longer change (every column done,
         # or the seg budget spent) -- the early-out that makes
         # the extra two-sided walk affordable.
+        # M13-2S rung 3b: per column [chi][flo][tcnt][bcnt] (the window's exclusive-end row bounds
+        # and the bytes used in its two pair buffers), plus the buffers themselves -- tcap bytes of
+        # TOP pairs then bcap of BOTTOM blocks. A column can never hold more than VIEW_H pairs in
+        # total (each pair advances the fill cursor by >= 1 row), so 2*VIEW_H bytes per side plus a
+        # length trailer per block is a hard bound, not a guess.
+        *([f"colst:{NLJ}" + NLJ.join(NLJ.join([";0x0 * dw", f";{cfg.VIEW_H:#x} * dw",
+                                               ";0x0 * dw", ";0x0 * dw"])
+                                     for _ in range(cfg.VIEW_W)),
+           f"colbuf:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W * 10 * TS_ECAP)),
+           "cstp: hex.vec w/4", "cbfp: hex.vec w/4", "tptr: hex.vec w/4", "bptr: hex.vec w/4",
+           "chi: hex.vec 2", "flo: hex.vec 2", "tcnt: hex.vec 2", "bcnt: hex.vec 2",
+           "bcnt0: hex.vec 2", "seg_flags: hex.vec 3",
+           "bceilfix: hex.vec 8", "bfloorfix: hex.vec 8",
+           "seg_wsupper: hex.vec 4", "seg_wslower: hex.vec 4",
+           "eptr: hex.vec w/4", "exp_ret: ;0",
+           "cbufa: hex.vec w/4", "cbufd: hex.vec w/4",
+           "fbufa: hex.vec w/4", "fbufd: hex.vec w/4"] if two_sided else []),
         *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
            "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
            "n_claimed: hex.vec 2", "n_tsv: hex.vec 2", "tsstop: hex.vec 1",
@@ -1152,56 +1223,80 @@ def _lines_wall_strips(rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap,
 
 
 def _lines_wall_pix_bank(rm, asset_wad, cmap, lds, sds, secs, colormap, verts, view_h,
-                         cap: int = WPX_RUN_CAP, solid=None):
+                         cap: int = WPX_RUN_CAP, solid=None, two_sided=None):
     """M13-WPX: the fully-baked 1×1 wall bank + its per-seg block offsets.
 
-    One BLOCK per distinct (wall texture, seg light level, sector wall span) — 575 E1M1 segs
-    collapse to ~185 blocks, since those three determine every column the seg can ever draw. A block holds one
+    One BLOCK per distinct (wall texture, seg light level, sector wall span) — 575 E1M1 segs collapse
+    to ~185 blocks, since those three determine every column the seg can ever draw. A block holds one
     run-list per possible wall height h (0..view_h) at a UNIFORM stride of `2*cap` words, so the
     fj emit indexes it with a single `mul_const` by the height: no offset table, no search.
 
     Each list is `[(rel, colour) × n][0][last_colour]` where `rel` is the run's end row measured
     from the wall's top. The final run always ends exactly at the wall bottom, which fj already
-    holds in `fstart`, so its `rel` is never stored — which frees `rel == 0` to be the list
-    TERMINATOR (every real run ends at row >= 1), so the fj loop needs no counter and no
-    per-run compare. Baking per EXACT height is
-    what makes this true 1×1: every boundary is pixel-exact, and a short wall's list is short
-    (a 5px wall can hold at most 5 runs), so far geometry costs almost nothing.
+    holds, so its `rel` is never stored — which frees `rel == 0` to be the list TERMINATOR (every
+    real run ends at row >= 1), so the fj loop needs no counter and no per-run compare. Baking per
+    EXACT height is what makes this true 1×1: every boundary is pixel-exact, and a short wall's list
+    is short (a 5px wall can hold at most 5 runs), so far geometry costs almost nothing.
+
+    M13-2S rung 3b (`two_sided`): a marking two-sided seg gets TWO more blocks -- its UPPER
+    (texture `sd.upper`, span front.ceil - back.ceil) and its LOWER (`sd.lower`, span
+    back.floor - front.floor) -- keyed exactly like the middle one, so a step face and a wall of the
+    same texture, light and span share a block. Returns `(offsets_by_seg, bank_text)` where each
+    offset entry is `(middle, upper, lower)` when `two_sided` is given, else the bare middle offset.
 
     The run-lists come from `ReferenceModel.wpx_strip` — the same call the oracle paints from, so
-    the two cannot drift (R6). Returns (offsets_by_seg, bank_text)."""
+    the two cannot drift (R6)."""
     STRIDE = 2 * cap                              # [n] + (cap-1) pairs + [last_colour]
     cache, blocks, off_by_seg = {}, {}, {}
     out = [f"// M13-WPX: 1x1 wall run-lists, per (texture,light) block x wall height "
            f"(stride {STRIDE} dw, run cap {cap})", "wpxstrips:"]
-    for si, seg in enumerate(cmap.segs):
-        # `solid` (ablate "tsfull", measurement only) lets the WALL-DRAWABLE two-sided segs into the
-        # bank as well, so they can be priced through the one-sided emission path.
-        if lds[seg.linedef].back != -1 and not (solid is not None and solid(seg)):
-            continue
-        sd = sds[lds[seg.linedef].front if seg.side == 0 else lds[seg.linedef].back]
-        sec = rm._seg_sector(lds, sds, secs, seg)
-        # M13-WPXLIGHT: the block key carries the seg's DOOM light level (sector level + FAKE
-        # CONTRAST, both per-seg constants) and the sector's ceiling-to-floor span in map units --
-        # the span is what lets each baked height h recover its own projection scale, and hence its
-        # scalelight row. So distance lighting and fake contrast are pure BAKE: zero runtime ops.
-        lightnum = rm.wall_lightnum(sec.light, rm.wall_fake_contrast(verts[seg.v1], verts[seg.v2]))
-        wall_units = sec.ceil_h - sec.floor_h
-        tex = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode="WPX")
-        key = (sd.middle.upper() if tex is not None else None, lightnum, wall_units)
+
+    def block_for(texname, lightnum, wall_units):
+        """the bank offset of the block for this (texture, light, span), baking it on first use."""
+        tex = rm._wall_texture(asset_wad, texname, cache, wall_mode="WPX")
+        key = (texname.upper() if tex is not None else None, lightnum, wall_units)
         if key not in blocks:
-            blocks[key] = len(blocks) * (view_h + 1) * STRIDE
+            # M13-2S rung 3b buffers a block INDEX (one byte pair in a region entry); the
+            # shipped tier bakes the dw OFFSET straight into the seg's register.
+            blocks[key] = (len(blocks) if two_sided is not None
+                           else len(blocks) * (view_h + 1) * STRIDE)
             texels, th, tw = tex if tex is not None else (None, 0, 0)
             for h in range(view_h + 1):
-                lr = rm.wall_light_row(lightnum, max(1, h), wall_units)
+                lr = rm.wall_light_row(lightnum, max(1, h), max(1, wall_units))
                 runs = rm.wpx_strip(texels, th, tw, colormap, lr, max(1, h), cap=cap)
                 body = []
                 for rel, c in runs[:-1]:
                     body += [rel, c]
                 body += [0, runs[-1][1]]                  # rel==0 sentinel, then the last colour
                 assert len(body) <= STRIDE, f"WPX list overflows its stride: {len(body)} > {STRIDE}"
-                out += [f";{v:#x} * dw" for v in body] + [";0 * dw"] * (STRIDE - len(body))
-        off_by_seg[si] = blocks[key]
+                out.extend([f";{v:#x} * dw" for v in body] + [";0 * dw"] * (STRIDE - len(body)))
+        return blocks[key]
+
+    for si, seg in enumerate(cmap.segs):
+        ld = lds[seg.linedef]
+        two = ld.back != -1
+        if two and not ((solid is not None and solid(seg))
+                        or (two_sided is not None and two_sided(seg))):
+            continue
+        sd = sds[ld.front if seg.side == 0 else ld.back]
+        sec = rm._seg_sector(lds, sds, secs, seg)
+        # M13-WPXLIGHT: the block key carries the seg's DOOM light level (sector level + FAKE
+        # CONTRAST, both per-seg constants) and the wall's span in map units -- the span is what lets
+        # each baked height h recover its own projection scale, and hence its scalelight row. So
+        # distance lighting and fake contrast are pure BAKE: zero runtime ops.
+        lightnum = rm.wall_lightnum(sec.light, rm.wall_fake_contrast(verts[seg.v1], verts[seg.v2]))
+        mid = block_for(sd.middle, lightnum, sec.ceil_h - sec.floor_h)
+        if two_sided is None:
+            off_by_seg[si] = mid
+            continue
+        up = lo = mid
+        if two:
+            bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
+            if sec.ceil_h > bsec.ceil_h:
+                up = block_for(sd.upper, lightnum, sec.ceil_h - bsec.ceil_h)
+            if bsec.floor_h > sec.floor_h:
+                lo = block_for(sd.lower, lightnum, bsec.floor_h - sec.floor_h)
+        off_by_seg[si] = (mid, up, lo)
     return off_by_seg, NLJ.join(out) + NLJ
 
 

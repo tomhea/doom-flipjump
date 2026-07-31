@@ -407,6 +407,299 @@ ns stream {
         stl.fcall leaf, ret
     }
 
+    // ══ M13-2S rung 3b — the TWO-SIDED emit ══════════════════════════════════════════════════
+    // The 0x0B protocol needs ONE contiguous top-to-bottom record per column, but walking segs
+    // front-to-back a column is built from BOTH ENDS: ceiling regions and upper walls arrive
+    // top-down, floor regions and lower walls bottom-UP. So the walk buffers each column's REGIONS
+    // -- 4 packed bytes, [kind][arg][y1][yend] -- into a top list and a bottom list, and the record
+    // is assembled afterwards by expanding them (top forward, bottom BACKWARD, which fixed-size
+    // entries make a plain reverse index walk).
+    //
+    // Regions, not pixels: buffering the finished [y2][colour] PAIRS instead was measured at
+    // +19M/frame on the square room alone, because a WPX 1x1 wall column is ~76 pairs and every one
+    // costs a write (50@) plus a read (42@). A column holds at most ~14 regions.
+    //   kind 0 = ceiling band (arg = the sector's plane-pair id), 1 = floor band, 2 = wall run
+    //   (arg = the WPX bank block index).
+
+    def entry_append ptr, cnt, kind, arg, y1, yend @ kr, end {
+        hex.set 2, kr, kind
+        hex.write_byte_and_inc ptr, kr
+        hex.write_byte_and_inc ptr, arg                  // arg is 4 nibbles: a plane-pair id, or a
+        hex.write_byte_and_inc ptr, arg + 2*dw           // WPX block index (E1M1 has 622 of them)
+        hex.write_byte_and_inc ptr, y1
+        hex.write_byte_and_inc ptr, yend
+        hex.inc 2, cnt
+        ;end
+      kr: hex.vec 2
+      end:
+    }
+
+    def band_pair sink, cnt, y2r, colr, buf {
+        rep(buf, k) .band_pair_buf sink, cnt, y2r, colr
+        rep(1-buf, k) .band_pair_emit y2r, colr
+    }
+
+    def band_pair_buf sink, cnt, y2r, colr {
+        hex.write_byte_and_inc sink, y2r
+        hex.write_byte_and_inc sink, colr
+        hex.add_constant 2, cnt, 2
+    }
+
+    def band_pair_emit y2r, colr {
+        byte.emit y2r
+        byte.emit colr
+    }
+
+    // one band-list HALF over the row sub-range [y1, yend): skip entries ending at or above y1,
+    // emit the rest, clamp the entry that crosses `yend` and stop there. The shipped prefix (pwalk)
+    // and suffix (swalk) walks are both special cases -- rung 3b needs the general form, because a
+    // plane region is now bounded by two SEGS, not by the window edge.
+    def band_half sink, cnt, listp, y1, yend, buf @ loop, body, skip, emitchk, emit, stopemit, clamp, done, ptr, cntN, iP, y2r, colr, end {
+        hex.mov w/4, ptr, listp
+        hex.read_byte_and_inc cntN, ptr
+        hex.zero 2, iP
+      loop:
+        hex.cmp 2, iP, cntN, body, done, done
+      body:
+        hex.read_byte_and_inc y2r, ptr
+        hex.read_byte_and_inc colr, ptr
+        hex.inc 2, iP
+        hex.cmp 2, y2r, y1, skip, skip, emitchk  // ends at/above the range start -> not ours
+      skip:
+        ;loop
+      emitchk:
+        hex.cmp 2, y2r, yend, emit, stopemit, clamp
+      emit:
+        .band_pair sink, cnt, y2r, colr, buf
+        ;loop
+      clamp:
+        hex.mov 2, y2r, yend                     // the entry crossing the end: clamp, then stop
+      stopemit:
+        .band_pair sink, cnt, y2r, colr, buf
+      done:
+        ;end
+      ptr: hex.vec w/4
+      cntN: hex.vec 2
+      iP: hex.vec 2
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      end:
+    }
+
+    // a plane REGION [y1, yend) of one surface: the asc half always (its entries all end at or
+    // below CENTERY, so it self-skips when the region starts below), the desc half only when the
+    // region actually reaches past CENTERY -- otherwise its first entry (ending at CENTERY+1)
+    // would clamp to `yend` and emit a phantom pair.
+    def band_range sink, cnt, lista, listd, y1, yend, centery, buf @ desc, done, ccy, end {
+        .band_half sink, cnt, lista, y1, yend, buf
+        hex.set 2, ccy, centery
+        hex.cmp 2, yend, ccy, done, done, desc
+      desc:
+        .band_half sink, cnt, listd, y1, yend, buf
+      done:
+        ;end
+      ccy: hex.vec 2
+      end:
+    }
+
+    // one WPX 1x1 wall run over the rows [y1, yend): the list baked for this EXACT height, `rel`
+    // measured from the run's top, the final run (the `rel == 0` sentinel) ending at yend.
+    def wall_run sink, cnt, y1, yend, wstrip, wstripbase, wpxstride, buf @ wloop, wdone, ptr, hh, y2r, colr, end {
+        hex.mov 2, hh, yend
+        hex.sub 2, hh, y1
+        hex.zero w/4, ptr
+        hex.mov 2, ptr, hh
+        hex.mul_const w/4, ptr, ptr, wpxstride*dw
+        hex.add w/4, ptr, wstripbase
+        hex.add w/4, ptr, wstrip
+      wloop:
+        hex.read_byte_and_inc y2r, ptr
+        hex.if0 2, y2r, wdone
+        hex.read_byte_and_inc colr, ptr
+        hex.add 2, y2r, y1
+        .band_pair sink, cnt, y2r, colr, buf
+        ;wloop
+      wdone:
+        hex.read_byte_and_inc colr, ptr
+        .band_pair sink, cnt, yend, colr, buf
+        ;end
+      ptr: hex.vec w/4
+      hh: hex.vec 2
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      end:
+    }
+
+    // expand ONE buffered region straight to the device (buf = 0: pairs go out as they are
+    // produced, so nothing is ever stored twice).
+    def entry_expand_body centery, half_slots, wpxstride, wpxblock @ isceil, isfloor, iswall, done, kind, arg, y1, yend, one, dead, woff, wlen, end < cbufa, cbufd, fbufa, fbufd, wstripbase, eptr, exp_ret {
+        hex.read_byte_and_inc kind, eptr
+        hex.zero 4, arg
+        hex.read_byte_and_inc arg, eptr
+        hex.read_byte_and_inc arg + 2*dw, eptr
+        hex.read_byte_and_inc y1, eptr
+        hex.read_byte_and_inc yend, eptr
+        hex.set 2, one, 1
+        hex.cmp 2, kind, one, isceil, isfloor, iswall
+      isceil:
+        frame.lines_pid_addrs arg, half_slots, cbufa, cbufd, fbufa, fbufd
+        .band_range dead, dead, cbufa, cbufd, y1, yend, centery, 0
+        ;done
+      isfloor:
+        frame.lines_pid_addrs arg, half_slots, cbufa, cbufd, fbufa, fbufd
+        .band_range dead, dead, fbufa, fbufd, y1, yend, centery, 0
+        ;done
+      iswall:
+        hex.zero w/4, woff
+        hex.mov 4, woff, arg
+        hex.mul_const w/4, woff, woff, wpxblock*dw       // block index -> bank offset
+        hex.mov 2, wlen, yend
+        hex.sub 2, wlen, y1
+        .wpx_wall y1, wlen, yend, woff, wstripbase, wpxstride
+      done:
+        stl.fret exp_ret
+      kind: hex.vec 2
+      arg: hex.vec 4
+      y1: hex.vec 2
+      yend: hex.vec 2
+      one: hex.vec 2
+      dead: hex.vec w/4
+      woff: hex.vec w/4
+      wlen: hex.vec 2
+      end:
+    }
+
+
+
+    // M13-2S rung 3b — assemble the WHOLE frame's records, one runtime pass over the columns.
+    // A runtime loop, not an unrolled one: the expansion (band walks + WPX run lists) is a shared
+    // fcall leaf, so it exists ONCE. Unrolling it per column put ~320 copies of it in the program
+    // and the assembler is roughly cubic in unrolled ops (the M11c lesson / heavy-leaf mantra).
+    // Top regions expand in append order; bottom regions in REVERSE append order, which is screen
+    // order, because the walk pushes them upward from the floor.
+    def flush_frame view_w, ecap, colst, colbuf @ xloop, xbody, chkb, colemit, colfull, cmpb, cmpbytes, cmploop, cmpone, cmpnext, dittook, cmploop2, cmpone2, cmpnext2, dittoyes, tloop, tbody, bstart, bloop, coldone, nextcol, done, end, cst, cbf, vw, fx, tn, bn, i, bi, ptn, pbn, pptr, ci, cn, ca, cb < eptr, exp_ret, expand_leaf {
+        hex.set w/4, cst, colst
+        hex.set w/4, cbf, colbuf
+        hex.zero 2, fx
+        hex.set 2, vw, view_w
+      xloop:
+        hex.cmp 2, fx, vw, xbody, done, done
+      xbody:
+        hex.ptr_add cst, 2
+        hex.read_byte tn, cst
+        hex.ptr_add cst, 1
+        hex.read_byte bn, cst
+        hex.ptr_sub cst, 3
+        hex.if0 2, tn, chkb
+        ;colemit
+      chkb:
+        hex.if0 2, bn, nextcol                   // the column was never touched: paint nothing
+      colemit:
+        // M13-2S rung 3b DITTO: if this column's REGION LIST is byte-identical to the previous
+        // column's, its pixels are too (same surfaces, same rows) -- so emit [x][0xFE], the
+        // device's "copy column x-1", and skip the whole expansion. Comparing ~6 entries costs a
+        // few hundred ops against tens of thousands for the band and run-list walks.
+        hex.if0 2, fx, colfull                   // column 0 has no left neighbour
+        hex.cmp 2, tn, ptn, colfull, cmpb, colfull
+      cmpb:
+        hex.cmp 2, bn, pbn, colfull, cmpbytes, colfull
+      cmpbytes:
+        hex.mov w/4, eptr, cbf
+        hex.mov w/4, pptr, cbf
+        hex.sub_constant w/4, pptr, 10*ecap*dw   // the previous column's buffer
+        hex.mul_const 2, cn, tn, 5               // top BYTES to compare (5 per entry -- a count,
+                                                 // not an address delta: no dw here)
+        hex.zero 2, ci
+      cmploop:
+        hex.cmp 2, ci, cn, cmpone, dittook, dittook
+      cmpone:
+        hex.read_byte_and_inc ca, eptr
+        hex.read_byte_and_inc cb, pptr
+        hex.cmp 2, ca, cb, colfull, cmpnext, colfull
+      cmpnext:
+        hex.inc 2, ci
+        ;cmploop
+      dittook:
+        hex.if0 2, bn, dittoyes                  // now the bottom entries, at +5*ecap
+        hex.mov w/4, eptr, cbf
+        hex.add_constant w/4, eptr, 5*ecap*dw
+        hex.mov w/4, pptr, eptr
+        hex.sub_constant w/4, pptr, 10*ecap*dw
+        hex.mul_const 2, cn, bn, 5
+        hex.zero 2, ci
+      cmploop2:
+        hex.cmp 2, ci, cn, cmpone2, dittoyes, dittoyes
+      cmpone2:
+        hex.read_byte_and_inc ca, eptr
+        hex.read_byte_and_inc cb, pptr
+        hex.cmp 2, ca, cb, colfull, cmpnext2, colfull
+      cmpnext2:
+        hex.inc 2, ci
+        ;cmploop2
+      dittoyes:
+        byte.emit fx
+        stl.output_char 0xFE
+        ;nextcol
+      colfull:
+        byte.emit fx
+        hex.mov w/4, eptr, cbf
+        hex.zero 2, i
+      tloop:
+        hex.cmp 2, i, tn, tbody, bstart, bstart
+      tbody:
+        stl.fcall expand_leaf, exp_ret           // advances eptr by one 5-byte entry
+        hex.inc 2, i
+        ;tloop
+      bstart:
+        hex.mov 2, bi, bn
+      bloop:
+        hex.if0 2, bi, coldone
+        hex.dec 2, bi
+        hex.mov w/4, eptr, cbf
+        hex.add_constant w/4, eptr, 5*ecap*dw
+        .entry_ptr_add eptr, bi
+        stl.fcall expand_leaf, exp_ret
+        ;bloop
+      coldone:
+        stl.output_char 0xFF
+      nextcol:
+        hex.mov 2, ptn, tn
+        hex.mov 2, pbn, bn
+        hex.ptr_add cst, 4
+        hex.ptr_add cbf, 10*ecap
+        hex.inc 2, fx
+        ;xloop
+      done:
+        ;end
+      cst: hex.vec w/4
+      cbf: hex.vec w/4
+      vw: hex.vec 2
+      fx: hex.vec 2
+      tn: hex.vec 2
+      bn: hex.vec 2
+      i: hex.vec 2
+      bi: hex.vec 2
+      ptn: hex.vec 2
+      pbn: hex.vec 2
+      pptr: hex.vec w/4
+      ci: hex.vec 2
+      cn: hex.vec 2
+      ca: hex.vec 2
+      cb: hex.vec 2
+      end:
+    }
+
+    // ptr += n ENTRIES of 5 bytes; n is a runtime count and hex.ptr_add only takes a constant.
+    def entry_ptr_add ptr, n @ t, end {
+        hex.zero w/4, t
+        hex.mov 2, t, n
+        hex.mul_const w/4, t, t, 5*dw
+        hex.add w/4, ptr, t
+        ;end
+      t: hex.vec w/4
+      end:
+    }
+
     // M13-EMIT rung 1 (ablate, measurement only) -- the per-pair OUTPUT, isolated so it can be
     // switched off while the list walk still runs: the difference prices the two byte.emit
     // dispatches against the two hex.read_byte_and_inc pointer reads that feed them.

@@ -1516,6 +1516,302 @@ ns frame {
       fbufd: hex.vec w/4
     }
 
+    // ── M13-2S rung 3b helpers: the per-column STATE and the two pair BUFFERS ─────────────────
+    // `colst` holds 4 packed bytes per column -- [chi][flo][tcnt][bcnt] -- where chi/flo are the
+    // window's exclusive-end row bounds (DOOM's ceilingclip+1 / floorclip) and tcnt/bcnt are the
+    // BYTES used in the column's top / bottom pair buffers. `colbuf` gives each column tcap bytes of
+    // top area followed by bcap of bottom. Both pointers walk in lockstep with the column loop, so
+    // a column visit costs one ptr_add each, not a ptr_index (72@ -- fj-lessons R37).
+    def col_ptrs x1, ecap @ idx, end < cstp, cbfp, dptr, dbase, colst, colbuf {
+        hex.zero w/4, idx
+        hex.mov 2, idx, x1
+        hex.mul_const w/4, idx, idx, 4*dw
+        hex.set w/4, cstp, colst
+        hex.add w/4, cstp, idx
+        hex.zero w/4, idx
+        hex.mov 2, idx, x1
+        hex.mul_const w/4, idx, idx, 10*ecap*dw
+        hex.set w/4, cbfp, colbuf
+        hex.add w/4, cbfp, idx
+        hex.ptr_index dptr, dbase, x1
+        ;end
+      idx: hex.vec w/4
+      end:
+    }
+
+    def col_ptrs_step ecap < cstp, cbfp, dptr {
+        hex.ptr_add cstp, 4
+        hex.ptr_add cbfp, 10*ecap
+        hex.ptr_add dptr, 1
+    }
+
+    def col_state_load < cstp, chi, flo {
+        hex.read_byte chi, cstp
+        hex.ptr_add cstp, 1
+        hex.read_byte flo, cstp
+        hex.ptr_sub cstp, 1
+    }
+
+    def col_state_store < cstp, chi, flo {
+        hex.write_byte cstp, chi
+        hex.ptr_add cstp, 1
+        hex.write_byte cstp, flo
+        hex.ptr_sub cstp, 1
+    }
+
+    def buf_top_open @ idx, end < cstp, cbfp, tcnt, tptr {
+        hex.ptr_add cstp, 2
+        hex.read_byte tcnt, cstp
+        hex.ptr_sub cstp, 2
+        hex.zero w/4, idx
+        hex.mov 2, idx, tcnt
+        hex.mul_const w/4, idx, idx, 5*dw
+        hex.mov w/4, tptr, cbfp
+        hex.add w/4, tptr, idx
+        ;end
+      idx: hex.vec w/4
+      end:
+    }
+
+    def buf_top_close < cstp, tcnt {
+        hex.ptr_add cstp, 2
+        hex.write_byte cstp, tcnt
+        hex.ptr_sub cstp, 2
+    }
+
+    def buf_bot_open ecap @ idx, end < cstp, cbfp, bcnt, bptr {
+        hex.ptr_add cstp, 3
+        hex.read_byte bcnt, cstp
+        hex.ptr_sub cstp, 3
+        hex.zero w/4, idx
+        hex.mov 2, idx, bcnt
+        hex.mul_const w/4, idx, idx, 5*dw
+        hex.mov w/4, bptr, cbfp
+        hex.add_constant w/4, bptr, 5*ecap*dw
+        hex.add w/4, bptr, idx
+        ;end
+      idx: hex.vec w/4
+      end:
+    }
+
+    // close a bottom BLOCK with its 1-byte length TRAILER (in BYTES, so the flush's backward walk
+    // needs no division): the flush reads the trailer, steps back over the block's pairs, emits them
+    // forward, and repeats -- bottom-up block order, top-down pairs inside each block.
+    def buf_bot_close < cstp, bcnt {
+        hex.ptr_add cstp, 3
+        hex.write_byte cstp, bcnt
+        hex.ptr_sub cstp, 3
+    }
+
+    // ctake = clamp(top, 0, VIEW_H) and fstart = clamp(bottom+1, 0, VIEW_H): DOOM's signed row
+    // clipping, folded once per column so everything after it is 2-nibble unsigned.
+    def row_clamp_top dst, src, viewh @ lo, hi, keep, clampv, cVH, end {
+        hex.sign 8, src, lo, hi
+      lo:
+        hex.zero 2, dst
+        ;end
+      hi:
+        hex.set 8, cVH, viewh
+        hex.scmp 8, src, cVH, keep, keep, clampv
+      keep:
+        hex.mov 2, dst, src
+        ;end
+      clampv:
+        hex.set 2, dst, viewh
+        ;end
+      cVH: hex.vec 8
+      end:
+    }
+
+    def row_clamp_bot dst, src, viewh @ tmp, end {
+        hex.mov 8, tmp, src
+        hex.inc 8, tmp
+        .row_clamp_top dst, tmp, viewh
+        ;end
+      tmp: hex.vec 8
+      end:
+    }
+
+    // the one-sided wall's run: [max(ctake, chi), min(fstart, flo))
+    def wall_span y1, y2, ctake, fstart @ a, b, clampf, end < chi, flo {
+        hex.mov 2, y1, ctake
+        hex.cmp 2, y1, chi, a, b, b
+      a:
+        hex.mov 2, y1, chi
+      b:
+        hex.mov 2, y2, fstart
+        hex.cmp 2, y2, flo, end, end, clampf
+      clampf:
+        hex.mov 2, y2, flo
+      end:
+    }
+
+    // ══ M13-2S rung 3b — the TWO-SIDED per-column body ══════════════════════════════════════
+    // DOOM's R_RenderSegLoop window, per column, per seg, front-to-back:
+    //     front CEILING region | upper wall | (opening) | lower wall | front FLOOR region
+    // narrowing [chi, flo) from both ends; a one-sided seg fills what is left and closes the
+    // column. Each piece appends finished [y2][colour] pairs to the column's TOP or BOTTOM buffer
+    // (stream.band_range / stream.wall_run); the record itself is assembled after the walk by
+    // stream.flush_col, because the bottom pieces arrive in the wrong order for the 0x0B protocol.
+    //
+    // Everything here is 2-nibble UNSIGNED row arithmetic on EXCLUSIVE ends, which is what makes it
+    // cheap: `ctake` = clamp(top, 0, VIEW_H) and `fstart` = clamp(bot+1, 0, VIEW_H) fold DOOM's
+    // signed clipping away, and then
+    //     ceiling region = [chi, min(ctake, flo))      upper wall = [chi, min(ufst, flo))
+    //     floor region   = [max(fstart, chi), flo)     lower wall = [max(ltak, chi), flo)
+    //     one-sided wall = [max(ctake, chi), min(fstart, flo))   -> closes the column
+    // `seg_flags` bit 0 = two-sided, bit 1 = has upper, bit 2 = has lower (baked per seg).
+    def seg_pass2_leaf_body_2s centery, viewh1, viewh, projection, half_slots, ecap, colstub @ loop, body, work, nextcol, ret, cdone, cge, doceil, noceil, fdone, fhi, dofloor, nofloor, haswin, nowin, solid, twosided, ckl, doproj, dosolid, nosolid, didclose, doup, uclip, upck, upno, dolo, lohi, lock, lono, sfull, cVH, ctake, fstart, cend, fbeg, wtop, wend, uend, lbeg, ltak, ubot, ltop, wtc8, wtf8, wbc8, wbf8, one, cbufa, cbufd, fbufa, fbufd < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, bceilfix, bfloorfix, viewz, seg_flags, seg_pid, seg_wstrip, seg_wsupper, seg_wslower, x1, x2, x, chi, flo, tcnt, bcnt, tptr, bptr, dptr, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww {
+        proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle
+        proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
+        hex.mov 4, wtc8, ceilfix + 4*dw
+        hex.sub 4, wtc8, viewz + 4*dw
+        hex.sign_extend 8, 4, wtc8
+        hex.mov 4, wtf8, floorfix + 4*dw
+        hex.sub 4, wtf8, viewz + 4*dw
+        hex.sign_extend 8, 4, wtf8
+        hex.mov 4, wbc8, bceilfix + 4*dw         // the BACK sector's two heights (0 for one-sided,
+        hex.sub 4, wbc8, viewz + 4*dw            // where seg_flags keeps them unused)
+        hex.sign_extend 8, 4, wbc8
+        hex.mov 4, wbf8, bfloorfix + 4*dw
+        hex.sub 4, wbf8, viewz + 4*dw
+        hex.sign_extend 8, 4, wbf8
+        .lines_pid_addrs seg_pid, half_slots, cbufa, cbufd, fbufa, fbufd
+        hex.mov 8, x, x1
+        .col_ptrs x1, ecap                 // cstp / cbfp: the per-column state + buffers
+        hex.set 2, one, 1
+      loop:
+        hex.cmp 2, x, x2, body, ret, ret
+      body:
+        .col_state_load                          // chi, flo (2 packed bytes at cstp)
+        hex.cmp 2, chi, flo, work, nextcol, nextcol
+      work:
+        rep(colstub, k) .lines_jmp nowin        // ablate: loop + state only, no projection/regions
+        proj.column_params_m top, bottom, scale, wtc8, wtf8, centery*0x10000, viewh1
+        .row_clamp_top ctake, top, viewh
+        .row_clamp_bot fstart, bottom, viewh
+        // ── front-sector CEILING region [chi, min(ctake, flo))
+        hex.mov 2, cend, ctake
+        hex.cmp 2, cend, flo, cdone, cdone, cge
+      cge:
+        hex.mov 2, cend, flo
+      cdone:
+        hex.cmp 2, chi, cend, doceil, noceil, noceil
+      doceil:
+        .buf_top_open
+        stream.entry_append tptr, tcnt, 0, seg_pid, chi, cend
+        .buf_top_close
+        hex.mov 2, chi, cend
+      noceil:
+        // ── front-sector FLOOR region [max(fstart, chi), flo)
+        hex.mov 2, fbeg, fstart
+        hex.cmp 2, fbeg, chi, fhi, fdone, fdone
+      fhi:
+        hex.mov 2, fbeg, chi
+      fdone:
+        hex.cmp 2, fbeg, flo, dofloor, nofloor, nofloor
+      dofloor:
+        .buf_bot_open ecap
+        stream.entry_append bptr, bcnt, 1, seg_pid, fbeg, flo
+        .buf_bot_close
+        hex.mov 2, flo, fbeg
+      nofloor:
+        // ── the window [chi, flo): the wall(s)
+        hex.cmp 2, chi, flo, haswin, nowin, nowin
+      haswin:
+        hex.if0 1, seg_flags, solid              // bit 0 clear -> one-sided: fill and close
+        ;twosided
+      solid:
+        .wall_span wtop, wend, ctake, fstart     // [max(ctake,chi), min(fstart,flo))
+        hex.cmp 2, wtop, wend, dosolid, nosolid, nosolid
+      dosolid:
+        .buf_top_open
+        stream.entry_append tptr, tcnt, 2, seg_wstrip, wtop, wend
+        .buf_top_close
+      nosolid:
+        hex.set 2, chi, viewh                    // ceilclip = H, floorclip = -1: column finished
+        hex.zero 2, flo
+        ;didclose
+      twosided:
+        // the BACK sector's two projected rows -- only for segs that actually have an upper or a
+        // lower. A marking-only two-sided seg (equal heights, different flat or light) contributes
+        // plane regions and nothing else, and it is the commonest kind.
+        hex.if0 1, seg_flags + 1*dw, ckl
+        ;doproj
+      ckl:
+        hex.if0 1, seg_flags + 2*dw, nowin
+      doproj:
+        proj.column_params_m ubot, ltop, scale, wbc8, wbf8, centery*0x10000, viewh1
+        hex.if0 1, seg_flags + 1*dw, upno        // bit 1: front ceiling above back ceiling
+        // the upper wall ends where the BACK ceiling projects: DOOM's `min(ub - 1, win_lo)` is an
+        // INCLUSIVE end, so the exclusive one is ub itself -- no +1, unlike the one-sided wall
+        // whose end comes from `bot` (measured: +1 here paints one row of step face too many).
+        .row_clamp_top uend, ubot, viewh         // upper wall = [chi, min(uend, flo))
+        hex.cmp 2, uend, flo, upck, upck, uclip
+      uclip:
+        hex.mov 2, uend, flo
+      upck:
+        hex.cmp 2, chi, uend, doup, upno, upno
+      doup:
+        .buf_top_open
+        stream.entry_append tptr, tcnt, 2, seg_wsupper, chi, uend
+        .buf_top_close
+        hex.mov 2, chi, uend
+      upno:
+        hex.if0 1, seg_flags + 2*dw, lono        // bit 2: back floor above front floor
+        .row_clamp_top ltak, ltop, viewh         // lower wall = [max(ltak, chi), flo)
+        hex.mov 2, lbeg, ltak
+        hex.cmp 2, lbeg, chi, lohi, lock, lock
+      lohi:
+        hex.mov 2, lbeg, chi
+      lock:
+        hex.cmp 2, lbeg, flo, dolo, lono, lono
+      dolo:
+        .buf_bot_open ecap
+        stream.entry_append bptr, bcnt, 2, seg_wslower, lbeg, flo
+        .buf_bot_close
+        hex.mov 2, flo, lbeg
+      lono:
+      nowin:
+        .col_state_store                         // chi, flo back to the column state
+        hex.cmp 2, chi, flo, nextcol, didclose, didclose
+      didclose:
+        .col_state_store
+        hex.write_byte dptr, one                 // pass 1's occlusion prescan reads drawn[]
+        hex.inc 2, n_drawn                       // the column can never paint again
+        hex.cmp 2, n_drawn, vieww, nextcol, sfull, nextcol
+      sfull:
+        hex.set 1, full, 1
+      nextcol:
+        .col_ptrs_step ecap
+        hex.inc 2, x
+        hex.add 8, scale, scalestep
+        ;loop
+      ret:
+        stl.fret seg_ret2
+      cVH: hex.vec 8
+      ctake: hex.vec 2
+      fstart: hex.vec 2
+      cend: hex.vec 2
+      fbeg: hex.vec 2
+      wtop: hex.vec 2
+      wend: hex.vec 2
+      uend: hex.vec 2
+      lbeg: hex.vec 2
+      ltak: hex.vec 2
+      ubot: hex.vec 8
+      ltop: hex.vec 8
+      wtc8: hex.vec 8
+      wtf8: hex.vec 8
+      wbc8: hex.vec 8
+      wbf8: hex.vec 8
+      one: hex.vec 2
+      cbufa: hex.vec w/4
+      cbufd: hex.vec w/4
+      fbufa: hex.vec w/4
+      fbufd: hex.vec w/4
+    }
+
     // ── M13opt2 R_MakeSpans (compile-time-column) — the per-ROW TEXTURED floor/ceiling span pass. For each
     //    screen row y, the COLUMN scan is UNROLLED (`rep(view_w, x) plane_col x`) so every per-column array read
     //    is a DIRECT mov from a COMPILE-TIME address `col_X + 8*x*dw` — NO runtime `ptr_index` (the M13d2 runtime

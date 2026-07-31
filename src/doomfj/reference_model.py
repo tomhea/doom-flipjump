@@ -1034,15 +1034,19 @@ class ReferenceModel:
         floorclip = [H] * W
         regions: list = []                       # (x, y1, y2, plane_h, light, flat)
 
-        def wallrun(x, y1, y2, texname, sec, wall_units):
-            """one WPX 1x1-textured, scalelight-shaded wall run over rows [y1, y2]."""
+        def wallrun(x, y1, y2, texname, sec, wall_units, contrast):
+            """one WPX 1x1-textured, scalelight-shaded wall run over rows [y1, y2].
+
+            `contrast` is DOOM's per-seg fake contrast (orientation only, so a baked constant): the
+            shipped WPX tier applies it and the owner signed off on that look, so the two-sided model
+            has to apply it too or switching the fj over would silently drop it."""
             y1, y2 = max(0, y1), min(H - 1, y2)
             if y1 > y2:
                 return
             h = y2 - y1 + 1
             tex = self._wall_texture(scene.asset_wad, texname, texcache, wall_mode="WPX")
             texels, th, tw = tex if tex is not None else (None, 0, 0)
-            lr = self.wall_light_row(self.wall_lightnum(sec.light, 0), h, max(1, wall_units))
+            lr = self.wall_light_row(self.wall_lightnum(sec.light, contrast), h, max(1, wall_units))
             ya = y1
             for rel, c in self.wpx_strip(texels, th, tw, colormap, lr, h):
                 for y in range(ya, min(y1 + rel, y2 + 1)):
@@ -1056,12 +1060,22 @@ class ReferenceModel:
             sd = sds[ld.front if seg.side == 0 else ld.back]
             fsec = secs[sd.sector]
             bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector] if two else None
-            if two and not (fsec.ceil_h > bsec.ceil_h or bsec.floor_h > fsec.floor_h):
-                continue                                  # can never draw (baked flag in fj)
+            # M13-2S rung 3b: the cull is DOOM's R_AddLine reject, i.e. the MARKING test -- the two
+            # sides differ in a plane key (height, light, flat). "Can never draw a WALL"
+            # (fsec.ceil > bsec.ceil or bsec.floor > fsec.floor) is a SUBSET of it: differing heights
+            # differ in the key. Using the wall test alone would throw away rung 3a's attribution fix,
+            # because two sectors of EQUAL heights but different flats/lights still bound the near
+            # floor -- measured at E1M1 spawn, that is the difference between 1 surface and 4.
+            if two and ((fsec.ceil_h, fsec.light, fsec.ceil_tex)
+                        == (bsec.ceil_h, bsec.light, bsec.ceil_tex)
+                        and (fsec.floor_h, fsec.light, fsec.floor_tex)
+                        == (bsec.floor_h, bsec.light, bsec.floor_tex)):
+                continue
             rng = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
             if rng is None:
                 continue
             x1, x2, _rw_angle1 = rng
+            contrast = self.wall_fake_contrast(verts[seg.v1], verts[seg.v2])
             rw_normalangle, rw_distance = self.wall_setup(viewx, viewy, seg, verts)
             scale = self.scale_from_global_angle((viewangle + self.xtoviewangle[x1]) & ANGLE_MASK,
                                                 viewangle, rw_normalangle, rw_distance)
@@ -1089,7 +1103,7 @@ class ReferenceModel:
                     if win_hi <= win_lo:
                         if not two:
                             wallrun(x, max(top, win_hi), min(bot, win_lo), sd.middle, fsec,
-                                    fsec.ceil_h - fsec.floor_h)
+                                    fsec.ceil_h - fsec.floor_h, contrast)
                             ceilclip[x], floorclip[x] = H, -1        # column finished
                         else:
                             if fsec.ceil_h > bsec.ceil_h:            # upper: lintel / step-down
@@ -1097,7 +1111,7 @@ class ReferenceModel:
                                 lo = min(ub - 1, win_lo)
                                 if win_hi <= lo:
                                     wallrun(x, win_hi, lo, sd.upper, fsec,
-                                            fsec.ceil_h - bsec.ceil_h)
+                                            fsec.ceil_h - bsec.ceil_h, contrast)
                                     ceilclip[x] = lo
                                     win_hi = lo + 1
                             if bsec.floor_h > fsec.floor_h:          # lower: step / ledge face
@@ -1105,7 +1119,7 @@ class ReferenceModel:
                                 hi = max(lt, win_hi)
                                 if hi <= win_lo:
                                     wallrun(x, hi, win_lo, sd.lower, fsec,
-                                            bsec.floor_h - fsec.floor_h)
+                                            bsec.floor_h - fsec.floor_h, contrast)
                                     floorclip[x] = hi
                 scale = (scale + scalestep) & ANGLE_MASK
         self._render_plane_regions_flat(fb, colormap, scene.asset_wad, flatcache, viewz, regions,

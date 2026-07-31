@@ -525,6 +525,64 @@ The others live in `plane_bands.fj` (the runtime band builder — lines mode use
 `plane_render.fj` (the framebuffer/textured-plane tier) and the coarse-cull bounds (off). The same
 conversion is available for those tiers if they are ever revived.
 
+## 15. Rung 3b — DONE and byte-exact (correct, not yet fast)
+
+`emit_wall_renderer(..., two_sided=True)` renders DOOM's `R_RenderSegLoop` window model and is
+**byte-exact vs `ReferenceModel.render_frame_2s`** on the square room (5 viewpoints incl. the
+(24,24) negative-viewz straddle, no unpainted pixel) and on E1M1 (spawn + rotation). Step faces,
+ledge fronts and door frames are drawn, and every plane region carries its own bounding seg's sector.
+
+### Two oracle corrections the rung forced
+
+1. **The 2S oracle culled two-sided segs by "can it draw a WALL"**, which throws away rung 3a's
+   attribution fix — two sectors of equal heights but different flats/lights still bound the near
+   floor. The cull is now DOOM's `R_AddLine` reject (the MARKING test, which subsumes the wall test):
+   at E1M1 spawn that is the difference between 1 near-floor surface and 4.
+2. **It didn't apply the per-seg fake contrast** the shipped WPX tier applies, so targeting it would
+   have silently dropped the look the owner signed off on. It does now.
+
+### How the emit works (and why it is shaped this way)
+
+The 0x0B protocol needs ONE contiguous top-to-bottom record per column, but front-to-back a column is
+built from BOTH ENDS: ceiling regions and upper walls arrive top-down, floor regions and lower walls
+bottom-UP. So the walk BUFFERS each column's REGIONS -- 5 bytes, `[kind][arg:2][y1][yend]` -- in a top
+list and a bottom list, and a flush pass afterwards expands them (top forward, bottom in reverse,
+which fixed-size entries make a plain backward index walk) and assembles the records.
+
+⚠ Buffering the finished [y2][colour] PAIRS instead measured **+19M on the square room alone**: a WPX
+1x1 wall column is ~76 pairs and each costs a pointer write plus a read. Regions are ~14 per column at
+worst (measured over 30 viewpoints), and the expansion emits straight to the device.
+
+Everything in the per-column body is 2-nibble UNSIGNED arithmetic on EXCLUSIVE-end row bounds --
+`ctake = clamp(top,0,VIEW_H)` and `fstart = clamp(bot+1,0,VIEW_H)` fold DOOM's signed clipping away
+once per column, and then every piece is a `min`/`max` pair. ⚠ The upper wall is the one asymmetric
+case: DOOM's `min(ub - 1, win_lo)` is an INCLUSIVE end, so its exclusive end is `ub` with NO +1,
+unlike the one-sided wall whose end comes from `bot` (getting this wrong paints one row of step face
+too many -- it was 644 pixels at spawn).
+
+### Cost — measured, and honest
+
+| E1M1 | spawn | rotated |
+|---|---|---|
+| rung 3a + ATANDISP (the SHIPPED tier) | 21,730,429 | 19,529,379 |
+| **rung 3b** | **137,320,223** | **50,132,022** |
+
+Optimisations already applied, in order of what they bought at spawn: restoring the `drawn[]` write so
+pass 1's occlusion prescan fires again (187M → 148M), skipping the back-sector projection for segs
+with neither an upper nor a lower (148M → 142M), and the flush's DITTO path — if a column's region
+list is byte-identical to its neighbour's, emit `[x][0xFE]` and skip the whole expansion (142M →
+137M; on the square room 16.3M → 10.9M).
+
+Measured split at spawn: **walk + pass 2 = 93.6M, the flush = 44M**. The flush's cost is dominated by
+re-walking a surface's whole baked band list for every region (a 3-row region still walks up to 32
+entries, two pointer byte-reads each), which a per-list row→offset index would cut ~10x. The 93.6M is
+NOT the BSP walk (only 114 segs reach pass 2 at spawn, over ~1,120 column visits) — it is the
+per-column body, and the next step is to price its pieces the way §13 priced the atan, because at
+~78k ops per visit something in it is far dearer than the stl complexities predict.
+
+**So rung 3b is correct and gated, but it is 4x the owner's ceiling and is NOT the shipped tier.**
+`plane_near` (rung 3a) still ships; `two_sided=True` is opt-in.
+
 ### Still open
 
 - Rung 3b (§6) — the upper/lower wall runs. Unchanged by this rung except that the per-column plane

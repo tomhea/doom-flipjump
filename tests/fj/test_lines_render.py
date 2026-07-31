@@ -31,10 +31,10 @@ RENDER_FLAT_WORDS = 1 << 26
 
 
 def _assemble_lines(tmp_path, map_wad, mapname, cfg, asset_wad=None,
-                    wall_mode="W1", floor_mode="flat", plane_near=False):
+                    wall_mode="W1", floor_mode="flat", plane_near=False, two_sided=False):
     main = emit_wall_renderer(map_wad, mapname, cfg, asset_wad=asset_wad, over_align=False,
                               floor_mode=floor_mode, wall_mode=wall_mode, raster_mode="lines",
-                              plane_near=plane_near)
+                              plane_near=plane_near, two_sided=two_sided)
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "lines.fj"
     p.write_text(main, encoding="utf-8")
@@ -276,3 +276,54 @@ def test_e1m1_lines_w2s_ft1_byte_exact_vs_oracle(tmp_path):
         assert bytes(screen.pixel_indices) == bytes(want),             f"lines W2S+FT1 @ ({vx},{vy},{va:#x}) != E1M1 oracle"
         if k == 0:
             print(f"[lines W2S+FT1] E1M1 spawn frame = {term.op_counter:,} ops")
+
+def test_square_lines_two_sided_byte_exact_vs_2s_oracle(tmp_path):
+    """M13-2S rung 3b on the square room, byte-exact vs `ReferenceModel.render_frame_2s`.
+
+    The room has no two-sided linedefs, so this gate isolates everything ELSE the rung introduces:
+    DOOM's per-column window (`ceilingclip`/`floorclip` as exclusive-end row bounds), plane regions
+    bounded by SEGS rather than by the window edge (the sub-range band walks), the per-column REGION
+    buffers, and the flush pass that assembles each 0x0B record afterwards -- including its ditto
+    path. It also proves the room still closes every column: no unpainted pixel."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(ROOM)
+    aw = WadFile.from_path(ASSET)
+    scene = build_scene(mw, aw, "MAP01")
+    sp = spawn_state(mw, "MAP01")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    A45 = 0x20000000
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45), (24, 24, A45)]
+    out = _assemble_lines(tmp_path, mw, "MAP01", cfg, asset_wad=aw,
+                          wall_mode="WPX", floor_mode="FT1", two_sided=True)
+    for vx, vy, va in VIEWPOINTS:
+        want = rm.render_frame_2s(SimState(vx << 16, vy << 16, va, "MAP01"), scene)
+        screen, _term = _run_lines(out, vx, vy, va)
+        assert bytes(screen.pixel_indices) == bytes(want),             f"lines 2S @ ({vx},{vy},{va:#x}) != render_frame_2s"
+        assert 0 not in screen.pixel_indices, "an unpainted pixel: a clip range is wrong"
+
+
+def test_e1m1_lines_two_sided_byte_exact_vs_2s_oracle(tmp_path):
+    """M13-2S rung 3b on E1M1 — the whole point of the rung: upper and lower wall runs, so step
+    faces, ledge fronts and door frames are drawn, and every plane region carries its own bounding
+    seg's sector. Byte-exact vs `ReferenceModel.render_frame_2s` at spawn and rotated.
+
+    ⚠ This tier is CORRECT but not yet fast: it reports its ops/frame and only guards a ceiling far
+    above the owner's 33M (see docs/handoff-m13-2s.md §15 for the measured profile and what is left
+    to cut). The shipped tier remains rung 3a's `plane_near`."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(E1M1_WAD)
+    scene = build_scene(mw, mw, "E1M1")
+    sp = spawn_state(mw, "E1M1")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
+    out = _assemble_lines(tmp_path, mw, "E1M1", cfg, wall_mode="WPX", floor_mode="FT1",
+                          two_sided=True)
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_frame_2s(SimState(vx << 16, vy << 16, va, "E1M1"), scene)
+        screen, term = _run_lines(out, vx, vy, va)
+        assert bytes(screen.pixel_indices) == bytes(want),             f"lines 2S @ ({vx},{vy},{va:#x}) != E1M1 render_frame_2s"
+        if k == 0:
+            print(f"[lines 2S] E1M1 spawn frame = {term.op_counter:,} ops")
+        assert term.op_counter < 200_000_000, "M13-2S rung 3b regressed badly"

@@ -300,3 +300,31 @@ because the reasons generalise.
    a sprite-heavy viewpoint, at the price of the furthest things. This is the owner's call, not a
    correctness question.
 4. **V3's step faces, +5.7M at the worst viewpoint**, have had no optimisation pass at all.
+
+## EXP-7 — an EXACT far-thing reject, before the lateral multiplies ✅ **KEEP**
+
+`h = wph * PROJECTION / tz`, so `tz > (wph * PROJECTION) << 16` forces `h == 0` — which
+`project_thing` already rejects, but only after two more multiplies and a reciprocal. Baking that
+threshold per thing (`sp_tzmax`) moves the reject to immediately after `tz`.
+
+**Verified before building**, exhaustively against `_scale_recip_div` over every sprite height and a
+sweep of `tz`: zero violations, and the boundary is exact — no safety margin needed. So the frame
+cannot change, and it did not.
+
+Counted (of 250 things): the new test rejects **76 at spawn, 12 at the courtyard, 30 at the tree,
+68 at the worst point**, each saving ~20k ops.
+
+| viewpoint | before | after | delta |
+|---|---:|---:|---:|
+| spawn | 27,823,804 | 27,631,269 | **−192,535** |
+| courtyard | 33,859,325 | 33,820,592 | −38,733 |
+| tree | 37,933,652 | **37,224,868** | **−708,784** |
+| worst | 37,003,252 | **36,433,309** | **−569,943** |
+
+**BYTE-EXACT at all four**, and `tests/fj/test_lines_render.py` 11/11 +
+`tests/fj/test_projection_kernels.py` 16/16 green on the tree this landed on.
+
+This is the same shape as EXP-2's reordering and the generalisation is worth stating plainly:
+**a rejection test belongs as early as its inputs allow, and the cheapest exact one you can derive
+is usually not the one the reference implementation uses.** DOOM rejects on height at the very end
+because on a 486 nothing in that chain cost 20,000 times a compare.

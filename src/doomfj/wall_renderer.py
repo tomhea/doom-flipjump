@@ -622,6 +622,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         ("sp_left", 8, (_art[5] << 16) & 0xFFFFFFFF),
                         ("sp_w", 8, (_art[3] << 16) & 0xFFFFFFFF),
                         ("sp_hh", 8, (_art[4] << 16) & 0xFFFFFFFF),
+                        # the EXACT far-reject threshold: beyond this depth the sprite
+                        # projects to zero rows, so the projection can stop before its
+                        # two lateral multiplies and its reciprocal (see proj.project_thing)
+                        ("sp_tzmax", 8, ((_art[4] * cfg.PROJECTION) << 16) & 0xFFFFFFFF),
                         ("sp_base", 4, spr_base[_t.type]),
                         ("sp_dw", 2, spr_dw[_t.type]),
                         ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])])
@@ -1249,6 +1253,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
            "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
            "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
+           "sp_tzmax: hex.vec 8",
            sprbkt, sprlight, sprbank] if _do_things else []),
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                             floor_mode == "FT1")] if lines else []),

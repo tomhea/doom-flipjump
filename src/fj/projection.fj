@@ -1359,10 +1359,10 @@ ns proj {
     //   reciprocal and five multiplies — which is why THING_BUDGET exists.
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
     def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds \
-            @ ok1, ok2, okd, okx, okx2, okh1, okh2, okv, tvcalc, tvhave, tvset, bad, done, end, \
+            @ ok1, oknear, ok2, okd, okx, okx2, okh1, okh2, okv, tvcalc, tvhave, tvset, bad, done, end, \
               trx, try8, ang, sidx, vsin, vcos, gxt, gyt, tz, xsc, txv, atx, tzl, \
               txl, txr, tmp, gz, one16, cminz, cproj, cxf, cyf, cvw, cvh \
-            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh {
+            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax {
         hex.set 1, vis, 0
         hex.mov 8, trx, sp_x
         hex.sub 8, trx, viewx
@@ -1393,7 +1393,14 @@ ns proj {
         hex.mov 8, tz, gxt
         hex.add 8, tz, gyt
         hex.set 8, cminz, minz
-        hex.scmp 8, tz, cminz, bad, ok1, ok1
+        hex.scmp 8, tz, cminz, bad, oknear, oknear
+      oknear:
+        // EXACT far reject, and it belongs HERE. h = wph*PROJECTION/tz, so tz > (wph*PROJ)<<16
+        // gives h == 0 -- which the height test below already rejects, but only after two more
+        // multiplies and a reciprocal. `sp_tzmax` is that threshold, baked per thing. Verified
+        // exhaustively against `_scale_recip_div` over every sprite height: the boundary is exact,
+        // no margin needed, so the frame cannot change.
+        hex.cmp 8, tz, sp_tzmax, ok1, ok1, bad
       ok1:
         // tx = trx*sin - try*cos  (DOOM: -(gyt + gxt) with both negated)
         hex.fixed_mul_lo 8, 4, gxt, vsin, trx          // same swap, same reason

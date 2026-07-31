@@ -50,6 +50,11 @@ def main():
     ap.add_argument("--asset", default=None)
     ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
+    ap.add_argument("--two-sided", action="store_true",
+                    help="M13-2S rung 3b: draw the TWO-SIDED walls too (step faces, ledge fronts,"
+                         " door frames) and give every plane region its own bounding seg's sector."
+                         " Byte-exact vs the 2S oracle but ~6x slower than the shipped tier"
+                         " (131M vs 21.7M ops/frame at spawn) -- for looking at, not for playing.")
     ap.add_argument("--no-plane-near", action="store_true",
                     help="turn OFF M13-2S rung 3a (attribute each column's floor/ceiling to the"
                          " nearest MARKING seg instead of to the wall that claims the column) --"
@@ -65,11 +70,12 @@ def main():
 
     print(f"assembling the fj renderer ({args.map}, lines mode, "
           f"{args.wall_mode}+{args.floor_mode}"
-          f"{'' if args.no_plane_near else '+plane_near'}) ...")
+          f"{'+two_sided' if args.two_sided else '' if args.no_plane_near else '+plane_near'}) ...")
     t0 = time.perf_counter()
     main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
                                   floor_mode=args.floor_mode, wall_mode=args.wall_mode,
-                                  raster_mode="lines", plane_near=not args.no_plane_near)
+                                  raster_mode="lines", two_sided=args.two_sided,
+                                  plane_near=(not args.no_plane_near) and not args.two_sided)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")

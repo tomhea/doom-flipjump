@@ -166,3 +166,38 @@ skeleton (3.88M) and wedge cull (2.02M)** — both stub-measured, and stub measu
 wrong three times this session. Then two known-pattern levers: `slopediv_recip`'s
 `read_table_packed 3` → dispatch (4th application of the conversion that just paid −1.14M), and a
 ROW-RULE operand-order check on `column_params_m`'s two multiplies (11.9k × 160 calls).
+
+---
+
+## V2 STATUS (end of session) — wired, spawn byte-exact, sky branch not firing
+
+`emit_wall_renderer(..., wall_noise=True, sky=True)` assembles and runs. Gate result:
+
+| viewpoint | ops | result |
+|---|---:|---|
+| spawn (no sky in view) | 23,492,508 | ✅ **BYTE-EXACT** |
+| courtyard (139 sky columns) | 19,383,757 | ❌ 2,111 px differ, first at (0,0) |
+
+**Read the failure precisely: 2,111 is EXACTLY the pixel count the oracle's sky changes at that
+viewpoint.** So the sky path is not firing at all — this is not a wrong-sky-column bug, not an
+off-by-one, and not a ditto bug. Everything else is right: spawn byte-exact proves the machinery is
+harmless where sky is absent, and proves the ditto/plane-address paths survived the change.
+
+Ruled out already:
+- `pval8` IS the effective pid — `lines_col_plane`'s `own` path does `hex.mov 2, pval8, seg_pid`
+  before `lines_pid_addrs pval8, ...`, so the register my macro indexes is the right one.
+- F_SKY1 really is reachable: 19 sectors carry it and it appears among the walked segs' ceiling
+  flats (32 distinct names).
+- `hex.if0 2, issky, notsky` has the right polarity (jump when zero = not sky).
+
+**Next step: dump the generated `skypid` table and confirm any entry is 1.** The likeliest remaining
+causes, in order: (a) `lines_pid` keys the pid on the pair `(ceil_key, floor_key)` and the list
+comprehension iterates `lines_pid` — check the ORDER matches the pid VALUES (pids are
+`len(lines_pid)+1` at insertion, so the dict order is insertion order and index `pid` must line up
+with `[0] + [...]`); (b) the table is generated under `plane_near` but indexed before the pid is
+stored; (c) `index_nibbles=2` truncating if pids exceed 255.
+
+⚠ Also worth pricing before shipping V2: the sky machinery costs **+1.30M at spawn where NO sky is
+visible** (22,192,782 → 23,492,508). `lines_sky_base` runs per column and does a `hex.mov 8` +
+`hex.shr_hex 8,6` + `hex.mov 2`; hoisting it to once per FRAME is the obvious fix and should recover
+most of that.

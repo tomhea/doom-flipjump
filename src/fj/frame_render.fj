@@ -1293,6 +1293,39 @@ ns frame {
     // own baked pid and claims the column (which is what lets `tsstop` ever become true -- most
     // columns are first reached by a one-sided wall). `pptr` walks pclm[] in lockstep with the
     // drawn[] pointer, so there is no per-column ptr_index (w(2.25@)) at all.
+    // V2 - the frame's sky scroll = viewangle >> 24, i.e. exactly 6 nibbles. That is why SKY_TURN
+    // is 2 and not 4: fj shifts cheaply only by whole nibbles (ReferenceModel._sky_shift).
+    def lines_sky_base skb @ t8, end < viewangle {
+        hex.mov 8, t8, viewangle
+        hex.shr_hex 8, 6, t8
+        hex.mov 2, skb, t8
+        ;end
+      t8: hex.vec 8
+      end:
+    }
+
+    // V2 - this column's CEILING list: the SKY list when the attributed pid's ceiling is F_SKY1,
+    // otherwise the plane list `lines_pid_addrs` already computed. Sky is the one surface with no
+    // perspective and no distance lighting, so a sky column IS just a band list -- which is why the
+    // whole feature costs one dispatch and one add here and adds NO new emit path: the existing
+    // ceiling prefix walk streams it unchanged.
+    // `u = skybase + skyoff[x]` needs NO MASK: both addends are <= 127 and the bank holds 256
+    // lists with entry u carrying sky column (u & 127), so the sum can never leave it (max 253).
+    def lines_sky_ceil skystride, cbufa, x, skb, soff, issky, pidreg @ notsky, end < skybands {
+        skypid.lookup issky, pidreg
+        hex.if0 2, issky, notsky
+        skyoff.lookup soff, x
+        hex.add 2, soff, skb
+        hex.zero w/4, cbufa                     // widen before mul_const (R11 reads w/4 nibbles)
+        hex.mov 2, cbufa, soff
+        hex.mul_const w/4, cbufa, cbufa, skystride*dw
+        hex.add_constant w/4, cbufa, skybands
+        ;end
+      notsky:
+        hex.zero 2, soff                        // non-sky columns share soff=0 so the ditto test
+      end:                                      // compares equal for them
+    }
+
     def lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd \
             @ own, have, recalc, pdone, end \
             < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
@@ -1408,11 +1441,11 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear, eabl, noproj, ptwice, stwice, noise \
+            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
-              dfull, dchk2, dgchk, dpl, dsame, demitted, dvalid, dct, dfs, dpid, \
-              gnrow, dgn \
+              dfull, dchk2, dgchk, dschk, dpl, dsame, demitted, dvalid, dct, dfs, dpid, \
+              gnrow, dgn, skb, soff, issky, dsoff \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
               seg_lit, seg_wstrip, wstripbase, \
@@ -1478,6 +1511,8 @@ ns frame {
       fdone:
         // M13-2S rung 3a: which SURFACES this column's plane regions belong to (see lines_col_plane)
         rep(pnear, k) .lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd
+        rep(sky, k) .lines_sky_base skb
+        rep(sky, k) .lines_sky_ceil skystride, cbufa, x, skb, soff, issky, pval8
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
@@ -1493,7 +1528,9 @@ ns frame {
         // fix: the first differing pixel sat at column 12 and at column 144, both x = 0 (mod 4).
         // ⚠ EVERY feature that changes a column's CONTENT without changing its CLIP ROWS must join
         // this chain -- that includes the step faces and the sprite fragments still to come.
-        rep(noise, k) hex.cmp 2, gnrow, dgn, dfull, dpl, dfull
+        rep(noise, k) hex.cmp 2, gnrow, dgn, dfull, dschk, dfull
+      dschk:
+        rep(sky, k) hex.cmp 2, soff, dsoff, dfull, dpl, dfull
       dpl:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
         rep(1-pnear, k) .lines_jmp dsame
@@ -1507,6 +1544,7 @@ ns frame {
         stream.emit_col_lines centery, w2s, wpx, wpxstride, eabl, noise, gnrow, x, cexcl, fstart, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
+        hex.mov 2, dsoff, soff                  // V2: unconditional, same reason as dgn
         hex.mov 2, dgn, gnrow                   // V1: unconditional so `dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
                                                 // rejects those outright. ~55 ops x 160 columns.
@@ -1534,6 +1572,10 @@ ns frame {
       dpid: hex.vec 2
       wtc8: hex.vec 8
       wtf8: hex.vec 8
+      skb: hex.vec 2                            // V2: the frame's sky scroll
+      soff: hex.vec 2                           // V2: this column's sky list index
+      dsoff: hex.vec 2                          // ... and the previously emitted one
+      issky: hex.vec 2
       gnrow: hex.vec 2                          // V1: this column's grain row
       dgn: hex.vec 2                            // ... and the previously emitted one
       dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs

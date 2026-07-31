@@ -65,6 +65,7 @@ WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap
 WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column (ops + bank knob)
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
+SKY_TURN = 4                      # V2: sky-texture widths swept per full 360 turn (a look knob)
 LIGHT_SHIFT = 3                   # sector light (0..255) -> colormap row (0..31): light >> 3
 COLORMAP_LIGHTS = 32              # COLORMAP usable light rows (0..31; invuln/black sit past these)
 _SLOPEDIV_RECIP = slopediv_recip_table()   # perf #13: shared block-FP reciprocal table for _slope_div
@@ -638,7 +639,7 @@ class ReferenceModel:
         return (scale // max(1, h)) % tw
 
     @staticmethod
-    def wall_noise(x: int, run: int) -> int:
+    def wall_noise(x: int, run: int = 0) -> int:
         """V1 — the PSEUDO-RANDOM wall grain: how many colormap steps to darken run `run` of screen
         column `x` by. The owner's idea, and the cheap answer to wall texturing: a real texture
         needs a texel fetch per wall row (5,612 rows a frame at ~1.4k each = +19.6M) whereas this
@@ -660,8 +661,14 @@ class ReferenceModel:
           instead of +1,198, i.e. a THIRD of the emit for MORE visible grain.
         * **the step is `<< 2`, so 0/4/8/12 rows, not 0..3.** Colormap row 0 is the identity and one
           step barely moves an already-dark colour: at 0..3 only 375 pixels changed on the whole
-          frame. At 0/4/8/12 it is 2,896 — 7.7x the effect for less than a third of the pairs."""
-        h = (x >> 2) ^ (x >> 4) ^ (run * 5) ^ (run << 1)
+          frame. At 0/4/8/12 it is 2,896 — 7.7x the effect for less than a third of the pairs.
+
+        `run` is accepted but DELIBERATELY UNUSED: varying the grain per run as well measured
+        identical (2,910 px / +373 pairs against 2,961 / +429 for column-group alone), and dropping
+        it means the fj sets the colormap row ONCE PER COLUMN instead of once per run — the emit loop
+        then only rebuilds the low byte of the `cm.apply` index. Kept in the signature because the
+        run-varying form is the obvious thing to try again, and this is the note that says don't."""
+        h = (x >> 2) ^ (x >> 4)
         h ^= h >> 3
         return (h & ((1 << WALL_NOISE_BITS) - 1)) << 2
 
@@ -819,7 +826,7 @@ class ReferenceModel:
     def render_wall_frame(self, state: SimState, scene: Scene, *, floor_texturing: bool = True,
                           wall_mode: str = "textured", floor_mode_ft1: bool = False,
                           plane_near: bool = False, planes_out: list | None = None,
-                          wall_noise: bool = False) -> bytes:
+                          wall_noise: bool = False, sky: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -1020,7 +1027,7 @@ class ReferenceModel:
             planes_out.append(planes)                        # the per-column records, for the gates
         if floor_mode_ft1:
             self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz, *planes,
-                                     ft1=True)
+                                     ft1=True, sky=sky, viewangle=viewangle, texcache=texcache)
         elif floor_texturing:
             self._render_planes_textured(fb, colormap, scene.asset_wad, flatcache,
                                          viewx, viewy, viewangle, viewz, *planes)
@@ -1205,9 +1212,29 @@ class ReferenceModel:
                 fb[y * W + x] = band_colour(flat, base, seq, k0)
 
     # ── M13 floor/ceiling visplane rasterizers (consume the per-column region records above) ──
+    def sky_texel(self, asset_wad, texcache, viewangle: int, x: int, y: int) -> int:
+        """V2 — one sky pixel. DOOM's sky is the only surface with NO perspective: its texture column
+        comes from the absolute view angle and its row is the screen row, so it neither scales with
+        distance nor takes a colormap step. That is exactly why it is cheap here — with no
+        perspective the whole column is a function of `u` alone, so the fj bakes ONE run-list per sky
+        texture column (128 of them, ~9 runs each) and the runtime cost per sky column is an add, a
+        shift, a mask and one dispatch.
+
+        `SKY_TURN` sky widths per full turn is the look knob (DOOM uses 1 across its 90° FOV, i.e. 4
+        per turn); it is not a correctness constant."""
+        tex = self._wall_texture(asset_wad, "SKY1", texcache if texcache is not None else {},
+                                 wall_mode="textured")
+        if tex is None:
+            return CEIL_BG
+        texels, th, tw = tex
+        ang = (viewangle + self.xtoviewangle[x]) & ANGLE_MASK
+        u = ((ang >> 16) * tw * SKY_TURN >> 16) % tw
+        return texels[u * th + min(th - 1, y * th // max(1, self.cfg.VIEW_H))]
+
     def _render_planes_flat(self, fb, colormap, asset_wad, flatcache, viewz,
                             ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff,
-                            *, ft1: bool = False):
+                            *, ft1: bool = False, sky: bool = False, viewangle: int = 0,
+                            texcache: dict | None = None):
         """M13a flat-colored tier (the cheaper §1 floor mode): each claimed column's ceiling rows
         [0, ceil_hi] and floor rows [floor_lo, H-1] are filled with the flat's base index, distance-lit
         per row. No horizontal DDA — each pixel is independent.
@@ -1246,7 +1273,15 @@ class ReferenceModel:
             return walk_cache[ph]
 
         for x in range(W):
-            if ceil_hi[x] >= 0:
+            # V2: F_SKY1 is not a flat at all -- it is DOOM's signal to paint the SKY, whose texture
+            # column is chosen by the VIEW ANGLE and which takes NO distance lighting. That
+            # combination is what makes it read as "outdoors": the sky slides as you turn but never
+            # gets nearer and never darkens with depth. 19 of E1M1's sectors use it.
+            is_sky = sky and ceil_hi[x] >= 0 and (col_cf[x] or "").upper() == "F_SKY1"
+            if is_sky:
+                for y in range(min(ceil_hi[x] + 1, H)):
+                    fb[y * W + x] = self.sky_texel(asset_wad, texcache, viewangle, x, y)
+            if ceil_hi[x] >= 0 and not is_sky:
                 ph = abs((col_ch[x] << 16) - viewz)
                 base = self._flat_base(asset_wad, col_cf[x], flatcache)
                 lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)

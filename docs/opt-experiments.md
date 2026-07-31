@@ -328,3 +328,26 @@ This is the same shape as EXP-2's reordering and the generalisation is worth sta
 **a rejection test belongs as early as its inputs allow, and the cheapest exact one you can derive
 is usually not the one the reference implementation uses.** DOOM rejects on height at the very end
 because on a 486 nothing in that chain cost 20,000 times a compare.
+
+## EXP-8 — the `THING_BUDGET` cost curve 📏 **measured, NOT applied**
+
+The straight knob. Both builds byte-exact against their own oracle.
+
+| viewpoint | budget 24 | budget 16 | delta |
+|---|---:|---:|---:|
+| spawn | 27,631,269 | 27,631,269 | 0 |
+| courtyard | 33,820,592 | 33,820,592 | 0 |
+| **tree** | 37,224,868 | **31,826,978** | **−5,397,890** |
+| **worst** | 36,433,309 | **35,216,185** | **−1,217,124** |
+
+Two things fall out of this, and the first is more useful than the second:
+
+* **The budget does not bind at spawn or the courtyard at all** — those viewpoints have fewer than 16
+  projectable things, so the two builds are identical to the op. It only costs where it earns.
+* At 16, **both sprite-heavy viewpoints land inside the owner's 30–35M band** (31.8M and 35.2M),
+  against 37.2M / 36.4M at 24.
+
+**Left at 24.** This is the one lever in the campaign that buys ops with PICTURE — it drops the eight
+furthest things at a crowded viewpoint — and V4 exists to make things visible. It is one constant
+(`reference_model.THING_BUDGET`), the oracle follows it automatically, and the numbers above are what
+it is worth, so the call is the owner's and it costs one build to take.

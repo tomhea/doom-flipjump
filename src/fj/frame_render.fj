@@ -1201,9 +1201,9 @@ ns frame {
             buckets, slotstride \
             @ tgo, tgo2, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
               tfree, tfree2, tblkok, tnext, \
-              tsy1z, tsy1k, tsy2c, tsy2h, tsy2k, tdraw, \
-              tcap, vis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tfrac, tu, tdwm, \
-              tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tidx, tlr, tr0, trl, \
+              tsy1z, tsy1k, tsy1h, tsy2c, tsy2z, tsy2k0, tsy2h, tsy2k, tdraw, \
+              tcap, vis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
+              tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tidx, tlr, tr0, trl, trw, \
               tsy1, tsy2, tb8, tneg, tcvh, end \
             < n_thing, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
               sp_base, sp_dw, sp_lt, thing_ret {
@@ -1217,9 +1217,10 @@ ns frame {
         hex.inc 2, n_thing
         // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][bucket:2]
         sprbkt.lookup tbkt, thpx
-        hex.mov 2, thb, tbkt + 2*dw
-        hex.mov 8, ty0, tytop                   // FEET planted: the bucket moves the sprite's TOP
-        hex.add 8, ty0, thpx
+        hex.zero 8, thb                         // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT
+        hex.mov 2, thb, tbkt + 2*dw             // nibbles of src, so a 2-nibble register would
+        hex.mov 8, ty0, tytop                   // drag its neighbours in as high nibbles.
+        hex.add 8, ty0, thpx                    // FEET planted: the bucket moves the sprite's TOP
         hex.sub 8, ty0, thb
         // the shade row: (light, sprite height) class << 8 | bucket height, one baked byte
         hex.zero w/4, tidx
@@ -1277,33 +1278,57 @@ ns frame {
         hex.zero w/4, tidx
         hex.mov 2, tidx, tbkt
         hex.add w/4, tblk, tidx
-        rep(5, k) hex.shl_bit w/4, tblk         // x SPR_BLOCK_STRIDE (32 dw), a power of two
+        // ⚠ `tblk` stays the RAW block INDEX -- that is what the slot stores and what the emit
+        // shifts. Shifting it here as well double-multiplied the address by the stride AND
+        // overflowed the slot's 4 nibbles, which read back as an all-zero block header and made
+        // every column skip: the frame then differed from the oracle by EXACTLY its sprite pixels.
+        hex.mov w/4, tbo, tblk
+        rep(5, k) hex.shl_bit w/4, tbo          // x SPR_BLOCK_STRIDE (32 dw), a power of two
         hex.set w/4, tbb, sprbank
-        hex.ptr_index tbp, tbb, tblk
+        hex.ptr_index tbp, tbb, tbo
         hex.read_byte tr0, tbp                  // the block HEADER: first row, last row
         hex.ptr_add tbp, 1
         hex.read_byte trl, tbp
         hex.ptr_sub tbp, 1
         hex.if0 2, trl, tnext                   // a fully transparent sprite column
         // sy1 = max(y0 + r0, 0), sy2p1 = min(y0 + last_rel, VIEW_H); empty -> nothing to store
-        hex.mov 8, tsy1, ty0
-        hex.add 8, tsy1, tr0
+        // sy1 = clamp(y0 + r0, 0, VIEW_H), sy2p1 = clamp(y0 + last_rel, 0, VIEW_H).
+        // ⚠ CLAMPED, never REJECTED: the oracle takes the column as soon as the sprite column has
+        // any opaque texel, even when the projected run lands entirely off-screen -- and a taken
+        // column is closed to every LATER thing. Rejecting here instead left the column claimable
+        // and fj recorded fragments the oracle does not have. An empty [sy1, sy2) costs nothing at
+        // emit: the two regions then cover the whole column and every sprite run skips or clamps.
+        // ⚠ the baked run list is relative to r0 (the column's FIRST OPAQUE row), not to the
+        // sprite's row 0 -- exactly as the oracle's fragment stores `ytop_b + st[0]` as its base.
+        // Fold r0 in ONCE here, so the emit's `y0 + rel` is right and `sy1` is the same row.
+        hex.zero 8, trw                         // ... widened: `hex.add 8` reads EIGHT nibbles
+        hex.mov 2, trw, tr0
+        hex.mov 8, tyb, ty0
+        hex.add 8, tyb, trw
+        hex.set 8, tcvh, viewh
+        hex.mov 8, tsy1, tyb
         hex.sign 8, tsy1, tsy1z, tsy1k
       tsy1z:
         hex.zero 8, tsy1
       tsy1k:
-        hex.set 8, tcvh, viewh
-        hex.scmp 8, tsy1, tcvh, tsy2c, tnext, tnext
+        hex.scmp 8, tsy1, tcvh, tsy2c, tsy2c, tsy1h
+      tsy1h:
+        hex.mov 8, tsy1, tcvh
       tsy2c:
-        hex.mov 8, tsy2, ty0
-        hex.add 8, tsy2, trl
+        hex.zero 8, trw
+        hex.mov 2, trw, trl
+        hex.mov 8, tsy2, tyb
+        hex.add 8, tsy2, trw
+        hex.sign 8, tsy2, tsy2z, tsy2k0
+      tsy2z:
+        hex.zero 8, tsy2
+      tsy2k0:
         hex.scmp 8, tsy2, tcvh, tsy2k, tsy2k, tsy2h
       tsy2h:
         hex.mov 8, tsy2, tcvh
       tsy2k:
-        hex.scmp 8, tsy1, tsy2, tdraw, tnext, tnext
       tdraw:
-        hex.mov 8, tb8, ty0                     // y0 + 128: a near sprite's top is above row 0
+        hex.mov 8, tb8, tyb                     // base + 128: a near sprite's top is above row 0
         hex.add_constant 8, tb8, 128
         hex.set w/4, tidx, 0
         hex.mov 2, tidx, tx
@@ -1336,8 +1361,9 @@ ns frame {
       thpx: hex.vec 8
       tistep: hex.vec 8
       tbkt: hex.vec 4
-      thb: hex.vec 2
+      thb: hex.vec 8
       ty0: hex.vec 8
+      tyb: hex.vec 8
       tfrac: hex.vec 8
       tu: hex.vec 8
       tdwm: hex.vec 2
@@ -1351,10 +1377,12 @@ ns frame {
       tbb: hex.vec w/4
       tbp: hex.vec w/4
       tblk: hex.vec w/4
+      tbo: hex.vec w/4
       tidx: hex.vec w/4
       tlr: hex.vec 2
       tr0: hex.vec 2
       trl: hex.vec 2
+      trw: hex.vec 8
       tsy1: hex.vec 8
       tsy2: hex.vec 8
       tb8: hex.vec 8
@@ -1792,6 +1820,42 @@ ns frame {
       end:
     }
 
+    // V4 -- this column's sprite fragment, read back from the write-once slot the thing pre-pass
+    // filled. Six bytes, but a column WITHOUT a sprite pays only the one `sprflag` read -- and that
+    // is most columns. All six are ZEROED when absent: they are the column's ditto signature too,
+    // and a stale value from an earlier column would let an empty column ditto a sprite column.
+    def lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, x \
+            @ sfb, sfp, sbb, sbp, sidx, end < sprflag, spslot {
+        hex.zero 2, sprfl
+        hex.zero 2, ssy1
+        hex.zero 2, ssy2
+        hex.zero 2, sy0b
+        hex.zero 4, sblk
+        hex.zero 2, slr
+        hex.set w/4, sfb, sprflag
+        hex.ptr_index sfp, sfb, x
+        hex.read_byte sprfl, sfp
+        hex.if0 2, sprfl, end
+        hex.zero w/4, sidx
+        hex.mov 2, sidx, x
+        hex.shl_hex w/4, 1, sidx                // 16 bytes per column -> a whole-nibble shift
+        hex.set w/4, sbb, spslot
+        hex.ptr_index sbp, sbb, sidx
+        hex.read_byte_and_inc ssy1, sbp
+        hex.read_byte_and_inc ssy2, sbp
+        hex.read_byte_and_inc sy0b, sbp
+        hex.read_byte_and_inc sblk, sbp
+        hex.read_byte_and_inc sblk + 2*dw, sbp
+        hex.read_byte_and_inc slr, sbp
+        ;end
+      sfb: hex.vec w/4
+      sfp: hex.vec w/4
+      sbb: hex.vec w/4
+      sbp: hex.vec w/4
+      sidx: hex.vec w/4
+      end:
+    }
+
     def lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd \
             @ own, have, recalc, pdone, end \
             < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
@@ -1907,14 +1971,16 @@ ns frame {
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, wpxstride, \
-            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps \
+            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
               dfull, dchk2, dgchk, dschk, dstchk, dst2, dst3, dst4, dst5, dst6, \
+              dsp1, dsp2, dsp3, dsp4, \
               dpl, dsame, demitted, dvalid, dct, dfs, dpid, \
               gnrow, dgn, skb, soff, issky, dsoff, \
               stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, \
-              duy1, duy2, ducol, dly1, dly2, dlcol \
+              duy1, duy2, ducol, dly1, dly2, dlcol, \
+              sprfl, ssy1, ssy2, sy0b, sblk, slr, dssy1, dssy2, dsy0b, dsblk \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
               seg_lit, seg_wstrip, wstripbase, \
@@ -1986,6 +2052,7 @@ ns frame {
         // Must run BEFORE the ditto decision -- a face changes a column's CONTENT without changing
         // its clip rows, the third feature in a row to hit that (see dgchk).
         rep(steps, k) .lines_step_load stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, x, cexcl, fstart
+        rep(things, k) .lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, x
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
@@ -2022,7 +2089,18 @@ ns frame {
       dst5:
         rep(steps, k) hex.cmp 2, ly2p1, dly2, dfull, dst6, dfull
       dst6:
-        rep(steps, k) hex.cmp 2, lcol, dlcol, dfull, dpl, dfull
+        rep(steps, k) hex.cmp 2, lcol, dlcol, dfull, dsp1, dfull
+      dsp1:
+        // V4: ... and the same SPRITE FRAGMENT. Fifth feature on this chain; same rule as V3 --
+        // COMPARE it, never refuse the ditto, or the columns AROUND a billboard stop dittoing too.
+        // The four values are the emit's whole sprite input (the block index carries r0/last_rel).
+        rep(things, k) hex.cmp 2, ssy1, dssy1, dfull, dsp2, dfull
+      dsp2:
+        rep(things, k) hex.cmp 2, ssy2, dssy2, dfull, dsp3, dfull
+      dsp3:
+        rep(things, k) hex.cmp 2, sy0b, dsy0b, dfull, dsp4, dfull
+      dsp4:
+        rep(things, k) hex.cmp 4, sblk, dsblk, dfull, dpl, dfull
       dpl:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
         rep(1-pnear, k) .lines_jmp dsame
@@ -2033,7 +2111,7 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, viewh, w2s, wpx, wpxstride, eabl, noise, steps, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, viewh, w2s, wpx, wpxstride, eabl, noise, steps, things, blkshift, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
         hex.mov 2, duy1, uy1                    // V3: the face signature, unconditional (same
@@ -2042,6 +2120,10 @@ ns frame {
         hex.mov 2, dly1, ly1
         hex.mov 2, dly2, ly2p1
         hex.mov 2, dlcol, lcol
+        hex.mov 2, dssy1, ssy1                  // V4: the sprite signature, unconditional
+        hex.mov 2, dssy2, ssy2
+        hex.mov 2, dsy0b, sy0b
+        hex.mov 4, dsblk, sblk
         hex.mov 2, dsoff, soff                  // V2: unconditional, same reason as dgn
         hex.mov 2, dgn, gnrow                   // V1: unconditional so `dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
@@ -2091,6 +2173,16 @@ ns frame {
       dly1: hex.vec 2
       dly2: hex.vec 2
       dlcol: hex.vec 2
+      sprfl: hex.vec 2                          // V4: does this column carry a sprite fragment?
+      ssy1: hex.vec 2                           // ... its first row,
+      ssy2: hex.vec 2                           // ... one past its last,
+      sy0b: hex.vec 2                           // ... the sprite's row 0, BIASED by 128,
+      sblk: hex.vec 4                           // ... its baked run-list block,
+      slr: hex.vec 2                            // ... and its shade row
+      dssy1: hex.vec 2                          // ... and the previously emitted column's four
+      dssy2: hex.vec 2
+      dsy0b: hex.vec 2
+      dsblk: hex.vec 4
       dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs
       dbot: hex.vec 8
       dscale: hex.vec 8                         // ablate "scaletwice" only: dead scale-setup outputs

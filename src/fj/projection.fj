@@ -1377,7 +1377,13 @@ ns proj {
         hex.set 8, cminz, minz
         hex.scmp 8, tz, cminz, bad, ok1, ok1
       ok1:
-        hex.set 8, cproj, projection*0x10000            // centerxfrac
+        hex.set 8, cproj, projection                    // centerxfrac -- `projection` ALREADY
+                                                        // carries the <<16 (wall_renderer's
+                                                        // `proj = cfg.PROJECTION << 16`), and
+                                                        // shifting it again truncated it to 0,
+                                                        // so xscale was 0 and EVERY thing failed
+                                                        // projection -- the frame then differed
+                                                        // from the oracle by exactly its sprites.
         hex.fixed_div 8, 4, xsc, cproj, tz, bad         // xscale = FixedDiv(projection, tz)
         // tx = trx*sin - try*cos  (DOOM: -(gyt + gxt) with both negated)
         hex.fixed_mul_lo 8, 4, gxt, trx, vsin

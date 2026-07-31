@@ -522,7 +522,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     if lines:
         def _cnt(child, pred, memo):
             if child & NF_SUBSECTOR:
-                _ss = cmap.subsectors[child & (NF_SUBSECTOR - 1)]
+                _si0 = child & (NF_SUBSECTOR - 1)
+                _ss = cmap.subsectors[_si0]
+                # V4: a THING-carrying leaf counts as live for the WALK prune, or the node above
+                # it is skipped and its sprites are never projected (see _lines_prune).
+                if pred is _seg_in_walk and _si0 in things_by_ss:
+                    return 1
                 return sum(1 for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs)
                            if pred(cmap.segs[_si]))
             _n = cmap.nodes[child]
@@ -538,7 +543,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
 
     def _lines_prune(child):
         if child & NF_SUBSECTOR:
-            _ss = cmap.subsectors[child & (NF_SUBSECTOR - 1)]
+            _si0 = child & (NF_SUBSECTOR - 1)
+            # V4: a subsector whose segs are ALL pruned can still hold THINGS, and the oracle
+            # projects them the moment the walk arrives there. Pruning it made fj miss every
+            # sprite in an open, purely two-sided area -- at the tree viewpoint, most of them.
+            # Keep the leaf whenever it carries a thing.
+            if _si0 in things_by_ss:
+                return False
+            _ss = cmap.subsectors[_si0]
             return not any(_seg_in_walk(cmap.segs[_si])
                            for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs))
         return lines_walk_below.get(child, 1) == 0
@@ -1109,7 +1121,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
             f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
             f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
-            f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}")]
+            f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
+            f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]

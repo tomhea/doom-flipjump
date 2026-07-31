@@ -1003,7 +1003,7 @@ class ReferenceModel:
                           plane_near: bool = False, planes_out: list | None = None,
                           wall_noise: bool = False, sky: bool = False,
                           near_steps: bool = False, things: bool = False,
-                          sprite_wad=None) -> bytes:
+                          sprite_wad=None, things_out: list | None = None) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -1337,6 +1337,8 @@ class ReferenceModel:
                                                      y2 - y1 + 1, max(1, units))
                             for y in range(y1, y2 + 1):
                                 fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
+            if things_out is not None:
+                things_out.append(sfrag)                 # the per-column fragments, for the gates
             if things:
                 # V4 - splice the sprite fragments. Each is ONE contiguous block of runs at
                 # `[y0 + rel]`, clipped to the screen exactly the way the fj emit clips it: runs

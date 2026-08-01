@@ -603,3 +603,160 @@ def generate_trig_idioms_fj(label: str, count: int, fraction_bits: int, *, resul
         "",
     ]
     return table + "\n".join(idioms)
+
+
+def _bit3(cell: str, b: int) -> str:
+    """The address of bit b of a bit.vec cell (one bit per op — bit.if REQUIRES the clean
+    bit.bit layout; hex-cell bits poison its composed jump, R42a)."""
+    return f"{cell} + {b}*dw"
+
+
+def _byte2bits_loader(label: str, target: str):
+    """A PRIVATE byte->bits dispatch: `{label}_load cell` reads the 2-nibble hex cell and writes
+    its 8 bits into the kept-zero bit.vec `{target}` (the load zeroes it first). Private dsp+ret
+    cells, so it is safe to call from ANY context (R42: only the SHARED hex.tables.ret nests
+    badly). Entry v = up to 8 raw flips + a jump; ~50-70 executed ops per load."""
+    out = [f"def {label}_load cell @ return < {label}_dsp, {label}_ret, {target} {{",
+           f"    bit.zero 8, {target}",
+           f"    rep(2, i) hex.xor {label}_dsp + 4*i, cell + i*dw",
+           f"    wflip {label}_ret+w, return, {label}_dsp",
+           "  return:",
+           f"    wflip {label}_ret+w, return",
+           "}",
+           f"{label}_blk__:",
+           f"    ;{label}_end__",
+           f"{label}_dsp: ;{label}_switch__",
+           "    pad 256",
+           f"{label}_switch__:"]
+    for v in range(256):
+        out.append(f"    ;{label}_h{v}")
+    for v in range(256):
+        out.append(f"{label}_h{v}:")
+        for b in range(8):
+            if (v >> b) & 1:
+                out.append(f"    {target} + {b}*dw + dbit;")
+        out.append(f"    ;{label}_clean__ + {v}*dw")
+    out += [f"{label}_clean__:",
+            f"    hex.tables.clean_table_entry__table 256, {label}_dsp, {label}_ret",
+            f"{label}_ret: ;0",
+            f"{label}_end__:"]
+    return out
+
+
+def _cmp3_tree(cell: str, k: int, lt: str, eq: str, gt: str, tag: str):
+    """A TABLE-FREE 3-way compare of a runtime 2-nibble value against constant k: an MSB-first
+    bit.if chain specialized on k's bits (R42: dispatch handlers may not call hex.* macros, and
+    bit.if is a raw self-modifying jump). Jumps lt/eq/gt; ~<=8 bit.ifs on any path."""
+    out = []
+    for b in range(7, -1, -1):
+        nxt = eq if b == 0 else f"{tag}_b{b - 1}"
+        if (k >> b) & 1:
+            out.append(f"    bit.if {_bit3(cell, b)}, {lt}, {nxt}")
+        else:
+            out.append(f"    bit.if {_bit3(cell, b)}, {nxt}, {gt}")
+        if b:
+            out.append(f"{tag}_b{b - 1}:")
+    return out
+
+
+def _raw_byte_out(cell: str, tag: str):
+    """Emit a runtime 2-nibble value as one output byte, lsb-first (stl.output_char's order),
+    with bit.if + stl.output_bit only — byte.emit is a table dispatch and R42 forbids it here."""
+    out = []
+    for b in range(8):
+        out += [f"    bit.if {_bit3(cell, b)}, {tag}_z{b}, {tag}_o{b}",
+                f"{tag}_z{b}:",
+                "    stl.output_bit 0",
+                f"    ;{tag}_n{b}",
+                f"{tag}_o{b}:",
+                "    stl.output_bit 1",
+                f"{tag}_n{b}:"]
+    return out
+
+
+def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
+    """M13-15M BANDS AS CODE (bake-to-code, 6th application): every band half-list is compile-time
+    data, and walking it costs two pointer READS per pair (~2.6k ops) plus skip logic. This bakes
+    each half-list as a flat RAW-OP handler emitting its pairs as constants against the frame's
+    window in the globals `vq_lo`/`vq_hi` (exclusive bound): per pair, a bit.if compare tree vs
+    vq_lo (skip if y2 <= lo), one vs vq_hi (emit / emit-and-stop at == / clamp-and-stop beyond),
+    and const `stl.output_char`s — ~36-70 EXECUTED ops per emitted pair. The contract is qwalk's,
+    verbatim. R42: handlers contain NO hex.* macros (they would corrupt the shared dispatch
+    return); the clamped pair's runtime byte goes out via a bit.if/output_bit chain.
+
+    Identical lists SHARE a handler (switch entries just point at the same label) — measured on
+    E1M1-lite: 17,280 half-lists, 5,855 unique. Dead/padding entries clean with their OWN index
+    (the clean un-xors the dispatched index out of the dsp op)."""
+    n = len(lists)
+    pad = 1 << max(1, (n - 1).bit_length())
+    if 4 * index_nibbles < (pad - 1).bit_length():
+        raise ValueError(f"bands walk: {n} lists need a wider index than {index_nibbles} nibbles")
+    first_of = {}
+    owner = []
+    for k, pairs in enumerate(lists):
+        key = tuple(map(tuple, pairs))
+        owner.append(first_of.setdefault(key, k))
+    out = [f"// M13-15M bands-as-code: {n} half-lists ({len(first_of)} unique, pad {pad}), raw-op handlers",
+           f"def vpb_walk idx @ return < hex.tables.ret, vpb_dsp {{",
+           f"    rep({index_nibbles}, i) hex.xor vpb_dsp + 4*i, idx + i*dw",
+           "    wflip hex.tables.ret+w, return, vpb_dsp",
+           "  return:",
+           "    wflip hex.tables.ret+w, return",
+           "}",
+           "vpb_blk__:",
+           "    ;vpb_end__",
+           "vpb_dsp: ;vpb_switch__",
+           f"    pad {pad}",
+           "vpb_switch__:"]
+    for k in range(pad):
+        if k >= n:
+            out.append(f"    ;vpb_clean__ + {k}*dw")
+        elif owner[k] != k:
+            # shared content: enter the owner's body through a per-id thunk so the CLEAN still
+            # un-xors THIS id. The body must therefore end by jumping through a RETURN REGISTER --
+            # simplest: bodies end at a per-id trampoline. Instead: entries with shared content get
+            # their own tiny handler that jumps to the owner's PAIR CODE with the exit label in
+            # vpb_x (a raw jump-target op), and the owner's terminal jumps go through vpb_x.
+            out.append(f"    ;vpb_t{k}")
+        else:
+            out.append(f"    ;vpb_t{k}")
+    # per-id thunks: fcall the (possibly shared) body, then clean with THIS id. stl.fcall/fret
+    # is raw wflip machinery (R42-safe), and its pair discipline clears vpb_x on return.
+    for k in range(n):
+        out += [f"vpb_t{k}:",
+                f"    stl.fcall vpb_body{owner[k]}, vpb_x",
+                f"    ;vpb_clean__ + {k}*dw"]
+    for k, pairs in enumerate(lists):
+        if owner[k] != k:
+            continue
+        out.append(f"vpb_body{k}:")
+        for j, (y2, c) in enumerate(pairs):
+            t = f"vpb_{k}_{j}"
+            nxt = f"{t}_nx"
+            out += _cmp3_tree("vq_lo", y2, f"{t}_in", nxt, nxt, f"{t}_lo")
+            out.append(f"{t}_in:")
+            out += _cmp3_tree("vq_hi", y2, f"{t}_cl", f"{t}_ls", f"{t}_em", f"{t}_hi")
+            out.append(f"{t}_em:")
+            for ch in (y2, c):
+                out.append(f"    stl.output_char {ch}")
+            out.append(f"    ;{nxt}")
+            out.append(f"{t}_ls:")
+            for ch in (y2, c):
+                out.append(f"    stl.output_char {ch}")
+            out.append(f"    ;vpb_fin{k}")
+            out.append(f"{t}_cl:")
+            out += _raw_byte_out("vq_hi", f"{t}_rb")
+            out.append(f"    stl.output_char {c}")
+            out.append(f"    ;vpb_fin{k}")
+            out.append(f"{nxt}:")
+        out += [f"vpb_fin{k}:",
+                "    stl.fret vpb_x"]
+    out += ["vpb_x: ;0",
+            "vpb_clean__:",
+            f"    hex.tables.clean_table_entry__table {pad}, vpb_dsp, hex.tables.ret",
+            "vq_lo: bit.vec 8", "vq_hi: bit.vec 8",
+            "vpb_end__:", ""]
+    out += _byte2bits_loader("vql", "vq_lo")
+    out += _byte2bits_loader("vqh", "vq_hi")
+    out.append("")
+    return chr(10).join(out)

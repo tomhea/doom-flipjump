@@ -45,21 +45,17 @@ SCALE = 4                      # window upscale
 
 def main():
     ap = argparse.ArgumentParser()
-    # THE PLAYABLE DEFAULT IS A PURPOSE-BUILT ARENA (owner: "change the map for a faster game";
-    # "no one will notice a missing sprite, but they will notice a slow game").
-    #
-    # 16 walls, 24 monsters, 8 items, ONE convex subsector and ZERO BSP nodes -- which is the trick
-    # that made it buildable without a node tool (see scratchpad/make_arena.py). Measured
-    # BYTE-EXACT at seven viewpoints: 11.6M-13.6M ops/frame at FULL 160x100 with all four visual
-    # features on and every monster drawn, against E1M1's 27.8-39.2M. That is the owner's <15M
-    # target met, and ~3x the frame rate.
-    #
-    # Two other maps, both still available and both byte-exact:
-    #     --wad assets/freedoom1.wad          --map E2M8   (542-seg arena, 19.9-24.6M)
-    #     --wad tests/fixtures/freedoom_e1m1.wad --map E1M1   (the ladder's canonical map, 27.8-39.2M)
-    # E1M1 remains canonical: every golden, gate and test still targets it.
-    ap.add_argument("--wad", default="tests/fixtures/arena.wad")
-    ap.add_argument("--map", default="MAP01")
+    # THE PLAYABLE DEFAULT IS E1M1-LITE (owner 2026-08-01: "use the e1m1... you may modify your
+    # level a bit... keep it good and fun"). Same layout, rooms and monsters as E1M1 -- built by
+    # src/doomfj/mapsimplify.py + the new node builder (segs 2057->1378, nodes 681->470, decor
+    # thinned spatially so every landmark survives; every monster/weapon/key kept). Measured
+    # BYTE-EXACT at six walkable gates: spawn 16.1M ops/frame (stock: 27.7M), worst gate 34.9M
+    # (stock: 39.1M+). The pure-arena and stock maps stay one flag away:
+    #     --wad tests/fixtures/arena.wad         --map MAP01  (16-wall ring, 11.6-13.6M)
+    #     --wad assets/freedoom1.wad             --map E2M8   (542-seg arena, 19.9-24.6M)
+    #     --wad tests/fixtures/freedoom_e1m1.wad --map E1M1   (stock, canonical for goldens)
+    ap.add_argument("--wad", default="tests/fixtures/e1m1_lite.wad")
+    ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None)
     ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])

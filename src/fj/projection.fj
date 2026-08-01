@@ -548,6 +548,83 @@ ns proj {
       c3: hex.vec 1, 3
     }
 
+    // proj.wedge_bbox_plane — ONE half-plane test on a BBOX (M13-15M, the bbox wedge cull): jump
+    //   `insid` when any part of the staged box (bl/bb/br/bt, all map<<16) can be inside half-plane
+    //   (q, n), else `outsid`. The maximizing corner is a pure function of the plane:
+    //   y = TOP iff n==0; x = LEFT iff (q<2) == (n==0)  (equivalent to the m-direction table:
+    //   x=left for m<4, y=top for m in {0,1,6,7}). The Q arithmetic is wedge_qt's high-4-nibble
+    //   slice form verbatim — corners are integer map units <<16, so low halves are zero.
+    def wedge_bbox_plane q, n, bl, bb, br, bt, wex, wey, weyx, wexy, insid, outsid \
+            @ ntop, nxl, nxr, qsel, qlo, qhi, qq0, qq1, qq2, qq3, qdone, posform, negnz, \
+              sxh, syh, s, c1, c2, c3 {
+        hex.if0 1, n, ntop
+        hex.mov 4, syh, bb + 4*dw           // n=1: y = bottom; x = left iff q >= 2
+        hex.cmp 1, q, c2, nxr, nxl, nxl
+      ntop:
+        hex.mov 4, syh, bt + 4*dw           // n=0: y = top;    x = left iff q < 2
+        hex.cmp 1, q, c2, nxl, nxr, nxr
+      nxl:
+        hex.mov 4, sxh, bl + 4*dw
+        ;qsel
+      nxr:
+        hex.mov 4, sxh, br + 4*dw
+      qsel:
+        hex.cmp 1, q, c2, qlo, qq2, qhi
+      qlo:
+        hex.cmp 1, q, c1, qq0, qq1, qq1
+      qhi:
+        hex.cmp 1, q, c3, qq2, qq3, qq3
+      qq0:
+        hex.mov 4, s, syh                   // Q0 = cy - viewy
+        hex.sub 4, s, wey + 4*dw
+        ;qdone
+      qq1:
+        hex.mov 4, s, syh                   // Q1 = (cy - cx) - (viewy - viewx)
+        hex.sub 4, s, sxh
+        hex.sub 4, s, weyx + 4*dw
+        ;qdone
+      qq2:
+        hex.mov 4, s, sxh                   // Q2 = cx - viewx
+        hex.sub 4, s, wex + 4*dw
+        ;qdone
+      qq3:
+        hex.mov 4, s, sxh                   // Q3 = (cx + cy) - (viewx + viewy)
+        hex.add 4, s, syh
+        hex.sub 4, s, wexy + 4*dw
+      qdone:
+        hex.if0 1, n, posform
+        hex.sign 4, s, insid, negnz            // negated test: outside iff Q > 0
+      negnz:
+        hex.if0 4, s, insid
+        ;outsid
+      posform:
+        hex.sign 4, s, outsid, insid           // plain test:   outside iff Q < 0
+
+      sxh: hex.vec 4
+      syh: hex.vec 4
+      s: hex.vec 4
+      c1: hex.vec 1, 1
+      c2: hex.vec 1, 2
+      c3: hex.vec 1, 3
+    }
+
+    // proj.wedge_bbox vis, <box>, <frame wedge regs> — vis=0 iff the whole box lies outside either
+    //   of the frame's two wedge half-planes (then the subtree below it can contribute no pixel,
+    //   no plane claim, no step face; THING subtrees get their boxes pre-inflated at bake time).
+    //   Mirrors mapcompiler.bbox_wedge_miss / reference_model.bsp_render_order's oracle gate.
+    def wedge_bbox vis, bl, bb, br, bt, qa, na, qb, nb, wex, wey, weyx, wexy \
+            @ pbgo, missl, okl, end {
+        hex.set 1, vis, 1
+        .wedge_bbox_plane qa, na, bl, bb, br, bt, wex, wey, weyx, wexy, pbgo, missl
+      pbgo:
+        .wedge_bbox_plane qb, nb, bl, bb, br, bt, wex, wey, weyx, wexy, okl, missl
+      missl:
+        hex.set 1, vis, 0
+      okl:
+        ;end
+      end:
+    }
+
     // proj.point_to_dist dst, viewx, viewy, x, y (R_PointToDist): dst[:8] = the 16.16 distance from
     //   (viewx,viewy) to (x,y) — sqrt(dx²+dy²) computed via tantoangle + finesine + two FixedDivs (no
     //   sqrt). Fold to the major octant (dx>=dy), index tantoangle by the slope dy/dx >> DBITS, take

@@ -1349,8 +1349,9 @@ ns frame {
         hex.mov 8, tsy2, tcvh
       tsy2k:
       tdraw:
-        hex.mov 8, tb8, tyb                     // base + 128: a near sprite's top is above row 0
-        hex.add_constant 8, tb8, 128
+        hex.mov 8, tb8, tyb                     // base + 32768, stored as TWO bytes: a tall NEAR
+        hex.add_constant 8, tb8, 32768          // sprite's top can sit far above row -128, and the
+                                                // old one-byte +128 bias WRAPPED there (M13-15M)
         hex.set w/4, tidx, 0
         hex.mov 2, tidx, tx
         rep(slotstride/16, k) hex.shl_hex w/4, 1, tidx   // a power-of-16 stride: whole-nibble shift
@@ -1359,6 +1360,7 @@ ns frame {
         hex.write_byte_and_inc tbp, tsy1
         hex.write_byte_and_inc tbp, tsy2
         hex.write_byte_and_inc tbp, tb8
+        hex.write_byte_and_inc tbp, tb8 + 2*dw
         hex.write_byte_and_inc tbp, tblk
         hex.write_byte_and_inc tbp, tblk + 2*dw
         hex.write_byte_and_inc tbp, tlr
@@ -1869,7 +1871,7 @@ ns frame {
         hex.zero 2, sprfl
         hex.zero 2, ssy1
         hex.zero 2, ssy2
-        hex.zero 2, sy0b
+        hex.zero 4, sy0b
         hex.zero 4, sblk
         hex.zero 2, slr
         hex.set w/4, sfb, sprflag
@@ -1883,7 +1885,11 @@ ns frame {
         hex.ptr_index sbp, sbb, sidx
         hex.read_byte_and_inc ssy1, sbp
         hex.read_byte_and_inc ssy2, sbp
+        // M13-15M: y0 is TWO bytes, bias 32768. One biased byte wrapped for y0 < -128 -- a tall
+        // near sprite's top row -- and the wrap turned (1869,479,W)'s fragment into an empty
+        // above-region plus one bogus clamped run (the oracle keeps raw ints, so only fj wrapped).
         hex.read_byte_and_inc sy0b, sbp
+        hex.read_byte_and_inc sy0b + 2*dw, sbp
         hex.read_byte_and_inc sblk, sbp
         hex.read_byte_and_inc sblk + 2*dw, sbp
         hex.read_byte_and_inc slr, sbp
@@ -2146,7 +2152,7 @@ ns frame {
       dsp2:
         rep(things, k) hex.cmp 2, ssy2, dssy2, dfull, dsp3, dfull
       dsp3:
-        rep(things, k) hex.cmp 2, sy0b, dsy0b, dfull, dsp4, dfull
+        rep(things, k) hex.cmp 4, sy0b, dsy0b, dfull, dsp4, dfull
       dsp4:
         rep(things, k) hex.cmp 4, sblk, dsblk, dfull, dpl, dfull
       dpl:
@@ -2170,7 +2176,7 @@ ns frame {
         hex.mov 2, dlcol, lcol
         hex.mov 2, dssy1, ssy1                  // V4: the sprite signature, unconditional
         hex.mov 2, dssy2, ssy2
-        hex.mov 2, dsy0b, sy0b
+        hex.mov 4, dsy0b, sy0b
         hex.mov 4, dsblk, sblk
         hex.mov 2, dsoff, soff                  // V2: unconditional, same reason as dgn
         hex.mov 2, dgn, gnrow                   // V1: unconditional so `dgn` is never an UNUSED
@@ -2222,14 +2228,15 @@ ns frame {
       dly2: hex.vec 2
       dlcol: hex.vec 2
       sprfl: hex.vec 2                          // V4: does this column carry a sprite fragment?
-      ssy1: hex.vec 2                           // ... its first row,
+      ssy1: hex.vec 2                           // ... its first row,   (sy0b/dsy0b are 4-nibble:
+                                                //     two-byte biased y0, see lines_spr_load)
       ssy2: hex.vec 2                           // ... one past its last,
-      sy0b: hex.vec 2                           // ... the sprite's row 0, BIASED by 128,
+      sy0b: hex.vec 4                           // ... the sprite's row 0, BIASED by 32768,
       sblk: hex.vec 4                           // ... its baked run-list block,
       slr: hex.vec 2                            // ... and its shade row
       dssy1: hex.vec 2                          // ... and the previously emitted column's four
       dssy2: hex.vec 2
-      dsy0b: hex.vec 2
+      dsy0b: hex.vec 4
       dsblk: hex.vec 4
       dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs
       dbot: hex.vec 8

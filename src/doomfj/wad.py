@@ -235,6 +235,17 @@ class WadFile:
             out.append(WadNode(x, y, dx, dy, right, left))
         return out
 
+    def nodes_bbox(self, mapname: str) -> list[tuple]:
+        """The per-child bounding boxes the NODES lump carries (M13-15M: the bbox wedge cull needs
+        them). One (bbox_right, bbox_left) pair per node, each box (top, bottom, left, right)."""
+        data = self._map_lump(mapname, "NODES").data
+        out = []
+        for off in range(0, len(data) - len(data) % 28, 28):
+            bbr = struct.unpack_from("<4h", data, off + 8)
+            bbl = struct.unpack_from("<4h", data, off + 16)
+            out.append((bbr, bbl))
+        return out
+
     # ── graphics lumps (H4 / M8): palette, colormap, textures, patches, flats ──
     def playpal(self, index: int = 0) -> list[tuple[int, int, int]]:
         """One 256-colour RGB palette (PLAYPAL holds 14; index 0 is the game palette)."""

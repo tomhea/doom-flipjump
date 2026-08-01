@@ -49,6 +49,8 @@ class Node:
     dy: int
     right: int       # child ref (| NF_SUBSECTOR if a subsector)
     left: int
+    bbr: tuple = None    # right child's bbox (top, bottom, left, right) — M13-15M bbox wedge cull
+    bbl: tuple = None
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,86 @@ def seg_affine_coeffs(seg: "Seg", verts: Sequence[Tuple[int, int]]) -> Tuple[int
     return a, b, c
 
 
+# ── M13-15M: the BBOX WEDGE CULL's SSOT (shared by the oracle mirror AND the fj emitter) ──
+
+ANG45_BAM = 0x20000000
+
+
+def wedge_planes_bam(viewangle: int) -> tuple:
+    """The two half-plane direction indices (0..7) proj.wedge_setup picks for this view angle —
+    MIRRORED EXACTLY, mod-2^32 BAM arithmetic included: lo = ((va - ANG45) mod 2^32) >> 29,
+    hi = ((va + ANG45 + ANG45-1) mod 2^32) >> 29 (the ceil identity), plane B = (hi + 4) & 7."""
+    lo = ((viewangle - ANG45_BAM) & 0xFFFFFFFF) >> 29
+    hi = ((viewangle + ANG45_BAM + (ANG45_BAM - 1)) & 0xFFFFFFFF) >> 29
+    return lo, (hi + 4) & 7
+
+
+def bbox_wedge_miss(m: int, box: tuple, vx: int, vy: int) -> bool:
+    """True when the whole box (top, bottom, left, right — the NODES lump order) lies OUTSIDE
+    half-plane m, i.e. max over the box of the plane's signed test value is negative. The maximizing
+    corner is a pure function of m: x = left for m<4 else right; y = top for m in {0,1,6,7} else
+    bottom (equivalently, in fj's (q=m&3, n=2<=m<=5) encoding: y = top iff n==0, x = left iff
+    (q<2) == (n==0)). All in raw 16.0 map units — |Q| < 2^15 for int16 maps, matching the fj
+    4-nibble slice arithmetic."""
+    top, bottom, left, right = box
+    cx = left if m < 4 else right
+    cy = top if m in (0, 1, 6, 7) else bottom
+    dx, dy = cx - vx, cy - vy
+    q = (dy, dy - dx, dx, dx + dy)[m & 3]
+    if 2 <= m <= 5:
+        q = -q
+    return q < 0
+
+
+def bbox_gate_boxes(cmap: "CompiledMap", *, min_segs: int = 32,
+                    thing_subsectors=(), inflate: int = 96) -> dict:
+    # min_segs tuning (E1M1-lite, measured): 8 gated 325 of 470 nodes and the per-visit test cost
+    # showed up as +0.83M at a high-reach viewpoint ((-309,636) keeps 86% of segs); 32 keeps the
+    # big-subtree culls (tree -1.54M, courtyard -0.78M) at roughly a third of the overhead.
+    """Which nodes get a runtime bbox wedge gate, and with what box: {node_index: (T, B, L, R)}.
+    The box is the UNION of the node's two child boxes. Only subtrees holding >= min_segs segs are
+    worth the ~2.5k-op runtime test; a subtree holding any THING-carrying leaf gets its box
+    inflated by `inflate` map units so a sprite whose center sits just outside the wedge cannot
+    lose its (up to ~sprite-half-width) on-screen columns. The ORACLE and the fj emitter must both
+    use THIS function — the gate changes which marking segs spend budget, so the two sides have to
+    agree on the gated set exactly."""
+    if not cmap.nodes or cmap.nodes[0].bbr is None:
+        return {}
+    segs_below: dict = {}
+    things_below: dict = {}
+    thing_ss = set(thing_subsectors)
+
+    def walk(child):
+        if child & NF_SUBSECTOR:
+            s = child & (NF_SUBSECTOR - 1)
+            return cmap.subsectors[s].numsegs, (s in thing_ss)
+        n = cmap.nodes[child]
+        sr, tr = walk(n.right)
+        sl, tl = walk(n.left)
+        segs_below[child] = sr + sl
+        things_below[child] = tr or tl
+        return sr + sl, tr or tl
+
+    import sys as _sys
+    _old = _sys.getrecursionlimit()
+    _sys.setrecursionlimit(20000)
+    try:
+        walk(cmap.root)
+    finally:
+        _sys.setrecursionlimit(_old)
+
+    out = {}
+    for i, n in enumerate(cmap.nodes):
+        if segs_below.get(i, 0) < min_segs:
+            continue
+        (rt, rb, rl, rr), (lt, lb, ll, lr) = n.bbr, n.bbl
+        box = (max(rt, lt), min(rb, lb), min(rl, ll), max(rr, lr))
+        if things_below.get(i):
+            box = (box[0] + inflate, box[1] - inflate, box[2] - inflate, box[3] + inflate)
+        out[i] = box
+    return out
+
+
 # ── BSP bake (parse the WAD's precompiled NODES/SSECTORS/SEGS) ──
 
 def bake_bsp(wad, mapname: str) -> CompiledMap:
@@ -107,7 +189,9 @@ def bake_bsp(wad, mapname: str) -> CompiledMap:
     verts = [(v.x, v.y) for v in wad.vertexes(mapname)]
     segs = [Seg(s.v1, s.v2, s.angle, s.linedef, s.direction, s.offset) for s in wad.segs(mapname)]
     subsectors = [SubSector(ss.numsegs, ss.firstseg) for ss in wad.subsectors(mapname)]
-    nodes = [Node(n.x, n.y, n.dx, n.dy, n.right, n.left) for n in wad.nodes(mapname)]
+    bboxes = wad.nodes_bbox(mapname)
+    nodes = [Node(n.x, n.y, n.dx, n.dy, n.right, n.left, bb[0], bb[1])
+             for n, bb in zip(wad.nodes(mapname), bboxes)]
     root = (len(nodes) - 1) if nodes else (0 | NF_SUBSECTOR)
     return CompiledMap(verts, segs, subsectors, nodes, root)
 
@@ -222,7 +306,7 @@ def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: st
 def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
                  subsector_action=None, full_abort_label: str = None, prune=None,
                  inline_side: bool = False, plane_gate=None,
-                 plane_gate_label: str = "tsstop") -> str:
+                 plane_gate_label: str = "tsstop", extra_gate=None) -> str:
     """BSP-as-code (opt #7): emit the front-to-back BSP walk as fj CODE. Each node becomes a code block
     whose partition line is baked as compile-time constants, so the side test is `proj.point_on_side`
     (no per-node stream read). The block visits the NEAR child subtree first (the side the viewer is on),
@@ -293,6 +377,13 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             lines.append(f"    hex.if0 1, {full_abort_label}, {L}_go{i}")   # paints nothing (front-to-back
             lines.append(f"    stl.fret {L}_r{i}")         # occlusion) -> prune it. Byte-exact: the per-seg
             lines.append(f"{L}_go{i}:")                    # leaf would have fret'd on `full` for every seg.
+        if extra_gate is not None:
+            # M13-15M: the caller's bbox wedge gate (or any other subtree-level runtime cull).
+            # The callback owns the register/leaf names; it receives the node index and this
+            # node's fret register so a miss can abandon the whole subtree.
+            g = extra_gate(i, f"{L}_r{i}")
+            if g:
+                lines += g
         if plane_gate is not None and plane_gate(i):
             # M13-2S rung 3a: this subtree has NO one-sided segs, so it can only contribute PLANE
             # ATTRIBUTION -- nothing to draw, nothing that touches drawn[]/full. Once every column

@@ -22,7 +22,8 @@ from doomfj.lut_generator import (
 )
 from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
-                                NF_SUBSECTOR, seg_affine_coeffs)
+                                NF_SUBSECTOR, seg_affine_coeffs, bbox_gate_boxes)
+from doomfj.reference_model import THING_SPRITE
 from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_FACE_BASE,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
@@ -99,7 +100,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        wall_mode: str = "textured", raster_mode: str = "framebuffer",
                        plane_near: bool = False, two_sided: bool = False,
                        wall_noise: bool = False, sky: bool = False, steps: bool = False,
-                       things: bool = False, sprite_wad=None) -> str:
+                       things: bool = False, sprite_wad=None,
+                       bbox_cull: bool = False) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -909,13 +911,42 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                    + out + [f"  e1sskip{cid}:"])
         return out
 
+    # M13-15M: the BBOX WEDGE CULL. Gate boxes come from the SSOT (bbox_gate_boxes), and the
+    # thing-subsector set uses the SAME THING_SPRITE rule the oracle's gate uses -- NOT the
+    # emitter's sprite_art-filtered things_by_ss: the gate decides which marking segs spend
+    # PNEAR budget, so both sides must agree on the gated set to the node.
+    bbox_gate: dict = {}
+    if lines and bbox_cull:
+        _gate_tss = {rm.point_in_subsector(cmap, _t.x, _t.y)
+                     for _t in map_wad.things(mapname)
+                     if THING_SPRITE.get(_t.type) is not None}
+        bbox_gate = bbox_gate_boxes(cmap, thing_subsectors=_gate_tss)
+
+    def _bbox_gate_lines(i, ret_reg):
+        box = bbox_gate.get(i)
+        if box is None:
+            return None
+        _t, _b, _l, _r = box
+        M32 = 0xFFFFFFFF
+        stage = [f"    hex.xor_by 8, bbcl, {(_l << 16) & M32}",
+                 f"    hex.xor_by 8, bbcb, {(_b << 16) & M32}",
+                 f"    hex.xor_by 8, bbcr, {(_r << 16) & M32}",
+                 f"    hex.xor_by 8, bbct, {(_t << 16) & M32}"]
+        return (stage + ["    stl.fcall bbgate_leaf, bbtret"] + stage
+                + [f"    hex.if0 1, bbvis, bbmiss{i}",
+                   f"    ;bbgo{i}",
+                   f"  bbmiss{i}:",
+                   f"    stl.fret {ret_reg}",
+                   f"  bbgo{i}:"])
+
     bsp = _bsp_as_code(_pfx(mapname), cmap, done_label="bsp_done", subsector_action=subsector_action,
                        full_abort_label="full" if (stream or raster or lines) else None,   # M13pG1
                        # inline_side=True measured +0.42M on E1M1 (code bloat beats the
                        # fcall savings -- the layout tax again); kept available, OFF.
                        prune=_lines_prune if lines else None, inline_side=False,
                        plane_gate=_lines_plane_gate if (lines and plane_near) else None,
-                       plane_gate_label="tsstop")
+                       plane_gate_label="tsstop",
+                       extra_gate=_bbox_gate_lines if bbox_gate else None)
     if lines:
         bsp += _bsp_descend_code(_pfx(mapname), cmap, _lines_descend_leaf, done_label="dsc_done")
     xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (once)
@@ -1159,6 +1190,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # plane_near call sites jump to has to be stubbed alongside them (measurement only).
         *(["seg_pass1_ts_leaf:", "stl.fret seg_ret"]
           if (plane_near and (ablate & {"segstub", "xrstub", "wedgestub"})) else []),
+        # M13-15M: the bbox wedge gate's shared test leaf -- corners staged per node via xor_by
+        *(["bbgate_leaf:",
+           "proj.wedge_bbox bbvis, bbcl, bbcb, bbcr, bbct, wqa, wna, wqb, wnb, "
+           "wex, wey, weyx, wexy",
+           "stl.fret bbtret"] if bbox_gate else []),
         *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
         bsp,
         *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
@@ -1173,6 +1209,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
+        *(["bbcl: hex.vec 8", "bbcb: hex.vec 8", "bbcr: hex.vec 8", "bbct: hex.vec 8",
+           "bbvis: hex.vec 1", "bbtret: ;0"] if bbox_gate else []),   # M13-15M bbox wedge gate
         "ceilfix: hex.vec 8", "floorfix: hex.vec 8",
         "seg_ceil: hex.vec 8", "worldtop: hex.vec 8",     # M12pp: seg_ceil baked (pure); worldtop leaf-computed
         "seg_floor: hex.vec 8", "seg_plight: hex.vec 2",  # M13d2 plane bakes (pure floor_h + raw light + flat slices)
@@ -1603,7 +1641,9 @@ def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs):
 SPR_BLOCK_STRIDE = 32      # V4: dw per baked sprite-column block -- [n][ (rel,texel) x <=cap ] with
                            # SPRITE_RUN_CAP = 12 needs 25, and a POWER OF TWO stride turns the block
                            # index into a shl_bit instead of a mul_const.
-SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot` (6 used), a power of 16 so the
+SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot` (7 used: y0 is TWO bytes,
+                           #     bias 32768 -- the one-byte +128 bias wrapped for tall near
+                           #     sprites, M13-15M), a power of 16 so the
                            # per-column byte offset is a whole-nibble shift.
 
 

@@ -30,6 +30,7 @@ from doomfj.config import Config, PNEAR_SEG_BUDGET
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
 from doomfj.mapcompiler import (  # shared geometry (R6)
     NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
+    bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam,
 )
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
@@ -555,13 +556,23 @@ class ReferenceModel:
             node = n.left if side > 0 else n.right
         return node & (NF_SUBSECTOR - 1)
 
-    def bsp_render_order(self, cmap: CompiledMap, vx: int, vy: int) -> list:
+    def bsp_render_order(self, cmap: CompiledMap, vx: int, vy: int, *,
+                         bbox_gate: dict | None = None, va: int | None = None) -> list:
         """R_RenderBSPNode: the front-to-back subsector visit order from viewpoint (vx, vy) [16.0 map
         coords]. At each node the viewer's side (`_point_side > 0` ⇒ back/left, else front/right, R6) is
         the NEAR child — descend it first, then the far child — so subsectors come out nearest-first (the
         order walls are drawn for solid-seg clipping). Iterative (explicit stack): the M7-built BSP is
         unbalanced/deep (~1829 segs on E1M1), so recursion would overflow — exactly why F5 reserves the
-        runtime stack for the BSP's upper levels (§2.1). Returns subsector indices."""
+        runtime stack for the BSP's upper levels (§2.1). Returns subsector indices.
+
+        M13-15M `bbox_gate` (with `va`): the BBOX WEDGE CULL's oracle mirror. A gated node whose
+        union subtree box lies wholly outside either of the frame's two wedge half-planes is
+        SKIPPED — subtree, segs, budget increments and all — exactly as the emitted fj gate skips
+        it. The gate dict must come from mapcompiler.bbox_gate_boxes (the SSOT), or the two sides
+        disagree on which marking segs spend PNEAR budget."""
+        gA = gB = None
+        if bbox_gate:
+            gA, gB = wedge_planes_bam(va & 0xFFFFFFFF)
         order = []
         stack = [cmap.root]
         while stack:
@@ -569,6 +580,11 @@ class ReferenceModel:
             if child & NF_SUBSECTOR:
                 order.append(child & (NF_SUBSECTOR - 1))
             else:
+                if bbox_gate is not None:
+                    box = bbox_gate.get(child)
+                    if box is not None and (bbox_wedge_miss(gA, box, vx, vy)
+                                            or bbox_wedge_miss(gB, box, vx, vy)):
+                        continue
                 n = cmap.nodes[child]
                 back = _point_side(n.x, n.y, n.dx, n.dy, vx, vy) > 0
                 near, far = (n.left, n.right) if back else (n.right, n.left)
@@ -576,11 +592,12 @@ class ReferenceModel:
                 stack.append(near)   # near on top ⇒ drawn first (front-to-back)
         return order
 
-    def visible_segs(self, cmap: CompiledMap, vx: int, vy: int) -> list:
+    def visible_segs(self, cmap: CompiledMap, vx: int, vy: int, *,
+                     bbox_gate: dict | None = None, va: int | None = None) -> list:
         """The seg indices (into `cmap.segs`) of every visible subsector, flattened in BSP front-to-back
         order — the wall draw order. Each subsector contributes its `firstseg .. firstseg+numsegs`."""
         segs = []
-        for ss in self.bsp_render_order(cmap, vx, vy):
+        for ss in self.bsp_render_order(cmap, vx, vy, bbox_gate=bbox_gate, va=va):
             s = cmap.subsectors[ss]
             segs.extend(range(s.firstseg, s.firstseg + s.numsegs))
         return segs
@@ -1086,7 +1103,8 @@ class ReferenceModel:
                           plane_near: bool = False, planes_out: list | None = None,
                           wall_noise: bool = False, sky: bool = False,
                           near_steps: bool = False, things: bool = False,
-                          sprite_wad=None, things_out: list | None = None) -> bytes:
+                          sprite_wad=None, things_out: list | None = None,
+                          bbox_cull: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -1178,7 +1196,17 @@ class ReferenceModel:
             for _si, _ss in enumerate(scene.cmap.subsectors):
                 if _ss.numsegs and _si in things_by_ss:
                     ss_first[_ss.firstseg] = _si              # the walk's arrival point for its things
-        for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
+        # M13-15M: the bbox wedge cull's oracle half. The gate set and boxes come from the SSOT
+        # (bbox_gate_boxes) — thing-carrying subtrees get inflated boxes, so this is computed from
+        # THING_SPRITE-mapped things whether or not `things` is on (the fj bake does the same).
+        _gate = None
+        if bbox_cull:
+            _tss = {self.point_in_subsector(scene.cmap, _t.x, _t.y)
+                    for _t in scene.map_wad.things(scene.mapname)
+                    if THING_SPRITE.get(_t.type) is not None}
+            _gate = bbox_gate_boxes(scene.cmap, thing_subsectors=_tss)
+        for seg_i in self.visible_segs(scene.cmap, px, py, bbox_gate=_gate,
+                                       va=viewangle & 0xFFFFFFFF):  # front-to-back order
             if things and seg_i in ss_first:
                 for t in things_by_ss[ss_first[seg_i]]:
                     if n_claimed == W:

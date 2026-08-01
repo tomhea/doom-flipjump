@@ -160,7 +160,15 @@ scenery without ever touching monsters.
 the native engine's throughput). That is ABOVE the old 30–35M band, and knowingly so: the frame now
 draws 28 of 28 monsters at the worst viewpoint where it used to draw 17.
 
-### ⚠ The 15M target is NOT met, and EXP-9 says why in one number
+### ⚠ The 15M target is NOT met — and EXP-11 shows it is ARITHMETIC, not a missing lever
+
+Measured components only: V4 things 7.02M + `wall_scale_setup_m` 4.06M + walk skeleton ~3.9M
+**= ~15.0M with nothing drawn**. Add the wedge cull, `point_to_angle` and V3 step faces and the
+floor is **~24.8M before a pixel is emitted**, with EXP-10's ~14.4M residue still on top. So no
+lever inside the residue can reach 15M while all three owner constraints hold (160x100, all
+features, no thing limit). 39.2M -> ~30M looks reachable; 15M needs a constraint to move.
+
+### And the reason resolution cannot do it either
 
 The owner asked for <15M/frame. **Cost is nearly resolution-INDEPENDENT**: building at 96×60 (36% of
 the pixels) bought only 21% of the ops, and the fit puts ~27.4M of the worst frame outside pixel

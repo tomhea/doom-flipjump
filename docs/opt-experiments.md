@@ -575,3 +575,40 @@ column, 39% are ≤2 at the worst viewpoint). So the per-seg fixed cost is amort
 nothing — roughly one net claimed column each, on a 160-column frame. Any real win has to reduce the
 NUMBER of setup-paying segs, not the price of one. (A checked-and-rejected micro-lever: skipping the
 second `scale_from_global_angle` when x1 == x2 is worth exactly zero — no seg is one column wide.)
+
+
+## EXP-11 — the 15M target is ARITHMETICALLY out of reach under the stated constraints
+
+Constraints (owner, 2026-08-01): keep 160x100, keep all four visual features, no thing count limit.
+Under those, add up only the components that have been MEASURED, and stop:
+
+| component | cost | how measured |
+|---|---:|---|
+| V4 things (every monster drawn) | **7.02M** | subtraction vs the V3 tier |
+| `wall_scale_setup_m` | **4.06M** | EXP-10, doubling |
+| BSP walk skeleton + per-seg xorby | ~3.9M | ablation |
+| **subtotal** | **~15.0M** | **= the target, with NOTHING drawn** |
+| + wedge cull | ~2.1M | ablation |
+| + all `point_to_angle` | ~2.0M | ablation |
+| + V3 step faces | ~5.7M | ablation |
+| **floor before a single pixel is emitted** | **~24.8M** | |
+
+The ~14.4M residue EXP-10 identified is on TOP of that. So even a residue of exactly zero — a
+perfect emit, a free occlusion pre-scan, free plane attribution — lands at ~24.8M, **65% over
+target**. No lever inside the residue can close it, which is why the search stopped here rather than
+bisecting further: the bisection can only reallocate the 14.4M, never the 24.8M underneath it.
+
+### What would have to give, in the owner's own terms
+
+* **The monsters.** V4 is 7.02M and it is the single largest measured component. Every monster drawn
+  is the explicit requirement, so this is the constraint most expensive to hold — and the one the
+  owner most clearly wants held.
+* **The step faces.** ~5.7M, and without them stairs are invisible — a playability loss, not a
+  cosmetic one.
+* **The algorithm.** ~150 segs pay a fixed setup to fill ~1 net column each (EXP-10). A renderer
+  whose per-frame cost scales with COLUMNS rather than SEGS would not have this floor at all. That
+  is a different renderer, not an optimisation of this one.
+
+**Nothing here says the frame cannot be made faster** — the 14.4M residue is real and unbisected,
+and 39.2M -> ~30M looks reachable. It says 15M specifically is the wrong number to aim at while all
+three constraints hold. Pick which constraint moves, and the target becomes a design question again.

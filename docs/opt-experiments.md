@@ -659,3 +659,56 @@ elsewhere). That is the real blocker for 15M, and it is a tooling gap, not a ren
 
 **The honest summary: 39.2M -> 24.6M is available today by changing the level, and it costs nothing.
 15M needs a purpose-built level, which needs a node builder.**
+
+
+## EXP-13 — A REAL OP PROFILER, and what actually burns the frame ⭐
+
+Every number before this came from subtracting whole-frame builds (~20 min each) or, twice, from a
+stale model. `scratchpad/opprof.py` attributes ops **directly**:
+
+* assemble with `debugging_file_path` — flipjump saves every label's address, and label names carry
+  the **full macro call path** (`f9:...frame.seg_pass2_leaf_body_lines(21)---...hex.exact_xor(5)`);
+* run the interpreter's FEATURED loop (`fj.run(..., profile=True)`), whose `register_op_address(ip)`
+  fires on **every op** — monkeypatched into a histogram;
+* map each executed address to the nearest label at or below it and aggregate at any depth.
+
+⚠ **Ops inside a `:wflips:` area must be BLAMED ON THEIR CALLER.** A wflip area is where the bit
+flips physically happen, not who asked for them; a naive profile just says "71% of the frame is
+wflip areas", which is true and useless. The hook tracks the last non-wflip macro and credits them.
+
+Runs at ~335k ops/s, so a 4.7M-op frame profiles in **14 seconds** — against ~20 minutes for a
+build-and-subtract. This should have existed before EXP-1.
+
+### The square room (4.69M ops = the LEVEL-INDEPENDENT floor), byte-exact
+
+| where | share |
+|---|---:|
+| `frame.seg_pass2_leaf_body_lines` (direct + the wflips it causes) | **~89%** |
+| everything else (startup, input parse, pass-1, present) | ~11% |
+
+**By the primitive that ISSUES the work** — this is the low-level optimisation list:
+
+| primitive | share of the whole frame |
+|---|---:|
+| `hex.exact_xor` | **37.4%** |
+| `hex.double_exact_xor` | **13.8%** |
+| `hex.quadrupled_exact_xor` | 4.0% |
+| `hex.if_flags` | 2.2% |
+| `hex.tables.jump_to_table_entry` | 1.6% |
+| `hex.shifts.shr_bit_once` | 1.6% |
+| `hex.cmp` | 1.4% |
+| `hex.add.clear_carry` | 1.4% |
+| `hex.shifts.shl_bit_once` | 1.3% |
+| `hex.add_mul` | 0.8% |
+
+**The xor family is 55% of the frame.** `hex.exact_xor` is `wflip src+w, switch, src` + a 16-entry
+jump table (`flipjump/stl/hex/logics.fj`), so its cost is the wflip itself. A 30% saving there is
+~16% off every frame, on every map, at every resolution — which is what a "low-level optimise the
+top macros" pass should target, and it is worth more than every knob in EXP-9 combined.
+
+### What this retires
+
+EXP-11's "the floor is ~24.8M, 15M is arithmetically impossible" was assembled from stale ablation
+numbers. The profiler makes that whole style of argument unnecessary: measure the frame you have,
+in seconds, and read the answer off. **Re-derive any cost claim in this file with `opprof.py` before
+acting on it** — two of them have already turned out to be wrong.

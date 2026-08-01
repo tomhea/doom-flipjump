@@ -742,18 +742,55 @@ Where those xors are issued from (wflip blame, outermost):
 | `frame.seg_pass1_leaf_body_ts` (per two-sided seg) | 6.0% |
 | `proj.point_on_side_leaf` (per BSP node) | 5.8% |
 
-### ⭐ The concrete low-level lever this exposes
+### ⚠ RETRACTED — the "8-wide xor" lever was a MISREADING of the STL
 
-`flipjump/stl/hex/logics.fj` batches exact-xor at **1, 2 and 4 nibbles** (`exact_xor`,
-`double_exact_xor`, `quadrupled_exact_xor`) — batching amortises the wflip + jump-table overhead
-across more nibbles, which is why the doubled/quadrupled forms exist at all.
+The first version of this section proposed an 8-wide `octupled_exact_xor`, reasoning that
+`double_`/`quadrupled_exact_xor` batch 2 and 4 NIBBLES and the renderer's registers are 8 nibbles
+wide. **That is not what they do.** Reading `flipjump/stl/hex/logics.fj`: they xor ONE src nibble
+into 2 or 4 different DESTINATIONS (see `address_and_variable_double_xor` — an address *and* a
+variable). The batching axis is destinations, not width. An 8-nibble register xor is 8 separate
+`exact_xor` calls each with a DIFFERENT src, which cannot share a jump table. **There is no
+octupled version to write.** Third stale/wrong lever this campaign — see EXP-10 and EXP-11.
 
-**This renderer's registers are almost all 8 nibbles** (`hex.vec 8` for every fixed-point value), so
-every 8-nibble operation is currently paying two quadrupled xors, or four doubles, or eight singles.
-An **8-wide `octupled_exact_xor`** would halve the batching overhead on the single hottest primitive
-in the program. That is a change to the flipjump STL, not to this repo, and it is measurable in 14
-seconds with `opprof.py` instead of 20 minutes with a build.
+### What the xors are ACTUALLY for (`opprof.py`, caller attribution)
 
-**Next session: prototype the 8-wide xor and re-profile.** If the frame's ~69% xor share drops even
-a fifth, that is ~14% off every frame on every map at every resolution — more than the entire EXP-1
-to EXP-8 campaign delivered combined.
+| caller of the xor | share of frame |
+|---|---:|
+| `hex.zero` | **14.1%** |
+| `hex.pointers.set_flip_and_jump_pointers` (pointer setup, 2 entries) | **11.4%** |
+| `hex.tables.jump_to_table_entry` (table dispatch) | **7.4%** |
+| `hex.xor_zero` | **6.4%** |
+| `hex.cmp` | 4.9% |
+| `hex.add_mul` | 4.1% |
+
+**~20% of the frame is spent ZEROING REGISTERS** (`hex.zero` + `hex.xor_zero`), ~11% is pointer
+setup and ~7% is table dispatch. But drilling into WHO zeroes shows the cost is **diffuse**:
+
+| | share |
+|---|---:|
+| `hex.add > jump_to_table_entry > xor_zero` | 2.11% |
+| `hex.set > hex.set > hex.zero` | 1.97% |
+| `hex.scmp > hex.mov > hex.zero` | 1.62% |
+| `hex.shl_hex > xor_zero` | 1.53% |
+| `hex.add_mul > xor_zero` | 1.41% |
+| `frame.seg_pass2_leaf_body_lines > hex.mov > hex.zero` | 1.17% |
+| ... a long tail of ~50 more | |
+
+### ⭐ THE REAL CONCLUSION: there is no single macro to optimise
+
+The renderer has only ONE explicit `hex.zero` in its hottest leaf. The zeroing lives inside the STL
+hex ops it calls, spread over dozens of sites of which **the largest is ~2%**. So:
+
+**No "top 10 macros" pass can deliver 2.6x. The cost is the hex arithmetic itself, diffusely.**
+
+That reframes the remaining levers, in order of measured size:
+
+1. **Narrow the registers.** Nearly every value is `hex.vec 8`, and zero/xor/mov/cmp cost scales
+   LINEARLY with nibble count. Values that fit in 4-5 nibbles (screen rows, column indices, run
+   lengths, light rows) pay double. This is the one lever that attacks the diffuse cost everywhere
+   at once, and `opprof.py` prices any experiment in 14 seconds.
+2. **`proj.column_params_m`** — ~2.7% across four separate zero/shift sites, the single largest
+   renderer-side cluster.
+3. Pointer setup (11.4%): fewer, wider memory reads. ⚠ This is EXP-6's hex-cell idea, which was
+   REVERTED for an implementation bug, not because the target was wrong. The profiler now says the
+   target was right. Retry it — proving the storage model in Python FIRST, as EXP-6 concluded.

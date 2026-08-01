@@ -158,5 +158,27 @@ report("WHO PAYS THE WFLIP COST (71% of the frame) -- outermost",
        lambda p: p[0], 10, BLAME)
 report("WHO PAYS THE WFLIP COST -- by the primitive that issued it",
        lambda p: p[-1], 15, BLAME)
+
+
+def caller_of_xor(pth):
+    """The macro that CALLED the xor primitive -- i.e. what is actually generating them."""
+    for i in range(len(pth) - 1, -1, -1):
+        if "exact_xor" in pth[i]:
+            return " > ".join(pth[max(0, i - 2):i + 1])
+    return None
+
+
+report("WHAT IS CALLING THE XORS (the real question)", caller_of_xor, 18, BLAME)
+
+
+def zero_parent(pth):
+    """Who asks for a ZERO? hex.zero/xor_zero live inside other ops -- name the op above them."""
+    for i, c in enumerate(pth):
+        if c in ("hex.zero", "hex.xor_zero"):
+            return " > ".join(pth[max(0, i - 2):i + 1])
+    return None
+
+
+report("WHO IS ZEROING (~20% of the frame)", zero_parent, 18, BLAME)
 print("-" * 69)
 print(f"{'TOTAL':46s} {total:13,}")

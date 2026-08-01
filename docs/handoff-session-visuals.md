@@ -136,7 +136,52 @@ runs, against the cached binary.
 
 ---
 
-## 5. What is left, in the order I would do it
+## 5. STATE AT THE END OF THIS SESSION (2026-08-01) — read this first
+
+**Sprite selection is now DISTANCE-ONLY, by owner decision.** There is no count limit: both
+`THING_BUDGET` and `MONSTER_BUDGET` sit at 255 (the widest the 2-nibble counters hold) and cannot
+bind — E1M1's heaviest viewpoint projects 52 things. What a frame draws is decided entirely by the
+per-thing **min-size reject**: scenery below `MIN_SPRITE_H` = 3 screen px is not drawn, a monster
+keeps the 1 px bound and is never dropped. Retiring the counts changed **zero pixels at all four
+gate viewpoints** — the size rule already filtered everything a count could have.
+
+The counters and their compares are deliberately KEPT (≈one test per thing): they are the backstop
+against a pathological map, and if a limit is ever wanted again, lowering `THING_BUDGET` alone thins
+scenery without ever touching monsters.
+
+**Frame cost, shipped:** 27.8M spawn / 33.7M courtyard / 34.5M tree / **39.2M worst** (~2.9 fps at
+the native engine's throughput). That is ABOVE the old 30–35M band, and knowingly so: the frame now
+draws 28 of 28 monsters at the worst viewpoint where it used to draw 17.
+
+### ⚠ The 15M target is NOT met, and EXP-9 says why in one number
+
+The owner asked for <15M/frame. **Cost is nearly resolution-INDEPENDENT**: building at 96×60 (36% of
+the pixels) bought only 21% of the ops, and the fit puts ~27.4M of the worst frame outside pixel
+count altogether. A 1×1 frame would still cost ~27M. Every cheap lever is now measured and dead
+(`docs/opt-experiments.md` EXP-9): ditto columns, the WPX run cap, V1 grain, the `fixed_div` swap,
+a per-linedef setup memo (only ~10% of setup-paying segs share a linedef), and the budget knobs
+(−2.57M worst but +855k courtyard and ~750 px of floor damage — not shipped).
+
+**The only lever of the required size is halving the per-seg `wall_setup` + `wall_scale_setup`,
+~190k ops paid ~150 times per frame.** That is a restructure, not a knob, and it is its own phase.
+`scratchpad/bench.py` is the harness for it: any tier/knob/resolution, cached, byte-exact gated.
+
+### Also worth knowing before touching anything
+
+* **A latent defect at TEXTURE_DOWNSCALE ≠ 2.** At 96×60 spawn is byte-exact but the other three
+  viewpoints DIFFER, so something in the lines renderer does not follow `cfg` at odd downscales.
+  Harmless today (the shipped tier is 160×100, downscale 2); a trap for any future resolution work.
+* **Two binding traps cost two probes this session.** `wall_renderer` does
+  `from doomfj.reference_model import THING_BUDGET, ...` (bound at IMPORT), and
+  `wpx_strip(..., cap=WPX_RUN_CAP)` is a KEYWORD DEFAULT (bound at DEF time). Patching the module
+  global moves neither. `scratchpad/bench.py` documents both and patches every binding site.
+* `tests/fj/test_floor_planes_fj.py` still carries two permanently-skipped tests for the legacy
+  framebuffer flat kernel — the tier is slated for deletion at M13p8; tier and tests should go
+  together.
+
+---
+
+## 5a. What is left, in the order I would do it
 
 Items 1–3 of the previous list are **done**: the V1–V4 regression test is committed
 (`tests/fj/test_visual_features.py`), the flags are wired into `build_wall_renderer` with its R0

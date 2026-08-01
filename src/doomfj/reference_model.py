@@ -119,20 +119,24 @@ MIN_SPRITE_H_MONSTER = 1          # ... but a MONSTER is never dropped for being
                                   # things that shoot back never do.
 MONSTER_TYPES = frozenset({7, 9, 16, 58, 64, 65, 66, 67, 68, 69, 71, 84, 88,
                            3001, 3002, 3003, 3004, 3005, 3006})
-MONSTER_BUDGET = 64               # V4: monsters get their OWN budget, so THING_BUDGET can never
-                                  # drop one. EXP-8a: budget slots are handed out in BSP walk-arrival
-                                  # order, which is not distance order, so at a crowded viewpoint six
-                                  # ONE-PIXEL bonus dots were holding slots while 24 monsters were
-                                  # turned away. Decor and pickups are scenery; a monster is the game.
-THING_BUDGET = 16                 # V4: things PROJECTED per frame. Each pays ~47k fj ops (4 FixedMuls
+MONSTER_BUDGET = 255              # V4: NO COUNT LIMIT (owner, 2026-08-01). 255 is the widest value
+                                  # the 2-nibble `n_mon`/`n_thing` counters hold, and E1M1's heaviest
+                                  # viewpoint projects 52 things, so neither budget can bind -- what
+                                  # a frame draws is decided ENTIRELY by distance now, via the
+                                  # per-thing min-size reject. The counters and their compares stay:
+                                  # they cost ~one test per thing, and they are the backstop that
+                                  # keeps a pathological map from unbounded per-frame work.
+                                  # ⚠ Both are kept SEPARATE deliberately. If a limit is ever needed
+                                  # again, lowering THING_BUDGET alone thins scenery without ever
+                                  # touching monsters -- which is the whole lesson of EXP-8a, where
+                                  # one shared counter let six ONE-PIXEL bonus dots hold the frame's
+                                  # slots while 24 monsters were turned away.
+THING_BUDGET = 255                # V4: things PROJECTED per frame. Each pays ~47k fj ops (4 FixedMuls
                                   # + 2 FixedDivs), so this is the knob that bounds the feature the
                                   # way STEP_SEG_BUDGET bounds V3 -- and, as there, the walk is
                                   # front-to-back so what the budget drops is the FURTHEST things.
-                                  # 16, not DOOM's unbounded, per EXP-8 (docs/opt-experiments.md):
-                                  # it does not bind at all at spawn or the courtyard, and at the two
-                                  # sprite-heavy viewpoints it buys -5.4M / -1.2M ops for 41 / 19
-                                  # pixels of a 16,000-pixel frame -- which lands both inside the
-                                  # 30-35M band. Owner's call, taken 2026-08-01.
+                                  # Was 16 (EXP-8); RETIRED as a count limit 2026-08-01 -- see
+                                  # MONSTER_BUDGET above. Distance, not arrival order, decides.
 
 
 def sprite_bucket(h: int, view_h: int) -> int:

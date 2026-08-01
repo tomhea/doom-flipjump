@@ -1545,10 +1545,22 @@ ns proj {
     //   schoolbook rows with SCALE as the multiplier (<= 3 nonzero nibbles; zero rows if0-skip).
     //   Bit-identical to wall_screen_span + clips on the same inputs. @requires hex.init
     def column_params_m top, bottom, scale, wtc8, wtf8, centeryfix_c, viewh1 \
-            @ prod, cvh, ccyf, tneg, tok, bok, bhi, end {
+            @ prod, cvh, ccyf, cinit, cset, cgo, tneg, tok, bok, bhi, end {
+        // EXP-14: `ccyf` and `cvh` are COMPILE-TIME constants and this macro runs once per COLUMN,
+        // so re-setting them every call cost two `hex.set 8` -- a zero plus a xor across eight
+        // nibbles each. A macro's locals are program statics (the EXP-5 sin/cos-cache lesson), so
+        // they survive between calls: set them on the FIRST call only, behind a 1-nibble flag.
+        // Bit-identical -- nothing else ever writes either register. `opprof.py` put the
+        // `hex.set > hex.set > hex.zero` path at ~2% of the whole frame.
+        hex.if0 1, cinit, cset
+        ;cgo
+      cset:
+        hex.set 8, ccyf, centeryfix_c
+        hex.set 8, cvh, viewh1
+        hex.set 1, cinit, 1
+      cgo:
         hex.zero 8, prod
         rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wtc8, scale
-        hex.set 8, ccyf, centeryfix_c
         hex.mov 8, top, ccyf
         hex.sub 8, top, prod                // topfrac = centeryfix - wt*scale
         hex.shr_hex 8, 4, top               // >> 16 arithmetic:
@@ -1563,8 +1575,7 @@ ns proj {
       tneg:
         hex.zero 8, top
       tok:
-        hex.set 8, cvh, viewh1              // bottom = min(VIEW_H-1, bottom)
-        hex.scmp 8, bottom, cvh, bok, bok, bhi
+        hex.scmp 8, bottom, cvh, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
       bhi:
         hex.mov 8, bottom, cvh
       bok:
@@ -1572,6 +1583,7 @@ ns proj {
       prod: hex.vec 8
       cvh: hex.vec 8
       ccyf: hex.vec 8
+      cinit: hex.vec 1
       end:
     }
 

@@ -794,3 +794,53 @@ That reframes the remaining levers, in order of measured size:
 3. Pointer setup (11.4%): fewer, wider memory reads. ⚠ This is EXP-6's hex-cell idea, which was
    REVERTED for an implementation bug, not because the target was wrong. The profiler now says the
    target was right. Retry it — proving the storage model in Python FIRST, as EXP-6 concluded.
+
+
+## EXP-14 — two loop-invariant hoists the profiler found ✅ KEEP (and a lesson about where to measure)
+
+The first optimisations in this repo found by PROFILING rather than by guessing. Both are
+bit-identical by construction: a compile-time constant that was being re-set inside a loop.
+
+1. **`hex.set 8, cVH, viewh` hoisted out of the per-column loop** in
+   `frame.seg_pass2_leaf_body_lines`. `cVH` is written once and only ever read, and `viewh` is a
+   macro parameter, so setting it once per SEG instead of once per CLAIMED COLUMN cannot change a
+   bit.
+2. **`proj.column_params_m`'s two per-call constant sets** (`ccyf`, `cvh`) replaced by a one-time
+   init behind a 1-nibble flag. A macro's locals are program STATICS (the EXP-5 lesson), so they
+   survive between calls; this macro runs once per column and was paying two `hex.set 8` -- a zero
+   plus a xor across eight nibbles -- every time.
+
+### Measured on the SQUARE ROOM with `opprof.py` (12 seconds per iteration, not 20 minutes)
+
+| | ops | delta |
+|---|---:|---:|
+| baseline | 4,689,867 | — |
+| + cVH hoist | 4,660,885 | −28,982 |
+| + `column_params_m` init | **4,597,651** | **−92,216 (−2.0%)** |
+
+`hex.set > hex.set > hex.zero` fell from 1.97% to 0.92% of the frame.
+
+### ⚠ ...and on E1M1 it is worth TWENTY TIMES LESS
+
+| viewpoint | before | after | delta |
+|---|---:|---:|---:|
+| spawn | 27,772,549 | 27,736,221 | −36,328 |
+| courtyard | 33,672,272 | 33,649,252 | −23,020 |
+| tree | 36,649,307 | 36,608,256 | −41,051 |
+| worst | 39,158,568 | 39,131,985 | −26,583 |
+
+**BYTE-EXACT at all four.** But −0.1%, against −2.0% on the square room.
+
+**The lesson is about the PROFILER, not the hoists.** A 4-seg room's frame is mostly per-column
+emit, so per-column levers look enormous there. E1M1's frame is mostly per-SEG and per-SPRITE work,
+so the same fix is noise. **Profile the map you actually ship**: `opprof.py` on the square room is
+12 seconds and will happily point at a lever worth 0.1% where it matters. E1M1 costs a ~10 minute
+assemble plus ~90 seconds of Python interpreter — pay it.
+
+### What this closes
+
+Every renderer-side zeroing site above 0.7% is now either fixed or inside an STL primitive
+(`hex.add`'s table dispatch, `hex.scmp`'s mov, `hex.shl_hex`, `hex.add_mul`). There is no third
+hoist of this shape to find. The remaining diffuse cost needs the register-narrowing pass (EXP-13a
+item 1), which is a different kind of change: it touches widths, and width bugs in this codebase
+have been Heisenbugs (fj-lessons R11, and "an n-nibble op reads n nibbles of its SOURCE").

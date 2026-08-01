@@ -2043,6 +2043,11 @@ ns frame {
         rep(pnear, k) .lines_plane_ptr x1       // ... and pclm[], walked in lockstep with it
         hex.set 2, one, 1
         hex.set 1, dvalid, 0                    // M13-ditto: no previous emitted column yet
+        // HOISTED out of the per-column loop (EXP-14). `viewh` is a compile-time parameter and
+        // `cVH` is never written again, so setting it once per SEG instead of once per CLAIMED
+        // COLUMN is bit-identical. `hex.set 8` is a zero + a xor across EIGHT nibbles, and
+        // `opprof.py` put the `hex.set > hex.set > hex.zero` path at ~2% of the whole frame.
+        hex.set 8, cVH, viewh
       loop:
         hex.cmp 2, x, x2, body, ret, ret
       body:
@@ -2060,8 +2065,7 @@ ns frame {
         // stub shrinks every wall and so changes the WPX emit volume too (its delta is NOT the
         // projection's cost; see docs/handoff-m13-2s-fast.md §1).
         rep(ptwice, k) .lines_projcall centery*0x10000, viewh1, dtop, dbot, scale, wtc8, wtf8
-        hex.set 8, cVH, viewh                   // cexcl = min(top, VIEW_H)
-        hex.mov 8, cexcl, top
+        hex.mov 8, cexcl, top                   // cexcl = min(top, VIEW_H); cVH hoisted above
         hex.scmp 8, top, cVH, cdone, cge, cge
       cge:
         hex.mov 8, cexcl, cVH

@@ -5,7 +5,7 @@
     python scratchpad/bench.py --knob PNEAR_SEG_BUDGET=32 --knob STEP_SEG_BUDGET=8
     python scratchpad/bench.py --off steps --off things # a tier without V3 / V4
 
-⚠ TWO traps this harness exists to avoid:
+!! TWO traps this harness exists to avoid:
   * `wall_renderer` does `from doomfj.reference_model import THING_BUDGET, ...`, so its names are
     BOUND AT IMPORT. Patching only `reference_model.X` moves the oracle and leaves the emitter on
     the old value -- a "byte-exact" run that proves nothing. `_set_knob` writes BOTH modules (and
@@ -44,6 +44,9 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--ablate", action="append", default=[])
 ap.add_argument("--knob", action="append", default=[], metavar="NAME=VALUE")
 ap.add_argument("--off", action="append", default=[], choices=["grain", "sky", "steps", "things"])
+ap.add_argument("--res", default="", metavar="WxH",
+                help="render at a different resolution. Config is fully W/H-derived, so the "
+                     "oracle follows and byte-exactness still holds.")
 ap.add_argument("--tag", default="")
 args = ap.parse_args()
 
@@ -65,7 +68,10 @@ for kv in args.knob:
     KNOBS[k] = int(v)
     print(f"  knob {k} = {v}  (patched in {', '.join(_set_knob(k, int(v)))})")
 
-cfg = Config()
+cfg = Config(**(dict(zip(("W", "H"), map(int, args.res.split("x")))) if args.res else {}))
+if args.res:
+    print(f"  resolution {cfg.VIEW_W}x{cfg.VIEW_H}  downscale {cfg.TEXTURE_DOWNSCALE}"
+          f"  col_bits {cfg.COL_BITS}  ({cfg.VIEW_W * cfg.VIEW_H:,} px)")
 mw = WadFile.from_path('tests/fixtures/freedoom_e1m1.wad')
 art = WadFile.from_path('assets/freedoom1.wad')
 rm = ReferenceModel(cfg)
@@ -86,7 +92,8 @@ def build():
         key.update(p.read_bytes())
     key.update(repr(sorted(FLAGS.items())).encode())
     key.update(repr(sorted(ABL)).encode())
-    key.update(repr(sorted(KNOBS.items())).encode())      # ... or a knobbed build collides
+    key.update(repr(sorted(KNOBS.items())).encode())
+    key.update(args.res.encode())      # ... or a knobbed build collides
     tag = key.hexdigest()[:16]
     cache = ROOT / "scratchpad" / "fjmcache"
     cache.mkdir(exist_ok=True)
@@ -128,6 +135,6 @@ for i, (vx, vy, va, tag) in enumerate(VPS):
     ops = r.run(scr)
     tot = max(tot, ops)
     ok = "" if WANT is None else ("  BYTE-EXACT" if bytes(scr.pixel_indices) == WANT[i]
-                                  else "  ⚠ DIFFERS")
+                                  else "  !! DIFFERS")
     print(f"{tag:10s} {ops:12,}{'   UNDER 15M' if ops < 15_000_000 else ''}{ok}", flush=True)
 print(f"{'WORST':10s} {tot:12,}")

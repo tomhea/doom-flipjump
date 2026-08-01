@@ -445,3 +445,80 @@ budget-16 oracle:
 
 The worst frame sits at the very top of the 30–35M band, so it is the one still worth spending on;
 the tree now has ~3M of headroom it did not have.
+
+
+---
+
+## EXP-9 — the 15M campaign: where the frame ACTUALLY is, and why knobs cannot get there 📏
+
+Target: every viewpoint under **15M ops/frame** (owner, 2026-08-01 — "they will notice a slow game").
+Starting point after the V4 selection policy: 27.8M spawn / 33.7M courtyard / 34.5M tree / 39.2M worst.
+
+### The measurement that ended the search: cost is nearly RESOLUTION-INDEPENDENT
+
+`Config` is fully W/H-derived, so a smaller viewport is a one-line experiment and the oracle follows.
+Built and ran at 96x60 (36% of the pixels):
+
+| viewpoint | 160x100 | 96x60 | fitted `ops = FIXED + k*pixels` |
+|---|---:|---:|---|
+| spawn | 27,772,447 | 21,837,506 | **FIXED ~18.5M**, k ~579/px |
+| worst | 39,156,918 | 31,606,532 | **FIXED ~27.4M**, k ~737/px |
+
+**Cutting 64% of the pixels bought 21%.** ~27M of the worst frame does not care how many pixels
+there are, so **no resolution short of absurd reaches 15M** — a 1x1 frame would still cost ~27M.
+That single build retired the whole "make the viewport smaller" family.
+
+⚠ It also surfaced a real bug: at 96x60 (TEXTURE_DOWNSCALE=3) spawn is byte-exact but the other
+three viewpoints DIFFER. Something in the lines renderer does not follow `cfg` at odd downscales.
+Not chased — the tier is not wanted — but it is a genuine latent defect at any non-2 downscale.
+
+### Where the fixed cost is
+
+~150 segs survive the cull per frame and each pays `wall_setup` + `wall_scale_setup` at roughly
+**190k ops** (`scratchpad/bboxcull_probe2.py`'s stage accounting). 150 x 190k ~ 28M — that IS the
+fixed cost. The walk itself visits all 2057 segs at every viewpoint, but a seg past the `full` flag
+costs only a test, so the walk skeleton is minor next to the per-seg setup.
+
+The dearest primitive lever is already spent: `hex.fixed_div 8,4` (38,500 ops) is GONE from the wall
+scale path (M13-scalerecip); the only two left in `projection.fj` are inside slope_div/point_to_dist.
+
+### Knobs, measured (all byte-exact)
+
+| tier | spawn | courtyard | tree | worst |
+|---|---:|---:|---:|---:|
+| shipped | 27,772,447 | 33,671,882 | 34,541,408 | 39,156,918 |
+| PNEAR_SEG_BUDGET 64 + STEP_SEG_BUDGET 8 | 27,772,440 | **34,526,560** | 34,185,505 | 36,591,853 |
+
+−2.57M on the worst frame, **+855k on the courtyard**, and ~750 px of floor-attribution damage there
+(the "grey floor / yellow sides" bug partially returning). **NOT SHIPPED**: it spends picture on a
+step that does not reach the target anyway. `PNEAR_SEG_BUDGET` below 64 is not available at all —
+32 costs 7,587 px at spawn and 13,016 at the courtyard (`scratchpad/knob_probe.py`).
+
+### Three levers killed by measurement, before any fj was written
+
+* **Ditto columns** (collapse a column identical to its left neighbour): only **2-8%** of emitted
+  pairs repeat once WPX per-pixel wall detail is on. `scratchpad/ditto_count.py`'s 58% was a
+  different key on an older tier.
+* **`WPX_RUN_CAP`**: costs 700-2,100 px at cap 8 and does not touch the dominant cost. ⚠ The first
+  run of this probe reported "0 px at every cap" — `wpx_strip(..., cap=WPX_RUN_CAP)` is a KEYWORD
+  DEFAULT, bound at def-time, so patching the module global changed nothing. Same class as the
+  import-binding trap `scratchpad/bench.py` documents. **Patch `__kwdefaults__`, or trust nothing.**
+* **V1 grain**: turning it OFF *increases* run count 2-7%. It is not the stream driver.
+
+### What would actually reach 15M
+
+Only a **per-seg pipeline re-architecture** — the ~190k setup paid ~150 times. Everything else is
+noise against it. Ranked, with honest uncertainty:
+
+1. **Halve the per-seg setup.** No single primitive is left to swap; this is a restructure of
+   `wall_setup`/`wall_scale_setup`, most likely by hoisting per-SUBSECTOR invariants out of the
+   per-seg path. Upside if it lands: ~14M off the worst frame. This is the only lever of the
+   required size.
+2. **Cull segs before the setup, not after.** ~150 reach it; DOOM's solidsegs would reject more.
+   `scratchpad/cull_levers.py` measured node-AABB culling at ~35% of the population.
+3. Resolution + knobs on top: ~7.5M + ~2.5M, both with picture cost, both only worth spending once
+   (1) has landed and the fixed cost is no longer the whole frame.
+
+**Not attempted deliberately**: reaching 15M by deleting features. Dropping V3 step faces (-5.7M)
+makes stairs invisible, and dropping sprites makes monsters invisible — the owner asked for a fast
+game that is still fun, and those two are the fun.

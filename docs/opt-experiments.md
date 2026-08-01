@@ -522,3 +522,56 @@ noise against it. Ranked, with honest uncertainty:
 **Not attempted deliberately**: reaching 15M by deleting features. Dropping V3 step faces (-5.7M)
 makes stairs invisible, and dropping sprites makes monsters invisible — the owner asked for a fast
 game that is still fun, and those two are the fun.
+
+
+## EXP-10 — ⚠ EXP-9's headline lever was WRONG. `wall_scale_setup_m` is 10%, not 50%
+
+Priced by DOUBLING it into dead registers (ablate `scaletwice`), the repo's own rule — never by
+stubbing:
+
+| viewpoint | shipped | doubled | **the kernel costs** | share of frame |
+|---|---:|---:|---:|---:|
+| spawn | 27,772,549 | 29,760,446 | **1.99M** | 7% |
+| courtyard | 33,672,272 | 36,472,088 | **2.80M** | 8% |
+| tree | 36,649,307 | 39,755,245 | **3.11M** | 8% |
+| worst | 39,158,568 | 43,219,006 | **4.06M** | **10%** |
+
+**~28k per seg, not ~190k.** EXP-9 said "the only lever of the required size is halving the per-seg
+`wall_setup` + `wall_scale_setup`, ~190k ops paid ~150 times" and put its upside at ~14M. **That is
+false.** Halving this kernel is worth ~2M at the worst viewpoint.
+
+**Where the 190k came from, and why it was wrong to use:** `scratchpad/bboxcull_probe2.py`, a host
+probe written for the PRE-optimisation framebuffer raster tier. It was never re-measured after
+M13-scalerecip replaced the signed `fixed_div` (38.5k) with the block-FP reciprocal (~19k), after
+the M13-mulorder operand swap, or after the move to the lines tier. A stale model number was quoted
+as a measurement — the exact failure this file's own method rules exist to prevent:
+**divide measured totals by MEASURED counts, never modelled ones.**
+
+### Corrected accounting of the 39.16M worst frame
+
+| component | cost | how known |
+|---|---:|---|
+| V4 things | 7.02M | subtraction vs the V3 tier |
+| V3 step faces | ~5.7M | earlier ablation |
+| `wall_scale_setup_m` | 4.06M | **EXP-10, doubling** |
+| BSP walk skeleton + per-seg xorby | ~3.9M | earlier ablation |
+| wedge cull | ~2.1M | earlier ablation |
+| all `point_to_angle` | ~2.0M | earlier ablation |
+| **UNACCOUNTED** | **~14.4M** | — |
+
+**The ~14.4M residue is now the only place a large win can live**, and it is NOT the scale setup and
+NOT resolution-dependent (EXP-9: ~27.4M of this frame is fixed against pixel count). The candidates,
+untested: `wall_setup` proper, the occlusion pre-scan, the per-seg column-store loop, and the
+`plane_near` marking-seg attribution — the last is worth ~5M by inference from the PNEAR 128→64 knob
+(−2.57M for half the budget).
+
+**Next session starts by bisecting that 14.4M**, with the `scaletwice`/`noprescan`/`projtwice`
+ablates that already exist and `scratchpad/bench.py`. Do NOT start by optimising the scale setup.
+
+### The seg-shape fact worth carrying
+
+~150 segs pay setup per frame and their mean screen width is **3.9–4.7 columns** (0% are a single
+column, 39% are ≤2 at the worst viewpoint). So the per-seg fixed cost is amortised over almost
+nothing — roughly one net claimed column each, on a 160-column frame. Any real win has to reduce the
+NUMBER of setup-paying segs, not the price of one. (A checked-and-rejected micro-lever: skipping the
+second `scale_from_global_angle` when x1 == x2 is worth exactly zero — no seg is one column wide.)

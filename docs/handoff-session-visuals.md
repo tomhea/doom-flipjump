@@ -169,9 +169,20 @@ count altogether. A 1×1 frame would still cost ~27M. Every cheap lever is now m
 a per-linedef setup memo (only ~10% of setup-paying segs share a linedef), and the budget knobs
 (−2.57M worst but +855k courtyard and ~750 px of floor damage — not shipped).
 
-**The only lever of the required size is halving the per-seg `wall_setup` + `wall_scale_setup`,
-~190k ops paid ~150 times per frame.** That is a restructure, not a knob, and it is its own phase.
-`scratchpad/bench.py` is the harness for it: any tier/knob/resolution, cached, byte-exact gated.
+⚠ **EXP-10 RETRACTS the lever EXP-9 named.** "Halve the per-seg setup, ~190k x ~150 segs, upside
+~14M" was built on a STALE probe (`bboxcull_probe2.py`, written for the pre-optimisation raster
+tier). Measured properly by doubling the kernel: `wall_scale_setup_m` costs **4.06M at the worst
+viewpoint — 10% of the frame, ~28k per seg.** Halving it is worth ~2M. **Do not start there.**
+
+What is actually left is a **~14.4M unaccounted residue** (see EXP-10's accounting table): not the
+scale setup, not resolution-dependent, and not yet bisected. Candidates: `wall_setup` proper, the
+occlusion pre-scan, the per-seg column-store loop, and `plane_near` attribution (~5M by inference
+from the PNEAR knob). **Next session starts by bisecting that**, with the existing
+`scaletwice`/`noprescan`/`projtwice` ablates and `scratchpad/bench.py`.
+
+Shape fact that constrains every idea: ~150 segs pay setup and their mean screen width is 3.9-4.7
+columns, i.e. roughly ONE net claimed column each on a 160-column frame. A win has to cut the NUMBER
+of setup-paying segs, not the price of one.
 
 ### Also worth knowing before touching anything
 

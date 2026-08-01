@@ -45,15 +45,21 @@ SCALE = 4                      # window upscale
 
 def main():
     ap = argparse.ArgumentParser()
-    # THE PLAYABLE DEFAULT IS THE ARENA, NOT E1M1 (owner: "change the map for a faster game").
-    # Measured byte-exact at five viewpoints: E2M8 (542 segs) runs 19.9-24.6M ops/frame against
-    # E1M1's 27.8-39.2M -- ~37% faster for the SAME renderer, same resolution, all four visual
-    # features, every monster drawn. Nothing is given up but the specific level, and a Doom engine
-    # at 4.6 fps in an arena full of monsters demos better than one at 2.9 fps in a corridor.
-    # E1M1 remains the ladder's canonical map and every golden/gate still targets it:
-    #     python scripts/walk_e1m1.py --wad tests/fixtures/freedoom_e1m1.wad --map E1M1
-    ap.add_argument("--wad", default="assets/freedoom1.wad")
-    ap.add_argument("--map", default="E2M8")
+    # THE PLAYABLE DEFAULT IS A PURPOSE-BUILT ARENA (owner: "change the map for a faster game";
+    # "no one will notice a missing sprite, but they will notice a slow game").
+    #
+    # 16 walls, 24 monsters, 8 items, ONE convex subsector and ZERO BSP nodes -- which is the trick
+    # that made it buildable without a node tool (see scratchpad/make_arena.py). Measured
+    # BYTE-EXACT at seven viewpoints: 11.6M-13.6M ops/frame at FULL 160x100 with all four visual
+    # features on and every monster drawn, against E1M1's 27.8-39.2M. That is the owner's <15M
+    # target met, and ~3x the frame rate.
+    #
+    # Two other maps, both still available and both byte-exact:
+    #     --wad assets/freedoom1.wad          --map E2M8   (542-seg arena, 19.9-24.6M)
+    #     --wad tests/fixtures/freedoom_e1m1.wad --map E1M1   (the ladder's canonical map, 27.8-39.2M)
+    # E1M1 remains canonical: every golden, gate and test still targets it.
+    ap.add_argument("--wad", default="tests/fixtures/arena.wad")
+    ap.add_argument("--map", default="MAP01")
     ap.add_argument("--asset", default=None)
     ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
@@ -88,7 +94,16 @@ def main():
 
     cfg = Config()
     mw = WadFile.from_path(str(ROOT / args.wad))
-    aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
+    # A geometry-only PWAD (the arena) carries no COLORMAP/textures/flats, so fall back to the
+    # IWAD for art. A self-contained map wad (the E1M1 fixture) keeps using itself, so its
+    # byte-exact goldens are untouched.
+    if args.asset:
+        aw = WadFile.from_path(str(ROOT / args.asset))
+    elif "COLORMAP" in mw.names():
+        aw = mw
+    else:
+        aw = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
+        print(f"  ({args.wad} is geometry-only -- taking art from assets/freedoom1.wad)")
 
     # V1-V4 ride on the rung-3a (plane_near) lines tier; the rung-3b two-sided tier is a different
     # emit path that none of them was written against, so they are off there.

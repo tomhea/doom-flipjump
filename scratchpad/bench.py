@@ -103,7 +103,9 @@ def build():
     key.update(repr(sorted(ABL)).encode())
     key.update(repr(sorted(KNOBS.items())).encode())
     key.update(args.res.encode())
-    key.update((args.wad + args.map + args.asset).encode())      # ... or a knobbed build collides
+    key.update((args.wad + args.map + args.asset).encode())
+    key.update(Path(args.wad).read_bytes())   # ... the wad CONTENT: a regenerated arena.wad
+                                              # at the same path must not hit the old binary      # ... or a knobbed build collides
     tag = key.hexdigest()[:16]
     cache = ROOT / "scratchpad" / "fjmcache"
     cache.mkdir(exist_ok=True)

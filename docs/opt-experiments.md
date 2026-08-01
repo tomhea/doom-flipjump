@@ -612,3 +612,50 @@ bisecting further: the bisection can only reallocate the 14.4M, never the 24.8M 
 **Nothing here says the frame cannot be made faster** — the 14.4M residue is real and unbisected,
 and 39.2M -> ~30M looks reachable. It says 15M specifically is the wrong number to aim at while all
 three constraints hold. Pick which constraint moves, and the target becomes a design question again.
+
+
+## EXP-12 — ⚠ THE REFRAME: the renderer is not slow, E1M1 is BIG. Cost is MAP cost.
+
+EXP-9/10/11 all searched inside the renderer. The owner had already said the map was negotiable
+("you can change the map for the better for a faster game") and that lever was never tested. It is
+the largest one available, and it costs **no fidelity at all** — a different level, not a worse
+renderer.
+
+### The floor: what a frame costs with essentially no map
+
+`tests/fixtures/square_room.wad` MAP01 — **4 segs, 1 subsector** — full 160x100, V1/V3/V4 on
+(no sky: the fixture has no sky flat), **BYTE-EXACT**:
+
+**4,689,867 ops.**
+
+That is the renderer's fixed cost: startup, input parse, the 160-column stream emit, present.
+**Everything above it is map cost.** So the question was never "how do I make the renderer 2.6x
+faster" — it is "how big a level fits in the budget".
+
+### Measured, all byte-exact, all at full resolution with every feature on
+
+| map | segs | subsectors | segs/subsector | **worst measured** | ops/seg above floor |
+|---|---:|---:|---:|---:|---:|
+| square room | 4 | 1 | 4.0 | **4,689,867** | — |
+| **E2M8** (arena) | 542 | 145 | 3.7 | **24,611,036** | 37.0k |
+| E1M1 | 2057 | 682 | 3.0 | **39,158,568** | 9.6k |
+
+**E2M8 is a 37% cut from E1M1 for free** — same renderer, same resolution, same four features, every
+monster drawn, byte-exact. ~4.6-5.7 fps against E1M1's ~2.9.
+
+⚠ **But a linear "ops = floor + k x segs" model predicted 13.8M for E2M8 and was wrong by 1.8x.**
+Cost tracks the segs a frame can SEE, not the segs a map has. E2M8 is an open arena (145 subsectors
+for 542 segs) so almost nothing occludes; E1M1 is 3.8x bigger but pays only 9.6k/seg because most of
+it is hidden. **Compartmentalisation beats size.** A corridor map should beat an arena map even with
+more segs — E3M8 (621 segs but 228 subsectors) is the test of that.
+
+### What this means for the 15M target
+
+The budget is **~10.3M of map cost above the 4.7M floor**. No shipped Freedoom episode-1-3 map is
+small enough: E2M8 is the smallest of all 36 and it lands at 24.6M. Reaching 15M needs a level of
+roughly 250-350 well-occluded segs — i.e. **authoring one**, and the project has **no BSP node
+builder** (`bake_bsp` READS the wad's NODES/SSECTORS lumps; `square_room.wad` was authored
+elsewhere). That is the real blocker for 15M, and it is a tooling gap, not a renderer one.
+
+**The honest summary: 39.2M -> 24.6M is available today by changing the level, and it costs nothing.
+15M needs a purpose-built level, which needs a node builder.**

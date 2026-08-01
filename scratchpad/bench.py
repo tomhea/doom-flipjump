@@ -47,6 +47,10 @@ ap.add_argument("--off", action="append", default=[], choices=["grain", "sky", "
 ap.add_argument("--res", default="", metavar="WxH",
                 help="render at a different resolution. Config is fully W/H-derived, so the "
                      "oracle follows and byte-exactness still holds.")
+ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
+ap.add_argument("--map", default="E1M1")
+ap.add_argument("--asset", default="")
+ap.add_argument("--vp", action="append", default=[], metavar="X,Y,ANG")
 ap.add_argument("--tag", default="")
 args = ap.parse_args()
 
@@ -72,13 +76,17 @@ cfg = Config(**(dict(zip(("W", "H"), map(int, args.res.split("x")))) if args.res
 if args.res:
     print(f"  resolution {cfg.VIEW_W}x{cfg.VIEW_H}  downscale {cfg.TEXTURE_DOWNSCALE}"
           f"  col_bits {cfg.COL_BITS}  ({cfg.VIEW_W * cfg.VIEW_H:,} px)")
-mw = WadFile.from_path('tests/fixtures/freedoom_e1m1.wad')
+mw = WadFile.from_path(args.wad)
 art = WadFile.from_path('assets/freedoom1.wad')
+aw = WadFile.from_path(args.asset) if args.asset else mw
 rm = ReferenceModel(cfg)
-scene = build_scene(mw, mw, "E1M1")
-sp = spawn_state(mw, "E1M1")
-VPS = [(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn"),
-       (1400, 1200, 0, "courtyard"), (2432, 1344, 3221225472, "tree"), (-309, -44, 0, "worst")]
+scene = build_scene(mw, aw, args.map)
+sp = spawn_state(mw, args.map)
+VPS = ([(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn")]
+       + [tuple(int(v) for v in q.split(",")) + (f"vp{i}",) for i, q in enumerate(args.vp)]
+       if args.vp or args.map != "E1M1" else
+       [(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn"),
+        (1400, 1200, 0, "courtyard"), (2432, 1344, 3221225472, "tree"), (-309, -44, 0, "worst")])
 ABL = frozenset(args.ablate)
 FLAGS = dict(floor_mode="FT1", wall_mode="WPX", raster_mode="lines",
              plane_near="plane_near" not in args.off,
@@ -94,7 +102,8 @@ def build():
     key.update(repr(sorted(FLAGS.items())).encode())
     key.update(repr(sorted(ABL)).encode())
     key.update(repr(sorted(KNOBS.items())).encode())
-    key.update(args.res.encode())      # ... or a knobbed build collides
+    key.update(args.res.encode())
+    key.update((args.wad + args.map + args.asset).encode())      # ... or a knobbed build collides
     tag = key.hexdigest()[:16]
     cache = ROOT / "scratchpad" / "fjmcache"
     cache.mkdir(exist_ok=True)
@@ -103,7 +112,7 @@ def build():
         print(f"cache HIT {fjm.name}", flush=True)
         return fjm
     t0 = time.time()
-    main = WR.emit_wall_renderer(mw, "E1M1", cfg, asset_wad=mw, over_align=False,
+    main = WR.emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
                                  sprite_wad=art if FLAGS["things"] else None, ablate=ABL, **FLAGS)
     print(f"emitted {len(main):,} chars ({time.time() - t0:.0f}s)", flush=True)
     consts = cfg.emit_fj_consts(cache / "fj_consts.fj")
@@ -118,7 +127,7 @@ def build():
 
 WANT = None
 if not ABL:                                    # an ablated frame is deliberately wrong: price only
-    WANT = [bytes(rm.render_wall_frame(SimState(x=vx << 16, y=vy << 16, angle=va, level="E1M1"),
+    WANT = [bytes(rm.render_wall_frame(SimState(x=vx << 16, y=vy << 16, angle=va, level=args.map),
                                        scene, wall_mode="WPX", floor_mode_ft1=True,
                                        plane_near=FLAGS["plane_near"],
                                        wall_noise=FLAGS["wall_noise"], sky=FLAGS["sky"],

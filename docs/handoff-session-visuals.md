@@ -15,7 +15,8 @@
 | + optimisation campaign (EXP-1..5) | 27,823,804 | 33,859,325 | 37,933,652 | 37,003,252 |
 | + EXP-7 far-thing reject | 27,631,269 | 33,820,592 | 37,224,868 | 36,433,309 |
 | + EXP-8 `THING_BUDGET`=16 | 27,631,269 | 33,820,592 | 31,826,978 | 35,216,185 |
-| **+ V4 selection policy: no count limit, min-size only (SHIPPED)** | **27,772,447** | **33,671,882** | **34,541,408** | **39,156,918** |
+| + V4 selection policy: monsters never dropped (budgets 16/64) | 27,772,447 | 33,671,882 | 34,541,408 | 39,156,918 |
+| **+ NO COUNT LIMIT — distance decides (SHIPPED)** | **27,772,549** | **33,672,272** | **36,649,307** | **39,158,568** |
 
 Every row is **BYTE-EXACT** against the oracle at every viewpoint listed
 (`scratchpad/v4_check.py --emit`). Gates green on this tree: `tests/fj/test_lines_render.py` and
@@ -23,9 +24,17 @@ Every row is **BYTE-EXACT** against the oracle at every viewpoint listed
 
 **All four features are in**: V1 pseudo-random wall grain, V2 sky, V3 step faces, V4 things.
 
-The last row is the SHIPPED tier and it is deliberately ABOVE the old 30–35M band: it draws 28 of
-28 monsters at the worst viewpoint where the budget tier drew 17. See §5 for the end-of-phase state
-and why the 15M target is not met.
+The last row is the SHIPPED tier, **BYTE-EXACT at all four viewpoints**, and it is deliberately
+ABOVE the old 30–35M band: it draws 28 of 28 monsters at the worst viewpoint where the budget tier
+drew 17.
+
+⚠ **Retiring the count limit costs +2.1M at the tree and ~nothing elsewhere, for an IDENTICAL
+picture.** That is not a regression, it is the price of the guarantee: with a count, things past the
+cap were skipped by a counter test; without one, every thing pays its (early, ~20k) distance reject
+instead. At the tree that is ~100 extra things. The trade buys correctness on any map denser than
+E1M1 — arrival order can never drop a monster again — and the min-size reject keeps the picture
+identical. Lower `THING_BUDGET` alone if a future map needs the ops back; it thins scenery and never
+touches monsters. See §5 for the end-of-phase state and why the 15M target is not met.
 
 ---
 

@@ -712,3 +712,48 @@ EXP-11's "the floor is ~24.8M, 15M is arithmetically impossible" was assembled f
 numbers. The profiler makes that whole style of argument unnecessary: measure the frame you have,
 in seconds, and read the answer off. **Re-derive any cost claim in this file with `opprof.py` before
 acting on it** — two of them have already turned out to be wrong.
+
+
+### EXP-13a — the same profile on the SHIPPED map (E1M1 spawn, 27,772,549 ops)
+
+The square room could have been unrepresentative — it over-weights per-column work. It was not.
+Adding each primitive's DIRECT ops to the wflip ops BLAMED on it (the two tables `opprof.py` prints):
+
+| primitive | direct | via wflip | **total share of the frame** |
+|---|---:|---:|---:|
+| `hex.exact_xor` | 7.78% | 35.55% | **43.3%** |
+| `hex.double_exact_xor` | 4.62% | 14.85% | **19.5%** |
+| `hex.quadrupled_exact_xor` | 2.01% | 4.04% | **6.1%** |
+| **the xor family** | | | **~69%** |
+| `hex.if_flags` | 0.88% | 2.48% | 3.4% |
+| `hex.tables.jump_to_table_entry` | — | 2.10% | 2.1% |
+| `hex.add.clear_carry` | — | 2.02% | 2.0% |
+| `hex.shifts.shl_bit_once` | 0.38% | 1.64% | 2.0% |
+
+**55% on a 4-seg room, ~69% on E1M1 — the xor family dominates REGARDLESS of level size**, which is
+exactly the question that was asked. Everything else in this file is rounding error next to it.
+
+Where those xors are issued from (wflip blame, outermost):
+
+| macro | share |
+|---|---:|
+| `frame.seg_pass2_leaf_body_lines` (per COLUMN) | 37.8% |
+| `frame.seg_pass1_leaf_body_lines` (per SEG) | 20.4% |
+| `frame.seg_pass1_leaf_body_ts` (per two-sided seg) | 6.0% |
+| `proj.point_on_side_leaf` (per BSP node) | 5.8% |
+
+### ⭐ The concrete low-level lever this exposes
+
+`flipjump/stl/hex/logics.fj` batches exact-xor at **1, 2 and 4 nibbles** (`exact_xor`,
+`double_exact_xor`, `quadrupled_exact_xor`) — batching amortises the wflip + jump-table overhead
+across more nibbles, which is why the doubled/quadrupled forms exist at all.
+
+**This renderer's registers are almost all 8 nibbles** (`hex.vec 8` for every fixed-point value), so
+every 8-nibble operation is currently paying two quadrupled xors, or four doubles, or eight singles.
+An **8-wide `octupled_exact_xor`** would halve the batching overhead on the single hottest primitive
+in the program. That is a change to the flipjump STL, not to this repo, and it is measurable in 14
+seconds with `opprof.py` instead of 20 minutes with a build.
+
+**Next session: prototype the 8-wide xor and re-profile.** If the frame's ~69% xor share drops even
+a fifth, that is ~14% off every frame on every map at every resolution — more than the entire EXP-1
+to EXP-8 campaign delivered combined.

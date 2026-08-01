@@ -45,8 +45,15 @@ SCALE = 4                      # window upscale
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
-    ap.add_argument("--map", default="E1M1")
+    # THE PLAYABLE DEFAULT IS THE ARENA, NOT E1M1 (owner: "change the map for a faster game").
+    # Measured byte-exact at five viewpoints: E2M8 (542 segs) runs 19.9-24.6M ops/frame against
+    # E1M1's 27.8-39.2M -- ~37% faster for the SAME renderer, same resolution, all four visual
+    # features, every monster drawn. Nothing is given up but the specific level, and a Doom engine
+    # at 4.6 fps in an arena full of monsters demos better than one at 2.9 fps in a corridor.
+    # E1M1 remains the ladder's canonical map and every golden/gate still targets it:
+    #     python scripts/walk_e1m1.py --wad tests/fixtures/freedoom_e1m1.wad --map E1M1
+    ap.add_argument("--wad", default="assets/freedoom1.wad")
+    ap.add_argument("--map", default="E2M8")
     ap.add_argument("--asset", default=None)
     ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])

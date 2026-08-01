@@ -145,6 +145,21 @@ runs, against the cached binary.
 
 ## 5. STATE AT THE END OF THIS SESSION (2026-08-01) — read this first
 
+### ⭐ THE PLAYABLE DEFAULT IS NOW E2M8, NOT E1M1
+
+`scripts/walk_e1m1.py` defaults to the **arena** (`assets/freedoom1.wad`, E2M8, 542 segs).
+Measured on the real walker: **24.5M ops, 178 ms, 5.6 fps** — against E1M1's ~2.9 fps. Same
+renderer, same 160x100, all four visual features, every monster drawn, byte-exact at five
+viewpoints. Nothing is given up but the specific level.
+
+**E1M1 remains the ladder's canonical map** and every golden, gate and test still targets it:
+
+    python scripts/walk_e1m1.py --wad tests/fixtures/freedoom_e1m1.wad --map E1M1
+
+Why: the frame's cost is MAP cost. A 4-seg room costs 4.69M (EXP-12's floor measurement), so
+everything above that is the level. E1M1 is one of the largest, most open maps in the game — the
+worst possible case for a renderer whose cost is per-seg.
+
 **Sprite selection is now DISTANCE-ONLY, by owner decision.** There is no count limit: both
 `THING_BUDGET` and `MONSTER_BUDGET` sit at 255 (the widest the 2-nibble counters hold) and cannot
 bind — E1M1's heaviest viewpoint projects 52 things. What a frame draws is decided entirely by the

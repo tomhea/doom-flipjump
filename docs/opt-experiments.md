@@ -375,6 +375,59 @@ owner's 30–35M band. Still the owner's call, because it is a picture change, b
 ("this is the lever that costs picture") overstated it: what the budget drops are, almost entirely,
 things that were never visible.
 
+### EXP-8a — ⚠ the budget's real cost is not pixels, it is WHICH things (`scratchpad/thing_census.py`)
+
+EXP-8 priced the budget in pixels (41 at the tree, 19 at the worst point) and concluded the trade was
+cheap. **Pixels are the wrong metric**, and the census says so. It instruments the real render —
+`project_thing` wrapped, budget lifted — so the log is exactly the ordered list of things the frame
+considered under the REAL stop conditions. (A standalone replay of the selection loop over-counts
+wildly: the loop's other stop, `n_claimed == VIEW_W`, usually fires FIRST. At spawn it stops the walk
+after 5 things, which is why the budget costs literally nothing there.)
+
+| viewpoint | reached | project | budget 16 turns away |
+|---|---:|---:|---|
+| spawn | 5 | 0 | nothing |
+| courtyard | 21 | 12 | nothing |
+| tree | 193 | 30 | 14 — 5 of them MONSTERS |
+| worst | 90 | 51 | **35 — 24 of them MONSTERS** |
+
+**And the order slots are handed out in is NOT distance order.** Budget slots go in walk-arrival
+order = BSP front-to-back BY SUBSECTOR, and a thing sits anywhere inside its subsector, so arrival
+is not monotone in distance to the thing. Measured at the worst viewpoint:
+
+```
+slot  euclid  h px  type          slot  euclid  h px  type
+   1    1238     1  BON2            42     204     8  BON1   <- the NEAREST thing in the frame
+   4     937     1  BON1            46    1066     4  POSS
+   6     900     1  BON1            48    1195     4  TROO
+  16    1349     1  ROCK            51    1228     4  POSS
+```
+
+Six ONE-PIXEL bonus dots hold slots 1-6. Dropped: 24 monsters — four of them 4 px tall at ~1100
+units — and the nearest object in the whole frame, an 8 px pickup at 204 units, which arrives at
+slot 42. So the budget is not "drops the furthest things"; it is "drops whatever the BSP happens to
+reach late", and that includes large near ones.
+
+The pixel count stays small because the dropped monsters are mostly 1-2 px. That is precisely why
+the metric misleads: **a monster that vanishes costs 2 pixels and all of the gameplay.**
+
+Also found: E1M1 carries 292 things (53 monsters / 120 pickups / 107 decor / 12 starts). V4 can draw
+250 of them — including 52 of the 53 monsters. **Type 58 (spectre) has no `THING_SPRITE` entry and
+is never drawn at any budget**, which is a gap independent of this knob.
+
+### Where that points (cheapest first, none of it built yet)
+
+1. **A minimum-SIZE reject.** EXP-7 bakes `sp_tzmax = wph * PROJECTION` — past that depth the sprite
+   projects to zero rows, tested before the two lateral multiplies and the reciprocal.
+   `wph * PROJECTION / 2` is the IDENTICAL test for "fewer than 2 rows": one baked constant, one
+   compare, no new code shape, exhaustively verifiable in Python the way EXP-7's was. At the worst
+   viewpoint it clears ~13 of the 16 things now holding slots — it makes the frame CHEAPER and the
+   selection BETTER at the same time. Changes the picture (1 px sprites disappear), so it is the
+   owner's call.
+2. **Category-aware slots.** Thing type is compile-time known, so reserve part of the budget for
+   monsters: a second counter and one compare in `frame.thing_record_body`.
+3. Then the structural items — the resumable emit walker, the tighter screen reject.
+
 ### APPLIED — the owner took 16 (2026-08-01)
 
 `reference_model.THING_BUDGET = 16`. One constant: the oracle reads the module global and the fj

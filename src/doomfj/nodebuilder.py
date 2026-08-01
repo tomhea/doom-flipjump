@@ -158,6 +158,13 @@ class NodeBuilder:
         cost = sp * self.split_cost + abs(nf - nb)
         if pdx and pdy:
             cost += DIAG_PENALTY
+        # prefer LONG partition lines: a short island line used early EXTENDS across the whole
+        # region and slices seg-less slivers off the surrounding sector, which then glue onto the
+        # island's leaf. NOTE: every observed "pocket" so far turned out to be VOID (outside the
+        # map) once the validator anchored walkability on the stock ray oracle — walkable-point
+        # location has measured 0 mismatches with and without this bias. Kept because it is
+        # directionally safe and free.
+        cost += max(0, 12 - int(math.hypot(pdx, pdy)) // 16)
         return cost, sp
 
     def _partition(self, segs: list[BSeg], cand: BSeg):

@@ -40,7 +40,13 @@ cfg = Config()
 rm = ReferenceModel(cfg)
 mw = WadFile.from_path(args.wad)
 art = WadFile.from_path('assets/freedoom1.wad')
-scene = build_scene(mw, mw, args.map)
+# a geometry-only PWAD (e1m1_lite) carries no COLORMAP: fall back to the stock fixture's assets
+try:
+    mw.colormap()
+    aw = mw
+except KeyError:
+    aw = WadFile.from_path('tests/fixtures/freedoom_e1m1.wad')
+scene = build_scene(mw, aw, args.map)
 sp = spawn_state(mw, args.map)
 sx, sy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 

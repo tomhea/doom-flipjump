@@ -844,3 +844,62 @@ Every renderer-side zeroing site above 0.7% is now either fixed or inside an STL
 hoist of this shape to find. The remaining diffuse cost needs the register-narrowing pass (EXP-13a
 item 1), which is a different kind of change: it touches widths, and width bugs in this codebase
 have been Heisenbugs (fj-lessons R11, and "an n-nibble op reads n nibbles of its SOURCE").
+
+
+## EXP-15 — a FAR-PLANE CULL: measured, and not the lever either 📏
+
+The last untried idea the owner's "modify the scenario or make tweaks" licence allows: distance
+lighting already renders far geometry almost black, so culling it should be nearly invisible.
+
+**Picture cost** (oracle-side, seconds — `visible_segs` wrapped with a segment-to-viewer distance):
+
+| far cull D | spawn | courtyard | tree | worst |
+|---|---:|---:|---:|---:|
+| 3000 | **0 px** | **0 px** | **0 px** | **0 px** |
+| 2500 | 0 px | 0 px | 0 px | 597 px (3%) |
+| 2000 | 0 px | 0 px | 0 px | 1,792 px (11%) |
+| 1500 | 1,701 (10%) | 2,191 (13%) | 138 (0%) | 5,444 (34%) |
+| 1000 | 3,003 (18%) | 11,320 (70%) | 4,118 (25%) | 10,985 (68%) |
+
+**A cull at 3000 is BYTE-EXACT** — nothing beyond it reaches the screen at any gate viewpoint.
+
+**Work saved**, though, is the disappointment. The walk visits all 575 one-sided segs at every
+viewpoint and only ~160 survive `wall_x_range`; a distance test placed before it saves the wedge
+cull + atans for the culled ones:
+
+| far cull D | segs surviving (of 575) | saved |
+|---|---:|---:|
+| 3000 (byte-exact) | 529 | 8% |
+| 2500 (597 px) | 467 | 19% |
+
+Pre-`wall_x_range` work is the wedge cull (~2.1M) plus `point_to_angle` (~2.0M), so 8% of it is
+**~300k ops (~1%)** and the 19% version is ~800k (~2%). The cull that would remove 70% of
+setup-paying segs (D=1500) costs a third of the picture.
+
+**Verdict: keep as a cheap ~1-3% if a byte-exact 3000 is wired, but it is not a 2.6x lever.**
+
+---
+
+# CAMPAIGN CLOSE — why 15M is not reachable for E1M1, with everything measured
+
+| avenue | measured result |
+|---|---|
+| Resolution | cost is ~resolution-INDEPENDENT (96x60 bought 21% for 64% of the pixels) |
+| Budget knobs (PNEAR/STEP) | −2.57M worst, but +855k courtyard and ~750 px damage |
+| Map choice | E2M8 (542 segs) = 24.6M worst vs E1M1 39.2M — **the biggest single win, −37%** |
+| `wall_scale_setup_m` | 4.06M = 10% of frame (EXP-10 retracted the "190k/seg, ~14M upside" claim) |
+| The xor family | ~69% of ops, but DIFFUSE: biggest single site 2.11%, a tail of ~50 |
+| Loop-invariant hoists | byte-exact, −2.0% square room, **−0.1% E1M1** (EXP-14) |
+| Far-plane cull | byte-exact at 3000, ~1% (this experiment) |
+
+**There is no concentrated cost to remove.** The two routes that WOULD reach 15M:
+
+1. **A purpose-built level of ~250-350 well-occluded segs.** The budget is ~10.3M of map cost above
+   the 4.69M floor (EXP-12). Blocker: no BSP node builder — `bake_bsp` READS the wad's
+   NODES/SSECTORS lumps. This is a tooling gap and much the more tractable of the two.
+2. **A renderer whose cost scales with COLUMNS, not SEGS.** ~150 segs each pay a fixed setup to fill
+   about one net column of a 160-column frame. That is a different renderer.
+
+**Available today without either: ship E2M8 instead of E1M1 — 39.2M -> 24.6M, byte-exact, every
+feature on, every monster drawn, zero fidelity lost.** That is a one-argument change and it is the
+single largest improvement this campaign found.

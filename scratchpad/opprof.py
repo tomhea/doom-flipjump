@@ -46,6 +46,10 @@ ap.add_argument("--map", default="MAP01")
 ap.add_argument("--asset", default="tests/fixtures/freedoom_assets.wad")
 ap.add_argument("--sky", action="store_true", help="the fixture room has no sky flat")
 ap.add_argument("--top", type=int, default=25)
+ap.add_argument("--vp", default="", metavar="X,Y,ANG",
+                help="profile THIS viewpoint instead of spawn (profile the frame that hurts)")
+ap.add_argument("--reuse", action="store_true",
+                help="reuse scratchpad/fjmcache/prof.fjm+dbg from the previous run (same sources!)")
 args = ap.parse_args()
 
 cfg = Config()
@@ -57,15 +61,19 @@ out.mkdir(exist_ok=True)
 fjm, dbg = out / "prof.fjm", out / "prof.dbg"
 
 t0 = time.time()
-main = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False, floor_mode="FT1",
-                          wall_mode="WPX", raster_mode="lines", plane_near=True, wall_noise=True,
-                          sky=args.sky, steps=True, things=True, sprite_wad=art)
-consts = cfg.emit_fj_consts(out / "fj_consts.fj")
-mp = out / "prof.fj"
-mp.write_text(main, encoding="utf-8")
-fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], mp.resolve()], fjm,
-            memory_width=W, print_time=False, debugging_file_path=dbg)
-print(f"assembled + labelled in {time.time() - t0:.0f}s", flush=True)
+if args.reuse and fjm.exists() and dbg.exists():
+    print("REUSING prof.fjm + prof.dbg (same-source assumption is YOURS to hold)", flush=True)
+else:
+    main = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False, floor_mode="FT1",
+                              wall_mode="WPX", raster_mode="lines", plane_near=True,
+                              wall_noise=True,
+                              sky=args.sky, steps=True, things=True, sprite_wad=art)
+    consts = cfg.emit_fj_consts(out / "fj_consts.fj")
+    mp = out / "prof.fj"
+    mp.write_text(main, encoding="utf-8")
+    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], mp.resolve()], fjm,
+                memory_width=W, print_time=False, debugging_file_path=dbg)
+    print(f"assembled + labelled in {time.time() - t0:.0f}s", flush=True)
 
 labels = load_debugging_labels(dbg)            # {label_name: address}
 addrs = sorted(set(labels.values()))
@@ -94,8 +102,11 @@ def _profile_hook(self, ip):
 
 RunStatistics.register_op_address = _profile_hook
 
-sp = spawn_state(mw, args.map)
-vx, vy, va = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle
+if args.vp:
+    vx, vy, va = (int(v) for v in args.vp.split(","))
+else:
+    sp = spawn_state(mw, args.map)
+    vx, vy, va = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle
 screen = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
 print(f"running {args.map} @ ({vx},{vy}) under the PYTHON loop -- this is the slow part", flush=True)
 t1 = time.time()
@@ -182,3 +193,19 @@ def zero_parent(pth):
 report("WHO IS ZEROING (~20% of the frame)", zero_parent, 18, BLAME)
 print("-" * 69)
 print(f"{'TOTAL':46s} {total:13,}")
+
+
+def _scoped(scope):
+    def key(p):
+        if p and p[0] == scope and len(p) > 1:
+            return " > ".join(p[1:3])
+        return None
+    return key
+
+
+report("INSIDE seg_pass2_leaf_body_lines -- direct ops by sub-path",
+       _scoped("frame.seg_pass2_leaf_body_lines"), 24)
+report("INSIDE seg_pass2_leaf_body_lines -- wflip blame by sub-path",
+       _scoped("frame.seg_pass2_leaf_body_lines"), 24, BLAME)
+report("INSIDE seg_pass1_leaf_body_ts -- wflip blame by sub-path",
+       _scoped("frame.seg_pass1_leaf_body_ts"), 16, BLAME)

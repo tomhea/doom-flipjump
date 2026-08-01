@@ -907,25 +907,29 @@ ns stream {
         hex.read_byte_and_inc cnt, ptr
         hex.zero 4, smidx
         hex.mov 2, smidx + 2*dw, slr
-        hex.zero 8, y0
+        // M13-15M: the row arithmetic runs at FOUR nibbles, not eight. Every value here is a
+        // screen row: y0 = sy0b - 128 in [-128, 127], ya = y0 + rel in [-128, 383], viewh = 100 --
+        // all comfortably inside signed 4-nibble range, and zero/mov/add/sign/scmp cost scales
+        // linearly with width (the profiler priced this loop at ~6k/run, half of it row math).
+        hex.zero 4, y0
         hex.mov 2, y0, sy0b
-        hex.sub_constant 8, y0, 128             // the slot stores y0 BIASED: a near sprite's top is
-        hex.sign_extend 8, 3, y0                // above row 0 and a slot byte is unsigned
-        hex.set 8, cvh, viewh
+        hex.sub_constant 4, y0, 128             // the slot stores y0 BIASED: a near sprite's top is
+                                                // above row 0 and a slot byte is unsigned
+        hex.set 4, cvh, viewh
         hex.zero 2, iS
       sloop:
         hex.cmp 2, iS, cnt, sbody, send, send
       sbody:
         hex.read_byte_and_inc rel, ptr
         hex.read_byte_and_inc tex, ptr
-        hex.zero 8, r8
+        hex.zero 4, r8
         hex.mov 2, r8, rel
-        hex.mov 8, ya, y0
-        hex.add 8, ya, r8
-        hex.sign 8, ya, snext, spos             // this run ends above row 0 -> nothing of it shows
+        hex.mov 4, ya, y0
+        hex.add 4, ya, r8
+        hex.sign 4, ya, snext, spos             // this run ends above row 0 -> nothing of it shows
       spos:
-        hex.if0 8, ya, snext
-        hex.scmp 8, ya, cvh, semit, sfin, sclamp
+        hex.if0 4, ya, snext
+        hex.scmp 4, ya, cvh, semit, sfin, sclamp
       semit:
         byte.emit ya
         hex.mov 2, smidx, tex
@@ -951,11 +955,11 @@ ns stream {
       iS: hex.vec 2
       rel: hex.vec 2
       tex: hex.vec 2
-      r8: hex.vec 8
-      ya: hex.vec 8
-      y0: hex.vec 8
+      r8: hex.vec 4
+      ya: hex.vec 4
+      y0: hex.vec 4
       smidx: hex.vec 4
-      cvh: hex.vec 8
+      cvh: hex.vec 4
       end:
     }
 

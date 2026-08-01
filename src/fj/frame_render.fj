@@ -1437,7 +1437,8 @@ ns frame {
     // against ~93k once per SEG. The oracle interpolates identically (ReferenceModel.render_wall_frame).
     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride \
             @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ust1, ust2, ust3, uclz, \
-              ukhi, uhicl, uwr, lskip, ldo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
+              ukhi, uhicl, uwr, umark, lskip, ldo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
+              lmark, \
               fcap, fnorm, fdist, fscale, fsstep, fwu1, fwu2, fwl1, fwl2, fra, frb, fcvh, \
               fx, fdb, fdp, fdv, fsb, fsp, fsv, fbb, fbp, fidx, fy1, fy2, end \
             < viewangle, viewz, sgn_aff, x1, x2, n_face, drawn, sfflag, sfslot, \
@@ -1491,15 +1492,22 @@ ns frame {
       udo:
         proj.step_rows fra, frb, fscale, fwu1, fwu2, centeryfix_c
         hex.dec 8, frb                          // ... ends one row ABOVE the back ceiling
-        // the slot stores BYTES, so emptiness is decided HERE rather than at the splice:
-        // valid <=> A <= B and B >= 0 and A <= VIEW_H-1, stored as (max(A,0), min(B,VIEW_H-1)).
-        // (Proven equivalent to the oracle's store-raw-then-clip at every gate viewpoint --
-        // scratchpad/v3_slotmodel.py.)
+        // the slot stores BYTES, so a VISIBLE face is stored clipped; but the oracle stores the
+        // face whenever A <= B -- EVEN FULLY OFF-SCREEN -- and that write CONSUMES the column's
+        // write-once slot, blocking farther segs. fj used to skip the store when off-screen,
+        // leaving the slot open for a farther seg's visible face: measured as a 28-column phantom
+        // upper face at E1M1-lite (1272,-724). Off-screen now takes `umark`: consume the slot
+        // with the EMPTY SENTINEL (y1=1, y2=0) -- lines_step_load rejects y1 > y2p1 before
+        // drawing, and a real stored face always has y1 <= y2, so the sentinel is unambiguous.
         hex.scmp 8, fra, frb, ust1, ust1, uskip
       ust1:
-        hex.sign 8, frb, uskip, ust2
+        hex.sign 8, frb, umark, ust2
       ust2:
-        hex.scmp 8, fra, fcvh, ust3, ust3, uskip
+        hex.scmp 8, fra, fcvh, ust3, ust3, umark
+      umark:
+        hex.set 8, fy1, 1
+        hex.zero 8, fy2
+        ;uwr
       ust3:
         hex.mov 8, fy1, fra
         hex.sign 8, fra, uclz, ukhi
@@ -1526,9 +1534,13 @@ ns frame {
         proj.step_rows fra, frb, fscale, fwl1, fwl2, centeryfix_c
         hex.scmp 8, fra, frb, lst1, lst1, lskip
       lst1:
-        hex.sign 8, frb, lskip, lst2
+        hex.sign 8, frb, lmark, lst2
       lst2:
-        hex.scmp 8, fra, fcvh, lst3, lst3, lskip
+        hex.scmp 8, fra, fcvh, lst3, lst3, lmark
+      lmark:
+        hex.set 8, fy1, 1                       // off-screen lower face: the same empty sentinel
+        hex.zero 8, fy2
+        ;lwr
       lst3:
         hex.mov 8, fy1, fra
         hex.sign 8, fra, lclz, lkhi

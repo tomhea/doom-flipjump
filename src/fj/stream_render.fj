@@ -311,6 +311,19 @@ ns stream {
         byte.emit wall_lit
     }
 
+    // ... and its WINDOWED twin for emit_region's wall piece [wlo, whi) (M13-15M): emit_region
+    // used to rep only `wpx_wall_win`, so in W1 mode a sprite-FRAGMENTED column emitted NO wall
+    // piece at all and the floor pairs bled into the wall rows -- 561 px at the courtyard, at
+    // exactly the sprite-adjacent columns. One clamped pair, the same constant lit byte.
+    // (W2S has the same hole and no windowed twin yet -- W2S+things remains ungated.)
+    def w1_wall_win wlo, whi, wall_lit @ dow, skip {
+        hex.cmp 2, wlo, whi, dow, skip, skip
+      dow:
+        byte.emit whi
+        byte.emit wall_lit
+      skip:
+    }
+
     // M13-W2S: the seg's run-merged 16-band colour strip STRETCHED over the wall span. Entry j is
     // [cum_j:1][colour:1]; its band ends at y2 = ctake + ((cum_j * wlen) >> 4) -- an exact integer
     // split (the 1/16 IS the >>4), no divide, no v-DDA, and a function of (seg, ctake, fstart)
@@ -851,7 +864,8 @@ ns stream {
     // wall, the floor half-walk, each intersected with the window. A sprite straddles all three, so
     // a fragmented column is `region(0, sy1)` + the sprite + `region(sy2+1, VIEW_H)` -- which is the
     // one structural thing V3's faces never needed, since a face lives inside a SINGLE region.
-    def emit_region lo, hi, viewh, wpx, wpxstride, eabl, noise, ctake, fstart, wstrip, wstripbase, \
+    def emit_region lo, hi, viewh, w2s, wpx, wpxstride, eabl, noise, ctake, fstart, wall_lit, \
+            wstrip, wstripbase, \
             cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret \
             @ ch1, ch2, cw1, cw2, cw3, cw4, cf1, cf2, cf3, cf4, end {
         hex.mov 2, qlo, lo                      // -- ceiling piece [lo, min(hi, ctake))
@@ -872,6 +886,7 @@ ns stream {
         hex.mov 2, whi, fstart
       cw3:
         rep(wpx, k) .wpx_wall_win ctake, fstart, wlo, whi, wstrip, wstripbase, wpxstride, noise, cmidx
+        rep(1-w2s-wpx, k) .w1_wall_win wlo, whi, wall_lit
         hex.mov 2, qlo, lo                      // -- floor piece [max(lo, fstart), min(hi, VIEW_H))
         hex.cmp 2, qlo, fstart, cf1, cf2, cf2
       cf1:
@@ -1011,9 +1026,9 @@ ns stream {
       sprpath:                                   // V4: region | sprite | region
         rep(things, k) hex.zero 2, zlo
         rep(things, k) hex.set 2, vhi, viewh
-        rep(things, k) .emit_region zlo, ssy1, viewh, wpx, wpxstride, eabl, noise, ctake, fstart, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region zlo, ssy1, viewh, w2s, wpx, wpxstride, eabl, noise, ctake, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
         rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
-        rep(things, k) .emit_region ssy2, vhi, viewh, wpx, wpxstride, eabl, noise, ctake, fstart, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region ssy2, vhi, viewh, w2s, wpx, wpxstride, eabl, noise, ctake, fstart, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
       fdone:
         stl.output_char 0xFF                     // ends this column's pair list
         ;end

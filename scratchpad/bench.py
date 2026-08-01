@@ -45,6 +45,8 @@ ap.add_argument("--ablate", action="append", default=[])
 ap.add_argument("--knob", action="append", default=[], metavar="NAME=VALUE")
 ap.add_argument("--off", action="append", default=[],
                 choices=["grain", "sky", "steps", "things", "plane_near", "bboxcull"])
+ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"],
+                help="wall tier: WPX = 1x1 texels (ships), W1 = flat-lit walls (the 15M ladder)")
 ap.add_argument("--res", default="", metavar="WxH",
                 help="render at a different resolution. Config is fully W/H-derived, so the "
                      "oracle follows and byte-exactness still holds.")
@@ -89,7 +91,7 @@ VPS = ([(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn")]
        [(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn"),
         (1400, 1200, 0, "courtyard"), (2432, 1344, 3221225472, "tree"), (-309, -44, 0, "worst")])
 ABL = frozenset(args.ablate)
-FLAGS = dict(floor_mode="FT1", wall_mode="WPX", raster_mode="lines",
+FLAGS = dict(floor_mode="FT1", wall_mode=args.wall_mode, raster_mode="lines",
              plane_near="plane_near" not in args.off,
              wall_noise="grain" not in args.off, sky="sky" not in args.off,
              steps="steps" not in args.off, things="things" not in args.off,
@@ -132,7 +134,7 @@ def build():
 WANT = None
 if not ABL:                                    # an ablated frame is deliberately wrong: price only
     WANT = [bytes(rm.render_wall_frame(SimState(x=vx << 16, y=vy << 16, angle=va, level=args.map),
-                                       scene, wall_mode="WPX", floor_mode_ft1=True,
+                                       scene, wall_mode=FLAGS["wall_mode"], floor_mode_ft1=True,
                                        plane_near=FLAGS["plane_near"],
                                        wall_noise=FLAGS["wall_noise"], sky=FLAGS["sky"],
                                        near_steps=FLAGS["steps"], things=FLAGS["things"],

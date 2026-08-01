@@ -670,19 +670,23 @@ class ReferenceModel:
 
         `wall_mode` (M13p4a): "textured" (default, the real texture) or "W1"/"W2" — a tiny synthetic
         canvas (`_tiny_wall_canvas`, the SAME helper `wall_renderer.emit_wall_renderer` calls, so the fj
-        combined table can never drift from this oracle). A single `render_wall_frame` call always uses
-        ONE wall_mode for its whole duration, so caching by name alone (no mode in the key) is safe."""
-        key = name.upper()
+        combined table can never drift from this oracle). ⚠ The cache key MUST carry the mode: the old
+        "one render = one mode" assumption broke when V2's sky started requesting `textured` INSIDE a
+        W1/W2 render — a visible WALL textured with SKY1 (E1M1-lite at (1869,479,W) has one) then
+        poisoned the sky's cache entry with the flattened canvas, or vice versa, whichever loaded
+        first (M13-15M, the 89-px W1 divergence)."""
+        nm = name.upper()
+        key = (nm, wall_mode)
         if key in cache:
             return cache[key]
         defs = cache.get("__defs__")
         if defs is None:
             defs = {d.name.upper(): d for d in asset_wad.texture_defs("TEXTURE1")}
             cache["__defs__"] = defs
-        if not key or key == "-" or key not in defs:
+        if not nm or nm == "-" or nm not in defs:
             cache[key] = None
             return None
-        canvas = downscale_canvas(composite_texture(asset_wad, defs[key]), self.downscale)
+        canvas = downscale_canvas(composite_texture(asset_wad, defs[nm]), self.downscale)
         texels, th, tw = texture_texels(canvas), len(canvas), len(canvas[0])
         if wall_mode not in ("textured", "WPX"):     # WPX samples the REAL texture (see wpx_strip)
             texels, th, tw = self._tiny_wall_canvas(texels, th, wall_mode)

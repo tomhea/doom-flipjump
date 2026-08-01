@@ -14,7 +14,8 @@
 | + V4 things | 28,104,383 | 36,010,624 | 45,252,666 | 39,448,264 |
 | + optimisation campaign (EXP-1..5) | 27,823,804 | 33,859,325 | 37,933,652 | 37,003,252 |
 | + EXP-7 far-thing reject | 27,631,269 | 33,820,592 | 37,224,868 | 36,433,309 |
-| **+ EXP-8 `THING_BUDGET`=16 (SHIPPED)** | **27,631,269** | **33,820,592** | **31,826,978** | **35,216,185** |
+| + EXP-8 `THING_BUDGET`=16 | 27,631,269 | 33,820,592 | 31,826,978 | 35,216,185 |
+| **+ V4 selection policy: no count limit, min-size only (SHIPPED)** | **27,772,447** | **33,671,882** | **34,541,408** | **39,156,918** |
 
 Every row is **BYTE-EXACT** against the oracle at every viewpoint listed
 (`scratchpad/v4_check.py --emit`). Gates green on this tree: `tests/fj/test_lines_render.py` and
@@ -22,12 +23,9 @@ Every row is **BYTE-EXACT** against the oracle at every viewpoint listed
 
 **All four features are in**: V1 pseudo-random wall grain, V2 sky, V3 step faces, V4 things.
 
-**Every viewpoint is now inside the owner's 30–35M band** — the worst one only just (35.22M), so it
-is the frame still worth spending on. The budget is the owner's call, taken 2026-08-01: 16 costs 41
-pixels at the tree and 19 at the worst point, out of 16,000, and nothing at all at spawn or the
-courtyard where it never binds (EXP-8 in `docs/opt-experiments.md` has the rendered comparison).
-The ranked list of what remains is in the same file; the short version is that `proj.project_thing`
-is still the largest kernel, because every one of E1M1's 250 things gets projected.
+The last row is the SHIPPED tier and it is deliberately ABOVE the old 30–35M band: it draws 28 of
+28 monsters at the worst viewpoint where the budget tier drew 17. See §5 for the end-of-phase state
+and why the 15M target is not met.
 
 ---
 
@@ -178,6 +176,57 @@ a per-linedef setup memo (only ~10% of setup-paying segs share a linedef), and t
 * `tests/fj/test_floor_planes_fj.py` still carries two permanently-skipped tests for the legacy
   framebuffer flat kernel — the tier is slated for deletion at M13p8; tier and tests should go
   together.
+
+---
+
+## 5b. ⚠ READ BEFORE M14 — what MOVING things break, and the trap that will bite first
+
+M14 is input + simulation, which means enemies that move. The renderer is better placed for that
+than it looks, but three things are compile-time and one of them fails SILENTLY.
+
+**Already runtime, needs no work:** `proj.project_thing` and `frame.thing_record_body` read the
+thing's position out of REGISTERS (`sp_x`/`sp_y`/`sp_z`). Nothing in the projection, the height
+bucket, the column DDA or the run-list emit knows where the thing is. Move it and the same kernel
+projects it correctly. That is the expensive, intricate half and it is already position-agnostic.
+
+**Compile-time, must change:**
+
+1. **Which BSP leaf owns the thing.** `things_by_ss` is built at emit by `point_in_subsector`, and
+   the per-thing call sites are emitted INSIDE that leaf's code (`wall_renderer.py`, the
+   `subsector_action` thing loop). A monster that walks into the next room is still recorded by the
+   old room's leaf — wrong occlusion order, and invisible whenever that leaf is not visited.
+2. **The per-thing constants** — x, y, z, sprite-bank base, light class, the min-size depth bound,
+   the monster flag — baked as one xor-involution block per (subsector, thing).
+3. **The art: ONE still frame.** `sprite_art` tries `A0/A1/A2A8/A1D1`, all spellings of frame A,
+   rotation 0. No walk cycle, no 8-way facing. A moving monster would slide, facing one way.
+
+So the change is to the **list**, not the renderer: a runtime thing table plus either a runtime
+`point_in_subsector` per moved thing or DOOM's per-leaf thing list (`P_UnsetThingPosition` /
+`P_SetThingPosition`). Sizing is friendly — mean ~1.9 things per occupied leaf, max 13 — so the
+per-leaf loop is short. A BSP descent is cheap against a ~47k projection.
+
+**⚠ THE TRAP: the prune.** A leaf with no one-sided seg is dropped TWICE — `_lines_prune` at compile
+time and `_lines_plane_gate`'s `tsstop` node gate at runtime — and both had to be taught that a
+thing-carrying leaf is live. That worked because with STATIC things the emitter knows which leaves
+carry things. **With moving things it does not.** A monster can walk into a leaf pruned as empty and
+vanish with no error. Widen the predicate to "any leaf a thing could ever enter", or move the prune
+to runtime — and settle it BEFORE writing the runtime list, not after. This is the exact bug class
+that already cost this repo two builds.
+
+**One design note worth keeping:** a thing lives in exactly one leaf and that is not a limitation.
+Leaf ownership is a *when*, not a *where* — it fixes the moment the thing is recorded (its slot in
+the front-to-back order); the sprite's extent is in SCREEN COLUMNS, which have nothing to do with
+leaves. Recording it in a second leaf would be actively wrong: another ~47k projection whose output
+the write-once columns reject. The one real failure mode is a thing whose centre is in leaf A but
+whose body reaches into a nearer leaf B: it takes A's depth slot, so a wall in B that already
+claimed those columns wins and the sprite is UNDER-drawn — clipped away, never drawn over a wall it
+belongs behind. Conservative, which is the right direction for a write-once protocol.
+
+**Known gaps in sprite occlusion**, for whoever touches this next: occlusion is per column and
+all-or-nothing, so a sprite cannot be cut off at a wall's top edge (forced by the forward-only 0x0B
+cursor); and step faces do not occlude sprites at all — "one overlay per column, sprite wins" — so a
+monster behind a ledge draws in front of it. The second is a policy choice in the emit, not a
+protocol limit, and is fixable: both are per-column records with known row ranges.
 
 ---
 

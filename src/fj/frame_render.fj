@@ -1197,18 +1197,28 @@ ns frame {
     // thing, which is what THING_BUDGET bounds. Both of the oracle's stop conditions are monotone,
     // so `tstop` short-circuits every later thing at its call site for one 1-nibble test.
     // Mirrors ReferenceModel.render_wall_frame's things pre-pass EXACTLY.
-    def thing_record_body budget, minz, projection, centerx, centery, viewwc, viewh, ds, \
+    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, \
             buckets, slotstride, ttwice \
-            @ tgo, tgo2, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
+            @ tgo, tgo2, tsce, tincs, tinced, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
               tfree, tfree2, tblkok, tnext, \
               tsy1z, tsy1k, tsy1h, tsy2c, tsy2z, tsy2k0, tsy2h, tsy2k, tdraw, \
               tcap, vis, dvis, dtx1, dtx2, dtyt, dthp, dtis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
               tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tcon, tidx, tlr, tr0, trl, trw, \
               tsy1, tsy2, tb8, tneg, tcvh, end \
-            < n_thing, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
-              sp_base, sp_dw, sp_lt, thing_ret {
+            < n_thing, n_mon, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
+              sp_base, sp_dw, sp_lt, sp_mon, thing_ret {
+        // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
+        // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
+        // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
+        // budget. ⚠ Failing a budget must NOT set `tstop` -- that latch stops EVERY later thing,
+        // and the other category may still have slots. Only `n_claimed == vieww` latches now, which
+        // is still monotone, so the call-site short-circuit keeps working.
+        hex.if0 2, sp_mon, tsce
+        hex.set 2, tcap, monbudget
+        hex.cmp 2, n_mon, tcap, tgo, tret, tret
+      tsce:
         hex.set 2, tcap, budget
-        hex.cmp 2, n_thing, tcap, tgo, tstopset, tstopset
+        hex.cmp 2, n_thing, tcap, tgo, tret, tret
       tgo:
         hex.cmp 2, n_claimed, vieww, tgo2, tstopset, tgo2   // every column claimed -> nothing left
       tgo2:
@@ -1218,7 +1228,12 @@ ns frame {
         // plus everything downstream (fj-cost-model, the `noproj` retraction).
         rep(ttwice, k) proj.project_thing dvis, dtx1, dtx2, dtyt, dthp, dtis, minz, projection, centerx, centery, viewwc, viewh, ds
         hex.if0 1, vis, tret
+        hex.if0 2, sp_mon, tincs                // ... and credit the counter this thing spends
+        hex.inc 2, n_mon
+        ;tinced
+      tincs:
         hex.inc 2, n_thing
+      tinced:
         // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][bucket:2]
         sprbkt.lookup tbkt, thpx
         hex.zero w/4, tcon                      // the per-thing block base: sp_base + bucket,

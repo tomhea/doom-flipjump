@@ -25,6 +25,8 @@ from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _byte
                                 NF_SUBSECTOR, seg_affine_coeffs)
 from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_FACE_BASE,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
+                                    MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
+                                    MIN_SPRITE_H_MONSTER,
                                     SPRITE_MINZ, sprite_bucket, sprite_bucket_height,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
@@ -622,10 +624,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         ("sp_left", 8, (_art[5] << 16) & 0xFFFFFFFF),
                         ("sp_w", 8, (_art[3] << 16) & 0xFFFFFFFF),
                         ("sp_hh", 8, (_art[4] << 16) & 0xFFFFFFFF),
-                        # the EXACT far-reject threshold: beyond this depth the sprite
-                        # projects to zero rows, so the projection can stop before its
-                        # two lateral multiplies and its reciprocal (see proj.project_thing)
-                        ("sp_tzmax", 8, ((_art[4] * cfg.PROJECTION) << 16) & 0xFFFFFFFF),
+                        # The EXACT min-SIZE reject: past this depth the sprite projects to
+                        # fewer than its category's minimum rows, so the projection stops before
+                        # its two lateral multiplies and its reciprocal. ⚠ NOT the analytic
+                        # wph*PROJECTION//min_h -- the block-FP reciprocal moves the true boundary
+                        # by up to a map unit, so `sprite_tz_min_size` scans for it (R6: the oracle
+                        # rejects the identical set at its `h < min_h` test).
+                        ("sp_tzmax", 8, rm.sprite_tz_min_size(
+                            _art[4], MIN_SPRITE_H_MONSTER if _t.type in MONSTER_TYPES
+                            else MIN_SPRITE_H) & 0xFFFFFFFF),
+                        # which budget this thing spends -- baked, because the category is a
+                        # property of the thing type and never changes at runtime
+                        ("sp_mon", 2, 1 if _t.type in MONSTER_TYPES else 0),
                         ("sp_base", 4, spr_base[_t.type]),
                         ("sp_dw", 2, spr_dw[_t.type]),
                         ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])])
@@ -1122,7 +1132,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
               f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}"] if plane_near else []),
            *(["thing_leaf:",
-              f"frame.thing_record_body {THING_BUDGET}, {SPRITE_MINZ}, {proj}, {cfg.CENTERX}, "
+              f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
+              f"{proj}, {cfg.CENTERX}, "
               f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
               f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
               f"{1 if 'thingtwice' in ablate else 0}"]
@@ -1249,11 +1260,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
            f"spslot:{NLJ}" + NLJ.join(";0 * dw"
                                       for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
-           "n_thing: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
+           "n_thing: hex.vec 2", "n_mon: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
            "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
            "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
            "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
-           "sp_tzmax: hex.vec 8",
+           "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
            sprbkt, sprlight, sprbank] if _do_things else []),
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                             floor_mode == "FT1")] if lines else []),

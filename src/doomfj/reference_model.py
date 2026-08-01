@@ -88,6 +88,10 @@ THING_SPRITE = {
     34: "CAND", 35: "CBRA", 44: "TBLU", 45: "TGRN", 46: "TRED", 55: "SMBT", 56: "SMGT",
     57: "SMRT", 48: "ELEC", 30: "COL1", 31: "COL2", 32: "COL3", 33: "COL4", 36: "COL5",
     37: "COL6", 41: "CEYE", 42: "FSKU", 49: "GOR1", 50: "GOR2",
+    58: "SARG",                   # the SPECTRE. DOOM draws it as a fuzzed SARG; there is no fuzz
+                                  # here, so it renders as a plain demon -- which is a great deal
+                                  # better than the previous behaviour, where the one spectre in
+                                  # E1M1 had no sprite mapping at all and was silently invisible.
 }
 SPRITE_HEIGHT_BUCKETS = 32        # V4: on-screen heights the sprite bank bakes a run-list for.
                                   # ~700 (sprite, downscaled column) blocks x 101 EXACT heights (the
@@ -96,6 +100,30 @@ SPRITE_HEIGHT_BUCKETS = 32        # V4: on-screen heights the sprite bank bakes 
                                   # of quantisation on a full-height sprite and 1/3 the bank.
 SPRITE_MINZ = 4 << 16             # DOOM's MINZ: nearer than this the projection blows up
 SPRITE_RUN_CAP = 12               # colour runs per baked sprite column (as WPX_RUN_CAP is for walls)
+MIN_SPRITE_H = 3                  # V4: a SCENERY sprite shorter than this on screen is not drawn.
+                                  # EXP-7 rejects the depth past which a sprite projects to ZERO
+                                  # rows; this is the same one compare with a bigger constant, and
+                                  # it is the RIGHT knob -- a 1-2px speck is not a monster, it is a
+                                  # coloured pixel, and paying ~47k ops for it while a real monster
+                                  # loses its budget slot is the trade EXP-8a caught us making.
+                                  # ⚠ The per-sprite tz thresholds fj compares against are NOT the
+                                  # analytic wph*PROJECTION/MIN_SPRITE_H -- the block-FP reciprocal
+                                  # puts the true boundary up to a whole map unit either side, so
+                                  # `sprite_tz_min_size` SCANS for it (scratchpad/minsize_verify.py
+                                  # proves the scanned bound exact for MIN_SPRITE_H 2, 3 and 4).
+MIN_SPRITE_H_MONSTER = 1          # ... but a MONSTER is never dropped for being small: it keeps
+                                  # EXP-7's bound (drawn while it projects at least one row). The
+                                  # threshold is baked PER THING, so splitting it by category costs
+                                  # exactly zero ops -- a different constant in the same compare.
+                                  # This is the whole policy: scenery thins out with distance, the
+                                  # things that shoot back never do.
+MONSTER_TYPES = frozenset({7, 9, 16, 58, 64, 65, 66, 67, 68, 69, 71, 84, 88,
+                           3001, 3002, 3003, 3004, 3005, 3006})
+MONSTER_BUDGET = 64               # V4: monsters get their OWN budget, so THING_BUDGET can never
+                                  # drop one. EXP-8a: budget slots are handed out in BSP walk-arrival
+                                  # order, which is not distance order, so at a crowded viewpoint six
+                                  # ONE-PIXEL bonus dots were holding slots while 24 monsters were
+                                  # turned away. Decor and pickups are scenery; a monster is the game.
 THING_BUDGET = 16                 # V4: things PROJECTED per frame. Each pays ~47k fj ops (4 FixedMuls
                                   # + 2 FixedDivs), so this is the knob that bounds the feature the
                                   # way STEP_SEG_BUDGET bounds V3 -- and, as there, the walk is
@@ -196,6 +224,7 @@ class ReferenceModel:
         self.zlight = zlight_table(self.cfg.VIEW_W, COLORMAP_LIGHTS)   # (light,z) -> colormap row (M13, R6)
         self.scalelight = scalelight_table(self.cfg.VIEW_W, COLORMAP_LIGHTS)   # (light,scale) -> row, WALLS (M13-WPXLIGHT)
         self.distscale = distscale_table(self.cfg.VIEW_W, self.cfg.TRIG_N)  # col -> 1/cos fisheye (M13b, R6)
+        self._tzmin_cache: dict = {}          # V4: scanned min-size depth bounds (sprite_tz_min_size)
 
     # ── trig (the M6 read_sin/read_cos idioms; cos shares the sine table at +N/4) ──
     def read_sin(self, angle: int) -> int:
@@ -764,6 +793,44 @@ class ReferenceModel:
             runs.pop(i)                               # (i == 0: the run below just starts at 0)
         return runs
 
+    def sprite_tz_min_size(self, wph: int, min_h: int | None = None) -> int:
+        """The largest depth `tz` at which a sprite `wph` map units tall still projects to at least
+        `min_h` screen rows. Beyond it `project_thing` rejects on height, so fj can reject on DEPTH
+        instead -- before the two lateral multiplies and the reciprocal (EXP-7's shape, bigger
+        constant). Baked per thing as `sp_tzmin`; R6 single source, the emitter calls this.
+
+        ⚠ NOT the analytic `(wph*PROJECTION<<16)//min_h`. `xscale` comes from the block-FP
+        `_scale_recip_div`, not a true divide, so the real boundary sits up to a whole map unit
+        either side of it (measured: -65,537 .. +43,690). Binary-searched against the REAL chain and
+        checked at the boundary, so the oracle's `h < min_h` and fj's `tz > sp_tzmin` reject exactly
+        the same set -- which is what byte-exactness needs."""
+        min_h = MIN_SPRITE_H if min_h is None else min_h
+        key = (wph, min_h)
+        if key in self._tzmin_cache:
+            return self._tzmin_cache[key]
+        proj = self.cfg.PROJECTION
+
+        def h_at(tz):
+            xs = self._scale_recip_div(proj << 16, tz)
+            return _signed(fixed_mul((wph << 16) & ANGLE_MASK, xs, 8, 4), 32) >> 16
+
+        # ⚠ ALWAYS scan, including min_h == 1. EXP-7's analytic `(wph*PROJECTION)<<16` is the depth
+        # where the ANALYTIC height hits zero, and the block-FP reciprocal's real boundary sits a
+        # unit or so off it -- close enough that EXP-7's reject stayed exact (it only had to be
+        # conservative), NOT close enough to be the sharp boundary this returns.
+        lo, hi = SPRITE_MINZ, ((wph * proj) << 16) // min_h + (8 << 16)
+        while lo < hi:                                    # largest tz with h >= min_h
+            mid = (lo + hi + 1) // 2
+            if h_at(mid) >= min_h:
+                lo = mid
+            else:
+                hi = mid - 1
+        best = lo
+        assert h_at(best) >= min_h > h_at(best + 1), \
+            f"sprite_tz_min_size({wph}, {min_h}): boundary not sharp at {best}"
+        self._tzmin_cache[key] = best
+        return best
+
     # ── V4 THINGS: sprite art, and the run-list the fj bank bakes from it ─────────────────────────
     def sprite_art(self, sprite_wad, kind: int, cache: dict):
         """A thing type's sprite, DOWNSCALED like a wall texture: `(cols, dh, dw, wpx, wph, left,
@@ -843,7 +910,8 @@ class ReferenceModel:
             runs.pop(i)
         return r0, runs
 
-    def project_thing(self, viewx, viewy, viewangle, viewz, tx_map, ty_map, tz_map, art):
+    def project_thing(self, viewx, viewy, viewangle, viewz, tx_map, ty_map, tz_map, art,
+                      min_h: int | None = None):
         """V4 — R_ProjectSprite in this repo's fixed point: the billboard's screen box.
 
         Returns `(x1, x2, ytop, h, istep)` — inclusive column range, the screen row of the sprite's
@@ -879,8 +947,11 @@ class ReferenceModel:
         gzt = ((tz_map + top) << 16) - viewz
         ytop = (cfg.CENTERY << 16) - _signed(fixed_mul(gzt & ANGLE_MASK, xscale, 8, 4), 32)
         h = _signed(fixed_mul((wph << 16) & ANGLE_MASK, xscale, 8, 4), 32) >> 16
-        if h <= 0 or h > cfg.VIEW_H:
+        if h < (MIN_SPRITE_H if min_h is None else min_h) or h > cfg.VIEW_H:
             return None                               # too small to see / too near to bucket
+            # ⚠ fj does NOT reach this test for the small case: `sp_tzmin` rejects on DEPTH right
+            # after tz, before the lateral multiplies and the reciprocal (EXP-7's shape). The two
+            # reject the identical set -- `sprite_tz_min_size` scans for the exact boundary.
         # the texture-column DDA step, through the SAME block-FP reciprocal `proj.scale_recip_div`
         # already implements (not `_recip_div32`, which is a different normalise/shift recipe --
         # reusing the macro that exists beats adding a second one for a sub-texel difference).
@@ -1088,8 +1159,9 @@ class ReferenceModel:
         # trick V3's step faces use, and it is what lets a WRITE-ONCE, forward-only column protocol
         # show sprites at all: DOOM draws them last, back-to-front, and this cannot.
         sfrag: list = [None] * W
-        n_thing = 0
-        spr_cache: dict = {}
+        n_thing = 0                   # ... against THING_BUDGET: scenery (decor + pickups)
+        n_mon = 0                     # ... against MONSTER_BUDGET: monsters, counted SEPARATELY so
+        spr_cache: dict = {}          #     walk order can never spend a monster's slot on a barrel
         things_by_ss: dict = {}
         ss_first: dict = {}
         if things:
@@ -1105,18 +1177,29 @@ class ReferenceModel:
         for seg_i in self.visible_segs(scene.cmap, px, py):  # front-to-back order
             if things and seg_i in ss_first:
                 for t in things_by_ss[ss_first[seg_i]]:
-                    if n_thing >= THING_BUDGET or n_claimed == W:
-                        break
-                    art = self.sprite_art(sprite_wad, t.type, spr_cache)
-                    if art is None:
+                    if n_claimed == W:
+                        break                            # nothing left to draw into: monotone stop
+                    # TWO budgets, not one. Slots are handed out in BSP walk-arrival order, which is
+                    # NOT distance order (EXP-8a), so a single counter let six 1-pixel bonus dots
+                    # spend the frame's budget while 24 monsters were turned away. Both counters are
+                    # monotone, so fj still latches `tstop` once BOTH are spent.
+                    mon = t.type in MONSTER_TYPES
+                    if (n_mon >= MONSTER_BUDGET) if mon else (n_thing >= THING_BUDGET):
+                        continue                         # ... `continue`, not `break`: a scenery
+                    art = self.sprite_art(sprite_wad, t.type, spr_cache)   # budget must not stop the
+                    if art is None:                                        # walk finding a monster
                         continue
                     tss = scene.cmap.subsectors[ss_first[seg_i]]
                     tsec = self._seg_sector(lds, sds, secs, scene.cmap.segs[tss.firstseg])
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
-                                            t.x, t.y, tsec.floor_h, art)
+                                            t.x, t.y, tsec.floor_h, art,
+                                            MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H)
                     if pr is None:
                         continue
-                    n_thing += 1
+                    if mon:
+                        n_mon += 1
+                    else:
+                        n_thing += 1
                     tx1, tx2, ytop, th_px, istep = pr
                     bkt = sprite_bucket(th_px, H)
                     hb = sprite_bucket_height(bkt, H)

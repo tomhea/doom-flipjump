@@ -334,10 +334,13 @@ def simplify(verts, linedefs, sidedefs, sectors, things, *,
                 if spaced(("bonus", tt), t.x, t.y, 96):
                     out.append(t)
             elif tt in THIN_2:
-                if spaced(("t2", tt), t.x, t.y, 192):
+                # v2: 192 -> 320. Trees are the sprite-EMIT driver at the outdoor gates (92 sprite
+                # columns at the tree gate, ~76k ops each); wider spacing keeps every isolated
+                # landmark and thins the grove.
+                if spaced(("t2", tt), t.x, t.y, 320):
                     out.append(t)
             elif tt in THIN_3:
-                if spaced(("t3", tt), t.x, t.y, 256):
+                if spaced(("t3", tt), t.x, t.y, 384):
                     out.append(t)
             elif tt in SMALL_DECOR or tt in CORPSE_DECOR:
                 continue                                    # gone: candles, gore, tiny dressing

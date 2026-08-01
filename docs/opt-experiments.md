@@ -903,3 +903,57 @@ setup-paying segs (D=1500) costs a third of the picture.
 **Available today without either: ship E2M8 instead of E1M1 — 39.2M -> 24.6M, byte-exact, every
 feature on, every monster drawn, zero fidelity lost.** That is a one-argument change and it is the
 single largest improvement this campaign found.
+
+---
+
+# THE 15M-ON-E1M1 CAMPAIGN (2026-08-01, owner: "use the e1m1... ~15M... must have")
+
+The arena pivot is reversed: E1M1 itself is the deliverable, modifiable "a bit", good and fun.
+
+## The tooling that unblocked it
+
+* **`src/doomfj/nodebuilder.py`** — a real BSP node builder (EXP-12 named its absence THE 15M
+  blocker). Stock-tool quality on stock E1M1 (2,057 segs); partitions use the seg's ORIGINAL
+  linedef line in exact integers. Point location: 0 mismatches over 23,935 walkable grid points
+  against an exact ray oracle. ⚠ The old "worst" gate (-309,-44) turned out to be VOID — outside
+  the map. Every stress viewpoint from now on must be walkable.
+* **`src/doomfj/mapsimplify.py` → `tests/fixtures/e1m1_lite.wad`** — E1M1-lite: range-capped
+  sector flattening (a staircase can never transitively collapse), interior-boundary deletion,
+  micro-sector absorption, sagitta-capped decimation (angle-only PULLED WALLS INTO VIEW — the
+  chord must pass within 12 units of every absorbed vertex), duplicate-vertex canonicalization
+  (E1M1 has same-coordinate twins; index-keyed degree counts opened a black column at a
+  T-junction), spatial thing thinning (isolated landmarks always survive — THE tree stays).
+  segs 2057→1378, nodes 681→470, 1-sided lines 521→444, sectors 182→118, things 292→212.
+
+## Measured (fj, byte-exact gates at 6 walkable viewpoints)
+
+| viewpoint | stock | lite v1 | +facefix+sprnarrow |
+|---|---:|---:|---:|
+| spawn | 27,736,221 | 16,027,726 | 16,098,142 |
+| courtyard | 33,649,252 | 30,045,487 | 29,945,828 |
+| tree | 36,608,256 | 36,417,616 | 35,955,213 |
+| (1272,-724) | — | not byte-exact! | 31,957,161 ✓ |
+| (1272,-44) | — | 23,312,196 | 23,421,689 |
+| (-309,636) | — | 35,520,273 | 35,459,022 |
+
+**The lite map is a −42% cut where frames are enclosed and nearly nothing where they are open** —
+because (opprof on the lite tree frame) the open-frame cost is the EMIT half:
+`seg_pass2_leaf_body_lines` = 39.3% of the tree frame, ts attribution 12.9%, things 7.6%. The
+sprite path alone is ~7.0M for 92 sprite columns (~76k per column, 5–7× a normal column).
+
+## The V3 face-slot divergence (a REAL bug, found by the new map)
+
+fj skipped storing a step face that projected off-screen; the oracle stores it anyway, and that
+store CONSUMES the column's write-once slot. When the nearest face was off-screen, fj's open slot
+let a FARTHER seg paint a 28-column phantom face. Fixed with an empty sentinel (y1=1, y2=0) the
+loader provably rejects. fj-lessons R40: **a write-once slot's contract includes its rejections**,
+and "proven equivalent at every gate viewpoint" is a statement about those viewpoints — a new map
+is a new input distribution.
+
+## Probed and parked (picture cost vs ops, oracle-side)
+
+PNEAR 128→64: 5.5k px at the courtyard. STEP 12→8: 610 px of stair faces for ~0.2M.
+SPRITE_RUN_CAP 12→8: 193 px at the tree for ~0.4M. zidx&~1 light banding: only −25-30% of groups
+for up to 1.2k px. **The knobs are spent; what remains is structural**: pair packing (two list
+bytes into ONE op, ~−2-3M), the resumable second emit_region (~−1M), sky mul→dispatch (~−0.5M),
+node-bbox subtree wedge culling (bboxes are in the new NODES; the oracle must mirror the cull).

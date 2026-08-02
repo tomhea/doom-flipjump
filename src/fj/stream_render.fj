@@ -810,7 +810,7 @@ ns stream {
     def face_pattern y2f, colf, y1, gnrow, cmidx @ fwl, end {
         hex.mov 2, fwl, y2f
         hex.sub 2, fwl, y1
-        w1rpat.walk fwl, y1, y2f, gnrow, colf, cmidx
+        w1rpat.walk fwl, y1, y2f, gnrow, colf, colf, cmidx
         ;end
       fwl: hex.vec 2
       end:
@@ -1068,7 +1068,7 @@ ns stream {
     // wall, the floor half-walk, each intersected with the window. A sprite straddles all three, so
     // a fragmented column is `region(0, sy1)` + the sprite + `region(sy2+1, VIEW_H)` -- which is the
     // one structural thing V3's faces never needed, since a face lives inside a SINGLE region.
-    def emit_region lo, hi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, \
+    def emit_region lo, hi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, \
             gnrow, wstrip, wstripbase, \
             cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret \
             @ ch1, ch2, cw1, cw2, cw3, cw4, cf1, cf2, cf3, cf4, end {
@@ -1093,7 +1093,7 @@ ns stream {
         rep(wpx, k) .wpx_wall_win ctake, fstart, wlo, whi, wstrip, wstripbase, wpxstride, noise, cmidx
         rep(1-w2s-wpx-w1r, k) .w1_wall_win wlo, whi, wall_lit
         // M13-W1R: the same randomized runs as w1rpat.walk, restricted to the window
-        rep(w1r, k) w1rpat.walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, cmidx
+        rep(w1r, k) w1rpat.walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, wall_lit2, cmidx
         hex.mov 2, qlo, lo                      // -- floor piece [max(lo, fstart), min(hi, VIEW_H))
         hex.cmp 2, qlo, fstart, cf1, cf2, cf2
       cf1:
@@ -1258,7 +1258,7 @@ ns stream {
       end:
     }
 
-    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, nospr, sprpath, spr1, sm1b, sm1ok, sgap1, sga1e, sgap2, sga2e, sm2b, sm2ok, wall, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, wlo, whi, zlo, vhi, sm1, sm2, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
+    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, wall_lit, wall_lit2, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, nospr, sprpath, spr1, sm1b, sm1ok, sgap1, sga1e, sgap2, sga2e, sm2b, sm2ok, wall, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, wlo, whi, zlo, vhi, sm1, sm2, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
@@ -1297,7 +1297,7 @@ ns stream {
         rep(1-w2s-wpx-w1r, k) .w1_wall fstart, wall_lit
         // M13-W1R: W1's one lit byte as pseudo-random runs, keyed (tier(wlen), gnrow) -- both
         // already in the ditto signature, so the ditto structure is untouched (zero new breaks)
-        rep(w1r, k) w1rpat.walk wlen, ctake, fstart, gnrow, wall_lit, cmidx
+        rep(w1r, k) w1rpat.walk wlen, ctake, fstart, gnrow, wall_lit, wall_lit2, cmidx
         rep(w2s, k) .w2s_wall ctake, wlen, wstrip, wstripbase
         rep(wpx, k) .wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride, noise, cmidx
       floor:                                     // -- floor SUFFIX over [fstart, view_h), split
@@ -1329,16 +1329,16 @@ ns stream {
       sm1b:
         rep(things, k) hex.mov 2, sm1, ssy1b
       sm1ok:
-        rep(things, k) .emit_region zlo, sm1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region zlo, sm1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
         rep(things, k) .sprite_runs_win sblkb, sy0bb, slrb, zlo, ssy1, blkshift
         rep(things, k) hex.cmp 2, ssy2b, ssy1, sgap1, sga1e, sga1e
       sgap1:
-        rep(things, k) .emit_region ssy2b, ssy1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region ssy2b, ssy1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
       sga1e:
         rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
         rep(things, k) hex.cmp 2, ssy2, ssy1b, sgap2, sga2e, sga2e
       sgap2:
-        rep(things, k) .emit_region ssy2, ssy1b, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region ssy2, ssy1b, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
       sga2e:
         rep(things, k) .sprite_runs_win sblkb, sy0bb, slrb, ssy2, vhi, blkshift
         rep(things, k) hex.mov 2, sm2, ssy2
@@ -1346,12 +1346,12 @@ ns stream {
       sm2b:
         rep(things, k) hex.mov 2, sm2, ssy2b
       sm2ok:
-        rep(things, k) .emit_region sm2, vhi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region sm2, vhi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
         ;fdone
       spr1:
-        rep(things, k) .emit_region zlo, ssy1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region zlo, ssy1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
         rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
-        rep(things, k) .emit_region ssy2, vhi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region ssy2, vhi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
       fdone:
         stl.output_char 0xFF                     // ends this column's pair list
         ;end

@@ -790,16 +790,30 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
            f"ns {label} {{"]
 
     def _body(t, v, runs, win):
-        """One (tier, group) body def: cycled baked runs; exits via the passed label."""
+        """One (tier, group) body def: cycled baked runs; exits via the passed label.
+
+        W1R-2C: each run carries an `alt` colour bit -- run colour = wall_lit or wall_lit2 in
+        cmidx's LOW byte. The mov is emitted ONLY where consecutive runs change colour (baked
+        knowledge); the cycle jumps to `entry`, which re-sets run 0's colour unconditionally,
+        so the wrap transition is always correct."""
         b = f"{'w' if win else 'b'}{t}_{v}"
         labs = ["entry"]
         for k in range(len(runs)):
             labs += ([f"t{k}"] if win else []) + [f"e{k}", f"l{k}", f"n{k}"]
-        params = ("ycur, wlo, whi, cmidx, wlast" if win else "ycur, fstart, cmidx, last")
+        # a body only takes the colour params it actually references (a single-colour body
+        # with an unused param would be a werror "unused label")
+        cargs = ([] if not any(not r[2] for r in runs) else ["wall_lit"]) \
+            + ([] if not any(r[2] for r in runs) else ["wall_lit2"])
+        colour_pass[b] = ", ".join(cargs)
+        params = (f"ycur, wlo, whi, {', '.join(cargs)}, cmidx, wlast" if win
+                  else f"ycur, fstart, {', '.join(cargs)}, cmidx, last")
         body = [f"    def {b} {params} @ {', '.join(labs)} {{",
-                "      entry:"]
-        for k, (ln, row) in enumerate(runs):
+                "      entry:",
+                f"        hex.mov 2, cmidx, {'wall_lit2' if runs[0][2] else 'wall_lit'}"]
+        for k, (ln, row, alt) in enumerate(runs):
             nxt = f"n{k}"
+            if k > 0 and alt != runs[k - 1][2]:
+                body.append(f"        hex.mov 2, cmidx, {'wall_lit2' if alt else 'wall_lit'}")
             body.append(f"        hex.add_constant 2, ycur, {ln}")
             if win:
                 body += [f"        hex.cmp 2, ycur, wlo, {nxt}, {nxt}, t{k}",
@@ -820,6 +834,7 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
                  "    }"]
         return body
 
+    colour_pass: dict = {}
     for t, variants in enumerate(patterns):
         for v, runs in enumerate(variants):
             out += _body(t, v, runs, win=False)
@@ -851,15 +866,14 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
              "      g12: hex.vec 1, 12"]
 
     d_labs = [f"d{t}_{v}" for t in range(nt) for v in range(4)]
-    out += [f"    def walk wlen, ctake, fstart, gnrow, wall_lit, cmidx "
+    out += [f"    def walk wlen, ctake, fstart, gnrow, wall_lit, wall_lit2, cmidx "
             f"@ {', '.join(tree_labs + d_labs)}, last, ycur, tb1, tb2, tb3, g4, g8, g12, end {{",
-            "        hex.mov 2, ycur, ctake",
-            "        hex.mov 2, cmidx, wall_lit"]
+            "        hex.mov 2, ycur, ctake"]
     out += _tree("wlen", "d")
     for t in range(nt):
         for v in range(4):
             out += [f"      d{t}_{v}:",
-                    f"        .b{t}_{v} ycur, fstart, cmidx, last"]
+                    f"        .b{t}_{v} ycur, fstart, {colour_pass[f'b{t}_{v}']}, cmidx, last"]
     out += ["      last:",
             "        byte.emit fstart",
             "        cm.emit cmidx",
@@ -868,19 +882,18 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
             "      end:",
             "    }"]
 
-    out += [f"    def walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, cmidx "
+    out += [f"    def walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, wall_lit2, cmidx "
             f"@ wgo, {', '.join(tree_labs + d_labs)}, wlast, ycur, wl2, tb1, tb2, tb3, g4, g8, g12, end {{",
             "        hex.cmp 2, wlo, whi, wgo, end, end",
             "      wgo:",
             "        hex.mov 2, wl2, fstart",
             "        hex.sub 2, wl2, ctake",                 # tier from the FULL wall height
-            "        hex.mov 2, ycur, ctake",
-            "        hex.mov 2, cmidx, wall_lit"]
+            "        hex.mov 2, ycur, ctake"]
     out += _tree("wl2", "d")
     for t in range(nt):
         for v in range(4):
             out += [f"      d{t}_{v}:",
-                    f"        .w{t}_{v} ycur, wlo, whi, cmidx, wlast"]
+                    f"        .w{t}_{v} ycur, wlo, whi, {colour_pass[f'w{t}_{v}']}, cmidx, wlast"]
     out += ["      wlast:",
             "        byte.emit whi",
             "        cm.emit cmidx",

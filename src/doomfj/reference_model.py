@@ -806,32 +806,35 @@ class ReferenceModel:
     # darken, and on the map's dark walls the texture was nearly invisible (first proto sheet).
     W1R_BASE_BRIGHTEN = 8
 
-    # W1R_PATTERNS[tier][wall_noise(x) >> 2] = ((run_len, colormap_row), ...), cycled down the
-    # wall. Hand-tuned literals (an SSOT, not a runtime RNG): the fj `w1rpat.walk` bakes these
-    # very tuples as code, so oracle and fj cannot drift (R6). Adjacent-run row deltas are kept
-    # >= 4 -- the V1 grain sweep measured smaller steps as invisible.
+    # W1R_PATTERNS[tier][wall_noise(x) >> 2] = ((run_len, colormap_row, alt), ...), cycled down
+    # the wall. Hand-tuned literals (an SSOT, not a runtime RNG): the fj `w1rpat.walk` bakes
+    # these very tuples as code, so oracle and fj cannot drift (R6). Adjacent-run row deltas
+    # are kept >= 4 -- the V1 grain sweep measured smaller steps as invisible.
+    # W1R-2C (owner ask): `alt`=1 draws the run over the texture's SECOND representative texel
+    # (`_w1r_texel2` -> the baked seg_lit2) -- scattered on ~30% of runs so it reads as embedded
+    # stones/panels -- and the run lens are FINER (~2-6 px) than the first cut's 2-9.
     W1R_PATTERNS = (
         (   # tier 0, wlen < 6: ONE run (the walls are slivers) -- but still per-group rows
-            ((5, 14),), ((5, 17),), ((5, 15),), ((5, 16),),
+            ((5, 14, 0),), ((5, 17, 1),), ((5, 15, 0),), ((5, 16, 1),),
         ),
-        (   # tier 1, 6 <= wlen < 16: 2-4 px runs, the darkest spread (far walls)
-            ((3, 9), (2, 15), (4, 11), (2, 17)),
-            ((2, 13), (4, 9), (3, 17), (3, 12)),
-            ((4, 11), (2, 17), (3, 9), (2, 14)),
-            ((3, 15), (3, 10), (2, 17), (4, 12)),
+        (   # tier 1, 6 <= wlen < 16: 2-3 px runs, the darkest spread (far walls)
+            ((2, 9, 0), (2, 15, 1), (3, 11, 0), (2, 17, 0)),
+            ((2, 13, 1), (3, 9, 0), (2, 17, 0), (2, 12, 0)),
+            ((3, 11, 0), (2, 17, 0), (2, 9, 1), (2, 14, 0)),
+            ((2, 15, 0), (2, 10, 0), (2, 17, 1), (3, 12, 0)),
         ),
-        (   # tier 2, 16 <= wlen < 40: 3-6 px runs, mid tones (~ the W1 tone on average)
-            ((5, 4), (3, 12), (4, 8), (6, 14), (4, 5)),
-            ((4, 10), (6, 4), (3, 14), (5, 6), (4, 12)),
-            ((6, 6), (4, 13), (5, 4), (3, 10), (5, 14)),
-            ((3, 12), (5, 5), (6, 10), (4, 4), (4, 14)),
+        (   # tier 2, 16 <= wlen < 40: 2-4 px runs, mid tones (~ the W1 tone on average)
+            ((3, 4, 0), (2, 12, 1), (3, 8, 0), (4, 14, 0), (2, 5, 0), (3, 10, 1)),
+            ((3, 10, 0), (4, 4, 0), (2, 14, 1), (3, 6, 0), (2, 12, 0), (3, 8, 0)),
+            ((4, 6, 0), (2, 13, 0), (3, 4, 1), (2, 10, 0), (3, 14, 0), (2, 7, 1)),
+            ((2, 12, 0), (3, 5, 1), (4, 10, 0), (2, 4, 0), (3, 14, 0), (2, 8, 0)),
         ),
-        (   # tier 3, wlen >= 40 (near): 4-9 px runs, BRIGHTER than the W1 tone on average --
+        (   # tier 3, wlen >= 40 (near): 3-6 px runs, BRIGHTER than the W1 tone on average --
             # the coarse stand-in for DOOM's scalelight (near walls light up), which W1 dropped
-            ((7, 0), (4, 6), (8, 2), (5, 7), (6, 1), (4, 5)),
-            ((5, 3), (8, 0), (4, 7), (7, 2), (5, 5), (6, 0)),
-            ((8, 1), (5, 5), (6, 0), (4, 7), (7, 3), (5, 6)),
-            ((6, 2), (7, 6), (5, 0), (8, 4), (4, 7), (6, 1)),
+            ((5, 0, 0), (3, 7, 1), (5, 3, 0), (4, 8, 0), (4, 1, 0), (3, 5, 1), (4, 2, 0)),
+            ((4, 4, 0), (5, 0, 0), (3, 8, 1), (5, 2, 0), (4, 6, 0), (4, 0, 1), (3, 3, 0)),
+            ((5, 1, 0), (4, 5, 1), (4, 0, 0), (3, 8, 0), (5, 4, 0), (4, 7, 1), (3, 2, 0)),
+            ((4, 2, 0), (5, 7, 0), (3, 0, 1), (5, 4, 0), (3, 8, 0), (4, 1, 0), (4, 6, 1)),
         ),
     )
 
@@ -844,19 +847,20 @@ class ReferenceModel:
     @staticmethod
     def w1r_runs(wlen: int, gnrow: int):
         """The W1R run list of a `wlen`-pixel wall column in grain group `gnrow`
-        (= `wall_noise(x)`): [(y2_rel_exclusive, colormap_row), ...], the last ending exactly
-        at `wlen`. Cycles the (tier, group) pattern down the wall and CLAMPS the final run --
-        the exact walk the generated fj `w1rpat.walk` performs, one add + one compare per run,
-        so the two sides cannot drift (R6). `wlen` must be >= 1."""
+        (= `wall_noise(x)`): [(y2_rel_exclusive, colormap_row, alt), ...], the last ending
+        exactly at `wlen`. Cycles the (tier, group) pattern down the wall and CLAMPS the final
+        run -- the exact walk the generated fj `w1rpat.walk` performs, one add + one compare
+        per run, so the two sides cannot drift (R6). `alt`=1 means the SECOND colour byte
+        (walls: seg_lit2; faces ignore it). `wlen` must be >= 1."""
         pat = ReferenceModel.W1R_PATTERNS[ReferenceModel.w1r_tier(wlen)][(gnrow >> 2) & 3]
         runs, rel, k = [], 0, 0
         while True:
-            ln, row = pat[k % len(pat)]
+            ln, row, alt = pat[k % len(pat)]
             rel += ln
             if rel >= wlen:
-                runs.append((wlen, row))
+                runs.append((wlen, row, alt))
                 return runs
-            runs.append((rel, row))
+            runs.append((rel, row, alt))
             k += 1
 
     @staticmethod
@@ -1069,6 +1073,23 @@ class ReferenceModel:
         return ReferenceModel._mode_texel(bright or texels)
 
     @staticmethod
+    def _w1r_texel2(texels, pal, texel1) -> int:
+        """W1R-2C -- the SECOND representative texel: the most common texel among those
+        RGB-DISTANT from texel1 (so the accent reads as a different embedded material, not a
+        shade of the same one), searched in the brighter half like texel1. Falls back to
+        texel1: a single-hue texture stays single-hue and the alt runs change nothing."""
+        from collections import Counter
+        lum = {t: sum(pal[t]) for t in set(texels)}
+        med = sorted(lum[t] for t in texels)[len(texels) // 2]
+        bright = [t for t in texels if lum[t] >= med]
+        r1, g1, b1 = pal[texel1]
+        far = [t for t in bright
+               if abs(pal[t][0] - r1) + abs(pal[t][1] - g1) + abs(pal[t][2] - b1) >= 60]
+        if not far:
+            return texel1
+        return Counter(far).most_common(1)[0][0]
+
+    @staticmethod
     def _tiny_wall_canvas(texels, th: int, wall_mode: str, pal=None):
         """M13p4a — reduce a full (column-major `texels`, height `th`) wall texture to a tiny synthetic
         canvas: "W1" = 1×1 (the MODE texel, `_mode_texel`) or "W2" = 1×16 (a vertical band strip sampled
@@ -1079,11 +1100,13 @@ class ReferenceModel:
         if wall_mode == "W1":
             return [ReferenceModel._mode_texel(texels)], 1, 1
         if wall_mode == "W1R":
-            # M13-W1R: a 1×1 canvas like W1's, but the texel is the BRIGHT-half mode
-            # (`_w1r_texel`, needs the palette) -- the randomization itself is applied at emit
-            # time through the colormap (see `w1r_runs`), never by sampling more texels.
+            # M13-W1R: a TWO-texel canvas -- the BRIGHT-half mode (`_w1r_texel`) plus the
+            # RGB-distant second representative (`_w1r_texel2`, W1R-2C's alt colour). The
+            # randomization itself is applied at emit time through the colormap (`w1r_runs`),
+            # never by sampling more texels.
             assert pal is not None, "wall_mode='W1R' needs the palette for _w1r_texel"
-            return [ReferenceModel._w1r_texel(texels, pal)], 1, 1
+            t1 = ReferenceModel._w1r_texel(texels, pal)
+            return [t1, ReferenceModel._w1r_texel2(texels, pal, t1)], 2, 1
         if wall_mode in ("W2", "W2S"):
             # M13-W2S shares W2's 16-texel strip; the tiers differ only in how a wall column MAPS
             # it (W2 = the real v-DDA tiling; W2S = the strip STRETCHED over [top,bottom], see
@@ -1529,11 +1552,15 @@ class ReferenceModel:
                         # (already in the fj ditto signature -- zero extra ditto breaks) and a
                         # height tier (short = far = darker). The base is baked BRIGHTER than
                         # W1's so the pattern spans both sides of the W1 tone. See `w1r_runs`.
+                        # W1R-2C: `alt` runs draw over the texture's SECOND texel (a different
+                        # material embedded in the wall, still from the same texture).
                         blr = max(0, light_row - self.W1R_BASE_BRIGHTEN)
-                        base = colormap[blr][tex[0][0] if tex is not None else WALL_BG]
+                        t1 = tex[0][0] if tex is not None else WALL_BG
+                        t2 = tex[0][1] if tex is not None else WALL_BG
+                        base, base2 = colormap[blr][t1], colormap[blr][t2]
                         ya = top
-                        for rel, row in self.w1r_runs(bottom + 1 - top, self.wall_noise(x)):
-                            cc = colormap[row][base]
+                        for rel, row, alt in self.w1r_runs(bottom + 1 - top, self.wall_noise(x)):
+                            cc = colormap[row][base2 if alt else base]
                             for y in range(ya, top + rel):
                                 fb[y * cfg.VIEW_W + x] = cc
                             ya = top + rel
@@ -1595,9 +1622,10 @@ class ReferenceModel:
                     h = y2 - y1 + 1
                     lr = self.wall_light_row(self.wall_lightnum(fsc.light, 0), h, max(1, units))
                     if wall_mode == "W1R":
+                        # (faces have no second texel -- the alt bit is ignored here)
                         base = colormap[max(0, lr - self.W1R_BASE_BRIGHTEN)][STEP_FACE_BASE]
                         ya = y1
-                        for rel, row in self.w1r_runs(h, self.wall_noise(x)):
+                        for rel, row, _alt in self.w1r_runs(h, self.wall_noise(x)):
                             cc = colormap[row][base]
                             for y in range(ya, y1 + rel):
                                 fb[y * cfg.VIEW_W + x] = cc

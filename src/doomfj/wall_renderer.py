@@ -281,7 +281,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     for nm in sorted(names) + [None]:
         key = nm if nm else "__WALLBG__"
         if nm is None:
-            th, tw, texels = 1, 1, [WALL_BG]
+            # W1R's canvas is TWO texels (t1 + the 2C alt), so the texture-less sentinel
+            # matches its stride -- both texels the flat shade.
+            th, tw, texels = (2, 1, [WALL_BG, WALL_BG]) if tex_mode == "W1R" else (1, 1, [WALL_BG])
         else:
             c = downscale_canvas(composite_texture(asset_wad, defs[nm]), rm.downscale)
             th, tw, texels = len(c), len(c[0]), texture_texels(c)
@@ -864,6 +866,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                            ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
                            ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
                            ("seg_lit", 2, wlit(ssec.light, combined[tb])),
+                           # W1R-2C: the SECOND colour byte -- the canvas's second texel
+                           # (combined[tb+1] at the 2-texel W1R tier) through the same bake
+                           *([("seg_lit2", 2, wlit(ssec.light, combined[tb + 1]))]
+                             if w1r_flag else []),
                            # M13-2S rung 3a: the emit half derives both list addresses from the
                            # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
                            # (and the same byte is what this seg writes when it claims a column).
@@ -946,6 +952,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 # M13pS2c: the W1 wall's lit colour is fully constant (one texel, one light row) --
                 # bake the FINAL palette byte at Python emit time (no runtime colormap lookup at all).
                 fields.append(("seg_lit", 2, wlit(ssec.light, combined[tb])))
+                if w1r_flag:
+                    fields.append(("seg_lit2", 2, wlit(ssec.light, combined[tb + 1])))
                 # M13pS2-crush2b: the seg's ceiling/floor visplane indices (shared band lists in
                 # stream mode; shared device-side row->colour arrays in raster mode)
                 # M13-lines2: lines mode keys visplanes on (height, light) ONLY -- the flat
@@ -1670,6 +1678,7 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
     raster/proj."""
     return [
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
+        "seg_lit2: hex.vec 2",                         # W1R-2C: ... and its SECOND colour byte
         "seg_wstrip: hex.vec w/4", "wstripbase: hex.vec w/4",   # M13-W2S strip bank
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
         "seg_pid: hex.vec 2",                          # M13-2S rung 3a: baked plane-pair id (1-based)

@@ -44,9 +44,10 @@ WCASES = [  # (ctake, fstart, wlo, whi, gnrow, wall_lit) -- windowed cases
 
 
 def mirror_walk(ctake, fstart, gnrow, wl):
+    wl2 = (wl + 0x30) & 0xFF                     # a distinct second colour per case
     out = bytearray()
-    for rel, row in ReferenceModel.w1r_runs(fstart - ctake, gnrow):
-        out += bytes([ctake + rel, colormap[row][wl]])
+    for rel, row, alt in ReferenceModel.w1r_runs(fstart - ctake, gnrow):
+        out += bytes([ctake + rel, colormap[row][wl2 if alt else wl]])
     return out
 
 
@@ -54,14 +55,16 @@ def mirror_win(ctake, fstart, wlo, whi, gnrow, wl):
     out = bytearray()
     if wlo >= whi:
         return out
-    for rel, row in ReferenceModel.w1r_runs(fstart - ctake, gnrow):
+    wl2 = (wl + 0x30) & 0xFF
+    for rel, row, alt in ReferenceModel.w1r_runs(fstart - ctake, gnrow):
         y2 = ctake + rel
+        c = colormap[row][wl2 if alt else wl]
         if y2 <= wlo:
             continue
         if y2 >= whi:
-            out += bytes([whi, colormap[row][wl]])
+            out += bytes([whi, c])
             break
-        out += bytes([y2, colormap[row][wl]])
+        out += bytes([y2, c])
     return out
 
 
@@ -75,12 +78,14 @@ def build_program():
         drive += [f"hex.set 2, wlen_r, {fs - ct}", f"hex.set 2, ctake_r, {ct}",
                   f"hex.set 2, fstart_r, {fs}", f"hex.set 2, gnrow_r, {gn}",
                   f"hex.set 2, wlit_r, {wl}",
+                  f"hex.set 2, wlit2_r, {(wl + 0x30) & 0xFF}",
                   "stl.fcall wleaf, wret",
                   "stl.output_char 0xFA", "stl.output_char 0xF5"]
     for (ct, fs, lo, hi, gn, wl) in WCASES:
         drive += [f"hex.set 2, ctake_r, {ct}", f"hex.set 2, fstart_r, {fs}",
                   f"hex.set 2, wlo_r, {lo}", f"hex.set 2, whi_r, {hi}",
                   f"hex.set 2, gnrow_r, {gn}", f"hex.set 2, wlit_r, {wl}",
+                  f"hex.set 2, wlit2_r, {(wl + 0x30) & 0xFF}",
                   "stl.fcall wwleaf, wret",
                   "stl.output_char 0xFA", "stl.output_char 0xF5"]
     prog = "\n".join([
@@ -89,15 +94,15 @@ def build_program():
         *drive,
         "stl.loop",
         "wleaf:",
-        "w1rpat.walk wlen_r, ctake_r, fstart_r, gnrow_r, wlit_r, cmidx_r",
+        "w1rpat.walk wlen_r, ctake_r, fstart_r, gnrow_r, wlit_r, wlit2_r, cmidx_r",
         "stl.fret wret",
         "wwleaf:",
-        "w1rpat.walk_win ctake_r, fstart_r, wlo_r, whi_r, gnrow_r, wlit_r, cmidx_r",
+        "w1rpat.walk_win ctake_r, fstart_r, wlo_r, whi_r, gnrow_r, wlit_r, wlit2_r, cmidx_r",
         "stl.fret wret",
         "wret: 0;0",
         "wlen_r: hex.vec 2", "ctake_r: hex.vec 2", "fstart_r: hex.vec 2",
         "wlo_r: hex.vec 2", "whi_r: hex.vec 2",
-        "gnrow_r: hex.vec 2", "wlit_r: hex.vec 2", "cmidx_r: hex.vec 4",
+        "gnrow_r: hex.vec 2", "wlit_r: hex.vec 2", "wlit2_r: hex.vec 2", "cmidx_r: hex.vec 4",
         ""])
     return prog
 

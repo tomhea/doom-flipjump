@@ -1200,11 +1200,11 @@ ns frame {
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, \
             buckets, slotstride, ttwice \
             @ tgo, tgo2, tsce, tincs, tinced, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
-              tfree, tfree2, tblkok, tnext, \
+              tfree, tfree2, tslota, tslotb, tblkok, tnext, \
               tsy1z, tsy1k, tsy1h, tsy2c, tsy2z, tsy2k0, tsy2h, tsy2k, tdraw, \
               tcap, vis, dvis, dtx1, dtx2, dtyt, dthp, dtis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
               tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tcon, tidx, tlr, tr0, trl, trw, \
-              tsy1, tsy2, tb8, tneg, tcvh, end \
+              tsy1, tsy2, tb8, tneg, tcvh, tsofs, tflagv, end \
             < n_thing, n_mon, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
               sp_base, sp_dw, sp_lt, sp_mon, thing_ret {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
@@ -1289,8 +1289,20 @@ ns frame {
         ;tnext
       tfree2:
         hex.read_byte tfv, tfp
-        hex.if0 2, tfv, tblkok                  // a nearer thing already claimed this column
+        hex.if0 2, tfv, tslota                  // no fragment yet -> slot A (offset 0, flag 1)
+        // V4b: slot A taken -- take slot B (byte offset 8 of the same 16-byte slot, flag 2),
+        // else both slots are spent and this thing is hidden here. Walk-arrival order makes
+        // A the nearer fragment and B the one behind it, exactly like the oracle's sfrag2.
+        hex.dec 2, tfv
+        hex.if0 2, tfv, tslotb
         ;tnext
+      tslota:
+        hex.set w/4, tsofs, 0
+        hex.set 2, tflagv, 1
+        ;tblkok
+      tslotb:
+        hex.set w/4, tsofs, 8
+        hex.set 2, tflagv, 2
       tblkok:
         // block = sp_base + u*buckets + bucket, at a POWER-OF-TWO stride so the address is a shift
         // blk = (base + bucket) + u*BUCKETS -- and (base + bucket) is a per-THING constant, so
@@ -1355,6 +1367,7 @@ ns frame {
         hex.set w/4, tidx, 0
         hex.mov 2, tidx, tx
         rep(slotstride/16, k) hex.shl_hex w/4, 1, tidx   // a power-of-16 stride: whole-nibble shift
+        hex.add w/4, tidx, tsofs                // V4b: slot B lives at byte offset 8
         hex.set w/4, tbb, spslot
         hex.ptr_index tbp, tbb, tidx
         hex.write_byte_and_inc tbp, tsy1
@@ -1364,8 +1377,7 @@ ns frame {
         hex.write_byte_and_inc tbp, tblk
         hex.write_byte_and_inc tbp, tblk + 2*dw
         hex.write_byte_and_inc tbp, tlr
-        hex.set 2, tfv, 1
-        hex.write_byte tfp, tfv
+        hex.write_byte tfp, tflagv              // V4b: 1 = A only, 2 = A + B
       tnext:
         hex.ptr_add tdp, 1
         hex.ptr_add tfp, 1
@@ -1418,6 +1430,8 @@ ns frame {
       tb8: hex.vec 8
       tneg: hex.vec 8
       tcvh: hex.vec 8
+      tsofs: hex.vec w/4                        // V4b: this claim's slot byte offset (0 = A, 8 = B)
+      tflagv: hex.vec 2                         // ... and the flag it leaves (1 = A, 2 = A+B)
       end:
     }
 
@@ -1905,14 +1919,21 @@ ns frame {
     // filled. Six bytes, but a column WITHOUT a sprite pays only the one `sprflag` read -- and that
     // is most columns. All six are ZEROED when absent: they are the column's ditto signature too,
     // and a stale value from an earlier column would let an empty column ditto a sprite column.
-    def lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, x \
-            @ sfb, sfp, sbb, sbp, sidx, end < sprflag, spslot {
+    def lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, x \
+            @ sfb, sfp, sbb, sbp, sidx, sfl2, end < sprflag, spslot {
         hex.zero 2, sprfl
         hex.zero 2, ssy1
         hex.zero 2, ssy2
         hex.zero 4, sy0b
         hex.zero 4, sblk
         hex.zero 2, slr
+        // V4b: slot B's signature regs zero when absent -- like slot A's, that keeps the ditto
+        // compares meaningful without a flag compare (a real fragment's sy0b is never 0).
+        hex.zero 2, ssy1b
+        hex.zero 2, ssy2b
+        hex.zero 4, sy0bb
+        hex.zero 4, sblkb
+        hex.zero 2, slrb
         hex.set w/4, sfb, sprflag
         hex.ptr_index sfp, sfb, x
         hex.read_byte sprfl, sfp
@@ -1932,12 +1953,25 @@ ns frame {
         hex.read_byte_and_inc sblk, sbp
         hex.read_byte_and_inc sblk + 2*dw, sbp
         hex.read_byte_and_inc slr, sbp
+        // V4b: sprfl == 2 -> the SECOND fragment at byte offset 8 of the same slot
+        hex.mov 2, sfl2, sprfl
+        hex.dec 2, sfl2
+        hex.if0 2, sfl2, end
+        hex.ptr_add sbp, 1                      // bytes 0-6 read -> skip byte 7 to land on 8
+        hex.read_byte_and_inc ssy1b, sbp
+        hex.read_byte_and_inc ssy2b, sbp
+        hex.read_byte_and_inc sy0bb, sbp
+        hex.read_byte_and_inc sy0bb + 2*dw, sbp
+        hex.read_byte_and_inc sblkb, sbp
+        hex.read_byte_and_inc sblkb + 2*dw, sbp
+        hex.read_byte_and_inc slrb, sbp
         ;end
       sfb: hex.vec w/4
       sfp: hex.vec w/4
       sbb: hex.vec w/4
       sbp: hex.vec w/4
       sidx: hex.vec w/4
+      sfl2: hex.vec 2
       end:
     }
 
@@ -2103,7 +2137,9 @@ ns frame {
               gnrow, dgn, skb, soff, issky, dsoff, \
               stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, \
               duy1, duy2, ducol, dly1, dly2, dlcol, \
-              sprfl, ssy1, ssy2, sy0b, sblk, slr, dssy1, dssy2, dsy0b, dsblk \
+              sprfl, ssy1, ssy2, sy0b, sblk, slr, dssy1, dssy2, dsy0b, dsblk, \
+              ssy1b, ssy2b, sy0bb, sblkb, slrb, dssy1b, dssy2b, dsy0bb, dsblkb, \
+              dsp5, dsp6, dsp7, dsp8 \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
               seg_lit, seg_wstrip, wstripbase, \
@@ -2186,7 +2222,7 @@ ns frame {
         // fragments back. The frame is then identical to a things=False build, so the
         // delta against one prices the record half ALONE -- by subtraction from a
         // byte-exact frame, not by stubbing something the rest of the frame depends on.
-        rep(things*spremit, k) .lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, x
+        rep(things*spremit, k) .lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, x
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
@@ -2234,7 +2270,17 @@ ns frame {
       dsp3:
         rep(things, k) hex.cmp 4, sy0b, dsy0b, dfull, dsp4, dfull
       dsp4:
-        rep(things, k) hex.cmp 4, sblk, dsblk, dfull, dpl, dfull
+        rep(things, k) hex.cmp 4, sblk, dsblk, dfull, dsp5, dfull
+      dsp5:
+        // V4b: ... and the SECOND fragment's signature (zeroed when absent, like slot A's --
+        // a real fragment's biased y0 is never 0, so presence is encoded in the values).
+        rep(things, k) hex.cmp 2, ssy1b, dssy1b, dfull, dsp6, dfull
+      dsp6:
+        rep(things, k) hex.cmp 2, ssy2b, dssy2b, dfull, dsp7, dfull
+      dsp7:
+        rep(things, k) hex.cmp 4, sy0bb, dsy0bb, dfull, dsp8, dfull
+      dsp8:
+        rep(things, k) hex.cmp 4, sblkb, dsblkb, dfull, dpl, dfull
       dpl:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
         rep(1-pnear, k) .lines_jmp dsame
@@ -2245,7 +2291,7 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
         hex.mov 2, duy1, uy1                    // V3: the face signature, unconditional (same
@@ -2258,6 +2304,10 @@ ns frame {
         hex.mov 2, dssy2, ssy2
         hex.mov 4, dsy0b, sy0b
         hex.mov 4, dsblk, sblk
+        hex.mov 2, dssy1b, ssy1b                // V4b: the second fragment's signature
+        hex.mov 2, dssy2b, ssy2b
+        hex.mov 4, dsy0bb, sy0bb
+        hex.mov 4, dsblkb, sblkb
         hex.mov 2, dsoff, soff                  // V2: unconditional, same reason as dgn
         hex.mov 2, dgn, gnrow                   // V1: unconditional so `dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
@@ -2318,6 +2368,15 @@ ns frame {
       dssy2: hex.vec 2
       dsy0b: hex.vec 4
       dsblk: hex.vec 4
+      ssy1b: hex.vec 2                          // V4b: the SECOND (farther) fragment's five ...
+      ssy2b: hex.vec 2
+      sy0bb: hex.vec 4
+      sblkb: hex.vec 4
+      slrb: hex.vec 2
+      dssy1b: hex.vec 2                         // ... and its previously emitted signature
+      dssy2b: hex.vec 2
+      dsy0bb: hex.vec 4
+      dsblkb: hex.vec 4
       dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs
       dbot: hex.vec 8
       dscale: hex.vec 8                         // ablate "scaletwice" only: dead scale-setup outputs

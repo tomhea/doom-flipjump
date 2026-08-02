@@ -945,6 +945,77 @@ ns stream {
     // arrives through `cm.emit` with the fragment's light row in the index's high byte -- V1's grain
     // mechanism exactly. ⚠ From `smidx`, NOT the grain's `cmidx`: the wall emitted AFTER the sprite
     // (the second region) would otherwise inherit the sprite's light row.
+    // V4b -- `sprite_runs` over a WINDOW [wlo, whi): the SECOND (farther) fragment's runs,
+    // restricted to the rows the near fragment leaves open. A deliberate second copy, like
+    // `wpx_wall_win`: the full walker carries most sprite pairs and adding two compares per run
+    // to it would cost more than this whole feature. Runs ending at or above wlo are skipped
+    // unemitted; the run crossing whi clamps there and stops. `wlo`/`whi` are 2-nibble rows.
+    def sprite_runs_win sblk, sy0b, slr, wlo, whi, blkshift \
+            @ sloop, sbody, spos, semit, sfin, sclamp, snext, send, \
+              ptr, sbase, sidx, cnt, iS, rel, tex, r8, ya, y0, smidx, wlo4, whi4, end < sprbank {
+        hex.zero w/4, sidx
+        hex.mov 4, sidx, sblk
+        rep(blkshift, k) hex.shl_bit w/4, sidx
+        hex.set w/4, sbase, sprbank
+        hex.ptr_index ptr, sbase, sidx
+        hex.ptr_add ptr, 2
+        hex.read_byte_and_inc cnt, ptr
+        hex.zero 4, smidx
+        hex.mov 2, smidx + 2*dw, slr
+        hex.zero 4, y0
+        hex.mov 4, y0, sy0b
+        hex.sub_constant 4, y0, 32768
+        hex.zero 4, wlo4                        // widened window rows (the row math is 4-nibble)
+        hex.mov 2, wlo4, wlo
+        hex.zero 4, whi4
+        hex.mov 2, whi4, whi
+        hex.zero 2, iS
+      sloop:
+        hex.cmp 2, iS, cnt, sbody, send, send
+      sbody:
+        hex.read_byte_and_inc rel, ptr
+        hex.read_byte_and_inc tex, ptr
+        hex.zero 4, r8
+        hex.mov 2, r8, rel
+        hex.mov 4, ya, y0
+        hex.add 4, ya, r8
+        hex.scmp 4, ya, wlo4, snext, snext, spos   // ends at or above the window -> skip unemitted
+      spos:
+        hex.scmp 4, ya, whi4, semit, sfin, sclamp
+      semit:
+        byte.emit ya
+        hex.mov 2, smidx, tex
+        cm.emit smidx
+      snext:
+        hex.inc 2, iS
+        ;sloop
+      sfin:
+        byte.emit ya
+        hex.mov 2, smidx, tex
+        cm.emit smidx
+        ;send
+      sclamp:
+        byte.emit whi
+        hex.mov 2, smidx, tex
+        cm.emit smidx
+      send:
+        ;end
+      ptr: hex.vec w/4
+      sbase: hex.vec w/4
+      sidx: hex.vec w/4
+      cnt: hex.vec 2
+      iS: hex.vec 2
+      rel: hex.vec 2
+      tex: hex.vec 2
+      r8: hex.vec 4
+      ya: hex.vec 4
+      y0: hex.vec 4
+      smidx: hex.vec 4
+      wlo4: hex.vec 4
+      whi4: hex.vec 4
+      end:
+    }
+
     def sprite_runs sblk, sy0b, slr, viewh, blkshift \
             @ sloop, sbody, spos, semit, sfin, sclamp, snext, send, \
               ptr, sbase, sidx, cnt, iS, rel, tex, r8, ya, y0, smidx, cvh, end < sprbank {
@@ -1018,7 +1089,7 @@ ns stream {
       end:
     }
 
-    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, nospr, sprpath, wall, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, wlo, whi, zlo, vhi, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
+    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, nospr, sprpath, spr1, sm1b, sm1ok, sgap1, sga1e, sgap2, sga2e, sm2b, sm2ok, wall, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, wlo, whi, zlo, vhi, sm1, sm2, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
@@ -1070,6 +1141,41 @@ ns stream {
       sprpath:                                   // V4: region | sprite | region
         rep(things, k) hex.zero 2, zlo
         rep(things, k) hex.set 2, vhi, viewh
+        // V4b: sprfl = 1 (one fragment, the old path) or 2 (A + a farther B). The dec is safe:
+        // nothing reads sprfl after the path split.
+        rep(things, k) hex.dec 2, sprfl
+        rep(things, k) hex.if0 2, sprfl, spr1
+        // -- A+B: region | B-above | (gap) | A | (gap) | B-below | region. Every piece is
+        // self-clamping (an empty emit_region window emits nothing; the windowed B walker
+        // skips runs at or above wlo and clamps at whi), and the near fragment A wins every
+        // overlapped row by construction: B only ever emits rows outside [ssy1, ssy2). The
+        // two GAP regions are guarded -- they are empty in the common overlap case, and an
+        // empty emit_region still walks its half-lists (~5k) while the guard is one cmp.
+        rep(things, k) hex.mov 2, sm1, ssy1
+        rep(things, k) hex.cmp 2, ssy1b, sm1, sm1b, sm1ok, sm1ok
+      sm1b:
+        rep(things, k) hex.mov 2, sm1, ssy1b
+      sm1ok:
+        rep(things, k) .emit_region zlo, sm1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .sprite_runs_win sblkb, sy0bb, slrb, zlo, ssy1, blkshift
+        rep(things, k) hex.cmp 2, ssy2b, ssy1, sgap1, sga1e, sga1e
+      sgap1:
+        rep(things, k) .emit_region ssy2b, ssy1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+      sga1e:
+        rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
+        rep(things, k) hex.cmp 2, ssy2, ssy1b, sgap2, sga2e, sga2e
+      sgap2:
+        rep(things, k) .emit_region ssy2, ssy1b, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+      sga2e:
+        rep(things, k) .sprite_runs_win sblkb, sy0bb, slrb, ssy2, vhi, blkshift
+        rep(things, k) hex.mov 2, sm2, ssy2
+        rep(things, k) hex.cmp 2, sm2, ssy2b, sm2b, sm2ok, sm2ok
+      sm2b:
+        rep(things, k) hex.mov 2, sm2, ssy2b
+      sm2ok:
+        rep(things, k) .emit_region sm2, vhi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        ;fdone
+      spr1:
         rep(things, k) .emit_region zlo, ssy1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
         rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
         rep(things, k) .emit_region ssy2, vhi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
@@ -1115,6 +1221,8 @@ ns stream {
       whi: hex.vec 2
       zlo: hex.vec 2                           // ... and the two region bounds a sprite splits at
       vhi: hex.vec 2
+      sm1: hex.vec 2                           // V4b: min(ssy1, ssy1b) / max(ssy2, ssy2b)
+      sm2: hex.vec 2
       ptr: hex.vec w/4
       cntN: hex.vec 2
       iP: hex.vec 2

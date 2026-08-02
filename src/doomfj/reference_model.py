@@ -1275,6 +1275,7 @@ class ReferenceModel:
         # trick V3's step faces use, and it is what lets a WRITE-ONCE, forward-only column protocol
         # show sprites at all: DOOM draws them last, back-to-front, and this cannot.
         sfrag: list = [None] * W
+        sfrag2: list = [None] * W     # V4b: the SECOND (farther) fragment, drawn under slot A
         n_thing = 0                   # ... against THING_BUDGET: scenery (decor + pickups)
         n_mon = 0                     # ... against MONSTER_BUDGET: monsters, counted SEPARATELY so
         spr_cache: dict = {}          #     walk order can never spend a monster's slot on a barrel
@@ -1335,12 +1336,20 @@ class ReferenceModel:
                     for x in range(max(0, tx1), min(W, tx2 + 1)):
                         u = min(art[2] - 1, max(0, frac >> 16))
                         frac += istep
-                        if drawn[x] or sfrag[x] is not None:
-                            continue
+                        if drawn[x] or sfrag2[x] is not None:
+                            continue                     # V4b: both fragment slots spent
                         st = self.sprite_strip(art[0][u], art[1], hb)
                         if st is None:
                             continue
-                        sfrag[x] = (ytop_b + st[0], st[1], lr)
+                        # V4b: TWO write-once fragment slots per column, filled in walk-arrival
+                        # (~front-to-back) order -- slot A is the near sprite, slot B the one
+                        # behind it. One slot chopped the farther sprite's whole column wherever
+                        # two overlapped in x (the owner's (664,291) frame: a tall zombie lost
+                        # its head to a potion's columns).
+                        if sfrag[x] is None:
+                            sfrag[x] = (ytop_b + st[0], st[1], lr)
+                        else:
+                            sfrag2[x] = (ytop_b + st[0], st[1], lr)
             seg = scene.cmap.segs[seg_i]
             ld = lds[seg.linedef]
             if ld.back != -1:
@@ -1592,14 +1601,17 @@ class ReferenceModel:
                 # ending at or above row 0 are skipped outright (a near sprite whose top is off the
                 # top of the view) and the last one is clamped at VIEW_H.
                 for x in range(cfg.VIEW_W):
-                    if sfrag[x] is None:
-                        continue
-                    y0, runs, lr = sfrag[x]
-                    prev = 0
-                    for (rel, texel) in runs:
-                        for y in range(max(0, y0 + prev), min(cfg.VIEW_H, y0 + rel)):
-                            fb[y * cfg.VIEW_W + x] = colormap[lr][texel]
-                        prev = rel
+                    # V4b: far fragment first, near painted OVER it -- the fj emit produces the
+                    # same pixels by windowing the far fragment to the rows the near one leaves.
+                    for frag in (sfrag2[x], sfrag[x]):
+                        if frag is None:
+                            continue
+                        y0, runs, lr = frag
+                        prev = 0
+                        for (rel, texel) in runs:
+                            for y in range(max(0, y0 + prev), min(cfg.VIEW_H, y0 + rel)):
+                                fb[y * cfg.VIEW_W + x] = colormap[lr][texel]
+                            prev = rel
         elif floor_texturing:
             self._render_planes_textured(fb, colormap, scene.asset_wad, flatcache,
                                          viewx, viewy, viewangle, viewz, *planes)

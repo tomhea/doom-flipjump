@@ -689,7 +689,9 @@ class ReferenceModel:
         canvas = downscale_canvas(composite_texture(asset_wad, defs[nm]), self.downscale)
         texels, th, tw = texture_texels(canvas), len(canvas), len(canvas[0])
         if wall_mode not in ("textured", "WPX"):     # WPX samples the REAL texture (see wpx_strip)
-            texels, th, tw = self._tiny_wall_canvas(texels, th, wall_mode)
+            texels, th, tw = self._tiny_wall_canvas(
+                texels, th, wall_mode,
+                pal=asset_wad.playpal() if wall_mode == "W1R" else None)
         cache[key] = (texels, th, tw)
         return cache[key]
 
@@ -785,6 +787,76 @@ class ReferenceModel:
         h = (x >> 2) ^ (x >> 4)
         h ^= h >> 3
         return (h & ((1 << WALL_NOISE_BITS) - 1)) << 2
+
+    # ------------------------------------------------------------------ M13-W1R
+    # The RANDOMIZED W1 wall tier: the wall keeps W1's single baked lit byte, but is emitted as
+    # PSEUDO-RANDOM VERTICAL RUNS re-shaded through the colormap (V1's grain mechanism -- same
+    # colour, dimmer, so it reads as surface texture and never as a hue jump). The pattern is
+    # keyed on (a) the V1 COLUMN-GROUP hash `wall_noise(x)` -- already part of the fj ditto
+    # signature, so W1R breaks ZERO additional dittos -- and (b) a HEIGHT TIER: short (= far)
+    # walls draw from darker rows than tall (= near) ones, which is the distance-light cue the
+    # flat W1 tier dropped. Rows are ABSOLUTE colormap rows composed over the already-lit byte
+    # (row 0 = identity), exactly like the WPX grain.
+    W1R_TIER_BOUNDS = (6, 16, 40)      # wlen < 6 -> tier 0 (far) ... >= 40 -> tier 3 (near)
+
+    # The W1R BASE is baked BRIGHTER than W1's by this many colormap rows (clamped at 0), so the
+    # pattern rows below can move the tone BOTH ways around today's W1 colour: row 3 ~ the W1
+    # tone, rows 0-2 brighter, rows 4+ darker. Without this, colormap composition can only
+    # darken, and on the map's dark walls the texture was nearly invisible (first proto sheet).
+    W1R_BASE_BRIGHTEN = 8
+
+    # W1R_PATTERNS[tier][wall_noise(x) >> 2] = ((run_len, colormap_row), ...), cycled down the
+    # wall. Hand-tuned literals (an SSOT, not a runtime RNG): the fj `w1rpat.walk` bakes these
+    # very tuples as code, so oracle and fj cannot drift (R6). Adjacent-run row deltas are kept
+    # >= 4 -- the V1 grain sweep measured smaller steps as invisible.
+    W1R_PATTERNS = (
+        (   # tier 0, wlen < 6: ONE run (the walls are slivers) -- but still per-group rows
+            ((5, 14),), ((5, 17),), ((5, 15),), ((5, 16),),
+        ),
+        (   # tier 1, 6 <= wlen < 16: 2-4 px runs, the darkest spread (far walls)
+            ((3, 9), (2, 15), (4, 11), (2, 17)),
+            ((2, 13), (4, 9), (3, 17), (3, 12)),
+            ((4, 11), (2, 17), (3, 9), (2, 14)),
+            ((3, 15), (3, 10), (2, 17), (4, 12)),
+        ),
+        (   # tier 2, 16 <= wlen < 40: 3-6 px runs, mid tones (~ the W1 tone on average)
+            ((5, 4), (3, 12), (4, 8), (6, 14), (4, 5)),
+            ((4, 10), (6, 4), (3, 14), (5, 6), (4, 12)),
+            ((6, 6), (4, 13), (5, 4), (3, 10), (5, 14)),
+            ((3, 12), (5, 5), (6, 10), (4, 4), (4, 14)),
+        ),
+        (   # tier 3, wlen >= 40 (near): 4-9 px runs, BRIGHTER than the W1 tone on average --
+            # the coarse stand-in for DOOM's scalelight (near walls light up), which W1 dropped
+            ((7, 0), (4, 6), (8, 2), (5, 7), (6, 1), (4, 5)),
+            ((5, 3), (8, 0), (4, 7), (7, 2), (5, 5), (6, 0)),
+            ((8, 1), (5, 5), (6, 0), (4, 7), (7, 3), (5, 6)),
+            ((6, 2), (7, 6), (5, 0), (8, 4), (4, 7), (6, 1)),
+        ),
+    )
+
+    @staticmethod
+    def w1r_tier(wlen: int) -> int:
+        """The W1R height tier of a `wlen`-pixel wall column (0 = far ... 3 = near)."""
+        b = ReferenceModel.W1R_TIER_BOUNDS
+        return 0 if wlen < b[0] else 1 if wlen < b[1] else 2 if wlen < b[2] else 3
+
+    @staticmethod
+    def w1r_runs(wlen: int, gnrow: int):
+        """The W1R run list of a `wlen`-pixel wall column in grain group `gnrow`
+        (= `wall_noise(x)`): [(y2_rel_exclusive, colormap_row), ...], the last ending exactly
+        at `wlen`. Cycles the (tier, group) pattern down the wall and CLAMPS the final run --
+        the exact walk the generated fj `w1rpat.walk` performs, one add + one compare per run,
+        so the two sides cannot drift (R6). `wlen` must be >= 1."""
+        pat = ReferenceModel.W1R_PATTERNS[ReferenceModel.w1r_tier(wlen)][(gnrow >> 2) & 3]
+        runs, rel, k = [], 0, 0
+        while True:
+            ln, row = pat[k % len(pat)]
+            rel += ln
+            if rel >= wlen:
+                runs.append((wlen, row))
+                return runs
+            runs.append((rel, row))
+            k += 1
 
     @staticmethod
     def wpx_strip(texels, th, tw, colormap, light_row, h, *, cap=WPX_RUN_CAP):
@@ -984,7 +1056,19 @@ class ReferenceModel:
         return x1, x2, ytop >> 16, h, istep
 
     @staticmethod
-    def _tiny_wall_canvas(texels, th: int, wall_mode: str):
+    def _w1r_texel(texels, pal) -> int:
+        """The W1R representative texel: the MODE of the texture's BRIGHTER half (true palette
+        luminance). W1's plain mode texel is often a near-black one, and colormap composition
+        over black is black -- the whole point of W1R (visible runs) then dies in dark sectors
+        (measured at spawn: the wood side walls rendered palette 0 at every row). Picking from
+        the brighter half keeps the dominant hue but leaves the colormap headroom to work in."""
+        lum = {t: sum(pal[t]) for t in set(texels)}
+        med = sorted(lum[t] for t in texels)[len(texels) // 2]
+        bright = [t for t in texels if lum[t] >= med]
+        return ReferenceModel._mode_texel(bright or texels)
+
+    @staticmethod
+    def _tiny_wall_canvas(texels, th: int, wall_mode: str, pal=None):
         """M13p4a — reduce a full (column-major `texels`, height `th`) wall texture to a tiny synthetic
         canvas: "W1" = 1×1 (the MODE texel, `_mode_texel`) or "W2" = 1×16 (a vertical band strip sampled
         from the real texture's column 0). Both keep the wall raster pipeline (`texcol % tw`, the
@@ -993,6 +1077,12 @@ class ReferenceModel:
         two can never drift (R6)."""
         if wall_mode == "W1":
             return [ReferenceModel._mode_texel(texels)], 1, 1
+        if wall_mode == "W1R":
+            # M13-W1R: a 1×1 canvas like W1's, but the texel is the BRIGHT-half mode
+            # (`_w1r_texel`, needs the palette) -- the randomization itself is applied at emit
+            # time through the colormap (see `w1r_runs`), never by sampling more texels.
+            assert pal is not None, "wall_mode='W1R' needs the palette for _w1r_texel"
+            return [ReferenceModel._w1r_texel(texels, pal)], 1, 1
         if wall_mode in ("W2", "W2S"):
             # M13-W2S shares W2's 16-texel strip; the tiers differ only in how a wall column MAPS
             # it (W2 = the real v-DDA tiling; W2S = the strip STRETCHED over [top,bottom], see
@@ -1395,6 +1485,20 @@ class ReferenceModel:
                             c = colormap[light_row][texels_s[j]]
                             for y in range(ya, min(yb, bottom + 1)):
                                 fb[y * cfg.VIEW_W + x] = c
+                    elif top <= bottom and wall_mode == "W1R":
+                        # M13-W1R: W1's one lit byte, split into pseudo-random vertical runs
+                        # re-shaded through the colormap. Keyed on the V1 column-group hash
+                        # (already in the fj ditto signature -- zero extra ditto breaks) and a
+                        # height tier (short = far = darker). The base is baked BRIGHTER than
+                        # W1's so the pattern spans both sides of the W1 tone. See `w1r_runs`.
+                        blr = max(0, light_row - self.W1R_BASE_BRIGHTEN)
+                        base = colormap[blr][tex[0][0] if tex is not None else WALL_BG]
+                        ya = top
+                        for rel, row in self.w1r_runs(bottom + 1 - top, self.wall_noise(x)):
+                            cc = colormap[row][base]
+                            for y in range(ya, top + rel):
+                                fb[y * cfg.VIEW_W + x] = cc
+                            ya = top + rel
                     elif top <= bottom:
                         if tex is None:
                             for y in range(top, bottom + 1):

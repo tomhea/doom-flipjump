@@ -34,7 +34,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.coarse_cull import generate_coarse_bounds_fj
-from doomfj.lut_generator import generate_bands_walk_fj
+from doomfj.lut_generator import generate_bands_walk_fj, generate_w1r_walls_fj
 from doomfj.tables import (tantoangle_table, slopediv_recip8_table, slopediv_recip_table,
                            xtoviewangle_table)
 from doomfj.config import PNEAR_SEG_BUDGET
@@ -172,9 +172,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     assert ablate <= _ABLATE_MODES, f"unknown ablate mode(s): {ablate - _ABLATE_MODES}"
     assert not ({"segstub", "xrstub"} <= ablate), "segstub and xrstub are mutually exclusive"
     assert floor_mode in ("textured", "flat", "FT1"), f"unknown floor_mode: {floor_mode!r}"
-    assert wall_mode in ("textured", "W1", "W2", "W2S", "WPX"), f"unknown wall_mode: {wall_mode!r}"
+    assert wall_mode in ("textured", "W1", "W2", "W2S", "WPX", "W1R"), \
+        f"unknown wall_mode: {wall_mode!r}"
     # M13-WPX carries its real texels in its OWN per-height bank, so the shared combined table
     # (and `seg_lit`) stays at the W1 tier -- one mode texel per texture, not the 793k-texel one.
+    # M13-W1R keeps its OWN tex_mode: same 1x1 canvas shape, but the BRIGHT-HALF mode texel
+    # (`_w1r_texel`) so the colormap has headroom to randomize in dark sectors.
     tex_mode = "W1" if wall_mode == "WPX" else wall_mode
     assert raster_mode in ("framebuffer", "stream", "spans", "raster", "proj", "lines"), \
         f"unknown raster_mode: {raster_mode!r}"
@@ -226,11 +229,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     table_dbl = 1 if "tabletwice" in ablate else 0
     w2s_flag = 1 if wall_mode == "W2S" else 0   # M13-W2S tier select for the lines leaf
     wpx_flag = 1 if wall_mode == "WPX" else 0   # M13-WPX (1x1 vertical) tier select
+    w1r_flag = 1 if wall_mode == "W1R" else 0   # M13-W1R (randomized runs) tier select
     if stream or raster or projm or lines:
-        assert wall_mode in ("W1", "W2S", "WPX") and floor_mode in ("flat", "FT1"), \
-            "the run-stream modes support wall_mode='W1'/'W2S'/'WPX' + floor_mode='flat'/'FT1'"
+        assert wall_mode in ("W1", "W2S", "WPX", "W1R") and floor_mode in ("flat", "FT1"), \
+            "the run-stream modes support wall_mode='W1'/'W2S'/'WPX'/'W1R' + floor_mode='flat'/'FT1'"
         assert wall_mode == "W1" or lines, f"wall_mode={wall_mode!r} is a lines-mode tier"
         assert floor_mode != "FT1" or lines, "floor_mode='FT1' is a lines-mode tier"
+    # M13-W1R rides V1's per-column grain group (`gnrow` via the wnoise lookup) and V1's ditto
+    # comparison of it -- without the grain the pattern key does not exist at runtime.
+    assert not w1r_flag or wall_noise, "wall_mode='W1R' requires wall_noise=True (V1's gnrow)"
+    assert not (w1r_flag and two_sided), "wall_mode='W1R' is not wired into the two_sided leaf"
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -271,7 +279,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             c = downscale_canvas(composite_texture(asset_wad, defs[nm]), rm.downscale)
             th, tw, texels = len(c), len(c[0]), texture_texels(c)
             if tex_mode != "textured":                         # M13p4a: shrink to the tiny synthetic canvas
-                texels, th, tw = rm._tiny_wall_canvas(texels, th, tex_mode)
+                texels, th, tw = rm._tiny_wall_canvas(
+                    texels, th, tex_mode,
+                    pal=asset_wad.playpal() if tex_mode == "W1R" else None)
         while len(combined) % th != 0:                        # align the slice to its texheight (the OR-trick)
             combined.append(0)
         info[key] = (len(combined), th, tw)
@@ -418,6 +428,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     wnoise = (generate_dispatch_table_fj(
         "wnoise", [rm.wall_noise(x) for x in range(cfg.VIEW_W + 1)],
         index_nibbles=2, result_nibbles=2) if lines and wall_noise else "")
+    # M13-W1R: the randomized-wall walkers, baked from the oracle's own pattern tables (R6).
+    w1rpat = (generate_w1r_walls_fj(rm.W1R_TIER_BOUNDS, rm.W1R_PATTERNS)
+              if lines and w1r_flag else "")
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     slopediv_recip8 = generate_slopediv_recip8_lut_fj("slopediv_recip8")  # M13-coarseslope
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
@@ -427,6 +440,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
 
     def lrow(light):
         return max(0, min(COLORMAP_LIGHTS - 1, light >> LIGHT_SHIFT))
+
+    def wlit(light, texel):
+        """The baked constant wall byte (`seg_lit`). W1R bakes it BRIGHTER by
+        `W1R_BASE_BRIGHTEN` rows so the randomized run rows can move the tone BOTH ways
+        around the W1 tone -- mirrors the oracle's W1R branch (`blr`) exactly (R6)."""
+        row = lrow(light)
+        if wall_mode == "W1R":
+            row = max(0, row - rm.W1R_BASE_BRIGHTEN)
+        return colormap[row][texel]
 
     # M13-bakedbands (the 12M campaign's LUT play): in lines mode EVERY POSSIBLE band list is
     # baked at compile time -- one list per (viewz class) x (height, light, flat-base) key, with
@@ -818,7 +840,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                              if wall_mode in ("W2S", "WPX") else []),
                            ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
                            ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
-                           ("seg_lit", 2, colormap[lrow(ssec.light)][combined[tb]]),
+                           ("seg_lit", 2, wlit(ssec.light, combined[tb])),
                            # M13-2S rung 3a: the emit half derives both list addresses from the
                            # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
                            # (and the same byte is what this seg writes when it claims a column).
@@ -900,7 +922,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             if stream or raster or lines:
                 # M13pS2c: the W1 wall's lit colour is fully constant (one texel, one light row) --
                 # bake the FINAL palette byte at Python emit time (no runtime colormap lookup at all).
-                fields.append(("seg_lit", 2, colormap[lrow(ssec.light)][combined[tb]]))
+                fields.append(("seg_lit", 2, wlit(ssec.light, combined[tb])))
                 # M13pS2-crush2b: the seg's ceiling/floor visplane indices (shared band lists in
                 # stream mode; shared device-side row->colour arrays in raster mode)
                 # M13-lines2: lines mode keys visplanes on (height, light) ONLY -- the flat
@@ -1120,7 +1142,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                     tex, cm, ttang, sdrecip, srdisp, xtadisp, wnoise, skybands, skyoff, skypid,
+                     tex, cm, ttang, sdrecip, srdisp, xtadisp, wnoise, w1rpat, skybands, skyoff, skypid,
                      entoff, "__hot_end:"])
     else:
         hotdata = []
@@ -1195,7 +1217,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
             f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
            (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
-            f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
+            f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {w1r_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
             f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
             f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
             f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "

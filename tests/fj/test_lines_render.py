@@ -31,10 +31,11 @@ RENDER_FLAT_WORDS = 1 << 26
 
 
 def _assemble_lines(tmp_path, map_wad, mapname, cfg, asset_wad=None,
-                    wall_mode="W1", floor_mode="flat", plane_near=False, two_sided=False):
+                    wall_mode="W1", floor_mode="flat", plane_near=False, two_sided=False,
+                    wall_noise=False):
     main = emit_wall_renderer(map_wad, mapname, cfg, asset_wad=asset_wad, over_align=False,
                               floor_mode=floor_mode, wall_mode=wall_mode, raster_mode="lines",
-                              plane_near=plane_near, two_sided=two_sided)
+                              plane_near=plane_near, two_sided=two_sided, wall_noise=wall_noise)
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "lines.fj"
     p.write_text(main, encoding="utf-8")
@@ -233,6 +234,54 @@ def test_e1m1_lines_wpx_ft1_plane_near_byte_exact_vs_oracle(tmp_path):
             print(f"[lines WPX+FT1 plane_near] E1M1 spawn frame = {term.op_counter:,} ops")
         assert term.op_counter < 33_000_000, \
             f"M13-2S rung 3a broke the owner's 33M ceiling @ ({vx},{vy},{va:#x}): {term.op_counter:,}"
+
+
+def test_square_lines_w1r_ft1_byte_exact_vs_oracle(tmp_path):
+    """M13-W1R — the RANDOMIZED W1 wall tier (owner ask 2026-08-02: per-pixel-looking texture
+    inside the 15M budget): the wall keeps W1's one baked lit byte but is emitted as pseudo-random
+    vertical runs re-shaded through the colormap, keyed on the V1 grain group (`wall_noise(x)`,
+    already in the ditto signature) and a height tier (short = far = darker). Byte-exact vs the
+    same-tier oracle on the 5 square viewpoints (incl. the negative-viewz straddle)."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(ROOM)
+    aw = WadFile.from_path(ASSET)
+    scene = build_scene(mw, aw, "MAP01")
+    sp = spawn_state(mw, "MAP01")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    A45 = 0x20000000
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45), (24, 24, A45)]
+    out = _assemble_lines(tmp_path, mw, "MAP01", cfg, asset_wad=aw,
+                          wall_mode="W1R", floor_mode="FT1", wall_noise=True)
+    for vx, vy, va in VIEWPOINTS:
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
+                                    floor_texturing=False, wall_mode="W1R", floor_mode_ft1=True,
+                                    wall_noise=True)
+        screen, _term = _run_lines(out, vx, vy, va)
+        assert bytes(screen.pixel_indices) == bytes(want), \
+            f"lines W1R+FT1 @ ({vx},{vy},{va:#x}) != oracle"
+
+
+def test_e1m1_lines_w1r_ft1_byte_exact_vs_oracle(tmp_path):
+    """E1M1 spawn + rotation at the W1R+FT1 tier, byte-exact vs the oracle."""
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(E1M1_WAD)
+    scene = build_scene(mw, mw, "E1M1")
+    sp = spawn_state(mw, "E1M1")
+    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
+    out = _assemble_lines(tmp_path, mw, "E1M1", cfg, wall_mode="W1R", floor_mode="FT1",
+                          wall_noise=True)
+    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
+                                    floor_texturing=False, wall_mode="W1R", floor_mode_ft1=True,
+                                    wall_noise=True)
+        screen, term = _run_lines(out, vx, vy, va)
+        assert bytes(screen.pixel_indices) == bytes(want), \
+            f"lines W1R+FT1 @ ({vx},{vy},{va:#x}) != E1M1 oracle"
+        if k == 0:
+            print(f"[lines W1R+FT1] E1M1 spawn frame = {term.op_counter:,} ops")
 
 
 def test_square_lines_w2s_ft1_byte_exact_vs_oracle(tmp_path):

@@ -57,9 +57,12 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/e1m1_lite.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None)
-    # W1 is the 15M-campaign default (owner 2026-08-02: "15M on most scenes" -- flat-lit walls
-    # buy 2-6M/frame); the 1x1-texel look stays one flag away: --wall-mode WPX
-    ap.add_argument("--wall-mode", default="W1", choices=["W1", "W2S", "WPX"])
+    # W1R is the default (owner 2026-08-02: "make nicer walls... keep the speed up to 16M"):
+    # W1's flat-lit wall split into pseudo-random vertical runs keyed on the V1 grain group +
+    # a height tier (near brighter / far darker), certified median 14.91M / mean 15.22M over
+    # the 260-frame walkable sweep -- +0.46M at the median over plain W1 (14.45M). W1 stays a
+    # flag away, as does the true-texel look: --wall-mode WPX (+2-6M/frame).
+    ap.add_argument("--wall-mode", default="W1R", choices=["W1", "W2S", "WPX", "W1R"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
     ap.add_argument("--two-sided", action="store_true",
                     help="M13-2S rung 3b: draw the TWO-SIDED walls too (step faces, ledge fronts,"
@@ -106,6 +109,12 @@ def main():
     # V1-V4 ride on the rung-3a (plane_near) lines tier; the rung-3b two-sided tier is a different
     # emit path that none of them was written against, so they are off there.
     feats = not args.two_sided
+    # M13-W1R rides V1's per-column grain group; without the grain its pattern key does not
+    # exist at runtime, so W1R forces V1 on rather than failing the emit assert.
+    if args.wall_mode == "W1R" and (args.no_grain or not feats):
+        print("  !! --wall-mode W1R needs V1's grain group -- keeping grain ON")
+        args.no_grain = False
+        assert feats, "--wall-mode W1R is not wired into the two_sided tier"
     spr_path = ROOT / args.sprites
     want_things = feats and not args.no_things
     if want_things and not spr_path.exists():

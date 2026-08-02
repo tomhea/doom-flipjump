@@ -45,8 +45,9 @@ ap.add_argument("--ablate", action="append", default=[])
 ap.add_argument("--knob", action="append", default=[], metavar="NAME=VALUE")
 ap.add_argument("--off", action="append", default=[],
                 choices=["grain", "sky", "steps", "things", "plane_near", "bboxcull"])
-ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"],
-                help="wall tier: WPX = 1x1 texels (ships), W1 = flat-lit walls (the 15M ladder)")
+ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX", "W1R"],
+                help="wall tier: WPX = 1x1 texels, W1 = flat-lit walls (the 15M ladder), "
+                     "W1R = W1 + randomized runs (M13-W1R)")
 ap.add_argument("--res", default="", metavar="WxH",
                 help="render at a different resolution. Config is fully W/H-derived, so the "
                      "oracle follows and byte-exactness still holds.")

@@ -760,3 +760,134 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
     out += _byte2bits_loader("vqh", "vq_hi")
     out.append("")
     return chr(10).join(out)
+
+
+def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
+    """M13-W1R -- the RANDOMIZED W1 wall walkers, baked from `ReferenceModel.W1R_TIER_BOUNDS` /
+    `W1R_PATTERNS` (R6: the oracle's own tables, so the two sides cannot drift).
+
+    `walk wlen, ctake, fstart, gnrow, wall_lit, cmidx` emits the full wall [ctake, fstart) as
+    the (height tier, grain group)'s cycled run list: per run one `hex.add_constant` on the
+    running y2, one `hex.cmp` vs fstart (>= -> clamp to fstart and stop), `byte.emit` +
+    `cm.emit` with the run's baked colormap row over the seg's `wall_lit` low byte (V1's grain
+    mechanism -- same colour, different shade, never a hue jump). The final pair always ends
+    exactly at fstart, mirroring `ReferenceModel.w1r_runs` pair for pair.
+
+    `walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, cmidx` is the emit_region twin: the
+    SAME absolute pattern (anchored at ctake, tier from fstart-ctake) restricted to [wlo, whi)
+    -- runs ending at or before wlo are skipped unemitted, the run crossing whi clamps there.
+    Windowed truncation is exact because a truncated first/last pair covers a row subset of the
+    full-wall run with the same colour.
+
+    Bodies are one `def` per (tier, group) so every def header stays short; they receive the
+    walker's registers and its exit label as parameters and either cycle internally or leave
+    through that exit. Plain macro code throughout -- no flat-dispatch handlers, so the R42
+    no-hex-in-handlers rule does not apply here."""
+    t1, t2, t3 = tier_bounds
+    nt = len(patterns)
+    assert nt == 4 and all(len(v) == 4 for v in patterns), "W1R expects 4 tiers x 4 groups"
+    out = [f"// M13-W1R randomized-wall walkers: tiers <{t1}/<{t2}/<{t3}/>= (doomfj.lut_generator)",
+           f"ns {label} {{"]
+
+    def _body(t, v, runs, win):
+        """One (tier, group) body def: cycled baked runs; exits via the passed label."""
+        b = f"{'w' if win else 'b'}{t}_{v}"
+        labs = ["entry"]
+        for k in range(len(runs)):
+            labs += ([f"t{k}"] if win else []) + [f"e{k}", f"l{k}", f"n{k}"]
+        params = ("ycur, wlo, whi, cmidx, wlast" if win else "ycur, fstart, cmidx, last")
+        body = [f"    def {b} {params} @ {', '.join(labs)} {{",
+                "      entry:"]
+        for k, (ln, row) in enumerate(runs):
+            nxt = f"n{k}"
+            body.append(f"        hex.add_constant 2, ycur, {ln}")
+            if win:
+                body += [f"        hex.cmp 2, ycur, wlo, {nxt}, {nxt}, t{k}",
+                         f"      t{k}:",
+                         f"        hex.cmp 2, ycur, whi, e{k}, l{k}, l{k}"]
+            else:
+                body.append(f"        hex.cmp 2, ycur, fstart, e{k}, l{k}, l{k}")
+            body += [f"      e{k}:",
+                     "        byte.emit ycur",
+                     f"        hex.set 2, cmidx + 2*dw, {row}",
+                     "        cm.emit cmidx",
+                     f"        ;{nxt}",
+                     f"      l{k}:",
+                     f"        hex.set 2, cmidx + 2*dw, {row}",
+                     f"        ;{'wlast' if win else 'last'}",
+                     f"      {nxt}:"]
+        body += ["        ;entry",                      # cycle the pattern down the wall
+                 "    }"]
+        return body
+
+    for t, variants in enumerate(patterns):
+        for v, runs in enumerate(variants):
+            out += _body(t, v, runs, win=False)
+            out += _body(t, v, runs, win=True)
+
+    def _tree(sel, dst):
+        """The (tier, group) compare tree: 3 cmps on `sel` (wlen), then 2 on gnrow's nibble 0."""
+        rows = [f"        hex.cmp 2, {sel}, tb1, r0, q1, q1",
+                "      q1:",
+                f"        hex.cmp 2, {sel}, tb2, r1, q2, q2",
+                "      q2:",
+                f"        hex.cmp 2, {sel}, tb3, r2, r3, r3"]
+        for t in range(nt):
+            rows += [f"      r{t}:",
+                     f"        hex.cmp 1, gnrow, g8, r{t}a, r{t}b, r{t}b",
+                     f"      r{t}a:",
+                     f"        hex.cmp 1, gnrow, g4, {dst}{t}_0, {dst}{t}_1, {dst}{t}_1",
+                     f"      r{t}b:",
+                     f"        hex.cmp 1, gnrow, g12, {dst}{t}_2, {dst}{t}_3, {dst}{t}_3"]
+        return rows
+
+    tree_labs = ["q1", "q2"] + [x for t in range(nt) for x in (f"r{t}", f"r{t}a", f"r{t}b")]
+    cells = ["      ycur: hex.vec 2",
+             f"      tb1: hex.vec 2, {t1}",
+             f"      tb2: hex.vec 2, {t2}",
+             f"      tb3: hex.vec 2, {t3}",
+             "      g4: hex.vec 1, 4",
+             "      g8: hex.vec 1, 8",
+             "      g12: hex.vec 1, 12"]
+
+    d_labs = [f"d{t}_{v}" for t in range(nt) for v in range(4)]
+    out += [f"    def walk wlen, ctake, fstart, gnrow, wall_lit, cmidx "
+            f"@ {', '.join(tree_labs + d_labs)}, last, ycur, tb1, tb2, tb3, g4, g8, g12, end {{",
+            "        hex.mov 2, ycur, ctake",
+            "        hex.mov 2, cmidx, wall_lit"]
+    out += _tree("wlen", "d")
+    for t in range(nt):
+        for v in range(4):
+            out += [f"      d{t}_{v}:",
+                    f"        .b{t}_{v} ycur, fstart, cmidx, last"]
+    out += ["      last:",
+            "        byte.emit fstart",
+            "        cm.emit cmidx",
+            "        ;end",
+            *cells,
+            "      end:",
+            "    }"]
+
+    out += [f"    def walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, cmidx "
+            f"@ wgo, {', '.join(tree_labs + d_labs)}, wlast, ycur, wl2, tb1, tb2, tb3, g4, g8, g12, end {{",
+            "        hex.cmp 2, wlo, whi, wgo, end, end",
+            "      wgo:",
+            "        hex.mov 2, wl2, fstart",
+            "        hex.sub 2, wl2, ctake",                 # tier from the FULL wall height
+            "        hex.mov 2, ycur, ctake",
+            "        hex.mov 2, cmidx, wall_lit"]
+    out += _tree("wl2", "d")
+    for t in range(nt):
+        for v in range(4):
+            out += [f"      d{t}_{v}:",
+                    f"        .w{t}_{v} ycur, wlo, whi, cmidx, wlast"]
+    out += ["      wlast:",
+            "        byte.emit whi",
+            "        cm.emit cmidx",
+            "        ;end",
+            *cells,
+            "      wl2: hex.vec 2",
+            "      end:",
+            "    }",
+            "}", ""]
+    return chr(10).join(out)

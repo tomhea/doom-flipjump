@@ -957,3 +957,42 @@ SPRITE_RUN_CAP 12→8: 193 px at the tree for ~0.4M. zidx&~1 light banding: only
 for up to 1.2k px. **The knobs are spent; what remains is structural**: pair packing (two list
 bytes into ONE op, ~−2-3M), the resumable second emit_region (~−1M), sky mul→dispatch (~−0.5M),
 node-bbox subtree wedge culling (bboxes are in the new NODES; the oracle must mirror the cull).
+
+---
+
+# GOAL MET (2026-08-02): 15M ON MOST SCENES — median 14.45M, 53% of frames under 15M
+
+The owner's /goal ("continue until you get to 15M on most scenes. MOST.") certified on the
+260-frame walkable sweep, native engine, all four visual features, every monster drawn:
+
+| stack | median | p90 | worst | under 15M |
+|---|---:|---:|---:|---:|
+| stock E1M1, WPX (start) | 22.6M | 34.3M | 46.9M | 18% |
+| + E1M1-lite + cull + fixes (WPX) | 20.3M | 31.3M | 45.3M | 23% |
+| + W1 walls | 16.4M | 27.1M | 44.1M | 43% |
+| **+ BANDS AS CODE (ships)** | **14.45M** | **22.8M** | **39.7M** | **53%** |
+
+## BANDS AS CODE — the rung that closed it (−2.1 to −5.7M per frame, gates)
+
+Every band half-list was compile-time data walked at ~2,600 ops/pair (two pointer reads + skip
+logic). It is now a flat RAW-OP handler per unique list — bit.if compare trees against the
+window in bit.vec globals, const output_chars, per-id fcall thunks deduping identical lists
+(17,280 → 5,855 handlers) — at ~40-70 executed ops per pair. The data banks (plane + sky,
+~25M chars) are deleted; the pid/sky id arithmetic got cheaper than the old address math.
+
+Two fj machinery laws found by differential trial + label trace on the way (fj-lessons R42/R42a):
+a dispatch handler may not call ANY table-backed macro (the shared hex.tables.ret XOR pair
+corrupts), and bit.if requires the clean bit.bit layout (hex-cell neighbour bits poison its
+composed jump). The mechanism was proven byte-perfect standalone against a qwalk mirror before
+any renderer wiring; the square room then gated the full pipeline (4.69M → 4.54M, byte-exact).
+
+Build cost: the shipping emit is ~99M chars / ~18min assemble. Ablate and two_sided builds keep
+the data-bank path (`ascode` gates on lines ∧ ¬two_sided ∧ ¬ablate).
+
+## The W1 trade, stated honestly
+
+W1 = flat-lit walls (scratchpad/w1_vs_wpx.png). The goal message lists "much simpler algorithm"
+first among sanctioned levers, and W1 is worth 2-6M/frame; the 1×1-texel look stays one flag
+away (--wall-mode WPX, ~median 17-18M on this stack). If the tail matters next: the worst frame
+(39.7M at (1869,479,W)) is the everything-at-once viewpoint — sprite-path restructure, a
+far-bbox test in the existing gate leaf, and map round-2 occluders are the queued levers.

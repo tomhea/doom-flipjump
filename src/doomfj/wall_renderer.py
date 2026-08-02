@@ -401,7 +401,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     skybands, skyoff = _lines_sky_bank(rm, asset_wad, cfg) if (lines and sky) else ("", "")
     skypid = ""                     # filled below, once the pid map exists
     # V3: the step-face shade bank + the (light, wall-units) class each face-carrying boundary bakes.
-    stepcol, step_cls = (_lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs)
+    stepcol, step_cls = (_lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs,
+                                          w1r=bool(w1r_flag))
                          if (lines and steps) else ("", {}))
     # V4: the sprite run-list bank + the shade-row bank, and the per-type block bases the things bake.
     _do_things = lines and things
@@ -1709,7 +1710,7 @@ STEP_SLOT_STRIDE = 16      # V3: bytes per column in `sfslot` -- 6 used, rounded
 STEP_COL_STRIDE = 256      # ... and bytes per light class in `stepcol`, same whole-nibble reason.
 
 
-def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs):
+def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False):
     """V3 — the step-face SHADE bank, plus the (lightnum, units) -> class map the segs bake.
 
     A step face is flat-shaded: one palette index for the whole run. But it still takes DOOM's
@@ -1742,7 +1743,13 @@ def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs):
     for (ln, units) in cls_of:                      # insertion order == class index
         row = [0] * STEP_COL_STRIDE
         for h in range(1, cfg.VIEW_H + 1):
-            row[h] = colormap[rm.wall_light_row(ln, h, units)][STEP_FACE_BASE]
+            lr = rm.wall_light_row(ln, h, units)
+            # M13-W1R-FACES: the W1R tier splits faces into randomized runs at emit time, so
+            # the baked byte pre-brightens exactly like seg_lit (colormap headroom, R44) --
+            # mirrors the oracle's `_face_paint` (R6).
+            if w1r:
+                lr = max(0, lr - rm.W1R_BASE_BRIGHTEN)
+            row[h] = colormap[lr][STEP_FACE_BASE]
         out += [f";{v:#x} * dw" for v in row]
     return NLJ.join(out) + NLJ, cls_of
 

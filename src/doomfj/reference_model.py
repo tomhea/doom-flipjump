@@ -1545,6 +1545,27 @@ class ReferenceModel:
                 # MONOTONE top-down -- the 0x0B device only moves its cursor forward and silently
                 # drops a non-monotone pair.
                 c_hi, f_lo = planes[0], planes[1]
+
+                def _face_paint(x, y1, y2, fsc, units):
+                    """One clipped face column [y1, y2]. Flat-shaded in every tier except W1R,
+                    which splits it into the SAME randomized runs as its walls (`w1r_runs`,
+                    anchored at the clipped top, keyed on the V1 group -- all of it already in
+                    the fj ditto signature). The base is pre-brightened like `seg_lit` so the
+                    rows have colormap headroom (R44)."""
+                    h = y2 - y1 + 1
+                    lr = self.wall_light_row(self.wall_lightnum(fsc.light, 0), h, max(1, units))
+                    if wall_mode == "W1R":
+                        base = colormap[max(0, lr - self.W1R_BASE_BRIGHTEN)][STEP_FACE_BASE]
+                        ya = y1
+                        for rel, row in self.w1r_runs(h, self.wall_noise(x)):
+                            cc = colormap[row][base]
+                            for y in range(ya, y1 + rel):
+                                fb[y * cfg.VIEW_W + x] = cc
+                            ya = y1 + rel
+                    else:
+                        for y in range(y1, y2 + 1):
+                            fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
+
                 for x in range(cfg.VIEW_W):
                     if sfrag[x] is not None:
                         # V4: ONE overlay per column, and the sprite wins. A column already carries
@@ -1556,18 +1577,12 @@ class ReferenceModel:
                         y1, y2, fsc, units = ups[x]
                         y1, y2 = max(y1, 0), min(y2, c_hi[x])
                         if y1 <= y2:
-                            lr = self.wall_light_row(self.wall_lightnum(fsc.light, 0),
-                                                     y2 - y1 + 1, max(1, units))
-                            for y in range(y1, y2 + 1):
-                                fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
+                            _face_paint(x, y1, y2, fsc, units)
                     if los[x] is not None:
                         y1, y2, fsc, units = los[x]
                         y1, y2 = max(y1, f_lo[x]), min(y2, cfg.VIEW_H - 1)
                         if y1 <= y2:
-                            lr = self.wall_light_row(self.wall_lightnum(fsc.light, 0),
-                                                     y2 - y1 + 1, max(1, units))
-                            for y in range(y1, y2 + 1):
-                                fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
+                            _face_paint(x, y1, y2, fsc, units)
             if things_out is not None:
                 things_out.append(sfrag)                 # the per-column fragments, for the gates
                 things_out.append(n_thing)               # ... and how many things the budget let in

@@ -787,16 +787,32 @@ ns stream {
     // re-walked from its head rather than resumed, which is why qwalk needs a skip bound at all:
     // the 0x0B cursor only ever moves forward, so re-emitting an already-covered pair would rewind
     // it and repaint over the face.
-    def face_splice fl, y2f, colf, hi, qlo, qbound, ptr, ccy, qwalk, qret, bufa, bufd, eabl, ascode \
+    def face_splice fl, y2f, colf, hi, qlo, qbound, ptr, ccy, qwalk, qret, bufa, bufd, eabl, ascode, w1r, gnrow, cmidx \
             @ none, end {
         hex.if0 1, fl, none
-        .pair_out y2f, colf
+        // M13-W1R-FACES: in the W1R tier the face is not ONE flat pair but the same randomized
+        // runs as the walls, anchored at the face's clipped top (= qbound, where face_bound
+        // stopped the region walk, so the cursor sits exactly there). Inputs (extents, colour,
+        // grain group) are all already in the ditto signature -- zero new ditto breaks.
+        rep(1-w1r, k) .pair_out y2f, colf
+        rep(w1r, k) .face_pattern y2f, colf, qbound, gnrow, cmidx
         hex.mov 2, qlo, y2f
         hex.mov 2, qbound, hi
         rep((1-eabl/2)*(1-ascode), k) .half_walk bufa, bufd, qlo, qbound, ptr, ccy, qwalk, qret
         rep(ascode, k) .half_walk_code bufa, bufd, qlo, qbound, ccy
       none:
         ;end
+      end:
+    }
+
+    // M13-W1R-FACES: one textured face piece [y1, y2f) -- wlen for the tier select, then the
+    // shared randomized walker with the face's baked (pre-brightened) colour as the base byte.
+    def face_pattern y2f, colf, y1, gnrow, cmidx @ fwl, end {
+        hex.mov 2, fwl, y2f
+        hex.sub 2, fwl, y1
+        w1rpat.walk fwl, y1, y2f, gnrow, colf, cmidx
+        ;end
+      fwl: hex.vec 2
       end:
     }
 
@@ -1031,7 +1047,7 @@ ns stream {
         rep(steps, k) .face_bound ufl, uy1, qbound
         rep((1-eabl/2)*(1-ascode), k) .half_walk cbufa, cbufd, qlo, qbound, ptr, ccy, qwalk, qret
         rep(ascode, k) .half_walk_code cbufa, cbufd, qlo, qbound, ccy
-        rep(steps, k) .face_splice ufl, uy2p1, ucol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, cbufa, cbufd, eabl, ascode
+        rep(steps, k) .face_splice ufl, uy2p1, ucol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, cbufa, cbufd, eabl, ascode, w1r, gnrow, cmidx
       wall:                                      // -- wall run [ctake, fstart)
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, ctake
@@ -1049,7 +1065,7 @@ ns stream {
         rep(steps, k) .face_bound lfl, ly1, qbound
         rep((1-eabl/2)*(1-ascode), k) .half_walk fbufa, fbufd, qlo, qbound, ptr, ccy, qwalk, qret
         rep(ascode, k) .half_walk_code fbufa, fbufd, qlo, qbound, ccy
-        rep(steps, k) .face_splice lfl, ly2p1, lcol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, fbufa, fbufd, eabl, ascode
+        rep(steps, k) .face_splice lfl, ly2p1, lcol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, fbufa, fbufd, eabl, ascode, w1r, gnrow, cmidx
         ;fdone
       sprpath:                                   // V4: region | sprite | region
         rep(things, k) hex.zero 2, zlo

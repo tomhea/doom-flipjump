@@ -34,6 +34,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.coarse_cull import generate_coarse_bounds_fj
+from doomfj.lut_generator import generate_bands_walk_fj
 from doomfj.tables import (tantoangle_table, slopediv_recip8_table, slopediv_recip_table,
                            xtoviewangle_table)
 from doomfj.config import PNEAR_SEG_BUDGET
@@ -523,6 +524,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         index_nibbles=2, result_nibbles=2) if (lines and sky and plane_near) else "")
     n_bank_keys = max(1, len(lines_bank_keys))
 
+    # M13-15M BANDS-AS-CODE: the shipping-tier emit path — every band half-list baked as raw-op
+    # CODE (see lut_generator.generate_bands_walk_fj; ~40-70 executed ops per emitted pair vs
+    # ~2,600 for the data walk). Ablate builds and the two_sided lab keep the data bank.
+    ascode = 1 if (lines and not two_sided and not ablate) else 0
+    bands_code, sky_base_id = "", 0
+    if ascode:
+        _main_lists = _band_pair_lists(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
+                                       floor_mode == "FT1")
+        _sky_lists = _sky_pair_lists(rm, asset_wad, cfg) if sky else []
+        sky_base_id = len(_main_lists)
+        bands_code = generate_bands_walk_fj(_main_lists + _sky_lists)
+        skybands = ""                          # the sky DATA bank dies with the plane bank
+
     # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be
     # skipped by the main walk entirely (byte-exact -- it would emit nothing and touch nothing).
     # M13-2S rung 3a: two counts now -- `_walk_below` (segs the walk does ANY work for, the compile-
@@ -576,6 +590,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # the descend pre-walk's landing action: bake this subsector's viewz + band-bank pointer
         _sec = rm._seg_sector(lds, sds, secs, cmap.segs[cmap.subsectors[s].firstseg])
         _vz = rm.view_z(_sec.floor_h)
+        if ascode:
+            return [f"    hex.set 8, viewz, {_vz & 0xFFFFFFFF}",
+                    f"    hex.set w/4, vzcbase, {lines_vz_classes[_vz] * n_bank_keys * 2}"]
         return [f"    hex.set 8, viewz, {_vz & 0xFFFFFFFF}",
                 f"    hex.set w/4, vzbank, vpbank + "
                 f"{lines_vz_classes[_vz] * n_bank_keys * 130}*dw"]
@@ -806,8 +823,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                            # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
                            # (and the same byte is what this seg writes when it claims a column).
                            *([("seg_pid", 2, lines_pid[(ckey, fkey)])] if plane_near else
-                             [("seg_cvpidx", "w/4", f"{lines_key_ids[ckey] * 130}*dw"),
-                              ("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw")])]
+                             [("seg_cvpidx", "w/4", lines_key_ids[ckey] * 2 if ascode
+                               else f"{lines_key_ids[ckey] * 130}*dw"),
+                              ("seg_fvpidx", "w/4", lines_key_ids[fkey] * 2 if ascode
+                               else f"{lines_key_ids[fkey] * 130}*dw")])]
                 xorby_blocks[si] = (_seg_xorby_block(f"{si}G", gfields)
                                     + _seg_xorby_block(f"{si}R", rfields))
                 # e1sk label keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
@@ -836,8 +855,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             # before any seg id -- the first visited subsector's block runs before its segs emit.
             *(["    stream.emit_bytes4 viewz"] if projm else []),
             # M13-bakedbands: aim the frame's band-list bank at this subsector's viewz class
-            *([f"    hex.set w/4, vzbank, vpbank + "
-               f"{lines_vz_classes[viewz_val] * n_bank_keys * 130}*dw"] if lines else []),
+            *(([f"    hex.set w/4, vzcbase, {lines_vz_classes[viewz_val] * n_bank_keys * 2}"]
+               if ascode else
+               [f"    hex.set w/4, vzbank, vpbank + "
+                f"{lines_vz_classes[viewz_val] * n_bank_keys * 130}*dw"]) if lines else []),
             "    hex.set 1, vz_set, 1",
             f"  e1psegs{cid}:",
         ]
@@ -891,7 +912,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                             ssec.ceil_tex.upper())
                     fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
                             ssec.floor_tex.upper())
-                    fields.append(("seg_cvpidx", "w/4", f"{lines_key_ids[ckey] * 130}*dw"))
+                    fields.append(("seg_cvpidx", "w/4", lines_key_ids[ckey] * 2 if ascode
+                                   else f"{lines_key_ids[ckey] * 130}*dw"))
                     fields.append(("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw"))
                 else:
                     ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
@@ -1179,7 +1201,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
             f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
             f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
-            f"{0 if 'sprnoemit' in ablate else 1}")]
+            f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -1305,7 +1327,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
            sprbkt, sprlight, sprbank] if _do_things else []),
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
-                            floor_mode == "FT1")] if lines else []),
+                            floor_mode == "FT1")] if (lines and not ascode) else []),
+        *([bands_code] if ascode else []),
         *([lines_wstrip_txt] if lines_wstrip_txt else []),
         *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
           [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
@@ -1356,6 +1379,69 @@ def _proj_mode_decls(cfg, asset_wad, seg_geom_txt: str) -> list[str]:
 
 
 LINES_HALF_SLOTS = 1 + 2 * (MAX_BANDS // 2)   # per half-window list: [count] + <=32 x 2-byte pairs
+
+
+def _band_pair_lists(rm, cfg, asset_wad, vz_classes: dict, key_ids, ft1: bool = False):
+    """The SSOT pair-list producer both band representations bake from: for every (viewz class,
+    bank key), the asc then desc half-window [absolute y2, final colour] lists — class-major,
+    key, half order, which IS the vpb_walk id order (id = (class*nkeys + key)*2 + half)."""
+    colormap = asset_wad.colormap()
+    flatcache: dict = {}
+    H, CY = cfg.VIEW_H, cfg.CENTERY
+    lists = []
+    for vz in vz_classes:
+        from doomfj.fixedpoint import _signed as _sgn
+        vzs = _sgn(vz, 32)
+        for (h, light, base, flatname) in key_ids:
+            ph = abs((h << 16) - vzs)
+            lvl = max(0, min(15, light >> 4))
+            strip = None
+            if ft1:
+                tx = rm._flat_texels(asset_wad, flatname, flatcache)
+                strip = [tx[(i * 64 + i) % len(tx)] for i in range(64)]
+            for rows in (list(range(0, CY)), list(range(CY, H))):
+                zidx = rm._zidx_band_walk(ph, rows)
+                zrows = [rm.zlight[lvl][z] for z in zidx]
+                pairs, ordinal, prev_z = [], 0, None
+                for k, zr in enumerate(zrows):
+                    y2 = rows[k] + 1
+                    if prev_z is not None and zr != prev_z:
+                        ordinal += 1
+                    prev_z = zr
+                    colr = (colormap[zr][strip[ordinal & 63]] if ft1 else colormap[zr][base])
+                    if pairs and pairs[-1][1] == colr:
+                        pairs[-1][0] = y2
+                    else:
+                        pairs.append([y2, colr])
+                lists.append([tuple(pr) for pr in pairs])
+    return lists
+
+
+def _sky_pair_lists(rm, asset_wad, cfg):
+    """The sky lists in vpb_walk id order (u-major, asc then desc), mirroring _lines_sky_bank's
+    half() exactly — 2*tw entries of u so skybase+skyoff never needs a mask."""
+    tex = rm._wall_texture(asset_wad, "SKY1", {}, wall_mode="textured")
+    if tex is None:
+        return []
+    _texels, _th, tw = tex
+    H, CY = cfg.VIEW_H, cfg.CENTERY
+    out = []
+
+    def half(u, y0, y1):
+        pairs, prev = [], None
+        for y in range(y0, y1):
+            c = rm.sky_texel_u(asset_wad, {}, u, y)
+            if c != prev:
+                if prev is not None:
+                    pairs[-1][0] = y
+                pairs.append([y1, c])
+                prev = c
+        return [tuple(pr) for pr in pairs]
+
+    for u in range(SKY_BANK_MUL * tw):
+        out.append(half(u, 0, CY))
+        out.append(half(u, CY, H))
+    return out
 
 
 def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict,
@@ -1542,6 +1628,7 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
         "seg_pid: hex.vec 2",                          # M13-2S rung 3a: baked plane-pair id (1-based)
         "vzbank: hex.vec w/4",                         # set per frame by the player-subsector block
+        "vzcbase: hex.vec w/4",                        # M13-15M: the as-code per-frame class base ID
         # M13-splitxb: part-1/part-2 shared state + the rest-block gate
         "proceed: hex.vec 1", "dbase: hex.vec w/4", "dptr: hex.vec w/4", "dval8: hex.vec 2",
         "seg_ret2: ;0",

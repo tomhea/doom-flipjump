@@ -57,7 +57,9 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/e1m1_lite.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default=None)
-    ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX"])
+    # W1 is the 15M-campaign default (owner 2026-08-02: "15M on most scenes" -- flat-lit walls
+    # buy 2-6M/frame); the 1x1-texel look stays one flag away: --wall-mode WPX
+    ap.add_argument("--wall-mode", default="W1", choices=["W1", "W2S", "WPX"])
     ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
     ap.add_argument("--two-sided", action="store_true",
                     help="M13-2S rung 3b: draw the TWO-SIDED walls too (step faces, ledge fronts,"
@@ -131,7 +133,8 @@ def main():
                                   wall_noise=feats and not args.no_grain,
                                   sky=feats and not args.no_sky,
                                   steps=feats and not args.no_steps,
-                                  things=want_things, sprite_wad=spr)
+                                  things=want_things, sprite_wad=spr,
+                                  bbox_cull=True)   # M13-15M: the wedge subtree cull ships
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")

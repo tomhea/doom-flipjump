@@ -816,6 +816,175 @@ ns stream {
       end:
     }
 
+    // V5 -- one stacked piece's FACE: clip [y1raw, y2raw] to [lo, hi) (the half-window; lo is
+    // the floor side's fstart, 0 on the ceiling side), reject empties/sentinels (y1 > y2 after
+    // the clip), shade the class byte by the CLIPPED height through stepcol -- exactly what the
+    // legacy lines_step_load did at load time -- and draw (W1R runs or one flat pair). The
+    // caller guarantees hi >= 1 (the half-window is non-empty).
+    def steps_face y1raw, y2raw, cls, lo, hi, w1r, gnrow, cmidx \
+            @ floc, fhic, fclip, fgo, fdrw, fy1, fy2, fy2p, fcol, cpb, end < stepcol {
+        hex.mov 2, fy1, y1raw
+        hex.cmp 2, fy1, lo, floc, fhic, fhic    // fy1 = max(y1raw, lo)
+      floc:
+        hex.mov 2, fy1, lo
+      fhic:
+        hex.mov 2, fy2, y2raw
+        hex.cmp 2, fy2, hi, fgo, fclip, fclip   // fy2 = min(y2raw, hi - 1)
+      fclip:
+        hex.mov 2, fy2, hi
+        hex.dec 2, fy2
+      fgo:
+        hex.cmp 2, fy1, fy2, fdrw, fdrw, end    // empty / sentinel -> nothing to draw
+      fdrw:
+        hex.mov 2, fcol, cls
+        hex.set w/4, cpb, stepcol
+        frame.step_shade fcol, fy1, fy2, cpb
+        hex.mov 2, fy2p, fy2
+        hex.inc 2, fy2p                         // the pair's EXCLUSIVE end row
+        rep(1-w1r, k) .pair_out fy2p, fcol
+        rep(w1r, k) .face_pattern fy2p, fcol, fy1, gnrow, cmidx
+        ;end
+      fy1: hex.vec 2
+      fy2: hex.vec 2
+      fy2p: hex.vec 2
+      fcol: hex.vec 2
+      cpb: hex.vec w/4
+      end:
+    }
+
+    // V5 -- the STACKED ceiling prefix [0, ctake): region0 (the claimed lists) | face 1 |
+    // region behind boundary 1 (its baked back-pair's ceiling lists) | face 2 | region behind
+    // boundary 2. Every bound is min'd against ctake and every piece self-clamps, so sentinel
+    // pieces contribute exactly their REGION (the stored bytes encode the direction -- see
+    // ts_step_faces). Requires ascode (asserted at emit time). The region list ids are derived
+    // per piece from the baked back pid via frame.lines_pid_ids into SCRATCH registers.
+    def steps_splice_c ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ctake, w1r, gnrow, cmidx, cbufa, cbufd, ccy \
+            @ conly, cw0, cg0, cg0e, cb1a, cb1b, cg1, cg1e, cp2, cg2, cdone, \
+              qlo, qbound, qz, ucn2, rba, rbd, rda, rdd, end {
+        hex.if0 2, ctake, cdone                 // no ceiling half at all
+        hex.zero 2, qlo
+        hex.mov 2, qbound, ctake
+        hex.if0 1, ucnt, conly                  // no pieces: one full claimed walk
+        hex.cmp 2, u1y1, ctake, cw0, conly, conly   // piece 1 beyond the window -> claimed only
+      cw0:
+        hex.mov 1, ucn2, ucnt                   // a LOCAL copy: ucnt is the ditto signature,
+        hex.mov 2, qbound, u1y1                 // saved to its shadow AFTER this emit
+        hex.cmp 2, qlo, qbound, cg0, cg0e, cg0e // guard: an empty window still pays the loaders
+      cg0:
+        .half_walk_code cbufa, cbufd, qlo, qbound, ccy
+      cg0e:
+        hex.zero 2, qz
+        .steps_face u1y1, u1y2, u1cls, qz, ctake, w1r, gnrow, cmidx
+        frame.lines_pid_ids u1bp, rba, rbd, rda, rdd
+        hex.mov 2, qlo, u1y2
+        hex.inc 2, qlo                          // region 1 starts at the STORED end + 1
+        hex.mov 2, qbound, ctake
+        hex.dec 1, ucn2
+        hex.if0 1, ucn2, cb1a                   // one piece: region 1 runs to ctake
+        hex.cmp 2, u2y1, ctake, cb1b, cb1a, cb1a
+      cb1b:
+        hex.mov 2, qbound, u2y1                 // ... else it stops at piece 2's start
+      cb1a:
+        hex.cmp 2, qlo, qbound, cg1, cg1e, cg1e
+      cg1:
+        .half_walk_code rba, rbd, qlo, qbound, ccy
+      cg1e:
+        hex.if0 1, ucn2, cdone
+        hex.cmp 2, u2y1, ctake, cp2, cdone, cdone   // piece 2 beyond the window -> done
+      cp2:
+        hex.zero 2, qz
+        .steps_face u2y1, u2y2, u2cls, qz, ctake, w1r, gnrow, cmidx
+        frame.lines_pid_ids u2bp, rba, rbd, rda, rdd
+        hex.mov 2, qlo, u2y2
+        hex.inc 2, qlo
+        hex.mov 2, qbound, ctake
+        hex.cmp 2, qlo, qbound, cg2, cdone, cdone
+      cg2:
+        .half_walk_code rba, rbd, qlo, qbound, ccy
+        ;cdone
+      conly:
+        .half_walk_code cbufa, cbufd, qlo, qbound, ccy
+      cdone:
+        ;end
+      qlo: hex.vec 2
+      qbound: hex.vec 2
+      qz: hex.vec 2
+      ucn2: hex.vec 1
+      rba: hex.vec w/4
+      rbd: hex.vec w/4
+      rda: hex.vec w/4
+      rdd: hex.vec w/4
+      end:
+    }
+
+    // V5 -- the STACKED floor suffix [fstart, viewh): pieces are stored NEAREST-first but emit
+    // TOP-DOWN, so the FARTHEST piece goes first: region behind boundary 2 (its back-pair's
+    // floor lists) | face 2 | region behind boundary 1 | face 1 | region0 (the claimed lists,
+    // the floor in FRONT of boundary 1). With one piece the middle collapses; with none it is
+    // one claimed walk.
+    def steps_splice_f lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, fstart, viewh, w1r, gnrow, cmidx, fbufa, fbufd, ccy \
+            @ fonly, fb2a, fb2b, fg2, fg2e, fb1a, fb1b, fg1, fg1e, fg0, fp1, fr1, fdone, \
+              qlo, qbound, qfs, vh2, lcn2, rba, rbd, rda, rdd, end {
+        hex.set 2, vh2, viewh
+        hex.cmp 2, fstart, vh2, fr1, fdone, fdone   // no floor half at all
+      fr1:
+        hex.mov 2, qlo, fstart
+        hex.mov 2, qbound, vh2
+        hex.if0 1, lcnt, fonly                  // no pieces: one full claimed walk
+        hex.mov 1, lcn2, lcnt                   // LOCAL copy: lcnt is the ditto signature
+        hex.mov 2, qfs, fstart
+        hex.dec 1, lcn2
+        hex.if0 1, lcn2, fp1                    // one piece: skip the piece-2 prefix
+        // -- two pieces: the region behind boundary 2 (farthest), then its face
+        frame.lines_pid_ids l2bp, rba, rbd, rda, rdd
+        hex.mov 2, qbound, l2y1
+        hex.cmp 2, qbound, vh2, fb2a, fb2b, fb2b
+      fb2b:
+        hex.mov 2, qbound, vh2
+      fb2a:
+        hex.cmp 2, qlo, qbound, fg2, fg2e, fg2e // guard: an empty window still pays the loaders
+      fg2:
+        .half_walk_code rda, rdd, qlo, qbound, ccy
+      fg2e:
+        .steps_face l2y1, l2y2, l2cls, qfs, vh2, w1r, gnrow, cmidx
+        hex.mov 2, qlo, l2y2
+        hex.inc 2, qlo                          // the middle region starts at piece 2's end + 1
+      fp1:
+        // -- the region behind boundary 1, its face, then the claimed floor in front of it
+        frame.lines_pid_ids l1bp, rba, rbd, rda, rdd
+        hex.mov 2, qbound, l1y1
+        hex.cmp 2, qbound, vh2, fb1a, fb1b, fb1b
+      fb1b:
+        hex.mov 2, qbound, vh2
+      fb1a:
+        hex.cmp 2, qlo, qbound, fg1, fg1e, fg1e
+      fg1:
+        .half_walk_code rda, rdd, qlo, qbound, ccy
+      fg1e:
+        .steps_face l1y1, l1y2, l1cls, qfs, vh2, w1r, gnrow, cmidx
+        hex.mov 2, qlo, l1y2
+        hex.inc 2, qlo
+        hex.mov 2, qbound, vh2
+        hex.cmp 2, qlo, qbound, fg0, fdone, fdone
+      fg0:
+        .half_walk_code fbufa, fbufd, qlo, qbound, ccy
+        ;fdone
+      fonly:
+        .half_walk_code fbufa, fbufd, qlo, qbound, ccy
+      fdone:
+        ;end
+      qlo: hex.vec 2
+      qbound: hex.vec 2
+      qfs: hex.vec 2
+      vh2: hex.vec 2
+      lcn2: hex.vec 1
+      rba: hex.vec w/4
+      rbd: hex.vec w/4
+      rda: hex.vec w/4
+      rdd: hex.vec w/4
+      end:
+    }
+
     // V3 -- the face's [y1, y2] becomes the FIRST piece's end bound: the region walk stops at y1 so
     // the face pair lands exactly on the cursor.
     def face_bound fl, y1, qbound @ none, end {
@@ -1089,7 +1258,7 @@ ns stream {
       end:
     }
 
-    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, nospr, sprpath, spr1, sm1b, sm1ok, sgap1, sga1e, sgap2, sga2e, sm2b, sm2ok, wall, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, wlo, whi, zlo, vhi, sm1, sm2, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
+    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, wall_lit, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, nospr, sprpath, spr1, sm1b, sm1ok, sgap1, sga1e, sgap2, sga2e, sm2b, sm2ok, wall, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, wlo, whi, zlo, vhi, sm1, sm2, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
@@ -1115,10 +1284,12 @@ ns stream {
         hex.zero 2, qlo
         hex.mov 2, qhi, ctake
         hex.mov 2, qbound, qhi
-        rep(steps, k) .face_bound ufl, uy1, qbound
+        rep(steps*(1-stack), k) .face_bound ufl, uy1, qbound
         rep((1-eabl/2)*(1-ascode), k) .half_walk cbufa, cbufd, qlo, qbound, ptr, ccy, qwalk, qret
-        rep(ascode, k) .half_walk_code cbufa, cbufd, qlo, qbound, ccy
-        rep(steps, k) .face_splice ufl, uy2p1, ucol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, cbufa, cbufd, eabl, ascode, w1r, gnrow, cmidx
+        rep(ascode*(1-stack), k) .half_walk_code cbufa, cbufd, qlo, qbound, ccy
+        rep(steps*(1-stack), k) .face_splice ufl, uy2p1, ucol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, cbufa, cbufd, eabl, ascode, w1r, gnrow, cmidx
+        // V5: the stacked ceiling prefix -- up to 2 boundary pieces, each with its own region
+        rep(stack, k) .steps_splice_c ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ctake, w1r, gnrow, cmidx, cbufa, cbufd, ccy
       wall:                                      // -- wall run [ctake, fstart)
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, ctake
@@ -1133,10 +1304,12 @@ ns stream {
         hex.mov 2, qlo, fstart                   //    around this column's LOWER step face (V3)
         hex.set 2, qhi, viewh
         hex.mov 2, qbound, qhi
-        rep(steps, k) .face_bound lfl, ly1, qbound
+        rep(steps*(1-stack), k) .face_bound lfl, ly1, qbound
         rep((1-eabl/2)*(1-ascode), k) .half_walk fbufa, fbufd, qlo, qbound, ptr, ccy, qwalk, qret
-        rep(ascode, k) .half_walk_code fbufa, fbufd, qlo, qbound, ccy
-        rep(steps, k) .face_splice lfl, ly2p1, lcol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, fbufa, fbufd, eabl, ascode, w1r, gnrow, cmidx
+        rep(ascode*(1-stack), k) .half_walk_code fbufa, fbufd, qlo, qbound, ccy
+        rep(steps*(1-stack), k) .face_splice lfl, ly2p1, lcol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, fbufa, fbufd, eabl, ascode, w1r, gnrow, cmidx
+        // V5: the stacked floor suffix -- farthest piece first, claimed floor last
+        rep(stack, k) .steps_splice_f lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, fstart, viewh, w1r, gnrow, cmidx, fbufa, fbufd, ccy
         ;fdone
       sprpath:                                   // V4: region | sprite | region
         rep(things, k) hex.zero 2, zlo

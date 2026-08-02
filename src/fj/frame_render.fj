@@ -1451,14 +1451,79 @@ ns frame {
     // The scale is INTERPOLATED across the seg (one setup, then `+= scalestep` per column) exactly
     // as the wall path's is -- an exact per-column scale_from_global_angle is ~40k ops per COLUMN
     // against ~93k once per SEG. The oracle interpolates identically (ReferenceModel.render_wall_frame).
-    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride \
+    // V5 -- the piece-2 monotone clamp: when this side already holds a piece (count nibble
+    // `cnt` nonzero), the new piece's FIRST row clips past the STORED previous piece's end
+    // byte (slot byte `off`+1), sentinels included -- exactly the oracle's stored-value clamp
+    // (R6), so the two sides can never disagree about a clamped piece.
+    def ts_clamp2 fra, cnt, fbp, off @ doclamp, noprev, fpy, fp1, end {
+        hex.if0 1, cnt, noprev
+        hex.ptr_add fbp, off+1
+        hex.read_byte fpy, fbp
+        hex.ptr_sub fbp, off+1
+        hex.zero 8, fp1
+        hex.mov 2, fp1, fpy
+        hex.inc 8, fp1                          // stored prev y2 + 1 (sentinel bytes included)
+        hex.scmp 8, fra, fp1, doclamp, noprev, noprev
+      doclamp:
+        hex.mov 8, fra, fp1
+      noprev:
+        ;end
+      fpy: hex.vec 2
+      fp1: hex.vec 8
+      end:
+    }
+
+    // V5 -- the LOWER side's mirror: the new piece's LAST row clips past the stored previous
+    // piece's start byte (slot byte `off`) -- b = min(b, prev_y1 - 1), sentinels included.
+    def ts_clamp2_lo frb, cnt, fbp, off @ doclamp, noprev, fpy, fp1, end {
+        hex.if0 1, cnt, noprev
+        hex.ptr_add fbp, off
+        hex.read_byte fpy, fbp
+        hex.ptr_sub fbp, off
+        hex.zero 8, fp1
+        hex.mov 2, fp1, fpy
+        hex.dec 8, fp1                          // stored prev y1 - 1
+        hex.scmp 8, frb, fp1, noprev, noprev, doclamp
+      doclamp:
+        hex.mov 8, frb, fp1
+      noprev:
+        ;end
+      fpy: hex.vec 2
+      fp1: hex.vec 8
+      end:
+    }
+
+    // V5 -- write one 4-byte piece [y1][y2][cls][bpid] at slot offset `off` + count*4, leaving
+    // the slot pointer where it was. count (0 or 1) lives in the flag cell `cnt`.
+    def ts_piece_wr cnt, fbp, off, fy1, fy2, cls, bpid @ wr0, end {
+        hex.if0 1, cnt, wr0
+        hex.ptr_add fbp, off+4
+        hex.write_byte_and_inc fbp, fy1
+        hex.write_byte_and_inc fbp, fy2
+        hex.write_byte_and_inc fbp, cls
+        hex.write_byte_and_inc fbp, bpid
+        hex.ptr_sub fbp, off+8
+        ;end
+      wr0:
+        hex.ptr_add fbp, off
+        hex.write_byte_and_inc fbp, fy1
+        hex.write_byte_and_inc fbp, fy2
+        hex.write_byte_and_inc fbp, cls
+        hex.write_byte_and_inc fbp, bpid
+        hex.ptr_sub fbp, off+4
+        ;end
+      end:
+    }
+
+    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack \
             @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ust1, ust2, ust3, uclz, \
-              ukhi, uhicl, uwr, umark, lskip, ldo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
-              lmark, \
+              ukhi, uhicl, uwr, umark, umark2, lskip, ldo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
+              lmark, lmark2, fmax, \
               fcap, fnorm, fdist, fscale, fsstep, fwu1, fwu2, fwl1, fwl2, fra, frb, fcvh, \
               fx, fdb, fdp, fdv, fsb, fsp, fsv, fbb, fbp, fidx, fy1, fy2, end \
             < viewangle, viewz, sgn_aff, x1, x2, n_face, drawn, sfflag, sfslot, \
-              seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls {
+              seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, \
+              seg_bpid {
         hex.if0 2, seg_fmask, nofaces           // this boundary carries no face at all (compile-time)
         hex.set 2, fcap, budget
         hex.cmp 2, n_face, fcap, dofaces, nofaces, nofaces
@@ -1501,28 +1566,35 @@ ns frame {
         ;fnext
       fwork:
         hex.read_byte fsv, fsp
-        // ---- the UPPER face -------------------------------------------------------------------
+        // ---- the UPPER face(s) ----------------------------------------------------------------
+        // V5: the flag nibbles are per-side COUNTS (0..1+stack); slot layout is 4-byte pieces
+        // [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all inside the 16-byte stride.
         hex.if0 1, seg_fmask, uskip             // nibble 0 = has an upper face
-        hex.if0 1, fsv, udo                     // nibble 0 = this column's upper slot is filled
-        ;uskip
+        hex.cmp 1, fsv, fmax, udo, uskip, uskip // upper count < 1+stack -> room for a piece
       udo:
         proj.step_rows fra, frb, fscale, fwu1, fwu2, centeryfix_c
         hex.dec 8, frb                          // ... ends one row ABOVE the back ceiling
-        // the slot stores BYTES, so a VISIBLE face is stored clipped; but the oracle stores the
-        // face whenever A <= B -- EVEN FULLY OFF-SCREEN -- and that write CONSUMES the column's
-        // write-once slot, blocking farther segs. fj used to skip the store when off-screen,
-        // leaving the slot open for a farther seg's visible face: measured as a 28-column phantom
-        // upper face at E1M1-lite (1272,-724). Off-screen now takes `umark`: consume the slot
-        // with the EMPTY SENTINEL (y1=1, y2=0) -- lines_step_load rejects y1 > y2p1 before
-        // drawing, and a real stored face always has y1 <= y2, so the sentinel is unambiguous.
+        // V5: a second piece clips past the STORED first piece's end (sentinels included)
+        rep(stack, k) .ts_clamp2 fra, fsv, fbp, 0
+        // the slot stores BYTES, so a VISIBLE face is stored clipped; the oracle stores the
+        // face whenever A <= B -- EVEN FULLY OFF-SCREEN -- and that write CONSUMES the slot,
+        // blocking farther segs (R40, the 28-column phantom face). V5 splits the off-screen
+        // sentinel by DIRECTION, because the region BEHIND a piece derives from the stored
+        // bytes: fully ABOVE the screen -> (1, 0) (the region behind starts at ~row 0); fully
+        // BELOW -> (255, 254) (the region behind is off-screen). Both keep y1 > y2, so
+        // lines_step_load still rejects them before drawing.
         hex.scmp 8, fra, frb, ust1, ust1, uskip
       ust1:
         hex.sign 8, frb, umark, ust2
       ust2:
-        hex.scmp 8, fra, fcvh, ust3, ust3, umark
+        hex.scmp 8, fra, fcvh, ust3, ust3, umark2
       umark:
         hex.set 8, fy1, 1
         hex.zero 8, fy2
+        ;uwr
+      umark2:
+        hex.set 8, fy1, 255
+        hex.set 8, fy2, 254
         ;uwr
       ust3:
         hex.mov 8, fy1, fra
@@ -1535,27 +1607,29 @@ ns frame {
       uhicl:
         hex.mov 8, fy2, fcvh
       uwr:
-        hex.write_byte_and_inc fbp, fy1
-        hex.write_byte_and_inc fbp, fy2
-        hex.write_byte_and_inc fbp, seg_ucls
-        hex.ptr_sub fbp, 3
-        hex.set 1, fsv, 1                       // nibble 0: the upper slot is now filled
+        .ts_piece_wr fsv, fbp, 0, fy1, fy2, seg_ucls, seg_bpid
+        hex.inc 1, fsv                          // nibble 0: the upper count
         hex.write_byte fsp, fsv
       uskip:
         // ---- the LOWER face -------------------------------------------------------------------
         hex.if0 1, seg_fmask + 1*dw, lskip
-        hex.if0 1, fsv + 1*dw, ldo
-        ;lskip
+        hex.cmp 1, fsv + 1*dw, fmax, ldo, lskip, lskip   // lower count < 1+stack -> room
       ldo:
         proj.step_rows fra, frb, fscale, fwl1, fwl2, centeryfix_c
+        // V5: a second (farther) piece clips ABOVE the stored first piece's start
+        rep(stack, k) .ts_clamp2_lo frb, fsv + 1*dw, fbp, 8
         hex.scmp 8, fra, frb, lst1, lst1, lskip
       lst1:
         hex.sign 8, frb, lmark, lst2
       lst2:
-        hex.scmp 8, fra, fcvh, lst3, lst3, lmark
+        hex.scmp 8, fra, fcvh, lst3, lst3, lmark2
       lmark:
-        hex.set 8, fy1, 1                       // off-screen lower face: the same empty sentinel
+        hex.set 8, fy1, 1                       // off-screen ABOVE: the (1, 0) sentinel
         hex.zero 8, fy2
+        ;lwr
+      lmark2:
+        hex.set 8, fy1, 255                     // off-screen BELOW: the (255, 254) sentinel
+        hex.set 8, fy2, 254
         ;lwr
       lst3:
         hex.mov 8, fy1, fra
@@ -1568,12 +1642,8 @@ ns frame {
       lhicl:
         hex.mov 8, fy2, fcvh
       lwr:
-        hex.ptr_add fbp, 3
-        hex.write_byte_and_inc fbp, fy1
-        hex.write_byte_and_inc fbp, fy2
-        hex.write_byte_and_inc fbp, seg_lcls
-        hex.ptr_sub fbp, 6
-        hex.set 1, fsv + 1*dw, 1                // nibble 1: the lower slot is now filled
+        .ts_piece_wr fsv + 1*dw, fbp, 8, fy1, fy2, seg_lcls, seg_bpid
+        hex.inc 1, fsv + 1*dw                   // nibble 1: the lower count
         hex.write_byte fsp, fsv
       lskip:
       fnext:
@@ -1586,6 +1656,7 @@ ns frame {
       nofaces:
         ;end
       fcap: hex.vec 2
+      fmax: hex.vec 1, 1+stack                  // V5: pieces allowed per side per column
       fnorm: hex.vec 8
       fdist: hex.vec 8
       fscale: hex.vec 8
@@ -1612,7 +1683,7 @@ ns frame {
       end:
     }
 
-    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride \
+    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride, stack \
             @ ret, bok, bstop, wok, wlo, wahi, wbhi, wbok, scan, nolow, dolow, nohigh, dohigh, \
               loop, body, claim, next, pdone, xa, xb, pm1, bcap \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
@@ -1639,7 +1710,7 @@ ns frame {
         // V3: record this boundary's step faces over its FULL column range -- deliberately BEFORE
         // the [pmin, pmax] window clip below, which is an attribution optimisation only: a column
         // outside the unattributed window can still be undrawn, and the oracle records a face there.
-        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride
+        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride, stack
         // Clip the scan to the UNATTRIBUTED WINDOW [pmin, pmax]. Every column below pmin / above
         // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
         // byte: at (-309,636) that is 769 column reads cut to 201, and 37 of the 60 projected segs
@@ -1915,6 +1986,89 @@ ns frame {
       end:
     }
 
+    // V5 -- the STACKED-pieces load: the RAW stored slot bytes (rows still unclipped-to-region,
+    // sentinels included) plus the per-side counts. The stack emit (`steps_splice_c`/`_f`) does
+    // its own clipping and shading against the column's window, so the ditto signature is the
+    // raw values + the window rows already in the chain. Zeroed when absent (the signature
+    // rule). Layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12.
+    def lines_steps_load2 ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
+            lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, x \
+            @ u1rd, l0rd, l1rd, l2rd, sfb, sfp, sbb, sbp, sidx, stv2, end \
+            < sfflag, sfslot {
+        hex.zero 2, ucnt
+        hex.zero 2, u1y1
+        hex.zero 2, u1y2
+        hex.zero 2, u1cls
+        hex.zero 2, u1bp
+        hex.zero 2, u2y1
+        hex.zero 2, u2y2
+        hex.zero 2, u2cls
+        hex.zero 2, u2bp
+        hex.zero 2, lcnt
+        hex.zero 2, l1y1
+        hex.zero 2, l1y2
+        hex.zero 2, l1cls
+        hex.zero 2, l1bp
+        hex.zero 2, l2y1
+        hex.zero 2, l2y2
+        hex.zero 2, l2cls
+        hex.zero 2, l2bp
+        hex.set w/4, sfb, sfflag
+        hex.ptr_index sfp, sfb, x
+        hex.read_byte stv2, sfp
+        hex.if0 2, stv2, end                    // no piece in this column -- the common case
+        hex.mov 1, ucnt, stv2                   // nibble 0 = upper count, nibble 1 = lower
+        hex.mov 1, lcnt, stv2 + 1*dw
+        hex.zero w/4, sidx
+        hex.mov 2, sidx, x
+        hex.shl_hex w/4, 1, sidx
+        hex.set w/4, sbb, sfslot
+        hex.ptr_index sbp, sbb, sidx
+        hex.if0 1, ucnt, l0rd
+        hex.read_byte_and_inc u1y1, sbp
+        hex.read_byte_and_inc u1y2, sbp
+        hex.read_byte_and_inc u1cls, sbp
+        hex.read_byte_and_inc u1bp, sbp
+        hex.dec 1, ucnt
+        hex.if0 1, ucnt, u1rd                   // count was 1 -> no second upper stored
+        hex.read_byte_and_inc u2y1, sbp
+        hex.read_byte_and_inc u2y2, sbp
+        hex.read_byte_and_inc u2cls, sbp
+        hex.read_byte_and_inc u2bp, sbp
+        hex.inc 1, ucnt
+        ;l1rd
+      u1rd:
+        hex.ptr_add sbp, 4
+        hex.inc 1, ucnt
+        ;l1rd
+      l0rd:
+        hex.ptr_add sbp, 8
+      l1rd:
+        hex.if0 1, lcnt, end
+        hex.read_byte_and_inc l1y1, sbp
+        hex.read_byte_and_inc l1y2, sbp
+        hex.read_byte_and_inc l1cls, sbp
+        hex.read_byte_and_inc l1bp, sbp
+        hex.dec 1, lcnt
+        hex.if0 1, lcnt, l2rd
+        hex.read_byte_and_inc l2y1, sbp
+        hex.read_byte_and_inc l2y2, sbp
+        hex.read_byte_and_inc l2cls, sbp
+        hex.read_byte_and_inc l2bp, sbp
+        hex.inc 1, lcnt
+        ;end
+      l2rd:
+        hex.inc 1, lcnt
+        ;end
+      sfb: hex.vec w/4
+      sfp: hex.vec w/4
+      sbb: hex.vec w/4
+      sbp: hex.vec w/4
+      sidx: hex.vec w/4
+      stv2: hex.vec 2
+      end:
+    }
+
     // V4 -- this column's sprite fragment, read back from the write-once slot the thing pre-pass
     // filled. Six bytes, but a column WITHOUT a sprite pays only the one `sprflag` read -- and that
     // is most columns. All six are ZEROED when absent: they are the column's ditto signature too,
@@ -2128,7 +2282,7 @@ ns frame {
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, w1r, wpxstride, \
             pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift, spremit, \
-            ascode, sky_base_id \
+            ascode, sky_base_id, stack \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
               dfull, dchk2, dgchk, dschk, dstchk, dst2, dst3, dst4, dst5, dst6, \
@@ -2139,7 +2293,13 @@ ns frame {
               duy1, duy2, ducol, dly1, dly2, dlcol, \
               sprfl, ssy1, ssy2, sy0b, sblk, slr, dssy1, dssy2, dsy0b, dsblk, \
               ssy1b, ssy2b, sy0bb, sblkb, slrb, dssy1b, dssy2b, dsy0bb, dsblkb, \
-              dsp5, dsp6, dsp7, dsp8 \
+              dsp5, dsp6, dsp7, dsp8, \
+              ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
+              lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, \
+              ducnt, du1y1, du1y2, du1cls, du1bp, du2y1, du2y2, du2cls, du2bp, \
+              dlcnt, dl1y1, dl1y2, dl1cls, dl1bp, dl2y1, dl2y2, dl2cls, dl2bp, \
+              dvc2, dvup, dvu2, dvu3, dvu4, dvu5, dvu6, dvu7, dvu8, dvu9, dvlo, \
+              dvl2, dvl3, dvl4, dvl5, dvl6, dvl7, dvl8, dvl9 \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
               seg_lit, seg_wstrip, wstripbase, \
@@ -2217,7 +2377,9 @@ ns frame {
         // V3: this column's step faces, clipped to the regions this wall leaves open and shaded.
         // Must run BEFORE the ditto decision -- a face changes a column's CONTENT without changing
         // its clip rows, the third feature in a row to hit that (see dgchk).
-        rep(steps, k) .lines_step_load stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, x, cexcl, fstart
+        rep(steps*(1-stack), k) .lines_step_load stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, x, cexcl, fstart
+        // V5: the stacked load -- RAW slot bytes + per-side counts; the emit splices clip
+        rep(steps*stack, k) .lines_steps_load2 ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, x
         // ablate "sprnoemit" (measurement only): keep the RECORD half, never read the
         // fragments back. The frame is then identical to a things=False build, so the
         // delta against one prices the record half ALONE -- by subtraction from a
@@ -2280,7 +2442,48 @@ ns frame {
       dsp7:
         rep(things, k) hex.cmp 4, sy0bb, dsy0bb, dfull, dsp8, dfull
       dsp8:
-        rep(things, k) hex.cmp 4, sblkb, dsblkb, dfull, dpl, dfull
+        rep(things, k) hex.cmp 4, sblkb, dsblkb, dfull, dvc2, dfull
+      dvc2:
+        // V5: ... and the STACKED-piece signature. Counts first; the field compares are gated
+        // on the (equal) count, so pieceless columns pay two compares and two if0s only.
+        rep(stack, k) hex.cmp 2, ucnt, ducnt, dfull, dvup, dfull
+      dvup:
+        rep(stack, k) hex.cmp 2, lcnt, dlcnt, dfull, dvu2, dfull
+      dvu2:
+        rep(stack, k) hex.if0 1, ucnt, dvlo
+        rep(stack, k) hex.cmp 2, u1y1, du1y1, dfull, dvu3, dfull
+      dvu3:
+        rep(stack, k) hex.cmp 2, u1y2, du1y2, dfull, dvu4, dfull
+      dvu4:
+        rep(stack, k) hex.cmp 2, u1cls, du1cls, dfull, dvu5, dfull
+      dvu5:
+        rep(stack, k) hex.cmp 2, u1bp, du1bp, dfull, dvu6, dfull
+      dvu6:
+        rep(stack, k) hex.cmp 2, u2y1, du2y1, dfull, dvu7, dfull
+      dvu7:
+        rep(stack, k) hex.cmp 2, u2y2, du2y2, dfull, dvu8, dfull
+      dvu8:
+        rep(stack, k) hex.cmp 2, u2cls, du2cls, dfull, dvu9, dfull
+      dvu9:
+        rep(stack, k) hex.cmp 2, u2bp, du2bp, dfull, dvlo, dfull
+      dvlo:
+        rep(stack, k) hex.if0 1, lcnt, dpl
+        rep(stack, k) hex.cmp 2, l1y1, dl1y1, dfull, dvl2, dfull
+      dvl2:
+        rep(stack, k) hex.cmp 2, l1y2, dl1y2, dfull, dvl3, dfull
+      dvl3:
+        rep(stack, k) hex.cmp 2, l1cls, dl1cls, dfull, dvl4, dfull
+      dvl4:
+        rep(stack, k) hex.cmp 2, l1bp, dl1bp, dfull, dvl5, dfull
+      dvl5:
+        rep(stack, k) hex.cmp 2, l2y1, dl2y1, dfull, dvl6, dfull
+      dvl6:
+        rep(stack, k) hex.cmp 2, l2y2, dl2y2, dfull, dvl7, dfull
+      dvl7:
+        rep(stack, k) hex.cmp 2, l2cls, dl2cls, dfull, dvl8, dfull
+      dvl8:
+        rep(stack, k) hex.cmp 2, l2bp, dl2bp, dfull, dvl9, dfull
+      dvl9:
       dpl:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
         rep(1-pnear, k) .lines_jmp dsame
@@ -2291,7 +2494,7 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, seg_lit, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
         hex.mov 2, duy1, uy1                    // V3: the face signature, unconditional (same
@@ -2308,6 +2511,24 @@ ns frame {
         hex.mov 2, dssy2b, ssy2b
         hex.mov 4, dsy0bb, sy0bb
         hex.mov 4, dsblkb, sblkb
+        hex.mov 2, ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
+        hex.mov 2, du1y1, u1y1                  // (the dgn rule: the cells must never be unused)
+        hex.mov 2, du1y2, u1y2
+        hex.mov 2, du1cls, u1cls
+        hex.mov 2, du1bp, u1bp
+        hex.mov 2, du2y1, u2y1
+        hex.mov 2, du2y2, u2y2
+        hex.mov 2, du2cls, u2cls
+        hex.mov 2, du2bp, u2bp
+        hex.mov 2, dlcnt, lcnt
+        hex.mov 2, dl1y1, l1y1
+        hex.mov 2, dl1y2, l1y2
+        hex.mov 2, dl1cls, l1cls
+        hex.mov 2, dl1bp, l1bp
+        hex.mov 2, dl2y1, l2y1
+        hex.mov 2, dl2y2, l2y2
+        hex.mov 2, dl2cls, l2cls
+        hex.mov 2, dl2bp, l2bp
         hex.mov 2, dsoff, soff                  // V2: unconditional, same reason as dgn
         hex.mov 2, dgn, gnrow                   // V1: unconditional so `dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
@@ -2377,6 +2598,42 @@ ns frame {
       dssy2b: hex.vec 2
       dsy0bb: hex.vec 4
       dsblkb: hex.vec 4
+      ucnt: hex.vec 2                           // V5: the stacked boundary pieces (RAW slot
+      u1y1: hex.vec 2                           // bytes; counts in the low nibbles)
+      u1y2: hex.vec 2
+      u1cls: hex.vec 2
+      u1bp: hex.vec 2
+      u2y1: hex.vec 2
+      u2y2: hex.vec 2
+      u2cls: hex.vec 2
+      u2bp: hex.vec 2
+      lcnt: hex.vec 2
+      l1y1: hex.vec 2
+      l1y2: hex.vec 2
+      l1cls: hex.vec 2
+      l1bp: hex.vec 2
+      l2y1: hex.vec 2
+      l2y2: hex.vec 2
+      l2cls: hex.vec 2
+      l2bp: hex.vec 2
+      ducnt: hex.vec 2                          // ... and the previously emitted signature
+      du1y1: hex.vec 2
+      du1y2: hex.vec 2
+      du1cls: hex.vec 2
+      du1bp: hex.vec 2
+      du2y1: hex.vec 2
+      du2y2: hex.vec 2
+      du2cls: hex.vec 2
+      du2bp: hex.vec 2
+      dlcnt: hex.vec 2
+      dl1y1: hex.vec 2
+      dl1y2: hex.vec 2
+      dl1cls: hex.vec 2
+      dl1bp: hex.vec 2
+      dl2y1: hex.vec 2
+      dl2y2: hex.vec 2
+      dl2cls: hex.vec 2
+      dl2bp: hex.vec 2
       dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs
       dbot: hex.vec 8
       dscale: hex.vec 8                         // ablate "scaletwice" only: dead scale-setup outputs

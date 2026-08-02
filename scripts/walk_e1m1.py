@@ -82,6 +82,9 @@ def main():
                     help="V2 OFF: sky-flat ceilings go back to a plain plane")
     ap.add_argument("--no-steps", action="store_true",
                     help="V3 OFF: no step faces (stair risers, ledge fronts, door lintels)")
+    ap.add_argument("--no-stack", action="store_true",
+                    help="V5 OFF: back to ONE boundary piece per column and no per-boundary"
+                         " floor/ceiling regions (stairs collapse to a single riser again)")
     ap.add_argument("--no-things", action="store_true",
                     help="V4 OFF: no thing sprites")
     ap.add_argument("--sprites", default="assets/freedoom1.wad", metavar="WAD",
@@ -143,7 +146,11 @@ def main():
                                   sky=feats and not args.no_sky,
                                   steps=feats and not args.no_steps,
                                   things=want_things, sprite_wad=spr,
-                                  bbox_cull=True)   # M13-15M: the wedge subtree cull ships
+                                  bbox_cull=True,   # M13-15M: the wedge subtree cull ships
+                                  # V5: stacked boundary pieces + true regions (certified
+                                  # median 15.92M / mean 16.87M on the 260-frame sweep)
+                                  stack_steps=(feats and not args.no_steps
+                                               and not args.no_stack))
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")

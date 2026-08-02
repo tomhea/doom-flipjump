@@ -67,6 +67,7 @@ WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
 STEP_SEG_BUDGET = 12              # V3: boundaries allowed a step face (the NEAREST ones)
+V5_STACK = 2                      # V5: stacked boundary pieces kept per column per side
 STEP_FACE_BASE = 96               # V3: flat-shaded step-face texel. NOT WALL_BG (=4),
                                   # which is near-WHITE in DOOM's ramp and blows out
 # V2: sky-texture widths swept per full 360 turn. A LOOK knob, but not a free one -- it sets the
@@ -1198,7 +1199,8 @@ class ReferenceModel:
                           wall_noise: bool = False, sky: bool = False,
                           near_steps: bool = False, things: bool = False,
                           sprite_wad=None, things_out: list | None = None,
-                          bbox_cull: bool = False) -> bytes:
+                          bbox_cull: bool = False, stack_steps: bool = False,
+                          steps_out: list | None = None) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -1262,8 +1264,12 @@ class ReferenceModel:
 
         drawn = bytearray(cfg.VIEW_W)                        # per-column solid-seg clip (1 = already drawn)
         pclaim = bytearray(cfg.VIEW_W)                        # M13-2S rung 3a: plane record claimed?
-        ups: list = [None] * W        # V3: this column's nearest upper step face (write-once)
-        los: list = [None] * W        # V3: ... and its nearest lower one (the STAIR RISER)
+        # V3: this column's upper/lower step faces, nearest first (write-once slots; V5 stacks
+        # up to V5_STACK per side when `stack_steps`, each entry carrying the boundary's BACK
+        # sector for the region behind it)
+        n_stack = V5_STACK if stack_steps else 1
+        ups: list = [[] for _ in range(W)]
+        los: list = [[] for _ in range(W)]
         n_face = [0]                  # V3: face-carrying boundaries used, vs STEP_SEG_BUDGET
         n_claimed = 0                                         # ... and its two STOP conditions, both of
         n_ts = 0                                              # which the fj mirrors (see below)
@@ -1415,18 +1421,41 @@ class ReferenceModel:
                         st2 = 0
                 for x in range(rng2[0], rng2[1]):
                     if face_seg and not drawn[x] and not (
-                            (not has_up or ups[x]) and (not has_lo or los[x])):
+                            (not has_up or len(ups[x]) >= n_stack)
+                            and (not has_lo or len(los[x]) >= n_stack)):
                         sc2m = sc2 & ANGLE_MASK
-                        if has_up and ups[x] is None:
+                        # V5 STORED-VALUE SEMANTICS (the fj slot's exact bytes, R6): a piece is
+                        # stored CLIPPED to the screen, with two off-screen SENTINELS -- fully
+                        # ABOVE = (1, 0) (the region behind it starts at row ~0), fully BELOW =
+                        # (255, 254) (the region behind it is off-screen). The piece-2 monotone
+                        # clamp reads the STORED previous value, sentinel included, so oracle
+                        # and fj can never disagree about a clamped piece.
+                        Hs = cfg.VIEW_H - 1
+                        if has_up and len(ups[x]) < n_stack:
                             t0, _b = self.wall_screen_span(fsec.ceil_h, fsec.ceil_h, viewz, sc2m)
                             _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h, viewz, sc2m)
-                            if t0 <= ub - 1:
-                                ups[x] = (t0, ub - 1, fsec, fsec.ceil_h - bsec.ceil_h)
-                        if has_lo and los[x] is None:
+                            a, b = t0, ub - 1
+                            if ups[x]:
+                                # a farther boundary's face clips BELOW the nearer one's stored
+                                # end (DOOM's descending ceilingclip -> the splice stays monotone)
+                                a = max(a, ups[x][-1][1] + 1)
+                            if a <= b:
+                                st_ = ((1, 0) if b < 0 else (255, 254) if a > Hs
+                                       else (max(a, 0), min(b, Hs)))
+                                ups[x].append((st_[0], st_[1], fsec,
+                                               fsec.ceil_h - bsec.ceil_h, bsec))
+                        if has_lo and len(los[x]) < n_stack:
                             lt, _b2 = self.wall_screen_span(bsec.floor_h, fsec.floor_h, viewz, sc2m)
                             _t2, b0 = self.wall_screen_span(fsec.floor_h, fsec.floor_h, viewz, sc2m)
-                            if lt <= b0:
-                                los[x] = (lt, b0, fsec, bsec.floor_h - fsec.floor_h)
+                            a, b = lt, b0
+                            if los[x]:
+                                # ... and ABOVE the nearer one's stored start (ascending floorclip)
+                                b = min(b, los[x][-1][0] - 1)
+                            if a <= b:
+                                st_ = ((1, 0) if b < 0 else (255, 254) if a > Hs
+                                       else (max(a, 0), min(b, Hs)))
+                                los[x].append((st_[0], st_[1], fsec,
+                                               bsec.floor_h - fsec.floor_h, bsec))
                     if not pclaim[x]:
                         col_ch[x], col_fh[x], col_lt[x] = fsec.ceil_h, fsec.floor_h, fsec.light
                         col_cf[x], col_ff[x] = fsec.ceil_tex, fsec.floor_tex
@@ -1543,6 +1572,8 @@ class ReferenceModel:
         planes = (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff)
         if planes_out is not None:
             planes_out.append(planes)                        # the per-column records, for the gates
+        if steps_out is not None:
+            steps_out.append((ups, los))                     # V5: the per-column piece lists
         if floor_mode_ft1:
             self._render_planes_flat(fb, colormap, scene.asset_wad, flatcache, viewz, *planes,
                                      ft1=True, sky=sky, viewangle=viewangle, texcache=texcache)
@@ -1575,6 +1606,30 @@ class ReferenceModel:
                         for y in range(y1, y2 + 1):
                             fb[y * cfg.VIEW_W + x] = colormap[lr][STEP_FACE_BASE]
 
+                v5_cache: dict = {}
+
+                def _region_paint(x, ra, rb, bsec, ceiling):
+                    """V5: the plane region BEHIND a boundary piece -- the back sector's own
+                    ceiling/floor, shaded through the SAME shared per-visplane recipe the base
+                    planes use (`_flat_row_colours`), so a stacked region's rows match any other
+                    window of that visplane. A sky back-ceiling paints SKY (the V2 rule)."""
+                    if rb < ra:
+                        return
+                    if ceiling:
+                        hgt, flat, lgt = bsec.ceil_h, bsec.ceil_tex, bsec.light
+                    else:
+                        hgt, flat, lgt = bsec.floor_h, bsec.floor_tex, bsec.light
+                    if ceiling and sky and (flat or "").upper() == "F_SKY1":
+                        for y in range(ra, rb + 1):
+                            fb[y * cfg.VIEW_W + x] = self.sky_texel(scene.asset_wad, texcache,
+                                                                    viewangle, x, y)
+                        return
+                    rows = self._flat_row_colours(colormap, scene.asset_wad, flatcache, viewz,
+                                                  abs((hgt << 16) - viewz), lgt, flat,
+                                                  ft1=True, walk_cache=v5_cache)
+                    for y in range(ra, rb + 1):
+                        fb[y * cfg.VIEW_W + x] = rows[y]
+
                 for x in range(cfg.VIEW_W):
                     if sfrag[x] is not None:
                         # V4: ONE overlay per column, and the sprite wins. A column already carries
@@ -1582,16 +1637,26 @@ class ReferenceModel:
                         # it would mean composing five, and the sprite is in front of the face
                         # anyway (it was recorded into an unclaimed column by a nearer subsector).
                         continue
-                    if ups[x] is not None:
-                        y1, y2, fsc, units = ups[x]
-                        y1, y2 = max(y1, 0), min(y2, c_hi[x])
-                        if y1 <= y2:
-                            _face_paint(x, y1, y2, fsc, units)
-                    if los[x] is not None:
-                        y1, y2, fsc, units = los[x]
-                        y1, y2 = max(y1, f_lo[x]), min(y2, cfg.VIEW_H - 1)
-                        if y1 <= y2:
-                            _face_paint(x, y1, y2, fsc, units)
+                    ceil_end = min(c_hi[x], cfg.VIEW_H - 1)
+                    for k, (y1, y2, fsc, units, bsec) in enumerate(ups[x]):
+                        y1c, y2c = max(y1, 0), min(y2, ceil_end)
+                        if y1c <= y2c:
+                            _face_paint(x, y1c, y2c, fsc, units)
+                        if stack_steps:
+                            # the CEILING region behind this boundary: below its face, above the
+                            # next piece (or the claiming wall's ceiling extent)
+                            nxt = ups[x][k + 1][0] - 1 if k + 1 < len(ups[x]) else ceil_end
+                            _region_paint(x, max(y2 + 1, 0), min(nxt, ceil_end), bsec, True)
+                    for k, (y1, y2, fsc, units, bsec) in enumerate(los[x]):
+                        y1c, y2c = max(y1, f_lo[x]), min(y2, cfg.VIEW_H - 1)
+                        if y1c <= y2c:
+                            _face_paint(x, y1c, y2c, fsc, units)
+                        if stack_steps:
+                            # the FLOOR region behind this boundary: above its face, below the
+                            # next piece (or the claiming wall's floor extent)
+                            nxt = los[x][k + 1][1] + 1 if k + 1 < len(los[x]) else f_lo[x]
+                            _region_paint(x, max(nxt, f_lo[x], 0),
+                                          min(y1 - 1, cfg.VIEW_H - 1), bsec, False)
             if things_out is not None:
                 things_out.append(sfrag)                 # the per-column fragments, for the gates
                 things_out.append(n_thing)               # ... and how many things the budget let in
@@ -1843,6 +1908,39 @@ class ReferenceModel:
         texels, th, tw = tex
         return texels[(u % tw) * th + min(th - 1, y * th // max(1, self.cfg.VIEW_H))]
 
+    def _flat_row_colours(self, colormap, asset_wad, flatcache, viewz,
+                          plane_h: int, light: int, flat_name, *, ft1: bool,
+                          walk_cache: dict):
+        """The FT1 flat tier's colour for EVERY screen row of one visplane (height, light, flat)
+        — the shared recipe `_render_planes_flat` slices per column and V5's stacked regions
+        window per piece: one full-range `_zidx_band_walk` (split at CENTERY inside), zlight
+        rows, and the FT1 band-ordinal diagonal texel, ordinals restarting per half. The fj side
+        windows its shared per-visplane band list exactly the same way, which is why a stacked
+        region's rows match any other window of the same visplane (R6)."""
+        cfg = self.cfg
+        H, CY_ = cfg.VIEW_H, cfg.CENTERY
+        key = (plane_h, light, flat_name, ft1)
+        if key in walk_cache:
+            return walk_cache[key]
+        wk = f"__walk_{plane_h}"
+        if wk not in walk_cache:
+            walk_cache[wk] = self._zidx_band_walk(plane_h, list(range(H)))
+        lvl = min(LIGHTLEVELS - 1, light >> LIGHTSEGSHIFT)
+        zr_all = [self.zlight[lvl][z] for z in walk_cache[wk]]
+        base = self._flat_base(asset_wad, flat_name, flatcache)
+        tx = self._flat_texels(asset_wad, flat_name, flatcache) if ft1 else None
+        out = [0] * H
+        for half, (lo, hi) in enumerate(((0, CY_), (CY_, H))):
+            seq = zr_all[lo:hi]
+            for k, y in enumerate(range(lo, hi)):
+                if not ft1:
+                    out[y] = colormap[seq[k]][base]
+                else:
+                    ordinal = sum(1 for i in range(1, k + 1) if seq[i] != seq[i - 1])
+                    out[y] = colormap[seq[k]][tx[((ordinal & 63) * 64 + (ordinal & 63)) % len(tx)]]
+        walk_cache[key] = out
+        return out
+
     def _render_planes_flat(self, fb, colormap, asset_wad, flatcache, viewz,
                             ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff,
                             *, ft1: bool = False, sky: bool = False, viewangle: int = 0,
@@ -1868,22 +1966,6 @@ class ReferenceModel:
         # suffixes take their zidx from the shared CENTERY-seeded half instead of a per-window
         # fstart seed -- an F4-class <=1-row band-edge shift, re-blessed with the fj consumer.
         walk_cache: dict = {}
-
-        def band_colour(name, base, zrows, k):
-            """M13-FT1: band ORDINAL k takes the flat's k-th diagonal texel instead of every band
-            sharing the flat's single base texel -- the free floor-texture tier, mirroring
-            `wall_renderer._lines_bake_bank(ft1=True)` byte for byte (R6)."""
-            if not ft1:
-                return colormap[zrows[k]][base]
-            tx = self._flat_texels(asset_wad, name, flatcache)
-            ordinal = sum(1 for i in range(1, k + 1) if zrows[i] != zrows[i - 1])
-            return colormap[zrows[k]][tx[((ordinal & 63) * 64 + (ordinal & 63)) % len(tx)]]
-
-        def full_walk(ph):
-            if ph not in walk_cache:
-                walk_cache[ph] = self._zidx_band_walk(ph, list(range(H)))
-            return walk_cache[ph]
-
         for x in range(W):
             # V2: F_SKY1 is not a flat at all -- it is DOOM's signal to paint the SKY, whose texture
             # column is chosen by the VIEW ANGLE and which takes NO distance lighting. That
@@ -1894,24 +1976,17 @@ class ReferenceModel:
                 for y in range(min(ceil_hi[x] + 1, H)):
                     fb[y * W + x] = self.sky_texel(asset_wad, texcache, viewangle, x, y)
             if ceil_hi[x] >= 0 and not is_sky:
-                ph = abs((col_ch[x] << 16) - viewz)
-                base = self._flat_base(asset_wad, col_cf[x], flatcache)
-                lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)
-                zr_all = [self.zlight[lvl][z] for z in full_walk(ph)]
-                zr_half = zr_all[:CY_] + zr_all[CY_:]          # ordinals restart per half-window
+                rows = self._flat_row_colours(colormap, asset_wad, flatcache, viewz,
+                                              abs((col_ch[x] << 16) - viewz), col_lt[x],
+                                              col_cf[x], ft1=ft1, walk_cache=walk_cache)
                 for y in range(min(ceil_hi[x] + 1, H)):
-                    k0 = y if y < CY_ else y - CY_
-                    seq = zr_all[:CY_] if y < CY_ else zr_all[CY_:]
-                    fb[y * W + x] = band_colour(col_cf[x], base, seq, k0)
+                    fb[y * W + x] = rows[y]
             if floor_lo[x] < H:
-                ph = abs((col_fh[x] << 16) - viewz)
-                base = self._flat_base(asset_wad, col_ff[x], flatcache)
-                lvl = min(LIGHTLEVELS - 1, col_lt[x] >> LIGHTSEGSHIFT)
-                zr_all = [self.zlight[lvl][z] for z in full_walk(ph)]
+                rows = self._flat_row_colours(colormap, asset_wad, flatcache, viewz,
+                                              abs((col_fh[x] << 16) - viewz), col_lt[x],
+                                              col_ff[x], ft1=ft1, walk_cache=walk_cache)
                 for y in range(floor_lo[x], H):
-                    k0 = y if y < CY_ else y - CY_
-                    seq = zr_all[:CY_] if y < CY_ else zr_all[CY_:]
-                    fb[y * W + x] = band_colour(col_ff[x], base, seq, k0)
+                    fb[y * W + x] = rows[y]
 
     @staticmethod
     def _plane_region_at(x, y, ceil_hi, floor_lo):

@@ -45,6 +45,8 @@ ap.add_argument("--ablate", action="append", default=[])
 ap.add_argument("--knob", action="append", default=[], metavar="NAME=VALUE")
 ap.add_argument("--off", action="append", default=[],
                 choices=["grain", "sky", "steps", "things", "plane_near", "bboxcull"])
+ap.add_argument("--stack", action="store_true",
+                help="V5: stacked boundary pieces + per-boundary plane regions")
 ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX", "W1R"],
                 help="wall tier: WPX = 1x1 texels, W1 = flat-lit walls (the 15M ladder), "
                      "W1R = W1 + randomized runs (M13-W1R)")
@@ -96,7 +98,7 @@ FLAGS = dict(floor_mode="FT1", wall_mode=args.wall_mode, raster_mode="lines",
              plane_near="plane_near" not in args.off,
              wall_noise="grain" not in args.off, sky="sky" not in args.off,
              steps="steps" not in args.off, things="things" not in args.off,
-             bbox_cull="bboxcull" not in args.off)
+             bbox_cull="bboxcull" not in args.off, stack_steps=args.stack)
 
 
 def build():
@@ -139,7 +141,8 @@ if not ABL:                                    # an ablated frame is deliberatel
                                        plane_near=FLAGS["plane_near"],
                                        wall_noise=FLAGS["wall_noise"], sky=FLAGS["sky"],
                                        near_steps=FLAGS["steps"], things=FLAGS["things"],
-                                       sprite_wad=art, bbox_cull=FLAGS["bbox_cull"]))
+                                       sprite_wad=art, bbox_cull=FLAGS["bbox_cull"],
+                                       stack_steps=FLAGS["stack_steps"]))
             for vx, vy, va, _ in VPS]
 
 label = args.tag or (" ".join(f"-{o}" for o in args.off) + " " +

@@ -102,7 +102,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        plane_near: bool = False, two_sided: bool = False,
                        wall_noise: bool = False, sky: bool = False, steps: bool = False,
                        things: bool = False, sprite_wad=None,
-                       bbox_cull: bool = False) -> str:
+                       bbox_cull: bool = False, stack_steps: bool = False) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -239,6 +239,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # comparison of it -- without the grain the pattern key does not exist at runtime.
     assert not w1r_flag or wall_noise, "wall_mode='W1R' requires wall_noise=True (V1's gnrow)"
     assert not (w1r_flag and two_sided), "wall_mode='W1R' is not wired into the two_sided leaf"
+    # V5: stacked boundary pieces + per-boundary plane regions ride the V3 slot machinery and
+    # the pnear pid bank -- both must be on.
+    stack_flag = 1 if stack_steps else 0
+    assert not stack_flag or (lines and steps and plane_near and not two_sided), \
+        "stack_steps requires the lines tier with steps + plane_near (and not two_sided)"
+    # V5 slot layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all four
+    # fit the EXISTING 16-byte stride, so the whole-nibble shift stays.
     asset_wad = asset_wad or map_wad
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
@@ -527,6 +534,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             lines_key_ids.setdefault(_fk, len(lines_key_ids))
             if (_ck, _fk) not in lines_pid:
                 lines_pid[(_ck, _fk)] = len(lines_pid) + 1     # 1-based: 0 == "not attributed yet"
+            # V5: a stacked piece's REGION shows its boundary's BACK sector, so back pairs need
+            # pids (and band lists) too. Registered for every two-sided walk seg -- a superset
+            # of the face-carrying ones, a few extra keys at most.
+            if stack_flag and lds[_seg.linedef].back != -1:
+                _bsec5 = secs[sds[lds[_seg.linedef].back if _seg.side == 0
+                               else lds[_seg.linedef].front].sector]
+                _bck, _bfk = _plane_keys(_bsec5)
+                lines_key_ids.setdefault(_bck, len(lines_key_ids))
+                lines_key_ids.setdefault(_bfk, len(lines_key_ids))
+                if (_bck, _bfk) not in lines_pid:
+                    lines_pid[(_bck, _bfk)] = len(lines_pid) + 1
         # M13-2S rung 3a — the bank LAYOUT. With per-column attribution the emit half has to recover
         # a column's two band lists from ONE byte, so `plane_near` lays the bank out per SECTOR PLANE
         # PAIR (pid): pid p's ceiling list is slot 2(p-1), its floor list 2(p-1)+1, hence
@@ -752,7 +770,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                 ("seg_ucls", 2, step_cls.get(
                                     (_ln, max(1, _fsec.ceil_h - _bsec.ceil_h)), 0) if _hu else 0),
                                 ("seg_lcls", 2, step_cls.get(
-                                    (_ln, max(1, _bsec.floor_h - _fsec.floor_h)), 0) if _hl else 0)])
+                                    (_ln, max(1, _bsec.floor_h - _fsec.floor_h)), 0) if _hl else 0),
+                                # V5: the boundary's BACK pair id -- the plane region behind a
+                                # stored piece re-derives its band lists from this (lines_pid_ids)
+                                *([("seg_bpid", 2, lines_pid[_plane_keys(_bsec)])]
+                                  if stack_flag else [])])
                             _tsq.append(f"    stl.fcall seg{si}F_xorby, xb_ret")
                             _tsu.append(f"    stl.fcall seg{si}F_xorby, xb_ret")
                         out += [f"    hex.if0 1, tsstop, e2go{cid}_{si}",
@@ -1206,7 +1228,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            *(["seg_pass1_ts_leaf:",
               f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
-              f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}"] if plane_near else []),
+              f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}"] if plane_near else []),
            *(["thing_leaf:",
               f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
               f"{proj}, {cfg.CENTERX}, "
@@ -1224,7 +1246,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
             f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
             f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
-            f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}")]
+            f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -1334,6 +1356,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
            "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
            "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
+           "seg_bpid: hex.vec 2",                # V5: the boundary's baked BACK pair id
            stepcol] if (lines and steps) else []),
         # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (nonzero =
         # this column carries one) so a column without a sprite costs ONE read on the emit path;

@@ -80,11 +80,27 @@ class FjmRunner:
             return fj.run(self.fjm_path, io_device=io_device, print_time=False,
                           print_termination=False,
                           flat_max_words=self.flat_max_words).op_counter
-        core = _fjcore.Memory(self.width, flat_max_words=self.flat_max_words)
-        for seg_start, seg_len in self._segments:
-            core.add_segment(seg_start, seg_len)
-        for start, vals in self._runs:            # restore the pristine image (see the ⚠ above)
-            core.set_words(start, vals)
+        # WALKER-PERF: one long-lived core, restored per frame by the C-side freeze()/reset()
+        # snapshot (a single 8B-per-word memcpy) instead of rebuilding a fresh core and pushing
+        # every word back through set_words -- the Python-list reload measured ~0.5s/frame at
+        # the 37M-word image (10x the run loop itself). Older engines without freeze() fall
+        # back to the rebuild path, so this stays correct on a stock flipjump install.
+        core = getattr(self, "_core", None)
+        if core is not None:
+            core.reset()
+        else:
+            core = _fjcore.Memory(self.width, flat_max_words=self.flat_max_words)
+            for seg_start, seg_len in self._segments:
+                core.add_segment(seg_start, seg_len)
+            for start, vals in self._runs:
+                core.set_words(start, vals)
+            if hasattr(core, "freeze"):
+                try:
+                    core.freeze()             # pure-flat programs only; paged falls back below
+                    self._core = core
+                    self._runs = []           # the frozen image supersedes the Python-int runs
+                except RuntimeError:
+                    pass
         io_device.attach_memory(NativeDeviceMemory(core, self.width))
         _cause, op_count, _err, _last, _paused = core.run(
             io_device.read_bit, io_device.write_bit, IOReadOnEOF, last_ops_length=0)

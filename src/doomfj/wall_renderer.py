@@ -451,14 +451,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     def lrow(light):
         return max(0, min(COLORMAP_LIGHTS - 1, light >> LIGHT_SHIFT))
 
-    def wlit(light, texel):
+    def wlit(light, texel, flat_wall=False):
         """The baked constant wall byte (`seg_lit`). W1R bakes it BRIGHTER by
         `W1R_BASE_BRIGHTEN` rows so the randomized run rows can move the tone BOTH ways
-        around the W1 tone -- mirrors the oracle's W1R branch (`blr`) exactly (R6)."""
+        around the W1 tone -- mirrors the oracle's W1R branch (`blr`) exactly (R6).
+        W1R-FLAT walls (no texture / sky) keep the plain UNbrightened W1 tone."""
         row = lrow(light)
-        if wall_mode == "W1R":
+        if wall_mode == "W1R" and not flat_wall:
             row = max(0, row - rm.W1R_BASE_BRIGHTEN)
         return colormap[row][texel]
+
+    # W1R-FLAT: the combined-table bases whose walls stay FLAT under W1R -- texture-less
+    # (the WALL_BG sentinel) and SKY-textured walls (smooth clouds in the best scenario).
+    w1r_flat_tb = ({info["__WALLBG__"][0]}
+                   | {info[nm][0] for nm in info if nm != "__WALLBG__" and nm.startswith("SKY")}
+                   if w1r_flag else set())
 
     # M13-bakedbands (the 12M campaign's LUT play): in lines mode EVERY POSSIBLE band list is
     # baked at compile time -- one list per (viewz class) x (height, light, flat-base) key, with
@@ -865,10 +872,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                              if wall_mode in ("W2S", "WPX") else []),
                            ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
                            ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
-                           ("seg_lit", 2, wlit(ssec.light, combined[tb])),
+                           ("seg_lit", 2, wlit(ssec.light, combined[tb],
+                                               flat_wall=tb in w1r_flat_tb)),
                            # W1R-2C: the SECOND colour byte -- the canvas's second texel
-                           # (combined[tb+1] at the 2-texel W1R tier) through the same bake
-                           *([("seg_lit2", 2, wlit(ssec.light, combined[tb + 1]))]
+                           # (combined[tb+1] at the 2-texel W1R tier) through the same bake.
+                           # W1R-FLAT: the per-seg stay-flat flag (no texture / sky).
+                           *([("seg_lit2", 2, wlit(ssec.light, combined[tb + 1],
+                                                   flat_wall=tb in w1r_flat_tb)),
+                              ("seg_w1rf", 1, 1 if tb in w1r_flat_tb else 0)]
                              if w1r_flag else []),
                            # M13-2S rung 3a: the emit half derives both list addresses from the
                            # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
@@ -951,9 +962,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             if stream or raster or lines:
                 # M13pS2c: the W1 wall's lit colour is fully constant (one texel, one light row) --
                 # bake the FINAL palette byte at Python emit time (no runtime colormap lookup at all).
-                fields.append(("seg_lit", 2, wlit(ssec.light, combined[tb])))
+                fields.append(("seg_lit", 2, wlit(ssec.light, combined[tb],
+                                                  flat_wall=tb in w1r_flat_tb)))
                 if w1r_flag:
-                    fields.append(("seg_lit2", 2, wlit(ssec.light, combined[tb + 1])))
+                    fields.append(("seg_lit2", 2, wlit(ssec.light, combined[tb + 1],
+                                                       flat_wall=tb in w1r_flat_tb)))
+                    fields.append(("seg_w1rf", 1, 1 if tb in w1r_flat_tb else 0))
                 # M13pS2-crush2b: the seg's ceiling/floor visplane indices (shared band lists in
                 # stream mode; shared device-side row->colour arrays in raster mode)
                 # M13-lines2: lines mode keys visplanes on (height, light) ONLY -- the flat
@@ -1679,6 +1693,7 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
     return [
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
         "seg_lit2: hex.vec 2",                         # W1R-2C: ... and its SECOND colour byte
+        "seg_w1rf: hex.vec 1",                         # W1R-FLAT: this wall stays one flat tone
         "seg_wstrip: hex.vec w/4", "wstripbase: hex.vec w/4",   # M13-W2S strip bank
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
         "seg_pid: hex.vec 2",                          # M13-2S rung 3a: baked plane-pair id (1-based)

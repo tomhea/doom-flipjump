@@ -1554,16 +1554,25 @@ class ReferenceModel:
                         # W1's so the pattern spans both sides of the W1 tone. See `w1r_runs`.
                         # W1R-2C: `alt` runs draw over the texture's SECOND texel (a different
                         # material embedded in the wall, still from the same texture).
-                        blr = max(0, light_row - self.W1R_BASE_BRIGHTEN)
-                        t1 = tex[0][0] if tex is not None else WALL_BG
-                        t2 = tex[0][1] if tex is not None else WALL_BG
-                        base, base2 = colormap[blr][t1], colormap[blr][t2]
-                        ya = top
-                        for rel, row, alt in self.w1r_runs(bottom + 1 - top, self.wall_noise(x)):
-                            cc = colormap[row][base2 if alt else base]
-                            for y in range(ya, top + rel):
+                        # W1R-FLAT (owner): walls that are FLAT in the best scenario stay flat
+                        # -- no texture at all, or a SKY-textured wall (smooth clouds). They
+                        # render one UNbrightened W1 tone (fj: the seg's baked seg_w1rf flag).
+                        if tex is None or (sd.middle or "").upper().startswith("SKY"):
+                            cc = (flat_fill if tex is None
+                                  else colormap[light_row][tex[0][0]])
+                            for y in range(top, bottom + 1):
                                 fb[y * cfg.VIEW_W + x] = cc
-                            ya = top + rel
+                        else:
+                            blr = max(0, light_row - self.W1R_BASE_BRIGHTEN)
+                            base = colormap[blr][tex[0][0]]
+                            base2 = colormap[blr][tex[0][1]]
+                            ya = top
+                            for rel, row, alt in self.w1r_runs(bottom + 1 - top,
+                                                               self.wall_noise(x)):
+                                cc = colormap[row][base2 if alt else base]
+                                for y in range(ya, top + rel):
+                                    fb[y * cfg.VIEW_W + x] = cc
+                                ya = top + rel
                     elif top <= bottom:
                         if tex is None:
                             for y in range(top, bottom + 1):

@@ -162,6 +162,18 @@ DEG_STACK_SCALE = 16384           # the SECOND stacked V5 piece only when the bo
                                   # stairs keep both risers; far doorways show one.
 DEG_PNEAR = 96                    # the marking-seg budget under degrade (128 baseline): the far
                                   # doorways that lose attribution are the least-visible ones
+DEG_HD_BUDGET = 0                 # OPTION B (0 = off): only the first N accepted TALL-bucket
+                                  # things keep the V4-HD cap-24 full-res bake; later tall things
+                                  # fall back to the cap-12 low-res blocks (a packed LD bank
+                                  # region). Walk order makes the first N the nearest N.
+DEG_DDA_FACES = 1                 # OPTION A (DEFAULT ON): step-face/stacked-piece rows advance by
+                                  # a per-seg frac DDA (DOOM's topstep/bottomstep) instead of two
+                                  # multiplies per column-side. BIT-EXACT by the mapmul identity
+                                  # (frac accumulates mod 2^32, no shift -- zero pixel change,
+                                  # verified 0 px on every probe + byte-exact gates). Measured on
+                                  # the 260-frame sweep: median 17.19 -> 16.51M, mean -0.23M,
+                                  # worst -1.0M. The per-seg setup loses ~0.5M on a few
+                                  # narrow-face-seg gate frames but wins the distribution.
 
 
 def sprite_bucket(h: int, view_h: int) -> int:
@@ -1380,6 +1392,7 @@ class ReferenceModel:
         sfrag: list = [None] * W
         sfrag2: list = [None] * W     # V4b: the SECOND (farther) fragment, drawn under slot A
         n_thing = 0                   # ... against THING_BUDGET: scenery (decor + pickups)
+        n_hd = 0                      # OPTION B: accepted TALL-bucket things granted the HD bake
         n_mon = 0                     # ... against MONSTER_BUDGET: monsters, counted SEPARATELY so
         spr_cache: dict = {}          #     walk order can never spend a monster's slot on a barrel
         things_by_ss: dict = {}
@@ -1444,6 +1457,15 @@ class ReferenceModel:
                     tx1, tx2, ytop, th_px, istep = pr
                     bkt = sprite_bucket(th_px, H)
                     hb = sprite_bucket_height(bkt, H)
+                    # OPTION B (DEG_HD_BUDGET): the first N accepted tall things keep the HD
+                    # bake; the rest use the cap-12 low-res blocks. Counted per THING right
+                    # here (post-acceptance, pre-columns), exactly where fj counts it.
+                    hd_ok = hb >= SPRITE_HD_H
+                    if hd_ok and DEG_HD_BUDGET:
+                        if n_hd < DEG_HD_BUDGET:
+                            n_hd += 1
+                        else:
+                            hd_ok = False
                     ytop_b = ytop + th_px - hb                # FEET planted: the bucket moves the top
                     lr = self.wall_light_row(self.wall_lightnum(tsec.light, 0), hb, art[4])
                     frac = (max(0, tx1) - tx1) * istep
@@ -1453,8 +1475,9 @@ class ReferenceModel:
                         if drawn[x] or sfrag2[x] is not None:
                             continue                     # V4b: both fragment slots spent
                         # V4-HD: tall buckets sample the full-res column with the deeper cap
+                        # (unless OPTION B's HD budget already went to nearer things)
                         st = (self.sprite_strip(art[7][u], art[8], hb, cap=SPRITE_RUN_CAP_HD)
-                              if hb >= SPRITE_HD_H else
+                              if hd_ok else
                               self.sprite_strip(art[0][u], art[1], hb))
                         if st is None:
                             continue
@@ -1534,6 +1557,16 @@ class ReferenceModel:
                         st2 = -(abs(d2) // sp2) if d2 < 0 else d2 // sp2   # trunc toward zero
                     else:
                         st2 = 0
+                    # OPTION A (DEG_DDA_FACES): per-seg frac bases + steps replace the four
+                    # per-column wall_screen_span multiplies. EXACT by the mapmul identity:
+                    # frac = CY - wt*scale accumulates mod 2^32 with no shift, so stepping by
+                    # -wt*st2 reproduces the per-column product bit for bit (zero px change).
+                    if DEG_DDA_FACES:
+                        _w4 = (fsec.ceil_h - viewz_world, bsec.ceil_h - viewz_world,
+                               bsec.floor_h - viewz_world, fsec.floor_h - viewz_world)
+                        _CY = cfg.CENTERY << 16
+                        _fr = [(_CY - w * (sc2 & ANGLE_MASK)) & 0xFFFFFFFF for w in _w4]
+                        _fst = [(w * (st2 & ANGLE_MASK)) & 0xFFFFFFFF for w in _w4]
                 for x in range(rng2[0], rng2[1]):
                     if face_seg and not drawn[x] and not (
                             (not has_up or len(ups[x]) >= n_stack)
@@ -1551,8 +1584,14 @@ class ReferenceModel:
                         # register fj already holds). Near stairs keep their two risers.
                         stk2 = deg_stack_scale == 0 or sc2m >= deg_stack_scale
                         if has_up and len(ups[x]) < n_stack and (not ups[x] or stk2):
-                            t0, _b = self.wall_screen_span(fsec.ceil_h, fsec.ceil_h, viewz, sc2m)
-                            _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h, viewz, sc2m)
+                            if DEG_DDA_FACES:
+                                t0 = _signed(_fr[0], 32) >> 16
+                                ub = _signed(_fr[1], 32) >> 16
+                            else:
+                                t0, _b = self.wall_screen_span(fsec.ceil_h, fsec.ceil_h,
+                                                               viewz, sc2m)
+                                _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h,
+                                                               viewz, sc2m)
                             a, b = t0, ub - 1
                             if ups[x]:
                                 # a farther boundary's face clips BELOW the nearer one's stored
@@ -1564,8 +1603,14 @@ class ReferenceModel:
                                 ups[x].append((st_[0], st_[1], fsec,
                                                fsec.ceil_h - bsec.ceil_h, bsec))
                         if has_lo and len(los[x]) < n_stack and (not los[x] or stk2):
-                            lt, _b2 = self.wall_screen_span(bsec.floor_h, fsec.floor_h, viewz, sc2m)
-                            _t2, b0 = self.wall_screen_span(fsec.floor_h, fsec.floor_h, viewz, sc2m)
+                            if DEG_DDA_FACES:
+                                lt = _signed(_fr[2], 32) >> 16
+                                b0 = _signed(_fr[3], 32) >> 16
+                            else:
+                                lt, _b2 = self.wall_screen_span(bsec.floor_h, fsec.floor_h,
+                                                                viewz, sc2m)
+                                _t2, b0 = self.wall_screen_span(fsec.floor_h, fsec.floor_h,
+                                                                viewz, sc2m)
                             a, b = lt, b0
                             if los[x]:
                                 # ... and ABOVE the nearer one's stored start (ascending floorclip)
@@ -1582,6 +1627,8 @@ class ReferenceModel:
                         n_claimed += 1
                     if face_seg:
                         sc2 = (sc2 + st2) & ANGLE_MASK     # the DDA advances on EVERY column
+                        if DEG_DDA_FACES:                  # OPTION A: the fracs advance with it
+                            _fr = [(f - d) & 0xFFFFFFFF for f, d in zip(_fr, _fst)]
                 continue
             rng = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
             if rng is None:

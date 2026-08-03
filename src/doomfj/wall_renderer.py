@@ -28,7 +28,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
                                     SPRITE_HD_H, SPRITE_RUN_CAP_HD,
                                     DEG_SOFT_SCENERY, DEG_MINH2_SCENERY, DEG_SOFT_MON,
                                     DEG_MINH2_MON, DEG_SPRB_MINH, DEG_SLIVER_W,
-                                    DEG_STACK_SCALE, DEG_PNEAR,
+                                    DEG_STACK_SCALE, DEG_PNEAR, DEG_HD_BUDGET, DEG_DDA_FACES,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER,
@@ -422,8 +422,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # V4: the sprite run-list bank + the shade-row bank, and the per-type block bases the things bake.
     _do_things = lines and things
     assert not (things and sprite_wad is None), "things=True needs sprite_wad (see _lines_sprite_bank)"
-    sprbank, spr_base, spr_dw = (_lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname)
-                                 if _do_things else ("", {}, {}))
+    sprbank, spr_base, spr_dw, spr_ldbase = (_lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname)
+                                 if _do_things else ("", {}, {}, {}))
     sprlight, spr_cls = (_lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname,
                                              cmap, lds, sds, secs) if _do_things else ("", {}))
     # h -> [bucket_height:2][bucket:2], the one runtime step of the height quantisation
@@ -725,6 +725,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         # property of the thing type and never changes at runtime
                         ("sp_mon", 2, 1 if _t.type in MONSTER_TYPES else 0),
                         ("sp_base", 4, spr_base[_t.type]),
+                        # OPTION B: the packed low-res region base (B0 pre-subtracted) -- only
+                        # baked when the HD budget is on, only read for tall buckets past it
+                        *([("sp_base2", 4, spr_ldbase[_t.type])] if DEG_HD_BUDGET else []),
                         ("sp_dw", 2, spr_dw[_t.type]),
                         ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])])
                     out += [f"    hex.if0 1, tstop, tgo{cid}_{_ti}",
@@ -1275,7 +1278,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR if deg else PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
               f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
-              f"{DEG_STACK_SCALE}"] if plane_near else []),
+              f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}"] if plane_near else []),
            *(["thing_leaf:",
               f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
               f"{proj}, {cfg.CENTERX}, "
@@ -1283,7 +1286,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
               f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
               f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
-              f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}"]
+              f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_HD_BUDGET else 0}, "
+              f"{DEG_HD_BUDGET}, {SPRITE_HD_H}, "
+              f"{SPRITE_HEIGHT_BUCKETS - _spr_b0(cfg) if DEG_HD_BUDGET else 1}"]
              if _do_things else []),
            "seg_pass2_leaf:",
            (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
@@ -1422,6 +1427,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
            "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
            "sp_tzmax2: hex.vec 8",             # 25M-CAP: the raised min-size depth bound
+           "sp_base2: hex.vec 4",              # OPTION B: the low-res LD region base
+           "n_hd: hex.vec 2", "hdfl: hex.vec 1",      # ... its budget counter + per-thing flag
            "degfl: hex.vec 1", "ballow: hex.vec 1",   # ... and the per-thing runtime flags
            sprbkt, sprlight, sprbank] if _do_things else []),
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
@@ -1896,7 +1903,35 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
                 out += [f";{v:#x} * dw" for v in body]
                 out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
                 blk += 1
-    return NLJ.join(out) + NLJ, base_of, dw_of
+    # OPTION B (DEG_HD_BUDGET): the packed LOW-RES fallback region -- cap-12 downscaled blocks
+    # for the TALL buckets only (heights are monotone in b, so [B0..) is contiguous). A tall
+    # thing past the HD budget indexes ld_base + u*n_ld + bucket with ld_base PRE-SUBTRACTING
+    # B0, so the record loop keeps its one add-and-multiply shape.
+    ld_base_of = {}
+    if DEG_HD_BUDGET:
+        B0 = _spr_b0(cfg)
+        n_ld = SPRITE_HEIGHT_BUCKETS - B0
+        for kind in kinds:
+            art = rm.sprite_art(sprite_wad, kind, cache)
+            cols, dh, dwid = art[0], art[1], art[2]
+            ld_base_of[kind] = blk - B0
+            for u in range(dwid):
+                for b in range(B0, SPRITE_HEIGHT_BUCKETS):
+                    st = rm.sprite_strip(cols[u], dh, sprite_bucket_height(b, cfg.VIEW_H))
+                    body = [0, 0, 0] if st is None else (
+                        [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
+                    assert len(body) <= SPR_BLOCK_STRIDE, f"LD block overflows: {len(body)}"
+                    out += [f";{v:#x} * dw" for v in body]
+                    out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
+                    blk += 1
+    assert blk < 0x10000, f"sprite bank blocks overflow sp_base's 4 nibbles: {blk}"
+    return NLJ.join(out) + NLJ, base_of, dw_of, ld_base_of
+
+
+def _spr_b0(cfg):
+    """The first TALL height bucket (>= SPRITE_HD_H px) -- monotone, so [B0..) is the HD set."""
+    return min(b for b in range(SPRITE_HEIGHT_BUCKETS)
+               if sprite_bucket_height(b, cfg.VIEW_H) >= SPRITE_HD_H)
 
 
 def _thing_sector(rm, cmap, lds, sds, secs, t):

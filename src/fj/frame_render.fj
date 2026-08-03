@@ -1198,16 +1198,16 @@ ns frame {
     // so `tstop` short-circuits every later thing at its call site for one 1-nibble test.
     // Mirrors ReferenceModel.render_wall_frame's things pre-pass EXACTLY.
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, blkshift, \
-            buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh \
+            buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, hdbf, hdbudget, hdh, nld \
             @ tgo, tgo2, tsce, tincs, tinced, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
-              tdsc, tdno, tdok, tbno, tbok, \
+              tdsc, tdno, tdok, tbno, tbok, hdtl, hdld, hdinc, hdok, hcon, hmul, hmdone, \
               tfree, tfree2, tslota, tslotb, tblkok, tnext, \
               tsy1z, tsy1k, tsy1h, tsy2c, tsy2z, tsy2k0, tsy2h, tsy2k, tdraw, \
               tcap, vis, dvis, dtx1, dtx2, dtyt, dthp, dtis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
               tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tcon, tidx, tlr, tr0, trl, trw, \
               tsy1, tsy2, tb8, tneg, tcvh, tsofs, tflagv, end \
             < n_thing, n_mon, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
-              sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow {
+              sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, n_hd, hdfl {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
         // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
         // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
@@ -1271,6 +1271,30 @@ ns frame {
       tbno:
         rep(deg, k) hex.set 1, ballow, 0
       tbok:
+        // OPTION B (hdbf): the first hdbudget accepted TALL things keep the cap-24 HD
+        // blocks; later tall things fall back to the packed low-res region. The walk is
+        // front-to-back, so the budget goes to the NEAREST tall sprites.
+        rep(hdbf, k) hex.set 1, hdfl, 1
+        rep(hdbf, k) hex.set 2, tcap, hdh
+        rep(hdbf, k) hex.cmp 2, thb, tcap, hdok, hdtl, hdtl
+      hdtl:
+        rep(hdbf, k) hex.set 2, tcap, hdbudget
+        rep(hdbf, k) hex.cmp 2, n_hd, tcap, hdinc, hdld, hdld
+      hdld:
+        rep(hdbf, k) hex.set 1, hdfl, 0
+        rep(hdbf, k) hex.if0 1, hdfl, hdok
+      hdinc:
+        rep(hdbf, k) hex.inc 2, n_hd
+      hdok:
+        // ... and the block base: sp_base2 already carries the -B0 of the packed region,
+        // so the LD index keeps the same base+bucket shape
+        rep(hdbf, k) hex.if1 1, hdfl, hcon
+        rep(hdbf, k) hex.zero w/4, tcon
+        rep(hdbf, k) hex.mov 4, tcon, sp_base2
+        rep(hdbf, k) hex.zero w/4, tidx
+        rep(hdbf, k) hex.mov 2, tidx, tbkt
+        rep(hdbf, k) hex.add w/4, tcon, tidx
+      hcon:
         // the shade row: (light, sprite height) class << 8 | bucket height, one baked byte
         hex.zero w/4, tidx
         hex.mov 2, tidx + 2*dw, sp_lt
@@ -1335,7 +1359,12 @@ ns frame {
         // only the `u*BUCKETS` term belongs in the column loop. `tcon` is that constant, hoisted.
         hex.zero w/4, tblk
         hex.mov 2, tblk, tu
+        rep(hdbf, k) hex.if1 1, hdfl, hmul  // OPTION B: the packed region strides nld
+        rep(hdbf, k) hex.mul_const w/4, tblk, tblk, nld
+        rep(hdbf, k) hex.if0 1, hdfl, hmdone
+      hmul:
         hex.mul_const w/4, tblk, tblk, buckets
+      hmdone:
         hex.add w/4, tblk, tcon
         // ⚠ `tblk` stays the RAW block INDEX -- that is what the slot stores and what the emit
         // shifts. Shifting it here as well double-multiplied the address by the stride AND
@@ -1541,11 +1570,67 @@ ns frame {
       end:
     }
 
-    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale \
+    // OPTION A (dda) -- the step-face frac DDA. rowfrac = centeryfix - wt*scale accumulates
+    // mod 2^32 with NO shift (the mapmul identity step_rows itself relies on), so stepping the
+    // frac by -wt*scalestep per column reproduces the per-column product BIT FOR BIT: this is
+    // pure ops savings, never a pixel change. Setup runs once per face seg (4 bases + 4 steps);
+    // the steps use 8 schoolbook rows because a negative scalestep is dense in two's complement.
+    def ts_dda_setup fscale, fsstep, fwu1, fwu2, fwl1, fwl2, ccy_c, fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2 \
+            @ ccyf, end {
+        hex.set 8, ccyf, ccy_c
+        hex.zero 8, fru1
+        rep(6, j) hex.fixed_mul_lo.row 8, j, fru1, fwu1, fscale
+        hex.neg 8, fru1
+        hex.add 8, fru1, ccyf
+        hex.zero 8, fru2
+        rep(6, j) hex.fixed_mul_lo.row 8, j, fru2, fwu2, fscale
+        hex.neg 8, fru2
+        hex.add 8, fru2, ccyf
+        hex.zero 8, frl1
+        rep(6, j) hex.fixed_mul_lo.row 8, j, frl1, fwl1, fscale
+        hex.neg 8, frl1
+        hex.add 8, frl1, ccyf
+        hex.zero 8, frl2
+        rep(6, j) hex.fixed_mul_lo.row 8, j, frl2, fwl2, fscale
+        hex.neg 8, frl2
+        hex.add 8, frl2, ccyf
+        hex.zero 8, stu1
+        rep(8, j) hex.fixed_mul_lo.row 8, j, stu1, fwu1, fsstep
+        hex.zero 8, stu2
+        rep(8, j) hex.fixed_mul_lo.row 8, j, stu2, fwu2, fsstep
+        hex.zero 8, stl1
+        rep(8, j) hex.fixed_mul_lo.row 8, j, stl1, fwl1, fsstep
+        hex.zero 8, stl2
+        rep(8, j) hex.fixed_mul_lo.row 8, j, stl2, fwl2, fsstep
+        ;end
+      ccyf: hex.vec 8
+      end:
+    }
+
+    // ... the per-column row derivation (frac >> 16 arithmetic, exactly step_rows' epilogue)
+    def ts_dda_rows fra, frb, fA, fB {
+        hex.mov 8, fra, fA
+        hex.shr_hex 8, 4, fra
+        hex.sign_extend 8, 4, fra
+        hex.mov 8, frb, fB
+        hex.shr_hex 8, 4, frb
+        hex.sign_extend 8, 4, frb
+    }
+
+    // ... and the per-column advance (frac -= wt*scalestep, mod 2^32 = the 8-nibble sub)
+    def ts_dda_adv fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2 {
+        hex.sub 8, fru1, stu1
+        hex.sub 8, fru2, stu2
+        hex.sub 8, frl1, stl1
+        hex.sub 8, frl2, stl2
+    }
+
+    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda \
             @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ugo, ust1, ust2, ust3, uclz, \
               ukhi, uhicl, uwr, umark, umark2, lskip, ldo, lgo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
               lmark, lmark2, fmax, \
               fcap, fnorm, fdist, fscale, fsstep, fwu1, fwu2, fwl1, fwl2, fra, frb, fcvh, \
+              fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2, \
               fx, fdb, fdp, fdv, fsb, fsp, fsv, fbb, fbp, fidx, fy1, fy2, end \
             < viewangle, viewz, sgn_aff, x1, x2, n_face, drawn, sfflag, sfslot, \
               seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, \
@@ -1573,6 +1658,7 @@ ns frame {
         hex.sub 4, fwl2, viewz + 4*dw
         hex.sign_extend 8, 4, fwl2
         hex.set 8, fcvh, viewh1
+        rep(dda, k) .ts_dda_setup fscale, fsstep, fwu1, fwu2, fwl1, fwl2, centeryfix_c, fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2
         hex.zero 8, fx
         hex.mov 2, fx, x1
         hex.set w/4, fdb, drawn                 // the occlusion flag, read but never written here
@@ -1605,7 +1691,8 @@ ns frame {
         rep(deg*stack, k) hex.set 8, fy1, dstkscale
         rep(deg*stack, k) hex.cmp 8, fscale, fy1, uskip, ugo, ugo
       ugo:
-        proj.step_rows fra, frb, fscale, fwu1, fwu2, centeryfix_c
+        rep(1-dda, k) proj.step_rows fra, frb, fscale, fwu1, fwu2, centeryfix_c
+        rep(dda, k) .ts_dda_rows fra, frb, fru1, fru2
         hex.dec 8, frb                          // ... ends one row ABOVE the back ceiling
         // V5: a second piece clips past the STORED first piece's end (sentinels included)
         rep(stack, k) .ts_clamp2 fra, fsv, fbp, 0
@@ -1652,7 +1739,8 @@ ns frame {
         rep(deg*stack, k) hex.set 8, fy1, dstkscale
         rep(deg*stack, k) hex.cmp 8, fscale, fy1, lskip, lgo, lgo
       lgo:
-        proj.step_rows fra, frb, fscale, fwl1, fwl2, centeryfix_c
+        rep(1-dda, k) proj.step_rows fra, frb, fscale, fwl1, fwl2, centeryfix_c
+        rep(dda, k) .ts_dda_rows fra, frb, frl1, frl2
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
         rep(stack, k) .ts_clamp2_lo frb, fsv + 1*dw, fbp, 8
         hex.scmp 8, fra, frb, lst1, lst1, lskip
@@ -1689,6 +1777,7 @@ ns frame {
         hex.ptr_add fbp, slotstride
         hex.inc 2, fx
         hex.add 8, fscale, fsstep               // the interpolated scale advances on EVERY column
+        rep(dda, k) .ts_dda_adv fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2
         ;floop
       nofaces:
         ;end
@@ -1705,6 +1794,14 @@ ns frame {
       fra: hex.vec 8
       frb: hex.vec 8
       fcvh: hex.vec 8
+      fru1: hex.vec 8
+      fru2: hex.vec 8
+      frl1: hex.vec 8
+      frl2: hex.vec 8
+      stu1: hex.vec 8
+      stu2: hex.vec 8
+      stl1: hex.vec 8
+      stl2: hex.vec 8
       fx: hex.vec 8
       fdb: hex.vec w/4
       fdp: hex.vec w/4
@@ -1720,7 +1817,7 @@ ns frame {
       end:
     }
 
-    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale \
+    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda \
             @ ret, bok, bstop, wok, wlo, wahi, wbhi, wbok, scan, nolow, dolow, nohigh, dohigh, \
               loop, body, claim, next, pdone, xa, xb, pm1, bcap \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
@@ -1747,7 +1844,7 @@ ns frame {
         // V3: record this boundary's step faces over its FULL column range -- deliberately BEFORE
         // the [pmin, pmax] window clip below, which is an attribution optimisation only: a column
         // outside the unattributed window can still be undrawn, and the oracle records a face there.
-        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale
+        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda
         // Clip the scan to the UNATTRIBUTED WINDOW [pmin, pmax]. Every column below pmin / above
         // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
         // byte: at (-309,636) that is 769 column reads cut to 201, and 37 of the 60 projected segs

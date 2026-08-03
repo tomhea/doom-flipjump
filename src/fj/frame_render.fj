@@ -1206,14 +1206,17 @@ ns frame {
               tcap, vis, dvis, dtx1, dtx2, dtyt, dthp, dtis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
               tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tcon, tidx, tlr, tr0, trl, trw, \
               tsy1, tsy2, tb8, tneg, tcvh, tsofs, tflagv, end \
-            < n_thing, n_mon, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
+            < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
               sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, n_hd, hdfl {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
         // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
         // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
         // budget. ⚠ Failing a budget must NOT set `tstop` -- that latch stops EVERY later thing,
-        // and the other category may still have slots. Only `n_claimed == vieww` latches now, which
-        // is still monotone, so the call-site short-circuit keeps working.
+        // and the other category may still have slots. Only `full` latches now: a sprite records
+        // into columns no WALL has drawn yet, so the correct monotone "nothing can land" signal
+        // is all-columns-WALL-DRAWN -- NOT the plane-attribution counter. The old n_claimed==vieww
+        // stop hid every monster in the room whenever a near marking seg finished the plane claim
+        // before the walk reached them (the owner's (1329,1065) one-step vanish).
         hex.if0 2, sp_mon, tsce
         hex.set 2, tcap, monbudget
         hex.cmp 2, n_mon, tcap, tgo, tret, tret
@@ -1221,7 +1224,7 @@ ns frame {
         hex.set 2, tcap, budget
         hex.cmp 2, n_thing, tcap, tgo, tret, tret
       tgo:
-        hex.cmp 2, n_claimed, vieww, tgo2, tstopset, tgo2   // every column claimed -> nothing left
+        hex.if1 1, full, tstopset               // every column WALL-drawn -> no fragment can land
       tgo2:
         // 25M-CAP GRADUATED ACCEPTANCE: past the SOFT count for this thing's (baked) category the
         // min-size bar rises -- project_thing then rejects on the second baked depth bound

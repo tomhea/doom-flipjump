@@ -1389,6 +1389,11 @@ class ReferenceModel:
         n_face = [0]                  # V3: face-carrying boundaries used, vs STEP_SEG_BUDGET
         n_claimed = 0                                         # ... and its two STOP conditions, both of
         n_ts = 0                                              # which the fj mirrors (see below)
+        n_wdrawn = 0                  # columns closed by a WALL (fj: n_drawn -> the `full` latch).
+                                      # ⚠ NOT n_claimed: plane ATTRIBUTION completes long before
+                                      # the walls do, and a sprite can still record into any
+                                      # column no wall has drawn -- the thing pre-pass stop must
+                                      # use THIS counter (the (1329,1065) one-step vanish bug).
         # V4 THINGS — one write-once SPRITE FRAGMENT per column, `(y0, runs, light_row)`. Recorded
         # during the walk, at the moment it reaches the thing's own subsector, and only into columns
         # no wall has claimed yet: front-to-back order is what makes "the first writer is the
@@ -1423,12 +1428,20 @@ class ReferenceModel:
                     for _t in scene.map_wad.things(scene.mapname)
                     if THING_SPRITE.get(_t.type) is not None}
             _gate = bbox_gate_boxes(scene.cmap, thing_subsectors=_tss)
+        # debug stats (cheap, always on): who reached the thing pre-pass and what stopped it --
+        # the (1329,1065) vanishing-sprites diagnosis needed exactly this visibility
+        self._thing_stats = {"ss_total": len(ss_first), "ss_arrived": 0, "th_arrived": 0,
+                             "th_claim_stopped": 0}
         for seg_i in self.visible_segs(scene.cmap, px, py, bbox_gate=_gate,
                                        va=viewangle & 0xFFFFFFFF):  # front-to-back order
             if things and seg_i in ss_first:
+                self._thing_stats["ss_arrived"] += 1
                 for t in things_by_ss[ss_first[seg_i]]:
-                    if n_claimed == W:
-                        break                            # nothing left to draw into: monotone stop
+                    self._thing_stats["th_arrived"] += 1
+                    if n_wdrawn == W:
+                        self._thing_stats["th_claim_stopped"] += 1
+                        break                            # every column WALL-drawn: no fragment
+                                                         # can land anywhere (monotone stop)
                     # TWO budgets, not one. Slots are handed out in BSP walk-arrival order, which is
                     # NOT distance order (EXP-8a), so a single counter let six 1-pixel bonus dots
                     # spend the frame's budget while 24 monsters were turned away. Both counters are
@@ -1756,6 +1769,7 @@ class ReferenceModel:
                         pclaim[x] = 1
                         n_claimed += 1
                     drawn[x] = 1
+                    n_wdrawn += 1                # fj's n_drawn/full mirror (M13opt-P1 counter)
                 scale = (scale + scalestep) & ANGLE_MASK     # DOOM accumulates rw_scale as a 32-bit Fixed
 
         planes = (ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff)

@@ -441,20 +441,24 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
+    # W1R-ANCHOR: the pattern key is (x + wnoff) with wnoff in [0, 640), so the W1R tables
+    # cover the whole shifted domain (the hash is pure, so this is just more baked entries).
+    _wn_dom = cfg.VIEW_W + 1 + (640 if w1r_flag else 0)
+    _wn_idx = 3 if w1r_flag else 2
     wnoise = (generate_dispatch_table_fj(
-        "wnoise", [rm.wall_noise(x) for x in range(cfg.VIEW_W + 1)],
-        index_nibbles=2, result_nibbles=2) if lines and wall_noise else "")
+        "wnoise", [rm.wall_noise(x) for x in range(_wn_dom)],
+        index_nibbles=_wn_idx, result_nibbles=2) if lines and wall_noise else "")
     # M13-W1R: the randomized-wall walkers, baked from the oracle's own pattern tables (R6).
     w1rpat = (generate_w1r_walls_fj(rm.W1R_TIER_BOUNDS, rm.W1R_PATTERNS)
               if lines and w1r_flag else "")
     # W1R-LOD: the fine (2-px) and coarse (8-px) column-group hashes, dispatch tables like
     # wnoise's -- far tiers mix wnoise2 into their pattern pick, the near tier uses wnoise3.
     wnoise2 = (generate_dispatch_table_fj(
-        "wnoise2", [rm.wall_noise2(x) for x in range(cfg.VIEW_W + 1)],
-        index_nibbles=2, result_nibbles=2) if lines and w1r_flag else "")
+        "wnoise2", [rm.wall_noise2(x) for x in range(_wn_dom)],
+        index_nibbles=_wn_idx, result_nibbles=2) if lines and w1r_flag else "")
     wnoise3 = (generate_dispatch_table_fj(
-        "wnoise3", [rm.wall_noise3(x) for x in range(cfg.VIEW_W + 1)],
-        index_nibbles=2, result_nibbles=2) if lines and w1r_flag else "")
+        "wnoise3", [rm.wall_noise3(x) for x in range(_wn_dom)],
+        index_nibbles=_wn_idx, result_nibbles=2) if lines and w1r_flag else "")
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     slopediv_recip8 = generate_slopediv_recip8_lut_fj("slopediv_recip8")  # M13-coarseslope
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
@@ -1081,6 +1085,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
         "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         "hex.zero 2, n_drawn", "hex.zero 1, full",   # M13opt-P1: reset the drawn-column counter + full flag per frame
+        # W1R-ANCHOR: wnoff = viewangle * 640 columns-per-turn >> 32 = (va*5) >> 25
+        # exactly -- once per frame, ~2k ops. Widened cells keep the 34-bit step exact.
+        *(["hex.zero 10, wnt", "hex.mov 8, wnt, viewangle",
+           "hex.zero 10, wnt2", "hex.mov 8, wnt2, viewangle",
+           "hex.shl_bit 10, wnt", "hex.shl_bit 10, wnt",
+           "hex.add 10, wnt, wnt2",
+           "hex.shr_hex 10, 6, wnt", "hex.shr_bit 10, wnt",
+           "hex.zero 4, wnoff", "hex.mov 4, wnoff, wnt"] if (lines and w1r_flag) else []),
     ]
     if stream or raster:
         # M13pS2-crush2b: per-frame reset of the visplane built-flags (compile-time-unrolled zeroing)
@@ -1732,6 +1744,8 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         "seg_lit2: hex.vec 2",                         # W1R-2C: ... and its SECOND colour byte
         "seg_w1rf: hex.vec 1",                         # W1R-FLAT: this wall stays one flat tone
         "w1rslv: hex.vec 1",                           # 25M-CAP: runtime sliver twin of seg_w1rf
+        "wnoff: hex.vec 4",                            # W1R-ANCHOR: the per-frame column offset
+        "wnt: hex.vec 10", "wnt2: hex.vec 10",         # ... and its widened scratch
         "seg_litf: hex.vec 2",                         # ... and the unbrightened sliver tone
         "gnrow2: hex.vec 2",                           # W1R-LOD: the fine 2-px group key
         "gnrow3: hex.vec 2",                           # ... and the coarse 8-px one

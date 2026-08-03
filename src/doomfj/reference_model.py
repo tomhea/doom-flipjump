@@ -865,31 +865,34 @@ class ReferenceModel:
     # W1R-2C (owner ask): `alt`=1 draws the run over the texture's SECOND representative texel
     # (`_w1r_texel2` -> the baked seg_lit2) -- scattered on ~30% of runs so it reads as embedded
     # stones/panels -- and the run lens are FINER (~2-6 px) than the first cut's 2-9.
+    # W1R-MASONRY (owner pick, 2026-08-03): every group in a tier shares the SAME run-length
+    # sequence, so run boundaries ALIGN horizontally across the wall (mortar lines) and only the
+    # brick shade varies per group -- the pattern reads as coursed masonry instead of static.
+    # Same mechanism, same costs: the tables are compile-time data.
     W1R_PATTERNS = (
-        (   # tier 0, wlen < 6 (farthest): 1-2 px runs -- the smallest texture cells
-            ((1, 14, 0), (2, 17, 1), (1, 15, 0), (2, 12, 0)),
-            ((2, 17, 1), (1, 12, 0), (2, 15, 0), (1, 17, 0)),
-            ((1, 15, 0), (2, 12, 0), (1, 17, 1), (2, 14, 0)),
-            ((2, 16, 0), (1, 12, 1), (2, 14, 0), (1, 17, 0)),
+        (   # tier 0, wlen < 6 (farthest): 1-2 px cells, calm low-contrast
+            ((2, 14, 0), (1, 16, 0)),
+            ((2, 15, 0), (1, 13, 1)),
+            ((2, 13, 0), (1, 15, 0)),
+            ((2, 16, 0), (1, 14, 0)),
         ),
-        (   # tier 1, 6 <= wlen < 16: 1-3 px runs, the darkest spread (far walls)
-            ((2, 9, 0), (1, 15, 1), (3, 11, 0), (2, 17, 0), (1, 12, 0)),
-            ((1, 13, 1), (3, 9, 0), (2, 17, 0), (2, 12, 0), (1, 15, 0)),
-            ((3, 11, 0), (1, 17, 0), (2, 9, 1), (2, 14, 0), (1, 17, 0)),
-            ((2, 15, 0), (1, 10, 0), (2, 17, 1), (3, 12, 0), (1, 9, 0)),
+        (   # tier 1, 6 <= wlen < 16: 2px brick + 1px mortar (row 15), aligned courses
+            ((2, 10, 0), (1, 15, 0), (2, 12, 0), (1, 15, 0)),
+            ((2, 12, 0), (1, 15, 0), (2, 9, 1), (1, 15, 0)),
+            ((2, 13, 0), (1, 15, 0), (2, 11, 0), (1, 15, 0)),
+            ((2, 9, 0), (1, 15, 0), (2, 12, 1), (1, 15, 0)),
         ),
-        (   # tier 2, 16 <= wlen < 40: 2-4 px runs, mid tones (~ the W1 tone on average)
-            ((3, 4, 0), (2, 12, 1), (3, 8, 0), (4, 14, 0), (2, 5, 0), (3, 10, 1)),
-            ((3, 10, 0), (4, 4, 0), (2, 14, 1), (3, 6, 0), (2, 12, 0), (3, 8, 0)),
-            ((4, 6, 0), (2, 13, 0), (3, 4, 1), (2, 10, 0), (3, 14, 0), (2, 7, 1)),
-            ((2, 12, 0), (3, 5, 1), (4, 10, 0), (2, 4, 0), (3, 14, 0), (2, 8, 0)),
+        (   # tier 2, 16 <= wlen < 40: 3px brick + 1px mortar (row 12)
+            ((3, 5, 0), (1, 12, 0), (3, 8, 0), (1, 12, 0)),
+            ((3, 7, 0), (1, 12, 0), (3, 4, 1), (1, 12, 0)),
+            ((3, 9, 0), (1, 12, 0), (3, 6, 0), (1, 12, 0)),
+            ((3, 4, 0), (1, 12, 0), (3, 8, 1), (1, 12, 0)),
         ),
-        (   # tier 3, wlen >= 40 (near): 4-8 px runs, BRIGHTER than the W1 tone on average --
-            # scalelight's stand-in, and the BIGGEST texture cells (8-px groups via gnrow3)
-            ((7, 0, 0), (4, 7, 1), (8, 3, 0), (5, 8, 0), (6, 1, 0), (4, 5, 1), (5, 2, 0)),
-            ((5, 4, 0), (8, 0, 0), (4, 8, 1), (7, 2, 0), (5, 6, 0), (6, 0, 1), (4, 3, 0)),
-            ((8, 1, 0), (5, 6, 1), (6, 0, 0), (4, 8, 0), (7, 3, 0), (5, 7, 1), (4, 2, 0)),
-            ((6, 2, 0), (7, 7, 0), (4, 0, 1), (8, 5, 0), (4, 8, 0), (6, 1, 0), (5, 6, 1)),
+        (   # tier 3, wlen >= 40 (near): 6px brick + 2px mortar (row 8), two courses per cycle
+            ((6, 1, 0), (2, 8, 0), (6, 3, 0), (2, 8, 0)),
+            ((6, 2, 0), (2, 8, 0), (6, 0, 1), (2, 8, 0)),
+            ((6, 4, 0), (2, 8, 0), (6, 1, 0), (2, 8, 0)),
+            ((6, 0, 0), (2, 8, 0), (6, 3, 1), (2, 8, 0)),
         ),
     )
 
@@ -1357,6 +1360,10 @@ class ReferenceModel:
         texcache: dict = {}
 
         viewx, viewy, viewangle = state.x, state.y, state.angle
+        # W1R-ANCHOR: the pattern key is (x + this) -- viewangle * 640 columns-per-turn >> 32
+        # (= *5 >> 25 exactly), so TURNING slides the pattern with the walls instead of
+        # re-rolling it every frame. fj computes the identical value once per frame (wnoff).
+        w1r_xoff = ((viewangle & 0xFFFFFFFF) * 5) >> 25
         px = _signed(state.x, 32) >> 16
         py = _signed(state.y, 32) >> 16
         # the eye z = the player's own sector floor + VIEWHEIGHT
@@ -1714,7 +1721,7 @@ class ReferenceModel:
                             base = colormap[blr][tex[0][0]]
                             base2 = colormap[blr][tex[0][1]]
                             ya = top
-                            for rel, row, alt in self.w1r_runs(bottom + 1 - top, x):
+                            for rel, row, alt in self.w1r_runs(bottom + 1 - top, x + w1r_xoff):
                                 cc = colormap[row][base2 if alt else base]
                                 for y in range(ya, top + rel):
                                     fb[y * cfg.VIEW_W + x] = cc
@@ -1780,7 +1787,7 @@ class ReferenceModel:
                         # (faces have no second texel -- the alt bit is ignored here)
                         base = colormap[max(0, lr - self.W1R_BASE_BRIGHTEN)][STEP_FACE_BASE]
                         ya = y1
-                        for rel, row, _alt in self.w1r_runs(h, x):
+                        for rel, row, _alt in self.w1r_runs(h, x + w1r_xoff):
                             cc = colormap[row][base]
                             for y in range(ya, y1 + rel):
                                 fb[y * cfg.VIEW_W + x] = cc

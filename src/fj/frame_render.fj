@@ -2418,7 +2418,7 @@ ns frame {
             pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift, spremit, \
             ascode, sky_base_id, stack, deg, dslvw \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
-              sl0, sl1, slw, slc, \
+              sl0, sl1, slw, slc, xa, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
               dfull, dchk2, dgchk, dschk, dstchk, dst2, dst3, dst4, dst5, dst6, \
               dsp1, dsp2, dsp3, dsp4, \
@@ -2444,7 +2444,7 @@ ns frame {
               normalangle, rw_distance, scale, scalestep, \
               top, bottom, \
               seg_ret2, \
-              full, n_drawn, vieww, w1rslv {
+              full, n_drawn, vieww, w1rslv, wnoff {
         proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle
         proj.wall_scale_setup_m scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         // ablate "scaletwice" (measurement only): the same setup, same operands, dead outputs. This
@@ -2537,9 +2537,16 @@ ns frame {
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
-        rep(noise, k) wnoise.lookup gnrow, x    // V1: this column's grain row, before the ditto test
-        rep(w1r, k) wnoise2.lookup gnrow2, x    // W1R-LOD: the fine + coarse group keys
-        rep(w1r, k) wnoise3.lookup gnrow3, x
+        // W1R-ANCHOR: the pattern key is (x + wnoff), wnoff = viewangle*640/turn computed
+        // once per frame -- turning slides the masonry WITH the walls instead of
+        // re-rolling it (the flickering-TV fix's temporal half).
+        rep(w1r, k) hex.zero 4, xa
+        rep(w1r, k) hex.mov 2, xa, x
+        rep(w1r, k) hex.add 4, xa, wnoff
+        rep(noise*(1-w1r), k) wnoise.lookup gnrow, x   // V1 grain (non-W1R): unanchored
+        rep(noise*w1r, k) wnoise.lookup gnrow, xa
+        rep(w1r, k) wnoise2.lookup gnrow2, xa   // W1R-LOD: the fine + coarse group keys
+        rep(w1r, k) wnoise3.lookup gnrow3, xa
         hex.if0 1, dvalid, dfull
         hex.cmp 2, cexcl, dct, dfull, dchk2, dfull
       dchk2:
@@ -2746,6 +2753,7 @@ ns frame {
       cw16: hex.vec 2, 16
       slw: hex.vec 2                            // 25M-CAP: the seg's span, for the sliver test
       slc: hex.vec 2                            // ... and the compile-time width bound cell
+      xa: hex.vec 4                             // W1R-ANCHOR: x + wnoff, the shifted key
       stv: hex.vec 2                            // V3: which step-face slots this column holds
       ufl: hex.vec 1                            // V3: draw an upper face in this column?
       uy1: hex.vec 2                            // ... its first row,

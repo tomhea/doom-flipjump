@@ -113,6 +113,7 @@ def build():
     key.update(repr(sorted(FLAGS.items())).encode())
     key.update(repr(sorted(ABL)).encode())
     key.update(repr(sorted(KNOBS.items())).encode())
+    key.update(repr(FLAGS_DEG).encode())   # ⚠ was missing: a --deg and non-deg build collided
     key.update(args.res.encode())
     key.update((args.wad + args.map + args.asset).encode())
     key.update(Path(args.wad).read_bytes())   # ... the wad CONTENT: a regenerated arena.wad

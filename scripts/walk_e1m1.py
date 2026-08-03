@@ -135,38 +135,57 @@ def main():
                          ("steps", feats and not args.no_steps),
                          ("things", want_things)) if f]
 
-    print(f"assembling the fj renderer ({args.map}, lines mode, "
-          f"{args.wall_mode}+{args.floor_mode}"
-          f"{'+two_sided' if args.two_sided else '' if args.no_plane_near else '+plane_near'}"
-          f"{'+' + '+'.join(on) if on else ''}) ...")
-    if want_things:
-        print("  (the sprite bank makes this a ~42M-character program:"
-              " expect ~10 minutes to assemble)", flush=True)
+    # The fjm CACHE (same shape as bench.py's): the emit is ~7 and the assemble ~16 of the ~23
+    # build minutes, and BOTH are a pure function of (sources, flags, wad bytes) -- so a hash of
+    # exactly those names the binary, and a second launch of the same config opens in seconds
+    # instead of regenerating and reassembling a ~104M-character program every time.
+    import hashlib
+    key = hashlib.sha256()
+    for p in SRC + [ROOT / "src/doomfj/wall_renderer.py", ROOT / "src/doomfj/reference_model.py",
+                    ROOT / "src/doomfj/config.py"]:
+        key.update(p.read_bytes())
+    key.update(repr((args.wall_mode, args.floor_mode, args.two_sided, args.no_plane_near,
+                     args.no_grain, args.no_sky, args.no_steps, args.no_stack, want_things,
+                     args.no_deg, args.map)).encode())
+    key.update((ROOT / args.wad).read_bytes())
+    cache = ROOT / "scratchpad" / "fjmcache"
+    cache.mkdir(parents=True, exist_ok=True)
+    fjm = cache / f"w_{key.hexdigest()[:16]}.fjm"
     t0 = time.perf_counter()
-    main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
-                                  floor_mode=args.floor_mode, wall_mode=args.wall_mode,
-                                  raster_mode="lines", two_sided=args.two_sided,
-                                  plane_near=(not args.no_plane_near) and not args.two_sided,
-                                  wall_noise=feats and not args.no_grain,
-                                  sky=feats and not args.no_sky,
-                                  steps=feats and not args.no_steps,
-                                  things=want_things, sprite_wad=spr,
-                                  bbox_cull=True,   # M13-15M: the wedge subtree cull ships
-                                  # V5: stacked boundary pieces + true regions (certified
-                                  # median 15.92M / mean 16.87M on the 260-frame sweep)
-                                  stack_steps=(feats and not args.no_steps
-                                               and not args.no_stack),
-                                  # 25M-CAP: certified median 17.19M / mean 17.57M / worst
-                                  # 42.9M (was 47.4M); >25M frames 57 -> 44 of 260, all
-                                  # byte-exact (b_0ec0c75341332d4e)
-                                  deg=feats and not args.no_deg)
-    tmp = Path(tempfile.mkdtemp())
-    consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
-    (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
-    fjm = tmp / "m.fjm"
-    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], (tmp / "m.fj").resolve()],
-                fjm, memory_width=W, print_time=False)
-    print(f"assembled in {time.perf_counter() - t0:.0f}s -- loading the program", flush=True)
+    if fjm.exists():
+        print(f"cache HIT {fjm.name} -- skipping the ~23 min build", flush=True)
+    else:
+        print(f"assembling the fj renderer ({args.map}, lines mode, "
+              f"{args.wall_mode}+{args.floor_mode}"
+              f"{'+two_sided' if args.two_sided else '' if args.no_plane_near else '+plane_near'}"
+              f"{'+' + '+'.join(on) if on else ''}) ...")
+        if want_things:
+            print("  (the sprite bank makes this a ~104M-character program: expect ~7 min to"
+                  " emit + ~16 min to assemble; the result is CACHED for later launches)",
+                  flush=True)
+        main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
+                                      floor_mode=args.floor_mode, wall_mode=args.wall_mode,
+                                      raster_mode="lines", two_sided=args.two_sided,
+                                      plane_near=(not args.no_plane_near) and not args.two_sided,
+                                      wall_noise=feats and not args.no_grain,
+                                      sky=feats and not args.no_sky,
+                                      steps=feats and not args.no_steps,
+                                      things=want_things, sprite_wad=spr,
+                                      bbox_cull=True,   # M13-15M: the wedge subtree cull ships
+                                      # V5: stacked boundary pieces + true regions
+                                      stack_steps=(feats and not args.no_steps
+                                                   and not args.no_stack),
+                                      # 25M-CAP + OPT-A: certified median 16.51M / mean 17.34M /
+                                      # worst 41.9M, byte-exact (b_8db722bbd480cd52)
+                                      deg=feats and not args.no_deg)
+        print(f"emitted {len(main_txt):,} chars in {time.perf_counter() - t0:.0f}s", flush=True)
+        tmp = Path(tempfile.mkdtemp())
+        consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
+        (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
+        fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], (tmp / "m.fj").resolve()],
+                    fjm, memory_width=W, print_time=False)
+        print(f"built in {time.perf_counter() - t0:.0f}s (cached as {fjm.name})", flush=True)
+    print("loading the program", flush=True)
     runner = FjmRunner(fjm)          # parse + memory-image prep ONCE, not once per frame
     print("engine: " + ("native (C)" if runner.native else
                         "pure-python FALLBACK -- ~14x slower"), flush=True)

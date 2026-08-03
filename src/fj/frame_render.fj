@@ -1628,12 +1628,12 @@ ns frame {
         hex.sub 8, frl2, stl2
     }
 
-    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda \
+    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
             @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ugo, ust1, ust2, ust3, uclz, \
               ukhi, uhicl, uwr, umark, umark2, lskip, ldo, lgo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
               lmark, lmark2, fmax, \
               fcap, fnorm, fdist, fscale, fsstep, fwu1, fwu2, fwl1, fwl2, fra, frb, fcvh, \
-              fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2, \
+              fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2, fmv, ulipn, llipn, udng, ldng, \
               fx, fdb, fdp, fdv, fsb, fsp, fsv, fbb, fbp, fidx, fy1, fy2, end \
             < viewangle, viewz, sgn_aff, x1, x2, n_face, drawn, sfflag, sfslot, \
               seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, \
@@ -1687,6 +1687,14 @@ ns frame {
         hex.if0 1, seg_fmask, uskip             // nibble 0 = has an upper face
         hex.cmp 1, fsv, fmax, udo, uskip, uskip // upper count < 1+stack -> room for a piece
       udo:
+        // V5-DROP FAR GATE: a LIP farther than dlipscale projects to a sub-pixel line
+        // -- skip the whole piece. Risers are never lip-gated (they ARE the stairs).
+        rep(deg, k) hex.mov 1, fmv, seg_fmask
+        rep(deg, k) hex.dec 1, fmv
+        rep(deg, k) hex.if0 1, fmv, udng
+        rep(deg, k) hex.set 8, fy1, dlipscale
+        rep(deg, k) hex.cmp 8, fscale, fy1, uskip, udng, udng
+      udng:
         // 25M-CAP STACK FAR GATE: a SECOND stacked piece only when the boundary is near enough
         // (scale >= dstkscale, one unsigned compare on the register the DDA already carries).
         // fy1 is dead until ust3, so it serves as the constant cell.
@@ -1697,6 +1705,13 @@ ns frame {
         rep(1-dda, k) proj.step_rows fra, frb, fscale, fwu1, fwu2, centeryfix_c
         rep(dda, k) .ts_dda_rows fra, frb, fru1, fru2
         hex.dec 8, frb                          // ... ends one row ABOVE the back ceiling
+        // V5-DROP: mode 2 = LIP -- the near ceiling's edge row ALONE; the stored
+        // region-behind then paints the far ceiling below it (mode 1 keeps the riser)
+        hex.mov 1, fmv, seg_fmask
+        hex.dec 1, fmv
+        hex.if0 1, fmv, ulipn
+        hex.mov 8, frb, fra
+      ulipn:
         // V5: a second piece clips past the STORED first piece's end (sentinels included)
         rep(stack, k) .ts_clamp2 fra, fsv, fbp, 0
         // the slot stores BYTES, so a VISIBLE face is stored clipped; the oracle stores the
@@ -1738,12 +1753,24 @@ ns frame {
         hex.if0 1, seg_fmask + 1*dw, lskip
         hex.cmp 1, fsv + 1*dw, fmax, ldo, lskip, lskip   // lower count < 1+stack -> room
       ldo:
+        rep(deg, k) hex.mov 1, fmv, seg_fmask + 1*dw     // V5-DROP far gate, lower mirror
+        rep(deg, k) hex.dec 1, fmv
+        rep(deg, k) hex.if0 1, fmv, ldng
+        rep(deg, k) hex.set 8, fy1, dlipscale
+        rep(deg, k) hex.cmp 8, fscale, fy1, lskip, ldng, ldng
+      ldng:
         rep(deg*stack, k) hex.if0 1, fsv + 1*dw, lgo      // ... and the LOWER side's mirror
         rep(deg*stack, k) hex.set 8, fy1, dstkscale
         rep(deg*stack, k) hex.cmp 8, fscale, fy1, lskip, lgo, lgo
       lgo:
         rep(1-dda, k) proj.step_rows fra, frb, fscale, fwl1, fwl2, centeryfix_c
         rep(dda, k) .ts_dda_rows fra, frb, frl1, frl2
+        // V5-DROP: mode 2 = LIP -- the near floor's edge row alone (the tread-lip line)
+        hex.mov 1, fmv, seg_fmask + 1*dw
+        hex.dec 1, fmv
+        hex.if0 1, fmv, llipn
+        hex.mov 8, fra, frb
+      llipn:
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
         rep(stack, k) .ts_clamp2_lo frb, fsv + 1*dw, fbp, 8
         hex.scmp 8, fra, frb, lst1, lst1, lskip
@@ -1797,6 +1824,7 @@ ns frame {
       fra: hex.vec 8
       frb: hex.vec 8
       fcvh: hex.vec 8
+      fmv: hex.vec 1
       fru1: hex.vec 8
       fru2: hex.vec 8
       frl1: hex.vec 8
@@ -1820,7 +1848,7 @@ ns frame {
       end:
     }
 
-    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda \
+    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
             @ ret, bok, bstop, wok, wlo, wahi, wbhi, wbok, scan, nolow, dolow, nohigh, dohigh, \
               loop, body, claim, next, pdone, xa, xb, pm1, bcap \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
@@ -1847,7 +1875,7 @@ ns frame {
         // V3: record this boundary's step faces over its FULL column range -- deliberately BEFORE
         // the [pmin, pmax] window clip below, which is an attribution optimisation only: a column
         // outside the unattributed window can still be undrawn, and the oracle records a face there.
-        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda
+        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale
         // Clip the scan to the UNATTRIBUTED WINDOW [pmin, pmax]. Every column below pmin / above
         // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
         // byte: at (-309,636) that is 769 column reads cut to 201, and 37 of the 60 projected segs

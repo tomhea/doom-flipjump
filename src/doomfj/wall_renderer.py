@@ -29,6 +29,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
                                     DEG_SOFT_SCENERY, DEG_MINH2_SCENERY, DEG_SOFT_MON,
                                     DEG_MINH2_MON, DEG_SPRB_MINH, DEG_SLIVER_W,
                                     DEG_STACK_SCALE, DEG_PNEAR, DEG_HD_BUDGET, DEG_DDA_FACES,
+                                    DEG_LIP_SCALE,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER,
@@ -417,7 +418,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     skypid = ""                     # filled below, once the pid map exists
     # V3: the step-face shade bank + the (light, wall-units) class each face-carrying boundary bakes.
     stepcol, step_cls = (_lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs,
-                                          w1r=bool(w1r_flag))
+                                          w1r=bool(w1r_flag), sky=sky)
                          if (lines and steps) else ("", {}))
     # V4: the sprite run-list bank + the shade-row bank, and the per-type block bases the things bake.
     _do_things = lines and things
@@ -789,23 +790,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         # if0 and nothing else, and never pays this block's SET+CLEAR at all.
                         _fsec = rm._seg_sector(lds, sds, secs, seg)
                         _bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
-                        _hu = _fsec.ceil_h > _bsec.ceil_h
-                        _hl = _bsec.floor_h > _fsec.floor_h
+                        # V5-DROP: per-side piece MODES (0 none / 1 riser / 2 lip) from the
+                        # SSOT -- drop-offs and level flat/light changes now carry a 1-row lip
+                        # piece so the far surface's region paints beyond the edge
+                        _um, _lm = rm.v5_side_modes(_fsec, _bsec, sky)
                         _tsq = [f"    stl.fcall seg{si}T_xorby, xb_ret"]
                         _tsu = [f"    stl.fcall seg{si}T_xorby, xb_ret"]
-                        if steps and (_hu or _hl):
+                        if steps and (_um or _lm):
                             _ln = rm.wall_lightnum(_fsec.light, 0)
                             xorby_blocks[si] = xorby_blocks[si] + _seg_xorby_block(f"{si}F", [
                                 ("seg_segangle", 8, seg.angle),
-                                ("seg_fmask", 2, (1 if _hu else 0) | ((1 if _hl else 0) << 4)),
+                                ("seg_fmask", 2, _um | (_lm << 4)),
                                 ("seg_uh1", 4, _fsec.ceil_h & 0xFFFF),
                                 ("seg_uh2", 4, _bsec.ceil_h & 0xFFFF),
                                 ("seg_lh1", 4, _bsec.floor_h & 0xFFFF),
                                 ("seg_lh2", 4, _fsec.floor_h & 0xFFFF),
                                 ("seg_ucls", 2, step_cls.get(
-                                    (_ln, max(1, _fsec.ceil_h - _bsec.ceil_h)), 0) if _hu else 0),
+                                    (_ln, max(1, _fsec.ceil_h - _bsec.ceil_h)), 0) if _um else 0),
                                 ("seg_lcls", 2, step_cls.get(
-                                    (_ln, max(1, _bsec.floor_h - _fsec.floor_h)), 0) if _hl else 0),
+                                    (_ln, max(1, _bsec.floor_h - _fsec.floor_h)), 0) if _lm else 0),
                                 # V5: the boundary's BACK pair id -- the plane region behind a
                                 # stored piece re-derives its band lists from this (lines_pid_ids)
                                 *([("seg_bpid", 2, lines_pid[_plane_keys(_bsec)])]
@@ -1290,7 +1293,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR if deg else PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
               f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
-              f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}"] if plane_near else []),
+              f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"] if plane_near else []),
            *(["thing_leaf:",
               f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
               f"{proj}, {cfg.CENTERX}, "
@@ -1820,7 +1823,7 @@ STEP_SLOT_STRIDE = 16      # V3: bytes per column in `sfslot` -- 6 used, rounded
 STEP_COL_STRIDE = 256      # ... and bytes per light class in `stepcol`, same whole-nibble reason.
 
 
-def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False):
+def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False, sky=False):
     """V3 — the step-face SHADE bank, plus the (lightnum, units) -> class map the segs bake.
 
     A step face is flat-shaded: one palette index for the whole run. But it still takes DOOM's
@@ -1843,9 +1846,12 @@ def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False):
         fsec = rm._seg_sector(lds, sds, secs, seg)
         bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
         ln = rm.wall_lightnum(fsec.light, 0)
-        if fsec.ceil_h > bsec.ceil_h:
+        # V5-DROP: lips (mode 2) collapse to units=1; risers keep their true delta (R6:
+        # exactly the keys the seg bakes below)
+        um, lm = rm.v5_side_modes(fsec, bsec, sky)
+        if um:
             cls_of.setdefault((ln, max(1, fsec.ceil_h - bsec.ceil_h)), len(cls_of))
-        if bsec.floor_h > fsec.floor_h:
+        if lm:
             cls_of.setdefault((ln, max(1, bsec.floor_h - fsec.floor_h)), len(cls_of))
     assert len(cls_of) * STEP_COL_STRIDE <= 0x10000, f"step classes overflow the 4-nibble index: {len(cls_of)}"
     out = [f"// V3 step-face shades: {len(cls_of)} (light, wall-units) classes x "

@@ -162,6 +162,12 @@ DEG_STACK_SCALE = 16384           # the SECOND stacked V5 piece only when the bo
                                   # stairs keep both risers; far doorways show one.
 DEG_PNEAR = 96                    # the marking-seg budget under degrade (128 baseline): the far
                                   # doorways that lose attribution are the least-visible ones
+DEG_LIP_SCALE = 16384             # V5-DROP far gate: LIP pieces (drop-offs / level flat changes)
+                                  # only when the boundary's scale is at least this (16.16:
+                                  # 16384 = tz <~ 320 map units, the stack gate's radius). A
+                                  # farther drop edge projects to a sub-pixel line; skipping it
+                                  # reclaims the lip cost where it cannot be seen. RISERS are
+                                  # never lip-gated (they are the visible stairs). Knob-tunable.
 DEG_HD_BUDGET = 0                 # OPTION B (0 = off): only the first N accepted TALL-bucket
                                   # things keep the V4-HD cap-24 full-res bake; later tall things
                                   # fall back to the cap-12 low-res blocks (a packed LD bank
@@ -897,6 +903,27 @@ class ReferenceModel:
     )
 
     @staticmethod
+    def v5_side_modes(fsec, bsec, sky: bool):
+        """V5-DROP -- what piece each SIDE of a marking boundary places, from ITS OWN banding
+        triple: (upper_mode, lower_mode), 0 = none, 1 = RISER face (the far side is higher --
+        stair risers, lintels: the existing V3/V5 faces), 2 = LIP (the far side is lower or
+        only the flat/light changes): a 1-ROW face at the near surface's edge row. The lip is
+        what makes DROP-OFFS visible -- the region-behind machinery then paints the far flat
+        beyond the edge, so descending stairs show treads and the nukage pool shows from its
+        bank (the owner's green-floor/stairs asks, 2026-08-04). An upper lip between two
+        F_SKY1 ceilings is suppressed (the V2 sky rule: nothing may draw lines in the sky)."""
+        up = ((fsec.ceil_h, fsec.light, fsec.ceil_tex)
+              != (bsec.ceil_h, bsec.light, bsec.ceil_tex))
+        lo = ((fsec.floor_h, fsec.light, fsec.floor_tex)
+              != (bsec.floor_h, bsec.light, bsec.floor_tex))
+        um = 0 if not up else (1 if fsec.ceil_h > bsec.ceil_h else 2)
+        lm = 0 if not lo else (1 if bsec.floor_h > fsec.floor_h else 2)
+        if um == 2 and sky and (fsec.ceil_tex or "").upper() == "F_SKY1" \
+                and (bsec.ceil_tex or "").upper() == "F_SKY1":
+            um = 0
+        return um, lm
+
+    @staticmethod
     def w1r_tier(wlen: int) -> int:
         """The W1R height tier of a `wlen`-pixel wall column (0 = far ... 3 = near)."""
         b = ReferenceModel.W1R_TIER_BOUNDS
@@ -1303,6 +1330,7 @@ class ReferenceModel:
                           steps_out: list | None = None,
                           deg_things: tuple | None = None, deg_sliver: int = 0,
                           deg_stack_scale: int = 0, deg_mark: int = 0,
+                          deg_lip_scale: int = 0,
                           degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -1348,6 +1376,7 @@ class ReferenceModel:
             deg_sliver = deg_sliver or DEG_SLIVER_W
             deg_stack_scale = deg_stack_scale or DEG_STACK_SCALE
             deg_mark = deg_mark or DEG_PNEAR
+            deg_lip_scale = deg_lip_scale or DEG_LIP_SCALE
         b_minh = DEG_SPRB_MINH if degrade else 0
         W, H = cfg.VIEW_W, cfg.VIEW_H
         fb = bytearray(cfg.FB_SIZE)                          # zero-init; visplanes + walls fill every column
@@ -1554,9 +1583,13 @@ class ReferenceModel:
                 # bound is what makes the cost viewpoint-INDEPENDENT: a face-carrying seg pays a
                 # full ~93k wall_scale_setup, and at a heavy viewpoint 128 marking segs would all
                 # otherwise qualify. Measured: only 2 boundaries at spawn have a face at all.
-                has_up = fsec.ceil_h > bsec.ceil_h
-                has_lo = bsec.floor_h > fsec.floor_h
-                face_seg = near_steps and (has_up or has_lo) and n_face[0] < STEP_SEG_BUDGET
+                # V5-DROP: each side's piece MODE (0 none / 1 riser / 2 lip) from its own
+                # banding triple -- drop-offs and level flat/light changes now place a 1-row
+                # lip piece, so the far surface's region paints beyond the edge.
+                um_, lm_ = self.v5_side_modes(fsec, bsec, sky)
+                has_up = um_ == 1
+                has_lo = lm_ == 1
+                face_seg = near_steps and (um_ or lm_) and n_face[0] < STEP_SEG_BUDGET
                 if face_seg:
                     n_face[0] += 1
                     rwn2, rwd2 = self.wall_setup(viewx, viewy, seg, verts)
@@ -1589,8 +1622,8 @@ class ReferenceModel:
                         _fst = [(w * (st2 & ANGLE_MASK)) & 0xFFFFFFFF for w in _w4]
                 for x in range(rng2[0], rng2[1]):
                     if face_seg and not drawn[x] and not (
-                            (not has_up or len(ups[x]) >= n_stack)
-                            and (not has_lo or len(los[x]) >= n_stack)):
+                            (not um_ or len(ups[x]) >= n_stack)
+                            and (not lm_ or len(los[x]) >= n_stack)):
                         sc2m = sc2 & ANGLE_MASK
                         # V5 STORED-VALUE SEMANTICS (the fj slot's exact bytes, R6): a piece is
                         # stored CLIPPED to the screen, with two off-screen SENTINELS -- fully
@@ -1603,16 +1636,22 @@ class ReferenceModel:
                         # near enough to matter (scale = projection/tz, so the compare is one
                         # register fj already holds). Near stairs keep their two risers.
                         stk2 = deg_stack_scale == 0 or sc2m >= deg_stack_scale
-                        if has_up and len(ups[x]) < n_stack and (not ups[x] or stk2):
+                        # V5-DROP far gate: a lip farther than deg_lip_scale is sub-pixel
+                        lip2 = deg_lip_scale == 0 or sc2m >= deg_lip_scale
+                        if um_ and (um_ == 1 or lip2) \
+                                and len(ups[x]) < n_stack and (not ups[x] or stk2):
                             if DEG_DDA_FACES:
                                 t0 = _signed(_fr[0], 32) >> 16
-                                ub = _signed(_fr[1], 32) >> 16
+                                ub = _signed(_fr[1], 32) >> 16 if um_ == 1 else 0
                             else:
                                 t0, _b = self.wall_screen_span(fsec.ceil_h, fsec.ceil_h,
                                                                viewz, sc2m)
-                                _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h,
-                                                               viewz, sc2m)
-                            a, b = t0, ub - 1
+                                _t, ub = (self.wall_screen_span(fsec.ceil_h, bsec.ceil_h,
+                                                                viewz, sc2m)
+                                          if um_ == 1 else (0, 0))
+                            # V5-DROP: a LIP piece is the near ceiling's edge row alone -- the
+                            # region-behind then paints the far ceiling below it
+                            a, b = (t0, ub - 1) if um_ == 1 else (t0, t0)
                             if ups[x]:
                                 # a farther boundary's face clips BELOW the nearer one's stored
                                 # end (DOOM's descending ceilingclip -> the splice stays monotone)
@@ -1622,16 +1661,20 @@ class ReferenceModel:
                                        else (max(a, 0), min(b, Hs)))
                                 ups[x].append((st_[0], st_[1], fsec,
                                                fsec.ceil_h - bsec.ceil_h, bsec))
-                        if has_lo and len(los[x]) < n_stack and (not los[x] or stk2):
+                        if lm_ and (lm_ == 1 or lip2) \
+                                and len(los[x]) < n_stack and (not los[x] or stk2):
                             if DEG_DDA_FACES:
-                                lt = _signed(_fr[2], 32) >> 16
+                                lt = _signed(_fr[2], 32) >> 16 if lm_ == 1 else 0
                                 b0 = _signed(_fr[3], 32) >> 16
                             else:
-                                lt, _b2 = self.wall_screen_span(bsec.floor_h, fsec.floor_h,
-                                                                viewz, sc2m)
+                                lt, _b2 = (self.wall_screen_span(bsec.floor_h, fsec.floor_h,
+                                                                 viewz, sc2m)
+                                           if lm_ == 1 else (0, 0))
                                 _t2, b0 = self.wall_screen_span(fsec.floor_h, fsec.floor_h,
                                                                 viewz, sc2m)
-                            a, b = lt, b0
+                            # V5-DROP: a LIP piece is the near floor's edge row alone (the
+                            # tread-lip line); the region-behind paints the far floor above it
+                            a, b = (lt, b0) if lm_ == 1 else (b0, b0)
                             if los[x]:
                                 # ... and ABOVE the nearer one's stored start (ascending floorclip)
                                 b = min(b, los[x][-1][0] - 1)

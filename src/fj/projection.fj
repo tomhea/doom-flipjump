@@ -1435,11 +1435,12 @@ ns proj {
     //   Cost is ONE `hex.fixed_div` (~38.5k, the dearest primitive here) plus one block-FP
     //   reciprocal and five multiplies — which is why THING_BUDGET exists.
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
-    def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds \
-            @ ok1, oknear, ok2, okd, okx, okx2, okh1, okh2, okv, tvcalc, tvhave, tvset, bad, done, end, \
+    def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg \
+            @ ok1, oknear, ok2, okd, okx, okx2, okh1, okh2, okv, tvcalc, tvhave, tvset, bad, done, end, dghard, \
               trx, try8, ang, sidx, vsin, vcos, gxt, gyt, tz, xsc, txv, atx, tzl, \
               txl, txr, tmp, gz, one16, cminz, cproj, cxf, cyf, cvw, cvh \
-            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax {
+            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, \
+              sp_tzmax2, degfl {
         hex.set 1, vis, 0
         hex.mov 8, trx, sp_x
         hex.sub 8, trx, viewx
@@ -1477,7 +1478,13 @@ ns proj {
         // multiplies and a reciprocal. `sp_tzmax` is that threshold, baked per thing. Verified
         // exhaustively against `_scale_recip_div` over every sprite height: the boundary is exact,
         // no margin needed, so the frame cannot change.
+        // 25M-CAP GRADUATED: past the SOFT count thing_record_body set degfl, and the reject
+        // depth tightens to the second baked bound (sp_tzmax2, scanned for the raised min-size
+        // exactly as sp_tzmax is for the base one). Same compare, different constant.
+        rep(deg, k) hex.if1 1, degfl, dghard
         hex.cmp 8, tz, sp_tzmax, ok1, ok1, bad
+      dghard:
+        rep(deg, k) hex.cmp 8, tz, sp_tzmax2, ok1, ok1, bad
       ok1:
         // tx = trx*sin - try*cos  (DOOM: -(gyt + gxt) with both negated)
         hex.fixed_mul_lo 8, 4, gxt, vsin, trx          // same swap, same reason

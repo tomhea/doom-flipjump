@@ -26,6 +26,9 @@ from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _byte
 from doomfj.reference_model import THING_SPRITE
 from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_FACE_BASE,
                                     SPRITE_HD_H, SPRITE_RUN_CAP_HD,
+                                    DEG_SOFT_SCENERY, DEG_MINH2_SCENERY, DEG_SOFT_MON,
+                                    DEG_MINH2_MON, DEG_SPRB_MINH, DEG_SLIVER_W,
+                                    DEG_STACK_SCALE, DEG_PNEAR,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER,
@@ -103,7 +106,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        plane_near: bool = False, two_sided: bool = False,
                        wall_noise: bool = False, sky: bool = False, steps: bool = False,
                        things: bool = False, sprite_wad=None,
-                       bbox_cull: bool = False, stack_steps: bool = False) -> str:
+                       bbox_cull: bool = False, stack_steps: bool = False,
+                       deg: bool = False) -> str:
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -231,6 +235,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     w2s_flag = 1 if wall_mode == "W2S" else 0   # M13-W2S tier select for the lines leaf
     wpx_flag = 1 if wall_mode == "WPX" else 0   # M13-WPX (1x1 vertical) tier select
     w1r_flag = 1 if wall_mode == "W1R" else 0   # M13-W1R (randomized runs) tier select
+    deg_flag = 1 if deg else 0                  # 25M-CAP: load-adaptive degradation package
     if stream or raster or projm or lines:
         assert wall_mode in ("W1", "W2S", "WPX", "W1R") and floor_mode in ("flat", "FT1"), \
             "the run-stream modes support wall_mode='W1'/'W2S'/'WPX'/'W1R' + floor_mode='flat'/'FT1'"
@@ -711,6 +716,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         ("sp_tzmax", 8, rm.sprite_tz_min_size(
                             _art[4], MIN_SPRITE_H_MONSTER if _t.type in MONSTER_TYPES
                             else MIN_SPRITE_H) & 0xFFFFFFFF),
+                        # 25M-CAP: the RAISED bar's bound, scanned the same way; picked at
+                        # runtime by degfl once the SOFT count fills (graduated acceptance)
+                        *([("sp_tzmax2", 8, rm.sprite_tz_min_size(
+                            _art[4], DEG_MINH2_MON if _t.type in MONSTER_TYPES
+                            else DEG_MINH2_SCENERY) & 0xFFFFFFFF)] if deg else []),
                         # which budget this thing spends -- baked, because the category is a
                         # property of the thing type and never changes at runtime
                         ("sp_mon", 2, 1 if _t.type in MONSTER_TYPES else 0),
@@ -890,6 +900,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                                    flat_wall=tb in w1r_flat_tb)),
                               ("seg_w1rf", 1, 1 if tb in w1r_flat_tb else 0)]
                              if w1r_flag else []),
+                           # 25M-CAP SLIVER: the UNbrightened flat tone. seg_lit carries the
+                           # W1R_BASE_BRIGHTEN headroom (R44) so the pattern can darken from it;
+                           # a sliver drawn flat must use the true W1-tone the oracle draws.
+                           *([("seg_litf", 2, wlit(ssec.light, combined[tb], flat_wall=True))]
+                             if (w1r_flag and deg) else []),
                            # M13-2S rung 3a: the emit half derives both list addresses from the
                            # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
                            # (and the same byte is what this seg writes when it claims a column).
@@ -1257,16 +1272,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"stream.entry_expand_body {cfg.CENTERY}, {LINES_HALF_SLOTS}, "
               f"{2 * WPX_RUN_CAP}, {(cfg.VIEW_H + 1) * 2 * WPX_RUN_CAP}"] if two_sided else []),
            *(["seg_pass1_ts_leaf:",
-              f"frame.seg_pass1_leaf_body_ts {PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
+              f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR if deg else PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
-              f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}"] if plane_near else []),
+              f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
+              f"{DEG_STACK_SCALE}"] if plane_near else []),
            *(["thing_leaf:",
               f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
               f"{proj}, {cfg.CENTERX}, "
               f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
               f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
               f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
-              f"{1 if 'thingtwice' in ablate else 0}"]
+              f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
+              f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}"]
              if _do_things else []),
            "seg_pass2_leaf:",
            (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
@@ -1278,7 +1295,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
             f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
             f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
-            f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}")]
+            f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}, "
+            f"{deg_flag}, {DEG_SLIVER_W}")]
           if lines else
           ["seg_pass1_leaf:",
            f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
@@ -1403,6 +1421,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
            "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
            "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
+           "sp_tzmax2: hex.vec 8",             # 25M-CAP: the raised min-size depth bound
+           "degfl: hex.vec 1", "ballow: hex.vec 1",   # ... and the per-thing runtime flags
            sprbkt, sprlight, sprbank] if _do_things else []),
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                             floor_mode == "FT1")] if (lines and not ascode) else []),
@@ -1704,6 +1724,8 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
         "seg_lit2: hex.vec 2",                         # W1R-2C: ... and its SECOND colour byte
         "seg_w1rf: hex.vec 1",                         # W1R-FLAT: this wall stays one flat tone
+        "w1rslv: hex.vec 1",                           # 25M-CAP: runtime sliver twin of seg_w1rf
+        "seg_litf: hex.vec 2",                         # ... and the unbrightened sliver tone
         "gnrow2: hex.vec 2",                           # W1R-LOD: the fine 2-px group key
         "gnrow3: hex.vec 2",                           # ... and the coarse 8-px one
         # V5: the current column's stacked boundary pieces (GLOBALS so emit_region's windowed

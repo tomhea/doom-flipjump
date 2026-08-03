@@ -1198,15 +1198,16 @@ ns frame {
     // so `tstop` short-circuits every later thing at its call site for one 1-nibble test.
     // Mirrors ReferenceModel.render_wall_frame's things pre-pass EXACTLY.
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, blkshift, \
-            buckets, slotstride, ttwice \
+            buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh \
             @ tgo, tgo2, tsce, tincs, tinced, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
+              tdsc, tdno, tdok, tbno, tbok, \
               tfree, tfree2, tslota, tslotb, tblkok, tnext, \
               tsy1z, tsy1k, tsy1h, tsy2c, tsy2z, tsy2k0, tsy2h, tsy2k, tdraw, \
               tcap, vis, dvis, dtx1, dtx2, dtyt, dthp, dtis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
               tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tcon, tidx, tlr, tr0, trl, trw, \
               tsy1, tsy2, tb8, tneg, tcvh, tsofs, tflagv, end \
             < n_thing, n_mon, n_claimed, vieww, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
-              sp_base, sp_dw, sp_lt, sp_mon, thing_ret {
+              sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
         // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
         // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
@@ -1222,11 +1223,25 @@ ns frame {
       tgo:
         hex.cmp 2, n_claimed, vieww, tgo2, tstopset, tgo2   // every column claimed -> nothing left
       tgo2:
-        proj.project_thing vis, tx1, tx2, tytop, thpx, tistep, minz, projection, centerx, centery, viewwc, viewh, ds
+        // 25M-CAP GRADUATED ACCEPTANCE: past the SOFT count for this thing's (baked) category the
+        // min-size bar rises -- project_thing then rejects on the second baked depth bound
+        // (sp_tzmax2). The walk is front-to-back, so what the raised bar drops is the far tail,
+        // and a light frame never fills SOFT so it renders exactly as before.
+        rep(deg, k) hex.set 1, degfl, 1
+        rep(deg, k) hex.if0 2, sp_mon, tdsc
+        rep(deg, k) hex.set 2, tcap, dsoftm
+        rep(deg, k) hex.cmp 2, n_mon, tcap, tdno, tdok, tdok
+      tdsc:
+        rep(deg, k) hex.set 2, tcap, dsofts
+        rep(deg, k) hex.cmp 2, n_thing, tcap, tdno, tdok, tdok
+      tdno:
+        rep(deg, k) hex.set 1, degfl, 0
+      tdok:
+        proj.project_thing vis, tx1, tx2, tytop, thpx, tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg
         // ablate "thingtwice" (measurement only): the SAME projection, SAME operands, dead
         // outputs. Pricing by ADDING keeps the frame byte-exact -- a stub would price itself
         // plus everything downstream (fj-cost-model, the `noproj` retraction).
-        rep(ttwice, k) proj.project_thing dvis, dtx1, dtx2, dtyt, dthp, dtis, minz, projection, centerx, centery, viewwc, viewh, ds
+        rep(ttwice, k) proj.project_thing dvis, dtx1, dtx2, dtyt, dthp, dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg
         hex.if0 1, vis, tret
         hex.if0 2, sp_mon, tincs                // ... and credit the counter this thing spends
         hex.inc 2, n_mon
@@ -1246,6 +1261,16 @@ ns frame {
         hex.mov 8, ty0, tytop                   // drag its neighbours in as high nibbles.
         hex.add 8, ty0, thpx                    // FEET planted: the bucket moves the sprite's TOP
         hex.sub 8, ty0, thb
+        // 25M-CAP B-GATE, hoisted per thing: slot B only for fragments whose bucket height
+        // reaches sprbminh -- a smaller B fragment sits behind slot A and ~never shows, so the
+        // per-column bank walk it would pay is invisible work. The slot stays OPEN for a later,
+        // taller thing (the oracle's elif does the same).
+        rep(deg, k) hex.set 1, ballow, 1
+        rep(deg, k) hex.set 2, tcap, sprbminh
+        rep(deg, k) hex.cmp 2, thb, tcap, tbno, tbok, tbok
+      tbno:
+        rep(deg, k) hex.set 1, ballow, 0
+      tbok:
         // the shade row: (light, sprite height) class << 8 | bucket height, one baked byte
         hex.zero w/4, tidx
         hex.mov 2, tidx + 2*dw, sp_lt
@@ -1294,8 +1319,9 @@ ns frame {
         // else both slots are spent and this thing is hidden here. Walk-arrival order makes
         // A the nearer fragment and B the one behind it, exactly like the oracle's sfrag2.
         hex.dec 2, tfv
-        hex.if0 2, tfv, tslotb
-        ;tnext
+        hex.if1 2, tfv, tnext                   // both slots spent -> the thing is hidden here
+        rep(deg, k) hex.if0 1, ballow, tnext    // 25M-CAP: B only for tall-enough fragments
+        ;tslotb
       tslota:
         hex.set w/4, tsofs, 0
         hex.set 2, tflagv, 1
@@ -1515,9 +1541,9 @@ ns frame {
       end:
     }
 
-    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack \
-            @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ust1, ust2, ust3, uclz, \
-              ukhi, uhicl, uwr, umark, umark2, lskip, ldo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
+    def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale \
+            @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ugo, ust1, ust2, ust3, uclz, \
+              ukhi, uhicl, uwr, umark, umark2, lskip, ldo, lgo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
               lmark, lmark2, fmax, \
               fcap, fnorm, fdist, fscale, fsstep, fwu1, fwu2, fwl1, fwl2, fra, frb, fcvh, \
               fx, fdb, fdp, fdv, fsb, fsp, fsv, fbb, fbp, fidx, fy1, fy2, end \
@@ -1572,6 +1598,13 @@ ns frame {
         hex.if0 1, seg_fmask, uskip             // nibble 0 = has an upper face
         hex.cmp 1, fsv, fmax, udo, uskip, uskip // upper count < 1+stack -> room for a piece
       udo:
+        // 25M-CAP STACK FAR GATE: a SECOND stacked piece only when the boundary is near enough
+        // (scale >= dstkscale, one unsigned compare on the register the DDA already carries).
+        // fy1 is dead until ust3, so it serves as the constant cell.
+        rep(deg*stack, k) hex.if0 1, fsv, ugo             // the FIRST piece is never gated
+        rep(deg*stack, k) hex.set 8, fy1, dstkscale
+        rep(deg*stack, k) hex.cmp 8, fscale, fy1, uskip, ugo, ugo
+      ugo:
         proj.step_rows fra, frb, fscale, fwu1, fwu2, centeryfix_c
         hex.dec 8, frb                          // ... ends one row ABOVE the back ceiling
         // V5: a second piece clips past the STORED first piece's end (sentinels included)
@@ -1615,6 +1648,10 @@ ns frame {
         hex.if0 1, seg_fmask + 1*dw, lskip
         hex.cmp 1, fsv + 1*dw, fmax, ldo, lskip, lskip   // lower count < 1+stack -> room
       ldo:
+        rep(deg*stack, k) hex.if0 1, fsv + 1*dw, lgo      // ... and the LOWER side's mirror
+        rep(deg*stack, k) hex.set 8, fy1, dstkscale
+        rep(deg*stack, k) hex.cmp 8, fscale, fy1, lskip, lgo, lgo
+      lgo:
         proj.step_rows fra, frb, fscale, fwl1, fwl2, centeryfix_c
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
         rep(stack, k) .ts_clamp2_lo frb, fsv + 1*dw, fbp, 8
@@ -1683,7 +1720,7 @@ ns frame {
       end:
     }
 
-    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride, stack \
+    def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale \
             @ ret, bok, bstop, wok, wlo, wahi, wbhi, wbok, scan, nolow, dolow, nohigh, dohigh, \
               loop, body, claim, next, pdone, xa, xb, pm1, bcap \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
@@ -1710,7 +1747,7 @@ ns frame {
         // V3: record this boundary's step faces over its FULL column range -- deliberately BEFORE
         // the [pmin, pmax] window clip below, which is an attribution optimisation only: a column
         // outside the unattributed window can still be undrawn, and the oracle records a face there.
-        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride, stack
+        rep(steps, k) .ts_step_faces sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale
         // Clip the scan to the UNATTRIBUTED WINDOW [pmin, pmax]. Every column below pmin / above
         // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
         // byte: at (-309,636) that is 769 column reads cut to 201, and 37 of the 60 projected segs
@@ -2282,8 +2319,9 @@ ns frame {
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, w1r, wpxstride, \
             pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift, spremit, \
-            ascode, sky_base_id, stack \
+            ascode, sky_base_id, stack, deg, dslvw \
             @ loop, body, notdrawn, skipcol, ret, one, cge, cdone, fneg, fdone, cVH, cexcl, \
+              sl0, sl1, slw, slc, \
               fstart, cbufa, cbufd, fbufa, fbufd, sfull, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
               dfull, dchk2, dgchk, dschk, dstchk, dst2, dst3, dst4, dst5, dst6, \
               dsp1, dsp2, dsp3, dsp4, \
@@ -2309,13 +2347,25 @@ ns frame {
               normalangle, rw_distance, scale, scalestep, \
               top, bottom, \
               seg_ret2, \
-              full, n_drawn, vieww {
+              full, n_drawn, vieww, w1rslv {
         proj.wall_setup_sgn normalangle, rw_distance, sgn_aff, seg_segangle
         proj.wall_scale_setup_m scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, projection
         // ablate "scaletwice" (measurement only): the same setup, same operands, dead outputs. This
         // is what rung 3c's step faces must pay for each marking seg they decorate, so it is THE
         // number that sets STEP_SEG_BUDGET. Frame stays byte-exact (asserted by the probe).
         rep(stwice, k) proj.wall_scale_setup_m dscale, dsstep, viewangle, normalangle, rw_distance, x1, x2, projection
+        // 25M-CAP SLIVER: a wall whose whole span is <= dslvw columns renders FLAT -- the runtime
+        // twin of the baked seg_w1rf flag (w1rslv, tested at both wall dispatch sites). A 1-2
+        // column horizon sliver carries no readable texture; the heavy skyline frames have
+        // dozens. Ditto-safe: dvalid resets per seg, so a ditto never crosses into this seg.
+        rep(deg*w1r, k) hex.set 1, w1rslv, 0
+        rep(deg*w1r, k) hex.mov 2, slw, x2
+        rep(deg*w1r, k) hex.sub 2, slw, x1
+        rep(deg*w1r, k) hex.set 2, slc, dslvw
+        rep(deg*w1r, k) hex.cmp 2, slw, slc, sl1, sl1, sl0
+      sl1:
+        rep(deg*w1r, k) hex.set 1, w1rslv, 1
+      sl0:
         // M13-paramhoist: the map-unit world heights, once per seg (the per-column subtracts and
         // the 12-nibble fixed_mul width both die; see proj.column_params_m).
         hex.mov 4, wtc8, ceilfix + 4*dw
@@ -2522,7 +2572,7 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, seg_lit, seg_lit2, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, deg, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, seg_lit, seg_lit2, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
         hex.mov 2, duy1, uy1                    // V3: the face signature, unconditional (same
@@ -2597,6 +2647,8 @@ ns frame {
       dgn3: hex.vec 2
       dwl: hex.vec 2                            // ... and the ditto-gate's wlen scratch
       cw16: hex.vec 2, 16
+      slw: hex.vec 2                            // 25M-CAP: the seg's span, for the sliver test
+      slc: hex.vec 2                            // ... and the compile-time width bound cell
       stv: hex.vec 2                            // V3: which step-face slots this column holds
       ufl: hex.vec 1                            // V3: draw an upper face in this column?
       uy1: hex.vec 2                            // ... its first row,

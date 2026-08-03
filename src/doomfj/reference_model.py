@@ -144,6 +144,25 @@ THING_BUDGET = 255                # V4: things PROJECTED per frame. Each pays ~4
                                   # Was 16 (EXP-8); RETIRED as a count limit 2026-08-01 -- see
                                   # MONSTER_BUDGET above. Distance, not arrival order, decides.
 
+# ── 25M-CAP (owner, 2026-08-03): load-adaptive degradation. Light frames render identically;
+# once a frame is already heavy (the SOFT counters below have filled) the importance bar rises,
+# so the frames in the sweep tail shed their least-visible work. All thresholds are ONE compare
+# against a register/constant fj also holds -- exact-mirrorable, R6.
+DEG_SOFT_SCENERY = 8              # after this many accepted scenery things, scenery must project...
+DEG_MINH2_SCENERY = 12            # ...at least this many rows (baseline MIN_SPRITE_H = 3)
+DEG_SOFT_MON = 8                  # monsters keep their own, looser pair (the owner's policy:
+DEG_MINH2_MON = 6                 # the things that shoot back thin LAST)
+DEG_SPRB_MINH = 32                # slot-B (behind-sprite) fragments only for things at least this
+                                  # tall on screen -- B slots under small/far overlaps are almost
+                                  # always occluded by slot A (measured px-diff ~0)
+DEG_SLIVER_W = 2                  # a wall whose whole projected span is <= this many columns
+                                  # renders flat (no W1R pattern): 1-2 col horizon slivers
+DEG_STACK_SCALE = 16384           # the SECOND stacked V5 piece only when the boundary's scale is
+                                  # at least this (16.16: 16384 = tz <~ 320 map units). Near
+                                  # stairs keep both risers; far doorways show one.
+DEG_PNEAR = 96                    # the marking-seg budget under degrade (128 baseline): the far
+                                  # doorways that lose attribution are the least-visible ones
+
 
 def sprite_bucket(h: int, view_h: int) -> int:
     """Which baked height bucket a sprite `h` screen pixels tall renders at."""
@@ -1266,7 +1285,10 @@ class ReferenceModel:
                           near_steps: bool = False, things: bool = False,
                           sprite_wad=None, things_out: list | None = None,
                           bbox_cull: bool = False, stack_steps: bool = False,
-                          steps_out: list | None = None) -> bytes:
+                          steps_out: list | None = None,
+                          deg_things: tuple | None = None, deg_sliver: int = 0,
+                          deg_stack_scale: int = 0, deg_mark: int = 0,
+                          degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
         each seg: `wall_x_range` (skip culled) -> `wall_setup`/`_wall_offset` -> DOOM's scale INTERPOLATION
@@ -1303,6 +1325,15 @@ class ReferenceModel:
         Returns W*H packed palette-index bytes (row-major, D3); the fj renderer reproduces this
         bit-exactly (D12)."""
         cfg = self.cfg
+        # 25M-CAP: `degrade=True` turns on the whole certified adaptive-degradation package;
+        # the individual deg_* kwargs stay as research overrides (any explicit value wins).
+        if degrade:
+            deg_things = deg_things or (DEG_SOFT_SCENERY, DEG_MINH2_SCENERY,
+                                        DEG_SOFT_MON, DEG_MINH2_MON)
+            deg_sliver = deg_sliver or DEG_SLIVER_W
+            deg_stack_scale = deg_stack_scale or DEG_STACK_SCALE
+            deg_mark = deg_mark or DEG_PNEAR
+        b_minh = DEG_SPRB_MINH if degrade else 0
         W, H = cfg.VIEW_W, cfg.VIEW_H
         fb = bytearray(cfg.FB_SIZE)                          # zero-init; visplanes + walls fill every column
         colormap = scene.asset_wad.colormap()
@@ -1390,9 +1421,20 @@ class ReferenceModel:
                         continue
                     tss = scene.cmap.subsectors[ss_first[seg_i]]
                     tsec = self._seg_sector(lds, sds, secs, scene.cmap.segs[tss.firstseg])
+                    # 25M-CAP GRADUATED ACCEPTANCE: once the frame has accepted its first
+                    # (nearest -- the walk is front-to-back) SOFT things of a category, the
+                    # min-size bar rises, so far specks stop paying the record loop exactly on
+                    # the frames that are already heavy. Light frames never reach SOFT and keep
+                    # every speck. Monsters keep their own (looser) pair, per the owner's policy.
+                    minh_ = MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H
+                    if deg_things is not None:
+                        soft_s, minh2_s, soft_m, minh2_m = deg_things
+                        if mon and n_mon >= soft_m:
+                            minh_ = minh2_m
+                        elif not mon and n_thing >= soft_s:
+                            minh_ = minh2_s
                     pr = self.project_thing(viewx, viewy, viewangle, viewz,
-                                            t.x, t.y, tsec.floor_h, art,
-                                            MIN_SPRITE_H_MONSTER if mon else MIN_SPRITE_H)
+                                            t.x, t.y, tsec.floor_h, art, minh_)
                     if pr is None:
                         continue
                     if mon:
@@ -1423,7 +1465,11 @@ class ReferenceModel:
                         # its head to a potion's columns).
                         if sfrag[x] is None:
                             sfrag[x] = (ytop_b + st[0], st[1], lr)
-                        else:
+                        elif not b_minh or hb >= b_minh:
+                            # 25M-CAP B-GATE: slot B only for fragments tall enough to plausibly
+                            # show through slot A's gaps; a small/far B fragment is ~always
+                            # occluded. The slot stays OPEN, so a later (taller) thing may claim
+                            # it -- fj tests the same baked bucket height before its bank walk.
                             sfrag2[x] = (ytop_b + st[0], st[1], lr)
             seg = scene.cmap.segs[seg_i]
             ld = lds[seg.linedef]
@@ -1450,7 +1496,7 @@ class ReferenceModel:
                 # attributed, or the per-frame seg BUDGET spent. The budget is what bounds the cost
                 # when part of the view is open sky/void so the first condition never fires --
                 # see config.PNEAR_SEG_BUDGET.
-                if n_claimed == cfg.VIEW_W or n_ts >= PNEAR_SEG_BUDGET:
+                if n_claimed == cfg.VIEW_W or n_ts >= (deg_mark or PNEAR_SEG_BUDGET):
                     continue
                 n_ts += 1
                 rng2 = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
@@ -1500,7 +1546,11 @@ class ReferenceModel:
                         # clamp reads the STORED previous value, sentinel included, so oracle
                         # and fj can never disagree about a clamped piece.
                         Hs = cfg.VIEW_H - 1
-                        if has_up and len(ups[x]) < n_stack:
+                        # 25M-CAP STACK FAR GATE: the SECOND stacked piece only for boundaries
+                        # near enough to matter (scale = projection/tz, so the compare is one
+                        # register fj already holds). Near stairs keep their two risers.
+                        stk2 = deg_stack_scale == 0 or sc2m >= deg_stack_scale
+                        if has_up and len(ups[x]) < n_stack and (not ups[x] or stk2):
                             t0, _b = self.wall_screen_span(fsec.ceil_h, fsec.ceil_h, viewz, sc2m)
                             _t, ub = self.wall_screen_span(fsec.ceil_h, bsec.ceil_h, viewz, sc2m)
                             a, b = t0, ub - 1
@@ -1513,7 +1563,7 @@ class ReferenceModel:
                                        else (max(a, 0), min(b, Hs)))
                                 ups[x].append((st_[0], st_[1], fsec,
                                                fsec.ceil_h - bsec.ceil_h, bsec))
-                        if has_lo and len(los[x]) < n_stack:
+                        if has_lo and len(los[x]) < n_stack and (not los[x] or stk2):
                             lt, _b2 = self.wall_screen_span(bsec.floor_h, fsec.floor_h, viewz, sc2m)
                             _t2, b0 = self.wall_screen_span(fsec.floor_h, fsec.floor_h, viewz, sc2m)
                             a, b = lt, b0
@@ -1603,7 +1653,11 @@ class ReferenceModel:
                         # W1R-FLAT (owner): walls that are FLAT in the best scenario stay flat
                         # -- no texture at all, or a SKY-textured wall (smooth clouds). They
                         # render one UNbrightened W1 tone (fj: the seg's baked seg_w1rf flag).
-                        if tex is None or (sd.middle or "").upper().startswith("SKY"):
+                        # 25M-CAP SLIVER FLAT: a wall whose whole projected span is <= deg_sliver
+                        # columns renders the flat tone -- a 1-2 column sliver at the horizon
+                        # carries no readable texture anyway, and the heavy frames have dozens.
+                        if (tex is None or (sd.middle or "").upper().startswith("SKY")
+                                or (deg_sliver and x2 - x1 <= deg_sliver)):
                             cc = (flat_fill if tex is None
                                   else colormap[light_row][tex[0][0]])
                             for y in range(top, bottom + 1):

@@ -87,6 +87,11 @@ def main():
                          " floor/ceiling regions (stairs collapse to a single riser again)")
     ap.add_argument("--no-things", action="store_true",
                     help="V4 OFF: no thing sprites")
+    ap.add_argument("--no-deg", action="store_true",
+                    help="25M-CAP OFF: disable the load-adaptive degradation package (graduated"
+                         " far-thing acceptance, behind-sprite B-gate, sliver-flat walls, far"
+                         " stacked-piece gate, marking budget 96). Light frames render the same"
+                         " either way; degradation only sheds far detail on already-heavy frames.")
     ap.add_argument("--sprites", default="assets/freedoom1.wad", metavar="WAD",
                     help="wad to take SPRITE art from. The cut-down test fixture has no sprite"
                          " lumps at all, so things need a full wad here; if it is missing, V4"
@@ -150,7 +155,11 @@ def main():
                                   # V5: stacked boundary pieces + true regions (certified
                                   # median 15.92M / mean 16.87M on the 260-frame sweep)
                                   stack_steps=(feats and not args.no_steps
-                                               and not args.no_stack))
+                                               and not args.no_stack),
+                                  # 25M-CAP: certified median 17.19M / mean 17.57M / worst
+                                  # 42.9M (was 47.4M); >25M frames 57 -> 44 of 260, all
+                                  # byte-exact (b_0ec0c75341332d4e)
+                                  deg=feats and not args.no_deg)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")

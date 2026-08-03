@@ -47,6 +47,9 @@ ap.add_argument("--off", action="append", default=[],
                 choices=["grain", "sky", "steps", "things", "plane_near", "bboxcull"])
 ap.add_argument("--stack", action="store_true",
                 help="V5: stacked boundary pieces + per-boundary plane regions")
+ap.add_argument("--deg", action="store_true",
+                help="25M-CAP: the load-adaptive degradation package (graduated things, B-gate, "
+                     "sliver-flat, stack far gate, PNEAR 96)")
 ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX", "W1R"],
                 help="wall tier: WPX = 1x1 texels, W1 = flat-lit walls (the 15M ladder), "
                      "W1R = W1 + randomized runs (M13-W1R)")
@@ -99,6 +102,7 @@ FLAGS = dict(floor_mode="FT1", wall_mode=args.wall_mode, raster_mode="lines",
              wall_noise="grain" not in args.off, sky="sky" not in args.off,
              steps="steps" not in args.off, things="things" not in args.off,
              bbox_cull="bboxcull" not in args.off, stack_steps=args.stack)
+FLAGS_DEG = args.deg
 
 
 def build():
@@ -122,7 +126,7 @@ def build():
         return fjm
     t0 = time.time()
     main = WR.emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
-                                 sprite_wad=art if FLAGS["things"] else None, ablate=ABL, **FLAGS)
+                                 sprite_wad=art if FLAGS["things"] else None, ablate=ABL, deg=FLAGS_DEG, **FLAGS)
     print(f"emitted {len(main):,} chars ({time.time() - t0:.0f}s)", flush=True)
     consts = cfg.emit_fj_consts(cache / "fj_consts.fj")
     mp = cache / f"b_{tag}.fj"
@@ -142,7 +146,7 @@ if not ABL:                                    # an ablated frame is deliberatel
                                        wall_noise=FLAGS["wall_noise"], sky=FLAGS["sky"],
                                        near_steps=FLAGS["steps"], things=FLAGS["things"],
                                        sprite_wad=art, bbox_cull=FLAGS["bbox_cull"],
-                                       stack_steps=FLAGS["stack_steps"]))
+                                       stack_steps=FLAGS["stack_steps"], degrade=FLAGS_DEG))
             for vx, vy, va, _ in VPS]
 
 label = args.tag or (" ".join(f"-{o}" for o in args.off) + " " +

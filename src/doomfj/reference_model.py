@@ -102,6 +102,10 @@ SPRITE_HEIGHT_BUCKETS = 32        # V4: on-screen heights the sprite bank bakes 
                                   # of quantisation on a full-height sprite and 1/3 the bank.
 SPRITE_MINZ = 4 << 16             # DOOM's MINZ: nearer than this the projection blows up
 SPRITE_RUN_CAP = 12               # colour runs per baked sprite column (as WPX_RUN_CAP is for walls)
+SPRITE_HD_H = 40                  # V4-HD: buckets at least this tall bake from FULL-RES art with
+SPRITE_RUN_CAP_HD = 24            # a deeper run cap -- near sprites were visibly blocky at cap 12
+                                  # over 2x-downscaled texels (the owner's "closer sprites seem
+                                  # very pixelated"). Vertical only: u stays downscaled.
 MIN_SPRITE_H = 3                  # V4: a SCENERY sprite shorter than this on screen is not drawn.
                                   # EXP-7 rejects the depth past which a sprite projects to ZERO
                                   # rows; this is the same one compare with a bigger constant, and
@@ -994,7 +998,17 @@ class ReferenceModel:
                 if 0 <= v < pic.height:
                     dense[v] = t
             cols.append([dense[min(pic.height - 1, v * ds)] for v in range(dh)])
-        cache[kind] = (cols, dh, dw, pic.width, pic.height, pic.leftoffset, pic.topoffset)
+        # V4-HD: the SAME columns at FULL vertical resolution (u stays downscaled) -- the
+        # near height buckets sample these so close sprites keep the art's real detail
+        fcols = []
+        for u in range(dw):
+            dense = [-1] * pic.height
+            for (v, t_) in pic.columns[min(pic.width - 1, u * ds)]:
+                if 0 <= v < pic.height:
+                    dense[v] = t_
+            fcols.append(dense)
+        cache[kind] = (cols, dh, dw, pic.width, pic.height, pic.leftoffset, pic.topoffset,
+                       fcols, pic.height)
         return cache[kind]
 
     @staticmethod
@@ -1051,7 +1065,7 @@ class ReferenceModel:
         rotated coordinates `tz` (depth) and `tx` (lateral) from one cos/sin pair and four
         FixedMuls, then ONE FixedDiv for the scale."""
         cfg = self.cfg
-        _cols, dh, _dw, wpx, wph, left, top = art
+        _cols, dh, _dw, wpx, wph, left, top = art[:7]
         tr_x = _signed((tx_map << 16) - viewx, 32)
         tr_y = _signed((ty_map << 16) - viewy, 32)
         vcos, vsin = self.read_cos(viewangle), self.read_sin(viewangle)
@@ -1396,7 +1410,10 @@ class ReferenceModel:
                         frac += istep
                         if drawn[x] or sfrag2[x] is not None:
                             continue                     # V4b: both fragment slots spent
-                        st = self.sprite_strip(art[0][u], art[1], hb)
+                        # V4-HD: tall buckets sample the full-res column with the deeper cap
+                        st = (self.sprite_strip(art[7][u], art[8], hb, cap=SPRITE_RUN_CAP_HD)
+                              if hb >= SPRITE_HD_H else
+                              self.sprite_strip(art[0][u], art[1], hb))
                         if st is None:
                             continue
                         # V4b: TWO write-once fragment slots per column, filled in walk-arrival

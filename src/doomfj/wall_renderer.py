@@ -25,6 +25,7 @@ from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _byte
                                 NF_SUBSECTOR, seg_affine_coeffs, bbox_gate_boxes)
 from doomfj.reference_model import THING_SPRITE
 from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_FACE_BASE,
+                                    SPRITE_HD_H, SPRITE_RUN_CAP_HD,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER,
@@ -1263,6 +1264,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
               f"{proj}, {cfg.CENTERX}, "
               f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
+              f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
               f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
               f"{1 if 'thingtwice' in ablate else 0}"]
              if _do_things else []),
@@ -1819,7 +1821,9 @@ def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False):
     return NLJ.join(out) + NLJ, cls_of
 
 
-SPR_BLOCK_STRIDE = 32      # V4: dw per baked sprite-column block -- [n][ (rel,texel) x <=cap ] with
+SPR_BLOCK_STRIDE = 64      # V4-HD: cap 24 needs 3+48 bytes -- was 32 at cap 12. Power of two so
+                           # the record/emit shifts stay bit-shifts (blkshift derives from this).
+                           # V4: dw per baked sprite-column block -- [n][ (rel,texel) x <=cap ] with
                            # SPRITE_RUN_CAP = 12 needs 25, and a POWER OF TWO stride turns the block
                            # index into a shl_bit instead of a mul_const.
 SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot` (7 used: y0 is TWO bytes,
@@ -1855,11 +1859,15 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
            f"height bucket), stride {SPR_BLOCK_STRIDE} dw", "sprbank:"]
     base_of, dw_of, blk = {}, {}, 0
     for kind in kinds:
-        cols, dh, dwid, _wpx, _wph, _left, _top = rm.sprite_art(sprite_wad, kind, cache)
+        art = rm.sprite_art(sprite_wad, kind, cache)
+        cols, dh, dwid, fcols, fdh = art[0], art[1], art[2], art[7], art[8]
         base_of[kind], dw_of[kind] = blk, dwid
         for u in range(dwid):
             for b in range(SPRITE_HEIGHT_BUCKETS):
-                st = rm.sprite_strip(cols[u], dh, sprite_bucket_height(b, cfg.VIEW_H))
+                hb_ = sprite_bucket_height(b, cfg.VIEW_H)
+                # V4-HD: tall buckets bake from the FULL-RES column, deeper cap (R6 mirror)
+                st = (rm.sprite_strip(fcols[u], fdh, hb_, cap=SPRITE_RUN_CAP_HD)
+                      if hb_ >= SPRITE_HD_H else rm.sprite_strip(cols[u], dh, hb_))
                 body = [0, 0, 0] if st is None else (
                     [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
                 assert len(body) <= SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"

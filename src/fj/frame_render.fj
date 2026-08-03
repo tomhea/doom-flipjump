@@ -1197,7 +1197,7 @@ ns frame {
     // thing, which is what THING_BUDGET bounds. Both of the oracle's stop conditions are monotone,
     // so `tstop` short-circuits every later thing at its call site for one 1-nibble test.
     // Mirrors ReferenceModel.render_wall_frame's things pre-pass EXACTLY.
-    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, \
+    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, blkshift, \
             buckets, slotstride, ttwice \
             @ tgo, tgo2, tsce, tincs, tinced, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
               tfree, tfree2, tslota, tslotb, tblkok, tnext, \
@@ -1316,7 +1316,7 @@ ns frame {
         // overflowed the slot's 4 nibbles, which read back as an all-zero block header and made
         // every column skip: the frame then differed from the oracle by EXACTLY its sprite pixels.
         hex.mov w/4, tbo, tblk
-        rep(5, k) hex.shl_bit w/4, tbo          // x SPR_BLOCK_STRIDE (32 dw), a power of two
+        rep(blkshift, k) hex.shl_bit w/4, tbo   // x SPR_BLOCK_STRIDE dw (a power of two)
         hex.set w/4, tbb, sprbank
         hex.ptr_index tbp, tbb, tbo
         hex.read_byte tr0, tbp                  // the block HEADER: first row, last row

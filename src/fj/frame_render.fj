@@ -2297,12 +2297,14 @@ ns frame {
               ducnt, du1y1, du1y2, du1cls, du1bp, du2y1, du2y2, du2cls, du2bp, \
               dlcnt, dl1y1, dl1y2, dl1cls, dl1bp, dl2y1, dl2y2, dl2cls, dl2bp, \
               dvc2, dvup, dvu2, dvu3, dvu4, dvu5, dvu6, dvu7, dvu8, dvu9, dvlo, \
-              dvl2, dvl3, dvl4, dvl5, dvl6, dvl7, dvl8, dvl9 \
+              dvl2, dvl3, dvl4, dvl5, dvl6, dvl7, dvl8, dvl9, \
+              dg3c, dg2g, dgfc, dgf2, dgf3, dgf4, dg2c, dgn2, dgn3, dwl, cw16 \
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
               seg_lit, seg_lit2, seg_wstrip, wstripbase, \
               ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
               lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, \
+              gnrow2, gnrow3, \
               x1, x2, x, dbase, dptr, dval8, pval8, \
               normalangle, rw_distance, scale, scalestep, \
               top, bottom, \
@@ -2389,6 +2391,8 @@ ns frame {
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
         rep(noise, k) wnoise.lookup gnrow, x    // V1: this column's grain row, before the ditto test
+        rep(w1r, k) wnoise2.lookup gnrow2, x    // W1R-LOD: the fine + coarse group keys
+        rep(w1r, k) wnoise3.lookup gnrow3, x
         hex.if0 1, dvalid, dfull
         hex.cmp 2, cexcl, dct, dfull, dchk2, dfull
       dchk2:
@@ -2400,7 +2404,31 @@ ns frame {
         // fix: the first differing pixel sat at column 12 and at column 144, both x = 0 (mod 4).
         // ⚠ EVERY feature that changes a column's CONTENT without changing its CLIP ROWS must join
         // this chain -- that includes the step faces and the sprite fragments still to come.
-        rep(noise, k) hex.cmp 2, gnrow, dgn, dfull, dschk, dfull
+        rep(noise, k) hex.cmp 2, gnrow, dgn, dfull, dg3c, dfull
+      dg3c:
+        // W1R-LOD: the coarse 8-px key is in every stacked pattern pick (the near tier)
+        rep(w1r, k) hex.cmp 2, gnrow3, dgn3, dfull, dg2g, dfull
+      dg2g:
+        // ... the fine 2-px key matters only for FAR-tier walls (wlen < 16) or columns that
+        // carry a boundary piece/face (faces pick their pattern by their own height): gate
+        // the compare so near plain columns keep their 4-px ditto granularity
+        rep(w1r, k) hex.mov 2, dwl, fstart
+        rep(w1r, k) hex.sub 2, dwl, cexcl
+        rep(w1r, k) hex.if0 2, dwl, dgfc
+        rep(w1r, k) hex.cmp 2, dwl, cw16, dg2c, dgfc, dgfc
+      dgfc:
+        rep(w1r, k) hex.if0 1, ucnt, dgf2
+        rep(w1r, k) .lines_jmp dg2c
+      dgf2:
+        rep(w1r, k) hex.if0 1, lcnt, dgf3
+        rep(w1r, k) .lines_jmp dg2c
+      dgf3:
+        rep(w1r, k) hex.if0 1, ufl, dgf4
+        rep(w1r, k) .lines_jmp dg2c
+      dgf4:
+        rep(w1r, k) hex.if0 1, lfl, dschk
+      dg2c:
+        rep(w1r, k) hex.cmp 2, gnrow2, dgn2, dfull, dschk, dfull
       dschk:
         rep(sky, k) hex.cmp 2, soff, dsoff, dfull, dstchk, dfull
       dstchk:
@@ -2530,6 +2558,8 @@ ns frame {
         hex.mov 2, dl2cls, l2cls
         hex.mov 2, dl2bp, l2bp
         hex.mov 2, dsoff, soff                  // V2: unconditional, same reason as dgn
+        hex.mov 2, dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
+        hex.mov 2, dgn3, gnrow3
         hex.mov 2, dgn, gnrow                   // V1: unconditional so `dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
                                                 // rejects those outright. ~55 ops x 160 columns.
@@ -2563,6 +2593,10 @@ ns frame {
       issky: hex.vec 2
       gnrow: hex.vec 2                          // V1: this column's grain row
       dgn: hex.vec 2                            // ... and the previously emitted one
+      dgn2: hex.vec 2                           // W1R-LOD: the fine/coarse key shadows
+      dgn3: hex.vec 2
+      dwl: hex.vec 2                            // ... and the ditto-gate's wlen scratch
+      cw16: hex.vec 2, 16
       stv: hex.vec 2                            // V3: which step-face slots this column holds
       ufl: hex.vec 1                            // V3: draw an upper face in this column?
       uy1: hex.vec 2                            // ... its first row,

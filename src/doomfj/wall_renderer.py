@@ -441,6 +441,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # M13-W1R: the randomized-wall walkers, baked from the oracle's own pattern tables (R6).
     w1rpat = (generate_w1r_walls_fj(rm.W1R_TIER_BOUNDS, rm.W1R_PATTERNS)
               if lines and w1r_flag else "")
+    # W1R-LOD: the fine (2-px) and coarse (8-px) column-group hashes, dispatch tables like
+    # wnoise's -- far tiers mix wnoise2 into their pattern pick, the near tier uses wnoise3.
+    wnoise2 = (generate_dispatch_table_fj(
+        "wnoise2", [rm.wall_noise2(x) for x in range(cfg.VIEW_W + 1)],
+        index_nibbles=2, result_nibbles=2) if lines and w1r_flag else "")
+    wnoise3 = (generate_dispatch_table_fj(
+        "wnoise3", [rm.wall_noise3(x) for x in range(cfg.VIEW_W + 1)],
+        index_nibbles=2, result_nibbles=2) if lines and w1r_flag else "")
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     slopediv_recip8 = generate_slopediv_recip8_lut_fj("slopediv_recip8")  # M13-coarseslope
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
@@ -1187,7 +1195,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                     tex, cm, ttang, sdrecip, srdisp, xtadisp, wnoise, w1rpat, skybands, skyoff, skypid,
+                     tex, cm, ttang, sdrecip, srdisp, xtadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid,
                      entoff, "__hot_end:"])
     else:
         hotdata = []
@@ -1694,6 +1702,8 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
         "seg_lit2: hex.vec 2",                         # W1R-2C: ... and its SECOND colour byte
         "seg_w1rf: hex.vec 1",                         # W1R-FLAT: this wall stays one flat tone
+        "gnrow2: hex.vec 2",                           # W1R-LOD: the fine 2-px group key
+        "gnrow3: hex.vec 2",                           # ... and the coarse 8-px one
         # V5: the current column's stacked boundary pieces (GLOBALS so emit_region's windowed
         # splices reach them without threading 18 parameters through every signature)
         "ucnt: hex.vec 2", "u1y1: hex.vec 2", "u1y2: hex.vec 2", "u1cls: hex.vec 2",

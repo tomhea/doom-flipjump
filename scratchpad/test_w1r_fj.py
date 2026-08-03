@@ -20,7 +20,7 @@ aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 cmv = colormap_values(aw, lights=COLORMAP_LIGHTS)
 colormap = aw.colormap()
 
-CASES = [  # (ctake, fstart, gnrow, wall_lit)  -- full-wall walk cases
+CASES = [  # (ctake, fstart, x_column, wall_lit)  -- full-wall walk cases
     (10, 13, 0, 0x67),      # tier 0
     (10, 15, 4, 0x67),      # tier 0 boundary (wlen=5)
     (10, 16, 8, 0x67),      # tier 1 boundary (wlen=6)
@@ -33,7 +33,7 @@ CASES = [  # (ctake, fstart, gnrow, wall_lit)  -- full-wall walk cases
     (10, 80, 12, 0x67),     # tier 3, cycles
     (0, 100, 4, 0x12),      # tier 3, full column
 ]
-WCASES = [  # (ctake, fstart, wlo, whi, gnrow, wall_lit) -- windowed cases
+WCASES = [  # (ctake, fstart, wlo, whi, x_column, wall_lit) -- windowed cases
     (0, 50, 10, 30, 0, 0x67),
     (0, 50, 45, 50, 4, 0x67),   # skip most runs, clamp at whi
     (0, 50, 20, 20, 8, 0x67),   # empty window -> nothing
@@ -43,20 +43,20 @@ WCASES = [  # (ctake, fstart, wlo, whi, gnrow, wall_lit) -- windowed cases
 ]
 
 
-def mirror_walk(ctake, fstart, gnrow, wl):
+def mirror_walk(ctake, fstart, xcol, wl):
     wl2 = (wl + 0x30) & 0xFF                     # a distinct second colour per case
     out = bytearray()
-    for rel, row, alt in ReferenceModel.w1r_runs(fstart - ctake, gnrow):
+    for rel, row, alt in ReferenceModel.w1r_runs(fstart - ctake, xcol):
         out += bytes([ctake + rel, colormap[row][wl2 if alt else wl]])
     return out
 
 
-def mirror_win(ctake, fstart, wlo, whi, gnrow, wl):
+def mirror_win(ctake, fstart, wlo, whi, xcol, wl):
     out = bytearray()
     if wlo >= whi:
         return out
     wl2 = (wl + 0x30) & 0xFF
-    for rel, row, alt in ReferenceModel.w1r_runs(fstart - ctake, gnrow):
+    for rel, row, alt in ReferenceModel.w1r_runs(fstart - ctake, xcol):
         y2 = ctake + rel
         c = colormap[row][wl2 if alt else wl]
         if y2 <= wlo:
@@ -74,17 +74,23 @@ def build_program():
                                              over_align=True)
     pat = generate_w1r_walls_fj(ReferenceModel.W1R_TIER_BOUNDS, ReferenceModel.W1R_PATTERNS)
     drive = []
-    for (ct, fs, gn, wl) in CASES:
+    for (ct, fs, xc, wl) in CASES:
         drive += [f"hex.set 2, wlen_r, {fs - ct}", f"hex.set 2, ctake_r, {ct}",
-                  f"hex.set 2, fstart_r, {fs}", f"hex.set 2, gnrow_r, {gn}",
+                  f"hex.set 2, fstart_r, {fs}",
+                  f"hex.set 2, gnrow_r, {ReferenceModel.wall_noise(xc)}",
+                  f"hex.set 2, gnrow2, {ReferenceModel.wall_noise2(xc)}",
+                  f"hex.set 2, gnrow3, {ReferenceModel.wall_noise3(xc)}",
                   f"hex.set 2, wlit_r, {wl}",
                   f"hex.set 2, wlit2_r, {(wl + 0x30) & 0xFF}",
                   "stl.fcall wleaf, wret",
                   "stl.output_char 0xFA", "stl.output_char 0xF5"]
-    for (ct, fs, lo, hi, gn, wl) in WCASES:
+    for (ct, fs, lo, hi, xc, wl) in WCASES:
         drive += [f"hex.set 2, ctake_r, {ct}", f"hex.set 2, fstart_r, {fs}",
                   f"hex.set 2, wlo_r, {lo}", f"hex.set 2, whi_r, {hi}",
-                  f"hex.set 2, gnrow_r, {gn}", f"hex.set 2, wlit_r, {wl}",
+                  f"hex.set 2, gnrow_r, {ReferenceModel.wall_noise(xc)}",
+                  f"hex.set 2, gnrow2, {ReferenceModel.wall_noise2(xc)}",
+                  f"hex.set 2, gnrow3, {ReferenceModel.wall_noise3(xc)}",
+                  f"hex.set 2, wlit_r, {wl}",
                   f"hex.set 2, wlit2_r, {(wl + 0x30) & 0xFF}",
                   "stl.fcall wwleaf, wret",
                   "stl.output_char 0xFA", "stl.output_char 0xF5"]
@@ -102,17 +108,17 @@ def build_program():
         "wret: 0;0",
         "wlen_r: hex.vec 2", "ctake_r: hex.vec 2", "fstart_r: hex.vec 2",
         "wlo_r: hex.vec 2", "whi_r: hex.vec 2",
-        "gnrow_r: hex.vec 2", "wlit_r: hex.vec 2", "wlit2_r: hex.vec 2", "cmidx_r: hex.vec 4",
+        "gnrow_r: hex.vec 2", "gnrow2: hex.vec 2", "gnrow3: hex.vec 2", "wlit_r: hex.vec 2", "wlit2_r: hex.vec 2", "cmidx_r: hex.vec 4",
         ""])
     return prog
 
 
 def main():
     expected = bytearray()
-    for (ct, fs, gn, wl) in CASES:
-        expected += mirror_walk(ct, fs, gn, wl) + b"\xFA\xF5"
-    for (ct, fs, lo, hi, gn, wl) in WCASES:
-        expected += mirror_win(ct, fs, lo, hi, gn, wl) + b"\xFA\xF5"
+    for (ct, fs, xc, wl) in CASES:
+        expected += mirror_walk(ct, fs, xc, wl) + b"\xFA\xF5"
+    for (ct, fs, lo, hi, xc, wl) in WCASES:
+        expected += mirror_win(ct, fs, lo, hi, xc, wl) + b"\xFA\xF5"
     prog = build_program()
     fp = ROOT / "scratchpad" / "w1r_unit.fj"
     fp.write_text(prog, encoding="utf-8")

@@ -789,6 +789,23 @@ class ReferenceModel:
         h ^= h >> 3
         return (h & ((1 << WALL_NOISE_BITS) - 1)) << 2
 
+    @staticmethod
+    def wall_noise2(x: int) -> int:
+        """W1R-LOD -- the FINE column-group hash (2-px groups, x>>1): FAR tiers mix it into
+        their pattern pick so distant walls get 2-px-wide texture cells. Its ditto compare is
+        GATED on the column's tier, so only far-wall columns pay the extra breaks."""
+        h = (x >> 1) ^ (x >> 3)
+        h ^= h >> 2
+        return (h & ((1 << WALL_NOISE_BITS) - 1)) << 2
+
+    @staticmethod
+    def wall_noise3(x: int) -> int:
+        """W1R-LOD -- the COARSE column-group hash (8-px groups, x>>3): the NEAR tier picks its
+        pattern by it, so close walls get 8-px-wide cells (bigger texels up close)."""
+        h = (x >> 3) ^ (x >> 5)
+        h ^= h >> 3
+        return (h & ((1 << WALL_NOISE_BITS) - 1)) << 2
+
     # ------------------------------------------------------------------ M13-W1R
     # The RANDOMIZED W1 wall tier: the wall keeps W1's single baked lit byte, but is emitted as
     # PSEUDO-RANDOM VERTICAL RUNS re-shaded through the colormap (V1's grain mechanism -- same
@@ -814,14 +831,17 @@ class ReferenceModel:
     # (`_w1r_texel2` -> the baked seg_lit2) -- scattered on ~30% of runs so it reads as embedded
     # stones/panels -- and the run lens are FINER (~2-6 px) than the first cut's 2-9.
     W1R_PATTERNS = (
-        (   # tier 0, wlen < 6: ONE run (the walls are slivers) -- but still per-group rows
-            ((5, 14, 0),), ((5, 17, 1),), ((5, 15, 0),), ((5, 16, 1),),
+        (   # tier 0, wlen < 6 (farthest): 1-2 px runs -- the smallest texture cells
+            ((1, 14, 0), (2, 17, 1), (1, 15, 0), (2, 12, 0)),
+            ((2, 17, 1), (1, 12, 0), (2, 15, 0), (1, 17, 0)),
+            ((1, 15, 0), (2, 12, 0), (1, 17, 1), (2, 14, 0)),
+            ((2, 16, 0), (1, 12, 1), (2, 14, 0), (1, 17, 0)),
         ),
-        (   # tier 1, 6 <= wlen < 16: 2-3 px runs, the darkest spread (far walls)
-            ((2, 9, 0), (2, 15, 1), (3, 11, 0), (2, 17, 0)),
-            ((2, 13, 1), (3, 9, 0), (2, 17, 0), (2, 12, 0)),
-            ((3, 11, 0), (2, 17, 0), (2, 9, 1), (2, 14, 0)),
-            ((2, 15, 0), (2, 10, 0), (2, 17, 1), (3, 12, 0)),
+        (   # tier 1, 6 <= wlen < 16: 1-3 px runs, the darkest spread (far walls)
+            ((2, 9, 0), (1, 15, 1), (3, 11, 0), (2, 17, 0), (1, 12, 0)),
+            ((1, 13, 1), (3, 9, 0), (2, 17, 0), (2, 12, 0), (1, 15, 0)),
+            ((3, 11, 0), (1, 17, 0), (2, 9, 1), (2, 14, 0), (1, 17, 0)),
+            ((2, 15, 0), (1, 10, 0), (2, 17, 1), (3, 12, 0), (1, 9, 0)),
         ),
         (   # tier 2, 16 <= wlen < 40: 2-4 px runs, mid tones (~ the W1 tone on average)
             ((3, 4, 0), (2, 12, 1), (3, 8, 0), (4, 14, 0), (2, 5, 0), (3, 10, 1)),
@@ -829,12 +849,12 @@ class ReferenceModel:
             ((4, 6, 0), (2, 13, 0), (3, 4, 1), (2, 10, 0), (3, 14, 0), (2, 7, 1)),
             ((2, 12, 0), (3, 5, 1), (4, 10, 0), (2, 4, 0), (3, 14, 0), (2, 8, 0)),
         ),
-        (   # tier 3, wlen >= 40 (near): 3-6 px runs, BRIGHTER than the W1 tone on average --
-            # the coarse stand-in for DOOM's scalelight (near walls light up), which W1 dropped
-            ((5, 0, 0), (3, 7, 1), (5, 3, 0), (4, 8, 0), (4, 1, 0), (3, 5, 1), (4, 2, 0)),
-            ((4, 4, 0), (5, 0, 0), (3, 8, 1), (5, 2, 0), (4, 6, 0), (4, 0, 1), (3, 3, 0)),
-            ((5, 1, 0), (4, 5, 1), (4, 0, 0), (3, 8, 0), (5, 4, 0), (4, 7, 1), (3, 2, 0)),
-            ((4, 2, 0), (5, 7, 0), (3, 0, 1), (5, 4, 0), (3, 8, 0), (4, 1, 0), (4, 6, 1)),
+        (   # tier 3, wlen >= 40 (near): 4-8 px runs, BRIGHTER than the W1 tone on average --
+            # scalelight's stand-in, and the BIGGEST texture cells (8-px groups via gnrow3)
+            ((7, 0, 0), (4, 7, 1), (8, 3, 0), (5, 8, 0), (6, 1, 0), (4, 5, 1), (5, 2, 0)),
+            ((5, 4, 0), (8, 0, 0), (4, 8, 1), (7, 2, 0), (5, 6, 0), (6, 0, 1), (4, 3, 0)),
+            ((8, 1, 0), (5, 6, 1), (6, 0, 0), (4, 8, 0), (7, 3, 0), (5, 7, 1), (4, 2, 0)),
+            ((6, 2, 0), (7, 7, 0), (4, 0, 1), (8, 5, 0), (4, 8, 0), (6, 1, 0), (5, 6, 1)),
         ),
     )
 
@@ -845,14 +865,23 @@ class ReferenceModel:
         return 0 if wlen < b[0] else 1 if wlen < b[1] else 2 if wlen < b[2] else 3
 
     @staticmethod
-    def w1r_runs(wlen: int, gnrow: int):
-        """The W1R run list of a `wlen`-pixel wall column in grain group `gnrow`
-        (= `wall_noise(x)`): [(y2_rel_exclusive, colormap_row, alt), ...], the last ending
-        exactly at `wlen`. Cycles the (tier, group) pattern down the wall and CLAMPS the final
-        run -- the exact walk the generated fj `w1rpat.walk` performs, one add + one compare
-        per run, so the two sides cannot drift (R6). `alt`=1 means the SECOND colour byte
-        (walls: seg_lit2; faces ignore it). `wlen` must be >= 1."""
-        pat = ReferenceModel.W1R_PATTERNS[ReferenceModel.w1r_tier(wlen)][(gnrow >> 2) & 3]
+    def w1r_runs(wlen: int, x: int):
+        """The W1R run list of a `wlen`-pixel wall column at SCREEN COLUMN `x`:
+        [(y2_rel_exclusive, colormap_row, alt), ...], the last ending exactly at `wlen`.
+        Cycles the (tier, group) pattern down the wall and CLAMPS the final run -- the exact
+        walk the generated fj `w1rpat.walk` performs, so the two sides cannot drift (R6).
+        `alt`=1 means the SECOND colour byte (walls: seg_lit2; faces ignore it).
+        W1R-LOD: the pattern GROUP key is per tier -- far tiers mix the fine 2-px hash
+        (gnrow ^ gnrow2), the mid tier keeps the 4-px hash, the near tier uses the coarse
+        8-px hash -- so texel width scales with distance. `wlen` must be >= 1."""
+        tier = ReferenceModel.w1r_tier(wlen)
+        if tier >= 3:
+            key = ReferenceModel.wall_noise3(x)
+        elif tier == 2:
+            key = ReferenceModel.wall_noise(x)
+        else:
+            key = ReferenceModel.wall_noise(x) ^ ReferenceModel.wall_noise2(x)
+        pat = ReferenceModel.W1R_PATTERNS[tier][(key >> 2) & 3]
         runs, rel, k = [], 0, 0
         while True:
             ln, row, alt = pat[k % len(pat)]
@@ -1567,8 +1596,7 @@ class ReferenceModel:
                             base = colormap[blr][tex[0][0]]
                             base2 = colormap[blr][tex[0][1]]
                             ya = top
-                            for rel, row, alt in self.w1r_runs(bottom + 1 - top,
-                                                               self.wall_noise(x)):
+                            for rel, row, alt in self.w1r_runs(bottom + 1 - top, x):
                                 cc = colormap[row][base2 if alt else base]
                                 for y in range(ya, top + rel):
                                     fb[y * cfg.VIEW_W + x] = cc
@@ -1634,7 +1662,7 @@ class ReferenceModel:
                         # (faces have no second texel -- the alt bit is ignored here)
                         base = colormap[max(0, lr - self.W1R_BASE_BRIGHTEN)][STEP_FACE_BASE]
                         ya = y1
-                        for rel, row, _alt in self.w1r_runs(h, self.wall_noise(x)):
+                        for rel, row, _alt in self.w1r_runs(h, x):
                             cc = colormap[row][base]
                             for y in range(ya, y1 + rel):
                                 fb[y * cfg.VIEW_W + x] = cc

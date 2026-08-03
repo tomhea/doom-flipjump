@@ -841,23 +841,27 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
             out += _body(t, v, runs, win=True)
 
     def _tree(sel, dst):
-        """The (tier, group) compare tree: 3 cmps on `sel` (wlen), then 2 on gnrow's nibble 0."""
+        """The (tier, group) compare tree: 3 cmps on `sel` (wlen), then 2 on the tier's GROUP
+        KEY nibble. W1R-LOD: the key is per tier -- far tiers (0-1) use gxor = gnrow ^ gnrow2
+        (2-px cells), the mid tier gnrow (4-px), the near tier gnrow3 (8-px cells)."""
         rows = [f"        hex.cmp 2, {sel}, tb1, r0, q1, q1",
                 "      q1:",
                 f"        hex.cmp 2, {sel}, tb2, r1, q2, q2",
                 "      q2:",
                 f"        hex.cmp 2, {sel}, tb3, r2, r3, r3"]
         for t in range(nt):
+            key = "gnrow3" if t >= 3 else ("gnrow" if t == 2 else "gxor")
             rows += [f"      r{t}:",
-                     f"        hex.cmp 1, gnrow, g8, r{t}a, r{t}b, r{t}b",
+                     f"        hex.cmp 1, {key}, g8, r{t}a, r{t}b, r{t}b",
                      f"      r{t}a:",
-                     f"        hex.cmp 1, gnrow, g4, {dst}{t}_0, {dst}{t}_1, {dst}{t}_1",
+                     f"        hex.cmp 1, {key}, g4, {dst}{t}_0, {dst}{t}_1, {dst}{t}_1",
                      f"      r{t}b:",
-                     f"        hex.cmp 1, gnrow, g12, {dst}{t}_2, {dst}{t}_3, {dst}{t}_3"]
+                     f"        hex.cmp 1, {key}, g12, {dst}{t}_2, {dst}{t}_3, {dst}{t}_3"]
         return rows
 
     tree_labs = ["q1", "q2"] + [x for t in range(nt) for x in (f"r{t}", f"r{t}a", f"r{t}b")]
     cells = ["      ycur: hex.vec 2",
+             "      gxor: hex.vec 1",
              f"      tb1: hex.vec 2, {t1}",
              f"      tb2: hex.vec 2, {t2}",
              f"      tb3: hex.vec 2, {t3}",
@@ -867,8 +871,11 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
 
     d_labs = [f"d{t}_{v}" for t in range(nt) for v in range(4)]
     out += [f"    def walk wlen, ctake, fstart, gnrow, wall_lit, wall_lit2, cmidx "
-            f"@ {', '.join(tree_labs + d_labs)}, last, ycur, tb1, tb2, tb3, g4, g8, g12, end {{",
-            "        hex.mov 2, ycur, ctake"]
+            f"@ {', '.join(tree_labs + d_labs)}, last, ycur, gxor, tb1, tb2, tb3, g4, g8, g12, end "
+            f"< gnrow2, gnrow3 {{",
+            "        hex.mov 2, ycur, ctake",
+            "        hex.mov 1, gxor, gnrow                  // the far tiers' 2-px key",
+            "        hex.xor 1, gxor, gnrow2"]
     out += _tree("wlen", "d")
     for t in range(nt):
         for v in range(4):
@@ -883,12 +890,15 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
             "    }"]
 
     out += [f"    def walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, wall_lit2, cmidx "
-            f"@ wgo, {', '.join(tree_labs + d_labs)}, wlast, ycur, wl2, tb1, tb2, tb3, g4, g8, g12, end {{",
+            f"@ wgo, {', '.join(tree_labs + d_labs)}, wlast, ycur, wl2, gxor, tb1, tb2, tb3, g4, g8, g12, end "
+            f"< gnrow2, gnrow3 {{",
             "        hex.cmp 2, wlo, whi, wgo, end, end",
             "      wgo:",
             "        hex.mov 2, wl2, fstart",
             "        hex.sub 2, wl2, ctake",                 # tier from the FULL wall height
-            "        hex.mov 2, ycur, ctake"]
+            "        hex.mov 2, ycur, ctake",
+            "        hex.mov 1, gxor, gnrow",
+            "        hex.xor 1, gxor, gnrow2"]
     out += _tree("wl2", "d")
     for t in range(nt):
         for v in range(4):

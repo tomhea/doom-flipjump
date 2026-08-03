@@ -1991,10 +1991,10 @@ ns frame {
     // its own clipping and shading against the column's window, so the ditto signature is the
     // raw values + the window rows already in the chain. Zeroed when absent (the signature
     // rule). Layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12.
-    def lines_steps_load2 ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
-            lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, x \
+    def lines_steps_load2 x \
             @ u1rd, l0rd, l1rd, l2rd, sfb, sfp, sbb, sbp, sidx, stv2, end \
-            < sfflag, sfslot {
+            < sfflag, sfslot, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
+              lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp {
         hex.zero 2, ucnt
         hex.zero 2, u1y1
         hex.zero 2, u1y2
@@ -2294,8 +2294,6 @@ ns frame {
               sprfl, ssy1, ssy2, sy0b, sblk, slr, dssy1, dssy2, dsy0b, dsblk, \
               ssy1b, ssy2b, sy0bb, sblkb, slrb, dssy1b, dssy2b, dsy0bb, dsblkb, \
               dsp5, dsp6, dsp7, dsp8, \
-              ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
-              lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, \
               ducnt, du1y1, du1y2, du1cls, du1bp, du2y1, du2y2, du2cls, du2bp, \
               dlcnt, dl1y1, dl1y2, dl1cls, dl1bp, dl2y1, dl2y2, dl2cls, dl2bp, \
               dvc2, dvup, dvu2, dvu3, dvu4, dvu5, dvu6, dvu7, dvu8, dvu9, dvlo, \
@@ -2303,6 +2301,8 @@ ns frame {
             < viewangle, seg_segangle, sgn_aff, \
               ceilfix, floorfix, viewz, \
               seg_lit, seg_lit2, seg_wstrip, wstripbase, \
+              ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
+              lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, \
               x1, x2, x, dbase, dptr, dval8, pval8, \
               normalangle, rw_distance, scale, scalestep, \
               top, bottom, \
@@ -2379,7 +2379,7 @@ ns frame {
         // its clip rows, the third feature in a row to hit that (see dgchk).
         rep(steps*(1-stack), k) .lines_step_load stv, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, x, cexcl, fstart
         // V5: the stacked load -- RAW slot bytes + per-side counts; the emit splices clip
-        rep(steps*stack, k) .lines_steps_load2 ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, x
+        rep(steps*stack, k) .lines_steps_load2 x
         // ablate "sprnoemit" (measurement only): keep the RECORD half, never read the
         // fragments back. The frame is then identical to a things=False build, so the
         // delta against one prices the record half ALONE -- by subtraction from a
@@ -2494,7 +2494,7 @@ ns frame {
         ;demitted
       dfull:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, seg_lit, seg_lit2, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
+        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, seg_lit, seg_lit2, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
         hex.mov 2, dct, cexcl                   // remember this column's clip rows for the ditto test
         hex.mov 2, dfs, fstart
         hex.mov 2, duy1, uy1                    // V3: the face signature, unconditional (same
@@ -2598,24 +2598,6 @@ ns frame {
       dssy2b: hex.vec 2
       dsy0bb: hex.vec 4
       dsblkb: hex.vec 4
-      ucnt: hex.vec 2                           // V5: the stacked boundary pieces (RAW slot
-      u1y1: hex.vec 2                           // bytes; counts in the low nibbles)
-      u1y2: hex.vec 2
-      u1cls: hex.vec 2
-      u1bp: hex.vec 2
-      u2y1: hex.vec 2
-      u2y2: hex.vec 2
-      u2cls: hex.vec 2
-      u2bp: hex.vec 2
-      lcnt: hex.vec 2
-      l1y1: hex.vec 2
-      l1y2: hex.vec 2
-      l1cls: hex.vec 2
-      l1bp: hex.vec 2
-      l2y1: hex.vec 2
-      l2y2: hex.vec 2
-      l2cls: hex.vec 2
-      l2bp: hex.vec 2
       ducnt: hex.vec 2                          // ... and the previously emitted signature
       du1y1: hex.vec 2
       du1y2: hex.vec 2

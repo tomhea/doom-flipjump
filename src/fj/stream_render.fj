@@ -816,13 +816,15 @@ ns stream {
       end:
     }
 
-    // V5 -- one stacked piece's FACE: clip [y1raw, y2raw] to [lo, hi) (the half-window; lo is
-    // the floor side's fstart, 0 on the ceiling side), reject empties/sentinels (y1 > y2 after
-    // the clip), shade the class byte by the CLIPPED height through stepcol -- exactly what the
-    // legacy lines_step_load did at load time -- and draw (W1R runs or one flat pair). The
-    // caller guarantees hi >= 1 (the half-window is non-empty).
-    def steps_face y1raw, y2raw, cls, lo, hi, w1r, gnrow, cmidx \
-            @ floc, fhic, fclip, fgo, fdrw, fy1, fy2, fy2p, fcol, cpb, end < stepcol {
+    // V5 -- one stacked piece's FACE: clip [y1raw, y2raw] to the REGION EXTENT [lo, hi) (the
+    // floor side's fstart / 0, and ctake / viewh) -- which sets the SHADE height and the
+    // pattern ANCHOR, matching the oracle's _face_paint exactly -- then DRAW only the window
+    // [rlo, rhi) slice of it (V5-SPR: a sprite-fragmented column shows a slice of the face,
+    // but anchored and shaded as the whole face, so the visible rows are pixel-identical to
+    // the unfragmented ones). Reject empties/sentinels (y1 > y2 after the clip).
+    def steps_face y1raw, y2raw, cls, lo, hi, rlo, rhi, w1r, gnrow, cmidx \
+            @ floc, fhic, fclip, fgo, fdrw, fwlo, fwlo2, fwhi, fwhi2, \
+              fy1, fy2, fy2p, fwl, fwh, fcol, cpb, end < stepcol {
         hex.mov 2, fy1, y1raw
         hex.cmp 2, fy1, lo, floc, fhic, fhic    // fy1 = max(y1raw, lo)
       floc:
@@ -840,13 +842,25 @@ ns stream {
         hex.set w/4, cpb, stepcol
         frame.step_shade fcol, fy1, fy2, cpb
         hex.mov 2, fy2p, fy2
-        hex.inc 2, fy2p                         // the pair's EXCLUSIVE end row
-        rep(1-w1r, k) .pair_out fy2p, fcol
-        rep(w1r, k) .face_pattern fy2p, fcol, fy1, gnrow, cmidx
+        hex.inc 2, fy2p                         // the face's EXCLUSIVE end row
+        hex.mov 2, fwl, fy1                     // the DRAW window [max(fy1,rlo), min(fy2p,rhi))
+        hex.cmp 2, fwl, rlo, fwlo, fwlo2, fwlo2
+      fwlo:
+        hex.mov 2, fwl, rlo
+      fwlo2:
+        hex.mov 2, fwh, fy2p
+        hex.cmp 2, fwh, rhi, fwhi2, fwhi2, fwhi
+      fwhi:
+        hex.mov 2, fwh, rhi
+      fwhi2:
+        rep(1-w1r, k) .w1_wall_win fwl, fwh, fcol
+        rep(w1r, k) w1rpat.walk_win fy1, fy2p, fwl, fwh, gnrow, fcol, fcol, cmidx
         ;end
       fy1: hex.vec 2
       fy2: hex.vec 2
       fy2p: hex.vec 2
+      fwl: hex.vec 2
+      fwh: hex.vec 2
       fcol: hex.vec 2
       cpb: hex.vec w/4
       end:
@@ -858,14 +872,23 @@ ns stream {
     // pieces contribute exactly their REGION (the stored bytes encode the direction -- see
     // ts_step_faces). Requires ascode (asserted at emit time). The region list ids are derived
     // per piece from the baked back pid via frame.lines_pid_ids into SCRATCH registers.
-    def steps_splice_c ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ctake, w1r, gnrow, cmidx, cbufa, cbufd, ccy \
-            @ conly, cw0, cg0, cg0e, cb1a, cb1b, cg1, cg1e, cp2, cg2, cdone, \
-              qlo, qbound, qz, ucn2, rba, rbd, rda, rdd, end {
+    def steps_splice_c ctake, rlo, rhi, w1r, gnrow, cmidx, cbufa, cbufd, ccy \
+            @ conly, ce1, ce2, cgo, cw0, cg0, cg0e, cb1a, cb1b, cg1, cg1e, cp2, cg2, cq1, cq1e, cq2, cq2e, cdone, \
+              qlo, qbound, qz, cend, rl2, ucn2, rba, rbd, rda, rdd, end \
+            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp {
         hex.if0 2, ctake, cdone                 // no ceiling half at all
-        hex.zero 2, qlo
-        hex.mov 2, qbound, ctake
+        hex.mov 2, cend, ctake                  // V5-SPR: the piece window [rlo, min(ctake,rhi))
+        hex.cmp 2, cend, rhi, ce1, ce1, ce2
+      ce2:
+        hex.mov 2, cend, rhi
+      ce1:
+        hex.mov 2, qlo, rlo
+        hex.mov 2, rl2, rlo
+        hex.cmp 2, qlo, cend, cgo, cdone, cdone // empty intersection -> nothing at all
+      cgo:
+        hex.mov 2, qbound, cend
         hex.if0 1, ucnt, conly                  // no pieces: one full claimed walk
-        hex.cmp 2, u1y1, ctake, cw0, conly, conly   // piece 1 beyond the window -> claimed only
+        hex.cmp 2, u1y1, cend, cw0, conly, conly    // piece 1 beyond the window -> claimed only
       cw0:
         hex.mov 1, ucn2, ucnt                   // a LOCAL copy: ucnt is the ditto signature,
         hex.mov 2, qbound, u1y1                 // saved to its shadow AFTER this emit
@@ -874,14 +897,18 @@ ns stream {
         .half_walk_code cbufa, cbufd, qlo, qbound, ccy
       cg0e:
         hex.zero 2, qz
-        .steps_face u1y1, u1y2, u1cls, qz, ctake, w1r, gnrow, cmidx
+        .steps_face u1y1, u1y2, u1cls, qz, ctake, rl2, cend, w1r, gnrow, cmidx
         frame.lines_pid_ids u1bp, rba, rbd, rda, rdd
         hex.mov 2, qlo, u1y2
-        hex.inc 2, qlo                          // region 1 starts at the STORED end + 1
-        hex.mov 2, qbound, ctake
+        hex.inc 2, qlo                          // region 1 starts at the STORED end + 1 --
+        hex.cmp 2, qlo, rl2, cq1, cq1e, cq1e    // clamped to the window start: a sub-window
+      cq1:                                      // qlo would emit SUB-CURSOR pairs, and the
+        hex.mov 2, qlo, rl2                     // device REWINDS on those (no silent drop!)
+      cq1e:
+        hex.mov 2, qbound, cend
         hex.dec 1, ucn2
-        hex.if0 1, ucn2, cb1a                   // one piece: region 1 runs to ctake
-        hex.cmp 2, u2y1, ctake, cb1b, cb1a, cb1a
+        hex.if0 1, ucn2, cb1a                   // one piece: region 1 runs to the window end
+        hex.cmp 2, u2y1, cend, cb1b, cb1a, cb1a
       cb1b:
         hex.mov 2, qbound, u2y1                 // ... else it stops at piece 2's start
       cb1a:
@@ -890,14 +917,18 @@ ns stream {
         .half_walk_code rba, rbd, qlo, qbound, ccy
       cg1e:
         hex.if0 1, ucn2, cdone
-        hex.cmp 2, u2y1, ctake, cp2, cdone, cdone   // piece 2 beyond the window -> done
+        hex.cmp 2, u2y1, cend, cp2, cdone, cdone    // piece 2 beyond the window -> done
       cp2:
         hex.zero 2, qz
-        .steps_face u2y1, u2y2, u2cls, qz, ctake, w1r, gnrow, cmidx
+        .steps_face u2y1, u2y2, u2cls, qz, ctake, rl2, cend, w1r, gnrow, cmidx
         frame.lines_pid_ids u2bp, rba, rbd, rda, rdd
         hex.mov 2, qlo, u2y2
         hex.inc 2, qlo
-        hex.mov 2, qbound, ctake
+        hex.cmp 2, qlo, rl2, cq2, cq2e, cq2e
+      cq2:
+        hex.mov 2, qlo, rl2
+      cq2e:
+        hex.mov 2, qbound, cend
         hex.cmp 2, qlo, qbound, cg2, cdone, cdone
       cg2:
         .half_walk_code rba, rbd, qlo, qbound, ccy
@@ -909,6 +940,8 @@ ns stream {
       qlo: hex.vec 2
       qbound: hex.vec 2
       qz: hex.vec 2
+      cend: hex.vec 2
+      rl2: hex.vec 2
       ucn2: hex.vec 1
       rba: hex.vec w/4
       rbd: hex.vec w/4
@@ -922,14 +955,26 @@ ns stream {
     // floor lists) | face 2 | region behind boundary 1 | face 1 | region0 (the claimed lists,
     // the floor in FRONT of boundary 1). With one piece the middle collapses; with none it is
     // one claimed walk.
-    def steps_splice_f lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, fstart, viewh, w1r, gnrow, cmidx, fbufa, fbufd, ccy \
-            @ fonly, fb2a, fb2b, fg2, fg2e, fb1a, fb1b, fg1, fg1e, fg0, fp1, fr1, fdone, \
-              qlo, qbound, qfs, vh2, lcn2, rba, rbd, rda, rdd, end {
+    def steps_splice_f fstart, viewh, rlo, rhi, w1r, gnrow, cmidx, fbufa, fbufd, ccy \
+            @ fonly, fe1, fe2, fl1, fl2, fb2a, fb2b, fg2, fg2e, fb1a, fb1b, fg1, fg1e, fg0, fq1, fq1e, fq2, fq2e, \
+              fp1, fr1, fdone, \
+              qlo, qbound, qfs, vh2, fend, flo, lcn2, rba, rbd, rda, rdd, end \
+            < lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp {
         hex.set 2, vh2, viewh
-        hex.cmp 2, fstart, vh2, fr1, fdone, fdone   // no floor half at all
+        hex.mov 2, fend, vh2                    // V5-SPR: the window [max(fstart,rlo), min(viewh,rhi))
+        hex.cmp 2, fend, rhi, fe1, fe1, fe2
+      fe2:
+        hex.mov 2, fend, rhi
+      fe1:
+        hex.mov 2, flo, fstart
+        hex.cmp 2, flo, rlo, fl1, fl2, fl2
+      fl1:
+        hex.mov 2, flo, rlo
+      fl2:
+        hex.cmp 2, flo, fend, fr1, fdone, fdone // empty intersection -> nothing at all
       fr1:
-        hex.mov 2, qlo, fstart
-        hex.mov 2, qbound, vh2
+        hex.mov 2, qlo, flo
+        hex.mov 2, qbound, fend
         hex.if0 1, lcnt, fonly                  // no pieces: one full claimed walk
         hex.mov 1, lcn2, lcnt                   // LOCAL copy: lcnt is the ditto signature
         hex.mov 2, qfs, fstart
@@ -938,33 +983,41 @@ ns stream {
         // -- two pieces: the region behind boundary 2 (farthest), then its face
         frame.lines_pid_ids l2bp, rba, rbd, rda, rdd
         hex.mov 2, qbound, l2y1
-        hex.cmp 2, qbound, vh2, fb2a, fb2b, fb2b
+        hex.cmp 2, qbound, fend, fb2a, fb2b, fb2b
       fb2b:
-        hex.mov 2, qbound, vh2
+        hex.mov 2, qbound, fend
       fb2a:
         hex.cmp 2, qlo, qbound, fg2, fg2e, fg2e // guard: an empty window still pays the loaders
       fg2:
         .half_walk_code rda, rdd, qlo, qbound, ccy
       fg2e:
-        .steps_face l2y1, l2y2, l2cls, qfs, vh2, w1r, gnrow, cmidx
+        .steps_face l2y1, l2y2, l2cls, qfs, vh2, flo, fend, w1r, gnrow, cmidx
         hex.mov 2, qlo, l2y2
         hex.inc 2, qlo                          // the middle region starts at piece 2's end + 1
+        hex.cmp 2, qlo, flo, fq2, fq2e, fq2e    // ... clamped to the window start (see cq1)
+      fq2:
+        hex.mov 2, qlo, flo
+      fq2e:
       fp1:
         // -- the region behind boundary 1, its face, then the claimed floor in front of it
         frame.lines_pid_ids l1bp, rba, rbd, rda, rdd
         hex.mov 2, qbound, l1y1
-        hex.cmp 2, qbound, vh2, fb1a, fb1b, fb1b
+        hex.cmp 2, qbound, fend, fb1a, fb1b, fb1b
       fb1b:
-        hex.mov 2, qbound, vh2
+        hex.mov 2, qbound, fend
       fb1a:
         hex.cmp 2, qlo, qbound, fg1, fg1e, fg1e
       fg1:
         .half_walk_code rda, rdd, qlo, qbound, ccy
       fg1e:
-        .steps_face l1y1, l1y2, l1cls, qfs, vh2, w1r, gnrow, cmidx
+        .steps_face l1y1, l1y2, l1cls, qfs, vh2, flo, fend, w1r, gnrow, cmidx
         hex.mov 2, qlo, l1y2
         hex.inc 2, qlo
-        hex.mov 2, qbound, vh2
+        hex.cmp 2, qlo, flo, fq1, fq1e, fq1e
+      fq1:
+        hex.mov 2, qlo, flo
+      fq1e:
+        hex.mov 2, qbound, fend
         hex.cmp 2, qlo, qbound, fg0, fdone, fdone
       fg0:
         .half_walk_code fbufa, fbufd, qlo, qbound, ccy
@@ -977,6 +1030,8 @@ ns stream {
       qbound: hex.vec 2
       qfs: hex.vec 2
       vh2: hex.vec 2
+      fend: hex.vec 2
+      flo: hex.vec 2
       lcn2: hex.vec 1
       rba: hex.vec w/4
       rbd: hex.vec w/4
@@ -1068,7 +1123,7 @@ ns stream {
     // wall, the floor half-walk, each intersected with the window. A sprite straddles all three, so
     // a fragmented column is `region(0, sy1)` + the sprite + `region(sy2+1, VIEW_H)` -- which is the
     // one structural thing V3's faces never needed, since a face lives inside a SINGLE region.
-    def emit_region lo, hi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, \
+    def emit_region lo, hi, viewh, w2s, wpx, w1r, stack, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, \
             gnrow, wstrip, wstripbase, \
             cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret \
             @ ch1, ch2, cw1, cw2, cw3, cw4, cf1, cf2, cf3, cf4, w1rwp, w1rwe, end < seg_w1rf {
@@ -1079,7 +1134,10 @@ ns stream {
         hex.mov 2, qbound, hi
       ch2:
         rep((1-eabl/2)*(1-ascode), k) .half_walk cbufa, cbufd, qlo, qbound, ptr, ccy, qwalk, qret
-        rep(ascode, k) .half_walk_code cbufa, cbufd, qlo, qbound, ccy
+        rep(ascode*(1-stack), k) .half_walk_code cbufa, cbufd, qlo, qbound, ccy
+        // V5-SPR: the stacked ceiling prefix, windowed to this region -- faces and the
+        // regions behind boundaries now show under/around sprites instead of being cut
+        rep(stack, k) .steps_splice_c ctake, lo, hi, w1r, gnrow, cmidx, cbufa, cbufd, ccy
         hex.mov 2, wlo, lo                      // -- wall piece [max(lo, ctake), min(hi, fstart))
         hex.cmp 2, wlo, ctake, cw1, cw2, cw2
       cw1:
@@ -1111,7 +1169,8 @@ ns stream {
         hex.mov 2, qbound, hi
       cf4:
         rep((1-eabl/2)*(1-ascode), k) .half_walk fbufa, fbufd, qlo, qbound, ptr, ccy, qwalk, qret
-        rep(ascode, k) .half_walk_code fbufa, fbufd, qlo, qbound, ccy
+        rep(ascode*(1-stack), k) .half_walk_code fbufa, fbufd, qlo, qbound, ccy
+        rep(stack, k) .steps_splice_f fstart, viewh, lo, hi, w1r, gnrow, cmidx, fbufa, fbufd, ccy
         ;end
       end:
     }
@@ -1264,7 +1323,7 @@ ns stream {
       end:
     }
 
-    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, wall_lit, wall_lit2, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, nospr, sprpath, spr1, sm1b, sm1ok, sgap1, sga1e, sgap2, sga2e, sm2b, sm2ok, wall, w1rp, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, wlo, whi, zlo, vhi, sm1, sm2, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end < seg_w1rf {
+    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, wall_lit, wall_lit2, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd @ cok, cclamp, nospr, sprpath, spr1, sm1b, sm1ok, sgap1, sga1e, sgap2, sga2e, sm2b, sm2ok, wall, w1rp, floor, fdone, qwalk, qloop, qcont, qskip, qtest, qemit, qlast, qclamp, qdone, qret, ctake, qlo, qbound, qhi, wlo, whi, zlo, vhi, sm1, sm2, ptr, cntN, iP, y2r, colr, wlen, ccy, cmidx, end < seg_w1rf {
         hex.mov 2, ctake, cexcl
         hex.cmp 2, ctake, fstart, cok, cok, cclamp    // ctake = min(cexcl, fstart)
       cclamp:
@@ -1277,6 +1336,8 @@ ns stream {
         // cm.apply is indexed by light<<8 | colour, leaving only the low byte to move per run.
         rep(noise, k) .wpx_grain_col gnrow, cmidx
         hex.set 2, ccy, centery
+        hex.zero 2, zlo                          // the full-column window bounds -- the stacked
+        hex.set 2, vhi, viewh                    // splices take [rlo, rhi) even on this path
         // V4: a column carrying a sprite fragment is composed as three pieces instead of the usual
         // ceiling|wall|floor -- and draws no step face (ONE overlay per column, and the sprite is in
         // front of the face by construction, having been recorded into an unclaimed column by a
@@ -1295,7 +1356,7 @@ ns stream {
         rep(ascode*(1-stack), k) .half_walk_code cbufa, cbufd, qlo, qbound, ccy
         rep(steps*(1-stack), k) .face_splice ufl, uy2p1, ucol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, cbufa, cbufd, eabl, ascode, w1r, gnrow, cmidx
         // V5: the stacked ceiling prefix -- up to 2 boundary pieces, each with its own region
-        rep(stack, k) .steps_splice_c ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ctake, w1r, gnrow, cmidx, cbufa, cbufd, ccy
+        rep(stack, k) .steps_splice_c ctake, zlo, vhi, w1r, gnrow, cmidx, cbufa, cbufd, ccy
       wall:                                      // -- wall run [ctake, fstart)
         hex.mov 2, wlen, fstart
         hex.sub 2, wlen, ctake
@@ -1320,11 +1381,9 @@ ns stream {
         rep(ascode*(1-stack), k) .half_walk_code fbufa, fbufd, qlo, qbound, ccy
         rep(steps*(1-stack), k) .face_splice lfl, ly2p1, lcol, qhi, qlo, qbound, ptr, ccy, qwalk, qret, fbufa, fbufd, eabl, ascode, w1r, gnrow, cmidx
         // V5: the stacked floor suffix -- farthest piece first, claimed floor last
-        rep(stack, k) .steps_splice_f lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, fstart, viewh, w1r, gnrow, cmidx, fbufa, fbufd, ccy
+        rep(stack, k) .steps_splice_f fstart, viewh, zlo, vhi, w1r, gnrow, cmidx, fbufa, fbufd, ccy
         ;fdone
       sprpath:                                   // V4: region | sprite | region
-        rep(things, k) hex.zero 2, zlo
-        rep(things, k) hex.set 2, vhi, viewh
         // V4b: sprfl = 1 (one fragment, the old path) or 2 (A + a farther B). The dec is safe:
         // nothing reads sprfl after the path split.
         rep(things, k) hex.dec 2, sprfl
@@ -1340,16 +1399,16 @@ ns stream {
       sm1b:
         rep(things, k) hex.mov 2, sm1, ssy1b
       sm1ok:
-        rep(things, k) .emit_region zlo, sm1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region zlo, sm1, viewh, w2s, wpx, w1r, stack, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
         rep(things, k) .sprite_runs_win sblkb, sy0bb, slrb, zlo, ssy1, blkshift
         rep(things, k) hex.cmp 2, ssy2b, ssy1, sgap1, sga1e, sga1e
       sgap1:
-        rep(things, k) .emit_region ssy2b, ssy1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region ssy2b, ssy1, viewh, w2s, wpx, w1r, stack, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
       sga1e:
         rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
         rep(things, k) hex.cmp 2, ssy2, ssy1b, sgap2, sga2e, sga2e
       sgap2:
-        rep(things, k) .emit_region ssy2, ssy1b, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region ssy2, ssy1b, viewh, w2s, wpx, w1r, stack, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
       sga2e:
         rep(things, k) .sprite_runs_win sblkb, sy0bb, slrb, ssy2, vhi, blkshift
         rep(things, k) hex.mov 2, sm2, ssy2
@@ -1357,12 +1416,12 @@ ns stream {
       sm2b:
         rep(things, k) hex.mov 2, sm2, ssy2b
       sm2ok:
-        rep(things, k) .emit_region sm2, vhi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region sm2, vhi, viewh, w2s, wpx, w1r, stack, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
         ;fdone
       spr1:
-        rep(things, k) .emit_region zlo, ssy1, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region zlo, ssy1, viewh, w2s, wpx, w1r, stack, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
         rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
-        rep(things, k) .emit_region ssy2, vhi, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
+        rep(things, k) .emit_region ssy2, vhi, viewh, w2s, wpx, w1r, stack, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret
       fdone:
         stl.output_char 0xFF                     // ends this column's pair list
         ;end

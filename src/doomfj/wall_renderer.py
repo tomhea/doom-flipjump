@@ -1694,6 +1694,14 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         "seg_lit: hex.vec 2",                          # the W1 wall's fully-baked constant lit byte
         "seg_lit2: hex.vec 2",                         # W1R-2C: ... and its SECOND colour byte
         "seg_w1rf: hex.vec 1",                         # W1R-FLAT: this wall stays one flat tone
+        # V5: the current column's stacked boundary pieces (GLOBALS so emit_region's windowed
+        # splices reach them without threading 18 parameters through every signature)
+        "ucnt: hex.vec 2", "u1y1: hex.vec 2", "u1y2: hex.vec 2", "u1cls: hex.vec 2",
+        "u1bp: hex.vec 2", "u2y1: hex.vec 2", "u2y2: hex.vec 2", "u2cls: hex.vec 2",
+        "u2bp: hex.vec 2",
+        "lcnt: hex.vec 2", "l1y1: hex.vec 2", "l1y2: hex.vec 2", "l1cls: hex.vec 2",
+        "l1bp: hex.vec 2", "l2y1: hex.vec 2", "l2y2: hex.vec 2", "l2cls: hex.vec 2",
+        "l2bp: hex.vec 2",
         "seg_wstrip: hex.vec w/4", "wstripbase: hex.vec w/4",   # M13-W2S strip bank
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
         "seg_pid: hex.vec 2",                          # M13-2S rung 3a: baked plane-pair id (1-based)

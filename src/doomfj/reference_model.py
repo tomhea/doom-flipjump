@@ -1668,11 +1668,11 @@ class ReferenceModel:
                         fb[y * cfg.VIEW_W + x] = rows[y]
 
                 for x in range(cfg.VIEW_W):
-                    if sfrag[x] is not None:
-                        # V4: ONE overlay per column, and the sprite wins. A column already carries
-                        # its ceiling/wall/floor as three windows; splicing a face AND a sprite into
-                        # it would mean composing five, and the sprite is in front of the face
-                        # anyway (it was recorded into an unclaimed column by a nearer subsector).
+                    if sfrag[x] is not None and not stack_steps:
+                        # V4: ONE overlay per column, and the sprite wins (the legacy tier's
+                        # trade). V5-SPR paints the pieces UNDER the sprite instead -- the fj
+                        # emit_region routes its region windows through the stacked splices, so
+                        # walls and ledges no longer look cut where a sprite overlaps them.
                         continue
                     ceil_end = min(c_hi[x], cfg.VIEW_H - 1)
                     for k, (y1, y2, fsc, units, bsec) in enumerate(ups[x]):

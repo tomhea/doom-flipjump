@@ -106,7 +106,8 @@ SPRITE_HD_H = 40                  # V4-HD: buckets at least this tall bake from 
 SPRITE_RUN_CAP_HD = 24            # a deeper run cap -- near sprites were visibly blocky at cap 12
                                   # over 2x-downscaled texels (the owner's "closer sprites seem
                                   # very pixelated"). Vertical only: u stays downscaled.
-DEG_SPR_MID_CAP = 8               # 20M-RECOVERY: the MIDDLE buckets (between the low-res and HD
+DEG_SPR_MID_CAP = 12              # (owner, 2026-08-04: cap 8 was "too much" -- mid sprites keep
+                                  # the full 12-run bake) the MIDDLE buckets (between low-res and HD
                                   # tiers) bake at this cap instead of SPRITE_RUN_CAP(12) --
                                   # mid-distance sprites get slightly coarser color runs.
                                   # ⚠ read at CALL time (a `cap=SPRITE_RUN_CAP` signature
@@ -928,10 +929,14 @@ class ReferenceModel:
         beyond the edge, so descending stairs show treads and the nukage pool shows from its
         bank (the owner's green-floor/stairs asks, 2026-08-04). An upper lip between two
         F_SKY1 ceilings is suppressed (the V2 sky rule: nothing may draw lines in the sky)."""
-        up = ((fsec.ceil_h, fsec.light, fsec.ceil_tex)
-              != (bsec.ceil_h, bsec.light, bsec.ceil_tex))
-        lo = ((fsec.floor_h, fsec.light, fsec.floor_tex)
-              != (bsec.floor_h, bsec.light, bsec.floor_tex))
+        # V5-DROP-P2 (owner's (1210,1187) field-flip, 2026-08-04): lips fire on HEIGHT or
+        # MATERIAL changes only, never light-only shading. Light-lips were stealing both
+        # per-column piece slots from the structural drop-off behind them (the pool edge),
+        # and WHICH light boundary won flipped with the walk order -- the whole far field
+        # then changed colour on a single step. Light-only transitions keep the pre-DROP
+        # look (the near attribution), which reads fine and costs nothing.
+        up = fsec.ceil_h != bsec.ceil_h or fsec.ceil_tex != bsec.ceil_tex
+        lo = fsec.floor_h != bsec.floor_h or fsec.floor_tex != bsec.floor_tex
         um = 0 if not up else (1 if fsec.ceil_h > bsec.ceil_h else 2)
         lm = 0 if not lo else (1 if bsec.floor_h > fsec.floor_h else 2)
         if um == 2 and sky and (fsec.ceil_tex or "").upper() == "F_SKY1" \
@@ -1589,7 +1594,13 @@ class ReferenceModel:
                 # attributed, or the per-frame seg BUDGET spent. The budget is what bounds the cost
                 # when part of the view is open sky/void so the first condition never fires --
                 # see config.PNEAR_SEG_BUDGET.
-                if n_claimed == cfg.VIEW_W or n_ts >= (deg_mark or PNEAR_SEG_BUDGET):
+                # V5-DROP-P2 (R48's sibling): the stop for PIECE-carrying segs is WALL-drawn
+                # completion (pieces record into attributed-but-undrawn columns); LIGHT-ONLY
+                # segs -- attribution was their whole job -- still stop at claim-completion.
+                um_, lm_ = self.v5_side_modes(fsec, bsec, sky)
+                if n_wdrawn == cfg.VIEW_W or n_ts >= (deg_mark or PNEAR_SEG_BUDGET):
+                    continue
+                if um_ == 0 == lm_ and n_claimed == cfg.VIEW_W:
                     continue
                 n_ts += 1
                 rng2 = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
@@ -1604,10 +1615,7 @@ class ReferenceModel:
                 # bound is what makes the cost viewpoint-INDEPENDENT: a face-carrying seg pays a
                 # full ~93k wall_scale_setup, and at a heavy viewpoint 128 marking segs would all
                 # otherwise qualify. Measured: only 2 boundaries at spawn have a face at all.
-                # V5-DROP: each side's piece MODE (0 none / 1 riser / 2 lip) from its own
-                # banding triple -- drop-offs and level flat/light changes now place a 1-row
-                # lip piece, so the far surface's region paints beyond the edge.
-                um_, lm_ = self.v5_side_modes(fsec, bsec, sky)
+                # V5-DROP: um_/lm_ (0 none / 1 riser / 2 lip) computed above, before the stop
                 has_up = um_ == 1
                 has_lo = lm_ == 1
                 face_seg = near_steps and (um_ or lm_) and n_face[0] < STEP_SEG_BUDGET

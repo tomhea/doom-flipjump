@@ -816,7 +816,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                   if stack_flag else [])])
                             _tsq.append(f"    stl.fcall seg{si}F_xorby, xb_ret")
                             _tsu.append(f"    stl.fcall seg{si}F_xorby, xb_ret")
-                        out += [f"    hex.if0 1, tsstop, e2go{cid}_{si}",
+                        # V5-DROP-P2: LIGHT-ONLY marking segs (no pieces possible) stop at
+                        # claim-completion via tsstop; piece-carrying segs call unconditionally
+                        # and stop on the leaf's wall-drawn `full` entry test instead.
+                        # ... piece segs still respect the BUDGET latch (tsbstop) -- only
+                        # the claim-complete half of tsstop is theirs to ignore
+                        _gflag = "tsstop" if not (_um or _lm) else "tsbstop"
+                        out += [f"    hex.if0 1, {_gflag}, e2go{cid}_{si}",
                                 f"    ;e2sk{cid}_{si}",
                                 f"  e2go{cid}_{si}:",
                                 *_tsq,
@@ -1410,6 +1416,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
            "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
            "n_claimed: hex.vec 2", "n_tsv: hex.vec 2", "tsstop: hex.vec 1",
+           "tsbstop: hex.vec 1",              # V5-DROP-P2b: the budget-only latch
            "viewh_stub: hex.vec 2, 100",
            "cpid: hex.vec 2",
            # the UNATTRIBUTED-COLUMN WINDOW: every column < pmin or > pmax is attributed already

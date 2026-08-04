@@ -1850,12 +1850,19 @@ ns frame {
 
     def seg_pass1_leaf_body_ts budget, dbl, dsl, dtb, steps, sbudget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
             @ ret, bok, bstop, wok, wlo, wahi, wbhi, wbok, scan, nolow, dolow, nohigh, dohigh, \
-              loop, body, claim, next, pdone, xa, xb, pm1, bcap \
+              loop, body, claim, next, pdone, tsgo, xa, xb, pm1, bcap \
             < viewx, viewy, viewxa, viewxs, viewya, viewys, sgn_aff, viewangle, \
               seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c, seg_pid, \
               pclm, visible, x1, x2, x, pbase, pptr, pval8, pmin, pmax, \
-              n_claimed, n_tsv, tsstop, vieww, seg_ret, \
+              n_claimed, n_tsv, tsstop, tsbstop, vieww, seg_ret, full, \
               wrej, wqa, wna, wqb, wnb, wex, wey, weyx, wexy {
+        // V5-DROP-P2: the correct monotone stop -- every column WALL-drawn means neither an
+        // attribution nor a PIECE can land (drawn[x] blocks both), exactly like the thing
+        // pre-pass (R48). Attribution-complete alone must NOT stop this leaf: pieces still
+        // record into attributed-but-undrawn columns.
+        hex.if0 1, full, tsgo
+        stl.fret seg_ret
+      tsgo:
         // Spend one unit of the per-frame attribution BUDGET (config.PNEAR_SEG_BUDGET). Segs arrive
         // nearest-first, so the budget only ever costs FAR attribution -- and it is what BOUNDS the
         // cost of a frame whose view never closes: with open sky or void on screen `n_claimed` never
@@ -1865,7 +1872,8 @@ ns frame {
         hex.cmp 2, n_tsv, bcap, bok, bstop, bok
       bstop:
         hex.set 1, tsstop, 1                    // this seg is the last one the budget allows
-      bok:
+        hex.set 1, tsbstop, 1                   // V5-DROP-P2b: the BUDGET-ONLY latch piece-seg
+      bok:                                      // call sites test (tsstop also means claim-done)
         proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy
         hex.if0 1, wrej, wok
         stl.fret seg_ret
@@ -1923,7 +1931,12 @@ ns frame {
         hex.inc 2, n_claimed
         hex.cmp 2, n_claimed, vieww, next, pdone, next
       pdone:
-        hex.set 1, tsstop, 1                    // every column attributed: nothing later matters
+        // V5-DROP-P2: claim-completion latches tsstop, but the CALL SITES only test it for
+        // LIGHT-ONLY marking segs (no pieces possible -- attribution was their whole job).
+        // Piece-carrying segs call unconditionally and stop on this leaf's `full` entry test
+        // instead: pieces still land in attributed-but-undrawn columns (the owner's
+        // (1210,1187) field flip -- R48's sibling).
+        hex.set 1, tsstop, 1
       next:
         hex.inc 2, x
         ;loop

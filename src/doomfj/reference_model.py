@@ -66,7 +66,7 @@ WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap
 WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column (ops + bank knob)
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
-STEP_SEG_BUDGET = 12              # V3: boundaries allowed a step face (the NEAREST ones)
+STEP_SEG_BUDGET = 8              # V3: boundaries allowed a step face (the NEAREST ones)
 V5_STACK = 2                      # V5: stacked boundary pieces kept per column per side
 STEP_FACE_BASE = 96               # V3: flat-shaded step-face texel. NOT WALL_BG (=4),
                                   # which is near-WHITE in DOOM's ramp and blows out
@@ -106,6 +106,16 @@ SPRITE_HD_H = 40                  # V4-HD: buckets at least this tall bake from 
 SPRITE_RUN_CAP_HD = 24            # a deeper run cap -- near sprites were visibly blocky at cap 12
                                   # over 2x-downscaled texels (the owner's "closer sprites seem
                                   # very pixelated"). Vertical only: u stays downscaled.
+DEG_SPR_MID_CAP = 8               # 20M-RECOVERY: the MIDDLE buckets (between the low-res and HD
+                                  # tiers) bake at this cap instead of SPRITE_RUN_CAP(12) --
+                                  # mid-distance sprites get slightly coarser color runs.
+                                  # ⚠ read at CALL time (a `cap=SPRITE_RUN_CAP` signature
+                                  # default binds at import and is NOT knob-patchable -- R49).
+DEG_SPR_LOWRES_H = 32             # 20M-RECOVERY (owner, 2026-08-04: "far sprites can be a bit
+DEG_SPR_LOWRES_CAP = 2            # more color-inaccurate"): buckets SHORTER than this bake with
+                                  # this run cap instead of SPRITE_RUN_CAP -- a far monster
+                                  # becomes a 2-3 colour silhouette at the right shape and size.
+                                  # BAKE-ONLY: the emit just walks fewer pairs; no new runtime.
 MIN_SPRITE_H = 3                  # V4: a SCENERY sprite shorter than this on screen is not drawn.
                                   # EXP-7 rejects the depth past which a sprite projects to ZERO
                                   # rows; this is the same one compare with a bigger constant, and
@@ -148,19 +158,23 @@ THING_BUDGET = 255                # V4: things PROJECTED per frame. Each pays ~4
 # once a frame is already heavy (the SOFT counters below have filled) the importance bar rises,
 # so the frames in the sweep tail shed their least-visible work. All thresholds are ONE compare
 # against a register/constant fj also holds -- exact-mirrorable, R6.
-DEG_SOFT_SCENERY = 8              # after this many accepted scenery things, scenery must project...
-DEG_MINH2_SCENERY = 12            # ...at least this many rows (baseline MIN_SPRITE_H = 3)
-DEG_SOFT_MON = 8                  # monsters keep their own, looser pair (the owner's policy:
-DEG_MINH2_MON = 6                 # the things that shoot back thin LAST)
+# 20M-RECOVERY (owner, 2026-08-04): these DEG constants were retuned as a SET so the
+# sweep lands under 20M median AND mean after the two correctness features (sprite-stop
+# fix + V5-DROP). Certified b_1b18612522b42204: median 19.96M / mean 19.74M / worst
+# 39.08M. The ladder and the per-knob shares are in the session sheets (opt20_*).
+DEG_SOFT_SCENERY = 3              # after this many accepted scenery things, scenery must project...
+DEG_MINH2_SCENERY = 24            # ...at least this many rows (baseline MIN_SPRITE_H = 3)
+DEG_SOFT_MON = 4                  # monsters keep their own, looser pair (the owner's policy:
+DEG_MINH2_MON = 10                 # the things that shoot back thin LAST)
 DEG_SPRB_MINH = 32                # slot-B (behind-sprite) fragments only for things at least this
                                   # tall on screen -- B slots under small/far overlaps are almost
                                   # always occluded by slot A (measured px-diff ~0)
-DEG_SLIVER_W = 2                  # a wall whose whole projected span is <= this many columns
+DEG_SLIVER_W = 3                  # a wall whose whole projected span is <= this many columns
                                   # renders flat (no W1R pattern): 1-2 col horizon slivers
-DEG_STACK_SCALE = 16384           # the SECOND stacked V5 piece only when the boundary's scale is
+DEG_STACK_SCALE = 32768           # the SECOND stacked V5 piece only when the boundary's scale is
                                   # at least this (16.16: 16384 = tz <~ 320 map units). Near
                                   # stairs keep both risers; far doorways show one.
-DEG_PNEAR = 96                    # the marking-seg budget under degrade (128 baseline): the far
+DEG_PNEAR = 64                    # the marking-seg budget under degrade (128 baseline): the far
                                   # doorways that lose attribution are the least-visible ones
 DEG_LIP_SCALE = 16384             # V5-DROP far gate: LIP pieces (drop-offs / level flat changes)
                                   # only when the boundary's scale is at least this (16.16:
@@ -876,17 +890,19 @@ class ReferenceModel:
     # brick shade varies per group -- the pattern reads as coursed masonry instead of static.
     # Same mechanism, same costs: the tables are compile-time data.
     W1R_PATTERNS = (
-        (   # tier 0, wlen < 6 (farthest): 1-2 px cells, calm low-contrast
-            ((2, 14, 0), (1, 16, 0)),
-            ((2, 15, 0), (1, 13, 1)),
-            ((2, 13, 0), (1, 15, 0)),
-            ((2, 16, 0), (1, 14, 0)),
+        (   # tier 0, wlen < 6 (farthest): LONG calm courses -- 20M-RECOVERY: a 6px cycle
+            # halves the emitted pairs on the smallest far walls (1-2 runs a column)
+            ((4, 14, 0), (2, 16, 0)),
+            ((4, 15, 0), (2, 13, 1)),
+            ((4, 13, 0), (2, 15, 0)),
+            ((4, 16, 0), (2, 14, 0)),
         ),
-        (   # tier 1, 6 <= wlen < 16: 2px brick + 1px mortar (row 15), aligned courses
-            ((2, 10, 0), (1, 15, 0), (2, 12, 0), (1, 15, 0)),
-            ((2, 12, 0), (1, 15, 0), (2, 9, 1), (1, 15, 0)),
-            ((2, 13, 0), (1, 15, 0), (2, 11, 0), (1, 15, 0)),
-            ((2, 9, 0), (1, 15, 0), (2, 12, 1), (1, 15, 0)),
+        (   # tier 1, 6 <= wlen < 16: 4px brick + 2px mortar (row 15) -- the same aligned
+            # courses at half the pair count (20M-RECOVERY: far walls carry no fine detail)
+            ((4, 10, 0), (2, 15, 0)),
+            ((4, 12, 0), (2, 15, 0)),
+            ((4, 13, 0), (2, 15, 0)),
+            ((4, 9, 1), (2, 15, 0)),
         ),
         (   # tier 2, 16 <= wlen < 40: 3px brick + 1px mortar (row 12)
             ((3, 5, 0), (1, 12, 0), (3, 8, 0), (1, 12, 0)),
@@ -1524,10 +1540,15 @@ class ReferenceModel:
                         if drawn[x] or sfrag2[x] is not None:
                             continue                     # V4b: both fragment slots spent
                         # V4-HD: tall buckets sample the full-res column with the deeper cap
-                        # (unless OPTION B's HD budget already went to nearer things)
+                        # (unless OPTION B's HD budget already went to nearer things);
+                        # 20M-RECOVERY: SHORT buckets take the coarse low-res cap instead
                         st = (self.sprite_strip(art[7][u], art[8], hb, cap=SPRITE_RUN_CAP_HD)
                               if hd_ok else
-                              self.sprite_strip(art[0][u], art[1], hb))
+                              self.sprite_strip(art[0][u], art[1], hb,
+                                                cap=DEG_SPR_LOWRES_CAP)
+                              if hb < DEG_SPR_LOWRES_H else
+                              self.sprite_strip(art[0][u], art[1], hb,
+                                                cap=DEG_SPR_MID_CAP))
                         if st is None:
                             continue
                         # V4b: TWO write-once fragment slots per column, filled in walk-arrival

@@ -29,7 +29,8 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
                                     DEG_SOFT_SCENERY, DEG_MINH2_SCENERY, DEG_SOFT_MON,
                                     DEG_MINH2_MON, DEG_SPRB_MINH, DEG_SLIVER_W,
                                     DEG_STACK_SCALE, DEG_PNEAR, DEG_HD_BUDGET, DEG_DDA_FACES,
-                                    DEG_LIP_SCALE,
+                                    DEG_LIP_SCALE, DEG_SPR_LOWRES_H, DEG_SPR_LOWRES_CAP,
+                                    DEG_SPR_MID_CAP,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER,
@@ -1914,9 +1915,13 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
         for u in range(dwid):
             for b in range(SPRITE_HEIGHT_BUCKETS):
                 hb_ = sprite_bucket_height(b, cfg.VIEW_H)
-                # V4-HD: tall buckets bake from the FULL-RES column, deeper cap (R6 mirror)
+                # V4-HD: tall buckets bake from the FULL-RES column, deeper cap; 20M-RECOVERY:
+                # SHORT buckets take the coarse low-res cap (R6 mirror of the record site)
                 st = (rm.sprite_strip(fcols[u], fdh, hb_, cap=SPRITE_RUN_CAP_HD)
-                      if hb_ >= SPRITE_HD_H else rm.sprite_strip(cols[u], dh, hb_))
+                      if hb_ >= SPRITE_HD_H else
+                      rm.sprite_strip(cols[u], dh, hb_, cap=DEG_SPR_LOWRES_CAP)
+                      if hb_ < DEG_SPR_LOWRES_H else
+                      rm.sprite_strip(cols[u], dh, hb_, cap=DEG_SPR_MID_CAP))
                 body = [0, 0, 0] if st is None else (
                     [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
                 assert len(body) <= SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"

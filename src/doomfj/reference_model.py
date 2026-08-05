@@ -106,6 +106,11 @@ SPRITE_HD_H = 40                  # V4-HD: buckets at least this tall bake from 
 SPRITE_RUN_CAP_HD = 24            # a deeper run cap -- near sprites were visibly blocky at cap 12
                                   # over 2x-downscaled texels (the owner's "closer sprites seem
                                   # very pixelated"). Vertical only: u stays downscaled.
+DEG_SPR_NEAR_TZ = 384             # SPR-NEAR (owner, 2026-08-05): the DETAIL RADIUS in map
+                                  # units. A sprite nearer than this ALWAYS bakes full detail,
+                                  # however short it projects (a potion at your feet is small
+                                  # on screen but deserves its pixels); the coarse low-res cap
+                                  # applies only to things both SHORT and beyond this radius.
 DEG_SPR_MID_CAP = 12              # (owner, 2026-08-04: cap 8 was "too much" -- mid sprites keep
                                   # the full 12-run bake) the MIDDLE buckets (between low-res and HD
                                   # tiers) bake at this cap instead of SPRITE_RUN_CAP(12) --
@@ -113,7 +118,7 @@ DEG_SPR_MID_CAP = 12              # (owner, 2026-08-04: cap 8 was "too much" -- 
                                   # ⚠ read at CALL time (a `cap=SPRITE_RUN_CAP` signature
                                   # default binds at import and is NOT knob-patchable -- R49).
 DEG_SPR_LOWRES_H = 32             # 20M-RECOVERY (owner, 2026-08-04: "far sprites can be a bit
-DEG_SPR_LOWRES_CAP = 2            # more color-inaccurate"): buckets SHORTER than this bake with
+DEG_SPR_LOWRES_CAP = 4            # more color-inaccurate"): buckets SHORTER than this bake with
                                   # this run cap instead of SPRITE_RUN_CAP -- a far monster
                                   # becomes a 2-3 colour silhouette at the right shape and size.
                                   # BAKE-ONLY: the emit just walks fewer pairs; no new runtime.
@@ -1174,16 +1179,24 @@ class ReferenceModel:
         gzt = ((tz_map + top) << 16) - viewz
         ytop = (cfg.CENTERY << 16) - _signed(fixed_mul(gzt & ANGLE_MASK, xscale, 8, 4), 32)
         h = _signed(fixed_mul((wph << 16) & ANGLE_MASK, xscale, 8, 4), 32) >> 16
-        if h < (MIN_SPRITE_H if min_h is None else min_h) or h > cfg.VIEW_H:
-            return None                               # too small to see / too near to bucket
+        if h < (MIN_SPRITE_H if min_h is None else min_h):
+            return None                               # too small to see
             # ⚠ fj does NOT reach this test for the small case: `sp_tzmin` rejects on DEPTH right
             # after tz, before the lateral multiplies and the reciprocal (EXP-7's shape). The two
             # reject the identical set -- `sprite_tz_min_size` scans for the exact boundary.
+        ytop_r = ytop >> 16
+        if h > cfg.VIEW_H:
+            # SPR-NEAR (owner, 2026-08-05): a TOO-NEAR sprite CLAMPS to the tallest bucket
+            # instead of vanishing -- feet planted: the top moves DOWN by the overflow rows so
+            # the bottom row stays true, and the emit clips the off-screen part as usual.
+            # Integer-row arithmetic, exactly as fj does it after its own >>16.
+            ytop_r += h - cfg.VIEW_H
+            h = cfg.VIEW_H
         # the texture-column DDA step, through the SAME block-FP reciprocal `proj.scale_recip_div`
         # already implements (not `_recip_div32`, which is a different normalise/shift recipe --
         # reusing the macro that exists beats adding a second one for a sub-texel difference).
         istep = self._scale_recip_div(1 << 16, xscale) // self.downscale
-        return x1, x2, ytop >> 16, h, istep
+        return x1, x2, ytop_r, h, istep, tz
 
     @staticmethod
     def _w1r_texel(texels, pal) -> int:
@@ -1524,7 +1537,9 @@ class ReferenceModel:
                         n_mon += 1
                     else:
                         n_thing += 1
-                    tx1, tx2, ytop, th_px, istep = pr
+                    tx1, tx2, ytop, th_px, istep, pr_tz = pr
+                    # SPR-NEAR: coarse bake only for things both SHORT and beyond the radius
+                    far_ = bool(DEG_SPR_NEAR_TZ) and pr_tz > (DEG_SPR_NEAR_TZ << 16)
                     bkt = sprite_bucket(th_px, H)
                     hb = sprite_bucket_height(bkt, H)
                     # OPTION B (DEG_HD_BUDGET): the first N accepted tall things keep the HD
@@ -1551,7 +1566,7 @@ class ReferenceModel:
                               if hd_ok else
                               self.sprite_strip(art[0][u], art[1], hb,
                                                 cap=DEG_SPR_LOWRES_CAP)
-                              if hb < DEG_SPR_LOWRES_H else
+                              if (hb < DEG_SPR_LOWRES_H and far_) else
                               self.sprite_strip(art[0][u], art[1], hb,
                                                 cap=DEG_SPR_MID_CAP))
                         if st is None:

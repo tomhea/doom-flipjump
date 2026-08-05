@@ -1435,12 +1435,12 @@ ns proj {
     //   Cost is ONE `hex.fixed_div` (~38.5k, the dearest primitive here) plus one block-FP
     //   reciprocal and five multiplies — which is why THING_BUDGET exists.
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
-    def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg \
-            @ ok1, oknear, ok2, okd, okx, okx2, okh1, okh2, okv, tvcalc, tvhave, tvset, bad, done, end, dghard, \
+    def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg, spn, neartz \
+            @ ok1, oknear, ok2, okd, okx, okx2, okh1, okh2, okv, clampn, thset, thok, tvcalc, tvhave, tvset, bad, done, end, dghard, \
               trx, try8, ang, sidx, vsin, vcos, gxt, gyt, tz, xsc, txv, atx, tzl, \
               txl, txr, tmp, gz, one16, cminz, cproj, cxf, cyf, cvw, cvh \
             < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, \
-              sp_tzmax2, degfl {
+              sp_tzmax2, degfl, thfar {
         hex.set 1, vis, 0
         hex.mov 8, trx, sp_x
         hex.sub 8, trx, viewx
@@ -1486,6 +1486,14 @@ ns proj {
       dghard:
         rep(deg, k) hex.cmp 8, tz, sp_tzmax2, ok1, ok1, bad
       ok1:
+        // SPR-NEAR: beyond the detail radius? The record loop then picks the coarse packed
+        // bank for SHORT buckets; near things keep full detail whatever their screen height.
+        rep(spn, k) hex.set 1, thfar, 0
+        rep(spn, k) hex.set 8, cminz, neartz
+        rep(spn, k) hex.cmp 8, tz, cminz, thok, thok, thset
+      thset:
+        rep(spn, k) hex.set 1, thfar, 1
+      thok:
         // tx = trx*sin - try*cos  (DOOM: -(gyt + gxt) with both negated)
         hex.fixed_mul_lo 8, 4, gxt, vsin, trx          // same swap, same reason
         hex.fixed_mul_lo 8, 4, gyt, vcos, try8
@@ -1553,7 +1561,14 @@ ns proj {
       okh2:
         hex.if0 8, hpxo, bad
         hex.set 8, cvh, viewh
-        hex.scmp 8, hpxo, cvh, okv, okv, bad            // taller than the screen -> skip (unbucketable)
+        hex.scmp 8, hpxo, cvh, okv, okv, clampn         // taller than the screen -> CLAMP
+      clampn:
+        // SPR-NEAR: a too-near sprite clamps to the tallest bucket instead of VANISHING --
+        // feet planted: the top moves DOWN by the overflow so the bottom row stays true
+        hex.mov 8, tmp, hpxo
+        hex.sub 8, tmp, cvh
+        hex.add 8, ytopo, tmp
+        hex.mov 8, hpxo, cvh
       okv:
         hex.set 8, one16, 0x10000
         .scale_recip_div istepo, one16, xsc, 1          // (1<<32)/xscale = texels per screen column

@@ -30,6 +30,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
                                     DEG_MINH2_MON, DEG_SPRB_MINH, DEG_SLIVER_W,
                                     DEG_STACK_SCALE, DEG_PNEAR, DEG_HD_BUDGET, DEG_DDA_FACES,
                                     DEG_LIP_SCALE, DEG_SPR_LOWRES_H, DEG_SPR_LOWRES_CAP,
+                                    DEG_SPR_NEAR_TZ,
                                     DEG_SPR_MID_CAP,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
@@ -731,9 +732,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         # property of the thing type and never changes at runtime
                         ("sp_mon", 2, 1 if _t.type in MONSTER_TYPES else 0),
                         ("sp_base", 4, spr_base[_t.type]),
-                        # OPTION B: the packed low-res region base (B0 pre-subtracted) -- only
-                        # baked when the HD budget is on, only read for tall buckets past it
-                        *([("sp_base2", 4, spr_ldbase[_t.type])] if DEG_HD_BUDGET else []),
+                        # SPR-NEAR: the packed coarse-region base -- read only for SHORT
+                        # buckets of FAR things (the thfar flag project_thing sets)
+                        *([("sp_base2", 4, spr_ldbase[_t.type])] if DEG_SPR_NEAR_TZ else []),
                         ("sp_dw", 2, spr_dw[_t.type]),
                         ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])])
                     out += [f"    hex.if0 1, tstop, tgo{cid}_{_ti}",
@@ -1308,9 +1309,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
               f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
               f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
-              f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_HD_BUDGET else 0}, "
-              f"{DEG_HD_BUDGET}, {SPRITE_HD_H}, "
-              f"{SPRITE_HEIGHT_BUCKETS - _spr_b0(cfg) if DEG_HD_BUDGET else 1}"]
+              f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
+              f"{DEG_SPR_LOWRES_H}, {_spr_nlow(cfg) if DEG_SPR_NEAR_TZ else 1}, "
+              f"{DEG_SPR_NEAR_TZ * 0x10000}"]
              if _do_things else []),
            "seg_pass2_leaf:",
            (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
@@ -1453,6 +1454,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "sp_base2: hex.vec 4",              # OPTION B: the low-res LD region base
            "n_hd: hex.vec 2", "hdfl: hex.vec 1",      # ... its budget counter + per-thing flag
            "degfl: hex.vec 1", "ballow: hex.vec 1",   # ... and the per-thing runtime flags
+           "thfar: hex.vec 1",                 # SPR-NEAR: beyond the detail radius?
            sprbkt, sprlight, sprbank] if _do_things else []),
         *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                             floor_mode == "FT1")] if (lines and not ascode) else []),
@@ -1922,12 +1924,11 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
         for u in range(dwid):
             for b in range(SPRITE_HEIGHT_BUCKETS):
                 hb_ = sprite_bucket_height(b, cfg.VIEW_H)
-                # V4-HD: tall buckets bake from the FULL-RES column, deeper cap; 20M-RECOVERY:
-                # SHORT buckets take the coarse low-res cap (R6 mirror of the record site)
+                # V4-HD: tall buckets bake from the FULL-RES column, deeper cap. SPR-NEAR: the
+                # MAIN bank is always FULL detail -- the coarse variants live in the packed LD
+                # region below and only FAR things pick them (R6 mirror of the record site).
                 st = (rm.sprite_strip(fcols[u], fdh, hb_, cap=SPRITE_RUN_CAP_HD)
                       if hb_ >= SPRITE_HD_H else
-                      rm.sprite_strip(cols[u], dh, hb_, cap=DEG_SPR_LOWRES_CAP)
-                      if hb_ < DEG_SPR_LOWRES_H else
                       rm.sprite_strip(cols[u], dh, hb_, cap=DEG_SPR_MID_CAP))
                 body = [0, 0, 0] if st is None else (
                     [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
@@ -1935,21 +1936,21 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
                 out += [f";{v:#x} * dw" for v in body]
                 out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
                 blk += 1
-    # OPTION B (DEG_HD_BUDGET): the packed LOW-RES fallback region -- cap-12 downscaled blocks
-    # for the TALL buckets only (heights are monotone in b, so [B0..) is contiguous). A tall
-    # thing past the HD budget indexes ld_base + u*n_ld + bucket with ld_base PRE-SUBTRACTING
-    # B0, so the record loop keeps its one add-and-multiply shape.
+    # SPR-NEAR (owner, 2026-08-05): the packed COARSE region -- the SHORT buckets baked at
+    # DEG_SPR_LOWRES_CAP. Only things BEYOND the detail radius (thfar, set in project_thing)
+    # index here: ld_base + u*n_ld + bucket (the low buckets are a prefix, so no offset).
+    # Near things -- however short on screen -- keep the main bank's full detail.
     ld_base_of = {}
-    if DEG_HD_BUDGET:
-        B0 = _spr_b0(cfg)
-        n_ld = SPRITE_HEIGHT_BUCKETS - B0
+    if DEG_SPR_NEAR_TZ:
+        n_ld = _spr_nlow(cfg)
         for kind in kinds:
             art = rm.sprite_art(sprite_wad, kind, cache)
             cols, dh, dwid = art[0], art[1], art[2]
-            ld_base_of[kind] = blk - B0
+            ld_base_of[kind] = blk
             for u in range(dwid):
-                for b in range(B0, SPRITE_HEIGHT_BUCKETS):
-                    st = rm.sprite_strip(cols[u], dh, sprite_bucket_height(b, cfg.VIEW_H))
+                for b in range(n_ld):
+                    st = rm.sprite_strip(cols[u], dh, sprite_bucket_height(b, cfg.VIEW_H),
+                                         cap=DEG_SPR_LOWRES_CAP)
                     body = [0, 0, 0] if st is None else (
                         [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
                     assert len(body) <= SPR_BLOCK_STRIDE, f"LD block overflows: {len(body)}"
@@ -1960,10 +1961,10 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
     return NLJ.join(out) + NLJ, base_of, dw_of, ld_base_of
 
 
-def _spr_b0(cfg):
-    """The first TALL height bucket (>= SPRITE_HD_H px) -- monotone, so [B0..) is the HD set."""
-    return min(b for b in range(SPRITE_HEIGHT_BUCKETS)
-               if sprite_bucket_height(b, cfg.VIEW_H) >= SPRITE_HD_H)
+def _spr_nlow(cfg):
+    """How many SHORT buckets (< DEG_SPR_LOWRES_H px) there are -- monotone, so a prefix."""
+    return sum(1 for b in range(SPRITE_HEIGHT_BUCKETS)
+               if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
 
 
 def _thing_sector(rm, cmap, lds, sds, secs, t):

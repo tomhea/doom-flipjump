@@ -1198,16 +1198,16 @@ ns frame {
     // so `tstop` short-circuits every later thing at its call site for one 1-nibble test.
     // Mirrors ReferenceModel.render_wall_frame's things pre-pass EXACTLY.
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, blkshift, \
-            buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, hdbf, hdbudget, hdh, nld \
+            buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, nld, neartz \
             @ tgo, tgo2, tsce, tincs, tinced, tstopset, tret, tlx, tlxo, tclamp, thxo, tloop, tbody, tuclamp, \
-              tdsc, tdno, tdok, tbno, tbok, hdtl, hdld, hdinc, hdok, hcon, hmul, hmdone, \
+              tdsc, tdno, tdok, tbno, tbok, hdld, hdok, hcon, hmul, hmdone, \
               tfree, tfree2, tslota, tslotb, tblkok, tnext, \
               tsy1z, tsy1k, tsy1h, tsy2c, tsy2z, tsy2k0, tsy2h, tsy2k, tdraw, \
               tcap, vis, dvis, dtx1, dtx2, dtyt, dthp, dtis, tx1, tx2, tytop, thpx, tistep, tbkt, thb, ty0, tyb, tfrac, tu, tdwm, \
               tx, tdb, tdp, tdv, tfb, tfp, tfv, tbb, tbp, tblk, tbo, tcon, tidx, tlr, tr0, trl, trw, \
               tsy1, tsy2, tb8, tneg, tcvh, tsofs, tflagv, end \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
-              sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, n_hd, hdfl {
+              sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
         // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
         // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
@@ -1240,11 +1240,11 @@ ns frame {
       tdno:
         rep(deg, k) hex.set 1, degfl, 0
       tdok:
-        proj.project_thing vis, tx1, tx2, tytop, thpx, tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg
+        proj.project_thing vis, tx1, tx2, tytop, thpx, tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
         // ablate "thingtwice" (measurement only): the SAME projection, SAME operands, dead
         // outputs. Pricing by ADDING keeps the frame byte-exact -- a stub would price itself
         // plus everything downstream (fj-cost-model, the `noproj` retraction).
-        rep(ttwice, k) proj.project_thing dvis, dtx1, dtx2, dtyt, dthp, dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg
+        rep(ttwice, k) proj.project_thing dvis, dtx1, dtx2, dtyt, dthp, dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
         hex.if0 1, vis, tret
         hex.if0 2, sp_mon, tincs                // ... and credit the counter this thing spends
         hex.inc 2, n_mon
@@ -1274,29 +1274,24 @@ ns frame {
       tbno:
         rep(deg, k) hex.set 1, ballow, 0
       tbok:
-        // OPTION B (hdbf): the first hdbudget accepted TALL things keep the cap-24 HD
-        // blocks; later tall things fall back to the packed low-res region. The walk is
-        // front-to-back, so the budget goes to the NEAREST tall sprites.
-        rep(hdbf, k) hex.set 1, hdfl, 1
-        rep(hdbf, k) hex.set 2, tcap, hdh
-        rep(hdbf, k) hex.cmp 2, thb, tcap, hdok, hdtl, hdtl
-      hdtl:
-        rep(hdbf, k) hex.set 2, tcap, hdbudget
-        rep(hdbf, k) hex.cmp 2, n_hd, tcap, hdinc, hdld, hdld
+        // SPR-NEAR (spn): a thing both SHORT on screen (bucket < lowh) and beyond the
+        // detail radius (thfar, set by project_thing) takes the packed COARSE region; near
+        // things -- however small they project -- keep the main bank's full detail.
+        rep(spn, k) hex.set 1, hdfl, 1
+        rep(spn, k) hex.if0 1, thfar, hdok
+        rep(spn, k) hex.set 2, tcap, lowh
+        rep(spn, k) hex.cmp 2, thb, tcap, hdld, hdok, hdok
       hdld:
-        rep(hdbf, k) hex.set 1, hdfl, 0
-        rep(hdbf, k) hex.if0 1, hdfl, hdok
-      hdinc:
-        rep(hdbf, k) hex.inc 2, n_hd
+        rep(spn, k) hex.set 1, hdfl, 0
       hdok:
-        // ... and the block base: sp_base2 already carries the -B0 of the packed region,
-        // so the LD index keeps the same base+bucket shape
-        rep(hdbf, k) hex.if1 1, hdfl, hcon
-        rep(hdbf, k) hex.zero w/4, tcon
-        rep(hdbf, k) hex.mov 4, tcon, sp_base2
-        rep(hdbf, k) hex.zero w/4, tidx
-        rep(hdbf, k) hex.mov 2, tidx, tbkt
-        rep(hdbf, k) hex.add w/4, tcon, tidx
+        // ... and the block base: the low buckets are a PREFIX, so the coarse index keeps
+        // the same base+bucket shape with no offset
+        rep(spn, k) hex.if1 1, hdfl, hcon
+        rep(spn, k) hex.zero w/4, tcon
+        rep(spn, k) hex.mov 4, tcon, sp_base2
+        rep(spn, k) hex.zero w/4, tidx
+        rep(spn, k) hex.mov 2, tidx, tbkt
+        rep(spn, k) hex.add w/4, tcon, tidx
       hcon:
         // the shade row: (light, sprite height) class << 8 | bucket height, one baked byte
         hex.zero w/4, tidx
@@ -1362,9 +1357,9 @@ ns frame {
         // only the `u*BUCKETS` term belongs in the column loop. `tcon` is that constant, hoisted.
         hex.zero w/4, tblk
         hex.mov 2, tblk, tu
-        rep(hdbf, k) hex.if1 1, hdfl, hmul  // OPTION B: the packed region strides nld
-        rep(hdbf, k) hex.mul_const w/4, tblk, tblk, nld
-        rep(hdbf, k) hex.if0 1, hdfl, hmdone
+        rep(spn, k) hex.if1 1, hdfl, hmul   // SPR-NEAR: the packed region strides nld
+        rep(spn, k) hex.mul_const w/4, tblk, tblk, nld
+        rep(spn, k) hex.if0 1, hdfl, hmdone
       hmul:
         hex.mul_const w/4, tblk, tblk, buckets
       hmdone:

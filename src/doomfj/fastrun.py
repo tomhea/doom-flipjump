@@ -70,9 +70,11 @@ class FjmRunner:
                 nxt = addr + 1
             if start is not None:
                 self._runs.append((start, vals))
-            # the parsed dict is now redundant with _runs and would sit on ~350MB for E1M1
-            # (6.36M int->int entries) for the whole session; the runs are all `run` needs
-            self._mem.memory = {}
+        # the parsed dict is redundant either way and would sit on ~350MB for E1M1 (6.36M
+        # int->int entries) for the whole session: the native path keeps only `_runs`, and the
+        # fallback path re-reads the .fjm from disk inside `fj.run` (CR-2026-08: this release
+        # used to live inside the `if self.native:` block, leaking the dict on the fallback).
+        self._mem.memory = {}
 
     def run(self, io_device) -> int:
         """Run the program once against `io_device`; returns the op count."""

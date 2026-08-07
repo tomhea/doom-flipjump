@@ -50,8 +50,13 @@ def _resolve_sprite_wad(map_wad, sprite_wad):
         return sprite_wad
     if sprite_wad is not None and Path(sprite_wad).exists():
         w = WadFile.from_path(str(sprite_wad))
-        if _has_sprites(w):
-            return w
+        if not _has_sprites(w):
+            # CR-2026-08: an existing-but-spriteless path raises exactly like a loaded WadFile
+            # does -- silently substituting the map wad here was the one hole in the
+            # "explicit failure" rule this docstring itself states.
+            raise ValueError(
+                f"things=True: {sprite_wad!r} exists but has no S_START..S_END lumps")
+        return w
     if _has_sprites(map_wad):
         return map_wad
     raise ValueError(

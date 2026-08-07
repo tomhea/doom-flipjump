@@ -107,11 +107,14 @@ def main():
     # IWAD for art. A self-contained map wad (the E1M1 fixture) keeps using itself, so its
     # byte-exact goldens are untouched.
     if args.asset:
-        aw = WadFile.from_path(str(ROOT / args.asset))
+        aw_path = ROOT / args.asset
+        aw = WadFile.from_path(str(aw_path))
     elif "COLORMAP" in mw.names():
+        aw_path = None                     # the map wad itself -- already in the cache key
         aw = mw
     else:
-        aw = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
+        aw_path = ROOT / "assets/freedoom1.wad"
+        aw = WadFile.from_path(str(aw_path))
         print(f"  ({args.wad} is geometry-only -- taking art from assets/freedoom1.wad)")
 
     # V1-V4 ride on the rung-3a (plane_near) lines tier; the rung-3b two-sided tier is a different
@@ -141,13 +144,25 @@ def main():
     # instead of regenerating and reassembling a ~104M-character program every time.
     import hashlib
     key = hashlib.sha256()
-    for p in SRC + [ROOT / "src/doomfj/wall_renderer.py", ROOT / "src/doomfj/reference_model.py",
-                    ROOT / "src/doomfj/config.py"]:
+    # CR-2026-08: the key hashes EVERY build input -- the fj sources, all emit-shaping python
+    # modules (not just wall_renderer: the LUT/map/texture compilers shape the emitted text
+    # too), the flag tuple, and the BYTES of all three wads (map, asset art, sprites). A
+    # missing input here = a stale binary served after that input changes.
+    for p in SRC + [ROOT / "src/doomfj" / f for f in
+                    ("wall_renderer.py", "reference_model.py", "config.py", "lut_generator.py",
+                     "mapcompiler.py", "texturecompiler.py", "tables.py", "wad.py", "build.py",
+                     # fixedpoint encodes every baked constant; harness owns W (the assemble
+                     # memory_width) -- hashing an importer does NOT capture its imports
+                     "fixedpoint.py", "harness.py")]:
         key.update(p.read_bytes())
     key.update(repr((args.wall_mode, args.floor_mode, args.two_sided, args.no_plane_near,
                      args.no_grain, args.no_sky, args.no_steps, args.no_stack, want_things,
                      args.no_deg, args.map)).encode())
     key.update((ROOT / args.wad).read_bytes())
+    if aw_path is not None:
+        key.update(aw_path.read_bytes())
+    if want_things:
+        key.update(spr_path.read_bytes())
     cache = ROOT / "scratchpad" / "fjmcache"
     cache.mkdir(parents=True, exist_ok=True)
     fjm = cache / f"w_{key.hexdigest()[:16]}.fjm"
@@ -249,6 +264,9 @@ def main():
     running = True
     while running:
         moved = False
+        # the last good viewpoint, snapshotted BEFORE the handlers apply this tick's move --
+        # snapshotting after them would 'restore' the exact position that just failed
+        ppx, ppy, pang = px, py, ang
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 running = False
@@ -278,6 +296,7 @@ def main():
                 render()
             except Exception as e:                       # a viewpoint outside the map can crash the
                 print(f"render failed at ({px},{py}): {e}")   # renderer -- step back and carry on
+                px, py, ang = ppx, ppy, pang
         pygame.time.wait(20)
     pygame.quit()
 

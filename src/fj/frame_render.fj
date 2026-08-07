@@ -2110,9 +2110,13 @@ ns frame {
         hex.read_byte_and_inc uy1, sbp
         hex.read_byte_and_inc uy2p1, sbp
         hex.read_byte_and_inc ucol, sbp         // the face's colour CLASS until step_shade runs
+        // V5 slots are 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 (see
+        // ts_piece_wr / lines_steps_load2). This tier draws piece 1 per side only: skip the
+        // bpid byte + the u2 slot to land on l1.
+        hex.ptr_add sbp, 5
         ;uhave
       unone:
-        hex.ptr_add sbp, 3
+        hex.ptr_add sbp, 8
         ;uskip
       uhave:
         hex.if0 2, ctake, uskip                 // no ceiling region at all in this column

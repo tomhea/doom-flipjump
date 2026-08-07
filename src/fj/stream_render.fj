@@ -1149,6 +1149,10 @@ ns stream {
         hex.mov 2, whi, fstart
       cw3:
         rep(wpx, k) .wpx_wall_win ctake, fstart, wlo, whi, wstrip, wstripbase, wpxstride, noise, cmidx
+        // ⚠ KNOWN GAP (CR-2026-08, accepted): there is NO rep(w2s) windowed wall emitter --
+        // in the W2S tier a sprite-fragmented column emits no wall piece for its [wlo,whi)
+        // window (the flat pair below is gated off by w2s too). W2S is a non-certified lab
+        // tier that never ships with sprites; wire a w2s window walker before ever doing so.
         rep(1-w2s-wpx-w1r, k) .w1_wall_win wlo, whi, wall_lit
         // M13-W1R: the same randomized runs as w1rpat.walk, restricted to the window.
         // W1R-FLAT: the flat-wall flag takes the plain windowed pair instead.

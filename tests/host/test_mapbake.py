@@ -163,6 +163,20 @@ def _deep_map():
                        subsectors=[SubSector(1, i) for i in range(4)], nodes=[n0, n1, root], root=2)
 
 
+def _signvaried_map():
+    """_deep_map's shape with sign/magnitude-VARIED partition consts: distinct x's, one negative
+    dx, one negative dy, distinct |dx|/|dy| -- so the XOR over all three nodes is NONZERO for
+    every partition register (cpx 3^5^0, cdx_mag 1^2^0, sign_dx 0^1^0, sign_dy 0^0^1, ...).
+    CR-2026-08: the self-zero involution gate used _deep_map, whose all-zero x's and
+    non-negative dx/dy made four of the six registers XOR to 0 even with the CLEARs deleted --
+    the gate was vacuous for exactly the regs M13-possignmag added."""
+    n0 = Node(x=3, y=10, dx=1, dy=0, right=0 | NF_SUBSECTOR, left=1 | NF_SUBSECTOR)
+    n1 = Node(x=5, y=-10, dx=-2, dy=0, right=2 | NF_SUBSECTOR, left=3 | NF_SUBSECTOR)
+    root = Node(x=0, y=0, dx=0, dy=-1, right=0, left=1)
+    return CompiledMap(vertexes=[(0, 0)], segs=[],
+                       subsectors=[SubSector(1, i) for i in range(4)], nodes=[n0, n1, root], root=2)
+
+
 def _run_bsp_walk(tmp_path, name, cmap, vx, vy):
     """Emit cmap's BSP-as-code, run the walk from (vx,vy), assert the printed subsector order matches
     reference_model.bsp_render_order byte-exact."""
@@ -243,8 +257,10 @@ def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
     sign_dy = 0 ^ 0 ^ 0), so this directly catches a broken/absent involution (the M12qq regression).
     Distinct from the order tests (which catch the WRONG side test) — this asserts the post-walk zero
     state. M13-possignmag: cdx/cdy became cdx_mag/cdy_mag (8-nibble magnitudes) + sign_dx/sign_dy
-    (1-nibble flags); the involution property is unchanged (xor_by is still self-inverse either way)."""
-    cmap = _deep_map()                                       # 3 nodes with distinct partition consts
+    (1-nibble flags); the involution property is unchanged (xor_by is still self-inverse either way).
+    CR-2026-08: the map is _signvaried_map, NOT _deep_map -- see its docstring: _deep_map made the
+    gate vacuous for cpx/cdx_mag/sign_dx/sign_dy (their XOR over the walk was 0 regardless)."""
+    cmap = _signvaried_map()                     # 3 nodes; every partition reg's walk-XOR nonzero
     # empty subsector action: the nodes still run their SET/USE/CLEAR (what we test), but the leaves print
     # nothing, so the only output is the post-walk partition-reg dump below.
     code = _bsp_as_code("z", cmap, done_label="bsp_done", subsector_action=lambda s: [])

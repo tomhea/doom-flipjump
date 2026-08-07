@@ -9,9 +9,12 @@ room is a single BSP leaf: `tests/fixtures/square_room.wad` has a **zero-byte NO
 SSECTORS record. So a convex polygon arena needs no node building at all, just the geometry lumps.
 That is the whole trick, and it is why this is ~100 lines instead of a node tool.
 
-    python scratchpad/make_arena.py --sides 12 --radius 512 --monsters 24
+    python scratchpad/make_arena.py                # reproduces the committed fixture byte for byte
 
-Writes tests/fixtures/arena.wad (MAP01).
+Writes tests/fixtures/arena.wad (MAP01). ⚠ The DEFAULTS are the committed fixture's exact recipe
+(16 sides, radius 1000, 20 monsters, CEIL3_5 roof -- cmp-verified byte-identical); change any knob
+and you are authoring a NEW arena, so point --out somewhere else or expect to re-bless every
+arena golden.
 """
 import argparse
 import math
@@ -23,14 +26,15 @@ ROOT = Path('.').resolve()
 sys.path.insert(0, str(ROOT / "src"))
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--sides", type=int, default=12, help="walls in the convex ring")
-ap.add_argument("--radius", type=int, default=512)
-ap.add_argument("--monsters", type=int, default=24)
+ap.add_argument("--sides", type=int, default=16, help="walls in the convex ring")
+ap.add_argument("--radius", type=int, default=1000)
+ap.add_argument("--monsters", type=int, default=20)
 ap.add_argument("--items", type=int, default=8)
 ap.add_argument("--ceil", type=int, default=160)
-ap.add_argument("--roof", default="F_SKY1",
-                help="ceiling flat. F_SKY1 makes it OPEN-AIR, which both looks better
-                      and keeps V2 sky on the shipped path instead of special-casing it")
+ap.add_argument("--roof", default="CEIL3_5",
+                help="ceiling flat. The default matches the COMMITTED tests/fixtures/arena.wad "
+                     "(regenerating must reproduce it byte for byte); pass F_SKY1 for an "
+                     "OPEN-AIR arena that exercises V2 sky on the shipped path")
 ap.add_argument("--light", type=int, default=192)
 ap.add_argument("--out", default="tests/fixtures/arena.wad")
 args = ap.parse_args()
@@ -50,7 +54,7 @@ LINEDEFS = b"".join(struct.pack("<7h", i, (i + 1) % N, 1, 0, 0, i, -1) for i in 
 SIDEDEFS = b"".join(struct.pack("<2h8s8s8sh", 0, 0, b"\0" * 8, b"\0" * 8,
                                 b"STARTAN3".ljust(8, b"\0"), 0) for _ in range(N))
 SECTORS = struct.pack("<2h8s8s3h", 0, args.ceil, b"FLOOR4_8".ljust(8, b"\0"),
-                      b"CEIL3_5".ljust(8, b"\0"), args.light, 0, 0)
+                      args.roof.encode().ljust(8, b"\0"), args.light, 0, 0)
 
 
 def bam(x0, y0, x1, y1):

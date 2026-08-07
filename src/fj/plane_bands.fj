@@ -11,9 +11,13 @@ ns plane {
     // `ReferenceModel._recip_div32` — RIGHT-NORMALIZE ONLY (no left-normalize branch): valid because
     // any REAL planeheight (16.16, >=1 world unit) has magnitude >= 0x10000, always above the table's
     // 0xFFF threshold, exactly like `column_setup`'s wall-scale `ipre` (SCALE_MIN=256 gives the same
-    // guarantee). ⚠ scope limit: an implausibly tiny nonzero planeheight (< 0x100, i.e. under ~0.004
-    // world units — never seen in real E1M1 data) would hit the table's unpopulated (zero) region;
-    // not guarded, matching how M13pS2a's oracle prototype also only validated realistic magnitudes.
+    // guarantee). ⚠ scope limit (re-examined CR-2026-08): this is the RIGHT-normalize half only;
+    // the oracle _recip_div32 also left-normalizes tiny denominators. planeheight < 0x100 would
+    // hit slopediv_recip's unpopulated zero region — but planeheight = |sector_h<<16 - viewz| and
+    // both operands are integer<<16, so any nonzero planeheight is >= 0x10000: the zero region is
+    // UNREACHABLE for every integer-height map, not merely "never seen". (planeheight == 0 — eye
+    // exactly at the plane — yields band rows the emitter never asks for.) If viewz ever gains
+    // sub-unit precision (bobbing), port the oracle's left-normalize here first.
     def recip32 @ sph, rc, cfff, czero2, irecip, nrm, more, done, shloop, shmore, shdone \
             < bb_recip_ph, bb_recip_out, slopediv_recip, plane_recip_ret {
         hex.mov 8, sph, bb_recip_ph
@@ -269,11 +273,14 @@ ns plane {
     }
 
     // M13-lines4 -- build_bands_bs: the BINARY-SEARCH band builder (lines mode only; 2-byte
-    // entries [runlen][zrow]). Identical output to `build_bands 0` -- PROVEN over 1,036 windows
+    // entries [runlen][zrow]). ⚠ DEAD EXPERIMENT (CR-2026-08): never instantiated by any emitter,
+    // and its cut-table generator (lut_generator.generate_zlight_cuts_fj) has been removed --
+    // recover both from git history together if this is ever revived. Kept for the proof record:
+    // identical output to `build_bands 0` over 1,036 windows
     // (118 real E1M1-spawn (ph,light) pairs + 400 fuzz, both halves, zero mismatches) -- but
     // instead of marching all `count` rows it finds each ZROW boundary directly: the only zidx
     // values where the colormap row changes are baked per light level in `zl_nextcut`/`zl_prevcut`
-    // (lut_generator.generate_zlight_cuts_fj), and each cut's screen row is the first crossing of
+    // (the removed generator), and each cut's screen row is the first crossing of
     // a monotone yslope half-window -- a ~6-probe binary search. Typical list: ~3-8 boundaries
     // instead of ~50 marched rows.
     //   asc  (ceiling half, ys non-decreasing): boundary(k) = first row with ys >= step*k

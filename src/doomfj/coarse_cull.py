@@ -1,6 +1,14 @@
 """M13-raster coarse cull: the BAKED coarse-angle bounds shared (R6 SSOT) by the fj macro's data table
 and the host reference / prototype.
 
+⚠ STATUS (CR-2026-08): NOT WIRED INTO ANY SHIPPED PATH. No emitter calls generate_coarse_bounds_fj
+and nothing imports this module outside its scratchpad prototypes (proj.coarse_bracket in
+projection.fj is equally uninstantiated) -- the shipped cull is the bbox WEDGE cull
+(mapcompiler.bbox_gate_boxes). Kept as the reference for the per-vertex coarse-slope experiment.
+Known gap if ever revived: GUARD_DEFAULT covers tantoangle quantization only, NOT _slope_div's
+block-FP truncation, so the 'guaranteed SUPERSET' claim below must be re-verified against the
+renderer's actual tta[_slope_div(num,den)] before trusting a cull to it.
+
 The division-free coarse cull pins a vertex's absolute BAM angle to a conservative interval [lo,hi]
 using ONLY sign-folds + integer magnitude compares (NO slope_div): the octant idx
 (sign(dx)*4 + sign(dy)*2 + (|dx|>|dy|), matching proj.point_to_angle) plus a WEDGE idx that subdivides

@@ -1572,7 +1572,9 @@ ns proj {
       okv:
         hex.set 8, one16, 0x10000
         .scale_recip_div istepo, one16, xsc, 1          // (1<<32)/xscale = texels per screen column
-        rep(ds/2, k) hex.shr_bit 8, istepo              // ... in DOWNSCALED texels
+        // CR-2026-08: /downscale = shift by log2(ds) (#ds-1), NOT ds/2 -- the two agree only
+        // at ds in {1,2,4}; the oracle divides by the value (reference_model.project_thing)
+        rep(#ds - 1, k) hex.shr_bit 8, istepo           // ... in DOWNSCALED texels
         hex.set 1, vis, 1
         ;done
       bad:

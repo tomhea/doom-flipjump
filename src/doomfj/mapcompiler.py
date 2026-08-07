@@ -118,8 +118,12 @@ def bbox_wedge_miss(m: int, box: tuple, vx: int, vy: int) -> bool:
     half-plane m, i.e. max over the box of the plane's signed test value is negative. The maximizing
     corner is a pure function of m: x = left for m<4 else right; y = top for m in {0,1,6,7} else
     bottom (equivalently, in fj's (q=m&3, n=2<=m<=5) encoding: y = top iff n==0, x = left iff
-    (q<2) == (n==0)). All in raw 16.0 map units — |Q| < 2^15 for int16 maps, matching the fj
-    4-nibble slice arithmetic."""
+    (q<2) == (n==0)). All in raw 16.0 map units. ⚠ WIDTH CONTRACT (CR-2026-08): the fj side
+    (proj.wedge_bbox_plane) evaluates Q on 4-nibble slices, so every true Q — including the
+    dx+dy / dy-dx combinations — must fit SIGNED 16 BITS. That is NOT free for "int16 maps":
+    Q reaches ±(span_x + span_y), ~2^17 on a map spanning the full int16 range. The bound is
+    ENFORCED per map by the assert in `bbox_gate_boxes` (span_x + span_y + slack < 2^15);
+    a map that trips it needs the fj slices widened, not the assert loosened."""
     top, bottom, left, right = box
     cx = left if m < 4 else right
     cy = top if m in (0, 1, 6, 7) else bottom
@@ -176,6 +180,18 @@ def bbox_gate_boxes(cmap: "CompiledMap", *, min_segs: int = 32,
         if things_below.get(i):
             box = (box[0] + inflate, box[1] - inflate, box[2] - inflate, box[3] + inflate)
         out[i] = box
+    # CR-2026-08: bbox_wedge_miss's WIDTH CONTRACT (see its docstring) -- the fj evaluates Q
+    # on signed-16-bit slices, and Q reaches +/-(span_x + span_y) for the dx+dy / dy-dx
+    # planes. Bound the spans over everything a Q can be built from: gated-box corners and
+    # the map's vertexes (the view position stays inside the map), + 256 slack for a view
+    # nudged past the walls.
+    if out:
+        xs = [v for b in out.values() for v in (b[2], b[3])] + [x for x, _ in cmap.vertexes]
+        ys = [v for b in out.values() for v in (b[0], b[1])] + [y for _, y in cmap.vertexes]
+        span = (max(xs) - min(xs)) + (max(ys) - min(ys))
+        assert span + 512 < (1 << 15), (
+            f"bbox wedge cull: map spans {span} units; Q would overflow the fj signed-16-bit "
+            "slices -- widen proj.wedge_bbox_plane before gating this map")
     return out
 
 

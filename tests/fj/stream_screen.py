@@ -26,7 +26,8 @@ from flipjump.utils.exceptions import IOReadOnEOF
 # device importing it directly is the same sharing principle as those fj macros already lean on, NOT
 # an oracle backdoor (colormap, by contrast, IS asset/level data, so it's DMA-read via the wire, not
 # imported -- see CMD_LOAD_RASTER_TABLES below).
-from doomfj.tables import slopediv_recip_table, SLOPEDIV_RECIP_RK
+from doomfj.tables import (slopediv_recip_table, SLOPEDIV_RECIP_RK, LIGHTZSHIFT, MAXLIGHTZ,
+                           LIGHTLEVELS, LIGHTSEGSHIFT)
 
 CMD_BEGIN_FRAME_STREAM = 0x07
 CMD_BEGIN_FRAME_PLANES = 0x09      # M13-planesproto (0x08 stays reserved for M16 write_pixel)
@@ -46,11 +47,10 @@ SPANS_END_X = 0xFF                 # a fillCol record with x == 0xFF terminates 
 RASTER_TAG_FLOOR_VP = 0xFD
 RASTER_TAG_CEIL_VP = 0xFE
 RASTER_TAG_END = 0xFF
-LIGHTZSHIFT = 20                   # R_MapPlane: distance -> zidx bucket shift (mirrors reference_model)
-MAXLIGHTZ = 128
-LIGHTLEVELS = 16                   # zlight light buckets (sector light >> LIGHTSEGSHIFT)
-LIGHTSEGSHIFT = 4                  # sector light (0..255) -> zlight light bucket (0..15)
-COLORMAP_LIGHTS = 32                # colormap usable light rows (0..31)
+# CR-2026-08: the light-bucket constants come from the SSOT modules (doomfj.tables import
+# above; COLORMAP_LIGHTS here) instead of local re-hardcodes -- the device and the oracle
+# cannot drift apart on them.
+from doomfj.reference_model import COLORMAP_LIGHTS
 
 
 class StreamScreen(InMemoryScreen):
@@ -268,8 +268,13 @@ class StreamScreen(InMemoryScreen):
                 return
             if byte == 0xFE:                           # DITTO: copy column x-1 (owner-approved
                 x = self._cl_x                         # "rectangles" -- widen the previous lines
+                # CR-2026-08: a ditto for column 0 has no left neighbour -- python's negative
+                # indexing would silently copy the row ABOVE's last pixel; fail loudly instead
+                # (the fj emitter never dittoes column 0: the signature chain starts fresh).
+                assert x > 0, "collines DITTO for column 0 (no left neighbour to copy)"
                 for y in range(self.height):           # by one column; a pure mechanical copy)
-                    self.pixel_indices[y * self.width + x] =                         self.pixel_indices[y * self.width + x - 1]
+                    self.pixel_indices[y * self.width + x] = \
+                        self.pixel_indices[y * self.width + x - 1]
                 self._cl_x = None
                 return
             self._cl_pend = byte                       # y2, awaiting its colour

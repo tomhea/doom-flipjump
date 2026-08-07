@@ -18,7 +18,6 @@ Needs Pillow (`pip install pillow`) -- silently skips PNG writing if absent (sti
 from __future__ import annotations
 
 import json
-from collections import Counter
 from pathlib import Path
 
 from doomfj.config import Config
@@ -42,12 +41,6 @@ def _save_png(frame, palette, path, cfg, scale=5):
     img.putdata([palette[b] for b in frame])
     img.resize((cfg.VIEW_W * scale, cfg.VIEW_H * scale), Image.NEAREST).save(path)
     return True
-
-
-def _mode_texel(texels) -> int:
-    """The most common palette index in a texel list -- a real representative color (NOT a mean
-    index; palette indices aren't luminance-ordered, so a mean index is a random hue)."""
-    return Counter(texels).most_common(1)[0][0]
 
 
 class PatternModel(ReferenceModel):
@@ -86,25 +79,10 @@ class PatternModel(ReferenceModel):
                     fb[y * W + x] = self._plane_pixel(colormap, ph, lt, base, y)
 
 
-class WallModel(ReferenceModel):
-    """Overrides _wall_texture to preview the tiny-canvas wall candidates (W1: 1x1 mode texel, W2:
-    1x16 vertical band strip from column 0). This is the SAME mechanism M13p4a ships -- the preview
-    is exactly what the fj rung will render, not an approximation."""
-    wall_mode = None  # "W1" | "W2"
-
-    def _wall_texture(self, asset_wad, name, cache):
-        real = super()._wall_texture(asset_wad, name, cache)
-        if real is None:
-            return None
-        texels, th, tw = real   # column-major: index = col*th + row
-        col0 = texels[:th]      # column 0's texels, row-major within the column
-        if self.wall_mode == "W1":
-            return [_mode_texel(texels)], 1, 1
-        if self.wall_mode == "W2":
-            n = 16
-            band = [col0[min(th - 1, r * th // n)] for r in range(n)]
-            return band, n, 1
-        raise ValueError(self.wall_mode)
+# CR-2026-08: the old WallModel._wall_texture override is GONE -- since M13p4a the oracle
+# takes wall_mode natively (render_wall_frame(wall_mode="W1"/"W2") -> _tiny_wall_canvas), with
+# the per-mode cache key that the override lacked (it flattened V2 sky's "textured" requests
+# too -- the documented cache-poisoning class). The W1/W2 sets below use the shipped mechanism.
 
 
 def _viewpoints(wad_path, mapname):
@@ -116,7 +94,8 @@ def _viewpoints(wad_path, mapname):
     return wad, [("spawn", spx, spy, sp.angle), ("rot45", spx, spy, A45)]
 
 
-def render_set(label, wad_path, mapname, asset_path, model_factory, floor_texturing=None, cfg=None):
+def render_set(label, wad_path, mapname, asset_path, model_factory, floor_texturing=None, cfg=None,
+               **render_kwargs):
     cfg = cfg or Config()
     wad, vps = _viewpoints(wad_path, mapname)
     asset = WadFile.from_path(asset_path) if asset_path else wad
@@ -127,7 +106,7 @@ def render_set(label, wad_path, mapname, asset_path, model_factory, floor_textur
         from doomfj.reference_model import SimState
         state = SimState(vx << 16, vy << 16, va, mapname)
         kwargs = {} if floor_texturing is None else {"floor_texturing": floor_texturing}
-        frame = rm.render_wall_frame(state, scene, **kwargs)
+        frame = rm.render_wall_frame(state, scene, **kwargs, **render_kwargs)
         name = f"{label}_{Path(wad_path).stem}_{tag}"
         _save_png(frame, asset.playpal(0), OUT / f"{name}.png", cfg)
         stats[name] = {"hash": frame_hash(frame), "distinct_palette_indices": len(set(frame))}
@@ -175,12 +154,11 @@ def main():
         results[p] = render_set(p, ROOM, "MAP01", ASSET, factory, floor_texturing=False, cfg=cfg)
         results[p].update(render_set(p, E1M1, "E1M1", None, factory, floor_texturing=False, cfg=cfg))
 
-    # W1/W2 wall candidates (textured floors kept, only the wall texture swapped)
+    # W1/W2 wall candidates (textured floors kept, only the wall texture swapped) -- the
+    # oracle's native wall_mode tier (see the note where WallModel used to be)
     for w in ("W1", "W2"):
-        def factory(w=w):
-            m = WallModel(cfg); m.wall_mode = w; return m
-        results[w] = render_set(w, ROOM, "MAP01", ASSET, factory, cfg=cfg)
-        results[w].update(render_set(w, E1M1, "E1M1", None, factory, cfg=cfg))
+        results[w] = render_set(w, ROOM, "MAP01", ASSET, ReferenceModel, cfg=cfg, wall_mode=w)
+        results[w].update(render_set(w, E1M1, "E1M1", None, ReferenceModel, cfg=cfg, wall_mode=w))
 
     # the owed #9a+#11 consolidated bless: current vs pre-campaign (0f1c94b), spawn viewpoint only
     if PRECAMPAIGN_SQUARE.exists() and PRECAMPAIGN_E1M1.exists():

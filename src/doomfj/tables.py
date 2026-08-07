@@ -82,7 +82,11 @@ def scalelight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
         startmap = ((LIGHTLEVELS - 1 - i) * 2) * num_colormaps // LIGHTLEVELS
         row = []
         for j in range(MAXLIGHTSCALE):
-            level = startmap - j * (DOOM_SCREENWIDTH // view_w) // DISTMAP
+            # CR-2026-08: DOOM's left-to-right integer order `j*SCREENWIDTH/viewwidth/DISTMAP`,
+            # verbatim -- the earlier `j * (SCREENWIDTH // viewwidth)` pre-floor is identical
+            # whenever view_w divides 320 (all shipped widths) but drifts on any width that
+            # does not, and this table's whole claim is DOOM's formula bit for bit.
+            level = startmap - j * DOOM_SCREENWIDTH // view_w // DISTMAP
             row.append(max(0, min(num_colormaps - 1, level)))
         grid.append(row)
     return grid

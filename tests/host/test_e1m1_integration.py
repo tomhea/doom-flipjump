@@ -17,10 +17,13 @@ from doomfj.wad import WadFile
 
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")
 SPRITE_WAD = Path("assets/freedoom1.wad")     # V4 art: the cut-down fixture has no sprite lumps
-SPAN_LO, SPAN_HI = 9_000_000, 18_000_000      # sanity band around the measured shipping-tier span
-                                              # (12.89M words: the lines raster deletes both 16K-pixel
-                                              # framebuffer unrolls, which more than pays for the
-                                              # sprite bank -- the pre-lines tier was ~24.7M)
+SPAN_LO, SPAN_HI = 40_000_000, 62_000_000     # sanity band around the measured default-build span:
+                                              # 51.21M words (CR-2026-08 recalibration -- the old
+                                              # 9-18M band predated V4-HD full-res sprite buckets,
+                                              # V5 stacked pieces/regions and SPR-NEAR's dual bank;
+                                              # this hour-long gate had not run since). The hard
+                                              # ceiling stays the separate `span < 1<<26` assert;
+                                              # HI at 62M leaves real headroom warning-room below it.
 
 
 # ── the downscale factor is config-derived (R6) ─────────────────────────────

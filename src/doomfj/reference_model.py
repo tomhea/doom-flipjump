@@ -439,6 +439,9 @@ class ReferenceModel:
         is the measured-exact width for real scale operands (12 truncates); precision vs the exact
         divide: 0.29% max relative over the 320 real spawn scale calls = sub-pixel wall-edge shift
         (<0.3px), re-blessed under the owner's 'game standards' rule."""
+        # CR-2026-08: den_abs == 0 would spin the left-normalize loop forever -- fail loudly.
+        # (This is the shared SSOT reciprocal kernel; every caller owns a nonzero denominator.)
+        assert den_abs > 0, f"_scale_recip_div: den_abs must be positive, got {den_abs}"
         sden = den_abs
         fsh = 6
         while sden > 0xFFF:
@@ -932,7 +935,7 @@ class ReferenceModel:
         only the flat/light changes): a 1-ROW face at the near surface's edge row. The lip is
         what makes DROP-OFFS visible -- the region-behind machinery then paints the far flat
         beyond the edge, so descending stairs show treads and the nukage pool shows from its
-        bank (the owner's green-floor/stairs asks, 2026-08-04). An upper lip between two
+        bank (the owner's green-floor/stairs asks, 2026-08-04). Any upper piece between two
         F_SKY1 ceilings is suppressed (the V2 sky rule: nothing may draw lines in the sky)."""
         # V5-DROP-P2 (owner's (1210,1187) field-flip, 2026-08-04): lips fire on HEIGHT or
         # MATERIAL changes only, never light-only shading. Light-lips were stealing both
@@ -944,7 +947,10 @@ class ReferenceModel:
         lo = fsec.floor_h != bsec.floor_h or fsec.floor_tex != bsec.floor_tex
         um = 0 if not up else (1 if fsec.ceil_h > bsec.ceil_h else 2)
         lm = 0 if not lo else (1 if bsec.floor_h > fsec.floor_h else 2)
-        if um == 2 and sky and (fsec.ceil_tex or "").upper() == "F_SKY1" \
+        # CR-2026-08: BOTH upper modes are suppressed between two F_SKY1 ceilings, not just
+        # the lip -- a RISER there is a face floating in the sky (DOOM's own sky hack skips
+        # the upper entirely when both sides are sky).
+        if um and sky and (fsec.ceil_tex or "").upper() == "F_SKY1" \
                 and (bsec.ceil_tex or "").upper() == "F_SKY1":
             um = 0
         return um, lm
@@ -1146,8 +1152,9 @@ class ReferenceModel:
                       min_h: int | None = None):
         """V4 — R_ProjectSprite in this repo's fixed point: the billboard's screen box.
 
-        Returns `(x1, x2, ytop, h, istep)` — inclusive column range, the screen row of the sprite's
-        top, its exact on-screen pixel height, and the DOWNSCALED-texel-per-column DDA step — or
+        Returns `(x1, x2, ytop, h, istep, tz)` — inclusive column range, the screen row of the
+        sprite's top, its exact on-screen pixel height, the DOWNSCALED-texel-per-column DDA step,
+        and the view-space depth (SPR-NEAR keys quality tiers off it) — or
         None if the thing is behind the eye, too near, or outside the view. Mirrors DOOM: the two
         rotated coordinates `tz` (depth) and `tx` (lateral) from one cos/sin pair and four
         FixedMuls, then ONE FixedDiv for the scale."""
@@ -1362,9 +1369,9 @@ class ReferenceModel:
                           sprite_wad=None, things_out: list | None = None,
                           bbox_cull: bool = False, stack_steps: bool = False,
                           steps_out: list | None = None,
-                          deg_things: tuple | None = None, deg_sliver: int = 0,
-                          deg_stack_scale: int = 0, deg_mark: int = 0,
-                          deg_lip_scale: int = 0,
+                          deg_things: tuple | None = None, deg_sliver: int | None = None,
+                          deg_stack_scale: int | None = None, deg_mark: int | None = None,
+                          deg_lip_scale: int | None = None,
                           degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -1403,14 +1410,24 @@ class ReferenceModel:
         bit-exactly (D12)."""
         cfg = self.cfg
         # 25M-CAP: `degrade=True` turns on the whole certified adaptive-degradation package;
-        # the individual deg_* kwargs stay as research overrides (any explicit value wins).
+        # the individual deg_* kwargs stay as research overrides (any explicit value wins --
+        # CR-2026-08: the sentinel is None, not falsiness, so an explicit 0 = "this lever OFF").
         if degrade:
-            deg_things = deg_things or (DEG_SOFT_SCENERY, DEG_MINH2_SCENERY,
-                                        DEG_SOFT_MON, DEG_MINH2_MON)
-            deg_sliver = deg_sliver or DEG_SLIVER_W
-            deg_stack_scale = deg_stack_scale or DEG_STACK_SCALE
-            deg_mark = deg_mark or DEG_PNEAR
-            deg_lip_scale = deg_lip_scale or DEG_LIP_SCALE
+            if deg_things is None:
+                deg_things = (DEG_SOFT_SCENERY, DEG_MINH2_SCENERY,
+                              DEG_SOFT_MON, DEG_MINH2_MON)
+            if deg_sliver is None:
+                deg_sliver = DEG_SLIVER_W
+            if deg_stack_scale is None:
+                deg_stack_scale = DEG_STACK_SCALE
+            if deg_mark is None:
+                deg_mark = DEG_PNEAR
+            if deg_lip_scale is None:
+                deg_lip_scale = DEG_LIP_SCALE
+        deg_sliver = deg_sliver or 0
+        deg_stack_scale = deg_stack_scale or 0
+        deg_mark = deg_mark or 0
+        deg_lip_scale = deg_lip_scale or 0
         b_minh = DEG_SPRB_MINH if degrade else 0
         W, H = cfg.VIEW_W, cfg.VIEW_H
         fb = bytearray(cfg.FB_SIZE)                          # zero-init; visplanes + walls fill every column
@@ -1631,8 +1648,6 @@ class ReferenceModel:
                 # full ~93k wall_scale_setup, and at a heavy viewpoint 128 marking segs would all
                 # otherwise qualify. Measured: only 2 boundaries at spawn have a face at all.
                 # V5-DROP: um_/lm_ (0 none / 1 riser / 2 lip) computed above, before the stop
-                has_up = um_ == 1
-                has_lo = lm_ == 1
                 face_seg = near_steps and (um_ or lm_) and n_face[0] < STEP_SEG_BUDGET
                 if face_seg:
                     n_face[0] += 1

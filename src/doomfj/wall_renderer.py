@@ -18,7 +18,6 @@ from doomfj.lut_generator import (
     generate_slopediv_recip8_lut_fj,
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
-    generate_zlight_cuts_fj,
 )
 from doomfj.reference_model import ANG90
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
@@ -28,7 +27,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
                                     SPRITE_HD_H, SPRITE_RUN_CAP_HD,
                                     DEG_SOFT_SCENERY, DEG_MINH2_SCENERY, DEG_SOFT_MON,
                                     DEG_MINH2_MON, DEG_SPRB_MINH, DEG_SLIVER_W,
-                                    DEG_STACK_SCALE, DEG_PNEAR, DEG_HD_BUDGET, DEG_DDA_FACES,
+                                    DEG_STACK_SCALE, DEG_PNEAR, DEG_DDA_FACES,
                                     DEG_LIP_SCALE, DEG_SPR_LOWRES_H, DEG_SPR_LOWRES_CAP,
                                     DEG_SPR_NEAR_TZ,
                                     DEG_SPR_MID_CAP,
@@ -40,7 +39,6 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
-from doomfj.coarse_cull import generate_coarse_bounds_fj
 from doomfj.lut_generator import generate_bands_walk_fj, generate_w1r_walls_fj
 from doomfj.tables import (tantoangle_table, slopediv_recip8_table, slopediv_recip_table,
                            xtoviewangle_table)
@@ -96,6 +94,11 @@ DW_BITS = 64                   # `dw` in address units at w=32 (2w), for baked d
 TS_ECAP = 24                   # M13-2S rung 3b: buffered REGIONS per column per side,
                                # 5 bytes each ([kind][arg:2][y1][yend]). Measured worst
                                # over 30 E1M1 viewpoints: 14 top / 10 bottom.
+# CR-2026-08: flush_frame's ditto byte count is `5*entries` computed in a 2-NIBBLE register
+# (stream_render.fj `hex.mul_const 2, cn, tn, 5`), which wraps silently past 255 -- so the
+# cap must keep 5*(TS_ECAP+1) inside one byte. Raising TS_ECAP past 50 needs that register
+# widened first.
+assert 5 * (TS_ECAP + 1) <= 255, "TS_ECAP overflows flush_frame's 2-nibble ditto byte count"
 MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Bound: a monotone half-window's
                                   # zidx walk gives <=32 distinct zrow runs (zlight[lvl][zidx] is monotone in
                                   # zidx with values in [0,31]); a horizon-STRADDLING window (negative-viewz
@@ -248,6 +251,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # comparison of it -- without the grain the pattern key does not exist at runtime.
     assert not w1r_flag or wall_noise, "wall_mode='W1R' requires wall_noise=True (V1's gnrow)"
     assert not (w1r_flag and two_sided), "wall_mode='W1R' is not wired into the two_sided leaf"
+    # CR-2026-08: emit_region has NO rep(w2s) windowed wall emitter (stream_render.fj, the
+    # 'KNOWN GAP' note): a sprite-fragmented column in a W2S build would emit no wall piece
+    # and let the floor pairs paint the wall rows. Refuse the combination at build time.
+    assert not (wall_mode == "W2S" and things), \
+        "wall_mode='W2S' has no windowed wall emitter for sprite-fragmented columns (things=True)"
     # V5: stacked boundary pieces + per-boundary plane regions ride the V3 slot machinery and
     # the pnear pid bank -- both must be on.
     stack_flag = 1 if stack_steps else 0
@@ -585,6 +593,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # plane_near the layout is EXACTLY the old shared-key one.
         lines_bank_keys = ([k for pair in lines_pid for k in pair] if plane_near
                            else list(lines_key_ids))
+        # CR-2026-08: a pid must fit ONE BYTE everywhere it flows (the per-column pclm store is
+        # `hex.write_byte pptr, seg_pid`, and skypid dispatches on 2 nibbles). E1M1-lite bakes
+        # ~230 pairs; a denser map would silently alias pids without this.
+        assert len(lines_pid) <= 255, f"lines_pid needs one byte, got {len(lines_pid)} pids"
         # ... and which PIDs are sky at all. A pid is (ceiling key, floor key) and the ceiling key
         # carries the flat NAME, so sky-ness is decided entirely at compile time: one dispatch per
         # column tells the emit loop whether to take the sky list or the plane list. pids are 1-based
@@ -892,7 +904,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
                                ("bceilfix", 8, (_bs.ceil_h << 16) & 0xFFFFFFFF),
                                ("bfloorfix", 8, (_bs.floor_h << 16) & 0xFFFFFFFF),
-                               ("seg_pid", 4, lines_pid[_plane_keys(ssec)])]
+                               # CR-2026-08: width 2, matching the `seg_pid: hex.vec 2` decl --
+                               # a 4-nibble bake would address the neighbouring declaration
+                               # (pids are byte-sized by the assert at the registry).
+                               ("seg_pid", 2, lines_pid[_plane_keys(ssec)])]
                     xorby_blocks[si] = (_seg_xorby_block(f"{si}G", gfields)
                                         + _seg_xorby_block(f"{si}R", rfields))
                     out += [f"    stl.fcall seg{si}G_xorby, xb_ret",
@@ -1302,7 +1317,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
               f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
               f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"] if plane_near else []),
-           *(["thing_leaf:",
+           # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
+           # log2(ds) (`rep(#ds - 1, ...)`), exact only for power-of-two downscales.
+           *([_assert_pow2_ds(cfg.TEXTURE_DOWNSCALE), "thing_leaf:",
               f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
               f"{proj}, {cfg.CENTERX}, "
               f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
@@ -1965,6 +1982,15 @@ def _spr_nlow(cfg):
     """How many SHORT buckets (< DEG_SPR_LOWRES_H px) there are -- monotone, so a prefix."""
     return sum(1 for b in range(SPRITE_HEIGHT_BUCKETS)
                if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
+
+
+def _assert_pow2_ds(ds: int) -> str:
+    """Guard project_thing's compile-time istep shift (`rep(#ds - 1, ...)` = /2^log2(ds)):
+    exact only for power-of-two downscales. Returns an empty emitted line so the check can sit
+    inline in the emit list right where the value is consumed."""
+    assert ds >= 1 and (ds & (ds - 1)) == 0, (
+        f"TEXTURE_DOWNSCALE={ds}: project_thing's istep shift needs a power of two")
+    return ""
 
 
 def _thing_sector(rm, cmap, lds, sds, secs, t):

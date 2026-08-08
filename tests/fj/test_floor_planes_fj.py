@@ -182,7 +182,8 @@ def test_e1m1_flat_planes_full_frame_byte_exact_and_golden(tmp_path):
 def test_e1m1_textured_planes_full_frame_byte_exact_and_golden(tmp_path):
     """M13d2 — THE FULL E1M1 TEXTURED floor/ceiling frame through the SHARED emit_wall_renderer (the same
     emitter build_doom ships, R6), byte-exact vs the host oracle render_wall_frame() (textured DEFAULT) and
-    matching the published M13b E1M1 spawn golden db5d3da8. The MULTI-SECTOR capstone the single-sector square
+    matching E1M1_TEX_GOLDEN (b7a28e38, the perf-#9+#11 re-blessed textured spawn golden that superseded the
+    original M13b db5d3da8). The MULTI-SECTOR capstone the single-sector square
     room cannot give: across E1M1's 575 one-sided segs the per-seg ceil/floor heights, flats (the 37-slice
     combined flat table -> 5-nibble slice offsets), and RAW sector light all VARY; the per-column plane params
     are baked per seg via the xor_by involution + stored per claimed column, then the runtime per-ROW span pass

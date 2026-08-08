@@ -1,7 +1,7 @@
 """M13p0 step 3c -- host-side until-full counts (sizes M13pG1's walk-abort win). Calls the oracle's
-OWN `bsp_render_order`/`wall_x_range`/`_seg_sector` (no duplicated math, no drift) and counts, at each
-of 3 viewpoints: how many subsectors (and their seg ranges) are visited, and how many segs reach
-`wall_x_range` BEFORE every screen column is claimed (`all(drawn)`) -- the post-full share is what
+OWN `bsp_render_order`/`wall_x_range` (no duplicated math, no drift) and counts, at each of 3
+viewpoints: how many subsectors and one-sided segs are visited (and how many of those segs pass
+`wall_x_range`) BEFORE every screen column is claimed (`all(drawn)`) -- the post-full share is what
 pG1's full-abort walk guard deletes.
 
 Usage: python scripts/count_until_full.py
@@ -21,8 +21,6 @@ def count_one(rm, scene, vx, vy, viewangle):
     cfg = rm.cfg
     W = cfg.VIEW_W
     lds = scene.map_wad.linedefs(scene.mapname)
-    sds = scene.map_wad.sidedefs(scene.mapname)
-    secs = scene.map_wad.sectors(scene.mapname)
     verts = scene.cmap.vertexes
 
     order = rm.bsp_render_order(scene.cmap, vx, vy)         # the front-to-back subsector visit order

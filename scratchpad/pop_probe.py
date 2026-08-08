@@ -55,6 +55,7 @@ for j, (vx, vy) in enumerate(P):
     prev = fb
 
 # second row: the same path with the LIP FAR GATE OFF (deg_lip_scale huge->0 disables gating)
+_orig_lip_scale = RM.DEG_LIP_SCALE
 RM.DEG_LIP_SCALE = 0
 for j, (vx, vy) in enumerate(P):
     fb = render(vx, vy)
@@ -64,6 +65,6 @@ for j, (vx, vy) in enumerate(P):
                                                            8 + (H * S + 10)))
     d = sum(1 for a, b in zip(frames[j], fb) if a != b)
     print(f"step {j} gate-off px-diff vs gated {d}")
-RM.DEG_LIP_SCALE = 16384
+RM.DEG_LIP_SCALE = _orig_lip_scale
 sheet.save(ROOT / "scratchpad" / "pop_probe.png")
 print("ok")

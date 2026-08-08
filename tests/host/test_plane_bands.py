@@ -4,13 +4,15 @@ step). This is the arithmetic the future fj column-stream band-list emitter (pS2
 tests pin its correctness and its accepted approximation bound (<=1 row shift vs the always-exact
 per-pixel formula) BEFORE it is wired into any renderer or oracle output.
 
-Not yet consumed by `_render_planes_flat` (still exact, byte-identical to the shipped flat goldens and
-the current row-major fj kernel) -- see the docstring on `_render_planes_flat` for why the wiring waits
-for the fj-side replacement to land in the same rung.
+Now CONSUMED by `_render_planes_flat` (the F4 re-bless): the flat tier's per-row zidx comes from one
+shared full-range `_zidx_band_walk` per planeheight (sliced per column), mirrored bit-for-bit by the fj
+column-stream `plane.build_bands` -- see the docstring on `_render_planes_flat` for the measured <=1-row
+band-edge drift vs the always-exact per-pixel formula.
 """
 from doomfj.config import Config
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.reference_model import ReferenceModel, build_scene, spawn_state
+from doomfj.tables import LIGHTZSHIFT, MAXLIGHTZ
 from doomfj.wad import WadFile
 
 E1M1 = "tests/fixtures/freedoom_e1m1.wad"
@@ -18,7 +20,7 @@ E1M1 = "tests/fixtures/freedoom_e1m1.wad"
 
 def _exact_zidx(rm, ph, y):
     dist = fixed_mul(ph, rm.yslope[y], 8, 4)
-    return min(127, dist >> 20)
+    return min(MAXLIGHTZ - 1, dist >> LIGHTZSHIFT)
 
 
 def _real_e1m1_planeheights(rm):

@@ -6,6 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image
 import doomfj.reference_model as RM
+from doomfj.config import Config
 from doomfj.reference_model import ReferenceModel, build_scene, spawn_state, frame_hash
 from doomfj.wad import WadFile
 
@@ -13,7 +14,8 @@ mw = WadFile.from_path("tests/fixtures/freedoom_e1m1.wad")
 sc = build_scene(mw, mw, "E1M1")
 st = spawn_state(mw, "E1M1")
 pal = [tuple(c) for c in mw.playpal()[:256]]
-W, H = 160, 100
+cfg = Config()
+W, H = cfg.VIEW_W, cfg.VIEW_H
 
 
 def render(bandfn):

@@ -41,11 +41,7 @@ BAMS = [int(a / (2 * math.pi) * (1 << 32)) & ANGLE_MASK for a in DIRS]
 def vsector(px, py):
     """index i such that angle(v-eye) in [BAMS[i], BAMS[i+1])."""
     ang = rm.point_to_angle(sp.x, sp.y, px << 16, py << 16)
-    best = None
-    for i, b in enumerate(BAMS):
-        if ((ang - b) & ANGLE_MASK) < ((ang - BAMS[best]) & ANGLE_MASK) if best is not None else True:
-            pass
-    # simpler: find i with (ang - BAMS[i]) mod 2^32 minimal among those where ang >= BAMS[i] going ccw
+    # find i with (ang - BAMS[i]) mod 2^32 minimal among those where ang >= BAMS[i] going ccw
     diffs = [((ang - b) & ANGLE_MASK) for b in BAMS]
     return diffs.index(min(diffs))
 

@@ -46,6 +46,8 @@ class DumpScreen(StreamScreen):
 fjm = sorted((ROOT / "scratchpad/fjmcache").glob("v4_*.fjm"),
              key=lambda p: p.stat().st_mtime)[-1]
 print("binary:", fjm.name)
+print(f"WARNING: picked newest v4_*.fjm by mtime ({fjm.name}); its build flags are NOT verified "
+      "against this script's oracle settings -- a stale/differently-flagged cache diffs falsely")
 scr = DumpScreen(COLS, stdin=f"{vx}\n{vy}\n{va}\n".encode())
 try:
     ops = FjmRunner(fjm).run(scr)

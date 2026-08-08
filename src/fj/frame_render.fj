@@ -2016,8 +2016,9 @@ ns frame {
     // perspective and no distance lighting, so a sky column IS just a band list -- which is why the
     // whole feature costs one dispatch and one add here and adds NO new emit path: the existing
     // ceiling prefix walk streams it unchanged.
-    // `u = skybase + skyoff[x]` needs NO MASK: both addends are <= 127 and the bank holds 256
-    // lists with entry u carrying sky column (u & 127), so the sum can never leave it (max 253).
+    // `u = skybase + skyoff[x]` needs NO MASK: skb is a full unmasked byte (viewangle>>24,
+    // <= 255) and skyoff[x] <= tw-1, and the bank holds SKY_BANK_MUL*tw lists with entry u
+    // carrying sky column (u & (tw-1)), so the sum (max SKY_BANK_MUL*tw - 2) can never leave it.
     // M13-15M: the ID twin — sky list u's two halves are ids SKY_BASE_ID + u*2 (+1 for desc);
     // the 16-nibble mul_const + label add of the address form die (they were 0.66M at the tree).
     def lines_sky_ceil_ids sky_base_id, skyall, cbufa, cbufd, x, skb, soff, issky, pidreg @ notsky, end {

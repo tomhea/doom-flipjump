@@ -46,12 +46,18 @@ __all__ = [
     "generate_trig_idioms_fj",
     "generate_packed_lut_fj",
     "generate_tantoangle_lut_fj",
+    "generate_slopediv_recip_lut_fj",
+    "generate_slopediv_recip8_lut_fj",
     "generate_finetangent_lut_fj",
     "generate_xtoviewangle_lut_fj",
     "generate_viewangletox_lut_fj",
     "generate_yslope_lut_fj",
+    "generate_yslope_packed_lut_fj",
     "generate_distscale_lut_fj",
     "generate_zlight_lut_fj",
+    "generate_zlight_packed_lut_fj",
+    "generate_bands_walk_fj",
+    "generate_w1r_walls_fj",
 ]
 
 
@@ -219,10 +225,10 @@ def generate_zlight_packed_lut_fj(label: str, view_w: int, num_colormaps: int) -
 
 
 # CR-2026-08: generate_zlight_cuts_fj (the M13-lines4 cut-point tables for the binary-search
-# band builder) was REMOVED here -- zero callers repo-wide once wall_renderer dropped its dead
-# import; its only conceptual consumer, plane.build_bands_bs, was never instantiated either
-# (the shipped band builder is the linear zidx walk). Recover both from git history if the
-# binary-search experiment is ever picked back up.
+# band builder) was REMOVED here, and its only conceptual consumer -- the never-instantiated
+# plane.build_bands_bs macro -- was removed from plane_bands.fj in the same cleanup (the
+# shipped band builder is the linear zidx walk). Recover both together from git history if
+# the binary-search experiment is ever picked back up.
 
 
 def generate_distscale_lut_fj(label: str, view_w: int, trig_n: int) -> str:
@@ -697,13 +703,6 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
     for k in range(pad):
         if k >= n:
             out.append(f"    ;vpb_clean__ + {k}*dw")
-        elif owner[k] != k:
-            # shared content: enter the owner's body through a per-id thunk so the CLEAN still
-            # un-xors THIS id. The body must therefore end by jumping through a RETURN REGISTER --
-            # simplest: bodies end at a per-id trampoline. Instead: entries with shared content get
-            # their own tiny handler that jumps to the owner's PAIR CODE with the exit label in
-            # vpb_x (a raw jump-target op), and the owner's terminal jumps go through vpb_x.
-            out.append(f"    ;vpb_t{k}")
         else:
             out.append(f"    ;vpb_t{k}")
     # per-id thunks: fcall the (possibly shared) body, then clean with THIS id. stl.fcall/fret
@@ -752,14 +751,15 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
     """M13-W1R -- the RANDOMIZED W1 wall walkers, baked from `ReferenceModel.W1R_TIER_BOUNDS` /
     `W1R_PATTERNS` (R6: the oracle's own tables, so the two sides cannot drift).
 
-    `walk wlen, ctake, fstart, gnrow, wall_lit, cmidx` emits the full wall [ctake, fstart) as
-    the (height tier, grain group)'s cycled run list: per run one `hex.add_constant` on the
-    running y2, one `hex.cmp` vs fstart (>= -> clamp to fstart and stop), `byte.emit` +
-    `cm.emit` with the run's baked colormap row over the seg's `wall_lit` low byte (V1's grain
+    `walk wlen, ctake, fstart, gnrow, wall_lit, wall_lit2, cmidx` emits the full wall
+    [ctake, fstart) as the (height tier, grain group)'s cycled run list: per run one
+    `hex.add_constant` on the running y2, one `hex.cmp` vs fstart (>= -> clamp to fstart and
+    stop), `byte.emit` + `cm.emit` with the run's baked colormap row over the run's colour low
+    byte -- `wall_lit` or `wall_lit2` per the run's baked W1R-2C alt bit (V1's grain
     mechanism -- same colour, different shade, never a hue jump). The final pair always ends
     exactly at fstart, mirroring `ReferenceModel.w1r_runs` pair for pair.
 
-    `walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, cmidx` is the emit_region twin: the
+    `walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, wall_lit2, cmidx` is the emit_region twin: the
     SAME absolute pattern (anchored at ctake, tier from fstart-ctake) restricted to [wlo, whi)
     -- runs ending at or before wlo are skipped unemitted, the run crossing whi clamps there.
     Windowed truncation is exact because a truncated first/last pair covers a row subset of the

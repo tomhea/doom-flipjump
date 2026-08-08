@@ -78,14 +78,17 @@ The ceiling is already emitted by walking a baked `[y2_cumulative][colour]` band
 sits in `cbufa`. A sky column is **exactly the same walk against a different list**, because a sky
 column has no perspective and no lighting — so it IS just a band list. Therefore:
 
-1. Bake `skybands`: **256 lists** over rows [0, H), same format as the plane band lists.
-2. Per frame: `skybase = (viewangle >> 23) & 127` — one shift and mask, once.
+1. Bake `skybands`: **`SKY_BANK_MUL*tw` lists** (3×128 = 384 as shipped) over rows [0, H), same
+   format as the plane band lists.
+2. Per frame: `skybase = viewangle >> 24` — one whole-nibble shift, once, **no mask at all**
+   (a full unmasked byte, ≤ 255).
 3. Per column: `u = skybase + skyoff[x]` where `skyoff[x]` is a **compile-time** constant (a
    dispatch table over x, exactly like `wnoise`), then `cbufa = skybands + u*stride`.
 4. The existing prefix walk emits it. **No new emit path at all.**
 
-⚠ **Why 256 lists and not 128:** both addends are already in [0, 127], so `skybase + skyoff[x]`
-never exceeds 254 — and with entry `u` holding sky column `u & 127`, **the wrap needs no mask**.
+⚠ **Why an over-sized bank instead of a mask:** skb ≤ 255 and skyoff ≤ tw−1 = 127, so
+`skybase + skyoff[x]` never exceeds 382 — and with entry `u` holding sky column `u & (tw-1)`,
+**the wrap needs no mask**.
 That matters because fj has no cheap AND: masking would cost a dispatch, or a compare-and-subtract,
 *per column*. The duplicate half is pure static text (~477k chars against the 8.9M-char wall bank).
 Trading baked data for an omitted runtime op is the same bargain the wall bank already makes.

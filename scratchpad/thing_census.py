@@ -22,14 +22,19 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 import doomfj.reference_model as RM                                       # noqa: E402
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
-from doomfj.reference_model import (THING_SPRITE, ReferenceModel, SimState,  # noqa: E402
-                                    build_scene, spawn_state)
+from doomfj import mapsimplify as MS                                      # noqa: E402
+from doomfj.reference_model import (MONSTER_TYPES, THING_SPRITE, ReferenceModel,  # noqa: E402
+                                    SimState, build_scene, spawn_state)
 from doomfj.wad import WadFile                                            # noqa: E402
 
-MONSTERS = {9, 58, 64, 65, 66, 67, 68, 69, 71, 84, 3001, 3002, 3003, 3004, 3005, 3006, 7, 16, 88}
-PICKUPS = {8, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2010, 2011, 2012, 2013, 2014, 2015,
-           2018, 2019, 2022, 2023, 2024, 2025, 2026, 2045, 2046, 2047, 2048, 2049}
-STARTS = {1, 2, 3, 4, 11, 14}
+# taxonomy derived from the canonical sources, not re-hardcoded: monsters = the renderer's own
+# MONSTER_TYPES (reference_model, exact match with the old hand list); starts/pickup families =
+# mapsimplify's thing taxonomy. NOTE: the derived PICKUPS is a strict superset of the old hand
+# list -- it adds keys (5,6,13,38,39,40), cell pack (17) and chainsaw (82), which the old list
+# wrongly left in "decor".
+MONSTERS = set(MONSTER_TYPES)
+PICKUPS = MS.WEAPONS | MS.KEYS | MS.BIG_PICKUPS | MS.BONUSES
+STARTS = set(MS.STARTS)
 
 
 def category(t):

@@ -546,7 +546,6 @@ class StreamScreen(InMemoryScreen):
         centeryfix = (self.height // 2) << 16
         painted = self._raster_painted
         scale &= 0xFFFFFFFF
-        x1c, x2c = max(0, x1), min(self.width, x2)
         # DOOM accumulates rw_scale from x1 even when x1 < 0 -- but the oracle render loop starts
         # its scale at x1 and only touches drawn columns; mirror render_wall_frame's loop exactly:
         for x in range(x1, x2):

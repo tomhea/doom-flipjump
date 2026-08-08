@@ -73,8 +73,7 @@ for x in sorted(cols):
         print("  ...")
         break
 pal = mw.playpal()
-im = Image.new("RGB", (VW * 2, VH))
-im.putdata([pal[c] for c in want] and [])
+im = Image.new("RGB", (VW * 2, VH))   # fully covered by the two pastes below
 imw = Image.new("RGB", (VW, VH)); imw.putdata([pal[c] for c in want])
 img = Image.new("RGB", (VW, VH)); img.putdata([pal[c] for c in got])
 im.paste(imw, (0, 0)); im.paste(img, (VW, 0))

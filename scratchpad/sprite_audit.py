@@ -1,10 +1,11 @@
 """Sprite-visibility AUDIT (owner guarantee: "all sprites always shown when possible").
 
-For every sweep frame: ground truth = things that project on-screen with >= 1 column not yet
-closed by a NEARER wall at record time; compare against what the renderer actually recorded.
-Classify misses: SLOTS (both fragment slots taken by nearer sprites -- the V4b protocol limit),
-MINSIZE (smaller than the acceptance bar -- policy), STOPPED (the monotone stop -- must be 0
-after the full-latch fix), OTHER (bugs).
+For every sweep frame: count things that project_thing ACCEPTS (projected on-screen and past the
+min-size bar) and, via the renderer's `_thing_stats`, how many arrivals the monotone thing-stop
+skipped (`th_claim_stopped` -- must be 0 on non-full frames after the full-latch fix); print the
+worst offending frames. NOTE: it does NOT classify misses further (no SLOTS / MINSIZE / OTHER
+breakdown -- the `miss_slots`/`miss_minsize`/`miss_other` counters are placeholders, never
+incremented).
 
     python scratchpad/sprite_audit.py [--limit N]
 """

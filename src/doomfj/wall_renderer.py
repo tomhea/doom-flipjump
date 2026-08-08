@@ -82,14 +82,6 @@ _ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wed
                            "noprescan", "noproj", "projtwice", "scaletwice", "skyall",
                            "sprnoemit", "thingtwice"})
 
-# M13-lines5: xorby fields the LINES leaf never reads (the device prints raw lines; fj's own emit
-# uses seg_lit + the flat bases, not the texture machinery). SET+CLEAR runs for every walk-reached
-# seg, so each dead field costs twice per seg. Keep in sync with seg_pass1_leaf_body_lines's `<`
-# list. (ceilfix/floorfix STAY: column_render_params_stream reads them.)
-_LINES_DEAD_FIELDS = frozenset({"seg_texoff", "seg_texbase", "seg_texheight", "seg_tw",
-                                "seg_hm", "seg_light", "seg_ceil", "seg_floor", "seg_plight",
-                                "seg_ceilbase", "seg_floorbase"})
-
 DW_BITS = 64                   # `dw` in address units at w=32 (2w), for baked dw-offsets
 TS_ECAP = 24                   # M13-2S rung 3b: buffered REGIONS per column per side,
                                # 5 bytes each ([kind][arg:2][y1][yend]). Measured worst
@@ -1046,9 +1038,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                       ("seg_plight", 2, ssec.light & 0xFF),         # RAW sector light (zlight does >>4)
                       ("seg_ceilbase", 5, _flatval(ssec.ceil_tex)),   # M13d2 slice offset / M13p1 base index
                       ("seg_floorbase", 5, _flatval(ssec.floor_tex))]
-            if stream or raster or lines:
+            if stream or raster:
                 # M13pS2c: the W1 wall's lit colour is fully constant (one texel, one light row) --
                 # bake the FINAL palette byte at Python emit time (no runtime colormap lookup at all).
+                # (Lines mode never reaches this half of the action -- it returned above -- so the
+                # old `or lines` term here and the _LINES_DEAD_FIELDS filter below it were dead;
+                # removed in the CR-2026-08 refactor on the same unreachability proof as the arm.)
                 fields.append(("seg_lit", 2, wlit(ssec.light, combined[tb],
                                                   flat_wall=tb in w1r_flat_tb)))
                 if w1r_flag:
@@ -1056,28 +1051,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                                        flat_wall=tb in w1r_flat_tb)))
                     fields.append(("seg_w1rf", 1, 1 if tb in w1r_flat_tb else 0))
                 # M13pS2-crush2b: the seg's ceiling/floor visplane indices (shared band lists in
-                # stream mode; shared device-side row->colour arrays in raster mode)
-                # M13-lines2: lines mode keys visplanes on (height, light) ONLY -- the flat
-                # base colour is applied at emit time from the seg's own register, so planes
-                # differing only in flat share one band list.
-                if lines:
-                    # baked DW-OFFSETS into the frame's viewz bank (list stride 130 dw)
-                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
-                            ssec.ceil_tex.upper())
-                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
-                            ssec.floor_tex.upper())
-                    fields.append(("seg_cvpidx", "w/4", lines_key_ids[ckey] * 2 if ascode
-                                   else f"{lines_key_ids[ckey] * 130}*dw"))
-                    fields.append(("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw"))
-                else:
-                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
-                            ssec.ceil_tex.upper())
-                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
-                            ssec.floor_tex.upper())
-                    fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
-                    fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
-            if lines:
-                fields = [f for f in fields if f[0] not in _LINES_DEAD_FIELDS]
+                # stream mode; shared device-side row->colour arrays in raster mode).
+                ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
+                        ssec.ceil_tex.upper())
+                fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
+                        ssec.floor_tex.upper())
+                fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
+                fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
             xorby_blocks[si] = _seg_xorby_block(si, fields)
             out += _seg_xorby_use(si)
         if stream or raster or lines:
@@ -1583,6 +1563,11 @@ def _band_pair_lists(rm, cfg, asset_wad, vz_classes: dict, key_ids, ft1: bool = 
         for (h, light, base, flatname) in key_ids:
             ph = abs((h << 16) - vzs)
             lvl = max(0, min(15, light >> 4))
+            # M13-FT1: the flat's DIAGONAL texels -- band ordinal j takes texel strip[j & 63]
+            # instead of every band sharing the flat's single base texel. Costs ZERO runtime ops
+            # (it only changes which byte is baked), and gives the floor real depth-varying texel
+            # colour on top of the distance shading. Sampling by band ORDINAL (not world u,v) is
+            # what keeps it free -- see docs/plan-w2-ft1.md for the honest scope statement.
             strip = None
             if ft1:
                 tx = rm._flat_texels(asset_wad, flatname, flatcache)
@@ -1607,7 +1592,7 @@ def _band_pair_lists(rm, cfg, asset_wad, vz_classes: dict, key_ids, ft1: bool = 
 
 def _sky_pair_lists(rm, asset_wad, cfg):
     """The sky lists in vpb_walk id order (u-major, asc then desc), mirroring _lines_sky_bank's
-    half() exactly — 2*tw entries of u so skybase+skyoff never needs a mask."""
+    half() exactly — SKY_BANK_MUL*tw entries of u so skybase+skyoff never needs a mask."""
     tex = rm._wall_texture(asset_wad, "SKY1", {}, wall_mode="textured")
     if tex is None:
         return []
@@ -1637,51 +1622,21 @@ def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict,
     """M13-bakedbands: the compile-time band-list bank. For every (viewz class, (h,light,base))
     pair, both half-window lists ([0,centery) asc + [centery,H) desc) with entries
     [y2_absolute:1B][final_colour:1B], grouped by FINAL colour (adjacent zrows sharing a colour
-    merge -- identical pixels, fewer pairs). Values from the SAME host walk the fj runtime build
-    mirrored (rm._zidx_band_walk + zlight + colormap), so frames are byte-identical to the
+    merge -- identical pixels, fewer pairs). The lists come from `_band_pair_lists` -- the SAME
+    SSOT walk the bands-as-code tier bakes from, itself mirroring the fj runtime build
+    (rm._zidx_band_walk + zlight + colormap) -- so frames are byte-identical to the
     runtime-built ones. Layout: list (class,key) at (class*len(keys)+key)*130 dw; asc half at +0
     ([n][pairs]), desc half at +65 dw."""
-    from doomfj.fixedpoint import _signed as _sgn
-    colormap = asset_wad.colormap()
-    flatcache: dict = {}
-    H, CY = cfg.VIEW_H, cfg.CENTERY
     half = LINES_HALF_SLOTS
     out = [f"// M13-bakedbands: {len(vz_classes)} viewz classes x {len(key_ids)} keys, 130 dw/list",
            "vpbank:"]
-    for vz in vz_classes:                                    # insertion order == class index
-        vzs = _sgn(vz, 32)
-        for (h, light, base, flatname) in key_ids:            # insertion order == key index
-            ph = abs((h << 16) - vzs)
-            lvl = max(0, min(15, light >> 4))
-            # M13-FT1: the flat's DIAGONAL texels -- band ordinal j takes texel strip[j & 63]
-            # instead of every band sharing the flat's single base texel. Costs ZERO runtime ops
-            # (it only changes which byte is baked), and gives the floor real depth-varying texel
-            # colour on top of the distance shading. Sampling by band ORDINAL (not world u,v) is
-            # what keeps it free -- see docs/plan-w2-ft1.md for the honest scope statement.
-            strip = None
-            if ft1:
-                tx = rm._flat_texels(asset_wad, flatname, flatcache)
-                strip = [tx[(i * 64 + i) % len(tx)] for i in range(64)]
-            for rows in (list(range(0, CY)), list(range(CY, H))):
-                zidx = rm._zidx_band_walk(ph, rows)
-                zrows = [rm.zlight[lvl][z] for z in zidx]
-                pairs, ordinal, prev_z = [], 0, None
-                for k, zr in enumerate(zrows):
-                    y2 = rows[k] + 1
-                    if prev_z is not None and zr != prev_z:
-                        ordinal += 1
-                    prev_z = zr
-                    colr = (colormap[zr][strip[ordinal & 63]] if ft1 else colormap[zr][base])
-                    if pairs and pairs[-1][1] == colr:
-                        pairs[-1][0] = y2
-                    else:
-                        pairs.append([y2, colr])
-                assert len(pairs) <= MAX_BANDS // 2, f"half list overflow: {len(pairs)}"
-                cell = [len(pairs)] + [b for pr in pairs for b in pr]
-                for b in cell:
-                    out.append(f";{b:#x} * dw")
-                for _ in range(half - len(cell)):
-                    out.append(";0 * dw")
+    for pairs in _band_pair_lists(rm, cfg, asset_wad, vz_classes, key_ids, ft1):
+        assert len(pairs) <= MAX_BANDS // 2, f"half list overflow: {len(pairs)}"
+        cell = [len(pairs)] + [b for pr in pairs for b in pr]
+        for b in cell:
+            out.append(f";{b:#x} * dw")
+        for _ in range(half - len(cell)):
+            out.append(";0 * dw")
     return NLJ.join(out) + NLJ
 
 
@@ -2089,15 +2044,18 @@ def _lines_sky_bank(rm, asset_wad, cfg):
     of static data — nothing beside the 8.9M-character wall bank — and it slots into the ceiling
     prefix walk that already exists, so V2 adds no emit path.
 
-    At runtime: `u = skybase + skyoff[x]` with `skybase = (viewangle >> shift) & (tw-1)` computed
-    once per frame, then the ceiling list address is `skybands + u*stride`.
+    At runtime: `u = skybase + skyoff[x]`, then the ceiling list address is `skybands + u*stride`.
+    `skybase` is the shifted viewangle taken as a full UNMASKED byte once per frame
+    (`lines_sky_base`'s 2-nibble mov); the oracle's `sky_base` folds in the `& (tw-1)` the fj
+    never pays — same column either way, since the bank wraps at tw.
 
-    ⚠ The bank holds **2*tw** lists, entry `u` carrying sky column `u & (tw-1)`. Both addends are
-    already in [0, tw-1], so their sum never exceeds 2*tw-2 and **the wrap needs no mask at all** —
-    which matters because fj has no cheap AND: masking would cost a dispatch or a compare-and-
-    subtract per column, while the duplicate half costs only static text (~477k characters against
-    the 8.9M-character wall bank). Trading a little baked data for an omitted runtime op is the same
-    bargain the wall bank already makes.
+    ⚠ The bank holds **SKY_BANK_MUL*tw** lists, entry `u` carrying sky column `u % tw`. `skyoff`
+    stays in [0, tw-1] but the unmasked skybase byte spans [0, 255], so their sum reaches at most
+    255 + tw-1 = SKY_BANK_MUL*tw - 2 (tw=128) and **the wrap needs no mask at all** — which
+    matters because fj has no cheap AND: masking would cost a dispatch or a compare-and-subtract
+    per column, while the extra copies cost only static text (~350k of the bank's ~530k
+    characters, against the 8.9M-character wall bank). Trading a little baked data for an omitted
+    runtime op is the same bargain the wall bank already makes.
 
     Values come from `ReferenceModel.sky_texel_u`, so oracle and fj cannot drift (R6)."""
     H = cfg.VIEW_H

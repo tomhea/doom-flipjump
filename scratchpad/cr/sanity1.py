@@ -13,7 +13,6 @@ import doomfj.mapcompiler as mc
 import doomfj.tables as tb
 import doomfj.build as bd
 import doomfj.fastrun as fr
-import doomfj.coarse_cull as cc
 import tests.fj.stream_screen as ss
 print("imports OK")
 

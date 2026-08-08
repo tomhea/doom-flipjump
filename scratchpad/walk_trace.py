@@ -59,6 +59,8 @@ term = fj.run(fjm, io_device=screen, profile=True, print_time=False, print_termi
               flat_max_words=1 << 26)
 print(f"ops={term.op_counter:,}  raw events={len(events)}")
 seq = [e for e in events if e != "TSLEAF"]
+# LIMITATION: collapsing ALL consecutive equal events also hides a genuine immediate revisit
+# of the same seg (visit, leave, immediately re-enter) -- acceptable for this diagnostic.
 dedup = []
 for e in seq:
     if not dedup or dedup[-1] != e:

@@ -180,14 +180,18 @@ DEG_SLIVER_W = 3                  # a wall whose whole projected span is <= this
 DEG_STACK_SCALE = 32768           # the SECOND stacked V5 piece only when the boundary's scale is
                                   # at least this (16.16: 16384 = tz <~ 320 map units). Near
                                   # stairs keep both risers; far doorways show one.
-DEG_PNEAR = 1024                  # the marking-seg budget under degrade. SMUDGE FIX (owner's
+DEG_PNEAR = 4095                  # the marking-seg budget under degrade. SMUDGE FIX (owner's
                                   # (1698,892) phantom columns, 2026-08-09): any budget that can
                                   # BIND hands mid-screen columns to a far one-sided wall's
                                   # sector -- giant wrong-colour shafts (73 of 260 sweep frames
-                                  # at the old 64; 17 still wrong at 256). 1024 NEVER binds on
-                                  # this map (< 731 segs total): attribution now runs to its
-                                  # natural stop (all columns wall-drawn), and the budget is
-                                  # only the pathological-map fuse. fj n_tsv is 3 nibbles.
+                                  # at the old 64; 17 still wrong at 256). 4095 = the 3-nibble
+                                  # fj counter's max, and the EMITTER ASSERTS the map's total
+                                  # seg count stays below it (n_ts counts a subset of segs), so
+                                  # the budget provably never binds: attribution runs to its
+                                  # natural stops (claim-complete / faces-spent / wall-drawn)
+                                  # and the count survives only as the assembler-width fuse.
+                                  # (CR-2026-08: an earlier 1024 claimed "never binds, < 731
+                                  # segs" -- wrong on both counts: lite has 1378, stock 2057.)
 DEG_LIP_SCALE = 16384             # V5-DROP far gate: LIP pieces (drop-offs / level flat changes)
                                   # only when the boundary's scale is at least this (16.16:
                                   # 16384 = tz <~ 320 map units, the stack gate's radius). A
@@ -1641,7 +1645,8 @@ class ReferenceModel:
                 if um_ == 0 == lm_ and n_claimed == cfg.VIEW_W:
                     continue
                 # SMUDGE FIX part 2 (2026-08-09): the PIECE-seg idle stop. With the count budget
-                # at never-binds (DEG_PNEAR 1024), the cost bound moves here: once every column
+                # at never-binds (DEG_PNEAR 4095, emitter-asserted), the cost bound moves here:
+                # once every column
                 # is attributed AND the face budget is spent, a piece-carrying seg's scan is
                 # pure reads (face_seg is false, pclaim[] all set) -- skipping it is
                 # PIXEL-NEUTRAL by construction, it only cuts the idle tail (~+14M/frame

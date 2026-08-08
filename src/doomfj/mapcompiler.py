@@ -400,16 +400,29 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             g = extra_gate(i, f"{L}_r{i}")
             if g:
                 lines += g
-        if plane_gate is not None and plane_gate(i):
+        _pg = plane_gate(i) if plane_gate is not None else 0
+        if _pg:
             # M13-2S rung 3a: this subtree has NO one-sided segs, so it can only contribute PLANE
-            # ATTRIBUTION -- nothing to draw, nothing that touches drawn[]/full. Once every column
-            # is attributed (`tsstop`) it is therefore dead, and one 1-nibble test skips it whole.
-            # This restores the M13-prune win that including two-sided segs in the walk removed:
-            # those 145 E1M1 subtrees are no longer prunable at COMPILE time (they do matter until
-            # attribution stops), so they are pruned at RUNTIME instead.
-            lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_pgo{i}")
-            lines.append(f"    stl.fret {L}_r{i}")
-            lines.append(f"{L}_pgo{i}:")
+            # ATTRIBUTION and (V5) boundary PIECES. Once nothing below can write, one runtime test
+            # skips it whole. This restores the M13-prune win that including two-sided segs in the
+            # walk removed: those 145 E1M1 subtrees are no longer prunable at COMPILE time, so
+            # they are pruned at RUNTIME instead.
+            # CR-2026-08: the gate MODE comes from the callback -- mode 1 (light-only subtree)
+            # tests plain tsstop (dead at claim-completion); mode 2 (the subtree holds
+            # PIECE-carrying segs) tests tsbstop|(tsstop&fbspent), the same compound the
+            # seg-level call sites use: pieces still record into attributed-but-undrawn columns,
+            # so plain tsstop here dropped riser/lip pieces the oracle records.
+            if _pg == 1:
+                lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_pgo{i}")
+                lines.append(f"    stl.fret {L}_r{i}")
+                lines.append(f"{L}_pgo{i}:")
+            else:
+                lines.append(f"    hex.if1 1, tsbstop, {L}_psk{i}")
+                lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_pgo{i}")
+                lines.append(f"    hex.if0 1, fbspent, {L}_pgo{i}")
+                lines.append(f"{L}_psk{i}:")
+                lines.append(f"    stl.fret {L}_r{i}")
+                lines.append(f"{L}_pgo{i}:")
         if inline_side:
             # M13-inlinenodes: the side test SPECIALIZED per node -- baked-const subtracts and
             # baked-magnitude multiplies, no shared-leaf fcalls, no xor_by SET/CLEAR involution.

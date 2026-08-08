@@ -1372,7 +1372,8 @@ ns stream {
         rep(1-w2s-wpx-w1r, k) .w1_wall fstart, wall_lit
         // M13-W1R: W1's one lit byte as pseudo-random runs, keyed (tier(wlen), gnrow) -- both
         // already in the ditto signature, so the ditto structure is untouched (zero new breaks).
-        // W1R-FLAT: the per-seg baked flag keeps texture-less / sky walls ONE flat tone.
+        // W1R-FLAT: the per-seg baked flag keeps TEXTURE-LESS walls one flat tone (sky walls
+        // pattern like any other since CR-2026-08).
         rep(deg*w1r, k) hex.if0 1, w1rslv, w1rn // 25M-CAP: a sliver seg renders the flat tone
         rep(deg*w1r, k) .w1_wall fstart, seg_litf
         rep(deg*w1r, k) .sjmp floor

@@ -1871,9 +1871,10 @@ ns frame {
         // reaches VIEW_W, and one such E1M1 viewpoint measured 69.6M ops/frame before this existed.
         // SMUDGE FIX (owner's (1698,892) phantom columns, 2026-08-09): a budget that BINDS hands
         // mid-screen columns to a far one-sided wall's sector -- giant wrong-colour shafts. The
-        // deg budget is now 1024 (never binds on this map: < 731 segs total); the counter is
-        // 3 NIBBLES so the compare stays honest. The full-latch above (all columns wall-drawn)
-        // is the real per-frame stop; the budget survives only as the pathological-map fuse.
+        // deg budget is now 4095 (the 3-NIBBLE counter's max) and the EMITTER asserts the map's
+        // total seg count stays below it, so it provably never binds. The full-latch above (all
+        // columns wall-drawn) + claim-complete + the fbspent idle stop are the real per-frame
+        // stops; the count survives only as the counter-width fuse.
         hex.inc 3, n_tsv
         hex.set 3, bcap, budget
         hex.cmp 3, n_tsv, bcap, bok, bstop, bok

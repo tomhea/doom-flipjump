@@ -484,7 +484,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         """The baked constant wall byte (`seg_lit`). W1R bakes it BRIGHTER by
         `W1R_BASE_BRIGHTEN` rows so the randomized run rows can move the tone BOTH ways
         around the W1 tone -- mirrors the oracle's W1R branch (`blr`) exactly (R6).
-        W1R-FLAT walls (no texture / sky) keep the plain UNbrightened W1 tone."""
+        W1R-FLAT walls (texture-less only since CR-2026-08; sky walls now pattern) keep the
+        plain UNbrightened W1 tone."""
         row = lrow(light)
         if wall_mode == "W1R" and not flat_wall:
             row = max(0, row - rm.W1R_BASE_BRIGHTEN)
@@ -537,6 +538,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     def _seg_as_solid(seg) -> bool:
         """Does this seg go down the one-sided (wall-emitting) path?"""
         return lds[seg.linedef].back == -1 or ("tsfull" in ablate and _seg_draws_wall(seg))
+
+    def _seg_as_piece(seg) -> bool:
+        """CR-2026-08 (the node-gate fix): is this a PIECE-CARRYING marking seg (um/lm nonzero)?
+        Piece segs must keep running after claim-completion until the face budget is spent, so a
+        gated subtree containing one needs the compound skip test, not plain tsstop."""
+        ld_ = lds[seg.linedef]
+        if ld_.back == -1 or not _seg_marks(seg):
+            return False
+        fs_ = secs[sds[ld_.front if seg.side == 0 else ld_.back].sector]
+        bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
+        um_, lm_ = rm.v5_side_modes(fs_, bs_, sky)
+        return bool(um_ or lm_)
 
     def _seg_in_walk(seg) -> bool:
         """Does the emitted walk do per-seg work for this seg? (the prune predicate's unit)
@@ -627,6 +640,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # planes, so it is dead once `tsstop` and gets the runtime tsstop gate instead).
     lines_walk_below: dict = {}
     lines_solid_below: dict = {}
+    lines_piece_below: dict = {}
     if lines:
         def _cnt(child, pred, memo):
             if child & NF_SUBSECTOR:
@@ -649,6 +663,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         _sys.setrecursionlimit(20000)
         _cnt(cmap.root, _seg_in_walk, lines_walk_below)
         _cnt(cmap.root, _seg_as_solid, lines_solid_below)
+        _cnt(cmap.root, _seg_as_piece, lines_piece_below)
         _sys.setrecursionlimit(_old_rl)
 
     def _lines_prune(child):
@@ -666,8 +681,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         return lines_walk_below.get(child, 1) == 0
 
     def _lines_plane_gate(node_i):
-        """Node blocks whose subtree holds no one-sided seg: skippable at runtime once tsstop."""
-        return lines_solid_below.get(node_i, 1) == 0
+        """Node blocks whose subtree holds no one-sided seg: skippable at runtime. Returns the
+        gate MODE: 0 = no gate; 1 = plain tsstop (subtree is light-only -- dead at
+        claim-completion); 2 = the compound test tsbstop|(tsstop&fbspent) (CR-2026-08: the
+        subtree holds PIECE-carrying marking segs, which the oracle keeps scanning after
+        claim-completion until the face budget is spent -- the old plain-tsstop gate dropped
+        their riser/lip pieces, the (1210,1187)/(1698,892) divergence class at node level)."""
+        if lines_solid_below.get(node_i, 1) != 0:
+            return 0
+        return 2 if (steps and lines_piece_below.get(node_i, 0)) else 1
 
     def _lines_descend_leaf(s):
         # the descend pre-walk's landing action: bake this subsector's viewz + band-bank pointer
@@ -935,7 +957,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                                flat_wall=tb in w1r_flat_tb)),
                            # W1R-2C: the SECOND colour byte -- the canvas's second texel
                            # (combined[tb+1] at the 2-texel W1R tier) through the same bake.
-                           # W1R-FLAT: the per-seg stay-flat flag (no texture / sky).
+                           # W1R-FLAT: the per-seg stay-flat flag (texture-less only;
+                           # sky walls pattern like any other since CR-2026-08).
                            *([("seg_lit2", 2, wlit(ssec.light, combined[tb + 1],
                                                    flat_wall=tb in w1r_flat_tb)),
                               ("seg_w1rf", 1, 1 if tb in w1r_flat_tb else 0)]
@@ -1319,7 +1342,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            *(["expand_leaf:",
               f"stream.entry_expand_body {cfg.CENTERY}, {LINES_HALF_SLOTS}, "
               f"{2 * WPX_RUN_CAP}, {(cfg.VIEW_H + 1) * 2 * WPX_RUN_CAP}"] if two_sided else []),
-           *(["seg_pass1_ts_leaf:",
+           # CR-2026-08: the deg attribution budget must provably never bind (a binding budget
+           # = the smudged-column bug) -- n_ts counts a subset of the map's segs, so total segs
+           # below the baked cap is the sufficient condition. 4095 is also the 3-nibble
+           # counter's max, enforced together here.
+           *([_assert_pnear_unbound(deg, len(cmap.segs)), "seg_pass1_ts_leaf:",
               f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR if deg else PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
               f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
@@ -1440,10 +1467,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "fbufa: hex.vec w/4", "fbufd: hex.vec w/4"] if two_sided else []),
         *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
            "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
-           # n_tsv is 3 nibbles: the deg attribution budget is 1024 (the never-binds fuse --
-           # see the SMUDGE FIX note in seg_pass1_leaf_body_ts)
+           # n_tsv is 3 nibbles: the deg attribution budget is DEG_PNEAR=4095 (its max), with
+           # never-binds ENFORCED by _assert_pnear_unbound -- see seg_pass1_leaf_body_ts
            "n_claimed: hex.vec 2", "n_tsv: hex.vec 3", "tsstop: hex.vec 1",
            "tsbstop: hex.vec 1",              # V5-DROP-P2b: the budget-only latch
+           # SMUDGE FIX part 2: the faces-spent latch. Declared under `lines` (NOT lines+steps,
+           # CR-2026-08: the piece-seg call sites reference it in every plane_near build) --
+           # a steps=0 build leaves it permanently 0, which matches the oracle: with
+           # near_steps off, n_face never fills so the idle stop never fires.
+           "fbspent: hex.vec 1",
            "viewh_stub: hex.vec 2, 100",
            "cpid: hex.vec 2",
            # the UNATTRIBUTED-COLUMN WINDOW: every column < pmin or > pmax is attributed already
@@ -1457,8 +1489,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
            f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
                                       for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
-           "n_face: hex.vec 2", "fbspent: hex.vec 1",   # SMUDGE FIX part 2: faces-spent latch
-           "seg_fmask: hex.vec 2",
+           "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
            "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
            "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
            "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
@@ -1992,6 +2023,16 @@ def _spr_nlow(cfg):
     """How many SHORT buckets (< DEG_SPR_LOWRES_H px) there are -- monotone, so a prefix."""
     return sum(1 for b in range(SPRITE_HEIGHT_BUCKETS)
                if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
+
+
+def _assert_pnear_unbound(deg: bool, total_segs: int) -> str:
+    """The deg attribution budget's never-binds proof (see DEG_PNEAR): total segs strictly below
+    the baked cap, and the cap inside the 3-nibble fj counter. Returns an empty emitted line."""
+    if deg:
+        assert total_segs < DEG_PNEAR <= 4095, (
+            f"DEG_PNEAR={DEG_PNEAR} can bind (map has {total_segs} segs) or overflows the "
+            "3-nibble n_tsv counter -- a binding attribution budget paints wrong columns")
+    return ""
 
 
 def _assert_pow2_ds(ds: int) -> str:

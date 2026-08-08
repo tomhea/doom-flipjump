@@ -491,10 +491,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         return colormap[row][texel]
 
     # W1R-FLAT: the combined-table bases whose walls stay FLAT under W1R -- texture-less
-    # (the WALL_BG sentinel) and SKY-textured walls (smooth clouds in the best scenario).
-    w1r_flat_tb = ({info["__WALLBG__"][0]}
-                   | {info[nm][0] for nm in info if nm != "__WALLBG__" and nm.startswith("SKY")}
-                   if w1r_flag else set())
+    # (the WALL_BG sentinel) only. SKY-textured walls USED to be here too; owner 2026-08-09:
+    # they read as blank white slabs, so they now take the standard masonry pattern (mirrors
+    # the oracle's W1R-FLAT branch, R6).
+    w1r_flat_tb = {info["__WALLBG__"][0]} if w1r_flag else set()
 
     # M13-bakedbands (the 12M campaign's LUT play): in lines mode EVERY POSSIBLE band list is
     # baked at compile time -- one list per (viewz class) x (height, light, flat-base) key, with
@@ -832,12 +832,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         # V5-DROP-P2: LIGHT-ONLY marking segs (no pieces possible) stop at
                         # claim-completion via tsstop; piece-carrying segs call unconditionally
                         # and stop on the leaf's wall-drawn `full` entry test instead.
-                        # ... piece segs still respect the BUDGET latch (tsbstop) -- only
-                        # the claim-complete half of tsstop is theirs to ignore
-                        _gflag = "tsstop" if not (_um or _lm) else "tsbstop"
-                        out += [f"    hex.if0 1, {_gflag}, e2go{cid}_{si}",
-                                f"    ;e2sk{cid}_{si}",
-                                f"  e2go{cid}_{si}:",
+                        # ... piece segs still respect the BUDGET latch (tsbstop), and (SMUDGE
+                        # FIX part 2) the IDLE stop: claim-complete (tsstop) AND face budget
+                        # spent (fbspent) means the seg provably writes nothing -- skip it.
+                        # Mirrors the oracle's piece-seg idle stop exactly.
+                        if not (_um or _lm):
+                            out += [f"    hex.if0 1, tsstop, e2go{cid}_{si}",
+                                    f"    ;e2sk{cid}_{si}"]
+                        else:
+                            out += [f"    hex.if1 1, tsbstop, e2sk{cid}_{si}",
+                                    f"    hex.if0 1, tsstop, e2go{cid}_{si}",
+                                    f"    hex.if0 1, fbspent, e2go{cid}_{si}",
+                                    f"    ;e2sk{cid}_{si}"]
+                        out += [f"  e2go{cid}_{si}:",
                                 *_tsq,
                                 "    stl.fcall seg_pass1_ts_leaf, seg_ret",
                                 *_tsu,
@@ -1433,7 +1440,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "fbufa: hex.vec w/4", "fbufd: hex.vec w/4"] if two_sided else []),
         *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
            "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
-           "n_claimed: hex.vec 2", "n_tsv: hex.vec 2", "tsstop: hex.vec 1",
+           # n_tsv is 3 nibbles: the deg attribution budget is 1024 (the never-binds fuse --
+           # see the SMUDGE FIX note in seg_pass1_leaf_body_ts)
+           "n_claimed: hex.vec 2", "n_tsv: hex.vec 3", "tsstop: hex.vec 1",
            "tsbstop: hex.vec 1",              # V5-DROP-P2b: the budget-only latch
            "viewh_stub: hex.vec 2, 100",
            "cpid: hex.vec 2",
@@ -1448,7 +1457,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *([f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
            f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
                                       for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
-           "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
+           "n_face: hex.vec 2", "fbspent: hex.vec 1",   # SMUDGE FIX part 2: faces-spent latch
+           "seg_fmask: hex.vec 2",
            "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
            "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
            "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",

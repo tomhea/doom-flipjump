@@ -1,0 +1,32 @@
+"""Unpack planes_out fully at the phantom columns, both frames."""
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+for q in (ROOT / "src", ROOT):
+    sys.path.insert(0, str(q))
+
+from doomfj.config import Config
+from doomfj.reference_model import ReferenceModel, SimState, build_scene
+from doomfj.wad import WadFile
+
+cfg = Config()
+rm = ReferenceModel(cfg)
+mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
+aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
+art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
+scene = build_scene(mw, aw, "E1M1")
+VA = 0x20000000
+NAMES = ("ceil_hi", "floor_lo", "col_ch", "col_fh", "col_lt", "col_cf", "col_ff")
+
+for tag, (vx, vy) in {"FAR": (1698, 892), "NEAR": (1715, 909)}.items():
+    planes = []
+    rm.render_wall_frame(SimState(vx << 16, vy << 16, VA, "E1M1"), scene,
+                         wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
+                         wall_noise=True, near_steps=True, stack_steps=True, sky=True,
+                         things=True, sprite_wad=art, degrade=True, planes_out=planes)
+    pl = planes[0] if len(planes) == 1 else tuple(planes)
+    print(f"\n=== {tag} ({vx},{vy}) ===")
+    for x in (70, 75, 80, 90, 100, 108, 112, 120):
+        vals = {n: (arr[x] if x < len(arr) else "?") for n, arr in zip(NAMES, pl)}
+        print(f"  x={x:3}: " + "  ".join(f"{n}={v}" for n, v in vals.items()))

@@ -180,8 +180,14 @@ DEG_SLIVER_W = 3                  # a wall whose whole projected span is <= this
 DEG_STACK_SCALE = 32768           # the SECOND stacked V5 piece only when the boundary's scale is
                                   # at least this (16.16: 16384 = tz <~ 320 map units). Near
                                   # stairs keep both risers; far doorways show one.
-DEG_PNEAR = 64                    # the marking-seg budget under degrade (128 baseline): the far
-                                  # doorways that lose attribution are the least-visible ones
+DEG_PNEAR = 1024                  # the marking-seg budget under degrade. SMUDGE FIX (owner's
+                                  # (1698,892) phantom columns, 2026-08-09): any budget that can
+                                  # BIND hands mid-screen columns to a far one-sided wall's
+                                  # sector -- giant wrong-colour shafts (73 of 260 sweep frames
+                                  # at the old 64; 17 still wrong at 256). 1024 NEVER binds on
+                                  # this map (< 731 segs total): attribution now runs to its
+                                  # natural stop (all columns wall-drawn), and the budget is
+                                  # only the pathological-map fuse. fj n_tsv is 3 nibbles.
 DEG_LIP_SCALE = 16384             # V5-DROP far gate: LIP pieces (drop-offs / level flat changes)
                                   # only when the boundary's scale is at least this (16.16:
                                   # 16384 = tz <~ 320 map units, the stack gate's radius). A
@@ -1634,6 +1640,14 @@ class ReferenceModel:
                     continue
                 if um_ == 0 == lm_ and n_claimed == cfg.VIEW_W:
                     continue
+                # SMUDGE FIX part 2 (2026-08-09): the PIECE-seg idle stop. With the count budget
+                # at never-binds (DEG_PNEAR 1024), the cost bound moves here: once every column
+                # is attributed AND the face budget is spent, a piece-carrying seg's scan is
+                # pure reads (face_seg is false, pclaim[] all set) -- skipping it is
+                # PIXEL-NEUTRAL by construction, it only cuts the idle tail (~+14M/frame
+                # measured on stock E1M1 without this stop).
+                if n_claimed == cfg.VIEW_W and n_face[0] >= STEP_SEG_BUDGET:
+                    continue
                 n_ts += 1
                 rng2 = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
                 if rng2 is None:
@@ -1820,12 +1834,15 @@ class ReferenceModel:
                         # W1R-2C: `alt` runs draw over the texture's SECOND texel (a different
                         # material embedded in the wall, still from the same texture).
                         # W1R-FLAT (owner): walls that are FLAT in the best scenario stay flat
-                        # -- no texture at all, or a SKY-textured wall (smooth clouds). They
-                        # render one UNbrightened W1 tone (fj: the seg's baked seg_w1rf flag).
+                        # -- no texture at all. They render one UNbrightened W1 tone (fj: the
+                        # seg's baked seg_w1rf flag). SKY-textured walls USED to stay flat too
+                        # (pre-anchor flicker fix) -- owner 2026-08-09: they read as blank white
+                        # slabs, so they now take the standard masonry pattern (white bricks
+                        # from SKY1's own two dominant texels).
                         # 25M-CAP SLIVER FLAT: a wall whose whole projected span is <= deg_sliver
                         # columns renders the flat tone -- a 1-2 column sliver at the horizon
                         # carries no readable texture anyway, and the heavy frames have dozens.
-                        if (tex is None or (sd.middle or "").upper().startswith("SKY")
+                        if (tex is None
                                 or (deg_sliver and x2 - x1 <= deg_sliver)):
                             cc = (flat_fill if tex is None
                                   else colormap[light_row][tex[0][0]])

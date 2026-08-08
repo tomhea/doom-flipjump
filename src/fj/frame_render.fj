@@ -1624,13 +1624,13 @@ ns frame {
     }
 
     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
-            @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ugo, ust1, ust2, ust3, uclz, \
+            @ nofaces, dofaces, fspent, fgo, floop, fbody, fwork, fnext, uskip, udo, ugo, ust1, ust2, ust3, uclz, \
               ukhi, uhicl, uwr, umark, umark2, lskip, ldo, lgo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
               lmark, lmark2, fmax, \
               fcap, fnorm, fdist, fscale, fsstep, fwu1, fwu2, fwl1, fwl2, fra, frb, fcvh, \
               fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2, fmv, ulipn, llipn, udng, ldng, \
               fx, fdb, fdp, fdv, fsb, fsp, fsv, fbb, fbp, fidx, fy1, fy2, end \
-            < viewangle, viewz, sgn_aff, x1, x2, n_face, drawn, sfflag, sfslot, \
+            < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, \
               seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, \
               seg_bpid {
         hex.if0 2, seg_fmask, nofaces           // this boundary carries no face at all (compile-time)
@@ -1638,6 +1638,13 @@ ns frame {
         hex.cmp 2, n_face, fcap, dofaces, nofaces, nofaces
       dofaces:
         hex.inc 2, n_face
+        // SMUDGE FIX part 2: latch `fbspent` the moment the face budget FILLS -- from here on
+        // the oracle's piece-seg idle stop (claim-complete AND faces-spent) holds, and the
+        // pass-2 call sites skip piece segs that provably cannot write anything.
+        hex.cmp 2, n_face, fcap, fgo, fspent, fspent
+      fspent:
+        hex.set 1, fbspent, 1
+      fgo:
         proj.wall_setup_sgn fnorm, fdist, sgn_aff, seg_segangle
         proj.wall_scale_setup_m fscale, fsstep, viewangle, fnorm, fdist, x1, x2, projection
         // the four world heights as map-unit deltas from the eye, hoisted once per seg exactly as
@@ -1862,9 +1869,14 @@ ns frame {
         // nearest-first, so the budget only ever costs FAR attribution -- and it is what BOUNDS the
         // cost of a frame whose view never closes: with open sky or void on screen `n_claimed` never
         // reaches VIEW_W, and one such E1M1 viewpoint measured 69.6M ops/frame before this existed.
-        hex.inc 2, n_tsv
-        hex.set 2, bcap, budget
-        hex.cmp 2, n_tsv, bcap, bok, bstop, bok
+        // SMUDGE FIX (owner's (1698,892) phantom columns, 2026-08-09): a budget that BINDS hands
+        // mid-screen columns to a far one-sided wall's sector -- giant wrong-colour shafts. The
+        // deg budget is now 1024 (never binds on this map: < 731 segs total); the counter is
+        // 3 NIBBLES so the compare stays honest. The full-latch above (all columns wall-drawn)
+        // is the real per-frame stop; the budget survives only as the pathological-map fuse.
+        hex.inc 3, n_tsv
+        hex.set 3, bcap, budget
+        hex.cmp 3, n_tsv, bcap, bok, bstop, bok
       bstop:
         hex.set 1, tsstop, 1                    // this seg is the last one the budget allows
         hex.set 1, tsbstop, 1                   // V5-DROP-P2b: the BUDGET-ONLY latch piece-seg
@@ -1940,7 +1952,7 @@ ns frame {
       xa: hex.vec 2
       xb: hex.vec 2
       pm1: hex.vec 2
-      bcap: hex.vec 2
+      bcap: hex.vec 3
     }
 
     // M13-2S rung 3a — a column's two band-list addresses FROM ITS PLANE-PAIR ID. The bank is laid

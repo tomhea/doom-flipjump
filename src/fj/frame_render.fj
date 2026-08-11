@@ -1669,14 +1669,60 @@ ns frame {
         hex.sub 8, frl2, stl2
     }
 
+    // A4: the per-side STORE TAIL of ts_step_faces. The upper and lower halves ran the same 27
+    // lines, differing only in which slot they write and which class register they carry, so the
+    // block lives here once and is instantiated twice. fj macros are TEXTUAL expansion and this
+    // one is inline (not an stl.fcall leaf), so the emitted op stream is unchanged -- proven by
+    // deg_gate op counts identical to the digit.
+    //   rowa/rowb  the piece's first/last row (rowa > rowb => nothing visible, jump to `skip`)
+    //   flagv      the side's piece COUNT nibble (caller passes `+ 1*dw` for the lower side)
+    //   flagbyte   ⚠ the BASE of that 2-nibble register. The count is incremented at the side's
+    //              nibble but the byte written back to the column is always the whole pair --
+    //              writing it from `flagv` stores the lower side's nibbles at the wrong offset
+    //              (measured: 4.5M ops and 7,570 px wrong at (664,291)).
+    //   slotoff    byte offset of this side's slot pair inside the 16-byte per-column stride
+    // ⚠ The off-screen SENTINELS are load-bearing, not tidiness: the oracle stores a face
+    // whenever rowa <= rowb EVEN FULLY OFF-SCREEN, and that write CONSUMES the slot, blocking
+    // farther segs (R40, the 28-column phantom face). The direction matters because the region
+    // BEHIND a piece is derived from the stored bytes: off-screen ABOVE -> (1, 0), BELOW ->
+    // (255, 254). Both keep y1 > y2, so lines_step_load rejects them before drawing.
+    def ts_piece_store rowa, rowb, cvh, oy1, oy2, flagv, flagbyte, flagp, slotp, slotoff, cls, bpid, skip \
+            @ vis_ok, onscr, store, off_above, off_below, y1_clamp0, y1_done, y2_clamp, write {
+        hex.scmp 8, rowa, rowb, vis_ok, vis_ok, skip
+      vis_ok:
+        hex.sign 8, rowb, off_above, onscr
+      onscr:
+        hex.scmp 8, rowa, cvh, store, store, off_below
+      off_above:
+        hex.set 8, oy1, 1
+        hex.zero 8, oy2
+        ;write
+      off_below:
+        hex.set 8, oy1, 255
+        hex.set 8, oy2, 254
+        ;write
+      store:
+        hex.mov 8, oy1, rowa
+        hex.sign 8, rowa, y1_clamp0, y1_done
+      y1_clamp0:
+        hex.zero 8, oy1
+      y1_done:
+        hex.mov 8, oy2, rowb
+        hex.scmp 8, rowb, cvh, write, write, y2_clamp
+      y2_clamp:
+        hex.mov 8, oy2, cvh
+      write:
+        .ts_piece_wr flagv, slotp, slotoff, oy1, oy2, cls, bpid
+        hex.inc 1, flagv
+        hex.write_byte flagp, flagbyte          // the WHOLE byte: nibble 0 upper, 1 lower
+    }
+
     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
             @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, \
-              up_skip, up_do, up_gates_ok, up_vis_ok, up_onscr, up_store, up_y1_clamp0, \
-              up_y1_done, up_y2_clamp, up_write, up_off_above, up_off_below, \
-              lo_skip, lo_do, lo_gates_ok, lo_vis_ok, lo_onscr, lo_store, lo_y1_clamp0, \
-              lo_y1_done, lo_y2_clamp, lo_write, lo_off_above, lo_off_below, piece_max, \
+              up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, \
+              lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, piece_max, \
               face_cap, face_norm, face_dist, face_scale, face_scalestep, wtu1, wtu2, wtl1, wtl2, row_a, row_b, cviewh1, \
-              frac_u1, frac_u2, frac_l1, frac_l2, step_u1, step_u2, step_l1, step_l2, fmode, up_not_lip, lo_not_lip, up_lip_ok, lo_lip_ok, \
+              frac_u1, frac_u2, frac_l1, frac_l2, step_u1, step_u2, step_l1, step_l2, fmode, \
               col_x, drawn_b, drawn_p, drawn_v, sfflag_b, sfflag_p, sfflag_v, sfslot_b, sfslot_p, slot_idx, out_y1, out_y2, end \
             < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, \
               seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, \
@@ -1771,33 +1817,7 @@ ns frame {
         // bytes: fully ABOVE the screen -> (1, 0) (the region behind starts at ~row 0); fully
         // BELOW -> (255, 254) (the region behind is off-screen). Both keep y1 > y2, so
         // lines_step_load still rejects them before drawing.
-        hex.scmp 8, row_a, row_b, up_vis_ok, up_vis_ok, up_skip
-      up_vis_ok:
-        hex.sign 8, row_b, up_off_above, up_onscr
-      up_onscr:
-        hex.scmp 8, row_a, cviewh1, up_store, up_store, up_off_below
-      up_off_above:
-        hex.set 8, out_y1, 1
-        hex.zero 8, out_y2
-        ;up_write
-      up_off_below:
-        hex.set 8, out_y1, 255
-        hex.set 8, out_y2, 254
-        ;up_write
-      up_store:
-        hex.mov 8, out_y1, row_a
-        hex.sign 8, row_a, up_y1_clamp0, up_y1_done
-      up_y1_clamp0:
-        hex.zero 8, out_y1
-      up_y1_done:
-        hex.mov 8, out_y2, row_b
-        hex.scmp 8, row_b, cviewh1, up_write, up_write, up_y2_clamp
-      up_y2_clamp:
-        hex.mov 8, out_y2, cviewh1
-      up_write:
-        .ts_piece_wr sfflag_v, sfslot_p, 0, out_y1, out_y2, seg_ucls, seg_bpid
-        hex.inc 1, sfflag_v                     // nibble 0: the upper count
-        hex.write_byte sfflag_p, sfflag_v
+        .ts_piece_store row_a, row_b, cviewh1, out_y1, out_y2, sfflag_v, sfflag_v, sfflag_p, sfslot_p, 0, seg_ucls, seg_bpid, up_skip
       up_skip:
         // ---- the LOWER face -------------------------------------------------------------------
         hex.if0 1, seg_fmask + 1*dw, lo_skip
@@ -1823,33 +1843,7 @@ ns frame {
       lo_not_lip:
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
         rep(stack, k) .ts_clamp2_lo row_b, sfflag_v + 1*dw, sfslot_p, 8
-        hex.scmp 8, row_a, row_b, lo_vis_ok, lo_vis_ok, lo_skip
-      lo_vis_ok:
-        hex.sign 8, row_b, lo_off_above, lo_onscr
-      lo_onscr:
-        hex.scmp 8, row_a, cviewh1, lo_store, lo_store, lo_off_below
-      lo_off_above:
-        hex.set 8, out_y1, 1                    // off-screen ABOVE: the (1, 0) sentinel
-        hex.zero 8, out_y2
-        ;lo_write
-      lo_off_below:
-        hex.set 8, out_y1, 255                  // off-screen BELOW: the (255, 254) sentinel
-        hex.set 8, out_y2, 254
-        ;lo_write
-      lo_store:
-        hex.mov 8, out_y1, row_a
-        hex.sign 8, row_a, lo_y1_clamp0, lo_y1_done
-      lo_y1_clamp0:
-        hex.zero 8, out_y1
-      lo_y1_done:
-        hex.mov 8, out_y2, row_b
-        hex.scmp 8, row_b, cviewh1, lo_write, lo_write, lo_y2_clamp
-      lo_y2_clamp:
-        hex.mov 8, out_y2, cviewh1
-      lo_write:
-        .ts_piece_wr sfflag_v + 1*dw, sfslot_p, 8, out_y1, out_y2, seg_lcls, seg_bpid
-        hex.inc 1, sfflag_v + 1*dw              // nibble 1: the lower count
-        hex.write_byte sfflag_p, sfflag_v
+        .ts_piece_store row_a, row_b, cviewh1, out_y1, out_y2, sfflag_v + 1*dw, sfflag_v, sfflag_p, sfslot_p, 8, seg_lcls, seg_bpid, lo_skip
       lo_skip:
       col_next:
         hex.ptr_add drawn_p, 1

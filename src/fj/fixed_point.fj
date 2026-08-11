@@ -1,7 +1,4 @@
 // fixed_point.fj — F2: signed Q-format fixed-point math (no floating point).
-// KEPT from PR #1 (D15 keep decision, M2): the macros below pass byte-exact on flipjump 1.5.0
-// (fixed_mul/fixed_div/mul_const verified vs the host mirror src/doomfj/fixedpoint.py; read_table/
-// read_table_byte are the §3.4 data-table fallback, D13). See docs/d15-disposition.md.
 //
 // ---------- Fixed-Point Math
 // Signed Q-format fixed-point helpers (no floating point) - e.g. DOOM's 16.16 format
@@ -10,6 +7,34 @@
 //  generated host-side (e.g. by the doom-flipjump LUT generator), and read with
 //  hex.read_table / hex.read_table_byte below - their entry-layout contracts are
 //  documented on the macros themselves.
+// fixed_mul/fixed_div/mul_const are byte-exact against the host mirror
+//  src/doomfj/fixedpoint.py; read_table/read_table_byte are the §3.4 data-table fallback
+//  (history: docs/d15-disposition.md, the PR #1 / D15 / D13 keep decisions).
+//
+// ---------- Conventions used in this file
+// * The Q-FORMAT PARAMS lead every signature and are COMPILE-TIME: `n` = total nibbles of the
+//   value (or `nb` = total bytes, for the packed-byte reader), and where a macro takes `f` too,
+//   `f` = how many of those n nibbles are fraction. Every f-taking macro assumes 0 < f <= n, so
+//   the shift by the fraction is NIBBLE-ALIGNED — a compile-time `+ f*dw` slice, never a
+//   runtime-amount shift. That alignment is the reason these macros are cheap.
+// * `wide_…` = a widened (2n or n+f nibble) SIGN-EXTENDED scratch copy of an n-nibble
+//   operand, so the intermediate product/dividend cannot overflow.
+// * `_lo` suffix on a macro name = the TRUNCATED variant: it computes only the low nibbles
+//   the final result can see. Bit-identical to the full-width form it replaces, and cheaper.
+// * read_table family: `table_address` is the compile-time table BASE (a `.vec w/4, table`
+//   data cell), `ptr` the running address walked into it. Both are w/4 nibbles = exactly one
+//   w-bit address, which is also the cap on the index register (`idx_n <= w/4`).
+// * ALIASING is stated per macro and is load-bearing: where a macro does not say
+//   "dst may alias …", it may not (mul_lo's res, and `dst` vs `idx` in the read_table family).
+// * `end:` is the macro's exit label, and `skip:` a forward branch target. Where a macro has
+//   data cells, they (`name: .vec …`) sit BETWEEN the body's closing `;end` and `end:` — data
+//   cells are fj ops that must never execute, so that jump is what steps over them.
+// * Annotations: `@Assumes:` = an unchecked precondition the caller must meet.
+//   `@requires hex.init` (sometimes `& stl.ptr_init`) = those dispatch tables must already be
+//   initialised at run time; without them the hex ops jump through uninitialised tables.
+//   `@note:` = a usage warning (e.g. prefer a reciprocal LUT over a runtime divide).
+// * The `Time/Space Complexity` lines are stl-style op-cost formulas in the `k@ + c` unit.
+//   They are measured, not decorative — keep them in sync if a body ever changes.
 
 
 ns hex {
@@ -98,17 +123,17 @@ ns hex {
     // @note: a runtime divide is expensive - prefer a reciprocal LUT in hot paths.
     // @Assumes: 0 < f <= n.
     // @requires hex.init
-    def fixed_div n, f, dst, a, b, div0 @ wide_a, q, r, end {
+    def fixed_div n, f, dst, a, b, div0 @ wide_a, quotient, remainder, end {
         .zero f, wide_a
         .mov n, wide_a + f*dw, a
         .sign_extend 2*n, n+f, wide_a
-        .idiv 2*n, n, q, r, wide_a, b, div0, 1
-        .mov n, dst, q
+        .idiv 2*n, n, quotient, remainder, wide_a, b, div0, 1
+        .mov n, dst, quotient
         ;end
 
       wide_a: .vec 2*n
-      q: .vec 2*n
-      r: .vec n
+      quotient: .vec 2*n
+      remainder: .vec n     // discarded: fixed_div truncates toward zero
       end:
     }
 
@@ -140,22 +165,15 @@ ns hex {
     }
 
 
-    //  Time Complexity: n(w(0.75@+5) + 16@+27) + #(n*dw)(w/4(1.5@+10)) + 22@+60
-    // Space Complexity: n(w(1.13@+32) + 14@+127) + #(n*dw)(w/4(2@+30))
-    //   dst[:n] = table[idx]    (entry idx of a LUT of hex[:n] entries)
+    // M13-lutpack — dst[:2*nb] = table[idx] for a PACKED-byte LUT.
     //
-    // table is a compile-time address (label) of consecutive hex[:n] entries.
-    // Entry-layout contract: entry k sits at table + k*n*dw; each entry is n hex data-ops
-    //  (exactly a `hex.vec n` value: nibble i of the value is the data bits of op i,
-    //  little-endian nibbles, each op `;nibble * dw`).
+    // Entry-layout contract: entry k sits at table + k*nb*dw and is nb consecutive PACKED-byte
+    //  data-ops, little-endian, one dw-slot per byte (as emitted by doomfj
+    //  generate_packed_lut_fj). dst receives them in REGISTER form — 2*nb hex ops, low nibble
+    //  of byte k at 2k, high at 2k+1.
+    // Same values as the read_table form below, but ~600 ops/BYTE (read_byte_and_inc) instead of
+    //  ~1.1k/NIBBLE (read_hex re-derives the pointer per nibble) — delta-measured, R19-era.
     // idx is an unsigned hex[:idx_n] (idx_n <= w/4); dst must not alias idx.
-    // The entry address is computed with the strength-reduced mul_const (no runtime-amount
-    //  shift), then read through a pointer.
-    // @requires hex.init & stl.ptr_init
-    // M13-lutpack — dst[:2*nb] = table[idx] for a PACKED-byte LUT (entry = nb consecutive bytes,
-    //  little-endian, one dw-slot per byte: doomfj generate_packed_lut_fj). Same values as the
-    //  read_table form, ~600 ops/BYTE (read_byte_and_inc) instead of ~1.1k/NIBBLE (read_hex's
-    //  per-nibble pointer re-derivation) — delta-measured, R19-era. dst must not alias idx.
     // @requires hex.init & stl.ptr_init
     def read_table_packed nb, dst, table, idx_n, idx @ ptr, table_address, end {
         .zero w/4, ptr
@@ -170,6 +188,18 @@ ns hex {
       end:
     }
 
+    //  Time Complexity: n(w(0.75@+5) + 16@+27) + #(n*dw)(w/4(1.5@+10)) + 22@+60
+    // Space Complexity: n(w(1.13@+32) + 14@+127) + #(n*dw)(w/4(2@+30))
+    //   dst[:n] = table[idx]    (entry idx of a LUT of hex[:n] entries)
+    //
+    // table is a compile-time address (label) of consecutive hex[:n] entries.
+    // Entry-layout contract: entry k sits at table + k*n*dw; each entry is n hex data-ops
+    //  (exactly a `hex.vec n` value: nibble i of the value is the data bits of op i,
+    //  little-endian nibbles, each op `;nibble * dw`).
+    // idx is an unsigned hex[:idx_n] (idx_n <= w/4); dst must not alias idx.
+    // The entry address is computed with the strength-reduced mul_const (no runtime-amount
+    //  shift), then read through a pointer.
+    // @requires hex.init & stl.ptr_init
     def read_table n, dst, table, idx_n, idx @ ptr, table_address, end {
         .zero w/4, ptr
         .mov idx_n, ptr, idx

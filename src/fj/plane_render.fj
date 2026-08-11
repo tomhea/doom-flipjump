@@ -13,6 +13,44 @@
 // Shared LUTs the includer emits (R6 SSOT, doomfj.lut_generator): yslope (row->slope, 8nib), zlight
 // (LIGHTLEVELS*MAXLIGHTZ flattened, 2nib), and the colormap ns `cm` (cm.apply). LIGHTZSHIFT=20 (5 nibbles),
 // LIGHTSEGSHIFT=4 (1 nibble), MAXLIGHTZ=128, COLORMAP rows 0..31. @requires hex.init & stl.ptr_init.
+//
+// ── STATUS: this is the LEGACY FRAMEBUFFER TIER ─────────────────────────────────────────────
+// All four macros here write (directly or via their caller) into the compile-time FRAMEBUFFER that
+// `present.update_screen*` then blits. The SHIPPED renderer is the column-stream / M13-lines path
+// (`plane_bands.fj::build_bands` -> `stream_render.fj`), which builds per-column BAND LISTS and
+// emits them as device records — no framebuffer at all. Concretely, in `wall_renderer.py` the
+// list holding `span_leaf:`/`clear_leaf:` (`fb_leaves`) is EMPTY whenever the mode is
+// stream/raster/proj/lines, and `plane_leaf: plane.draw_pixel` is not emitted by the Python
+// emitters at all. So today these macros are exercised only by the fj unit tests
+// (`tests/fj/test_plane_kernel.py`, `test_plane_span_pass.py`, `test_floor_planes_fj.py`) and by
+// the old framebuffer floor_mode="textured"/"flat" configurations. Kept as the byte-exact oracle
+// mirror and the reference for the distance-light math the shipped tier reuses. Do not delete.
+//
+// ── NAMING CONVENTIONS IN THIS FILE ─────────────────────────────────────────────────────────
+// Macro signature anatomy: `def name params \ @ local, names \ < global, names {`. `@` = compile-
+//   time locals (registers AND labels); `<` = external globals the body touches (off limits to
+//   renames — the Python emitters reference them by name). `params` are compile-time constants
+//   baked at instantiation (`fbase`, `view_w`, `centerxfix`, `ang90`).
+// ORACLE-MIRROR NAMING is the file's main convention: locals are named after the variable they
+//   mirror in `reference_model._plane_pixel` / `_draw_span` / `_render_planes_textured`
+//   (`dist`, `zidx`, `lvl`, `zrow`, `xfrac`/`yfrac`, `xstep`/`ystep`, `length`, `spot`, `pal`,
+//   `angb` = the oracle's `ang_b`). The block comment above each macro lists the oracle lines
+//   these mirror — read the two side by side; the fj is byte-exact against them.
+// `c…`   = a constant register loaded ONCE and used only as a read-only operand — a compare
+//          bound (`c127` = MAXLIGHTZ-1), an AND-mask source (`c3f` = the &63 flat-coord mask),
+//          or a divisor (`ccenterx`). Never assigned in a loop.
+// `fbptr` = the FIXED framebuffer base (`hex.set` once from `fbase`, never advanced); `cell` is
+//          the RUNNING pointer derived from it (`hex.ptr_index cell, fbptr, pixofs`), advanced by
+//          write_hex_and_inc so the per-pixel loop never rebuilds an address.
+// `zclamp` / `zok` = the shared label pair for the `zidx = min(127, distance>>20)` clamp; the same
+//          two names mean the same thing in all three kernels that do it.
+// `sloop` / `sbody` / `sdone` = the per-span pixel loop's head / body / exit.
+// `tmp` = a scratch register REUSED for unrelated values within one macro — it must be re-zeroed
+//          before each reuse at a wider width (see the `hex.zero 8, tmp` before the x1 load; the
+//          M13opt1 lesson: it still held dist>>20).
+// Labels are jump targets, and `hex.cmp n, a, b, lt, eq, gt` names three of them in that order.
+// Data cells (`name: hex.vec n`) live AFTER the macro's `stl.fret` (lesson #2): they are fj ops
+//   that must never be executed, so nothing may fall through into them.
 
 ns plane {
     // one flat-colored floor/ceiling pixel -> `lit`. Inputs (registers): planeheight (8, 16.16 |plane_z-viewz|),
@@ -20,17 +58,17 @@ ns plane {
     // Reads the yslope/zlight tables + cm.apply. Returns via stl.fret plane_ret (the data below is never
     // fallen into — lesson #2). The @-local data regs are allocated after the fret.
     def draw_pixel \
-            @ ys, dist, zidx, lvl, zlidx, zrow, cmidx, c127, ok, clamp \
+            @ ys, dist, zidx, lvl, zlidx, zrow, cmidx, c127, zok, zclamp \
             < planeheight, light, pbase, y, lit, yslope, zlight, plane_ret {
         hex.read_table 8, ys, yslope, 2, y           // ys = yslope[y]   (y in [0, VIEW_H) -> 2-nibble index)
         hex.fixed_mul_lo 8, 4, dist, planeheight, ys    // dist = FixedMul(planeheight, ys) (16.16, wraps mod 2^32)
         hex.shr_hex 8, 5, dist                       // dist >>= 20 (LIGHTZSHIFT): the distance bucket
         hex.mov 3, zidx, dist                        // zidx = bucket (the low 3 nibbles; the high nibbles are 0)
         hex.set 3, c127, 127                         // MAXLIGHTZ-1
-        hex.cmp 3, zidx, c127, ok, ok, clamp         // zidx > 127 -> clamp to 127 (min)
-      clamp:
+        hex.cmp 3, zidx, c127, zok, zok, zclamp      // zidx > 127 -> clamp to 127 (min)
+      zclamp:
         hex.mov 3, zidx, c127
-      ok:
+      zok:
         hex.mov 2, lvl, light
         hex.shr_hex 2, 1, lvl                        // lvl = light >> 4 (LIGHTSEGSHIFT) -> 0..15
         hex.mul_const 3, zlidx, lvl, 128             // zlidx = lvl * MAXLIGHTZ
@@ -62,18 +100,18 @@ ns plane {
     // (0x40000000). Reads the finesine table (read_cos/read_sin). Returns via stl.fret clear_ret BEFORE the
     // @-local data (lesson #2). @requires hex.init & stl.ptr_init.
     def clear_planes centerxfix, ang90 \
-            @ angf, t90, angb, fc, fs, cxf, baddiv, done \
+            @ ang32, cang90, angb, fc, fs, ccenterx, baddiv, done \
             < viewangle, basexscale, baseyscale, clear_ret {
-        hex.mov 8, angf, viewangle
-        hex.set 8, t90, ang90
-        hex.sub 8, angf, t90             // (viewangle - ANG90) mod 2^32  (== & ANGLE_MASK)
-        hex.shr_hex 8, 5, angf           // >> 20 (angle_shift): the down-view fine angle
-        hex.mov 3, angb, angf            // ang_b in [0, TRIG_N)
-        hex.set 8, cxf, centerxfix       // CENTERX<<16 (nonzero -> FixedDiv never hits baddiv)
+        hex.mov 8, ang32, viewangle
+        hex.set 8, cang90, ang90
+        hex.sub 8, ang32, cang90         // (viewangle - ANG90) mod 2^32  (== & ANGLE_MASK)
+        hex.shr_hex 8, 5, ang32          // >> 20 (angle_shift): the down-view fine angle
+        hex.mov 3, angb, ang32           // ang_b in [0, TRIG_N)
+        hex.set 8, ccenterx, centerxfix  // CENTERX<<16 (nonzero -> FixedDiv never hits baddiv)
         finesine.read_cos fc, angb
-        hex.fixed_div 8, 4, basexscale, fc, cxf, baddiv   // basexscale = FixedDiv(finecos[ang_b], CENTERX<<16)
+        hex.fixed_div 8, 4, basexscale, fc, ccenterx, baddiv   // basexscale = FixedDiv(finecos[ang_b], CENTERX<<16)
         finesine.read_sin fs, angb
-        hex.fixed_div 8, 4, baseyscale, fs, cxf, baddiv   // FixedDiv(finesin[ang_b], CENTERX<<16)
+        hex.fixed_div 8, 4, baseyscale, fs, ccenterx, baddiv   // FixedDiv(finesin[ang_b], CENTERX<<16)
         hex.neg 8, baseyscale            // baseyscale = -FixedDiv(...) mod 2^32 (R_ClearPlanes negates yscale)
         ;done
       baddiv:                            // unreachable (centerxfix != 0); safe fallback
@@ -82,12 +120,12 @@ ns plane {
       done:
         stl.fret clear_ret
 
-      angf: hex.vec 8
-      t90: hex.vec 8
+      ang32: hex.vec 8
+      cang90: hex.vec 8
       angb: hex.vec 3
       fc: hex.vec 8
       fs: hex.vec 8
-      cxf: hex.vec 8
+      ccenterx: hex.vec 8
     }
 
     // M13d — the TEXTURED floor/ceiling span (DOOM R_MapPlane + R_DrawSpan). One horizontal span [x1,x2] at
@@ -108,6 +146,7 @@ ns plane {
     // `flatbase` = the seg's flat slice offset. Shared LUTs the includer emits (R6): yslope/distscale/
     // xtoviewangle (8nib read_tables), zlight (2nib), finesine (read_sin/read_cos), the colormap ns `cm`, and
     // the flat ns. VIEW_W is from fj_consts. Returns via stl.fret BEFORE the @-local data (lesson #2).
+// ⚠ LEGACY TIER (see the STATUS note in the file header): not instantiated by the shipped build.
     // @requires hex.init & stl.ptr_init.
     // M13opt1 — per-pixel [exact] optimizations (perf phase): the per-pixel loop now does NO multiply, NO
     // framebuffer-address rebuild, and narrower ops. Span-constant values (the zlight colormap row, the flat
@@ -119,8 +158,8 @@ ns plane {
     // is OR-disjoint with the preset flatbase high nibbles.
     def draw_span fbase, view_w \
             @ ys, dist, xstep, ystep, dscale, length, xta, ang, idx, fc, fs, prod, xfrac, yfrac, \
-              zidx, lvl, zlidx, zrow, c127, tt, c3f, u, vv, spot, fidx, pal, cmidx, lit, \
-              count, pixp, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
+              zidx, lvl, zlidx, zrow, c127, tmp, c3f, u, vv, spot, fidx, pal, cmidx, lit, \
+              count, pixofs, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
             < planeheight, light, basexscale, baseyscale, viewx, viewy, viewangle, y, x1, x2, flatbase, \
               yslope, distscale, xtoviewangle, zlight, span_ret {
         hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
@@ -143,9 +182,9 @@ ns plane {
         hex.mov 8, yfrac, viewy
         hex.add 8, yfrac, prod
         hex.neg 8, yfrac                                 // yfrac = -(viewy + FixedMul(finesin[idx], length))
-        hex.mov 8, tt, dist                              // the distance colormap row (zlight), as in draw_pixel
-        hex.shr_hex 8, 5, tt                             // distance >> 20 (LIGHTZSHIFT)
-        hex.mov 3, zidx, tt
+        hex.mov 8, tmp, dist                             // the distance colormap row (zlight), as in draw_pixel
+        hex.shr_hex 8, 5, tmp                            // distance >> 20 (LIGHTZSHIFT)
+        hex.mov 3, zidx, tmp
         hex.set 3, c127, 127
         hex.cmp 3, zidx, c127, zok, zok, zclamp          // zidx = min(127, distance>>20)  (unsigned, R5 OK)
       zclamp:
@@ -161,15 +200,15 @@ ns plane {
         hex.zero 4, cmidx
         hex.mov 2, cmidx + 2*dw, zrow                    // cmidx high byte = the zlight row (constant per span)
         hex.mov 5, fidx, flatbase                        // fidx high = flatbase (4096-aligned -> low 3 hold spot)
-        hex.zero 8, pixp
-        hex.mov 2, pixp, y
-        hex.mul_const 8, pixp, pixp, view_w              // pixp = y*VIEW_W  (the only y*W multiply, ONCE per span)
-        hex.zero 8, tt                                   // CLEAR tt (it still holds dist>>20 from the zlight calc)
-        hex.mov 2, tt, x1
-        hex.add 8, pixp, tt                              // + x1  -> the pixel index of (y, x1)
-        hex.shl_bit 8, pixp                              // *2  -> the hex.vec2 cell digit offset
+        hex.zero 8, pixofs
+        hex.mov 2, pixofs, y
+        hex.mul_const 8, pixofs, pixofs, view_w          // pixofs = y*VIEW_W (the only y*W multiply, ONCE per span)
+        hex.zero 8, tmp                                  // CLEAR tmp (it still holds dist>>20 from the zlight calc)
+        hex.mov 2, tmp, x1
+        hex.add 8, pixofs, tmp                           // + x1  -> the pixel index of (y, x1)
+        hex.shl_bit 8, pixofs                            // *2  -> the hex.vec2 cell digit offset
         hex.set w/4, fbptr, fbase
-        hex.ptr_index cell, fbptr, pixp                  // cell -> &fb[y*VIEW_W + x1]  (the running write pointer)
+        hex.ptr_index cell, fbptr, pixofs                // cell -> &fb[y*VIEW_W + x1]  (the running write pointer)
         hex.mov 2, count, x2
         hex.sub 2, count, x1
         hex.inc 2, count                                 // count = x2 - x1 + 1  (span width, <= VIEW_W)
@@ -214,7 +253,7 @@ ns plane {
       zlidx: hex.vec 3
       zrow: hex.vec 2
       c127: hex.vec 3
-      tt: hex.vec 8
+      tmp: hex.vec 8
       c3f: hex.vec 2
       u: hex.vec 3                                      // read at 3 by add 3 (mov 2 writes low 2; nibble 2 = 0)
       vv: hex.vec 3                                     // read at 3 by mul_const 3 (nibble 2 = 0)
@@ -224,7 +263,7 @@ ns plane {
       cmidx: hex.vec 4
       lit: hex.vec 2
       count: hex.vec 2
-      pixp: hex.vec 8
+      pixofs: hex.vec 8
       fbptr: hex.vec w/4
       cell: hex.vec w/4
     }
@@ -238,14 +277,14 @@ ns plane {
     // per-pixel coord extract/sample/cm.apply (only ONE cm.apply, in setup). Returns via stl.fret
     // BEFORE the @-local data (lesson #2). @requires hex.init & stl.ptr_init.
     def draw_span_flat fbase, view_w \
-            @ ys, dist, zidx, lvl, zlidx, zrow, c127, tt, cmidx, lit, \
-              count, pixp, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
+            @ ys, dist, zidx, lvl, zlidx, zrow, c127, tmp, cmidx, lit, \
+              count, pixofs, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
             < planeheight, light, y, x1, x2, flatbase, yslope, zlight, span_ret {
         hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
         hex.fixed_mul_lo 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
-        hex.mov 8, tt, dist
-        hex.shr_hex 8, 5, tt                             // distance >> 20 (LIGHTZSHIFT)
-        hex.mov 3, zidx, tt
+        hex.mov 8, tmp, dist
+        hex.shr_hex 8, 5, tmp                            // distance >> 20 (LIGHTZSHIFT)
+        hex.mov 3, zidx, tmp
         hex.set 3, c127, 127
         hex.cmp 3, zidx, c127, zok, zok, zclamp          // zidx = min(127, distance>>20)
       zclamp:
@@ -260,15 +299,15 @@ ns plane {
         hex.mov 2, cmidx, flatbase                       // low byte = the flat BASE palette index
         hex.mov 2, cmidx + 2*dw, zrow
         cm.apply lit, cmidx                              // lit = colormap[zrow][base]  (SPAN-CONSTANT)
-        hex.zero 8, pixp
-        hex.mov 2, pixp, y
-        hex.mul_const 8, pixp, pixp, view_w              // pixp = y*VIEW_W (once per span)
-        hex.zero 8, tt                                   // CLEAR tt (still holds dist>>20 -- opt1 lesson)
-        hex.mov 2, tt, x1
-        hex.add 8, pixp, tt
-        hex.shl_bit 8, pixp                              // *2 -> the hex.vec2 cell digit offset
+        hex.zero 8, pixofs
+        hex.mov 2, pixofs, y
+        hex.mul_const 8, pixofs, pixofs, view_w          // pixofs = y*VIEW_W (once per span)
+        hex.zero 8, tmp                                  // CLEAR tmp (still holds dist>>20 -- opt1 lesson)
+        hex.mov 2, tmp, x1
+        hex.add 8, pixofs, tmp
+        hex.shl_bit 8, pixofs                            // *2 -> the hex.vec2 cell digit offset
         hex.set w/4, fbptr, fbase
-        hex.ptr_index cell, fbptr, pixp                  // cell -> &fb[y*VIEW_W + x1]
+        hex.ptr_index cell, fbptr, pixofs                // cell -> &fb[y*VIEW_W + x1]
         hex.mov 2, count, x2
         hex.sub 2, count, x1
         hex.inc 2, count                                 // count = x2 - x1 + 1
@@ -289,11 +328,11 @@ ns plane {
       zlidx: hex.vec 3
       zrow: hex.vec 2
       c127: hex.vec 3
-      tt: hex.vec 8
+      tmp: hex.vec 8
       cmidx: hex.vec 4
       lit: hex.vec 2
       count: hex.vec 2
-      pixp: hex.vec 8
+      pixofs: hex.vec 8
       fbptr: hex.vec w/4
       cell: hex.vec w/4
     }

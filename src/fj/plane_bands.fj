@@ -4,6 +4,32 @@
 // `plane.draw_pixel`'s zidx derivation bit-for-bit) then advance via a cheap threshold walk
 // (add/compare only) for the rest — mirrors `ReferenceModel._zidx_band_walk` (R15) exactly, so the fj
 // kernel and the oracle stay byte-identical. @requires hex.init & stl.ptr_init.
+//
+// ── NAMING CONVENTIONS IN THIS FILE ──────────────────────────────────────────────────────────
+// Macro signature anatomy: `def name params \ @ local, names \ < global, names {`. The `@` list
+//   is compile-time locals (registers AND labels); werror fails the build if one is never used on
+//   some rep-gated path. The `<` list is external labels the body touches — globals, off limits to
+//   renames (the Python emitters generate text that references them by name).
+// `bb_…`  = the build_bands wire block: caller-set input globals (bb_ph/bb_light/bb_base/bb_y0/
+//           bb_count/bb_ascending/bb_arr), the output bb_n, and the recip32 fcall wire —
+//           bb_recip_ph is recip32's ARGUMENT (build_bands sets it just before the fcall),
+//           bb_recip_out its RESULT. These are the ONLY cross-macro state; all else is macro-local.
+// `c…`    = a constant register loaded once and only compared/copied (`cfff`, `czero2`, `c127`,
+//           `cmax6`). Never assigned in a loop.
+// `…v`    = a value loaded out of a table (`recipv` = slopediv_recip[m]).
+// `…ptr`  = a RUNNING pointer that is advanced as it is used (`ysptr` walks yslope_packed,
+//           `outptr` walks the caller's bb_arr output buffer); `…base` = a fixed base index a
+//           running index is added to (`zlbase` = lvl*128, hoisted out of the per-row work).
+// numeric suffix = a copy of a value kept at a NARROWER/wider nibble width for a cheaper op:
+//           `thresh_hi6` is thresh_hi clamped into 6 nibbles for the per-row compare, `zidx8` is
+//           zidx widened to 8 for the multiply. `…w` = widened to pointer width w/4 (`y0w`).
+// Domain glossary: `ph` = planeheight (16.16 |plane_z - viewz|); `zidx` = the distance bucket
+//           0..127; `lvl` = the sector-light bucket (light>>4); `zrow` = the COLORMAP row
+//           zlight[lvl*128+zidx] — bands are grouped by zrow, not zidx (see `classify`).
+// Labels are jump targets, and `hex.cmp n, a, b, lt, eq, gt` names three of them in that order —
+//   read a `hex.cmp` by matching its three label args to lt/eq/gt.
+// Data cells (`name: hex.vec n`) live AFTER the macro's `stl.fret`: they are fj ops that must
+//   never be executed, so nothing may fall through into them.
 
 ns plane {
     // perf #11-style: dst = (1<<32)//ph via the SHARED block-FP reciprocal table (`slopediv_recip`,
@@ -18,37 +44,38 @@ ns plane {
     // UNREACHABLE for every integer-height map, not merely "never seen". (planeheight == 0 — eye
     // exactly at the plane — yields band rows the emitter never asks for.) If viewz ever gains
     // sub-unit precision (bobbing), port the oracle's left-normalize here first.
-    def recip32 @ sph, rc, cfff, czero2, irecip, nrm, more, done, shloop, shmore, shdone \
+    def recip32 @ denom, rshift, cfff, czero2, recipv, norm_loop, norm_shift, norm_done, \
+                  unshift_loop, unshift_step, unshift_done \
             < bb_recip_ph, bb_recip_out, slopediv_recip, plane_recip_ret {
-        hex.mov 8, sph, bb_recip_ph
-        hex.set 2, rc, 0
+        hex.mov 8, denom, bb_recip_ph
+        hex.set 2, rshift, 0
         hex.set 8, cfff, 0xFFF
         hex.set 2, czero2, 0
-      nrm:
-        hex.cmp 8, sph, cfff, done, done, more   // sph > 0xFFF ? gt -> shift right
-      more:
-        hex.shr_hex 8, 1, sph
-        hex.inc 2, rc
-        ;nrm
-      done:
-        hex.read_table_packed 3, irecip, slopediv_recip, 3, sph   // recip[m] (packed, M13-lutpack)
+      norm_loop:                                 // right-normalize denom down into the table's 0..0xFFF domain,
+        hex.cmp 8, denom, cfff, norm_done, norm_done, norm_shift   // counting the shifts in rshift
+      norm_shift:
+        hex.shr_hex 8, 1, denom
+        hex.inc 2, rshift
+        ;norm_loop
+      norm_done:
+        hex.read_table_packed 3, recipv, slopediv_recip, 3, denom   // recip[m] (packed, M13-lutpack)
         hex.zero 8, bb_recip_out
-        hex.mov 5, bb_recip_out, irecip
+        hex.mov 5, bb_recip_out, recipv
         hex.shl_hex 8, 2, bb_recip_out             // recip << 2 nibbles
-      shloop:
-        hex.cmp 2, rc, czero2, shdone, shdone, shmore
-      shmore:
+      unshift_loop:                                 // undo the normalization: shift back down rshift times
+        hex.cmp 2, rshift, czero2, unshift_done, unshift_done, unshift_step
+      unshift_step:
         hex.shr_hex 8, 1, bb_recip_out
-        hex.dec 2, rc
-        ;shloop
-      shdone:                                       // bb_recip_out = (recip<<2) >> rc = recip<<(2-rc)
+        hex.dec 2, rshift
+        ;unshift_loop
+      unshift_done:                                 // bb_recip_out = (recip<<2) >> rshift = recip<<(2-rshift)
         stl.fret plane_recip_ret
 
-      sph: hex.vec 8
-      rc: hex.vec 2
+      denom: hex.vec 8
+      rshift: hex.vec 2
       cfff: hex.vec 8
       czero2: hex.vec 2
-      irecip: hex.vec 6
+      recipv: hex.vec 6
     }
 
     // Build ONE column's ceiling/floor BAND LIST: mirrors `ReferenceModel._zidx_band_walk` (R15)
@@ -67,26 +94,24 @@ ns plane {
     // colormap index); M13-lines passes 0 (2-byte entries [runlen][zrow] -- the flat base joins at
     // EMIT time from the seg's own register, letting visplanes sharing (height,light) share a list).
     def build_bands basewidth \
-            @ i, ys, ysptr, y0w, yadv, zidx, step, threshold_hi, threshold_lo, thi6, tlo6, cFFF6, \
+            @ i, ys, ysptr, y0w, ysoff, zidx, zstep, thresh_hi, thresh_lo, thresh_hi6, thresh_lo6, cmax6, \
               zidx8, lvl, zlbase, zlidx, zrow, \
-              cur_zrow, runlen, ptr, c127, dist, \
-              empty, phzero, seed, seedclamp, seedok, chi_gt, chi_ok, chi_done, clo_gt, clo_ok, clo_done, \
-              bhi_gt, bhi_ok, blo_gt, blo_ok, \
-              bloop, bbody, ascloop, ascmaybe, ascmaybe0, ascbump, \
-              descloop, descloop0, descmaybe, descbump, classify, samezidx, diffzidx, cont2, \
+              cur_zrow, runlen, outptr, c127, dist, \
+              empty, phzero, seed, seedclamp, seedok, hi_clamp, hi_copy, hi_done, lo_clamp, lo_copy, lo_done, \
+              bump_hi_clamp, bump_hi_copy, bump_lo_clamp, bump_lo_copy, \
+              rowloop, rowbody, asc_loop, asc_test, asc_test_first, asc_bump, \
+              desc_loop, desc_test_first, desc_test, desc_bump, classify, same_band, new_band, next_row, \
               flush_final, writeentry, done \
             < bb_ph, bb_light, bb_base, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, \
               bb_recip_ph, bb_recip_out, yslope_packed, zlight, recip32_leaf, plane_recip_ret, \
               plane_band_ret {
         hex.zero 2, bb_n
         hex.if0 2, bb_count, empty
-        hex.mov w/4, ptr, bb_arr   // bb_arr is a RUNTIME register holding the buffer address (set by
-                                   // the caller per call) -- NOT itself a compile-time array label, so
-                                   // this must be hex.mov (copy the held value), never hex.set (which
-                                   // would bake bb_arr's OWN storage address as a literal instead of
-                                   // reading what's stored there -- the R11-adjacent trap that
-                                   // corrupted memory starting at bb_arr's own location, eventually
-                                   // smashing adjacent globals/code and crashing with ip<2w).
+        hex.mov w/4, outptr, bb_arr  // ⚠ bb_arr is a RUNTIME register HOLDING the buffer address (the
+                                   // caller sets it per call) -- not a compile-time array label. So this
+                                   // must be hex.mov (copy the held value); hex.set would bake bb_arr's
+                                   // OWN storage address as a literal and the writes would then corrupt
+                                   // memory from bb_arr outwards (the R11-adjacent trap).
         // basewidth=0 leaves bb_base unread -- this dummy read (overwritten right below)
         // keeps the extern used so warning-as-error doesn't trip. rep(0,..) when basewidth=1.
         rep(1-basewidth, k) hex.mov 2, lvl, bb_base
@@ -100,9 +125,9 @@ ns plane {
         hex.zero 3, zidx
         hex.mul_const 3, zlidx, lvl, 128
         hex.read_table 2, zrow, zlight, 3, zlidx
-        hex.write_byte_and_inc ptr, bb_count
-        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
-        hex.write_byte_and_inc ptr, zrow
+        hex.write_byte_and_inc outptr, bb_count
+        rep(basewidth, k) hex.write_byte_and_inc outptr, bb_base
+        hex.write_byte_and_inc outptr, zrow
         hex.inc 2, bb_n
         ;done
 
@@ -114,9 +139,9 @@ ns plane {
         hex.set w/4, ysptr, yslope_packed
         hex.zero w/4, y0w
         hex.mov 2, y0w, bb_y0
-        hex.mul_const w/4, yadv, y0w, 3*dw
-        hex.add w/4, ysptr, yadv                        // ysptr -> yslope_packed[y0]
-        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys[0:6] = yslope[y0]; ptr -> y0+1
+        hex.mul_const w/4, ysoff, y0w, 3*dw
+        hex.add w/4, ysptr, ysoff                       // ysptr -> yslope_packed[y0]
+        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys[0:6] = yslope[y0]; ysptr -> y0+1
         hex.fixed_mul_lo 8, 4, dist, bb_ph, ys             // ys[6:8] stay zero-init (R11-safe wide read)
         hex.shr_hex 8, 5, dist
         hex.set 3, c127, 127
@@ -128,34 +153,34 @@ ns plane {
       seedok:
         hex.mov 8, bb_recip_ph, bb_ph
         stl.fcall recip32_leaf, plane_recip_ret
-        hex.zero 8, step
-        hex.mov 8, step, bb_recip_out
-        hex.shl_hex 8, 1, step                          // step = recip << 1 nibble ( *16 )
+        hex.zero 8, zstep
+        hex.mov 8, zstep, bb_recip_out
+        hex.shl_hex 8, 1, zstep                         // zstep = recip << 1 nibble ( *16 ) = one zidx bucket
         hex.zero 8, zidx8
         hex.mov 3, zidx8, zidx
-        hex.mul 8, threshold_lo, step, zidx8            // threshold_lo = step*zidx
-        hex.mov 8, threshold_hi, threshold_lo           // threshold_hi = step*(zidx+1) = lo + step
-        hex.add 8, threshold_hi, step                   //   (one hex.mul saved per call)
+        hex.mul 8, thresh_lo, zstep, zidx8              // thresh_lo = zstep*zidx
+        hex.mov 8, thresh_hi, thresh_lo                 // thresh_hi = zstep*(zidx+1) = lo + zstep
+        hex.add 8, thresh_hi, zstep                     //   (one hex.mul saved per call)
         // the per-row compares run at 6 NIBBLES against CLAMPED copies of the thresholds: ys is at
         // most 0xA00000 < 0xFFFFFF, so min(threshold, 0xFFFFFF) preserves EVERY comparison outcome
         // (a true threshold above 2^24 compares the same as 0xFFFFFF against any real ys), and the
         // clamped copies only need refreshing when a bump changes the threshold -- rare, vs the
         // per-row compare. Byte-identical to comparing the full-width thresholds.
-        hex.set 8, cFFF6, 0xFFFFFF
-        hex.cmp 8, threshold_hi, cFFF6, chi_ok, chi_ok, chi_gt
-      chi_gt:
-        hex.set 6, thi6, 0xFFFFFF
-        ;chi_done
-      chi_ok:
-        hex.mov 6, thi6, threshold_hi
-      chi_done:
-        hex.cmp 8, threshold_lo, cFFF6, clo_ok, clo_ok, clo_gt
-      clo_gt:
-        hex.set 6, tlo6, 0xFFFFFF
-        ;clo_done
-      clo_ok:
-        hex.mov 6, tlo6, threshold_lo
-      clo_done:
+        hex.set 8, cmax6, 0xFFFFFF
+        hex.cmp 8, thresh_hi, cmax6, hi_copy, hi_copy, hi_clamp
+      hi_clamp:
+        hex.set 6, thresh_hi6, 0xFFFFFF
+        ;hi_done
+      hi_copy:
+        hex.mov 6, thresh_hi6, thresh_hi
+      hi_done:
+        hex.cmp 8, thresh_lo, cmax6, lo_copy, lo_copy, lo_clamp
+      lo_clamp:
+        hex.set 6, thresh_lo6, 0xFFFFFF
+        ;lo_done
+      lo_copy:
+        hex.mov 6, thresh_lo6, thresh_lo
+      lo_done:
         hex.mul_const 3, zlbase, lvl, 128               // zlbase = lvl*128 -- CALL-invariant, hoisted
         hex.mov 3, zlidx, zlbase                        //   out of the per-row classify (R12)
         hex.add 3, zlidx, zidx
@@ -167,48 +192,48 @@ ns plane {
         hex.set 2, runlen, 1
         hex.set 2, i, 1
 
-      bloop:
-        hex.cmp 2, i, bb_count, bbody, flush_final, flush_final
-      bbody:
-        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys = yslope[y]; ptr -> next row
-        // M13-lines4b: the moved-flag is THREADED away -- the FIRST threshold test's no-move
-        // outcome jumps straight to samezidx (most rows), and `classify` is reached only after
-        // >=1 bump, so the per-row zero/set/if0 flag traffic is gone. Same rows, same output.
-        hex.if0 2, bb_ascending, descloop0
-        hex.cmp 3, zidx, c127, ascmaybe0, samezidx, samezidx
-      ascmaybe0:
-        hex.cmp 6, ys, thi6, samezidx, ascbump, ascbump
-      ascloop:
-        hex.cmp 3, zidx, c127, ascmaybe, classify, classify
-      ascmaybe:
-        hex.cmp 6, ys, thi6, classify, ascbump, ascbump
-      ascbump:
+      rowloop:
+        hex.cmp 2, i, bb_count, rowbody, flush_final, flush_final
+      rowbody:
+        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys = yslope[y]; ysptr -> next row
+        // the "did zidx move this row?" flag is THREADED away: the FIRST threshold test's no-move
+        // outcome jumps straight to same_band (most rows), and `classify` is reached only after
+        // >=1 bump. Same rows, same output, no per-row flag traffic. (history: docs/handoff-*.md)
+        hex.if0 2, bb_ascending, desc_test_first
+        hex.cmp 3, zidx, c127, asc_test_first, same_band, same_band
+      asc_test_first:
+        hex.cmp 6, ys, thresh_hi6, same_band, asc_bump, asc_bump
+      asc_loop:                                     // re-entered after each bump: keep bumping while ys >= thresh_hi
+        hex.cmp 3, zidx, c127, asc_test, classify, classify
+      asc_test:
+        hex.cmp 6, ys, thresh_hi6, classify, asc_bump, asc_bump
+      asc_bump:
         hex.inc 3, zidx
-        hex.add 8, threshold_hi, step
-        hex.cmp 8, threshold_hi, cFFF6, bhi_ok, bhi_ok, bhi_gt   // refresh the clamped compare copy
-      bhi_gt:
-        hex.set 6, thi6, 0xFFFFFF
-        ;ascloop
-      bhi_ok:
-        hex.mov 6, thi6, threshold_hi
-        ;ascloop
-      descloop0:
-        hex.if0 3, zidx, samezidx
-        hex.cmp 6, ys, tlo6, descbump, samezidx, samezidx
-      descloop:
+        hex.add 8, thresh_hi, zstep
+        hex.cmp 8, thresh_hi, cmax6, bump_hi_copy, bump_hi_copy, bump_hi_clamp   // refresh the clamped copy
+      bump_hi_clamp:
+        hex.set 6, thresh_hi6, 0xFFFFFF
+        ;asc_loop
+      bump_hi_copy:
+        hex.mov 6, thresh_hi6, thresh_hi
+        ;asc_loop
+      desc_test_first:
+        hex.if0 3, zidx, same_band
+        hex.cmp 6, ys, thresh_lo6, desc_bump, same_band, same_band
+      desc_loop:                                    // re-entered after each bump: keep bumping while ys < thresh_lo
         hex.if0 3, zidx, classify
-      descmaybe:
-        hex.cmp 6, ys, tlo6, descbump, classify, classify
-      descbump:
+      desc_test:
+        hex.cmp 6, ys, thresh_lo6, desc_bump, classify, classify
+      desc_bump:
         hex.dec 3, zidx
-        hex.sub 8, threshold_lo, step
-        hex.cmp 8, threshold_lo, cFFF6, blo_ok, blo_ok, blo_gt   // refresh the clamped compare copy
-      blo_gt:
-        hex.set 6, tlo6, 0xFFFFFF
-        ;descloop
-      blo_ok:
-        hex.mov 6, tlo6, threshold_lo
-        ;descloop
+        hex.sub 8, thresh_lo, zstep
+        hex.cmp 8, thresh_lo, cmax6, bump_lo_copy, bump_lo_copy, bump_lo_clamp   // refresh the clamped copy
+      bump_lo_clamp:
+        hex.set 6, thresh_lo6, 0xFFFFFF
+        ;desc_loop
+      bump_lo_copy:
+        hex.mov 6, thresh_lo6, thresh_lo
+        ;desc_loop
       classify:
         // reached only when zidx MOVED this row. GROUP BY ZROW, not zidx: distinct zidx buckets can
         // share the same darkest/lightest colormap row (zlight clamps) -- comparing raw zidx here
@@ -216,29 +241,29 @@ ns plane {
         hex.mov 3, zlidx, zlbase
         hex.add 3, zlidx, zidx
         hex.read_table 2, zrow, zlight, 3, zlidx
-        hex.cmp 2, zrow, cur_zrow, diffzidx, samezidx, diffzidx
-      samezidx:
+        hex.cmp 2, zrow, cur_zrow, new_band, same_band, new_band
+      same_band:
         hex.inc 2, runlen
-        ;cont2
-      diffzidx:
+        ;next_row
+      new_band:
         ;writeentry
-      cont2:
+      next_row:
         hex.inc 2, i
-        ;bloop
+        ;rowloop
 
       writeentry:
-        hex.write_byte_and_inc ptr, runlen
-        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
-        hex.write_byte_and_inc ptr, cur_zrow
+        hex.write_byte_and_inc outptr, runlen
+        rep(basewidth, k) hex.write_byte_and_inc outptr, bb_base
+        hex.write_byte_and_inc outptr, cur_zrow
         hex.inc 2, bb_n
         hex.mov 2, cur_zrow, zrow
         hex.set 2, runlen, 1
-        ;cont2
+        ;next_row
 
       flush_final:
-        hex.write_byte_and_inc ptr, runlen
-        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
-        hex.write_byte_and_inc ptr, cur_zrow
+        hex.write_byte_and_inc outptr, runlen
+        rep(basewidth, k) hex.write_byte_and_inc outptr, bb_base
+        hex.write_byte_and_inc outptr, cur_zrow
         hex.inc 2, bb_n
         ;done
 
@@ -252,14 +277,14 @@ ns plane {
       ys: hex.vec 8
       ysptr: hex.vec w/4
       y0w: hex.vec w/4
-      yadv: hex.vec w/4
+      ysoff: hex.vec w/4
       zidx: hex.vec 3
-      step: hex.vec 8
-      threshold_hi: hex.vec 8
-      threshold_lo: hex.vec 8
-      thi6: hex.vec 6
-      tlo6: hex.vec 6
-      cFFF6: hex.vec 8
+      zstep: hex.vec 8
+      thresh_hi: hex.vec 8
+      thresh_lo: hex.vec 8
+      thresh_hi6: hex.vec 6
+      thresh_lo6: hex.vec 6
+      cmax6: hex.vec 8
       zidx8: hex.vec 8
       lvl: hex.vec 3
       zlbase: hex.vec 3
@@ -267,7 +292,7 @@ ns plane {
       zrow: hex.vec 2
       cur_zrow: hex.vec 2
       runlen: hex.vec 2
-      ptr: hex.vec w/4
+      outptr: hex.vec w/4
       c127: hex.vec 3
       dist: hex.vec 8
     }

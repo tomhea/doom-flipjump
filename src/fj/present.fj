@@ -3,6 +3,55 @@
 // output stream; the memory-hook present (0x03) hands the device a framebuffer bit-address and it
 // DMA-reads W*H packed bytes (stride dw, row-major) straight from program memory (~free, D3/F7).
 // Screen geometry comes from fj_consts (W/H/BPP/NCOLORS — the config SSOT, R6). Input poll is M14.
+//
+// ---------- ORIENTATION: the command-byte map (this file IS the wire-protocol spec)
+// Every macro below is a pure EMITTER: it writes command/payload bytes with stl.output_char and
+// touches no state. Each macro's comment is the authoritative byte grammar for the command it
+// emits — read the table to find the one you need, then read that macro's comment for the exact
+// layout. (0x01 has two macros: the stock 8-byte init and the extended 9-byte stream init.)
+//
+//   byte  macro                    payload                          used by which renderer tier
+//   ----  -----------------------  -------------------------------  --------------------------
+//   0x01  init_screen              W,H,BPP,NCOLORS (8 bytes)        legacy framebuffer tier
+//   0x01  init_screen_stream       ...+flush_mode (9 bytes)         every stream/device tier
+//   0x02  set_palette              addr                             all tiers
+//   0x03  update_screen            addr (packed-byte FB)            legacy framebuffer tier
+//   0x06  update_screen_reg        addr (hex.vec 2 FB)              legacy framebuffer tier
+//   0x07  begin_frame_stream       —                                tests only (no emitter tier)
+//   0x09  begin_frame_planes       —                                visplane-band tier
+//   0x0A  begin_frame_spans        —                                dumb-screen fillCol tier
+//   0x0B  begin_frame_collines     —                                *** THE SHIPPED TIER ***
+//   0x0C  load_raster_tables       3 addrs                          raster + proj tiers
+//   0x0D  begin_frame_raster       —                                device-rasterizer tier
+//   0x0E  load_proj_tables         addr + count:2                   proj tier
+//   0x0F  begin_frame_proj         —                                proj tier
+//   (0x04/0x05/0x08 are not emitted by this file. `emit_addr` is a helper, not a command.)
+//
+// ---------- Conventions that hold in this file
+// * TIERS. The tiers above are ALTERNATIVES, selected once by the Python emitter
+//   (src/doomfj/wall_renderer.py) — a program emits exactly one of them. They are strictly
+//   ADDITIVE: the 0x01/0x02/0x03/0x06 stock commands are unchanged and still drive the stock
+//   flipjump InMemoryScreen; 0x07 and up are decoded only by the in-repo StreamScreen subclass
+//   (tests/fj/stream_screen.py), which the stock device never sees.
+// * ORDERING. `load_*_tables` are ONCE-PER-PROGRAM address handoffs (right after set_palette);
+//   `begin_frame_*` starts a per-frame stream. ⚠ For tiers that emit records INLINE during the
+//   BSP walk (raster/proj/collines), set_palette + the load_* handoffs MUST precede the walk, or
+//   their command bytes land inside the record stream and corrupt it.
+// * ADDRESSES are handed over, never copied: `emit_addr` writes a w-bit label as w/8
+//   little-endian bytes and the device DMA-reads the table/framebuffer straight out of program
+//   memory. That is why a table costs ~zero fj ops to "send" (D3/F7).
+// * COMPILE-TIME ONLY. `stl.output_char` needs a constant operand, so every parameter here
+//   (addresses, counts, flush_mode) is a compile-time value — none may be a runtime register.
+// * IN-STREAM TAGS, not command bytes — in the TAGGED formats only. 0x0A/0x0B/0x0D end with a
+//   single 0xFF terminator; 0x0B also tags 0xFE = ditto and 0x0D tags 0xFE/0xFD = ceil/floor
+//   visplane records; in those three the tag values can never collide with a valid first payload
+//   byte. 0x0F ends with the two-byte [0xFF][0xFF], discriminated by the SECOND byte (a seg id's
+//   lo byte may be 0xFF; its hi byte never is). The LENGTH-DRIVEN formats (0x07 run stream,
+//   0x09 planes) have NO terminator — the device counts pixels/records. 0x07 additionally has no
+//   reserved byte values at all (0xFF/0xFE are ordinary [count]/[color] bytes); 0x09 reserves
+//   only 0xFF, and only in a column record's `fvp` field (= unclaimed, paints nothing).
+// * The decoder for each frame format lives in tests/fj/stream_screen.py and is named in the
+//   macro's comment — that pair (macro comment + decoder) is the protocol's two-sided SSOT.
 
 ns present {
     // emit a w-bit label/address as w/8 little-endian bytes (includes zero bytes, unlike stl.output).
@@ -44,12 +93,12 @@ ns present {
         .emit_addr addr
     }
 
-    // M13pS0 — the column-stream device protocol (owned by us; NOT frozen — see the plan's note on
-    // evolving it). ADDITIVE ONLY: `init_screen`/`update_screen*` above are UNCHANGED and every
-    // existing test/build_doom keeps using the stock 8-byte init_screen + the stock InMemoryScreen
-    // device. These two new macros are consumed ONLY by the new stream-composite renderer (M13pS2)
-    // against the in-repo `StreamScreen(InMemoryScreen)` subclass (tests/fj/stream_screen.py), which
-    // expects the EXTENDED 9-byte init and decodes 0x07 — the stock device never sees either.
+    // ===== M13pS0 and later: the column-stream protocol. Owned by this repo and NOT frozen — it
+    // may be evolved, but only ADDITIVELY (everything above this line is the stock device's and
+    // must stay byte-for-byte as it is). Decoded by StreamScreen(InMemoryScreen) in
+    // tests/fj/stream_screen.py, which expects the EXTENDED 9-byte init; the stock InMemoryScreen
+    // sees neither that nor any command byte from here down.
+    // (history: docs/m13p-procedural-plan.md)
 
     // init_screen_stream: [0x01][W:2][H:2][BPP:1][NCOLORS:2][flush_mode:1]. `flush_mode` is a
     // COMPILE-TIME constant (0 or 1, decided once by the Python emitter, never per-frame) — 0 = flush
@@ -73,7 +122,9 @@ ns present {
     // column-major run stream `[count:1][color:1]` (no per-run command-byte framing — the device
     // knows the total pixel count from init_screen_stream, so the last run naturally completes the
     // frame with no explicit end marker). `byte.emit`/`cm.emit`-style EMIT tables are what actually
-    // produce those bytes (see doomfj.lut_generator.generate_emit_dispatch_table_fj).
+    // produce those bytes (see doomfj.lut_generator.generate_emit_dispatch_table_fj). No Python
+    // emitter tier uses this command today — hand-written fj tests only. Decode:
+    // stream_screen.py::_handle_stream_byte.
     def begin_frame_stream {
         stl.output_char 0x07
     }
@@ -93,7 +144,7 @@ ns present {
     // rows [y1, y2), to palette index `colour` — no cursor state, no band lists, no clipping, no
     // lookups. fj does all the geometry/lighting/clipping and hands the device only straight coloured
     // vertical strips. (A horizontal-span twin — fillRow [x1][x2][y][colour] — is the natural
-    // extension for a row-major floor pass; not emitted yet.) Decode: stream_screen.py::_decode_spans_frame.
+    // extension for a row-major floor pass; not emitted yet.) Decode: stream_screen.py::_handle_spans_byte.
     def begin_frame_spans {
         stl.output_char 0x0A
     }
@@ -103,10 +154,14 @@ ns present {
     // record x/y1. Records, tagged by their first byte:
     //   x < 0xF0: a COLUMN RUN-LIST -- [x], then pairs [y2:1][colour:1] filling rows [prev,y2)
     //             top-down starting at prev=0, terminated by a single [0xFF] (y2 is <= VIEW_H=100
-    //             for real pairs, so 0xFF is unambiguous).
+    //             for real pairs, so 0xFF is unambiguous). If the byte after [x] is [0xFE], the
+    //             record is a DITTO instead: copy column x-1's pixels into column x, record done.
+    //             Emitted when a column's output would be byte-identical to column x-1's — inline
+    //             by the walk leaf in the shipped tier (frame_render.fj's emit_ditto path), by
+    //             stream_render.fj::flush_frame in the rung-3b mode; never for column 0.
     //   0xFF:     end of frame -> present.
-    // (0xFE is reserved for a rect record.) No clipping, no lookups, no decisions device-side:
-    // every row range and colour was computed in fj.
+    // No clipping, no lookups, no decisions device-side: every row range and colour was computed
+    // in fj. Decode: stream_screen.py::_handle_collines_byte.
     def begin_frame_collines {
         stl.output_char 0x0B
     }
@@ -138,13 +193,13 @@ ns present {
 
     // begin_frame_raster: [0x0D] — starts the per-frame raster stream. What follows (interleaved,
     // in BSP front-to-back walk order — no separate "buffer then emit" phase needed since ordering
-    // alone encodes occlusion) is: per newly-referenced visplane, ONE record
-    // [0xFE][planeheight:4][light:1][base:1] (the 0xFE tag disambiguates a visplane record from a
-    // seg record in the flat interleaved stream); per surviving seg, ONE record
+    // alone encodes occlusion) is: per newly-referenced visplane, ONE 8-byte record
+    // [tag:1][vp_idx:1][planeheight:4][light:1][base:1] with tag 0xFE = ceiling visplane,
+    // 0xFD = floor visplane; per surviving seg, ONE record
     // [x1:1][x2:1][scale1:4][scalestep:4][wt_ceil:4][wt_floor:4][lit:1][cvp_idx:1][fvp_idx:1]
-    // (21 bytes; x1 != 0xFE so the device can tell it apart from a visplane record by its first
-    // byte). The stream ends with ONE terminator byte 0xFF (never a valid x1 or tag). Decode:
-    // stream_screen.py::_decode_raster_frame.
+    // (21 bytes; x1 < 0xFD always, so the device tells records apart by their first byte). The
+    // stream ends with ONE terminator byte 0xFF (never a valid x1 or tag). Decode:
+    // stream_screen.py::_handle_raster_byte + _decode_raster_record.
     def begin_frame_raster {
         stl.output_char 0x0D
     }

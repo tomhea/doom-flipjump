@@ -300,22 +300,22 @@ def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: st
         lines += list(leaf_action(root & (NF_SUBSECTOR - 1)))
         lines.append(f"    ;{done_label}")
         return chr(10).join(lines) + chr(10)
-    lines.append(f"    ;{D}_n{root}")
+    lines.append(f"    ;{D}_node{root}")
     for i, n in enumerate(bsp.nodes):
-        lines.append(f"{D}_n{i}:")
-        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")     # SET the shared partition consts
+        lines.append(f"{D}_node{i}:")
+        lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")     # SET the shared partition consts
         lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
-        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")     # CLEAR (involution)
-        lines.append(f"    hex.if0 2, {L}_side, {D}_nf{i}")
+        lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")     # CLEAR (involution)
+        lines.append(f"    hex.if0 2, {L}_side, {D}_node{i}_far")
         for child, tag in ((n.left, ""), (n.right, "f")):       # back -> left is near; front -> right
             if tag == "f":
-                lines.append(f"{D}_nf{i}:")
+                lines.append(f"{D}_node{i}_far:")
             if child & NF_SUBSECTOR:
                 lines += ["  " + ln if not ln.startswith(" ") else ln
                           for ln in leaf_action(child & (NF_SUBSECTOR - 1))]
                 lines.append(f"    ;{done_label}")
             else:
-                lines.append(f"    ;{D}_n{child}")
+                lines.append(f"    ;{D}_node{child}")
     return chr(10).join(lines) + chr(10)
 
 
@@ -355,7 +355,7 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
                 return [f"    hex.set 4, {L}_ss, {s}", f"    hex.print_as_digit 4, {L}_ss, 0",
                         f"    stl.output 10    // subsector {s}"]
             return list(subsector_action(s))              # M12ll+: the caller's per-subsector fj lines
-        return [f"    stl.fcall {L}_n{child}, {L}_r{child}"]   # interior node: recurse
+        return [f"    stl.fcall {L}_node{child}, {L}_node{child}_ret"]   # interior node: recurse
 
     # entry: visit the root, then halt via done_label
     lines.append(f"{L}_walk:")
@@ -379,7 +379,7 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
     # twice (SET + CLEAR); {L}_xbret is its shared fcall/fret return reg (dead after each fret, like pos_ret).
     for i, n in enumerate(bsp.nodes):
         if prune is not None and prune(i):                 # pruned subtree: no walk block (its xb
-            lines.append(f"{L}_xb{i}:    // (pruned walk block; xb kept for the descend pre-walk)")
+            lines.append(f"{L}_node{i}_partition:    // (pruned walk block; xb kept for the descend pre-walk)")
             lines.append(f"    hex.xor_by 10, {L}_cpx, {n.x & MASK40}")
             lines.append(f"    hex.xor_by 10, {L}_cpy, {n.y & MASK40}")
             lines.append(f"    hex.xor_by 8, {L}_cdx_mag, {abs(n.dx)}")
@@ -388,16 +388,16 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             lines.append(f"    hex.xor_by 1, {L}_sign_dy, {1 if n.dy < 0 else 0}")
             lines.append(f"    stl.fret {L}_xbret")
             continue
-        lines.append(f"{L}_n{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
+        lines.append(f"{L}_node{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
         if full_abort_label:                               # M13pG1: the screen is full -> the whole subtree
-            lines.append(f"    hex.if0 1, {full_abort_label}, {L}_go{i}")   # paints nothing (front-to-back
-            lines.append(f"    stl.fret {L}_r{i}")         # occlusion) -> prune it. Byte-exact: the per-seg
-            lines.append(f"{L}_go{i}:")                    # leaf would have fret'd on `full` for every seg.
+            lines.append(f"    hex.if0 1, {full_abort_label}, {L}_node{i}_open")   # paints nothing (front-to-back
+            lines.append(f"    stl.fret {L}_node{i}_ret")         # occlusion) -> prune it. Byte-exact: the per-seg
+            lines.append(f"{L}_node{i}_open:")                    # leaf would have fret'd on `full` for every seg.
         if extra_gate is not None:
             # M13-15M: the caller's bbox wedge gate (or any other subtree-level runtime cull).
             # The callback owns the register/leaf names; it receives the node index and this
             # node's fret register so a miss can abandon the whole subtree.
-            g = extra_gate(i, f"{L}_r{i}")
+            g = extra_gate(i, f"{L}_node{i}_ret")
             if g:
                 lines += g
         _pg = plane_gate(i) if plane_gate is not None else 0
@@ -413,16 +413,16 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             # seg-level call sites use: pieces still record into attributed-but-undrawn columns,
             # so plain tsstop here dropped riser/lip pieces the oracle records.
             if _pg == 1:
-                lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_pgo{i}")
-                lines.append(f"    stl.fret {L}_r{i}")
-                lines.append(f"{L}_pgo{i}:")
+                lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_node{i}_planes_live")
+                lines.append(f"    stl.fret {L}_node{i}_ret")
+                lines.append(f"{L}_node{i}_planes_live:")
             else:
-                lines.append(f"    hex.if1 1, tsbstop, {L}_psk{i}")
-                lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_pgo{i}")
-                lines.append(f"    hex.if0 1, fbspent, {L}_pgo{i}")
-                lines.append(f"{L}_psk{i}:")
-                lines.append(f"    stl.fret {L}_r{i}")
-                lines.append(f"{L}_pgo{i}:")
+                lines.append(f"    hex.if1 1, tsbstop, {L}_node{i}_planes_dead")
+                lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_node{i}_planes_live")
+                lines.append(f"    hex.if0 1, fbspent, {L}_node{i}_planes_live")
+                lines.append(f"{L}_node{i}_planes_dead:")
+                lines.append(f"    stl.fret {L}_node{i}_ret")
+                lines.append(f"{L}_node{i}_planes_live:")
         if inline_side:
             # M13-inlinenodes: the side test SPECIALIZED per node -- baked-const subtracts and
             # baked-magnitude multiplies, no shared-leaf fcalls, no xor_by SET/CLEAR involution.
@@ -459,31 +459,31 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             e(f"{L}_ia0{i}:")                                 # p1 term positive
             e(f"    hex.if 1, {L}_is2, {L}_ipp{i}, {L}_ipm{i}")
             e(f"{L}_ipp{i}:")                                 # (+,+): back = p1 > p2
-            e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_nf{i}, {L}_nf{i}, {L}_ib{i}")
+            e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_node{i}_far, {L}_node{i}_far, {L}_ib{i}")
             e(f"{L}_ipm{i}:")                                 # (+,-): back unless both magnitudes 0
             e(f"    hex.if0 8, {L}_ip1, {L}_ipz{i}")
             e(f"    ;{L}_ib{i}")
             e(f"{L}_ipz{i}:")
-            e(f"    hex.if0 8, {L}_ip2, {L}_nf{i}")
+            e(f"    hex.if0 8, {L}_ip2, {L}_node{i}_far")
             e(f"    ;{L}_ib{i}")
             e(f"{L}_ia1{i}:")                                 # p1 term negative
-            e(f"    hex.if 1, {L}_is2, {L}_nf{i}, {L}_imm{i}")     # (-,+): always front
+            e(f"    hex.if 1, {L}_is2, {L}_node{i}_far, {L}_imm{i}")     # (-,+): always front
             e(f"{L}_imm{i}:")                                 # (-,-): back = p2 > p1
-            e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_ib{i}, {L}_nf{i}, {L}_nf{i}")
+            e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_ib{i}, {L}_node{i}_far, {L}_node{i}_far")
             e(f"{L}_ib{i}:")                                  # back path falls through
         else:
-            lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
+            lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
             lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
-            lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # CLEAR (vals -> 0, the xor involution)
-            lines.append(f"    hex.if0 2, {L}_side, {L}_nf{i}")   # back==0 (front) -> jump; else fall to back path
+            lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")  # CLEAR (vals -> 0, the xor involution)
+            lines.append(f"    hex.if0 2, {L}_side, {L}_node{i}_far")   # back==0 (front) -> jump; else fall to back path
         lines += visit(n.left)                             # back (side>0): near=left, far=right
         lines += visit(n.right)
-        lines.append(f"    stl.fret {L}_r{i}")
-        lines.append(f"{L}_nf{i}:")                         # front: near=right, far=left
+        lines.append(f"    stl.fret {L}_node{i}_ret")
+        lines.append(f"{L}_node{i}_far:")                         # front: near=right, far=left
         lines += visit(n.right)
         lines += visit(n.left)
-        lines.append(f"    stl.fret {L}_r{i}")
-        lines.append(f"{L}_xb{i}:    // the node's partition-const xor_by block (emitted once, fcall'd SET+CLEAR)")
+        lines.append(f"    stl.fret {L}_node{i}_ret")
+        lines.append(f"{L}_node{i}_partition:    // the node's partition-const xor_by block (emitted once, fcall'd SET+CLEAR)")
         lines.append(f"    hex.xor_by 10, {L}_cpx, {n.x & MASK40}")
         lines.append(f"    hex.xor_by 10, {L}_cpy, {n.y & MASK40}")
         # M13-possignmag: dx/dy never re-enter a subtract (only a product), so bake them as an
@@ -511,5 +511,5 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
         lines.append(f"{L}_xbret: ;0")                     # the node xor_by block's fcall/fret return register (M12qq)
     lines.append(f"{L}_ss: hex.vec 4")
     for i in range(len(bsp.nodes)):
-        lines.append(f"{L}_r{i}: ;0")                      # per-node fcall/fret return register
+        lines.append(f"{L}_node{i}_ret: ;0")                      # per-node fcall/fret return register
     return "\n".join(lines) + "\n"

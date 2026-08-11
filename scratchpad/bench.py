@@ -126,15 +126,17 @@ def build():
         print(f"cache HIT {fjm.name}", flush=True)
         return fjm
     t0 = time.time()
-    main = WR.emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
-                                 sprite_wad=art if FLAGS["things"] else None, ablate=ABL, deg=FLAGS_DEG, **FLAGS)
-    print(f"emitted {len(main):,} chars ({time.time() - t0:.0f}s)", flush=True)
+    parts = WR.emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
+                                  sprite_wad=art if FLAGS["things"] else None, ablate=ABL,
+                                  deg=FLAGS_DEG, return_parts=True, **FLAGS)
+    print(f"emitted {sum(len(x) for _, x in parts):,} chars in {len(parts)} parts "
+          f"({time.time() - t0:.0f}s)", flush=True)
     consts = cfg.emit_fj_consts(cache / "fj_consts.fj")
-    mp = cache / f"b_{tag}.fj"
-    mp.write_text(main, encoding="utf-8")
-    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], mp.resolve()],
+    prog = WR.write_program_files(parts, cache, f"b_{tag}")   # order is load-bearing
+    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], *[p.resolve() for p in prog]],
                 fjm, memory_width=W, print_time=False)
-    mp.unlink()
+    for _p in prog:
+        _p.unlink()
     print(f"assembled ({time.time() - t0:.0f}s) -> {fjm.name}", flush=True)
     return fjm
 

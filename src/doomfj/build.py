@@ -24,7 +24,7 @@ from doomfj.mapcompiler import compile_geometry_streams
 from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
-from doomfj.wall_renderer import emit_wall_renderer
+from doomfj.wall_renderer import emit_wall_renderer, write_program_files
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
@@ -221,15 +221,17 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
     spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
 
-    main = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode,
-                              wall_mode=wall_mode, raster_mode=raster_mode, plane_near=plane_near,
-                              wall_noise=wall_noise, sky=sky, steps=steps, things=things,
-                              sprite_wad=spr)
+    parts = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode,
+                               wall_mode=wall_mode, raster_mode=raster_mode, plane_near=plane_near,
+                               wall_noise=wall_noise, sky=sky, steps=steps, things=things,
+                               sprite_wad=spr, return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
-    main_p = gen / "renderer_main.fj"
-    main_p.write_text(main, encoding="utf-8")
+    # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
+    # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a
+    # file with the ~50-line program. ⚠ Order is load-bearing -- see write_program_files.
+    prog = write_program_files(parts, gen, mapname)
     includes = _RENDERER_INCLUDES + (_LINES_INCLUDES if raster_mode == "lines" else [])
-    paths = [consts] + [_SRC_FJ / f for f in includes] + [main_p]
+    paths = [consts] + [_SRC_FJ / f for f in includes] + prog
 
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()

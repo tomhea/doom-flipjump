@@ -11,6 +11,8 @@ unrolled pass 2 rasters them through the shared-compare trampoline.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from doomfj.lut_generator import (
     generate_dispatch_table_fj,
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
@@ -53,25 +55,25 @@ def _pfx(mapname: str) -> str:
     return mapname.lower().replace("-", "_")
 
 
-def _seg_xorby_block(idx, fields):
-    """The shared seg{idx}_xorby block (emitted ONCE, fcall'd twice per visible seg — SET then CLEAR). M12pp:
+def _seg_xorby_block(label, fields):
+    """The shared per-seg constant block `label` (emitted ONCE, fcall'd twice per visible seg — SET then CLEAR). M12pp:
     replaces the per-seg baked `hex.set` (each pays an @-dispatch to zero a reg it overwrites) with `hex.xor_by`
     (no @), kept correct by xor-INVOLUTION self-zeroing. `fields` = list of (regname, width, value) PURE
     compile-time constants. Correct ONLY on a zero register, so the zero-init seg regs self-restore each call."""
-    lines = [f"  seg{idx}_xorby:"]
+    lines = [f"  {label}:"]
     for reg, wdt, val in fields:
         lines.append(f"    hex.xor_by {wdt}, {reg}, {val}")
     lines.append("    stl.fret xb_ret")
     return lines
 
 
-def _seg_xorby_use(idx, clear=True):
+def _seg_xorby_use(label, clear=True):
     """The SET / USE / CLEAR fcall sequence at the call site. `clear=False` drops the involution CLEAR (a TDD
     FAIL stub: seg regs accumulate across segs -> wrong values for every seg after the first)."""
-    seq = [f"    stl.fcall seg{idx}_xorby, xb_ret",      # SET  (0 -> vals)
+    seq = [f"    stl.fcall {label}, xb_ret",      # SET  (0 -> vals)
            "    stl.fcall seg_pass1_leaf, seg_ret"]      # USE  (the leaf READS the seg regs)
     if clear:
-        seq.append(f"    stl.fcall seg{idx}_xorby, xb_ret")   # CLEAR (vals -> 0, the xor involution)
+        seq.append(f"    stl.fcall {label}, xb_ret")   # CLEAR (vals -> 0, the xor involution)
     return seq
 
 
@@ -105,7 +107,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        wall_noise: bool = False, sky: bool = False, steps: bool = False,
                        things: bool = False, sprite_wad=None,
                        bbox_cull: bool = False, stack_steps: bool = False,
-                       deg: bool = False) -> str:
+                       deg: bool = False, return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -733,7 +735,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                     _art = rm.sprite_art(sprite_wad, _t.type, spr_cache)
                     _tsec = _thing_sector(rm, cmap, lds, sds, secs, _t)
                     _tag = f"{s}_{_ti}"
-                    xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"{_tag}S", [
+                    xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", [
                         ("sp_x", 8, (_t.x << 16) & 0xFFFFFFFF),
                         ("sp_y", 8, (_t.y << 16) & 0xFFFFFFFF),
                         ("sp_z", 8, ((_tsec.floor_h + _art[6]) << 16) & 0xFFFFFFFF),
@@ -763,13 +765,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         *([("sp_base2", 4, spr_ldbase[_t.type])] if DEG_SPR_NEAR_TZ else []),
                         ("sp_dw", 2, spr_dw[_t.type]),
                         ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])])
-                    out += [f"    hex.if0 1, tstop, tgo{cid}_{_ti}",
-                            f"    ;tsk{cid}_{_ti}",
-                            f"  tgo{cid}_{_ti}:",
-                            f"    stl.fcall seg{_tag}S_xorby, xb_ret",
+                    out += [f"    hex.if0 1, tstop, ss{cid}_thing{_ti}_do",
+                            f"    ;ss{cid}_thing{_ti}_skip",
+                            f"  ss{cid}_thing{_ti}_do:",
+                            f"    stl.fcall thing{_tag}_consts, xb_ret",
                             "    stl.fcall thing_leaf, thing_ret",
-                            f"    stl.fcall seg{_tag}S_xorby, xb_ret",
-                            f"  tsk{cid}_{_ti}:"]
+                            f"    stl.fcall thing{_tag}_consts, xb_ret",
+                            f"  ss{cid}_thing{_ti}_skip:"]
             for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
                 seg = cmap.segs[si]
                 ld = lds[seg.linedef]
@@ -804,7 +806,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         _v1x, _v1y = verts[seg.v1]
                         _v2x, _v2y = verts[seg.v2]
                         _sa, _sb, _sc = seg_affine_coeffs(seg, verts)
-                        xorby_blocks[si] = _seg_xorby_block(f"{si}T", [
+                        xorby_blocks[si] = _seg_xorby_block(f"seg{si}_attrib_consts", [
                             ("seg_v1x", 8, (_v1x << 16) & 0xFFFFFFFF),
                             ("seg_v1y", 8, (_v1y << 16) & 0xFFFFFFFF),
                             ("seg_v2x", 8, (_v2x << 16) & 0xFFFFFFFF),
@@ -822,11 +824,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         # SSOT -- drop-offs and level flat/light changes now carry a 1-row lip
                         # piece so the far surface's region paints beyond the edge
                         _um, _lm = rm.v5_side_modes(_fsec, _bsec, sky)
-                        _tsq = [f"    stl.fcall seg{si}T_xorby, xb_ret"]
-                        _tsu = [f"    stl.fcall seg{si}T_xorby, xb_ret"]
+                        _tsq = [f"    stl.fcall seg{si}_attrib_consts, xb_ret"]
+                        _tsu = [f"    stl.fcall seg{si}_attrib_consts, xb_ret"]
                         if steps and (_um or _lm):
                             _ln = rm.wall_lightnum(_fsec.light, 0)
-                            xorby_blocks[si] = xorby_blocks[si] + _seg_xorby_block(f"{si}F", [
+                            xorby_blocks[si] = xorby_blocks[si] + _seg_xorby_block(f"seg{si}_face_consts", [
                                 ("seg_segangle", 8, seg.angle),
                                 ("seg_fmask", 2, _um | (_lm << 4)),
                                 ("seg_uh1", 4, _fsec.ceil_h & 0xFFFF),
@@ -841,8 +843,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                 # stored piece re-derives its band lists from this (lines_pid_ids)
                                 *([("seg_bpid", 2, lines_pid[_plane_keys(_bsec)])]
                                   if stack_flag else [])])
-                            _tsq.append(f"    stl.fcall seg{si}F_xorby, xb_ret")
-                            _tsu.append(f"    stl.fcall seg{si}F_xorby, xb_ret")
+                            _tsq.append(f"    stl.fcall seg{si}_face_consts, xb_ret")
+                            _tsu.append(f"    stl.fcall seg{si}_face_consts, xb_ret")
                         # V5-DROP-P2: LIGHT-ONLY marking segs (no pieces possible) stop at
                         # claim-completion via tsstop; piece-carrying segs call unconditionally
                         # and stop on the leaf's wall-drawn `full` entry test instead.
@@ -851,18 +853,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         # spent (fbspent) means the seg provably writes nothing -- skip it.
                         # Mirrors the oracle's piece-seg idle stop exactly.
                         if not (_um or _lm):
-                            out += [f"    hex.if0 1, tsstop, e2go{cid}_{si}",
-                                    f"    ;e2sk{cid}_{si}"]
+                            out += [f"    hex.if0 1, tsstop, ss{cid}_seg{si}_mark",
+                                    f"    ;ss{cid}_seg{si}_marked"]
                         else:
-                            out += [f"    hex.if1 1, tsbstop, e2sk{cid}_{si}",
-                                    f"    hex.if0 1, tsstop, e2go{cid}_{si}",
-                                    f"    hex.if0 1, fbspent, e2go{cid}_{si}",
-                                    f"    ;e2sk{cid}_{si}"]
-                        out += [f"  e2go{cid}_{si}:",
+                            out += [f"    hex.if1 1, tsbstop, ss{cid}_seg{si}_marked",
+                                    f"    hex.if0 1, tsstop, ss{cid}_seg{si}_mark",
+                                    f"    hex.if0 1, fbspent, ss{cid}_seg{si}_mark",
+                                    f"    ;ss{cid}_seg{si}_marked"]
+                        out += [f"  ss{cid}_seg{si}_mark:",
                                 *_tsq,
                                 "    stl.fcall seg_pass1_ts_leaf, seg_ret",
                                 *_tsu,
-                                f"  e2sk{cid}_{si}:"]
+                                f"  ss{cid}_seg{si}_marked:"]
                         continue
                     if not (ablate & {"tsprobe", "tsmark"}):
                         continue
@@ -879,15 +881,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                     _v1x, _v1y = verts[seg.v1]
                     _v2x, _v2y = verts[seg.v2]
                     _sa, _sb, _sc = seg_affine_coeffs(seg, verts)
-                    xorby_blocks[si] = _seg_xorby_block(f"{si}G", [
+                    xorby_blocks[si] = _seg_xorby_block(f"seg{si}_geom_consts", [
                         ("seg_v1x", 8, (_v1x << 16) & 0xFFFFFFFF),
                         ("seg_v1y", 8, (_v1y << 16) & 0xFFFFFFFF),
                         ("seg_v2x", 8, (_v2x << 16) & 0xFFFFFFFF),
                         ("seg_v2y", 8, (_v2y << 16) & 0xFFFFFFFF),
                         ("seg_a", 8, _sa), ("seg_b", 8, _sb), ("seg_c", 8, _sc)])
-                    out += [f"    stl.fcall seg{si}G_xorby, xb_ret",
+                    out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
                             "    stl.fcall seg_pass1_leaf, seg_ret",
-                            f"    stl.fcall seg{si}G_xorby, xb_ret"]
+                            f"    stl.fcall seg{si}_geom_consts, xb_ret"]
                     continue
                 v1x, v1y = verts[seg.v1]
                 v2x, v2y = verts[seg.v2]
@@ -929,16 +931,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                # a 4-nibble bake would address the neighbouring declaration
                                # (pids are byte-sized by the assert at the registry).
                                ("seg_pid", 2, lines_pid[_plane_keys(ssec)])]
-                    xorby_blocks[si] = (_seg_xorby_block(f"{si}G", gfields)
-                                        + _seg_xorby_block(f"{si}R", rfields))
-                    out += [f"    stl.fcall seg{si}G_xorby, xb_ret",
+                    xorby_blocks[si] = (_seg_xorby_block(f"seg{si}_geom_consts", gfields)
+                                        + _seg_xorby_block(f"seg{si}_render_consts", rfields))
+                    out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
                             "    stl.fcall seg_pass1_leaf, seg_ret",
-                            f"    hex.if0 1, proceed, e1sk{cid}_{si}",
-                            f"    stl.fcall seg{si}R_xorby, xb_ret",
+                            f"    hex.if0 1, proceed, ss{cid}_seg{si}_unseen",
+                            f"    stl.fcall seg{si}_render_consts, xb_ret",
                             "    stl.fcall seg_pass2_leaf, seg_ret2",
-                            f"    stl.fcall seg{si}R_xorby, xb_ret",
-                            f"  e1sk{cid}_{si}:",
-                            f"    stl.fcall seg{si}G_xorby, xb_ret"]
+                            f"    stl.fcall seg{si}_render_consts, xb_ret",
+                            f"  ss{cid}_seg{si}_unseen:",
+                            f"    stl.fcall seg{si}_geom_consts, xb_ret"]
                     continue
                 rfields = [("seg_segangle", 8, seg.angle),
                            *([("seg_wstrip", "w/4", f"{lines_wstrip_off[si]}*dw")]
@@ -968,21 +970,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                else f"{lines_key_ids[ckey] * 130}*dw"),
                               ("seg_fvpidx", "w/4", lines_key_ids[fkey] * 2 if ascode
                                else f"{lines_key_ids[fkey] * 130}*dw")])]
-                xorby_blocks[si] = (_seg_xorby_block(f"{si}G", gfields)
-                                    + _seg_xorby_block(f"{si}R", rfields))
+                xorby_blocks[si] = (_seg_xorby_block(f"seg{si}_geom_consts", gfields)
+                                    + _seg_xorby_block(f"seg{si}_render_consts", rfields))
                 # e1sk label keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
                 # leaf's action once per parent branch, so seg-index labels would collide (R6m).
-                out += [f"    stl.fcall seg{si}G_xorby, xb_ret",
+                out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
                         "    stl.fcall seg_pass1_leaf, seg_ret",
-                        f"    hex.if0 1, proceed, e1sk{cid}_{si}",
-                        f"    stl.fcall seg{si}R_xorby, xb_ret",
+                        f"    hex.if0 1, proceed, ss{cid}_seg{si}_unseen",
+                        f"    stl.fcall seg{si}_render_consts, xb_ret",
                         "    stl.fcall seg_pass2_leaf, seg_ret2",
-                        f"    stl.fcall seg{si}R_xorby, xb_ret",
-                        f"  e1sk{cid}_{si}:",
-                        f"    stl.fcall seg{si}G_xorby, xb_ret"]
+                        f"    stl.fcall seg{si}_render_consts, xb_ret",
+                        f"  ss{cid}_seg{si}_unseen:",
+                        f"    stl.fcall seg{si}_geom_consts, xb_ret"]
             if out:
-                out = ([f"    hex.if0 1, full, e1sact{cid}", f"    ;e1sskip{cid}", f"  e1sact{cid}:"]
-                       + out + [f"  e1sskip{cid}:"])
+                out = ([f"    hex.if0 1, full, ss{cid}_visit", f"    ;ss{cid}_occluded", f"  ss{cid}_visit:"]
+                       + out + [f"  ss{cid}_occluded:"])
             return out
         # player-subsector setup (runs only at the FIRST subsector visited = order[0] = the player's): set the
         # runtime viewz (player sector floor + VIEWHEIGHT) that every seg's worldtop + ceil/floor planeheight use.
@@ -1022,8 +1024,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                           ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
                           ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc),
                           ("seg_sid", 4, proj_sid[si])]
-                xorby_blocks[si] = _seg_xorby_block(si, fields)
-                out += _seg_xorby_use(si)
+                xorby_blocks[si] = _seg_xorby_block(f"seg{si}_consts", fields)
+                out += _seg_xorby_use(f"seg{si}_consts")
                 continue
             fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
                       ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
@@ -1058,13 +1060,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         ssec.floor_tex.upper())
                 fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
                 fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
-            xorby_blocks[si] = _seg_xorby_block(si, fields)
-            out += _seg_xorby_use(si)
+            xorby_blocks[si] = _seg_xorby_block(f"seg{si}_consts", fields)
+            out += _seg_xorby_use(f"seg{si}_consts")
         if stream or raster or lines:
             # M13pG1: skip the whole action (incl. every seg's xorby SET/CLEAR pair) once the screen
             # is full -- the leaf would fret per seg anyway, but the involution flips aren't free.
-            out = ([f"    hex.if0 1, full, e1sact{cid}", f"    ;e1sskip{cid}", f"  e1sact{cid}:"]
-                   + out + [f"  e1sskip{cid}:"])
+            out = ([f"    hex.if0 1, full, ss{cid}_visit", f"    ;ss{cid}_occluded", f"  ss{cid}_visit:"]
+                   + out + [f"  ss{cid}_occluded:"])
         return out
 
     # M13-15M: the BBOX WEDGE CULL. Gate boxes come from the SSOT (bbox_gate_boxes), and the
@@ -1291,219 +1293,294 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     else:
         prelude = []
         postlude_palette = ["present.set_palette palette"]
-    main = "\n".join([
+    # ── PARTITIONED EMISSION ────────────────────────────────────────────────────────────
+    # The emitted program is built as ORDERED, NAMED PARTS instead of one 107M-char blob, so
+    # the huge generated regions (LUT/dispatch tables, per-seg constant blocks, the BSP walk,
+    # the baked banks) assemble as their OWN FILES and the file holding the actual program
+    # stays small and readable. ⚠ ORDER IS LOAD-BEARING and the parts are NOT reordered:
+    # concatenating them in this order reproduces the previous single-file text BYTE FOR
+    # BYTE (asserted by scratchpad/cr/emit_hash.py), so the assembled binary is unchanged.
+    # A consequence of not reordering: a few small declarations that sit after the first
+    # big array in the original order ride along in the "banks" part rather than "state".
+    _parts = [
+      ("entry", [
+        "// == GENERATED PROGRAM: label vocabulary ==================================",
+        "//   ss<c>_visit / _occluded        a subsector's per-seg block; _occluded = the screen",
+        "//                                  was already full when the walk reached it",
+        "//   ss<c>_seg<s>_mark / _marked    a MARKING (two-sided) seg: attribution + step faces",
+        "//   ss<c>_seg<s>_unseen            pass 1 said this one-sided seg is not visible,",
+        "//                                  so pass 2 is skipped",
+        "//   ss<c>_thing<t>_do / _skip      a sprite, gated by the per-frame thing budget",
+        "//   seg<s>_geom_consts             pass-1 constants (vertices + affine coeffs)",
+        "//   seg<s>_render_consts           pass-2 constants (angle, heights, light)",
+        "//   seg<s>_attrib_consts           a marking seg's plane-attribution constants",
+        "//   seg<s>_face_consts             its step-face (riser/lip) constants",
+        "//   thing<c>_<t>_consts            a sprite's constants",
+        "//     ^ every *_consts block is fcall'd TWICE -- SET then CLEAR. It is built from",
+        "//       hex.xor_by, and xor is an involution (x^v^v = x), so the second call restores",
+        "//       the registers to zero for the next seg. Deleting the CLEAR corrupts every",
+        "//       seg after the first.",
+        "//   <map>_bspcode_node<n>          one BSP node: the baked partition line's side test",
+        "//     ..._open                     not occluded -> do the test",
+        "//     ..._far                      the far child (the near child is visited first)",
+        "//     ..._partition                its partition constants (SET/CLEAR, same involution)",
+        "//     ..._ret                      its fcall return register",
+        "//     ..._planes_live / _planes_dead   runtime skip for a subtree that can no longer",
+        "//                                      contribute plane attribution or pieces",
+        "//   <map>_dsc_node<n>              the descend-only pre-walk that locates the eye",
+        "//   vpb_*                          the baked visplane band-list walker (generated by",
+        "//                                  lut_generator; ~1.2M labels, machine-read only)",
+        "// =========================================================================",
         "stl.startup_and_init_all",
-        *hotdata,
-        "present.init_screen_stream 0" if (stream or raster or projm or lines) else "present.init_screen",
-        *prelude,
-        *pass1, *pass2, *plane_pass,
-        *postlude_palette, *present_tail, "stl.loop",
-        "bad: stl.loop",
-        *fb_leaves,
-        *((["seg_pass1_leaf:", "stl.fret seg_ret"]
-           + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "segstub" in ablate else
-          # M13-wedge attribution: segstub + the wedge test only. (segstub - wedgestub)/segs gives the
-          # test's true in-context unit cost; both walk the WHOLE tree (`full` is never set).
-          (["seg_pass1_leaf:",
-            "proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy",
-            "stl.fret seg_ret"]
-           + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "wedgestub" in ablate else
-          (["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
-            "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"]
-           # lines mode fcalls a pass-2 leaf too, so the stub ladder has to define one (it is never
-           # reached: part 1 always leaves `proceed` = 0 here).
-           + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "xrstub" in ablate else
-          ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_raster {proj}"]
-          if raster else
-          ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
-          if projm else
-          ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
-           f"{1 if 'noprescan' in ablate else 0}",
-           *(["expand_leaf:",
-              f"stream.entry_expand_body {cfg.CENTERY}, {LINES_HALF_SLOTS}, "
-              f"{2 * WPX_RUN_CAP}, {(cfg.VIEW_H + 1) * 2 * WPX_RUN_CAP}"] if two_sided else []),
-           # CR-2026-08: the deg attribution budget must provably never bind (a binding budget
-           # = the smudged-column bug) -- n_ts counts a subset of the map's segs, so total segs
-           # below the baked cap is the sufficient condition. 4095 is also the 3-nibble
-           # counter's max, enforced together here.
-           *([_assert_pnear_unbound(deg, len(cmap.segs)), "seg_pass1_ts_leaf:",
-              f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR if deg else PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
-              f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
-              f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
-              f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"] if plane_near else []),
-           # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
-           # log2(ds) (`rep(#ds - 1, ...)`), exact only for power-of-two downscales.
-           *([_assert_pow2_ds(cfg.TEXTURE_DOWNSCALE), "thing_leaf:",
-              f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
-              f"{proj}, {cfg.CENTERX}, "
-              f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
-              f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
-              f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
-              f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
-              f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
-              f"{DEG_SPR_LOWRES_H}, {_spr_nlow(cfg) if DEG_SPR_NEAR_TZ else 1}, "
-              f"{DEG_SPR_NEAR_TZ * 0x10000}"]
-             if _do_things else []),
-           "seg_pass2_leaf:",
-           (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
-            f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
-           (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
-            f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {w1r_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
-            f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
-            f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
-            f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
-            f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
-            f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
-            f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}, "
-            f"{deg_flag}, {DEG_SLIVER_W}")]
-          if lines else
-          ["seg_pass1_leaf:",
-           f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
-          if stream else
-          ["seg_pass1_leaf:",
-           f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),
-        # the stub ablations replace the lines leaves wholesale, so the two-sided claim leaf the
-        # plane_near call sites jump to has to be stubbed alongside them (measurement only).
-        *(["seg_pass1_ts_leaf:", "stl.fret seg_ret"]
-          if (plane_near and (ablate & {"segstub", "xrstub", "wedgestub"})) else []),
-        # M13-15M: the bbox wedge gate's shared test leaf -- corners staged per node via xor_by
-        *(["bbgate_leaf:",
-           "proj.wedge_bbox bbvis, bbcl, bbcb, bbcr, bbct, wqa, wna, wqb, wnb, "
-           "wex, wey, weyx, wexy",
-           "stl.fret bbtret"] if bbox_gate else []),
-        *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
-        bsp,
-        *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
-        "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
-        # M13-absmul: the per-frame abs/sign forms of the view coords + the shared affine-distance
-        # output of wall_x_range (consumed by wall_setup_sgn as rw_distance-pre-abs)
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
-        "sgn_aff: hex.vec 8",
-        "viewz: hex.vec 8", "viewzw: hex.vec 8", "vz_set: hex.vec 1",
-        "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
-        "seg_texoff: hex.vec 8",
-        "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
-        "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
-        *(["bbcl: hex.vec 8", "bbcb: hex.vec 8", "bbcr: hex.vec 8", "bbct: hex.vec 8",
-           "bbvis: hex.vec 1", "bbtret: ;0"] if bbox_gate else []),   # M13-15M bbox wedge gate
-        "ceilfix: hex.vec 8", "floorfix: hex.vec 8",
-        "seg_ceil: hex.vec 8", "worldtop: hex.vec 8",     # M12pp: seg_ceil baked (pure); worldtop leaf-computed
-        "seg_floor: hex.vec 8", "seg_plight: hex.vec 2",  # M13d2 plane bakes (pure floor_h + raw light + flat slices)
-        "seg_ceilbase: hex.vec 5", "seg_floorbase: hex.vec 5",   # 5-nib flat slice offsets
-        "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
-        "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
-        "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
-        "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 5",
-        "seg_ret: ;0",
-        "top: hex.vec 8", "bottom: hex.vec 8",
-        "y: hex.vec 2", "ret_reg: ;0",                    # M12oo trampoline: runtime row counter + shared return reg
-        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
-        "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
-        "heightmask: hex.vec 3", "pixel_ret: ;0",
-        # M13d2 pass-2b textured-plane registers (render_planes_spans sets these per span; draw_span reads them)
-        "planeheight: hex.vec 8", "light: hex.vec 2", "flatbase: hex.vec 5",
-        "basexscale: hex.vec 8", "baseyscale: hex.vec 8",   # per-frame R_ClearPlanes seeds (clear_leaf)
-        "span_ret: ;0", "clear_ret: ;0",
-        # M13opt2 span-scan state + classify scratch (globals shared by render_planes_spans + plane_col)
-        "inspan: hex.vec 1", "spanR: hex.vec 2", "spanph: hex.vec 8", "spanfb: hex.vec 5",
-        "spanlt: hex.vec 2", "spanx1: hex.vec 2", "cR: hex.vec 2", "cph: hex.vec 8", "cfb: hex.vec 5",
-        "clt: hex.vec 2", "cexcl: hex.vec 2", "fstart: hex.vec 2",
-        f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_light: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        # M13c3 per-column plane param arrays (8-nibble stride, written by store_col_field/8)
-        f"col_cexcl: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_fstart: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_ceil_ph: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_floor_ph: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_plight: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_ceilbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_floorbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        # M13-raster/lines declare their OWN packed-byte `drawn` (stride 1, in their hotdata decls)
-        # -- this shared nibble-vec (stride 4) declaration is for fb-mode/stream-mode only.
-        *([] if (raster or lines) else [f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0"]),
-        # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
-        "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
-        # M13-2S rung 3a: the per-column PLANE ATTRIBUTION state -- ONE byte per column holding the
-        # claiming seg's plane-pair id (0 = not attributed yet), a stride-1 packed-byte array walked
-        # in lockstep with `drawn`. `tsstop` = attribution can no longer change (every column done,
-        # or the seg budget spent) -- the early-out that makes
-        # the extra two-sided walk affordable.
-        # M13-2S rung 3b: per column [chi][flo][tcnt][bcnt] (the window's exclusive-end row bounds
-        # and the bytes used in its two pair buffers), plus the buffers themselves -- tcap bytes of
-        # TOP pairs then bcap of BOTTOM blocks. A column can never hold more than VIEW_H pairs in
-        # total (each pair advances the fill cursor by >= 1 row), so 2*VIEW_H bytes per side plus a
-        # length trailer per block is a hard bound, not a guess.
-        *([f"colst:{NLJ}" + NLJ.join(NLJ.join([";0x0 * dw", f";{cfg.VIEW_H:#x} * dw",
-                                               ";0x0 * dw", ";0x0 * dw"])
-                                     for _ in range(cfg.VIEW_W)),
-           f"colbuf:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W * 10 * TS_ECAP)),
-           "cstp: hex.vec w/4", "cbfp: hex.vec w/4", "tptr: hex.vec w/4", "bptr: hex.vec w/4",
-           "chi: hex.vec 2", "flo: hex.vec 2", "tcnt: hex.vec 2", "bcnt: hex.vec 2",
-           "bcnt0: hex.vec 2", "seg_flags: hex.vec 3",
-           "bceilfix: hex.vec 8", "bfloorfix: hex.vec 8",
-           "seg_wsupper: hex.vec 4", "seg_wslower: hex.vec 4",
-           "eptr: hex.vec w/4", "exp_ret: ;0",
-           "cbufa: hex.vec w/4", "cbufd: hex.vec w/4",
-           "fbufa: hex.vec w/4", "fbufd: hex.vec w/4"] if two_sided else []),
-        *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
-           "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
-           # n_tsv is 3 nibbles: the deg attribution budget is DEG_PNEAR=4095 (its max), with
-           # never-binds ENFORCED by _assert_pnear_unbound -- see seg_pass1_leaf_body_ts
-           "n_claimed: hex.vec 2", "n_tsv: hex.vec 3", "tsstop: hex.vec 1",
-           "tsbstop: hex.vec 1",              # V5-DROP-P2b: the budget-only latch
-           # SMUDGE FIX part 2: the faces-spent latch. Declared under `lines` (NOT lines+steps,
-           # CR-2026-08: the piece-seg call sites reference it in every plane_near build) --
-           # a steps=0 build leaves it permanently 0, which matches the oracle: with
-           # near_steps off, n_face never fills so the idle stop never fires.
-           "fbspent: hex.vec 1",
-           "viewh_stub: hex.vec 2, 100",
-           "cpid: hex.vec 2",
-           # the UNATTRIBUTED-COLUMN WINDOW: every column < pmin or > pmax is attributed already
-           "pmin: hex.vec 2, 0", f"pmax: hex.vec 2, {cfg.VIEW_W - 1}"] if lines else []),
-        # V3 step faces: the per-column WRITE-ONCE slots. `sfflag[x]` is one byte (nibble 0 = an
-        # upper face is stored, nibble 1 = a lower one) so a column with no face costs ONE read on
-        # the emit path; `sfslot[x]` holds [uy1][uy2][ucls][ly1][ly2][lcls] at a power-of-16 stride
-        # so its byte offset is a whole-nibble shift. `n_face` is the per-frame SEG budget counter
-        # (STEP_SEG_BUDGET) -- separate from n_tsv, because it must count only the boundaries that
-        # actually pay a wall_scale_setup_m.
-        *([f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
-           f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
-                                      for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
-           "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
-           "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
-           "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
-           "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
-           "seg_bpid: hex.vec 2",                # V5: the boundary's baked BACK pair id
-           stepcol] if (lines and steps) else []),
-        # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (nonzero =
-        # this column carries one) so a column without a sprite costs ONE read on the emit path;
-        # `spslot[x]` holds [sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row] at a power-of-16 stride.
-        # `y0` is BIASED by 128 because a near sprite's top sits above row 0 and the slot is bytes;
-        # h <= VIEW_H bounds it to +-99. `n_thing`/`tstop` are the budget and its monotone early-out.
-        *([f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
-           f"spslot:{NLJ}" + NLJ.join(";0 * dw"
-                                      for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
-           "n_thing: hex.vec 2", "n_mon: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
-           "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
-           "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
-           "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
-           "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
-           "sp_tzmax2: hex.vec 8",             # 25M-CAP: the raised min-size depth bound
-           "sp_base2: hex.vec 4",              # OPTION B: the low-res LD region base
-           "n_hd: hex.vec 2", "hdfl: hex.vec 1",      # ... its budget counter + per-thing flag
-           "degfl: hex.vec 1", "ballow: hex.vec 1",   # ... and the per-thing runtime flags
-           "thfar: hex.vec 1",                 # SPR-NEAR: beyond the detail radius?
-           sprbkt, sprlight, sprbank] if _do_things else []),
-        *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
-                            floor_mode == "FT1")] if (lines and not ascode) else []),
-        *([bands_code] if ascode else []),
-        *([lines_wstrip_txt] if lines_wstrip_txt else []),
-        *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
-          [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
-        palette,
-        yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
-    ])
-    return main
+        *hotdata[:1],                                  # the `;__hot_end` jump over the tables
+      ]),
+      ("tables", [
+        *hotdata[1:],                                  # shared decls + trig/reciprocal LUTs + dispatch tables
+      ]),
+      ("main", [
+          "present.init_screen_stream 0" if (stream or raster or projm or lines) else "present.init_screen",
+          *prelude,
+          *pass1, *pass2, *plane_pass,
+          *postlude_palette, *present_tail, "stl.loop",
+          "bad: stl.loop",
+          *fb_leaves,
+          *((["seg_pass1_leaf:", "stl.fret seg_ret"]
+             + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "segstub" in ablate else
+            # M13-wedge attribution: segstub + the wedge test only. (segstub - wedgestub)/segs gives the
+            # test's true in-context unit cost; both walk the WHOLE tree (`full` is never set).
+            (["seg_pass1_leaf:",
+              "proj.wedge_reject wrej, seg_v1x, seg_v1y, seg_v2x, seg_v2y, wqa, wna, wqb, wnb, wex, wey, weyx, wexy",
+              "stl.fret seg_ret"]
+             + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "wedgestub" in ablate else
+            (["seg_pass1_leaf:", "hex.if0 1, full, xrs_work", "stl.fret seg_ret",
+              "xrs_work:", "hex.zero 1, visible", "stl.fret seg_ret"]
+             # lines mode fcalls a pass-2 leaf too, so the stub ladder has to define one (it is never
+             # reached: part 1 always leaves `proceed` = 0 here).
+             + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "xrstub" in ablate else
+            ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_raster {proj}"]
+            if raster else
+            ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
+            if projm else
+            ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
+             f"{1 if 'noprescan' in ablate else 0}",
+             *(["expand_leaf:",
+                f"stream.entry_expand_body {cfg.CENTERY}, {LINES_HALF_SLOTS}, "
+                f"{2 * WPX_RUN_CAP}, {(cfg.VIEW_H + 1) * 2 * WPX_RUN_CAP}"] if two_sided else []),
+             # CR-2026-08: the deg attribution budget must provably never bind (a binding budget
+             # = the smudged-column bug) -- n_ts counts a subset of the map's segs, so total segs
+             # below the baked cap is the sufficient condition. 4095 is also the 3-nibble
+             # counter's max, enforced together here.
+             *([_assert_pnear_unbound(deg, len(cmap.segs)), "seg_pass1_ts_leaf:",
+                f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR if deg else PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
+                f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
+                f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
+                f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"] if plane_near else []),
+             # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
+             # log2(ds) (`rep(#ds - 1, ...)`), exact only for power-of-two downscales.
+             *([_assert_pow2_ds(cfg.TEXTURE_DOWNSCALE), "thing_leaf:",
+                f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
+                f"{proj}, {cfg.CENTERX}, "
+                f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
+                f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
+                f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
+                f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
+                f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
+                f"{DEG_SPR_LOWRES_H}, {_spr_nlow(cfg) if DEG_SPR_NEAR_TZ else 1}, "
+                f"{DEG_SPR_NEAR_TZ * 0x10000}"]
+               if _do_things else []),
+             "seg_pass2_leaf:",
+             (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
+              f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
+             (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
+              f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {w1r_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
+              f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
+              f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
+              f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
+              f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
+              f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
+              f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}, "
+              f"{deg_flag}, {DEG_SLIVER_W}")]
+            if lines else
+            ["seg_pass1_leaf:",
+             f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
+            if stream else
+            ["seg_pass1_leaf:",
+             f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),
+          # the stub ablations replace the lines leaves wholesale, so the two-sided claim leaf the
+          # plane_near call sites jump to has to be stubbed alongside them (measurement only).
+          *(["seg_pass1_ts_leaf:", "stl.fret seg_ret"]
+            if (plane_near and (ablate & {"segstub", "xrstub", "wedgestub"})) else []),
+          # M13-15M: the bbox wedge gate's shared test leaf -- corners staged per node via xor_by
+          *(["bbgate_leaf:",
+             "proj.wedge_bbox bbvis, bbcl, bbcb, bbcr, bbct, wqa, wna, wqb, wnb, "
+             "wex, wey, weyx, wexy",
+             "stl.fret bbtret"] if bbox_gate else []),
+      ]),
+      ("segconsts", [
+          *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
+      ]),
+      ("walk", [
+          bsp,
+      ]),
+      ("state", [
+          *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
+          "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+          # M13-absmul: the per-frame abs/sign forms of the view coords + the shared affine-distance
+          # output of wall_x_range (consumed by wall_setup_sgn as rw_distance-pre-abs)
+          "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+          "sgn_aff: hex.vec 8",
+          "viewz: hex.vec 8", "viewzw: hex.vec 8", "vz_set: hex.vec 1",
+          "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
+          "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+          "seg_texoff: hex.vec 8",
+          "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
+          "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
+          *(["bbcl: hex.vec 8", "bbcb: hex.vec 8", "bbcr: hex.vec 8", "bbct: hex.vec 8",
+             "bbvis: hex.vec 1", "bbtret: ;0"] if bbox_gate else []),   # M13-15M bbox wedge gate
+          "ceilfix: hex.vec 8", "floorfix: hex.vec 8",
+          "seg_ceil: hex.vec 8", "worldtop: hex.vec 8",     # M12pp: seg_ceil baked (pure); worldtop leaf-computed
+          "seg_floor: hex.vec 8", "seg_plight: hex.vec 2",  # M13d2 plane bakes (pure floor_h + raw light + flat slices)
+          "seg_ceilbase: hex.vec 5", "seg_floorbase: hex.vec 5",   # 5-nib flat slice offsets
+          "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
+          "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
+          "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
+          "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 5",
+          "seg_ret: ;0",
+          "top: hex.vec 8", "bottom: hex.vec 8",
+          "y: hex.vec 2", "ret_reg: ;0",                    # M12oo trampoline: runtime row counter + shared return reg
+          "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
+          "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
+          "heightmask: hex.vec 3", "pixel_ret: ;0",
+          # M13d2 pass-2b textured-plane registers (render_planes_spans sets these per span; draw_span reads them)
+          "planeheight: hex.vec 8", "light: hex.vec 2", "flatbase: hex.vec 5",
+          "basexscale: hex.vec 8", "baseyscale: hex.vec 8",   # per-frame R_ClearPlanes seeds (clear_leaf)
+          "span_ret: ;0", "clear_ret: ;0",
+          # M13opt2 span-scan state + classify scratch (globals shared by render_planes_spans + plane_col)
+          "inspan: hex.vec 1", "spanR: hex.vec 2", "spanph: hex.vec 8", "spanfb: hex.vec 5",
+          "spanlt: hex.vec 2", "spanx1: hex.vec 2", "cR: hex.vec 2", "cph: hex.vec 8", "cfb: hex.vec 5",
+          "clt: hex.vec 2", "cexcl: hex.vec 2", "fstart: hex.vec 2",
+          f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+          f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+          f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+          f"col_light: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+          # M13c3 per-column plane param arrays (8-nibble stride, written by store_col_field/8)
+          f"col_cexcl: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_fstart: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+          f"col_ceil_ph: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_floor_ph: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+          f"col_plight: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_ceilbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+          f"col_floorbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
+          # M13-raster/lines declare their OWN packed-byte `drawn` (stride 1, in their hotdata decls)
+          # -- this shared nibble-vec (stride 4) declaration is for fb-mode/stream-mode only.
+          *([] if (raster or lines) else [f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0"]),
+          # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
+          "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
+          # M13-2S rung 3a: the per-column PLANE ATTRIBUTION state -- ONE byte per column holding the
+          # claiming seg's plane-pair id (0 = not attributed yet), a stride-1 packed-byte array walked
+          # in lockstep with `drawn`. `tsstop` = attribution can no longer change (every column done,
+          # or the seg budget spent) -- the early-out that makes
+          # the extra two-sided walk affordable.
+          # M13-2S rung 3b: per column [chi][flo][tcnt][bcnt] (the window's exclusive-end row bounds
+          # and the bytes used in its two pair buffers), plus the buffers themselves -- tcap bytes of
+          # TOP pairs then bcap of BOTTOM blocks. A column can never hold more than VIEW_H pairs in
+          # total (each pair advances the fill cursor by >= 1 row), so 2*VIEW_H bytes per side plus a
+          # length trailer per block is a hard bound, not a guess.
+      ]),
+      ("banks", [
+          *([f"colst:{NLJ}" + NLJ.join(NLJ.join([";0x0 * dw", f";{cfg.VIEW_H:#x} * dw",
+                                                 ";0x0 * dw", ";0x0 * dw"])
+                                       for _ in range(cfg.VIEW_W)),
+             f"colbuf:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W * 10 * TS_ECAP)),
+             "cstp: hex.vec w/4", "cbfp: hex.vec w/4", "tptr: hex.vec w/4", "bptr: hex.vec w/4",
+             "chi: hex.vec 2", "flo: hex.vec 2", "tcnt: hex.vec 2", "bcnt: hex.vec 2",
+             "bcnt0: hex.vec 2", "seg_flags: hex.vec 3",
+             "bceilfix: hex.vec 8", "bfloorfix: hex.vec 8",
+             "seg_wsupper: hex.vec 4", "seg_wslower: hex.vec 4",
+             "eptr: hex.vec w/4", "exp_ret: ;0",
+             "cbufa: hex.vec w/4", "cbufd: hex.vec w/4",
+             "fbufa: hex.vec w/4", "fbufd: hex.vec w/4"] if two_sided else []),
+          *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+             "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
+             # n_tsv is 3 nibbles: the deg attribution budget is DEG_PNEAR=4095 (its max), with
+             # never-binds ENFORCED by _assert_pnear_unbound -- see seg_pass1_leaf_body_ts
+             "n_claimed: hex.vec 2", "n_tsv: hex.vec 3", "tsstop: hex.vec 1",
+             "tsbstop: hex.vec 1",              # V5-DROP-P2b: the budget-only latch
+             # SMUDGE FIX part 2: the faces-spent latch. Declared under `lines` (NOT lines+steps,
+             # CR-2026-08: the piece-seg call sites reference it in every plane_near build) --
+             # a steps=0 build leaves it permanently 0, which matches the oracle: with
+             # near_steps off, n_face never fills so the idle stop never fires.
+             "fbspent: hex.vec 1",
+             "viewh_stub: hex.vec 2, 100",
+             "cpid: hex.vec 2",
+             # the UNATTRIBUTED-COLUMN WINDOW: every column < pmin or > pmax is attributed already
+             "pmin: hex.vec 2, 0", f"pmax: hex.vec 2, {cfg.VIEW_W - 1}"] if lines else []),
+          # V3 step faces: the per-column WRITE-ONCE slots. `sfflag[x]` is one byte (nibble 0 = an
+          # upper face is stored, nibble 1 = a lower one) so a column with no face costs ONE read on
+          # the emit path; `sfslot[x]` holds [uy1][uy2][ucls][ly1][ly2][lcls] at a power-of-16 stride
+          # so its byte offset is a whole-nibble shift. `n_face` is the per-frame SEG budget counter
+          # (STEP_SEG_BUDGET) -- separate from n_tsv, because it must count only the boundaries that
+          # actually pay a wall_scale_setup_m.
+          *([f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+             f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
+                                        for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
+             "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
+             "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
+             "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
+             "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
+             "seg_bpid: hex.vec 2",                # V5: the boundary's baked BACK pair id
+             stepcol] if (lines and steps) else []),
+          # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (nonzero =
+          # this column carries one) so a column without a sprite costs ONE read on the emit path;
+          # `spslot[x]` holds [sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row] at a power-of-16 stride.
+          # `y0` is BIASED by 128 because a near sprite's top sits above row 0 and the slot is bytes;
+          # h <= VIEW_H bounds it to +-99. `n_thing`/`tstop` are the budget and its monotone early-out.
+          *([f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+             f"spslot:{NLJ}" + NLJ.join(";0 * dw"
+                                        for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
+             "n_thing: hex.vec 2", "n_mon: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
+             "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
+             "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
+             "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
+             "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
+             "sp_tzmax2: hex.vec 8",             # 25M-CAP: the raised min-size depth bound
+             "sp_base2: hex.vec 4",              # OPTION B: the low-res LD region base
+             "n_hd: hex.vec 2", "hdfl: hex.vec 1",      # ... its budget counter + per-thing flag
+             "degfl: hex.vec 1", "ballow: hex.vec 1",   # ... and the per-thing runtime flags
+             "thfar: hex.vec 1",                 # SPR-NEAR: beyond the detail radius?
+             sprbkt, sprlight, sprbank] if _do_things else []),
+          *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
+                              floor_mode == "FT1")] if (lines and not ascode) else []),
+          *([bands_code] if ascode else []),
+          *([lines_wstrip_txt] if lines_wstrip_txt else []),
+          *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
+            [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
+          palette,
+          yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table
+      ]),
+    ]
+    _texts = [(n, chr(10).join(g)) for n, g in _parts if g]
+    main = chr(10).join(t for _, t in _texts)
+    return (_texts if return_parts else main)
+
+
+def write_program_files(parts, outdir, mapname: str = "e1m1") -> list:
+    """Write the emitted parts as SEPARATE .fj files and return them in ASSEMBLE ORDER.
+
+    The generated program is ~4.76M lines, of which the actual program is ~58. Splitting it
+    keeps the huge machine-written regions (LUT/dispatch tables, per-seg constant blocks, the
+    BSP walk, the baked banks) out of the file a human opens to read the program.
+
+    ⚠ ORDER IS THE CONTRACT. fj top-level labels are global, so N files assembled in this order
+    are exactly equivalent to their concatenation -- which is byte-identical to the previous
+    single file. Do NOT sort or reorder these paths: the parts are emitted in address order and
+    the program's baked address constants depend on it.
+    """
+    out = Path(outdir)
+    out.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for i, (name, text) in enumerate(parts):
+        p = out / ("%s_%02d_%s.fj" % (mapname.lower(), i, name))
+        p.write_text(text, encoding="utf-8")
+        paths.append(p)
+    return paths
 
 
 def _raster_mode_decls(cfg, asset_wad, nvpc: int, nvpf: int) -> list[str]:

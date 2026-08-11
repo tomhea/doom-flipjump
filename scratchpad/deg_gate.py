@@ -16,7 +16,7 @@ from doomfj.harness import W
 from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
 from doomfj.wad import WadFile
 from tests.fj.stream_screen import StreamScreen
-from doomfj.wall_renderer import emit_wall_renderer
+from doomfj.wall_renderer import emit_wall_renderer, write_program_files
 
 SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
@@ -33,16 +33,20 @@ VPS = [(664, 291, 0x18000000),        # the sprite-overlap frame: B-gate + gradu
        (1869, 479, 2147483648),       # the everything frame: sliver + PNEAR + all
        (spx, spy, sp.angle)]
 
-main = emit_wall_renderer(mw, "E1M1", cfg, over_align=False,
+parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, over_align=False,
                           floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
                           plane_near=True, wall_noise=True, steps=True, stack_steps=True,
                           things=True, sprite_wad=art, deg=True)
 tmp = Path(tempfile.mkdtemp())
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
-p = tmp / "deg.fj"
-p.write_text(main, encoding="utf-8")
+# the emitted program is written as SEPARATE files (order is load-bearing -- see
+# write_program_files); the huge generated regions no longer share a file with the program.
+prog = write_program_files(parts, tmp, "e1m1")
+print("program parts: " + ", ".join("%s=%s" % (p.name.split("_", 2)[2][:-3],
+                                               format(p.read_text(encoding="utf-8").count(chr(10)) + 1, ","))
+                                    for p in prog), flush=True)
 out = tmp / "deg.fjm"
-fj.assemble([consts.resolve(), *[s.resolve() for s in SRC], p.resolve()],
+fj.assemble([consts.resolve(), *[s.resolve() for s in SRC], *[p.resolve() for p in prog]],
             out, memory_width=W, print_time=False)
 print("assembled", flush=True)
 

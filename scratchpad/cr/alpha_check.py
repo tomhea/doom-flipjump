@@ -187,7 +187,7 @@ MUTATIONS = [
 def selftest():
     """Apply known-bad mutations to a real file and require the gate to REJECT each one."""
     target = FJ / "plane_bands.fj"
-    original = target.read_text(encoding="utf-8")
+    original = target.read_bytes()          # binary: restore must be BYTE-exact
     head_clean = compare("HEAD", verbose=False) == 0
     print("baseline (working tree vs HEAD): %s" % ("clean" if head_clean else "DIRTY -- commit first"))
     if not head_clean:
@@ -195,15 +195,15 @@ def selftest():
     failures = 0
     try:
         for label, old, new in MUTATIONS:
-            if old not in original:
+            if old.encode() not in original:
                 print("  SKIP  %-36s (anchor not found)" % label)
                 continue
-            target.write_text(original.replace(old, new, 1), encoding="utf-8")
+            target.write_bytes(original.replace(old.encode(), new.encode(), 1))
             caught = compare("HEAD", verbose=False) != 0
             print("  %-4s  %s" % ("ok" if caught else "MISS", label))
             failures += (0 if caught else 1)
     finally:
-        target.write_text(original, encoding="utf-8")
+        target.write_bytes(original)
     print("selftest: %s" % ("all mutations rejected" if not failures
                             else "!! %d MUTATION(S) PASSED THE GATE" % failures))
     return 1 if failures else 0

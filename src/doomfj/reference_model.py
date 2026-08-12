@@ -30,7 +30,8 @@ from doomfj.config import Config, PNEAR_SEG_BUDGET
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-format kernels (R6)
 from doomfj.mapcompiler import (  # shared geometry (R6)
     NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
-    bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam,
+    bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
+    thing_live_subsectors,
 )
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
@@ -680,10 +681,10 @@ class ReferenceModel:
     @staticmethod
     def _seg_sector(lds, sds, secs, seg):
         """The sector a seg fronts: seg -> linedef -> (front|back) sidedef -> sector. `lds/sds/secs` are
-        the level's parsed LINEDEFS/SIDEDEFS/SECTORS (parsed once per frame and threaded in, R6)."""
-        ld = lds[seg.linedef]
-        sd_idx = ld.front if seg.side == 0 else ld.back
-        return secs[sds[sd_idx].sector]
+        the level's parsed LINEDEFS/SIDEDEFS/SECTORS (parsed once per frame and threaded in, R6).
+        The rule itself lives in `mapcompiler.seg_sector` -- `thing_live_subsectors` needs it too and
+        mapcompiler cannot import this module, so this delegates rather than restating it."""
+        return seg_sector(lds, sds, secs, seg)
 
     def _sector_light(self, scene: Scene, subsector: int) -> int:
         """Light level of the sector the subsector belongs to (subsector -> first seg -> sector)."""
@@ -1510,13 +1511,15 @@ class ReferenceModel:
                 if _ss.numsegs and _si in things_by_ss:
                     ss_first[_ss.firstseg] = _si              # the walk's arrival point for its things
         # M13-15M: the bbox wedge cull's oracle half. The gate set and boxes come from the SSOT
-        # (bbox_gate_boxes) — thing-carrying subtrees get inflated boxes, so this is computed from
-        # THING_SPRITE-mapped things whether or not `things` is on (the fj bake does the same).
+        # (bbox_gate_boxes) — thing-live subtrees get inflated boxes, so this is computed whether or
+        # not `things` is on (the fj bake does the same).
+        # M14-a: the inflated set is now `thing_live_subsectors` (every subtree a thing COULD enter)
+        # rather than the spawn occupancy — a thing that walks into an un-inflated subtree would
+        # otherwise lose its off-wedge columns with no other symptom. The emitter's half changed in
+        # the same commit; these two must agree to the node or the mirrors diverge.
         _gate = None
         if bbox_cull:
-            _tss = {self.point_in_subsector(scene.cmap, _t.x, _t.y)
-                    for _t in scene.map_wad.things(scene.mapname)
-                    if THING_SPRITE.get(_t.type) is not None}
+            _tss = thing_live_subsectors(scene.cmap, lds, sds, secs)
             _gate = bbox_gate_boxes(scene.cmap, thing_subsectors=_tss)
         # debug stats (cheap, always on): who reached the thing pre-pass and what stopped it --
         # the (1329,1065) vanishing-sprites diagnosis needed exactly this visibility

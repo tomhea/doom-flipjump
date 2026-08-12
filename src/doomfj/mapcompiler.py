@@ -134,6 +134,85 @@ def bbox_wedge_miss(m: int, box: tuple, vx: int, vy: int) -> bool:
     return q < 0
 
 
+def seg_sector(lds, sds, secs, seg):
+    """The sector a seg fronts: seg -> linedef -> (front|back) sidedef -> sector. `lds/sds/secs` are
+    the level's parsed LINEDEFS/SIDEDEFS/SECTORS. `ReferenceModel._seg_sector` delegates here so the
+    oracle, the emitter and `thing_live_subsectors` cannot drift on the rule."""
+    ld = lds[seg.linedef]
+    return secs[sds[ld.front if seg.side == 0 else ld.back].sector]
+
+
+def thing_live_subsectors(cmap: "CompiledMap", lds, sds, secs) -> frozenset:
+    """M14-a — every subsector a thing COULD EVER BE IN. The SSOT for all three compile-time
+    structures that used to key off where the things happen to STAND at emit time:
+    `_lines_prune` (the walk prune), `_cnt`/`_lines_plane_gate` (the runtime `tsstop` node gate)
+    and `bbox_gate_boxes`'s `thing_subsectors` (the inflated wedge boxes).
+
+    ⚠ WHY THIS EXISTS. Those three were taught "a thing-carrying leaf is live" from
+    `things_by_ss`, which is a snapshot of the map's SPAWN positions. That is correct only while
+    things never move. The moment they do, a monster that walks into a leaf pruned as empty
+    vanishes with NO error and NO assertion -- the exact bug class handoff-m14.md section 3 says to
+    settle before the runtime thing list exists, and the class that already cost this repo two
+    builds.
+
+    The predicate is deliberately conservative: a thing needs somewhere to stand, so the only
+    subsectors excluded are those whose sector has no space at all (`ceil_h <= floor_h` -- closed
+    doors, wall fillers, the 25 degenerate leaves of E1M1). Every subsector a monster could
+    conceivably walk into stays live, which is what makes it sound under an unconstrained sim.
+    Nothing here reads a thing's position, so no simulation can invalidate it."""
+    live = set()
+    for si, ss in enumerate(cmap.subsectors):
+        if not ss.numsegs:
+            continue                       # a seg-less leaf has no sector to read, and no walk code
+        sec = seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
+        if sec.ceil_h > sec.floor_h:
+            live.add(si)
+    return frozenset(live)
+
+
+def assert_thing_live_survives_prune(cmap: "CompiledMap", *, thing_live, prune=None,
+                                     plane_gate=None, where: str = "") -> None:
+    """M14-a THE LOUD FAILURE. Walks the tree exactly as `_bsp_as_code` does and raises if any
+    subsector a thing could ever occupy sits in a subtree that either prune would drop:
+
+      * `prune(child)` truthy  -> the walk block is not emitted at all (COMPILE time), so the leaf
+        is never visited and its things are never projected;
+      * `plane_gate(node)` truthy -> the subtree is skipped at RUNTIME once `tsstop`, with the same
+        consequence for anything below it.
+
+    Both take the SAME callables the emitter hands `_bsp_as_code`, so this cannot drift from what is
+    actually emitted -- which is the point. Without it, re-narrowing liveness produces a renderer
+    that silently loses sprites and passes every existing gate (the static things happen to stand
+    where the narrow predicate keeps them alive)."""
+    bad: list = []
+
+    def walk(child: int, dropped: bool, gated: bool) -> None:
+        if child & NF_SUBSECTOR:
+            si0 = child & (NF_SUBSECTOR - 1)
+            if si0 in thing_live and (dropped or gated):
+                bad.append((si0, "walk-pruned at emit" if dropped else "tsstop-gated at runtime"))
+            return
+        d = dropped or bool(prune and prune(child))
+        g = gated or bool(plane_gate and plane_gate(child))
+        n = cmap.nodes[child]
+        walk(n.left, d, g)
+        walk(n.right, d, g)
+
+    import sys as _sys
+    _old = _sys.getrecursionlimit()
+    _sys.setrecursionlimit(20000)
+    try:
+        walk(cmap.root, bool(prune and prune(cmap.root)), False)
+    finally:
+        _sys.setrecursionlimit(_old)
+    if bad:
+        raise AssertionError(
+            f"{where}thing-live subsectors are unreachable to the walk: "
+            + ", ".join(f"ss{s} ({why})" for s, why in sorted(bad)[:20])
+            + (f" ... and {len(bad) - 20} more" if len(bad) > 20 else "")
+            + " -- a thing entering one of these would vanish with no other symptom.")
+
+
 def bbox_gate_boxes(cmap: "CompiledMap", *, min_segs: int = 32,
                     thing_subsectors=(), inflate: int = 96) -> dict:
     # min_segs tuning (E1M1-lite, measured): 8 gated 325 of 470 nodes and the per-visit test cost

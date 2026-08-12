@@ -21,10 +21,14 @@ from doomfj.lut_generator import (
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
-from doomfj.reference_model import ANG90
+from doomfj.reference_model import ANG90, ANGLE_TURN, FORWARD_MOVE
+from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
+                               KEY_FORWARD_MASK, KEY_BACK_MASK,
+                               KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK)
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
-                                NF_SUBSECTOR, seg_affine_coeffs, bbox_gate_boxes)
-from doomfj.reference_model import THING_SPRITE
+                                NF_SUBSECTOR, seg_affine_coeffs, bbox_gate_boxes,
+                                thing_live_subsectors,
+                                assert_thing_live_survives_prune)
 from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_FACE_BASE,
                                     SPRITE_HD_H, SPRITE_RUN_CAP_HD,
                                     DEG_SOFT_SCENERY, DEG_MINH2_SCENERY, DEG_SOFT_MON,
@@ -100,6 +104,103 @@ MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Boun
 BAND_STRIDE = MAX_BANDS * 3        # packed bytes per column per region (run-length, base, zrow each entry)
 
 
+def _int_part_lines(dst, src, neg, pos):
+    """M14-b: the walk's INTEGER map coord out of a 16.16 position -- `dst[0:4] = src[4:8]`, then
+    sign-extend nibbles 4..9 so the 10-nibble two's complement the BSP side test reads is exactly
+    what `hex.input_dec_int 10` used to produce for the same coordinate. It is an arithmetic shift,
+    so it floors; the decimal wire's integer coordinate meant the same thing."""
+    return [f"hex.zero 10, {dst}", f"hex.mov 4, {dst}, {src} + 4*dw",
+            f"hex.sign 4, {dst}, {neg}, {pos}",
+            f"{neg}:", f"hex.set 6, {dst} + 4*dw, 0xFFFFFF", f";{pos}", f"{pos}:"]
+
+
+def _player_sim_lines() -> list:
+    """M14-c — ONE TIC OF THE PLAYER SIM, in fj. The exact mirror of
+    `ReferenceModel.step_sim`: turn first, then a collision-free move along the NEW angle.
+
+        angle += ANGLE_TURN on turn_left, -= ANGLE_TURN on turn_right   (mod 2**32)
+        move   = +FORWARD_MOVE on forward, -FORWARD_MOVE on back        (both -> 0, so no move)
+        x += FixedMul(move, cos(angle));  y += FixedMul(move, sin(angle))
+
+    Two things are worth stating because they are where a mirror would drift:
+      * the angle is modular, so `-= ANGLE_TURN` is emitted as `+= (2**32 - ANGLE_TURN)` -- one
+        primitive, and bit-identical to the oracle's `& 0xFFFFFFFF` subtract;
+      * `fixed_mul_lo` is the cheap form of `fixed_mul`, documented bit-identical, and the operands
+        are in the oracle's order (move first, trig second).
+
+    The key byte's bits are tested with `hex.if_flags`, whose mask is a set of NIBBLE VALUES: bit 0
+    set is the 8 odd nibbles (0xAAAA), bit 1 is 0xCCCC, bit 2 is 0xF0F0, bit 3 is 0xFF00. Only the
+    LOW nibble is read, so only key bits 0..3 exist.
+    """
+    turn = ANGLE_TURN & 0xFFFFFFFF
+    fwd = FORWARD_MOVE & 0xFFFFFFFF
+    return [
+        f"hex.if_flags pkeys, {KEY_TURN_LEFT_MASK:#06x}, simtl_no, simtl_yes",
+        "simtl_yes:", f"hex.add_constant 8, viewangle, {turn:#x}",
+        "simtl_no:",
+        f"hex.if_flags pkeys, {KEY_TURN_RIGHT_MASK:#06x}, simtr_no, simtr_yes",
+        "simtr_yes:", f"hex.add_constant 8, viewangle, {-ANGLE_TURN & 0xFFFFFFFF:#x}",
+        "simtr_no:",
+        "hex.zero 8, pmove",
+        f"hex.if_flags pkeys, {KEY_FORWARD_MASK:#06x}, simfw_no, simfw_yes",
+        "simfw_yes:", f"hex.add_constant 8, pmove, {fwd:#x}",
+        "simfw_no:",
+        f"hex.if_flags pkeys, {KEY_BACK_MASK:#06x}, simbk_no, simbk_yes",
+        "simbk_yes:", f"hex.add_constant 8, pmove, {-FORWARD_MOVE & 0xFFFFFFFF:#x}",
+        "simbk_no:",
+        "hex.if0 8, pmove, simmv_done",          # neither key, or both: the oracle does not move
+        # the finesine index is the BAM's top 12 bits (angle_shift = 32 - log2(TRIG_N) = 20 = 5
+        # nibbles), exactly `read_sin`'s `(angle >> angle_shift) & (TRIG_N - 1)`
+        "hex.mov 8, pangt, viewangle", "hex.shr_hex 8, 5, pangt", "hex.mov 3, pangi, pangt",
+        "finesine.read_cos pmvc, pangi",
+        "finesine.read_sin pmvs, pangi",
+        "hex.fixed_mul_lo 8, 4, pmvdx, pmove, pmvc",
+        "hex.fixed_mul_lo 8, 4, pmvdy, pmove, pmvs",
+        "hex.add 8, viewx, pmvdx", "hex.add 8, viewy, pmvdy",
+        "simmv_done:",
+    ]
+
+
+def _state_wire_lines(state_wire: str, *, sim: bool = False) -> list:
+    """The fj that reads one frame's world state (and, on the bin wire, echoes it back).
+
+    Lives at module level so `tests/fj/test_state_wire.py` can assemble THE SAME TEXT in a
+    seconds-long program instead of debugging it inside a 20-minute renderer build.
+
+    "dec" is the historical wire: three decimals, position in whole map units.
+    "bin" is M14's (doomfj.wireformat): a MAGIC byte, 16.16 x/y, a BAM angle and a key byte, with
+    vx/vy derived from the position rather than the other way round. At an integer viewpoint both
+    leave viewx/viewy/vx/vy holding identical bits -- which is what makes a bin frame byte-identical
+    to a dec frame, and is what `scratchpad/m14_gate.py` gates."""
+    if state_wire != "bin":
+        assert not sim, "the player sim needs the bin wire (there is no key byte on the dec wire)"
+        return ["hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
+                "hex.input_dec_uint 8, viewangle, bad",
+                "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
+                "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy"]
+    # MAGIC first: a junk feed must still reach `bad:` and halt, or the R0 build gate (which feeds
+    # one junk byte) would block reading the other 13 bytes and die on EOF instead of gating.
+    return [
+        "hex.input 1, wmagic",
+        f"hex.if_flags wmagic + dw, 1<<0x{WIRE_MAGIC >> 4:X}, bad, wmagic_lo",
+        "wmagic_lo:", f"hex.if_flags wmagic, 1<<0x{WIRE_MAGIC & 0xF:X}, bad, wmagic_ok",
+        "wmagic_ok:",
+        "hex.input 4, viewx", "hex.input 4, viewy", "hex.input 4, viewangle",
+        "hex.input 1, pkeys",
+        # M14-c: the tic runs BEFORE anything is derived from the state and before the echo, so the
+        # frame is rendered from the state the host will be handed back -- DOOM's P_Ticker then
+        # R_RenderPlayerView, and the reason one run really is one tic.
+        *(_player_sim_lines() if sim else []),
+        *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
+        *_int_part_lines("vy", "viewy", "vysx", "vydone"),
+        # ... and the state goes straight back out, so the host can relay it into the next frame
+        # without recomputing anything: one command byte + three 4-byte words, ahead of the frame's
+        # own records (the device reads it as an ordinary present command).
+        f"stl.output_char {WIRE_STATE_CMD}",
+        "stream.emit_bytes4 viewx", "stream.emit_bytes4 viewy", "stream.emit_bytes4 viewangle",
+    ]
+
+
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
                        wall_mode: str = "textured", raster_mode: str = "framebuffer",
@@ -107,7 +208,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        wall_noise: bool = False, sky: bool = False, steps: bool = False,
                        things: bool = False, sprite_wad=None,
                        bbox_cull: bool = False, stack_steps: bool = False,
-                       deg: bool = False, return_parts: bool = False):
+                       deg: bool = False, state_wire: str = "dec",
+                       player_sim: bool = False, return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -241,6 +343,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             "the run-stream modes support wall_mode='W1'/'W2S'/'WPX'/'W1R' + floor_mode='flat'/'FT1'"
         assert wall_mode == "W1" or lines, f"wall_mode={wall_mode!r} is a lines-mode tier"
         assert floor_mode != "FT1" or lines, "floor_mode='FT1' is a lines-mode tier"
+    # M14-b: the state wire. "dec" is the historical three-decimals-on-stdin viewpoint; "bin" is the
+    # M14 round-trip format (doomfj.wireformat) -- 16.16 position + BAM + key byte in, state back
+    # out ahead of the frame. The echo goes out through `stream.emit_bytes4`, i.e. `byte.emit`,
+    # which only the run-stream modes bake a table for.
+    assert state_wire in ("dec", "bin"), f"state_wire={state_wire!r} is not 'dec' or 'bin'"
+    assert state_wire == "dec" or (stream or raster or projm or lines), \
+        "state_wire='bin' needs a run-stream mode (byte.emit's table is not baked for framebuffer)"
     # M13-W1R rides V1's per-column grain group (`gnrow` via the wnoise lookup) and V1's ditto
     # comparison of it -- without the grain the pattern key does not exist at runtime.
     assert not w1r_flag or wall_noise, "wall_mode='W1R' requires wall_noise=True (V1's gnrow)"
@@ -443,6 +552,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             if rm.sprite_art(sprite_wad, _t.type, spr_cache) is None:
                 continue
             things_by_ss.setdefault(rm.point_in_subsector(cmap, _t.x, _t.y), []).append(_t)
+    # M14-a — THE PRUNE, settled. Everything that decides whether a leaf/subtree may be dropped now
+    # asks `thing_live_subsectors` ("could a thing EVER be here?") instead of `things_by_ss` ("is a
+    # thing standing here right now?"). The second answer stops being true the moment the sim moves
+    # anything, and it fails SILENTLY -- see the SSOT's docstring. `_do_things` keeps a things=False
+    # build bit-identical: with no sprites emitted there is nothing to lose by pruning.
+    # ...gated by `_do_things` for the PRUNE, but not for the bbox gate: like the old code, the
+    # wedge boxes are inflated whether or not sprites are emitted, because the oracle's half is
+    # computed the same way in both cases and the two sets must agree to the node.
+    _thing_live_gate = thing_live_subsectors(cmap, lds, sds, secs)
+    _thing_live = _thing_live_gate if _do_things else frozenset()
+    # THE LOUD FAILURE (handoff-m14.md section 3: "a silent vanish is unacceptable; a hard failure
+    # is fine"). Anything the predicate calls uninhabitable must be provably unreachable, so a thing
+    # already standing in one means the predicate is wrong -- refuse to emit rather than ship a
+    # renderer that can drop it.
+    _stranded = sorted(set(things_by_ss) - _thing_live) if _do_things else []
+    assert not _stranded, (
+        f"thing_live_subsectors says subsectors {_stranded} are uninhabitable, yet {mapname} spawns "
+        f"drawable things in them: {[(t.type, t.x, t.y) for s in _stranded for t in things_by_ss[s]]}. "
+        "The prune would drop those leaves and the sprites would vanish with no other symptom.")
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -644,7 +772,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 # prune drops the node at COMPILE time; the `tsstop` plane gate skips it at RUNTIME
                 # once attribution is finished. Either one silently loses every sprite in an open,
                 # purely two-sided area -- at the tree viewpoint, most of them.
-                if _si0 in things_by_ss:
+                # M14-a: "carrying a thing" -> "a thing could ever be here" (see _thing_live).
+                if _si0 in _thing_live:
                     return 1
                 return sum(1 for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs)
                            if pred(cmap.segs[_si]))
@@ -666,8 +795,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             # V4: a subsector whose segs are ALL pruned can still hold THINGS, and the oracle
             # projects them the moment the walk arrives there. Pruning it made fj miss every
             # sprite in an open, purely two-sided area -- at the tree viewpoint, most of them.
-            # Keep the leaf whenever it carries a thing.
-            if _si0 in things_by_ss:
+            # M14-a: keep the leaf whenever a thing could EVER stand in it, not merely when one
+            # stands in it at emit time.
+            if _si0 in _thing_live:
                 return False
             _ss = cmap.subsectors[_si0]
             return not any(_seg_in_walk(cmap.segs[_si])
@@ -684,6 +814,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         if lines_solid_below.get(node_i, 1) != 0:
             return 0
         return 2 if (steps and lines_piece_below.get(node_i, 0)) else 1
+
+    if lines and _do_things:
+        # M14-a: the guard runs on the SAME two callables `_bsp_as_code` is about to be handed, so
+        # it checks what is really emitted rather than a restatement of it. It is O(tree) at emit.
+        assert_thing_live_survives_prune(
+            cmap, thing_live=_thing_live, prune=_lines_prune,
+            plane_gate=_lines_plane_gate if plane_near else None,
+            where=f"{mapname}: ")
 
     def _lines_descend_leaf(s):
         # the descend pre-walk's landing action: bake this subsector's viewz + band-bank pointer
@@ -1069,16 +1207,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                    + out + [f"  ss{cid}_occluded:"])
         return out
 
-    # M13-15M: the BBOX WEDGE CULL. Gate boxes come from the SSOT (bbox_gate_boxes), and the
-    # thing-subsector set uses the SAME THING_SPRITE rule the oracle's gate uses -- NOT the
-    # emitter's sprite_art-filtered things_by_ss: the gate decides which marking segs spend
-    # PNEAR budget, so both sides must agree on the gated set to the node.
+    # M13-15M: the BBOX WEDGE CULL. Gate boxes come from the SSOT (bbox_gate_boxes); the gate
+    # decides which marking segs spend PNEAR budget, so both sides must agree on the gated set to
+    # the node -- the oracle's half (reference_model.render_wall_frame) computes the SAME set.
+    # M14-a: that set was "subtrees holding a thing AT SPAWN", which inflates exactly the boxes the
+    # spawn layout happens to need. A thing that walks into an un-inflated subtree loses its
+    # off-wedge columns silently, so the inflation now follows `thing_live_subsectors` -- every
+    # subtree a thing could ever enter.
     bbox_gate: dict = {}
     if lines and bbox_cull:
-        _gate_tss = {rm.point_in_subsector(cmap, _t.x, _t.y)
-                     for _t in map_wad.things(mapname)
-                     if THING_SPRITE.get(_t.type) is not None}
-        bbox_gate = bbox_gate_boxes(cmap, thing_subsectors=_gate_tss)
+        bbox_gate = bbox_gate_boxes(cmap, thing_subsectors=_thing_live_gate)
 
     def _bbox_gate_lines(i, ret_reg):
         box = bbox_gate.get(i)
@@ -1110,10 +1248,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (once)
 
     pass1 = [
-        "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
-        "hex.input_dec_uint 8, viewangle, bad",
-        "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
-        "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
+        *_state_wire_lines(state_wire, sim=player_sim),
         # M13-absmul: per-frame |viewx|/|viewy| + sign flags. fixed_mul_lo's cost is one schoolbook
         # row per nonzero nibble of the MULTIPLIER, and a negative 16.16 view coord sign-extends to
         # a dense pattern -- so the per-seg affine cull multiplies by these sparse abs values and
@@ -1428,6 +1563,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
       ("state", [
           *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
           "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+          # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2 nibbles)
+          *(["wmagic: hex.vec 2", "pkeys: hex.vec 2"] if state_wire == "bin" else []),
+          # M14-c: the player tic's scratch -- the signed 16.16 move magnitude, the
+          # finesine index it is projected through, and the two 16.16 deltas
+          *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",
+             "pmvc: hex.vec 8", "pmvs: hex.vec 8",
+             "pmvdx: hex.vec 8", "pmvdy: hex.vec 8"] if player_sim else []),
           # M13-absmul: the per-frame abs/sign forms of the view coords + the shared affine-distance
           # output of wall_x_range (consumed by wall_setup_sgn as rw_distance-pre-abs)
           "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",

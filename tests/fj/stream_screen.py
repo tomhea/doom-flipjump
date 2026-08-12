@@ -51,6 +51,9 @@ RASTER_TAG_END = 0xFF
 # above; COLORMAP_LIGHTS here) instead of local re-hardcodes -- the device and the oracle
 # cannot drift apart on them.
 from doomfj.reference_model import COLORMAP_LIGHTS
+# M14-b: the state block the program echoes back is decoded through the wire's SSOT --
+# the device must not open-code a byte order the emitter could change under it.
+from doomfj.wireformat import STATE_CMD as CMD_STATE, STATE_BYTES, decode_state
 
 
 class StreamScreen(InMemoryScreen):
@@ -90,6 +93,9 @@ class StreamScreen(InMemoryScreen):
         self._proj_buf = bytearray()               # positional header/viewz bytes being collected
         self._proj_state = None                    # "header" | "viewz" | "segs"
         self._proj_view = None                     # (viewx, viewy, viewangle, viewz)
+        # M14-b: the round-tripped world state, as (x16, y16, angle). None until the
+        # program emits a STATE_CMD block -- a dec-wire binary never does.
+        self.state = None
         self._proj_rm = None
 
     # ---------------------------------------------------------------- input stream (optional)
@@ -126,9 +132,14 @@ class StreamScreen(InMemoryScreen):
             return 1 + self._address_bytes() + 2
         if command == CMD_BEGIN_FRAME_PROJ:
             return 1
+        if command == CMD_STATE:                    # M14-b: [cmd][x:4][y:4][angle:4]
+            return 1 + STATE_BYTES
         return super()._command_length(command)
 
     def _execute_command(self, command: int, payload) -> None:
+        if command == CMD_STATE:                       # M14-b: the world state coming back out
+            self.state = decode_state(bytes(payload))
+            return
         if command == 0x01:
             self._init_screen(self._u16(payload, 0), self._u16(payload, 2), payload[4], self._u16(payload, 5))
             self.flush_mode = payload[7]

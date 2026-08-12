@@ -51,15 +51,40 @@ relay that holds the previous state and feeds it back; it stops being the thing 
 movement. That preserves the existing architecture exactly — still stateless, still one run =
 one frame — and it is the honest reading of "the sim runs in fj".
 
-⚠ **MEASURE BEFORE YOU COMMIT TO IT.** E1M1-lite has **212 things**. If each round-trips
-(x, y, z, angle, state) as decimals, that is ~1000 `hex.input_dec_int` calls per frame and the
-per-call cost is **unmeasured**. At ~23M ops/frame today, an input path costing even 20k
-ops/number would double the frame. **Rung 0 is a spike that measures `hex.input_dec_int` and
-`stl.output_char` per number**, and the answer decides the wire format:
-- cheap → decimals, simplest;
-- expensive → a packed binary form, or only round-trip things that MOVED (a dirty list), or keep
-  thing sim host-side for M14 and move it in M15.
-Do not design the wire format before that number exists. Write the number into this file.
+### 2.1 M14-0 RESULT — the wire format is BINARY. Measured, not estimated.
+
+Two probes, both in `scratchpad/`, both shipping the negative control R9 demands:
+
+* `m14_0_insitu_digits.py` — the **in-situ** cost of one decimal input digit, measured inside a real
+  12.5MB E1M1 binary (`b_272d37507ca58434.fjm`) by the leading-zeros trick: `"0000001869"` and
+  `"1869"` are the same value, six digits apart. *Control:* the frame bytes must be identical across
+  every padded run, or the probe is measuring a moved value, not a digit. They were.
+* `m14_0_wire_cost.py` — a k = 1/17/33 sweep over each candidate primitive in a small program.
+  *Controls:* marginal cost linear in k, all input drained, output byte-exact.
+
+| primitive | ops per unit | one 32-bit value |
+|---|---|---|
+| `hex.input_dec_int 10` | **2,135 / digit** (in-situ **2,079–2,395**) | ~21,400 (10 digits) |
+| `hex.input_dec_uint 8` | 1,747 / digit (in-situ 1,969) | ~17,500 |
+| `hex.print_dec_uint 8` | **12,927 / number** | 12,927 |
+| `hex.input n` (raw) | **73.6 / byte** | **295** |
+| `byte.emit` (raw, runtime) | **54 / byte** | **216** |
+| `stl.output_char` (const) | 8 / byte | — |
+
+**The small program does not lie about this one.** In-situ / small = **×0.97 … ×1.12** on the digit
+row, so `@` barely moves between a 100KB and a 12.5MB program here and the small-program rows
+transfer directly.
+
+**Round-tripping one 32-bit value costs 511 ops binary against ~34,300 decimal — 67× cheaper.**
+Scaled to the thing table (212 things × 5 values):
+
+* binary: **~542k ops/frame**, i.e. 1.2–1.6% of the certified 33.5–45.2M frame — affordable;
+* decimal: **~36M ops/frame**, i.e. *more than the entire frame* — exactly the doubling §2 feared.
+
+**DECISION: the wire is raw little-endian binary** (`hex.input n, cell` in, `byte.emit` out), for
+player state and for the thing table alike. No dirty-list complexity is needed and no thing sim has
+to stay host-side: at 511 ops a value, all 212 things can round-trip every frame. The three player
+decimals stay affordable either way (~60k ops) but move to binary too, so there is one format.
 
 ## 3. ⚠ THE TRAP THAT WILL BITE FIRST — the prune, and it fails SILENTLY
 

@@ -1740,8 +1740,10 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
                       ("seg_texoff", 8, texoff & 0xFFFFFFFF),
                       ("seg_texbase", 5, texbase), ("seg_texheight", 4, th_s), ("seg_tw", 8, tw_s),
                       ("seg_hm", 3, th_s - 1), ("seg_light", 2, seg_light[si])]
-            xorby_blocks[si] = _seg_xorby_block(si, fields)  # ceilfix/floorfix/seg_ceil/viewzw are static (1 sector)
-            out += _seg_xorby_use(si, clear=_M12PP_CLEAR)
+            # the helpers take a FULL LABEL (not a seg index) so a definition cannot drift from
+            # its call sites -- match the shipping emitter's `seg<i>_consts` convention
+            xorby_blocks[si] = _seg_xorby_block(f"seg{si}_consts", fields)  # ceilfix/floorfix/seg_ceil/viewzw static (1 sector)
+            out += _seg_xorby_use(f"seg{si}_consts", clear=_M12PP_CLEAR)
         return out
 
     bsp = _bsp_as_code("room", cmap, done_label="bsp_done", subsector_action=subsector_action)

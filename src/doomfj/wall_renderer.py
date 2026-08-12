@@ -972,7 +972,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                else f"{lines_key_ids[fkey] * 130}*dw")])]
                 xorby_blocks[si] = (_seg_xorby_block(f"seg{si}_geom_consts", gfields)
                                     + _seg_xorby_block(f"seg{si}_render_consts", rfields))
-                # e1sk label keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
+                # ss{cid}_seg{si}_unseen: keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
                 # leaf's action once per parent branch, so seg-index labels would collide (R6m).
                 out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
                         "    stl.fcall seg_pass1_leaf, seg_ret",
@@ -1315,7 +1315,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "//   seg<s>_render_consts           pass-2 constants (angle, heights, light)",
         "//   seg<s>_attrib_consts           a marking seg's plane-attribution constants",
         "//   seg<s>_face_consts             its step-face (riser/lip) constants",
-        "//   thing<c>_<t>_consts            a sprite's constants",
+        "//   thing<ss>_<t>_consts           a sprite's constants. ⚠ <ss> is the SUBSECTOR index,",
+        "//                                  NOT the <c> above: <c> counts EMISSIONS (a leaf is emitted",
+        "//                                  once per parent branch) while this block is deduped per",
+        "//                                  subsector, so the two numbers differ.",
         "//     ^ every *_consts block is fcall'd TWICE -- SET then CLEAR. It is built from",
         "//       hex.xor_by, and xor is an involution (x^v^v = x), so the second call restores",
         "//       the registers to zero for the next seg. Deleting the CLEAR corrupts every",

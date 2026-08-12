@@ -67,25 +67,53 @@ def main():
 
     # The per-copy label prefixes the ORIGINAL inline blocks used (the sub-macro's own locals are
     # bare). Erased on BOTH sides: each expansion legitimately gets fresh label names.
-    prefixes = [""]
+    prefixes, extra = [""], []
     for a in sys.argv[5:]:
-        if a.startswith("--prefixes="):
-            prefixes += a.split("=", 1)[1].split(",")
-        elif a == "--prefixes":
-            prefixes += sys.argv[sys.argv.index(a) + 1].split(",")
-    names = sorted({pre + l for l in locals_ for pre in prefixes}, key=len, reverse=True)
+        for flag, dst in (("--prefixes", "p"), ("--erase", "e")):
+            if a.startswith(flag + "="):
+                v = a.split("=", 1)[1].split(",")
+            elif a == flag:
+                v = sys.argv[sys.argv.index(a) + 1].split(",")
+            else:
+                continue
+            (prefixes if dst == "p" else extra).extend(v)
+    # `--erase` names additional OLD-side labels that play a sub-macro local's role but do not
+    # share its prefix -- e.g. an inline block whose fall-through exit was the NEXT section's
+    # label, which the sub-macro replaces with an internal `done:` in the same position.
+    names = sorted({pre + l for l in locals_ for pre in prefixes} | set(extra),
+                   key=len, reverse=True)
 
     calls = re.findall(r"\.%s ([^\n]+)" % sub_name, new)
     if not calls:
         raise SystemExit("no call sites for .%s found" % sub_name)
 
     def norm(seq):
+        """Alpha-rename the per-copy label names: L0, L1, ... by first occurrence.
+
+        ⚠ An earlier version mapped them ALL to one literal "LBL", which erased the control-flow
+        graph -- swapping two branch targets, or inverting a compare's lt/gt arms, compared as
+        IDENTICAL. That is the exact class of bug this tool exists to catch. Indexing by first
+        occurrence keeps the equality-partition of targets, so a rewire changes the stream while
+        a legitimate fresh naming does not."""
         if not names:
             return list(seq)
-        pat = r"\b(%s)\b" % "|".join(map(re.escape, names))
-        return [re.sub(pat, "LBL", l) for l in seq]
+        pat = re.compile(r"\b(%s)\b" % "|".join(map(re.escape, names)))
+        seen, out = {}, []
+
+        def rep(m):
+            k = m.group(1)
+            if k not in seen:
+                seen[k] = len(seen)
+            return "L%d" % seen[k]
+
+        for l in seq:
+            out.append(pat.sub(rep, l))
+        return out
 
     old_body = ops(body(old, outer))
+    new_body = ops(body(new, outer))
+    cursor = 0                      # regions must be found in order and must not overlap
+    ncur = 0                        # ... and each call site anchored to its own tail
     bad = 0
     for n, call in enumerate(calls):
         args = [a.strip() for a in call.split(",")]
@@ -94,15 +122,31 @@ def main():
                       lambda x: m[x.group(1)], l) for l in sub_body]
         first = norm([exp[0]])[0]
         try:
-            i = next(k for k, l in enumerate(old_body) if norm([l])[0] == first)
+            i = next(k for k in range(cursor, len(old_body))
+                     if norm([old_body[k]])[0] == first)      # in order, never re-matching a region
         except StopIteration:
             print("call %d: FAIL  first expanded op not found in %s@%s:\n    %s"
                   % (n, outer, ref, first))
             bad += 1
             continue
         A, B = norm(old_body[i:i + len(exp)]), norm(exp)
-        if A == B:
+        # END ANCHOR: the window is sized by the EXPANSION, so without this an op dropped from the
+        # END of the original inline block would fall outside the window and never be compared.
+        # The op after the call site in the new body must equal the op after the region in the old.
+        nxt_old = old_body[i + len(exp)] if i + len(exp) < len(old_body) else None
+        c = next((k for k in range(ncur, len(new_body))
+                  if new_body[k].startswith("." + sub_name)), None)
+        nxt_new = new_body[c + 1] if (c is not None and c + 1 < len(new_body)) else None
+        ncur = (c + 1) if c is not None else ncur
+        tail_ok = (nxt_old is None or nxt_new is None or nxt_old == nxt_new)
+        cursor = i + len(exp)
+        if A == B and tail_ok:
             print("call %d: IDENTICAL (%d ops, from %s line ~%d)" % (n, len(B), outer, i))
+        elif A == B:
+            bad += 1
+            print("call %d: the block matches but the region does NOT end where the call does" % n)
+            print("    after the block  %s: %r" % (ref, nxt_old))
+            print("    after the call   new : %r" % (nxt_new,))
         else:
             bad += 1
             print("call %d: DIFFERS" % n)

@@ -52,7 +52,7 @@ def _strip(text):
 def macro_streams(text):
     """-> {namespace-qualified scope name: [tokens]}, with only @-locals alpha-renamed."""
     toks = TOKEN.findall(_strip(text))
-    out, ns_stack, stack = {}, [], []
+    out, siglen, ns_stack, stack = {}, {}, [], []
     depth, i = 0, 0
     pending = None          # macro name awaiting its '{'
     sig = []                # its signature tokens
@@ -75,6 +75,7 @@ def macro_streams(text):
                 while n in out:
                     n, k = "%s#%d" % (name, k), k + 1
                 out[n] = list(sig)
+                siglen[n] = len(sig)          # the @-list lives ONLY in the signature
                 stack.append((n, depth))
                 pending, sig = None, []
                 i += 1
@@ -107,9 +108,14 @@ def macro_streams(text):
     alpha = {}
     for name, ts in out.items():
         renameable = set()
-        if "@" in ts:
+        # ⚠ Scan the SIGNATURE ONLY. Bounding this by the `<` token alone was a real bug: a macro
+        # that declares `@ locals` but no `<` globals has no `<`, so the scan ran into the body and
+        # marked EVERY identifier -- ops, macro calls, globals -- renameable, silently restoring
+        # the unsound behaviour this tool was rewritten to remove.
+        sig_end = siglen.get(name, 0)
+        if "@" in ts[:sig_end]:
             j = ts.index("@") + 1
-            while j < len(ts) and ts[j] != "<":
+            while j < sig_end and ts[j] != "<":
                 if IDENT.match(ts[j]):
                     renameable.add(ts[j])
                 j += 1
@@ -170,6 +176,8 @@ def compare(ref, verbose=True):
     return bad
 
 
+# (file, label, old, new). ⚠ fixed_point.fj::fixed_div declares `@ locals` but NO `<` list --
+# exactly the shape that defeated the old signature scan, so it MUST stay in this set.
 MUTATIONS = [
     ("global swapped for another global", "hex.mov 8, denom, bb_recip_ph",
                                           "hex.mov 8, denom, yslope_packed"),
@@ -184,8 +192,16 @@ MUTATIONS = [
 ]
 
 
+EXTRA_MUTATIONS = [
+    ("fixed_point.fj", "op swapped, in a macro with NO < list",
+     ".idiv 2*n, n, quotient", ".idiv2 2*n, n, quotient"),
+    ("fixed_point.fj", "global swapped, in a macro with NO < list",
+     "hex.read_table_packed 3, recip, slopediv_recip8", "hex.read_table_packed 3, recip, tantoangle"),
+]
+
+
 def selftest():
-    """Apply known-bad mutations to a real file and require the gate to REJECT each one."""
+    """Apply known-bad mutations to real files and require the gate to REJECT each one."""
     target = FJ / "plane_bands.fj"
     original = target.read_bytes()          # binary: restore must be BYTE-exact
     head_clean = compare("HEAD", verbose=False) == 0
@@ -202,8 +218,23 @@ def selftest():
             caught = compare("HEAD", verbose=False) != 0
             print("  %-4s  %s" % ("ok" if caught else "MISS", label))
             failures += (0 if caught else 1)
+            for fname, label, old, new in EXTRA_MUTATIONS:
+                pass
     finally:
         target.write_bytes(original)
+    for fname, label, old, new in EXTRA_MUTATIONS:
+        tgt = FJ / fname
+        orig = tgt.read_bytes()
+        if old.encode() not in orig:
+            print("  SKIP  %-44s (anchor not found in %s)" % (label, fname))
+            continue
+        try:
+            tgt.write_bytes(orig.replace(old.encode(), new.encode(), 1))
+            caught = compare("HEAD", verbose=False) != 0
+        finally:
+            tgt.write_bytes(orig)
+        print("  %-4s  %-44s [%s]" % ("ok" if caught else "MISS", label, fname))
+        failures += (0 if caught else 1)
     print("selftest: %s" % ("all mutations rejected" if not failures
                             else "!! %d MUTATION(S) PASSED THE GATE" % failures))
     return 1 if failures else 0

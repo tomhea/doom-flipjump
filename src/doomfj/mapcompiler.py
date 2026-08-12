@@ -287,7 +287,7 @@ def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: st
     NEAR child at every node and never visit the far side -- the leaf reached is the subsector
     containing the eye. Runs BEFORE the main walk to set the per-frame player-subsector state
     (viewz + the baked band-bank pointer), so the main walk needs no per-leaf guard blocks and
-    empty subtrees can be pruned from it safely. Reuses the main walk's shared xb{i} const blocks
+    empty subtrees can be pruned from it safely. Reuses the main walk's shared <L>_node{i}_partition const blocks
     and pos_leaf (same labels); path length ~tree depth (~10-20 nodes), once per frame.
     `leaf_action(s)` returns the fj lines for landing in subsector s (must end by falling
     through); the emitted code jumps to `done_label` afterwards."""
@@ -375,11 +375,11 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
     # no @) -> fcall the side test -> CLEAR (xor_by again cancels, cpx..cdy back to 0) -> branch on the already-
     # computed side -> NEAR child first, FAR second. The CLEAR happens BEFORE recursion, so the children SET
     # cpx..cdy from a known-zero state (the involution's zero invariant). point_on_side_leaf only READS
-    # cpx..cdy (verified), so the CLEAR exactly cancels the SET. The xb{i} block is emitted once and fcall'd
+    # cpx..cdy (verified), so the CLEAR exactly cancels the SET. The node{i}_partition block is emitted once and fcall'd
     # twice (SET + CLEAR); {L}_xbret is its shared fcall/fret return reg (dead after each fret, like pos_ret).
     for i, n in enumerate(bsp.nodes):
         if prune is not None and prune(i):                 # pruned subtree: no walk block (its xb
-            lines.append(f"{L}_node{i}_partition:    // (pruned walk block; xb kept for the descend pre-walk)")
+            lines.append(f"{L}_node{i}_partition:    // (pruned walk block; the partition consts stay for the descend pre-walk)")
             lines.append(f"    hex.xor_by 10, {L}_cpx, {n.x & MASK40}")
             lines.append(f"    hex.xor_by 10, {L}_cpy, {n.y & MASK40}")
             lines.append(f"    hex.xor_by 8, {L}_cdx_mag, {abs(n.dx)}")
@@ -428,7 +428,7 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
             # baked-magnitude multiplies, no shared-leaf fcalls, no xor_by SET/CLEAR involution.
             # Same fold/compare structure as point_on_side_leaf at the same widths -> byte-exact.
             # is1/is2 = the two product terms' signs (sign_d XOR sign_partition-delta); the 4-way
-            # sign-pair compare mirrors the leaf verbatim. xb{i}/pos_leaf stay emitted for the
+            # sign-pair compare mirrors the leaf verbatim. node{i}_partition/pos_leaf stay emitted for the
             # descend pre-walk, which still routes through them.
             e = lines.append
             e(f"    hex.mov 10, {L}_idyv, vy")

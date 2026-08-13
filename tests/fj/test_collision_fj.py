@@ -215,3 +215,99 @@ def test_runtime_selection_on_a_walked_trajectory(runtime_fjm, level):
         st = rm.step_sim(st, L if tic % 7 == 6 else F, scene=scene)
         assert _run_runtime(runtime_fjm, level, st.x, st.y) == \
             rm.check_position(scene, st.x, st.y), f"tic {tic} at ({st.x / U:.3f}, {st.y / U:.3f})"
+
+
+# ── the TABLE + BLOCKMAP path, all runtime: the shape that will ship ───────────────────────────
+
+@pytest.fixture(scope="module")
+def table_fjm(tmp_path_factory, level):
+    """`sim.check_position` over the packed tables: the blockmap is indexed at RUNTIME, the block's
+    line list and each line's row are READ, and `sim.check_line` executes DOOM's PIT_CheckLine with
+    no compile-time specialisation. This is what bake-as-code was replaced by after it failed to
+    assemble in 50 minutes -- note that this one assembles in seconds."""
+    from doomfj.collision import (LINE_ROW_BYTES, LINE_ROW_LEN, block_tables, blockmap_grid,
+                                  line_rows)
+    from doomfj.lut_generator import generate_packed_lut_fj
+    rm, scene, cmap, lds, sds, secs, grid = level
+    rows = line_rows(lds, cmap.vertexes, secs, sds, ML_BLOCKING)
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    blocks, flat = block_tables(grid)
+
+    def pack(vals, widths):
+        v = sh = 0
+        for x, nb in zip(vals, widths):
+            v |= (x & ((1 << (8 * nb)) - 1)) << sh
+            sh += 8 * nb
+        return v
+
+    prog = "\n".join([
+        "stl.startup_and_init_all",
+        "hex.input 1, wmagic", "hex.input 4, cpx", "hex.input 4, cpy",
+        "hex.input 4, cp_seedf", "hex.input 4, cp_seedc",
+        f"hex.set 8, cprad, {PLAYER_RADIUS}",
+        f"sim.check_position bkoff, 4, bklin, 4, lnrow, 3, {nbx}, {nby}, {bx0}, {by0}",
+        "hex.print_as_digit 1, cp_ok, 0", "stl.output 10",
+        "hex.print_as_digit 8, cp_floor, 0", "stl.output 10",
+        "hex.print_as_digit 8, cp_ceil, 0", "stl.output 10",
+        "stl.loop",
+        "wmagic: hex.vec 2", "cpx: hex.vec 8", "cpy: hex.vec 8", "cprad: hex.vec 8",
+        "cbx_lo: hex.vec 8", "cbx_hi: hex.vec 8", "cby_lo: hex.vec 8", "cby_hi: hex.vec 8",
+        "cp_ok: hex.vec 1", "cp_floor: hex.vec 8", "cp_ceil: hex.vec 8",
+        "cp_seedf: hex.vec 8", "cp_seedc: hex.vec 8",
+        generate_packed_lut_fj("lnrow", [pack(r, LINE_ROW_BYTES) for r in rows], LINE_ROW_LEN),
+        generate_packed_lut_fj("bkoff", [pack(b, (2, 1)) for b in blocks], 3),
+        generate_packed_lut_fj("bklin", list(flat), 2),
+    ]) + "\n"
+    d = tmp_path_factory.mktemp("simpos")
+    src = d / "p.fj"
+    src.write_text(prog, encoding="utf-8")
+    out = d / "p.fjm"
+    fj.assemble([FIXP.resolve(), Path("src/fj/sim.fj").resolve(), src.resolve()],
+                out, memory_width=W, print_time=False)
+    return out
+
+
+def _run_table(table_fjm, level, x16, y16):
+    import struct
+    rm, _scene, cmap, lds, sds, secs, _grid = level
+    sf, sc = _seed(rm, cmap, lds, sds, secs, x16, y16)
+    io = FixedIO(bytes([0xD0]) + struct.pack("<IIII", x16 & 0xFFFFFFFF, y16 & 0xFFFFFFFF,
+                                             sf & 0xFFFFFFFF, sc & 0xFFFFFFFF))
+    fj.run(table_fjm, io_device=io, print_time=False, print_termination=False)
+    b, f, c = io.get_output(allow_incomplete_output=True).decode().split("\n")[:3]
+
+    def sg(h):
+        v = int(h, 16)
+        return v - (1 << 32) if v >> 31 else v
+
+    return int(b, 16) == 1, sg(f), sg(c)
+
+
+def test_table_check_position_matches_the_oracle(table_fjm, level):
+    """⚠ The sample must contain REFUSED positions, or this proves only that open space is open."""
+    import random
+    rm, scene, cmap, *_ = level
+    rng = random.Random(14)
+    xs = [v[0] for v in cmap.vertexes]
+    ys = [v[1] for v in cmap.vertexes]
+    pts = list(POSITIONS) + [(rng.randint(min(xs), max(xs)), rng.randint(min(ys), max(ys)))
+                             for _ in range(40)]
+    refused = 0
+    for x, y in pts:
+        for fx, fy in ((0, 0), (0x8000, 0x4000)):        # integer AND fractional
+            x16, y16 = (x << 16) + fx, (y << 16) + fy
+            want = rm.check_position(scene, x16, y16)
+            refused += not want[0]
+            assert _run_table(table_fjm, level, x16, y16) == want,                 f"({x16 / U:.3f},{y16 / U:.3f})"
+    assert refused >= 8, f"only {refused} refused positions in the sample -- too weak"
+
+
+def test_table_check_position_on_a_walked_trajectory(table_fjm, level):
+    from doomfj.reference_model import SimState, spawn_state
+    rm, scene, *_ = level
+    sp = spawn_state(scene.map_wad, "E1M1")
+    st = SimState(sp.x, sp.y, sp.angle, "E1M1")
+    for tic in range(30):
+        st = rm.step_sim(st, {"turn_left": True} if tic % 7 == 6 else {"forward": True},
+                         scene=scene)
+        assert _run_table(table_fjm, level, st.x, st.y) == rm.check_position(scene, st.x, st.y),             f"tic {tic}"

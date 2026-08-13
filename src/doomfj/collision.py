@@ -351,9 +351,16 @@ def check_position_runtime_decls() -> list:
 # across the three the axis-retry policy tries -- against a ~40M frame. And it assembles in
 # seconds, because it is a data table and a loop rather than 57k unrolled lines.
 
-LINE_ROW_BYTES = (2, 2, 2, 2, 1, 2, 2)      # v1x, v1y, dx, dy, flags, opentop, openbottom
+# v1x, v1y, dxi, dyi, minx, maxx, miny, maxy, slope, flags, opentop, openbottom
+LINE_ROW_BYTES = (2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2)
+LINE_ROW_LEN = sum(LINE_ROW_BYTES)
 FLAG_ONE_SIDED = 1 << 0
 FLAG_BLOCKING = 1 << 1
+# The bbox and the SLOPE TYPE are precomputed into the row rather than derived at runtime. They
+# cost four extra 2-byte reads and one 1-byte read (~3k ops a line) and they remove four runtime
+# min/max pairs and the whole sign-comparison switch from the loop -- fewer branches in the one
+# piece of fj that has to be exactly DOOM, at a price that is noise against a ~40M frame.
+ST_HORIZONTAL, ST_VERTICAL, ST_POSITIVE, ST_NEGATIVE = 0, 1, 2, 3
 
 
 def line_rows(lds, verts, secs, sds, ml_blocking: int) -> list:
@@ -365,6 +372,7 @@ def line_rows(lds, verts, secs, sds, ml_blocking: int) -> list:
     for ld in lds:
         v1x, v1y = verts[ld.v1]
         v2x, v2y = verts[ld.v2]
+        dx, dy = v2x - v1x, v2y - v1y
         flags = (FLAG_ONE_SIDED if ld.back == -1 else 0) | \
                 (FLAG_BLOCKING if ld.flags & ml_blocking else 0)
         if ld.back == -1:
@@ -372,7 +380,10 @@ def line_rows(lds, verts, secs, sds, ml_blocking: int) -> list:
         else:
             fs, bs = secs[sds[ld.front].sector], secs[sds[ld.back].sector]
             opentop, openbottom = min(fs.ceil_h, bs.ceil_h), max(fs.floor_h, bs.floor_h)
-        rows.append((v1x, v1y, v2x - v1x, v2y - v1y, flags, opentop, openbottom))
+        slope = (ST_HORIZONTAL if dy == 0 else ST_VERTICAL if dx == 0 else
+                 ST_POSITIVE if (dy > 0) == (dx > 0) else ST_NEGATIVE)
+        rows.append((v1x, v1y, dx, dy, min(v1x, v2x), max(v1x, v2x), min(v1y, v2y), max(v1y, v2y),
+                     slope, flags, opentop, openbottom))
     return rows
 
 
@@ -413,13 +424,12 @@ def check_position_table(rows, blocks, flat, grid, x16: int, y16: int, radius: i
                 if li in seen:
                     continue                     # a line listed in two of the four blocks
                 seen.add(li)
-                v1x, v1y, dx, dy, flags, opentop, openbottom = rows[li]
-                v1x16, v1y16 = v1x << 16, v1y << 16
-                v2x16, v2y16 = (v1x + dx) << 16, (v1y + dy) << 16
-                if (bx_hi <= min(v1x16, v2x16) or bx_lo >= max(v1x16, v2x16)
-                        or by_hi <= min(v1y16, v2y16) or by_lo >= max(v1y16, v2y16)):
+                (v1x, v1y, dx, dy, minx, maxx, miny, maxy,
+                 slope, flags, opentop, openbottom) = rows[li]
+                if (bx_hi <= minx << 16 or bx_lo >= maxx << 16
+                        or by_hi <= miny << 16 or by_lo >= maxy << 16):
                     continue
-                bake = _RowBake(v1x16, v1y16, dx << 16, dy << 16)
+                bake = _RowBake(v1x << 16, v1y << 16, dx << 16, dy << 16, slope)
                 if bake.box_side((by_hi, by_lo, bx_lo, bx_hi)) != -1:
                     continue
                 if flags & (FLAG_ONE_SIDED | FLAG_BLOCKING):
@@ -434,8 +444,8 @@ class _RowBake:
     """`box_on_line_side` over a row's geometry, with no compile-time specialisation — the shape
     the fj loop runs."""
 
-    def __init__(self, v1x, v1y, dx, dy):
-        self.v1x, self.v1y, self.dx, self.dy = v1x, v1y, dx, dy
+    def __init__(self, v1x, v1y, dx, dy, slope):
+        self.v1x, self.v1y, self.dx, self.dy, self.slope = v1x, v1y, dx, dy, slope
 
     def point_side(self, x, y):
         from doomfj.reference_model import ReferenceModel
@@ -444,11 +454,11 @@ class _RowBake:
 
     def box_side(self, box):
         top, bottom, left, right = box
-        if self.dy == 0:
+        if self.slope == ST_HORIZONTAL:
             p1, p2 = int(top > self.v1y), int(bottom > self.v1y)
-        elif self.dx == 0:
+        elif self.slope == ST_VERTICAL:
             p1, p2 = int(right < self.v1x), int(left < self.v1x)
-        elif (self.dy > 0) == (self.dx > 0):
+        elif self.slope == ST_POSITIVE:
             p1, p2 = self.point_side(left, top), self.point_side(right, bottom)
         else:
             p1, p2 = self.point_side(right, top), self.point_side(left, bottom)

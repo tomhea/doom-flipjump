@@ -1,0 +1,261 @@
+// ============================================================================
+// sim.fj — M14: the player simulation's collision half, in FlipJump.
+//
+// `ReferenceModel.check_position` is DOOM's P_CheckPosition: does any linedef refuse this
+// position, and what opening do the lines it touches leave? The oracle tests every linedef, which
+// is fine in Python and ~7M ops a tic here. Two things make it affordable:
+//
+//   * the BLOCKMAP (mapcompiler.build_blockmap) narrows ~1,500 linedefs to the ~35 in the blocks
+//     the player's 32-unit box can touch — proven equivalent to the exhaustive sweep, not argued;
+//   * the geometry is DATA, walked by the one loop below, rather than 1,651 baked copies of the
+//     test. Baking was tried first and measured: ~57k lines of macro that did not finish
+//     assembling in 50 minutes (docs/handoff-m14.md section 5, M14-d).
+//
+// THE TABLES (all packed bytes, read with hex.read_table_packed):
+//   bkoff[block]  -> [offset:2][count:1]           where this block's line list starts, how long
+//   bklin[k]      -> [linedef:2]                   the flat per-block line lists
+//   lnrow[line]   -> [v1x:2][v1y:2][dxi:2][dyi:2][minx:2][maxx:2][miny:2][maxy:2]
+//                    [slope:1][flags:1][opentop:2][openbottom:2]
+//
+// The bbox and the SLOPE TYPE are precomputed into the row on purpose: they cost five short reads
+// and they remove four runtime min/max pairs and the whole sign-comparison switch from the one
+// piece of fj that has to be exactly DOOM.
+//
+// ⚠ 16.16 FROM AN INT16, WITHOUT SIGN EXTENSION. A map coordinate is int16 and the working values
+// are 16.16, so `hex.zero 8, r; hex.mov 4, r + 4*dw, raw` IS the conversion: putting the 16 bits
+// in the high half is exactly `raw << 16` in two's complement, negatives included. The INTEGER
+// deltas that feed FixedMul are different — those are values, not positions, so they DO need
+// sign-extending into 8 nibbles (`sim.sext16`).
+//
+// ⚠ ON A REFUSAL the openings are returned as the caller's SEED, not as whatever had accumulated.
+// The partial accumulation is order-dependent (the oracle walks linedefs in index order, this
+// walks them in blockmap order) and DOOM never reads it — pinning it is what makes a refusal
+// comparable between the two mirrors at all.
+// ============================================================================
+
+ns sim {
+    // sim.sext16 dst, src — sign-extend a 4-nibble int16 into an 8-nibble two's-complement value.
+    def sext16 dst, src @ neg, done {
+        hex.zero 8, dst
+        hex.mov 4, dst, src
+        hex.sign 4, src, neg, done
+      neg:
+        hex.set 4, dst + 4*dw, 0xFFFF
+      done:
+    }
+
+    // sim.fix16 dst, src — a 4-nibble int16 MAP COORDINATE as a 16.16 value (see the header note).
+    def fix16 dst, src {
+        hex.zero 8, dst
+        hex.mov 4, dst + 4*dw, src
+    }
+
+    // sim.point_side side, x, y, v1x, v1y, dxi, dyi — P_PointOnLineSide's cross-product case only.
+    // The axis cases never reach here: the caller dispatches on the baked slope type, and both
+    // diagonal slopes have dx != 0 and dy != 0. x/y/v1x/v1y are 16.16; dxi/dyi are the SIGNED
+    // integer deltas, already sign-extended.
+    //   left = FixedMul(dyi, x - v1x);  right = FixedMul(y - v1y, dxi)
+    //   right < left -> 0 (front), else 1 (back)
+    def point_side side, x, y, v1x, v1y, dxi, dyi @ ax, ay, l, r, front, back, done, body {
+        ;body                                  // the @-local DATA below must never execute
+      ax: hex.vec 8
+      ay: hex.vec 8
+      l:  hex.vec 8
+      r:  hex.vec 8
+      body:
+        hex.mov 8, ax, x
+        hex.sub 8, ax, v1x
+        hex.mov 8, ay, y
+        hex.sub 8, ay, v1y
+        hex.fixed_mul_lo 8, 4, l, dyi, ax
+        hex.fixed_mul_lo 8, 4, r, ay, dxi
+        hex.scmp 8, r, l, front, back, back
+      front:
+        hex.set 1, side, 0
+        ;done
+      back:
+        hex.set 1, side, 1
+      done:
+    }
+}
+
+ns sim {
+    // sim.check_line — ONE candidate linedef, from its packed row. Falls through to the caller's
+    // next line when this one does not refuse the position; jumps to `blocked` when it does.
+    // Mirrors PIT_CheckLine.
+    //
+    //   lnrow / n_ln : the packed line table and its index width
+    //   li           : the linedef index (runtime)
+    //   the box      : cbx_lo/cbx_hi/cby_lo/cby_hi (16.16) — the caller sets them once
+    //   the opening  : cp_floor/cp_ceil, narrowed IN PLACE (map units, 8-nibble signed)
+    //
+    // ⚠ THE WHOLE ROW IS READ IN ONE GO. `hex.read_table_packed nb, ...` strides by nb, so reading
+    // a single field with `nb = 2` would stride by 2 bytes and land in the wrong row. One 22-byte
+    // read, then every field is a compile-time nibble offset into it: byte k is at `rrow + 2k*dw`.
+    def check_line lnrow, n_ln, li, blocked             @ rrow, rv1x, rv1y, rdxi, rdyi, rtmp, ropen, p1, p2, cst,               nxt, hit, k_a, k_b, k_c, k_d,               axis, diag, do_h, do_v, do_pos, do_neg, h1, v1c, cmp_p,               open_f, open_c, set_f, set_c, body             < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_floor, cp_ceil {
+        ;body                                  // the @-local DATA below must never execute
+      rrow: hex.vec 44                         // the whole 22-byte row, two nibbles per byte
+      rv1x: hex.vec 8
+      rv1y: hex.vec 8
+      rdxi: hex.vec 8
+      rdyi: hex.vec 8
+      rtmp: hex.vec 8
+      ropen: hex.vec 8
+      p1: hex.vec 1
+      p2: hex.vec 1
+      cst: hex.vec 1
+      body:
+        hex.read_table_packed 22, rrow, lnrow, n_ln, li
+
+        // ---- bbox reject: right <= minx, left >= maxx, top <= miny, bottom >= maxy -----------
+        .fix16 rtmp, rrow + 16*dw                       // minx  (byte 8)
+        hex.scmp 8, cbx_hi, rtmp, nxt, nxt, k_a
+      k_a:
+        .fix16 rtmp, rrow + 20*dw                       // maxx  (byte 10)
+        hex.scmp 8, cbx_lo, rtmp, k_b, nxt, nxt
+      k_b:
+        .fix16 rtmp, rrow + 24*dw                       // miny  (byte 12)
+        hex.scmp 8, cby_hi, rtmp, nxt, nxt, k_c
+      k_c:
+        .fix16 rtmp, rrow + 28*dw                       // maxy  (byte 14)
+        hex.scmp 8, cby_lo, rtmp, k_d, nxt, nxt
+      k_d:
+        // ---- P_BoxOnLineSide: only a STRADDLING box can be refused ---------------------------
+        .fix16 rv1x, rrow                               // v1x   (byte 0)
+        .fix16 rv1y, rrow + 4*dw                        // v1y   (byte 2)
+        // slope (byte 16) is 0..3, so its two low bits ARE the switch: bit 1 separates the
+        // diagonals from the axis cases, bit 0 picks within each pair. `hex.if_flags`' mask is a
+        // set of nibble VALUES, so "bit 1 set" is {2,3} = 0xCCCC and "bit 0 set" is {1,3} = 0xAAAA.
+        hex.if_flags rrow + 32*dw, 0xCCCC, axis, diag
+      axis:
+        hex.if_flags rrow + 32*dw, 0xAAAA, do_h, do_v
+      do_h:                                             // horizontal: straddle iff bottom <= v1y < top
+        hex.scmp 8, cby_hi, rv1y, nxt, nxt, h1
+      h1:
+        hex.scmp 8, cby_lo, rv1y, hit, hit, nxt
+      do_v:                                             // vertical: straddle iff left < v1x <= right
+        hex.scmp 8, cbx_hi, rv1x, nxt, v1c, v1c
+      v1c:
+        hex.scmp 8, cbx_lo, rv1x, hit, nxt, nxt
+      diag:
+        .sext16 rdxi, rrow + 8*dw                       // dxi   (byte 4) — a VALUE, so sign-extend
+        .sext16 rdyi, rrow + 12*dw                      // dyi   (byte 6)
+        hex.if_flags rrow + 32*dw, 0xAAAA, do_pos, do_neg
+      do_pos:                                           // "/" : (left, top) vs (right, bottom)
+        .point_side p1, cbx_lo, cby_hi, rv1x, rv1y, rdxi, rdyi
+        .point_side p2, cbx_hi, cby_lo, rv1x, rv1y, rdxi, rdyi
+        ;cmp_p
+      do_neg:                                           // "\" : (right, top) vs (left, bottom)
+        .point_side p1, cbx_hi, cby_hi, rv1x, rv1y, rdxi, rdyi
+        .point_side p2, cbx_lo, cby_lo, rv1x, rv1y, rdxi, rdyi
+      cmp_p:
+        hex.cmp 1, p1, p2, hit, nxt, hit                // differ -> straddling
+      hit:
+        // ---- the blocking rules, then the opening --------------------------------------------
+        hex.set 1, cst, 0
+        hex.cmp 1, rrow + 34*dw, cst, blocked, open_f, blocked   // flags != 0 -> a wall
+      open_f:
+        .sext16 ropen, rrow + 40*dw                     // openbottom (byte 20) -> floorz = max
+        hex.scmp 8, ropen, cp_floor, open_c, open_c, set_f
+      set_f:
+        hex.mov 8, cp_floor, ropen
+      open_c:
+        .sext16 ropen, rrow + 36*dw                     // opentop (byte 18) -> ceilingz = min
+        hex.scmp 8, ropen, cp_ceil, set_c, nxt, nxt
+      set_c:
+        hex.mov 8, cp_ceil, ropen
+      nxt:
+    }
+}
+
+ns sim {
+    // sim.check_position — P_CheckPosition: may a box of `cprad` centred on (cpx, cpy) stand here?
+    //
+    // Writes cp_ok (1 = legal), cp_floor / cp_ceil (map units). The candidate lines come from the
+    // BLOCKMAP: the box is 2*cprad across and a block is 256 units, so the box's four corners fall
+    // in at most 2x2 blocks and every line that can touch the box is listed in one of them.
+    //
+    // No de-duplication, deliberately: a line listed in two of the four blocks is tested twice, and
+    // both effects are idempotent -- "blocked" is a latch, and the opening updates are max/min.
+    // Dropping the dedupe costs a few repeated tests and saves a whole runtime set.
+    //
+    // ⚠ The block index is an ARITHMETIC shift of a signed coordinate and fj's shr_hex is logical,
+    // so the position is BIASED by 2^15 map units first. Map coords are int16, so x + 32768 >= 0
+    // always, and (x16 + (32768 << 16)) >> 6 nibbles is (x_int + 32768) >> 8 exactly -- one
+    // whole-nibble shift, which is why blocks are 256 units and not DOOM's 128.
+    def check_position bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0             @ blocked, done, body             < cpx, cpy, cprad, cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil,               cp_seedf, cp_seedc {
+        ;body                                  // (the per-corner scratch lives in check_block)
+      body:
+        hex.set 1, cp_ok, 1
+        hex.mov 8, cp_floor, cp_seedf
+        hex.mov 8, cp_ceil, cp_seedc
+        hex.mov 8, cbx_lo, cpx
+        hex.sub 8, cbx_lo, cprad
+        hex.mov 8, cbx_hi, cpx
+        hex.add 8, cbx_hi, cprad
+        hex.mov 8, cby_lo, cpy
+        hex.sub 8, cby_lo, cprad
+        hex.mov 8, cby_hi, cpy
+        hex.add 8, cby_hi, cprad
+        rep(4, q) .check_block bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0, \
+                               (q&1) ? cbx_hi : cbx_lo, (q>>1) ? cby_hi : cby_lo, blocked
+        ;done
+      blocked:
+        hex.set 1, cp_ok, 0
+        hex.mov 8, cp_floor, cp_seedf         // the SEED, not the partial accumulation -- the
+        hex.mov 8, cp_ceil, cp_seedc          // oracle pins it the same way (order-dependence)
+      done:
+    }
+
+    // sim.check_block — one corner's block: index it, bounds-check it, run its line list.
+    def check_block bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0, xreg, yreg, blocked \
+            @ body, bt, bu, bcst, bi, rbk, off, cnt, k, kend, li, xok, yok, skip, lloop, lbody {
+        ;body
+      bt: hex.vec 8
+      bu: hex.vec 8
+      bcst: hex.vec 8
+      bi: hex.vec 4
+      rbk: hex.vec 6
+      off: hex.vec 4
+      cnt: hex.vec 4
+      k: hex.vec 4
+      kend: hex.vec 4
+      li: hex.vec 4
+      body:
+        hex.mov 8, bt, xreg
+        hex.set 8, bcst, 0x80000000
+        hex.add 8, bt, bcst
+        hex.shr_hex 8, 6, bt
+        hex.mov 8, bu, yreg
+        hex.add 8, bu, bcst
+        hex.shr_hex 8, 6, bu
+        hex.set 4, bcst, (ibx0 + 128) & 0xFFFF
+        hex.sub 4, bt, bcst
+        hex.set 4, bcst, (iby0 + 128) & 0xFFFF
+        hex.sub 4, bu, bcst
+        hex.set 4, bcst, nbx
+        hex.cmp 4, bt, bcst, xok, skip, skip
+      xok:
+        hex.set 4, bcst, nby
+        hex.cmp 4, bu, bcst, yok, skip, skip
+      yok:
+        hex.mul_const 4, bi, bu, nbx
+        hex.add 4, bi, bt
+        hex.read_table_packed 3, rbk, bkoff, n_bk, bi
+        hex.zero 4, off
+        hex.mov 4, off, rbk                    // [offset:2] = the first 4 nibbles
+        hex.zero 4, cnt
+        hex.mov 2, cnt, rbk + 4*dw             // [count:1]
+        hex.mov 4, k, off
+        hex.mov 4, kend, off
+        hex.add 4, kend, cnt
+      lloop:
+        hex.cmp 4, k, kend, lbody, skip, skip
+      lbody:
+        hex.read_table_packed 2, li, bklin, n_bl, k
+        .check_line lnrow, n_ln, li, blocked
+        hex.inc 4, k
+        ;lloop
+      skip:
+    }
+}

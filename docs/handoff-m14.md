@@ -305,7 +305,21 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
   relayed trajectory and the angle wrap (`tests/fj/test_state_wire.py`, 36 tests) — and the
   renderer-level gate passes too: `m14_gate` phase 1 byte-exact ×4, phase 2 **8/8 tics byte-exact
   with the state relayed**, once §4b's `wall_x_range_m` precision bug was fixed (+9–10% ops).
-- **M14-d** ⚠ **ORACLE DONE, fj NOT STARTED.** `check_position` / `try_move` /
+- **M14-d** ⚠ **ORACLE DONE + the fj PER-LINE KERNEL PROVEN; the runtime selection needs
+  re-architecting.** `mapcompiler.build_blockmap` cuts the candidates from ~1.5k linedefs to the
+  ~35 in the blocks the player's box touches, and is proven equivalent to the exhaustive sweep
+  (500+ grid positions, block boundaries, a fractional trajectory). `doomfj.collision` bakes each
+  candidate line's PIT_CheckLine as code, byte-exact against the oracle at 16 positions including
+  fractional ones and positions the oracle refuses (`tests/fj/test_collision_fj.py`).
+  ⚠ **BUT bake-as-code does not scale here, measured:** 1,651 (block, line) pairs x ~35 macro
+  invocations = ~57k lines of `hex.set`/`hex.scmp`, and that program **did not finish assembling in
+  50 minutes**. The 13 runtime-path tests are skipped with that reason recorded in place.
+  **The fix is named by the same measurement:** bake-as-code was chosen because a table loop over
+  ALL the linedefs costs ~7M ops/tic — but the blockmap already removed the "all", so
+  `read_table_packed` + one shared loop is ~360k ops per candidate position (~1M/tic across the
+  three the axis-retry tries) and assembles in seconds. Redo the fj side that way; keep the
+  blockmap and the oracle.
+  *(previously:)* `check_position` / `try_move` /
   `move_with_collision` mirror P_CheckPosition / PIT_CheckLine / P_BoxOnLineSide (no blockmap: the
   per-line bbox reject does that job, ~1.5k lines against a ~34M-op frame). 16 tests in
   `tests/host/test_collision.py`, including the control that collision actually blocks something.

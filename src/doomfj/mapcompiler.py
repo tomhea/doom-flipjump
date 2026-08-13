@@ -213,7 +213,11 @@ def assert_thing_live_survives_prune(cmap: "CompiledMap", *, thing_live, prune=N
             + " -- a thing entering one of these would vanish with no other symptom.")
 
 
-BLOCK_SHIFT = 7                  # 128-unit blocks, DOOM's own blockmap granularity
+# 256-unit blocks. DOOM uses 128; this is one bit coarser ON PURPOSE, so the fj side's block
+# index is a WHOLE-NIBBLE shift of the 16.16 position (16 + 8 bits = 6 nibbles) instead of a
+# 7-bit shift it has no single op for. Coarser blocks mean a few more lines per block, which
+# is far cheaper than synthesising the odd shift per candidate position.
+BLOCK_SHIFT = 8
 BLOCK_SIZE = 1 << BLOCK_SHIFT
 
 
@@ -240,9 +244,12 @@ def build_blockmap(cmap: "CompiledMap", lds, *, shift: int = BLOCK_SHIFT) -> dic
     for li, ld in enumerate(lds):
         x1, y1 = cmap.vertexes[ld.v1]
         x2, y2 = cmap.vertexes[ld.v2]
-        # walk the segment block by block (a DDA over block boundaries); a step of half a block is
-        # short enough that no crossed block is skipped, and duplicates are dropped by the set
-        steps = max(abs(x2 - x1), abs(y2 - y1)) // (1 << (shift - 1)) + 1
+        # Walk the segment and record every block a sample lands in. The sample spacing has to be
+        # well BELOW the block size or a line that clips a block's corner is missed -- at half a
+        # block it already was, and `test_blockmap_gives_the_same_answer_as_the_full_line_sweep`
+        # caught it the moment the blocks got coarser. 16 units (the player radius) is ~1/16 of a
+        # block; bake-time cost is irrelevant next to being wrong.
+        steps = max(abs(x2 - x1), abs(y2 - y1)) // 16 + 1
         seen = set()
         for k in range(steps + 1):
             bx = (x1 + (x2 - x1) * k // steps) >> shift

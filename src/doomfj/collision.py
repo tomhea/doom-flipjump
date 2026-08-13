@@ -56,22 +56,22 @@ class LineBake:
         """Jump to `side0` (front) or `side1` (back) for the point in (xreg, yreg)."""
         if self.dx == 0:                                  # vertical: x <= v1x ? (dy>0) : (dy<0)
             lo, hi = (side1, side0) if self.dy > 0 else (side0, side1)
-            return [_set(f"{tag}c", self.v1x),
-                    f"    hex.scmp 8, {xreg}, {tag}c, {lo}, {lo}, {hi}"]
+            return [_set("cs_c", self.v1x),
+                    f"    hex.scmp 8, {xreg}, cs_c, {lo}, {lo}, {hi}"]
         if self.dy == 0:                                  # horizontal: y <= v1y ? (dx<0) : (dx>0)
             lo, hi = (side1, side0) if self.dx < 0 else (side0, side1)
-            return [_set(f"{tag}c", self.v1y),
-                    f"    hex.scmp 8, {yreg}, {tag}c, {lo}, {lo}, {hi}"]
+            return [_set("cs_c", self.v1y),
+                    f"    hex.scmp 8, {yreg}, cs_c, {lo}, {lo}, {hi}"]
         # left = FixedMul(dy >> 16, x - v1x); right = FixedMul(y - v1y, dx >> 16)
         # right < left -> front (0), else back (1). Both multipliers are baked.
-        return [_set(f"{tag}a", self.v1x), _set(f"{tag}b", self.v1y),
-                f"    hex.mov 8, {tag}dx, {xreg}", f"    hex.sub 8, {tag}dx, {tag}a",
-                f"    hex.mov 8, {tag}dy, {yreg}", f"    hex.sub 8, {tag}dy, {tag}b",
-                _set(f"{tag}k", self.dy >> 16),
-                f"    hex.fixed_mul_lo 8, 4, {tag}l, {tag}k, {tag}dx",
-                _set(f"{tag}k", self.dx >> 16),
-                f"    hex.fixed_mul_lo 8, 4, {tag}r, {tag}dy, {tag}k",
-                f"    hex.scmp 8, {tag}r, {tag}l, {side0}, {side1}, {side1}"]
+        return [_set("cs_a", self.v1x), _set("cs_b", self.v1y),
+                f"    hex.mov 8, cs_dx, {xreg}", "    hex.sub 8, cs_dx, cs_a",
+                f"    hex.mov 8, cs_dy, {yreg}", "    hex.sub 8, cs_dy, cs_b",
+                _set("cs_k", self.dy >> 16),
+                "    hex.fixed_mul_lo 8, 4, cs_l, cs_k, cs_dx",
+                _set("cs_k", self.dx >> 16),
+                "    hex.fixed_mul_lo 8, 4, cs_r, cs_dy, cs_k",
+                f"    hex.scmp 8, cs_r, cs_l, {side0}, {side1}, {side1}"]
 
     # ── P_BoxOnLineSide: skip unless the box STRADDLES the line ──────────────────────────────
     def box_straddles_ops(self, tag: str, skip: str, hit: str) -> list:
@@ -83,16 +83,16 @@ class LineBake:
         than as "is the line inside the box"."""
         if self.dy == 0:                                  # ST_HORIZONTAL
             # p1 = top > v1y, p2 = bottom > v1y  ->  differ iff  bottom <= v1y < top
-            return [_set(f"{tag}c", self.v1y),
-                    f"    hex.scmp 8, cby_hi, {tag}c, {skip}, {skip}, {tag}_h1",   # need top > v1y
+            return [_set("cs_c", self.v1y),
+                    f"    hex.scmp 8, cby_hi, cs_c, {skip}, {skip}, {tag}_h1",   # need top > v1y
                     f"  {tag}_h1:",
-                    f"    hex.scmp 8, cby_lo, {tag}c, {hit}, {hit}, {skip}"]       # need bottom <= v1y
+                    f"    hex.scmp 8, cby_lo, cs_c, {hit}, {hit}, {skip}"]       # need bottom <= v1y
         if self.dx == 0:                                  # ST_VERTICAL
             # p1 = right < v1x, p2 = left < v1x  ->  differ iff  left < v1x <= right
-            return [_set(f"{tag}c", self.v1x),
-                    f"    hex.scmp 8, cbx_hi, {tag}c, {skip}, {tag}_v1, {tag}_v1",  # need right >= v1x
+            return [_set("cs_c", self.v1x),
+                    f"    hex.scmp 8, cbx_hi, cs_c, {skip}, {tag}_v1, {tag}_v1",  # need right >= v1x
                     f"  {tag}_v1:",
-                    f"    hex.scmp 8, cbx_lo, {tag}c, {hit}, {skip}, {skip}"]       # need left < v1x
+                    f"    hex.scmp 8, cbx_lo, cs_c, {hit}, {skip}, {skip}"]       # need left < v1x
         # the two diagonal cases test opposite corner pairs, and straddling is p1 != p2
         if (self.dy > 0) == (self.dx > 0):                # ST_POSITIVE: (left, top) vs (right, bottom)
             first, second = ("cbx_lo", "cby_hi"), ("cbx_hi", "cby_lo")
@@ -118,11 +118,11 @@ def line_test_ops(bake: "LineBake", tag: str, nxt: str) -> list:
                                      ("cbx_lo", bake.maxx, False, "b"),
                                      ("cby_hi", bake.miny, True, "c"),
                                      ("cby_lo", bake.maxy, False, "d")):
-        out.append(_set(f"{tag}{name}", const))
+        out.append(_set("cs_c", const))
         if cmp_lo:      # reject when reg <= const
-            out.append(f"    hex.scmp 8, {reg}, {tag}{name}, {nxt}, {nxt}, {tag}_k{name}")
+            out.append(f"    hex.scmp 8, {reg}, cs_c, {nxt}, {nxt}, {tag}_k{name}")
         else:           # reject when reg >= const
-            out.append(f"    hex.scmp 8, {reg}, {tag}{name}, {tag}_k{name}, {nxt}, {nxt}")
+            out.append(f"    hex.scmp 8, {reg}, cs_c, {tag}_k{name}, {nxt}, {nxt}")
         out.append(f"  {tag}_k{name}:")
     out += bake.box_straddles_ops(tag, nxt, f"{tag}_hit")
     out.append(f"  {tag}_hit:")
@@ -131,13 +131,13 @@ def line_test_ops(bake: "LineBake", tag: str, nxt: str) -> list:
         return out
     # two-sided and passable: narrow the opening. floorz = max(floorz, openbottom),
     # ceilingz = min(ceilingz, opentop) -- heights are map units, 8-nibble signed.
-    out += [_set(f"{tag}o", bake.openbottom),
-            f"    hex.scmp 8, {tag}o, cp_floor, {tag}_f, {tag}_f, {tag}_setf",
-            f"  {tag}_setf:", f"    hex.mov 8, cp_floor, {tag}o",
+    out += [_set("cs_o", bake.openbottom),
+            f"    hex.scmp 8, cs_o, cp_floor, {tag}_f, {tag}_f, {tag}_setf",
+            f"  {tag}_setf:", "    hex.mov 8, cp_floor, cs_o",
             f"  {tag}_f:",
-            _set(f"{tag}t", bake.opentop),
-            f"    hex.scmp 8, {tag}t, cp_ceil, {tag}_setc, {tag}_c, {tag}_c",
-            f"  {tag}_setc:", f"    hex.mov 8, cp_ceil, {tag}t",
+            _set("cs_t", bake.opentop),
+            f"    hex.scmp 8, cs_t, cp_ceil, {tag}_setc, {tag}_c, {tag}_c",
+            f"  {tag}_setc:", "    hex.mov 8, cp_ceil, cs_t",
             f"  {tag}_c:", f"    ;{nxt}"]
     return out
 
@@ -171,16 +171,159 @@ COLLISION_DECLS = [
 ]
 
 
-def line_scratch_decls(n: int) -> list:
-    """Per-line scratch. Each baked line owns its own cells rather than sharing one set, because a
-    shared cell would have to be cleared on every early-out path and a missed clear is silent."""
-    out = []
-    for i in range(n):
-        t = f"cl{i}"
-        out += [f"{t}a: hex.vec 8", f"{t}b: hex.vec 8", f"{t}c: hex.vec 8", f"{t}d: hex.vec 8",
-                f"{t}o: hex.vec 8", f"{t}t: hex.vec 8"]
-        for sub in ("p", "q", "s"):
-            out += [f"{t}{sub}a: hex.vec 8", f"{t}{sub}b: hex.vec 8", f"{t}{sub}c: hex.vec 8",
-                    f"{t}{sub}k: hex.vec 8", f"{t}{sub}l: hex.vec 8", f"{t}{sub}r: hex.vec 8",
-                    f"{t}{sub}dx: hex.vec 8", f"{t}{sub}dy: hex.vec 8"]
+# ── the RUNTIME half: which lines to test is a per-tic question ────────────────────────────────
+#
+# The kernel above bakes the lines for a position known at compile time. The emitted renderer does
+# not know where the player is, so the blockmap has to be walked at RUNTIME: compute the block the
+# box corner falls in, jump to that block's handler, run its baked line tests.
+#
+# The jump is a BINARY SEARCH over the block index rather than a dispatch table, deliberately. The
+# repo's dispatch-code idiom (`generate_bands_walk_fj`) forbids `hex.*` macros inside a handler --
+# they corrupt the shared `hex.tables.ret` (R42) -- and every line test here is `hex.set` /
+# `hex.scmp` / `hex.fixed_mul_lo`. A compare tree needs no shared return register, so the handlers
+# stay ordinary code. Depth is ceil(log2 blocks) ~ 10 compares for E1M1.
+
+def blockmap_grid(grid):
+    """The blockmap's DENSE bounding grid: `(bx0, by0, nbx, nby)`.
+
+    The handlers are reached by a compare tree over a single integer, so the block index has to be
+    arithmetic -- `bmi = (by - by0) * nbx + (bx - bx0)` -- not a lookup in a sparse set. Unoccupied
+    cells inside the rectangle simply route to the miss label."""
+    bxs = [c[0] for c in grid]
+    bys = [c[1] for c in grid]
+    bx0, by0 = min(bxs), min(bys)
+    return bx0, by0, max(bxs) - bx0 + 1, max(bys) - by0 + 1
+
+
+def generate_blockmap_code_fj(grid, lds, verts, secs, sds, ml_blocking, *, label="bmk") -> str:
+    """The blockmap as code: `{label}_walk` reads `bmi` (the DENSE block index) and runs that
+    block's baked line tests, then `stl.fret {label}_ret`. A blocking line jumps straight to
+    `cp_blocked` and never returns -- correct, because a refusal is final and the remaining blocks
+    cannot un-refuse it."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    dense = {(by - by0) * nbx + (bx - bx0): lines for (bx, by), lines in grid.items()}
+    n = nbx * nby
+    out = [f"// M14-d blockmap-as-code: {nbx}x{nby} grid, {len(grid)} occupied, "
+           f"{sum(len(v) for v in grid.values())} (block, line) pairs",
+           f"{label}_walk:"]
+
+    def tree(lo: int, hi: int) -> list:
+        if hi - lo <= 1:
+            return [f"    ;{label}_h{lo}" if lo in dense else f"    ;{label}_miss"]
+        mid = (lo + hi) // 2
+        tg = f"{label}_n{lo}_{hi}"
+        return ([f"    hex.set 4, {tg}c, {mid}",
+                 f"    hex.cmp 4, bmi, {tg}c, {tg}_lo, {tg}_hi, {tg}_hi",
+                 f"  {tg}_lo:"] + tree(lo, mid)
+                + [f"  {tg}_hi:"] + tree(mid, hi))
+
+    out += tree(0, n)
+    out += [f"  {label}_miss:", f"    stl.fret {label}_ret"]
+    for bi, lines in sorted(dense.items()):
+        out.append(f"  {label}_h{bi}:      // {len(lines)} lines")
+        for k, li in enumerate(lines):
+            bake = LineBake(lds[li], verts, secs, sds, ml_blocking)
+            out += line_test_ops(bake, f"{label}b{bi}l{k}", f"{label}b{bi}l{k + 1}")
+        out.append(f"  {label}b{bi}l{len(lines)}:")
+        out.append(f"    stl.fret {label}_ret")
+    return "\n".join(out) + "\n"
+
+
+def blockmap_code_decls(grid, *, label="bmk") -> list:
+    """Every scratch cell the generated blockmap code needs."""
+    _bx0, _by0, nbx, nby = blockmap_grid(grid)
+    n = nbx * nby
+    out = ["bmi: hex.vec 4", f"{label}_ret: hex.vec w/4"]
+
+    def tree_decls(lo, hi):
+        if hi - lo <= 1:
+            return []
+        mid = (lo + hi) // 2
+        return [f"{label}_n{lo}_{hi}c: hex.vec 4"] + tree_decls(lo, mid) + tree_decls(mid, hi)
+
+    out += tree_decls(0, n)
+    return out + list(SHARED_SCRATCH)
+
+
+SHARED_SCRATCH = [
+    "cs_a: hex.vec 8", "cs_b: hex.vec 8", "cs_c: hex.vec 8", "cs_k: hex.vec 8",
+    "cs_l: hex.vec 8", "cs_r: hex.vec 8", "cs_dx: hex.vec 8", "cs_dy: hex.vec 8",
+    "cs_o: hex.vec 8", "cs_t: hex.vec 8",
+]
+
+
+def line_scratch_decls(n: int = 0) -> list:
+    """ONE shared scratch set for every baked line, not one set per line.
+
+    Safe because every write here is `hex.set` (which zeroes the cell first) or a `hex.mov` that
+    overwrites it -- there is no xor-involution invariant to preserve, so no early-out path has to
+    clear anything. Per-line cells cost 63,837 declarations on E1M1 and bought nothing."""
+    return list(SHARED_SCRATCH)
+
+
+def blockmap_walk_ops(grid, xreg: str, yreg: str, tag: str, *, label="bmk", shift: int = 8) -> list:
+    """Compute the block index for the point in (xreg, yreg) — 16.16 — and run that block.
+
+    The index has to be an ARITHMETIC shift of a signed coordinate, and fj's `shr_hex` is logical,
+    so the position is BIASED by 2**15 map units first. Map coordinates are int16, so `x + 32768`
+    is non-negative for every point on any level, and `(x16 + (32768 << 16)) >> 6 nibbles` is
+    `(x_int + 32768) >> 8` exactly — one whole-nibble shift, which is why the blocks are 256 units
+    (see `mapcompiler.BLOCK_SHIFT`).
+
+    Out-of-range indices are skipped rather than clamped: a biased index that wrapped would land on
+    some other block's handler and test the wrong lines."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    bias_x, bias_y = bx0 + (1 << (15 - shift)), by0 + (1 << (15 - shift))
+    return [
+        f"    hex.mov 8, {tag}t, {xreg}", _set(f"{tag}bias", 1 << 31),
+        f"    hex.add 8, {tag}t, {tag}bias", f"    hex.shr_hex 8, 6, {tag}t",
+        f"    hex.mov 8, {tag}u, {yreg}", f"    hex.add 8, {tag}u, {tag}bias",
+        f"    hex.shr_hex 8, 6, {tag}u",
+        f"    hex.set 4, {tag}c, {bias_x & 0xFFFF}", f"    hex.sub 4, {tag}t, {tag}c",
+        f"    hex.set 4, {tag}c, {bias_y & 0xFFFF}", f"    hex.sub 4, {tag}u, {tag}c",
+        # bounds: an index outside the grid must NOT reach a handler
+        f"    hex.set 4, {tag}c, {nbx}",
+        f"    hex.cmp 4, {tag}t, {tag}c, {tag}_xok, {tag}_out, {tag}_out",
+        f"  {tag}_xok:", f"    hex.set 4, {tag}c, {nby}",
+        f"    hex.cmp 4, {tag}u, {tag}c, {tag}_yok, {tag}_out, {tag}_out",
+        f"  {tag}_yok:",
+        f"    hex.mul_const 4, bmi, {tag}u, {nbx}", f"    hex.add 4, bmi, {tag}t",
+        f"    stl.fcall {label}_walk, {label}_ret",
+        f"  {tag}_out:",
+    ]
+
+
+def blockmap_walk_decls(tag: str) -> list:
+    return [f"{tag}t: hex.vec 8", f"{tag}u: hex.vec 8", f"{tag}c: hex.vec 4",
+            f"{tag}bias: hex.vec 8"]
+
+
+def check_position_runtime_ops(grid, *, radius: int, seed_floor: str, seed_ceil: str,
+                               label="bmk") -> list:
+    """`check_position` with the candidate lines chosen at RUNTIME: the box's four corners give at
+    most 2x2 distinct blocks, and each is walked. A line listed in two of them is simply tested
+    twice — harmless, because "blocked" is a latch and the opening updates are max/min.
+
+    `seed_floor` / `seed_ceil` are REGISTER names here, not constants: P_CheckPosition seeds the
+    opening from the subsector the position lands in, which only the caller knows."""
+    out = ["    hex.set 1, cp_ok, 1",
+           f"    hex.mov 8, cp_floor, {seed_floor}", f"    hex.mov 8, cp_ceil, {seed_ceil}",
+           _set("cprad", radius),
+           "    hex.mov 8, cbx_lo, cpx", "    hex.sub 8, cbx_lo, cprad",
+           "    hex.mov 8, cbx_hi, cpx", "    hex.add 8, cbx_hi, cprad",
+           "    hex.mov 8, cby_lo, cpy", "    hex.sub 8, cby_lo, cprad",
+           "    hex.mov 8, cby_hi, cpy", "    hex.add 8, cby_hi, cprad"]
+    for i, (xr, yr) in enumerate((("cbx_lo", "cby_lo"), ("cbx_hi", "cby_lo"),
+                                  ("cbx_lo", "cby_hi"), ("cbx_hi", "cby_hi"))):
+        out += blockmap_walk_ops(grid, xr, yr, f"bw{i}", label=label)
+    out += ["    ;cp_done",
+            "  cp_blocked:", "    hex.set 1, cp_ok, 0",
+            "  cp_done:"]
+    return out
+
+
+def check_position_runtime_decls() -> list:
+    out = list(COLLISION_DECLS) + list(SHARED_SCRATCH)
+    for i in range(4):
+        out += blockmap_walk_decls(f"bw{i}")
     return out

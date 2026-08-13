@@ -119,3 +119,99 @@ def test_positions_that_are_actually_blocked(tmp_path, level):
         got_ok, got_f, got_c, _n = _run_one(tmp_path, level, x << 16, y << 16, f"cpb{i}")
         assert (got_ok, got_f, got_c) == rm.check_position(scene, x << 16, y << 16), \
             f"({x},{y}) is refused by the oracle; fj said {(got_ok, got_f, got_c)}"
+
+
+# ── the RUNTIME path: the block is chosen by the program, not by the test ──────────────────────
+#
+# ⚠ SKIPPED, and the reason is a MEASUREMENT, not a bug. Baking every (block, line) pair as code
+# gives E1M1 1,651 pairs x ~35 macro invocations = ~57k lines of `hex.set` / `hex.scmp`, and that
+# program DID NOT FINISH ASSEMBLING IN 50 MINUTES. The generated code is correct -- the 16 tests
+# above prove the per-line half byte-exact, including fractional positions and positions the oracle
+# refuses -- but bake-as-code is the wrong shape at this scale, and adding it to the renderer would
+# roughly triple an already 25-minute build.
+#
+# The measurement also names the fix. Bake-as-code was chosen because a table-driven loop over ALL
+# ~1.5k linedefs costs ~7M ops/tic. But the blockmap already cuts the candidates to ~35 lines, so a
+# packed table + one shared loop is ~35 x 17 bytes x ~600 ops/byte ~ 360k ops per candidate
+# position, ~1M/tic across the three the axis-retry policy tries -- affordable, and it assembles in
+# seconds because it is one loop and a data table instead of 57k unrolled lines. The 7M figure that
+# ruled the table out was for the UNFILTERED sweep; with the blockmap in front of it, it no longer
+# applies.
+#
+# So: keep `mapcompiler.build_blockmap` (proven equivalent to the full sweep) and the oracle, and
+# re-do the fj side as `read_table_packed` + a runtime loop, with the slope switch and parity flips
+# evaluated at runtime rather than baked.
+
+SKIP_RUNTIME = "bake-as-code does not assemble at this scale (>50 min) -- see the note above"
+
+
+@pytest.fixture(scope="module")
+def runtime_fjm(tmp_path_factory, level):
+    """One assemble of the PRODUCTION shape: the whole blockmap baked as code, the block index
+    computed at runtime from the position on stdin. Re-run per position."""
+    from doomfj.collision import (blockmap_code_decls, check_position_runtime_decls,
+                                  check_position_runtime_ops, generate_blockmap_code_fj)
+    from doomfj.wireformat import MAGIC
+    rm, _scene, cmap, lds, sds, secs, grid = level
+    body = (["hex.input 1, wmagic", "hex.input 4, cpx", "hex.input 4, cpy",
+             "hex.input 4, seedf", "hex.input 4, seedc"]
+            + check_position_runtime_ops(grid, radius=PLAYER_RADIUS,
+                                         seed_floor="seedf", seed_ceil="seedc")
+            + ["    hex.print_as_digit 1, cp_ok, 0", "    stl.output 10",
+               "    hex.print_as_digit 8, cp_floor, 0", "    stl.output 10",
+               "    hex.print_as_digit 8, cp_ceil, 0", "    stl.output 10"])
+    decls = (check_position_runtime_decls() + blockmap_code_decls(grid)
+             + ["wmagic: hex.vec 2", "seedf: hex.vec 8", "seedc: hex.vec 8"])
+    prog = "\n".join(["stl.startup_and_init_all", *body, "stl.loop",
+                      generate_blockmap_code_fj(grid, lds, cmap.vertexes, secs, sds, ML_BLOCKING),
+                      *decls]) + "\n"
+    d = tmp_path_factory.mktemp("cprt")
+    src = d / "cprt.fj"
+    src.write_text(prog, encoding="utf-8")
+    out = d / "cprt.fjm"
+    fj.assemble([FIXP.resolve(), src.resolve()], out, memory_width=W, print_time=False)
+    return out, MAGIC
+
+
+def _run_runtime(runtime_fjm, level, x16, y16):
+    import struct
+    rm, _scene, cmap, lds, sds, secs, _grid = level
+    fjm, magic = runtime_fjm
+    sf, sc = _seed(rm, cmap, lds, sds, secs, x16, y16)
+    feed = bytes([magic]) + struct.pack("<IIII", x16 & 0xFFFFFFFF, y16 & 0xFFFFFFFF,
+                                        sf & 0xFFFFFFFF, sc & 0xFFFFFFFF)
+    io = FixedIO(feed)
+    fj.run(fjm, io_device=io, print_time=False, print_termination=False)
+    ok, floorz, ceilz = io.get_output(allow_incomplete_output=True).decode().split("\n")[:3]
+
+    def signed(h):
+        v = int(h, 16)
+        return v - (1 << 32) if v >> 31 else v
+
+    return int(ok, 16) == 1, signed(floorz), signed(ceilz)
+
+
+@pytest.mark.skip(reason=SKIP_RUNTIME)
+@pytest.mark.parametrize("vx,vy", POSITIONS)
+def test_runtime_block_selection_matches_the_oracle(runtime_fjm, level, vx, vy):
+    """The production path end to end: the program computes its own block index from the position
+    it is handed, walks the (up to four) blocks the box touches, and must still equal the oracle's
+    exhaustive all-lines answer."""
+    rm, scene, *_ = level
+    assert _run_runtime(runtime_fjm, level, vx << 16, vy << 16) == \
+        rm.check_position(scene, vx << 16, vy << 16), f"({vx},{vy})"
+
+
+@pytest.mark.skip(reason=SKIP_RUNTIME)
+def test_runtime_selection_on_a_walked_trajectory(runtime_fjm, level):
+    """...and along a real fractional trajectory, which is where the block index's biased shift
+    has to behave for negative coordinates."""
+    from doomfj.reference_model import SimState, spawn_state
+    rm, scene, *_ = level
+    sp = spawn_state(scene.map_wad, "E1M1")
+    st = SimState(sp.x, sp.y, sp.angle, "E1M1")
+    F, L = {"forward": True}, {"turn_left": True}
+    for tic in range(24):
+        st = rm.step_sim(st, L if tic % 7 == 6 else F, scene=scene)
+        assert _run_runtime(runtime_fjm, level, st.x, st.y) == \
+            rm.check_position(scene, st.x, st.y), f"tic {tic} at ({st.x / U:.3f}, {st.y / U:.3f})"

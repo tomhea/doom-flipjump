@@ -304,3 +304,62 @@ ns sim {
       out:
     }
 }
+
+ns sim {
+    // sim.thing_load — load ONE thing's sprite registers from the M14-e tables.
+    //
+    // This replaces the xor-involution block `subsector_action` bakes per (subsector, thing). The
+    // fields come from three places, and which place is the whole design (see doomfj.things):
+    //   * sp_x / sp_y   -- the RUNTIME position array, written from the wire each frame
+    //   * the art metrics, bases, monster flag and depth bounds -- the per-INDEX row, static
+    //   * sp_z and sp_lt -- derived from the BOUND SUBSECTOR, because those two change when a
+    //     thing crosses a sector, which is exactly what M14-e exists for
+    //
+    // ⚠ `hex.read_table_packed nb, ...` strides by nb, so the 22-byte row is read WHOLE and every
+    // field is a compile-time nibble offset into it (byte k at +2k*dw) -- the same trap M14-d's
+    // check_line hit.
+    // ⚠ A 16.16 value from an int16 needs NO sign extension: putting the 16 bits in the high half
+    // IS `raw << 16` in two's complement. The tzmax bounds are already 32-bit and are moved whole.
+    def thing_load throw, n_th, thpos, ssflr, ssnss, sslgt, sprlt, ltbase, ti, ssi \
+            @ body, row, zt, pos, lti \
+            < sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
+              sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
+        ;body
+      row: hex.vec 44
+      zt: hex.vec 4
+      pos: hex.vec 16                          // [x:4][y:4] = 16 nibbles, NOT 8 -- reading a
+      lti: hex.vec 4                           // 16-nibble row into sp_x would run off its end
+      body:
+        hex.read_table_packed 22, row, throw, n_th, ti
+        hex.read_table_packed 8, pos, thpos, n_th, ti       // [x:4][y:4], already 16.16
+        hex.mov 8, sp_x, pos
+        hex.mov 8, sp_y, pos + 8*dw
+        .fix16 sp_left, row                                  // byte 0
+        .fix16 sp_w,    row + 4*dw                           // byte 2
+        .fix16 sp_hh,   row + 8*dw                           // byte 4
+        hex.mov 8, sp_tzmax,  row + 16*dw                    // byte 8, already 32 bits
+        hex.mov 8, sp_tzmax2, row + 24*dw                    // byte 12
+        hex.zero 4, sp_base
+        hex.mov 4, sp_base,  row + 32*dw                     // byte 16
+        hex.zero 4, sp_base2
+        hex.mov 4, sp_base2, row + 36*dw                     // byte 18
+        hex.zero 2, sp_mon
+        hex.mov 2, sp_mon, row + 40*dw                       // byte 20
+        hex.zero 2, sp_dw
+        hex.mov 2, sp_dw,  row + 42*dw                       // byte 21
+        // sp_z = (this leaf's floor + the art's z offset) << 16 -- the two int16s add mod 2^16,
+        // which is the right two's-complement sum, and fix16 lifts it to 16.16
+        hex.read_table_packed 2, zt, ssflr, ssnss, ssi
+        hex.add 4, zt, row + 12*dw                           // byte 6 = zoff
+        .fix16 sp_z, zt
+        // sp_lt = sprlt[sslgt[ssi] * nthings + ti]
+        // sp_lt = sprlt[ltbase[light] + ti]. The row base comes from a TABLE rather than a
+        // multiply: `hex.mul_const` by a non-power-of-two (nthings = 251) is where this first went
+        // wrong, and a wrong index here does not merely read the wrong class -- it reads off the
+        // end of the table, which took two of the probe's runs off into the weeds entirely.
+        hex.read_table_packed 1, zt, sslgt, ssnss, ssi
+        hex.read_table_packed 2, lti, ltbase, 2, zt
+        hex.add 4, lti, ti                                  // the index needs its OWN cell: a read
+        hex.read_table_packed 1, sp_lt, sprlt, 4, lti       // zeroes dst, so dst == idx destroys it
+    }
+}

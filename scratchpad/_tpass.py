@@ -18,6 +18,16 @@ from doomfj.things import THING_ROW_BYTES, THING_ROW_LEN, subsector_tables, thin
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import _lines_sprite_bank, _lines_sprite_light
 
+def thpos_vec(name, positions):
+    """The runtime position array: a hex.vec of 16 nibbles per thing, which is what the
+    shl-by-one-nibble + ptr_index + read_hex accessor addresses (a packed table is one BYTE
+    per slot and read_table_packed cannot address this)."""
+    out = [name + ":"]
+    for x, y in positions:
+        out.append("    hex.vec 16, %d" % (((y & 0xFFFFFFFF) << 32) | (x & 0xFFFFFFFF)))
+    return chr(10).join(out)
+
+
 cfg = Config(); rm = ReferenceModel(cfg)
 mw = WadFile.from_path(str(ROOT/"tests/fixtures/freedoom_e1m1.wad"))
 art = WadFile.from_path(str(ROOT/"assets/freedoom1.wad"))
@@ -40,7 +50,7 @@ def pack(v, ws):
 prog = "\n".join([
     "stl.startup_and_init_all",
     "hex.input 1, wmagic", "hex.input 2, want_ss",
-    f"sim.bind_things thpos, 4, {NT}, {NSS}",
+    f"sim.bind_things thpos, {NT}, {NSS}",
     "hex.zero w/4, cur_ss", "hex.mov 4, cur_ss, want_ss",
     "hex.zero 1, tstop",
     "sim.thing_pass throw, 4, thpos, ssflr, 4, sslgt, sprlt, ltbase",
@@ -56,8 +66,7 @@ prog = "\n".join([
     *point_location_decls(),
     generate_point_location_fj(cmap),
     generate_packed_lut_fj("throw", [pack(r, THING_ROW_BYTES) for r in rows], THING_ROW_LEN),
-    generate_packed_lut_fj("thpos", [pack(((t.x << 16) & 0xFFFFFFFF, (t.y << 16) & 0xFFFFFFFF), (4, 4))
-                                     for t in things], 8),
+    thpos_vec("thpos", [((t.x << 16) & 0xFFFFFFFF, (t.y << 16) & 0xFFFFFFFF) for t in things]),
     generate_packed_lut_fj("ssflr", [f & 0xFFFF for f in ssflr], 2),
     generate_packed_lut_fj("sslgt", sslgt, 1),
     generate_packed_lut_fj("sprlt", sprlt, 1),

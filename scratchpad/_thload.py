@@ -16,6 +16,16 @@ from doomfj.things import THING_ROW_BYTES, THING_ROW_LEN, subsector_tables, thin
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import _lines_sprite_bank, _lines_sprite_light, _thing_sector
 
+def thpos_vec(name, positions):
+    """The runtime position array: a hex.vec of 16 nibbles per thing, which is what the
+    shl-by-one-nibble + ptr_index + read_hex accessor addresses (a packed table is one BYTE
+    per slot and read_table_packed cannot address this)."""
+    out = [name + ":"]
+    for x, y in positions:
+        out.append("    hex.vec 16, %d" % (((y & 0xFFFFFFFF) << 32) | (x & 0xFFFFFFFF)))
+    return chr(10).join(out)
+
+
 cfg = Config(); rm = ReferenceModel(cfg)
 mw = WadFile.from_path(str(ROOT/"tests/fixtures/freedoom_e1m1.wad"))
 art = WadFile.from_path(str(ROOT/"assets/freedoom1.wad"))
@@ -38,7 +48,8 @@ def pack(v, ws):
 NT = len(rows)
 prog = "\n".join([
     "stl.startup_and_init_all",
-    "hex.input 1, wmagic", "hex.input 2, ti", "hex.input 2, ssi",
+    "hex.input 1, wmagic", "hex.zero w/4, ti", "hex.input 2, ti",
+    "hex.zero w/4, ssi", "hex.input 2, ssi",
     "hex.input 4, px", "hex.input 4, py",
     "hex.write_hex 8, thpos_p, px",   # placeholder; positions come from a baked table below
     "hex.print_as_digit 4, ti, 0", "stl.output 10",     # marker: did we get this far?
@@ -49,15 +60,13 @@ prog = "\n".join([
        ("sp_tzmax",8),("sp_tzmax2",8),("sp_base",4),("sp_base2",4),
        ("sp_mon",2),("sp_dw",2),("sp_lt",2))],
     "stl.loop",
-    "wmagic: hex.vec 2", "ti: hex.vec 4", "ssi: hex.vec 4", "px: hex.vec 8", "py: hex.vec 8",
+    "wmagic: hex.vec 2", "ti: hex.vec w/4", "ssi: hex.vec w/4", "px: hex.vec 8", "py: hex.vec 8",
     "thpos_p: hex.vec 8",
     "sp_x: hex.vec 8","sp_y: hex.vec 8","sp_z: hex.vec 8","sp_left: hex.vec 8","sp_w: hex.vec 8",
     "sp_hh: hex.vec 8","sp_tzmax: hex.vec 8","sp_tzmax2: hex.vec 8","sp_base: hex.vec 4",
     "sp_base2: hex.vec 4","sp_mon: hex.vec 2","sp_dw: hex.vec 2","sp_lt: hex.vec 2",
     generate_packed_lut_fj("throw", [pack(r, THING_ROW_BYTES) for r in rows], THING_ROW_LEN),
-    generate_packed_lut_fj("thpos", [pack(((things[t].x << 16) & 0xFFFFFFFF,
-                                           (things[t].y << 16) & 0xFFFFFFFF), (4, 4))
-                                     for t in idx], 8),
+    thpos_vec("thpos", [(((things[t].x << 16) & 0xFFFFFFFF), ((things[t].y << 16) & 0xFFFFFFFF)) for t in idx]),
     generate_packed_lut_fj("ssflr", [f & 0xFFFF for f in ssflr], 2),
     generate_packed_lut_fj("sslgt", sslgt, 1),
     generate_packed_lut_fj("sprlt", sprlt, 1),

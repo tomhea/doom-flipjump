@@ -13,6 +13,16 @@ from doomfj.mapcompiler import bake_bsp
 from doomfj.reference_model import ReferenceModel, THING_SPRITE
 from doomfj.wad import WadFile
 
+def thpos_vec(name, positions):
+    """The runtime position array: a hex.vec of 16 nibbles per thing, which is what the
+    shl-by-one-nibble + ptr_index + read_hex accessor addresses (a packed table is one BYTE
+    per slot and read_table_packed cannot address this)."""
+    out = [name + ":"]
+    for x, y in positions:
+        out.append("    hex.vec 16, %d" % (((y & 0xFFFFFFFF) << 32) | (x & 0xFFFFFFFF)))
+    return chr(10).join(out)
+
+
 cfg = Config(); rm = ReferenceModel(cfg)
 mw = WadFile.from_path(str(ROOT/"tests/fixtures/freedoom_e1m1.wad"))
 cmap = bake_bsp(mw, "E1M1")
@@ -27,7 +37,7 @@ prog = "\n".join([
     "stl.startup_and_init_all",
     "hex.input 1, wmagic",
     "hex.set 2, mk, 0x11", "hex.print_as_digit 2, mk, 0", "stl.output 10",
-    f"sim.bind_things thpos, 4, {NT}, {NSS}",
+    f"sim.bind_things thpos, {NT}, {NSS}",
     "hex.set 2, mk, 0x99", "hex.print_as_digit 2, mk, 0", "stl.output 10",
     # dump every leaf's list, ascending, as "ss:t,t,t"
     "hex.zero w/4, ds", "hex.set w/4, dn, %d" % NSS,
@@ -46,7 +56,7 @@ prog = "\n".join([
     f"sshead: hex.vec {2*NSS}", f"thnext: hex.vec {2*NT}",
     *point_location_decls(),
     generate_point_location_fj(cmap),
-    generate_packed_lut_fj("thpos", [pack(p, (4, 4)) for p in positions], 8),
+    thpos_vec("thpos", positions),
 ]) + "\n"
 tmp = Path(tempfile.mkdtemp()); src = tmp/"b.fj"; src.write_text(prog, encoding="utf-8")
 out = tmp/"b.fjm"

@@ -116,9 +116,12 @@ was pruned. A silent vanish is unacceptable; a hard failure is fine.
 - **`things_by_ss`** (`wall_renderer.py:440-445`) is built at emit by `point_in_subsector`, and
   the per-thing call sites are emitted INSIDE that leaf's code. Needs a runtime thing table plus
   either a runtime `point_in_subsector` per moved thing, or DOOM's own
-  `P_UnsetThingPosition`/`P_SetThingPosition` per-leaf list. Sizing is friendly: mean ~1.9 things
-  per occupied leaf, max 13, so the per-leaf loop is short and a BSP descent is cheap against a
-  ~47k projection.
+  `P_UnsetThingPosition`/`P_SetThingPosition` per-leaf list. Sizing is friendly for the LOOP: mean
+  ~1.9 things per occupied leaf, max 13.
+  ⚠ **BUT "a BSP descent is cheap against a ~47k projection" WAS WRONG, and by orders of
+  magnitude** — see §5's M14-e entry. Measured: 11,602,784 ops for M14-d's four descents plus their
+  line tests, i.e. **~2.9M ops per descent**, so one descent per thing would be ~730M ops/frame
+  against a ~40M frame. Do not build re-binding on per-thing descents.
 - **The per-thing constants** — x, y, z, sprite base, light class, min-size depth bound, monster
   flag — are baked as one xor-involution block per (subsector, thing). Moving things means those
   come from the table, not from a baked block.
@@ -333,9 +336,32 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
       per-thing descent lands in, or carry them in the wire row as part of the thing's state (the
       §2 architecture says state round-trips, and z is state).
 
-  **Re-binding.** The per-thing BSP descent is now cheap and proven — M14-d added `tag` to
-  `_bsp_descend_code` precisely so a second descent could exist, and a third is the same move.
-  Its leaf action appends the thing to that leaf's runtime list.
+  **⚠ RE-BINDING: MEASURE FIRST, AND THE MEASUREMENT IS ALREADY IN.** The obvious design — one BSP
+  descent per thing, reusing M14-d's `tag` — is **NOT AFFORDABLE**. Measured by running the
+  `m14_bin` and `m14_coll` binaries on the SAME unobstructed forward step (identical resulting state
+  and identical frame, so the delta is purely the collision machinery):
+
+  ```
+  no collision  55,464,044 ops
+  collision     67,066,828 ops      -> +11,602,784 for 4 descents + 4 check_positions + 3 try_moves
+  ```
+
+  That is **~2.9M ops per descent**, so 251 per-thing descents would be **~730M ops/frame** against
+  a ~40M frame — 18x the whole frame. §4's "a BSP descent is cheap" is corrected above.
+
+  What to use instead: a **baked point-location table**, the same shape as M14-d's blockmap — a grid
+  cell -> subsector index, read with `read_table_packed` at ~1.2k ops a thing, so ~300k ops for all
+  251. ⚠ It is an APPROXIMATION (a cell resolves to one subsector), so a thing near a leaf boundary
+  can get the neighbouring leaf. Both mirrors would use the same table and therefore agree, but it
+  is a fidelity decision about *ownership* — and §5b notes ownership fixes a sprite's depth SLOT, so
+  a wrong leaf can under-draw a sprite. **That is the owner's call, and it is the first thing to
+  settle in M14-e**, before any code.
+
+  Then the list itself: a LINKED list (`thing_next[t]`, `ss_head[ss]`) rather than per-leaf arrays —
+  O(1) to append, no cap, and therefore no overflow budget that could silently drop a thing (the
+  failure class M14-a exists to prevent). Bind things in DESCENDING index order so traversal yields
+  ascending order, which is exactly today's `things_by_ss` spawn order and keeps static-thing frames
+  bit-identical.
   **The free win:** that descent visits exactly the ancestors of the thing's leaf, so setting a
   "thing below" flag on the way down costs nothing and restores the `tsstop` node gate at runtime —
   buying back M14-a's +1.4%.

@@ -1,0 +1,156 @@
+"""M14-e — the runtime thing table's DATA, proved equivalent to the constants baked today.
+
+`wall_renderer.subsector_action` bakes one block per (subsector, thing). M14-e replaces those with
+per-INDEX tables plus two per-subsector tables, because two of the baked fields -- `sp_z` and
+`sp_lt` -- are properties of where the thing IS, and change when it crosses a sector.
+
+⚠ This test is the reason `doomfj.things` exists: it derives `sp_z` and `sp_lt` the runtime way, for
+every thing at its spawn position, and requires them to equal the emitter's baked values. If that
+holds, swapping baked blocks for table reads cannot move a pixel for a static thing -- which is what
+lets the M14-e gate blame any divergence on the moving half rather than on the migration.
+"""
+from pathlib import Path
+
+import pytest
+
+from doomfj.config import Config
+from doomfj.mapcompiler import bake_bsp
+from doomfj.reference_model import COLORMAP_LIGHTS, MONSTER_TYPES, ReferenceModel
+from doomfj.things import (reachable_lightnums, subsector_tables, thing_rows,
+                           THING_ROW_BYTES, THING_ROW_LEN)
+from doomfj.wad import WadFile
+from doomfj.wall_renderer import _lines_sprite_bank, _lines_sprite_light, _thing_sector
+
+E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")
+ART = Path("assets/freedoom1.wad")
+
+
+@pytest.fixture(scope="module")
+def level():
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    mw = WadFile.from_path(E1M1)
+    art = WadFile.from_path(ART)
+    cmap = bake_bsp(mw, "E1M1")
+    lds, sds, secs = mw.linedefs("E1M1"), mw.sidedefs("E1M1"), mw.sectors("E1M1")
+    _bank, spr_base, spr_dw, spr_ldbase = _lines_sprite_bank(rm, art, cfg, mw, "E1M1")
+    _lt, spr_cls = _lines_sprite_light(rm, cfg, art, mw, "E1M1", cmap, lds, sds, secs)
+    return cfg, rm, mw, art, cmap, lds, sds, secs, spr_base, spr_dw, spr_ldbase, spr_cls
+
+
+def _build(level, deg=True, spr_near=True):
+    from doomfj.reference_model import (DEG_MINH2_MON, DEG_MINH2_SCENERY, MIN_SPRITE_H,
+                                        MIN_SPRITE_H_MONSTER)
+    cfg, rm, mw, art, cmap, lds, sds, secs, spr_base, spr_dw, spr_ldbase, spr_cls = level
+    things = mw.things("E1M1")
+    rows, idx = thing_rows(rm, things, art, spr_base, spr_ldbase, spr_dw, MONSTER_TYPES,
+                           MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
+                           deg=deg, spr_near=spr_near)
+    ssfloor, sslight = subsector_tables(rm, cmap, lds, sds, secs)
+    return things, rows, idx, ssfloor, sslight
+
+
+def test_the_rows_cover_exactly_the_drawable_things(level):
+    """The row set must be the SAME set the emitter bakes -- `sprite_art`-resolvable things -- or
+    the migration would silently add or drop sprites."""
+    cfg, rm, mw, art, *_ = level
+    things = mw.things("E1M1")
+    _t, rows, idx, *_ = _build(level)
+    cache = {}
+    want = [i for i, t in enumerate(things) if rm.sprite_art(art, t.type, cache) is not None]
+    assert idx == want
+    assert len(rows) == len(want) > 100
+    for r in rows:
+        assert len(r) == len(THING_ROW_BYTES)
+        for v, nb in zip(r, THING_ROW_BYTES):
+            assert 0 <= (v & ((1 << (8 * nb)) - 1)) < (1 << (8 * nb))
+    assert THING_ROW_LEN == 22
+
+
+def test_runtime_sp_z_and_sp_lt_equal_the_baked_constants(level):
+    """⚠ THE EQUIVALENCE PROOF. `sp_z` and `sp_lt` are the two fields that stop being constant once
+    a thing moves. Derived from the bound subsector at spawn, they must reproduce exactly what the
+    emitter bakes today -- for every drawable thing, not a sample."""
+    cfg, rm, mw, art, cmap, lds, sds, secs, *_rest = level
+    things, rows, idx, ssfloor, sslight = _build(level)
+    spr_cls = level[-1]
+    cache = {}
+    baked = {}
+    for t_i in idx:
+        t = things[t_i]
+        a = rm.sprite_art(art, t.type, cache)
+        tsec = _thing_sector(rm, cmap, lds, sds, secs, t)
+        baked[t_i] = (tsec.floor_h + a[6],
+                      spr_cls[(rm.wall_lightnum(tsec.light, 0), max(1, a[4]))])
+    # the flat `sprlt` array cannot be built until the shade-row bank is widened (see the last
+    # test), so the DERIVATION is proved through the dict the array will hold: sp_lt is a function
+    # of the BOUND subsector's light and the thing's height, and nothing else.
+    def lt_of(ss, row_i):
+        return spr_cls[(sslight[ss], max(1, rows[row_i][2]))]
+
+    bad = []
+    for row_i, t_i in enumerate(idx):
+        ss = rm.point_in_subsector(cmap, things[t_i].x, things[t_i].y)
+        fl = ssfloor[ss] if ssfloor[ss] < 0x8000 else ssfloor[ss] - 0x10000
+        got = (fl + rows[row_i][3], lt_of(ss, row_i))
+        if got != baked[t_i]:
+            bad.append((t_i, got, baked[t_i]))
+    assert not bad, f"{len(bad)} things derive differently at rest: {bad[:5]}"
+
+
+def test_a_thing_moved_into_another_sector_takes_that_sector_s_floor_and_light(level):
+    """⚠ THE CONTROL. The test above passes even if the derivation ignored the subsector entirely
+    and returned the baked value -- every thing is at its spawn position there. This one moves a
+    thing to a DIFFERENT sector and requires sp_z / sp_lt to follow it, which is the entire point of
+    the rung: the two fields must be functions of where the thing IS."""
+    cfg, rm, mw, art, cmap, lds, sds, secs, *_rest = level
+    things, rows, idx, ssfloor, sslight = _build(level)
+    spr_cls = level[-1]
+    moved = 0
+    for row_i, t_i in enumerate(idx):
+        home = rm.point_in_subsector(cmap, things[t_i].x, things[t_i].y)
+        for ss in range(len(cmap.subsectors)):
+            if not cmap.subsectors[ss].numsegs or ss == home:
+                continue
+            if (ssfloor[ss], sslight[ss]) == (ssfloor[home], sslight[home]):
+                continue                       # same floor AND light: nothing would change
+            z_home = (ssfloor[home] if ssfloor[home] < 0x8000 else ssfloor[home] - 0x10000)
+            z_away = (ssfloor[ss] if ssfloor[ss] < 0x8000 else ssfloor[ss] - 0x10000)
+            h = max(1, rows[row_i][2])
+            if (sslight[ss], h) not in spr_cls or (sslight[home], h) not in spr_cls:
+                continue                      # a pair the bank does not carry yet -- see below
+            lt_home, lt_away = spr_cls[(sslight[home], h)], spr_cls[(sslight[ss], h)]
+            assert (z_away + rows[row_i][3], lt_away) != (z_home + rows[row_i][3], lt_home), \
+                f"thing {t_i} derives identically in ss{home} and ss{ss} -- it is not position-driven"
+            moved += 1
+            break
+        if moved >= 20:
+            break
+    assert moved >= 20, f"only {moved} things could be moved to a differing sector"
+
+
+def test_the_shade_row_bank_must_be_widened_and_by_how_much(level):
+    """⚠ THE BLOCKER M14-e HITS, measured rather than discovered as a KeyError mid-build.
+
+    `_lines_sprite_light` bakes only the (lightnum, height) pairs that OCCUR AT SPAWN, because a
+    static thing never sees another. A thing that walks into a differently-lit sector needs a pair
+    that was never baked, so the bank has to be widened first.
+
+    The size of that widening is the point: naively it is every COLORMAP_LIGHTS, but a thing can
+    only ever stand in a REAL SECTOR, and far fewer lightnums occur among them. This asserts the
+    cheap bound holds, so the next session budgets 2.8x and not 9x."""
+    cfg, rm, mw, art, cmap, lds, sds, secs, *_rest = level
+    spr_cls = level[-1]
+    things, rows, idx, *_ = _build(level)
+    heights = {max(1, r[2]) for r in rows}
+    reach = reachable_lightnums(rm, secs)
+    naive = COLORMAP_LIGHTS * len(heights)
+    needed = len(reach) * len(heights)
+    assert len(spr_cls) < needed, "the bank already covers every reachable pair -- no widening left"
+    assert needed < naive, "the reachable restriction must actually save something"
+    assert needed / len(spr_cls) < 4, (
+        f"widening is {needed / len(spr_cls):.1f}x today ({len(spr_cls)} -> {needed} pairs); "
+        "over 4x would want re-thinking before it ships")
+    # and the missing pairs must be exactly the reachable ones nobody stands in today
+    missing = {(ln, h) for ln in reach for h in heights if (ln, h) not in spr_cls}
+    assert missing, "nothing missing means moving things need no widening, which contradicts above"

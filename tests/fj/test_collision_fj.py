@@ -388,3 +388,55 @@ def test_try_move_matches_the_oracle(trymove_fjm, level):
             tot += 1
             refused += not want
     assert refused >= 8, f"only {refused} of {tot} moves were refused -- the sample is too weak"
+
+
+# ── M14-e's critical path: exact point location, baked as code ─────────────────────────────────
+
+@pytest.fixture(scope="module")
+def ptloc_fjm(tmp_path_factory, level):
+    from doomfj.collision import generate_point_location_fj, point_location_decls
+    _rm, _scene, cmap, *_ = level
+    prog = "\n".join([
+        "stl.startup_and_init_all",
+        "hex.input 1, wmagic", "hex.input 2, inx", "hex.input 2, iny",   # 2 BYTES = 4 nibbles
+        # sign-extend the int16 inputs into the 10-nibble signed working width
+        "hex.zero 10, ptx", "hex.mov 4, ptx, inx", "hex.sign 4, inx, xn, xp",
+        "xn:", "hex.set 6, ptx + 4*dw, 0xFFFFFF", "xp:",
+        "hex.zero 10, pty", "hex.mov 4, pty, iny", "hex.sign 4, iny, yn, yp",
+        "yn:", "hex.set 6, pty + 4*dw, 0xFFFFFF", "yp:",
+        "stl.fcall ptloc_walk, ptloc_ret",
+        "hex.print_as_digit 4, ptss, 0", "stl.output 10", "stl.loop",
+        "wmagic: hex.vec 2", "inx: hex.vec 4", "iny: hex.vec 4",
+        *point_location_decls(),
+        generate_point_location_fj(cmap),
+    ]) + "\n"
+    d = tmp_path_factory.mktemp("ptloc")
+    src = d / "p.fj"
+    src.write_text(prog, encoding="utf-8")
+    out = d / "p.fjm"
+    fj.assemble([FIXP.resolve(), src.resolve()], out, memory_width=W, print_time=False)
+    return out
+
+
+def test_baked_point_location_matches_point_in_subsector(ptloc_fjm, level):
+    """M14-e needs "which subsector is this point in?" once per moved thing. Reusing
+    `_bsp_descend_code` was PRICED and rejected (~2.9M ops a descent, ~730M for 251 things against a
+    ~40M frame). Baking the descent makes 61% of E1M1's partitions multiply-free, and it stays
+    EXACT -- no grid approximation, so no question about which leaf owns a thing near a boundary.
+
+    The sample deliberately includes VERTICES, which sit exactly on partition lines: that is where
+    `_point_side`'s "on the line counts as front" convention has to be reproduced, and where an
+    approximate scheme would differ."""
+    import random
+    import struct
+    rm, _scene, cmap, *_ = level
+    rng = random.Random(14)
+    xs = [v[0] for v in cmap.vertexes]
+    ys = [v[1] for v in cmap.vertexes]
+    pts = [(v[0], v[1]) for v in cmap.vertexes[:8]]
+    pts += [(rng.randint(min(xs), max(xs)), rng.randint(min(ys), max(ys))) for _ in range(12)]
+    for x, y in pts:
+        io = FixedIO(bytes([0xD0]) + struct.pack("<hh", x, y))
+        fj.run(ptloc_fjm, io_device=io, print_time=False, print_termination=False)
+        got = int(io.get_output(allow_incomplete_output=True).decode().split("\n")[0], 16)
+        assert got == rm.point_in_subsector(cmap, x, y), f"({x},{y}): fj ss{got}"

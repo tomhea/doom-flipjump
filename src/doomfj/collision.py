@@ -556,3 +556,77 @@ def move_with_collision_lines(grid, mapname_pfx: str, *, radius: int, height: in
                      ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_stay")
     out += ["  cmv_done:"]
     return out
+
+
+# ── M14-e's critical path: POINT LOCATION, baked as code ──────────────────────────────────────
+#
+# Re-binding things to leaves needs "which subsector is this point in?" once per thing per frame.
+# The obvious answer -- reuse `_bsp_descend_code` -- was PRICED and rejected: M14-d's four descents
+# cost 11,602,784 ops together, ~2.9M each, so 251 of them would be ~730M ops against a ~40M frame.
+# The cost is `proj.point_on_side_leaf`: a generic 10-nibble cross product, plus two fcalls per node
+# to set and clear the partition constants through the xor involution.
+#
+# None of that is needed when the partition is BAKED. `_point_side` is
+# `dx*(y - py) - dy*(x - px)`, and dx/dy/px/py are compile-time per node, so:
+#
+#   * a VERTICAL partition (dx == 0) reduces to one compare of x against px -- no multiply;
+#   * a HORIZONTAL one (dy == 0) reduces to one compare of y against py;
+#   * only a diagonal needs the cross product, and even then both multipliers are constants, so the
+#     row rule (see [[fj-cost-model]]) makes them sparse.
+#
+# On E1M1 that is 209 vertical + 209 horizontal + 263 diagonal of 681 nodes -- 61% multiply-free --
+# and a descent visits ~13 nodes. Exact, not a grid approximation, so it costs no fidelity and
+# needs no decision about which leaf owns a thing near a boundary.
+
+def generate_point_location_fj(cmap, *, label="ptloc") -> str:
+    """`{label}_walk` reads `ptx`/`pty` (10-nibble SIGNED map units) and leaves the containing
+    subsector index in `ptss`, then `stl.fret {label}_ret`. Mirrors `mapcompiler._point_side`'s
+    convention exactly: side = dx*(y - py) - dy*(x - px), and side > 0 is the BACK (left) child."""
+    from doomfj.mapcompiler import NF_SUBSECTOR
+    M40 = (1 << 40) - 1
+    out = [f"// M14-e point location as code: {len(cmap.nodes)} nodes, {len(cmap.subsectors)} leaves",
+           f"{label}_walk:"]
+
+    def target(child):
+        return (f"{label}_l{child & (NF_SUBSECTOR - 1)}" if child & NF_SUBSECTOR
+                else f"{label}_n{child}")
+
+    out.append(f"    ;{target(cmap.root)}")
+    for i, n in enumerate(cmap.nodes):
+        back, front = target(n.left), target(n.right)      # left = back, right = front
+        out.append(f"  {label}_n{i}:")
+        if n.dx == 0:                                      # side = -dy*(x - px)
+            # back iff -dy*(x-px) > 0  iff  (dy > 0 and x < px) or (dy < 0 and x > px)
+            lo, hi = (back, front) if n.dy > 0 else (front, back)
+            out += [f"    hex.set 10, {label}k, {n.x & M40}",
+                    f"    hex.scmp 10, ptx, {label}k, {lo}, {front}, {hi}"]
+        elif n.dy == 0:                                    # side = dx*(y - py)
+            lo, hi = (front, back) if n.dx > 0 else (back, front)
+            out += [f"    hex.set 10, {label}k, {n.y & M40}",
+                    f"    hex.scmp 10, pty, {label}k, {lo}, {front}, {hi}"]
+        else:                                              # the general cross product
+            out += [f"    hex.set 10, {label}k, {n.x & M40}",
+                    f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}k",
+                    f"    hex.set 10, {label}k, {n.y & M40}",
+                    f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}k",
+                    # the CONSTANT goes second: fixed_mul_lo/mul_lo cost one schoolbook row per
+                    # nonzero nibble of the second operand, and a partition delta is small
+                    f"    hex.set 10, {label}k, {n.dx & M40}",
+                    f"    hex.mul_lo 10, {label}p, {label}dy, {label}k",
+                    f"    hex.set 10, {label}k, {n.dy & M40}",
+                    f"    hex.mul_lo 10, {label}q, {label}dx, {label}k",
+                    f"    hex.sub 10, {label}p, {label}q",
+                    f"    hex.sign 10, {label}p, {front}, {label}_g{i}",   # < 0 -> front
+                    f"  {label}_g{i}:",
+                    f"    hex.if0 10, {label}p, {front}",                  # == 0 -> front (on the line)
+                    f"    ;{back}"]
+    for s in range(len(cmap.subsectors)):
+        out += [f"  {label}_l{s}:", f"    hex.set 4, ptss, {s}", f"    stl.fret {label}_ret"]
+    return "\n".join(out) + "\n"
+
+
+def point_location_decls(label="ptloc") -> list:
+    return ["ptx: hex.vec 10", "pty: hex.vec 10", "ptss: hex.vec 4",
+            f"{label}_ret: hex.vec w/4", f"{label}k: hex.vec 10",
+            f"{label}dx: hex.vec 10", f"{label}dy: hex.vec 10",
+            f"{label}p: hex.vec 10", f"{label}q: hex.vec 10"]

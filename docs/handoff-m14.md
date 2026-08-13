@@ -349,13 +349,26 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
   That is **~2.9M ops per descent**, so 251 per-thing descents would be **~730M ops/frame** against
   a ~40M frame — 18x the whole frame. §4's "a BSP descent is cheap" is corrected above.
 
-  What to use instead: a **baked point-location table**, the same shape as M14-d's blockmap — a grid
-  cell -> subsector index, read with `read_table_packed` at ~1.2k ops a thing, so ~300k ops for all
-  251. ⚠ It is an APPROXIMATION (a cell resolves to one subsector), so a thing near a leaf boundary
-  can get the neighbouring leaf. Both mirrors would use the same table and therefore agree, but it
-  is a fidelity decision about *ownership* — and §5b notes ownership fixes a sprite's depth SLOT, so
-  a wrong leaf can under-draw a sprite. **That is the owner's call, and it is the first thing to
-  settle in M14-e**, before any code.
+  **SOLVED, and it needs no fidelity trade after all.** `collision.generate_point_location_fj`
+  bakes the descent AS CODE, so the partition is compile-time: a vertical node is one compare of x,
+  a horizontal one is one compare of y, and only a diagonal needs the cross product — and even then
+  both multipliers are constants, so the row rule keeps them sparse. E1M1 is 209 vertical + 209
+  horizontal + 263 diagonal of 681, i.e. **61% multiply-free**.
+
+  It is EXACT — `tests/fj/test_collision_fj.py::test_baked_point_location_matches_point_in_subsector`
+  agrees with `point_in_subsector` at 50/50 sampled points including VERTICES, which sit exactly on
+  partition lines and are where `_point_side`'s "on the line is front" convention has to be
+  reproduced. So the grid approximation is off the table and with it the ownership question: no
+  decision needed.
+
+  Measured: **mean 105,715 ops a lookup** (min 10,661, max 298,411). 27x cheaper than the fcall
+  descent, but 251 x that is still 26.5M ops — ~66% of the frame. Two levers close the gap, and
+  both should be taken:
+   1. **only re-bind what MOVED.** Most of the 251 are decor and pickups that never move; DOOM
+      itself only calls `P_SetThingPosition` on a move. A thing that did not move keeps its leaf
+      and costs nothing.
+   2. **narrow the diagonal multiply.** It runs at `hex.mul_lo 10` today; the operands are int16
+      deltas, so the products fit 6 nibbles — roughly 3x cheaper on the 39% of nodes that need it.
 
   Then the list itself: a LINKED list (`thing_next[t]`, `ss_head[ss]`) rather than per-leaf arrays —
   O(1) to append, no cap, and therefore no overflow budget that could silently drop a thing (the

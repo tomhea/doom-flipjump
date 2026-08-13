@@ -377,9 +377,18 @@ ns sim {
 ns sim {
     // sim.bind_things — rebuild the per-leaf thing lists for this frame.
     //
-    // DOOM keeps a per-subsector thing list and moves a thing between them on P_SetThingPosition.
-    // fj has no state between frames (one run = one frame), so the lists are rebuilt from the
-    // position table every frame instead.
+    // DOOM keeps a per-subsector thing list and moves a thing between them on P_SetThingPosition
+    // -- i.e. it re-binds ON A MOVE, not once a frame. The first cut of this macro re-located all
+    // 251 things every frame because fj has no state between frames, and that cost 27.2M ops, 73%
+    // of everything M14-e added.
+    //
+    // ⚠ IT DOES NOT HAVE TO. Section 2's architecture already says WORLD STATE ROUND-TRIPS through
+    // stdin/stdout, and a thing's subsector is world state exactly like its position. So `thss[t]`
+    // arrives on the wire holding last frame's binding, and only a thing the host marks DIRTY
+    // (thss = 0xFFFF, which no real subsector index can be) pays a point location. Static decor --
+    // which on E1M1 is nearly everything -- costs nothing. fj still COMPUTES every binding; the
+    // host only carries the answer between frames, and a wrong one diverges against the oracle
+    // immediately because the oracle derives it from position independently.
     //
     // ⚠ A LINKED LIST, not per-leaf arrays: `thnext[t]` and `sshead[ss]`, both BYTE arrays with
     // 0xFF as the empty sentinel. Prepending is O(1) and there is NO CAP -- so no budget can
@@ -389,49 +398,84 @@ ns sim {
     // ⚠ Bind in DESCENDING index order. Prepending reverses, so descending insertion makes the
     // traversal ASCENDING -- exactly the order `things_by_ss` has today, which is what keeps the
     // front-to-back slot each sprite claims bit-identical for a static thing.
-    def bind_things thpos, nthings, nss             @ body, clr, clr_body, clr_done, bl, bl_done,               t, ss, hv, tv, p, q, r, cst, pos, poff, pbase, pptr, xn, xp, yn, yp             < ptx, pty, ptss, sshead, thnext, ptloc_walk, ptloc_ret {
+    // ⚠ BUILT ONLY FROM PATTERNS THIS FILE HAS ALREADY PROVEN. Two rewrites were thrown away
+    // first, and both failures are worth more than the code:
+    //   * COMPILE-TIME INDEX (`rep(nthings, i) .bind_one ... i`) makes every array access a direct
+    //     address and is ~1M ops/frame cheaper. It took the standalone probe from seconds to over
+    //     40 MINUTES TO ASSEMBLE -- the repo's oldest lesson, the assembler is ~cubic in unrolled
+    //     ops. Not worth 1M.
+    //   * RUNNING POINTERS (`hex.add w/4, ptr, k` per iteration, no ptr_index at all) simply KILLS
+    //     THE PROGRAM -- `scratchpad/_ptrunit.py` reproduces it in 30 lines. Also: `ptr + n*dw`
+    //     offsets the POINTER CELL's own address, not the address it points to, so it cannot reach
+    //     a field inside a pointed-to record.
+    // So: the original loop, with the cache added, and `thss` split into two BYTE arrays indexed by
+    // the raw thing index -- exactly how `sshead` and `thnext` are already indexed here.
+    def bind_things thpos, thss, nthings, nss             @ body, bl, bl_done, dirty, clean, clr, clr_body, clr_done, t, hv, tv, dv, p, q, r, sptr,               pos, poff, pbase, pptr, xn, xp, yn, yp           < ptx, pty, ptss, sshead, thnext, ptloc_walk, ptloc_ret {
         ;body
-      t:   hex.vec w/4                          // ⚠ w/4, not 4: hex.ptr_index does
-      ss:  hex.vec w/4                          // `mov w/4` out of its INDEX register
-      hv:  hex.vec 2
-      tv:  hex.vec 2
-      p:   hex.vec w/4
-      q:   hex.vec w/4
-      r:   hex.vec w/4
-      cst: hex.vec w/4
+      t:  hex.vec w/4                          // ⚠ w/4, not 4: hex.ptr_index does
+      hv: hex.vec 2                            // `mov w/4` out of its INDEX register
+      tv: hex.vec 2
+      dv: hex.vec 4
+      p:  hex.vec w/4
+      q:  hex.vec w/4
+      r:  hex.vec w/4
       poff:  hex.vec w/4
       pbase: hex.vec w/4
       pptr:  hex.vec w/4
       pos: hex.vec 16
+      sptr: hex.vec w/4
       body:
-        // every leaf starts empty
-        hex.zero 4, ss
-        hex.set w/4, cst, nss
+        // every leaf starts empty.
+        // ⚠ `rep(nss, i) hex.set 2, sshead + i*2*dw, 0xFF` -- a compile-time unroll, ~30x cheaper
+        // than this loop -- SILENTLY EXPANDS TO NOTHING when the count is a macro PARAMETER. The
+        // binary got SMALLER after adding 682 unrolled sets, which is the tell. `rep` needs a
+        // literal, so that unroll belongs in the emitter, where NSS is a number. Kept as a loop
+        // here so the macro is correct standalone; see the emitter for the fast path.
+        hex.zero w/4, r
+        hex.set w/4, q, nss
       clr:
-        hex.cmp w/4, ss, cst, clr_body, clr_done, clr_done
+        hex.cmp w/4, r, q, clr_body, clr_done, clr_done
       clr_body:
-        hex.set w/4, q, sshead
-        hex.ptr_index p, q, ss
+        hex.set w/4, pbase, sshead
+        hex.ptr_index p, pbase, r
         hex.set 2, hv, 0xFF
         hex.write_byte p, hv
-        hex.inc w/4, ss
+        hex.inc w/4, r
         ;clr
       clr_done:
+        hex.set 4, dv, 0xFFFF                  // the host's "I moved this one" sentinel
         hex.set w/4, t, nthings
       bl:
         hex.if0 w/4, t, bl_done
-        hex.dec w/4, t                             // descending: nthings-1 .. 0
-        // the thing's position -> the 10-nibble signed map coords point location reads
-        // the position array is a hex.vec (one NIBBLE per slot), not a packed table (one BYTE
-        // per slot), so read_table_packed cannot address it -- the strides differ by 2. A 16.16
-        // pair is 16 nibbles and 16 is one nibble of SHIFT, so the index scales without a multiply.
+        hex.dec w/4, t                         // descending: nthings-1 .. 0
+        // ---- last frame's binding ---------------------------------------------------------------
+        // ⚠ `hex.input` does NOT fill an array that `ptr_index` + `read_byte` addresses -- the
+        // wire writes a hex.vec (nibble per slot) and read_byte addresses something else, which is
+        // the same trap the POSITION array hit. `scratchpad/_ptrunit.py` shows write_byte/read_byte
+        // round-tripping while a wire-filled array reads back garbage; `_ptrunit2.py` shows the
+        // accessor that DOES work and is used here and by thing_load: nibble offset = index*16 via
+        // `shl_hex 1`, then read_hex / write_hex. So a thss entry is 16 nibbles (8 wire bytes) even
+        // though it holds 4 -- the cost is ~0.26M of wire round-trip against the 25M this saves,
+        // and it reuses the one accessor this file has proven rather than inventing a third.
+        hex.mov w/4, poff, t
+        hex.shl_hex w/4, 1, poff
+        hex.set w/4, pbase, thss
+        hex.ptr_index sptr, pbase, poff
+        hex.zero w/4, ptss
+        hex.read_hex 4, ptss, sptr
+        hex.cmp 4, ptss, dv, clean, dirty, clean
+      dirty:
+        // the thing's position -> the 10-nibble SIGNED map coords point location reads. The
+        // position array is a hex.vec (one NIBBLE per slot), not a packed table (one BYTE per
+        // slot), so read_table_packed cannot address it. A 16.16 pair is 16 nibbles and 16 is one
+        // nibble of SHIFT, so the index scales without a multiply.
         hex.mov w/4, poff, t
         hex.shl_hex w/4, 1, poff
         hex.set w/4, pbase, thpos
         hex.ptr_index pptr, pbase, poff
         hex.read_hex 16, pos, pptr
         hex.zero 10, ptx
-        hex.mov 4, ptx, pos + 4*dw               // the INTEGER part of a 16.16 is nibbles 4..7
+        hex.mov 4, ptx, pos + 4*dw             // the INTEGER part of a 16.16 is nibbles 4..7
         hex.sign 4, pos + 4*dw, xn, xp
       xn:
         hex.set 6, ptx + 4*dw, 0xFFFFFF
@@ -442,15 +486,19 @@ ns sim {
       yn:
         hex.set 6, pty + 4*dw, 0xFFFFFF
       yp:
-        stl.fcall ptloc_walk, ptloc_ret
+        stl.fcall ptloc_walk, ptloc_ret        // -> ptss
+        // write it back so it goes out on the wire and returns as next frame's cache. `sptr` still
+        // points at this thing's slot -- the dirty branch recomputed poff/pbase/pptr for thpos, so
+        // the thss pointer is kept in its own cell rather than recomputed.
+        hex.write_hex 4, sptr, ptss
+      clean:
         // thnext[t] = sshead[ptss];  sshead[ptss] = t
         hex.set w/4, q, sshead
         hex.ptr_index p, q, ptss
         hex.read_byte hv, p
         hex.set w/4, q, thnext
         // ⚠ NOT `ptr_index q, q, t`: ptr_index writes its DESTINATION FIRST (`mov w/4, dst,
-        // index`), so aliasing dst onto the base destroys the base before it is added in. Same
-        // family as the read whose dst was also its index -- fj macros are not alias-safe.
+        // index`), so aliasing dst onto the base destroys the base before it is added in.
         hex.ptr_index r, q, t
         hex.write_byte r, hv
         hex.zero 2, tv

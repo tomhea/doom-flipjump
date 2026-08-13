@@ -1,4 +1,13 @@
-"""sim.bind_things vs the Python binding (point_in_subsector + ascending-order per-leaf lists)."""
+"""sim.bind_things vs the Python binding, in BOTH cache modes.
+
+COLD = every thss slot is the 0xFFFF dirty sentinel, so all 251 things are point-located (what
+the first cut did every single frame). WARM = the true bindings are fed in, as they would arrive
+on the wire from the previous frame, so nothing is located.
+
+⚠ THE CONTROL IS TWO-SIDED and that is the point: WARM must produce lists IDENTICAL to COLD
+(else the cache is wrong) AND must be far cheaper (else it is not doing anything). Checking only
+the ops would pass a build that skipped the work and bound nothing; checking only the lists would
+pass one that ignored the cache and re-located everything."""
 import struct, sys, tempfile
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,7 +46,8 @@ prog = "\n".join([
     "stl.startup_and_init_all",
     "hex.input 1, wmagic",
     "hex.set 2, mk, 0x11", "hex.print_as_digit 2, mk, 0", "stl.output 10",
-    f"sim.bind_things thpos, {NT}, {NSS}",
+    f"hex.input {NT*8}, thss",      # last frame's bindings, 8 wire bytes per thing
+    f"sim.bind_things thpos, thss, {NT}, {NSS}",
     "hex.set 2, mk, 0x99", "hex.print_as_digit 2, mk, 0", "stl.output 10",
     # dump every leaf's list, ascending, as "ss:t,t,t"
     "hex.zero w/4, ds", "hex.set w/4, dn, %d" % NSS,
@@ -53,7 +63,7 @@ prog = "\n".join([
     "ddone:", "stl.loop",
     "wmagic: hex.vec 2", "mk: hex.vec 2", "ds: hex.vec w/4", "dn: hex.vec w/4", "dh: hex.vec w/4", "dc: hex.vec w/4",
     "dp: hex.vec w/4", "dq: hex.vec w/4",
-    f"sshead: hex.vec {2*NSS}", f"thnext: hex.vec {2*NT}",
+    f"sshead: hex.vec {2*NSS}", f"thnext: hex.vec {2*NT}", f"thss: hex.vec {16*NT}",
     *point_location_decls(),
     generate_point_location_fj(cmap),
     thpos_vec("thpos", positions),
@@ -63,18 +73,39 @@ out = tmp/"b.fjm"
 fj.assemble([(ROOT/"src/fj/fixed_point.fj").resolve(), (ROOT/"src/fj/sim.fj").resolve(),
              src.resolve()], out, memory_width=W, print_time=False)
 print("assembled", f"{out.stat().st_size:,}")
-io = FixedIO(bytes([0xD0]))
-term = fj.run(out, io_device=io, print_time=False, print_termination=False)
-got = {}
-raw = io.get_output(allow_incomplete_output=True).decode()
-print("RAW[:160]:", repr(raw[:160]))
-for line in io.get_output(allow_incomplete_output=True).decode().split("\n"):
-    if ":" not in line: continue
-    a, b = line.split(":"); got.setdefault(int(a, 16), []).append(int(b, 16))
+import struct
 want = {}
+truess = []
 for i, t in enumerate(things):
-    want.setdefault(rm.point_in_subsector(cmap, t.x, t.y), []).append(i)
-print(f"ops {term.op_counter:,}   leaves with things: fj {len(got)}, python {len(want)}")
-bad = [(k, got.get(k), want.get(k)) for k in set(got) | set(want) if got.get(k) != want.get(k)]
-print(f"{'ALL LEAF LISTS MATCH (ascending order preserved)' if not bad else str(len(bad))+' leaves differ'}")
-for k, g, w in bad[:5]: print(f"  ss{k}: fj {g} python {w}")
+    ss = rm.point_in_subsector(cmap, t.x, t.y)
+    truess.append(ss)
+    want.setdefault(ss, []).append(i)
+
+
+def run(thss_vals, tag):
+    io_ = FixedIO(bytes([0xD0]) + b"".join(struct.pack("<Q", v) for v in thss_vals))
+    term = fj.run(out, io_device=io_, print_time=False, print_termination=False)
+    got = {}
+    for line in io_.get_output(allow_incomplete_output=True).decode().splitlines():
+        if ":" not in line:
+            continue
+        a, b = line.split(":")
+        got.setdefault(int(a, 16), []).append(int(b, 16))
+    bad = [k for k in set(got) | set(want) if got.get(k) != want.get(k)]
+    print(f"  {tag:5s} {term.op_counter:>12,} ops   leaves fj {len(got)} / python {len(want)}   "
+          f"{'LISTS MATCH' if not bad else str(len(bad)) + ' LEAVES DIFFER'}", flush=True)
+    return term.op_counter, not bad
+
+
+cold, ok_c = run([0xFFFF] * NT, "COLD")
+warm, ok_w = run(truess, "WARM")
+print(f"{chr(10)}WARM saves {cold - warm:,} ops ({100 * (cold - warm) / cold:.1f}%)")
+# the bar guards a PROPERTY, not a number: WARM must not be paying for point location, which is
+# ~25M of COLD's ~31M. Anything near COLD means the cache is being ignored.
+ok = ok_c and ok_w and warm < cold * 0.4
+if not ok_c or not ok_w:
+    print("!! a mode's lists are WRONG")
+elif warm >= cold * 0.4:
+    print("!! WARM is not meaningfully cheaper -- the cache is not being taken")
+else:
+    print("PASS -- identical lists both ways, and the cache is doing the work")

@@ -629,7 +629,12 @@ def point_location_decls(label="ptloc") -> list:
     # ⚠ ptss is w/4 wide, not 4: `hex.ptr_index` does `mov w/4` OUT of its index register, so a
     # narrower cell drags its neighbour in and yields a wild pointer (fj-lessons: an n-nibble
     # op reads n nibbles of its SOURCE).
+    # ⚠ ptp/ptq/bhv/btv/bdv are `sim.bind_one`'s scratch and are SHARED on purpose: that macro is
+    # instantiated once per thing (251 on E1M1), so an @-local data cell would be 251 cells and 251
+    # declaration lines in the emitted text. It keeps nothing across the call.
     return ["ptx: hex.vec 10", "pty: hex.vec 10", "ptss: hex.vec w/4",
             f"{label}_ret: hex.vec w/4", f"{label}k: hex.vec 10",
             f"{label}dx: hex.vec 10", f"{label}dy: hex.vec 10",
-            f"{label}p: hex.vec 10", f"{label}q: hex.vec 10"]
+            f"{label}p: hex.vec 10", f"{label}q: hex.vec 10",
+            "ptp: hex.vec w/4", "ptq: hex.vec w/4",
+            "bhv: hex.vec 2", "btv: hex.vec 2", "bdv: hex.vec 4"]

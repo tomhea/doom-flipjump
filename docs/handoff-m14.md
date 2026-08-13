@@ -154,7 +154,9 @@ same arithmetic its non-`_m` twin has always used. The signature is untouched (t
 
 **Cost: +3.3M–4.0M ops/frame (~+9–10%)** at the four gate viewpoints — the price the M13-mapmul
 narrowing was buying, now paid back because the premise it rested on is gone. Correctness over op
-budget, per §7. If it needs winning back, the lever is a *conditional*: the map-slice path is still
+budget — CLAUDE.md's cost model, which allows *stops* and distrusts *budgets*, and an optimisation
+resting on a premise the milestone breaks is neither. If it needs winning back, the lever is a
+*conditional*: the map-slice path is still
 valid whenever the position's low nibbles are zero, so a per-frame test could pick the narrow path
 for integer positions — but that is an optimisation to price separately, not a correctness matter.
 
@@ -320,7 +322,64 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
   tests (~57k macro lines, **did not assemble in 50 minutes**), and a gate whose script never
   touches a wall (vacuous — `phase2` now counts blocked tics and fails at zero, which is what
   caught `cprad` being left at zero and collapsing the collision box to a point).
-- **M14-e** ❌ **NOT STARTED — the last rung, and the biggest.** §3's trap is already disarmed
+- **M14-e** ✅ **DONE and gated — moving things render.** `emit_wall_renderer(moving_things=True)`
+  replaces every baked per-(subsector, thing) block with a runtime table: positions arrive on the
+  wire, `sim.bind_things` rebuilds each leaf's linked list from them each frame, and every leaf's
+  sprite work becomes two lines calling one shared `thing_pass`.
+
+  **The gate** — `python scratchpad/m14_gate.py 10 --things`, an 18,124,217-byte binary:
+
+  | phase | result |
+  |---|---|
+  | 1, still, spawn positions | **byte-exact ×4**, state round-tripped |
+  | 2, 10 relayed tics, things drifting 4 units/tic | **10/10 byte-exact**, state OK every tic |
+  | the controls | things changed leaf **281 times**; the drift changed the frame on **9 of 10** tics |
+
+  Phase 1 is the load-bearing half: fed the SPAWN positions the runtime table reproduces the baked
+  blocks' frames exactly, so the swap is pixel-neutral and any divergence phase 2 found would have
+  belonged to the moving half alone. **Both vacuity traps are closed and they are deliberately
+  two-sided** — counting leaf changes alone would pass a build that re-binds correctly and never
+  draws it, counting changed pixels alone would pass one that moves sprites without re-binding
+  them, so the gate fails at zero of either. (Tic 0 is the zero-drift tic by construction, which is
+  why 9 of 10 and not 10 of 10.)
+
+  **⚠ THE COST IS THE HEADLINE: ~+43M ops/frame, i.e. the frame roughly DOUBLES** — 81.2M–93.0M
+  against the M14-a dec-wire baseline's 34.1M–45.7M. The gate prints +45.8M to +47.3M, which
+  bundles §4b's +3.3–4.0M. This is the price of re-binding all 251 things every frame at the
+  measured 105,715 ops a lookup (~26.5M) plus the per-frame list rebuild, and **the lever named
+  below is untaken**: DOOM re-binds on `P_SetThingPosition`, i.e. only what moved, and E1M1's
+  decor and pickups never move. Taking it should recover most of the 26.5M. Correctness first —
+  the same call §4b made — but nothing here is inside the 25M cap, and §6 lists it first.
+
+  **What the shipped path pays: nothing.** `moving_things` defaults False and
+  `scratchpad/cr/emit_hash_vs_head.py` proves it — it emits the certified AND the shipped config
+  twice, once from the working tree and once from HEAD, and all 14 parts hash identically. That is
+  the same proof `test_build_wall_renderer_e1m1_flat` gives in ~70 minutes, in minutes.
+  ⚠ It carries an R9 `--selftest` that mutates HEAD's copy by ONE character and requires a DIFF,
+  because this exact control failed silently before: `emit_hash.py` compares against a STORED
+  baseline, and after a run of milestones that baseline is stale and reports DIFF for every config
+  whether or not the change under review touched anything. **A stale baseline is not a control.**
+
+  ⚠ **`python -m pytest tests/host -q` IS NOT THE ~1-MINUTE RUN THE LADDER DESCRIBES.** Nothing
+  deselects `test_build_wall_renderer_e1m1_flat`, so a bare invocation sits on the ~70-minute
+  shipped build at test 45 and looks exactly like a hang. The fast run is
+  `--deselect tests/host/test_e1m1_integration.py::test_build_wall_renderer_e1m1_flat`
+  — **242 passed in 93s**.
+
+  ⚠ **Things move on the INTEGER grid, and that is a real limit, not an oversight.** fj carries a
+  thing at full 16.16, but the oracle's `thing_positions` override writes the integer `t.x`/`t.y` a
+  WAD thing has, so a fractional thing would be comparing two different worlds — §4b's bug, in the
+  other mirror. The player is the fractional one. Lifting this means giving the oracle's thing
+  record 16.16 coordinates.
+
+  ⚠ **Every seg-carrying leaf calls `thing_pass`, not just the ones that can hold a thing.** Gating
+  the call on `thing_live_subsectors` would save the empty-list walks, but binding is a runtime
+  answer: a thing landing in a leaf the gate excluded would silently vanish, which is the exact
+  failure class M14-a exists to prevent. The gate would have to become a hard assert first.
+
+  <details><summary>The pre-implementation design analysis, kept for the record</summary>
+
+- **M14-e** (design notes) — §3's trap is already disarmed
   (M14-a), so what remains is the sprite pipeline itself. The analysis, so the next session starts
   from a design rather than a blank page:
 
@@ -479,3 +538,16 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
   **Gate it the way M14-d was gated:** `m14_gate --collide` plus a thing that actually CHANGES LEAF
   during the run, with the gate failing if none does. Every vacuity trap in this milestone has been
   a script that never exercised the thing being tested.
+
+  </details>
+
+## 6. What M14 leaves for M15
+
+All six rungs are done and gated. The program is no longer a pure function of a viewpoint: it is a
+function of world state and input that returns the next world state, the player moves and collides
+against real geometry, and things move and re-bind. The open items, in the order they cost:
+
+1. **Re-bind only what MOVED** (~26.5M ops/frame, the single biggest number in the milestone).
+2. **Fractional thing positions** — give the oracle's thing record 16.16 coordinates.
+3. **Gate `thing_pass` on the live-leaf set**, once that set is a hard assert rather than a prune.
+4. **The art is one still frame** (§4) — no walk cycle, no 8-way facing. Still an open decision.

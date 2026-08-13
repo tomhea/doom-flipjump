@@ -207,6 +207,67 @@ def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = Fal
     ]
 
 
+def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
+                         spr_base, spr_ldbase, spr_dw, spr_cls, *, deg: bool, spr_cache: dict):
+    """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
+
+    The static path bakes one xor-involution block per (subsector, thing), which is only possible
+    because a static thing's leaf is known at emit time. Here the leaf is a runtime answer, so the
+    same constants bake by INDEX (`doomfj.things.thing_rows`) and the two fields that are properties
+    of WHERE the thing stands -- `sp_z` and `sp_lt` -- come from two small per-subsector tables plus
+    an add. See `doomfj.things` for the split and for the proof that it reproduces the baked
+    constants exactly at every thing's spawn position.
+
+    Returns `(tables, ptloc, decls, nthings, nss)` -- the baked point-location walk is CODE and is
+    kept out of the data block for the same reason M14-d's seed descent is: it lives beside the BSP
+    walk it mirrors, not inside the region `;__hot_end` jumps over.
+    """
+    from doomfj.collision import generate_point_location_fj, point_location_decls
+    from doomfj.lut_generator import generate_packed_lut_fj
+    from doomfj.things import (THING_ROW_BYTES, THING_ROW_LEN, reachable_lightnums,
+                               sprite_light_table, subsector_tables, thing_rows)
+    allt = map_wad.things(mapname)
+    rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, MONSTER_TYPES,
+                           MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
+                           deg=deg, spr_near=bool(DEG_SPR_NEAR_TZ), cache=spr_cache)
+    things = [allt[i] for i in idx]
+    ssflr, sslgt_raw = subsector_tables(rm, cmap, lds, sds, secs)
+    lns = reachable_lightnums(rm, secs)
+    lnpos = {ln: k for k, ln in enumerate(lns)}
+    # a seg-less leaf has no sector and gets 0 -- nothing can bind to it (point location only ever
+    # returns a leaf with geometry), so which row it names never matters
+    sslgt = [lnpos.get(ln, 0) for ln in sslgt_raw]
+    sprlt = sprite_light_table(spr_cls, rows, lns)
+    nt, nss = len(rows), len(cmap.subsectors)
+
+    def _pack(vals, widths):
+        out = shift = 0
+        for v, nb in zip(vals, widths):
+            out |= (v & ((1 << 8 * nb) - 1)) << shift
+            shift += 8 * nb
+        return out
+
+    # ⚠ the position array is a hex.vec (one NIBBLE per slot), NOT a packed table (one BYTE per
+    # slot): the wire writes it with `hex.input 8` and sim reads it with ptr_index + read_hex 16.
+    # Emitting it as a packed LUT would put the strides a factor of 2 apart -- see handoff-m14 5.
+    thpos = ["thpos_rt:"] + [f"    hex.vec 16, {(((t.y << 16) & 0xFFFFFFFF) << 32) | ((t.x << 16) & 0xFFFFFFFF)}"
+                             for t in things]
+    text = "\n".join([
+        generate_packed_lut_fj("throw", [_pack(r, THING_ROW_BYTES) for r in rows], THING_ROW_LEN),
+        "\n".join(thpos),
+        generate_packed_lut_fj("ssflr", [f & 0xFFFF for f in ssflr], 2),
+        generate_packed_lut_fj("sslgt", sslgt, 1),
+        generate_packed_lut_fj("sprlt", sprlt, 1),
+        generate_packed_lut_fj("ltbase", [k * nt for k in range(len(lns))], 2),
+    ])
+    # 0xFF is the empty/end sentinel of both linked-list arrays, so 251 things fit a byte index
+    assert nt < 0xFF, f"{mapname} has {nt} drawable things; the byte linked list tops out at 254"
+    decls = ["cur_ss: hex.vec w/4", "tp_ret: ;0",
+             f"sshead: hex.vec {2 * nss}", f"thnext: hex.vec {2 * nt}",
+             *point_location_decls()]
+    return text, generate_point_location_fj(cmap), decls, nt, nss
+
+
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
                        ablate: frozenset = frozenset(), floor_mode: str = "textured",
                        wall_mode: str = "textured", raster_mode: str = "framebuffer",
@@ -216,6 +277,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        bbox_cull: bool = False, stack_steps: bool = False,
                        deg: bool = False, state_wire: str = "dec",
                        player_sim: bool = False, collide: bool = False,
+                       moving_things: bool = False,
                        return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
@@ -357,6 +419,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     assert state_wire in ("dec", "bin"), f"state_wire={state_wire!r} is not 'dec' or 'bin'"
     assert state_wire == "dec" or (stream or raster or projm or lines), \
         "state_wire='bin' needs a run-stream mode (byte.emit's table is not baked for framebuffer)"
+    # M14-e: the runtime thing table. Positions arrive on the wire after the player's state, so it
+    # needs the binary wire; and there is nothing to re-bind unless sprites are being emitted.
+    assert not moving_things or (things and lines), \
+        "moving_things=True is the runtime thing table -- it needs things=True on the lines tier"
+    assert not moving_things or state_wire == "bin", \
+        "moving_things=True reads the position array off the binary wire (see wireformat.encode_things)"
+    # `sim.thing_load` externs the full sprite register set, and an extern that has no global is an
+    # assembler error -- so the two OPTIONAL registers must be present. Both are in the certified
+    # tier; this refuses at emit time rather than 25 minutes into an assemble.
+    assert not moving_things or (deg and DEG_SPR_NEAR_TZ), (
+        "moving_things=True needs deg=True and DEG_SPR_NEAR_TZ: sim.thing_load loads sp_tzmax2 and "
+        "sp_base2, which are only declared under those two flags")
     # M13-W1R rides V1's per-column grain group (`gnrow` via the wnoise lookup) and V1's ditto
     # comparison of it -- without the grain the pattern key does not exist at runtime.
     assert not w1r_flag or wall_noise, "wall_mode='W1R' requires wall_noise=True (V1's gnrow)"
@@ -546,7 +620,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     sprbank, spr_base, spr_dw, spr_ldbase = (_lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname)
                                  if _do_things else ("", {}, {}, {}))
     sprlight, spr_cls = (_lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname,
-                                             cmap, lds, sds, secs) if _do_things else ("", {}))
+                                             cmap, lds, sds, secs, moving_things=moving_things)
+                         if _do_things else ("", {}))
     # h -> [bucket_height:2][bucket:2], the one runtime step of the height quantisation
     sprbkt = (generate_dispatch_table_fj(
         "sprbkt", [0] + [sprite_bucket(h, cfg.VIEW_H) | (sprite_bucket_height(
@@ -578,6 +653,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         f"thing_live_subsectors says subsectors {_stranded} are uninhabitable, yet {mapname} spawns "
         f"drawable things in them: {[(t.type, t.x, t.y) for s in _stranded for t in things_by_ss[s]]}. "
         "The prune would drop those leaves and the sprites would vanish with no other symptom.")
+    # M14-e: the runtime half of the same data, baked by INDEX rather than by (subsector, thing).
+    _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS = (
+        _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
+                             spr_base, spr_ldbase, spr_dw, spr_cls, deg=deg, spr_cache=spr_cache)
+        if moving_things else ("", "", [], 0, 0))
+    _MT_NTH = _index_nibbles(max(1, _MT_NT))          # the row index's width, as check_line's is
+    _MT_NSSN = _index_nibbles(max(1, _MT_NSS))
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -875,7 +957,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             # `tstop` gates the xorby block, exactly as `tsstop` does for the two-sided claim: both
             # of the oracle's stop conditions (the budget spent, every column claimed) are monotone,
             # so once the leaf sets it no later thing can matter and none pays its SET+CLEAR.
-            if _do_things and ss.numsegs:
+            if _do_things and ss.numsegs and moving_things:
+                # M14-e: the leaf no longer knows which things are its own -- `bind_things` decided
+                # that this frame from the wire's positions. Two lines, and the shared `thing_pass`
+                # walks this leaf's list; `tstop` is re-tested per thing inside it, exactly as the
+                # baked call sites gate themselves individually below.
+                out += [f"    hex.set w/4, cur_ss, {s}",
+                        "    stl.fcall thing_pass_leaf, tp_ret"]
+            elif _do_things and ss.numsegs:
                 for _ti, _t in enumerate(things_by_ss.get(s, ())):
                     _art = rm.sprite_art(sprite_wad, _t.type, spr_cache)
                     _tsec = _thing_sector(rm, cmap, lds, sds, secs, _t)
@@ -1289,6 +1378,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     pass1 = [
         *_state_wire_lines(state_wire, sim=player_sim, collide=collide),
         *_collide_block,
+        # M14-e: the thing positions follow the player's state on the wire, then every leaf's list
+        # is rebuilt from them. `hex.input n` counts BYTES, so one call takes a whole 16.16 pair
+        # into 16 nibbles at a COMPILE-TIME offset -- no per-byte writes, ~148k ops for all 251.
+        # This has to precede the walk: `subsector_action` reads the lists the bind writes.
+        *([f"rep({_MT_NT}, i) hex.input 8, thpos_rt + i*16*dw",
+           f"sim.bind_things thpos_rt, {_MT_NT}, {_MT_NSS}"] if moving_things else []),
         # M13-absmul: per-frame |viewx|/|viewy| + sign flags. fixed_mul_lo's cost is one schoolbook
         # row per nonzero nibble of the MULTIPLIER, and a negative 16.16 view coord sign-extends to
         # a dense pattern -- so the per-seg affine cull multiplies by these sparse abs values and
@@ -1440,7 +1535,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, ttang, sdrecip, srdisp, xtadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid,
-                     entoff, _collide_tables, "__hot_end:"])
+                     entoff, _collide_tables]
+                  # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
+                  # which changes the shipped text and so its emit hash -- caught by
+                  # scratchpad/cr/emit_hash_vs_head.py, which is exactly what that control is for.
+                  + ([_mt_tables] if moving_things else []) + ["__hot_end:"])
     else:
         hotdata = []
     # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,
@@ -1566,6 +1665,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 f"{DEG_SPR_LOWRES_H}, {_spr_nlow(cfg) if DEG_SPR_NEAR_TZ else 1}, "
                 f"{DEG_SPR_NEAR_TZ * 0x10000}"]
                if _do_things else []),
+             # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
+             *(["thing_pass_leaf:",
+                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt, ssflr, {_MT_NSSN}, sslgt, sprlt, "
+                "ltbase",
+                "stl.fret tp_ret"] if moving_things else []),
              "seg_pass2_leaf:",
              (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
               f"{LINES_HALF_SLOTS}, {TS_ECAP}, {1 if 'colstub' in ablate else 0}") if two_sided else
@@ -1600,6 +1704,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
       ("walk", [
           bsp,
           _collide_descend,          # M14-d: the candidate-position point location
+          # M14-e: the per-thing point location, baked as code -- conditional for the same reason
+          # the tables above are: an unconditional "" is still a newline the shipped text lacks
+          *([_mt_ptloc] if moving_things else []),
       ]),
       ("state", [
           *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
@@ -1732,6 +1839,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
              "n_hd: hex.vec 2", "hdfl: hex.vec 1",      # ... its budget counter + per-thing flag
              "degfl: hex.vec 1", "ballow: hex.vec 1",   # ... and the per-thing runtime flags
              "thfar: hex.vec 1",                 # SPR-NEAR: beyond the detail radius?
+             *_mt_decls,                         # M14-e: the runtime table's state + point location
              sprbkt, sprlight, sprbank] if _do_things else []),
           *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                               floor_mode == "FT1")] if (lines and not ascode) else []),

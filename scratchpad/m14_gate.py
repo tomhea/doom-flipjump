@@ -9,8 +9,8 @@ Same map, same tier, same degrade=True oracle as `scratchpad/deg_gate.py`; the d
     and the op counts should differ from the dec wire only by the input path -- three decimal
     parses (~60k ops) traded for 13 raw bytes (~1k) plus the sim's handful of key tests.
 
-  PHASE 2 -- MOVING, which is the point. handoff-m14.md section 6: "One frame proving byte-exact
-    says nothing about state drift on frame 200." N tics from the spawn point under a scripted key
+  PHASE 2 -- MOVING, which is the point. One frame proving byte-exact says nothing about state
+    drift on frame 200. N tics from the spawn point under a scripted key
     sequence, each tic's echoed state relayed into the next -- exactly the loop the host will run --
     with BOTH the frame and the state compared against the oracle every tic. This is the first gate
     in the repo that is stateful across frames.
@@ -35,7 +35,7 @@ from doomfj.harness import W
 from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer, write_program_files
-from doomfj.wireformat import encode_feed, encode_feed_mapunits, keys_dict
+from doomfj.wireformat import encode_feed, encode_feed_mapunits, encode_things, keys_dict
 from tests.fj.stream_screen import StreamScreen
 
 SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
@@ -75,8 +75,36 @@ RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noi
 
 
 COLLIDE = "--collide" in sys.argv
-CACHE = ROOT / ("scratchpad/fjmcache/m14_coll.fjm" if COLLIDE
-                else "scratchpad/fjmcache/m14_bin.fjm")
+MOVING = "--things" in sys.argv                  # M14-e: the RUNTIME thing table
+# ⚠ the cache key must name EVERY flag that changes the binary -- keying it on one of two would
+# hand `--things --collide` the no-collision binary and gate the wrong program.
+CACHE = ROOT / ("scratchpad/fjmcache/m14_bin%s%s.fjm"
+                % ("_coll" if COLLIDE else "", "_things" if MOVING else ""))
+
+# M14-e — the drawable things, in the ONE order both mirrors index by: wad order, filtered to the
+# types that have art. `thing_rows` (fj side) and `render_wall_frame`'s `_drawable` (oracle side)
+# apply that same filter, and the two were checked to select the identical 251 things.
+DRAWABLE = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+SPAWN_POS = [(t.x, t.y) for t in DRAWABLE]
+# ⚠ WHOLE MAP UNITS. fj carries a thing at full 16.16 but the oracle's override takes the integer
+# `t.x`/`t.y` a WAD thing has, so a fractional thing would be comparing two different worlds. The
+# player is the fractional one (M14-c); things move on the grid until the oracle carries 16.16 too.
+THING_DRIFT = 4                                  # map units per tic, every thing, +x
+
+
+def thing_positions(tic):
+    """Where every drawable thing stands on tic `tic` -- the host holds this between frames exactly
+    as it holds the player's state, because the program is a pure function of stdin (section 2)."""
+    return [(x + THING_DRIFT * tic, y) for x, y in SPAWN_POS]
+
+
+def feed(state, keys, positions=None):
+    """The wire: the player's state, then the thing block if this build reads one."""
+    b = encode_feed(*state, keys)
+    if MOVING:
+        b += encode_things([(x << 16, y << 16) for x, y in
+                            (SPAWN_POS if positions is None else positions)])
+    return b
 
 
 def build():
@@ -89,7 +117,8 @@ def build():
                                floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
                                plane_near=True, wall_noise=True, steps=True, stack_steps=True,
                                things=True, sprite_wad=art, deg=True,
-                               state_wire="bin", player_sim=True, collide=COLLIDE)
+                               state_wire="bin", player_sim=True, collide=COLLIDE,
+                               moving_things=MOVING)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     prog = write_program_files(parts, tmp, "e1m1")     # ⚠ order is the contract
@@ -110,11 +139,14 @@ def run(fjm, feed):
 
 
 def phase1(fjm):
+    """⚠ With --things this is also THE PIXEL-NEUTRALITY PROOF. Fed the SPAWN positions, the runtime
+    table must reproduce the frames the baked blocks produced -- same pixels, same sprite slots. If
+    it does, any divergence phase 2 finds belongs to the moving half and nowhere else."""
     ok = True
     print("\nPHASE 1 -- still (keys=0), against deg_gate's viewpoints", flush=True)
     for i, (vx, vy, va) in enumerate(VPS):
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene, **RENDER_KW)
-        scr, term = run(fjm, encode_feed_mapunits(vx, vy, va))
+        scr, term = run(fjm, feed((vx << 16, vy << 16, va), 0))
         same = bytes(scr.pixel_indices) == bytes(want)
         diff = sum(1 for a, b in zip(bytes(scr.pixel_indices), bytes(want)) if a != b)
         echoed = scr.state == (vx << 16, vy << 16, va)
@@ -133,9 +165,18 @@ def phase2(fjm, tics):
     state = (_signed(sp.x, 32), _signed(sp.y, 32), sp.angle)
     want_state = state
     blocked_tics = 0
+    leaf_changes = moved_frames = 0
     for tic in range(tics):
         keys = SCRIPT[tic % len(SCRIPT)]
-        scr, term = run(fjm, encode_feed(*state, keys))
+        pos = thing_positions(tic) if MOVING else None
+        if MOVING:
+            # ⚠ THE CONTROL, and it is two-sided. Counting leaf changes alone would pass a build
+            # that re-binds correctly and never draws the result; counting changed pixels alone
+            # would pass one that moves sprites without re-binding them. Both must happen.
+            leaf_changes += sum(rm.point_in_subsector(scene.cmap, x, y)
+                                != rm.point_in_subsector(scene.cmap, sx, sy)
+                                for (x, y), (sx, sy) in zip(pos, SPAWN_POS))
+        scr, term = run(fjm, feed(state, keys, pos))
         # the oracle takes the same tic, then renders from the state that tic produced
         _prev = SimState(want_state[0] & 0xFFFFFFFF, want_state[1] & 0xFFFFFFFF,
                          want_state[2], "E1M1")
@@ -144,7 +185,13 @@ def phase2(fjm, tics):
             _free = rm.step_sim(_prev, keys_dict(keys))
             blocked_tics += (_free.x, _free.y) != (s.x, s.y)
         want_state = (_signed(s.x, 32), _signed(s.y, 32), s.angle)
-        want = rm.render_wall_frame(SimState(s.x, s.y, s.angle, "E1M1"), scene, **RENDER_KW)
+        want = rm.render_wall_frame(SimState(s.x, s.y, s.angle, "E1M1"), scene,
+                                    thing_positions=pos, **RENDER_KW)
+        if MOVING:
+            # ... and did the drift actually reach the SCREEN this tic? Same viewpoint, spawn
+            # positions: if that renders identically, this tic proves nothing about moving things.
+            _static = rm.render_wall_frame(SimState(s.x, s.y, s.angle, "E1M1"), scene, **RENDER_KW)
+            moved_frames += bytes(_static) != bytes(want)
         same = bytes(scr.pixel_indices) == bytes(want)
         diff = sum(1 for a, b in zip(bytes(scr.pixel_indices), bytes(want)) if a != b)
         st_ok = scr.state == want_state
@@ -164,6 +211,15 @@ def phase2(fjm, tics):
         if not blocked_tics:
             print("  !! VACUOUS: no tic was blocked -- run more tics or fix SCRIPT")
             ok = False
+    if MOVING:
+        print(f"  things changed leaf {leaf_changes} times; the drift changed the frame on "
+              f"{moved_frames} of {tics} tics", flush=True)
+        if not leaf_changes:
+            print("  !! VACUOUS: nothing ever changed leaf -- raise THING_DRIFT or run more tics")
+            ok = False
+        if not moved_frames:
+            print("  !! VACUOUS: no moved thing was ever ON SCREEN -- the re-binding is untested")
+            ok = False
     return ok
 
 
@@ -172,7 +228,7 @@ def probe(fjm, argv):
     to separate "the sim corrupted something" from "the renderer and the oracle disagree at a
     viewpoint no gate has ever visited": feed keys=0 to take the sim out of the picture."""
     vx, vy, va, keys = int(argv[0]), int(argv[1]), int(argv[2], 0), int(argv[3], 0)
-    scr, term = run(fjm, encode_feed(vx << 16, vy << 16, va, keys))
+    scr, term = run(fjm, feed((vx << 16, vy << 16, va), keys))
     st = scr.state
     want = rm.render_wall_frame(SimState(st[0] & 0xFFFFFFFF, st[1] & 0xFFFFFFFF, st[2], "E1M1"),
                                 scene, **RENDER_KW)

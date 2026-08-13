@@ -182,11 +182,24 @@ with `keys=0`, i.e. with the program behaving exactly as it did before this mile
 ever asked the renderer for a fractional viewpoint. But it *blocks* M14-c's byte-exactness claim,
 because a walking player is fractional from its second step.
 
+**Shape of the divergence** at that point (574 px, `fj(half)` vs `oracle(half)`): 53 of 160 columns
+are touched, **median 6 pixels per column**, and **no column is wholly changed** — but three
+(81, 87, 92) are 62–70 pixels of 100. So it is two effects at once: mostly ROW boundaries off by a
+row or two across many columns, plus a few columns where a whole surface changed (a seg's claimed
+x-range, or which seg won the column). Feature toggles on the oracle attribute those pixels to
+`near_steps` / `stack_steps` / `plane_near` in roughly equal thirds and to `things` / `wall_noise`
+not at all — i.e. it is the geometry, not the decoration.
+
 Options, in the order I would take them:
 1. bisect the pipeline: at one fractional point, dump the per-column projection intermediates on
    both sides (`scratchpad/` already has the tracing precedent in `walk_trace.py` / `ts_trace.py`)
    and find the first stage whose output differs. The 4-pixel, single-column repro above is the
-   cheapest place to do it;
+   cheapest place to do it. Prime suspect, given "row boundaries off by one or two": the M13-absmul
+   affine path. Its `viewxa`/`viewya` comment claims bit-identity while noting that a view coord's
+   LOW NIBBLES are the multiplier's sparsity — and an integer coord has four zero low nibbles where
+   a fractional one does not. `fixed_mul_lo` truncates at `n+f` nibbles, which is exact for the
+   slice `fixed_mul` would return; whether it stays exact once those low nibbles are populated is
+   the first thing to check, not assume;
 2. once found, feed the 16.16 position to whichever consumer is truncating (or truncate on the
    oracle side, if the integer really is the intended input) so the mirrors agree by construction;
 3. (last resort, and against the owner's stated preferences) quantise the sim's position to whole

@@ -417,14 +417,27 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
   position array has to be readable by `hex.read_table_packed`, and that reads **one BYTE per dw
   slot** (the shape `generate_packed_lut_fj` emits: `;value*dw`). A `hex.vec` is **one NIBBLE per
   slot**. So `hex.input 8, thpos_rt + i*16*dw` does NOT produce something `read_table_packed 8` can
-  read — the strides differ by 2. Pick one before writing the wire read:
-   1. keep the array packed and fill it with `hex.input 1` + `hex.write_byte` per byte — 8 writes a
-      thing, ~2,000 calls, ~3M ops/frame;
-   2. keep it a `hex.vec` and read positions with explicit pointer arithmetic at a 16-slot stride
-      instead of `read_table_packed` — cheaper at runtime, but `thing_load` and `bind_things` both
-      take `thpos` as a packed table today and would both need the other accessor;
-   3. have the host send positions already interleaved so one `hex.input` lands in packed shape —
-      free at runtime, but it puts a layout detail in the wire, which §2.1 deliberately kept simple.
+  read — the strides differ by 2. **TAKE OPTION 2 — and the stride is a SHIFT, which is what makes it the cheap one.** A position is
+  16 nibbles, and 16 is one nibble's worth of shift, so the index scales with `hex.shl_hex w/4, 1`
+  rather than a multiply:
+
+  ```
+  hex.mov w/4, poff, ti
+  hex.shl_hex w/4, 1, poff          // ti * 16 slots -- a SHIFT, not hex.mul_const
+  hex.set w/4, pbase, thpos
+  hex.ptr_index pptr, pbase, poff
+  hex.read_hex 16, pos, pptr        // the 16.16 pair, exactly as read_table_packed 8 delivered it
+  ```
+
+  Then the wire read is the trivial `rep(NT, i) hex.input 8, thpos_rt + i*16*dw` — compile-time
+  offsets, ~148k ops for all 251 (§2.1's measured 73.6 ops a byte), no per-byte writes at all.
+  `bind_things` and `thing_load` each swap ONE `read_table_packed 8` for that five-line sequence;
+  nothing else about them changes, and both have standalone probes
+  (`scratchpad/_bind.py`, `scratchpad/_thload.py`) that re-verify in one run.
+
+  The rejected two, for the record: filling a packed array with `hex.input 1` + `hex.write_byte`
+  costs ~2,000 write calls and ~3M ops/frame; pre-interleaving on the host is free at runtime but
+  puts a layout detail into the wire that §2.1 deliberately kept simple.
 
   Everything else is assembly against known-good parts: the `subsector_action` swap (two lines),
   the table emission, `bind_things` in pass1, then the gate — gated the way M14-d was, with a thing

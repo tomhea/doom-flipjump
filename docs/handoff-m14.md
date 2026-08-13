@@ -127,17 +127,84 @@ was pruned. A silent vanish is unacceptable; a hard failure is fine.
   whether M14 ships that (honest, and fine for a first cut) or adds rotations (a bank-size
   question — 8 rotations multiplies the sprite bank).
 
+## 4b. ⚠ THE BLOCKER M14-c FOUND — the renderer is byte-exact at INTEGER positions only
+
+**Read this before touching M14-c or M14-d.** The player sim is the first thing in this project
+ever to produce a **fractional** player position. Every gate, every test and every golden in the
+repo feeds `SimState(vx << 16, ...)` — a whole number of map units. In that regime the renderer is
+in excellent shape; outside it, it is not.
+
+Measured with `scratchpad/m14_vp_sweep.py` against the certified tier (one build, keys=0, so the
+sim is not in the picture at all):
+
+| player position | byte-exact frames |
+|---|---|
+| integer map units (10 random walkable points, random angles) | **10 / 10** |
+| the same points + **half a map unit** (`--frac 0x8000`) | **2 / 10** (diffs 7–574 px of 16,000) |
+
+That integer row is itself new: before this, "byte-exact" meant *four fixed viewpoints*.
+`lite_sweep.py` visits many viewpoints but only counts ops — it never compared a pixel.
+
+**Minimal repro** (no sim, no fractional y, one column, four pixels):
+
+```bash
+python scratchpad/m14_gate.py --probe -416 256 0x0 0     # BYTE-EXACT
+```
+
+then the same point with `x = (-416 << 16) + 0x8000`: 4 pixels differ, all in column 133, rows
+68–72. Bisecting the fraction, `+0x1000` (1/16 unit) is still byte-exact and `+0x8000` is not.
+
+**Diagnosis so far.** Re-rendering the oracle with features toggled at that exact point:
+
+```
+oracle all on       col133 rows 66..74: [1, 2, 75, 75, 104, 6, 6, 6, 6]
+oracle stack=False  col133 rows 66..74: [1, 2,  8,  8, 104, 6, 6, 6, 6]
+fj                  col133 rows 66..74: [., .,104,104,   .,104,105, ., .]
+```
+
+The 75s are a **V5 stacked boundary piece** the oracle places and fj does not; fj paints wall
+colour through those rows instead. V5 pieces sit behind a *scale threshold* gate
+(`DEG_STACK_SCALE`, 16384). A threshold is exactly what a sub-unit position change perturbs: at
+integer positions the per-column scale lands far from 16384, at fractional ones it lands on it, and
+a one-ulp difference between the two mirrors' scale then decides the piece differently. **That is
+the hypothesis to test first — instrument the per-column scale on both sides at (-416.5, 256).**
+
+This is a **pre-existing renderer/oracle divergence, not something M14 introduced** — it reproduces
+with `keys=0`, i.e. with the program behaving exactly as it did before this milestone. But it
+*blocks* M14-c's byte-exactness claim, because a walking player is fractional from its second step.
+
+Options, in the order I would take them:
+1. find the one-ulp difference and fix it (the mirrors then agree everywhere);
+2. if the scale genuinely cannot be made bit-identical, move the V5 gate off a raw scale compare
+   onto a quantity both sides compute identically;
+3. (last resort, and against the owner's stated preferences) quantise the sim's position to whole
+   map units, which hides a real bug.
+
 ## 5. Suggested rungs (each its own commit + gate)
 
-- **M14-0 spike** — measure `hex.input_dec_int` / output cost per number. Decide the wire format.
-  No behaviour change. *(Write the measured number into §2 of this file.)*
-- **M14-a** — the prune decision from §3, with the loud-failure guard. Renderer output must stay
-  **byte-exact** (nothing moves yet), so `deg_gate` op counts may change but pixels must not.
-- **M14-b** — state round-trip: the program reads player state + input, re-emits it unchanged.
-  Byte-exact vs today when the input is the current viewpoint.
-- **M14-c** — the player sim in fj (turn/move), byte-exact vs the oracle's existing step.
-- **M14-d** — line collision, against a new oracle mirror. This is the substantial new algorithm.
-- **M14-e** — the runtime thing table + moving things, with per-frame re-binding to leaves.
+- **M14-0 spike** ✅ **DONE** (`81c3796`) — measured; §2.1 has the numbers and the decision (binary).
+- **M14-a** ✅ **DONE** (`fda6de4`) — the prune settled on `thing_live_subsectors`, both guards in,
+  `deg_gate` byte-exact ×4 at +1.4% ops, 217 host tests incl. the shipped build.
+- **M14-b** ✅ **DONE** — the binary wire round-trips; `m14_gate.py` phase 1 is byte-exact at all
+  four viewpoints with the state echoed back unchanged, and the bin wire is 336k–603k ops
+  *cheaper* than the decimals it replaces.
+- **M14-c** ⚠ **BUILT AND PROVEN AS A SIM, NOT CERTIFIED AS A FRAME.** The fj tic matches
+  `step_sim` exactly: all 16 key combinations, a 200-tic relayed trajectory, and the angle wrap
+  (`tests/fj/test_state_wire.py`, 36 tests). The renderer-level gate then walks into §4b — the
+  first fractional position diverges. **§4b is the next piece of work, and it is not M14's fault.**
+- **M14-d** ⚠ **ORACLE DONE, fj NOT STARTED.** `check_position` / `try_move` /
+  `move_with_collision` mirror P_CheckPosition / PIT_CheckLine / P_BoxOnLineSide (no blockmap: the
+  per-line bbox reject does that job, ~1.5k lines against a ~34M-op frame). 16 tests in
+  `tests/host/test_collision.py`, including the control that collision actually blocks something.
+  Two departures from vanilla are documented in the docstrings and must be mirrored in fj:
+  no dropoff test, and axis-separated retry instead of `P_SlideMove`. The fj half wants a baked
+  packed linedef table + a runtime loop; `hex.read_table_packed` is the primitive.
+- **M14-e** ❌ **NOT STARTED** — the runtime thing table + moving things. §3 is settled, so the
+  trap is disarmed; what remains is real work: per-thing constants out of the baked per-leaf
+  xor-involution blocks and into a runtime table, a runtime `point_in_subsector` per moved thing,
+  and per-leaf lists. Note the free win waiting there: the per-thing BSP descent visits exactly
+  the ancestors of the thing's leaf, so setting a "thing below" flag on each costs nothing and
+  buys back M14-a's 1.4% by restoring the `tsstop` node gate at runtime.
 
 ## 6. Verification (see `CLAUDE.md` for the full ladder)
 
@@ -152,6 +219,24 @@ normal run and it is the SHIPPED path (~70 min).
 will need a **multi-frame** gate — run N tics from a fixed start with a scripted input sequence
 and compare the whole sequence against the oracle. One frame proving byte-exact says nothing
 about state drift on frame 200.
+
+**That gate now exists, at two levels:**
+- `tests/fj/test_state_wire.py::test_sim_matches_the_oracle_over_N_tics` — 200 tics of the sim
+  alone, each tic's echoed state relayed into the next, ~20 s and no renderer build. This is where
+  a sim bug should be caught.
+- `scratchpad/m14_gate.py` — phase 1 (four still viewpoints) + phase 2 (N tics, frame *and* state
+  compared every tic). It **caches its binary** at `scratchpad/fjmcache/m14_bin.fjm` and takes
+  `--probe vx vy va keys` for a single frame, so a divergence can be chased without a 25-minute
+  rebuild. `--rebuild` forces a fresh one.
+- `scratchpad/m14_vp_sweep.py` — byte-exactness over MANY viewpoints (the repo had none: every
+  gate certified the same four, and `lite_sweep.py` counts ops without comparing a pixel). It is
+  what turned §4b from "one bad frame" into a measured boundary.
+
+⚠ And the trap the multi-frame gate found on its first run, now fixed and regression-tested:
+`SimState` normalises x/y to signed on construction. `spawn_state` built them SIGNED, `step_sim`
+returned them MASKED, and the projection reads `state.x` **raw** while everything else goes through
+`_signed` — so feeding a simulated state back into the renderer rendered a different frame from the
+identical hand-built one (14,845 of 16,000 pixels). Nothing had ever composed those two functions.
 
 ## 7. Standing preferences (owner)
 

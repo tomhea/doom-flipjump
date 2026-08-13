@@ -60,6 +60,12 @@ VIEWHEIGHT = 41                    # DOOM player eye height above the floor (map
 FORWARD_MOVE = 50 << 16           # 16.16 map-units per tic (DOOM run forwardmove 0x32); S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
+# ── M14-d: line collision (P_CheckPosition / PIT_CheckLine) ───────────────────────────────────
+PLAYER_RADIUS = 16 << 16          # MT_PLAYER radius, 16.16 (the half-width of the collision box)
+PLAYER_HEIGHT = 56 << 16          # MT_PLAYER height -- an opening shorter than this blocks
+MAX_STEP = 24 << 16               # P_TryMove: a floor more than 24 units up is a wall, not a step
+ML_BLOCKING = 0x0001              # linedef flag: blocks everything, two-sided or not
+
 # ── render: placeholder band base indices (until real flats/visplanes, M13 / wall textures) ──
 CEIL_BG = 0                       # ceiling band palette index (pre-colormap)
 FLOOR_BG = 96                     # floor band palette index (pre-colormap)
@@ -244,10 +250,26 @@ def _deg_to_bam(deg: int) -> int:
 
 @dataclass(frozen=True)
 class SimState:
-    x: int          # player position, 16.16 (the only genuine 16.16 quantity, §1.1.4)
-    y: int          # 16.16
-    angle: int      # 32-bit BAM
+    """The player's world state. `x`/`y` are 16.16 (the only genuine 16.16 quantities, §1.1.4).
+
+    ⚠ x/y are normalised to SIGNED 32-bit on construction, and that is not cosmetic. Most readers
+    go through `_signed(state.x, 32)`, but the projection reads `state.x` RAW -- so before M14 a
+    state built from `spawn_state` (signed, e.g. -27262976) and the mathematically equal state
+    built from `step_sim`'s masked output (0xFE600000) rendered DIFFERENT FRAMES. Nothing had ever
+    composed the two: every gate fed `SimState(vx << 16, ...)` by hand. M14's multi-frame gate is
+    the first code to feed a simulated state back into the renderer, and it found this immediately
+    -- 14,845 of 16,000 pixels, with the fj side blameless. Normalising here fixes it once for
+    every caller rather than at each of the two raw reads.
+    """
+    x: int          # player position, 16.16 signed
+    y: int          # 16.16 signed
+    angle: int      # 32-bit BAM (modular: NOT normalised, 0 and 2**32 are the same angle anyway)
     level: str      # current level lump name
+
+    def __post_init__(self):
+        object.__setattr__(self, "x", _signed(self.x, 32))
+        object.__setattr__(self, "y", _signed(self.y, 32))
+        object.__setattr__(self, "angle", self.angle & 0xFFFFFFFF)
 
 
 @dataclass(frozen=True)
@@ -553,10 +575,150 @@ class ReferenceModel:
         bottomfrac = centeryfrac - _signed(fixed_mul(worldbottom, scale, 8, 4), 32)
         return topfrac >> 16, bottomfrac >> 16
 
+    # ── M14-d: line collision ──────────────────────────────────────────────────────────────────
+    #
+    # DOOM's P_CheckPosition, minus the blockmap. The blockmap exists to avoid testing every line;
+    # here the whole line list is tested and the per-line bbox reject does that job instead -- E1M1
+    # has ~1.5k linedefs and a reject is four compares, which is cheap next to a ~34M-op frame and
+    # spares both mirrors an entire baked acceleration structure they would have to agree on.
+    #
+    # Everything is 16.16, exactly as DOOM's fixed_t is, so the fj mirror is the same arithmetic on
+    # the same widths. Vertices are int16 map units, widened on read.
+
+    @staticmethod
+    def point_on_line_side(x: int, y: int, v1x: int, v1y: int, v2x: int, v2y: int) -> int:
+        """P_PointOnLineSide: 0 = front/right of v1->v2, 1 = back/left. `x`/`y` are 16.16; the
+        vertices are 16.16 too. The axis-aligned shortcuts are DOOM's and are not an optimisation
+        that can be dropped -- they decide the `<=` boundary cases differently from the cross
+        product, so a mirror without them disagrees exactly on the lines a player hugs."""
+        dx_l, dy_l = v2x - v1x, v2y - v1y
+        if dx_l == 0:
+            return int(dy_l > 0) if x <= v1x else int(dy_l < 0)
+        if dy_l == 0:
+            return int(dx_l < 0) if y <= v1y else int(dx_l > 0)
+        left = fixed_mul(_signed(dy_l >> 16, 32) & 0xFFFFFFFF, (x - v1x) & 0xFFFFFFFF, 8, 4)
+        right = fixed_mul((y - v1y) & 0xFFFFFFFF, _signed(dx_l >> 16, 32) & 0xFFFFFFFF, 8, 4)
+        return 0 if _signed(right, 32) < _signed(left, 32) else 1
+
+    def box_on_line_side(self, box, v1x, v1y, v2x, v2y) -> int:
+        """P_BoxOnLineSide: the side the whole box is on, or -1 when the box straddles the line.
+        `box` is (top, bottom, left, right) in 16.16 -- DOOM's BOXTOP/BOXBOTTOM/BOXLEFT/BOXRIGHT
+        order. Only a straddling box can be blocked by the line."""
+        top, bottom, left, right = box
+        dx_l, dy_l = v2x - v1x, v2y - v1y
+        if dy_l == 0:                                            # ST_HORIZONTAL
+            p1, p2 = int(top > v1y), int(bottom > v1y)
+            if dx_l < 0:
+                p1 ^= 1
+                p2 ^= 1
+        elif dx_l == 0:                                          # ST_VERTICAL
+            p1, p2 = int(right < v1x), int(left < v1x)
+            if dy_l < 0:
+                p1 ^= 1
+                p2 ^= 1
+        elif (dy_l > 0) == (dx_l > 0):                            # ST_POSITIVE: test the \ diagonal
+            p1 = self.point_on_line_side(left, top, v1x, v1y, v2x, v2y)
+            p2 = self.point_on_line_side(right, bottom, v1x, v1y, v2x, v2y)
+        else:                                                     # ST_NEGATIVE: the / diagonal
+            p1 = self.point_on_line_side(right, top, v1x, v1y, v2x, v2y)
+            p2 = self.point_on_line_side(left, bottom, v1x, v1y, v2x, v2y)
+        return p1 if p1 == p2 else -1
+
+    @staticmethod
+    def line_opening(fs, bs):
+        """P_LineOpening for a two-sided line: (opentop, openbottom, lowfloor), map units. The
+        opening is what a thing has to fit through; `lowfloor` is the drop the far side offers."""
+        return (min(fs.ceil_h, bs.ceil_h), max(fs.floor_h, bs.floor_h),
+                min(fs.floor_h, bs.floor_h))
+
+    def check_position(self, scene, x: int, y: int, *, radius: int = PLAYER_RADIUS):
+        """P_CheckPosition: may a thing of `radius` stand at (x, y)? Returns
+        `(ok, floorz, ceilingz)` in MAP UNITS -- `ok` False means a line refuses the position
+        outright, and the two heights are the opening the touched lines leave.
+
+        The rules, in DOOM's order, are: bbox reject; `P_BoxOnLineSide != -1` reject (the box is
+        wholly on one side, so the line is not hit); then a hit line blocks if it is one-sided or
+        carries ML_BLOCKING, and otherwise narrows floorz/ceilingz to its opening.
+
+        ⚠ NOT IMPLEMENTED, deliberately and permissively: the `tmfloorz - tmdropoffz > 24` "don't
+        stand over a dropoff" test. It only ever REFUSES moves, so leaving it out cannot block a
+        move DOOM would allow -- it can only allow one DOOM would refuse (walking off a tall
+        ledge). Both mirrors omit it identically, so it is a stated behaviour difference from
+        vanilla and not a divergence between the two halves of this project."""
+        cmap = scene.cmap
+        lds = scene.map_wad.linedefs(scene.mapname)
+        sds = scene.map_wad.sidedefs(scene.mapname)
+        secs = scene.map_wad.sectors(scene.mapname)
+        box = (y + radius, y - radius, x - radius, x + radius)   # top, bottom, left, right
+        # P_CheckPosition seeds the opening from the SUBSECTOR the position lands in, before any
+        # line is looked at. Without that seed a position with no line near it is unconstrained,
+        # and the far outside of the map -- where no bbox overlaps -- reads as open space. The BSP
+        # partitions the whole plane, so there is always a subsector to ask; outside the level it
+        # is a solid one and its zero opening does the refusing.
+        _sec = self._seg_sector(lds, sds, secs,
+                                cmap.segs[cmap.subsectors[
+                                    self.point_in_subsector(cmap, x >> 16, y >> 16)].firstseg])
+        floorz, ceilingz = _sec.floor_h, _sec.ceil_h
+        for ld in lds:
+            v1x, v1y = cmap.vertexes[ld.v1]
+            v2x, v2y = cmap.vertexes[ld.v2]
+            v1x, v1y, v2x, v2y = v1x << 16, v1y << 16, v2x << 16, v2y << 16
+            if (box[3] <= min(v1x, v2x) or box[2] >= max(v1x, v2x)
+                    or box[0] <= min(v1y, v2y) or box[1] >= max(v1y, v2y)):
+                continue                                          # bbox reject
+            if self.box_on_line_side(box, v1x, v1y, v2x, v2y) != -1:
+                continue                                          # wholly on one side: not hit
+            if ld.back == -1:
+                return False, floorz, ceilingz                    # one-sided: a wall
+            if ld.flags & ML_BLOCKING:
+                return False, floorz, ceilingz
+            opentop, openbottom, _low = self.line_opening(
+                secs[sds[ld.front].sector], secs[sds[ld.back].sector])
+            floorz = max(floorz, openbottom)
+            ceilingz = min(ceilingz, opentop)
+        return True, floorz, ceilingz
+
+    def try_move(self, scene, x: int, y: int, nx: int, ny: int, *,
+                 radius: int = PLAYER_RADIUS, height: int = PLAYER_HEIGHT) -> tuple:
+        """P_TryMove: is (nx, ny) a legal position to move to from (x, y)? All 16.16.
+
+        On top of `check_position`, a position is refused when the opening is shorter than the
+        thing (`ceilingz - floorz < height`) or the floor is more than MAX_STEP above where the
+        thing stands now -- DOOM's "too big a step up". The current floor comes from the position
+        being left, so a move is judged against the step it actually takes."""
+        ok, floorz, ceilingz = self.check_position(scene, nx, ny, radius=radius)
+        if not ok:
+            return False
+        if (ceilingz - floorz) << 16 < height:
+            return False
+        _here_ok, here_floor, _here_ceil = self.check_position(scene, x, y, radius=radius)
+        if (floorz - here_floor) << 16 > MAX_STEP:
+            return False
+        return True
+
+    def move_with_collision(self, scene, x: int, y: int, dx: int, dy: int, **kw) -> tuple:
+        """The blocked-move policy: try the whole step, then the two axis-separated halves.
+
+        ⚠ This is NOT DOOM's `P_SlideMove`, which projects the residual momentum along the wall.
+        Sliding needs a fixed-point divide per blocking line and a second full P_TryMove pass; the
+        axis retry gets the property that matters for a walkable level -- you do not stick to a
+        wall you approach at an angle -- with three position tests and no new arithmetic. Both
+        mirrors implement THIS policy, so it is a stated difference from vanilla, not a drift.
+        Returns the (possibly unchanged) 16.16 position."""
+        M = 0xFFFFFFFF
+        for cand in (((x + dx) & M, (y + dy) & M), ((x + dx) & M, y), (x, (y + dy) & M)):
+            if cand == (x, y):
+                continue
+            if self.try_move(scene, x, y, _signed(cand[0], 32), _signed(cand[1], 32), **kw):
+                return cand
+        return x, y
+
     # ── sim ──
-    def step_sim(self, state: SimState, keys: dict) -> SimState:
-        """One tic: turn then collision-free move (collision is M14). FixedMul(move, cos/sin) in 16.16
-        (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path exactly; angle wraps mod 2**32."""
+    def step_sim(self, state: SimState, keys: dict, *, scene=None) -> SimState:
+        """One tic: turn, then move -- against the level's lines when `scene` is given (M14-d), and
+        freely when it is not (the M9 collision-free sim every earlier gate speaks).
+        FixedMul(move, cos/sin) in 16.16 (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path
+        exactly; angle wraps mod 2**32."""
         angle = state.angle
         if keys.get("turn_left"):
             angle = (angle + ANGLE_TURN) & 0xFFFFFFFF
@@ -572,8 +734,13 @@ class ReferenceModel:
         x, y = state.x, state.y
         if move:
             m = move & 0xFFFFFFFF  # two's-complement; fixed_mul interprets the sign (n=8)
-            x = (x + fixed_mul(m, self.read_cos(angle), 8, 4)) & 0xFFFFFFFF
-            y = (y + fixed_mul(m, self.read_sin(angle), 8, 4)) & 0xFFFFFFFF
+            dx = fixed_mul(m, self.read_cos(angle), 8, 4)
+            dy = fixed_mul(m, self.read_sin(angle), 8, 4)
+            if scene is None:
+                x, y = (x + dx) & 0xFFFFFFFF, (y + dy) & 0xFFFFFFFF
+            else:
+                x, y = self.move_with_collision(scene, _signed(x, 32), _signed(y, 32), dx, dy)
+                x, y = x & 0xFFFFFFFF, y & 0xFFFFFFFF
         return replace(state, x=x, y=y, angle=angle)
 
     def render_textured_column(self, texels, texheight, texcol, colormap, light, *,

@@ -440,3 +440,45 @@ ns sim {
       bl_done:
     }
 }
+
+ns sim {
+    // sim.thing_pass — every thing bound to `cur_ss`, in ascending index order.
+    //
+    // This is what a leaf runs instead of the baked call sites `subsector_action` emits today. The
+    // leaf itself shrinks to two lines (set cur_ss, fcall this), so the intricate part of
+    // subsector_action is left alone and only the SOURCE of the sprite registers changes.
+    //
+    // `tstop` is re-tested every iteration, not once: `thing_leaf` can set it, and the static path
+    // gates each baked call site individually. It is monotone, so this only ever stops earlier.
+    def thing_pass throw, n_th, thpos, ssflr, ssnss, sslgt, sprlt, ltbase \
+            @ body, loop, run, alive, done, h, hp, hq, c255 \
+            < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf {
+        // the sp_* cells belong to thing_load, which is what writes them -- declaring an
+        // extern this macro does not itself reference is an error
+        ;body
+      h:    hex.vec w/4
+      hp:   hex.vec w/4
+      hq:   hex.vec w/4
+      c255: hex.vec w/4
+      body:
+        hex.set w/4, hq, sshead
+        hex.ptr_index hp, hq, cur_ss
+        hex.zero w/4, h                        // read_byte fills only 2 nibbles; the rest must be
+        hex.read_byte h, hp                    // cleared or the sentinel compare never matches
+      loop:
+        hex.set w/4, c255, 0xFF
+        hex.cmp w/4, h, c255, run, done, run
+      run:
+        hex.if0 1, tstop, alive
+        ;done
+      alive:
+        .thing_load throw, n_th, thpos, ssflr, ssnss, sslgt, sprlt, ltbase, h, cur_ss
+        stl.fcall thing_leaf, thing_ret
+        hex.set w/4, hq, thnext
+        hex.ptr_index hp, hq, h                // h is consumed as the INDEX before being reloaded
+        hex.zero w/4, h
+        hex.read_byte h, hp
+        ;loop
+      done:
+    }
+}

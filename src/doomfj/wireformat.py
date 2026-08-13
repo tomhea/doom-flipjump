@@ -103,7 +103,37 @@ def decode_state(payload: bytes) -> tuple:
 # nothing and destroys nothing), so it bakes; and `sp_z`/`sp_lt` are derived from the leaf the thing
 # binds to, which only fj knows. See `doomfj.things`.
 
-THING_CMD = 0x11        # the present-protocol command carrying the thing table back out
+THING_CMD = 0x11        # the present-protocol command carrying the thing BINDINGS back out
+
+# M14-e perf: the thing->subsector binding round-trips too, and for the same reason the position
+# does -- it is world state, and fj has none between frames. Re-locating all 251 things every frame
+# cost 27.2M ops (73% of everything M14-e added); with the binding fed back, only what the host
+# actually MOVED pays, which is what DOOM does (P_SetThingPosition re-binds on a move, not a frame).
+#
+# ⚠ The two directions are NOT the same width, deliberately:
+#   IN   2 bytes/thing -- `hex.input 2, thss + i*16*dw` fills the 4 nibbles the value occupies.
+#   OUT  4 bytes/thing -- `stream.emit_bytes4` is the emitter this protocol has; the high two
+#        bytes are always zero because nothing ever writes them.
+# The slot is 16 nibbles wide for a 4-nibble value because that is the ONE pointer accessor this
+# codebase has proven on a wire-filled array (index*16 via `shl_hex 1`, then read_hex/write_hex).
+# See sim.bind_things and scratchpad/_ptrunit2.py.
+BINDING_DIRTY = 0xFFFF          # "I moved this one -- re-locate it". No real subsector index can be this.
+BINDING_IN_BYTES = 2
+BINDING_OUT_BYTES = 4
+
+
+def encode_bindings(ss_list) -> bytes:
+    """`[ss, ...]` (or BINDING_DIRTY) -> the wire's binding block, 2 bytes each, little-endian."""
+    return b"".join(struct.pack("<H", s & 0xFFFF) for s in ss_list)
+
+
+def decode_bindings(payload: bytes) -> list:
+    """The THING_CMD payload -> `[ss, ...]`. 4 bytes each on the way out (see above)."""
+    if len(payload) % BINDING_OUT_BYTES:
+        raise ValueError(f"binding block is {len(payload)} bytes, not a multiple of "
+                         f"{BINDING_OUT_BYTES}")
+    return [struct.unpack("<I", payload[i:i + 4])[0]
+            for i in range(0, len(payload), BINDING_OUT_BYTES)]
 
 
 def encode_things(positions) -> bytes:

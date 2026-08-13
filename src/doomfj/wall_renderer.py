@@ -25,6 +25,7 @@ from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS)
 from doomfj.mapcompiler import build_blockmap
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
+                               THING_CMD as WIRE_THING_CMD,
                                KEY_FORWARD_MASK, KEY_BACK_MASK,
                                KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK)
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
@@ -264,6 +265,9 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     assert nt < 0xFF, f"{mapname} has {nt} drawable things; the byte linked list tops out at 254"
     decls = ["cur_ss: hex.vec w/4", "tp_ret: ;0",
              f"sshead: hex.vec {2 * nss}", f"thnext: hex.vec {2 * nt}",
+             # 16 nibbles for a 4-nibble value: the one pointer accessor proven on a
+             # wire-filled array strides by index*16 (see sim.bind_things)
+             f"thss_rt: hex.vec {16 * nt}",
              *point_location_decls()]
     return text, generate_point_location_fj(cmap), decls, nt, nss
 
@@ -1383,7 +1387,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # into 16 nibbles at a COMPILE-TIME offset -- no per-byte writes, ~148k ops for all 251.
         # This has to precede the walk: `subsector_action` reads the lists the bind writes.
         *([f"rep({_MT_NT}, i) hex.input 8, thpos_rt + i*16*dw",
-           f"sim.bind_things thpos_rt, {_MT_NT}, {_MT_NSS}"] if moving_things else []),
+           # M14-e perf: last frame's thing->subsector bindings. Re-locating all of them every frame
+           # cost 27.2M ops -- 73% of what M14-e added -- and it was only necessary because fj has
+           # no state between frames. The binding is world state like the position, so it
+           # round-trips, and `bind_things` locates ONLY what the host marked dirty. 2 bytes in
+           # (the value's 4 nibbles), 4 bytes out (emit_bytes4 is the emitter this protocol has).
+           f"rep({_MT_NT}, i) hex.input 2, thss_rt + i*16*dw",
+           f"sim.bind_things thpos_rt, thss_rt, {_MT_NT}, {_MT_NSS}",
+           f"stl.output_char {WIRE_THING_CMD}",
+           f"rep({_MT_NT}, i) stream.emit_bytes4 thss_rt + i*16*dw"] if moving_things else []),
         # M13-absmul: per-frame |viewx|/|viewy| + sign flags. fixed_mul_lo's cost is one schoolbook
         # row per nonzero nibble of the MULTIPLIER, and a negative 16.16 view coord sign-extends to
         # a dense pattern -- so the per-seg affine cull multiplies by these sparse abs values and

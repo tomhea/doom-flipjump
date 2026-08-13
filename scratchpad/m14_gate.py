@@ -35,7 +35,8 @@ from doomfj.harness import W
 from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer, write_program_files
-from doomfj.wireformat import encode_feed, encode_feed_mapunits, encode_things, keys_dict
+from doomfj.wireformat import (BINDING_DIRTY, encode_bindings, encode_feed,
+                              encode_feed_mapunits, encode_things, keys_dict)
 from tests.fj.stream_screen import StreamScreen
 
 SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
@@ -89,21 +90,39 @@ SPAWN_POS = [(t.x, t.y) for t in DRAWABLE]
 # ⚠ WHOLE MAP UNITS. fj carries a thing at full 16.16 but the oracle's override takes the integer
 # `t.x`/`t.y` a WAD thing has, so a fractional thing would be comparing two different worlds. The
 # player is the fractional one (M14-c); things move on the grid until the oracle carries 16.16 too.
-THING_DRIFT = 4                                  # map units per tic, every thing, +x
+THING_DRIFT = 4                                  # map units per tic, +x
+# ⚠ Only a SUBSET moves, and that is deliberate. If everything moves every tic, every thing is
+# dirty every tic and the binding cache is never exercised -- the gate would pass a build whose
+# cache path is broken. DOOM is the same shape: monsters move, decor does not.
+# ⚠ ...and they must be things the player can SEE. `i % 8 == 0` picked 31 things spread over the
+# whole map, none of them on screen from the spawn trajectory: 22 leaf changes, and the drift
+# changed the frame on 0 of 10 tics. The gate caught it and failed, which is the entire point of
+# checking pixels as well as bindings. So: the things NEAREST the spawn point.
+MOVERS = sorted(range(len(SPAWN_POS)),
+                key=lambda i: (SPAWN_POS[i][0] - spx) ** 2 + (SPAWN_POS[i][1] - spy) ** 2)[:30]
 
 
 def thing_positions(tic):
     """Where every drawable thing stands on tic `tic` -- the host holds this between frames exactly
     as it holds the player's state, because the program is a pure function of stdin (section 2)."""
-    return [(x + THING_DRIFT * tic, y) for x, y in SPAWN_POS]
+    m = set(MOVERS)
+    return [(x + THING_DRIFT * tic, y) if i in m else (x, y)
+            for i, (x, y) in enumerate(SPAWN_POS)]
 
 
-def feed(state, keys, positions=None):
-    """The wire: the player's state, then the thing block if this build reads one."""
+SPAWN_BINDINGS = [rm.point_in_subsector(scene.cmap, x, y) for x, y in SPAWN_POS]
+
+
+def feed(state, keys, positions=None, bindings=None):
+    """The wire: the player's state, the thing positions, then last frame's BINDINGS.
+
+    `bindings=None` means all-dirty -- a cold start, where fj point-locates all 251. Passing the
+    previous frame's echo is the steady state, where it locates only what the host marked dirty."""
     b = encode_feed(*state, keys)
     if MOVING:
         b += encode_things([(x << 16, y << 16) for x, y in
                             (SPAWN_POS if positions is None else positions)])
+        b += encode_bindings([BINDING_DIRTY] * len(SPAWN_POS) if bindings is None else bindings)
     return b
 
 
@@ -132,7 +151,7 @@ def build():
 
 
 def run(fjm, feed):
-    scr = StreamScreen(stdin=feed)
+    scr = StreamScreen(stdin=feed, n_things=len(SPAWN_POS) if MOVING else 0)
     term = fj.run(fjm, io_device=scr, print_time=False, print_termination=False,
                   flat_max_words=1 << 26)
     return scr, term
@@ -146,11 +165,24 @@ def phase1(fjm):
     print("\nPHASE 1 -- still (keys=0), against deg_gate's viewpoints", flush=True)
     for i, (vx, vy, va) in enumerate(VPS):
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene, **RENDER_KW)
-        scr, term = run(fjm, feed((vx << 16, vy << 16, va), 0))
+        scr, term = run(fjm, feed((vx << 16, vy << 16, va), 0,
+                                  bindings=SPAWN_BINDINGS))
         same = bytes(scr.pixel_indices) == bytes(want)
         diff = sum(1 for a, b in zip(bytes(scr.pixel_indices), bytes(want)) if a != b)
         echoed = scr.state == (vx << 16, vy << 16, va)
         ok &= same and echoed
+        if MOVING:
+            # ⚠ THE CACHE CONTROL. A warm frame must be pixel-identical to a cold one, and the
+            # bindings it echoes must equal the ones it was fed -- otherwise the cache is changing
+            # what gets drawn, which is the one thing it must never do.
+            cold, cterm = run(fjm, feed((vx << 16, vy << 16, va), 0, bindings=None))
+            id_px = bytes(cold.pixel_indices) == bytes(scr.pixel_indices)
+            id_bind = cold.bindings == SPAWN_BINDINGS and scr.bindings == SPAWN_BINDINGS
+            ok &= id_px and id_bind
+            print(f"    cold {cterm.op_counter:,} ops vs warm {term.op_counter:,} "
+                  f"({term.op_counter - cterm.op_counter:+,})  "
+                  f"{'SAME PIXELS' if id_px else '!! COLD AND WARM DIFFER'}  "
+                  f"{'bindings agree' if id_bind else '!! BINDINGS WRONG'}", flush=True)
         print(f"  ({vx},{vy},{va:#x}): {term.op_counter:,} ops "
               f"(dec wire {DEC_OPS[i]:,}, {term.op_counter - DEC_OPS[i]:+,})  "
               f"{'BYTE-EXACT' if same else f'!! {diff} px DIFFER'}  "
@@ -165,18 +197,24 @@ def phase2(fjm, tics):
     state = (_signed(sp.x, 32), _signed(sp.y, 32), sp.angle)
     want_state = state
     blocked_tics = 0
-    leaf_changes = moved_frames = 0
+    leaf_changes = moved_frames = bind_errors = 0
+    binds = None
     for tic in range(tics):
         keys = SCRIPT[tic % len(SCRIPT)]
         pos = thing_positions(tic) if MOVING else None
         if MOVING:
+            # what the host hands back: last frame's echo, with everything it MOVED marked dirty
+            if binds is None:
+                binds = list(SPAWN_BINDINGS)
+            for i in MOVERS:
+                binds[i] = BINDING_DIRTY
             # ⚠ THE CONTROL, and it is two-sided. Counting leaf changes alone would pass a build
             # that re-binds correctly and never draws the result; counting changed pixels alone
             # would pass one that moves sprites without re-binding them. Both must happen.
             leaf_changes += sum(rm.point_in_subsector(scene.cmap, x, y)
                                 != rm.point_in_subsector(scene.cmap, sx, sy)
                                 for (x, y), (sx, sy) in zip(pos, SPAWN_POS))
-        scr, term = run(fjm, feed(state, keys, pos))
+        scr, term = run(fjm, feed(state, keys, pos, binds))
         # the oracle takes the same tic, then renders from the state that tic produced
         _prev = SimState(want_state[0] & 0xFFFFFFFF, want_state[1] & 0xFFFFFFFF,
                          want_state[2], "E1M1")
@@ -203,6 +241,16 @@ def phase2(fjm, tics):
         if not (same and st_ok):
             print("  -- stopping: once the trajectories part, later tics compare nothing useful")
             break
+        if MOVING:
+            # ⚠ the echoed bindings must equal what the ORACLE derives from the same positions --
+            # the independent check that makes a wrong cached binding impossible to hide
+            want_b = [rm.point_in_subsector(scene.cmap, x, y) for x, y in pos]
+            if scr.bindings != want_b:
+                bind_errors += 1
+                n = sum(1 for a, b in zip(scr.bindings or [], want_b) if a != b)
+                print(f"  !! {n} BINDINGS disagree with the oracle on tic {tic}")
+                ok = False
+            binds = list(scr.bindings)             # the relay, exactly as the host would do it
         state = scr.state                          # the relay: this tic's output is next tic's input
     if COLLIDE:
         # ⚠ THE CONTROL. With collision on BOTH sides, a script that never hits a wall agrees no

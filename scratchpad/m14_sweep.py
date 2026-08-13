@@ -28,7 +28,8 @@ from doomfj.config import Config                                          # noqa
 from doomfj.fastrun import FjmRunner                                      # noqa: E402
 from doomfj.reference_model import ReferenceModel                         # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
-from doomfj.wireformat import encode_feed_mapunits, encode_things         # noqa: E402
+from doomfj.wireformat import (encode_bindings, encode_feed_mapunits,   # noqa: E402
+                              encode_things)
 from nb_validate import true_sector, _near_any_line                       # noqa: E402
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
@@ -37,6 +38,8 @@ ap.add_argument("fjm")
 ap.add_argument("--step", type=int, default=256)
 ap.add_argument("--angles", type=int, default=4)
 ap.add_argument("--things", action="store_true", help="the build reads a runtime thing block")
+ap.add_argument("--cold", action="store_true",
+                help="feed all-dirty bindings (a cold start) instead of the steady state")
 ap.add_argument("--csv", default=None)
 ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
 args = ap.parse_args()
@@ -58,13 +61,24 @@ print(f"{len(pts)} walkable grid points x {args.angles} angles", flush=True)
 
 # the SPAWN thing block -- the same positions the baked path had, so this sweep measures the cost
 # of the runtime table and not the cost of having moved anything
+# ⚠ and the WARM bindings with it. A median frame during play has almost nothing moving, so the
+# steady state is what the median should measure; feeding all-dirty would measure a cold start,
+# which happens once. `--cold` measures that instead, and both are worth reporting.
 THINGS = b""
+NTH = 0
 if args.things:
+    from doomfj.mapcompiler import bake_bsp
     art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
     rm = ReferenceModel(Config())
+    cmap = bake_bsp(w, M)
     drawable = [t for t in w.things(M) if rm.sprite_art(art, t.type, {}) is not None]
     THINGS = encode_things([(t.x << 16, t.y << 16) for t in drawable])
-    print(f"thing block: {len(drawable)} things, {len(THINGS)} bytes", flush=True)
+    binds = ([0xFFFF] * len(drawable) if args.cold
+             else [rm.point_in_subsector(cmap, t.x, t.y) for t in drawable])
+    THINGS += encode_bindings(binds)
+    NTH = len(drawable)
+    print(f"thing block: {len(drawable)} things, {len(THINGS)} bytes "
+          f"({'COLD -- all dirty' if args.cold else 'WARM -- steady state'})", flush=True)
 
 r = FjmRunner(str(ROOT / args.fjm) if not Path(args.fjm).is_absolute() else args.fjm)
 rows, allops = [], []
@@ -72,7 +86,8 @@ worst = (0, None)
 for i, (x, y) in enumerate(pts):
     for k in range(args.angles):
         va = (k << 30) & 0xFFFFFFFF
-        ops = r.run(StreamScreen(stdin=encode_feed_mapunits(x, y, va) + THINGS))
+        ops = r.run(StreamScreen(stdin=encode_feed_mapunits(x, y, va) + THINGS,
+                                 n_things=NTH))
         allops.append(ops)
         rows.append((x, y, va, ops))
         if ops > worst[0]:

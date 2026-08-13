@@ -53,11 +53,12 @@ RASTER_TAG_END = 0xFF
 from doomfj.reference_model import COLORMAP_LIGHTS
 # M14-b: the state block the program echoes back is decoded through the wire's SSOT --
 # the device must not open-code a byte order the emitter could change under it.
-from doomfj.wireformat import STATE_CMD as CMD_STATE, STATE_BYTES, decode_state
+from doomfj.wireformat import (STATE_CMD as CMD_STATE, STATE_BYTES, decode_state,
+                              THING_CMD as CMD_THINGS, BINDING_OUT_BYTES, decode_bindings)
 
 
 class StreamScreen(InMemoryScreen):
-    def __init__(self, *, frames_dir=None, stdin: bytes = b""):
+    def __init__(self, *, frames_dir=None, stdin: bytes = b"", n_things: int = 0):
         super().__init__(frames_dir=frames_dir)
         self._inp = stdin                          # optional stdin feed (mirrors tests/fj/test_wall_render._ScreenWithInput)
         self._in_byte = 0
@@ -96,6 +97,10 @@ class StreamScreen(InMemoryScreen):
         # M14-b: the round-tripped world state, as (x16, y16, angle). None until the
         # program emits a STATE_CMD block -- a dec-wire binary never does.
         self.state = None
+        # M14-e perf: the thing->subsector bindings coming back, so the host can relay them and
+        # fj re-locates only what moved. Needs n_things to know the block's length.
+        self.bindings = None
+        self._n_things = n_things
         self._proj_rm = None
 
     # ---------------------------------------------------------------- input stream (optional)
@@ -134,11 +139,16 @@ class StreamScreen(InMemoryScreen):
             return 1
         if command == CMD_STATE:                    # M14-b: [cmd][x:4][y:4][angle:4]
             return 1 + STATE_BYTES
+        if command == CMD_THINGS:                   # M14-e: [cmd][ss:4] x n_things
+            return 1 + BINDING_OUT_BYTES * self._n_things
         return super()._command_length(command)
 
     def _execute_command(self, command: int, payload) -> None:
         if command == CMD_STATE:                       # M14-b: the world state coming back out
             self.state = decode_state(bytes(payload))
+            return
+        if command == CMD_THINGS:                      # M14-e: the thing bindings coming back out
+            self.bindings = decode_bindings(bytes(payload))
             return
         if command == 0x01:
             self._init_screen(self._u16(payload, 0), self._u16(payload, 2), payload[4], self._u16(payload, 5))

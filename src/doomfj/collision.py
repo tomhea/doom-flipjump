@@ -621,12 +621,15 @@ def generate_point_location_fj(cmap, *, label="ptloc") -> str:
                     f"    hex.if0 10, {label}p, {front}",                  # == 0 -> front (on the line)
                     f"    ;{back}"]
     for s in range(len(cmap.subsectors)):
-        out += [f"  {label}_l{s}:", f"    hex.set 4, ptss, {s}", f"    stl.fret {label}_ret"]
+        out += [f"  {label}_l{s}:", f"    hex.set w/4, ptss, {s}", f"    stl.fret {label}_ret"]
     return "\n".join(out) + "\n"
 
 
 def point_location_decls(label="ptloc") -> list:
-    return ["ptx: hex.vec 10", "pty: hex.vec 10", "ptss: hex.vec 4",
+    # ⚠ ptss is w/4 wide, not 4: `hex.ptr_index` does `mov w/4` OUT of its index register, so a
+    # narrower cell drags its neighbour in and yields a wild pointer (fj-lessons: an n-nibble
+    # op reads n nibbles of its SOURCE).
+    return ["ptx: hex.vec 10", "pty: hex.vec 10", "ptss: hex.vec w/4",
             f"{label}_ret: hex.vec w/4", f"{label}k: hex.vec 10",
             f"{label}dx: hex.vec 10", f"{label}dy: hex.vec 10",
             f"{label}p: hex.vec 10", f"{label}q: hex.vec 10"]

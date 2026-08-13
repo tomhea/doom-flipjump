@@ -404,12 +404,26 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
    * `sim.thing_load` — the register load that replaces the baked block: ALL 13 FIELDS MATCH;
    * `render_wall_frame(thing_positions=…)` and `wireformat.encode_things` / `decode_things`.
 
-  **WHAT IS NOT** — `sim.bind_things`, parked unproven in `scratchpad/m14e_bind_draft.fj` with its
-  symptom written down: the macro never returns, dying within a few ops of entry (a marker before
-  the call prints, the one after does not, and the run ends at ~5,064 ops — about
-  `stl.startup_and_init_all` alone), so neither loop body runs. Suspect the preamble, not the
-  pointer walks. `scratchpad/_bind.py` drives it and diffs the per-leaf lists against
-  `point_in_subsector`. After that: the `subsector_action` swap (two lines) and the gate.
+  **WHAT IS NOT** — `sim.bind_things`, parked in `scratchpad/m14e_bind_draft.fj`. Chasing it turned
+  up **two real fj defects**, both isolated in `scratchpad/_ptrtest.py` (20 lines, seconds to
+  assemble) and worth knowing before writing any more pointer code:
+
+   1. ⚠ **`hex.ptr_index dst, ptr, index` does `.mov w/4, dst, index`** — it reads EIGHT nibbles out
+      of the index register. A `hex.vec 4` index drags its neighbour in, yields a wild pointer, and
+      the write through it KILLS THE PROGRAM. Every index handed to `ptr_index` must be `hex.vec
+      w/4`. `collision.point_location_decls` is fixed accordingly (`ptss` is now w/4). This is the
+      repo's own "an n-nibble op reads n nibbles of its SOURCE" in its nastiest form: the symptom is
+      a dead program, not a wrong value.
+   2. ⚠ **`hex.write_byte ptr, src` (two args) is the partner of `hex.read_byte dst, ptr`.** The
+      three-arg `hex.write_hex n, ptr, src` is a different overload and wrote one nibble: 0xAB in,
+      0x0b back.
+
+  With both fixed the clear loop runs (682 leaves, ~1.65M ops) and the bind loop enters; the run
+  then does not finish inside 40 minutes. **Check the HARNESS first:** `scratchpad/_bind.py`'s dump
+  loop read a byte into an 8-nibble cell (`read_byte` fills only 2, leaving the top stale) and
+  compared all 8 against the 0xFF sentinel, so its inner walk could never terminate. That is fixed;
+  re-run before suspecting the macro. After that: the `subsector_action` swap (two lines), the wire
+  extension, and the gate.
 
   Then the list itself: a LINKED list (`thing_next[t]`, `ss_head[ss]`) rather than per-leaf arrays —
   O(1) to append, no cap, and therefore no overflow budget that could silently drop a thing (the

@@ -1,16 +1,24 @@
 // M14-e WORK IN PROGRESS -- NOT PROVEN, parked here rather than in src/ (CLAUDE.md: scratchpad is
-// where unproven experiments live).
+// where unproven experiments live; everything in src/fj/sim.fj has a passing test behind it).
 //
-// sim.bind_things rebuilds the per-leaf thing lists each frame: clear sshead[] to the 0xFF
-// sentinel, then for t = nthings-1 downto 0 locate the thing's subsector with ptloc_walk and
-// prepend it. Descending insertion makes traversal ascending, which is today's things_by_ss order.
+// TWO REAL fj DEFECTS WERE FOUND AND FIXED HERE, both isolated in scratchpad/_ptrtest.py (20 lines,
+// assembles in seconds) after the macro died within a few ops of entry:
 //
-// ⚠ SYMPTOM WHERE I LEFT IT: the macro never returns. A marker printed immediately BEFORE the call
-// appears; the one immediately after does not, and the run ends at ~5,064 ops -- about the cost of
-// stl.startup_and_init_all alone, so it dies within a few ops of entry, before even the clear
-// loop's first iteration. Neither loop body executes. Suspect the preamble
-// (`;body` / @-local data / `body:` / the first hex.cmp), not the pointer walks further down.
-// scratchpad/_bind.py drives it and diffs the per-leaf lists against point_in_subsector.
+//   1. `hex.ptr_index dst, ptr, index` does `.mov w/4, dst, index` -- it reads EIGHT nibbles out of
+//      the index register. Passing a `hex.vec 4` index drags the neighbouring cell in and yields a
+//      wild pointer, and the write through it kills the program. Every index handed to ptr_index
+//      must be `hex.vec w/4`. This is the repo's own lesson -- an n-nibble op reads n nibbles of
+//      its SOURCE -- in its nastiest form, because the symptom is a dead program, not a bad value.
+//   2. `hex.write_byte ptr, src` (TWO args) is the partner of `hex.read_byte dst, ptr`. The
+//      three-arg `hex.write_hex n, ptr, src` is a different overload and wrote only one nibble:
+//      0xAB went in, 0x0b came back.
+//
+// WHERE IT STANDS: with both fixed the clear loop runs (682 leaves, ~1.65M ops) and the bind loop
+// enters. The run then does not finish inside 40 minutes -- and the first thing to check is the
+// TEST HARNESS, not the macro: scratchpad/_bind.py's dump loop reads a byte into an 8-nibble `dh`
+// (read_byte fills only 2 nibbles, leaving the top stale) and then compares all 8 against the 0xFF
+// sentinel, so its inner walk can never terminate. Zero `dh` before each read, or compare 2
+// nibbles, before suspecting bind_things itself.
 //
 // Everything it depends on IS proven and in src/: sim.thing_load (all 13 fields match the baked
 // constants) and collision.generate_point_location_fj (50/50 vs point_in_subsector).
@@ -32,32 +40,32 @@ ns sim {
     // front-to-back slot each sprite claims bit-identical for a static thing.
     def bind_things thpos, n_th, nthings, nss             @ body, clr, clr_body, clr_done, bl, bl_done,               t, ss, hv, tv, p, q, cst, pos, xn, xp, yn, yp             < ptx, pty, ptss, sshead, thnext, ptloc_walk, ptloc_ret {
         ;body
-      t:   hex.vec 4
-      ss:  hex.vec 4
+      t:   hex.vec w/4                          // ⚠ w/4, not 4: hex.ptr_index does
+      ss:  hex.vec w/4                          // `mov w/4` out of its INDEX register
       hv:  hex.vec 2
       tv:  hex.vec 2
       p:   hex.vec w/4
       q:   hex.vec w/4
-      cst: hex.vec 4
+      cst: hex.vec w/4
       pos: hex.vec 16
       body:
         // every leaf starts empty
         hex.zero 4, ss
-        hex.set 4, cst, nss
+        hex.set w/4, cst, nss
       clr:
-        hex.cmp 4, ss, cst, clr_body, clr_done, clr_done
+        hex.cmp w/4, ss, cst, clr_body, clr_done, clr_done
       clr_body:
         hex.set w/4, q, sshead
         hex.ptr_index p, q, ss
         hex.set 2, hv, 0xFF
-        hex.write_hex 2, p, hv
-        hex.inc 4, ss
+        hex.write_byte p, hv
+        hex.inc w/4, ss
         ;clr
       clr_done:
-        hex.set 4, t, nthings
+        hex.set w/4, t, nthings
       bl:
-        hex.if0 4, t, bl_done
-        hex.dec 4, t                             // descending: nthings-1 .. 0
+        hex.if0 w/4, t, bl_done
+        hex.dec w/4, t                             // descending: nthings-1 .. 0
         // the thing's position -> the 10-nibble signed map coords point location reads
         hex.read_table_packed 8, pos, thpos, n_th, t
         hex.zero 10, ptx
@@ -79,10 +87,10 @@ ns sim {
         hex.read_byte hv, p
         hex.set w/4, q, thnext
         hex.ptr_index q, q, t
-        hex.write_hex 2, q, hv
+        hex.write_byte q, hv
         hex.zero 2, tv
         hex.mov 2, tv, t
-        hex.write_hex 2, p, tv
+        hex.write_byte p, tv
         ;bl
       bl_done:
     }

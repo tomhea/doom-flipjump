@@ -159,7 +159,10 @@ def check_position_ops(bakes, *, radius: int, seed_floor: int, seed_ceil: int) -
     for i, bake in enumerate(bakes):
         out += line_test_ops(bake, f"cl{i}", f"cl{i + 1}")
     out += [f"  cl{len(bakes)}:", "    ;cp_done",
+            # the refusal path restores the SEED openings, matching the oracle -- they are dead on
+            # this path but they are compared, and a partial accumulation is order-dependent
             "  cp_blocked:", "    hex.set 1, cp_ok, 0",
+            _set("cp_floor", seed_floor), _set("cp_ceil", seed_ceil),
             "  cp_done:"]
     return out
 
@@ -318,6 +321,7 @@ def check_position_runtime_ops(grid, *, radius: int, seed_floor: str, seed_ceil:
         out += blockmap_walk_ops(grid, xr, yr, f"bw{i}", label=label)
     out += ["    ;cp_done",
             "  cp_blocked:", "    hex.set 1, cp_ok, 0",
+            f"    hex.mov 8, cp_floor, {seed_floor}", f"    hex.mov 8, cp_ceil, {seed_ceil}",
             "  cp_done:"]
     return out
 
@@ -327,3 +331,125 @@ def check_position_runtime_decls() -> list:
     for i in range(4):
         out += blockmap_walk_decls(f"bw{i}")
     return out
+
+
+# ── the TABLE form: what the 50-minute assemble sent us back to ────────────────────────────────
+#
+# Bake-as-code put a copy of every line's test in every block that lists it: 1,651 copies on E1M1,
+# ~57k lines of macro, and an assemble that did not finish in 50 minutes. The blockmap had already
+# done the expensive part of the job -- it is what makes a runtime loop affordable, because the
+# loop only ever walks the ~35 lines the player's box can touch, not 1,500.
+#
+# So the geometry becomes DATA and the test becomes ONE loop:
+#
+#   block_rows[bi]   -> (offset, count) into block_lines          3 bytes per block
+#   block_lines[k]   -> a linedef index                           2 bytes per (block, line) pair
+#   line_rows[li]    -> v1x, v1y, dx, dy, flags, opentop, openbottom
+#                                                                13 bytes per linedef
+#
+# ~35 lines x 15 bytes read at ~600 ops/byte is ~315k ops per candidate position and ~1M per tic
+# across the three the axis-retry policy tries -- against a ~40M frame. And it assembles in
+# seconds, because it is a data table and a loop rather than 57k unrolled lines.
+
+LINE_ROW_BYTES = (2, 2, 2, 2, 1, 2, 2)      # v1x, v1y, dx, dy, flags, opentop, openbottom
+FLAG_ONE_SIDED = 1 << 0
+FLAG_BLOCKING = 1 << 1
+
+
+def line_rows(lds, verts, secs, sds, ml_blocking: int) -> list:
+    """One row per linedef, in `LINE_ROW_BYTES` order, as SIGNED map units where signed.
+
+    `dx`/`dy` rather than v2: the runtime test needs the direction for the slope switch and the two
+    FixedMul multipliers, and v2 is one add away when the bbox is wanted."""
+    rows = []
+    for ld in lds:
+        v1x, v1y = verts[ld.v1]
+        v2x, v2y = verts[ld.v2]
+        flags = (FLAG_ONE_SIDED if ld.back == -1 else 0) | \
+                (FLAG_BLOCKING if ld.flags & ml_blocking else 0)
+        if ld.back == -1:
+            opentop = openbottom = 0
+        else:
+            fs, bs = secs[sds[ld.front].sector], secs[sds[ld.back].sector]
+            opentop, openbottom = min(fs.ceil_h, bs.ceil_h), max(fs.floor_h, bs.floor_h)
+        rows.append((v1x, v1y, v2x - v1x, v2y - v1y, flags, opentop, openbottom))
+    return rows
+
+
+def block_tables(grid) -> tuple:
+    """`(block_rows, block_lines)` over the DENSE grid — an unoccupied block gets count 0, so the
+    loop needs no membership test, just a count it can be zero."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    dense = {(by - by0) * nbx + (bx - bx0): lines for (bx, by), lines in grid.items()}
+    rows, flat = [], []
+    for bi in range(nbx * nby):
+        lines = dense.get(bi, ())
+        rows.append((len(flat), len(lines)))
+        flat.extend(lines)
+    return rows, flat
+
+
+def check_position_table(rows, blocks, flat, grid, x16: int, y16: int, radius: int,
+                         seed_floor: int, seed_ceil: int):
+    """The table walk, executed in PYTHON — the exact algorithm the fj loop has to implement.
+
+    This exists so the loop can be specified, and diffed against `ReferenceModel.check_position`,
+    before a line of fj is written: if this disagrees with the oracle, the fj cannot be right
+    either, and finding that out costs a second rather than an assemble."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    r = radius >> 16
+    bx_lo, bx_hi = x16 - radius, x16 + radius
+    by_lo, by_hi = y16 - radius, y16 + radius
+    ok, floorz, ceilz = True, seed_floor, seed_ceil
+    seen = set()
+    for bx in {((x16 >> 16) - r) >> 8, ((x16 >> 16) + r) >> 8}:
+        for by in {((y16 >> 16) - r) >> 8, ((y16 >> 16) + r) >> 8}:
+            bi = (by - by0) * nbx + (bx - bx0)
+            if not (0 <= bx - bx0 < nbx and 0 <= by - by0 < nby):
+                continue
+            off, cnt = blocks[bi]
+            for k in range(off, off + cnt):
+                li = flat[k]
+                if li in seen:
+                    continue                     # a line listed in two of the four blocks
+                seen.add(li)
+                v1x, v1y, dx, dy, flags, opentop, openbottom = rows[li]
+                v1x16, v1y16 = v1x << 16, v1y << 16
+                v2x16, v2y16 = (v1x + dx) << 16, (v1y + dy) << 16
+                if (bx_hi <= min(v1x16, v2x16) or bx_lo >= max(v1x16, v2x16)
+                        or by_hi <= min(v1y16, v2y16) or by_lo >= max(v1y16, v2y16)):
+                    continue
+                bake = _RowBake(v1x16, v1y16, dx << 16, dy << 16)
+                if bake.box_side((by_hi, by_lo, bx_lo, bx_hi)) != -1:
+                    continue
+                if flags & (FLAG_ONE_SIDED | FLAG_BLOCKING):
+                    return False, seed_floor, seed_ceil   # the seed, not the partial
+                                                          # accumulation -- see the
+                                                          # oracle's note on ordering
+                floorz, ceilz = max(floorz, openbottom), min(ceilz, opentop)
+    return ok, floorz, ceilz
+
+
+class _RowBake:
+    """`box_on_line_side` over a row's geometry, with no compile-time specialisation — the shape
+    the fj loop runs."""
+
+    def __init__(self, v1x, v1y, dx, dy):
+        self.v1x, self.v1y, self.dx, self.dy = v1x, v1y, dx, dy
+
+    def point_side(self, x, y):
+        from doomfj.reference_model import ReferenceModel
+        return ReferenceModel.point_on_line_side(x, y, self.v1x, self.v1y,
+                                                 self.v1x + self.dx, self.v1y + self.dy)
+
+    def box_side(self, box):
+        top, bottom, left, right = box
+        if self.dy == 0:
+            p1, p2 = int(top > self.v1y), int(bottom > self.v1y)
+        elif self.dx == 0:
+            p1, p2 = int(right < self.v1x), int(left < self.v1x)
+        elif (self.dy > 0) == (self.dx > 0):
+            p1, p2 = self.point_side(left, top), self.point_side(right, bottom)
+        else:
+            p1, p2 = self.point_side(right, top), self.point_side(left, bottom)
+        return p1 if p1 == p2 else -1

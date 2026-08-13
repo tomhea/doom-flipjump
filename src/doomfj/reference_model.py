@@ -658,7 +658,7 @@ class ReferenceModel:
         _sec = self._seg_sector(lds, sds, secs,
                                 cmap.segs[cmap.subsectors[
                                     self.point_in_subsector(cmap, x >> 16, y >> 16)].firstseg])
-        floorz, ceilingz = _sec.floor_h, _sec.ceil_h
+        floorz, ceilingz = seed_floor, seed_ceil = _sec.floor_h, _sec.ceil_h
         # M14-d: `blockmap` is a pure ACCELERATOR -- the same answer from the ~0-8 lines whose block
         # the box touches instead of all ~1.5k. It exists because the fj mirror cannot afford the
         # full sweep (~7M ops/tic); the oracle's default stays the exhaustive loop, and
@@ -676,10 +676,16 @@ class ReferenceModel:
                 continue                                          # bbox reject
             if self.box_on_line_side(box, v1x, v1y, v2x, v2y) != -1:
                 continue                                          # wholly on one side: not hit
+            # ⚠ On a refusal the openings are returned as the SEED, not as whatever had
+            # accumulated. DOOM's P_CheckPosition returns false out of the blockmap iterator and
+            # leaves tmfloorz/tmceilingz partially updated — `try_move` never reads them on that
+            # path, so they are dead. But "dead" means ORDER-DEPENDENT, and the fj mirror walks the
+            # lines in blockmap order while this walks them in linedef order: comparing the two
+            # would compare garbage. Pinning them to the seed makes the refusal comparable.
             if ld.back == -1:
-                return False, floorz, ceilingz                    # one-sided: a wall
+                return False, seed_floor, seed_ceil               # one-sided: a wall
             if ld.flags & ML_BLOCKING:
-                return False, floorz, ceilingz
+                return False, seed_floor, seed_ceil
             opentop, openbottom, _low = self.line_opening(
                 secs[sds[ld.front].sector], secs[sds[ld.back].sector])
             floorz = max(floorz, openbottom)

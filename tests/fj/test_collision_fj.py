@@ -311,3 +311,80 @@ def test_table_check_position_on_a_walked_trajectory(table_fjm, level):
         st = rm.step_sim(st, {"turn_left": True} if tic % 7 == 6 else {"forward": True},
                          scene=scene)
         assert _run_table(table_fjm, level, st.x, st.y) == rm.check_position(scene, st.x, st.y),             f"tic {tic}"
+
+
+@pytest.fixture(scope="module")
+def trymove_fjm(tmp_path_factory, level):
+    """`sim.try_move`: check_position plus P_TryMove's two extra refusals — the opening must fit
+    the thing, and the floor must not be more than MAX_STEP above the one being left."""
+    from doomfj.collision import (LINE_ROW_BYTES, LINE_ROW_LEN, block_tables, blockmap_grid,
+                                  line_rows)
+    from doomfj.lut_generator import generate_packed_lut_fj
+    from doomfj.reference_model import MAX_STEP, PLAYER_HEIGHT
+    _rm, _scene, cmap, lds, sds, secs, grid = level
+    rows = line_rows(lds, cmap.vertexes, secs, sds, ML_BLOCKING)
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    blocks, flat = block_tables(grid)
+
+    def pack(vals, widths):
+        v = sh = 0
+        for x, nb in zip(vals, widths):
+            v |= (x & ((1 << (8 * nb)) - 1)) << sh
+            sh += 8 * nb
+        return v
+
+    prog = "\n".join([
+        "stl.startup_and_init_all",
+        "hex.input 1, wmagic", "hex.input 4, cpx", "hex.input 4, cpy",
+        "hex.input 4, cp_seedf", "hex.input 4, cp_seedc", "hex.input 4, herf",
+        f"hex.set 8, cprad, {PLAYER_RADIUS}",
+        f"sim.try_move bkoff, 4, bklin, 4, lnrow, 3, {nbx}, {nby}, {bx0}, {by0}, "
+        f"{PLAYER_HEIGHT >> 16}, {MAX_STEP >> 16}, herf",
+        "hex.print_as_digit 1, mv_ok, 0", "stl.output 10", "stl.loop",
+        "wmagic: hex.vec 2", "cpx: hex.vec 8", "cpy: hex.vec 8", "cprad: hex.vec 8",
+        "cbx_lo: hex.vec 8", "cbx_hi: hex.vec 8", "cby_lo: hex.vec 8", "cby_hi: hex.vec 8",
+        "cp_ok: hex.vec 1", "cp_floor: hex.vec 8", "cp_ceil: hex.vec 8",
+        "cp_seedf: hex.vec 8", "cp_seedc: hex.vec 8", "herf: hex.vec 8", "mv_ok: hex.vec 1",
+        generate_packed_lut_fj("lnrow", [pack(r, LINE_ROW_BYTES) for r in rows], LINE_ROW_LEN),
+        generate_packed_lut_fj("bkoff", [pack(b, (2, 1)) for b in blocks], 3),
+        generate_packed_lut_fj("bklin", list(flat), 2),
+    ]) + "\n"
+    d = tmp_path_factory.mktemp("simtry")
+    src = d / "t.fj"
+    src.write_text(prog, encoding="utf-8")
+    out = d / "t.fjm"
+    fj.assemble([FIXP.resolve(), Path("src/fj/sim.fj").resolve(), src.resolve()],
+                out, memory_width=W, print_time=False)
+    return out
+
+
+def test_try_move_matches_the_oracle(trymove_fjm, level):
+    """⚠ The sample must contain REFUSED moves — a `try_move` that always said yes would otherwise
+    pass, and "always yes" is exactly what a walker with no collision does."""
+    import random
+    import struct
+    rm, scene, cmap, lds, sds, secs, _grid = level
+    rng = random.Random(14)
+    xs = [v[0] for v in cmap.vertexes]
+    ys = [v[1] for v in cmap.vertexes]
+    pts = [(-416, 256), (664, 291), (1272, -724), (1869, 479), (343, 128)]
+    pts += [(rng.randint(min(xs), max(xs)), rng.randint(min(ys), max(ys))) for _ in range(35)]
+    refused = tot = 0
+    for x, y in pts:
+        x16, y16 = x << 16, y << 16
+        here = rm.check_position(scene, x16, y16)
+        if not here[0]:
+            continue                                   # the sim only ever steps off legal ground
+        for dx, dy in ((50 << 16, 0), (0, 50 << 16), (-50 << 16, -50 << 16), (13 << 16, 7 << 16)):
+            nx, ny = x16 + dx, y16 + dy
+            sf, sc = _seed(rm, cmap, lds, sds, secs, nx, ny)
+            io = FixedIO(bytes([0xD0]) + struct.pack(
+                "<IIIII", nx & 0xFFFFFFFF, ny & 0xFFFFFFFF, sf & 0xFFFFFFFF, sc & 0xFFFFFFFF,
+                here[1] & 0xFFFFFFFF))
+            fj.run(trymove_fjm, io_device=io, print_time=False, print_termination=False)
+            got = io.get_output(allow_incomplete_output=True).decode().split("\n")[0].strip() == "1"
+            want = rm.try_move(scene, x16, y16, nx, ny)
+            assert got == want, f"({x},{y}) -> ({nx / U:.2f},{ny / U:.2f}): fj {got} oracle {want}"
+            tot += 1
+            refused += not want
+    assert refused >= 8, f"only {refused} of {tot} moves were refused -- the sample is too weak"

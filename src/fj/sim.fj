@@ -259,3 +259,48 @@ ns sim {
       skip:
     }
 }
+
+ns sim {
+    // sim.try_move — P_TryMove's verdict for the candidate already in cpx/cpy, given the floor the
+    // thing is standing on now (`here_floor`, map units). Sets `mv_ok` to 1 or 0.
+    //
+    // On top of check_position: the opening must be tall enough for the thing, and the floor must
+    // not be more than MAX_STEP above the one being left ("too big a step up").
+    //
+    // ⚠ Both tests are plain MAP-UNIT compares, not 16.16 ones. DOOM writes them as
+    // `(tmceilingz - tmfloorz) < thing->height` and `tmfloorz - thing->z > 24*FRACUNIT` in fixed
+    // point, but every quantity here is a whole number of units scaled by the same 2^16, so the
+    // shifts cancel: `(c - f) << 16 < 56 << 16` IS `c - f < 56`. Doing it in units keeps the
+    // compares 8 nibbles wide and drops two shifts per candidate.
+    //
+    // NOT IMPLEMENTED, deliberately and permissively: the "don't stand over a dropoff" test. It
+    // only ever REFUSES moves, so leaving it out cannot block a move DOOM would allow. The oracle
+    // omits it identically -- see ReferenceModel.check_position's docstring.
+    def try_move bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0, height, maxstep, \
+                 here_floor \
+            @ body, fail, done, out, tall, cst, gap, step \
+            < cp_ok, cp_floor, cp_ceil, mv_ok {    // the box/seed globals belong to check_position
+        ;body
+      cst: hex.vec 8
+      gap: hex.vec 8
+      step: hex.vec 8
+      body:
+        .check_position bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0
+        hex.if0 1, cp_ok, fail
+        hex.mov 8, gap, cp_ceil                // the opening must fit the thing
+        hex.sub 8, gap, cp_floor
+        hex.set 8, cst, height
+        hex.scmp 8, gap, cst, fail, tall, tall
+      tall:
+        hex.mov 8, step, cp_floor              // ... and must not be a step up of more than maxstep
+        hex.sub 8, step, here_floor
+        hex.set 8, cst, maxstep
+        hex.scmp 8, step, cst, done, done, fail
+      done:
+        hex.set 1, mv_ok, 1
+        ;out
+      fail:
+        hex.set 1, mv_ok, 0
+      out:
+    }
+}

@@ -305,68 +305,44 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
   relayed trajectory and the angle wrap (`tests/fj/test_state_wire.py`, 36 tests) — and the
   renderer-level gate passes too: `m14_gate` phase 1 byte-exact ×4, phase 2 **8/8 tics byte-exact
   with the state relayed**, once §4b's `wall_x_range_m` precision bug was fixed (+9–10% ops).
-- **M14-d** ⚠ **ORACLE DONE + the fj PER-LINE KERNEL PROVEN; the runtime selection needs
-  re-architecting.** `mapcompiler.build_blockmap` cuts the candidates from ~1.5k linedefs to the
-  ~35 in the blocks the player's box touches, and is proven equivalent to the exhaustive sweep
-  (500+ grid positions, block boundaries, a fractional trajectory). `doomfj.collision` bakes each
-  candidate line's PIT_CheckLine as code, byte-exact against the oracle at 16 positions including
-  fractional ones and positions the oracle refuses (`tests/fj/test_collision_fj.py`).
-  ⚠ **BUT bake-as-code does not scale here, measured:** 1,651 (block, line) pairs x ~35 macro
-  invocations = ~57k lines of `hex.set`/`hex.scmp`, and that program **did not finish assembling in
-  50 minutes**. The 13 runtime-path tests are skipped with that reason recorded in place.
-  **The fix is named by the same measurement:** bake-as-code was chosen because a table loop over
-  ALL the linedefs costs ~7M ops/tic — but the blockmap already removed the "all", so
-  `read_table_packed` + one shared loop is ~360k ops per candidate position (~1M/tic across the
-  three the axis-retry tries) and assembles in seconds. Redo the fj side that way; keep the
-  blockmap and the oracle.
-  *(previously:)* `check_position` / `try_move` /
-  `move_with_collision` mirror P_CheckPosition / PIT_CheckLine / P_BoxOnLineSide (no blockmap: the
-  per-line bbox reject does that job, ~1.5k lines against a ~34M-op frame). 16 tests in
-  `tests/host/test_collision.py`, including the control that collision actually blocks something.
-  Two departures from vanilla are documented in the docstrings and must be mirrored in fj:
-  no dropoff test, and axis-separated retry instead of `P_SlideMove`. The fj half wants a baked
-  packed linedef table + a runtime loop; `hex.read_table_packed` is the primitive.
-- **M14-e** ❌ **NOT STARTED** — the runtime thing table + moving things. §3 is settled, so the
-  trap is disarmed; what remains is real work: per-thing constants out of the baked per-leaf
-  xor-involution blocks and into a runtime table, a runtime `point_in_subsector` per moved thing,
-  and per-leaf lists. Note the free win waiting there: the per-thing BSP descent visits exactly
-  the ancestors of the thing's leaf, so setting a "thing below" flag on each costs nothing and
-  buys back M14-a's 1.4% by restoring the `tsstop` node gate at runtime.
+- **M14-d** ✅ **DONE and gated.** Oracle mirror (`check_position`/`try_move`/`move_with_collision`
+  = P_CheckPosition / PIT_CheckLine / P_BoxOnLineSide + the subsector seed, 20 host tests);
+  `mapcompiler.build_blockmap` (256-unit cells) narrowing ~1.5k linedefs to ~35, PROVEN equivalent
+  to the exhaustive sweep; `src/fj/sim.fj`'s `check_line` / `check_block` / `check_position` /
+  `try_move`, each oracle-exact; wired into `player_sim` with a second, tagged BSP descent for the
+  candidate's seed. **Gate: phase 1 byte-exact ×4, phase 2 26/26 relayed tics byte-exact, with
+  collision changing the outcome on 5 of them.** Cost ~+1–2M ops/tic on top of §4b's fix.
+  Departures from vanilla, mirrored on both sides: no dropoff test, axis retry not `P_SlideMove`.
+  ⚠ Two dead ends are recorded so they are not re-walked: bake-as-code for the per-block line
+  tests (~57k macro lines, **did not assemble in 50 minutes**), and a gate whose script never
+  touches a wall (vacuous — `phase2` now counts blocked tics and fails at zero, which is what
+  caught `cprad` being left at zero and collapsing the collision box to a point).
+- **M14-e** ❌ **NOT STARTED — the last rung, and the biggest.** §3's trap is already disarmed
+  (M14-a), so what remains is the sprite pipeline itself. The analysis, so the next session starts
+  from a design rather than a blank page:
 
-## 6. Verification (see `CLAUDE.md` for the full ladder)
+  **What is baked per (subsector, thing) today** (`subsector_action`): one xor-involution block
+  holding `sp_x/sp_y/sp_z`, `sp_left/sp_w/sp_hh`, `sp_tzmax(+2)`, `sp_mon`, `sp_base(+2)`,
+  `sp_dw`, `sp_lt` — then `stl.fcall thing_leaf`. Three groups, and they do NOT move together:
+   1. **position** (`sp_x/sp_y`) — pure runtime, straight from the table;
+   2. **per TYPE** (`sp_left/sp_w/sp_hh/sp_tzmax/sp_mon/sp_base/sp_dw`) — bake ONE table indexed
+      by a type index carried in the thing's row; nothing here depends on where the thing is;
+   3. ⚠ **per SECTOR** (`sp_z` = the thing's floor + the art's z-offset, and `sp_lt` = the light
+      class from `wall_lightnum(sector.light)` × art height) — these change WHEN THE THING MOVES
+      BETWEEN SECTORS, which is exactly what M14-e is for. Either recompute them from the leaf the
+      per-thing descent lands in, or carry them in the wire row as part of the thing's state (the
+      §2 architecture says state round-trips, and z is state).
 
-Every rung: `alpha_check`/`expand_check` if you touched fj macros, `tests/host`, then
-`scratchpad/deg_gate.py` (~20 min, SOLO). A rung that changes what is drawn needs a new oracle
-mirror and a byte-exact test **before** the fj side (R1: failing test first).
+  **Re-binding.** The per-thing BSP descent is now cheap and proven — M14-d added `tag` to
+  `_bsp_descend_code` precisely so a second descent could exist, and a third is the same move.
+  Its leaf action appends the thing to that leaf's runtime list.
+  **The free win:** that descent visits exactly the ancestors of the thing's leaf, so setting a
+  "thing below" flag on the way down costs nothing and restores the `tsstop` node gate at runtime —
+  buying back M14-a's +1.4%.
 
-⚠ After touching `build.py`, run `test_build_wall_renderer_e1m1_flat` — it is deselected from the
-normal run and it is the SHIPPED path (~70 min).
+  **Cost budget, already measured (§2.1):** 212 things × 5 values round-trip for ~542k ops, 1.2–1.6%
+  of the frame. The wire is not the problem; the per-leaf lists and the leaf loop are the work.
 
-⚠ New for M14: the sim is stateful across frames, which the current gates are not built for. You
-will need a **multi-frame** gate — run N tics from a fixed start with a scripted input sequence
-and compare the whole sequence against the oracle. One frame proving byte-exact says nothing
-about state drift on frame 200.
-
-**That gate now exists, at two levels:**
-- `tests/fj/test_state_wire.py::test_sim_matches_the_oracle_over_N_tics` — 200 tics of the sim
-  alone, each tic's echoed state relayed into the next, ~20 s and no renderer build. This is where
-  a sim bug should be caught.
-- `scratchpad/m14_gate.py` — phase 1 (four still viewpoints) + phase 2 (N tics, frame *and* state
-  compared every tic). It **caches its binary** at `scratchpad/fjmcache/m14_bin.fjm` and takes
-  `--probe vx vy va keys` for a single frame, so a divergence can be chased without a 25-minute
-  rebuild. `--rebuild` forces a fresh one.
-- `scratchpad/m14_vp_sweep.py` — byte-exactness over MANY viewpoints (the repo had none: every
-  gate certified the same four, and `lite_sweep.py` counts ops without comparing a pixel). It is
-  what turned §4b from "one bad frame" into a measured boundary.
-
-⚠ And the trap the multi-frame gate found on its first run, now fixed and regression-tested:
-`SimState` normalises x/y to signed on construction. `spawn_state` built them SIGNED, `step_sim`
-returned them MASKED, and the projection reads `state.x` **raw** while everything else goes through
-`_signed` — so feeding a simulated state back into the renderer rendered a different frame from the
-identical hand-built one (14,845 of 16,000 pixels). Nothing had ever composed those two functions.
-
-## 7. Standing preferences (owner)
-
-Correctness and detail over op budget; fix-it-everywhere over spot fixes; CR loops until clean;
-report with evidence (hashes, op counts, before/after), never adjectives. A budget that binds
-paints wrong pixels — bound cost with provably write-neutral stops instead.
+  **Gate it the way M14-d was gated:** `m14_gate --collide` plus a thing that actually CHANGES LEAF
+  during the run, with the gate failing if none does. Every vacuity trap in this milestone has been
+  a script that never exercised the thing being tested.

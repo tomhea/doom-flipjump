@@ -10,6 +10,7 @@ from doomfj.collision import generate_point_location_fj, point_location_decls
 from doomfj.config import Config
 from doomfj.harness import W
 from doomfj.lut_generator import generate_packed_lut_fj
+from doomfj.texturecompiler import _index_nibbles
 from doomfj.mapcompiler import bake_bsp
 from doomfj.reference_model import (DEG_MINH2_MON, DEG_MINH2_SCENERY, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER, MONSTER_TYPES, ReferenceModel,
@@ -50,14 +51,18 @@ def pack(v, ws):
 prog = "\n".join([
     "stl.startup_and_init_all",
     "hex.input 1, wmagic", "hex.input 2, want_ss",
-    f"sim.bind_things thpos, {NT}, {NSS}",
+    f"hex.input {NT*8}, thss",
+    f"sim.bind_things thpos, thss, {NT}",
     "hex.zero w/4, cur_ss", "hex.mov 4, cur_ss, want_ss",
+    # the leaf bakes these; the probe sets them from the same tables the emitter uses
+    "hex.zero 4, ss_flr", "hex.zero 4, ss_ltb",
     "hex.zero 1, tstop",
-    "sim.thing_pass throw, 4, thpos, ssflr, 4, sslgt, sprlt, ltbase",
+    f"sim.thing_pass throw, {_index_nibbles(NT)}, thpos, sprlt, {_index_nibbles(len(lns)*NT)}",
     "stl.loop",
     # the stub leaf: print the thing's x (16.16) so the visit ORDER is observable
     "thing_leaf:", "hex.print_as_digit 8, sp_x, 0", "stl.output 10", "stl.fret thing_ret",
     "wmagic: hex.vec 2", "want_ss: hex.vec 4", "cur_ss: hex.vec w/4", "tstop: hex.vec 1",
+    "ss_flr: hex.vec 4", "ss_ltb: hex.vec 4", f"thss: hex.vec {16*NT}",
     "thing_ret: hex.vec w/4",
     "sp_x: hex.vec 8","sp_y: hex.vec 8","sp_z: hex.vec 8","sp_left: hex.vec 8","sp_w: hex.vec 8",
     "sp_hh: hex.vec 8","sp_tzmax: hex.vec 8","sp_tzmax2: hex.vec 8","sp_base: hex.vec 4",
@@ -67,10 +72,7 @@ prog = "\n".join([
     generate_point_location_fj(cmap),
     generate_packed_lut_fj("throw", [pack(r, THING_ROW_BYTES) for r in rows], THING_ROW_LEN),
     thpos_vec("thpos", [((t.x << 16) & 0xFFFFFFFF, (t.y << 16) & 0xFFFFFFFF) for t in things]),
-    generate_packed_lut_fj("ssflr", [f & 0xFFFF for f in ssflr], 2),
-    generate_packed_lut_fj("sslgt", sslgt, 1),
     generate_packed_lut_fj("sprlt", sprlt, 1),
-    generate_packed_lut_fj("ltbase", [k * NT for k in range(len(lns))], 2),
 ]) + "\n"
 tmp = Path(tempfile.mkdtemp()); src = tmp/"t.fj"; src.write_text(prog, encoding="utf-8")
 out = tmp/"t.fjm"
@@ -84,7 +86,9 @@ for i, t in enumerate(things):
 bad = 0
 targets = sorted(want, key=lambda s: -len(want[s]))[:4] + [s for s in sorted(want)][:2]
 for ss in targets:
-    io = FixedIO(bytes([0xD0]) + struct.pack("<H", ss))
+    io = FixedIO(bytes([0xD0]) + struct.pack("<H", ss)
+                 + b"".join(struct.pack("<Q", rm.point_in_subsector(cmap, t.x, t.y))
+                            for t in things))
     fj.run(out, io_device=io, print_time=False, print_termination=False)
     got = [int(v, 16) for v in io.get_output(allow_incomplete_output=True).decode().split("\n") if v]
     exp = [(things[i].x << 16) & 0xFFFFFFFF for i in want[ss]]

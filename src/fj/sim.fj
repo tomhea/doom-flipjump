@@ -320,9 +320,9 @@ ns sim {
     // check_line hit.
     // ⚠ A 16.16 value from an int16 needs NO sign extension: putting the 16 bits in the high half
     // IS `raw << 16` in two's complement. The tzmax bounds are already 32-bit and are moved whole.
-    def thing_load throw, n_th, thpos, ssflr, ssnss, sslgt, sprlt, ltbase, ti, ssi \
+    def thing_load throw, n_th, thpos, sprlt, nlti, ti \
             @ body, row, zt, pos, poff, pbase, pptr, lti \
-            < sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
+            < ss_flr, ss_ltb, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
               sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
         ;body
       row: hex.vec 44
@@ -359,18 +359,25 @@ ns sim {
         hex.mov 2, sp_dw,  row + 42*dw                       // byte 21
         // sp_z = (this leaf's floor + the art's z offset) << 16 -- the two int16s add mod 2^16,
         // which is the right two's-complement sum, and fix16 lifts it to 16.16
-        hex.read_table_packed 2, zt, ssflr, ssnss, ssi
+        //
+        // ⚠ `ss_flr` and `ss_ltb` are BAKED BY THE LEAF, not read from a table here. Both are
+        // properties of the SUBSECTOR -- its floor height, and the row base of its light class --
+        // and a subsector's floor and light are fixed at level load, so the emitter knows them and
+        // `subsector_action` sets them alongside `cur_ss`. They used to be three
+        // `read_table_packed`s PER THING (ssflr[ss], sslgt[ss], ltbase[light]) when all three are
+        // constant for every thing in the leaf: measured at 23,569 of thing_load's 69,503 ops.
+        hex.zero 4, zt
+        hex.mov 4, zt, ss_flr
         hex.add 4, zt, row + 12*dw                           // byte 6 = zoff
         .fix16 sp_z, zt
-        // sp_lt = sprlt[sslgt[ssi] * nthings + ti]
-        // sp_lt = sprlt[ltbase[light] + ti]. The row base comes from a TABLE rather than a
-        // multiply: `hex.mul_const` by a non-power-of-two (nthings = 251) is where this first went
-        // wrong, and a wrong index here does not merely read the wrong class -- it reads off the
-        // end of the table, which took two of the probe's runs off into the weeds entirely.
-        hex.read_table_packed 1, zt, sslgt, ssnss, ssi
-        hex.read_table_packed 2, lti, ltbase, 2, zt
+        // sp_lt = sprlt[ltbase[light] + ti], and ltbase[light] is the leaf's baked `ss_ltb`. The
+        // row base is a table/baked value rather than a multiply because `hex.mul_const` by a
+        // non-power-of-two (nthings = 251) is where this first went wrong, and a wrong index here
+        // does not merely read the wrong class -- it reads off the END of the table.
+        hex.zero 4, lti
+        hex.mov 4, lti, ss_ltb
         hex.add 4, lti, ti                                  // the index needs its OWN cell: a read
-        hex.read_table_packed 1, sp_lt, sprlt, 4, lti       // zeroes dst, so dst == idx destroys it
+        hex.read_table_packed 1, sp_lt, sprlt, nlti, lti    // zeroes dst, so dst == idx destroys it
     }
 }
 
@@ -410,7 +417,15 @@ ns sim {
     //     a field inside a pointed-to record.
     // So: the original loop, with the cache added, and `thss` split into two BYTE arrays indexed by
     // the raw thing index -- exactly how `sshead` and `thnext` are already indexed here.
-    def bind_things thpos, thss, nthings, nss             @ body, bl, bl_done, dirty, clean, clr, clr_body, clr_done, t, hv, tv, dv, p, q, r, sptr,               pos, poff, pbase, pptr, xn, xp, yn, yp           < ptx, pty, ptss, sshead, thnext, ptloc_walk, ptloc_ret {
+    // ⚠ NO CLEAR AT ALL, and the trick is the SENTINEL. A bare `hex.vec` is zero-initialised, and
+    // one run is one frame -- fj self-modifies, so the host reloads the pristine image every frame
+    // and anything baked is re-initialised for free. So EMPTY IS 0, and the lists store `t + 1`
+    // rather than `t` to keep index 0 representable. 251 things encode to 1..251, well inside a
+    // byte. This deleted a 682-iteration pointer loop that cost ~1.65M ops EVERY FRAME.
+    // (Three costlier clears were tried first: the loop; `rep` with a macro PARAMETER as the count,
+    // which SILENTLY EXPANDS TO NOTHING; and baking 682 `hex.vec 2, 0xFF` lines or a literal-count
+    // `rep`, both of which take the assembler from seconds to 30-40 MINUTES.)
+    def bind_things thpos, thss, nthings             @ body, bl, bl_done, dirty, clean, t, hv, tv, dv, p, q, r, sptr,               pos, poff, pbase, pptr, xn, xp, yn, yp           < ptx, pty, ptss, sshead, thnext, ptloc_walk, ptloc_ret {
         ;body
       t:  hex.vec w/4                          // ⚠ w/4, not 4: hex.ptr_index does
       hv: hex.vec 2                            // `mov w/4` out of its INDEX register
@@ -431,18 +446,6 @@ ns sim {
         // binary got SMALLER after adding 682 unrolled sets, which is the tell. `rep` needs a
         // literal, so that unroll belongs in the emitter, where NSS is a number. Kept as a loop
         // here so the macro is correct standalone; see the emitter for the fast path.
-        hex.zero w/4, r
-        hex.set w/4, q, nss
-      clr:
-        hex.cmp w/4, r, q, clr_body, clr_done, clr_done
-      clr_body:
-        hex.set w/4, pbase, sshead
-        hex.ptr_index p, pbase, r
-        hex.set 2, hv, 0xFF
-        hex.write_byte p, hv
-        hex.inc w/4, r
-        ;clr
-      clr_done:
         hex.set 4, dv, 0xFFFF                  // the host's "I moved this one" sentinel
         hex.set w/4, t, nthings
       bl:
@@ -503,6 +506,7 @@ ns sim {
         hex.write_byte r, hv
         hex.zero 2, tv
         hex.mov 2, tv, t
+        hex.inc 2, tv                          // stored ENCODED as t+1, so 0 can mean "empty"
         hex.write_byte p, tv
         ;bl
       bl_done:
@@ -518,8 +522,8 @@ ns sim {
     //
     // `tstop` is re-tested every iteration, not once: `thing_leaf` can set it, and the static path
     // gates each baked call site individually. It is monotone, so this only ever stops earlier.
-    def thing_pass throw, n_th, thpos, ssflr, ssnss, sslgt, sprlt, ltbase \
-            @ body, loop, run, alive, done, h, hp, hq, c255 \
+    def thing_pass throw, n_th, thpos, sprlt, nlti \
+            @ body, loop, alive, done, h, hp, hq \
             < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf {
         // the sp_* cells belong to thing_load, which is what writes them -- declaring an
         // extern this macro does not itself reference is an error
@@ -527,20 +531,20 @@ ns sim {
       h:    hex.vec w/4
       hp:   hex.vec w/4
       hq:   hex.vec w/4
-      c255: hex.vec w/4
       body:
         hex.set w/4, hq, sshead
         hex.ptr_index hp, hq, cur_ss
         hex.zero w/4, h                        // read_byte fills only 2 nibbles; the rest must be
-        hex.read_byte h, hp                    // cleared or the sentinel compare never matches
+        hex.read_byte h, hp                    // cleared or the 0 test reads a stale high half
       loop:
-        hex.set w/4, c255, 0xFF
-        hex.cmp w/4, h, c255, run, done, run
-      run:
+        // ⚠ the lists hold t+1, so 0 is both "empty leaf" and "end of list" -- which is what lets
+        // `sshead` be a plain zero-initialised hex.vec and need no per-frame clear.
+        hex.if0 w/4, h, done
         hex.if0 1, tstop, alive
         ;done
       alive:
-        .thing_load throw, n_th, thpos, ssflr, ssnss, sslgt, sprlt, ltbase, h, cur_ss
+        hex.dec w/4, h                         // encoded -> the real thing index
+        .thing_load throw, n_th, thpos, sprlt, nlti, h
         stl.fcall thing_leaf, thing_ret
         hex.set w/4, hq, thnext
         hex.ptr_index hp, hq, h                // h is consumed as the INDEX before being reloaded

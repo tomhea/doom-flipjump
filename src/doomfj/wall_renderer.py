@@ -256,20 +256,28 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     text = "\n".join([
         generate_packed_lut_fj("throw", [_pack(r, THING_ROW_BYTES) for r in rows], THING_ROW_LEN),
         "\n".join(thpos),
-        generate_packed_lut_fj("ssflr", [f & 0xFFFF for f in ssflr], 2),
-        generate_packed_lut_fj("sslgt", sslgt, 1),
+        # ⚠ ssflr / sslgt / ltbase are NOT emitted any more: every one of them was indexed by the
+        # SUBSECTOR, so the emitter knows the answer and `subsector_action` bakes it into the leaf.
         generate_packed_lut_fj("sprlt", sprlt, 1),
-        generate_packed_lut_fj("ltbase", [k * nt for k in range(len(lns))], 2),
     ])
     # 0xFF is the empty/end sentinel of both linked-list arrays, so 251 things fit a byte index
     assert nt < 0xFF, f"{mapname} has {nt} drawable things; the byte linked list tops out at 254"
     decls = ["cur_ss: hex.vec w/4", "tp_ret: ;0",
-             f"sshead: hex.vec {2 * nss}", f"thnext: hex.vec {2 * nt}",
+             # the leaf's baked floor height and sprlt row base (see subsector_action)
+             "ss_flr: hex.vec 4", "ss_ltb: hex.vec 4",
+             # ⚠ a bare hex.vec is ZERO-filled, and one run is one frame -- fj self-modifies, so
+             # the host reloads the pristine image every frame. That makes 0 a free-to-restore
+             # EMPTY sentinel, which is why bind_things has no clear loop and why the lists hold
+             # t+1 rather than t. Deleted ~1.65M ops/frame.
+             f"sshead: hex.vec {2 * nss}",
+             f"thnext: hex.vec {2 * nt}",
              # 16 nibbles for a 4-nibble value: the one pointer accessor proven on a
              # wire-filled array strides by index*16 (see sim.bind_things)
              f"thss_rt: hex.vec {16 * nt}",
              *point_location_decls()]
-    return text, generate_point_location_fj(cmap), decls, nt, nss
+    # lightnum -> the row base into `sprlt`, for the leaf to bake
+    return (text, generate_point_location_fj(cmap), decls, nt, nss,
+            {ln: k * nt for k, ln in enumerate(lns)})
 
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
@@ -658,12 +666,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         f"drawable things in them: {[(t.type, t.x, t.y) for s in _stranded for t in things_by_ss[s]]}. "
         "The prune would drop those leaves and the sprites would vanish with no other symptom.")
     # M14-e: the runtime half of the same data, baked by INDEX rather than by (subsector, thing).
-    _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS = (
+    _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB = (
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, deg=deg, spr_cache=spr_cache)
-        if moving_things else ("", "", [], 0, 0))
+        if moving_things else ("", "", [], 0, 0, {}))
     _MT_NTH = _index_nibbles(max(1, _MT_NT))          # the row index's width, as check_line's is
     _MT_NSSN = _index_nibbles(max(1, _MT_NSS))
+    _MT_NLTI = _index_nibbles(max(1, len(_MT_LTB) * _MT_NT)) if moving_things else 1
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -966,7 +975,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 # that this frame from the wire's positions. Two lines, and the shared `thing_pass`
                 # walks this leaf's list; `tstop` is re-tested per thing inside it, exactly as the
                 # baked call sites gate themselves individually below.
+                # ⚠ the leaf's FLOOR and LIGHT-ROW BASE go with it, as baked constants. Both are
+                # properties of this subsector and fixed at level load, so reading them from tables
+                # inside thing_load meant three `read_table_packed`s PER THING for values constant
+                # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
                 out += [f"    hex.set w/4, cur_ss, {s}",
+                        f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}",
+                        f"    hex.set 4, ss_ltb, {_MT_LTB[rm.wall_lightnum(psec.light, 0)]}",
                         "    stl.fcall thing_pass_leaf, tp_ret"]
             elif _do_things and ss.numsegs:
                 for _ti, _t in enumerate(things_by_ss.get(s, ())):
@@ -1393,7 +1408,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            # round-trips, and `bind_things` locates ONLY what the host marked dirty. 2 bytes in
            # (the value's 4 nibbles), 4 bytes out (emit_bytes4 is the emitter this protocol has).
            f"rep({_MT_NT}, i) hex.input 2, thss_rt + i*16*dw",
-           f"sim.bind_things thpos_rt, thss_rt, {_MT_NT}, {_MT_NSS}",
+           f"sim.bind_things thpos_rt, thss_rt, {_MT_NT}",
            f"stl.output_char {WIRE_THING_CMD}",
            f"rep({_MT_NT}, i) stream.emit_bytes4 thss_rt + i*16*dw"] if moving_things else []),
         # M13-absmul: per-frame |viewx|/|viewy| + sign flags. fixed_mul_lo's cost is one schoolbook
@@ -1679,8 +1694,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                if _do_things else []),
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
-                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt, ssflr, {_MT_NSSN}, sslgt, sprlt, "
-                "ltbase",
+                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt, sprlt, {_MT_NLTI}",
                 "stl.fret tp_ret"] if moving_things else []),
              "seg_pass2_leaf:",
              (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "

@@ -47,15 +47,16 @@ prog = "\n".join([
     "hex.input 1, wmagic",
     "hex.set 2, mk, 0x11", "hex.print_as_digit 2, mk, 0", "stl.output 10",
     f"hex.input {NT*8}, thss",      # last frame's bindings, 8 wire bytes per thing
-    f"sim.bind_things thpos, thss, {NT}, {NSS}",
+    f"sim.bind_things thpos, thss, {NT}",
     "hex.set 2, mk, 0x99", "hex.print_as_digit 2, mk, 0", "stl.output 10",
     # dump every leaf's list, ascending, as "ss:t,t,t"
     "hex.zero w/4, ds", "hex.set w/4, dn, %d" % NSS,
     "dl:", "hex.cmp w/4, ds, dn, dbody, ddone, ddone",
     "dbody:", "hex.set w/4, dq, sshead", "hex.ptr_index dp, dq, ds",
     "hex.zero w/4, dh", "hex.read_byte dh, dp",   # read_byte fills only 2 nibbles
-    "wl:", "hex.set w/4, dc, 0xFF", "hex.cmp w/4, dh, dc, wbody, wdone, wbody",
-    "wbody:", "hex.print_as_digit 4, ds, 0", "stl.output 58", "hex.print_as_digit 2, dh, 0",
+    "wl:", "hex.if0 w/4, dh, wdone",
+    "hex.dec w/4, dh",                    # lists hold t+1
+    "hex.print_as_digit 4, ds, 0", "stl.output 58", "hex.print_as_digit 2, dh, 0",
     "stl.output 10",
     "hex.set w/4, dq, thnext", "hex.ptr_index dp, dq, dh",
     "hex.zero w/4, dh", "hex.read_byte dh, dp", ";wl",
@@ -63,6 +64,8 @@ prog = "\n".join([
     "ddone:", "stl.loop",
     "wmagic: hex.vec 2", "mk: hex.vec 2", "ds: hex.vec w/4", "dn: hex.vec w/4", "dh: hex.vec w/4", "dc: hex.vec w/4",
     "dp: hex.vec w/4", "dq: hex.vec w/4",
+    # a bare hex.vec is ZERO-filled and every run reloads the pristine image, so the
+    # 0 sentinel costs nothing and bind_things needs no clear
     f"sshead: hex.vec {2*NSS}", f"thnext: hex.vec {2*NT}", f"thss: hex.vec {16*NT}",
     *point_location_decls(),
     generate_point_location_fj(cmap),

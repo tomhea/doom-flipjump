@@ -90,3 +90,36 @@ def decode_state(payload: bytes) -> tuple:
     return (x - (1 << 32) if x >> 31 else x,
             y - (1 << 32) if y >> 31 else y,
             ang)
+
+
+# ── M14-e: the thing table on the wire ─────────────────────────────────────────────────────────
+#
+# The player's state round-trips because the program is a pure function of stdin (§2). Things are
+# world state too, so they round-trip the same way: the host holds the table between frames and can
+# move anything in it, and fj re-binds every thing to a leaf and renders.
+#
+# Only POSITION travels. Everything else about a thing -- its art metrics, bases, monster flag,
+# depth bounds -- is static per index, because the set of things is fixed at level load (M14 spawns
+# nothing and destroys nothing), so it bakes; and `sp_z`/`sp_lt` are derived from the leaf the thing
+# binds to, which only fj knows. See `doomfj.things`.
+
+THING_CMD = 0x11        # the present-protocol command carrying the thing table back out
+
+
+def encode_things(positions) -> bytes:
+    """`[(x16, y16), ...]` -> the wire's thing block, little-endian, drawable order."""
+    import struct
+    return b"".join(struct.pack("<II", x & 0xFFFFFFFF, y & 0xFFFFFFFF) for x, y in positions)
+
+
+def decode_things(payload: bytes) -> list:
+    """The inverse, with x/y SIGNED -- the same convention `SimState` normalises to, because the
+    projection reads positions raw and a masked value renders a different frame (see SimState)."""
+    import struct
+    if len(payload) % 8:
+        raise ValueError(f"thing block is {len(payload)} bytes, not a multiple of 8")
+    out = []
+    for i in range(0, len(payload), 8):
+        x, y = struct.unpack("<II", payload[i:i + 8])
+        out.append((x - (1 << 32) if x >> 31 else x, y - (1 << 32) if y >> 31 else y))
+    return out

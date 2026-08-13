@@ -1564,6 +1564,7 @@ class ReferenceModel:
                           deg_things: tuple | None = None, deg_sliver: int | None = None,
                           deg_stack_scale: int | None = None, deg_mark: int | None = None,
                           deg_lip_scale: int | None = None,
+                          thing_positions=None,
                           degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -1683,9 +1684,19 @@ class ReferenceModel:
         ss_first: dict = {}
         if things:
             assert sprite_wad is not None, "things=True needs sprite_wad (the fixture wad has none)"
-            for t in scene.map_wad.things(scene.mapname):
-                if THING_SPRITE.get(t.type) is None:
-                    continue                                  # a start / teleport spot / unknown
+            # M14-e: `thing_positions` overrides where the drawable things ARE, in drawable order
+            # (index i = the i-th thing whose type has a sprite). Without it the WAD's spawn
+            # positions are used, which is every gate and golden this repo has.
+            _drawable = [t for t in scene.map_wad.things(scene.mapname)
+                         if THING_SPRITE.get(t.type) is not None]
+            if thing_positions is not None:
+                assert len(thing_positions) == len(_drawable), (
+                    f"thing_positions has {len(thing_positions)} entries, "
+                    f"{scene.mapname} has {len(_drawable)} drawable things")
+                _drawable = [replace(t, x=px, y=py)
+                             for t, (px, py) in zip(_drawable, thing_positions)]
+            for t in _drawable:
+                # binding is ALREADY position-driven, which is why M14-e needs no new logic here
                 things_by_ss.setdefault(
                     self.point_in_subsector(scene.cmap, t.x, t.y), []).append(t)
             for _si, _ss in enumerate(scene.cmap.subsectors):

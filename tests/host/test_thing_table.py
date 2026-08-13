@@ -177,3 +177,26 @@ def test_the_widened_shade_row_bank_is_additive_and_covers_every_reachable_pair(
     ratio = len(wide_cls) / len(static_cls)
     assert 1 < ratio < 4, f"widening is {ratio:.1f}x ({len(static_cls)} -> {len(wide_cls)})"
     assert len(wide_txt) > len(static_txt)
+
+
+def test_the_oracle_renders_the_same_frame_from_explicit_spawn_positions(level):
+    """M14-e's oracle half, and the reason it is nearly free: `render_wall_frame` already binds
+    things by calling `point_in_subsector(t.x, t.y)`, so it is position-driven ALREADY. Handing it
+    the spawn positions explicitly must reproduce today's frame bit for bit."""
+    from doomfj.reference_model import SimState, THING_SPRITE, build_scene, spawn_state
+    cfg, rm, mw, art, cmap, *_rest = level
+    scene = build_scene(mw, mw, "E1M1")
+    sp = spawn_state(mw, "E1M1")
+    kw = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
+              near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
+    st = SimState(sp.x, sp.y, sp.angle, "E1M1")
+    base = bytes(rm.render_wall_frame(st, scene, **kw))
+    pos = [(t.x, t.y) for t in mw.things("E1M1") if THING_SPRITE.get(t.type) is not None]
+    same = bytes(rm.render_wall_frame(st, scene, thing_positions=pos, **kw))
+    assert same == base, "explicit spawn positions changed the frame"
+    # ⚠ THE CONTROL: moving things must CHANGE the frame, or the parameter is being ignored.
+    # Move all of them, not thing[0] -- the first drawable thing is nowhere near the spawn view, so
+    # moving it changes no pixel and the control passed vacuously on the first attempt.
+    moved = [(x + 64, y + 64) for x, y in pos]
+    other = bytes(rm.render_wall_frame(st, scene, thing_positions=moved, **kw))
+    assert other != base, "moving every thing changed nothing -- thing_positions is not wired through"

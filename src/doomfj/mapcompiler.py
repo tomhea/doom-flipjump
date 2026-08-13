@@ -419,7 +419,8 @@ def compile_geometry_streams(wad, mapname: str) -> str:
     return "\n".join(out)
 
 
-def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: str) -> str:
+def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: str,
+                      tag: str = "") -> str:
     """M13-prune: a DESCEND-ONLY point-location walk (R_PointInSubsector): from the root, take the
     NEAR child at every node and never visit the far side -- the leaf reached is the subsector
     containing the eye. Runs BEFORE the main walk to set the per-frame player-subsector state
@@ -427,9 +428,14 @@ def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: st
     empty subtrees can be pruned from it safely. Reuses the main walk's shared <L>_node{i}_partition const blocks
     and pos_leaf (same labels); path length ~tree depth (~10-20 nodes), once per frame.
     `leaf_action(s)` returns the fj lines for landing in subsector s (must end by falling
-    through); the emitted code jumps to `done_label` afterwards."""
+    through); the emitted code jumps to `done_label` afterwards.
+
+    `tag` names a SECOND, independent descent that shares the same partition blocks and pos_leaf
+    (M14-d: the collision needs the sector under a CANDIDATE position, which is the same query at a
+    different point). Only the descent's own labels are tagged -- the shared blocks are keyed on
+    `pfx` and must stay keyed on it, or the second descent would reference blocks nobody emits."""
     L = f"{pfx}_bspcode"
-    D = f"{pfx}_dsc"
+    D = f"{pfx}_dsc{tag}"
     lines = [f"// descend-only point-location pre-walk ({len(bsp.nodes)} node blocks)"]
     lines.append(f"{D}_walk:")
     root = bsp.root

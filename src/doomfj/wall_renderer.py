@@ -21,7 +21,9 @@ from doomfj.lut_generator import (
     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
-from doomfj.reference_model import ANG90, ANGLE_TURN, FORWARD_MOVE
+from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
+                                    ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS)
+from doomfj.mapcompiler import build_blockmap
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                KEY_FORWARD_MASK, KEY_BACK_MASK,
                                KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK)
@@ -114,7 +116,7 @@ def _int_part_lines(dst, src, neg, pos):
             f"{neg}:", f"hex.set 6, {dst} + 4*dw, 0xFFFFFF", f";{pos}", f"{pos}:"]
 
 
-def _player_sim_lines() -> list:
+def _player_sim_lines(collide: bool = False) -> list:
     """M14-c — ONE TIC OF THE PLAYER SIM, in fj. The exact mirror of
     `ReferenceModel.step_sim`: turn first, then a collision-free move along the NEW angle.
 
@@ -156,12 +158,15 @@ def _player_sim_lines() -> list:
         "finesine.read_sin pmvs, pangi",
         "hex.fixed_mul_lo 8, 4, pmvdx, pmove, pmvc",
         "hex.fixed_mul_lo 8, 4, pmvdy, pmove, pmvs",
-        "hex.add 8, viewx, pmvdx", "hex.add 8, viewy, pmvdy",
+        # M14-d: with collision on the move is a REQUEST -- `move_with_collision_lines` decides
+        # where it actually lands. Without it the delta is applied straight, as M14-c shipped.
+        *(["hex.mov 8, cm_dx, pmvdx", "hex.mov 8, cm_dy, pmvdy", ";simcollide"] if collide else
+          ["hex.add 8, viewx, pmvdx", "hex.add 8, viewy, pmvdy"]),
         "simmv_done:",
     ]
 
 
-def _state_wire_lines(state_wire: str, *, sim: bool = False) -> list:
+def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = False) -> list:
     """The fj that reads one frame's world state (and, on the bin wire, echoes it back).
 
     Lives at module level so `tests/fj/test_state_wire.py` can assemble THE SAME TEXT in a
@@ -174,6 +179,7 @@ def _state_wire_lines(state_wire: str, *, sim: bool = False) -> list:
     to a dec frame, and is what `scratchpad/m14_gate.py` gates."""
     if state_wire != "bin":
         assert not sim, "the player sim needs the bin wire (there is no key byte on the dec wire)"
+        assert not collide, "collision rides the player sim, which needs the bin wire"
         return ["hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
                 "hex.input_dec_uint 8, viewangle, bad",
                 "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
@@ -190,7 +196,7 @@ def _state_wire_lines(state_wire: str, *, sim: bool = False) -> list:
         # M14-c: the tic runs BEFORE anything is derived from the state and before the echo, so the
         # frame is rendered from the state the host will be handed back -- DOOM's P_Ticker then
         # R_RenderPlayerView, and the reason one run really is one tic.
-        *(_player_sim_lines() if sim else []),
+        *(_player_sim_lines(collide) if sim else []),
         *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
         *_int_part_lines("vy", "viewy", "vysx", "vydone"),
         # ... and the state goes straight back out, so the host can relay it into the next frame
@@ -209,7 +215,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        things: bool = False, sprite_wad=None,
                        bbox_cull: bool = False, stack_steps: bool = False,
                        deg: bool = False, state_wire: str = "dec",
-                       player_sim: bool = False, return_parts: bool = False):
+                       player_sim: bool = False, collide: bool = False,
+                       return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both
@@ -1247,8 +1254,41 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         bsp += _bsp_descend_code(_pfx(mapname), cmap, _lines_descend_leaf, done_label="dsc_done")
     xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # the shared per-seg xorby blocks (once)
 
+    if collide:
+        assert player_sim and lines, "collide=True rides player_sim on the lines tier"
+        # local import: doomfj.collision needs wall_renderer's _int_part_lines, so importing it at
+        # module level would close a cycle (the seg_affine_coeffs precedent in mapcompiler)
+        from doomfj.collision import (block_tables, blockmap_grid, collision_tables_fj,
+                                      move_with_collision_lines, COLLISION_STATE_DECLS)
+        _cgrid = build_blockmap(cmap, lds)
+        _bx0, _by0, _nbx, _nby = blockmap_grid(_cgrid)
+        _cblocks, _cflat = block_tables(_cgrid)
+        _collide_block = ([";simcollide_skip", "simcollide:"]
+                          + move_with_collision_lines(
+                              _cgrid, _pfx(mapname), radius=PLAYER_RADIUS,
+                              height=PLAYER_HEIGHT >> 16, maxstep=MAX_STEP >> 16,
+                              n_bk=_index_nibbles(len(_cblocks)),
+                              n_bl=_index_nibbles(max(1, len(_cflat))),
+                              n_ln=_index_nibbles(len(lds)))
+                          + ["    ;simmv_done", "simcollide_skip:"])
+        _collide_tables = collision_tables_fj(cmap, lds, secs, sds, ML_BLOCKING, _cgrid)
+        _collide_decls = list(COLLISION_STATE_DECLS)
+        # the SEED descent: the same point-location query the eye's pre-walk runs, at a CANDIDATE
+        # position, tagged so it gets its own labels while sharing the partition blocks
+        _collide_descend = _bsp_descend_code(
+            _pfx(mapname), cmap,
+            lambda s: [f"    hex.set 8, cp_seedf, "
+                       f"{rm._seg_sector(lds, sds, secs, cmap.segs[cmap.subsectors[s].firstseg]).floor_h & 0xFFFFFFFF}",
+                       f"    hex.set 8, cp_seedc, "
+                       f"{rm._seg_sector(lds, sds, secs, cmap.segs[cmap.subsectors[s].firstseg]).ceil_h & 0xFFFFFFFF}"],
+            done_label="cs_seeded", tag="cs") + "\ncs_seeded:\n    stl.fret cs_ret\n"
+    else:
+        _collide_block = _collide_decls = []
+        _collide_tables = _collide_descend = ""
+
     pass1 = [
-        *_state_wire_lines(state_wire, sim=player_sim),
+        *_state_wire_lines(state_wire, sim=player_sim, collide=collide),
+        *_collide_block,
         # M13-absmul: per-frame |viewx|/|viewy| + sign flags. fixed_mul_lo's cost is one schoolbook
         # row per nonzero nibble of the MULTIPLIER, and a negative 16.16 view coord sign-extends to
         # a dense pattern -- so the per-seg affine cull multiplies by these sparse abs values and
@@ -1400,7 +1440,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                      tex, cm, ttang, sdrecip, srdisp, xtadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid,
-                     entoff, "__hot_end:"])
+                     entoff, _collide_tables, "__hot_end:"])
     else:
         hotdata = []
     # M13-raster: the walk EMITS records inline (present.begin_frame_raster is prepended to pass1,
@@ -1559,10 +1599,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
       ]),
       ("walk", [
           bsp,
+          _collide_descend,          # M14-d: the candidate-position point location
       ]),
       ("state", [
           *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
           "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+          *_collide_decls,                                  # M14-d collision state
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2 nibbles)
           *(["wmagic: hex.vec 2", "pkeys: hex.vec 2"] if state_wire == "bin" else []),
           # M14-c: the player tic's scratch -- the signed 16.16 move magnitude, the

@@ -40,7 +40,7 @@ from tests.fj.stream_screen import StreamScreen
 
 SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
-                                     "stream_render.fj")]
+                                     "stream_render.fj", "sim.fj")]
 # the M14-a certified op counts (dec wire), in VPS order -- the baseline the bin wire is diffed
 # against. deg_gate's own header still carries the pre-M14-a numbers.
 DEC_OPS = (45_664_661, 36_423_780, 43_030_266, 34_119_621)
@@ -57,15 +57,26 @@ VPS = [(664, 291, 0x18000000),        # the sprite-overlap frame: B-gate + gradu
        (1869, 479, 2147483648),       # the everything frame: sliver + PNEAR + all
        (spx, spy, sp.angle)]
 
-# a scripted tic sequence: turn, walk, turn while walking, back up, and the two cancelling pairs
 F, B, L, R = 0b0001, 0b0010, 0b0100, 0b1000
-SCRIPT = [L, L, F, F, F | L, F | L, F, F | R, B, F | B, L | R, F, F, F | R, R, F]
+# The scripted tics. The first stretch is the M14-c script -- turn, walk, turn while walking, back
+# up, and the two cancelling pairs.
+#
+# ⚠ THE TAIL EXISTS TO MAKE --collide NON-VACUOUS. Under `--collide` both mirrors run collision, so
+# a script that never touches a wall passes whether or not the collision works at all. Four turns
+# then five steps walks the player INTO one from spawn (found by searching the oracle for the
+# shortest colliding script), and `phase2` asserts that at least one tic was actually blocked.
+# ...and it goes FIRST, because it only reaches that wall FROM SPAWN. Appended, the player has
+# already walked elsewhere by the time it runs and nothing is hit -- which the control caught.
+SCRIPT = ([L, L, L, L, F, F, F, F, F]
+          + [L, L, F, F, F | L, F | L, F, F | R, B, F | B, L | R, F, F, F | R, R, F])
 
 RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
                  near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
 
 
-CACHE = ROOT / "scratchpad/fjmcache/m14_bin.fjm"
+COLLIDE = "--collide" in sys.argv
+CACHE = ROOT / ("scratchpad/fjmcache/m14_coll.fjm" if COLLIDE
+                else "scratchpad/fjmcache/m14_bin.fjm")
 
 
 def build():
@@ -78,7 +89,7 @@ def build():
                                floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
                                plane_near=True, wall_noise=True, steps=True, stack_steps=True,
                                things=True, sprite_wad=art, deg=True,
-                               state_wire="bin", player_sim=True)
+                               state_wire="bin", player_sim=True, collide=COLLIDE)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     prog = write_program_files(parts, tmp, "e1m1")     # ⚠ order is the contract
@@ -121,12 +132,17 @@ def phase2(fjm, tics):
     ok = True
     state = (_signed(sp.x, 32), _signed(sp.y, 32), sp.angle)
     want_state = state
+    blocked_tics = 0
     for tic in range(tics):
         keys = SCRIPT[tic % len(SCRIPT)]
         scr, term = run(fjm, encode_feed(*state, keys))
         # the oracle takes the same tic, then renders from the state that tic produced
-        s = rm.step_sim(SimState(want_state[0] & 0xFFFFFFFF, want_state[1] & 0xFFFFFFFF,
-                                 want_state[2], "E1M1"), keys_dict(keys))
+        _prev = SimState(want_state[0] & 0xFFFFFFFF, want_state[1] & 0xFFFFFFFF,
+                         want_state[2], "E1M1")
+        s = rm.step_sim(_prev, keys_dict(keys), scene=scene if COLLIDE else None)
+        if COLLIDE:                      # did collision actually change this tic's outcome?
+            _free = rm.step_sim(_prev, keys_dict(keys))
+            blocked_tics += (_free.x, _free.y) != (s.x, s.y)
         want_state = (_signed(s.x, 32), _signed(s.y, 32), s.angle)
         want = rm.render_wall_frame(SimState(s.x, s.y, s.angle, "E1M1"), scene, **RENDER_KW)
         same = bytes(scr.pixel_indices) == bytes(want)
@@ -141,6 +157,13 @@ def phase2(fjm, tics):
             print("  -- stopping: once the trajectories part, later tics compare nothing useful")
             break
         state = scr.state                          # the relay: this tic's output is next tic's input
+    if COLLIDE:
+        # ⚠ THE CONTROL. With collision on BOTH sides, a script that never hits a wall agrees no
+        # matter what the fj does. Refuse to call it a pass unless a wall was actually hit.
+        print(f"  collision changed the outcome on {blocked_tics} of {tics} tics", flush=True)
+        if not blocked_tics:
+            print("  !! VACUOUS: no tic was blocked -- run more tics or fix SCRIPT")
+            ok = False
     return ok
 
 

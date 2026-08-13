@@ -25,6 +25,8 @@ conventions, which are not the same as the cross product's.
 """
 from __future__ import annotations
 
+from doomfj.wall_renderer import _int_part_lines
+
 M32 = 0xFFFFFFFF
 BOXTOP, BOXBOTTOM, BOXLEFT, BOXRIGHT = 0, 1, 2, 3
 
@@ -463,3 +465,94 @@ class _RowBake:
         else:
             p1, p2 = self.point_side(right, top), self.point_side(left, bottom)
         return p1 if p1 == p2 else -1
+
+
+# ── the emitter's side: everything the renderer needs to collide ──────────────────────────────
+
+def collision_tables_fj(cmap, lds, secs, sds, ml_blocking, grid) -> str:
+    """The three packed tables, as fj data."""
+    from doomfj.lut_generator import generate_packed_lut_fj
+
+    def pack(vals, widths):
+        v = sh = 0
+        for x, nb in zip(vals, widths):
+            v |= (x & ((1 << (8 * nb)) - 1)) << sh
+            sh += 8 * nb
+        return v
+
+    rows = line_rows(lds, cmap.vertexes, secs, sds, ml_blocking)
+    blocks, flat = block_tables(grid)
+    return "\n".join([
+        generate_packed_lut_fj("lnrow", [pack(r, LINE_ROW_BYTES) for r in rows], LINE_ROW_LEN),
+        generate_packed_lut_fj("bkoff", [pack(b, (2, 1)) for b in blocks], 3),
+        generate_packed_lut_fj("bklin", list(flat) or [0], 2),
+    ]) + "\n"
+
+
+COLLISION_STATE_DECLS = [
+    "cpx: hex.vec 8", "cpy: hex.vec 8", "cprad: hex.vec 8",
+    "cbx_lo: hex.vec 8", "cbx_hi: hex.vec 8", "cby_lo: hex.vec 8", "cby_hi: hex.vec 8",
+    "cp_ok: hex.vec 1", "cp_floor: hex.vec 8", "cp_ceil: hex.vec 8",
+    "cp_seedf: hex.vec 8", "cp_seedc: hex.vec 8", "mv_ok: hex.vec 1",
+    "cm_hf: hex.vec 8",                       # the floor the player is standing on now
+    "cm_dx: hex.vec 8", "cm_dy: hex.vec 8",   # the tic's desired move
+    "cs_ret: hex.vec w/4",                    # the seed descent's fcall return
+]
+
+
+def move_with_collision_lines(grid, mapname_pfx: str, *, radius: int, height: int, maxstep: int,
+                              n_bk: int, n_bl: int, n_ln: int) -> list:
+    """M14-d — the blocked-move policy, in the emitted program.
+
+    `cm_dx`/`cm_dy` hold the tic's desired move and `viewx`/`viewy` the current position; on return
+    `viewx`/`viewy` hold the position actually taken. Tries the whole step, then the two
+    axis-separated halves — NOT DOOM's `P_SlideMove`, which projects the residual momentum along
+    the wall. The oracle implements this same policy (`move_with_collision`), so it is a stated
+    difference from vanilla rather than a drift between the mirrors.
+
+    ⚠ Each candidate needs the sector UNDER IT for `check_position`'s seed, which is a BSP descent
+    per candidate. The descent reads `vx`/`vy`, so those are set from the candidate before it runs.
+    That is safe here and only here: this whole block runs BEFORE `_int_part_lines` re-derives
+    `vx`/`vy` from the final position for the walk."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    args = (f"bkoff, {n_bk}, bklin, {n_bl}, lnrow, {n_ln}, {nbx}, {nby}, {bx0}, {by0}")
+
+    def candidate(tag, xexpr, yexpr, nxt):
+        return [
+            *xexpr, *yexpr,
+            # the seed: locate the candidate's subsector, then run the full P_TryMove
+            *_int_part_lines("vx", "cpx", f"{tag}vxs", f"{tag}vxd"),
+            *_int_part_lines("vy", "cpy", f"{tag}vys", f"{tag}vyd"),
+            # the seed descent is a CALL, not a jump: it has one exit and four call sites, so it
+            # frets to `cs_ret` instead of falling into any one caller's continuation
+            f"    stl.fcall {mapname_pfx}_dsccs_walk, cs_ret",
+            f"    sim.try_move {args}, {height}, {maxstep}, cm_hf",
+            f"    hex.if0 1, mv_ok, {nxt}",
+            "    hex.mov 8, viewx, cpx", "    hex.mov 8, viewy, cpy",
+            "    ;cmv_done",
+            f"  {nxt}:",
+        ]
+
+    out = [
+        # ⚠ THE RADIUS, ONCE. `sim.check_position` READS `cprad` -- it does not set it -- and a
+        # declared-but-unwritten hex.vec is ZERO. With cprad = 0 the collision box collapses to a
+        # POINT, which walks straight through walls whose line the real 32-unit box would straddle.
+        # The standalone tests set it themselves, so they never saw this; the gate's blocked-tic
+        # control did, on the first tic where a wall mattered.
+        _set("cprad", radius),
+        # where the player stands now: its floor is what "too big a step up" is measured against
+        "    hex.mov 8, cpx, viewx", "    hex.mov 8, cpy, viewy",
+        *_int_part_lines("vx", "cpx", "cmh_vxs", "cmh_vxd"),
+        *_int_part_lines("vy", "cpy", "cmh_vys", "cmh_vyd"),
+        f"    stl.fcall {mapname_pfx}_dsccs_walk, cs_ret",
+        f"    sim.check_position {args}",
+        "    hex.mov 8, cm_hf, cp_floor",
+    ]
+    out += candidate("cma_", ["    hex.mov 8, cpx, viewx", "    hex.add 8, cpx, cm_dx"],
+                     ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_b")
+    out += candidate("cmb_", ["    hex.mov 8, cpx, viewx", "    hex.add 8, cpx, cm_dx"],
+                     ["    hex.mov 8, cpy, viewy"], "cmv_c")
+    out += candidate("cmc_", ["    hex.mov 8, cpx, viewx"],
+                     ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_stay")
+    out += ["  cmv_done:"]
+    return out

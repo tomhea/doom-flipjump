@@ -393,6 +393,24 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
   `point_in_subsector(t.x, t.y)` — it is already position-driven. Feed it the runtime positions
   instead of the WAD's and it mirrors the new binding with no new logic.
 
+  **WHAT IS BUILT AND PROVEN ALREADY** (all in `src/`, all with tests):
+   * `collision.generate_point_location_fj` — the descent baked as code, EXACT (50/50 vs
+     `point_in_subsector`, vertices included), mean 105,715 ops a lookup;
+   * `doomfj.things` — the row split, with the proof that deriving `sp_z`/`sp_lt` from the bound
+     subsector reproduces today's baked constants for every drawable thing, and the control that
+     moves 20 things into differently-lit sectors and requires the values to follow;
+   * `_lines_sprite_light(moving_things=True)` — the widened shade-row bank, ADDITIVE (every spawn
+     class keeps its index, so widening alone cannot move a pixel), 75 → 210 classes, 2.8x;
+   * `sim.thing_load` — the register load that replaces the baked block: ALL 13 FIELDS MATCH;
+   * `render_wall_frame(thing_positions=…)` and `wireformat.encode_things` / `decode_things`.
+
+  **WHAT IS NOT** — `sim.bind_things`, parked unproven in `scratchpad/m14e_bind_draft.fj` with its
+  symptom written down: the macro never returns, dying within a few ops of entry (a marker before
+  the call prints, the one after does not, and the run ends at ~5,064 ops — about
+  `stl.startup_and_init_all` alone), so neither loop body runs. Suspect the preamble, not the
+  pointer walks. `scratchpad/_bind.py` drives it and diffs the per-leaf lists against
+  `point_in_subsector`. After that: the `subsector_action` swap (two lines) and the gate.
+
   Then the list itself: a LINKED list (`thing_next[t]`, `ss_head[ss]`) rather than per-leaf arrays —
   O(1) to append, no cap, and therefore no overflow budget that could silently drop a thing (the
   failure class M14-a exists to prevent). Bind things in DESCENDING index order so traversal yields

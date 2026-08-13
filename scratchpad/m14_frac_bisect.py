@@ -27,8 +27,10 @@ from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
 from doomfj.config import Config
 from doomfj.harness import W
-from doomfj.lut_generator import (generate_slopediv_recip8_lut_fj, generate_slopediv_recip_lut_fj,
-                                  generate_tantoangle_lut_fj, generate_viewangletox_lut_fj)
+from doomfj.lut_generator import (generate_dispatch_table_fj, generate_slopediv_recip8_lut_fj,
+                                  generate_slopediv_recip_lut_fj, generate_tantoangle_lut_fj,
+                                  generate_viewangletox_lut_fj)
+from doomfj.tables import slopediv_recip8_table, tantoangle_table
 from doomfj.mapcompiler import bake_bsp, seg_affine_coeffs
 from doomfj.reference_model import ReferenceModel, SLOPERANGE
 from doomfj.wad import WadFile
@@ -242,8 +244,14 @@ def run_head_to_kernel(tmp: Path):
         "hex.shr_hex 10, 6, wnt", "hex.shr_bit 10, wnt",
         "hex.zero 4, wnoff", "hex.mov 4, wnoff, wnt",
         "proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy",
+        # BOTH range macros, side by side. `wall_x_range` is what tests/fj cover; the SHIPPED lines
+        # leaf calls `wall_x_range_m`, which is the M13-mapmul variant -- and that one reads
+        # `viewx + 4*dw`, the top 4 nibbles, i.e. the INTEGER MAP SLICE.
         "proj.wall_x_range vis, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, "
         "viewangle, p, q, r, s, ga, gb, gc",
+        "hex.print_as_digit 8, x1, 0", "stl.output 10",
+        "proj.wall_x_range_m 0, 0, 0, vis, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, "
+        "viewys, viewangle, p, q, r, s, ga, gb, gc",
         "hex.print_as_digit 8, viewx, 0", "stl.output 10",
         "hex.print_as_digit 8, viewxa, 0", "stl.output 10",
         "hex.print_as_digit 1, vis, 0", "stl.output 10",
@@ -267,6 +275,11 @@ def run_head_to_kernel(tmp: Path):
         generate_slopediv_recip_lut_fj("slopediv_recip"),
         generate_slopediv_recip8_lut_fj("slopediv_recip8"),
         generate_viewangletox_lut_fj("viewangletox", Config().VIEW_W, Config().TRIG_N),
+        # the lines tier's DISPATCH forms of the same two tables -- wall_x_range_m reads these
+        generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE),
+                                   index_nibbles=3, result_nibbles=8),
+        generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(),
+                                   index_nibbles=3, result_nibbles=6),
     ]) + "\n"
     src = tmp / "head.fj"
     src.write_text(prog, encoding="utf-8")
@@ -283,10 +296,12 @@ def run_head_to_kernel(tmp: Path):
         # skip the 13-byte state echo the wire emits before the prints
         o = io.get_output(allow_incomplete_output=True)[13:].decode("ascii").split("\n")
         res = rm.wall_x_range((-416 * U) + frac, 256 * U, 0, seg, e1.vertexes)
-        got_x1 = int(o[3], 16)
-        ok &= got_x1 == (res[0] if res else None)
-        print(f"  {tag:10s} viewx={o[0]} viewxa={o[1]}  fj x1={got_x1}  oracle x1={res[0]}"
-              f"{'' if got_x1 == res[0] else '   <<< the head lost the fraction'}")
+        # print order: [0] wall_x_range x1, [1] viewx, [2] viewxa, [3] vis, [4] x1_m, [5] x2_m
+        plain_x1, m_x1 = int(o[0], 16), int(o[4], 16)
+        ok &= plain_x1 == res[0] and m_x1 == res[0]
+        print(f"  {tag:10s} viewx={o[1]}  oracle x1={res[0]:3d}"
+              f"   wall_x_range x1={plain_x1:3d}   wall_x_range_m x1={m_x1:3d}"
+              f"{'' if m_x1 == res[0] else '   <<< THE SHIPPED PATH IGNORES THE FRACTION'}")
     return ok
 
 

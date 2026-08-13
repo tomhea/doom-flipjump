@@ -1943,16 +1943,28 @@ ns proj {
               notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end {
         hex.set 1, visible, 0
 
-        // M13-mapmul: viewxa = |viewx| = m<<16, so fixed_mul(a, m<<16) = (a*m<<16)>>16 = a*m
-        // EXACTLY (no truncation) -- the mul runs on the 4-NIBBLE map slice (viewxa+4*dw) at
-        // mul_lo 8 instead of fixed_mul_lo 8,4's 12-nibble internal width. Bit-identical.
-        hex.zero 8, sgn
-        rep(4, j) hex.fixed_mul_lo.row 8, j, sgn, a, viewxa + 4*dw   // 4 multiplier rows only
+        // M13-mapmul WAS: viewxa = |viewx| = m<<16, so fixed_mul(a, m<<16) = (a*m<<16)>>16 = a*m
+        // EXACTLY -- the mul ran on the 4-NIBBLE map slice (viewxa+4*dw), and the two atans on the
+        // map slice too. Bit-identical, AND ONLY BIT-IDENTICAL WHILE THE PREMISE HOLDS.
+        //
+        // ⚠ M14-c KILLED THE PREMISE. The player sim moves in 16.16, so `viewx = m<<16` stops being
+        // true from the player's second step: the low nibbles carry a real fraction and the map
+        // slice silently FLOORS the view position. The renderer then draws the frame for the
+        // integer position -- byte-exact at whole map units (which is every gate, test and golden
+        // this repo has ever had) and wrong everywhere between them. Measured before the fix:
+        // 10/10 random walkable viewpoints byte-exact on integers, 2/10 at +1/2 unit; at
+        // (-416, 256, 0) seg 424's x1 stayed 133 where the oracle said 134, and column 133 kept a
+        // riser piece the oracle had already given up. See docs/handoff-m14.md section 4b.
+        //
+        // So both halves go back to full 16.16 width -- the same arithmetic `wall_x_range` (the
+        // non-`_m` twin, which the projection-kernel tests cover) has always used. At an integer
+        // position this is bit-identical to what it replaces, so nothing that was certified moves;
+        // it costs the map-slice's narrower multiplier rows and narrower atan.
+        hex.fixed_mul_lo 8, 4, sgn, a, viewxa
         hex.if0 1, viewxs, sgn_x_done
         hex.neg 8, sgn
       sgn_x_done:
-        hex.zero 8, sgn_b
-        rep(4, j) hex.fixed_mul_lo.row 8, j, sgn_b, b, viewya + 4*dw
+        hex.fixed_mul_lo 8, 4, sgn_b, b, viewya
         hex.if0 1, viewys, sgn_y_done
         hex.neg 8, sgn_b
       sgn_y_done:
@@ -1961,8 +1973,13 @@ ns proj {
         hex.sign 8, sgn, end, frontok
       frontok:
         hex.if0 8, sgn, end
-        .point_to_angle_m dsl, dtb, ang1, viewx + 4*dw, viewy + 4*dw, v1x + 4*dw, v1y + 4*dw
-        .point_to_angle_m dsl, dtb, ang2, viewx + 4*dw, viewy + 4*dw, v2x + 4*dw, v2y + 4*dw
+        .point_to_angle ang1, viewx, viewy, v1x, v1y
+        .point_to_angle ang2, viewx, viewy, v2x, v2y
+        // `dsl`/`dtb` (ablate "slopetwice"/"tabletwice") used to split point_to_angle_m's cost into
+        // its slope-divide and table-read halves. The full-width `point_to_angle` has no such split,
+        // so they now re-run the WHOLE atan into a dead register instead -- measurement-only knobs
+        // (never set in a shipped or gated config), but their granularity is coarser than it was.
+        rep(dsl + dtb, k) .point_to_angle adup, viewx, viewy, v1x, v1y
         rep(dbl, k) .atan_dup adup, viewx, viewy, v1x, v1y, v2x, v2y
         hex.mov 8, span, ang1
         hex.sub 8, span, ang2

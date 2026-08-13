@@ -127,7 +127,37 @@ was pruned. A silent vanish is unacceptable; a hard failure is fine.
   whether M14 ships that (honest, and fine for a first cut) or adds rotations (a bank-size
   question — 8 rotations multiplies the sprite bank).
 
-## 4b. ⚠ THE BLOCKER M14-c FOUND — the renderer is byte-exact at INTEGER positions only
+## 4b. ✅ FIXED — the renderer used to be byte-exact at INTEGER positions only
+
+**Root cause: `proj.wall_x_range_m` read the view position's INTEGER MAP SLICE.** The lines-tier
+leaf calls `wall_x_range_m`, not the `wall_x_range` the projection-kernel tests cover, and the
+M13-mapmul optimisation inside it passed `viewx + 4*dw` / `viewy + 4*dw` — the top four nibbles —
+to `point_to_angle_m`, and multiplied the affine cull by the map slice of `viewxa`/`viewya`. That is
+exactly bit-identical **while `viewx = m<<16`**, which was true of every gate, test and golden this
+repo has ever had. M14-c's sim breaks the premise from the player's second step: the low nibbles
+carry a real fraction, the slice floors it, and the renderer draws the frame for the integer
+position. The macro's own comment stated the premise; nothing had ever violated it.
+
+**The fix** (`src/fj/projection.fj`): both halves of `wall_x_range_m` go back to full 16.16 width —
+`hex.fixed_mul_lo 8, 4` for the affine cull and `.point_to_angle` for the two vertex atans, i.e. the
+same arithmetic its non-`_m` twin has always used. The signature is untouched (the frozen ABI holds);
+`dsl`/`dtb` survive as coarser measurement-only knobs, documented in place.
+
+| | before | after |
+|---|---|---|
+| integer positions (10 random walkable × random angles) | 10/10 byte-exact | **10/10** |
+| the same + half a map unit | 2/10 | **10/10** |
+| `m14_gate` phase 2, 8 relayed tics from spawn | diverged at tic 2 | **8/8 byte-exact** |
+
+**Cost: +3.3M–4.0M ops/frame (~+9–10%)** at the four gate viewpoints — the price the M13-mapmul
+narrowing was buying, now paid back because the premise it rested on is gone. Correctness over op
+budget, per §7. If it needs winning back, the lever is a *conditional*: the map-slice path is still
+valid whenever the position's low nibbles are zero, so a per-frame test could pick the narrow path
+for integer positions — but that is an optimisation to price separately, not a correctness matter.
+
+<details><summary>The original blocker write-up, kept for the record</summary>
+
+### ⚠ THE BLOCKER M14-c FOUND — the renderer is byte-exact at INTEGER positions only
 
 **Read this before touching M14-c or M14-d.** The player sim is the first thing in this project
 ever to produce a **fractional** player position. Every gate, every test and every golden in the
@@ -257,6 +287,12 @@ Options, in the order I would take them:
 3. (last resort, and against the owner's stated preferences) quantise the sim's position to whole
    map units, which hides a real bug rather than fixing it.
 
+*(Option 2 is what shipped: the truncating consumer was `wall_x_range_m`'s map slice, and it now
+takes the full 16.16. Option 1's record-level diff was never needed — the kernel-level bisect in
+`m14_frac_bisect.py` reached the macro first.)*
+
+</details>
+
 ## 5. Suggested rungs (each its own commit + gate)
 
 - **M14-0 spike** ✅ **DONE** (`81c3796`) — measured; §2.1 has the numbers and the decision (binary).
@@ -265,10 +301,10 @@ Options, in the order I would take them:
 - **M14-b** ✅ **DONE** — the binary wire round-trips; `m14_gate.py` phase 1 is byte-exact at all
   four viewpoints with the state echoed back unchanged, and the bin wire is 336k–603k ops
   *cheaper* than the decimals it replaces.
-- **M14-c** ⚠ **BUILT AND PROVEN AS A SIM, NOT CERTIFIED AS A FRAME.** The fj tic matches
-  `step_sim` exactly: all 16 key combinations, a 200-tic relayed trajectory, and the angle wrap
-  (`tests/fj/test_state_wire.py`, 36 tests). The renderer-level gate then walks into §4b — the
-  first fractional position diverges. **§4b is the next piece of work, and it is not M14's fault.**
+- **M14-c** ✅ **DONE.** The fj tic matches `step_sim` exactly — all 16 key combinations, a 200-tic
+  relayed trajectory and the angle wrap (`tests/fj/test_state_wire.py`, 36 tests) — and the
+  renderer-level gate passes too: `m14_gate` phase 1 byte-exact ×4, phase 2 **8/8 tics byte-exact
+  with the state relayed**, once §4b's `wall_x_range_m` precision bug was fixed (+9–10% ops).
 - **M14-d** ⚠ **ORACLE DONE, fj NOT STARTED.** `check_position` / `try_move` /
   `move_with_collision` mirror P_CheckPosition / PIT_CheckLine / P_BoxOnLineSide (no blockmap: the
   per-line bbox reject does that job, ~1.5k lines against a ~34M-op frame). 16 tests in

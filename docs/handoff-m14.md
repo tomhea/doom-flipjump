@@ -190,16 +190,42 @@ x-range, or which seg won the column). Feature toggles on the oracle attribute t
 `near_steps` / `stack_steps` / `plane_near` in roughly equal thirds and to `things` / `wall_noise`
 not at all — i.e. it is the geometry, not the decoration.
 
+### What the bisection has already ruled out — `scratchpad/m14_frac_bisect.py`, ~1 minute, no build
+
+That script drives the projection kernels the way `tests/fj/test_projection_kernels.py` does (whose
+every case feeds a whole number of map units) but with the low nibbles populated. Results:
+
+| stage | fractional viewpoints | verdict |
+|---|---|---|
+| `proj.wall_setup` (→ rw_distance) | 4 points × {0, 1 ulp, ¼, ½, 0.99 unit} | **exact** |
+| `proj.wall_x_range` (→ x1, x2, rw_angle1) | same | **exact** |
+| `proj.wall_x_range` on the REAL E1M1 segs at the repro | 8 segs × {integer, ½} | **exact**, including the 133→134 shift |
+| the emitter's OWN pass-1 head → the kernel | fed through the real wire | **exact** (`viewx=fe608000`, `viewxa=019f8000`, x1=134) |
+
+That last row matters most: the wire loads the fraction, the M13-absmul derivation keeps it
+(`viewxa` is the abs of the FULL 16.16, not of the integer part), and `wall_x_range` answers the
+oracle's value. **So the fraction reaches the kernels intact and the kernels are right.** The
+M13-absmul suspicion is dead, and so is the `DEG_STACK_SCALE` one.
+
+And yet the shipped frame barely moves. At (-416, 256, 0) for a half unit:
+
+```
+x + 0.5 : fj moved   0 px, oracle moved   4
+y + 0.5 : fj moved   2 px, oracle moved 216
+both    : fj moved   0 px, oracle moved 214
+x + 0.99: fj moved   0 px, oracle moved   8
+```
+
+**So the divergence is DOWNSTREAM of the kernels, inside the lines-tier leaf's own per-column and
+piece machinery** — the part that turns an exact `(x1, x2, scale, rw_distance)` into claimed
+columns, wall runs, V3/V5 pieces and plane regions. That is where to look next, and it is a much
+smaller haystack than the whole renderer.
+
 Options, in the order I would take them:
-1. bisect the pipeline: at one fractional point, dump the per-column projection intermediates on
-   both sides (`scratchpad/` already has the tracing precedent in `walk_trace.py` / `ts_trace.py`)
-   and find the first stage whose output differs. The 4-pixel, single-column repro above is the
-   cheapest place to do it. Prime suspect, given "row boundaries off by one or two": the M13-absmul
-   affine path. Its `viewxa`/`viewya` comment claims bit-identity while noting that a view coord's
-   LOW NIBBLES are the multiplier's sparsity — and an integer coord has four zero low nibbles where
-   a fractional one does not. `fixed_mul_lo` truncates at `n+f` nibbles, which is exact for the
-   slice `fixed_mul` would return; whether it stays exact once those low nibbles are populated is
-   the first thing to check, not assume;
+1. compare at the RECORD level, not the pixel level: the oracle already exposes `steps_out` /
+   `planes_out` / `things_out`, and the fj frame is a 0x0B fillCol run-list before `StreamScreen`
+   composites it. Diffing those two for the 4-pixel repro column names the disagreeing record
+   directly, instead of inferring it from colours;
 2. once found, feed the 16.16 position to whichever consumer is truncating (or truncate on the
    oracle side, if the integer really is the intended input) so the mirrors agree by construction;
 3. (last resort, and against the owner's stated preferences) quantise the sim's position to whole

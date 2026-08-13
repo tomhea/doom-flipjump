@@ -2269,14 +2269,25 @@ def _thing_sector(rm, cmap, lds, sds, secs, t):
     return rm._seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
 
 
-def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, secs):
+def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, secs,
+                        *, moving_things: bool = False):
     """V4 — the sprite SHADE-ROW bank + the (lightnum, sprite world height) class each thing bakes.
 
     A billboard takes DOOM's scalelight row for its own on-screen height, exactly as a wall column
     and a V3 step face do, so the row is a function of (sector light, sprite height, BUCKETED screen
     height) and bakes out. Rows, not colours: sprite texels stay RAW in `sprbank` and go through
     `cm.emit` at emit time (V1's grain mechanism), which is what keeps ONE bank serving all 16 light
-    levels instead of being multiplied by them."""
+    levels instead of being multiplied by them.
+
+    M14-e `moving_things`: the classes above are the pairs that occur AT SPAWN, which is all a
+    static thing can ever see. A thing that walks into a differently-lit sector needs a pair that
+    was never baked, so the bank widens to the CROSS PRODUCT of the sprite heights with the
+    lightnums a thing can actually stand in.
+
+    ⚠ "can actually stand in" is the whole cost argument, and it is sound: a thing is always in some
+    sector, so only the lightnums the map's SECTORS have are reachable. On E1M1 that is 10 of the 32
+    COLORMAP_LIGHTS, so the bank goes 75 -> 210 classes (**2.8x**, ~193k -> ~540k chars) instead of
+    the 672 (9x, ~1.73M) a naive all-lights widening would cost."""
     cache: dict = {}
     cls_of: dict = {}
     for t in map_wad.things(mapname):
@@ -2285,6 +2296,13 @@ def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, s
             continue
         sec = _thing_sector(rm, cmap, lds, sds, secs, t)
         cls_of.setdefault((rm.wall_lightnum(sec.light, 0), max(1, art[4])), len(cls_of))
+    if moving_things:
+        # the spawn pairs keep their indices -- appending leaves every static thing's baked class
+        # exactly where it was, so widening the bank cannot move a pixel by itself
+        heights = sorted({h for (_ln, h) in cls_of})
+        for ln in sorted({rm.wall_lightnum(s.light, 0) for s in secs}):
+            for h in heights:
+                cls_of.setdefault((ln, h), len(cls_of))
     assert len(cls_of) * STEP_COL_STRIDE <= 0x10000, f"sprite light classes overflow: {len(cls_of)}"
     out = [f"// V4 sprite shade rows: {len(cls_of)} (light, sprite-height) classes x "
            f"{STEP_COL_STRIDE} dw, indexed class<<8 | bucket height", "sprlight:"]

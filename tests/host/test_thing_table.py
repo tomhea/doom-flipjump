@@ -154,3 +154,26 @@ def test_the_shade_row_bank_must_be_widened_and_by_how_much(level):
     # and the missing pairs must be exactly the reachable ones nobody stands in today
     missing = {(ln, h) for ln in reach for h in heights if (ln, h) not in spr_cls}
     assert missing, "nothing missing means moving things need no widening, which contradicts above"
+
+
+def test_the_widened_shade_row_bank_is_additive_and_covers_every_reachable_pair(level):
+    """M14-e's bank widening, and the property that makes it safe to ship.
+
+    `_lines_sprite_light(moving_things=True)` APPENDS the reachable pairs after the spawn ones, so
+    every class a static thing already bakes keeps its index. That is what makes the widening
+    pixel-neutral on its own: a static thing's `sp_lt` is bit-identical before and after, and any
+    divergence the M14-e gate then finds belongs to the moving half, not to the bank."""
+    cfg, rm, mw, art, cmap, lds, sds, secs, *_rest = level
+    static_txt, static_cls = _lines_sprite_light(rm, cfg, art, mw, "E1M1", cmap, lds, sds, secs)
+    wide_txt, wide_cls = _lines_sprite_light(rm, cfg, art, mw, "E1M1", cmap, lds, sds, secs,
+                                             moving_things=True)
+    # ⚠ the property that matters: indices are preserved, not merely present
+    for pair, idx in static_cls.items():
+        assert wide_cls[pair] == idx, f"{pair} moved from class {idx} to {wide_cls[pair]}"
+    heights = {h for (_ln, h) in static_cls}
+    for ln in reachable_lightnums(rm, secs):
+        for h in heights:
+            assert (ln, h) in wide_cls, f"a thing standing in light {ln} at height {h} has no class"
+    ratio = len(wide_cls) / len(static_cls)
+    assert 1 < ratio < 4, f"widening is {ratio:.1f}x ({len(static_cls)} -> {len(wide_cls)})"
+    assert len(wide_txt) > len(static_txt)

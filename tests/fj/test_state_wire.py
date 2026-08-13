@@ -146,10 +146,14 @@ def test_the_good_magic_byte_is_the_one_the_wire_module_defines(wire_fjm):
 # ── M14-c: the player sim ──────────────────────────────────────────────────────────────────────
 
 def _oracle(state, keys: int):
-    s = RM.step_sim(SimState(state[0] & 0xFFFFFFFF, state[1] & 0xFFFFFFFF, state[2], "E1M1"),
-                    keys_dict(keys))
-    return (s.x - (1 << 32) if s.x >> 31 else s.x,
-            s.y - (1 << 32) if s.y >> 31 else s.y, s.angle)
+    """One oracle tic, as the (x16, y16, angle) triple the wire speaks.
+
+    ⚠ No sign conversion here, deliberately: `SimState` normalises x/y to SIGNED on construction
+    (see its docstring — that fix is what made the multi-frame gate agree at all), so `s.x` is
+    already what `decode_state` returns. An extra `- (1 << 32)` here would convert a second time,
+    which is exactly what this helper used to do."""
+    s = RM.step_sim(SimState(state[0], state[1], state[2], "E1M1"), keys_dict(keys))
+    return (s.x, s.y, s.angle)
 
 
 @pytest.mark.parametrize("keys", range(16))

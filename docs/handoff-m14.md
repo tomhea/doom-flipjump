@@ -154,31 +154,43 @@ python scratchpad/m14_gate.py --probe -416 256 0x0 0     # BYTE-EXACT
 then the same point with `x = (-416 << 16) + 0x8000`: 4 pixels differ, all in column 133, rows
 68–72. Bisecting the fraction, `+0x1000` (1/16 unit) is still byte-exact and `+0x8000` is not.
 
-**Diagnosis so far.** Re-rendering the oracle with features toggled at that exact point:
+**Diagnosis: the two mirrors propagate the sub-unit position through DIFFERENT parts of the
+pipeline.** Measured at `(-267, 1458, 0xe8af30f7)`, comparing each side against ITSELF at the
+integer and the half-unit position:
 
 ```
-oracle all on       col133 rows 66..74: [1, 2, 75, 75, 104, 6, 6, 6, 6]
-oracle stack=False  col133 rows 66..74: [1, 2,  8,  8, 104, 6, 6, 6, 6]
-fj                  col133 rows 66..74: [., .,104,104,   .,104,105, ., .]
+oracle(int) vs oracle(half): 494 px    the oracle moves this much for half a unit
+fj(int)     vs fj(half)    : 105 px    fj moves, but only a fifth as much
+fj(int)     vs oracle(int) :   0 px    the integer regime is exact
+fj(half)    vs oracle(half): 574 px    ... and the two drift apart on the way
 ```
 
-The 75s are a **V5 stacked boundary piece** the oracle places and fj does not; fj paints wall
-colour through those rows instead. V5 pieces sit behind a *scale threshold* gate
-(`DEG_STACK_SCALE`, 16384). A threshold is exactly what a sub-unit position change perturbs: at
-integer positions the per-column scale lands far from 16384, at fractional ones it lands on it, and
-a one-ulp difference between the two mirrors' scale then decides the piece differently. **That is
-the hypothesis to test first — instrument the per-column scale on both sides at (-416.5, 256).**
+So it is **not** that fj discards the fraction (it moves 105 px) and **not** a single threshold
+flipping — fj carries the fraction into part of the pipeline and drops it in the rest. `viewx`/
+`viewy` (16.16, fraction intact) reach `proj.wall_x_range` and `proj.wall_offset`; other consumers
+work from `vx`/`vy`, the 10-nibble integer map coordinate. On the oracle side `state.x` is used at
+full precision in more places. **Find the consumers that differ — that is the whole bug.**
+
+⚠ **RULED OUT, do not re-test it:** the `DEG_STACK_SCALE` far gate. The first hypothesis was that
+the V5 stacked piece at the repro column flips on its scale threshold. It does not: binary-searching
+`deg_stack_scale` shows the oracle still places that piece at a threshold of 2²², i.e. the column's
+scale is ≥ 4,194,304 against a gate of 32,768 — a margin of +4,161,536. The gate is nowhere near
+binding.
 
 This is a **pre-existing renderer/oracle divergence, not something M14 introduced** — it reproduces
-with `keys=0`, i.e. with the program behaving exactly as it did before this milestone. But it
-*blocks* M14-c's byte-exactness claim, because a walking player is fractional from its second step.
+with `keys=0`, i.e. with the program behaving exactly as it did before this milestone. Nothing had
+ever asked the renderer for a fractional viewpoint. But it *blocks* M14-c's byte-exactness claim,
+because a walking player is fractional from its second step.
 
 Options, in the order I would take them:
-1. find the one-ulp difference and fix it (the mirrors then agree everywhere);
-2. if the scale genuinely cannot be made bit-identical, move the V5 gate off a raw scale compare
-   onto a quantity both sides compute identically;
+1. bisect the pipeline: at one fractional point, dump the per-column projection intermediates on
+   both sides (`scratchpad/` already has the tracing precedent in `walk_trace.py` / `ts_trace.py`)
+   and find the first stage whose output differs. The 4-pixel, single-column repro above is the
+   cheapest place to do it;
+2. once found, feed the 16.16 position to whichever consumer is truncating (or truncate on the
+   oracle side, if the integer really is the intended input) so the mirrors agree by construction;
 3. (last resort, and against the owner's stated preferences) quantise the sim's position to whole
-   map units, which hides a real bug.
+   map units, which hides a real bug rather than fixing it.
 
 ## 5. Suggested rungs (each its own commit + gate)
 

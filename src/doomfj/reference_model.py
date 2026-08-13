@@ -31,7 +31,7 @@ from doomfj.fixedpoint import fixed_mul, fixed_div, _signed  # shared signed Q-f
 from doomfj.mapcompiler import (  # shared geometry (R6)
     NF_SUBSECTOR, CompiledMap, bake_bsp, _point_side, seg_affine_coeffs,
     bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
-    thing_live_subsectors,
+    thing_live_subsectors, blockmap_candidates,
 )
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
@@ -631,7 +631,7 @@ class ReferenceModel:
         return (min(fs.ceil_h, bs.ceil_h), max(fs.floor_h, bs.floor_h),
                 min(fs.floor_h, bs.floor_h))
 
-    def check_position(self, scene, x: int, y: int, *, radius: int = PLAYER_RADIUS):
+    def check_position(self, scene, x: int, y: int, *, radius: int = PLAYER_RADIUS, blockmap=None):
         """P_CheckPosition: may a thing of `radius` stand at (x, y)? Returns
         `(ok, floorz, ceilingz)` in MAP UNITS -- `ok` False means a line refuses the position
         outright, and the two heights are the opening the touched lines leave.
@@ -659,6 +659,14 @@ class ReferenceModel:
                                 cmap.segs[cmap.subsectors[
                                     self.point_in_subsector(cmap, x >> 16, y >> 16)].firstseg])
         floorz, ceilingz = _sec.floor_h, _sec.ceil_h
+        # M14-d: `blockmap` is a pure ACCELERATOR -- the same answer from the ~0-8 lines whose block
+        # the box touches instead of all ~1.5k. It exists because the fj mirror cannot afford the
+        # full sweep (~7M ops/tic); the oracle's default stays the exhaustive loop, and
+        # tests/host/test_collision.py proves the two agree over thousands of positions rather than
+        # trusting the argument in `build_blockmap`'s docstring.
+        if blockmap is not None:
+            cand = blockmap_candidates(blockmap, x >> 16, y >> 16, radius >> 16)
+            lds = [lds[i] for i in cand]
         for ld in lds:
             v1x, v1y = cmap.vertexes[ld.v1]
             v2x, v2y = cmap.vertexes[ld.v2]

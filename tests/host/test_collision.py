@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from doomfj.config import Config
+from doomfj.mapcompiler import build_blockmap
 from doomfj.fixedpoint import _signed
 from doomfj.reference_model import (ML_BLOCKING, PLAYER_RADIUS, ReferenceModel, SimState,
                                     build_scene, spawn_state)
@@ -197,3 +198,55 @@ def test_a_masked_and_a_signed_simstate_are_the_same_state(level):
     assert SimState(sp.x, sp.y, sp.angle, "E1M1").x == _signed(sp.x, 32)
     # and an angle past the wrap is the same angle
     assert SimState(0, 0, 1 << 32, "E1M1").angle == 0
+
+
+# ── M14-d: the blockmap accelerator ────────────────────────────────────────────────────────────
+
+def test_blockmap_gives_the_same_answer_as_the_full_line_sweep(level):
+    """⚠ THE CONTROL FOR THE ACCELERATOR. `build_blockmap`'s docstring argues that a line can only
+    matter if the player's box straddles it, so listing lines per block loses nothing. An argument
+    is not a proof: this compares the blockmap answer against the exhaustive all-lines answer at
+    every position on a grid over the map, and requires them to be IDENTICAL -- blocked flag and
+    both opening heights. The fj mirror will use the blockmap, so a disagreement here is a
+    disagreement between the two halves of the project."""
+    rm, scene, _sp = level
+    lds = scene.map_wad.linedefs("E1M1")
+    grid = build_blockmap(scene.cmap, lds)
+    xs = [v[0] for v in scene.cmap.vertexes]
+    ys = [v[1] for v in scene.cmap.vertexes]
+    checked = 0
+    for x in range(min(xs), max(xs) + 1, 97):          # 97/89: coprime with the 128 block size, so
+        for y in range(min(ys), max(ys) + 1, 89):      # the samples do not land on block boundaries
+            full = rm.check_position(scene, x << 16, y << 16)
+            fast = rm.check_position(scene, x << 16, y << 16, blockmap=grid)
+            assert full == fast, f"({x},{y}): all-lines {full} != blockmap {fast}"
+            checked += 1
+    assert checked > 500, f"only {checked} positions sampled -- widen the grid"
+
+
+def test_blockmap_agrees_on_the_block_boundaries_too(level):
+    """The sampling above deliberately avoids block boundaries; this hits them on purpose, since
+    `(x - radius) >> shift` vs `(x + radius) >> shift` is exactly where a 2x2 span appears."""
+    rm, scene, _sp = level
+    grid = build_blockmap(scene.cmap, scene.map_wad.linedefs("E1M1"))
+    xs = [v[0] for v in scene.cmap.vertexes]
+    ys = [v[1] for v in scene.cmap.vertexes]
+    for x in range((min(xs) // 128) * 128, max(xs), 128):
+        for y in range((min(ys) // 128) * 128, max(ys), 512):
+            for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (16, 16), (-16, -16)):
+                px, py = x + dx, y + dy
+                full = rm.check_position(scene, px << 16, py << 16)
+                fast = rm.check_position(scene, px << 16, py << 16, blockmap=grid)
+                assert full == fast, f"({px},{py}) on a block edge: {full} != {fast}"
+
+
+def test_a_walk_agrees_between_the_two_line_sources(level):
+    """And along a real trajectory, where the positions are fractional."""
+    rm, scene, sp = level
+    grid = build_blockmap(scene.cmap, scene.map_wad.linedefs("E1M1"))
+    st = SimState(sp.x, sp.y, sp.angle, "E1M1")
+    for tic, k in enumerate(SCRIPT):
+        st = rm.step_sim(st, keys(*k), scene=scene)
+        full = rm.check_position(scene, st.x, st.y)
+        fast = rm.check_position(scene, st.x, st.y, blockmap=grid)
+        assert full == fast, f"tic {tic} at ({st.x / U:.3f}, {st.y / U:.3f}): {full} != {fast}"

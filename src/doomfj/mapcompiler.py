@@ -213,6 +213,57 @@ def assert_thing_live_survives_prune(cmap: "CompiledMap", *, thing_live, prune=N
             + " -- a thing entering one of these would vanish with no other symptom.")
 
 
+BLOCK_SHIFT = 7                  # 128-unit blocks, DOOM's own blockmap granularity
+BLOCK_SIZE = 1 << BLOCK_SHIFT
+
+
+def build_blockmap(cmap: "CompiledMap", lds, *, shift: int = BLOCK_SHIFT) -> dict:
+    """M14-d — DOOM's blockmap: `{(bx, by): [linedef indices]}`, a linedef listed in EVERY block its
+    segment passes through.
+
+    WHY IT EXISTS. `check_position` has to answer "does any line refuse this position?", and the
+    oracle answers it by testing all ~1.5k linedefs — fine in Python, ~7M fj ops if the emitted
+    program read the same table per tic. The blockmap turns that into "test the ~0-8 lines in the
+    blocks the player's box touches".
+
+    WHY IT IS SOUND, which is the part that matters. A line can only affect the answer if the
+    player's box STRADDLES it (`P_BoxOnLineSide != -1` rejects everything else), and a straddling
+    line passes through the box. The box is 2*radius across and radius (16) is far below the
+    128-unit block size, so the box spans at most 2x2 blocks — and any line crossing the box
+    crosses one of them. Listing a line in every block it passes through therefore loses nothing.
+    `tests/host/test_collision.py` proves that exhaustively rather than by this argument: it
+    compares the blockmap answer against the all-lines answer over thousands of positions.
+
+    Blocks are indexed in WHOLE MAP UNITS (the fj side gets the index by shifting the integer part
+    of the position), not 16.16 — a block index must not depend on the sub-unit fraction."""
+    grid: dict = {}
+    for li, ld in enumerate(lds):
+        x1, y1 = cmap.vertexes[ld.v1]
+        x2, y2 = cmap.vertexes[ld.v2]
+        # walk the segment block by block (a DDA over block boundaries); a step of half a block is
+        # short enough that no crossed block is skipped, and duplicates are dropped by the set
+        steps = max(abs(x2 - x1), abs(y2 - y1)) // (1 << (shift - 1)) + 1
+        seen = set()
+        for k in range(steps + 1):
+            bx = (x1 + (x2 - x1) * k // steps) >> shift
+            by = (y1 + (y2 - y1) * k // steps) >> shift
+            seen.add((bx, by))
+        for cell in seen:
+            grid.setdefault(cell, []).append(li)
+    return grid
+
+
+def blockmap_candidates(grid: dict, x: int, y: int, radius: int, *, shift: int = BLOCK_SHIFT):
+    """The linedefs to test for a box of `radius` centred at (x, y) — all in WHOLE MAP UNITS. The
+    box spans at most 2x2 blocks, and both mirrors must agree on WHICH, so the bounds are computed
+    from the box corners exactly as the fj side will."""
+    out = set()
+    for bx in range((x - radius) >> shift, ((x + radius) >> shift) + 1):
+        for by in range((y - radius) >> shift, ((y + radius) >> shift) + 1):
+            out.update(grid.get((bx, by), ()))
+    return sorted(out)
+
+
 def bbox_gate_boxes(cmap: "CompiledMap", *, min_segs: int = 32,
                     thing_subsectors=(), inflate: int = 96) -> dict:
     # min_segs tuning (E1M1-lite, measured): 8 gated 325 of 470 nodes and the per-visit test cost

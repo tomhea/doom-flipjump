@@ -221,6 +221,32 @@ piece machinery** — the part that turns an exact `(x1, x2, scale, rw_distance)
 columns, wall runs, V3/V5 pieces and plane regions. That is where to look next, and it is a much
 smaller haystack than the whole renderer.
 
+### Narrowed further: it is WHICH BOUNDARY WINS A COLUMN'S PIECE SLOT
+
+The oracle's own `steps_out` for the repro column, at both positions:
+
+```
+-416.0   los[133] = [(63, 72, front floor 0, step 16, back floor 16)]   a RISER, rows 63..72
+-416.5   los[133] = [(70, 70, front floor 0, step  0, back floor  0)]   a 1-row LIP (AQF054->AQF018)
+```
+
+So half a unit changes which boundary owns column 133's piece slot — riser to flat-change lip — and
+fj keeps painting the riser. The colours line up exactly: the 104/105s fj shows at rows 68–72 are
+the riser face, and the oracle's 75s are what shows once the riser stops covering the column.
+
+Both degradation gates that could plausibly flip this are RULED OUT by binary-searching the
+threshold at that column (do not re-test them):
+
+| gate | value | the column's actual scale | margin |
+|---|---|---|---|
+| `DEG_STACK_SCALE` | 32,768 | ≥ 4,194,304 | +4,161,536 |
+| `DEG_LIP_SCALE` | 16,384 | 32,875 | +16,491 |
+
+Neither is anywhere near binding, so this is not a threshold landing on a knife edge — it is the
+**piece-slot assignment itself**: which marking seg reaches the column first, and with what
+`rng2`. That is `subsector_action`'s attribution path and the V5 slot machinery in
+`stream_render.fj`, not the projection.
+
 Options, in the order I would take them:
 1. compare at the RECORD level, not the pixel level: the oracle already exposes `steps_out` /
    `planes_out` / `things_out`, and the fj frame is a 0x0B fillCol run-list before `StreamScreen`

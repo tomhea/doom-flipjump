@@ -231,6 +231,17 @@ def run_head_to_kernel(tmp: Path):
         "stl.startup_and_init_all",
         *_state_wire_lines("bin"),               # THE EMITTER'S OWN WIRE
         *ABSMUL,
+        # ... and everything else pass1 runs between the head and the walk, in the emitter's order:
+        # the per-frame counters, the W1R rotation anchor, and the wedge descriptors. If any of them
+        # disturbs viewx/viewy, the kernel downstream sees an integer position and the frame stops
+        # responding to the fraction -- which is exactly the symptom.
+        "hex.zero 2, n_drawn", "hex.zero 1, full",
+        "hex.zero 10, wnt", "hex.mov 8, wnt, viewangle",
+        "hex.zero 10, wnt2", "hex.mov 8, wnt2, viewangle",
+        "hex.shl_bit 10, wnt", "hex.shl_bit 10, wnt", "hex.add 10, wnt, wnt2",
+        "hex.shr_hex 10, 6, wnt", "hex.shr_bit 10, wnt",
+        "hex.zero 4, wnoff", "hex.mov 4, wnoff, wnt",
+        "proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy",
         "proj.wall_x_range vis, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, "
         "viewangle, p, q, r, s, ga, gb, gc",
         "hex.print_as_digit 8, viewx, 0", "stl.output 10",
@@ -243,6 +254,10 @@ def run_head_to_kernel(tmp: Path):
         "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "vx: hex.vec 10", "vy: hex.vec 10",
         "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+        "n_drawn: hex.vec 2", "full: hex.vec 1",
+        "wnt: hex.vec 10", "wnt2: hex.vec 10", "wnoff: hex.vec 4",
+        "wqa: hex.vec 1", "wna: hex.vec 1", "wqb: hex.vec 1", "wnb: hex.vec 1",
+        "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
         "vis: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8", "sgn_aff: hex.vec 8",
         f"p: hex.vec 8, {(v1x << 16) & M32}", f"q: hex.vec 8, {(v1y << 16) & M32}",
         f"r: hex.vec 8, {(v2x << 16) & M32}", f"s: hex.vec 8, {(v2y << 16) & M32}",

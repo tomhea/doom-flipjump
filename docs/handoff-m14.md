@@ -404,7 +404,33 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
    * `sim.thing_load` — the register load that replaces the baked block: ALL 13 FIELDS MATCH;
    * `render_wall_frame(thing_positions=…)` and `wireformat.encode_things` / `decode_things`.
 
-  **WHAT IS NOT** — `sim.bind_things`, parked in `scratchpad/m14e_bind_draft.fj`. Chasing it turned
+  **THE fj PIPELINE IS COMPLETE AND PROVEN**, piece by piece, all in `src/`:
+
+  | piece | evidence |
+  |---|---|
+  | `collision.generate_point_location_fj` | 50/50 vs `point_in_subsector`, vertices included |
+  | `sim.bind_things` | 132/132 leaf lists, ascending order preserved |
+  | `sim.thing_load` | all 13 fields match the baked constants |
+  | `sim.thing_pass` | 6 leaves incl. the 13-thing one — right things, right order |
+
+  **WHAT IS LEFT IS EMITTER WIRING, AND ONE LAYOUT DECISION BLOCKS ITS FIRST STEP.** The runtime
+  position array has to be readable by `hex.read_table_packed`, and that reads **one BYTE per dw
+  slot** (the shape `generate_packed_lut_fj` emits: `;value*dw`). A `hex.vec` is **one NIBBLE per
+  slot**. So `hex.input 8, thpos_rt + i*16*dw` does NOT produce something `read_table_packed 8` can
+  read — the strides differ by 2. Pick one before writing the wire read:
+   1. keep the array packed and fill it with `hex.input 1` + `hex.write_byte` per byte — 8 writes a
+      thing, ~2,000 calls, ~3M ops/frame;
+   2. keep it a `hex.vec` and read positions with explicit pointer arithmetic at a 16-slot stride
+      instead of `read_table_packed` — cheaper at runtime, but `thing_load` and `bind_things` both
+      take `thpos` as a packed table today and would both need the other accessor;
+   3. have the host send positions already interleaved so one `hex.input` lands in packed shape —
+      free at runtime, but it puts a layout detail in the wire, which §2.1 deliberately kept simple.
+
+  Everything else is assembly against known-good parts: the `subsector_action` swap (two lines),
+  the table emission, `bind_things` in pass1, then the gate — gated the way M14-d was, with a thing
+  that actually CHANGES LEAF during the run and the gate failing if none does.
+
+  **THE HISTORICAL NOTE** — `sim.bind_things` was parked in `scratchpad/m14e_bind_draft.fj`. Chasing it turned
   up **two real fj defects**, both isolated in `scratchpad/_ptrtest.py` (20 lines, seconds to
   assemble) and worth knowing before writing any more pointer code:
 

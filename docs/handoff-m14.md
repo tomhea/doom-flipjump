@@ -370,6 +370,29 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
    2. **narrow the diagonal multiply.** It runs at `hex.mul_lo 10` today; the operands are int16
       deltas, so the products fit 6 nibbles — roughly 3x cheaper on the 39% of nodes that need it.
 
+  **THE LEAF REWRITE IS TWO LINES, NOT SURGERY.** This looked like the scariest part of the rung —
+  `subsector_action` bakes one xor-involution block plus an `fcall thing_leaf` per (subsector,
+  thing), and moving things means those call sites cannot stay baked. But the leaf does not need to
+  know anything: emit ONE shared `thing_pass` and have every leaf become
+
+  ```
+  hex.set 4, cur_ss, <s>
+  stl.fcall thing_pass, tp_ret
+  ```
+
+  with `thing_pass` walking `ss_head[cur_ss]` and, per thing index `t`, loading `sp_*` from baked
+  per-index tables plus the runtime position. The intricate part of `subsector_action` is left
+  alone; what changes is which table the constants come from.
+
+  **The data all bakes by THING INDEX, not by (subsector, thing)** — the set of things is fixed at
+  level load, so type/art/`sp_mon`/`sp_base`/`sp_dw`/`sp_tzmax` are static per index. Only these are
+  runtime: position (from the wire), `sp_z` = `ssfloor[bound ss] + zoff[t]`, and `sp_lt` =
+  `sprlt[lightnum[bound ss]][t]` — two small baked tables and an add.
+
+  **The ORACLE side is nearly free.** `render_wall_frame` already builds `things_by_ss` by calling
+  `point_in_subsector(t.x, t.y)` — it is already position-driven. Feed it the runtime positions
+  instead of the WAD's and it mirrors the new binding with no new logic.
+
   Then the list itself: a LINKED list (`thing_next[t]`, `ss_head[ss]`) rather than per-leaf arrays —
   O(1) to append, no cap, and therefore no overflow budget that could silently drop a thing (the
   failure class M14-a exists to prevent). Bind things in DESCENDING index order so traversal yields

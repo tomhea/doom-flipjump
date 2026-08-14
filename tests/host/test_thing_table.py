@@ -59,7 +59,11 @@ def test_the_rows_cover_exactly_the_drawable_things(level):
     cache = {}
     want = [i for i, t in enumerate(things) if rm.sprite_art(art, t.type, cache) is not None]
     assert idx == want
-    assert len(rows) == len(want) > 100
+    # ⚠ THE INVARIANT IS `idx == want`, not the magnitude. The absolute count follows
+    # reference_model.DROPPED_SPRITE_TYPES (the 25M sprite package): E1M1 has 251 drawable things
+    # with every class enabled and 53 with monsters only. The bound below exists solely to catch
+    # the fixture silently emptying, so it tracks the smaller configuration.
+    assert len(rows) == len(want) > 40
     for r in rows:
         assert len(r) == len(THING_ROW_BYTES)
         for v, nb in zip(r, THING_ROW_BYTES):

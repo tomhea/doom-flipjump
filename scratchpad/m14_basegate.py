@@ -47,7 +47,11 @@ from tests.fj.stream_screen import StreamScreen                           # noqa
 SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
                                      "frame_render.fj", "plane_render.fj", "plane_bands.fj",
                                      "stream_render.fj")]
-CACHE = ROOT / "scratchpad/fjmcache/base_dec_today.fjm"
+# --nothings: the SAME gated config with things=False. Not a candidate build -- it draws a
+# different picture by construction -- but it bounds the WHOLE sprite bill at the median, which
+# is what §7 needs before any sprite option can be proposed (docs/handoff-perf.md §4, §7).
+NOTHINGS = "--nothings" in sys.argv
+CACHE = ROOT / ("scratchpad/fjmcache/base_dec_today%s.fjm" % ("_nothings" if NOTHINGS else ""))
 
 cfg = Config()
 rm = ReferenceModel(cfg)
@@ -59,7 +63,8 @@ spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 VPS = [(664, 291, 0x18000000), (1272, -724, 1073741824),
        (1869, 479, 2147483648), (spx, spy, sp.angle)]
 RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
-                 near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
+                 near_steps=True, stack_steps=True, things=not NOTHINGS,
+                 sprite_wad=None if NOTHINGS else art, degrade=True)
 
 if CACHE.exists() and "--rebuild" not in sys.argv:
     print(f"cache HIT {CACHE.name} ({CACHE.stat().st_size:,} bytes)", flush=True)
@@ -69,7 +74,8 @@ else:
     parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, over_align=False,
                                floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
                                plane_near=True, wall_noise=True, steps=True, stack_steps=True,
-                               things=True, sprite_wad=art, deg=True)
+                               things=not NOTHINGS,
+                               sprite_wad=None if NOTHINGS else art, deg=True)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     prog = write_program_files(parts, tmp, "e1m1")        # ⚠ order is the contract

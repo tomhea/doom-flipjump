@@ -148,6 +148,31 @@ MIN_SPRITE_H_MONSTER = 1          # ... but a MONSTER is never dropped for being
                                   # things that shoot back never do.
 MONSTER_TYPES = frozenset({7, 9, 16, 58, 64, 65, 66, 67, 68, 69, 71, 84, 88,
                            3001, 3002, 3003, 3004, 3005, 3006})
+
+# ── THE 25M PACKAGE (owner goal, 2026-08-14) — A DELIBERATE PICTURE CHANGE ─────────────────────
+#
+# MEASURED, and this constant exists only because the measurement forced it. The whole sprite bill
+# is 14,352,586 ops at the median — 41% of the frame — because the walk LOADS ~71 things per frame
+# at 69,130 ops each to accept 6: 94.1% are rejected AFTER being loaded. Removing every sprite
+# takes the median from 35,293,677 to 20,941,091 (scratchpad/sweep_base_nothings.csv, gated
+# byte-exact at four viewpoints). No picture-neutral lever remains that can close a 10.3M gap —
+# the base renderer alone is 28.19M against a 25M ceiling (docs/handoff-perf.md §4) — so the band
+# is reachable ONLY through sprites, and it needs ~72% of them gone. Cost tracks COUNT, because
+# the reject rate barely varies with what is dropped.
+#
+# The line is drawn where this file already draws it (see MONSTER_TYPES: "scenery thins out with
+# distance, the things that shoot back never do"): MONSTERS STAY, everything else goes — 53 of
+# E1M1's 251 drawable things kept, 198 dropped (60 pure scenery, 52 bonus dots, 22 barrels, 64
+# pickups).
+#
+# ⚠ SET THIS TO frozenset() TO RESTORE EVERY SPRITE. It is ONE constant because THING_SPRITE is
+# the SSOT all three drawable filters read — the oracle's `_drawable`, the emitter's `thing_rows`,
+# and every gate/sweep's DRAWABLE — so the two mirrors cannot drift apart on it. That is exactly
+# what handoff-perf.md §7.1 demands of a sprite cut: one data change, both mirrors, one commit.
+THING_SPRITE_ALL = THING_SPRITE          # the full table, kept so the before/after sheet can
+                                         # render what the cut removes (scratchpad/spr25_sheet.py)
+DROPPED_SPRITE_TYPES = frozenset(THING_SPRITE_ALL) - MONSTER_TYPES
+THING_SPRITE = {k: v for k, v in THING_SPRITE_ALL.items() if k not in DROPPED_SPRITE_TYPES}
 MONSTER_BUDGET = 255              # V4: NO COUNT LIMIT (owner, 2026-08-01). 255 is the widest value
                                   # the 2-nibble `n_mon`/`n_thing` counters hold, and E1M1's heaviest
                                   # viewpoint projects 52 things, so neither budget can bind -- what

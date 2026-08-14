@@ -15,7 +15,8 @@ from doomfj.mapcompiler import bake_bsp
 from doomfj.reference_model import (DEG_MINH2_MON, DEG_MINH2_SCENERY, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER, MONSTER_TYPES, ReferenceModel,
                                     THING_SPRITE)
-from doomfj.things import THING_ROW_BYTES, THING_ROW_LEN, subsector_tables, thing_rows
+from doomfj.things import (THING_ROW_HOT_BYTES, THING_ROW_HOT_LEN, hot_row,
+                           subsector_tables, thing_rows)
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import _lines_sprite_bank, _lines_sprite_light
 
@@ -57,7 +58,7 @@ prog = "\n".join([
     # the leaf bakes these; the probe sets them from the same tables the emitter uses
     "hex.zero 4, ss_flr", "hex.zero 4, ss_ltb",
     "hex.zero 1, tstop",
-    f"sim.thing_pass throw, {_index_nibbles(NT)}, thpos, sprlt, {_index_nibbles(len(lns)*NT)}",
+    f"sim.thing_pass throw, {_index_nibbles(NT)}, thpos",
     "stl.loop",
     # the stub leaf: print the thing's x (16.16) so the visit ORDER is observable
     "thing_leaf:", "hex.print_as_digit 8, sp_x, 0", "stl.output 10", "stl.fret thing_ret",
@@ -70,7 +71,10 @@ prog = "\n".join([
     f"sshead: hex.vec {2*NSS}", f"thnext: hex.vec {2*NT}",
     *point_location_decls(),
     generate_point_location_fj(cmap),
-    generate_packed_lut_fj("throw", [pack(r, THING_ROW_BYTES) for r in rows], THING_ROW_LEN),
+    # M14-perf: thing_load reads the HOT half only (17 bytes), and read_table_packed takes its
+    # STRIDE from that count -- a 22-byte table here would index every row but the first wrongly.
+    generate_packed_lut_fj("throw", [pack(hot_row(r), THING_ROW_HOT_BYTES) for r in rows],
+                           THING_ROW_HOT_LEN),
     thpos_vec("thpos", [((t.x << 16) & 0xFFFFFFFF, (t.y << 16) & 0xFFFFFFFF) for t in things]),
     generate_packed_lut_fj("sprlt", sprlt, 1),
 ]) + "\n"

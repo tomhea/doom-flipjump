@@ -225,7 +225,8 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     """
     from doomfj.collision import generate_point_location_fj, point_location_decls
     from doomfj.lut_generator import generate_packed_lut_fj
-    from doomfj.things import (THING_ROW_BYTES, THING_ROW_LEN, reachable_lightnums,
+    from doomfj.things import (THING_ROW_COLD_BYTES, THING_ROW_COLD_LEN, THING_ROW_HOT_BYTES,
+                               THING_ROW_HOT_LEN, cold_row, hot_row, reachable_lightnums,
                                sprite_light_table, subsector_tables, thing_rows)
     allt = map_wad.things(mapname)
     rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, MONSTER_TYPES,
@@ -254,7 +255,13 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     thpos = ["thpos_rt:"] + [f"    hex.vec 16, {(((t.y << 16) & 0xFFFFFFFF) << 32) | ((t.x << 16) & 0xFFFFFFFF)}"
                              for t in things]
     text = "\n".join([
-        generate_packed_lut_fj("throw", [_pack(r, THING_ROW_BYTES) for r in rows], THING_ROW_LEN),
+        # M14-perf: HOT (everything a reject can reach) and COLD (what only a drawn sprite needs).
+        # See doomfj.things -- 94.1% of loads are rejected, and read_table_packed is linear in the
+        # row width, so the cold half is now read only by the 5.9% that survive.
+        generate_packed_lut_fj("throw", [_pack(hot_row(r), THING_ROW_HOT_BYTES) for r in rows],
+                               THING_ROW_HOT_LEN),
+        generate_packed_lut_fj("throwc", [_pack(cold_row(r), THING_ROW_COLD_BYTES) for r in rows],
+                               THING_ROW_COLD_LEN),
         "\n".join(thpos),
         # ⚠ ssflr / sslgt / ltbase are NOT emitted any more: every one of them was indexed by the
         # SUBSECTOR, so the emitter knows the answer and `subsector_action` bakes it into the leaf.
@@ -1690,11 +1697,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
                 f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
                 f"{DEG_SPR_LOWRES_H}, {_spr_nlow(cfg) if DEG_SPR_NEAR_TZ else 1}, "
-                f"{DEG_SPR_NEAR_TZ * 0x10000}"]
+                f"{DEG_SPR_NEAR_TZ * 0x10000}, "
+                # M14-perf: the DEFERRED cold row. `mt` is 0 on the static path, where the leaf's
+                # xor_by block bakes these registers and the rep expands to nothing -- so the
+                # table names below are never referenced there and need not exist.
+                f"{1 if moving_things else 0}, "
+                f"{'throwc' if moving_things else '0'}, {_MT_NTH}, "
+                f"{'sprlt' if moving_things else '0'}, {_MT_NLTI}"]
                if _do_things else []),
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
-                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt, sprlt, {_MT_NLTI}",
+                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt",
                 "stl.fret tp_ret"] if moving_things else []),
              "seg_pass2_leaf:",
              (f"frame.seg_pass2_leaf_body_2s {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
@@ -1860,6 +1873,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
              "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
              "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
              "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
+             # M14-perf: the thing INDEX the hot load ran on, so the deferred cold load can read
+             # its row after the reject. Declared unconditionally (it costs w/4 nibbles) because
+             # `frame.thing_load_cold` externs it, and an extern with no global is an assembler
+             # error even on the static path where the macro is never instantiated.
+             "sp_ti: hex.vec w/4",
              "sp_tzmax2: hex.vec 8",             # 25M-CAP: the raised min-size depth bound
              "sp_base2: hex.vec 4",              # OPTION B: the low-res LD region base
              "n_hd: hex.vec 2", "hdfl: hex.vec 1",      # ... its budget counter + per-thing flag

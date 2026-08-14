@@ -320,20 +320,33 @@ ns sim {
     // check_line hit.
     // ⚠ A 16.16 value from an int16 needs NO sign extension: putting the 16 bits in the high half
     // IS `raw << 16` in two's complement. The tzmax bounds are already 32-bit and are moved whole.
-    def thing_load throw, n_th, thpos, sprlt, nlti, ti \
-            @ body, row, zt, pos, poff, pbase, pptr, lti \
-            < ss_flr, ss_ltb, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
-              sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
+    // ⚠ THE HOT HALF ONLY. 94.1% of the things this loads are rejected by proj.project_thing
+    // without ever reading sp_base / sp_base2 / sp_dw / sp_lt, and hex.read_table_packed costs one
+    // read_byte_and_inc per byte -- so those four moved to `frame.thing_load_cold`, which runs
+    // AFTER the `vis` reject. The fields kept here are exactly the ones a reject can reach:
+    // project_thing's three cheap rejects (tz < minz, tz > sp_tzmax/sp_tzmax2, |tx| > tz<<2) read
+    // the position and the two depth bounds, and thing_record_body's budget test reads sp_mon.
+    // ⚠ `sprlt`/`nlti` LEAVE THE SIGNATURE, they cannot be left unused: the assembler treats
+    // "unused labels" as an error, so a parameter kept for ABI tidiness fails the parse. The
+    // change therefore reaches thing_pass and the emitter's call site too (R4 is about renames,
+    // and this is a deliberate signature change with every call site moved in the same commit).
+    def thing_load throw, n_th, thpos, ti \
+            @ body, row, zt, pos, poff, pbase, pptr \
+            < ss_flr, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
+              sp_mon, sp_ti {
         ;body
-      row: hex.vec 44
+      row: hex.vec 34
       zt: hex.vec 4
       poff:  hex.vec w/4
       pbase: hex.vec w/4
       pptr:  hex.vec w/4
       pos: hex.vec 16                          // [x:4][y:4] = 16 nibbles, NOT 8 -- reading a
-      lti: hex.vec 4                           // 16-nibble row into sp_x would run off its end
-      body:
-        hex.read_table_packed 22, row, throw, n_th, ti
+      body:                                    // 16-nibble row into sp_x would run off its end
+        hex.read_table_packed 17, row, throw, n_th, ti
+        // the index the cold half will re-read this thing's row with. It cannot recompute it:
+        // thing_record_body runs from a shared fcall leaf and never sees `ti`.
+        hex.zero w/4, sp_ti
+        hex.mov w/4, sp_ti, ti
         // the position array is a hex.vec (one NIBBLE per slot), not a packed table (one BYTE
         // per slot), so read_table_packed cannot address it -- the strides differ by 2. A 16.16
         // pair is 16 nibbles and 16 is one nibble of SHIFT, so the index scales without a multiply.
@@ -349,14 +362,8 @@ ns sim {
         .fix16 sp_hh,   row + 8*dw                           // byte 4
         hex.mov 8, sp_tzmax,  row + 16*dw                    // byte 8, already 32 bits
         hex.mov 8, sp_tzmax2, row + 24*dw                    // byte 12
-        hex.zero 4, sp_base
-        hex.mov 4, sp_base,  row + 32*dw                     // byte 16
-        hex.zero 4, sp_base2
-        hex.mov 4, sp_base2, row + 36*dw                     // byte 18
         hex.zero 2, sp_mon
-        hex.mov 2, sp_mon, row + 40*dw                       // byte 20
-        hex.zero 2, sp_dw
-        hex.mov 2, sp_dw,  row + 42*dw                       // byte 21
+        hex.mov 2, sp_mon, row + 32*dw                       // byte 16 (was 20: base/base2 left)
         // sp_z = (this leaf's floor + the art's z offset) << 16 -- the two int16s add mod 2^16,
         // which is the right two's-complement sum, and fix16 lifts it to 16.16
         //
@@ -370,14 +377,6 @@ ns sim {
         hex.mov 4, zt, ss_flr
         hex.add 4, zt, row + 12*dw                           // byte 6 = zoff
         .fix16 sp_z, zt
-        // sp_lt = sprlt[ltbase[light] + ti], and ltbase[light] is the leaf's baked `ss_ltb`. The
-        // row base is a table/baked value rather than a multiply because `hex.mul_const` by a
-        // non-power-of-two (nthings = 251) is where this first went wrong, and a wrong index here
-        // does not merely read the wrong class -- it reads off the END of the table.
-        hex.zero 4, lti
-        hex.mov 4, lti, ss_ltb
-        hex.add 4, lti, ti                                  // the index needs its OWN cell: a read
-        hex.read_table_packed 1, sp_lt, sprlt, nlti, lti    // zeroes dst, so dst == idx destroys it
     }
 }
 
@@ -522,7 +521,7 @@ ns sim {
     //
     // `tstop` is re-tested every iteration, not once: `thing_leaf` can set it, and the static path
     // gates each baked call site individually. It is monotone, so this only ever stops earlier.
-    def thing_pass throw, n_th, thpos, sprlt, nlti \
+    def thing_pass throw, n_th, thpos \
             @ body, loop, alive, done, h, hp, hq \
             < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf {
         // the sp_* cells belong to thing_load, which is what writes them -- declaring an
@@ -544,7 +543,7 @@ ns sim {
         ;done
       alive:
         hex.dec w/4, h                         // encoded -> the real thing index
-        .thing_load throw, n_th, thpos, sprlt, nlti, h
+        .thing_load throw, n_th, thpos, h
         stl.fcall thing_leaf, thing_ret
         hex.set w/4, hq, thnext
         hex.ptr_index hp, hq, h                // h is consumed as the INDEX before being reloaded

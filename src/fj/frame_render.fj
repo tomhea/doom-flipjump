@@ -1257,8 +1257,49 @@ ns frame {
       done:
     }
 
+    // M14-perf: THE COLD HALF of a thing's row, read only once the thing is known to be VISIBLE.
+    //
+    // MEASURED: 20,832 of 22,146 loads (94.1%) are rejected by proj.project_thing, and
+    // hex.read_table_packed costs one read_byte_and_inc PER BYTE, so a rejected thing used to pay
+    // for 5 row bytes and a whole second table lookup it never read. Nothing here is reachable
+    // from any reject: sp_base/sp_base2/sp_dw are first touched by the bucket/block arithmetic
+    // below, and sp_lt by the shade row -- all after `hex.if0 1, vis, ret`.
+    //
+    // ⚠ IT LIVES HERE, NOT IN sim.fj, deliberately. The static (baked) thing path builds without
+    // sim.fj at all, and thing_record_body is shared between the two; a `sim.` reference under
+    // rep(mt,k) would still have to resolve. `sp_ti` is declared unconditionally for the same
+    // reason -- an extern with no global is an assembler error.
+    //
+    // ⚠ `ss_ltb` is the LEAF's baked light-row base and is read here rather than in thing_load,
+    // which is still correct: the cold load runs inside the same leaf's pass over the same thing,
+    // before subsector_action can set ss_ltb for another leaf.
+    def thing_load_cold throwc, n_th, sprlt, nlti \
+            @ body, rowc, lti \
+            < ss_ltb, sp_ti, sp_base, sp_base2, sp_dw, sp_lt {
+        ;body
+      rowc: hex.vec 10                                   // 5 bytes: base, base2, dw
+      lti: hex.vec 4
+      body:
+        hex.read_table_packed 5, rowc, throwc, n_th, sp_ti
+        hex.zero 4, sp_base
+        hex.mov 4, sp_base,  rowc                        // byte 0
+        hex.zero 4, sp_base2
+        hex.mov 4, sp_base2, rowc + 4*dw                 // byte 2
+        hex.zero 2, sp_dw
+        hex.mov 2, sp_dw,  rowc + 8*dw                   // byte 4
+        // sp_lt = sprlt[ltbase[light] + ti], and ltbase[light] is the leaf's baked `ss_ltb`. The
+        // row base is a table/baked value rather than a multiply because `hex.mul_const` by a
+        // non-power-of-two (nthings = 251) is where this first went wrong, and a wrong index here
+        // does not merely read the wrong class -- it reads off the END of the table.
+        hex.zero 4, lti
+        hex.mov 4, lti, ss_ltb
+        hex.add 4, lti, sp_ti                            // the index needs its OWN cell: a read
+        hex.read_table_packed 1, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
+    }
+
     def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, blkshift, \
-            buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, nld, neartz \
+            buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, nld, neartz, \
+            mt, throwc, n_thc, sprltc, nltic \
             @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, \
               x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, \
               soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, \
@@ -1308,6 +1349,10 @@ ns frame {
         // plus everything downstream (fj-cost-model, the `noproj` retraction).
         rep(ttwice, k) proj.project_thing dvis, dtx1, dtx2, dtyt, dthp, dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
         hex.if0 1, vis, ret
+        // M14-perf: PAST EVERY REJECT -- now, and only now, read the half of the row that only a
+        // drawn sprite needs. `mt` is 0 on the static path, where the registers are baked by the
+        // leaf's xor_by block instead and this expands to nothing.
+        rep(mt, k) .thing_load_cold throwc, n_thc, sprltc, nltic
         hex.if0 2, sp_mon, inc_scenery          // ... and credit the counter this thing spends
         hex.inc 2, n_mon
         ;inc_done

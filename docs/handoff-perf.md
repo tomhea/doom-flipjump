@@ -70,7 +70,8 @@ and not an assumption.
 | **THE BASELINE (`sweep_base_today.csv`)** — today's source, `deg_gate`'s config, no M14 wire | **28.19M** | 28.72M | — | 53.70M | 6.30M |
 | M14-e as first shipped | 60.29M | 62.01M | 82.52M | 97.01M | 32.25M |
 | + binding round-trip (`1202393`) | 38.48M | 40.21M | 60.36M | 74.78M | 11.54M |
-| + clear & per-leaf reads deleted (`f54300e`) | **36.68M** | 38.17M | 58.08M | 71.67M | 9.67M |
+| + clear & per-leaf reads deleted (`f54300e`) | 36.68M | 38.17M | 58.08M | 71.67M | 9.67M |
+| **+ §5c the lazy cold row (`sweep_m14_lazy.csv`)** | **35.31M** | 36.78M | 55.54M | 68.89M | 9.66M |
 
 ⚠ **THE `sweep_crfix2.csv` ROW IS STRUCK OUT, AND WITH IT THE OLD "+13.7M".** Its binary
 (`b_272d37507ca58434.fjm`) **is not byte-exact against today's oracle**: 1091 / 844 / 3256 / 5300 of
@@ -334,14 +335,16 @@ Both inputs are measured against a byte-identical picture (§1.1), so this is ar
 
 | | |
 |---|---|
-| today (`m14_bin_things`) | 36,683,119 |
+| ~~today, before §5c~~ | ~~36,683,119~~ |
+| **today (`m14_bin_things`, §5c shipped)** | **35,311,166** |
 | **the base renderer TODAY, same picture** | **28,193,396** |
-| M14's cost | **+8,489,723** |
+| M14's cost | ~~+8,489,723~~ → **+7,117,770** (per-frame median +7,072,739) |
 
-* **To reach 25M** (top of the band): remove **11,683,119**.
-* **M14's ENTIRE cost is 8,489,723.** Deleting M14 outright — no wire, no runtime things, a feature
-  the milestone exists to provide — lands at **28,193,396, still 3,193,396 ABOVE the band's top.**
-* **To reach 20M** (bottom): remove 16,683,119 — all of M14 plus ~8.2M of base renderer.
+* **To reach 25M** (top of the band): remove **10,311,166** more.
+* **M14's ENTIRE REMAINING cost is 7,117,770.** Deleting M14 outright — no wire, no runtime things,
+  a feature the milestone exists to provide — lands at **28,193,396, still 3,193,396 ABOVE the
+  band's top.**
+* **To reach 20M** (bottom): remove 15,311,166 — all of M14 plus ~8.2M of base renderer.
 
 > ⚠ **The previous draft's central claim — "its top is reachable by removing M14 waste alone" — is
 > FALSE, and measured to be false.** It followed from the 22.94M baseline, which was a different
@@ -423,9 +426,41 @@ frames, **20,832 (94.1%) are rejected after being loaded** (§1.5). The per-call
 22-byte row read and its 13 field extractions** and 16,995 to the position accessor — and the
 position is the only part the reject needs.
 
-**DERIVED saving at the median frame** (three MEASURED inputs, so tagged DERIVED, not measured):
-`29,938 ops × 94.1% rejected × 71 calls = 2,000,148 ops/frame` ≈ **2.0M**. Confirm with M1 after
-building; do not quote it as measured before that.
+**✅ SHIPPED 2026-08-14. MEASURED −1,371,953 at the median**, byte-exact, picture unchanged.
+
+The row is now TWO tables — `throw` (17 bytes: left, w, hh, zoff, tzmax, tzmax2, mon) and `throwc`
+(5 bytes: base, base2, dw) — plus the `sprlt` lookup deferred with the cold half into a new
+`frame.thing_load_cold`, called from `thing_record_body` immediately after `hex.if0 1, vis, ret`.
+The split point is the reject ladder: `project_thing`'s three cheap rejects (tz < minz,
+tz > sp_tzmax/sp_tzmax2, |tx| > tz<<2) reach only the position and the two depth bounds, and the
+budget test reaches only `sp_mon`. Every reject and every budget spend still happens in the same
+order on the same values, which is why no pixel can move.
+
+```
+MEASURED (python scratchpad/m14_sweep.py … --things --csv scratchpad/sweep_m14_lazy.csv)
+              min          MEDIAN          mean           worst
+before   9,669,185      36,683,119    38,173,812      71,674,642
+after    9,657,891      35,311,166    36,777,118      68,894,297
+saving      11,294       1,371,953     1,396,694       2,780,345
+per-frame saving: min -199,616  MEDIAN 1,292,520  max 4,312,965   improved 256/260
+```
+
+⚠ **4 OF 260 FRAMES GOT WORSE** (worst −199,616), and the reason is structural, not noise: a
+SURVIVING thing now pays two `read_table_packed` setups instead of one, so a frame whose things
+mostly survive loses a little. The trade is 94.1%-vs-5.9% and it wins on the median by ~6.5×, but
+the loss is real and belongs in the record.
+
+⚠ **The `--rebuild` overwrote `scratchpad/fjmcache/m14_bin_things.fjm`**, so `sweep_m14e_b1.csv`
+is now the only record of the pre-lever binary.
+
+Two things this cost that generalise:
+* **`hex.read_table_packed nb` derives its STRIDE from `nb`** (`mul_const w/4, ptr, ptr, nb*dw`), so
+  it can only read a row of exactly `nb` bytes. A lazy tail must be a SECOND TABLE; a prefix read of
+  a wider row indexes every row but the first at the wrong stride. (See §10.10.)
+* **The assembler rejects UNUSED MACRO PARAMETERS** (`unused labels: nlti, sprlt`), so a signature
+  cannot be padded to keep call sites stable — the change propagated to `sim.thing_pass` and its
+  two call sites. Cheap failure (a parse, not a 25-minute assemble), but R4's "frozen positional
+  parameter lists" cannot be honoured by leaving a parameter in place unused.
 ⚠ **IT CAN MOVE PIXELS THROUGH THE BUDGETS.** `thing_record_body` does not only reject, it *spends*:
 `n_thing`/`n_mon` against their budgets, `degfl` graduated acceptance, `n_hd`, and the monotone
 `tstop` — all consumed **in visit order**. Any split must be **reject-before-spend, in the same
@@ -546,8 +581,8 @@ with its visible consequence named, and stays unapplied until answered.
 | `scratchpad/cr/emit_hash_vs_head.py [--selftest]` | ~15 min | the shipped path is unchanged (14/14 parts hash-identical, certified + shipped configs) |
 | `scratchpad/_bind.py` | ~3 min | `bind_things` COLD vs WARM: identical lists, and the cache is actually taken |
 | `scratchpad/_tpass.py` | ~2 min | every leaf visits exactly its things, in ascending order |
-| `scratchpad/m14_thload_split.py` | ~5 min | where `thing_load`'s ops go, by ablation, with a linearity control and a sum check |
-| `scratchpad/m14_thload_cost.py` | ~3 min | `thing_load` per-call cost, k-sweep |
+| ~~`scratchpad/m14_thload_split.py`~~ | — | ⚠ **STALE**: it string-patches `sim.thing_load`'s body to ablate it, and M14-perf rewrote those lines (hot/cold split). Its 45,934 figure stands as a historical measurement of the OLD macro. |
+| ~~`scratchpad/m14_thload_cost.py`~~ | — | ⚠ **STALE, AND ALREADY WAS**: it calls `sim.thing_load` with the pre-`f54300e` signature (`ssflr, sslgt, ltbase, ssi`). Rewrite before quoting it. |
 | `scratchpad/opprof.py --m14 [--vp X,Y,ANG] [--reuse]` | 68 min build + ~4 min/frame | **§0's PROFILER.** per-macro attribution of one frame; sha256-controls its binary against the swept one. ⚠ ~8GB RSS — run it alone and kill it after. |
 | `scratchpad/m14_basegate.py` | ~16 min build | **THE BASELINE.** today's source, `deg_gate`'s config, no M14 wire; refuses to emit a number unless byte-exact vs today's oracle |
 | `scratchpad/m14_vp_ops.py --m14 F --dec F [--oracle]` | ~5 min | ops at named viewpoints on two binaries **with a pixel-identity column** — the control §11.5 exists for |
@@ -589,6 +624,19 @@ Every one of these cost at least one wasted build or probe cycle.
    real widths vs 68,571 at a hard-coded 4. Do not optimise the width; do reduce the number of reads.
 9. **Anything handed to a `w/4`-wide `mov` must itself be `w/4`.** `ptr_index` does `mov w/4` out of
    its index. Three defects of this one family in M14-e alone.
+
+10. **`hex.read_table_packed nb` TAKES ITS STRIDE FROM `nb`** — `mul_const w/4, ptr, ptr, nb*dw` —
+    so it reads a row of exactly `nb` bytes and nothing else. It cannot read a PREFIX of a wider
+    row: every row but the first would be indexed at the wrong stride, silently. Splitting a row
+    into hot/cold halves therefore means splitting the TABLE, not passing a smaller `nb`. Its cost
+    is `rep(nb) read_byte_and_inc`, i.e. linear in the byte count, which is what makes the split
+    pay at all. (Note this REFINES R10.8: the *index width* barely matters, the *row width* does.)
+
+11. **THE ASSEMBLER TREATS AN UNUSED MACRO PARAMETER AS AN ERROR** —
+    `Syntax Warning … unused labels: nlti, sprlt` stops the assembly. So a signature cannot be
+    padded with now-dead parameters to keep its call sites stable; a body-only change that drops a
+    parameter's last use is automatically a FAN-OUT edit (CLAUDE.md rule 5). It fails in the parse,
+    before the 25-minute assemble, which makes it cheap — but only if you build rather than assume.
 
 ## 11. ⚠ Method traps — these cost more than the fj ones
 

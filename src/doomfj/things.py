@@ -29,6 +29,44 @@ from __future__ import annotations
 THING_ROW_BYTES = (2, 2, 2, 2, 4, 4, 2, 2, 1, 1)
 THING_ROW_LEN = sum(THING_ROW_BYTES)
 
+# ── M14-perf: the row is READ IN TWO HALVES, because 94.1% of loads are thrown away ────────────
+#
+# MEASURED (scratchpad/m14_m5_counts.py, 260 frames): of 22,146 things `sim.thing_load` loads,
+# 20,832 are rejected by `proj.project_thing` and only 1,314 (5.9%) ever draw. `read_table_packed`
+# costs `rep(nb) read_byte_and_inc`, i.e. LINEAR in the row width, so every rejected thing was
+# paying for bytes it never read.
+#
+# The split point is the reject ladder, not convenience. `project_thing`'s three cheap rejects --
+# tz < minz, tz > sp_tzmax/sp_tzmax2, |tx| > tz<<2 -- read only the position and the two depth
+# bounds, and `thing_record_body`'s budget test reads only `mon`. `sp_base`/`sp_base2`/`sp_dw`
+# (and the separate `sprlt` lookup) are first touched AFTER `hex.if0 1, vis, ret`. So HOT is
+# everything any reject can reach and COLD is what only a drawn sprite needs.
+#
+# ⚠ TWO TABLES, NOT AN OFFSET READ. `hex.read_table_packed nb, ...` derives its STRIDE from `nb`
+# (`mul_const w/4, ptr, ptr, nb*dw`), so it can only read a whole row of exactly `nb` bytes -- a
+# prefix of a wider row would index at the wrong stride. Splitting the table is the only form this
+# accessor supports.
+#
+# ⚠ VALUES AND ORDER ARE UNCHANGED, so no pixel can move: the same fields carry the same bytes and
+# every reject and budget spend still happens in the same sequence.
+_HOT_FIELDS = (0, 1, 2, 3, 4, 5, 8)     # left, w, hh, zoff, tzmax, tzmax2, mon
+_COLD_FIELDS = (6, 7, 9)                # base, base2, dw
+THING_ROW_HOT_BYTES = tuple(THING_ROW_BYTES[i] for i in _HOT_FIELDS)
+THING_ROW_COLD_BYTES = tuple(THING_ROW_BYTES[i] for i in _COLD_FIELDS)
+THING_ROW_HOT_LEN = sum(THING_ROW_HOT_BYTES)      # 17
+THING_ROW_COLD_LEN = sum(THING_ROW_COLD_BYTES)    # 5
+assert THING_ROW_HOT_LEN + THING_ROW_COLD_LEN == THING_ROW_LEN
+
+
+def hot_row(row):
+    """The fields any reject can reach, in `THING_ROW_HOT_BYTES` order."""
+    return tuple(row[i] for i in _HOT_FIELDS)
+
+
+def cold_row(row):
+    """The fields only a DRAWN sprite needs, in `THING_ROW_COLD_BYTES` order."""
+    return tuple(row[i] for i in _COLD_FIELDS)
+
 
 def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_types,
                min_h, min_h_monster, deg_min_h, deg_min_h_monster, *, deg: bool,

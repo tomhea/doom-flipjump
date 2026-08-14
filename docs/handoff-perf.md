@@ -35,11 +35,19 @@ What this means in practice, and it is not negotiable:
 5. **A plan resting on an ESTIMATED number will be rejected**, so do not build one. Convert the
    estimate to a measurement first (§3), or state plainly that the lever cannot yet be justified.
 
-⚠ **This document already complies**: §1 is the measured ledger with provenance, §2 is the explicit
-list of what is NOT measured, and §5's levers deliberately carry **no saving figures at all** — they
-are hypotheses awaiting §0's breakdown. Earlier drafts violated the rule and are the reason it
-exists: they carried a per-lever saving table, a "~117 things/frame" that was a residual divided by
-the cost it was used to corroborate, and an extrapolated §4b figure.
+⚠ **STATUS (2026-08-14): §0's breakdown EXISTS — §1.2b — and §5's levers now carry ceilings.** §1 is
+the measured ledger with provenance, §2 is the shortened list of what is still not measured, and
+every §5 figure is tagged MEASURED (with its command) or DERIVED (with its inputs). Earlier drafts
+violated the rule and are the reason it exists: they carried a per-lever saving table, a "~117
+things/frame" that was a residual divided by the cost it was used to corroborate, and an
+extrapolated §4b figure.
+
+⚠ **AND THE RULE CAUGHT SOMETHING ITS AUTHOR DID NOT EXPECT.** §0 demands that every *figure* be
+measured. It does not, on its face, demand that a *subtraction between two measured figures* be
+valid — and that is exactly where this plan broke: the old "+13.7M = M14's cost" subtracted two
+genuine measurements taken on binaries that draw different pictures (§1.1, §11.5). **So §0 now has a
+sixth clause: a DIFFERENCE is a measurement only if the two sides are controlled to be comparable,
+and for this repo "comparable" means byte-identical pixels.**
 
 
 ## 1. What is measured, and how
@@ -459,12 +467,17 @@ frame, benchmark and played alike.
 the program fractional. Before the campaign closes, the target metric itself should be re-examined
 (§12.10).
 
-## 6. Phase 2 — the base renderer, only if the band's bottom is wanted
+## 6. Phase 2 — the base renderer. ⚠ NO LONGER OPTIONAL
 
-Needed only for 20M, not for 25M (§4). **It has no plan, and it should not get one until §2's base
-decomposition exists.** First task: re-derive where 22.94M goes *today* with M1 — things off, stack
-off, steps off, planes off, one sweep each. The repo's older decomposition predates several
-correctness fixes and should not be trusted as current.
+~~Needed only for 20M, not for 25M.~~ **Needed for BOTH**: the base renderer alone is 28.19M against
+a 25M ceiling (§4). The precondition this section set — "it should not get one until §2's base
+decomposition exists" — **is now met**: §1.2c is that decomposition, and §5d/§12.8 identify its
+largest single item (M14-c's full-precision `wall_x_range_m`, +13.2%..+16.0%, measured).
+
+What is still owed before a plan: §1.2c is **one heavy frame** (55.76M vs a 36.68M median), so its
+shares are trustworthy and its absolutes are not. Price the candidates at the median with M1 —
+things off, stack off, steps off, planes off, one sweep each — now that a valid baseline binary and
+a byte-exactness-gated build script (`m14_basegate.py`) exist to diff against.
 
 ## 7. The picture: what is permitted, and how to propose the rest
 

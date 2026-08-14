@@ -14,6 +14,34 @@ Owner directive (2026-08-14, superseding both the 26M and 15M framings):
 
 ---
 
+## 0. ⚠ THE EVIDENCE RULE — the gate on all work below
+
+**Owner directive, verbatim (2026-08-14):**
+
+> Before proposing any optimization, produce a measured cost breakdown: run the profiler, print the
+> raw output, and attribute ops/frame to each subsystem with the arithmetic shown. Mark every number
+> as MEASURED (with the command) or ESTIMATED (with the assumption). **I will reject any plan built
+> on ESTIMATED numbers.**
+
+What this means in practice, and it is not negotiable:
+
+1. **No optimisation is proposed before its subsystem has a measured breakdown.** Not "probably the
+   biggest", not "should be around" — a profile, printed.
+2. **Print the RAW output**, not a summary of it. The owner reads the tool's own words.
+3. **Show the arithmetic.** If a subsystem's cost is derived from other numbers, write the sum out so
+   the derivation can be checked. A residual is not an attribution (§2).
+4. **Tag every figure.** `MEASURED (python scratchpad/… , 2026-08-14)` or
+   `ESTIMATED (assumes …)`. A number with no tag is a defect in the report.
+5. **A plan resting on an ESTIMATED number will be rejected**, so do not build one. Convert the
+   estimate to a measurement first (§3), or state plainly that the lever cannot yet be justified.
+
+⚠ **This document already complies**: §1 is the measured ledger with provenance, §2 is the explicit
+list of what is NOT measured, and §5's levers deliberately carry **no saving figures at all** — they
+are hypotheses awaiting §0's breakdown. Earlier drafts violated the rule and are the reason it
+exists: they carried a per-lever saving table, a "~117 things/frame" that was a residual divided by
+the cost it was used to corroborate, and an extrapolated §4b figure.
+
+
 ## 1. What is measured, and how
 
 Everything in this section was produced by a named tool this campaign, and the provenance is given
@@ -99,7 +127,38 @@ open questions, because none of them has evidence behind it:
 
 ## 3. THE METHODS — how to turn §2 into evidence
 
-These are the seven instruments this repo has. Each entry says what it can price and what it costs.
+These are the eight instruments this repo has, M0 first because §0 names it. Each entry says what it can price and what it costs.
+
+**M0 — THE PROFILER. The instrument §0 names, and the one to run first.**
+`scratchpad/opprof.py` attributes ops **directly** to the macro that burned them: it assembles with
+`debugging_file_path`, runs the interpreter's featured loop with `profile=True` (monkeypatching
+`register_op_address` into a histogram), maps each executed address to the nearest label at or below
+it, and aggregates by macro path. Output is a BY-OUTERMOST-MACRO table and a BY-DEPTH-2 table —
+exactly the "attribute ops/frame to each subsystem" the rule asks for.
+
+```bash
+python scratchpad/opprof.py --wad tests/fixtures/freedoom_e1m1.wad --map E1M1 --vp X,Y,ANG
+```
+
+⚠ **THREE THINGS BEFORE TRUSTING IT.**
+* **It cannot drive an M14 binary yet.** It emits with the default `state_wire="dec"` and feeds
+  `f"{vx}
+{vy}
+{va}
+"` on stdin (line ~110). It needs the same change `m14_sweep.py` got: bin
+  wire, `player_sim`, `moving_things`, and the position + binding blocks appended. **That extension
+  is task one of this campaign**, because §0 depends on it.
+* **The featured loop is pure Python, ~200× slower than the native engine.** A previously saved E1M1
+  profile (`scratchpad/prof_tree_full.txt`) took 111s for 36.4M ops — feasible, but profile ONE
+  viewpoint, not the 260-frame sweep.
+* **~72% of ops land in wflip AREAS and are blamed on their CALLER** (that saved run: "wflip-area
+  ops: 26,074,620 (71.6%)"). That is the tool's attribution model, and it is the right one — the
+  flips are where work physically happens, the caller is who asked — but it means the tables are
+  *caller* attribution, so read them as "this macro caused N ops", not "these ops are inside it".
+
+**M0 prices ONE VIEWPOINT by subsystem. M1 prices ONE SUBSYSTEM at the median.** They answer
+different questions and a complete case usually needs both: M0 to find where the ops are, M1 to
+confirm the saving on the metric the target is stated in.
 
 **M1 — ablation sweep.** Build with a feature off, sweep, diff the medians against the same grid.
 Prices a whole feature at the median, including all its second-order effects. `emit_wall_renderer`
@@ -157,8 +216,12 @@ the reason §3 exists.
 
 ## 5. Phase 1 — candidate levers against M14's +13.7M
 
-**Each is a HYPOTHESIS with a method, and deliberately carries no saving figure.** Price with the
-named method, then decide.
+**Each is a HYPOTHESIS with a method, and deliberately carries no saving figure.**
+
+⚠ **NONE OF THESE MAY BE PROPOSED UNTIL §0's BREAKDOWN EXISTS.** The order is: extend `opprof.py`
+to the M14 binary → profile → print the raw tables → attribute M14's measured +13.7M to subsystems
+with the arithmetic shown → *then* the levers below become proposals with numbers attached. Until
+that happens they are notes, not a plan, and §0 says a plan built on estimates gets rejected.
 
 ### 5a. The per-leaf head check at a baked address
 `s` is a compile-time constant at each leaf's call site, so `sshead + s*2*dw` is a compile-time
@@ -234,6 +297,21 @@ decision is made on an image, not on a description.
 
 **To suggest — not apply.** Anything else that trades picture goes to the owner as a priced option
 with its visible consequence named, and stays unapplied until answered.
+
+## 7b. The work order
+
+1. **Extend `opprof.py` to the M14 binary** (bin wire, `player_sim`, `moving_things`, position +
+   binding blocks). ~20 lines, mirrors the change `m14_sweep.py` already has. **Task one — §0
+   depends on it.**
+2. **Profile.** At minimum the spawn viewpoint and one crowded one (664, 291, 0x18000000). Print the
+   raw BY-OUTERMOST and BY-DEPTH-2 tables.
+3. **Attribute M14's +13.7M**, arithmetic shown, every line tagged MEASURED or ESTIMATED. Reconcile
+   against §1.1's sweep delta and say so if it does not reconcile.
+4. **Answer §2's open counts with M5 first** (oracle-side, no build): things loaded per frame,
+   survivors per reject, leaves visited, leaves carrying things.
+5. **Only now**, propose levers — each with its own measured number.
+6. Build → gate → sweep after **each** lever, one self-contained commit each.
+7. Phase 2 (§6) only if the band's bottom is wanted, and only after its own breakdown.
 
 ## 8. Acceptance criteria
 

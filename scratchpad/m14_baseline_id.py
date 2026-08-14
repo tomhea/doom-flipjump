@@ -56,15 +56,20 @@ for wad in ("tests/fixtures/freedoom_e1m1.wad", "tests/fixtures/e1m1_lite.wad"):
     got = bytes(scr.pixel_indices)
     print(f"\n=== {Path(wad).name} spawn ({vx},{vy},{va:#x}) -- binary ran {ops:,} ops ===",
           flush=True)
-    for sky, bbox, deg in itertools.product((False, True), (False, True), (True, False)):
-        kw = dict(BASE, sky=sky, bbox_cull=bbox, degrade=deg)
+    # ⚠ bench.py's DEFAULTS are not the gates': --wall-mode defaults to "WPX" (gates use W1R),
+    # --stack and --deg are store_true (gates pass stack_steps=True, deg=True). A `b_*` binary is
+    # therefore a different PROGRAM unless the invocation said otherwise, so those three are the
+    # axes that matter -- sky/bbox_cull alone never explained it.
+    for wm, stack, deg in itertools.product(("W1R", "WPX", "W2S", "W1"),
+                                            (True, False), (True, False)):
+        kw = dict(BASE, wall_mode=wm, stack_steps=stack, degrade=deg)
         try:
             want = bytes(rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"),
                                               scene, **kw))
         except Exception as e:                       # a flag combination the oracle refuses
-            print(f"  sky={sky:<5} bbox_cull={bbox:<5} degrade={deg:<5} -> {type(e).__name__}: {e}")
+            print(f"  wall={wm:<4} stack={stack:<5} deg={deg:<5} -> {type(e).__name__}: {e}")
             continue
         nd = sum(1 for a, b in zip(got, want) if a != b)
-        print(f"  sky={sky:<5} bbox_cull={bbox:<5} degrade={deg:<5} -> "
+        print(f"  wall={wm:<4} stack={stack:<5} deg={deg:<5} -> "
               + ("BYTE-EXACT  <== THIS IS THE CONFIG" if nd == 0
                  else f"{nd:5d} of {len(want)} px differ"), flush=True)

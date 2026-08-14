@@ -344,9 +344,17 @@ realistic M14 recovery is bounded by §5: ~3.29M frame-constant (5b) + ~2.0M (5c
 around **31.4M** — 6.4M short. That is not a reason to skip §5; those are the cheapest ops in the
 program to remove and they are pure waste. It is a reason not to promise the band from them.
 
+**The largest single item in the base renderer is now identified and measured**: M14-c's
+full-precision `proj.wall_x_range_m`, **+5.47M..+6.02M (+13.2%..+16.0%)** at the four gate
+viewpoints (§5d, §12.8). It is a correctness fix and is not up for reversal. ⚠ **Its obvious
+recovery — a conditional narrow path for integer view positions — is a BENCHMARK ARTEFACT that
+would fire on 260 of 260 swept frames and ~0 played ones (§5e). Do not take it without reading
+§5e.** The legitimate version is to make the full-precision form itself cheaper.
+
 ⚠ **THIS IS AN OWNER DECISION, not an engineering one.** §7 permits removing some sprites and
 permits *suggesting* other picture trades. The band as stated now requires either base-renderer work
-with no picture cost (unproven to exist), or a picture trade. Both belong to the owner.
+with no picture cost (only one candidate identified, and it is not free), or a picture trade. Both
+belong to the owner.
 
 ## 5. Phase 1 — the levers against M14's +8.49M, NOW WITH NUMBERS
 
@@ -423,6 +431,33 @@ can be cheaper — the row rule says cost ∝ nonzero nibbles of the *second* op
 and width are worth an audit.
 **Price it with M1**: one build with the map-slice form restored, swept. ⚠ **Measurement only, never
 committed** — it is byte-exact at integer view positions only.
+
+**MEASURED SIZE (2026-08-14): the fix cost +5.47M..+6.02M, i.e. +13.2%..+16.0%**, per `110cfd6`'s
+own evidence, and `m14_basegate.py` reproduces its post-fix column to the digit (§12.8). That makes
+it **the largest single identified item in the base renderer** — bigger than every M14 lever
+combined.
+
+### 5e. ⚠ THE CONDITIONAL NARROW PATH — and why it is a BENCHMARK ARTEFACT, not a lever
+
+`110cfd6` names the obvious recovery itself: *"the map-slice path is still valid whenever the
+position's low nibbles are zero, so a per-frame test could pick the narrow path for integer
+positions"*. It would be correct, byte-exact, and picture-neutral.
+
+⚠ **AND IT WOULD BUY ALMOST NOTHING IN PLAY, WHILE LOOKING LIKE A ~5.5M WIN ON THIS DOCUMENT'S
+TARGET METRIC.** Every sweep here feeds `encode_feed_mapunits`, i.e. `viewx = vx << 16` — **integer
+positions, so the narrow path would fire on 260 of 260 frames.** The player sim moves in 16.16 and
+is at an exact integer essentially never, which is the whole reason M14-c had to widen the macro.
+So the conditional would fire on ~100% of benchmark frames and ~0% of real ones.
+
+**Anyone proposing it must report the sweep median AND a fractional-position sweep**, or they are
+reporting a number that exists only because the harness stands on whole map units. The honest
+version of this lever is to make the FULL-precision form cheaper (the row rule: cost ∝ nonzero
+nibbles of the *second* operand, so operand order and width are worth an audit) — that helps every
+frame, benchmark and played alike.
+
+⚠ **THIS GENERALISES BEYOND 5e**: the 260-frame sweep is an integer-position metric, and M14 made
+the program fractional. Before the campaign closes, the target metric itself should be re-examined
+(§12.10).
 
 ## 6. Phase 2 — the base renderer, only if the band's bottom is wanted
 
@@ -608,23 +643,41 @@ commit, with the gate as the check that they moved together.
 pre-M14-a op counts and no certified binary hash has been published since `b_272d37507ca58434`.
 Part of closing the campaign, not part of any lever.
 
-**12.8 THE PICTURE CHANGED between `b_272d37507ca58434` (2026-08-08) and today, and nobody knows
-why.** MEASURED: that binary differs from today's oracle by 1091 / 844 / 3256 / 5300 of 16000 px at
-the four gate viewpoints; today's M14 binary is byte-exact at all four.
-`scratchpad/m14_baseline_id.py` ruled out `sky`, `bbox_cull`, `degrade` and the lite map. It also
-does not match the deg_gate counts `fda6de4` recorded for its own era (45.21M → 45.66M at (664,291)
-vs today's 51.69M in the same config), so **today's base renderer may have grown ~6M at that
-viewpoint during M14-b..e in a build with no M14 wire at all.** This campaign does not depend on the
-answer — §1.1's new baseline is built from today's source and gated byte-exact — but if that 6M is a
-regression rather than a deliberate change, it is worth more than every lever in §5 combined, and
-§4 needs 11.68M. **Diagnose it before opening Phase 2**: build `m14_basegate.py`'s config at
-`fda6de4` and at `f54300e` and diff the sweeps. Two builds, ~20 min each.
+**12.8 ~~The base renderer may have grown ~6M during M14-b..e~~ — ANSWERED, and it is not a
+regression.** It is **M14-c (`110cfd6`)**, whose own evidence block records the deg_gate cost of
+making `proj.wall_x_range_m` full 16.16:
+
+```
+(664,291)    45,664,661 -> 51,688,913   +6,024,252  (+13.2%)
+(1272,-724)  36,423,780 -> 41,978,565   +5,554,785  (+15.2%)
+(1869,479)   43,030,266 -> 48,915,900   +5,885,634  (+13.7%)
+(-416,256)   34,119,621 -> 39,594,303   +5,474,682  (+16.0%)
+```
+
+⚠ **`m14_basegate.py` reproduces the right-hand column to the digit** — 51,688,913 / 41,978,565 /
+48,915,900 / 39,594,303 — from a build that had never seen those numbers. That is an independent
+validation of the new baseline, and it retires this item: the ~6M is a **priced correctness fix**,
+paid deliberately, not a regression to hunt.
+
+⚠ It does NOT explain `b_272d37507ca58434`'s pixels, which remain unexplained: the closest
+configuration is the gate's own (5300 px at spawn), and `m14_baseline_id.py` has now also ruled out
+every `wall_mode` × `stack_steps` × `degrade` combination. It is a pre-`54da396` artefact and the
+campaign no longer depends on it. **Do not resurrect it as a baseline.**
 
 **12.9 The certified artefacts are stale in a NEW way.** `deg_gate.py` and the `b_*` cache are the
 only record of the pre-M14 picture, and §12.8 says that record disagrees with today's oracle. Until
 12.8 is answered, treat `scratchpad/fjmcache/b_*.fjm` as **undated artefacts of unknown
 configuration**, not as baselines. `scratchpad/fjmcache/base_dec_today.fjm` is the one binary in the
 cache whose config and picture are both known and checked.
+
+**12.10 ⚠ THE TARGET METRIC IS AN INTEGER-POSITION METRIC, AND THE PROGRAM IS NO LONGER INTEGER.**
+Every sweep in this document feeds `encode_feed_mapunits` (`viewx = vx << 16`). M14's sim moves the
+player in 16.16, so **no frame the player actually sees is at a swept position.** M14-c exists
+precisely because the renderer was wrong between whole map units, and §5e is a lever that would
+score ~5.5M on this metric while doing nothing in play. The median is still the right *shape* of
+target — it is deterministic and it diffs — but before the campaign closes, either re-run the sweep
+at fractional positions or state plainly that the number is an integer-grid proxy. ⚠ Neither is
+done, and until one is, **every median in this document is an integer-grid median.**
 
 **12.7 fps has never been measured in this campaign.** Ops/frame is a proxy chosen because it diffs
 deterministically. If frame rate is what actually matters, measure it before declaring anything.

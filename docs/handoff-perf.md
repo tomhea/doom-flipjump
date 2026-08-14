@@ -58,13 +58,46 @@ and not an assumption.
 
 | build | median | mean | p90 | worst | min |
 |---|---|---|---|---|---|
-| certified, pre-M14 (`sweep_crfix2.csv`) | **22.94M** | 22.58M | — | 48.46M | — |
+| ~~certified, pre-M14 (`sweep_crfix2.csv`)~~ | ~~22.94M~~ | ~~22.58M~~ | — | ~~48.46M~~ | — |
+| **THE BASELINE (`sweep_base_today.csv`)** — today's source, `deg_gate`'s config, no M14 wire | **28.19M** | 28.72M | — | 53.70M | 6.30M |
 | M14-e as first shipped | 60.29M | 62.01M | 82.52M | 97.01M | 32.25M |
 | + binding round-trip (`1202393`) | 38.48M | 40.21M | 60.36M | 74.78M | 11.54M |
 | + clear & per-leaf reads deleted (`f54300e`) | **36.68M** | 38.17M | 58.08M | 71.67M | 9.67M |
 
-**So M14 costs +13.7M at the median, measured.** That and the two endpoint medians are the only
-whole-frame numbers in this document that are directly measured.
+⚠ **THE `sweep_crfix2.csv` ROW IS STRUCK OUT, AND WITH IT THE OLD "+13.7M".** Its binary
+(`b_272d37507ca58434.fjm`) **is not byte-exact against today's oracle**: 1091 / 844 / 3256 / 5300 of
+16000 pixels at the four gate viewpoints, while today's M14 binary is byte-exact at all four.
+MEASURED (`python scratchpad/m14_vp_ops.py --m14 … --dec … --oracle`, 2026-08-14). A baseline that
+draws a different picture prices the feature *plus* the picture change with no way to separate them.
+`scratchpad/m14_baseline_id.py` ruled out sky, `bbox_cull`, `degrade` and the lite map as the cause;
+the binary also fails to match the deg_gate op counts `fda6de4` recorded for its own era.
+
+**THE REPLACEMENT** is `scratchpad/m14_basegate.py`: `deg_gate.py`'s emit call verbatim (i.e.
+`m14_gate.py`'s minus `state_wire="bin"`, `player_sim`, `moving_things`), built from today's source,
+and it **refuses to emit a number unless the binary is byte-exact against today's oracle** at all
+four viewpoints. It passes. So both sides of the subtraction below draw the same frame.
+
+**M14 costs +8.49M at the median, measured against a baseline with identical pixels.**
+
+| viewpoint | M14 | baseline (same picture) | Δ = M14 alone |
+|---|---|---|---|
+| (664,291,0x18000000) | 68,195,203 | 51,688,913 | +16,506,290 |
+| (1272,−724,0x40000000) | 57,299,613 | 41,978,565 | +15,321,048 |
+| (1869,479,0x80000000) | 64,492,369 | 48,915,900 | +15,576,469 |
+| spawn (−416,256,0x0) | 55,757,155 | 39,594,303 | +16,162,852 |
+
+Per frame across the whole grid (`python scratchpad/m14_delta_join.py`, the two CSVs joined on
+(x,y,angle); all 260 keys match, so it is like-for-like):
+
+| | min | MEDIAN | mean | max |
+|---|---|---|---|---|
+| baseline | 6,301,043 | 28,193,396 | 28,722,064 | 53,703,412 |
+| M14 | 9,669,185 | 36,683,119 | 38,173,813 | 71,674,642 |
+| **per-frame Δ** | 3,255,052 | **8,376,784** | 9,451,749 | 21,141,717 |
+
+(The difference of the two medians is 8,489,723; the median of the per-frame differences is
+8,376,784. Different statistics of the same data — both are given rather than one being passed off
+as the other.)
 
 ⚠ Two caveats on the metric itself, both real:
 * The sweep runs **keys=0**, so the player sim is a no-op and **collision never runs**. The median
@@ -89,6 +122,73 @@ and in the split, the parts must sum to the whole (measured 101.4% — no intera
 Also measured, earlier in M14: baked point location **105,715 ops mean per lookup** (min 10,661,
 max 298,411); an `fcall` BSP descent ~2.9M; collision **+11,602,784 ops on a moving tic**.
 
+### 1.2b THE PROFILE — §0's breakdown, and it reconciles with §1.1
+
+`python scratchpad/opprof.py --m14 [--vp X,Y,ANG]`, 2026-08-14. The `--m14` mode emits
+`m14_gate.py --things`'s kwargs verbatim and feeds `m14_sweep.py`'s wire (state + 251 spawn
+positions + WARM bindings, keys=0). **Its control**: it sha256-compares its own binary against
+`m14_bin_things.fjm` and prints the verdict — `IDENTICAL -- profiling the measured binary`. A
+profile of a lookalike would be worthless, so the tool says which it has.
+
+The roll-up table is the only one that sums to the frame (direct ops **plus** the wflip-area blame,
+which is ~74% of every frame). Both totals below equal the native runner's op count for the same
+feed, to the op.
+
+| | spawn (−416,256,0x0) | crowded (664,291,0x18000000) |
+|---|---|---|
+| **frame total** | **55,757,155** | **68,195,203** |
+| `<base renderer — not M14>` | 40,461,019 (72.57%) | 53,369,133 (78.26%) |
+| `sim.thing_pass` | 12,001,248 (21.52%) | 11,531,182 (16.91%) |
+| `sim.bind_things` | 3,294,888 (5.91%) | 3,294,888 (4.83%) |
+| … of which `sim.thing_load` | 9,654,291 | 9,284,652 |
+| … `sim.thing_pass`'s own | 2,092,711 | 2,001,952 |
+| … `sim.fix16` | 254,246 | 244,578 |
+
+**`sim.bind_things` is 3,294,888 at BOTH viewpoints, to the op** — it is a pure frame-constant, as
+its shape predicts (251 things, warm, the same walk every frame).
+
+**THE RECONCILIATION**, and it is three-way. Fit the 260 per-frame deltas of §1.1 against the M5
+counts of §1.5 (`delta = a + b·calls`): **a = 3,490,161, b = 69,991, R² = 0.991**, residual sd
+408,602. Against the profile:
+
+| | 260-frame A/B regression | profile of one frame | agreement |
+|---|---|---|---|
+| frame-constant | a = 3,490,161 | `sim.bind_things` 3,294,888 | 5.9% |
+| per `thing_load` call | b = 69,991 | `sim.thing_pass` 12,001,248 ÷ 183 = 65,581 | 6.7% |
+| `thing_load` alone | — | 9,654,291 ÷ 183 = 52,755 vs §1.2's k-sweep 45,934 | 14.8% |
+
+Two unrelated instruments — a 260-frame binary A/B and a per-macro runtime profile — agree on both
+coefficients within 7%. ⚠ **R² was 0.774 against the OLD baseline and 0.991 against this one**: the
+old baseline's scatter *was* the picture difference.
+
+⚠ **THE ONE ATTRIBUTION LIMIT, stated rather than hidden.** Ops executed inside a shared
+`stl.fcall` leaf carry that leaf's label, not its caller's, so `frame.thing_record_body` (3,127,430
+at spawn) sits under "base renderer" although `sim.thing_pass` drives it. It is not M14-*added* —
+the pre-M14 baked path called the same leaf equally often, and the baseline binary pays it too — but
+the `sim.*` column is therefore a LOWER bound. The measured A/B delta (16,162,852 at spawn) exceeds
+the profiled `sim.*` total (15,296,136) by 866,716 = 5.4%; at the crowded viewpoint the gap is
+1,680,220 = 10.2%. **That remainder is unattributed, and naming it here as "the wire" would be
+exactly the residual-as-attribution §0.3 forbids.**
+
+### 1.2c THE BASE RENDERER — the decomposition §6 said it needed
+
+Same profile, the base-renderer 40,461,019 at spawn, direct + wflip blame:
+
+| macro | ops | share of frame |
+|---|---|---|
+| `frame.seg_pass1_leaf_body_lines` | 13,029,418 | 23.4% |
+| `frame.seg_pass2_leaf_body_lines` | 10,475,621 | 18.8% |
+| `frame.seg_pass1_leaf_body_ts` | 6,108,694 | 11.0% |
+| `frame.thing_record_body` | 3,127,430 | 5.6% |
+| `proj.point_on_side_leaf` | 3,056,362 | 5.5% |
+| `stl.startup_and_init_all` | 1,956,573 | 3.5% |
+| **sum** | **37,754,098** | **93.3% of the base renderer** |
+
+Inside the biggest one, `proj.wall_x_range_m` is 2,411,018 direct ops — §5d's subject.
+
+⚠ **THIS IS ONE HEAVY FRAME (55.76M against a 36.68M median), so read the SHARES, not the
+absolutes, and price anything load-bearing with M1 at the median.**
+
 ### 1.3 Whole-subsystem deltas — A/B on one binary
 
 The gate reports cold vs warm bindings at four viewpoints: **−24,808,725 ops, identical to the op at
@@ -107,23 +207,50 @@ gates certify, so it is the safe place to work. ⚠ **If the deliverable is what
 the target should be measured on lite and every number here must be re-measured** — do not mix them
 in one report.
 
+### 1.5 THE PER-FRAME COUNTS — M5, oracle-side, no build
+
+`python scratchpad/m14_m5_counts.py --csv scratchpad/m5_counts.csv`, 2026-08-14. The sweep's own 260
+frames, rendered through `ReferenceModel.render_wall_frame` itself with wrappers around
+`project_thing`/`sprite_art` installed from the probe — no oracle file edited (§12.5).
+
+```
+subsectors 682 | with segs 682 | carrying >=1 thing 132 | EMPTY of things 550 (80.6%)
+
+leaves entered before `full`  LOW bound  min 0  MEDIAN 215  max 680   (of 682 in the walk order)
+                              HIGH bound min 1  MEDIAN 222  max 681
+thing_load calls/frame                   min 0  MEDIAN  71  mean 85   max 249
+accepted sprites/frame                   min 0  MEDIAN   6  mean  5   max  10
+
+arrived 44,234 -> claim-stopped 22,088 (49.9%) -> LOADED 22,146 -> ACCEPTED 1,314 = 5.9% of loaded
+```
+
+`full` is monotone, so the leaves entered before it latches are a PREFIX of the walk order — which
+is what makes the leaf count exact (bracketed) rather than modelled.
+
+⚠ **A CORRECTION TO §5c AND §7.2.** `THING_BUDGET` and `MONSTER_BUDGET` are both **255** against 251
+drawable things, so **neither can ever bind on this map**. The first cut in the ladder is the `full`
+claim-stop, not a budget. §5c's "reject-before-spend, in the same order" warning still holds for
+`degfl` graduated acceptance and the monotone `tstop`, but not for the count budgets; and §7.2's
+"lower `THING_BUDGET`" is a *visible* change from 255 with nothing free before it.
+
 ## 2. ⚠ What is NOT measured
 
-These were carried as figures in earlier drafts of this plan. They are **removed** and listed here as
-open questions, because none of them has evidence behind it:
+Everything this section used to list has been measured (§1.1–§1.5). What remains open:
 
-* **How many `thing_load` calls happen per frame.** Earlier drafts said "~117"; that was a residual
-  divided by a per-call cost, i.e. circular with the model it was used to confirm.
-* **How many leaves the BSP walk VISITS per frame.** 682 are emitted; the walk stops when the frame
-  is claimed, so the visited count is lower by an unknown factor.
-* **What the unattributed remainder of M14's +13.7M is.** Subtracting the measured pieces leaves a
-  gap that was previously *labelled* "the per-leaf walk" without evidence.
+* **How `sim.thing_pass`'s own 2,092,711 ops split** between the per-leaf preamble and the per-thing
+  loop step. A two-predictor fit (`delta = a + b·calls + c·leaves`) returns c = 330 ops/leaf but
+  does **not** improve R² (0.991 either way) or the residual (408,369 vs 408,602), so `c` is not
+  identified — `leaves` and `calls` are collinear across the grid. What IS bounded: the whole of
+  `thing_pass`'s own cost is 2.09M, and only the empty-leaf share of it is reachable. An M2 k-sweep
+  of `thing_pass` with an empty vs a populated list would settle it in minutes.
+* **The 5.4%–10.2% remainder** between the A/B delta and the profiled `sim.*` total (§1.2b). It is
+  named as a remainder, not attributed.
 * **§4b's full-precision `wall_x_range_m` cost at the median.** The "+9–10%" came from four gate
-  viewpoints at a different milestone.
-* **`bind_things`' cost inside a real frame.** The 5,197,749 above includes the probe's own dump loop.
-* **What any proposed lever would save.** All previous per-lever figures were estimates.
-* **Where the base 22.94M goes today.** The repo has older ablation research, but it predates several
-  correctness fixes.
+  viewpoints at a different milestone. The profile gives 2,411,018 direct ops at ONE heavy frame.
+* **`bind_things`' cost inside a real frame** — now measured at 3,294,888 (§1.2b), so the old
+  5,197,749 figure (which included the probe's own dump loop) is superseded.
+* **What broke the picture between `b_272d37507ca58434` and today** (§12.8). It does not block this
+  campaign — the new baseline sidesteps it — but it is unexplained.
 
 ## 3. THE METHODS — how to turn §2 into evidence
 
@@ -193,35 +320,47 @@ pixel). §11 says why a one-sided control is worthless.
 the knobs into the binary cache key. The instrument for pricing a fidelity option before proposing
 it.
 
-## 4. The arithmetic of the band
+## 4. The arithmetic of the band — ⚠ THE CONCLUSION HAS FLIPPED
 
-Both inputs are measured (§1.1), so this is arithmetic rather than estimate:
+Both inputs are measured against a byte-identical picture (§1.1), so this is arithmetic:
 
 | | |
 |---|---|
-| today | 36.68M |
-| the base renderer, pre-M14 | 22.94M |
-| M14's cost | +13.7M |
+| today (`m14_bin_things`) | 36,683,119 |
+| **the base renderer TODAY, same picture** | **28,193,396** |
+| M14's cost | **+8,489,723** |
 
-* **To reach 25M** (top of the band): M14's overhead must fall from 13.7M to **≤2.06M** — an ~85%
-  reduction. The base renderer is then untouched, and the graphics are unchanged by construction.
-* **To reach 20M** (bottom of the band): M14's overhead to ~0 **and** ~3M out of the base renderer as
-  well.
+* **To reach 25M** (top of the band): remove **11,683,119**.
+* **M14's ENTIRE cost is 8,489,723.** Deleting M14 outright — no wire, no runtime things, a feature
+  the milestone exists to provide — lands at **28,193,396, still 3,193,396 ABOVE the band's top.**
+* **To reach 20M** (bottom): remove 16,683,119 — all of M14 plus ~8.2M of base renderer.
 
-**So the band is well chosen: its top is reachable by removing M14 waste alone, and its bottom
-requires touching the base renderer.** Work the top first; it needs no picture compromise at all.
+> ⚠ **The previous draft's central claim — "its top is reachable by removing M14 waste alone" — is
+> FALSE, and measured to be false.** It followed from the 22.94M baseline, which was a different
+> picture (§1.1). The true base renderer is 28.19M, which is 3.19M over the band's top *by itself*.
 
-Whether 25M is actually reachable depends entirely on the §2 unknowns — that is not a hedge, it is
-the reason §3 exists.
+**So every route into the band goes through the base renderer**, and §6 stops being optional. The
+realistic M14 recovery is bounded by §5: ~3.29M frame-constant (5b) + ~2.0M (5c) ≈ 5.3M, landing
+around **31.4M** — 6.4M short. That is not a reason to skip §5; those are the cheapest ops in the
+program to remove and they are pure waste. It is a reason not to promise the band from them.
 
-## 5. Phase 1 — candidate levers against M14's +13.7M
+⚠ **THIS IS AN OWNER DECISION, not an engineering one.** §7 permits removing some sprites and
+permits *suggesting* other picture trades. The band as stated now requires either base-renderer work
+with no picture cost (unproven to exist), or a picture trade. Both belong to the owner.
 
-**Each is a HYPOTHESIS with a method, and deliberately carries no saving figure.**
+## 5. Phase 1 — the levers against M14's +8.49M, NOW WITH NUMBERS
 
-⚠ **NONE OF THESE MAY BE PROPOSED UNTIL §0's BREAKDOWN EXISTS.** The order is: extend `opprof.py`
-to the M14 binary → profile → print the raw tables → attribute M14's measured +13.7M to subsystems
-with the arithmetic shown → *then* the levers below become proposals with numbers attached. Until
-that happens they are notes, not a plan, and §0 says a plan built on estimates gets rejected.
+§0's breakdown exists (§1.2b), so these are proposals rather than notes. Each carries its measured
+ceiling and says which part of that ceiling is actually reachable.
+
+**Ranked by measured ceiling:**
+
+| lever | what it targets | MEASURED ceiling | reachable |
+|---|---|---|---|
+| 5b lists round-trip | the frame-constant `a` | **3,294,888/frame** (bind_things, identical at both viewpoints) | most of it, minus new wire cost |
+| 5c lazy `thing_load` | the per-call `b` | **4.91M/frame at the median** (69,130 × 71) | ~2.0M — see 5c |
+| 5a baked head check | `thing_pass`'s own | **≤2.09M/frame**, and the leaf-proportional part is not even identifiable | **not the lever — drop it** |
+| 5d `wall_x_range_m` | base renderer | 2,411,018 direct ops at one heavy frame | unknown; Phase 2 |
 
 ### 5a. The per-leaf head check at a baked address
 `s` is a compile-time constant at each leaf's call site, so `sshead + s*2*dw` is a compile-time
@@ -234,15 +373,25 @@ hex.set 4, ss_ltb, {ltbase}
 stl.fcall thing_pass_leaf, tp_ret
 ss{cid}_nothings:
 ```
-**Price it with M5 then M4**: M5 counts how many visited leaves are empty (if few are, the lever is
-worthless); M4 stubs `thing_pass_leaf` to bound the whole subsystem.
-⚠ `subsector_action` is shared with the static path — keep this strictly inside the `moving_things`
-branch and run `cr/emit_hash_vs_head.py` after it.
+⚠ **PRICED AND REJECTED (2026-08-14).** M5 says 550 of 682 leaves (80.6%) are empty and the median
+frame enters 215–222 leaves before `full` latches — so the lever's *count* is real. Its *unit cost*
+is not: `sim.thing_pass`'s own ops (everything except `thing_load`/`fix16`) are **2,092,711** at
+spawn and **2,001,952** at the crowded viewpoint, and that is the whole preamble-plus-loop-step
+budget. Adding `leaves` to the 260-frame regression moves neither R² (0.991) nor the residual
+(408,369 vs 408,602), so the leaf-proportional component cannot even be separated from the per-thing
+one. **Against the 11.68M the band needs, a ≤2.09M ceiling whose reachable fraction is unmeasurable
+is not worth a build.** Reopen only if an M2 k-sweep of `thing_pass` shows the preamble dominating.
 
 ### 5b. The leaf lists round-trip, as the bindings already do
 A frame with nothing moving would then do no binding work; a moved thing costs one unlink + one
 sorted insert — DOOM's `P_UnsetThingPosition`/`P_SetThingPosition`.
-**Price it with M4** (stub `bind_things` to bound what it can possibly save) **then M1**.
+**PRICED — this is the strongest lever. MEASURED ceiling 3,294,888 ops/frame**, the profiled
+`sim.bind_things`, which came out **bit-identical at both profiled viewpoints** and is corroborated
+by the regression's frame-constant a = 3,490,161 (§1.2b). At the median frame that is **39% of
+M14's whole 8.49M**. The warm cache already skips *point location*; what remains is the list
+REBUILD — 251 things walked and re-inserted every frame, whether or not anything moved.
+⚠ The saving is bounded below by the new wire cost (the lists must round-trip), which is why the
+ceiling is not the estimate. Price the residue with M1 after building.
 ⚠ **THE INSERT MUST BE SORTED, NOT A PREPEND.** Lists are built descending so traversal is ascending,
 and ascending order is what makes a static thing claim the same front-to-back sprite slot. A prepend
 reorders sprites and moves pixels. ⚠ Wire cost is real and must be counted against the saving; the
@@ -250,10 +399,17 @@ cold frame gets worse — report `--cold` alongside.
 
 ### 5c. `thing_load` becomes lazy
 Load position first, let `frame.thing_record_body`'s existing rejects fire, load the rest only for
-survivors. The per-call split is measured (§1.2); **what is not measured is the survivor rate, and
-the lever is worth exactly that rate.**
-**Price it with M5 first** — count, on the oracle across the 260 viewpoints, how many things reach
-each reject. If most survive, **this lever does not exist**; say so and move on.
+survivors.
+
+**PRICED, and the survivor rate is now measured: 5.9%.** Of 22,146 things loaded across the 260
+frames, **20,832 (94.1%) are rejected after being loaded** (§1.5). The per-call cost is
+69,130 (regression) / 65,581 (profile ÷ calls), of which §1.2's k-sweep attributes **29,938 to the
+22-byte row read and its 13 field extractions** and 16,995 to the position accessor — and the
+position is the only part the reject needs.
+
+**DERIVED saving at the median frame** (three MEASURED inputs, so tagged DERIVED, not measured):
+`29,938 ops × 94.1% rejected × 71 calls = 2,000,148 ops/frame` ≈ **2.0M**. Confirm with M1 after
+building; do not quote it as measured before that.
 ⚠ **IT CAN MOVE PIXELS THROUGH THE BUDGETS.** `thing_record_body` does not only reject, it *spends*:
 `n_thing`/`n_mon` against their budgets, `degfl` graduated acceptance, `n_hd`, and the monotone
 `tstop` — all consumed **in visit order**. Any split must be **reject-before-spend, in the same
@@ -300,18 +456,21 @@ with its visible consequence named, and stays unapplied until answered.
 
 ## 7b. The work order
 
-1. **Extend `opprof.py` to the M14 binary** (bin wire, `player_sim`, `moving_things`, position +
-   binding blocks). ~20 lines, mirrors the change `m14_sweep.py` already has. **Task one — §0
-   depends on it.**
-2. **Profile.** At minimum the spawn viewpoint and one crowded one (664, 291, 0x18000000). Print the
-   raw BY-OUTERMOST and BY-DEPTH-2 tables.
-3. **Attribute M14's +13.7M**, arithmetic shown, every line tagged MEASURED or ESTIMATED. Reconcile
-   against §1.1's sweep delta and say so if it does not reconcile.
-4. **Answer §2's open counts with M5 first** (oracle-side, no build): things loaded per frame,
-   survivors per reject, leaves visited, leaves carrying things.
-5. **Only now**, propose levers — each with its own measured number.
-6. Build → gate → sweep after **each** lever, one self-contained commit each.
-7. Phase 2 (§6) only if the band's bottom is wanted, and only after its own breakdown.
+1. ~~Extend `opprof.py` to the M14 binary~~ **DONE** — `--m14`, with a sha256 control against
+   `m14_bin_things.fjm` (`IDENTICAL -- profiling the measured binary`).
+2. ~~Profile spawn + one crowded viewpoint~~ **DONE** — §1.2b. Both totals equal the native
+   runner's op count to the op.
+3. ~~Attribute M14's cost, reconciled~~ **DONE** — §1.2b, three-way, within 7%. ⚠ It reconciled
+   only after §1.1's baseline was replaced; against the old one the fit was R² 0.774.
+4. ~~Answer §2's open counts with M5~~ **DONE** — §1.5.
+5. ~~Propose levers with measured numbers~~ **DONE** — §5. 5a priced and **rejected**; 5b and 5c
+   carry ceilings.
+6. **← YOU ARE HERE, AND IT NEEDS THE OWNER FIRST.** §4's conclusion flipped: the band is not
+   reachable by removing M14 alone, because the base renderer alone is 28.19M against a 25M ceiling.
+   5b + 5c are still worth building (≈5.3M of pure waste), but they land at ~31.4M, not in the band.
+   **The owner chooses**: (a) build 5b+5c and accept ~31M; (b) open Phase 2 on the base renderer
+   (§1.2c is its decomposition, and it now exists); (c) take a picture trade under §7.
+7. Then: build → gate → sweep after **each** lever, one self-contained commit each.
 
 ## 8. Acceptance criteria
 
@@ -341,6 +500,12 @@ with its visible consequence named, and stays unapplied until answered.
 | `scratchpad/_tpass.py` | ~2 min | every leaf visits exactly its things, in ascending order |
 | `scratchpad/m14_thload_split.py` | ~5 min | where `thing_load`'s ops go, by ablation, with a linearity control and a sum check |
 | `scratchpad/m14_thload_cost.py` | ~3 min | `thing_load` per-call cost, k-sweep |
+| `scratchpad/opprof.py --m14 [--vp X,Y,ANG] [--reuse]` | 68 min build + ~4 min/frame | **§0's PROFILER.** per-macro attribution of one frame; sha256-controls its binary against the swept one. ⚠ ~8GB RSS — run it alone and kill it after. |
+| `scratchpad/m14_basegate.py` | ~16 min build | **THE BASELINE.** today's source, `deg_gate`'s config, no M14 wire; refuses to emit a number unless byte-exact vs today's oracle |
+| `scratchpad/m14_vp_ops.py --m14 F --dec F [--oracle]` | ~5 min | ops at named viewpoints on two binaries **with a pixel-identity column** — the control §11.5 exists for |
+| `scratchpad/m14_m5_counts.py [--csv F]` | ~12 min | M5: leaves entered before `full`, `thing_load` calls, the reject ladder, over the 260-frame grid |
+| `scratchpad/m14_delta_join.py [baseline.csv]` | seconds | joins the two sweeps + the M5 counts on (x,y,angle); per-frame deltas and the a/b/c fit |
+| `scratchpad/m14_baseline_id.py [fjm]` | ~8 min | which config an archived `b_*` binary is (§12.8) |
 | `scratchpad/_ptrunit.py` / `_ptrunit2.py` | seconds | the pointer/accessor semantics in §4 |
 | `pytest tests/host -q --deselect …e1m1_flat` | 93s | 242 host tests |
 
@@ -398,6 +563,26 @@ Every one of these cost at least one wasted build or probe cycle.
    4-nibble index width where the emitter passes 2 and 3 — it was measuring a program nobody builds.
    It happened not to matter; next time it will.
 
+5. ⚠ **A BASELINE IS NOT A BASELINE UNTIL ITS PIXELS ARE CHECKED. (2026-08-14, and it invalidated
+   this document's headline number.)** §1.1 subtracted an archived binary's sweep median from
+   today's and called the difference "M14's cost, measured". Both sides were real measurements; the
+   *subtraction* was not, because the two binaries draw different frames (up to 5300 of 16000 px).
+   The tells were all visible in advance and none was checked: the archived binary came from a
+   different tool (`bench.py`, whose flags differ from the gates'), it did not match the deg_gate op
+   counts recorded in its own era's commit message, and its per-viewpoint deltas ranged +19M..+38M
+   around a claimed +13.7M median. **Any A/B across two builds must carry a pixel-identity column**
+   — `m14_vp_ops.py --oracle` is that column, and `m14_basegate.py` refuses to emit a number from a
+   binary that is not byte-exact against today's oracle.
+   The corroborating tell, worth remembering on its own: **R² 0.774 → 0.991** on the same regression
+   when the baseline was fixed. Unexplained scatter in a cost model is often a broken control, not
+   noise.
+
+6. **The profiler's own control is cheap and it is not optional.** `opprof.py --m14` sha256-compares
+   its binary against the swept one. It cost 3 lines and it is the only reason the profile can be
+   quoted against the sweep at all. Note the assemble with `debugging_file_path` is **4073s** (vs
+   ~980s without) and produces 24.4M labels / 62MB / ~8GB RSS — profile with nothing else running,
+   and kill the process afterwards or the next tool OOMs (it did).
+
 ## 12. ⚠ The debts and the gaps
 
 **12.1 THE CR.** 36 commits unreviewed since `54da396` (2026-08-12) — all of M14 plus this campaign.
@@ -422,6 +607,24 @@ commit, with the gate as the check that they moved together.
 **12.6 Nothing here re-blesses the certified artefacts.** `deg_gate.py`'s header still carries
 pre-M14-a op counts and no certified binary hash has been published since `b_272d37507ca58434`.
 Part of closing the campaign, not part of any lever.
+
+**12.8 THE PICTURE CHANGED between `b_272d37507ca58434` (2026-08-08) and today, and nobody knows
+why.** MEASURED: that binary differs from today's oracle by 1091 / 844 / 3256 / 5300 of 16000 px at
+the four gate viewpoints; today's M14 binary is byte-exact at all four.
+`scratchpad/m14_baseline_id.py` ruled out `sky`, `bbox_cull`, `degrade` and the lite map. It also
+does not match the deg_gate counts `fda6de4` recorded for its own era (45.21M → 45.66M at (664,291)
+vs today's 51.69M in the same config), so **today's base renderer may have grown ~6M at that
+viewpoint during M14-b..e in a build with no M14 wire at all.** This campaign does not depend on the
+answer — §1.1's new baseline is built from today's source and gated byte-exact — but if that 6M is a
+regression rather than a deliberate change, it is worth more than every lever in §5 combined, and
+§4 needs 11.68M. **Diagnose it before opening Phase 2**: build `m14_basegate.py`'s config at
+`fda6de4` and at `f54300e` and diff the sweeps. Two builds, ~20 min each.
+
+**12.9 The certified artefacts are stale in a NEW way.** `deg_gate.py` and the `b_*` cache are the
+only record of the pre-M14 picture, and §12.8 says that record disagrees with today's oracle. Until
+12.8 is answered, treat `scratchpad/fjmcache/b_*.fjm` as **undated artefacts of unknown
+configuration**, not as baselines. `scratchpad/fjmcache/base_dec_today.fjm` is the one binary in the
+cache whose config and picture are both known and checked.
 
 **12.7 fps has never been measured in this campaign.** Ops/frame is a proxy chosen because it diffs
 deterministically. If frame rate is what actually matters, measure it before declaring anything.

@@ -964,15 +964,15 @@ ns proj {
             @ world_h, prod, end {
         hex.mov 8, world_h, ceilfix
         hex.sub 8, world_h, viewz           // worldtop = ceilfix - viewz
-        hex.fixed_mul_lo 8, 4, prod, world_h, scale
-        hex.set 8, top, centeryfix
+        hex.fixed_mul_lo 8, 4, prod, scale, world_h   // M14-perf ROW RULE: world_h's low 4
+        hex.set 8, top, centeryfix                    // nibbles are 0 (integer<<16), scale is dense
         hex.sub 8, top, prod                // topfrac = centeryfix - worldtop*scale
         hex.shr_hex 8, 4, top               // >> 16 (logical) ...
         hex.sign_extend 8, 4, top           //   ... + sign-extend low 4 nibbles = arithmetic >> 16
 
         hex.mov 8, world_h, floorfix
         hex.sub 8, world_h, viewz           // worldbottom = floorfix - viewz
-        hex.fixed_mul_lo 8, 4, prod, world_h, scale
+        hex.fixed_mul_lo 8, 4, prod, scale, world_h   // M14-perf ROW RULE (see above)
         hex.set 8, bottom, centeryfix
         hex.sub 8, bottom, prod
         hex.shr_hex 8, 4, bottom
@@ -1461,13 +1461,13 @@ ns proj {
       cols_ok:
         hex.mov 8, gzt, sp_z                            // gzt = (thing floor + sprite top) - viewz
         hex.sub 8, gzt, viewz
-        hex.fixed_mul_lo 8, 4, tmp, gzt, xscale
+        hex.fixed_mul_lo 8, 4, tmp, xscale, gzt        // M14-perf ROW RULE: gzt is integer<<16
         hex.set 8, c_centeryfix, centery*0x10000
         hex.mov 8, ytopo, c_centeryfix
         hex.sub 8, ytopo, tmp
         hex.shr_hex 8, 4, ytopo
         hex.sign_extend 8, 4, ytopo
-        hex.fixed_mul_lo 8, 4, tmp, sp_hh, xscale
+        hex.fixed_mul_lo 8, 4, tmp, xscale, sp_hh      // M14-perf ROW RULE: sp_hh is integer<<16
         hex.shr_hex 8, 4, tmp
         hex.sign_extend 8, 4, tmp
         hex.mov 8, hpxo, tmp

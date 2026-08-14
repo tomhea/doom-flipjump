@@ -404,13 +404,23 @@ is not worth a build.** Reopen only if an M2 k-sweep of `thing_pass` shows the p
 ### 5b. The leaf lists round-trip, as the bindings already do
 A frame with nothing moving would then do no binding work; a moved thing costs one unlink + one
 sorted insert — DOOM's `P_UnsetThingPosition`/`P_SetThingPosition`.
-**PRICED — this is the strongest lever. MEASURED ceiling 3,294,888 ops/frame**, the profiled
-`sim.bind_things`, which came out **bit-identical at both profiled viewpoints** and is corroborated
-by the regression's frame-constant a = 3,490,161 (§1.2b). At the median frame that is **39% of
-M14's whole 8.49M**. The warm cache already skips *point location*; what remains is the list
-REBUILD — 251 things walked and re-inserted every frame, whether or not anything moved.
-⚠ The saving is bounded below by the new wire cost (the lists must round-trip), which is why the
-ceiling is not the estimate. Price the residue with M1 after building.
+**PRICED — MEASURED ceiling 3,294,888 ops/frame**, the profiled `sim.bind_things`, bit-identical at
+both profiled viewpoints and corroborated by the regression's frame-constant a = 3,490,161 (§1.2b).
+The warm cache already skips *point location*; what remains is the list REBUILD — 251 things walked
+and re-inserted every frame, whether or not anything moved.
+
+⚠ **AND THE CEILING IS NOT THE PRIZE. MEASURED, 2026-08-14: attacking the ADDRESSING half of that
+cost made the frame WORSE by 1,929,402 ops.** `sim.bind_one` unrolled the bind from the emitter with
+the thing index baked, removing two `hex.ptr_index`, a 16-nibble `read_hex` and a `write_hex` per
+thing — exactly the pointer machinery `set_flip_and_jump_pointers` (12.7% of the frame) is made of.
+Result at (664,291): 65,225,402 → **67,154,804**, byte-exact but 1.93M dearer, and the binary grew
+2.45MB. **The 251 inlined copies cost more than the pointers they removed — the layout tax, and the
+same shape as R10.7 and as `inline_side=True`'s measured +0.42M.** Reverted.
+
+**So `bind_things`' 3.29M is NOT dominated by its addressing**, and any 5b that keeps the work
+in-frame will hit the same wall. The wire round-trip is the only form left worth trying — it removes
+the work rather than re-addressing it — but its ceiling should now be read as "up to 3.29M, and the
+one experiment that tried to collect part of it collected nothing".
 ⚠ **THE INSERT MUST BE SORTED, NOT A PREPEND.** Lists are built descending so traversal is ascending,
 and ascending order is what makes a static thing claim the same front-to-back sprite slot. A prepend
 reorders sprites and moves pixels. ⚠ Wire cost is real and must be counted against the saving; the
@@ -501,6 +511,30 @@ frame, benchmark and played alike.
 ⚠ **THIS GENERALISES BEYOND 5e**: the 260-frame sweep is an integer-position metric, and M14 made
 the program fractional. Before the campaign closes, the target metric itself should be re-examined
 (§12.10).
+
+### 5f. THE ROW RULE, audited across every `fixed_mul_lo` in the hot path — SHIPPED, and tiny
+
+`hex.fixed_mul_lo n, f, dst, a, b` sign-extends both operands to n+f and runs
+`rep(n+f, j) row(..., wb + j*dw)` where each row is skipped on a zero nibble of `b` and costs an
+`add_mul` of width `m-j`. So (a) it is **commutative** — verified directly, not argued:
+`scratchpad/_mulcomm.py` gets identical results on 8/8 real operand pairs including negatives and
+`0x80000001` — and (b) **the LOW nibbles are the dear ones**, so a count of nonzero nibbles is the
+wrong statistic and the first version of `m14_mulorder.py` (which used one) pointed the wrong way.
+
+Priced with the position-weighted cost (`scratchpad/m14_mulorder.py`, max 78 per multiply):
+
+| site | today's 2nd operand | swapped 2nd operand | verdict |
+|---|---|---|---|
+| `wall_screen_span` ×2 (`world_h`×`scale`) | scale ≈ 68 | world_h **15.1** | SWAPPED |
+| `project_thing` `gzt`, `sp_hh` × `xscale` | xscale ≈ 68 | integer<<16 **15.1** | SWAPPED |
+| `wall_x_range_m` / `wall_setup` (`a`×`viewxa`) | viewxa **20.5** int / 29.5 frac | a 21.6 | **NOT swapped** |
+
+⚠ **The `a * viewxa` order is already tuned FOR THE BENCHMARK.** Swapping loses 1.1 row-units at
+integer view positions and wins 7.9 at fractional ones — i.e. it would help real play and hurt this
+document's metric. Left alone, and flagged: §5e's trap has a mirror image, and this is it.
+
+**MEASURED RESULT: −39,449 ops at (664,291), byte-exact.** 0.06%. Correct and free, but those
+multiplies are a small slice of the frame; recorded so nobody re-derives the audit expecting more.
 
 ## 6. Phase 2 — the base renderer. ⚠ NO LONGER OPTIONAL
 
@@ -631,6 +665,22 @@ Every one of these cost at least one wasted build or probe cycle.
     into hot/cold halves therefore means splitting the TABLE, not passing a smaller `nb`. Its cost
     is `rep(nb) read_byte_and_inc`, i.e. linear in the byte count, which is what makes the split
     pay at all. (Note this REFINES R10.8: the *index width* barely matters, the *row width* does.)
+
+12. ⚠ **UNROLLING TO REMOVE POINTER MATH LOSES AT THIS SCALE — MEASURED, +1,929,402.** `sim.bind_one`
+    baked the thing index so `thss[t]`/`thpos[t]` became compile-time addresses, deleting two
+    `ptr_index`, a 16-nibble `read_hex` and a `write_hex` per thing. The frame got 1.93M DEARER and
+    the binary grew 2.45MB. This is R10.7 and `inline_side=True`'s +0.42M again: **251 inlined
+    copies cost more than the pointers they remove.** Before unrolling anything at this scale,
+    assume the layout tax wins and require a measurement to prove otherwise.
+
+13. ⚠ **BAKE AN ADDRESS ONLY WHERE SHIPPED CODE ALREADY BAKES IT.** The same lever first FAILED the
+    gate (1766/17/8 px) because it baked `thnext + i*2*dw`, assuming a 2-nibble entry strides by
+    `2*dw`. `thss`/`thpos` were safe — the emitter already addresses them as `+ i*16*dw` in its own
+    gated wire loops — but `thnext` is baked nowhere else, so its stride was an assumption.
+    ⚠ And note the diagnosis nearly went wrong: 17 px looked "too small for a list-order bug", which
+    pointed at the multiplies instead. `scratchpad/_mulcomm.py` settled it in seconds by TESTING
+    commutativity (8/8 identical) rather than re-reading the macro. **Pixel COUNT does not indicate
+    which subsystem moved.**
 
 11. **THE ASSEMBLER TREATS AN UNUSED MACRO PARAMETER AS AN ERROR** —
     `Syntax Warning … unused labels: nlti, sprlt` stops the assembly. So a signature cannot be

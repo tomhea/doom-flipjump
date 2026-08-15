@@ -276,10 +276,37 @@ change, not a regression.
 mysterious multi-hundred-pixel diff late in a 25-minute build. Decide the order FIRST, write it in
 both mirrors, and record it here.
 
-**Cheap pre-check, no build (M5-style):** count, over the 260 sweep frames, how many leaves contain
-both a static and a dynamic thing AND are reached before `full`. If that count is zero the order is
-unobservable and the change is free; if it is small, the pixel diff is bounded before anything is
-built.
+### ✅ RESOLVED — bake only HOMOGENEOUS leaves, and the picture stays byte-identical
+
+MEASURED, no build (`scratchpad/m145_order_check.py`, and the split count beside it):
+
+```
+leaves holding things                : 132
+leaves holding BOTH kinds            :  15
+static/monster pairs that would SWAP :  14
+statics total                        : 198
+  ... in MIXED leaves                :  22  (11%)
+  ... in HOMOGENEOUS leaves          : 176  (89%)
+```
+
+**So bake a static thing only when NO monster shares its leaf.** The other 22 stay on the runtime
+path. Then **every leaf is either all-baked or all-runtime**, the per-leaf order is WAD order in
+both cases exactly as today, and **the frame is byte-identical** — for 89% of the baking win. The
+picture change in §4b simply does not have to be taken.
+
+⚠ **THE ORACLE'S RULE MUST BE "BAKED FIRST, THEN RUNTIME" — NOT "STATIC FIRST, THEN DYNAMIC".**
+Those coincide today only because of the split above. Keying the oracle on *static-ness* would
+reorder the 15 mixed leaves and diverge immediately; keying it on *baked-ness* is order-preserving
+by construction. **The baked/runtime classification is therefore an SSOT both mirrors read**, in the
+same way `THING_SPRITE` is the SSOT for drawability.
+
+⚠ **THIS CLASSIFICATION IS NOT STABLE UNDER M16.** Monsters move, so a leaf that is homogeneous at
+level load stops being so the moment a monster walks into it — and then a baked static and a runtime
+monster DO share a leaf, and the order becomes baked-then-runtime rather than WAD order. That is
+fine and needs no fix, because both mirrors follow the same rule and the oracle IS the reference —
+but it means **the byte-identical guarantee holds for the spawn configuration, not for all of M16's
+play**. Do not carry "byte-identical" forward as a property of the design; it is a property of the
+starting positions.
 
 ## 5. IS A LINKED LIST THE RIGHT STRUCTURE?
 

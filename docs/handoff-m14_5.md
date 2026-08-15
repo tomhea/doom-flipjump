@@ -10,6 +10,10 @@ Owner directive (2026-08-14), after the 27M sprite package shipped:
 > like you to think of the simplest ways to show these sprites — but in a zero-costing way of
 > drawing … also — you stated a linked list — is it the best optimized data structure?
 
+⚠ **The glyph half of that directive was WITHDRAWN by the owner on the same day**, once the draw
+path was measured and showed no speed difference: *"alright, drop the glyphs programme from the
+plan."* §4 records why, so the idea is not re-invented. **The rest of the directive stands.**
+
 Everything here inherits `docs/handoff-perf.md`'s evidence rule: **no figure without a measurement
 and a command**, every number tagged MEASURED or DERIVED, and a difference is only a measurement if
 both sides are controlled to be comparable (§0 of that document, sixth clause).
@@ -166,128 +170,54 @@ it.
 
 ---
 
-## 4. THE ZERO-COST GLYPHS
+## 4. ~~THE ZERO-COST GLYPHS~~ — RETIRED (owner, 2026-08-14)
 
-⚠ **FIRST, THE CORRECTION.** A simpler picture does **not**, by itself, make a hidden sprite cheap.
-MEASURED: 94.1% of loaded things are rejected before anything is drawn (22,146 loaded, 1,314 drawn
-over 260 frames). The cost is *deciding not to draw*, not drawing. **Baking is what makes them
-cheap; the glyph is what keeps them cheap once they are visible.**
+**Dropped from the plan. Restore the hidden things with their REAL ART instead.**
 
-DERIVED floor per visible baked thing: the projection still runs. From the spawn profile
-`frame.thing_record_body` is 3,127,430 over 183 loads ≈ 17,090 per thing, against ~69,130 per
-runtime load. So a baked glyph thing should land near a quarter of today's cost — **DERIVED from
-two measurements, and the M14.5 build must confirm it.** Not zero. Nothing here is zero.
+The programme rested on a normal-graphics intuition — simpler art draws faster — and the code says
+otherwise. Three rounds of glyph design were spent before the draw path was actually read; this
+section is kept, short, so nobody re-derives it.
 
-### ⚠ 4-0. WHAT A GLYPH ACTUALLY BUYS IN fj — the correction (owner, 2026-08-14)
-
-> *are they really easy to draw in fj, or is it just simple-to-draw in normal-graphics machinery*
-
-**The latter, mostly. "Few colours" is a normal-graphics intuition and it optimises the wrong axis
-here.** Read the real path before designing any more glyphs:
-
-* **Record time, per COLUMN** (`thing_record_body`'s `col_loop`): `read_byte drawn_v`,
-  `read_byte sprflag_v`, slot select, `mul_const` + `rep(blkshift) shl_bit`, `ptr_index` into
-  `sprbank`, `read_byte run_r0`, `read_byte run_last`, the y clamps, the slot store. **Three pointer
-  reads and a shift loop, and NONE of it depends on the run count** — only the block HEADER is read.
-* **Emit time, per RUN** (`stream.sprite_runs`): `read_byte_and_inc rel`, `read_byte_and_inc tex`,
-  ~8 ops, `byte.emit` + `cm.emit`. This is the only run-proportional part.
-
-MEASURED at spawn (`opprof.py --m14`):
+**WHY IT DIED.** MEASURED (`opprof.py --m14`, spawn):
 
 ```
-stream.sprite_runs      48,014 direct + 236,702 wflip = 284,716   0.5% of a 55.8M frame
-frame.thing_record_body                                3,127,430   5.6%
+stream.sprite_runs -- the ONLY run-proportional work   284,716 ops = 0.5% of the frame
+per SCREEN column, in thing_record_body's col_loop:    u DDA, read_byte drawn, read_byte sprflag,
+  slot select, mul_const, rep(blkshift) shl_bit, ptr_index into sprbank, TWO header reads
+  -> THREE POINTER READS, and NONE of it looks at the art
 ```
 
-**The run-walk is an order of magnitude smaller than the per-column record work it hangs off.** So
-runs are SECOND-ORDER. The first-order driver is **how many COLUMNS the sprite covers on screen**,
-which is set by the projection, not by the art — a 5-wide glyph and a 5-wide sampled sprite cost
-about the same to record.
+A textured sprite and a 3-band glyph cost the **same** per screen column. Runs differ, and runs are
+half a percent of the frame. **There is no meaningful speed difference.**
 
-⚠ **One fj-specific freebie with no normal-graphics analogue:** `hex.if0 2, run_last, col_next`
-short-circuits a **fully transparent column** before the rest of the header work. Empty columns are
-nearly free, so a SPARSE glyph beats a solid one of the same width. Design for empty columns, not
-for few colours.
+**AND THE ALTERNATIVE IS CHEAP.** MEASURED, emitting with `THING_SPRITE_ALL`:
 
-**So the honest division of labour, and it is not what §4 originally implied:**
+```
+wall bank only                 95,671,818
+shipped 13 classes            101,366,687   (sprites  5,694,869)
+ALL 56 classes, REAL ART      109,214,892   (sprites 13,543,074)
+=> every hidden thing back with its own sprite: +7,848,205 chars, +6.9% of the program
+```
 
-| tool | fixes | evidence |
-|---|---|---|
-| **BAKING** | **ops** — removes the load, the table reads, the binding | 7,252,305 baked vs 14,352,586 runtime |
-| **GLYPHS** | **the BUILD** — bank size, binary size, assemble time | bank is 5,694,869 chars for 12 images; 399s vs 1583s assemble |
+**TWO FACTS WORTH KEEPING**, because they will come up again:
 
-Glyphs are what make it *affordable to bake 176 statics* without the bank exploding. They are not
-an ops optimisation and must not be sold as one.
+1. **Vertical scaling is free; horizontal is fixed.** The bank bakes per HEIGHT BUCKET, so a
+   procedural shape is crisp at any height — nothing is stretched vertically. But
+   `u = min(dw-1, frac>>16)` and **`sp_dw` is a per-TYPE constant, not per-bucket**, so an N-column
+   sprite always renders as N vertical bands however close the player stands. Exact for
+   rectangle-based shapes, crude for organic ones.
+2. **Screen columns come from the WORLD footprint (`sp_left`/`sp_w`), not from the art's column
+   count (`sp_dw`).** Shrinking the art shrinks the BANK; only shrinking the world footprint
+   shrinks the per-frame work — and that visibly narrows the object.
 
-Secondary design rule (real, but second-order): cost per run is ~2 pointer reads at emit, and bank
-size is ~`columns × 32 buckets × (2 + 2×runs)` bytes — so runs drive the BUILD more than the frame.
+**THE ONE THING THAT WOULD REVIVE THIS: ASSEMBLE TIME.** It is the real constraint and it is
+unpriced for the M14 config. The dec baseline went **399s with no sprites to 1583s with all of
+them**, and `--things` builds are already ~20-25 min. If restoring all 56 classes pushes a build
+past an hour, glyphs become worth it **for the build, not for the frame**. ⚠ Measure that with ONE
+build before writing another glyph.
 
-Proposals rendered at `scratchpad/glyph_sheet.png` (`scratchpad/glyph_sheet.py`), each drawn in that
-class's own dominant palette colours sampled from its real sprite, so it still reads as itself:
-
-| sprite | n | glyph | runs/col |
-|---|---|---|---|
-| BON1 health bonus | 30 | 2×4 dot | 1 |
-| BON2 armour bonus | 22 | 2×4 dot | 1 |
-| BAR1 **barrel** | 22 | 3×6, banded top+bottom | 3 |
-| SMIT stalagmite | 18 | 5×5 triangle | 1 |
-| SHEL shells | 18 | 3×3 box | 3 |
-| TRE2 large tree | 15 | 5×6 canopy + trunk | 2 |
-| TRE1 small tree | 12 | 3×5 canopy + trunk | 2 |
-| ROCK rubble | 8 | 4×3 | 1 |
-| COLU column | 7 | 3×6 + base | 2 |
-| STIM stimpack | 6 | **5×5 PLUS** (the owner's example) | 1 |
-| SBOX shell box | 5 | 4×3 banded | 3 |
-| AMMO clip box | 4 | 4×3 banded | 3 |
-| ELEC tech pillar | 4 | 3×6 + cap | 2 |
-| CLIP ammo clip | 3 | 2×2 | 1 |
-| ARM1 green armour | 2 | 5×5 shield | 1 |
-| ARM2 blue armour | 1 | 5×5 shield | 1 |
-| MGUN chaingun | 2 | 5×3 bar | 2 |
-| LAUN rocket launcher | 2 | 5×3 bar + tip | 2 |
-| BROK rocket box | 2 | 3×3 striped | 1 |
-
-⚠ **AWAITING PER-ROW APPROVAL.** The 3-run rows (BAR1, SHEL, SBOX, AMMO) are the expensive ones;
-if the owner wants them cheaper, drop the band and they become 1 run.
-
-### 4a. ⚠ A GLYPH MUST BE A PROCEDURAL SHAPE, NOT A BITMAP (owner, 2026-08-14)
-
-> they are about 10px total — what if they are close by, how would they look? the same?
-
-**No, and the sheet above is misleading on exactly this point.** The grids are bitmaps at one size.
-The sprite bank bakes a run-list PER HEIGHT BUCKET (`SPRITE_HEIGHT_BUCKETS = 32`), so a 5-row glyph
-on a barrel two units away is stretched across ~70 screen rows — **14-pixel blocks**. That is the
-"closer sprites seem very pixelated" complaint that caused `SPRITE_RUN_CAP_HD = 24` and the
-full-res HD bake to exist; shipping a bitmap glyph would walk straight back into it.
-
-**Define each glyph by PROPORTION and let every bucket bake it at that bucket's own resolution:**
-a plus whose arm is ⅕ of the height, a barrel whose bands are the top and bottom ⅙, a tree whose
-trunk is the lower ⅓ and ⅕ of the width. Then:
-
-* the run count stays **1–3 per column at every size** — a procedural shape has the same number of
-  colour transitions whether it is 4 rows tall or 80;
-* it gets **crisper** as it grows, where sampled art gets blockier — the opposite of the current
-  failure mode;
-* the HD bake and `DEG_SPR_LOWRES_*` tiers become irrelevant for glyph classes, since there is no
-  source art to lose detail from.
-
-⚠ **KEEP THE ORIGINAL WORLD FOOTPRINT.** `sp_w` / `sp_hh` / `sp_left` come from the real picture's
-dimensions. If a glyph changes them, things change size and horizontal position on screen and the
-picture moves far more than intended. **Bake the glyph into the same world box the real sprite had.**
-
-⚠ **A LIKELY WIN I UNDER-SOLD.** Glyphs replace sampled art in the bank, and the bank is the build's
-dominant cost — MEASURED, the sprite bank is 5,694,869 chars for 12 images, and the same config
-assembled in **399s with no sprites vs 1583s with all of them**. A procedural glyph's run-list is a
-fraction of a sampled image's, so glyph classes should shrink the bank and the assemble time
-markedly. That may matter more than their ops saving. **Measure it: emit with glyphs and diff the
-`banks` part size.**
-
-⚠ **A glyph is a PICTURE CHANGE and must move in BOTH MIRRORS in one commit** — the oracle's sprite
-art and the emitter's bank come from `sprite_art`, so the cleanest implementation is a glyph table
-consulted *there*, which makes both sides read it by construction (the same SSOT trick that made
-`THING_SPRITE` safe for the sprite cut).
-
----
+Artefacts, kept for reference only: `scratchpad/glyph_sheet.py`, `scratchpad/glyph_fast.py`,
+and their PNGs.
 
 ## 4b. ⚠ THE GAP THAT WOULD HAVE SHIPPED A BUG: MERGED ITERATION ORDER
 
@@ -398,7 +328,11 @@ Each rung is one self-contained commit: build → `m14_gate.py 10 --things` → 
    prevent. Keep its `assert_thing_live_survives_prune` guard and its R9 negative control.
 2. **`is_visible`** (§3.3), for the vanishable set only.
 3. **`sshead` at a baked address** (§3.2) — re-price under the hybrid before building.
-4. **Glyphs** (§4), after per-row approval, both mirrors in one commit, with a before/after sheet.
+4. **RESTORE THE HIDDEN THINGS WITH THEIR REAL ART** — no glyphs (§4 is retired). Once statics are
+   baked, a restored thing costs the baked path, and its sprite costs **+7,848,205 chars of bank
+   (+6.9% of the program) and nothing per frame**. Restore in the cost order
+   `m14_class_cost.py` ranks, sweep after each batch, and stop at the owner's ceiling.
+   ⚠ **Time the build** as the set grows — assemble time, not ops, is what limits this (§4).
 5. **The list decision** (§5) — only once M16's re-binding shape is known.
 
 **Acceptance:** `m14_gate.py 10 --things` PASS (byte-exact ×4, cold-vs-warm identical pixels, N

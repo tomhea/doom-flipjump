@@ -178,8 +178,49 @@ DERIVED floor per visible baked thing: the projection still runs. From the spawn
 runtime load. So a baked glyph thing should land near a quarter of today's cost — **DERIVED from
 two measurements, and the M14.5 build must confirm it.** Not zero. Nothing here is zero.
 
-Glyph design rule: cost is **colour RUNS per column**, because that is what `sprite_strip` bakes.
-1 run/column is the floor for a visible sprite.
+### ⚠ 4-0. WHAT A GLYPH ACTUALLY BUYS IN fj — the correction (owner, 2026-08-14)
+
+> *are they really easy to draw in fj, or is it just simple-to-draw in normal-graphics machinery*
+
+**The latter, mostly. "Few colours" is a normal-graphics intuition and it optimises the wrong axis
+here.** Read the real path before designing any more glyphs:
+
+* **Record time, per COLUMN** (`thing_record_body`'s `col_loop`): `read_byte drawn_v`,
+  `read_byte sprflag_v`, slot select, `mul_const` + `rep(blkshift) shl_bit`, `ptr_index` into
+  `sprbank`, `read_byte run_r0`, `read_byte run_last`, the y clamps, the slot store. **Three pointer
+  reads and a shift loop, and NONE of it depends on the run count** — only the block HEADER is read.
+* **Emit time, per RUN** (`stream.sprite_runs`): `read_byte_and_inc rel`, `read_byte_and_inc tex`,
+  ~8 ops, `byte.emit` + `cm.emit`. This is the only run-proportional part.
+
+MEASURED at spawn (`opprof.py --m14`):
+
+```
+stream.sprite_runs      48,014 direct + 236,702 wflip = 284,716   0.5% of a 55.8M frame
+frame.thing_record_body                                3,127,430   5.6%
+```
+
+**The run-walk is an order of magnitude smaller than the per-column record work it hangs off.** So
+runs are SECOND-ORDER. The first-order driver is **how many COLUMNS the sprite covers on screen**,
+which is set by the projection, not by the art — a 5-wide glyph and a 5-wide sampled sprite cost
+about the same to record.
+
+⚠ **One fj-specific freebie with no normal-graphics analogue:** `hex.if0 2, run_last, col_next`
+short-circuits a **fully transparent column** before the rest of the header work. Empty columns are
+nearly free, so a SPARSE glyph beats a solid one of the same width. Design for empty columns, not
+for few colours.
+
+**So the honest division of labour, and it is not what §4 originally implied:**
+
+| tool | fixes | evidence |
+|---|---|---|
+| **BAKING** | **ops** — removes the load, the table reads, the binding | 7,252,305 baked vs 14,352,586 runtime |
+| **GLYPHS** | **the BUILD** — bank size, binary size, assemble time | bank is 5,694,869 chars for 12 images; 399s vs 1583s assemble |
+
+Glyphs are what make it *affordable to bake 176 statics* without the bank exploding. They are not
+an ops optimisation and must not be sold as one.
+
+Secondary design rule (real, but second-order): cost per run is ~2 pointer reads at emit, and bank
+size is ~`columns × 32 buckets × (2 + 2×runs)` bytes — so runs drive the BUILD more than the frame.
 
 Proposals rendered at `scratchpad/glyph_sheet.png` (`scratchpad/glyph_sheet.py`), each drawn in that
 class's own dominant palette colours sampled from its real sprite, so it still reads as itself:

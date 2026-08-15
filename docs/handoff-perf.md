@@ -571,6 +571,60 @@ decision is made on an image, not on a description.
 **To suggest — not apply.** Anything else that trades picture goes to the owner as a priced option
 with its visible consequence named, and stays unapplied until answered.
 
+## 7c. WHERE THE CAMPAIGN STANDS — 25,853,174, and the last 853,174
+
+| | median | note |
+|---|---|---|
+| campaign start | 36,683,119 | |
+| §5c lazy cold row | 35,311,166 | picture-neutral, gated |
+| §5f row rule | 35,293,677 | picture-neutral, gated |
+| **§7 sprite package** | **25,853,174** | **picture change, gated, imaged** |
+| the 25M ceiling | 25,000,000 | **853,174 short** |
+| no sprites at all (floor) | 20,941,091 | measured, gated |
+
+**PICTURE-NEUTRAL IS EXHAUSTED.** Three attempts this campaign: −1,371,953, **+1,929,402
+(reverted)**, −39,449. The base renderer alone is 28.19M, so nothing picture-neutral could ever have
+reached 25M; the sprite package was not a shortcut, it was the only route.
+
+**THE LAST 853,174 REQUIRES AN OWNER DECISION**, because every remaining lever is a picture trade
+this document reserves to them (§7 "to suggest — not apply"), and three of the four reverse a
+preference the owner has already expressed:
+
+| option | what it costs the picture | owner history |
+|---|---|---|
+| **a.** `SPRITE_HD_H` 40→higher / `SPRITE_RUN_CAP_HD` 24→12 | near monsters go blocky again | ⚠ the owner ASKED for the HD bake ("closer sprites seem very pixelated") |
+| **b.** harsher `DEG_*` distance/size gates | distant monsters thin out sooner | ⚠ previously DECLINED (§7.3) |
+| **c.** drop monster classes | the one content class deliberately kept | — |
+| **d.** `stack_steps=False` | stairs lose their stacked step faces | untried; the largest single untried block (`seg_pass1_leaf_body_ts`, 11% at spawn) |
+
+⚠ **OPTION (d) IS NOW PRICED, AND IT CLOSES THE GOAL.** MEASURED
+(`scratchpad/m14_price_stack.py` + `m14_sweep.py --things`, `sweep_nostack.csv`, 2026-08-14):
+
+```
+              min          MEDIAN          mean           worst
+with stack  7,129,702    25,853,174    26,379,443    51,230,363
+no stack    7,292,032    24,217,315    25,054,744    48,806,228
+saving       -162,330     1,635,859     1,324,699     2,424,135
+under 26M: 158/260 = 61% (was 51%)
+```
+
+**24,217,315 is inside the 20-25M band**, with 782,685 to spare. Picture: `scratchpad/stack_sheet.png`.
+
+⚠ **IT IS PRICED, NOT CERTIFIED.** `m14_nostack.fjm` was built as a MEASUREMENT: `m14_gate.py`'s
+`RENDER_KW` carries `stack_steps=True`, so this build has never been gated against a matching
+oracle. Before it could ship, the gate's kwargs and the build must move together and the whole
+gate + `m14_basegate.py` re-run. Do not quote 24,217,315 as a shipped number until that happens.
+
+⚠ **AND IT IS UNAPPLIED, DELIBERATELY.** §7 permits removing sprites; step faces are geometry, not
+sprites, so this falls under "anything else that trades picture goes to the owner as a priced option
+with its visible consequence named, and stays unapplied until answered." The consequence is named:
+stairs lose their stacked step faces (the V5 feature), most visible on the (1272,-724) stairs row.
+
+⚠ **AND NOTE WHAT THE SHORTFALL TAUGHT**: the estimate said dropping 79% of things would cut 79% of
+the sprite bill; it cut **66%**. Cost tracks DRAWN AREA once the cheap rejects are gone, not count —
+94.1% of loads reject, so the classes removed were the cheap ones and the 53 monsters kept still
+cost 4,911,000. Any further "drop N% of things ⇒ save N%" reasoning is wrong for the same reason.
+
 ## 7b. The work order
 
 1. ~~Extend `opprof.py` to the M14 binary~~ **DONE** — `--m14`, with a sha256 control against

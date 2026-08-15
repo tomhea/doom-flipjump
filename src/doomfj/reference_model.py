@@ -171,7 +171,33 @@ MONSTER_TYPES = frozenset({7, 9, 16, 58, 64, 65, 66, 67, 68, 69, 71, 84, 88,
 # what handoff-perf.md §7.1 demands of a sprite cut: one data change, both mirrors, one commit.
 THING_SPRITE_ALL = THING_SPRITE          # the full table, kept so the before/after sheet can
                                          # render what the cut removes (scratchpad/spr25_sheet.py)
-DROPPED_SPRITE_TYPES = frozenset(THING_SPRITE_ALL) - MONSTER_TYPES
+# KEPT ALONGSIDE THE MONSTERS (owner, 2026-08-14, ceiling raised to 27M). The headroom above the
+# monsters-only 25,853,174 is 1,146,826 ops, and the set below was CHOSEN BY MEASUREMENT rather
+# than by count: `scratchpad/m14_class_cost.py` counts, per class, how many (frame, thing) LOADS it
+# causes over the sweep's 260 frames — i.e. how often the walk reaches its leaf before `full`
+# latches. Cost tracks THAT, not sprite size, so a class of one prop in a corridor nobody looks
+# down is ~22k ops/frame while 30 bonus dots in the open courtyard are 1.4M.
+#
+# ⚠ THE PROXY UNDERSTATES, AND IT WAS MEASURED DOING SO. The load count ignores that an ACCEPTED
+# thing also DRAWS, so mid-size classes cost more than their loads suggest. Barrels + these six
+# were predicted at 932,100 and measured at 1,558,963 (median 25,853,174 -> 27,412,137): actual =
+# proxy x 1.673. ⇒ THE 22 BARRELS ALONE ARE ~1.34M AGAINST A 1,146,826 BUDGET AND DO NOT FIT AT
+# 27M. They are the thing to buy back first if the ceiling ever rises.
+#
+# So the set is the classes whose things are small and rarely reached, where proxy ~ actual:
+#   BPAK PSTR SOUL CSAW PLAS CELL  1 each   21,840-46,280   distinctive one-off pickups
+#   SHOT  4                                    153,140
+#   MEDI  5                                    210,080
+#   proxy 582,140 x 1.673 = ~974k  =>  ~26.83M, inside 27M with margin held for the ratio.
+#
+# Deliberately out: BAR1 (see above), BON1/BON2 (52 bonus dots, 5.6M — the most expensive thing on
+# the map and sub-pixel at most distances), SHEL/SMIT/TRE1/TRE2 (bulk classes, 0.7-1.1M each).
+SPRITE_KEEP_EXTRA = frozenset({
+    8, 2023, 2013, 2005, 2004, 2047,     # BPAK PSTR SOUL CSAW PLAS CELL, 1 each
+    2001,                                # SHOT  shotgun, 4
+    2012,                                # MEDI  medikit, 5
+})
+DROPPED_SPRITE_TYPES = frozenset(THING_SPRITE_ALL) - MONSTER_TYPES - SPRITE_KEEP_EXTRA
 THING_SPRITE = {k: v for k, v in THING_SPRITE_ALL.items() if k not in DROPPED_SPRITE_TYPES}
 MONSTER_BUDGET = 255              # V4: NO COUNT LIMIT (owner, 2026-08-01). 255 is the widest value
                                   # the 2-nibble `n_mon`/`n_thing` counters hold, and E1M1's heaviest

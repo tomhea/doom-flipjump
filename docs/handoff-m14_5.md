@@ -328,11 +328,38 @@ Each rung is one self-contained commit: build → `m14_gate.py 10 --things` → 
    prevent. Keep its `assert_thing_live_survives_prune` guard and its R9 negative control.
 2. **`is_visible`** (§3.3), for the vanishable set only.
 3. **`sshead` at a baked address** (§3.2) — re-price under the hybrid before building.
-4. **RESTORE THE HIDDEN THINGS WITH THEIR REAL ART** — no glyphs (§4 is retired). Once statics are
-   baked, a restored thing costs the baked path, and its sprite costs **+7,848,205 chars of bank
-   (+6.9% of the program) and nothing per frame**. Restore in the cost order
-   `m14_class_cost.py` ranks, sweep after each batch, and stop at the owner's ceiling.
+4. **RESTORE THE HIDDEN THINGS WITH THEIR REAL ART** — no glyphs (§4 is retired). Their *art* is
+   nearly free: **+7,848,205 chars of bank (+6.9% of the program) and nothing per frame**. Restore
+   in the cost order `m14_class_cost.py` ranks, sweep after each batch.
    ⚠ **Time the build** as the set grows — assemble time, not ops, is what limits this (§4).
+
+   ⚠ **ALL 198 DOES NOT FIT AT 27M, AND THE PLAN SHOULD NOT PRETEND IT DOES.** The arithmetic,
+   from this session's measurements:
+
+   | | ops | source |
+   |---|---|---|
+   | base renderer, no things | 20,941,091 | MEASURED |
+   | 53 monsters, runtime | +4,912,083 | MEASURED (25,853,174) |
+   | 198 non-monsters, RUNTIME | +9,440,503 | DERIVED; cross-checks the 9,439,503 sprite-cut delta |
+   | **198 non-monsters, BAKED** | **?** | the whole question |
+
+   To fit 27M the 198 baked must cost **≤ 1,146,826 — 0.12× their runtime cost.** The measured
+   baked/runtime ratio over all 251 sprites is **0.505**; the optimistic bound for a reject-heavy
+   set is ~0.25 (a rejected thing's runtime cost is mostly `thing_load` ≈ 52,755 of ≈ 69,130, and
+   baking removes exactly that, leaving the ≈ 17,090 projection). So:
+
+   ```
+   198 baked at 0.505  ~4.77M  ->  ~30.6M   |  198 baked at 0.25  ~2.36M  ->  ~28.2M
+   ```
+
+   **Both clear the ceiling.** What fits at 27M is roughly **50–100 of the 198** — still far better
+   than today's 15. ⚠ These are DERIVED from a ratio measured on the FULL set, not on the
+   non-monster subset, so the error bars are wide: **step 1's build measures the real ratio, and
+   the restore list must be re-cut from that number, not from these.**
+
+   **The owner's options once step 1 has measured it:** raise the ceiling to ~28–31M and take
+   everything; keep 27M and restore the cheapest ~50–100; or spend the difference on the base
+   renderer instead (§8 — it is 20.94M with no things at all).
 5. **The list decision** (§5) — only once M16's re-binding shape is known.
 
 **Acceptance:** `m14_gate.py 10 --things` PASS (byte-exact ×4, cold-vs-warm identical pixels, N

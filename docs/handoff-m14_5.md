@@ -209,12 +209,77 @@ class's own dominant palette colours sampled from its real sprite, so it still r
 ⚠ **AWAITING PER-ROW APPROVAL.** The 3-run rows (BAR1, SHEL, SBOX, AMMO) are the expensive ones;
 if the owner wants them cheaper, drop the band and they become 1 run.
 
+### 4a. ⚠ A GLYPH MUST BE A PROCEDURAL SHAPE, NOT A BITMAP (owner, 2026-08-14)
+
+> they are about 10px total — what if they are close by, how would they look? the same?
+
+**No, and the sheet above is misleading on exactly this point.** The grids are bitmaps at one size.
+The sprite bank bakes a run-list PER HEIGHT BUCKET (`SPRITE_HEIGHT_BUCKETS = 32`), so a 5-row glyph
+on a barrel two units away is stretched across ~70 screen rows — **14-pixel blocks**. That is the
+"closer sprites seem very pixelated" complaint that caused `SPRITE_RUN_CAP_HD = 24` and the
+full-res HD bake to exist; shipping a bitmap glyph would walk straight back into it.
+
+**Define each glyph by PROPORTION and let every bucket bake it at that bucket's own resolution:**
+a plus whose arm is ⅕ of the height, a barrel whose bands are the top and bottom ⅙, a tree whose
+trunk is the lower ⅓ and ⅕ of the width. Then:
+
+* the run count stays **1–3 per column at every size** — a procedural shape has the same number of
+  colour transitions whether it is 4 rows tall or 80;
+* it gets **crisper** as it grows, where sampled art gets blockier — the opposite of the current
+  failure mode;
+* the HD bake and `DEG_SPR_LOWRES_*` tiers become irrelevant for glyph classes, since there is no
+  source art to lose detail from.
+
+⚠ **KEEP THE ORIGINAL WORLD FOOTPRINT.** `sp_w` / `sp_hh` / `sp_left` come from the real picture's
+dimensions. If a glyph changes them, things change size and horizontal position on screen and the
+picture moves far more than intended. **Bake the glyph into the same world box the real sprite had.**
+
+⚠ **A LIKELY WIN I UNDER-SOLD.** Glyphs replace sampled art in the bank, and the bank is the build's
+dominant cost — MEASURED, the sprite bank is 5,694,869 chars for 12 images, and the same config
+assembled in **399s with no sprites vs 1583s with all of them**. A procedural glyph's run-list is a
+fraction of a sampled image's, so glyph classes should shrink the bank and the assemble time
+markedly. That may matter more than their ops saving. **Measure it: emit with glyphs and diff the
+`banks` part size.**
+
 ⚠ **A glyph is a PICTURE CHANGE and must move in BOTH MIRRORS in one commit** — the oracle's sprite
 art and the emitter's bank come from `sprite_art`, so the cleanest implementation is a glyph table
 consulted *there*, which makes both sides read it by construction (the same SSOT trick that made
 `THING_SPRITE` safe for the sprite cut).
 
 ---
+
+## 4b. ⚠ THE GAP THAT WOULD HAVE SHIPPED A BUG: MERGED ITERATION ORDER
+
+**A leaf that holds BOTH baked statics and dynamic monsters must visit them in an order both
+mirrors agree on, and today's order cannot be preserved.**
+
+Within a leaf the oracle iterates `things_by_ss[ss]`, built by appending in WAD order, so statics
+and monsters are interleaved. fj cannot interleave them: the baked things are *code* emitted at the
+call site and the dynamic ones are a *runtime list*, so the only orders fj can produce are
+"all baked, then all dynamic" or the reverse.
+
+This is not cosmetic. Arrival order decides:
+* **which sprite claims slot A** (the write-once near fragment) and which gets slot B — a monster
+  behind a barrel swaps depth with it if the order flips;
+* **`n_thing` / `n_mon`**, and therefore `degfl`'s graduated acceptance, which raises the min-size
+  bar after the first SOFT accepted things — a different order changes *which* far things are
+  dropped;
+* **`n_hd`** (the HD bake budget), spent in visit order.
+
+⚠ **So the oracle must adopt the same split, in the same commit.** `render_wall_frame`'s per-leaf
+loop becomes "statics of this leaf, then dynamics of this leaf", matching the emitter. That is a
+BOTH-MIRRORS change of the kind §7.1 of `handoff-perf.md` describes, and **it will move pixels**
+wherever a static and a dynamic thing overlap in the same leaf — a deliberate, ownable picture
+change, not a regression.
+
+⚠ **The gate will catch it either way** — that is what phase 1 is for — but it will catch it as a
+mysterious multi-hundred-pixel diff late in a 25-minute build. Decide the order FIRST, write it in
+both mirrors, and record it here.
+
+**Cheap pre-check, no build (M5-style):** count, over the 260 sweep frames, how many leaves contain
+both a static and a dynamic thing AND are reached before `full`. If that count is zero the order is
+unobservable and the change is free; if it is small, the pixel diff is bounded before anything is
+built.
 
 ## 5. IS A LINKED LIST THE RIGHT STRUCTURE?
 
@@ -227,23 +292,26 @@ static thing is pure overhead.
 frame-constant, because it re-links every thing every frame whether or not anything moved. It is
 per-thing, so with only monsters dynamic it scales down with the count.
 
-Two real weaknesses to fix in M14.5 or M16:
+⚠ **THERE IS NO UNLINK, AND THERE SHOULD NOT BE ONE.** An earlier draft of this section recommended
+a doubly-linked list so a moved thing could be unlinked in O(1). That was wrong, and the owner
+caught it: `bind_things` **rebuilds from scratch every frame** — `sshead` is zero-init so there is
+nothing to unlink from, and every thing is simply re-inserted. Unlink only exists in the design
+where the lists round-trip and are maintained INCREMENTALLY (§5b of the perf handoff), and that
+design does not pay once the statics are baked:
 
-1. ⚠ **The list is SINGLY linked, so unlinking requires finding the predecessor — O(list length).**
-   Today that never happens because the whole structure is rebuilt from scratch. The moment M16 does
-   incremental re-binding (`P_UnsetThingPosition`/`P_SetThingPosition`, §5b of the perf handoff), a
-   singly-linked list is the wrong structure. **DOOM uses a doubly-linked list for exactly this
-   reason.**
-2. **Rebuilding at all is optional.** The lists are world state and fj has none between frames —
-   which is the same argument that made positions and bindings round-trip. Round-tripping the lists
-   (§5b) means fj never rebuilds; it reads a head at a fixed address (§3.2) and walks.
+* the rebuild is **per-thing** and shrinks with the dynamic set — DERIVED, 3,294,888 × 53/251 ≈
+  **~0.7M** for a monsters-only dynamic set (confirm by measuring, it is not a measurement yet);
+* but `sshead` is **682 entries no matter how few things there are**, so round-tripping the lists
+  costs ~735 entries in and out *regardless*. **The wire cost does not scale down with the dynamic
+  set; the rebuild cost does.** §5b gets less attractive as M14.5 succeeds, not more.
 
-⚠ **§5b's ceiling is 3,294,888 but its collectable fraction is unknown**, and the one experiment
-that tried to collect part of it by re-addressing collected nothing (§0). Price it with a build.
+**So: keep the singly-linked list, keep the full rebuild, and let baking shrink it.** A forward pass
+over ~53 things with no search beats any incremental scheme here, and it needs no new data
+structure, no wire format change and no host state.
 
-**Candidate ranking for the dynamic set** (all DERIVED from structure, none measured):
-baked CSR for statics (zero per-frame) > doubly-linked list rebuilt only for movers > today's
-singly-linked full rebuild.
+**Ranking for the dynamic set** (DERIVED from structure, not measured): baked call sites for statics
+(no structure at all) > today's singly-linked full rebuild over a small set > incremental
+maintenance with round-tripped lists. Revisit only if M16 makes the dynamic set large.
 
 ---
 
@@ -290,6 +358,33 @@ nothing last time only because the change was inert); `pytest tests/host -q --de
 6. **ONE HEAVY BUILD AT A TIME** (CLAUDE.md rule 1). The `--things` build is ~25 min; `opprof.py`
    with `debugging_file_path` is **4073s and ~8GB RSS** — run it alone and kill the process after,
    or the next tool OOMs (it did).
+
+## 7b. ⚠ THE GUARDS — because "just another if/else" is where these bugs live
+
+Owner: *"that's a good code change maybe its just another if/else. yes, you should take a good
+notice and make sure bugs as these won't happen."* The structural change IS small. Each hazard below
+gets a control that FAILS LOUDLY, in the spirit of R9 — a check that never fires proves nothing.
+
+1. **`if/elif` → both branches in one leaf.** The two thing branches in `subsector_action` are
+   mutually exclusive today. Making them independent is the change. **Control:** an emit-time
+   assertion that the union of (baked things emitted) ∪ (things in the runtime table) is EXACTLY the
+   drawable set, per leaf and overall — no thing in both, none in neither. A thing silently in
+   neither is invisible with no other symptom, which is the M14-a failure mode all over again.
+2. **Iteration order (§4b).** **Control:** the M5 pre-count of leaves holding both kinds; then the
+   gate. Do not rely on the gate alone to discover the order is wrong.
+3. **The prune.** ⚠ **DO NOT narrow `thing_live_subsectors` for statics in M14.5.** It is tempting
+   (a static thing cannot walk into a new leaf) and it is a separate, riskier optimisation whose
+   failure mode is silent vanishing. M14-a exists because of exactly this. Keep
+   `assert_thing_live_survives_prune` and its R9 negative control running unchanged.
+4. **`is_visible` vacuity.** ⚠ **M14.5 HAS NO PICKUP LOGIC**, so nothing will ever clear a visibility
+   bit and the gate would pass a build whose flag is never read. **Control, and it must be
+   TWO-SIDED** (`handoff-perf.md` §11.2): the gate must hide a set of things that are ON SCREEN,
+   assert the frame CHANGED, and assert it changed back when they are restored. Counting flag writes
+   alone passed a mover set that was entirely off-screen once already.
+5. **The shipped/static path.** Any change to `subsector_action` or the shared decls touches the
+   renderer `build.py` ships. **Control:** `m14_basegate.py --rebuild` must come back byte-exact AND
+   **op-identical to the digit** (51,688,913 / 41,978,565 / 48,915,900 / 39,594,303). It passed last
+   time only because the change was inert; it will not be inert here.
 
 ## 8. OPEN, AND HONEST ABOUT IT
 

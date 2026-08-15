@@ -357,9 +357,39 @@ Each rung is one self-contained commit: build → `m14_gate.py 10 --things` → 
    non-monster subset, so the error bars are wide: **step 1's build measures the real ratio, and
    the restore list must be re-cut from that number, not from these.**
 
-   **The owner's options once step 1 has measured it:** raise the ceiling to ~28–31M and take
-   everything; keep 27M and restore the cheapest ~50–100; or spend the difference on the base
-   renderer instead (§8 — it is 20.94M with no things at all).
+   ### ✅ DECIDED (owner, 2026-08-14): **ALL 198 COME BACK.**
+
+   > *"anyway i want to use all sprites."*
+
+   So the target is the FULL 251-thing picture and **the 27M ceiling moves to whatever this
+   measures.** The split is already known from §4b's census, computed with every class enabled:
+
+   | | things | path |
+   |---|---|---|
+   | monsters | 53 | runtime (they change leaf) |
+   | statics sharing a leaf with a monster | 22 | runtime (preserves WAD order — §4b) |
+   | **statics in homogeneous leaves** | **176** | **BAKED** |
+
+   DERIVED landing zone, and it is a range because the ratio is not yet measured:
+
+   ```
+   20,941,091 base + 4,912,083 monsters + ~1.05M (22 statics runtime)
+                   + 176 baked at 0.505 -> ~4.24M  =>  ~31.1M
+                   + 176 baked at 0.25  -> ~2.10M  =>  ~29.0M
+   ```
+
+   ⚠ **DO NOT quote either end.** Step 1 measures the real ratio on the real subset; everything
+   above is bracketing, not prediction.
+
+   ⚠ **THE PICTURE RETURNS TO FULL.** All 251 things with their own art — the same picture the
+   renderer drew before the 27M sprite package cut it, so `spr27c_sheet.png`'s right-hand column
+   stops being the shipped look. Restoring `DROPPED_SPRITE_TYPES = frozenset()` is the one-line
+   part; baking is what makes it affordable.
+
+   **AND THE REAL CONSTRAINT MOVES TO THE BASE RENDERER.** At ~29–31M with a full picture, the
+   sprite question is closed and the 20,941,091 floor is what stands between this and the owner's
+   12–25M full-game target (§8). That is the next campaign, and it needs a MEDIAN-frame profile,
+   which does not exist.
 5. **The list decision** (§5) — only once M16's re-binding shape is known.
 
 **Acceptance:** `m14_gate.py 10 --things` PASS (byte-exact ×4, cold-vs-warm identical pixels, N

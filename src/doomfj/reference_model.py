@@ -215,7 +215,20 @@ SPRITE_KEEP_EXTRA = frozenset({
     2001,                                # SHOT  shotgun, 4
     2012,                                # MEDI  medikit, 5
 })
-DROPPED_SPRITE_TYPES = frozenset(THING_SPRITE_ALL) - MONSTER_TYPES - SPRITE_KEEP_EXTRA
+# ── M14.5: EVERY SPRITE COMES BACK (owner, 2026-08-14: "anyway i want to use all sprites") ──────
+#
+# The cut above was forced by a measurement that no longer holds. It priced 198 sprites on the
+# RUNTIME path, where a thing costs a table read, a position read, a binding and a list insert every
+# frame. M14.5 bakes any thing no monster shares a leaf with -- 176 of those 198 -- back into its
+# leaf as compile-time constants, which is where they were before M14-e and roughly half the price
+# (docs/handoff-m14_5.md section 0). So the set is restored in full and the ceiling moves to
+# whatever it measures; the sprite question closes and the base renderer's 20,941,091 becomes the
+# thing standing between this and the 12-25M target.
+#
+# ⚠ THE CUT'S OWN CONSTANT IS KEPT, not deleted: `SPRITE_KEEP_EXTRA` and the reasoning above it are
+# the record of how the 27M package was chosen, and re-cutting is one edit if a ceiling ever
+# demands it. Restoring is this one line.
+DROPPED_SPRITE_TYPES = frozenset()
 THING_SPRITE = {k: v for k, v in THING_SPRITE_ALL.items() if k not in DROPPED_SPRITE_TYPES}
 MONSTER_BUDGET = 255              # V4: NO COUNT LIMIT (owner, 2026-08-01). 255 is the widest value
                                   # the 2-nibble `n_mon`/`n_thing` counters hold, and E1M1's heaviest

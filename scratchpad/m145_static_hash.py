@@ -25,9 +25,18 @@ ROOT = Path(__file__).resolve().parents[1]
 for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
+import doomfj.reference_model as RM                                       # noqa: E402
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.wall_renderer import emit_wall_renderer                       # noqa: E402
+
+# `--cut27` restores the 27M package's sprite set, so a tree that has since restored every sprite
+# can be compared against a pre-M14.5 tree on the SAME PICTURE. Without it the two differ for a
+# deliberate reason and the comparison says nothing about the structural change.
+if "--cut27" in sys.argv:
+    keep = set(RM.MONSTER_TYPES) | set(RM.SPRITE_KEEP_EXTRA)
+    RM.THING_SPRITE = {k: v for k, v in RM.THING_SPRITE_ALL.items() if k in keep}
+    print(f"27M cut applied: {len(RM.THING_SPRITE)} sprite classes")
 
 mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))

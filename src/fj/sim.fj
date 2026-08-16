@@ -445,6 +445,24 @@ ns sim {
         // binary got SMALLER after adding 682 unrolled sets, which is the tell. `rep` needs a
         // literal, so that unroll belongs in the emitter, where NSS is a number. Kept as a loop
         // here so the macro is correct standalone; see the emitter for the fast path.
+        //
+        // ⚠⚠ AND THE ADDRESS IN THAT SKETCH IS UNVERIFIED -- DO NOT COPY IT. M14.5 wanted the same
+        // baked address for a per-leaf EMPTY-LIST TEST (`hex.if0 2, sshead + s*?*dw`, worth
+        // 0.7-2.2% now that 96% of visited leaves have no runtime list -- scratchpad/m145_leafcost.py)
+        // and could not establish it:
+        //   * the stl documents `hex.ptr_index dst, ptr, index` as `dst = ptr + index*2w`, i.e. ONE
+        //     dw cell per index -- which is `sshead + i*dw`, NOT `i*2*dw`;
+        //   * but `hex.read_byte dst, ptr` is `dst[:2] = *ptr`, two nibbles, so a byte entry spans
+        //     two cells and a one-cell stride would make neighbouring entries OVERLAP -- which the
+        //     shipped renderer's byte-exact gate says does not happen;
+        //   * and three probes (scratchpad/_ssheadaddr.py, _ssheadoverlap.py, _ssheadlayout.py)
+        //     returned MUTUALLY INCONSISTENT answers, so none of them is evidence (CLAUDE.md rule 3:
+        //     a verification tool used as evidence must ship a negative control, and these do not).
+        // So the layout here is whatever `ptr_index` + `read_byte`/`write_byte` agree on, and it is
+        // only ever addressed through that pair -- which is why the shipped code is correct and why
+        // a BAKED address is a separate rung: establish the layout with a negative-controlled probe
+        // FIRST, then bake. Trap 2 of docs/handoff-m14_5.md is exactly this mistake, already paid
+        // for once with `thnext + i*2*dw`.
         hex.set 4, dv, 0xFFFF                  // the host's "I moved this one" sentinel
         hex.set w/4, t, nthings
       bl:

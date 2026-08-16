@@ -541,12 +541,51 @@ wrong, and both were caught by a 10-second fj unit test rather than a 25-minute 
 `scratchpad/_visunit.py` (the visibility wire, which PASSED) and `scratchpad/_ssheadaddr.py` (the
 sshead address, which FAILED) are the pattern — write the probe before the build, every time.
 
+### ✅ THE SHIPPED STATIC PATH IS RE-CERTIFIED, AND THE STRUCTURAL CHANGE IS PROVEN INERT ON IT
+
+§7b.5 asks the renderer `build.py` ships to come back byte-exact AND op-identical. Both halves are
+now answered, and they needed different instruments because rung 2 changes that renderer's picture
+ON PURPOSE — an op-identity check across a deliberate picture change would be meaningless.
+
+**1. Rung 1 does not touch the static path — PROVEN BY EMISSION, no build.** A static build bakes
+every thing, has no runtime list, no `thvis`, and keeps the record body's name, so the emitted TEXT
+must be unchanged. MEASURED (`scratchpad/m145_static_hash.py`, the shipped tier, SAME sprite set on
+both sides via `--cut27`):
+
+```
+pre-M14.5 (3e8d1aa, isolated worktree)  2ad61d4cf119f805...  114,232,173 chars
+HEAD --cut27                            2ad61d4cf119f805...  114,232,173 chars   IDENTICAL
+```
+
+⚠ **with its negative control**, because an equality that cannot fail proves nothing: HEAD without
+`--cut27` (the restored picture) hashes `a8b77cc24deb4f76...` / 122,102,636 chars. The tool detects a
+change. Character-identical text cannot assemble differently, so this is STRONGER than op-identity.
+
+**2. The static renderer re-certified on the restored picture.** `m14_basegate.py --rebuild`,
+assembled 855s / 14,338,911 bytes:
+
+```
+(664,291,0x18000000)   51,653,980 ops   BYTE-EXACT vs today's oracle
+(1272,-724,0x40000000) 41,936,825 ops   BYTE-EXACT
+(1869,479,0x80000000)  48,876,228 ops   BYTE-EXACT
+(-416,256,0x0)         39,596,401 ops   BYTE-EXACT
+```
+
+**⚠ AND THE OP DELTA AGAINST THE RECORDED BASELINE IS ATTRIBUTED, not waved at** (rule 2: an
+op-count change with byte-exact pixels means structure moved — investigate it). The recorded
+51,688,913 / 41,978,565 / 48,915,900 / 39,594,303 turn out to date from **bcff5f8, which is BEFORE
+the sprite cut** — i.e. they were measured on the FULL 251-thing picture, the one just restored,
+which is why today's numbers land within ~40k rather than millions above. The differences
+(−34,933 / −41,740 / −39,672 / **+2,098**) are NOT M14.5's: the static emission at bcff5f8 hashes
+`11bd2282...` / 122,102,602 chars against HEAD's `a8b77cc2...` / 122,102,636 — **34 characters** —
+and the only non-M14.5 commits touching the emitter or `src/fj` in that range are `ee0358d` (the
+row-rule audit, which advertised −17,489) and `ef6320e` (the lazy thing row). Together with (1),
+M14.5 accounts for none of it.
+
+**⇒ THESE ARE THE NUMBERS TO QUOTE FROM NOW ON**, and the old four are retired: they belong to a
+picture the renderer no longer draws.
+
 ### What did NOT get done
 
-* `m14_basegate.py --rebuild` op-identity for the shipped static path. Rung 1 is inert there BY
-  CONSTRUCTION (a static build bakes everything, has no runtime list, no `thvis`, and the record
-  body keeps its name), and `scratchpad/m145_static_hash.py` checks that by emission hash without a
-  70-minute build — **but rung 2 deliberately changes that renderer's picture**, so the op-identity
-  half can only be run against a same-sprite-set baseline. Do it before shipping `build.py`.
 * The 22 statics that share a leaf with a monster stay on the runtime path (§4b's rule). Freeing
   them needs the merged-order change and MOVES PIXELS — an ownable decision, not a bug fix.

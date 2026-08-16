@@ -88,3 +88,15 @@ and the distinction is the repo's hardest-won lesson:
   stage named files only, or you will sweep 35 stray artifacts into a commit.
 - Windows console is cp1255: keep probe output ASCII, or redirect to a file.
 - Commit messages carry the proof numbers (op counts, hashes, test names), not adjectives.
+
+## Performance Claims
+Never quote an ops/frame, speedup, or cost number without re-running the measurement harness in this session. Before reporting any performance win: (1) verify the harness is not measuring zeros or a no-op filter, (2) print the raw baseline and post-change numbers side by side, (3) state the measurement command used. If a number comes from a doc, git log, or memory, label it explicitly as UNVERIFIED and re-measure before acting on it.
+
+## Byte-Exactness Gate
+Every renderer/emitter change must be validated byte-exact against the reference output before it is described as done or committed. Run the four-viewpoint gate and diff the emitted bytes; if the diff is non-empty, the change is NOT shipped. Do not use the equivalence checker alone — verify it actually compared every file (print the file count it checked).
+
+## Feature Wiring Checklist
+A feature is not 'shipped' until it is wired into the entry point (e.g. walk_e1m1.py) and observable end-to-end from a user-facing run. Before saying a milestone is complete, grep for the new flag/function name in the entry-point script and paste the line that enables it.
+
+## Long-Running Commands
+Always bound long commands: use `timeout <N>` on benchmark/test invocations and verify pytest marker filters actually deselect (check the 'N deselected' line) before trusting a scoped run. Never leave a harness running longer than 10 minutes without reporting progress to the user.

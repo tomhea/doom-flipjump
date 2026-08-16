@@ -171,7 +171,7 @@ def thing_live_subsectors(cmap: "CompiledMap", lds, sds, secs) -> frozenset:
 
 
 def assert_thing_live_survives_prune(cmap: "CompiledMap", *, thing_live, prune=None,
-                                     plane_gate=None, where: str = "") -> None:
+                                     plane_gate=None, plane_live=None, where: str = "") -> None:
     """M14-a THE LOUD FAILURE. Walks the tree exactly as `_bsp_as_code` does and raises if any
     subsector a thing could ever occupy sits in a subtree that either prune would drop:
 
@@ -183,14 +183,26 @@ def assert_thing_live_survives_prune(cmap: "CompiledMap", *, thing_live, prune=N
     Both take the SAME callables the emitter hands `_bsp_as_code`, so this cannot drift from what is
     actually emitted -- which is the point. Without it, re-narrowing liveness produces a renderer
     that silently loses sprites and passes every existing gate (the static things happen to stand
-    where the narrow predicate keeps them alive)."""
+    where the narrow predicate keeps them alive).
+
+    ⚠ CR-2026-08 (WR-1) — THE TWO SETS ARE NOT THE SAME QUESTION, so they are two parameters.
+    `thing_live` guards the COMPILE-time prune: a dropped walk block is gone from the binary, so it
+    must survive anything the sim could ever do, and that set is `thing_live_subsectors`.
+    `plane_live` guards the RUNTIME tsstop gate, which is re-decided every frame and therefore only
+    has to cover where a thing can be IN THIS BUILD -- on a static build (`moving_things=False`)
+    nothing moves, so spawn occupancy is exact and the wide set would forbid a gate that cannot
+    lose anything. It defaults to `thing_live`, which is the conservative reading: passing the
+    narrower set is a claim the CALLER makes about its build, in one place, explicitly."""
+    plane_live = thing_live if plane_live is None else plane_live
     bad: list = []
 
     def walk(child: int, dropped: bool, gated: bool) -> None:
         if child & NF_SUBSECTOR:
             si0 = child & (NF_SUBSECTOR - 1)
-            if si0 in thing_live and (dropped or gated):
-                bad.append((si0, "walk-pruned at emit" if dropped else "tsstop-gated at runtime"))
+            if dropped and si0 in thing_live:
+                bad.append((si0, "walk-pruned at emit"))
+            elif gated and si0 in plane_live:
+                bad.append((si0, "tsstop-gated at runtime"))
             return
         d = dropped or bool(prune and prune(child))
         g = gated or bool(plane_gate and plane_gate(child))

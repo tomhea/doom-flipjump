@@ -118,6 +118,7 @@ def test_build_doom_subset_is_flat(tmp_path):
 
 # ── M12rr: the SHIPPED runtime wall renderer (build_wall_renderer) is flat under the RAISED limit ──
 
+@pytest.mark.slow          # CR-2026-08 (TS-10): ~70 min. Excluded by default; `-m slow` runs it.
 @pytest.mark.skipif(not SPRITE_WAD.exists(),
                     reason=f"{SPRITE_WAD} absent -- the shipped tier's V4 things need sprite lumps")
 def test_build_wall_renderer_e1m1_flat(tmp_path):

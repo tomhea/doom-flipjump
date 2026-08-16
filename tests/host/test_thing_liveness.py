@@ -173,3 +173,67 @@ def test_bbox_wedge_boxes_are_inflated_for_every_thing_live_subtree(level):
             "a relaxed cull can only grow boxes")
     assert any(new[i] != old[i] for i in old), (
         "no box changed at all: the widened set is not reaching bbox_gate_boxes")
+
+
+def test_a_static_build_may_gate_on_spawn_occupancy_but_not_on_less(level):
+    """⚠ CR-2026-08 (WR-1) — the two-set guard, both sides.
+
+    M14-a widened liveness from "a thing stands here" to "a thing could EVER be here", which the
+    COMPILE-time prune needs. Feeding the same set to the RUNTIME tsstop gate turned it off
+    everywhere (MEASURED on stock E1M1: 128 gated nodes -> 0), because 657 of 682 leaves are
+    could-ever-live. On a static build nothing moves, so the runtime gate only has to keep the
+    leaves things actually occupy -- `plane_live`.
+
+    Two-sided, because a permission that can never be refused is not a guard:
+      * spawn occupancy as `plane_live` is ACCEPTED (the leaves things stand in stay reachable);
+      * an EMPTY `plane_live` is still accepted (nothing to lose), but occupancy-minus-one-occupied
+        -leaf must be REFUSED -- if it were not, `plane_live` would not be consulted at all.
+    """
+    wad, cmap, lds, sds, secs, rm = level
+    live = thing_live_subsectors(cmap, lds, sds, secs)
+    occupancy = _spawn_occupancy(wad, cmap, rm)
+    assert occupancy < live, "spawn occupancy is not a strict subset -- this test proves nothing"
+    # the tree the emitter actually builds on a static build: prune on the WIDE set (unchanged),
+    # plane gate on the NARROW one.
+    prune, _wide_gate = _prune_closures(cmap, lds, sds, secs, live)
+    _p2, plane_gate = _prune_closures(cmap, lds, sds, secs, occupancy)
+    assert_thing_live_survives_prune(cmap, thing_live=live, prune=prune, plane_gate=plane_gate,
+                                     plane_live=occupancy, where=f"{MAPNAME}: ")
+
+    # ⚠ THE REFUSAL. The pass above is only meaningful if `plane_live` is consulted at all, and by
+    # construction no OCCUPIED leaf is gated -- that is the invariant it just checked. So take a
+    # leaf the gate really does skip and declare it plane-live: the guard must refuse. If it does
+    # not, `plane_live` is being ignored and the permission above is unconditional.
+    gated = [si for si in range(len(cmap.subsectors))
+             if cmap.subsectors[si].numsegs and _is_gated(cmap, si, prune, plane_gate)]
+    assert gated, "nothing is tsstop-gated at all -- the refusal below cannot be exercised"
+    with pytest.raises(AssertionError, match="tsstop-gated at runtime"):
+        assert_thing_live_survives_prune(
+            cmap, thing_live=live, prune=prune, plane_gate=plane_gate,
+            plane_live=occupancy | {gated[0]}, where=f"{MAPNAME}: ")
+
+
+def _is_gated(cmap, target, prune, plane_gate):
+    """Is subsector `target` under a node the plane gate skips (and not walk-pruned)? Mirrors the
+    guard's own descent so the search cannot disagree with what the guard will find."""
+    import sys as _sys
+    found = []
+
+    def walk(child, dropped, gated):
+        if child & NF_SUBSECTOR:
+            if (child & (NF_SUBSECTOR - 1)) == target and gated and not dropped:
+                found.append(True)
+            return
+        n = cmap.nodes[child]
+        d = dropped or bool(prune(child))
+        g = gated or bool(plane_gate(child))
+        walk(n.left, d, g)
+        walk(n.right, d, g)
+
+    old = _sys.getrecursionlimit()
+    _sys.setrecursionlimit(20000)
+    try:
+        walk(cmap.root, bool(prune(cmap.root)), False)
+    finally:
+        _sys.setrecursionlimit(old)
+    return bool(found)

@@ -195,8 +195,14 @@ MUTATIONS = [
 EXTRA_MUTATIONS = [
     ("fixed_point.fj", "op swapped, in a macro with NO < list",
      ".idiv 2*n, n, quotient", ".idiv2 2*n, n, quotient"),
-    ("fixed_point.fj", "global swapped, in a macro with NO < list",
-     "hex.read_table_packed 3, recip, slopediv_recip8", "hex.read_table_packed 3, recip, tantoangle"),
+    # ⚠ CR-2026-08 — REMOVED: ("fixed_point.fj", "global swapped, in a macro with NO < list").
+    # Its anchor (`hex.read_table_packed 3, recip, slopediv_recip8`) is not in fixed_point.fj and
+    # by the look of it never was -- the macro takes `table` as a PARAMETER, and in this dialect a
+    # macro reaches a global through its `<` list, so "names a global but has no `<` list" may not
+    # be a shape that exists. It sat here reporting SKIP while the summary said "all mutations
+    # rejected". The GLOBAL-swap class is still covered by MUTATIONS[0] (plane_bands.fj, which does
+    # have a `<` list) and the no-`<`-list SHAPE by the op-swap fixture directly above.
+    # If you find a real macro of that shape, add it back -- with a verified anchor.
 ]
 
 
@@ -212,21 +218,25 @@ def selftest():
     try:
         for label, old, new in MUTATIONS:
             if old.encode() not in original:
-                print("  SKIP  %-36s (anchor not found)" % label)
+                print("  MISS  %-36s (ANCHOR NOT FOUND -- fixture is stale)" % label)
+                failures += 1
                 continue
             target.write_bytes(original.replace(old.encode(), new.encode(), 1))
             caught = compare("HEAD", verbose=False) != 0
             print("  %-4s  %s" % ("ok" if caught else "MISS", label))
             failures += (0 if caught else 1)
-            for fname, label, old, new in EXTRA_MUTATIONS:
-                pass
     finally:
         target.write_bytes(original)
     for fname, label, old, new in EXTRA_MUTATIONS:
         tgt = FJ / fname
         orig = tgt.read_bytes()
         if old.encode() not in orig:
-            print("  SKIP  %-44s (anchor not found in %s)" % (label, fname))
+            # ⚠ CR-2026-08: this used to `continue` and still print "all mutations rejected".
+            # R9's corollary is that the fixtures must cover the shapes that can defeat the tool;
+            # a fixture whose anchor has drifted covers NOTHING, and saying so quietly is how a
+            # self-test rots into decoration. A stale anchor is now a FAILURE.
+            print("  MISS  %-44s (ANCHOR NOT FOUND in %s -- fixture is stale)" % (label, fname))
+            failures += 1
             continue
         try:
             tgt.write_bytes(orig.replace(old.encode(), new.encode(), 1))

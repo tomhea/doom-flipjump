@@ -33,7 +33,8 @@ from doomfj.mapcompiler import (  # shared geometry (R6)
     bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
     thing_live_subsectors, blockmap_candidates,
 )
-from doomfj.things import baked_thing_mask, vanishable_slots   # M14.5: the split SSOT (R6)
+from doomfj.things import (baked_thing_mask, drawable_things,   # M14.5: the split SSOT (R6)
+                           vanishable_slots)
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
     yslope_table, zlight_table, scalelight_table, distscale_table, LIGHTLEVELS, LIGHTSEGSHIFT,
@@ -1769,8 +1770,16 @@ class ReferenceModel:
             # M14-e: `thing_positions` overrides where the drawable things ARE, in drawable order
             # (index i = the i-th thing whose type has a sprite). Without it the WAD's spawn
             # positions are used, which is every gate and golden this repo has.
-            _drawable = [t for t in scene.map_wad.things(scene.mapname)
-                         if THING_SPRITE.get(t.type) is not None]
+            # ⚠ CR-2026-08 (RM-1/ST-1) — this list is THE index space: `thing_positions`, the
+            # `thvis` wire slots and `baked_thing_mask` are all keyed by position in it, so the
+            # emitter and the oracle must build it with the SAME predicate. They did not. The
+            # emitter asks `things.drawable_things` (i.e. `sprite_art(...) is not None`, which is
+            # also None when the TYPE is in the table but the WAD HAS NO LUMP for it); this asked
+            # only whether the type is in `THING_SPRITE`. The two coincide on the full Freedoom
+            # art wad -- which is why every gate passes -- and diverge on any wad missing a lump,
+            # shifting every index after the first absent sprite in one mirror only.
+            _drawable, _ = drawable_things(self, scene.map_wad.things(scene.mapname),
+                                           sprite_wad, spr_cache)
             # M14.5: the BAKED/RUNTIME split, from the SSOT both mirrors read, computed at SPAWN
             # positions -- a thing's class is a property of the thing, not of where it now stands.
             _baked = baked_thing_mask(self, scene.cmap, _drawable, MONSTER_TYPES)

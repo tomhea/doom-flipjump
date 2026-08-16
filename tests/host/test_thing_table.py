@@ -50,6 +50,21 @@ def _build(level, deg=True, spr_near=True):
     return things, rows, idx, ssfloor, sslight
 
 
+def _interior_point(cmap, ss):
+    """A point inside subsector `ss`, or None if the centroid escapes it (convex leaves are the
+    normal case, but E1M1 has degenerate ones). Used to MOVE a thing somewhere for real, so the
+    control below runs the production descent instead of a test-local restatement of it."""
+    ssd = cmap.subsectors[ss]
+    if not ssd.numsegs:
+        return None
+    pts = []
+    for si in range(ssd.firstseg, ssd.firstseg + ssd.numsegs):
+        sg = cmap.segs[si]
+        pts.append(cmap.vertexes[sg.v1])
+        pts.append(cmap.vertexes[sg.v2])
+    return (round(sum(p[0] for p in pts) / len(pts)), round(sum(p[1] for p in pts) / len(pts)))
+
+
 def test_the_rows_cover_exactly_the_drawable_things(level):
     """The row set must be the SAME set the emitter bakes -- `sprite_art`-resolvable things -- or
     the migration would silently add or drop sprites."""
@@ -104,28 +119,59 @@ def test_runtime_sp_z_and_sp_lt_equal_the_baked_constants(level):
 
 def test_a_thing_moved_into_another_sector_takes_that_sector_s_floor_and_light(level):
     """⚠ THE CONTROL. The test above passes even if the derivation ignored the subsector entirely
-    and returned the baked value -- every thing is at its spawn position there. This one moves a
-    thing to a DIFFERENT sector and requires sp_z / sp_lt to follow it, which is the entire point of
-    the rung: the two fields must be functions of where the thing IS."""
+    and returned the baked value -- every thing is at its spawn position there. This one MOVES a
+    thing into a different sector and requires sp_z / sp_lt to follow it, which is the entire point
+    of the rung: the two fields must be functions of where the thing IS.
+
+    ⚠ CR-2026-08 (TS-2): the previous version of this control could not fail. It compared
+    `(z_away + off, lt_away)` against `(z_home + off, lt_home)` where all four values were computed
+    IN THE TEST from `ssfloor`/`sslight`/`spr_cls`, under a guard that had already skipped the
+    equal case -- so it asserted `spr_cls` is injective and never called the derivation at all.
+    This version moves the thing and runs BOTH production paths on the moved thing: the emitter's
+    `_thing_sector` (which bakes the constant) and `things.subsector_tables` (which the runtime
+    table reads). They must agree with each other AND differ from the home answer -- so a
+    `_thing_sector` that ignored position fails the first clause, and a fixture that never really
+    moved anything fails the second."""
+    from dataclasses import replace
     cfg, rm, mw, art, cmap, lds, sds, secs, *_rest = level
     things, rows, idx, ssfloor, sslight = _build(level)
     spr_cls = level[-1]
+
+    def derive(t, ss, row_i):
+        """(sp_z, sp_lt) both ways for thing `t` standing in subsector `ss`."""
+        fl = ssfloor[ss] if ssfloor[ss] < 0x8000 else ssfloor[ss] - 0x10000
+        table = (fl + rows[row_i][3], spr_cls[(sslight[ss], max(1, rows[row_i][2]))])
+        sec = _thing_sector(rm, cmap, lds, sds, secs, t)         # the emitter's baked half
+        baked = (sec.floor_h + rows[row_i][3],
+                 spr_cls[(rm.wall_lightnum(sec.light, 0), max(1, rows[row_i][2]))])
+        return table, baked
+
     moved = 0
     for row_i, t_i in enumerate(idx):
-        home = rm.point_in_subsector(cmap, things[t_i].x, things[t_i].y)
-        for ss in range(len(cmap.subsectors)):
-            if not cmap.subsectors[ss].numsegs or ss == home:
+        t = things[t_i]
+        home = rm.point_in_subsector(cmap, t.x, t.y)
+        home_table, home_baked = derive(t, home, row_i)
+        assert home_table == home_baked, f"thing {t_i} disagrees at home"
+        for ss, ssd in enumerate(cmap.subsectors):
+            if not ssd.numsegs or ss == home:
                 continue
             if (ssfloor[ss], sslight[ss]) == (ssfloor[home], sslight[home]):
                 continue                       # same floor AND light: nothing would change
-            z_home = (ssfloor[home] if ssfloor[home] < 0x8000 else ssfloor[home] - 0x10000)
-            z_away = (ssfloor[ss] if ssfloor[ss] < 0x8000 else ssfloor[ss] - 0x10000)
             h = max(1, rows[row_i][2])
             if (sslight[ss], h) not in spr_cls or (sslight[home], h) not in spr_cls:
-                continue                      # a pair the bank does not carry yet -- see below
-            lt_home, lt_away = spr_cls[(sslight[home], h)], spr_cls[(sslight[ss], h)]
-            assert (z_away + rows[row_i][3], lt_away) != (z_home + rows[row_i][3], lt_home), \
-                f"thing {t_i} derives identically in ss{home} and ss{ss} -- it is not position-driven"
+                continue                       # a pair the bank does not carry yet
+            # a point INSIDE ss, so `_thing_sector`'s own descent lands there: the seg midpoint
+            # nudged towards the leaf's interior along the seg normal.
+            pt = _interior_point(cmap, ss)
+            if pt is None or rm.point_in_subsector(cmap, *pt) != ss:
+                continue
+            away_table, away_baked = derive(replace(t, x=pt[0], y=pt[1]), ss, row_i)
+            assert away_table == away_baked, (
+                f"thing {t_i} moved to ss{ss}: the runtime table derives {away_table} but the "
+                f"emitter bakes {away_baked} -- the two halves disagree once it moves")
+            assert away_baked != home_baked, (
+                f"thing {t_i} derives identically in ss{home} and ss{ss} -- _thing_sector is not "
+                f"position-driven")
             moved += 1
             break
         if moved >= 20:
@@ -241,10 +287,12 @@ def test_the_runtime_pass_clears_every_register_the_baked_block_xors(level):
                for m in re.finditer(r"hex\.zero\s+(\d+),\s*(sp_\w+)", body)}
     assert cleared, "sim.thing_pass clears nothing -- the zero invariant is gone"
 
-    # the registers a baked call site xors, taken from the emitter's own block builder
-    fields = [("sp_x", 8, 0), ("sp_y", 8, 0), ("sp_z", 8, 0), ("sp_left", 8, 0), ("sp_w", 8, 0),
-              ("sp_hh", 8, 0), ("sp_tzmax", 8, 0), ("sp_tzmax2", 8, 0), ("sp_mon", 2, 0),
-              ("sp_base", 4, 0), ("sp_base2", 4, 0), ("sp_dw", 2, 0), ("sp_lt", 2, 0)]
+    # ⚠ CR-2026-08 (TS-3/ST-7): read the emitter's OWN schema. This list used to be hand-copied
+    # here, so a register added to the xor_by block was invisible to the test that exists to catch
+    # exactly that -- a control that cannot fail. `emit_wall_renderer` now asserts it builds from
+    # THING_XORBY_FIELDS, so the two ends are pinned to one constant.
+    from doomfj.wall_renderer import THING_XORBY_FIELDS
+    fields = [(n, w, 0) for n, w in THING_XORBY_FIELDS]
     emitted = {line.split(",")[1].strip() for line in _seg_xorby_block("t", fields)
                if line.strip().startswith("hex.xor_by")}
     missing = sorted(emitted - set(cleared))
@@ -255,6 +303,48 @@ def test_the_runtime_pass_clears_every_register_the_baked_block_xors(level):
     decls = dict(re.findall(r"\"(sp_\w+): hex\.vec (\d+)\"",
                             (Path(__file__).resolve().parents[2]
                              / "src/doomfj/wall_renderer.py").read_text(encoding="utf-8")))
-    narrow = {r: (cleared[r], int(decls[r])) for r in emitted
-              if r in decls and cleared[r] < int(decls[r])}
+    # ⚠ CR-2026-08 (TS-3): the `r in decls` filter used to make this whole check vanish if the
+    # regex stopped matching -- a rename of the decl line, and the width half silently passed on an
+    # empty set. Require the declarations to cover every xored register FIRST.
+    undeclared = sorted(emitted - set(decls))
+    assert not undeclared, (
+        f"no `hex.vec` declaration found for {undeclared} -- the decl regex has gone stale and the "
+        f"width check below would have passed vacuously")
+    narrow = {r: (cleared[r], int(decls[r])) for r in emitted if cleared[r] < int(decls[r])}
     assert not narrow, f"cleared narrower than declared: {narrow}"
+
+
+def test_both_mirrors_build_the_drawable_list_with_the_same_predicate(level):
+    """⚠ CR-2026-08 (RM-1/ST-1) — THE INDEX SPACE, one predicate.
+
+    `thing_positions`, the `thvis` visibility slots and `baked_thing_mask` are all keyed by position
+    in "the drawable list", so the emitter and the oracle must build that list the same way. They
+    did not: the emitter asked `things.drawable_things` (`sprite_art(...) is not None`, which is also
+    None when the type is in the table but THE WAD HAS NO LUMP), while the oracle asked only whether
+    the type was in `THING_SPRITE`. On the full Freedoom art wad the two agree -- which is why every
+    gate passed -- and on any wad missing a lump every index after the first absent sprite shifts in
+    one mirror only, silently.
+
+    So this test pins the two together AND proves the two predicates are genuinely different, using
+    an art wad with a sprite lump removed. Without the second half the first is a tautology on the
+    only wad we ship.
+    """
+    from doomfj.reference_model import THING_SPRITE
+    from doomfj.things import drawable_things
+    cfg, rm, mw, art, *_rest = level
+    things = mw.things("E1M1")
+
+    ssot, _idx = drawable_things(rm, things, art, {})
+    loose = [t for t in things if THING_SPRITE.get(t.type) is not None]
+    assert [(t.x, t.y, t.type) for t in ssot] == [(t.x, t.y, t.type) for t in loose], \
+        "the two predicates already disagree on the shipped art wad"
+
+    # ⚠ THE CONTROL: a wad whose sprite lumps are all missing. `drawable_things` must shrink;
+    # the loose predicate cannot. If this passed, the test above would prove nothing.
+    class _NoArt:
+        def get_data(self, name):
+            raise KeyError(name)
+    empty, _ = drawable_things(rm, things, _NoArt(), {})
+    assert not empty and loose, (
+        "with no sprite lumps at all `drawable_things` still returned things -- the two predicates "
+        "are the same after all, and this test has no teeth")

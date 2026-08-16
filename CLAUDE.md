@@ -50,13 +50,17 @@ Run these in order; each is cheaper than the next and rules out a different clas
 |---|---|---|
 | `scratchpad/cr/alpha_check.py [ref]` | ~1 s | a pass renamed only `@`-locals/labels (rejects op/global/ns/param edits) |
 | `scratchpad/cr/expand_check.py <ref> <file> <outer> <sub>` | ~1 s | an extracted sub-macro expands to the exact ops it replaced |
-| `python -m pytest tests/host -q` | ~1 min | host logic (211 tests) |
+| `python -m pytest tests/host -q` | minutes | host logic. ⚠ CR-2026-08: this was documented as ~1 min with the heavy build test "normally deselected" — it was neither. There was no marker and no `addopts`, so the run walked into the ~70-min `test_build_wall_renderer_e1m1_flat` at 17%. `slow` is now a registered marker excluded by `addopts`; check the **"N deselected"** line to see the filter bound. |
 | `scratchpad/deg_gate.py` | ~20 min | **the real proof**: byte-exact ×4 + op counts to the digit |
 | the `steps=False` lines test | ~9 min | a config the certified gates never build (where a `rep`-gated `werror` break hides) |
-| `test_build_wall_renderer_e1m1_flat` | ~70 min | the **shipped** build path — normally deselected, so run it after touching `build.py` |
+| `python -m pytest tests/host -m slow` | ~70 min | the **shipped** build path — excluded by default, so run it after touching `build.py` |
 | `scratchpad/bench.py …` | varies | op counts per viewpoint; byte-exactness asserted when un-ablated |
 
-Both `cr/` tools have self-tests — run `alpha_check.py --selftest` after touching either.
+All three `cr/` tools have self-tests — `alpha_check.py --selftest`, `expand_check.py --selftest`,
+`emit_hash.py --selftest`. Run the one you touched. (⚠ CR-2026-08: this line used to claim "both
+tools" had them when only `alpha_check` did — a false statement about R9 compliance, in the file
+that states R9. If you add a tool whose output you intend to quote as proof, it does not exist
+until its `--selftest` does.)
 
 ## The generated program
 

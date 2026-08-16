@@ -62,6 +62,19 @@ def _pfx(mapname: str) -> str:
     return mapname.lower().replace("-", "_")
 
 
+# ⚠ CR-2026-08 (TS-3/ST-7) — the sprite registers a BAKED thing's `hex.xor_by` block writes, in
+# emission order with their declared widths. `sim.thing_pass` must clear every one of them at least
+# this wide, because `hex.xor_by` is self-restoring ONLY from a zero register and the runtime
+# `thing_load` leaves them holding the last thing. That correspondence spans two languages with no
+# compiler between them; it shipped wrong once (25 px at (1869,479), 29 px at spawn). Both the
+# emitter (which asserts it built from this) and `test_the_runtime_pass_clears_every_register_the_
+# baked_block_xors` (which reads it) key off this tuple, so the lists cannot drift apart again.
+# `sp_tzmax2` is present only when `deg`, `sp_base2` only when `DEG_SPR_NEAR_TZ`.
+THING_XORBY_FIELDS = (("sp_x", 8), ("sp_y", 8), ("sp_z", 8), ("sp_left", 8), ("sp_w", 8),
+                      ("sp_hh", 8), ("sp_tzmax", 8), ("sp_tzmax2", 8), ("sp_mon", 2),
+                      ("sp_base", 4), ("sp_base2", 4), ("sp_dw", 2), ("sp_lt", 2))
+
+
 def _seg_xorby_block(label, fields):
     """The shared per-seg constant block `label` (emitted ONCE, fcall'd twice per visible seg — SET then CLEAR). M12pp:
     replaces the per-seg baked `hex.set` (each pays an @-dispatch to zero a reg it overwrites) with `hex.xor_by`
@@ -931,29 +944,54 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     lines_solid_below: dict = {}
     lines_piece_below: dict = {}
     if lines:
-        def _cnt(child, pred, memo):
+        # V4: a THING-carrying leaf counts as live for BOTH subtree predicates. The walk prune drops
+        # the node at COMPILE time; the `tsstop` plane gate skips it at RUNTIME once attribution is
+        # finished. Either one silently loses every sprite in an open, purely two-sided area -- at
+        # the tree viewpoint, most of them. So `live` forces the leaf's count to 1 regardless of the
+        # predicate: it is not "this leaf has a seg of that kind", it is "do not drop this leaf".
+        #
+        # ⚠ CR-2026-08 (WR-1) — WHICH live set, and why it is NOT the same one for both users.
+        # M14-a widened the prune's set from "a thing stands here" to `thing_live_subsectors` ("a
+        # thing could EVER be here"), which is right: the sim moves things, and the narrow answer
+        # stops being true the moment it does. But that set is 657 of E1M1's 682 leaves, so feeding
+        # it to the PLANE-GATE counts made `lines_solid_below` non-zero almost everywhere and
+        # `_lines_plane_gate` returned mode 0 for EVERY node -- MEASURED 128 gated nodes -> 0 on
+        # stock E1M1, 65 -> 0 on lite. The runtime tsstop gate simply stopped existing, and no gate
+        # could see it: the gate only ever skipped provably-dead work, so losing it is byte-exact
+        # and pure cost.
+        # The fix is to ask each user its own question. The prune is a COMPILE-time drop and must
+        # survive anything the sim can do, so it keeps the wide set. The plane gate is a RUNTIME
+        # skip re-decided every frame, so it only has to cover where things can be IN THIS BUILD --
+        # and when `moving_things` is off nothing moves, so spawn occupancy is exact.
+        # Both are emitter-only: the oracle models the bbox gate (which keeps `_thing_live`
+        # unchanged) but not this runtime skip, so narrowing it moves no pixel and needs no oracle
+        # half -- it must still be gated, because it changes the emitted program.
+        _live_planes = _thing_live if moving_things else (
+            frozenset(_all_by_ss) if _do_things else frozenset())
+
+        def _cnt(child, pred, memo, live):
             if child & NF_SUBSECTOR:
                 _si0 = child & (NF_SUBSECTOR - 1)
                 _ss = cmap.subsectors[_si0]
-                # V4: a THING-carrying leaf counts as live for BOTH subtree predicates. The walk
-                # prune drops the node at COMPILE time; the `tsstop` plane gate skips it at RUNTIME
-                # once attribution is finished. Either one silently loses every sprite in an open,
-                # purely two-sided area -- at the tree viewpoint, most of them.
-                # M14-a: "carrying a thing" -> "a thing could ever be here" (see _thing_live).
-                if _si0 in _thing_live:
+                if _si0 in live:
                     return 1
                 return sum(1 for _si in range(_ss.firstseg, _ss.firstseg + _ss.numsegs)
                            if pred(cmap.segs[_si]))
             _n = cmap.nodes[child]
-            tot = _cnt(_n.left, pred, memo) + _cnt(_n.right, pred, memo)
+            tot = _cnt(_n.left, pred, memo, live) + _cnt(_n.right, pred, memo, live)
             memo[child] = tot
             return tot
         import sys as _sys
         _old_rl = _sys.getrecursionlimit()
         _sys.setrecursionlimit(20000)
-        _cnt(cmap.root, _seg_in_walk, lines_walk_below)
-        _cnt(cmap.root, _seg_as_solid, lines_solid_below)
-        _cnt(cmap.root, _seg_as_piece, lines_piece_below)
+        _cnt(cmap.root, _seg_in_walk, lines_walk_below, _thing_live)
+        _cnt(cmap.root, _seg_as_solid, lines_solid_below, _live_planes)
+        # ⚠ WR-14: the piece count decides the gate's FLAVOUR (mode 2's compound test), not whether
+        # a node is gated at all -- and a live leaf has already forced `lines_solid_below` non-zero,
+        # which returns mode 0 before the flavour is asked. So the live override is dead here, and
+        # passing it only inflated the count into the costlier mode for nodes that reach it another
+        # way. This one asks the predicate and nothing else.
+        _cnt(cmap.root, _seg_as_piece, lines_piece_below, frozenset())
         _sys.setrecursionlimit(_old_rl)
 
     def _lines_prune(child):
@@ -985,10 +1023,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     if lines and _do_things:
         # M14-a: the guard runs on the SAME two callables `_bsp_as_code` is about to be handed, so
         # it checks what is really emitted rather than a restatement of it. It is O(tree) at emit.
+        # ⚠ CR-2026-08 (WR-1): the runtime gate is checked against `_live_planes`, the set that
+        # build can actually put a thing in -- see the note at `_cnt`. On a moving build the two
+        # arguments are the same object and this is the M14-a guard unchanged.
         assert_thing_live_survives_prune(
             cmap, thing_live=_thing_live, prune=_lines_prune,
             plane_gate=_lines_plane_gate if plane_near else None,
-            where=f"{mapname}: ")
+            plane_live=_live_planes, where=f"{mapname}: ")
 
     def _lines_descend_leaf(s):
         # the descend pre-walk's landing action: bake this subsector's viewz + band-bank pointer
@@ -1044,7 +1085,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                     _art = rm.sprite_art(sprite_wad, _t.type, spr_cache)
                     _tsec = _thing_sector(rm, cmap, lds, sds, secs, _t)
                     _tag = f"{s}_{_ti}"
-                    xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", [
+                    _tfields = [
                         ("sp_x", 8, (_t.x << 16) & 0xFFFFFFFF),
                         ("sp_y", 8, (_t.y << 16) & 0xFFFFFFFF),
                         ("sp_z", 8, ((_tsec.floor_h + _art[6]) << 16) & 0xFFFFFFFF),
@@ -1073,7 +1114,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         # buckets of FAR things (the thfar flag project_thing sets)
                         *([("sp_base2", 4, spr_ldbase[_t.type])] if DEG_SPR_NEAR_TZ else []),
                         ("sp_dw", 2, spr_dw[_t.type]),
-                        ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])])
+                        ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])]
+                    # ⚠ CR-2026-08 (TS-3/ST-7) — THE SCHEMA CHECK. These registers must each be
+                    # cleared by `sim.thing_pass` on a hybrid build (xor_by self-restores only from
+                    # zero), and the test that ties the two lists together used to hand-copy THIS
+                    # list -- so a field added here was invisible to it. Now the schema is one
+                    # constant, the emitter asserts it built from that schema, and the test reads
+                    # the same constant: a new field cannot be added without both noticing.
+                    assert [(n, w) for n, w, _v in _tfields] == [
+                        p for p in THING_XORBY_FIELDS
+                        if p[0] not in ("sp_tzmax2", "sp_base2")
+                        or (p[0] == "sp_tzmax2" and deg)
+                        or (p[0] == "sp_base2" and DEG_SPR_NEAR_TZ)], (
+                        "the thing xor_by block no longer matches THING_XORBY_FIELDS -- update the "
+                        "schema (and sim.thing_pass's clears) together")
+                    xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
                     out += [
                         # M14.5 §3.3: read-many, write-rarely, and the index is a COMPILE-TIME
                         # constant here -- so this is a fixed-address 1-nibble test, not a pointer

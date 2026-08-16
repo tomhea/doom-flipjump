@@ -461,3 +461,92 @@ gets a control that FAILS LOUDLY, in the spirit of R9 — a check that never fir
 * **The metric.** The sweep feeds integer view positions and M14 made the program fractional — no
   frame the player sees is at a swept position (`handoff-perf.md` §12.10). fps has never been
   measured (§12.7).
+
+---
+
+## 9. ✅ DONE (2026-08-16) — RUNGS 1, 2 AND `is_visible` SHIP; §3.2 DOES NOT, AND HERE IS WHY
+
+Two commits, both gated: `M14.5 rung 1` (the split) and `M14.5 rung 2` (all 251 sprites).
+
+### The numbers, all MEASURED this session, both sides controlled
+
+| config | picture | median | mean | p90 | worst | source |
+|---|---|---|---|---|---|---|
+| 27M package, all-runtime | 68 things | 26,615,399 | 27,282,157 | 40,315,349 | 53,134,173 | `sweep_m14_27c.csv` |
+| hybrid, 11 baked | 68 things | 25,494,019 | 26,134,998 | 38,843,004 | 51,594,282 | `sweep_m145_s1.csv` |
+| all-runtime | **251 things** | 35,293,677 | 36,752,032 | 55,532,161 | 68,851,245 | `sweep_m14_rowrule.csv` |
+| **hybrid, 176 baked** | **251 things** | **29,394,592** | 30,156,920 | 45,371,274 | 56,290,486 | `sweep_m145_all.csv` |
+
+`python scratchpad/m14_sweep.py scratchpad/fjmcache/m14_bin_things.fjm --things`
+
+**Same picture, hybrid vs runtime: −5,899,085 (−16.7%) median, −12,560,759 worst.**
+
+**THE RATIO §6 ASKED FOR, MEASURED: ~0.41**, better than the 0.505 bracket and inside the
+predicted 29.0–31.1M landing zone, near its good end. Against the 20,941,091 no-things floor,
+251 things cost 14,352,586 through the table and 8,453,501 in the hybrid.
+
+**THE FULL PICTURE COSTS 26,615,399 → 29,394,592** (+2,779,193 for 183 more things). The ceiling
+moved, as §4 said it would, and the sprite question is closed: what stands between this and the
+12–25M target is now the base renderer's 20,941,091, exactly as §8 predicted.
+
+**ASSEMBLE TIME DOES NOT BIND — 21 minutes, 18,616,618 bytes.** §4's "the one thing that would
+revive the glyph programme" is answered: it would not. The glyphs stay retired.
+
+### ⚠ THE BUG THE MIX CREATED, AND IT IS A GENERAL LESSON
+
+`hex.xor_by` is self-restoring **only from zero** — that is the whole basis of M12pp's involution,
+and `_seg_xorby_block` says so. The baked path preserved that invariant; `sim.thing_load` writes the
+same `sp_*` cells with mov/read and does not. **Pure-baked and pure-runtime were each gated correct;
+only the MIX broke**, because a leaf that ran `thing_pass` handed the next leaf's baked call site
+dirty registers to xor onto. MEASURED as 25 px at (1869,479) and 29 px at spawn.
+
+The general form: **when two mechanisms are merged, the invariants each one MAINTAINED become
+invariants the other must not BREAK — and neither one's gate covers that.** `sim.thing_pass` now
+restores it per LEAF (skipped when the list is empty), and a host test reads both lists — the
+emitter's xor_by fields and sim.fj's `hex.zero`s — so they cannot drift apart.
+
+The ablation that found it is worth reusing: **the visibility flag is a diagnostic instrument.**
+`scratchpad/m145_diag.py` renders with all baked things shown and hidden; hidden was byte-exact at
+all four viewpoints, which cleared the runtime half, the wire split, the walk and the layout in one
+run.
+
+### ⚠ §3.2 (the `sshead` skip) IS PRICED, DE-RISKED AND **BLOCKED** — do not just implement it
+
+The opportunity is real and the hybrid made it bigger, exactly as §3.2 hoped —
+MEASURED (`scratchpad/m145_leafcost.py`, no build):
+
+```
+leaves with a RUNTIME list : 35 of 682
+225.3 leaf visits per frame, 215.4 with an EMPTY list (96%)
+=> the skip is worth 215k-646k ops/frame = 0.73%-2.20% of the 29,394,592 median
+```
+
+**But the baked address does not exist yet.** MEASURED (`scratchpad/_ssheadaddr.py`, 10 seconds):
+writing entry `s` through the accessor `bind_things` uses (`ptr_index` + `write_byte`) lands it at
+**nibble `s`** — a ONE-nibble stride. So:
+
+* `hex.if0 2, sshead + s*dw` also reads the NEIGHBOUR's low nibble;
+* `hex.if0 1, sshead + s*dw` misreads any head whose low nibble is 0 (thing index 15, 31, …) as
+  EMPTY — **a silently vanishing sprite, the exact failure mode M14-a exists to prevent**;
+* and ⚠ **`bind_things`' own comment proposing `rep(nss, i) hex.set 2, sshead + i*2*dw` as a
+  compile-time clear is inconsistent with that measurement** — implementing it as written would
+  have written every other entry to the wrong place. That comment needs fixing or proving.
+
+**So §3.2 requires a LAYOUT change first** (entries 2 nibbles apart, i.e. `bind_things` indexing a
+pre-doubled index), which touches gated binding code for ≤2.2%. It is the right next lever, but it
+is a rung of its own with its own gate — not a tweak.
+
+⚠ And the meta-lesson, which is CLAUDE.md rule 3 again: **both address assumptions here were
+wrong, and both were caught by a 10-second fj unit test rather than a 25-minute build.**
+`scratchpad/_visunit.py` (the visibility wire, which PASSED) and `scratchpad/_ssheadaddr.py` (the
+sshead address, which FAILED) are the pattern — write the probe before the build, every time.
+
+### What did NOT get done
+
+* `m14_basegate.py --rebuild` op-identity for the shipped static path. Rung 1 is inert there BY
+  CONSTRUCTION (a static build bakes everything, has no runtime list, no `thvis`, and the record
+  body keeps its name), and `scratchpad/m145_static_hash.py` checks that by emission hash without a
+  70-minute build — **but rung 2 deliberately changes that renderer's picture**, so the op-identity
+  half can only be run against a same-sprite-set baseline. Do it before shipping `build.py`.
+* The 22 statics that share a leaf with a monster stay on the runtime path (§4b's rule). Freeing
+  them needs the merged-order change and MOVES PIXELS — an ownable decision, not a bug fix.

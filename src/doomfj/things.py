@@ -68,20 +68,78 @@ def cold_row(row):
     return tuple(row[i] for i in _COLD_FIELDS)
 
 
+def drawable_things(rm, things, sprite_wad, cache=None):
+    """`(drawable, wad_indices)` -- the things that have art, in wad order.
+
+    ONE definition of "drawable", so the emitter, the oracle and every gate index the same list."""
+    cache = {} if cache is None else cache
+    out, idx = [], []
+    for i, t in enumerate(things):
+        if rm.sprite_art(sprite_wad, t.type, cache) is not None:
+            out.append(t)
+            idx.append(i)
+    return out, idx
+
+
+def baked_thing_mask(rm, cmap, drawable, monster_types):
+    """M14.5 SSOT — which drawable things BAKE into their leaf, and which take the runtime path.
+
+    Returns a tuple parallel to `drawable` (True = baked). ⚠ It is computed from SPAWN positions
+    and is a property of the THING, not of where it currently stands: a runtime thing that walks
+    into a baked thing's leaf stays runtime.
+
+    THE RULE (docs/handoff-m14_5.md §4b): a thing bakes iff it is not a monster AND no monster
+    shares its leaf. That keeps every leaf HOMOGENEOUS at spawn -- all-baked or all-runtime -- so
+    the per-leaf visit order stays wad order in both mirrors and the frame is byte-identical to the
+    all-runtime build. A mixed leaf could only be visited "all baked, then all runtime" (baked
+    things are CODE at the call site, runtime things are a list), which reorders sprite slot claims
+    and the graduated-acceptance counters.
+
+    ⚠ Both mirrors order a leaf BAKED-FIRST-THEN-RUNTIME (not static-first-then-dynamic). Those
+    coincide at spawn because of the rule above; they stop coinciding the moment a runtime thing
+    moves into a baked leaf, and only the baked-ness key is order-preserving by construction."""
+    leaves = [rm.point_in_subsector(cmap, t.x, t.y) for t in drawable]
+    mon_leaves = {ss for ss, t in zip(leaves, drawable) if t.type in monster_types}
+    return tuple(t.type not in monster_types and ss not in mon_leaves
+                 for t, ss in zip(drawable, leaves))
+
+
+def vanishable_slots(drawable, baked, vanishable_types):
+    """M14.5 §3.3 — `{drawable index: slot}` for the baked things that can VANISH.
+
+    A baked thing is code inside its leaf, so a runtime flag is the ONLY way it can stop being
+    drawn -- and it is the cheapest read the program has: the index is a compile-time constant at
+    the call site, so the test is `hex.if0 1, thvis + slot*2*dw` at a FIXED ADDRESS, no pointer
+    built, no table strided. One test per thing per leaf visit, the same shape as the `tstop` guard
+    already emitted there; a hidden thing then skips its whole projection.
+
+    ⚠ Only BAKED things get a slot. A runtime thing already carries a position that the host can
+    move, and giving it a flag would mean an INDEXED read -- the pattern this milestone exists to
+    remove. ⚠ And only VANISHABLE types: a guard on a tree is a test that can never fire."""
+    return {i: k for k, i in enumerate(
+        i for i, (t, b) in enumerate(zip(drawable, baked))
+        if b and t.type in vanishable_types)}
+
+
 def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_types,
                min_h, min_h_monster, deg_min_h, deg_min_h_monster, *, deg: bool,
-               spr_near: bool, cache=None):
+               spr_near: bool, cache=None, keep=None):
     """One packed row per DRAWABLE thing, in `THING_ROW_BYTES` order, plus the index list.
 
     Returns `(rows, indices)` where `indices[i]` is the position of row `i` in the wad's THINGS
     lump -- the wire's position table is indexed the same way, so a row and a position share an
-    index and neither needs a pointer to the other."""
+    index and neither needs a pointer to the other.
+
+    `keep`, when given, is the set of wad indices that take the RUNTIME path (M14.5): everything
+    else bakes into its leaf and must NOT appear here, or it would be drawn twice."""
     cache = {} if cache is None else cache
     rows, idx = [], []
     for i, t in enumerate(things):
         art = rm.sprite_art(sprite_wad, t.type, cache)
         if art is None:
             continue                                    # a start / teleport spot / unknown
+        if keep is not None and i not in keep:
+            continue                                    # M14.5: baked into its leaf instead
         mon = t.type in monster_types
         rows.append((art[5], art[3], art[4], art[6],
                      rm.sprite_tz_min_size(art[4], min_h_monster if mon else min_h) & 0xFFFFFFFF,

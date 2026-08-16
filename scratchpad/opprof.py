@@ -51,7 +51,7 @@ from doomfj.reference_model import spawn_state                            # noqa
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.wall_renderer import emit_wall_renderer, write_program_files  # noqa: E402
 from doomfj.wireformat import (encode_bindings, encode_feed_mapunits,     # noqa: E402
-                               encode_things)
+                               encode_things, encode_visibility)
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
 SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
@@ -171,10 +171,17 @@ if args.m14:
     from doomfj.reference_model import ReferenceModel                     # noqa: E402
     _rm = ReferenceModel(cfg)
     _cmap = bake_bsp(mw, args.map)
+    from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES  # noqa: E402
+    from doomfj.things import baked_thing_mask, vanishable_slots        # noqa: E402
     _draw = [t for t in mw.things(args.map) if _rm.sprite_art(art, t.type, {}) is not None]
+    # M14.5: the wire carries the RUNTIME half only; the rest is baked into its leaf's code
+    _bk = baked_thing_mask(_rm, _cmap, _draw, MONSTER_TYPES)
+    _nvis = len(vanishable_slots(_draw, _bk, VANISHABLE_TYPES))
+    _draw = [t for t, b in zip(_draw, _bk) if not b]
     feed = (encode_feed_mapunits(vx, vy, va, 0)
             + encode_things([(t.x << 16, t.y << 16) for t in _draw])
-            + encode_bindings([_rm.point_in_subsector(_cmap, t.x, t.y) for t in _draw]))
+            + encode_bindings([_rm.point_in_subsector(_cmap, t.x, t.y) for t in _draw])
+            + encode_visibility([1] * _nvis))
     screen = StreamScreen(stdin=feed, n_things=len(_draw))
     print(f"M14 wire: {len(_draw)} things, {len(feed)} bytes, WARM bindings, keys=0", flush=True)
 else:

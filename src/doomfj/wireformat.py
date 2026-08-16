@@ -142,6 +142,21 @@ def encode_things(positions) -> bytes:
     return b"".join(struct.pack("<II", x & 0xFFFFFFFF, y & 0xFFFFFFFF) for x, y in positions)
 
 
+# ── M14.5: the VISIBILITY block ────────────────────────────────────────────────────────────────
+#
+# A BAKED thing is code inside its leaf and has no position on the wire, so one nibble at a
+# COMPILE-TIME address is the whole of its mutable state: drawn, or not. It travels IN only -- the
+# host owns it (it decides what was picked up), fj only reads it -- which is the read-many/
+# write-rarely shape section 2 of the handoff is about. One byte per slot, in `vanishable_slots`
+# order; `hex.input 1` fills the two nibbles the byte occupies, and the guard tests the low one.
+VIS_IN_BYTES = 1
+
+
+def encode_visibility(flags) -> bytes:
+    """`[bool, ...]` in slot order -> one byte each, 1 = draw it."""
+    return bytes(1 if f else 0 for f in flags)
+
+
 def decode_things(payload: bytes) -> list:
     """The inverse, with x/y SIGNED -- the same convention `SimState` normalises to, because the
     projection reads positions raw and a masked value renders a different frame (see SimState)."""

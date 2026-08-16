@@ -521,11 +521,25 @@ ns sim {
     //
     // `tstop` is re-tested every iteration, not once: `thing_leaf` can set it, and the static path
     // gates each baked call site individually. It is monotone, so this only ever stops earlier.
+    // M14.5 — ⚠ AND IT RESTORES THE ZERO INVARIANT ITS CALLER'S SIBLING DEPENDS ON.
+    //
+    // A hybrid build draws some things from BAKED xor_by blocks and the rest from here. `hex.xor_by`
+    // is correct ONLY on a zero register -- that is what makes the involution self-restoring, and
+    // `_seg_xorby_block` says so in as many words. But `thing_load` writes the same sp_* cells with
+    // mov / read_table_packed and leaves them holding the last thing it loaded. So a leaf that ran
+    // this pass used to hand the NEXT leaf's baked call site dirty registers, which then xored its
+    // constants onto garbage: MEASURED as 25 px at (1869,479) and 29 px at spawn, in sprite-shaped
+    // clusters that vanished when the baked things were hidden. Pure-baked and pure-runtime builds
+    // were each gated correct; only the MIX broke, which is why nothing caught it before.
+    //
+    // The clear is per LEAF, not per thing (~100 visited leaves against ~30 loaded things a frame),
+    // and it is skipped entirely when the leaf's list is empty -- the overwhelming case once the
+    // statics bake, since only a leaf holding a monster has a list at all.
     def thing_pass throw, n_th, thpos \
-            @ body, loop, alive, done, h, hp, hq \
-            < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf {
-        // the sp_* cells belong to thing_load, which is what writes them -- declaring an
-        // extern this macro does not itself reference is an error
+            @ body, loop, alive, done, clear, empty, h, hp, hq \
+            < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf, \
+              sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
+              sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
         ;body
       h:    hex.vec w/4
       hp:   hex.vec w/4
@@ -535,6 +549,8 @@ ns sim {
         hex.ptr_index hp, hq, cur_ss
         hex.zero w/4, h                        // read_byte fills only 2 nibbles; the rest must be
         hex.read_byte h, hp                    // cleared or the 0 test reads a stale high half
+        hex.if0 w/4, h, empty                  // nothing bound here: nothing to load, nothing to
+                                               // dirty, so the leaf pays one test and leaves
       loop:
         // ⚠ the lists hold t+1, so 0 is both "empty leaf" and "end of list" -- which is what lets
         // `sshead` be a plain zero-initialised hex.vec and need no per-frame clear.
@@ -551,5 +567,23 @@ ns sim {
         hex.read_byte h, hp
         ;loop
       done:
+        // the widths are the DECLARED ones (wall_renderer's sp_* decls), not the xor_by field
+        // widths: thing_load writes the whole cell, so a narrower clear would leave high nibbles
+        // set and the next baked xor_by would still land on a non-zero register.
+      clear:
+        hex.zero 8, sp_x
+        hex.zero 8, sp_y
+        hex.zero 8, sp_z
+        hex.zero 8, sp_left
+        hex.zero 8, sp_w
+        hex.zero 8, sp_hh
+        hex.zero 8, sp_tzmax
+        hex.zero 8, sp_tzmax2
+        hex.zero 2, sp_mon
+        hex.zero 4, sp_base
+        hex.zero 4, sp_base2
+        hex.zero 2, sp_dw
+        hex.zero 2, sp_lt
+      empty:
     }
 }

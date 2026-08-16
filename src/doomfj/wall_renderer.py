@@ -42,7 +42,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
                                     DEG_SPR_MID_CAP,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
-                                    MIN_SPRITE_H_MONSTER,
+                                    MIN_SPRITE_H_MONSTER, VANISHABLE_TYPES,
                                     SPRITE_MINZ, sprite_bucket, sprite_bucket_height,
                                     COLORMAP_LIGHTS, LIGHT_SHIFT, SLOPERANGE, build_scene)
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
@@ -209,7 +209,8 @@ def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = Fal
 
 
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
-                         spr_base, spr_ldbase, spr_dw, spr_cls, *, deg: bool, spr_cache: dict):
+                         spr_base, spr_ldbase, spr_dw, spr_cls, *, deg: bool, spr_cache: dict,
+                         keep=None):
     """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
 
     The static path bakes one xor-involution block per (subsector, thing), which is only possible
@@ -231,7 +232,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     allt = map_wad.things(mapname)
     rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, MONSTER_TYPES,
                            MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
-                           deg=deg, spr_near=bool(DEG_SPR_NEAR_TZ), cache=spr_cache)
+                           deg=deg, spr_near=bool(DEG_SPR_NEAR_TZ), cache=spr_cache, keep=keep)
     things = [allt[i] for i in idx]
     ssflr, sslgt_raw = subsector_tables(rm, cmap, lds, sds, secs)
     lns = reachable_lightnums(rm, secs)
@@ -647,12 +648,40 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             sprite_bucket(h, cfg.VIEW_H), cfg.VIEW_H) << 8) for h in range(1, cfg.VIEW_H + 1)],
         index_nibbles=2, result_nibbles=4) if _do_things else "")
     spr_cache: dict = {}
+    # M14.5 — THE SPLIT. `things_by_ss` is what the leaf BAKES; `_mt_keep` is what the runtime
+    # table carries. On a static build everything bakes, exactly as before. On a moving build the
+    # SSOT (`baked_thing_mask`) decides, and the two sets are disjoint and cover the drawable set --
+    # asserted below, because a thing in NEITHER is invisible with no other symptom (M14-a's
+    # failure mode), and a thing in BOTH is drawn twice.
     things_by_ss: dict = {}
+    _all_by_ss: dict = {}
+    _mt_keep = None
     if _do_things:
-        for _t in map_wad.things(mapname):
-            if rm.sprite_art(sprite_wad, _t.type, spr_cache) is None:
-                continue
-            things_by_ss.setdefault(rm.point_in_subsector(cmap, _t.x, _t.y), []).append(_t)
+        from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
+        _drawable, _draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, spr_cache)
+        _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES) if moving_things
+                  else (True,) * len(_drawable))
+        _mt_keep = {i for i, b in zip(_draw_idx, _baked) if not b}
+        # M14.5 §3.3: the baked things that can VANISH get a 1-nibble flag at a fixed address.
+        # Static builds have no wire to carry it, so they keep none -- and stay byte-identical.
+        _vis_slots = (vanishable_slots(_drawable, _baked, VANISHABLE_TYPES) if moving_things
+                      else {})
+        for _di, (_t, _b) in enumerate(zip(_drawable, _baked)):
+            _ss0 = rm.point_in_subsector(cmap, _t.x, _t.y)
+            _all_by_ss.setdefault(_ss0, []).append(_t)
+            if _b:
+                things_by_ss.setdefault(_ss0, []).append((_di, _t))
+        # THE CONTROL (handoff-m14_5.md §7b.1): baked ∪ runtime == drawable, exactly, no overlap.
+        _nb = sum(len(v) for v in things_by_ss.values())
+        assert _nb + len(_mt_keep) == len(_drawable) and _nb == sum(_baked), (
+            f"M14.5 split lost or duplicated things: {_nb} baked + {len(_mt_keep)} runtime != "
+            f"{len(_drawable)} drawable")
+        # ... and every leaf is HOMOGENEOUS at spawn, which is what keeps the per-leaf visit order
+        # wad order in both mirrors (§4b). A mixed leaf here means the rule was edited without its
+        # oracle half, and the gate would find it as a mysterious pixel diff 25 minutes later.
+        assert not moving_things or not [s for s, v in _all_by_ss.items()
+                                         if 0 < len(things_by_ss.get(s, ())) < len(v)], (
+            "M14.5: a leaf holds BOTH baked and runtime things at spawn -- see baked_thing_mask")
     # M14-a — THE PRUNE, settled. Everything that decides whether a leaf/subtree may be dropped now
     # asks `thing_live_subsectors` ("could a thing EVER be here?") instead of `things_by_ss` ("is a
     # thing standing here right now?"). The second answer stops being true the moment the sim moves
@@ -667,19 +696,48 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # is fine"). Anything the predicate calls uninhabitable must be provably unreachable, so a thing
     # already standing in one means the predicate is wrong -- refuse to emit rather than ship a
     # renderer that can drop it.
-    _stranded = sorted(set(things_by_ss) - _thing_live) if _do_things else []
+    _stranded = sorted(set(_all_by_ss) - _thing_live) if _do_things else []
     assert not _stranded, (
         f"thing_live_subsectors says subsectors {_stranded} are uninhabitable, yet {mapname} spawns "
-        f"drawable things in them: {[(t.type, t.x, t.y) for s in _stranded for t in things_by_ss[s]]}. "
+        f"drawable things in them: {[(t.type, t.x, t.y) for s in _stranded for t in _all_by_ss[s]]}. "
         "The prune would drop those leaves and the sprites would vanish with no other symptom.")
     # M14-e: the runtime half of the same data, baked by INDEX rather than by (subsector, thing).
     _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB = (
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
-                             spr_base, spr_ldbase, spr_dw, spr_cls, deg=deg, spr_cache=spr_cache)
+                             spr_base, spr_ldbase, spr_dw, spr_cls, deg=deg, spr_cache=spr_cache,
+                             keep=_mt_keep)
         if moving_things else ("", "", [], 0, 0, {}))
+    # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
+    # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
+    # host that owns what has been picked up, and fj has no state between frames.
+    _MT_NVIS = len(_vis_slots) if _do_things else 0
+    if _MT_NVIS:
+        _mt_decls = list(_mt_decls) + [f"thvis: hex.vec {2 * _MT_NVIS}"]
     _MT_NTH = _index_nibbles(max(1, _MT_NT))          # the row index's width, as check_line's is
     _MT_NSSN = _index_nibbles(max(1, _MT_NSS))
     _MT_NLTI = _index_nibbles(max(1, len(_MT_LTB) * _MT_NT)) if moving_things else 1
+    # M14.5: the baked call sites' own copy of the record body (`mt`=0). On a static build there is
+    # only one body and it keeps its name, so that renderer is emission-identical to before.
+    _baked_leaf = "thing_leaf_b" if moving_things else "thing_leaf"
+    _emit_baked_leaf = bool(moving_things and things_by_ss)
+
+    def _thing_leaf_body(label, mt):
+        """One instantiation of frame.thing_record_body. `mt` picks where the COLD half of the
+        thing's row comes from: 1 = the runtime table (read after every reject), 0 = the leaf's
+        xor_by block, where the rep expands to nothing and the table names are never referenced."""
+        return [f"{label}:",
+                f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
+                f"{proj}, {cfg.CENTERX}, "
+                f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
+                f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
+                f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
+                f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
+                f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
+                f"{DEG_SPR_LOWRES_H}, {_spr_nlow(cfg) if DEG_SPR_NEAR_TZ else 1}, "
+                f"{DEG_SPR_NEAR_TZ * 0x10000}, "
+                f"{mt}, "
+                f"{'throwc' if mt else '0'}, {_MT_NTH}, "
+                f"{'sprlt' if mt else '0'}, {_MT_NLTI}"]
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -977,21 +1035,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             # `tstop` gates the xorby block, exactly as `tsstop` does for the two-sided claim: both
             # of the oracle's stop conditions (the budget spent, every column claimed) are monotone,
             # so once the leaf sets it no later thing can matter and none pays its SET+CLEAR.
-            if _do_things and ss.numsegs and moving_things:
-                # M14-e: the leaf no longer knows which things are its own -- `bind_things` decided
-                # that this frame from the wire's positions. Two lines, and the shared `thing_pass`
-                # walks this leaf's list; `tstop` is re-tested per thing inside it, exactly as the
-                # baked call sites gate themselves individually below.
-                # ⚠ the leaf's FLOOR and LIGHT-ROW BASE go with it, as baked constants. Both are
-                # properties of this subsector and fixed at level load, so reading them from tables
-                # inside thing_load meant three `read_table_packed`s PER THING for values constant
-                # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
-                out += [f"    hex.set w/4, cur_ss, {s}",
-                        f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}",
-                        f"    hex.set 4, ss_ltb, {_MT_LTB[rm.wall_lightnum(psec.light, 0)]}",
-                        "    stl.fcall thing_pass_leaf, tp_ret"]
-            elif _do_things and ss.numsegs:
-                for _ti, _t in enumerate(things_by_ss.get(s, ())):
+            if _do_things and ss.numsegs:
+                # M14.5: BAKED FIRST, THEN THE RUNTIME LIST -- the order both mirrors keep (§4b).
+                # A static build has no runtime half and this is the whole thing pre-pass, exactly
+                # as before; a moving build bakes only the things whose leaf no monster shares, so
+                # at spawn a leaf runs one branch or the other and the order is wad order either way.
+                for _ti, (_di, _t) in enumerate(things_by_ss.get(s, ())):
                     _art = rm.sprite_art(sprite_wad, _t.type, spr_cache)
                     _tsec = _thing_sector(rm, cmap, lds, sds, secs, _t)
                     _tag = f"{s}_{_ti}"
@@ -1025,13 +1074,33 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         *([("sp_base2", 4, spr_ldbase[_t.type])] if DEG_SPR_NEAR_TZ else []),
                         ("sp_dw", 2, spr_dw[_t.type]),
                         ("sp_lt", 2, spr_cls[(rm.wall_lightnum(_tsec.light, 0), max(1, _art[4]))])])
-                    out += [f"    hex.if0 1, tstop, ss{cid}_thing{_ti}_do",
-                            f"    ;ss{cid}_thing{_ti}_skip",
-                            f"  ss{cid}_thing{_ti}_do:",
+                    out += [
+                        # M14.5 §3.3: read-many, write-rarely, and the index is a COMPILE-TIME
+                        # constant here -- so this is a fixed-address 1-nibble test, not a pointer
+                        # build. A picked-up medikit costs exactly this test and skips its
+                        # projection; a thing that cannot vanish emits nothing at all.
+                        *([f"    hex.if0 1, thvis + {_vis_slots[_di]}*2*dw, "
+                           f"ss{cid}_thing{_ti}_skip"] if _di in _vis_slots else []),
+                        f"    hex.if0 1, tstop, ss{cid}_thing{_ti}_do",
+                        f"    ;ss{cid}_thing{_ti}_skip",
+                        f"  ss{cid}_thing{_ti}_do:"] + [
                             f"    stl.fcall thing{_tag}_consts, xb_ret",
-                            "    stl.fcall thing_leaf, thing_ret",
+                            f"    stl.fcall {_baked_leaf}, thing_ret",
                             f"    stl.fcall thing{_tag}_consts, xb_ret",
                             f"  ss{cid}_thing{_ti}_skip:"]
+            if _do_things and ss.numsegs and moving_things:
+                # M14-e: the leaf no longer knows which things are its own -- `bind_things` decided
+                # that this frame from the wire's positions. Two lines, and the shared `thing_pass`
+                # walks this leaf's list; `tstop` is re-tested per thing inside it, exactly as the
+                # baked call sites gate themselves individually below.
+                # ⚠ the leaf's FLOOR and LIGHT-ROW BASE go with it, as baked constants. Both are
+                # properties of this subsector and fixed at level load, so reading them from tables
+                # inside thing_load meant three `read_table_packed`s PER THING for values constant
+                # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
+                out += [f"    hex.set w/4, cur_ss, {s}",
+                        f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}",
+                        f"    hex.set 4, ss_ltb, {_MT_LTB[rm.wall_lightnum(psec.light, 0)]}",
+                        "    stl.fcall thing_pass_leaf, tp_ret"]
             for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
                 seg = cmap.segs[si]
                 ld = lds[seg.linedef]
@@ -1418,6 +1487,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            f"sim.bind_things thpos_rt, thss_rt, {_MT_NT}",
            f"stl.output_char {WIRE_THING_CMD}",
            f"rep({_MT_NT}, i) stream.emit_bytes4 thss_rt + i*16*dw"] if moving_things else []),
+        # M14.5: ... and the baked things' visibility, last on the wire. IN only: the host decides
+        # what has been picked up, fj only reads it, at a fixed address per call site (section 3.3).
+        *([f"rep({_MT_NVIS}, i) hex.input 1, thvis + i*2*dw"] if _MT_NVIS else []),
         # M13-absmul: per-frame |viewx|/|viewy| + sign flags. fixed_mul_lo's cost is one schoolbook
         # row per nonzero nibble of the MULTIPLIER, and a negative 16.16 view coord sign-extends to
         # a dense pattern -- so the per-seg affine cull multiplies by these sparse abs values and
@@ -1688,22 +1760,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"] if plane_near else []),
              # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
              # log2(ds) (`rep(#ds - 1, ...)`), exact only for power-of-two downscales.
-             *([_assert_pow2_ds(cfg.TEXTURE_DOWNSCALE), "thing_leaf:",
-                f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
-                f"{proj}, {cfg.CENTERX}, "
-                f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
-                f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
-                f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
-                f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
-                f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
-                f"{DEG_SPR_LOWRES_H}, {_spr_nlow(cfg) if DEG_SPR_NEAR_TZ else 1}, "
-                f"{DEG_SPR_NEAR_TZ * 0x10000}, "
-                # M14-perf: the DEFERRED cold row. `mt` is 0 on the static path, where the leaf's
-                # xor_by block bakes these registers and the rep expands to nothing -- so the
-                # table names below are never referenced there and need not exist.
-                f"{1 if moving_things else 0}, "
-                f"{'throwc' if moving_things else '0'}, {_MT_NTH}, "
-                f"{'sprlt' if moving_things else '0'}, {_MT_NLTI}"]
+             *([_assert_pow2_ds(cfg.TEXTURE_DOWNSCALE),
+                # M14.5: up to TWO bodies. `mt` is a COMPILE-TIME rep, so a build that has both
+                # baked call sites and a runtime list cannot share one -- the baked one must not
+                # read a cold row it has no index into, and the runtime one must. Same macro, same
+                # arguments but `mt`; the duplicate is program TEXT, not per-frame ops.
+                *_thing_leaf_body("thing_leaf", 1 if moving_things else 0),
+                *(_thing_leaf_body(_baked_leaf, 0) if _emit_baked_leaf else [])]
                if _do_things else []),
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",

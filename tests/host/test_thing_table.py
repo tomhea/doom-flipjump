@@ -201,6 +201,60 @@ def test_the_oracle_renders_the_same_frame_from_explicit_spawn_positions(level):
     # ⚠ THE CONTROL: moving things must CHANGE the frame, or the parameter is being ignored.
     # Move all of them, not thing[0] -- the first drawable thing is nowhere near the spawn view, so
     # moving it changes no pixel and the control passed vacuously on the first attempt.
-    moved = [(x + 64, y + 64) for x, y in pos]
+    # M14.5: ... all of the RUNTIME ones. A baked thing is code inside its leaf and has no position
+    # on the wire, so moving one here would compare a world fj cannot render.
+    from doomfj.things import baked_thing_mask
+    drawable = [t for t in mw.things("E1M1") if THING_SPRITE.get(t.type) is not None]
+    baked = baked_thing_mask(rm, scene.cmap, drawable, MONSTER_TYPES)
+    assert not all(baked) and any(baked), "the split is degenerate -- this control proves nothing"
+    moved = [(x, y) if b else (x + 64, y + 64) for (x, y), b in zip(pos, baked)]
     other = bytes(rm.render_wall_frame(st, scene, thing_positions=moved, **kw))
     assert other != base, "moving every thing changed nothing -- thing_positions is not wired through"
+    # ⚠ ... and the other side of it: moving a BAKED thing must be REFUSED, not silently rendered.
+    # That is the only thing standing between a host bug and two mirrors drawing different worlds.
+    bad = [(x + 64, y + 64) if b else (x, y) for (x, y), b in zip(pos, baked)]
+    with pytest.raises(AssertionError, match="BAKED"):
+        rm.render_wall_frame(st, scene, thing_positions=bad, **kw)
+
+
+def test_the_runtime_pass_clears_every_register_the_baked_block_xors(level):
+    """M14.5 — THE ZERO INVARIANT, tied down so it cannot drift apart again.
+
+    A hybrid build sources the sprite registers two ways: BAKED things get an `hex.xor_by` block,
+    which is self-restoring ONLY because it starts from zero, and RUNTIME things get `thing_load`,
+    which writes the same cells with mov/read and leaves them holding the last thing. So
+    `sim.thing_pass` clears them before it returns.
+
+    That is a correspondence between a list in `wall_renderer.subsector_action` and a list in
+    `src/fj/sim.fj`, in different languages, with no compiler to check it -- and getting it wrong
+    costs a 40-minute build and shows up as a handful of sprite-shaped pixels (MEASURED: 25 px at
+    (1869,479), 29 px at spawn). So the test reads BOTH and requires every xored register to be
+    cleared, at least as wide as it is declared.
+    """
+    import re
+    from doomfj.wall_renderer import _seg_xorby_block
+    cfg, rm, mw, art, cmap, *_rest = level
+    src = (Path(__file__).resolve().parents[2] / "src/fj/sim.fj").read_text(encoding="utf-8")
+    body = src[src.index("def thing_pass"):]
+    body = body[:body.index("\n}")]
+    cleared = {m.group(2): int(m.group(1))
+               for m in re.finditer(r"hex\.zero\s+(\d+),\s*(sp_\w+)", body)}
+    assert cleared, "sim.thing_pass clears nothing -- the zero invariant is gone"
+
+    # the registers a baked call site xors, taken from the emitter's own block builder
+    fields = [("sp_x", 8, 0), ("sp_y", 8, 0), ("sp_z", 8, 0), ("sp_left", 8, 0), ("sp_w", 8, 0),
+              ("sp_hh", 8, 0), ("sp_tzmax", 8, 0), ("sp_tzmax2", 8, 0), ("sp_mon", 2, 0),
+              ("sp_base", 4, 0), ("sp_base2", 4, 0), ("sp_dw", 2, 0), ("sp_lt", 2, 0)]
+    emitted = {line.split(",")[1].strip() for line in _seg_xorby_block("t", fields)
+               if line.strip().startswith("hex.xor_by")}
+    missing = sorted(emitted - set(cleared))
+    assert not missing, (
+        f"sim.thing_pass leaves {missing} dirty, and the next leaf's baked xor_by block would "
+        f"land on a non-zero register")
+    # ... and wide enough: a narrow clear leaves high nibbles set, which is the same bug
+    decls = dict(re.findall(r"\"(sp_\w+): hex\.vec (\d+)\"",
+                            (Path(__file__).resolve().parents[2]
+                             / "src/doomfj/wall_renderer.py").read_text(encoding="utf-8")))
+    narrow = {r: (cleared[r], int(decls[r])) for r in emitted
+              if r in decls and cleared[r] < int(decls[r])}
+    assert not narrow, f"cleared narrower than declared: {narrow}"

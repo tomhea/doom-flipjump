@@ -33,6 +33,7 @@ from doomfj.mapcompiler import (  # shared geometry (R6)
     bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
     thing_live_subsectors, blockmap_candidates,
 )
+from doomfj.things import baked_thing_mask, vanishable_slots   # M14.5: the split SSOT (R6)
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
     yslope_table, zlight_table, scalelight_table, distscale_table, LIGHTLEVELS, LIGHTSEGSHIFT,
@@ -148,6 +149,23 @@ MIN_SPRITE_H_MONSTER = 1          # ... but a MONSTER is never dropped for being
                                   # things that shoot back never do.
 MONSTER_TYPES = frozenset({7, 9, 16, 58, 64, 65, 66, 67, 68, 69, 71, 84, 88,
                            3001, 3002, 3003, 3004, 3005, 3006})
+
+# ── M14.5: WHAT CAN VANISH ────────────────────────────────────────────────────────────────────
+# A thing baked into its leaf is CODE, so the only way it ever stops being drawn is a runtime flag.
+# These are the types that DOOM removes from the world while the level runs -- everything the
+# player picks up, plus the barrel (destroyed). Everything else on this map (trees, columns,
+# candles, gore, techno-pillars) is scenery that stands for the whole level and needs no flag,
+# which is why the flag is per-TYPE-class and not universal: a guard nothing can ever clear is
+# pure cost. See `doomfj.things.vanishable_slots` and handoff-m14_5.md section 3.3.
+VANISHABLE_TYPES = frozenset({
+    2018, 2019,                             # ARM1 ARM2  armor
+    2011, 2012, 2013, 2014, 2015,           # STIM MEDI SOUL BON1 BON2  health + bonuses
+    2022, 2023, 2024, 2025, 2026, 2045,     # PINV PSTR PINS SUIT PMAP PVIS  powerups
+    2001, 2002, 2003, 2004, 2005, 2006,     # SHOT MGUN LAUN PLAS CSAW BFUG  weapons
+    2007, 2008, 2010, 2046, 2047, 2048, 2049, 8,   # CLIP SHEL ROCK BROK CELL AMMO SBOX BPAK
+    5, 6, 13, 38, 39, 40,                   # the keys (none drawable on E1M1 today; harmless)
+    2035,                                   # BAR1  the barrel -- destroyed, not picked up
+})
 
 # ── THE 25M PACKAGE (owner goal, 2026-08-14) — A DELIBERATE PICTURE CHANGE ─────────────────────
 #
@@ -1615,7 +1633,7 @@ class ReferenceModel:
                           deg_things: tuple | None = None, deg_sliver: int | None = None,
                           deg_stack_scale: int | None = None, deg_mark: int | None = None,
                           deg_lip_scale: int | None = None,
-                          thing_positions=None,
+                          thing_positions=None, thing_hidden=None,
                           degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -1740,16 +1758,44 @@ class ReferenceModel:
             # positions are used, which is every gate and golden this repo has.
             _drawable = [t for t in scene.map_wad.things(scene.mapname)
                          if THING_SPRITE.get(t.type) is not None]
+            # M14.5: the BAKED/RUNTIME split, from the SSOT both mirrors read, computed at SPAWN
+            # positions -- a thing's class is a property of the thing, not of where it now stands.
+            _baked = baked_thing_mask(self, scene.cmap, _drawable, MONSTER_TYPES)
+            _drawable_spawn = _drawable          # the classification's own (pre-override) list
             if thing_positions is not None:
                 assert len(thing_positions) == len(_drawable), (
                     f"thing_positions has {len(thing_positions)} entries, "
                     f"{scene.mapname} has {len(_drawable)} drawable things")
+                # ⚠ A BAKED thing is CODE inside its leaf: fj cannot move it, and the wire does not
+                # even carry its position. Moving one here would compare two different worlds.
+                _moved = [i for i, (t, (px, py)) in enumerate(zip(_drawable, thing_positions))
+                          if _baked[i] and (px, py) != (t.x, t.y)]
+                assert not _moved, (
+                    f"thing_positions moves BAKED things {_moved[:8]} -- they are baked into their "
+                    f"leaf's code and cannot move (see doomfj.things.baked_thing_mask)")
                 _drawable = [replace(t, x=px, y=py)
                              for t, (px, py) in zip(_drawable, thing_positions)]
-            for t in _drawable:
-                # binding is ALREADY position-driven, which is why M14-e needs no new logic here
-                things_by_ss.setdefault(
-                    self.point_in_subsector(scene.cmap, t.x, t.y), []).append(t)
+            # M14.5 §3.3: the visibility flags. `thing_hidden` is a set of DRAWABLE indices the
+            # host has removed from the world (picked up, destroyed). Only a baked VANISHABLE thing
+            # has a flag to clear, and asking to hide anything else is a host bug, not a picture.
+            _hidden = frozenset(thing_hidden or ())
+            if _hidden:
+                _slots = vanishable_slots(_drawable_spawn, _baked, VANISHABLE_TYPES)
+                _bad = sorted(_hidden - set(_slots))
+                assert not _bad, (
+                    f"thing_hidden names things {_bad[:8]} that have no visibility flag -- only "
+                    f"BAKED VANISHABLE things do (see doomfj.things.vanishable_slots)")
+            # ⚠ BAKED FIRST, THEN RUNTIME, per leaf -- the ONE order fj can produce, because the
+            # baked things are call sites emitted in the leaf and the runtime ones are a list walked
+            # after them. It is wad order within each class, and at spawn every leaf holds only one
+            # class, so this is wad order outright (§4b of docs/handoff-m14_5.md).
+            for _pass in (True, False):
+                for _di, (t, b) in enumerate(zip(_drawable, _baked)):
+                    if b is not _pass or _di in _hidden:
+                        continue
+                    # binding is ALREADY position-driven, so M14-e needs no new logic here
+                    things_by_ss.setdefault(
+                        self.point_in_subsector(scene.cmap, t.x, t.y), []).append(t)
             for _si, _ss in enumerate(scene.cmap.subsectors):
                 if _ss.numsegs and _si in things_by_ss:
                     ss_first[_ss.firstseg] = _si              # the walk's arrival point for its things

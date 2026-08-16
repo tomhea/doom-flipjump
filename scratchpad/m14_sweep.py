@@ -29,7 +29,7 @@ from doomfj.fastrun import FjmRunner                                      # noqa
 from doomfj.reference_model import ReferenceModel                         # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.wireformat import (encode_bindings, encode_feed_mapunits,   # noqa: E402
-                              encode_things)
+                              encode_things, encode_visibility)
 from nb_validate import true_sector, _near_any_line                       # noqa: E402
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
@@ -71,13 +71,22 @@ if args.things:
     art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
     rm = ReferenceModel(Config())
     cmap = bake_bsp(w, M)
+    from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES
+    from doomfj.things import baked_thing_mask, vanishable_slots
     drawable = [t for t in w.things(M) if rm.sprite_art(art, t.type, {}) is not None]
+    # M14.5: only the RUNTIME half is on the wire -- the baked half is code inside its leaf.
+    baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES)
+    # M14.5: every baked vanishable thing is VISIBLE for the sweep -- the median frame is the one
+    # the player sees at level load, with nothing picked up yet.
+    nvis = len(vanishable_slots(drawable, baked, VANISHABLE_TYPES))
+    drawable = [t for t, b in zip(drawable, baked) if not b]
     THINGS = encode_things([(t.x << 16, t.y << 16) for t in drawable])
     binds = ([0xFFFF] * len(drawable) if args.cold
              else [rm.point_in_subsector(cmap, t.x, t.y) for t in drawable])
     THINGS += encode_bindings(binds)
+    THINGS += encode_visibility([1] * nvis)
     NTH = len(drawable)
-    print(f"thing block: {len(drawable)} things, {len(THINGS)} bytes "
+    print(f"thing block: {len(drawable)} runtime things ({sum(baked)} baked), {len(THINGS)} bytes "
           f"({'COLD -- all dirty' if args.cold else 'WARM -- steady state'})", flush=True)
 
 r = FjmRunner(str(ROOT / args.fjm) if not Path(args.fjm).is_absolute() else args.fjm)

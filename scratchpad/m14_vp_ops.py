@@ -30,7 +30,7 @@ from doomfj.reference_model import (ReferenceModel, SimState,             # noqa
                                     build_scene, spawn_state)
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.wireformat import (encode_bindings, encode_feed_mapunits,     # noqa: E402
-                               encode_things)
+                               encode_things, encode_visibility)
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -58,8 +58,15 @@ RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noi
                  near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
 cmap = bake_bsp(mw, "E1M1")
 DRAW = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+# M14.5: only the RUNTIME half is on the wire (the baked half is code inside its leaf)
+from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES        # noqa: E402
+from doomfj.things import baked_thing_mask, vanishable_slots              # noqa: E402
+_BK = baked_thing_mask(rm, cmap, DRAW, MONSTER_TYPES)
+NVIS = len(vanishable_slots(DRAW, _BK, VANISHABLE_TYPES))
+DRAW = [t for t, b in zip(DRAW, _BK) if not b]
 THINGS = (encode_things([(t.x << 16, t.y << 16) for t in DRAW])
-          + encode_bindings([rm.point_in_subsector(cmap, t.x, t.y) for t in DRAW]))
+          + encode_bindings([rm.point_in_subsector(cmap, t.x, t.y) for t in DRAW])
+          + encode_visibility([1] * NVIS))
 print(f"{len(DRAW)} drawable things, WARM bindings, keys=0")
 
 runners = {}

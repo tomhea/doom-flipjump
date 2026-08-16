@@ -32,11 +32,13 @@ import flipjump as fj
 from doomfj.config import Config
 from doomfj.fixedpoint import _signed
 from doomfj.harness import W
-from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
+from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES, ReferenceModel, SimState,
+                                    build_scene, spawn_state)
+from doomfj.things import baked_thing_mask, vanishable_slots
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer, write_program_files
 from doomfj.wireformat import (BINDING_DIRTY, encode_bindings, encode_feed,
-                              encode_feed_mapunits, encode_things, keys_dict)
+                              encode_feed_mapunits, encode_things, encode_visibility, keys_dict)
 from tests.fj.stream_screen import StreamScreen
 
 SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection.fj",
@@ -87,6 +89,15 @@ CACHE = ROOT / ("scratchpad/fjmcache/m14_bin%s%s.fjm"
 # apply that same filter, and the two were checked to select the identical 251 things.
 DRAWABLE = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
 SPAWN_POS = [(t.x, t.y) for t in DRAWABLE]
+# M14.5 — only the RUNTIME half is on the wire; the rest is baked into its leaf's code and cannot
+# move. Same SSOT the emitter and the oracle read, so the three cannot drift.
+BAKED = baked_thing_mask(rm, scene.cmap, DRAWABLE, MONSTER_TYPES)
+RT = [i for i, b in enumerate(BAKED) if not b]
+RTPOS = {i: k for k, i in enumerate(RT)}         # drawable index -> its slot on the wire
+# M14.5 §3.3: the baked things that can VANISH, each with a 1-nibble flag at a fixed address.
+VIS = vanishable_slots(DRAWABLE, BAKED, VANISHABLE_TYPES)      # drawable index -> wire slot
+print(f"things: {len(DRAWABLE)} drawable = {sum(BAKED)} BAKED + {len(RT)} runtime; "
+      f"{len(VIS)} baked things carry a visibility flag", flush=True)
 # ⚠ WHOLE MAP UNITS. fj carries a thing at full 16.16 but the oracle's override takes the integer
 # `t.x`/`t.y` a WAD thing has, so a fractional thing would be comparing two different worlds. The
 # player is the fractional one (M14-c); things move on the grid until the oracle carries 16.16 too.
@@ -98,8 +109,23 @@ THING_DRIFT = 4                                  # map units per tic, +x
 # whole map, none of them on screen from the spawn trajectory: 22 leaf changes, and the drift
 # changed the frame on 0 of 10 tics. The gate caught it and failed, which is the entire point of
 # checking pixels as well as bindings. So: the things NEAREST the spawn point.
-MOVERS = sorted(range(len(SPAWN_POS)),
-                key=lambda i: (SPAWN_POS[i][0] - spx) ** 2 + (SPAWN_POS[i][1] - spy) ** 2)[:30]
+# ⚠ ...and only a RUNTIME thing can move at all (M14.5), so the mover set is drawn from those.
+# ⚠ AND THAT MADE THE OLD SET VACUOUS, which the gate caught: "nearest 30 drawable" crossed 22 leaf
+# boundaries, but "nearest 30 RUNTIME" (mostly monsters, standing in big open leaves) crossed ZERO,
+# so the re-binding path went untested. So the set is now CHOSEN for the property the gate needs:
+# things that both (a) actually change leaf under the scripted drift, and (b) are near the player.
+# The host can compute (a) exactly -- it is one point location per candidate per tic.
+def _crosses(i, tics=24):
+    ss0 = rm.point_in_subsector(scene.cmap, *SPAWN_POS[i])
+    return any(rm.point_in_subsector(scene.cmap, SPAWN_POS[i][0] + THING_DRIFT * t,
+                                     SPAWN_POS[i][1]) != ss0 for t in range(1, tics + 1))
+
+
+_near = sorted(RT, key=lambda i: (SPAWN_POS[i][0] - spx) ** 2 + (SPAWN_POS[i][1] - spy) ** 2)
+MOVERS = [i for i in _near if _crosses(i)][:20] or _near[:20]
+MOVERS = sorted(set(MOVERS) | set(_near[:10]))       # ... plus the nearest, for the PIXEL half
+print(f"movers: {len(MOVERS)} runtime things, "
+      f"{sum(1 for i in MOVERS if _crosses(i))} of them cross a leaf boundary", flush=True)
 
 
 def thing_positions(tic):
@@ -110,19 +136,21 @@ def thing_positions(tic):
             for i, (x, y) in enumerate(SPAWN_POS)]
 
 
-SPAWN_BINDINGS = [rm.point_in_subsector(scene.cmap, x, y) for x, y in SPAWN_POS]
+SPAWN_BINDINGS = [rm.point_in_subsector(scene.cmap, *SPAWN_POS[i]) for i in RT]
 
 
-def feed(state, keys, positions=None, bindings=None):
+def feed(state, keys, positions=None, bindings=None, hidden=()):
     """The wire: the player's state, the thing positions, then last frame's BINDINGS.
 
     `bindings=None` means all-dirty -- a cold start, where fj point-locates all 251. Passing the
     previous frame's echo is the steady state, where it locates only what the host marked dirty."""
     b = encode_feed(*state, keys)
     if MOVING:
-        b += encode_things([(x << 16, y << 16) for x, y in
-                            (SPAWN_POS if positions is None else positions)])
-        b += encode_bindings([BINDING_DIRTY] * len(SPAWN_POS) if bindings is None else bindings)
+        pos = SPAWN_POS if positions is None else positions       # full drawable order
+        b += encode_things([(pos[i][0] << 16, pos[i][1] << 16) for i in RT])
+        b += encode_bindings([BINDING_DIRTY] * len(RT) if bindings is None else bindings)
+        # ... and the visibility block, last: 1 = draw it. Sent EVERY frame -- fj has no state.
+        b += encode_visibility([i not in set(hidden) for i in VIS])
     return b
 
 
@@ -151,7 +179,7 @@ def build():
 
 
 def run(fjm, feed):
-    scr = StreamScreen(stdin=feed, n_things=len(SPAWN_POS) if MOVING else 0)
+    scr = StreamScreen(stdin=feed, n_things=len(RT) if MOVING else 0)
     term = fj.run(fjm, io_device=scr, print_time=False, print_termination=False,
                   flat_max_words=1 << 26)
     return scr, term
@@ -207,7 +235,7 @@ def phase2(fjm, tics):
             if binds is None:
                 binds = list(SPAWN_BINDINGS)
             for i in MOVERS:
-                binds[i] = BINDING_DIRTY
+                binds[RTPOS[i]] = BINDING_DIRTY
             # ⚠ THE CONTROL, and it is two-sided. Counting leaf changes alone would pass a build
             # that re-binds correctly and never draws the result; counting changed pixels alone
             # would pass one that moves sprites without re-binding them. Both must happen.
@@ -244,7 +272,7 @@ def phase2(fjm, tics):
         if MOVING:
             # ⚠ the echoed bindings must equal what the ORACLE derives from the same positions --
             # the independent check that makes a wrong cached binding impossible to hide
-            want_b = [rm.point_in_subsector(scene.cmap, x, y) for x, y in pos]
+            want_b = [rm.point_in_subsector(scene.cmap, *pos[i]) for i in RT]
             if scr.bindings != want_b:
                 bind_errors += 1
                 n = sum(1 for a, b in zip(scr.bindings or [], want_b) if a != b)
@@ -268,6 +296,47 @@ def phase2(fjm, tics):
         if not moved_frames:
             print("  !! VACUOUS: no moved thing was ever ON SCREEN -- the re-binding is untested")
             ok = False
+    return ok
+
+
+def phase3(fjm):
+    """M14.5 §7b.4 — THE VISIBILITY CONTROL, and it must be TWO-SIDED.
+
+    M14.5 has no pickup logic, so nothing in the gate's own play ever clears a flag: a build whose
+    guard is never read, or read at the wrong nibble, would pass phases 1 and 2 unchanged. So hide
+    every vanishable baked thing explicitly and require all three of:
+
+      * fj and the oracle agree BYTE-EXACT with them hidden (the flag does the same thing on both
+        sides -- not merely 'something changed');
+      * the frame actually CHANGED at some viewpoint (or the things hidden were all off screen and
+        the control proves nothing -- the mistake handoff-perf.md section 11.2 records);
+      * it changes BACK when they are restored (a guard that hides permanently is not a guard).
+    """
+    print(f"\nPHASE 3 -- visibility: hiding all {len(VIS)} vanishable baked things", flush=True)
+    if not VIS:
+        print("  !! VACUOUS: no thing carries a flag")
+        return False
+    ok, changed = True, 0
+    hide = list(VIS)
+    for vx, vy, va in VPS:
+        st = (vx << 16, vy << 16, va)
+        shown, _ = run(fjm, feed(st, 0, bindings=SPAWN_BINDINGS))
+        hid, term = run(fjm, feed(st, 0, bindings=SPAWN_BINDINGS, hidden=hide))
+        back, _ = run(fjm, feed(st, 0, bindings=SPAWN_BINDINGS))
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
+                                    thing_hidden=hide, **RENDER_KW)
+        same = bytes(hid.pixel_indices) == bytes(want)
+        moved = bytes(hid.pixel_indices) != bytes(shown.pixel_indices)
+        restored = bytes(back.pixel_indices) == bytes(shown.pixel_indices)
+        changed += moved
+        ok &= same and restored
+        print(f"  ({vx},{vy},{va:#x}): {term.op_counter:,} ops  "
+              f"{'BYTE-EXACT vs oracle' if same else '!! HIDDEN FRAME DIFFERS FROM ORACLE'}  "
+              f"{'frame changed' if moved else 'no visible change here'}  "
+              f"{'restored' if restored else '!! DID NOT COME BACK'}", flush=True)
+    if not changed:
+        print("  !! VACUOUS: hiding them changed no pixel at any viewpoint -- the flag is untested")
+        ok = False
     return ok
 
 
@@ -296,6 +365,8 @@ def main():
     fjm = build()
     ok = phase1(fjm)
     ok &= phase2(fjm, tics)
+    if MOVING:
+        ok &= phase3(fjm)
     print("\nPASS" if ok else "\nFAIL")
     return 0 if ok else 1
 

@@ -569,3 +569,65 @@ Rationale for the interleave:
   is what makes it the real tier (§0).
 * **C4 late**, because AI is the only item that can single-handedly blow the budget, and it should
   meet a frame Step A has already made as cheap as it is going to get.
+
+---
+
+## §9 STATE AT HANDOFF (end of session 2026-08-17)
+
+### Committed and pushed on `m13opt3-early-out`
+
+| commit | what |
+|---|---|
+| `4ff4d51` | CLAUDE.md's four working rules |
+| `0b67376` | **CR round 1** — the WR-1 plane-gate fix (gated byte-exact ×4), the drawable-SSOT mirror fix, the TS-2 control rewrite, `THING_XORBY_FIELDS`, `--selftest` for `expand_check` + `emit_hash`, `wad.py` memoisation, the `slow` pytest marker |
+| `540bccc` | this document |
+| `6175cc2` | §4.2's measured per-frame floor + §6.5's seven gaps |
+
+Verified at `0b67376`: `deg_gate` PASS byte-exact ×4; `pytest tests/host -q` = 245 passed,
+1 deselected, 54.70 s; `alpha_check`/`expand_check`/`emit_hash` `--selftest` all pass.
+
+### ⚠ IN FLIGHT AND **NOT** CERTIFIED — read before touching anything
+
+**A0.1 is EDITED BUT UNPROVEN.** Uncommitted in the working tree:
+
+* `src/doomfj/build.py` — `wall_mode` WPX→**W1R**, and `stack_steps=True, bbox_cull=True, deg=True`
+  added to the signature and passed through. This makes the shipped artifact the walker's picture.
+  ⚠ There were **FOUR** divergences, not the three in §1/A0.1's table — `wall_mode` was the fourth
+  and is the most expensive (WPX is +2–6M/frame over W1R).
+* `scratchpad/deg_gate.py` — `bbox_cull=True` added so the gate certifies what is now shipped.
+* `scratchpad/dirty_census.py` — NEW, unrun: the §4.2/B4.1 dirty-word sampler, with its R9 negative
+  control (pristine core vs itself must report 0% dirty).
+
+The unified config **emits** (walk 72,109→73,957 lines, main 55→58, state 101→107 — the wedge gate
+code). It had NOT finished assembling when the session ended, so **nothing about its correctness or
+its op counts is proven.** The four op counts in §0's table belong to the PRE-`bbox_cull` gate and
+**will change**; that is the intended one-time cost of unifying the tiers.
+
+**FIRST ACTION IN THE NEXT SESSION:**
+```
+python scratchpad/deg_gate.py        # ~25 min, must print PASS + 4x BYTE-EXACT
+```
+If it PASSes: record the four new op counts as the A0.1 baseline, commit
+`build.py` + `deg_gate.py` together, and note that `test_build_wall_renderer_e1m1_flat`
+(`pytest tests/host -m slow`, ~70 min) must also be run because the span changed.
+If it FAILs: `bbox_cull` interacts with something the walker's path does not exercise — that is a
+real finding, not a setback. Do not "fix" it by reverting the unification.
+
+### Then, in order (§8)
+
+1. **A0.3** — build the M14 tier (`state_wire="bin"`, `player_sim=True`, `moving_things=True`,
+   things on) at the A0.1 config, cache the `.fjm`, run `scratchpad/m14_sweep.py` (also `--cold`).
+   **This median is the number every Step-A rung is scored against**, and it is still UNMEASURED.
+2. **B4.1 step 1** — `python scratchpad/dirty_census.py <cached.fjm> --feed ...` on that binary.
+   ⚠ Use the BINARY wire feed for an M14-tier build; a decimal feed halts it after ~200 ops and the
+   script says so rather than reporting a meaningless fraction.
+3. **A0.2** — the PJ-1/PJ-2 probes. 4. **B0** — wire the sim. 5. **G1** — the regression guard.
+
+### Where everything lives
+
+* findings: `scratchpad/cr2/findings/*.md` (158; round 1 closed 8)
+* the gate: `scratchpad/deg_gate.py` · the median: `scratchpad/m14_sweep.py` · the static gate:
+  `scratchpad/m14_basegate.py` · attribution: `scratchpad/opprof.py`
+* stop census prototype: `scratchpad/_cr_wr1b.py` · TS-2's mutation control:
+  `scratchpad/_cr_ts2_neg.py` · CR tools: `scratchpad/cr/{alpha,expand}_check.py`, `emit_hash.py`
+* memory: `cr-round-2026-08.md` (the backlog), `m145-handoff.md`, `perf-campaign.md`, `fj-lessons.md`

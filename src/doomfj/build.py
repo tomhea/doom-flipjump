@@ -187,9 +187,10 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
 
 
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
-                        flat_max_words=None, floor_mode="FT1", wall_mode="WPX",
+                        flat_max_words=None, floor_mode="FT1", wall_mode="W1R",
                         raster_mode="lines", plane_near=True, wall_noise=True, sky=True,
-                        steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD) -> dict:
+                        steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
+                        stack_steps=True, bbox_cull=True, deg=True) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
@@ -202,8 +203,17 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     needed for the gate — the golden test does the byte-exact render).
 
     **The defaults are the SHIPPING tier**, i.e. what `scripts/walk_e1m1.py` puts on screen: the lines
-    raster with WPX 1x1-texel walls + FT1 floors + rung-3a `plane_near`, and all four VISUAL FEATURES
-    (V1 `wall_noise` grain, V2 `sky`, V3 `steps` faces, V4 `things` sprites) ON. Every one is byte-exact
+    raster with W1R walls + FT1 floors + rung-3a `plane_near`, all four VISUAL FEATURES
+    (V1 `wall_noise` grain, V2 `sky`, V3 `steps` faces, V4 `things` sprites) ON, and V5 `stack_steps`
+    + the `bbox_cull` wedge subtree cull + the `deg` degradation package ON.
+
+    ⚠ CR-2026-08 (IN-3, A0.1) — THIS SENTENCE USED TO BE FALSE, which is why it is now spelled out
+    flag by flag. `stack_steps`, `bbox_cull` and `deg` were never passed here at all and defaulted
+    OFF in the emitter, and `wall_mode` was WPX where the walker uses W1R — so THREE entry points
+    built THREE different renderers: the artifact shipped, the artifact certified by
+    `scratchpad/deg_gate.py`, and the artifact a human actually looked at. Optimizing or certifying
+    any one of them said little about the others. If you add an emit-shaping keyword, add it HERE
+    and to the walker in the same commit, or the divergence comes straight back. Every one is byte-exact
     against the oracle (`tests/fj/test_visual_features.py`); before this they were emitter keywords that
     only the walker and that test ever passed, so the shipped binary rendered a strictly older picture
     than the project's own screenshots. The older tiers stay reachable by keyword
@@ -224,7 +234,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     parts = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode,
                                wall_mode=wall_mode, raster_mode=raster_mode, plane_near=plane_near,
                                wall_noise=wall_noise, sky=sky, steps=steps, things=things,
-                               sprite_wad=spr, return_parts=True)
+                               sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
+                               deg=deg, return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
     # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a

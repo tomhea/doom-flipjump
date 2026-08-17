@@ -586,32 +586,39 @@ Rationale for the interleave:
 Verified at `0b67376`: `deg_gate` PASS byte-exact ×4; `pytest tests/host -q` = 245 passed,
 1 deselected, 54.70 s; `alpha_check`/`expand_check`/`emit_hash` `--selftest` all pass.
 
-### ⚠ IN FLIGHT AND **NOT** CERTIFIED — read before touching anything
+### ✅ A0.1 IS DONE AND CERTIFIED (commit `b478897`)
 
-**A0.1 is EDITED BUT UNPROVEN.** Uncommitted in the working tree:
+The three (in fact **FOUR**) build configurations are now one. `src/doomfj/build.py` ships the
+walker's picture — `wall_mode` WPX→**W1R** (the fourth divergence, and the most expensive: WPX is
++2–6M/frame) plus `stack_steps=True, bbox_cull=True, deg=True` — and `scratchpad/deg_gate.py`
+certifies that same picture, with `bbox_cull=True` added so the wedge subtree cull is finally
+covered by the repo's own proof.
 
-* `src/doomfj/build.py` — `wall_mode` WPX→**W1R**, and `stack_steps=True, bbox_cull=True, deg=True`
-  added to the signature and passed through. This makes the shipped artifact the walker's picture.
-  ⚠ There were **FOUR** divergences, not the three in §1/A0.1's table — `wall_mode` was the fourth
-  and is the most expensive (WPX is +2–6M/frame over W1R).
-* `scratchpad/deg_gate.py` — `bbox_cull=True` added so the gate certifies what is now shipped.
-* `scratchpad/dirty_census.py` — NEW, unrun: the §4.2/B4.1 dirty-word sampler, with its R9 negative
-  control (pristine core vs itself must report 0% dirty).
+`deg_gate` **PASS, byte-exact ×4**, measured 2026-08-17. Unifying did not cost ops, it SAVED them,
+because the gate had never been running the cull the walker ships:
 
-The unified config **emits** (walk 72,109→73,957 lines, main 55→58, state 101→107 — the wedge gate
-code). It had NOT finished assembling when the session ended, so **nothing about its correctness or
-its op counts is proven.** The four op counts in §0's table belong to the PRE-`bbox_cull` gate and
-**will change**; that is the intended one-time cost of unifying the tiers.
+| viewpoint | before (gate without `bbox_cull`) | after | delta |
+|---|---|---|---|
+| (664,291,0x18000000) | 51,186,631 | **49,384,173** | −1,802,458 |
+| (1272,−724,0x40000000) | 40,843,272 | **39,825,528** | −1,017,744 |
+| (1869,479,0x80000000) | 48,666,231 | **45,917,740** | −2,748,491 |
+| (−416,256,0x0) | 38,931,760 | **37,898,025** | −1,033,735 |
 
-**FIRST ACTION IN THE NEXT SESSION:**
-```
-python scratchpad/deg_gate.py        # ~25 min, must print PASS + 4x BYTE-EXACT
-```
-If it PASSes: record the four new op counts as the A0.1 baseline, commit
-`build.py` + `deg_gate.py` together, and note that `test_build_wall_renderer_e1m1_flat`
-(`pytest tests/host -m slow`, ~70 min) must also be run because the span changed.
-If it FAILs: `bbox_cull` interacts with something the walker's path does not exercise — that is a
-real finding, not a setback. Do not "fix" it by reverting the unification.
+Emission grew as expected for the added gate code: walk 72,109→73,957 lines, main 55→58,
+state 101→107.
+
+**⇒ THESE FOUR ARE NOW THE WORST-CASE ANCHOR.** The pre-`bbox_cull` numbers elsewhere in this
+document are retired: they belong to a picture nothing ships.
+
+⚠ **STILL OWED for A0.1:** `build.py`'s span changed (W1R + the cull + V5), so
+`python -m pytest tests/host -m slow` (~70 min, `test_build_wall_renderer_e1m1_flat`) must run and
+assert `storage_mode == flat` under the raised limit. **It has NOT been run.** Do it before trusting
+the shipped artifact.
+
+### ⚠ NOT RUN: `scratchpad/dirty_census.py`
+
+New, unrun: the §4.2/B4.1 dirty-word sampler with its R9 negative control (a pristine core compared
+against itself must report 0% dirty). See step 2 below.
 
 ### Then, in order (§8)
 

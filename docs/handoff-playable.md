@@ -50,6 +50,8 @@ MEASURED THIS SESSION (2026-08-17, commit `0b67376`):
 | leaves a mover can REACH vs "any leaf with headroom" | 538 of 657 (stock), 314 of 446 (lite) | flood fill, this session |
 | `check_position` geometry lookups | 3,577.7 µs → 6.5 µs (549×) | in-process A/B |
 | host suite | 245 passed, 1 deselected, 54.70 s | `pytest tests/host -q` |
+| **per-frame image reset (the floor)** | **52.5-61.5 ms**, independent of ops | `core.reset()` x5 on a 68M-word image |
+| effective engine rate incl. reset | 144.6M / 186.3M fj/s | `FjmRunner.run()`, frames 2-3 |
 
 ⚠ **UNVERIFIED — re-measure before acting on any of these.** They come from docs/memory, not from a
 harness run in this session: sweep median ≈ **29.39M** (M14.5 rung 2, the *moving* build); base
@@ -133,9 +135,18 @@ batch, sweep it, and attribute. Interactions inside a batch are the risk; the ru
 * **Keep a rejected-findings log with its number.** A measured negative result closes a direction
   permanently and is worth as much as a win; this repo has lost days re-deriving them.
 
-**The stop rule.** Work the batches best-first and stop when a whole batch returns **< 0.5% of the
-median**. The tail of the backlog is dominated by LOW findings worth low-thousands of ops against a
-~30M frame; grinding them is how a perf campaign eats a month for 1%.
+**The stop rule — OWNER OVERRIDE (2026-08-17): there isn't one on size.** "0.5% of the median is
+alright too, small advances can reach bigger results when accumulated." So work the backlog to the
+end; a 0.3% win is banked, not discarded. What still gets rationed is *build time*, not win size:
+
+* **batch aggressively at the small end.** Below ~1% a finding does not deserve its own 25-minute
+  build — collect ten of them into one batch and attribute with the emit-hash/nnls harness.
+* **keep a cumulative ledger** so the accumulation is visible: a column of 0.3%s that reaches 4%
+  is the argument for continuing, and the only way to see it is to record every one.
+* **the real stop condition is the per-frame FLOOR, not the finding size** — see §4. Below roughly
+  15M ops/frame the fixed image-reset cost dominates and further op wins stop converting into fps.
+  Keep banking them (they still help a faster reset path later), but re-read §4 before spending a
+  week on the last 2%.
 
 ### A2 — THE BATCHES, best first
 
@@ -345,21 +356,71 @@ as its own gated rung, not as a garnish on C2.
 
 ---
 
-## §4 THE BUDGET THREAD THAT RUNS THROUGH ALL THREE
+## §4 THE BUDGET — AND THE PER-FRAME FLOOR THAT CAPS IT
 
 Step A *saves*; Steps B and C *spend*. Without a ledger, A's wins vanish into B and C and nobody can
-say where. So:
+say where. So **every rung in B and C reports its median delta** the same way A's do, and a running
+ledger tracks A-saves / B-spend / C-spend / net.
 
-* **every rung in B and C reports its median delta**, the same way A's do;
-* **maintain a running ledger** — A's savings, B's spend, C's spend, and the net;
-* **set the target before spending.** DOOM runs at 35 tics/s. At the UNVERIFIED ~100–200M fj/s
-  engine rate, 30 fps needs ~3–7M ops/frame and 15 fps needs ~7–13M. Against a ~29.4M median
-  (UNVERIFIED) and an UNVERIFIED ~20.94M base-renderer floor, **single-digit fps is the realistic
-  landing zone for the current fidelity**, and a genuinely playable frame rate needs a fidelity
-  decision (resolution, texture tier, sprite budget) — not just Step A. **Make that decision
-  explicitly, with numbers, at the A3 exit gate. Do not let it emerge as a disappointment in C.**
+### 4.1 The target machine
 
----
+Owner (2026-08-17): **"I plan on running it on a 300 fj/second machine."** Read throughout this
+document as **300M fj/s** — the native C engine measures 144.6M–186.3M effective on this machine
+today, so 300M is a plausible faster box. ⚠ If 300 ops/second was meant literally, a 29.4M-op frame
+takes ~27 HOURS and nothing in this plan applies; confirm before relying on §4.2.
+
+### 4.2 ⚠ THE FLOOR: a fixed ~52 ms per frame that no amount of Step A removes
+
+**MEASURED this session**, on a 68M-word image via `FjmRunner`'s C `freeze()`/`reset()` path:
+
+```
+core.reset() alone:  52.5 - 61.5 ms      <- fixed, independent of ops/frame
+frame 2:  0.357s  51,653,980 ops  -> 144.6M fj/s effective
+frame 3:  0.262s  48,876,228 ops  -> 186.3M fj/s effective
+```
+
+The program SELF-MODIFIES, so the host must restore the image before every run — run 2 on a dirty
+image halts after ~9 ops. That restore is a ~545 MB memcpy and is memory-bandwidth-bound.
+Consequences, at 300M fj/s:
+
+| ops/frame | run | + reset | fps |
+|---|---|---|---|
+| 29.4M (median today, UNVERIFIED) | 98.0 ms | 52.5 ms | **6.6** |
+| 20.9M (base-renderer floor, UNVERIFIED) | 69.7 ms | 52.5 ms | **8.2** |
+| 13.0M | 43.3 ms | 52.5 ms | **10.4** |
+| 10.0M | 33.3 ms | 52.5 ms | **11.7** |
+| 0 (free frame) | 0 ms | 52.5 ms | **19.0 — THE CEILING** |
+
+**Read that last row before planning Step A's tail.** There is a hard ~19 fps ceiling on this
+machine's reset path, and below roughly 15M ops/frame the reset is more than half the frame:
+halving 20.9M → 10M buys 8.2 → 11.7 fps, not 8.2 → 30. Op wins are still worth banking (they
+convert fully once the floor moves), but **the floor, not the op count, is what stands between this
+and a 30 fps game.**
+
+### 4.3 THE LEVER — and it is a new work item nobody had costed
+
+Reset copies the WHOLE image. The program only dirties part of it, and M12pp's xor-involution work
+already exists to make per-seg constant blocks **self-restoring** — that is, much of the image
+provably comes back on its own. So:
+
+**B4.1 (NEW, high priority) — measure the dirty set, then restore only it.**
+1. After one frame, diff the live image against the frozen snapshot and **count the differing
+   words**. That number is the whole feasibility question and it is a cheap experiment.
+2. If the dirty set is small and its extent is statically bounded, replace the blanket memcpy with a
+   dirty-range restore (or extend the involution so the frame restores itself, which is the same
+   idea one level down).
+3. If it is large, the ceiling is real and the fidelity/resolution decision at A3 has to carry the
+   whole fps gap on its own.
+
+⚠ Do NOT start Step A's long tail before step 1 of this is done. It costs an afternoon and it
+decides whether the tail converts into frames per second or into nothing.
+
+### 4.4 The fidelity decision, still owed at A3
+
+If the floor cannot move, 30 fps needs the frame to be free, which it will not be — so the honest
+options are a lower resolution, a cheaper texture tier, a smaller sprite budget, or accepting
+~10 fps. Make that call **explicitly, with numbers, at the A3 exit gate.** Do not let it emerge as a
+disappointment in Step C.
 
 ## §5 THE TESTING DEBT THAT WILL BITE ALL THREE STEPS
 
@@ -398,6 +459,64 @@ CLAUDE.md's five, plus the three this session added or sharpened:
 
 ---
 
+## §6.5 GAPS FOUND AUDITING THIS PLAN AGAINST ITSELF (2026-08-17)
+
+Beyond §4.2's floor, seven things this document needed and did not have:
+
+**G1 — Nothing guards a win once it lands.** WR-1 happened because a correct widening silently
+disabled a gate and no check noticed for months. Step A will create ~150 such opportunities. Add a
+CHEAP, emit-time regression guard, run on every commit, no build required:
+* the **stop census** — count gated nodes / pruned leaves / never-binding budgets
+  (`scratchpad/_cr_wr1b.py` is the prototype) and fail if a count drops unexpectedly;
+* the **emit hash** for the shipped config (`scratchpad/cr/emit_hash.py`, now with `--selftest`);
+* a tracked `perf-ledger.json` holding the current median, the four gate viewpoints, assemble time
+  and `.fjm` size, updated by whoever lands a rung.
+Without G1, Step A is a bucket with a hole in it.
+
+**G2 — Assemble time is an unbudgeted Step-A cost.** Builds are 21–25 min and the assembler is
+~cubic in unrolled ops, so a plan with dozens of batches is dominated by assembly, not by thinking.
+Two consequences: **track assemble time as a first-class metric per batch** (some findings —
+SI-5's shared `fcall` leaf, anything moving unrolled code into a leaf — REDUCE it, so do those
+early and make every later batch cheaper), and reuse the walker's `.fjm` cache so sweeps never
+rebuild.
+
+**G3 — A5 and B3 compete for the same span budget.** Batch 5 buys ops by *spending span* on dispatch
+tables; B3 needs span for 9 levels of baked geometry against the flat limit (R4). These are the same
+scarce resource and the document had them in different sections pretending otherwise. **Keep ONE
+span ledger in DESIGN.md §1.2 across A and B, and price one extra level's span BEFORE Step A spends
+span on tables.**
+
+**G4 — No way to bisect a batch that regresses.** If a 10-finding batch comes back worse, you have
+one number and ten suspects. Land each finding as its own commit inside the batch branch, with an
+emit hash per commit, so a regression bisects by emission instead of by rebuild.
+
+**G5 — Step C has no regression harness for BEHAVIOUR.** Byte-exactness gates a *frame*; it says
+nothing about whether a monster chased you correctly. DESIGN's H7 already scopes a **replay**
+facility at M14. Build it in B (a recorded input stream + expected end state), because by C the
+oracle must simulate AI too and "the picture matches" stops being sufficient.
+
+**G6 — The oracle becomes the bottleneck.** Every gate runs the Python oracle, and C makes it
+simulate AI per tic. This session's `wad.py` fix bought 549× on one call and `RM-2`/`RM-4`/`RM-5`
+are still open. **Treat oracle speed as a shipping constraint from B onward**, not as housekeeping.
+
+**G7 — "Playable" has no acceptance test.** Define one in B, concretely, or the step cannot be
+called done: *walk from spawn to the exit in real time, on the target machine, at ≥ N fps, with no
+visual artefact and no host-side simulation.* Pick N at the A3 fidelity gate (§4.4).
+
+Two smaller ones, recorded so they are not rediscovered:
+* **DEG popping becomes visible once the player really moves.** The degradation knobs shed far
+  detail adaptively; this repo has already fought smudge and pop bugs (the 73/260-frame owner-smudge
+  class). With continuous motion, re-audit the knobs against motion, not against still frames.
+* **Two-sided walls vs doors.** `--two-sided` is what makes door frames and ledge fronts read
+  correctly, and it is byte-exact but ~6× slower. B2 ships doors; decide then whether door frames
+  need it, and price it against §4.2's floor rather than against the op count alone.
+
+**Explicitly OUT of scope** (named so nobody assumes them): sound, multiplayer, save/load games,
+and 320×200. Skill levels are nearly free — thing flags already carry the skill bits — so fold them
+into C2 if wanted.
+
+---
+
 ## §7 WHAT THE THREE-STEP BRIEF DID NOT MENTION, AND WHERE IT WENT
 
 | missing piece | inserted at | why it cannot wait |
@@ -421,15 +540,32 @@ CLAUDE.md's five, plus the three this session added or sharpened:
 | a status bar is a `VIEW_H` change | C5 | moves every projection constant |
 | the A-saves/B-spends/C-spends ledger + an fps target | §4 | otherwise A's wins silently vanish into B and C |
 | the untested surfaces B and C are about to depend on | §5 | `sim.fj`'s thing path and the whole wire are untested |
+| **a fixed ~52 ms per-frame image reset caps fps at ~19** | **§4.2** | measured; below ~15M ops it dominates, and Step A's tail stops converting to fps |
+| restore only the DIRTY words instead of the whole image | **B4.1** (new) | the one lever that moves the ceiling; costs an afternoon to test |
+| a perf regression guard (stop census + emit hash + ledger) | G1 | WR-1 is exactly what happens without it |
+| assemble time as a tracked, budgeted metric | G2 | dozens of 25-min builds dominate Step A |
+| ONE span ledger shared by A5's tables and B3's levels | G3 | they compete for the same scarce resource |
+| per-finding commits + emit hash so a batch can bisect | G4 | otherwise a regressed batch has ten suspects |
+| a replay/demo harness for BEHAVIOUR | G5 | byte-exactness cannot gate "did the monster chase me" |
+| oracle speed as a shipping constraint | G6 | every gate runs it; C makes it simulate AI |
+| a concrete acceptance test for "playable" | G7 | otherwise Step B has no done |
+| DEG popping under real continuous motion | §6.5 | knobs were tuned against still frames |
+| sound / multiplayer / save-load / 320x200 | §6.5 | named OUT of scope so they are not assumed |
 
 ---
 
 ## §8 SUGGESTED ORDER
 
-`A0.1 → A0.2 → A0.3 → B0` **then** `A1–A2 batches 1–4` **then** `B1, B2` **then** `A2 batches 5–9`
-**then** `B3, B4` **then** `C1 → C2 → C3 → C5 → C4 → C6`.
+`A0.1 → A0.3 → B4.1(step 1: count the dirty words) → A0.2 → B0` **then** `G1 (the guard)` **then**
+`A2 batches 1–4` **then** `B1, B2` **then** `A2 batches 5–9` **then** `B3, B4` **then**
+`C1 → C2 → C3 → C5 → C4 → C6`.
 
-Rationale for the interleave: **B0 before the optimization batches**, because the M14 tier is what
-Step A must optimize and B0 is what makes it the real tier (§0). **C4 late**, because AI is the only
-item that can single-handedly blow the budget, and it should meet a frame that Step A has already
-made as cheap as it is going to get.
+Rationale for the interleave:
+* **B4.1 step 1 comes third**, right after the baseline. Counting the dirty words is an afternoon and
+  it decides whether Step A's long tail converts into frames per second or into nothing (§4.2).
+* **G1 before the batches**, because the guard is what stops a later rung silently undoing an
+  earlier one — the WR-1 failure, which cost more than any single finding on the list is worth.
+* **B0 before the optimization batches**, because the M14 tier is what Step A must optimize and B0
+  is what makes it the real tier (§0).
+* **C4 late**, because AI is the only item that can single-handedly blow the budget, and it should
+  meet a frame Step A has already made as cheap as it is going to get.

@@ -254,6 +254,37 @@
         "ASSEMBLE IS 2h14m, up from ~30 min pre-B0. Every gate on the shipped tier now costs two hours; G2 counts this as a first-class budget. Three levels in one image projects to 4-5 hours."
       ],
       "band": "tests/host SPAN_LO/HI moved to 70M-100M to bracket the measurement (was a provisional 40-90M)"
+    },
+    {
+      "id": "B0-median",
+      "date": "2026-08-19",
+      "what": "THE SHIPPED MEDIAN after B0 -- measured on the collide=True binary, which is what build.py and the walker actually emit",
+      "how": "python scratchpad/m14_sweep.py scratchpad/fjmcache/m14_bin_coll_things_cull.fjm --things",
+      "binary": "m14_bin_coll_things_cull.fjm (21,796,514 bytes)",
+      "frames": 260,
+      "min": 7441882,
+      "median_warm": 29792277,
+      "mean_warm": 30517021,
+      "p90": 46470863,
+      "p99": 56883057,
+      "worst": 60914103,
+      "worst_at": [
+        2637,
+        1247,
+        2147483648
+      ],
+      "under_20M": "38/260",
+      "under_26M": "83/260",
+      "under_30M": "135/260",
+      "csv": "scratchpad/sweep_b0.csv",
+      "COLLIDE_COST": {
+        "collide_false_median": 27850134,
+        "collide_true_median": 29792277,
+        "delta": 1942143,
+        "pct": 7.0,
+        "UNEXPLAINED": "The sweep feeds keys=0, so the player sim is a no-op and COLLISION NEVER RUNS -- yet the frame costs 7% more. So collide=True changes something STRUCTURAL, not just adding an untaken branch. Recorded as measured-and-unexplained; do NOT rationalise it. Cheapest next step: opprof the two binaries at one viewpoint and diff the per-macro attribution, or emit-hash the two programs and diff the emitted parts."
+      },
+      "GATE_STATUS": "m14_gate --things 8 FAILED its VACUITY control on the collide binary: 'collision changed the outcome on 0 of 8 tics'. Phases 1, 1b and 3 were clean and phase 2's frames matched -- the gate correctly refuses to certify a collision build in which nothing ever hit a wall. Re-running with 20 tics."
     }
   ]
 }

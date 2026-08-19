@@ -34,7 +34,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 import flipjump as fj                                                     # noqa: E402
-from doomfj.config import Config                                          # noqa: E402
+from doomfj.config import Config, RENDER_FLAT_MAX_WORDS                                          # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.harness import W                                              # noqa: E402
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
@@ -98,7 +98,7 @@ for vx, vy, va in VPS:
     want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene, **RENDER_KW)
     scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
     term = fj.run(CACHE, io_device=scr, print_time=False, print_termination=False,
-                  flat_max_words=1 << 26)
+                  flat_max_words=RENDER_FLAT_MAX_WORDS)
     diff = sum(1 for a, b in zip(bytes(scr.pixel_indices), bytes(want)) if a != b)
     ok &= diff == 0
     print(f"({vx},{vy},{va:#x}): {term.op_counter:,} ops  "

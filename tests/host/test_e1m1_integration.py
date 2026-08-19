@@ -9,7 +9,7 @@ import pytest
 
 from doomfj import reference_model, texturecompiler
 from doomfj.build import build_doom, build_wall_renderer
-from doomfj.config import Config, FLAT_MAX_WORDS
+from doomfj.config import Config, FLAT_MAX_WORDS, RENDER_FLAT_MAX_WORDS
 from doomfj.texturecompiler import (
     downscale_canvas, composite_texture, texture_texels, compile_texture, compile_flat,
 )
@@ -22,7 +22,7 @@ SPAN_LO, SPAN_HI = 40_000_000, 62_000_000     # sanity band around the measured 
                                               # 9-18M band predated V4-HD full-res sprite buckets,
                                               # V5 stacked pieces/regions and SPR-NEAR's dual bank;
                                               # this hour-long gate had not run since). The hard
-                                              # ceiling stays the separate `span < 1<<26` assert;
+                                              # ceiling stays the separate span < RENDER_FLAT_MAX_WORDS
                                               # HI at 62M leaves real headroom warning-room below it.
 
 
@@ -123,7 +123,7 @@ def test_build_doom_subset_is_flat(tmp_path):
                     reason=f"{SPRITE_WAD} absent -- the shipped tier's V4 things need sprite lumps")
 def test_build_wall_renderer_e1m1_flat(tmp_path):
     """M12rr/M13c3 (build_doom wiring) — the SHIPPED runtime wall+floor/ceiling renderer assembles flat and
-    under the RAISED 2**26 flat limit (R0/R4). build_wall_renderer emits via the SHARED
+    under the RAISED flat limit `config.RENDER_FLAT_MAX_WORDS` (R0/R4). build_wall_renderer emits via the SHARED
     doomfj.wall_renderer.emit_wall_renderer — the SAME optimized renderer (M12oo trampoline + M12pp/qq
     xor_by-involution walk + the M13c3 plane_tramp visplane raster) the byte-exact golden test renders through
     (R6) — so this gates the production build.
@@ -134,15 +134,17 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
     below is the sanity band around the measured figure, not a target. ⚠ SLOW (~10 min): the V4 build is
     a ~42M-character program against a ~cubic assembler."""
     m = build_wall_renderer(E1M1, "E1M1", out_fjm=tmp_path / "renderer.fjm",
-                            generated_dir=tmp_path / "gen", flat_max_words=1 << 26)
+                            generated_dir=tmp_path / "gen",
+                            flat_max_words=RENDER_FLAT_MAX_WORDS)
     # G1/R2: this 30-minute run is the only place the shipped tier's span, .fjm size and assemble
     # time are measured. It used to assert them and print NOTHING, so a passing run left no number
     # for the perf ledger and the next session had to spend the 30 minutes again to learn one.
     print(f"\nR4 shipped-tier metrics: tier={m['tier']} span={m['span_words']:,} words "
-          f"limit={1 << 26:,} headroom={m['headroom']} fjm={m['fjm_bytes']:,} bytes "
+          f"limit={RENDER_FLAT_MAX_WORDS:,} headroom={m['headroom']} "
+          f"fjm={m['fjm_bytes']:,} bytes "
           f"assemble={m['assemble_seconds']}s", flush=True)
     assert m["storage_mode"] == "flat", m
-    assert m["span_words"] < (1 << 26)
+    assert m["span_words"] < RENDER_FLAT_MAX_WORDS
     assert m["headroom"] > 1.0
     # CR-2026-08 (IN-3, A0.1) — this pair is the ONLY automated guard that the shipped picture is the
     # one the walker shows and `deg_gate` certifies. It asserted WPX and four features while build.py

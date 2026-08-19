@@ -14,6 +14,25 @@ from pathlib import Path
 # Default flat-limit (span-words) — flipjump's 2**23 (64 MB at w=32), §1.2. The R-3 budget ceiling.
 FLAT_MAX_WORDS = 1 << 23
 
+# The RAISED flat limit the full E1M1 renderer runs under (DESIGN §1.2, RAM-only cost).
+#
+# ⚠ R6 SSOT, added 2026-08-18. This was the literal `1 << 26` copy-pasted into build.py, fastrun.py,
+# three gates, the host span test and seven fj tests — so "the limit" was twelve independent numbers
+# and raising it meant finding them all.
+#
+# ⚠ RAISED 2**26 -> 2**27 (owner decision, 2026-08-18). MEASURED: the M14 tier — the tier that ships
+# after B0 — is 68,213,458 words, 1.6% OVER 2**26. At 2**26 it silently ran in HYBRID storage, which
+# R4 forbids, and `_fjcore.Memory.freeze()` requires PURE FLAT — so the frozen-image fast reset path
+# (and with it B4.1's 357x restore) was unavailable to the shipped tier. Op counts are identical in
+# both modes (43,115,656 at the spawn viewpoint either way), so no earlier measurement moved.
+#
+# THIS IS A LIMIT, NOT AN ALLOCATION: flipjump allocates the actual span (68.2M words ≈ 546 MB), and
+# this only decides whether it may use flat storage. Raising it costs no memory by itself — it
+# raises the ceiling under which a build is allowed to stay flat.
+# ⚠ It is still a CEILING, and B3's nine-level table competes for the same headroom (handoff G3):
+# at 68.2M of 134.2M the shipped tier now has ~1.97x, not the ~1.02x it had against 2**26.
+RENDER_FLAT_MAX_WORDS = 1 << 27
+
 # M13-2S rung 3a — how many MARKING TWO-SIDED segs may attribute floor/ceiling surfaces in one frame
 # (see ReferenceModel.render_wall_frame's `plane_near` and wall_renderer's ts leaf). A hard budget, in
 # the spirit of vanilla DOOM's MAXVISPLANES/MAXDRAWSEGS: without one the cost is unbounded, because

@@ -31,6 +31,8 @@ from flipjump.fjm.fjm_reader import GarbageHandling
 from flipjump.interpreter.fjm_run import IOReadOnEOF, is_native_engine_active
 from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
 
+from doomfj.config import RENDER_FLAT_MAX_WORDS   # R6: ONE flat limit, not twelve literals
+
 try:                                          # the native engine is optional (a source install
     from flipjump.interpreter import _fjcore  # without the built C extension still works)
 except ImportError:                           # pragma: no cover
@@ -44,7 +46,8 @@ class FjmRunner:
     or cannot take this program — so callers never need to branch on it; check `.native` only to
     report which path is live."""
 
-    def __init__(self, fjm_path: Path, flat_max_words: int = 1 << 26) -> None:
+    def __init__(self, fjm_path: Path,
+                 flat_max_words: int = RENDER_FLAT_MAX_WORDS) -> None:
         self.fjm_path = Path(fjm_path)
         self.flat_max_words = flat_max_words
         self._mem = fjm_reader.Reader(self.fjm_path)

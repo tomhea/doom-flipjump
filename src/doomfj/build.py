@@ -197,7 +197,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     (R6 single source) — so every space optimization (M12oo pass-2 trampoline, M12pp/qq xor_by + xor-involution
     walk) ships here for free. Assembles against the renderer include set, then R0-gates: assert
     `storage_mode == flat` and `span < limit`. The renderer's fully-unrolled pass-2 + BSP walk push the span
-    past the 2**23 default, so pass a RAISED `flat_max_words` (2**26) per DESIGN §1.2 (RAM-only cost). The
+    past the 2**23 default, so pass a RAISED `flat_max_words` (`config.RENDER_FLAT_MAX_WORDS`, 2**27
+    since 2026-08-18 -- the M14 tier is 1.6% over 2**26) per DESIGN §1.2 (RAM-only cost). The
     viewpoint `(vx,vy,va)` is read from stdin at runtime; the gate run feeds an invalid byte so the input
     parser jumps to `bad:` and halts immediately (the span/storage_mode are load-time, so no full render is
     needed for the gate — the golden test does the byte-exact render).

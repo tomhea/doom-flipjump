@@ -152,7 +152,26 @@ read past the end (flipjump-dev skill) — align at the boundaries (e.g. 16.16 p
 Power-of-two dispatch-table padding inflates the span — lay out **hot-low + largest-alignment-first**
 (§3/#2) and sum padding here, don't discover it. **OPEN — D10** (concrete memory map). Default flat limit = 2²³ words
 (64 MB); raise via `--flat-max-words` / `FLIPJUMP_FLAT_MAX_WORDS` if needed (cost = RAM + ~0.1 s/GB fill,
-zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
+zero per-op cost). Assert `storage_mode == flat` in the harness.
+
+**⚠ THE RENDERER'S RAISED LIMIT IS `config.RENDER_FLAT_MAX_WORDS`, AND IT IS NOW 2²⁷ (2026-08-18).**
+It was 2²⁶, copy-pasted as the literal `1 << 26` into twelve places, so "the limit" was twelve
+independent numbers; it is one constant now (R6). **Why it was raised:** MEASURED — the **M14 tier**
+(`state_wire="bin"` + `player_sim` + `moving_things`, the tier that ships after B0) is
+**68,213,458 span-words, 1.6% OVER 2²⁶**. At 2²⁶ it silently ran in **hybrid** storage, which R4
+forbids, and `_fjcore.Memory.freeze()` requires **pure flat** — so the frozen-image fast reset path,
+and with it B4.1's measured **357× restore** (44.97 ms → 0.12 ms), was unavailable to the shipped
+tier. Op counts are identical in both modes (43,115,656 at the spawn viewpoint either way), so no
+earlier measurement moved. **A limit is not an allocation:** flipjump allocates the real span
+(~546 MB); this only decides whether flat storage is permitted, so raising it costs no memory by
+itself. **It is still a ceiling, and B3's nine-level table competes for the same headroom (G3):**
+the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where against 2²⁶ it had ~1.02×
+— i.e. it was *already over* and running hybrid, not comfortably under.
+
+| tier | span-words | vs 2²⁶ | vs 2²⁷ | storage_mode |
+|---|---|---|---|---|
+| static (`build_wall_renderer`, R4 gate) | in the 40–62M band, `< 2²⁶` asserted | under | under | flat |
+| **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** | Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |
 |---|---|---|---|---|

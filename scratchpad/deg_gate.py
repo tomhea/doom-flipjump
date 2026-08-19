@@ -10,7 +10,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 import flipjump as fj
-from doomfj.config import Config
+from doomfj.config import Config, RENDER_FLAT_MAX_WORDS
 from doomfj.fixedpoint import _signed
 from doomfj.harness import W
 from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
@@ -63,7 +63,7 @@ for vx, vy, va in VPS:
                                 things=True, sprite_wad=art, degrade=True)
     scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
     term = fj.run(out, io_device=scr, print_time=False, print_termination=False,
-                  flat_max_words=1 << 26)
+                  flat_max_words=RENDER_FLAT_MAX_WORDS)
     same = bytes(scr.pixel_indices) == bytes(want)
     ok &= same
     diff = sum(1 for a, b in zip(bytes(scr.pixel_indices), bytes(want)) if a != b)

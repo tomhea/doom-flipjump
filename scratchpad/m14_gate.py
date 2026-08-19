@@ -29,7 +29,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 import flipjump as fj
-from doomfj.config import Config
+from doomfj.config import Config, RENDER_FLAT_MAX_WORDS
 from doomfj.fixedpoint import _signed
 from doomfj.harness import W
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES, ReferenceModel, SimState,
@@ -191,7 +191,7 @@ def build():
 def run(fjm, feed):
     scr = StreamScreen(stdin=feed, n_things=len(RT) if MOVING else 0)
     term = fj.run(fjm, io_device=scr, print_time=False, print_termination=False,
-                  flat_max_words=1 << 26)
+                  flat_max_words=RENDER_FLAT_MAX_WORDS)
     return scr, term
 
 

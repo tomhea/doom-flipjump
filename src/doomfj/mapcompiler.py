@@ -113,7 +113,8 @@ def wedge_planes_bam(viewangle: int) -> tuple:
     return lo, (hi + 4) & 7
 
 
-def bbox_wedge_miss(m: int, box: tuple, vx: int, vy: int) -> bool:
+def bbox_wedge_miss(m: int, box: tuple, vx: int, vy: int,
+                    eyex16: int | None = None, eyey16: int | None = None) -> bool:
     """True when the whole box (top, bottom, left, right — the NODES lump order) lies OUTSIDE
     half-plane m, i.e. max over the box of the plane's signed test value is negative. The maximizing
     corner is a pure function of m: x = left for m<4 else right; y = top for m in {0,1,6,7} else
@@ -127,8 +128,34 @@ def bbox_wedge_miss(m: int, box: tuple, vx: int, vy: int) -> bool:
     top, bottom, left, right = box
     cx = left if m < 4 else right
     cy = top if m in (0, 1, 6, 7) else bottom
-    dx, dy = cx - vx, cy - vy
-    q = (dy, dy - dx, dx, dx + dy)[m & 3]
+    # ⚠ CR-2026-08 (PJ-1) — THE COMBINED TERMS ARE FLOORED AFTER COMBINING, NOT PER AXIS.
+    # This used to compute dy-dx and dx+dy from the already-floored vx/vy, i.e.
+    # floor(viewy)-floor(viewx). `proj.wedge_setup` builds weyx/wexy at full 16.16 width and its
+    # readers slice the high nibbles, i.e. floor(viewy-viewx). Those differ by 1 exactly when the
+    # fractions borrow (q=1) or carry (q=3) — a byte-exactness break from the moment M14 made the
+    # view position fractional, and invisible to every gate because they all sit on whole units.
+    # MEASURED, two-sided control: scratchpad/_pj1_probe.py.
+    #
+    # THIS mirror moved rather than the fj one, and the reason is VISUAL, not convenience. Only
+    # floor-after-combining is CONSERVATIVE: Q - Q_true = frac(E) ∈ [0,1) for all four q, so a cull
+    # (Q an integer with the culling sign) always implies the true point is really outside — it can
+    # fail to cull, never over-cull. Flooring per axis gives q=3 an error of fx+fy ∈ [0,2), so Q=1
+    # on the negated plane m=3 culls a box whose true Q is as low as -1 (genuinely INSIDE). The
+    # wedge is rounded out to 45° boundaries, and at a view angle that is an exact multiple of 45°
+    # — two of the four certified gate angles are — that rounding slack is ZERO. Dropping a whole
+    # subtree is the failure PJ-1 was filed for, so the form that cannot do it wins.
+    #
+    # eyex16/eyey16 are the SIGNED 16.16 view position. Omitted ⇒ the whole-map-unit case, where
+    # the two forms are identical by construction (that is why every existing golden still holds).
+    if eyex16 is None:
+        eyex16, eyey16 = vx << 16, vy << 16
+    assert eyex16 >> 16 == vx and eyey16 >> 16 == vy, (
+        f"bbox_wedge_miss: eye16 {(eyex16, eyey16)} disagrees with the floored eye {(vx, vy)} — "
+        "the caller floored one of them differently (python >> on a negative int floors, §1.1.4)")
+    q = (cy - vy,                                   # q=0: single term, floor is per axis anyway
+         (cy - cx) - ((eyey16 - eyex16) >> 16),     # q=1: floor(viewy - viewx)
+         cx - vx,                                   # q=2: single term
+         (cx + cy) - ((eyex16 + eyey16) >> 16))[m & 3]   # q=3: floor(viewx + viewy)
     if 2 <= m <= 5:
         q = -q
     return q < 0

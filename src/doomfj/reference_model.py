@@ -897,7 +897,8 @@ class ReferenceModel:
         return node & (NF_SUBSECTOR - 1)
 
     def bsp_render_order(self, cmap: CompiledMap, vx: int, vy: int, *,
-                         bbox_gate: dict | None = None, va: int | None = None) -> list:
+                         bbox_gate: dict | None = None, va: int | None = None,
+                         eye16: tuple | None = None) -> list:
         """R_RenderBSPNode: the front-to-back subsector visit order from viewpoint (vx, vy) [16.0 map
         coords]. At each node the viewer's side (`_point_side > 0` ⇒ back/left, else front/right, R6) is
         the NEAR child — descend it first, then the far child — so subsectors come out nearest-first (the
@@ -911,6 +912,10 @@ class ReferenceModel:
         it. The gate dict must come from mapcompiler.bbox_gate_boxes (the SSOT), or the two sides
         disagree on which marking segs spend PNEAR budget."""
         gA = gB = None
+        # CR-2026-08 (PJ-1): the wedge test needs the FRACTIONAL eye, because its combined terms are
+        # floored after combining (see bbox_wedge_miss). Defaulting to the floored eye reproduces the
+        # old behaviour exactly at a whole map unit, which is every pre-M14 viewpoint.
+        ex16, ey16 = eye16 if eye16 is not None else (vx << 16, vy << 16)
         if bbox_gate:
             gA, gB = wedge_planes_bam(va & 0xFFFFFFFF)
         order = []
@@ -922,8 +927,8 @@ class ReferenceModel:
             else:
                 if bbox_gate is not None:
                     box = bbox_gate.get(child)
-                    if box is not None and (bbox_wedge_miss(gA, box, vx, vy)
-                                            or bbox_wedge_miss(gB, box, vx, vy)):
+                    if box is not None and (bbox_wedge_miss(gA, box, vx, vy, ex16, ey16)
+                                            or bbox_wedge_miss(gB, box, vx, vy, ex16, ey16)):
                         continue
                 n = cmap.nodes[child]
                 back = _point_side(n.x, n.y, n.dx, n.dy, vx, vy) > 0
@@ -933,11 +938,16 @@ class ReferenceModel:
         return order
 
     def visible_segs(self, cmap: CompiledMap, vx: int, vy: int, *,
-                     bbox_gate: dict | None = None, va: int | None = None) -> list:
+                     bbox_gate: dict | None = None, va: int | None = None,
+                     eye16: tuple | None = None) -> list:
         """The seg indices (into `cmap.segs`) of every visible subsector, flattened in BSP front-to-back
-        order — the wall draw order. Each subsector contributes its `firstseg .. firstseg+numsegs`."""
+        order — the wall draw order. Each subsector contributes its `firstseg .. firstseg+numsegs`.
+
+        `eye16` (CR-2026-08 PJ-1) is the SIGNED 16.16 view position, needed only by the `bbox_gate`
+        wedge test, whose combined terms must be floored AFTER combining to mirror
+        `proj.wedge_setup`. Omitted ⇒ the whole-map-unit case, identical by construction."""
         segs = []
-        for ss in self.bsp_render_order(cmap, vx, vy, bbox_gate=bbox_gate, va=va):
+        for ss in self.bsp_render_order(cmap, vx, vy, bbox_gate=bbox_gate, va=va, eye16=eye16):
             s = cmap.subsectors[ss]
             segs.extend(range(s.firstseg, s.firstseg + s.numsegs))
         return segs
@@ -1837,7 +1847,11 @@ class ReferenceModel:
         self._thing_stats = {"ss_total": len(ss_first), "ss_arrived": 0, "th_arrived": 0,
                              "th_claim_stopped": 0}
         for seg_i in self.visible_segs(scene.cmap, px, py, bbox_gate=_gate,
-                                       va=viewangle & 0xFFFFFFFF):  # front-to-back order
+                                       va=viewangle & 0xFFFFFFFF,
+                                       # CR-2026-08 (PJ-1): the wedge test floors AFTER combining,
+                                       # so it needs the fraction px/py threw away.
+                                       eye16=(_signed(state.x, 32), _signed(state.y, 32))
+                                       ):  # front-to-back order
             if things and seg_i in ss_first:
                 self._thing_stats["ss_arrived"] += 1
                 for t in things_by_ss[ss_first[seg_i]]:

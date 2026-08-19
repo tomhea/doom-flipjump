@@ -32,6 +32,10 @@ _RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_re
 # ... plus these two for raster_mode="lines" (the shipping tier): the packed-byte ceiling/floor BAND
 # lists pass-1 builds, and the 0x0B column-stream present that replaces the framebuffer raster.
 _LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]
+# B0 (2026-08-18): the player sim. ⚠ LAST in the list -- fj top-level labels are global, so the
+# ordered file list is equivalent to its concatenation and the order is the contract (R54). This is
+# the same position m14_gate.py and scripts/walk_e1m1.py put it in.
+_SIM_INCLUDES = ["sim.fj"]
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 
@@ -190,7 +194,9 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                         flat_max_words=None, floor_mode="FT1", wall_mode="W1R",
                         raster_mode="lines", plane_near=True, wall_noise=True, sky=True,
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
-                        stack_steps=True, bbox_cull=True, deg=True) -> dict:
+                        stack_steps=True, bbox_cull=True, deg=True,
+                        state_wire="bin", player_sim=True, collide=True,
+                        moving_things=True) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
@@ -207,6 +213,14 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     raster with W1R walls + FT1 floors + rung-3a `plane_near`, all four VISUAL FEATURES
     (V1 `wall_noise` grain, V2 `sky`, V3 `steps` faces, V4 `things` sprites) ON, and V5 `stack_steps`
     + the `bbox_cull` wedge subtree cull + the `deg` degradation package ON.
+
+    ⚠ B0 (2026-08-18) — AND THE SHIPPED ARTIFACT NOW RUNS THE SIM. `state_wire="bin"`,
+    `player_sim`, `collide` and `moving_things` default ON here because `scripts/walk_e1m1.py`
+    turns them on, and A0.1's whole point is that the artifact shipped, the artifact certified and
+    the artifact a human looks at are ONE program. Shipping a renderer while the walker ships a
+    game would have re-created the divergence A0.1 just closed. The binary reads a BINARY wire
+    (a decimal feed halts it after ~200 ops) and it is the M14 tier, ~68.2M span-words — which is
+    why `config.RENDER_FLAT_MAX_WORDS` had to go to 2**27 (DESIGN §1.2).
 
     ⚠ CR-2026-08 (IN-3, A0.1) — THIS SENTENCE USED TO BE FALSE, which is why it is now spelled out
     flag by flag. `stack_steps`, `bbox_cull` and `deg` were never passed here at all and defaulted
@@ -236,13 +250,15 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                                wall_mode=wall_mode, raster_mode=raster_mode, plane_near=plane_near,
                                wall_noise=wall_noise, sky=sky, steps=steps, things=things,
                                sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
-                               deg=deg, return_parts=True)
+                               deg=deg, state_wire=state_wire, player_sim=player_sim,
+                               collide=collide, moving_things=moving_things, return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
     # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a
     # file with the ~50-line program. ⚠ Order is load-bearing -- see write_program_files.
     prog = write_program_files(parts, gen, mapname)
-    includes = _RENDERER_INCLUDES + (_LINES_INCLUDES if raster_mode == "lines" else [])
+    includes = (_RENDERER_INCLUDES + (_LINES_INCLUDES if raster_mode == "lines" else [])
+                + (_SIM_INCLUDES if player_sim else []))   # B0: sim.fj LAST (R54)
     paths = [consts] + [_SRC_FJ / f for f in includes] + prog
 
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
@@ -263,7 +279,12 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         # consumer of metrics.json AND to the R4 gate below. A flag that shapes the picture is now
         # reported; add new ones here in the same commit that adds them to the signature.
         "features": {"wall_noise": wall_noise, "sky": sky, "steps": steps, "things": things,
-                     "stack_steps": stack_steps, "bbox_cull": bbox_cull, "deg": deg},
+                     "stack_steps": stack_steps, "bbox_cull": bbox_cull, "deg": deg,
+                     # B0: the sim half. Reported for the same reason as the rest -- a flag that
+                     # shapes the artifact must be visible in metrics.json, or the next divergence
+                     # is invisible again.
+                     "player_sim": player_sim, "collide": collide,
+                     "moving_things": moving_things, "state_wire": state_wire},
     }
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
     assert span < limit, f"R4: span {span} >= flat limit {limit}"

@@ -17,7 +17,12 @@ from doomfj.wad import WadFile
 
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")
 SPRITE_WAD = Path("assets/freedoom1.wad")     # V4 art: the cut-down fixture has no sprite lumps
-SPAN_LO, SPAN_HI = 40_000_000, 62_000_000     # sanity band around the measured default-build span:
+# ⚠ B0 (2026-08-18): the default build now ships the SIM, so this gate builds the M14 tier, whose
+# span is ~68.2M words on the full fixture -- ABOVE the old 40-62M band, which was calibrated on the
+# static tier. The band is widened to bracket it. It is PROVISIONAL until this 30-minute gate runs
+# and prints the real figure (the metrics print below exists for exactly that); if the printed span
+# lands outside, move the band to the measurement, do not widen it again to make a run pass.
+SPAN_LO, SPAN_HI = 40_000_000, 90_000_000     # sanity band around the measured default-build span:
                                               # 51.21M words (CR-2026-08 recalibration -- the old
                                               # 9-18M band predated V4-HD full-res sprite buckets,
                                               # V5 stacked pieces/regions and SPR-NEAR's dual bank;
@@ -150,7 +155,10 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
     # one the walker shows and `deg_gate` certifies. It asserted WPX and four features while build.py
     # had moved to W1R + stack_steps/bbox_cull/deg; a fan-out miss the 70-min runtime hid.
     assert m["features"] == {"wall_noise": True, "sky": True, "steps": True, "things": True,
-                             "stack_steps": True, "bbox_cull": True, "deg": True}, m
+                             "stack_steps": True, "bbox_cull": True, "deg": True,
+                             # B0: the shipped artifact runs the sim, same as the walker
+                             "player_sim": True, "collide": True, "moving_things": True,
+                             "state_wire": "bin"}, m
     assert m["tier"] == "lines/W1R/FT1+plane_near", m
     assert SPAN_LO < m["span_words"] < SPAN_HI, m
 

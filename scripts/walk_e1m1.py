@@ -1,10 +1,20 @@
 """walk_e1m1 -- the closest thing to PLAYING the game today: a pygame window you walk around in,
 where EVERY FRAME IS RENDERED BY THE REAL FLIPJUMP PROGRAM (the shipping raster_mode="lines"
-renderer, assembled once at startup). There is no fj-side input/simulation yet (that's M14) --
-this host loop feeds the viewpoint to the .fjm via stdin and re-runs it per move, so movement,
-collision and turning are host-side stand-ins while the RENDERING is 100% the real thing.
+renderer, assembled once at startup).
 
-Controls:  W/S or Up/Down = forward/back    A/D = strafe    Left/Right = turn
+⚠ B0 (2026-08-18) -- THE SIM NOW RUNS IN FLIPJUMP. This docstring used to say "there is no fj-side
+input/simulation yet (that's M14)", and that was true for months AFTER M14 and M14.5 shipped: both
+were built, gated byte-exact and completely unreachable from anything a human runs, because
+`sim.fj` was in no entry point's source list. The host now sends a KEY BITMASK and reads the
+player's new position back OUT of the frame; it does not move, turn or collide the player at all.
+Pass `--no-sim` for the old host-driven path (kept only as an A/B, not as a fallback).
+
+⚠ NO STRAFE WITH THE SIM. `sim.fj`'s key set is forward/back/turn_left/turn_right -- there is no
+strafe in the mirror, so A/D turn instead. Adding strafe is a SIM FEATURE (both mirrors, gated),
+not wiring, and doing it host-side would put simulation back in the host, which is the one thing
+B0 exists to remove.
+
+Controls:  W/S or Up/Down = forward/back    A/D = turn      Left/Right = turn
            Q or Esc = quit                  P = save a screenshot PNG next to this script
 
 Frame rate: the fj program runs on the NATIVE (C) engine at ~220M ops/s, and `doomfj.fastrun`
@@ -28,16 +38,24 @@ sys.path.insert(0, str(ROOT / "src"))
 import flipjump as fj
 from doomfj.config import Config
 from doomfj.fastrun import FjmRunner
+from doomfj.mapcompiler import bake_bsp
+from doomfj.things import baked_thing_mask, vanishable_slots
+from doomfj.wireformat import (encode_bindings, encode_feed, encode_things,
+                               encode_visibility)
 from doomfj.fixedpoint import _signed
 from doomfj.harness import W
-from doomfj.reference_model import spawn_state
+from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,
+                                    ReferenceModel, spawn_state)
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer
 from tests.fj.stream_screen import StreamScreen
 
-SRC = [ROOT / "src/fj" / f for f in
-       ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
-        "plane_bands.fj", "stream_render.fj")]
+_SRC_NAMES = ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj",
+              "plane_render.fj", "plane_bands.fj", "stream_render.fj")
+# B0: `sim.fj` LAST, exactly as m14_gate.py orders it -- fj top-level labels are global, so the
+# ordered file list is equivalent to its concatenation and the order is load-bearing (R54).
+SRC = [ROOT / "src/fj" / f for f in _SRC_NAMES]
+SRC_SIM = [ROOT / "src/fj" / f for f in _SRC_NAMES + ("sim.fj",)]
 ANG_STEP = 0x08000000          # 11.25 degrees per turn
 MOVE_STEP = 24                 # map units per step
 SCALE = 4                      # window upscale
@@ -96,6 +114,10 @@ def main():
                     help="wad to take SPRITE art from. The cut-down test fixture has no sprite"
                          " lumps at all, so things need a full wad here; if it is missing, V4"
                          " turns itself off with a warning rather than failing to build.")
+    ap.add_argument("--no-sim", action="store_true",
+                    help="B0 A/B ONLY: drive movement from the HOST again (no sim.fj, decimal "
+                         "wire). The default runs the player sim, collision and the runtime thing "
+                         "table INSIDE the fj program and reads the new position out of the frame.")
     ap.add_argument("--frames", type=int, default=0, metavar="N",
                     help="render N frames HEADLESSLY (no window) and report timings, then exit"
                          " -- use this to check the fj side independently of pygame")
@@ -138,6 +160,14 @@ def main():
                          ("steps", feats and not args.no_steps),
                          ("things", want_things)) if f]
 
+    # B0: the sim is the DEFAULT path now. It needs the runtime thing table (moving_things), so
+    # it also needs things; --no-things therefore implies --no-sim rather than silently building a
+    # sim binary whose wire carries a thing block the program never reads.
+    sim = not args.no_sim and want_things
+    if not args.no_sim and not want_things:
+        print("  --no-things forces --no-sim (the sim path carries a runtime thing block)",
+              flush=True)
+
     # The fjm CACHE (same shape as bench.py's): the emit is ~7 and the assemble ~16 of the ~23
     # build minutes, and BOTH are a pure function of (sources, flags, wad bytes) -- so a hash of
     # exactly those names the binary, and a second launch of the same config opens in seconds
@@ -155,9 +185,12 @@ def main():
                      # memory_width) -- hashing an importer does NOT capture its imports
                      "fixedpoint.py", "harness.py")]:
         key.update(p.read_bytes())
+    # ⚠ B0: `sim` is IN THE KEY. It changes the binary AND the wire format, so a cached
+    # no-sim binary served to the sim path would be fed a wire it cannot parse and would halt
+    # after ~200 ops -- the exact failure dirty_census documents for the decimal feed.
     key.update(repr((args.wall_mode, args.floor_mode, args.two_sided, args.no_plane_near,
                      args.no_grain, args.no_sky, args.no_steps, args.no_stack, want_things,
-                     args.no_deg, args.map)).encode())
+                     args.no_deg, args.map, sim)).encode())
     key.update((ROOT / args.wad).read_bytes())
     if aw_path is not None:
         key.update(aw_path.read_bytes())
@@ -192,13 +225,19 @@ def main():
                                                    and not args.no_stack),
                                       # 25M-CAP + OPT-A: certified median 16.51M / mean 17.34M /
                                       # worst 41.9M, byte-exact (b_8db722bbd480cd52)
-                                      deg=feats and not args.no_deg)
+                                      deg=feats and not args.no_deg,
+                                      # B0: the sim, the collision and the runtime thing table --
+                                      # built and gated since M14/M14.5, wired in here for the
+                                      # first time. `collide=True` is what makes walls solid
+                                      # without the host testing a single linedef.
+                                      **(dict(state_wire="bin", player_sim=True, collide=True,
+                                              moving_things=True) if sim else {}))
         print(f"emitted {len(main_txt):,} chars in {time.perf_counter() - t0:.0f}s", flush=True)
         tmp = Path(tempfile.mkdtemp())
         consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
         (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
-        fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], (tmp / "m.fj").resolve()],
-                    fjm, memory_width=W, print_time=False)
+        fj.assemble([consts.resolve(), *[p.resolve() for p in (SRC_SIM if sim else SRC)],
+                     (tmp / "m.fj").resolve()], fjm, memory_width=W, print_time=False)
         print(f"built in {time.perf_counter() - t0:.0f}s (cached as {fjm.name})", flush=True)
     print("loading the program", flush=True)
     runner = FjmRunner(fjm)          # parse + memory-image prep ONCE, not once per frame
@@ -210,16 +249,67 @@ def main():
     px = _signed(sp.x, 32) >> 16
     py = _signed(sp.y, 32) >> 16
     ang = sp.angle
+    # B0 -- the state the PROGRAM owns. With the sim on, the host holds the player's 16.16
+    # position only to hand it back next tic; it never changes it. `st` is replaced wholesale by
+    # what the frame echoes out, which is the whole point of B0.
+    st = (_signed(sp.x, 32), _signed(sp.y, 32), sp.angle)
+    THINGS, NTH, binds = b"", 0, None
+    if sim:
+        # the runtime thing block, built exactly as m14_gate/m14_sweep build it -- same SSOT
+        # (baked_thing_mask / vanishable_slots), so the walker cannot drift from the gates.
+        _rm = ReferenceModel(cfg)
+        _cmap = bake_bsp(mw, args.map)
+        _drawable = [th for th in mw.things(args.map)
+                     if _rm.sprite_art(spr, th.type, {}) is not None]
+        _baked = baked_thing_mask(_rm, _cmap, _drawable, MONSTER_TYPES)
+        _nvis = len(vanishable_slots(_drawable, _baked, VANISHABLE_TYPES))
+        _rt = [th for th, b in zip(_drawable, _baked) if not b]
+        NTH = len(_rt)
+        _POS = encode_things([(th.x << 16, th.y << 16) for th in _rt])
+        # nothing moves things yet (that is C4), so the bindings are the spawn ones and stay warm
+        binds = [_rm.point_in_subsector(_cmap, th.x, th.y) for th in _rt]
+        _VIS = encode_visibility([1] * _nvis)
+        THINGS = (_POS, _VIS)
+        print(f"  sim ON: {len(_drawable)} drawable = {sum(_baked)} baked + {NTH} runtime, "
+              f"{_nvis} visibility flags", flush=True)
+
+    def wire(keys):
+        """The frame's stdin. ⚠ BINARY when the sim is on -- a decimal feed halts a state_wire=bin
+        program after ~200 ops rather than failing loudly."""
+        if not sim:
+            nl = chr(10)          # the three-decimal wire, one value per line
+            return (str(px) + nl + str(py) + nl + str(ang) + nl).encode()
+        return encode_feed(st[0], st[1], st[2], keys) + THINGS[0] + encode_bindings(binds) + THINGS[1]
+
+    def render_headless(keys):
+        """`render()` without the window -- same wire, same state adoption, no pygame."""
+        nonlocal st, px, py, ang, binds
+        screen = StreamScreen(stdin=wire(keys), n_things=NTH)
+        ops = runner.run(screen)
+        if sim:
+            st = screen.state
+            px, py = st[0] >> 16, st[1] >> 16
+            ang = st[2]
+            if screen.bindings:
+                binds = list(screen.bindings)
+        return ops
 
     if args.frames:                      # headless: fj only, no pygame, no window
+        # B0: with the sim on this is a real headless PLAY loop -- turn_left every tic, and
+        # the position/angle that come back are the PROGRAM's. It is also the cheapest
+        # end-to-end check that the wire, the sim and the state echo all work (R2 evidence).
         for i in range(args.frames):
             t = time.perf_counter()
-            screen = StreamScreen(stdin=f"{px}\n{py}\n{ang}\n".encode())
-            ops = runner.run(screen)
+            # turn for the first half, then walk: a turn-only script would prove the sim
+            # runs but never that MOVEMENT or COLLISION do, which is the half B0 wires in.
+            ops = render_headless((0b0100 if i < args.frames // 2 else 0b0001) if sim else 0)
+            if not sim:
+                ang = (ang + ANG_STEP) & 0xFFFFFFFF
             dt = time.perf_counter() - t
-            print(f"  frame {i + 1}: {ops:,} fj ops in {dt * 1000:.0f}ms ({1 / dt:.1f} fps)",
-                  flush=True)
-            ang = (ang + ANG_STEP) & 0xFFFFFFFF
+            pos = (f"  -> ({st[0] / 65536:.3f},{st[1] / 65536:.3f}) ang={st[2]:#010x}"
+                   if sim else "")
+            print(f"  frame {i + 1}: {ops:,} fj ops in {dt * 1000:.0f}ms "
+                  f"({1 / dt:.1f} fps){pos}", flush=True)
         return
 
     import pygame
@@ -241,10 +331,21 @@ def main():
     # 16,000 per-pixel surf.set_at calls (which cost about as much as the fj run itself now)
     pal3 = [bytes(pal[i]) for i in range(256)]
 
-    def render():
+    def render(keys=0):
+        """One TIC. ⚠ B0: with the sim on this both renders AND advances the world -- the
+        program turns, moves and collides the player, then echoes the new state, which we
+        simply adopt. The host does not compute a position. `nonlocal` is doing real work
+        here: `st` is the program's output, not the host's variable."""
+        nonlocal st, px, py, ang, binds
         t = time.perf_counter()
-        screen = StreamScreen(stdin=f"{px}\n{py}\n{ang}\n".encode())
+        screen = StreamScreen(stdin=wire(keys), n_things=NTH)
         ops = runner.run(screen)
+        if sim:
+            st = screen.state                   # <- the new position, FROM THE FRAME
+            px, py = st[0] >> 16, st[1] >> 16   # display only; never fed back as truth
+            ang = st[2]
+            if screen.bindings:
+                binds = list(screen.bindings)   # the relay, exactly as m14_gate does it
         frame = pygame.image.frombuffer(b"".join(map(pal3.__getitem__, screen.pixel_indices)),
                                         (cfg.VIEW_W, cfg.VIEW_H), "RGB")
         # .convert(win): frombuffer hands back a 24-bit surface, and scaling INTO the 32-bit
@@ -262,42 +363,77 @@ def main():
     print(f"first frame: {ops:,} fj ops in {dt * 1000:.0f}ms ({1 / dt:.1f} fps)"
           f" -- W/S move, A/D strafe, arrows turn, Q quits")
     running = True
-    while running:
-        moved = False
-        # the last good viewpoint, snapshotted BEFORE the handlers apply this tick's move --
-        # snapshotting after them would 'restore' the exact position that just failed
-        ppx, ppy, pang = px, py, ang
-        for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
-                running = False
-            elif ev.type == pygame.KEYDOWN:
-                k = ev.key
-                fx = math.cos(ang / 2**32 * 2 * math.pi)
-                fy = math.sin(ang / 2**32 * 2 * math.pi)
-                if k in (pygame.K_q, pygame.K_ESCAPE):
+    if sim:
+        # ── B0: THE HOST DOES NO SIMULATION. ────────────────────────────────────────────────
+        # Every key becomes a BIT in the wire's key byte and nothing else. There is no host-side
+        # position update, no host-side turn and no host-side collision left in this loop -- the
+        # program moves the player, walks him into walls and hands back where he ended up.
+        # Held keys, not KEYDOWN events: a tic is what the sim consumes, so sampling the keyboard
+        # state each pass gives continuous movement while a key is down, which is what a game does.
+        # ⚠ NO STRAFE: sim.fj has forward/back/turn_left/turn_right only, so A/D turn.
+        F, B, L, R = 0b0001, 0b0010, 0b0100, 0b1000
+        while running:
+            for ev in pygame.event.get():
+                if ev.type == pygame.QUIT:
                     running = False
-                elif k in (pygame.K_w, pygame.K_UP):
-                    px += round(fx * MOVE_STEP); py += round(fy * MOVE_STEP); moved = True
-                elif k in (pygame.K_s, pygame.K_DOWN):
-                    px -= round(fx * MOVE_STEP); py -= round(fy * MOVE_STEP); moved = True
-                elif k == pygame.K_a:
-                    px -= round(fy * MOVE_STEP); py += round(fx * MOVE_STEP); moved = True
-                elif k == pygame.K_d:
-                    px += round(fy * MOVE_STEP); py -= round(fx * MOVE_STEP); moved = True
-                elif k == pygame.K_LEFT:
-                    ang = (ang + ANG_STEP) & 0xFFFFFFFF; moved = True
-                elif k == pygame.K_RIGHT:
-                    ang = (ang - ANG_STEP) & 0xFFFFFFFF; moved = True
-                elif k == pygame.K_p:
+                elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_p:
                     pygame.image.save(win, str(ROOT / "scripts" / "walk_screenshot.png"))
                     print("screenshot saved to scripts/walk_screenshot.png")
-        if moved and running:
-            try:
-                render()
-            except Exception as e:                       # a viewpoint outside the map can crash the
-                print(f"render failed at ({px},{py}): {e}")   # renderer -- step back and carry on
-                px, py, ang = ppx, ppy, pang
-        pygame.time.wait(20)
+            kp = pygame.key.get_pressed()
+            if kp[pygame.K_q] or kp[pygame.K_ESCAPE]:
+                running = False
+                continue
+            keys = 0
+            if kp[pygame.K_w] or kp[pygame.K_UP]:
+                keys |= F
+            if kp[pygame.K_s] or kp[pygame.K_DOWN]:
+                keys |= B
+            if kp[pygame.K_LEFT] or kp[pygame.K_a]:
+                keys |= L
+            if kp[pygame.K_RIGHT] or kp[pygame.K_d]:
+                keys |= R
+            if keys:
+                render(keys)          # one tic: the program simulates AND draws
+            else:
+                pygame.time.wait(20)
+    else:
+        import math          # the legacy HOST-SIDE path (--no-sim), kept only as an A/B
+        while running:
+            moved = False
+            # the last good viewpoint, snapshotted BEFORE the handlers apply this tick's move --
+            # snapshotting after them would 'restore' the exact position that just failed
+            ppx, ppy, pang = px, py, ang
+            for ev in pygame.event.get():
+                if ev.type == pygame.QUIT:
+                    running = False
+                elif ev.type == pygame.KEYDOWN:
+                    k = ev.key
+                    fx = math.cos(ang / 2**32 * 2 * math.pi)
+                    fy = math.sin(ang / 2**32 * 2 * math.pi)
+                    if k in (pygame.K_q, pygame.K_ESCAPE):
+                        running = False
+                    elif k in (pygame.K_w, pygame.K_UP):
+                        px += round(fx * MOVE_STEP); py += round(fy * MOVE_STEP); moved = True
+                    elif k in (pygame.K_s, pygame.K_DOWN):
+                        px -= round(fx * MOVE_STEP); py -= round(fy * MOVE_STEP); moved = True
+                    elif k == pygame.K_a:
+                        px -= round(fy * MOVE_STEP); py += round(fx * MOVE_STEP); moved = True
+                    elif k == pygame.K_d:
+                        px += round(fy * MOVE_STEP); py -= round(fx * MOVE_STEP); moved = True
+                    elif k == pygame.K_LEFT:
+                        ang = (ang + ANG_STEP) & 0xFFFFFFFF; moved = True
+                    elif k == pygame.K_RIGHT:
+                        ang = (ang - ANG_STEP) & 0xFFFFFFFF; moved = True
+                    elif k == pygame.K_p:
+                        pygame.image.save(win, str(ROOT / "scripts" / "walk_screenshot.png"))
+                        print("screenshot saved to scripts/walk_screenshot.png")
+            if moved and running:
+                try:
+                    render()
+                except Exception as e:                       # a viewpoint outside the map can crash the
+                    print(f"render failed at ({px},{py}): {e}")   # renderer -- step back and carry on
+                    px, py, ang = ppx, ppy, pang
+            pygame.time.wait(20)
     pygame.quit()
 
 

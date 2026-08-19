@@ -280,6 +280,43 @@ them whenever a build is occupying the machine.
 
 ### B0 — WIRE WHAT ALREADY EXISTS. This is the biggest single win in the document.
 
+> ### ✅ B0 DONE 2026-08-18 — THE SIM RUNS IN FLIPJUMP.
+>
+> Wired at BOTH entry points, because doing only the walker would have re-created the divergence
+> A0.1 closed: `scripts/walk_e1m1.py` AND `src/doomfj/build.py` now emit `state_wire="bin"`,
+> `player_sim=True`, `collide=True`, `moving_things=True`, with `sim.fj` LAST in the source list
+> (order is the contract, R54). The walker sends a KEY BITMASK and adopts the state the frame
+> echoes back; the host movement code is gone from that path (`--no-sim` keeps it as an A/B only).
+>
+> MEASURED, headless play loop (`--frames 6`, turn ×3 then forward ×3, e1m1_lite):
+>
+> | frame | keys | ops | ms | state ECHOED BY THE PROGRAM |
+> |---|---|---|---|---|
+> | 2 | turn_left | 23,569,604 | 200 | (−416.000, 256.000) ang=0x05000000 |
+> | 3 | turn_left | 23,968,752 | 142 | (−416.000, 256.000) ang=0x07800000 |
+> | 4 | forward | 27,206,780 | 143 | (−366.845, 265.152) ang=0x07800000 |
+> | 5 | forward | 30,842,471 | 155 | (−317.689, 274.304) ang=0x07800000 |
+> | 6 | forward | 30,269,968 | 148 | (−268.534, 283.457) ang=0x07800000 |
+>
+> Turning turns and does not move; forward walks. The step is (+49.155, +9.152) = **magnitude 50.0
+> at 10.55°**, exactly `FORWARD_MOVE` along `ang=0x07800000` — checked independently of the
+> program. The player stands on FRACTIONAL coordinates, the regime PJ-1/PJ-2 live in.
+>
+> **FIRST HONEST FPS FOR THE PLAYABLE PATH: ~6.5–7.0** (142–155 ms/frame at 23–30M ops, lite wad;
+> frame 1's 2,096 ms is cold start). Measured end-to-end, not derived.
+>
+> ⚠ **NO STRAFE.** `sim.fj`'s key set is forward/back/turn_left/turn_right, so A/D turn. Keeping
+> the walker's strafe would put movement back in the host — the one thing B0 removes. Strafe is a
+> SIM feature (both mirrors, gated), not wiring.
+> ⚠ **The shipped artifact is now the M14 tier (~68.2M span-words)**, which is why
+> `RENDER_FLAT_MAX_WORDS` went to 2**27. The R4 gate's span band is PROVISIONAL until that gate
+> prints the real figure.
+> ⚠ **CERTIFICATION IS NOW SPLIT.** `deg_gate` certifies the renderer (static tier); `m14_gate`
+> certifies the tier that SHIPS. "One picture" now means the shipped picture is m14_gate's —
+> deg_gate remains the cheaper renderer-only proof, not the shipped-artifact proof.
+> ⚠ STILL OPEN for B5: doors (B2), menu/levels (B3), and G7's concrete "playable" acceptance test.
+
+
 **M14 and M14.5 are built, gated and byte-exact — and unreachable from anything a human runs.**
 `sim.fj`, `player_sim`, `collide`, `moving_things` and `state_wire` appear ONLY in `scratchpad/`
 gates and `tests/`. `scripts/walk_e1m1.py`'s `SRC` list does not include `sim.fj`, and its docstring

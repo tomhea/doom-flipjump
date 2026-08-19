@@ -24,6 +24,7 @@ shares the sine table at +TRIG_N/4 (the M6 idiom). Player position is the only g
 from __future__ import annotations
 
 import hashlib
+import dataclasses
 from dataclasses import dataclass, replace
 
 from doomfj.config import Config, PNEAR_SEG_BUDGET
@@ -360,16 +361,48 @@ class Scene:
     """The static data a frame is rendered against — the SAME inputs the program is built from (R6).
     `map_wad` carries geometry (VERTEXES/LINEDEFS/SIDEDEFS/SECTORS + the THINGS spawn + the baked
     SEGS/SSECTORS/NODES); `asset_wad` carries graphics (PLAYPAL/COLORMAP). `cmap` is the BSP baked
-    once from those lumps by mapcompiler (H3)."""
+    once from those lumps by mapcompiler (H3).
+
+    B2/DOORS: `sector_heights` is the ONE place a sector stops being static. It maps
+    `sector index -> (floor_h, ceil_h)` and OVERRIDES the wad's values for that sector only.
+    Everything else about the sector (textures, light, tag) is unchanged, and every sector not in
+    the dict is the wad's, byte-for-byte — so a scene with no doors moving is bit-identical to one
+    built before doors existed, which is what keeps every existing golden valid."""
     map_wad: WadFile
     asset_wad: WadFile
     mapname: str
     cmap: CompiledMap
+    sector_heights: dict | None = None
 
 
-def build_scene(map_wad: WadFile, asset_wad: WadFile, mapname: str) -> Scene:
-    """Bake the level's BSP once (from the WAD's NODES/SSECTORS/SEGS) and bundle the render inputs."""
-    return Scene(map_wad, asset_wad, mapname, bake_bsp(map_wad, mapname))
+def scene_sectors(scene: Scene):
+    """The level's SECTORS with any door override applied — the SSOT every reader must go through.
+
+    ⚠ B2: there were FOUR independent `scene.map_wad.sectors(...)` reads in this file. A door that
+    moved for three of them and not the fourth is precisely the class of bug this repo keeps paying
+    for (M14-c, PJ-1, PJ-2: one mirror updated, its twin not). Route new readers through here.
+    ⚠ With no override this returns the wad's own list UNCHANGED -- we add no copy and no
+    allocation, so the door-free path is exactly what it was. (It is not the identical OBJECT
+    across calls: `WadFile.sectors()` builds a fresh list each time. Checked, because the first
+    version of this comment claimed identity and was wrong.)"""
+    secs = scene.map_wad.sectors(scene.mapname)
+    if not scene.sector_heights:
+        return secs
+    out = list(secs)
+    for idx, fc in scene.sector_heights.items():
+        floor_h, ceil_h = fc
+        out[idx] = dataclasses.replace(out[idx], floor_h=floor_h, ceil_h=ceil_h)
+    return out
+
+
+def build_scene(map_wad: WadFile, asset_wad: WadFile, mapname: str,
+                sector_heights: dict | None = None) -> Scene:
+    """Bake the level's BSP once (from the WAD's NODES/SSECTORS/SEGS) and bundle the render inputs.
+
+    ⚠ B2: `sector_heights` changes only SECTOR HEIGHTS. The BSP itself is baked from geometry that
+    doors do not move (vertices, linedefs, the node tree), so a door opening does NOT invalidate
+    `cmap` -- which is what makes doors affordable at all."""
+    return Scene(map_wad, asset_wad, mapname, bake_bsp(map_wad, mapname), sector_heights)
 
 
 def spawn_state(wad: WadFile, mapname: str, *, player: int = 1) -> SimState:
@@ -731,7 +764,7 @@ class ReferenceModel:
         cmap = scene.cmap
         lds = scene.map_wad.linedefs(scene.mapname)
         sds = scene.map_wad.sidedefs(scene.mapname)
-        secs = scene.map_wad.sectors(scene.mapname)
+        secs = scene_sectors(scene)
         box = (y + radius, y - radius, x - radius, x + radius)   # top, bottom, left, right
         # P_CheckPosition seeds the opening from the SUBSECTOR the position lands in, before any
         # line is looked at. Without that seed a position with no line near it is unconstrained,
@@ -965,7 +998,7 @@ class ReferenceModel:
         seg = scene.cmap.segs[scene.cmap.subsectors[subsector].firstseg]
         return self._seg_sector(scene.map_wad.linedefs(scene.mapname),
                                 scene.map_wad.sidedefs(scene.mapname),
-                                scene.map_wad.sectors(scene.mapname), seg).light
+                                scene_sectors(scene), seg).light
 
     # ── render ──
     def render_frame(self, state: SimState, scene: Scene) -> bytes:
@@ -1721,7 +1754,7 @@ class ReferenceModel:
         flatcache: dict = {}
         lds = scene.map_wad.linedefs(scene.mapname)
         sds = scene.map_wad.sidedefs(scene.mapname)
-        secs = scene.map_wad.sectors(scene.mapname)
+        secs = scene_sectors(scene)
         verts = scene.cmap.vertexes
         texcache: dict = {}
 
@@ -2368,7 +2401,7 @@ class ReferenceModel:
         colormap = scene.asset_wad.colormap()
         lds = scene.map_wad.linedefs(scene.mapname)
         sds = scene.map_wad.sidedefs(scene.mapname)
-        secs = scene.map_wad.sectors(scene.mapname)
+        secs = scene_sectors(scene)
         verts = scene.cmap.vertexes
         texcache, flatcache = {}, {}
         viewx, viewy, viewangle = state.x, state.y, state.angle

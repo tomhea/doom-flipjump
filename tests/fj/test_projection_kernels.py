@@ -322,18 +322,19 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
         v2x, v2y = cmap.vertexes[seg.v2]
         fa, fb, fc = seg_affine_coeffs(seg, cmap.vertexes)   # perf #10: affine back-face cull coeffs
         for _ in range(2):   # call twice (R5 #8)
-            # M13-absmul: wall_x_range now takes the per-frame |viewx|/|viewy| + sign flags and
-            # exports the pre-abs affine distance (sgnr, unchecked here -- wall_setup_sgn's input)
+            # CR-2026-08 (PJ-2): the per-frame |viewx|/|viewy| + sign-flag arguments are GONE --
+            # wall_x_range multiplies the SIGNED value now, because abs-then-negate truncates toward
+            # zero where the oracle's fixed_mul floors, and the two stopped agreeing the moment M14
+            # gave the view position a fraction. It still exports the affine distance (sgnr,
+            # unchecked here -- wall_setup_sgn's input).
             body += [f"proj.wall_x_range vis, x1, x2, rwa, sgnr, vx{k}, vy{k}, "
-                     f"vxa{k}, vxs{k}, vya{k}, vys{k}, va{k}, "
+                     f"va{k}, "
                      f"a{k}, b{k}, c{k}, e{k}, fa{k}, fb{k}, fc{k}",
                      "hex.print_as_digit 1, vis, 0", "stl.output 10",
                      "hex.print_as_digit 8, x1, 0", "stl.output 10",
                      "hex.print_as_digit 8, x2, 0", "stl.output 10",
                      "hex.print_as_digit 8, rwa, 0", "stl.output 10"]
         data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
-                 f"vxa{k}: hex.vec 8, {abs(vxu) * U}", f"vxs{k}: hex.vec 1, {1 if vxu < 0 else 0}",
-                 f"vya{k}: hex.vec 8, {abs(vyu) * U}", f"vys{k}: hex.vec 1, {1 if vyu < 0 else 0}",
                  f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
                  f"a{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"b{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
                  f"c{k}: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"e{k}: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}",

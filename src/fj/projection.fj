@@ -287,8 +287,31 @@ ns proj {
               nb_set1, nb_done, c1, c2, c4, c6, cang45, cang90m1, end {
         hex.mov 8, wex, viewx
         hex.mov 8, wey, viewy
+        // ⚠ CR-2026-08 (PJ-1) -- THIS ARITHMETIC IS THE MIRROR THAT WAS RIGHT. The eye terms are
+        //   built at FULL 16.16 width and every reader takes their HIGH 4-nibble slice, so each Q
+        //   is C - floor(E) for the COMBINED term E. The oracle mirror
+        //   (mapcompiler.bbox_wedge_miss) used to floor PER AXIS instead -- floor(viewy)-floor(viewx)
+        //   -- which differs by 1 whenever the fractions borrow (q=1) or carry (q=3). Invisible
+        //   while the player stood on whole map units; a byte-exactness break the moment M14 gave
+        //   it a fraction. MEASURED with a two-sided negative control: scratchpad/_pj1_probe.py.
+        //
+        //   THE ORACLE WAS MOVED TO THIS FORM, NOT THE OTHER WAY ROUND, AND THE REASON IS VISUAL:
+        //   only this form is CONSERVATIVE. Write Q_true for the exact fractional eye. Here
+        //   Q - Q_true = frac(E) is in [0,1) for ALL FOUR q, so a cull (|Q| >= 1 with the culling
+        //   sign, Q being an integer) always implies the true point really is outside -- this test
+        //   can fail to cull, never over-cull. The per-axis form does NOT have that property: for
+        //   q=3 its error is fx+fy in [0,2), so Q=1 on the negated plane m=3 culls a box whose true
+        //   Q is as low as -1, i.e. genuinely inside. That is not academic -- the wedge is rounded
+        //   out to 45-degree boundaries, and at a view angle that IS an exact multiple of 45 (two
+        //   of the four certified gate angles: 0x40000000, 0x80000000) the rounding slack is ZERO.
+        //   Dropping a whole BSP subtree -- its walls, plane claims, step faces and things -- is
+        //   exactly the failure PJ-1 was filed for, so the mirror that cannot do it wins.
+        //
+        //   Full-precision Q is not an option either: dx+dy at 16.16 needs 34 bits and Q is a
+        //   4-nibble contract (see bbox_wedge_miss's WIDTH CONTRACT docstring and its per-map
+        //   assert). ⇒ fj is UNCHANGED by PJ-1; the emitted program and its op counts do not move.
         hex.mov 8, weyx, viewy
-        hex.sub 8, weyx, viewx              // weyx = viewy - viewx
+        hex.sub 8, weyx, viewx              // weyx = viewy - viewx   (readers take floor via +4*dw)
         hex.mov 8, wexy, viewx
         hex.add 8, wexy, viewy              // wexy = viewx + viewy
 
@@ -404,11 +427,17 @@ ns proj {
     //   fcall/fret pair and the outc round-trip, cost more than the body itself. Every path exits by
     //   a jump, so the trailing data block is never fallen into. @requires hex.init
     def wedge_qt vx, vy, q, n, wex, wey, weyx, wexy, insid, outsid             @ qval, qsel_lo, qsel_hi, calc_q0, calc_q1, calc_q2, calc_q3, q_ready, plain_test, neg_nonzero, c1, c2, c3 {
-        // M13-lines3: every operand here is a 16.16 value whose LOW 16 BITS ARE ZERO (vertices are
-        // baked map<<16; the eye terms are sums/differences of view coords that are themselves
-        // map<<16) -- so Q's sign is fully determined by the HIGH 4-NIBBLE slices, and 4-nibble
-        // mov/sub/sign replace the 8-nibble forms at roughly half the cost. No borrow-in is
-        // possible from the (all-zero) low halves, so the slice arithmetic is exact.
+        // M13-lines3: vertices are baked map<<16, so THEIR low 16 bits are zero, and Q is read from
+        // the HIGH 4-NIBBLE slices -- 4-nibble mov/sub/sign at roughly half the cost of the
+        // 8-nibble forms.
+        // ⚠ CR-2026-08 (PJ-1) -- THE SECOND HALF OF THAT PREMISE IS DEAD AND THIS COMMENT USED TO
+        // STATE IT AS FACT: "the eye terms are sums/differences of view coords that are themselves
+        // map<<16 ... so the slice arithmetic is exact". Since M14 the EYE has a fraction, so the
+        // low halves of weyx/wexy are NOT zero and slicing them is a floor, not an exact read.
+        // That is fine, and deliberately so: Q here is C - floor(E), whose error against the exact
+        // eye is frac(E) in [0,1), so this test can fail to cull but can never over-cull. The
+        // oracle mirror was moved onto this same rule (mapcompiler.bbox_wedge_miss) rather than the
+        // reverse, precisely to keep that property -- see the note in wedge_setup.
         hex.cmp 1, q, c2, qsel_lo, calc_q2, qsel_hi
       qsel_lo:
         hex.cmp 1, q, c1, calc_q0, calc_q1, calc_q1
@@ -453,7 +482,10 @@ ns proj {
     //   (q, n), else `outsid`. The maximizing corner is a pure function of the plane:
     //   y = TOP iff n==0; x = LEFT iff (q<2) == (n==0)  (equivalent to the m-direction table:
     //   x=left for m<4, y=top for m in {0,1,6,7}). The Q arithmetic is wedge_qt's high-4-nibble
-    //   slice form verbatim — corners are integer map units <<16, so low halves are zero.
+    //   slice form verbatim — corners are integer map units <<16, so THEIR low halves are zero.
+    //   ⚠ CR-2026-08 (PJ-1): the EYE TERMS' low halves are not, since M14 made the view position
+    //   fractional — slicing them floors the combined term, which is exactly what the oracle
+    //   mirror now does too. See wedge_setup for why this direction and not the other.
     def wedge_bbox_plane q, n, bl, bb, br, bt, wex, wey, weyx, wexy, insid, outsid \
             @ use_top, use_left, use_right, corner_done, qsel_lo, qsel_hi, \
               calc_q0, calc_q1, calc_q2, calc_q3, q_ready, plain_test, neg_nonzero, \
@@ -858,9 +890,8 @@ ns proj {
     //   (modular BAM) -> hex.cmp; only the final x1>=x2 column test is SIGNED (columns can be -1) ->
     //   hex.scmp. Outputs are computed into temps and committed only on the visible path.
     //   @requires hex.init & stl.ptr_init   (inlines point_to_angle x2 + angle_to_x x2)
-    def wall_x_range visible, x1, x2, rw_angle1, sgn, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, v1x, v1y, v2x, v2y, a, b, c \
+    def wall_x_range visible, x1, x2, rw_angle1, sgn, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, a, b, c \
             @ ang1, ang2, span, tspan, diff, ang1_world, tx1, tx2, sgn_b, frontok, \
-              sgn_x_done, sgn_y_done, \
               cang180, cclip, c2clip, cnegclip, \
               notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end {
         hex.set 1, visible, 0              // default: culled (None)
@@ -882,14 +913,28 @@ ns proj {
         // the truncated product equals truncation of the negated product (verified over 401 viewpoints
         // x 575 segs, scratchpad session 2026-07-25). sgn is an OUTPUT (pre-abs): wall_setup's
         // rw_distance is abs(sgn), so the caller can skip wall_setup's identical 2-mul recompute.
-        hex.fixed_mul_lo 8, 4, sgn, a, viewxa
-        hex.if0 1, viewxs, sgn_x_done
-        hex.neg 8, sgn
-      sgn_x_done:
-        hex.fixed_mul_lo 8, 4, sgn_b, b, viewya
-        hex.if0 1, viewys, sgn_y_done
-        hex.neg 8, sgn_b
-      sgn_y_done:
+        // ⚠ CR-2026-08 (PJ-2) -- MULTIPLY THE SIGNED VALUE. The old form multiplied |viewx| and
+        //   negated the product, which is -floor(P/2^16) where the oracle's fixed_mul(a, viewx)
+        //   gives -ceil(P/2^16). Equal iff P mod 2^16 == 0 -- true for every whole map unit, false
+        //   from the player's second step once M14 made the position fractional. The in-file comment
+        //   asserted the identity as PROVEN ("verified over 401 viewpoints x 575 segs"), and it was
+        //   -- on integers. MEASURED with two-sided controls: scratchpad/_pj2_probe.py (abs/negate
+        //   5 agree / 5 DIFFER, every divergence +1 ULP; this form 10 / 0). Note the R17 trap the
+        //   probe pins down: at a HALF unit only an ODD `a` diverges, so a half-unit-only fixture
+        //   set is half-vacuous.
+        //   OPERAND ORDER: the sparse baked constant goes SECOND (the ROW RULE -- one schoolbook row
+        //   per nonzero nibble of the second operand). That swap is bit-identical, and it is
+        //   MEASURED not assumed (probe control 6), because "obviously equivalent" has been wrong
+        //   here before. The old form's speed argument is dead anyway: post-M14 viewxa is a dense
+        //   8-nibble value, so it no longer has the 2-3 nonzero nibbles the comment claimed.
+        //   ⚠ viewxa/viewxs/viewya/viewys are GONE from the signature, and that is forced, not
+        //   chosen: flipjump emits a Syntax Warning for an unused macro parameter and the build
+        //   runs --werror (R8), so a dead parameter cannot simply be left in place. Safe here
+        //   because these two macros are called only from hand-written fj (frame_render.fj, 9
+        //   sites) -- NO Python f-string emits them -- so rule 4's frozen-ABI concern, which is
+        //   about emitter-generated calls, does not apply. Checked by grep over src/doomfj/.
+        hex.fixed_mul_lo 8, 4, sgn, viewx, a
+        hex.fixed_mul_lo 8, 4, sgn_b, viewy, b
         hex.add 8, sgn, sgn_b
         hex.add 8, sgn, c
         hex.sign 8, sgn, end, frontok      // sgn < 0 -> back-facing, cull (visible=0)
@@ -1936,9 +1981,8 @@ ns proj {
         .point_to_angle_m 0, 0, dst, viewx + 4*dw, viewy + 4*dw, v2x + 4*dw, v2y + 4*dw
     }
 
-    def wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, v1x, v1y, v2x, v2y, a, b, c \
+    def wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, a, b, c \
             @ adup, ang1, ang2, span, tspan, diff, tx1, tx2, sgn_b, frontok, \
-              sgn_x_done, sgn_y_done, \
               cclip, c2clip, cnegclip, \
               notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end {
         hex.set 1, visible, 0
@@ -1960,14 +2004,28 @@ ns proj {
         // non-`_m` twin, which the projection-kernel tests cover) has always used. At an integer
         // position this is bit-identical to what it replaces, so nothing that was certified moves;
         // it costs the map-slice's narrower multiplier rows and narrower atan.
-        hex.fixed_mul_lo 8, 4, sgn, a, viewxa
-        hex.if0 1, viewxs, sgn_x_done
-        hex.neg 8, sgn
-      sgn_x_done:
-        hex.fixed_mul_lo 8, 4, sgn_b, b, viewya
-        hex.if0 1, viewys, sgn_y_done
-        hex.neg 8, sgn_b
-      sgn_y_done:
+        // ⚠ CR-2026-08 (PJ-2) -- MULTIPLY THE SIGNED VALUE. The old form multiplied |viewx| and
+        //   negated the product, which is -floor(P/2^16) where the oracle's fixed_mul(a, viewx)
+        //   gives -ceil(P/2^16). Equal iff P mod 2^16 == 0 -- true for every whole map unit, false
+        //   from the player's second step once M14 made the position fractional. The in-file comment
+        //   asserted the identity as PROVEN ("verified over 401 viewpoints x 575 segs"), and it was
+        //   -- on integers. MEASURED with two-sided controls: scratchpad/_pj2_probe.py (abs/negate
+        //   5 agree / 5 DIFFER, every divergence +1 ULP; this form 10 / 0). Note the R17 trap the
+        //   probe pins down: at a HALF unit only an ODD `a` diverges, so a half-unit-only fixture
+        //   set is half-vacuous.
+        //   OPERAND ORDER: the sparse baked constant goes SECOND (the ROW RULE -- one schoolbook row
+        //   per nonzero nibble of the second operand). That swap is bit-identical, and it is
+        //   MEASURED not assumed (probe control 6), because "obviously equivalent" has been wrong
+        //   here before. The old form's speed argument is dead anyway: post-M14 viewxa is a dense
+        //   8-nibble value, so it no longer has the 2-3 nonzero nibbles the comment claimed.
+        //   ⚠ viewxa/viewxs/viewya/viewys are GONE from the signature, and that is forced, not
+        //   chosen: flipjump emits a Syntax Warning for an unused macro parameter and the build
+        //   runs --werror (R8), so a dead parameter cannot simply be left in place. Safe here
+        //   because these two macros are called only from hand-written fj (frame_render.fj, 9
+        //   sites) -- NO Python f-string emits them -- so rule 4's frozen-ABI concern, which is
+        //   about emitter-generated calls, does not apply. Checked by grep over src/doomfj/.
+        hex.fixed_mul_lo 8, 4, sgn, viewx, a
+        hex.fixed_mul_lo 8, 4, sgn_b, viewy, b
         hex.add 8, sgn, sgn_b
         hex.add 8, sgn, c
         hex.sign 8, sgn, end, frontok

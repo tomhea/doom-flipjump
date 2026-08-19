@@ -1545,14 +1545,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         # M14.5: ... and the baked things' visibility, last on the wire. IN only: the host decides
         # what has been picked up, fj only reads it, at a fixed address per call site (section 3.3).
         *([f"rep({_MT_NVIS}, i) hex.input 1, thvis + i*2*dw"] if _MT_NVIS else []),
-        # M13-absmul: per-frame |viewx|/|viewy| + sign flags. fixed_mul_lo's cost is one schoolbook
-        # row per nonzero nibble of the MULTIPLIER, and a negative 16.16 view coord sign-extends to
-        # a dense pattern -- so the per-seg affine cull multiplies by these sparse abs values and
-        # negates the product on the flag (bit-identical; see proj.wall_x_range).
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
+        # CR-2026-08 (PJ-2): the M13-absmul per-frame |viewx|/|viewy| + sign flags are GONE, and
+        # with them 12 fj statements and 4 labels per frame. The abs form multiplied the magnitude
+        # and negated the product, which truncates toward ZERO where the oracle's fixed_mul floors
+        # -- equal only when the product's low 16 bits are zero, i.e. only at a whole map unit. M14
+        # made the view position fractional and the two mirrors silently stopped agreeing (MEASURED:
+        # scratchpad/_pj2_probe.py, 5 of 10 cases off by +1 ULP). The per-seg affine cull now
+        # multiplies the SIGNED coord, with the sparse baked coefficient as the SECOND operand so
+        # the ROW RULE still applies (that swap is bit-identical -- probe control 6).
         "hex.zero 2, n_drawn", "hex.zero 1, full",   # M13opt-P1: reset the drawn-column counter + full flag per frame
         # W1R-ANCHOR: wnoff = viewangle * 640 columns-per-turn >> 32 = (va*5) >> 25
         # exactly -- once per frame, ~2k ops. Widened cells keep the 34-bit step exact.
@@ -1876,9 +1876,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",
              "pmvc: hex.vec 8", "pmvs: hex.vec 8",
              "pmvdx: hex.vec 8", "pmvdy: hex.vec 8"] if player_sim else []),
-          # M13-absmul: the per-frame abs/sign forms of the view coords + the shared affine-distance
-          # output of wall_x_range (consumed by wall_setup_sgn as rw_distance-pre-abs)
-          "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
+          # the shared affine-distance output of wall_x_range (consumed by wall_setup_sgn as
+          # rw_distance-pre-abs). ⚠ CR-2026-08 (PJ-2) removed viewxa/viewxs/viewya/viewys from
+          # here; `sgn_aff` is NOT dead with them -- it is the OUTPUT, read at 10 call sites.
           "sgn_aff: hex.vec 8",
           "viewz: hex.vec 8", "viewzw: hex.vec 8", "vz_set: hex.vec 1",
           "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",

@@ -582,13 +582,9 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",   # viewx = vx << 16
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
         # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
-        "proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, viewangle, v1x, v1y, v2x, v2y, acoef, bcoef, ccoef",
+        "proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, acoef, bcoef, ccoef",
         "hex.if0 1, visible, pass2",                             # culled -> pass 2 (background only)
         "proj.wall_setup normalangle, rw_distance, viewx, viewy, segangle, acoef, bcoef, ccoef",
         f"proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, {proj}",
@@ -617,7 +613,6 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
         "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
@@ -792,10 +787,6 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
         # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk",                                 # pass 1: the walk drives the multi-seg fill
@@ -812,7 +803,6 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
         "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
@@ -999,10 +989,6 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",                  # viewx = vx << 16 (16.16 for projection)
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
         # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";occ_bspcode_walk",                                                # the walk (with a NODE) drives pass 1
@@ -1019,7 +1005,6 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
         "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
@@ -1226,10 +1211,6 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
         # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1245,7 +1226,6 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
         "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
@@ -1434,10 +1414,6 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
         # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1454,7 +1430,6 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
         "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
@@ -1592,10 +1567,6 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
         # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         "hex.mov 2, bgrow, player_light",
         f"rep({LIGHT_SHIFT}, i) hex.shr_bit 2, bgrow",   # row = light >> LIGHT_SHIFT (single source of truth)
         "hex.zero 4, bgidx", "hex.mov 2, bgidx + 2*dw, bgrow",                     # bgidx = row<<8 | 0(CEIL_BG)
@@ -1616,7 +1587,6 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
         "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
@@ -1755,10 +1725,6 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
         # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:",
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1775,7 +1741,6 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
         "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body_w",
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)

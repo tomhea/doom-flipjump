@@ -9,7 +9,9 @@ Every existing case in that file feeds `viewx = vxu * 65536` -- a WHOLE number o
 drives the same macros with the low nibbles populated, which is the regime `step_sim` produces from
 the player's second step onward.
 
-⚠ The abs/sign inputs must be built the way the emitter builds them (`hex.mov viewxa, viewx;
+⚠ SUPERSEDED IN PART (CR-2026-08, PJ-2): the abs/sign inputs no longer exist -- wall_x_range and
+wall_x_range_m multiply the SIGNED view coord now, so this harness no longer stages them. The note
+below is kept because it records why they were there. Historically: (`hex.mov viewxa, viewx;
 hex.sign; hex.neg`), i.e. the absolute value of the FULL 16.16 quantity -- not `abs(units) << 16`,
 which is what the integer-only cases could get away with.
 
@@ -225,10 +227,7 @@ def run_head_to_kernel(tmp: Path):
     v2x, v2y = e1.vertexes[seg.v2]
     fa, fb, fc = seg_affine_coeffs(seg, e1.vertexes)
     ABSMUL = [                                   # verbatim from wall_renderer's pass1 (M13-absmul)
-        "hex.mov 8, viewxa, viewx", "hex.set 1, viewxs, 0", "hex.sign 8, viewxa, wxn, wxp",
-        "wxn:", "hex.neg 8, viewxa", "hex.set 1, viewxs, 1", "wxp:",
-        "hex.mov 8, viewya, viewy", "hex.set 1, viewys, 0", "hex.sign 8, viewya, wyn, wyp",
-        "wyn:", "hex.neg 8, viewya", "hex.set 1, viewys, 1", "wyp:"]
+        ]
     prog = "\n".join([
         "stl.startup_and_init_all",
         *_state_wire_lines("bin"),               # THE EMITTER'S OWN WIRE
@@ -247,13 +246,13 @@ def run_head_to_kernel(tmp: Path):
         # BOTH range macros, side by side. `wall_x_range` is what tests/fj cover; the SHIPPED lines
         # leaf calls `wall_x_range_m`, which is the M13-mapmul variant -- and that one reads
         # `viewx + 4*dw`, the top 4 nibbles, i.e. the INTEGER MAP SLICE.
-        "proj.wall_x_range vis, x1, x2, rwa, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, viewys, "
+        "proj.wall_x_range vis, x1, x2, rwa, sgn_aff, viewx, viewy, "
         "viewangle, p, q, r, s, ga, gb, gc",
         "hex.print_as_digit 8, x1, 0", "stl.output 10",
-        "proj.wall_x_range_m 0, 0, 0, vis, x1, x2, sgn_aff, viewx, viewy, viewxa, viewxs, viewya, "
-        "viewys, viewangle, p, q, r, s, ga, gb, gc",
+        "proj.wall_x_range_m 0, 0, 0, vis, x1, x2, sgn_aff, viewx, viewy, "
+        "viewangle, p, q, r, s, ga, gb, gc",
         "hex.print_as_digit 8, viewx, 0", "stl.output 10",
-        "hex.print_as_digit 8, viewxa, 0", "stl.output 10",
+        "hex.print_as_digit 4, viewx + 4*dw, 0", "stl.output 10",   # the INTEGER map slice
         "hex.print_as_digit 1, vis, 0", "stl.output 10",
         "hex.print_as_digit 8, x1, 0", "stl.output 10",
         "hex.print_as_digit 8, x2, 0", "stl.output 10",
@@ -261,7 +260,6 @@ def run_head_to_kernel(tmp: Path):
         "wmagic: hex.vec 2", "pkeys: hex.vec 2",
         "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "vx: hex.vec 10", "vy: hex.vec 10",
-        "viewxa: hex.vec 8", "viewxs: hex.vec 1", "viewya: hex.vec 8", "viewys: hex.vec 1",
         "n_drawn: hex.vec 2", "full: hex.vec 1",
         "wnt: hex.vec 10", "wnt2: hex.vec 10", "wnoff: hex.vec 4",
         "wqa: hex.vec 1", "wna: hex.vec 1", "wqb: hex.vec 1", "wnb: hex.vec 1",
@@ -296,7 +294,7 @@ def run_head_to_kernel(tmp: Path):
         # skip the 13-byte state echo the wire emits before the prints
         o = io.get_output(allow_incomplete_output=True)[13:].decode("ascii").split("\n")
         res = rm.wall_x_range((-416 * U) + frac, 256 * U, 0, seg, e1.vertexes)
-        # print order: [0] wall_x_range x1, [1] viewx, [2] viewxa, [3] vis, [4] x1_m, [5] x2_m
+        # print order: [0] wall_x_range x1, [1] viewx, [2] viewx int slice, [3] vis, [4] x1_m, [5] x2_m
         plain_x1, m_x1 = int(o[0], 16), int(o[4], 16)
         ok &= plain_x1 == res[0] and m_x1 == res[0]
         print(f"  {tag:10s} viewx={o[1]}  oracle x1={res[0]:3d}"

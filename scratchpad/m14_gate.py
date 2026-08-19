@@ -81,7 +81,11 @@ RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noi
                  near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
 
 
-COLLIDE = "--collide" in sys.argv
+# ⚠ B0 (2026-08-18): COLLISION IS ON BY DEFAULT, because build.py and walk_e1m1.py now SHIP
+# `collide=True` -- and a gate whose default differs from the shipped config certifies a program
+# nobody runs. That is the A0.1 failure exactly, re-created one flag over and caught the same day.
+# `--no-collide` keeps the old collision-free binary for A/B work; it is not the shipped tier.
+COLLIDE = "--no-collide" not in sys.argv
 MOVING = "--things" in sys.argv                  # M14-e: the RUNTIME thing table
 # ⚠ CR-2026-08 (IN-3, A0.1): `bbox_cull` is part of THE ONE PICTURE now -- build.py ships it, the
 # walker shows it and deg_gate certifies it -- but this gate was emitting without it, so the M14
@@ -420,7 +424,12 @@ def main():
     if "--probe" in sys.argv:
         i = sys.argv.index("--probe")
         return 0 if probe(build(), sys.argv[i + 1:i + 5]) else 1
-    tics = int(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else 8
+    # ⚠ tics is POSITIONAL and may appear anywhere. It used to be read from sys.argv[1] only, so
+    # `m14_gate.py --things 20` silently ran EIGHT tics -- the 20 was parsed as the flag's neighbour
+    # and dropped. That matters because phase 2's --collide vacuity control needs enough tics to
+    # actually reach a wall: the run reported "0 of 8 tics blocked" and FAILED, and the failure
+    # looked like a collision bug rather than a mis-parsed argument.
+    tics = next((int(a) for a in sys.argv[1:] if not a.startswith("-") and a.isdigit()), 8)
     fjm = build()
     ok = phase1(fjm)
     ok &= phase1b(fjm)          # CR-2026-08: the fractional class -- see FRAC_VPS

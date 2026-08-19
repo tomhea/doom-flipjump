@@ -207,6 +207,34 @@
         "ATTRIBUTION": "ALL of the cost is PJ-2's operand order, none is PJ-1 (whose fj emission is unchanged). Filed as PJ-2b with the weighted cost model that predicts the sign of all four viewpoints, and the exact-and-cheaper form fixed_mul_lo(-a, |viewx|). DEFERRED TO BATCH 2 (row-rule operand swaps) so it shares a build instead of spending a 30-min gate alone.",
         "NOTE": "the gate viewpoints moved ~2% while the MEDIAN moved 0.46% -- a clean demonstration of why the median is the metric and gate viewpoints are worst cases."
       }
+    },
+    {
+      "id": "B4.1-step2",
+      "date": "2026-08-18",
+      "what": "The dirty-range restore: MEASURED. The prize is real; the naive mechanism is REFUTED.",
+      "how": "python scratchpad/dirty_restore.py scratchpad/fjmcache/m14_bin_things_cull.fjm [--learn-extra 25]",
+      "THE_PRIZE_CONFIRMED": {
+        "blanket_core_reset_ms": [
+          44.97,
+          43.71
+        ],
+        "range_restore_ms": 0.12,
+        "speedup": "357x - 386x",
+        "ranges": "223-234 ranges covering ~0.23 MB, vs 546 MB",
+        "note": "Per-range call overhead is NEGLIGIBLE -- 234 Python->C set_words calls cost 0.12 ms total, so the bytes-moved reduction converts almost perfectly. The ~45ms floor really can become ~0.1ms."
+      },
+      "THE_MECHANISM_REFUTED": {
+        "finding": "A range set LEARNED FROM SAMPLED FRAMES IS UNSOUND. 5 of 7 unseen frames leaked with a 5-frame learn set; with 30 learn frames the union grew 6,880 -> 9,225 and op-level leaks fell to 1 of 7, but the EXACT WALK still found 67 and 2 unrestored words. It converges slowly and does not close.",
+        "why_it_matters": "The program SELF-MODIFIES, so a leaked word does not produce a wrong pixel -- it produces a different PROGRAM. Op deltas ranged +3 to +4,375,384.",
+        "PIXELS_ARE_NOT_A_DETECTOR": "pixels MATCHED on ALL 7 frames in BOTH runs, including the one that leaked 4.4M ops. A pixel-only validation would have passed every case and shipped a broken restore.",
+        "OPS_ARE_NOT_A_COMPLETE_DETECTOR_EITHER": "the (-416,256,k=4) frame matched op-for-op (+0) while the exact walk still found 2 unrestored words. The FULL WALK is the only sound check.",
+        "the_leaks_are_STRUCTURED": "the same addresses recur across runs (3304301, 5511717, 5649875, 5649877, 5753831, ...), so the writable set is a structured region, not noise -- it is simply not enumerable by sampling."
+      },
+      "RECOMMENDED_MECHANISM": "Derive the writable set from the EMITTER, which knows every address the program can write (state cells, thing rows, bindings, banks, per-frame scratch), and emit it as a manifest next to the program. scratchpad/dirty_restore.py then becomes its ACCEPTANCE TEST: learn nothing, restore the manifest's ranges, and require 0 unrestored words on the full walk over a wide frame set. Alternative: engine-side write tracking in the C core (sound by construction, but a flipjump change).",
+      "BLOCKER_FOUND_IN_PASSING": {
+        "R4": "the M14 tier is 68,213,458 words -- 1.6% OVER the certified 2**26 flat limit. At 1<<26 it runs in HYBRID storage, and `freeze()` requires PURE FLAT, so THE FAST RESET PATH IS UNAVAILABLE TO THE TIER THAT WILL SHIP. Op counts are identical in both modes (43,115,656), so no earlier measurement is invalidated. Only at 1<<27 is it flat. R4 says no silent paged-mode fallback -- this needs a decision before B0, and it competes with B3's 9-level span budget (G3).",
+        "measured": "flat_max_words=67,108,864 -> storage_mode=hybrid;  134,217,728 -> flat"
+      }
     }
   ]
 }

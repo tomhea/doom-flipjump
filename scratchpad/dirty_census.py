@@ -53,6 +53,10 @@ ap.add_argument("--things", action="store_true",
 ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
 ap.add_argument("--exact", action="store_true",
                 help="walk EVERY word instead of sampling: exact count AND the extent")
+ap.add_argument("--keys", type=int, default=0,
+                help="with --m14: the key bitmask to feed. ⚠ A MOVING tic runs the player sim and "
+                     "WRITES player state, so it can dirty words a keys=0 frame never touches -- "
+                     "the whole dirty set must be censused with this non-zero at least once.")
 ap.add_argument("--gatevps", action="store_true",
                 help="with --exact: census the FOUR gate viewpoints and report the UNION. One "
                      "frame's dirty set proves nothing about a restore mechanism -- a range "
@@ -78,7 +82,7 @@ def m14_feed(state=None):
     if state is None:
         sp = spawn_state(w, "E1M1")
         state = (_signed(sp.x, 32), _signed(sp.y, 32), sp.angle)
-    blob = encode_feed(state[0], state[1], state[2], 0)
+    blob = encode_feed(state[0], state[1], state[2], args.keys)
     if not args.things:
         return blob, 0
     rm = ReferenceModel(Config())

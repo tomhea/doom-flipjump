@@ -17,12 +17,16 @@ from doomfj.wad import WadFile
 
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")
 SPRITE_WAD = Path("assets/freedoom1.wad")     # V4 art: the cut-down fixture has no sprite lumps
-# ⚠ B0 (2026-08-18): the default build now ships the SIM, so this gate builds the M14 tier, whose
-# span is ~68.2M words on the full fixture -- ABOVE the old 40-62M band, which was calibrated on the
-# static tier. The band is widened to bracket it. It is PROVISIONAL until this 30-minute gate runs
-# and prints the real figure (the metrics print below exists for exactly that); if the printed span
-# lands outside, move the band to the measurement, do not widen it again to make a run pass.
-SPAN_LO, SPAN_HI = 40_000_000, 90_000_000     # sanity band around the measured default-build span:
+# ⚠ B0 -- MEASURED 2026-08-19, and the provisional band was wrong in the informative direction.
+# The shipped tier (sim + collide + the full fixture) is 84,823,030 words, NOT the ~68.2M carried
+# over from the M14 gate's lighter binary. headroom=1.582 against 2**27; against the old 2**26 it
+# would have been 1.26x OVER, so the limit raise was required, not cosmetic.
+#   R4 shipped-tier metrics: tier=lines/W1R/FT1+plane_near span=84,823,030 words
+#   limit=134,217,728 headroom=1.582 fjm=23,432,034 bytes assemble=8054.988s
+# ⚠ ASSEMBLE IS NOW 2h14m (was ~30 min pre-B0). Every gate on this tier is a two-hour commitment,
+# and handoff G2 counts assemble time as a first-class budget -- price it into any plan that wants
+# several builds (three levels in one image projects to 4-5 hours).
+SPAN_LO, SPAN_HI = 70_000_000, 100_000_000    # bracketing the MEASURED 84.82M, not a guess:
                                               # 51.21M words (CR-2026-08 recalibration -- the old
                                               # 9-18M band predated V4-HD full-res sprite buckets,
                                               # V5 stacked pieces/regions and SPR-NEAR's dual bank;

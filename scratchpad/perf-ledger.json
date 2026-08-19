@@ -235,6 +235,25 @@
         "R4": "the M14 tier is 68,213,458 words -- 1.6% OVER the certified 2**26 flat limit. At 1<<26 it runs in HYBRID storage, and `freeze()` requires PURE FLAT, so THE FAST RESET PATH IS UNAVAILABLE TO THE TIER THAT WILL SHIP. Op counts are identical in both modes (43,115,656), so no earlier measurement is invalidated. Only at 1<<27 is it flat. R4 says no silent paged-mode fallback -- this needs a decision before B0, and it competes with B3's 9-level span budget (G3).",
         "measured": "flat_max_words=67,108,864 -> storage_mode=hybrid;  134,217,728 -> flat"
       }
+    },
+    {
+      "id": "B0-R4",
+      "date": "2026-08-19",
+      "what": "R4 span gate on the SHIPPED tier after B0 (sim + collide wired in)",
+      "how": "python -m pytest tests/host -m slow -q -s",
+      "result": "1 passed, 245 deselected in 8601.92s (2:23:21)",
+      "tier": "lines/W1R/FT1+plane_near",
+      "span_words": 84823030,
+      "flat_limit": 134217728,
+      "headroom": 1.582,
+      "fjm_bytes": 23432034,
+      "assemble_seconds": 8054.988,
+      "FINDINGS": [
+        "The shipped span is 84,823,030 words -- NOT the ~68.2M quoted from the M14 gate's binary (lighter config, collide=False, and m14_gate omits sky=). Anything derived from 68.2M should be re-derived.",
+        "headroom 1.582 against 2**27; against 2**26 it would be 1.26x OVER. The limit raise was REQUIRED, not cosmetic.",
+        "ASSEMBLE IS 2h14m, up from ~30 min pre-B0. Every gate on the shipped tier now costs two hours; G2 counts this as a first-class budget. Three levels in one image projects to 4-5 hours."
+      ],
+      "band": "tests/host SPAN_LO/HI moved to 70M-100M to bracket the measurement (was a provisional 40-90M)"
     }
   ]
 }

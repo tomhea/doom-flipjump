@@ -135,11 +135,21 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
     a ~42M-character program against a ~cubic assembler."""
     m = build_wall_renderer(E1M1, "E1M1", out_fjm=tmp_path / "renderer.fjm",
                             generated_dir=tmp_path / "gen", flat_max_words=1 << 26)
+    # G1/R2: this 30-minute run is the only place the shipped tier's span, .fjm size and assemble
+    # time are measured. It used to assert them and print NOTHING, so a passing run left no number
+    # for the perf ledger and the next session had to spend the 30 minutes again to learn one.
+    print(f"\nR4 shipped-tier metrics: tier={m['tier']} span={m['span_words']:,} words "
+          f"limit={1 << 26:,} headroom={m['headroom']} fjm={m['fjm_bytes']:,} bytes "
+          f"assemble={m['assemble_seconds']}s", flush=True)
     assert m["storage_mode"] == "flat", m
     assert m["span_words"] < (1 << 26)
     assert m["headroom"] > 1.0
-    assert m["features"] == {"wall_noise": True, "sky": True, "steps": True, "things": True}, m
-    assert m["tier"] == "lines/WPX/FT1+plane_near", m
+    # CR-2026-08 (IN-3, A0.1) — this pair is the ONLY automated guard that the shipped picture is the
+    # one the walker shows and `deg_gate` certifies. It asserted WPX and four features while build.py
+    # had moved to W1R + stack_steps/bbox_cull/deg; a fan-out miss the 70-min runtime hid.
+    assert m["features"] == {"wall_noise": True, "sky": True, "steps": True, "things": True,
+                             "stack_steps": True, "bbox_cull": True, "deg": True}, m
+    assert m["tier"] == "lines/W1R/FT1+plane_near", m
     assert SPAN_LO < m["span_words"] < SPAN_HI, m
 
 

@@ -88,8 +88,11 @@ fjm, dbg = out / f"{tag}.fjm", out / f"{tag}.dbg"
 # the binary the sweep measured -- which is what the byte-compare below is there to catch.
 M14_EMIT = dict(return_parts=True, over_align=False, floor_mode="FT1", wall_mode="W1R",
                 raster_mode="lines", plane_near=True, wall_noise=True, steps=True,
-                stack_steps=True, things=True, deg=True,
+                stack_steps=True, things=True, deg=True, bbox_cull=True,
                 state_wire="bin", player_sim=True, collide=False, moving_things=True)
+# ⚠ CR-2026-08 (IN-3, A0.1): `bbox_cull=True` added to keep the "m14_gate.py's, verbatim" contract
+# above true after A0.1 unified the four configurations. A profile of a different picture ranks the
+# wrong macros -- and the ranking is what A2's whole batch order rests on.
 
 t0 = time.time()
 if args.reuse and fjm.exists() and dbg.exists():

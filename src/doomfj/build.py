@@ -257,7 +257,12 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         "headroom": round(limit / span, 3) if span else None,
         "fjm_bytes": out.stat().st_size, "assemble_seconds": assemble_seconds,
         "tier": f"{raster_mode}/{wall_mode}/{floor_mode}" + ("+plane_near" if plane_near else ""),
-        "features": {"wall_noise": wall_noise, "sky": sky, "steps": steps, "things": things},
+        # CR-2026-08 (IN-3, A0.1): the metrics used to describe only FOUR of the emit-shaping flags,
+        # so the three that had silently diverged (stack_steps/bbox_cull/deg) were invisible to every
+        # consumer of metrics.json AND to the R4 gate below. A flag that shapes the picture is now
+        # reported; add new ones here in the same commit that adds them to the signature.
+        "features": {"wall_noise": wall_noise, "sky": sky, "steps": steps, "things": things,
+                     "stack_steps": stack_steps, "bbox_cull": bbox_cull, "deg": deg},
     }
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
     assert span < limit, f"R4: span {span} >= flat limit {limit}"

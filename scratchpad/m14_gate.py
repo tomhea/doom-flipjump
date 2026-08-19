@@ -46,6 +46,10 @@ SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection
                                      "stream_render.fj", "sim.fj")]
 # the M14-a certified op counts (dec wire), in VPS order -- the baseline the bin wire is diffed
 # against. deg_gate's own header still carries the pre-M14-a numbers.
+# ⚠ STALE SINCE A0.1 (2026-08-17): these were measured WITHOUT `bbox_cull`, which A0.1 turned on
+# everywhere and which is worth -1.0M..-2.7M per viewpoint on the static tier. The phase-1 delta
+# printed against them is therefore NOT "the cost of the bin wire" -- it is that plus the cull's
+# saving. Printed as a landmark only; do not quote it. Re-measure both sides to price the wire.
 DEC_OPS = (45_664_661, 36_423_780, 43_030_266, 34_119_621)
 
 cfg = Config()
@@ -79,10 +83,16 @@ RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noi
 
 COLLIDE = "--collide" in sys.argv
 MOVING = "--things" in sys.argv                  # M14-e: the RUNTIME thing table
-# ⚠ the cache key must name EVERY flag that changes the binary -- keying it on one of two would
-# hand `--things --collide` the no-collision binary and gate the wrong program.
-CACHE = ROOT / ("scratchpad/fjmcache/m14_bin%s%s.fjm"
-                % ("_coll" if COLLIDE else "", "_things" if MOVING else ""))
+# ⚠ CR-2026-08 (IN-3, A0.1): `bbox_cull` is part of THE ONE PICTURE now -- build.py ships it, the
+# walker shows it and deg_gate certifies it -- but this gate was emitting without it, so the M14
+# tier was still a different program from the static tier it is compared against. It is a constant,
+# not a flag, for exactly that reason: the whole point of A0.1 is that there is one configuration.
+# ⚠ ...and it changes the binary, so it is IN THE CACHE KEY. The pre-A0.1 `m14_bin*.fjm` caches
+# were built without the cull and must not be silently reused under the new config.
+BBOX_CULL = True
+CACHE = ROOT / ("scratchpad/fjmcache/m14_bin%s%s%s.fjm"
+                % ("_coll" if COLLIDE else "", "_things" if MOVING else "",
+                   "_cull" if BBOX_CULL else ""))
 
 # M14-e — the drawable things, in the ONE order both mirrors index by: wad order, filtered to the
 # types that have art. `thing_rows` (fj side) and `render_wall_frame`'s `_drawable` (oracle side)
@@ -163,7 +173,7 @@ def build():
     parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, over_align=False,
                                floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
                                plane_near=True, wall_noise=True, steps=True, stack_steps=True,
-                               things=True, sprite_wad=art, deg=True,
+                               things=True, sprite_wad=art, deg=True, bbox_cull=BBOX_CULL,
                                state_wire="bin", player_sim=True, collide=COLLIDE,
                                moving_things=MOVING)
     tmp = Path(tempfile.mkdtemp())
@@ -183,6 +193,55 @@ def run(fjm, feed):
     term = fj.run(fjm, io_device=scr, print_time=False, print_termination=False,
                   flat_max_words=1 << 26)
     return scr, term
+
+
+# ⚠ CR-2026-08 (PJ-1 / PJ-2 / PJ-3) -- THE FRACTIONAL VIEWPOINTS, AND WHY THEY EXIST.
+# Both PJ-1 (wedge eye terms) and PJ-2 (the absmul identity) were byte-exactness breaks that
+# REQUIRE a fractional view position, and every certified viewpoint in this repo -- deg_gate's
+# four, this gate's phase 1, every golden -- sits on a WHOLE MAP UNIT, where each bug is
+# identically zero. That is not bad luck: the renderer predates M14, when the player could not
+# stand between units. The consequence was that NO GATE IN THE REPO COULD FAIL ON EITHER BUG, and
+# both were found by hand-written probes instead. This closes that hole.
+#
+# The offsets are chosen, not arbitrary:
+#   0x8000 = exactly half a unit -- and it is PARTLY VACUOUS ON ITS OWN (R17): PJ-2 only diverges
+#            there for an ODD seg coefficient, since P mod 2^16 = (a mod 2)*2^15. Kept because it
+#            is the offset a reader will reach for, and labelled so nobody trusts it alone.
+#   0x5555 = a fraction with bits across the whole low half; diverges for either parity.
+#   the (0xC000, 0x5000) pair makes fy < fx AND fx + fy >= 1 simultaneously, which is the only way
+#            to arm PJ-1's q=1 borrow and q=3 carry in the same frame.
+FRAC_VPS = [(spx, spy, sp.angle, 0x8000, 0x8000, "half unit (R17: partly vacuous alone)"),
+            (spx, spy, sp.angle, 0x5555, 0x5555, "0x5555 both axes"),
+            (spx, spy, sp.angle, 0xC000, 0x5000, "fy<fx AND fx+fy>=1 (PJ-1 borrow + carry)"),
+            (664, 291, 0x18000000, 0x5555, 0xC000, "sprite-overlap frame, fractional"),
+            (1272, -724, 0x40000000, 0xC000, 0x5000, "stairs, fractional (va = exact 45x mult)"),
+            (1869, 479, 0x80000000, 0x8000, 0x5555, "everything frame, fractional")]
+
+
+def phase1b(fjm):
+    """The bug class the whole certified set is blind to: a view position with a FRACTION.
+
+    ⚠ This proves AGREEMENT, not absence. A frame is byte-exact when the two mirrors compute the
+    same thing; PJ-1 and PJ-2 could still be latent at a viewpoint no fixture visits, because both
+    need a boundary condition (a bbox corner within 1 unit of a wedge plane; a product whose low 16
+    bits are nonzero) on top of the fraction. The PROOF that each is fixed is its probe
+    (scratchpad/_pj1_probe.py, _pj2_probe.py), which drives the boundary directly and ships a
+    two-sided control. This is the REGRESSION net under them."""
+    print(chr(10) + "PHASE 1b -- FRACTIONAL viewpoints (the class every other gate is blind to)",
+          flush=True)
+    ok = True
+    for vx, vy, va, fx, fy, why in FRAC_VPS:
+        x16 = ((vx << 16) + fx) & 0xFFFFFFFF
+        y16 = ((vy << 16) + fy) & 0xFFFFFFFF
+        want = rm.render_wall_frame(SimState(x16, y16, va, "E1M1"), scene, **RENDER_KW)
+        scr, term = run(fjm, feed((_signed(x16, 32), _signed(y16, 32), va), 0,
+                                  bindings=SPAWN_BINDINGS))
+        same = bytes(scr.pixel_indices) == bytes(want)
+        diff = sum(1 for a, b in zip(bytes(scr.pixel_indices), bytes(want)) if a != b)
+        ok &= same
+        print(f"  ({vx}+{fx:#06x},{vy}+{fy:#06x},{va:#010x}): {term.op_counter:,} ops  "
+              f"{'BYTE-EXACT' if same else f'!! {diff} px DIFFER'}   {why}", flush=True)
+    return ok
 
 
 def phase1(fjm):
@@ -364,6 +423,7 @@ def main():
     tics = int(sys.argv[1]) if len(sys.argv) > 1 and not sys.argv[1].startswith("-") else 8
     fjm = build()
     ok = phase1(fjm)
+    ok &= phase1b(fjm)          # CR-2026-08: the fractional class -- see FRAC_VPS
     ok &= phase2(fjm, tics)
     if MOVING:
         ok &= phase3(fjm)

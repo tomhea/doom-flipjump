@@ -285,6 +285,29 @@
         "UNEXPLAINED": "The sweep feeds keys=0, so the player sim is a no-op and COLLISION NEVER RUNS -- yet the frame costs 7% more. So collide=True changes something STRUCTURAL, not just adding an untaken branch. Recorded as measured-and-unexplained; do NOT rationalise it. Cheapest next step: opprof the two binaries at one viewpoint and diff the per-macro attribution, or emit-hash the two programs and diff the emitted parts."
       },
       "GATE_STATUS": "m14_gate --things 8 FAILED its VACUITY control on the collide binary: 'collision changed the outcome on 0 of 8 tics'. Phases 1, 1b and 3 were clean and phase 2's frames matched -- the gate correctly refuses to certify a collision build in which nothing ever hit a wall. Re-running with 20 tics."
+    },
+    {
+      "id": "B4b-rerun",
+      "date": "2026-08-19",
+      "what": "Can the SHIPPED program render a second frame? Measured at full scale (78,626,386 words).",
+      "how": "python scratchpad/_rerun2.py scratchpad/fjmcache/m14_bin_coll_things_cull.fjm",
+      "CONFIRMED": {
+        "frame1": "46,384,263 ops in 0.5s, 16000 px",
+        "low_words_changed_by_a_frame": "word 1: 0x87380 -> 0x87180 (xor 512); word 2: 0x0 -> 0x3 (xor 3)",
+        "frame2_nothing_restored": "9 ops -- the documented death, reproduced at shipped scale",
+        "meaning": "word 1 is the jump field of the program's FIRST op, so run 2 enters 8 ops before code_start, lands in the stack error handler and hits ;0. The 'one run = one frame' wall IS the low words."
+      },
+      "CORRECTION": {
+        "claim_I_repeated": "'restoring word 1 turns 9 ops into 424,376' -> I framed the standalone loop as nearly free.",
+        "what_the_measurement_shows": "With words 1 and 2 restored, frame 2 does NOT die -- and does NOT terminate either: still running after 560s where frame 1 took 0.5s (>1000x). The latches from frame 1 (tsstop, n_claimed, sshead/thnext, the 640 latch-array bytes, pmax) drive an unbounded run.",
+        "the_tell_was_already_there": "424,376 ops is not a frame: that binary's real frame is ~15M ops. The investigation's own number showed the frame never completed; I read it as encouraging instead of incomplete.",
+        "honest_position": "The standalone .fjm needs the FULL reset prologue (~2,500 enumerated cells), not a one-word patch. Still bounded and still days rather than weeks -- but the one-bit finding is a PRECONDITION, not the solution."
+      },
+      "NEXT": [
+        "Write the reset prologue from the enumerated cell list (640 latch bytes + 17 scalars + pmax=159 not 0 + ~1,866 accumulator cells), using the compile-time unrolled clear the emitter already emits for vpc_flags.",
+        "\u26a0 sshead/thnext are 74% of the cells and their STRIDE is unverified -- three prior probes disagreed. An R9 negative-controlled stride probe is a hard prerequisite.",
+        "Then prove correctness with m14_gate phase 2 driven by the PROGRAM's restore instead of the host's, requiring pixel equality per tic."
+      ]
     }
   ]
 }

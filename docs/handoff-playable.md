@@ -94,6 +94,53 @@ walker's, because that is the one a player sees — make `build.py` emit it, mak
 and delete the divergence. Everything after this point assumes one picture.
 
 **A0.2 — Resolve the two open correctness claims. BLOCKING for anything touching projection.**
+
+> ### ✅ A0.2 DONE — BOTH CONFIRMED (2026-08-17) AND BOTH FIXED + GATED (2026-08-18).
+>
+> `scratchpad/_pj1_probe.py` and `scratchpad/_pj2_probe.py`, each with two-sided controls (R9),
+> each ~30 seconds, no build:
+>
+> | | as shipped | the proposed fix |
+> |---|---|---|
+> | **PJ-1** `wedge_bbox_plane` vs `bbox_wedge_miss`, 8 planes × 5 positions × Qtrue∈{-1,0,+1} | 110 agree / **10 DIFFER** | 120 agree / 0 DIFFER |
+> | **PJ-2** absmul vs `fixed_mul`, 10 (a, viewx) cases | 5 agree / **5 DIFFER** (all +1 ULP) | 10 agree / 0 DIFFER |
+>
+> **They are not merely latent.** PJ-1's dangerous direction reproduces exactly as predicted
+> (`fy<fx, m=5, Qtrue=0`: the oracle keeps the box, fj culls the whole BSP subtree — its walls,
+> plane claims, step faces and things). Controls that make this quotable rather than suggestive:
+> integer positions agree in both modes; PJ-1's q=0/q=2 planes agree everywhere; PJ-2's even-`a`-at-
+> a-half-unit agrees while odd-`a` at the same offset differs, which is the R17 vacuity the finding
+> predicted, now asserted instead of assumed.
+>
+> **BOTH ARE NOW FIXED (2026-08-18).** Owner directed the fixes before B0, which was the right call:
+> B0 makes fractional positions the shipped path, so after it they would be live bugs in the game.
+>
+> * **PJ-1 — THE ORACLE MOVED, NOT fj.** `mapcompiler.bbox_wedge_miss` now floors AFTER combining
+>   (16.16 eye threaded through `visible_segs`/`bsp_render_order`). ⚠ The first attempt went the
+>   OTHER way, on a stated-but-false claim that both rounding forms are conservative. They are not:
+>   only floor-after-combining has error `frac(E) ∈ [0,1)` on all four q, so only it can never
+>   over-cull. Per-axis flooring gives q=3 error `fx+fy ∈ [0,2)`, culling boxes that are genuinely
+>   INSIDE — and the wedge's angular slack is ZERO at view angles that are exact multiples of 45°,
+>   two of which are certified gate angles. **fj emission is UNCHANGED by PJ-1 — zero op cost.**
+> * **PJ-2 — fj moved to the oracle's signed multiply, at THREE sites**, the third
+>   (`frame_render.fj` `seg_pass1_leaf_body_proj`) not listed in the finding. flipjump warns on an
+>   unused macro parameter under `--werror`, so the four dead abs/sign params forced a fan-out
+>   through 7 files; safe on rule 4 because no Python f-string emits those calls.
+>
+> **⇒ NEW GATE CAPABILITY: `m14_gate` PHASE 1b — six FRACTIONAL viewpoints, byte-exact.** Before it,
+> no gate in this repo could fail on either bug, which is exactly why both survived. One offset
+> (`0x8000`) is labelled PARTLY VACUOUS in place: PJ-2 only diverges at a half unit for an ODD seg
+> coefficient (R17). PJ-3 is therefore partly discharged — the *class* is now gated, though the
+> per-macro kernel tests it asks for are still missing.
+>
+> ⚠ It proves AGREEMENT, not absence: both bugs need a boundary condition on top of the fraction,
+> so **the probes remain the proof** and phase 1b is the regression net. No per-frame incidence was
+> measured for PJ-1; do not quote one.
+>
+> **COST, both sides measured in one session:** median **27,722,912 → 27,850,134 (+0.46%)**; the four
+> gate viewpoints moved ~2%, which is itself a demonstration of §0 (worst cases are not the frame).
+> ALL of it is PJ-2's operand order — filed as **PJ-2b** with the weighted cost model and the
+> exact-and-cheaper form `fixed_mul_lo(-a, |viewx|)`, DEFERRED TO BATCH 2 so it shares a build.
 `PJ-1` (`wedge_bbox_plane` reads a 4-nibble slice while its oracle mirror `bbox_wedge_miss` uses
 integer coords) and `PJ-2` (the M13-absmul "multiply |viewx|, negate the product" identity holds only
 when the product's low 16 bits are zero). Both are *premise deaths* from M14 making view positions
@@ -369,6 +416,33 @@ document as **300M fj/s** — the native C engine measures 144.6M–186.3M effec
 today, so 300M is a plausible faster box. ⚠ If 300 ops/second was meant literally, a 29.4M-op frame
 takes ~27 HOURS and nothing in this plan applies; confirm before relying on §4.2.
 
+> ### ✅ MEASURED 2026-08-17 (B4.1 step 1) — THE FLOOR IS NOT PERMANENT. §4.2 BELOW IS SUPERSEDED.
+>
+> `scratchpad/dirty_census.py --m14 --things --exact --gatevps`, on the certified A0.3 binary. Exact
+> walk of all 68,223,650 words, no sampling; its negative control (two pristine images, full walk)
+> reports 0 differ; the four frames' op counts reproduce the certified gate figures to the digit.
+>
+> | frame | dirty words |
+> |---|---|
+> | (664,291) / (1272,−724) / (1869,479) / spawn | 5,366 / 3,910 / 4,323 / 3,891 |
+> | **UNION of all four** | **6,685 of 68,223,650 = 0.0098% (~0.05 MB of 546 MB)** |
+>
+> Coalesced: **216 ranges covering 0.22 MB** (gap 256), or 41 ranges / 28 MB at gap 65536. The
+> union is far below the sum (6,685 vs 17,490 if disjoint), so each frame dirties largely the SAME
+> region — what a static bound needs. **The blanket memcpy is ~99.99% waste.**
+>
+> ⇒ At 300M fj/s with a free reset, the A0.3 median of 27.72M is ~92 ms ≈ **10.8 fps**, and 30 fps
+> needs roughly a 10M-op frame. **Ops, not the floor, are what stand between this and 30 fps** —
+> so Step A's long tail is worth working, which is exactly what §8 asked this measurement to decide.
+>
+> ⚠ NOT ESTABLISHED: this measured the dirty SET, not a working restore. The sub-millisecond reset
+> is arithmetic from bytes-moved; per-range overhead is unmodelled. That is **B4.1 step 2** (change
+> `fastrun`'s reset path and re-time it) and it is now the highest-value item in the document.
+> ⚠ ALSO NOT COVERED: all four frames are `keys=0`. A MOVING tic runs the sim and writes player
+> state and may dirty more — 6 seconds per frame to check, do it before designing the mechanism.
+> ⚠ TOOL NOTE: the exact walk costs 6 SECONDS per pass. The sampler and its confidence interval
+> were never necessary; prefer `--exact`.
+
 ### 4.2 ⚠ THE FLOOR: a fixed ~52 ms per frame that no amount of Step A removes
 
 **MEASURED this session**, on a 68M-word image via `FjmRunner`'s C `freeze()`/`reset()` path:
@@ -620,15 +694,55 @@ the shipped artifact.
 New, unrun: the §4.2/B4.1 dirty-word sampler with its R9 negative control (a pristine core compared
 against itself must report 0% dirty). See step 2 below.
 
+### ✅ SESSION 2026-08-17 (second): steps 1-3 below are DONE. State after them:
+
+* **A0.1's owed span gate: PASSED.** `pytest tests/host -m slow` = `1 passed, 245 deselected in
+  1783.21s (0:29:43)`. Flat, under 2^26, inside the sanity band, and the tier/features assertions
+  now check all seven emit flags. ⚠ 29:43, not ~70 min — that figure was the pre-A0.1 WPX build.
+  ⚠ The run proved the BOUNDS, not the span figure: the test asserted and printed nothing. A
+  metrics print was added so the next run records span / `.fjm` bytes / assemble seconds.
+* **A0.1 had a FAN-OUT MISS.** `deg_gate` got `bbox_cull=True`; `tests/host/test_e1m1_integration.py`
+  (still asserting `WPX`), `m14_gate.py`, `m14_basegate.py` and `opprof.py` did not — the last two
+  while their docstrings claim to mirror `deg_gate` "VERBATIM". All fixed, M14 cache key bumped to
+  `m14_bin_things_cull.fjm` so the pre-A0.1 binary cannot be silently reused. `build.py`'s metrics
+  now report all seven flags, so the next divergence is visible in `metrics.json`.
+* **A0.3 — THE BASELINE EXISTS.** See the table below and `scratchpad/perf-ledger.json`.
+* **B4.1 step 1 — DONE, exactly.** See the §4.2 banner: the floor is ~99.99% waste and removable.
+* **A0.2 — DONE. Both PJ-1 and PJ-2 CONFIRMED as real bugs** (see the A0.2 banner in §1). Neither
+  is fixed, and neither CAN be certified until the gate has a fractional viewpoint.
+
+**THE A0.3 BASELINE — the number every Step-A rung is scored against:**
+
+| metric | value | how |
+|---|---|---|
+| **median (warm)** | **27,722,912** | `m14_sweep.py <m14_bin_things_cull.fjm> --things`, 260 frames |
+| mean / p90 / p99 / worst | 28,180,748 / 42,959,278 / 52,237,021 / 56,379,978 @ (2637,1247,0x80000000) | same |
+| tail | under 20M 45/260 · under 26M 110/260 · under 30M 159/260 | same |
+| median (cold) | 32,657,488 | same, `--cold` |
+| 4 gate viewpoints (worst case) | 52,194,203 / 44,260,279 / 47,671,745 / 41,812,643 | `m14_gate.py --things 8`, PASS byte-exact ×3 phases |
+
+Three things this baseline establishes that change how the backlog reads:
+
+1. **The gate viewpoints sit between p90 and p99.** They overstate the typical frame by ~1.5–1.9×.
+   With a 2.0× median-to-worst spread, **track median AND p90** — one number cannot represent it.
+2. **The binding cache is worth exactly 4,934,576 ops on EVERY frame** — identical to the digit at
+   min, median, worst and all four gate viewpoints. It is a fixed prologue over 75 runtime things
+   (65,794 ops each), paid per THING and not per VISIBLE thing. That is ~18% of the median and it
+   is the same shape as Batch 8's SI-1 empty-leaf skip — **re-price SI-1 against this** before
+   accepting the reviewers' modelled 0.7–2.2%.
+3. **The sweep's worst frame (2637,1247) is not a gate viewpoint.** The gate's worst is 52.2M; the
+   sweep found 56.4M elsewhere. Consider adding it to the gate set.
+
 ### Then, in order (§8)
 
-1. **A0.3** — build the M14 tier (`state_wire="bin"`, `player_sim=True`, `moving_things=True`,
-   things on) at the A0.1 config, cache the `.fjm`, run `scratchpad/m14_sweep.py` (also `--cold`).
-   **This median is the number every Step-A rung is scored against**, and it is still UNMEASURED.
-2. **B4.1 step 1** — `python scratchpad/dirty_census.py <cached.fjm> --feed ...` on that binary.
-   ⚠ Use the BINARY wire feed for an M14-tier build; a decimal feed halts it after ~200 ops and the
-   script says so rather than reporting a meaningless fraction.
-3. **A0.2** — the PJ-1/PJ-2 probes. 4. **B0** — wire the sim. 5. **G1** — the regression guard.
+1. ~~**A0.3**~~ DONE. 2. ~~**B4.1 step 1**~~ DONE. 3. ~~**A0.2**~~ DONE (both CONFIRMED).
+4. ~~**PJ-1/PJ-2 decision**~~ RESOLVED: owner chose fix-before-B0. Both fixed, gated byte-exact
+   (`deg_gate` ×4, `m14_gate` phases 1/1b/2/3), median cost +0.46%. `m14_gate` phase 1b is the new
+   fractional-viewpoint net. Open follow-up: **PJ-2b** (operand order, ~2% at gate viewpoints /
+   0.46% at the median) → Batch 2.
+5. **B4.1 step 2** — the dirty-range restore. Highest-value item in the document: it is what makes
+   every Step-A op win convert into fps.
+6. **B0** — wire the sim. 7. **G1** — the regression guard (`scratchpad/perf-ledger.json` started).
 
 ### Where everything lives
 

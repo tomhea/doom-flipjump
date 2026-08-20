@@ -243,11 +243,22 @@ spawn (-416,256,0x0)      46,927,659      1     0x0     0x200   0x3
   frame, listed words 1 and 2 but not word 0.
 
 **Receipt 2 — a write of the value that is already there is invisible to every measurement.**
-`thpos_rt`'s 1,200 words are **entirely absent** from every census, because the wire feeds the
-baked spawn positions, so all 1,200 `hex.input` writes are zero-delta. The moment a thing actually
-moves, up to 1,200 words appear that no learn run has ever seen. The same mechanism suppresses most
-of `thnext` (there is no 75-long stride-2 progression anywhere in the image, because
-`thnext[t] = sshead[ptss]` is 0 for the first thing in each leaf).
+`thpos_rt`'s 1,200 cells are **entirely absent** from every census, because the wire feeds the
+baked spawn positions, so every `hex.input` write is zero-delta. **Measured two-sided**, same
+harness, same frame, only the fed positions differ:
+
+```
+UNMOVED (the control):   46,927,659 ops, 3,905 dirty words ->    0 inside thpos_rt
+MOVED by +64 map units:  47,043,633 ops, 3,994 dirty words ->   92 inside thpos_rt
+                                                (offsets 11..2379, every one odd)
+```
+
+92 words that **no census in this repo's history has ever seen**, produced by moving things 64
+units — and they appear in one step, from a region a learned range-set would have marked clean.
+(92 rather than 1,200 because +64 changes only some nibbles of each 16-nibble position and leaves
+`y` alone; a real move changes more.) The same mechanism suppresses most of `thnext` — there is no
+75-long stride-2 progression anywhere in the image, because `thnext[t] = sshead[ptss]` is 0 for the
+first thing in each leaf.
 
 And **150 words are dirty at keys=0 but not at keys≠0** — no single configuration is a superset of
 the others. Only the union is meaningful.

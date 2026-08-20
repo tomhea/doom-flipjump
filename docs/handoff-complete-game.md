@@ -120,22 +120,32 @@ Cheapest of the three content milestones and a good confidence-builder after M1.
 
 ---
 
-## M4 — More levels ⚠ **BLOCKED ON YOUR DECISION**
+## M4 — More levels — ✅ **DECIDED 2026-08-20: THREE LEVELS, NOT THE FULL EPISODE**
 
-**9 levels is impossible.** Three in one image (E1M1 + E1M5 + E1M8) is **88.7% of the 65,536
-band-index cap**, and it is the only standalone-compatible option (a standalone `.fjm` cannot load a
-wad at runtime).
+Owner's call, verbatim: *"yes, try 3 levels at first, and not the whole line, if the space is too
+big for that."* So: **target three levels in one image (E1M1 + E1M5 + E1M8); the full 9-level
+episode is explicitly OUT; and if three does not fit, scale down rather than push.**
 
-The build-cost objection is gone (~30 min for three levels, was 4–5 hours). What remains is a
-product choice only you can make:
+⚠ **THE FIRST M4 TASK IS NOT A BUILD — IT IS RE-DERIVING THE BUDGET.** "Three levels = **88.7% of
+the 65,536 band-index cap**" is a projection carried over from an earlier session and **has not been
+re-measured against the current emitter**. 88.7% leaves **11.3% of margin**: if that projection is
+off by even an eighth, three levels does not fit, and you would find out after a ~30-minute build
+instead of after an afternoon of arithmetic. Re-derive the per-level band-index count from the
+emitter first, then decide.
 
-| option | fits? | cost |
+The fallback ladder, in order, if three does not fit:
+
+| step | what | when to take it |
 |---|---|---|
-| 3 levels in one image | 88.7% of cap | ~30 min build, ~87 MB `.fjm` at fast LZMA |
-| 1 level, more polish | 30% of cap | today |
-| more levels, lower detail per level | ? | needs a detail-vs-count study |
+| 1 | 3 levels, full detail | budget re-derived and under ~90% |
+| 2 | 3 levels, reduced far-detail on levels 2–3 (the DEG knobs already exist) | over cap by < ~20% |
+| 3 | 2 levels, full detail | over cap by more |
+| 4 | 1 level + polish | last resort |
 
-**I need your call on this before M4 can start.**
+Never the full episode — it was measured impossible and the owner has ruled it out.
+
+Build cost is no longer an objection: ~30 min for three levels (was 4–5 hours). Standalone-
+compatibility is why they must share one image — a standalone `.fjm` cannot load a wad at runtime.
 
 ---
 
@@ -163,8 +173,9 @@ M1 self-reset ──┬── M2 doors ──┐
    (THE GATE)   ├── M3 menu ───┼── M6 ship
                 └── M4 levels ─┘        ▲
                        │                │
-                  YOUR DECISION     M5 standalone
-                                     (needs M1)
+                 3 levels (decided) M5 standalone
+                 re-derive budget    (needs M1)
+                 BEFORE building
 ```
 
 ---

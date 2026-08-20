@@ -361,7 +361,17 @@ json.dump({"fjm": args.fjm, "words": len(words), "labels": len(regions), "nonzer
 print(f"  wrote {args.dump}")
 
 
-def validate(patch, cases, label, quiet=False):
+def validate(patch, cases, label, quiet=False, rerun=True):
+    """rerun=False skips the frame-2 re-run and judges on the walk alone.
+
+    ⚠ THE ABLATION MUST PASS rerun=False, AND THIS IS NOT AN OPTIMISATION. A hole in a LINKED-LIST
+    head does not merely change the op count: leave `sshead` unrestored and frame 2 does not
+    terminate at all -- `bind_things` prepends onto a list that is already non-empty and
+    `thing_pass` walks a chain that can close on itself. MEASURED: killed at 180 s against a 0.22 s
+    clean re-run (`scratchpad/m1c_hole.py --drop sshead`, exit 124; the control exits 0).
+    `_fjcore.Memory.run` takes no op cap, so a re-run inside the ablation loop is an unbounded hang.
+    The walk alone is sufficient evidence for the ablation: `left > 0` already means insufficient.
+    """
     ok = True
     for c in cases:
         vx, vy, va, keys = c[0], c[1], c[2], c[3]
@@ -374,14 +384,20 @@ def validate(patch, cases, label, quiet=False):
         for a, vals in patch:
             core.set_words(a, vals)
         left = walk_count(core, limit=None if not quiet else 500)
-        ops2, px2 = run(core, f)
-        good = (left == 0) and (ops2 == ops1) and (px2 == px1)
+        if not rerun:                       # ablation: the walk alone decides (see the docstring)
+            good = (left == 0)
+            ops2, px2 = ops1, px1
+        else:
+            ops2, px2 = run(core, f)
+            good = (left == 0) and (ops2 == ops1) and (px2 == px1)
         ok &= good
         if not quiet or not good:
+            tail = (f"re-run {ops2:,} {'==' if ops2 == ops1 else '!='}, pixels "
+                    f"{'match' if px2 == px1 else 'DIFFER'}" if rerun else
+                    "re-run SKIPPED (would not terminate on a linked-list hole)")
             print(f"  {label} ({vx>>16},{vy>>16},{va:#x},k={keys},d=({dx},{dy})): {ops1:,} ops "
-                  f"-> {left:,} differ after restore; re-run {ops2:,} "
-                  f"{'==' if ops2 == ops1 else '!='}, pixels "
-                  f"{'match' if px2 == px1 else 'DIFFER'}  {'ok' if good else 'FAIL'}", flush=True)
+                  f"-> {left:,} differ after restore; {tail}  {'ok' if good else 'FAIL'}",
+                  flush=True)
         del core
         if not good and quiet:
             return False
@@ -411,7 +427,7 @@ if args.ablate:
         a, b = regions[n][0], regions[n][1]
         sub = [x for x in words if not (a <= x < b)]
         failed = not validate(patch_for(sub), BUILT_FROM[:1] + HOLDOUT[2:3],
-                              f"ablate<{n[:24]}>", quiet=True)
+                              f"ablate<{n[:24]}>", quiet=True, rerun=False)
         print(f"  drop {n[:36]:<36} ({sz:>5,} w, set {len(sub):,}): "
               f"{'ok -- FAILED as required' if failed else '!! STILL PASSED -- no teeth'}",
               flush=True)

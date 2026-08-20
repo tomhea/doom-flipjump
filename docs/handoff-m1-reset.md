@@ -396,17 +396,36 @@ frame-2 pixels matched and only the op count moved. `deg_gate` compares pixels. 
 of this** — which is exactly why the gate for M1c has to be the exact 84.8M-word walk plus the op
 count, not a picture.
 
+### A hole in a linked-list head does not diverge — it does not TERMINATE
+
+`scratchpad/m1c_hole.py` punches one label out of the set and runs the next frame, under an
+external timeout because `_fjcore.Memory.run` takes no op cap:
+
+```
+--drop none    (the CONTROL)  frame 2  57,364,424 ops in 0.22s   ops ==, pixels match   exit 0
+--drop spslot  (5,120 words)  frame 2  57,362,405 ops in 0.19s   -2,019 ops             exit 0
+--drop sshead  (2,728 words)  frame 2  DID NOT TERMINATE -- killed at 180 s             exit 124
+```
+
+`sshead` is the **head array of a linked list**. Leave it stale and `bind_things` prepends onto a
+list that is already non-empty, so `thing_pass` walks a chain that can close on itself. That is
+almost certainly what commit `3046a40` hit when it restored the two low words and reported "STILL
+RUNNING AFTER 560s": **not a slow frame — a cycle.** It also means the ablation loop must judge on
+the walk alone and never re-run, or the control hangs (it did, for 35 minutes, before this was
+understood).
+
 ### What this does NOT prove
 
 - **Eleven frames, one map, one build config.** It shows the *construction rule* generalises to
   frames it was not built from — which a learned range set demonstrably does not — but "declared
   state ∪ macro-local vectors" is still a rule about this emitter's output, re-checkable only by
   running the holdout. Config sensitivity from §4.5 applies unchanged.
-- **The ablation control is weaker than it looks.** It drops one label and requires failure, but
-  only for the two probe frames it re-runs — so it demonstrates teeth for a label those frames
-  actually dirty (`spslot` and `sfslot` each failed as required, 5,120 words apiece) and proves
-  nothing about a label they do not. It is a demonstration that the validation *can* detect a hole,
-  not a per-label necessity proof.
+- **The ablation control is narrower than it looks.** It drops one label and requires failure, but
+  only for the probe frames it runs — so it demonstrates teeth for a label those frames actually
+  dirty and proves nothing about a label they do not. All 8 labels tried failed as required
+  (`spslot`/`sfslot` 500 words each, `thss_rt` 166, `sfflag` 127, `thvis` 123, `sprflag` 106,
+  `sshead` 35, `stl.IO` **1**), so the validation detects holes down to a single word — but that is
+  a demonstration that it *can* detect a hole, not a per-label necessity proof.
 - **The read-only LUTs are untested as droppable.** 231,418 of the 363,832 words are baked LUTs
   (`stepcol`, `lnrow`, `finetangent`, `slopediv_recip`, `tantoangle`, `viewangletox`, `bklin`);
   restoring them is safe but pure cost, and nothing here has yet re-run the validation **without**

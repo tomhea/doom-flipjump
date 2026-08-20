@@ -108,8 +108,13 @@ cross-check it against the census.
 - the set is **DERIVED**, not learned: the full `[label, next label)` extent of (a) the 265
   emitter-declared runtime-state labels, (b) the 6,546 macro-locals whose name is declared
   `hex.vec`/`bit.vec` anywhere — including in **generated** macros, which exist in no `.fj` file —
-  and (c) 9 observed extras. **6,821 labels → 363,832 words (0.43% of the image), of which 231,418
-  are droppable read-only LUT, so ~132k words are essential.**
+  and (c) 9 observed extras. With `--drop-luts`: **6,813 labels → 132,414 words = 66,207 hex cells
+  in 3,768 runs, only 7,330 of them non-zero.** So ~94.5% of the prologue is a clear-to-zero, and
+  the values it does need are read out of the assembled image.
+- ⚠ **a hole in `sshead` does not diverge — it HANGS.** `sshead` is a linked-list head; leave it
+  stale and `bind_things` prepends onto a non-empty list and `thing_pass` can walk a cycle.
+  Measured: frame 2 killed at 180 s against a 0.22 s clean re-run. That is almost certainly what
+  `3046a40` saw as "STILL RUNNING AFTER 560s".
 - **11 of 11 frames** restore to a **0-differ exact walk over all 84,823,030 words**, with the
   re-run reproducing op count and pixels byte for byte — including **7 holdout frames the set was
   never built from** (three never-censused viewpoints, a moved-things wire, turn-only key states).

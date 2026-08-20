@@ -342,13 +342,19 @@ Those three overlap; deduplicated the tool reports **6,821 labels** (`{macrovec:
 derivation now covers essentially everything the census found, which is the point.
 
 ```
-6,821 labels -> 363,832 words (0.429% of the image, ~2.9 MB) in 3,766 runs
-  81,573 of them NON-ZERO in the pristine image (22.4%)
-  231,418 of them read-only LUTs -- safe but pure cost, droppable -> ~132k essential
+with the read-only LUTs   6,821 labels -> 363,832 words (0.429%),  81,573 non-zero (22.4%)
+--drop-luts   (SHIP THIS) 6,813 labels -> 132,414 words (0.156%),   7,330 non-zero ( 5.5%)
+                                       = 66,207 hex cells in 3,768 runs
 ```
 
 **Result: 11 of 11 frames restore to a 0-differ exact walk over all 84,823,030 words, and the
-re-run reproduces the op count and the pixels byte for byte.**
+re-run reproduces the op count and the pixels byte for byte — with OR without the LUTs.**
+The eight read-only LUTs (`stepcol`, `lnrow`, `finetangent`, `slopediv_recip`, `slopediv_recip8`,
+`tantoangle`, `viewangletox`, `bklin`) really are never written: dropping their 231,418 words
+changes no verdict, and cuts the non-zero cells — the ones that need a `hex.set` rather than a
+`hex.zero` — from 81,573 to 7,330.
+
+**So the fj prologue is ~66,207 cells, of which ~94.5 % are a clear-to-zero.**
 
 ```
 VALIDATION A (4 frames the set was built from)   all 0 differ, ops ==, pixels match
@@ -426,11 +432,8 @@ understood).
   (`spslot`/`sfslot` 500 words each, `thss_rt` 166, `sfflag` 127, `thvis` 123, `sprflag` 106,
   `sshead` 35, `stl.IO` **1**), so the validation detects holes down to a single word — but that is
   a demonstration that it *can* detect a hole, not a per-label necessity proof.
-- **The read-only LUTs are untested as droppable.** 231,418 of the 363,832 words are baked LUTs
-  (`stepcol`, `lnrow`, `finetangent`, `slopediv_recip`, `tantoangle`, `viewangletox`, `bklin`);
-  restoring them is safe but pure cost, and nothing here has yet re-run the validation **without**
-  them. Do that before sizing the fj prologue — it is one no-build run and it decides whether the
-  prologue is ~132k words or ~364k.
+- **The LUT drop is validated on the same 11 frames, no more.** `--drop-luts` passes all 11, which
+  is evidence those eight labels are never written — not a proof that no code path writes them.
 
 ---
 
@@ -440,10 +443,16 @@ understood).
    in evidence are three: word 0 (op 0 flip), word 1 (op 0 jump — the 9-op death), word 2
    (`stl.IO`), plus `hex.pointers.to_flip`'s first word at 1030.
 2. **Word 1 must be restored unconditionally**, even though it is clean on one gate viewpoint.
-3. Cost looks small — ~10k cells at ~20 ops each is ~0.2M ops against a ~47M-op frame (~0.4 %) —
-   but that is arithmetic from a cell count, **not a measurement**. Measure it.
-4. Restoring `sfslot`/`spslot` and the ~900 `@`-scratch registers is the bulk; `sshead`/`thnext`
-   are noise.
+3. **The set is settled: 132,414 words = 66,207 hex cells in 3,768 runs, only 7,330 of them
+   non-zero.** So ~94.5 % of the prologue is "clear this cell", and the pristine values it does
+   need are read straight out of the assembled image — they never have to be re-derived.
+4. Cost is **not yet measured**. Naive arithmetic (66k cells × 5–20 ops) puts it at 0.3M–1.3M ops
+   against a ~47M-op frame, i.e. **0.7 %–2.8 %** — but that is a guess from a cell count, and this
+   repo's rule is that a number is not a number until the harness prints it. Measure it, and note
+   that a contiguous run can be cleared with one `hex.zero n, addr` rather than n separate ones.
+5. Restoring `sfslot`/`spslot` and the ~900 `@`-scratch registers is the bulk; `sshead`/`thnext`
+   are noise **in size** — but `sshead` is the one whose omission hangs the program, so "small" and
+   "unimportant" are not the same thing here.
 5. `stl.startup_and_init_all` executes exactly one op and jumps over all six truth tables, and the
    tables measure clean — so an in-program loop does not have to re-run it. That is a source claim
    about a macro that has only ever run once, and it becomes load-bearing the moment the program

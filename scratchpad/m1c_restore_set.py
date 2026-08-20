@@ -85,6 +85,10 @@ ap.add_argument("--dirty", default="scratchpad/_m1_dirty_grand.json.gz")
 ap.add_argument("--gen", default="scratchpad/fjmcache/_rssgen")
 ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
 ap.add_argument("--ablate", type=int, default=8)
+ap.add_argument("--drop-luts", action="store_true",
+                help="exclude the read-only LUTs. Restoring a region nothing writes is safe but is "
+                     "pure cost; this measures whether they are really never written, and the "
+                     "holdout is what decides -- do not drop them on the argument alone.")
 ap.add_argument("--dump", default="scratchpad/_m1c_restore_set.json.gz")
 args = ap.parse_args()
 
@@ -318,6 +322,12 @@ print(f"  macro-local declared-vec labels: {len(macrovec):,} "
 for e, n in sorted(skipped, reverse=True)[:4]:
     print(f"     skipped {e:>9,} words: {n[:80]}")
 
+
+if args.drop_luts:
+    for n in list(regions):
+        if n in READONLY_LUTS:
+            del regions[n]
+    print(f"  --drop-luts: removed {len(READONLY_LUTS)} read-only LUT labels from the set")
 lut_words = sum(b - a for n, (a, b, _s) in regions.items() if n in READONLY_LUTS)
 words = set()
 for n, (a, b, _s) in regions.items():
@@ -325,6 +335,9 @@ for n, (a, b, _s) in regions.items():
 words = sorted(words)
 wset = set(words)
 missing = [w for w in grand if w not in wset]
+if missing and args.drop_luts:
+    print(f"  !! --drop-luts removed {len(missing):,} words that a censused frame DID dirty -- "
+          f"a 'read-only' LUT is written after all")
 assert not missing, f"CONTROL 4 FAILED: not a superset -- {len(missing)} measured words absent"
 nz = sum(1 for w in words if PRISTINE.get_word(w) != 0)
 from collections import Counter                                           # noqa: E402
@@ -334,7 +347,8 @@ print(f"  -> {len(words):,} words ({100*len(words)/TOTAL:.5f}% of the image, "
       f"~{len(words)*8/1e6:.3f} MB)")
 print(f"  superset of the {len(grand):,} measured dirty words: ok")
 print(f"  NON-ZERO pristine values: {nz:,} ({100*nz/len(words):.1f}%) -- a memset(0) is WRONG")
-print(f"  of which READ-ONLY LUTs (safe but pure cost, droppable): {lut_words:,} words")
+print(f"  read-only LUT words still IN the set: {lut_words:,}"
+      + ("  (--drop-luts removed them)" if args.drop_luts else "  -- droppable with --drop-luts"))
 
 
 def coalesce(ws):
@@ -436,8 +450,9 @@ if args.ablate:
 print("\n" + "=" * 100)
 print(f"VALIDATION A (built-from) : {'PASS' if a_ok else 'FAIL'}")
 print(f"VALIDATION B (holdout)    : {'PASS' if b_ok else 'FAIL'}")
-print(f"CONTROL 2  (ablation)     : {'PASS -- the test has teeth' if c_ok else 'FAIL -- no teeth'}")
-print(f"restore set: {len(words):,} words, {len(RUNS):,} runs, {nz:,} non-zero, "
-      f"{lut_words:,} of it droppable read-only LUT")
+print("CONTROL 2  (ablation)     : " + ("SKIPPED (--ablate 0)" if not args.ablate
+      else ('PASS -- the test has teeth' if c_ok else 'FAIL -- no teeth')))
+print(f"restore set: {len(words):,} words = {len(words)//2:,} hex cells, {len(RUNS):,} runs, "
+      f"{nz:,} non-zero ({100*nz/len(words):.1f}%), {lut_words:,} read-only LUT")
 print("=" * 100)
 sys.exit(0 if (a_ok and b_ok and c_ok) else 1)

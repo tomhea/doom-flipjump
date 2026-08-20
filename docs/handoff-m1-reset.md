@@ -325,6 +325,96 @@ Everything here assumes `W = 32` (`harness.py:9`) and that the emitted program b
 
 ---
 
+## 4b. THE RESTORE SET IS DERIVED, AND IT SURVIVES EVERY HOLDOUT
+
+`scratchpad/m1c_restore_set.py` builds the set from the program rather than from observations, and
+then runs the real M1 gate on it in Python — **before any fj exists**. The set is the union of the
+full `[label, next label)` extent of:
+
+| source | labels contributed | where it comes from |
+|---|---:|---|
+| **declared** | 265 | every top-level label of `e1m1_05_state.fj`, `e1m1_01_tables.fj`, and the state prefix of `e1m1_06_banks.fj` (which ends at `thvis`; after it the file is baked banks) |
+| **macro-local vectors** | 6,546 | every label in the table mangled `…---<local>` whose `<local>` is declared `hex.vec`/`bit.vec` somewhere |
+| **observed** | 1,438 | anything a censused frame dirtied — kept as belt-and-braces |
+
+Those three overlap; deduplicated the tool reports **6,821 labels** (`{macrovec: 5,225, both:
+1,429, declared: 158, observed-only: 9}`). **Only 9 labels come from observation alone** — the
+derivation now covers essentially everything the census found, which is the point.
+
+```
+6,821 labels -> 363,832 words (0.429% of the image, ~2.9 MB) in 3,766 runs
+  81,573 of them NON-ZERO in the pristine image (22.4%)
+  231,418 of them read-only LUTs -- safe but pure cost, droppable -> ~132k essential
+```
+
+**Result: 11 of 11 frames restore to a 0-differ exact walk over all 84,823,030 words, and the
+re-run reproduces the op count and the pixels byte for byte.**
+
+```
+VALIDATION A (4 frames the set was built from)   all 0 differ, ops ==, pixels match
+VALIDATION B (7 HOLDOUT frames it never saw)     all 0 differ, ops ==, pixels match
+   including 3 never-censused viewpoints, a MOVED-things wire, and turn-only key states
+```
+
+### Why "macro-local vectors" is the whole trick
+
+Restoring *all* macro-locals is impossible: there are 5,128,268 of them and their label-to-label
+extents sweep up every jump target and the code between, totalling **47,145,920 words — 55 % of the
+image**. Filtering to those whose local name is *declared as a vector* collapses that to **6,546
+labels / 66,128 words**. It is small only because this repo puts every heavy body in a **shared leaf
+instantiated once** — the architecture that exists for assemble time turns out to be what makes a
+self-reset affordable.
+
+### Three parser shapes, each of which cost a holdout failure
+
+The derivation was wrong four times, and each time a holdout said so. Words still leaking after the
+restore, per run (`—` = the run stopped at an earlier failure and never reached that frame):
+
+| set | words | things moved | (1000,100) | (1500,-200) | (2100,800) |
+|---|---:|---:|---:|---:|---:|
+| observed labels only | 37,116 | **92** | — | — | — |
+| + declared state | 315,796 | 0 | 29 | 19 | 725 |
+| + macro-local vecs, same-line decls only | 340,358 | 0 | 2 | 14 | 169 |
+| + next-line decls (`ba:` / `.vec n`) | 363,094 | 0 | 2 | **0** | **0** |
+| + generated-macro and `rep(...)` decls | 363,832 | **0** | **0** | **0** | **0** |
+
+- **next-line declarations.** The stl writes `ba:` on one line and `.vec n` on the next
+  (`cond_jumps.fj:209-218`). A same-line-only regex misses `ba`/`bb` and every other stl scratch
+  vector — 185 words leaking out of `sim.check_line` alone.
+- **generated macros.** `w1rpat.walk_win` is written into the program by `lut_generator.py:878`, so
+  its `wl2: hex.vec 2` exists in **no hand-written `.fj` file**. A parser reading only `src/fj` +
+  the stl cannot see it. Two words, one viewpoint.
+- **`rep(...)` declarations.** `col_top: rep(160, i) hex.vec 8, 1`.
+
+Each of these is now a **named assertion** in the parser: it refuses to run if it stops seeing
+`ba`, `bb`, `wl2`, `wide_a` or `col_top`. A parser that quietly stops recognising a shape would
+otherwise just silently shrink the restore set, and the only symptom would be a different program
+next frame.
+
+⚠ **And every one of those failures was PIXEL-IDENTICAL.** In all nine leaking runs above the
+frame-2 pixels matched and only the op count moved. `deg_gate` compares pixels. **It cannot see any
+of this** — which is exactly why the gate for M1c has to be the exact 84.8M-word walk plus the op
+count, not a picture.
+
+### What this does NOT prove
+
+- **Eleven frames, one map, one build config.** It shows the *construction rule* generalises to
+  frames it was not built from — which a learned range set demonstrably does not — but "declared
+  state ∪ macro-local vectors" is still a rule about this emitter's output, re-checkable only by
+  running the holdout. Config sensitivity from §4.5 applies unchanged.
+- **The ablation control is weaker than it looks.** It drops one label and requires failure, but
+  only for the two probe frames it re-runs — so it demonstrates teeth for a label those frames
+  actually dirty (`spslot` and `sfslot` each failed as required, 5,120 words apiece) and proves
+  nothing about a label they do not. It is a demonstration that the validation *can* detect a hole,
+  not a per-label necessity proof.
+- **The read-only LUTs are untested as droppable.** 231,418 of the 363,832 words are baked LUTs
+  (`stepcol`, `lnrow`, `finetangent`, `slopediv_recip`, `tantoangle`, `viewangletox`, `bklin`);
+  restoring them is safe but pure cost, and nothing here has yet re-run the validation **without**
+  them. Do that before sizing the fj prologue — it is one no-build run and it decides whether the
+  prologue is ~132k words or ~364k.
+
+---
+
 ## 5. What this changes about M1c
 
 1. The prologue restores **cell VALUES**, not code. Across twelve frames the only code-side words

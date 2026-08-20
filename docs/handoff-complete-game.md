@@ -103,9 +103,22 @@ cross-check it against the census.
   of the four gate viewpoints**, and `thpos_rt`'s 1,200 words are invisible to every census because
   the wire feeds the values already baked there.
 
-**M1c — the fj reset prologue.** ~2,500 cells restored in fj at frame start. Cost must be small
-against the ~29.4M-op frame. Gate: run the same frame twice and require **identical op counts and
-identical pixels**, plus an exact 68M-word walk against the pristine image. *(days, builds)*
+**M1c — the fj reset prologue.** *(days, builds)* **The SET is now solved and validated in Python
+(`scratchpad/m1c_restore_set.py`); what is left is writing it in fj.**
+- the set is **DERIVED**, not learned: the full `[label, next label)` extent of (a) the 265
+  emitter-declared runtime-state labels, (b) the 6,546 macro-locals whose name is declared
+  `hex.vec`/`bit.vec` anywhere — including in **generated** macros, which exist in no `.fj` file —
+  and (c) 9 observed extras. **6,821 labels → 363,832 words (0.43% of the image), of which 231,418
+  are droppable read-only LUT, so ~132k words are essential.**
+- **11 of 11 frames** restore to a **0-differ exact walk over all 84,823,030 words**, with the
+  re-run reproducing op count and pixels byte for byte — including **7 holdout frames the set was
+  never built from** (three never-censused viewpoints, a moved-things wire, turn-only key states).
+- ⚠ **not ~2,500 cells** — that figure came from the same accounting as the 74%. And ⚠ **not
+  `memset(0)`**: 81,573 of the words are non-zero in the pristine image.
+- ⚠ **every leak found along the way was PIXEL-IDENTICAL and op-count-visible.** `deg_gate` cannot
+  see any of it. The gate must be the exact 84.8M-word walk + op count, not a picture.
+Gate: run the same frame twice and require **identical op counts and identical pixels**, plus an
+exact 84.8M-word walk against the pristine image, per frame.
 
 **M1d — the internal frame loop.** The program loops instead of the host re-launching it.
 **This is the first moment the thing is a game rather than a frame renderer.**

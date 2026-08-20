@@ -16,7 +16,7 @@ import flipjump as fj
 from flipjump.fjm.fjm_reader import Reader
 
 from doomfj.config import Config, FLAT_MAX_WORDS
-from doomfj.harness import W, assemble_fjm, run_fjm
+from doomfj.harness import W, FJM_LZMA_FAST, assemble_fjm, run_fjm
 from doomfj.lut_generator import (
     generate_dispatch_table_fj, generate_offset_deposit_table_fj, generate_trig_idioms_fj,
 )
@@ -168,7 +168,8 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
     out = Path(out_fjm)
     out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
-    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False)
+    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
+                lzma_fast=FJM_LZMA_FAST)
     assemble_seconds = round(time.perf_counter() - t, 3)
     term = fj.run(out, print_time=False, print_termination=False, flat_max_words=limit)
 
@@ -263,7 +264,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
 
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
-    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False)
+    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
+                lzma_fast=FJM_LZMA_FAST)
     assemble_seconds = round(time.perf_counter() - t, 3)
     term = fj.run(out, io_device=FixedIO(b"q\n"), print_time=False, print_termination=False,
                   flat_max_words=limit)                    # 'q' is not a digit -> input parser -> bad: -> halt
@@ -320,7 +322,8 @@ def build_present_slice(wad_path, *, cfg=None, col_x, color, out_fjm, generated_
     paths = [consts, Path("src/fj/present.fj"), Path("src/fj/framebuffer.fj"), gen / "main.fj"]
     out = Path(out_fjm)
     out.parent.mkdir(parents=True, exist_ok=True)
-    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False)
+    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
+                lzma_fast=FJM_LZMA_FAST)
 
     screen = InMemoryScreen()
     term = fj.run(out, io_device=screen, print_time=False, print_termination=False)
@@ -370,7 +373,7 @@ def build_textured_column(wad_path, texname, *, cfg=None, texcol, light, count, 
     out = Path(out_fjm)
     out.parent.mkdir(parents=True, exist_ok=True)
     fj.assemble([Path("src/fj/wall_render.fj").resolve(), (gen / "main.fj").resolve()], out,
-                memory_width=W, print_time=False)
+                memory_width=W, print_time=False, lzma_fast=FJM_LZMA_FAST)
     io = FixedIO(b"")
     term = fj.run(out, io_device=io, print_time=False, print_termination=False)
     return {
@@ -443,7 +446,8 @@ def build_unroll_frame(wad_path, texname, *, cfg=None, light, width=None, count=
     out = Path(out_fjm)
     out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
-    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False)
+    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
+                lzma_fast=FJM_LZMA_FAST)
     assemble_seconds = round(time.perf_counter() - t, 3)
 
     pixels = width * count

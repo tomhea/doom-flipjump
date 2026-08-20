@@ -7,7 +7,9 @@ frame. A Python twin — the **oracle** (`src/doomfj/reference_model.py`) — re
 independently, and the two must agree **byte for byte**.
 
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
-`docs/handoff-*.md` files for per-milestone detail.
+`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at
+`docs/handoff-complete-game.md`** — the road to a complete standalone game, and why the 9-op
+wall gates all of it.
 
 ---
 
@@ -16,6 +18,11 @@ Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review c
 **1. ⚠ ONE HEAVY BUILD AT A TIME.** Two concurrent E1M1 builds die silently — exit 255, empty
 output, no error. Every gate, bench and heavy test runs solo. If you are about to launch a build
 while another runs, don't.
+> **The cause is now known, and it was never an assembler bug: MEMORY EXHAUSTION.** The assembler
+> was memory-bound and paged — 129.4 MB of fj source became ~13.6 GB live on a 16.8 GB machine, so
+> two at once simply ran the box out of RAM. The 2026-08-20 assembler work (flipjump-151 06385ad +
+> 108e391) cut that live set hard, so concurrency *may* now be safe — but **the rule stands until
+> someone measures peak RSS of the current build and proves it.** Don't relax it on this note alone.
 
 **2. Byte-exactness is the contract.** A change that moves pixels moves them in *both* mirrors in
 the same commit, then re-certifies. "Looks fine" does not exist here. The proof is
@@ -51,9 +58,15 @@ Run these in order; each is cheaper than the next and rules out a different clas
 | `scratchpad/cr/alpha_check.py [ref]` | ~1 s | a pass renamed only `@`-locals/labels (rejects op/global/ns/param edits) |
 | `scratchpad/cr/expand_check.py <ref> <file> <outer> <sub>` | ~1 s | an extracted sub-macro expands to the exact ops it replaced |
 | `python -m pytest tests/host -q` | minutes | host logic. ⚠ CR-2026-08: this was documented as ~1 min with the heavy build test "normally deselected" — it was neither. There was no marker and no `addopts`, so the run walked into the ~70-min `test_build_wall_renderer_e1m1_flat` at 17%. `slow` is now a registered marker excluded by `addopts`; check the **"N deselected"** line to see the filter bound. |
-| `scratchpad/deg_gate.py` | ~20 min | **the real proof**: byte-exact ×4 + op counts to the digit |
-| the `steps=False` lines test | ~9 min | a config the certified gates never build (where a `rep`-gated `werror` break hides) |
-| `python -m pytest tests/host -m slow` | ~70 min | the **shipped** build path — excluded by default, so run it after touching `build.py` |
+| `scratchpad/deg_gate.py` | was ~20 min | **the real proof**: byte-exact ×4 + op counts to the digit |
+| the `steps=False` lines test | was ~9 min | a config the certified gates never build (where a `rep`-gated `werror` break hides) |
+| `python -m pytest tests/host -m slow` | was 29:43 | the **shipped** build path — excluded by default, so run it after touching `build.py` |
+
+⚠ **Every "was" above is a build-dominated cost measured BEFORE 2026-08-20, when the same program
+assembled in 1,729 s and now assembles in 559 s (3.1×; 11.3× against the original 6,332 s).** They
+are all substantially lower now and none has been re-measured. Read the number the run prints;
+do not quote these. Emission (~7 min for the sprite-bank tier) did **not** change and is now the
+larger half of most of these.
 | `scratchpad/bench.py …` | varies | op counts per viewpoint; byte-exactness asserted when un-ablated |
 
 All three `cr/` tools have self-tests — `alpha_check.py --selftest`, `expand_check.py --selftest`,

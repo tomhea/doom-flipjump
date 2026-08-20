@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import flipjump as fj
 from doomfj.config import Config
 from doomfj.fixedpoint import _signed
-from doomfj.harness import W
+from doomfj.harness import W, FJM_LZMA_FAST
 from doomfj.reference_model import spawn_state
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer
@@ -74,7 +74,7 @@ def main():
     (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
     t0 = time.perf_counter()
     fj.assemble([consts.resolve(), *[p.resolve() for p in src], (tmp / "m.fj").resolve()],
-                tmp / "m.fjm", memory_width=W, print_time=False)
+                tmp / "m.fjm", memory_width=W, print_time=False, lzma_fast=FJM_LZMA_FAST)
     assemble_seconds = round(time.perf_counter() - t0, 1)
 
     sp = spawn_state(mw, args.map)

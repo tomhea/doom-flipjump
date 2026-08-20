@@ -23,9 +23,11 @@ SPRITE_WAD = Path("assets/freedoom1.wad")     # V4 art: the cut-down fixture has
 # would have been 1.26x OVER, so the limit raise was required, not cosmetic.
 #   R4 shipped-tier metrics: tier=lines/W1R/FT1+plane_near span=84,823,030 words
 #   limit=134,217,728 headroom=1.582 fjm=23,432,034 bytes assemble=8054.988s
-# ⚠ ASSEMBLE IS NOW 2h14m (was ~30 min pre-B0). Every gate on this tier is a two-hour commitment,
-# and handoff G2 counts assemble time as a first-class budget -- price it into any plan that wants
-# several builds (three levels in one image projects to 4-5 hours).
+# ⚠ THAT 8,054 s FIGURE IS HISTORY. The assembler was rebuilt 2026-08-20 (flipjump-151 06385ad +
+# 108e391) and the SAME program now assembles in 559 s -- 9m19s, measured, decompressing to a
+# byte-identical 314,505,544-byte program image. The old note here said "every gate on this tier is
+# a two-hour commitment" and priced three levels in one image at 4-5 hours; both are now wrong by
+# an order of magnitude (three levels projects to ~30 min). See docs/handoff-complete-game.md.
 SPAN_LO, SPAN_HI = 70_000_000, 100_000_000    # bracketing the MEASURED 84.82M, not a guess:
                                               # 51.21M words (CR-2026-08 recalibration -- the old
                                               # 9-18M band predated V4-HD full-res sprite buckets,
@@ -127,7 +129,11 @@ def test_build_doom_subset_is_flat(tmp_path):
 
 # ── M12rr: the SHIPPED runtime wall renderer (build_wall_renderer) is flat under the RAISED limit ──
 
-@pytest.mark.slow          # CR-2026-08 (TS-10): ~70 min. Excluded by default; `-m slow` runs it.
+@pytest.mark.slow          # Excluded by default via addopts; `-m slow` runs it. SOLO (CLAUDE.md #1).
+                           # ⚠ COST UNMEASURED SINCE 2026-08-20. Last measured end-to-end at 29:43
+                           # (emit + assemble). The assemble half got 3.1x faster that day
+                           # (1,729 s -> 559 s on the same program), so expect roughly half -- but
+                           # this test prints its own `assemble=` line, so read that, don't guess.
 @pytest.mark.skipif(not SPRITE_WAD.exists(),
                     reason=f"{SPRITE_WAD} absent -- the shipped tier's V4 things need sprite lumps")
 def test_build_wall_renderer_e1m1_flat(tmp_path):
@@ -140,8 +146,9 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
     The shipped defaults are now the LINES tier with all four visual features on (WPX walls + FT1 floors
     + plane_near + V1 grain / V2 sky / V3 step faces / V4 things), which is what walk_e1m1 shows and what
     tests/fj/test_visual_features.py proves byte-exact. The sprite bank dominates the span; the bound
-    below is the sanity band around the measured figure, not a target. ⚠ SLOW (~10 min): the V4 build is
-    a ~42M-character program against a ~cubic assembler."""
+    below is the sanity band around the measured figure, not a target. ⚠ SLOW: the V4 build is a
+    ~42M-character program. (The assembler is LINEAR in program size -- measured exponent 1.12 --
+    not "~cubic" as this repo long assumed; what made it slow was paging, now fixed.)"""
     m = build_wall_renderer(E1M1, "E1M1", out_fjm=tmp_path / "renderer.fjm",
                             generated_dir=tmp_path / "gen",
                             flat_max_words=RENDER_FLAT_MAX_WORDS)

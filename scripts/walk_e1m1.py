@@ -43,7 +43,7 @@ from doomfj.things import baked_thing_mask, vanishable_slots
 from doomfj.wireformat import (encode_bindings, encode_feed, encode_things,
                                encode_visibility)
 from doomfj.fixedpoint import _signed
-from doomfj.harness import W
+from doomfj.harness import W, FJM_LZMA_FAST
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,
                                     ReferenceModel, spawn_state)
 from doomfj.wad import WadFile
@@ -201,7 +201,7 @@ def main():
     fjm = cache / f"w_{key.hexdigest()[:16]}.fjm"
     t0 = time.perf_counter()
     if fjm.exists():
-        print(f"cache HIT {fjm.name} -- skipping the ~23 min build", flush=True)
+        print(f"cache HIT {fjm.name} -- skipping the ~15 min build", flush=True)
     else:
         print(f"assembling the fj renderer ({args.map}, lines mode, "
               f"{args.wall_mode}+{args.floor_mode}"
@@ -209,7 +209,7 @@ def main():
               f"{'+' + '+'.join(on) if on else ''}) ...")
         if want_things:
             print("  (the sprite bank makes this a ~104M-character program: expect ~7 min to"
-                  " emit + ~16 min to assemble; the result is CACHED for later launches)",
+                  " emit + ~9 min to assemble; the result is CACHED for later launches)",
                   flush=True)
         main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
                                       floor_mode=args.floor_mode, wall_mode=args.wall_mode,
@@ -237,7 +237,8 @@ def main():
         consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
         (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
         fj.assemble([consts.resolve(), *[p.resolve() for p in (SRC_SIM if sim else SRC)],
-                     (tmp / "m.fj").resolve()], fjm, memory_width=W, print_time=False)
+                     (tmp / "m.fj").resolve()], fjm, memory_width=W, print_time=False,
+                    lzma_fast=FJM_LZMA_FAST)
         print(f"built in {time.perf_counter() - t0:.0f}s (cached as {fjm.name})", flush=True)
     print("loading the program", flush=True)
     runner = FjmRunner(fjm)          # parse + memory-image prep ONCE, not once per frame

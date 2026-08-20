@@ -56,7 +56,20 @@ levels are content that hangs off a working loop.
 | ✅ measured | restoring exactly those two words gets *past* 9 ops — so they are real |
 | ⚠ measured, and damning | …but frame 2 then runs **>560 s against frame 1's 0.5 s**. Those two words are a **symptom**, not the cause. |
 | ✅ measured | one frame dirties ~4–5k words of 68,223,650; the union of four very different frames is 6,685; coalescing at gap 256 gives 216 ranges over 0.22 MB (`scratchpad/dirty_census.py --exact`) |
-| ❌ **UNVERIFIED** | the stride of `sshead`/`thnext`, which are **74% of the ~2,500 cells**. **Three previous probes disagreed.** |
+| ~~❌ UNVERIFIED~~ | ~~the stride of `sshead`/`thnext`, which are **74% of the ~2,500 cells**~~ |
+
+> **✅ M1a IS DONE (2026-08-20) — and BOTH halves of that last row were wrong. See
+> `docs/handoff-m1-reset.md`.**
+> The stride is **ONE hex cell** (`base + i*dw`), with all 8 bits inside that one cell, so entry `i`
+> dirties at most one word `base_word + 2i + 1`. Measured by `scratchpad/m1a_stride.py` (calibrated
+> against strides the stl states literally, K=1,2,3, plus discrimination/poison/vacuity controls),
+> confirmed on the shipped 84.8M-word binary, and re-derived independently from the stl on two
+> paths. **The three previous probes never disagreed** — they were all correct, and were misread
+> because in the *array* a byte is one cell while in a *register* it is two.
+> And `sshead`/`thnext` are **not 74%** of the dirty set: they are **75 of 6,706 words = 1.1%**.
+> The 74% came from the declared spans with `nt = 251`; the shipped binary bakes 176 things
+> statically and carries **nt = 75**. M1a was on the critical path for *correctness*, never for
+> *cost* — the cost is `sfslot`/`spslot` and ~900 macro-local scratch registers.
 
 **Do not write the reset prologue against an assumed stride.** That is the exact shape of failure
 this repo keeps hitting (CLAUDE.md rule 3). The first task is a probe with an R9 negative control.
@@ -67,15 +80,28 @@ this repo keeps hitting (CLAUDE.md rule 3). The first task is a probe with an R9
 
 **Goal:** the program renders frame N+1 correctly, on its own, with no host restore.
 
-**M1a — the stride probe.** Determine the `sshead`/`thnext` stride, with a negative control that
-mutates a known-good stride and *requires* the probe to reject it. Three prior probes disagreed;
-a fourth opinion without a control is worth nothing. *(hours, no build)*
+**M1a — the stride probe. ✅ DONE 2026-08-20** (`scratchpad/m1a_stride.py`,
+`scratchpad/m1_dirtymap.py`, `docs/handoff-m1-reset.md`). Answer above.
 
-**M1b — the dirty set from the EMITTER, not from sampling.** `dirty_census` learned its ranges from
-4–5 sample frames. That bounds the prize; it does **not** bound the set. A word dirtied outside the
-sampled ranges survives into the next frame — and because the program self-modifies, a leak does not
-politely produce a wrong pixel, it produces a **different program**. The emitter knows every address
-it writes; derive the set there and cross-check it against the census. *(days, no build)*
+**M1b — the dirty set from the EMITTER, not from sampling.** *(days, no build; roughly half done)*
+`dirty_census` learned its ranges from 4–5 sample frames. That bounds the prize; it does **not**
+bound the set. A word dirtied outside the sampled ranges survives into the next frame — and because
+the program self-modifies, a leak does not politely produce a wrong pixel, it produces a
+**different program**. The emitter knows every address it writes; derive the set there and
+cross-check it against the census.
+- ✅ the measured side is done and **NAMED**: `scratchpad/_m1b_labels.tsv.gz` (6,806,757 labels,
+  sha-matched to the shipped `.fjm`) lets `m1_dirtymap.py` attribute every dirty word to its label.
+  Grand union over 12 frames × 3 key states = **10,230 words**, of which **10,227 are data-cell
+  value words and only 3 are code words** (0, 2, 1030).
+- ✅ a source-side enumeration (no build) produced a **≈14,918-word upper bound at keys=0** and four
+  falsifiable predictions, all of which the attribution then confirmed — including the exact
+  14-word stl set below `code_start`, predicted before the label table existed.
+- ❌ still owed: the per-instantiation count of stl-created `@` scratch vectors (47% of the set),
+  the complete list of **non-zero pristine** cells (a `memset(0)` prologue is wrong — `pmax = 159`),
+  the two never-cleared latches, and the `stl.fcall` early-out check this branch is named after.
+- ⚠ two receipts that a *sampled* set cannot be trusted: word 1 (the 9-op death) is **clean on one
+  of the four gate viewpoints**, and `thpos_rt`'s 1,200 words are invisible to every census because
+  the wire feeds the values already baked there.
 
 **M1c — the fj reset prologue.** ~2,500 cells restored in fj at frame start. Cost must be small
 against the ~29.4M-op frame. Gate: run the same frame twice and require **identical op counts and
@@ -249,14 +275,24 @@ The cheap assembler wins are **spent**. What is left, in expected-value order:
 - `__slots__` on sly's `Token`/`YaccProduction` — already present.
 - `gc.freeze()` + freeing the macro tree — no change to peak; the peak is before the frees.
 
-**Q1 (10 minutes, high value):** measure peak RSS of the current build. If it is comfortably under
-half of RAM, `CLAUDE.md` rule 1 can be relaxed to two concurrent builds and **every gate day gets
-twice as fast** — worth more than any remaining assembler micro-optimisation.
+**Q1 — ✅ ANSWERED 2026-08-20, and the answer is NO.** `scratchpad/m1q_rss.py` measured peak RSS of
+the current shipped build twice — **9.46 GB** with 2.1 GB free at start (paging) and **9.66 GB**
+with 7.5 GB free. Two concurrent builds need ~19 GB against 16.8 GB of RAM = **112 %**.
+**`CLAUDE.md` rule 1 stands; do not relax it.** The same run puts a clean number on the assemble
+phase alone: **396.5 s CPU / 639.9 s wall** (the table above says 342 s CPU / 559 s wall — same
+order, and the wall gap is this machine's VM drift).
 
 ---
 
 ## 7. Where to start next session
 
-1. Read this file, then `CLAUDE.md`, then `docs/cr-rules.md`.
-2. **M1a**: the `sshead`/`thnext` stride probe, with its R9 negative control.
-3. Do **not** write the reset prologue until M1a and M1b agree on the dirty set.
+1. Read this file, then `docs/handoff-m1-reset.md`, then `CLAUDE.md`, then `docs/cr-rules.md`.
+2. ~~M1a~~ ✅ done. **Next is the rest of M1b**, listed under M1b above. None of it needs a build.
+3. Do **not** write the reset prologue until M1a and M1b agree on the dirty set. They now agree on
+   the *classes* and on four falsifiable predictions; what is missing is the four ❌ items — above
+   all the **complete list of non-zero pristine cells**, because a prologue that zeroes `pmax`
+   kills plane attribution for the whole frame and does it silently.
+4. Two cheap things worth doing first, both no-build: the `stl.fcall` early-out check (this branch
+   is called `m13opt3-early-out`), and re-running the census with a wire whose thing positions
+   *differ* from the baked spawn values, which should make up to 1,200 `thpos_rt` words appear in
+   one step. If they do not appear, the delta-write model is wrong and the whole bound moves.

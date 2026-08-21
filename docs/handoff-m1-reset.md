@@ -475,3 +475,109 @@ understood).
 `m1a_stride.py`, `m1b_labels.py` and `m1q_rss.py` carry `--selftest` negative controls.
 `m1_dirtymap.py` runs its four controls (walker, vacuity, label-shift, declared-size) inline on
 every invocation — there is no way to get a number out of it without them.
+
+
+---
+
+## 7. M1c + M1d — DONE. The program self-resets and loops.
+
+**Built:** `scratchpad/fjmcache/_m1loop.fjm`, 89,446,230 span-words,
+sha256 `ebeac2361b72ddf82be6c1c31f7c77be2697552a31e4a9ec6d78ea7abf91f287`.
+
+### 7.1 The insight that made it small
+
+**In an internal loop, op 0 never re-executes** — so the 9-op death (word 1, op 0's jump field)
+stops mattering entirely. The loop re-enters at `__hot_end`. And `stl.startup_and_init_all` has
+nothing to re-run: it emits the six truth tables as *data* and jumps over them, which is exactly why
+the whole table span measures clean after a frame. So M1c and M1d are not two milestones stacked —
+doing them together is what makes M1c easy.
+
+### 7.2 The shape of the change
+
+| | |
+|---|---|
+| `e1m1_02_main.fj` | the frame's trailing `stl.loop` becomes `;m1_reset` — **1 op → 1 op** |
+| `e1m1_07_reset.fj` | a new, last part: `m1_reset:` … `;__hot_end` |
+
+Size-neutral plus appended means no existing label moves, which is what lets the reset bake
+**numeric addresses** taken from a first assembly. That is necessary, not a shortcut: most of the
+set is macro-`@`-local scratch, which fj cannot name from outside its macro, and restoring only the
+fj-addressable declared state leaves **up to 4,495 pixels wrong**.
+
+### 7.3 The final set — 113,058 words = 56,529 cells
+
+Three reductions, each proven by the 12-frame chain rather than argued:
+
+- **`sfslot`/`spslot`/`thnext` need no restore** (−10,540 words): the slot arrays are write-once and
+  gated by their flag byte, and `bind_things` fully overwrites `thnext` every frame.
+- **the stl region below `code_start` must NOT be restored** (−552 words): `to_flip` and
+  `to_flip_var` are a **consistent pair** that `set_flip_pointer` xors against, so restoring one
+  without the other is worse than restoring neither.
+- **seven read-only regions auto-excluded** (−8,264 words): `throw`, `sprlt`, `throwc`, `bkoff`,
+  `xtoviewangle`, plus `__hot_end` (code) and a `thvis` extent overrun. Derived, not listed: a cell
+  only nibble ops ever write cannot hold a pristine value above 15, so anything that does is a
+  packed LUT or code.
+
+### 7.4 Two primitives, and the choice is correctness (M1a / R57)
+
+Measured per cell: **`hex.zero` 19.5 ops, `hex.set` 21.5, `hex.zero_ptr` 943.**
+
+A nibble op on a BYTE cell does not merely fail — it **corrupts**: 0xA5 → 0x22A5, because
+`hex.xor`'s dispatch jumps out of its own 16-entry table. So `sshead`/`pclm`/`sfflag`/`drawn`/
+`sprflag` get pointer loops and everything else is unrolled. And `hex.xor_by` **clamps to a
+nibble** (`stl/hex/memory.fj:74`), which is why the pointer path is the only value-independent way
+to clear a full byte.
+
+### 7.5 The gate — PASS
+
+```
+PHASE 1  four certified viewpoints, ALL IN ONE RUN
+         loop vs old binary: BYTE-EXACT x4
+         vs oracle: loop delta == old delta on every frame -> M1 moved no pixel
+CONTROL  the same wire on the OLD binary presents exactly 1 frame
+PHASE 2  8-frame chain, every frame BYTE-EXACT vs that frame on a PRISTINE image
+PHASE 3  the reset costs 3,548,600 ops/frame = 7.47% of a 47.5M-op frame
+```
+
+⚠ The 378-px delta at (1869,479) in phase 1 is **pre-existing**: the oracle call is `deg_gate`'s,
+which certifies the non-sim tier, and the OLD certified binary has exactly the same 378. The test
+that means something for M1 is that the two deltas are *equal*.
+
+### 7.6 fps
+
+Alternating A/B ×3 on one harness, best of 3, `scratchpad/m1_fps.py`:
+
+| | cpu/frame | fps (cpu) |
+|---|---:|---:|
+| host restores the image | 1918.0 ms | 0.52 |
+| **M1 internal loop** | **498.0 ms** | **2.01** |
+| | | **3.85×** |
+
+⚠ **The absolute numbers are harness-bound and must not be quoted as the game's fps.** The "host
+restore" side is `FjmRunner`'s per-frame core rebuild in Python, which is what the walker does but
+is not a 52 ms memcpy. What the measurement supports is the **ratio**, measured in-session on both
+sides. ⚠ Rep 2 came back 299 s against 18 s for identical work — this machine's VM drift, which is
+why the runs alternate and report best-of-N on CPU time.
+
+### 7.7 What is NOT done
+
+**The reset is not wired into `build.py`.** It is produced by `scratchpad/m1_emit_reset.py` and
+assembled by `scratchpad/m1_build.py`; `build_wall_renderer` still emits the single-pass,
+host-reset program. Wiring the two-pass into the emitter is the remaining integration step, and
+`walk_e1m1.py` has not been pointed at the looping binary. Until then M1 is *built and gated*, not
+*shipped* — the distinction CLAUDE.md's wiring checklist exists to enforce.
+
+Also open: 9 of the set's labels still come from observation alone rather than derivation, and the
+whole set is validated on 12 frames of one map in one build config.
+
+### 7.8 Four controls that earned their keep
+
+- the **byte-preload control** caught a vacuous cost measurement: `hex.xor_by` had clamped 0xA5 to
+  0xF, so "hex.zero clears a byte" had been measured on a byte that was never there;
+- the **label-stability control** caught 32 moved labels — `hex.exact_xor`'s `end`/`switch`, which
+  sit at wflip-chain spots whose recycled `pad` slots shift when the program gains thousands of
+  wflips. None was a restored cell, but the control was a coarse min..max range and is now a
+  membership test;
+- the **no-restore control hung** instead of failing — the `sshead` cycle again;
+- the **first build died with an empty log** at 6.19 GB with 4.72 GB free: the silent OOM of
+  CLAUDE.md rule 1, reproduced exactly.

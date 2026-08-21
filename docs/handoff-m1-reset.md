@@ -559,13 +559,21 @@ is not a 52 ms memcpy. What the measurement supports is the **ratio**, measured 
 sides. ⚠ Rep 2 came back 299 s against 18 s for identical work — this machine's VM drift, which is
 why the runs alternate and report best-of-N on CPU time.
 
-### 7.7 What is NOT done
+### 7.7 What was NOT done at the time — ALL OF IT NOW IS (2026-08-22)
 
-**The reset is not wired into `build.py`.** It is produced by `scratchpad/m1_emit_reset.py` and
+[SUPERSEDED. `build_wall_renderer(self_reset=True)` does both passes and refuses the binary if a
+baked address moved; `scripts/walk_e1m1.py --fjm PATH --loop` runs it. See §9.5. The original text
+follows because the distinction it draws is the one CLAUDE.md's wiring checklist exists to enforce,
+and it is worth keeping visible that M1 spent a while *built and gated* rather than *shipped*.]
+
+~~**The reset is not wired into `build.py`.** It is produced by `scratchpad/m1_emit_reset.py` and
 assembled by `scratchpad/m1_build.py`; `build_wall_renderer` still emits the single-pass,
 host-reset program. Wiring the two-pass into the emitter is the remaining integration step, and
-`walk_e1m1.py` has not been pointed at the looping binary. Until then M1 is *built and gated*, not
-*shipped* — the distinction CLAUDE.md's wiring checklist exists to enforce.
+`walk_e1m1.py` has not been pointed at the looping binary.~~
+
+⚠ The one part of this that is STILL TRUE: the only caller of `build_wall_renderer(self_reset=True)`
+is `scratchpad/m1_wired_build.py`. `walk_e1m1.py` consumes a prebuilt loop `.fjm`; it cannot
+produce one.
 
 Also open: 9 of the set's labels still come from observation alone rather than derivation, and the
 whole set is validated on 12 frames of one map in one build config.
@@ -830,24 +838,39 @@ the wrong property, and its summary line looks identical either way.** Both vers
 and when a control is the evidence, the thing to review is *which* mutation it rejects, not
 *whether* it rejects one.
 
-### 9.7 Which M1 tools carry a negative control (CR round 4)
+### 9.7 Which M1 tools carry a negative control (CR rounds 4 and 5)
 
-This table exists because the PR's prose version of it was wrong three revisions running -- first
-overclaiming, then underclaiming. It is the exhaustive list.
+⚠ **The previous three versions of this list were all wrong** — first overclaiming that every tool
+had `--selftest`, then undercounting, then calling an 11-row table "the exhaustive list" when the
+PR adds **21 `m1*.py` scripts**. So the scope is stated first and the claim is bounded to it.
 
-| tool | verdict quoted as proof? | `--selftest` | mutation control |
-|---|---|---|---|
-| `m1_gate.py` | yes | yes | flips a byte of the LOOP binary's frame; requires FAIL |
-| `m1_bytecheck.py` | yes | yes (needs a built image) | plants 0xA5 in a nibble-cleared cell |
-| `m1_reemit.py` | yes | yes (synthetic) | drops a label; emission must differ |
-| `m1_setfile.py` | yes | yes (synthetic) | C1 shift / C2 delete / C3 escape + positive |
-| `m1_mutations.py` | yes | it *is* the control | 8 mutations of shipped code, all must be caught |
-| `m1a_stride.py` | historical | yes | — |
-| `m1b_labels.py` | historical | yes | — |
-| `m1q_rss.py` | historical | yes | — |
-| `m1_dirtymap.py` | **yes** (the 0-dirty-words result licenses the trim) | **no flag** | has one: CONTROL 3 shifts the label table and requires the per-label counts to change |
-| `m1_sweep.py` | **yes** (260/260 byte-exact) | **no** | in-run only: vacuity + byte-exact vs the old binary |
-| `m1_play.py` | **yes** (100/100 byte-exact) | **no** | in-run only: distinct-picture vacuity + byte-exact |
+**SCOPE: every tool whose verdict this PR or `DESIGN.md` quotes as proof.** That is the set R9
+governs. Other `m1*` scripts are exploratory probes whose output is not cited as evidence anywhere,
+and they are listed separately rather than silently omitted.
 
-The last two rows are the real remaining gap. `m1_dirtymap.py` has a genuine mutation control but no
-flag to invoke it standalone, which is why it kept getting miscounted.
+| tool | `--selftest` | the mutation it rejects |
+|---|---|---|
+| `m1_mutations.py` | it *is* the control | 8 mutations of shipped `src/` files; every one must be caught |
+| `m1_gate.py` | yes | flips a byte of the **loop** binary's presented frame; requires FAIL |
+| `m1_bytecheck.py` | yes (needs a built image) | plants `0xA5` in a nibble-cleared cell |
+| `m1_reemit.py` | yes (synthetic) | drops a label; the emission must differ |
+| `m1_setfile.py` | yes (synthetic) | C1 shift / C2 delete / C3 escape, plus a positive |
+| `m1a_stride.py` | yes | mutates a known-good stride; must be rejected |
+| `m1b_labels.py` | yes | — |
+| `m1q_rss.py` | yes | — |
+| **`m1_dirtymap.py`** | **no flag** | has one: CONTROL 3 shifts the label table, per-label counts must change. Its 0-dirty-words result licenses the 682-cell trim. |
+| **`m1_sweep.py`** | **none** | in-run only: byte-exact vs the old binary over 260 frames |
+| **`m1_play.py`** | **none** | in-run only: distinct-picture vacuity + byte-exact over 100 frames |
+| **`m1c_restore_set.py`** | **none** | the first stage of the chain that produced the SHIPPED `m1_restore_set.json.gz`. Uncontrolled. |
+| **`m1_fps.py`** | **none** | produced the 3.85x figure, which is why that figure is now labelled UNVERIFIED rather than quoted (see below) |
+
+**Not cited as evidence anywhere, listed for completeness:** `m1_build.py`, `m1_emit_reset.py`,
+`m1_minimize.py`, `m1_rbw.py`, `m1_wired_build.py`, `m1_zbyte.py`, `m1c_cost.py`, `m1c_hole.py`,
+`m1d_loop.py`.
+
+⚠ **`m1_fps.py` and `DESIGN.md`.** CR round 5 caught `DESIGN.md` pointing readers at "the fps line
+in the handoff" while `docs/handoff-complete-game.md` marks that same figure UNVERIFIED for the
+shipped binary. A pointer to a retracted number is a citation of it, so the pointer is gone.
+
+**The real remaining gaps are the four bold rows with no control at all.** `m1c_restore_set.py` is
+the most load-bearing of them: it produced a file that ships in `src/`.

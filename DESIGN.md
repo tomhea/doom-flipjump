@@ -172,7 +172,8 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 |---|---|---|---|---|
 | static (`build_wall_renderer`, R4 gate) | in the 40–62M band, `< 2²⁶` asserted | under | under | flat |
 | **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** |
-| **M1 (the above + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+| shipped config, `self_reset=False` | **84,823,030** | 1.26× OVER | 0.63× | flat |
+| **M1 (the same + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
 
 (Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
 That trailing instruction used to be swallowed into the M14 row's last cell, where it read as
@@ -195,9 +196,16 @@ it was derived from whole label extents. MEASURED at 0 dirty words across all fi
 emitter now REFUSES a set word in a byte array's declared-but-unreachable range instead of letting
 it fall through to the nibble clear. The trim is worth **−19,110 ops/frame** (270,811 → 251,701 on
 the same 8-frame chain) and **−57,950 span-words**; do not quote the pre-trim 270,811 for this
-tier. The tier's **85,468,976** words is the M14 tier plus that part plus the fj-side
-`m1.zerobyte` def, and R4's `storage_mode == flat` assert runs on this path — the frozen-image reset
-the loop depends on needs pure flat.
+tier.
+
+**THE PART'S OWN SPAN IS 645,946 WORDS** — `85,468,976 − 84,823,030`, the same shipped config
+measured with and without `self_reset`, both sha-named in `docs/handoff-m1-reset.md`. That is what
+R4 wants recorded, and it is ~85 words per restored cell, which the trim independently corroborates
+(57,950 words for 682 cells). ⚠ Do **not** derive it by subtracting the M14 row above: that row is
+an older, smaller configuration, and the difference (17,255,518) is 26× the real figure. An earlier
+revision of this paragraph said the tier "is the M14 tier plus that part", which invited exactly
+that mistake. R4's `storage_mode == flat` assert runs on this path — the frozen-image reset the loop
+depends on needs pure flat.
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |
 |---|---|---|---|---|

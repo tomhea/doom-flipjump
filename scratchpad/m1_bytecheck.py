@@ -30,6 +30,7 @@ previously named none, while licensing BYTE_ARRAY_NAMES in shipped code.
 import argparse
 import gzip
 import hashlib
+import json
 import sys
 import time
 from pathlib import Path
@@ -145,6 +146,16 @@ print("image  : %s" % args.fjm)
 print("sha256 : %s" % h.hexdigest())
 print("labels : %s" % args.labels)
 print("set    : %s" % args.set)
+_doc = json.load(gzip.open(args.set, "rt", encoding="utf-8"))
+_lh = hashlib.sha256()
+with open(args.labels, "rb") as _f:
+    for _c in iter(lambda: _f.read(1 << 20), b""):
+        _lh.update(_c)
+assert _doc.get("labels_sha256") == _lh.hexdigest(), (
+    "the restore set was derived from a DIFFERENT label table (%s) than the one being resolved "
+    "against (%s) -- the verdict would not describe this program"
+    % (str(_doc.get("labels_sha256"))[:12], _lh.hexdigest()[:12]))
+print("labels sha256 matches the set's provenance  ok")
 
 r = FjmRunner(Path(args.fjm))
 assert r.native, "needs the native engine"
@@ -206,8 +217,9 @@ if bad:
         print("     word %d  %s" % (x, bad[x][:3]))
     ok = False
 else:
-    print("RESULT: no nibble-cleared cell ever held a value > 15 across %d viewpoints." % len(STATES))
-    print("        The three named byte arrays are the only byte arrays in the restore set.")
+    print("RESULT: over %d viewpoints, no nibble-cleared cell held a value > 15." % len(STATES))
+    print("        SCOPE: that is evidence about THESE viewpoints, not a proof over all frames.")
+    print("        It is what licenses BYTE_ARRAY_NAMES holding only sshead/pclm/sfflag.")
 
 print("")
 print("m1_bytecheck: %s" % ("PASS" if ok else "FAIL"))

@@ -248,7 +248,8 @@ print(f"  difference                                        : {extra:+,} ops")
 print(f"  => the reset costs ~{per:,.0f} ops per frame "
       f"({100*per/(base/len(CHAIN)):.2f}% of a {base//len(CHAIN):,}-op frame)")
 print("  (the loop also SAVES the 2 ops of op0 + `;__hot_end` per frame, and the host's whole-image")
-print("   memcpy entirely -- which is the point; see the fps line in the handoff.)")
+print("   memcpy entirely -- which is the point. NOTE: the 3.85x CPU-time figure in")
+print("   docs/handoff-complete-game.md is UNVERIFIED for this binary -- re-measure it.)")
 
 ok = ok1 and ok2 and ok3
 print("\n" + "=" * 96)

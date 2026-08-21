@@ -96,6 +96,37 @@ def run():
     return failed, (tail[-1] if tail else "?")
 
 
+ap = __import__("argparse").ArgumentParser()
+ap.add_argument("--all-at-once", action="store_true",
+                help="apply EVERY mutation together and print the raw pytest output -- the R1 "
+                     "FAIL block, generated rather than retyped")
+cli = ap.parse_args()
+
+if cli.all_at_once:
+    # R1 wants a FAIL block and a PASS block. CR round 5 was right that the body's FAIL block was
+    # hand-composed with nothing on disk behind it, so this produces it: every mutation applied at
+    # once, the REAL pytest output printed, then the tree restored and run again.
+    originals = {p: rd(p) for p in (SR, FJ)}
+    try:
+        for _name, _path, _fn in MUTATIONS:
+            wr(_path, _fn(rd(_path)))
+        print("=== ALL %d MUTATIONS APPLIED TO REAL SHIPPED CODE ===" % len(MUTATIONS))
+        for _name, _p, _f in MUTATIONS:
+            print("    %s" % _name)
+        print("")
+        r = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header",
+                            "--tb=no"], cwd=ROOT, capture_output=True, text=True)
+        print(r.stdout.rstrip())
+    finally:
+        for _p, _s in originals.items():
+            wr(_p, _s)
+    print("")
+    print("=== RESTORED ===")
+    r = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header", "--tb=no"],
+                       cwd=ROOT, capture_output=True, text=True)
+    print(r.stdout.rstrip())
+    sys.exit(0 if " failed" not in r.stdout else 1)
+
 ok = True
 print("BASELINE (no mutation)")
 base_failed, base_line = run()

@@ -103,14 +103,21 @@ cross-check it against the census.
   of the four gate viewpoints**, and `thpos_rt`'s 1,200 words are invisible to every census because
   the wire feeds the values already baked there.
 
-**M1c — the fj reset prologue.** *(days, builds)* **The SET is now solved and validated in Python
-(`scratchpad/m1c_restore_set.py`); what is left is writing it in fj.**
+**M1c — the fj reset prologue.** *(days, builds)* **DONE 2026-08-21, SHIPPED 2026-08-22.**
+
+⚠ [SUPERSEDED BELOW. The numbers in this section are the *Python-validated candidate* set. The
+SHIPPED set is far smaller: read-before-write analysis and the CR round-2 `sshead` trim took it to
+**4,349 nibble + 1,002 byte cells** (`scratchpad/_m1_wired2.log`), not 66,207 cells, and it is
+written in fj, not "left to write". Kept because the derivation rule below — DERIVE labels, never
+learn cells — is what makes the set sound, and that has not changed.]
 - the set is **DERIVED**, not learned: the full `[label, next label)` extent of (a) the 265
   emitter-declared runtime-state labels, (b) the 6,546 macro-locals whose name is declared
   `hex.vec`/`bit.vec` anywhere — including in **generated** macros, which exist in no `.fj` file —
   and (c) 9 observed extras. With `--drop-luts`: **6,813 labels → 132,414 words = 66,207 hex cells
   in 3,768 runs, only 7,330 of them non-zero.** So ~94.5% of the prologue is a clear-to-zero, and
   the values it does need are read out of the assembled image.
+  ⚠ SUPERSEDED: the shipped set is **10,702 words / 5,351 cells** (4,349 nibble + 1,002 byte) after
+  read-before-write analysis and the `sshead` trim — 12.4x smaller than this candidate.
 - ⚠ **a hole in `sshead` does not diverge — it HANGS.** `sshead` is a linked-list head; leave it
   stale and `bind_things` prepends onto a non-empty list and `thing_pass` can walk a cycle.
   Measured: frame 2 killed at 180 s against a 0.22 s clean re-run. That is almost certainly what

@@ -15,11 +15,13 @@ again — and a hard check that every address still means what it meant.
 THE PRIMITIVE PER CELL IS NOT A DETAIL, IT IS THE WHOLE CORRECTNESS ARGUMENT (M1a / R57):
   * a NIBBLE cell (only ever written by hex.mov/set/xor/input) holds 0..15 -> `hex.zero`, 19.5
     ops/cell measured, or `hex.set 1, addr, v` at 21.5 when its pristine value is not 0;
-  * a BYTE cell (written by `hex.write_byte`, all 8 bits in ONE cell) needs `hex.zero_ptr`, 943
-    ops/cell measured -- 48x more. `hex.zero` on a byte cell does not merely fail, it CORRUPTS:
-    measured 0xA5 -> 0x22A5, because `hex.xor`'s dispatch jumps out of its own 16-entry table.
-  * so the byte arrays are cleared by an indexed LOOP and everything else is unrolled, and the
-    generator ASSERTS that no cell it treats as a nibble has a pristine value above 15.
+  * a BYTE cell (written by `hex.write_byte`, all 8 bits in ONE cell) cannot use a nibble op at
+    all: `hex.zero` on one does not merely fail, it CORRUPTS -- measured 0xA5 -> 0x22A5, because
+    `hex.xor`'s dispatch jumps out of its own 16-entry table. It is cleared by `m1.zerobyte`,
+    which needs NO POINTER because the address is a compile-time constant: 91.1 ops/cell measured
+    against `hex.zero_ptr`'s 943 (scratchpad/m1_zbyte.py).
+  * everything is UNROLLED with `rep`, and the generator ASSERTS that no cell it treats as a
+    nibble has a pristine value above 15.
 
 ⚠ NEGATIVE CONTROLS (R9), all at generation time, because a wrong prologue is a 25-minute build:
   1. every emitted address must be dw-aligned and inside a segment;
@@ -62,8 +64,14 @@ CODE_START_WORD = 17308
 # Arrays written through `hex.write_byte`: all 8 bits live in ONE cell, so a nibble op corrupts
 # them. `n` is the number of cells the program can actually reach (a 1-cell stride, M1a), NOT the
 # declared `hex.vec` size -- sshead is declared 2*nss and only nss is reachable.
-BYTE_ARRAYS = [("sshead", 682), ("pclm", 160), ("sfflag", 160),
-               ("drawn", 160), ("sprflag", 160)]
+# ⚠ `drawn` and `sprflag` are written with hex.write_byte but only ever hold SMALL values, so they
+# do NOT need the 943-op byte clear -- a 19.5-op `hex.zero` is enough. Statically:
+#   drawn   -- `frame.mark_drawn` sets drawn[x] = 1 (frame_render.fj:340), values {0,1}
+#   sprflag -- `hex.write_byte sprflag_p, slot_flag`, "1 = A only, 2 = A + B"
+#              (frame_render.fj:1538), values {0,1,2}
+# Both were also MEASURED over six viewpoints at max 1 and 2. `pclm` (a plane-pair id, 152 of the
+# 255 budget used) and `sfflag` (measured 33) genuinely exceed a nibble and stay here.
+BYTE_ARRAYS = [("sshead", 682), ("pclm", 160), ("sfflag", 160)]
 # Proven droppable by the 12-frame loop test: write-once slots gated by their flag byte, and a
 # thnext that bind_things fully overwrites every frame.
 DROP_LABELS = ["sfslot", "spslot", "thnext"]
@@ -117,7 +125,7 @@ missing = byte_words - WSET
 assert not missing, (f"CONTROL 3 FAILED: {len(missing)} byte-array words are not in the restore "
                      f"set -- the reachable counts in BYTE_ARRAYS disagree with the set")
 nib_words = sorted(WSET - byte_words)
-print(f"  byte-array cells (hex.zero_ptr loop): {len(covered)//2:,}")
+print(f"  byte cells (m1.zerobyte, 91.1 ops): {len(covered)//2:,}")
 print(f"  nibble cells (unrolled)             : {len(nib_words)//2:,}")
 
 # AUTO-EXCLUDE the read-only regions. A cell that only nibble ops ever write cannot hold a pristine
@@ -177,10 +185,10 @@ while i < len(cells):
     i = j + 1
 print(f"  emitted as {n_zero_runs:,} hex.zero runs + {n_set:,} hex.set")
 
-OPS = (len(cells) - nz) * 19.5 + nz * 21.5 + (len(covered) // 2) * 943
+OPS = (len(cells) - nz) * 19.5 + nz * 21.5 + (len(covered) // 2) * 91.3  # 91.3 measured
 print(f"\nPROJECTED cost: {OPS:,.0f} ops "
       f"({(len(cells)-nz)*19.5:,.0f} zero + {nz*21.5:,.0f} set + "
-      f"{(len(covered)//2)*943:,.0f} byte-loop)")
+      f"{(len(covered)//2)*91.3:,.0f} byte)")
 
 # ------------------------------------------------------------------------------- emit the part
 out = Path(args.out)
@@ -200,27 +208,34 @@ hdr = [
     "//",
     "//   TWO PRIMITIVES, and the choice is correctness not tuning (M1a/R57):",
     "//     nibble cell -> hex.zero / hex.set   (19.5 / 21.5 ops, measured)",
-    "//     BYTE cell   -> hex.zero_ptr         (943 ops, measured) -- a nibble",
+    "//     BYTE cell   -> m1.zerobyte          (91.1 ops, measured) -- a nibble",
     "//                    op on a byte cell CORRUPTS it (0xA5 -> 0x22A5).",
     "// =========================================================================",
     "ns m1 {",
-    "    // clear `n` BYTE cells from `base` -- all 8 bits of each, via the pointer path,",
-    "    // which is the only value-independent way to clear a full byte (hex.xor_by clamps",
-    "    // to a nibble; see stl/hex/memory.fj).",
-    "    def clear_bytes base, n @ body, loop, done, i, p {",
-    "        ;body",
-    "      i: hex.vec w/4",
-    "      p: hex.vec w/4",
-    "      body:",
-    "        hex.set w/4, i, n",
-    "        hex.set w/4, p, base",
-    "      loop:",
-    "        hex.if0 w/4, i, done",
-    "        hex.dec w/4, i",
-    "        hex.zero_ptr p",
-    "        hex.ptr_inc p",
-    "        ;loop",
-    "      done:",
+    "    // Clear all 8 bits of the byte cell at the CONSTANT address C -- NO POINTER AT ALL.",
+    "    // MEASURED 91.1 ops/cell against hex.zero_ptr's 943 (scratchpad/m1_zbyte.py),",
+    "    // a 10.3x saving, because the pointer path's cost is almost entirely",
+    "    // `set_flip_and_jump_pointers` copying an 8-nibble address at RUNTIME -- and these",
+    "    // addresses are compile-time constants.",
+    "    //   1. zero the stl's 2-cell byte register",
+    "    //   2. aim the byte table's return at `back`",
+    "    //   3. flip bit dbit+8 of C and jump INTO C: its jump word becomes (v+256)*dw, which",
+    "    //      IS `read_ptr_byte_table + v` (the table is pinned at op 256); that entry xors",
+    "    //      v's bits into read_byte and returns",
+    "    //   4. flip the marker bit back, then xor read_byte's two nibbles onto C's own low and",
+    "    //      high nibble -- hex.exact_xor's d3..d0 are arbitrary BIT addresses, so C is named",
+    "    //      directly and no pointer is ever built",
+    "    // ⚠ verified on all 256 byte values, pre-loaded with a RAW wflip (hex.xor_by clamps to",
+    "    //   a nibble and would have made that check vacuous).",
+    "    def zerobyte C @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {",
+    "        hex.zero 2, hex.pointers.read_byte",
+    "        wflip hex.pointers.ret_after_read_byte+w, back",
+    "        C+dbit+8; C",
+    "      back:",
+    "        wflip hex.pointers.ret_after_read_byte+w, back",
+    "        C+dbit+8;",
+    "        hex.exact_xor C+dbit+3, C+dbit+2, C+dbit+1, C+dbit+0, hex.pointers.read_byte",
+    "        hex.exact_xor C+dbit+7, C+dbit+6, C+dbit+5, C+dbit+4, hex.pointers.read_byte+dw",
     "    }",
     "}",
     "",
@@ -228,7 +243,9 @@ hdr = [
 ]
 body = list(lines)
 for name, n in BYTE_ARRAYS:
-    body.append(f"    m1.clear_bytes {BITS[name]}, {n}      // {name}")
+    # `rep` needs a LITERAL count, and a rep whose count is a macro PARAMETER silently expands to
+    # nothing (this repo has paid for that once already), so the rep lives here where n is a number.
+    body.append(f"    rep({n}, i) m1.zerobyte {BITS[name]} + i*dw      // {name}")
 body.append("    ;__hot_end")
 Path(out / "e1m1_07_reset.fj").write_text("\n".join(hdr + body) + "\n", encoding="utf-8")
 print(f"\nwrote {out/'e1m1_07_reset.fj'} ({len(hdr)+len(body):,} lines)")

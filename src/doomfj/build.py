@@ -197,7 +197,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
                         state_wire="bin", player_sim=True, collide=True,
-                        moving_things=True) -> dict:
+                        moving_things=True, self_reset=False, restore_set=None) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
@@ -264,8 +264,45 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
 
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
-    fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
-                lzma_fast=FJM_LZMA_FAST)
+    reset_info = None
+    if self_reset:
+        # M1 -- the program restores itself and LOOPS, so the host never reloads the image.
+        # TWO PASSES, and the second is not a re-run: pass 1 exists only to learn where every cell
+        # landed. The reset bakes those addresses (it must -- most of the dirty set is macro-local
+        # scratch, which fj cannot name from outside its macro), is APPENDED as a new last part,
+        # and patches the frame tail size-neutrally, so pass 2 has to place every restored cell at
+        # the same address. That is ASSERTED below, not assumed: a reset writing shifted addresses
+        # does not produce a wrong pixel, it produces a different program.
+        assert restore_set, "self_reset=True requires restore_set (see docs/handoff-m1-reset.md)"
+        from doomfj import selfreset
+        from doomfj.fastrun import FjmRunner, _fjcore
+        # ⚠ m1_reset.fj goes LAST, AFTER the emitted parts -- not into `includes`. A macro-expansion
+        # label is named `f<file>:l<line>:...`, so inserting a file anywhere earlier renumbers every
+        # label in every file after it, and the restore set (which names labels) stops resolving.
+        # Measured: adding it to the includes renamed 200 of the set's labels and the loader
+        # refused, exactly as it should. A file that only holds a `def` emits no ops, so appending
+        # it moves no address.
+        paths = paths + [_SRC_FJ / "m1_reset.fj"]
+        labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
+        r1 = FjmRunner(out, flat_max_words=limit)
+        core1 = _fjcore.Memory(r1.width, flat_max_words=r1.flat_max_words)
+        for _s, _n in r1._segments:
+            core1.add_segment(_s, _n)
+        for _st, _v in r1._runs:
+            core1.set_words(_st, _v)
+        part, n_nib, n_byte = selfreset.emit_reset_part(gen, labels1, core1.get_word,
+                                                        restore_set, mapname)
+        del core1, r1
+        paths = paths + [part]
+        labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
+        moved = selfreset.verify_labels_unchanged(labels1, labels2, restore_set)
+        assert not moved, ("M1 self-reset REFUSED: %d baked addresses moved between passes, e.g. %s"
+                           % (len(moved), sorted(moved)[:3]))
+        reset_info = {"nibble_cells": n_nib, "byte_cells": n_byte,
+                      "restore_set": str(restore_set), "labels_moved_in_set": 0}
+    else:
+        fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
+                    lzma_fast=FJM_LZMA_FAST)
     assemble_seconds = round(time.perf_counter() - t, 3)
     term = fj.run(out, io_device=FixedIO(b"q\n"), print_time=False, print_termination=False,
                   flat_max_words=limit)                    # 'q' is not a digit -> input parser -> bad: -> halt
@@ -286,7 +323,10 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      # shapes the artifact must be visible in metrics.json, or the next divergence
                      # is invisible again.
                      "player_sim": player_sim, "collide": collide,
-                     "moving_things": moving_things, "state_wire": state_wire},
+                     "moving_things": moving_things, "state_wire": state_wire,
+                     # M1: the program self-resets and loops -- one run renders many frames.
+                     "self_reset": self_reset},
+        "self_reset": reset_info,
     }
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
     assert span < limit, f"R4: span {span} >= flat limit {limit}"

@@ -1,0 +1,35 @@
+// M1 -- the self-reset prologue's one new primitive.
+//
+// The frame's residue is almost all DATA-CELL values, and a nibble cell is cleared by `hex.zero`
+// for 19.5 ops. A BYTE cell is not: `hex.write_byte` keeps all 8 bits in ONE cell, and a nibble op
+// on one does not merely fail, it CORRUPTS -- measured 0xA5 -> 0x22A5, because `hex.xor`'s dispatch
+// jumps out of its own 16-entry table.
+//
+// `hex.zero_ptr` clears a byte correctly but costs 943 ops/cell, and almost all of that is
+// `set_flip_and_jump_pointers` copying an 8-nibble ADDRESS so the machine can reach a cell it only
+// knows at RUNTIME. The reset knows every address at EMIT time, so none of that is needed.
+
+ns m1 {
+    // Clear all 8 bits of the byte cell at the CONSTANT address `c`. NO POINTER AT ALL.
+    // MEASURED 91.1 ops/cell against hex.zero_ptr's 943 -- 10.3x (scratchpad/m1_zbyte.py).
+    //   1. zero the stl's 2-cell byte register
+    //   2. aim the byte table's return at `back`
+    //   3. flip bit dbit+8 of c, then JUMP INTO c: its jump word is now (v+256)*dw, which IS
+    //      `read_ptr_byte_table + v` -- the table is pinned at op 256 -- and that entry xors v's
+    //      bits into read_byte and returns
+    //   4. undo both flips, then xor read_byte's two nibbles onto c's own low and high nibble.
+    //      `hex.exact_xor`'s d3..d0 are ARBITRARY BIT ADDRESSES, so c's HIGH nibble is reachable
+    //      by name -- exactly the thing `hex.zero` cannot do.
+    // Verified on ALL 256 byte values, planted with a RAW wflip (hex.xor_by clamps to a nibble,
+    // which had already made one cost measurement in this repo vacuous).
+    def zerobyte c @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {
+        hex.zero 2, hex.pointers.read_byte
+        wflip hex.pointers.ret_after_read_byte+w, back
+        c+dbit+8; c
+      back:
+        wflip hex.pointers.ret_after_read_byte+w, back
+        c+dbit+8;
+        hex.exact_xor c+dbit+3, c+dbit+2, c+dbit+1, c+dbit+0, hex.pointers.read_byte
+        hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw
+    }
+}

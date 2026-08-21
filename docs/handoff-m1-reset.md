@@ -671,3 +671,97 @@ The floor is now ~91 ops/cell x 1,002 byte cells (91k) + 5,031 nibble cells (99k
 remaining lever is that **`sshead` is 682 of those 1,002 cells but only <=75 heads are ever
 non-zero**, and `thss_rt[t]` names exactly which -- a change to what the reset iterates, not to the
 primitive. And M1 is still **not wired into `build.py`**.
+
+
+---
+
+## 8. The reset got 13x cheaper -- and the fix was the PRIMITIVE, not the set
+
+Two owner observations drove this, and both were right.
+
+### 8.1 "The frame is 30M, not 47M"
+
+47.5M was the mean of eight hand-picked GATE viewpoints. The metric is the sweep median, and
+`handoff-complete-game.md` §4 says gate viewpoints overstate the typical frame by 1.5-1.9x.
+Re-measured in-session over the sweep's own 260-frame walkable grid:
+
+```
+median 30,191,585   mean 30,929,878   min 7,675,375   max 61,405,073
+```
+
+reproducing commit `d125a18`'s 29,792,277 to within 1.3%. Every percentage below uses this.
+
+### 8.2 "What actually needs a reset to its values?"
+
+A cell needs restoring iff the next frame READS it before it WRITES it -- not merely if the frame
+dirties it. Per cell that is hopeless (56k cells); per **(macro, local)** it is easy, because the
+property belongs to the MACRO BODY and is identical in every instantiation. The 1,321 scratch
+labels collapse to **349 distinct pairs**. `scratchpad/m1_rbw.py` parses each macro, walks the
+body, and classifies the first statement that mentions the local; anything unrecognised defaults to
+READ, so a gap in the table can only make the set BIGGER.
+
+```
+220 pairs write-first (droppable)      129 read-first (must restore)
+set A shipped first     113,058 words
+set B never-dirty        27,930 words
+set D read-before-write  12,066 words      9.4x smaller than A
+```
+
+Validated on the 12-frame chain **and on all 260 sweep frames**, which no set was derived from.
+
+### 8.3 "You can zero a byte cell with a LUT and no pointer arithmetic"
+
+This was the one that mattered. `hex.zero_ptr` costs 943 ops/cell and nearly all of it is
+`set_flip_and_jump_pointers` copying an 8-nibble address **at runtime** -- and these addresses are
+compile-time constants. The stl's own byte read already works by flipping bit `dbit+8` of the cell
+and JUMPING INTO IT: the jump word becomes `(v+256)*dw`, which *is* `read_ptr_byte_table + v` (the
+table is pinned at op 256). With a baked address every pointer step collapses to one op:
+
+```
+def zerobyte C @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {
+    hex.zero 2, hex.pointers.read_byte
+    wflip hex.pointers.ret_after_read_byte+w, back
+    C+dbit+8; C                     // set the marker bit, jump into C -> LUT[v]
+  back:
+    wflip hex.pointers.ret_after_read_byte+w, back
+    C+dbit+8;                       // marker bit back
+    hex.exact_xor C+dbit+3, C+dbit+2, C+dbit+1, C+dbit+0, hex.pointers.read_byte
+    hex.exact_xor C+dbit+7, C+dbit+6, C+dbit+5, C+dbit+4, hex.pointers.read_byte+dw
+}
+```
+
+`hex.exact_xor`'s `d3..d0` are **arbitrary bit addresses**, so they name C's own low and high nibble
+directly. MEASURED (`scratchpad/m1_zerobyte.py`), verified on all 256 byte values:
+
+| | ops/cell |
+|---|---:|
+| `hex.zero_ptr` (pointer path) | 931.6 |
+| **`m1.zerobyte` (no pointer)** | **91.3** |
+| | **10.2x** |
+
+⚠ The pre-load control is load-bearing: cells are loaded with a RAW `wflip C+w, v*dw`, because
+`hex.xor_by` CLAMPS to a nibble and had already made one cost measurement in this session vacuous.
+
+Two smaller reductions rode along: `drawn` and `sprflag` never exceed a nibble (`mark_drawn` writes
+1, `sprflag` writes 1 or 2), so 320 of the 1,322 byte cells moved to the 19.5-op path.
+
+### 8.4 The result
+
+`scratchpad/fjmcache/_m1loop4.fjm`, sha256 `40b0ace20430ed6f1f6e3c18e4d0b9cfba8451c163349fbd4352bb3049370eee`
+
+```
+M1 GATE            PASS   (phase 1 byte-exact x4 in ONE run, phase 2 8/8 vs pristine)
+260-FRAME SWEEP    260/260 BYTE-EXACT
+reset per frame    3,546,865 -> 270,811 ops      13.1x
+as % of median          11.7% -> 0.90%
+```
+
+### 8.5 What is still open
+
+- **Still not wired** into `build.py` / `walk_e1m1.py` (§7.7 unchanged).
+- The reset could go further: 91.3 ops/cell is still four `hex.exact_xor` calls (~19.5 each) --
+  zeroing the register and applying it. A **per-cell** LUT would clear the cell directly at roughly
+  20-30 ops, at the price of 256 entries of program text per cell.
+- ⚠ **Rule 1 was broken during this work**: two builds ran concurrently on the same output file and
+  drove free RAM to 0.65 GB. A foreground command that times out into the background can end up
+  launched twice; check for duplicates before assuming one build is running.

@@ -536,7 +536,7 @@ PHASE 1  four certified viewpoints, ALL IN ONE RUN
          vs oracle: loop delta == old delta on every frame -> M1 moved no pixel
 CONTROL  the same wire on the OLD binary presents exactly 1 frame
 PHASE 2  8-frame chain, every frame BYTE-EXACT vs that frame on a PRISTINE image
-PHASE 3  the reset costs 270,811 ops/frame = 0.9% of the 30,191,585-op MEDIAN
+PHASE 3  the reset costs 270,811 ops/frame  [PRE-TRIM -- superseded by 251,701, see 9.5] = 0.9% of the 30,191,585-op MEDIAN
 ```
 
 ⚠ The 378-px delta at (1869,479) in phase 1 is **pre-existing**: the oracle call is `deg_gate`'s,
@@ -656,7 +656,8 @@ and would have made that check vacuous, which it already had once (`scratchpad/m
 | build | reset/frame | % of the 30,191,585 median |
 |---|---:|---:|
 | set B + `hex.zero_ptr` loop | 2,161,364 | 7.2% |
-| **set D + `m1.zerobyte`, unrolled** | **270,811** | **0.9%** |
+| set D + `m1.zerobyte`, unrolled | 270,811 | 0.9% |
+| **the same, after the CR round-2 `sshead` trim** | **250,789** | **0.8%** |
 
 M1 gate PASS; **260/260 sweep frames byte-exact**.
 
@@ -716,14 +717,28 @@ value > 15.
 ```
   4 viewpoints, 46.9M-61.5M ops each
   CONTROL 1 (vacuity) -- the KNOWN byte arrays must show values > 15:
-    sshead      96 cells   ok
-    pclm       640 cells   ok
-    sfflag     503 cells   ok
+    sshead      24 of 682 cells held a value > 15   ok
+    pclm       160 of 160 cells   ok
+    sfflag     160 of 160 cells   ok
   RESULT: no nibble-cleared cell ever held a value > 15.
 ```
 
 The vacuity control is the point: without it, a clean result would be indistinguishable from a probe
 that was reading the wrong memory.
+
+⚠ **CR round 3 found three defects in this probe, and one of them had already reached the docs.**
+The counts were summed OVER THE FOUR RUNS, so a 160-cell array reported "640" — a number that
+cannot exist. `ok` did not depend on there being anything to check, so an empty set would have
+printed the clean RESULT line. And the FAIL branch had never executed (its `%d` had no argument).
+It now reports DISTINCT cells, asserts it has >1,000 cells to check, and carries a `--selftest`
+that plants `0xA5` in one nibble-cleared cell and requires the verdict to flip:
+
+```
+  SELFTEST 1/2 as shipped                      -> m1_bytecheck: PASS
+  SELFTEST 2/2 one cell planted with 0xA5      -> m1_bytecheck: FAIL
+     !! 1 NIBBLE-CLEARED CELL HELD A VALUE > 15   word 17321
+  M1 BYTECHECK SELFTEST: PASS
+```
 
 ### 9.3 A control that computed `x == x` (R9, round 1)
 
@@ -746,7 +761,8 @@ nearest-preceding-label with **no containment check**, so `load_restore_set` now
   the split, the read-only drop, the run coalescing and the main-part surgery in milliseconds.
 - **`m1_gate.py` had no `--selftest`** (R9): it now re-runs itself with one byte of a presented
   frame flipped and requires the verdict to flip too.
-- **Assemble time regressed** (R2): 3,498 s / 4,560 s total against 559 s single-pass. Two passes
+- **Assemble time regressed** (R2): 3,498 s / 4,560 s total against 559 s single-pass (the
+  rebuild in 9.5 measures 3,193 s / 4,724 s). Two passes
   are structural to M1; the number was omitted from the first PR body and should not have been.
 - **One finding was wrong**: hatchling already ships `src/doomfj/data/`, verified by building a
   wheel where an explicit `force-include` is rejected as a duplicate.

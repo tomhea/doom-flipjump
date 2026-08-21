@@ -69,9 +69,14 @@ def run_clear(n, values, clear=True, repeats=1):
     return [core.get_word(base + 2 * i + 1) >> VAL_SHIFT for i in range(n + 2)]
 
 
+# The two cells past the end are planted with NON-ZERO bytes on purpose -- see
+# test_neighbours_untouched.
+GUARD = [0xC3, 0x5A]
+
+
 @pytest.fixture(scope="module")
 def all256():
-    return run_clear(256, list(range(256)))
+    return run_clear(256, list(range(256)) + GUARD)
 
 
 def test_preload_actually_plants_bytes():
@@ -89,7 +94,13 @@ def test_clears_every_value_0_to_255(all256):
 
 
 def test_neighbours_untouched(all256):
-    assert all256[256] == 0 and all256[257] == 0, "the clear spilled past the array"
+    """The two guard cells are PLANTED with non-zero bytes and must come back holding them.
+
+    ⚠ CR round 3: this used to assert they were 0 -- but `values` was only 256 long, so the guard
+    cells were never planted and were 0 going in. A spill that correctly byte-zeroed them left 0
+    and the test passed. It could not fail for the bug it names. Planting them makes the assertion
+    "unchanged", which a spill of either kind breaks."""
+    assert all256[256:258] == GUARD, "the clear spilled past the array"
 
 
 def test_second_call_on_the_same_cell_still_works():

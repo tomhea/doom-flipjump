@@ -70,24 +70,58 @@ def emit(core, bits, setpath):
     return part.read_bytes(), n_nib, n_byte
 
 
-core = load_image(args.fjm)
-bits = load_bits(args.labels)
+class FakeCore:
+    """A pristine image for --selftest: word 1 carries code_start, everything else is a small
+    value. emit_reset_part only ever calls get_word, so nothing about a real 85M-word image is
+    needed to exercise it."""
+
+    def __init__(self, code_start=100):
+        self.code_start = code_start
+
+    def get_word(self, word):
+        return self.code_start * W if word == 1 else 0
+
+
+def synthetic():
+    """Inputs for --selftest, built here rather than read from disk.
+
+    CR round 3: this selftest defaulted to build/doom_e1m1_loop.fjm and a 48 MB untracked labels
+    file, so the fix for round 2 died in open() on a clean checkout -- the very defect it was
+    answering. The control is about whether this script can SEE a difference, and that does not
+    depend on whose program the labels describe.
+    """
+    bits = {"sshead": 200 * W, "pclm": 212 * W, "sfflag": 216 * W,
+            "scratch": 220 * W, "zzz_end": 226 * W}
+    doc = {"format": "label+offset", "words": 20, "labels": 4,
+           "entries": [["pclm", 0, 1, 2, 3], ["scratch", 0, 1, 2, 3, 4, 5],
+                       ["sfflag", 0, 1, 2, 3], ["sshead", 0, 1, 2, 3, 4, 5]],
+           "source_sha256": "selftest", "labels_sha256": "selftest", "generated_by": "selftest"}
+    tmp = Path(tempfile.mkdtemp(prefix="m1re_")) / "set.json.gz"
+    json.dump(doc, gzip.open(tmp, "wt", encoding="utf-8"))
+    return FakeCore(), bits, tmp, doc, 2, 3
+
 
 if args.selftest:
-    # CONTROL: drop one label's offsets from the set; the emission MUST change.
-    doc = json.load(gzip.open(args.set, "rt", encoding="utf-8"))
-    a, _n1, _b1 = emit(core, bits, args.set)
-    victim = max(doc["entries"], key=len)[0]
-    doc["entries"] = [e for e in doc["entries"] if e[0] != victim]
+    core, bits, setpath, doc, args.view_w, args.nss = synthetic()
+    print("SELFTEST inputs are synthetic (no built binary, no scratchpad artifacts needed)")
+    a, n1, b1 = emit(core, bits, setpath)
+    # CONTROL: drop one label's offsets; the emission MUST change.
+    victim = "scratch"
+    doc = dict(doc, entries=[e for e in doc["entries"] if e[0] != victim])
     doc["words"] = sum(len(e) - 1 for e in doc["entries"])
-    tmp = Path(tempfile.mkdtemp(prefix="m1re_")) / "mut.json.gz"
-    json.dump(doc, gzip.open(tmp, "wt", encoding="utf-8"))
-    b, _n2, _b2 = emit(core, bits, tmp)
-    ok = a != b
-    print("CONTROL: dropping label %r from the set changes the emission: %s"
-          % (victim, "ok" if ok else "!! IDENTICAL - this script cannot see a difference"))
+    tmp2 = Path(tempfile.mkdtemp(prefix="m1re_")) / "mut.json.gz"
+    json.dump(doc, gzip.open(tmp2, "wt", encoding="utf-8"))
+    b, n2, b2 = emit(core, bits, tmp2)
+    ok = a != b and n2 < n1
+    print("  as given            : %s (%d nibble cells)" % (hashlib.sha256(a).hexdigest()[:16], n1))
+    print("  %-20s: %s (%d nibble cells)" % ("without " + victim, hashlib.sha256(b).hexdigest()[:16], n2))
+    print("  CONTROL: dropping a label changes the emission: %s"
+          % ("ok" if ok else "!! IDENTICAL - this script cannot see a difference"))
     print("SELFTEST: %s" % ("PASS" if ok else "FAIL"))
     sys.exit(0 if ok else 1)
+
+core = load_image(args.fjm)
+bits = load_bits(args.labels)
 
 new, n_nib, n_byte = emit(core, bits, args.set)
 ref = Path(args.ref).read_bytes()

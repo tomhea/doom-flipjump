@@ -43,6 +43,10 @@ ap.add_argument("--labels", default="scratchpad/_m1b_labels.tsv.gz")
 ap.add_argument("--set", default="src/doomfj/data/m1_restore_set.json.gz")
 ap.add_argument("--view-w", type=int, default=160)
 ap.add_argument("--nss", type=int, default=682)
+ap.add_argument("--plant", type=int, default=0,
+                help="write a >15 value into this many nibble-cleared cells -- the NEGATIVE CONTROL")
+ap.add_argument("--selftest", action="store_true",
+                help="run twice, once with --plant 1, and require PASS then FAIL")
 args = ap.parse_args()
 
 # Build the wire the same way m1_gate.py does, from the same repo helpers, so this probe and the
@@ -96,6 +100,36 @@ for name, n in selfreset.byte_arrays(bits, words_sorted, args.view_w, args.nss):
 nib_val_words = sorted(x for x in (wset - byte_words) if x % 2)
 print("checking %s nibble-cleared cells across %s known byte arrays as the control"
       % (format(len(nib_val_words), ","), len(known)), flush=True)
+# CR round 3: `ok` did not depend on this, so a set that resolved to nothing outside the byte
+# arrays printed the clean RESULT line and exited 0. Silence has to be earned.
+assert len(nib_val_words) > 1000,     "only %d nibble-cleared cells to check -- the set or labels are wrong, and a clean result "     "here would mean nothing" % len(nib_val_words)
+
+if args.selftest:
+    # R9. CR round 3 was right that a clean RESULT here proved nothing while the FAIL branch had
+    # never executed. This plants a byte value in a cell the reset nibble-clears -- exactly the
+    # condition the probe exists to detect -- and requires the verdict to flip.
+    #
+    # ⚠ It needs a BUILT binary. This probe reads what a real program leaves in real memory; there
+    # is no synthetic stand-in for that, so unlike m1_setfile/m1_reemit its selftest cannot run on
+    # a bare checkout. That is a property of what it measures, not an oversight.
+    import subprocess
+    base = [sys.executable, __file__, "--fjm", args.fjm, "--labels", args.labels, "--set", args.set,
+            "--view-w", str(args.view_w), "--nss", str(args.nss)]
+    if not Path(args.fjm).exists():
+        print("SELFTEST CANNOT RUN: %s is missing -- build it first" % args.fjm)
+        sys.exit(2)
+    print("SELFTEST 1/2: as shipped -- must PASS", flush=True)
+    a = subprocess.run(base).returncode
+    print("")
+    print("SELFTEST 2/2: one nibble-cleared cell planted with 0xA5 -- must FAIL", flush=True)
+    b = subprocess.run(base + ["--plant", "1"]).returncode
+    good = a == 0 and b != 0
+    print("")
+    print("  clean   exit %d (want 0)" % a)
+    print("  planted exit %d (want non-zero)" % b)
+    print("M1 BYTECHECK SELFTEST: %s"
+          % ("PASS" if good else "!! FAIL -- this probe cannot reject a byte cell in the nibble set"))
+    sys.exit(0 if good else 1)
 
 r = FjmRunner(Path(args.fjm))
 assert r.native, "needs the native engine"
@@ -115,7 +149,7 @@ STATES = [(_signed(_sp.x, 32) >> 16, _signed(_sp.y, 32) >> 16, _sp.angle, 0),
           (1272, -724, 0x40000000, 5),
           (1869, 479, 0x80000000, 0)]
 
-bad, ctl_hits, ok = {}, {k: 0 for k in known}, True
+bad, ctl_hits, ok = {}, {k: set() for k in known}, True
 for st in STATES:
     core = fresh()
     scr = StreamScreen(stdin=wire(*st), n_things=len(_RT))
@@ -126,26 +160,32 @@ for st in STATES:
     if ops <= 1_000_000:
         print("  CONTROL 2 FAILED at %s: only %s ops -- the wire is wrong" % (name, format(ops, ",")))
         ok = False
+    for x in nib_val_words[:args.plant]:
+        # THE NEGATIVE CONTROL: make this cell look like a byte cell.
+        core.set_words(x, [0xA5 << VAL_SHIFT])
     for x in nib_val_words:
         v = core.get_word(x) >> VAL_SHIFT
         if v > 15:
             bad.setdefault(x, []).append((name, v))
     for k, ws in known.items():
-        ctl_hits[k] += sum(1 for x in ws if (core.get_word(x) >> VAL_SHIFT) > 15)
+        # DISTINCT cells across the whole run, not a per-state sum. CR round 3: summing made
+        # "pclm 640" out of a 160-cell array seen 4 times, a number that cannot exist.
+        ctl_hits[k].update(x for x in ws if (core.get_word(x) >> VAL_SHIFT) > 15)
     print("  %-22s %13s ops  %5.1fs  cells>15 so far: %d"
           % (name, format(ops, ","), time.perf_counter() - t0, len(bad)), flush=True)
     del core
 
 print("")
 print("CONTROL 1 (vacuity) -- the KNOWN byte arrays must themselves show values > 15:")
-for k, n in ctl_hits.items():
-    print("  %-8s %5d cells held a value > 15   %s"
-          % (k, n, "ok" if n else "!! THE PROBE IS NOT REACHING LIVE DATA"))
-    ok &= bool(n)
+for k, v in ctl_hits.items():
+    print("  %-8s %5d of %d cells held a value > 15   %s"
+          % (k, len(v), len(known[k]), "ok" if v else "!! THE PROBE IS NOT REACHING LIVE DATA"))
+    ok &= bool(v)
 
 print("")
 if bad:
-    print("!! %d NIBBLE-CLEARED CELLS HELD A VALUE > 15 -- they are BYTE cells and the reset")
+    print("!! %d NIBBLE-CLEARED CELLS HELD A VALUE > 15 -- they are BYTE cells and the reset"
+          % len(bad))
     print("   CORRUPTS them. e.g.:")
     for x in sorted(bad)[:8]:
         print("     word %d  %s" % (x, bad[x][:3]))

@@ -130,9 +130,17 @@ def run_all(fjm, blob, keep=None):
     _c, ops, _e, _l, _p = core.run(scr.read_bit, scr.write_bit, IOReadOnEOF, last_ops_length=0)
     frames = list(scr.frames)
     del core, scr, r
-    if args.corrupt_frame is not None and keep is None and len(frames) > args.corrupt_frame:
-        # THE NEGATIVE CONTROL, applied to the LOOP binary's frames only (the old binary is read
-        # back through `keep`). One byte, so nothing but the comparison can notice.
+    if (args.corrupt_frame is not None and str(fjm) == str(args.loop_fjm)
+            and len(frames) > args.corrupt_frame):
+        # THE NEGATIVE CONTROL, and it must hit the LOOP BINARY ONLY.
+        #
+        # ⚠ CR round 3 caught this guard testing `keep is None`, which NO CALLER EVER SETS -- so the
+        # flip landed on every run, INCLUDING the old-binary reference runs. The gate then failed
+        # for the wrong reason: frame 0 came out "loop vs old BYTE-EXACT" (both corrupted
+        # identically) and the FAIL came from a corrupted REFERENCE at frame 1. A control that
+        # proves the gate notices a broken reference proves nothing about the property the gate
+        # exists to certify -- that a WRONG LOOP FRAME is rejected. Compare against the loop path
+        # explicitly instead.
         k = args.corrupt_frame
         b = bytearray(frames[k])
         b[0] ^= 1

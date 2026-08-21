@@ -195,7 +195,7 @@ it was derived from whole label extents. MEASURED at 0 dirty words across all fi
 emitter now REFUSES a set word in a byte array's declared-but-unreachable range instead of letting
 it fall through to the nibble clear. The trim is worth **−19,110 ops/frame** (270,811 → 251,701 on
 the same 8-frame chain) and **−57,950 span-words**; do not quote the pre-trim 270,811 for this
-tier. The tier's **85,526,926** words is the M14 tier plus that part plus the fj-side
+tier. The tier's **85,468,976** words is the M14 tier plus that part plus the fj-side
 `m1.zerobyte` def, and R4's `storage_mode == flat` assert runs on this path — the frozen-image reset
 the loop depends on needs pure flat.
 

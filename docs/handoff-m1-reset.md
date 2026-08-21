@@ -798,3 +798,29 @@ sweep   260 frames, median 30,191,585 ops
 The two reset figures (251,701 and 250,789) are the same quantity over different frame sets, not one
 number rounded twice. The trim is worth **-19,110 ops/frame** against the pre-trim build measured on
 the identical 8-frame chain, and **-57,950 span-words**.
+
+### 9.6 The control that certified the wrong property (CR round 3)
+
+`m1_gate.py --selftest`, added in round 2, guarded its frame flip with `keep is None` -- and no
+caller ever passes `keep`. So `--corrupt-frame 0` flipped a byte in **every** run, the old-binary
+reference runs included. It still printed `M1 GATE SELFTEST: PASS`.
+
+What it was actually doing, from `_m1_gate5_self.log`:
+
+```
+frame 0: loop vs old BYTE-EXACT      <- BOTH corrupted identically
+frame 1: loop vs old !! DIFFER       <- the FAIL came from a corrupted REFERENCE
+```
+
+After the fix (`_m1_gate6_self.log`):
+
+```
+frame 0: loop vs old !! DIFFER; vs oracle loop=1 old=0 !! M1 MOVED PIXELS  FAIL
+frame 1..3: BYTE-EXACT
+```
+
+**The lesson, and it is the sharpest one in this file: a negative control can pass while testing
+the wrong property, and its summary line looks identical either way.** Both versions printed
+`PASS`; only the per-frame signature distinguishes them. Quote the signature, not the verdict --
+and when a control is the evidence, the thing to review is *which* mutation it rejects, not
+*whether* it rejects one.

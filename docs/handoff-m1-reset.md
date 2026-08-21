@@ -671,3 +671,82 @@ The floor is now ~91 ops/cell x 1,002 byte cells (91k) + 5,031 nibble cells (99k
 remaining lever is that **`sshead` is 682 of those 1,002 cells but only <=75 heads are ever
 non-zero**, and `thss_rt[t]` names exactly which -- a change to what the reset iterates, not to the
 primitive. And M1 is still **not wired into `build.py`**.
+
+---
+
+## 9. CR rounds 1 and 2 — what review found that the gates could not
+
+Two rounds against `docs/cr-rules.md`. Every finding that mattered was in the class this repo is
+worst at: **things that stay byte-exact, so no rendering gate can see them.**
+
+### 9.1 The one-sided guard, and 682 cells of dead work (R6, round 2)
+
+`emit_reset_part` asserted `byte_words - wset` — every byte cell must be IN the set — and nothing
+in the other direction. So a set word lying inside a byte array's declared extent but outside its
+**reachable** part fell straight through to the nibble clear.
+
+It was doing exactly that. `sshead` is declared `hex.vec 2*nss` (1,364 cells) but the stride is ONE
+cell, so only `nss` = 682 are addressable; the set carried the whole extent, so 682 unreachable
+cells were being nibble-cleared every frame.
+
+The question that mattered was whether those cells are padding (dead work) or live byte cells
+(silent corruption), and the code could not tell the two apart. **Measured, not argued:** across
+all five `scratchpad/_m1_dirty*.json.gz` maps, the padding half is dirty in **0 words**. Dead work.
+
+| | |
+|---|---:|
+| nibble cells before | 5,031 |
+| nibble cells after the trim | **4,349** |
+| removed | 682 (the whole `sshead` padding half) |
+
+The guard is now two-sided: a set word in a byte array's declared-but-unreachable range is
+**refused**, and `scratchpad/m1_setfile.py` trims that tail when it writes the set (derived from the
+label extents, not hardcoded).
+
+### 9.2 Is any OTHER array a byte array? (R6, round 2)
+
+The counts were derived but the **membership** of the byte-array list was still hand-written, and
+`src/fj/` has a dozen other `hex.write_byte` sites — all through pointer registers, so no static
+rule can name the arrays they reach.
+
+`scratchpad/m1_bytecheck.py` settles it empirically instead: run real frames, and for every cell the
+reset nibble-clears, read the value it is left holding. A byte cell gives itself away by holding a
+value > 15.
+
+```
+  4 viewpoints, 46.9M-61.5M ops each
+  CONTROL 1 (vacuity) -- the KNOWN byte arrays must show values > 15:
+    sshead      96 cells   ok
+    pclm       640 cells   ok
+    sfflag     503 cells   ok
+  RESULT: no nibble-cleared cell ever held a value > 15.
+```
+
+The vacuity control is the point: without it, a clean result would be indistinguishable from a probe
+that was reading the wrong memory.
+
+### 9.3 A control that computed `x == x` (R9, round 1)
+
+`m1_setfile.py`'s "CONTROL: round-trip" rebuilt the absolute set from the same arrays that produced
+the offsets — `base + (x - base) == x`, an identity, true for every input, and the **only**
+provenance the shipped data file had. It is now a round-trip through the production loader with
+three mutations that must each be caught (shift a label / delete a label / make an offset escape its
+span), and `--selftest` builds its own synthetic inputs so it runs on a clean checkout.
+
+The escape case is the one a round-trip is structurally blind to: attribution is
+nearest-preceding-label with **no containment check**, so `load_restore_set` now enforces one.
+
+### 9.4 The rest
+
+- **Hardcoded byte counts** (R6): a wider `VIEW_W` would have dropped byte cells into the nibble set
+  — corruption, byte-exact on E1M1. Counts are derived and cross-checked against two sources.
+- **`CODE_START_WORD = 17308`** (R6): derived from word 1, which is op0's jump field and *is*
+  `code_start`. Verified against the shipped binary: `553856 // 32 = 17308`.
+- **`emit_reset_part` had no test** (R3): it is pure and injectable, so a fake label table covers
+  the split, the read-only drop, the run coalescing and the main-part surgery in milliseconds.
+- **`m1_gate.py` had no `--selftest`** (R9): it now re-runs itself with one byte of a presented
+  frame flipped and requires the verdict to flip too.
+- **Assemble time regressed** (R2): 3,498 s / 4,560 s total against 559 s single-pass. Two passes
+  are structural to M1; the number was omitted from the first PR body and should not have been.
+- **One finding was wrong**: hatchling already ships `src/doomfj/data/`, verified by building a
+  wheel where an explicit `force-include` is rejected as a duplicate.

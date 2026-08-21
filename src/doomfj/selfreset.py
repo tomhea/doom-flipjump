@@ -175,16 +175,34 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
     words = [x for x in words if x >= code_start_word]
     wset = set(words)
 
-    byte_words, byte_bases = set(), []
+    byte_words, byte_bases, declared_words = set(), [], set()
     for name, n in byte_arrays(bits, words_sorted, view_w, nss):
         base = bits[name] // W
         byte_bases.append((name, bits[name], n))
+        declared_words.update(range(base, _extent(words_sorted, base)))
         for k in range(n):
             byte_words.add(base + 2 * k)
             byte_words.add(base + 2 * k + 1)
     missing = byte_words - wset
     assert not missing, ("self-reset: %d byte-array words are outside the restore set -- "
-                         "BYTE_ARRAYS disagrees with it" % len(missing))
+                         "the byte arrays disagree with it" % len(missing))
+    # THE OTHER SIDE OF THE SAME GUARD, and the one that was missing. The assert above catches a
+    # byte cell the set forgot; this one catches a set word that lies INSIDE a byte array's
+    # DECLARED extent but outside its REACHABLE part. Such a word would fall through to `nib` and
+    # be nibble-cleared -- and if the reachable count were ever wrong, that is precisely the
+    # corruption this module exists to prevent, arriving silently and byte-exact.
+    #
+    # It fires on the pre-2026-08-21 set, which carried each label's whole extent: sshead is
+    # declared hex.vec 2*nss but a 1-cell stride reaches only nss, so 1,364 words of unreachable
+    # padding were being nibble-cleared -- ~682 dead cells, MEASURED at 0 dirty words across all
+    # five dirty maps in scratchpad/, i.e. provably-dead work, not corruption. The set is trimmed
+    # now; this assert is what keeps it trimmed.
+    stray = sorted((wset & declared_words) - byte_words)
+    assert not stray, (
+        "self-reset: %d restore-set words lie inside a byte array's declared extent but outside "
+        "its reachable part (e.g. %s). They would be NIBBLE-cleared, which corrupts a byte cell "
+        "rather than failing. Re-generate the set with scratchpad/m1_setfile.py, which trims the "
+        "unreachable tail." % (len(stray), stray[:3]))
     nib = sorted(wset - byte_words)
 
     # Drop read-only/code regions. A cell only nibble ops ever write cannot hold a pristine value

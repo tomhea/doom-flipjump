@@ -47,7 +47,34 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--loop-fjm", default="scratchpad/fjmcache/_m1loop.fjm")
 ap.add_argument("--old-fjm", default="scratchpad/fjmcache/_rssprobe.fjm")
 ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
+ap.add_argument("--corrupt-frame", type=int, default=None,
+                help="flip one byte of this presented frame -- the NEGATIVE CONTROL, see --selftest")
+ap.add_argument("--selftest", action="store_true",
+                help="run the gate twice, once with --corrupt-frame 0, and require the second to FAIL")
 args = ap.parse_args()
+
+if args.selftest:
+    # R9. A gate whose verdict is quoted as proof must be shown to be capable of the other verdict.
+    # This re-runs the REAL gate on the REAL binaries, once untouched and once with a single byte of
+    # one presented frame flipped, and requires PASS then FAIL. It is not a separate reimplementation
+    # of the checks -- it is this file, twice.
+    import subprocess
+    base = [sys.executable, __file__, "--loop-fjm", args.loop_fjm, "--old-fjm", args.old_fjm,
+            "--wad", args.wad]
+    print("SELFTEST 1/2: the gate as shipped -- must PASS", flush=True)
+    a = subprocess.run(base).returncode
+    print("")
+    print("SELFTEST 2/2: one byte of presented frame 0 flipped -- must FAIL", flush=True)
+    b = subprocess.run(base + ["--corrupt-frame", "0"]).returncode
+    good = a == 0 and b != 0
+    print("")
+    print("=" * 96)
+    print("  clean run  exit %d (want 0)" % a)
+    print("  mutated    exit %d (want non-zero)" % b)
+    print("M1 GATE SELFTEST: %s" % ("PASS" if good else
+                                    "!! FAIL -- this gate cannot distinguish a wrong frame"))
+    print("=" * 96)
+    sys.exit(0 if good else 1)
 
 
 class MultiFrameScreen(StreamScreen):
@@ -103,6 +130,13 @@ def run_all(fjm, blob, keep=None):
     _c, ops, _e, _l, _p = core.run(scr.read_bit, scr.write_bit, IOReadOnEOF, last_ops_length=0)
     frames = list(scr.frames)
     del core, scr, r
+    if args.corrupt_frame is not None and keep is None and len(frames) > args.corrupt_frame:
+        # THE NEGATIVE CONTROL, applied to the LOOP binary's frames only (the old binary is read
+        # back through `keep`). One byte, so nothing but the comparison can notice.
+        k = args.corrupt_frame
+        b = bytearray(frames[k])
+        b[0] ^= 1
+        frames[k] = bytes(b)
     return ops, frames
 
 

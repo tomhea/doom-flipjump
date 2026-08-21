@@ -15,6 +15,7 @@ import json
 import pytest
 
 from doomfj.harness import W
+from doomfj import selfreset
 from doomfj.selfreset import (BYTE_ARRAY_NAMES, byte_arrays, load_restore_set,
                               verify_labels_unchanged)
 
@@ -157,8 +158,131 @@ def test_offset_running_past_its_label_is_refused(tmp_path):
         load_restore_set(p, {"a": 0, "b": 4 * W})                     # 9 >= 4: escaped
 
 
-def test_byte_arrays_covers_only_the_write_byte_arrays():
-    """drawn/sprflag are write_byte arrays too but only ever hold values <= 2, so the 19.5-op
-    nibble clear is correct for them and the 91-op byte clear would be waste."""
-    assert BYTE_ARRAY_NAMES == ("sshead", "pclm", "sfflag")
-    assert "drawn" not in BYTE_ARRAY_NAMES and "sprflag" not in BYTE_ARRAY_NAMES
+# ---------------------------------------------------------------------------------------------
+# emit_reset_part -- the function that actually writes the program. CR round 2 was right that it
+# had no test at all, while being the piece that derives code_start, splits the set into nibble vs
+# byte, drops read-only extents, coalesces the zero runs, and performs the size-neutral surgery on
+# the main part. It is pure and fully injectable, so a fake label table tests all of it in
+# milliseconds -- no build.
+# ---------------------------------------------------------------------------------------------
+
+VAL_SHIFT = (W + W.bit_length()) - W
+CODE_START = 100
+
+# A miniature program: 3 subsectors, a 2-column viewport, one scratch region, one read-only LUT.
+# sshead is declared 2*nss cells (the real over-allocation), so only its first 3 cells are
+# reachable and its last 3 are padding.
+FAKE = {"sshead": 200, "pclm": 212, "sfflag": 216, "scratch": 220, "lut": 230, "zzz_end": 240}
+FAKE_BITS = {k: v * W for k, v in FAKE.items()}
+
+
+def _pristine(values):
+    """word -> content. Word 1 is op0's jump field and carries code_start; a cell's value lives in
+    the odd (jump) word, shifted."""
+    def get(word):
+        if word == 1:
+            return CODE_START * W
+        return values.get(word, 0) << VAL_SHIFT
+    return get
+
+
+def _emit(tmp_path, entries, values, view_w=2, nss=3, main=None):
+    gen = tmp_path / "gen"
+    gen.mkdir()
+    (gen / "e1m1_02_main.fj").write_text(
+        main if main is not None else "stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+        encoding="utf-8")
+    p = _set_file(tmp_path, entries)
+    part, n_nib, n_byte = selfreset.emit_reset_part(
+        gen, dict(FAKE_BITS), _pristine(values), p, view_w, nss, "e1m1")
+    return part.read_text(encoding="utf-8"), n_nib, n_byte, gen
+
+
+BYTE_ENTRIES = [["sshead", 0, 1, 2, 3, 4, 5], ["pclm", 0, 1, 2, 3], ["sfflag", 0, 1, 2, 3]]
+
+
+def test_emit_splits_byte_arrays_from_nibble_cells(tmp_path):
+    txt, n_nib, n_byte, _g = _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1, 2, 3]], {})
+    assert n_byte == 3 + 2 + 2                      # nss + view_w + view_w reachable cells
+    assert n_nib == 2                               # scratch is 2 cells
+    assert "rep(3, i) m1.zerobyte %d + i*dw" % (200 * W) in txt
+    assert txt.rstrip().endswith(";__hot_end")
+
+
+def test_emit_coalesces_zero_runs_and_keeps_non_zero_singles(tmp_path):
+    """A run of zero cells becomes ONE hex.zero; a cell with a real pristine value must be set back
+    to that value, not zeroed -- restoring it to 0 would be a silent wrong-value bug."""
+    ents = BYTE_ENTRIES + [["scratch", 0, 1, 2, 3, 4, 5]]
+    txt, _n, _b, _g = _emit(tmp_path, ents, {221: 0, 223: 7, 225: 0})
+    assert "hex.set 1, %d, 7" % ((220 // 2 + 1) * 2 * W) in txt
+    zeros = [l for l in txt.splitlines() if "hex.zero" in l]
+    assert len(zeros) == 2 and all(" 1, " in z for z in zeros), zeros
+
+
+def test_emit_drops_a_read_only_extent(tmp_path):
+    """A cell only nibble ops ever write cannot hold a pristine value above 15, so a label whose
+    extent contains one is a packed LUT or code -- and the WHOLE extent goes, not just that cell."""
+    ents = BYTE_ENTRIES + [["scratch", 0, 1], ["lut", 0, 1, 2, 3]]
+    txt, n_nib, _b, _g = _emit(tmp_path, ents, {231: 0xFF, 233: 0})
+    assert n_nib == 1                               # scratch's one cell survives, both lut cells go
+    assert str(230 * 2 * W) not in txt
+
+
+def test_emit_ignores_words_below_code_start(tmp_path):
+    """code_start is DERIVED from word 1, and everything below it is the stl's own tables."""
+    bits = dict(FAKE_BITS, low=50 * W)
+    gen = tmp_path / "gen"; gen.mkdir()
+    (gen / "e1m1_02_main.fj").write_text("stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+                                         encoding="utf-8")
+    p = _set_file(tmp_path, BYTE_ENTRIES + [["low", 0, 1], ["scratch", 0, 1]])
+    _part, n_nib, _b = selfreset.emit_reset_part(gen, bits, _pristine({}), p, 2, 3, "e1m1")
+    assert n_nib == 1                               # `low` is below code_start and never emitted
+
+
+def test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array(tmp_path):
+    """THE TWO-SIDED HALF OF THE GUARD. sshead is declared 2*nss but reaches nss, so offsets 6..11
+    address padding. They are not byte cells, so they would fall through to the NIBBLE clear -- and
+    a nibble op on a byte cell corrupts it rather than failing. Refuse instead."""
+    ents = [["sshead", 0, 1, 2, 3, 4, 5, 6, 7], ["pclm", 0, 1, 2, 3], ["sfflag", 0, 1, 2, 3]]
+    with pytest.raises(AssertionError, match="outside its reachable part"):
+        _emit(tmp_path, ents, {})
+
+
+def test_emit_patches_the_frame_tail_size_neutrally(tmp_path):
+    """1 op -> 1 op. If the patch changed the line count, every baked address after it would move
+    and the whole two-pass scheme would be void."""
+    _txt, _n, _b, gen = _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1]], {})
+    out = (gen / "e1m1_02_main.fj").read_text(encoding="utf-8").split("\n")
+    assert out == ["stl.output_char 0xFF", ";m1_reset", "bad: stl.loop", ""]
+
+
+@pytest.mark.parametrize("main,match", [
+    ("stl.output_char 0xFF\nstl.loop\nstl.loop\nbad: stl.loop\n", "exactly 1 bare stl.loop"),
+    ("stl.output_char 0xFF\nstl.loop\n", "junk-input halt"),
+    ("nop\nstl.loop\nbad: stl.loop\n", "0xFF end-of-frame marker"),
+])
+def test_emit_refuses_a_main_part_it_does_not_recognise(tmp_path, main, match):
+    """The patch is done by text surgery on generated code. If the frame tail is not exactly where
+    it is expected, patching the wrong line would redirect the program silently."""
+    with pytest.raises(AssertionError, match=match):
+        _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1]], {}, main=main)
+
+
+def test_no_byte_array_word_is_ever_nibble_cleared(tmp_path):
+    """The property, not a restatement of the list. Every word of a byte array must leave through
+    the `rep m1.zerobyte` path and none may appear as a `hex.zero`/`hex.set` address, because a
+    nibble op on a byte cell CORRUPTS it (0xA5 -> 0x22A5) instead of failing.
+
+    ** The MEMBERSHIP of BYTE_ARRAY_NAMES cannot be settled here. ** src/fj/ writes bytes through
+    POINTER registers, so no static rule can name the arrays they reach; `scratchpad/m1_bytecheck.py`
+    settles it empirically instead -- it runs real frames and checks that no cell the reset
+    nibble-clears ever holds a value > 15, with the three known arrays as the vacuity control
+    (measured: sshead 96, pclm 640, sfflag 503 cells > 15, and 0 elsewhere over 4 viewpoints).
+    """
+    txt, _n, n_byte, _g = _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1]], {})
+    assert n_byte == 7
+    addr_lines = [l for l in txt.splitlines() if "hex.zero" in l or "hex.set" in l]
+    for name, cells in (("sshead", 3), ("pclm", 2), ("sfflag", 2)):
+        for k in range(cells):
+            a = (FAKE[name] // 2 + k) * 2 * W
+            assert not any(str(a) in l for l in addr_lines),                 "%s cell %d reached a nibble op" % (name, k)

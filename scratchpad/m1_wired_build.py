@@ -22,7 +22,6 @@ m = build_wall_renderer(
     out_fjm=ROOT / "build/doom_e1m1_loop.fjm",
     generated_dir=ROOT / "build/generated_loop",
     flat_max_words=RENDER_FLAT_MAX_WORDS,
-    self_reset=True,
-    restore_set=ROOT / "src/doomfj/data/m1_restore_set.json.gz")
+    self_reset=True)          # restore_set defaults to the packaged src/doomfj/data set
 print(json.dumps(m, indent=2))
 print("total %.0fs" % (time.perf_counter() - t0))

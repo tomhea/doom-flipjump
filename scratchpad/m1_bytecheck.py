@@ -20,10 +20,16 @@ CONTROLS (R9):
   2. FRAME REALITY -- every frame must run > 1e6 ops, or the wire is wrong and nothing was written.
   3. Several viewpoints, because a cell can be untouched at one and live at another.
 
-    python scratchpad/m1_bytecheck.py [--fjm build/doom_e1m1.fjm]
+    python scratchpad/m1_bytecheck.py [--fjm scratchpad/fjmcache/_rssprobe.fjm]
+
+The default is the NON-LOOPING binary on purpose: the question is what a FRAME leaves behind, and
+the loop's own reset would overwrite exactly the cells under test. The tool prints the image path
+and its sha256 so the verdict can be attributed to one artifact -- CR round 4 was right that it
+previously named none, while licensing BYTE_ARRAY_NAMES in shipped code.
 """
 import argparse
 import gzip
+import hashlib
 import sys
 import time
 from pathlib import Path
@@ -130,6 +136,15 @@ if args.selftest:
     print("M1 BYTECHECK SELFTEST: %s"
           % ("PASS" if good else "!! FAIL -- this probe cannot reject a byte cell in the nibble set"))
     sys.exit(0 if good else 1)
+
+h = hashlib.sha256()
+with open(args.fjm, "rb") as _f:
+    for _c in iter(lambda: _f.read(1 << 20), b""):
+        h.update(_c)
+print("image  : %s" % args.fjm)
+print("sha256 : %s" % h.hexdigest())
+print("labels : %s" % args.labels)
+print("set    : %s" % args.set)
 
 r = FjmRunner(Path(args.fjm))
 assert r.native, "needs the native engine"

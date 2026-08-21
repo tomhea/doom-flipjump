@@ -277,7 +277,8 @@ def test_no_byte_array_word_is_ever_nibble_cleared(tmp_path):
     POINTER registers, so no static rule can name the arrays they reach; `scratchpad/m1_bytecheck.py`
     settles it empirically instead -- it runs real frames and checks that no cell the reset
     nibble-clears ever holds a value > 15, with the three known arrays as the vacuity control
-    (measured: sshead 96, pclm 640, sfflag 503 cells > 15, and 0 elsewhere over 4 viewpoints).
+    (measured: sshead 24/682, pclm 160/160, sfflag 160/160 cells > 15, and 0 elsewhere over 4
+    viewpoints -- see scratchpad/_m1_bytecheck.log).
     """
     txt, _n, n_byte, _g = _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1]], {})
     assert n_byte == 7

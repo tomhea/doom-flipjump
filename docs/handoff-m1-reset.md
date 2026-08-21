@@ -668,10 +668,15 @@ genuinely exceed a nibble and keep the byte clear.
 
 ### 8.5 What is left
 
-The floor is now ~91 ops/cell x 1,002 byte cells (91k) + 5,031 nibble cells (99k). The one
-remaining lever is that **`sshead` is 682 of those 1,002 cells but only <=75 heads are ever
-non-zero**, and `thss_rt[t]` names exactly which -- a change to what the reset iterates, not to the
-primitive. And M1 is still **not wired into `build.py`**.
+[SUPERSEDED -- see 9.5. The nibble half is **4,349** cells after the CR round-2 `sshead` trim, not
+5,031, and M1 **is** wired into `build.py` (`self_reset=True`, 2026-08-22).]
+
+The floor is ~91 ops/cell x 1,002 byte cells (91k) + the nibble cells. The one remaining lever is
+that **`sshead` is 682 of those 1,002 cells but only <=75 heads are ever non-zero**, and
+`thss_rt[t]` names exactly which -- a change to what the reset iterates, not to the primitive.
+⚠ MEASURED AND REJECTED: at a constant address the byte clear is ~91 ops/cell, so 682 x 91 = 62,130
+beats 75 x 943 = 70,725 for a selective clear at a RUNTIME address, and that 943 is a lower bound.
+The lever is only worth taking if the selective clear can keep constant addresses.
 
 ---
 
@@ -824,3 +829,25 @@ the wrong property, and its summary line looks identical either way.** Both vers
 `PASS`; only the per-frame signature distinguishes them. Quote the signature, not the verdict --
 and when a control is the evidence, the thing to review is *which* mutation it rejects, not
 *whether* it rejects one.
+
+### 9.7 Which M1 tools carry a negative control (CR round 4)
+
+This table exists because the PR's prose version of it was wrong three revisions running -- first
+overclaiming, then underclaiming. It is the exhaustive list.
+
+| tool | verdict quoted as proof? | `--selftest` | mutation control |
+|---|---|---|---|
+| `m1_gate.py` | yes | yes | flips a byte of the LOOP binary's frame; requires FAIL |
+| `m1_bytecheck.py` | yes | yes (needs a built image) | plants 0xA5 in a nibble-cleared cell |
+| `m1_reemit.py` | yes | yes (synthetic) | drops a label; emission must differ |
+| `m1_setfile.py` | yes | yes (synthetic) | C1 shift / C2 delete / C3 escape + positive |
+| `m1_mutations.py` | yes | it *is* the control | 8 mutations of shipped code, all must be caught |
+| `m1a_stride.py` | historical | yes | — |
+| `m1b_labels.py` | historical | yes | — |
+| `m1q_rss.py` | historical | yes | — |
+| `m1_dirtymap.py` | **yes** (the 0-dirty-words result licenses the trim) | **no flag** | has one: CONTROL 3 shifts the label table and requires the per-label counts to change |
+| `m1_sweep.py` | **yes** (260/260 byte-exact) | **no** | in-run only: vacuity + byte-exact vs the old binary |
+| `m1_play.py` | **yes** (100/100 byte-exact) | **no** | in-run only: distinct-picture vacuity + byte-exact |
+
+The last two rows are the real remaining gap. `m1_dirtymap.py` has a genuine mutation control but no
+flag to invoke it standalone, which is why it kept getting miscounted.

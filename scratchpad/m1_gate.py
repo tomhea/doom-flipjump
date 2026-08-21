@@ -117,7 +117,7 @@ def oracle(vx, vy, va):
         things=True, sprite_wad=art, degrade=True))
 
 
-def run_all(fjm, blob, keep=None):
+def run_all(fjm, blob):
     r = FjmRunner(Path(fjm))
     assert r.native
     core = _fjcore.Memory(r.width, flat_max_words=r.flat_max_words)
@@ -134,7 +134,7 @@ def run_all(fjm, blob, keep=None):
             and len(frames) > args.corrupt_frame):
         # THE NEGATIVE CONTROL, and it must hit the LOOP BINARY ONLY.
         #
-        # ⚠ CR round 3 caught this guard testing `keep is None`, which NO CALLER EVER SETS -- so the
+        # ⚠ CR round 3 caught this guard testing a `keep=None` parameter NO CALLER EVER SET -- so the
         # flip landed on every run, INCLUDING the old-binary reference runs. The gate then failed
         # for the wrong reason: frame 0 came out "loop vs old BYTE-EXACT" (both corrupted
         # identically) and the FAIL came from a corrupted REFERENCE at frame 1. A control that

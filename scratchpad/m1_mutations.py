@@ -1,0 +1,130 @@
+"""R1 evidence for M1, as a re-runnable script instead of a hand-composed table.
+
+Each entry MUTATES REAL SHIPPED CODE -- not a copy, not a fixture -- runs the M1 tests, and records
+which tests failed. A test that passes under the mutation it is supposed to catch is not evidence.
+
+CR round 4: the PR body's mutation table was hand-composed and nothing on disk backed it. This
+writes scratchpad/_m1_mutations.log, which the body can cite.
+
+⚠ It edits files in src/ and restores them from an in-memory copy in a finally block. If it is
+killed mid-run, `git checkout src/` restores the tree.
+
+    python scratchpad/m1_mutations.py
+"""
+import io
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SR = ROOT / "src/doomfj/selfreset.py"
+FJ = ROOT / "src/fj/m1_reset.fj"
+TESTS = ["tests/host/test_selfreset.py", "tests/fj/test_m1_reset.py"]
+
+
+def rd(p):
+    return io.open(p, encoding="utf-8").read()
+
+
+def wr(p, s):
+    io.open(p, "w", encoding="utf-8", newline="\n").write(s)
+
+
+def drop_two_sided(s):
+    i = s.index("    stray = sorted((wset & declared_words) - byte_words)")
+    j = s.index("    nib = sorted(wset - byte_words)", i)
+    return s[:i] + s[j:]
+
+
+def drop_main_check(s):
+    a = ('    assert len(hits) == 1, ("self-reset: expected exactly 1 bare stl.loop (the frame '
+         'tail), "\n                            "found %d" % len(hits))')
+    assert a in s
+    return s.replace(a, "    hits = hits[:1] or [0]")
+
+
+def drop_provenance(s):
+    return s.replace('    for k in ("source_sha256", "labels_sha256", "generated_by"):',
+                     "    for k in ():")
+
+
+def drop_containment(s):
+    return s.replace("            if span is not None and off >= span:\n"
+                     "                escaped.append((name, off, span))", "            pass")
+
+
+def hardcode_counts(s):
+    return s.replace("    for name, n in byte_arrays(bits, words_sorted, view_w, nss):",
+                     "    for name, n in [('sshead', 682), ('pclm', 160), ('sfflag', 160)]:")
+
+
+def drop_high_nibble(s):
+    out = [l for l in s.splitlines(True) if "c+dbit+7, c+dbit+6" not in l]
+    assert len(out) == len(s.splitlines(True)) - 1
+    return "".join(out)
+
+
+def drop_pointer_restore(s):
+    a = "      back:\n        wflip hex.pointers.ret_after_read_byte+w, back\n"
+    assert a in s
+    return s.replace(a, "      back:\n")
+
+
+def spill_past_the_cell(s):
+    t = "hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw"
+    return s.replace(t, t + "\n        wflip c+dw+w, 1*dw")
+
+
+MUTATIONS = [
+    ("selfreset.py: the two-sided guard deleted",        SR, drop_two_sided),
+    ("selfreset.py: main-part recognition assert gone",  SR, drop_main_check),
+    ("selfreset.py: provenance refusal gone",            SR, drop_provenance),
+    ("selfreset.py: containment check gone",             SR, drop_containment),
+    ("selfreset.py: byte counts hardcoded again",        SR, hardcode_counts),
+    ("m1_reset.fj: high-nibble exact_xor deleted",       FJ, drop_high_nibble),
+    ("m1_reset.fj: shared pointer never restored",       FJ, drop_pointer_restore),
+    ("m1_reset.fj: one write past the cell",             FJ, spill_past_the_cell),
+]
+
+
+def run():
+    out = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header", "--tb=no"],
+                         cwd=ROOT, capture_output=True, text=True)
+    failed = sorted(l.split(" ")[1].split("[")[0] for l in out.stdout.splitlines()
+                    if l.startswith("FAILED"))
+    tail = [l for l in out.stdout.splitlines() if " passed" in l or " failed" in l]
+    return failed, (tail[-1] if tail else "?")
+
+
+ok = True
+print("BASELINE (no mutation)")
+base_failed, base_line = run()
+print("  %s" % base_line)
+if base_failed:
+    print("  !! the tree is not clean -- %s" % base_failed)
+    ok = False
+
+originals = {p: rd(p) for p in (SR, FJ)}
+try:
+    for name, path, fn in MUTATIONS:
+        wr(path, fn(originals[path]))
+        failed, line = run()
+        wr(path, originals[path])
+        caught = bool(failed)
+        ok &= caught
+        print("")
+        print("MUTATION: %s" % name)
+        print("  %s   %s" % (line, "ok" if caught else "!! NOTHING CAUGHT IT"))
+        for f in failed:
+            print("    caught by %s" % f)
+finally:
+    for p, s in originals.items():
+        wr(p, s)
+
+print("")
+after_failed, after_line = run()
+print("RESTORED: %s  %s" % (after_line, "ok" if not after_failed else "!! TREE LEFT DIRTY"))
+ok &= not after_failed
+print("")
+print("M1 MUTATION EVIDENCE: %s" % ("PASS -- every mutation is caught" if ok else "FAIL"))
+sys.exit(0 if ok else 1)

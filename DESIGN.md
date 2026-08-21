@@ -172,9 +172,7 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 |---|---|---|---|---|
 | static (`build_wall_renderer`, R4 gate) | in the 40–62M band, `< 2²⁶` asserted | under | under | flat |
 | **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** |
-| **M1 (the above + `self_reset=True`)** | **85,526,926** | 1.27× OVER | **0.64×** | **flat** (asserted) |
-
-⚠ that M1 span is the **pre-trim** build; it is being re-measured (see the segment note below).
+| **M1 (the above + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
 
 (Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
 That trailing instruction used to be swallowed into the M14 row's last cell, where it read as
@@ -183,18 +181,22 @@ a column.)
 **M1 adds ONE segment, `<map>_07_reset.fj`** (`selfreset.emit_reset_part`). Its size is
 `nibble_cells` coalesced `hex.zero` runs + non-zero `hex.set 1` singles + one `rep` per byte
 array + the `;__hot_end` tail — MEASURED on the E1M1 tier at **4,349 nibble cells and 1,002 byte
-cells**, 618 emitted lines. It carries **no table and no align pad**: every address in it is baked,
-so it adds code span only.
+cells**, 618 emitted lines, **250,789 ops/frame** — **0.8% of the 30,191,585-op sweep median** over
+260 frames. (The 8-frame gate chain measures the same quantity at **251,701**; both are printed
+because they are different frame sets, not one number rounded two ways.) It carries **no table and
+no align pad**: every address in it is baked, so it adds code span only. Headroom against
+`RENDER_FLAT_MAX_WORDS` = 2²⁷ is **1.57×**, `storage_mode == flat` asserted; assemble 3,193 s of a
+4,724 s two-pass build.
 
 ⚠ The first build of this tier emitted **5,031** nibble cells. 682 of them were the unreachable half
 of `sshead` — declared `hex.vec 2*nss`, reached at a ONE-cell stride — which the set carried because
 it was derived from whole label extents. MEASURED at 0 dirty words across all five
 `scratchpad/_m1_dirty*.json.gz` maps, so it was provably-dead work rather than corruption; the
 emitter now REFUSES a set word in a byte array's declared-but-unreachable range instead of letting
-it fall through to the nibble clear. Ops/frame and span for the trimmed tier are pending the
-rebuild — do not quote the pre-trim 270,811 for it. The tier's **85,526,926** words is the M14 tier plus that part plus the fj-side
-`m1.zerobyte` def; headroom against `RENDER_FLAT_MAX_WORDS` = 2²⁷ is **1.569×**, and
-`storage_mode == flat` is asserted on this path exactly as R4 requires — the frozen-image reset
+it fall through to the nibble clear. The trim is worth **−19,110 ops/frame** (270,811 → 251,701 on
+the same 8-frame chain) and **−57,950 span-words**; do not quote the pre-trim 270,811 for this
+tier. The tier's **85,526,926** words is the M14 tier plus that part plus the fj-side
+`m1.zerobyte` def, and R4's `storage_mode == flat` assert runs on this path — the frozen-image reset
 the loop depends on needs pure flat.
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |

@@ -750,3 +750,35 @@ nearest-preceding-label with **no containment check**, so `load_restore_set` now
   are structural to M1; the number was omitted from the first PR body and should not have been.
 - **One finding was wrong**: hatchling already ships `src/doomfj/data/`, verified by building a
   wheel where an explicit `force-include` is rejected as a duplicate.
+
+### 9.5 The rebuild — every number re-measured on the shipped bytes
+
+```
+build   span 85,468,976 words (was 85,526,926), storage flat, headroom 1.57
+        assemble 3,193 s of a 4,724 s two-pass build
+        nibble_cells 4349, byte_cells 1002, labels_moved_in_set 0
+        view_w 160, subsectors 682          <- derived geometry, now recorded in metrics
+
+part    m1_reemit.py: the built e1m1_07_reset.fj == what this code emits, 63a80ad69cdd...
+
+gate    PHASE 1 (oracle, 4 frames one run) : PASS
+        CONTROL 2 (old binary = 1 frame)   : PASS
+        PHASE 2 (8-frame chain vs pristine): PASS      8/8 BYTE-EXACT
+        M1 GATE: PASS
+        reset = 251,701 ops/frame on the 8-frame chain
+
+gate    --selftest: clean exit 0, one presented-frame byte flipped exit 1
+        M1 GATE SELFTEST: PASS
+
+play    100 frames from ONE run, 72 distinct pictures
+        (-416.0, 256.0) -> (799.7, 477.3)
+        BYTE-EXACT vs the old binary: 100/100        M1 PLAYABILITY: PASS
+
+sweep   260 frames, median 30,191,585 ops
+        reset = 250,789 ops/frame = 0.8% OF THE MEDIAN
+        CONTROL (same pictures): 260/260 byte-exact  ok
+```
+
+The two reset figures (251,701 and 250,789) are the same quantity over different frame sets, not one
+number rounded twice. The trim is worth **-19,110 ops/frame** against the pre-trim build measured on
+the identical 8-frame chain, and **-57,950 span-words**.

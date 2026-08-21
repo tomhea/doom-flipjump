@@ -536,7 +536,7 @@ PHASE 1  four certified viewpoints, ALL IN ONE RUN
          vs oracle: loop delta == old delta on every frame -> M1 moved no pixel
 CONTROL  the same wire on the OLD binary presents exactly 1 frame
 PHASE 2  8-frame chain, every frame BYTE-EXACT vs that frame on a PRISTINE image
-PHASE 3  the reset costs 3,548,600 ops/frame = 7.47% of a 47.5M-op frame
+PHASE 3  the reset costs 270,811 ops/frame = 0.9% of the 30,191,585-op MEDIAN
 ```
 
 ⚠ The 378-px delta at (1869,479) in phase 1 is **pre-existing**: the oracle call is `deg_gate`'s,
@@ -581,3 +581,93 @@ whole set is validated on 12 frames of one map in one build config.
 - the **no-restore control hung** instead of failing — the `sshead` cycle again;
 - the **first build died with an empty log** at 6.19 GB with 4.72 GB free: the silent OOM of
   CLAUDE.md rule 1, reproduced exactly.
+
+
+---
+
+## 8. The reset came down 13x, and the frame cost was measured against the wrong thing
+
+Two corrections and one idea, all after §7 was written.
+
+### 8.1 The denominator was wrong
+
+§7 reported "7.47% of a 47.5M-op frame". **47.5M was the mean of eight hand-picked GATE viewpoints.**
+The metric is the sweep median, and `handoff-complete-game.md` §4 says gate viewpoints overstate the
+typical frame by 1.5-1.9x. Re-measured in-session over the sweep's own 260-frame walkable grid, one
+frame per run on the old binary:
+
+```
+median 30,191,585   mean 30,929,878   min 7,675,375   max 61,405,073
+```
+
+which reproduces commit `d125a18`'s 29,792,277 to within 1.3%.
+
+### 8.2 The set was 9.4x bigger than it needed to be
+
+The predicate was wrong too. A cell needs restoring iff the next frame **reads it before it writes
+it** -- not merely if the frame dirties it. Per cell that is hopeless; per **(macro, local)** it is
+easy, because it is a property of the macro body and identical in every instantiation. The 1,321
+scratch labels collapse to 349 distinct pairs (`scratchpad/m1_rbw.py`); walk each macro body and
+classify the FIRST statement that mentions the local, defaulting to READ so a gap in the table can
+only make the set bigger.
+
+| set | words | |
+|---|---:|---|
+| A shipped first | 113,058 | every dirty label's full extent |
+| B never-dirty dropped | 27,930 | 77% of A is never dirty at all (`col_*` alone is 35,840 words of framebuffer-tier state the `lines` tier never touches) |
+| **D read-before-write** | **12,066** | 220 of 349 pairs are write-first |
+
+Set D: 12-frame chain PASS, **260/260 sweep frames byte-exact**.
+
+### 8.3 The byte clear needed no pointer at all
+
+`hex.zero_ptr` costs 943 ops/cell and almost all of it is `set_flip_and_jump_pointers`, copying an
+8-nibble address so the machine can reach a cell it only knows at RUNTIME. **The reset knows every
+address at emit time.** So drive the stl's own 256-entry byte table directly:
+
+```
+hex.zero 2, read_byte
+wflip ret_after_read_byte+w, back
+C+dbit+8 ; C          # set the marker bit, JUMP INTO THE CELL: its jump word is now
+                      # (v+256)*dw, which IS read_ptr_byte_table + v (pinned at op 256)
+back:
+wflip ret_after_read_byte+w, back
+C+dbit+8 ;
+hex.exact_xor C+dbit+3..0, read_byte       # C ^= v -> low nibble cleared
+hex.exact_xor C+dbit+7..4, read_byte+dw    # C ^= v -> high nibble cleared
+```
+
+`hex.exact_xor`'s four flip targets are **arbitrary bit addresses**, so the HIGH nibble of a byte
+cell is reachable by name -- the thing `hex.zero` cannot do, and the reason a nibble op corrupts a
+byte cell (R57).
+
+```
+hex.zero_ptr (pointer path)      943.0 ops/cell
+m1.zerobyte  (constant address)   91.1 ops/cell    10.3x
+```
+
+Verified on **all 256 byte values**, planted with a RAW `wflip` -- `hex.xor_by` clamps to a nibble
+and would have made that check vacuous, which it already had once (`scratchpad/m1_zbyte.py`).
+
+### 8.4 The result
+
+`scratchpad/fjmcache/_m1loop4.fjm`, sha256 `40b0ace20430ed6f1f6e3c18e4d0b9cfba8451c163349fbd4352bb3049370eee`
+
+| build | reset/frame | % of the 30,191,585 median |
+|---|---:|---:|
+| set B + `hex.zero_ptr` loop | 2,161,364 | 7.2% |
+| **set D + `m1.zerobyte`, unrolled** | **270,811** | **0.9%** |
+
+M1 gate PASS; **260/260 sweep frames byte-exact**.
+
+Also folded in: `drawn` and `sprflag` moved to the nibble path, justified statically --
+`frame.mark_drawn` writes 1 (`frame_render.fj:340`) and `sprflag` writes 1 or 2
+(`frame_render.fj:1538`). `pclm` (a plane-pair id, 152 of 255 used) and `sfflag` (measured 33)
+genuinely exceed a nibble and keep the byte clear.
+
+### 8.5 What is left
+
+The floor is now ~91 ops/cell x 1,002 byte cells (91k) + 5,031 nibble cells (99k). The one
+remaining lever is that **`sshead` is 682 of those 1,002 cells but only <=75 heads are ever
+non-zero**, and `thss_rt[t]` names exactly which -- a change to what the reset iterates, not to the
+primitive. And M1 is still **not wired into `build.py`**.

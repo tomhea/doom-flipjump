@@ -29,14 +29,49 @@ from doomfj.harness import W
 
 DW = 2 * W
 VAL_SHIFT = (W + W.bit_length()) - W
-CODE_START_WORD = 17308
 
-# Arrays written through hex.write_byte: 8 bits in ONE cell, so they need m1.zerobyte.
-# n is the number of cells the program can REACH (a 1-cell stride), not the declared hex.vec size.
-# drawn and sprflag are deliberately absent: they are write_byte-written but only ever hold small
-# values -- frame.mark_drawn writes 1, sprflag writes 1 or 2 -- so the 19.5-op nibble clear is
-# correct for them, and 91 ops each would be waste.
-BYTE_ARRAYS = [("sshead", 682), ("pclm", 160), ("sfflag", 160)]
+# Arrays written through hex.write_byte: 8 bits in ONE cell, so they need m1.zerobyte and a
+# nibble op on one CORRUPTS it. drawn and sprflag are deliberately absent: they are write_byte
+# arrays too, but only ever hold small values -- frame.mark_drawn writes 1, sprflag writes 1 or 2
+# -- so the 19.5-op nibble clear is correct for them and 91 ops each would be waste.
+#
+# The reachable CELL COUNT of each is DERIVED, never hardcoded (R6). sshead is declared
+# hex.vec 2*nss and a 1-cell stride reaches only nss of it; pclm and sfflag are declared VIEW_W.
+# Two independent sources must agree: the label EXTENT in this build's own table, and the geometry
+# the caller passes (cfg.VIEW_W and len(cmap.subsectors)).
+#
+# WHY THIS MATTERS AND WHY NO GATE WOULD CATCH IT: the coverage assert below fires only when the
+# count is too LARGE. Hardcode 160 and raise VIEW_W, or move to a map with more subsectors, and the
+# extra byte cells silently fall out of the byte set, land in the nibble set, and get nibble-cleared
+# -- which corrupts rather than fails (0xA5 -> 0x22A5). It stays byte-exact on the old map, so
+# every gate passes.
+BYTE_ARRAY_NAMES = ("sshead", "pclm", "sfflag")
+# declared cells per reachable cell: sshead is over-allocated 2x, the per-column arrays are 1:1
+_DECLARED_RATIO = {"sshead": 2, "pclm": 1, "sfflag": 1}
+
+
+
+def byte_arrays(bits, words_sorted, view_w, nss):
+    """Reachable cell count per write_byte array, derived and cross-checked two ways.
+
+    `extent // 2` is the DECLARED cell count (2 words per cell); dividing by the declared ratio
+    gives what a 1-cell stride can actually reach. The caller's geometry must agree, so a change to
+    VIEW_W or to the map that this file does not know about fails the build instead of silently
+    nibble-clearing byte cells.
+    """
+    expect = {"sshead": nss, "pclm": view_w, "sfflag": view_w}
+    out = []
+    for name in BYTE_ARRAY_NAMES:
+        assert name in bits, "self-reset: byte array %r is not in the label table" % name
+        base = bits[name] // W
+        declared_cells = (_extent(words_sorted, base) - base) // 2
+        derived = declared_cells // _DECLARED_RATIO[name]
+        assert derived == expect[name], (
+            "self-reset: %s spans %d declared cells -> %d reachable, but the geometry says %d. "
+            "The emitter's declaration and cfg/map disagree; a hardcoded count here would "
+            "silently nibble-clear byte cells." % (name, declared_cells, derived, expect[name]))
+        out.append((name, derived))
+    return out
 
 
 def capture_labels(paths, out_fjm, lzma_fast=True):
@@ -73,21 +108,41 @@ def load_restore_set(path, labels):
     """
     doc = json.load(gzip.open(path, "rt", encoding="utf-8"))
     assert doc.get("format") == "label+offset",         "restore set %s is not label-relative; regenerate with scratchpad/m1_setfile.py" % path
+    # PROVENANCE (R9). A set carrying no record of what it was derived from is unfalsifiable: 308
+    # label names that all happen to exist in a DIFFERENT program resolve clean and restore the
+    # wrong cells. Refuse an unprovenanced set outright.
+    for k in ("source_sha256", "labels_sha256", "generated_by"):
+        assert doc.get(k),             "restore set %s carries no %s; regenerate with scratchpad/m1_setfile.py" % (path, k)
+
     base = {}
     for k, v in labels.items():
         base.setdefault(k, int(v) // W)
+    addrs = sorted(set(base.values()))
+
     out = set()
-    missing = []
+    missing, escaped = [], []
     for entry in doc["entries"]:
         name = entry[0]
         if name not in base:
             missing.append(name)
             continue
         b = base[name]
+        # CONTAINMENT (R9). Attribution is nearest-preceding-label, so an offset is only meaningful
+        # while it stays inside that label's span. If THIS build spaces the labels differently, an
+        # offset can run past the next label and point at an unrelated cell -- resolving "clean"
+        # while restoring the wrong words. verify_labels_unchanged cannot see this: it compares
+        # pass 1 to pass 2 of the same program, never the set to the program.
+        i = bisect.bisect_right(addrs, b)
+        span = (addrs[i] - b) if i < len(addrs) else None
         for off in entry[1:]:
+            if span is not None and off >= span:
+                escaped.append((name, off, span))
             out.add(b + off)
     assert not missing, ("restore set names %d labels this build does not have, e.g. %s -- the set "
                          "was derived from a different program" % (len(missing), missing[:3]))
+    assert not escaped, ("restore set: %d offsets run past the end of the label they are relative "
+                         "to, e.g. %s (name, offset, span) -- this build lays those labels out "
+                         "differently, so the set does not describe it" % (len(escaped), escaped[:3]))
     assert len(out) == doc["words"],         "restore set resolved to %d words, expected %d" % (len(out), doc["words"])
     return out
 
@@ -97,7 +152,8 @@ def _extent(words_sorted, addr_word):
     return words_sorted[i] if i < len(words_sorted) else addr_word + 2
 
 
-def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, mapname="e1m1"):
+def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, nss,
+                    mapname="e1m1"):
     """Write <map>_07_reset.fj and patch the main part into a loop.
 
     Returns (part_path, nibble_cells, byte_cells). pristine_get_word(word) reads the FIRST
@@ -110,13 +166,17 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, mapname="e
         bits.setdefault(k, int(v))
     words_sorted = sorted(v // W for v in bits.values())
 
+    # R6: code_start is not a literal. Word 1 is op 0's jump field and its PRISTINE value IS
+    # code_start, so the program states where its own code begins.
+    code_start_word = pristine_get_word(1) // W
+    assert 0 < code_start_word < 1 << 24,         "self-reset: derived code_start word %d is implausible" % code_start_word
+
     words = sorted(load_restore_set(restore_set_path, bits))
-    words = [x for x in words if x >= CODE_START_WORD]
+    words = [x for x in words if x >= code_start_word]
     wset = set(words)
 
     byte_words, byte_bases = set(), []
-    for name, n in BYTE_ARRAYS:
-        assert name in bits, "self-reset: byte array %r is not in the label table" % name
+    for name, n in byte_arrays(bits, words_sorted, view_w, nss):
         base = bits[name] // W
         byte_bases.append((name, bits[name], n))
         for k in range(n):

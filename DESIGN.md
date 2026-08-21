@@ -171,7 +171,22 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | tier | span-words | vs 2²⁶ | vs 2²⁷ | storage_mode |
 |---|---|---|---|---|
 | static (`build_wall_renderer`, R4 gate) | in the 40–62M band, `< 2²⁶` asserted | under | under | flat |
-| **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** | Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
+| **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** |
+| **M1 (the above + `self_reset=True`)** | **85,526,926** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+
+(Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
+That trailing instruction used to be swallowed into the M14 row's last cell, where it read as
+a column.)
+
+**M1 adds ONE segment, `<map>_07_reset.fj`** (`selfreset.emit_reset_part`). Its size is
+`nibble_cells` coalesced `hex.zero` runs + non-zero `hex.set 1` singles + one `rep` per byte
+array + the `;__hot_end` tail — MEASURED on the shipped E1M1 tier at **5,031 nibble cells and
+1,002 byte cells**, 619 emitted lines, **270,811 ops/frame** (0.9% of the 30,191,585-op sweep
+median). It carries **no table and no align pad**: every address in it is baked, so it adds code
+span only. The tier's **85,526,926** words is the M14 tier plus that part plus the fj-side
+`m1.zerobyte` def; headroom against `RENDER_FLAT_MAX_WORDS` = 2²⁷ is **1.569×**, and
+`storage_mode == flat` is asserted on this path exactly as R4 requires — the frozen-image reset
+the loop depends on needs pure flat.
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |
 |---|---|---|---|---|

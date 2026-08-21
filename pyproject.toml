@@ -14,6 +14,10 @@ dev = ["pytest"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/doomfj"]
+# NOTE: hatchling ships every file under the package dir, so src/doomfj/data/m1_restore_set.json.gz
+# (the M1 restore set that build_wall_renderer(self_reset=True) defaults to) is already in the
+# wheel -- VERIFIED by building one; an explicit force-include is in fact REJECTED as a duplicate.
+# No __init__.py or package-data entry is needed. Do not "fix" this.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

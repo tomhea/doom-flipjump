@@ -20,7 +20,7 @@ from doomfj.harness import W, FJM_LZMA_FAST, assemble_fjm, run_fjm
 from doomfj.lut_generator import (
     generate_dispatch_table_fj, generate_offset_deposit_table_fj, generate_trig_idioms_fj,
 )
-from doomfj.mapcompiler import compile_geometry_streams
+from doomfj.mapcompiler import bake_bsp, compile_geometry_streams
 from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
@@ -191,13 +191,18 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
     return metrics
 
 
+# The M1 restore set SHIPS WITH THE PACKAGE. It is the default so the path is not re-typed at
+# every call site (and so an installed copy uses the same one the tests do).
+DEFAULT_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m1_restore_set.json.gz"
+
+
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
                         flat_max_words=None, floor_mode="FT1", wall_mode="W1R",
                         raster_mode="lines", plane_near=True, wall_noise=True, sky=True,
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
                         state_wire="bin", player_sim=True, collide=True,
-                        moving_things=True, self_reset=False, restore_set=None) -> dict:
+                        moving_things=True, self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
@@ -290,8 +295,12 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
             core1.add_segment(_s, _n)
         for _st, _v in r1._runs:
             core1.set_words(_st, _v)
+        # view_w/nss are the SECOND source the byte-array cell counts are checked against; the
+        # first is each array's label extent in this build's own table. Both must agree, so a
+        # resolution or map change cannot silently nibble-clear a byte cell (see selfreset.py).
+        nss = len(bake_bsp(wad, mapname).subsectors)
         part, n_nib, n_byte = selfreset.emit_reset_part(gen, labels1, core1.get_word,
-                                                        restore_set, mapname)
+                                                        restore_set, cfg.VIEW_W, nss, mapname)
         del core1, r1
         paths = paths + [part]
         labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
@@ -299,7 +308,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         assert not moved, ("M1 self-reset REFUSED: %d baked addresses moved between passes, e.g. %s"
                            % (len(moved), sorted(moved)[:3]))
         reset_info = {"nibble_cells": n_nib, "byte_cells": n_byte,
-                      "restore_set": str(restore_set), "labels_moved_in_set": 0}
+                      "restore_set": str(restore_set), "labels_moved_in_set": 0,
+                      "view_w": cfg.VIEW_W, "subsectors": nss}
     else:
         fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
                     lzma_fast=FJM_LZMA_FAST)

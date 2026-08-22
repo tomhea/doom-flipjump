@@ -225,3 +225,19 @@ and the gate rejected. Both were about operand DENSITY, which such a model does 
 ⚠ Note the shape of the C10 and C11 results: mixed sign across viewpoints, roughly symmetric
 magnitudes. That signature means "the cost is data-dependent and I changed which data it depends
 on", not "small win". Treat it as a rejection, not as noise to average away.
+
+## 11. A THIRD stale assembler verdict — 13 tests skipped for a reason that may not hold
+
+`tests/fj/test_collision_fj.py` skips **13 tests** with:
+
+> `bake-as-code does not assemble at this scale (>50 min)`
+
+That is the same verdict as `sim.fj:12-14` (bake the blockmap) and `sim.fj:411-415` (unroll
+`bind_things`) — all three predate 2026-08-20, when the assembler stopped being "~cubic in unrolled
+ops" and turned out to be MEMORY-BOUND with a measured exponent of 1.12, taking the shipped program
+from 6,332 s to 559 s.
+
+So the repo currently has **three decisions and thirteen skipped tests** resting on a cost model
+that no longer describes the tool. None of them is necessarily wrong now — the sizes involved are
+large — but none has been re-measured either. **Re-time one before trusting any of them.** The
+cheapest is the skipped tests: they either run or they do not, and finding out costs one run.

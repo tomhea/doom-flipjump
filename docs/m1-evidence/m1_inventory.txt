@@ -1,0 +1,28 @@
+| tool | `--selftest` | `CONTROL` mentions | tracked |
+|---|---|---|---|
+| `m1_build.py` | **no** | 3 | yes |
+| `m1_bytecheck.py` | yes | 5 | yes |
+| `m1_dirtymap.py` | **no** | 6 | yes |
+| `m1_emit_reset.py` | **no** | 7 | yes |
+| `m1_fpcheck.py` | **no** | 0 | yes |
+| `m1_fps.py` | **no** | 3 | yes |
+| `m1_gate.py` | yes | 10 | yes |
+| `m1_inventory.py` | yes | 3 | yes |
+| `m1_minimize.py` | **no** | 3 | yes |
+| `m1_mutations.py` (15 mutations) | **no** | 0 | yes |
+| `m1_play.py` | **no** | 3 | yes |
+| `m1_rbw.py` | **no** | 6 | yes |
+| `m1_reemit.py` | yes | 3 | yes |
+| `m1_setfile.py` | yes | 2 | yes |
+| `m1_sweep.py` | **no** | 3 | yes |
+| `m1_wired_build.py` | **no** | 0 | yes |
+| `m1_zbyte.py` | **no** | 5 | yes |
+| `m1a_stride.py` | yes | 8 | yes |
+| `m1b_labels.py` | yes | 5 | yes |
+| `m1c_cost.py` | **no** | 1 | yes |
+| `m1c_hole.py` | **no** | 3 | yes |
+| `m1c_restore_set.py` | **no** | 10 | yes |
+| `m1d_loop.py` | **no** | 5 | yes |
+| `m1q_rss.py` | yes | 4 | yes |
+
+24 M1 scripts (`_?m1` not followed by 4); 8 carry `--selftest`, 16 do not.

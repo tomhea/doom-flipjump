@@ -221,7 +221,8 @@ if cli.all_at_once:
                 # laundering a broken control into a benign note, in the tool whose entire job is
                 # to prove controls are not broken.
                 try:
-                    _fn(originals[_path])
+                    _probe = _fn(originals[_path])
+                    assert _probe != originals[_path], "no-op on pristine"
                 except (AssertionError, ValueError):
                     raise AssertionError(
                         "mutation %r does not match the shipped code -- its anchor has DRIFTED "

@@ -62,7 +62,7 @@ FAILED tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristi
 FAILED tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
 FAILED tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255 - Assertio...
 FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
-24 failed, 15 passed in 1.72s
+24 failed, 15 passed in 1.68s
 
 === RESTORED ===
 .......................................                                  [100%]
@@ -74,27 +74,27 @@ FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 ```
 BASELINE (no mutation)
-  39 passed in 1.76s
+  39 passed in 1.87s
 
 MUTATION: selfreset.py: the two-sided guard deleted
-  1 failed, 38 passed in 1.77s   ok
+  1 failed, 38 passed in 1.83s   ok
     caught by tests/host/test_selfreset.py::test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array
 
 MUTATION: selfreset.py: main-part recognition assert gone
-  1 failed, 38 passed in 1.78s   ok
+  1 failed, 38 passed in 1.82s   ok
     caught by tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise
 
 MUTATION: selfreset.py: provenance refusal gone
-  1 failed, 38 passed in 1.78s   ok
+  1 failed, 38 passed in 1.80s   ok
     caught by tests/host/test_selfreset.py::test_restore_set_without_provenance_is_refused
 
 MUTATION: selfreset.py: containment check gone
-  2 failed, 37 passed in 1.77s   ok
+  2 failed, 37 passed in 1.79s   ok
     caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
     caught by tests/host/test_selfreset.py::test_offset_running_past_its_label_is_refused
 
 MUTATION: selfreset.py: byte counts hardcoded again
-  10 failed, 29 passed in 1.78s   ok
+  10 failed, 29 passed in 1.80s   ok
     caught by tests/host/test_selfreset.py::test_emit_coalesces_zero_runs_and_keeps_non_zero_singles
     caught by tests/host/test_selfreset.py::test_emit_drops_a_read_only_extent
     caught by tests/host/test_selfreset.py::test_emit_ignores_words_below_code_start
@@ -107,53 +107,53 @@ MUTATION: selfreset.py: byte counts hardcoded again
     caught by tests/host/test_selfreset.py::test_no_byte_array_word_is_ever_nibble_cleared
 
 MUTATION: m1_reset.fj: high-nibble exact_xor deleted
-  2 failed, 37 passed in 1.68s   ok
+  2 failed, 37 passed in 1.69s   ok
     caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: m1_reset.fj: shared pointer never restored
-  2 failed, 37 passed in 1.78s   ok
+  2 failed, 37 passed in 1.77s   ok
     caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: m1_reset.fj: one write past the cell
-  2 failed, 37 passed in 1.79s   ok
+  2 failed, 37 passed in 1.80s   ok
     caught by tests/fj/test_m1_reset.py::test_neighbours_untouched
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: selfreset.py: layout fingerprint check gone
-  1 failed, 38 passed in 1.78s   ok
+  1 failed, 38 passed in 1.79s   ok
     caught by tests/host/test_selfreset.py::test_layout_fingerprint_rejects_a_differently_laid_out_build
 
 MUTATION: selfreset.py: missing-label refusal gone
-  1 failed, 38 passed in 1.78s   ok
+  1 failed, 38 passed in 1.77s   ok
     caught by tests/host/test_selfreset.py::test_refuses_a_set_naming_a_label_this_build_does_not_have
 
 MUTATION: selfreset.py: label+offset format refusal gone
-  1 failed, 38 passed in 1.81s   ok
+  1 failed, 38 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_refuses_an_absolute_address_set
 
 MUTATION: selfreset.py: containment unbounded at the top
-  1 failed, 38 passed in 1.80s   ok
+  1 failed, 38 passed in 1.77s   ok
     caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
 
 MUTATION: selfreset.py: verify back to the membership test
-  4 failed, 35 passed in 1.82s   ok
+  4 failed, 35 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
 
 MUTATION: selfreset.py: pristine-value check gone
-  2 failed, 37 passed in 1.78s   ok
+  2 failed, 37 passed in 1.83s   ok
     caught by tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristine_value
     caught by tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
 
 MUTATION: selfreset.py: limit back to a truthiness test
-  1 failed, 38 passed in 1.78s   ok
+  1 failed, 38 passed in 1.76s   ok
     caught by tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
 
-RESTORED: 39 passed in 1.76s  ok
+RESTORED: 39 passed in 1.75s  ok
 
 M1 MUTATION EVIDENCE: PASS -- every mutation is caught
 ```
@@ -402,8 +402,9 @@ own synthetic inputs so it runs on a clean checkout; `m1_gate.py` and `m1_reemit
 
 - `tests/host` still has no test that BUILDS the loop end-to-end; the gate, sweep, playability,
   byte-check and re-emit runs are scripts under `scratchpad/`.
-- **Negative-control coverage is now GENERATED into `docs/handoff-m1-reset.md` §9.7** by
-  `scratchpad/m1_inventory.py` (`--check` fails if the doc disagrees with the filesystem), because
+- **Negative-control coverage is GENERATED into `docs/handoff-m1-reset.md` §9.7** by
+  `scratchpad/m1_inventory.py`; `--check` compares EVERY ROW against the filesystem and
+  `--selftest` falsifies a row and requires `--check` to reject it. Generated because
   the prose version of it in this body was wrong three revisions running -- first overclaiming that
   all five tools carried `--selftest` (false, and the exact failure CLAUDE.md records: a false
   R9-compliance statement inside the R9 evidence), then undercounting. The real remaining gaps:
@@ -605,3 +606,32 @@ underscore, which is why the inventory could never have found it); the `check_la
 justified at the call site for the right reason; `handoff-complete-game.md`'s next-steps block
 rewritten as a banner after its strike-through was found closing at the end of its own first line —
 twice, because round 7's fix added a note instead of moving the marker.
+
+## Answers to CR round 12 (1 blocking)
+
+**The generator I added to stop the inventory being wrong was itself uncontrolled, and overclaimed.**
+Four parts, one cause. Its `--selftest` column was a substring match, so it matched its own summary
+template and credited itself with a flag it did not have (8 reported, 7 real). Its `--check`
+compared only the one-line summary, so falsifying an entire row — the reviewer used
+`m1c_restore_set.py`, the uncontrolled tool that produced the file shipping in `src/` — still
+printed "agrees with the filesystem" and exited 0. Its own row was stale (generated before
+`git add`). And the prose said "none carries a negative control" over five names, then counted four,
+while `m1_dirtymap.py` does have one.
+
+A generated inventory of negative controls, with no negative control of its own. That is the same
+failure the table was generated to end, one level up — which is the real lesson: **moving a
+recurrence into a tool does not close it unless the tool is controlled too.**
+
+Fixed: the column matches the `add_argument` declaration; `--check` is row-by-row; and the generator
+has `--selftest`, which falsifies a row and requires rejection:
+
+```
+  the doc as committed            -> agrees ok
+  one row falsified               -> rejected ok
+M1 INVENTORY SELFTEST: PASS
+```
+
+**And the evidence is now in the tree.** Round 8 tracked the PR body and left every log it cites
+untracked, so the R1 blocks were regenerable but not one R2 artifact was checkable from the PR
+alone. `docs/m1-evidence/` carries all 13, 23 KB of text, with a README saying plainly that they are
+snapshots true only of the commit that added them.

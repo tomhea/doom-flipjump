@@ -1,0 +1,21 @@
+checking 4,349 nibble-cleared cells across 3 known byte arrays as the control
+image  : scratchpad/fjmcache/_rssprobe.fjm
+sha256 : 3c13ec21424f7f5434bd2070d9a34796ab2f92de9657dc16e2894f4c63e4acee
+labels : scratchpad/_m1b_labels.tsv.gz
+set    : src/doomfj/data/m1_restore_set.json.gz
+labels sha256 matches the set's provenance  ok
+  (-416,256,0x0,k=0)        46,927,659 ops    0.5s  cells>15 so far: 0
+  (664,291,0x18000000,k=1)    61,519,657 ops    0.5s  cells>15 so far: 0
+  (1272,-724,0x40000000,k=5)    54,804,140 ops    0.7s  cells>15 so far: 0
+  (1869,479,0x80000000,k=0)    51,929,636 ops    0.5s  cells>15 so far: 0
+
+CONTROL 1 (vacuity) -- the KNOWN byte arrays must themselves show values > 15:
+  sshead      24 of 682 cells held a value > 15   ok
+  pclm       160 of 160 cells held a value > 15   ok
+  sfflag     160 of 160 cells held a value > 15   ok
+
+RESULT: over 4 viewpoints, no nibble-cleared cell held a value > 15.
+        SCOPE: that is evidence about THESE viewpoints, not a proof over all frames.
+        It is what licenses BYTE_ARRAY_NAMES holding only sshead/pclm/sfflag.
+
+m1_bytecheck: PASS

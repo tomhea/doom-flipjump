@@ -854,16 +854,19 @@ and when a control is the evidence, the thing to review is *which* mutation it r
 ### 9.7 Which M1 tools carry a negative control — GENERATED
 
 ⚠⚠ **THIS TABLE IS GENERATED. Do not hand-edit it.** Regenerate with
-`python scratchpad/m1_inventory.py`; `--check` exits 1 if this section disagrees with the
-filesystem.
+`python scratchpad/m1_inventory.py`. `--check` compares **every row** against the filesystem and
+exits 1 on any disagreement; `--selftest` falsifies a row and requires `--check` to reject it.
 
-It is generated because the hand-written version was wrong in **seven successive revisions** —
-overclaiming, undercounting, miscounting, mis-partitioning, a wrong total, stale cells in
-freshly-edited rows, and (round 11) a stale count in a row the same commit touched. Every failure
-had the same cause: the commit that adds a control is the one least likely to re-read the table
-describing the controls. That is not a discipline problem, it is a design problem, so it is fixed by
-design. The scope glob is `_?m1` not followed by 4 — the old `m1*.py` could not see
-`_m1_scratchtest.py`, which is how that file stayed tracked by accident for eight rounds.
+It is generated because the hand-written version was wrong in **seven successive revisions**. Every
+failure had one cause: the commit that adds a control is the one least likely to re-read the table
+describing the controls. That is a design problem, so it is fixed by design.
+
+⚠ **And generating it was not enough.** CR round 12 found the first generator overclaiming and its
+`--check` vacuous: the `--selftest` column was a substring match that credited the generator with a
+flag it did not have, and `--check` compared only the summary line, so falsifying an entire row
+still printed "agrees with the filesystem" and exited 0. A generated inventory of negative controls,
+with no negative control of its own — the same failure one level up. Both are fixed; the column now
+matches the `add_argument` declaration and `--check` is row-by-row.
 
 | tool | `--selftest` | `CONTROL` mentions | tracked |
 |---|---|---|---|
@@ -874,7 +877,7 @@ design. The scope glob is `_?m1` not followed by 4 — the old `m1*.py` could no
 | `m1_fpcheck.py` | **no** | 0 | yes |
 | `m1_fps.py` | **no** | 3 | yes |
 | `m1_gate.py` | yes | 10 | yes |
-| `m1_inventory.py` | yes | 2 | no |
+| `m1_inventory.py` | yes | 3 | yes |
 | `m1_minimize.py` | **no** | 3 | yes |
 | `m1_mutations.py` (15 mutations) | **no** | 0 | yes |
 | `m1_play.py` | **no** | 3 | yes |
@@ -894,13 +897,18 @@ design. The scope glob is `_?m1` not followed by 4 — the old `m1*.py` could no
 
 24 M1 scripts (`_?m1` not followed by 4); 8 carry `--selftest`, 16 do not.
 
-**Reading it.** `--selftest` = has a flag that mutates real input and requires rejection.
-`m1_mutations.py` shows `no` because it *is* the control — 15 mutations of shipped `src/` files,
-every one required to be caught. A `CONTROL` count is only a count of mentions; it is not evidence
-that any of them can fail. **The gaps that matter are `m1_sweep.py`, `m1_play.py`,
-`m1_dirtymap.py`, `m1_fps.py` and `m1c_restore_set.py`**, whose verdicts are quoted as proof
-somewhere in this PR while none carries a negative control. `m1c_restore_set.py` is the most
-load-bearing: it produced the file that ships in `src/`.
+**Reading it.** `--selftest` means the tool declares a flag that mutates real input and requires
+rejection. `m1_mutations.py` shows `no` because it *is* the control — 15 mutations of shipped `src/`
+files, every one required to be caught. **The `CONTROL` column is a count of the word, not evidence
+that any of them can fail** (this tool's own count includes its own regex literal).
+
+**The gaps that matter**, all quoted as proof somewhere in this PR: `m1_sweep.py`, `m1_play.py`,
+`m1_fps.py` and `m1c_restore_set.py` carry no negative control at all. `m1c_restore_set.py` is the
+most load-bearing — it produced the file that ships in `src/doomfj/data/`. `m1_dirtymap.py` is a
+fifth case but a different one: it *has* a real mutation control (`CONTROL 3` shifts the label table
+and requires the per-label counts to change) with no flag to invoke it standalone. An earlier
+revision of this paragraph said "none carries a negative control" over five names and then counted
+four — wrong twice in one sentence, which is why the list above is now stated per-tool.
 
 ⚠ **`m1_fps.py` and `DESIGN.md`.** CR round 5 caught `DESIGN.md` pointing readers at "the fps line
 in the handoff" while `docs/handoff-complete-game.md` marks that same figure UNVERIFIED for the

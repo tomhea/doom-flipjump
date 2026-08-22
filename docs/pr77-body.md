@@ -6,17 +6,17 @@ restore **itself**: a reset appended as a final part (`<map>_07_reset.fj`), plus
 patch turning the frame's trailing `stl.loop` into `;m1_reset`, which ends by re-entering the frame
 at `__hot_end`. **One execution now renders as many frames as the wire feeds.**
 
-Base is `m1-base` (= `16ee4fd`), so this diff is M1 only - 12 files, not the 310-commit branch.
+Base is `m1-base` (= `16ee4fd`), so this diff is M1 only — 13 files outside `scratchpad/`, not the 310-commit branch.
 
 ## TDD evidence (R1)
 
 Every block below is generated, not retyped. `scratchpad/m1_mutations.py` edits **real shipped
 files** (`src/doomfj/selfreset.py`, `src/fj/m1_reset.fj`) and restores them in a `finally`.
 
-**FAIL** — all 14 mutations applied at once (`scratchpad/_m1_mutations_all.log`, verbatim and complete):
+**FAIL** — every mutation that can coexist, applied at once (`scratchpad/_m1_mutations_all.log`, verbatim and complete):
 
 ```
-=== ALL 14 MUTATIONS APPLIED TO REAL SHIPPED CODE ===
+=== 14 OF 15 MUTATIONS APPLIED TO REAL SHIPPED CODE ===
     selfreset.py: the two-sided guard deleted
     selfreset.py: main-part recognition assert gone
     selfreset.py: provenance refusal gone
@@ -24,13 +24,17 @@ files** (`src/doomfj/selfreset.py`, `src/fj/m1_reset.fj`) and restores them in a
     selfreset.py: byte counts hardcoded again
     m1_reset.fj: high-nibble exact_xor deleted
     m1_reset.fj: shared pointer never restored
-    m1_reset.fj: one write past the cell
     selfreset.py: layout fingerprint check gone
     selfreset.py: missing-label refusal gone
     selfreset.py: label+offset format refusal gone
     selfreset.py: containment unbounded at the top
     selfreset.py: verify back to the membership test
     selfreset.py: pristine-value check gone
+    selfreset.py: limit back to a truthiness test
+
+    NOT APPLIED (conflicts with a mutation above -- covered individually by
+    the per-mutation run in scratchpad/_m1_mutations.log):
+      m1_reset.fj: one write past the cell
 
 .FF........FFFFFFFFFFFF.F.F.FFFF.FF.F.F                                  [100%]
 =========================== short test summary info ===========================
@@ -58,11 +62,11 @@ FAILED tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristi
 FAILED tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
 FAILED tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255 - Assertio...
 FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
-24 failed, 15 passed in 1.83s
+24 failed, 15 passed in 1.67s
 
 === RESTORED ===
 .......................................                                  [100%]
-39 passed in 1.95s
+39 passed in 1.81s
 ```
 
 **Each mutation individually**, so no mutation hides behind another
@@ -70,27 +74,27 @@ FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 ```
 BASELINE (no mutation)
-  39 passed in 1.94s
+  39 passed in 1.77s
 
 MUTATION: selfreset.py: the two-sided guard deleted
-  1 failed, 38 passed in 1.87s   ok
+  1 failed, 38 passed in 1.79s   ok
     caught by tests/host/test_selfreset.py::test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array
 
 MUTATION: selfreset.py: main-part recognition assert gone
-  1 failed, 38 passed in 1.94s   ok
+  1 failed, 38 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise
 
 MUTATION: selfreset.py: provenance refusal gone
-  1 failed, 38 passed in 1.92s   ok
+  1 failed, 38 passed in 1.79s   ok
     caught by tests/host/test_selfreset.py::test_restore_set_without_provenance_is_refused
 
 MUTATION: selfreset.py: containment check gone
-  2 failed, 37 passed in 1.95s   ok
+  2 failed, 37 passed in 1.80s   ok
     caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
     caught by tests/host/test_selfreset.py::test_offset_running_past_its_label_is_refused
 
 MUTATION: selfreset.py: byte counts hardcoded again
-  10 failed, 29 passed in 1.95s   ok
+  10 failed, 29 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_emit_coalesces_zero_runs_and_keeps_non_zero_singles
     caught by tests/host/test_selfreset.py::test_emit_drops_a_read_only_extent
     caught by tests/host/test_selfreset.py::test_emit_ignores_words_below_code_start
@@ -103,54 +107,58 @@ MUTATION: selfreset.py: byte counts hardcoded again
     caught by tests/host/test_selfreset.py::test_no_byte_array_word_is_ever_nibble_cleared
 
 MUTATION: m1_reset.fj: high-nibble exact_xor deleted
-  2 failed, 37 passed in 1.84s   ok
+  2 failed, 37 passed in 1.69s   ok
     caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: m1_reset.fj: shared pointer never restored
-  2 failed, 37 passed in 1.86s   ok
+  2 failed, 37 passed in 1.79s   ok
     caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: m1_reset.fj: one write past the cell
-  2 failed, 37 passed in 1.98s   ok
+  2 failed, 37 passed in 1.74s   ok
     caught by tests/fj/test_m1_reset.py::test_neighbours_untouched
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: selfreset.py: layout fingerprint check gone
-  1 failed, 38 passed in 2.40s   ok
+  1 failed, 38 passed in 1.82s   ok
     caught by tests/host/test_selfreset.py::test_layout_fingerprint_rejects_a_differently_laid_out_build
 
 MUTATION: selfreset.py: missing-label refusal gone
-  1 failed, 38 passed in 1.96s   ok
+  1 failed, 38 passed in 1.80s   ok
     caught by tests/host/test_selfreset.py::test_refuses_a_set_naming_a_label_this_build_does_not_have
 
 MUTATION: selfreset.py: label+offset format refusal gone
-  1 failed, 38 passed in 1.95s   ok
+  1 failed, 38 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_refuses_an_absolute_address_set
 
 MUTATION: selfreset.py: containment unbounded at the top
-  1 failed, 38 passed in 1.88s   ok
+  1 failed, 38 passed in 1.77s   ok
     caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
 
 MUTATION: selfreset.py: verify back to the membership test
-  4 failed, 35 passed in 1.86s   ok
+  4 failed, 35 passed in 1.77s   ok
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
 
 MUTATION: selfreset.py: pristine-value check gone
-  2 failed, 37 passed in 1.94s   ok
+  2 failed, 37 passed in 1.75s   ok
     caught by tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristine_value
     caught by tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
 
-RESTORED: 39 passed in 1.92s  ok
+MUTATION: selfreset.py: limit back to a truthiness test
+  1 failed, 38 passed in 1.78s   ok
+    caught by tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
+
+RESTORED: 39 passed in 1.76s  ok
 
 M1 MUTATION EVIDENCE: PASS -- every mutation is caught
 ```
 
-⚠ Read both. `test_neighbours_untouched` is among the 13 PASSED in the all-at-once block, because a
+⚠ Read both. `test_neighbours_untouched` is among the PASSED tests in the all-at-once block, because a
 mutation that breaks the clear earlier masks a write past the end. The per-mutation run is what
 shows it has teeth. An "everything at once" FAIL block alone would have hidden that.
 
@@ -158,7 +166,7 @@ Full host suite, with the marker filter's bound visible:
 
 ```
 $ timeout 900 python -m pytest tests/host tests/fj/test_m1_reset.py -q   # _m1_pytest_full.log
-284 passed, 1 deselected in 49.15s
+284 passed, 1 deselected in 43.06s
 ```
 
 ## Integration evidence (R2)
@@ -168,6 +176,7 @@ pristine-value check, which is why this is the run quoted and not the earlier
 `_m1_wired2.log`:
 
 ```json
+  "storage_mode": "flat",
   "span_words": 85468976,
   "flat_limit": 134217728,
   "headroom": 1.57,
@@ -456,7 +465,18 @@ label had unbounded offsets, which is the same shape as the round-2 bug.
 **Mutations: 8 → 12**, covering the guards the reviewer noted no mutation exercised. All 12 caught.
 ⚠ When I changed the containment code, `drop_containment` silently stopped matching and the harness
 reported `!! NOTHING CAUGHT IT` rather than a green tick — the non-vacuity property working. Every
-mutation function now asserts its own anchor.
+mutation whose anchor drifts silently becomes a no-op, and a no-op mutation passes every
+test -- which reads as coverage. The harness now asserts, for EVERY mutation and any added later,
+that applying it actually changed the file; breaking one anchor gives
+`mutation '...' changed nothing -- its anchor has drifted from the code`.
+
+⚠ An earlier revision of this line claimed all 14 functions asserted their own anchors. Three did
+not -- they relied on the loud-failure backstop. That was a completeness claim about the R1 evidence
+tool itself, which is the class CLAUDE.md records.
+
+⚠ And two mutations CANNOT COEXIST: `drop_high_nibble` deletes the line `spill_past_the_cell`
+anchors on. The all-at-once block now says so and names what it could not apply, rather than
+crashing or quietly dropping it; the per-mutation run covers it.
 
 ## Answers to CR round 7 (5 blocking)
 

@@ -52,8 +52,9 @@ def drop_main_check(s):
 
 
 def drop_provenance(s):
-    return s.replace('    for k in ("source_sha256", "labels_sha256", "generated_by"):',
-                     "    for k in ():")
+    a = '    for k in ("source_sha256", "labels_sha256", "generated_by"):'
+    assert a in s, "drop_provenance no longer matches -- update it, do not leave it stale"
+    return s.replace(a, "    for k in ():")
 
 
 def drop_containment(s):
@@ -63,8 +64,9 @@ def drop_containment(s):
 
 
 def hardcode_counts(s):
-    return s.replace("    for name, n in byte_arrays(bits, words_sorted, view_w, nss):",
-                     "    for name, n in [('sshead', 682), ('pclm', 160), ('sfflag', 160)]:")
+    a = "    for name, n in byte_arrays(bits, words_sorted, view_w, nss):"
+    assert a in s, "hardcode_counts no longer matches -- update it, do not leave it stale"
+    return s.replace(a, "    for name, n in [('sshead', 682), ('pclm', 160), ('sfflag', 160)]:")
 
 
 def drop_high_nibble(s):
@@ -81,6 +83,7 @@ def drop_pointer_restore(s):
 
 def spill_past_the_cell(s):
     t = "hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw"
+    assert t in s, "spill_past_the_cell no longer matches -- update it, do not leave it stale"
     return s.replace(t, t + "\n        wflip c+dw+w, 1*dw")
 
 
@@ -162,6 +165,18 @@ MUTATIONS += [
 ]
 
 
+
+def restore_truthy_limit(s):
+    a = "    if limit is not None:"
+    assert a in s, "restore_truthy_limit no longer matches -- update it"
+    return s.replace(a, "    if limit:")
+
+
+MUTATIONS += [
+    ("selfreset.py: limit back to a truthiness test", SR, restore_truthy_limit),
+]
+
+
 def run():
     out = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header", "--tb=no"],
                          cwd=ROOT, capture_output=True, text=True)
@@ -183,11 +198,33 @@ if cli.all_at_once:
     # once, the REAL pytest output printed, then the tree restored and run again.
     originals = {p: rd(p) for p in (SR, FJ)}
     try:
+        applied, skipped = [], []
         for _name, _path, _fn in MUTATIONS:
-            wr(_path, _fn(rd(_path)))
-        print("=== ALL %d MUTATIONS APPLIED TO REAL SHIPPED CODE ===" % len(MUTATIONS))
-        for _name, _p, _f in MUTATIONS:
+            _before = rd(_path)
+            try:
+                _after = _fn(_before)
+            except AssertionError:
+                # ⚠ SOME MUTATIONS CONFLICT AND CANNOT COEXIST. drop_high_nibble DELETES the line
+                # spill_past_the_cell anchors on, so applying both is impossible. Report the ones
+                # that could not be applied -- silently dropping them would make this block claim
+                # coverage it does not have, which is the whole failure mode this file exists to
+                # prevent. The per-mutation run (no --all-at-once) covers them individually.
+                skipped.append(_name)
+                continue
+            assert _after != _before, (
+                "mutation %r changed nothing -- its anchor has drifted from the code" % _name)
+            wr(_path, _after)
+            applied.append(_name)
+        print("=== %d OF %d MUTATIONS APPLIED TO REAL SHIPPED CODE ==="
+              % (len(applied), len(MUTATIONS)))
+        for _name in applied:
             print("    %s" % _name)
+        if skipped:
+            print("")
+            print("    NOT APPLIED (conflicts with a mutation above -- covered individually by")
+            print("    the per-mutation run in scratchpad/_m1_mutations.log):")
+            for _name in skipped:
+                print("      %s" % _name)
         print("")
         r = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header",
                             "--tb=no"], cwd=ROOT, capture_output=True, text=True)
@@ -213,7 +250,16 @@ if base_failed:
 originals = {p: rd(p) for p in (SR, FJ)}
 try:
     for name, path, fn in MUTATIONS:
-        wr(path, fn(originals[path]))
+        mutated = fn(originals[path])
+        # ⚠ THE UNIFORM ANCHOR CHECK, and it is one line rather than fourteen. A mutation whose
+        # anchor has drifted silently becomes a no-op, and a no-op mutation "passes" every test --
+        # which reads as coverage. Individual functions assert their own anchors too (and two have
+        # fired for real), but only this catches ALL of them, including any added later. CR round 10
+        # found 3 of 14 relying solely on the loud-failure backstop; the body had claimed all 14
+        # asserted, which was a completeness claim about the R1 evidence tool itself.
+        assert mutated != originals[path], (
+            "mutation %r changed nothing -- its anchor has drifted from the code" % name)
+        wr(path, mutated)
         failed, line = run()
         wr(path, originals[path])
         caught = bool(failed)

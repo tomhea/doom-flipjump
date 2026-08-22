@@ -396,8 +396,16 @@ def verify_values_unchanged(restore_set_path, labels, get_word_1, get_word_2, li
     build holds both images, so the check is nearly free; `limit` caps how many addresses are read
     when a caller only wants a spot check.
     """
+    # check_layout=False: emit_reset_part already resolved this set against pass 1 WITH the
+    # fingerprint on, and verify_labels_unchanged has proved both passes resolve to the same words,
+    # so re-checking here is redundant rather than weaker. Stated because CR round 9 and round 10
+    # each found a NEW bare opt-out introduced in the same commit that justified the previous one.
     words = sorted(load_restore_set(restore_set_path, labels, check_layout=False))
-    if limit:
+    # `if limit is not None`, NOT `if limit`. With the truthiness test, limit=0 meant "no limit"
+    # and read everything -- the opposite of what a caller asking for zero cells means, and the
+    # kind of ambiguity that makes a spot-check silently a full check or vice versa. Found by
+    # writing the vacuity test so it could actually fail (CR round 10).
+    if limit is not None:
         words = words[:limit]
     bad = []
     for x in words:

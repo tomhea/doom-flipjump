@@ -400,9 +400,12 @@ def test_verify_values_reports_clean_when_it_read_nothing(tmp_path):
     pins the behaviour instead of pretending it cannot happen.
     """
     p = _set_file(tmp_path, [["alpha", 0, 1]])
-    empty = {}
-    assert selfreset.verify_values_unchanged(p, LABELS, empty.get, empty.get, limit=0) == []
-    # ...and with a real limit it does read, and does report.
     a = {100: 1, 101: 1}
-    b = {100: 1, 101: 2}
+    b = {100: 1, 101: 2}          # a REAL difference at word 101
+    # limit=0 reads nothing, so it reports clean DESPITE that difference. That is the hazard, stated
+    # as a fact about the function rather than assumed away. (CR round 10: the previous first
+    # assertion compared two empty dicts, where both sides return None and the result is [] however
+    # `limit` behaves -- it could not fail.)
+    assert selfreset.verify_values_unchanged(p, LABELS, a.get, b.get, limit=0) == []
+    # ...and reading everything finds it.
     assert selfreset.verify_values_unchanged(p, LABELS, a.get, b.get) == [101]

@@ -108,7 +108,6 @@ old_words = doc["words"]
 print("words: %s -> %s  (delta %+d)  negative = a dropped register; positive = the superset"
       % (format(old_words, ","), format(len(words), ","), len(words) - old_words))
 print("      taken where the old->new mapping was ambiguous -- see the comment above.")
-      % (format(old_words, ","), format(len(words), ","), len(words) - old_words))
 
 tmp = Path(args.out).with_suffix(".probe.gz")
 json.dump(payload, gzip.open(tmp, "wt", encoding="utf-8"))

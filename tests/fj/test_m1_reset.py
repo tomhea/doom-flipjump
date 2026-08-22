@@ -110,3 +110,74 @@ def test_second_call_on_the_same_cell_still_works():
     once = run_clear(32, vals, repeats=1)
     twice = run_clear(32, vals, repeats=2)
     assert twice == once == [0] * 34
+
+
+# ── m1.readbyte / m1.writebyte: the same round trip, minus the clear ─────────────────────────────
+# Ported from scratchpad/ptr_price_list.py, where they were written to make the constant-address
+# alternative MEASURABLE (628.0 -> 111.4 and 805.6 -> 110.3 ops). Once they live in src/ they need
+# the same coverage m1.zerobyte has: every value, both nibbles, and neighbours untouched.
+
+def run_rw(n, values, mode):
+    """Plant `values` as raw BYTES, then read/rewrite them at CONSTANT addresses.
+
+    ⚠ NO helper macro with an inline `hex.vec`. A `hex.vec` declared inside a macro body sits in the
+    INSTRUCTION STREAM, and control falls straight into it after the last statement -- the data gets
+    executed. That mistake cost a debugging round here and looked exactly like a broken primitive.
+    Temporaries live after `stl.loop`, where nothing runs.
+    """
+    lines = ["stl.startup_and_init_all"]
+    lines += ["wflip arr + %d*dw + w, %d*dw" % (i, v) for i, v in enumerate(values) if v]
+    if mode == "read":
+        lines.append("rep(%d, i) m1.readbyte tv + i*2*dw, arr + i*dw" % n)
+        lines.append("rep(%d, i) m1.writebyte out + i*dw, tv + i*2*dw" % n)
+    else:
+        lines += ["hex.set 2, tv, 0x5A", "rep(%d, i) m1.writebyte arr + i*dw, tv" % n]
+    lines += ["stl.loop", "tv: hex.vec %d" % (2 * n + 2), "arr: hex.vec %d" % (n + 2),
+              "out: hex.vec %d" % (n + 2)]
+    tmp = Path(tempfile.mkdtemp(prefix="m1rw_"))
+    src = tmp / "p.fj"
+    src.write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+    out, dbg = tmp / "p.fjm", tmp / "p.fjd"
+    fj.assemble([M1_FJ.resolve(), src.resolve()], out, memory_width=W, print_time=False,
+                debugging_file_path=dbg)
+    labels = load_debugging_labels(dbg)
+
+    def base(name):
+        return min(v for k, v in labels.items() if k == name or k.endswith(":" + name)) // W
+
+    r = FjmRunner(out, flat_max_words=1 << 24)
+    core = _fjcore.Memory(r.width, flat_max_words=r.flat_max_words)
+    for sg, ln in r._segments:
+        core.add_segment(sg, ln)
+    for st, vals in r._runs:
+        core.set_words(st, vals)
+    core.run(lambda: 0, lambda _b: None, IOReadOnEOF, last_ops_length=0)
+    arr = [core.get_word(base("arr") + 2 * i + 1) >> VAL_SHIFT for i in range(n + 2)]
+    got = ([core.get_word(base("out") + 2 * i + 1) >> VAL_SHIFT for i in range(n)]
+           if mode == "read" else None)
+    return arr, got
+
+
+def test_readbyte_returns_every_value_and_does_not_disturb_the_cell():
+    """Every value 0..255 read at a CONSTANT address and stored back through m1.writebyte.
+
+    Catches the two failure modes that matter: losing the HIGH nibble (a read that only assembles
+    4 of the 8 bits looks correct for every value below 0x10), and a read that corrupts its own
+    source cell -- it flips bit dbit+8 and jumps INTO the cell, so it must undo both flips.
+    """
+    vals = list(range(256)) + GUARD
+    arr, got = run_rw(256, vals, "read")
+    assert got == list(range(256)), "misread: %s" % (
+        [(i, g) for i, g in enumerate(got) if g != i][:6])
+    assert arr[:256] == list(range(256)), "the READ modified its source cells"
+    assert arr[256:258] == GUARD
+
+
+def test_writebyte_stores_every_value_and_leaves_neighbours_alone():
+    """The write twin of test_clears_every_value_0_to_255. 0x5A has popcount 4 and both nibbles
+    non-zero, so a half-width write shows up immediately."""
+    vals = list(range(256)) + GUARD
+    arr, _ = run_rw(256, vals, "write")
+    assert arr[:256] == [0x5A] * 256, "cells not written: %s" % (
+        [(i, v) for i, v in enumerate(arr[:256]) if v != 0x5A][:6])
+    assert arr[256:258] == GUARD, "the write spilled past the array"

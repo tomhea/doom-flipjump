@@ -5,9 +5,18 @@
 // on one does not merely fail, it CORRUPTS -- measured 0xA5 -> 0x22A5, because `hex.xor`'s dispatch
 // jumps out of its own 16-entry table.
 //
-// `hex.zero_ptr` clears a byte correctly but costs 943 ops/cell, and almost all of that is
+// `hex.zero_ptr` clears a byte correctly but costs ~796 ops/cell, and 82-86% of that is
 // `set_flip_and_jump_pointers` copying an 8-nibble ADDRESS so the machine can reach a cell it only
-// knows at RUNTIME. The reset knows every address at EMIT time, so none of that is needed.
+// knows at RUNTIME. When the address is known at EMIT time, none of that is needed.
+//
+// MEASURED (scratchpad/ptr_price_list.py, slopes over four program sizes, with vacuity,
+// body-removed and --selftest negative controls):
+//     hex.zero_ptr   795.9  ->  m1.zerobyte    79.6   10.0x
+//     hex.read_byte  628.0  ->  m1.readbyte   111.4    5.6x
+//     hex.write_byte 805.6  ->  m1.writebyte  110.3    7.3x
+// ⚠ The `943 -> 91.1 (10.3x)` pair quoted in docs/handoff-m1-reset.md and in several commit
+// messages is NOT an isolated per-call cost: the 943 bundles a `ptr_inc` and the 91.1 bundles a
+// raw-wflip plant. Use the numbers above.
 
 ns m1 {
     // Clear all 8 bits of the byte cell at the CONSTANT address `c`. NO POINTER AT ALL.
@@ -29,6 +38,46 @@ ns m1 {
       back:
         wflip hex.pointers.ret_after_read_byte+w, back
         c+dbit+8;
+        hex.exact_xor c+dbit+3, c+dbit+2, c+dbit+1, c+dbit+0, hex.pointers.read_byte
+        hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw
+    }
+
+    // ── the same round trip, minus the clear ──────────────────────────────────────────────────
+    // `zerobyte` above is: read the byte, then xor it back onto itself (v ^ v = 0). Splitting the
+    // read from the xor gives the other two byte operations for free.
+
+    // READ the byte at CONSTANT address `c`, leaving it in `hex.pointers.read_byte` -- no copy, so
+    // this is the cheapest form when the caller only wants to test it.
+    def readbyte_reg c @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {
+        hex.zero 2, hex.pointers.read_byte
+        wflip hex.pointers.ret_after_read_byte+w, back
+        c+dbit+8; c
+      back:
+        wflip hex.pointers.ret_after_read_byte+w, back
+        c+dbit+8;
+    }
+
+    // READ the byte at CONSTANT address `c` into the hex[:2] register `dst`.
+    def readbyte dst, c @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {
+        hex.zero 2, hex.pointers.read_byte
+        wflip hex.pointers.ret_after_read_byte+w, back
+        c+dbit+8; c
+      back:
+        wflip hex.pointers.ret_after_read_byte+w, back
+        c+dbit+8;
+        hex.mov 2, dst, hex.pointers.read_byte
+    }
+
+    // STORE the hex[:2] register `src` into the byte cell at CONSTANT address `c`.
+    // Read v, make read_byte = v ^ src, then xor THAT onto c:  c = v ^ (v ^ src) = src.
+    def writebyte c, src @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {
+        hex.zero 2, hex.pointers.read_byte
+        wflip hex.pointers.ret_after_read_byte+w, back
+        c+dbit+8; c
+      back:
+        wflip hex.pointers.ret_after_read_byte+w, back
+        c+dbit+8;
+        hex.xor 2, hex.pointers.read_byte, src
         hex.exact_xor c+dbit+3, c+dbit+2, c+dbit+1, c+dbit+0, hex.pointers.read_byte
         hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw
     }

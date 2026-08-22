@@ -70,9 +70,11 @@ def hardcode_counts(s):
 
 
 def drop_high_nibble(s):
-    out = [l for l in s.splitlines(True) if "c+dbit+7, c+dbit+6" not in l]
-    assert len(out) == len(s.splitlines(True)) - 1
-    return "".join(out)
+    """zerobyte's high-nibble exact_xor -- the FIRST occurrence. writebyte gained one too, so
+    this can no longer be a whole-file line count (the anchor assert caught that)."""
+    a = '        hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw' + chr(10)
+    assert a in s, "drop_high_nibble no longer matches -- update it"
+    return s.replace(a, "", 1)
 
 
 def drop_pointer_restore(s):
@@ -182,6 +184,26 @@ MUTATIONS += [
 # independently (pyproject sets pythonpath = ["."], not src). CR round 11 showed a checkout where
 # the harness mutated one file and tested another and still printed "14 OF 15 APPLIED", exit 0.
 ENV = dict(__import__("os").environ, PYTHONPATH=str(ROOT / "src"))
+
+
+
+def break_writebyte_high_nibble(s):
+    a = ("        hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, "
+         "hex.pointers.read_byte+dw\n    }\n}")
+    assert a in s, "break_writebyte_high_nibble no longer matches -- update it"
+    return s.replace(a, "    }\n}")
+
+
+def break_readbyte_copy(s):
+    a = "        hex.mov 2, dst, hex.pointers.read_byte"
+    assert a in s, "break_readbyte_copy no longer matches -- update it"
+    return s.replace(a, "        hex.zero 2, dst")
+
+
+MUTATIONS += [
+    ("m1_reset.fj: writebyte drops the HIGH nibble", FJ, break_writebyte_high_nibble),
+    ("m1_reset.fj: readbyte never copies the value", FJ, break_readbyte_copy),
+]
 
 
 def run():

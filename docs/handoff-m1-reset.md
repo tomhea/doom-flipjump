@@ -931,3 +931,22 @@ as-average error DESIGN.md now warns about twice.
 
 **Do not use §7.4's prices to predict a reset cost until someone measures the per-run constant.**
 The measured 250,789 stands on its own; the model under it does not.
+
+### 9.9 The build-path fingerprint assert, exercised (CR round 7)
+
+A hard assert that has never executed on the path it guards is not a guard. `scratchpad/m1_fpcheck.py`
+drives the real `build_wall_renderer(self_reset=True)` to pass 1 and fires it against the build's
+own label table, then aborts (pass 2 costs another ~27 min and adds nothing):
+
+```
+pass 1 reached in 1271s, 6,806,757 labels
+set's layout_fingerprint : 46422330e2a2aa53aca2233c682ae757ae39c3d1a5405473dea4511764765c99
+this build's pass-1 table: 46422330e2a2aa53aca2233c682ae757ae39c3d1a5405473dea4511764765c99
+load_restore_set against the REAL pass-1 table: ACCEPTED, 10,702 words
+m1_fpcheck: PASS
+```
+
+This matters because the shipped fingerprint was generated from `scratchpad/_m1b_labels.tsv.gz`,
+captured from the `self_reset=False` assembly, while the build resolves against a pass-1 table that
+includes `m1_reset.fj`. `m1_reemit.py` re-checks it against that same tsv — **circular**. Only this
+closes the loop, and if it had mismatched the next real build would have died.

@@ -124,3 +124,38 @@ correct, already the right shape, and the replacement lines already exist verbat
 Then **candidate 1**, because it is the largest and its read half is prototyped and measured. Port
 `m1.readbyte`/`m1.writebyte` into `src/fj/` first — they exist only in the measurement harness — and
 build the write-half dispatch, which is the one piece nobody has prototyped.
+
+## 8. MEASURED RESULTS — and two candidates the gate rejected
+
+`scratchpad/deg_gate.py`, 4 viewpoints, every run BYTE-EXACT. Baseline is the tree at `c4d2e8e`.
+
+| | (664,291) | (1272,-724) | (1869,479) | spawn |
+|---|---:|---:|---:|---:|
+| baseline | 50,186,307 | 40,950,575 | 45,534,466 | 39,057,903 |
+| **C2 + C8 (SHIPPED)** | **44,573,453** | **36,087,127** | **39,842,687** | **34,648,801** |
+| | **-11.2%** | **-11.9%** | **-12.5%** | **-11.3%** |
+| C9 alone (rejected) | +239,388 | +102,679 | +337,586 | +84,086 |
+| C11 alone (rejected) | +203,882 | -200,834 | +320,818 | -332,386 |
+| C9 + C11 (rejected) | +92,675 | -254,101 | +112,528 | -439,955 |
+
+**C2 + C8 came in ~3x BETTER than estimated** (survey said ~1.5-2.2M combined; measured 4.4-5.7M).
+
+**C9 REJECTED — worse at all four.** The pre-scan walks `drawn[]` on far more segs than ever reach
+pass 2, so paying one `hex.mov w/4` per pre-scan seg to save one `hex.ptr_index` per pass-2 seg is a
+net loss. Back-solving (664,291): ~870 pre-scan segs against ~99 pass-2 segs. There is no cheap
+winning variant — moving the copy to the `occproc` path costs a `ptr_index` there instead, which is
+exactly what it was trying to remove. **Do not retry without changing pass 2's start column**, which
+is a behaviour change, not an optimisation.
+
+**C11 REJECTED — a wash, net -8,520 ops over four viewpoints**, with near-symmetric +-200-330k
+swings. The swings are the finding: **`hex.add n, dst, src`'s cost is DATA-DEPENDENT** (the carry
+chain does different work for different operand values), so replacing it with `hex.add_constant`
+does not buy a fixed per-call saving -- it buys a different data-dependence, and which one wins
+varies by viewpoint. This candidate was rated HIGH confidence at ~870k from a static op-count model.
+**A static model cannot price a carry chain.**
+
+⚠ **METHOD NOTE, learned the hard way here.** These three changes are NOT ADDITIVE: C9 and C11 each
+regress against the baseline, yet C9 *appears* to help when measured as the marginal step from
+C11-alone to C11+C9. **A marginal delta does not give you a candidate's sign.** Isolate against the
+committed baseline, one candidate at a time, or the arithmetic will tell you a confident story about
+the wrong change -- which it did here, twice, in opposite directions.

@@ -851,57 +851,56 @@ the wrong property, and its summary line looks identical either way.** Both vers
 and when a control is the evidence, the thing to review is *which* mutation it rejects, not
 *whether* it rejects one.
 
-### 9.7 Which M1 tools carry a negative control (CR rounds 4 and 5)
+### 9.7 Which M1 tools carry a negative control — GENERATED
 
-⚠ **The previous three versions of this list were all wrong** — first overclaiming that every tool
-had `--selftest`, then undercounting, then calling an 11-row table "the exhaustive list" when the
-PR adds **21 `m1*.py` scripts**. So the scope is stated first and the claim is bounded to it.
+⚠⚠ **THIS TABLE IS GENERATED. Do not hand-edit it.** Regenerate with
+`python scratchpad/m1_inventory.py`; `--check` exits 1 if this section disagrees with the
+filesystem.
 
-**SCOPE: every tool whose verdict this PR or `DESIGN.md` quotes as proof.** ⚠ The glob used to
-build this was `m1*.py`, which misses anything with a leading underscore — see §9.10. Use `*m1*`. That is the set R9
-governs. Other `m1*` scripts are exploratory probes whose output is not cited as evidence anywhere,
-and they are listed separately rather than silently omitted.
+It is generated because the hand-written version was wrong in **seven successive revisions** —
+overclaiming, undercounting, miscounting, mis-partitioning, a wrong total, stale cells in
+freshly-edited rows, and (round 11) a stale count in a row the same commit touched. Every failure
+had the same cause: the commit that adds a control is the one least likely to re-read the table
+describing the controls. That is not a discipline problem, it is a design problem, so it is fixed by
+design. The scope glob is `_?m1` not followed by 4 — the old `m1*.py` could not see
+`_m1_scratchtest.py`, which is how that file stayed tracked by accident for eight rounds.
 
-| tool | `--selftest` | the mutation it rejects |
-|---|---|---|
-| `m1_mutations.py` | it *is* the control | **14** mutations of shipped `src/` files; every one must be caught |
-| `m1_gate.py` | yes | flips a byte of the **loop** binary's presented frame; requires FAIL |
-| `m1_bytecheck.py` | yes (needs a built image) | plants `0xA5` in a nibble-cleared cell |
-| `m1_reemit.py` | yes (synthetic) | drops a label; the emission must differ |
-| `m1_fpcheck.py` | it *is* the check | runs the REAL `build_wall_renderer` to pass 1 and fires the build-path fingerprint assert against the build's OWN table |
-| `m1_setfile.py` | yes (synthetic) | C1 shift / C2 delete / C3 escape / **C4 layout** (label moved DOWN so only the fingerprint can catch it), plus a positive |
-| `m1a_stride.py` | yes | mutates a known-good stride; must be rejected |
-| `m1b_labels.py` | yes | — |
-| `m1q_rss.py` | yes | — |
-| **`m1_dirtymap.py`** | **no flag** | has one: CONTROL 3 shifts the label table, per-label counts must change. Its 0-dirty-words result licenses the 682-cell trim. |
-| **`m1_sweep.py`** | **none** | in-run only: byte-exact vs the old binary over 260 frames |
-| **`m1_play.py`** | **none** | in-run only: distinct-picture vacuity + byte-exact over 100 frames |
-| **`m1c_restore_set.py`** | **none** | the first stage of the chain that produced the SHIPPED `m1_restore_set.json.gz`. Uncontrolled. |
-| **`m1_fps.py`** | **none** | produced the 3.85x figure, which is why that figure is now labelled UNVERIFIED rather than quoted (see below) |
+| tool | `--selftest` | `CONTROL` mentions | tracked |
+|---|---|---|---|
+| `m1_build.py` | **no** | 3 | yes |
+| `m1_bytecheck.py` | yes | 5 | yes |
+| `m1_dirtymap.py` | **no** | 6 | yes |
+| `m1_emit_reset.py` | **no** | 7 | yes |
+| `m1_fpcheck.py` | **no** | 0 | yes |
+| `m1_fps.py` | **no** | 3 | yes |
+| `m1_gate.py` | yes | 10 | yes |
+| `m1_inventory.py` | yes | 2 | no |
+| `m1_minimize.py` | **no** | 3 | yes |
+| `m1_mutations.py` (15 mutations) | **no** | 0 | yes |
+| `m1_play.py` | **no** | 3 | yes |
+| `m1_rbw.py` | **no** | 6 | yes |
+| `m1_reemit.py` | yes | 3 | yes |
+| `m1_setfile.py` | yes | 2 | yes |
+| `m1_sweep.py` | **no** | 3 | yes |
+| `m1_wired_build.py` | **no** | 0 | yes |
+| `m1_zbyte.py` | **no** | 5 | yes |
+| `m1a_stride.py` | yes | 8 | yes |
+| `m1b_labels.py` | yes | 5 | yes |
+| `m1c_cost.py` | **no** | 1 | yes |
+| `m1c_hole.py` | **no** | 3 | yes |
+| `m1c_restore_set.py` | **no** | 10 | yes |
+| `m1d_loop.py` | **no** | 5 | yes |
+| `m1q_rss.py` | yes | 4 | yes |
 
-⚠ **CR round 6 found this partition wrong too** — three of the tools I had filed as uncited are
-cited, one of them *in shipped source*. They belong in the table:
+24 M1 scripts (`_?m1` not followed by 4); 8 carry `--selftest`, 16 do not.
 
-| tool | `--selftest` | where its verdict is cited |
-|---|---|---|
-| **`m1_zbyte.py`** | **none** | §8 (943.0 → 91.1 ops/cell) **and `src/fj/m1_reset.fj` lines 14 and 21** |
-| **`m1c_hole.py`** | **none** | §6 — the "DID NOT TERMINATE, killed at 180 s" hang evidence |
-| **`m1_rbw.py`** | **none** | §8 — the read-before-write derivation of the SHIPPED set |
-
-**Genuinely uncited, listed for completeness:** `m1_build.py`, `m1_emit_reset.py`,
-`m1_minimize.py`, `m1_wired_build.py`, `m1c_cost.py`, `m1d_loop.py`.
-
-That is 23 `m1*.py` scripts in total (`m1_fpcheck.py` is new this round). **This list has now been
-wrong in SIX successive revisions** — and round 7 found the two stale cells in the very rows the
-previous revision edited: it said 8 mutations when there were 12, and omitted the C4 control added
-in the same commit. The six failures were: overclaiming, undercounting, miscounting,
-mis-partitioning, a wrong total, and stale cells in freshly-edited rows.
-
-**The lesson is not about M1.** A hand-maintained inventory of one's own evidence is itself
-evidence, and it decays exactly as fast as everything else — faster, in fact, because every commit
-that adds a control invalidates it, and the commit that adds the control is the one least likely to
-re-read the table. If this table matters, it should be GENERATED from the filesystem, not written.
-It is not generated, so treat every row as needing verification before quoting it.
+**Reading it.** `--selftest` = has a flag that mutates real input and requires rejection.
+`m1_mutations.py` shows `no` because it *is* the control — 15 mutations of shipped `src/` files,
+every one required to be caught. A `CONTROL` count is only a count of mentions; it is not evidence
+that any of them can fail. **The gaps that matter are `m1_sweep.py`, `m1_play.py`,
+`m1_dirtymap.py`, `m1_fps.py` and `m1c_restore_set.py`**, whose verdicts are quoted as proof
+somewhere in this PR while none carries a negative control. `m1c_restore_set.py` is the most
+load-bearing: it produced the file that ships in `src/`.
 
 ⚠ **`m1_fps.py` and `DESIGN.md`.** CR round 5 caught `DESIGN.md` pointing readers at "the fps line
 in the handoff" while `docs/handoff-complete-game.md` marks that same figure UNVERIFIED for the

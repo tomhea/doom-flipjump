@@ -177,9 +177,16 @@ MUTATIONS += [
 ]
 
 
+# ⚠ The subprocess must import the SAME doomfj this script mutates. The guard above only checks
+# THIS process's import, which the sys.path.insert forces to ROOT/src; pytest resolves it
+# independently (pyproject sets pythonpath = ["."], not src). CR round 11 showed a checkout where
+# the harness mutated one file and tested another and still printed "14 OF 15 APPLIED", exit 0.
+ENV = dict(__import__("os").environ, PYTHONPATH=str(ROOT / "src"))
+
+
 def run():
     out = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header", "--tb=no"],
-                         cwd=ROOT, capture_output=True, text=True)
+                         cwd=ROOT, capture_output=True, text=True, env=ENV)
     failed = sorted(l.split(" ")[1].split("[")[0] for l in out.stdout.splitlines()
                     if l.startswith("FAILED"))
     tail = [l for l in out.stdout.splitlines() if " passed" in l or " failed" in l]
@@ -203,12 +210,23 @@ if cli.all_at_once:
             _before = rd(_path)
             try:
                 _after = _fn(_before)
-            except AssertionError:
-                # ⚠ SOME MUTATIONS CONFLICT AND CANNOT COEXIST. drop_high_nibble DELETES the line
-                # spill_past_the_cell anchors on, so applying both is impossible. Report the ones
-                # that could not be applied -- silently dropping them would make this block claim
-                # coverage it does not have, which is the whole failure mode this file exists to
-                # prevent. The per-mutation run (no --all-at-once) covers them individually.
+            except (AssertionError, ValueError):
+                # A mutation can fail to apply for TWO REASONS and they mean opposite things:
+                #   CONFLICT -- an earlier mutation removed the text this one anchors on. Benign;
+                #               the per-mutation run covers it.
+                #   DRIFT    -- the anchor no longer matches the SHIPPED code at all. That is a
+                #               broken control and must fail the run.
+                # Distinguish them by re-applying to the PRISTINE file. CR round 11 demonstrated
+                # the previous version filing a drifted anchor under "conflict" and exiting 0 --
+                # laundering a broken control into a benign note, in the tool whose entire job is
+                # to prove controls are not broken.
+                try:
+                    _fn(originals[_path])
+                except (AssertionError, ValueError):
+                    raise AssertionError(
+                        "mutation %r does not match the shipped code -- its anchor has DRIFTED "
+                        "(it also fails against the pristine file, so this is not a conflict)"
+                        % _name)
                 skipped.append(_name)
                 continue
             assert _after != _before, (
@@ -227,7 +245,7 @@ if cli.all_at_once:
                 print("      %s" % _name)
         print("")
         r = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header",
-                            "--tb=no"], cwd=ROOT, capture_output=True, text=True)
+                            "--tb=no"], cwd=ROOT, capture_output=True, text=True, env=ENV)
         print(r.stdout.rstrip())
     finally:
         for _p, _s in originals.items():
@@ -235,7 +253,7 @@ if cli.all_at_once:
     print("")
     print("=== RESTORED ===")
     r = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header", "--tb=no"],
-                       cwd=ROOT, capture_output=True, text=True)
+                       cwd=ROOT, capture_output=True, text=True, env=ENV)
     print(r.stdout.rstrip())
     sys.exit(0 if " failed" not in r.stdout else 1)
 

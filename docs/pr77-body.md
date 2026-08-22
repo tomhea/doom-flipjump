@@ -62,11 +62,11 @@ FAILED tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristi
 FAILED tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
 FAILED tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255 - Assertio...
 FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
-24 failed, 15 passed in 1.67s
+24 failed, 15 passed in 1.72s
 
 === RESTORED ===
 .......................................                                  [100%]
-39 passed in 1.81s
+39 passed in 1.79s
 ```
 
 **Each mutation individually**, so no mutation hides behind another
@@ -74,10 +74,10 @@ FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 ```
 BASELINE (no mutation)
-  39 passed in 1.77s
+  39 passed in 1.76s
 
 MUTATION: selfreset.py: the two-sided guard deleted
-  1 failed, 38 passed in 1.79s   ok
+  1 failed, 38 passed in 1.77s   ok
     caught by tests/host/test_selfreset.py::test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array
 
 MUTATION: selfreset.py: main-part recognition assert gone
@@ -85,11 +85,11 @@ MUTATION: selfreset.py: main-part recognition assert gone
     caught by tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise
 
 MUTATION: selfreset.py: provenance refusal gone
-  1 failed, 38 passed in 1.79s   ok
+  1 failed, 38 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_restore_set_without_provenance_is_refused
 
 MUTATION: selfreset.py: containment check gone
-  2 failed, 37 passed in 1.80s   ok
+  2 failed, 37 passed in 1.77s   ok
     caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
     caught by tests/host/test_selfreset.py::test_offset_running_past_its_label_is_refused
 
@@ -107,45 +107,45 @@ MUTATION: selfreset.py: byte counts hardcoded again
     caught by tests/host/test_selfreset.py::test_no_byte_array_word_is_ever_nibble_cleared
 
 MUTATION: m1_reset.fj: high-nibble exact_xor deleted
-  2 failed, 37 passed in 1.69s   ok
+  2 failed, 37 passed in 1.68s   ok
     caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: m1_reset.fj: shared pointer never restored
-  2 failed, 37 passed in 1.79s   ok
+  2 failed, 37 passed in 1.78s   ok
     caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: m1_reset.fj: one write past the cell
-  2 failed, 37 passed in 1.74s   ok
+  2 failed, 37 passed in 1.79s   ok
     caught by tests/fj/test_m1_reset.py::test_neighbours_untouched
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: selfreset.py: layout fingerprint check gone
-  1 failed, 38 passed in 1.82s   ok
+  1 failed, 38 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_layout_fingerprint_rejects_a_differently_laid_out_build
 
 MUTATION: selfreset.py: missing-label refusal gone
-  1 failed, 38 passed in 1.80s   ok
+  1 failed, 38 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_refuses_a_set_naming_a_label_this_build_does_not_have
 
 MUTATION: selfreset.py: label+offset format refusal gone
-  1 failed, 38 passed in 1.78s   ok
+  1 failed, 38 passed in 1.81s   ok
     caught by tests/host/test_selfreset.py::test_refuses_an_absolute_address_set
 
 MUTATION: selfreset.py: containment unbounded at the top
-  1 failed, 38 passed in 1.77s   ok
+  1 failed, 38 passed in 1.80s   ok
     caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
 
 MUTATION: selfreset.py: verify back to the membership test
-  4 failed, 35 passed in 1.77s   ok
+  4 failed, 35 passed in 1.82s   ok
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
 
 MUTATION: selfreset.py: pristine-value check gone
-  2 failed, 37 passed in 1.75s   ok
+  2 failed, 37 passed in 1.78s   ok
     caught by tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristine_value
     caught by tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
 
@@ -158,15 +158,23 @@ RESTORED: 39 passed in 1.76s  ok
 M1 MUTATION EVIDENCE: PASS -- every mutation is caught
 ```
 
-⚠ Read both. `test_neighbours_untouched` is among the PASSED tests in the all-at-once block, because a
-mutation that breaks the clear earlier masks a write past the end. The per-mutation run is what
-shows it has teeth. An "everything at once" FAIL block alone would have hidden that.
+⚠ Read both blocks. The all-at-once block says **nothing** about
+`test_neighbours_untouched`: the mutation that catches it (`one write past the cell`) is the one it
+lists as NOT APPLIED, because an earlier mutation deletes the line that one anchors on. The
+per-mutation run is where that test is shown to have teeth.
+
+⚠⚠ An earlier revision of this paragraph said the test was among the passes "because a mutation that
+breaks the clear earlier masks a write past the end". That asserted the mutation RAN and the test
+survived — a coverage claim about the FAIL block that was false. Worse, it was never true: before
+round 10 that mutation was a bare `str.replace` whose anchor had already been deleted, so it was a
+**silent no-op**, which is precisely the failure this harness exists to detect. It took the uniform
+anchor assert to surface it.
 
 Full host suite, with the marker filter's bound visible:
 
 ```
 $ timeout 900 python -m pytest tests/host tests/fj/test_m1_reset.py -q   # _m1_pytest_full.log
-284 passed, 1 deselected in 43.06s
+284 passed, 1 deselected in 43.01s
 ```
 
 ## Integration evidence (R2)
@@ -394,8 +402,8 @@ own synthetic inputs so it runs on a clean checkout; `m1_gate.py` and `m1_reemit
 
 - `tests/host` still has no test that BUILDS the loop end-to-end; the gate, sweep, playability,
   byte-check and re-emit runs are scripts under `scratchpad/`.
-- **Negative-control coverage is tabulated in `docs/handoff-m1-reset.md` 9.7**, scoped to the tools
-  whose verdicts are quoted as proof and listing the rest separately, because
+- **Negative-control coverage is now GENERATED into `docs/handoff-m1-reset.md` §9.7** by
+  `scratchpad/m1_inventory.py` (`--check` fails if the doc disagrees with the filesystem), because
   the prose version of it in this body was wrong three revisions running -- first overclaiming that
   all five tools carried `--selftest` (false, and the exact failure CLAUDE.md records: a false
   R9-compliance statement inside the R9 evidence), then undercounting. The real remaining gaps:
@@ -474,9 +482,17 @@ that applying it actually changed the file; breaking one anchor gives
 not -- they relied on the loud-failure backstop. That was a completeness claim about the R1 evidence
 tool itself, which is the class CLAUDE.md records.
 
-⚠ And two mutations CANNOT COEXIST: `drop_high_nibble` deletes the line `spill_past_the_cell`
-anchors on. The all-at-once block now says so and names what it could not apply, rather than
-crashing or quietly dropping it; the per-mutation run covers it.
+⚠ Two mutations **cannot both be applied in this order**: `drop_high_nibble` deletes the line
+`spill_past_the_cell` anchors on. (Reversing them would apply both — it is an ordering artifact, not
+a true incompatibility, and CR round 11 was right to say so. The order is kept deliberately, because
+it is what keeps the conflict path exercised rather than dormant.) The all-at-once block names what
+it could not apply; the per-mutation run covers it.
+
+⚠⚠ **And the skip mechanism itself had the defect it was built to prevent.** It filed every failed
+application under "conflict" and exited 0 — so a mutation whose anchor had DRIFTED from the shipped
+code was laundered into a benign note, in the tool whose whole job is proving controls are not
+broken. It now distinguishes them by re-applying to the pristine file: fails there too → DRIFT,
+raise; succeeds → conflict, report. Proven both ways.
 
 ## Answers to CR round 7 (5 blocking)
 

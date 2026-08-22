@@ -194,3 +194,34 @@ existing one, and it needs its own correctness proof before any op count from it
 `scratchpad/constrd_probe.py` is the probe, with its controls and its negative control (which does
 reject a broken handler). The generator itself was BACKED OUT of `src/doomfj/lut_generator.py`
 rather than left in unused — an unproven, unreachable generator is dead code.
+
+## 10. C7 KEPT, C10 REJECTED — and the row rule in disguise
+
+**C7 (hot/cold array move) KEPT.** deg_gate, byte-exact, better at all four:
+
+| | (664,291) | (1272,-724) | (1869,479) | spawn |
+|---|---:|---:|---:|---:|
+| C2+C8 | 44,573,453 | 36,087,127 | 39,842,687 | 34,648,801 |
+| **+C7** | **44,494,846** | **36,031,157** | **39,771,895** | **34,598,353** |
+| | -78,607 | -55,970 | -70,792 | -50,448 |
+
+...and that is only THREE of the six arrays -- deg_gate has no `moving_things`, so `sshead`/
+`thnext`/`thss_rt` are not even in that build. Span unchanged: this is placement, not duplication.
+
+**C10 (bake `seg_normalangle`) REJECTED** -- mixed, net **+26,553 WORSE**:
++69,165 / -20,900 / +105,694 / -127,406.
+
+**Why, and it is worth internalising.** The macro built `((segangle & 0xFFFF) << 16) + ANG90` from
+`hex.zero 8` + `hex.mov 4` of a SPARSE 4-nibble angle + `hex.add 8` against `0x40000000` -- a
+constant with exactly ONE nonzero nibble. Baking it replaces all that with `hex.mov 8` of a DENSE
+32-bit value. Cost follows the NONZERO NIBBLES OF THE SOURCE, so the add being deleted was already
+nearly free and the mov being added is not.
+
+**BAKING A CONSTANT IS NOT AUTOMATICALLY CHEAPER. It is cheaper only when the baked value is no
+DENSER than the pieces it replaces.** This is [[fj-cost-model]]'s ROW RULE reappearing outside
+multiplication, and it is the second candidate (after C11) that a static op-count model rated HIGH
+and the gate rejected. Both were about operand DENSITY, which such a model does not represent.
+
+⚠ Note the shape of the C10 and C11 results: mixed sign across viewpoints, roughly symmetric
+magnitudes. That signature means "the cost is data-dependent and I changed which data it depends
+on", not "small win". Treat it as a rejection, not as noise to average away.

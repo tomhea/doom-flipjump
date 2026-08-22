@@ -19,7 +19,9 @@ import flipjump as fj
 import pytest
 from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
-from doomfj.collision import (COLLISION_DECLS, LineBake, check_position_ops, line_scratch_decls)
+from doomfj.collision import (LINE_BOX_BYTES, LINE_BOX_LEN, LINE_REST_BYTES,
+                              LINE_REST_LEN, line_box, line_rest,
+                              COLLISION_DECLS, LineBake, check_position_ops, line_scratch_decls)
 from doomfj.config import Config
 from doomfj.harness import W
 from doomfj.mapcompiler import bake_bsp, blockmap_candidates, build_blockmap, seg_sector
@@ -245,7 +247,7 @@ def table_fjm(tmp_path_factory, level):
         "hex.input 1, wmagic", "hex.input 4, cpx", "hex.input 4, cpy",
         "hex.input 4, cp_seedf", "hex.input 4, cp_seedc",
         f"hex.set 8, cprad, {PLAYER_RADIUS}",
-        f"sim.check_position bkoff, 4, bklin, 4, lnrow, 3, {nbx}, {nby}, {bx0}, {by0}",
+        f"sim.check_position bkoff, 4, bklin, 4, lnbox, lnrow, 3, {nbx}, {nby}, {bx0}, {by0}",
         "hex.print_as_digit 1, cp_ok, 0", "stl.output 10",
         "hex.print_as_digit 8, cp_floor, 0", "stl.output 10",
         "hex.print_as_digit 8, cp_ceil, 0", "stl.output 10",
@@ -254,7 +256,10 @@ def table_fjm(tmp_path_factory, level):
         "cbx_lo: hex.vec 8", "cbx_hi: hex.vec 8", "cby_lo: hex.vec 8", "cby_hi: hex.vec 8",
         "cp_ok: hex.vec 1", "cp_floor: hex.vec 8", "cp_ceil: hex.vec 8",
         "cp_seedf: hex.vec 8", "cp_seedc: hex.vec 8",
-        generate_packed_lut_fj("lnrow", [pack(r, LINE_ROW_BYTES) for r in rows], LINE_ROW_LEN),
+        generate_packed_lut_fj("lnbox", [pack(line_box(r), LINE_BOX_BYTES) for r in rows],
+                               LINE_BOX_LEN),
+        generate_packed_lut_fj("lnrow", [pack(line_rest(r), LINE_REST_BYTES) for r in rows],
+                               LINE_REST_LEN),
         generate_packed_lut_fj("bkoff", [pack(b, (2, 1)) for b in blocks], 3),
         generate_packed_lut_fj("bklin", list(flat), 2),
     ]) + "\n"
@@ -338,14 +343,17 @@ def trymove_fjm(tmp_path_factory, level):
         "hex.input 1, wmagic", "hex.input 4, cpx", "hex.input 4, cpy",
         "hex.input 4, cp_seedf", "hex.input 4, cp_seedc", "hex.input 4, herf",
         f"hex.set 8, cprad, {PLAYER_RADIUS}",
-        f"sim.try_move bkoff, 4, bklin, 4, lnrow, 3, {nbx}, {nby}, {bx0}, {by0}, "
+        f"sim.try_move bkoff, 4, bklin, 4, lnbox, lnrow, 3, {nbx}, {nby}, {bx0}, {by0}, "
         f"{PLAYER_HEIGHT >> 16}, {MAX_STEP >> 16}, herf",
         "hex.print_as_digit 1, mv_ok, 0", "stl.output 10", "stl.loop",
         "wmagic: hex.vec 2", "cpx: hex.vec 8", "cpy: hex.vec 8", "cprad: hex.vec 8",
         "cbx_lo: hex.vec 8", "cbx_hi: hex.vec 8", "cby_lo: hex.vec 8", "cby_hi: hex.vec 8",
         "cp_ok: hex.vec 1", "cp_floor: hex.vec 8", "cp_ceil: hex.vec 8",
         "cp_seedf: hex.vec 8", "cp_seedc: hex.vec 8", "herf: hex.vec 8", "mv_ok: hex.vec 1",
-        generate_packed_lut_fj("lnrow", [pack(r, LINE_ROW_BYTES) for r in rows], LINE_ROW_LEN),
+        generate_packed_lut_fj("lnbox", [pack(line_box(r), LINE_BOX_BYTES) for r in rows],
+                               LINE_BOX_LEN),
+        generate_packed_lut_fj("lnrow", [pack(line_rest(r), LINE_REST_BYTES) for r in rows],
+                               LINE_REST_LEN),
         generate_packed_lut_fj("bkoff", [pack(b, (2, 1)) for b in blocks], 3),
         generate_packed_lut_fj("bklin", list(flat), 2),
     ]) + "\n"

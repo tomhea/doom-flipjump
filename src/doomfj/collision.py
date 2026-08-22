@@ -356,6 +356,33 @@ def check_position_runtime_decls() -> list:
 # v1x, v1y, dxi, dyi, minx, maxx, miny, maxy, slope, flags, opentop, openbottom
 LINE_ROW_BYTES = (2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2)
 LINE_ROW_LEN = sum(LINE_ROW_BYTES)
+
+# M-CONSTADDR C5 -- the HOT/COLD split of the linedef row.
+#
+# `hex.read_table_packed nb` is nb separate `set_flip_and_jump_pointers` rebuilds (~781 ops each),
+# and `sim.check_line` read all 22 bytes before a BBOX TEST that rejects most candidates outright.
+# The four bbox fields (minx, maxx, miny, maxy) are CONTIGUOUS at bytes 8..15, so the row splits
+# cleanly: read 8 bytes, reject, and only survivors pay for the other 14.
+#
+# This is the same lever M14.5 already applied to `thing_load` -- "those four moved to
+# frame.thing_load_cold, which runs AFTER the vis reject" (src/fj/sim.fj).
+LINE_BOX_SLICE = slice(4, 8)                      # minx, maxx, miny, maxy
+LINE_BOX_BYTES = LINE_ROW_BYTES[4:8]              # (2, 2, 2, 2)  -> 8 bytes
+LINE_BOX_LEN = sum(LINE_BOX_BYTES)
+# everything else, in order: v1x v1y dx dy | slope flags opentop openbottom
+LINE_REST_BYTES = LINE_ROW_BYTES[:4] + LINE_ROW_BYTES[8:]
+LINE_REST_LEN = sum(LINE_REST_BYTES)
+assert LINE_BOX_LEN + LINE_REST_LEN == LINE_ROW_LEN
+
+
+def line_box(row):
+    """The bbox half of a row, in `LINE_BOX_BYTES` order."""
+    return tuple(row[LINE_BOX_SLICE])
+
+
+def line_rest(row):
+    """Everything the bbox reject does NOT need, in `LINE_REST_BYTES` order."""
+    return tuple(row[:4]) + tuple(row[8:])
 FLAG_ONE_SIDED = 1 << 0
 FLAG_BLOCKING = 1 << 1
 # The bbox and the SLOPE TYPE are precomputed into the row rather than derived at runtime. They
@@ -483,7 +510,10 @@ def collision_tables_fj(cmap, lds, secs, sds, ml_blocking, grid) -> str:
     rows = line_rows(lds, cmap.vertexes, secs, sds, ml_blocking)
     blocks, flat = block_tables(grid)
     return "\n".join([
-        generate_packed_lut_fj("lnrow", [pack(r, LINE_ROW_BYTES) for r in rows], LINE_ROW_LEN),
+        generate_packed_lut_fj("lnbox", [pack(line_box(r), LINE_BOX_BYTES) for r in rows],
+                               LINE_BOX_LEN),
+        generate_packed_lut_fj("lnrow", [pack(line_rest(r), LINE_REST_BYTES) for r in rows],
+                               LINE_REST_LEN),
         generate_packed_lut_fj("bkoff", [pack(b, (2, 1)) for b in blocks], 3),
         generate_packed_lut_fj("bklin", list(flat) or [0], 2),
     ]) + "\n"
@@ -515,7 +545,9 @@ def move_with_collision_lines(grid, mapname_pfx: str, *, radius: int, height: in
     That is safe here and only here: this whole block runs BEFORE `_int_part_lines` re-derives
     `vx`/`vy` from the final position for the walk."""
     bx0, by0, nbx, nby = blockmap_grid(grid)
-    args = (f"bkoff, {n_bk}, bklin, {n_bl}, lnrow, {n_ln}, {nbx}, {nby}, {bx0}, {by0}")
+    # `n_ln` is the INDEX-NIBBLE count, not a row length, and both tables are indexed by the same
+    # line index over the same row count -- so lnbox needs no count of its own.
+    args = (f"bkoff, {n_bk}, bklin, {n_bl}, lnbox, lnrow, {n_ln}, {nbx}, {nby}, {bx0}, {by0}")
 
     def candidate(tag, xexpr, yexpr, nxt):
         return [

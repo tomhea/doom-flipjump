@@ -67,13 +67,23 @@ for shape, olds in groups.items():
     assert len(offs) == 1, (
         "re-key REFUSED: group %r has %d distinct offset lists, so the pairing WOULD matter. "
         "Re-derive the set instead of re-keying it." % (shape[-60:], len(offs)))
-    assert len(cands) == len(olds), (
-        "re-key REFUSED: group %r has %d old labels but %d candidates"
-        % (shape[-60:], len(olds), len(cands)))
-    for o, c in zip(sorted(olds), cands):
-        assert o.split("---")[-1] == c.split("---")[-1], (o[-40:], c[-40:])
-        new_entries.append([c] + ent[o])
-        remapped.append((o, c))
+    # WHEN THE MAPPING IS AMBIGUOUS, TAKE THE SUPERSET -- do not guess.
+    #
+    # A group can have FEWER old labels than candidates: `collision.py` emits three candidate
+    # positions (whole step, x-only, y-only), so a macro-local exists in three sibling expansions
+    # while the derived set named only one of them. Nothing in the label distinguishes which, and
+    # picking wrong would leave the cell that actually needed restoring DIRTY -- and a hole in the
+    # restore set does not draw wrong pixels, it HANGS the next frame (handoff-m1-reset.md 4b).
+    #
+    # Restoring all three is safe in the direction that matters: writing a scratch cell back to its
+    # pristine value when it did not need it is a no-op, because pristine is exactly what it should
+    # hold at frame start. The cost is a few extra cells. The guards still apply to every one of
+    # them -- containment, the byte/nibble split, and the pristine-value check in build.py.
+    for o in sorted(olds):
+        for c in cands:
+            assert o.split("---")[-1] == c.split("---")[-1], (o[-40:], c[-40:])
+            new_entries.append([c] + ent[o])
+            remapped.append((o, c))
 
 print("labels in the set      : %d" % len(ent))
 print("  unchanged            : %d" % len(present))
@@ -95,7 +105,9 @@ payload = {"format": "label+offset", "words": len(words), "labels": len(new_entr
 payload["layout_fingerprint"] = selfreset.layout_fingerprint(payload, labels)
 
 old_words = doc["words"]
-print("words: %s -> %s  (delta %+d, expected negative only from the dropped register)"
+print("words: %s -> %s  (delta %+d)  negative = a dropped register; positive = the superset"
+      % (format(old_words, ","), format(len(words), ","), len(words) - old_words))
+print("      taken where the old->new mapping was ambiguous -- see the comment above.")
       % (format(old_words, ","), format(len(words), ","), len(words) - old_words))
 
 tmp = Path(args.out).with_suffix(".probe.gz")

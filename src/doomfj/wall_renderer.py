@@ -2479,7 +2479,8 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
                       rm.sprite_strip(cols[u], dh, hb_, cap=DEG_SPR_MID_CAP))
                 body = [0, 0, 0] if st is None else (
                     [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
-                assert len(body) <= SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"
+                assert len(body) < SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"   # STRICT: the
+                # rel==0 sentinel in stream.sprite_runs needs at least one 0 cell after the body
                 out += [f";{v:#x} * dw" for v in body]
                 out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
                 blk += 1
@@ -2500,7 +2501,7 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
                                          cap=DEG_SPR_LOWRES_CAP)
                     body = [0, 0, 0] if st is None else (
                         [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
-                    assert len(body) <= SPR_BLOCK_STRIDE, f"LD block overflows: {len(body)}"
+                    assert len(body) < SPR_BLOCK_STRIDE, f"LD block overflows: {len(body)}"       # STRICT, as above
                     out += [f";{v:#x} * dw" for v in body]
                     out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
                     blk += 1

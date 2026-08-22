@@ -1242,15 +1242,14 @@ ns stream {
     // to it would cost more than this whole feature. Runs ending at or above wlo are skipped
     // unemitted; the run crossing whi clamps there and stops. `wlo`/`whi` are 2-nibble rows.
     def sprite_runs_win sblk, sy0b, slr, wlo, whi, blkshift \
-            @ sloop, sbody, spos, semit, sfin, sclamp, snext, send, \
-              ptr, sbase, sidx, n_ent, ent_i, rel, tex, rel_w, yabs, y0, smidx, wlo4, whi4, end < sprbank {
+            @ sloop, spos, semit, sfin, sclamp, snext, send, \
+              ptr, sbase, sidx, rel, tex, rel_w, yabs, y0, smidx, wlo4, whi4, end < sprbank {
         hex.zero w/4, sidx
         hex.mov 4, sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, sidx
         hex.set w/4, sbase, sprbank
         hex.ptr_index ptr, sbase, sidx
-        hex.ptr_add ptr, 2
-        hex.read_byte_and_inc n_ent, ptr
+        hex.ptr_add ptr, 3
         hex.zero 4, smidx
         hex.mov 2, smidx + 2*dw, slr
         hex.zero 4, y0
@@ -1260,11 +1259,15 @@ ns stream {
         hex.mov 2, wlo4, wlo
         hex.zero 4, whi4
         hex.mov 2, whi4, whi
-        hex.zero 2, ent_i
+        // rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
+        // no counter register, no per-run compare, no n_ent read. Every real run ends at row
+        // >= 1 and the emitter zero-pads every block, so a 0 always terminates the walk.
+        // VERIFIED on the shipped bank: 22,837 blocks, 858 empty, ZERO runs with rel==0, and
+        // the longest body is 51 of stride 64. The emitter asserts are now STRICT
+        // (`< SPR_BLOCK_STRIDE`) so that stays true.
       sloop:
-        hex.cmp 2, ent_i, n_ent, sbody, send, send
-      sbody:
         hex.read_byte_and_inc rel, ptr
+        hex.if0 2, rel, send
         hex.read_byte_and_inc tex, ptr
         hex.zero 4, rel_w
         hex.mov 2, rel_w, rel
@@ -1278,7 +1281,6 @@ ns stream {
         hex.mov 2, smidx, tex
         cm.emit smidx
       snext:
-        hex.inc 2, ent_i
         ;sloop
       sfin:
         byte.emit yabs
@@ -1294,8 +1296,6 @@ ns stream {
       ptr: hex.vec w/4
       sbase: hex.vec w/4
       sidx: hex.vec w/4
-      n_ent: hex.vec 2
-      ent_i: hex.vec 2
       rel: hex.vec 2
       tex: hex.vec 2
       rel_w: hex.vec 4
@@ -1308,8 +1308,8 @@ ns stream {
     }
 
     def sprite_runs sblk, sy0b, slr, viewh, blkshift \
-            @ sloop, sbody, spos, semit, sfin, sclamp, snext, send, \
-              ptr, sbase, sidx, n_ent, ent_i, rel, tex, rel_w, yabs, y0, smidx, cvh, end < sprbank {
+            @ sloop, spos, semit, sfin, sclamp, snext, send, \
+              ptr, sbase, sidx, rel, tex, rel_w, yabs, y0, smidx, cvh, end < sprbank {
         hex.zero w/4, sidx
         hex.mov 4, sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, sidx  // x SPR_BLOCK_STRIDE = 1<<blkshift SLOTS
@@ -1319,8 +1319,7 @@ ns stream {
         // it lands 64x short, the entry count reads garbage, and the walk runs on through the whole
         // bank emitting a slowly-creeping cycle of pairs.
         hex.ptr_index ptr, sbase, sidx
-        hex.ptr_add ptr, 2                      // past the [r0][last_rel] header the RECORD half used
-        hex.read_byte_and_inc n_ent, ptr
+        hex.ptr_add ptr, 3                      // past the WHOLE [r0][last_rel][n_ent] header
         hex.zero 4, smidx
         hex.mov 2, smidx + 2*dw, slr
         // M13-15M: the row arithmetic runs at FOUR nibbles, not eight. Every value here is a
@@ -1333,11 +1332,15 @@ ns stream {
                                                 // a tall NEAR sprite's top sits far above row -128,
                                                 // and the old one-byte +128 bias WRAPPED (M13-15M)
         hex.set 4, cvh, viewh
-        hex.zero 2, ent_i
+        // rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
+        // no counter register, no per-run compare, no n_ent read. Every real run ends at row
+        // >= 1 and the emitter zero-pads every block, so a 0 always terminates the walk.
+        // VERIFIED on the shipped bank: 22,837 blocks, 858 empty, ZERO runs with rel==0, and
+        // the longest body is 51 of stride 64. The emitter asserts are now STRICT
+        // (`< SPR_BLOCK_STRIDE`) so that stays true.
       sloop:
-        hex.cmp 2, ent_i, n_ent, sbody, send, send
-      sbody:
         hex.read_byte_and_inc rel, ptr
+        hex.if0 2, rel, send
         hex.read_byte_and_inc tex, ptr
         hex.zero 4, rel_w
         hex.mov 2, rel_w, rel
@@ -1352,7 +1355,6 @@ ns stream {
         hex.mov 2, smidx, tex
         cm.emit smidx
       snext:
-        hex.inc 2, ent_i
         ;sloop
       sfin:
         byte.emit yabs
@@ -1368,8 +1370,6 @@ ns stream {
       ptr: hex.vec w/4
       sbase: hex.vec w/4
       sidx: hex.vec w/4
-      n_ent: hex.vec 2
-      ent_i: hex.vec 2
       rel: hex.vec 2
       tex: hex.vec 2
       rel_w: hex.vec 4

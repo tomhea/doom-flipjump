@@ -60,7 +60,7 @@ ns proj {
     //   steps, same table values, R6): +-1 screen column vs the old exact-numerator form at worst,
     //   and every golden-gate frame is pixel-identical (scratchpad/coarse_gate_check.py).
     //   @requires hex.init & stl.ptr_init.
-    def slope_div dst, num, den \
+    def slope_div dst, num, den, disp \
             @ den_tiny, den_ok, den_hi_zero, prod_small, nrm_hi, hi_done, nrm_lo, lo_more, \
               lo_done, num_in_range, \
               keep, clamp, done, \
@@ -101,7 +101,14 @@ ns proj {
         hex.if0 3, num_norm + 3*dw, num_in_range
         ;clamp
       num_in_range:
-        hex.read_table_packed 3, recip, slopediv_recip8, 3, den_norm  // recip8[m] = ((1<<24)//m) << 3
+        // M13-ATANDISP, FIFTH application -- and the first two got ORPHANED. `sdrecip` has been
+        // emitted whenever `lines` since the lever landed, but its only reader was `slope_div_m`,
+        // which M14-c stopped calling when `wall_x_range_m` reverted to the full-width
+        // `point_to_angle`. So the shipped binary carried the dispatch table AND kept paying the
+        // packed read for the same values. `disp` is compile-time; non-lines tiers have no
+        // `sdrecip` and keep the packed read.
+        rep(1-disp, k) hex.read_table_packed 3, recip, slopediv_recip8, 3, den_norm  // recip8[m] = ((1<<24)//m) << 3
+        rep(disp, k) sdrecip.lookup recip, den_norm
 
         hex.zero 8, recip_wide
         hex.mov 6, recip_wide, recip
@@ -140,7 +147,7 @@ ns proj {
     //   idx = sxneg*4 + syneg*2 + (|dx|>|dy|); base = tantoangle[slope_div(min(|dx|,|dy|), max)];
     //   result = p2a_off[idx] (+ or -, per p2a_neg[idx]) base, mod 2^32. (0,0) -> 0.
     //   @requires hex.init & stl.ptr_init   (read_table needs the pointer init)
-    def point_to_angle dst, x1, y1, x2, y2 \
+    def point_to_angle dst, x1, y1, x2, y2, disp \
             @ dx, dy, num, den, oct_idx, slope_idx, tan_base, c1, c2, c4, c6, czero, \
               dx_neg, dx_pos, dx_done, dy_neg, dy_pos, dy_done, dx_zero, both_zero, nonzero, \
               dx_major, dy_major, numden_set, \
@@ -189,8 +196,12 @@ ns proj {
         hex.mov 8, den, dy
         ;numden_set
       numden_set:
-        .slope_div slope_idx, num, den            // slope_idx = tantoangle index for the slope
-        hex.read_table_packed 4, tan_base, tantoangle, 3, slope_idx   // shared LUT, M12l
+        .slope_div slope_idx, num, den, disp      // slope_idx = tantoangle index for the slope
+        // ORPHANED TABLE, see slope_div above: `ttang` ships whenever `lines` and had no live
+        // reader. Same values, same shape (index_nibbles=3, result_nibbles=8 vs slope_idx: hex.vec 3
+        // and tan_base: hex.vec 8).
+        rep(1-disp, k) hex.read_table_packed 4, tan_base, tantoangle, 3, slope_idx   // shared LUT, M12l
+        rep(disp, k) ttang.lookup tan_base, slope_idx
         // M13-p2acrush: the octant offset+sign, previously two read_tables (8-nib ~10.4k + 1-nib)
         // on oct_idx, is now a 3-deep COMPARE TREE to 8 constant tails (same formulas, ~1k).
         // oct_idx = sxneg*4 + syneg*2 + (|dx|>|dy|); the oracle's 8 returns (ANG90=0x40000000 etc.),
@@ -940,8 +951,8 @@ ns proj {
         hex.sign 8, sgn, end, frontok      // sgn < 0 -> back-facing, cull (visible=0)
       frontok:
         hex.if0 8, sgn, end                // sgn == 0 -> on the line, cull
-        .point_to_angle ang1, viewx, viewy, v1x, v1y   // absolute angle to v1 (left)
-        .point_to_angle ang2, viewx, viewy, v2x, v2y   // absolute angle to v2 (right)
+        .point_to_angle ang1, viewx, viewy, v1x, v1y, 0   // absolute angle to v1 (left)
+        .point_to_angle ang2, viewx, viewy, v2x, v2y, 0   // absolute angle to v2 (right)
         hex.mov 8, span, ang1
         hex.sub 8, span, ang2                          // span = (ang1 - ang2) mod 2^32
         hex.sign 8, span, end, notback                 // span >= ANG180 <=> bit 31 set -> cull
@@ -2031,13 +2042,13 @@ ns proj {
         hex.sign 8, sgn, end, frontok
       frontok:
         hex.if0 8, sgn, end
-        .point_to_angle ang1, viewx, viewy, v1x, v1y
-        .point_to_angle ang2, viewx, viewy, v2x, v2y
+        .point_to_angle ang1, viewx, viewy, v1x, v1y, 1
+        .point_to_angle ang2, viewx, viewy, v2x, v2y, 1
         // `dsl`/`dtb` (ablate "slopetwice"/"tabletwice") used to split point_to_angle_m's cost into
         // its slope-divide and table-read halves. The full-width `point_to_angle` has no such split,
         // so they now re-run the WHOLE atan into a dead register instead -- measurement-only knobs
         // (never set in a shipped or gated config), but their granularity is coarser than it was.
-        rep(dsl + dtb, k) .point_to_angle adup, viewx, viewy, v1x, v1y
+        rep(dsl + dtb, k) .point_to_angle adup, viewx, viewy, v1x, v1y, 1
         rep(dbl, k) .atan_dup adup, viewx, viewy, v1x, v1y, v2x, v2y
         hex.mov 8, span, ang1
         hex.sub 8, span, ang2

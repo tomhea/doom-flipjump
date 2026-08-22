@@ -290,6 +290,11 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
              # the host reloads the pristine image every frame. That makes 0 a free-to-restore
              # EMPTY sentinel, which is why bind_things has no clear loop and why the lists hold
              # t+1 rather than t. Deleted ~1.65M ops/frame.
+             f"sshead: hex.vec {2 * nss}",
+             f"thnext: hex.vec {2 * nt}",
+             # 16 nibbles for a 4-nibble value: the one pointer accessor proven on a
+             # wire-filled array strides by index*16 (see sim.bind_things)
+             f"thss_rt: hex.vec {16 * nt}",
              *point_location_decls()]
     # lightnum -> the row base into `sprlt`, for the leaf to bake
     return (text, generate_point_location_fj(cmap), decls, nt, nss,
@@ -1686,24 +1691,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _proj_mode_decls(cfg, asset_wad, proj_geom_txt)
                   + [cm, "__hot_end:"])
     elif lines:
-        # M-CONSTADDR C7 (R20): the six most pointer-hammered arrays were sitting in the ~34M-word
-        # BANKS tail while `drawn`, walked in lockstep with three of them, was already hot. R20:
-        # pointer-deref/dispatch wflip cost scales with the ADDRESS's set bits -- the measured
-        # hotdata move was 78.54M -> 76.39M ops, frame byte-identical. Nothing here explained the
-        # split; the arrays simply post-dated that pass.
-        #
-        # ⚠ ORDER IS LOAD-BEARING. `selfreset.byte_arrays` derives each byte array's reachable size
-        # from the distance to the NEXT LABEL, so every one of these must keep its follower:
-        # pclm->sfflag and sfflag->sprflag at VIEW_W cells, sshead->thnext at 2*nss. Reorder them
-        # and the build asserts (which is the guard working, but you will have to read this comment
-        # to know why).
-        _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
-                        f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
-                        f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
-                       + ([f"sshead: hex.vec {2 * _MT_NSS}",
-                           f"thnext: hex.vec {2 * _MT_NT}",
-                           f"thss_rt: hex.vec {16 * _MT_NT}"] if moving_things else []))
-        hotdata = ([";__hot_end"] + _hot_arrays
+        hotdata = ([";__hot_end"]
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
@@ -1960,7 +1948,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
              "eptr: hex.vec w/4", "exp_ret: ;0",
              "cbufa: hex.vec w/4", "cbufd: hex.vec w/4",
              "fbufa: hex.vec w/4", "fbufd: hex.vec w/4"] if two_sided else []),
-          *([             "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
+          *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+             "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
              # n_tsv is 3 nibbles: the deg attribution budget is DEG_PNEAR=4095 (its max), with
              # never-binds ENFORCED by _assert_pnear_unbound -- see seg_pass1_leaf_body_ts
              "n_claimed: hex.vec 2", "n_tsv: hex.vec 3", "tsstop: hex.vec 1",
@@ -1980,7 +1969,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           # so its byte offset is a whole-nibble shift. `n_face` is the per-frame SEG budget counter
           # (STEP_SEG_BUDGET) -- separate from n_tsv, because it must count only the boundaries that
           # actually pay a wall_scale_setup_m.
-          *([             f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
+          *([f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+             f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
              "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
              "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
@@ -1993,7 +1983,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           # `spslot[x]` holds [sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row] at a power-of-16 stride.
           # `y0` is BIASED by 128 because a near sprite's top sits above row 0 and the slot is bytes;
           # h <= VIEW_H bounds it to +-99. `n_thing`/`tstop` are the budget and its monotone early-out.
-          *([             f"spslot:{NLJ}" + NLJ.join(";0 * dw"
+          *([f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+             f"spslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
              "n_thing: hex.vec 2", "n_mon: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
              "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",

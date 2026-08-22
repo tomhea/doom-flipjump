@@ -56,6 +56,23 @@ ap.add_argument("--png-dir", default="scratchpad/_m1_play_frames")
 ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
 args = ap.parse_args()
 
+
+def _sha(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for c in iter(lambda: f.read(1 << 20), b""):
+            h.update(c)
+    return h.hexdigest()
+
+
+# R2 (CR round 6): a verdict that names no artifact cannot be attributed to one. Print the images
+# this run is about, with hashes, so the log says what it measured.
+for _lbl, _pth in (("loop", args.loop_fjm), ("old ", args.old_fjm)):
+    print("%s : %s  sha256 %s" % (_lbl, _pth, _sha(_pth)))
+print("")
+
+
 FWD, BACK, LEFT, RIGHT = 1, 2, 4, 8
 
 

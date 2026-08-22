@@ -76,10 +76,20 @@ def build_payload(words, sa, sn):
             "entries": sorted(([k] + sorted(v)) for k, v in rel.items())}
 
 
-def resolve_via_production(payload, sa, sn, tmp):
-    """Resolve through selfreset.load_restore_set -- the code the BUILD runs, not a local twin."""
-    json.dump(payload, gzip.open(tmp, "wt", encoding="utf-8"))
-    return selfreset.load_restore_set(tmp, {n: a * W for a, n in zip(sa, sn)})
+def resolve_via_production(payload, sa, sn, tmp, refingerprint=False):
+    """Resolve through selfreset.load_restore_set -- the code the BUILD runs, not a local twin.
+
+    `refingerprint` recomputes the layout fingerprint for the MUTATED table. The controls need it:
+    otherwise every mutation would be caught by the fingerprint alone and C1/C2/C3 would stop
+    testing resolution, containment and the missing-label refusal at all -- passing for the wrong
+    reason, which is the failure this file already had once.
+    """
+    labels = {n: a * W for a, n in zip(sa, sn)}
+    doc = dict(payload)
+    if refingerprint:
+        doc["layout_fingerprint"] = selfreset.layout_fingerprint(doc, labels)
+    json.dump(doc, gzip.open(tmp, "wt", encoding="utf-8"))
+    return selfreset.load_restore_set(tmp, labels)
 
 
 def refuses(fn):
@@ -101,7 +111,7 @@ def controls(payload, words, sa, sn, tmp):
     sa2 = list(sa)
     sa2[j] += 2
     try:
-        got = resolve_via_production(payload, sa2, sn, tmp)
+        got = resolve_via_production(payload, sa2, sn, tmp, refingerprint=True)
         c1 = got != set(words)
     except AssertionError:
         c1 = True                       # containment refused it -- also a catch
@@ -111,7 +121,7 @@ def controls(payload, words, sa, sn, tmp):
     # C2 -- MISSING. Delete a label the set names. Must be refused, not silently dropped.
     keep = [i for i in range(len(sn)) if sn[i] != busiest]
     c2 = refuses(lambda: resolve_via_production(payload, [sa[i] for i in keep],
-                                                [sn[i] for i in keep], tmp))
+                                                [sn[i] for i in keep], tmp, True))
     print("  C2 deleted  label %-28s -> %s" % (busiest[:28], "refused ok" if c2 else "!! ACCEPTED"))
     ok &= c2
 
@@ -125,12 +135,19 @@ def controls(payload, words, sa, sn, tmp):
     else:
         sa3 = list(sa)
         sa3[k] = sa[j] + max(1, big // 2)
-        c3 = refuses(lambda: resolve_via_production(payload, sa3, sn, tmp))
+        c3 = refuses(lambda: resolve_via_production(payload, sa3, sn, tmp, True))
         print("  C3 offset %d escapes its span    -> %s" % (big, "refused ok" if c3 else "!! ACCEPTED"))
         ok &= c3
 
+    # C4 -- LAYOUT. Shift a label WITHOUT refingerprinting: resolution, containment and the count
+    # can all still pass, and only the fingerprint can catch it. This is the hazard the three
+    # provenance hashes describe but cannot check.
+    c4 = refuses(lambda: resolve_via_production(payload, sa2, sn, tmp))
+    print("  C4 layout changed, fingerprint stale -> %s" % ("refused ok" if c4 else "!! ACCEPTED"))
+    ok &= c4
+
     # POSITIVE: the unmutated table must resolve to exactly the original words.
-    got = resolve_via_production(payload, sa, sn, tmp)
+    got = resolve_via_production(payload, sa, sn, tmp, refingerprint=True)
     pos = got == set(words)
     print("  P  unmutated table               -> %s (%d words)"
           % ("exact ok" if pos else "!! MISMATCH", len(got)))
@@ -190,6 +207,11 @@ payload["source_sha256"] = "selftest" if args.selftest else sha_file(args.set)
 payload["labels_sha256"] = "selftest" if args.selftest else sha_file(args.labels)
 payload["generated_by"] = ("scratchpad/m1_setfile.py --set %s --labels %s"
                            % (args.set, args.labels))
+# The one piece of provenance the BUILD can actually check: the layout of the labels this set
+# names. Invariant to line-number churn elsewhere; catches a set from a different map or tier.
+payload["layout_fingerprint"] = selfreset.layout_fingerprint(
+    payload, {n: a * W for a, n in zip(sa, sn)})
+print("  layout_fingerprint %s" % payload["layout_fingerprint"][:16])
 
 tmp = Path(tempfile.mkdtemp(prefix="m1set_")) / "probe.json.gz"
 Path(tmp).parent.mkdir(parents=True, exist_ok=True)

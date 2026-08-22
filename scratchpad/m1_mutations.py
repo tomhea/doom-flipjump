@@ -49,8 +49,9 @@ def drop_provenance(s):
 
 
 def drop_containment(s):
-    return s.replace("            if span is not None and off >= span:\n"
-                     "                escaped.append((name, off, span))", "            pass")
+    a = "            if off >= span:"
+    assert a in s, "drop_containment no longer matches -- update it, do not leave it stale"
+    return s.replace(a, "            if False:")
 
 
 def hardcode_counts(s):
@@ -84,6 +85,39 @@ MUTATIONS = [
     ("m1_reset.fj: high-nibble exact_xor deleted",       FJ, drop_high_nibble),
     ("m1_reset.fj: shared pointer never restored",       FJ, drop_pointer_restore),
     ("m1_reset.fj: one write past the cell",             FJ, spill_past_the_cell),
+]
+
+
+
+def drop_layout_fingerprint(s):
+    a = "    got = layout_fingerprint(doc, labels)"
+    assert a in s, "drop_layout_fingerprint no longer matches -- update it, do not leave it stale"
+    return s.replace(a, "    return out  #")
+
+
+def drop_missing_label_refusal(s):
+    i = s.index("    assert not missing, (")
+    j = s.index("\n", s.index("derived from a different program", i))
+    return s[:i] + "    missing = []" + s[j:]
+
+
+def drop_format_refusal(s):
+    i = s.index('    assert doc.get("format")')
+    j = s.index("\n", s.index("regenerate with scratchpad/m1_setfile.py", i))
+    return s[:i] + "    pass" + s[j:]
+
+
+def unbound_top_containment(s):
+    a = "else (addrs[-1] + 2 - b)"
+    assert a in s, "unbound_top_containment no longer matches -- update it"
+    return s.replace(a, "else 1 << 60")
+
+
+MUTATIONS += [
+    ("selfreset.py: layout fingerprint check gone",     SR, drop_layout_fingerprint),
+    ("selfreset.py: missing-label refusal gone",        SR, drop_missing_label_refusal),
+    ("selfreset.py: label+offset format refusal gone",  SR, drop_format_refusal),
+    ("selfreset.py: containment unbounded at the top",  SR, unbound_top_containment),
 ]
 
 

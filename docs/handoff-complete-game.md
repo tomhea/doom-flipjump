@@ -329,7 +329,8 @@ order, and the wall gap is this machine's VM drift).
 
 1. Read this file, then `docs/handoff-m1-reset.md`, then `CLAUDE.md`, then `docs/cr-rules.md`.
 2. ~~M1a~~ ✅ done. **Next is the rest of M1b**, listed under M1b above. None of it needs a build.
-3. Do **not** write the reset prologue until M1a and M1b agree on the dirty set. They now agree on
+[SUPERSEDED 2026-08-22 -- M1a and M1b did agree, the prologue is written, gated and
+shipped; see docs/handoff-m1-reset.md 9.5.] ~~3. Do **not** write the reset prologue until M1a and M1b agree on the dirty set. They now agree on~~
    the *classes* and on four falsifiable predictions; what is missing is the four ❌ items — above
    all the **complete list of non-zero pristine cells**, because a prologue that zeroes `pmax`
    kills plane attribution for the whole frame and does it silently.

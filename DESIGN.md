@@ -199,12 +199,25 @@ the same 8-frame chain) and **−57,950 span-words**; do not quote the pre-trim 
 tier.
 
 **THE PART'S OWN SPAN IS 645,946 WORDS** — `85,468,976 − 84,823,030`, the same shipped config
-measured with and without `self_reset`, both sha-named in `docs/handoff-m1-reset.md`. That is what
-R4 wants recorded, and it is ~85 words per restored cell, which the trim independently corroborates
-(57,950 words for 682 cells). ⚠ Do **not** derive it by subtracting the M14 row above: that row is
-an older, smaller configuration, and the difference (17,255,518) is 26× the real figure. An earlier
-revision of this paragraph said the tier "is the M14 tier plus that part", which invited exactly
-that mistake. R4's `storage_mode == flat` assert runs on this path — the frozen-image reset the loop
+measured with and without `self_reset`:
+
+| | words | binary | sha256 |
+|---|---:|---|---|
+| `self_reset=False` | 84,823,030 | `scratchpad/fjmcache/_rssprobe.fjm` | `3c13ec21424f7f54…` |
+| `self_reset=True` | 85,468,976 | `build/doom_e1m1_loop.fjm` | `75794727dce656be…` |
+
+**The per-cell rates, and there are two of them** — an earlier revision of this paragraph printed
+both operands and asserted a quotient neither produces:
+
+| | cells | words | words/cell |
+|---|---:|---:|---:|
+| whole part | 5,351 | 645,946 | **120.7** |
+| coalesced `hex.zero` runs (from the trim: 57,950 words for 682 cells) | 4,349 | ~369,650 | **85.0** |
+| `rep … m1.zerobyte` byte cells (the remainder) | 1,002 | ~276,300 | **~276** |
+
+⚠ Do **not** derive the part's span by subtracting the M14 row above: that row is an older, smaller
+configuration, and the difference (17,255,518) is 26× the real figure. An earlier revision said the
+tier "is the M14 tier plus that part", which invited exactly that mistake. R4's `storage_mode == flat` assert runs on this path — the frozen-image reset the loop
 depends on needs pure flat.
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |

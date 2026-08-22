@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import bisect
 import gzip
+import hashlib
 import json
 from pathlib import Path
 
@@ -98,7 +99,7 @@ def capture_labels(paths, out_fjm, lzma_fast=True):
 
 
 
-def load_restore_set(path, labels):
+def load_restore_set(path, labels, check_layout=True):
     """Resolve a LABEL+OFFSET restore set against THIS assembly's label table.
 
     The set is stored label-relative on purpose. Absolute word addresses are valid only for the one
@@ -108,9 +109,12 @@ def load_restore_set(path, labels):
     """
     doc = json.load(gzip.open(path, "rt", encoding="utf-8"))
     assert doc.get("format") == "label+offset",         "restore set %s is not label-relative; regenerate with scratchpad/m1_setfile.py" % path
-    # PROVENANCE (R9). A set carrying no record of what it was derived from is unfalsifiable: 308
-    # label names that all happen to exist in a DIFFERENT program resolve clean and restore the
-    # wrong cells. Refuse an unprovenanced set outright.
+    # PROVENANCE (R9), and be precise about which half is which.
+    #
+    # source_sha256 / labels_sha256 / generated_by are PROVENANCE FOR A HUMAN. They are asserted
+    # present and are NEVER compared against the program being built -- they cannot be: a comment
+    # edit anywhere renames the `f<file>:l<line>` macro-expansion labels, so a whole-table hash
+    # would never match again. Do not read them as closing the "wrong program" hazard.
     for k in ("source_sha256", "labels_sha256", "generated_by"):
         assert doc.get(k),             "restore set %s carries no %s; regenerate with scratchpad/m1_setfile.py" % (path, k)
 
@@ -133,9 +137,12 @@ def load_restore_set(path, labels):
         # while restoring the wrong words. verify_labels_unchanged cannot see this: it compares
         # pass 1 to pass 2 of the same program, never the set to the program.
         i = bisect.bisect_right(addrs, b)
-        span = (addrs[i] - b) if i < len(addrs) else None
+        # ⚠ ONE-SIDED AT THE TOP OF THE ADDRESS SPACE was the shape of the round-2 bug. The
+        # highest-addressed label has no successor, so bound it by the program's own extent
+        # instead of leaving it unbounded.
+        span = (addrs[i] - b) if i < len(addrs) else (addrs[-1] + 2 - b)
         for off in entry[1:]:
-            if span is not None and off >= span:
+            if off >= span:
                 escaped.append((name, off, span))
             out.add(b + off)
     assert not missing, ("restore set names %d labels this build does not have, e.g. %s -- the set "
@@ -144,7 +151,40 @@ def load_restore_set(path, labels):
                          "to, e.g. %s (name, offset, span) -- this build lays those labels out "
                          "differently, so the set does not describe it" % (len(escaped), escaped[:3]))
     assert len(out) == doc["words"],         "restore set resolved to %d words, expected %d" % (len(out), doc["words"])
+
+    # THE HALF THAT IS ACTUALLY CHECKED: a LAYOUT FINGERPRINT over the set's OWN labels -- sha256
+    # of the sorted (name, span_words) pairs. It is invariant to line-number churn elsewhere in the
+    # program, which is what makes a whole-table hash useless here, and it catches exactly what
+    # resolution + containment + count miss: a set from a different map or tier whose 308 names all
+    # happen to exist and whose offsets all happen to fit.
+    want = doc.get("layout_fingerprint")
+    assert want, ("restore set %s has no layout_fingerprint; regenerate with "
+                  "scratchpad/m1_setfile.py" % path)
+    if not check_layout:
+        return out
+    got = layout_fingerprint(doc, labels)
+    assert got == want, (
+        "restore set layout fingerprint %s != %s -- the labels this set names are laid out "
+        "DIFFERENTLY in this build, so it describes a different program. Resolution and "
+        "containment cannot see this on their own." % (got[:12], str(want)[:12]))
     return out
+
+
+def layout_fingerprint(doc, labels):
+    """sha256 over the sorted (label, span-in-words) pairs of the labels the SET names."""
+    base = {}
+    for k, v in labels.items():
+        base.setdefault(k, int(v) // W)
+    addrs = sorted(set(base.values()))
+    h = hashlib.sha256()
+    for name in sorted(e[0] for e in doc["entries"]):
+        if name not in base:
+            continue
+        b = base[name]
+        i = bisect.bisect_right(addrs, b)
+        span = (addrs[i] - b) if i < len(addrs) else -1
+        h.update(("%s:%d;" % (name, span)).encode())
+    return h.hexdigest()
 
 
 def _extent(words_sorted, addr_word):
@@ -280,7 +320,12 @@ def verify_labels_unchanged(old, new, restore_set_path):
     spots whose recycled pad slots shift when the program gains wflips -- and a range test flags
     those while a membership test correctly ignores them.
     """
-    s = load_restore_set(restore_set_path, new)
+    # check_layout=False ON PURPOSE. This function exists to REPORT which baked addresses moved
+    # between the two passes, and it resolves against the SECOND pass's table. If a label did move,
+    # the layout fingerprint would fire first and replace a precise "N addresses moved, e.g. ..."
+    # diagnostic with a generic one. The fingerprint has already been checked against pass 1 inside
+    # emit_reset_part, which is where it belongs.
+    s = load_restore_set(restore_set_path, new, check_layout=False)
     out = []
     for k in set(old) & set(new):
         if old[k] != new[k] and ((old[k] // W) in s or (old[k] // W + 1) in s):

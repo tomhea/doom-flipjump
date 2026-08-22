@@ -545,6 +545,13 @@ that means something for M1 is that the two deltas are *equal*.
 
 ### 7.6 fps
 
+⚠⚠ **EVERY NUMBER IN THIS SECTION IS UNVERIFIED FOR THE SHIPPED BINARY, INCLUDING THE 3.85×.**
+It was measured on 2026-08-21 against the pre-CR, pre-trim, pre-rebuild program and has not been
+re-run since; `scratchpad/m1_fps.py` also carries no negative control (§9.7). CLAUDE.md's
+Performance Claims rule says re-measure before acting on it — so do that, do not cite this table.
+Kept because the METHOD (alternating A/B on one harness, best of 3, ratio not absolutes) is the
+right one and the successor measurement should use it.
+
 Alternating A/B ×3 on one harness, best of 3, `scratchpad/m1_fps.py`:
 
 | | cpu/frame | fps (cpu) |
@@ -783,6 +790,12 @@ nearest-preceding-label with **no containment check**, so `load_restore_set` now
 ### 9.5 The rebuild — every number re-measured on the shipped bytes
 
 ```
+binary  build/doom_e1m1_loop.fjm   31,347,735 bytes
+        sha256 75794727dce656be18140f10c88cff5b647660c713bcea4c8d1e34a918c5689a
+        (the without-flag twin is scratchpad/fjmcache/_rssprobe.fjm,
+         sha256 3c13ec21424f7f5434bd2070d9a34796ab2f92de9657dc16e2894f4c63e4acee,
+         84,823,030 words -- so the reset part's own span is 645,946 words)
+
 build   span 85,468,976 words (was 85,526,926), storage flat, headroom 1.57
         assemble 3,193 s of a 4,724 s two-pass build
         nibble_cells 4349, byte_cells 1002, labels_moved_in_set 0
@@ -864,9 +877,22 @@ and they are listed separately rather than silently omitted.
 | **`m1c_restore_set.py`** | **none** | the first stage of the chain that produced the SHIPPED `m1_restore_set.json.gz`. Uncontrolled. |
 | **`m1_fps.py`** | **none** | produced the 3.85x figure, which is why that figure is now labelled UNVERIFIED rather than quoted (see below) |
 
-**Not cited as evidence anywhere, listed for completeness:** `m1_build.py`, `m1_emit_reset.py`,
-`m1_minimize.py`, `m1_rbw.py`, `m1_wired_build.py`, `m1_zbyte.py`, `m1c_cost.py`, `m1c_hole.py`,
-`m1d_loop.py`.
+⚠ **CR round 6 found this partition wrong too** — three of the tools I had filed as uncited are
+cited, one of them *in shipped source*. They belong in the table:
+
+| tool | `--selftest` | where its verdict is cited |
+|---|---|---|
+| **`m1_zbyte.py`** | **none** | §8 (943.0 → 91.1 ops/cell) **and `src/fj/m1_reset.fj` lines 14 and 21** |
+| **`m1c_hole.py`** | **none** | §6 — the "DID NOT TERMINATE, killed at 180 s" hang evidence |
+| **`m1_rbw.py`** | **none** | §8 — the read-before-write derivation of the SHIPPED set |
+
+**Genuinely uncited, listed for completeness:** `m1_build.py`, `m1_emit_reset.py`,
+`m1_minimize.py`, `m1_wired_build.py`, `m1c_cost.py`, `m1d_loop.py`.
+
+That is 22 `m1*.py` scripts in total, not 21. **This list has now been wrong in five successive
+revisions** — overclaiming, undercounting, miscounting, and mis-partitioning. The lesson is not
+about M1: a hand-maintained inventory of one's own evidence is itself evidence, and it decays
+exactly as fast as everything else.
 
 ⚠ **`m1_fps.py` and `DESIGN.md`.** CR round 5 caught `DESIGN.md` pointing readers at "the fps line
 in the handoff" while `docs/handoff-complete-game.md` marks that same figure UNVERIFIED for the

@@ -49,6 +49,23 @@ ap.add_argument("--limit", type=int, default=0, help="cap the frame count (0 = a
 ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
 args = ap.parse_args()
 
+
+def _sha(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for c in iter(lambda: f.read(1 << 20), b""):
+            h.update(c)
+    return h.hexdigest()
+
+
+# R2 (CR round 6): a verdict that names no artifact cannot be attributed to one. Print the images
+# this run is about, with hashes, so the log says what it measured.
+for _lbl, _pth in (("loop", args.loop_fjm), ("old ", args.old_fjm)):
+    print("%s : %s  sha256 %s" % (_lbl, _pth, _sha(_pth)))
+print("")
+
+
 w = WadFile.from_path(str(ROOT / args.wad))
 M = "E1M1"
 verts = [(v.x, v.y) for v in w.vertexes(M)]

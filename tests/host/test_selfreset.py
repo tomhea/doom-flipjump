@@ -20,12 +20,18 @@ from doomfj.selfreset import (BYTE_ARRAY_NAMES, byte_arrays, load_restore_set,
                               verify_labels_unchanged)
 
 
-def _set_file(tmp_path, entries, words=None, fmt="label+offset", provenance=True):
+def _set_file(tmp_path, entries, words=None, fmt="label+offset", provenance=True, labels=None):
+    """A restore-set file. `labels` is the table the LAYOUT FINGERPRINT is computed against; it
+    defaults to whichever table the test then resolves with, so these files describe a build that
+    exists. A test that wants the fingerprint to MISmatch passes a different table to
+    load_restore_set (see test_layout_fingerprint_rejects_a_differently_laid_out_build)."""
     p = tmp_path / "set.json.gz"
     n = words if words is not None else sum(len(e) - 1 for e in entries)
     doc = {"format": fmt, "words": n, "labels": len(entries), "entries": entries}
     if provenance:
         doc.update(source_sha256="x" * 64, labels_sha256="y" * 64, generated_by="test")
+        doc["layout_fingerprint"] = selfreset.layout_fingerprint(
+            doc, labels if labels is not None else LABELS)
     with gzip.open(p, "wt", encoding="utf-8") as f:
         json.dump(doc, f)
     return p
@@ -150,12 +156,17 @@ def test_restore_set_without_provenance_is_refused(tmp_path):
 
 
 def test_offset_running_past_its_label_is_refused(tmp_path):
+    (tmp_path / "n").mkdir()
     """R9. Attribution is nearest-preceding-label with no containment of its own. If THIS build
     spaces the labels differently, an offset can point at an unrelated cell and still resolve."""
-    p = _set_file(tmp_path, [["a", 0, 9]])
-    load_restore_set(p, {"a": 0, "b": 20 * W})                        # 9 < 20: inside, fine
+    wide = {"a": 0, "b": 20 * W}
+    narrow = {"a": 0, "b": 4 * W}
+    load_restore_set(_set_file(tmp_path, [["a", 0, 9]], labels=wide), wide)   # 9 < 20: inside
+    # The set is fingerprinted against the NARROW table so the layout check passes and containment
+    # is what has to catch it -- otherwise this would test the fingerprint, not containment.
+    p = _set_file(tmp_path / "n", [["a", 0, 9]], labels=narrow)
     with pytest.raises(AssertionError, match="past the end"):
-        load_restore_set(p, {"a": 0, "b": 4 * W})                     # 9 >= 4: escaped
+        load_restore_set(p, narrow)                                          # 9 >= 4: escaped
 
 
 # ---------------------------------------------------------------------------------------------
@@ -192,7 +203,7 @@ def _emit(tmp_path, entries, values, view_w=2, nss=3, main=None):
     (gen / "e1m1_02_main.fj").write_text(
         main if main is not None else "stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
         encoding="utf-8")
-    p = _set_file(tmp_path, entries)
+    p = _set_file(tmp_path, entries, labels=FAKE_BITS)
     part, n_nib, n_byte = selfreset.emit_reset_part(
         gen, dict(FAKE_BITS), _pristine(values), p, view_w, nss, "e1m1")
     return part.read_text(encoding="utf-8"), n_nib, n_byte, gen
@@ -234,7 +245,7 @@ def test_emit_ignores_words_below_code_start(tmp_path):
     gen = tmp_path / "gen"; gen.mkdir()
     (gen / "e1m1_02_main.fj").write_text("stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
                                          encoding="utf-8")
-    p = _set_file(tmp_path, BYTE_ENTRIES + [["low", 0, 1], ["scratch", 0, 1]])
+    p = _set_file(tmp_path, BYTE_ENTRIES + [["low", 0, 1], ["scratch", 0, 1]], labels=bits)
     _part, n_nib, _b = selfreset.emit_reset_part(gen, bits, _pristine({}), p, 2, 3, "e1m1")
     assert n_nib == 1                               # `low` is below code_start and never emitted
 
@@ -287,3 +298,51 @@ def test_no_byte_array_word_is_ever_nibble_cleared(tmp_path):
         for k in range(cells):
             a = (FAKE[name] // 2 + k) * 2 * W
             assert not any(str(a) in l for l in addr_lines),                 "%s cell %d reached a nibble op" % (name, k)
+
+
+def _fp_set(tmp_path, entries, labels, **kw):
+    """A set file carrying a fingerprint computed against `labels`."""
+    doc = {"format": "label+offset", "words": sum(len(e) - 1 for e in entries),
+           "labels": len(entries), "entries": entries,
+           "source_sha256": "x" * 64, "labels_sha256": "y" * 64, "generated_by": "test"}
+    doc.update(kw)
+    doc.setdefault("layout_fingerprint", selfreset.layout_fingerprint(doc, labels))
+    p = tmp_path / "fp.json.gz"
+    with gzip.open(p, "wt", encoding="utf-8") as f:
+        json.dump(doc, f)
+    return p
+
+
+def test_layout_fingerprint_accepts_the_table_it_was_built_from(tmp_path):
+    p = _fp_set(tmp_path, [["alpha", 0, 1], ["beta", 10]], LABELS)
+    assert load_restore_set(p, LABELS) == {100, 101, 510}
+
+
+def test_layout_fingerprint_rejects_a_differently_laid_out_build(tmp_path):
+    """THE HAZARD THE THREE PROVENANCE HASHES DESCRIBE BUT CANNOT CHECK.
+
+    Every other guard passes here: all the names exist, every offset is inside its span, the word
+    count matches. Only the fingerprint notices that `beta` now spans a different number of words,
+    i.e. that this is a different program.
+    """
+    p = _fp_set(tmp_path, [["alpha", 0, 1], ["beta", 10]], LABELS)
+    moved = {"alpha": 100 * W, "beta": 500 * W, "gamma": 700 * W}   # gamma moved: beta's span shrank
+    assert load_restore_set(p, LABELS)                              # unmoved: fine
+    with pytest.raises(AssertionError, match="laid out"):
+        load_restore_set(p, moved)
+
+
+def test_a_set_without_a_layout_fingerprint_is_refused(tmp_path):
+    p = _fp_set(tmp_path, [["alpha", 0]], LABELS, layout_fingerprint=None)
+    with pytest.raises(AssertionError, match="no layout_fingerprint"):
+        load_restore_set(p, LABELS)
+
+
+def test_containment_is_bounded_at_the_top_of_the_address_space(tmp_path):
+    """The highest-addressed label has no successor. Leaving its offsets unbounded is the same
+    one-sided shape as the round-2 bug, so it is bounded by the program's own extent instead."""
+    p = _fp_set(tmp_path, [["gamma", 0, 1]], LABELS)               # gamma is the highest label
+    load_restore_set(p, LABELS)
+    p2 = _fp_set(tmp_path, [["gamma", 0, 5000]], LABELS)
+    with pytest.raises(AssertionError, match="past the end"):
+        load_restore_set(p2, LABELS)

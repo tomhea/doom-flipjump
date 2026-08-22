@@ -159,3 +159,38 @@ regress against the baseline, yet C9 *appears* to help when measured as the marg
 C11-alone to C11+C9. **A marginal delta does not give you a candidate's sign.** Isolate against the
 committed baseline, one candidate at a time, or the arithmetic will tell you a confident story about
 the wrong change -- which it did here, twice, in opposite directions.
+
+## 9. C1: the dispatch generator — ATTEMPTED, NOT LANDED, and why
+
+The primitives are in and proven (`src/fj/m1_reset.fj`: `m1.readbyte`, `m1.readbyte_reg`,
+`m1.writebyte`; all 256 values, guards, non-destructive read, 2 mutations). What is NOT in is the
+piece that makes them reach a RUNTIME index: a dispatch whose handlers are constant-address reads.
+
+**Two bugs found, one fixed, one fatal-as-designed.**
+
+1. **`wflip <dst>, <a full address>` is NOT one op.** The first version computed each handler's
+   return label as `handlers + d*4*dw + 2*dw`, assuming a 4-op handler. The marker bit was then
+   never undone and every source cell came back with **+256** in it (`arr[0] = 269` for a planted
+   13) — a beautifully specific symptom. Fixed by giving each handler a REAL label and using `pad`
+   to force the uniform stride the switch indexes by.
+
+2. **The round trip cannot nest inside a dispatch handler.** After the fix the reads still do not
+   complete, and the cost column gives it away: 0.0 ops/call at both program sizes, i.e. the reads
+   are not executing at all. The handler jumps INTO an array cell and returns via
+   `hex.pointers.ret_after_read_byte`, while the dispatch returns via `hex.tables.ret` — two
+   wflip-based return mechanisms in flight at once. **This is exactly the R42 hazard
+   `generate_bands_walk_fj` already documents**: *"handlers contain NO `hex.*` macros (they would
+   corrupt the shared dispatch return)"*. The byte-table read is such a macro.
+
+**So the survey's C1 — and with it C3, C4 and C6, which all assumed the same dispatch — rests on a
+mechanism that the repo's own existing generator says does not work.** The emitter agent reported
+prototyping it at 153.6 ops/call; that measurement should be re-examined, because it disagrees with
+both R42 and with what happens when the shape is built on `hex.tables`.
+
+**A viable route probably exists** — a dispatch that does NOT use `hex.tables`, hand-rolling its own
+return so only one wflip-return is live — but that is a new mechanism, not an application of an
+existing one, and it needs its own correctness proof before any op count from it is quoted.
+
+`scratchpad/constrd_probe.py` is the probe, with its controls and its negative control (which does
+reject a broken handler). The generator itself was BACKED OUT of `src/doomfj/lut_generator.py`
+rather than left in unused — an unproven, unreachable generator is dead code.

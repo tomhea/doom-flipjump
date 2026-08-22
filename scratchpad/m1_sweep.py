@@ -160,8 +160,18 @@ extra = loop_ops - sum(ops_each)
 per = extra / len(VPS)
 print("=" * 88)
 print(f"  sweep MEDIAN frame          : {med:,.0f} ops")
-print(f"  in-program reset, per frame : {per:,.0f} ops")
-print(f"  => the reset is {100*per/med:.1f}% OF THE MEDIAN FRAME")
+# ⚠ `extra` is (loop total) - (sum of per-frame runs on the OLD binary). That equals the RESET COST
+# only while the two binaries differ SOLELY by the reset. Once the loop build carries an
+# optimisation the reference build does not -- as it did the moment the constant-address work landed
+# -- this difference is (reset - optimisation) and calling it "the reset" is nonsense. It went
+# NEGATIVE (-1,534,196, "the reset is -5.1% of the frame") and that is what exposed the bug.
+# Report what is actually measured, and only name the reset when the two binaries agree frame by
+# frame on op count, which is a thing this script cannot know.
+print(f"  loop binary, per frame      : {loop_ops/len(VPS):,.0f} ops")
+print(f"  reference build, per frame  : {sum(ops_each)/len(VPS):,.0f} ops  (one frame per run)")
+print(f"  difference                  : {per:+,.0f} ops/frame  ({100*per/med:+.1f}% of the median)")
+print( "  ⚠ that difference is the reset MINUS whatever else the two builds differ by. It is the")
+print( "    reset's cost ONLY if they are otherwise the same program.")
 print("     (previously reported as 7.47%, against a 47.5M mean of GATE viewpoints -- the wrong")
 print("      denominator. Gate frames overstate the typical frame, exactly as the handoff says.)")
 print("=" * 88)

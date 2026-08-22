@@ -368,3 +368,25 @@ def test_verify_catches_a_moved_label_at_every_distance(tmp_path, delta):
 def test_verify_is_clean_only_when_nothing_moved(tmp_path):
     p = _set_file(tmp_path, [["alpha", 0, 1], ["beta", 0, 1]])
     assert verify_labels_unchanged(LABELS, dict(LABELS), p) == []
+
+
+def test_verify_values_catches_a_changed_pristine_value(tmp_path):
+    """ADDRESSES AND VALUES ARE TWO CLAIMS, and until CR round 8 only the first was checked.
+
+    emit_reset_part bakes `hex.set 1, addr, v` with v read from PASS 1's image. If pass 2 assembles
+    a different value at that same address, the reset restores pass 1's -- silently, and
+    pixel-identically until that cell matters. verify_labels_unchanged cannot see it: the address
+    did not move.
+    """
+    p = _set_file(tmp_path, [["alpha", 0, 1], ["beta", 0, 1]])
+    same = {100: 7, 101: 7, 500: 3, 501: 3}
+    assert selfreset.verify_values_unchanged(p, LABELS, same.get, same.get) == []
+    drifted = dict(same); drifted[501] = 9
+    assert selfreset.verify_values_unchanged(p, LABELS, same.get, drifted.get) == [501]
+
+
+def test_verify_values_is_not_vacuous_when_the_set_is_empty(tmp_path):
+    """A check that reads nothing reports nothing wrong. Make sure it read something."""
+    p = _set_file(tmp_path, [["alpha", 0, 1]])
+    got = selfreset.load_restore_set(p, LABELS, check_layout=False)
+    assert len(got) == 2

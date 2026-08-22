@@ -161,10 +161,21 @@ def load_restore_set(path, labels, check_layout=True):
     # + containment + count miss: a set whose names all happen to exist and whose offsets all
     # happen to fit, but whose labels are laid out differently.
     #
-    # ⚠ SCOPE (CR round 7 measured this): over the shipped set the 308 labels have only TEN
-    # distinct span values -- 2400 of them share span 2, 320 share span 4. So the discriminating
-    # power sits in the few wide, resolution-or-map-dependent rows (sshead's 2*nss, the VIEW_W
-    # arrays), not uniformly across 308 labels. It is a real check, not a strong hash.
+    # ⚠ SCOPE. Over the shipped set the 308 labels take only TEN distinct span values. MEASURED
+    # (span -> how many labels have it):
+    #
+    #     {2: 29, 4: 77, 6: 6, 8: 19, 12: 8, 16: 158, 20: 4, 320: 4, 2400: 2, 2728: 1}
+    #
+    # 301 of the 308 have a span of 20 words or fewer, and ANY ONE of them changing flips the hash,
+    # so the discriminating power is spread across nearly all of them -- it is not confined to the
+    # few wide rows (sshead's 2*nss at 2728, the VIEW_W arrays at 320).
+    #
+    # ⚠⚠ CR round 8 caught the previous version of this comment stating that distribution with its
+    # KEYS AND VALUES TRANSPOSED -- "2400 of them share span 2, 320 share span 4" -- which is not
+    # merely wrong but impossible, since there are 308 labels in total. It then drew the opposite
+    # conclusion from the real data. A load-bearing scope note on a hard build-path assert, written
+    # specifically to be honest about scope, and it was inverted. Verify this block against
+    # scratchpad/m1_fpcheck.py before trusting it.
     want = doc.get("layout_fingerprint")
     assert want, ("restore set %s has no layout_fingerprint; regenerate with "
                   "scratchpad/m1_setfile.py" % path)
@@ -357,8 +368,39 @@ def verify_labels_unchanged(old, new, restore_set_path):
 
     # Belt and braces, and it is what makes this total rather than name-by-name: the addresses the
     # reset actually bakes must be identical under both tables.
+    #
+    # check_layout=False here is deliberate and is NOT the old bad reason. This function's whole job
+    # is to detect that pass 2 spans the set's labels differently; the fingerprint detects the same
+    # condition, so leaving it on would RAISE on exactly the input this function exists to inspect
+    # and report -- a false positive by construction. The fingerprint's place is against PASS 1,
+    # inside emit_reset_part, where a mismatch means the set does not describe this program at all.
+    # ⚠ It was a genuine HOLE until CR round 7 only because the comparison it guarded was a
+    # membership test blind to moves of 2+ words. It is safe because the compare above is total now.
+    # Do not put a membership test back under it.
     a = load_restore_set(restore_set_path, old, check_layout=False)
     b = load_restore_set(restore_set_path, new, check_layout=False)
     if a != b and not moved:
         moved = ["<%d baked addresses differ between the passes>" % len(a ^ b)]
     return moved
+
+
+def verify_values_unchanged(restore_set_path, labels, get_word_1, get_word_2, limit=None):
+    """Return baked addresses whose PRISTINE VALUE differs between the two assemblies.
+
+    verify_labels_unchanged proves the reset writes to the right ADDRESSES. It says nothing about
+    the VALUES: `emit_reset_part` bakes `hex.set 1, addr, v` with `v` read out of PASS 1's image, so
+    if pass 2 assembles a different value at that same address the reset restores the wrong one --
+    silently, and pixel-identically for as long as that cell happens not to matter.
+
+    CR round 8 pointed out this was covered only empirically (8/8 gate chain, 260/260 sweep). The
+    build holds both images, so the check is nearly free; `limit` caps how many addresses are read
+    when a caller only wants a spot check.
+    """
+    words = sorted(load_restore_set(restore_set_path, labels, check_layout=False))
+    if limit:
+        words = words[:limit]
+    bad = []
+    for x in words:
+        if get_word_1(x) != get_word_2(x):
+            bad.append(x)
+    return bad

@@ -328,17 +328,31 @@ order, and the wall gap is this machine's VM drift).
 ## 7. Where to start next session
 
 1. Read this file, then `docs/handoff-m1-reset.md`, then `CLAUDE.md`, then `docs/cr-rules.md`.
-2. ~~M1a~~ ✅ done. **Next is the rest of M1b**, listed under M1b above. None of it needs a build.
-[SUPERSEDED 2026-08-22 -- M1a and M1b did agree, the prologue is written, gated and
-shipped; see docs/handoff-m1-reset.md 9.5.] ~~3. Do **not** write the reset prologue until M1a and M1b agree on the dirty set. They now agree on~~
-   the *classes* and on four falsifiable predictions; what is missing is the four ❌ items — above
-   all the **complete list of non-zero pristine cells**, because a prologue that zeroes `pmax`
-   kills plane attribution for the whole frame and does it silently.~~
-   ⚠ CR round 7: the SUPERSEDED marker above struck only this item's first line, leaving the
-   continuation reading as live. It is all superseded. The non-zero pristine cells ARE enumerated —
-   341 `hex.set 1, …` singles in the emitted part — and they are read out of the assembled image
-   rather than listed by hand, which is why the failure this warned about cannot occur.
-4. Two cheap things worth doing first, both no-build: the `stl.fcall` early-out check (this branch
-   is called `m13opt3-early-out`), and re-running the census with a wire whose thing positions
-   *differ* from the baked spawn values, which should make up to 1,200 `thpos_rt` words appear in
-   one step. If they do not appear, the delta-write model is wrong and the whole bound moves.
+
+⚠⚠ **ITEMS 2-4 BELOW ARE ALL SUPERSEDED (2026-08-22). M1 IS DONE, WIRED AND GATED.** They are kept
+because the *reasoning* in them is sound and the next milestone needs it, but every instruction in
+them is stale. `docs/handoff-m1-reset.md` §9.5 has the current state.
+
+CR round 8 caught a strike-through here closing at the end of its own first line, so the
+continuation rendered live while a note underneath *claimed* the whole item was struck -- twice
+over, because round 7's "fix" added the note instead of moving the marker. Hence a plain banner
+rather than inline markup: it is harder to get wrong, and this block has now been wrong about
+itself twice.
+
+> **2.** M1a done; next is the rest of M1b, none of it needs a build.
+> -> M1b is done. The set is derived, trimmed and shipped.
+>
+> **3.** Do not write the reset prologue until M1a and M1b agree on the dirty set. What is missing
+> is the complete list of non-zero pristine cells, because a prologue that zeroes `pmax` kills plane
+> attribution for the whole frame and does it silently.
+> -> They agreed; the prologue is written, gated and shipped. The non-zero pristine cells are
+> enumerated -- **341** `hex.set 1, ...` singles in the emitted part -- and they are read out of the
+> assembled image rather than listed by hand, which is why the failure this warned about cannot
+> occur. The concern was right and is now structurally impossible, which is the good outcome.
+>
+> **4.** Two cheap no-build things first: the `stl.fcall` early-out check, and re-running the census
+> with a wire whose thing positions differ from the baked spawn values.
+> -> The census question was settled another way (read-before-write, `scratchpad/m1_rbw.py`). The
+> `stl.fcall` early-out check is **still untaken** and still cheap -- this branch is named for it,
+> `m13opt3-early-out`, and nothing in M1 touched it.
+

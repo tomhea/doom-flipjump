@@ -857,13 +857,14 @@ and when a control is the evidence, the thing to review is *which* mutation it r
 had `--selftest`, then undercounting, then calling an 11-row table "the exhaustive list" when the
 PR adds **21 `m1*.py` scripts**. So the scope is stated first and the claim is bounded to it.
 
-**SCOPE: every tool whose verdict this PR or `DESIGN.md` quotes as proof.** That is the set R9
+**SCOPE: every tool whose verdict this PR or `DESIGN.md` quotes as proof.** ⚠ The glob used to
+build this was `m1*.py`, which misses anything with a leading underscore — see §9.10. Use `*m1*`. That is the set R9
 governs. Other `m1*` scripts are exploratory probes whose output is not cited as evidence anywhere,
 and they are listed separately rather than silently omitted.
 
 | tool | `--selftest` | the mutation it rejects |
 |---|---|---|
-| `m1_mutations.py` | it *is* the control | **13** mutations of shipped `src/` files; every one must be caught |
+| `m1_mutations.py` | it *is* the control | **14** mutations of shipped `src/` files; every one must be caught |
 | `m1_gate.py` | yes | flips a byte of the **loop** binary's presented frame; requires FAIL |
 | `m1_bytecheck.py` | yes (needs a built image) | plants `0xA5` in a nibble-cleared cell |
 | `m1_reemit.py` | yes (synthetic) | drops a label; the emission must differ |
@@ -950,3 +951,27 @@ This matters because the shipped fingerprint was generated from `scratchpad/_m1b
 captured from the `self_reset=False` assembly, while the build resolves against a pass-1 table that
 includes `m1_reset.fj`. `m1_reemit.py` re-checks it against that same tsv — **circular**. Only this
 closes the loop, and if it had mismatched the next real build would have died.
+
+### 9.10 Two more ways the inventory was wrong (CR round 8)
+
+**`scratchpad/_m1_scratchtest.py` was TRACKED and should not have been.** It went in with `35f02bc`,
+an ad-hoc probe whose headline ("65% of the restore set") is superseded by the read-before-write
+work, which carried no control, and which could not run on a clean checkout (it needs three
+untracked artifacts). Deleted. CLAUDE.md says never `git add -A scratchpad/`; this is what that rule
+is protecting against, and it still got through.
+
+**§9.7's scope glob is `m1*.py`, and that file is `_m1_scratchtest.py`.** A leading underscore put it
+outside the inventory's own search, so no amount of care in maintaining the table would have found
+it. That is the concrete argument for the note already in §9.7: **if this table matters it should be
+GENERATED from the filesystem, and the glob should be `*m1*`, not `m1*`.**
+
+### 9.11 Addresses and values are two claims (CR round 8)
+
+`verify_labels_unchanged` proves the reset writes to the right ADDRESSES. It says nothing about the
+VALUES: `emit_reset_part` bakes `hex.set 1, addr, v` with `v` read out of **pass 1's** image, so if
+pass 2 assembles a different value at that same address the reset restores the wrong one — silently,
+and pixel-identically for as long as that cell happens not to matter.
+
+That was covered only empirically (8/8 gate chain, 260/260 sweep). `build.py` holds both images, so
+`verify_values_unchanged` now compares them and the build refuses on any difference;
+`metrics.json` records `values_changed_in_set` and `baked_cells_value_checked`.

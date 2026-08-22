@@ -301,14 +301,36 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         nss = len(bake_bsp(wad, mapname).subsectors)
         part, n_nib, n_byte = selfreset.emit_reset_part(gen, labels1, core1.get_word,
                                                         restore_set, cfg.VIEW_W, nss, mapname)
+        # Snapshot pass 1's pristine words at the baked addresses BEFORE releasing the image -- the
+        # value check below needs them and re-loading an 85M-word image to get them would not.
+        _s1 = selfreset.load_restore_set(restore_set, labels1, check_layout=False)
+        _v1 = {x: core1.get_word(x) for x in _s1}
+        pristine1 = _v1.get
         del core1, r1
         paths = paths + [part]
         labels2 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
         moved = selfreset.verify_labels_unchanged(labels1, labels2, restore_set)
         assert not moved, ("M1 self-reset REFUSED: %d baked addresses moved between passes, e.g. %s"
                            % (len(moved), sorted(moved)[:3]))
+
+        # ...and that the VALUES at those addresses are the same in both assemblies. The reset bakes
+        # `hex.set 1, addr, v` with v read from PASS 1; if pass 2 puts a different value there, the
+        # reset restores the wrong one -- silently, and pixel-identically until that cell matters.
+        # Addresses and values are two separate claims and only the first was ever checked (CR-8).
+        r2 = FjmRunner(out, flat_max_words=limit)
+        core2 = _fjcore.Memory(r2.width, flat_max_words=r2.flat_max_words)
+        for _s, _n in r2._segments:
+            core2.add_segment(_s, _n)
+        for _st, _v in r2._runs:
+            core2.set_words(_st, _v)
+        bad = selfreset.verify_values_unchanged(restore_set, labels2, pristine1, core2.get_word)
+        del core2, r2
+        assert not bad, ("M1 self-reset REFUSED: %d baked cells hold a DIFFERENT pristine value in "
+                         "pass 2, e.g. %s -- the reset would restore pass 1's value"
+                         % (len(bad), bad[:3]))
         reset_info = {"nibble_cells": n_nib, "byte_cells": n_byte,
                       "restore_set": str(restore_set), "labels_moved_in_set": 0,
+                      "values_changed_in_set": 0, "baked_cells_value_checked": len(_v1),
                       "view_w": cfg.VIEW_W, "subsectors": nss}
     else:
         fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,

@@ -150,6 +150,18 @@ MUTATIONS += [
 ]
 
 
+
+def drop_value_check(s):
+    a = "        if get_word_1(x) != get_word_2(x):"
+    assert a in s, "drop_value_check no longer matches -- update it"
+    return s.replace(a, "        if False:")
+
+
+MUTATIONS += [
+    ("selfreset.py: pristine-value check gone", SR, drop_value_check),
+]
+
+
 def run():
     out = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "--no-header", "--tb=no"],
                          cwd=ROOT, capture_output=True, text=True)

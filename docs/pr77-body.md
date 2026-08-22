@@ -183,8 +183,8 @@ outside its macro - so ~2x is structural and the rest is the larger span. It buy
 whole-image restore on *every frame*, but the build-time goal the memory index calls met is met for
 the non-reset tier only.
 
-Gate on the wired binary (`scratchpad/_m1_gate7.log`; the tool now names and hashes
-both images, so the verdict is attributable):
+Gate on the wired binary (`scratchpad/_m1_gate8.log`; the tool names and hashes both
+images, and no longer prints a percentage against its own worst-case chain mean):
 
 ```
 loop : build/doom_e1m1_loop.fjm  sha256 75794727dce656be18140f10c88cff5b647660c713bcea4c8d1e34a918c5689a
@@ -486,3 +486,52 @@ prices predict **176,769** ops for the shipped composition; the measured cost is
 **42%** gap. The tidy explanation (74,019 / 265 `hex.zero` runs = 279 ops per run) is an arithmetic
 coincidence, not a measurement. The measured number stands on its own; the model under it does not,
 and the handoff now says not to use those prices to predict a reset cost.
+
+## Answers to CR round 8 (3 blocking)
+
+**Two of the three describe a body that is not the one on the PR.** Counting every string the review
+quotes, against the live body fetched from GitHub: `"270,811 ops"` 0, `"_m1_gate4"` 0,
+`"_m1_wired.log"` 0, `"7 failed, 11 passed"` 0, `"5,271,539,564"` 0, `"0.9% OF THE MEDIAN"` 0. Those
+blocks were repointed in round 6 and regenerated in round 7. The likely cause is structural: the
+body was drafted in an **untracked** scratchpad file, so a reviewer exporting the tree at a commit
+sees no body at all. Fixed — it lives at `docs/pr77-body.md` now, in the tree, at the same commit as
+the code it describes.
+
+**The third is mine and is the seventh occurrence of the same class.** The round-7 SCOPE comment on
+the fingerprint — added specifically to be honest about scope — stated the span distribution with
+its keys and values transposed: *"2400 of them share span 2, 320 share span 4"*. There are 308
+labels, so that is not merely wrong but impossible. Measured:
+`{2:29, 4:77, 6:6, 8:19, 12:8, 16:158, 20:4, 320:4, 2400:2, 2728:1}`. The conclusion inverted with
+it: 301 of 308 labels have span ≤ 20 and any one of them flips the hash, so the power is **not**
+confined to the few wide rows. Corrected with the real distribution inline.
+
+**A non-blocking item that deserved better: addresses and values are two claims.**
+`verify_labels_unchanged` proves the reset writes to the right ADDRESSES. `emit_reset_part` bakes
+`hex.set 1, addr, v` with `v` from **pass 1's** image, and nothing compared pass 2's value there — a
+drift would restore the wrong value silently and pixel-identically. `verify_values_unchanged` now
+compares both images and the build refuses on any difference.
+
+That is new code on the shipped build path, which is exactly what round 7 caught me shipping
+unexercised — so the build was **re-run** rather than reasoned about:
+
+```
+  "self_reset": {
+    "nibble_cells": 4349, "byte_cells": 1002,
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 10702,
+    "view_w": 160, "subsectors": 682
+  }
+  span 85,468,976 words, flat, assemble 2,918 s, total 4,039 s
+```
+
+`baked_cells_value_checked: 10702` is every word the set resolves to, not a sample. **And the binary
+came out BYTE-IDENTICAL** (`75794727dce656be…`, 31,347,735 bytes) — the same file the sweep and
+playability logs certify. "No rebuild needed" was checked by rebuilding.
+
+Also taken: `scratchpad/_m1_scratchtest.py` deleted (tracked by accident, uncontrolled, superseded,
+unrunnable on a clean checkout — and §9.7's glob is `m1*.py` while that file starts with an
+underscore, which is why the inventory could never have found it); the `check_layout=False` opt-out
+justified at the call site for the right reason; `handoff-complete-game.md`'s next-steps block
+rewritten as a banner after its strike-through was found closing at the end of its own first line —
+twice, because round 7's fix added a note instead of moving the marker.

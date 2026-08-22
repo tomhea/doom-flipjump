@@ -975,3 +975,30 @@ and pixel-identically for as long as that cell happens not to matter.
 That was covered only empirically (8/8 gate chain, 260/260 sweep). `build.py` holds both images, so
 `verify_values_unchanged` now compares them and the build refuses on any difference;
 `metrics.json` records `values_changed_in_set` and `baked_cells_value_checked`.
+
+### 9.12 The rebuild that exercised the value check (CR round 8)
+
+Round 7's lesson was that a hard assert which has never run on the path it guards is not a guard.
+`verify_values_unchanged` is new code on the shipped build path, so the build was re-run rather than
+reasoned about:
+
+```
+  "self_reset": {
+    "nibble_cells": 4349,
+    "byte_cells": 1002,
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 10702,
+    "view_w": 160,
+    "subsectors": 682
+  }
+  span 85,468,976 words, flat, assemble 2,918 s, total 4,039 s
+```
+
+`baked_cells_value_checked: 10702` is every word the set resolves to, not a sample.
+
+**And the binary came out BYTE-IDENTICAL** — sha256 `75794727dce656be18140f10c88cff5b647660c713bcea4c8d1e34a918c5689a`,
+31,347,735 bytes, the same file the round-3 gate, sweep and playability logs certify. So rounds 7
+and 8 changed only guards and evidence, which is what they were supposed to change, and the existing
+certification still applies. That is worth more than the assertion it replaces: "no rebuild needed"
+was checked by rebuilding.

@@ -261,8 +261,13 @@ per = extra / len(CHAIN)
 print(f"  {len(CHAIN)} frames, one at a time on the old binary : {base:,} ops")
 print(f"  the same {len(CHAIN)} frames in ONE looping run       : {ops_loop:,} ops")
 print(f"  difference                                        : {extra:+,} ops")
-print(f"  => the reset costs ~{per:,.0f} ops per frame "
-      f"({100*per/(base/len(CHAIN)):.2f}% of a {base//len(CHAIN):,}-op frame)")
+print(f"  => the reset costs ~{per:,.0f} ops per frame")
+# ⚠ This tool used to print that as a % of the mean of ITS OWN 8 chain frames, which is the wrong
+# denominator and is the source of the retracted 7.47%/0.53% figures. Gate viewpoints are worst
+# cases; the repo's metric is the 260-frame sweep MEDIAN. So print the chain mean as a plain fact
+# and refuse to divide by it.
+print(f"     (these 8 chain frames average {base//len(CHAIN):,} ops -- a WORST-CASE set. Do not")
+print(f"      quote a percentage against it; use the 260-frame sweep median, scratchpad/m1_sweep.py.)")
 print("  (the loop also SAVES the 2 ops of op0 + `;__hot_end` per frame, and the host's whole-image")
 print("   memcpy entirely -- which is the point. NOTE: the 3.85x CPU-time figure in")
 print("   docs/handoff-complete-game.md is UNVERIFIED for this binary -- re-measure it.)")

@@ -340,9 +340,31 @@ def test_a_set_without_a_layout_fingerprint_is_refused(tmp_path):
 
 def test_containment_is_bounded_at_the_top_of_the_address_space(tmp_path):
     """The highest-addressed label has no successor. Leaving its offsets unbounded is the same
-    one-sided shape as the round-2 bug, so it is bounded by the program's own extent instead."""
+    one-sided shape as the round-2 bug, so it is bounded to ONE CELL -- the tightest bound this
+    function can justify, since it sees only the label table and never the image."""
     p = _fp_set(tmp_path, [["gamma", 0, 1]], LABELS)               # gamma is the highest label
     load_restore_set(p, LABELS)
     p2 = _fp_set(tmp_path, [["gamma", 0, 5000]], LABELS)
     with pytest.raises(AssertionError, match="past the end"):
         load_restore_set(p2, LABELS)
+
+
+@pytest.mark.parametrize("delta", [1, 2, 10, -10, 5000])
+def test_verify_catches_a_moved_label_at_every_distance(tmp_path, delta):
+    """CR ROUND 7, AND THIS ONE SHIPPED. The old implementation resolved the set against the
+    PASS-2 table and asked whether each PASS-1 address was a member. A 1-word move keeps the old
+    address inside the new set, so 1-word moves were caught and everything larger was reported
+    CLEAN -- and build.py asserts on this result before shipping the binary.
+
+    Measured on the old code: +1 -> ['alpha'], but +2, +10 and -10 all -> [].
+
+    Parametrised over distances on purpose: a single delta=1 case is exactly what let this pass.
+    """
+    p = _set_file(tmp_path, [["alpha", 0, 1], ["beta", 0, 1]])
+    moved = dict(LABELS, alpha=(100 + delta) * W)
+    assert verify_labels_unchanged(LABELS, moved, p) == ["alpha"]
+
+
+def test_verify_is_clean_only_when_nothing_moved(tmp_path):
+    p = _set_file(tmp_path, [["alpha", 0, 1], ["beta", 0, 1]])
+    assert verify_labels_unchanged(LABELS, dict(LABELS), p) == []

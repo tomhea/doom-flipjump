@@ -139,12 +139,30 @@ def controls(payload, words, sa, sn, tmp):
         print("  C3 offset %d escapes its span    -> %s" % (big, "refused ok" if c3 else "!! ACCEPTED"))
         ok &= c3
 
-    # C4 -- LAYOUT. Shift a label WITHOUT refingerprinting: resolution, containment and the count
-    # can all still pass, and only the fingerprint can catch it. This is the hazard the three
-    # provenance hashes describe but cannot check.
-    c4 = refuses(lambda: resolve_via_production(payload, sa2, sn, tmp))
-    print("  C4 layout changed, fingerprint stale -> %s" % ("refused ok" if c4 else "!! ACCEPTED"))
-    ok &= c4
+    # C4 -- LAYOUT, and it must be caught BY THE FINGERPRINT, not by something else.
+    #
+    # ⚠ CR round 7: the first C4 reused C1's shifted table (busiest label +2) without
+    # refingerprinting -- and CONTAINMENT refused it, because the set carries whole label extents
+    # (307 of the shipped set's 308 labels have maxoff+1 == span), so shifting a label UP by 2 makes
+    # its own offsets escape. The same input was refused identically with check_layout=False. The
+    # fingerprint played no part and the control proved nothing.
+    #
+    # So move the label DOWN instead: its span GROWS, every offset still fits, the word count still
+    # matches, every name still resolves -- and only the layout fingerprint can tell.
+    sa4 = list(sa)
+    sa4[j] -= 2
+    c4 = refuses(lambda: resolve_via_production(payload, sa4, sn, tmp))
+    # and the two-sided half: with the fingerprint OFF the same input must be ACCEPTED, or
+    # something other than the fingerprint is doing the catching and C4 is vacuous again.
+    def _no_fp():
+        labels = {n: a * W for a, n in zip(sa4, sn)}
+        json.dump(payload, gzip.open(tmp, "wt", encoding="utf-8"))
+        return selfreset.load_restore_set(tmp, labels, check_layout=False)
+    only_fp = not refuses(_no_fp)
+    print("  C4 label moved DOWN, fingerprint stale -> %s%s"
+          % ("refused ok" if c4 else "!! ACCEPTED",
+             "" if only_fp else "   !! but check_layout=False ALSO refuses -- not the fingerprint"))
+    ok &= c4 and only_fp
 
     # POSITIVE: the unmutated table must resolve to exactly the original words.
     got = resolve_via_production(payload, sa, sn, tmp, refingerprint=True)

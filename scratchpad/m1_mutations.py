@@ -21,6 +21,14 @@ SR = ROOT / "src/doomfj/selfreset.py"
 FJ = ROOT / "src/fj/m1_reset.fj"
 TESTS = ["tests/host/test_selfreset.py", "tests/fj/test_m1_reset.py"]
 
+# ⚠ CR round 7: this script writes ROOT/src/doomfj/selfreset.py, but the tests import whatever
+# `doomfj` resolves to. If those differ it mutates a file nobody imports. It fails LOUD when that
+# happens (every mutation reports "!! NOTHING CAUGHT IT"), but a one-line check says so directly.
+sys.path.insert(0, str(ROOT / "src"))
+import doomfj.selfreset as _sr                                             # noqa: E402
+assert Path(_sr.__file__).resolve() == SR.resolve(), (
+    "this script would mutate %s but the tests import %s" % (SR, _sr.__file__))
+
 
 def rd(p):
     return io.open(p, encoding="utf-8").read()
@@ -108,9 +116,9 @@ def drop_format_refusal(s):
 
 
 def unbound_top_containment(s):
-    a = "else (addrs[-1] + 2 - b)"
+    a = "        span = (addrs[i] - b) if i < len(addrs) else 2"
     assert a in s, "unbound_top_containment no longer matches -- update it"
-    return s.replace(a, "else 1 << 60")
+    return s.replace(a, "        span = (addrs[i] - b) if i < len(addrs) else 1 << 60")
 
 
 MUTATIONS += [
@@ -118,6 +126,27 @@ MUTATIONS += [
     ("selfreset.py: missing-label refusal gone",        SR, drop_missing_label_refusal),
     ("selfreset.py: label+offset format refusal gone",  SR, drop_format_refusal),
     ("selfreset.py: containment unbounded at the top",  SR, unbound_top_containment),
+]
+
+
+
+def restore_membership_verify(s):
+    """Put back the pre-round-7 verify_labels_unchanged: resolve against the NEW table and test
+    PASS-1 addresses for membership. Catches 1-word moves and silently passes everything bigger."""
+    i = s.index("    doc = json.load(gzip.open(restore_set_path, \"rt\", encoding=\"utf-8\"))\n    named =")
+    j = s.index("    return moved\n", i) + len("    return moved\n")
+    body = (
+        "    s = load_restore_set(restore_set_path, new, check_layout=False)\n"
+        "    out = []\n"
+        "    for k in set(old) & set(new):\n"
+        "        if old[k] != new[k] and ((old[k] // W) in s or (old[k] // W + 1) in s):\n"
+        "            out.append(k)\n"
+        "    return out\n")
+    return s[:i] + body + s[j:]
+
+
+MUTATIONS += [
+    ("selfreset.py: verify back to the membership test", SR, restore_membership_verify),
 ]
 
 

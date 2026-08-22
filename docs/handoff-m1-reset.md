@@ -863,11 +863,12 @@ and they are listed separately rather than silently omitted.
 
 | tool | `--selftest` | the mutation it rejects |
 |---|---|---|
-| `m1_mutations.py` | it *is* the control | 8 mutations of shipped `src/` files; every one must be caught |
+| `m1_mutations.py` | it *is* the control | **13** mutations of shipped `src/` files; every one must be caught |
 | `m1_gate.py` | yes | flips a byte of the **loop** binary's presented frame; requires FAIL |
 | `m1_bytecheck.py` | yes (needs a built image) | plants `0xA5` in a nibble-cleared cell |
 | `m1_reemit.py` | yes (synthetic) | drops a label; the emission must differ |
-| `m1_setfile.py` | yes (synthetic) | C1 shift / C2 delete / C3 escape, plus a positive |
+| `m1_fpcheck.py` | it *is* the check | runs the REAL `build_wall_renderer` to pass 1 and fires the build-path fingerprint assert against the build's OWN table |
+| `m1_setfile.py` | yes (synthetic) | C1 shift / C2 delete / C3 escape / **C4 layout** (label moved DOWN so only the fingerprint can catch it), plus a positive |
 | `m1a_stride.py` | yes | mutates a known-good stride; must be rejected |
 | `m1b_labels.py` | yes | — |
 | `m1q_rss.py` | yes | — |
@@ -889,10 +890,17 @@ cited, one of them *in shipped source*. They belong in the table:
 **Genuinely uncited, listed for completeness:** `m1_build.py`, `m1_emit_reset.py`,
 `m1_minimize.py`, `m1_wired_build.py`, `m1c_cost.py`, `m1d_loop.py`.
 
-That is 22 `m1*.py` scripts in total, not 21. **This list has now been wrong in five successive
-revisions** — overclaiming, undercounting, miscounting, and mis-partitioning. The lesson is not
-about M1: a hand-maintained inventory of one's own evidence is itself evidence, and it decays
-exactly as fast as everything else.
+That is 23 `m1*.py` scripts in total (`m1_fpcheck.py` is new this round). **This list has now been
+wrong in SIX successive revisions** — and round 7 found the two stale cells in the very rows the
+previous revision edited: it said 8 mutations when there were 12, and omitted the C4 control added
+in the same commit. The six failures were: overclaiming, undercounting, miscounting,
+mis-partitioning, a wrong total, and stale cells in freshly-edited rows.
+
+**The lesson is not about M1.** A hand-maintained inventory of one's own evidence is itself
+evidence, and it decays exactly as fast as everything else — faster, in fact, because every commit
+that adds a control invalidates it, and the commit that adds the control is the one least likely to
+re-read the table. If this table matters, it should be GENERATED from the filesystem, not written.
+It is not generated, so treat every row as needing verification before quoting it.
 
 ⚠ **`m1_fps.py` and `DESIGN.md`.** CR round 5 caught `DESIGN.md` pointing readers at "the fps line
 in the handoff" while `docs/handoff-complete-game.md` marks that same figure UNVERIFIED for the
@@ -900,3 +908,26 @@ shipped binary. A pointer to a retracted number is a citation of it, so the poin
 
 **The real remaining gaps are the four bold rows with no control at all.** `m1c_restore_set.py` is
 the most load-bearing of them: it produced a file that ships in `src/`.
+
+### 9.8 An unreconciled 42% (CR round 7, open)
+
+§7.4's measured per-primitive prices do not add up to the measured frame cost, and nothing in this
+document reconciled them until the reviewer asked:
+
+| | cells | ops/cell (§7.4) | ops |
+|---|---:|---:|---:|
+| `hex.zero` in coalesced runs | 4,008 | 19.5 | 78,156 |
+| `hex.set 1, …` singles | 341 | 21.5 | 7,331 |
+| `rep … m1.zerobyte` | 1,002 | 91.1 | 91,282 |
+| **predicted** | 5,351 | | **176,769** |
+| **MEASURED** (sweep, `_m1_sweep6.log`) | | | **250,789** |
+| gap | | | **74,019 — 42%** |
+
+**The gap is not explained.** The leading hypothesis is per-RUN overhead in `hex.zero`: the part has
+**265** runs, and 74,019 / 265 = **279 ops per run**, which is the right order for setting up a run
+that then costs 19.5/cell. But that is a hypothesis with an arithmetic coincidence behind it, not a
+measurement, and §7.4's 19.5 was measured as a *marginal* per-cell rate — exactly the marginal-used-
+as-average error DESIGN.md now warns about twice.
+
+**Do not use §7.4's prices to predict a reset cost until someone measures the per-run constant.**
+The measured 250,789 stands on its own; the model under it does not.

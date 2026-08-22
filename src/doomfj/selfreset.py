@@ -137,10 +137,13 @@ def load_restore_set(path, labels, check_layout=True):
         # while restoring the wrong words. verify_labels_unchanged cannot see this: it compares
         # pass 1 to pass 2 of the same program, never the set to the program.
         i = bisect.bisect_right(addrs, b)
-        # ⚠ ONE-SIDED AT THE TOP OF THE ADDRESS SPACE was the shape of the round-2 bug. The
-        # highest-addressed label has no successor, so bound it by the program's own extent
-        # instead of leaving it unbounded.
-        span = (addrs[i] - b) if i < len(addrs) else (addrs[-1] + 2 - b)
+        # ⚠ ONE-SIDED AT THE TOP OF THE ADDRESS SPACE was the shape of the round-2 bug, so the
+        # highest-addressed label is bounded too. CR round 7: be exact about WHAT it is bounded by
+        # -- `addrs[-1] + 2` is that label's own address plus ONE CELL, not "the program's extent"
+        # as an earlier comment claimed. That is the tightest bound available here (this function
+        # sees only the label table, never the image), and it is inert today because no set label
+        # is the global maximum. The claim is narrowed to what the code does.
+        span = (addrs[i] - b) if i < len(addrs) else 2
         for off in entry[1:]:
             if off >= span:
                 escaped.append((name, off, span))
@@ -154,9 +157,14 @@ def load_restore_set(path, labels, check_layout=True):
 
     # THE HALF THAT IS ACTUALLY CHECKED: a LAYOUT FINGERPRINT over the set's OWN labels -- sha256
     # of the sorted (name, span_words) pairs. It is invariant to line-number churn elsewhere in the
-    # program, which is what makes a whole-table hash useless here, and it catches exactly what
-    # resolution + containment + count miss: a set from a different map or tier whose 308 names all
-    # happen to exist and whose offsets all happen to fit.
+    # program, which is what makes a whole-table hash useless here, and it catches what resolution
+    # + containment + count miss: a set whose names all happen to exist and whose offsets all
+    # happen to fit, but whose labels are laid out differently.
+    #
+    # ⚠ SCOPE (CR round 7 measured this): over the shipped set the 308 labels have only TEN
+    # distinct span values -- 2400 of them share span 2, 320 share span 4. So the discriminating
+    # power sits in the few wide, resolution-or-map-dependent rows (sshead's 2*nss, the VIEW_W
+    # arrays), not uniformly across 308 labels. It is a real check, not a strong hash.
     want = doc.get("layout_fingerprint")
     assert want, ("restore set %s has no layout_fingerprint; regenerate with "
                   "scratchpad/m1_setfile.py" % path)
@@ -313,21 +321,44 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
 
 
 def verify_labels_unchanged(old, new, restore_set_path):
-    """Return the labels INSIDE the restored set whose address moved. Empty means the bake is sound.
+    """Return the labels the restore set NAMES whose address moved between the two passes.
 
-    Membership, not a min..max range: the set spans tens of millions of words with enormous holes.
-    A handful of CODE labels legitimately move -- hex.exact_xor's end/switch sit at wflip-chain
-    spots whose recycled pad slots shift when the program gains wflips -- and a range test flags
-    those while a membership test correctly ignores them.
+    Empty means the bake is sound: the reset writes addresses taken from pass 1, so if any of them
+    moved in pass 2 the binary must be refused.
+
+    ⚠⚠ THIS WAS WRONG UNTIL CR ROUND 7, AND IT WAS WRONG IN THE DIRECTION THAT SHIPS A BAD BINARY.
+    It used to resolve the set against the PASS-2 table and then test whether each PASS-1 address
+    was a member:
+
+        s = load_restore_set(path, new, check_layout=False)
+        if old[k] != new[k] and ((old[k] // W) in s or (old[k] // W + 1) in s): ...
+
+    A label that moves by ONE word still has its old address inside the new-resolved set, so
+    1-word moves were caught -- which is what made the bug invisible. A label that moves TWO OR
+    MORE words does not, so it was reported CLEAN. Measured, on this exact code:
+
+        alpha 100 -> 101   ['alpha']     caught
+        alpha 100 -> 102   []            REPORTED CLEAN
+        alpha 100 -> 110   []            REPORTED CLEAN
+        alpha 100 ->  90   []            REPORTED CLEAN
+
+    `build.py` asserts `not moved` and then records `labels_moved_in_set: 0` -- a field that could
+    not tell "nothing moved" from "something moved two words". The layout fingerprint DOES catch
+    all four cases, and this function used to switch it off with check_layout=False, justified by a
+    comment claiming the opt-out cost only a nicer diagnostic. It cost the detection.
+
+    The check is TOTAL now: every label the set names is compared directly, and the two resolved
+    word sets must be equal. A membership test replaced a min..max range test in §7.8 to kill false
+    positives; it introduced a false negative. Comparing the two tables has neither.
     """
-    # check_layout=False ON PURPOSE. This function exists to REPORT which baked addresses moved
-    # between the two passes, and it resolves against the SECOND pass's table. If a label did move,
-    # the layout fingerprint would fire first and replace a precise "N addresses moved, e.g. ..."
-    # diagnostic with a generic one. The fingerprint has already been checked against pass 1 inside
-    # emit_reset_part, which is where it belongs.
-    s = load_restore_set(restore_set_path, new, check_layout=False)
-    out = []
-    for k in set(old) & set(new):
-        if old[k] != new[k] and ((old[k] // W) in s or (old[k] // W + 1) in s):
-            out.append(k)
-    return out
+    doc = json.load(gzip.open(restore_set_path, "rt", encoding="utf-8"))
+    named = {e[0] for e in doc["entries"]}
+    moved = sorted(k for k in named if k in old and k in new and old[k] != new[k])
+
+    # Belt and braces, and it is what makes this total rather than name-by-name: the addresses the
+    # reset actually bakes must be identical under both tables.
+    a = load_restore_set(restore_set_path, old, check_layout=False)
+    b = load_restore_set(restore_set_path, new, check_layout=False)
+    if a != b and not moved:
+        moved = ["<%d baked addresses differ between the passes>" % len(a ^ b)]
+    return moved

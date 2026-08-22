@@ -206,14 +206,21 @@ measured with and without `self_reset`:
 | `self_reset=False` | 84,823,030 | `scratchpad/fjmcache/_rssprobe.fjm` | `3c13ec21424f7f54…` |
 | `self_reset=True` | 85,468,976 | `build/doom_e1m1_loop.fjm` | `75794727dce656be…` |
 
-**The per-cell rates, and there are two of them** — an earlier revision of this paragraph printed
-both operands and asserted a quotient neither produces:
+**Composition of the part**, counted from the emitted file `m1_reemit.py` certifies as current
+(`build/generated_loop/e1m1_07_reset.fj`, sha256 `63a80ad6…`, 618 lines):
 
-| | cells | words | words/cell |
-|---|---:|---:|---:|
-| whole part | 5,351 | 645,946 | **120.7** |
-| coalesced `hex.zero` runs (from the trim: 57,950 words for 682 cells) | 4,349 | ~369,650 | **85.0** |
-| `rep … m1.zerobyte` byte cells (the remainder) | 1,002 | ~276,300 | **~276** |
+| primitive | lines | cells |
+|---|---:|---:|
+| `hex.zero` coalesced runs | 265 | 4,008 |
+| `hex.set 1, …` non-zero singles | 341 | 341 |
+| `rep … m1.zerobyte` | 3 | 1,002 (byte) |
+| | | **5,351 total** |
+
+**The only per-cell span rate that is measured is the average: 645,946 / 5,351 = 120.7 words/cell.**
+⚠ Two earlier revisions of this paragraph quoted 85.0 instead — that is the trim's **marginal** rate
+(57,950 words / 682 contiguous zero cells), and applying a marginal rate measured on one primitive
+as an average over three is an extrapolation, not arithmetic. Round 5 and round 6 were both this
+mistake; do not make it a fourth time by splitting 645,946 across the rows above.
 
 ⚠ Do **not** derive the part's span by subtracting the M14 row above: that row is an older, smaller
 configuration, and the difference (17,255,518) is 26× the real figure. An earlier revision said the

@@ -333,7 +333,11 @@ order, and the wall gap is this machine's VM drift).
 shipped; see docs/handoff-m1-reset.md 9.5.] ~~3. Do **not** write the reset prologue until M1a and M1b agree on the dirty set. They now agree on~~
    the *classes* and on four falsifiable predictions; what is missing is the four ❌ items — above
    all the **complete list of non-zero pristine cells**, because a prologue that zeroes `pmax`
-   kills plane attribution for the whole frame and does it silently.
+   kills plane attribution for the whole frame and does it silently.~~
+   ⚠ CR round 7: the SUPERSEDED marker above struck only this item's first line, leaving the
+   continuation reading as live. It is all superseded. The non-zero pristine cells ARE enumerated —
+   341 `hex.set 1, …` singles in the emitted part — and they are read out of the assembled image
+   rather than listed by hand, which is why the failure this warned about cannot occur.
 4. Two cheap things worth doing first, both no-build: the `stl.fcall` early-out check (this branch
    is called `m13opt3-early-out`), and re-running the census with a wire whose thing positions
    *differ* from the baked spawn values, which should make up to 1,200 `thpos_rt` words appear in

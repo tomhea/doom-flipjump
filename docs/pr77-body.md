@@ -243,13 +243,15 @@ M1 GATE: PASS
 The gate's own negative control, added in round 2 -- the same gate, run twice:
 
 ```
-$ python scratchpad/m1_gate.py --selftest --loop-fjm build/doom_e1m1_loop.fjm   # _m1_gate6_self.log
-run 2/2, one byte of the LOOP binary's presented frame 0 flipped:
+$ python scratchpad/m1_gate.py --selftest --loop-fjm build/doom_e1m1_loop.fjm
+# scratchpad/_m1_gate8_self.log, produced by the SHIPPED tool (the earlier
+# _m1_gate6_self.log predated a print-only edit to m1_gate.py)
+SELFTEST 2/2: one byte of presented frame 0 flipped -- must FAIL
   frame 0 (664,291,0x18000000): loop vs old !! DIFFER; vs oracle loop=1 old=0 !! M1 MOVED PIXELS  FAIL
-  frame 1 (1272,-724,0x40000000): loop vs old BYTE-EXACT; vs oracle loop=0 old=0 (equal)  ok
-  frame 2 (1869,479,0x80000000): loop vs old BYTE-EXACT; vs oracle loop=378 old=378 (equal)  ok
-  frame 3 (-416,256,0x0): loop vs old BYTE-EXACT; vs oracle loop=0 old=0 (equal)  ok
-
+  frame 1 (1272,-724,0x40000000): loop vs old BYTE-EXACT; vs oracle loop=0 old=0 (equal -- M1 changed nothing)  ok
+  frame 2 (1869,479,0x80000000): loop vs old BYTE-EXACT; vs oracle loop=378 old=378 (equal -- M1 changed nothing)  ok
+  frame 3 (-416,256,0x0): loop vs old BYTE-EXACT; vs oracle loop=0 old=0 (equal -- M1 changed nothing)  ok
+  frame 0 (664,291,0x18000000,k=0): !! 1 px DIFFER
   clean run  exit 0 (want 0)
   mutated    exit 1 (want non-zero)
 M1 GATE SELFTEST: PASS

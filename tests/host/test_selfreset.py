@@ -385,8 +385,24 @@ def test_verify_values_catches_a_changed_pristine_value(tmp_path):
     assert selfreset.verify_values_unchanged(p, LABELS, same.get, drifted.get) == [501]
 
 
-def test_verify_values_is_not_vacuous_when_the_set_is_empty(tmp_path):
-    """A check that reads nothing reports nothing wrong. Make sure it read something."""
+def test_verify_values_reports_clean_when_it_read_nothing(tmp_path):
+    """The vacuity hazard, named honestly and then actually exercised.
+
+    ⚠ CR round 9: the previous version of this test was called
+    `..._is_not_vacuous_when_the_set_is_empty` and never called `verify_values_unchanged` at all --
+    it asserted a resolve count, duplicating an earlier test. A test that cannot fail for the reason
+    it names is the exact shape this repo keeps getting wrong, and it was in the file guarding
+    against that shape.
+
+    `verify_values_unchanged` returns [] when there is nothing to compare, so "no differences" and
+    "nothing was read" are indistinguishable from its return value alone. That is why `build.py`
+    asserts the snapshot is non-empty and records `baked_cells_value_checked`, and why this test
+    pins the behaviour instead of pretending it cannot happen.
+    """
     p = _set_file(tmp_path, [["alpha", 0, 1]])
-    got = selfreset.load_restore_set(p, LABELS, check_layout=False)
-    assert len(got) == 2
+    empty = {}
+    assert selfreset.verify_values_unchanged(p, LABELS, empty.get, empty.get, limit=0) == []
+    # ...and with a real limit it does read, and does report.
+    a = {100: 1, 101: 1}
+    b = {100: 1, 101: 2}
+    assert selfreset.verify_values_unchanged(p, LABELS, a.get, b.get) == [101]

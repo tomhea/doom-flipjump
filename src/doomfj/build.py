@@ -303,8 +303,15 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                                                         restore_set, cfg.VIEW_W, nss, mapname)
         # Snapshot pass 1's pristine words at the baked addresses BEFORE releasing the image -- the
         # value check below needs them and re-loading an 85M-word image to get them would not.
+        # check_layout=False: emit_reset_part above already resolved this set against labels1 WITH
+        # the fingerprint on, so re-checking it here would be redundant, not weaker. (CR round 9
+        # noted the round-8 fix justified the OTHER opt-out and left this one bare -- the finding
+        # was "correct but unjustified in the code", and a new bare site is the same defect.)
         _s1 = selfreset.load_restore_set(restore_set, labels1, check_layout=False)
         _v1 = {x: core1.get_word(x) for x in _s1}
+        # A value check over an empty snapshot returns "no differences". Make that impossible to
+        # confuse with a real clean result.
+        assert _v1, "M1 self-reset: the pristine snapshot is empty -- the value check would be vacuous"
         pristine1 = _v1.get
         del core1, r1
         paths = paths + [part]

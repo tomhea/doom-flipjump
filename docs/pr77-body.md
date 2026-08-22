@@ -13,10 +13,10 @@ Base is `m1-base` (= `16ee4fd`), so this diff is M1 only - 12 files, not the 310
 Every block below is generated, not retyped. `scratchpad/m1_mutations.py` edits **real shipped
 files** (`src/doomfj/selfreset.py`, `src/fj/m1_reset.fj`) and restores them in a `finally`.
 
-**FAIL** — all 13 mutations applied at once (`scratchpad/_m1_mutations_all.log`, verbatim and complete):
+**FAIL** — all 14 mutations applied at once (`scratchpad/_m1_mutations_all.log`, verbatim and complete):
 
 ```
-=== ALL 13 MUTATIONS APPLIED TO REAL SHIPPED CODE ===
+=== ALL 14 MUTATIONS APPLIED TO REAL SHIPPED CODE ===
     selfreset.py: the two-sided guard deleted
     selfreset.py: main-part recognition assert gone
     selfreset.py: provenance refusal gone
@@ -30,8 +30,9 @@ files** (`src/doomfj/selfreset.py`, `src/fj/m1_reset.fj`) and restores them in a
     selfreset.py: label+offset format refusal gone
     selfreset.py: containment unbounded at the top
     selfreset.py: verify back to the membership test
+    selfreset.py: pristine-value check gone
 
-.FF........FFFFFFFFFFFF.F.F.FFFF..F.F                                    [100%]
+.FF........FFFFFFFFFFFF.F.F.FFFF.FF.F.F                                  [100%]
 =========================== short test summary info ===========================
 FAILED tests/host/test_selfreset.py::test_refuses_a_set_naming_a_label_this_build_does_not_have
 FAILED tests/host/test_selfreset.py::test_refuses_an_absolute_address_set - K...
@@ -53,13 +54,15 @@ FAILED tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_
 FAILED tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance[10]
 FAILED tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance[-10]
 FAILED tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance[5000]
+FAILED tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristine_value
+FAILED tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
 FAILED tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255 - Assertio...
 FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
-22 failed, 15 passed in 1.75s
+24 failed, 15 passed in 1.83s
 
 === RESTORED ===
-.....................................                                    [100%]
-37 passed in 1.87s
+.......................................                                  [100%]
+39 passed in 1.95s
 ```
 
 **Each mutation individually**, so no mutation hides behind another
@@ -67,27 +70,27 @@ FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 ```
 BASELINE (no mutation)
-  37 passed in 1.80s
+  39 passed in 1.94s
 
 MUTATION: selfreset.py: the two-sided guard deleted
-  1 failed, 36 passed in 1.82s   ok
+  1 failed, 38 passed in 1.87s   ok
     caught by tests/host/test_selfreset.py::test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array
 
 MUTATION: selfreset.py: main-part recognition assert gone
-  1 failed, 36 passed in 1.91s   ok
+  1 failed, 38 passed in 1.94s   ok
     caught by tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise
 
 MUTATION: selfreset.py: provenance refusal gone
-  1 failed, 36 passed in 1.83s   ok
+  1 failed, 38 passed in 1.92s   ok
     caught by tests/host/test_selfreset.py::test_restore_set_without_provenance_is_refused
 
 MUTATION: selfreset.py: containment check gone
-  2 failed, 35 passed in 1.90s   ok
+  2 failed, 37 passed in 1.95s   ok
     caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
     caught by tests/host/test_selfreset.py::test_offset_running_past_its_label_is_refused
 
 MUTATION: selfreset.py: byte counts hardcoded again
-  10 failed, 27 passed in 1.85s   ok
+  10 failed, 29 passed in 1.95s   ok
     caught by tests/host/test_selfreset.py::test_emit_coalesces_zero_runs_and_keeps_non_zero_singles
     caught by tests/host/test_selfreset.py::test_emit_drops_a_read_only_extent
     caught by tests/host/test_selfreset.py::test_emit_ignores_words_below_code_start
@@ -100,44 +103,49 @@ MUTATION: selfreset.py: byte counts hardcoded again
     caught by tests/host/test_selfreset.py::test_no_byte_array_word_is_ever_nibble_cleared
 
 MUTATION: m1_reset.fj: high-nibble exact_xor deleted
-  2 failed, 35 passed in 1.72s   ok
+  2 failed, 37 passed in 1.84s   ok
     caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: m1_reset.fj: shared pointer never restored
-  2 failed, 35 passed in 1.80s   ok
+  2 failed, 37 passed in 1.86s   ok
     caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: m1_reset.fj: one write past the cell
-  2 failed, 35 passed in 1.84s   ok
+  2 failed, 37 passed in 1.98s   ok
     caught by tests/fj/test_m1_reset.py::test_neighbours_untouched
     caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
 
 MUTATION: selfreset.py: layout fingerprint check gone
-  1 failed, 36 passed in 1.86s   ok
+  1 failed, 38 passed in 2.40s   ok
     caught by tests/host/test_selfreset.py::test_layout_fingerprint_rejects_a_differently_laid_out_build
 
 MUTATION: selfreset.py: missing-label refusal gone
-  1 failed, 36 passed in 1.88s   ok
+  1 failed, 38 passed in 1.96s   ok
     caught by tests/host/test_selfreset.py::test_refuses_a_set_naming_a_label_this_build_does_not_have
 
 MUTATION: selfreset.py: label+offset format refusal gone
-  1 failed, 36 passed in 1.86s   ok
+  1 failed, 38 passed in 1.95s   ok
     caught by tests/host/test_selfreset.py::test_refuses_an_absolute_address_set
 
 MUTATION: selfreset.py: containment unbounded at the top
-  1 failed, 36 passed in 1.83s   ok
+  1 failed, 38 passed in 1.88s   ok
     caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
 
 MUTATION: selfreset.py: verify back to the membership test
-  4 failed, 33 passed in 1.87s   ok
+  4 failed, 35 passed in 1.86s   ok
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
     caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
 
-RESTORED: 37 passed in 1.86s  ok
+MUTATION: selfreset.py: pristine-value check gone
+  2 failed, 37 passed in 1.94s   ok
+    caught by tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristine_value
+    caught by tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
+
+RESTORED: 39 passed in 1.92s  ok
 
 M1 MUTATION EVIDENCE: PASS -- every mutation is caught
 ```
@@ -150,31 +158,55 @@ Full host suite, with the marker filter's bound visible:
 
 ```
 $ timeout 900 python -m pytest tests/host tests/fj/test_m1_reset.py -q   # _m1_pytest_full.log
-282 passed, 1 deselected in 44.85s
+284 passed, 1 deselected in 49.15s
 ```
 
 ## Integration evidence (R2)
 
-The shipped artifact, from `scratchpad/_m1_wired2.log` - the build's own `metrics.json`, not retyped:
+The shipped artifact, from `scratchpad/_m1_wired3.log` — the build that EXERCISES the
+pristine-value check, which is why this is the run quoted and not the earlier
+`_m1_wired2.log`:
 
 ```json
   "span_words": 85468976,
-  "storage_mode": "flat",
+  "flat_limit": 134217728,
   "headroom": 1.57,
   "fjm_bytes": 31347735,
-  "assemble_seconds": 3192.638,
-  "features": { ..., "state_wire": "bin", "self_reset": true },
+  "assemble_seconds": 2918.415,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": true
+  },
   "self_reset": {
     "nibble_cells": 4349,
     "byte_cells": 1002,
-    "restore_set": "...\src\doomfj\data\m1_restore_set.json.gz",
+    "restore_set": "C:\\Users\\tomhe\\Documents\\doom-flipjump\\src\\doomfj\\data\\m1_restore_set.json.gz",
     "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 10702,
     "view_w": 160,
     "subsectors": 682
   }
 }
-total 4724s
+total 4039s
 ```
+
+⚠ **TWO ASSEMBLE TIMES FOR ONE BYTE-IDENTICAL BINARY**, and the drift is the machine, not the
+program: `_m1_wired2.log` 3,193 s / 4,724 s total, `_m1_wired3.log` 2,918 s / 4,039 s total, same
+inputs, same output sha256 `75794727dce656be…`. That is a 15% wall-clock spread on identical work,
+which is why CLAUDE.md says to compare on process CPU time and treat this machine's wall clock as
+unreliable. Quoting the slower of the two below, since it is the less flattering.
 
 **ASSEMBLE TIME REGRESSED, AND THAT IS THE HONEST NUMBER: 3,193 s assemble / 4,724 s total, against
 559 s for the single-pass build.** M1 is inherently two-pass - pass 1 exists only to learn where

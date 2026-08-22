@@ -186,8 +186,9 @@ cells**, 618 emitted lines, **250,789 ops/frame** — **0.8% of the 30,191,585-o
 260 frames. (The 8-frame gate chain measures the same quantity at **251,701**; both are printed
 because they are different frame sets, not one number rounded two ways.) It carries **no table and
 no align pad**: every address in it is baked, so it adds code span only. Headroom against
-`RENDER_FLAT_MAX_WORDS` = 2²⁷ is **1.57×**, `storage_mode == flat` asserted; assemble 3,193 s of a
-4,724 s two-pass build.
+`RENDER_FLAT_MAX_WORDS` = 2²⁷ is **1.57×**, `storage_mode == flat` asserted. Assemble time is
+**3,193 s / 2,918 s** across two builds of the same inputs producing the same sha256 — a 15%
+wall-clock spread on identical work, which is this machine drifting, not the program.
 
 ⚠ The first build of this tier emitted **5,031** nibble cells. 682 of them were the unreachable half
 of `sshead` — declared `hex.vec 2*nss`, reached at a ONE-cell stride — which the set carried because

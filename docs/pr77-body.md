@@ -1,4 +1,4 @@
-# M1 - the self-resetting program
+# M1 - the self-resetting program, + two constant-address optimisation rounds
 
 The fj program self-modifies, so the host restored a pristine 85M-word image before every frame.
 That is both the fps ceiling and the reason a standalone `.fjm` cannot exist. This makes the program
@@ -7,6 +7,122 @@ patch turning the frame's trailing `stl.loop` into `;m1_reset`, which ends by re
 at `__hot_end`. **One execution now renders as many frames as the wire feeds.**
 
 Base is `m1-base` (= `16ee4fd`), so this diff is M1 only — 13 files outside `scratchpad/`, not the 310-commit branch.
+
+---
+
+## ⚠ WHAT THIS BRANCH NOW CONTAINS (CR-2026-08, R1/R7)
+
+**The title and the section above describe M1 only, and the branch has moved past that twice.**
+A reviewer reading only the M1 sections would review a tree that no longer exists. In commit
+order:
+
+| | what | where it is written up |
+|---|---|---|
+| **M1** | the program self-resets and loops | this document, below |
+| **constant-address round 1** | C2 (tantoangle/slopediv_recip8 dispatch), C5 (linedef bbox split), C7 (hot-array placement), C8 (sentinel sprite runs) | `docs/handoff-constaddr.md` §1-§12 |
+| **constant-address round 2** | `vtxdisp`, `sinadisp`, `finesine` per_entry, `cproj` baked, 22 dead `hex.zero` | `docs/handoff-constaddr.md` §13 |
+
+### Constant-address round 2 — TDD evidence (R1)
+
+Both new rep-gated arms are tested on BOTH sides of the flag, which is the thing round 1 got wrong
+(CR-2026-08 R3 found C2's shipped `disp=1` path had no test at all — the test had been edited to
+pass `disp=0`, covering only the branch the change replaced):
+
+```
+tests/fj/test_projection_kernels.py::test_angle_to_x_byte_exact_vs_oracle[packed]                    PASSED
+tests/fj/test_projection_kernels.py::test_angle_to_x_byte_exact_vs_oracle[dispatch]                  PASSED
+tests/fj/test_projection_kernels.py::test_scale_from_global_angle_column_cases_byte_exact_vs_oracle[packed]    PASSED
+tests/fj/test_projection_kernels.py::test_scale_from_global_angle_column_cases_byte_exact_vs_oracle[dispatch]  PASSED
+tests/fj/test_projection_kernels.py::test_scale_from_global_angle_byte_exact_vs_oracle               PASSED
+5 passed, 14 deselected in 402.95s
+```
+
+The FAIL side, before the harness was complete — the `disp=1` arm could not even assemble, because
+that arm also routes `scale_recip_div` through `srdisp` and the test program did not emit it:
+
+```
+E  flipjump.utils.exceptions.FlipJumpPreprocessorException: Macro Resolve Error:
+E    macro srdisp.lookup(2) is used but isn't defined. In file src/fj/projection.fj (line 724).
+E  Macro call trace:
+E    0) macro proj.scale_from_global_angle(8) (file .../scale_col_1.fj (line 2))
+E    1) macro proj.scale_recip_div(4) (file src/fj/projection.fj (line 850))
+FAILED test_scale_from_global_angle_column_cases_byte_exact_vs_oracle[dispatch]
+1 failed, 6 passed
+```
+
+New every-entry coverage for all five dispatch tables, with a mutation control (closes R5):
+
+```
+tests/host/test_dispatch_tables.py .......                               [100%]
+7 passed in 0.25s
+```
+
+### The two tests added in `dd8190a` — the FAIL/PASS blocks R1 asked for
+
+`scratchpad/m1_mutations.py`, re-run on this head (`scratchpad/_ca2_mutations.log`). Four mutations
+of `src/fj/m1_reset.fj` are caught BY THESE TWO TESTS specifically:
+
+```
+MUTATION: m1_reset.fj: readbyte never copies the value
+  1 failed, 40 passed in 10.22s   ok
+    caught by tests/fj/test_m1_reset.py::test_readbyte_returns_every_value_and_does_not_disturb_the_cell
+
+MUTATION: m1_reset.fj: writebyte drops the HIGH nibble
+  2 failed, 39 passed in 10.72s   ok
+    caught by tests/fj/test_m1_reset.py::test_readbyte_returns_every_value_and_does_not_disturb_the_cell
+    caught by tests/fj/test_m1_reset.py::test_writebyte_stores_every_value_and_leaves_neighbours_alone
+
+MUTATION: m1_reset.fj: one write past the cell
+  3 failed, 38 passed in 11.33s   ok
+    caught by tests/fj/test_m1_reset.py::test_writebyte_stores_every_value_and_leaves_neighbours_alone
+
+RESTORED: 41 passed in 10.92s  ok
+M1 MUTATION EVIDENCE: PASS -- every mutation is caught
+```
+
+### Constant-address round 2 — integration evidence (R2)
+
+⚠ The M1 "Integration evidence" section below quotes span **85,468,976** and binary
+`75794727dce656be…`. **That is two builds stale** — round 1 shipped 85,523,360 /
+`5c643a7701d5faa4…`, and round 2 has not built the `self_reset` tier at all (see the
+⚠ row in the DESIGN.md §1.2 ledger). Round 2 is certified on `deg_gate` + a 260-frame sweep, both
+with a pristine same-session baseline:
+
+| viewpoint | base `f7a8ac7` | + round 2 | delta |
+|---|---:|---:|---:|
+| (664,291,0x18000000) | 44,494,846 | 42,705,614 | **-1,789,232** (-4.02%) |
+| (1272,-724,0x40000000) | 36,031,157 | 34,382,519 | **-1,648,638** (-4.58%) |
+| (1869,479,0x80000000) | 39,771,895 | 37,977,716 | **-1,794,179** (-4.51%) |
+| (-416,256,0x0) | 34,598,353 | 32,579,930 | **-2,018,423** (-5.83%) |
+
+All four BYTE-EXACT. The governing metric, 260 frames, both binaries in one interleaved run:
+
+```
+                median           mean            min            max
+A base      24,795,197     24,964,916      6,245,371     49,614,388
+B new       24,060,771     24,116,889      6,084,776     47,835,191
+delta         -734,426       -848,027       -160,595     -1,779,197
+pct             -2.96%         -3.40%
+PICTURE CONTROL : 260 of 260 frames byte-exact between A and B  ok
+VACUITY CONTROL : 254 distinct pictures across 260 frames  ok
+```
+
+Every log quoted here is TRACKED, in `docs/constaddr-evidence/` — the rule
+`docs/m1-evidence/README.md` states and that round 1 did not follow (R2 found 0 of ~20 `_ca_*` logs
+tracked).
+
+### Still open on this branch
+
+* the `self_reset` tier has not been rebuilt since round 1, so the M1 restore set is stale for
+  round 2 and DESIGN.md's span row for it is marked NOT MEASURED;
+* `docs/handoff-constaddr.md` §13.6 lists five packed-read call sites on dead (non-`lines`) paths
+  that a future tier would want dispatched;
+* C5's stationary +421k is still unexplained — §12 and the CR both suspect an R20 placement shift
+  rather than collision work, and the deciding experiment (pad the C2+C8 build by 413,668 dead
+  words) has not been run.
+
+---
+
 
 ## TDD evidence (R1)
 

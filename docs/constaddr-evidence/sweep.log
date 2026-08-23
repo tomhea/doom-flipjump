@@ -1,0 +1,22 @@
+A (baseline): scratchpad/fjmcache/_ca2_base.fjm  sha256 de53fd982ae9555d22854e4c1db90e9f9026302f8ab6400d6c7788ff0a04515f
+B (new)     : scratchpad/fjmcache/_ca2_new.fjm  sha256 9e69b6b91e9c3ccec7eabe91e9d0c388f15cd90cb618a221b316dec6bed2054e
+
+65 walkable grid points x 4 angles = 260 frames
+   40/260 frames (113s)
+   80/260 frames (231s)
+   120/260 frames (351s)
+   160/260 frames (470s)
+   200/260 frames (590s)
+   240/260 frames (710s)
+
+============================================================================================
+                   median           mean            min            max
+A base         24,795,197     24,964,916      6,245,371     49,614,388
+B new          24,060,771     24,116,889      6,084,776     47,835,191
+delta            -734,426       -848,027       -160,595     -1,779,197
+pct                -2.96%         -3.40%
+============================================================================================
+PICTURE CONTROL : 260 of 260 frames byte-exact between A and B  ok
+VACUITY CONTROL : 254 distinct pictures across 260 frames  ok
+
+ca2_sweep: PASS

@@ -1,0 +1,7 @@
+program parts: entry=32, tables=300,177, main=44, segconsts=44,441, walk=73,957, state=103, banks=4,841,783
+assembled
+(664,291,0x18000000): 44,494,846 ops  BYTE-EXACT
+(1272,-724,0x40000000): 36,031,157 ops  BYTE-EXACT
+(1869,479,0x80000000): 39,771,895 ops  BYTE-EXACT
+(-416,256,0x0): 34,598,353 ops  BYTE-EXACT
+PASS

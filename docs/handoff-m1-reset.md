@@ -520,6 +520,8 @@ Three reductions, each proven by the 12-frame chain rather than argued:
 
 ### 7.4 Two primitives, and the choice is correctness (M1a / R57)
 
+⚠ **CORRECTED (CR-2026-08).** The 943 / 91.1 / 10.3x figures below are a WHOLE-CALL price for one `hex.zero_ptr` / `m1.zerobyte`, from the M1 measurement; they are NOT a per-cell rate and must not be multiplied out as one. The re-measured price list (`scratchpad/ptr_price_list.py`, log `scratchpad/_ptr_price.log`) gives `hex.zero_ptr` 795.9 and `m1.zerobyte` 79.6 ops/call, and reports every primitive with a min..max spread because the cost is DATA-DEPENDENT. Quote that file, not these numbers.
+
 Measured per cell: **`hex.zero` 19.5 ops, `hex.set` 21.5, `hex.zero_ptr` 943.**
 
 A nibble op on a BYTE cell does not merely fail — it **corrupts**: 0xA5 → 0x22A5, because

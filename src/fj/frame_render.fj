@@ -1293,18 +1293,14 @@ ns frame {
       lti: hex.vec 4
       body:
         hex.read_table_packed 5, rowc, throwc, n_th, sp_ti
-        hex.zero 4, sp_base
         hex.mov 4, sp_base,  rowc                        // byte 0
-        hex.zero 4, sp_base2
         hex.mov 4, sp_base2, rowc + 4*dw                 // byte 2
-        hex.zero 2, sp_dw
         hex.mov 2, sp_dw,  rowc + 8*dw                   // byte 4
         // sp_lt = sprlt[ltbase[light] + ti], and ltbase[light] is the leaf's baked `ss_ltb`. The
         // row base is a table/baked value rather than a multiply because `hex.mul_const` by a
         // non-power-of-two (nthings = 251) is where this first went wrong, and a wrong index here
         // does not merely read the wrong class -- it reads off the END of the table.
-        hex.zero 4, lti
-        hex.mov 4, lti, ss_ltb
+        hex.mov 4, lti, ss_ltb   // (hex.mov zeroes dst first)
         hex.add 4, lti, sp_ti                            // the index needs its OWN cell: a read
         hex.read_table_packed 1, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
     }

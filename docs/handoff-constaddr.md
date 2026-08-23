@@ -22,7 +22,7 @@ mutates the macros and requires rejection — re-run and passing.
 | `hex.ptr_add 1` / `ptr_sub 1` | 141.2 / 145.6 | folded into the op | 0 | — |
 | a 5-byte RECORD read (`set` + 5x`read_byte_and_inc`) | **4569.6** | 5x `m1.readbyte` | 620.4 | **7.4x** |
 
-**The address plumbing is 82-86% of every byte access.** That is the M1 thesis, now measured across
+**The address plumbing is 82-90% of every byte access.** That is the M1 thesis, now measured across
 the whole primitive set rather than one macro.
 
 ⚠ **CORRECTION TO THE M1 FIGURES.** `docs/handoff-m1-reset.md` and this repo's commit messages quote
@@ -42,8 +42,15 @@ left restored):
 
 | today | ops | dispatch | ratio |
 |---|---:|---:|---:|
-| `hex.set w/4` + `ptr_index` + `read_byte` | **2,188** | **153.6** | **14.2x** |
-| `ptr_add 1` + `read_byte` (walked pointer) | 704 | 153.6 | 4.6x |
+| `hex.set w/4` + `ptr_index` + `read_byte` | **2,188** | **153.6** ⚠ | **14.2x** ⚠ |
+| `ptr_add 1` + `read_byte` (walked pointer) | 704 | 153.6 ⚠ | 4.6x ⚠ |
+
+⚠ **The 153.6 column is RETRACTED — do not quote it.** It came from the C1 dispatch prototype,
+and §9 shows that dispatch does not execute at all. Worse (CR-2026-08): the probe's own
+CONTROL — the known-good `hex.set` + `ptr_index` + `read_byte` idiom — also reads ~0 ops/call
+in that harness, so the harness, not the mechanism, is what those numbers measure. The
+MEASURED constant-address prices in this table (the `m1.*` rows, from
+`scratchpad/ptr_price_list.py`) are unaffected.
 
 Span: one 256-entry dispatch is about 3,072 words, roughly **0.006%** of the 48.7M-word headroom.
 And the baked byte-write form measured **5.8x SMALLER** than `hex.write_byte` per instance (58.9 vs
@@ -68,7 +75,13 @@ One agent nearly costed a ~2M-op win on `wpx_wall`, which `rep`-expands to nothi
 ## 4. Ranked candidates
 
 Op figures are the measured price list x oracle-measured populations. **They are estimates of a
-frame delta, not measured frame deltas.** Nothing below has been built.
+frame delta, not measured frame deltas.**
+
+⚠ **STALE HEADER (CR-2026-08).** This said "Nothing below has been built". Seven of the eleven
+rows have since been built and measured; the confidence ratings in this table are the
+PRE-BUILD guesses and are kept only to show how far off they were. For what actually happened
+see §8 (C2/C8/C9/C11), §10 (C7/C10) and §12 (C5/C7). C9, C10 and C11 were REJECTED despite
+"HIGH"/"MEDIUM-HIGH" ratings here.
 
 | # | candidate | est. ops/frame | conf. | span |
 |---|---|---:|---|---|
@@ -76,7 +89,7 @@ frame delta, not measured frame deltas.** Nothing below has been built.
 | 2 | `ttang` + `sdrecip`: emitted, never called; live path still pays `read_table_packed` | ~1.4-1.7M | **HIGH (grep-verified)** | **negative** |
 | 3 | `ts_piece_wr` / `lines_spr_load` 7-byte record stores -> baked handlers | ~0.8-1.0M | MEDIUM | +66k words |
 | 4 | `sim.thing_load`: 17-byte row + 16-nibble pos -> dispatched xor_by block | ~0.4-0.8M | MEDIUM-HIGH | +5k words |
-| 5 | `check_line`: hot/cold split the 22-byte row (93% die on the bbox test, MEASURED) | ~0.3-0.6M | HIGH mechanism | ~0 |
+| 5 | `check_line`: hot/cold split the 22-byte row (92.8% die on the bbox test, MEASURED) | ~0.3-0.6M | HIGH mechanism | ~0 |
 | 6 | `step_shade` -> D4 dispatch (**found independently by two agents**) | ~0.25-0.7M | MEDIUM | check entry count |
 | 7 | move `sshead`/`thnext`/`thss_rt`/`pclm`/`sfflag`/`sprflag` into hotdata (R20) | ~0.2-0.4M | HIGH mechanism | **zero** |
 | 8 | `sprite_runs`: counter -> `rel==0` sentinel (idiom already ships in `wpx_wall`) | ~0.03-0.5M | **HIGH** | **negative** |
@@ -127,7 +140,10 @@ build the write-half dispatch, which is the one piece nobody has prototyped.
 
 ## 8. MEASURED RESULTS — and two candidates the gate rejected
 
-`scratchpad/deg_gate.py`, 4 viewpoints, every run BYTE-EXACT. Baseline is the tree at `c4d2e8e`.
+`scratchpad/deg_gate.py`, 4 viewpoints, every run BYTE-EXACT. Baseline is the tree at
+`c4d2e8e` for the C2 and C8 rows. ⚠ **The C9 and C11 rows below are deltas against C2+C8**
+(the committed baseline they were isolated from, `17a90f6`), NOT against `c4d2e8e` — the
+isolation logs are `_ca_A4` (C9 alone), `_ca_A3` (C11 alone) and `_ca_A2` (C9+C11).
 
 | | (664,291) | (1272,-724) | (1869,479) | spawn |
 |---|---:|---:|---:|---:|
@@ -195,6 +211,34 @@ existing one, and it needs its own correctness proof before any op count from it
 reject a broken handler). The generator itself was BACKED OUT of `src/doomfj/lut_generator.py`
 rather than left in unused — an unproven, unreachable generator is dead code.
 
+⚠ **TWO CORRECTIONS (CR-2026-08).**
+
+**(1) The probe could not be run by anyone but its author.** `d89d488` committed it and backed the
+generator out in the SAME commit, so `generate_const_read_dispatch_fj` exists at no commit and the
+probe died on `ImportError`. It has been made SELF-CONTAINED: the generator is RECONSTRUCTED inside
+the probe from the shape of `lut_generator._per_entry_table` (the dispatch half) and
+`src/fj/m1_reset.fj::m1.readbyte` (the handler half, inlined so the negative control can break one
+handler's undo-flip). It is a faithful reconstruction of the MECHANISM, not the original text — do
+not quote it as the original. It reproduces both documented failures: source cells come back +256
+(bug 1) and the reads show 0.0 ops/call (bug 2).
+
+**(2) The 0.0 ops/call figure is NOT evidence about the dispatch.** Running the probe's own CONTROL
+arm — `hex.set` + `hex.ptr_index` + `hex.read_byte`, the idiom the whole program uses and which
+demonstrably works — gives the SAME reading:
+
+```
+control n=8   term=3  ops=3,378   read back [0,0,0,0,0,0]  want [13,180,91,2,169,80]
+control n=24  term=3  ops=3,318   read back [0,0,0,0,0,0]  want [13,180,91,2,169,80]
+```
+
+`term=3` is an error termination, and the probe DISCARDED the termination cause. So the harness
+never executed either arm, and "0.0 ops/call, i.e. the reads are not executing" describes the
+harness, not the mechanism. **The R42 argument above is structural and stands on its own; the
+measurement does not.** Do not cite the ops/call figure until the probe's control reads back its
+planted values. (`scratchpad/ca2_price.py`, written for §13, is the shape to copy: it refuses any
+arm whose destination register does not hold the table's value, and that control caught three real
+harness bugs in one afternoon.)
+
 ## 10. C7 KEPT, C10 REJECTED — and the row rule in disguise
 
 **C7 (hot/cold array move) KEPT.** deg_gate, byte-exact, better at all four:
@@ -253,12 +297,32 @@ reading the sweep alone would have rejected C5.
 
 Measured on the shipped tier, all runs byte-exact:
 
-| build | sweep (stationary) | play (100 frames, moving) |
+⚠ **COLUMN LABEL CORRECTED (CR-2026-08).** The first column is NOT the sweep median. Every number
+in it is `m1_sweep.py`'s **"loop binary, per frame"** line — the LOOPING binary's total ops divided
+by 260, i.e. a MEAN, and one that INCLUDES the ~250k/frame M1 reset. It was labelled "sweep", which
+reads as the median. The comparable reference is the same log's **"reference build, per frame"**
+(a mean of the same 260 frames, one frame per run) = **30,929,878** — NOT the median 30,191,585,
+which is a different statistic of a different binary. Comparing across those two lines is the
+median-vs-mean error this campaign was already burned by once.
+
+| build | loop binary, MEAN ops/frame (stationary, incl. reset) | play (100 frames, moving) |
 |---|---:|---:|
+| reference `_rssprobe.fjm` (no reset in the program) | 30,929,878 | — |
 | C2+C8 | 29,395,682 | 48,615,435 |
 | + C5 | 29,817,038 (+421,356) | 47,375,658 (**-1,239,777**) |
-| + C5 + C7 | 29,737,004 | 47,277,611 |
-| **C7 alone contributes** | **-80,034** | **-98,047** |
+| + C5 + C7 | 29,737,005 | 47,277,611 |
+
+⚠ The 30,929,878 → 29,737,005 gap (**-1,192,873**) is **round 1's saving MINUS the reset it now
+pays**, not round 1's saving. `_rssprobe.fjm` (sha `3c13ec21…`) is unchanged across the whole
+campaign, so it is a valid fixed reference — but it has no self-reset, and the loop binary does.
+Do not read -1,192,873 as what C2+C8+C5+C7 are worth.
+| **C7 alone contributes** | **-80,034** ⚠ | **-98,047** ⚠ |
+
+⚠ **That row is a MARGINAL delta (C5-alone → C5+C7), which is the comparison §8's own METHOD
+NOTE forbids** — the same error that produced the wrong C9 verdict. C7 *was* isolated properly,
+but on deg_gate against C2+C8 (§10, −50k…−79k on all four viewpoints); its SHIPPED-TIER
+contribution has never been measured against a C7-less build of this tree. Treat the two
+numbers above as "C7 on top of C5", not as "what C7 is worth".
 
 **C7 is kept: it helps BOTH workloads and costs no span** (85,523,458 vs 85,523,360 words -- 98
 words, i.e. nothing). An earlier revert of C7 was WRONG; it was never the regression.
@@ -275,4 +339,159 @@ quote a mechanism for it; it has not been found.**
 **0.0% rejected**, which looked like the premise collapsing. `PLAYER_RADIUS` is 16.16 FIXED
 (1,048,576) while `blockmap_candidates` and the bbox test take WHOLE MAP UNITS, so the query box
 spanned the entire map. The tell was not the rate but the candidate count: **1,175 per position
-against a true ~34**. Corrected: **98.8% rejected**, better than the 93% the survey assumed.
+against a true 12.6-19.6**. ⚠ **Corrected AGAIN (CR-2026-08).** The 98.8% figure was
+measured on a uniform 512-unit grid over the map bounding box -- including points in no
+sector at all -- while the docstring claimed "real walk positions". Re-measured on two point
+sets that mean something (`scratchpad/ca_bbox_rate.py --selftest`, log
+`scratchpad/_ca2_bbox2.log`):
+
+| point set | positions | candidates/position | bbox-rejected |
+|---|---:|---:|---:|
+| **SWEEP** — the sweep's own walkable grid (the governing metric's positions) | 40 | 12.6 | **99.6%** |
+| **CONTACT** — in a sector, within 24 units of a line (where a moving player is) | 40 | 19.6 | **92.8%** |
+
+The two sets differ because the sweep grid DROPS every point within 24 units of a line and
+PLAYER_RADIUS is 16 — so on the sweep set no candidate can touch the player box at all, and
+the rate is near 100% by construction. CONTACT is the honest number for C5: **92.8%**, which
+is the survey's 93% almost exactly. The probe now ships three negative controls (force the
+reject always-false, force it always-true, restore the 16.16 radius bug) and an INDEPENDENT
+soundness check (Liang–Barsky segment-vs-square, not a restatement of the four bbox
+compares); the always-true control finds 53 unsound rejections, which is what proves the
+soundness check can fire at all. Its first version could not — it re-ran the same four
+comparisons inside the `if rejected:` branch.
+
+---
+
+## 13. ROUND 2 — the four candidates the consolidation DROPPED
+
+The eleven-candidate table in §4 was consolidated from seven agent surveys, and it lost four
+findings from the one survey whose estimates later proved accurate. None of them was blocked by
+R42; all four use `generate_dispatch_table_fj`, the *value-lookup* dispatch that `srdisp`/`xtadisp`
+already ship — a different mechanism from the byte-read handler §9 shows does not work.
+
+| # | change | status |
+|---|---|---|
+| 1 | `proj.angle_to_x`: `viewangletox` as a per-entry dispatch (`vtxdisp`) | SHIPPED |
+| 2 | `proj.scale_from_global_angle`: the `anglea` sine is COLUMN-ONLY (`sinadisp`) | SHIPPED |
+| 3 | `finesine`: `per_result_nibble` -> `per_entry` | SHIPPED |
+| 4 | `cproj` baked; 22 redundant `hex.zero` before `hex.mov` deleted | SHIPPED |
+
+### 13.1 What it is worth — MEASURED, both sides, in one session
+
+deg_gate, 4 viewpoints, **every run BYTE-EXACT**. The baseline is a pristine `f7a8ac7` worktree
+built in the same session (`scratchpad/_ca2_gate_base.log`), not a log from a previous tree — and
+it reproduces `_ca_c7.log` to the digit, which retroactively confirms that C5 instantiates nothing
+in this tier.
+
+| viewpoint | base `f7a8ac7` | + round 2 | delta |
+|---|---:|---:|---:|
+| (664,291,0x18000000) | 44,494,846 | 42,705,614 | **-1,789,232** (-4.02%) |
+| (1272,-724,0x40000000) | 36,031,157 | 34,382,519 | **-1,648,638** (-4.58%) |
+| (1869,479,0x80000000) | 39,771,895 | 37,977,716 | **-1,794,179** (-4.51%) |
+| (-416,256,0x0) | 34,598,353 | 32,579,930 | **-2,018,423** (-5.83%) |
+
+⚠ **Those four are WORST CASES.** The governing metric is the 260-frame sweep median. Both
+binaries were swept in ONE interleaved run (`scratchpad/ca2_sweep.py`, log
+`scratchpad/_ca2_sweep.log`) — which needed no extra build, because deg_gate leaves its binary in
+a temp dir:
+
+| | median | mean | min | max |
+|---|---:|---:|---:|---:|
+| base `f7a8ac7` | 24,795,197 | 24,964,916 | 6,245,371 | 49,614,388 |
+| + round 2 | 24,060,771 | 24,116,889 | 6,084,776 | 47,835,191 |
+| **delta** | **-734,426** | **-848,027** | -160,595 | -1,779,197 |
+| pct | **-2.96%** | -3.40% | | |
+
+**PICTURE CONTROL: 260 of 260 frames byte-exact between the two binaries** — a strictly stronger
+proof than deg_gate's four. VACUITY CONTROL: 254 distinct pictures across 260 frames.
+
+⚠ These are **deg-tier** numbers (`scratchpad/deg_gate.py`'s config: no sim, no M1 loop). They are
+NOT comparable to the 29,737,005 shipped-tier median in §12 — different config, different absolute
+scale. The DELTA is what transfers.
+
+### 13.2 Prices, and one that had to be corrected
+
+`scratchpad/ca2_price.py` builds each arm from `src/fj/projection.fj` itself with the real tables,
+prices it as a DIFFERENCE of two program sizes, and refuses any arm whose destination register
+does not read back the table's value (see §13.4).
+
+| arm | ops/call |
+|---|---:|
+| `proj.angle_to_x`, `disp=0` (packed read, as shipped) | 8,827.7 |
+| `proj.angle_to_x`, `disp=1` (the same macro, dispatch) | 1,809.5 |
+| **saved** | **7,018.2** |
+| `finesine.read_sin`, `per_result_nibble` (as shipped) | 983.2 |
+| `finesine.read_sin`, `per_entry` | 452.6 |
+| **saved** | **530.6** |
+
+⚠ **The first run of that probe said 8,404.7 for `angle_to_x`, and it was wrong.** Arm B was a
+BARE `vtxdisp.lookup` rather than the macro with `disp=1`, so `A-B` credited the change with
+`angle_to_x`'s whole prologue (`mov 8` + `add 8` + `shr_hex 8,5` + `mov 3` + `cmp 3`) — work the
+change keeps. **Measure a rep-gated macro by flipping its flag, never against the inner call the
+flag selects.** The corrected 7,018.2 is what the source comments carry.
+
+### 13.3 Why -734k and not -1.6M — the two medians are different frames
+
+`scratchpad/ca2_callcount.py` counts oracle calls per frame (the oracle mirrors the fj program
+call-for-call, so this counts fj calls). At the median of the CALL-COUNT distribution `angle_to_x`
+runs 228 times; 228 x 7,018 = 1.60M, which is roughly the sweep's *max* delta (-1.78M), not its
+median. The frame at the median of the OPS distribution is a much lighter frame — 24.8M against
+the gate's 34-44M — and runs ~105 calls: 105 x 7,018 = 737k, against a measured -734,426.
+
+**The lesson is not about this change.** A per-call price times a median call count is not a median
+saving, because the median of one distribution is a different frame from the median of the other.
+Only the end-to-end sweep answers the question the cost model asks.
+
+### 13.4 What the probes now refuse to do
+
+Both new probes ship two-sided controls, because §9's C1 probe did not and its central number was
+an artifact:
+
+* `ca2_price.py` reads the destination register back after every run and reports the arm VACUOUS if
+  it does not hold the table's value. That control caught three real harness bugs in this round —
+  a data table placed BEFORE `stl.startup_and_init_all` (op 0 became a data word; the program
+  halted in 2 ops and every arm read 0), and two arms silently off by one.
+* `ca2_callcount.py` requires the instrumented frame to stay byte-exact against an uninstrumented
+  one AND every counted name to fire at least once.
+* `ca_bbox_rate.py` (rewritten, §12) now has three negative controls and an INDEPENDENT
+  Liang-Barsky soundness check.
+* `tests/host/test_dispatch_tables.py` decodes every entry of `ttang`, `sdrecip`, `xtadisp`,
+  `vtxdisp`, `sinadisp` and `finesine` back out of the emitted handler text and compares to the
+  shared kernel, with a mutation control. 0.25 s, and it closes CR-2026-08 R5.
+
+### 13.5 The premise behind #2, and where it is pinned
+
+`anglea = ANG90 + (visangle - viewangle)`, and every caller builds `visangle` as
+`viewangle + xtoviewangle[col]`, so `viewangle` cancels EXACTLY (mod 2^32) and `anglea` is a
+function of the screen column alone. All four fj call sites
+(`wall_scale_setup` x2, `wall_scale_setup_m` x2) have the column in scope.
+
+That premise is the whole change, so it is pinned in three places: an identity check over 966
+(column, viewangle) pairs with a negative control that perturbs `visangle` off the column;
+`test_sinadisp_every_entry_is_the_sine_of_that_columns_angle` (host, every column); and
+`test_scale_from_global_angle_column_cases_byte_exact_vs_oracle`, which drives ONLY
+column-derived cases through BOTH arms. A future caller that builds `visangle` some other way
+fails that last test — deg_gate would only show moved pixels with no indication why.
+
+### 13.6 What was checked and NOT taken
+
+* **`proj.point_to_dist`** reads `tantoangle` with a packed read and `ttang` already exists — but
+  it has NO fj caller; the shipped path uses `wall_setup_sgn`. The oracle calls it 88x/frame,
+  which is exactly the trap: an oracle call count is not proof the fj macro is live.
+* **`texture_u`, `column_setup`, `wall_scale_setup` (non-`_m`), `plane_render.draw_span`,
+  `plane_bands.recip32`** all still use packed reads of tables that have dispatches. They are on
+  the non-`lines` paths, which the shipped `e1m1_02_main.fj` does not instantiate (it calls
+  `frame.seg_pass1_leaf_body_lines`, `..._ts` and `frame.seg_pass2_leaf_body_lines`). Dead in the
+  shipped tier; live in tests.
+* **`finetangent`** in `texture_u` has no dispatch and is on the same dead path.
+
+### 13.7 Span
+
+| table | lines | note |
+|---|---:|---|
+| `vtxdisp` | 20,503 | 2,048 entries x 8 nibbles |
+| `sinadisp` | 2,583 | 161 entries, one per column |
+| `finesine` per_entry vs per_result_nibble | +8,117 | 65,536 -> 81,920 words |
+
+The emitted `tables` part goes 300,177 -> 331,382 lines (+31,205). ~62k words on an 85.5M-word
+image: **+0.07%**.

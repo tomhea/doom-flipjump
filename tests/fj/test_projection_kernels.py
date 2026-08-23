@@ -5,16 +5,19 @@ each (R5 #8), compared to ReferenceModel._slope_div — so the fj angle math and
 from pathlib import Path
 
 import flipjump as fj
+import pytest
 
 from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed
 from doomfj.harness import W
 from doomfj.lut_generator import (
-    generate_slopediv_recip8_lut_fj,
+    generate_dispatch_table_fj, generate_slopediv_recip8_lut_fj,
     generate_tantoangle_lut_fj, generate_trig_idioms_fj, generate_viewangletox_lut_fj,
     generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj, generate_slopediv_recip_lut_fj,
 )
 from doomfj.reference_model import ReferenceModel, SLOPERANGE, ANGLE_MASK
+from doomfj.tables import (sine_table, slopediv_recip_table, viewangletox_table,
+                           xtoviewangle_table)
 from doomfj.mapcompiler import bake_bsp, _point_side, seg_affine_coeffs
 from doomfj.wad import WadFile
 
@@ -241,12 +244,12 @@ def test_scale_from_global_angle_byte_exact_vs_oracle(tmp_path):
     body, data, expected = [], [], b""
     for k, (vis, view, nrm, rwd) in enumerate(SCALE_CASES):
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, {proj}, 0",
+            body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, {proj}, 0, 0",
                      "hex.print_as_digit 8, s, 0", "stl.output 10"]
         data += [f"vis{k}: hex.vec 8, {vis & 0xFFFFFFFF}", f"vw{k}: hex.vec 8, {view & 0xFFFFFFFF}",
                  f"nrm{k}: hex.vec 8, {nrm & 0xFFFFFFFF}", f"rwd{k}: hex.vec 8, {rwd & 0xFFFFFFFF}"]
         expected += f"{rm.scale_from_global_angle(vis, view, nrm, rwd):08x}\n".encode() * 2
-    data += ["s: hex.vec 8", generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16),
+    data += ["s: hex.vec 8", generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16, mode="per_entry"),
              generate_slopediv_recip_lut_fj("slopediv_recip")]   # M13-scalerecip
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
@@ -256,6 +259,70 @@ def test_scale_from_global_angle_byte_exact_vs_oracle(tmp_path):
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "scale_from_global_angle: fj output != oracle"
+
+
+# -- proj.scale_from_global_angle, the disp=1 COLUMN-DISPATCH arm (M13-SINADISP) -------------
+# The optimisation rests on ONE premise: every caller builds visangle as
+# `viewangle + xtoviewangle[col]`, so anglea = ANG90 + (visangle - viewangle) is a function of
+# the column alone (viewangle cancels, exactly, mod 2**32). This test drives ONLY cases of that
+# shape -- columns 0/1/centre/VIEW_W, several viewangles, three distance/normal pairs -- and
+# requires the dispatch arm to be byte-exact against the oracle. It is TWO-SIDED: the SAME
+# cases also run through the disp=0 packed arm, so a divergence says which arm moved. A premise
+# violation (a caller whose visangle is not column-derived) can only be caught here; deg_gate
+# would show it as moved pixels with no indication why.
+SINADISP_COLS = [0, 1, 40, 80, 120, 160]
+SINADISP_VIEWS = [0, 0x10000000, 0x9C000000]
+SINADISP_WALLS = [(128 << 16, 0), (56 << 16, 0x20000000), (900 << 16, 0x04000000)]
+
+
+@pytest.mark.parametrize("disp", [0, 1], ids=["packed", "dispatch"])
+def test_scale_from_global_angle_column_cases_byte_exact_vs_oracle(tmp_path, disp):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    proj = cfg.PROJECTION << 16
+    xtov = xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N)
+    assert len(xtov) == cfg.VIEW_W + 1, "sinadisp domain must be the column range"
+    body, data, expected = [], [], b""
+    k = 0
+    for col in SINADISP_COLS:
+        for view in SINADISP_VIEWS:
+            for rwd, nrm in SINADISP_WALLS:
+                vis = (view + xtov[col]) & 0xFFFFFFFF  # how the shipped callers build it
+                for _ in range(2):   # call twice (R5 #8)
+                    body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, "
+                             f"{proj}, {disp}, c{k}",
+                             "hex.print_as_digit 8, s, 0", "stl.output 10"]
+                data += [f"vis{k}: hex.vec 8, {vis}", f"vw{k}: hex.vec 8, {view}",
+                         f"nrm{k}: hex.vec 8, {nrm}", f"rwd{k}: hex.vec 8, {rwd}",
+                         f"c{k}: hex.vec 2, {col}"]
+                expected += (f"{rm.scale_from_global_angle(vis, view, nrm, rwd):08x}"
+                             + chr(10)).encode() * 2
+                k += 1
+    assert k == len(SINADISP_COLS) * len(SINADISP_VIEWS) * len(SINADISP_WALLS)
+    sine = sine_table(cfg.TRIG_N, 16, 32)
+    shift = 32 - (cfg.TRIG_N.bit_length() - 1)      # config-derived, not a literal 20
+    data += ["s: hex.vec 8",
+             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16, mode="per_entry"),
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             # disp=1 also routes scale_recip_div through the srdisp dispatch (C2), so the
+             # dispatch arm needs that table too -- emitting both keeps ONE program per arm.
+             generate_dispatch_table_fj("srdisp", slopediv_recip_table(),
+                                        index_nibbles=3, result_nibbles=6),
+             generate_dispatch_table_fj(
+                 "sinadisp",
+                 [sine[((a + (1 << 30)) >> shift) & (cfg.TRIG_N - 1)] & 0xFFFFFFFF
+                  for a in xtov],
+                 index_nibbles=2, result_nibbles=8)]
+
+    nl = chr(10)
+    prog = ("stl.startup_and_init_all" + nl + nl.join(body) + nl + "stl.loop" + nl
+            + nl.join(data) + nl)
+    p = tmp_path / f"scale_col_{disp}.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, f"scale_from_global_angle(disp={disp}, column cases): fj output != oracle"
 
 
 # ── proj.angle_to_x (R_PointToX / viewangletox lookup): view-relative BAM angle -> screen column ──
@@ -272,17 +339,28 @@ A2X_CASES = [
 ]
 
 
-def test_angle_to_x_byte_exact_vs_oracle(tmp_path):
+# ! BOTH `disp` arms are exercised. CR-2026-08 found that C2 shipped `disp=1` with NO test --
+# the test had been edited to pass `disp=0`, i.e. to cover only the branch the change replaced.
+# A rep-gated macro has TWO bodies; a test that pins one proves nothing about the other, and
+# `disp=1` is the arm `wall_x_range_m` (the shipped lines tier) actually instantiates.
+@pytest.mark.parametrize("disp", [0, 1], ids=["packed", "dispatch"])
+def test_angle_to_x_byte_exact_vs_oracle(tmp_path, disp):
     cfg = Config()
     rm = ReferenceModel(cfg)
     body, data, expected = [], [], b""
     for k, a in enumerate(A2X_CASES):
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.angle_to_x d, a{k}", "hex.print_as_digit 8, d, 0", "stl.output 10"]
+            body += [f"proj.angle_to_x d, a{k}, {disp}", "hex.print_as_digit 8, d, 0", "stl.output 10"]
         data.append(f"a{k}: hex.vec 8, {a & 0xFFFFFFFF}")
         expected += f"{rm.angle_to_x(a) & 0xFFFFFFFF:08x}\n".encode() * 2
     data += ["d: hex.vec 8",
-             generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)]
+             generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N),
+             # both tables in both arms: the macro declares `< viewangletox` either way, and
+             # one program answering from both forms shows they carry the same SSOT values.
+             generate_dispatch_table_fj(
+                 "vtxdisp", [v & 0xFFFFFFFF for v in
+                             viewangletox_table(cfg.VIEW_W, cfg.TRIG_N)],
+                 index_nibbles=3, result_nibbles=8)]
 
     prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
     p = tmp_path / "angle_to_x.fj"
@@ -290,7 +368,7 @@ def test_angle_to_x_byte_exact_vs_oracle(tmp_path):
     ok = fj.assemble_and_run_test_output(
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
-    assert ok, "angle_to_x: fj output != oracle"
+    assert ok, f"angle_to_x(disp={disp}): fj output != oracle"
 
 
 # ── proj.wall_x_range (R_AddLine): seg -> (visible, x1, x2, rw_angle1) ──

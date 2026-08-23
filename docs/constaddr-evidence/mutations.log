@@ -1,0 +1,95 @@
+BASELINE (no mutation)
+  41 passed in 11.37s
+
+MUTATION: selfreset.py: the two-sided guard deleted
+  1 failed, 40 passed in 11.03s   ok
+    caught by tests/host/test_selfreset.py::test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array
+
+MUTATION: selfreset.py: main-part recognition assert gone
+  1 failed, 40 passed in 11.03s   ok
+    caught by tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise
+
+MUTATION: selfreset.py: provenance refusal gone
+  1 failed, 40 passed in 11.06s   ok
+    caught by tests/host/test_selfreset.py::test_restore_set_without_provenance_is_refused
+
+MUTATION: selfreset.py: containment check gone
+  2 failed, 39 passed in 10.94s   ok
+    caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
+    caught by tests/host/test_selfreset.py::test_offset_running_past_its_label_is_refused
+
+MUTATION: selfreset.py: byte counts hardcoded again
+  10 failed, 31 passed in 11.04s   ok
+    caught by tests/host/test_selfreset.py::test_emit_coalesces_zero_runs_and_keeps_non_zero_singles
+    caught by tests/host/test_selfreset.py::test_emit_drops_a_read_only_extent
+    caught by tests/host/test_selfreset.py::test_emit_ignores_words_below_code_start
+    caught by tests/host/test_selfreset.py::test_emit_patches_the_frame_tail_size_neutrally
+    caught by tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise
+    caught by tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise
+    caught by tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise
+    caught by tests/host/test_selfreset.py::test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array
+    caught by tests/host/test_selfreset.py::test_emit_splits_byte_arrays_from_nibble_cells
+    caught by tests/host/test_selfreset.py::test_no_byte_array_word_is_ever_nibble_cleared
+
+MUTATION: m1_reset.fj: high-nibble exact_xor deleted
+  2 failed, 39 passed in 11.15s   ok
+    caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
+    caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
+
+MUTATION: m1_reset.fj: shared pointer never restored
+  4 failed, 37 passed in 10.82s   ok
+    caught by tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255
+    caught by tests/fj/test_m1_reset.py::test_readbyte_returns_every_value_and_does_not_disturb_the_cell
+    caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
+    caught by tests/fj/test_m1_reset.py::test_writebyte_stores_every_value_and_leaves_neighbours_alone
+
+MUTATION: m1_reset.fj: one write past the cell
+  3 failed, 38 passed in 11.33s   ok
+    caught by tests/fj/test_m1_reset.py::test_neighbours_untouched
+    caught by tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
+    caught by tests/fj/test_m1_reset.py::test_writebyte_stores_every_value_and_leaves_neighbours_alone
+
+MUTATION: selfreset.py: layout fingerprint check gone
+  1 failed, 40 passed in 11.18s   ok
+    caught by tests/host/test_selfreset.py::test_layout_fingerprint_rejects_a_differently_laid_out_build
+
+MUTATION: selfreset.py: missing-label refusal gone
+  1 failed, 40 passed in 10.94s   ok
+    caught by tests/host/test_selfreset.py::test_refuses_a_set_naming_a_label_this_build_does_not_have
+
+MUTATION: selfreset.py: label+offset format refusal gone
+  1 failed, 40 passed in 10.89s   ok
+    caught by tests/host/test_selfreset.py::test_refuses_an_absolute_address_set
+
+MUTATION: selfreset.py: containment unbounded at the top
+  1 failed, 40 passed in 10.89s   ok
+    caught by tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
+
+MUTATION: selfreset.py: verify back to the membership test
+  4 failed, 37 passed in 11.01s   ok
+    caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
+    caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
+    caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
+    caught by tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance
+
+MUTATION: selfreset.py: pristine-value check gone
+  2 failed, 39 passed in 11.16s   ok
+    caught by tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristine_value
+    caught by tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
+
+MUTATION: selfreset.py: limit back to a truthiness test
+  1 failed, 40 passed in 11.22s   ok
+    caught by tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
+
+MUTATION: m1_reset.fj: writebyte drops the HIGH nibble
+  2 failed, 39 passed in 10.72s   ok
+    caught by tests/fj/test_m1_reset.py::test_readbyte_returns_every_value_and_does_not_disturb_the_cell
+    caught by tests/fj/test_m1_reset.py::test_writebyte_stores_every_value_and_leaves_neighbours_alone
+
+MUTATION: m1_reset.fj: readbyte never copies the value
+  1 failed, 40 passed in 10.22s   ok
+    caught by tests/fj/test_m1_reset.py::test_readbyte_returns_every_value_and_does_not_disturb_the_cell
+
+RESTORED: 41 passed in 10.92s  ok
+
+M1 MUTATION EVIDENCE: PASS -- every mutation is caught

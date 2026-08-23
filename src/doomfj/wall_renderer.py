@@ -49,8 +49,8 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.lut_generator import generate_bands_walk_fj, generate_w1r_walls_fj
-from doomfj.tables import (tantoangle_table, slopediv_recip8_table, slopediv_recip_table,
-                           xtoviewangle_table)
+from doomfj.tables import (sine_table, tantoangle_table, slopediv_recip8_table,
+                           slopediv_recip_table, viewangletox_table, xtoviewangle_table)
 from doomfj.config import PNEAR_SEG_BUDGET
 
 
@@ -631,6 +631,35 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # entries, so this costs ~1/25 the program size of the tantoangle conversion.
     xtadisp = (generate_dispatch_table_fj("xtadisp", xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N),
                                           index_nibbles=2, result_nibbles=8) if lines else "")
+    # M13-VTXDISP: the SAME lever, fifth application -- and the largest one left. `proj.angle_to_x`
+    # opens with a `hex.read_table_packed 4` of `viewangletox` and runs TWICE per in-frustum seg
+    # inside `wall_x_range_m`. MEASURED on the macro itself with only the `disp` flag changed, both
+    # arms vacuity-checked (scratchpad/ca2_price.py): 8,827.7 -> 1,809.5 ops/call, 7,018.2 saved.
+    # 2,048 entries at 8 nibbles -> ~41k words, against an 85.5M-word span.
+    # ⚠ An earlier version of that probe compared the WHOLE macro against a BARE `vtxdisp.lookup`
+    # and reported 8,404.7 -- it was crediting the change with angle_to_x's prologue, which the
+    # change keeps. Measure a rep-gated macro by flipping its flag, never against its inner call.
+    # Values are the SAME `tables.viewangletox_table` the packed LUT bakes (R6 SSOT), masked to
+    # 32 bits exactly as `generate_viewangletox_lut_fj` does (the columns are signed sentinels).
+    vtxdisp = (generate_dispatch_table_fj(
+        "vtxdisp", [v & 0xFFFFFFFF for v in viewangletox_table(cfg.VIEW_W, cfg.TRIG_N)],
+        index_nibbles=3, result_nibbles=8) if lines else "")
+
+    # M13-SINADISP: `proj.scale_from_global_angle` computes its DENOMINATOR sine from
+    # anglea = ANG90 + (visangle - viewangle). Every caller builds visangle as
+    # `viewangle + xtoviewangle[col]`, so viewangle cancels EXACTLY (mod 2^32) and anglea is a
+    # function of the screen column alone. The whole prologue + read_sin therefore bakes into a
+    # 161-entry dispatch indexed by the column -- the same domain and index width `xtadisp`
+    # already uses, so a column valid for one is valid for the other by construction.
+    # Values come from the same `tables.sine_table` / `tables.xtoviewangle_table` the fj path
+    # reads (R6 SSOT), with the shift written as the config-derived ANGLE_SHIFT, not a literal.
+    _ang_shift = 32 - (cfg.TRIG_N.bit_length() - 1)          # = 20 for TRIG_N=4096
+    _sine = sine_table(cfg.TRIG_N, 16, 32)
+    sinadisp = (generate_dispatch_table_fj(
+        "sinadisp",
+        [_sine[((a + (1 << 30)) >> _ang_shift) & (cfg.TRIG_N - 1)] & 0xFFFFFFFF
+         for a in xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N)],
+        index_nibbles=2, result_nibbles=8) if lines else "")
     # V2: the SKY bank. A sky column has no perspective and no distance lighting, so it is just a
     # band list -- which makes "sky" nothing more than a per-column CHOICE OF CEILING BAND LIST, and
     # needs no new emit path at all. One list per sky texture column, in the same
@@ -769,7 +798,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         index_nibbles=_wn_idx, result_nibbles=2) if lines and w1r_flag else "")
     slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip")   # perf #13
     slopediv_recip8 = generate_slopediv_recip8_lut_fj("slopediv_recip8")  # M13-coarseslope
-    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
+    # M13-SINPERENTRY: `per_result_nibble` runs EIGHT dispatches per lookup (one per result
+    # nibble); `per_entry` runs ONE. MEASURED on the real idiom (scratchpad/ca2_price.py, both
+    # arms vacuity-checked): 983.2 -> 452.6 ops/call, i.e. 530.6 saved. read_sin+read_cos run 769
+    # times at the sweep-median frame (scratchpad/ca2_callcount.py). The generator docstring
+    # chose per_result_nibble for span on a "trig is ~160x/frame" estimate that is 4.8x low; the
+    # span it buys is 65,536 -> 81,920 words, 0.02% of an 85.5M-word image.
+    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16, mode="per_entry")
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
     xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
@@ -1707,7 +1742,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
                   + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                     tex, cm, ttang, sdrecip, srdisp, xtadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid,
+                     tex, cm, ttang, sdrecip, srdisp, xtadisp, vtxdisp, sinadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid,
                      entoff, _collide_tables]
                   # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
                   # which changes the shipped text and so its emit hash -- caught by

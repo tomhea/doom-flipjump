@@ -100,8 +100,7 @@ ns stream {
     // emits nothing and never dereferences the buffer (an UNCLAIMED column's cell is 0).
     def emit_prefix arr_cell, take_src \
             @ ptr, cnt, cidx, take, ploop, p_emit_full, p_emit_part, pdone, pskip {
-        hex.zero 2, take
-        hex.mov 2, take, take_src
+        hex.mov 2, take, take_src   // (hex.mov zeroes dst first)
         hex.if0 2, take, pdone
         hex.mov w/4, ptr, arr_cell                 // the buffer ADDRESS stored per column (mov, R16)
         hex.read_byte_and_inc cnt, ptr             // consume the n header byte (value unused here)
@@ -136,8 +135,7 @@ ns stream {
         hex.mov w/4, ptr, arr_cell
         hex.if0 w/4, ptr, sdone
         hex.read_byte_and_inc n_ent, ptr           // the entry count
-        hex.zero 2, skip_rows
-        hex.mov 2, skip_rows, skip_src
+        hex.mov 2, skip_rows, skip_src   // (hex.mov zeroes dst first)
         hex.zero 2, ent_i
       sloop:
         hex.cmp 2, ent_i, n_ent, sbody, sdone, sdone
@@ -216,7 +214,6 @@ ns stream {
         hex.if0 2, ctake, wall
         hex.mov w/4, ptr, cbuf
         hex.read_byte_and_inc cnt, ptr                 // consume the entry-count header byte
-        hex.zero 2, take
         hex.mov 2, take, ctake                         // rows still to emit
       cloop:
         hex.read_byte_and_inc cnt, ptr                 // run length
@@ -256,7 +253,6 @@ ns stream {
         hex.mov w/4, ptr, fbuf
         hex.read_byte_and_inc n_ent, ptr               // n (entry count)
         hex.zero 2, ent_i
-        hex.zero 2, take
         hex.mov 2, take, fstartv                       // skip the first fstart rows
       floop:
         hex.cmp 2, ent_i, n_ent, fbody, fdone, fdone
@@ -317,15 +313,13 @@ ns stream {
     // completed and leak into command-byte decode.
     def emit_column cbuf_cell, cexcl, fstart, wall_lit, fbuf_cell \
             @ wlen, ctake, cclamp, cok, nowall, skip {
-        hex.zero 2, ctake
-        hex.mov 2, ctake, cexcl
+        hex.mov 2, ctake, cexcl   // (hex.mov zeroes dst first)
         hex.cmp 2, ctake, fstart, cok, cok, cclamp   // ctake = min(cexcl, fstart)
       cclamp:
         hex.mov 2, ctake, fstart
       cok:
         .emit_prefix cbuf_cell, ctake
-        hex.zero 2, wlen
-        hex.mov 2, wlen, fstart
+        hex.mov 2, wlen, fstart   // (hex.mov zeroes dst first)
         hex.sub 2, wlen, ctake                    // wlen = fstart - ctake (>= 0 by the clamp)
         hex.if0 2, wlen, nowall
         byte.emit wlen
@@ -1252,8 +1246,7 @@ ns stream {
         hex.ptr_add ptr, 3
         hex.zero 4, smidx
         hex.mov 2, smidx + 2*dw, slr
-        hex.zero 4, y0
-        hex.mov 4, y0, sy0b
+        hex.mov 4, y0, sy0b   // (hex.mov zeroes dst first)
         hex.sub_constant 4, y0, 32768
         hex.zero 4, wlo4                        // widened window rows (the row math is 4-nibble)
         hex.mov 2, wlo4, wlo
@@ -1326,8 +1319,7 @@ ns stream {
         // screen row: y0 = sy0b - 32768, well inside signed 4-nibble range, viewh = 100 --
         // all comfortably inside signed 4-nibble range, and zero/mov/add/sign/scmp cost scales
         // linearly with width (the profiler priced this loop at ~6k/run, half of it row math).
-        hex.zero 4, y0
-        hex.mov 4, y0, sy0b
+        hex.mov 4, y0, sy0b   // (hex.mov zeroes dst first)
         hex.sub_constant 4, y0, 32768           // the slot stores y0 as TWO bytes biased by 32768:
                                                 // a tall NEAR sprite's top sits far above row -128,
                                                 // and the old one-byte +128 bias WRAPPED (M13-15M)

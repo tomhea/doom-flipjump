@@ -75,9 +75,7 @@ ns proj {
         hex.set 3, dst, 0x800
         ;done
       den_ok:
-        hex.zero 6, den_norm
         hex.mov 6, den_norm, den + 2*dw          // den_norm = den >> 8  (den <= 8 nibbles -> <= 6)
-        hex.zero 6, num_norm
         hex.mov 6, num_norm, num + 2*dw          // num_norm = num >> 8  (num <= den, same bound)
       nrm_hi:                                    // right-normalize: while den_norm > 0xFFF, BOTH >>= 1 nib
         hex.if0 3, den_norm + 3*dw, hi_done      // den_norm <= 0xFFF <=> nibbles 3..5 all zero
@@ -703,8 +701,7 @@ ns proj {
               shift10, shift11, shift_done, done, \
               den_norm, num_wide, recip_wide, recip, prod, shift_nibs, csh5, csh6, csh8, csh10 \
             < slopediv_recip {
-        hex.zero 8, den_norm
-        hex.mov 8, den_norm, den
+        hex.mov 8, den_norm, den   // (hex.mov zeroes dst first)
         hex.set 2, shift_nibs, 6                 // base shift = RK/4 = 6 nibbles; +- the exponent below
       nrm_hi:                                    // right-normalize: while den_norm > 0xFFF, >>= 1 nib, ++
         hex.if0 5, den_norm + 3*dw, hi_done      // den_norm <= 0xFFF <=> nibbles 3..7 all zero
@@ -793,12 +790,12 @@ ns proj {
     //   a huge unsigned scale and clamps to SCALE_MAX, exactly as the oracle does (scmp would give
     //   SCALE_MIN and diverge). anglea/b are unsigned-modular BAM that only feed read_sin (bit extract).
     //   @requires hex.init & stl.ptr_init   (finesine.read_sin)
-    def scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection, disp \
+    def scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection, disp, col \
             @ anglea, angleb, num, den, sin_idx, sinv, cproj, cang90, csmin, csmax, qneg, \
               den_zero, num_neg, num_pos, den_neg, den_pos, dodiv, chk_min, set_max, set_min, end {
-        hex.mov 8, anglea, visangle
-        hex.sub 8, anglea, viewangle
-        hex.add 8, anglea, cang90               // anglea = ANG90 + (visangle - viewangle)
+        rep(1-disp, k) hex.mov 8, anglea, visangle
+        rep(1-disp, k) hex.sub 8, anglea, viewangle
+        rep(1-disp, k) hex.add 8, anglea, cang90               // anglea = ANG90 + (visangle - viewangle)
         hex.mov 8, angleb, visangle
         hex.sub 8, angleb, rw_normalangle
         hex.add 8, angleb, cang90               // angleb = ANG90 + (visangle - rw_normalangle)
@@ -806,7 +803,11 @@ ns proj {
         hex.shr_hex 8, 5, angleb                // num = fixed_mul(PROJECTION<<16, read_sin(angleb))
         hex.mov 3, sin_idx, angleb              //   read_sin idx = angleb >> 20 (low 3 nibbles)
         finesine.read_sin sinv, sin_idx
-        hex.set 8, cproj, projection            //   PROJECTION<<16 (compile-time, from Config)
+        // M13-CPROJSTATIC: `hex.set 8, cproj, projection` used to run HERE, once per call, to
+        // reload a value fixed at emit time. hex.fixed_mul_lo reads its operands via
+        // `.mov n, wide_b, b` (fixed_point.fj:80) and never writes b, so cproj is never
+        // disturbed -- the vec below carries the constant instead. 127.3 ops/call saved
+        // (scratchpad/_ptr_price.log, "hex.set 8 (const addr)").
         // M13-mulorder: operands SWAPPED vs the obvious order. fixed_mul_lo runs one schoolbook row
         // per NONZERO nibble of its SECOND operand, and a negative 16.16 sine sign-extends to a dense
         // 12-nibble pattern (~10k ops as a multiplier) while cproj = PROJECTION<<16 has ONE nonzero
@@ -814,9 +815,15 @@ ns proj {
         // product either way, so this is BIT-IDENTICAL -- purely a row-count choice.
         hex.fixed_mul_lo 8, 4, num, sinv, cproj
 
-        hex.shr_hex 8, 5, anglea                // den = fixed_mul(rw_distance, read_sin(anglea))
-        hex.mov 3, sin_idx, anglea
-        finesine.read_sin sinv, sin_idx
+        // M13-SINADISP: anglea is COLUMN-ONLY. Every caller builds visangle as
+        // `viewangle + xtoviewangle[col]`, so anglea = ANG90 + (visangle - viewangle) reduces,
+        // as an exact mod-2^32 identity, to ANG90 + xtoviewangle[col] -- viewangle cancels. The
+        // whole den sine is therefore a compile-time function of the column: a 161-entry
+        // dispatch (~2.6k lines) replaces mov8 + sub8 + add8 + shr_hex + mov3 + read_sin.
+        rep(1-disp, k) hex.shr_hex 8, 5, anglea    // den = fixed_mul(rw_distance, read_sin(anglea))
+        rep(1-disp, k) hex.mov 3, sin_idx, anglea
+        rep(1-disp, k) finesine.read_sin sinv, sin_idx
+        rep(disp, k) sinadisp.lookup sinv, col
         hex.fixed_mul_lo 8, 4, den, sinv, rw_distance   // same swap: rw_distance is the sparse operand
 
         hex.if0 8, den, den_zero                // den == 0 -> SCALE_MAX
@@ -857,7 +864,7 @@ ns proj {
       den: hex.vec 8
       sin_idx: hex.vec 3
       sinv: hex.vec 8
-      cproj: hex.vec 8
+      cproj: hex.vec 8, projection    // PROJECTION<<16, baked (M13-CPROJSTATIC; see above)
       cang90: hex.vec 8, 0x40000000
       qneg: hex.vec 1
       csmin: hex.vec 8, 0x100             // SCALE_MIN (16.16 engine constant)
@@ -871,7 +878,7 @@ ns proj {
     //   is the SIGNED column (2's-complement; off-screen ends carry the -1 / VIEW_W+1 sentinels). idx is
     //   unsigned so the low (max-0) clamp is automatic. Mirrors reference_model.angle_to_x EXACTLY.
     //   @requires hex.init & stl.ptr_init   (read_table)
-    def angle_to_x dst, angle \
+    def angle_to_x dst, angle, disp \
             @ angt, vtx_idx, cang90, cmaxidx, clampmax, keep, end \
             < viewangletox {
         hex.mov 8, angt, angle
@@ -882,7 +889,15 @@ ns proj {
       clampmax:
         hex.set 3, vtx_idx, 0x7ff
       keep:
-        hex.read_table_packed 4, dst, viewangletox, 3, vtx_idx  // the signed column (2's-complement)
+        rep(1-disp, k) hex.read_table_packed 4, dst, viewangletox, 3, vtx_idx  // signed column (2s-complement)
+        // M13-VTXDISP: the SAME lever C2 applied to tantoangle/slopediv_recip8, and the same
+        // values -- viewangletox as a per-entry D4 dispatch. MEASURED on THIS macro with only the
+        // `disp` flag changed, both arms vacuity-checked (scratchpad/ca2_price.py, log
+        // scratchpad/_ca2_price.log): 8,827.7 -> 1,809.5 ops/call, so 7,018.2 saved. angle_to_x
+        // runs twice per in-frustum seg -- 228 calls at the median of the CALL-COUNT distribution,
+        // ~105 at the median of the OPS distribution (a lighter frame; the two medians are
+        // different frames, which is why the whole-program delta is -734k and not -1.6M).
+        rep(disp, k) vtxdisp.lookup dst, vtx_idx
         ;end
 
       angt: hex.vec 8
@@ -982,8 +997,8 @@ ns proj {
       setright:
         hex.mov 8, ang2, cnegclip                      // ang2 = -CLIPANGLE (0xE0000000)
       rightok:
-        .angle_to_x tx1, ang1
-        .angle_to_x tx2, ang2
+        .angle_to_x tx1, ang1, 0
+        .angle_to_x tx2, ang2, 0
         hex.scmp 8, tx1, tx2, visok, end, end          // x1 >= x2 -> sub-column, cull (SIGNED columns)
       visok:
         hex.set 1, visible, 1
@@ -1303,10 +1318,10 @@ ns proj {
             < xtoviewangle {
         hex.read_table_packed 4, visang1, xtoviewangle, 2, x1  // xtoviewangle[x1]
         hex.add 8, visang1, viewangle                   // visangle@x1 = viewangle + xtoviewangle[x1]
-        .scale_from_global_angle scale1, visang1, viewangle, rw_normalangle, rw_distance, projection, 0
+        .scale_from_global_angle scale1, visang1, viewangle, rw_normalangle, rw_distance, projection, 0, x1
         hex.read_table_packed 4, visang2, xtoviewangle, 2, x2  // xtoviewangle[x2]
         hex.add 8, visang2, viewangle                   // visangle@x2
-        .scale_from_global_angle scale2, visang2, viewangle, rw_normalangle, rw_distance, projection, 0
+        .scale_from_global_angle scale2, visang2, viewangle, rw_normalangle, rw_distance, projection, 0, x2
         .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero
         ;end
 
@@ -1326,10 +1341,10 @@ ns proj {
             @ visang1, visang2, scale2, end {
         xtadisp.lookup visang1, x1                      // xtoviewangle[x1]
         hex.add 8, visang1, viewangle                   // visangle@x1 = viewangle + xtoviewangle[x1]
-        .scale_from_global_angle scale1, visang1, viewangle, rw_normalangle, rw_distance, projection, 1
+        .scale_from_global_angle scale1, visang1, viewangle, rw_normalangle, rw_distance, projection, 1, x1
         xtadisp.lookup visang2, x2                      // xtoviewangle[x2]
         hex.add 8, visang2, viewangle                   // visangle@x2
-        .scale_from_global_angle scale2, visang2, viewangle, rw_normalangle, rw_distance, projection, 1
+        .scale_from_global_angle scale2, visang2, viewangle, rw_normalangle, rw_distance, projection, 1, x2
         .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero
         ;end
 
@@ -2077,8 +2092,8 @@ ns proj {
       setright:
         hex.mov 8, ang2, cnegclip
       rightok:
-        .angle_to_x tx1, ang1
-        .angle_to_x tx2, ang2
+        .angle_to_x tx1, ang1, 1
+        .angle_to_x tx2, ang2, 1
         hex.cmp 2, tx1, tx2, visok, end, end     // post-clip columns are unsigned-small
       visok:
         hex.set 1, visible, 1

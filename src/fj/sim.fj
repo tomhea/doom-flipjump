@@ -85,13 +85,20 @@ ns sim {
     // Mirrors PIT_CheckLine.
     //
     //   lnrow / n_ln : the packed line table and its index width
-    //   li           : the linedef index (runtime)
+    //   lnbox, lnrow : the two packed linedef tables (C5: bbox half, then the other 14 bytes)
+    //   li           : the linedef index (runtime), indexing BOTH tables identically
     //   the box      : cbx_lo/cbx_hi/cby_lo/cby_hi (16.16) — the caller sets them once
     //   the opening  : cp_floor/cp_ceil, narrowed IN PLACE (map units, 8-nibble signed)
     //
-    // ⚠ THE WHOLE ROW IS READ IN ONE GO. `hex.read_table_packed nb, ...` strides by nb, so reading
-    // a single field with `nb = 2` would stride by 2 bytes and land in the wrong row. One 22-byte
-    // read, then every field is a compile-time nibble offset into it: byte k is at `rrow + 2k*dw`.
+    // ⚠ EACH TABLE'S ROW IS READ IN ONE GO. `hex.read_table_packed nb, ...` strides by nb, so
+    // reading a single field with `nb = 2` would stride by 2 bytes and land in the wrong row. Since
+    // M-CONSTADDR C5 the linedef is TWO tables, each read whole: `lnbox` (8 bytes: minx maxx miny
+    // maxy) into `rbox`, and -- only for candidates that survive the bbox -- `lnrow` (the other 14)
+    // into `rrow`. Within each buffer every field is a compile-time nibble offset: byte k of the
+    // BOX is at `rbox + 2k*dw`, byte k of the REST at `rrow + 2k*dw`. ⚠ The rest-buffer byte
+    // numbers are therefore the POST-SPLIT ones (rest byte k = old row byte k+8); the comments
+    // below carry the post-split numbers, and getting one wrong does not crash -- it walks the
+    // player through a wall.
     def check_line lnbox, lnrow, n_ln, li, blocked             @ rbox, rrow, rv1x, rv1y, rdxi, rdyi, rtmp, ropen, p1, p2, cst,               nxt, hit, k_a, k_b, k_c, k_d,               axis, diag, do_h, do_v, do_pos, do_neg, h1, v1c, cmp_p,               open_f, open_c, set_f, set_c, body             < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_floor, cp_ceil {
         ;body                                  // the @-local DATA below must never execute
       rbox: hex.vec 16                         // bytes 8..15 of the row: minx maxx miny maxy
@@ -131,7 +138,7 @@ ns sim {
         // ---- P_BoxOnLineSide: only a STRADDLING box can be refused ---------------------------
         .fix16 rv1x, rrow                               // v1x   (byte 0)
         .fix16 rv1y, rrow + 4*dw                        // v1y   (byte 2)
-        // slope (byte 16) is 0..3, so its two low bits ARE the switch: bit 1 separates the
+        // slope (rest byte 8; row byte 16) is 0..3, so its two low bits ARE the switch: bit 1 separates the
         // diagonals from the axis cases, bit 0 picks within each pair. `hex.if_flags`' mask is a
         // set of nibble VALUES, so "bit 1 set" is {2,3} = 0xCCCC and "bit 0 set" is {1,3} = 0xAAAA.
         hex.if_flags rrow + 16*dw, 0xCCCC, axis, diag
@@ -163,12 +170,12 @@ ns sim {
         hex.set 1, cst, 0
         hex.cmp 1, rrow + 18*dw, cst, blocked, open_f, blocked   // flags != 0 -> a wall
       open_f:
-        .sext16 ropen, rrow + 24*dw                     // openbottom (byte 20) -> floorz = max
+        .sext16 ropen, rrow + 24*dw                     // openbottom (rest byte 12; row byte 20) -> floorz = max
         hex.scmp 8, ropen, cp_floor, open_c, open_c, set_f
       set_f:
         hex.mov 8, cp_floor, ropen
       open_c:
-        .sext16 ropen, rrow + 20*dw                     // opentop (byte 18) -> ceilingz = min
+        .sext16 ropen, rrow + 20*dw                     // opentop (rest byte 10; row byte 18) -> ceilingz = min
         hex.scmp 8, ropen, cp_ceil, set_c, nxt, nxt
       set_c:
         hex.mov 8, cp_ceil, ropen
@@ -250,7 +257,6 @@ ns sim {
         hex.mul_const 4, bi, bu, nbx
         hex.add 4, bi, bt
         hex.read_table_packed 3, rbk, bkoff, n_bk, bi
-        hex.zero 4, off
         hex.mov 4, off, rbk                    // [offset:2] = the first 4 nibbles
         hex.zero 4, cnt
         hex.mov 2, cnt, rbk + 4*dw             // [count:1]
@@ -353,8 +359,7 @@ ns sim {
         hex.read_table_packed 17, row, throw, n_th, ti
         // the index the cold half will re-read this thing's row with. It cannot recompute it:
         // thing_record_body runs from a shared fcall leaf and never sees `ti`.
-        hex.zero w/4, sp_ti
-        hex.mov w/4, sp_ti, ti
+        hex.mov w/4, sp_ti, ti   // (hex.mov zeroes dst first)
         // the position array is a hex.vec (one NIBBLE per slot), not a packed table (one BYTE
         // per slot), so read_table_packed cannot address it -- the strides differ by 2. A 16.16
         // pair is 16 nibbles and 16 is one nibble of SHIFT, so the index scales without a multiply.
@@ -370,7 +375,6 @@ ns sim {
         .fix16 sp_hh,   row + 8*dw                           // byte 4
         hex.mov 8, sp_tzmax,  row + 16*dw                    // byte 8, already 32 bits
         hex.mov 8, sp_tzmax2, row + 24*dw                    // byte 12
-        hex.zero 2, sp_mon
         hex.mov 2, sp_mon, row + 32*dw                       // byte 16 (was 20: base/base2 left)
         // sp_z = (this leaf's floor + the art's z offset) << 16 -- the two int16s add mod 2^16,
         // which is the right two's-complement sum, and fix16 lifts it to 16.16
@@ -381,8 +385,7 @@ ns sim {
         // `subsector_action` sets them alongside `cur_ss`. They used to be three
         // `read_table_packed`s PER THING (ssflr[ss], sslgt[ss], ltbase[light]) when all three are
         // constant for every thing in the leaf: measured at 23,569 of thing_load's 69,503 ops.
-        hex.zero 4, zt
-        hex.mov 4, zt, ss_flr
+        hex.mov 4, zt, ss_flr   // (hex.mov zeroes dst first)
         hex.add 4, zt, row + 12*dw                           // byte 6 = zoff
         .fix16 sp_z, zt
     }
@@ -539,8 +542,7 @@ ns sim {
         // index`), so aliasing dst onto the base destroys the base before it is added in.
         hex.ptr_index r, q, t
         hex.write_byte r, hv
-        hex.zero 2, tv
-        hex.mov 2, tv, t
+        hex.mov 2, tv, t   // (hex.mov zeroes dst first)
         hex.inc 2, tv                          // stored ENCODED as t+1, so 0 can mean "empty"
         hex.write_byte p, tv
         ;bl

@@ -145,16 +145,14 @@ ns plane {
         hex.fixed_mul_lo 8, 4, dist, bb_ph, ys             // ys[6:8] stay zero-init (R11-safe wide read)
         hex.shr_hex 8, 5, dist
         hex.set 3, c127, 127
-        hex.zero 3, zidx
-        hex.mov 3, zidx, dist
+        hex.mov 3, zidx, dist   // (hex.mov zeroes dst first)
         hex.cmp 3, zidx, c127, seedok, seedok, seedclamp   // zidx>127 -> clamp
       seedclamp:
         hex.mov 3, zidx, c127
       seedok:
         hex.mov 8, bb_recip_ph, bb_ph
         stl.fcall recip32_leaf, plane_recip_ret
-        hex.zero 8, zstep
-        hex.mov 8, zstep, bb_recip_out
+        hex.mov 8, zstep, bb_recip_out   // (hex.mov zeroes dst first)
         hex.shl_hex 8, 1, zstep                         // zstep = recip << 1 nibble ( *16 ) = one zidx bucket
         hex.zero 8, zidx8
         hex.mov 3, zidx8, zidx

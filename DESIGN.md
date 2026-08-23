@@ -174,10 +174,30 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** |
 | shipped config, `self_reset=False` | **84,823,030** | 1.26× OVER | 0.63× | flat |
 | **M1 (the same + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+| **+ constant-address round 1 (C2/C5/C7/C8)** | **85,523,360** | 1.27× OVER | **0.637×** | **flat** (asserted) |
+| + constant-address round 2 (`vtxdisp`/`sinadisp`/finesine per_entry) | ⚠ NOT MEASURED — see below | | | |
 
 (Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
 That trailing instruction used to be swallowed into the M14 row's last cell, where it read as
 a column.)
+
+⚠ **THE TWO ROWS ABOVE, ADDED CR-2026-08.** The M1 row (85,468,976 / headroom 1.57×) was the
+ledger's last entry while the shipped binary had moved on twice. What the two rounds added:
+
+* **Round 1, C5** (`src/doomfj/collision.py`): the linedef row splits into `lnbox` (8 bytes) +
+  `lnrow` (14), emitted as two packed LUTs. ⚠ **The pair carries the SAME 22 bytes/row `lnrow`
+  alone carried** — `generate_packed_lut_fj` emits one `;v*dw` per byte with no padding — so **none
+  of the +413,668 words is table DATA.** It is macro-expansion CODE: an extra
+  `hex.read_table_packed` staging preamble across the 16 `check_line` expansions, ≈25.9k words
+  each. A ledger line for "the new table" would have said 0 and been wrong; the line is for the
+  expansions.
+* **Round 2** adds three dispatch tables — `vtxdisp` (2,048×8 nibbles), `sinadisp` (161×8) and
+  `finesine` switched from `per_result_nibble` to `per_entry`. MEASURED on the emitted text: the
+  `tables` part goes **300,177 → 331,382 lines (+31,205)**, i.e. ≈**+62k words**, ~0.07% of the
+  image (`docs/handoff-constaddr.md` §13.7). ⚠ **The resulting total span has NOT been measured** —
+  round 2 was certified on `scratchpad/deg_gate.py`, which does not build the `self_reset` tier.
+  Fill this row from the next `build.py --self-reset` run and re-assert the flat limit; do not
+  quote the +62k estimate as the total.
 
 **M1 adds ONE segment, `<map>_07_reset.fj`** (`selfreset.emit_reset_part`). Its size is
 `nibble_cells` coalesced `hex.zero` runs + non-zero `hex.set 1` singles + one `rep` per byte

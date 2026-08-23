@@ -1,4 +1,4 @@
-"""Prove and price the CONST-ADDRESS READ dispatch (lut_generator.generate_const_read_dispatch_fj).
+"""Prove and price the CONST-ADDRESS READ dispatch (C1) -- SELF-CONTAINED, generator included.
 
 Correctness first: plant all 256 byte values, read every index through the dispatch, require the
 exact value back AND the source cell untouched (the handler flips dbit+8 and jumps INTO the cell,
@@ -28,7 +28,74 @@ from flipjump.interpreter.fjm_run import IOReadOnEOF                      # noqa
 from flipjump.utils.functions import load_debugging_labels                # noqa: E402
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
 from doomfj.harness import W                                              # noqa: E402
-from doomfj.lut_generator import generate_const_read_dispatch_fj          # noqa: E402
+
+# ---------------------------------------------------------------------------------------------
+# THE GENERATOR, RECONSTRUCTED IN THIS FILE.
+#
+# ! HONESTY NOTE (CR-2026-08, R9). The original `lut_generator.generate_const_read_dispatch_fj`
+#   was backed out of `src/` in the same commit that landed this probe (d89d488) and therefore
+#   exists in NO commit -- so this probe could not be run by anyone but its author. What follows
+#   is a RECONSTRUCTION from the shape of `lut_generator._per_entry_table` (the dispatch half) and
+#   `src/fj/m1_reset.fj::m1.readbyte` (the handler half, INLINED here so the negative control can
+#   break one handler's undo-flip). It is not byte-identical to the code that produced the
+#   numbers in `docs/handoff-constaddr.md` SS9 -- it is a faithful reconstruction of the MECHANISM,
+#   and it reproduces the documented failure. Do not quote it as the original.
+#
+# The shape under test: a per-entry dispatch (returns via `hex.tables.ret`) whose handlers do a
+# CONSTANT-ADDRESS byte read (returns via `hex.pointers.ret_after_read_byte`). Two wflip-based
+# return mechanisms live at once -- the R42 hazard `generate_bands_walk_fj` documents.
+# ---------------------------------------------------------------------------------------------
+def generate_const_read_dispatch_fj(label, arr, n, index_nibbles):
+    """Emit `ns <label>` with a `<label>.read_to dst, idx` macro reading byte `idx` of array
+    `arr` through a dispatch whose handlers use CONSTANT addresses (no pointer rebuild)."""
+    pad = 1 << max(1, (n - 1).bit_length())
+    if 4 * index_nibbles < (pad - 1).bit_length():
+        raise ValueError("%s: index_nibbles=%d too narrow for %d entries"
+                         % (label, index_nibbles, pad))
+    locals_ = ["switch", "clean", "end"]
+    locals_ += ["h%d" % d for d in range(pad)] + ["b%d" % d for d in range(pad)]
+    L = []
+    L.append("// CONST-ADDRESS READ dispatch \"%s\": %d entries over `%s` (scratchpad probe)"
+             % (label, pad, arr))
+    L.append("ns %s {" % label)
+    L.append("    def read_to dst, idx @ return < hex.tables.ret, .res, .dsp {")
+    L.append("        rep(%d, i) hex.xor .dsp + 4*i, idx + i*dw" % index_nibbles)
+    L.append("        wflip hex.tables.ret+w, return, .dsp")
+    L.append("      return:")
+    L.append("        wflip hex.tables.ret+w, return")
+    L.append("        hex.zero 2, dst")
+    L.append("        hex.xor_zero 2, dst, .res")
+    L.append("    }")
+    L.append("    def init @ %s < hex.tables.ret, hex.pointers.read_byte, "
+             "hex.pointers.ret_after_read_byte, %s > dsp, res {"
+             % (", ".join(locals_), arr))
+    L.append("        ;end")
+    L.append("      res: hex.vec 2")
+    L.append("      dsp: ;switch")
+    L.append("        pad %d" % pad)
+    L.append("      switch:")
+    for d in range(pad):
+        L.append("        ;h%d" % d)
+    for d in range(pad):
+        # the inlined m1.readbyte: mark the cell, jump INTO it, come back, un-mark, keep the byte.
+        # the un-mark op is ALSO the jump to `clean` -- so dropping it is a one-line mutation.
+        L.append("      h%d:" % d)
+        L.append("        hex.zero 2, hex.pointers.read_byte")
+        L.append("        wflip hex.pointers.ret_after_read_byte+w, b%d" % d)
+        L.append("        %s + %d*dw+dbit+8; %s + %d*dw" % (arr, d, arr, d))
+        L.append("      b%d:" % d)
+        L.append("        wflip hex.pointers.ret_after_read_byte+w, b%d" % d)
+        L.append("        hex.mov 2, .res, hex.pointers.read_byte")
+        L.append("        %s + %d*dw+dbit+8; clean + %d*dw" % (arr, d, d))
+    L.append("      clean:")
+    L.append("        hex.tables.clean_table_entry__table %d, .dsp, hex.tables.ret" % pad)
+    L.append("      end:")
+    L.append("    }")
+    L.append("}")
+    L.append("%s.init" % label)
+    L.append("")
+    return chr(10).join(L)
+
 
 VAL = (W + W.bit_length()) - W
 N = 256
@@ -70,6 +137,7 @@ def build(nread, break_handler=False, dispatch=True):
     for st, v in r._runs:
         core.set_words(st, v)
     _c, ops, _e, _l, _p = core.run(lambda: 0, lambda _b: None, IOReadOnEOF, last_ops_length=0)
+    print('    [term=%s ops=%s err=%s]' % (_c, format(ops, ','), _e))
     got = []
     for i in range(N):
         lo = core.get_word(base("out") + 4 * i + 1) >> VAL

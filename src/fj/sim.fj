@@ -92,9 +92,10 @@ ns sim {
     // ⚠ THE WHOLE ROW IS READ IN ONE GO. `hex.read_table_packed nb, ...` strides by nb, so reading
     // a single field with `nb = 2` would stride by 2 bytes and land in the wrong row. One 22-byte
     // read, then every field is a compile-time nibble offset into it: byte k is at `rrow + 2k*dw`.
-    def check_line lnrow, n_ln, li, blocked             @ rrow, rv1x, rv1y, rdxi, rdyi, rtmp, ropen, p1, p2, cst,               nxt, hit, k_a, k_b, k_c, k_d,               axis, diag, do_h, do_v, do_pos, do_neg, h1, v1c, cmp_p,               open_f, open_c, set_f, set_c, body             < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_floor, cp_ceil {
+    def check_line lnbox, lnrow, n_ln, li, blocked             @ rbox, rrow, rv1x, rv1y, rdxi, rdyi, rtmp, ropen, p1, p2, cst,               nxt, hit, k_a, k_b, k_c, k_d,               axis, diag, do_h, do_v, do_pos, do_neg, h1, v1c, cmp_p,               open_f, open_c, set_f, set_c, body             < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_floor, cp_ceil {
         ;body                                  // the @-local DATA below must never execute
-      rrow: hex.vec 44                         // the whole 22-byte row, two nibbles per byte
+      rbox: hex.vec 16                         // bytes 8..15 of the row: minx maxx miny maxy
+      rrow: hex.vec 28                         // the other 14 bytes, read only on survival
       rv1x: hex.vec 8
       rv1y: hex.vec 8
       rdxi: hex.vec 8
@@ -105,30 +106,37 @@ ns sim {
       p2: hex.vec 1
       cst: hex.vec 1
       body:
-        hex.read_table_packed 22, rrow, lnrow, n_ln, li
+        // M-CONSTADDR C5: the BBOX HALF ONLY -- 8 bytes, so 8 pointer setups instead of 22. Most
+        // candidates die on the four compares below, and every byte read for them was wasted:
+        // `read_table_packed nb` is nb separate set_flip_and_jump_pointers rebuilds (~781 ops each).
+        // Same lever M14.5 applied to thing_load ("those four moved to frame.thing_load_cold,
+        // which runs AFTER the vis reject").
+        hex.read_table_packed 8, rbox, lnbox, n_ln, li
 
         // ---- bbox reject: right <= minx, left >= maxx, top <= miny, bottom >= maxy -----------
-        .fix16 rtmp, rrow + 16*dw                       // minx  (byte 8)
+        .fix16 rtmp, rbox                               // minx  (box byte 0)
         hex.scmp 8, cbx_hi, rtmp, nxt, nxt, k_a
       k_a:
-        .fix16 rtmp, rrow + 20*dw                       // maxx  (byte 10)
+        .fix16 rtmp, rbox + 4*dw                        // maxx  (box byte 2)
         hex.scmp 8, cbx_lo, rtmp, k_b, nxt, nxt
       k_b:
-        .fix16 rtmp, rrow + 24*dw                       // miny  (byte 12)
+        .fix16 rtmp, rbox + 8*dw                        // miny  (box byte 4)
         hex.scmp 8, cby_hi, rtmp, nxt, nxt, k_c
       k_c:
-        .fix16 rtmp, rrow + 28*dw                       // maxy  (byte 14)
+        .fix16 rtmp, rbox + 12*dw                       // maxy  (box byte 6)
         hex.scmp 8, cby_lo, rtmp, k_d, nxt, nxt
       k_d:
+        // SURVIVED the bbox -- now, and only now, pay for the other 14 bytes.
+        hex.read_table_packed 14, rrow, lnrow, n_ln, li
         // ---- P_BoxOnLineSide: only a STRADDLING box can be refused ---------------------------
         .fix16 rv1x, rrow                               // v1x   (byte 0)
         .fix16 rv1y, rrow + 4*dw                        // v1y   (byte 2)
         // slope (byte 16) is 0..3, so its two low bits ARE the switch: bit 1 separates the
         // diagonals from the axis cases, bit 0 picks within each pair. `hex.if_flags`' mask is a
         // set of nibble VALUES, so "bit 1 set" is {2,3} = 0xCCCC and "bit 0 set" is {1,3} = 0xAAAA.
-        hex.if_flags rrow + 32*dw, 0xCCCC, axis, diag
+        hex.if_flags rrow + 16*dw, 0xCCCC, axis, diag
       axis:
-        hex.if_flags rrow + 32*dw, 0xAAAA, do_h, do_v
+        hex.if_flags rrow + 16*dw, 0xAAAA, do_h, do_v
       do_h:                                             // horizontal: straddle iff bottom <= v1y < top
         hex.scmp 8, cby_hi, rv1y, nxt, nxt, h1
       h1:
@@ -140,7 +148,7 @@ ns sim {
       diag:
         .sext16 rdxi, rrow + 8*dw                       // dxi   (byte 4) — a VALUE, so sign-extend
         .sext16 rdyi, rrow + 12*dw                      // dyi   (byte 6)
-        hex.if_flags rrow + 32*dw, 0xAAAA, do_pos, do_neg
+        hex.if_flags rrow + 16*dw, 0xAAAA, do_pos, do_neg
       do_pos:                                           // "/" : (left, top) vs (right, bottom)
         .point_side p1, cbx_lo, cby_hi, rv1x, rv1y, rdxi, rdyi
         .point_side p2, cbx_hi, cby_lo, rv1x, rv1y, rdxi, rdyi
@@ -153,14 +161,14 @@ ns sim {
       hit:
         // ---- the blocking rules, then the opening --------------------------------------------
         hex.set 1, cst, 0
-        hex.cmp 1, rrow + 34*dw, cst, blocked, open_f, blocked   // flags != 0 -> a wall
+        hex.cmp 1, rrow + 18*dw, cst, blocked, open_f, blocked   // flags != 0 -> a wall
       open_f:
-        .sext16 ropen, rrow + 40*dw                     // openbottom (byte 20) -> floorz = max
+        .sext16 ropen, rrow + 24*dw                     // openbottom (byte 20) -> floorz = max
         hex.scmp 8, ropen, cp_floor, open_c, open_c, set_f
       set_f:
         hex.mov 8, cp_floor, ropen
       open_c:
-        .sext16 ropen, rrow + 36*dw                     // opentop (byte 18) -> ceilingz = min
+        .sext16 ropen, rrow + 20*dw                     // opentop (byte 18) -> ceilingz = min
         hex.scmp 8, ropen, cp_ceil, set_c, nxt, nxt
       set_c:
         hex.mov 8, cp_ceil, ropen
@@ -183,7 +191,7 @@ ns sim {
     // so the position is BIASED by 2^15 map units first. Map coords are int16, so x + 32768 >= 0
     // always, and (x16 + (32768 << 16)) >> 6 nibbles is (x_int + 32768) >> 8 exactly -- one
     // whole-nibble shift, which is why blocks are 256 units and not DOOM's 128.
-    def check_position bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0             @ blocked, done, body             < cpx, cpy, cprad, cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil,               cp_seedf, cp_seedc {
+    def check_position bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0             @ blocked, done, body             < cpx, cpy, cprad, cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil,               cp_seedf, cp_seedc {
         ;body                                  // (the per-corner scratch lives in check_block)
       body:
         hex.set 1, cp_ok, 1
@@ -197,7 +205,7 @@ ns sim {
         hex.sub 8, cby_lo, cprad
         hex.mov 8, cby_hi, cpy
         hex.add 8, cby_hi, cprad
-        rep(4, q) .check_block bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0, \
+        rep(4, q) .check_block bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, \
                                (q&1) ? cbx_hi : cbx_lo, (q>>1) ? cby_hi : cby_lo, blocked
         ;done
       blocked:
@@ -208,7 +216,7 @@ ns sim {
     }
 
     // sim.check_block — one corner's block: index it, bounds-check it, run its line list.
-    def check_block bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0, xreg, yreg, blocked \
+    def check_block bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, xreg, yreg, blocked \
             @ body, bt, bu, bcst, bi, rbk, off, cnt, k, kend, li, xok, yok, skip, lloop, lbody {
         ;body
       bt: hex.vec 8
@@ -253,7 +261,7 @@ ns sim {
         hex.cmp 4, k, kend, lbody, skip, skip
       lbody:
         hex.read_table_packed 2, li, bklin, n_bl, k
-        .check_line lnrow, n_ln, li, blocked
+        .check_line lnbox, lnrow, n_ln, li, blocked
         hex.inc 4, k
         ;lloop
       skip:
@@ -276,7 +284,7 @@ ns sim {
     // NOT IMPLEMENTED, deliberately and permissively: the "don't stand over a dropoff" test. It
     // only ever REFUSES moves, so leaving it out cannot block a move DOOM would allow. The oracle
     // omits it identically -- see ReferenceModel.check_position's docstring.
-    def try_move bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0, height, maxstep, \
+    def try_move bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, height, maxstep, \
                  here_floor \
             @ body, fail, done, out, tall, cst, gap, step \
             < cp_ok, cp_floor, cp_ceil, mv_ok {    // the box/seed globals belong to check_position
@@ -285,7 +293,7 @@ ns sim {
       gap: hex.vec 8
       step: hex.vec 8
       body:
-        .check_position bkoff, n_bk, bklin, n_bl, lnrow, n_ln, nbx, nby, ibx0, iby0
+        .check_position bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0
         hex.if0 1, cp_ok, fail
         hex.mov 8, gap, cp_ceil                // the opening must fit the thing
         hex.sub 8, gap, cp_floor
@@ -446,23 +454,33 @@ ns sim {
         // literal, so that unroll belongs in the emitter, where NSS is a number. Kept as a loop
         // here so the macro is correct standalone; see the emitter for the fast path.
         //
-        // ⚠⚠ AND THE ADDRESS IN THAT SKETCH IS UNVERIFIED -- DO NOT COPY IT. M14.5 wanted the same
-        // baked address for a per-leaf EMPTY-LIST TEST (`hex.if0 2, sshead + s*?*dw`, worth
-        // 0.7-2.2% now that 96% of visited leaves have no runtime list -- scratchpad/m145_leafcost.py)
-        // and could not establish it:
-        //   * the stl documents `hex.ptr_index dst, ptr, index` as `dst = ptr + index*2w`, i.e. ONE
-        //     dw cell per index -- which is `sshead + i*dw`, NOT `i*2*dw`;
-        //   * but `hex.read_byte dst, ptr` is `dst[:2] = *ptr`, two nibbles, so a byte entry spans
-        //     two cells and a one-cell stride would make neighbouring entries OVERLAP -- which the
-        //     shipped renderer's byte-exact gate says does not happen;
-        //   * and three probes (scratchpad/_ssheadaddr.py, _ssheadoverlap.py, _ssheadlayout.py)
-        //     returned MUTUALLY INCONSISTENT answers, so none of them is evidence (CLAUDE.md rule 3:
-        //     a verification tool used as evidence must ship a negative control, and these do not).
-        // So the layout here is whatever `ptr_index` + `read_byte`/`write_byte` agree on, and it is
-        // only ever addressed through that pair -- which is why the shipped code is correct and why
-        // a BAKED address is a separate rung: establish the layout with a negative-controlled probe
-        // FIRST, then bake. Trap 2 of docs/handoff-m14_5.md is exactly this mistake, already paid
-        // for once with `thnext + i*2*dw`.
+        // ⚠⚠ AND THE ADDRESS IN THAT SKETCH IS WRONG. M1a (2026-08-20) SETTLED THE LAYOUT:
+        // `scratchpad/m1a_stride.py`, calibrated against strides the stl states literally (K=1,2,3)
+        // and confirmed on the shipped 84.8M-word binary. See docs/handoff-m1-reset.md.
+        //
+        //   THE STRIDE IS ONE CELL: entry i is at `sshead + i*dw`, NOT `i*2*dw`. All 8 bits of the
+        //   byte live INSIDE that one cell, at bits dbit..dbit+7, so entries do NOT overlap and
+        //   writing entry i dirties exactly one word.
+        //
+        // The paradox that blocked this for two milestones was an ASYMMETRY, not a contradiction:
+        // in the ARRAY a byte is one cell; in a REGISTER it is two (`hex.read_byte dst, ptr` gives
+        // `dst[:2]`, a nibble per cell -- which is why `h` below is zeroed before the read). Both
+        // halves of "one cell" and "two cells" were true, about different things. The three earlier
+        // probes (scratchpad/_ssheadaddr.py, _ssheadoverlap.py, _ssheadlayout.py) were therefore
+        // ALL CORRECT and were only read as mutually inconsistent; what they lacked was a negative
+        // control, which is why none of them could settle it.
+        //
+        // ⚠ So `rep(nss, i) hex.set 2, sshead + i*2*dw, 0xFF` is doubly wrong: the stride, and also
+        // `hex.set 2, x, v` -- which writes the LOW NIBBLES of cells x and x+dw, not one byte cell.
+        // ⚠ AND THE M14.5 §3.2 BAKED EMPTY-LIST TEST STILL CANNOT USE `hex.if0`, at any width.
+        // `hex.if0 1, sshead + s*dw` reaches `hex.if_flags`, which XORs `switch` into the cell's
+        // jump word and then EXECUTES the cell, landing at (value*dw) ^ switch; `pad 16` aligns
+        // switch to 16 ops, so that stays inside the 16-entry table ONLY when the value's high
+        // nibble is 0 -- and the escaping path skips `clean:`, leaving the array cell permanently
+        // corrupted. if_flags is documented for 0..15; these entries hold t+1 in 1..251. `hex.if0 2`
+        // additionally straddles entry s+1. A baked test must `read_byte` and test the register.
+        // ⚠ The declarations in the emitter (`hex.vec 2*nss` / `2*nt`) are 2x what a one-cell stride
+        // can reach; cells nss.. and nt.. are unreachable padding.
         hex.set 4, dv, 0xFFFF                  // the host's "I moved this one" sentinel
         hex.set w/4, t, nthings
       bl:

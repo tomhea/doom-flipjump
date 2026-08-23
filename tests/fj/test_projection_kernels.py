@@ -52,7 +52,7 @@ def test_slope_div_byte_exact_vs_oracle(tmp_path):
     body, data = [], []
     for k, (num, den) in enumerate(SLOPE_CASES):
         for _ in range(2):   # call twice per case (R5 #8): catches scratch/result-reg cleanup bugs
-            body += [f"proj.slope_div d, n{k}, m{k}", "hex.print_as_digit 3, d, 0", "stl.output 10"]
+            body += [f"proj.slope_div d, n{k}, m{k}, 0", "hex.print_as_digit 3, d, 0", "stl.output 10"]
         data += [f"n{k}: hex.vec 8, {num}", f"m{k}: hex.vec 8, {den}"]
     data.append("d: hex.vec 3")
     data += [generate_slopediv_recip_lut_fj("slopediv_recip"),
@@ -99,7 +99,7 @@ def test_point_to_angle_byte_exact_vs_oracle(tmp_path):
     body, data = [], []
     for k, (x1, y1, x2, y2) in enumerate(P2A_CASES):
         for _ in range(2):   # call twice per case (R5 #8): catches scratch/result-reg cleanup bugs
-            body += [f"proj.point_to_angle d, x1_{k}, y1_{k}, x2_{k}, y2_{k}",
+            body += [f"proj.point_to_angle d, x1_{k}, y1_{k}, x2_{k}, y2_{k}, 0",
                      "hex.print_as_digit 8, d, 0", "stl.output 10"]
         data += [f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"y1_{k}: hex.vec 8, {y1 & 0xFFFFFFFF}",
                  f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}", f"y2_{k}: hex.vec 8, {y2 & 0xFFFFFFFF}"]

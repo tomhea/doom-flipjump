@@ -171,7 +171,62 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | tier | span-words | vs 2²⁶ | vs 2²⁷ | storage_mode |
 |---|---|---|---|---|
 | static (`build_wall_renderer`, R4 gate) | in the 40–62M band, `< 2²⁶` asserted | under | under | flat |
-| **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** | Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
+| **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** |
+| shipped config, `self_reset=False` | **84,823,030** | 1.26× OVER | 0.63× | flat |
+| **M1 (the same + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+
+(Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
+That trailing instruction used to be swallowed into the M14 row's last cell, where it read as
+a column.)
+
+**M1 adds ONE segment, `<map>_07_reset.fj`** (`selfreset.emit_reset_part`). Its size is
+`nibble_cells` coalesced `hex.zero` runs + non-zero `hex.set 1` singles + one `rep` per byte
+array + the `;__hot_end` tail — MEASURED on the E1M1 tier at **4,349 nibble cells and 1,002 byte
+cells**, 618 emitted lines, **250,789 ops/frame** — **0.8% of the 30,191,585-op sweep median** over
+260 frames. (The 8-frame gate chain measures the same quantity at **251,701**; both are printed
+because they are different frame sets, not one number rounded two ways.) It carries **no table and
+no align pad**: every address in it is baked, so it adds code span only. Headroom against
+`RENDER_FLAT_MAX_WORDS` = 2²⁷ is **1.57×**, `storage_mode == flat` asserted. Assemble time is
+**3,193 s / 2,918 s** across two builds of the same inputs producing the same sha256 — a 15%
+wall-clock spread on identical work, which is this machine drifting, not the program.
+
+⚠ The first build of this tier emitted **5,031** nibble cells. 682 of them were the unreachable half
+of `sshead` — declared `hex.vec 2*nss`, reached at a ONE-cell stride — which the set carried because
+it was derived from whole label extents. MEASURED at 0 dirty words across all five
+`scratchpad/_m1_dirty*.json.gz` maps, so it was provably-dead work rather than corruption; the
+emitter now REFUSES a set word in a byte array's declared-but-unreachable range instead of letting
+it fall through to the nibble clear. The trim is worth **−19,110 ops/frame** (270,811 → 251,701 on
+the same 8-frame chain) and **−57,950 span-words**; do not quote the pre-trim 270,811 for this
+tier.
+
+**THE PART'S OWN SPAN IS 645,946 WORDS** — `85,468,976 − 84,823,030`, the same shipped config
+measured with and without `self_reset`:
+
+| | words | binary | sha256 |
+|---|---:|---|---|
+| `self_reset=False` | 84,823,030 | `scratchpad/fjmcache/_rssprobe.fjm` | `3c13ec21424f7f54…` |
+| `self_reset=True` | 85,468,976 | `build/doom_e1m1_loop.fjm` | `75794727dce656be…` |
+
+**Composition of the part**, counted from the emitted file `m1_reemit.py` certifies as current
+(`build/generated_loop/e1m1_07_reset.fj`, sha256 `63a80ad6…`, 618 lines):
+
+| primitive | lines | cells |
+|---|---:|---:|
+| `hex.zero` coalesced runs | 265 | 4,008 |
+| `hex.set 1, …` non-zero singles | 341 | 341 |
+| `rep … m1.zerobyte` | 3 | 1,002 (byte) |
+| | | **5,351 total** |
+
+**The only per-cell span rate that is measured is the average: 645,946 / 5,351 = 120.7 words/cell.**
+⚠ Two earlier revisions of this paragraph quoted 85.0 instead — that is the trim's **marginal** rate
+(57,950 words / 682 contiguous zero cells), and applying a marginal rate measured on one primitive
+as an average over three is an extrapolation, not arithmetic. Round 5 and round 6 were both this
+mistake; do not make it a fourth time by splitting 645,946 across the rows above.
+
+⚠ Do **not** derive the part's span by subtracting the M14 row above: that row is an older, smaller
+configuration, and the difference (17,255,518) is 26× the real figure. An earlier revision said the
+tier "is the M14 tier plus that part", which invited exactly that mistake. R4's `storage_mode == flat` assert runs on this path — the frozen-image reset the loop
+depends on needs pure flat.
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |
 |---|---|---|---|---|

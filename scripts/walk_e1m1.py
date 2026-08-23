@@ -48,6 +48,7 @@ from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,
                                     ReferenceModel, spawn_state)
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer
+from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
 from tests.fj.stream_screen import StreamScreen
 
 _SRC_NAMES = ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj",
@@ -121,6 +122,16 @@ def main():
     ap.add_argument("--frames", type=int, default=0, metavar="N",
                     help="render N frames HEADLESSLY (no window) and report timings, then exit"
                          " -- use this to check the fj side independently of pygame")
+    ap.add_argument("--fjm", default=None, metavar="PATH",
+                    help="play a PREBUILT .fjm instead of assembling one -- e.g. the M1 "
+                         "self-resetting binary from build.build_wall_renderer(self_reset=True)")
+    ap.add_argument("--loop", action="store_true",
+                    help="M1: the program RESETS ITSELF and loops, so the host never reloads the "
+                         "image. Needs a self-reset binary (--fjm). The control flow inverts: ONE "
+                         "core.run drives the whole session and the device services it -- read_bit "
+                         "builds the next tic from the state the frame just echoed. Without this "
+                         "the walker reloads the whole image between tics, which is the ~52ms "
+                         "floor M1 exists to remove.")
     args = ap.parse_args()
 
     cfg = Config()
@@ -199,6 +210,10 @@ def main():
     cache = ROOT / "scratchpad" / "fjmcache"
     cache.mkdir(parents=True, exist_ok=True)
     fjm = cache / f"w_{key.hexdigest()[:16]}.fjm"
+    if args.fjm:                       # a prebuilt binary (M1: the self-resetting one)
+        fjm = Path(args.fjm) if Path(args.fjm).is_absolute() else ROOT / args.fjm
+        assert fjm.exists(), f"--fjm {fjm} does not exist"
+        print(f"using prebuilt {fjm.name} ({fjm.stat().st_size:,} bytes)", flush=True)
     t0 = time.perf_counter()
     if fjm.exists():
         print(f"cache HIT {fjm.name} -- skipping the ~15 min build", flush=True)
@@ -373,6 +388,94 @@ def main():
         # state each pass gives continuous movement while a key is down, which is what a game does.
         # ⚠ NO STRAFE: sim.fj has forward/back/turn_left/turn_right only, so A/D turn.
         F, B, L, R = 0b0001, 0b0010, 0b0100, 0b1000
+
+        if args.loop:
+            # ── M1: ONE RUN, THE PROGRAM LOOPS. ─────────────────────────────────────────────
+            # The control flow inverts. Instead of the host calling the program once per tic and
+            # reloading the whole image in between, the program runs continuously and the DEVICE
+            # services it: read_bit builds the next tic's wire out of the state the frame just
+            # echoed, and _present blits. That is what an interactive host actually is, and it is
+            # only possible because the program restores itself.
+            from doomfj.fastrun import _fjcore
+            from flipjump.utils.exceptions import IOReadOnEOF as _EOF
+
+            class _LoopDevice(StreamScreen):
+                def __init__(self, **kw):
+                    super().__init__(stdin=b"", n_things=NTH, **kw)
+                    self.stop = False
+                    self.tics = 0
+                    self.t0 = time.perf_counter()
+                    self._inp = wire(0)          # the first tic, from the spawn state
+
+                def _poll(self):
+                    for ev in pygame.event.get():
+                        if ev.type == pygame.QUIT:
+                            self.stop = True
+                        elif ev.type == pygame.KEYDOWN and ev.key == pygame.K_p:
+                            pygame.image.save(win, str(ROOT / "scripts" / "walk_screenshot.png"))
+                            print("screenshot saved to scripts/walk_screenshot.png")
+                    kp = pygame.key.get_pressed()
+                    if kp[pygame.K_q] or kp[pygame.K_ESCAPE]:
+                        self.stop = True
+                    k = 0
+                    if kp[pygame.K_w] or kp[pygame.K_UP]:
+                        k |= F
+                    if kp[pygame.K_s] or kp[pygame.K_DOWN]:
+                        k |= B
+                    if kp[pygame.K_LEFT] or kp[pygame.K_a]:
+                        k |= L
+                    if kp[pygame.K_RIGHT] or kp[pygame.K_d]:
+                        k |= R
+                    return k
+
+                def read_bit(self):
+                    if self._in_bits == 0 and not self._inp:
+                        if self.stop:
+                            raise _EOF("walker: quit")
+                        self._inp = wire(self._poll())
+                    return super().read_bit()
+
+                def _present(self):
+                    nonlocal st, px, py, ang, binds
+                    super()._present()
+                    if self.state:
+                        st = self.state
+                        px, py = st[0] >> 16, st[1] >> 16
+                        ang = st[2]
+                    if self.bindings:
+                        binds = list(self.bindings)
+                    surf = pygame.image.frombuffer(
+                        b"".join(map(pal3.__getitem__, self.pixel_indices)),
+                        (cfg.VIEW_W, cfg.VIEW_H), "RGB")
+                    pygame.transform.scale(surf.convert(win), win.get_size(), win)
+                    pygame.display.flip()
+                    self.tics += 1
+                    el = time.perf_counter() - self.t0
+                    pygame.display.set_caption(
+                        f"doom-flipjump [M1 LOOP]  ({px},{py}) ang={ang:#010x}  "
+                        f"tic {self.tics}  {self.tics / el:.1f} fps")
+
+            core = _fjcore.Memory(runner.width, flat_max_words=runner.flat_max_words)
+            for _s, _n in runner._segments:
+                core.add_segment(_s, _n)
+            for _st, _v in runner._runs:
+                core.set_words(_st, _v)
+            dev = _LoopDevice()
+            dev.attach_memory(NativeDeviceMemory(core, runner.width))
+            print("M1 LOOP: one run, the program self-resets between tics "
+                  "-- W/S move, A/D or arrows turn, P screenshot, Q quits", flush=True)
+            try:
+                _c, ops, _e, _l, _pp = core.run(dev.read_bit, dev.write_bit, _EOF,
+                                                last_ops_length=0)
+            except Exception as exc:
+                print(f"  run ended: {exc}", flush=True)
+                ops = 0
+            el = time.perf_counter() - dev.t0
+            print(f"  {dev.tics} tics in {el:.1f}s ({dev.tics / max(el, 1e-9):.2f} fps), "
+                  f"{ops:,} fj ops in ONE run", flush=True)
+            pygame.quit()
+            return
+
         while running:
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:

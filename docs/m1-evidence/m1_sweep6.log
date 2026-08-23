@@ -1,0 +1,24 @@
+loop : build/doom_e1m1_loop.fjm  sha256 75794727dce656be18140f10c88cff5b647660c713bcea4c8d1e34a918c5689a
+old  : scratchpad/fjmcache/_rssprobe.fjm  sha256 3c13ec21424f7f5434bd2070d9a34796ab2f92de9657dc16e2894f4c63e4acee
+
+65 walkable grid points x 4 angles = 260 frames
+sweeping the OLD binary, one frame per run (the repo's metric) ...
+   40/260 frames (67s)
+   80/260 frames (130s)
+   120/260 frames (196s)
+   160/260 frames (262s)
+   200/260 frames (329s)
+   240/260 frames (397s)
+SWEEP over 260 frames, OLD binary (no reset in the program):
+  median 30,191,585   mean 30,929,878   min 7,675,375   max 61,405,073
+the same frames in ONE run on the LOOPING binary ...
+  8,106,973,552 ops, 260 frames (49s)
+  CONTROL (same pictures): 260/260 byte-exact  ok
+========================================================================================
+  sweep MEDIAN frame          : 30,191,585 ops
+  in-program reset, per frame : 250,789 ops
+  => the reset is 0.8% OF THE MEDIAN FRAME
+     (previously reported as 7.47%, against a 47.5M mean of GATE viewpoints -- the wrong
+      denominator. Gate frames overstate the typical frame, exactly as the handoff says.)
+========================================================================================
+SWEEP exit=0

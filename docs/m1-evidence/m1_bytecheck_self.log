@@ -1,0 +1,39 @@
+checking 4,349 nibble-cleared cells across 3 known byte arrays as the control
+SELFTEST 1/2: as shipped -- must PASS
+checking 4,349 nibble-cleared cells across 3 known byte arrays as the control
+  (-416,256,0x0,k=0)        46,927,659 ops    0.7s  cells>15 so far: 0
+  (664,291,0x18000000,k=1)    61,519,657 ops    1.3s  cells>15 so far: 0
+  (1272,-724,0x40000000,k=5)    54,804,140 ops    0.7s  cells>15 so far: 0
+  (1869,479,0x80000000,k=0)    51,929,636 ops    0.6s  cells>15 so far: 0
+
+CONTROL 1 (vacuity) -- the KNOWN byte arrays must themselves show values > 15:
+  sshead      24 of 682 cells held a value > 15   ok
+  pclm       160 of 160 cells held a value > 15   ok
+  sfflag     160 of 160 cells held a value > 15   ok
+
+RESULT: no nibble-cleared cell ever held a value > 15 across 4 viewpoints.
+        The three named byte arrays are the only byte arrays in the restore set.
+
+m1_bytecheck: PASS
+
+SELFTEST 2/2: one nibble-cleared cell planted with 0xA5 -- must FAIL
+checking 4,349 nibble-cleared cells across 3 known byte arrays as the control
+  (-416,256,0x0,k=0)        46,927,659 ops    0.5s  cells>15 so far: 1
+  (664,291,0x18000000,k=1)    61,519,657 ops    0.6s  cells>15 so far: 1
+  (1272,-724,0x40000000,k=5)    54,804,140 ops    0.6s  cells>15 so far: 1
+  (1869,479,0x80000000,k=0)    51,929,636 ops    0.5s  cells>15 so far: 1
+
+CONTROL 1 (vacuity) -- the KNOWN byte arrays must themselves show values > 15:
+  sshead      24 of 682 cells held a value > 15   ok
+  pclm       160 of 160 cells held a value > 15   ok
+  sfflag     160 of 160 cells held a value > 15   ok
+
+!! 1 NIBBLE-CLEARED CELLS HELD A VALUE > 15 -- they are BYTE cells and the reset
+   CORRUPTS them. e.g.:
+     word 17321  [('(-416,256,0x0,k=0)', 165), ('(664,291,0x18000000,k=1)', 165), ('(1272,-724,0x40000000,k=5)', 165)]
+
+m1_bytecheck: FAIL
+
+  clean   exit 0 (want 0)
+  planted exit 1 (want non-zero)
+M1 BYTECHECK SELFTEST: PASS

@@ -1,0 +1,9 @@
+running build_wall_renderer(self_reset=True) as far as pass 1 ...
+pass 1 reached in 1271s, 6,806,757 labels
+
+set's layout_fingerprint : 46422330e2a2aa53aca2233c682ae757ae39c3d1a5405473dea4511764765c99  (generated from scratchpad/_m1b_labels.tsv.gz)
+this build's pass-1 table: 46422330e2a2aa53aca2233c682ae757ae39c3d1a5405473dea4511764765c99
+
+load_restore_set against the REAL pass-1 table: ACCEPTED, 10,702 words
+
+m1_fpcheck: PASS -- the build-path assert is exercised and passes

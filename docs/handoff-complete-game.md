@@ -56,7 +56,20 @@ levels are content that hangs off a working loop.
 | ✅ measured | restoring exactly those two words gets *past* 9 ops — so they are real |
 | ⚠ measured, and damning | …but frame 2 then runs **>560 s against frame 1's 0.5 s**. Those two words are a **symptom**, not the cause. |
 | ✅ measured | one frame dirties ~4–5k words of 68,223,650; the union of four very different frames is 6,685; coalescing at gap 256 gives 216 ranges over 0.22 MB (`scratchpad/dirty_census.py --exact`) |
-| ❌ **UNVERIFIED** | the stride of `sshead`/`thnext`, which are **74% of the ~2,500 cells**. **Three previous probes disagreed.** |
+| ~~❌ UNVERIFIED~~ | ~~the stride of `sshead`/`thnext`, which are **74% of the ~2,500 cells**~~ |
+
+> **✅ M1a IS DONE (2026-08-20) — and BOTH halves of that last row were wrong. See
+> `docs/handoff-m1-reset.md`.**
+> The stride is **ONE hex cell** (`base + i*dw`), with all 8 bits inside that one cell, so entry `i`
+> dirties at most one word `base_word + 2i + 1`. Measured by `scratchpad/m1a_stride.py` (calibrated
+> against strides the stl states literally, K=1,2,3, plus discrimination/poison/vacuity controls),
+> confirmed on the shipped 84.8M-word binary, and re-derived independently from the stl on two
+> paths. **The three previous probes never disagreed** — they were all correct, and were misread
+> because in the *array* a byte is one cell while in a *register* it is two.
+> And `sshead`/`thnext` are **not 74%** of the dirty set: they are **75 of 6,706 words = 1.1%**.
+> The 74% came from the declared spans with `nt = 251`; the shipped binary bakes 176 things
+> statically and carries **nt = 75**. M1a was on the critical path for *correctness*, never for
+> *cost* — the cost is `sfslot`/`spslot` and ~900 macro-local scratch registers.
 
 **Do not write the reset prologue against an assumed stride.** That is the exact shape of failure
 this repo keeps hitting (CLAUDE.md rule 3). The first task is a probe with an R9 negative control.
@@ -67,24 +80,78 @@ this repo keeps hitting (CLAUDE.md rule 3). The first task is a probe with an R9
 
 **Goal:** the program renders frame N+1 correctly, on its own, with no host restore.
 
-**M1a — the stride probe.** Determine the `sshead`/`thnext` stride, with a negative control that
-mutates a known-good stride and *requires* the probe to reject it. Three prior probes disagreed;
-a fourth opinion without a control is worth nothing. *(hours, no build)*
+**M1a — the stride probe. ✅ DONE 2026-08-20** (`scratchpad/m1a_stride.py`,
+`scratchpad/m1_dirtymap.py`, `docs/handoff-m1-reset.md`). Answer above.
 
-**M1b — the dirty set from the EMITTER, not from sampling.** `dirty_census` learned its ranges from
-4–5 sample frames. That bounds the prize; it does **not** bound the set. A word dirtied outside the
-sampled ranges survives into the next frame — and because the program self-modifies, a leak does not
-politely produce a wrong pixel, it produces a **different program**. The emitter knows every address
-it writes; derive the set there and cross-check it against the census. *(days, no build)*
+**M1b — the dirty set from the EMITTER, not from sampling.** *(days, no build; roughly half done)*
+`dirty_census` learned its ranges from 4–5 sample frames. That bounds the prize; it does **not**
+bound the set. A word dirtied outside the sampled ranges survives into the next frame — and because
+the program self-modifies, a leak does not politely produce a wrong pixel, it produces a
+**different program**. The emitter knows every address it writes; derive the set there and
+cross-check it against the census.
+- ✅ the measured side is done and **NAMED**: `scratchpad/_m1b_labels.tsv.gz` (6,806,757 labels,
+  sha-matched to the shipped `.fjm`) lets `m1_dirtymap.py` attribute every dirty word to its label.
+  Grand union over 12 frames × 3 key states = **10,230 words**, of which **10,227 are data-cell
+  value words and only 3 are code words** (0, 2, 1030).
+- ✅ a source-side enumeration (no build) produced a **≈14,918-word upper bound at keys=0** and four
+  falsifiable predictions, all of which the attribution then confirmed — including the exact
+  14-word stl set below `code_start`, predicted before the label table existed.
+- ❌ still owed: the per-instantiation count of stl-created `@` scratch vectors (47% of the set),
+  the complete list of **non-zero pristine** cells (a `memset(0)` prologue is wrong — `pmax = 159`),
+  the two never-cleared latches, and the `stl.fcall` early-out check this branch is named after.
+- ⚠ two receipts that a *sampled* set cannot be trusted: word 1 (the 9-op death) is **clean on one
+  of the four gate viewpoints**, and `thpos_rt`'s 1,200 words are invisible to every census because
+  the wire feeds the values already baked there.
 
-**M1c — the fj reset prologue.** ~2,500 cells restored in fj at frame start. Cost must be small
-against the ~29.4M-op frame. Gate: run the same frame twice and require **identical op counts and
-identical pixels**, plus an exact 68M-word walk against the pristine image. *(days, builds)*
+**M1c — the fj reset prologue.** *(days, builds)* **DONE 2026-08-21, SHIPPED 2026-08-22.**
 
-**M1d — the internal frame loop.** The program loops instead of the host re-launching it.
-**This is the first moment the thing is a game rather than a frame renderer.**
+⚠ [SUPERSEDED BELOW. The numbers in this section are the *Python-validated candidate* set. The
+SHIPPED set is far smaller: read-before-write analysis and the CR round-2 `sshead` trim took it to
+**4,349 nibble + 1,002 byte cells** (`scratchpad/_m1_wired2.log`), not 66,207 cells, and it is
+written in fj, not "left to write". Kept because the derivation rule below — DERIVE labels, never
+learn cells — is what makes the set sound, and that has not changed.]
+- the set is **DERIVED**, not learned: the full `[label, next label)` extent of (a) the 265
+  emitter-declared runtime-state labels, (b) the 6,546 macro-locals whose name is declared
+  `hex.vec`/`bit.vec` anywhere — including in **generated** macros, which exist in no `.fj` file —
+  and (c) 9 observed extras. With `--drop-luts`: **6,813 labels → 132,414 words = 66,207 hex cells
+  in 3,768 runs, only 7,330 of them non-zero.** So ~94.5% of the prologue is a clear-to-zero, and
+  the values it does need are read out of the assembled image.
+  ⚠ SUPERSEDED: the shipped set is **10,702 words / 5,351 cells** (4,349 nibble + 1,002 byte) after
+  read-before-write analysis and the `sshead` trim — 12.4x smaller than this candidate.
+- ⚠ **a hole in `sshead` does not diverge — it HANGS.** `sshead` is a linked-list head; leave it
+  stale and `bind_things` prepends onto a non-empty list and `thing_pass` can walk a cycle.
+  Measured: frame 2 killed at 180 s against a 0.22 s clean re-run. That is almost certainly what
+  `3046a40` saw as "STILL RUNNING AFTER 560s".
+- **11 of 11 frames** restore to a **0-differ exact walk over all 84,823,030 words**, with the
+  re-run reproducing op count and pixels byte for byte — including **7 holdout frames the set was
+  never built from** (three never-censused viewpoints, a moved-things wire, turn-only key states).
+- ⚠ **not ~2,500 cells** — that figure came from the same accounting as the 74%. And ⚠ **not
+  `memset(0)`**: 81,573 of the words are non-zero in the pristine image.
+- ⚠ **every leak found along the way was PIXEL-IDENTICAL and op-count-visible.** `deg_gate` cannot
+  see any of it. The gate must be the exact 84.8M-word walk + op count, not a picture.
+Gate: run the same frame twice and require **identical op counts and identical pixels**, plus an
+exact 84.8M-word walk against the pristine image, per frame.
 
-**Payoff:** kills the ~52 ms/frame ceiling → the first honest fps number; unblocks M5 entirely.
+**M1d — the internal frame loop. DONE 2026-08-21, together with M1c.**
+Doing them together is what made M1c easy: **in a loop op 0 never re-executes**, so the 9-op
+death stops mattering -- the program re-enters at `__hot_end`. The gate runs 12 frames from ONE
+execution, byte-exact. See `docs/handoff-m1-reset.md` section 7.
+
+**Payoff -- MEASURED:** the host reload is gone. The in-program reset costs **250,789 ops/frame
+= 0.8% of the 30,191,585-op sweep MEDIAN** (an earlier 7.47% figure used the mean of eight gate
+viewpoints -- the wrong denominator; a later 270,811 was measured before the `sshead` trim).
+260/260 sweep frames byte-exact. **M5 is unblocked.**
+
+⚠ **The 3.85x CPU-time figure (1918.0 -> 498.0 ms/frame) is UNVERIFIED for the shipped binary.**
+It was measured on 2026-08-21 against the pre-CR, pre-trim, pre-rebuild program and has not been
+re-run since; do not quote it without re-measuring. The ratio was the point, not the absolutes,
+which are harness-bound rather than the game's fps.
+
+**WIRED 2026-08-22.** `build_wall_renderer(self_reset=True)` does both passes and refuses the
+binary if a baked address moved; `scripts/walk_e1m1.py --fjm PATH --loop` runs it. The shipped
+artifact is `build/doom_e1m1_loop.fjm` (span 85,468,976 words, flat, headroom 1.57). The only
+caller of the flag is still `scratchpad/m1_wired_build.py` -- `walk_e1m1.py` consumes a prebuilt
+loop `.fjm`, it does not produce one.
 
 ---
 
@@ -249,14 +316,43 @@ The cheap assembler wins are **spent**. What is left, in expected-value order:
 - `__slots__` on sly's `Token`/`YaccProduction` — already present.
 - `gc.freeze()` + freeing the macro tree — no change to peak; the peak is before the frees.
 
-**Q1 (10 minutes, high value):** measure peak RSS of the current build. If it is comfortably under
-half of RAM, `CLAUDE.md` rule 1 can be relaxed to two concurrent builds and **every gate day gets
-twice as fast** — worth more than any remaining assembler micro-optimisation.
+**Q1 — ✅ ANSWERED 2026-08-20, and the answer is NO.** `scratchpad/m1q_rss.py` measured peak RSS of
+the current shipped build twice — **9.46 GB** with 2.1 GB free at start (paging) and **9.66 GB**
+with 7.5 GB free. Two concurrent builds need ~19 GB against 16.8 GB of RAM = **112 %**.
+**`CLAUDE.md` rule 1 stands; do not relax it.** The same run puts a clean number on the assemble
+phase alone: **396.5 s CPU / 639.9 s wall** (the table above says 342 s CPU / 559 s wall — same
+order, and the wall gap is this machine's VM drift).
 
 ---
 
 ## 7. Where to start next session
 
-1. Read this file, then `CLAUDE.md`, then `docs/cr-rules.md`.
-2. **M1a**: the `sshead`/`thnext` stride probe, with its R9 negative control.
-3. Do **not** write the reset prologue until M1a and M1b agree on the dirty set.
+1. Read this file, then `docs/handoff-m1-reset.md`, then `CLAUDE.md`, then `docs/cr-rules.md`.
+
+⚠⚠ **ITEMS 2-4 BELOW ARE ALL SUPERSEDED (2026-08-22). M1 IS DONE, WIRED AND GATED.** They are kept
+because the *reasoning* in them is sound and the next milestone needs it, but every instruction in
+them is stale. `docs/handoff-m1-reset.md` §9.5 has the current state.
+
+CR round 8 caught a strike-through here closing at the end of its own first line, so the
+continuation rendered live while a note underneath *claimed* the whole item was struck -- twice
+over, because round 7's "fix" added the note instead of moving the marker. Hence a plain banner
+rather than inline markup: it is harder to get wrong, and this block has now been wrong about
+itself twice.
+
+> **2.** M1a done; next is the rest of M1b, none of it needs a build.
+> -> M1b is done. The set is derived, trimmed and shipped.
+>
+> **3.** Do not write the reset prologue until M1a and M1b agree on the dirty set. What is missing
+> is the complete list of non-zero pristine cells, because a prologue that zeroes `pmax` kills plane
+> attribution for the whole frame and does it silently.
+> -> They agreed; the prologue is written, gated and shipped. The non-zero pristine cells are
+> enumerated -- **341** `hex.set 1, ...` singles in the emitted part -- and they are read out of the
+> assembled image rather than listed by hand, which is why the failure this warned about cannot
+> occur. The concern was right and is now structurally impossible, which is the good outcome.
+>
+> **4.** Two cheap no-build things first: the `stl.fcall` early-out check, and re-running the census
+> with a wire whose thing positions differ from the baked spawn values.
+> -> The census question was settled another way (read-before-write, `scratchpad/m1_rbw.py`). The
+> `stl.fcall` early-out check is **still untaken** and still cheap -- this branch is named for it,
+> `m13opt3-early-out`, and nothing in M1 touched it.
+

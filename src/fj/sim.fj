@@ -91,94 +91,86 @@ ns sim {
     //   the opening  : cp_floor/cp_ceil, narrowed IN PLACE (map units, 8-nibble signed)
     //
     // ⚠ EACH TABLE'S ROW IS READ IN ONE GO. `hex.read_table_packed nb, ...` strides by nb, so
-    // reading a single field with `nb = 2` would stride by 2 bytes and land in the wrong row. Since
-    // M-CONSTADDR C5 the linedef is TWO tables, each read whole: `lnbox` (8 bytes: minx maxx miny
-    // maxy) into `rbox`, and -- only for candidates that survive the bbox -- `lnrow` (the other 14)
-    // into `rrow`. Within each buffer every field is a compile-time nibble offset: byte k of the
-    // BOX is at `rbox + 2k*dw`, byte k of the REST at `rrow + 2k*dw`. ⚠ The rest-buffer byte
-    // numbers are therefore the POST-SPLIT ones (rest byte k = old row byte k+8); the comments
-    // below carry the post-split numbers, and getting one wrong does not crash -- it walks the
-    // player through a wall.
-    def check_line lnbox, lnrow, n_ln, li, blocked             @ rbox, rrow, rv1x, rv1y, rdxi, rdyi, rtmp, ropen, p1, p2, cst,               nxt, hit, k_a, k_b, k_c, k_d,               axis, diag, do_h, do_v, do_pos, do_neg, h1, v1c, cmp_p,               open_f, open_c, set_f, set_c, body             < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_floor, cp_ceil {
-        ;body                                  // the @-local DATA below must never execute
-      rbox: hex.vec 16                         // bytes 8..15 of the row: minx maxx miny maxy
-      rrow: hex.vec 28                         // the other 14 bytes, read only on survival
-      rv1x: hex.vec 8
-      rv1y: hex.vec 8
-      rdxi: hex.vec 8
-      rdyi: hex.vec 8
-      rtmp: hex.vec 8
-      ropen: hex.vec 8
-      p1: hex.vec 1
-      p2: hex.vec 1
-      cst: hex.vec 1
-      body:
+    // reading a single field with `nb = 2` would stride by 2 bytes and land in the wrong row. The
+    // linedef is TWO tables, each read whole: `lnbox` (8 bytes: minx maxx miny maxy) into `cl_box`,
+    // and -- only for candidates that survive the bbox -- `lnrow` (the other 14) into `cl_rest`.
+    // Within each buffer every field is a compile-time nibble offset: box byte k is at
+    // `cl_box + 2k*dw`, rest byte k at `cl_rest + 2k*dw`. ⚠ Rest byte k is old row byte k+8; the
+    // comments below carry the post-split numbers, and getting one wrong does not crash -- it
+    // walks the player through a wall.
+    //
+    // The scratch (`cl_*`) is GLOBAL, declared in collision.py::COLLISION_STATE_DECLS, not @-local:
+    // check_position expands this macro four times (one per box corner) and four private copies
+    // would be four cells the M1 restore set could only name by expansion path.
+    def check_line lnbox, lnrow, n_ln, li, blocked \
+            @ nxt, hit, k_a, k_b, k_c, k_d, axis, diag, do_h, do_v, do_pos, do_neg, h1, v1c, cmp_p, open_f, open_c, set_f, set_c \
+            < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_floor, cp_ceil, cl_box, cl_rest, cl_v1x, cl_v1y, cl_dx, cl_dy, cl_tmp, cl_open, cl_side1, cl_side2, cl_const {
         // M-CONSTADDR C5: the BBOX HALF ONLY -- 8 bytes, so 8 pointer setups instead of 22. Most
         // candidates die on the four compares below, and every byte read for them was wasted:
         // `read_table_packed nb` is nb separate set_flip_and_jump_pointers rebuilds (~781 ops each).
         // Same lever M14.5 applied to thing_load ("those four moved to frame.thing_load_cold,
         // which runs AFTER the vis reject").
-        hex.read_table_packed 8, rbox, lnbox, n_ln, li
+        hex.read_table_packed 8, cl_box, lnbox, n_ln, li
 
         // ---- bbox reject: right <= minx, left >= maxx, top <= miny, bottom >= maxy -----------
-        .fix16 rtmp, rbox                               // minx  (box byte 0)
-        hex.scmp 8, cbx_hi, rtmp, nxt, nxt, k_a
+        .fix16 cl_tmp, cl_box                               // minx  (box byte 0)
+        hex.scmp 8, cbx_hi, cl_tmp, nxt, nxt, k_a
       k_a:
-        .fix16 rtmp, rbox + 4*dw                        // maxx  (box byte 2)
-        hex.scmp 8, cbx_lo, rtmp, k_b, nxt, nxt
+        .fix16 cl_tmp, cl_box + 4*dw                        // maxx  (box byte 2)
+        hex.scmp 8, cbx_lo, cl_tmp, k_b, nxt, nxt
       k_b:
-        .fix16 rtmp, rbox + 8*dw                        // miny  (box byte 4)
-        hex.scmp 8, cby_hi, rtmp, nxt, nxt, k_c
+        .fix16 cl_tmp, cl_box + 8*dw                        // miny  (box byte 4)
+        hex.scmp 8, cby_hi, cl_tmp, nxt, nxt, k_c
       k_c:
-        .fix16 rtmp, rbox + 12*dw                       // maxy  (box byte 6)
-        hex.scmp 8, cby_lo, rtmp, k_d, nxt, nxt
+        .fix16 cl_tmp, cl_box + 12*dw                       // maxy  (box byte 6)
+        hex.scmp 8, cby_lo, cl_tmp, k_d, nxt, nxt
       k_d:
         // SURVIVED the bbox -- now, and only now, pay for the other 14 bytes.
-        hex.read_table_packed 14, rrow, lnrow, n_ln, li
+        hex.read_table_packed 14, cl_rest, lnrow, n_ln, li
         // ---- P_BoxOnLineSide: only a STRADDLING box can be refused ---------------------------
-        .fix16 rv1x, rrow                               // v1x   (byte 0)
-        .fix16 rv1y, rrow + 4*dw                        // v1y   (byte 2)
+        .fix16 cl_v1x, cl_rest                               // v1x   (byte 0)
+        .fix16 cl_v1y, cl_rest + 4*dw                        // v1y   (byte 2)
         // slope (rest byte 8; row byte 16) is 0..3, so its two low bits ARE the switch: bit 1 separates the
         // diagonals from the axis cases, bit 0 picks within each pair. `hex.if_flags`' mask is a
         // set of nibble VALUES, so "bit 1 set" is {2,3} = 0xCCCC and "bit 0 set" is {1,3} = 0xAAAA.
-        hex.if_flags rrow + 16*dw, 0xCCCC, axis, diag
+        hex.if_flags cl_rest + 16*dw, 0xCCCC, axis, diag
       axis:
-        hex.if_flags rrow + 16*dw, 0xAAAA, do_h, do_v
+        hex.if_flags cl_rest + 16*dw, 0xAAAA, do_h, do_v
       do_h:                                             // horizontal: straddle iff bottom <= v1y < top
-        hex.scmp 8, cby_hi, rv1y, nxt, nxt, h1
+        hex.scmp 8, cby_hi, cl_v1y, nxt, nxt, h1
       h1:
-        hex.scmp 8, cby_lo, rv1y, hit, hit, nxt
+        hex.scmp 8, cby_lo, cl_v1y, hit, hit, nxt
       do_v:                                             // vertical: straddle iff left < v1x <= right
-        hex.scmp 8, cbx_hi, rv1x, nxt, v1c, v1c
+        hex.scmp 8, cbx_hi, cl_v1x, nxt, v1c, v1c
       v1c:
-        hex.scmp 8, cbx_lo, rv1x, hit, nxt, nxt
+        hex.scmp 8, cbx_lo, cl_v1x, hit, nxt, nxt
       diag:
-        .sext16 rdxi, rrow + 8*dw                       // dxi   (byte 4) — a VALUE, so sign-extend
-        .sext16 rdyi, rrow + 12*dw                      // dyi   (byte 6)
-        hex.if_flags rrow + 16*dw, 0xAAAA, do_pos, do_neg
+        .sext16 cl_dx, cl_rest + 8*dw                       // dxi   (byte 4) — a VALUE, so sign-extend
+        .sext16 cl_dy, cl_rest + 12*dw                      // dyi   (byte 6)
+        hex.if_flags cl_rest + 16*dw, 0xAAAA, do_pos, do_neg
       do_pos:                                           // "/" : (left, top) vs (right, bottom)
-        .point_side p1, cbx_lo, cby_hi, rv1x, rv1y, rdxi, rdyi
-        .point_side p2, cbx_hi, cby_lo, rv1x, rv1y, rdxi, rdyi
+        .point_side cl_side1, cbx_lo, cby_hi, cl_v1x, cl_v1y, cl_dx, cl_dy
+        .point_side cl_side2, cbx_hi, cby_lo, cl_v1x, cl_v1y, cl_dx, cl_dy
         ;cmp_p
       do_neg:                                           // "\" : (right, top) vs (left, bottom)
-        .point_side p1, cbx_hi, cby_hi, rv1x, rv1y, rdxi, rdyi
-        .point_side p2, cbx_lo, cby_lo, rv1x, rv1y, rdxi, rdyi
+        .point_side cl_side1, cbx_hi, cby_hi, cl_v1x, cl_v1y, cl_dx, cl_dy
+        .point_side cl_side2, cbx_lo, cby_lo, cl_v1x, cl_v1y, cl_dx, cl_dy
       cmp_p:
-        hex.cmp 1, p1, p2, hit, nxt, hit                // differ -> straddling
+        hex.cmp 1, cl_side1, cl_side2, hit, nxt, hit                // differ -> straddling
       hit:
         // ---- the blocking rules, then the opening --------------------------------------------
-        hex.set 1, cst, 0
-        hex.cmp 1, rrow + 18*dw, cst, blocked, open_f, blocked   // flags != 0 -> a wall
+        hex.set 1, cl_const, 0
+        hex.cmp 1, cl_rest + 18*dw, cl_const, blocked, open_f, blocked   // flags != 0 -> a wall
       open_f:
-        .sext16 ropen, rrow + 24*dw                     // openbottom (rest byte 12; row byte 20) -> floorz = max
-        hex.scmp 8, ropen, cp_floor, open_c, open_c, set_f
+        .sext16 cl_open, cl_rest + 24*dw                     // openbottom (rest byte 12; row byte 20) -> floorz = max
+        hex.scmp 8, cl_open, cp_floor, open_c, open_c, set_f
       set_f:
-        hex.mov 8, cp_floor, ropen
+        hex.mov 8, cp_floor, cl_open
       open_c:
-        .sext16 ropen, rrow + 20*dw                     // opentop (rest byte 10; row byte 18) -> ceilingz = min
-        hex.scmp 8, ropen, cp_ceil, set_c, nxt, nxt
+        .sext16 cl_open, cl_rest + 20*dw                     // opentop (rest byte 10; row byte 18) -> ceilingz = min
+        hex.scmp 8, cl_open, cp_ceil, set_c, nxt, nxt
       set_c:
-        hex.mov 8, cp_ceil, ropen
+        hex.mov 8, cp_ceil, cl_open
       nxt:
     }
 }
@@ -198,9 +190,7 @@ ns sim {
     // so the position is BIASED by 2^15 map units first. Map coords are int16, so x + 32768 >= 0
     // always, and (x16 + (32768 << 16)) >> 6 nibbles is (x_int + 32768) >> 8 exactly -- one
     // whole-nibble shift, which is why blocks are 256 units and not DOOM's 128.
-    def check_position bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0             @ blocked, done, body             < cpx, cpy, cprad, cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil,               cp_seedf, cp_seedc {
-        ;body                                  // (the per-corner scratch lives in check_block)
-      body:
+    def check_position bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0             @ blocked, done             < cpx, cpy, cprad, cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil,               cp_seedf, cp_seedc {
         hex.set 1, cp_ok, 1
         hex.mov 8, cp_floor, cp_seedf
         hex.mov 8, cp_ceil, cp_seedc
@@ -224,51 +214,40 @@ ns sim {
 
     // sim.check_block — one corner's block: index it, bounds-check it, run its line list.
     def check_block bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, xreg, yreg, blocked \
-            @ body, bt, bu, bcst, bi, rbk, off, cnt, k, kend, li, xok, yok, skip, lloop, lbody {
-        ;body
-      bt: hex.vec 8
-      bu: hex.vec 8
-      bcst: hex.vec 8
-      bi: hex.vec 4
-      rbk: hex.vec 6
-      off: hex.vec 4
-      cnt: hex.vec 4
-      k: hex.vec 4
-      kend: hex.vec 4
-      li: hex.vec 4
-      body:
-        hex.mov 8, bt, xreg
-        hex.set 8, bcst, 0x80000000
-        hex.add 8, bt, bcst
-        hex.shr_hex 8, 6, bt
-        hex.mov 8, bu, yreg
-        hex.add 8, bu, bcst
-        hex.shr_hex 8, 6, bu
-        hex.set 4, bcst, (ibx0 + 128) & 0xFFFF
-        hex.sub 4, bt, bcst
-        hex.set 4, bcst, (iby0 + 128) & 0xFFFF
-        hex.sub 4, bu, bcst
-        hex.set 4, bcst, nbx
-        hex.cmp 4, bt, bcst, xok, skip, skip
+            @ xok, yok, skip, lloop, lbody \
+            < cb_bx, cb_by, cb_const, cb_idx, cb_row, cb_first, cb_count, cb_k, cb_kend, cb_line {
+        hex.mov 8, cb_bx, xreg
+        hex.set 8, cb_const, 0x80000000
+        hex.add 8, cb_bx, cb_const
+        hex.shr_hex 8, 6, cb_bx
+        hex.mov 8, cb_by, yreg
+        hex.add 8, cb_by, cb_const
+        hex.shr_hex 8, 6, cb_by
+        hex.set 4, cb_const, (ibx0 + 128) & 0xFFFF
+        hex.sub 4, cb_bx, cb_const
+        hex.set 4, cb_const, (iby0 + 128) & 0xFFFF
+        hex.sub 4, cb_by, cb_const
+        hex.set 4, cb_const, nbx
+        hex.cmp 4, cb_bx, cb_const, xok, skip, skip
       xok:
-        hex.set 4, bcst, nby
-        hex.cmp 4, bu, bcst, yok, skip, skip
+        hex.set 4, cb_const, nby
+        hex.cmp 4, cb_by, cb_const, yok, skip, skip
       yok:
-        hex.mul_const 4, bi, bu, nbx
-        hex.add 4, bi, bt
-        hex.read_table_packed 3, rbk, bkoff, n_bk, bi
-        hex.mov 4, off, rbk                    // [offset:2] = the first 4 nibbles
-        hex.zero 4, cnt
-        hex.mov 2, cnt, rbk + 4*dw             // [count:1]
-        hex.mov 4, k, off
-        hex.mov 4, kend, off
-        hex.add 4, kend, cnt
+        hex.mul_const 4, cb_idx, cb_by, nbx
+        hex.add 4, cb_idx, cb_bx
+        hex.read_table_packed 3, cb_row, bkoff, n_bk, cb_idx
+        hex.mov 4, cb_first, cb_row                    // [offset:2] = the first 4 nibbles
+        hex.zero 4, cb_count
+        hex.mov 2, cb_count, cb_row + 4*dw             // [count:1]
+        hex.mov 4, cb_k, cb_first
+        hex.mov 4, cb_kend, cb_first
+        hex.add 4, cb_kend, cb_count
       lloop:
-        hex.cmp 4, k, kend, lbody, skip, skip
+        hex.cmp 4, cb_k, cb_kend, lbody, skip, skip
       lbody:
-        hex.read_table_packed 2, li, bklin, n_bl, k
-        .check_line lnbox, lnrow, n_ln, li, blocked
-        hex.inc 4, k
+        hex.read_table_packed 2, cb_line, bklin, n_bl, cb_k
+        .check_line lnbox, lnrow, n_ln, cb_line, blocked
+        hex.inc 4, cb_k
         ;lloop
       skip:
     }

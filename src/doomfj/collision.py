@@ -169,6 +169,35 @@ def check_position_ops(bakes, *, radius: int, seed_floor: int, seed_ceil: int) -
     return out
 
 
+# ── check_block / check_line scratch — ONE definition, spliced in by every consumer ─────
+#
+# HOISTED OUT OF THE MACROS. `check_position` runs `rep(4, q) .check_block`, so an @-local vec
+# inside check_block (or its nested check_line) is emitted FOUR times under one source name --
+# four addresses the M1 restore set cannot name, which is why 236 of its 344 entries were mangled
+# expansion paths (`f9:l208:rep0:sim.check_block(14)---...---p1`). The four corners run
+# SEQUENTIALLY and every register here is pure scratch, so one shared set is equivalent, a quarter
+# of the cells, and NAMEABLE.
+#
+# ⚠ Anything that assembles sim.check_position / check_block / check_line MUST emit these. They
+# were duplicated in four places once; that is what this constant exists to prevent (rule 5).
+CHECK_SCRATCH_DECLS = [
+    "cb_bx: hex.vec 8", "cb_by: hex.vec 8",   # the corner's block x / y
+    "cb_const: hex.vec 8",                    # constant staging
+    "cb_idx: hex.vec 4",                      # block index = by*nbx + bx
+    "cb_row: hex.vec 6",                      # that block's bkoff row: [first:2][count:1]
+    "cb_first: hex.vec 4", "cb_count: hex.vec 4",
+    "cb_k: hex.vec 4", "cb_kend: hex.vec 4",  # the line-list walk
+    "cb_line: hex.vec 4",                     # the linedef index handed to check_line
+    "cl_box: hex.vec 16",                     # lnbox row: minx maxx miny maxy
+    "cl_rest: hex.vec 28",                    # lnrow row: the other 14 bytes, read on survival
+    "cl_v1x: hex.vec 8", "cl_v1y: hex.vec 8", # the line's first vertex
+    "cl_dx: hex.vec 8", "cl_dy: hex.vec 8",   # its delta
+    "cl_tmp: hex.vec 8", "cl_open: hex.vec 8",
+    "cl_side1: hex.vec 1", "cl_side2: hex.vec 1",   # box-corner sides for P_BoxOnLineSide
+    "cl_const: hex.vec 1"
+]
+
+
 COLLISION_DECLS = [
     "cpx: hex.vec 8", "cpy: hex.vec 8", "cprad: hex.vec 8",
     "cbx_lo: hex.vec 8", "cbx_hi: hex.vec 8", "cby_lo: hex.vec 8", "cby_hi: hex.vec 8",
@@ -527,7 +556,8 @@ COLLISION_STATE_DECLS = [
     "cm_hf: hex.vec 8",                       # the floor the player is standing on now
     "cm_dx: hex.vec 8", "cm_dy: hex.vec 8",   # the tic's desired move
     "cs_ret: hex.vec w/4",                    # the seed descent's fcall return
-]
+
+] + CHECK_SCRATCH_DECLS
 
 
 def move_with_collision_lines(grid, mapname_pfx: str, *, radius: int, height: int, maxstep: int,

@@ -463,10 +463,13 @@ does not read back the table's value (see §13.4).
 |---|---:|
 | `proj.angle_to_x`, `disp=0` (packed read, as shipped) | 8,827.7 |
 | `proj.angle_to_x`, `disp=1` (the same macro, dispatch) | 1,809.5 |
-| **saved** | **7,018.2** |
+| **saved** | **7,018.2** ⚠ |
 | `finesine.read_sin`, `per_result_nibble` (as shipped) | 983.2 |
 | `finesine.read_sin`, `per_entry` | 452.6 |
-| **saved** | **530.6** |
+| **saved** | **530.6** ⚠ |
+
+⚠ **These are ISOLATED-PROBE prices and they do NOT reconcile against the whole-program
+delta — see §13.8. Do not estimate from them.**
 
 ⚠ **The first run of that probe said 8,404.7 for `angle_to_x`, and it was wrong.** Arm B was a
 BARE `vtxdisp.lookup` rather than the macro with `disp=1`, so `A-B` credited the change with
@@ -474,17 +477,14 @@ BARE `vtxdisp.lookup` rather than the macro with `disp=1`, so `A-B` credited the
 change keeps. **Measure a rep-gated macro by flipping its flag, never against the inner call the
 flag selects.** The corrected 7,018.2 is what the source comments carry.
 
-### 13.3 Why -734k and not -1.6M — the two medians are different frames
+### 13.3 ⚠ WITHDRAWN — this section fitted a coincidence and the numbers refute it
 
-`scratchpad/ca2_callcount.py` counts oracle calls per frame (the oracle mirrors the fj program
-call-for-call, so this counts fj calls). At the median of the CALL-COUNT distribution `angle_to_x`
-runs 228 times; 228 x 7,018 = 1.60M, which is roughly the sweep's *max* delta (-1.78M), not its
-median. The frame at the median of the OPS distribution is a much lighter frame — 24.8M against
-the gate's 34-44M — and runs ~105 calls: 105 x 7,018 = 737k, against a measured -734,426.
-
-**The lesson is not about this change.** A per-call price times a median call count is not a median
-saving, because the median of one distribution is a different frame from the median of the other.
-Only the end-to-end sweep answers the question the cost model asks.
+This section used to explain the -734,426 deg-tier median as "~105 calls x 7,018 = 737k". That was
+a NUMBER THAT HAPPENED TO MATCH, not a mechanism: the call count was inferred by dividing the
+answer by the price, so of course it reproduced the answer. The one lesson worth keeping is the
+statistical one — **a per-call price times a MEDIAN call count is not a median saving**, because
+the median of the call-count distribution is a different frame from the median of the ops
+distribution. Everything else here was retro-fitting; see §13.8.
 
 ### 13.4 What the probes now refuse to do
 
@@ -528,6 +528,50 @@ fails that last test — deg_gate would only show moved pixels with no indicatio
   `frame.seg_pass1_leaf_body_lines`, `..._ts` and `frame.seg_pass2_leaf_body_lines`). Dead in the
   shipped tier; live in tests.
 * **`finetangent`** in `texture_u` has no dispatch and is on the same dead path.
+
+### 13.8 ⚠ THE ATTRIBUTION IS UNVERIFIED — the RESULT is not
+
+**What is measured and certain:** the shipped-tier median falls 29,054,107 -> 27,932,265
+(-1,121,842, -3.86%), 260 of 260 frames byte-exact, span down 127,226 words. Nothing below
+qualifies any of that.
+
+**What is NOT established: that this saving is the four changes.** Profiling one shipped-tier frame
+(`scratchpad/ca2_profile.py`, viewpoint (-416,256,0x0), both binaries, byte-exact and every op
+accounted for) gives 42,464,060 -> 39,899,775, a saving of 2,564,285. But at that viewpoint
+`scratchpad/ca2_callcount.py` counts `angle_to_x` running **430** times, and §13.2 prices the
+change at **7,018.2 ops/call**:
+
+    angle_to_x alone : 430 x 7,018.2  = 3,017,826 predicted
+    the WHOLE frame  :                  2,564,285 measured
+
+**One of four changes predicts more saving than the entire frame achieved**, before `sinadisp`,
+`finesine`, `cproj` and the 22 deleted `hex.zero` calls, which together add roughly another 1.1M.
+So the per-call price, the call count, or both are wrong by about 2x, or something in the change
+costs ~1.6M that is unaccounted for. **Which of those is true is NOT KNOWN.**
+
+Two attempts to resolve it failed, and both failures are worth recording:
+
+* **A padding experiment** — rebuild without C5 but with 413,668 words of dead padding — was
+  proposed and rejected. It would construct a configuration that never ships, and even a perfect
+  match would only be CONSISTENT with a placement story, never identify a cause. Owner's call, and
+  correct: that is not how you find out where time went.
+* **A per-address profile diff** was built and run, and is useless for this. The two binaries differ
+  in span by 127,226 words, so every region past the divergence sits at a different address in
+  each; the diff shows 223 buckets losing 26.7M ops and 219 gaining 24.1M against a net of 2.56M.
+  That is the image RELOCATING, not work disappearing. **Matching buckets by address across two
+  builds of different size compares unrelated code.**
+
+**What would settle it:** ablate. Every one of the four changes is behind a `rep` gate or a
+one-line emitter switch, so building with each flipped in turn and measuring ONE frame each gives
+an exact split on the real program, with no attribution machinery — the repo's own rule, *price a
+rep-gated macro by flipping its flag*. One wrinkle first: `scale_from_global_angle`'s `disp`
+currently gates BOTH `sinadisp` and `srdisp`, so it needs splitting before it can isolate either.
+
+A per-LABEL profiler was also considered and is NOT the answer here: the mangled labels do carry
+the full macro chain (6,811,602 of them on this program), but the heavy code lives in shared
+`stl.fcall` leaves emitted once and jumped into, so the chain records where code was EMITTED, not
+who called it — and `hex.pointers.read_byte`, which is exactly where `read_table_packed`'s cost
+sits, collapses into a single row serving every table in the program.
 
 ### 13.7 Span
 

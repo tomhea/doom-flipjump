@@ -894,9 +894,11 @@ ns proj {
         // values -- viewangletox as a per-entry D4 dispatch. MEASURED on THIS macro with only the
         // `disp` flag changed, both arms vacuity-checked (scratchpad/ca2_price.py, log
         // scratchpad/_ca2_price.log): 8,827.7 -> 1,809.5 ops/call, so 7,018.2 saved. angle_to_x
-        // runs twice per in-frustum seg -- 228 calls at the median of the CALL-COUNT distribution,
-        // ~105 at the median of the OPS distribution (a lighter frame; the two medians are
-        // different frames, which is why the whole-program delta is -734k and not -1.6M).
+        // runs twice per in-frustum seg. !! THAT 7,018.2 IS AN ISOLATED-PROBE PRICE AND IT DOES
+        // NOT RECONCILE with the whole program: at one profiled shipped-tier frame it predicts
+        // 3,017,826 ops of saving (430 calls) where the ENTIRE frame saved 2,564,285. The round-2
+        // RESULT is measured (-1,121,842 shipped median, 260/260 byte-exact); its ATTRIBUTION to
+        // this change is NOT. Do not estimate from it -- see docs/handoff-constaddr.md SS13.8.
         rep(disp, k) vtxdisp.lookup dst, vtx_idx
         ;end
 

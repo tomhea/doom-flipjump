@@ -639,6 +639,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # ⚠ An earlier version of that probe compared the WHOLE macro against a BARE `vtxdisp.lookup`
     # and reported 8,404.7 -- it was crediting the change with angle_to_x's prologue, which the
     # change keeps. Measure a rep-gated macro by flipping its flag, never against its inner call.
+    # ⚠ AND 7,018.2 IS STILL ONLY AN ISOLATED-PROBE PRICE: at one profiled shipped-tier frame it
+    # predicts 3,017,826 ops of saving (430 calls) where the WHOLE frame saved 2,564,285. The
+    # round-2 RESULT is measured (-1,121,842 shipped median, 260/260 byte-exact); its ATTRIBUTION
+    # to these four changes is NOT. Do not estimate from it -- see docs/handoff-constaddr.md §13.8.
     # Values are the SAME `tables.viewangletox_table` the packed LUT bakes (R6 SSOT), masked to
     # 32 bits exactly as `generate_viewangletox_lut_fj` does (the columns are signed sentinels).
     vtxdisp = (generate_dispatch_table_fj(

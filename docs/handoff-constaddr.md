@@ -241,3 +241,38 @@ So the repo currently has **three decisions and thirteen skipped tests** resting
 that no longer describes the tool. None of them is necessarily wrong now — the sizes involved are
 large — but none has been re-measured either. **Re-time one before trusting any of them.** The
 cheapest is the skipped tests: they either run or they do not, and finding out costs one run.
+
+## 12. C5 and C7 isolated — and the sweep cannot see collision at all
+
+**The methodological finding first, because it invalidates a class of measurement.**
+`scratchpad/m1_sweep.py:101` feeds `encode_feed(vx << 16, vy << 16, va, 0)` -- **keys = 0**. The
+player never moves across all 260 frames, so `try_move` / `check_position` / `check_line` never run.
+**The repo's headline metric describes a STATIONARY player.** That is fine for renderer work, which
+is what it was built for, but a collision optimisation is invisible to it by construction -- and
+reading the sweep alone would have rejected C5.
+
+Measured on the shipped tier, all runs byte-exact:
+
+| build | sweep (stationary) | play (100 frames, moving) |
+|---|---:|---:|
+| C2+C8 | 29,395,682 | 48,615,435 |
+| + C5 | 29,817,038 (+421,356) | 47,375,658 (**-1,239,777**) |
+| + C5 + C7 | 29,737,004 | 47,277,611 |
+| **C7 alone contributes** | **-80,034** | **-98,047** |
+
+**C7 is kept: it helps BOTH workloads and costs no span** (85,523,458 vs 85,523,360 words -- 98
+words, i.e. nothing). An earlier revert of C7 was WRONG; it was never the regression.
+
+**C5 is kept on the movement asymmetry**: +421k stationary against -1.24M moving, ~3:1, and real
+play moves. It does cost ~414k span and ~1,700 s of assemble time, which C2/C8/C7 did not.
+
+⚠ **C5's stationary cost is NOT explained.** With `keys=0` the collision path should barely execute,
+and the +176 superset cells account for only ~3.5k of the 421k. Either `check_position` runs more
+than expected on a stationary frame, or the split costs something outside `check_line`. **Do not
+quote a mechanism for it; it has not been found.**
+
+**And C5's premise had to be re-measured twice.** `scratchpad/ca_bbox_rate.py` first reported
+**0.0% rejected**, which looked like the premise collapsing. `PLAYER_RADIUS` is 16.16 FIXED
+(1,048,576) while `blockmap_candidates` and the bbox test take WHOLE MAP UNITS, so the query box
+spanned the entire map. The tell was not the rate but the candidate count: **1,175 per position
+against a true ~34**. Corrected: **98.8% rejected**, better than the 93% the survey assumed.

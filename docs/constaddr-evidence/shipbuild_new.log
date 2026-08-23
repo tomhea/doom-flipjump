@@ -1,0 +1,32 @@
+building the SHIPPED tier (self_reset=False) -> scratchpad\fjmcache\_ca2_ship_new.fjm
+
+{
+  "assemble_seconds": 1264.509,
+  "downscale": 2,
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": false
+  },
+  "fjm_bytes": 31172954,
+  "flat_limit": 134217728,
+  "headroom": 1.584,
+  "map": "E1M1",
+  "span_words": 84756676,
+  "storage_mode": "flat",
+  "tier": "lines/W1R/FT1+plane_near"
+}
+
+out    : scratchpad\fjmcache\_ca2_ship_new.fjm
+sha256 : 49d35b84ddd81ea7bc45605fb9b550f5aa97077bef1dfc96d5d8e4b2c1b22909
+bytes  : 31,172,954
+wall   : 2397 s  ! this machine's wall clock drifts ~70%; compare OP COUNTS, not this

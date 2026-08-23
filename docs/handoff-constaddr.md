@@ -405,9 +405,53 @@ a temp dir:
 **PICTURE CONTROL: 260 of 260 frames byte-exact between the two binaries** — a strictly stronger
 proof than deg_gate's four. VACUITY CONTROL: 254 distinct pictures across 260 frames.
 
-⚠ These are **deg-tier** numbers (`scratchpad/deg_gate.py`'s config: no sim, no M1 loop). They are
-NOT comparable to the 29,737,005 shipped-tier median in §12 — different config, different absolute
-scale. The DELTA is what transfers.
+⚠ The two tables above are **deg-tier** (`scratchpad/deg_gate.py`'s config). `deg_gate` passes no
+`state_wire`, no `player_sim`, no `collide` and no `moving_things`, so it builds a program without
+the whole M14 layer and its median runs ~4.3M below the shipped tier's. Their absolute values are
+not comparable to anything in §12.
+
+### 13.1a The SHIPPED tier — the same measurement on the program that actually ships
+
+Two `self_reset=False` builds (`scratchpad/ca2_shipbuild.py`), one from a pristine `f7a8ac7`
+worktree and one from this tree, swept interleaved over the same 260 viewpoints with the same
+`encode_feed` + things + bindings + visibility wire `m1_sweep.py` uses
+(`scratchpad/ca2_sweep_ship.py`, log `docs/constaddr-evidence/sweep_ship.log`):
+
+| | median | mean | min | max |
+|---|---:|---:|---:|---:|
+| base `f7a8ac7` | 29,054,107 | 29,490,018 | 7,597,552 | 58,353,520 |
+| + round 2 | 27,932,265 | 28,302,045 | 7,569,883 | 56,112,295 |
+| **delta** | **-1,121,842** | **-1,187,973** | -27,669 | -2,241,225 |
+| pct | **-3.86%** | -4.03% | | |
+
+**260 of 260 frames byte-exact**, 0 viewpoints presenting != 1 frame, 254 distinct pictures.
+
+⚠ **The shipped delta is LARGER than the deg delta (-1.12M vs -734k), not equal to it.** The
+shipped tier carries `moving_things`, so more segs survive per frame and `angle_to_x` /
+`scale_from_global_angle` run more often. **A saving measured on a reduced tier is a LOWER BOUND on
+the shipped one when the change is per-seg work** — the reduced tier has fewer segs. Do not assume
+a deg-tier delta transfers 1:1 in either direction; it is a different scene load.
+
+### 13.1b The campaign on ONE metric, for the first time
+
+§12's numbers are loop-binary MEANS including the reset; these are shipped-tier MEDIANS of
+`self_reset=False` builds, which is what the cost model actually reports:
+
+| build | shipped-tier median | delta |
+|---|---:|---:|
+| `_rssprobe.fjm`, pre-campaign (sha `3c13ec21…`) | 30,191,585 | — |
+| `f7a8ac7` — round 1 (C2/C5/C7/C8) | 29,054,107 | -1,137,478 |
+| this tree — + round 2 | **27,932,265** | -1,121,842 |
+| | | **-2,259,320 total (-7.48%)** |
+
+⚠ The first row is the ONE number here not re-measured in the round-2 session: it comes from
+`scratchpad/_ca_sweepF.log` / `docs/m1-evidence/m1_sweep6.log`, produced by the same tool over the
+same 260 viewpoints with the same wire. Corroboration: its span is 84,823,030 and the `f7a8ac7`
+baseline built here is 84,883,902 — a difference of 60,872 words, which is round 1's span add.
+Re-run it before quoting the -7.48% as certified.
+
+**Round 2 is worth about as much as all of round 1.** That is the price of the consolidation slip
+described at the top of this section.
 
 ### 13.2 Prices, and one that had to be corrected
 
@@ -493,5 +537,19 @@ fails that last test — deg_gate would only show moved pixels with no indicatio
 | `sinadisp` | 2,583 | 161 entries, one per column |
 | `finesine` per_entry vs per_result_nibble | +8,117 | 65,536 -> 81,920 words |
 
-The emitted `tables` part goes 300,177 -> 331,382 lines (+31,205). ~62k words on an 85.5M-word
-image: **+0.07%**.
+The emitted `tables` part goes 300,177 -> 331,382 lines (+31,205), i.e. the TABLES add ~62k words.
+
+⚠ **But the total span went DOWN.** MEASURED on the two shipped builds:
+
+| | span_words | sha256 |
+|---|---:|---|
+| base `f7a8ac7` | 84,883,902 | `204ae314d710619c…` |
+| + round 2 | **84,756,676** | `49d35b84ddd81ea7…` |
+| | **-127,226** | |
+
+An earlier draft of this section said "+62k words, +0.07%" — it counted the new TABLES and forgot
+that the change also DELETES code at every expansion: `finesine` per_entry is ~790k characters
+smaller than eight per-result-nibble tables, `angle_to_x` and `scale_from_global_angle` each shed
+instructions from every instantiation, and 22 `hex.zero` calls are gone. Net, the program is both
+faster and smaller. **A span estimate built from the data you added is not a span measurement**;
+`headroom` went 1.581 -> 1.584.

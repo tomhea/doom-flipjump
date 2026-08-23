@@ -175,7 +175,7 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | shipped config, `self_reset=False` | **84,823,030** | 1.26× OVER | 0.63× | flat |
 | **M1 (the same + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
 | **+ constant-address round 1 (C2/C5/C7/C8)** | **85,523,360** | 1.27× OVER | **0.637×** | **flat** (asserted) |
-| + constant-address round 2 (`vtxdisp`/`sinadisp`/finesine per_entry) | ⚠ NOT MEASURED — see below | | | |
+| + constant-address round 2, `self_reset=False` | **84,756,676** | 1.26× OVER | **0.631×** | **flat** (asserted) |
 
 (Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
 That trailing instruction used to be swallowed into the M14 row's last cell, where it read as
@@ -192,12 +192,16 @@ ledger's last entry while the shipped binary had moved on twice. What the two ro
   each. A ledger line for "the new table" would have said 0 and been wrong; the line is for the
   expansions.
 * **Round 2** adds three dispatch tables — `vtxdisp` (2,048×8 nibbles), `sinadisp` (161×8) and
-  `finesine` switched from `per_result_nibble` to `per_entry`. MEASURED on the emitted text: the
-  `tables` part goes **300,177 → 331,382 lines (+31,205)**, i.e. ≈**+62k words**, ~0.07% of the
-  image (`docs/handoff-constaddr.md` §13.7). ⚠ **The resulting total span has NOT been measured** —
-  round 2 was certified on `scratchpad/deg_gate.py`, which does not build the `self_reset` tier.
-  Fill this row from the next `build.py --self-reset` run and re-assert the flat limit; do not
-  quote the +62k estimate as the total.
+  `finesine` switched from `per_result_nibble` to `per_entry`. The `tables` part grows
+  **300,177 → 331,382 lines (+31,205)**, ≈ +62k words. ⚠ **And yet the TOTAL SPAN FALLS by
+  127,226 words** (84,883,902 → 84,756,676, both `self_reset=False`, both built in one session —
+  `docs/constaddr-evidence/shipbuild_base.log` / `shipbuild_new.log`; headroom 1.581 → 1.584).
+  The change deletes code at every expansion: `finesine` per_entry is ~790k characters smaller than
+  eight per-result-nibble tables, `angle_to_x` and `scale_from_global_angle` shed instructions from
+  every instantiation, and 22 dead `hex.zero` calls are gone. **A span figure derived from the data
+  you added is not a span measurement** — an earlier draft of this note said "+62k, +0.07%" and had
+  the sign wrong. ⚠ The `self_reset=True` tier is still unbuilt for round 2: the fj edits moved
+  labels, so the M1 restore set needs re-keying first (`scratchpad/ca_remap_set.py`).
 
 **M1 adds ONE segment, `<map>_07_reset.fj`** (`selfreset.emit_reset_part`). Its size is
 `nibble_cells` coalesced `hex.zero` runs + non-zero `hex.set 1` singles + one `rep` per byte

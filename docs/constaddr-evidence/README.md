@@ -12,11 +12,17 @@ round did not follow (CR-2026-08 R2 found 0 of ~20 `_ca_*` logs tracked).
 | `price.log` | `scratchpad/ca2_price.py` | ops/call for both arms of angle_to_x and of finesine.read_sin, every arm vacuity-checked |
 | `callcount.log` | `scratchpad/ca2_callcount.py --sweep 8` | calls/frame per kernel at the gate + sweep viewpoints, with a transparency control |
 | `bbox_rate.log` | `scratchpad/ca_bbox_rate.py --selftest` | C5's bbox reject rate on the sweep and contact point sets, with 3 negative controls |
+| `shipbuild_base.log` | `scratchpad/ca2_shipbuild.py` in a pristine f7a8ac7 worktree | the SHIPPED-tier baseline binary: span 84,883,902, sha `204ae314…` |
+| `shipbuild_new.log` | `scratchpad/ca2_shipbuild.py` on this tree | the SHIPPED-tier round-2 binary: span 84,756,676 (-127,226), sha `49d35b84…` |
+| `sweep_ship.log` | `scratchpad/ca2_sweep_ship.py --a <base> --b <new>` | **THE NUMBER THE COST MODEL REPORTS**: shipped-tier 260-frame median 29,054,107 -> 27,932,265 (-1,121,842, -3.86%), 260/260 byte-exact |
+| `mutations.log` | `scratchpad/m1_mutations.py` | every m1_reset.fj / selfreset.py mutation is caught, including by the two tests added in dd8190a |
+| `fjtests.log` | `python -m pytest tests/fj -q` | 182 passed, 15 skipped |
+| `hosttests.log` | `python -m pytest tests/host -q` | 287 passed, 1 deselected |
 
 ⚠ `gate_base.log` and `gate_new.log` are the two sides of the same comparison, built in the
 same session on the same machine. This machine's wall clock drifts ~70%, so only the OP COUNTS
 in them are comparable — never the timings.
 
-⚠ `sweep.log` is the **deg tier** (`scratchpad/deg_gate.py`'s config: no sim, no M1 loop). Its
+⚠ `sweep.log` is the **deg tier** (compare `sweep_ship.log` for the shipped tier) (`scratchpad/deg_gate.py`'s config: no sim, no M1 loop). Its
 absolute median is not comparable to the shipped-tier 29,737,005 in §12; the DELTA is.
 

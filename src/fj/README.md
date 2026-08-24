@@ -42,8 +42,6 @@ expanded. But they are not deletable without dropping the tiers they implement.
 |---|---:|---|---|
 | `plane_render.fj` | 340 | `floor_mode="textured"` and the non-`lines` rasters | `test_plane_kernel`, `test_floor_planes_fj`, `test_plane_span_pass` |
 | `plane_bands.fj` | 298 | `raster_mode="stream"` (`wall_renderer.py:2419`) | `test_plane_bands_fj`, `test_stream_pass1_wiring` |
-| `wall_render.fj` | 33 | nothing — an early wall demo, superseded | `test_render_macros` |
-| `framebuffer.fj` | 28 | nothing — a framebuffer-pixel demo, superseded | `test_framebuffer` |
 | `memory_map.fj` | 19 | nothing at runtime; it consumes `fj_consts.fj`, so it checks the constants file is usable | `test_build` |
 | `hello.fj` | 3 | nothing — the toolchain canary: proves the assembler runs at all | `test_toolchain` |
 

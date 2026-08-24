@@ -1,2 +1,8 @@
+// ==============================================================================================
+// hello.fj         the toolchain canary: proves the assembler and runner work at all.
+// STATUS  NOT SHIPPED - test_toolchain.py only
+// ENTRY   (no macros)
+// SIZE    3 lines, 0 macros
+// ==============================================================================================
 stl.startup
 stl.loop

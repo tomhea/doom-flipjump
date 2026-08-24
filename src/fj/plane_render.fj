@@ -1,3 +1,10 @@
+// ==============================================================================================
+// plane_render.fj  the floor/ceiling (visplane) raster of the pre-`lines` tiers.
+// STATUS  NOT SHIPPED - instantiated by floor_mode="textured" and the non-`lines` rasters
+// ENTRY   plane.draw_span, plane.draw_span_flat, plane.draw_pixel, plane.clear_planes
+// SIZE    340 lines, 4 macros
+// NOTE    nothing in doom_e1m1_loop.fjm runs this. Skip it when optimising the shipped program.
+// ==============================================================================================
 // M13c (F5) — the floor/ceiling (visplane) raster. M13c2 lands the FLAT-COLORED plane pixel (the cheaper
 // §1 floor tier): one ceiling/floor pixel whose colour is the flat's base index, distance-lit via DOOM's
 // zlight (R_MapPlane). The perspective u,v texture sample (M13d) replaces the base index with a per-pixel

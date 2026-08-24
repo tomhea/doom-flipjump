@@ -1,3 +1,11 @@
+// ==============================================================================================
+// fixed_point.fj   16.16 fixed-point + the packed-table reads. Extends the stl's `hex` namespace.
+// STATUS  LIVE - every other fj file, and the generated main
+// ENTRY   hex.fixed_mul_lo, hex.mul_lo, hex.mul_const, hex.fixed_div, hex.read_table[_packed]
+// SIZE    243 lines, 10 macros
+// NOTE    `read_table_packed nb` is nb separate pointer rebuilds (~781 ops each) plus a staging
+//         preamble -- it is the single most expensive idiom in the program.
+// ==============================================================================================
 // fixed_point.fj — F2: signed Q-format fixed-point math (no floating point).
 //
 // ---------- Fixed-Point Math

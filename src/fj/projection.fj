@@ -1,3 +1,12 @@
+// ==============================================================================================
+// projection.fj    the projection math: angles, wall scales, screen-column ranges.
+// STATUS  LIVE - the generated main + frame_render.fj
+// ENTRY   proj.point_on_side_leaf, proj.wedge_setup, proj.wedge_bbox (main);
+//         proj.wall_x_range_m, wall_scale_setup_m, column_render_params, project_thing, ...
+// SIZE    2122 lines, 32 macros
+// NOTE    the `disp` parameter on several macros selects DISPATCH tables over packed reads.
+//         disp=1 is the shipped `lines` tier. Both arms are tested; keep it that way.
+// ==============================================================================================
 // F5 (projection kernels, M12m+) — the runtime projection math the fj wall renderer needs, each a
 // byte-exact mirror of the H5 oracle (src/doomfj/reference_model.py). The shared LUTs (tantoangle,
 // finesine, viewangletox, xtoviewangle, finetangent) are emitted as read_table data tables (M12l).

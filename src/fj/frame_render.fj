@@ -1,3 +1,12 @@
+// ==============================================================================================
+// frame_render.fj  the frame: BSP-walk leaves, seg passes, thing records.
+// STATUS  LIVE - the generated main + stream_render.fj
+// ENTRY   frame.seg_pass1_leaf_body_lines, ..._ts, frame.seg_pass2_leaf_body_lines,
+//         frame.thing_record_body (main); frame.step_shade, lines_pid_* (stream_render)
+// SIZE    3402 lines, 82 macros
+// NOTE    the biggest file, but the surface is small: 7 of 82 macros are called from outside.
+//         Per-frame cost is dominated by the four `MAIN` entries above.
+// ==============================================================================================
 // F5 / D2b (full-unroll renderer, M11c) — the chosen D2 structure done RIGHT: every framebuffer pixel
 // address is a COMPILE-TIME constant (`rep(VIEW_W, x) ... rep(count, row) frame.pixel ...`), so the pixel
 // path carries ZERO pointers — BUT the heavy per-pixel body (DDA + texture sample + colormap apply) lives

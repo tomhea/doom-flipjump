@@ -1,3 +1,10 @@
+// ==============================================================================================
+// plane_bands.fj   the per-column ceiling/floor BAND LIST builder.
+// STATUS  NOT SHIPPED - instantiated by raster_mode="stream" (wall_renderer.py:2419)
+// ENTRY   plane.build_bands, plane.recip32
+// SIZE    298 lines, 2 macros
+// NOTE    the shipped `lines` tier uses the GENERATED `vpb_walk` instead (stream_render.fj:811).
+// ==============================================================================================
 // M13pS2c — the LS2 per-column ceiling/floor BAND LIST builder (the column-stream design's floor
 // raster). Replaces the row-major `render_planes_spans`/`plane_col`/`plane.draw_span_flat` (M13c3/p1)
 // with a per-COLUMN walk: seed the window's first row EXACTLY (one real `hex.fixed_mul`, matching

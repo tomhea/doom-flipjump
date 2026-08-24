@@ -1,3 +1,9 @@
+// ==============================================================================================
+// memory_map.fj    a layout probe: consumes fj_consts.fj and checks the constants file is usable.
+// STATUS  NOT SHIPPED - test_build.py only
+// ENTRY   (no macros)
+// SIZE    19 lines, 0 macros
+// ==============================================================================================
 // memory_map.fj — F1: program entry + LOW data region + segment base labels.
 // Consumes build/generated/fj_consts.fj (the config SSOT, §9). Uses ONLY generated constants
 // — no hardcoded resolution literal (the §1 2-const invariant, R6). The §3 hot-low layout

@@ -190,7 +190,19 @@ def first_use(macro, local):
 for mac, loc, want in (("hex.scmp", "ba", "write"),          # .mov n, ba, a
                        ("hex.scmp", "bb", "write"),          # .mov n, bb, b
                        ("hex.fixed_mul_lo", "res", "write"),  # .zero n+f, res
-                       ("sim.check_line", "cl_rest", "write")):  # read_table_packed fills all 28
+                       ("sim.check_line", "cl_rest", "write"),   # read_table_packed fills all 28
+                       # ⚠ THE TWO BELOW EXIST TO COVER classify()'s DECLARATION-SKIP BRANCH, and
+                       # CR 2026-08-25 proved the other four do not. Deleting that branch left all
+                       # of scmp.ba/bb, fixed_mul_lo.res and check_line.cl_rest still passing: in
+                       # each of those the write PRECEDES the declaration (or, for cl_rest since
+                       # bdf1f1a, the cell is a `<` global whose decl is not in the body at all).
+                       # The branch is load-bearing -- counting a declaration as a first use
+                       # classifies everything READ and makes the analysis nearly vacuous -- so it
+                       # needs an anchor whose first body mention IS its `hex.vec`. Both of these
+                       # are @-locals, so unlike cl_rest they are pairs the production path really
+                       # does route through first_use().
+                       ("frame.thing_load_cold", "rowc", "write"),  # `rowc: hex.vec 10` THEN read_table_packed 5
+                       ("sim.point_side", "ax", "write")):          # `ax: hex.vec 8`  THEN hex.mov 8, ax, x
     got, why = first_use(mac, loc)
     assert got == want, (f"CONTROL 2 FAILED: {mac}.{loc} classified {got}, expected {want} "
                          f"(first use: {why!r})")

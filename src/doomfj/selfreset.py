@@ -161,18 +161,24 @@ def load_restore_set(path, labels, check_layout=True):
     # + containment + count miss: a set whose names all happen to exist and whose offsets all
     # happen to fit, but whose labels are laid out differently.
     #
-    # ⚠ SCOPE. Over the shipped set the 308 labels take only TEN distinct span values. MEASURED
-    # (span -> how many labels have it):
+    # ⚠ SCOPE. Over the shipped set the 317 DISTINCT labels take twelve distinct span values.
+    # MEASURED 2026-08-25 on the current set (span -> how many labels have it):
     #
-    #     {2: 29, 4: 77, 6: 6, 8: 19, 12: 8, 16: 158, 20: 4, 320: 4, 2400: 2, 2728: 1}
+    #     {2: 24, 4: 73, 6: 6, 8: 17, 12: 9, 16: 175, 20: 4, 32: 1, 56: 1, 320: 4, 1364: 1, 2400: 2}
     #
-    # 301 of the 308 have a span of 20 words or fewer, and ANY ONE of them changing flips the hash,
+    # 308 of the 317 have a span of 20 words or fewer, and ANY ONE of them changing flips the hash,
     # so the discriminating power is spread across nearly all of them -- it is not confined to the
-    # few wide rows (sshead's 2*nss at 2728, the VIEW_W arrays at 320).
+    # few wide rows (sshead's reachable half at 1364, the VIEW_W arrays at 320).
+    #
+    # ⚠ COUNT DISTINCT LABELS, NOT ENTRIES. The file carries 501 entries for those 317 labels:
+    # ca_remap_set.py emits OVERLAPPING entries when it takes the superset for an ambiguous
+    # old->new mapping, and every duplicate of a key carries an identical offset list
+    # (tests/host/test_restore_set_shipped.py asserts both). Reading `len(doc["entries"])` as a
+    # label count is how the 2026-08-25 commit message came to claim "501 labels".
     #
     # ⚠⚠ CR round 8 caught the previous version of this comment stating that distribution with its
     # KEYS AND VALUES TRANSPOSED -- "2400 of them share span 2, 320 share span 4" -- which is not
-    # merely wrong but impossible, since there are 308 labels in total. It then drew the opposite
+    # merely wrong but impossible, since there were 308 labels in total. It then drew the opposite
     # conclusion from the real data. A load-bearing scope note on a hard build-path assert, written
     # specifically to be honest about scope, and it was inverted. Verify this block against
     # scratchpad/m1_fpcheck.py before trusting it.

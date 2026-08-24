@@ -3,7 +3,7 @@
 // STATUS  LIVE - the generated main + frame_render.fj
 // ENTRY   proj.point_on_side_leaf, proj.wedge_setup, proj.wedge_bbox (main);
 //         proj.wall_x_range_m, wall_scale_setup_m, column_render_params, project_thing, ...
-// SIZE    2122 lines, 32 macros
+// SIZE    32 macros (proj.point_on_side_leaf .. proj.project_thing)
 // NOTE    the `disp` parameter on several macros selects DISPATCH tables over packed reads.
 //         disp=1 is the shipped `lines` tier. Both arms are tested; keep it that way.
 // ==============================================================================================

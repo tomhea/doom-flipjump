@@ -2,7 +2,7 @@
 // m1_reset.fj      M1's self-reset primitives: byte read/write/clear at a CONSTANT address.
 // STATUS  LIVE - the generated main (m1.zerobyte)
 // ENTRY   m1.zerobyte
-// SIZE    85 lines, 4 macros
+// SIZE    4 macros (m1.zerobyte, m1.readbyte, m1.writebyte, m1.readbyte_dispatch)
 // NOTE    m1.readbyte / m1.writebyte are tested but currently unused by the program -- they were
 //         built for the C1 dispatch, which does not work (docs/handoff-constaddr.md SS9).
 // ==============================================================================================

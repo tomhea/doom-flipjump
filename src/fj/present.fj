@@ -2,7 +2,7 @@
 // present.fj       drives the screen device: command bytes on the output stream.
 // STATUS  LIVE - the generated main
 // ENTRY   present.init_screen_stream, present.set_palette, present.begin_frame_collines
-// SIZE    230 lines, 14 macros
+// SIZE    14 macros (present.init_screen_stream .. present.emit_cmd_byte)
 // ==============================================================================================
 // F7 (present layer, M11a) — drive the screen device over the output stream.
 // Device protocol (authoritative: flipjump InMemoryScreen / ScreenIO.py): command bytes on the

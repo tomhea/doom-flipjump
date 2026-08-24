@@ -1,7 +1,6 @@
 # `src/fj/` — the hand-written FlipJump
 
-Read this before opening anything else. **7 of these 13 files are the program; 6 are not called by
-anything** and exist only for their own tests.
+Read this before opening anything else. **7 of these 11 files are the program.**
 
 Everything else in the shipped image is machine-written into `build/generated_loop/` — see
 [the generated side](#the-generated-side) at the bottom.
@@ -11,39 +10,36 @@ Everything else in the shipped image is machine-written into `build/generated_lo
 Listed in include order (`build.py:_RENDERER_INCLUDES` + `_LINES_INCLUDES` + `_SIM_INCLUDES`).
 fj top-level labels are global, so **the order is the contract** — never reorder.
 
-| file | lines | macros | called from `MAIN` | what it is |
-|---|---:|---:|---|---|
-| `fixed_point.fj` | 243 | 10 | `hex.fixed_mul_lo`, `hex.mul_lo` | 16.16 fixed-point + the packed-table reads. Extends the stl's `hex` namespace, so everything uses it. |
-| `present.fj` | 230 | 14 | `init_screen_stream`, `set_palette`, `begin_frame_collines` | drives the screen device: command bytes on the output stream. |
-| `projection.fj` | 2,122 | 32 | `point_on_side_leaf`, `wedge_setup`, `wedge_bbox` | the projection math — angles, scales, column ranges. 12 more macros are called by `frame_render.fj`. |
-| `frame_render.fj` | 3,402 | 82 | `seg_pass1_leaf_body_lines`, `seg_pass1_leaf_body_ts`, `seg_pass2_leaf_body_lines`, `thing_record_body` | the frame. **Only 7 of its 82 macros are called from outside**; the rest are its internals. |
-| `stream_render.fj` | 1,542 | 41 | `emit_bytes4` | the per-column run emitter — pushes runs to the device. |
-| `sim.fj` | 607 | 10 | `check_position`, `try_move`, `bind_things`, `thing_pass` | the player sim: collision against real linedefs. |
-| `m1_reset.fj` | 85 | 4 | `m1.zerobyte` | M1's self-reset primitives (constant-address byte clear). |
+| file | macros | called from `MAIN` | what it is |
+|---|---:|---|---|
+| `fixed_point.fj` | 10 | `hex.fixed_mul_lo`, `hex.mul_lo` | 16.16 fixed-point + the packed-table reads. Extends the stl's `hex` namespace, so everything uses it. |
+| `present.fj` | 14 | `init_screen_stream`, `set_palette`, `begin_frame_collines` | drives the screen device: command bytes on the output stream. |
+| `projection.fj` | 32 | `point_on_side_leaf`, `wedge_setup`, `wedge_bbox` | the projection math — angles, scales, column ranges. 12 more macros are called by `frame_render.fj`. |
+| `frame_render.fj` | 82 | `seg_pass1_leaf_body_lines`, `seg_pass1_leaf_body_ts`, `seg_pass2_leaf_body_lines`, `thing_record_body` | the frame. **Only 7 of its 82 macros are called from outside**; the rest are its internals. |
+| `stream_render.fj` | 41 | `emit_bytes4` | the per-column run emitter — pushes runs to the device. |
+| `sim.fj` | 10 | `check_position`, `try_move`, `bind_things`, `thing_pass` | the player sim: collision against real linedefs. |
+| `m1_reset.fj` | 4 | `m1.zerobyte` | M1's self-reset primitives (constant-address byte clear). |
 
 **Where the time goes.** Per frame the four `MAIN` entry points in `frame_render.fj` dominate;
 `projection.fj` is the arithmetic under them. Start there.
 
 ## Not instantiated by the SHIPPED tier
 
-⚠ **CORRECTED.** An earlier version of this file called these "not called by anything". That is
-false: `plane_render.fj` and `plane_bands.fj` implement OTHER build tiers the emitter still offers.
+`plane_render.fj` and `plane_bands.fj` implement OTHER build tiers the emitter still offers.
 The emitter branches on five `raster_mode`s (`lines` — shipped — plus `proj`, `raster`, `spans`,
 `stream`) and two `floor_mode`s (`FT1` — shipped — and `textured`), and the non-shipped ones
-instantiate these files. `wall_renderer.py:2419` emits `recip32_leaf: plane.recip32` and
-`build_bands_leaf: plane.build_bands` under `if stream:`. The first survey missed it because those
-calls are preceded by a label, and because it skipped the 125 MB banks file.
+instantiate these files. `emit_wall_renderer` emits `recip32_leaf: plane.recip32` and
+`build_bands_leaf: plane.build_bands` under `if stream:`.
 
-They are still not worth READING while optimising the shipped program — nothing here runs in
-`doom_e1m1_loop.fjm` — and they cost no span, since fj only emits macros that are actually
-expanded. But they are not deletable without dropping the tiers they implement.
+Nothing here runs in `doom_e1m1_loop.fjm`, and they cost no span (fj only emits macros that are
+actually expanded). But they are not deletable without dropping the tiers they implement.
 
-| file | lines | instantiated by | tests |
-|---|---:|---|---|
-| `plane_render.fj` | 340 | `floor_mode="textured"` and the non-`lines` rasters | `test_plane_kernel`, `test_floor_planes_fj`, `test_plane_span_pass` |
-| `plane_bands.fj` | 298 | `raster_mode="stream"` (`wall_renderer.py:2419`) | `test_plane_bands_fj`, `test_stream_pass1_wiring` |
-| `memory_map.fj` | 19 | nothing at runtime; it consumes `fj_consts.fj`, so it checks the constants file is usable | `test_build` |
-| `hello.fj` | 3 | nothing — the toolchain canary: proves the assembler runs at all | `test_toolchain` |
+| file | instantiated by | tests |
+|---|---|---|
+| `plane_render.fj` | `floor_mode="textured"` and the non-`lines` rasters | `test_plane_kernel`, `test_floor_planes_fj`, `test_plane_span_pass` |
+| `plane_bands.fj` | `raster_mode="stream"` (in `emit_wall_renderer`) | `test_plane_bands_fj`, `test_stream_pass1_wiring` |
+| `memory_map.fj` | nothing at runtime; it consumes `fj_consts.fj`, so it checks the constants file is usable | `test_build` |
+| `hello.fj` | nothing — the toolchain canary: proves the assembler runs at all | `test_toolchain` |
 
 ⚠ Two of `m1_reset.fj`'s four macros — `m1.readbyte` and `m1.writebyte` — are also uncalled by the
 program. They were built for the C1 constant-address dispatch, which does not work (see
@@ -69,15 +65,15 @@ program. They were built for the C1 constant-address dispatch, which does not wo
 `write_program_files`. **Order is load-bearing**: every baked address constant depends on the
 layout, so never sort, glob, or reorder these.
 
-| file | lines | what |
-|---|---:|---|
-| `e1m1_00_entry.fj` | 32 | jumps to `main` |
-| `e1m1_01_tables.fj` | 334,667 | trig/reciprocal LUTs + the dispatch tables |
-| **`e1m1_02_main.fj`** | **202** | **the actual program** — this is the one to read |
-| `e1m1_03_segconsts.fj` | 43,294 | per-seg baked constants |
-| `e1m1_04_walk.fj` | 92,154 | the BSP walk, as code |
-| `e1m1_05_state.fj` | 129 | the runtime state registers |
-| `e1m1_06_banks.fj` | 5,407,895 | baked sprite / step / sky / band banks |
-| `e1m1_07_reset.fj` | 638 | M1's self-reset part |
+| file | what |
+|---|---|
+| `e1m1_00_entry.fj` | jumps to `main` |
+| `e1m1_01_tables.fj` | trig/reciprocal LUTs + the dispatch tables |
+| **`e1m1_02_main.fj`** | **the actual program** — this is the one to read |
+| `e1m1_03_segconsts.fj` | per-seg baked constants |
+| `e1m1_04_walk.fj` | the BSP walk, as code |
+| `e1m1_05_state.fj` | the runtime state registers |
+| `e1m1_06_banks.fj` | baked sprite / step / sky / band banks |
+| `e1m1_07_reset.fj` | M1's self-reset part |
 
 The compiled image is `build/doom_e1m1_loop.fjm`.

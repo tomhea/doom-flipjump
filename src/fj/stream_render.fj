@@ -2,7 +2,7 @@
 // stream_render.fj the per-column run emitter: pushes ceiling/wall/floor/sprite runs to the device.
 // STATUS  LIVE - the generated main + frame_render.fj
 // ENTRY   stream.emit_bytes4 (main); stream.emit_col_lines, stream.entry_append (frame_render)
-// SIZE    1542 lines, 41 macros
+// SIZE    41 macros (stream.emit_bytes4 .. stream.entry_append)
 // ==============================================================================================
 // THE STREAM EMITTER — the per-column device-RUN raster. Walks a column's run-lists (ceiling band
 // list, wall run(s), floor band list, sprite fragments) and pushes each run out as `byte.emit` /

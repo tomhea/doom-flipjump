@@ -2,7 +2,7 @@
 // sim.fj           the player sim: collision against real linedefs, thing binding.
 // STATUS  LIVE - the generated main
 // ENTRY   sim.check_position, sim.try_move, sim.bind_things, sim.thing_pass
-// SIZE    607 lines, 10 macros
+// SIZE    10 macros (sim.check_position .. sim.thing_pass)
 // NOTE    `@` holds control-flow labels ONLY; the scratch is named globals (`cb_*`, `cl_*` in
 //         collision.py::CHECK_SCRATCH_DECLS). check_position expands check_block 4x, so an
 //         @-local vec here becomes 4 cells the M1 restore set can only name by expansion path.

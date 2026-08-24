@@ -24,20 +24,28 @@ fj top-level labels are global, so **the order is the contract** — never reord
 **Where the time goes.** Per frame the four `MAIN` entry points in `frame_render.fj` dominate;
 `projection.fj` is the arithmetic under them. Start there.
 
-## NOT called by anything
+## Not instantiated by the SHIPPED tier
 
-Assembled into every build, never instantiated. fj only emits macros that are actually expanded, so
-these cost **no span** — but they cost reading time, and two of them sit in the *shipping tier*
-include list, which is misleading.
+⚠ **CORRECTED.** An earlier version of this file called these "not called by anything". That is
+false: `plane_render.fj` and `plane_bands.fj` implement OTHER build tiers the emitter still offers.
+The emitter branches on five `raster_mode`s (`lines` — shipped — plus `proj`, `raster`, `spans`,
+`stream`) and two `floor_mode`s (`FT1` — shipped — and `textured`), and the non-shipped ones
+instantiate these files. `wall_renderer.py:2419` emits `recip32_leaf: plane.recip32` and
+`build_bands_leaf: plane.build_bands` under `if stream:`. The first survey missed it because those
+calls are preceded by a label, and because it skipped the 125 MB banks file.
 
-| file | lines | why it is still here |
-|---|---:|---|
-| `plane_render.fj` | 340 | the pre-"lines" framebuffer floor/ceiling raster. In `_RENDERER_INCLUDES`. Live only in `test_plane_kernel.py`, `test_floor_planes_fj.py`, `test_plane_span_pass.py`. |
-| `plane_bands.fj` | 298 | the per-column band-list builder it replaced; the shipped path uses the GENERATED `vpb_walk` instead (`stream_render.fj:811`). In `_LINES_INCLUDES`. |
-| `wall_render.fj` | 33 | an early wall demo. `test_render_macros.py`. |
-| `framebuffer.fj` | 28 | framebuffer pixel demo. `test_framebuffer.py`. |
-| `memory_map.fj` | 19 | a layout probe. `test_build.py`. |
-| `hello.fj` | 3 | the toolchain smoke test. `test_toolchain.py`. |
+They are still not worth READING while optimising the shipped program — nothing here runs in
+`doom_e1m1_loop.fjm` — and they cost no span, since fj only emits macros that are actually
+expanded. But they are not deletable without dropping the tiers they implement.
+
+| file | lines | instantiated by | tests |
+|---|---:|---|---|
+| `plane_render.fj` | 340 | `floor_mode="textured"` and the non-`lines` rasters | `test_plane_kernel`, `test_floor_planes_fj`, `test_plane_span_pass` |
+| `plane_bands.fj` | 298 | `raster_mode="stream"` (`wall_renderer.py:2419`) | `test_plane_bands_fj`, `test_stream_pass1_wiring` |
+| `wall_render.fj` | 33 | nothing — an early wall demo, superseded | `test_render_macros` |
+| `framebuffer.fj` | 28 | nothing — a framebuffer-pixel demo, superseded | `test_framebuffer` |
+| `memory_map.fj` | 19 | nothing at runtime; it consumes `fj_consts.fj`, so it checks the constants file is usable | `test_build` |
+| `hello.fj` | 3 | nothing — the toolchain canary: proves the assembler runs at all | `test_toolchain` |
 
 ⚠ Two of `m1_reset.fj`'s four macros — `m1.readbyte` and `m1.writebyte` — are also uncalled by the
 program. They were built for the C1 constant-address dispatch, which does not work (see

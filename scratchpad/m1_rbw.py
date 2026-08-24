@@ -182,10 +182,15 @@ def first_use(macro, local):
 # `hex.read_table_packed 22, rrow, ...`, which writes every one of its 44 cells. The control fired
 # and the EXPECTATION was what was wrong. Anchors are only worth having if a failure sends you back
 # to the source rather than to the code.
+# ⚠ 2026-08-24: it fired a SECOND time, and again the expectation was stale rather than the
+# parser. bdf1f1a hoisted check_line's scratch to named globals, so `rrow` no longer exists and
+# the anchor reported '(no use found -> default READ)'. The cell is now `cl_rest`, filled by the
+# same statement -- `hex.read_table_packed 14, cl_rest, lnrow, n_ln, li` -- so the hand-checked
+# claim is unchanged: 14 bytes = 28 cells, all written before any read.
 for mac, loc, want in (("hex.scmp", "ba", "write"),          # .mov n, ba, a
                        ("hex.scmp", "bb", "write"),          # .mov n, bb, b
                        ("hex.fixed_mul_lo", "res", "write"),  # .zero n+f, res
-                       ("sim.check_line", "rrow", "write")):  # read_table_packed fills all 44
+                       ("sim.check_line", "cl_rest", "write")):  # read_table_packed fills all 28
     got, why = first_use(mac, loc)
     assert got == want, (f"CONTROL 2 FAILED: {mac}.{loc} classified {got}, expected {want} "
                          f"(first use: {why!r})")

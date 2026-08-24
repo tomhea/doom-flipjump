@@ -149,8 +149,22 @@ def controls(payload, words, sa, sn, tmp):
     #
     # So move the label DOWN instead: its span GROWS, every offset still fits, the word count still
     # matches, every name still resolves -- and only the layout fingerprint can tell.
+    #
+    # ⚠ 2026-08-24: that was still not enough, because C4 reused C1's `j` (the BUSIEST label).
+    # Moving a label DOWN grows its own span but SHRINKS its PREDECESSOR's, and when the predecessor
+    # is fully packed (maxoff+1 == span) the predecessor's offsets escape -- so containment refused
+    # the mutation and the fingerprint again played no part. That is the same "passing for the wrong
+    # reason" this control was rewritten to avoid, arriving through the neighbour instead of the
+    # label itself. Choose the label HERE rather than inheriting it: one whose PREDECESSOR has at
+    # least 2 words of slack, so nothing can object except the fingerprint.
+    maxoff = {e[0]: max(e[1:]) for e in payload["entries"]}
+    j4 = next((i for i in range(1, len(sa))
+               if sa[i] != sa[i - 1] and sn[i] in maxoff
+               and (sa[i] - sa[i - 1]) - (maxoff.get(sn[i - 1], -1) + 1) >= 2), None)
+    assert j4 is not None, ("C4 has no usable label: every label the set names sits directly after a "
+                           "fully-packed one, so moving it down cannot isolate the fingerprint")
     sa4 = list(sa)
-    sa4[j] -= 2
+    sa4[j4] -= 2
     c4 = refuses(lambda: resolve_via_production(payload, sa4, sn, tmp))
     # and the two-sided half: with the fingerprint OFF the same input must be ACCEPTED, or
     # something other than the fingerprint is doing the catching and C4 is vacuous again.
@@ -159,8 +173,8 @@ def controls(payload, words, sa, sn, tmp):
         json.dump(payload, gzip.open(tmp, "wt", encoding="utf-8"))
         return selfreset.load_restore_set(tmp, labels, check_layout=False)
     only_fp = not refuses(_no_fp)
-    print("  C4 label moved DOWN, fingerprint stale -> %s%s"
-          % ("refused ok" if c4 else "!! ACCEPTED",
+    print("  C4 moved %-20s DOWN, fingerprint stale -> %s%s"
+          % (sn[j4][:20], "refused ok" if c4 else "!! ACCEPTED",
              "" if only_fp else "   !! but check_layout=False ALSO refuses -- not the fingerprint"))
     ok &= c4 and only_fp
 

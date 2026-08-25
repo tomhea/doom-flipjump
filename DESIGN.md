@@ -173,7 +173,8 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | static (`build_wall_renderer`, R4 gate) | in the 40–62M band, `< 2²⁶` asserted | under | under | flat |
 | **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** |
 | shipped config, `self_reset=False` | **84,823,030** | 1.26× OVER | 0.63× | flat |
-| **M1 (the same + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+| **M1 (the same + `self_reset=True`)** | **85,438,862** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+| **M1 + M1-HOIST (319 @-locals -> named globals)** | **85,438,862** | 1.27× OVER | **0.64×** | **flat** (asserted) |
 | **+ constant-address round 1 (C2/C5/C7/C8)** | **85,523,360** | 1.27× OVER | **0.637×** | **flat** (asserted) |
 | + constant-address round 2, `self_reset=False` | **84,756,676** | 1.26× OVER | **0.631×** | **flat** (asserted) |
 
@@ -205,14 +206,30 @@ ledger's last entry while the shipped binary had moved on twice. What the two ro
 
 **M1 adds ONE segment, `<map>_07_reset.fj`** (`selfreset.emit_reset_part`). Its size is
 `nibble_cells` coalesced `hex.zero` runs + non-zero `hex.set 1` singles + one `rep` per byte
-array + the `;__hot_end` tail — MEASURED on the E1M1 tier at **4,349 nibble cells and 1,002 byte
-cells**, 618 emitted lines, **250,789 ops/frame** — **0.8% of the 30,191,585-op sweep median** over
-260 frames. (The 8-frame gate chain measures the same quantity at **251,701**; both are printed
-because they are different frame sets, not one number rounded two ways.) It carries **no table and
-no align pad**: every address in it is baked, so it adds code span only. Headroom against
-`RENDER_FLAT_MAX_WORDS` = 2²⁷ is **1.57×**, `storage_mode == flat` asserted. Assemble time is
-**3,193 s / 2,918 s** across two builds of the same inputs producing the same sha256 — a 15%
-wall-clock spread on identical work, which is this machine drifting, not the program.
+array + the `;__hot_end` tail. It carries **no table and no align pad**: every address in it is
+baked, so it adds code span only.
+
+⚠ **RE-MEASURED 2026-08-25 after M1-HOIST** (the figures here previously described a
+superseded set and contradicted the shipped artifact -- CR R4). Current E1M1 shipped tier:
+
+| | |
+|---|---|
+| restore set | **12,072 words / 448 entries**, and **ZERO `@`-local keys** (was 188) |
+| reset cells | **5,034 nibble + 1,002 byte** |
+| reset cost | **~322,438 ops/frame** (8-frame gate chain) |
+| span | **85,438,862** words, headroom **1.571×** vs `RENDER_FLAT_MAX_WORDS` = 2²⁷, `storage_mode == flat` asserted |
+| assemble | **2,619 s** (total build 3,543 s) |
+| binary | `build/doom_e1m1_loop.fjm`, sha256 `4fad6d12...`, 31,315,545 bytes |
+
+**NO PERCENTAGE IS QUOTED** against a sweep median, because no 260-frame sweep has been run for
+this binary. The retired "0.8% of 30,191,585" belonged to a superseded set; treat it as
+UNVERIFIED rather than rescaling it. `scratchpad/m1_sweep.py` is the harness if the figure is
+wanted.
+
+**Why the reset grew** (250,789 -> ~322,438): M1-HOIST moved 319 macro-`@`-local registers to
+named globals so the restore set stops naming expansion paths, and those globals are restored at
+full declared extent. That is the price of a set that no longer breaks when a comment shifts a
+line -- 313 of 344 keys once needed re-keying for line numbers alone.
 
 ⚠ The first build of this tier emitted **5,031** nibble cells. 682 of them were the unreachable half
 of `sshead` — declared `hex.vec 2*nss`, reached at a ONE-cell stride — which the set carried because

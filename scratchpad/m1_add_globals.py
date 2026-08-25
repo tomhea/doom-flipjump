@@ -31,6 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from doomfj import selfreset                              # noqa: E402
+from doomfj.selfreset import decl_words                   # noqa: E402
 from doomfj.collision import CHECK_SCRATCH_DECLS          # noqa: E402
 from doomfj.wall_renderer import HOISTED_SCRATCH_DECLS   # noqa: E402
 from doomfj.harness import W                              # noqa: E402
@@ -46,27 +47,8 @@ CELL_WORDS = 2          # a hex cell is dw = 2w bits = 2 words
 
 
 def declared():
-    """(name, words|None) for every decl. None = size is symbolic beyond w/dw, so the DERIVED
-    extent stands alone and the cross-check is skipped for that one (reported, never silent).
-
-    The hoisted renderer registers carry SYMBOLIC sizes (`hex.vec w/4`, the pointer registers), so
-    a numeric-only parser rejects them -- the same gap that silently under-hoisted 12 of them in
-    m1_hoist.py. Evaluate w/dw instead of refusing.
-    """
-    out = []
-    for d in list(CHECK_SCRATCH_DECLS) + list(HOISTED_SCRATCH_DECLS):
-        m = re.match(r"\s*(\w+)\s*:\s*hex\.vec\s+(.+)", d)
-        assert m, "decl is not `name: hex.vec ...`: %r" % d
-        size = m.group(2).split(",")[0].strip()
-        try:
-            cells = int(size, 0)
-        except ValueError:
-            try:
-                cells = int(eval(size, {"__builtins__": {}}, {"w": W, "dw": 2 * W}))
-            except Exception:
-                cells = None
-        out.append((m.group(1), None if cells is None else cells * CELL_WORDS))
-    return out
+    """(name, words|None) for every decl, via selfreset.decl_words -- ONE parser (R6)."""
+    return [decl_words(d) for d in list(CHECK_SCRATCH_DECLS) + list(HOISTED_SCRATCH_DECLS)]
 
 
 def read_labels(path):

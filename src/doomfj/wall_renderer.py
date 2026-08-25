@@ -2395,6 +2395,22 @@ HOISTED_SCRATCH_DECLS = [
     "sga_qneg: hex.vec 1",
     "sga_sin_idx: hex.vec 3",
     "sga_sinv: hex.vec 8",
+    # ── proj.point_to_angle (x4 expansions) ──────────────────────────────────────────────
+    # CR 2026-08-25: this macro was believed unhoistable. It was not -- m1_hoist.py appended
+    # declarations it declined to hoist AFTER the body, and point_to_angle's last body line is
+    # its terminal label `done:`, so data words landed in the fall-through EXIT. The six-run
+    # bisect measured the TOOL. Fixed there; these are the registers it always could have taken.
+    "pta_c1: hex.vec 1, 1",
+    "pta_c2: hex.vec 1, 2",
+    "pta_c4: hex.vec 1, 4",
+    "pta_c6: hex.vec 1, 6",
+    "pta_den: hex.vec 8",
+    "pta_dx: hex.vec 8",
+    "pta_dy: hex.vec 8",
+    "pta_num: hex.vec 8",
+    "pta_oct_idx: hex.vec 1",
+    "pta_slope_idx: hex.vec 3",
+    "pta_tan_base: hex.vec 8",
 ]
 
 

@@ -25,7 +25,12 @@ if not consts.exists():
     consts = cfg.emit_fj_consts(consts)
 
 includes = _RENDERER_INCLUDES + _LINES_INCLUDES + _SIM_INCLUDES
-prog = sorted(gen.glob("e1m1_0[0-6]_*.fj"))
+# ⚠ ORDER IS THE CONTRACT (CLAUDE.md): "Never sort these paths, never glob them, never reorder
+# the parts: every baked address constant depends on the layout." This tool produces the label
+# table the ENTIRE restore set is keyed on, so a wrong order makes every address in it wrong.
+# glob+sort was correct only by accident of the 00_..06_ naming. Name the order explicitly.
+PART_ORDER = ("entry", "tables", "main", "segconsts", "walk", "state", "banks")
+prog = [gen / ("e1m1_%02d_%s.fj" % (i, n)) for i, n in enumerate(PART_ORDER)]
 paths = [consts] + [_SRC_FJ / f for f in includes] + prog + [_SRC_FJ / "m1_reset.fj"]
 
 out = ROOT / "build" / "_label_capture_temp.fjm"

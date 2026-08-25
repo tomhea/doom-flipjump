@@ -18,6 +18,7 @@ The restore set is derived by the scratchpad pipeline and passed in as a file.
 from __future__ import annotations
 
 import bisect
+import re
 import gzip
 import hashlib
 import json
@@ -50,6 +51,32 @@ BYTE_ARRAY_NAMES = ("sshead", "pclm", "sfflag")
 # declared cells per reachable cell: sshead is over-allocated 2x, the per-column arrays are 1:1
 _DECLARED_RATIO = {"sshead": 2, "pclm": 1, "sfflag": 1}
 
+
+
+def decl_words(decl):
+    """`"name: hex.vec N"` -> (name, words) for a scratch DECLARATION string.
+
+    ONE parser for every consumer of CHECK_SCRATCH_DECLS / HOISTED_SCRATCH_DECLS (R6):
+    scratchpad/m1_add_globals.py, which re-attaches them to the restore set, and
+    tests/host/test_restore_set_shipped.py, which asserts they are all present at full extent.
+
+    ⚠ THE SIZE MAY BE SYMBOLIC. The hoisted pointer registers are `hex.vec w/4`, and a
+    numeric-only parser silently skips them -- the same gap that under-hoisted 12 registers in
+    m1_hoist.py and then blocked the test from covering the 308 hoisted globals at all.
+    Returns words=None when the size is symbolic beyond w/dw, so the caller can fall back to
+    the label-derived extent rather than treat it as absent.
+    """
+    m = re.match(r"\s*(\w+)\s*:\s*hex\.vec\s+(.+)", decl)
+    assert m, "decl is not `name: hex.vec ...`: %r" % decl
+    size = m.group(2).split("//")[0].split(",")[0].strip()
+    try:
+        cells = int(size, 0)
+    except ValueError:
+        try:
+            cells = int(eval(size, {"__builtins__": {}}, {"w": W, "dw": 2 * W}))
+        except Exception:
+            cells = None
+    return m.group(1), (None if cells is None else cells * 2)   # 2 words per hex cell
 
 
 def byte_arrays(bits, words_sorted, view_w, nss):

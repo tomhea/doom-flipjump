@@ -16,6 +16,8 @@ from pathlib import Path
 import pytest
 
 from doomfj.collision import CHECK_SCRATCH_DECLS
+from doomfj.selfreset import decl_words
+from doomfj.wall_renderer import HOISTED_SCRATCH_DECLS
 
 SET = Path(__file__).resolve().parents[2] / "src/doomfj/data/m1_restore_set.json.gz"
 CELL_WORDS = 2                      # a hex cell is dw = 2w bits = 2 words
@@ -28,11 +30,22 @@ def doc():
 
 
 def _declared():
+    """Every global the restore set must carry, from BOTH sources.
+
+    CHECK_SCRATCH_DECLS replaced the sim @-locals bdf1f1a hoisted; HOISTED_SCRATCH_DECLS replaced
+    the 319 renderer @-locals the M1-HOIST rounds moved. Same hazard for both: the re-key DROPS
+    the old macro-local keys because those registers no longer exist, and a dropped cell is a
+    HOLE -- which hangs the next frame rather than drawing anything wrong.
+
+    ⚠ Sizes may be SYMBOLIC (`hex.vec w/4`). An earlier version of this helper asserted on them,
+    which is why it could only ever cover CHECK_SCRATCH_DECLS -- the 319 globals most at risk were
+    silently out of scope. selfreset.decl_words is the one parser (R6).
+    """
     out = {}
-    for d in CHECK_SCRATCH_DECLS:
-        m = re.match(r"\s*(\w+)\s*:\s*hex\.vec\s+(\d+)", d)
-        assert m, "CHECK_SCRATCH_DECLS entry is not `name: hex.vec N`: %r" % d
-        out[m.group(1)] = int(m.group(2)) * CELL_WORDS
+    for d in list(CHECK_SCRATCH_DECLS) + list(HOISTED_SCRATCH_DECLS):
+        name, words = decl_words(d)
+        assert words is not None, "declared size is not evaluable: %r" % d
+        out[name] = words
     return out
 
 
@@ -65,14 +78,15 @@ def test_duplicate_entries_carry_identical_offsets(doc):
 
 
 def test_every_hoisted_sim_global_is_present_at_full_declared_extent(doc):
-    """bdf1f1a hoisted sim scratch to these globals; the re-key DROPS the registers they replaced.
+    """bdf1f1a and the M1-HOIST rounds moved scratch to these globals; the re-key DROPS the
+    registers they replaced.
 
     If one is missing, or present at less than its declared width, the set has a hole exactly where
     check_block/check_line write -- and the next frame hangs rather than drawing anything wrong.
     """
     have = {e[0]: list(e[1:]) for e in doc["entries"]}
     missing = [n for n in _declared() if n not in have]
-    assert not missing, "restore set is missing hoisted sim globals: %s" % missing
+    assert not missing, "restore set is missing hoisted globals: %s" % missing[:8]
     for name, words in _declared().items():
         assert have[name] == list(range(words)), (
             "%s must cover its whole declared extent 0..%d, got %d offsets (first/last %s/%s)"

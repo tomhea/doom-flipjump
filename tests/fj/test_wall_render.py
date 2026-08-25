@@ -36,6 +36,9 @@ from doomfj.texturecompiler import (compile_texture, compile_colormap, compile_p
                                     texture_texels, _texel_table, downscale_canvas)
 from doomfj.wall_renderer import emit_wall_renderer, _seg_xorby_block, _seg_xorby_use
 from doomfj.wad import WadFile
+# M1-HOIST: these fj macros name hoisted globals in their `<` lists, so any program that
+# expands one STANDALONE must declare them too. ONE source with the emitter (R6).
+from doomfj.wall_renderer import hoisted_scratch_fj
 
 PRESENT_FJ = Path("src/fj/present.fj")
 FRAME_FJ = Path("src/fj/frame_render.fj")
@@ -149,7 +152,7 @@ def test_wall_render_seg_columns_byte_exact(tmp_path):
         tex, cm, palette, xtoviewangle, finetangent, finesine,
     ])
     p = tmp_path / "wallrender.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "wallrender.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -244,7 +247,7 @@ def test_wall_render_full_width_via_column_leaf(tmp_path):
         tex, cm, palette, xtoviewangle, finetangent, finesine,
     ])
     p = tmp_path / "wallfull.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "wallfull.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -350,7 +353,7 @@ def test_wall_render_array_bridge_byte_exact(tmp_path):
         tex, cm, palette,
     ])
     p = tmp_path / "arraybridge.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "arraybridge.fjm"
     fj.assemble([consts.resolve(), PRESENT_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
                 out, memory_width=W, print_time=False)
@@ -454,7 +457,7 @@ def test_wall_render_composes_over_background(tmp_path):
         tex, cm, palette, xtoviewangle, finetangent, finesine,
     ])
     p = tmp_path / "wallcompose.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "wallcompose.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -645,7 +648,7 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "pass1fill.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "pass1fill.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -837,7 +840,7 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "multiseg.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "multiseg.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1034,7 +1037,7 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "occlusion.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "occlusion.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1258,7 +1261,7 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "multitex.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "multitex.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1463,7 +1466,7 @@ def test_wall_render_multilight_byte_exact(tmp_path):
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "multilight.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "multilight.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1621,7 +1624,7 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "runtimebg.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "runtimebg.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1777,7 +1780,7 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "wideindex.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "wideindex.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],

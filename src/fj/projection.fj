@@ -155,116 +155,102 @@ ns proj {
     //   result = p2a_off[idx] (+ or -, per p2a_neg[idx]) base, mod 2^32. (0,0) -> 0.
     //   @requires hex.init & stl.ptr_init   (read_table needs the pointer init)
     def point_to_angle dst, x1, y1, x2, y2, disp \
-            @ dx, dy, num, den, oct_idx, slope_idx, tan_base, c1, c2, c4, c6, czero, \
-              dx_neg, dx_pos, dx_done, dy_neg, dy_pos, dy_done, dx_zero, both_zero, nonzero, \
-              dx_major, dy_major, numden_set, \
-              oct_lo4, oct_lo2, oct_hi4, oct0, oct1, oct2, oct3, oct4, oct5, oct6, oct7, done \
-            < tantoangle {
-        hex.mov 8, dx, x2
-        hex.sub 8, dx, x1                        // dx = x2 - x1   (signed 16.16)
-        hex.mov 8, dy, y2
-        hex.sub 8, dy, y1                        // dy = y2 - y1
-        hex.set 1, oct_idx, 0
+            @ czero, dx_neg, dx_pos, dx_done, dy_neg, dy_pos, dy_done, dx_zero, both_zero, nonzero, dx_major, dy_major, numden_set, oct_lo4, oct_lo2, oct_hi4, oct0, oct1, oct2, oct3, oct4, oct5, oct6, oct7, done \
+            < tantoangle, pta_c1, pta_c2, pta_c4, pta_c6, pta_den, pta_dx, pta_dy, pta_num, pta_oct_idx, pta_slope_idx, pta_tan_base {
+        hex.mov 8, pta_dx, x2
+        hex.sub 8, pta_dx, x1                        // pta_dx = x2 - x1   (signed 16.16)
+        hex.mov 8, pta_dy, y2
+        hex.sub 8, pta_dy, y1                        // pta_dy = y2 - y1
+        hex.set 1, pta_oct_idx, 0
 
-        hex.sign 8, dx, dx_neg, dx_pos           // dx<0 ? fold x negative, set the octant bit
+        hex.sign 8, pta_dx, dx_neg, dx_pos           // pta_dx<0 ? fold x negative, set the octant bit
       dx_neg:
-        hex.add 1, oct_idx, c4                   // oct_idx |= 4
-        hex.neg 8, dx                            // dx = |dx|
+        hex.add 1, pta_oct_idx, pta_c4                   // pta_oct_idx |= 4
+        hex.neg 8, pta_dx                            // pta_dx = |pta_dx|
         ;dx_done
       dx_pos:
       dx_done:
-        hex.sign 8, dy, dy_neg, dy_pos
+        hex.sign 8, pta_dy, dy_neg, dy_pos
       dy_neg:
-        hex.add 1, oct_idx, c2                   // oct_idx |= 2
-        hex.neg 8, dy                            // dy = |dy|
+        hex.add 1, pta_oct_idx, pta_c2                   // pta_oct_idx |= 2
+        hex.neg 8, pta_dy                            // pta_dy = |pta_dy|
         ;dy_done
       dy_pos:
       dy_done:
-        // dx,dy are now non-negative magnitudes. zero check (unsigned, R5-ok): both zero -> angle 0.
-        hex.if0 8, dx, dx_zero
+        // pta_dx,pta_dy are now non-negative magnitudes. zero check (unsigned, R5-ok): both zero -> angle 0.
+        hex.if0 8, pta_dx, dx_zero
         ;nonzero
       dx_zero:
-        hex.if0 8, dy, both_zero
+        hex.if0 8, pta_dy, both_zero
         ;nonzero
       both_zero:
         hex.zero 8, dst
         ;done
       nonzero:
-        // dx_major = |dx| > |dy| (magnitudes, unsigned cmp R5-ok). num=min, den=max (slope_div
-        // needs num<=den).
-        hex.cmp 8, dx, dy, dy_major, dy_major, dx_major
+        // dx_major = |pta_dx| > |pta_dy| (magnitudes, unsigned cmp R5-ok). pta_num=min, pta_den=max (slope_div
+        // needs pta_num<=pta_den).
+        hex.cmp 8, pta_dx, pta_dy, dy_major, dy_major, dx_major
       dx_major:
-        hex.add 1, oct_idx, c1                   // oct_idx |= 1
-        hex.mov 8, num, dy                        // num = |dy| (smaller), den = |dx| (larger)
-        hex.mov 8, den, dx
+        hex.add 1, pta_oct_idx, pta_c1                   // pta_oct_idx |= 1
+        hex.mov 8, pta_num, pta_dy                        // pta_num = |pta_dy| (smaller), pta_den = |pta_dx| (larger)
+        hex.mov 8, pta_den, pta_dx
         ;numden_set
-      dy_major:                                   // |dx| <= |dy|
-        hex.mov 8, num, dx
-        hex.mov 8, den, dy
+      dy_major:                                   // |pta_dx| <= |pta_dy|
+        hex.mov 8, pta_num, pta_dx
+        hex.mov 8, pta_den, pta_dy
         ;numden_set
       numden_set:
-        .slope_div slope_idx, num, den, disp      // slope_idx = tantoangle index for the slope
+        .slope_div pta_slope_idx, pta_num, pta_den, disp      // pta_slope_idx = tantoangle index for the slope
         // ORPHANED TABLE, see slope_div above: `ttang` ships whenever `lines` and had no live
-        // reader. Same values, same shape (index_nibbles=3, result_nibbles=8 vs slope_idx: hex.vec 3
-        // and tan_base: hex.vec 8).
-        rep(1-disp, k) hex.read_table_packed 4, tan_base, tantoangle, 3, slope_idx   // shared LUT, M12l
-        rep(disp, k) ttang.lookup tan_base, slope_idx
+        // reader. Same values, same shape (index_nibbles=3, result_nibbles=8 vs pta_slope_idx: hex.vec 3
+        // and pta_tan_base: hex.vec 8).
+        rep(1-disp, k) hex.read_table_packed 4, pta_tan_base, tantoangle, 3, pta_slope_idx   // shared LUT, M12l
+        rep(disp, k) ttang.lookup pta_tan_base, pta_slope_idx
         // M13-p2acrush: the octant offset+sign, previously two read_tables (8-nib ~10.4k + 1-nib)
-        // on oct_idx, is now a 3-deep COMPARE TREE to 8 constant tails (same formulas, ~1k).
-        // oct_idx = sxneg*4 + syneg*2 + (|dx|>|dy|); the oracle's 8 returns (ANG90=0x40000000 etc.),
-        // with `base` = tan_base:
+        // on pta_oct_idx, is now a 3-deep COMPARE TREE to 8 constant tails (same formulas, ~1k).
+        // pta_oct_idx = sxneg*4 + syneg*2 + (|pta_dx|>|pta_dy|); the oracle's 8 returns (ANG90=0x40000000 etc.),
+        // with `base` = pta_tan_base:
         //   0: (ANG90-1)-base   1: +base            2: ANG270+base    3: -base
         //   4: ANG90+base       5: (ANG180-1)-base  6: (ANG270-1)-base 7: ANG180+base
-        hex.cmp 1, oct_idx, c4, oct_lo4, oct4, oct_hi4
+        hex.cmp 1, pta_oct_idx, pta_c4, oct_lo4, oct4, oct_hi4
       oct_lo4:
-        hex.cmp 1, oct_idx, c2, oct_lo2, oct2, oct3
+        hex.cmp 1, pta_oct_idx, pta_c2, oct_lo2, oct2, oct3
       oct_lo2:
-        hex.cmp 1, oct_idx, c1, oct0, oct1, oct1
+        hex.cmp 1, pta_oct_idx, pta_c1, oct0, oct1, oct1
       oct_hi4:
-        hex.cmp 1, oct_idx, c6, oct5, oct6, oct7
+        hex.cmp 1, pta_oct_idx, pta_c6, oct5, oct6, oct7
       oct0:
         hex.set 8, dst, 0x3FFFFFFF
-        hex.sub 8, dst, tan_base
+        hex.sub 8, dst, pta_tan_base
         ;done
       oct1:
-        hex.mov 8, dst, tan_base
+        hex.mov 8, dst, pta_tan_base
         ;done
       oct2:
         hex.set 8, dst, 0xC0000000
-        hex.add 8, dst, tan_base
+        hex.add 8, dst, pta_tan_base
         ;done
       oct3:
         hex.zero 8, dst
-        hex.sub 8, dst, tan_base
+        hex.sub 8, dst, pta_tan_base
         ;done
       oct4:
         hex.set 8, dst, 0x40000000
-        hex.add 8, dst, tan_base
+        hex.add 8, dst, pta_tan_base
         ;done
       oct5:
         hex.set 8, dst, 0x7FFFFFFF
-        hex.sub 8, dst, tan_base
+        hex.sub 8, dst, pta_tan_base
         ;done
       oct6:
         hex.set 8, dst, 0xBFFFFFFF
-        hex.sub 8, dst, tan_base
+        hex.sub 8, dst, pta_tan_base
         ;done
       oct7:
         hex.set 8, dst, 0x80000000
-        hex.add 8, dst, tan_base
+        hex.add 8, dst, pta_tan_base
         ;done
 
-      dx: hex.vec 8
-      dy: hex.vec 8
-      num: hex.vec 8
-      den: hex.vec 8
-      oct_idx: hex.vec 1
-      slope_idx: hex.vec 3
-      tan_base: hex.vec 8
-      c1: hex.vec 1, 1
-      c2: hex.vec 1, 2
-      c4: hex.vec 1, 4
-      c6: hex.vec 1, 6
       czero: hex.vec 8, 0                        // ⚠ declared + reserved but never referenced
       done:
     }
@@ -1399,6 +1385,18 @@ ns proj {
         // THING (250 of them on E1M1). A `finesine` lookup carries result_nibbles=8, i.e. EIGHT
         // dispatches, so the pair costs ~8.6k ops -- against a 1-nibble `if0` to reuse them. A
         // macro's locals are program statics, so the cache needs nothing but the flag.
+        // ⚠⚠ SHARED LATCH, AND IT IS READ-BEFORE-WRITE ACROSS EXPANSIONS.
+        // pth_trig_cached / pth_vsin / pth_vcos are ONE cell each, shared by both
+        // proj.project_thing expansions in frame.thing_record_body. Pre-hoist each expansion
+        // cached its OWN sin/cos; now expansion 2 consumes what expansion 1 left. That is
+        // correct today for TWO reasons, neither of which the code states, so state them:
+        //   1. `viewangle` is FRAME-INVARIANT across both call sites, so the cached sin/cos
+        //      are the values expansion 2 would have computed anyway;
+        //   2. pth_trig_cached is CLEARED EVERY FRAME by the M1 restore set (present there at
+        //      full extent), so the cache never survives into the next frame.
+        // Break either -- a second view, a mirror, a mid-frame turn, or dropping the register
+        // from the restore set -- and every sprite mis-renders with no gate saying why.
+        // Found by CR 2026-08-25 dataflow; it is the ONE read-before-write among the 18.
         hex.if0 1, pth_trig_cached, trig_calc
         ;trig_have
       trig_calc:

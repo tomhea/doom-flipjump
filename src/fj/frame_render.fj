@@ -1784,98 +1784,91 @@ ns frame {
     }
 
     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
-            @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, \
-              up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, \
-              lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, piece_max, \
-              face_cap, face_norm, face_dist, face_scale, face_scalestep, wtu1, wtu2, wtl1, wtl2, row_a, row_b, cviewh1, \
-              frac_u1, frac_u2, frac_l1, frac_l2, step_u1, step_u2, step_l1, step_l2, fmode, \
-              col_x, drawn_b, drawn_p, drawn_v, sfflag_b, sfflag_p, sfflag_v, sfslot_b, sfslot_p, slot_idx, out_y1, out_y2, end \
-            < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, \
-              seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, \
-              seg_bpid {
+            @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, piece_max, end \
+            < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, seg_bpid, tsf_col_x, tsf_cviewh1, tsf_drawn_b, tsf_drawn_p, tsf_drawn_v, tsf_face_cap, tsf_face_dist, tsf_face_norm, tsf_face_scale, tsf_face_scalestep, tsf_fmode, tsf_frac_l1, tsf_frac_l2, tsf_frac_u1, tsf_frac_u2, tsf_out_y1, tsf_out_y2, tsf_row_a, tsf_row_b, tsf_sfflag_b, tsf_sfflag_p, tsf_sfflag_v, tsf_sfslot_b, tsf_sfslot_p, tsf_slot_idx, tsf_step_l1, tsf_step_l2, tsf_step_u1, tsf_step_u2, tsf_wtl1, tsf_wtl2, tsf_wtu1, tsf_wtu2 {
         hex.if0 2, seg_fmask, nofaces           // this boundary carries no face at all (compile-time)
-        hex.set 2, face_cap, budget
-        hex.cmp 2, n_face, face_cap, dofaces, nofaces, nofaces
+        hex.set 2, tsf_face_cap, budget
+        hex.cmp 2, n_face, tsf_face_cap, dofaces, nofaces, nofaces
       dofaces:
         hex.inc 2, n_face
         // SMUDGE FIX part 2: latch `fbspent` the moment the face budget FILLS -- from here on
         // the oracle's piece-seg idle stop (claim-complete AND faces-spent) holds, and the
         // pass-2 call sites skip piece segs that provably cannot write anything.
-        hex.cmp 2, n_face, face_cap, budget_ok, budget_full, budget_full
+        hex.cmp 2, n_face, tsf_face_cap, budget_ok, budget_full, budget_full
       budget_full:
         hex.set 1, fbspent, 1
       budget_ok:
-        proj.wall_setup_sgn face_norm, face_dist, sgn_aff, seg_segangle
-        proj.wall_scale_setup_m face_scale, face_scalestep, viewangle, face_norm, face_dist, x1, x2, projection
+        proj.wall_setup_sgn tsf_face_norm, tsf_face_dist, sgn_aff, seg_segangle
+        proj.wall_scale_setup_m tsf_face_scale, tsf_face_scalestep, viewangle, tsf_face_norm, tsf_face_dist, x1, x2, projection
         // the four world heights as map-unit deltas from the eye, hoisted once per seg exactly as
         // pass 2 hoists wtc8/wtf8. Upper face = [row(front ceil), row(back ceil) - 1]; lower face =
         // [row(back floor), row(front floor)] -- the oracle's wall_screen_span pairs, verbatim.
-        hex.mov 4, wtu1, seg_uh1
-        hex.sub 4, wtu1, viewz + 4*dw
-        hex.sign_extend 8, 4, wtu1
-        hex.mov 4, wtu2, seg_uh2
-        hex.sub 4, wtu2, viewz + 4*dw
-        hex.sign_extend 8, 4, wtu2
-        hex.mov 4, wtl1, seg_lh1
-        hex.sub 4, wtl1, viewz + 4*dw
-        hex.sign_extend 8, 4, wtl1
-        hex.mov 4, wtl2, seg_lh2
-        hex.sub 4, wtl2, viewz + 4*dw
-        hex.sign_extend 8, 4, wtl2
-        hex.set 8, cviewh1, viewh1
-        rep(dda, k) .ts_dda_setup face_scale, face_scalestep, wtu1, wtu2, wtl1, wtl2, centeryfix_c, frac_u1, frac_u2, frac_l1, frac_l2, step_u1, step_u2, step_l1, step_l2
-        hex.zero 8, col_x
-        hex.mov 2, col_x, x1
-        hex.set w/4, drawn_b, drawn             // the occlusion flag, read but never written here
-        hex.ptr_index drawn_p, drawn_b, col_x
-        hex.set w/4, sfflag_b, sfflag           // one byte per column: which slots are filled
-        hex.ptr_index sfflag_p, sfflag_b, col_x
-        hex.zero w/4, slot_idx
-        hex.mov 2, slot_idx, col_x
-        hex.shl_hex w/4, 1, slot_idx            // slotstride = 16 bytes -> a whole-nibble shift
-        hex.set w/4, sfslot_b, sfslot
-        hex.ptr_index sfslot_p, sfslot_b, slot_idx
+        hex.mov 4, tsf_wtu1, seg_uh1
+        hex.sub 4, tsf_wtu1, viewz + 4*dw
+        hex.sign_extend 8, 4, tsf_wtu1
+        hex.mov 4, tsf_wtu2, seg_uh2
+        hex.sub 4, tsf_wtu2, viewz + 4*dw
+        hex.sign_extend 8, 4, tsf_wtu2
+        hex.mov 4, tsf_wtl1, seg_lh1
+        hex.sub 4, tsf_wtl1, viewz + 4*dw
+        hex.sign_extend 8, 4, tsf_wtl1
+        hex.mov 4, tsf_wtl2, seg_lh2
+        hex.sub 4, tsf_wtl2, viewz + 4*dw
+        hex.sign_extend 8, 4, tsf_wtl2
+        hex.set 8, tsf_cviewh1, viewh1
+        rep(dda, k) .ts_dda_setup tsf_face_scale, tsf_face_scalestep, tsf_wtu1, tsf_wtu2, tsf_wtl1, tsf_wtl2, centeryfix_c, tsf_frac_u1, tsf_frac_u2, tsf_frac_l1, tsf_frac_l2, tsf_step_u1, tsf_step_u2, tsf_step_l1, tsf_step_l2
+        hex.zero 8, tsf_col_x
+        hex.mov 2, tsf_col_x, x1
+        hex.set w/4, tsf_drawn_b, drawn             // the occlusion flag, read but never written here
+        hex.ptr_index tsf_drawn_p, tsf_drawn_b, tsf_col_x
+        hex.set w/4, tsf_sfflag_b, sfflag           // one byte per column: which slots are filled
+        hex.ptr_index tsf_sfflag_p, tsf_sfflag_b, tsf_col_x
+        hex.zero w/4, tsf_slot_idx
+        hex.mov 2, tsf_slot_idx, tsf_col_x
+        hex.shl_hex w/4, 1, tsf_slot_idx            // slotstride = 16 bytes -> a whole-nibble shift
+        hex.set w/4, tsf_sfslot_b, sfslot
+        hex.ptr_index tsf_sfslot_p, tsf_sfslot_b, tsf_slot_idx
       col_loop:
-        hex.cmp 2, col_x, x2, col_body, nofaces, nofaces
+        hex.cmp 2, tsf_col_x, x2, col_body, nofaces, nofaces
       col_body:
-        hex.read_byte drawn_v, drawn_p
-        hex.if0 2, drawn_v, col_work            // already painted by a nearer wall -> nothing to show
+        hex.read_byte tsf_drawn_v, tsf_drawn_p
+        hex.if0 2, tsf_drawn_v, col_work            // already painted by a nearer wall -> nothing to show
         ;col_next
       col_work:
-        hex.read_byte sfflag_v, sfflag_p
+        hex.read_byte tsf_sfflag_v, tsf_sfflag_p
         // ---- the UPPER face(s) ----------------------------------------------------------------
         // V5: the flag nibbles are per-side COUNTS (0..1+stack); slot layout is 4-byte pieces
         // [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all inside the 16-byte stride.
         hex.if0 1, seg_fmask, up_skip           // nibble 0 = has an upper face
-        hex.cmp 1, sfflag_v, piece_max, up_do, up_skip, up_skip // upper count < 1+stack -> room
+        hex.cmp 1, tsf_sfflag_v, piece_max, up_do, up_skip, up_skip // upper count < 1+stack -> room
       up_do:
         // V5-DROP FAR GATE: a LIP farther than dlipscale projects to a sub-pixel line
         // -- skip the whole piece. Risers are never lip-gated (they ARE the stairs).
-        rep(deg, k) hex.mov 1, fmode, seg_fmask
-        rep(deg, k) hex.dec 1, fmode
-        rep(deg, k) hex.if0 1, fmode, up_lip_ok
-        rep(deg, k) hex.set 8, out_y1, dlipscale
-        rep(deg, k) hex.cmp 8, face_scale, out_y1, up_skip, up_lip_ok, up_lip_ok
+        rep(deg, k) hex.mov 1, tsf_fmode, seg_fmask
+        rep(deg, k) hex.dec 1, tsf_fmode
+        rep(deg, k) hex.if0 1, tsf_fmode, up_lip_ok
+        rep(deg, k) hex.set 8, tsf_out_y1, dlipscale
+        rep(deg, k) hex.cmp 8, tsf_face_scale, tsf_out_y1, up_skip, up_lip_ok, up_lip_ok
       up_lip_ok:
         // 25M-CAP STACK FAR GATE: a SECOND stacked piece only when the boundary is near enough
         // (scale >= dstkscale, one unsigned compare on the register the DDA already carries).
-        // out_y1 is dead until up_store, so it serves as the constant cell.
-        rep(deg*stack, k) hex.if0 1, sfflag_v, up_gates_ok    // the FIRST piece is never gated
-        rep(deg*stack, k) hex.set 8, out_y1, dstkscale
-        rep(deg*stack, k) hex.cmp 8, face_scale, out_y1, up_skip, up_gates_ok, up_gates_ok
+        // tsf_out_y1 is dead until up_store, so it serves as the constant cell.
+        rep(deg*stack, k) hex.if0 1, tsf_sfflag_v, up_gates_ok    // the FIRST piece is never gated
+        rep(deg*stack, k) hex.set 8, tsf_out_y1, dstkscale
+        rep(deg*stack, k) hex.cmp 8, tsf_face_scale, tsf_out_y1, up_skip, up_gates_ok, up_gates_ok
       up_gates_ok:
-        rep(1-dda, k) proj.step_rows row_a, row_b, face_scale, wtu1, wtu2, centeryfix_c
-        rep(dda, k) .ts_dda_rows row_a, row_b, frac_u1, frac_u2
-        hex.dec 8, row_b                        // ... ends one row ABOVE the back ceiling
+        rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtu1, tsf_wtu2, centeryfix_c
+        rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_u1, tsf_frac_u2
+        hex.dec 8, tsf_row_b                        // ... ends one row ABOVE the back ceiling
         // V5-DROP: mode 2 = LIP -- the near ceiling's edge row ALONE; the stored
         // region-behind then paints the far ceiling below it (mode 1 keeps the riser)
-        hex.mov 1, fmode, seg_fmask
-        hex.dec 1, fmode
-        hex.if0 1, fmode, up_not_lip
-        hex.mov 8, row_b, row_a
+        hex.mov 1, tsf_fmode, seg_fmask
+        hex.dec 1, tsf_fmode
+        hex.if0 1, tsf_fmode, up_not_lip
+        hex.mov 8, tsf_row_b, tsf_row_a
       up_not_lip:
         // V5: a second piece clips past the STORED first piece's end (sentinels included)
-        rep(stack, k) .ts_clamp2 row_a, sfflag_v, sfslot_p, 0
+        rep(stack, k) .ts_clamp2 tsf_row_a, tsf_sfflag_v, tsf_sfslot_p, 0
         // the slot stores BYTES, so a VISIBLE face is stored clipped; the oracle stores the
         // face whenever A <= B -- EVEN FULLY OFF-SCREEN -- and that write CONSUMES the slot,
         // blocking farther segs (R40, the 28-column phantom face). V5 splits the off-screen
@@ -1883,78 +1876,45 @@ ns frame {
         // bytes: fully ABOVE the screen -> (1, 0) (the region behind starts at ~row 0); fully
         // BELOW -> (255, 254) (the region behind is off-screen). Both keep y1 > y2, so
         // lines_step_load still rejects them before drawing.
-        .ts_piece_store row_a, row_b, cviewh1, out_y1, out_y2, sfflag_v, sfflag_v, sfflag_p, sfslot_p, 0, seg_ucls, seg_bpid, up_skip
+        .ts_piece_store tsf_row_a, tsf_row_b, tsf_cviewh1, tsf_out_y1, tsf_out_y2, tsf_sfflag_v, tsf_sfflag_v, tsf_sfflag_p, tsf_sfslot_p, 0, seg_ucls, seg_bpid, up_skip
       up_skip:
         // ---- the LOWER face -------------------------------------------------------------------
         hex.if0 1, seg_fmask + 1*dw, lo_skip
-        hex.cmp 1, sfflag_v + 1*dw, piece_max, lo_do, lo_skip, lo_skip   // lower count < 1+stack -> room
+        hex.cmp 1, tsf_sfflag_v + 1*dw, piece_max, lo_do, lo_skip, lo_skip   // lower count < 1+stack -> room
       lo_do:
-        rep(deg, k) hex.mov 1, fmode, seg_fmask + 1*dw   // V5-DROP far gate, lower mirror
-        rep(deg, k) hex.dec 1, fmode
-        rep(deg, k) hex.if0 1, fmode, lo_lip_ok
-        rep(deg, k) hex.set 8, out_y1, dlipscale
-        rep(deg, k) hex.cmp 8, face_scale, out_y1, lo_skip, lo_lip_ok, lo_lip_ok
+        rep(deg, k) hex.mov 1, tsf_fmode, seg_fmask + 1*dw   // V5-DROP far gate, lower mirror
+        rep(deg, k) hex.dec 1, tsf_fmode
+        rep(deg, k) hex.if0 1, tsf_fmode, lo_lip_ok
+        rep(deg, k) hex.set 8, tsf_out_y1, dlipscale
+        rep(deg, k) hex.cmp 8, tsf_face_scale, tsf_out_y1, lo_skip, lo_lip_ok, lo_lip_ok
       lo_lip_ok:
-        rep(deg*stack, k) hex.if0 1, sfflag_v + 1*dw, lo_gates_ok   // ... and the LOWER side's mirror
-        rep(deg*stack, k) hex.set 8, out_y1, dstkscale
-        rep(deg*stack, k) hex.cmp 8, face_scale, out_y1, lo_skip, lo_gates_ok, lo_gates_ok
+        rep(deg*stack, k) hex.if0 1, tsf_sfflag_v + 1*dw, lo_gates_ok   // ... and the LOWER side's mirror
+        rep(deg*stack, k) hex.set 8, tsf_out_y1, dstkscale
+        rep(deg*stack, k) hex.cmp 8, tsf_face_scale, tsf_out_y1, lo_skip, lo_gates_ok, lo_gates_ok
       lo_gates_ok:
-        rep(1-dda, k) proj.step_rows row_a, row_b, face_scale, wtl1, wtl2, centeryfix_c
-        rep(dda, k) .ts_dda_rows row_a, row_b, frac_l1, frac_l2
+        rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtl1, tsf_wtl2, centeryfix_c
+        rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_l1, tsf_frac_l2
         // V5-DROP: mode 2 = LIP -- the near floor's edge row alone (the tread-lip line)
-        hex.mov 1, fmode, seg_fmask + 1*dw
-        hex.dec 1, fmode
-        hex.if0 1, fmode, lo_not_lip
-        hex.mov 8, row_a, row_b
+        hex.mov 1, tsf_fmode, seg_fmask + 1*dw
+        hex.dec 1, tsf_fmode
+        hex.if0 1, tsf_fmode, lo_not_lip
+        hex.mov 8, tsf_row_a, tsf_row_b
       lo_not_lip:
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
-        rep(stack, k) .ts_clamp2_lo row_b, sfflag_v + 1*dw, sfslot_p, 8
-        .ts_piece_store row_a, row_b, cviewh1, out_y1, out_y2, sfflag_v + 1*dw, sfflag_v, sfflag_p, sfslot_p, 8, seg_lcls, seg_bpid, lo_skip
+        rep(stack, k) .ts_clamp2_lo tsf_row_b, tsf_sfflag_v + 1*dw, tsf_sfslot_p, 8
+        .ts_piece_store tsf_row_a, tsf_row_b, tsf_cviewh1, tsf_out_y1, tsf_out_y2, tsf_sfflag_v + 1*dw, tsf_sfflag_v, tsf_sfflag_p, tsf_sfslot_p, 8, seg_lcls, seg_bpid, lo_skip
       lo_skip:
       col_next:
-        hex.ptr_add drawn_p, 1
-        hex.ptr_add sfflag_p, 1
-        hex.ptr_add sfslot_p, slotstride
-        hex.inc 2, col_x
-        hex.add 8, face_scale, face_scalestep   // the interpolated scale advances on EVERY column
-        rep(dda, k) .ts_dda_adv frac_u1, frac_u2, frac_l1, frac_l2, step_u1, step_u2, step_l1, step_l2
+        hex.ptr_add tsf_drawn_p, 1
+        hex.ptr_add tsf_sfflag_p, 1
+        hex.ptr_add tsf_sfslot_p, slotstride
+        hex.inc 2, tsf_col_x
+        hex.add 8, tsf_face_scale, tsf_face_scalestep   // the interpolated scale advances on EVERY column
+        rep(dda, k) .ts_dda_adv tsf_frac_u1, tsf_frac_u2, tsf_frac_l1, tsf_frac_l2, tsf_step_u1, tsf_step_u2, tsf_step_l1, tsf_step_l2
         ;col_loop
       nofaces:
         ;end
-      face_cap: hex.vec 2
       piece_max: hex.vec 1, 1+stack             // V5: pieces allowed per side per column
-      face_norm: hex.vec 8
-      face_dist: hex.vec 8
-      face_scale: hex.vec 8
-      face_scalestep: hex.vec 8
-      wtu1: hex.vec 8
-      wtu2: hex.vec 8
-      wtl1: hex.vec 8
-      wtl2: hex.vec 8
-      row_a: hex.vec 8
-      row_b: hex.vec 8
-      cviewh1: hex.vec 8
-      fmode: hex.vec 1
-      frac_u1: hex.vec 8
-      frac_u2: hex.vec 8
-      frac_l1: hex.vec 8
-      frac_l2: hex.vec 8
-      step_u1: hex.vec 8
-      step_u2: hex.vec 8
-      step_l1: hex.vec 8
-      step_l2: hex.vec 8
-      col_x: hex.vec 8
-      drawn_b: hex.vec w/4
-      drawn_p: hex.vec w/4
-      drawn_v: hex.vec 2
-      sfflag_b: hex.vec w/4
-      sfflag_p: hex.vec w/4
-      sfflag_v: hex.vec 2
-      sfslot_b: hex.vec w/4
-      sfslot_p: hex.vec w/4
-      slot_idx: hex.vec w/4
-      out_y1: hex.vec 8
-      out_y2: hex.vec 8
       end:
     }
 
@@ -2592,37 +2552,9 @@ ns frame {
     // M13-splitxb part 2 -- the EMIT HALF: projection setup, baked-bank addresses, the claim
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
-    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, w1r, wpxstride, \
-            pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift, spremit, \
-            ascode, sky_base_id, stack, deg, dslvw \
-            @ col_loop, col_body, notdrawn, skipcol, ret, one, cVH, cexcl, \
-              sliver_done, sliver_yes, sliver_w, sliver_cap, xkey, \
-              fstart, cbufa, cbufd, fbufa, fbufd, screen_full, wtc8, wtf8, dtop, dbot, dscale, dsstep, \
-              emit_full, ck_fstart, ck_grain, ck_sky, ck_face_uy1, ck_face_uy2, ck_face_ucol, ck_face_ly1, ck_face_ly2, ck_face_lcol, \
-              ck_spr_sy1, ck_spr_sy2, ck_spr_y0, ck_spr_blk, \
-              ck_plane, emit_ditto, col_emitted, dvalid, dcexcl, dfstart, dpid, \
-              gnrow, dgn, skb, soff, issky, dsoff, \
-              face_flags, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, \
-              duy1, duy2, ducol, dly1, dly2, dlcol, \
-              sprfl, ssy1, ssy2, sy0b, sblk, slr, dssy1, dssy2, dsy0b, dsblk, \
-              ssy1b, ssy2b, sy0bb, sblkb, slrb, dssy1b, dssy2b, dsy0bb, dsblkb, \
-              ck_sprb_sy1, ck_sprb_sy2, ck_sprb_y0, ck_sprb_blk, \
-              ducnt, du1y1, du1y2, du1cls, du1bp, du2y1, du2y2, du2cls, du2bp, \
-              dlcnt, dl1y1, dl1y2, dl1cls, dl1bp, dl2y1, dl2y2, dl2cls, dl2bp, \
-              ck_piece_ucnt, ck_piece_lcnt, ck_upper_pieces, ck_u1y2, ck_u1cls, ck_u1bp, ck_u2y1, ck_u2y2, ck_u2cls, ck_u2bp, ck_lower_pieces, \
-              ck_l1y2, ck_l1cls, ck_l1bp, ck_l2y1, ck_l2y2, ck_l2cls, ck_l2bp, pieces_done, \
-              ck_grain3, ck_wlen, gate_ucnt, gate_lcnt, gate_ufl, gate_lfl, ck_grain2, dgn2, dgn3, wlen, cw16 \
-            < viewangle, seg_segangle, sgn_aff, \
-              ceilfix, floorfix, viewz, \
-              seg_lit, seg_lit2, seg_wstrip, wstripbase, \
-              ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
-              lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, \
-              gnrow2, gnrow3, \
-              x1, x2, x, dbase, dptr, dval8, pval8, \
-              normalangle, rw_distance, scale, scalestep, \
-              top, bottom, \
-              seg_ret2, \
-              full, n_drawn, vieww, w1rslv, wnoff {
+    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, w1r, wpxstride, pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift, spremit, ascode, sky_base_id, stack, deg, dslvw \
+            @ col_loop, col_body, notdrawn, skipcol, ret, sliver_done, sliver_yes, screen_full, emit_full, ck_fstart, ck_grain, ck_sky, ck_face_uy1, ck_face_uy2, ck_face_ucol, ck_face_ly1, ck_face_ly2, ck_face_lcol, ck_spr_sy1, ck_spr_sy2, ck_spr_y0, ck_spr_blk, ck_plane, emit_ditto, col_emitted, ck_sprb_sy1, ck_sprb_sy2, ck_sprb_y0, ck_sprb_blk, ck_piece_ucnt, ck_piece_lcnt, ck_upper_pieces, ck_u1y2, ck_u1cls, ck_u1bp, ck_u2y1, ck_u2y2, ck_u2cls, ck_u2bp, ck_lower_pieces, ck_l1y2, ck_l1cls, ck_l1bp, ck_l2y1, ck_l2y2, ck_l2cls, ck_l2bp, pieces_done, ck_grain3, ck_wlen, gate_ucnt, gate_lcnt, gate_ufl, gate_lfl, ck_grain2 \
+            < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, viewz, seg_lit, seg_lit2, seg_wstrip, wstripbase, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, gnrow2, gnrow3, x1, x2, x, dbase, dptr, dval8, pval8, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww, w1rslv, wnoff, p2_cVH, p2_cbufa, p2_cbufd, p2_cexcl, p2_cw16, p2_dbot, p2_dcexcl, p2_dfstart, p2_dgn, p2_dgn2, p2_dgn3, p2_dl1bp, p2_dl1cls, p2_dl1y1, p2_dl1y2, p2_dl2bp, p2_dl2cls, p2_dl2y1, p2_dl2y2, p2_dlcnt, p2_dlcol, p2_dly1, p2_dly2, p2_dpid, p2_dsblk, p2_dsblkb, p2_dscale, p2_dsoff, p2_dsstep, p2_dssy1, p2_dssy1b, p2_dssy2, p2_dssy2b, p2_dsy0b, p2_dsy0bb, p2_dtop, p2_du1bp, p2_du1cls, p2_du1y1, p2_du1y2, p2_du2bp, p2_du2cls, p2_du2y1, p2_du2y2, p2_ducnt, p2_ducol, p2_duy1, p2_duy2, p2_dvalid, p2_face_flags, p2_fbufa, p2_fbufd, p2_fstart, p2_gnrow, p2_issky, p2_lcol, p2_lfl, p2_ly1, p2_ly2p1, p2_one, p2_sblk, p2_sblkb, p2_skb, p2_sliver_cap, p2_sliver_w, p2_slr, p2_slrb, p2_soff, p2_sprfl, p2_ssy1, p2_ssy1b, p2_ssy2, p2_ssy2b, p2_sy0b, p2_sy0bb, p2_ucol, p2_ufl, p2_uy1, p2_uy2p1, p2_wlen, p2_wtc8, p2_wtf8, p2_xkey {
         // ==========================================================================================
         // == 1. PER-SEG SETUP (hoisted out of the column loop) ==
         // angle/scale/distance, the sliver flag, the map-unit world heights, the band bases.
@@ -2632,45 +2564,45 @@ ns frame {
         // ablate "scaletwice" (measurement only): the same setup, same operands, dead outputs. This
         // is what rung 3c's step faces must pay for each marking seg they decorate, so it is THE
         // number that sets STEP_SEG_BUDGET. Frame stays byte-exact (asserted by the probe).
-        rep(stwice, k) proj.wall_scale_setup_m dscale, dsstep, viewangle, normalangle, rw_distance, x1, x2, projection
+        rep(stwice, k) proj.wall_scale_setup_m p2_dscale, p2_dsstep, viewangle, normalangle, rw_distance, x1, x2, projection
         // 25M-CAP SLIVER: a wall whose whole span is <= dslvw columns renders FLAT -- the runtime
         // twin of the baked seg_w1rf flag (w1rslv, tested at both wall dispatch sites). A 1-2
         // column horizon sliver carries no readable texture; the heavy skyline frames have
-        // dozens. Ditto-safe: dvalid resets per seg, so a ditto never crosses into this seg.
+        // dozens. Ditto-safe: p2_dvalid resets per seg, so a ditto never crosses into this seg.
         rep(deg*w1r, k) hex.set 1, w1rslv, 0
-        rep(deg*w1r, k) hex.mov 2, sliver_w, x2
-        rep(deg*w1r, k) hex.sub 2, sliver_w, x1
-        rep(deg*w1r, k) hex.set 2, sliver_cap, dslvw
-        rep(deg*w1r, k) hex.cmp 2, sliver_w, sliver_cap, sliver_yes, sliver_yes, sliver_done
+        rep(deg*w1r, k) hex.mov 2, p2_sliver_w, x2
+        rep(deg*w1r, k) hex.sub 2, p2_sliver_w, x1
+        rep(deg*w1r, k) hex.set 2, p2_sliver_cap, dslvw
+        rep(deg*w1r, k) hex.cmp 2, p2_sliver_w, p2_sliver_cap, sliver_yes, sliver_yes, sliver_done
       sliver_yes:
         rep(deg*w1r, k) hex.set 1, w1rslv, 1
       sliver_done:
         // M13-paramhoist: the map-unit world heights, once per seg (the per-column subtracts and
         // the 12-nibble fixed_mul width both die; see proj.column_params_m).
-        hex.mov 4, wtc8, ceilfix + 4*dw
-        hex.sub 4, wtc8, viewz + 4*dw
-        hex.sign_extend 8, 4, wtc8
-        hex.mov 4, wtf8, floorfix + 4*dw
-        hex.sub 4, wtf8, viewz + 4*dw
-        hex.sign_extend 8, 4, wtf8
+        hex.mov 4, p2_wtc8, ceilfix + 4*dw
+        hex.sub 4, p2_wtc8, viewz + 4*dw
+        hex.sign_extend 8, 4, p2_wtc8
+        hex.mov 4, p2_wtf8, floorfix + 4*dw
+        hex.sub 4, p2_wtf8, viewz + 4*dw
+        hex.sign_extend 8, 4, p2_wtf8
 
         // M13-bakedbands: the four half-list addresses -- pure adds off the per-frame bank
         // pointer (vzbank, set once by the player-subsector block); the offsets are BAKED per
         // seg. No build calls, no built-flags, no planeheight: the lists are compile-time data.
         // M13-2S rung 3a (pnear): the plane surfaces are no longer this seg's -- they are the
         // NEAREST MARKING seg's, per column, so the addresses move into the loop below.
-        rep((1-pnear)*(1-ascode), k) .lines_seg_plane half_slots, cbufa, cbufd, fbufa, fbufd
-        rep((1-pnear)*ascode, k) .lines_seg_plane_ids cbufa, cbufd, fbufa, fbufd
+        rep((1-pnear)*(1-ascode), k) .lines_seg_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
+        rep((1-pnear)*ascode, k) .lines_seg_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
         hex.ptr_index dptr, dbase, x1
         rep(pnear, k) .lines_plane_ptr x1       // ... and pclm[], walked in lockstep with it
-        hex.set 2, one, 1
-        hex.set 1, dvalid, 0                    // M13-ditto: no previous emitted column yet
+        hex.set 2, p2_one, 1
+        hex.set 1, p2_dvalid, 0                    // M13-ditto: no previous emitted column yet
         // HOISTED out of the per-column loop (EXP-14). `viewh` is a compile-time parameter and
-        // `cVH` is never written again, so setting it once per SEG instead of once per CLAIMED
+        // `p2_cVH` is never written again, so setting it once per SEG instead of once per CLAIMED
         // COLUMN is bit-identical. `hex.set 8` is a zero + a xor across EIGHT nibbles, and
         // `opprof.py` put the `hex.set > hex.set > hex.zero` path at ~2% of the whole frame.
-        hex.set 8, cVH, viewh
+        hex.set 8, p2_cVH, viewh
       col_loop:
         hex.cmp 2, x, x2, col_body, ret, ret
       col_body:
@@ -2678,59 +2610,59 @@ ns frame {
         hex.if0 2, dval8, notdrawn
         hex.ptr_add dptr, 1                     // already claimed -> next column
         rep(pnear, k) .lines_plane_step
-        hex.set 1, dvalid, 0                    // M13-ditto: a gap breaks x-adjacency
+        hex.set 1, p2_dvalid, 0                    // M13-ditto: a gap breaks x-adjacency
         ;skipcol
       notdrawn:
-        rep(1-noproj, k) .lines_projcall centery*0x10000, viewh1, top, bottom, scale, wtc8, wtf8
+        rep(1-noproj, k) .lines_projcall centery*0x10000, viewh1, top, bottom, scale, p2_wtc8, p2_wtf8
         rep(noproj, k) .lines_projstub centery, top, bottom
         // ablate "projtwice" (measurement only): the SAME call with the SAME operands into dead
         // destinations. Measuring by ADDING keeps the frame byte-exact -- unlike "noproj", whose
         // stub shrinks every wall and so changes the WPX emit volume too (its delta is NOT the
         // projection's cost; see docs/handoff-m13-2s-fast.md §1).
-        rep(ptwice, k) .lines_projcall centery*0x10000, viewh1, dtop, dbot, scale, wtc8, wtf8
-        .clip_rows cexcl, fstart, top, bottom, cVH
+        rep(ptwice, k) .lines_projcall centery*0x10000, viewh1, p2_dtop, p2_dbot, scale, p2_wtc8, p2_wtf8
+        .clip_rows p2_cexcl, p2_fstart, top, bottom, p2_cVH
         // M13-2S rung 3a: which SURFACES this column's plane regions belong to (see lines_col_plane)
-        rep(pnear*(1-ascode), k) .lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd
-        rep(pnear*ascode, k) .lines_col_plane_ids cbufa, cbufd, fbufa, fbufd
-        rep(sky, k) .lines_sky_base skb
-        rep(sky*(1-ascode), k) .lines_sky_ceil skystride, half_slots, skyall, cbufa, cbufd, x, skb, soff, issky, pval8
-        rep(sky*ascode, k) .lines_sky_ceil_ids sky_base_id, skyall, cbufa, cbufd, x, skb, soff, issky, pval8
+        rep(pnear*(1-ascode), k) .lines_col_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
+        rep(pnear*ascode, k) .lines_col_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
+        rep(sky, k) .lines_sky_base p2_skb
+        rep(sky*(1-ascode), k) .lines_sky_ceil skystride, half_slots, skyall, p2_cbufa, p2_cbufd, x, p2_skb, p2_soff, p2_issky, pval8
+        rep(sky*ascode, k) .lines_sky_ceil_ids sky_base_id, skyall, p2_cbufa, p2_cbufd, x, p2_skb, p2_soff, p2_issky, pval8
         // V3: this column's step faces, clipped to the regions this wall leaves open and shaded.
         // Must run BEFORE the ditto decision -- a face changes a column's CONTENT without changing
         // its clip rows, the third feature in a row to hit that (see the ck_grain chain).
-        rep(steps*(1-stack), k) .lines_step_load face_flags, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, x, cexcl, fstart
+        rep(steps*(1-stack), k) .lines_step_load p2_face_flags, p2_ufl, p2_uy1, p2_uy2p1, p2_ucol, p2_lfl, p2_ly1, p2_ly2p1, p2_lcol, x, p2_cexcl, p2_fstart
         // V5: the stacked load -- RAW slot bytes + per-side counts; the emit splices clip
         rep(steps*stack, k) .lines_steps_load2 x
         // ablate "sprnoemit" (measurement only): keep the RECORD half, never read the
         // fragments back. The frame is then identical to a things=False build, so the
-        // delta against one prices the record half ALONE -- by subtraction from a
+        // delta against p2_one prices the record half ALONE -- by subtraction from a
         // byte-exact frame, not by stubbing something the rest of the frame depends on.
-        rep(things*spremit, k) .lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, x
+        rep(things*spremit, k) .lines_spr_load p2_sprfl, p2_ssy1, p2_ssy2, p2_sy0b, p2_sblk, p2_slr, p2_ssy1b, p2_ssy2b, p2_sy0bb, p2_sblkb, p2_slrb, x
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
         // W1R-ANCHOR: the pattern key is (x + wnoff), wnoff = viewangle*640/turn computed
         // once per frame -- turning slides the masonry WITH the walls instead of
         // re-rolling it (the flickering-TV fix's temporal half).
-        rep(w1r, k) hex.zero 4, xkey
-        rep(w1r, k) hex.mov 2, xkey, x
-        rep(w1r, k) hex.add 4, xkey, wnoff
-        rep(noise*(1-w1r), k) wnoise.lookup gnrow, x   // V1 grain (non-W1R): unanchored
-        rep(noise*w1r, k) wnoise.lookup gnrow, xkey
-        rep(w1r, k) wnoise2.lookup gnrow2, xkey   // W1R-LOD: the fine + coarse group keys
-        rep(w1r, k) wnoise3.lookup gnrow3, xkey
-        hex.if0 1, dvalid, emit_full
-        hex.cmp 2, cexcl, dcexcl, emit_full, ck_fstart, emit_full
+        rep(w1r, k) hex.zero 4, p2_xkey
+        rep(w1r, k) hex.mov 2, p2_xkey, x
+        rep(w1r, k) hex.add 4, p2_xkey, wnoff
+        rep(noise*(1-w1r), k) wnoise.lookup p2_gnrow, x   // V1 grain (non-W1R): unanchored
+        rep(noise*w1r, k) wnoise.lookup p2_gnrow, p2_xkey
+        rep(w1r, k) wnoise2.lookup gnrow2, p2_xkey   // W1R-LOD: the fine + coarse group keys
+        rep(w1r, k) wnoise3.lookup gnrow3, p2_xkey
+        hex.if0 1, p2_dvalid, emit_full
+        hex.cmp 2, p2_cexcl, p2_dcexcl, emit_full, ck_fstart, emit_full
         // ==========================================================================================
-        // == 3. THE DITTO LADDER -- is this column byte-identical to the one before it? ==
-        // Each rung compares one field of the emit signature against its `d`-prefixed shadow
+        // == 3. THE DITTO LADDER -- is this column byte-identical to the p2_one before it? ==
+        // Each rung compares p2_one field of the emit signature against its `d`-prefixed shadow
         // and falls through on a match; ANY mismatch jumps to `emit_full`. A column that
         // survives every rung emits 2 bytes instead of a full run-list (~58% of E1M1-spawn
         // columns). ⚠ A new feature needs BOTH a rung here AND a shadow save in section 4:
         // a field compared but never saved dittoes when it must not, and vice versa.
         // ==========================================================================================
       ck_fstart:
-        hex.cmp 2, fstart, dfstart, emit_full, ck_grain, emit_full
+        hex.cmp 2, p2_fstart, p2_dfstart, emit_full, ck_grain, emit_full
       ck_grain:
         // V1: ... and the same GRAIN row. The grain varies per x>>2 group, so two adjacent columns
         // can share clip rows and plane yet render differently -- without this the ditto ("copy
@@ -2738,18 +2670,18 @@ ns frame {
         // fix: the first differing pixel sat at column 12 and at column 144, both x = 0 (mod 4).
         // ⚠ EVERY feature that changes a column's CONTENT without changing its CLIP ROWS must join
         // this chain -- that includes the step faces and the sprite fragments still to come.
-        rep(noise, k) hex.cmp 2, gnrow, dgn, emit_full, ck_grain3, emit_full
+        rep(noise, k) hex.cmp 2, p2_gnrow, p2_dgn, emit_full, ck_grain3, emit_full
       ck_grain3:
         // W1R-LOD: the coarse 8-px key is in every stacked pattern pick (the near tier)
-        rep(w1r, k) hex.cmp 2, gnrow3, dgn3, emit_full, ck_wlen, emit_full
+        rep(w1r, k) hex.cmp 2, gnrow3, p2_dgn3, emit_full, ck_wlen, emit_full
       ck_wlen:
-        // ... the fine 2-px key matters only for FAR-tier walls (wlen < 16) or columns that
+        // ... the fine 2-px key matters only for FAR-tier walls (p2_wlen < 16) or columns that
         // carry a boundary piece/face (faces pick their pattern by their own height): gate
         // the compare so near plain columns keep their 4-px ditto granularity
-        rep(w1r, k) hex.mov 2, wlen, fstart
-        rep(w1r, k) hex.sub 2, wlen, cexcl
-        rep(w1r, k) hex.if0 2, wlen, gate_ucnt
-        rep(w1r, k) hex.cmp 2, wlen, cw16, ck_grain2, gate_ucnt, gate_ucnt
+        rep(w1r, k) hex.mov 2, p2_wlen, p2_fstart
+        rep(w1r, k) hex.sub 2, p2_wlen, p2_cexcl
+        rep(w1r, k) hex.if0 2, p2_wlen, gate_ucnt
+        rep(w1r, k) hex.cmp 2, p2_wlen, p2_cw16, ck_grain2, gate_ucnt, gate_ucnt
       gate_ucnt:
         rep(w1r, k) hex.if0 1, ucnt, gate_lcnt
         rep(w1r, k) .lines_jmp ck_grain2
@@ -2757,14 +2689,14 @@ ns frame {
         rep(w1r, k) hex.if0 1, lcnt, gate_ufl
         rep(w1r, k) .lines_jmp ck_grain2
       gate_ufl:
-        rep(w1r, k) hex.if0 1, ufl, gate_lfl
+        rep(w1r, k) hex.if0 1, p2_ufl, gate_lfl
         rep(w1r, k) .lines_jmp ck_grain2
       gate_lfl:
-        rep(w1r, k) hex.if0 1, lfl, ck_sky
+        rep(w1r, k) hex.if0 1, p2_lfl, ck_sky
       ck_grain2:
-        rep(w1r, k) hex.cmp 2, gnrow2, dgn2, emit_full, ck_sky, emit_full
+        rep(w1r, k) hex.cmp 2, gnrow2, p2_dgn2, emit_full, ck_sky, emit_full
       ck_sky:
-        rep(sky, k) hex.cmp 2, soff, dsoff, emit_full, ck_face_uy1, emit_full
+        rep(sky, k) hex.cmp 2, p2_soff, p2_dsoff, emit_full, ck_face_uy1, emit_full
       ck_face_uy1:
         // V3: ... and the same STEP FACES. A face is a run whose rows come from a DIFFERENT seg's
         // projection, so two neighbours can share clip rows, plane and grain and still differ.
@@ -2773,83 +2705,83 @@ ns frame {
         // carries a face, so "no ditto on a face column" is "no ditto", and ditto is worth ~4.8M.
         // The six values below are exactly the emit's face inputs, so equal signature => identical
         // pair list; the projection changes slowly across a flat surface, so long runs still ditto.
-        rep(steps, k) hex.cmp 2, uy1, duy1, emit_full, ck_face_uy2, emit_full
+        rep(steps, k) hex.cmp 2, p2_uy1, p2_duy1, emit_full, ck_face_uy2, emit_full
       ck_face_uy2:
-        rep(steps, k) hex.cmp 2, uy2p1, duy2, emit_full, ck_face_ucol, emit_full
+        rep(steps, k) hex.cmp 2, p2_uy2p1, p2_duy2, emit_full, ck_face_ucol, emit_full
       ck_face_ucol:
-        rep(steps, k) hex.cmp 2, ucol, ducol, emit_full, ck_face_ly1, emit_full
+        rep(steps, k) hex.cmp 2, p2_ucol, p2_ducol, emit_full, ck_face_ly1, emit_full
       ck_face_ly1:
-        rep(steps, k) hex.cmp 2, ly1, dly1, emit_full, ck_face_ly2, emit_full
+        rep(steps, k) hex.cmp 2, p2_ly1, p2_dly1, emit_full, ck_face_ly2, emit_full
       ck_face_ly2:
-        rep(steps, k) hex.cmp 2, ly2p1, dly2, emit_full, ck_face_lcol, emit_full
+        rep(steps, k) hex.cmp 2, p2_ly2p1, p2_dly2, emit_full, ck_face_lcol, emit_full
       ck_face_lcol:
-        rep(steps, k) hex.cmp 2, lcol, dlcol, emit_full, ck_spr_sy1, emit_full
+        rep(steps, k) hex.cmp 2, p2_lcol, p2_dlcol, emit_full, ck_spr_sy1, emit_full
       ck_spr_sy1:
         // V4: ... and the same SPRITE FRAGMENT. Fifth feature on this chain; same rule as V3 --
         // COMPARE it, never refuse the ditto, or the columns AROUND a billboard stop dittoing too.
         // The four values are the emit's whole sprite input (the block index carries r0/last_rel).
-        rep(things, k) hex.cmp 2, ssy1, dssy1, emit_full, ck_spr_sy2, emit_full
+        rep(things, k) hex.cmp 2, p2_ssy1, p2_dssy1, emit_full, ck_spr_sy2, emit_full
       ck_spr_sy2:
-        rep(things, k) hex.cmp 2, ssy2, dssy2, emit_full, ck_spr_y0, emit_full
+        rep(things, k) hex.cmp 2, p2_ssy2, p2_dssy2, emit_full, ck_spr_y0, emit_full
       ck_spr_y0:
-        rep(things, k) hex.cmp 4, sy0b, dsy0b, emit_full, ck_spr_blk, emit_full
+        rep(things, k) hex.cmp 4, p2_sy0b, p2_dsy0b, emit_full, ck_spr_blk, emit_full
       ck_spr_blk:
-        rep(things, k) hex.cmp 4, sblk, dsblk, emit_full, ck_sprb_sy1, emit_full
+        rep(things, k) hex.cmp 4, p2_sblk, p2_dsblk, emit_full, ck_sprb_sy1, emit_full
       ck_sprb_sy1:
         // V4b: ... and the SECOND fragment's signature (zeroed when absent, like slot A's --
         // a real fragment's biased y0 is never 0, so presence is encoded in the values).
-        rep(things, k) hex.cmp 2, ssy1b, dssy1b, emit_full, ck_sprb_sy2, emit_full
+        rep(things, k) hex.cmp 2, p2_ssy1b, p2_dssy1b, emit_full, ck_sprb_sy2, emit_full
       ck_sprb_sy2:
-        rep(things, k) hex.cmp 2, ssy2b, dssy2b, emit_full, ck_sprb_y0, emit_full
+        rep(things, k) hex.cmp 2, p2_ssy2b, p2_dssy2b, emit_full, ck_sprb_y0, emit_full
       ck_sprb_y0:
-        rep(things, k) hex.cmp 4, sy0bb, dsy0bb, emit_full, ck_sprb_blk, emit_full
+        rep(things, k) hex.cmp 4, p2_sy0bb, p2_dsy0bb, emit_full, ck_sprb_blk, emit_full
       ck_sprb_blk:
-        rep(things, k) hex.cmp 4, sblkb, dsblkb, emit_full, ck_piece_ucnt, emit_full
+        rep(things, k) hex.cmp 4, p2_sblkb, p2_dsblkb, emit_full, ck_piece_ucnt, emit_full
       ck_piece_ucnt:
         // V5: ... and the STACKED-piece signature. Counts first; the field compares are gated
         // on the (equal) count, so pieceless columns pay two compares and two if0s only.
-        rep(stack, k) hex.cmp 2, ucnt, ducnt, emit_full, ck_piece_lcnt, emit_full
+        rep(stack, k) hex.cmp 2, ucnt, p2_ducnt, emit_full, ck_piece_lcnt, emit_full
       ck_piece_lcnt:
-        rep(stack, k) hex.cmp 2, lcnt, dlcnt, emit_full, ck_upper_pieces, emit_full
+        rep(stack, k) hex.cmp 2, lcnt, p2_dlcnt, emit_full, ck_upper_pieces, emit_full
       ck_upper_pieces:
         rep(stack, k) hex.if0 1, ucnt, ck_lower_pieces
-        rep(stack, k) hex.cmp 2, u1y1, du1y1, emit_full, ck_u1y2, emit_full
+        rep(stack, k) hex.cmp 2, u1y1, p2_du1y1, emit_full, ck_u1y2, emit_full
       ck_u1y2:
-        rep(stack, k) hex.cmp 2, u1y2, du1y2, emit_full, ck_u1cls, emit_full
+        rep(stack, k) hex.cmp 2, u1y2, p2_du1y2, emit_full, ck_u1cls, emit_full
       ck_u1cls:
-        rep(stack, k) hex.cmp 2, u1cls, du1cls, emit_full, ck_u1bp, emit_full
+        rep(stack, k) hex.cmp 2, u1cls, p2_du1cls, emit_full, ck_u1bp, emit_full
       ck_u1bp:
-        rep(stack, k) hex.cmp 2, u1bp, du1bp, emit_full, ck_u2y1, emit_full
+        rep(stack, k) hex.cmp 2, u1bp, p2_du1bp, emit_full, ck_u2y1, emit_full
       ck_u2y1:
-        rep(stack, k) hex.cmp 2, u2y1, du2y1, emit_full, ck_u2y2, emit_full
+        rep(stack, k) hex.cmp 2, u2y1, p2_du2y1, emit_full, ck_u2y2, emit_full
       ck_u2y2:
-        rep(stack, k) hex.cmp 2, u2y2, du2y2, emit_full, ck_u2cls, emit_full
+        rep(stack, k) hex.cmp 2, u2y2, p2_du2y2, emit_full, ck_u2cls, emit_full
       ck_u2cls:
-        rep(stack, k) hex.cmp 2, u2cls, du2cls, emit_full, ck_u2bp, emit_full
+        rep(stack, k) hex.cmp 2, u2cls, p2_du2cls, emit_full, ck_u2bp, emit_full
       ck_u2bp:
-        rep(stack, k) hex.cmp 2, u2bp, du2bp, emit_full, ck_lower_pieces, emit_full
+        rep(stack, k) hex.cmp 2, u2bp, p2_du2bp, emit_full, ck_lower_pieces, emit_full
       ck_lower_pieces:
         rep(stack, k) hex.if0 1, lcnt, ck_plane
-        rep(stack, k) hex.cmp 2, l1y1, dl1y1, emit_full, ck_l1y2, emit_full
+        rep(stack, k) hex.cmp 2, l1y1, p2_dl1y1, emit_full, ck_l1y2, emit_full
       ck_l1y2:
-        rep(stack, k) hex.cmp 2, l1y2, dl1y2, emit_full, ck_l1cls, emit_full
+        rep(stack, k) hex.cmp 2, l1y2, p2_dl1y2, emit_full, ck_l1cls, emit_full
       ck_l1cls:
-        rep(stack, k) hex.cmp 2, l1cls, dl1cls, emit_full, ck_l1bp, emit_full
+        rep(stack, k) hex.cmp 2, l1cls, p2_dl1cls, emit_full, ck_l1bp, emit_full
       ck_l1bp:
-        rep(stack, k) hex.cmp 2, l1bp, dl1bp, emit_full, ck_l2y1, emit_full
+        rep(stack, k) hex.cmp 2, l1bp, p2_dl1bp, emit_full, ck_l2y1, emit_full
       ck_l2y1:
-        rep(stack, k) hex.cmp 2, l2y1, dl2y1, emit_full, ck_l2y2, emit_full
+        rep(stack, k) hex.cmp 2, l2y1, p2_dl2y1, emit_full, ck_l2y2, emit_full
       ck_l2y2:
-        rep(stack, k) hex.cmp 2, l2y2, dl2y2, emit_full, ck_l2cls, emit_full
+        rep(stack, k) hex.cmp 2, l2y2, p2_dl2y2, emit_full, ck_l2cls, emit_full
       ck_l2cls:
-        rep(stack, k) hex.cmp 2, l2cls, dl2cls, emit_full, ck_l2bp, emit_full
+        rep(stack, k) hex.cmp 2, l2cls, p2_dl2cls, emit_full, ck_l2bp, emit_full
       ck_l2bp:
-        rep(stack, k) hex.cmp 2, l2bp, dl2bp, emit_full, pieces_done, emit_full
+        rep(stack, k) hex.cmp 2, l2bp, p2_dl2bp, emit_full, pieces_done, emit_full
       pieces_done:
       ck_plane:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
         rep(1-pnear, k) .lines_jmp emit_ditto
-        rep(pnear, k) .lines_ditto_plane pval8, dpid, emit_ditto, emit_full
+        rep(pnear, k) .lines_ditto_plane pval8, p2_dpid, emit_ditto, emit_full
       emit_ditto:
         byte.emit x
         stl.output_char 0xFE
@@ -2862,51 +2794,51 @@ ns frame {
         // ==========================================================================================
       emit_full:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, deg, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, seg_lit, seg_lit2, seg_wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd
-        hex.mov 2, dcexcl, cexcl                // remember this column's clip rows for the ditto test
-        hex.mov 2, dfstart, fstart
-        hex.mov 2, duy1, uy1                    // V3: the face signature, unconditional (same
-        hex.mov 2, duy2, uy2p1                  // reason as dgn -- an unused label is an error)
-        hex.mov 2, ducol, ucol
-        hex.mov 2, dly1, ly1
-        hex.mov 2, dly2, ly2p1
-        hex.mov 2, dlcol, lcol
-        hex.mov 2, dssy1, ssy1                  // V4: the sprite signature, unconditional
-        hex.mov 2, dssy2, ssy2
-        hex.mov 4, dsy0b, sy0b
-        hex.mov 4, dsblk, sblk
-        hex.mov 2, dssy1b, ssy1b                // V4b: the second fragment's signature
-        hex.mov 2, dssy2b, ssy2b
-        hex.mov 4, dsy0bb, sy0bb
-        hex.mov 4, dsblkb, sblkb
-        hex.mov 2, ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
-        hex.mov 2, du1y1, u1y1                  // (the dgn rule: the cells must never be unused)
-        hex.mov 2, du1y2, u1y2
-        hex.mov 2, du1cls, u1cls
-        hex.mov 2, du1bp, u1bp
-        hex.mov 2, du2y1, u2y1
-        hex.mov 2, du2y2, u2y2
-        hex.mov 2, du2cls, u2cls
-        hex.mov 2, du2bp, u2bp
-        hex.mov 2, dlcnt, lcnt
-        hex.mov 2, dl1y1, l1y1
-        hex.mov 2, dl1y2, l1y2
-        hex.mov 2, dl1cls, l1cls
-        hex.mov 2, dl1bp, l1bp
-        hex.mov 2, dl2y1, l2y1
-        hex.mov 2, dl2y2, l2y2
-        hex.mov 2, dl2cls, l2cls
-        hex.mov 2, dl2bp, l2bp
-        hex.mov 2, dsoff, soff                  // V2: unconditional, same reason as dgn
-        hex.mov 2, dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
-        hex.mov 2, dgn3, gnrow3
-        hex.mov 2, dgn, gnrow                   // V1: unconditional so `dgn` is never an UNUSED
+        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, deg, p2_gnrow, x, p2_cexcl, p2_fstart, p2_ufl, p2_uy1, p2_uy2p1, p2_ucol, p2_lfl, p2_ly1, p2_ly2p1, p2_lcol, p2_sprfl, p2_ssy1, p2_ssy2, p2_sy0b, p2_sblk, p2_slr, p2_ssy1b, p2_ssy2b, p2_sy0bb, p2_sblkb, p2_slrb, seg_lit, seg_lit2, seg_wstrip, wstripbase, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
+        hex.mov 2, p2_dcexcl, p2_cexcl                // remember this column's clip rows for the ditto test
+        hex.mov 2, p2_dfstart, p2_fstart
+        hex.mov 2, p2_duy1, p2_uy1                    // V3: the face signature, unconditional (same
+        hex.mov 2, p2_duy2, p2_uy2p1                  // reason as p2_dgn -- an unused label is an error)
+        hex.mov 2, p2_ducol, p2_ucol
+        hex.mov 2, p2_dly1, p2_ly1
+        hex.mov 2, p2_dly2, p2_ly2p1
+        hex.mov 2, p2_dlcol, p2_lcol
+        hex.mov 2, p2_dssy1, p2_ssy1                  // V4: the sprite signature, unconditional
+        hex.mov 2, p2_dssy2, p2_ssy2
+        hex.mov 4, p2_dsy0b, p2_sy0b
+        hex.mov 4, p2_dsblk, p2_sblk
+        hex.mov 2, p2_dssy1b, p2_ssy1b                // V4b: the second fragment's signature
+        hex.mov 2, p2_dssy2b, p2_ssy2b
+        hex.mov 4, p2_dsy0bb, p2_sy0bb
+        hex.mov 4, p2_dsblkb, p2_sblkb
+        hex.mov 2, p2_ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
+        hex.mov 2, p2_du1y1, u1y1                  // (the p2_dgn rule: the cells must never be unused)
+        hex.mov 2, p2_du1y2, u1y2
+        hex.mov 2, p2_du1cls, u1cls
+        hex.mov 2, p2_du1bp, u1bp
+        hex.mov 2, p2_du2y1, u2y1
+        hex.mov 2, p2_du2y2, u2y2
+        hex.mov 2, p2_du2cls, u2cls
+        hex.mov 2, p2_du2bp, u2bp
+        hex.mov 2, p2_dlcnt, lcnt
+        hex.mov 2, p2_dl1y1, l1y1
+        hex.mov 2, p2_dl1y2, l1y2
+        hex.mov 2, p2_dl1cls, l1cls
+        hex.mov 2, p2_dl1bp, l1bp
+        hex.mov 2, p2_dl2y1, l2y1
+        hex.mov 2, p2_dl2y2, l2y2
+        hex.mov 2, p2_dl2cls, l2cls
+        hex.mov 2, p2_dl2bp, l2bp
+        hex.mov 2, p2_dsoff, p2_soff                  // V2: unconditional, same reason as p2_dgn
+        hex.mov 2, p2_dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
+        hex.mov 2, p2_dgn3, gnrow3
+        hex.mov 2, p2_dgn, p2_gnrow                   // V1: unconditional so `p2_dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
                                                 // rejects those outright. ~55 ops x 160 columns.
-        rep(pnear, k) .lines_save_plane pval8, dpid
-        hex.set 1, dvalid, 1
+        rep(pnear, k) .lines_save_plane pval8, p2_dpid
+        hex.set 1, p2_dvalid, 1
       col_emitted:
-        hex.write_byte_and_inc dptr, one        // drawn = 1 (advances to the next column's slot)
+        hex.write_byte_and_inc dptr, p2_one        // drawn = 1 (advances to the next column's slot)
         hex.inc 2, n_drawn
         hex.cmp 2, n_drawn, vieww, skipcol, screen_full, skipcol
       screen_full:
@@ -2917,90 +2849,7 @@ ns frame {
         ;col_loop
       ret:
         stl.fret seg_ret2
-      one: hex.vec 2
-      cVH: hex.vec 8
-      cexcl: hex.vec 8
-      fstart: hex.vec 8
-      dvalid: hex.vec 1
-      dcexcl: hex.vec 2
-      dfstart: hex.vec 2
-      dpid: hex.vec 2
-      wtc8: hex.vec 8
-      wtf8: hex.vec 8
-      skb: hex.vec 2                            // V2: the frame's sky scroll
-      soff: hex.vec 2                           // V2: this column's sky list index
-      dsoff: hex.vec 2                          // ... and the previously emitted one
-      issky: hex.vec 2
-      gnrow: hex.vec 2                          // V1: this column's grain row
-      dgn: hex.vec 2                            // ... and the previously emitted one
-      dgn2: hex.vec 2                           // W1R-LOD: the fine/coarse key shadows
-      dgn3: hex.vec 2
-      wlen: hex.vec 2                           // ... and the ditto-gate's wall-length scratch
-      cw16: hex.vec 2, 16
-      sliver_w: hex.vec 2                       // 25M-CAP: the seg's span, for the sliver test
-      sliver_cap: hex.vec 2                     // ... and the compile-time width bound cell
-      xkey: hex.vec 4                           // W1R-ANCHOR: x + wnoff, the shifted pattern key
-      face_flags: hex.vec 2                     // V3: which step-face slots this column holds
-      ufl: hex.vec 1                            // V3: draw an upper face in this column?
-      uy1: hex.vec 2                            // ... its first row,
-      uy2p1: hex.vec 2                          // ... its exclusive end row,
-      ucol: hex.vec 2                           // ... and its shade
-      lfl: hex.vec 1                            // V3: the same four for the lower face
-      ly1: hex.vec 2
-      ly2p1: hex.vec 2
-      lcol: hex.vec 2
-      duy1: hex.vec 2                           // ... and the previously emitted column's six, the
-      duy2: hex.vec 2                           // DITTO SIGNATURE
-      ducol: hex.vec 2
-      dly1: hex.vec 2
-      dly2: hex.vec 2
-      dlcol: hex.vec 2
-      sprfl: hex.vec 2                          // V4: does this column carry a sprite fragment?
-      ssy1: hex.vec 2                           // ... its first row,   (sy0b/dsy0b are 4-nibble:
                                                 //     two-byte biased y0, see lines_spr_load)
-      ssy2: hex.vec 2                           // ... one past its last,
-      sy0b: hex.vec 4                           // ... the sprite's row 0, BIASED by 32768,
-      sblk: hex.vec 4                           // ... its baked run-list block,
-      slr: hex.vec 2                            // ... and its shade row
-      dssy1: hex.vec 2                          // ... and the previously emitted column's four
-      dssy2: hex.vec 2
-      dsy0b: hex.vec 4
-      dsblk: hex.vec 4
-      ssy1b: hex.vec 2                          // V4b: the SECOND (farther) fragment's five ...
-      ssy2b: hex.vec 2
-      sy0bb: hex.vec 4
-      sblkb: hex.vec 4
-      slrb: hex.vec 2
-      dssy1b: hex.vec 2                         // ... and its previously emitted signature
-      dssy2b: hex.vec 2
-      dsy0bb: hex.vec 4
-      dsblkb: hex.vec 4
-      ducnt: hex.vec 2                          // ... and the previously emitted signature
-      du1y1: hex.vec 2
-      du1y2: hex.vec 2
-      du1cls: hex.vec 2
-      du1bp: hex.vec 2
-      du2y1: hex.vec 2
-      du2y2: hex.vec 2
-      du2cls: hex.vec 2
-      du2bp: hex.vec 2
-      dlcnt: hex.vec 2
-      dl1y1: hex.vec 2
-      dl1y2: hex.vec 2
-      dl1cls: hex.vec 2
-      dl1bp: hex.vec 2
-      dl2y1: hex.vec 2
-      dl2y2: hex.vec 2
-      dl2cls: hex.vec 2
-      dl2bp: hex.vec 2
-      dtop: hex.vec 8                           // ablate "projtwice" only: dead projection outputs
-      dbot: hex.vec 8
-      dscale: hex.vec 8                         // ablate "scaletwice" only: dead scale-setup outputs
-      dsstep: hex.vec 8
-      cbufa: hex.vec w/4
-      cbufd: hex.vec w/4
-      fbufa: hex.vec w/4
-      fbufd: hex.vec w/4
     }
 
     def lines_projcall centeryfix_c, viewh1, top, bottom, scale, wtc8, wtf8 {

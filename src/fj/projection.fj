@@ -299,10 +299,8 @@ ns proj {
     //   map's max |x|+|y| is 5440 units = 3.6e8 in 16.16, well inside the signed 32-bit range.
     //   @requires hex.init
     def wedge_setup qa, na, qb, nb, wex, wey, weyx, wexy, viewangle, viewx, viewy \
-            @ mdir, angt, wsel, qout, nout, wret, \
-              sel_lo4, sel_hi4, sel_lo2, mdir0, mdir1, mdir2, mdir3, mdir4, mdir5, mdir6, mdir7, \
-              sel_done, \
-              nb_set1, nb_done, c1, c2, c4, c6, cang45, cang90m1, end {
+            @ wsel, wret, sel_lo4, sel_hi4, sel_lo2, mdir0, mdir1, mdir2, mdir3, mdir4, mdir5, mdir6, mdir7, sel_done, nb_set1, nb_done, end \
+            < ws_angt, ws_c1, ws_c2, ws_c4, ws_c6, ws_cang45, ws_cang90m1, ws_mdir, ws_nout, ws_qout {
         hex.mov 8, wex, viewx
         hex.mov 8, wey, viewy
         // ⚠ CR-2026-08 (PJ-1) -- THIS ARITHMETIC IS THE MIRROR THAT WAS RIGHT. The eye terms are
@@ -333,23 +331,23 @@ ns proj {
         hex.mov 8, wexy, viewx
         hex.add 8, wexy, viewy              // wexy = viewx + viewy
 
-        hex.mov 8, angt, viewangle
-        hex.sub 8, angt, cang45             // (va - ANG45) mod 2^32
-        hex.shr_hex 8, 7, angt              // >> 28 bits ...
-        hex.shr_bit 8, angt                 //   ... then >> 1 = floor(./ANG45), in [0,7]
-        hex.mov 1, mdir, angt
+        hex.mov 8, ws_angt, viewangle
+        hex.sub 8, ws_angt, ws_cang45             // (va - ANG45) mod 2^32
+        hex.shr_hex 8, 7, ws_angt              // >> 28 bits ...
+        hex.shr_bit 8, ws_angt                 //   ... then >> 1 = floor(./ANG45), in [0,7]
+        hex.mov 1, ws_mdir, ws_angt
         stl.fcall wsel, wret
-        hex.mov 1, qa, qout
-        hex.mov 1, na, nout
+        hex.mov 1, qa, ws_qout
+        hex.mov 1, na, ws_nout
 
-        hex.mov 8, angt, viewangle
-        hex.add 8, angt, cang90m1           // va + ANG45 + (ANG45-1)  =>  ceil((va+ANG45)/ANG45)
-        hex.shr_hex 8, 7, angt
-        hex.shr_bit 8, angt
-        hex.mov 1, mdir, angt
+        hex.mov 8, ws_angt, viewangle
+        hex.add 8, ws_angt, ws_cang90m1           // va + ANG45 + (ANG45-1)  =>  ceil((va+ANG45)/ANG45)
+        hex.shr_hex 8, 7, ws_angt
+        hex.shr_bit 8, ws_angt
+        hex.mov 1, ws_mdir, ws_angt
         stl.fcall wsel, wret
-        hex.mov 1, qb, qout
-        hex.if0 1, nout, nb_set1            // nb = 1 - wsel(hi).n  (the +4 half-plane flip)
+        hex.mov 1, qb, ws_qout
+        hex.if0 1, ws_nout, nb_set1            // nb = 1 - wsel(hi).n  (the +4 half-plane flip)
         hex.set 1, nb, 0
         ;nb_done
       nb_set1:
@@ -357,60 +355,50 @@ ns proj {
       nb_done:
         ;end
 
-      wsel:                                 // mdir (0..7) -> qout = mdir&3, nout = (2 <= mdir <= 5)
-        hex.cmp 1, mdir, c4, sel_lo4, mdir4, sel_hi4
+      wsel:                                 // ws_mdir (0..7) -> ws_qout = ws_mdir&3, ws_nout = (2 <= ws_mdir <= 5)
+        hex.cmp 1, ws_mdir, ws_c4, sel_lo4, mdir4, sel_hi4
       sel_lo4:
-        hex.cmp 1, mdir, c2, sel_lo2, mdir2, mdir3
+        hex.cmp 1, ws_mdir, ws_c2, sel_lo2, mdir2, mdir3
       sel_lo2:
-        hex.cmp 1, mdir, c1, mdir0, mdir1, mdir1
+        hex.cmp 1, ws_mdir, ws_c1, mdir0, mdir1, mdir1
       sel_hi4:
-        hex.cmp 1, mdir, c6, mdir5, mdir6, mdir7
+        hex.cmp 1, ws_mdir, ws_c6, mdir5, mdir6, mdir7
       mdir0:
-        hex.set 1, qout, 0
-        hex.set 1, nout, 0
+        hex.set 1, ws_qout, 0
+        hex.set 1, ws_nout, 0
         ;sel_done
       mdir1:
-        hex.set 1, qout, 1
-        hex.set 1, nout, 0
+        hex.set 1, ws_qout, 1
+        hex.set 1, ws_nout, 0
         ;sel_done
       mdir2:
-        hex.set 1, qout, 2
-        hex.set 1, nout, 1
+        hex.set 1, ws_qout, 2
+        hex.set 1, ws_nout, 1
         ;sel_done
       mdir3:
-        hex.set 1, qout, 3
-        hex.set 1, nout, 1
+        hex.set 1, ws_qout, 3
+        hex.set 1, ws_nout, 1
         ;sel_done
       mdir4:
-        hex.set 1, qout, 0
-        hex.set 1, nout, 1
+        hex.set 1, ws_qout, 0
+        hex.set 1, ws_nout, 1
         ;sel_done
       mdir5:
-        hex.set 1, qout, 1
-        hex.set 1, nout, 1
+        hex.set 1, ws_qout, 1
+        hex.set 1, ws_nout, 1
         ;sel_done
       mdir6:
-        hex.set 1, qout, 2
-        hex.set 1, nout, 0
+        hex.set 1, ws_qout, 2
+        hex.set 1, ws_nout, 0
         ;sel_done
       mdir7:
-        hex.set 1, qout, 3
-        hex.set 1, nout, 0
+        hex.set 1, ws_qout, 3
+        hex.set 1, ws_nout, 0
         ;sel_done
       sel_done:
         stl.fret wret
 
-      mdir: hex.vec 1
-      angt: hex.vec 8
-      qout: hex.vec 1
-      nout: hex.vec 1
       wret: ;0
-      c1: hex.vec 1, 1
-      c2: hex.vec 1, 2
-      c4: hex.vec 1, 4
-      c6: hex.vec 1, 6
-      cang45: hex.vec 8, 0x20000000
-      cang90m1: hex.vec 8, 0x3FFFFFFF
       end:
     }
 
@@ -1642,46 +1630,42 @@ ns proj {
     //   schoolbook rows with SCALE as the multiplier (<= 3 nonzero nibbles; zero rows if0-skip).
     //   Bit-identical to wall_screen_span + clips on the same inputs. @requires hex.init
     def column_params_m top, bottom, scale, wtc8, wtf8, centeryfix_c, viewh1 \
-            @ prod, c_viewh1, c_centeryfix, consts_set, set_consts, consts_ready, \
-              tneg, tok, bok, bhi, end {
+            @ set_consts, consts_ready, tneg, tok, bok, bhi, end \
+            < cpm_c_centeryfix, cpm_c_viewh1, cpm_consts_set, cpm_prod {
         // EXP-14: the two c_ constants are COMPILE-TIME values and this macro runs once per COLUMN,
         // so re-setting them every call cost two `hex.set 8` -- a zero plus a xor across eight
         // nibbles each. A macro's locals are program statics (the EXP-5 sin/cos-cache lesson), so
         // they survive between calls: set them on the FIRST call only, behind a 1-nibble flag.
         // Bit-identical -- nothing else ever writes either register. `opprof.py` put the
         // `hex.set > hex.set > hex.zero` path at ~2% of the whole frame.
-        hex.if0 1, consts_set, set_consts
+        hex.if0 1, cpm_consts_set, set_consts
         ;consts_ready
       set_consts:
-        hex.set 8, c_centeryfix, centeryfix_c
-        hex.set 8, c_viewh1, viewh1
-        hex.set 1, consts_set, 1
+        hex.set 8, cpm_c_centeryfix, centeryfix_c
+        hex.set 8, cpm_c_viewh1, viewh1
+        hex.set 1, cpm_consts_set, 1
       consts_ready:
-        hex.zero 8, prod
-        rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wtc8, scale
-        hex.mov 8, top, c_centeryfix
-        hex.sub 8, top, prod                // topfrac = centeryfix - wt*scale
+        hex.zero 8, cpm_prod
+        rep(6, j) hex.fixed_mul_lo.row 8, j, cpm_prod, wtc8, scale
+        hex.mov 8, top, cpm_c_centeryfix
+        hex.sub 8, top, cpm_prod                // topfrac = centeryfix - wt*scale
         hex.shr_hex 8, 4, top               // >> 16 arithmetic:
         hex.sign_extend 8, 4, top           //   logical shift + sign-extend the low half
-        hex.zero 8, prod
-        rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wtf8, scale
-        hex.mov 8, bottom, c_centeryfix
-        hex.sub 8, bottom, prod
+        hex.zero 8, cpm_prod
+        rep(6, j) hex.fixed_mul_lo.row 8, j, cpm_prod, wtf8, scale
+        hex.mov 8, bottom, cpm_c_centeryfix
+        hex.sub 8, bottom, cpm_prod
         hex.shr_hex 8, 4, bottom
         hex.sign_extend 8, 4, bottom
         hex.sign 8, top, tneg, tok          // top = max(0, top)
       tneg:
         hex.zero 8, top
       tok:
-        hex.scmp 8, bottom, c_viewh1, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
+        hex.scmp 8, bottom, cpm_c_viewh1, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
       bhi:
-        hex.mov 8, bottom, c_viewh1
+        hex.mov 8, bottom, cpm_c_viewh1
       bok:
         ;end
-      prod: hex.vec 8
-      c_viewh1: hex.vec 8
-      c_centeryfix: hex.vec 8
-      consts_set: hex.vec 1
       end:
     }
 
@@ -1747,57 +1731,56 @@ ns proj {
     //   fixed_mul_lo.row's built-in zero-digit skip on their always-zero high nibbles for free.
     //   Writes back(0/1) to `back` and returns via stl.fret pos_ret. @requires hex.init.
     def point_on_side_leaf back, vx, vy, cpx, cpy, cdx_mag, cdy_mag, sign_dx, sign_dy, pos_ret \
-            @ dyv_neg, dyv_pos, dyv_done, dxv_neg, dxv_pos, dxv_done, \
-              signA_pos, signA_neg, both_pos, pos_neg, check_p2, both_neg, setback, front, end, \
-              dxv, dyv, dxv_mag, dyv_mag, sign_dxv, sign_dyv, signA, signB, p1, p2 {
-        hex.mov 10, dxv, vx
-        hex.sub 10, dxv, cpx              // dxv = vx - px   (signed, 10-nib -- unchanged width)
-        hex.mov 10, dyv, vy
-        hex.sub 10, dyv, cpy              // dyv = vy - py
+            @ dyv_neg, dyv_pos, dyv_done, dxv_neg, dxv_pos, dxv_done, signA_pos, signA_neg, both_pos, pos_neg, check_p2, both_neg, setback, front, end \
+            < pos_dxv, pos_dxv_mag, pos_dyv, pos_dyv_mag, pos_p1, pos_p2, pos_signA, pos_signB, pos_sign_dxv, pos_sign_dyv {
+        hex.mov 10, pos_dxv, vx
+        hex.sub 10, pos_dxv, cpx              // pos_dxv = vx - px   (signed, 10-nib -- unchanged width)
+        hex.mov 10, pos_dyv, vy
+        hex.sub 10, pos_dyv, cpy              // pos_dyv = vy - py
 
-        hex.sign 10, dyv, dyv_neg, dyv_pos
+        hex.sign 10, pos_dyv, dyv_neg, dyv_pos
       dyv_neg:
-        hex.set 1, sign_dyv, 1
-        hex.neg 5, dyv                     // magnitude fits 5 nibbles (int16 coords => diff <= 65535);
+        hex.set 1, pos_sign_dyv, 1
+        hex.neg 5, pos_dyv                     // magnitude fits 5 nibbles (int16 coords => diff <= 65535);
         ;dyv_done                          // negating only the low 5 nibbles == the true magnitude
       dyv_pos:                             // (two's-complement truncation identity)
-        hex.set 1, sign_dyv, 0
+        hex.set 1, pos_sign_dyv, 0
       dyv_done:
-        hex.zero 8, dyv_mag
-        hex.mov 5, dyv_mag, dyv
+        hex.zero 8, pos_dyv_mag
+        hex.mov 5, pos_dyv_mag, pos_dyv
 
-        hex.sign 10, dxv, dxv_neg, dxv_pos
+        hex.sign 10, pos_dxv, dxv_neg, dxv_pos
       dxv_neg:
-        hex.set 1, sign_dxv, 1
-        hex.neg 5, dxv
+        hex.set 1, pos_sign_dxv, 1
+        hex.neg 5, pos_dxv
         ;dxv_done
       dxv_pos:
-        hex.set 1, sign_dxv, 0
+        hex.set 1, pos_sign_dxv, 0
       dxv_done:
-        hex.zero 8, dxv_mag
-        hex.mov 5, dxv_mag, dxv
+        hex.zero 8, pos_dxv_mag
+        hex.mov 5, pos_dxv_mag, pos_dxv
 
-        hex.mul_lo 8, p1, dyv_mag, cdx_mag   // p1 = |dx|*|dyv|
-        hex.mul_lo 8, p2, dxv_mag, cdy_mag   // p2 = |dy|*|dxv|
+        hex.mul_lo 8, pos_p1, pos_dyv_mag, cdx_mag   // pos_p1 = |dx|*|pos_dyv|
+        hex.mul_lo 8, pos_p2, pos_dxv_mag, cdy_mag   // pos_p2 = |dy|*|pos_dxv|
 
-        hex.mov 1, signA, sign_dx
-        hex.xor 1, signA, sign_dyv          // signA = sign(dx*dyv)
-        hex.mov 1, signB, sign_dy
-        hex.xor 1, signB, sign_dxv          // signB = sign(dy*dxv)
+        hex.mov 1, pos_signA, sign_dx
+        hex.xor 1, pos_signA, pos_sign_dyv          // pos_signA = sign(dx*pos_dyv)
+        hex.mov 1, pos_signB, sign_dy
+        hex.xor 1, pos_signB, pos_sign_dxv          // pos_signB = sign(dy*pos_dxv)
 
-        hex.if 1, signA, signA_pos, signA_neg
-      signA_pos:                            // signA==0 (p1 contributes +|p1|)
-        hex.if 1, signB, both_pos, pos_neg
-      both_pos:                             // (+,+): side = |p1|-|p2| -> back = p1>p2
-        hex.cmp 8, p1, p2, front, front, setback
-      pos_neg:                              // (+,-): side = |p1|+|p2| -> back unless both zero
-        hex.if 8, p1, check_p2, setback
+        hex.if 1, pos_signA, signA_pos, signA_neg
+      signA_pos:                            // pos_signA==0 (pos_p1 contributes +|pos_p1|)
+        hex.if 1, pos_signB, both_pos, pos_neg
+      both_pos:                             // (+,+): side = |pos_p1|-|pos_p2| -> back = pos_p1>pos_p2
+        hex.cmp 8, pos_p1, pos_p2, front, front, setback
+      pos_neg:                              // (+,-): side = |pos_p1|+|pos_p2| -> back unless both zero
+        hex.if 8, pos_p1, check_p2, setback
       check_p2:
-        hex.if 8, p2, front, setback
-      signA_neg:                            // signA==1 (p1 contributes -|p1|)
-        hex.if 1, signB, front, both_neg     // (-,+): side = -|p1|-|p2| <= 0 -> always front
-      both_neg:                             // (-,-): side = |p2|-|p1| -> back = p2>p1 (p1<p2)
-        hex.cmp 8, p1, p2, setback, front, front
+        hex.if 8, pos_p2, front, setback
+      signA_neg:                            // pos_signA==1 (pos_p1 contributes -|pos_p1|)
+        hex.if 1, pos_signB, front, both_neg     // (-,+): side = -|pos_p1|-|pos_p2| <= 0 -> always front
+      both_neg:                             // (-,-): side = |pos_p2|-|pos_p1| -> back = pos_p2>pos_p1 (pos_p1<pos_p2)
+        hex.cmp 8, pos_p1, pos_p2, setback, front, front
 
       setback:
         hex.set 2, back, 1
@@ -1807,16 +1790,6 @@ ns proj {
       end:
         stl.fret pos_ret                  // return (the data below is never fallen into — fret exits first)
 
-      dxv: hex.vec 10
-      dyv: hex.vec 10
-      dxv_mag: hex.vec 8
-      dyv_mag: hex.vec 8
-      sign_dxv: hex.vec 1
-      sign_dyv: hex.vec 1
-      signA: hex.vec 1
-      signB: hex.vec 1
-      p1: hex.vec 8
-      p2: hex.vec 8
     }
 
     // ── M13-mapunits (lines mode): the map-unit twins of slope_div / point_to_angle /

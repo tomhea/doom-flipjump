@@ -5,6 +5,7 @@
 set -e
 declare -A M=( [trb]="src/fj/frame_render.fj thing_record_body" \
                [wxr]="src/fj/projection.fj wall_x_range_m" \
+               [pth]="src/fj/projection.fj project_thing" \
                [ssc]="src/fj/stream_render.fj steps_splice_c" \
                [ssf]="src/fj/stream_render.fj steps_splice_f" \
                [wss]="src/fj/projection.fj wall_scale_setup_m" \

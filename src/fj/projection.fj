@@ -1388,48 +1388,42 @@ ns proj {
     //   the fj reads next to r_things.c (see the conventions header).
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
     def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg, spn, neartz \
-            @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, h_ok, h_fits, \
-              clamp_tall, set_far, far_done, trig_calc, trig_have, trig_cached, reject, done, end, \
-              deg_far_hard, \
-              tr_x, tr_y, ang, sin_idx, vsin, vcos, gxt, gyt, tz, xscale, tx, tx_abs, tz_lim, \
-              tx_left, tx_right, tmp, gzt, one16, czlim, cproj, c_centerxfix, c_centeryfix, \
-              c_vieww, c_viewh \
-            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, \
-              sp_tzmax2, degfl, thfar {
+            @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, h_ok, h_fits, clamp_tall, set_far, far_done, trig_calc, trig_have, reject, done, end, deg_far_hard \
+            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_c_centerxfix, pth_c_centeryfix, pth_c_viewh, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_gzt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
         hex.set 1, vis, 0
-        hex.mov 8, tr_x, sp_x
-        hex.sub 8, tr_x, viewx
-        hex.mov 8, tr_y, sp_y
-        hex.sub 8, tr_y, viewy
+        hex.mov 8, pth_tr_x, sp_x
+        hex.sub 8, pth_tr_x, viewx
+        hex.mov 8, pth_tr_y, sp_y
+        hex.sub 8, pth_tr_y, viewy
         // sin/cos of the VIEW angle: constant for the whole frame, but this leaf runs once per
         // THING (250 of them on E1M1). A `finesine` lookup carries result_nibbles=8, i.e. EIGHT
         // dispatches, so the pair costs ~8.6k ops -- against a 1-nibble `if0` to reuse them. A
         // macro's locals are program statics, so the cache needs nothing but the flag.
-        hex.if0 1, trig_cached, trig_calc
+        hex.if0 1, pth_trig_cached, trig_calc
         ;trig_have
       trig_calc:
-        hex.mov 8, ang, viewangle                       // finesine index = angle >> 20 bits
-        hex.shr_hex 8, 5, ang
-        hex.mov 3, sin_idx, ang
-        finesine.read_sin vsin, sin_idx
-        finesine.read_cos vcos, sin_idx
-        hex.set 1, trig_cached, 1
+        hex.mov 8, pth_ang, viewangle                       // finesine index = angle >> 20 bits
+        hex.shr_hex 8, 5, pth_ang
+        hex.mov 3, pth_sin_idx, pth_ang
+        finesine.read_sin pth_vsin, pth_sin_idx
+        finesine.read_cos pth_vcos, pth_sin_idx
+        hex.set 1, pth_trig_cached, 1
       trig_have:
-        // tz = tr_x*cos + tr_y*sin  (DOOM: gxt - gyt with gyt = -FixedMul(tr_y, viewsin))
+        // pth_tz = pth_tr_x*cos + pth_tr_y*sin  (DOOM: pth_gxt - pth_gyt with pth_gyt = -FixedMul(pth_tr_y, viewsin))
         // ⚠ OPERANDS SWAPPED (the M13-mulorder lever). `fixed_mul_lo` runs one schoolbook row
-        // per NONZERO NIBBLE OF THE SECOND OPERAND, and tr_x/tr_y are differences of
+        // per NONZERO NIBBLE OF THE SECOND OPERAND, and pth_tr_x/pth_tr_y are differences of
         // (map-unit << 16) values -- their low FOUR nibbles are always zero -- while a finesine
         // value is a dense 16.16. Commutative and the same mod-16^12 low product, so this is
         // BIT-IDENTICAL: purely a row-count choice.
-        hex.fixed_mul_lo 8, 4, gxt, vcos, tr_x
-        hex.fixed_mul_lo 8, 4, gyt, vsin, tr_y
-        hex.mov 8, tz, gxt
-        hex.add 8, tz, gyt
-        // ⚠ czlim is REUSED: it carries MINZ here and the SPR-NEAR detail radius below.
-        hex.set 8, czlim, minz
-        hex.scmp 8, tz, czlim, reject, past_minz, past_minz
+        hex.fixed_mul_lo 8, 4, pth_gxt, pth_vcos, pth_tr_x
+        hex.fixed_mul_lo 8, 4, pth_gyt, pth_vsin, pth_tr_y
+        hex.mov 8, pth_tz, pth_gxt
+        hex.add 8, pth_tz, pth_gyt
+        // ⚠ pth_czlim is REUSED: it carries MINZ here and the SPR-NEAR detail radius below.
+        hex.set 8, pth_czlim, minz
+        hex.scmp 8, pth_tz, pth_czlim, reject, past_minz, past_minz
       past_minz:
-        // EXACT far reject, and it belongs HERE. h = wph*PROJECTION/tz, so tz > (wph*PROJ)<<16
+        // EXACT far reject, and it belongs HERE. h = wph*PROJECTION/pth_tz, so pth_tz > (wph*PROJ)<<16
         // gives h == 0 -- which the height test below already rejects, but only after two more
         // multiplies and a reciprocal. `sp_tzmax` is that threshold, baked per thing. Verified
         // exhaustively against `_scale_recip_div` over every sprite height: the boundary is exact,
@@ -1438,96 +1432,96 @@ ns proj {
         // depth tightens to the second baked bound (sp_tzmax2, scanned for the raised min-size
         // exactly as sp_tzmax is for the base one). Same compare, different constant.
         rep(deg, k) hex.if1 1, degfl, deg_far_hard
-        hex.cmp 8, tz, sp_tzmax, past_far, past_far, reject
+        hex.cmp 8, pth_tz, sp_tzmax, past_far, past_far, reject
       deg_far_hard:
-        rep(deg, k) hex.cmp 8, tz, sp_tzmax2, past_far, past_far, reject
+        rep(deg, k) hex.cmp 8, pth_tz, sp_tzmax2, past_far, past_far, reject
       past_far:
         // SPR-NEAR: beyond the detail radius? The record loop then picks the coarse packed
         // bank for SHORT buckets; near things keep full detail whatever their screen height.
         rep(spn, k) hex.set 1, thfar, 0
-        rep(spn, k) hex.set 8, czlim, neartz
-        rep(spn, k) hex.cmp 8, tz, czlim, far_done, far_done, set_far
+        rep(spn, k) hex.set 8, pth_czlim, neartz
+        rep(spn, k) hex.cmp 8, pth_tz, pth_czlim, far_done, far_done, set_far
       set_far:
         rep(spn, k) hex.set 1, thfar, 1
       far_done:
-        // tx = tr_x*sin - tr_y*cos  (DOOM: -(gyt + gxt) with both negated)
-        hex.fixed_mul_lo 8, 4, gxt, vsin, tr_x         // same swap, same reason
-        hex.fixed_mul_lo 8, 4, gyt, vcos, tr_y
-        hex.mov 8, tx, gxt
-        hex.sub 8, tx, gyt
-        hex.mov 8, tx_abs, tx                           // |tx| > tz<<2 -> outside the view
-        hex.abs 8, tx_abs
-        hex.mov 8, tz_lim, tz
-        hex.shl_bit 8, tz_lim
-        hex.shl_bit 8, tz_lim
-        // ⚠ this reject runs BEFORE the divide, where DOOM runs it after. It needs only tz
-        // and tx and rejects exactly the same set either way -- so the frame is unchanged
+        // pth_tx = pth_tr_x*sin - pth_tr_y*cos  (DOOM: -(pth_gyt + pth_gxt) with both negated)
+        hex.fixed_mul_lo 8, 4, pth_gxt, pth_vsin, pth_tr_x         // same swap, same reason
+        hex.fixed_mul_lo 8, 4, pth_gyt, pth_vcos, pth_tr_y
+        hex.mov 8, pth_tx, pth_gxt
+        hex.sub 8, pth_tx, pth_gyt
+        hex.mov 8, pth_tx_abs, pth_tx                           // |pth_tx| > pth_tz<<2 -> outside the view
+        hex.abs 8, pth_tx_abs
+        hex.mov 8, pth_tz_lim, pth_tz
+        hex.shl_bit 8, pth_tz_lim
+        hex.shl_bit 8, pth_tz_lim
+        // ⚠ this reject runs BEFORE the divide, where DOOM runs it after. It needs only pth_tz
+        // and pth_tx and rejects exactly the same set either way -- so the frame is unchanged
         // and every off-screen thing stops paying a `hex.fixed_div 8,4` (38,500 ops, the
         // dearest primitive in the table).
-        hex.cmp 8, tx_abs, tz_lim, in_fov, in_fov, reject
+        hex.cmp 8, pth_tx_abs, pth_tz_lim, in_fov, in_fov, reject
       in_fov:
-        hex.set 8, cproj, projection                    // ⚠ `projection` ALREADY carries the <<16
+        hex.set 8, pth_cproj, projection                    // ⚠ `projection` ALREADY carries the <<16
                                                         // (wall_renderer passes
                                                         // `cfg.PROJECTION << 16`). Shifting it
-                                                        // again truncates it to 0 -> xscale 0 ->
+                                                        // again truncates it to 0 -> pth_xscale 0 ->
                                                         // EVERY thing fails projection.
         // M13-scalerecip applied to sprites: `hex.fixed_div 8,4` is 38,500 ops -- the dearest
         // primitive there is -- and it runs for every thing that survives the FOV reject. The
         // shared block-FP reciprocal is roughly a third of that. ⚠ NOT bit-identical (a true divide
         // against a table reciprocal), so the ORACLE takes the same path: this is the same re-bless
         // the wall scale already took, not an approximation fj invented on its own.
-        .scale_recip_div xscale, cproj, tz, 1           // xscale = (projection<<16) / tz
+        .scale_recip_div pth_xscale, pth_cproj, pth_tz, 1           // pth_xscale = (projection<<16) / pth_tz
       xscale_done:                                      // ⚠ label is never jumped to (dead)
-        hex.set 8, c_centerxfix, centerx*0x10000
-        hex.mov 8, tx_left, tx
-        hex.sub 8, tx_left, sp_left
-        hex.fixed_mul_lo 8, 4, tmp, tx_left, xscale
-        hex.add 8, tmp, c_centerxfix
-        hex.shr_hex 8, 4, tmp
-        hex.sign_extend 8, 4, tmp
-        hex.mov 8, x1o, tmp
-        hex.mov 8, tx_right, tx_left
-        hex.add 8, tx_right, sp_w
-        hex.fixed_mul_lo 8, 4, tmp, tx_right, xscale
-        hex.add 8, tmp, c_centerxfix
-        hex.shr_hex 8, 4, tmp
-        hex.sign_extend 8, 4, tmp
-        hex.dec 8, tmp
-        hex.mov 8, x2o, tmp
+        hex.set 8, pth_c_centerxfix, centerx*0x10000
+        hex.mov 8, pth_tx_left, pth_tx
+        hex.sub 8, pth_tx_left, sp_left
+        hex.fixed_mul_lo 8, 4, pth_tmp, pth_tx_left, pth_xscale
+        hex.add 8, pth_tmp, pth_c_centerxfix
+        hex.shr_hex 8, 4, pth_tmp
+        hex.sign_extend 8, 4, pth_tmp
+        hex.mov 8, x1o, pth_tmp
+        hex.mov 8, pth_tx_right, pth_tx_left
+        hex.add 8, pth_tx_right, sp_w
+        hex.fixed_mul_lo 8, 4, pth_tmp, pth_tx_right, pth_xscale
+        hex.add 8, pth_tmp, pth_c_centerxfix
+        hex.shr_hex 8, 4, pth_tmp
+        hex.sign_extend 8, 4, pth_tmp
+        hex.dec 8, pth_tmp
+        hex.mov 8, x2o, pth_tmp
         hex.sign 8, x2o, reject, x2_ok                  // x2 < 0 -> entirely off the left
       x2_ok:
-        hex.set 8, c_vieww, vieww
-        hex.scmp 8, x1o, c_vieww, x1_ok, reject, reject // x1 >= VIEW_W -> entirely off the right
+        hex.set 8, pth_c_vieww, vieww
+        hex.scmp 8, x1o, pth_c_vieww, x1_ok, reject, reject // x1 >= VIEW_W -> entirely off the right
       x1_ok:
         hex.scmp 8, x2o, x1o, reject, cols_ok, cols_ok  // x2 < x1 -> sub-column
       cols_ok:
-        hex.mov 8, gzt, sp_z                            // gzt = (thing floor + sprite top) - viewz
-        hex.sub 8, gzt, viewz
-        hex.fixed_mul_lo 8, 4, tmp, xscale, gzt        // M14-perf ROW RULE: gzt is integer<<16
-        hex.set 8, c_centeryfix, centery*0x10000
-        hex.mov 8, ytopo, c_centeryfix
-        hex.sub 8, ytopo, tmp
+        hex.mov 8, pth_gzt, sp_z                            // pth_gzt = (thing floor + sprite top) - viewz
+        hex.sub 8, pth_gzt, viewz
+        hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, pth_gzt        // M14-perf ROW RULE: pth_gzt is integer<<16
+        hex.set 8, pth_c_centeryfix, centery*0x10000
+        hex.mov 8, ytopo, pth_c_centeryfix
+        hex.sub 8, ytopo, pth_tmp
         hex.shr_hex 8, 4, ytopo
         hex.sign_extend 8, 4, ytopo
-        hex.fixed_mul_lo 8, 4, tmp, xscale, sp_hh      // M14-perf ROW RULE: sp_hh is integer<<16
-        hex.shr_hex 8, 4, tmp
-        hex.sign_extend 8, 4, tmp
-        hex.mov 8, hpxo, tmp
+        hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, sp_hh      // M14-perf ROW RULE: sp_hh is integer<<16
+        hex.shr_hex 8, 4, pth_tmp
+        hex.sign_extend 8, 4, pth_tmp
+        hex.mov 8, hpxo, pth_tmp
         hex.sign 8, hpxo, reject, h_ok
       h_ok:
         hex.if0 8, hpxo, reject
-        hex.set 8, c_viewh, viewh
-        hex.scmp 8, hpxo, c_viewh, h_fits, h_fits, clamp_tall   // taller than the screen -> CLAMP
+        hex.set 8, pth_c_viewh, viewh
+        hex.scmp 8, hpxo, pth_c_viewh, h_fits, h_fits, clamp_tall   // taller than the screen -> CLAMP
       clamp_tall:
         // SPR-NEAR: a too-near sprite clamps to the tallest bucket instead of VANISHING --
         // feet planted: the top moves DOWN by the overflow so the bottom row stays true
-        hex.mov 8, tmp, hpxo
-        hex.sub 8, tmp, c_viewh
-        hex.add 8, ytopo, tmp
-        hex.mov 8, hpxo, c_viewh
+        hex.mov 8, pth_tmp, hpxo
+        hex.sub 8, pth_tmp, pth_c_viewh
+        hex.add 8, ytopo, pth_tmp
+        hex.mov 8, hpxo, pth_c_viewh
       h_fits:
-        hex.set 8, one16, 0x10000
-        .scale_recip_div istepo, one16, xscale, 1       // (1<<32)/xscale = texels per screen column
+        hex.set 8, pth_one16, 0x10000
+        .scale_recip_div istepo, pth_one16, pth_xscale, 1       // (1<<32)/pth_xscale = texels per screen column
         // CR-2026-08: /downscale = shift by log2(ds) (#ds-1), NOT ds/2 -- the two agree only
         // at ds in {1,2,4}; the oracle divides by the value (reference_model.project_thing)
         rep(#ds - 1, k) hex.shr_bit 8, istepo           // ... in DOWNSCALED texels
@@ -1537,31 +1531,6 @@ ns proj {
         hex.set 1, vis, 0
       done:
         ;end
-      tr_x: hex.vec 8
-      tr_y: hex.vec 8
-      ang: hex.vec 8
-      sin_idx: hex.vec 3
-      vsin: hex.vec 8
-      vcos: hex.vec 8
-      gxt: hex.vec 8
-      gyt: hex.vec 8
-      tz: hex.vec 8
-      xscale: hex.vec 8
-      tx: hex.vec 8
-      tx_abs: hex.vec 8
-      tz_lim: hex.vec 8
-      tx_left: hex.vec 8
-      tx_right: hex.vec 8
-      tmp: hex.vec 8
-      gzt: hex.vec 8
-      one16: hex.vec 8
-      czlim: hex.vec 8                                // MINZ, then the SPR-NEAR radius
-      cproj: hex.vec 8
-      c_centerxfix: hex.vec 8
-      c_centeryfix: hex.vec 8
-      c_vieww: hex.vec 8
-      c_viewh: hex.vec 8
-      trig_cached: hex.vec 1                          // V4: sin/cos already cached this frame?
       end:
     }
 

@@ -70,7 +70,7 @@ Run these in order; each is cheaper than the next and rules out a different clas
 | `scratchpad/deg_gate.py` | was ~20 min | **the real proof**: byte-exact ×4 + op counts to the digit |
 | the `steps=False` lines test | was ~9 min | a config the certified gates never build (where a `rep`-gated `werror` break hides) |
 | `python -m pytest tests/host -m slow` | was 29:43 | the **shipped** build path — excluded by default, so run it after touching `build.py` |
-| `scratchpad/m5_gate.py --frames 12` | 561M ops | the **standalone** binary: 12 frames driven by nothing but scripted keypresses, each byte-exact vs the oracle stepping the same keys from the player start. CUMULATIVE — a one-ulp drift on frame 0 parts the trajectory and every later frame differs. `--smoke` is the cheap no-loop variant. |
+| `scratchpad/m5_gate.py` | 1.13G ops | the **standalone** binary: 24 frames driven by nothing but scripted keypresses, each byte-exact vs the oracle stepping the same keys from the player start. CUMULATIVE — a one-ulp drift on frame 0 parts the trajectory and every later frame differs. `--smoke` is the cheap no-loop variant. |
 | `scratchpad/bench.py …` | varies | op counts per viewpoint; byte-exactness asserted when un-ablated |
 
 ⚠ **Every "was" above is a build-dominated cost measured BEFORE 2026-08-20, when the same program

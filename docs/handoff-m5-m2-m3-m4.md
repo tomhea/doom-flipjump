@@ -101,7 +101,8 @@ STANDALONE layout before the fingerprint is recomputed. Result: **12,072 -> 12,0
 | | |
 |---|---|
 | `build/doom_e1m1_std.fjm` | 31,221,481 bytes, span 84,892,508 words, headroom 1.581x |
-| M5 gate | **PASS** - 12 frames byte-exact in ONE 561,258,605-op run; `--selftest` PASS |
+| M5 gate | **PASS** - 24 frames byte-exact in ONE 1,131,621,966-op run; `--selftest` PASS |
+| what that run exercised | 13 frames MOVED, 8 TURNED, **5 blocked by COLLISION**, 20 of 24 pictures distinct |
 | smoke gate (no-loop build, spawn frame) | BYTE-EXACT vs the oracle at 39,157,887 ops |
 | 0x0B decoder | 20 differential tests + 3 R9 negative controls; real-stream replay 3/3 byte-exact |
 | `kb.poll` | 10 tests incl. the phase test and an R9 negative control |
@@ -114,19 +115,25 @@ CUMULATIVE - a one-ulp drift in the sim, a wrong cell in the persist set or a mi
 sends the trajectory somewhere the oracle never goes and every later frame differs. The device is
 the stock `PcIO` that `--io pc` builds, so what is certified is the object a human runs.
 
-    python scratchpad/m5_gate.py --frames 12          # the real gate
+    python scratchpad/m5_gate.py                      # the real gate (24 frames)
     python scratchpad/m5_gate.py --selftest           # R9: corrupt one oracle frame, must FAIL
     python scratchpad/m5_gate.py --fjm build/doom_e1m1_std_noloop.fjm --smoke
 
-It carries vacuity controls (frames that moved, turned, were changed by collision, and distinct
+It carries vacuity controls (frames that moved, turned, were changed by COLLISION, and distinct
 pictures) because a script that stood still would compare a dozen copies of one picture and pass.
+
+!! THE COLLISION CONTROL EXISTS BECAUSE THE FIRST PASSING VERSION DID NOT HAVE IT. 24 frames, all
+byte-exact, `frames COLLISION changed: 0` - the script crossed open courtyard the whole way, so
+half the sim was uncovered and the gate said PASS. `scratchpad/_m2_findwall.py` searched every
+heading from the spawn with the ORACLE alone (no renders, seconds) and found turn-right x4 blocks
+soonest; the script now opens with it and the gate REFUSES a run that never hits geometry.
 
 ### Rebuilding it
 
     python scratchpad/ca_labels.py --standalone --out scratchpad/_m5_labels_std.tsv.gz   # ~26 min
     python scratchpad/m5_setfile.py --labels scratchpad/_m5_labels_std.tsv.gz            # seconds
     python scratchpad/m5_build.py                                                        # 4,740 s
-    python scratchpad/m5_gate.py --frames 12
+    python scratchpad/m5_gate.py
 
 `--no-reset` on `m5_build.py` gives the cheap intermediate: one frame, no loop, no restore set -
 enough to prove the emit half without the two-pass build.

@@ -1,6 +1,6 @@
 """M5 GATE -- the STANDALONE binary, driven only by the keyboard device, against the oracle.
 
-    python scratchpad/m5_gate.py --fjm build/doom_e1m1_std.fjm [--frames 12]
+    python scratchpad/m5_gate.py --fjm build/doom_e1m1_std.fjm [--frames 24]
     python scratchpad/m5_gate.py --selftest            # R9: the negative control
 
 What makes this different from every gate before it: NOTHING IS FED IN. The hosted gates hand the
@@ -50,23 +50,23 @@ KEY_NAMES = ("forward", "back", "turn_left", "turn_right")
 BINDING = {K_FWD: "forward", 0x80: "forward", K_BACK: "back", 0x81: "back",
            K_LEFT: "turn_left", 0x82: "turn_left", K_RIGHT: "turn_right", 0x83: "turn_right"}
 
-# (frame, poll-within-frame, is_down, keycode). Chosen so the trajectory turns, walks, walks
-# backwards and runs into geometry -- a script that only ever held one key would leave the turn
-# path and the collision path untested, and the vacuity controls at the end say so out loud.
+# (frame, poll-within-frame, is_down, keycode). Chosen so the trajectory turns, WALKS INTO A
+# WALL, backs off and uses the arrow bindings -- a script that only crossed open floor would leave
+# the collision half of the sim untested, and for the first 24-frame version of this script it did
+# (`frames COLLISION changed: 0`). The four opening turns aim the player at geometry:
+# scratchpad/_m2_findwall.py searched every heading from the spawn with the ORACLE alone and found
+# turn-right x4 blocks soonest, at frame 8.
 SCRIPT = [
-    (0, 0, True, K_FWD),                    # walk
-    (3, 0, True, K_RIGHT),                  # ... and turn while walking
-    (5, 2, False, K_RIGHT),
-    (7, 0, False, K_FWD),
-    (7, 1, True, K_LEFT),                   # turn in place
-    (9, 0, True, 0x80),                     # the ARROW binding, same flag
-    (11, 0, False, K_LEFT),
-    (13, 0, False, 0x80),
-    (13, 1, True, K_BACK),                  # back up
-    (16, 0, True, K_LEFT),
-    (19, 0, False, K_BACK),
-    (19, 1, False, K_LEFT),
-    (20, 0, True, K_FWD),                   # ... and forward again, into whatever is ahead
+    (0, 0, True, K_RIGHT),                  # 4 turns right: aim at a wall
+    (4, 0, False, K_RIGHT),
+    (4, 1, True, K_FWD),                    # ... and walk into it -- collision binds from frame 8
+    (12, 0, False, K_FWD),
+    (12, 1, True, K_BACK),                  # back off
+    (15, 0, False, K_BACK),
+    (15, 1, True, 0x82),                    # the ARROW binding for turn-left, same flag as 'a'
+    (19, 0, False, 0x82),
+    (19, 1, True, 0x80),                    # ... and the arrow for forward
+    (23, 0, False, 0x80),
 ]
 
 
@@ -154,7 +154,9 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default="assets/freedoom1.wad")
-    ap.add_argument("--frames", type=int, default=12)
+    # 24 is what is CERTIFIED: the opening 4 turns aim at a wall, frames 8-10 are blocked,
+    # and the tail covers the arrow bindings. Fewer than 12 stops short of the collision.
+    ap.add_argument("--frames", type=int, default=24)
     ap.add_argument("--selftest", action="store_true",
                     help="R9: corrupt one oracle frame; the gate must FAIL")
     ap.add_argument("--smoke", action="store_true",
@@ -226,7 +228,10 @@ def main():
     # --smoke makes a DIFFERENT and much weaker claim -- "the emit half is right and the program
     # presents the spawn frame" -- on a build with no loop and no keys, so the controls that
     # certify the sim do not apply and are not silently waived: they are not claimed.
-    vacuous = (not args.smoke) and (moved < 2 or turned < 2 or distinct < 3)
+    # COLLISION is in the list because it was NOT covered when this gate first passed: 24 frames
+    # of open floor, every one byte-exact, and `frames COLLISION changed: 0`. A gate that cannot
+    # tell you which half of the sim it exercised is not telling you much.
+    vacuous = (not args.smoke) and (moved < 2 or turned < 2 or distinct < 3 or blocked < 1)
     if vacuous:
         print("  !! VACUOUS -- this script does not exercise the sim; fix SCRIPT, not the verdict")
     if args.smoke:

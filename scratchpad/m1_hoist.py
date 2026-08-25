@@ -113,6 +113,16 @@ def hoist(text, macro, prefix):
     assert decls, ("%s: no @-local carries a `name: hex.vec` declaration -- nothing to hoist "
                    "(its @ list is all control-flow labels)" % macro)
 
+    # ⚠ A LOCAL THAT IS DECLARED BUT NEVER USED MUST NOT BE HOISTED. Before the hoist its
+    # declaration counted as its use; afterwards the `<` entry is unreferenced and fj says
+    # "unused labels: <name>" -- a WARNING, which the assembler treats as an ERROR (R8).
+    # Leave it exactly as it was: it is a dead cell either way, and deleting it would be a
+    # separate change with its own gate.
+    for _n in [n for n in decls
+               if not any(re.search(r"\b%s\b" % re.escape(n), l) for l in keep_body)]:
+        skipped.append(_n)
+        keep_body.append("      %s: hex.vec %s" % (_n, decls.pop(_n)))
+
     ren = {n: "%s_%s" % (prefix, n) for n in decls}
     # rewrite the body: whole-word renames only
     pat = re.compile(r"\b(%s)\b" % "|".join(sorted(map(re.escape, ren), key=len, reverse=True)))
@@ -142,24 +152,26 @@ def hoist(text, macro, prefix):
     assert not _left, "%s: still @-locals but declared: %s" % (macro, _left)
     out = lines[:start] + new_hdr + keep_body + lines[body_end:]
     for _n in skipped:
-        print("    SKIPPED (parameter-dependent, stays @-local): %s" % _n)
+        print("    SKIPPED (stays @-local): %s" % _n)
     return "\n".join(out), ["%s: hex.vec %s" % (ren[n], decls[n]) for n in sorted(decls)]
 
 
 if args.selftest:
     SRC = "\n".join([
         "    def demo a, b \\",
-        "            @ loop, tmp, flag, ptr, done \\",
+        "            @ loop, tmp, flag, ptr, dead, done \\",
         "            < shared {",
         "        hex.zero 8, tmp",
         "        hex.if0 1, flag, done",
         "        hex.add 8, tmp, a",
         "      loop:",
         "        hex.mov 8, shared, tmp",
+        "        hex.ptr_index ptr, shared, tmp",
         "      done:",
         "      tmp: hex.vec 8",
         "      flag: hex.vec 1, 1        // a latch with an initialiser",
         "      ptr: hex.vec w/4          // SYMBOLIC size -- the gap that under-hoisted",
+        "      dead: hex.vec 2           // declared, never used -> must stay @-local",
         "    }",
     ])
     got, decls = hoist(SRC, "demo", "d")
@@ -171,7 +183,7 @@ if args.selftest:
         print("  %-52s %s" % (name, "ok" if cond else "!! FAIL"))
 
     chk("def keeps its indentation", got.split('\n')[0].startswith("    def demo"))
-    chk("control-flow labels stay in @", "@ loop, done" in got)
+    chk("control-flow labels stay in @", "@ loop, dead, done" in got)
     chk("storage moved to < with prefix", "< shared, d_flag, d_ptr, d_tmp {" in got)
     chk("uses renamed", "hex.zero 8, d_tmp" in got and "hex.add 8, d_tmp, a" in got)
     chk("declarations removed from body", "tmp: hex.vec" not in got and "flag: hex.vec" not in got)
@@ -180,6 +192,8 @@ if args.selftest:
     chk("initialiser carried over", "d_flag: hex.vec 1, 1" in decls)
     chk("SYMBOLIC size hoisted (w/4)", "d_ptr: hex.vec w/4" in decls)
     chk("all three emitted", decls == ["d_flag: hex.vec 1, 1", "d_ptr: hex.vec w/4", "d_tmp: hex.vec 8"])
+    chk("declared-but-unused stays @-local", "dead" in got.split("{")[0] and "d_dead" not in got)
+    chk("its declaration is put back", "dead: hex.vec 2" in got)
     # C1: a macro whose @ list is only control flow must REFUSE, not silently no-op
     NOSTORE = "\n".join(["    def q a \\", "            @ x {", "      x:", "        ;x", "    }"])
     try:

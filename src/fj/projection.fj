@@ -693,84 +693,71 @@ ns proj {
     //   a compare tree, low 8 nibbles out. 14 nibbles is the measured-exact width (12 truncates
     //   real operands). @requires hex.init & stl.ptr_init
     def scale_recip_div q, num, den, disp \
-            @ nrm_hi, hi_done, nrm_lo, lo_more, lo_done, \
-              shift_lo, shift_67, shift_hi, shift4, shift5, shift6, shift7, shift8, shift9, \
-              shift10, shift11, shift_done, done, \
-              den_norm, num_wide, recip_wide, recip, prod, shift_nibs, csh5, csh6, csh8, csh10 \
-            < slopediv_recip {
-        hex.mov 8, den_norm, den   // (hex.mov zeroes dst first)
-        hex.set 2, shift_nibs, 6                 // base shift = RK/4 = 6 nibbles; +- the exponent below
-      nrm_hi:                                    // right-normalize: while den_norm > 0xFFF, >>= 1 nib, ++
-        hex.if0 5, den_norm + 3*dw, hi_done      // den_norm <= 0xFFF <=> nibbles 3..7 all zero
-        hex.shr_hex 8, 1, den_norm
-        hex.inc 2, shift_nibs
+            @ nrm_hi, hi_done, nrm_lo, lo_more, lo_done, shift_lo, shift_67, shift_hi, shift4, shift5, shift6, shift7, shift8, shift9, shift10, shift11, shift_done, done \
+            < slopediv_recip, srd_csh10, srd_csh5, srd_csh6, srd_csh8, srd_den_norm, srd_num_wide, srd_prod, srd_recip, srd_recip_wide, srd_shift_nibs {
+        hex.mov 8, srd_den_norm, den   // (hex.mov zeroes dst first)
+        hex.set 2, srd_shift_nibs, 6                 // base shift = RK/4 = 6 nibbles; +- the exponent below
+      nrm_hi:                                    // right-normalize: while srd_den_norm > 0xFFF, >>= 1 nib, ++
+        hex.if0 5, srd_den_norm + 3*dw, hi_done      // srd_den_norm <= 0xFFF <=> nibbles 3..7 all zero
+        hex.shr_hex 8, 1, srd_den_norm
+        hex.inc 2, srd_shift_nibs
         ;nrm_hi
-      hi_done:                                   // left-normalize: while den_norm < 0x100, <<= 1 nib, --
+      hi_done:                                   // left-normalize: while srd_den_norm < 0x100, <<= 1 nib, --
       nrm_lo:
-        hex.if0 6, den_norm + 2*dw, lo_more      // den_norm < 0x100 <=> nibbles 2..7 all zero
+        hex.if0 6, srd_den_norm + 2*dw, lo_more      // srd_den_norm < 0x100 <=> nibbles 2..7 all zero
         ;lo_done
       lo_more:
-        hex.shl_hex 8, 1, den_norm
-        hex.dec 2, shift_nibs
+        hex.shl_hex 8, 1, srd_den_norm
+        hex.dec 2, srd_shift_nibs
         ;nrm_lo
       lo_done:
         // M13-SRDISP (the D4 dispatch lever, 4th application): 3 x read_byte_and_inc (42@ each)
         // + a mul_const ~ 247@ becomes a ~20@ lookup. `disp` is a COMPILE-TIME flag, so the
         // non-lines tiers -- which have no `srdisp` table -- keep the packed read.
-        rep(1-disp, k) hex.read_table_packed 3, recip, slopediv_recip, 3, den_norm  // recip[m]=(1<<24)//m
-        rep(disp, k) srdisp.lookup recip, den_norm
-        hex.zero 14, num_wide
-        hex.mov 8, num_wide + 4*dw, num          // num_wide = num << 16 (4 nibbles, by placement)
-        hex.zero 14, recip_wide
-        hex.mov 6, recip_wide, recip
-        hex.zero 14, prod
-        rep(5, j) hex.fixed_mul_lo.row 14, j, prod, num_wide, recip_wide   // mod 16^14
-        // shift_nibs in [4,11]: den has 1..8 significant nibbles -> at most 5 right- or 2 left-shifts
-        hex.cmp 2, shift_nibs, csh8, shift_lo, shift8, shift_hi
+        rep(1-disp, k) hex.read_table_packed 3, srd_recip, slopediv_recip, 3, srd_den_norm  // srd_recip[m]=(1<<24)//m
+        rep(disp, k) srdisp.lookup srd_recip, srd_den_norm
+        hex.zero 14, srd_num_wide
+        hex.mov 8, srd_num_wide + 4*dw, num          // srd_num_wide = num << 16 (4 nibbles, by placement)
+        hex.zero 14, srd_recip_wide
+        hex.mov 6, srd_recip_wide, srd_recip
+        hex.zero 14, srd_prod
+        rep(5, j) hex.fixed_mul_lo.row 14, j, srd_prod, srd_num_wide, srd_recip_wide   // mod 16^14
+        // srd_shift_nibs in [4,11]: den has 1..8 significant nibbles -> at most 5 right- or 2 left-shifts
+        hex.cmp 2, srd_shift_nibs, srd_csh8, shift_lo, shift8, shift_hi
       shift_lo:
-        hex.cmp 2, shift_nibs, csh5, shift4, shift5, shift_67
+        hex.cmp 2, srd_shift_nibs, srd_csh5, shift4, shift5, shift_67
       shift_67:
-        hex.cmp 2, shift_nibs, csh6, shift6, shift6, shift7   // lt unreachable (>= 6 here)
+        hex.cmp 2, srd_shift_nibs, srd_csh6, shift6, shift6, shift7   // lt unreachable (>= 6 here)
       shift_hi:
-        hex.cmp 2, shift_nibs, csh10, shift9, shift10, shift11
+        hex.cmp 2, srd_shift_nibs, srd_csh10, shift9, shift10, shift11
       shift4:
-        hex.shr_hex 14, 4, prod
+        hex.shr_hex 14, 4, srd_prod
         ;shift_done
       shift5:
-        hex.shr_hex 14, 5, prod
+        hex.shr_hex 14, 5, srd_prod
         ;shift_done
       shift6:
-        hex.shr_hex 14, 6, prod
+        hex.shr_hex 14, 6, srd_prod
         ;shift_done
       shift7:
-        hex.shr_hex 14, 7, prod
+        hex.shr_hex 14, 7, srd_prod
         ;shift_done
       shift8:
-        hex.shr_hex 14, 8, prod
+        hex.shr_hex 14, 8, srd_prod
         ;shift_done
       shift9:
-        hex.shr_hex 14, 9, prod
+        hex.shr_hex 14, 9, srd_prod
         ;shift_done
       shift10:
-        hex.shr_hex 14, 10, prod
+        hex.shr_hex 14, 10, srd_prod
         ;shift_done
       shift11:
-        hex.shr_hex 14, 11, prod
+        hex.shr_hex 14, 11, srd_prod
         ;shift_done
       shift_done:
-        hex.mov 8, q, prod
+        hex.mov 8, q, srd_prod
         ;done
 
-      den_norm: hex.vec 8
-      num_wide: hex.vec 14
-      recip_wide: hex.vec 14
-      recip: hex.vec 6
-      prod: hex.vec 14
-      shift_nibs: hex.vec 2
-      csh5: hex.vec 2, 5
-      csh6: hex.vec 2, 6
-      csh8: hex.vec 2, 8
-      csh10: hex.vec 2, 10
       done:
     }
 
@@ -788,18 +775,18 @@ ns proj {
     //   SCALE_MIN and diverge). anglea/b are unsigned-modular BAM that only feed read_sin (bit extract).
     //   @requires hex.init & stl.ptr_init   (finesine.read_sin)
     def scale_from_global_angle scale, visangle, viewangle, rw_normalangle, rw_distance, projection, disp, col \
-            @ anglea, angleb, num, den, sin_idx, sinv, cproj, cang90, csmin, csmax, qneg, \
-              den_zero, num_neg, num_pos, den_neg, den_pos, dodiv, chk_min, set_max, set_min, end {
-        rep(1-disp, k) hex.mov 8, anglea, visangle
-        rep(1-disp, k) hex.sub 8, anglea, viewangle
-        rep(1-disp, k) hex.add 8, anglea, cang90               // anglea = ANG90 + (visangle - viewangle)
-        hex.mov 8, angleb, visangle
-        hex.sub 8, angleb, rw_normalangle
-        hex.add 8, angleb, cang90               // angleb = ANG90 + (visangle - rw_normalangle)
+            @ cproj, den_zero, num_neg, num_pos, den_neg, den_pos, dodiv, chk_min, set_max, set_min, end \
+            < sga_anglea, sga_angleb, sga_cang90, sga_csmax, sga_csmin, sga_den, sga_num, sga_qneg, sga_sin_idx, sga_sinv {
+        rep(1-disp, k) hex.mov 8, sga_anglea, visangle
+        rep(1-disp, k) hex.sub 8, sga_anglea, viewangle
+        rep(1-disp, k) hex.add 8, sga_anglea, sga_cang90               // sga_anglea = ANG90 + (visangle - viewangle)
+        hex.mov 8, sga_angleb, visangle
+        hex.sub 8, sga_angleb, rw_normalangle
+        hex.add 8, sga_angleb, sga_cang90               // sga_angleb = ANG90 + (visangle - rw_normalangle)
 
-        hex.shr_hex 8, 5, angleb                // num = fixed_mul(PROJECTION<<16, read_sin(angleb))
-        hex.mov 3, sin_idx, angleb              //   read_sin idx = angleb >> 20 (low 3 nibbles)
-        finesine.read_sin sinv, sin_idx
+        hex.shr_hex 8, 5, sga_angleb                // sga_num = fixed_mul(PROJECTION<<16, read_sin(sga_angleb))
+        hex.mov 3, sga_sin_idx, sga_angleb              //   read_sin idx = sga_angleb >> 20 (low 3 nibbles)
+        finesine.read_sin sga_sinv, sga_sin_idx
         // M13-CPROJSTATIC: `hex.set 8, cproj, projection` used to run HERE, once per call, to
         // reload a value fixed at emit time. hex.fixed_mul_lo reads its operands via
         // `.mov n, wide_b, b` (fixed_point.fj:80) and never writes b, so cproj is never
@@ -810,62 +797,52 @@ ns proj {
         // 12-nibble pattern (~10k ops as a multiplier) while cproj = PROJECTION<<16 has ONE nonzero
         // nibble (~1.9k). Multiplication is commutative and the macro takes the same mod-16^12 low
         // product either way, so this is BIT-IDENTICAL -- purely a row-count choice.
-        hex.fixed_mul_lo 8, 4, num, sinv, cproj
+        hex.fixed_mul_lo 8, 4, sga_num, sga_sinv, cproj
 
-        // M13-SINADISP: anglea is COLUMN-ONLY. Every caller builds visangle as
-        // `viewangle + xtoviewangle[col]`, so anglea = ANG90 + (visangle - viewangle) reduces,
+        // M13-SINADISP: sga_anglea is COLUMN-ONLY. Every caller builds visangle as
+        // `viewangle + xtoviewangle[col]`, so sga_anglea = ANG90 + (visangle - viewangle) reduces,
         // as an exact mod-2^32 identity, to ANG90 + xtoviewangle[col] -- viewangle cancels. The
-        // whole den sine is therefore a compile-time function of the column: a 161-entry
+        // whole sga_den sine is therefore a compile-time function of the column: a 161-entry
         // dispatch (~2.6k lines) replaces mov8 + sub8 + add8 + shr_hex + mov3 + read_sin.
-        rep(1-disp, k) hex.shr_hex 8, 5, anglea    // den = fixed_mul(rw_distance, read_sin(anglea))
-        rep(1-disp, k) hex.mov 3, sin_idx, anglea
-        rep(1-disp, k) finesine.read_sin sinv, sin_idx
-        rep(disp, k) sinadisp.lookup sinv, col
-        hex.fixed_mul_lo 8, 4, den, sinv, rw_distance   // same swap: rw_distance is the sparse operand
+        rep(1-disp, k) hex.shr_hex 8, 5, sga_anglea    // sga_den = fixed_mul(rw_distance, read_sin(sga_anglea))
+        rep(1-disp, k) hex.mov 3, sga_sin_idx, sga_anglea
+        rep(1-disp, k) finesine.read_sin sga_sinv, sga_sin_idx
+        rep(disp, k) sinadisp.lookup sga_sinv, col
+        hex.fixed_mul_lo 8, 4, sga_den, sga_sinv, rw_distance   // same swap: rw_distance is the sparse operand
 
-        hex.if0 8, den, den_zero                // den == 0 -> SCALE_MAX
+        hex.if0 8, sga_den, den_zero                // sga_den == 0 -> SCALE_MAX
         // M13-scalerecip [re-bless]: sign-split + block-FP reciprocal replaces the signed
         // fixed_div (38.5k -> ~19k ops). A sign MISMATCH (negative true quotient) goes straight
         // to SCALE_MAX -- proven identical to the old unsigned-wraparound-then-clamp (any negative
         // quotient's unsigned reading is >= 2^31 > SCALE_MAX). Mirrors the oracle exactly.
-        hex.set 1, qneg, 0
-        hex.sign 8, num, num_neg, num_pos
+        hex.set 1, sga_qneg, 0
+        hex.sign 8, sga_num, num_neg, num_pos
       num_neg:
-        hex.neg 8, num
-        hex.xor_by 1, qneg, 1
+        hex.neg 8, sga_num
+        hex.xor_by 1, sga_qneg, 1
       num_pos:
-        hex.sign 8, den, den_neg, den_pos
+        hex.sign 8, sga_den, den_neg, den_pos
       den_neg:
-        hex.neg 8, den
-        hex.xor_by 1, qneg, 1
+        hex.neg 8, sga_den
+        hex.xor_by 1, sga_qneg, 1
       den_pos:
-        hex.if0 1, qneg, dodiv
+        hex.if0 1, sga_qneg, dodiv
       den_zero:
-        hex.mov 8, scale, csmax
+        hex.mov 8, scale, sga_csmax
         ;end
       dodiv:
-        .scale_recip_div scale, num, den, disp
-        hex.cmp 8, scale, csmax, chk_min, chk_min, set_max    // min(SCALE_MAX, scale): > -> clamp (unsigned)
+        .scale_recip_div scale, sga_num, sga_den, disp
+        hex.cmp 8, scale, sga_csmax, chk_min, chk_min, set_max    // min(SCALE_MAX, scale): > -> clamp (unsigned)
       set_max:
-        hex.mov 8, scale, csmax
+        hex.mov 8, scale, sga_csmax
         ;end                                    // SCALE_MAX > SCALE_MIN, so the min-clamp is satisfied
       chk_min:
-        hex.cmp 8, scale, csmin, set_min, end, end            // max(SCALE_MIN, scale): < -> clamp (unsigned)
+        hex.cmp 8, scale, sga_csmin, set_min, end, end            // max(SCALE_MIN, scale): < -> clamp (unsigned)
       set_min:
-        hex.mov 8, scale, csmin
+        hex.mov 8, scale, sga_csmin
         ;end
 
-      anglea: hex.vec 8
-      angleb: hex.vec 8
-      num: hex.vec 8
-      den: hex.vec 8
-      sin_idx: hex.vec 3
-      sinv: hex.vec 8
       cproj: hex.vec 8, projection    // PROJECTION<<16, baked (M13-CPROJSTATIC; see above)
-      cang90: hex.vec 8, 0x40000000
-      qneg: hex.vec 1
-      csmin: hex.vec 8, 0x100             // SCALE_MIN (16.16 engine constant)
-      csmax: hex.vec 8, 0x400000          // SCALE_MAX = 64.0
       end:
     }
 
@@ -1062,35 +1039,32 @@ ns proj {
     //   (unsigned hex.div), and a negative diff negates the quotient (-(|diff|//span) = trunc toward 0).
     //   @requires hex.init
     def scalestep dst, scale1, scale2, x1, x2 \
-            @ diff, span, quot, rem, no_span, have_span, diff_neg, diff_pos, baddiv, end {
+            @ no_span, have_span, diff_neg, diff_pos, baddiv, end \
+            < sst_diff, sst_quot, sst_rem, sst_span {
         hex.scmp 8, x2, x1, no_span, no_span, have_span  // x2 > x1 ? (signed columns) — else step 0
       no_span:
         hex.zero 8, dst
         ;end
       have_span:
-        hex.mov 8, span, x2
-        hex.sub 8, span, x1                 // span = x2 - x1  (> 0)
-        hex.mov 8, diff, scale2
-        hex.sub 8, diff, scale1             // diff = scale2 - scale1 (signed)
-        hex.sign 8, diff, diff_neg, diff_pos
+        hex.mov 8, sst_span, x2
+        hex.sub 8, sst_span, x1                 // sst_span = x2 - x1  (> 0)
+        hex.mov 8, sst_diff, scale2
+        hex.sub 8, sst_diff, scale1             // sst_diff = scale2 - scale1 (signed)
+        hex.sign 8, sst_diff, diff_neg, diff_pos
       diff_neg:
-        hex.neg 8, diff                     // |diff|
-        hex.div 8, 2, quot, rem, diff, span, baddiv   // M13: span = x2-x1 <= VIEW_W fits 2 nibbles
-        hex.mov 8, dst, quot
-        hex.neg 8, dst                      // dst = -(|diff| // span)  (trunc toward zero)
+        hex.neg 8, sst_diff                     // |sst_diff|
+        hex.div 8, 2, sst_quot, sst_rem, sst_diff, sst_span, baddiv   // M13: sst_span = x2-x1 <= VIEW_W fits 2 nibbles
+        hex.mov 8, dst, sst_quot
+        hex.neg 8, dst                      // dst = -(|sst_diff| // sst_span)  (trunc toward zero)
         ;end
       diff_pos:
-        hex.div 8, 2, quot, rem, diff, span, baddiv   // dst = diff // span (2-nib divisor)
-        hex.mov 8, dst, quot
+        hex.div 8, 2, sst_quot, sst_rem, sst_diff, sst_span, baddiv   // dst = sst_diff // sst_span (2-nib divisor)
+        hex.mov 8, dst, sst_quot
         ;end
-      baddiv:                               // unreachable (span > 0); safe fallback
+      baddiv:                               // unreachable (sst_span > 0); safe fallback
         hex.zero 8, dst
         ;end
 
-      diff: hex.vec 8
-      span: hex.vec 8
-      quot: hex.vec 8
-      rem: hex.vec 8
       end:
     }
 
@@ -1337,19 +1311,17 @@ ns proj {
     // tantoangle and slopediv_recip8; byte-exact by construction, same values.
     // x1/x2 are 2-nibble column indices in [0, VIEW_W] -- exactly the dispatch table's index width.
     def wall_scale_setup_m scale1, scalestep_out, viewangle, rw_normalangle, rw_distance, x1, x2, projection \
-            @ visang1, visang2, scale2, end {
-        xtadisp.lookup visang1, x1                      // xtoviewangle[x1]
-        hex.add 8, visang1, viewangle                   // visangle@x1 = viewangle + xtoviewangle[x1]
-        .scale_from_global_angle scale1, visang1, viewangle, rw_normalangle, rw_distance, projection, 1, x1
-        xtadisp.lookup visang2, x2                      // xtoviewangle[x2]
-        hex.add 8, visang2, viewangle                   // visangle@x2
-        .scale_from_global_angle scale2, visang2, viewangle, rw_normalangle, rw_distance, projection, 1, x2
-        .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero
+            @ end \
+            < wss_scale2, wss_visang1, wss_visang2 {
+        xtadisp.lookup wss_visang1, x1                      // xtoviewangle[x1]
+        hex.add 8, wss_visang1, viewangle                   // visangle@x1 = viewangle + xtoviewangle[x1]
+        .scale_from_global_angle scale1, wss_visang1, viewangle, rw_normalangle, rw_distance, projection, 1, x1
+        xtadisp.lookup wss_visang2, x2                      // xtoviewangle[x2]
+        hex.add 8, wss_visang2, viewangle                   // visangle@x2
+        .scale_from_global_angle wss_scale2, wss_visang2, viewangle, rw_normalangle, rw_distance, projection, 1, x2
+        .scalestep scalestep_out, scale1, wss_scale2, x1, x2   // trunc((wss_scale2-scale1)/(x2-x1)) toward zero
         ;end
 
-      visang1: hex.vec 8
-      visang2: hex.vec 8
-      scale2: hex.vec 8
       end:
     }
 
@@ -1992,9 +1964,8 @@ ns proj {
     }
 
     def wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, a, b, c \
-            @ adup, ang1, ang2, span, tspan, diff, tx1, tx2, sgn_b, frontok, \
-              cclip, c2clip, cnegclip, \
-              notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end {
+            @ frontok, notback, leftclip, setleft, leftok, rightclip, setright, rightok, visok, end \
+            < wxr_adup, wxr_ang1, wxr_ang2, wxr_c2clip, wxr_cclip, wxr_cnegclip, wxr_diff, wxr_sgn_b, wxr_span, wxr_tspan, wxr_tx1, wxr_tx2 {
         hex.set 1, visible, 0
 
         // M13-mapmul WAS: viewxa = |viewx| = m<<16, so fixed_mul(a, m<<16) = (a*m<<16)>>16 = a*m
@@ -2035,68 +2006,56 @@ ns proj {
         //   sites) -- NO Python f-string emits them -- so rule 4's frozen-ABI concern, which is
         //   about emitter-generated calls, does not apply. Checked by grep over src/doomfj/.
         hex.fixed_mul_lo 8, 4, sgn, viewx, a
-        hex.fixed_mul_lo 8, 4, sgn_b, viewy, b
-        hex.add 8, sgn, sgn_b
+        hex.fixed_mul_lo 8, 4, wxr_sgn_b, viewy, b
+        hex.add 8, sgn, wxr_sgn_b
         hex.add 8, sgn, c
         hex.sign 8, sgn, end, frontok
       frontok:
         hex.if0 8, sgn, end
-        .point_to_angle ang1, viewx, viewy, v1x, v1y, 1
-        .point_to_angle ang2, viewx, viewy, v2x, v2y, 1
+        .point_to_angle wxr_ang1, viewx, viewy, v1x, v1y, 1
+        .point_to_angle wxr_ang2, viewx, viewy, v2x, v2y, 1
         // `dsl`/`dtb` (ablate "slopetwice"/"tabletwice") used to split point_to_angle_m's cost into
         // its slope-divide and table-read halves. The full-width `point_to_angle` has no such split,
         // so they now re-run the WHOLE atan into a dead register instead -- measurement-only knobs
         // (never set in a shipped or gated config), but their granularity is coarser than it was.
-        rep(dsl + dtb, k) .point_to_angle adup, viewx, viewy, v1x, v1y, 1
-        rep(dbl, k) .atan_dup adup, viewx, viewy, v1x, v1y, v2x, v2y
-        hex.mov 8, span, ang1
-        hex.sub 8, span, ang2
-        hex.sign 8, span, end, notback
+        rep(dsl + dtb, k) .point_to_angle wxr_adup, viewx, viewy, v1x, v1y, 1
+        rep(dbl, k) .atan_dup wxr_adup, viewx, viewy, v1x, v1y, v2x, v2y
+        hex.mov 8, wxr_span, wxr_ang1
+        hex.sub 8, wxr_span, wxr_ang2
+        hex.sign 8, wxr_span, end, notback
       notback:
-        hex.sub 8, ang1, viewangle
-        hex.sub 8, ang2, viewangle
+        hex.sub 8, wxr_ang1, viewangle
+        hex.sub 8, wxr_ang2, viewangle
 
-        hex.mov 8, tspan, ang1
-        hex.add 8, tspan, cclip
-        hex.cmp 8, tspan, c2clip, leftok, leftok, leftclip
+        hex.mov 8, wxr_tspan, wxr_ang1
+        hex.add 8, wxr_tspan, wxr_cclip
+        hex.cmp 8, wxr_tspan, wxr_c2clip, leftok, leftok, leftclip
       leftclip:
-        hex.mov 8, diff, tspan
-        hex.sub 8, diff, c2clip
-        hex.cmp 8, diff, span, setleft, end, end
+        hex.mov 8, wxr_diff, wxr_tspan
+        hex.sub 8, wxr_diff, wxr_c2clip
+        hex.cmp 8, wxr_diff, wxr_span, setleft, end, end
       setleft:
-        hex.mov 8, ang1, cclip
+        hex.mov 8, wxr_ang1, wxr_cclip
       leftok:
-        hex.mov 8, tspan, cclip
-        hex.sub 8, tspan, ang2
-        hex.cmp 8, tspan, c2clip, rightok, rightok, rightclip
+        hex.mov 8, wxr_tspan, wxr_cclip
+        hex.sub 8, wxr_tspan, wxr_ang2
+        hex.cmp 8, wxr_tspan, wxr_c2clip, rightok, rightok, rightclip
       rightclip:
-        hex.mov 8, diff, tspan
-        hex.sub 8, diff, c2clip
-        hex.cmp 8, diff, span, setright, end, end
+        hex.mov 8, wxr_diff, wxr_tspan
+        hex.sub 8, wxr_diff, wxr_c2clip
+        hex.cmp 8, wxr_diff, wxr_span, setright, end, end
       setright:
-        hex.mov 8, ang2, cnegclip
+        hex.mov 8, wxr_ang2, wxr_cnegclip
       rightok:
-        .angle_to_x tx1, ang1, 1
-        .angle_to_x tx2, ang2, 1
-        hex.cmp 2, tx1, tx2, visok, end, end     // post-clip columns are unsigned-small
+        .angle_to_x wxr_tx1, wxr_ang1, 1
+        .angle_to_x wxr_tx2, wxr_ang2, 1
+        hex.cmp 2, wxr_tx1, wxr_tx2, visok, end, end     // post-clip columns are unsigned-small
       visok:
         hex.set 1, visible, 1
-        hex.mov 8, x1, tx1
-        hex.mov 8, x2, tx2
+        hex.mov 8, x1, wxr_tx1
+        hex.mov 8, x2, wxr_tx2
         ;end
 
-      adup: hex.vec 8
-      ang1: hex.vec 8
-      ang2: hex.vec 8
-      span: hex.vec 8
-      tspan: hex.vec 8
-      diff: hex.vec 8
-      tx1: hex.vec 8
-      tx2: hex.vec 8
-      sgn_b: hex.vec 8
-      cclip: hex.vec 8, 0x20000000
-      c2clip: hex.vec 8, 0x40000000
-      cnegclip: hex.vec 8, 0xE0000000
       end:
     }
 

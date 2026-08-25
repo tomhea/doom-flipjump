@@ -1314,20 +1314,9 @@ ns frame {
         hex.read_table_packed 1, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
     }
 
-    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, blkshift, \
-            buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, nld, neartz, \
-            mt, throwc, n_thc, sprltc, nltic \
-            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, \
-              x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, \
-              soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, \
-              blockbase_done, bucket_mul, bucket_mul_done, \
-              col_check, slot_check, slot_a, slot_b, slot_done, col_next, \
-              do_store, \
-              climit, vis, dvis, dtx1, dtx2, dtyt, dthp, dtis, tx1, tx2, tytop, thpx, tistep, bucket, bucket_h, y0, y_base, frac_u, u, dw_max, \
-              col_x, drawn_b, drawn_p, drawn_v, sprflag_b, sprflag_p, sprflag_v, tbl_b, tbl_p, blk, blk_ofs, blk_const, tab_idx, shade_row, run_r0, run_last, run_w8, \
-              sy1, sy2, y0_biased, negx1, cbound, slot_ofs, slot_flag, end \
-            < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, \
-              sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl {
+    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, blkshift, buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, nld, neartz, mt, throwc, n_thc, sprltc, nltic \
+            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, bucket_mul, bucket_mul_done, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end \
+            < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_blk_ofs, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_run_r0, trb_run_w8, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_sy1, trb_sy2, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, trb_y0_biased, trb_y_base {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
         // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
         // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
@@ -1338,11 +1327,11 @@ ns frame {
         // n_claimed==vieww instead hid every monster in a room the moment a near marking seg
         // finished the plane claim (history: docs/handoff-visual-features.md).
         hex.if0 2, sp_mon, scenery_budget
-        hex.set 2, climit, monbudget
-        hex.cmp 2, n_mon, climit, budget_ok, ret, ret
+        hex.set 2, trb_climit, monbudget
+        hex.cmp 2, n_mon, trb_climit, budget_ok, ret, ret
       scenery_budget:
-        hex.set 2, climit, budget
-        hex.cmp 2, n_thing, climit, budget_ok, ret, ret
+        hex.set 2, trb_climit, budget
+        hex.cmp 2, n_thing, trb_climit, budget_ok, ret, ret
       budget_ok:
         hex.if1 1, full, set_tstop              // every column WALL-drawn -> no fragment can land
       not_full:
@@ -1352,20 +1341,20 @@ ns frame {
         // and a light frame never fills SOFT so it renders exactly as before.
         rep(deg, k) hex.set 1, degfl, 1
         rep(deg, k) hex.if0 2, sp_mon, soft_scenery
-        rep(deg, k) hex.set 2, climit, dsoftm
-        rep(deg, k) hex.cmp 2, n_mon, climit, soft_under, soft_done, soft_done
+        rep(deg, k) hex.set 2, trb_climit, dsoftm
+        rep(deg, k) hex.cmp 2, n_mon, trb_climit, soft_under, soft_done, soft_done
       soft_scenery:
-        rep(deg, k) hex.set 2, climit, dsofts
-        rep(deg, k) hex.cmp 2, n_thing, climit, soft_under, soft_done, soft_done
+        rep(deg, k) hex.set 2, trb_climit, dsofts
+        rep(deg, k) hex.cmp 2, n_thing, trb_climit, soft_under, soft_done, soft_done
       soft_under:
         rep(deg, k) hex.set 1, degfl, 0
       soft_done:
-        proj.project_thing vis, tx1, tx2, tytop, thpx, tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
+        proj.project_thing trb_vis, trb_tx1, trb_tx2, trb_tytop, trb_thpx, trb_tistep, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
         // ablate "thingtwice" (measurement only): the SAME projection, SAME operands, dead
         // outputs. Pricing by ADDING keeps the frame byte-exact -- a stub would price itself
         // plus everything downstream (fj-cost-model, the `noproj` retraction).
-        rep(ttwice, k) proj.project_thing dvis, dtx1, dtx2, dtyt, dthp, dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
-        hex.if0 1, vis, ret
+        rep(ttwice, k) proj.project_thing trb_dvis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dthp, trb_dtis, minz, projection, centerx, centery, viewwc, viewh, ds, deg, spn, neartz
+        hex.if0 1, trb_vis, ret
         // M14-perf: PAST EVERY REJECT -- now, and only now, read the half of the row that only a
         // drawn sprite needs. `mt` is 0 on the static path, where the registers are baked by the
         // leaf's xor_by block instead and this expands to nothing.
@@ -1376,227 +1365,183 @@ ns frame {
       inc_scenery:
         hex.inc 2, n_thing
       inc_done:
-        // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][bucket:2]
-        sprbkt.lookup bucket, thpx
-        hex.zero w/4, blk_const                 // the per-thing block base: sp_base + bucket,
-        hex.mov 4, blk_const, sp_base           // WIDENED first (a narrow add cannot carry out
-        hex.zero w/4, tab_idx                   // of its own nibbles)
-        hex.mov 2, tab_idx, bucket
-        hex.add w/4, blk_const, tab_idx
-        hex.zero 8, bucket_h                    // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT
-        hex.mov 2, bucket_h, bucket + 2*dw      // nibbles of src, so a 2-nibble register would
-        hex.mov 8, y0, tytop                    // drag its neighbours in as high nibbles.
-        hex.add 8, y0, thpx                     // FEET planted: the bucket moves the sprite's TOP
-        hex.sub 8, y0, bucket_h
-        // 25M-CAP B-GATE, hoisted per thing: slot B only for fragments whose bucket height
+        // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][trb_bucket:2]
+        sprbkt.lookup trb_bucket, trb_thpx
+        hex.zero w/4, trb_blk_const                 // the per-thing block base: sp_base + trb_bucket,
+        hex.mov 4, trb_blk_const, sp_base           // WIDENED first (a narrow add cannot carry out
+        hex.zero w/4, trb_tab_idx                   // of its own nibbles)
+        hex.mov 2, trb_tab_idx, trb_bucket
+        hex.add w/4, trb_blk_const, trb_tab_idx
+        hex.zero 8, trb_bucket_h                    // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT
+        hex.mov 2, trb_bucket_h, trb_bucket + 2*dw      // nibbles of src, so a 2-nibble register would
+        hex.mov 8, trb_y0, trb_tytop                    // drag its neighbours in as high nibbles.
+        hex.add 8, trb_y0, trb_thpx                     // FEET planted: the trb_bucket moves the sprite's TOP
+        hex.sub 8, trb_y0, trb_bucket_h
+        // 25M-CAP B-GATE, hoisted per thing: slot B only for fragments whose trb_bucket height
         // reaches sprbminh -- a smaller B fragment sits behind slot A and ~never shows, so the
         // per-column bank walk it would pay is invisible work. The slot stays OPEN for a later,
         // taller thing (the oracle's elif does the same).
         rep(deg, k) hex.set 1, ballow, 1
-        rep(deg, k) hex.set 2, climit, sprbminh
-        rep(deg, k) hex.cmp 2, bucket_h, climit, bslot_no, bslot_done, bslot_done
+        rep(deg, k) hex.set 2, trb_climit, sprbminh
+        rep(deg, k) hex.cmp 2, trb_bucket_h, trb_climit, bslot_no, bslot_done, bslot_done
       bslot_no:
         rep(deg, k) hex.set 1, ballow, 0
       bslot_done:
-        // SPR-NEAR (spn): a thing both SHORT on screen (bucket < lowh) and beyond the
+        // SPR-NEAR (spn): a thing both SHORT on screen (trb_bucket < lowh) and beyond the
         // detail radius (thfar, set by project_thing) takes the packed COARSE region; near
         // things -- however small they project -- keep the main bank's full detail.
         rep(spn, k) hex.set 1, hdfl, 1
         rep(spn, k) hex.if0 1, thfar, hd_done
-        rep(spn, k) hex.set 2, climit, lowh
-        rep(spn, k) hex.cmp 2, bucket_h, climit, hd_lowdetail, hd_done, hd_done
+        rep(spn, k) hex.set 2, trb_climit, lowh
+        rep(spn, k) hex.cmp 2, trb_bucket_h, trb_climit, hd_lowdetail, hd_done, hd_done
       hd_lowdetail:
         rep(spn, k) hex.set 1, hdfl, 0
       hd_done:
         // ... and the block base: the low buckets are a PREFIX, so the coarse index keeps
-        // the same base+bucket shape with no offset
+        // the same base+trb_bucket shape with no offset
         rep(spn, k) hex.if1 1, hdfl, blockbase_done
-        rep(spn, k) hex.zero w/4, blk_const
-        rep(spn, k) hex.mov 4, blk_const, sp_base2
-        rep(spn, k) hex.zero w/4, tab_idx
-        rep(spn, k) hex.mov 2, tab_idx, bucket
-        rep(spn, k) hex.add w/4, blk_const, tab_idx
+        rep(spn, k) hex.zero w/4, trb_blk_const
+        rep(spn, k) hex.mov 4, trb_blk_const, sp_base2
+        rep(spn, k) hex.zero w/4, trb_tab_idx
+        rep(spn, k) hex.mov 2, trb_tab_idx, trb_bucket
+        rep(spn, k) hex.add w/4, trb_blk_const, trb_tab_idx
       blockbase_done:
-        // the shade row: (light, sprite height) class << 8 | bucket height, one baked byte
-        hex.zero w/4, tab_idx
-        hex.mov 2, tab_idx + 2*dw, sp_lt
-        hex.mov 2, tab_idx, bucket_h
-        hex.set w/4, tbl_b, sprlight
-        hex.ptr_index tbl_p, tbl_b, tab_idx
-        hex.read_byte shade_row, tbl_p
+        // the shade row: (light, sprite height) class << 8 | trb_bucket height, one baked byte
+        hex.zero w/4, trb_tab_idx
+        hex.mov 2, trb_tab_idx + 2*dw, sp_lt
+        hex.mov 2, trb_tab_idx, trb_bucket_h
+        hex.set w/4, trb_tbl_b, sprlight
+        hex.ptr_index trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.read_byte trb_shade_row, trb_tbl_p
         // the column DDA: frac starts at (clamped x1 - x1) * istep, exactly as the oracle's does
-        hex.mov 8, col_x, tx1
-        hex.zero 8, frac_u
-        hex.sign 8, tx1, x1_negative, x1_done
+        hex.mov 8, trb_col_x, trb_tx1
+        hex.zero 8, trb_frac_u
+        hex.sign 8, trb_tx1, x1_negative, x1_done
       x1_negative:
-        hex.zero 8, col_x
-        hex.mov 8, negx1, tx1
-        hex.neg 8, negx1
-        hex.mul_lo 8, frac_u, negx1, tistep
+        hex.zero 8, trb_col_x
+        hex.mov 8, trb_negx1, trb_tx1
+        hex.neg 8, trb_negx1
+        hex.mul_lo 8, trb_frac_u, trb_negx1, trb_tistep
       x1_done:
-        hex.set 8, cbound, viewwc              // x2 is INCLUSIVE, so clamp it to VIEW_W-1
-        hex.dec 8, cbound
-        hex.scmp 8, tx2, cbound, x2_done, x2_done, x2_clamp
+        hex.set 8, trb_cbound, viewwc              // x2 is INCLUSIVE, so clamp it to VIEW_W-1
+        hex.dec 8, trb_cbound
+        hex.scmp 8, trb_tx2, trb_cbound, x2_done, x2_done, x2_clamp
       x2_clamp:
-        hex.mov 8, tx2, cbound
+        hex.mov 8, trb_tx2, trb_cbound
       x2_done:
-        hex.mov 2, dw_max, sp_dw
-        hex.dec 2, dw_max                       // the last downscaled texture column
-        hex.set w/4, drawn_b, drawn
-        hex.ptr_index drawn_p, drawn_b, col_x
-        hex.set w/4, sprflag_b, sprflag
-        hex.ptr_index sprflag_p, sprflag_b, col_x
+        hex.mov 2, trb_dw_max, sp_dw
+        hex.dec 2, trb_dw_max                       // the last downscaled texture column
+        hex.set w/4, trb_drawn_b, drawn
+        hex.ptr_index trb_drawn_p, trb_drawn_b, trb_col_x
+        hex.set w/4, trb_sprflag_b, sprflag
+        hex.ptr_index trb_sprflag_p, trb_sprflag_b, trb_col_x
       col_loop:
-        hex.cmp 2, col_x, tx2, col_body, col_body, ret
+        hex.cmp 2, trb_col_x, trb_tx2, col_body, col_body, ret
       col_body:
-        hex.mov 8, u, frac_u                    // u = min(dw-1, frac >> 16)
-        hex.shr_hex 8, 4, u
-        hex.cmp 2, u, dw_max, col_check, col_check, u_clamp
+        hex.mov 8, trb_u, trb_frac_u                    // trb_u = min(dw-1, frac >> 16)
+        hex.shr_hex 8, 4, trb_u
+        hex.cmp 2, trb_u, trb_dw_max, col_check, col_check, u_clamp
       u_clamp:
-        hex.mov 2, u, dw_max
+        hex.mov 2, trb_u, trb_dw_max
       col_check:
-        hex.read_byte drawn_v, drawn_p
-        hex.if0 2, drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
+        hex.read_byte trb_drawn_v, trb_drawn_p
+        hex.if0 2, trb_drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
         ;col_next
       slot_check:
-        hex.read_byte sprflag_v, sprflag_p
-        hex.if0 2, sprflag_v, slot_a            // no fragment yet -> slot A (offset 0, flag 1)
+        hex.read_byte trb_sprflag_v, trb_sprflag_p
+        hex.if0 2, trb_sprflag_v, slot_a            // no fragment yet -> slot A (offset 0, flag 1)
         // V4b: slot A taken -- take slot B (byte offset 8 of the same 16-byte slot, flag 2),
         // else both slots are spent and this thing is hidden here. Walk-arrival order makes
         // A the nearer fragment and B the one behind it, exactly like the oracle's sfrag2.
-        hex.dec 2, sprflag_v
-        hex.if1 2, sprflag_v, col_next          // both slots spent -> the thing is hidden here
+        hex.dec 2, trb_sprflag_v
+        hex.if1 2, trb_sprflag_v, col_next          // both slots spent -> the thing is hidden here
         rep(deg, k) hex.if0 1, ballow, col_next // 25M-CAP: B only for tall-enough fragments
         ;slot_b
       slot_a:
-        hex.set w/4, slot_ofs, 0
-        hex.set 2, slot_flag, 1
+        hex.set w/4, trb_slot_ofs, 0
+        hex.set 2, trb_slot_flag, 1
         ;slot_done
       slot_b:
-        hex.set w/4, slot_ofs, 8
-        hex.set 2, slot_flag, 2
+        hex.set w/4, trb_slot_ofs, 8
+        hex.set 2, trb_slot_flag, 2
       slot_done:
-        // block = sp_base + u*buckets + bucket, at a POWER-OF-TWO stride so the address is a shift
-        // blk = (base + bucket) + u*BUCKETS -- and (base + bucket) is a per-THING constant, so
-        // only the `u*BUCKETS` term belongs in the column loop. `blk_const` is that constant, hoisted.
-        hex.zero w/4, blk
-        hex.mov 2, blk, u
+        // block = sp_base + trb_u*buckets + trb_bucket, at a POWER-OF-TWO stride so the address is a shift
+        // trb_blk = (base + trb_bucket) + trb_u*BUCKETS -- and (base + trb_bucket) is a per-THING constant, so
+        // only the `trb_u*BUCKETS` term belongs in the column loop. `trb_blk_const` is that constant, hoisted.
+        hex.zero w/4, trb_blk
+        hex.mov 2, trb_blk, trb_u
         rep(spn, k) hex.if1 1, hdfl, bucket_mul   // SPR-NEAR: the packed region strides nld
-        rep(spn, k) hex.mul_const w/4, blk, blk, nld
+        rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld
         rep(spn, k) hex.if0 1, hdfl, bucket_mul_done
       bucket_mul:
-        hex.mul_const w/4, blk, blk, buckets
+        hex.mul_const w/4, trb_blk, trb_blk, buckets
       bucket_mul_done:
-        hex.add w/4, blk, blk_const
-        // ⚠ `blk` stays the RAW block INDEX -- that is what the slot stores and what the emit
+        hex.add w/4, trb_blk, trb_blk_const
+        // ⚠ `trb_blk` stays the RAW block INDEX -- that is what the slot stores and what the emit
         // shifts. Shifting it here as well double-multiplied the address by the stride AND
         // overflowed the slot's 4 nibbles, which read back as an all-zero block header and made
         // every column skip: the frame then differed from the oracle by EXACTLY its sprite pixels.
-        hex.mov w/4, blk_ofs, blk
-        rep(blkshift, k) hex.shl_bit w/4, blk_ofs   // x SPR_BLOCK_STRIDE dw (a power of two)
-        hex.set w/4, tbl_b, sprbank
-        hex.ptr_index tbl_p, tbl_b, blk_ofs
-        hex.read_byte run_r0, tbl_p             // the block HEADER: first row, last row
-        hex.ptr_add tbl_p, 1
-        hex.read_byte run_last, tbl_p
-        hex.ptr_sub tbl_p, 1
-        hex.if0 2, run_last, col_next           // a fully transparent sprite column
-        // sy1 = max(y0 + r0, 0), sy2p1 = min(y0 + last_rel, VIEW_H); empty -> nothing to store
-        // sy1 = clamp(y0 + r0, 0, VIEW_H), sy2p1 = clamp(y0 + last_rel, 0, VIEW_H).
+        hex.mov w/4, trb_blk_ofs, trb_blk
+        rep(blkshift, k) hex.shl_bit w/4, trb_blk_ofs   // x SPR_BLOCK_STRIDE dw (a power of two)
+        hex.set w/4, trb_tbl_b, sprbank
+        hex.ptr_index trb_tbl_p, trb_tbl_b, trb_blk_ofs
+        hex.read_byte trb_run_r0, trb_tbl_p             // the block HEADER: first row, last row
+        hex.ptr_add trb_tbl_p, 1
+        hex.read_byte trb_run_last, trb_tbl_p
+        hex.ptr_sub trb_tbl_p, 1
+        hex.if0 2, trb_run_last, col_next           // a fully transparent sprite column
+        // trb_sy1 = max(trb_y0 + r0, 0), sy2p1 = min(trb_y0 + last_rel, VIEW_H); empty -> nothing to store
+        // trb_sy1 = clamp(trb_y0 + r0, 0, VIEW_H), sy2p1 = clamp(trb_y0 + last_rel, 0, VIEW_H).
         // ⚠ CLAMPED, never REJECTED: the oracle takes the column as soon as the sprite column has
         // any opaque texel, even when the projected run lands entirely off-screen -- and a taken
         // column is closed to every LATER thing. Rejecting here instead left the column claimable
-        // and fj recorded fragments the oracle does not have. An empty [sy1, sy2) costs nothing at
+        // and fj recorded fragments the oracle does not have. An empty [trb_sy1, trb_sy2) costs nothing at
         // emit: the two regions then cover the whole column and every sprite run skips or clamps.
         // ⚠ the baked run list is relative to r0 (the column's FIRST OPAQUE row), not to the
         // sprite's row 0 -- exactly as the oracle's fragment stores `ytop_b + st[0]` as its base.
-        // Fold r0 in ONCE here, so the emit's `y0 + rel` is right and `sy1` is the same row.
-        hex.zero 8, run_w8                      // ... widened: `hex.add 8` reads EIGHT nibbles
-        hex.mov 2, run_w8, run_r0
-        hex.mov 8, y_base, y0
-        hex.add 8, y_base, run_w8
-        hex.set 8, cbound, viewh
-        hex.mov 8, sy1, y_base
-        .clamp_row sy1, cbound
-        hex.zero 8, run_w8
-        hex.mov 2, run_w8, run_last
-        hex.mov 8, sy2, y_base
-        hex.add 8, sy2, run_w8
-        .clamp_row sy2, cbound
+        // Fold r0 in ONCE here, so the emit's `trb_y0 + rel` is right and `trb_sy1` is the same row.
+        hex.zero 8, trb_run_w8                      // ... widened: `hex.add 8` reads EIGHT nibbles
+        hex.mov 2, trb_run_w8, trb_run_r0
+        hex.mov 8, trb_y_base, trb_y0
+        hex.add 8, trb_y_base, trb_run_w8
+        hex.set 8, trb_cbound, viewh
+        hex.mov 8, trb_sy1, trb_y_base
+        .clamp_row trb_sy1, trb_cbound
+        hex.zero 8, trb_run_w8
+        hex.mov 2, trb_run_w8, trb_run_last
+        hex.mov 8, trb_sy2, trb_y_base
+        hex.add 8, trb_sy2, trb_run_w8
+        .clamp_row trb_sy2, trb_cbound
       do_store:
-        hex.mov 8, y0_biased, y_base            // base + 32768, stored as TWO bytes: a tall NEAR
-        hex.add_constant 8, y0_biased, 32768    // sprite's top can sit far above row -128, and the
+        hex.mov 8, trb_y0_biased, trb_y_base            // base + 32768, stored as TWO bytes: a tall NEAR
+        hex.add_constant 8, trb_y0_biased, 32768    // sprite's top can sit far above row -128, and the
                                                 // old one-byte +128 bias WRAPPED there (M13-15M)
-        hex.set w/4, tab_idx, 0
-        hex.mov 2, tab_idx, col_x
-        rep(slotstride/16, k) hex.shl_hex w/4, 1, tab_idx   // a power-of-16 stride: whole-nibble shift
-        hex.add w/4, tab_idx, slot_ofs          // V4b: slot B lives at byte offset 8
-        hex.set w/4, tbl_b, spslot
-        hex.ptr_index tbl_p, tbl_b, tab_idx
-        hex.write_byte_and_inc tbl_p, sy1
-        hex.write_byte_and_inc tbl_p, sy2
-        hex.write_byte_and_inc tbl_p, y0_biased
-        hex.write_byte_and_inc tbl_p, y0_biased + 2*dw
-        hex.write_byte_and_inc tbl_p, blk
-        hex.write_byte_and_inc tbl_p, blk + 2*dw
-        hex.write_byte_and_inc tbl_p, shade_row
-        hex.write_byte sprflag_p, slot_flag     // V4b: 1 = A only, 2 = A + B
+        hex.set w/4, trb_tab_idx, 0
+        hex.mov 2, trb_tab_idx, trb_col_x
+        rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx   // a power-of-16 stride: whole-nibble shift
+        hex.add w/4, trb_tab_idx, trb_slot_ofs          // V4b: slot B lives at byte offset 8
+        hex.set w/4, trb_tbl_b, spslot
+        hex.ptr_index trb_tbl_p, trb_tbl_b, trb_tab_idx
+        hex.write_byte_and_inc trb_tbl_p, trb_sy1
+        hex.write_byte_and_inc trb_tbl_p, trb_sy2
+        hex.write_byte_and_inc trb_tbl_p, trb_y0_biased
+        hex.write_byte_and_inc trb_tbl_p, trb_y0_biased + 2*dw
+        hex.write_byte_and_inc trb_tbl_p, trb_blk
+        hex.write_byte_and_inc trb_tbl_p, trb_blk + 2*dw
+        hex.write_byte_and_inc trb_tbl_p, trb_shade_row
+        hex.write_byte trb_sprflag_p, trb_slot_flag     // V4b: 1 = A only, 2 = A + B
       col_next:
-        hex.ptr_add drawn_p, 1
-        hex.ptr_add sprflag_p, 1
-        hex.inc 2, col_x
-        hex.add 8, frac_u, tistep
+        hex.ptr_add trb_drawn_p, 1
+        hex.ptr_add trb_sprflag_p, 1
+        hex.inc 2, trb_col_x
+        hex.add 8, trb_frac_u, trb_tistep
         ;col_loop
       set_tstop:
         hex.set 1, tstop, 1
       ret:
         stl.fret thing_ret
-      climit: hex.vec 2                         // the current gate's compare bound: a budget cap
                                                 //   (budget/monbudget/dsoft*) or a min-height bar
                                                 //   (sprbminh/lowh) — reloaded before each cmp
-      vis: hex.vec 1
-      dvis: hex.vec 1
-      dtx1: hex.vec 8
-      dtx2: hex.vec 8
-      dtyt: hex.vec 8
-      dthp: hex.vec 8
-      dtis: hex.vec 8
-      tx1: hex.vec 8
-      tx2: hex.vec 8
-      tytop: hex.vec 8
-      thpx: hex.vec 8
-      tistep: hex.vec 8
-      bucket: hex.vec 4                         // [bucket_h:2][bucket idx:2], one sprbkt dispatch
-      bucket_h: hex.vec 8                       // ... the bucket's on-screen height, widened
-      y0: hex.vec 8                             // the sprite's row 0 (feet planted)
-      y_base: hex.vec 8                         // ... plus this column's first opaque row (run_r0)
-      frac_u: hex.vec 8                         // the column DDA accumulator (16.16)
-      u: hex.vec 8                              // ... and its integer texture column
-      dw_max: hex.vec 2                         // the last downscaled texture column (sp_dw - 1)
-      col_x: hex.vec 8
-      drawn_b: hex.vec w/4
-      drawn_p: hex.vec w/4
-      drawn_v: hex.vec 2
-      sprflag_b: hex.vec w/4
-      sprflag_p: hex.vec w/4
-      sprflag_v: hex.vec 2
-      tbl_b: hex.vec w/4                        // a shared table base/pointer pair, reused for
-      tbl_p: hex.vec w/4                        // sprlight, then sprbank, then spslot
-      blk: hex.vec w/4                          // the RAW run-list block INDEX (see the ⚠ above)
-      blk_const: hex.vec w/4                    // ... its per-THING part, hoisted out of the loop
-      blk_ofs: hex.vec w/4                      // ... and the index shifted to a byte offset
-      tab_idx: hex.vec w/4
-      shade_row: hex.vec 2
-      run_r0: hex.vec 2                         // the block header: first opaque row,
-      run_last: hex.vec 2                       // ... and the last, relative to it
-      run_w8: hex.vec 8                         // ... widened for the 8-nibble adds
-      sy1: hex.vec 8
-      sy2: hex.vec 8
-      y0_biased: hex.vec 8
-      negx1: hex.vec 8
-      cbound: hex.vec 8                        // the clamp bound (VIEW_W-1, then VIEW_H)
-      slot_ofs: hex.vec w/4                     // V4b: this claim's slot byte offset (0 = A, 8 = B)
-      slot_flag: hex.vec 2                      // ... and the flag it leaves (1 = A, 2 = A+B)
       end:
     }
 

@@ -914,83 +914,69 @@ ns stream {
     // ts_step_faces). Requires ascode (asserted at emit time). The region list ids are derived
     // per piece from the baked back pid via frame.lines_pid_ids into SCRATCH registers.
     def steps_splice_c ctake, rlo, rhi, w1r, gnrow, cmidx, cbufa, cbufd, ccy \
-            @ ceil_only, cend_ok, cend_clamp, ceil_go, piece1_in_win, \
-              walk_region0, region0_end, bound1_at_end, bound1_at_piece2, \
-              walk_region1, region1_end, piece2_in_win, walk_region2, \
-              lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, ceil_done, \
-              win_lo, win_end, zero_row, ceil_end, rlo2, ucnt2, rcbufa, rcbufd, rfbufa, rfbufd, end \
-            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp {
+            @ ceil_only, cend_ok, cend_clamp, ceil_go, piece1_in_win, walk_region0, region0_end, bound1_at_end, bound1_at_piece2, walk_region1, region1_end, piece2_in_win, walk_region2, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, ceil_done, end \
+            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ssc_ceil_end, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd, ssc_rlo2, ssc_ucnt2, ssc_win_end, ssc_win_lo, ssc_zero_row {
         hex.if0 2, ctake, ceil_done             // no ceiling half at all
-        hex.mov 2, ceil_end, ctake              // V5-SPR: the piece window [rlo, min(ctake,rhi))
-        hex.cmp 2, ceil_end, rhi, cend_ok, cend_ok, cend_clamp
+        hex.mov 2, ssc_ceil_end, ctake              // V5-SPR: the piece window [rlo, min(ctake,rhi))
+        hex.cmp 2, ssc_ceil_end, rhi, cend_ok, cend_ok, cend_clamp
       cend_clamp:
-        hex.mov 2, ceil_end, rhi
+        hex.mov 2, ssc_ceil_end, rhi
       cend_ok:
-        hex.mov 2, win_lo, rlo
-        hex.mov 2, rlo2, rlo
-        hex.cmp 2, win_lo, ceil_end, ceil_go, ceil_done, ceil_done  // empty intersection -> nothing
+        hex.mov 2, ssc_win_lo, rlo
+        hex.mov 2, ssc_rlo2, rlo
+        hex.cmp 2, ssc_win_lo, ssc_ceil_end, ceil_go, ceil_done, ceil_done  // empty intersection -> nothing
       ceil_go:
-        hex.mov 2, win_end, ceil_end
+        hex.mov 2, ssc_win_end, ssc_ceil_end
         hex.if0 1, ucnt, ceil_only              // no pieces: one full claimed walk
-        hex.cmp 2, u1y1, ceil_end, piece1_in_win, ceil_only, ceil_only  // piece 1 out -> claimed only
+        hex.cmp 2, u1y1, ssc_ceil_end, piece1_in_win, ceil_only, ceil_only  // piece 1 out -> claimed only
       piece1_in_win:
-        hex.mov 1, ucnt2, ucnt                  // a LOCAL copy: ucnt is the ditto signature,
-        hex.mov 2, win_end, u1y1                // saved to its shadow AFTER this emit
-        hex.cmp 2, win_lo, win_end, walk_region0, region0_end, region0_end  // guard: an empty
+        hex.mov 1, ssc_ucnt2, ucnt                  // a LOCAL copy: ucnt is the ditto signature,
+        hex.mov 2, ssc_win_end, u1y1                // saved to its shadow AFTER this emit
+        hex.cmp 2, ssc_win_lo, ssc_win_end, walk_region0, region0_end, region0_end  // guard: an empty
       walk_region0:                             // window still pays the loaders
-        .half_walk_code cbufa, cbufd, win_lo, win_end, ccy
+        .half_walk_code cbufa, cbufd, ssc_win_lo, ssc_win_end, ccy
       region0_end:
-        hex.zero 2, zero_row
-        .steps_face u1y1, u1y2, u1cls, zero_row, ctake, rlo2, ceil_end, w1r, gnrow, cmidx
-        frame.lines_pid_ids u1bp, rcbufa, rcbufd, rfbufa, rfbufd
-        hex.mov 2, win_lo, u1y2
-        hex.inc 2, win_lo                       // region 1 starts at the STORED end + 1 --
-        hex.cmp 2, win_lo, rlo2, lo1_clamp, lo1_ok, lo1_ok   // clamped to the window start: a
-      lo1_clamp:                                // sub-window win_lo would emit SUB-CURSOR pairs,
-        hex.mov 2, win_lo, rlo2                 // and the device REWINDS on those (no silent drop!)
+        hex.zero 2, ssc_zero_row
+        .steps_face u1y1, u1y2, u1cls, ssc_zero_row, ctake, ssc_rlo2, ssc_ceil_end, w1r, gnrow, cmidx
+        frame.lines_pid_ids u1bp, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd
+        hex.mov 2, ssc_win_lo, u1y2
+        hex.inc 2, ssc_win_lo                       // region 1 starts at the STORED end + 1 --
+        hex.cmp 2, ssc_win_lo, ssc_rlo2, lo1_clamp, lo1_ok, lo1_ok   // clamped to the window start: a
+      lo1_clamp:                                // sub-window ssc_win_lo would emit SUB-CURSOR pairs,
+        hex.mov 2, ssc_win_lo, ssc_rlo2                 // and the device REWINDS on those (no silent drop!)
       lo1_ok:
-        hex.mov 2, win_end, ceil_end
-        hex.dec 1, ucnt2
-        hex.if0 1, ucnt2, bound1_at_end         // one piece: region 1 runs to the window end
-        hex.cmp 2, u2y1, ceil_end, bound1_at_piece2, bound1_at_end, bound1_at_end
+        hex.mov 2, ssc_win_end, ssc_ceil_end
+        hex.dec 1, ssc_ucnt2
+        hex.if0 1, ssc_ucnt2, bound1_at_end         // one piece: region 1 runs to the window end
+        hex.cmp 2, u2y1, ssc_ceil_end, bound1_at_piece2, bound1_at_end, bound1_at_end
       bound1_at_piece2:
-        hex.mov 2, win_end, u2y1                // ... else it stops at piece 2's start
+        hex.mov 2, ssc_win_end, u2y1                // ... else it stops at piece 2's start
       bound1_at_end:
-        hex.cmp 2, win_lo, win_end, walk_region1, region1_end, region1_end
+        hex.cmp 2, ssc_win_lo, ssc_win_end, walk_region1, region1_end, region1_end
       walk_region1:
-        .half_walk_code rcbufa, rcbufd, win_lo, win_end, ccy
+        .half_walk_code ssc_rcbufa, ssc_rcbufd, ssc_win_lo, ssc_win_end, ccy
       region1_end:
-        hex.if0 1, ucnt2, ceil_done
-        hex.cmp 2, u2y1, ceil_end, piece2_in_win, ceil_done, ceil_done  // piece 2 out -> done
+        hex.if0 1, ssc_ucnt2, ceil_done
+        hex.cmp 2, u2y1, ssc_ceil_end, piece2_in_win, ceil_done, ceil_done  // piece 2 out -> done
       piece2_in_win:
-        hex.zero 2, zero_row
-        .steps_face u2y1, u2y2, u2cls, zero_row, ctake, rlo2, ceil_end, w1r, gnrow, cmidx
-        frame.lines_pid_ids u2bp, rcbufa, rcbufd, rfbufa, rfbufd
-        hex.mov 2, win_lo, u2y2
-        hex.inc 2, win_lo
-        hex.cmp 2, win_lo, rlo2, lo2_clamp, lo2_ok, lo2_ok
+        hex.zero 2, ssc_zero_row
+        .steps_face u2y1, u2y2, u2cls, ssc_zero_row, ctake, ssc_rlo2, ssc_ceil_end, w1r, gnrow, cmidx
+        frame.lines_pid_ids u2bp, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd
+        hex.mov 2, ssc_win_lo, u2y2
+        hex.inc 2, ssc_win_lo
+        hex.cmp 2, ssc_win_lo, ssc_rlo2, lo2_clamp, lo2_ok, lo2_ok
       lo2_clamp:
-        hex.mov 2, win_lo, rlo2
+        hex.mov 2, ssc_win_lo, ssc_rlo2
       lo2_ok:
-        hex.mov 2, win_end, ceil_end
-        hex.cmp 2, win_lo, win_end, walk_region2, ceil_done, ceil_done
+        hex.mov 2, ssc_win_end, ssc_ceil_end
+        hex.cmp 2, ssc_win_lo, ssc_win_end, walk_region2, ceil_done, ceil_done
       walk_region2:
-        .half_walk_code rcbufa, rcbufd, win_lo, win_end, ccy
+        .half_walk_code ssc_rcbufa, ssc_rcbufd, ssc_win_lo, ssc_win_end, ccy
         ;ceil_done
       ceil_only:
-        .half_walk_code cbufa, cbufd, win_lo, win_end, ccy
+        .half_walk_code cbufa, cbufd, ssc_win_lo, ssc_win_end, ccy
       ceil_done:
         ;end
-      win_lo: hex.vec 2
-      win_end: hex.vec 2
-      zero_row: hex.vec 2
-      ceil_end: hex.vec 2
-      rlo2: hex.vec 2
-      ucnt2: hex.vec 1
-      rcbufa: hex.vec w/4
-      rcbufd: hex.vec w/4
-      rfbufa: hex.vec w/4
-      rfbufd: hex.vec w/4
       end:
     }
 
@@ -1000,90 +986,74 @@ ns stream {
     // the floor in FRONT of boundary 1). With one piece the middle collapses; with none it is
     // one claimed walk.
     def steps_splice_f fstart, viewh, rlo, rhi, w1r, gnrow, cmidx, fbufa, fbufd, ccy \
-            @ floor_only, fend_ok, fend_clamp, flo_clamp, flo_ok, \
-              bound2_ok, bound2_clamp, walk_region2, region2_end, \
-              bound1_ok, bound1_clamp, walk_region1, region1_end, walk_region0, \
-              lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, piece1, floor_go, floor_done, \
-              win_lo, win_end, fstart2, cviewh, floor_end, floor_lo, lcnt2, \
-              rcbufa, rcbufd, rfbufa, rfbufd, end \
-            < lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp {
-        hex.set 2, cviewh, viewh
-        hex.mov 2, floor_end, cviewh            // V5-SPR: the window [max(fstart,rlo), min(viewh,rhi))
-        hex.cmp 2, floor_end, rhi, fend_ok, fend_ok, fend_clamp
+            @ floor_only, fend_ok, fend_clamp, flo_clamp, flo_ok, bound2_ok, bound2_clamp, walk_region2, region2_end, bound1_ok, bound1_clamp, walk_region1, region1_end, walk_region0, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, piece1, floor_go, floor_done, end \
+            < lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, ssf_cviewh, ssf_floor_end, ssf_floor_lo, ssf_fstart2, ssf_lcnt2, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd, ssf_win_end, ssf_win_lo {
+        hex.set 2, ssf_cviewh, viewh
+        hex.mov 2, ssf_floor_end, ssf_cviewh            // V5-SPR: the window [max(fstart,rlo), min(viewh,rhi))
+        hex.cmp 2, ssf_floor_end, rhi, fend_ok, fend_ok, fend_clamp
       fend_clamp:
-        hex.mov 2, floor_end, rhi
+        hex.mov 2, ssf_floor_end, rhi
       fend_ok:
-        hex.mov 2, floor_lo, fstart
-        hex.cmp 2, floor_lo, rlo, flo_clamp, flo_ok, flo_ok
+        hex.mov 2, ssf_floor_lo, fstart
+        hex.cmp 2, ssf_floor_lo, rlo, flo_clamp, flo_ok, flo_ok
       flo_clamp:
-        hex.mov 2, floor_lo, rlo
+        hex.mov 2, ssf_floor_lo, rlo
       flo_ok:
-        hex.cmp 2, floor_lo, floor_end, floor_go, floor_done, floor_done  // empty -> nothing at all
+        hex.cmp 2, ssf_floor_lo, ssf_floor_end, floor_go, floor_done, floor_done  // empty -> nothing at all
       floor_go:
-        hex.mov 2, win_lo, floor_lo
-        hex.mov 2, win_end, floor_end
+        hex.mov 2, ssf_win_lo, ssf_floor_lo
+        hex.mov 2, ssf_win_end, ssf_floor_end
         hex.if0 1, lcnt, floor_only             // no pieces: one full claimed walk
-        hex.mov 1, lcnt2, lcnt                  // LOCAL copy: lcnt is the ditto signature
-        hex.mov 2, fstart2, fstart
-        hex.dec 1, lcnt2
-        hex.if0 1, lcnt2, piece1                // one piece: skip the piece-2 prefix
+        hex.mov 1, ssf_lcnt2, lcnt                  // LOCAL copy: lcnt is the ditto signature
+        hex.mov 2, ssf_fstart2, fstart
+        hex.dec 1, ssf_lcnt2
+        hex.if0 1, ssf_lcnt2, piece1                // one piece: skip the piece-2 prefix
         // -- two pieces: the region behind boundary 2 (farthest), then its face
-        frame.lines_pid_ids l2bp, rcbufa, rcbufd, rfbufa, rfbufd
-        hex.mov 2, win_end, l2y1
-        hex.cmp 2, win_end, floor_end, bound2_ok, bound2_clamp, bound2_clamp
+        frame.lines_pid_ids l2bp, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd
+        hex.mov 2, ssf_win_end, l2y1
+        hex.cmp 2, ssf_win_end, ssf_floor_end, bound2_ok, bound2_clamp, bound2_clamp
       bound2_clamp:
-        hex.mov 2, win_end, floor_end
+        hex.mov 2, ssf_win_end, ssf_floor_end
       bound2_ok:
-        hex.cmp 2, win_lo, win_end, walk_region2, region2_end, region2_end  // guard: an empty
+        hex.cmp 2, ssf_win_lo, ssf_win_end, walk_region2, region2_end, region2_end  // guard: an empty
       walk_region2:                             // window still pays the loaders
-        .half_walk_code rfbufa, rfbufd, win_lo, win_end, ccy
+        .half_walk_code ssf_rfbufa, ssf_rfbufd, ssf_win_lo, ssf_win_end, ccy
       region2_end:
-        .steps_face l2y1, l2y2, l2cls, fstart2, cviewh, floor_lo, floor_end, w1r, gnrow, cmidx
-        hex.mov 2, win_lo, l2y2
-        hex.inc 2, win_lo                       // the middle region starts at piece 2's end + 1
-        hex.cmp 2, win_lo, floor_lo, lo2_clamp, lo2_ok, lo2_ok  // clamped to the window start
+        .steps_face l2y1, l2y2, l2cls, ssf_fstart2, ssf_cviewh, ssf_floor_lo, ssf_floor_end, w1r, gnrow, cmidx
+        hex.mov 2, ssf_win_lo, l2y2
+        hex.inc 2, ssf_win_lo                       // the middle region starts at piece 2's end + 1
+        hex.cmp 2, ssf_win_lo, ssf_floor_lo, lo2_clamp, lo2_ok, lo2_ok  // clamped to the window start
       lo2_clamp:                                // (see steps_splice_c::lo1_clamp for WHY)
-        hex.mov 2, win_lo, floor_lo
+        hex.mov 2, ssf_win_lo, ssf_floor_lo
       lo2_ok:
       piece1:
         // -- the region behind boundary 1, its face, then the claimed floor in front of it
-        frame.lines_pid_ids l1bp, rcbufa, rcbufd, rfbufa, rfbufd
-        hex.mov 2, win_end, l1y1
-        hex.cmp 2, win_end, floor_end, bound1_ok, bound1_clamp, bound1_clamp
+        frame.lines_pid_ids l1bp, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd
+        hex.mov 2, ssf_win_end, l1y1
+        hex.cmp 2, ssf_win_end, ssf_floor_end, bound1_ok, bound1_clamp, bound1_clamp
       bound1_clamp:
-        hex.mov 2, win_end, floor_end
+        hex.mov 2, ssf_win_end, ssf_floor_end
       bound1_ok:
-        hex.cmp 2, win_lo, win_end, walk_region1, region1_end, region1_end
+        hex.cmp 2, ssf_win_lo, ssf_win_end, walk_region1, region1_end, region1_end
       walk_region1:
-        .half_walk_code rfbufa, rfbufd, win_lo, win_end, ccy
+        .half_walk_code ssf_rfbufa, ssf_rfbufd, ssf_win_lo, ssf_win_end, ccy
       region1_end:
-        .steps_face l1y1, l1y2, l1cls, fstart2, cviewh, floor_lo, floor_end, w1r, gnrow, cmidx
-        hex.mov 2, win_lo, l1y2
-        hex.inc 2, win_lo
-        hex.cmp 2, win_lo, floor_lo, lo1_clamp, lo1_ok, lo1_ok
+        .steps_face l1y1, l1y2, l1cls, ssf_fstart2, ssf_cviewh, ssf_floor_lo, ssf_floor_end, w1r, gnrow, cmidx
+        hex.mov 2, ssf_win_lo, l1y2
+        hex.inc 2, ssf_win_lo
+        hex.cmp 2, ssf_win_lo, ssf_floor_lo, lo1_clamp, lo1_ok, lo1_ok
       lo1_clamp:
-        hex.mov 2, win_lo, floor_lo
+        hex.mov 2, ssf_win_lo, ssf_floor_lo
       lo1_ok:
-        hex.mov 2, win_end, floor_end
-        hex.cmp 2, win_lo, win_end, walk_region0, floor_done, floor_done
+        hex.mov 2, ssf_win_end, ssf_floor_end
+        hex.cmp 2, ssf_win_lo, ssf_win_end, walk_region0, floor_done, floor_done
       walk_region0:
-        .half_walk_code fbufa, fbufd, win_lo, win_end, ccy
+        .half_walk_code fbufa, fbufd, ssf_win_lo, ssf_win_end, ccy
         ;floor_done
       floor_only:
-        .half_walk_code fbufa, fbufd, win_lo, win_end, ccy
+        .half_walk_code fbufa, fbufd, ssf_win_lo, ssf_win_end, ccy
       floor_done:
         ;end
-      win_lo: hex.vec 2
-      win_end: hex.vec 2
-      fstart2: hex.vec 2
-      cviewh: hex.vec 2
-      floor_end: hex.vec 2
-      floor_lo: hex.vec 2
-      lcnt2: hex.vec 1
-      rcbufa: hex.vec w/4
-      rcbufd: hex.vec w/4
-      rfbufa: hex.vec w/4
-      rfbufd: hex.vec w/4
       end:
     }
 
@@ -1242,139 +1212,118 @@ ns stream {
     // to it would cost more than this whole feature. Runs ending at or above wlo are skipped
     // unemitted; the run crossing whi clamps there and stops. `wlo`/`whi` are 2-nibble rows.
     def sprite_runs_win sblk, sy0b, slr, wlo, whi, blkshift \
-            @ sloop, spos, semit, sfin, sclamp, snext, send, \
-              ptr, sbase, sidx, rel, tex, rel_w, yabs, y0, smidx, wlo4, whi4, end < sprbank {
-        hex.zero w/4, sidx
-        hex.mov 4, sidx, sblk
-        rep(blkshift, k) hex.shl_bit w/4, sidx
-        hex.set w/4, sbase, sprbank
-        hex.ptr_index ptr, sbase, sidx
-        hex.ptr_add ptr, 3
-        hex.zero 4, smidx
-        hex.mov 2, smidx + 2*dw, slr
-        hex.mov 4, y0, sy0b   // (hex.mov zeroes dst first)
-        hex.sub_constant 4, y0, 32768
-        hex.zero 4, wlo4                        // widened window rows (the row math is 4-nibble)
-        hex.mov 2, wlo4, wlo
-        hex.zero 4, whi4
-        hex.mov 2, whi4, whi
-        // rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
+            @ sloop, spos, semit, sfin, sclamp, snext, send, end \
+            < sprbank, srw_ptr, srw_rel, srw_rel_w, srw_sbase, srw_sidx, srw_smidx, srw_tex, srw_whi4, srw_wlo4, srw_y0, srw_yabs {
+        hex.zero w/4, srw_sidx
+        hex.mov 4, srw_sidx, sblk
+        rep(blkshift, k) hex.shl_bit w/4, srw_sidx
+        hex.set w/4, srw_sbase, sprbank
+        hex.ptr_index srw_ptr, srw_sbase, srw_sidx
+        hex.ptr_add srw_ptr, 3
+        hex.zero 4, srw_smidx
+        hex.mov 2, srw_smidx + 2*dw, slr
+        hex.mov 4, srw_y0, sy0b   // (hex.mov zeroes dst first)
+        hex.sub_constant 4, srw_y0, 32768
+        hex.zero 4, srw_wlo4                        // widened window rows (the row math is 4-nibble)
+        hex.mov 2, srw_wlo4, wlo
+        hex.zero 4, srw_whi4
+        hex.mov 2, srw_whi4, whi
+        // srw_rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
         // no counter register, no per-run compare, no n_ent read. Every real run ends at row
         // >= 1 and the emitter zero-pads every block, so a 0 always terminates the walk.
-        // VERIFIED on the shipped bank: 22,837 blocks, 858 empty, ZERO runs with rel==0, and
+        // VERIFIED on the shipped bank: 22,837 blocks, 858 empty, ZERO runs with srw_rel==0, and
         // the longest body is 51 of stride 64. The emitter asserts are now STRICT
         // (`< SPR_BLOCK_STRIDE`) so that stays true.
       sloop:
-        hex.read_byte_and_inc rel, ptr
-        hex.if0 2, rel, send
-        hex.read_byte_and_inc tex, ptr
-        hex.zero 4, rel_w
-        hex.mov 2, rel_w, rel
-        hex.mov 4, yabs, y0
-        hex.add 4, yabs, rel_w
-        hex.scmp 4, yabs, wlo4, snext, snext, spos // ends at or above the window -> skip unemitted
+        hex.read_byte_and_inc srw_rel, srw_ptr
+        hex.if0 2, srw_rel, send
+        hex.read_byte_and_inc srw_tex, srw_ptr
+        hex.zero 4, srw_rel_w
+        hex.mov 2, srw_rel_w, srw_rel
+        hex.mov 4, srw_yabs, srw_y0
+        hex.add 4, srw_yabs, srw_rel_w
+        hex.scmp 4, srw_yabs, srw_wlo4, snext, snext, spos // ends at or above the window -> skip unemitted
       spos:
-        hex.scmp 4, yabs, whi4, semit, sfin, sclamp
+        hex.scmp 4, srw_yabs, srw_whi4, semit, sfin, sclamp
       semit:
-        byte.emit yabs
-        hex.mov 2, smidx, tex
-        cm.emit smidx
+        byte.emit srw_yabs
+        hex.mov 2, srw_smidx, srw_tex
+        cm.emit srw_smidx
       snext:
         ;sloop
       sfin:
-        byte.emit yabs
-        hex.mov 2, smidx, tex
-        cm.emit smidx
+        byte.emit srw_yabs
+        hex.mov 2, srw_smidx, srw_tex
+        cm.emit srw_smidx
         ;send
       sclamp:
         byte.emit whi
-        hex.mov 2, smidx, tex
-        cm.emit smidx
+        hex.mov 2, srw_smidx, srw_tex
+        cm.emit srw_smidx
       send:
         ;end
-      ptr: hex.vec w/4
-      sbase: hex.vec w/4
-      sidx: hex.vec w/4
-      rel: hex.vec 2
-      tex: hex.vec 2
-      rel_w: hex.vec 4
-      yabs: hex.vec 4
-      y0: hex.vec 4
-      smidx: hex.vec 4
-      wlo4: hex.vec 4
-      whi4: hex.vec 4
       end:
     }
 
     def sprite_runs sblk, sy0b, slr, viewh, blkshift \
-            @ sloop, spos, semit, sfin, sclamp, snext, send, \
-              ptr, sbase, sidx, rel, tex, rel_w, yabs, y0, smidx, cvh, end < sprbank {
-        hex.zero w/4, sidx
-        hex.mov 4, sidx, sblk
-        rep(blkshift, k) hex.shl_bit w/4, sidx  // x SPR_BLOCK_STRIDE = 1<<blkshift SLOTS
-        hex.set w/4, sbase, sprbank
-        // ⚠ through ptr_index, NOT `hex.add w/4, ptr, sbase`: a SLOT offset has to be scaled by dw
+            @ sloop, spos, semit, sfin, sclamp, snext, send, end \
+            < sprbank, srn_cvh, srn_ptr, srn_rel, srn_rel_w, srn_sbase, srn_sidx, srn_smidx, srn_tex, srn_y0, srn_yabs {
+        hex.zero w/4, srn_sidx
+        hex.mov 4, srn_sidx, sblk
+        rep(blkshift, k) hex.shl_bit w/4, srn_sidx  // x SPR_BLOCK_STRIDE = 1<<blkshift SLOTS
+        hex.set w/4, srn_sbase, sprbank
+        // ⚠ through ptr_index, NOT `hex.add w/4, srn_ptr, srn_sbase`: a SLOT offset has to be scaled by dw
         // to become an address (cf. lines_pid_addrs's `mul_const ..., 4*half_slots*dw`). Added raw
         // it lands 64x short, the entry count reads garbage, and the walk runs on through the whole
         // bank emitting a slowly-creeping cycle of pairs.
-        hex.ptr_index ptr, sbase, sidx
-        hex.ptr_add ptr, 3                      // past the WHOLE [r0][last_rel][n_ent] header
-        hex.zero 4, smidx
-        hex.mov 2, smidx + 2*dw, slr
+        hex.ptr_index srn_ptr, srn_sbase, srn_sidx
+        hex.ptr_add srn_ptr, 3                      // past the WHOLE [r0][last_rel][n_ent] header
+        hex.zero 4, srn_smidx
+        hex.mov 2, srn_smidx + 2*dw, slr
         // M13-15M: the row arithmetic runs at FOUR nibbles, not eight. Every value here is a
-        // screen row: y0 = sy0b - 32768, well inside signed 4-nibble range, viewh = 100 --
+        // screen row: srn_y0 = sy0b - 32768, well inside signed 4-nibble range, viewh = 100 --
         // all comfortably inside signed 4-nibble range, and zero/mov/add/sign/scmp cost scales
         // linearly with width (the profiler priced this loop at ~6k/run, half of it row math).
-        hex.mov 4, y0, sy0b   // (hex.mov zeroes dst first)
-        hex.sub_constant 4, y0, 32768           // the slot stores y0 as TWO bytes biased by 32768:
+        hex.mov 4, srn_y0, sy0b   // (hex.mov zeroes dst first)
+        hex.sub_constant 4, srn_y0, 32768           // the slot stores srn_y0 as TWO bytes biased by 32768:
                                                 // a tall NEAR sprite's top sits far above row -128,
                                                 // and the old one-byte +128 bias WRAPPED (M13-15M)
-        hex.set 4, cvh, viewh
-        // rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
+        hex.set 4, srn_cvh, viewh
+        // srn_rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
         // no counter register, no per-run compare, no n_ent read. Every real run ends at row
         // >= 1 and the emitter zero-pads every block, so a 0 always terminates the walk.
-        // VERIFIED on the shipped bank: 22,837 blocks, 858 empty, ZERO runs with rel==0, and
+        // VERIFIED on the shipped bank: 22,837 blocks, 858 empty, ZERO runs with srn_rel==0, and
         // the longest body is 51 of stride 64. The emitter asserts are now STRICT
         // (`< SPR_BLOCK_STRIDE`) so that stays true.
       sloop:
-        hex.read_byte_and_inc rel, ptr
-        hex.if0 2, rel, send
-        hex.read_byte_and_inc tex, ptr
-        hex.zero 4, rel_w
-        hex.mov 2, rel_w, rel
-        hex.mov 4, yabs, y0
-        hex.add 4, yabs, rel_w
-        hex.sign 4, yabs, snext, spos           // this run ends above row 0 -> nothing of it shows
+        hex.read_byte_and_inc srn_rel, srn_ptr
+        hex.if0 2, srn_rel, send
+        hex.read_byte_and_inc srn_tex, srn_ptr
+        hex.zero 4, srn_rel_w
+        hex.mov 2, srn_rel_w, srn_rel
+        hex.mov 4, srn_yabs, srn_y0
+        hex.add 4, srn_yabs, srn_rel_w
+        hex.sign 4, srn_yabs, snext, spos           // this run ends above row 0 -> nothing of it shows
       spos:
-        hex.if0 4, yabs, snext
-        hex.scmp 4, yabs, cvh, semit, sfin, sclamp
+        hex.if0 4, srn_yabs, snext
+        hex.scmp 4, srn_yabs, srn_cvh, semit, sfin, sclamp
       semit:
-        byte.emit yabs
-        hex.mov 2, smidx, tex
-        cm.emit smidx
+        byte.emit srn_yabs
+        hex.mov 2, srn_smidx, srn_tex
+        cm.emit srn_smidx
       snext:
         ;sloop
       sfin:
-        byte.emit yabs
-        hex.mov 2, smidx, tex
-        cm.emit smidx
+        byte.emit srn_yabs
+        hex.mov 2, srn_smidx, srn_tex
+        cm.emit srn_smidx
         ;send
       sclamp:
-        byte.emit cvh
-        hex.mov 2, smidx, tex
-        cm.emit smidx
+        byte.emit srn_cvh
+        hex.mov 2, srn_smidx, srn_tex
+        cm.emit srn_smidx
       send:
         ;end
-      ptr: hex.vec w/4
-      sbase: hex.vec w/4
-      sidx: hex.vec w/4
-      rel: hex.vec 2
-      tex: hex.vec 2
-      rel_w: hex.vec 4
-      yabs: hex.vec 4
-      y0: hex.vec 4
-      smidx: hex.vec 4
-      cvh: hex.vec 4
       end:
     }
 

@@ -7,8 +7,10 @@ frame. A Python twin — the **oracle** (`src/doomfj/reference_model.py`) — re
 independently, and the two must agree **byte for byte**.
 
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
-`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at
-`docs/handoff-complete-game.md`** — the road to a complete standalone game, and why the 9-op
+`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-m5-m2-m3-m4.md`** — M1 is DONE (the
+self-resetting loop; it was the gate on everything), and that file is the short plan for the
+four milestones left, in the owner’s order: M5 standalone → M2 doors → M3 menu → M4 levels.
+`docs/handoff-complete-game.md` remains the full roadmap behind it.** — the road to a complete standalone game, and why the 9-op
 wall gates all of it.
 
 ---

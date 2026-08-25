@@ -90,31 +90,40 @@ print(f"{args.map}: {len(secs)} sectors, {len(doors)} REAL doors (stored shut), 
       f"{len(set(doors.values()))} distinct open heights {sorted(set(doors.values()))}", flush=True)
 
 
-def door_state(frac):
-    """`frac` 0.0 = shut (ceiling on the floor), 1.0 = fully open (the wad's own ceiling).
+def quantise(lo, open_h, h):
+    """THE rounding rule, and there is exactly one of it.
 
-    ⚠ QUANTISED. The height a door stops at must be one the EMITTER can bake a pid for, so the
-    oracle must round exactly as the emitter will -- if the two round differently the mirrors
-    diverge, which is this repo's most-repeated bug. One rounding rule, here, shared."""
+    The height a door stops at must be one the EMITTER can bake a pid for, so the oracle must round
+    exactly as the emitter will -- if the two round differently the mirrors diverge, which is this
+    repo's most-repeated bug.
+
+    ⚠ THE CLAMP IS LOAD-BEARING. Flooring to a multiple of the quantum lands BELOW the floor
+    whenever the floor is not itself a multiple: floor -128 at quant 24 floors to -144, a ceiling
+    under its own floor. `door_state` clamped and `height_set` did not, so for every quantum that
+    does not divide the floor height the two disagreed -- and `height_set` is the one that would
+    have SIZED THE PID BUDGET. It was also never called, so nothing caught it. They share this now."""
+    return max(lo, min(open_h, (h // args.quant) * args.quant))
+
+
+def door_state(frac):
+    """`frac` 0.0 = shut (ceiling on the floor), 1.0 = fully open (min neighbouring ceiling - 4)."""
     out = {}
     for si, open_h in doors.items():
         s = secs[si]
         lo = s.floor_h                       # shut: the ceiling rests on the floor
-        h = lo + (open_h - lo) * frac
-        q = int(h // args.quant) * args.quant
-        out[si] = (s.floor_h, max(lo, min(open_h, q)))
+        out[si] = (lo, quantise(lo, open_h, lo + (open_h - lo) * frac))
     return out
 
 
 def height_set():
-    """Every ceiling height a quantised sweep can produce -- the emitter must bake a pid per height,
-    and that field is ONE BYTE (255, with 152 already used on stock E1M1)."""
+    """Every ceiling height a quantised sweep can produce. The emitter bakes a pid per (ceiling,
+    floor) PAIR, so this is NOT the pid cost -- 13 doors sharing 27 heights at quant 16 cost 94
+    pids, not 27. scratchpad/m2_budget.py does that arithmetic against the real baked count."""
     hs = set()
     for si, open_h in doors.items():
-        lo = secs[si].floor_h
-        h = lo
+        lo, h = secs[si].floor_h, secs[si].floor_h
         while h < open_h:
-            hs.add(min(open_h, int(h // args.quant) * args.quant))
+            hs.add(quantise(lo, open_h, h))
             h += args.quant
         hs.add(open_h)
     return hs

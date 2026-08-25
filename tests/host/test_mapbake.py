@@ -22,6 +22,9 @@ from doomfj.wad import WadFile, WadSeg, WadSubSector, WadNode
 ROOM = Path("tests/fixtures/square_room.wad")            # pre-baked DOOM-wound square room
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")          # full real level (baked node tree)
 PROJECTION_FJ = Path("src/fj/projection.fj")             # provides proj.point_on_side (the side test)
+# M1-HOIST: projection.fj's macros now name hoisted globals in their `<` lists, so any program
+# that expands them standalone must declare those too. ONE source with the emitter (R6).
+from doomfj.wall_renderer import hoisted_scratch_fj    # noqa: E402
 FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")           # provides hex.mul_lo (point_on_side_leaf's cross product)
 
 
@@ -187,7 +190,7 @@ def _run_bsp_walk(tmp_path, name, cmap, vx, vy):
         f";{name}_bspcode_walk",
         "bsp_done:", "stl.loop",
         "vx: hex.vec 10", "vy: hex.vec 10",
-        code,
+        hoisted_scratch_fj(), code,
     ]) + "\n"
     p = tmp_path / f"{name}.fj"
     p.write_text(prog, encoding="utf-8")
@@ -231,7 +234,7 @@ def test_bsp_code_e1m1_order_byte_exact_vs_oracle(tmp_path):
         "stl.startup_and_init_all",
         "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
         ";e1m1_bspcode_walk", "bsp_done:", "stl.loop", "bad:", "stl.loop",
-        "vx: hex.vec 10", "vy: hex.vec 10", code,
+        "vx: hex.vec 10", "vy: hex.vec 10", hoisted_scratch_fj(), code,
     ]) + "\n"
     p = tmp_path / "e1m1_bsp.fj"
     p.write_text(prog, encoding="utf-8")
@@ -275,7 +278,7 @@ def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
         "hex.print_as_digit 8, z_bspcode_cdx_mag, 0", "hex.print_as_digit 8, z_bspcode_cdy_mag, 0",
         "hex.print_as_digit 1, z_bspcode_sign_dx, 0", "hex.print_as_digit 1, z_bspcode_sign_dy, 0",
         "stl.loop",
-        "vx: hex.vec 10", "vy: hex.vec 10", code,
+        "vx: hex.vec 10", "vy: hex.vec 10", hoisted_scratch_fj(), code,
     ]) + "\n"
     p = tmp_path / "selfzero.fj"
     p.write_text(prog, encoding="utf-8")

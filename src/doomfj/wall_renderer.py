@@ -2398,6 +2398,17 @@ HOISTED_SCRATCH_DECLS = [
 ]
 
 
+def hoisted_scratch_fj() -> str:
+    """HOISTED_SCRATCH_DECLS as fj text, for any program that expands these macros STANDALONE.
+
+    The macros now name these registers in their `<` lists, so a program that expands one but
+    does not emit the `state` part fails to assemble ("Can't evaluate label pos_dxv"). The
+    shipped build gets them via the state part; tests get them from here, so there is ONE
+    source (R6) and a new hoist cannot leave the tests behind.
+    """
+    return NLJ.join(HOISTED_SCRATCH_DECLS) + NLJ
+
+
 def write_program_files(parts, outdir, mapname: str = "e1m1") -> list:
     """Write the emitted parts as SEPARATE .fj files and return them in ASSEMBLE ORDER.
 

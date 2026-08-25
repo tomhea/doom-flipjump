@@ -23,6 +23,9 @@ from doomfj.config import RENDER_FLAT_MAX_WORDS                # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", default="scratchpad/_ca_labels.tsv.gz")
+# M5: the standalone tier is a DIFFERENT program (a keyboard prologue instead of the wire, baked
+# thing bindings, no magic byte), so it has its own label table and its own restore set.
+ap.add_argument("--standalone", action="store_true")
 args = ap.parse_args()
 
 
@@ -34,7 +37,8 @@ RESULT = {}
 _real_emit = selfreset.emit_reset_part
 
 
-def spy(gen, labels, pristine_get_word, restore_set_path, view_w, nss, mapname="e1m1"):
+def spy(gen, labels, pristine_get_word, restore_set_path, view_w, nss, mapname="e1m1",
+        persist=()):
     RESULT["labels"] = dict(labels)
     RESULT["code_start"] = pristine_get_word(1)
     raise Done()
@@ -45,9 +49,11 @@ t0 = time.perf_counter()
 print("driving build_wall_renderer(self_reset=True) to pass 1 ...", flush=True)
 try:
     build_wall_renderer(ROOT / "tests/fixtures/freedoom_e1m1.wad", "E1M1",
-                        out_fjm=ROOT / "build/ca_labels.fjm",
-                        generated_dir=ROOT / "build/generated_calabels",
-                        flat_max_words=RENDER_FLAT_MAX_WORDS, self_reset=True)
+                        out_fjm=ROOT / ("build/ca_labels%s.fjm" % ("_std" if args.standalone else "")),
+                        generated_dir=ROOT / ("build/generated_calabels%s"
+                                              % ("_std" if args.standalone else "")),
+                        flat_max_words=RENDER_FLAT_MAX_WORDS, self_reset=True,
+                        standalone=args.standalone)
 except Done:
     pass
 labels = RESULT.get("labels")

@@ -36,6 +36,15 @@ _LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]
 # ordered file list is equivalent to its concatenation and the order is the contract (R54). This is
 # the same position m14_gate.py and scripts/walk_e1m1.py put it in.
 _SIM_INCLUDES = ["sim.fj"]
+# M5: the standalone tier's keyboard poll. BEFORE sim.fj, which stays last (R54).
+_STANDALONE_INCLUDES = ["input.fj"]
+# M5: the labels the self-reset must NOT restore. A hosted frame is handed its whole world state
+# every frame, so restoring everything is exactly right; a standalone binary has no host, so the
+# player's position and the four held-key flags are the program's own memory and have to survive.
+# Everything else about the frame is still residue and is still restored. `emit_reset_part` checks
+# each of these exists and is actually in the set -- see its docstring for why a hole is safe HERE
+# and nowhere else.
+STANDALONE_PERSIST = ("viewx", "viewy", "viewangle", "kb_f", "kb_b", "kb_l", "kb_r")
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 
@@ -194,6 +203,11 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
 # The M1 restore set SHIPS WITH THE PACKAGE. It is the default so the path is not re-typed at
 # every call site (and so an installed copy uses the same one the tests do).
 DEFAULT_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m1_restore_set.json.gz"
+# M5: the standalone tier is a DIFFERENT PROGRAM (a keyboard prologue instead of the wire, no magic
+# byte, baked thing bindings), so it has its own set -- derived from the certified one by
+# scratchpad/m5_setfile.py, never re-measured. Pairing a set with the wrong program is caught by the
+# layout fingerprint, but loudly and 20 minutes in; resolving it by tier here means it cannot happen.
+STANDALONE_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m5_restore_set.json.gz"
 
 
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
@@ -202,7 +216,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
                         state_wire="bin", player_sim=True, collide=True,
-                        moving_things=True, self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
+                        moving_things=True, standalone=False,
+                        self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
@@ -240,6 +255,14 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     than the project's own screenshots. The older tiers stay reachable by keyword
     (`raster_mode="framebuffer", floor_mode="textured", wall_mode="textured"` is the pre-lines build).
 
+    ⚠ M5 `standalone=True` — THE NO-HOST TIER. Same renderer, same sim, but the frame reads the
+    KEYBOARD device instead of a wire, the player start is baked into `viewx`/`viewy`/`viewangle`,
+    the thing bindings and visibility bake instead of arriving per frame, nothing is echoed back,
+    and the screen is initialized with the stock 8-byte command the plain `fj` CLI's device wants.
+    With `self_reset=True` that is a complete game in one file: `fj <out> --io pc`. It needs its own
+    restore set (resolved above) because the reset must LEAVE the view state and the held-key flags
+    alone — `STANDALONE_PERSIST` — which is the one place a hole in that set is intended.
+
     ⚠ V4 needs SPRITE ART, and a cut-down map wad has no sprite lumps at all — hence `sprite_wad`,
     which defaults to `assets/freedoom1.wad` and falls back to the map wad when that file is absent.
     If neither carries sprites this RAISES rather than quietly dropping the feature: a silently
@@ -257,13 +280,15 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                                wall_noise=wall_noise, sky=sky, steps=steps, things=things,
                                sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
                                deg=deg, state_wire=state_wire, player_sim=player_sim,
-                               collide=collide, moving_things=moving_things, return_parts=True)
+                               collide=collide, moving_things=moving_things,
+                               standalone=standalone, return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
     # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a
     # file with the ~50-line program. ⚠ Order is load-bearing -- see write_program_files.
     prog = write_program_files(parts, gen, mapname)
     includes = (_RENDERER_INCLUDES + (_LINES_INCLUDES if raster_mode == "lines" else [])
+                + (_STANDALONE_INCLUDES if standalone else [])   # M5: kb.poll
                 + (_SIM_INCLUDES if player_sim else []))   # B0: sim.fj LAST (R54)
     paths = [consts] + [_SRC_FJ / f for f in includes] + prog
 
@@ -279,6 +304,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         # the same address. That is ASSERTED below, not assumed: a reset writing shifted addresses
         # does not produce a wrong pixel, it produces a different program.
         assert restore_set, "self_reset=True requires restore_set (see docs/handoff-m1-reset.md)"
+        if standalone and Path(restore_set) == DEFAULT_RESTORE_SET:
+            restore_set = STANDALONE_RESTORE_SET      # the tier's own set, see its definition
         from doomfj import selfreset
         from doomfj.fastrun import FjmRunner, _fjcore
         # ⚠ m1_reset.fj goes LAST, AFTER the emitted parts -- not into `includes`. A macro-expansion
@@ -299,8 +326,9 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         # first is each array's label extent in this build's own table. Both must agree, so a
         # resolution or map change cannot silently nibble-clear a byte cell (see selfreset.py).
         nss = len(bake_bsp(wad, mapname).subsectors)
-        part, n_nib, n_byte = selfreset.emit_reset_part(gen, labels1, core1.get_word,
-                                                        restore_set, cfg.VIEW_W, nss, mapname)
+        part, n_nib, n_byte = selfreset.emit_reset_part(
+            gen, labels1, core1.get_word, restore_set, cfg.VIEW_W, nss, mapname,
+            persist=STANDALONE_PERSIST if standalone else ())
         # Snapshot pass 1's pristine words at the baked addresses BEFORE releasing the image -- the
         # value check below needs them and re-loading an 85M-word image to get them would not.
         # check_layout=False: emit_reset_part above already resolved this set against labels1 WITH
@@ -336,6 +364,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                          "pass 2, e.g. %s -- the reset would restore pass 1's value"
                          % (len(bad), bad[:3]))
         reset_info = {"nibble_cells": n_nib, "byte_cells": n_byte,
+                      "persisted_labels": list(STANDALONE_PERSIST) if standalone else [],
                       "restore_set": str(restore_set), "labels_moved_in_set": 0,
                       "values_changed_in_set": 0, "baked_cells_value_checked": len(_v1),
                       "view_w": cfg.VIEW_W, "subsectors": nss}
@@ -364,7 +393,10 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      "player_sim": player_sim, "collide": collide,
                      "moving_things": moving_things, "state_wire": state_wire,
                      # M1: the program self-resets and loops -- one run renders many frames.
-                     "self_reset": self_reset},
+                     "self_reset": self_reset,
+                     # M5: no host in the loop -- the keyboard device drives it and the view state
+                     # survives the reset.
+                     "standalone": standalone},
         "self_reset": reset_info,
     }
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"

@@ -1,0 +1,107 @@
+// ==============================================================================================
+// input.fj     M5: the standalone build's ONE input source -- the flipjump keyboard device.
+// STATUS  LIVE (standalone tier only; the hosted tier reads its state off the wire instead)
+// ENTRY   kb.poll
+// SIZE    1 macro (kb.poll)
+// ==============================================================================================
+// The hosted tier is handed the player's whole world state every frame (doomfj/wireformat.py), so
+// it needs no input device at all. A standalone .fjm has no host to write that wire: it keeps the
+// state itself -- M1's self-reset leaves viewx/viewy/viewangle and the four key flags alone -- and
+// learns what the player did from the keyboard device.
+//
+// THE DEVICE PROTOCOL (flipjump/interpreter/io_devices/KeyboardIO.py):
+//   one poll = one input HEX.  0x0 = nothing happened.  bit 3 set = an event, and its bit 0 is
+//   is_down (so 0x9 = pressed, 0x8 = released). On an event the KEYCODE BYTE follows immediately
+//   on the input stream and MUST be consumed, or every later poll reads a byte out of phase.
+//   Idle polling never EOFs, so polling more often than events arrive is free and safe.
+//   Those three are the WHOLE status alphabet, so a fourth value means the input is not a
+//   keyboard at all -- the macro jumps to the caller's `bad` label, which is the same halt the
+//   hosted tier gives a junk wire.
+//
+// WHY THE CALLER UNROLLS INSTEAD OF LOOPING: a backward jump would re-enter the SAME expansion on
+// cells the first pass dirtied -- the 9-op wall in miniature, which is the whole reason M1 exists.
+// Each poll is its own expansion and runs exactly once per frame. The emitter repeats this macro a
+// fixed number of times; a frame with fewer events than that just reads 0x0 for the rest.
+//
+// THE FLAGS ARE EDGE-DRIVEN AND PERSISTENT. A poll records a TRANSITION; the four flag cells hold
+// "this key is currently held" and survive the frame reset, which is what makes holding W walk
+// instead of taking one step per keypress.
+//
+// ACCEPTED KEYCODES -- the SDL codes pygame_window delivers, and the same bindings the host walker
+// uses (scripts/walk_e1m1.py). There is no strafe, because sim.fj has none.
+//     'w' 0x77   up    0x80     forward        'a' 0x61   left  0x82     turn left
+//     's' 0x73   down  0x81     back           'd' 0x64   right 0x83     turn right
+// Anything else is read and DISCARDED. The discard happens AFTER the keycode byte is consumed --
+// there is deliberately no early exit that would skip that read.
+// ==============================================================================================
+
+ns kb {
+    // One poll. `stat` is a 1-hex scratch, `code` a 2-hex scratch (both written before they are
+    // read, so both are ordinary restore-set cells); `f`/`b`/`l`/`r` are the persistent 1-hex
+    // held-key flags, in wireformat.py's key order: forward, back, turn_left, turn_right.
+    def poll stat, code, f, b, l, r, bad @ done, legal, hi7, hi8, k_fwd, k_back, k_left, k_right, lo6, lo6_d, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn {
+        hex.input_hex stat
+        // 0x0, 0x8 and 0x9 are the ONLY statuses the keyboard device produces. Anything else means
+        // this program is not reading a keyboard -- someone piped a file in, or ran it with the
+        // wrong --io mode -- and the right answer is the same halt a junk wire gets, not a frame
+        // rendered from garbage. It also keeps `bad:` reachable in a build that has no wire to
+        // reject, which is the only other thing that used to reference it.
+        hex.if_flags stat, (1<<0x0)|(1<<0x8)|(1<<0x9), bad, legal
+      legal:
+        hex.if0 stat, done                      // 0x0: no event this poll, and no byte follows
+        hex.input 1, code
+
+        // ---- which key? two nibble tests per candidate, the wmagic idiom ----
+        hex.if_flags code+dw, 1<<0x6, hi7, lo6
+      hi7:
+        hex.if_flags code+dw, 1<<0x7, hi8, lo7
+      hi8:
+        hex.if_flags code+dw, 1<<0x8, done, lo8a
+
+      lo6:                                      // 0x6_ : 'a' turn left, 'd' turn right
+        hex.if_flags code, 1<<0x1, lo6_d, k_left
+      lo6_d:
+        hex.if_flags code, 1<<0x4, done, k_right
+
+      lo7:                                      // 0x7_ : 'w' forward, 's' back
+        hex.if_flags code, 1<<0x7, lo7_s, k_fwd
+      lo7_s:
+        hex.if_flags code, 1<<0x3, done, k_back
+
+      lo8a:                                     // 0x8_ : the four arrows, up/down/left/right
+        hex.if_flags code, 1<<0x0, lo8b, k_fwd
+      lo8b:
+        hex.if_flags code, 1<<0x1, lo8c, k_back
+      lo8c:
+        hex.if_flags code, 1<<0x2, lo8d, k_left
+      lo8d:
+        hex.if_flags code, 1<<0x3, done, k_right
+
+        // ---- set or clear that key's flag. stat's bit 0 is is_down, and the only two statuses
+        // that reach here are 0x8 (up) and 0x9 (down), so the odd-nibble mask separates them.
+      k_fwd:
+        hex.if_flags stat, 0xAAAA, f_up, f_dn
+      f_dn: hex.set 1, f, 1
+            ;done
+      f_up: hex.zero 1, f
+            ;done
+      k_back:
+        hex.if_flags stat, 0xAAAA, b_up, b_dn
+      b_dn: hex.set 1, b, 1
+            ;done
+      b_up: hex.zero 1, b
+            ;done
+      k_left:
+        hex.if_flags stat, 0xAAAA, l_up, l_dn
+      l_dn: hex.set 1, l, 1
+            ;done
+      l_up: hex.zero 1, l
+            ;done
+      k_right:
+        hex.if_flags stat, 0xAAAA, r_up, r_dn
+      r_dn: hex.set 1, r, 1
+            ;done
+      r_up: hex.zero 1, r
+      done:
+    }
+}

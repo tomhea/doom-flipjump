@@ -56,18 +56,91 @@ Other rules that have already cost real time - details in `CLAUDE.md`:
 
 ---
 
-## 2. M5 - the standalone .fjm (no Python)   <- DO THIS FIRST
+## 2. M5 - the standalone .fjm (no Python)   <- DONE, 2026-08-25
 
-The smallest thing that converts M1 into the headline result. Everything it needed was M1.
+    fj build/doom_e1m1_std.fjm --io pc --flat-max-words 134217728
 
-- **Input** - no change; the flipjump input device already covers it.
-- **Output** - **~35 lines in `ScreenIO.py`** for the 0x0B decoder. The "you control fj1.5.1" case.
-- **The loop** - entirely M1, done.
-- Cutting the distributable: flip `doomfj.harness.FJM_LZMA_FAST` to `False` - **21.8 MB instead of
-  29.0 MB**, costs 93 s of build. Encoder-only, changes nothing but size.
+That is DOOM, out of one file, with no Python in the loop. `--io pc` is the stock CLI mode: a
+window for the pixels, live keys in. W/S or the up/down arrows walk, A/D or left/right turn.
 
-**Done when:** the `.fjm` runs to a rendered, controllable frame with no Python in the loop, and
-the M1 gate still passes.
+This handoff predicted two things about M5 and got one of them right.
+
+**RIGHT: "~35 lines in `ScreenIO.py`".** The shipping renderer presents COLUMN RUN-LISTS (0x0B) and
+only this repo's lab device could decode them, so a binary handed to `fj` drew nothing. The decoder
+is upstream now (flipjump-151 `19f7da5`): 50 lines of code, 35 of protocol docs.
+
+**WRONG: "Input - no change; the flipjump input device already covers it".** MEASURED: a hosted
+frame reads **887 bytes of stdin every frame** - 14 of player state, 600 of thing positions, 150 of
+bindings, 123 of visibility flags - and echoes the new state back out. A keyboard device cannot
+produce that, and no host exists to write it. *That* was M5, and it is what the `standalone=True`
+tier is:
+
+| | hosted | standalone |
+|---|---|---|
+| player state | read + echoed every frame | BAKED at the player start, then kept across the reset |
+| keys | one byte on the wire | `kb.poll` x8, `src/fj/input.fj`, edge-driven persistent flags |
+| thing bindings / visibility | fed per frame | baked (nothing moves things until C4) |
+| screen init | `init_screen_stream 0` (9 bytes) | stock `init_screen` (8) - what `fj`'s device wants |
+| state echo | `0x10` + `0x11` blocks | none |
+
+**THE ONE PLACE A HOLE IN THE RESTORE SET IS THE INTENT.** `selfreset.emit_reset_part` gained
+`persist=`, and `build.STANDALONE_PERSIST` names the seven labels the reset must LEAVE ALONE:
+`viewx viewy viewangle kb_f kb_b kb_l kb_r`. Everything else about the frame is still residue and
+is still restored. It is checked, not trusted: each name must exist in this build's own label table
+AND carry cells in the set, or the build refuses.
+
+**The standalone set is RE-KEYED, never re-measured** (section 1's rule). `scratchpad/m5_setfile.py`
+takes the certified 448-entry set and makes exactly two edits: drop `wmagic` (no wire, no magic
+byte - and the list of names allowed to disappear is CLOSED), and add the six `kb*` globals at
+their declared width. Every surviving offset is re-checked against its label's span in the
+STANDALONE layout before the fingerprint is recomputed. Result: **12,072 -> 12,082 words over
+448 -> 453 entries.** Its `--selftest` has five controls, all refusing.
+
+### The numbers, all measured this session
+
+| | |
+|---|---|
+| `build/doom_e1m1_std.fjm` | 31,221,481 bytes, span 84,892,508 words, headroom 1.581x |
+| M5 gate | **PASS** - 12 frames byte-exact in ONE 561,258,605-op run; `--selftest` PASS |
+| smoke gate (no-loop build, spawn frame) | BYTE-EXACT vs the oracle at 39,157,887 ops |
+| 0x0B decoder | 20 differential tests + 3 R9 negative controls; real-stream replay 3/3 byte-exact |
+| `kb.poll` | 10 tests incl. the phase test and an R9 negative control |
+
+### How it is gated
+
+`scratchpad/m5_gate.py` is not like the gates before it: **nothing is fed in.** The program starts
+at the player start it baked, and the only thing crossing the wire is KEY EVENTS. So the gate is
+CUMULATIVE - a one-ulp drift in the sim, a wrong cell in the persist set or a mis-decoded keycode
+sends the trajectory somewhere the oracle never goes and every later frame differs. The device is
+the stock `PcIO` that `--io pc` builds, so what is certified is the object a human runs.
+
+    python scratchpad/m5_gate.py --frames 12          # the real gate
+    python scratchpad/m5_gate.py --selftest           # R9: corrupt one oracle frame, must FAIL
+    python scratchpad/m5_gate.py --fjm build/doom_e1m1_std_noloop.fjm --smoke
+
+It carries vacuity controls (frames that moved, turned, were changed by collision, and distinct
+pictures) because a script that stood still would compare a dozen copies of one picture and pass.
+
+### Rebuilding it
+
+    python scratchpad/ca_labels.py --standalone --out scratchpad/_m5_labels_std.tsv.gz   # ~26 min
+    python scratchpad/m5_setfile.py --labels scratchpad/_m5_labels_std.tsv.gz            # seconds
+    python scratchpad/m5_build.py                                                        # 4,740 s
+    python scratchpad/m5_gate.py --frames 12
+
+`--no-reset` on `m5_build.py` gives the cheap intermediate: one frame, no loop, no restore set -
+enough to prove the emit half without the two-pass build.
+
+### Left open
+
+- **The distributable is still the fast-LZMA one.** `doomfj.harness.FJM_LZMA_FAST = False` is
+  encoder-only (the program is identical) and the handoff's "21.8 MB instead of 29.0 MB for 93 s"
+  is UNVERIFIED for this binary. Cutting it costs a full rebuild, so it was not done for a size
+  number nothing depends on yet. Do it when the artifact is actually shipped (M6).
+- ⚠ **A finished build process holds its memory.** `m5_build.py` printed its metrics and then sat
+  at 6.4 GB, and `ca_labels.py` at 6.9 GB, for minutes afterwards. Rule 1 is about PEAK RSS, and
+  "the build printed its results" is NOT "the build released its memory" - check the process is
+  gone, not just that the log is complete, before starting the next one.
 
 ---
 

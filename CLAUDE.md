@@ -7,11 +7,11 @@ frame. A Python twin — the **oracle** (`src/doomfj/reference_model.py`) — re
 independently, and the two must agree **byte for byte**.
 
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
-`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-m5-m2-m3-m4.md`** — M1 is DONE (the
-self-resetting loop; it was the gate on everything), and that file is the short plan for the
-four milestones left, in the owner’s order: M5 standalone → M2 doors → M3 menu → M4 levels.
-`docs/handoff-complete-game.md` remains the full roadmap behind it.** — the road to a complete standalone game, and why the 9-op
-wall gates all of it.
+`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-m5-m2-m3-m4.md`.**
+M1 (the self-resetting loop) and M5 (the standalone `.fjm` — `fj build/doom_e1m1_std.fjm --io pc
+--flat-max-words 134217728`, no Python in the loop) are both DONE. Three milestones remain, in the
+owner’s order: **M2 doors → M3 menu → M4 levels**, then M6 ship.
+`docs/handoff-complete-game.md` is the full roadmap behind it.
 
 ---
 
@@ -20,6 +20,13 @@ wall gates all of it.
 **1. ⚠ ONE HEAVY BUILD AT A TIME.** Two concurrent E1M1 builds die silently — exit 255, empty
 output, no error. Every gate, bench and heavy test runs solo. If you are about to launch a build
 while another runs, don't.
+> ⚠ **AND "the build printed its results" is NOT "the build released its memory" (2026-08-25).**
+> `m5_build.py` sat at **6.4 GB** and `ca_labels.py` at **6.9 GB** for minutes after printing
+> their final line — the interpreter frees an 85M-word image slowly. Rule 1 is about PEAK RSS,
+> so check the PROCESS is gone (`wmic process where "name='python.exe'" get ProcessId,WorkingSetSize`),
+> not that the log looks complete. Starting the next build on the strength of the log put two
+> heavy jobs on the box twice in one session.
+>
 > **The cause is now known, and it was never an assembler bug: MEMORY EXHAUSTION.** The assembler
 > was memory-bound and paged — 129.4 MB of fj source became ~13.6 GB live on a 16.8 GB machine, so
 > two at once simply ran the box out of RAM. The 2026-08-20 assembler work (flipjump-151 06385ad +
@@ -63,13 +70,14 @@ Run these in order; each is cheaper than the next and rules out a different clas
 | `scratchpad/deg_gate.py` | was ~20 min | **the real proof**: byte-exact ×4 + op counts to the digit |
 | the `steps=False` lines test | was ~9 min | a config the certified gates never build (where a `rep`-gated `werror` break hides) |
 | `python -m pytest tests/host -m slow` | was 29:43 | the **shipped** build path — excluded by default, so run it after touching `build.py` |
+| `scratchpad/m5_gate.py --frames 12` | 561M ops | the **standalone** binary: 12 frames driven by nothing but scripted keypresses, each byte-exact vs the oracle stepping the same keys from the player start. CUMULATIVE — a one-ulp drift on frame 0 parts the trajectory and every later frame differs. `--smoke` is the cheap no-loop variant. |
+| `scratchpad/bench.py …` | varies | op counts per viewpoint; byte-exactness asserted when un-ablated |
 
 ⚠ **Every "was" above is a build-dominated cost measured BEFORE 2026-08-20, when the same program
 assembled in 1,729 s and now assembles in 559 s (3.1×; 11.3× against the original 6,332 s).** They
 are all substantially lower now and none has been re-measured. Read the number the run prints;
 do not quote these. Emission (~7 min for the sprite-bank tier) did **not** change and is now the
 larger half of most of these.
-| `scratchpad/bench.py …` | varies | op counts per viewpoint; byte-exactness asserted when un-ablated |
 
 All three `cr/` tools have self-tests — `alpha_check.py --selftest`, `expand_check.py --selftest`,
 `emit_hash.py --selftest`. Run the one you touched. (⚠ CR-2026-08: this line used to claim "both
@@ -91,6 +99,22 @@ e1m1_04_walk   e1m1_05_state   e1m1_06_banks
 ⚠ **ORDER IS THE CONTRACT.** fj top-level labels are global, so the ordered files are equivalent
 to their concatenation — which is what made the split provably safe. Never sort these paths, never
 glob them, never reorder the parts: every baked address constant depends on the layout.
+
+## The two tiers
+
+One emitter, two programs, and the difference is only where the world comes from:
+
+- **hosted** (`build_wall_renderer()` defaults) — a Python host writes **887 bytes of state per
+  frame** to stdin and reads the new state back. `scripts/walk_e1m1.py` is this.
+- **standalone** (`standalone=True`) — no host at all. The player start is BAKED, the keyboard
+  device drives the sim (`src/fj/input.fj`), thing bindings and visibility bake, nothing is
+  echoed, and the view state + held-key flags SURVIVE the M1 reset (`build.STANDALONE_PERSIST`,
+  the one place a hole in the restore set is intended). Run it with
+  `fj build/doom_e1m1_std.fjm --io pc --flat-max-words 134217728`.
+
+⚠ They are DIFFERENT PROGRAMS and each has its own restore set (`m1_` / `m5_restore_set.json.gz`);
+`build_wall_renderer` picks by tier so they cannot be crossed. Add an emit-shaping flag to BOTH
+or neither — three entry points building three renderers is the divergence A0.1 closed.
 
 ## Cost model
 

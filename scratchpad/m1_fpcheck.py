@@ -34,7 +34,8 @@ RESULT = {}
 _real = selfreset.emit_reset_part
 
 
-def spy(gen, labels, pristine_get_word, restore_set_path, view_w, nss, mapname="e1m1"):
+def spy(gen, labels, pristine_get_word, restore_set_path, view_w, nss, mapname="e1m1",
+        persist=()):
     """Intercept the build AT THE POINT the assert fires, with the build's OWN pass-1 table.
 
     ⚠ The first version of this script re-listed emit_wall_renderer's arguments by hand -- a twin of

@@ -245,12 +245,21 @@ def _extent(words_sorted, addr_word):
 
 
 def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, nss,
-                    mapname="e1m1"):
+                    mapname="e1m1", persist=()):
     """Write <map>_07_reset.fj and patch the main part into a loop.
 
     Returns (part_path, nibble_cells, byte_cells). pristine_get_word(word) reads the FIRST
     assembly's image -- that is where the value a non-zero cell is restored TO comes from, so it is
     never re-derived.
+
+    `persist` names labels whose cells are PROGRAM STATE rather than frame residue, and are left
+    alone. Nothing needed that until M5: a hosted frame is handed its whole world state on the
+    wire, so restoring everything is exactly right. A STANDALONE build has no host, so the player's
+    position and the held-key flags have to survive the reset -- and this is the one place where a
+    hole in the restore set is the intent rather than the bug that hangs the next frame. It is
+    checked rather than trusted: every name must exist, its extent comes from THIS build's label
+    table (never a hardcoded width), and its cells must actually be in the set -- a persist label
+    the frame never dirties is a typo, and a silent one would leave the state being restored.
     """
     gen = Path(gen)
     bits = {}
@@ -266,6 +275,21 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
     words = sorted(load_restore_set(restore_set_path, bits))
     words = [x for x in words if x >= code_start_word]
     wset = set(words)
+
+    persisted = set()
+    for name in persist:
+        assert name in bits, (
+            "self-reset: persist names %r, which this build has no label for" % name)
+        base = bits[name] // W
+        hit = wset & set(range(base, _extent(words_sorted, base)))
+        assert hit, (
+            "self-reset: persist names %r, but the restore set carries no cell of it -- so "
+            "excluding it changes nothing, and the name is either a typo or a label the set was "
+            "never given. Either way the state it is supposed to protect is NOT protected." % name)
+        persisted |= hit
+    if persisted:
+        words = [x for x in words if x not in persisted]
+        wset = set(words)
 
     byte_words, byte_bases, declared_words = set(), [], set()
     for name, n in byte_arrays(bits, words_sorted, view_w, nss):
@@ -338,6 +362,11 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
     lines.append("    ;__hot_end")
 
     hdr = ["// == M1: the self-reset prologue ======================================",
+           *(["//   %d words across %d PERSISTED labels are deliberately NOT restored:"
+              % (len(persisted), len(persist)),
+              "//     %s" % ", ".join(persist),
+              "//   they are program state (the standalone tier's world), not frame residue."]
+             if persist else []),
            "//   Restores every cell a frame leaves dirty, then re-enters the frame",
            "//   at __hot_end -- what replaces the host whole-image restore.",
            "//   ADDRESSES ARE BAKED, from a first assembly of THIS program; the build",

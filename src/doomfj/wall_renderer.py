@@ -22,7 +22,8 @@ from doomfj.lut_generator import (
     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
 )
 from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
-                                    ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS)
+                                    ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
+                                    spawn_state)
 from doomfj.mapcompiler import build_blockmap
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
@@ -221,6 +222,54 @@ def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = Fal
     ]
 
 
+# M5 — how many `kb.poll` expansions one standalone frame runs. Each is its own expansion (a
+# backward jump would re-enter dirtied cells; see src/fj/input.fj), a poll with no event costs a
+# single input hex, and the device never EOFs on an idle poll — so this is a cheap upper bound on
+# "key transitions in one frame", not a budget that can bind. A human cannot produce 8 transitions
+# in a 200 ms frame; if one ever did, the extras are read on the NEXT frame, in order.
+STANDALONE_POLLS = 8
+
+# M5 — the standalone tier's own globals, in ONE place (R6): the emitter declares them and
+# scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, so a vec
+# widened here without re-running that fails the build instead of leaving half a register
+# unrestored. `kbstat`/`kbcode` are ordinary write-before-read scratch; the four flags are the
+# PERSISTED held-key state (build.STANDALONE_PERSIST).
+STANDALONE_SCRATCH_DECLS = [
+    "kbstat: hex.vec 1", "kbcode: hex.vec 2",
+    "kb_f: hex.vec 1", "kb_b: hex.vec 1", "kb_l: hex.vec 1", "kb_r: hex.vec 1",
+]
+
+
+def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS) -> list:
+    """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
+
+    The hosted tier is handed the player's whole world state every frame and echoes the new one
+    back. A standalone `.fjm` has neither side of that: it KEEPS `viewx`/`viewy`/`viewangle` across
+    the M1 reset (they are excluded from the restore set — see `build_wall_renderer`) and learns
+    what the player did from the keyboard device.
+
+    ⚠ THE TIC IS THE SAME CODE. `_player_sim_lines` is spliced in unchanged, so the standalone
+    binary's simulation is the one `scratchpad/m14_gate.py` certified byte-exact; only where
+    `pkeys` comes from differs. The four `kb.*` flags are edge-driven and persistent ("this key is
+    held"), and `pkeys` is rebuilt from them every frame — so `pkeys` itself is ordinary
+    restore-set scratch, and only the four flags need to survive the reset.
+    """
+    return [
+        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, bad",
+        # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
+        # cell just zeroed IS a set, and is the cheapest primitive that does it.
+        "hex.zero 2, pkeys",
+        "hex.if0 1, kb_f, sa_nf", "hex.xor_by pkeys, 0x1", "sa_nf:",
+        "hex.if0 1, kb_b, sa_nb", "hex.xor_by pkeys, 0x2", "sa_nb:",
+        "hex.if0 1, kb_l, sa_nl", "hex.xor_by pkeys, 0x4", "sa_nl:",
+        "hex.if0 1, kb_r, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
+        *_player_sim_lines(collide),
+        *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
+        *_int_part_lines("vy", "viewy", "vysx", "vydone"),
+        # ... and NO echo. There is no host to relay the state, which is the whole point.
+    ]
+
+
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                          spr_base, spr_ldbase, spr_dw, spr_cls, *, deg: bool, spr_cache: dict,
                          keep=None):
@@ -291,9 +340,13 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
              # EMPTY sentinel, which is why bind_things has no clear loop and why the lists hold
              # t+1 rather than t. Deleted ~1.65M ops/frame.
              *point_location_decls()]
-    # lightnum -> the row base into `sprlt`, for the leaf to bake
+    # lightnum -> the row base into `sprlt`, for the leaf to bake, and (M5) each runtime thing's
+    # SPAWN leaf. The hosted tier is fed that binding every frame; a standalone build has no host,
+    # nothing moves things (that is C4), so the same values bake and `bind_things` takes its
+    # `clean` path for every thing and never runs point location.
     return (text, generate_point_location_fj(cmap), decls, nt, nss,
-            {ln: k * nt for k, ln in enumerate(lns)})
+            {ln: k * nt for k, ln in enumerate(lns)},
+            [rm.point_in_subsector(cmap, t.x, t.y) for t in things])
 
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
@@ -305,7 +358,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        bbox_cull: bool = False, stack_steps: bool = False,
                        deg: bool = False, state_wire: str = "dec",
                        player_sim: bool = False, collide: bool = False,
-                       moving_things: bool = False,
+                       moving_things: bool = False, standalone: bool = False,
                        return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
@@ -453,6 +506,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "moving_things=True is the runtime thing table -- it needs things=True on the lines tier"
     assert not moving_things or state_wire == "bin", \
         "moving_things=True reads the position array off the binary wire (see wireformat.encode_things)"
+    # M5 -- the STANDALONE tier: no host, so no wire in either direction. It keeps the view state
+    # across the M1 reset and reads the keyboard device instead, which means the player sim is not
+    # optional here: without it nothing would ever move and the keys would go nowhere.
+    assert not standalone or player_sim, (
+        "standalone=True needs player_sim=True -- the keyboard drives the sim, and nothing else "
+        "moves the player")
+    assert not standalone or state_wire == "bin", (
+        "standalone=True shares the bin tier's registers (pkeys, the 16.16 view state); "
+        "state_wire='dec' has neither")
+    assert not standalone or lines, (
+        "standalone=True presents 0x0B column run-lists, which is the lines tier")
+    # the player start, which only the standalone tier bakes (see the view-state declaration)
+    _spawn = spawn_state(map_wad, mapname) if standalone else None
     # `sim.thing_load` externs the full sprite register set, and an extern that has no global is an
     # assembler error -- so the two OPTIONAL registers must be present. Both are in the certified
     # tier; this refuses at emit time rather than 25 minutes into an assemble.
@@ -743,17 +809,22 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         f"drawable things in them: {[(t.type, t.x, t.y) for s in _stranded for t in _all_by_ss[s]]}. "
         "The prune would drop those leaves and the sprites would vanish with no other symptom.")
     # M14-e: the runtime half of the same data, baked by INDEX rather than by (subsector, thing).
-    _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB = (
+    _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB, _MT_BINDS = (
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, deg=deg, spr_cache=spr_cache,
                              keep=_mt_keep)
-        if moving_things else ("", "", [], 0, 0, {}))
+        if moving_things else ("", "", [], 0, 0, {}, []))
     # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
     # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
     # host that owns what has been picked up, and fj has no state between frames.
     _MT_NVIS = len(_vis_slots) if _do_things else 0
     if _MT_NVIS:
-        _mt_decls = list(_mt_decls) + [f"thvis: hex.vec {2 * _MT_NVIS}"]
+        # M5: standalone has no host to say what has been picked up, and nothing picks anything up
+        # yet (that is C1), so every slot bakes VISIBLE. Zero would mean "hidden" -- the reason the
+        # hosted tier has to send the whole block every frame.
+        _mt_decls = list(_mt_decls) + (
+            ["thvis:"] + ["    hex.vec 2, 1"] * _MT_NVIS if standalone else
+            [f"thvis: hex.vec {2 * _MT_NVIS}"])
     _MT_NTH = _index_nibbles(max(1, _MT_NT))          # the row index's width, as check_line's is
     _MT_NSSN = _index_nibbles(max(1, _MT_NSS))
     _MT_NLTI = _index_nibbles(max(1, len(_MT_LTB) * _MT_NT)) if moving_things else 1
@@ -1560,13 +1631,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         _collide_tables = _collide_descend = ""
 
     pass1 = [
-        *_state_wire_lines(state_wire, sim=player_sim, collide=collide),
+        *(_standalone_input_lines(collide) if standalone else
+          _state_wire_lines(state_wire, sim=player_sim, collide=collide)),
         *_collide_block,
         # M14-e: the thing positions follow the player's state on the wire, then every leaf's list
         # is rebuilt from them. `hex.input n` counts BYTES, so one call takes a whole 16.16 pair
         # into 16 nibbles at a COMPILE-TIME offset -- no per-byte writes, ~148k ops for all 251.
         # This has to precede the walk: `subsector_action` reads the lists the bind writes.
-        *([f"rep({_MT_NT}, i) hex.input 8, thpos_rt + i*16*dw",
+        *([f"sim.bind_things thpos_rt, thss_rt, {_MT_NT}"] if (moving_things and standalone) else
+          [f"rep({_MT_NT}, i) hex.input 8, thpos_rt + i*16*dw",
            # M14-e perf: last frame's thing->subsector bindings. Re-locating all of them every frame
            # cost 27.2M ops -- 73% of what M14-e added -- and it was only necessary because fj has
            # no state between frames. The binding is world state like the position, so it
@@ -1578,7 +1651,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            f"rep({_MT_NT}, i) stream.emit_bytes4 thss_rt + i*16*dw"] if moving_things else []),
         # M14.5: ... and the baked things' visibility, last on the wire. IN only: the host decides
         # what has been picked up, fj only reads it, at a fixed address per call site (section 3.3).
-        *([f"rep({_MT_NVIS}, i) hex.input 1, thvis + i*2*dw"] if _MT_NVIS else []),
+        *([f"rep({_MT_NVIS}, i) hex.input 1, thvis + i*2*dw"]
+          if (_MT_NVIS and not standalone) else []),
         # CR-2026-08 (PJ-2): the M13-absmul per-frame |viewx|/|viewy| + sign flags are GONE, and
         # with them 12 fj statements and 4 labels per frame. The abs form multiplied the magnitude
         # and negated the product, which truncates toward ZERO where the oracle's fixed_mul floors
@@ -1740,8 +1814,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
                         f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
                        + ([f"sshead: hex.vec {2 * _MT_NSS}",
-                           f"thnext: hex.vec {2 * _MT_NT}",
-                           f"thss_rt: hex.vec {16 * _MT_NT}"] if moving_things else []))
+                           f"thnext: hex.vec {2 * _MT_NT}"]
+                          # M5: the hosted tier is fed last frame's binding; standalone bakes the
+                          # SPAWN one, so bind_things finds every thing clean and still builds the
+                          # per-leaf lists it is really there for.
+                          + ([NLJ.join(["thss_rt:"]
+                                       + [f"    hex.vec 16, {ss}" for ss in _MT_BINDS])]
+                             if standalone else [f"thss_rt: hex.vec {16 * _MT_NT}"])
+                          if moving_things else []))
         hotdata = ([";__hot_end"] + _hot_arrays
                   + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                       wall_mode in ("W2S", "WPX"))
@@ -1827,7 +1907,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         *hotdata[1:],                                  # shared decls + trig/reciprocal LUTs + dispatch tables
       ]),
       ("main", [
-          "present.init_screen_stream 0" if (stream or raster or projm or lines) else "present.init_screen",
+          # M5: standalone is run by the plain `fj` CLI, whose stock InMemoryScreen wants the
+          # 8-byte init. `flush_mode` governs only the 0x07 pixel-stream mode, which the 0x0B
+          # frames this tier presents do not use, so dropping it costs the picture nothing.
+          "present.init_screen" if standalone else
+          ("present.init_screen_stream 0" if (stream or raster or projm or lines) else "present.init_screen"),
           *prelude,
           *pass1, *pass2, *plane_pass,
           *postlude_palette, *present_tail, "stl.loop",
@@ -1918,11 +2002,24 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
       ]),
       ("state", [
           *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
-          "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
+          "vx: hex.vec 10", "vy: hex.vec 10",
+          # M5: the standalone tier BAKES the player start into the view state, because nothing
+          # else ever writes it: there is no wire, the sim only ever adds a delta to it, and the
+          # M1 reset is told to leave it alone (build.STANDALONE_PERSIST). So this declaration IS
+          # the initial condition of the game, and every later frame is the sim's own doing.
+          *([f"viewx: hex.vec 8, {_spawn.x & 0xFFFFFFFF}",
+             f"viewy: hex.vec 8, {_spawn.y & 0xFFFFFFFF}",
+             f"viewangle: hex.vec 8, {_spawn.angle & 0xFFFFFFFF}"] if standalone else
+            ["viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8"]),
           *_collide_decls,                                  # M14-d collision state
           *HOISTED_SCRATCH_DECLS,                           # M1-HOIST: ex-@-local storage
-          # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2 nibbles)
-          *(["wmagic: hex.vec 2", "pkeys: hex.vec 2"] if state_wire == "bin" else []),
+          # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2
+          # nibbles). M5: standalone has no wire and so no magic byte, but it still builds `pkeys`.
+          *(["pkeys: hex.vec 2"] if standalone else
+            (["wmagic: hex.vec 2", "pkeys: hex.vec 2"] if state_wire == "bin" else [])),
+          # M5: the keyboard poll's scratch, and the four PERSISTENT held-key flags. The flags are
+          # the only cells besides the view state that the M1 reset must leave alone.
+          *(STANDALONE_SCRATCH_DECLS if standalone else []),
           # M14-c: the player tic's scratch -- the signed 16.16 move magnitude, the
           # finesine index it is projected through, and the two 16.16 deltas
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",

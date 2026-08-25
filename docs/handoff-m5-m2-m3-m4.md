@@ -193,14 +193,23 @@ table - one op per entry, so 32,768 -> 65,536 costs **+65,536 words on an 84.9M-
 
 ⚠ **THIS IS THE SAME COUNTER M4 SPENDS** - see section 5.
 
+**RUNG 1 IS DONE (2026-08-25): the cap is cleared.** `scratchpad/m2_widen.py` bakes a real
+70,000-half-list walk at 5 nibbles, assembles it (7.9 MB of fj, 16 s) and dispatches into it -
+ids 0 / 7 / 65,535 / 65,536 / 69,999 each return their OWN list. 65,535 and 65,536 carry different
+shapes on purpose: that pair is what proves bit 17 is decoded, because a 4-nibble truncation would
+have turned 65,536 into id 0. `index_nibbles=4` refuses the same input, so the cap is real and the
+clearing is meaningful. **Doors are not index-bound at any quantum, and neither is M4.**
+
+The ops/frame half is an UPPER BOUND, not a measurement: one extra `hex.xor` (~19.5 ops) per
+`vpb_walk`, called at most twice per region per column, so <= ~640 calls -> <= ~12,500 ops on a
+~28M frame (<= 0.045%). Measure it for real in whatever build ships the change.
+
 Owed, in order:
 
-1. **price the index widening** - the ops/frame cost of one extra `hex.xor` per `vpb_walk`
-   (it runs at most twice per column, so order 320 calls/frame), and that the assembler is happy
-   at a larger `pad`. Neither needs a full build. UNVERIFIED today.
+1. ~~price the index widening~~ **DONE** - see above.
 2. a compile-time-addressed **dynamic height cell** for the 7.8% of segs touching door sectors;
 3. the trigger and the door's own state machine (opening / waiting / closing) - the part no
-   measurement above touches;
+   measurement above touches, and the real bulk of M2;
 4. the `thing_live_subsectors` predicate fix - a closed door is `ceil_h <= floor_h`.
 
 WARNING: **the door model was wrong once and the gate passed anyway.** Sweeping floor -> the wad's
@@ -248,11 +257,12 @@ index_nibbles=4)` raises if `4*index_nibbles` cannot address `pad`; nothing else
 really scales is `pad` itself - one op per entry, so even 131,072 entries is +262,144 words against
 an 84.9M-word span.
 
-So the fallback ladder below is **premature**. The first task is now:
-
-1. price the index widening (M2 rung 1 - the extra xor's ops/frame, and the assembler at a larger
-   pad). It unblocks doors and levels together, and needs no full build.
-2. only if that fails, take the ladder.
+So the fallback ladder below is **premature - and rung 1 has now cleared the cap**
+(`scratchpad/m2_widen.py`, section 3: a real 70,000-half-list walk at 5 nibbles assembles and
+dispatches correctly past 65,536). Three levels is **~90k half-lists, which 5 nibbles addresses
+with room to spare**, so the reason to scale down is gone. What is still owed for M4 is the cost
+side - span, assemble time, and the extra dispatch xor's ops/frame - none of which the ladder
+below was ever about.
 
 ⚠ Do NOT quote "88.7%" again, and do not scale down before step 1. `scratchpad/m2_budget.py`
 prints the live number and reconstructs the emitted total before it will project anything.

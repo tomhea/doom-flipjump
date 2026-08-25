@@ -158,16 +158,59 @@ it, with every door and lift open, `deg_gate`'s four viewpoints rendered **0 px 
 repo could have shipped a completely broken door and every gate would have passed. Three door
 viewpoints (2,720 / 2,664 / 693 px) now fail when they should.
 
-Owed:
+### THE BUDGET IS RE-DERIVED (2026-08-25). Read this before writing any door code.
 
-- a compile-time-addressed **dynamic height cell** for the 7.8% of segs touching door sectors;
-- **16-unit quantisation -> 26 distinct heights**, which fits the one-byte pid budget (255
-  available, 152 used);
-- the `thing_live_subsectors` predicate fix - a closed door is `ceil_h <= floor_h`.
+The line this section used to carry - *"16-unit quantisation -> 26 distinct heights, which fits the
+one-byte pid budget (255 available, 152 used)"* - is **wrong twice**, and the corrections point in
+opposite directions. `scratchpad/m2_budget.py` and `scratchpad/m2_bodies.py` do this arithmetic in
+seconds, with no build, and both refuse to project unless they first reproduce the shipped
+program's own numbers.
+
+**(1) A pid is a (ceiling, floor) PAIR PER SECTOR, not a height.** 13 real doors share 27 heights
+at quant 16 but need **94 pids**, not 26. The "26" is the **quant=64** row:
+
+| quant | new pids | of 255 | new half-lists | **new baked bodies** |
+|---|---|---|---|---|
+| 8 | 185 | **337 - over** | +35,520 | +765 (+9.5%) |
+| 16 | 94 | 246 (96.5%) | +18,048 | +664 (+8.2%) |
+| 32 | 48 | 200 | +9,216 | +589 (+7.3%) |
+| 64 | 25 | 177 | +4,800 | +529 (+6.5%) |
+
+**(2) ... and the pid byte is a RED HERRING.** What the bands-as-code tier actually bakes is a
+raw-op handler body per DISTINCT half-list, and identical lists share one. Doors add 62% more
+half-lists and only **8% more bodies** - 96% of what a door adds is already in the bank. The body
+cost is nearly FLAT in the quantum: smooth doors cost 135 more bodies than chunky ones, +1.7%.
+**So there is no cost argument for a coarse door. Pick the quantum for how it looks.**
+
+**(3) What actually binds is the BAND INDEX, and it is a default argument.**
+`half-lists = viewz_classes x 2 keys/pid x pids x 2 halves + sky`. MEASURED: 48 viewz classes, so
+**each pid costs 192 half-lists**; today 29,952 of a 65,536 cap at pad 32,768 - **2,816 spare, or
+14.7 pids**. Every quantum, down to 64, pushes the pad to 65,536, the most 4 nibbles can address.
+That cap is `generate_bands_walk_fj(lists, *, index_nibbles=4)` and nothing else; **5 nibbles lifts
+it to 2**20** for one extra `hex.xor` per dispatch. What genuinely scales is `pad`, the switch
+table - one op per entry, so 32,768 -> 65,536 costs **+65,536 words on an 84.9M-word span
+(+0.08%)**.
+
+⚠ **THIS IS THE SAME COUNTER M4 SPENDS** - see section 5.
+
+Owed, in order:
+
+1. **price the index widening** - the ops/frame cost of one extra `hex.xor` per `vpb_walk`
+   (it runs at most twice per column, so order 320 calls/frame), and that the assembler is happy
+   at a larger `pad`. Neither needs a full build. UNVERIFIED today.
+2. a compile-time-addressed **dynamic height cell** for the 7.8% of segs touching door sectors;
+3. the trigger and the door's own state machine (opening / waiting / closing) - the part no
+   measurement above touches;
+4. the `thing_live_subsectors` predicate fix - a closed door is `ceil_h <= floor_h`.
 
 WARNING: **the door model was wrong once and the gate passed anyway.** Sweeping floor -> the wad's
 ceiling is *zero movement* for a stored-shut door; the 1,451 px it reported came from a **lift**.
 The rule is `P_DoorRaise`: a door opens to **`min(neighbouring sector ceiling) - 4`**.
+
+WARNING: `door_gate.py`'s `height_set()` was **dead code with an unclamped rounding rule** -
+flooring to a multiple of the quantum lands *below the floor* whenever the floor is not a multiple
+of it (floor -128 at quant 24 -> -144). It was the function documented as the pid-cost answer, and
+nothing called it. Both it and `door_state` now go through one `quantise()`.
 
 Owner's constraint: **keep ops/frame at similar cost**, measured against the sweep median.
 
@@ -188,11 +231,31 @@ Cheapest content milestone, and the first thing that genuinely *needs* the loop.
 **DECIDED**: three levels in one image (E1M1 + E1M5 + E1M8). The full 9-level episode is **OUT**.
 If three does not fit, **scale down rather than push**.
 
-WARNING: **the first task is NOT a build - it is re-deriving the budget.** "Three levels = 88.7% of
-the 65,536 band-index cap" is a projection from an earlier session, **never re-measured against the
-current emitter**, and 88.7% leaves only 11.3% of margin. If it is off by an eighth, three levels
-does not fit - and you find out after a ~30-minute build instead of after an afternoon of
-arithmetic. Re-derive the per-level band-index count first.
+### THE BUDGET WAS RE-DERIVED (2026-08-25), and 88.7% was optimistic.
+
+That instruction - *the first task is NOT a build* - was right, and M2's D1/D2 rungs answered it
+for M4 as a side effect, because **both milestones spend the same counter**.
+
+MEASURED on the shipped stock-E1M1 program: **29,952 half-lists** at pad 32,768 of a 65,536 cap.
+Three levels sum: **29,952 x 3 = 89,856 = 137% of the cap, BEFORE any door.** The "88.7%" was
+projected from a smaller per-level count (roughly 19.4k/level - plausibly e1m1-lite, or a figure
+from before rung 3a's per-pid bank layout tripled the keys). At the real number, three levels does
+not fit 4 nibbles and neither does two-plus-doors.
+
+**But the cap is a default argument, not a law.** `generate_bands_walk_fj(lists, *,
+index_nibbles=4)` raises if `4*index_nibbles` cannot address `pad`; nothing else fixes 65,536.
+`index_nibbles=5` lifts it to 2**20 for ONE extra `hex.xor` per dispatch, and the thing that
+really scales is `pad` itself - one op per entry, so even 131,072 entries is +262,144 words against
+an 84.9M-word span.
+
+So the fallback ladder below is **premature**. The first task is now:
+
+1. price the index widening (M2 rung 1 - the extra xor's ops/frame, and the assembler at a larger
+   pad). It unblocks doors and levels together, and needs no full build.
+2. only if that fails, take the ladder.
+
+⚠ Do NOT quote "88.7%" again, and do not scale down before step 1. `scratchpad/m2_budget.py`
+prints the live number and reconstructs the emitted total before it will project anything.
 
 At 559 s for one E1M1 and roughly linear scaling, three levels projects to ~30 minutes of build.
 

@@ -173,7 +173,7 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | static (`build_wall_renderer`, R4 gate) | in the 40–62M band, `< 2²⁶` asserted | under | under | flat |
 | **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** |
 | shipped config, `self_reset=False` | **84,823,030** | 1.26× OVER | 0.63× | flat |
-| **M1 (the same + `self_reset=True`)** | **85,438,862** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+| **M1 (the same + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
 | **M1 + M1-HOIST (319 @-locals -> named globals)** | **85,438,862** | 1.27× OVER | **0.64×** | **flat** (asserted) |
 | **+ constant-address round 1 (C2/C5/C7/C8)** | **85,523,360** | 1.27× OVER | **0.637×** | **flat** (asserted) |
 | + constant-address round 2, `self_reset=False` | **84,756,676** | 1.26× OVER | **0.631×** | **flat** (asserted) |
@@ -209,6 +209,17 @@ ledger's last entry while the shipped binary had moved on twice. What the two ro
 array + the `;__hot_end` tail. It carries **no table and no align pad**: every address in it is
 baked, so it adds code span only.
 
+
+**Reset part composition, MEASURED 2026-08-25 off the shipped `build/generated_loop/e1m1_07_reset.fj`** (the previous table described a superseded part in every cell):
+
+| | |
+|---|---|
+| lines / sha256 | **575** / `5ccf52a5...` |
+| coalesced `hex.zero` runs | **194** |
+| non-zero `hex.set 1` singles | **369** |
+| `rep` byte-array clears | **3** (sshead, pclm, sfflag) |
+| cells | **5,034 nibble + 1,002 byte** |
+
 ⚠ **RE-MEASURED 2026-08-25 after M1-HOIST** (the figures here previously described a
 superseded set and contradicted the shipped artifact -- CR R4). Current E1M1 shipped tier:
 
@@ -226,9 +237,12 @@ this binary. The retired "0.8% of 30,191,585" belonged to a superseded set; trea
 UNVERIFIED rather than rescaling it. `scratchpad/m1_sweep.py` is the harness if the figure is
 wanted.
 
-**Why the reset grew** (250,789 -> ~322,438): M1-HOIST moved 319 macro-`@`-local registers to
+**Why the reset grew.** M1-HOIST moved 319 macro-`@`-local registers to
 named globals so the restore set stops naming expansion paths, and those globals are restored at
-full declared extent. That is the price of a set that no longer breaks when a comment shifts a
+full declared extent, so the reset clears more cells. (No before/after pair is quoted: the
+earlier figures 250,789 / 263,666 / 285,126 each belong to a DIFFERENT superseded set, so
+subtracting any of them from 322,438 would compare two things that were never the same
+program.) That is the price of a set that no longer breaks when a comment shifts a
 line -- 313 of 344 keys once needed re-keying for line numbers alone.
 
 ⚠ The first build of this tier emitted **5,031** nibble cells. 682 of them were the unreachable half
@@ -240,29 +254,27 @@ it fall through to the nibble clear. The trim is worth **−19,110 ops/frame** (
 the same 8-frame chain) and **−57,950 span-words**; do not quote the pre-trim 270,811 for this
 tier.
 
-**THE PART'S OWN SPAN IS 645,946 WORDS** — `85,468,976 − 84,823,030`, the same shipped config
-measured with and without `self_reset`:
+⚠ **THE PART'S OWN SPAN IS NOT RE-MEASURED** after M1-HOIST.
+The former figure (645,946 words) was `85,468,976 - 84,823,030`, both PRE-hoist spans, and
+the post-hoist non-self-reset span has not been built. Deriving a words/cell rate from a
+mixed pair is exactly the mis-derivation the warnings below guard against, so no rate is
+quoted. Build with `self_reset=False` on this tree if the number is wanted.
 
 | | words | binary | sha256 |
 |---|---:|---|---|
 | `self_reset=False` | 84,823,030 | `scratchpad/fjmcache/_rssprobe.fjm` | `3c13ec21424f7f54…` |
-| `self_reset=True` | 85,468,976 | `build/doom_e1m1_loop.fjm` | `75794727dce656be…` |
+| `self_reset=True` (PRE-hoist) | 85,468,976 | superseded | `75794727dce656be…` |
+| `self_reset=True` **+ M1-HOIST** | **85,438,862** | `build/doom_e1m1_loop.fjm` | `4fad6d126ed84d79…` |
 
-**Composition of the part**, counted from the emitted file `m1_reemit.py` certifies as current
-(`build/generated_loop/e1m1_07_reset.fj`, sha256 `63a80ad6…`, 618 lines):
+⚠ **THE PAIR ABOVE NO LONGER SUBTRACTS.** `self_reset=False` (84,823,030) is a PRE-hoist build,
+so `85,438,862 - 84,823,030` mixes two different programs and is NOT the reset part's span. The
+old 645,946 figure came from the pre-hoist pair and is retired; **no per-cell span rate is quoted**
+until `self_reset=False` is rebuilt on this tree.
 
-| primitive | lines | cells |
-|---|---:|---:|
-| `hex.zero` coalesced runs | 265 | 4,008 |
-| `hex.set 1, …` non-zero singles | 341 | 341 |
-| `rep … m1.zerobyte` | 3 | 1,002 (byte) |
-| | | **5,351 total** |
-
-**The only per-cell span rate that is measured is the average: 645,946 / 5,351 = 120.7 words/cell.**
-⚠ Two earlier revisions of this paragraph quoted 85.0 instead — that is the trim's **marginal** rate
-(57,950 words / 682 contiguous zero cells), and applying a marginal rate measured on one primitive
-as an average over three is an extrapolation, not arithmetic. Round 5 and round 6 were both this
-mistake; do not make it a fourth time by splitting 645,946 across the rows above.
+⚠ Keep the standing warning that retired it: 120.7 words/cell was an AVERAGE over three
+primitives, and 85.0 was the trim's MARGINAL rate (57,950 words / 682 contiguous zero cells).
+Applying a marginal rate as an average is an extrapolation, not arithmetic -- rounds 5 and 6 were
+both that mistake. Do not make it a fourth time by splitting any total across the rows above.
 
 ⚠ Do **not** derive the part's span by subtracting the M14 row above: that row is an older, smaller
 configuration, and the difference (17,255,518) is 26× the real figure. An earlier revision said the

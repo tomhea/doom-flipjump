@@ -15,9 +15,16 @@ WRITES before it READS -- otherwise expansion 2 would see expansion 1's leftover
 see its own cell. This tool REFUSES a multi-instantiation macro unless --shared says the caller has
 checked that, and the honest check is deg_gate.
 
-⚠ LATCHES SURVIVE. `proj.column_params_m`'s `consts_set` is deliberately a program static that
-persists between calls ("set them on the FIRST call only"). A global is also a static, so the
-property is preserved -- but it is why the DECLARED INITIALISER must be carried over verbatim.
+⚠⚠ LATCHES DO **NOT** SURVIVE UNCHANGED -- an earlier version of this docstring said they did.
+A macro-local is a static PER EXPANSION; a global is a static SHARED BY ALL EXPANSIONS. For a
+macro expanded once that is the same thing. For a multi-expansion macro it is not: expansion 1
+sets the latch and expansions 2..N then SKIP the block it guards. Two such latches exist here,
+both found by review rather than by this tool:
+    proj.project_thing::trig_cached   -- safe because viewangle is frame-invariant across sites
+    proj.column_params_m::consts_set  -- safe because every site passes centery*0x10000, viewh1
+Both invariants are now written at the latches. THIS TOOL CANNOT DETECT THE SHAPE: it does not
+read control flow. Before hoisting a multi-expansion macro, grep its body for `hex.if0 1, <local>`
+paired with `hex.set 1, <local>, 1` and check the guarded values are identical at every site.
 
     python scratchpad/m1_hoist.py --file src/fj/projection.fj --macro wedge_setup --prefix ws --dry-run
     python scratchpad/m1_hoist.py --selftest

@@ -1396,7 +1396,9 @@ ns proj {
         //      full extent), so the cache never survives into the next frame.
         // Break either -- a second view, a mirror, a mid-frame turn, or dropping the register
         // from the restore set -- and every sprite mis-renders with no gate saying why.
-        // Found by CR 2026-08-25 dataflow; it is the ONE read-before-write among the 18.
+        // Found by CR 2026-08-25 dataflow. It is ONE OF TWO cross-expansion latches among the
+        // 18 -- the other is proj.column_params_m's `cpm_consts_set`, same shape, same hazard.
+        // (A verification round caught this comment claiming it was the only one.)
         hex.if0 1, pth_trig_cached, trig_calc
         ;trig_have
       trig_calc:
@@ -1577,6 +1579,20 @@ ns proj {
         // they survive between calls: set them on the FIRST call only, behind a 1-nibble flag.
         // Bit-identical -- nothing else ever writes either register. `opprof.py` put the
         // `hex.set > hex.set > hex.zero` path at ~2% of the whole frame.
+        // ⚠⚠ THE SECOND SHARED LATCH, AND IT GUARDS VALUES, NOT JUST A CACHE.
+        // Pre-hoist `consts_set` was one cell PER EXPANSION, so each of the 3 expansions set
+        // its own c_ constants. Post-hoist it is ONE shared cell, so expansions 2..N skip the
+        // `hex.set` block entirely and consume expansion 1's cpm_c_centeryfix / cpm_c_viewh1.
+        //
+        // CORRECT ONLY BECAUSE EVERY CALL SITE PASSES THE SAME COMPILE-TIME CONSTANTS.
+        // VERIFIED 2026-08-25: all three reach here with `centery*0x10000, viewh1` --
+        // frame_render.fj `seg_pass2_leaf_body_lines` via `lines_projcall` (x2, one rep-gated)
+        // and the two `seg_pass2_leaf_body_2s` sites. Give any caller a different centery --
+        // a second viewport, a split view -- and every column mis-projects, silently, with no
+        // gate saying why: the pixels stay self-consistent, they are just projected with
+        // another expansion's constants.
+        // The latch itself is cleared every frame by the M1 restore set (cpm_consts_set is
+        // present there at full extent), so it never survives into the next frame.
         hex.if0 1, cpm_consts_set, set_consts
         ;consts_ready
       set_consts:

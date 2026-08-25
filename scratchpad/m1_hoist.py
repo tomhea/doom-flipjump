@@ -32,6 +32,8 @@ ap.add_argument("--file")
 ap.add_argument("--macro")
 ap.add_argument("--prefix")
 ap.add_argument("--dry-run", action="store_true")
+ap.add_argument("--only", default=None,
+                help="comma-separated locals to hoist; the rest stay @-local")
 ap.add_argument("--shared", action="store_true",
                 help="assert the caller has checked that N expansions may share one cell")
 ap.add_argument("--selftest", action="store_true")
@@ -78,7 +80,7 @@ def parse_list(hdr, sigil):
     return [n.strip() for n in tail.split(",") if n.strip()], flat
 
 
-def hoist(text, macro, prefix):
+def hoist(text, macro, prefix, only=None):
     """Return (new_text, decls) -- decls are `name: hex.vec N` strings for the emitter."""
     lines, start, hdr_end, body_end = split_macro(text, macro)
     hdr = lines[start:hdr_end + 1]
@@ -110,6 +112,15 @@ def hoist(text, macro, prefix):
             decls[m.group(2)] = _sz
             continue                      # the declaration moves out of the macro
         keep_body.append(l)
+    # --only: hoist a SUBSET. proj.point_to_angle is why -- sharing all of its cells blanks the
+    # screen, but only `slope_idx` is in the restore set, and that one is written by
+    # `.slope_div slope_idx, ...` before any read.
+    if only:
+        for _n in [n for n in decls if n not in only]:
+            skipped.append(_n)
+            keep_body.append("      %s: hex.vec %s" % (_n, decls.pop(_n)))
+        _miss = [n for n in only if n not in decls]
+        assert not _miss, "--only names %s, not a hoistable @-local here" % _miss
     assert decls, ("%s: no @-local carries a `name: hex.vec` declaration -- nothing to hoist "
                    "(its @ list is all control-flow labels)" % macro)
 
@@ -207,7 +218,8 @@ if args.selftest:
 assert args.file and args.macro and args.prefix, "need --file --macro --prefix"
 p = Path(args.file)
 txt = p.read_text(encoding="utf-8")
-new, decls = hoist(txt, args.macro, args.prefix)
+new, decls = hoist(txt, args.macro, args.prefix,
+                   only=set(args.only.split(",")) if args.only else None)
 print("%s :: %s -> %d globals" % (p.name, args.macro, len(decls)))
 for d in decls:
     print("    \"%s\"," % d)

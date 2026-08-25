@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from doomfj import selfreset                              # noqa: E402
 from doomfj.collision import CHECK_SCRATCH_DECLS          # noqa: E402
+from doomfj.wall_renderer import HOISTED_SCRATCH_DECLS   # noqa: E402
 from doomfj.harness import W                              # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -45,12 +46,26 @@ CELL_WORDS = 2          # a hex cell is dw = 2w bits = 2 words
 
 
 def declared():
-    """(name, words) for every CHECK_SCRATCH_DECLS entry -- the DECLARED width."""
+    """(name, words|None) for every decl. None = size is symbolic beyond w/dw, so the DERIVED
+    extent stands alone and the cross-check is skipped for that one (reported, never silent).
+
+    The hoisted renderer registers carry SYMBOLIC sizes (`hex.vec w/4`, the pointer registers), so
+    a numeric-only parser rejects them -- the same gap that silently under-hoisted 12 of them in
+    m1_hoist.py. Evaluate w/dw instead of refusing.
+    """
     out = []
-    for d in CHECK_SCRATCH_DECLS:
-        m = re.match(r"\s*(\w+)\s*:\s*hex\.vec\s+(\d+)", d)
-        assert m, "CHECK_SCRATCH_DECLS entry is not `name: hex.vec N`: %r" % d
-        out.append((m.group(1), int(m.group(2)) * CELL_WORDS))
+    for d in list(CHECK_SCRATCH_DECLS) + list(HOISTED_SCRATCH_DECLS):
+        m = re.match(r"\s*(\w+)\s*:\s*hex\.vec\s+(.+)", d)
+        assert m, "decl is not `name: hex.vec ...`: %r" % d
+        size = m.group(2).split(",")[0].strip()
+        try:
+            cells = int(size, 0)
+        except ValueError:
+            try:
+                cells = int(eval(size, {"__builtins__": {}}, {"w": W, "dw": 2 * W}))
+            except Exception:
+                cells = None
+        out.append((m.group(1), None if cells is None else cells * CELL_WORDS))
     return out
 
 
@@ -83,7 +98,9 @@ def add_globals(doc, sa, sn):
         extent = selfreset._extent(ws, base) - base
         # CONTROL B: DERIVED vs DECLARED must agree (R6). A vec widened in collision.py without
         # re-running this would otherwise leave the tail of the register unrestored.
-        assert extent == want_words, (
+        if want_words is None:
+            print("   (symbolic size, extent-derived only): %s = %d words" % (name, extent))
+        assert want_words is None or extent == want_words, (
             "%s spans %d words in the label table but CHECK_SCRATCH_DECLS declares hex.vec -> %d "
             "words. The two sources disagree; a baked count here would silently leave part of the "
             "register unrestored." % (name, extent, want_words))
@@ -147,5 +164,6 @@ doc, added = add_globals(doc, sa, sn)
 doc["generated_by"] = ("scratchpad/ca_remap_set.py --labels %s   then   "
                        "scratchpad/m1_add_globals.py --labels %s" % (args.labels, args.labels))
 json.dump(doc, gzip.open(args.out, "wt", encoding="utf-8"))
-print("added %d words over %d globals" % (added, len(declared())))
+print("added %d words over %d globals (%d check + %d hoisted)"
+      % (added, len(declared()), len(CHECK_SCRATCH_DECLS), len(HOISTED_SCRATCH_DECLS)))
 print("%s: %d -> %d words over %d entries" % (args.out, before, doc["words"], doc["labels"]))

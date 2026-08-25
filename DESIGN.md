@@ -232,10 +232,28 @@ superseded set and contradicted the shipped artifact -- CR R4). Current E1M1 shi
 | assemble | **2,619 s** (total build 3,543 s) |
 | binary | `build/doom_e1m1_loop.fjm`, sha256 `4fad6d12...`, 31,315,545 bytes |
 
-**NO PERCENTAGE IS QUOTED** against a sweep median, because no 260-frame sweep has been run for
-this binary. The retired "0.8% of 30,191,585" belonged to a superseded set; treat it as
-UNVERIFIED rather than rescaling it. `scratchpad/m1_sweep.py` is the harness if the figure is
-wanted.
+**SWEEP MEASURED 2026-08-25** (`scratchpad/m1_sweep.py`, 65 walkable grid points x 4 angles =
+260 frames, this binary vs `_ca2_ship_new.fjm`):
+
+| | ops/frame |
+|---|---:|
+| **looping binary, reset included** | **28,564,109** (7,426,668,261 ops / 260 frames, ONE run) |
+| reference build, one frame per run | 28,302,045 |
+| **median frame** (reference) | **27,932,265** |
+| range | 7,569,883 .. 56,112,295 (7.4x) |
+| looping overhead | **+262,063 ops/frame = +0.9% of the median** |
+
+⚠ **THE +0.9% IS NOT PURELY THE RESET.** It is the reset MINUS whatever else the two builds
+differ by, and they differ: the reference is PRE-hoist. The reset measured against the same
+program (gate PHASE 3) is ~322,438; the sweep delta is lower because M1-HOIST made the renderer
+slightly cheaper on average (R20 address set-bits), partly paying for its own restore cost.
+
+⚠ **CONTROL: 260/260 frames BYTE-EXACT** between the two paths -- the post-hoist LOOPING binary
+renders pixel-identically to the pre-hoist ONE-SHOT binary at every one of the 260 viewpoints.
+That is a far wider byte-exactness proof than deg_gate (4) or the M1 gate (12).
+
+This retires the old "7.47%", which divided by a 47.5M MEAN OF GATE VIEWPOINTS. Gate frames
+overstate a typical frame by ~1.5x, exactly as docs/handoff-complete-game.md 4 says.
 
 **Why the reset grew.** M1-HOIST moved 319 macro-`@`-local registers to
 named globals so the restore set stops naming expansion paths, and those globals are restored at

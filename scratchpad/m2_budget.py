@@ -117,8 +117,78 @@ if after <= 255:
     print("  FITS -- with %d pids of headroom left." % (255 - after))
 else:
     print("  DOES NOT FIT -- raise the quantum or move to a runtime height cell.")
+
+# ---- THE OTHER BUDGET, and it is the binding one ----------------------------------------------
+# A pid is not just a byte: with plane_near the bank carries one KEY PER PLANE PER PID, and the
+# shipping tier bakes every half-list as CODE (generate_bands_walk_fj), dispatched on an index of
+# `index_nibbles` = 4 nibbles. So the real ceiling is the HALF-LIST COUNT, and it is the same
+# counter docs/handoff-m5-m2-m3-m4.md hands to M4 as "the 65,536 band-index cap".
+#
+#     half-lists = viewz_classes x (2 keys per pid) x pids x (asc + desc)  +  sky half-lists
+#
+# THE MODEL IS CHECKED AGAINST GROUND TRUTH, not assumed: the emitted program states the total in
+# its own header ("bands-as-code: N half-lists"), and the reconstruction below must reproduce it.
+m2 = re.search(r'bands-as-code: (\d+) half-lists \((\d+) unique, pad (\d+)\)',
+               tables.read_text(encoding="utf-8"))
+if m2 is None:
+    banks = tables.parent / tables.name.replace("_01_tables", "_06_banks")
+    m2 = re.search(r'bands-as-code: (\d+) half-lists \((\d+) unique, pad (\d+)\)',
+                   banks.read_text(encoding="utf-8")) if banks.exists() else None
+if m2 is None:
+    print("\n  (no bands-as-code header found -- skipping the band-index budget)")
+    sys.exit(0 if after <= 255 else 1)
+
+emitted, unique, pad_now = (int(g) for g in m2.groups())
+
+from doomfj.config import Config                                          # noqa: E402
+from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
+from doomfj.reference_model import ReferenceModel                         # noqa: E402
+rm = ReferenceModel(Config())
+cmap = bake_bsp(mw, args.map)
+classes = {}
+for ss in cmap.subsectors:
+    sec = rm._seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
+    classes.setdefault(rm.view_z(sec.floor_h), len(classes))
+nclass = len(classes)
+main = nclass * (2 * used) * 2
+sky = emitted - main
 print("")
-print("  !! THIS IS THE PID BUDGET ONLY. Each pid also costs TWO band-list slots in the visplane")
-print("     bank (lines_bank_keys is one key per plane per pid), and the bank is already the")
-print("     biggest single region in the image. Size that separately before committing.")
+print("  BAND-INDEX BUDGET (the binding one)")
+print("    viewz classes %d x 2 keys/pid x %d pids x 2 halves = %d main half-lists"
+      % (nclass, used, main))
+print("    emitted total %d  ->  sky half-lists %d   (%s)"
+      % (emitted, sky, "reconstruction CHECKS OUT" if 0 <= sky < main else
+         "!! RECONSTRUCTION IS WRONG -- do not trust the projection below"))
+assert 0 <= sky < main, "the half-list model does not reproduce the emitted count"
+per_pid = nclass * 4
+cap = 1 << (4 * 4)                       # generate_bands_walk_fj's default index_nibbles = 4
+print("    -> EACH PID COSTS %d half-lists; today %d of the %d cap, pad %d (%d spare -> %.1f pids)"
+      % (per_pid, emitted, cap, pad_now, pad_now - emitted, (pad_now - emitted) / per_pid))
+print("")
+print("    quant  new pids   half-lists      total     pad   verdict")
+for q in (8, 16, 24, 32, 48, 64):
+    stops = 0
+    for si in sorted(doors):
+        lo, hi = secs[si].floor_h, doors[si]
+        h, seen = lo, set()
+        while h < hi:
+            seen.add(max(lo, min(hi, (h // q) * q)))
+            h += q
+        seen.add(hi); seen.add(lo)
+        stops += len(seen) - 1
+    n = emitted + stops * per_pid
+    pad = 1 << max(1, (n - 1).bit_length())
+    print("    %5d  %8d   %+10d  %7d  %6d   %s"
+          % (q, stops, stops * per_pid, n, pad,
+             "OVER THE CAP" if pad > cap else
+             ("fits, but the pad DOUBLES -- no room left for M4" if pad > pad_now else "free")))
+print("")
+print("    !! THIS IS THE SAME COUNTER M4 SPENDS. Three levels in one image sum their half-lists,")
+print("       and %d x 3 = %d is already %.0f%% of the cap BEFORE any door. The handoff's 88.7%%"
+      % (emitted, emitted * 3, 100.0 * emitted * 3 / cap))
+print("       figure for M4 was projected from a smaller per-level count and needs the same")
+print("       re-derivation this file just did for M2.")
+print("    !! index_nibbles is a PARAMETER (generate_bands_walk_fj default 4), not a law. Raising")
+print("       it to 5 lifts the cap to 2**20 for one extra xor per dispatch; what really scales")
+print("       is `pad`, the dispatch table itself. Price that before scaling anything down.")
 sys.exit(0 if after <= 255 else 1)

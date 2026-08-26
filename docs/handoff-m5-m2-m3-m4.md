@@ -204,13 +204,53 @@ The ops/frame half is an UPPER BOUND, not a measurement: one extra `hex.xor` (~1
 `vpb_walk`, called at most twice per region per column, so <= ~640 calls -> <= ~12,500 ops on a
 ~28M frame (<= 0.045%). Measure it for real in whatever build ships the change.
 
-Owed, in order:
+### The rungs
 
-1. ~~price the index widening~~ **DONE** - see above.
-2. a compile-time-addressed **dynamic height cell** for the 7.8% of segs touching door sectors;
-3. the trigger and the door's own state machine (opening / waiting / closing) - the part no
-   measurement above touches, and the real bulk of M2;
-4. the `thing_live_subsectors` predicate fix - a closed door is `ceil_h <= floor_h`.
+**R1 - the index cap. DONE** (above): `index_nibbles=5` clears 65,536, assembled and dispatched.
+
+**R2 - a door baked OPEN renders byte-exact. DONE** (commit `638e59c`).
+`build/doom_e1m1_doors100.fjm` is E1M1 with all 13 doors at their true open height, built by
+handing the emitter the same `sector_heights` override the oracle takes - **no fj code moved**.
+Span 85,980,098 words (+1.8M vs shut), 675 s. `scratchpad/m2_gate.py` PASSES: the doors change
+2,720 / 2,669 / 698 / 117 / 16 px at the gate's viewpoints and every changed pixel matches the
+oracle's, **value for value**. That certifies the render path - pids, band bank, V5 stacked
+pieces, collision, thing-liveness - for a door away from its stored position.
+
+⚠ **The gate is a DIFFERENTIAL, and it has to be.** Comparing fj against the doors-open oracle
+directly FAILS at (1869,479) with 371 px that have nothing to do with doors: the shipped binary
+already differs from that oracle by **378 px** there, because the oracle call certifies the
+NON-SIM tier. Disagreements are judged by where they land - outside the standing-delta set is a
+door bug, inside it is INHERITED and reported (7 px today) but not judged. Do not "fix" this by
+loosening it; fix it by closing the standing delta, which is a separate job.
+
+**R3 - the RUNTIME door.** The measurements that shape it (`scratchpad/m2_segs.py`):
+
+| | |
+|---|---|
+| segs a door can change at all | **81 of 2,057 = 3.9%** (the handoff said 7.8%) |
+| ... whose OWN sector is the door (pid + render consts) | 52 - exactly **4 per door** |
+| ... which LOOK AT a door (V5 stacked upper piece) | 29 - **1-3 per door**, and this is the half a player watches move |
+| subsectors inside a door sector (walk + thing-liveness) | 13 |
+| pids if ALL states coexist | +94 at quant 16 -> 246 of 255 |
+| unique baked bodies if all states coexist | +664 (+8.2%); ONE open state costs +242 |
+
+The shape this suggests, given the repo's own idiom (bake-to-code, and R20: dispatch cost scales
+with the address's set bits): **bake each affected seg's constant block once per door state and
+dispatch on a per-door state cell.** 81 segs x ~9 states, against 2,057 segs of blocks already
+emitted, and only the door-touching segs pay anything at runtime. The alternative - making the
+constants runtime registers loaded from a height cell - turns every one of those segs' xor_by
+involution blocks into loads, which is the thing `_seg_xorby_block` exists to avoid.
+
+⚠ Two things R2 did NOT touch and R3 must: the walk PRUNES a shut door's subsector at compile
+time (it cannot, once the door is runtime), and `thing_live_subsectors` calls a shut door
+uninhabitable - a closed door is `ceil_h <= floor_h`.
+
+**R4 - the trigger and the state machine** (opening / waiting / closing, use-key on a door
+linedef). No measurement here touches it; it is the real bulk of M2 and it is pure fj + oracle
+mirror work.
+
+Owner's constraint applies from R3 on: **keep ops/frame at similar cost**, measured against the
+sweep median.
 
 WARNING: **the door model was wrong once and the gate passed anyway.** Sweeping floor -> the wad's
 ceiling is *zero movement* for a stored-shut door; the 1,451 px it reported came from a **lift**.

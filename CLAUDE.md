@@ -8,9 +8,12 @@ independently, and the two must agree **byte for byte**.
 
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
 `docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-m5-m2-m3-m4.md`.**
-M1 (the self-resetting loop) and M5 (the standalone `.fjm` — `fj build/doom_e1m1_std.fjm --io pc
---flat-max-words 134217728`, no Python in the loop) are both DONE. Three milestones remain, in the
-owner’s order: **M2 doors → M3 menu → M4 levels**, then M6 ship.
+**M1** (the self-resetting loop), **M5** (the standalone `.fjm`) and **M3** (the menu — a second
+frame producer chosen by a persisted `mode` cell) are DONE:
+`fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
+starts the game. **M2** has its two foundation rungs done (the band-index cap cleared; a door baked
+open renders byte-exact, at no ops cost) and owes the runtime door. **M4** — three levels in one
+image — is the only milestone that changes the emitter's shape; its plan is section 5. Then M6.
 `docs/handoff-complete-game.md` is the full roadmap behind it.
 
 ---

@@ -265,7 +265,7 @@ Owner's constraint: **keep ops/frame at similar cost**, measured against the swe
 
 ---
 
-## 4. M3 - menu   <- STARTED
+## 4. M3 - menu   <- DONE, 2026-08-26
 
 Cheapest content milestone, and M5 made it cheaper still: the standalone binary already has the
 two things a menu needs - **persistent state** and **keyboard input**.
@@ -282,23 +282,30 @@ One generator feeds both mirrors (`menu.pixels()` for the oracle, `menu.stream()
 one `_bitmap()`), and `tests/host/test_menu.py` (18 tests) proves they agree by decoding the stream
 through the real `InMemoryScreen`. Colours are derived from the wad's PLAYPAL, not picked.
 
-### The steps left, in order
+### It is finished
 
-1. **A persisted `mode` cell**, beside `kb_f..kb_r` in `STANDALONE_SCRATCH_DECLS`, and added to
-   `build.STANDALONE_PERSIST` so it survives the M1 reset. Add it to `STANDALONE_SCRATCH_DECLS`
-   and re-run `scratchpad/m5_setfile.py` - the set gains one global at declared width.
-2. **The branch at frame start**: `hex.if0 1, mode, world_frame` -> emit the baked menu bytes and
-   jump to the frame tail, skipping pass1/pass2/planes entirely. The frame tail already ends with
-   `stl.output_char 0xFF` + `;m1_reset`, so the reset restores as usual and the loop continues.
-   ⚠ `emit_reset_part` ASSERTS the line before the tail is the 0xFF marker - keep that shape.
-3. **The transition**: a keycode (enter = 13, esc = 27) toggles `mode` in `kb.poll`'s dispatch.
-   Both are already inside its `0x0_`/`0x1_` high-nibble range, which the macro does not yet test.
-4. **The gate**: extend `scratchpad/m5_gate.py` with a script that starts in the menu, presses
-   enter, and requires frame 0 to equal `menu.pixels()` and frame 1 to equal the oracle's world
-   frame. Cheap - the menu half needs no oracle render at all.
+`build/doom_e1m1_menu.fjm` boots into the menu; enter/esc toggles. Span 85,209,916 words, 2,867 s.
+`scratchpad/m3_gate.py` PASSES: ONE 347,229,603-op run, **13 frames, every one byte-exact** - menu
+frames against `menu.pixels()`, world frames against the oracle at the state the sim reached.
 
-⚠ The menu frame does NOT go through pass1, so `viewx`/`viewy`/`viewangle` are untouched by it -
-which is exactly what makes "return to the menu and back" keep the player where they were.
+    frame  0 MENU  (-416.000, 256.000)   boots into the menu
+    frame  2 world (-416.000, 256.000)   enter -> world
+    frame  5 world (-266.000, 256.000)   walking
+    frame  6 MENU  (-266.000, 256.000)   enter -> menu, W STILL HELD
+    frame  8 MENU  (-266.000, 256.000)   ... and it did not move
+    frame  9 world (-216.000, 256.000)   enter -> world, resumes in place
+
+The three properties the gate is built around, none of them visible in a single frame: `mode`
+survives the M1 reset (it is in `STANDALONE_PERSIST` - without that it would snap back to 1 every
+frame and show the menu forever, one frame after appearing to work); a menu frame does not run the
+tic (the branch is BEFORE the sim, which is what makes leaving the menu resume in place); and the
+toggle is DOWN-EDGE only (a press delivers a down AND an up event). `--selftest` REJECTED at
+frame 0.
+
+The restore set gained `mode`: 12,072 -> 12,084 words over 448 -> 454 entries, re-keyed as always.
+
+Left for M4: the menu's entries currently select nothing. Wiring them to a `level` cell is M4's
+rung R3, because it needs more than one level to select.
 
 ---
 
@@ -307,39 +314,64 @@ which is exactly what makes "return to the menu and back" keep the player where 
 **DECIDED**: three levels in one image (E1M1 + E1M5 + E1M8). The full 9-level episode is **OUT**.
 If three does not fit, **scale down rather than push**.
 
-### The steps, now that the index cap is gone
+### THE PLAN
 
-**D1 - the label collision surface. DONE.** fj top-level labels are GLOBAL, so three emissions in
-one image collide. MEASURED (`scratchpad/m4_labels.py`) on the shipped emission:
+**M4 is not one more build - it is the only milestone left that changes the emitter's shape.** Two
+emissions cannot be concatenated even with every label namespaced, because each one also contains
+the SHARED tables: `palette`, the trig/reciprocal LUTs, the colormap, the texture and flat tables,
+the sprite bank, and the `vpb_walk` machinery. Two copies is a duplicate-label error, not a
+collision a prefix can fix - and two would not fit anyway, since they are the bulk of the 86M words.
+
+**Already done, all measured, all committed:**
 
 | | |
 |---|---|
-| labels emitted for E1M1 | 1,678,742 |
-| already map-prefixed (`e1m1_*`) | 6,135 - nothing owed |
-| bands-as-code bank (`vpb_`/`vql_`/`vqh_`) | 1,655,556 - **ID-indexed, so three levels MERGE into one walk** (and M2 rung 1 cleared the id cap) |
-| **map-specific, 22 families** | **16,780 - THE RENAME SURFACE** |
-| shared registers/leaves | 271 - one per program, not per map |
+| the 65,536 band-index cap | **CLEARED** - a real 70,000-half-list walk at 5 nibbles assembles and dispatches (`m2_widen.py`) |
+| the label collision surface | **16,412 labels in 17 families** (`m4_labels.py`) |
+| the namespacer | `doomfj.mapprefix` - opt-in by construction (empty prefix = identity), 51,787 tokens on the real emission, 20 tests |
+| the level-select mechanism | M3's persisted `mode` cell is the same machinery |
 
-The big families: `ss#_seg#_mark`/`_marked` (2,890 each), `seg#_attrib_consts` (1,445),
-`seg#_face_consts` (1,389), `ss#_visit`/`_occluded` (1,364 each), `ss#_seg#_unseen` (1,150),
-`ptloc_l#`/`n#`, `seg#_geom_consts`/`_render_consts` (575 each), `ss#_thing#_do`/`_skip`.
+**The rungs, in order:**
 
-**16,780 labels come from ~22 f-string sites**, and `_pfx(mapname)` already exists for the BSP ones.
+**R0 - the shared/per-map boundary. NO BUILD.** Emit two DIFFERENT maps and diff the seven parts.
+That turns "which blocks are map-derived" from a reading of the emitter into a list from the
+emitter's own output. ~15 min of emission, no assembly. Everything below depends on that list, so
+it goes first - the same discipline that caught the pid budget (94, not 26) and the label count
+(16,412, not 102).
 
-2. **Make the prefix OPT-IN**, the way `standalone` is: prefix only when building multi-level, so
-   single-level emission stays **byte-identical** and every existing gate transfers without
-   re-running. Prove it with `scratchpad/cr/emit_hash_vs_head.py` (it has its own negative control).
-   ⚠ Rule 4 freezes generated global labels; an opt-in prefix is what keeps that rule intact.
-3. **Price the widened band index for real** - one extra `hex.xor` per `vpb_walk` (upper bound
-   <= 0.045%, never measured) and the assembler at `pad` 131,072.
-4. **Two levels first.** Three is the goal; two is the rung that finds every collision for half the
-   build time. Only then three.
-5. **The level table + entry point**: which map the frame renders is a mode/level cell - the SAME
-   mechanism M3's menu flag uses, which is why M3 comes first.
+**R1 - a geometry-only emission mode.** `emit_wall_renderer(shared_tables=False)`: maps 2 and 3
+emit their `segconsts` + `walk` and nothing else. Gate WITHOUT a build: the label sets of a full
+emission and a geometry-only one must intersect in exactly the shared names, and two prefixed
+geometry-only emissions must not intersect at all.
 
-⚠ **The cost side is the open question, and do not answer it by doubling.** One E1M1 (doors open)
-is 85.98M words against `config.RENDER_FLAT_MAX_WORDS` = 134,217,728, so a naive 2x does not fit -
-but most of the image does NOT duplicate. By emitted text (a proxy; chars are not words):
+**R2 - one bands walk from N maps.** `lines_bank_keys` is per-map today; the union is a
+concatenation, with each map's `seg_cvpidx`/`seg_fvpidx` shifted by its base, at
+`index_nibbles=5`. This is the piece the cap had to be lifted for - three maps is ~90k half-lists.
+
+**R3 - the `level` cell and the dispatch.** A persisted cell exactly like `mode`, and `main` jumps
+to the selected map's walk entry. The menu's entries feed it, which is the whole reason M3 came
+first.
+
+**R4 - the build ladder, and do not skip a rung.**
+  1. ONE map WITH a prefix - must be byte-exact against the unprefixed build. **This is the proof
+     `mapprefix` is sound**, and it is cheap relative to what follows.
+  2. TWO maps - finds every collision R1's label check missed, for half the build time of three.
+  3. THREE.
+
+⚠ **Span.** One E1M1 is 85.98M words against `RENDER_FLAT_MAX_WORDS` = 134,217,728, and the
+per-level increment is somewhere between 3.4% and 93% (below). R0 narrows it; R4.2 settles it. If
+the limit must rise it is RAM-only (DESIGN 1.2), but raise it with a measured peak RSS, not on a
+failed build. Rule 1 has a new clause too: a finished build holds its memory for minutes after
+printing its results.
+
+⚠ **Honest risk.** R1 and R2 are surgery on a 2,900-line emitter in which the part order IS the
+contract ("every baked address constant depends on the layout"). Expect
+`scratchpad/cr/emit_hash_vs_head.py` to be the tool that keeps single-level emission honest
+throughout - it has its own negative control and it is fast relative to a build.
+
+### Why the increment is not just "double it"
+
+By emitted text (a proxy; chars are not words):
 
 | part | | size | share |
 |---|---|---|---|
@@ -350,12 +382,7 @@ but most of the image does NOT duplicate. By emitted text (a proxy; chars are no
 | entry/main/state | shared | 18,079 | 0.0% |
 
 Clearly map-specific is only **3.4%**. `06_banks` is the one that matters and it is MIXED: the
-bands-as-code bank is map-derived, the **sprite bank is shared**. So the real per-level increment
-is somewhere between 3.4% and 93%, and nothing here narrows it - **build a SECOND level and
-subtract**. That is D-next, and it is also why step 4 says two levels before three.
-
-If it does not fit, `RENDER_FLAT_MAX_WORDS` is RAM-only (DESIGN 1.2) and 2**28 doubles the room -
-but raise it deliberately, with the peak-RSS number, not on discovering a failed build.
+bands-as-code bank is map-derived, the **sprite bank is shared**. Hence R0.
 
 ### THE BUDGET WAS RE-DERIVED (2026-08-25), and 88.7% was optimistic.
 

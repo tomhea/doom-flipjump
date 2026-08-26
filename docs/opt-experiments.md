@@ -996,3 +996,42 @@ first among sanctioned levers, and W1 is worth 2-6M/frame; the 1×1-texel look s
 away (--wall-mode WPX, ~median 17-18M on this stack). If the tail matters next: the worst frame
 (39.7M at (1869,479,W)) is the everything-at-once viewpoint — sprite-path restructure, a
 far-bbox test in the existing gate leaf, and map round-2 occluders are the queued levers.
+
+---
+
+## REJECTED: collision as bake-as-code (M14-d), and the flat kernel's retired test
+
+Recorded here 2026-08-26, when the two skipped test groups that carried these notes were deleted.
+Both are records of a shape the repo tried and moved off; keeping the tests only kept a
+`@pytest.mark.skip` that could never announce a regression.
+
+### Baking every (block, line) pair as code did not assemble
+
+Collision's candidate set is already cut to ~35 lines by the blockmap, and a linedef's geometry is
+compile-time, so baking each candidate AS CODE collapses most of `PIT_CheckLine`'s branching before
+the program runs. That was the M14-d plan, and it does not scale:
+
+* E1M1 gives **1,651 (block, line) pairs × ~35 macro invocations ≈ 57k lines** of `hex.set` /
+  `hex.scmp`, and that program **DID NOT FINISH ASSEMBLING IN 50 MINUTES**.
+* The generated code was CORRECT — the per-line half was proven byte-exact against the oracle,
+  including fractional positions and positions the oracle refuses. It is the wrong SHAPE at this
+  scale, and adding it to the renderer would have roughly tripled an already 25-minute build.
+
+**The measurement also named the fix, which is what shipped.** Bake-as-code was chosen because a
+table-driven loop over all ~1.5k linedefs costs ~7M ops/tic — but that figure was for the
+UNFILTERED sweep. With the blockmap in front of it: ~35 candidates × 17 bytes × ~600 ops/byte
+≈ 360k ops per candidate position, ~1M/tic across the three the axis-retry policy tries. Affordable,
+and it assembles in seconds because it is ONE loop over a data table instead of 57k unrolled lines.
+
+`doomfj.collision.collision_tables_fj` (three packed tables via `generate_packed_lut_fj`) +
+`hex.read_table_packed` + `sim.check_line` is that fix, and it is what the shipped binary runs.
+`mapcompiler.build_blockmap` (proven equivalent to the full sweep) and the oracle were kept.
+
+### The legacy framebuffer flat kernel no longer matches the oracle
+
+`raster_mode="framebuffer", floor_mode="textured"` is still reachable by keyword, but its
+byte-exact tests were retired at the M13pS2 column-stream gates: the flat oracle now band-walks
+`zidx` (the F4 re-bless), while the legacy kernel stays exact-per-row. **Both mirrors moved and the
+old tier's test was left behind** — it was not a regression, and the live path is covered by
+`tests/fj/test_stream_pass1_wiring.py`. If that tier is ever revived, its kernel needs re-blessing
+against the current oracle before any test of it means anything.

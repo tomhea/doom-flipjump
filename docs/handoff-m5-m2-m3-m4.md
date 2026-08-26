@@ -144,6 +144,13 @@ enough to prove the emit half without the two-pass build.
   encoder-only (the program is identical) and the handoff's "21.8 MB instead of 29.0 MB for 93 s"
   is UNVERIFIED for this binary. Cutting it costs a full rebuild, so it was not done for a size
   number nothing depends on yet. Do it when the artifact is actually shipped (M6).
+- ~~nobody has opened an actual pygame window~~ **CLOSED 2026-08-26.** `scratchpad/play_window.py`
+  opens the genuine `--io pc` composition on a real window; five sessions, the last 18 frames /
+  702,109,142 ops: menu -> enter -> walk -> turn right -> walk -> turn left -> walk, all correct,
+  sky included. ⚠ The INPUT is a scripted key list, not a physical keyboard -- Windows' foreground
+  lock stops a background process focusing a window and SDL drops keys for an unfocused one. And
+  an external PrintWindow capture is NOT trustworthy for an SDL window (it showed the menu frames
+  as pure black while SDL's own surface had them perfectly); dump `window._screen_surface` instead.
 - ⚠ **A finished build process holds its memory.** `m5_build.py` printed its metrics and then sat
   at 6.4 GB, and `ca_labels.py` at 6.9 GB, for minutes afterwards. Rule 1 is about PEAK RSS, and
   "the build printed its results" is NOT "the build released its memory" - check the process is

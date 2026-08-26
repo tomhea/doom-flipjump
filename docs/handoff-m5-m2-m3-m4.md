@@ -337,10 +337,25 @@ The big families: `ss#_seg#_mark`/`_marked` (2,890 each), `seg#_attrib_consts` (
 5. **The level table + entry point**: which map the frame renders is a mode/level cell - the SAME
    mechanism M3's menu flag uses, which is why M3 comes first.
 
-⚠ Cost side still unmeasured: span and assemble time for N levels. At 85.98M words for one E1M1
-(doors open) against a 134.2M-word limit, **two levels do not fit the current `flat_max_words`** -
-that limit is `config.RENDER_FLAT_MAX_WORDS = 2**27` and raising it is RAM-only, but it must be
-raised deliberately and measured, not discovered.
+⚠ **The cost side is the open question, and do not answer it by doubling.** One E1M1 (doors open)
+is 85.98M words against `config.RENDER_FLAT_MAX_WORDS` = 134,217,728, so a naive 2x does not fit -
+but most of the image does NOT duplicate. By emitted text (a proxy; chars are not words):
+
+| part | | size | share |
+|---|---|---|---|
+| `06_banks` | mixed | 130,590,001 | 89.8% |
+| `01_tables` | mixed | 9,981,535 | 6.9% |
+| `04_walk` | **MAP** | 3,519,030 | 2.4% |
+| `03_segconsts` | **MAP** | 1,379,522 | 0.9% |
+| entry/main/state | shared | 18,079 | 0.0% |
+
+Clearly map-specific is only **3.4%**. `06_banks` is the one that matters and it is MIXED: the
+bands-as-code bank is map-derived, the **sprite bank is shared**. So the real per-level increment
+is somewhere between 3.4% and 93%, and nothing here narrows it - **build a SECOND level and
+subtract**. That is D-next, and it is also why step 4 says two levels before three.
+
+If it does not fit, `RENDER_FLAT_MAX_WORDS` is RAM-only (DESIGN 1.2) and 2**28 doubles the room -
+but raise it deliberately, with the peak-RSS number, not on discovering a failed build.
 
 ### THE BUDGET WAS RE-DERIVED (2026-08-25), and 88.7% was optimistic.
 

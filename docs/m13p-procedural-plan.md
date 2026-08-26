@@ -595,14 +595,29 @@ together (same rung, one gate).
    uses internally) + 1 jump-to-clean, instead of wflipping the value into a kept-zero result register.
    No `dst`, nothing to read out — the byte already left as IO.
    - `cm.emit idx` — built from the SAME `colormap_values(...)` list `compile_colormap`'s `.apply`
-     table uses (no drift), just fed through the emit generator. **MEASURED: 329.5 ops/call** (real
-     8,192-entry E1M1 colormap) — est. was ~150-400, landed mid-range. **2.07× cheaper than the OLD
-     cm.apply(399)+xor_zero(284)=683 combo**, since there's no register write to pay for afterward.
+     table uses (no drift), just fed through the emit generator. **MEASURED: 79.1 ops/call** (real
+     8,192-entry E1M1 colormap, 4-nibble index). It fuses the colormap LOOKUP and the byte's output
+     into one dispatch — there is no register write to pay for afterward.
    - `byte.emit v` — a 256-entry IDENTITY table (`values=range(256)`) for run counts/raw bytes.
-     **MEASURED: 283.6 ops/call** — est. was ~100-150, landed higher (dispatch overhead dominates the
-     handler-body difference more than expected). Not concerning: LS1's per-run budget (~600-900,
-     TWO emits + narrow clip/advance) still holds — 283.6+329.5≈613 is within range before the
-     clip/advance ops are even added.
+     **MEASURED: 47.1 ops/call** (2-nibble index). The 32.0-op gap to `cm.emit` is exactly the two
+     extra `hex.xor`es a 4-nibble index costs, which is a good sign both numbers are real.
+     So a 0x0B PAIR is ~126 ops, not ~613, and LS1's ~600-900 per-run budget was never in danger.
+
+   ⚠ **THESE WERE 283.6 AND 329.5 UNTIL 2026-08-26, AND BOTH WERE ~6x TOO HIGH.**
+   `scratchpad/measure_emit.py` uses the two-count delta (run n=100 and n=300, subtract, divide by
+   200). That correctly cancels the fixed STARTUP — but its loop body is
+   `hex.cmp 8 + <the call> + hex.inc 8 + jump`, and **per-iteration** work scales with n exactly as
+   the call does, so it rides straight through the subtraction. The counters are `hex.vec 8` —
+   32-bit, for a loop that never exceeds 300 — and every nibble is its own dispatch: **236.5 ops of
+   pure harness, five times the 47.1-op call being weighed.** The note above the old figure read
+   "landed higher (dispatch overhead dominates the handler)", attributing the excess to the thing
+   under test rather than to the scaffolding around it.
+   `scratchpad/measure_emit_ctl.py` adds the control that was missing — the SAME loop with the call
+   removed — and reports both columns side by side. Any per-iteration harness needs one; a
+   two-count delta only removes what is CONSTANT between the two runs.
+   (Consequence: the bands-as-code walk's ~36-70 ops/pair is the same ORDER as the emit path, not
+   an order of magnitude below it. Its real win was over the DATA-bank walk's ~2,600 ops/pair of
+   pointer reads, which is what its own docstring claims.)
    - Verified end-to-end (not just eyeballed): a smoke assemble+run confirmed a 4-entry identity table
      dispatches idx→byte correctly (`b"ABCD"`), before committing to the cost measurement.
 2. **The device side**: `tests/fj/stream_screen.py::StreamScreen(InMemoryScreen)` — an in-repo
@@ -647,9 +662,11 @@ visplane — `slopediv_recip_table` machinery — + a threshold walk over the ba
   `generate_emit_dispatch_table_fj` (own function, not a mode flag — see above) + `StreamScreen`
   device subclass (`tests/fj/stream_screen.py`) + `present.init_screen_stream`/
   `present.begin_frame_stream` (additive, `present.fj`) + 6 pure-Python decode tests + 2 fj-level
-  integration tests (known 3-run column, both flush_mode values) — all 8 pass. MEASURED:
-  `byte.emit` 283.6 ops/call, `cm.emit` 329.5 ops/call (2.07× cheaper than the old cm.apply+xor_zero
-  combo). Nothing visible ships yet (no renderer wiring) — this rung only proves the mechanism.
+  integration tests (known 3-run column, both flush_mode values) — all 8 pass. MEASURED (corrected
+  2026-08-26, see the ⚠ above): `byte.emit` **47.1** ops/call, `cm.emit` **79.1** — the 283.6/329.5
+  originally recorded here were the measuring loop's `hex.cmp 8`/`hex.inc 8` riding through the
+  two-count delta. Nothing visible ships yet (no renderer wiring) — this rung only proves the
+  mechanism.
 - [x] **pS1 — one-column prototype (scratch). DONE, MEASURED 2026-07-04.** `src/fj/stream_render.fj`
   (`stream.emit_band_list` + `stream.emit_column`, the REAL body pS2 will wire per-column) + a
   synthetic-column byte-exact test (`tests/fj/test_stream_render.py`, vs a Python-computed column

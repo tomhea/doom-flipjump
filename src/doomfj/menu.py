@@ -118,13 +118,19 @@ def stream(width, height, lines, selected, colours) -> bytes:
     return bytes(out)
 
 
-def fj(width, height, lines, selected, colours, label: str = "menu_frame") -> str:
+def fj(width, height, lines, selected, colours, label: str = "menu_frame",
+       end_marker: bool = True) -> str:
     """The baked frame as fj: one `stl.output_char` per stream byte, all compile-time operands.
 
     ~2 ops per byte, and a menu stream is ~1 kB — so a menu frame costs order 2,000 ops against a
     world frame's ~28,000,000. The mode flag that chooses between them is the whole of M3's cost.
     """
     data = stream(width, height, lines, selected, colours)
+    if not end_marker:
+        # the caller supplies the end-of-frame byte from a SHARED tail -- see
+        # wall_renderer._menu_lines, where both frame producers fall into one tail
+        assert data[-1] == END
+        data = data[:-1]
     body = "\n".join("    stl.output_char %d" % b for b in data)
     return ("// M3: the baked menu frame -- %d bytes of 0x0B column run-lists, all constants\n"
             "%s:\n%s\n" % (len(data), label, body))

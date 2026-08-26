@@ -44,7 +44,9 @@ _STANDALONE_INCLUDES = ["input.fj"]
 # Everything else about the frame is still residue and is still restored. `emit_reset_part` checks
 # each of these exists and is actually in the set -- see its docstring for why a hole is safe HERE
 # and nowhere else.
-STANDALONE_PERSIST = ("viewx", "viewy", "viewangle", "kb_f", "kb_b", "kb_l", "kb_r")
+# M3: `mode` joins them -- a mode that reset every frame would flicker between the two pictures.
+STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
+                      "kb_f", "kb_b", "kb_l", "kb_r", "mode")
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 
@@ -216,7 +218,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
                         state_wire="bin", player_sim=True, collide=True,
-                        moving_things=True, standalone=False, sector_heights=None,
+                        moving_things=True, standalone=False, menu=False, menu_entries=None,
+                        sector_heights=None,
                         self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
@@ -281,7 +284,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                                sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
                                deg=deg, state_wire=state_wire, player_sim=player_sim,
                                collide=collide, moving_things=moving_things,
-                               standalone=standalone, sector_heights=sector_heights,
+                               standalone=standalone, menu=menu, menu_entries=menu_entries,
+                               sector_heights=sector_heights,
                                return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
@@ -397,7 +401,9 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      "self_reset": self_reset,
                      # M5: no host in the loop -- the keyboard device drives it and the view state
                      # survives the reset.
-                     "standalone": standalone},
+                     "standalone": standalone,
+                     # M3: the menu is a second frame producer chosen by a persisted cell
+                     "menu": menu},
         "self_reset": reset_info,
     }
     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"

@@ -36,6 +36,8 @@ def main():
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--out", default=None)
     ap.add_argument("--gen", default=None)
+    ap.add_argument("--menu", action="store_true",
+                    help="M3: boot into the menu; enter/esc toggles to the world")
     ap.add_argument("--no-reset", action="store_true",
                     help="skip the self-reset: one frame, no loop, no restore set")
     args = ap.parse_args()
@@ -48,7 +50,8 @@ def main():
     t = time.perf_counter()
     metrics = build_wall_renderer(
         str(ROOT / args.wad), args.map, cfg=Config(), out_fjm=out, generated_dir=gen,
-        flat_max_words=RENDER_FLAT_MAX_WORDS, standalone=True, self_reset=not args.no_reset)
+        flat_max_words=RENDER_FLAT_MAX_WORDS, standalone=True, menu=args.menu,
+        self_reset=not args.no_reset)
     print(json.dumps(metrics, indent=2))
     print("total %.0fs" % (time.perf_counter() - t))
     return 0

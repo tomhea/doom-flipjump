@@ -30,7 +30,7 @@ CFG = Config()
 
 POLLS = 8          # polls per "frame", the same unroll the emitter uses
 FRAMES = 6
-KEYS = ("f", "b", "l", "r")
+KEYS = ("f", "b", "l", "r", "m")
 
 # keycode -> which flag, mirroring the macro's own comment table
 BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b",
@@ -40,14 +40,15 @@ BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b",
 def _program() -> str:
     lines = ["stl.startup_and_init_all"]
     for _ in range(FRAMES):
-        lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, bad")
+        lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kmode, bad")
         lines += [f"hex.print_as_digit k{name}, 0" for name in
                   ("fwd", "back", "left", "right")]
+        lines.append("hex.print_as_digit kmode, 0")
         lines.append("stl.output 10")
     lines += ["stl.loop",
               # the halt a non-keyboard input stream gets -- '!' so a rejected run is visible
               "bad:", "stl.output_char 0x21", "stl.loop",
-              "kstat: hex.vec 1", "kcode: hex.vec 2",
+              "kstat: hex.vec 1", "kcode: hex.vec 2", "kmode: hex.vec 1, 1",
               "kfwd: hex.vec 1", "kback: hex.vec 1", "kleft: hex.vec 1", "kright: hex.vec 1"]
     return "\n".join(lines) + "\n"
 
@@ -77,14 +78,19 @@ def _expected(events, binding=None) -> list:
     binding = BINDING if binding is None else binding
     pending = sorted((KeyEvent(*e) for e in events), key=lambda e: e.tic)
     held = {name: 0 for name in KEYS}
+    held["m"] = 1                      # M3: `mode` BAKES to 1 (the game boots into the menu)
     out, index = [], 0
     for tic in range(FRAMES * POLLS):
         if index < len(pending) and pending[index].tic <= tic:
             event = pending[index]
             index += 1
-            name = binding.get(event.keycode)
-            if name is not None:
-                held[name] = 1 if event.is_down else 0
+            if event.keycode in (0x0D, 0x1B):      # enter / esc toggle the menu, DOWN edge only
+                if event.is_down:
+                    held["m"] ^= 1
+            else:
+                name = binding.get(event.keycode)
+                if name is not None:
+                    held[name] = 1 if event.is_down else 0
         if tic % POLLS == POLLS - 1:
             out.append("".join(str(held[name]) for name in KEYS))
     return out
@@ -107,6 +113,14 @@ SCRIPTS = {
                                     (20, True, 0xFF), (21, True, 0x73)],
     "a key held down twice never sticks off": [(0, True, 0x77), (1, True, 0x77),
                                                (9, False, 0x77)],
+    # M3: the menu toggle. It must flip on the DOWN edge only -- toggling on both edges would
+    # land back where it started and the menu would never open.
+    "enter toggles the menu once per press": [(0, True, 0x0D), (1, False, 0x0D)],
+    "enter twice comes back": [(0, True, 0x0D), (1, False, 0x0D),
+                               (8, True, 0x0D), (9, False, 0x0D)],
+    "esc does the same as enter": [(0, True, 0x1B), (1, False, 0x1B)],
+    "the menu toggle does not disturb the keys": [(0, True, 0x77), (1, True, 0x0D),
+                                                  (2, False, 0x0D), (16, False, 0x77)],
 }
 
 

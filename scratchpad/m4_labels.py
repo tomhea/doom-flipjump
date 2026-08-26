@@ -22,12 +22,25 @@ ap.add_argument("--map", default="e1m1")
 args = ap.parse_args()
 
 LABEL = re.compile(r"^\s*([A-Za-z_][\w]*)\s*:(?!\s*hex\.vec|\s*bit\.vec)")
+DEF = re.compile(r"^\s*def\s")
+# !! ONLY DEPTH 0 COUNTS. Labels inside a generated `def ... { }` are macro-LOCALS -- one cell per
+# expansion, named by the assembler, and they cannot collide between two maps. Counting them put
+# five bogus families in this tool's own output (`e#`, `l#`, `n#`, `t#`, `d#_#`, 368 labels) that
+# are @-locals of the generated wall walkers. Track the braces.
 labels = []
 for f in sorted(Path(args.gen).glob("%s_0*.fj" % args.map)):
+    depth = 0
     for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+        if DEF.match(line):
+            depth += line.count("{") - line.count("}")
+            continue
+        if depth:
+            depth += line.count("{") - line.count("}")
+            continue
         m = LABEL.match(line)
         if m:
             labels.append(m.group(1))
+        depth += line.count("{") - line.count("}")
 
 pref = [l for l in labels if l.lower().startswith(args.map)]
 rest = [l for l in labels if not l.lower().startswith(args.map)]

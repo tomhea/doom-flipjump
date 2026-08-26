@@ -229,6 +229,10 @@ def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = Fal
 # in a 200 ms frame; if one ever did, the extras are read on the NEXT frame, in order.
 STANDALONE_POLLS = 8
 
+# M3 -- the menu the standalone tier boots into. Entries only; the picture is derived
+# (doomfj.menu), and the colours come from the wad's own PLAYPAL.
+DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "QUIT"]
+
 # M5 — the standalone tier's own globals, in ONE place (R6): the emitter declares them and
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, so a vec
 # widened here without re-running that fails the build instead of leaving half a register
@@ -237,10 +241,41 @@ STANDALONE_POLLS = 8
 STANDALONE_SCRATCH_DECLS = [
     "kbstat: hex.vec 1", "kbcode: hex.vec 2",
     "kb_f: hex.vec 1", "kb_b: hex.vec 1", "kb_l: hex.vec 1", "kb_r: hex.vec 1",
+    # M3: which frame producer runs. 1 = MENU, 0 = world, and it BAKES to 1 so the game boots
+    # into the menu. Persisted like the key flags -- a mode that reset every frame would flicker
+    # between the two pictures. It is declared even when the menu is off (two words) so both
+    # standalone tiers share one restore set.
+    "mode: hex.vec 1, 1",
 ]
 
 
-def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS) -> list:
+def _menu_lines(cfg, asset_wad, entries, selected: int) -> list:
+    """M3 — the MENU frame, and the branch that chooses it.
+
+    A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
+    column run-lists, so this is a constant byte stream: no renderer, no map, no tables, no
+    dispatch. MEASURED at ~1,172 bytes -> ~2,344 ops against a world frame's ~28,000,000.
+
+    ⚠ THE STREAM'S END-OF-FRAME BYTE IS OMITTED ON PURPOSE. Both producers fall into the SAME
+    tail, whose last line is `stl.output_char 0xFF` -- which `selfreset.emit_reset_part` asserts on
+    when it patches the frame into a loop. Emitting a second 0xFF here would present an empty
+    frame; jumping past the tail would break that assert. So the menu ends where the world ends.
+    """
+    from doomfj.menu import fj as menu_fj, palette_colours
+    colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
+    return [
+        # after the poll (so this frame sees the toggle) and BEFORE the sim, so a menu frame does
+        # not move the player -- which is what makes leaving the menu resume where you were.
+        "hex.if0 1, mode, do_world",
+        menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, selected, colours,
+                label="menu_frame", end_marker=False),
+        ";frame_end",
+        "do_world:",
+    ]
+
+
+def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
+                            menu: list | None = None) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -255,7 +290,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     restore-set scratch, and only the four flags need to survive the reset.
     """
     return [
-        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, bad",
+        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, mode, bad",
         # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
         "hex.zero 2, pkeys",
@@ -263,6 +298,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         "hex.if0 1, kb_b, sa_nb", "hex.xor_by pkeys, 0x2", "sa_nb:",
         "hex.if0 1, kb_l, sa_nl", "hex.xor_by pkeys, 0x4", "sa_nl:",
         "hex.if0 1, kb_r, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
+        *(menu or []),                     # M3: the menu frame + the branch past the world
         *_player_sim_lines(collide),
         *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
         *_int_part_lines("vy", "viewy", "vysx", "vydone"),
@@ -359,6 +395,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        deg: bool = False, state_wire: str = "dec",
                        player_sim: bool = False, collide: bool = False,
                        moving_things: bool = False, standalone: bool = False,
+                       menu: bool = False, menu_entries=None,
                        sector_heights: dict | None = None,
                        return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
@@ -520,6 +557,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         "standalone=True presents 0x0B column run-lists, which is the lines tier")
     # the player start, which only the standalone tier bakes (see the view-state declaration)
     _spawn = spawn_state(map_wad, mapname) if standalone else None
+    assert not menu or standalone, "menu=True is a standalone-tier frame producer"
     # `sim.thing_load` externs the full sprite register set, and an extern that has no global is an
     # assembler error -- so the two OPTIONAL registers must be present. Both are in the certified
     # tier; this refuses at emit time rather than 25 minutes into an assemble.
@@ -1636,8 +1674,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         _collide_block = _collide_decls = []
         _collide_tables = _collide_descend = ""
 
+    # M3: the menu frame + the branch past the world. Built here, where `asset_wad` is
+    # resolved, so its colours come from the SAME palette the renderer bakes.
+    _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU), 2)
+                   if menu else None)
     pass1 = [
-        *(_standalone_input_lines(collide) if standalone else
+        *(_standalone_input_lines(collide, menu=_menu_block) if standalone else
           _state_wire_lines(state_wire, sim=player_sim, collide=collide)),
         *_collide_block,
         # M14-e: the thing positions follow the player's state on the wire, then every leaf's list
@@ -1920,7 +1962,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           ("present.init_screen_stream 0" if (stream or raster or projm or lines) else "present.init_screen"),
           *prelude,
           *pass1, *pass2, *plane_pass,
-          *postlude_palette, *present_tail, "stl.loop",
+          # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
+          # `stl.output_char 0xFF`, so the line preceding `stl.loop` is still that 0xFF and
+          # `selfreset.emit_reset_part`'s structural assert is untouched.
+          *postlude_palette, *(["frame_end:"] if menu else []), *present_tail, "stl.loop",
           "bad: stl.loop",
           *fb_leaves,
           *((["seg_pass1_leaf:", "stl.fret seg_ret"]

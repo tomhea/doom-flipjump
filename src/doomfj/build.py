@@ -216,7 +216,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
                         state_wire="bin", player_sim=True, collide=True,
-                        moving_things=True, standalone=False,
+                        moving_things=True, standalone=False, sector_heights=None,
                         self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
@@ -281,7 +281,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                                sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
                                deg=deg, state_wire=state_wire, player_sim=player_sim,
                                collide=collide, moving_things=moving_things,
-                               standalone=standalone, return_parts=True)
+                               standalone=standalone, sector_heights=sector_heights,
+                               return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
     # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a

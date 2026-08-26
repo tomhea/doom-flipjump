@@ -375,6 +375,24 @@ class Scene:
     sector_heights: dict | None = None
 
 
+def apply_sector_heights(secs, sector_heights):
+    """THE door override, and there is exactly one of it.
+
+    ⚠ B2/M2: the ORACLE applies it through `scene_sectors` and the EMITTER applies it to the one
+    `map_wad.sectors()` read it makes, so if these two rounded, clamped or ordered differently the
+    mirrors would disagree about where a door is — the exact failure this repo has paid for three
+    times (M14-c, PJ-1, PJ-2). They call this.
+
+    With no override the wad's own list comes back UNCHANGED (no copy, no allocation), so the
+    door-free path is bit-identical to what it was before doors existed."""
+    if not sector_heights:
+        return secs
+    out = list(secs)
+    for idx, (floor_h, ceil_h) in sector_heights.items():
+        out[idx] = dataclasses.replace(out[idx], floor_h=floor_h, ceil_h=ceil_h)
+    return out
+
+
 def scene_sectors(scene: Scene):
     """The level's SECTORS with any door override applied — the SSOT every reader must go through.
 
@@ -385,14 +403,7 @@ def scene_sectors(scene: Scene):
     allocation, so the door-free path is exactly what it was. (It is not the identical OBJECT
     across calls: `WadFile.sectors()` builds a fresh list each time. Checked, because the first
     version of this comment claimed identity and was wrong.)"""
-    secs = scene.map_wad.sectors(scene.mapname)
-    if not scene.sector_heights:
-        return secs
-    out = list(secs)
-    for idx, fc in scene.sector_heights.items():
-        floor_h, ceil_h = fc
-        out[idx] = dataclasses.replace(out[idx], floor_h=floor_h, ceil_h=ceil_h)
-    return out
+    return apply_sector_heights(scene.map_wad.sectors(scene.mapname), scene.sector_heights)
 
 
 def build_scene(map_wad: WadFile, asset_wad: WadFile, mapname: str,

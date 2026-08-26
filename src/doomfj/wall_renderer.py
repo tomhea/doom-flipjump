@@ -23,7 +23,7 @@ from doomfj.lut_generator import (
 )
 from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
-                                    spawn_state)
+                                    apply_sector_heights, spawn_state)
 from doomfj.mapcompiler import build_blockmap
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
@@ -359,6 +359,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        deg: bool = False, state_wire: str = "dec",
                        player_sim: bool = False, collide: bool = False,
                        moving_things: bool = False, standalone: bool = False,
+                       sector_heights: dict | None = None,
                        return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
@@ -545,7 +546,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
     cmap = bake_bsp(map_wad, mapname)
     verts = cmap.vertexes
-    lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname); secs = map_wad.sectors(mapname)
+    lds = map_wad.linedefs(mapname); sds = map_wad.sidedefs(mapname)
+    # M2/B2: the ONE sector read the emitter makes, so the door override lands here and
+    # reaches every consumer -- pids, the band bank, V5 pieces, collision, thing-liveness.
+    # Same helper the oracle's `scene_sectors` uses (R6): a door the two mirrors disagree
+    # about is the failure this repo has paid for three times.
+    secs = apply_sector_heights(map_wad.sectors(mapname), sector_heights)
     scene = build_scene(map_wad, asset_wad, mapname)
     colormap = scene.asset_wad.colormap()
     proj = cfg.PROJECTION << 16

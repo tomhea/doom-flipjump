@@ -33,6 +33,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj.config import Config                                          # noqa: E402
+from doomfj.doors import door_sectors, heights_at, stops                  # noqa: E402
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
                                     build_scene, spawn_state)
 from doomfj.wad import WadFile                                            # noqa: E402
@@ -58,75 +59,25 @@ RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noi
 
 secs, lds, sds = mw.sectors(args.map), mw.linedefs(args.map), mw.sidedefs(args.map)
 
-# ── the door sectors, WITH DOOM'S ACTUAL SEMANTICS ─────────────────────────────────────────────
-# ⚠ THE FIRST VERSION OF THIS FILE GOT THIS WRONG AND STILL "PASSED". It took every sector behind a
-# special line and swept floor_h -> the WAD's ceil_h. But a DOOM door is STORED SHUT: its sector has
-# ceil_h == floor_h, so that sweep is zero movement for every real door. The 1,451 px the gate
-# reported came from a LIFT (sector 36, open by 144) -- the gate passed while measuring the wrong
-# thing, which is exactly the vacuity this repo keeps getting caught by. MEASURED: of 23 sectors
-# behind a special line, 13 are stored shut (real doors) and 10 are already-open lift/other sectors.
-#
-# The real rule (P_DoorRaise): a door opens to  min(neighbouring sector ceiling) - 4.
-_nb = {}
-for ld in lds:
-    f = sds[ld.front].sector if ld.front != 0xFFFF and ld.front < len(sds) else None
-    b = sds[ld.back].sector if ld.back != 0xFFFF and ld.back < len(sds) else None
-    if f is not None and b is not None and f != b:
-        _nb.setdefault(f, set()).add(b)
-        _nb.setdefault(b, set()).add(f)
-
-doors = {}
-for ld in lds:
-    if ld.special and ld.back != 0xFFFF and ld.back < len(sds):
-        si = sds[ld.back].sector
-        s = secs[si]
-        if s.ceil_h != s.floor_h:          # already open: a lift or a trigger sector, not a door
-            continue
-        nb = _nb.get(si)
-        if not nb:
-            continue
-        doors[si] = min(secs[n].ceil_h for n in nb) - 4      # the OPEN height
+# -- the doors, from doomfj.doors -------------------------------------------------------------
+# THE MODEL LIVES IN ONE PLACE. It used to be written out here, and the emitter would have had to
+# write it out again: see doomfj/doors.py for what a door is (stored shut, opens to
+# min(neighbouring ceiling) - 4) and why the first version of this file measured a LIFT instead.
+doors = door_sectors(secs, lds, sds)
 print(f"{args.map}: {len(secs)} sectors, {len(doors)} REAL doors (stored shut), "
       f"{len(set(doors.values()))} distinct open heights {sorted(set(doors.values()))}", flush=True)
 
 
-def quantise(lo, open_h, h):
-    """THE rounding rule, and there is exactly one of it.
-
-    The height a door stops at must be one the EMITTER can bake a pid for, so the oracle must round
-    exactly as the emitter will -- if the two round differently the mirrors diverge, which is this
-    repo's most-repeated bug.
-
-    ⚠ THE CLAMP IS LOAD-BEARING. Flooring to a multiple of the quantum lands BELOW the floor
-    whenever the floor is not itself a multiple: floor -128 at quant 24 floors to -144, a ceiling
-    under its own floor. `door_state` clamped and `height_set` did not, so for every quantum that
-    does not divide the floor height the two disagreed -- and `height_set` is the one that would
-    have SIZED THE PID BUDGET. It was also never called, so nothing caught it. They share this now."""
-    return max(lo, min(open_h, (h // args.quant) * args.quant))
-
-
 def door_state(frac):
-    """`frac` 0.0 = shut (ceiling on the floor), 1.0 = fully open (min neighbouring ceiling - 4)."""
-    out = {}
-    for si, open_h in doors.items():
-        s = secs[si]
-        lo = s.floor_h                       # shut: the ceiling rests on the floor
-        out[si] = (lo, quantise(lo, open_h, lo + (open_h - lo) * frac))
-    return out
+    """`frac` 0.0 = shut (ceiling on the floor), 1.0 = fully open."""
+    return heights_at(secs, lds, sds, frac, args.quant)
 
 
 def height_set():
     """Every ceiling height a quantised sweep can produce. The emitter bakes a pid per (ceiling,
     floor) PAIR, so this is NOT the pid cost -- 13 doors sharing 27 heights at quant 16 cost 94
     pids, not 27. scratchpad/m2_budget.py does that arithmetic against the real baked count."""
-    hs = set()
-    for si, open_h in doors.items():
-        lo, h = secs[si].floor_h, secs[si].floor_h
-        while h < open_h:
-            hs.add(quantise(lo, open_h, h))
-            h += args.quant
-        hs.add(open_h)
-    return hs
+    return {h for si, oh in doors.items() for h in stops(secs[si].floor_h, oh, args.quant)}
 
 
 def render(vp, frac=None):

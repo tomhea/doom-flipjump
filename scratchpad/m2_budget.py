@@ -23,6 +23,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "src"))
 
+from doomfj.doors import door_sectors                                     # noqa: E402
+from doomfj.doors import stops as door_stops                              # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -36,47 +38,18 @@ args = ap.parse_args()
 mw = WadFile.from_path(str(ROOT / args.wad))
 secs, lds, sds = mw.sectors(args.map), mw.linedefs(args.map), mw.sidedefs(args.map)
 
-# ---- the doors, by DOOM's rule (the same derivation scratchpad/door_gate.py uses) --------------
-# A real door is STORED SHUT (ceil_h == floor_h) behind a special linedef, and P_DoorRaise opens it
-# to min(neighbouring sector ceiling) - 4. Sweeping to the WAD's own ceiling instead is zero
-# movement for every real door -- the mistake that made the first door gate measure a LIFT.
-neighbours = {}
-for ld in lds:
-    f = sds[ld.front].sector if ld.front != 0xFFFF and ld.front < len(sds) else None
-    b = sds[ld.back].sector if ld.back != 0xFFFF and ld.back < len(sds) else None
-    if f is not None and b is not None and f != b:
-        neighbours.setdefault(f, set()).add(b)
-        neighbours.setdefault(b, set()).add(f)
-
-doors, lifts = {}, []
-for ld in lds:
-    if ld.special and ld.back != 0xFFFF and ld.back < len(sds):
-        si = sds[ld.back].sector
-        s = secs[si]
-        if s.ceil_h != s.floor_h:
-            lifts.append(si)
-            continue
-        nb = neighbours.get(si)
-        if nb:
-            doors[si] = min(secs[n].ceil_h for n in nb) - 4
+# ---- the doors, from doomfj.doors (the model lives in ONE place) ------------------------------
+doors = door_sectors(secs, lds, sds)
+lifts = [sds[ld.back].sector for ld in lds
+         if ld.special and ld.back != 0xFFFF and ld.back < len(sds)
+         and sds[ld.back].sector not in doors]
 
 def sweep(floor_h, open_h):
-    """every ceiling height the QUANTISED sweep can stop at, shut..open inclusive.
+    """Every height this door can stop at -- doomfj.doors.stops, so the budget below counts exactly
+    the states the gate and the emitter can actually produce. An earlier local copy floored without
+    allowing the endpoint, and counted a fully-open stop the gate could never reach."""
+    return door_stops(floor_h, open_h, args.quant)
 
-    !! THE CLAMP IS LOAD-BEARING, and door_gate.height_set() DOES NOT HAVE IT. Flooring to a
-    multiple of the quantum can land BELOW the floor when the floor is not itself a multiple:
-    floor -128 at quant 24 floors to -144, a ceiling under its own floor. door_gate's `door_state`
-    clamps with max(lo, min(open_h, q)) and its `height_set` does not, so the two disagree for
-    every quantum that does not divide the floor height -- and `height_set` is the one that would
-    have sized this budget. Same rule as door_state, here, and the counts below are the clamped
-    ones."""
-    hs, h = set(), floor_h
-    while h < open_h:
-        hs.add(max(floor_h, min(open_h, (h // args.quant) * args.quant)))
-        h += args.quant
-    hs.add(open_h)
-    hs.add(floor_h)                      # shut, which the wad already carries
-    return sorted(hs)
 
 print("%s: %d sectors, %d REAL doors (stored shut), %d already-open sectors behind a special line"
       % (args.map, len(secs), len(doors), len(set(lifts))))

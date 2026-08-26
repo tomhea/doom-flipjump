@@ -265,13 +265,40 @@ Owner's constraint: **keep ops/frame at similar cost**, measured against the swe
 
 ---
 
-## 4. M3 - menu
+## 4. M3 - menu   <- STARTED
 
-Cheapest content milestone, and the first thing that genuinely *needs* the loop.
+Cheapest content milestone, and M5 made it cheaper still: the standalone binary already has the
+two things a menu needs - **persistent state** and **keyboard input**.
 
-- Text output already exists (`stl.output_char`), so a menu is a different **frame producer**, not
-  new machinery: a mode flag selecting menu-draw vs world-draw.
-- Input already works (M14 rung 0). Needs a mode state and a transition.
+**DONE: the menu is a BAKED FRAME** (`src/doomfj/menu.py`, commit in this series). A menu screen is
+a picture that never changes and the renderer already presents pictures as 0x0B column run-lists,
+so the menu needs no renderer: it is a constant byte stream, and menu-draw is a run of
+`stl.output_char`s with compile-time operands.
+
+    MEASURED: 1,172 bytes -> ~2,344 ops/frame, against a world frame's ~28,000,000.
+    The menu is ~11,900x cheaper, so THE MODE FLAG IS M3'S ENTIRE COST.
+
+One generator feeds both mirrors (`menu.pixels()` for the oracle, `menu.stream()` for fj, both from
+one `_bitmap()`), and `tests/host/test_menu.py` (18 tests) proves they agree by decoding the stream
+through the real `InMemoryScreen`. Colours are derived from the wad's PLAYPAL, not picked.
+
+### The steps left, in order
+
+1. **A persisted `mode` cell**, beside `kb_f..kb_r` in `STANDALONE_SCRATCH_DECLS`, and added to
+   `build.STANDALONE_PERSIST` so it survives the M1 reset. Add it to `STANDALONE_SCRATCH_DECLS`
+   and re-run `scratchpad/m5_setfile.py` - the set gains one global at declared width.
+2. **The branch at frame start**: `hex.if0 1, mode, world_frame` -> emit the baked menu bytes and
+   jump to the frame tail, skipping pass1/pass2/planes entirely. The frame tail already ends with
+   `stl.output_char 0xFF` + `;m1_reset`, so the reset restores as usual and the loop continues.
+   ⚠ `emit_reset_part` ASSERTS the line before the tail is the 0xFF marker - keep that shape.
+3. **The transition**: a keycode (enter = 13, esc = 27) toggles `mode` in `kb.poll`'s dispatch.
+   Both are already inside its `0x0_`/`0x1_` high-nibble range, which the macro does not yet test.
+4. **The gate**: extend `scratchpad/m5_gate.py` with a script that starts in the menu, presses
+   enter, and requires frame 0 to equal `menu.pixels()` and frame 1 to equal the oracle's world
+   frame. Cheap - the menu half needs no oracle render at all.
+
+⚠ The menu frame does NOT go through pass1, so `viewx`/`viewy`/`viewangle` are untouched by it -
+which is exactly what makes "return to the menu and back" keep the player where they were.
 
 ---
 
@@ -279,6 +306,41 @@ Cheapest content milestone, and the first thing that genuinely *needs* the loop.
 
 **DECIDED**: three levels in one image (E1M1 + E1M5 + E1M8). The full 9-level episode is **OUT**.
 If three does not fit, **scale down rather than push**.
+
+### The steps, now that the index cap is gone
+
+**D1 - the label collision surface. DONE.** fj top-level labels are GLOBAL, so three emissions in
+one image collide. MEASURED (`scratchpad/m4_labels.py`) on the shipped emission:
+
+| | |
+|---|---|
+| labels emitted for E1M1 | 1,678,742 |
+| already map-prefixed (`e1m1_*`) | 6,135 - nothing owed |
+| bands-as-code bank (`vpb_`/`vql_`/`vqh_`) | 1,655,556 - **ID-indexed, so three levels MERGE into one walk** (and M2 rung 1 cleared the id cap) |
+| **map-specific, 22 families** | **16,780 - THE RENAME SURFACE** |
+| shared registers/leaves | 271 - one per program, not per map |
+
+The big families: `ss#_seg#_mark`/`_marked` (2,890 each), `seg#_attrib_consts` (1,445),
+`seg#_face_consts` (1,389), `ss#_visit`/`_occluded` (1,364 each), `ss#_seg#_unseen` (1,150),
+`ptloc_l#`/`n#`, `seg#_geom_consts`/`_render_consts` (575 each), `ss#_thing#_do`/`_skip`.
+
+**16,780 labels come from ~22 f-string sites**, and `_pfx(mapname)` already exists for the BSP ones.
+
+2. **Make the prefix OPT-IN**, the way `standalone` is: prefix only when building multi-level, so
+   single-level emission stays **byte-identical** and every existing gate transfers without
+   re-running. Prove it with `scratchpad/cr/emit_hash_vs_head.py` (it has its own negative control).
+   ⚠ Rule 4 freezes generated global labels; an opt-in prefix is what keeps that rule intact.
+3. **Price the widened band index for real** - one extra `hex.xor` per `vpb_walk` (upper bound
+   <= 0.045%, never measured) and the assembler at `pad` 131,072.
+4. **Two levels first.** Three is the goal; two is the rung that finds every collision for half the
+   build time. Only then three.
+5. **The level table + entry point**: which map the frame renders is a mode/level cell - the SAME
+   mechanism M3's menu flag uses, which is why M3 comes first.
+
+⚠ Cost side still unmeasured: span and assemble time for N levels. At 85.98M words for one E1M1
+(doors open) against a 134.2M-word limit, **two levels do not fit the current `flat_max_words`** -
+that limit is `config.RENDER_FLAT_MAX_WORDS = 2**27` and raising it is RAM-only, but it must be
+raised deliberately and measured, not discovered.
 
 ### THE BUDGET WAS RE-DERIVED (2026-08-25), and 88.7% was optimistic.
 

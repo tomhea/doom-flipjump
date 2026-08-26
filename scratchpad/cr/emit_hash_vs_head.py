@@ -24,11 +24,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SELFTEST = "--selftest" in sys.argv
+# ⚠ the baseline is a REF, defaulting to HEAD. Once the change under review is COMMITTED, HEAD is
+# the change, and comparing it against itself is trivially SAME -- a control that cannot fail.
+# Pass the last commit whose emission was certified instead: `--ref <sha>`.
+REF = "HEAD"
+for _i, _a in enumerate(sys.argv):
+    if _a == "--ref" and _i + 1 < len(sys.argv):
+        REF = sys.argv[_i + 1]
 
 # HEAD's src tree, complete, so the import graph resolves exactly as it does in the working tree
 head_dir = Path(tempfile.mkdtemp()) / "src"
 shutil.copytree(ROOT / "src", head_dir)
-head_txt = subprocess.run(["git", "show", "HEAD:src/doomfj/wall_renderer.py"], cwd=ROOT,
+head_txt = subprocess.run(["git", "show", REF + ":src/doomfj/wall_renderer.py"], cwd=ROOT,
                           capture_output=True, check=True).stdout.decode("utf-8")
 if SELFTEST:
     # the mutation: one baked constant, one character -- the smallest thing that must still trip it

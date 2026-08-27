@@ -1,0 +1,24 @@
+A (baseline): scratchpad/fjmcache/_ca2_ship_base.fjm  sha256 204ae314d710619ce5a28e3be40f3be994a0404597a74ef6d89c2a27b7cc1d1d
+B (new)     : scratchpad/fjmcache/_ca2_ship_new.fjm  sha256 49d35b84ddd81ea7bc45605fb9b550f5aa97077bef1dfc96d5d8e4b2c1b22909
+
+65 walkable grid points x 4 angles = 260 frames
+   40/260 frames (821s)
+   80/260 frames (2037s)
+   120/260 frames (3337s)
+   160/260 frames (4316s)
+   200/260 frames (5794s)
+   240/260 frames (7340s)
+
+============================================================================================
+SHIPPED TIER (self_reset=False, sim + collision + moving things)
+                   median           mean            min            max
+A base         29,054,107     29,490,018      7,597,552     58,353,520
+B new          27,932,265     28,302,045      7,569,883     56,112,295
+delta          -1,121,842     -1,187,973        -27,669     -2,241,225
+pct                -3.86%         -4.03%
+============================================================================================
+FRAME-COUNT ctl : 0 viewpoints presented != 1 frame  ok
+PICTURE CONTROL : 260 of 260 frames byte-exact between A and B  ok
+VACUITY CONTROL : 254 distinct pictures across 260 frames  ok
+
+ca2_sweep_ship: PASS

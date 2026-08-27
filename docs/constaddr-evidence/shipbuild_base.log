@@ -1,0 +1,32 @@
+building the SHIPPED tier (self_reset=False) -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\fjmcache\_ca2_ship_base.fjm
+
+{
+  "assemble_seconds": 1198.782,
+  "downscale": 2,
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": false
+  },
+  "fjm_bytes": 31165872,
+  "flat_limit": 134217728,
+  "headroom": 1.581,
+  "map": "E1M1",
+  "span_words": 84883902,
+  "storage_mode": "flat",
+  "tier": "lines/W1R/FT1+plane_near"
+}
+
+out    : C:\Users\tomhe\Documents\doom-flipjump\scratchpad\fjmcache\_ca2_ship_base.fjm
+sha256 : 204ae314d710619ce5a28e3be40f3be994a0404597a74ef6d89c2a27b7cc1d1d
+bytes  : 31,165,872
+wall   : 2525 s  ! this machine's wall clock drifts ~70%; compare OP COUNTS, not this

@@ -14,7 +14,21 @@ dev = ["pytest"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/doomfj"]
+# NOTE: hatchling ships every file under the package dir, so src/doomfj/data/m1_restore_set.json.gz
+# (the M1 restore set that build_wall_renderer(self_reset=True) defaults to) is already in the
+# wheel -- VERIFIED by building one; an explicit force-include is in fact REJECTED as a duplicate.
+# No __init__.py or package-data entry is needed. Do not "fix" this.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]          # so tests can import the tests/fixtures/* builders as a package
+# CR-2026-08 (TS-10) -- THE LADDER'S FIRST RUNG HAS TO BE RUNNABLE.
+# `pytest tests/host` was documented as a ~1.5 minute check and as deselecting the shipped-build
+# test. Neither was true: there was no marker, no addopts and no deselect anywhere, so the run
+# walked into `test_build_wall_renderer_e1m1_flat` (~70 min) at 17% and every bounded invocation
+# died there -- which is also how five docs came to carry a copy-pasted `--deselect` workaround
+# instead of fixing it once. `slow` is now registered and excluded by default, so the documented
+# command does what the doc says AND prints the "N deselected" line that proves the filter bound.
+#   run them:  pytest tests/host -m slow          (or -m "")
+markers = ["slow: heavy build/assemble tests (minutes to ~70 min); excluded by default"]
+addopts = "-m 'not slow'"

@@ -1,0 +1,490 @@
+"""M1 -- the self-reset machinery's host logic (src/doomfj/selfreset.py).
+
+The self-reset bakes NUMERIC addresses into the program, so the two functions that decide WHICH
+addresses are load-bearing in a way a 40-minute build cannot check for you: get them wrong and the
+reset writes the wrong cells, which does not produce a wrong pixel -- it produces a different
+program. Both are pure logic over a label table, so they are testable in milliseconds.
+
+Every test here is a NEGATIVE control in the R9 sense: each one breaks something real and requires
+the code to refuse. A test that only fed valid input would pass just as happily against a function
+that never checked anything.
+"""
+import gzip
+import json
+
+import pytest
+
+from doomfj.harness import W
+from doomfj import selfreset
+from doomfj.selfreset import (BYTE_ARRAY_NAMES, byte_arrays, load_restore_set,
+                              verify_labels_unchanged)
+
+
+def _set_file(tmp_path, entries, words=None, fmt="label+offset", provenance=True, labels=None):
+    """A restore-set file. `labels` is the table the LAYOUT FINGERPRINT is computed against; it
+    defaults to whichever table the test then resolves with, so these files describe a build that
+    exists. A test that wants the fingerprint to MISmatch passes a different table to
+    load_restore_set (see test_layout_fingerprint_rejects_a_differently_laid_out_build)."""
+    p = tmp_path / "set.json.gz"
+    n = words if words is not None else sum(len(e) - 1 for e in entries)
+    doc = {"format": fmt, "words": n, "labels": len(entries), "entries": entries}
+    if provenance:
+        doc.update(source_sha256="x" * 64, labels_sha256="y" * 64, generated_by="test")
+        doc["layout_fingerprint"] = selfreset.layout_fingerprint(
+            doc, labels if labels is not None else LABELS)
+    with gzip.open(p, "wt", encoding="utf-8") as f:
+        json.dump(doc, f)
+    return p
+
+
+LABELS = {"alpha": 100 * W, "beta": 500 * W, "gamma": 900 * W}
+
+
+def test_resolves_label_plus_offset_to_absolute_words(tmp_path):
+    p = _set_file(tmp_path, [["alpha", 0, 1, 2], ["beta", 10, 11]])
+    got = load_restore_set(p, LABELS)
+    assert got == {100, 101, 102, 510, 511}
+
+
+def test_refuses_a_set_naming_a_label_this_build_does_not_have(tmp_path):
+    """The failure this exists for: the set was derived against a DIFFERENT program.
+
+    It is not hypothetical -- putting m1_reset.fj into the includes renumbered 200 of the set's
+    labels, because a macro-expansion label is named f<file>:l<line>:... and inserting a file
+    renumbers every file after it.
+    """
+    p = _set_file(tmp_path, [["alpha", 0], ["nosuchlabel", 3]])
+    with pytest.raises(AssertionError, match="labels this build does not have"):
+        load_restore_set(p, LABELS)
+
+
+def test_refuses_an_absolute_address_set(tmp_path):
+    """Absolute addresses are only valid for the assembly they came from -- refuse them outright."""
+    p = tmp_path / "abs.json.gz"
+    with gzip.open(p, "wt", encoding="utf-8") as f:
+        json.dump({"runs": [[10, 20]]}, f)
+    with pytest.raises(AssertionError, match="not label-relative"):
+        load_restore_set(p, LABELS)
+
+
+def test_refuses_when_the_resolved_word_count_disagrees(tmp_path):
+    """A stated size that does not match what resolved means the file and the table disagree."""
+    p = _set_file(tmp_path, [["alpha", 0, 1]], words=99)
+    with pytest.raises(AssertionError, match="resolved to"):
+        load_restore_set(p, LABELS)
+
+
+def test_duplicate_offsets_do_not_inflate_the_count(tmp_path):
+    """Resolution is a SET: the same word named twice is one word, and `words` must reflect that."""
+    p = _set_file(tmp_path, [["alpha", 0, 0, 1]], words=2)
+    assert load_restore_set(p, LABELS) == {100, 101}
+
+
+def test_verify_flags_a_label_that_moved_INSIDE_the_restored_set(tmp_path):
+    p = _set_file(tmp_path, [["alpha", 0, 1]])
+    old = dict(LABELS)
+    new = dict(LABELS)
+    new["alpha"] = 101 * W                      # the restored region itself moved
+    assert verify_labels_unchanged(old, new, p) == ["alpha"]
+
+
+def test_verify_ignores_a_label_that_moved_OUTSIDE_the_restored_set(tmp_path):
+    """The real build sees ~32 such labels every time -- hex.exact_xor's end/switch sit at
+    wflip-chain spots whose recycled pad slots shift when the program gains wflips. They are code,
+    not restored cells. A min..max RANGE test flags them; membership correctly does not."""
+    p = _set_file(tmp_path, [["alpha", 0, 1]])
+    old = dict(LABELS)
+    new = dict(LABELS)
+    new["gamma"] = 12345 * W                    # far outside the set, and far from alpha
+    assert verify_labels_unchanged(old, new, p) == []
+
+
+def test_verify_is_clean_when_nothing_moved(tmp_path):
+    p = _set_file(tmp_path, [["alpha", 0, 1], ["beta", 0]])
+    assert verify_labels_unchanged(dict(LABELS), dict(LABELS), p) == []
+
+
+# ---------------------------------------------------------------------------------------------
+# The R6/R9 fixes from the CR of PR #76. Each of these guards a failure that is BYTE-EXACT on the
+# map we ship, so no rendering gate can see it.
+# ---------------------------------------------------------------------------------------------
+
+def _fake_labels(spec):
+    """spec: {name: (word_addr, declared_cells)} -> a bit-address label dict with a next label
+    placed exactly `declared_cells` cells later, which is what the extent derivation reads."""
+    out = {}
+    for name, (base, cells) in spec.items():
+        out[name] = base * W
+        out["_after_" + name] = (base + 2 * cells) * W
+    return out
+
+
+def _byte_call(spec, view_w, nss):
+    bits = _fake_labels(spec)
+    return byte_arrays(bits, sorted(v // W for v in bits.values()), view_w, nss)
+
+
+def test_byte_array_counts_are_derived_not_hardcoded():
+    """sshead is declared 2*nss cells and a 1-cell stride reaches nss; the per-column arrays are
+    declared VIEW_W and reach VIEW_W."""
+    spec = {"sshead": (1000, 1364), "pclm": (10000, 200), "sfflag": (20000, 200)}
+    assert _byte_call(spec, 200, 682) == [("sshead", 682), ("pclm", 200), ("sfflag", 200)]
+
+
+def test_byte_array_counts_follow_a_wider_viewport():
+    """THE BUG THIS EXISTS FOR. With a hardcoded 160 a wider VIEW_W leaves the extra byte cells in
+    the NIBBLE set, where the clear CORRUPTS them (0xA5 -> 0x22A5) instead of failing -- and it
+    stays byte-exact on the old map, so every gate passes."""
+    spec = {"sshead": (1000, 1364), "pclm": (10000, 640), "sfflag": (20000, 640)}
+    assert _byte_call(spec, 640, 682)[1] == ("pclm", 640)
+
+
+def test_byte_arrays_refuse_geometry_that_disagrees_with_the_layout():
+    spec = {"sshead": (1000, 1364), "pclm": (10000, 200), "sfflag": (20000, 200)}
+    with pytest.raises(AssertionError, match="geometry says"):
+        _byte_call(spec, 160, 682)            # emitter laid out 200, caller claims 160
+    with pytest.raises(AssertionError, match="geometry says"):
+        _byte_call(spec, 200, 683)            # one more subsector than the layout has
+
+
+def test_restore_set_without_provenance_is_refused(tmp_path):
+    """R9. 308 label names that all happen to exist in a DIFFERENT program resolve clean and
+    restore the wrong cells. A set that cannot say what it came from is refused."""
+    p = _set_file(tmp_path, [["a", 0]], provenance=False)
+    with pytest.raises(AssertionError, match="source_sha256"):
+        load_restore_set(p, {"a": 0, "b": 8 * W})
+
+
+def test_offset_running_past_its_label_is_refused(tmp_path):
+    (tmp_path / "n").mkdir()
+    """R9. Attribution is nearest-preceding-label with no containment of its own. If THIS build
+    spaces the labels differently, an offset can point at an unrelated cell and still resolve."""
+    wide = {"a": 0, "b": 20 * W}
+    narrow = {"a": 0, "b": 4 * W}
+    load_restore_set(_set_file(tmp_path, [["a", 0, 9]], labels=wide), wide)   # 9 < 20: inside
+    # The set is fingerprinted against the NARROW table so the layout check passes and containment
+    # is what has to catch it -- otherwise this would test the fingerprint, not containment.
+    p = _set_file(tmp_path / "n", [["a", 0, 9]], labels=narrow)
+    with pytest.raises(AssertionError, match="past the end"):
+        load_restore_set(p, narrow)                                          # 9 >= 4: escaped
+
+
+# ---------------------------------------------------------------------------------------------
+# emit_reset_part -- the function that actually writes the program. CR round 2 was right that it
+# had no test at all, while being the piece that derives code_start, splits the set into nibble vs
+# byte, drops read-only extents, coalesces the zero runs, and performs the size-neutral surgery on
+# the main part. It is pure and fully injectable, so a fake label table tests all of it in
+# milliseconds -- no build.
+# ---------------------------------------------------------------------------------------------
+
+VAL_SHIFT = (W + W.bit_length()) - W
+CODE_START = 100
+
+# A miniature program: 3 subsectors, a 2-column viewport, one scratch region, one read-only LUT.
+# sshead is declared 2*nss cells (the real over-allocation), so only its first 3 cells are
+# reachable and its last 3 are padding.
+FAKE = {"sshead": 200, "pclm": 212, "sfflag": 216, "scratch": 220, "lut": 230, "zzz_end": 240}
+FAKE_BITS = {k: v * W for k, v in FAKE.items()}
+
+
+def _pristine(values):
+    """word -> content. Word 1 is op0's jump field and carries code_start; a cell's value lives in
+    the odd (jump) word, shifted."""
+    def get(word):
+        if word == 1:
+            return CODE_START * W
+        return values.get(word, 0) << VAL_SHIFT
+    return get
+
+
+def _emit(tmp_path, entries, values, view_w=2, nss=3, main=None):
+    gen = tmp_path / "gen"
+    gen.mkdir()
+    (gen / "e1m1_02_main.fj").write_text(
+        main if main is not None else "stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+        encoding="utf-8")
+    p = _set_file(tmp_path, entries, labels=FAKE_BITS)
+    part, n_nib, n_byte = selfreset.emit_reset_part(
+        gen, dict(FAKE_BITS), _pristine(values), p, view_w, nss, "e1m1")
+    return part.read_text(encoding="utf-8"), n_nib, n_byte, gen
+
+
+BYTE_ENTRIES = [["sshead", 0, 1, 2, 3, 4, 5], ["pclm", 0, 1, 2, 3], ["sfflag", 0, 1, 2, 3]]
+
+
+def test_emit_splits_byte_arrays_from_nibble_cells(tmp_path):
+    txt, n_nib, n_byte, _g = _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1, 2, 3]], {})
+    assert n_byte == 3 + 2 + 2                      # nss + view_w + view_w reachable cells
+    assert n_nib == 2                               # scratch is 2 cells
+    assert "rep(3, i) m1.zerobyte %d + i*dw" % (200 * W) in txt
+    assert txt.rstrip().endswith(";__hot_end")
+
+
+def test_emit_coalesces_zero_runs_and_keeps_non_zero_singles(tmp_path):
+    """A run of zero cells becomes ONE hex.zero; a cell with a real pristine value must be set back
+    to that value, not zeroed -- restoring it to 0 would be a silent wrong-value bug."""
+    ents = BYTE_ENTRIES + [["scratch", 0, 1, 2, 3, 4, 5]]
+    txt, _n, _b, _g = _emit(tmp_path, ents, {221: 0, 223: 7, 225: 0})
+    assert "hex.set 1, %d, 7" % ((220 // 2 + 1) * 2 * W) in txt
+    zeros = [l for l in txt.splitlines() if "hex.zero" in l]
+    assert len(zeros) == 2 and all(" 1, " in z for z in zeros), zeros
+
+
+def test_emit_drops_a_read_only_extent(tmp_path):
+    """A cell only nibble ops ever write cannot hold a pristine value above 15, so a label whose
+    extent contains one is a packed LUT or code -- and the WHOLE extent goes, not just that cell."""
+    ents = BYTE_ENTRIES + [["scratch", 0, 1], ["lut", 0, 1, 2, 3]]
+    txt, n_nib, _b, _g = _emit(tmp_path, ents, {231: 0xFF, 233: 0})
+    assert n_nib == 1                               # scratch's one cell survives, both lut cells go
+    assert str(230 * 2 * W) not in txt
+
+
+def test_emit_ignores_words_below_code_start(tmp_path):
+    """code_start is DERIVED from word 1, and everything below it is the stl's own tables."""
+    bits = dict(FAKE_BITS, low=50 * W)
+    gen = tmp_path / "gen"; gen.mkdir()
+    (gen / "e1m1_02_main.fj").write_text("stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+                                         encoding="utf-8")
+    p = _set_file(tmp_path, BYTE_ENTRIES + [["low", 0, 1], ["scratch", 0, 1]], labels=bits)
+    _part, n_nib, _b = selfreset.emit_reset_part(gen, bits, _pristine({}), p, 2, 3, "e1m1")
+    assert n_nib == 1                               # `low` is below code_start and never emitted
+
+
+def test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array(tmp_path):
+    """THE TWO-SIDED HALF OF THE GUARD. sshead is declared 2*nss but reaches nss, so offsets 6..11
+    address padding. They are not byte cells, so they would fall through to the NIBBLE clear -- and
+    a nibble op on a byte cell corrupts it rather than failing. Refuse instead."""
+    ents = [["sshead", 0, 1, 2, 3, 4, 5, 6, 7], ["pclm", 0, 1, 2, 3], ["sfflag", 0, 1, 2, 3]]
+    with pytest.raises(AssertionError, match="outside its reachable part"):
+        _emit(tmp_path, ents, {})
+
+
+def test_emit_patches_the_frame_tail_size_neutrally(tmp_path):
+    """1 op -> 1 op. If the patch changed the line count, every baked address after it would move
+    and the whole two-pass scheme would be void."""
+    _txt, _n, _b, gen = _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1]], {})
+    out = (gen / "e1m1_02_main.fj").read_text(encoding="utf-8").split("\n")
+    assert out == ["stl.output_char 0xFF", ";m1_reset", "bad: stl.loop", ""]
+
+
+@pytest.mark.parametrize("main,match", [
+    ("stl.output_char 0xFF\nstl.loop\nstl.loop\nbad: stl.loop\n", "exactly 1 bare stl.loop"),
+    ("stl.output_char 0xFF\nstl.loop\n", "junk-input halt"),
+    ("nop\nstl.loop\nbad: stl.loop\n", "0xFF end-of-frame marker"),
+])
+def test_emit_refuses_a_main_part_it_does_not_recognise(tmp_path, main, match):
+    """The patch is done by text surgery on generated code. If the frame tail is not exactly where
+    it is expected, patching the wrong line would redirect the program silently."""
+    with pytest.raises(AssertionError, match=match):
+        _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1]], {}, main=main)
+
+
+def test_no_byte_array_word_is_ever_nibble_cleared(tmp_path):
+    """The property, not a restatement of the list. Every word of a byte array must leave through
+    the `rep m1.zerobyte` path and none may appear as a `hex.zero`/`hex.set` address, because a
+    nibble op on a byte cell CORRUPTS it (0xA5 -> 0x22A5) instead of failing.
+
+    ** The MEMBERSHIP of BYTE_ARRAY_NAMES cannot be settled here. ** src/fj/ writes bytes through
+    POINTER registers, so no static rule can name the arrays they reach; `scratchpad/m1_bytecheck.py`
+    settles it empirically instead -- it runs real frames and checks that no cell the reset
+    nibble-clears ever holds a value > 15, with the three known arrays as the vacuity control
+    (measured: sshead 24/682, pclm 160/160, sfflag 160/160 cells > 15, and 0 elsewhere over 4
+    viewpoints -- see scratchpad/_m1_bytecheck.log).
+    """
+    txt, _n, n_byte, _g = _emit(tmp_path, BYTE_ENTRIES + [["scratch", 0, 1]], {})
+    assert n_byte == 7
+    addr_lines = [l for l in txt.splitlines() if "hex.zero" in l or "hex.set" in l]
+    for name, cells in (("sshead", 3), ("pclm", 2), ("sfflag", 2)):
+        for k in range(cells):
+            a = (FAKE[name] // 2 + k) * 2 * W
+            assert not any(str(a) in l for l in addr_lines),                 "%s cell %d reached a nibble op" % (name, k)
+
+
+def _fp_set(tmp_path, entries, labels, **kw):
+    """A set file carrying a fingerprint computed against `labels`."""
+    doc = {"format": "label+offset", "words": sum(len(e) - 1 for e in entries),
+           "labels": len(entries), "entries": entries,
+           "source_sha256": "x" * 64, "labels_sha256": "y" * 64, "generated_by": "test"}
+    doc.update(kw)
+    doc.setdefault("layout_fingerprint", selfreset.layout_fingerprint(doc, labels))
+    p = tmp_path / "fp.json.gz"
+    with gzip.open(p, "wt", encoding="utf-8") as f:
+        json.dump(doc, f)
+    return p
+
+
+def test_layout_fingerprint_accepts_the_table_it_was_built_from(tmp_path):
+    p = _fp_set(tmp_path, [["alpha", 0, 1], ["beta", 10]], LABELS)
+    assert load_restore_set(p, LABELS) == {100, 101, 510}
+
+
+def test_layout_fingerprint_rejects_a_differently_laid_out_build(tmp_path):
+    """THE HAZARD THE THREE PROVENANCE HASHES DESCRIBE BUT CANNOT CHECK.
+
+    Every other guard passes here: all the names exist, every offset is inside its span, the word
+    count matches. Only the fingerprint notices that `beta` now spans a different number of words,
+    i.e. that this is a different program.
+    """
+    p = _fp_set(tmp_path, [["alpha", 0, 1], ["beta", 10]], LABELS)
+    moved = {"alpha": 100 * W, "beta": 500 * W, "gamma": 700 * W}   # gamma moved: beta's span shrank
+    assert load_restore_set(p, LABELS)                              # unmoved: fine
+    with pytest.raises(AssertionError, match="laid out"):
+        load_restore_set(p, moved)
+
+
+def test_a_set_without_a_layout_fingerprint_is_refused(tmp_path):
+    p = _fp_set(tmp_path, [["alpha", 0]], LABELS, layout_fingerprint=None)
+    with pytest.raises(AssertionError, match="no layout_fingerprint"):
+        load_restore_set(p, LABELS)
+
+
+def test_containment_is_bounded_at_the_top_of_the_address_space(tmp_path):
+    """The highest-addressed label has no successor. Leaving its offsets unbounded is the same
+    one-sided shape as the round-2 bug, so it is bounded to ONE CELL -- the tightest bound this
+    function can justify, since it sees only the label table and never the image."""
+    p = _fp_set(tmp_path, [["gamma", 0, 1]], LABELS)               # gamma is the highest label
+    load_restore_set(p, LABELS)
+    p2 = _fp_set(tmp_path, [["gamma", 0, 5000]], LABELS)
+    with pytest.raises(AssertionError, match="past the end"):
+        load_restore_set(p2, LABELS)
+
+
+@pytest.mark.parametrize("delta", [1, 2, 10, -10, 5000])
+def test_verify_catches_a_moved_label_at_every_distance(tmp_path, delta):
+    """CR ROUND 7, AND THIS ONE SHIPPED. The old implementation resolved the set against the
+    PASS-2 table and asked whether each PASS-1 address was a member. A 1-word move keeps the old
+    address inside the new set, so 1-word moves were caught and everything larger was reported
+    CLEAN -- and build.py asserts on this result before shipping the binary.
+
+    Measured on the old code: +1 -> ['alpha'], but +2, +10 and -10 all -> [].
+
+    Parametrised over distances on purpose: a single delta=1 case is exactly what let this pass.
+    """
+    p = _set_file(tmp_path, [["alpha", 0, 1], ["beta", 0, 1]])
+    moved = dict(LABELS, alpha=(100 + delta) * W)
+    assert verify_labels_unchanged(LABELS, moved, p) == ["alpha"]
+
+
+def test_verify_is_clean_only_when_nothing_moved(tmp_path):
+    p = _set_file(tmp_path, [["alpha", 0, 1], ["beta", 0, 1]])
+    assert verify_labels_unchanged(LABELS, dict(LABELS), p) == []
+
+
+def test_verify_values_catches_a_changed_pristine_value(tmp_path):
+    """ADDRESSES AND VALUES ARE TWO CLAIMS, and until CR round 8 only the first was checked.
+
+    emit_reset_part bakes `hex.set 1, addr, v` with v read from PASS 1's image. If pass 2 assembles
+    a different value at that same address, the reset restores pass 1's -- silently, and
+    pixel-identically until that cell matters. verify_labels_unchanged cannot see it: the address
+    did not move.
+    """
+    p = _set_file(tmp_path, [["alpha", 0, 1], ["beta", 0, 1]])
+    same = {100: 7, 101: 7, 500: 3, 501: 3}
+    assert selfreset.verify_values_unchanged(p, LABELS, same.get, same.get) == []
+    drifted = dict(same); drifted[501] = 9
+    assert selfreset.verify_values_unchanged(p, LABELS, same.get, drifted.get) == [501]
+
+
+def test_verify_values_reports_clean_when_it_read_nothing(tmp_path):
+    """The vacuity hazard, named honestly and then actually exercised.
+
+    ⚠ CR round 9: the previous version of this test was called
+    `..._is_not_vacuous_when_the_set_is_empty` and never called `verify_values_unchanged` at all --
+    it asserted a resolve count, duplicating an earlier test. A test that cannot fail for the reason
+    it names is the exact shape this repo keeps getting wrong, and it was in the file guarding
+    against that shape.
+
+    `verify_values_unchanged` returns [] when there is nothing to compare, so "no differences" and
+    "nothing was read" are indistinguishable from its return value alone. That is why `build.py`
+    asserts the snapshot is non-empty and records `baked_cells_value_checked`, and why this test
+    pins the behaviour instead of pretending it cannot happen.
+    """
+    p = _set_file(tmp_path, [["alpha", 0, 1]])
+    a = {100: 1, 101: 1}
+    b = {100: 1, 101: 2}          # a REAL difference at word 101
+    # limit=0 reads nothing, so it reports clean DESPITE that difference. That is the hazard, stated
+    # as a fact about the function rather than assumed away. (CR round 10: the previous first
+    # assertion compared two empty dicts, where both sides return None and the result is [] however
+    # `limit` behaves -- it could not fail.)
+    assert selfreset.verify_values_unchanged(p, LABELS, a.get, b.get, limit=0) == []
+    # ...and reading everything finds it.
+    assert selfreset.verify_values_unchanged(p, LABELS, a.get, b.get) == [101]
+
+
+# ---------------------------------------------------------------------------------------------
+# M5: `persist=` -- the ONE place a hole in the restore set is the intent.
+#
+# Everywhere else in this file a missing cell is the bug that HANGS the next frame. A standalone
+# build has no host to hand it a world, so the player's position and the held-key flags must
+# survive the reset. That inverts the danger: the failure mode is no longer a hang but a SILENT
+# one -- a persist name that matches nothing quietly leaves the state being restored, and the
+# player teleports back to spawn every frame while the program runs perfectly. These tests are
+# the guard on that, and they exist because CR PR#78 (R3) found this path shipping untested.
+# ---------------------------------------------------------------------------------------------
+
+# `other` splits scratch's extent, so the persisted label is NOT the last one -- a bug that
+# dropped "everything from the base onward" would pass against a single trailing label.
+PERSIST_BITS = dict(FAKE_BITS, other=224 * W)
+PERSIST_ENTRIES = BYTE_ENTRIES + [["scratch", 0, 1, 2, 3], ["other", 0, 1, 2, 3]]
+
+
+def _emit_persist(tmp_path, persist, entries=None, values=None, bits=None):
+    bits = dict(PERSIST_BITS if bits is None else bits)
+    gen = tmp_path / "gen"; gen.mkdir(parents=True)
+    (gen / "e1m1_02_main.fj").write_text("stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+                                         encoding="utf-8")
+    p = _set_file(tmp_path, PERSIST_ENTRIES if entries is None else entries, labels=bits)
+    part, n_nib, n_byte = selfreset.emit_reset_part(
+        gen, bits, _pristine(values or {}), p, 2, 3, "e1m1", persist=persist)
+    return part.read_text(encoding="utf-8"), n_nib, n_byte
+
+
+def test_persist_excludes_only_the_named_labels_cells(tmp_path):
+    """THE POSITIVE CONTROL IS THE SAME BUILD WITHOUT persist. Asserting only that the persisted
+    address is absent would also pass if the label were never emitted for some unrelated reason,
+    so the first half proves the cells ARE there to begin with."""
+    txt_no, n_no, _b = _emit_persist(tmp_path / "a", ())
+    assert n_no == 4                                        # scratch 2 cells + other 2 cells
+    assert "hex.zero 4, %d" % (220 * W) in txt_no           # one coalesced run over both labels
+
+    txt, n_nib, _b2 = _emit_persist(tmp_path / "b", ("scratch",))
+    assert n_nib == 2                                       # scratch's two cells, and only those
+    assert str(220 * W) not in txt                          # the persisted label is gone...
+    assert "hex.zero 2, %d" % (224 * W) in txt              # ...and its neighbour is untouched
+
+
+def test_persist_refuses_a_name_this_build_has_no_label_for(tmp_path):
+    """A typo'd persist name must not be a no-op -- silently restoring the state it was meant to
+    protect is precisely the bug that would be invisible in a running program."""
+    with pytest.raises(AssertionError, match="no label for"):
+        _emit_persist(tmp_path, ("viewx",))                 # a real M5 name, absent from this build
+
+
+def test_persist_refuses_a_label_the_restore_set_never_dirties(tmp_path):
+    """The name resolves, but no cell of it is in the set, so excluding it changes nothing. That
+    means the set was never given the label -- the state is unprotected either way, so refuse
+    rather than report success."""
+    with pytest.raises(AssertionError, match="carries no cell of it"):
+        _emit_persist(tmp_path, ("lut",))                   # in the label table, not in the set
+
+
+def test_persist_takes_its_extent_from_this_builds_label_table(tmp_path):
+    """The extent is derived from the neighbouring label, never a hardcoded width. Move `other`
+    and scratch's extent moves with it: the same persist name now covers four cells, not two."""
+    bits = dict(FAKE_BITS, other=228 * W)
+    ents = BYTE_ENTRIES + [["scratch", 0, 1, 2, 3, 4, 5, 6, 7], ["other", 0, 1]]
+    txt, n_nib, _b = _emit_persist(tmp_path, ("scratch",), entries=ents, bits=bits)
+    assert n_nib == 1                                       # only `other`'s single cell is left
+    assert "hex.zero 1, %d" % (228 * W) in txt
+    assert all(str(w * W) not in txt for w in (220, 222, 224, 226))
+
+
+def test_persist_states_in_the_generated_part_what_it_did_not_restore(tmp_path):
+    """A hole nothing records is indistinguishable from a hole nobody meant. The count is the
+    emitted one, so it cannot drift from what was actually skipped."""
+    txt, _n, _b = _emit_persist(tmp_path, ("scratch",))
+    assert "4 words across 1 PERSISTED labels are deliberately NOT restored" in txt
+    assert "scratch" in txt.split("Restores every cell")[0]
+    # ...and a build with no persist says nothing about persisting, so the note means something.
+    txt0, _n0, _b0 = _emit_persist(tmp_path / "z", ())
+    assert "PERSISTED" not in txt0

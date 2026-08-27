@@ -123,6 +123,19 @@ def colormap_values(wad: WadFile, *, lights: int = 32) -> List[int]:
     return [cm[light][colour] for light in range(lights) for colour in range(256)]
 
 
+def generate_colormap_packed_table_fj(label: str, wad: WadFile, *, lights: int = 32) -> str:
+    """M13-raster: the colormap as a RAW packed-byte array (NOT a dispatch table) -- one byte per
+    entry, row-major [light_row][colour], addressable at `label + (light*256+colour)*dw`. This is
+    the device rasterizer's third static table (alongside yslope_packed/zlight): the device DMA-reads
+    it directly (an address handoff via `present.load_raster_tables`, zero fj ops) to do its own
+    distance-light shade lookup, instead of fj baking every (light,colour) combo into a compile-time
+    cm.emit dispatch jump target. SAME values as `colormap_values` (R6 SSOT) -- guaranteed to match
+    whatever cm.emit/cm.apply bake elsewhere, since both draw from the identical wad.colormap()."""
+    values = colormap_values(wad, lights=lights)
+    lines = [f"{label}:"] + [f";{v} * dw" for v in values]
+    return "\n".join(lines)
+
+
 def compile_colormap(label: str, wad: WadFile, *, lights: int = 32, mode: str = "per_entry",
                      over_align: bool = True) -> str:
     """Emit the colormap as a dispatch table indexed by `(light<<8 | colour)` -> lit palette byte,

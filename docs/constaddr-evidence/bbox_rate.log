@@ -1,0 +1,27 @@
+bake_bsp: 0.0s
+build_blockmap: 0.0s
+SWEEP   set: 116 points (the sweep's own construction, step=192)
+CONTACT set: 70 points (in a sector, within 24 units of a line)
+
+SWEEP set
+  positions sampled    : 40
+  check_line candidates: 503  (12.6 per position)
+  BBOX-rejected        : 501  (99.6%)
+  survivors, paying BOTH staging preambles: 0.4%
+  SOUNDNESS            : 0 rejections that could have collided  ok
+
+CONTACT set
+  positions sampled    : 40
+  check_line candidates: 783  (19.6 per position)
+  BBOX-rejected        : 727  (92.8%)
+  survivors, paying BOTH staging preambles: 7.2%
+  SOUNDNESS            : 0 rejections that could have collided  ok
+
+the survey assumed 93% rejection; measured: SWEEP 99.6%  CONTACT 92.8%
+
+NEGATIVE CONTROLS -- each mutation MUST move the number
+  (a) bbox test forced always-false : 0.0% rejected  ok
+  (c) reject rule forced always-true: 53 unsound rejections (CONTACT set)  ok
+  (b) radius left 16.16 (the bug)   : 0.0% rejected, 1175.0 candidates/position  ok
+
+ca_bbox_rate SELFTEST: PASS

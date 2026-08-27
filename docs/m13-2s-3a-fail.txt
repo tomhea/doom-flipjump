@@ -1,0 +1,60 @@
+E       AssertionError: near floor still attributed to 7 surfaces: {(0, 150, 'AQF054'), (0, 192, 'AQF024'), (-128, 160, 'FLOOR5_2'), (0, 160, 'AQF024'), (16, 160, 'AQF024'), (0, 192, 'AQF018'), (0, 160, 'AQF054')}
+E       assert {(-128, 160, ...AQF024'), ...} == {(0, 192, 'AQF054')}
+E         
+E         Extra items in the left set:
+E         (0, 150, 'AQF054')
+E         (0, 192, 'AQF024')
+E         (-128, 160, 'FLOOR5_2')
+E         (0, 160, 'AQF024')
+E         (16, 160, 'AQF024')...
+E         
+E         ...Full output truncated (5 lines hidden), use '-vv' to show
+
+tests\host\test_twosided.py:88: AssertionError
+____________ test_plane_near_leaves_one_colour_per_near_floor_row _____________
+
+    def test_plane_near_leaves_one_colour_per_near_floor_row():
+        """The same fix seen in PIXELS: within one row every floor pixel is at the same distance on the
+        same surface, so once attribution is right the row's floor is ONE colour. Measured before the
+        fix: 6 distinct floor colours on those rows (three flats at two light levels)."""
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        mw = WadFile.from_path(E1M1)
+        scene = build_scene(mw, mw, "E1M1")
+        st = _spawn(mw, "E1M1")
+        W = cfg.VIEW_W
+        fb, (_c, floor_lo, *_rest) = _planes(rm, st, scene, plane_near=True)
+        for y in range(cfg.VIEW_H - 12, cfg.VIEW_H):
+            shades = {fb[y * W + x] for x in range(W) if y >= floor_lo[x]}
+>           assert len(shades) == 1, f"row {y}: {len(shades)} floor colours, expected 1 ({sorted(shades)})"
+E           AssertionError: row 88: 6 floor colours, expected 1 ([5, 8, 75, 79, 109, 110])
+E           assert 6 == 1
+E            +  where 6 = len({5, 8, 75, 79, 109, 110})
+
+tests\host\test_twosided.py:105: AssertionError
+_______________ test_plane_near_is_opt_in_and_changes_the_frame _______________
+
+    def test_plane_near_is_opt_in_and_changes_the_frame():
+        """`plane_near` must be OFF by default -- `render_wall_frame` still feeds the tiers with stored
+        goldens -- and must actually change the frame when ON (else the gates above pass vacuously)."""
+        cfg = Config()
+        rm = ReferenceModel(cfg)
+        mw = WadFile.from_path(E1M1)
+        scene = build_scene(mw, mw, "E1M1")
+        st = _spawn(mw, "E1M1")
+        default = rm.render_wall_frame(st, scene, floor_texturing=False, wall_mode="WPX",
+                                       floor_mode_ft1=True)
+        off, _ = _planes(rm, st, scene)
+        near, _ = _planes(rm, st, scene, plane_near=True)
+        assert off == default, "planes_out must not change what is rendered"
+        differing = sum(1 for a, b in zip(off, near) if a != b)
+>       assert differing > 2000, f"only {differing} px differ -- the near attribution did nothing"
+E       AssertionError: only 0 px differ -- the near attribution did nothing
+E       assert 0 > 2000
+
+tests\host\test_twosided.py:122: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_twosided.py::test_plane_near_claims_every_column_for_the_player_sector
+FAILED tests/host/test_twosided.py::test_plane_near_leaves_one_colour_per_near_floor_row
+FAILED tests/host/test_twosided.py::test_plane_near_is_opt_in_and_changes_the_frame
+3 failed, 3 passed in 1.29s

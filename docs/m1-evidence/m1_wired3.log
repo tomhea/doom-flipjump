@@ -1,0 +1,36 @@
+{
+  "map": "E1M1",
+  "downscale": 2,
+  "storage_mode": "flat",
+  "span_words": 85468976,
+  "flat_limit": 134217728,
+  "headroom": 1.57,
+  "fjm_bytes": 31347735,
+  "assemble_seconds": 2918.415,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": true
+  },
+  "self_reset": {
+    "nibble_cells": 4349,
+    "byte_cells": 1002,
+    "restore_set": "C:\\Users\\tomhe\\Documents\\doom-flipjump\\src\\doomfj\\data\\m1_restore_set.json.gz",
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 10702,
+    "view_w": 160,
+    "subsectors": 682
+  }
+}
+total 4039s

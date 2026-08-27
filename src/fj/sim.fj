@@ -1,0 +1,616 @@
+// ==============================================================================================
+// sim.fj           the player sim: collision against real linedefs, thing binding.
+// STATUS  LIVE - the generated main
+// ENTRY   sim.check_position, sim.try_move, sim.bind_things, sim.thing_pass
+// SIZE    10 macros (sim.check_position .. sim.thing_pass)
+// NOTE    `@` holds control-flow labels ONLY; the scratch is named globals (`cb_*`, `cl_*` in
+//         collision.py::CHECK_SCRATCH_DECLS). check_position expands check_block 4x, so an
+//         @-local vec here becomes 4 cells the M1 restore set can only name by expansion path.
+// ==============================================================================================
+
+// ============================================================================
+// sim.fj — M14: the player simulation's collision half, in FlipJump.
+//
+// `ReferenceModel.check_position` is DOOM's P_CheckPosition: does any linedef refuse this
+// position, and what opening do the lines it touches leave? The oracle tests every linedef, which
+// is fine in Python and ~7M ops a tic here. Two things make it affordable:
+//
+//   * the BLOCKMAP (mapcompiler.build_blockmap) narrows ~1,500 linedefs to the ~35 in the blocks
+//     the player's 32-unit box can touch — proven equivalent to the exhaustive sweep, not argued;
+//   * the geometry is DATA, walked by the one loop below, rather than 1,651 baked copies of the
+//     test. Baking was tried first and measured: ~57k lines of macro that did not finish
+//     assembling in 50 minutes (docs/handoff-m14.md section 5, M14-d).
+//
+// THE TABLES (all packed bytes, read with hex.read_table_packed):
+//   bkoff[block]  -> [offset:2][count:1]           where this block's line list starts, how long
+//   bklin[k]      -> [linedef:2]                   the flat per-block line lists
+//   lnrow[line]   -> [v1x:2][v1y:2][dxi:2][dyi:2][minx:2][maxx:2][miny:2][maxy:2]
+//                    [slope:1][flags:1][opentop:2][openbottom:2]
+//
+// The bbox and the SLOPE TYPE are precomputed into the row on purpose: they cost five short reads
+// and they remove four runtime min/max pairs and the whole sign-comparison switch from the one
+// piece of fj that has to be exactly DOOM.
+//
+// ⚠ 16.16 FROM AN INT16, WITHOUT SIGN EXTENSION. A map coordinate is int16 and the working values
+// are 16.16, so `hex.zero 8, r; hex.mov 4, r + 4*dw, raw` IS the conversion: putting the 16 bits
+// in the high half is exactly `raw << 16` in two's complement, negatives included. The INTEGER
+// deltas that feed FixedMul are different — those are values, not positions, so they DO need
+// sign-extending into 8 nibbles (`sim.sext16`).
+//
+// ⚠ ON A REFUSAL the openings are returned as the caller's SEED, not as whatever had accumulated.
+// The partial accumulation is order-dependent (the oracle walks linedefs in index order, this
+// walks them in blockmap order) and DOOM never reads it — pinning it is what makes a refusal
+// comparable between the two mirrors at all.
+// ============================================================================
+
+ns sim {
+    // sim.sext16 dst, src — sign-extend a 4-nibble int16 into an 8-nibble two's-complement value.
+    def sext16 dst, src @ neg, done {
+        hex.zero 8, dst
+        hex.mov 4, dst, src
+        hex.sign 4, src, neg, done
+      neg:
+        hex.set 4, dst + 4*dw, 0xFFFF
+      done:
+    }
+
+    // sim.fix16 dst, src — a 4-nibble int16 MAP COORDINATE as a 16.16 value (see the header note).
+    def fix16 dst, src {
+        hex.zero 8, dst
+        hex.mov 4, dst + 4*dw, src
+    }
+
+    // sim.point_side side, x, y, v1x, v1y, dxi, dyi — P_PointOnLineSide's cross-product case only.
+    // The axis cases never reach here: the caller dispatches on the baked slope type, and both
+    // diagonal slopes have dx != 0 and dy != 0. x/y/v1x/v1y are 16.16; dxi/dyi are the SIGNED
+    // integer deltas, already sign-extended.
+    //   left = FixedMul(dyi, x - v1x);  right = FixedMul(y - v1y, dxi)
+    //   right < left -> 0 (front), else 1 (back)
+    def point_side side, x, y, v1x, v1y, dxi, dyi @ ax, ay, l, r, front, back, done, body {
+        ;body                                  // the @-local DATA below must never execute
+      ax: hex.vec 8
+      ay: hex.vec 8
+      l:  hex.vec 8
+      r:  hex.vec 8
+      body:
+        hex.mov 8, ax, x
+        hex.sub 8, ax, v1x
+        hex.mov 8, ay, y
+        hex.sub 8, ay, v1y
+        hex.fixed_mul_lo 8, 4, l, dyi, ax
+        hex.fixed_mul_lo 8, 4, r, ay, dxi
+        hex.scmp 8, r, l, front, back, back
+      front:
+        hex.set 1, side, 0
+        ;done
+      back:
+        hex.set 1, side, 1
+      done:
+    }
+}
+
+ns sim {
+    // sim.check_line — ONE candidate linedef, from its packed row. Falls through to the caller's
+    // next line when this one does not refuse the position; jumps to `blocked` when it does.
+    // Mirrors PIT_CheckLine.
+    //
+    //   lnrow / n_ln : the packed line table and its index width
+    //   lnbox, lnrow : the two packed linedef tables (C5: bbox half, then the other 14 bytes)
+    //   li           : the linedef index (runtime), indexing BOTH tables identically
+    //   the box      : cbx_lo/cbx_hi/cby_lo/cby_hi (16.16) — the caller sets them once
+    //   the opening  : cp_floor/cp_ceil, narrowed IN PLACE (map units, 8-nibble signed)
+    //
+    // ⚠ EACH TABLE'S ROW IS READ IN ONE GO. `hex.read_table_packed nb, ...` strides by nb, so
+    // reading a single field with `nb = 2` would stride by 2 bytes and land in the wrong row. The
+    // linedef is TWO tables, each read whole: `lnbox` (8 bytes: minx maxx miny maxy) into `cl_box`,
+    // and -- only for candidates that survive the bbox -- `lnrow` (the other 14) into `cl_rest`.
+    // Within each buffer every field is a compile-time nibble offset: box byte k is at
+    // `cl_box + 2k*dw`, rest byte k at `cl_rest + 2k*dw`. ⚠ Rest byte k is old row byte k+8; the
+    // comments below carry the post-split numbers, and getting one wrong does not crash -- it
+    // walks the player through a wall.
+    //
+    // The scratch (`cl_*`) is GLOBAL, declared in collision.py::COLLISION_STATE_DECLS, not @-local:
+    // check_position expands this macro four times (one per box corner) and four private copies
+    // would be four cells the M1 restore set could only name by expansion path.
+    def check_line lnbox, lnrow, n_ln, li, blocked \
+            @ nxt, hit, k_a, k_b, k_c, k_d, axis, diag, do_h, do_v, do_pos, do_neg, h1, v1c, cmp_p, open_f, open_c, set_f, set_c \
+            < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_floor, cp_ceil, cl_box, cl_rest, cl_v1x, cl_v1y, cl_dx, cl_dy, cl_tmp, cl_open, cl_side1, cl_side2, cl_const {
+        // M-CONSTADDR C5: the BBOX HALF ONLY -- 8 bytes, so 8 pointer setups instead of 22. Most
+        // candidates die on the four compares below, and every byte read for them was wasted:
+        // `read_table_packed nb` is nb separate set_flip_and_jump_pointers rebuilds (~781 ops each).
+        // Same lever M14.5 applied to thing_load ("those four moved to frame.thing_load_cold,
+        // which runs AFTER the vis reject").
+        hex.read_table_packed 8, cl_box, lnbox, n_ln, li
+
+        // ---- bbox reject: right <= minx, left >= maxx, top <= miny, bottom >= maxy -----------
+        .fix16 cl_tmp, cl_box                               // minx  (box byte 0)
+        hex.scmp 8, cbx_hi, cl_tmp, nxt, nxt, k_a
+      k_a:
+        .fix16 cl_tmp, cl_box + 4*dw                        // maxx  (box byte 2)
+        hex.scmp 8, cbx_lo, cl_tmp, k_b, nxt, nxt
+      k_b:
+        .fix16 cl_tmp, cl_box + 8*dw                        // miny  (box byte 4)
+        hex.scmp 8, cby_hi, cl_tmp, nxt, nxt, k_c
+      k_c:
+        .fix16 cl_tmp, cl_box + 12*dw                       // maxy  (box byte 6)
+        hex.scmp 8, cby_lo, cl_tmp, k_d, nxt, nxt
+      k_d:
+        // SURVIVED the bbox -- now, and only now, pay for the other 14 bytes.
+        hex.read_table_packed 14, cl_rest, lnrow, n_ln, li
+        // ---- P_BoxOnLineSide: only a STRADDLING box can be refused ---------------------------
+        .fix16 cl_v1x, cl_rest                               // v1x   (byte 0)
+        .fix16 cl_v1y, cl_rest + 4*dw                        // v1y   (byte 2)
+        // slope (rest byte 8; row byte 16) is 0..3, so its two low bits ARE the switch: bit 1 separates the
+        // diagonals from the axis cases, bit 0 picks within each pair. `hex.if_flags`' mask is a
+        // set of nibble VALUES, so "bit 1 set" is {2,3} = 0xCCCC and "bit 0 set" is {1,3} = 0xAAAA.
+        hex.if_flags cl_rest + 16*dw, 0xCCCC, axis, diag
+      axis:
+        hex.if_flags cl_rest + 16*dw, 0xAAAA, do_h, do_v
+      do_h:                                             // horizontal: straddle iff bottom <= v1y < top
+        hex.scmp 8, cby_hi, cl_v1y, nxt, nxt, h1
+      h1:
+        hex.scmp 8, cby_lo, cl_v1y, hit, hit, nxt
+      do_v:                                             // vertical: straddle iff left < v1x <= right
+        hex.scmp 8, cbx_hi, cl_v1x, nxt, v1c, v1c
+      v1c:
+        hex.scmp 8, cbx_lo, cl_v1x, hit, nxt, nxt
+      diag:
+        .sext16 cl_dx, cl_rest + 8*dw                       // dxi   (byte 4) — a VALUE, so sign-extend
+        .sext16 cl_dy, cl_rest + 12*dw                      // dyi   (byte 6)
+        hex.if_flags cl_rest + 16*dw, 0xAAAA, do_pos, do_neg
+      do_pos:                                           // "/" : (left, top) vs (right, bottom)
+        .point_side cl_side1, cbx_lo, cby_hi, cl_v1x, cl_v1y, cl_dx, cl_dy
+        .point_side cl_side2, cbx_hi, cby_lo, cl_v1x, cl_v1y, cl_dx, cl_dy
+        ;cmp_p
+      do_neg:                                           // "\" : (right, top) vs (left, bottom)
+        .point_side cl_side1, cbx_hi, cby_hi, cl_v1x, cl_v1y, cl_dx, cl_dy
+        .point_side cl_side2, cbx_lo, cby_lo, cl_v1x, cl_v1y, cl_dx, cl_dy
+      cmp_p:
+        hex.cmp 1, cl_side1, cl_side2, hit, nxt, hit                // differ -> straddling
+      hit:
+        // ---- the blocking rules, then the opening --------------------------------------------
+        hex.set 1, cl_const, 0
+        hex.cmp 1, cl_rest + 18*dw, cl_const, blocked, open_f, blocked   // flags != 0 -> a wall
+      open_f:
+        .sext16 cl_open, cl_rest + 24*dw                     // openbottom (rest byte 12; row byte 20) -> floorz = max
+        hex.scmp 8, cl_open, cp_floor, open_c, open_c, set_f
+      set_f:
+        hex.mov 8, cp_floor, cl_open
+      open_c:
+        .sext16 cl_open, cl_rest + 20*dw                     // opentop (rest byte 10; row byte 18) -> ceilingz = min
+        hex.scmp 8, cl_open, cp_ceil, set_c, nxt, nxt
+      set_c:
+        hex.mov 8, cp_ceil, cl_open
+      nxt:
+    }
+}
+
+ns sim {
+    // sim.check_position — P_CheckPosition: may a box of `cprad` centred on (cpx, cpy) stand here?
+    //
+    // Writes cp_ok (1 = legal), cp_floor / cp_ceil (map units). The candidate lines come from the
+    // BLOCKMAP: the box is 2*cprad across and a block is 256 units, so the box's four corners fall
+    // in at most 2x2 blocks and every line that can touch the box is listed in one of them.
+    //
+    // No de-duplication, deliberately: a line listed in two of the four blocks is tested twice, and
+    // both effects are idempotent -- "blocked" is a latch, and the opening updates are max/min.
+    // Dropping the dedupe costs a few repeated tests and saves a whole runtime set.
+    //
+    // ⚠ The block index is an ARITHMETIC shift of a signed coordinate and fj's shr_hex is logical,
+    // so the position is BIASED by 2^15 map units first. Map coords are int16, so x + 32768 >= 0
+    // always, and (x16 + (32768 << 16)) >> 6 nibbles is (x_int + 32768) >> 8 exactly -- one
+    // whole-nibble shift, which is why blocks are 256 units and not DOOM's 128.
+    def check_position bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0             @ blocked, done             < cpx, cpy, cprad, cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil,               cp_seedf, cp_seedc {
+        hex.set 1, cp_ok, 1
+        hex.mov 8, cp_floor, cp_seedf
+        hex.mov 8, cp_ceil, cp_seedc
+        hex.mov 8, cbx_lo, cpx
+        hex.sub 8, cbx_lo, cprad
+        hex.mov 8, cbx_hi, cpx
+        hex.add 8, cbx_hi, cprad
+        hex.mov 8, cby_lo, cpy
+        hex.sub 8, cby_lo, cprad
+        hex.mov 8, cby_hi, cpy
+        hex.add 8, cby_hi, cprad
+        rep(4, q) .check_block bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, \
+                               (q&1) ? cbx_hi : cbx_lo, (q>>1) ? cby_hi : cby_lo, blocked
+        ;done
+      blocked:
+        hex.set 1, cp_ok, 0
+        hex.mov 8, cp_floor, cp_seedf         // the SEED, not the partial accumulation -- the
+        hex.mov 8, cp_ceil, cp_seedc          // oracle pins it the same way (order-dependence)
+      done:
+    }
+
+    // sim.check_block — one corner's block: index it, bounds-check it, run its line list.
+    def check_block bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, xreg, yreg, blocked \
+            @ xok, yok, skip, lloop, lbody \
+            < cb_bx, cb_by, cb_const, cb_idx, cb_row, cb_first, cb_count, cb_k, cb_kend, cb_line {
+        hex.mov 8, cb_bx, xreg
+        hex.set 8, cb_const, 0x80000000
+        hex.add 8, cb_bx, cb_const
+        hex.shr_hex 8, 6, cb_bx
+        hex.mov 8, cb_by, yreg
+        hex.add 8, cb_by, cb_const
+        hex.shr_hex 8, 6, cb_by
+        hex.set 4, cb_const, (ibx0 + 128) & 0xFFFF
+        hex.sub 4, cb_bx, cb_const
+        hex.set 4, cb_const, (iby0 + 128) & 0xFFFF
+        hex.sub 4, cb_by, cb_const
+        hex.set 4, cb_const, nbx
+        hex.cmp 4, cb_bx, cb_const, xok, skip, skip
+      xok:
+        hex.set 4, cb_const, nby
+        hex.cmp 4, cb_by, cb_const, yok, skip, skip
+      yok:
+        hex.mul_const 4, cb_idx, cb_by, nbx
+        hex.add 4, cb_idx, cb_bx
+        hex.read_table_packed 3, cb_row, bkoff, n_bk, cb_idx
+        hex.mov 4, cb_first, cb_row                    // [offset:2] = the first 4 nibbles
+        hex.zero 4, cb_count
+        hex.mov 2, cb_count, cb_row + 4*dw             // [count:1]
+        hex.mov 4, cb_k, cb_first
+        hex.mov 4, cb_kend, cb_first
+        hex.add 4, cb_kend, cb_count
+      lloop:
+        hex.cmp 4, cb_k, cb_kend, lbody, skip, skip
+      lbody:
+        hex.read_table_packed 2, cb_line, bklin, n_bl, cb_k
+        .check_line lnbox, lnrow, n_ln, cb_line, blocked
+        hex.inc 4, cb_k
+        ;lloop
+      skip:
+    }
+}
+
+ns sim {
+    // sim.try_move — P_TryMove's verdict for the candidate already in cpx/cpy, given the floor the
+    // thing is standing on now (`here_floor`, map units). Sets `mv_ok` to 1 or 0.
+    //
+    // On top of check_position: the opening must be tall enough for the thing, and the floor must
+    // not be more than MAX_STEP above the one being left ("too big a step up").
+    //
+    // ⚠ Both tests are plain MAP-UNIT compares, not 16.16 ones. DOOM writes them as
+    // `(tmceilingz - tmfloorz) < thing->height` and `tmfloorz - thing->z > 24*FRACUNIT` in fixed
+    // point, but every quantity here is a whole number of units scaled by the same 2^16, so the
+    // shifts cancel: `(c - f) << 16 < 56 << 16` IS `c - f < 56`. Doing it in units keeps the
+    // compares 8 nibbles wide and drops two shifts per candidate.
+    //
+    // NOT IMPLEMENTED, deliberately and permissively: the "don't stand over a dropoff" test. It
+    // only ever REFUSES moves, so leaving it out cannot block a move DOOM would allow. The oracle
+    // omits it identically -- see ReferenceModel.check_position's docstring.
+    def try_move bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, height, maxstep, \
+                 here_floor \
+            @ body, fail, done, out, tall, cst, gap, step \
+            < cp_ok, cp_floor, cp_ceil, mv_ok {    // the box/seed globals belong to check_position
+        ;body
+      cst: hex.vec 8
+      gap: hex.vec 8
+      step: hex.vec 8
+      body:
+        .check_position bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0
+        hex.if0 1, cp_ok, fail
+        hex.mov 8, gap, cp_ceil                // the opening must fit the thing
+        hex.sub 8, gap, cp_floor
+        hex.set 8, cst, height
+        hex.scmp 8, gap, cst, fail, tall, tall
+      tall:
+        hex.mov 8, step, cp_floor              // ... and must not be a step up of more than maxstep
+        hex.sub 8, step, here_floor
+        hex.set 8, cst, maxstep
+        hex.scmp 8, step, cst, done, done, fail
+      done:
+        hex.set 1, mv_ok, 1
+        ;out
+      fail:
+        hex.set 1, mv_ok, 0
+      out:
+    }
+}
+
+ns sim {
+    // sim.thing_load — load ONE thing's sprite registers from the M14-e tables.
+    //
+    // This replaces the xor-involution block `subsector_action` bakes per (subsector, thing). The
+    // fields come from three places, and which place is the whole design (see doomfj.things):
+    //   * sp_x / sp_y   -- the RUNTIME position array, written from the wire each frame
+    //   * the art metrics, bases, monster flag and depth bounds -- the per-INDEX row, static
+    //   * sp_z and sp_lt -- derived from the BOUND SUBSECTOR, because those two change when a
+    //     thing crosses a sector, which is exactly what M14-e exists for
+    //
+    // ⚠ `hex.read_table_packed nb, ...` strides by nb, so the 22-byte row is read WHOLE and every
+    // field is a compile-time nibble offset into it (byte k at +2k*dw) -- the same trap M14-d's
+    // check_line hit.
+    // ⚠ A 16.16 value from an int16 needs NO sign extension: putting the 16 bits in the high half
+    // IS `raw << 16` in two's complement. The tzmax bounds are already 32-bit and are moved whole.
+    // ⚠ THE HOT HALF ONLY. 94.1% of the things this loads are rejected by proj.project_thing
+    // without ever reading sp_base / sp_base2 / sp_dw / sp_lt, and hex.read_table_packed costs one
+    // read_byte_and_inc per byte -- so those four moved to `frame.thing_load_cold`, which runs
+    // AFTER the `vis` reject. The fields kept here are exactly the ones a reject can reach:
+    // project_thing's three cheap rejects (tz < minz, tz > sp_tzmax/sp_tzmax2, |tx| > tz<<2) read
+    // the position and the two depth bounds, and thing_record_body's budget test reads sp_mon.
+    // ⚠ `sprlt`/`nlti` LEAVE THE SIGNATURE, they cannot be left unused: the assembler treats
+    // "unused labels" as an error, so a parameter kept for ABI tidiness fails the parse. The
+    // change therefore reaches thing_pass and the emitter's call site too (R4 is about renames,
+    // and this is a deliberate signature change with every call site moved in the same commit).
+    def thing_load throw, n_th, thpos, ti \
+            @ body, row, zt, pos, poff, pbase, pptr \
+            < ss_flr, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
+              sp_mon, sp_ti {
+        ;body
+      row: hex.vec 34
+      zt: hex.vec 4
+      poff:  hex.vec w/4
+      pbase: hex.vec w/4
+      pptr:  hex.vec w/4
+      pos: hex.vec 16                          // [x:4][y:4] = 16 nibbles, NOT 8 -- reading a
+      body:                                    // 16-nibble row into sp_x would run off its end
+        hex.read_table_packed 17, row, throw, n_th, ti
+        // the index the cold half will re-read this thing's row with. It cannot recompute it:
+        // thing_record_body runs from a shared fcall leaf and never sees `ti`.
+        hex.mov w/4, sp_ti, ti   // (hex.mov zeroes dst first)
+        // the position array is a hex.vec (one NIBBLE per slot), not a packed table (one BYTE
+        // per slot), so read_table_packed cannot address it -- the strides differ by 2. A 16.16
+        // pair is 16 nibbles and 16 is one nibble of SHIFT, so the index scales without a multiply.
+        hex.mov w/4, poff, ti
+        hex.shl_hex w/4, 1, poff
+        hex.set w/4, pbase, thpos
+        hex.ptr_index pptr, pbase, poff
+        hex.read_hex 16, pos, pptr
+        hex.mov 8, sp_x, pos
+        hex.mov 8, sp_y, pos + 8*dw
+        .fix16 sp_left, row                                  // byte 0
+        .fix16 sp_w,    row + 4*dw                           // byte 2
+        .fix16 sp_hh,   row + 8*dw                           // byte 4
+        hex.mov 8, sp_tzmax,  row + 16*dw                    // byte 8, already 32 bits
+        hex.mov 8, sp_tzmax2, row + 24*dw                    // byte 12
+        hex.mov 2, sp_mon, row + 32*dw                       // byte 16 (was 20: base/base2 left)
+        // sp_z = (this leaf's floor + the art's z offset) << 16 -- the two int16s add mod 2^16,
+        // which is the right two's-complement sum, and fix16 lifts it to 16.16
+        //
+        // ⚠ `ss_flr` and `ss_ltb` are BAKED BY THE LEAF, not read from a table here. Both are
+        // properties of the SUBSECTOR -- its floor height, and the row base of its light class --
+        // and a subsector's floor and light are fixed at level load, so the emitter knows them and
+        // `subsector_action` sets them alongside `cur_ss`. They used to be three
+        // `read_table_packed`s PER THING (ssflr[ss], sslgt[ss], ltbase[light]) when all three are
+        // constant for every thing in the leaf: measured at 23,569 of thing_load's 69,503 ops.
+        hex.mov 4, zt, ss_flr   // (hex.mov zeroes dst first)
+        hex.add 4, zt, row + 12*dw                           // byte 6 = zoff
+        .fix16 sp_z, zt
+    }
+}
+
+ns sim {
+    // sim.bind_things — rebuild the per-leaf thing lists for this frame.
+    //
+    // DOOM keeps a per-subsector thing list and moves a thing between them on P_SetThingPosition
+    // -- i.e. it re-binds ON A MOVE, not once a frame. The first cut of this macro re-located all
+    // 251 things every frame because fj has no state between frames, and that cost 27.2M ops, 73%
+    // of everything M14-e added.
+    //
+    // ⚠ IT DOES NOT HAVE TO. Section 2's architecture already says WORLD STATE ROUND-TRIPS through
+    // stdin/stdout, and a thing's subsector is world state exactly like its position. So `thss[t]`
+    // arrives on the wire holding last frame's binding, and only a thing the host marks DIRTY
+    // (thss = 0xFFFF, which no real subsector index can be) pays a point location. Static decor --
+    // which on E1M1 is nearly everything -- costs nothing. fj still COMPUTES every binding; the
+    // host only carries the answer between frames, and a wrong one diverges against the oracle
+    // immediately because the oracle derives it from position independently.
+    //
+    // ⚠ A LINKED LIST, not per-leaf arrays: `thnext[t]` and `sshead[ss]`, both BYTE arrays with
+    // 0xFF as the empty sentinel. Prepending is O(1) and there is NO CAP -- so no budget can
+    // silently drop a thing when a leaf gets crowded, which is precisely the failure class M14-a
+    // exists to prevent. 251 things fit a byte index with the sentinel to spare.
+    //
+    // ⚠ Bind in DESCENDING index order. Prepending reverses, so descending insertion makes the
+    // traversal ASCENDING -- exactly the order `things_by_ss` has today, which is what keeps the
+    // front-to-back slot each sprite claims bit-identical for a static thing.
+    // ⚠ BUILT ONLY FROM PATTERNS THIS FILE HAS ALREADY PROVEN. Two rewrites were thrown away
+    // first, and both failures are worth more than the code:
+    //   * COMPILE-TIME INDEX (`rep(nthings, i) .bind_one ... i`) makes every array access a direct
+    //     address and is ~1M ops/frame cheaper. It took the standalone probe from seconds to over
+    //     40 MINUTES TO ASSEMBLE -- the repo's oldest lesson, the assembler is ~cubic in unrolled
+    //     ops. Not worth 1M.
+    //   * RUNNING POINTERS (`hex.add w/4, ptr, k` per iteration, no ptr_index at all) simply KILLS
+    //     THE PROGRAM -- `scratchpad/_ptrunit.py` reproduces it in 30 lines. Also: `ptr + n*dw`
+    //     offsets the POINTER CELL's own address, not the address it points to, so it cannot reach
+    //     a field inside a pointed-to record.
+    // So: the original loop, with the cache added, and `thss` split into two BYTE arrays indexed by
+    // the raw thing index -- exactly how `sshead` and `thnext` are already indexed here.
+    // ⚠ NO CLEAR AT ALL, and the trick is the SENTINEL. A bare `hex.vec` is zero-initialised, and
+    // one run is one frame -- fj self-modifies, so the host reloads the pristine image every frame
+    // and anything baked is re-initialised for free. So EMPTY IS 0, and the lists store `t + 1`
+    // rather than `t` to keep index 0 representable. 251 things encode to 1..251, well inside a
+    // byte. This deleted a 682-iteration pointer loop that cost ~1.65M ops EVERY FRAME.
+    // (Three costlier clears were tried first: the loop; `rep` with a macro PARAMETER as the count,
+    // which SILENTLY EXPANDS TO NOTHING; and baking 682 `hex.vec 2, 0xFF` lines or a literal-count
+    // `rep`, both of which take the assembler from seconds to 30-40 MINUTES.)
+    def bind_things thpos, thss, nthings             @ body, bl, bl_done, dirty, clean, t, hv, tv, dv, p, q, r, sptr,               pos, poff, pbase, pptr, xn, xp, yn, yp           < ptx, pty, ptss, sshead, thnext, ptloc_walk, ptloc_ret {
+        ;body
+      t:  hex.vec w/4                          // ⚠ w/4, not 4: hex.ptr_index does
+      hv: hex.vec 2                            // `mov w/4` out of its INDEX register
+      tv: hex.vec 2
+      dv: hex.vec 4
+      p:  hex.vec w/4
+      q:  hex.vec w/4
+      r:  hex.vec w/4
+      poff:  hex.vec w/4
+      pbase: hex.vec w/4
+      pptr:  hex.vec w/4
+      pos: hex.vec 16
+      sptr: hex.vec w/4
+      body:
+        // every leaf starts empty.
+        // ⚠ `rep(nss, i) hex.set 2, sshead + i*2*dw, 0xFF` -- a compile-time unroll, ~30x cheaper
+        // than this loop -- SILENTLY EXPANDS TO NOTHING when the count is a macro PARAMETER. The
+        // binary got SMALLER after adding 682 unrolled sets, which is the tell. `rep` needs a
+        // literal, so that unroll belongs in the emitter, where NSS is a number. Kept as a loop
+        // here so the macro is correct standalone; see the emitter for the fast path.
+        //
+        // ⚠⚠ AND THE ADDRESS IN THAT SKETCH IS WRONG. M1a (2026-08-20) SETTLED THE LAYOUT:
+        // `scratchpad/m1a_stride.py`, calibrated against strides the stl states literally (K=1,2,3)
+        // and confirmed on the shipped 84.8M-word binary. See docs/handoff-m1-reset.md.
+        //
+        //   THE STRIDE IS ONE CELL: entry i is at `sshead + i*dw`, NOT `i*2*dw`. All 8 bits of the
+        //   byte live INSIDE that one cell, at bits dbit..dbit+7, so entries do NOT overlap and
+        //   writing entry i dirties exactly one word.
+        //
+        // The paradox that blocked this for two milestones was an ASYMMETRY, not a contradiction:
+        // in the ARRAY a byte is one cell; in a REGISTER it is two (`hex.read_byte dst, ptr` gives
+        // `dst[:2]`, a nibble per cell -- which is why `h` below is zeroed before the read). Both
+        // halves of "one cell" and "two cells" were true, about different things. The three earlier
+        // probes (scratchpad/_ssheadaddr.py, _ssheadoverlap.py, _ssheadlayout.py) were therefore
+        // ALL CORRECT and were only read as mutually inconsistent; what they lacked was a negative
+        // control, which is why none of them could settle it.
+        //
+        // ⚠ So `rep(nss, i) hex.set 2, sshead + i*2*dw, 0xFF` is doubly wrong: the stride, and also
+        // `hex.set 2, x, v` -- which writes the LOW NIBBLES of cells x and x+dw, not one byte cell.
+        // ⚠ AND THE M14.5 §3.2 BAKED EMPTY-LIST TEST STILL CANNOT USE `hex.if0`, at any width.
+        // `hex.if0 1, sshead + s*dw` reaches `hex.if_flags`, which XORs `switch` into the cell's
+        // jump word and then EXECUTES the cell, landing at (value*dw) ^ switch; `pad 16` aligns
+        // switch to 16 ops, so that stays inside the 16-entry table ONLY when the value's high
+        // nibble is 0 -- and the escaping path skips `clean:`, leaving the array cell permanently
+        // corrupted. if_flags is documented for 0..15; these entries hold t+1 in 1..251. `hex.if0 2`
+        // additionally straddles entry s+1. A baked test must `read_byte` and test the register.
+        // ⚠ The declarations in the emitter (`hex.vec 2*nss` / `2*nt`) are 2x what a one-cell stride
+        // can reach; cells nss.. and nt.. are unreachable padding.
+        hex.set 4, dv, 0xFFFF                  // the host's "I moved this one" sentinel
+        hex.set w/4, t, nthings
+      bl:
+        hex.if0 w/4, t, bl_done
+        hex.dec w/4, t                         // descending: nthings-1 .. 0
+        // ---- last frame's binding ---------------------------------------------------------------
+        // ⚠ `hex.input` does NOT fill an array that `ptr_index` + `read_byte` addresses -- the
+        // wire writes a hex.vec (nibble per slot) and read_byte addresses something else, which is
+        // the same trap the POSITION array hit. `scratchpad/_ptrunit.py` shows write_byte/read_byte
+        // round-tripping while a wire-filled array reads back garbage; `_ptrunit2.py` shows the
+        // accessor that DOES work and is used here and by thing_load: nibble offset = index*16 via
+        // `shl_hex 1`, then read_hex / write_hex. So a thss entry is 16 nibbles (8 wire bytes) even
+        // though it holds 4 -- the cost is ~0.26M of wire round-trip against the 25M this saves,
+        // and it reuses the one accessor this file has proven rather than inventing a third.
+        hex.mov w/4, poff, t
+        hex.shl_hex w/4, 1, poff
+        hex.set w/4, pbase, thss
+        hex.ptr_index sptr, pbase, poff
+        hex.zero w/4, ptss
+        hex.read_hex 4, ptss, sptr
+        hex.cmp 4, ptss, dv, clean, dirty, clean
+      dirty:
+        // the thing's position -> the 10-nibble SIGNED map coords point location reads. The
+        // position array is a hex.vec (one NIBBLE per slot), not a packed table (one BYTE per
+        // slot), so read_table_packed cannot address it. A 16.16 pair is 16 nibbles and 16 is one
+        // nibble of SHIFT, so the index scales without a multiply.
+        hex.mov w/4, poff, t
+        hex.shl_hex w/4, 1, poff
+        hex.set w/4, pbase, thpos
+        hex.ptr_index pptr, pbase, poff
+        hex.read_hex 16, pos, pptr
+        hex.zero 10, ptx
+        hex.mov 4, ptx, pos + 4*dw             // the INTEGER part of a 16.16 is nibbles 4..7
+        hex.sign 4, pos + 4*dw, xn, xp
+      xn:
+        hex.set 6, ptx + 4*dw, 0xFFFFFF
+      xp:
+        hex.zero 10, pty
+        hex.mov 4, pty, pos + 12*dw
+        hex.sign 4, pos + 12*dw, yn, yp
+      yn:
+        hex.set 6, pty + 4*dw, 0xFFFFFF
+      yp:
+        stl.fcall ptloc_walk, ptloc_ret        // -> ptss
+        // write it back so it goes out on the wire and returns as next frame's cache. `sptr` still
+        // points at this thing's slot -- the dirty branch recomputed poff/pbase/pptr for thpos, so
+        // the thss pointer is kept in its own cell rather than recomputed.
+        hex.write_hex 4, sptr, ptss
+      clean:
+        // thnext[t] = sshead[ptss];  sshead[ptss] = t
+        hex.set w/4, q, sshead
+        hex.ptr_index p, q, ptss
+        hex.read_byte hv, p
+        hex.set w/4, q, thnext
+        // ⚠ NOT `ptr_index q, q, t`: ptr_index writes its DESTINATION FIRST (`mov w/4, dst,
+        // index`), so aliasing dst onto the base destroys the base before it is added in.
+        hex.ptr_index r, q, t
+        hex.write_byte r, hv
+        hex.mov 2, tv, t   // (hex.mov zeroes dst first)
+        hex.inc 2, tv                          // stored ENCODED as t+1, so 0 can mean "empty"
+        hex.write_byte p, tv
+        ;bl
+      bl_done:
+    }
+}
+
+ns sim {
+    // sim.thing_pass — every thing bound to `cur_ss`, in ascending index order.
+    //
+    // This is what a leaf runs instead of the baked call sites `subsector_action` emits today. The
+    // leaf itself shrinks to two lines (set cur_ss, fcall this), so the intricate part of
+    // subsector_action is left alone and only the SOURCE of the sprite registers changes.
+    //
+    // `tstop` is re-tested every iteration, not once: `thing_leaf` can set it, and the static path
+    // gates each baked call site individually. It is monotone, so this only ever stops earlier.
+    // M14.5 — ⚠ AND IT RESTORES THE ZERO INVARIANT ITS CALLER'S SIBLING DEPENDS ON.
+    //
+    // A hybrid build draws some things from BAKED xor_by blocks and the rest from here. `hex.xor_by`
+    // is correct ONLY on a zero register -- that is what makes the involution self-restoring, and
+    // `_seg_xorby_block` says so in as many words. But `thing_load` writes the same sp_* cells with
+    // mov / read_table_packed and leaves them holding the last thing it loaded. So a leaf that ran
+    // this pass used to hand the NEXT leaf's baked call site dirty registers, which then xored its
+    // constants onto garbage: MEASURED as 25 px at (1869,479) and 29 px at spawn, in sprite-shaped
+    // clusters that vanished when the baked things were hidden. Pure-baked and pure-runtime builds
+    // were each gated correct; only the MIX broke, which is why nothing caught it before.
+    //
+    // The clear is per LEAF, not per thing (~100 visited leaves against ~30 loaded things a frame),
+    // and it is skipped entirely when the leaf's list is empty -- the overwhelming case once the
+    // statics bake, since only a leaf holding a monster has a list at all.
+    def thing_pass throw, n_th, thpos \
+            @ body, loop, alive, done, clear, empty, h, hp, hq \
+            < cur_ss, sshead, thnext, tstop, thing_ret, thing_leaf, \
+              sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
+              sp_mon, sp_base, sp_base2, sp_dw, sp_lt {
+        ;body
+      h:    hex.vec w/4
+      hp:   hex.vec w/4
+      hq:   hex.vec w/4
+      body:
+        hex.set w/4, hq, sshead
+        hex.ptr_index hp, hq, cur_ss
+        hex.zero w/4, h                        // read_byte fills only 2 nibbles; the rest must be
+        hex.read_byte h, hp                    // cleared or the 0 test reads a stale high half
+        hex.if0 w/4, h, empty                  // nothing bound here: nothing to load, nothing to
+                                               // dirty, so the leaf pays one test and leaves
+      loop:
+        // ⚠ the lists hold t+1, so 0 is both "empty leaf" and "end of list" -- which is what lets
+        // `sshead` be a plain zero-initialised hex.vec and need no per-frame clear.
+        hex.if0 w/4, h, done
+        hex.if0 1, tstop, alive
+        ;done
+      alive:
+        hex.dec w/4, h                         // encoded -> the real thing index
+        .thing_load throw, n_th, thpos, h
+        stl.fcall thing_leaf, thing_ret
+        hex.set w/4, hq, thnext
+        hex.ptr_index hp, hq, h                // h is consumed as the INDEX before being reloaded
+        hex.zero w/4, h
+        hex.read_byte h, hp
+        ;loop
+      done:
+        // the widths are the DECLARED ones (wall_renderer's sp_* decls), not the xor_by field
+        // widths: thing_load writes the whole cell, so a narrower clear would leave high nibbles
+        // set and the next baked xor_by would still land on a non-zero register.
+      clear:
+        hex.zero 8, sp_x
+        hex.zero 8, sp_y
+        hex.zero 8, sp_z
+        hex.zero 8, sp_left
+        hex.zero 8, sp_w
+        hex.zero 8, sp_hh
+        hex.zero 8, sp_tzmax
+        hex.zero 8, sp_tzmax2
+        hex.zero 2, sp_mon
+        hex.zero 4, sp_base
+        hex.zero 4, sp_base2
+        hex.zero 2, sp_dw
+        hex.zero 2, sp_lt
+      empty:
+    }
+}

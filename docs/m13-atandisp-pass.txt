@@ -1,0 +1,30 @@
+== fj byte-exact gates, plane_near (E1M1 spawn + rotation + budget-binding + sweep-worst) ==
+[lines WPX+FT1 plane_near] E1M1 spawn frame = 21,730,429 ops
+.
+1 passed, 8 deselected in 257.67s (0:04:17)
+
+== 65-viewpoint worst-case sweep ==
+built in 168s
+(-416,256,0x00000000) OK   ops=21,730,429
+(-416,256,0x20000000) OK   ops=19,529,379
+(-416,256,0x40000000) OK   ops=8,821,225
+(-416,256,0x60000000) OK   ops=10,240,938
+(-416,256,0x80000000) OK   ops=6,385,918
+(-416,256,0xa0000000) OK   ops=10,477,819
+(-416,256,0xc0000000) OK   ops=9,023,350
+(-416,256,0xe0000000) OK   ops=15,926,227
+(-352,256,0x00000000) OK   ops=21,944,644
+(-480,256,0x00000000) OK   ops=23,441,471
+(-416,320,0x00000000) OK   ops=22,079,938
+(-416,160,0x00000000) OK   ops=20,922,191
+(-288,320,0x20000000) OK   ops=12,885,984
+(-309,636,0x00000000) OK   ops=24,734,560
+(-480,256,0x00000000) OK   ops=23,441,471
+15 gate viewpoints byte-exact; worst so far 24,734,560
+  new worst 25,596,690 @ (-309,-724,0x00000000)
+  new worst 26,551,706 @ (-309,-44,0x00000000)
+WORST over 65 viewpoints = 26,551,706 @ (-309, -44, 0)   (UNDER the 33M ceiling)
+
+== full suite ==
+.......................                                                  [100%]
+307 passed, 4 skipped in 4395.68s (1:13:15)

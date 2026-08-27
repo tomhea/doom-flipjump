@@ -1,0 +1,51 @@
+=== 14 OF 15 MUTATIONS APPLIED TO REAL SHIPPED CODE ===
+    selfreset.py: the two-sided guard deleted
+    selfreset.py: main-part recognition assert gone
+    selfreset.py: provenance refusal gone
+    selfreset.py: containment check gone
+    selfreset.py: byte counts hardcoded again
+    m1_reset.fj: high-nibble exact_xor deleted
+    m1_reset.fj: shared pointer never restored
+    selfreset.py: layout fingerprint check gone
+    selfreset.py: missing-label refusal gone
+    selfreset.py: label+offset format refusal gone
+    selfreset.py: containment unbounded at the top
+    selfreset.py: verify back to the membership test
+    selfreset.py: pristine-value check gone
+    selfreset.py: limit back to a truthiness test
+
+    NOT APPLIED (conflicts with a mutation above -- covered individually by
+    the per-mutation run in scratchpad/_m1_mutations.log):
+      m1_reset.fj: one write past the cell
+
+.FF........FFFFFFFFFFFF.F.F.FFFF.FF.F.F                                  [100%]
+=========================== short test summary info ===========================
+FAILED tests/host/test_selfreset.py::test_refuses_a_set_naming_a_label_this_build_does_not_have
+FAILED tests/host/test_selfreset.py::test_refuses_an_absolute_address_set - K...
+FAILED tests/host/test_selfreset.py::test_restore_set_without_provenance_is_refused
+FAILED tests/host/test_selfreset.py::test_offset_running_past_its_label_is_refused
+FAILED tests/host/test_selfreset.py::test_emit_splits_byte_arrays_from_nibble_cells
+FAILED tests/host/test_selfreset.py::test_emit_coalesces_zero_runs_and_keeps_non_zero_singles
+FAILED tests/host/test_selfreset.py::test_emit_drops_a_read_only_extent - Ass...
+FAILED tests/host/test_selfreset.py::test_emit_ignores_words_below_code_start
+FAILED tests/host/test_selfreset.py::test_emit_refuses_set_words_in_the_unreachable_tail_of_a_byte_array
+FAILED tests/host/test_selfreset.py::test_emit_patches_the_frame_tail_size_neutrally
+FAILED tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise[stl.output_char 0xFF\nstl.loop\nstl.loop\nbad: stl.loop\n-exactly 1 bare stl.loop]
+FAILED tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise[stl.output_char 0xFF\nstl.loop\n-junk-input halt]
+FAILED tests/host/test_selfreset.py::test_emit_refuses_a_main_part_it_does_not_recognise[nop\nstl.loop\nbad: stl.loop\n-0xFF end-of-frame marker]
+FAILED tests/host/test_selfreset.py::test_no_byte_array_word_is_ever_nibble_cleared
+FAILED tests/host/test_selfreset.py::test_layout_fingerprint_rejects_a_differently_laid_out_build
+FAILED tests/host/test_selfreset.py::test_containment_is_bounded_at_the_top_of_the_address_space
+FAILED tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance[2]
+FAILED tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance[10]
+FAILED tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance[-10]
+FAILED tests/host/test_selfreset.py::test_verify_catches_a_moved_label_at_every_distance[5000]
+FAILED tests/host/test_selfreset.py::test_verify_values_catches_a_changed_pristine_value
+FAILED tests/host/test_selfreset.py::test_verify_values_reports_clean_when_it_read_nothing
+FAILED tests/fj/test_m1_reset.py::test_clears_every_value_0_to_255 - Assertio...
+FAILED tests/fj/test_m1_reset.py::test_second_call_on_the_same_cell_still_works
+24 failed, 15 passed in 1.68s
+
+=== RESTORED ===
+.......................................                                  [100%]
+39 passed in 1.79s

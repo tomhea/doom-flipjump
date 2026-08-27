@@ -25,9 +25,10 @@ from types import SimpleNamespace
 
 from doomfj.lut_generator import (
     generate_xtoviewangle_lut_fj, generate_finetangent_lut_fj, generate_trig_idioms_fj,
-    generate_tantoangle_lut_fj, generate_viewangletox_lut_fj,
+    generate_tantoangle_lut_fj, generate_viewangletox_lut_fj, generate_slopediv_recip_lut_fj, generate_slopediv_recip8_lut_fj,
 )
-from doomfj.mapcompiler import bake_bsp, _bsp_as_code, Seg, SubSector, Node, CompiledMap, NF_SUBSECTOR
+from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, Seg, SubSector, Node, CompiledMap, NF_SUBSECTOR,
+                                seg_affine_coeffs)
 from doomfj.reference_model import (ReferenceModel, ANGLE_MASK, SLOPERANGE, WALL_BG,
                                     CEIL_BG, FLOOR_BG, COLORMAP_LIGHTS, LIGHT_SHIFT,
                                     SimState, build_scene, spawn_state, frame_hash)
@@ -35,6 +36,9 @@ from doomfj.texturecompiler import (compile_texture, compile_colormap, compile_p
                                     texture_texels, _texel_table, downscale_canvas)
 from doomfj.wall_renderer import emit_wall_renderer, _seg_xorby_block, _seg_xorby_use
 from doomfj.wad import WadFile
+# M1-HOIST: these fj macros name hoisted globals in their `<` lists, so any program that
+# expands one STANDALONE must declare them too. ONE source with the emitter (R6).
+from doomfj.wall_renderer import hoisted_scratch_fj
 
 PRESENT_FJ = Path("src/fj/present.fj")
 FRAME_FJ = Path("src/fj/frame_render.fj")
@@ -62,7 +66,7 @@ def _col_params(rm, scale, rca, rw_off, rwd, x, tw, ceil_h, floor_h, viewz, worl
     ang = (rca + rm.xtoviewangle[x]) & ANGLE_MASK
     ft = rm.finetangent[(ang >> rm.angle_shift) & (cfg.TRIG_N - 1)]
     texcol = (_signed((rw_off - fixed_mul(ft, rwd, 8, 4)) & ANGLE_MASK, 32) >> 16) % tw
-    iscale = fixed_div(1 << 16, scale & ANGLE_MASK, 8, 4) // ds
+    iscale = rm._recip_div32(scale & ANGLE_MASK) // ds   # perf #11: block-FP reciprocal (matches the fj)
     texturemid = (worldtop << 16) // ds
     frac = texturemid + (top - cfg.CENTERY) * iscale
     return top, bottom, texcol, (frac >> 8) & 0xFFFF, (iscale >> 8) & 0xFFFF
@@ -118,7 +122,7 @@ def test_wall_render_seg_columns_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
-    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N) + chr(10) + generate_slopediv_recip_lut_fj("slopediv_recip")   # M13-scalerecip
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
 
     render = [f"proj.wall_scale_setup scale, scalestep, va_in, nrm_in, rwd_in, x1_in, x2_in, {proj}"]
@@ -148,7 +152,7 @@ def test_wall_render_seg_columns_byte_exact(tmp_path):
         tex, cm, palette, xtoviewangle, finetangent, finesine,
     ])
     p = tmp_path / "wallrender.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "wallrender.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -210,7 +214,7 @@ def test_wall_render_full_width_via_column_leaf(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
-    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N) + chr(10) + generate_slopediv_recip_lut_fj("slopediv_recip")   # M13-scalerecip
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
 
     # register names must match column_leaf_body's `<` extern clause exactly (x, rw_centerangle, ...)
@@ -243,7 +247,7 @@ def test_wall_render_full_width_via_column_leaf(tmp_path):
         tex, cm, palette, xtoviewangle, finetangent, finesine,
     ])
     p = tmp_path / "wallfull.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "wallfull.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -349,7 +353,7 @@ def test_wall_render_array_bridge_byte_exact(tmp_path):
         tex, cm, palette,
     ])
     p = tmp_path / "arraybridge.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "arraybridge.fjm"
     fj.assemble([consts.resolve(), PRESENT_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
                 out, memory_width=W, print_time=False)
@@ -418,7 +422,7 @@ def test_wall_render_composes_over_background(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
-    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
+    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N) + chr(10) + generate_slopediv_recip_lut_fj("slopediv_recip")   # M13-scalerecip
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
 
     # register names must match column_leaf_body's `<` extern clause exactly (as in the full-width test)
@@ -453,7 +457,7 @@ def test_wall_render_composes_over_background(tmp_path):
         tex, cm, palette, xtoviewangle, finetangent, finesine,
     ])
     p = tmp_path / "wallcompose.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "wallcompose.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -569,6 +573,7 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -579,11 +584,12 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",                  # va = BAM (unsigned)
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",   # viewx = vx << 16
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
-        "proj.wall_x_range visible, x1, x2, rwa, viewx, viewy, viewangle, v1x, v1y, v2x, v2y",
+        "proj.wall_x_range visible, x1, x2, rwa, sgn_aff, viewx, viewy, viewangle, v1x, v1y, v2x, v2y, acoef, bcoef, ccoef",
         "hex.if0 1, visible, pass2",                             # culled -> pass 2 (background only)
-        "proj.wall_setup normalangle, rw_distance, viewx, viewy, segangle, v1x, v1y",
+        "proj.wall_setup normalangle, rw_distance, viewx, viewy, segangle, acoef, bcoef, ccoef",
         f"proj.wall_scale_setup scale, scalestep, viewangle, normalangle, rw_distance, x1, x2, {proj}",
         "proj.wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, normalangle, rwa, "
         "v1x, v1y, texoff",   # texoff is a hex.add MEMORY operand -> must be a register (lesson #1)
@@ -610,6 +616,7 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         # pass-1 input + temps
@@ -622,6 +629,9 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         f"v1x: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"v1y: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
         f"v2x: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"v2y: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}",
         f"segangle: hex.vec 8, {seg.angle}", f"tw: hex.vec 8, {tw}", f"texoff: hex.vec 8, {texoff & 0xFFFFFFFF}",
+        # perf #9: baked affine rw_distance coeffs (shared SSOT)
+        f"acoef: hex.vec 8, {seg_affine_coeffs(seg, verts)[0]}", f"bcoef: hex.vec 8, {seg_affine_coeffs(seg, verts)[1]}",
+        f"ccoef: hex.vec 8, {seg_affine_coeffs(seg, verts)[2]}",
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
         f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}", f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}",
         f"light_baked: hex.vec 2, {light}",
@@ -635,10 +645,10 @@ def test_wall_render_pass1_runtime_fill_byte_exact(tmp_path):
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "pass1fill.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "pass1fill.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -741,6 +751,7 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -764,6 +775,9 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
                     "    stl.fcall seg_pass1_leaf, seg_ret"]
         return out
@@ -775,6 +789,7 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk",                                 # pass 1: the walk drives the multi-seg fill
@@ -791,6 +806,7 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body {th}, {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -799,7 +815,8 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         # per-seg baked consts (set by the walk's subsector_action before each fcall)
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         # scene consts (single sector -> baked once)
         f"tw: hex.vec 8, {tw}", f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}",
         f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}", f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}",
@@ -820,10 +837,10 @@ def test_wall_render_multi_seg_walk_driven_byte_exact(tmp_path):
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "multiseg.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "multiseg.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -941,6 +958,7 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -959,6 +977,9 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     "    hex.set 8, seg_texoff, 0",
                     "    stl.fcall seg_pass1_leaf, seg_ret"]
         return out
@@ -970,6 +991,7 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",                  # viewx = vx << 16 (16.16 for projection)
         "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";occ_bspcode_walk",                                                # the walk (with a NODE) drives pass 1
@@ -986,6 +1008,7 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body {th}, {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -993,7 +1016,8 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         f"tw: hex.vec 8, {tw}", f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}",
         f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}", f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}",
         f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}", f"light_baked: hex.vec 2, {light}",
@@ -1010,10 +1034,10 @@ def test_wall_render_occlusion_drawn_clips_byte_exact(tmp_path):
         f"col_top: rep({cfg.VIEW_W}, i) hex.vec 4, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     p = tmp_path / "occlusion.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "occlusion.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1148,6 +1172,7 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=2, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1172,6 +1197,9 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
                     f"    hex.set 4, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
                     f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
@@ -1185,6 +1213,7 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1200,6 +1229,7 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mt {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -1207,7 +1237,8 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 4", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
         f"viewz: hex.vec 8, {viewz & 0xFFFFFFFF}", f"worldtop: hex.vec 8, {worldtop & 0xFFFFFFFF}",
@@ -1226,11 +1257,11 @@ def test_wall_render_multitexture_byte_exact(tmp_path):
         f"col_base: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "multitex.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "multitex.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1343,6 +1374,7 @@ def test_wall_render_multilight_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=32, over_align=True)   # 32 light rows (per-seg lights span them)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1367,6 +1399,9 @@ def test_wall_render_multilight_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
                     f"    hex.set 4, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
                     f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
@@ -1381,6 +1416,7 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1397,6 +1433,7 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtl {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -1404,7 +1441,8 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 4", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2",
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
@@ -1424,11 +1462,11 @@ def test_wall_render_multilight_byte_exact(tmp_path):
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_light: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "multilight.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "multilight.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1488,6 +1526,7 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=COLORMAP_LIGHTS, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1512,6 +1551,9 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
                     f"    hex.set 8, seg_v2x, {(v2x << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_v2y, {(v2y << 16) & 0xFFFFFFFF}",
                     f"    hex.set 8, seg_segangle, {seg.angle}",
+                    f"    hex.set 8, seg_a, {seg_affine_coeffs(seg, verts)[0]}",   # perf #9
+                    f"    hex.set 8, seg_b, {seg_affine_coeffs(seg, verts)[1]}",
+                    f"    hex.set 8, seg_c, {seg_affine_coeffs(seg, verts)[2]}",
                     f"    hex.set 8, seg_texoff, {texoff & 0xFFFFFFFF}",
                     f"    hex.set 4, seg_texbase, {texbase}", f"    hex.set 4, seg_texheight, {th_s}",
                     f"    hex.set 8, seg_tw, {tw_s}", f"    hex.set 3, seg_hm, {th_s - 1}",
@@ -1527,6 +1569,7 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad", "hex.input_dec_uint 8, player_light, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
         "hex.mov 2, bgrow, player_light",
         f"rep({LIGHT_SHIFT}, i) hex.shr_bit 2, bgrow",   # row = light >> LIGHT_SHIFT (single source of truth)
         "hex.zero 4, bgidx", "hex.mov 2, bgidx + 2*dw, bgrow",                     # bgidx = row<<8 | 0(CEIL_BG)
@@ -1547,6 +1590,7 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body",
         "seg_pass1_leaf:",
         f"frame.seg_pass1_leaf_body_mtl {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
@@ -1555,7 +1599,8 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "player_light: hex.vec 8", "bgrow: hex.vec 2", "bgidx: hex.vec 4", "bgceil: hex.vec 2", "bgfloor: hex.vec 2",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 4", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2",
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
@@ -1575,11 +1620,11 @@ def test_wall_render_runtimebg_byte_exact(tmp_path):
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 4, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"col_light: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "runtimebg.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "runtimebg.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1639,6 +1684,7 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
     cm = compile_colormap("cm", wad, lights=COLORMAP_LIGHTS, over_align=True)
     palette = compile_palette("palette", wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
+    slopediv_recip = generate_slopediv_recip_lut_fj("slopediv_recip") + chr(10) + generate_slopediv_recip8_lut_fj("slopediv_recip8")   # perf #13
     finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
     finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
     viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
@@ -1662,11 +1708,15 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
             texbase, th_s, tw_s = texinfo[name if name else "__WALLBG__"]
             fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
                       ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
-                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
+                      ("seg_segangle", 8, seg.angle),
+                      *[(n, 8, v) for n, v in zip(("seg_a", "seg_b", "seg_c"), seg_affine_coeffs(seg, verts))],
+                      ("seg_texoff", 8, texoff & 0xFFFFFFFF),
                       ("seg_texbase", 5, texbase), ("seg_texheight", 4, th_s), ("seg_tw", 8, tw_s),
                       ("seg_hm", 3, th_s - 1), ("seg_light", 2, seg_light[si])]
-            xorby_blocks[si] = _seg_xorby_block(si, fields)  # ceilfix/floorfix/seg_ceil/viewzw are static (1 sector)
-            out += _seg_xorby_use(si, clear=_M12PP_CLEAR)
+            # the helpers take a FULL LABEL (not a seg index) so a definition cannot drift from
+            # its call sites -- match the shipping emitter's `seg<i>_consts` convention
+            xorby_blocks[si] = _seg_xorby_block(f"seg{si}_consts", fields)  # ceilfix/floorfix/seg_ceil/viewzw static (1 sector)
+            out += _seg_xorby_use(f"seg{si}_consts", clear=_M12PP_CLEAR)
         return out
 
     bsp = _bsp_as_code("room", cmap, done_label="bsp_done", subsector_action=subsector_action)
@@ -1677,6 +1727,7 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         "hex.input_dec_uint 8, viewangle, bad",
         "hex.mov 8, viewx, vx_raw", "hex.shl_hex 8, 4, viewx",
         "hex.mov 8, viewy, vy_raw", "hex.shl_hex 8, 4, viewy",
+        # M13-absmul: the per-frame abs/sign view regs wall_x_range multiplies by
         f"frame.render_background framebuffer, {ceil_color}, {floor_color}, "
         f"{cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
         ";room_bspcode_walk", "bsp_done:",
@@ -1693,6 +1744,7 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
         "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
         "bad: stl.loop",
+        "sgn_aff: hex.vec 8",
         "pixel_leaf:", "frame.leaf_body_w",
         "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
         "seg_pass1_leaf:",
@@ -1702,7 +1754,8 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
         "vx_raw: hex.vec 8", "vy_raw: hex.vec 8", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
+        "seg_segangle: hex.vec 8", "seg_a: hex.vec 8", "seg_b: hex.vec 8", "seg_c: hex.vec 8",  # perf #9
+        "seg_texoff: hex.vec 8",
         "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
         "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: the xorby block's fcall/fret return register
         f"ceilfix: hex.vec 8, {(ceil_h << 16) & 0xFFFFFFFF}", f"floorfix: hex.vec 8, {(floor_h << 16) & 0xFFFFFFFF}",
@@ -1723,11 +1776,11 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
         f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"col_light: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
         f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
+        tantoangle, slopediv_recip, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
     ])
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "wideindex.fj"
-    p.write_text(main, encoding="utf-8")
+    p.write_text(main + hoisted_scratch_fj(), encoding="utf-8")
     out = tmp_path / "wideindex.fjm"
     fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
                  PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
@@ -1744,253 +1797,16 @@ def test_wall_render_wideindex_byte_exact(tmp_path):
 E1M1_WAD = "tests/fixtures/freedoom_e1m1.wad"
 
 
-@pytest.mark.skip(reason="M13a/b: oracle floors/ceilings are intentionally ahead of the fj renderer "
-                         "(handoff: do the host oracle first, mirror in fj at M13c/d). This test "
-                         "full-frame-diffs the fj wall renderer (still M9 two-band bg) against the live "
-                         "oracle (now M13 visplanes); re-enabled when the fj span raster lands (M13d).")
-def test_wall_render_e1m1_geometry_wallbg_byte_exact(tmp_path):
-    """M12nn-d — FULL E1M1 GEOMETRY runtime frame (proxy for the capstone): the REAL 681-node BSP walk drives
-    pass 1 over ALL 575 one-sided segs of E1M1, with the runtime player-subsector logic that the square room
-    couldn't exercise — at the FIRST subsector visited (= the player's subsector, order[0]) it sets the runtime
-    viewz (player sector floor + VIEWHEIGHT) used by every seg's worldtop/span AND fills the two-band background
-    at that subsector's sector light (a shared fcall bg-fill leaf = render_background_reg, guarded by a runtime
-    bg_done flag). Each seg uses its OWN baked sector ceil/floor/light with worldtop = seg_ceil - viewz_world
-    (runtime). drawn[] now CLIPS real occlusion across 575 segs. To keep the assemble fast (the real 793k-texel
-    table is the FINAL capstone rung), every wall is the flat WALL_BG sentinel (1x1) and the oracle's
-    _wall_texture is forced to None — so this validates the whole walk/viewz/bg/light/occlusion INTEGRATION on
-    real geometry, byte-exact, without the big texture table. Several viewpoints (spawn + rotations + other
-    sectors => the player-subsector viewz/light/bg vary)."""
-    cfg = Config()
-    mw = WadFile.from_path(E1M1_WAD)
-    cmap = bake_bsp(mw, "E1M1")
-    verts = cmap.vertexes
-    lds = mw.linedefs("E1M1"); sds = mw.sidedefs("E1M1"); secs = mw.sectors("E1M1")
-    scene = build_scene(mw, mw, "E1M1")
-    rm = ReferenceModel(cfg)
-    rm._wall_texture = lambda *a, **k: None                  # proxy: every wall flat-fills WALL_BG
-
-    horizon = cfg.VIEW_H // 2
-    proj = cfg.PROJECTION << 16
-
-    sp = spawn_state(mw, "E1M1")
-    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
-    things = mw.things("E1M1")
-    VIEWPOINTS = [(spx, spy, sp.angle),
-                  (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
-    seen = {(spx, spy)}
-    for t in things:                                          # other sectors -> player viewz/light/bg vary
-        if (t.x, t.y) not in seen:
-            seen.add((t.x, t.y)); VIEWPOINTS.append((t.x, t.y, sp.angle))
-        if len(VIEWPOINTS) >= 4:
-            break
-
-    combined = [WALL_BG]                                      # the 1x1 WALL_BG sentinel (the only texel)
-    tex = _texel_table("tex", combined, "per_entry", over_align=True)
-    cm = compile_colormap("cm", mw, lights=COLORMAP_LIGHTS, over_align=True)
-    palette = compile_palette("palette", mw)
-    tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
-    finesine = generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)
-    finetangent = generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)
-    viewangletox = generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)
-    xtoviewangle = generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N)
-
-    def lrow(light):
-        return max(0, min(COLORMAP_LIGHTS - 1, light >> LIGHT_SHIFT))
-
-    colormap = scene.asset_wad.colormap()
-    _cid = [0]                                                # unique label id per EMISSION (a leaf is emitted
-    #                                                           twice by _bsp_as_code — once per node branch)
-    xorby_blocks = {}                                         # M12pp: seg{si}_xorby blocks, emitted once each
-
-    def subsector_action(s):
-        ss = cmap.subsectors[s]
-        cid = _cid[0]; _cid[0] += 1
-        # player-subsector setup (runs only at the FIRST subsector visited = order[0] = the player's):
-        psec = rm._seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
-        viewz_val = rm.view_z(psec.floor_h)
-        viewzw_val = viewz_val >> 16
-        prow = lrow(psec.light)
-        out = [
-            f"    hex.if0 1, bg_done, e1pset{cid}",          # bg_done==0 (first/player subsector) -> set player state
-            f"    ;e1psegs{cid}",
-            f"  e1pset{cid}:",
-            f"    hex.set 8, viewz, {viewz_val & 0xFFFFFFFF}",
-            f"    hex.set 8, viewzw, {viewzw_val & 0xFFFFFFFF}",
-            f"    hex.set 2, bgceil, {colormap[prow][CEIL_BG]}",
-            f"    hex.set 2, bgfloor, {colormap[prow][FLOOR_BG]}",
-            "    stl.fcall bg_fill_leaf, bg_ret",
-            "    hex.set 1, bg_done, 1",
-            f"  e1psegs{cid}:",
-        ]
-        for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
-            seg = cmap.segs[si]
-            ld = lds[seg.linedef]
-            if ld.back != -1:
-                continue
-            v1x, v1y = verts[seg.v1]
-            v2x, v2y = verts[seg.v2]
-            sd = sds[ld.front if seg.side == 0 else ld.back]
-            texoff = (seg.offset + sd.x_off) << 16
-            ssec = rm._seg_sector(lds, sds, secs, seg)
-            fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
-                      ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
-                      ("seg_segangle", 8, seg.angle), ("seg_texoff", 8, texoff & 0xFFFFFFFF),
-                      ("seg_texbase", 5, 0), ("seg_texheight", 4, 1), ("seg_tw", 8, 1), ("seg_hm", 3, 0),
-                      ("seg_light", 2, lrow(ssec.light)),                # WALL_BG sentinel (proxy) tex fields
-                      ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
-                      ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
-                      ("seg_ceil", 8, ssec.ceil_h & 0xFFFFFFFF)]        # M12pp: worldtop = seg_ceil - viewzw in-leaf
-            xorby_blocks[si] = _seg_xorby_block(si, fields)
-            out += _seg_xorby_use(si, clear=_M12PP_CLEAR)
-        return out
-
-    bsp = _bsp_as_code("e1", cmap, done_label="bsp_done", subsector_action=subsector_action)
-    xorby = [ln for blk in xorby_blocks.values() for ln in blk]   # M12pp: the shared per-seg xorby blocks (once)
-
-    pass1 = [
-        "hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
-        "hex.input_dec_uint 8, viewangle, bad",
-        "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",   # viewx = (low 8 of the map coord) << 16 (16.16)
-        "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy",
-        ";e1_bspcode_walk", "bsp_done:",                      # the walk fills col arrays + (player ss) the bg
-    ]
-    pass2 = []
-    for x in range(cfg.VIEW_W):
-        pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
-                     f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
-                     f"col_heightmask + {8 * x}*dw")
-        for y in range(cfg.H):                            # M12oo: the shared-compare trampoline (y runtime, set by load_col)
-            pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
-
-    main = "\n".join([
-        "stl.startup_and_init_all", "present.init_screen", *pass1, *pass2,
-        "present.set_palette palette", "present.update_screen_reg framebuffer", "stl.loop",
-        "bad: stl.loop",
-        "pixel_leaf:", "frame.leaf_body_w",
-        "compare_y:", "frame.compare_y_body",             # M12oo shared pass-2 clip (emitted once)
-        "seg_pass1_leaf:",
-        f"frame.seg_pass1_leaf_body_mtlw {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {proj}",
-        "bg_fill_leaf:",
-        f"frame.render_background_reg framebuffer, bgceil, bgfloor, {cfg.VIEW_W}, {cfg.VIEW_H}, {horizon}",
-        "stl.fret bg_ret",
-        *xorby,                                           # M12pp: the shared per-seg xorby blocks (fcall'd SET/CLEAR)
-        bsp,
-        f"framebuffer: hex.vec {2 * cfg.FB_SIZE}",
-        "vx: hex.vec 10", "vy: hex.vec 10", "viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8",
-        "viewz: hex.vec 8", "viewzw: hex.vec 8", "bgceil: hex.vec 2", "bgfloor: hex.vec 2",
-        "bg_done: hex.vec 1", "bg_ret: ;0",
-        "seg_v1x: hex.vec 8", "seg_v1y: hex.vec 8", "seg_v2x: hex.vec 8", "seg_v2y: hex.vec 8",
-        "seg_segangle: hex.vec 8", "seg_texoff: hex.vec 8",
-        "seg_texbase: hex.vec 5", "seg_texheight: hex.vec 4", "seg_tw: hex.vec 8", "seg_hm: hex.vec 3",
-        "seg_light: hex.vec 2", "xb_ret: ;0",             # M12pp: xorby block fcall/fret return register
-        "ceilfix: hex.vec 8", "floorfix: hex.vec 8",
-        "seg_ceil: hex.vec 8", "worldtop: hex.vec 8",     # M12pp: seg_ceil baked (pure); worldtop leaf-computed
-        "visible: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
-        "normalangle: hex.vec 8", "rw_distance: hex.vec 8", "scale: hex.vec 8", "scalestep: hex.vec 8",
-        "rw_offset: hex.vec 8", "rw_centerangle: hex.vec 8", "x: hex.vec 8",
-        "texcol: hex.vec 8", "cfrac0: hex.vec 4", "stepv: hex.vec 4", "base: hex.vec 5",
-        "seg_ret: ;0",
-        "top: hex.vec 8", "bottom: hex.vec 8",
-        "y: hex.vec 2", "ret_reg: ;0",                    # M12oo trampoline: runtime row counter + shared return reg
-        "frac: hex.vec 4", "v3: hex.vec 3", "idx: hex.vec 5", "cmidx: hex.vec 4",
-        "lit: hex.vec 2", "base_reg: hex.vec 5", "step: hex.vec 4",
-        "heightmask: hex.vec 3", "pixel_ret: ;0",
-        f"col_top: rep({cfg.VIEW_W}, i) hex.vec 8, 1", f"col_bottom: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_base: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_step: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_frac0: rep({cfg.VIEW_W}, i) hex.vec 8, 0", f"col_heightmask: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"col_light: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
-        f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0",
-        tantoangle, finesine, finetangent, viewangletox, xtoviewangle, tex, cm, palette,
-    ])
-    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
-    p = tmp_path / "e1m1geo.fj"
-    p.write_text(main, encoding="utf-8")
-    out = tmp_path / "e1m1geo.fjm"
-    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
-                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
-                out, memory_width=W, print_time=False)
-
-    for vx, vy, va in VIEWPOINTS:
-        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)
-        screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
-        fj.run(out, io_device=screen, print_time=False, print_termination=False)
-        assert bytes(screen.pixel_indices) == bytes(want), f"M12nn-d @ ({vx},{vy},{va}) != oracle"
-
-
-E1M1_GOLDEN = "0b817e4a126026207f40327cb32b68685efd47572f79661ff7136e752e566c0e"
-
-
-@pytest.mark.skip(reason="M13a/b: oracle floors/ceilings are intentionally ahead of the fj renderer "
-                         "(handoff: do the host oracle first, mirror in fj at M13c/d). This test "
-                         "full-frame-diffs the fj wall renderer (still M9 two-band bg) against the live "
-                         "oracle (now M13 visplanes); re-enabled when the fj span raster lands (M13d).")
-def test_wall_render_e1m1_full_frame_golden(tmp_path):
-    """M12nn — THE CAPSTONE: the full E1M1 runtime wall frame with REAL textures, byte-exact vs the oracle and
-    matching the published spawn golden hash. Everything from M12nn-d (the 681-node walk over 575 one-sided
-    segs, runtime player-subsector viewz + walk-driven background, per-seg worldtop, drawn[] occlusion,
-    per-seg multi-light, the off-screen-wall sentinel) NOW with each wall sampling its OWN texture out of a
-    single COMBINED dispatch table of ALL 70 E1M1 wall textures (downscaled like the oracle's _wall_texture;
-    ~198k texels => the 5-nibble wide-index path from M12nn-c). One assemble (the big 198k texel table; watch
-    the time), several stdin viewpoints byte-exact vs render_wall_frame, and the spawn frame hashes to the
-    golden test_wall_frame.py key. The real playable wall renderer."""
-    cfg = Config()
-    rm = ReferenceModel(cfg)                                  # REAL textures (no _wall_texture override)
-    mw = WadFile.from_path(E1M1_WAD)
-    scene = build_scene(mw, mw, "E1M1")
-
-    sp = spawn_state(mw, "E1M1")
-    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
-    things = mw.things("E1M1")
-    VIEWPOINTS = [(spx, spy, sp.angle),                       # the golden viewpoint FIRST
-                  (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
-    seen = {(spx, spy)}
-    for t in things:
-        if (t.x, t.y) not in seen:
-            seen.add((t.x, t.y)); VIEWPOINTS.append((t.x, t.y, sp.angle))
-        if len(VIEWPOINTS) >= 4:
-            break
-
-    # M12rr: the renderer is emitted by the SHARED emit_wall_renderer -- build_doom ships the SAME emitter
-    # (R6 single source), so this golden byte-exact + hash check verifies the production renderer too.
-    # PRODUCTION layout (over_align=False) -- drops the 2^n table padding to fit the flat budget.
-    main = emit_wall_renderer(mw, "E1M1", cfg, over_align=False)
-    consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
-    p = tmp_path / "e1m1full.fj"
-    p.write_text(main, encoding="utf-8")
-    out = tmp_path / "e1m1full.fjm"
-    fj.assemble([consts.resolve(), FIXED_POINT_FJ.resolve(), PRESENT_FJ.resolve(),
-                 PROJECTION_FJ.resolve(), FRAME_FJ.resolve(), p.resolve()],
-                out, memory_width=W, print_time=False)
-
-    # R4: the WHOLE runtime renderer (the 198k-texel combined table + framebuffer + LUTs + the fully unrolled
-    # 16K-pixel pass 2 + the 681-node walk) MUST run on the FLAT path -- a silent paged/hybrid fallback would
-    # otherwise pass. Its span exceeds the DEFAULT 2**23 budget (the renderer ADDS the per-pixel unroll on top of
-    # the table set build_doom's ledger measures), so per DESIGN §1.2 the flat limit is RAISED (RAM-only cost);
-    # asserted over a build that actually CONTAINS the renderer footprint (cf. build.py:35), production layout.
-    span = max(s.segment_start + s.segment_length for s in Reader(out).memory_segments)
-    print(f"\nM12nn renderer flat span = {span:,} words ({span / (1 << 20):.2f}M; "
-          f"default FLAT_MAX_WORDS = {FLAT_MAX_WORDS:,} = 2**23)")
-    # SPAN BREAKDOWN (bisected via Reader.memory_segments, corrected -- the combined table is NOT the dominant
-    # chunk, an earlier wrong guess): the ~40M pre-M12oo span was ~21M the BSP WALK (575 segs' baked per-seg/
-    # per-node hex.set constants, emitted twice per leaf) + ~16M the fully-unrolled 16K-pixel PASS-2 clip + only
-    # ~3.5M the combined texel table. M12oo replaced the inlined per-pixel pass-2 clip (two hex.cmp x 16K) with
-    # the SHARED-COMPARE TRAMPOLINE (one compare_y body + a cheap per-pixel wflip): 40.3M -> 31.2M (-9M / ~23%).
-    # M12pp then replaced the per-seg baked hex.set walk constants (each pays an @-dispatch) with hex.xor_by +
-    # xor-INVOLUTION self-zeroing (no @): 31.2M -> 23.4M (-7.8M / ~25%), assemble 1090s -> 262s (the @ dispatches
-    # were super-linearly expensive). M12qq applied the SAME involution to the 681 BSP NODE partition consts
-    # (cpx/cpy/cdx/cdy in _bsp_as_code): 23.4M -> 21.8M (-1.6M). Cumulative since M12nn: 40.3M -> 21.8M (-46%).
-    # (Single-emission of subsectors -- the original M12qq plan -- is negligible post-M12pp: the seg bodies are
-    # already shared xorby blocks, so the BSP double-emission only duplicates cheap fcalls.) Remaining levers: the
-    # ~3.5M table (a floor) + the pass-2 unroll + partition-const width shrink; flat limit stays RAISED (RAM-only
-    # cost). (Don't promise a number -- MEASURE.)
-    RENDER_FLAT_WORDS = 1 << 26
-    for k, (vx, vy, va) in enumerate(VIEWPOINTS):
-        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene)
-        screen = _ScreenWithInput(f"{vx}\n{vy}\n{va}\n".encode())
-        term = fj.run(out, io_device=screen, print_time=False, print_termination=False,
-                      flat_max_words=RENDER_FLAT_WORDS)
-        assert str(term.storage_mode) == "flat", f"R4: storage_mode {term.storage_mode!r} not flat @ {span} words"
-        got = bytes(screen.pixel_indices)
-        assert got == bytes(want), f"M12nn @ ({vx},{vy},{va}) != oracle"
-        if k == 0:                                            # the spawn viewpoint must hash to the golden
-            assert frame_hash(got) == E1M1_GOLDEN, f"M12nn spawn hash {frame_hash(got)} != golden"
+# ── REMOVED (2026-08-01): two permanently-skipped M12nn tests ────────────────────────────────────
+# `test_wall_render_e1m1_geometry_wallbg_byte_exact` and `test_wall_render_e1m1_full_frame_golden`
+# full-frame-diffed the fj renderer's M9 TWO-BAND BACKGROUND against the live oracle. Their skip
+# reason said "re-enabled when the fj span raster lands (M13d)" -- but M13d landed, and M13c3 then
+# DELETED the two-band background outright (the floor/ceiling visplane pass replaced it, DESIGN
+# 1.2). They were gating a feature that no longer exists, so they could never be re-enabled: a
+# skipped test that cannot come back is dead weight that reads like coverage.
+#
+# What replaced their coverage: the full-E1M1 runtime frame is gated byte-exact by
+# tests/fj/test_lines_render.py (the tier matrix) and tests/fj/test_visual_features.py (V1-V4),
+# both against the live oracle. The M12nn spawn golden 0b817e4a1260... is recorded in DESIGN 1.2.
+# ⚠ `frame.render_background_reg` in src/fj/frame_render.fj is now referenced by NOTHING -- the
+# emitter dropped it at M13c3 and these tests were its last user.

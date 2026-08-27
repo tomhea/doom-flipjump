@@ -142,6 +142,22 @@ class WadFile:
     def __init__(self, wad_type: str, lumps: list[Lump]):
         self.wad_type = wad_type
         self._lumps = lumps
+        # ⚠ CR-2026-08 (RM-3) — the typed map accessors below rebuild their whole list from bytes
+        # on EVERY call, and the hot callers call them per invocation, not per frame:
+        # `reference_model.check_position` asks for linedefs + sidedefs + sectors each time, and
+        # `try_move` calls `check_position` several times per simulated tic -- so a tic re-parsed
+        # E1M1's geometry (2,057 linedefs / 3,001 sidedefs / 279 sectors) roughly six times over.
+        # Every record is a FROZEN dataclass and nothing in the tree mutates the returned lists
+        # (checked across all 82 call sites), so the parse is memoised per (lump, mapname) and each
+        # caller still gets its own list object to hold.
+        self._record_cache: dict = {}
+
+    def _records_cached(self, mapname: str, key: str, build):
+        ck = (key, mapname)
+        got = self._record_cache.get(ck)
+        if got is None:
+            got = self._record_cache[ck] = tuple(build())
+        return list(got)
 
     # ── container ──
     @classmethod
@@ -195,18 +211,34 @@ class WadFile:
 
     # ── typed map records ──
     def vertexes(self, mapname: str) -> list[Vertex]:
+        return self._records_cached(mapname, 'VERTEXES',
+                                    lambda: self._vertexes_uncached(mapname))
+
+    def _vertexes_uncached(self, mapname: str) -> list[Vertex]:
         return [Vertex(*r) for r in _records(self._map_lump(mapname, "VERTEXES").data, "<2h")]
 
     def linedefs(self, mapname: str) -> list[Linedef]:
+        return self._records_cached(mapname, 'LINEDEFS',
+                                    lambda: self._linedefs_uncached(mapname))
+
+    def _linedefs_uncached(self, mapname: str) -> list[Linedef]:
         return [Linedef(*r) for r in _records(self._map_lump(mapname, "LINEDEFS").data, "<7h")]
 
     def sidedefs(self, mapname: str) -> list[Sidedef]:
+        return self._records_cached(mapname, 'SIDEDEFS',
+                                    lambda: self._sidedefs_uncached(mapname))
+
+    def _sidedefs_uncached(self, mapname: str) -> list[Sidedef]:
         out = []
         for x, y, up, lo, mid, sec in _records(self._map_lump(mapname, "SIDEDEFS").data, "<hh8s8s8sh"):
             out.append(Sidedef(x, y, _str8(up), _str8(lo), _str8(mid), sec))
         return out
 
     def sectors(self, mapname: str) -> list[Sector]:
+        return self._records_cached(mapname, 'SECTORS',
+                                    lambda: self._sectors_uncached(mapname))
+
+    def _sectors_uncached(self, mapname: str) -> list[Sector]:
         out = []
         for f, c, ft, ct, li, sp, tg in _records(self._map_lump(mapname, "SECTORS").data, "<hh8s8shhh"):
             out.append(Sector(f, c, _str8(ft), _str8(ct), li, sp, tg))
@@ -233,6 +265,17 @@ class WadFile:
             x, y, dx, dy = struct.unpack_from("<4h", data, off)
             right, left = struct.unpack_from("<2H", data, off + 24)
             out.append(WadNode(x, y, dx, dy, right, left))
+        return out
+
+    def nodes_bbox(self, mapname: str) -> list[tuple]:
+        """The per-child bounding boxes the NODES lump carries (M13-15M: the bbox wedge cull needs
+        them). One (bbox_right, bbox_left) pair per node, each box (top, bottom, left, right)."""
+        data = self._map_lump(mapname, "NODES").data
+        out = []
+        for off in range(0, len(data) - len(data) % 28, 28):
+            bbr = struct.unpack_from("<4h", data, off + 8)
+            bbl = struct.unpack_from("<4h", data, off + 16)
+            out.append((bbr, bbl))
         return out
 
     # ── graphics lumps (H4 / M8): palette, colormap, textures, patches, flats ──

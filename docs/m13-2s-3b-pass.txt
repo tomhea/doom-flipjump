@@ -1,0 +1,13 @@
+== rung 3b byte-exact gates (square 5 viewpoints + E1M1 spawn/rotated) ==
+.[lines 2S] E1M1 spawn frame = 137,320,223 ops
+.
+2 passed, 9 deselected in 283.86s (0:04:43)
+
+== E1M1 after the dispatch-offset optimisation ==
+assembled
+  (-416,256,0x00000000) ops=131,060,211 diff=    0 term=looping
+  (-416,256,0x40000000) ops=46,222,635 diff=    0 term=looping
+
+== full suite ==
+.........................                                                [100%]
+309 passed, 4 skipped in 4176.99s (1:09:36)

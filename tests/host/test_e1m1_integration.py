@@ -9,13 +9,32 @@ import pytest
 
 from doomfj import reference_model, texturecompiler
 from doomfj.build import build_doom, build_wall_renderer
-from doomfj.config import Config, FLAT_MAX_WORDS
+from doomfj.config import Config, FLAT_MAX_WORDS, RENDER_FLAT_MAX_WORDS
 from doomfj.texturecompiler import (
     downscale_canvas, composite_texture, texture_texels, compile_texture, compile_flat,
 )
 from doomfj.wad import WadFile
 
 E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")
+SPRITE_WAD = Path("assets/freedoom1.wad")     # V4 art: the cut-down fixture has no sprite lumps
+# ⚠ B0 -- MEASURED 2026-08-19, and the provisional band was wrong in the informative direction.
+# The shipped tier (sim + collide + the full fixture) is 84,823,030 words, NOT the ~68.2M carried
+# over from the M14 gate's lighter binary. headroom=1.582 against 2**27; against the old 2**26 it
+# would have been 1.26x OVER, so the limit raise was required, not cosmetic.
+#   R4 shipped-tier metrics: tier=lines/W1R/FT1+plane_near span=84,823,030 words
+#   limit=134,217,728 headroom=1.582 fjm=23,432,034 bytes assemble=8054.988s
+# ⚠ THAT 8,054 s FIGURE IS HISTORY. The assembler was rebuilt 2026-08-20 (flipjump-151 06385ad +
+# 108e391) and the SAME program now assembles in 559 s -- 9m19s, measured, decompressing to a
+# byte-identical 314,505,544-byte program image. The old note here said "every gate on this tier is
+# a two-hour commitment" and priced three levels in one image at 4-5 hours; both are now wrong by
+# an order of magnitude (three levels projects to ~30 min). See docs/handoff-complete-game.md.
+SPAN_LO, SPAN_HI = 70_000_000, 100_000_000    # bracketing the MEASURED 84.82M, not a guess:
+                                              # 51.21M words (CR-2026-08 recalibration -- the old
+                                              # 9-18M band predated V4-HD full-res sprite buckets,
+                                              # V5 stacked pieces/regions and SPR-NEAR's dual bank;
+                                              # this hour-long gate had not run since). The hard
+                                              # ceiling stays the separate span < RENDER_FLAT_MAX_WORDS
+                                              # HI at 62M leaves real headroom warning-room below it.
 
 
 # ── the downscale factor is config-derived (R6) ─────────────────────────────
@@ -110,18 +129,80 @@ def test_build_doom_subset_is_flat(tmp_path):
 
 # ── M12rr: the SHIPPED runtime wall renderer (build_wall_renderer) is flat under the RAISED limit ──
 
+@pytest.mark.slow          # Excluded by default via addopts; `-m slow` runs it. SOLO (CLAUDE.md #1).
+                           # ⚠ COST UNMEASURED SINCE 2026-08-20. Last measured end-to-end at 29:43
+                           # (emit + assemble). The assemble half got 3.1x faster that day
+                           # (1,729 s -> 559 s on the same program), so expect roughly half -- but
+                           # this test prints its own `assemble=` line, so read that, don't guess.
+@pytest.mark.skipif(not SPRITE_WAD.exists(),
+                    reason=f"{SPRITE_WAD} absent -- the shipped tier's V4 things need sprite lumps")
 def test_build_wall_renderer_e1m1_flat(tmp_path):
     """M12rr/M13c3 (build_doom wiring) — the SHIPPED runtime wall+floor/ceiling renderer assembles flat and
-    under the RAISED 2**26 flat limit (R0/R4). build_wall_renderer emits via the SHARED
+    under the RAISED flat limit `config.RENDER_FLAT_MAX_WORDS` (R0/R4). build_wall_renderer emits via the SHARED
     doomfj.wall_renderer.emit_wall_renderer — the SAME optimized renderer (M12oo trampoline + M12pp/qq
     xor_by-involution walk + the M13c3 plane_tramp visplane raster) the byte-exact golden test renders through
-    (R6) — so this gates the production build. M13c3 replaced the M9 two-band background (the 4.10M bg-fill
-    unroll) with the floor/ceiling visplane pass-2 (a second 16K-pixel plane_tramp unroll + the per-column
-    plane param arrays + yslope/zlight LUTs): the span moved ~21.8M -> ~24.7M words (DESIGN §1.2), still flat
-    under 2**26 (RAM-only cost). ~4-5 min (the 198k-texel table + the two 16K-pixel pass-2 unrolls dominate)."""
+    (R6) — so this gates the production build.
+
+    The shipped defaults are now the LINES tier with all four visual features on (WPX walls + FT1 floors
+    + plane_near + V1 grain / V2 sky / V3 step faces / V4 things), which is what walk_e1m1 shows and what
+    tests/fj/test_visual_features.py proves byte-exact. The sprite bank dominates the span; the bound
+    below is the sanity band around the measured figure, not a target. ⚠ SLOW: the V4 build is a
+    ~42M-character program. (The assembler is LINEAR in program size -- measured exponent 1.12 --
+    not "~cubic" as this repo long assumed; what made it slow was paging, now fixed.)"""
     m = build_wall_renderer(E1M1, "E1M1", out_fjm=tmp_path / "renderer.fjm",
-                            generated_dir=tmp_path / "gen", flat_max_words=1 << 26)
+                            generated_dir=tmp_path / "gen",
+                            flat_max_words=RENDER_FLAT_MAX_WORDS)
+    # G1/R2: this 30-minute run is the only place the shipped tier's span, .fjm size and assemble
+    # time are measured. It used to assert them and print NOTHING, so a passing run left no number
+    # for the perf ledger and the next session had to spend the 30 minutes again to learn one.
+    print(f"\nR4 shipped-tier metrics: tier={m['tier']} span={m['span_words']:,} words "
+          f"limit={RENDER_FLAT_MAX_WORDS:,} headroom={m['headroom']} "
+          f"fjm={m['fjm_bytes']:,} bytes "
+          f"assemble={m['assemble_seconds']}s", flush=True)
     assert m["storage_mode"] == "flat", m
-    assert m["span_words"] < (1 << 26)
+    assert m["span_words"] < RENDER_FLAT_MAX_WORDS
     assert m["headroom"] > 1.0
-    assert 20_000_000 < m["span_words"] < 28_000_000, m   # ~24.7M post-M13c3 (bg-fill -> visplane pass; sanity bound)
+    # CR-2026-08 (IN-3, A0.1) — this pair is the ONLY automated guard that the shipped picture is the
+    # one the walker shows and `deg_gate` certifies. It asserted WPX and four features while build.py
+    # had moved to W1R + stack_steps/bbox_cull/deg; a fan-out miss the 70-min runtime hid.
+    #
+    # ⚠ EXACT EQUALITY IS DELIBERATE, and it costs something: every flag added to `features` breaks
+    # this until someone states its SHIPPED value here. That is the point — a new picture-shaping
+    # flag must not be able to arrive unnoticed. A subset check would be quieter and would defeat
+    # the guard the comment above describes.
+    #
+    # ⚠⚠ AND IT WAS RED FOR THREE MILESTONES BECAUSE NOBODY PAID THAT COST. `self_reset` joined
+    # `features` in 22ca98a ("M1 WIRED") without landing here, and `standalone` (M5) and `menu` (M3)
+    # followed. The 22-minute runtime and the default deselect meant the failure sat unseen: the
+    # build was fine every time, and the ONLY assertion failing was this one, about its own
+    # bookkeeping. If you add a flag, run `pytest tests/host -m slow` before you call it done.
+    assert m["features"] == {"wall_noise": True, "sky": True, "steps": True, "things": True,
+                             "stack_steps": True, "bbox_cull": True, "deg": True,
+                             # B0: the shipped artifact runs the sim, same as the walker
+                             "player_sim": True, "collide": True, "moving_things": True,
+                             "state_wire": "bin",
+                             # M1/M5/M3: the three TIER flags. The shipped hosted artifact is the
+                             # non-looping, host-driven, world-only build, so all three are False —
+                             # `self_reset` is what m1_gate's binary turns on, `standalone` +
+                             # `menu` are the no-Python tier (build/doom_e1m1_menu.fjm).
+                             "self_reset": False, "standalone": False, "menu": False,
+                             # M2: a door override moves pixels; the shipped tier has none
+                             "sector_heights": False}, m
+    assert m["tier"] == "lines/W1R/FT1+plane_near", m
+    assert SPAN_LO < m["span_words"] < SPAN_HI, m
+
+
+def test_shipped_sprite_wad_resolution():
+    """V4's art source resolves explicitly or RAISES — it never silently ships things=True with an
+    empty sprite bank. The cut-down fixture has no S_START..S_END at all, which is the whole reason
+    `sprite_wad` is a separate argument."""
+    from doomfj.build import _resolve_sprite_wad
+
+    fixture = WadFile.from_path(E1M1)
+    assert "S_START" not in fixture.names()               # the premise
+    with pytest.raises(ValueError, match="sprite"):
+        _resolve_sprite_wad(fixture, "no/such/file.wad")  # absent default + a spriteless map wad
+    with pytest.raises(ValueError, match="S_START"):
+        _resolve_sprite_wad(fixture, fixture)             # explicitly handed a spriteless wad
+    if SPRITE_WAD.exists():
+        assert "S_START" in _resolve_sprite_wad(fixture, SPRITE_WAD).names()

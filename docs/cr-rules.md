@@ -1,6 +1,6 @@
 # CR rules
 
-Eight hard requirements for every PR into `main`. Each has an ID so review comments quote it (`R4 fail: ...`).
+Nine hard requirements for every PR into `main`. Each has an ID so review comments quote it (`R4 fail: ...`).
 
 ## R1 — Tests first, evidence in PR body
 The PR body MUST contain two fenced blocks: (1) `scripts/test.sh` output showing the new test(s) FAILing
@@ -38,6 +38,19 @@ Branch `mN-feature-slug` (milestone) / `sN-topic` (spike) / `fix/slug` (hotfix).
 Assembly runs with `warning_as_errors=True` (the `flipjump.assemble` default = `--werror`) and introduces no
 new warning vs `docs/known-warnings.md`. `pytest` runs clean.
 
+## R9 — A verification tool used as evidence must carry a negative control
+A script whose output is quoted as proof ("byte-exact", "emission-neutral", "equivalent") is itself
+load-bearing and MUST ship a self-test that mutates real code and requires the tool to REJECT each
+mutation — `alpha_check.py --selftest` is the pattern. A tool with no negative control has not been
+shown to have teeth, and its verdict may not be cited in a commit message or PR body.
+Corollary: the self-test's fixtures must cover the shapes that can defeat the tool. Both tools in
+`scratchpad/cr/` failed review precisely because their controls exercised only the easy case —
+one mutated the single file whose macros all have a `<` list, hiding a scan that ran into macro
+bodies for the other 68 of 188 macros; the other normalised all labels to one token, so an
+INVERTED BRANCH compared identical.
+Do not write "verified" for a property no gate actually ran on. Prefer: state the check, its cost,
+and what it does NOT cover.
+
 ## Verdict format
-Approve: review body `APPROVED\nAll R1-R8 pass.` Request changes: `CHANGES REQUESTED\nR<id> fail: <reason>`.
+Approve: review body `APPROVED\nAll R1-R9 pass.` Request changes: `CHANGES REQUESTED\nR<id> fail: <reason>`.
 Inline comments quote offending lines with `R<id>:`.

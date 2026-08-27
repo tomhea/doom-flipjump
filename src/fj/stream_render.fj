@@ -1,0 +1,1473 @@
+// ==============================================================================================
+// stream_render.fj the per-column run emitter: pushes ceiling/wall/floor/sprite runs to the device.
+// STATUS  LIVE - the generated main + frame_render.fj
+// ENTRY   stream.emit_bytes4 (main); stream.emit_col_lines, stream.entry_append (frame_render)
+// SIZE    41 macros (stream.emit_bytes4 .. stream.entry_append)
+// ==============================================================================================
+// THE STREAM EMITTER — the per-column device-RUN raster. Walks a column's run-lists (ceiling band
+// list, wall run(s), floor band list, sprite fragments) and pushes each run out as `byte.emit` /
+// `cm.emit` through the device-emit dispatch tables (present.fj's `begin_frame_stream` + the tables
+// `doomfj.lut_generator.generate_emit_dispatch_table_fj` emits, named "byte"/"cm" by the includer).
+// `emit_col_lines` is the shipped per-column entry point; `flush_frame` is the two-sided (rung 3b)
+// whole-frame assembler. (history: docs/handoff-visual-features.md, docs/m13p-procedural-plan.md)
+// @requires hex.init & stl.ptr_init (ptr_index/read_hex) — stl.startup_and_init_all covers both —
+// plus the includer's "byte"/"cm" emit tables. Each such table self-inits via its `<label>: ;end …
+// end:` header at table-declaration time (see lut_generator's `_per_entry_emit_table`), so there is
+// no separate init call here.
+
+// ══ NAMING CONVENTIONS IN THIS FILE ══════════════════════════════════════════════════════════
+// Macro signature anatomy: `def name params… @ compile-time, locals < global, names`. Params and
+// the `<` globals are EMITTER-VISIBLE (src/doomfj/wall_renderer.py generates calls by name and
+// position) and are never renamed; only `@`-locals and body labels are. Every `@`-local must be
+// USED on every rep-gated path or werror fails the build.
+//
+//   c… / f…      ceiling-side / floor-side halves of a column (cbufa, fstart, ceil_done…).
+//   u… / l…      the UPPER (ceiling-side) / LOWER (floor-side) step piece of a stacked column.
+//   …a / …d      the ASC / DESC half of a plane band list, split at CENTERY because the zlight
+//                ordinals restart there (cbufa/cbufd, fbufa/fbufd, and their region-behind twins
+//                rcbufa/rcbufd/rfbufa/rfbufd).
+//   …p1          value PLUS ONE — an EXCLUSIVE end row (uy2p1, fy2p1).
+//   …_p / …base  a running POINTER (colst_p/colbuf_p in flush_frame; `ptr` is always the walk
+//                cursor) and the fixed table BASE it derives from (`wstripbase` is the base the
+//                seg's baked `wstrip` offset indexes; `stepcol_b` likewise). ⚠ A `b` is NOT
+//                always "base": on sprite names it is the second, FARTHER fragment B —
+//                ssy1b/ssy2b/sblkb/slrb pair with ssy1/ssy2/sblk/slr, and the labels
+//                spr_top_b/spr_bot_b mean "take fragment B's bound" — while sy0b/sy0bb is the
+//                top row stored BIASED by 32768 (two bytes in the slot), and cmp_a/cmp_b are
+//                the ditto compare's two operands. Read a trailing `b` by its macro's context.
+//   …v           a VALUE loaded out of a compile-time cell param (`cexcl_cell` -> `cexclv`).
+//   …_cell       a param naming a compile-time data cell to read, not a runtime register.
+//   n_… / …_i    an entry COUNT and the running INDEX over it (n_ent/ent_i, n_top/top_i).
+//   c…           a CONSTANT register: ccy = CENTERY, cviewh = VIEW_H, cFF = 0xFF, c_one = 1.
+//   win_lo/win_end   the half-open ROW WINDOW [lo, end) a band/run walk is restricted to.
+//   y2r / colr   the unit of the 0x0B protocol: one emitted pair's END ROW and its FINAL palette
+//                byte (colours are pre-composed through the colormap at bake time).
+//   ctake        the ceiling prefix's end row = min(cexcl, fstart) = the wall run's first row.
+//
+// Labels are jump targets; `hex.cmp a, b, lt, eq, gt` names three of them, so a `…_ok` / `…_clamp`
+// pair is the usual clamp idiom. Data cells (`name: hex.vec n`) live after the macro's final
+// `;end` — they are fj ops that must never execute.
+
+ns stream {
+    // M13-raster — emit a RUNTIME 8-nibble (4-byte, little-endian) register as 4 byte.emit calls, for
+    // the device rasterizer's per-seg/per-visplane records (planeheight, scale1, scalestep, wt_ceil,
+    // wt_floor). byte.emit's dispatch reads a 2-nibble-vec cell directly (no dereference through a
+    // register — see fj-lessons R21), so each of the 4 bytes is `reg + 2*k*dw` for k in 0..3.
+    def emit_bytes4 reg {
+        rep(4, k) byte.emit reg + 2*k*dw
+    }
+
+    // M13-planesproto — emit ONE visplane bank's band lists for the 0x09 BEGIN_FRAME_PLANES frame.
+    // `base` = the bank's buffer label (compile-time), `nvps`/`stride` compile-time; per vp:
+    // [n:1B] then n x ([count:1B] via byte.emit + the (base,zrow) pair collapsed to ONE final
+    // colour byte via cm.emit — the colormap lookup now runs once per VISPLANE ENTRY (~dozens),
+    // not once per emitted column run). An unbuilt vp's slot0 is still 0-init => emits just [0].
+    def emit_vp_bank base, nvps, stride {
+        rep(nvps, v) .emit_vp_list base + v*(1+stride)*dw
+    }
+    def emit_vp_list buf @ ptr, n, i, cnt, cidx, vloop, vbody, vdone, vskip {
+        hex.set w/4, ptr, buf
+        hex.read_byte_and_inc n, ptr
+        byte.emit n
+        hex.zero 2, i
+      vloop:
+        hex.cmp 2, i, n, vbody, vdone, vdone
+      vbody:
+        hex.read_byte_and_inc cnt, ptr
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
+        byte.emit cnt
+        cm.emit cidx
+        hex.inc 2, i
+        ;vloop
+      vdone:
+        ;vskip
+      ptr: hex.vec w/4
+      n: hex.vec 2
+      i: hex.vec 2
+      cnt: hex.vec 2
+      cidx: hex.vec 4
+      vskip:
+    }
+
+    // One column's 5-byte record: [cexcl][fstart][lit][cvp][fvp] — five compile-time-cell reads,
+    // five byte.emits, no loops, no pointer derefs. The device does the rest.
+    def emit_column_rec cexcl_cell, fstart_cell, lit_cell, cvp_cell, fvp_cell {
+        byte.emit cexcl_cell
+        byte.emit fstart_cell
+        byte.emit lit_cell
+        byte.emit cvp_cell
+        byte.emit fvp_cell
+    }
+
+    // M13pS2-crush2b — emit a PREFIX of a shared FULL-RANGE band list: the first `take_src` rows.
+    // `arr_cell` is a RUNTIME cell (a per-column col array slot) holding the visplane buffer's
+    // ADDRESS (slot 0 = the entry count n, entries from slot 1); the list's counts sum to VIEW_H, so
+    // take<=VIEW_H always exhausts before the list does and n itself is not needed here. take==0
+    // emits nothing and never dereferences the buffer (an UNCLAIMED column's cell is 0).
+    def emit_prefix arr_cell, take_src \
+            @ ptr, cnt, cidx, take, ploop, p_emit_full, p_emit_part, pdone, pskip {
+        hex.mov 2, take, take_src   // (hex.mov zeroes dst first)
+        hex.if0 2, take, pdone
+        hex.mov w/4, ptr, arr_cell                 // the buffer ADDRESS stored per column (mov, R16)
+        hex.read_byte_and_inc cnt, ptr             // consume the n header byte (value unused here)
+      ploop:
+        hex.read_byte_and_inc cnt, ptr
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
+        hex.cmp 2, cnt, take, p_emit_full, p_emit_full, p_emit_part
+      p_emit_full:                                 // cnt <= take: emit the whole band, continue
+        byte.emit cnt
+        cm.emit cidx
+        hex.sub 2, take, cnt
+        hex.if0 2, take, pdone
+        ;ploop
+      p_emit_part:                                 // cnt > take: emit the remaining rows, done
+        byte.emit take
+        cm.emit cidx
+        ;pdone
+      pdone:
+        ;pskip
+      ptr: hex.vec w/4
+      cnt: hex.vec 2
+      cidx: hex.vec 4
+      take: hex.vec 2
+      pskip:
+    }
+
+    // Emit a SUFFIX of a shared FULL-RANGE band list: everything after the first `skip_src` rows
+    // (the list sums to VIEW_H, so the emitted total is exactly VIEW_H - skip with no extra
+    // bookkeeping). A zero buffer address (an UNCLAIMED column) emits nothing.
+    def emit_suffix arr_cell, skip_src \
+            @ ptr, n_ent, ent_i, cnt, cidx, skip_rows, sloop, sbody, sskipall, spartial, sread, scont, sdone, sskip {
+        hex.mov w/4, ptr, arr_cell
+        hex.if0 w/4, ptr, sdone
+        hex.read_byte_and_inc n_ent, ptr           // the entry count
+        hex.mov 2, skip_rows, skip_src   // (hex.mov zeroes dst first)
+        hex.zero 2, ent_i
+      sloop:
+        hex.cmp 2, ent_i, n_ent, sbody, sdone, sdone
+      sbody:
+        hex.read_byte_and_inc cnt, ptr
+        hex.if0 2, skip_rows, sread                // done skipping -> read the colour + emit the band
+        hex.cmp 2, skip_rows, cnt, spartial, sskipall, sskipall
+      sskipall:                                    // skip >= cnt: the band is entirely above the window --
+        hex.sub 2, skip_rows, cnt                  // HOP its 2 colour bytes without the (expensive)
+        hex.ptr_add ptr, 2                         // pointer READS (the skip-scan dominated the emit cost)
+        ;scont
+      spartial:                                    // 0 < skip < cnt: emit the band's remainder
+        hex.sub 2, cnt, skip_rows
+        hex.zero 2, skip_rows
+      sread:
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
+        byte.emit cnt
+        cm.emit cidx
+      scont:
+        hex.inc 2, ent_i
+        ;sloop
+      sdone:
+        ;sskip
+      ptr: hex.vec w/4
+      n_ent: hex.vec 2
+      ent_i: hex.vec 2
+      cnt: hex.vec 2
+      cidx: hex.vec 4
+      skip_rows: hex.vec 2
+      sskip:
+    }
+
+    // M13-spanfill — emit ONE column's fillCol spans for the 0x0A begin_frame_spans DUMB-screen
+    // protocol. Same three windows as emit_column (ceiling PREFIX [0,min(cexcl,fstart)) over the shared
+    // ceiling visplane list, ONE wall run [ctake,fstart), floor SUFFIX [fstart,VIEW_H) over the floor
+    // list), but instead of implicit column-major run pairs it emits EXPLICIT records
+    // [x:1][y1:1][y2:1][colour:1] the device just fills — x is the compile-time column (stl.output_char),
+    // y1/y2 track a running row cursor `ycur`, colour is cm.emit(cidx) for plane bands / byte.emit(lit)
+    // for the wall. The per-column visplane buffer ADDRESSES are recomputed from the baked cvp/fvp
+    // INDICES (planesproto stores indices, not addresses) as base + idx*(1+stride)*dw. An UNCLAIMED
+    // column (fvp==0xFF) emits nothing. The frame's trailing 0xFF-x sentinel is emitted by the caller,
+    // once, after all columns. @requires the "byte"/"cm" emit tables + hex.init & stl.ptr_init.
+    def emit_column_spans x, cexcl_cell, fstart_cell, lit_cell, cvp_cell, fvp_cell, \
+            vpc_bufs, vpf_bufs, band_stride \
+            @ claimed, cok, cclamp, ceil, cloop, cemit_full, cemit_part, wall, floor, \
+              floop, fbody, fskipall, fpartial, fread, fcont, fdone, skip, \
+              fvpv, cexclv, fstartv, litv, cvpv, cbuf, fbuf, ctake, ycur, y2, ptr, cnt, n_ent, ent_i, \
+              cidx, take, wlen, cFF {
+        hex.mov 2, fvpv, fvp_cell
+        hex.set 2, cFF, 0xFF
+        hex.cmp 2, fvpv, cFF, claimed, skip, claimed  // fvp == 0xFF -> unclaimed, emit nothing
+      claimed:
+        hex.mov 2, cexclv, cexcl_cell
+        hex.mov 2, fstartv, fstart_cell
+        hex.mov 2, litv, lit_cell
+        hex.mov 2, cvpv, cvp_cell
+        // cbuf = vpc_bufs + cvp*(1+band_stride)*dw ; fbuf = vpf_bufs + fvp*(1+band_stride)*dw
+        hex.zero w/4, cbuf
+        hex.mov 2, cbuf, cvpv
+        hex.mul_const w/4, cbuf, cbuf, (1+band_stride)*dw
+        hex.set w/4, ptr, vpc_bufs
+        hex.add w/4, cbuf, ptr
+        hex.zero w/4, fbuf
+        hex.mov 2, fbuf, fvpv
+        hex.mul_const w/4, fbuf, fbuf, (1+band_stride)*dw
+        hex.set w/4, ptr, vpf_bufs
+        hex.add w/4, fbuf, ptr
+        // ctake = min(cexcl, fstart) ; ycur = 0
+        hex.mov 2, ctake, cexclv
+        hex.cmp 2, ctake, fstartv, cok, cok, cclamp
+      cclamp:
+        hex.mov 2, ctake, fstartv
+      cok:
+        hex.zero 2, ycur
+      ceil:                                            // ceiling PREFIX over [0, ctake)
+        hex.if0 2, ctake, wall
+        hex.mov w/4, ptr, cbuf
+        hex.read_byte_and_inc cnt, ptr                 // consume the entry-count header byte
+        hex.mov 2, take, ctake                         // rows still to emit
+      cloop:
+        hex.read_byte_and_inc cnt, ptr                 // run length
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr   // cidx = (base, zrow)
+        hex.cmp 2, cnt, take, cemit_full, cemit_full, cemit_part   // cnt <= take -> whole band
+      cemit_full:
+        stl.output_char x                              // [x]
+        byte.emit ycur                                 // [y1]
+        hex.mov 2, y2, ycur
+        hex.add 2, y2, cnt
+        byte.emit y2                                   // [y2]
+        cm.emit cidx                                   // [colour]
+        hex.mov 2, ycur, y2
+        hex.sub 2, take, cnt
+        hex.if0 2, take, wall                          // ceiling filled up to ctake
+        ;cloop
+      cemit_part:                                      // cnt > take: emit the remaining `take` rows
+        stl.output_char x
+        byte.emit ycur
+        hex.mov 2, y2, ycur
+        hex.add 2, y2, take
+        byte.emit y2
+        cm.emit cidx
+        hex.mov 2, ycur, y2
+        ;wall
+      wall:                                            // ycur == ctake here; wall run [ctake, fstart)
+        hex.mov 2, wlen, fstartv
+        hex.sub 2, wlen, ctake
+        hex.if0 2, wlen, floor
+        stl.output_char x
+        byte.emit ycur                                 // y1 == ctake
+        byte.emit fstartv                              // y2 == fstart
+        byte.emit litv                                 // wall colour (already final, no cm)
+        hex.mov 2, ycur, fstartv
+      floor:                                           // floor SUFFIX over [fstart, view_h)
+        hex.mov 2, ycur, fstartv
+        hex.mov w/4, ptr, fbuf
+        hex.read_byte_and_inc n_ent, ptr               // n (entry count)
+        hex.zero 2, ent_i
+        hex.mov 2, take, fstartv                       // skip the first fstart rows
+      floop:
+        hex.cmp 2, ent_i, n_ent, fbody, fdone, fdone
+      fbody:
+        hex.read_byte_and_inc cnt, ptr                 // run length
+        hex.if0 2, take, fread                         // done skipping -> emit this band
+        hex.cmp 2, take, cnt, fpartial, fskipall, fskipall
+      fskipall:                                        // skip >= cnt: hop the band's 2 colour bytes
+        hex.sub 2, take, cnt
+        hex.ptr_add ptr, 2
+        ;fcont
+      fpartial:                                        // 0 < skip < cnt: emit the band remainder
+        hex.sub 2, cnt, take
+        hex.zero 2, take
+      fread:
+        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
+        stl.output_char x
+        byte.emit ycur
+        hex.mov 2, y2, ycur
+        hex.add 2, y2, cnt
+        byte.emit y2
+        cm.emit cidx
+        hex.mov 2, ycur, y2
+      fcont:
+        hex.inc 2, ent_i
+        ;floop
+      fdone:
+        ;skip
+      fvpv: hex.vec 2
+      cexclv: hex.vec 2
+      fstartv: hex.vec 2
+      litv: hex.vec 2
+      cvpv: hex.vec 2
+      cbuf: hex.vec w/4
+      fbuf: hex.vec w/4
+      ctake: hex.vec 2
+      ycur: hex.vec 2
+      y2: hex.vec 2
+      ptr: hex.vec w/4
+      cnt: hex.vec 2
+      n_ent: hex.vec 2
+      ent_i: hex.vec 2
+      cidx: hex.vec 4
+      take: hex.vec 2
+      wlen: hex.vec 2
+      cFF: hex.vec 2
+      skip:
+    }
+
+    // One column's 3 windows over the SHARED per-visplane full-range lists (M13pS2-crush2b):
+    // ceiling = the ceiling visplane list's PREFIX [0, min(cexcl, fstart)) — the min gives the
+    // oracle's floor-wins semantics on (theoretical) off-screen-sentinel overlap columns — then ONE
+    // wall run [cexcl', fstart), then floor = the floor visplane list's SUFFIX [fstart, VIEW_H).
+    // `cbuf_cell`/`fbuf_cell` are per-column col-array cells holding the visplane buffer addresses;
+    // `wall_lit` is the column's W1 wall FINAL palette byte (baked at Python emit time). A
+    // ZERO-length wall run emits NOTHING — mid-stream a 0-count pair is merely 2 wasted emits, but
+    // on the frame's LAST column a trailing pair would arrive AFTER the device's width*height pixels
+    // completed and leak into command-byte decode.
+    def emit_column cbuf_cell, cexcl, fstart, wall_lit, fbuf_cell \
+            @ wlen, ctake, cclamp, cok, nowall, skip {
+        hex.mov 2, ctake, cexcl   // (hex.mov zeroes dst first)
+        hex.cmp 2, ctake, fstart, cok, cok, cclamp   // ctake = min(cexcl, fstart)
+      cclamp:
+        hex.mov 2, ctake, fstart
+      cok:
+        .emit_prefix cbuf_cell, ctake
+        hex.mov 2, wlen, fstart   // (hex.mov zeroes dst first)
+        hex.sub 2, wlen, ctake                    // wlen = fstart - ctake (>= 0 by the clamp)
+        hex.if0 2, wlen, nowall
+        byte.emit wlen
+        byte.emit wall_lit
+      nowall:
+        .emit_suffix fbuf_cell, fstart
+        ;skip
+      wlen: hex.vec 2
+      ctake: hex.vec 2
+      skip:
+    }
+
+    // M13-lines wall tiers. W1: the wall is ONE flat run -> a single [y2][colour] pair.
+    def w1_wall fstart, wall_lit {
+        byte.emit fstart
+        byte.emit wall_lit
+    }
+
+    // ... and its WINDOWED twin for emit_region's wall piece [wlo, whi): one clamped pair, the same
+    // constant lit byte. INVARIANT: every wall tier needs a windowed twin -- without one a
+    // sprite-FRAGMENTED column emits no wall piece and the floor pairs bleed into the wall rows.
+    // ⚠ W2S still has that hole (no windowed twin), so W2S+things remains ungated.
+    // (history: docs/handoff-visual-features.md, M13-15M)
+    def w1_wall_win wlo, whi, wall_lit @ do_wall, skip {
+        hex.cmp 2, wlo, whi, do_wall, skip, skip
+      do_wall:
+        byte.emit whi
+        byte.emit wall_lit
+      skip:
+    }
+
+    // M13-W2S: the seg's run-merged 16-band colour strip STRETCHED over the wall span. Entry j is
+    // [cum_j:1][colour:1]; its band ends at y2 = ctake + ((cum_j * wlen) >> 4) -- an exact integer
+    // split (the 1/16 IS the >>4), no divide, no v-DDA, and a function of (seg, ctake, fstart)
+    // alone, so the ditto key is unchanged and the 93 ditto columns stay free. Bands that don't
+    // advance y2 (thin walls) emit nothing. @requires hex.init & stl.ptr_init
+    def w2s_wall ctake, wlen, wstrip, wstripbase \
+            @ ptr, n_ent, ent_i, ycur, y2r, colr, mul_cum, mul_wlen, mul_out, \
+              wsloop, wsbody, wsemit, wsnext, wsdone, end {
+        hex.mov w/4, ptr, wstripbase               // bank base (per frame) + the seg's baked offset
+        hex.add w/4, ptr, wstrip
+        hex.read_byte_and_inc n_ent, ptr
+        hex.zero 2, ent_i
+        hex.mov 2, ycur, ctake
+      wsloop:
+        hex.cmp 2, ent_i, n_ent, wsbody, wsdone, wsdone
+      wsbody:
+        hex.read_byte_and_inc y2r, ptr             // cum band index (1..16)
+        hex.read_byte_and_inc colr, ptr            // the band's final palette byte
+        hex.zero 4, mul_cum                        // both operands zero-extended to the mul width
+        hex.mov 2, mul_cum, y2r                    // (mul_lo n reads n nibbles from BOTH sources)
+        hex.zero 4, mul_wlen
+        hex.mov 2, mul_wlen, wlen
+        hex.mul_lo 4, mul_out, mul_cum, mul_wlen   // cum * wlen  (<=16 x <=100)
+        hex.shr_hex 4, 1, mul_out                  // >> 4 bits = the 1/16 split
+        hex.mov 2, y2r, mul_out
+        hex.add 2, y2r, ctake                      // y2 = ctake + ((cum*wlen) >> 4)
+        hex.cmp 2, y2r, ycur, wsnext, wsnext, wsemit   // no advance -> skip this band
+      wsemit:
+        byte.emit y2r
+        byte.emit colr
+        hex.mov 2, ycur, y2r
+      wsnext:
+        hex.inc 2, ent_i
+        ;wsloop
+      wsdone:
+        ;end
+      ptr: hex.vec w/4
+      n_ent: hex.vec 2
+      ent_i: hex.vec 2
+      ycur: hex.vec 2
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      mul_cum: hex.vec 4
+      mul_wlen: hex.vec 4
+      mul_out: hex.vec 4
+      end:
+    }
+
+    // M13-WPX: TRUE 1x1 vertical wall texturing. The seg's block holds one FULLY-BAKED run-list
+    // per possible wall height (0..view_h, uniform stride `wpxstride` words), each list =
+    // [n][(rel,colour) x n][last_colour], where `rel` is the run's END row measured from the wall
+    // TOP. So the whole emit is: index the block by wlen (one mul_const -- no table read, no
+    // search), then per run `y2 = ctake + rel` -- ONE ADD, no multiply, no v-DDA, no divide. The
+    // last run always ends exactly at fstart, so it is emitted straight from the register and
+    // needs no baked rel. The list is baked at the wall's EXACT height, so every run boundary is
+    // pixel-exact and the run count self-limits on short walls (a 5px wall walks <=5 runs).
+    // Output stays a function of (seg, ctake, fstart) alone -> the ditto columns are still free.
+    // @requires hex.init & stl.ptr_init
+    // V1 (`noise`=1): the PSEUDO-RANDOM WALL GRAIN. Each run's baked colour is pushed down
+    // `wnoise` colormap rows before it goes out -- the same colour, dimmer, so the grain always
+    // reads as surface roughness and never as a hue jump. `wnoise` is a COLUMN-GROUP constant the
+    // caller has already computed (rm.wall_noise: keyed on x>>2 so ditto survives, stepping
+    // 0/4/8/12 so it is actually visible), pre-shifted into the high byte of `cmidx`. So the whole
+    // per-run cost is rebuilding the LOW byte and one cm.apply -- no hash, no table, no per-run
+    // state. Mirrors ReferenceModel.wall_noise exactly (R6).
+    def wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride, noise, cmidx \
+            @ ptr, y2r, colr, wloop, wdone, end {
+        hex.zero w/4, ptr
+        hex.mov 2, ptr, wlen
+        hex.mul_const w/4, ptr, ptr, wpxstride*dw      // the list baked for THIS exact height
+        hex.add w/4, ptr, wstripbase
+        hex.add w/4, ptr, wstrip                       // + the seg's baked block offset
+      wloop:
+        hex.read_byte_and_inc y2r, ptr                 // this run's end row, relative to the top
+        hex.if0 2, y2r, wdone                          // rel==0 SENTINEL: every real run ends >=1,
+        hex.read_byte_and_inc colr, ptr                // so no counter register, no per-run compare
+        hex.add 2, y2r, ctake
+        byte.emit y2r
+        rep(1-noise, k) byte.emit colr
+        rep(noise, k) .wpx_grain colr, cmidx
+        ;wloop
+      wdone:
+        hex.read_byte_and_inc colr, ptr                // the last run ends exactly at fstart
+        byte.emit fstart
+        rep(1-noise, k) byte.emit colr
+        rep(noise, k) .wpx_grain colr, cmidx
+        ;end
+      ptr: hex.vec w/4
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      end:
+    }
+
+    // one grained run: cmidx's HIGH byte already holds the column's colormap row (set once per
+    // column by the caller), so only the low byte moves. `cm.emit` colormaps AND emits in a single
+    // dispatch (indexed by light<<8 | colour) -- the lines tier has no `cm.apply`, and wanting one
+    // would have been the wrong shape anyway: this replaces a byte.emit rather than adding to it.
+    def wpx_grain colr, cmidx {
+        hex.mov 2, cmidx, colr
+        cm.emit cmidx
+    }
+
+    // once per column: look this column's grain row up and park it in cmidx's high byte.
+    def wpx_grain_col gnrow, cmidx {
+        hex.zero 4, cmidx
+        hex.mov 2, cmidx + 2*dw, gnrow
+    }
+
+    // M13-lines (the DUMB-DEVICE mode): one claimed column's three windows emitted at CLAIM
+    // TIME as the 0x0B packed column-run frame. M13-bakedbands: the per-visplane lists are
+    // COMPILE-TIME data with [y2_absolute][final_colour] pairs (colours pre-composed through
+    // the colormap at emit time, cumulative y2) -- so the walkers below just stream bytes:
+    // no ycur arithmetic, no colormap dispatch, no base registers. The ceiling PREFIX emits
+    // pairs until one crosses ctake (clamped there); the floor SUFFIX skips pairs at or below
+    // fstart and streams the rest (the device cursor is already at fstart after the wall pair).
+    // @requires hex.init & stl.ptr_init
+    def call_walk leaf, ret {
+        stl.fcall leaf, ret
+    }
+
+    // ══ M13-2S rung 3b — the TWO-SIDED emit ══════════════════════════════════════════════════
+    // The 0x0B protocol needs ONE contiguous top-to-bottom record per column, but walking segs
+    // front-to-back a column is built from BOTH ENDS: ceiling regions and upper walls arrive
+    // top-down, floor regions and lower walls bottom-UP. So the walk buffers each column's REGIONS
+    // -- 4 packed bytes, [kind][arg][y1][yend] -- into a top list and a bottom list, and the record
+    // is assembled afterwards by expanding them (top forward, bottom BACKWARD, which fixed-size
+    // entries make a plain reverse index walk).
+    //
+    // Regions, not pixels: buffering the finished [y2][colour] PAIRS instead was measured at
+    // +19M/frame on the square room alone, because a WPX 1x1 wall column is ~76 pairs and every one
+    // costs a write (50@) plus a read (42@). A column holds at most ~14 regions.
+    //   kind 0 = ceiling band (arg = the sector's plane-pair id), 1 = floor band, 2 = wall run
+    //   (arg = the WPX bank block index).
+
+    def entry_append ptr, cnt, kind, arg, y1, yend @ kind_r, end {
+        hex.set 2, kind_r, kind
+        hex.write_byte_and_inc ptr, kind_r
+        hex.write_byte_and_inc ptr, arg                  // arg is 4 nibbles: a plane-pair id, or a
+        hex.write_byte_and_inc ptr, arg + 2*dw           // WPX block index (E1M1 has 622 of them)
+        hex.write_byte_and_inc ptr, y1
+        hex.write_byte_and_inc ptr, yend
+        hex.inc 2, cnt
+        ;end
+      kind_r: hex.vec 2
+      end:
+    }
+
+    def band_pair sink, cnt, y2r, colr, buf {
+        rep(buf, k) .band_pair_buf sink, cnt, y2r, colr
+        rep(1-buf, k) .band_pair_emit y2r, colr
+    }
+
+    def band_pair_buf sink, cnt, y2r, colr {
+        hex.write_byte_and_inc sink, y2r
+        hex.write_byte_and_inc sink, colr
+        hex.add_constant 2, cnt, 2
+    }
+
+    def band_pair_emit y2r, colr {
+        byte.emit y2r
+        byte.emit colr
+    }
+
+    // one band-list HALF over the row sub-range [y1, yend): skip entries ending at or above y1,
+    // emit the rest, clamp the entry that crosses `yend` and stop there. The shipped prefix (pwalk)
+    // and suffix (swalk) walks are both special cases -- rung 3b needs the general form, because a
+    // plane region is now bounded by two SEGS, not by the window edge.
+    def band_half sink, cnt, listp, y1, yend, buf @ loop, body, skip, check_end, emit, emit_last, clamp, done, ptr, n_ent, ent_i, y2r, colr, end {
+        hex.mov w/4, ptr, listp
+        hex.read_byte_and_inc n_ent, ptr
+        hex.zero 2, ent_i
+      loop:
+        hex.cmp 2, ent_i, n_ent, body, done, done
+      body:
+        hex.read_byte_and_inc y2r, ptr
+        hex.read_byte_and_inc colr, ptr
+        hex.inc 2, ent_i
+        hex.cmp 2, y2r, y1, skip, skip, check_end  // ends at/above the range start -> not ours
+      skip:
+        ;loop
+      check_end:
+        hex.cmp 2, y2r, yend, emit, emit_last, clamp
+      emit:
+        .band_pair sink, cnt, y2r, colr, buf
+        ;loop
+      clamp:
+        hex.mov 2, y2r, yend                     // the entry crossing the end: clamp, then stop
+      emit_last:
+        .band_pair sink, cnt, y2r, colr, buf
+      done:
+        ;end
+      ptr: hex.vec w/4
+      n_ent: hex.vec 2
+      ent_i: hex.vec 2
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      end:
+    }
+
+    // a plane REGION [y1, yend) of one surface: the asc half always (its entries all end at or
+    // below CENTERY, so it self-skips when the region starts below), the desc half only when the
+    // region actually reaches past CENTERY -- otherwise its first entry (ending at CENTERY+1)
+    // would clamp to `yend` and emit a phantom pair.
+    def band_range sink, cnt, lista, listd, y1, yend, centery, buf @ desc, done, ccy, end {
+        .band_half sink, cnt, lista, y1, yend, buf
+        hex.set 2, ccy, centery
+        hex.cmp 2, yend, ccy, done, done, desc
+      desc:
+        .band_half sink, cnt, listd, y1, yend, buf
+      done:
+        ;end
+      ccy: hex.vec 2
+      end:
+    }
+
+    // one WPX 1x1 wall run over the rows [y1, yend): the list baked for this EXACT height, `rel`
+    // measured from the run's top, the final run (the `rel == 0` sentinel) ending at yend.
+    def wall_run sink, cnt, y1, yend, wstrip, wstripbase, wpxstride, buf @ wloop, wdone, ptr, wlen, y2r, colr, end {
+        hex.mov 2, wlen, yend
+        hex.sub 2, wlen, y1
+        hex.zero w/4, ptr
+        hex.mov 2, ptr, wlen
+        hex.mul_const w/4, ptr, ptr, wpxstride*dw
+        hex.add w/4, ptr, wstripbase
+        hex.add w/4, ptr, wstrip
+      wloop:
+        hex.read_byte_and_inc y2r, ptr
+        hex.if0 2, y2r, wdone
+        hex.read_byte_and_inc colr, ptr
+        hex.add 2, y2r, y1
+        .band_pair sink, cnt, y2r, colr, buf
+        ;wloop
+      wdone:
+        hex.read_byte_and_inc colr, ptr
+        .band_pair sink, cnt, yend, colr, buf
+        ;end
+      ptr: hex.vec w/4
+      wlen: hex.vec 2
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      end:
+    }
+
+    // expand ONE buffered region straight to the device (buf = 0: pairs go out as they are
+    // produced, so nothing is ever stored twice).
+    def entry_expand_body centery, half_slots, wpxstride, wpxblock @ isceil, isfloor, iswall, done, kind, arg, y1, yend, c_one, dead, woff, wlen, end < cbufa, cbufd, fbufa, fbufd, wstripbase, eptr, exp_ret {
+        hex.read_byte_and_inc kind, eptr
+        hex.zero 4, arg
+        hex.read_byte_and_inc arg, eptr
+        hex.read_byte_and_inc arg + 2*dw, eptr
+        hex.read_byte_and_inc y1, eptr
+        hex.read_byte_and_inc yend, eptr
+        hex.set 2, c_one, 1
+        hex.cmp 2, kind, c_one, isceil, isfloor, iswall
+      isceil:
+        frame.lines_pid_addrs arg, half_slots, cbufa, cbufd, fbufa, fbufd
+        .band_range dead, dead, cbufa, cbufd, y1, yend, centery, 0
+        ;done
+      isfloor:
+        frame.lines_pid_addrs arg, half_slots, cbufa, cbufd, fbufa, fbufd
+        .band_range dead, dead, fbufa, fbufd, y1, yend, centery, 0
+        ;done
+      iswall:
+        hex.zero w/4, woff
+        hex.mov 4, woff, arg
+        hex.mul_const w/4, woff, woff, wpxblock*dw       // block index -> bank offset
+        hex.mov 2, wlen, yend
+        hex.sub 2, wlen, y1
+        .wpx_wall y1, wlen, yend, woff, wstripbase, wpxstride, 0, 0   // 2S tier: no grain
+      done:
+        stl.fret exp_ret
+      kind: hex.vec 2
+      arg: hex.vec 4
+      y1: hex.vec 2
+      yend: hex.vec 2
+      c_one: hex.vec 2
+      dead: hex.vec w/4                                  // a throwaway sink/count: buf=0 never writes
+      woff: hex.vec w/4
+      wlen: hex.vec 2
+      end:
+    }
+
+
+
+    // M13-2S rung 3b — assemble the WHOLE frame's records, one runtime pass over the columns.
+    // A runtime loop, not an unrolled one: the expansion (band walks + WPX run lists) is a shared
+    // fcall leaf, so it exists ONCE. Unrolling it per column put ~320 copies of it in the program
+    // and the assembler is roughly cubic in unrolled ops (the M11c lesson / heavy-leaf mantra).
+    // Top regions expand in append order; bottom regions in REVERSE append order, which is screen
+    // order, because the walk pushes them upward from the floor.
+    def flush_frame view_w, ecap, colst, colbuf \
+            @ col_loop, col_body, chk_bot, col_emit, col_full, \
+              cmp_bot_n, cmp_bytes, cmp_top_loop, cmp_top_one, cmp_top_next, ditto_top_ok, \
+              cmp_bot_loop, cmp_bot_one, cmp_bot_next, ditto_hit, \
+              top_loop, top_body, bot_start, bot_loop, col_done, next_col, done, end, \
+              colst_p, colbuf_p, n_cols, col_x, n_top, n_bot, top_i, bot_i, \
+              prev_n_top, prev_n_bot, prev_ptr, cmp_i, cmp_n, cmp_a, cmp_b \
+            < eptr, exp_ret, expand_leaf {
+        hex.set w/4, colst_p, colst
+        hex.set w/4, colbuf_p, colbuf
+        hex.zero 2, col_x
+        hex.set 2, n_cols, view_w
+      col_loop:
+        hex.cmp 2, col_x, n_cols, col_body, done, done
+      col_body:
+        hex.ptr_add colst_p, 2
+        hex.read_byte n_top, colst_p
+        hex.ptr_add colst_p, 1
+        hex.read_byte n_bot, colst_p
+        hex.ptr_sub colst_p, 3
+        hex.if0 2, n_top, chk_bot
+        ;col_emit
+      chk_bot:
+        hex.if0 2, n_bot, next_col                // the column was never touched: paint nothing
+      col_emit:
+        // M13-2S rung 3b DITTO: if this column's REGION LIST is byte-identical to the previous
+        // column's, its pixels are too (same surfaces, same rows) -- so emit [x][0xFE], the
+        // device's "copy column x-1", and skip the whole expansion. Comparing ~6 entries costs a
+        // few hundred ops against tens of thousands for the band and run-list walks.
+        hex.if0 2, col_x, col_full               // column 0 has no left neighbour
+        hex.cmp 2, n_top, prev_n_top, col_full, cmp_bot_n, col_full
+      cmp_bot_n:
+        hex.cmp 2, n_bot, prev_n_bot, col_full, cmp_bytes, col_full
+      cmp_bytes:
+        hex.mov w/4, eptr, colbuf_p
+        hex.mov w/4, prev_ptr, colbuf_p
+        hex.sub_constant w/4, prev_ptr, 10*ecap*dw   // the previous column's buffer
+        hex.mul_const 2, cmp_n, n_top, 5         // top BYTES to compare (5 per entry -- a count,
+                                                 // not an address delta: no dw here)
+        hex.zero 2, cmp_i
+      cmp_top_loop:
+        hex.cmp 2, cmp_i, cmp_n, cmp_top_one, ditto_top_ok, ditto_top_ok
+      cmp_top_one:
+        hex.read_byte_and_inc cmp_a, eptr
+        hex.read_byte_and_inc cmp_b, prev_ptr
+        hex.cmp 2, cmp_a, cmp_b, col_full, cmp_top_next, col_full
+      cmp_top_next:
+        hex.inc 2, cmp_i
+        ;cmp_top_loop
+      ditto_top_ok:
+        hex.if0 2, n_bot, ditto_hit              // now the bottom entries, at +5*ecap
+        hex.mov w/4, eptr, colbuf_p
+        hex.add_constant w/4, eptr, 5*ecap*dw
+        hex.mov w/4, prev_ptr, eptr
+        hex.sub_constant w/4, prev_ptr, 10*ecap*dw
+        hex.mul_const 2, cmp_n, n_bot, 5
+        hex.zero 2, cmp_i
+      cmp_bot_loop:
+        hex.cmp 2, cmp_i, cmp_n, cmp_bot_one, ditto_hit, ditto_hit
+      cmp_bot_one:
+        hex.read_byte_and_inc cmp_a, eptr
+        hex.read_byte_and_inc cmp_b, prev_ptr
+        hex.cmp 2, cmp_a, cmp_b, col_full, cmp_bot_next, col_full
+      cmp_bot_next:
+        hex.inc 2, cmp_i
+        ;cmp_bot_loop
+      ditto_hit:
+        byte.emit col_x
+        stl.output_char 0xFE
+        ;next_col
+      col_full:
+        byte.emit col_x
+        hex.mov w/4, eptr, colbuf_p
+        hex.zero 2, top_i
+      top_loop:
+        hex.cmp 2, top_i, n_top, top_body, bot_start, bot_start
+      top_body:
+        stl.fcall expand_leaf, exp_ret           // advances eptr by one 5-byte entry
+        hex.inc 2, top_i
+        ;top_loop
+      bot_start:
+        hex.mov 2, bot_i, n_bot
+      bot_loop:
+        hex.if0 2, bot_i, col_done
+        hex.dec 2, bot_i
+        hex.mov w/4, eptr, colbuf_p
+        hex.add_constant w/4, eptr, 5*ecap*dw
+        .entry_ptr_add eptr, bot_i
+        stl.fcall expand_leaf, exp_ret
+        ;bot_loop
+      col_done:
+        stl.output_char 0xFF
+      next_col:
+        hex.mov 2, prev_n_top, n_top
+        hex.mov 2, prev_n_bot, n_bot
+        hex.ptr_add colst_p, 4
+        hex.ptr_add colbuf_p, 10*ecap
+        hex.inc 2, col_x
+        ;col_loop
+      done:
+        ;end
+      colst_p: hex.vec w/4
+      colbuf_p: hex.vec w/4
+      n_cols: hex.vec 2
+      col_x: hex.vec 2
+      n_top: hex.vec 2
+      n_bot: hex.vec 2
+      top_i: hex.vec 2
+      bot_i: hex.vec 2
+      prev_n_top: hex.vec 2
+      prev_n_bot: hex.vec 2
+      prev_ptr: hex.vec w/4
+      cmp_i: hex.vec 2
+      cmp_n: hex.vec 2
+      cmp_a: hex.vec 2
+      cmp_b: hex.vec 2
+      end:
+    }
+
+    // ptr += n ENTRIES of 5 bytes; n is a runtime count and hex.ptr_add only takes a constant.
+    def entry_ptr_add ptr, n @ off, end {
+        entoff.lookup off, n                     // same dispatch as the append side
+        hex.add w/4, ptr, off
+        ;end
+      off: hex.vec w/4
+      end:
+    }
+
+    // M13-EMIT rung 1 (ablate, measurement only) -- the per-pair OUTPUT, isolated so it can be
+    // switched off while the list walk still runs: the difference prices the two byte.emit
+    // dispatches against the two hex.read_byte_and_inc pointer reads that feed them.
+    def pair_out a, b {
+        byte.emit a
+        byte.emit b
+    }
+
+    // V3 -- ONE half-pair region walk over the window [qlo, qbound). The plane bank keeps a region
+    // as TWO half-lists split at CENTERY (the zlight ordinals restart there), so a window is walked
+    // as: the asc half iff it can contribute (qlo < CENTERY -- every asc pair ends at or before
+    // CENTERY, so a window starting at/after it skips them all), then the desc half iff the window
+    // reaches past CENTERY. Empty windows return without touching memory, which is what lets the
+    // face splice ask for a zero-width piece without emitting a wasted pair.
+    def half_walk bufa, bufd, qlo, qbound, ptr, ccy, qwalk, qret @ win_ok, walk_asc, chk_desc, walk_desc, end {
+        hex.cmp 2, qlo, qbound, win_ok, end, end   // empty window -> touch nothing
+      win_ok:
+        hex.cmp 2, qlo, ccy, walk_asc, chk_desc, chk_desc  // qlo >= CENTERY -> asc cannot contribute
+      walk_asc:
+        hex.mov w/4, ptr, bufa
+        stl.fcall qwalk, qret
+      chk_desc:
+        hex.cmp 2, qbound, ccy, end, end, walk_desc  // qbound > CENTERY -> the desc half is needed
+      walk_desc:
+        hex.mov w/4, ptr, bufd
+        stl.fcall qwalk, qret
+      end:
+    }
+
+    // M13-15M BANDS-AS-CODE: the ID twin of half_walk -- load the window bounds into the
+    // bit.vec globals (vql/vqh: private-ret byte->bits dispatches, ~60 ops each; hex.* is legal
+    // HERE, outside the handlers) and enter the per-list baked walkers by ID.
+    def half_walk_code bufa, bufd, qlo, qbound, ccy @ win_ok, walk_asc, chk_desc, walk_desc, end {
+        hex.cmp 2, qlo, qbound, win_ok, end, end   // empty window -> touch nothing
+      win_ok:
+        vql_load qlo
+        vqh_load qbound
+        hex.cmp 2, qlo, ccy, walk_asc, chk_desc, chk_desc
+      walk_asc:
+        vpb_walk bufa
+      chk_desc:
+        hex.cmp 2, qbound, ccy, end, end, walk_desc
+      walk_desc:
+        vpb_walk bufd
+      end:
+    }
+
+    // V3 -- the two-piece splice, ceiling side: emit the face's own [y2][colour] pair, then re-aim
+    // the window at [uy2+1, ctake) so the REST of the ceiling still reaches ctake. The list is
+    // re-walked from its head rather than resumed, which is why qwalk needs a skip bound at all:
+    // the 0x0B cursor only ever moves forward, so re-emitting an already-covered pair would rewind
+    // it and repaint over the face.
+    def face_splice fl, y2f, colf, hi, qlo, qbound, ptr, ccy, qwalk, qret, bufa, bufd, eabl, ascode, w1r, gnrow, cmidx \
+            @ none, end {
+        hex.if0 1, fl, none
+        // M13-W1R-FACES: in the W1R tier the face is not ONE flat pair but the same randomized
+        // runs as the walls, anchored at the face's clipped top (= qbound, where face_bound
+        // stopped the region walk, so the cursor sits exactly there). Inputs (extents, colour,
+        // grain group) are all already in the ditto signature -- zero new ditto breaks.
+        rep(1-w1r, k) .pair_out y2f, colf
+        rep(w1r, k) .face_pattern y2f, colf, qbound, gnrow, cmidx
+        hex.mov 2, qlo, y2f
+        hex.mov 2, qbound, hi
+        rep((1-eabl/2)*(1-ascode), k) .half_walk bufa, bufd, qlo, qbound, ptr, ccy, qwalk, qret
+        rep(ascode, k) .half_walk_code bufa, bufd, qlo, qbound, ccy
+      none:
+        ;end
+      end:
+    }
+
+    // M13-W1R-FACES: one textured face piece [y1, y2f) -- wlen for the tier select, then the
+    // shared randomized walker with the face's baked (pre-brightened) colour as the base byte.
+    def face_pattern y2f, colf, y1, gnrow, cmidx @ face_h, end {
+        hex.mov 2, face_h, y2f
+        hex.sub 2, face_h, y1
+        w1rpat.walk face_h, y1, y2f, gnrow, colf, colf, cmidx
+        ;end
+      face_h: hex.vec 2
+      end:
+    }
+
+    // V5 -- one stacked piece's FACE: clip [y1raw, y2raw] to the REGION EXTENT [lo, hi) (the
+    // floor side's fstart / 0, and ctake / viewh) -- which sets the SHADE height and the
+    // pattern ANCHOR, matching the oracle's _face_paint exactly -- then DRAW only the window
+    // [rlo, rhi) slice of it (V5-SPR: a sprite-fragmented column shows a slice of the face,
+    // but anchored and shaded as the whole face, so the visible rows are pixel-identical to
+    // the unfragmented ones). Reject empties/sentinels (y1 > y2 after the clip).
+    def steps_face y1raw, y2raw, cls, lo, hi, rlo, rhi, w1r, gnrow, cmidx \
+            @ fy1_clamp, fy1_ok, fy2_clamp, fy2_ok, draw, \
+              dlo_clamp, dlo_ok, dhi_clamp, dhi_ok, \
+              fy1, fy2, fy2p1, draw_lo, draw_hi, fcol, stepcol_b, end < stepcol {
+        hex.mov 2, fy1, y1raw
+        hex.cmp 2, fy1, lo, fy1_clamp, fy1_ok, fy1_ok    // fy1 = max(y1raw, lo)
+      fy1_clamp:
+        hex.mov 2, fy1, lo
+      fy1_ok:
+        hex.mov 2, fy2, y2raw
+        hex.cmp 2, fy2, hi, fy2_ok, fy2_clamp, fy2_clamp // fy2 = min(y2raw, hi - 1)
+      fy2_clamp:
+        hex.mov 2, fy2, hi
+        hex.dec 2, fy2
+      fy2_ok:
+        hex.cmp 2, fy1, fy2, draw, draw, end    // empty / sentinel -> nothing to draw
+      draw:
+        hex.mov 2, fcol, cls
+        hex.set w/4, stepcol_b, stepcol
+        frame.step_shade fcol, fy1, fy2, stepcol_b
+        hex.mov 2, fy2p1, fy2
+        hex.inc 2, fy2p1                        // the face's EXCLUSIVE end row
+        hex.mov 2, draw_lo, fy1                 // the DRAW window [max(fy1,rlo), min(fy2p1,rhi))
+        hex.cmp 2, draw_lo, rlo, dlo_clamp, dlo_ok, dlo_ok
+      dlo_clamp:
+        hex.mov 2, draw_lo, rlo
+      dlo_ok:
+        hex.mov 2, draw_hi, fy2p1
+        hex.cmp 2, draw_hi, rhi, dhi_ok, dhi_ok, dhi_clamp
+      dhi_clamp:
+        hex.mov 2, draw_hi, rhi
+      dhi_ok:
+        rep(1-w1r, k) .w1_wall_win draw_lo, draw_hi, fcol
+        rep(w1r, k) w1rpat.walk_win fy1, fy2p1, draw_lo, draw_hi, gnrow, fcol, fcol, cmidx
+        ;end
+      fy1: hex.vec 2
+      fy2: hex.vec 2
+      fy2p1: hex.vec 2
+      draw_lo: hex.vec 2
+      draw_hi: hex.vec 2
+      fcol: hex.vec 2
+      stepcol_b: hex.vec w/4
+      end:
+    }
+
+    // V5 -- the STACKED ceiling prefix [0, ctake): region0 (the claimed lists) | face 1 |
+    // region behind boundary 1 (its baked back-pair's ceiling lists) | face 2 | region behind
+    // boundary 2. Every bound is min'd against ctake and every piece self-clamps, so sentinel
+    // pieces contribute exactly their REGION (the stored bytes encode the direction -- see
+    // ts_step_faces). Requires ascode (asserted at emit time). The region list ids are derived
+    // per piece from the baked back pid via frame.lines_pid_ids into SCRATCH registers.
+    def steps_splice_c ctake, rlo, rhi, w1r, gnrow, cmidx, cbufa, cbufd, ccy \
+            @ ceil_only, cend_ok, cend_clamp, ceil_go, piece1_in_win, walk_region0, region0_end, bound1_at_end, bound1_at_piece2, walk_region1, region1_end, piece2_in_win, walk_region2, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, ceil_done, end \
+            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ssc_ceil_end, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd, ssc_rlo2, ssc_ucnt2, ssc_win_end, ssc_win_lo, ssc_zero_row {
+        hex.if0 2, ctake, ceil_done             // no ceiling half at all
+        hex.mov 2, ssc_ceil_end, ctake              // V5-SPR: the piece window [rlo, min(ctake,rhi))
+        hex.cmp 2, ssc_ceil_end, rhi, cend_ok, cend_ok, cend_clamp
+      cend_clamp:
+        hex.mov 2, ssc_ceil_end, rhi
+      cend_ok:
+        hex.mov 2, ssc_win_lo, rlo
+        hex.mov 2, ssc_rlo2, rlo
+        hex.cmp 2, ssc_win_lo, ssc_ceil_end, ceil_go, ceil_done, ceil_done  // empty intersection -> nothing
+      ceil_go:
+        hex.mov 2, ssc_win_end, ssc_ceil_end
+        hex.if0 1, ucnt, ceil_only              // no pieces: one full claimed walk
+        hex.cmp 2, u1y1, ssc_ceil_end, piece1_in_win, ceil_only, ceil_only  // piece 1 out -> claimed only
+      piece1_in_win:
+        hex.mov 1, ssc_ucnt2, ucnt                  // a LOCAL copy: ucnt is the ditto signature,
+        hex.mov 2, ssc_win_end, u1y1                // saved to its shadow AFTER this emit
+        hex.cmp 2, ssc_win_lo, ssc_win_end, walk_region0, region0_end, region0_end  // guard: an empty
+      walk_region0:                             // window still pays the loaders
+        .half_walk_code cbufa, cbufd, ssc_win_lo, ssc_win_end, ccy
+      region0_end:
+        hex.zero 2, ssc_zero_row
+        .steps_face u1y1, u1y2, u1cls, ssc_zero_row, ctake, ssc_rlo2, ssc_ceil_end, w1r, gnrow, cmidx
+        frame.lines_pid_ids u1bp, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd
+        hex.mov 2, ssc_win_lo, u1y2
+        hex.inc 2, ssc_win_lo                       // region 1 starts at the STORED end + 1 --
+        hex.cmp 2, ssc_win_lo, ssc_rlo2, lo1_clamp, lo1_ok, lo1_ok   // clamped to the window start: a
+      lo1_clamp:                                // sub-window ssc_win_lo would emit SUB-CURSOR pairs,
+        hex.mov 2, ssc_win_lo, ssc_rlo2                 // and the device REWINDS on those (no silent drop!)
+      lo1_ok:
+        hex.mov 2, ssc_win_end, ssc_ceil_end
+        hex.dec 1, ssc_ucnt2
+        hex.if0 1, ssc_ucnt2, bound1_at_end         // one piece: region 1 runs to the window end
+        hex.cmp 2, u2y1, ssc_ceil_end, bound1_at_piece2, bound1_at_end, bound1_at_end
+      bound1_at_piece2:
+        hex.mov 2, ssc_win_end, u2y1                // ... else it stops at piece 2's start
+      bound1_at_end:
+        hex.cmp 2, ssc_win_lo, ssc_win_end, walk_region1, region1_end, region1_end
+      walk_region1:
+        .half_walk_code ssc_rcbufa, ssc_rcbufd, ssc_win_lo, ssc_win_end, ccy
+      region1_end:
+        hex.if0 1, ssc_ucnt2, ceil_done
+        hex.cmp 2, u2y1, ssc_ceil_end, piece2_in_win, ceil_done, ceil_done  // piece 2 out -> done
+      piece2_in_win:
+        hex.zero 2, ssc_zero_row
+        .steps_face u2y1, u2y2, u2cls, ssc_zero_row, ctake, ssc_rlo2, ssc_ceil_end, w1r, gnrow, cmidx
+        frame.lines_pid_ids u2bp, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd
+        hex.mov 2, ssc_win_lo, u2y2
+        hex.inc 2, ssc_win_lo
+        hex.cmp 2, ssc_win_lo, ssc_rlo2, lo2_clamp, lo2_ok, lo2_ok
+      lo2_clamp:
+        hex.mov 2, ssc_win_lo, ssc_rlo2
+      lo2_ok:
+        hex.mov 2, ssc_win_end, ssc_ceil_end
+        hex.cmp 2, ssc_win_lo, ssc_win_end, walk_region2, ceil_done, ceil_done
+      walk_region2:
+        .half_walk_code ssc_rcbufa, ssc_rcbufd, ssc_win_lo, ssc_win_end, ccy
+        ;ceil_done
+      ceil_only:
+        .half_walk_code cbufa, cbufd, ssc_win_lo, ssc_win_end, ccy
+      ceil_done:
+        ;end
+      end:
+    }
+
+    // V5 -- the STACKED floor suffix [fstart, viewh): pieces are stored NEAREST-first but emit
+    // TOP-DOWN, so the FARTHEST piece goes first: region behind boundary 2 (its back-pair's
+    // floor lists) | face 2 | region behind boundary 1 | face 1 | region0 (the claimed lists,
+    // the floor in FRONT of boundary 1). With one piece the middle collapses; with none it is
+    // one claimed walk.
+    def steps_splice_f fstart, viewh, rlo, rhi, w1r, gnrow, cmidx, fbufa, fbufd, ccy \
+            @ floor_only, fend_ok, fend_clamp, flo_clamp, flo_ok, bound2_ok, bound2_clamp, walk_region2, region2_end, bound1_ok, bound1_clamp, walk_region1, region1_end, walk_region0, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, piece1, floor_go, floor_done, end \
+            < lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, ssf_cviewh, ssf_floor_end, ssf_floor_lo, ssf_fstart2, ssf_lcnt2, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd, ssf_win_end, ssf_win_lo {
+        hex.set 2, ssf_cviewh, viewh
+        hex.mov 2, ssf_floor_end, ssf_cviewh            // V5-SPR: the window [max(fstart,rlo), min(viewh,rhi))
+        hex.cmp 2, ssf_floor_end, rhi, fend_ok, fend_ok, fend_clamp
+      fend_clamp:
+        hex.mov 2, ssf_floor_end, rhi
+      fend_ok:
+        hex.mov 2, ssf_floor_lo, fstart
+        hex.cmp 2, ssf_floor_lo, rlo, flo_clamp, flo_ok, flo_ok
+      flo_clamp:
+        hex.mov 2, ssf_floor_lo, rlo
+      flo_ok:
+        hex.cmp 2, ssf_floor_lo, ssf_floor_end, floor_go, floor_done, floor_done  // empty -> nothing at all
+      floor_go:
+        hex.mov 2, ssf_win_lo, ssf_floor_lo
+        hex.mov 2, ssf_win_end, ssf_floor_end
+        hex.if0 1, lcnt, floor_only             // no pieces: one full claimed walk
+        hex.mov 1, ssf_lcnt2, lcnt                  // LOCAL copy: lcnt is the ditto signature
+        hex.mov 2, ssf_fstart2, fstart
+        hex.dec 1, ssf_lcnt2
+        hex.if0 1, ssf_lcnt2, piece1                // one piece: skip the piece-2 prefix
+        // -- two pieces: the region behind boundary 2 (farthest), then its face
+        frame.lines_pid_ids l2bp, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd
+        hex.mov 2, ssf_win_end, l2y1
+        hex.cmp 2, ssf_win_end, ssf_floor_end, bound2_ok, bound2_clamp, bound2_clamp
+      bound2_clamp:
+        hex.mov 2, ssf_win_end, ssf_floor_end
+      bound2_ok:
+        hex.cmp 2, ssf_win_lo, ssf_win_end, walk_region2, region2_end, region2_end  // guard: an empty
+      walk_region2:                             // window still pays the loaders
+        .half_walk_code ssf_rfbufa, ssf_rfbufd, ssf_win_lo, ssf_win_end, ccy
+      region2_end:
+        .steps_face l2y1, l2y2, l2cls, ssf_fstart2, ssf_cviewh, ssf_floor_lo, ssf_floor_end, w1r, gnrow, cmidx
+        hex.mov 2, ssf_win_lo, l2y2
+        hex.inc 2, ssf_win_lo                       // the middle region starts at piece 2's end + 1
+        hex.cmp 2, ssf_win_lo, ssf_floor_lo, lo2_clamp, lo2_ok, lo2_ok  // clamped to the window start
+      lo2_clamp:                                // (see steps_splice_c::lo1_clamp for WHY)
+        hex.mov 2, ssf_win_lo, ssf_floor_lo
+      lo2_ok:
+      piece1:
+        // -- the region behind boundary 1, its face, then the claimed floor in front of it
+        frame.lines_pid_ids l1bp, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd
+        hex.mov 2, ssf_win_end, l1y1
+        hex.cmp 2, ssf_win_end, ssf_floor_end, bound1_ok, bound1_clamp, bound1_clamp
+      bound1_clamp:
+        hex.mov 2, ssf_win_end, ssf_floor_end
+      bound1_ok:
+        hex.cmp 2, ssf_win_lo, ssf_win_end, walk_region1, region1_end, region1_end
+      walk_region1:
+        .half_walk_code ssf_rfbufa, ssf_rfbufd, ssf_win_lo, ssf_win_end, ccy
+      region1_end:
+        .steps_face l1y1, l1y2, l1cls, ssf_fstart2, ssf_cviewh, ssf_floor_lo, ssf_floor_end, w1r, gnrow, cmidx
+        hex.mov 2, ssf_win_lo, l1y2
+        hex.inc 2, ssf_win_lo
+        hex.cmp 2, ssf_win_lo, ssf_floor_lo, lo1_clamp, lo1_ok, lo1_ok
+      lo1_clamp:
+        hex.mov 2, ssf_win_lo, ssf_floor_lo
+      lo1_ok:
+        hex.mov 2, ssf_win_end, ssf_floor_end
+        hex.cmp 2, ssf_win_lo, ssf_win_end, walk_region0, floor_done, floor_done
+      walk_region0:
+        .half_walk_code fbufa, fbufd, ssf_win_lo, ssf_win_end, ccy
+        ;floor_done
+      floor_only:
+        .half_walk_code fbufa, fbufd, ssf_win_lo, ssf_win_end, ccy
+      floor_done:
+        ;end
+      end:
+    }
+
+    // V3 -- the face's [y1, y2] becomes the FIRST piece's end bound: the region walk stops at y1 so
+    // the face pair lands exactly on the cursor.
+    def face_bound fl, y1, qbound @ none, end {
+        hex.if0 1, fl, none
+        hex.mov 2, qbound, y1
+      none:
+        ;end
+      end:
+    }
+
+    def sjmp there {
+        ;there
+    }
+
+    // one run's colour byte: plain, or V1-grained through the single cm.emit dispatch.
+    def wcol colr, cmidx, noise {
+        rep(1-noise, k) byte.emit colr
+        rep(noise, k) .wpx_grain colr, cmidx
+    }
+
+    // V4 -- `wpx_wall` over a WINDOW [wlo, whi). Needed only on the sprite path, and deliberately a
+    // SECOND copy rather than a parameter on the shipped one: the wall run-list walk carries most of
+    // the frame's pairs, and adding two compares per run to it would cost more than the whole
+    // feature. Same bank, same sentinel (a run's stored `rel` is 0 only for the terminator, since
+    // every real run ends at row >= 1) -- just skipped below wlo and clamped at whi.
+    def wpx_wall_win ctake, fstart, wlo, whi, wstrip, wstripbase, wpxstride, noise, cmidx \
+            @ wgo, wloop, wskip, wtest, wemit, wstop, wclamp, wdone, last_run, last_emit, last_clamp, \
+              ptr, y2r, colr, wlen, end {
+        hex.cmp 2, wlo, whi, wgo, end, end
+      wgo:
+        hex.mov 2, wlen, fstart
+        hex.sub 2, wlen, ctake
+        hex.if0 2, wlen, end
+        hex.zero w/4, ptr
+        hex.mov 2, ptr, wlen
+        hex.mul_const w/4, ptr, ptr, wpxstride*dw      // the list baked for THIS exact height
+        hex.add w/4, ptr, wstripbase
+        hex.add w/4, ptr, wstrip
+      wloop:
+        hex.read_byte_and_inc y2r, ptr
+        hex.if0 2, y2r, wdone
+        hex.read_byte_and_inc colr, ptr
+        hex.add 2, y2r, ctake
+        hex.cmp 2, y2r, wlo, wskip, wskip, wtest
+      wskip:
+        ;wloop
+      wtest:
+        hex.cmp 2, y2r, whi, wemit, wstop, wclamp
+      wemit:
+        byte.emit y2r
+        .wcol colr, cmidx, noise
+        ;wloop
+      wstop:
+        byte.emit y2r
+        .wcol colr, cmidx, noise
+        ;end
+      wclamp:
+        byte.emit whi
+        .wcol colr, cmidx, noise
+        ;end
+      wdone:
+        hex.read_byte_and_inc colr, ptr                // the last run ends exactly at fstart
+        hex.cmp 2, fstart, wlo, end, end, last_run
+      last_run:
+        hex.mov 2, y2r, fstart
+        hex.cmp 2, y2r, whi, last_emit, last_emit, last_clamp
+      last_clamp:
+        hex.mov 2, y2r, whi
+      last_emit:
+        byte.emit y2r
+        .wcol colr, cmidx, noise
+        ;end
+      ptr: hex.vec w/4
+      y2r: hex.vec 2
+      colr: hex.vec 2
+      wlen: hex.vec 2
+      end:
+    }
+
+    // V4 -- the column's ORDINARY content restricted to rows [lo, hi): the ceiling half-walk, the
+    // wall, the floor half-walk, each intersected with the window. A sprite straddles all three, so
+    // a fragmented column is `region(0, sy1)` + the sprite + `region(sy2+1, VIEW_H)` -- which is the
+    // one structural thing V3's faces never needed, since a face lives inside a SINGLE region.
+    def emit_region lo, hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ctake, fstart, wall_lit, wall_lit2, \
+            gnrow, wstrip, wstripbase, \
+            cbufa, cbufd, fbufa, fbufd, qlo, qbound, wlo, whi, ptr, ccy, cmidx, qwalk, qret \
+            @ ceil_hi_clip, ceil_hi_ok, wall_lo_clip, wall_lo_ok, wall_hi_ok, wall_hi_clip, \
+              floor_lo_clip, floor_lo_ok, floor_hi_clip, floor_hi_ok, \
+              w1r_win_pattern, w1r_win_test, w1r_win_end, end < seg_w1rf, w1rslv, seg_litf {
+        hex.mov 2, qlo, lo                      // -- ceiling piece [lo, min(hi, ctake))
+        hex.mov 2, qbound, ctake
+        hex.cmp 2, hi, qbound, ceil_hi_clip, ceil_hi_ok, ceil_hi_ok
+      ceil_hi_clip:
+        hex.mov 2, qbound, hi
+      ceil_hi_ok:
+        rep((1-eabl/2)*(1-ascode), k) .half_walk cbufa, cbufd, qlo, qbound, ptr, ccy, qwalk, qret
+        rep(ascode*(1-stack), k) .half_walk_code cbufa, cbufd, qlo, qbound, ccy
+        // V5-SPR: the stacked ceiling prefix, windowed to this region -- faces and the
+        // regions behind boundaries now show under/around sprites instead of being cut
+        rep(stack, k) .steps_splice_c ctake, lo, hi, w1r, gnrow, cmidx, cbufa, cbufd, ccy
+        hex.mov 2, wlo, lo                      // -- wall piece [max(lo, ctake), min(hi, fstart))
+        hex.cmp 2, wlo, ctake, wall_lo_clip, wall_lo_ok, wall_lo_ok
+      wall_lo_clip:
+        hex.mov 2, wlo, ctake
+      wall_lo_ok:
+        hex.mov 2, whi, hi
+        hex.cmp 2, whi, fstart, wall_hi_ok, wall_hi_ok, wall_hi_clip
+      wall_hi_clip:
+        hex.mov 2, whi, fstart
+      wall_hi_ok:
+        rep(wpx, k) .wpx_wall_win ctake, fstart, wlo, whi, wstrip, wstripbase, wpxstride, noise, cmidx
+        // ⚠ KNOWN GAP (CR-2026-08, accepted): there is NO rep(w2s) windowed wall emitter --
+        // in the W2S tier a sprite-fragmented column emits no wall piece for its [wlo,whi)
+        // window (the flat pair below is gated off by w2s too). W2S is a non-certified lab
+        // tier that never ships with sprites; wire a w2s window walker before ever doing so.
+        rep(1-w2s-wpx-w1r, k) .w1_wall_win wlo, whi, wall_lit
+        // M13-W1R: the same randomized runs as w1rpat.walk, restricted to the window.
+        // W1R-FLAT: the flat-wall flag takes the plain windowed pair instead.
+        rep(deg*w1r, k) hex.if0 1, w1rslv, w1r_win_test  // 25M-CAP: sliver -> the flat windowed pair
+        rep(deg*w1r, k) .w1_wall_win wlo, whi, seg_litf
+        rep(deg*w1r, k) .sjmp w1r_win_end
+      w1r_win_test:
+        rep(w1r, k) hex.if0 1, seg_w1rf, w1r_win_pattern
+        rep(w1r, k) .w1_wall_win wlo, whi, wall_lit
+        rep(w1r, k) .sjmp w1r_win_end
+      w1r_win_pattern:
+        rep(w1r, k) w1rpat.walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, wall_lit2, cmidx
+      w1r_win_end:
+        hex.mov 2, qlo, lo                      // -- floor piece [max(lo, fstart), min(hi, VIEW_H))
+        hex.cmp 2, qlo, fstart, floor_lo_clip, floor_lo_ok, floor_lo_ok
+      floor_lo_clip:
+        hex.mov 2, qlo, fstart
+      floor_lo_ok:
+        hex.set 2, qbound, viewh
+        hex.cmp 2, hi, qbound, floor_hi_clip, floor_hi_ok, floor_hi_ok
+      floor_hi_clip:
+        hex.mov 2, qbound, hi
+      floor_hi_ok:
+        rep((1-eabl/2)*(1-ascode), k) .half_walk fbufa, fbufd, qlo, qbound, ptr, ccy, qwalk, qret
+        rep(ascode*(1-stack), k) .half_walk_code fbufa, fbufd, qlo, qbound, ccy
+        rep(stack, k) .steps_splice_f fstart, viewh, lo, hi, w1r, gnrow, cmidx, fbufa, fbufd, ccy
+        ;end
+      end:
+    }
+
+    // V4 -- this column's sprite fragment, as pairs. The baked block holds RAW texels, so the shade
+    // arrives through `cm.emit` with the fragment's light row in the index's high byte -- V1's grain
+    // mechanism exactly. ⚠ From `smidx`, NOT the grain's `cmidx`: the wall emitted AFTER the sprite
+    // (the second region) would otherwise inherit the sprite's light row.
+    // V4b -- `sprite_runs` over a WINDOW [wlo, whi): the SECOND (farther) fragment's runs,
+    // restricted to the rows the near fragment leaves open. A deliberate second copy, like
+    // `wpx_wall_win`: the full walker carries most sprite pairs and adding two compares per run
+    // to it would cost more than this whole feature. Runs ending at or above wlo are skipped
+    // unemitted; the run crossing whi clamps there and stops. `wlo`/`whi` are 2-nibble rows.
+    def sprite_runs_win sblk, sy0b, slr, wlo, whi, blkshift \
+            @ sloop, spos, semit, sfin, sclamp, snext, send, end \
+            < sprbank, srw_ptr, srw_rel, srw_rel_w, srw_sbase, srw_sidx, srw_smidx, srw_tex, srw_whi4, srw_wlo4, srw_y0, srw_yabs {
+        hex.zero w/4, srw_sidx
+        hex.mov 4, srw_sidx, sblk
+        rep(blkshift, k) hex.shl_bit w/4, srw_sidx
+        hex.set w/4, srw_sbase, sprbank
+        hex.ptr_index srw_ptr, srw_sbase, srw_sidx
+        hex.ptr_add srw_ptr, 3
+        hex.zero 4, srw_smidx
+        hex.mov 2, srw_smidx + 2*dw, slr
+        hex.mov 4, srw_y0, sy0b   // (hex.mov zeroes dst first)
+        hex.sub_constant 4, srw_y0, 32768
+        hex.zero 4, srw_wlo4                        // widened window rows (the row math is 4-nibble)
+        hex.mov 2, srw_wlo4, wlo
+        hex.zero 4, srw_whi4
+        hex.mov 2, srw_whi4, whi
+        // srw_rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
+        // no counter register, no per-run compare, no n_ent read. Every real run ends at row
+        // >= 1 and the emitter zero-pads every block, so a 0 always terminates the walk.
+        // VERIFIED on the shipped bank: 22,837 blocks, 858 empty, ZERO runs with srw_rel==0, and
+        // the longest body is 51 of stride 64. The emitter asserts are now STRICT
+        // (`< SPR_BLOCK_STRIDE`) so that stays true.
+      sloop:
+        hex.read_byte_and_inc srw_rel, srw_ptr
+        hex.if0 2, srw_rel, send
+        hex.read_byte_and_inc srw_tex, srw_ptr
+        hex.zero 4, srw_rel_w
+        hex.mov 2, srw_rel_w, srw_rel
+        hex.mov 4, srw_yabs, srw_y0
+        hex.add 4, srw_yabs, srw_rel_w
+        hex.scmp 4, srw_yabs, srw_wlo4, snext, snext, spos // ends at or above the window -> skip unemitted
+      spos:
+        hex.scmp 4, srw_yabs, srw_whi4, semit, sfin, sclamp
+      semit:
+        byte.emit srw_yabs
+        hex.mov 2, srw_smidx, srw_tex
+        cm.emit srw_smidx
+      snext:
+        ;sloop
+      sfin:
+        byte.emit srw_yabs
+        hex.mov 2, srw_smidx, srw_tex
+        cm.emit srw_smidx
+        ;send
+      sclamp:
+        byte.emit whi
+        hex.mov 2, srw_smidx, srw_tex
+        cm.emit srw_smidx
+      send:
+        ;end
+      end:
+    }
+
+    def sprite_runs sblk, sy0b, slr, viewh, blkshift \
+            @ sloop, spos, semit, sfin, sclamp, snext, send, end \
+            < sprbank, srn_cvh, srn_ptr, srn_rel, srn_rel_w, srn_sbase, srn_sidx, srn_smidx, srn_tex, srn_y0, srn_yabs {
+        hex.zero w/4, srn_sidx
+        hex.mov 4, srn_sidx, sblk
+        rep(blkshift, k) hex.shl_bit w/4, srn_sidx  // x SPR_BLOCK_STRIDE = 1<<blkshift SLOTS
+        hex.set w/4, srn_sbase, sprbank
+        // ⚠ through ptr_index, NOT `hex.add w/4, srn_ptr, srn_sbase`: a SLOT offset has to be scaled by dw
+        // to become an address (cf. lines_pid_addrs's `mul_const ..., 4*half_slots*dw`). Added raw
+        // it lands 64x short, the entry count reads garbage, and the walk runs on through the whole
+        // bank emitting a slowly-creeping cycle of pairs.
+        hex.ptr_index srn_ptr, srn_sbase, srn_sidx
+        hex.ptr_add srn_ptr, 3                      // past the WHOLE [r0][last_rel][n_ent] header
+        hex.zero 4, srn_smidx
+        hex.mov 2, srn_smidx + 2*dw, slr
+        // M13-15M: the row arithmetic runs at FOUR nibbles, not eight. Every value here is a
+        // screen row: srn_y0 = sy0b - 32768, well inside signed 4-nibble range, viewh = 100 --
+        // all comfortably inside signed 4-nibble range, and zero/mov/add/sign/scmp cost scales
+        // linearly with width (the profiler priced this loop at ~6k/run, half of it row math).
+        hex.mov 4, srn_y0, sy0b   // (hex.mov zeroes dst first)
+        hex.sub_constant 4, srn_y0, 32768           // the slot stores srn_y0 as TWO bytes biased by 32768:
+                                                // a tall NEAR sprite's top sits far above row -128,
+                                                // and the old one-byte +128 bias WRAPPED (M13-15M)
+        hex.set 4, srn_cvh, viewh
+        // srn_rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
+        // no counter register, no per-run compare, no n_ent read. Every real run ends at row
+        // >= 1 and the emitter zero-pads every block, so a 0 always terminates the walk.
+        // VERIFIED on the shipped bank: 22,837 blocks, 858 empty, ZERO runs with srn_rel==0, and
+        // the longest body is 51 of stride 64. The emitter asserts are now STRICT
+        // (`< SPR_BLOCK_STRIDE`) so that stays true.
+      sloop:
+        hex.read_byte_and_inc srn_rel, srn_ptr
+        hex.if0 2, srn_rel, send
+        hex.read_byte_and_inc srn_tex, srn_ptr
+        hex.zero 4, srn_rel_w
+        hex.mov 2, srn_rel_w, srn_rel
+        hex.mov 4, srn_yabs, srn_y0
+        hex.add 4, srn_yabs, srn_rel_w
+        hex.sign 4, srn_yabs, snext, spos           // this run ends above row 0 -> nothing of it shows
+      spos:
+        hex.if0 4, srn_yabs, snext
+        hex.scmp 4, srn_yabs, srn_cvh, semit, sfin, sclamp
+      semit:
+        byte.emit srn_yabs
+        hex.mov 2, srn_smidx, srn_tex
+        cm.emit srn_smidx
+      snext:
+        ;sloop
+      sfin:
+        byte.emit srn_yabs
+        hex.mov 2, srn_smidx, srn_tex
+        cm.emit srn_smidx
+        ;send
+      sclamp:
+        byte.emit srn_cvh
+        hex.mov 2, srn_smidx, srn_tex
+        cm.emit srn_smidx
+      send:
+        ;end
+      end:
+    }
+
+    def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, deg, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, wall_lit, wall_lit2, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd \
+            @ ctake_ok, ctake_clamp, no_sprite, sprite_path, sprite_one, spr_top_b, spr_top_ok, gap1_do, gap1_end, gap2_do, gap2_end, spr_bot_b, spr_bot_ok, wall, w1r_pattern, w1r_test, floor, col_done, band_walk, bw_loop, bw_body, bw_skip, bw_test, bw_emit, bw_last, bw_clamp, bw_done, band_ret, end \
+            < seg_w1rf, w1rslv, seg_litf, ecl_ccy, ecl_cmidx, ecl_colr, ecl_ctake, ecl_ent_i, ecl_full_hi, ecl_full_lo, ecl_n_ent, ecl_ptr, ecl_spr_bot, ecl_spr_top, ecl_whi, ecl_win_end, ecl_win_hi, ecl_win_lo, ecl_wlen, ecl_wlo, ecl_y2r {
+        hex.mov 2, ecl_ctake, cexcl
+        hex.cmp 2, ecl_ctake, fstart, ctake_ok, ctake_ok, ctake_clamp   // ecl_ctake = min(cexcl, fstart)
+      ctake_clamp:
+        hex.mov 2, ecl_ctake, fstart
+      ctake_ok:
+        byte.emit x                              // ONE x header for the whole column
+        // V1: this column's grain row, ONCE. `wnoise` is a 161-entry dispatch table baked straight
+        // from ReferenceModel.wall_noise, so the hash lives at compile time and costs one lookup
+        // (~20@) rather than the shifts and xors it encodes. It lands in ecl_cmidx's HIGH byte because
+        // cm.apply is indexed by light<<8 | colour, leaving only the low byte to move per run.
+        rep(noise, k) .wpx_grain_col gnrow, ecl_cmidx
+        hex.set 2, ecl_ccy, centery
+        hex.zero 2, ecl_full_lo                      // the full-column window bounds -- the stacked
+        hex.set 2, ecl_full_hi, viewh                // splices take [rlo, rhi) even on this path
+        // V4: a column carrying a sprite fragment is composed as three pieces instead of the usual
+        // ceiling|wall|floor -- and draws no step face (ONE overlay per column, and the sprite is in
+        // front of the face by construction, having been recorded into an unclaimed column by a
+        // nearer subsector). The no-sprite path below is untouched: it carries almost every column
+        // and most of the frame's pairs.
+        rep(things, k) hex.if0 2, sprfl, no_sprite
+        rep(things, k) .sjmp sprite_path
+      no_sprite:
+        // -- ceiling PREFIX over [0, ecl_ctake), split around this column's UPPER step face (V3)
+        hex.if0 2, ecl_ctake, wall
+        hex.zero 2, ecl_win_lo
+        hex.mov 2, ecl_win_hi, ecl_ctake
+        hex.mov 2, ecl_win_end, ecl_win_hi
+        rep(steps*(1-stack), k) .face_bound ufl, uy1, ecl_win_end
+        rep((1-eabl/2)*(1-ascode), k) .half_walk cbufa, cbufd, ecl_win_lo, ecl_win_end, ecl_ptr, ecl_ccy, band_walk, band_ret
+        rep(ascode*(1-stack), k) .half_walk_code cbufa, cbufd, ecl_win_lo, ecl_win_end, ecl_ccy
+        rep(steps*(1-stack), k) .face_splice ufl, uy2p1, ucol, ecl_win_hi, ecl_win_lo, ecl_win_end, ecl_ptr, ecl_ccy, band_walk, band_ret, cbufa, cbufd, eabl, ascode, w1r, gnrow, ecl_cmidx
+        // V5: the stacked ceiling prefix -- up to 2 boundary pieces, each with its own region
+        rep(stack, k) .steps_splice_c ecl_ctake, ecl_full_lo, ecl_full_hi, w1r, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
+      wall:                                      // -- wall run [ecl_ctake, fstart)
+        hex.mov 2, ecl_wlen, fstart
+        hex.sub 2, ecl_wlen, ecl_ctake
+        hex.if0 2, ecl_wlen, floor
+        rep(1-w2s-wpx-w1r, k) .w1_wall fstart, wall_lit
+        // M13-W1R: W1's one lit byte as pseudo-random runs, keyed (tier(ecl_wlen), gnrow) -- both
+        // already in the ditto signature, so the ditto structure is untouched (zero new breaks).
+        // W1R-FLAT: the per-seg baked flag keeps TEXTURE-LESS walls one flat tone (sky walls
+        // pattern like any other since CR-2026-08).
+        rep(deg*w1r, k) hex.if0 1, w1rslv, w1r_test  // 25M-CAP: a sliver seg renders the flat tone
+        rep(deg*w1r, k) .w1_wall fstart, seg_litf
+        rep(deg*w1r, k) .sjmp floor
+      w1r_test:
+        rep(w1r, k) hex.if0 1, seg_w1rf, w1r_pattern
+        rep(w1r, k) .w1_wall fstart, wall_lit
+        rep(w1r, k) .sjmp floor
+      w1r_pattern:
+        rep(w1r, k) w1rpat.walk ecl_wlen, ecl_ctake, fstart, gnrow, wall_lit, wall_lit2, ecl_cmidx
+        rep(w2s, k) .w2s_wall ecl_ctake, ecl_wlen, wstrip, wstripbase
+        rep(wpx, k) .wpx_wall ecl_ctake, ecl_wlen, fstart, wstrip, wstripbase, wpxstride, noise, ecl_cmidx
+      floor:                                     // -- floor SUFFIX over [fstart, view_h), split
+        hex.mov 2, ecl_win_lo, fstart                //    around this column's LOWER step face (V3)
+        hex.set 2, ecl_win_hi, viewh
+        hex.mov 2, ecl_win_end, ecl_win_hi
+        rep(steps*(1-stack), k) .face_bound lfl, ly1, ecl_win_end
+        rep((1-eabl/2)*(1-ascode), k) .half_walk fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_ptr, ecl_ccy, band_walk, band_ret
+        rep(ascode*(1-stack), k) .half_walk_code fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_ccy
+        rep(steps*(1-stack), k) .face_splice lfl, ly2p1, lcol, ecl_win_hi, ecl_win_lo, ecl_win_end, ecl_ptr, ecl_ccy, band_walk, band_ret, fbufa, fbufd, eabl, ascode, w1r, gnrow, ecl_cmidx
+        // V5: the stacked floor suffix -- farthest piece first, claimed floor last
+        rep(stack, k) .steps_splice_f fstart, viewh, ecl_full_lo, ecl_full_hi, w1r, gnrow, ecl_cmidx, fbufa, fbufd, ecl_ccy
+        ;col_done
+      sprite_path:                               // V4: region | sprite | region
+        // V4b: sprfl = 1 (one fragment, the old path) or 2 (A + a farther B). The dec is safe:
+        // nothing reads sprfl after the path split.
+        rep(things, k) hex.dec 2, sprfl
+        rep(things, k) hex.if0 2, sprfl, sprite_one
+        // -- A+B: region | B-above | (gap) | A | (gap) | B-below | region. Every piece is
+        // self-clamping (an empty emit_region window emits nothing; the windowed B walker
+        // skips runs at or above ecl_wlo and clamps at ecl_whi), and the near fragment A wins every
+        // overlapped row by construction: B only ever emits rows outside [ssy1, ssy2). The
+        // two GAP regions are guarded -- they are empty in the common overlap case, and an
+        // empty emit_region still walks its half-lists (~5k) while the guard is one cmp.
+        rep(things, k) hex.mov 2, ecl_spr_top, ssy1
+        rep(things, k) hex.cmp 2, ssy1b, ecl_spr_top, spr_top_b, spr_top_ok, spr_top_ok
+      spr_top_b:
+        rep(things, k) hex.mov 2, ecl_spr_top, ssy1b
+      spr_top_ok:
+        rep(things, k) .emit_region ecl_full_lo, ecl_spr_top, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .sprite_runs_win sblkb, sy0bb, slrb, ecl_full_lo, ssy1, blkshift
+        rep(things, k) hex.cmp 2, ssy2b, ssy1, gap1_do, gap1_end, gap1_end
+      gap1_do:
+        rep(things, k) .emit_region ssy2b, ssy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+      gap1_end:
+        rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
+        rep(things, k) hex.cmp 2, ssy2, ssy1b, gap2_do, gap2_end, gap2_end
+      gap2_do:
+        rep(things, k) .emit_region ssy2, ssy1b, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+      gap2_end:
+        rep(things, k) .sprite_runs_win sblkb, sy0bb, slrb, ssy2, ecl_full_hi, blkshift
+        rep(things, k) hex.mov 2, ecl_spr_bot, ssy2
+        rep(things, k) hex.cmp 2, ecl_spr_bot, ssy2b, spr_bot_b, spr_bot_ok, spr_bot_ok
+      spr_bot_b:
+        rep(things, k) hex.mov 2, ecl_spr_bot, ssy2b
+      spr_bot_ok:
+        rep(things, k) .emit_region ecl_spr_bot, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        ;col_done
+      sprite_one:
+        rep(things, k) .emit_region ecl_full_lo, ssy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+        rep(things, k) .sprite_runs sblk, sy0b, slr, viewh, blkshift
+        rep(things, k) .emit_region ssy2, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
+      col_done:
+        stl.output_char 0xFF                     // ends this column's pair list
+        ;end
+
+      // band_walk: over the window [ecl_win_lo, ecl_win_end) -- skip pairs ending at or before ecl_win_lo,
+      // stream the rest while y2 < ecl_win_end; the pair crossing ecl_win_end emits [ecl_win_end] and stops, one
+      // ending exactly at ecl_win_end emits as-is and stops. List exhausted -> return (the caller may
+      // continue into the other half with the same window).
+      band_walk:
+        hex.read_byte_and_inc ecl_n_ent, ecl_ptr
+        hex.zero 2, ecl_ent_i
+      bw_loop:
+        hex.cmp 2, ecl_ent_i, ecl_n_ent, bw_body, bw_done, bw_done
+      bw_body:
+        hex.read_byte_and_inc ecl_y2r, ecl_ptr
+        hex.read_byte_and_inc ecl_colr, ecl_ptr
+        hex.cmp 2, ecl_y2r, ecl_win_lo, bw_skip, bw_skip, bw_test  // y2 <= ecl_win_lo -> above the window
+      bw_skip:
+        hex.inc 2, ecl_ent_i
+        ;bw_loop
+      bw_test:
+        hex.cmp 2, ecl_y2r, ecl_win_end, bw_emit, bw_last, bw_clamp
+      bw_emit:
+        rep(1-eabl%2, k) .pair_out ecl_y2r, ecl_colr    // eabl=1: walk but emit nothing
+        hex.inc 2, ecl_ent_i
+        ;bw_loop
+      bw_last:                                   // y2 == ecl_win_end: emit and stop
+        rep(1-eabl%2, k) .pair_out ecl_y2r, ecl_colr
+        ;bw_done
+      bw_clamp:                                  // y2 > ecl_win_end: emit the clamped pair and stop
+        rep(1-eabl%2, k) .pair_out ecl_win_end, ecl_colr
+      bw_done:
+        stl.fret band_ret
+
+      band_ret: ;0
+      end:
+    }
+}

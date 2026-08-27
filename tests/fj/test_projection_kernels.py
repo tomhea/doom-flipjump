@@ -5,17 +5,24 @@ each (R5 #8), compared to ReferenceModel._slope_div — so the fj angle math and
 from pathlib import Path
 
 import flipjump as fj
+import pytest
 
 from doomfj.config import Config
 from doomfj.fixedpoint import fixed_mul, fixed_div, _signed
 from doomfj.harness import W
 from doomfj.lut_generator import (
+    generate_dispatch_table_fj, generate_slopediv_recip8_lut_fj,
     generate_tantoangle_lut_fj, generate_trig_idioms_fj, generate_viewangletox_lut_fj,
-    generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj,
+    generate_finetangent_lut_fj, generate_xtoviewangle_lut_fj, generate_slopediv_recip_lut_fj,
 )
 from doomfj.reference_model import ReferenceModel, SLOPERANGE, ANGLE_MASK
-from doomfj.mapcompiler import bake_bsp, _point_side
+from doomfj.tables import (sine_table, slopediv_recip_table, viewangletox_table,
+                           xtoviewangle_table)
+from doomfj.mapcompiler import bake_bsp, _point_side, seg_affine_coeffs
 from doomfj.wad import WadFile
+# M1-HOIST: these fj macros name hoisted globals in their `<` lists, so any program that
+# expands one STANDALONE must declare them too. ONE source with the emitter (R6).
+from doomfj.wall_renderer import hoisted_scratch_fj
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
 FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table + hex.fixed_div
@@ -24,11 +31,11 @@ MASK40 = (1 << 40) - 1   # 10-nibble two's-complement mask (point_on_side's work
 
 
 def _run(tmp_path, name, body, data, expected: bytes):
-    prog = "stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n"
+    prog = "stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj()
     p = tmp_path / f"{name}.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"{name}: fj output != oracle"
 
@@ -51,9 +58,11 @@ def test_slope_div_byte_exact_vs_oracle(tmp_path):
     body, data = [], []
     for k, (num, den) in enumerate(SLOPE_CASES):
         for _ in range(2):   # call twice per case (R5 #8): catches scratch/result-reg cleanup bugs
-            body += [f"proj.slope_div d, n{k}, m{k}", "hex.print_as_digit 3, d, 0", "stl.output 10"]
+            body += [f"proj.slope_div d, n{k}, m{k}, 0", "hex.print_as_digit 3, d, 0", "stl.output 10"]
         data += [f"n{k}: hex.vec 8, {num}", f"m{k}: hex.vec 8, {den}"]
     data.append("d: hex.vec 3")
+    data += [generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8")]   # perf #13: the reciprocal table
     expected = b"".join(f"{ReferenceModel._slope_div(num, den):03x}\n".encode() * 2
                         for num, den in SLOPE_CASES)
     _run(tmp_path, "slope_div", body, data, expected)
@@ -96,15 +105,17 @@ def test_point_to_angle_byte_exact_vs_oracle(tmp_path):
     body, data = [], []
     for k, (x1, y1, x2, y2) in enumerate(P2A_CASES):
         for _ in range(2):   # call twice per case (R5 #8): catches scratch/result-reg cleanup bugs
-            body += [f"proj.point_to_angle d, x1_{k}, y1_{k}, x2_{k}, y2_{k}",
+            body += [f"proj.point_to_angle d, x1_{k}, y1_{k}, x2_{k}, y2_{k}, 0",
                      "hex.print_as_digit 8, d, 0", "stl.output 10"]
         data += [f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"y1_{k}: hex.vec 8, {y1 & 0xFFFFFFFF}",
                  f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}", f"y2_{k}: hex.vec 8, {y2 & 0xFFFFFFFF}"]
-    data += ["d: hex.vec 8", generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)]
+    data += ["d: hex.vec 8", generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8")]   # perf #13
     expected = b"".join(f"{rm.point_to_angle(x1, y1, x2, y2):08x}\n".encode() * 2
                         for (x1, y1, x2, y2) in P2A_CASES)
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "point_to_angle.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -147,7 +158,7 @@ def test_point_to_dist_byte_exact_vs_oracle(tmp_path):
     expected = b"".join(f"{rm.point_to_dist(vx, vy, x, y):08x}\n".encode() * 2
                         for (vx, vy, x, y) in P2D_CASES)
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "point_to_dist.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -186,22 +197,19 @@ def test_wall_setup_byte_exact_vs_oracle(tmp_path):
     body, data, expected = [], [], b""
     for k, (vxu, vyu, si) in enumerate(WALL_SETUP_CASES):
         seg = cmap.segs[si]
-        v1x, v1y = cmap.vertexes[seg.v1]
+        a, b, c = seg_affine_coeffs(seg, cmap.vertexes)   # perf #9: baked affine coeffs (shared SSOT)
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.wall_setup nrm, rwd, vx{k}, vy{k}, sa{k}, v1x{k}, v1y{k}",
+            body += [f"proj.wall_setup nrm, rwd, vx{k}, vy{k}, sa{k}, a{k}, b{k}, c{k}",
                      "hex.print_as_digit 8, nrm, 0", "stl.output 10",
                      "hex.print_as_digit 8, rwd, 0", "stl.output 10"]
         data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
                  f"sa{k}: hex.vec 4, {seg.angle & 0xFFFF}",
-                 f"v1x{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}",
-                 f"v1y{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}"]
+                 f"a{k}: hex.vec 8, {a}", f"b{k}: hex.vec 8, {b}", f"c{k}: hex.vec 8, {c}"]
         nrm, rwd = rm.wall_setup(vxu * U, vyu * U, seg, cmap.vertexes)
         expected += (f"{nrm:08x}\n{rwd:08x}\n".encode()) * 2
-    data += ["nrm: hex.vec 8", "rwd: hex.vec 8",
-             generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
-             generate_trig_idioms_fj("finesine", Config().TRIG_N, 16)]
+    data += ["nrm: hex.vec 8", "rwd: hex.vec 8"]   # perf #9: affine wall_setup needs no tantoangle/finesine
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "wall_setup.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -239,20 +247,85 @@ def test_scale_from_global_angle_byte_exact_vs_oracle(tmp_path):
     body, data, expected = [], [], b""
     for k, (vis, view, nrm, rwd) in enumerate(SCALE_CASES):
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, {proj}",
+            body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, {proj}, 0, 0",
                      "hex.print_as_digit 8, s, 0", "stl.output 10"]
         data += [f"vis{k}: hex.vec 8, {vis & 0xFFFFFFFF}", f"vw{k}: hex.vec 8, {view & 0xFFFFFFFF}",
                  f"nrm{k}: hex.vec 8, {nrm & 0xFFFFFFFF}", f"rwd{k}: hex.vec 8, {rwd & 0xFFFFFFFF}"]
         expected += f"{rm.scale_from_global_angle(vis, view, nrm, rwd):08x}\n".encode() * 2
-    data += ["s: hex.vec 8", generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+    data += ["s: hex.vec 8", generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16, mode="per_entry"),
+             generate_slopediv_recip_lut_fj("slopediv_recip")]   # M13-scalerecip
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "scale.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "scale_from_global_angle: fj output != oracle"
+
+
+# -- proj.scale_from_global_angle, the disp=1 COLUMN-DISPATCH arm (M13-SINADISP) -------------
+# The optimisation rests on ONE premise: every caller builds visangle as
+# `viewangle + xtoviewangle[col]`, so anglea = ANG90 + (visangle - viewangle) is a function of
+# the column alone (viewangle cancels, exactly, mod 2**32). This test drives ONLY cases of that
+# shape -- columns 0/1/centre/VIEW_W, several viewangles, three distance/normal pairs -- and
+# requires the dispatch arm to be byte-exact against the oracle. It is TWO-SIDED: the SAME
+# cases also run through the disp=0 packed arm, so a divergence says which arm moved. A premise
+# violation (a caller whose visangle is not column-derived) can only be caught here; deg_gate
+# would show it as moved pixels with no indication why.
+SINADISP_COLS = [0, 1, 40, 80, 120, 160]
+SINADISP_VIEWS = [0, 0x10000000, 0x9C000000]
+SINADISP_WALLS = [(128 << 16, 0), (56 << 16, 0x20000000), (900 << 16, 0x04000000)]
+
+
+@pytest.mark.parametrize("disp", [0, 1], ids=["packed", "dispatch"])
+def test_scale_from_global_angle_column_cases_byte_exact_vs_oracle(tmp_path, disp):
+    cfg = Config()
+    rm = ReferenceModel(cfg)
+    proj = cfg.PROJECTION << 16
+    xtov = xtoviewangle_table(cfg.VIEW_W, cfg.TRIG_N)
+    assert len(xtov) == cfg.VIEW_W + 1, "sinadisp domain must be the column range"
+    body, data, expected = [], [], b""
+    k = 0
+    for col in SINADISP_COLS:
+        for view in SINADISP_VIEWS:
+            for rwd, nrm in SINADISP_WALLS:
+                vis = (view + xtov[col]) & 0xFFFFFFFF  # how the shipped callers build it
+                for _ in range(2):   # call twice (R5 #8)
+                    body += [f"proj.scale_from_global_angle s, vis{k}, vw{k}, nrm{k}, rwd{k}, "
+                             f"{proj}, {disp}, c{k}",
+                             "hex.print_as_digit 8, s, 0", "stl.output 10"]
+                data += [f"vis{k}: hex.vec 8, {vis}", f"vw{k}: hex.vec 8, {view}",
+                         f"nrm{k}: hex.vec 8, {nrm}", f"rwd{k}: hex.vec 8, {rwd}",
+                         f"c{k}: hex.vec 2, {col}"]
+                expected += (f"{rm.scale_from_global_angle(vis, view, nrm, rwd):08x}"
+                             + chr(10)).encode() * 2
+                k += 1
+    assert k == len(SINADISP_COLS) * len(SINADISP_VIEWS) * len(SINADISP_WALLS)
+    sine = sine_table(cfg.TRIG_N, 16, 32)
+    shift = 32 - (cfg.TRIG_N.bit_length() - 1)      # config-derived, not a literal 20
+    data += ["s: hex.vec 8",
+             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16, mode="per_entry"),
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             # disp=1 also routes scale_recip_div through the srdisp dispatch (C2), so the
+             # dispatch arm needs that table too -- emitting both keeps ONE program per arm.
+             generate_dispatch_table_fj("srdisp", slopediv_recip_table(),
+                                        index_nibbles=3, result_nibbles=6),
+             generate_dispatch_table_fj(
+                 "sinadisp",
+                 [sine[((a + (1 << 30)) >> shift) & (cfg.TRIG_N - 1)] & 0xFFFFFFFF
+                  for a in xtov],
+                 index_nibbles=2, result_nibbles=8)]
+
+    nl = chr(10)
+    prog = ("stl.startup_and_init_all" + nl + nl.join(body) + nl + "stl.loop" + nl
+            + nl.join(data) + nl + hoisted_scratch_fj())
+    p = tmp_path / f"scale_col_{disp}.fj"
+    p.write_text(prog, encoding="utf-8")
+    ok = fj.assemble_and_run_test_output(
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, f"scale_from_global_angle(disp={disp}, column cases): fj output != oracle"
 
 
 # ── proj.angle_to_x (R_PointToX / viewangletox lookup): view-relative BAM angle -> screen column ──
@@ -269,25 +342,36 @@ A2X_CASES = [
 ]
 
 
-def test_angle_to_x_byte_exact_vs_oracle(tmp_path):
+# ! BOTH `disp` arms are exercised. CR-2026-08 found that C2 shipped `disp=1` with NO test --
+# the test had been edited to pass `disp=0`, i.e. to cover only the branch the change replaced.
+# A rep-gated macro has TWO bodies; a test that pins one proves nothing about the other, and
+# `disp=1` is the arm `wall_x_range_m` (the shipped lines tier) actually instantiates.
+@pytest.mark.parametrize("disp", [0, 1], ids=["packed", "dispatch"])
+def test_angle_to_x_byte_exact_vs_oracle(tmp_path, disp):
     cfg = Config()
     rm = ReferenceModel(cfg)
     body, data, expected = [], [], b""
     for k, a in enumerate(A2X_CASES):
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.angle_to_x d, a{k}", "hex.print_as_digit 8, d, 0", "stl.output 10"]
+            body += [f"proj.angle_to_x d, a{k}, {disp}", "hex.print_as_digit 8, d, 0", "stl.output 10"]
         data.append(f"a{k}: hex.vec 8, {a & 0xFFFFFFFF}")
         expected += f"{rm.angle_to_x(a) & 0xFFFFFFFF:08x}\n".encode() * 2
     data += ["d: hex.vec 8",
-             generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N)]
+             generate_viewangletox_lut_fj("viewangletox", cfg.VIEW_W, cfg.TRIG_N),
+             # both tables in both arms: the macro declares `< viewangletox` either way, and
+             # one program answering from both forms shows they carry the same SSOT values.
+             generate_dispatch_table_fj(
+                 "vtxdisp", [v & 0xFFFFFFFF for v in
+                             viewangletox_table(cfg.VIEW_W, cfg.TRIG_N)],
+                 index_nibbles=3, result_nibbles=8)]
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "angle_to_x.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
         [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
-    assert ok, "angle_to_x: fj output != oracle"
+    assert ok, f"angle_to_x(disp={disp}): fj output != oracle"
 
 
 # ── proj.wall_x_range (R_AddLine): seg -> (visible, x1, x2, rw_angle1) ──
@@ -317,9 +401,16 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
         seg = cmap.segs[si]
         v1x, v1y = cmap.vertexes[seg.v1]
         v2x, v2y = cmap.vertexes[seg.v2]
+        fa, fb, fc = seg_affine_coeffs(seg, cmap.vertexes)   # perf #10: affine back-face cull coeffs
         for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.wall_x_range vis, x1, x2, rwa, vx{k}, vy{k}, va{k}, "
-                     f"a{k}, b{k}, c{k}, e{k}",
+            # CR-2026-08 (PJ-2): the per-frame |viewx|/|viewy| + sign-flag arguments are GONE --
+            # wall_x_range multiplies the SIGNED value now, because abs-then-negate truncates toward
+            # zero where the oracle's fixed_mul floors, and the two stopped agreeing the moment M14
+            # gave the view position a fraction. It still exports the affine distance (sgnr,
+            # unchecked here -- wall_setup_sgn's input).
+            body += [f"proj.wall_x_range vis, x1, x2, rwa, sgnr, vx{k}, vy{k}, "
+                     f"va{k}, "
+                     f"a{k}, b{k}, c{k}, e{k}, fa{k}, fb{k}, fc{k}",
                      "hex.print_as_digit 1, vis, 0", "stl.output 10",
                      "hex.print_as_digit 8, x1, 0", "stl.output 10",
                      "hex.print_as_digit 8, x2, 0", "stl.output 10",
@@ -327,7 +418,8 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
         data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
                  f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
                  f"a{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"b{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
-                 f"c{k}: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"e{k}: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}"]
+                 f"c{k}: hex.vec 8, {(v2x << 16) & 0xFFFFFFFF}", f"e{k}: hex.vec 8, {(v2y << 16) & 0xFFFFFFFF}",
+                 f"fa{k}: hex.vec 8, {fa}", f"fb{k}: hex.vec 8, {fb}", f"fc{k}: hex.vec 8, {fc}"]
         res = rm.wall_x_range(vxu * U, vyu * U, va, seg, cmap.vertexes)
         if res is None:
             expected += b"0\n00000000\n00000000\n00000000\n" * 2
@@ -335,10 +427,13 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
             x1, x2, rwa = res
             expected += f"1\n{x1 & 0xFFFFFFFF:08x}\n{x2 & 0xFFFFFFFF:08x}\n{rwa:08x}\n".encode() * 2
     data += ["vis: hex.vec 1", "x1: hex.vec 8", "x2: hex.vec 8", "rwa: hex.vec 8",
+             "sgnr: hex.vec 8",
              generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8"),   # perf #13
              generate_viewangletox_lut_fj("viewangletox", Config().VIEW_W, Config().TRIG_N)]
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "wall_x_range.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -378,7 +473,7 @@ def test_wall_screen_span_byte_exact_vs_oracle(tmp_path):
         expected += f"{top & 0xFFFFFFFF:08x}\n{bot & 0xFFFFFFFF:08x}\n".encode() * 2
     data += ["top: hex.vec 8", "bot: hex.vec 8"]
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "wall_screen_span.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -419,7 +514,7 @@ def test_scalestep_byte_exact_vs_oracle(tmp_path):
         expected += f"{_oracle_scalestep(s1, s2, x1, x2) & 0xFFFFFFFF:08x}\n".encode() * 2
     data.append("d: hex.vec 8")
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "scalestep.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -482,7 +577,7 @@ def test_wall_offset_byte_exact_vs_oracle(tmp_path):
              generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
              generate_trig_idioms_fj("finesine", Config().TRIG_N, 16)]
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "wall_offset.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -529,7 +624,7 @@ def test_texture_u_byte_exact_vs_oracle(tmp_path):
              generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
              generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)]
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "texture_u.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -544,7 +639,7 @@ def test_texture_u_byte_exact_vs_oracle(tmp_path):
 # (worldtop<<16)//ds; frac = texturemid + (top-CENTERY)*iscale; frac0 = (frac>>8)&0xFFFF, step =
 # (iscale>>8)&0xFFFF. ds = TEXTURE_DOWNSCALE = 2 (engine invariant). CENTERY a compile-time arg (R6).
 def _oracle_column_setup(cy, scale, worldtop, top, ds):
-    iscale = fixed_div(1 << 16, scale & ANGLE_MASK, 8, 4) // ds
+    iscale = ReferenceModel._recip_div32(scale & ANGLE_MASK) // ds   # perf #11: block-FP reciprocal
     texturemid = (worldtop << 16) // ds      # FLOORED (Python //) — negative worldtop floors toward -inf
     frac = texturemid + (top - cy) * iscale
     return (frac >> 8) & 0xFFFF, (iscale >> 8) & 0xFFFF
@@ -579,9 +674,11 @@ def test_column_setup_byte_exact_vs_oracle(tmp_path):
                  f"tp{k}: hex.vec 8, {top & 0xFFFFFFFF}"]
         frac0, step = _oracle_column_setup(cy, sc, wt, top, ds)
         expected += f"{frac0:04x}\n{step:04x}\n".encode() * 2
-    data += ["f0: hex.vec 4", "st: hex.vec 4"]
+    data += ["f0: hex.vec 4", "st: hex.vec 4",
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8")]   # perf #11
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "column_setup.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -642,9 +739,10 @@ def test_wall_scale_setup_byte_exact_vs_oracle(tmp_path):
         expected += f"{s1 & 0xFFFFFFFF:08x}\n{step & 0xFFFFFFFF:08x}\n".encode() * 2
     data += ["sc1: hex.vec 8", "sst: hex.vec 8",
              generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
-             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16)]
+             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16),
+             generate_slopediv_recip_lut_fj("slopediv_recip")]   # M13-scalerecip
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "wall_scale_setup.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -715,9 +813,11 @@ def test_column_render_params_byte_exact_vs_oracle(tmp_path):
                      f"{frac0:04x}\n{step:04x}\n").encode() * 2
     data += ["tp: hex.vec 8", "bt: hex.vec 8", "tc: hex.vec 8", "f0: hex.vec 4", "st: hex.vec 4",
              generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
+             generate_slopediv_recip_lut_fj("slopediv_recip"),
+             generate_slopediv_recip8_lut_fj("slopediv_recip8"),   # perf #11 (column_setup iscale reciprocal)
              generate_finetangent_lut_fj("finetangent", cfg.TRIG_N)]
 
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n")
+    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
     p = tmp_path / "column_render_params.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
@@ -742,6 +842,17 @@ HAND_SIDE_CASES = [
     (10, 20, -3, -4, -100, -100),  # -> -80 -> 0
     (32000, -32000, 30000, 25000, -30000, 31000),     # large magnitude (40-bit width stress)
     (-32000, 32000, -30000, -25000, 30000, -31000),
+    # M13-possignmag sign-pair coverage: each of the 4 (signA,signB) branches, plus the "viewer exactly
+    # on the node's reference point" degenerate case (dxv==dyv==0) for all 4 dx/dy sign combos.
+    (0, 0, 5, 5, 10, 10),          # (+,+) equal magnitudes -> on-the-line -> front
+    (0, 0, 5, 1, 10, 10),          # (+,+) p1>p2 -> back
+    (0, 0, 1, 5, 10, 10),          # (+,+) p1<p2 -> front
+    (0, 0, 5, 5, -10, 10),         # (+,-) both magnitudes nonzero -> back
+    (0, 0, 0, 5, -10, 10),         # (+,-) p1==0 (dx==0), p2!=0 -> back
+    (0, 10, 5, 5, 0, 10),          # dxv==dyv==0, dx>=0,dy>=0 (+,+) -> front
+    (0, 10, -5, 5, 0, 10),         # dxv==dyv==0, dx<0,dy>=0 (-,+) -> always front
+    (0, 10, 5, -5, 0, 10),         # dxv==dyv==0, dx>=0,dy<0 (+,-) both zero -> front
+    (0, 10, -5, -5, 0, 10),        # dxv==dyv==0, dx<0,dy<0 (-,-) -> front
 ]
 
 
@@ -773,22 +884,26 @@ def test_point_on_side_byte_exact_vs_oracle(tmp_path):
 def test_point_on_side_leaf_byte_exact_vs_oracle(tmp_path):
     """proj.point_on_side_leaf — the register / shared-fcall-leaf form of the side test used by the
     BSP-as-code walk — matches mapcompiler._point_side byte-exact over the hand cases. Set the viewer +
-    partition const regs, fcall the leaf, print back; each case twice (R5 #8)."""
+    partition const regs (M13-possignmag: dx/dy baked as an 8-nibble magnitude + a 1-nibble sign flag,
+    not a 10-nibble two's-complement pattern), fcall the leaf, print back; each case twice (R5 #8)."""
     body, expected = [], b""
     for px, py, dx, dy, vx, vy in HAND_SIDE_CASES:
         for _ in range(2):
             body += [f"hex.set 10, vx, {vx & MASK40}", f"hex.set 10, vy, {vy & MASK40}",
                      f"hex.set 10, cpx, {px & MASK40}", f"hex.set 10, cpy, {py & MASK40}",
-                     f"hex.set 10, cdx, {dx & MASK40}", f"hex.set 10, cdy, {dy & MASK40}",
+                     f"hex.set 8, cdx_mag, {abs(dx)}", f"hex.set 8, cdy_mag, {abs(dy)}",
+                     f"hex.set 1, sign_dx, {1 if dx < 0 else 0}",
+                     f"hex.set 1, sign_dy, {1 if dy < 0 else 0}",
                      "stl.fcall pos_leaf, pos_ret", "hex.print_as_digit 1, b, 0", "stl.output 10"]
         expected += f"{1 if _point_side(px, py, dx, dy, vx, vy) > 0 else 0}\n".encode() * 2
-    tail = ["pos_leaf: proj.point_on_side_leaf b, vx, vy, cpx, cpy, cdx, cdy, pos_ret",
+    tail = ["pos_leaf: proj.point_on_side_leaf b, vx, vy, cpx, cpy, cdx_mag, cdy_mag, sign_dx, sign_dy, pos_ret",
             "b: hex.vec 2", "vx: hex.vec 10", "vy: hex.vec 10", "cpx: hex.vec 10", "cpy: hex.vec 10",
-            "cdx: hex.vec 10", "cdy: hex.vec 10", "pos_ret: ;0"]
-    prog = "stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(tail) + "\n"
+            "cdx_mag: hex.vec 8", "cdy_mag: hex.vec 8", "sign_dx: hex.vec 1", "sign_dy: hex.vec 1",
+            "pos_ret: ;0"]
+    prog = "stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(tail) + "\n" + hoisted_scratch_fj()
     p = tmp_path / "pos_leaf.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "point_on_side_leaf: fj output != oracle"

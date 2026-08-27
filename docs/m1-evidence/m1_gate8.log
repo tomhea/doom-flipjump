@@ -1,0 +1,52 @@
+loop : build/doom_e1m1_loop.fjm  sha256 75794727dce656be18140f10c88cff5b647660c713bcea4c8d1e34a918c5689a
+old  : scratchpad/fjmcache/_rssprobe.fjm  sha256 3c13ec21424f7f5434bd2070d9a34796ab2f92de9657dc16e2894f4c63e4acee
+
+================================================================================================
+PHASE 1 -- the four certified viewpoints, ALL IN ONE RUN, byte-exact vs the ORACLE
+================================================================================================
+  4 oracle pictures, all distinct (0s)
+  ONE run: 206,293,420 ops -> 4 frames presented
+  CONTROL 1 (frame count): 4 == 4?  ok
+  (the oracle call is deg_gate's, which certifies the NON-sim tier -- so the old binary's
+   own delta is printed beside the loop's, and they must be equal)
+  frame 0 (664,291,0x18000000): loop vs old BYTE-EXACT; vs oracle loop=0 old=0 (equal -- M1 changed nothing)  ok
+  frame 1 (1272,-724,0x40000000): loop vs old BYTE-EXACT; vs oracle loop=0 old=0 (equal -- M1 changed nothing)  ok
+  frame 2 (1869,479,0x80000000): loop vs old BYTE-EXACT; vs oracle loop=378 old=378 (equal -- M1 changed nothing)  ok
+  frame 3 (-416,256,0x0): loop vs old BYTE-EXACT; vs oracle loop=0 old=0 (equal -- M1 changed nothing)  ok
+
+CONTROL 2 (non-looping): the SAME wire on the OLD binary must present exactly 1 frame
+  old binary: 57,364,424 ops -> 1 frame(s)  ok -- so N frames IS the loop
+
+================================================================================================
+PHASE 2 -- a longer chain vs the OLD binary on a PRISTINE image, per frame
+================================================================================================
+  8 pristine references, all distinct
+  ONE run: 381,820,821 ops -> 8 frames  ok
+  frame 0 (664,291,0x18000000,k=0): BYTE-EXACT
+  frame 1 (700,300,0x20000000,k=1): BYTE-EXACT
+  frame 2 (1272,-724,0x40000000,k=5): BYTE-EXACT
+  frame 3 (1869,479,0x80000000,k=0): BYTE-EXACT
+  frame 4 (-416,256,0x0,k=4): BYTE-EXACT
+  frame 5 (1000,100,0x20000000,k=8): BYTE-EXACT
+  frame 6 (2100,800,0xc0000000,k=5): BYTE-EXACT
+  frame 7 (1500,-200,0x60000000,k=1): BYTE-EXACT
+
+================================================================================================
+PHASE 3 -- what the in-program reset COSTS
+================================================================================================
+  8 frames, one at a time on the old binary : 379,807,211 ops
+  the same 8 frames in ONE looping run       : 381,820,821 ops
+  difference                                        : +2,013,610 ops
+  => the reset costs ~251,701 ops per frame
+     (these 8 chain frames average 47,475,901 ops -- a WORST-CASE set. Do not
+      quote a percentage against it; use the 260-frame sweep median, scratchpad/m1_sweep.py.)
+  (the loop also SAVES the 2 ops of op0 + `;__hot_end` per frame, and the host's whole-image
+   memcpy entirely -- which is the point. NOTE: the 3.85x CPU-time figure in
+   docs/handoff-complete-game.md is UNVERIFIED for this binary -- re-measure it.)
+
+================================================================================================
+PHASE 1 (oracle, 4 frames one run) : PASS
+CONTROL 2 (old binary = 1 frame)   : PASS
+PHASE 2 (8-frame chain vs pristine): PASS
+M1 GATE: PASS
+================================================================================================

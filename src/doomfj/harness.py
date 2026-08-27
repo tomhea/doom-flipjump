@@ -8,12 +8,24 @@ import flipjump as fj
 
 W = 32  # memory_width; 16.16 fits one word (DESIGN §1.2). Single source: config.py once M1 lands.
 
+# ⚠ BUILD TIME vs ARTIFACT SIZE -- ONE KNOB, AND THIS IS ITS ONLY DEFINITION.
+# MEASURED 2026-08-20 on the shipped 314,505,544-byte program image: the .fjm's LZMA compression is
+# 99.9% of the assembler's `create binary` phase, and the match finder is the whole cost.
+#     False (flipjump's default, BT4/nice_len 64) .... 100.8 s to write, 21.8 MB
+#     True  (MODE_FAST / MF_HC4) .................... . 7.5 s to write, 29.0 MB
+# It is ENCODER-only: dict_size is untouched, the reader passes no dict size, so every existing
+# .fjm still loads and a fast-written one is read by the unmodified reader.
+# Default True because the thing being optimised is the ~13-minute edit-build-look loop. FLIP IT TO
+# FALSE when cutting the distributable standalone .fjm, where 7 MB matters and 93 s does not.
+FJM_LZMA_FAST = True
+
 def assemble_fjm(fj_paths: list[str | Path], out_fjm: str | Path, *, flat_max_words: int | None = None) -> dict:
     """Assemble at w=32 with --werror (assemble default). Returns assemble time + .fjm size."""
     paths = [Path(p).resolve() for p in fj_paths]
     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
     t = time.perf_counter()
-    fj.assemble(paths, out, memory_width=W, print_time=False)      # warning_as_errors=True is the default
+    fj.assemble(paths, out, memory_width=W, print_time=False,      # warning_as_errors=True is the default
+                lzma_fast=FJM_LZMA_FAST)
     return {"assemble_seconds": round(time.perf_counter() - t, 4), "fjm_bytes": out.stat().st_size}
 
 def run_fjm(fjm_path: str | Path, *, flat_max_words: int | None = None):

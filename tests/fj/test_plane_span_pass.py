@@ -142,6 +142,10 @@ def test_render_planes_spans_byte_exact_vs_oracle(tmp_path):
         "basexscale: hex.vec 8", "baseyscale: hex.vec 8",
         "planeheight: hex.vec 8", "light: hex.vec 2", "flatbase: hex.vec 5",
         "y: hex.vec 2", "x1: hex.vec 8", "x2: hex.vec 8", "span_ret: ;0",
+        # M13opt2 span-scan state + classify scratch (globals shared by render_planes_spans + plane_col)
+        "inspan: hex.vec 1", "spanR: hex.vec 2", "spanph: hex.vec 8", "spanfb: hex.vec 5",
+        "spanlt: hex.vec 2", "spanx1: hex.vec 2", "cR: hex.vec 2", "cph: hex.vec 8", "cfb: hex.vec 5",
+        "clt: hex.vec 2", "cexcl: hex.vec 2", "fstart: hex.vec 2",
         _col_array("col_cexcl", cexcl), _col_array("col_fstart", fstart),
         _col_array("col_ceil_ph", ceil_ph), _col_array("col_floor_ph", floor_ph),
         _col_array("col_plight", col_lt), _col_array("col_ceilbase", ceilbase),

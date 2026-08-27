@@ -1,0 +1,34 @@
+== host gates (tests/host/test_twosided.py) ==
+......                                                                   [100%]
+6 passed in 1.09s
+
+== fj byte-exact gates (tests/fj/test_lines_render.py -k plane_near) ==
+.[lines WPX+FT1 plane_near] E1M1 spawn frame = 25,494,558 ops
+.
+2 passed, 7 deselected in 177.13s (0:02:57)
+
+== 65-viewpoint worst-case sweep (scratchpad/pnear_sweep.py) ==
+built in 267s
+(-416,256,0x00000000) OK   ops=25,494,558
+(-416,256,0x20000000) OK   ops=23,189,674
+(-416,256,0x40000000) OK   ops=9,301,290
+(-416,256,0x60000000) OK   ops=10,547,552
+(-416,256,0x80000000) OK   ops=6,713,294
+(-416,256,0xa0000000) OK   ops=10,789,076
+(-416,256,0xc0000000) OK   ops=9,553,599
+(-416,256,0xe0000000) OK   ops=16,973,785
+(-352,256,0x00000000) OK   ops=25,313,055
+(-480,256,0x00000000) OK   ops=27,685,988
+(-416,320,0x00000000) OK   ops=26,031,716
+(-416,160,0x00000000) OK   ops=24,569,985
+(-288,320,0x20000000) OK   ops=13,591,821
+(-309,636,0x00000000) OK   ops=29,294,483
+(-480,256,0x00000000) OK   ops=27,685,988
+15 gate viewpoints byte-exact; worst so far 29,294,483
+  new worst 30,847,434 @ (-309,-724,0x00000000)
+  new worst 30,998,786 @ (-309,-44,0x00000000)
+WORST over 65 viewpoints = 30,998,786 @ (-309, -44, 0)   (UNDER the 33M ceiling)
+
+== full suite ==
+.......................                                                  [100%]
+307 passed, 4 skipped in 4285.97s (1:11:25)

@@ -152,7 +152,174 @@ read past the end (flipjump-dev skill) — align at the boundaries (e.g. 16.16 p
 Power-of-two dispatch-table padding inflates the span — lay out **hot-low + largest-alignment-first**
 (§3/#2) and sum padding here, don't discover it. **OPEN — D10** (concrete memory map). Default flat limit = 2²³ words
 (64 MB); raise via `--flat-max-words` / `FLIPJUMP_FLAT_MAX_WORDS` if needed (cost = RAM + ~0.1 s/GB fill,
-zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
+zero per-op cost). Assert `storage_mode == flat` in the harness.
+
+**⚠ THE RENDERER'S RAISED LIMIT IS `config.RENDER_FLAT_MAX_WORDS`, AND IT IS NOW 2²⁷ (2026-08-18).**
+It was 2²⁶, copy-pasted as the literal `1 << 26` into twelve places, so "the limit" was twelve
+independent numbers; it is one constant now (R6). **Why it was raised:** MEASURED — the **M14 tier**
+(`state_wire="bin"` + `player_sim` + `moving_things`, the tier that ships after B0) is
+**68,213,458 span-words, 1.6% OVER 2²⁶**. At 2²⁶ it silently ran in **hybrid** storage, which R4
+forbids, and `_fjcore.Memory.freeze()` requires **pure flat** — so the frozen-image fast reset path,
+and with it B4.1's measured **357× restore** (44.97 ms → 0.12 ms), was unavailable to the shipped
+tier. Op counts are identical in both modes (43,115,656 at the spawn viewpoint either way), so no
+earlier measurement moved. **A limit is not an allocation:** flipjump allocates the real span
+(~546 MB); this only decides whether flat storage is permitted, so raising it costs no memory by
+itself. **It is still a ceiling, and B3's nine-level table competes for the same headroom (G3):**
+the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where against 2²⁶ it had ~1.02×
+— i.e. it was *already over* and running hybrid, not comfortably under.
+
+| tier | span-words | vs 2²⁶ | vs 2²⁷ | storage_mode |
+|---|---|---|---|---|
+| static (`build_wall_renderer`, R4 gate) | in the 40–62M band, `< 2²⁶` asserted | under | under | flat |
+| **M14 (`state_wire=bin`, sim, moving things)** | **68,213,458** | **1.02× OVER** | 0.51× | hybrid at 2²⁶, **flat at 2²⁷** |
+| shipped config, `self_reset=False` | **84,823,030** | 1.26× OVER | 0.63× | flat |
+| **M1 (the same + `self_reset=True`)** | **85,468,976** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+| **M1 + M1-HOIST (319 @-locals -> named globals)** | **85,438,862** | 1.27× OVER | **0.64×** | **flat** (asserted) |
+| **+ constant-address round 1 (C2/C5/C7/C8)** | **85,523,360** | 1.27× OVER | **0.637×** | **flat** (asserted) |
+| + constant-address round 2, `self_reset=False` | **84,756,676** | 1.26× OVER | **0.631×** | **flat** (asserted) |
+| **M5 standalone, `self_reset=False`** | **84,155,496** | 1.25× OVER | **0.627×** | **flat** (asserted) |
+| **M5 standalone + `self_reset=True`** (shipped `doom_e1m1_std.fjm`) | **84,892,508** | 1.27× OVER | **0.633×** | **flat** (asserted) |
+| **M3 the same + `menu=True`** (shipped `doom_e1m1_menu.fjm`) | **85,209,916** | 1.27× OVER | **0.635×** | **flat** (asserted) |
+
+⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
+and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the
+*hosted* shipped tier, the one tier that milestone did not change — for two tiers it did add.
+Full metrics, from the run that produced each binary:
+
+| tier | span-words | headroom | `.fjm` bytes | assemble |
+|---|---|---|---|---|
+| standalone, no self-reset (`_m5_build_noloop.log`) | 84,155,496 | 1.595 | 30,948,902 | 684 s |
+| standalone + self-reset (`_m5_build_loop.log`) | 84,892,508 | 1.581 | 31,221,481 | 3,405 s (**two passes**) |
+| + menu (`_m3_build.log`) | 85,209,916 | 1.575 | 31,252,015 | 2,867 s (two passes) |
+
+Two things this table is **not** evidence for. The **+737,012** between the first two rows is the
+self-reset part for the *standalone* set (12,082 words, seven labels persisted), and is not the
+hosted figure — do not cross-subtract the rows above, which are a different program (§the M14 warning
+below). And the **+317,408** for the menu row is the whole menu **tier** — the bitmap, the mode
+register, the `kb.poll` edge dispatch and the second present path — not the cost of the glyphs.
+The assemble column is wall-clock on a machine that was doing nothing else, and the two-pass rows
+are two full assemblies, which is most of the difference from the 684 s row.
+
+(Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
+That trailing instruction used to be swallowed into the M14 row's last cell, where it read as
+a column.)
+
+⚠ **THE TWO ROWS ABOVE, ADDED CR-2026-08.** The M1 row (85,468,976 / headroom 1.57×) was the
+ledger's last entry while the shipped binary had moved on twice. What the two rounds added:
+
+* **Round 1, C5** (`src/doomfj/collision.py`): the linedef row splits into `lnbox` (8 bytes) +
+  `lnrow` (14), emitted as two packed LUTs. ⚠ **The pair carries the SAME 22 bytes/row `lnrow`
+  alone carried** — `generate_packed_lut_fj` emits one `;v*dw` per byte with no padding — so **none
+  of the +413,668 words is table DATA.** It is macro-expansion CODE: an extra
+  `hex.read_table_packed` staging preamble across the 16 `check_line` expansions, ≈25.9k words
+  each. A ledger line for "the new table" would have said 0 and been wrong; the line is for the
+  expansions.
+* **Round 2** adds three dispatch tables — `vtxdisp` (2,048×8 nibbles), `sinadisp` (161×8) and
+  `finesine` switched from `per_result_nibble` to `per_entry`. The `tables` part grows
+  **300,177 → 331,382 lines (+31,205)**, ≈ +62k words. ⚠ **And yet the TOTAL SPAN FALLS by
+  127,226 words** (84,883,902 → 84,756,676, both `self_reset=False`, both built in one session —
+  `docs/constaddr-evidence/shipbuild_base.log` / `shipbuild_new.log`; headroom 1.581 → 1.584).
+  The change deletes code at every expansion: `finesine` per_entry is ~790k characters smaller than
+  eight per-result-nibble tables, `angle_to_x` and `scale_from_global_angle` shed instructions from
+  every instantiation, and 22 dead `hex.zero` calls are gone. **A span figure derived from the data
+  you added is not a span measurement** — an earlier draft of this note said "+62k, +0.07%" and had
+  the sign wrong. ⚠ The `self_reset=True` tier is still unbuilt for round 2: the fj edits moved
+  labels, so the M1 restore set needs re-keying first (`scratchpad/ca_remap_set.py`).
+
+**M1 adds ONE segment, `<map>_07_reset.fj`** (`selfreset.emit_reset_part`). Its size is
+`nibble_cells` coalesced `hex.zero` runs + non-zero `hex.set 1` singles + one `rep` per byte
+array + the `;__hot_end` tail. It carries **no table and no align pad**: every address in it is
+baked, so it adds code span only.
+
+
+**Reset part composition, MEASURED 2026-08-25 off the shipped `build/generated_loop/e1m1_07_reset.fj`** (the previous table described a superseded part in every cell):
+
+| | |
+|---|---|
+| lines / sha256 | **575** / `5ccf52a5...` |
+| coalesced `hex.zero` runs | **194** |
+| non-zero `hex.set 1` singles | **369** |
+| `rep` byte-array clears | **3** (sshead, pclm, sfflag) |
+| cells | **5,034 nibble + 1,002 byte** |
+
+⚠ **RE-MEASURED 2026-08-25 after M1-HOIST** (the figures here previously described a
+superseded set and contradicted the shipped artifact -- CR R4). Current E1M1 shipped tier:
+
+| | |
+|---|---|
+| restore set | **12,072 words / 448 entries**, and **ZERO `@`-local keys** (was 188) |
+| reset cells | **5,034 nibble + 1,002 byte** |
+| reset cost | **~322,438 ops/frame** (8-frame gate chain) |
+| span | **85,438,862** words, headroom **1.571×** vs `RENDER_FLAT_MAX_WORDS` = 2²⁷, `storage_mode == flat` asserted |
+| assemble | **2,619 s** (total build 3,543 s) |
+| binary | `build/doom_e1m1_loop.fjm`, sha256 `4fad6d12...`, 31,315,545 bytes |
+
+**SWEEP MEASURED 2026-08-25** (`scratchpad/m1_sweep.py`, 65 walkable grid points x 4 angles =
+260 frames, this binary vs `_ca2_ship_new.fjm`):
+
+| | ops/frame |
+|---|---:|
+| **looping binary, reset included** | **28,564,109** (7,426,668,261 ops / 260 frames, ONE run) |
+| reference build, one frame per run | 28,302,045 |
+| **median frame** (reference) | **27,932,265** |
+| range | 7,569,883 .. 56,112,295 (7.4x) |
+| looping overhead | **+262,063 ops/frame = +0.9% of the median** |
+
+⚠ **THE +0.9% IS NOT PURELY THE RESET.** It is the reset MINUS whatever else the two builds
+differ by, and they differ: the reference is PRE-hoist. The reset measured against the same
+program (gate PHASE 3) is ~322,438; the sweep delta is lower because M1-HOIST made the renderer
+slightly cheaper on average (R20 address set-bits), partly paying for its own restore cost.
+
+⚠ **CONTROL: 260/260 frames BYTE-EXACT** between the two paths -- the post-hoist LOOPING binary
+renders pixel-identically to the pre-hoist ONE-SHOT binary at every one of the 260 viewpoints.
+That is a far wider byte-exactness proof than deg_gate (4) or the M1 gate (12).
+
+This retires the old "7.47%", which divided by a 47.5M MEAN OF GATE VIEWPOINTS. Gate frames
+overstate a typical frame by ~1.5x, exactly as docs/handoff-complete-game.md 4 says.
+
+**Why the reset grew.** M1-HOIST moved 319 macro-`@`-local registers to
+named globals so the restore set stops naming expansion paths, and those globals are restored at
+full declared extent, so the reset clears more cells. (No before/after pair is quoted: the
+earlier figures 250,789 / 263,666 / 285,126 each belong to a DIFFERENT superseded set, so
+subtracting any of them from 322,438 would compare two things that were never the same
+program.) That is the price of a set that no longer breaks when a comment shifts a
+line -- 313 of 344 keys once needed re-keying for line numbers alone.
+
+⚠ The first build of this tier emitted **5,031** nibble cells. 682 of them were the unreachable half
+of `sshead` — declared `hex.vec 2*nss`, reached at a ONE-cell stride — which the set carried because
+it was derived from whole label extents. MEASURED at 0 dirty words across all five
+`scratchpad/_m1_dirty*.json.gz` maps, so it was provably-dead work rather than corruption; the
+emitter now REFUSES a set word in a byte array's declared-but-unreachable range instead of letting
+it fall through to the nibble clear. The trim is worth **−19,110 ops/frame** (270,811 → 251,701 on
+the same 8-frame chain) and **−57,950 span-words**; do not quote the pre-trim 270,811 for this
+tier.
+
+⚠ **THE PART'S OWN SPAN IS NOT RE-MEASURED** after M1-HOIST.
+The former figure (645,946 words) was `85,468,976 - 84,823,030`, both PRE-hoist spans, and
+the post-hoist non-self-reset span has not been built. Deriving a words/cell rate from a
+mixed pair is exactly the mis-derivation the warnings below guard against, so no rate is
+quoted. Build with `self_reset=False` on this tree if the number is wanted.
+
+| | words | binary | sha256 |
+|---|---:|---|---|
+| `self_reset=False` | 84,823,030 | `scratchpad/fjmcache/_rssprobe.fjm` | `3c13ec21424f7f54…` |
+| `self_reset=True` (PRE-hoist) | 85,468,976 | superseded | `75794727dce656be…` |
+| `self_reset=True` **+ M1-HOIST** | **85,438,862** | `build/doom_e1m1_loop.fjm` | `4fad6d126ed84d79…` |
+
+⚠ **THE PAIR ABOVE NO LONGER SUBTRACTS.** `self_reset=False` (84,823,030) is a PRE-hoist build,
+so `85,438,862 - 84,823,030` mixes two different programs and is NOT the reset part's span. The
+old 645,946 figure came from the pre-hoist pair and is retired; **no per-cell span rate is quoted**
+until `self_reset=False` is rebuilt on this tree.
+
+⚠ Keep the standing warning that retired it: 120.7 words/cell was an AVERAGE over three
+primitives, and 85.0 was the trim's MARGINAL rate (57,950 words / 682 contiguous zero cells).
+Applying a marginal rate as an average is an extrapolation, not arithmetic -- rounds 5 and 6 were
+both that mistake. Do not make it a fourth time by splitting any total across the rows above.
+
+⚠ Do **not** derive the part's span by subtracting the M14 row above: that row is an older, smaller
+configuration, and the difference (17,255,518) is 26× the real figure. An earlier revision said the
+tier "is the M14 tier plus that part", which invited exactly that mistake. R4's `storage_mode == flat` assert runs on this path — the frozen-image reset the loop
+depends on needs pure flat.
 
 | Segment / table | Size formula (ops) | Align pad | Span (R0-filled) | Notes |
 |---|---|---|---|---|
@@ -176,7 +343,7 @@ zero per-op cost). Assert `storage_mode == flat` in the harness. Very-hot tables
 
 **M12rr-post measured span breakdown (the live 21.8M renderer, bisected by assembling sub-parts — corrects the rough pre-campaign guesses):** PASS-2 per-pixel unroll **9.19M** (the 16K `pixel_tramp` shells — the residual is the per-pixel framebuffer overwrite `hex.zero 2`+`hex.xor_zero 2`, which M12oo did NOT remove — only the clip), the **background-fill unroll 4.10M** (`render_background_reg` = a *second* full-screen 16K-`hex.mov` unroll, baked once — M13 deletes it), texture table **3.46M**, the **per-level BSP-as-code walk 2.53M** (681 nodes + 575 segs' `xor_by` blocks + the fcall skeleton + subsector setup), the shared projection+pixel leaves **1.84M**, LUTs **0.36M**, colormap **0.13M**. So the renderer is **~2.5 stacked full-screen unrolls** (pass-2 + bg-fill + table ≈ 77%); the `xor_by`/involution campaign attacked the *baked-constant* cost (the walk), which is now a comparatively small **2.53M**.
 
-**M13c3 floors/ceilings (visplane flat-colored raster) — MEASURED span 21.8M → 24.66M words (23.52M, `over_align=False`, headroom 2.72× under 2²⁶, assemble ~259 s).** The M9 two-band background is GONE (−4.10M `render_background_reg` bg-fill unroll); in its place a **second full-screen 16K-pixel pass-2** (`plane_tramp` + the shared `plane_compare_body` / `plane.draw_pixel` kernel) paints the floor/ceiling bands around each wall (≈ +7M — comparable to the wall pass-2 but without the per-pixel overwrite, since plane rows are disjoint from wall rows and stay zero-init), plus the 7 per-column plane-param arrays (`col_cexcl/col_fstart/col_ceil_ph/col_floor_ph/col_plight/col_ceilbase/col_floorbase`, 8-nibble stride) and the `yslope`/`zlight` LUTs (small). Net **+2.86M** (the bg-fill deletion offsets most of the new pass). Pass-1 grows by ~14 `store_col_field` per claimed column + the once-per-seg ceil/floor planeheight `hex.abs` (emitted once in the shared leaf). The renderer is now **2 stacked full-screen unrolls** (wall pass-2 + plane pass-2) + the texture table. The C2 runtime-row-loop remains the relief if a future viewport widens this (handoff §2(2)). `test_build_wall_renderer_e1m1_flat` gates it flat under 2²⁶.
+**M13c3 floors/ceilings (visplane flat-colored raster) — MEASURED span 21.8M → 24.66M words (23.52M, `over_align=False`, headroom 2.72× under 2²⁶, assemble ~259 s).** The M9 two-band background is GONE (−4.10M `render_background_reg` bg-fill unroll); in its place a **second full-screen 16K-pixel pass-2** (`plane_tramp` + the shared `plane_compare_body` / `plane.draw_pixel` kernel) paints the floor/ceiling bands around each wall (≈ +7M — comparable to the wall pass-2 but without the per-pixel overwrite, since plane rows are disjoint from wall rows and stay zero-init), plus the 7 per-column plane-param arrays (`col_cexcl/col_fstart/col_ceil_ph/col_floor_ph/col_plight/col_ceilbase/col_floorbase`, 8-nibble stride) and the `yslope`/`zlight` LUTs (small). Net **+2.86M** (the bg-fill deletion offsets most of the new pass). Pass-1 grows by ~14 `store_col_field` per claimed column + the once-per-seg ceil/floor planeheight `hex.abs` (emitted once in the shared leaf). The renderer is now **2 stacked full-screen unrolls** (wall pass-2 + plane pass-2) + the texture table. The C2 runtime-row-loop remains the relief if a future viewport widens this (handoff §2(2)). `test_build_wall_renderer_e1m1_flat` gates it flat under 2²⁶. **⚠ SUPERSEDED as the SHIPPED span (2026-08-01): `build_wall_renderer` now defaults to the LINES tier (`raster_mode="lines"`, WPX walls + FT1 floors + rung-3a `plane_near`) with all four visual features on (V1 grain / V2 sky / V3 step faces / V4 thing sprites), and its MEASURED span is 12,887,798 words — headroom 5.21× under 2²⁶, assemble 191 s.** The 24.66M figure above is the framebuffer tier, still reachable by keyword. The span HALVED even though the V4 sprite bank adds ~5.5M characters of program, because the column-stream present deletes BOTH 16K-pixel unrolls this paragraph describes — the wall pass-2 and the plane pass-2 — which were the bulk of it.
 
 **Level packaging — *owner decision: all levels in one binary, and KEEP the baked BSP-as-code walk (NOT the BSP-as-data alternative).*** Rationale (owner, this decision): **prefer faster runtime over a smaller binary here** — the baked walk runs with no per-node dispatch/stack reads, so it is the fps-cheaper path; the larger footprint is the accepted cost. **Runtime fps is *unchanged* by level count** — the renderer walks only the *current* level's BSP; the others sit dormant (level-switch = re-point the BSP root + reset state, once per transition). Of the per-binary span, only the **BSP-as-code walk multiplies per level (~2.53M × 9 ≈ 23M, MEASURED on E1M1 — *not* the "~0.2–0.5MB" node-skeleton-only figure used pre-M12rr; the renderer's walk also bakes every one-sided seg's geometry as `xor_by` blocks)**; the **textures grow as the shared *union* (sub-linear, ~2–4×)**; and the pass-2/bg-fill/leaves/LUTs are **shared (×1)**. **All 9 shareware E1 levels** (E1M1 Hangar · E1M2 Nuclear Plant · E1M3 Toxin Refinery · E1M4 Command Control · E1M5 Phobos Lab · E1M6 Central Processing · E1M7 Computer Station · E1M8 Phobos Anomaly · E1M9 Military Base) ≈ **~45–50M words flat** (9× walk ~23M + texture union ~8–12M + the ~15M shared renderer/bg/LUTs) at the raised 2²⁶ limit. **Watch item: assemble time** (~9× BSP blocks + the full texture union — R-2). The full game (Ultimate 36 / DOOM II 32) grows both the walk-×N and the texture union → raise `--flat-max-words` accordingly.
 

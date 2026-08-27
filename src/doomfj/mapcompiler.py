@@ -49,6 +49,8 @@ class Node:
     dy: int
     right: int       # child ref (| NF_SUBSECTOR if a subsector)
     left: int
+    bbr: tuple = None    # right child's bbox (top, bottom, left, right) — M13-15M bbox wedge cull
+    bbl: tuple = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +70,307 @@ def _point_side(px: int, py: int, dx: int, dy: int, x: int, y: int) -> int:
     return dx * (y - py) - dy * (x - px)
 
 
+def seg_affine_coeffs(seg: "Seg", verts: Sequence[Tuple[int, int]]) -> Tuple[int, int, int]:
+    """The SSOT affine coefficients (a, b, c) for a seg's signed perpendicular view→wall-line distance
+    (perf #9, [re-bless]). The signed distance, in 16.16 map units, is
+
+        signed_dist = fixed_mul(a, viewx) + fixed_mul(b, viewy) + c        (32-bit wrap)
+
+    where a = segdy/seglen, b = -segdx/seglen are the unit-normal components and c = -(a·v1x + b·v1y)
+    references the line through v1. This is the cross product ((view−v1)×segdir)/seglen — exact integer
+    affine in the viewpoint, with the same value the divide path (point_to_dist·sin) approximates, but
+    without the atan/divide. For a FRONT-facing seg (those that survive wall_x_range's span<ANG180 cull)
+    signed_dist > 0, so rw_distance = signed_dist directly (abs is a no-op); the SIGN is what perf #10's
+    back-face cull tests. Returned a/b/c are raw 32-bit two's-complement words ready to bake — both the
+    oracle and the fj emitter consume THIS function so they cannot drift (R6). `c` is the perpendicular
+    distance from the origin to the wall line; encode_fixed_point raises if it exceeds the signed 16.16
+    range (|c| < 32768 map units), which would need a wider representation."""
+    from doomfj.fixedpoint import encode_fixed_point   # local import: avoid a module cycle
+    v1x, v1y = verts[seg.v1]
+    v2x, v2y = verts[seg.v2]
+    segdx, segdy = v2x - v1x, v2y - v1y
+    seglen = (segdx * segdx + segdy * segdy) ** 0.5
+    if seglen == 0:
+        return 0, 0, 0                                   # degenerate zero-length seg
+    af, bf = segdy / seglen, -segdx / seglen
+    a = encode_fixed_point(af, 16, 32)
+    b = encode_fixed_point(bf, 16, 32)
+    c = encode_fixed_point(-(af * v1x + bf * v1y), 16, 32)
+    return a, b, c
+
+
+# ── M13-15M: the BBOX WEDGE CULL's SSOT (shared by the oracle mirror AND the fj emitter) ──
+
+ANG45_BAM = 0x20000000
+
+
+def wedge_planes_bam(viewangle: int) -> tuple:
+    """The two half-plane direction indices (0..7) proj.wedge_setup picks for this view angle —
+    MIRRORED EXACTLY, mod-2^32 BAM arithmetic included: lo = ((va - ANG45) mod 2^32) >> 29,
+    hi = ((va + ANG45 + ANG45-1) mod 2^32) >> 29 (the ceil identity), plane B = (hi + 4) & 7."""
+    lo = ((viewangle - ANG45_BAM) & 0xFFFFFFFF) >> 29
+    hi = ((viewangle + ANG45_BAM + (ANG45_BAM - 1)) & 0xFFFFFFFF) >> 29
+    return lo, (hi + 4) & 7
+
+
+def bbox_wedge_miss(m: int, box: tuple, vx: int, vy: int,
+                    eyex16: int | None = None, eyey16: int | None = None) -> bool:
+    """True when the whole box (top, bottom, left, right — the NODES lump order) lies OUTSIDE
+    half-plane m, i.e. max over the box of the plane's signed test value is negative. The maximizing
+    corner is a pure function of m: x = left for m<4 else right; y = top for m in {0,1,6,7} else
+    bottom (equivalently, in fj's (q=m&3, n=2<=m<=5) encoding: y = top iff n==0, x = left iff
+    (q<2) == (n==0)). All in raw 16.0 map units. ⚠ WIDTH CONTRACT (CR-2026-08): the fj side
+    (proj.wedge_bbox_plane) evaluates Q on 4-nibble slices, so every true Q — including the
+    dx+dy / dy-dx combinations — must fit SIGNED 16 BITS. That is NOT free for "int16 maps":
+    Q reaches ±(span_x + span_y), ~2^17 on a map spanning the full int16 range. The bound is
+    ENFORCED per map by the assert in `bbox_gate_boxes` (span_x + span_y + slack < 2^15);
+    a map that trips it needs the fj slices widened, not the assert loosened."""
+    top, bottom, left, right = box
+    cx = left if m < 4 else right
+    cy = top if m in (0, 1, 6, 7) else bottom
+    # ⚠ CR-2026-08 (PJ-1) — THE COMBINED TERMS ARE FLOORED AFTER COMBINING, NOT PER AXIS.
+    # This used to compute dy-dx and dx+dy from the already-floored vx/vy, i.e.
+    # floor(viewy)-floor(viewx). `proj.wedge_setup` builds weyx/wexy at full 16.16 width and its
+    # readers slice the high nibbles, i.e. floor(viewy-viewx). Those differ by 1 exactly when the
+    # fractions borrow (q=1) or carry (q=3) — a byte-exactness break from the moment M14 made the
+    # view position fractional, and invisible to every gate because they all sit on whole units.
+    # MEASURED, two-sided control: scratchpad/_pj1_probe.py.
+    #
+    # THIS mirror moved rather than the fj one, and the reason is VISUAL, not convenience. Only
+    # floor-after-combining is CONSERVATIVE: Q - Q_true = frac(E) ∈ [0,1) for all four q, so a cull
+    # (Q an integer with the culling sign) always implies the true point is really outside — it can
+    # fail to cull, never over-cull. Flooring per axis gives q=3 an error of fx+fy ∈ [0,2), so Q=1
+    # on the negated plane m=3 culls a box whose true Q is as low as -1 (genuinely INSIDE). The
+    # wedge is rounded out to 45° boundaries, and at a view angle that is an exact multiple of 45°
+    # — two of the four certified gate angles are — that rounding slack is ZERO. Dropping a whole
+    # subtree is the failure PJ-1 was filed for, so the form that cannot do it wins.
+    #
+    # eyex16/eyey16 are the SIGNED 16.16 view position. Omitted ⇒ the whole-map-unit case, where
+    # the two forms are identical by construction (that is why every existing golden still holds).
+    if eyex16 is None:
+        eyex16, eyey16 = vx << 16, vy << 16
+    assert eyex16 >> 16 == vx and eyey16 >> 16 == vy, (
+        f"bbox_wedge_miss: eye16 {(eyex16, eyey16)} disagrees with the floored eye {(vx, vy)} — "
+        "the caller floored one of them differently (python >> on a negative int floors, §1.1.4)")
+    q = (cy - vy,                                   # q=0: single term, floor is per axis anyway
+         (cy - cx) - ((eyey16 - eyex16) >> 16),     # q=1: floor(viewy - viewx)
+         cx - vx,                                   # q=2: single term
+         (cx + cy) - ((eyex16 + eyey16) >> 16))[m & 3]   # q=3: floor(viewx + viewy)
+    if 2 <= m <= 5:
+        q = -q
+    return q < 0
+
+
+def seg_sector(lds, sds, secs, seg):
+    """The sector a seg fronts: seg -> linedef -> (front|back) sidedef -> sector. `lds/sds/secs` are
+    the level's parsed LINEDEFS/SIDEDEFS/SECTORS. `ReferenceModel._seg_sector` delegates here so the
+    oracle, the emitter and `thing_live_subsectors` cannot drift on the rule."""
+    ld = lds[seg.linedef]
+    return secs[sds[ld.front if seg.side == 0 else ld.back].sector]
+
+
+def thing_live_subsectors(cmap: "CompiledMap", lds, sds, secs) -> frozenset:
+    """M14-a — every subsector a thing COULD EVER BE IN. The SSOT for all three compile-time
+    structures that used to key off where the things happen to STAND at emit time:
+    `_lines_prune` (the walk prune), `_cnt`/`_lines_plane_gate` (the runtime `tsstop` node gate)
+    and `bbox_gate_boxes`'s `thing_subsectors` (the inflated wedge boxes).
+
+    ⚠ WHY THIS EXISTS. Those three were taught "a thing-carrying leaf is live" from
+    `things_by_ss`, which is a snapshot of the map's SPAWN positions. That is correct only while
+    things never move. The moment they do, a monster that walks into a leaf pruned as empty
+    vanishes with NO error and NO assertion -- the exact bug class handoff-m14.md section 3 says to
+    settle before the runtime thing list exists, and the class that already cost this repo two
+    builds.
+
+    The predicate is deliberately conservative: a thing needs somewhere to stand, so the only
+    subsectors excluded are those whose sector has no space at all (`ceil_h <= floor_h` -- closed
+    doors, wall fillers, the 25 degenerate leaves of E1M1). Every subsector a monster could
+    conceivably walk into stays live, which is what makes it sound under an unconstrained sim.
+    Nothing here reads a thing's position, so no simulation can invalidate it."""
+    live = set()
+    for si, ss in enumerate(cmap.subsectors):
+        if not ss.numsegs:
+            continue                       # a seg-less leaf has no sector to read, and no walk code
+        sec = seg_sector(lds, sds, secs, cmap.segs[ss.firstseg])
+        if sec.ceil_h > sec.floor_h:
+            live.add(si)
+    return frozenset(live)
+
+
+def assert_thing_live_survives_prune(cmap: "CompiledMap", *, thing_live, prune=None,
+                                     plane_gate=None, plane_live=None, where: str = "") -> None:
+    """M14-a THE LOUD FAILURE. Walks the tree exactly as `_bsp_as_code` does and raises if any
+    subsector a thing could ever occupy sits in a subtree that either prune would drop:
+
+      * `prune(child)` truthy  -> the walk block is not emitted at all (COMPILE time), so the leaf
+        is never visited and its things are never projected;
+      * `plane_gate(node)` truthy -> the subtree is skipped at RUNTIME once `tsstop`, with the same
+        consequence for anything below it.
+
+    Both take the SAME callables the emitter hands `_bsp_as_code`, so this cannot drift from what is
+    actually emitted -- which is the point. Without it, re-narrowing liveness produces a renderer
+    that silently loses sprites and passes every existing gate (the static things happen to stand
+    where the narrow predicate keeps them alive).
+
+    ⚠ CR-2026-08 (WR-1) — THE TWO SETS ARE NOT THE SAME QUESTION, so they are two parameters.
+    `thing_live` guards the COMPILE-time prune: a dropped walk block is gone from the binary, so it
+    must survive anything the sim could ever do, and that set is `thing_live_subsectors`.
+    `plane_live` guards the RUNTIME tsstop gate, which is re-decided every frame and therefore only
+    has to cover where a thing can be IN THIS BUILD -- on a static build (`moving_things=False`)
+    nothing moves, so spawn occupancy is exact and the wide set would forbid a gate that cannot
+    lose anything. It defaults to `thing_live`, which is the conservative reading: passing the
+    narrower set is a claim the CALLER makes about its build, in one place, explicitly."""
+    plane_live = thing_live if plane_live is None else plane_live
+    bad: list = []
+
+    def walk(child: int, dropped: bool, gated: bool) -> None:
+        if child & NF_SUBSECTOR:
+            si0 = child & (NF_SUBSECTOR - 1)
+            if dropped and si0 in thing_live:
+                bad.append((si0, "walk-pruned at emit"))
+            elif gated and si0 in plane_live:
+                bad.append((si0, "tsstop-gated at runtime"))
+            return
+        d = dropped or bool(prune and prune(child))
+        g = gated or bool(plane_gate and plane_gate(child))
+        n = cmap.nodes[child]
+        walk(n.left, d, g)
+        walk(n.right, d, g)
+
+    import sys as _sys
+    _old = _sys.getrecursionlimit()
+    _sys.setrecursionlimit(20000)
+    try:
+        walk(cmap.root, bool(prune and prune(cmap.root)), False)
+    finally:
+        _sys.setrecursionlimit(_old)
+    if bad:
+        raise AssertionError(
+            f"{where}thing-live subsectors are unreachable to the walk: "
+            + ", ".join(f"ss{s} ({why})" for s, why in sorted(bad)[:20])
+            + (f" ... and {len(bad) - 20} more" if len(bad) > 20 else "")
+            + " -- a thing entering one of these would vanish with no other symptom.")
+
+
+# 256-unit blocks. DOOM uses 128; this is one bit coarser ON PURPOSE, so the fj side's block
+# index is a WHOLE-NIBBLE shift of the 16.16 position (16 + 8 bits = 6 nibbles) instead of a
+# 7-bit shift it has no single op for. Coarser blocks mean a few more lines per block, which
+# is far cheaper than synthesising the odd shift per candidate position.
+BLOCK_SHIFT = 8
+BLOCK_SIZE = 1 << BLOCK_SHIFT
+
+
+def build_blockmap(cmap: "CompiledMap", lds, *, shift: int = BLOCK_SHIFT) -> dict:
+    """M14-d — DOOM's blockmap: `{(bx, by): [linedef indices]}`, a linedef listed in EVERY block its
+    segment passes through.
+
+    WHY IT EXISTS. `check_position` has to answer "does any line refuse this position?", and the
+    oracle answers it by testing all ~1.5k linedefs — fine in Python, ~7M fj ops if the emitted
+    program read the same table per tic. The blockmap turns that into "test the ~0-8 lines in the
+    blocks the player's box touches".
+
+    WHY IT IS SOUND, which is the part that matters. A line can only affect the answer if the
+    player's box STRADDLES it (`P_BoxOnLineSide != -1` rejects everything else), and a straddling
+    line passes through the box. The box is 2*radius across and radius (16) is far below the
+    128-unit block size, so the box spans at most 2x2 blocks — and any line crossing the box
+    crosses one of them. Listing a line in every block it passes through therefore loses nothing.
+    `tests/host/test_collision.py` proves that exhaustively rather than by this argument: it
+    compares the blockmap answer against the all-lines answer over thousands of positions.
+
+    Blocks are indexed in WHOLE MAP UNITS (the fj side gets the index by shifting the integer part
+    of the position), not 16.16 — a block index must not depend on the sub-unit fraction."""
+    grid: dict = {}
+    for li, ld in enumerate(lds):
+        x1, y1 = cmap.vertexes[ld.v1]
+        x2, y2 = cmap.vertexes[ld.v2]
+        # Walk the segment and record every block a sample lands in. The sample spacing has to be
+        # well BELOW the block size or a line that clips a block's corner is missed -- at half a
+        # block it already was, and `test_blockmap_gives_the_same_answer_as_the_full_line_sweep`
+        # caught it the moment the blocks got coarser. 16 units (the player radius) is ~1/16 of a
+        # block; bake-time cost is irrelevant next to being wrong.
+        steps = max(abs(x2 - x1), abs(y2 - y1)) // 16 + 1
+        seen = set()
+        for k in range(steps + 1):
+            bx = (x1 + (x2 - x1) * k // steps) >> shift
+            by = (y1 + (y2 - y1) * k // steps) >> shift
+            seen.add((bx, by))
+        for cell in seen:
+            grid.setdefault(cell, []).append(li)
+    return grid
+
+
+def blockmap_candidates(grid: dict, x: int, y: int, radius: int, *, shift: int = BLOCK_SHIFT):
+    """The linedefs to test for a box of `radius` centred at (x, y) — all in WHOLE MAP UNITS. The
+    box spans at most 2x2 blocks, and both mirrors must agree on WHICH, so the bounds are computed
+    from the box corners exactly as the fj side will."""
+    out = set()
+    for bx in range((x - radius) >> shift, ((x + radius) >> shift) + 1):
+        for by in range((y - radius) >> shift, ((y + radius) >> shift) + 1):
+            out.update(grid.get((bx, by), ()))
+    return sorted(out)
+
+
+def bbox_gate_boxes(cmap: "CompiledMap", *, min_segs: int = 32,
+                    thing_subsectors=(), inflate: int = 96) -> dict:
+    # min_segs tuning (E1M1-lite, measured): 8 gated 325 of 470 nodes and the per-visit test cost
+    # showed up as +0.83M at a high-reach viewpoint ((-309,636) keeps 86% of segs); 32 keeps the
+    # big-subtree culls (tree -1.54M, courtyard -0.78M) at roughly a third of the overhead.
+    """Which nodes get a runtime bbox wedge gate, and with what box: {node_index: (T, B, L, R)}.
+    The box is the UNION of the node's two child boxes. Only subtrees holding >= min_segs segs are
+    worth the ~2.5k-op runtime test; a subtree holding any THING-carrying leaf gets its box
+    inflated by `inflate` map units so a sprite whose center sits just outside the wedge cannot
+    lose its (up to ~sprite-half-width) on-screen columns. The ORACLE and the fj emitter must both
+    use THIS function — the gate changes which marking segs spend budget, so the two sides have to
+    agree on the gated set exactly."""
+    if not cmap.nodes or cmap.nodes[0].bbr is None:
+        return {}
+    segs_below: dict = {}
+    things_below: dict = {}
+    thing_ss = set(thing_subsectors)
+
+    def walk(child):
+        if child & NF_SUBSECTOR:
+            s = child & (NF_SUBSECTOR - 1)
+            return cmap.subsectors[s].numsegs, (s in thing_ss)
+        n = cmap.nodes[child]
+        sr, tr = walk(n.right)
+        sl, tl = walk(n.left)
+        segs_below[child] = sr + sl
+        things_below[child] = tr or tl
+        return sr + sl, tr or tl
+
+    import sys as _sys
+    _old = _sys.getrecursionlimit()
+    _sys.setrecursionlimit(20000)
+    try:
+        walk(cmap.root)
+    finally:
+        _sys.setrecursionlimit(_old)
+
+    out = {}
+    for i, n in enumerate(cmap.nodes):
+        if segs_below.get(i, 0) < min_segs:
+            continue
+        (rt, rb, rl, rr), (lt, lb, ll, lr) = n.bbr, n.bbl
+        box = (max(rt, lt), min(rb, lb), min(rl, ll), max(rr, lr))
+        if things_below.get(i):
+            box = (box[0] + inflate, box[1] - inflate, box[2] - inflate, box[3] + inflate)
+        out[i] = box
+    # CR-2026-08: bbox_wedge_miss's WIDTH CONTRACT (see its docstring) -- the fj evaluates Q
+    # on signed-16-bit slices, and Q reaches +/-(span_x + span_y) for the dx+dy / dy-dx
+    # planes. Bound the spans over everything a Q can be built from: gated-box corners and
+    # the map's vertexes (the view position stays inside the map), + 256 slack for a view
+    # nudged past the walls.
+    if out:
+        xs = [v for b in out.values() for v in (b[2], b[3])] + [x for x, _ in cmap.vertexes]
+        ys = [v for b in out.values() for v in (b[0], b[1])] + [y for _, y in cmap.vertexes]
+        span = (max(xs) - min(xs)) + (max(ys) - min(ys))
+        assert span + 512 < (1 << 15), (
+            f"bbox wedge cull: map spans {span} units; Q would overflow the fj signed-16-bit "
+            "slices -- widen proj.wedge_bbox_plane before gating this map")
+    return out
+
+
 # ── BSP bake (parse the WAD's precompiled NODES/SSECTORS/SEGS) ──
 
 def bake_bsp(wad, mapname: str) -> CompiledMap:
@@ -78,7 +381,9 @@ def bake_bsp(wad, mapname: str) -> CompiledMap:
     verts = [(v.x, v.y) for v in wad.vertexes(mapname)]
     segs = [Seg(s.v1, s.v2, s.angle, s.linedef, s.direction, s.offset) for s in wad.segs(mapname)]
     subsectors = [SubSector(ss.numsegs, ss.firstseg) for ss in wad.subsectors(mapname)]
-    nodes = [Node(n.x, n.y, n.dx, n.dy, n.right, n.left) for n in wad.nodes(mapname)]
+    bboxes = wad.nodes_bbox(mapname)
+    nodes = [Node(n.x, n.y, n.dx, n.dy, n.right, n.left, bb[0], bb[1])
+             for n, bb in zip(wad.nodes(mapname), bboxes)]
     root = (len(nodes) - 1) if nodes else (0 | NF_SUBSECTOR)
     return CompiledMap(verts, segs, subsectors, nodes, root)
 
@@ -153,8 +458,53 @@ def compile_geometry_streams(wad, mapname: str) -> str:
     return "\n".join(out)
 
 
+def _bsp_descend_code(pfx: str, bsp: CompiledMap, leaf_action, *, done_label: str,
+                      tag: str = "") -> str:
+    """M13-prune: a DESCEND-ONLY point-location walk (R_PointInSubsector): from the root, take the
+    NEAR child at every node and never visit the far side -- the leaf reached is the subsector
+    containing the eye. Runs BEFORE the main walk to set the per-frame player-subsector state
+    (viewz + the baked band-bank pointer), so the main walk needs no per-leaf guard blocks and
+    empty subtrees can be pruned from it safely. Reuses the main walk's shared <L>_node{i}_partition const blocks
+    and pos_leaf (same labels); path length ~tree depth (~10-20 nodes), once per frame.
+    `leaf_action(s)` returns the fj lines for landing in subsector s (must end by falling
+    through); the emitted code jumps to `done_label` afterwards.
+
+    `tag` names a SECOND, independent descent that shares the same partition blocks and pos_leaf
+    (M14-d: the collision needs the sector under a CANDIDATE position, which is the same query at a
+    different point). Only the descent's own labels are tagged -- the shared blocks are keyed on
+    `pfx` and must stay keyed on it, or the second descent would reference blocks nobody emits."""
+    L = f"{pfx}_bspcode"
+    D = f"{pfx}_dsc{tag}"
+    lines = [f"// descend-only point-location pre-walk ({len(bsp.nodes)} node blocks)"]
+    lines.append(f"{D}_walk:")
+    root = bsp.root
+    if root & NF_SUBSECTOR:
+        lines += list(leaf_action(root & (NF_SUBSECTOR - 1)))
+        lines.append(f"    ;{done_label}")
+        return chr(10).join(lines) + chr(10)
+    lines.append(f"    ;{D}_node{root}")
+    for i, n in enumerate(bsp.nodes):
+        lines.append(f"{D}_node{i}:")
+        lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")     # SET the shared partition consts
+        lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
+        lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")     # CLEAR (involution)
+        lines.append(f"    hex.if0 2, {L}_side, {D}_node{i}_far")
+        for child, tag in ((n.left, ""), (n.right, "f")):       # back -> left is near; front -> right
+            if tag == "f":
+                lines.append(f"{D}_node{i}_far:")
+            if child & NF_SUBSECTOR:
+                lines += ["  " + ln if not ln.startswith(" ") else ln
+                          for ln in leaf_action(child & (NF_SUBSECTOR - 1))]
+                lines.append(f"    ;{done_label}")
+            else:
+                lines.append(f"    ;{D}_node{child}")
+    return chr(10).join(lines) + chr(10)
+
+
 def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
-                 subsector_action=None) -> str:
+                 subsector_action=None, full_abort_label: str = None, prune=None,
+                 inline_side: bool = False, plane_gate=None,
+                 plane_gate_label: str = "tsstop", extra_gate=None) -> str:
     """BSP-as-code (opt #7): emit the front-to-back BSP walk as fj CODE. Each node becomes a code block
     whose partition line is baked as compile-time constants, so the side test is `proj.point_on_side`
     (no per-node stream read). The block visits the NEAR child subtree first (the side the viewer is on),
@@ -174,13 +524,20 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
              f"{len(bsp.subsectors)} subsector leaves; walk reads vx,vy -> front-to-back subsector visits"]
 
     def visit(child: int) -> list:
+        # M13-prune (the 12M campaign): a subtree that can contribute NOTHING to the frame (zero
+        # one-sided segs anywhere below, per the caller's `prune` predicate) is skipped ENTIRELY --
+        # no fcall, no node block. Byte-exact: such a subtree emits nothing and never touches
+        # drawn[]/full, so removing its traversal cannot change any later decision. (The player-
+        # subsector viewz setup must NOT rely on the walk when pruning -- see _bsp_descend_code.)
+        if prune is not None and prune(child):
+            return []
         if child & NF_SUBSECTOR:                          # leaf: run the subsector action (front-to-back)
             s = child & (NF_SUBSECTOR - 1)
             if subsector_action is None:                  # default: emit the subsector index (M12ff order)
                 return [f"    hex.set 4, {L}_ss, {s}", f"    hex.print_as_digit 4, {L}_ss, 0",
                         f"    stl.output 10    // subsector {s}"]
             return list(subsector_action(s))              # M12ll+: the caller's per-subsector fj lines
-        return [f"    stl.fcall {L}_n{child}, {L}_r{child}"]   # interior node: recurse
+        return [f"    stl.fcall {L}_node{child}, {L}_node{child}_ret"]   # interior node: recurse
 
     # entry: visit the root, then halt via done_label
     lines.append(f"{L}_walk:")
@@ -193,43 +550,148 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
     if bsp.nodes:
         lines.append(f"{L}_pos_leaf:")
         lines.append(f"    proj.point_on_side_leaf {L}_side, vx, vy, "
-                     f"{L}_cpx, {L}_cpy, {L}_cdx, {L}_cdy, {L}_pos_ret")
+                     f"{L}_cpx, {L}_cpy, {L}_cdx_mag, {L}_cdy_mag, {L}_sign_dx, {L}_sign_dy, {L}_pos_ret")
 
     # one code block per node: SET the partition consts (M12qq: via xor_by + xor-involution self-zeroing,
     # NOT hex.set -- the per-node hex.set 10 each paid an @-dispatch to zero a reg it overwrites; xor_by has
     # no @) -> fcall the side test -> CLEAR (xor_by again cancels, cpx..cdy back to 0) -> branch on the already-
     # computed side -> NEAR child first, FAR second. The CLEAR happens BEFORE recursion, so the children SET
     # cpx..cdy from a known-zero state (the involution's zero invariant). point_on_side_leaf only READS
-    # cpx..cdy (verified), so the CLEAR exactly cancels the SET. The xb{i} block is emitted once and fcall'd
+    # cpx..cdy (verified), so the CLEAR exactly cancels the SET. The node{i}_partition block is emitted once and fcall'd
     # twice (SET + CLEAR); {L}_xbret is its shared fcall/fret return reg (dead after each fret, like pos_ret).
     for i, n in enumerate(bsp.nodes):
-        lines.append(f"{L}_n{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
-        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
-        lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
-        lines.append(f"    stl.fcall {L}_xb{i}, {L}_xbret")  # CLEAR (vals -> 0, the xor involution)
-        lines.append(f"    hex.if0 2, {L}_side, {L}_nf{i}")   # back==0 (front) -> jump; else fall to back path
+        if prune is not None and prune(i):                 # pruned subtree: no walk block (its xb
+            lines.append(f"{L}_node{i}_partition:    // (pruned walk block; the partition consts stay for the descend pre-walk)")
+            lines.append(f"    hex.xor_by 10, {L}_cpx, {n.x & MASK40}")
+            lines.append(f"    hex.xor_by 10, {L}_cpy, {n.y & MASK40}")
+            lines.append(f"    hex.xor_by 8, {L}_cdx_mag, {abs(n.dx)}")
+            lines.append(f"    hex.xor_by 8, {L}_cdy_mag, {abs(n.dy)}")
+            lines.append(f"    hex.xor_by 1, {L}_sign_dx, {1 if n.dx < 0 else 0}")
+            lines.append(f"    hex.xor_by 1, {L}_sign_dy, {1 if n.dy < 0 else 0}")
+            lines.append(f"    stl.fret {L}_xbret")
+            continue
+        lines.append(f"{L}_node{i}:    // partition ({n.x},{n.y})+t({n.dx},{n.dy})")
+        if full_abort_label:                               # M13pG1: the screen is full -> the whole subtree
+            lines.append(f"    hex.if0 1, {full_abort_label}, {L}_node{i}_open")   # paints nothing (front-to-back
+            lines.append(f"    stl.fret {L}_node{i}_ret")         # occlusion) -> prune it. Byte-exact: the per-seg
+            lines.append(f"{L}_node{i}_open:")                    # leaf would have fret'd on `full` for every seg.
+        if extra_gate is not None:
+            # M13-15M: the caller's bbox wedge gate (or any other subtree-level runtime cull).
+            # The callback owns the register/leaf names; it receives the node index and this
+            # node's fret register so a miss can abandon the whole subtree.
+            g = extra_gate(i, f"{L}_node{i}_ret")
+            if g:
+                lines += g
+        _pg = plane_gate(i) if plane_gate is not None else 0
+        if _pg:
+            # M13-2S rung 3a: this subtree has NO one-sided segs, so it can only contribute PLANE
+            # ATTRIBUTION and (V5) boundary PIECES. Once nothing below can write, one runtime test
+            # skips it whole. This restores the M13-prune win that including two-sided segs in the
+            # walk removed: those 145 E1M1 subtrees are no longer prunable at COMPILE time, so
+            # they are pruned at RUNTIME instead.
+            # CR-2026-08: the gate MODE comes from the callback -- mode 1 (light-only subtree)
+            # tests plain tsstop (dead at claim-completion); mode 2 (the subtree holds
+            # PIECE-carrying segs) tests tsbstop|(tsstop&fbspent), the same compound the
+            # seg-level call sites use: pieces still record into attributed-but-undrawn columns,
+            # so plain tsstop here dropped riser/lip pieces the oracle records.
+            if _pg == 1:
+                lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_node{i}_planes_live")
+                lines.append(f"    stl.fret {L}_node{i}_ret")
+                lines.append(f"{L}_node{i}_planes_live:")
+            else:
+                lines.append(f"    hex.if1 1, tsbstop, {L}_node{i}_planes_dead")
+                lines.append(f"    hex.if0 1, {plane_gate_label}, {L}_node{i}_planes_live")
+                lines.append(f"    hex.if0 1, fbspent, {L}_node{i}_planes_live")
+                lines.append(f"{L}_node{i}_planes_dead:")
+                lines.append(f"    stl.fret {L}_node{i}_ret")
+                lines.append(f"{L}_node{i}_planes_live:")
+        if inline_side:
+            # M13-inlinenodes: the side test SPECIALIZED per node -- baked-const subtracts and
+            # baked-magnitude multiplies, no shared-leaf fcalls, no xor_by SET/CLEAR involution.
+            # Same fold/compare structure as point_on_side_leaf at the same widths -> byte-exact.
+            # is1/is2 = the two product terms' signs (sign_d XOR sign_partition-delta); the 4-way
+            # sign-pair compare mirrors the leaf verbatim. node{i}_partition/pos_leaf stay emitted for the
+            # descend pre-walk, which still routes through them.
+            e = lines.append
+            e(f"    hex.mov 10, {L}_idyv, vy")
+            e(f"    hex.add_constant 10, {L}_idyv, {(-n.y) & MASK40}")   # dyv = vy - py
+            e(f"    hex.sign 10, {L}_idyv, {L}_iyn{i}, {L}_iyp{i}")
+            e(f"{L}_iyn{i}:")                                 # dyv < 0: |dyv| via the 5-nibble identity
+            e(f"    hex.neg 5, {L}_idyv")
+            e(f"    hex.zero 3, {L}_idyv + 5*dw")             # clear the sign-extension for the mul
+            e(f"    hex.set 1, {L}_is1, {0 if n.dx < 0 else 1}")   # is1 = 1 XOR sign_dx
+            e(f"    ;{L}_imy{i}")
+            e(f"{L}_iyp{i}:")                                 # dyv >= 0: already a clean magnitude
+            e(f"    hex.set 1, {L}_is1, {1 if n.dx < 0 else 0}")   # is1 = sign_dx
+            e(f"{L}_imy{i}:")
+            e(f"    hex.mul_const 8, {L}_ip1, {L}_idyv, {abs(n.dx)}")   # p1 = |dx| * |dyv|
+            e(f"    hex.mov 10, {L}_idxv, vx")
+            e(f"    hex.add_constant 10, {L}_idxv, {(-n.x) & MASK40}")   # dxv = vx - px
+            e(f"    hex.sign 10, {L}_idxv, {L}_ixn{i}, {L}_ixp{i}")
+            e(f"{L}_ixn{i}:")
+            e(f"    hex.neg 5, {L}_idxv")
+            e(f"    hex.zero 3, {L}_idxv + 5*dw")
+            e(f"    hex.set 1, {L}_is2, {0 if n.dy < 0 else 1}")   # is2 = 1 XOR sign_dy
+            e(f"    ;{L}_imx{i}")
+            e(f"{L}_ixp{i}:")
+            e(f"    hex.set 1, {L}_is2, {1 if n.dy < 0 else 0}")   # is2 = sign_dy
+            e(f"{L}_imx{i}:")
+            e(f"    hex.mul_const 8, {L}_ip2, {L}_idxv, {abs(n.dy)}")   # p2 = |dy| * |dxv|
+            e(f"    hex.if 1, {L}_is1, {L}_ia0{i}, {L}_ia1{i}")
+            e(f"{L}_ia0{i}:")                                 # p1 term positive
+            e(f"    hex.if 1, {L}_is2, {L}_ipp{i}, {L}_ipm{i}")
+            e(f"{L}_ipp{i}:")                                 # (+,+): back = p1 > p2
+            e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_node{i}_far, {L}_node{i}_far, {L}_ib{i}")
+            e(f"{L}_ipm{i}:")                                 # (+,-): back unless both magnitudes 0
+            e(f"    hex.if0 8, {L}_ip1, {L}_ipz{i}")
+            e(f"    ;{L}_ib{i}")
+            e(f"{L}_ipz{i}:")
+            e(f"    hex.if0 8, {L}_ip2, {L}_node{i}_far")
+            e(f"    ;{L}_ib{i}")
+            e(f"{L}_ia1{i}:")                                 # p1 term negative
+            e(f"    hex.if 1, {L}_is2, {L}_node{i}_far, {L}_imm{i}")     # (-,+): always front
+            e(f"{L}_imm{i}:")                                 # (-,-): back = p2 > p1
+            e(f"    hex.cmp 8, {L}_ip1, {L}_ip2, {L}_ib{i}, {L}_node{i}_far, {L}_node{i}_far")
+            e(f"{L}_ib{i}:")                                  # back path falls through
+        else:
+            lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")  # SET cpx/cpy/cdx/cdy (0 -> vals via xor_by)
+            lines.append(f"    stl.fcall {L}_pos_leaf, {L}_pos_ret")
+            lines.append(f"    stl.fcall {L}_node{i}_partition, {L}_xbret")  # CLEAR (vals -> 0, the xor involution)
+            lines.append(f"    hex.if0 2, {L}_side, {L}_node{i}_far")   # back==0 (front) -> jump; else fall to back path
         lines += visit(n.left)                             # back (side>0): near=left, far=right
         lines += visit(n.right)
-        lines.append(f"    stl.fret {L}_r{i}")
-        lines.append(f"{L}_nf{i}:")                         # front: near=right, far=left
+        lines.append(f"    stl.fret {L}_node{i}_ret")
+        lines.append(f"{L}_node{i}_far:")                         # front: near=right, far=left
         lines += visit(n.right)
         lines += visit(n.left)
-        lines.append(f"    stl.fret {L}_r{i}")
-        lines.append(f"{L}_xb{i}:    // the node's partition-const xor_by block (emitted once, fcall'd SET+CLEAR)")
+        lines.append(f"    stl.fret {L}_node{i}_ret")
+        lines.append(f"{L}_node{i}_partition:    // the node's partition-const xor_by block (emitted once, fcall'd SET+CLEAR)")
         lines.append(f"    hex.xor_by 10, {L}_cpx, {n.x & MASK40}")
         lines.append(f"    hex.xor_by 10, {L}_cpy, {n.y & MASK40}")
-        lines.append(f"    hex.xor_by 10, {L}_cdx, {n.dx & MASK40}")
-        lines.append(f"    hex.xor_by 10, {L}_cdy, {n.dy & MASK40}")
+        # M13-possignmag: dx/dy never re-enter a subtract (only a product), so bake them as an
+        # 8-nibble zero-extended MAGNITUDE + a 1-nibble sign flag instead of a 10-nibble two's-comp
+        # pattern -- lets point_on_side_leaf's cross-product run at 8 nibbles, not 10.
+        lines.append(f"    hex.xor_by 8, {L}_cdx_mag, {abs(n.dx)}")
+        lines.append(f"    hex.xor_by 8, {L}_cdy_mag, {abs(n.dy)}")
+        lines.append(f"    hex.xor_by 1, {L}_sign_dx, {1 if n.dx < 0 else 0}")
+        lines.append(f"    hex.xor_by 1, {L}_sign_dy, {1 if n.dy < 0 else 0}")
         lines.append(f"    stl.fret {L}_xbret")
 
     # data — never fallen into (every code path above ends in stl.fret or `;done_label`)
     if bsp.nodes:
-        for nm in ("cpx", "cpy", "cdx", "cdy"):
+        for nm in ("cpx", "cpy"):
             lines.append(f"{L}_{nm}: hex.vec 10")          # shared per-node partition const regs
+        for nm in ("cdx_mag", "cdy_mag"):
+            lines.append(f"{L}_{nm}: hex.vec 8")           # shared per-node partition magnitude regs
+        for nm in ("sign_dx", "sign_dy"):
+            lines.append(f"{L}_{nm}: hex.vec 1")           # shared per-node partition sign flags
         lines.append(f"{L}_side: hex.vec 2")
+        if inline_side:                                    # M13-inlinenodes shared scratch
+            for nm, wd in (("idxv", 10), ("idyv", 10), ("ip1", 8), ("ip2", 8), ("is1", 1), ("is2", 1)):
+                lines.append(f"{L}_{nm}: hex.vec {wd}")
         lines.append(f"{L}_pos_ret: ;0")                   # the side-test leaf's fcall/fret return register
         lines.append(f"{L}_xbret: ;0")                     # the node xor_by block's fcall/fret return register (M12qq)
     lines.append(f"{L}_ss: hex.vec 4")
     for i in range(len(bsp.nodes)):
-        lines.append(f"{L}_r{i}: ;0")                      # per-node fcall/fret return register
+        lines.append(f"{L}_node{i}_ret: ;0")                      # per-node fcall/fret return register
     return "\n".join(lines) + "\n"

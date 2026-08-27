@@ -1,7 +1,12 @@
+// ==============================================================================================
+// fixed_point.fj   16.16 fixed-point + the packed-table reads. Extends the stl's `hex` namespace.
+// STATUS  LIVE - every other fj file, and the generated main
+// ENTRY   hex.fixed_mul_lo, hex.mul_lo, hex.mul_const, hex.fixed_div, hex.read_table[_packed]
+// SIZE    10 macros (hex.fixed_mul_lo .. hex.read_table_packed)
+// NOTE    `read_table_packed nb` is nb separate pointer rebuilds (~781 ops each) plus a staging
+//         preamble -- it is the single most expensive idiom in the program.
+// ==============================================================================================
 // fixed_point.fj — F2: signed Q-format fixed-point math (no floating point).
-// KEPT from PR #1 (D15 keep decision, M2): the macros below pass byte-exact on flipjump 1.5.0
-// (fixed_mul/fixed_div/mul_const verified vs the host mirror src/doomfj/fixedpoint.py; read_table/
-// read_table_byte are the §3.4 data-table fallback, D13). See docs/d15-disposition.md.
 //
 // ---------- Fixed-Point Math
 // Signed Q-format fixed-point helpers (no floating point) - e.g. DOOM's 16.16 format
@@ -10,6 +15,34 @@
 //  generated host-side (e.g. by the doom-flipjump LUT generator), and read with
 //  hex.read_table / hex.read_table_byte below - their entry-layout contracts are
 //  documented on the macros themselves.
+// fixed_mul/fixed_div/mul_const are byte-exact against the host mirror
+//  src/doomfj/fixedpoint.py; read_table/read_table_byte are the §3.4 data-table fallback
+//  (history: docs/d15-disposition.md, the PR #1 / D15 / D13 keep decisions).
+//
+// ---------- Conventions used in this file
+// * The Q-FORMAT PARAMS lead every signature and are COMPILE-TIME: `n` = total nibbles of the
+//   value (or `nb` = total bytes, for the packed-byte reader), and where a macro takes `f` too,
+//   `f` = how many of those n nibbles are fraction. Every f-taking macro assumes 0 < f <= n, so
+//   the shift by the fraction is NIBBLE-ALIGNED — a compile-time `+ f*dw` slice, never a
+//   runtime-amount shift. That alignment is the reason these macros are cheap.
+// * `wide_…` = a widened (2n or n+f nibble) SIGN-EXTENDED scratch copy of an n-nibble
+//   operand, so the intermediate product/dividend cannot overflow.
+// * `_lo` suffix on a macro name = the TRUNCATED variant: it computes only the low nibbles
+//   the final result can see. Bit-identical to the full-width form it replaces, and cheaper.
+// * read_table family: `table_address` is the compile-time table BASE (a `.vec w/4, table`
+//   data cell), `ptr` the running address walked into it. Both are w/4 nibbles = exactly one
+//   w-bit address, which is also the cap on the index register (`idx_n <= w/4`).
+// * ALIASING is stated per macro and is load-bearing: where a macro does not say
+//   "dst may alias …", it may not (mul_lo's res, and `dst` vs `idx` in the read_table family).
+// * `end:` is the macro's exit label, and `skip:` a forward branch target. Where a macro has
+//   data cells, they (`name: .vec …`) sit BETWEEN the body's closing `;end` and `end:` — data
+//   cells are fj ops that must never execute, so that jump is what steps over them.
+// * Annotations: `@Assumes:` = an unchecked precondition the caller must meet.
+//   `@requires hex.init` (sometimes `& stl.ptr_init`) = those dispatch tables must already be
+//   initialised at run time; without them the hex ops jump through uninitialised tables.
+//   `@note:` = a usage warning (e.g. prefer a reciprocal LUT over a runtime divide).
+// * The `Time/Space Complexity` lines are stl-style op-cost formulas in the `k@ + c` unit.
+//   They are measured, not decorative — keep them in sync if a body ever changes.
 
 
 ns hex {
@@ -39,6 +72,55 @@ ns hex {
     }
 
 
+    // M13-mulcrush — BYTE-EXACT-identical to `fixed_mul n, f, dst, a, b`, ~3x cheaper: the full
+    //  2n-nibble product is TRUNCATED-SCHOOLBOOK'd at n+f nibbles (the only nibbles fixed_mul's
+    //  [f, f+n) result slice can see). Row j adds wa[0..m-j)*wb[j] at offset j with add_mul's own
+    //  mod-16^(m-j) ripple — every pair with i+j < m lands exactly, columns >= m are dropped, so
+    //  res[0..m) == the full product's low m nibbles and dst == fixed_mul's dst, bit for bit.
+    //  Zero-digit rows (e.g. the sign-extension nibbles of small positive operands) skip their
+    //  add_mul behind a 1-nibble if0. No dst/src shifting, no count_bits (hex.mul's per-iteration
+    //  overhead), compile-time offsets throughout.
+    // @Assumes: 0 < f <= n.
+    // @requires hex.init
+    def fixed_mul_lo n, f, dst, a, b @ wide_a, wide_b, res, end {
+        .mov n, wide_a, a
+        .sign_extend n+f, n, wide_a
+        .mov n, wide_b, b
+        .sign_extend n+f, n, wide_b
+        .zero n+f, res
+        rep(n+f, j) .fixed_mul_lo.row n+f, j, res, wide_a, wide_b
+        .mov n, dst, res + f*dw
+        ;end
+
+      wide_a: .vec n+f
+      wide_b: .vec n+f
+      res: .vec n+f
+      end:
+    }
+    ns fixed_mul_lo {
+        // one truncated-schoolbook row: res[j..m) += wa[0..m-j) * wb[j]  (skipped when wb[j]==0)
+        def row m, j, res, wa, wb @ skip {
+            ..if0 1, wb + j*dw, skip
+            ..add_mul m-j, res + j*dw, wa, wb + j*dw
+          skip:
+        }
+    }
+
+
+    // M13-sidemul — BIT-IDENTICAL to `hex.mul n, res, a, b` (both are the product mod 16^n),
+    //  as an unrolled truncated schoolbook: n(n+1)/2 nibble-pairs at compile-time offsets, an
+    //  if0-skip per zero b-digit — no per-iteration shl/shr n, no count_bits, and (unlike
+    //  hex.mul's early-exit) no blow-up on sign-extended NEGATIVE operands (R19). res must not
+    //  alias a or b.
+    // @requires hex.init
+    def mul_lo n, res, a, b @ end {
+        .zero n, res
+        rep(n, j) .fixed_mul_lo.row n, j, res, a, b
+        ;end
+      end:
+    }
+
+
     //  Time Complexity: n^2(76@+216) + n(15@+50)
     // Space Complexity: n(45@+600)
     //   if b==0: goto div0
@@ -49,17 +131,17 @@ ns hex {
     // @note: a runtime divide is expensive - prefer a reciprocal LUT in hot paths.
     // @Assumes: 0 < f <= n.
     // @requires hex.init
-    def fixed_div n, f, dst, a, b, div0 @ wide_a, q, r, end {
+    def fixed_div n, f, dst, a, b, div0 @ wide_a, quotient, remainder, end {
         .zero f, wide_a
         .mov n, wide_a + f*dw, a
         .sign_extend 2*n, n+f, wide_a
-        .idiv 2*n, n, q, r, wide_a, b, div0, 1
-        .mov n, dst, q
+        .idiv 2*n, n, quotient, remainder, wide_a, b, div0, 1
+        .mov n, dst, quotient
         ;end
 
       wide_a: .vec 2*n
-      q: .vec 2*n
-      r: .vec n
+      quotient: .vec 2*n
+      remainder: .vec n     // discarded: fixed_div truncates toward zero
       end:
     }
 
@@ -90,6 +172,29 @@ ns hex {
         }
     }
 
+
+    // M13-lutpack — dst[:2*nb] = table[idx] for a PACKED-byte LUT.
+    //
+    // Entry-layout contract: entry k sits at table + k*nb*dw and is nb consecutive PACKED-byte
+    //  data-ops, little-endian, one dw-slot per byte (as emitted by doomfj
+    //  generate_packed_lut_fj). dst receives them in REGISTER form — 2*nb hex ops, low nibble
+    //  of byte k at 2k, high at 2k+1.
+    // Same values as the read_table form below, but ~600 ops/BYTE (read_byte_and_inc) instead of
+    //  ~1.1k/NIBBLE (read_hex re-derives the pointer per nibble) — delta-measured, R19-era.
+    // idx is an unsigned hex[:idx_n] (idx_n <= w/4); dst must not alias idx.
+    // @requires hex.init & stl.ptr_init
+    def read_table_packed nb, dst, table, idx_n, idx @ ptr, table_address, end {
+        .zero w/4, ptr
+        .mov idx_n, ptr, idx
+        .mul_const w/4, ptr, ptr, nb*dw
+        .add w/4, ptr, table_address
+        rep(nb, k) .read_byte_and_inc dst + 2*k*dw, ptr
+        ;end
+
+      ptr: .vec w/4
+      table_address: .vec w/4, table
+      end:
+    }
 
     //  Time Complexity: n(w(0.75@+5) + 16@+27) + #(n*dw)(w/4(1.5@+10)) + 22@+60
     // Space Complexity: n(w(1.13@+32) + 14@+127) + #(n*dw)(w/4(2@+30))

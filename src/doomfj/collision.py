@@ -1,0 +1,702 @@
+"""M14-d — the fj half of line collision: DOOM's PIT_CheckLine, BAKED AS CODE.
+
+Why baked and not table-driven. `ReferenceModel.check_position` tests every linedef; that is fine
+in Python and about **7M fj ops per tic** if the emitted program read the same rows through
+`hex.read_table_packed`. The blockmap (`mapcompiler.build_blockmap`) cuts the candidate set to the
+~0-8 lines whose block the player's box touches, and baking each of those lines AS CODE removes the
+rest of the cost: a linedef's geometry is compile-time, so most of PIT_CheckLine's branching
+collapses before the program ever runs.
+
+WHAT COLLAPSES AT COMPILE TIME, which is the whole reason this is affordable:
+
+* `P_PointOnLineSide`'s three cases are chosen by the line's slope, and the slope is baked -- a
+  vertical line emits one compare, not a cross product;
+* so is `P_BoxOnLineSide`'s slopetype switch, and the `dx < 0` / `dy < 0` parity flips inside it;
+* `line->dy >> FRACBITS` is a constant, so the two FixedMuls take a baked multiplier;
+* one-sided-ness, ML_BLOCKING and the two sector openings are constants, so a blocking line emits
+  a jump and nothing else.
+
+Most of E1M1's linedefs are axis-aligned, and those reduce to two compares.
+
+⚠ The emitted code must produce the ORACLE's answer, bit for bit -- `tests/fj/test_collision_fj.py`
+drives this against `check_position` directly. The rules are mirrored from `reference_model`'s
+`point_on_line_side` / `box_on_line_side` / `line_opening`, including DOOM's `<=` boundary
+conventions, which are not the same as the cross product's.
+"""
+from __future__ import annotations
+
+from doomfj.wall_renderer import _int_part_lines
+
+M32 = 0xFFFFFFFF
+BOXTOP, BOXBOTTOM, BOXLEFT, BOXRIGHT = 0, 1, 2, 3
+
+
+def _set(reg: str, value: int, nib: int = 8) -> str:
+    return f"    hex.set {nib}, {reg}, {value & M32}"
+
+
+class LineBake:
+    """One linedef's compile-time facts, in the form the emitted test needs."""
+
+    def __init__(self, ld, verts, secs, sds, ml_blocking: int):
+        self.v1x, self.v1y = (c << 16 for c in verts[ld.v1])
+        self.v2x, self.v2y = (c << 16 for c in verts[ld.v2])
+        self.dx, self.dy = self.v2x - self.v1x, self.v2y - self.v1y
+        self.minx, self.maxx = min(self.v1x, self.v2x), max(self.v1x, self.v2x)
+        self.miny, self.maxy = min(self.v1y, self.v2y), max(self.v1y, self.v2y)
+        self.one_sided = ld.back == -1
+        self.blocking = bool(ld.flags & ml_blocking)
+        if self.one_sided:
+            self.opentop = self.openbottom = 0
+        else:
+            fs, bs = secs[sds[ld.front].sector], secs[sds[ld.back].sector]
+            self.opentop = min(fs.ceil_h, bs.ceil_h)
+            self.openbottom = max(fs.floor_h, bs.floor_h)
+
+    # ── P_PointOnLineSide, with the case already chosen ──────────────────────────────────────
+    def point_side_ops(self, xreg: str, yreg: str, tag: str, side0: str, side1: str) -> list:
+        """Jump to `side0` (front) or `side1` (back) for the point in (xreg, yreg)."""
+        if self.dx == 0:                                  # vertical: x <= v1x ? (dy>0) : (dy<0)
+            lo, hi = (side1, side0) if self.dy > 0 else (side0, side1)
+            return [_set("cs_c", self.v1x),
+                    f"    hex.scmp 8, {xreg}, cs_c, {lo}, {lo}, {hi}"]
+        if self.dy == 0:                                  # horizontal: y <= v1y ? (dx<0) : (dx>0)
+            lo, hi = (side1, side0) if self.dx < 0 else (side0, side1)
+            return [_set("cs_c", self.v1y),
+                    f"    hex.scmp 8, {yreg}, cs_c, {lo}, {lo}, {hi}"]
+        # left = FixedMul(dy >> 16, x - v1x); right = FixedMul(y - v1y, dx >> 16)
+        # right < left -> front (0), else back (1). Both multipliers are baked.
+        return [_set("cs_a", self.v1x), _set("cs_b", self.v1y),
+                f"    hex.mov 8, cs_dx, {xreg}", "    hex.sub 8, cs_dx, cs_a",
+                f"    hex.mov 8, cs_dy, {yreg}", "    hex.sub 8, cs_dy, cs_b",
+                _set("cs_k", self.dy >> 16),
+                "    hex.fixed_mul_lo 8, 4, cs_l, cs_k, cs_dx",
+                _set("cs_k", self.dx >> 16),
+                "    hex.fixed_mul_lo 8, 4, cs_r, cs_dy, cs_k",
+                f"    hex.scmp 8, cs_r, cs_l, {side0}, {side1}, {side1}"]
+
+    # ── P_BoxOnLineSide: skip unless the box STRADDLES the line ──────────────────────────────
+    def box_straddles_ops(self, tag: str, skip: str, hit: str) -> list:
+        """`skip` when the box is wholly on one side (DOOM's `p1 == p2`); `hit` when it straddles.
+
+        The parity flips DOOM applies for `dx < 0` / `dy < 0` hit BOTH p1 and p2, so they cannot
+        change whether the two agree — the axis cases reduce to a band test and the flips drop out.
+        The `<=` boundaries do NOT drop out and are the whole reason this is written by hand rather
+        than as "is the line inside the box"."""
+        if self.dy == 0:                                  # ST_HORIZONTAL
+            # p1 = top > v1y, p2 = bottom > v1y  ->  differ iff  bottom <= v1y < top
+            return [_set("cs_c", self.v1y),
+                    f"    hex.scmp 8, cby_hi, cs_c, {skip}, {skip}, {tag}_h1",   # need top > v1y
+                    f"  {tag}_h1:",
+                    f"    hex.scmp 8, cby_lo, cs_c, {hit}, {hit}, {skip}"]       # need bottom <= v1y
+        if self.dx == 0:                                  # ST_VERTICAL
+            # p1 = right < v1x, p2 = left < v1x  ->  differ iff  left < v1x <= right
+            return [_set("cs_c", self.v1x),
+                    f"    hex.scmp 8, cbx_hi, cs_c, {skip}, {tag}_v1, {tag}_v1",  # need right >= v1x
+                    f"  {tag}_v1:",
+                    f"    hex.scmp 8, cbx_lo, cs_c, {hit}, {skip}, {skip}"]       # need left < v1x
+        # the two diagonal cases test opposite corner pairs, and straddling is p1 != p2
+        if (self.dy > 0) == (self.dx > 0):                # ST_POSITIVE: (left, top) vs (right, bottom)
+            first, second = ("cbx_lo", "cby_hi"), ("cbx_hi", "cby_lo")
+        else:                                            # ST_NEGATIVE: (right, top) vs (left, bottom)
+            first, second = ("cbx_hi", "cby_hi"), ("cbx_lo", "cby_lo")
+        return (self.point_side_ops(first[0], first[1], f"{tag}p", f"{tag}_p0", f"{tag}_p1")
+                + [f"  {tag}_p0:"]                        # p1 = 0 -> straddle iff p2 = 1
+                + self.point_side_ops(second[0], second[1], f"{tag}q", skip, hit)
+                + [f"  {tag}_p1:"]                        # p1 = 1 -> straddle iff p2 = 0
+                + self.point_side_ops(second[0], second[1], f"{tag}s", hit, skip))
+
+
+def line_test_ops(bake: "LineBake", tag: str, nxt: str) -> list:
+    """One linedef's full PIT_CheckLine, as straight-line fj. Falls through to `nxt` in every
+    outcome except a blocking hit, which jumps to `cp_blocked`.
+
+    Order is DOOM's and it matters for cost, not just correctness: the bbox reject first (four
+    compares, and it rejects nearly everything), then the straddle test, and only then the
+    blocking rules and the opening."""
+    out = [f"  {tag}:"]
+    # bbox reject -- box.right <= line.minx, box.left >= line.maxx, and the same in y
+    for reg, const, cmp_lo, name in (("cbx_hi", bake.minx, True, "a"),
+                                     ("cbx_lo", bake.maxx, False, "b"),
+                                     ("cby_hi", bake.miny, True, "c"),
+                                     ("cby_lo", bake.maxy, False, "d")):
+        out.append(_set("cs_c", const))
+        if cmp_lo:      # reject when reg <= const
+            out.append(f"    hex.scmp 8, {reg}, cs_c, {nxt}, {nxt}, {tag}_k{name}")
+        else:           # reject when reg >= const
+            out.append(f"    hex.scmp 8, {reg}, cs_c, {tag}_k{name}, {nxt}, {nxt}")
+        out.append(f"  {tag}_k{name}:")
+    out += bake.box_straddles_ops(tag, nxt, f"{tag}_hit")
+    out.append(f"  {tag}_hit:")
+    if bake.one_sided or bake.blocking:
+        out.append("    ;cp_blocked")          # a wall: the position is refused outright
+        return out
+    # two-sided and passable: narrow the opening. floorz = max(floorz, openbottom),
+    # ceilingz = min(ceilingz, opentop) -- heights are map units, 8-nibble signed.
+    out += [_set("cs_o", bake.openbottom),
+            f"    hex.scmp 8, cs_o, cp_floor, {tag}_f, {tag}_f, {tag}_setf",
+            f"  {tag}_setf:", "    hex.mov 8, cp_floor, cs_o",
+            f"  {tag}_f:",
+            _set("cs_t", bake.opentop),
+            f"    hex.scmp 8, cs_t, cp_ceil, {tag}_setc, {tag}_c, {tag}_c",
+            f"  {tag}_setc:", "    hex.mov 8, cp_ceil, cs_t",
+            f"  {tag}_c:", f"    ;{nxt}"]
+    return out
+
+
+def check_position_ops(bakes, *, radius: int, seed_floor: int, seed_ceil: int) -> list:
+    """The whole of `check_position` for one candidate position in `cpx`/`cpy` (16.16).
+
+    Writes `cp_ok` (1 = the position is legal), `cp_floor` / `cp_ceil` (map units). The subsector
+    SEED comes from the caller -- P_CheckPosition seeds the opening from the sector the position
+    lands in, and without it a position with no line near it reads as open space (which is how the
+    oracle's first draft teleported the player to (30000, 30000))."""
+    out = ["    hex.set 1, cp_ok, 1",
+           _set("cp_floor", seed_floor), _set("cp_ceil", seed_ceil),
+           _set("cprad", radius),
+           "    hex.mov 8, cbx_lo, cpx", "    hex.sub 8, cbx_lo, cprad",
+           "    hex.mov 8, cbx_hi, cpx", "    hex.add 8, cbx_hi, cprad",
+           "    hex.mov 8, cby_lo, cpy", "    hex.sub 8, cby_lo, cprad",
+           "    hex.mov 8, cby_hi, cpy", "    hex.add 8, cby_hi, cprad"]
+    for i, bake in enumerate(bakes):
+        out += line_test_ops(bake, f"cl{i}", f"cl{i + 1}")
+    out += [f"  cl{len(bakes)}:", "    ;cp_done",
+            # the refusal path restores the SEED openings, matching the oracle -- they are dead on
+            # this path but they are compared, and a partial accumulation is order-dependent
+            "  cp_blocked:", "    hex.set 1, cp_ok, 0",
+            _set("cp_floor", seed_floor), _set("cp_ceil", seed_ceil),
+            "  cp_done:"]
+    return out
+
+
+# ── check_block / check_line scratch — ONE definition, spliced in by every consumer ─────
+#
+# HOISTED OUT OF THE MACROS. `check_position` runs `rep(4, q) .check_block`, so an @-local vec
+# inside check_block (or its nested check_line) is emitted FOUR times under one source name --
+# four addresses the M1 restore set cannot name, which is why 236 of its 344 entries were mangled
+# expansion paths (`f9:l208:rep0:sim.check_block(14)---...---p1`). The four corners run
+# SEQUENTIALLY and every register here is pure scratch, so one shared set is equivalent, a quarter
+# of the cells, and NAMEABLE.
+#
+# ⚠ Anything that assembles sim.check_position / check_block / check_line MUST emit these. They
+# were duplicated in four places once; that is what this constant exists to prevent (rule 5).
+CHECK_SCRATCH_DECLS = [
+    "cb_bx: hex.vec 8", "cb_by: hex.vec 8",   # the corner's block x / y
+    "cb_const: hex.vec 8",                    # constant staging
+    "cb_idx: hex.vec 4",                      # block index = by*nbx + bx
+    "cb_row: hex.vec 6",                      # that block's bkoff row: [first:2][count:1]
+    "cb_first: hex.vec 4", "cb_count: hex.vec 4",
+    "cb_k: hex.vec 4", "cb_kend: hex.vec 4",  # the line-list walk
+    "cb_line: hex.vec 4",                     # the linedef index handed to check_line
+    "cl_box: hex.vec 16",                     # lnbox row: minx maxx miny maxy
+    "cl_rest: hex.vec 28",                    # lnrow row: the other 14 bytes, read on survival
+    "cl_v1x: hex.vec 8", "cl_v1y: hex.vec 8", # the line's first vertex
+    "cl_dx: hex.vec 8", "cl_dy: hex.vec 8",   # its delta
+    "cl_tmp: hex.vec 8", "cl_open: hex.vec 8",
+    "cl_side1: hex.vec 1", "cl_side2: hex.vec 1",   # box-corner sides for P_BoxOnLineSide
+    "cl_const: hex.vec 1"
+]
+
+
+COLLISION_DECLS = [
+    "cpx: hex.vec 8", "cpy: hex.vec 8", "cprad: hex.vec 8",
+    "cbx_lo: hex.vec 8", "cbx_hi: hex.vec 8", "cby_lo: hex.vec 8", "cby_hi: hex.vec 8",
+    "cp_ok: hex.vec 1", "cp_floor: hex.vec 8", "cp_ceil: hex.vec 8",
+]
+
+
+# ── the RUNTIME half: which lines to test is a per-tic question ────────────────────────────────
+#
+# The kernel above bakes the lines for a position known at compile time. The emitted renderer does
+# not know where the player is, so the blockmap has to be walked at RUNTIME: compute the block the
+# box corner falls in, jump to that block's handler, run its baked line tests.
+#
+# The jump is a BINARY SEARCH over the block index rather than a dispatch table, deliberately. The
+# repo's dispatch-code idiom (`generate_bands_walk_fj`) forbids `hex.*` macros inside a handler --
+# they corrupt the shared `hex.tables.ret` (R42) -- and every line test here is `hex.set` /
+# `hex.scmp` / `hex.fixed_mul_lo`. A compare tree needs no shared return register, so the handlers
+# stay ordinary code. Depth is ceil(log2 blocks) ~ 10 compares for E1M1.
+
+def blockmap_grid(grid):
+    """The blockmap's DENSE bounding grid: `(bx0, by0, nbx, nby)`.
+
+    The handlers are reached by a compare tree over a single integer, so the block index has to be
+    arithmetic -- `bmi = (by - by0) * nbx + (bx - bx0)` -- not a lookup in a sparse set. Unoccupied
+    cells inside the rectangle simply route to the miss label."""
+    bxs = [c[0] for c in grid]
+    bys = [c[1] for c in grid]
+    bx0, by0 = min(bxs), min(bys)
+    return bx0, by0, max(bxs) - bx0 + 1, max(bys) - by0 + 1
+
+
+def generate_blockmap_code_fj(grid, lds, verts, secs, sds, ml_blocking, *, label="bmk") -> str:
+    """The blockmap as code: `{label}_walk` reads `bmi` (the DENSE block index) and runs that
+    block's baked line tests, then `stl.fret {label}_ret`. A blocking line jumps straight to
+    `cp_blocked` and never returns -- correct, because a refusal is final and the remaining blocks
+    cannot un-refuse it."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    dense = {(by - by0) * nbx + (bx - bx0): lines for (bx, by), lines in grid.items()}
+    n = nbx * nby
+    out = [f"// M14-d blockmap-as-code: {nbx}x{nby} grid, {len(grid)} occupied, "
+           f"{sum(len(v) for v in grid.values())} (block, line) pairs",
+           f"{label}_walk:"]
+
+    def tree(lo: int, hi: int) -> list:
+        if hi - lo <= 1:
+            return [f"    ;{label}_h{lo}" if lo in dense else f"    ;{label}_miss"]
+        mid = (lo + hi) // 2
+        tg = f"{label}_n{lo}_{hi}"
+        return ([f"    hex.set 4, {tg}c, {mid}",
+                 f"    hex.cmp 4, bmi, {tg}c, {tg}_lo, {tg}_hi, {tg}_hi",
+                 f"  {tg}_lo:"] + tree(lo, mid)
+                + [f"  {tg}_hi:"] + tree(mid, hi))
+
+    out += tree(0, n)
+    out += [f"  {label}_miss:", f"    stl.fret {label}_ret"]
+    for bi, lines in sorted(dense.items()):
+        out.append(f"  {label}_h{bi}:      // {len(lines)} lines")
+        for k, li in enumerate(lines):
+            bake = LineBake(lds[li], verts, secs, sds, ml_blocking)
+            out += line_test_ops(bake, f"{label}b{bi}l{k}", f"{label}b{bi}l{k + 1}")
+        out.append(f"  {label}b{bi}l{len(lines)}:")
+        out.append(f"    stl.fret {label}_ret")
+    return "\n".join(out) + "\n"
+
+
+def blockmap_code_decls(grid, *, label="bmk") -> list:
+    """Every scratch cell the generated blockmap code needs."""
+    _bx0, _by0, nbx, nby = blockmap_grid(grid)
+    n = nbx * nby
+    out = ["bmi: hex.vec 4", f"{label}_ret: hex.vec w/4"]
+
+    def tree_decls(lo, hi):
+        if hi - lo <= 1:
+            return []
+        mid = (lo + hi) // 2
+        return [f"{label}_n{lo}_{hi}c: hex.vec 4"] + tree_decls(lo, mid) + tree_decls(mid, hi)
+
+    out += tree_decls(0, n)
+    return out + list(SHARED_SCRATCH)
+
+
+SHARED_SCRATCH = [
+    "cs_a: hex.vec 8", "cs_b: hex.vec 8", "cs_c: hex.vec 8", "cs_k: hex.vec 8",
+    "cs_l: hex.vec 8", "cs_r: hex.vec 8", "cs_dx: hex.vec 8", "cs_dy: hex.vec 8",
+    "cs_o: hex.vec 8", "cs_t: hex.vec 8",
+]
+
+
+def line_scratch_decls(n: int = 0) -> list:
+    """ONE shared scratch set for every baked line, not one set per line.
+
+    Safe because every write here is `hex.set` (which zeroes the cell first) or a `hex.mov` that
+    overwrites it -- there is no xor-involution invariant to preserve, so no early-out path has to
+    clear anything. Per-line cells cost 63,837 declarations on E1M1 and bought nothing."""
+    return list(SHARED_SCRATCH)
+
+
+def blockmap_walk_ops(grid, xreg: str, yreg: str, tag: str, *, label="bmk", shift: int = 8) -> list:
+    """Compute the block index for the point in (xreg, yreg) — 16.16 — and run that block.
+
+    The index has to be an ARITHMETIC shift of a signed coordinate, and fj's `shr_hex` is logical,
+    so the position is BIASED by 2**15 map units first. Map coordinates are int16, so `x + 32768`
+    is non-negative for every point on any level, and `(x16 + (32768 << 16)) >> 6 nibbles` is
+    `(x_int + 32768) >> 8` exactly — one whole-nibble shift, which is why the blocks are 256 units
+    (see `mapcompiler.BLOCK_SHIFT`).
+
+    Out-of-range indices are skipped rather than clamped: a biased index that wrapped would land on
+    some other block's handler and test the wrong lines."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    bias_x, bias_y = bx0 + (1 << (15 - shift)), by0 + (1 << (15 - shift))
+    return [
+        f"    hex.mov 8, {tag}t, {xreg}", _set(f"{tag}bias", 1 << 31),
+        f"    hex.add 8, {tag}t, {tag}bias", f"    hex.shr_hex 8, 6, {tag}t",
+        f"    hex.mov 8, {tag}u, {yreg}", f"    hex.add 8, {tag}u, {tag}bias",
+        f"    hex.shr_hex 8, 6, {tag}u",
+        f"    hex.set 4, {tag}c, {bias_x & 0xFFFF}", f"    hex.sub 4, {tag}t, {tag}c",
+        f"    hex.set 4, {tag}c, {bias_y & 0xFFFF}", f"    hex.sub 4, {tag}u, {tag}c",
+        # bounds: an index outside the grid must NOT reach a handler
+        f"    hex.set 4, {tag}c, {nbx}",
+        f"    hex.cmp 4, {tag}t, {tag}c, {tag}_xok, {tag}_out, {tag}_out",
+        f"  {tag}_xok:", f"    hex.set 4, {tag}c, {nby}",
+        f"    hex.cmp 4, {tag}u, {tag}c, {tag}_yok, {tag}_out, {tag}_out",
+        f"  {tag}_yok:",
+        f"    hex.mul_const 4, bmi, {tag}u, {nbx}", f"    hex.add 4, bmi, {tag}t",
+        f"    stl.fcall {label}_walk, {label}_ret",
+        f"  {tag}_out:",
+    ]
+
+
+def blockmap_walk_decls(tag: str) -> list:
+    return [f"{tag}t: hex.vec 8", f"{tag}u: hex.vec 8", f"{tag}c: hex.vec 4",
+            f"{tag}bias: hex.vec 8"]
+
+
+def check_position_runtime_ops(grid, *, radius: int, seed_floor: str, seed_ceil: str,
+                               label="bmk") -> list:
+    """`check_position` with the candidate lines chosen at RUNTIME: the box's four corners give at
+    most 2x2 distinct blocks, and each is walked. A line listed in two of them is simply tested
+    twice — harmless, because "blocked" is a latch and the opening updates are max/min.
+
+    `seed_floor` / `seed_ceil` are REGISTER names here, not constants: P_CheckPosition seeds the
+    opening from the subsector the position lands in, which only the caller knows."""
+    out = ["    hex.set 1, cp_ok, 1",
+           f"    hex.mov 8, cp_floor, {seed_floor}", f"    hex.mov 8, cp_ceil, {seed_ceil}",
+           _set("cprad", radius),
+           "    hex.mov 8, cbx_lo, cpx", "    hex.sub 8, cbx_lo, cprad",
+           "    hex.mov 8, cbx_hi, cpx", "    hex.add 8, cbx_hi, cprad",
+           "    hex.mov 8, cby_lo, cpy", "    hex.sub 8, cby_lo, cprad",
+           "    hex.mov 8, cby_hi, cpy", "    hex.add 8, cby_hi, cprad"]
+    for i, (xr, yr) in enumerate((("cbx_lo", "cby_lo"), ("cbx_hi", "cby_lo"),
+                                  ("cbx_lo", "cby_hi"), ("cbx_hi", "cby_hi"))):
+        out += blockmap_walk_ops(grid, xr, yr, f"bw{i}", label=label)
+    out += ["    ;cp_done",
+            "  cp_blocked:", "    hex.set 1, cp_ok, 0",
+            f"    hex.mov 8, cp_floor, {seed_floor}", f"    hex.mov 8, cp_ceil, {seed_ceil}",
+            "  cp_done:"]
+    return out
+
+
+def check_position_runtime_decls() -> list:
+    out = list(COLLISION_DECLS) + list(SHARED_SCRATCH)
+    for i in range(4):
+        out += blockmap_walk_decls(f"bw{i}")
+    return out
+
+
+# ── the TABLE form: what the 50-minute assemble sent us back to ────────────────────────────────
+#
+# Bake-as-code put a copy of every line's test in every block that lists it: 1,651 copies on E1M1,
+# ~57k lines of macro, and an assemble that did not finish in 50 minutes. The blockmap had already
+# done the expensive part of the job -- it is what makes a runtime loop affordable, because the
+# loop only ever walks the ~35 lines the player's box can touch, not 1,500.
+#
+# So the geometry becomes DATA and the test becomes ONE loop:
+#
+#   block_rows[bi]   -> (offset, count) into block_lines          3 bytes per block
+#   block_lines[k]   -> a linedef index                           2 bytes per (block, line) pair
+#   line_rows[li]    -> v1x, v1y, dx, dy, flags, opentop, openbottom
+#                                                                13 bytes per linedef
+#
+# ~35 lines x 15 bytes read at ~600 ops/byte is ~315k ops per candidate position and ~1M per tic
+# across the three the axis-retry policy tries -- against a ~40M frame. And it assembles in
+# seconds, because it is a data table and a loop rather than 57k unrolled lines.
+
+# v1x, v1y, dxi, dyi, minx, maxx, miny, maxy, slope, flags, opentop, openbottom
+LINE_ROW_BYTES = (2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 2, 2)
+LINE_ROW_LEN = sum(LINE_ROW_BYTES)
+
+# M-CONSTADDR C5 -- the HOT/COLD split of the linedef row.
+#
+# `hex.read_table_packed nb` is nb separate `set_flip_and_jump_pointers` rebuilds (~781 ops each),
+# and `sim.check_line` read all 22 bytes before a BBOX TEST that rejects most candidates outright.
+# The four bbox fields (minx, maxx, miny, maxy) are CONTIGUOUS at bytes 8..15, so the row splits
+# cleanly: read 8 bytes, reject, and only survivors pay for the other 14.
+#
+# This is the same lever M14.5 already applied to `thing_load` -- "those four moved to
+# frame.thing_load_cold, which runs AFTER the vis reject" (src/fj/sim.fj).
+LINE_BOX_SLICE = slice(4, 8)                      # minx, maxx, miny, maxy
+LINE_BOX_BYTES = LINE_ROW_BYTES[4:8]              # (2, 2, 2, 2)  -> 8 bytes
+LINE_BOX_LEN = sum(LINE_BOX_BYTES)
+# everything else, in order: v1x v1y dx dy | slope flags opentop openbottom
+LINE_REST_BYTES = LINE_ROW_BYTES[:4] + LINE_ROW_BYTES[8:]
+LINE_REST_LEN = sum(LINE_REST_BYTES)
+assert LINE_BOX_LEN + LINE_REST_LEN == LINE_ROW_LEN
+
+
+def line_box(row):
+    """The bbox half of a row, in `LINE_BOX_BYTES` order."""
+    return tuple(row[LINE_BOX_SLICE])
+
+
+def line_rest(row):
+    """Everything the bbox reject does NOT need, in `LINE_REST_BYTES` order."""
+    return tuple(row[:4]) + tuple(row[8:])
+FLAG_ONE_SIDED = 1 << 0
+FLAG_BLOCKING = 1 << 1
+# The bbox and the SLOPE TYPE are precomputed into the row rather than derived at runtime. They
+# cost four extra 2-byte reads and one 1-byte read (~3k ops a line) and they remove four runtime
+# min/max pairs and the whole sign-comparison switch from the loop -- fewer branches in the one
+# piece of fj that has to be exactly DOOM, at a price that is noise against a ~40M frame.
+ST_HORIZONTAL, ST_VERTICAL, ST_POSITIVE, ST_NEGATIVE = 0, 1, 2, 3
+
+
+def line_rows(lds, verts, secs, sds, ml_blocking: int) -> list:
+    """One row per linedef, in `LINE_ROW_BYTES` order, as SIGNED map units where signed.
+
+    `dx`/`dy` rather than v2: the runtime test needs the direction for the slope switch and the two
+    FixedMul multipliers, and v2 is one add away when the bbox is wanted."""
+    rows = []
+    for ld in lds:
+        v1x, v1y = verts[ld.v1]
+        v2x, v2y = verts[ld.v2]
+        dx, dy = v2x - v1x, v2y - v1y
+        flags = (FLAG_ONE_SIDED if ld.back == -1 else 0) | \
+                (FLAG_BLOCKING if ld.flags & ml_blocking else 0)
+        if ld.back == -1:
+            opentop = openbottom = 0
+        else:
+            fs, bs = secs[sds[ld.front].sector], secs[sds[ld.back].sector]
+            opentop, openbottom = min(fs.ceil_h, bs.ceil_h), max(fs.floor_h, bs.floor_h)
+        slope = (ST_HORIZONTAL if dy == 0 else ST_VERTICAL if dx == 0 else
+                 ST_POSITIVE if (dy > 0) == (dx > 0) else ST_NEGATIVE)
+        rows.append((v1x, v1y, dx, dy, min(v1x, v2x), max(v1x, v2x), min(v1y, v2y), max(v1y, v2y),
+                     slope, flags, opentop, openbottom))
+    return rows
+
+
+def block_tables(grid) -> tuple:
+    """`(block_rows, block_lines)` over the DENSE grid — an unoccupied block gets count 0, so the
+    loop needs no membership test, just a count it can be zero."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    dense = {(by - by0) * nbx + (bx - bx0): lines for (bx, by), lines in grid.items()}
+    rows, flat = [], []
+    for bi in range(nbx * nby):
+        lines = dense.get(bi, ())
+        rows.append((len(flat), len(lines)))
+        flat.extend(lines)
+    return rows, flat
+
+
+def check_position_table(rows, blocks, flat, grid, x16: int, y16: int, radius: int,
+                         seed_floor: int, seed_ceil: int):
+    """The table walk, executed in PYTHON — the exact algorithm the fj loop has to implement.
+
+    This exists so the loop can be specified, and diffed against `ReferenceModel.check_position`,
+    before a line of fj is written: if this disagrees with the oracle, the fj cannot be right
+    either, and finding that out costs a second rather than an assemble."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    r = radius >> 16
+    bx_lo, bx_hi = x16 - radius, x16 + radius
+    by_lo, by_hi = y16 - radius, y16 + radius
+    ok, floorz, ceilz = True, seed_floor, seed_ceil
+    seen = set()
+    for bx in {((x16 >> 16) - r) >> 8, ((x16 >> 16) + r) >> 8}:
+        for by in {((y16 >> 16) - r) >> 8, ((y16 >> 16) + r) >> 8}:
+            bi = (by - by0) * nbx + (bx - bx0)
+            if not (0 <= bx - bx0 < nbx and 0 <= by - by0 < nby):
+                continue
+            off, cnt = blocks[bi]
+            for k in range(off, off + cnt):
+                li = flat[k]
+                if li in seen:
+                    continue                     # a line listed in two of the four blocks
+                seen.add(li)
+                (v1x, v1y, dx, dy, minx, maxx, miny, maxy,
+                 slope, flags, opentop, openbottom) = rows[li]
+                if (bx_hi <= minx << 16 or bx_lo >= maxx << 16
+                        or by_hi <= miny << 16 or by_lo >= maxy << 16):
+                    continue
+                bake = _RowBake(v1x << 16, v1y << 16, dx << 16, dy << 16, slope)
+                if bake.box_side((by_hi, by_lo, bx_lo, bx_hi)) != -1:
+                    continue
+                if flags & (FLAG_ONE_SIDED | FLAG_BLOCKING):
+                    return False, seed_floor, seed_ceil   # the seed, not the partial
+                                                          # accumulation -- see the
+                                                          # oracle's note on ordering
+                floorz, ceilz = max(floorz, openbottom), min(ceilz, opentop)
+    return ok, floorz, ceilz
+
+
+class _RowBake:
+    """`box_on_line_side` over a row's geometry, with no compile-time specialisation — the shape
+    the fj loop runs."""
+
+    def __init__(self, v1x, v1y, dx, dy, slope):
+        self.v1x, self.v1y, self.dx, self.dy, self.slope = v1x, v1y, dx, dy, slope
+
+    def point_side(self, x, y):
+        from doomfj.reference_model import ReferenceModel
+        return ReferenceModel.point_on_line_side(x, y, self.v1x, self.v1y,
+                                                 self.v1x + self.dx, self.v1y + self.dy)
+
+    def box_side(self, box):
+        top, bottom, left, right = box
+        if self.slope == ST_HORIZONTAL:
+            p1, p2 = int(top > self.v1y), int(bottom > self.v1y)
+        elif self.slope == ST_VERTICAL:
+            p1, p2 = int(right < self.v1x), int(left < self.v1x)
+        elif self.slope == ST_POSITIVE:
+            p1, p2 = self.point_side(left, top), self.point_side(right, bottom)
+        else:
+            p1, p2 = self.point_side(right, top), self.point_side(left, bottom)
+        return p1 if p1 == p2 else -1
+
+
+# ── the emitter's side: everything the renderer needs to collide ──────────────────────────────
+
+def collision_tables_fj(cmap, lds, secs, sds, ml_blocking, grid) -> str:
+    """The three packed tables, as fj data."""
+    from doomfj.lut_generator import generate_packed_lut_fj
+
+    def pack(vals, widths):
+        v = sh = 0
+        for x, nb in zip(vals, widths):
+            v |= (x & ((1 << (8 * nb)) - 1)) << sh
+            sh += 8 * nb
+        return v
+
+    rows = line_rows(lds, cmap.vertexes, secs, sds, ml_blocking)
+    blocks, flat = block_tables(grid)
+    return "\n".join([
+        generate_packed_lut_fj("lnbox", [pack(line_box(r), LINE_BOX_BYTES) for r in rows],
+                               LINE_BOX_LEN),
+        generate_packed_lut_fj("lnrow", [pack(line_rest(r), LINE_REST_BYTES) for r in rows],
+                               LINE_REST_LEN),
+        generate_packed_lut_fj("bkoff", [pack(b, (2, 1)) for b in blocks], 3),
+        generate_packed_lut_fj("bklin", list(flat) or [0], 2),
+    ]) + "\n"
+
+
+COLLISION_STATE_DECLS = [
+    "cpx: hex.vec 8", "cpy: hex.vec 8", "cprad: hex.vec 8",
+    "cbx_lo: hex.vec 8", "cbx_hi: hex.vec 8", "cby_lo: hex.vec 8", "cby_hi: hex.vec 8",
+    "cp_ok: hex.vec 1", "cp_floor: hex.vec 8", "cp_ceil: hex.vec 8",
+    "cp_seedf: hex.vec 8", "cp_seedc: hex.vec 8", "mv_ok: hex.vec 1",
+    "cm_hf: hex.vec 8",                       # the floor the player is standing on now
+    "cm_dx: hex.vec 8", "cm_dy: hex.vec 8",   # the tic's desired move
+    "cs_ret: hex.vec w/4",                    # the seed descent's fcall return
+
+] + CHECK_SCRATCH_DECLS
+
+
+def move_with_collision_lines(grid, mapname_pfx: str, *, radius: int, height: int, maxstep: int,
+                              n_bk: int, n_bl: int, n_ln: int) -> list:
+    """M14-d — the blocked-move policy, in the emitted program.
+
+    `cm_dx`/`cm_dy` hold the tic's desired move and `viewx`/`viewy` the current position; on return
+    `viewx`/`viewy` hold the position actually taken. Tries the whole step, then the two
+    axis-separated halves — NOT DOOM's `P_SlideMove`, which projects the residual momentum along
+    the wall. The oracle implements this same policy (`move_with_collision`), so it is a stated
+    difference from vanilla rather than a drift between the mirrors.
+
+    ⚠ Each candidate needs the sector UNDER IT for `check_position`'s seed, which is a BSP descent
+    per candidate. The descent reads `vx`/`vy`, so those are set from the candidate before it runs.
+    That is safe here and only here: this whole block runs BEFORE `_int_part_lines` re-derives
+    `vx`/`vy` from the final position for the walk."""
+    bx0, by0, nbx, nby = blockmap_grid(grid)
+    # `n_ln` is the INDEX-NIBBLE count, not a row length, and both tables are indexed by the same
+    # line index over the same row count -- so lnbox needs no count of its own.
+    args = (f"bkoff, {n_bk}, bklin, {n_bl}, lnbox, lnrow, {n_ln}, {nbx}, {nby}, {bx0}, {by0}")
+
+    def candidate(tag, xexpr, yexpr, nxt):
+        return [
+            *xexpr, *yexpr,
+            # the seed: locate the candidate's subsector, then run the full P_TryMove
+            *_int_part_lines("vx", "cpx", f"{tag}vxs", f"{tag}vxd"),
+            *_int_part_lines("vy", "cpy", f"{tag}vys", f"{tag}vyd"),
+            # the seed descent is a CALL, not a jump: it has one exit and four call sites, so it
+            # frets to `cs_ret` instead of falling into any one caller's continuation
+            f"    stl.fcall {mapname_pfx}_dsccs_walk, cs_ret",
+            f"    sim.try_move {args}, {height}, {maxstep}, cm_hf",
+            f"    hex.if0 1, mv_ok, {nxt}",
+            "    hex.mov 8, viewx, cpx", "    hex.mov 8, viewy, cpy",
+            "    ;cmv_done",
+            f"  {nxt}:",
+        ]
+
+    out = [
+        # ⚠ THE RADIUS, ONCE. `sim.check_position` READS `cprad` -- it does not set it -- and a
+        # declared-but-unwritten hex.vec is ZERO. With cprad = 0 the collision box collapses to a
+        # POINT, which walks straight through walls whose line the real 32-unit box would straddle.
+        # The standalone tests set it themselves, so they never saw this; the gate's blocked-tic
+        # control did, on the first tic where a wall mattered.
+        _set("cprad", radius),
+        # where the player stands now: its floor is what "too big a step up" is measured against
+        "    hex.mov 8, cpx, viewx", "    hex.mov 8, cpy, viewy",
+        *_int_part_lines("vx", "cpx", "cmh_vxs", "cmh_vxd"),
+        *_int_part_lines("vy", "cpy", "cmh_vys", "cmh_vyd"),
+        f"    stl.fcall {mapname_pfx}_dsccs_walk, cs_ret",
+        f"    sim.check_position {args}",
+        "    hex.mov 8, cm_hf, cp_floor",
+    ]
+    out += candidate("cma_", ["    hex.mov 8, cpx, viewx", "    hex.add 8, cpx, cm_dx"],
+                     ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_b")
+    out += candidate("cmb_", ["    hex.mov 8, cpx, viewx", "    hex.add 8, cpx, cm_dx"],
+                     ["    hex.mov 8, cpy, viewy"], "cmv_c")
+    out += candidate("cmc_", ["    hex.mov 8, cpx, viewx"],
+                     ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_stay")
+    out += ["  cmv_done:"]
+    return out
+
+
+# ── M14-e's critical path: POINT LOCATION, baked as code ──────────────────────────────────────
+#
+# Re-binding things to leaves needs "which subsector is this point in?" once per thing per frame.
+# The obvious answer -- reuse `_bsp_descend_code` -- was PRICED and rejected: M14-d's four descents
+# cost 11,602,784 ops together, ~2.9M each, so 251 of them would be ~730M ops against a ~40M frame.
+# The cost is `proj.point_on_side_leaf`: a generic 10-nibble cross product, plus two fcalls per node
+# to set and clear the partition constants through the xor involution.
+#
+# None of that is needed when the partition is BAKED. `_point_side` is
+# `dx*(y - py) - dy*(x - px)`, and dx/dy/px/py are compile-time per node, so:
+#
+#   * a VERTICAL partition (dx == 0) reduces to one compare of x against px -- no multiply;
+#   * a HORIZONTAL one (dy == 0) reduces to one compare of y against py;
+#   * only a diagonal needs the cross product, and even then both multipliers are constants, so the
+#     row rule (see [[fj-cost-model]]) makes them sparse.
+#
+# On E1M1 that is 209 vertical + 209 horizontal + 263 diagonal of 681 nodes -- 61% multiply-free --
+# and a descent visits ~13 nodes. Exact, not a grid approximation, so it costs no fidelity and
+# needs no decision about which leaf owns a thing near a boundary.
+
+def generate_point_location_fj(cmap, *, label="ptloc") -> str:
+    """`{label}_walk` reads `ptx`/`pty` (10-nibble SIGNED map units) and leaves the containing
+    subsector index in `ptss`, then `stl.fret {label}_ret`. Mirrors `mapcompiler._point_side`'s
+    convention exactly: side = dx*(y - py) - dy*(x - px), and side > 0 is the BACK (left) child."""
+    from doomfj.mapcompiler import NF_SUBSECTOR
+    M40 = (1 << 40) - 1
+    out = [f"// M14-e point location as code: {len(cmap.nodes)} nodes, {len(cmap.subsectors)} leaves",
+           f"{label}_walk:"]
+
+    def target(child):
+        return (f"{label}_l{child & (NF_SUBSECTOR - 1)}" if child & NF_SUBSECTOR
+                else f"{label}_n{child}")
+
+    out.append(f"    ;{target(cmap.root)}")
+    for i, n in enumerate(cmap.nodes):
+        back, front = target(n.left), target(n.right)      # left = back, right = front
+        out.append(f"  {label}_n{i}:")
+        if n.dx == 0:                                      # side = -dy*(x - px)
+            # back iff -dy*(x-px) > 0  iff  (dy > 0 and x < px) or (dy < 0 and x > px)
+            lo, hi = (back, front) if n.dy > 0 else (front, back)
+            out += [f"    hex.set 10, {label}k, {n.x & M40}",
+                    f"    hex.scmp 10, ptx, {label}k, {lo}, {front}, {hi}"]
+        elif n.dy == 0:                                    # side = dx*(y - py)
+            lo, hi = (front, back) if n.dx > 0 else (back, front)
+            out += [f"    hex.set 10, {label}k, {n.y & M40}",
+                    f"    hex.scmp 10, pty, {label}k, {lo}, {front}, {hi}"]
+        else:                                              # the general cross product
+            out += [f"    hex.set 10, {label}k, {n.x & M40}",
+                    f"    hex.mov 10, {label}dx, ptx", f"    hex.sub 10, {label}dx, {label}k",
+                    f"    hex.set 10, {label}k, {n.y & M40}",
+                    f"    hex.mov 10, {label}dy, pty", f"    hex.sub 10, {label}dy, {label}k",
+                    # the CONSTANT goes second: fixed_mul_lo/mul_lo cost one schoolbook row per
+                    # nonzero nibble of the second operand, and a partition delta is small
+                    f"    hex.set 10, {label}k, {n.dx & M40}",
+                    f"    hex.mul_lo 10, {label}p, {label}dy, {label}k",
+                    f"    hex.set 10, {label}k, {n.dy & M40}",
+                    f"    hex.mul_lo 10, {label}q, {label}dx, {label}k",
+                    f"    hex.sub 10, {label}p, {label}q",
+                    f"    hex.sign 10, {label}p, {front}, {label}_g{i}",   # < 0 -> front
+                    f"  {label}_g{i}:",
+                    f"    hex.if0 10, {label}p, {front}",                  # == 0 -> front (on the line)
+                    f"    ;{back}"]
+    for s in range(len(cmap.subsectors)):
+        out += [f"  {label}_l{s}:", f"    hex.set w/4, ptss, {s}", f"    stl.fret {label}_ret"]
+    return "\n".join(out) + "\n"
+
+
+def point_location_decls(label="ptloc") -> list:
+    # ⚠ ptss is w/4 wide, not 4: `hex.ptr_index` does `mov w/4` OUT of its index register, so a
+    # narrower cell drags its neighbour in and yields a wild pointer (fj-lessons: an n-nibble
+    # op reads n nibbles of its SOURCE).
+    # ⚠ ptp/ptq/bhv/btv/bdv are `sim.bind_one`'s scratch and are SHARED on purpose: that macro is
+    # instantiated once per thing (251 on E1M1), so an @-local data cell would be 251 cells and 251
+    # declaration lines in the emitted text. It keeps nothing across the call.
+    return ["ptx: hex.vec 10", "pty: hex.vec 10", "ptss: hex.vec w/4",
+            f"{label}_ret: hex.vec w/4", f"{label}k: hex.vec 10",
+            f"{label}dx: hex.vec 10", f"{label}dy: hex.vec 10",
+            f"{label}p: hex.vec 10", f"{label}q: hex.vec 10",
+            "ptp: hex.vec w/4", "ptq: hex.vec w/4",
+            "bhv: hex.vec 2", "btv: hex.vec 2", "bdv: hex.vec 4"]

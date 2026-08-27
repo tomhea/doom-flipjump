@@ -1,0 +1,20 @@
+loop : build/doom_e1m1_loop.fjm  sha256 75794727dce656be18140f10c88cff5b647660c713bcea4c8d1e34a918c5689a
+old  : scratchpad/fjmcache/_rssprobe.fjm  sha256 3c13ec21424f7f5434bd2070d9a34796ab2f92de9657dc16e2894f4c63e4acee
+
+PLAYING 100 frames on doom_e1m1_loop.fjm
+  ONE run: 5,269,537,364 ops, 100 frames, 49.1s
+  frame count 100 == 100 ?  ok
+  CONTROL (the player really moved): 1735 map units travelled, 50 distinct positions, 15 distinct angles
+     ok
+  CONTROL (vacuity): 72 distinct pictures of 100
+  start (-416.0, 256.0)   end (799.7, 477.3)
+  replaying the SAME 100 states on the old binary, one frame per run ...
+     25/100 (41s)
+     50/100 (82s)
+     75/100 (122s)
+     100/100 (164s)
+  BYTE-EXACT vs the old binary: 100/100 frames  ok
+  wrote 4 frame images to scratchpad\_m1_play_frames
+
+M1 PLAYABILITY: PASS
+PLAY exit=0

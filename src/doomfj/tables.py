@@ -17,6 +17,8 @@ LIGHTSEGSHIFT = 4       # sector light (0..255) -> zlight light bucket (0..15)
 MAXLIGHTZ = 128         # zlight distance buckets (distance >> LIGHTZSHIFT)
 LIGHTZSHIFT = 20        # distance (16.16) -> zlight distance bucket
 LIGHTSCALESHIFT = 12    # DOOM R_InitLightTables intermediate shift
+MAXLIGHTSCALE = 48      # DOOM scalelight[] scale buckets (rw_scale >> LIGHTSCALESHIFT)
+DOOM_SCREENWIDTH = 320  # DOOM's reference view width -- scalelight's own view-size compensation
 DISTMAP = 2             # DOOM distance-darkening rate divisor
 
 
@@ -52,6 +54,40 @@ def zlight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
             level = startmap - scale // DISTMAP
             level = max(0, min(num_colormaps - 1, level))
             row.append(level)
+        grid.append(row)
+    return grid
+
+
+def scalelight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
+    """DOOM's `scalelight[]` (R_ExecuteSetViewSize): the WALL distance-light map — the sibling of
+    `zlight_table`, indexed by the column's projection SCALE instead of a plane distance. Returns a
+    `LIGHTLEVELS × MAXLIGHTSCALE` grid of COLORMAP row indices.
+
+    Index it as `scalelight[light >> LIGHTSEGSHIFT][min(MAXLIGHTSCALE-1, scale >> LIGHTSCALESHIFT)]`
+    (DOOM R_RenderSegLoop). A NEARER column has a larger scale, so a larger bucket j, so a lower
+    (brighter) colormap row — near walls are bright, far walls fade into the dark. This is the cue
+    that makes depth readable, and until M13-WPXLIGHT our walls had none of it: they used the
+    sector's light level alone, flat all the way to the horizon.
+
+    `view_w` is load-bearing, not decoration: DOOM's own formula is
+    `level = startmap - j*SCREENWIDTH/viewwidth/DISTMAP`, and that `SCREENWIDTH/viewwidth` term is
+    what keeps the falloff right on a narrower view. Our projection is `view_w/2`, so at 160 wide our
+    scales are HALF DOOM's at the same distance — drop the term and every wall lands ~6 colormap rows
+    too dark, which is most of a 32-row range. (`zlight_table` takes `view_w` for the same reason.)
+
+    Note `startmap` is 0 for a fully-lit sector (light 255), so DOOM gives such sectors no wall
+    falloff at all — that is DOOM's behaviour, faithfully reproduced, not a bug here."""
+    grid = []
+    for i in range(LIGHTLEVELS):
+        startmap = ((LIGHTLEVELS - 1 - i) * 2) * num_colormaps // LIGHTLEVELS
+        row = []
+        for j in range(MAXLIGHTSCALE):
+            # CR-2026-08: DOOM's left-to-right integer order `j*SCREENWIDTH/viewwidth/DISTMAP`,
+            # verbatim -- the earlier `j * (SCREENWIDTH // viewwidth)` pre-floor is identical
+            # whenever view_w divides 320 (all shipped widths) but drifts on any width that
+            # does not, and this table's whole claim is DOOM's formula bit for bit.
+            level = startmap - j * DOOM_SCREENWIDTH // view_w // DISTMAP
+            row.append(max(0, min(num_colormaps - 1, level)))
         grid.append(row)
     return grid
 
@@ -153,3 +189,29 @@ def tantoangle_table(slope_range: int = 2048) -> list[int]:
     (a computed value in [0, SLOPERANGE], §1.3 — not a shift-extracted index). slope_range+1 entries.
     Shared kernel: the oracle's `point_to_angle` and the fj angle LUT both read these (R6/D12)."""
     return [round(math.atan(i / slope_range) / (2 * math.pi) * (1 << 32)) for i in range(slope_range + 1)]
+
+
+SLOPEDIV_RECIP_RK = 24   # perf #13: reciprocal table scale (recip[m] = (1<<RK)//m); RK=24 => <=17-bit entries
+
+
+def slopediv_recip_table() -> list[int]:
+    """perf #13 [re-bless]: the block-FP reciprocal table that replaces SlopeDiv's `hex.div` with a
+    normalize + lookup + mul. `m` is the top-3-nibble (12-bit) mantissa of `sden = den>>8` (leading nibble
+    non-zero, so m in [0x100, 0xFFF]); `recip[m] = (1<<24)//m`. The reciprocal of any sden is then
+    `recip[m] >> (exponent)`, and SlopeDiv = `((num<<3) * recip[m]) >> (24 + 4*nibble_exp)`, clamped to
+    SLOPERANGE. 4096 entries (m<0x100 unused -> 0). De-risked PNG-clean on E1M1 (spawn + square goldens
+    byte-identical; off-spawn viewpoints shift sub-pixel). Shared SSOT: the oracle's `_slope_div` and the
+    fj `slope_div` macro both consume THESE values (R6)."""
+    t = [0] * 4096
+    for m in range(0x100, 0x1000):
+        t[m] = (1 << SLOPEDIV_RECIP_RK) // m
+    return t
+
+
+def slopediv_recip8_table() -> list[int]:
+    """M13-coarseslope [re-bless, owner-approved ±1 column]: `slopediv_recip` with SlopeDiv's own
+    <<3 (DBITS) pre-folded into each entry — `recip8[m] = ((1<<24)//m) << 3`, NOT (1<<27)//m (the
+    floor-then-shift order is what the coarse `_slope_div` computes, and the fj macro must match it
+    bit for bit, R6). Lets the fj slope_div multiply the 3-nibble normalized numerator directly
+    (3 schoolbook rows) with no shl_bit at all. Max entry 0x80000 (20 bits, 3 packed bytes)."""
+    return [r << 3 for r in slopediv_recip_table()]

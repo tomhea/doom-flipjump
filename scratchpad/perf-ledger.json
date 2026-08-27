@@ -1,0 +1,313 @@
+{
+  "_README": [
+    "G1's tracked ledger (docs/handoff-playable.md \u00a76.5). ONE entry per landed rung.",
+    "Every number here was measured by the harness named in `how`, in the session that wrote",
+    "the entry. A number without a `how` is not a number -- delete it rather than carry it.",
+    "THE METRIC IS `median_warm` (\u00a70). The gate viewpoints are worst cases and sit between p90",
+    "and p99; quoting one as 'the frame' overstates the typical frame by ~1.5-1.9x."
+  ],
+  "entries": [
+    {
+      "id": "A0.3",
+      "date": "2026-08-17",
+      "commit": "74a2ac9+",
+      "what": "BASELINE on the tier that will ship: the M14 tier at the A0.1 one-picture config",
+      "config": {
+        "wall_mode": "W1R",
+        "floor_mode": "FT1",
+        "raster_mode": "lines",
+        "plane_near": true,
+        "wall_noise": true,
+        "sky": true,
+        "steps": true,
+        "stack_steps": true,
+        "things": true,
+        "bbox_cull": true,
+        "deg": true,
+        "state_wire": "bin",
+        "player_sim": true,
+        "collide": false,
+        "moving_things": true
+      },
+      "binary": "scratchpad/fjmcache/m14_bin_things_cull.fjm",
+      "fjm_bytes": 18908639,
+      "certified": "scratchpad/m14_gate.py --things 8 -- PASS: phase1 byte-exact x4 + cold==warm, phase2 byte-exact x8 with state relayed, phase3 visibility byte-exact x4",
+      "sweep": {
+        "how": "python scratchpad/m14_sweep.py scratchpad/fjmcache/m14_bin_things_cull.fjm --things",
+        "frames": 260,
+        "min": 6865499,
+        "median_warm": 27722912,
+        "mean_warm": 28180748,
+        "p90": 42959278,
+        "p99": 52237021,
+        "worst": 56379978,
+        "worst_at": [
+          2637,
+          1247,
+          2147483648
+        ],
+        "under_20M": "45/260",
+        "under_26M": "110/260",
+        "under_30M": "159/260",
+        "csv": "scratchpad/sweep_m14_a01.csv"
+      },
+      "sweep_cold": {
+        "how": "same, with --cold (all-dirty bindings)",
+        "min": 11800075,
+        "median": 32657488,
+        "mean": 33115324,
+        "p90": 47893854,
+        "p99": 57171597,
+        "worst": 61314554,
+        "csv": "scratchpad/sweep_m14_a01_cold.csv",
+        "FINDING": "cold - warm = 4,934,576 EXACTLY, at min, median, worst and all four gate viewpoints. The cold binding pass is a fixed prologue (75 runtime things x 65,794 ops), independent of what is on screen -- ~18% of the median, priced per THING and not per VISIBLE thing. Re-price Batch 8's SI-1 empty-leaf skip against this before assuming the reviewers' 0.7-2.2%."
+      },
+      "gate_viewpoints_worst_case_anchor": {
+        "how": "scratchpad/m14_gate.py --things 8, phase 1 (warm)",
+        "664,291,0x18000000": 52194203,
+        "1272,-724,0x40000000": 44260279,
+        "1869,479,0x80000000": 47671745,
+        "-416,256,0x0": 41812643,
+        "NOTE": "the static tier at the same config (A0.1, commit 74a2ac9) was 49384173 / 39825528 / 45917740 / 37898025, so the M14 tier costs +1.75M..+4.43M per gate frame. Both sides measured 2026-08-17."
+      },
+      "span_gate": {
+        "how": "python -m pytest tests/host -m slow  (test_build_wall_renderer_e1m1_flat)",
+        "result": "1 passed, 245 deselected in 1783.21s (0:29:43)",
+        "proves": "storage_mode == flat, span < 2**26, headroom > 1.0, span in (40M, 62M), tier == lines/W1R/FT1+plane_near, all 7 emit flags on",
+        "NOT_measured": "the span WORD COUNT -- the test asserted the bounds and printed nothing. A metrics print was added so the next run records it.",
+        "note": "29:43, not the documented ~70 min: that figure predated A0.1 and belonged to the WPX build."
+      }
+    },
+    {
+      "id": "B4.1-step1",
+      "date": "2026-08-17",
+      "what": "THE DIRTY CENSUS -- how much of the image does one frame actually change?",
+      "how": "python scratchpad/dirty_census.py scratchpad/fjmcache/m14_bin_things_cull.fjm --m14 --things --exact --gatevps",
+      "negative_control": "two pristine images walked in full (68,223,650 words): 0 differ",
+      "cross_check": "the four frames' op counts (52194203/44260279/47671745/41812643) reproduce the certified gate figures to the digit -- the binary wire drove the real frames",
+      "image_words": 68223650,
+      "image_mb": 546,
+      "dirty_per_frame_words": {
+        "664,291": 5366,
+        "1272,-724": 3910,
+        "1869,479": 4323,
+        "spawn": 3891
+      },
+      "dirty_union_words": 6685,
+      "dirty_union_pct": 0.009799,
+      "extent_union": {
+        "gap_0": {
+          "ranges": 6683,
+          "words": 6685,
+          "mb": 0.05
+        },
+        "gap_16": {
+          "ranges": 535,
+          "words": 18839,
+          "mb": 0.15
+        },
+        "gap_256": {
+          "ranges": 216,
+          "words": 28096,
+          "mb": 0.22
+        },
+        "gap_4096": {
+          "ranges": 190,
+          "words": 78055,
+          "mb": 0.62
+        },
+        "gap_65536": {
+          "ranges": 41,
+          "words": 3560038,
+          "mb": 28.48
+        }
+      },
+      "VERDICT": "The ~52ms blanket memcpy is ~99.99% waste. 216 ranges / 0.22 MB would replace 546 MB (~2400x fewer bytes); even a crude 41-range 28 MB superset is ~19x. The four per-frame sets overlap heavily (6,685 union vs 17,490 if disjoint), so the dirty region is largely the SAME region each frame -- what a static bound needs.",
+      "NOT_ESTABLISHED": [
+        "This measured the dirty SET, not a working restore. The sub-millisecond reset is arithmetic from bytes-moved, NOT a measured reset time; per-range overhead is unmodelled. That is B4.1 step 2 (change fastrun's reset path and re-time it).",
+        "All four frames are keys=0. A MOVING tic runs the sim and writes player state and may dirty more. 6s per frame to check -- do it before designing the mechanism."
+      ],
+      "CONSEQUENCE": "If the floor collapses, frame time is ops-bound again and Step A's wins convert fully. At 300M fj/s the 27.72M median is ~92ms (~10.8 fps) with a free reset, so 30 fps needs roughly a 10M-op frame. docs/handoff-playable.md \u00a74.2's 'a fixed ~52ms no amount of Step A removes' is retired as a PERMANENT constraint.",
+      "tool_note": "The exact walk costs 6 SECONDS per pass, not the minutes assumed -- the sampler and its confidence interval were never necessary. Prefer --exact."
+    },
+    {
+      "id": "PJ-1 + PJ-2",
+      "date": "2026-08-18",
+      "what": "The two confirmed fractional-position mirror divergences, FIXED. Both were byte-exactness breaks invisible to every gate because all certified viewpoints sit on whole map units.",
+      "PJ-1": {
+        "bug": "proj.wedge_setup builds the eye terms at full 16.16 and readers slice the high nibbles = floor(viewy-viewx); mapcompiler.bbox_wedge_miss floored PER AXIS = floor(viewy)-floor(viewx). Differ by 1 on borrow (q=1) / carry (q=3).",
+        "fix": "THE ORACLE MOVED, not fj. mapcompiler.bbox_wedge_miss now floors after combining, with the 16.16 eye threaded through visible_segs/bsp_render_order.",
+        "why_this_direction": "Only floor-after-combining is CONSERVATIVE: Q - Q_true = frac(E) in [0,1) for all four q, so a cull always implies the true point is outside. Per-axis flooring gives q=3 an error of fx+fy in [0,2), so Q=1 on the negated plane m=3 culls a box that is genuinely INSIDE -- and the wedge has ZERO angular slack at view angles that are exact multiples of 45 degrees, two of which are certified gate angles. \u26a0 MY FIRST ATTEMPT WENT THE OTHER WAY and I had written the (false) claim that both forms are conservative into the source; the fan-out sweep caught it.",
+        "fj_cost": "ZERO -- fj emission unchanged by PJ-1 (walk stayed 73,957 lines)",
+        "proof": "scratchpad/_pj1_probe.py: fj 120/120 agree, per-axis 110/10. Roles INVERTED vs before the fix, which is itself the regression test."
+      },
+      "PJ-2": {
+        "bug": "sgn = -fixed_mul_lo(a, |viewx|) truncates toward zero; the oracle's fixed_mul floors. Equal iff P mod 2^16 == 0, i.e. only at a whole map unit.",
+        "fix": "fj multiplies the SIGNED value, at THREE sites: projection.fj wall_x_range + wall_x_range_m, and frame_render.fj seg_pass1_leaf_body_proj -- the third was NOT in the CR finding and is the 'fixed in one macro, not its twin' shape that let the M14-c bug survive.",
+        "forced_fanout": "flipjump warns on an UNUSED MACRO PARAMETER and the build is --werror, so the 4 dead abs/sign params could not be left in place: 2 signatures, 2 bodies, 2 dead @-locals, 19 frame_render lines (9 calls + 10 scope lists), 12 emitter statements + 4 labels, 7 test heads + 7 decls, 1 test call, 2 harnesses. Safe on rule 4 because NO Python f-string emits these calls (grep over src/doomfj/).",
+        "proof": "scratchpad/_pj2_probe.py: signed 10/10, abs/negate 5/10 (every divergence +1 ULP). Control 6 MEASURES that the row-rule operand swap is bit-identical rather than assuming it. R17 trap confirmed: even `a` at a half unit agrees, odd `a` differs."
+      },
+      "gates": {
+        "deg_gate": "PASS byte-exact x4 (50,186,307 / 40,950,575 / 45,534,466 / 39,057,903)",
+        "m14_gate --things 8": "PASS: phase 1 byte-exact x4 + cold==warm, phase 1b byte-exact x6 FRACTIONAL, phase 2 byte-exact x8 relayed, phase 3 byte-exact x4",
+        "NEW_CAPABILITY": "m14_gate PHASE 1b -- six FRACTIONAL viewpoints. Before this, no gate in the repo could fail on either bug. Offsets chosen: 0x8000 (labelled PARTLY VACUOUS -- R17), 0x5555, and (0xC000,0x5000) which arms PJ-1's borrow and carry in the same frame.",
+        "tests": "tests/host 245 passed 1 deselected; tests/fj/test_projection_kernels 16 passed; tests/fj/test_wall_render 9 passed"
+      },
+      "cost_measured_both_sides_same_session": {
+        "metric_median_warm": {
+          "before": 27722912,
+          "after": 27850134,
+          "delta": 127222,
+          "pct": 0.46
+        },
+        "mean": {
+          "before": 28180748,
+          "after": 28488990
+        },
+        "p90": {
+          "before": 42959278,
+          "after": 43379880
+        },
+        "p99": {
+          "before": 52237021,
+          "after": 53310402
+        },
+        "worst": {
+          "before": 56379978,
+          "after": 56789910
+        },
+        "tail": {
+          "under20M": "45->45",
+          "under26M": "110->108",
+          "under30M": "159->158"
+        },
+        "gate_viewpoints": {
+          "664,291": [
+            49384173,
+            50186307
+          ],
+          "1272,-724": [
+            39825528,
+            40950575
+          ],
+          "1869,479": [
+            45917740,
+            45534466
+          ],
+          "-416,256": [
+            37898025,
+            39057903
+          ]
+        },
+        "binding_cache_constant": {
+          "before": 4934576,
+          "after": 4911964,
+          "note": "still identical to the digit across all four viewpoints"
+        },
+        "ATTRIBUTION": "ALL of the cost is PJ-2's operand order, none is PJ-1 (whose fj emission is unchanged). Filed as PJ-2b with the weighted cost model that predicts the sign of all four viewpoints, and the exact-and-cheaper form fixed_mul_lo(-a, |viewx|). DEFERRED TO BATCH 2 (row-rule operand swaps) so it shares a build instead of spending a 30-min gate alone.",
+        "NOTE": "the gate viewpoints moved ~2% while the MEDIAN moved 0.46% -- a clean demonstration of why the median is the metric and gate viewpoints are worst cases."
+      }
+    },
+    {
+      "id": "B4.1-step2",
+      "date": "2026-08-18",
+      "what": "The dirty-range restore: MEASURED. The prize is real; the naive mechanism is REFUTED.",
+      "how": "python scratchpad/dirty_restore.py scratchpad/fjmcache/m14_bin_things_cull.fjm [--learn-extra 25]",
+      "THE_PRIZE_CONFIRMED": {
+        "blanket_core_reset_ms": [
+          44.97,
+          43.71
+        ],
+        "range_restore_ms": 0.12,
+        "speedup": "357x - 386x",
+        "ranges": "223-234 ranges covering ~0.23 MB, vs 546 MB",
+        "note": "Per-range call overhead is NEGLIGIBLE -- 234 Python->C set_words calls cost 0.12 ms total, so the bytes-moved reduction converts almost perfectly. The ~45ms floor really can become ~0.1ms."
+      },
+      "THE_MECHANISM_REFUTED": {
+        "finding": "A range set LEARNED FROM SAMPLED FRAMES IS UNSOUND. 5 of 7 unseen frames leaked with a 5-frame learn set; with 30 learn frames the union grew 6,880 -> 9,225 and op-level leaks fell to 1 of 7, but the EXACT WALK still found 67 and 2 unrestored words. It converges slowly and does not close.",
+        "why_it_matters": "The program SELF-MODIFIES, so a leaked word does not produce a wrong pixel -- it produces a different PROGRAM. Op deltas ranged +3 to +4,375,384.",
+        "PIXELS_ARE_NOT_A_DETECTOR": "pixels MATCHED on ALL 7 frames in BOTH runs, including the one that leaked 4.4M ops. A pixel-only validation would have passed every case and shipped a broken restore.",
+        "OPS_ARE_NOT_A_COMPLETE_DETECTOR_EITHER": "the (-416,256,k=4) frame matched op-for-op (+0) while the exact walk still found 2 unrestored words. The FULL WALK is the only sound check.",
+        "the_leaks_are_STRUCTURED": "the same addresses recur across runs (3304301, 5511717, 5649875, 5649877, 5753831, ...), so the writable set is a structured region, not noise -- it is simply not enumerable by sampling."
+      },
+      "RECOMMENDED_MECHANISM": "Derive the writable set from the EMITTER, which knows every address the program can write (state cells, thing rows, bindings, banks, per-frame scratch), and emit it as a manifest next to the program. scratchpad/dirty_restore.py then becomes its ACCEPTANCE TEST: learn nothing, restore the manifest's ranges, and require 0 unrestored words on the full walk over a wide frame set. Alternative: engine-side write tracking in the C core (sound by construction, but a flipjump change).",
+      "BLOCKER_FOUND_IN_PASSING": {
+        "R4": "the M14 tier is 68,213,458 words -- 1.6% OVER the certified 2**26 flat limit. At 1<<26 it runs in HYBRID storage, and `freeze()` requires PURE FLAT, so THE FAST RESET PATH IS UNAVAILABLE TO THE TIER THAT WILL SHIP. Op counts are identical in both modes (43,115,656), so no earlier measurement is invalidated. Only at 1<<27 is it flat. R4 says no silent paged-mode fallback -- this needs a decision before B0, and it competes with B3's 9-level span budget (G3).",
+        "measured": "flat_max_words=67,108,864 -> storage_mode=hybrid;  134,217,728 -> flat"
+      }
+    },
+    {
+      "id": "B0-R4",
+      "date": "2026-08-19",
+      "what": "R4 span gate on the SHIPPED tier after B0 (sim + collide wired in)",
+      "how": "python -m pytest tests/host -m slow -q -s",
+      "result": "1 passed, 245 deselected in 8601.92s (2:23:21)",
+      "tier": "lines/W1R/FT1+plane_near",
+      "span_words": 84823030,
+      "flat_limit": 134217728,
+      "headroom": 1.582,
+      "fjm_bytes": 23432034,
+      "assemble_seconds": 8054.988,
+      "FINDINGS": [
+        "The shipped span is 84,823,030 words -- NOT the ~68.2M quoted from the M14 gate's binary (lighter config, collide=False, and m14_gate omits sky=). Anything derived from 68.2M should be re-derived.",
+        "headroom 1.582 against 2**27; against 2**26 it would be 1.26x OVER. The limit raise was REQUIRED, not cosmetic.",
+        "ASSEMBLE IS 2h14m, up from ~30 min pre-B0. Every gate on the shipped tier now costs two hours; G2 counts this as a first-class budget. Three levels in one image projects to 4-5 hours."
+      ],
+      "band": "tests/host SPAN_LO/HI moved to 70M-100M to bracket the measurement (was a provisional 40-90M)"
+    },
+    {
+      "id": "B0-median",
+      "date": "2026-08-19",
+      "what": "THE SHIPPED MEDIAN after B0 -- measured on the collide=True binary, which is what build.py and the walker actually emit",
+      "how": "python scratchpad/m14_sweep.py scratchpad/fjmcache/m14_bin_coll_things_cull.fjm --things",
+      "binary": "m14_bin_coll_things_cull.fjm (21,796,514 bytes)",
+      "frames": 260,
+      "min": 7441882,
+      "median_warm": 29792277,
+      "mean_warm": 30517021,
+      "p90": 46470863,
+      "p99": 56883057,
+      "worst": 60914103,
+      "worst_at": [
+        2637,
+        1247,
+        2147483648
+      ],
+      "under_20M": "38/260",
+      "under_26M": "83/260",
+      "under_30M": "135/260",
+      "csv": "scratchpad/sweep_b0.csv",
+      "COLLIDE_COST": {
+        "collide_false_median": 27850134,
+        "collide_true_median": 29792277,
+        "delta": 1942143,
+        "pct": 7.0,
+        "UNEXPLAINED": "The sweep feeds keys=0, so the player sim is a no-op and COLLISION NEVER RUNS -- yet the frame costs 7% more. So collide=True changes something STRUCTURAL, not just adding an untaken branch. Recorded as measured-and-unexplained; do NOT rationalise it. Cheapest next step: opprof the two binaries at one viewpoint and diff the per-macro attribution, or emit-hash the two programs and diff the emitted parts."
+      },
+      "GATE_STATUS": "m14_gate --things 8 FAILED its VACUITY control on the collide binary: 'collision changed the outcome on 0 of 8 tics'. Phases 1, 1b and 3 were clean and phase 2's frames matched -- the gate correctly refuses to certify a collision build in which nothing ever hit a wall. Re-running with 20 tics."
+    },
+    {
+      "id": "B4b-rerun",
+      "date": "2026-08-19",
+      "what": "Can the SHIPPED program render a second frame? Measured at full scale (78,626,386 words).",
+      "how": "python scratchpad/_rerun2.py scratchpad/fjmcache/m14_bin_coll_things_cull.fjm",
+      "CONFIRMED": {
+        "frame1": "46,384,263 ops in 0.5s, 16000 px",
+        "low_words_changed_by_a_frame": "word 1: 0x87380 -> 0x87180 (xor 512); word 2: 0x0 -> 0x3 (xor 3)",
+        "frame2_nothing_restored": "9 ops -- the documented death, reproduced at shipped scale",
+        "meaning": "word 1 is the jump field of the program's FIRST op, so run 2 enters 8 ops before code_start, lands in the stack error handler and hits ;0. The 'one run = one frame' wall IS the low words."
+      },
+      "CORRECTION": {
+        "claim_I_repeated": "'restoring word 1 turns 9 ops into 424,376' -> I framed the standalone loop as nearly free.",
+        "what_the_measurement_shows": "With words 1 and 2 restored, frame 2 does NOT die -- and does NOT terminate either: still running after 560s where frame 1 took 0.5s (>1000x). The latches from frame 1 (tsstop, n_claimed, sshead/thnext, the 640 latch-array bytes, pmax) drive an unbounded run.",
+        "the_tell_was_already_there": "424,376 ops is not a frame: that binary's real frame is ~15M ops. The investigation's own number showed the frame never completed; I read it as encouraging instead of incomplete.",
+        "honest_position": "The standalone .fjm needs the FULL reset prologue (~2,500 enumerated cells), not a one-word patch. Still bounded and still days rather than weeks -- but the one-bit finding is a PRECONDITION, not the solution."
+      },
+      "NEXT": [
+        "Write the reset prologue from the enumerated cell list (640 latch bytes + 17 scalars + pmax=159 not 0 + ~1,866 accumulator cells), using the compile-time unrolled clear the emitter already emits for vpc_flags.",
+        "\u26a0 sshead/thnext are 74% of the cells and their STRIDE is unverified -- three prior probes disagreed. An R9 negative-controlled stride probe is a hard prerequisite.",
+        "Then prove correctness with m14_gate phase 2 driven by the PROGRAM's restore instead of the host's, requiring pixel equality per tic."
+      ]
+    }
+  ]
+}

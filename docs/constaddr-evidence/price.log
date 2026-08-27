@@ -1,0 +1,34 @@
+harness: W=32  sizes=[24, 72]  (price = (ops(n2)-ops(n1))/(n2-n1))
+NOTE: each rep is a hex.set of the index plus the lookup, IDENTICAL in both arms of a
+      pair, so the A-B and C-D deltas are the mechanism alone.
+
+  A  proj.angle_to_x (read_table_packed 4, as shipped)
+      n=24   ops=185,866      dstv=0xffffffff   want 0xffffffff   term=0  ok
+      n=72   ops=609,597      dstv=0x67         want 0x67         term=0  ok
+      -> 8827.7 ops/rep   OK
+
+  B  proj.angle_to_x, disp=1 (same macro, viewangletox as a DISPATCH)
+      n=24   ops=40,119       dstv=0xffffffff   want 0xffffffff   term=0  ok
+      n=72   ops=126,974      dstv=0x67         want 0x67         term=0  ok
+      -> 1809.5 ops/rep   OK
+
+  C  finesine.read_sin (per_result_nibble, as shipped)
+      n=24   ops=23,412       sdst=0xffffafb3   want 0xffffafb3   term=0  ok
+      n=72   ops=70,608       sdst=0x88f6       want 0x88f6       term=0  ok
+      -> 983.2 ops/rep   OK
+
+  D  finesine.read_sin (per_entry)
+      n=24   ops=10,230       sdst=0xffffafb3   want 0xffffafb3   term=0  ok
+      n=72   ops=31,957       sdst=0x88f6       want 0x88f6       term=0  ok
+      -> 452.6 ops/rep   OK
+
+====================================================================================================
+  A  proj.angle_to_x (read_table_packed 4, as shipped)         8827.7 ops/rep   OK
+  B  proj.angle_to_x, disp=1 (same macro, viewangletox as      1809.5 ops/rep   OK
+  C  finesine.read_sin (per_result_nibble, as shipped)          983.2 ops/rep   OK
+  D  finesine.read_sin (per_entry)                              452.6 ops/rep   OK
+
+  A - B (angle_to_x  -> dispatch) :     7018.2 ops saved per call
+  C - D (read_sin per_entry)      :      530.6 ops saved per call
+
+ca2_price: PASS

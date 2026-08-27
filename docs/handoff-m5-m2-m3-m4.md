@@ -58,7 +58,11 @@ Other rules that have already cost real time - details in `CLAUDE.md`:
 
 ## 2. M5 - the standalone .fjm (no Python)   <- DONE, 2026-08-25
 
-    fj build/doom_e1m1_std.fjm --io pc --flat-max-words 134217728
+    fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728
+
+⚠ `doom_e1m1_std.fjm` is the M5-era build and predates M3's `mode` cell, so it is no longer
+what this source emits. `doom_e1m1_menu.fjm` supersedes it -- same tier, plus the menu.
+(`build/` is gitignored, so a stale artifact there is a local-cache problem, not a shipped one.)
 
 That is DOOM, out of one file, with no Python in the loop. `--io pc` is the stock CLI mode: a
 window for the pixels, live keys in. W/S or the up/down arrows walk, A/D or left/right turn.
@@ -100,7 +104,7 @@ STANDALONE layout before the fingerprint is recomputed. Result: **12,072 -> 12,0
 
 | | |
 |---|---|
-| `build/doom_e1m1_std.fjm` | 31,221,481 bytes, span 84,892,508 words, headroom 1.581x |
+| `build/doom_e1m1_std.fjm` (M5-era; superseded) | 31,221,481 bytes, span 84,892,508 words, headroom 1.581x |
 | M5 gate | **PASS** - 24 frames byte-exact in ONE 1,131,621,966-op run; `--selftest` PASS |
 | what that run exercised | 13 frames MOVED, 8 TURNED, **5 blocked by COLLISION**, 20 of 24 pictures distinct |
 | smoke gate (no-loop build, spawn frame) | BYTE-EXACT vs the oracle at 39,157,887 ops |

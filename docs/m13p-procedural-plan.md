@@ -597,7 +597,16 @@ together (same rung, one gate).
    - `cm.emit idx` — built from the SAME `colormap_values(...)` list `compile_colormap`'s `.apply`
      table uses (no drift), just fed through the emit generator. **MEASURED: 79.1 ops/call** (real
      8,192-entry E1M1 colormap, 4-nibble index). It fuses the colormap LOOKUP and the byte's output
-     into one dispatch — there is no register write to pay for afterward.
+     into one dispatch — there is no register write to pay for afterward. The combo it
+     replaced, `cm.apply` + `hex.xor_zero 2`, is **159.2 ops** measured in ONE loop, so
+     cm.emit is **2.01x cheaper** (`scratchpad/measure_apply_ctl.py`).
+
+   ⚠ THE OLD LINE READ "2.07x cheaper than the OLD cm.apply(399)+xor_zero(284)=683 combo".
+   The RATIO survives almost exactly, and that is a COINCIDENCE worth naming: those two were
+   measured in SEPARATE runs and added, so 683 DOUBLE-COUNTS the ~250-op harness, while
+   cm.emit's 329.5 counted it once. Real figures: cm.apply 129.0, +xor_zero 159.2, emit 79.1.
+   A conclusion that is right for the wrong reason is still worth re-deriving -- the next
+   comparison built that way may not be as lucky.
    - `byte.emit v` — a 256-entry IDENTITY table (`values=range(256)`) for run counts/raw bytes.
      **MEASURED: 47.1 ops/call** (2-nibble index). The 32.0-op gap to `cm.emit` is exactly the two
      extra `hex.xor`es a 4-nibble index costs, which is a good sign both numbers are real.

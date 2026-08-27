@@ -185,7 +185,9 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
                              # non-looping, host-driven, world-only build, so all three are False —
                              # `self_reset` is what m1_gate's binary turns on, `standalone` +
                              # `menu` are the no-Python tier (build/doom_e1m1_menu.fjm).
-                             "self_reset": False, "standalone": False, "menu": False}, m
+                             "self_reset": False, "standalone": False, "menu": False,
+                             # M2: a door override moves pixels; the shipped tier has none
+                             "sector_heights": False}, m
     assert m["tier"] == "lines/W1R/FT1+plane_near", m
     assert SPAN_LO < m["span_words"] < SPAN_HI, m
 

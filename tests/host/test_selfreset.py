@@ -409,3 +409,82 @@ def test_verify_values_reports_clean_when_it_read_nothing(tmp_path):
     assert selfreset.verify_values_unchanged(p, LABELS, a.get, b.get, limit=0) == []
     # ...and reading everything finds it.
     assert selfreset.verify_values_unchanged(p, LABELS, a.get, b.get) == [101]
+
+
+# ---------------------------------------------------------------------------------------------
+# M5: `persist=` -- the ONE place a hole in the restore set is the intent.
+#
+# Everywhere else in this file a missing cell is the bug that HANGS the next frame. A standalone
+# build has no host to hand it a world, so the player's position and the held-key flags must
+# survive the reset. That inverts the danger: the failure mode is no longer a hang but a SILENT
+# one -- a persist name that matches nothing quietly leaves the state being restored, and the
+# player teleports back to spawn every frame while the program runs perfectly. These tests are
+# the guard on that, and they exist because CR PR#78 (R3) found this path shipping untested.
+# ---------------------------------------------------------------------------------------------
+
+# `other` splits scratch's extent, so the persisted label is NOT the last one -- a bug that
+# dropped "everything from the base onward" would pass against a single trailing label.
+PERSIST_BITS = dict(FAKE_BITS, other=224 * W)
+PERSIST_ENTRIES = BYTE_ENTRIES + [["scratch", 0, 1, 2, 3], ["other", 0, 1, 2, 3]]
+
+
+def _emit_persist(tmp_path, persist, entries=None, values=None, bits=None):
+    bits = dict(PERSIST_BITS if bits is None else bits)
+    gen = tmp_path / "gen"; gen.mkdir(parents=True)
+    (gen / "e1m1_02_main.fj").write_text("stl.output_char 0xFF\nstl.loop\nbad: stl.loop\n",
+                                         encoding="utf-8")
+    p = _set_file(tmp_path, PERSIST_ENTRIES if entries is None else entries, labels=bits)
+    part, n_nib, n_byte = selfreset.emit_reset_part(
+        gen, bits, _pristine(values or {}), p, 2, 3, "e1m1", persist=persist)
+    return part.read_text(encoding="utf-8"), n_nib, n_byte
+
+
+def test_persist_excludes_only_the_named_labels_cells(tmp_path):
+    """THE POSITIVE CONTROL IS THE SAME BUILD WITHOUT persist. Asserting only that the persisted
+    address is absent would also pass if the label were never emitted for some unrelated reason,
+    so the first half proves the cells ARE there to begin with."""
+    txt_no, n_no, _b = _emit_persist(tmp_path / "a", ())
+    assert n_no == 4                                        # scratch 2 cells + other 2 cells
+    assert "hex.zero 4, %d" % (220 * W) in txt_no           # one coalesced run over both labels
+
+    txt, n_nib, _b2 = _emit_persist(tmp_path / "b", ("scratch",))
+    assert n_nib == 2                                       # scratch's two cells, and only those
+    assert str(220 * W) not in txt                          # the persisted label is gone...
+    assert "hex.zero 2, %d" % (224 * W) in txt              # ...and its neighbour is untouched
+
+
+def test_persist_refuses_a_name_this_build_has_no_label_for(tmp_path):
+    """A typo'd persist name must not be a no-op -- silently restoring the state it was meant to
+    protect is precisely the bug that would be invisible in a running program."""
+    with pytest.raises(AssertionError, match="no label for"):
+        _emit_persist(tmp_path, ("viewx",))                 # a real M5 name, absent from this build
+
+
+def test_persist_refuses_a_label_the_restore_set_never_dirties(tmp_path):
+    """The name resolves, but no cell of it is in the set, so excluding it changes nothing. That
+    means the set was never given the label -- the state is unprotected either way, so refuse
+    rather than report success."""
+    with pytest.raises(AssertionError, match="carries no cell of it"):
+        _emit_persist(tmp_path, ("lut",))                   # in the label table, not in the set
+
+
+def test_persist_takes_its_extent_from_this_builds_label_table(tmp_path):
+    """The extent is derived from the neighbouring label, never a hardcoded width. Move `other`
+    and scratch's extent moves with it: the same persist name now covers four cells, not two."""
+    bits = dict(FAKE_BITS, other=228 * W)
+    ents = BYTE_ENTRIES + [["scratch", 0, 1, 2, 3, 4, 5, 6, 7], ["other", 0, 1]]
+    txt, n_nib, _b = _emit_persist(tmp_path, ("scratch",), entries=ents, bits=bits)
+    assert n_nib == 1                                       # only `other`'s single cell is left
+    assert "hex.zero 1, %d" % (228 * W) in txt
+    assert all(str(w * W) not in txt for w in (220, 222, 224, 226))
+
+
+def test_persist_states_in_the_generated_part_what_it_did_not_restore(tmp_path):
+    """A hole nothing records is indistinguishable from a hole nobody meant. The count is the
+    emitted one, so it cannot drift from what was actually skipped."""
+    txt, _n, _b = _emit_persist(tmp_path, ("scratch",))
+    assert "4 words across 1 PERSISTED labels are deliberately NOT restored" in txt
+    assert "scratch" in txt.split("Restores every cell")[0]
+    # ...and a build with no persist says nothing about persisting, so the note means something.
+    txt0, _n0, _b0 = _emit_persist(tmp_path / "z", ())
+    assert "PERSISTED" not in txt0

@@ -38,7 +38,10 @@ _GLYPHS = {
 GLYPH_W, GLYPH_H, GLYPH_GAP = 3, 5, 1
 CELL_W = GLYPH_W + GLYPH_GAP
 
-DITTO, END = 0xFE, 0xFF
+# the protocol's own constants, from the device that decodes them -- NOT a third private copy.
+# (tests/fj/stream_screen.py has the lab decoder's; this file had a second. R6 is one source.)
+from flipjump.interpreter.io_devices.ScreenIO import COLLINES_DITTO as DITTO
+from flipjump.interpreter.io_devices.ScreenIO import COLLINES_END as END
 
 
 def palette_colours(palette_rgb) -> tuple:
@@ -95,6 +98,12 @@ def stream(width, height, lines, selected, colours) -> bytes:
     Column-major run-lists, with DITTO (0xFE) for a column identical to its left neighbour — which
     on a menu is most of them, and which exercises the one compression the protocol has. Column 0
     is never dittoed: it has no left neighbour, and the device refuses it."""
+    # ⚠ THE PROTOCOL BOUNDS THE RESOLUTION, and R6 forbids assuming it. A column tag must be
+    # distinguishable from DITTO/END, and a run's `y2` is one byte, so this encoder is correct only
+    # while width < 0xFE and height <= 0xFF. At 160x100 that is far off; assert rather than assume,
+    # because a resolution change would otherwise corrupt the stream instead of failing.
+    assert width < DITTO, "0x0B column tags must stay below DITTO (0xFE); width=%d" % width
+    assert height <= END, "0x0B run bounds are one byte; height=%d" % height
     grid = _bitmap(width, height, lines, selected, colours)
     out = bytearray([0x0B])
     previous = None

@@ -177,6 +177,28 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **M1 + M1-HOIST (319 @-locals -> named globals)** | **85,438,862** | 1.27× OVER | **0.64×** | **flat** (asserted) |
 | **+ constant-address round 1 (C2/C5/C7/C8)** | **85,523,360** | 1.27× OVER | **0.637×** | **flat** (asserted) |
 | + constant-address round 2, `self_reset=False` | **84,756,676** | 1.26× OVER | **0.631×** | **flat** (asserted) |
+| **M5 standalone, `self_reset=False`** | **84,155,496** | 1.25× OVER | **0.627×** | **flat** (asserted) |
+| **M5 standalone + `self_reset=True`** (shipped `doom_e1m1_std.fjm`) | **84,892,508** | 1.27× OVER | **0.633×** | **flat** (asserted) |
+| **M3 the same + `menu=True`** (shipped `doom_e1m1_menu.fjm`) | **85,209,916** | 1.27× OVER | **0.635×** | **flat** (asserted) |
+
+⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
+and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the
+*hosted* shipped tier, the one tier that milestone did not change — for two tiers it did add.
+Full metrics, from the run that produced each binary:
+
+| tier | span-words | headroom | `.fjm` bytes | assemble |
+|---|---|---|---|---|
+| standalone, no self-reset (`_m5_build_noloop.log`) | 84,155,496 | 1.595 | 30,948,902 | 684 s |
+| standalone + self-reset (`_m5_build_loop.log`) | 84,892,508 | 1.581 | 31,221,481 | 3,405 s (**two passes**) |
+| + menu (`_m3_build.log`) | 85,209,916 | 1.575 | 31,252,015 | 2,867 s (two passes) |
+
+Two things this table is **not** evidence for. The **+737,012** between the first two rows is the
+self-reset part for the *standalone* set (12,082 words, seven labels persisted), and is not the
+hosted figure — do not cross-subtract the rows above, which are a different program (§the M14 warning
+below). And the **+317,408** for the menu row is the whole menu **tier** — the bitmap, the mode
+register, the `kb.poll` edge dispatch and the second present path — not the cost of the glyphs.
+The assemble column is wall-clock on a machine that was doing nothing else, and the two-pass rows
+are two full assemblies, which is most of the difference from the 684 s row.
 
 (Very-hot tables may be **over-aligned** by one bit (§2.1) — count the extra padding here.
 That trailing instruction used to be swallowed into the M14 row's last cell, where it read as

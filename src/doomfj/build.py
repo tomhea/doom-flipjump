@@ -219,6 +219,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                         stack_steps=True, bbox_cull=True, deg=True,
                         state_wire="bin", player_sim=True, collide=True,
                         moving_things=True, standalone=False, menu=False, menu_entries=None,
+                        menu_selected=0,
                         sector_heights=None,
                         self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
@@ -285,6 +286,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                                deg=deg, state_wire=state_wire, player_sim=player_sim,
                                collide=collide, moving_things=moving_things,
                                standalone=standalone, menu=menu, menu_entries=menu_entries,
+                               menu_selected=menu_selected,
                                sector_heights=sector_heights,
                                return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
@@ -402,6 +404,11 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      # M5: no host in the loop -- the keyboard device drives it and the view state
                      # survives the reset.
                      "standalone": standalone,
+                     # M2: a door override MOVES PIXELS, so it belongs in the guard the same as any
+                     # other picture-shaping input. Reported as a bool: the heights themselves are
+                     # a per-sector dict, and what the guard needs to catch is a build that has
+                     # them at all. (CR PR#78, R6.)
+                     "sector_heights": bool(sector_heights),
                      # M3: the menu is a second frame producer chosen by a persisted cell
                      "menu": menu},
         "self_reset": reset_info,

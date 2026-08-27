@@ -10,9 +10,14 @@ import pytest
 from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen
 from flipjump.utils.exceptions import IODeviceException
 
+from doomfj.config import Config
 from doomfj.menu import CELL_W, fj, palette_colours, pixels, stream
 
-W, H = 160, 100
+# R6: the CONFIGURED resolution, not a hardcoded 160x100 -- otherwise
+# `test_glyph_geometry_fits_the_screen` asserts nothing about the screen the program actually
+# builds, which is the point of that test. The two fj-level menu tests already do this.
+CFG = Config()
+W, H = CFG.VIEW_W, CFG.VIEW_H
 LINES = ["DOOM ON FLIPJUMP", "NEW GAME", "LEVEL 1", "LEVEL 5", "LEVEL 8", "QUIT"]
 COLOURS = (0, 4, 176)
 

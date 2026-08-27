@@ -188,7 +188,17 @@ def main():
         print("SELFTEST (the oracle was told the doors never moved): "
               + ("FAIL -- the gate did not notice" if ok else "PASS -- the gate rejected it"))
         return 0 if not ok else 1
-    print("M2-R2 GATE: " + ("PASS" if ok else "FAIL"))
+    # ⚠ SAY WHAT WAS NOT JUDGED. The verdict excludes pixels inside the pre-existing fj-vs-oracle
+    # delta, so an unqualified "byte-exact" would overstate it -- and commit 638e59c and PR#78 both
+    # did exactly that while this gate's own output said "7 inherited" (CR PR#78, R9). The count
+    # rides in the verdict line now, where it cannot be dropped when the result is quoted.
+    verdict = "PASS" if ok else "FAIL"
+    if ok and total_inherited:
+        verdict += (" -- byte-exact on every judged pixel, with %d changed pixels NOT judged "
+                    "(they fall inside the standing non-sim-tier delta)" % total_inherited)
+    elif ok:
+        verdict += " -- byte-exact on every changed pixel, none excluded"
+    print("M2-R2 GATE: " + verdict)
     return 0 if ok else 1
 
 

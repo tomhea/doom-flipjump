@@ -232,6 +232,9 @@ STANDALONE_POLLS = 8
 # M3 -- the menu the standalone tier boots into. Entries only; the picture is derived
 # (doomfj.menu), and the colours come from the wad's own PLAYPAL.
 DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "QUIT"]
+# which entry is highlighted. 2 = "NEW GAME" in DEFAULT_MENU -- an index that means nothing for a
+# caller-supplied list, so `menu_entries` brings its own `menu_selected`.
+DEFAULT_MENU_SELECTED = 2
 
 # M5 — the standalone tier's own globals, in ONE place (R6): the emitter declares them and
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, so a vec
@@ -395,7 +398,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        deg: bool = False, state_wire: str = "dec",
                        player_sim: bool = False, collide: bool = False,
                        moving_things: bool = False, standalone: bool = False,
-                       menu: bool = False, menu_entries=None,
+                       menu: bool = False, menu_entries=None, menu_selected: int = 0,
                        sector_heights: dict | None = None,
                        return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
@@ -590,7 +593,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # Same helper the oracle's `scene_sectors` uses (R6): a door the two mirrors disagree
     # about is the failure this repo has paid for three times.
     secs = apply_sector_heights(map_wad.sectors(mapname), sector_heights)
-    scene = build_scene(map_wad, asset_wad, mapname)
+    # ⚠ THE OVERRIDE GOES HERE TOO. `secs` above has the doors applied and `scene` did not, so the
+    # emitter held TWO sector sources that disagreed about where a door is. Only
+    # `scene.asset_wad.colormap()` is read from it today, which is why nothing broke -- but "one
+    # doored, one not" is precisely the two-mirror drift doors.py exists to prevent, and the next
+    # reader of `scene` would have inherited it silently. (CR PR#78, R6.)
+    scene = build_scene(map_wad, asset_wad, mapname, sector_heights)
     colormap = scene.asset_wad.colormap()
     proj = cfg.PROJECTION << 16
     defs = {d.name.upper(): d for d in asset_wad.texture_defs("TEXTURE1")}
@@ -1676,7 +1684,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
 
     # M3: the menu frame + the branch past the world. Built here, where `asset_wad` is
     # resolved, so its colours come from the SAME palette the renderer bakes.
-    _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU), 2)
+    _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
+                               DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected)
                    if menu else None)
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block) if standalone else

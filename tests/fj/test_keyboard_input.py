@@ -40,7 +40,7 @@ BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b",
 def _program() -> str:
     lines = ["stl.startup_and_init_all"]
     for _ in range(FRAMES):
-        lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kmode, bad")
+        lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kuse, kmode, bad")
         lines += [f"hex.print_as_digit k{name}, 0" for name in
                   ("fwd", "back", "left", "right")]
         lines.append("hex.print_as_digit kmode, 0")
@@ -49,7 +49,9 @@ def _program() -> str:
               # the halt a non-keyboard input stream gets -- '!' so a rejected run is visible
               "bad:", "stl.output_char 0x21", "stl.loop",
               "kstat: hex.vec 1", "kcode: hex.vec 2", "kmode: hex.vec 1, 1",
-              "kfwd: hex.vec 1", "kback: hex.vec 1", "kleft: hex.vec 1", "kright: hex.vec 1"]
+              "kfwd: hex.vec 1", "kback: hex.vec 1", "kleft: hex.vec 1", "kright: hex.vec 1",
+              # M2-R4: the USE key (space, 0x20) is a held flag like the four above
+              "kuse: hex.vec 1"]
     return "\n".join(lines) + "\n"
 
 

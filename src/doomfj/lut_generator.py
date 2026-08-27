@@ -57,6 +57,7 @@ __all__ = [
     "generate_zlight_lut_fj",
     "generate_zlight_packed_lut_fj",
     "generate_bands_walk_fj",
+    "generate_state_switch_fj",
     "generate_w1r_walls_fj",
 ]
 
@@ -744,6 +745,57 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
     out += _byte2bits_loader("vql", "vq_lo")
     out += _byte2bits_loader("vqh", "vq_hi")
     out.append("")
+    return chr(10).join(out)
+
+
+def generate_state_switch_fj(name: str, targets, *, states: int = 16) -> str:
+    """M2-R3 — a 1-nibble switch that fcalls one of `targets` and returns to the caller.
+
+    THE RUNTIME DOOR'S ONLY NEW PRIMITIVE. A door-touching seg has its constant block baked once
+    per door state; this picks the one the state nibble names. The machinery is
+    `generate_bands_walk_fj`'s, verbatim and for the same reason (R42: a flat dispatch whose
+    handlers must not disturb the shared return) — index xored into the dispatch op, `wflip`
+    through it, and a per-entry CLEAN that un-xors the same index back out.
+
+    `<name>_go idx` is the macro the call site uses. `idx` is the address of the door's state
+    nibble, so the call site does NO arithmetic at all: the switch is per-seg, one entry per state,
+    and the state cell IS the index. (A single shared switch over (seg, state) pairs was the other
+    option and costs a base-add plus a wider index at every one of the ~81 call sites, for a table
+    81x smaller — the wrong trade when the table is 16 entries.)
+
+    Entries past `len(targets)` clean with their OWN index, exactly as the bands walk's padding
+    does, so a state cell that somehow holds an unreachable value corrupts nothing.
+
+    ⚠ NOT RE-ENTRANT, and it shares `hex.tables.ret` with `vpb_walk`. Call it from the subsector
+    action (where the band walk is not running), never from inside a band handler.
+    """
+    n = len(targets)
+    assert 0 < n <= states, f"{name}: {n} targets does not fit a {states}-entry switch"
+    assert states == 1 << (states - 1).bit_length(), f"{name}: states must be a power of two"
+    nib = max(1, ((states - 1).bit_length() + 3) // 4)
+    assert nib == 1, f"{name}: this switch is the 1-nibble form ({states} states)"
+    out = [f"// M2-R3 door state switch {name}: {n} states of {states}",
+           f"def {name}_go idx @ return < hex.tables.ret, {name}_dsp {{",
+           f"    hex.xor {name}_dsp, idx",
+           f"    wflip hex.tables.ret+w, return, {name}_dsp",
+           "  return:",
+           "    wflip hex.tables.ret+w, return",
+           "}",
+           f"{name}_blk__:",
+           f"    ;{name}_end__",
+           f"{name}_dsp: ;{name}_switch__",
+           f"    pad {states}",
+           f"{name}_switch__:"]
+    for k in range(states):
+        out.append(f"    ;{name}_t{k}" if k < n else f"    ;{name}_clean__ + {k}*dw")
+    for k, tgt in enumerate(targets):
+        out += [f"{name}_t{k}:",
+                f"    stl.fcall {tgt}, {name}_x",
+                f"    ;{name}_clean__ + {k}*dw"]
+    out += [f"{name}_x: ;0",
+            f"{name}_clean__:",
+            f"    hex.tables.clean_table_entry__table {states}, {name}_dsp, hex.tables.ret",
+            f"{name}_end__:", ""]
     return chr(10).join(out)
 
 

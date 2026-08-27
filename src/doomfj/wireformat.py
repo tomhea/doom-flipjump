@@ -40,8 +40,13 @@ KEY_FORWARD = 1 << 0
 KEY_BACK = 1 << 1
 KEY_TURN_LEFT = 1 << 2
 KEY_TURN_RIGHT = 1 << 3
+# M2-R4: the USE key, and it deliberately starts the SECOND nibble. The four movement bits fill
+# the low nibble exactly, and the fj side tests a nibble at a time with `hex.if_flags` -- so bit 4
+# is the first bit that costs nothing to add: it is `pkeys + 1*dw` under the same mask as bit 0.
+KEY_USE = 1 << 4
 KEY_NAMES = {"forward": KEY_FORWARD, "back": KEY_BACK,
-             "turn_left": KEY_TURN_LEFT, "turn_right": KEY_TURN_RIGHT}
+             "turn_left": KEY_TURN_LEFT, "turn_right": KEY_TURN_RIGHT,
+             "use": KEY_USE}
 
 # The fj side tests these bits with `hex.if_flags`, whose mask is a set of NIBBLE VALUES rather
 # than a bit mask: mask bit v is set iff nibble value v should take the "flag set" branch. So
@@ -52,12 +57,15 @@ KEY_FORWARD_MASK = _NIBBLE_MASK[0]        # 0xAAAA
 KEY_BACK_MASK = _NIBBLE_MASK[1]           # 0xCCCC
 KEY_TURN_LEFT_MASK = _NIBBLE_MASK[2]      # 0xF0F0
 KEY_TURN_RIGHT_MASK = _NIBBLE_MASK[3]     # 0xFF00
+KEY_USE_MASK = _NIBBLE_MASK[0]            # 0xAAAA, applied to the HIGH nibble (pkeys + 1*dw)
 
 
 def keys_dict(byte: int) -> dict:
-    """The wire's key byte as the dict `ReferenceModel.step_sim` reads. Only bits 0..3 exist -- the
-    fj side reads the LOW NIBBLE only -- so anything above is dropped here too, deliberately, so the
-    two mirrors agree on a malformed byte as well as a well-formed one."""
+    """The wire's key byte as the dict `ReferenceModel.step_sim` reads.
+
+    Bits 0..3 are the movement keys (the low nibble, which is all `step_sim` reads) and bit 4 is
+    M2-R4's use key (the low bit of the high nibble). Bits 5..7 do not exist on either side, so a
+    malformed byte reads the same in both mirrors."""
     return {name: bool(byte & bit) for name, bit in KEY_NAMES.items()}
 
 

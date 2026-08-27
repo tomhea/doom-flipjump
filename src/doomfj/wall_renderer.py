@@ -49,7 +49,9 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
-from doomfj.lut_generator import generate_bands_walk_fj, generate_w1r_walls_fj
+from doomfj.doors import DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states
+from doomfj.lut_generator import (generate_bands_walk_fj, generate_state_switch_fj,
+                                  generate_w1r_walls_fj)
 from doomfj.tables import (sine_table, tantoangle_table, slopediv_recip8_table,
                            slopediv_recip_table, viewangletox_table, xtoviewangle_table)
 from doomfj.config import PNEAR_SEG_BUDGET
@@ -76,7 +78,7 @@ THING_XORBY_FIELDS = (("sp_x", 8), ("sp_y", 8), ("sp_z", 8), ("sp_left", 8), ("s
                       ("sp_base", 4), ("sp_base2", 4), ("sp_dw", 2), ("sp_lt", 2))
 
 
-def _seg_xorby_block(label, fields):
+def _seg_xorby_block(label, fields, ret="xb_ret"):
     """The shared per-seg constant block `label` (emitted ONCE, fcall'd twice per visible seg — SET then CLEAR). M12pp:
     replaces the per-seg baked `hex.set` (each pays an @-dispatch to zero a reg it overwrites) with `hex.xor_by`
     (no @), kept correct by xor-INVOLUTION self-zeroing. `fields` = list of (regname, width, value) PURE
@@ -84,7 +86,9 @@ def _seg_xorby_block(label, fields):
     lines = [f"  {label}:"]
     for reg, wdt, val in fields:
         lines.append(f"    hex.xor_by {wdt}, {reg}, {val}")
-    lines.append("    stl.fret xb_ret")
+    # M2-R3: a per-state block is reached through its door's switch and must return to the SWITCH's
+    # register, not the call site's -- the switch is what the call site fcall'd.
+    lines.append(f"    stl.fret {ret}")
     return lines
 
 
@@ -400,6 +404,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                        moving_things: bool = False, standalone: bool = False,
                        menu: bool = False, menu_entries=None, menu_selected: int = 0,
                        sector_heights: dict | None = None,
+                       doors: bool = False, door_quant: int = DOOR_QUANT,
                        return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
@@ -593,6 +598,77 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # Same helper the oracle's `scene_sectors` uses (R6): a door the two mirrors disagree
     # about is the failure this repo has paid for three times.
     secs = apply_sector_heights(map_wad.sectors(mapname), sector_heights)
+
+    # ---- M2-R3: THE RUNTIME DOOR -------------------------------------------------------------
+    # `sector_heights` above bakes ONE height per door (R2). `doors=True` bakes them ALL, once per
+    # state, and puts a nibble in front: the state cell picks which constant block a door-touching
+    # seg runs. `_dsecs[k]` is the whole map with every door at state k -- the same `secs` shape
+    # every predicate and field builder below already reads, so a door state is expressed as
+    # "which sector list do I build this block from" and nothing else has to know about doors.
+    #
+    # ⚠ THE STRUCTURAL DECISIONS ARE UNIONS, not the shut map's. Whether a seg is walked, whether
+    # it marks planes, whether it carries a step face, whether a thing can stand in a subsector --
+    # each is a compile-time yes/no that has to hold for EVERY state, because the emitted program
+    # is one program. Taking them from the stored (shut) map is exactly the bug the handoff warns
+    # about twice: the walk prunes a shut door's subsector, and `thing_live_subsectors` calls a
+    # shut door uninhabitable (`ceil_h <= floor_h`). Both would be silently wrong the moment the
+    # door opened, and neither shows up in a shut-door frame.
+    _dst_tbl = door_states(secs, lds, sds, door_quant) if doors else {}
+    _dslot = {si: i for i, si in enumerate(sorted(_dst_tbl))}
+    _dmax = max((len(v) for v in _dst_tbl.values()), default=0)
+    _dsecs = [apply_sector_heights(
+        secs, heights_for_states(secs, lds, sds,
+                                 {_si: min(k, len(_st) - 1) for _si, _st in _dst_tbl.items()},
+                                 door_quant))
+        for k in range(_dmax)]
+    _dsecs_open = _dsecs[-1] if _dsecs else secs      # the union for every "could it ever" question
+
+    def _seg_door(seg):
+        """The door sector whose state this seg's constants depend on, or None.
+
+        A seg is touched either because its OWN sector is the door (its pid and render constants
+        come from that ceiling) or because it LOOKS AT one (its V5 stacked upper piece is the gap
+        between its own ceiling and the door's). MEASURED on E1M1: 52 and 29 of 2,057, and no seg
+        is both -- asserted, because a seg with a door on both sides would need a two-dimensional
+        switch and this one is a nibble."""
+        if not _dst_tbl:
+            return None
+        ld_ = lds[seg.linedef]
+        f_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
+        b_ = sds[ld_.back if seg.side == 0 else ld_.front].sector if ld_.back != -1 else None
+        if f_ in _dst_tbl and b_ in _dst_tbl:
+            raise AssertionError(
+                f"{mapname}: seg on linedef {seg.linedef} has a door on BOTH sides "
+                f"({f_} and {b_}); the per-seg state switch addresses one door")
+        if f_ in _dst_tbl:
+            return f_
+        return b_ if (b_ is not None and b_ in _dst_tbl) else None
+
+    def _seg_secs(seg):
+        """The sector lists this seg's constants must be baked against: one per state of its door,
+        or just the map itself. This is the ONLY place the per-state fan-out is decided, so a seg
+        no door can move emits exactly what it emitted before doors existed."""
+        d_ = _seg_door(seg)
+        return [secs] if d_ is None else _dsecs[:len(_dst_tbl[d_])]
+
+    def _door_blocks(si, seg, label, build_fields):
+        """(block lines, call lines) -- the constant block, or one per state behind a switch.
+
+        `build_fields(sv)` builds the field list against sector list `sv`. For a door seg the call
+        site becomes a single `dsw_<label>_go dstate + slot*dw`: no index arithmetic at all,
+        because the switch is PER SEG and the door's state cell is already the index. (One shared
+        switch over (seg, state) pairs was the alternative and costs a base-add and a wider index
+        at every one of the ~81 call sites, to save a table of 16 entries.)"""
+        variants = _seg_secs(seg)
+        if len(variants) == 1:
+            return _seg_xorby_block(label, build_fields(secs)), [f"    stl.fcall {label}, xb_ret"]
+        blk = []
+        for k, sv in enumerate(variants):
+            blk += _seg_xorby_block(f"{label}_st{k}", build_fields(sv), ret=f"dsw_{label}_x")
+        blk += generate_state_switch_fj(
+            f"dsw_{label}", [f"{label}_st{k}" for k in range(len(variants))]).splitlines()
+        return blk, [f"    dsw_{label}_go dstate + {_dslot[_seg_door(seg)]}*dw"]
+
     # ⚠ THE OVERRIDE GOES HERE TOO. `secs` above has the doors applied and `scene` did not, so the
     # emitter held TWO sector sources that disagreed about where a door is. Only
     # `scene.asset_wad.colormap()` is read from it today, which is why nothing broke -- but "one
@@ -791,7 +867,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     skypid = ""                     # filled below, once the pid map exists
     # V3: the step-face shade bank + the (light, wall-units) class each face-carrying boundary bakes.
     stepcol, step_cls = (_lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs,
-                                          w1r=bool(w1r_flag), sky=sky)
+                                          w1r=bool(w1r_flag), sky=sky, seg_secs=_seg_secs)
                          if (lines and steps) else ("", {}))
     # V4: the sprite run-list bank + the shade-row bank, and the per-type block bases the things bake.
     _do_things = lines and things
@@ -849,7 +925,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # ...gated by `_do_things` for the PRUNE, but not for the bbox gate: like the old code, the
     # wedge boxes are inflated whether or not sprites are emitted, because the oracle's half is
     # computed the same way in both cases and the two sets must agree to the node.
-    _thing_live_gate = thing_live_subsectors(cmap, lds, sds, secs)
+    # M2-R3: the OPEN map. `thing_live_subsectors` calls a sector with `ceil_h <= floor_h`
+    # uninhabitable, which is exactly what a SHUT door is -- so on the stored map every door
+    # subsector is pruned out of the walk and out of the bbox gate, and the first frame after a
+    # door opens has nothing emitted for it. The union is the open state.
+    _thing_live_gate = thing_live_subsectors(cmap, lds, sds, _dsecs_open)
     _thing_live = _thing_live_gate if _do_things else frozenset()
     # THE LOUD FAILURE (handoff-m14.md section 3: "a silent vanish is unacceptable; a hard failure
     # is fine"). Anything the predicate calls uninhabitable must be provably unreachable, so a thing
@@ -968,16 +1048,22 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # two-sided one only when its two sides differ in a band-bank key (height, light, flat) --
     # DOOM's R_StoreWallRange markfloor/markceiling test. Equal on both sides => attributing the
     # plane to either sector renders identically, so skipping it is free of error BY CONSTRUCTION.
-    def _seg_marks(seg) -> bool:
+    def _seg_marks_in(seg, sv) -> bool:
         ld_ = lds[seg.linedef]
         if ld_.back == -1:
             return True
-        fs_ = secs[sds[ld_.front if seg.side == 0 else ld_.back].sector]
-        bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
+        fs_ = sv[sds[ld_.front if seg.side == 0 else ld_.back].sector]
+        bs_ = sv[sds[ld_.back if seg.side == 0 else ld_.front].sector]
         return ((fs_.ceil_h, fs_.light & 0xFF, fs_.ceil_tex.upper())
                 != (bs_.ceil_h, bs_.light & 0xFF, bs_.ceil_tex.upper())
                 or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
                 != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
+
+    def _seg_marks(seg) -> bool:
+        """M2-R3: ANY state. A seg the program must be able to mark in some door position has to be
+        emitted in every one -- there is one program, and the compile-time cull cannot be
+        conditional on a runtime cell."""
+        return any(_seg_marks_in(seg, sv) for sv in _seg_secs(seg))
 
     def _seg_draws_wall(seg) -> bool:
         """M13-2S rung 3b (ablate "tsfull", measurement only): would this two-sided seg draw an
@@ -1005,10 +1091,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         ld_ = lds[seg.linedef]
         if ld_.back == -1 or not _seg_marks(seg):
             return False
-        fs_ = secs[sds[ld_.front if seg.side == 0 else ld_.back].sector]
-        bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
-        um_, lm_ = rm.v5_side_modes(fs_, bs_, sky)
+        um_, lm_ = _seg_piece_modes(seg)
         return bool(um_ or lm_)
+
+    def _seg_piece_modes(seg):
+        """(um, lm) ORed over the seg's door states -- whether a FACE BLOCK is emitted at all is a
+        compile-time decision, while which face it draws is a per-state constant (`seg_fmask`). A
+        door that carries a riser only when it is open still needs the block baked when it is
+        shut."""
+        ld_ = lds[seg.linedef]
+        um_ = lm_ = 0
+        for sv in _seg_secs(seg):
+            a_, b_ = rm.v5_side_modes(sv[sds[ld_.front if seg.side == 0 else ld_.back].sector],
+                                      sv[sds[ld_.back if seg.side == 0 else ld_.front].sector], sky)
+            um_, lm_ = um_ or a_, lm_ or b_
+        return um_, lm_
 
     def _seg_in_walk(seg) -> bool:
         """Does the emitted walk do per-seg work for this seg? (the prune predicate's unit)
@@ -1039,22 +1136,26 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             # sector's two band lists must be in the bank too (E1M1: 159 -> 227 distinct keys).
             if not _seg_in_walk(_seg):
                 continue
-            _ck, _fk = _plane_keys(rm._seg_sector(lds, sds, secs, _seg))
-            lines_key_ids.setdefault(_ck, len(lines_key_ids))
-            lines_key_ids.setdefault(_fk, len(lines_key_ids))
-            if (_ck, _fk) not in lines_pid:
-                lines_pid[(_ck, _fk)] = len(lines_pid) + 1     # 1-based: 0 == "not attributed yet"
-            # V5: a stacked piece's REGION shows its boundary's BACK sector, so back pairs need
-            # pids (and band lists) too. Registered for every two-sided walk seg -- a superset
-            # of the face-carrying ones, a few extra keys at most.
-            if stack_flag and lds[_seg.linedef].back != -1:
-                _bsec5 = secs[sds[lds[_seg.linedef].back if _seg.side == 0
-                               else lds[_seg.linedef].front].sector]
-                _bck, _bfk = _plane_keys(_bsec5)
-                lines_key_ids.setdefault(_bck, len(lines_key_ids))
-                lines_key_ids.setdefault(_bfk, len(lines_key_ids))
-                if (_bck, _bfk) not in lines_pid:
-                    lines_pid[(_bck, _bfk)] = len(lines_pid) + 1
+            # M2-R3: once per STATE of this seg's door (once, for a seg no door moves). A pid the
+            # seg can bake in some state but that is not in this registry is an emit-time KeyError,
+            # which is the right failure -- but only because the registry is filled here first.
+            for _sv in _seg_secs(_seg):
+                _ck, _fk = _plane_keys(rm._seg_sector(lds, sds, _sv, _seg))
+                lines_key_ids.setdefault(_ck, len(lines_key_ids))
+                lines_key_ids.setdefault(_fk, len(lines_key_ids))
+                if (_ck, _fk) not in lines_pid:
+                    lines_pid[(_ck, _fk)] = len(lines_pid) + 1   # 1-based: 0 == "not attributed yet"
+                # V5: a stacked piece's REGION shows its boundary's BACK sector, so back pairs need
+                # pids (and band lists) too. Registered for every two-sided walk seg -- a superset
+                # of the face-carrying ones, a few extra keys at most.
+                if stack_flag and lds[_seg.linedef].back != -1:
+                    _bsec5 = _sv[sds[lds[_seg.linedef].back if _seg.side == 0
+                                 else lds[_seg.linedef].front].sector]
+                    _bck, _bfk = _plane_keys(_bsec5)
+                    lines_key_ids.setdefault(_bck, len(lines_key_ids))
+                    lines_key_ids.setdefault(_bfk, len(lines_key_ids))
+                    if (_bck, _bfk) not in lines_pid:
+                        lines_pid[(_bck, _bfk)] = len(lines_pid) + 1
         # M13-2S rung 3a — the bank LAYOUT. With per-column attribution the emit half has to recover
         # a column's two band lists from ONE byte, so `plane_near` lays the bank out per SECTOR PLANE
         # PAIR (pid): pid p's ceiling list is slot 2(p-1), its floor list 2(p-1)+1, hence
@@ -1347,45 +1448,57 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                         _v1x, _v1y = verts[seg.v1]
                         _v2x, _v2y = verts[seg.v2]
                         _sa, _sb, _sc = seg_affine_coeffs(seg, verts)
-                        xorby_blocks[si] = _seg_xorby_block(f"seg{si}_attrib_consts", [
-                            ("seg_v1x", 8, (_v1x << 16) & 0xFFFFFFFF),
-                            ("seg_v1y", 8, (_v1y << 16) & 0xFFFFFFFF),
-                            ("seg_v2x", 8, (_v2x << 16) & 0xFFFFFFFF),
-                            ("seg_v2y", 8, (_v2y << 16) & 0xFFFFFFFF),
-                            ("seg_a", 8, _sa), ("seg_b", 8, _sb), ("seg_c", 8, _sc),
-                            ("seg_pid", 2,
-                             lines_pid[_plane_keys(rm._seg_sector(lds, sds, secs, seg))])])
+                        _ablk, _acall = _door_blocks(
+                            si, seg, f"seg{si}_attrib_consts",
+                            lambda sv, _sg=seg: [
+                                ("seg_v1x", 8, (_v1x << 16) & 0xFFFFFFFF),
+                                ("seg_v1y", 8, (_v1y << 16) & 0xFFFFFFFF),
+                                ("seg_v2x", 8, (_v2x << 16) & 0xFFFFFFFF),
+                                ("seg_v2y", 8, (_v2y << 16) & 0xFFFFFFFF),
+                                ("seg_a", 8, _sa), ("seg_b", 8, _sb), ("seg_c", 8, _sc),
+                                ("seg_pid", 2,
+                                 lines_pid[_plane_keys(rm._seg_sector(lds, sds, sv, _sg))])])
+                        xorby_blocks[si] = _ablk
                         # V3: a SECOND block, emitted only for boundaries that actually carry a step
                         # face (709 of E1M1's marking two-sided segs). `seg_fmask` is 0 for the rest,
                         # which is what the leaf tests -- so a face-less boundary pays one 2-nibble
                         # if0 and nothing else, and never pays this block's SET+CLEAR at all.
-                        _fsec = rm._seg_sector(lds, sds, secs, seg)
-                        _bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
                         # V5-DROP: per-side piece MODES (0 none / 1 riser / 2 lip) from the
                         # SSOT -- drop-offs and level flat/light changes now carry a 1-row lip
-                        # piece so the far surface's region paints beyond the edge
-                        _um, _lm = rm.v5_side_modes(_fsec, _bsec, sky)
-                        _tsq = [f"    stl.fcall seg{si}_attrib_consts, xb_ret"]
-                        _tsu = [f"    stl.fcall seg{si}_attrib_consts, xb_ret"]
+                        # piece so the far surface's region paints beyond the edge.
+                        # M2-R3: the modes are ORed over the door's states, because WHETHER the
+                        # block exists is compile-time while WHICH face it draws (`seg_fmask`) is
+                        # a per-state constant. A door that carries a riser only part-way open
+                        # still needs its block baked at every state.
+                        _um, _lm = _seg_piece_modes(seg)
+                        _tsq = list(_acall)
+                        _tsu = list(_acall)
                         if steps and (_um or _lm):
-                            _ln = rm.wall_lightnum(_fsec.light, 0)
-                            xorby_blocks[si] = xorby_blocks[si] + _seg_xorby_block(f"seg{si}_face_consts", [
-                                ("seg_segangle", 8, seg.angle),
-                                ("seg_fmask", 2, _um | (_lm << 4)),
-                                ("seg_uh1", 4, _fsec.ceil_h & 0xFFFF),
-                                ("seg_uh2", 4, _bsec.ceil_h & 0xFFFF),
-                                ("seg_lh1", 4, _bsec.floor_h & 0xFFFF),
-                                ("seg_lh2", 4, _fsec.floor_h & 0xFFFF),
-                                ("seg_ucls", 2, step_cls.get(
-                                    (_ln, max(1, _fsec.ceil_h - _bsec.ceil_h)), 0) if _um else 0),
-                                ("seg_lcls", 2, step_cls.get(
-                                    (_ln, max(1, _bsec.floor_h - _fsec.floor_h)), 0) if _lm else 0),
-                                # V5: the boundary's BACK pair id -- the plane region behind a
-                                # stored piece re-derives its band lists from this (lines_pid_ids)
-                                *([("seg_bpid", 2, lines_pid[_plane_keys(_bsec)])]
-                                  if stack_flag else [])])
-                            _tsq.append(f"    stl.fcall seg{si}_face_consts, xb_ret")
-                            _tsu.append(f"    stl.fcall seg{si}_face_consts, xb_ret")
+                            def _face_fields(sv, _sg=seg, _ld=ld):
+                                f_ = rm._seg_sector(lds, sds, sv, _sg)
+                                b_ = sv[sds[_ld.back if _sg.side == 0 else _ld.front].sector]
+                                u_, l_ = rm.v5_side_modes(f_, b_, sky)
+                                ln_ = rm.wall_lightnum(f_.light, 0)
+                                return [
+                                    ("seg_segangle", 8, _sg.angle),
+                                    ("seg_fmask", 2, u_ | (l_ << 4)),
+                                    ("seg_uh1", 4, f_.ceil_h & 0xFFFF),
+                                    ("seg_uh2", 4, b_.ceil_h & 0xFFFF),
+                                    ("seg_lh1", 4, b_.floor_h & 0xFFFF),
+                                    ("seg_lh2", 4, f_.floor_h & 0xFFFF),
+                                    ("seg_ucls", 2, step_cls.get(
+                                        (ln_, max(1, f_.ceil_h - b_.ceil_h)), 0) if u_ else 0),
+                                    ("seg_lcls", 2, step_cls.get(
+                                        (ln_, max(1, b_.floor_h - f_.floor_h)), 0) if l_ else 0),
+                                    # V5: the boundary's BACK pair id -- the plane region behind a
+                                    # stored piece re-derives its band lists from this
+                                    *([("seg_bpid", 2, lines_pid[_plane_keys(b_)])]
+                                      if stack_flag else [])]
+                            _fblk, _fcall = _door_blocks(si, seg, f"seg{si}_face_consts",
+                                                         _face_fields)
+                            xorby_blocks[si] = xorby_blocks[si] + _fblk
+                            _tsq += _fcall
+                            _tsu += _fcall
                         # V5-DROP-P2: LIGHT-ONLY marking segs (no pieces possible) stop at
                         # claim-completion via tsstop; piece-carrying segs call unconditionally
                         # and stop on the leaf's wall-drawn `full` entry test instead.
@@ -1483,8 +1596,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                             f"  ss{cid}_seg{si}_unseen:",
                             f"    stl.fcall seg{si}_geom_consts, xb_ret"]
                     continue
-                rfields = [("seg_segangle", 8, seg.angle),
-                           *([("seg_wstrip", "w/4", f"{lines_wstrip_off[si]}*dw")]
+                def rfields(sv, _sg=seg, _si=si):
+                    ssec = rm._seg_sector(lds, sds, sv, _sg)
+                    ckey, fkey = _plane_keys(ssec)
+                    return [("seg_segangle", 8, _sg.angle),
+                           *([("seg_wstrip", "w/4", f"{lines_wstrip_off[_si]}*dw")]
                              if wall_mode in ("W2S", "WPX") else []),
                            ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
                            ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
@@ -1511,16 +1627,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                else f"{lines_key_ids[ckey] * 130}*dw"),
                               ("seg_fvpidx", "w/4", lines_key_ids[fkey] * 2 if ascode
                                else f"{lines_key_ids[fkey] * 130}*dw")])]
-                xorby_blocks[si] = (_seg_xorby_block(f"seg{si}_geom_consts", gfields)
-                                    + _seg_xorby_block(f"seg{si}_render_consts", rfields))
+                # M2-R3: only the RENDER block moves with a door -- the geom block is vertices and
+                # affine coefficients, which a ceiling cannot change. So a door's own wall pays one
+                # switch dispatch, not two, and its pass-1 cull is untouched.
+                _rblk, _rcall = _door_blocks(si, seg, f"seg{si}_render_consts", rfields)
+                xorby_blocks[si] = (_seg_xorby_block(f"seg{si}_geom_consts", gfields) + _rblk)
                 # ss{cid}_seg{si}_unseen: keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
                 # leaf's action once per parent branch, so seg-index labels would collide (R6m).
                 out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
                         "    stl.fcall seg_pass1_leaf, seg_ret",
                         f"    hex.if0 1, proceed, ss{cid}_seg{si}_unseen",
-                        f"    stl.fcall seg{si}_render_consts, xb_ret",
+                        *_rcall,
                         "    stl.fcall seg_pass2_leaf, seg_ret2",
-                        f"    stl.fcall seg{si}_render_consts, xb_ret",
+                        *_rcall,
                         f"  ss{cid}_seg{si}_unseen:",
                         f"    stl.fcall seg{si}_geom_consts, xb_ret"]
             if out:
@@ -2071,6 +2190,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
              f"viewy: hex.vec 8, {_spawn.y & 0xFFFFFFFF}",
              f"viewangle: hex.vec 8, {_spawn.angle & 0xFFFFFFFF}"] if standalone else
             ["viewx: hex.vec 8", "viewy: hex.vec 8", "viewangle: hex.vec 8"]),
+          # M2-R3: one nibble per door, in `sorted(door sector)` order -- the index every per-seg
+          # state switch dispatches on. Zero is SHUT for every door by construction of
+          # `doors.door_states`, so this declaration is the level's initial condition, exactly as
+          # `viewx/viewy/viewangle` are for the player.
+          *([f"dstate: hex.vec {len(_dslot)}, 0"] if _dst_tbl else []),
           *_collide_decls,                                  # M14-d collision state
           *HOISTED_SCRATCH_DECLS,                           # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2
@@ -2944,7 +3068,8 @@ STEP_SLOT_STRIDE = 16      # V3: bytes per column in `sfslot` -- 6 used, rounded
 STEP_COL_STRIDE = 256      # ... and bytes per light class in `stepcol`, same whole-nibble reason.
 
 
-def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False, sky=False):
+def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False, sky=False,
+                     seg_secs=None):
     """V3 — the step-face SHADE bank, plus the (lightnum, units) -> class map the segs bake.
 
     A step face is flat-shaded: one palette index for the whole run. But it still takes DOOM's
@@ -2960,20 +3085,25 @@ def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False, sky=Fa
     Values come from `ReferenceModel.wall_light_row`, so oracle and fj cannot drift (R6)."""
     colormap = asset_wad.colormap()
     cls_of: dict = {}
+    # M2-R3: `seg_secs(seg)` yields one sector list per state of that seg's door (just `secs` when
+    # no door moves it), so a door's face class exists at EVERY height it can stop at. The seg
+    # bakes `seg_ucls` per state from this same map; a missing class is a KeyError at emit, but
+    # only because both sides enumerate states the same way.
     for seg in cmap.segs:
         ld = lds[seg.linedef]
         if ld.back == -1:
             continue
-        fsec = rm._seg_sector(lds, sds, secs, seg)
-        bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
-        ln = rm.wall_lightnum(fsec.light, 0)
-        # V5-DROP: lips (mode 2) collapse to units=1; risers keep their true delta (R6:
-        # exactly the keys the seg bakes below)
-        um, lm = rm.v5_side_modes(fsec, bsec, sky)
-        if um:
-            cls_of.setdefault((ln, max(1, fsec.ceil_h - bsec.ceil_h)), len(cls_of))
-        if lm:
-            cls_of.setdefault((ln, max(1, bsec.floor_h - fsec.floor_h)), len(cls_of))
+        for sv in (seg_secs(seg) if seg_secs else [secs]):
+            fsec = rm._seg_sector(lds, sds, sv, seg)
+            bsec = sv[sds[ld.back if seg.side == 0 else ld.front].sector]
+            ln = rm.wall_lightnum(fsec.light, 0)
+            # V5-DROP: lips (mode 2) collapse to units=1; risers keep their true delta (R6:
+            # exactly the keys the seg bakes below)
+            um, lm = rm.v5_side_modes(fsec, bsec, sky)
+            if um:
+                cls_of.setdefault((ln, max(1, fsec.ceil_h - bsec.ceil_h)), len(cls_of))
+            if lm:
+                cls_of.setdefault((ln, max(1, bsec.floor_h - fsec.floor_h)), len(cls_of))
     assert len(cls_of) * STEP_COL_STRIDE <= 0x10000, f"step classes overflow the 4-nibble index: {len(cls_of)}"
     out = [f"// V3 step-face shades: {len(cls_of)} (light, wall-units) classes x "
            f"{STEP_COL_STRIDE} dw, indexed class<<8 | height", "stepcol:"]

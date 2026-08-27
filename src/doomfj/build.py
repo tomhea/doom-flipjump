@@ -220,7 +220,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                         state_wire="bin", player_sim=True, collide=True,
                         moving_things=True, standalone=False, menu=False, menu_entries=None,
                         menu_selected=0,
-                        sector_heights=None,
+                        sector_heights=None, doors=False,
                         self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
@@ -287,7 +287,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                                collide=collide, moving_things=moving_things,
                                standalone=standalone, menu=menu, menu_entries=menu_entries,
                                menu_selected=menu_selected,
-                               sector_heights=sector_heights,
+                               sector_heights=sector_heights, doors=doors,
                                return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
@@ -409,6 +409,10 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      # a per-sector dict, and what the guard needs to catch is a build that has
                      # them at all. (CR PR#78, R6.)
                      "sector_heights": bool(sector_heights),
+                     # M2-R3: the runtime door. Picture-shaping and opt-in, so it belongs in
+                     # the exact-equality features guard for the same reason sector_heights
+                     # does -- a tier flag that can arrive unnoticed is the CR-2026-08 miss.
+                     "doors": bool(doors),
                      # M3: the menu is a second frame producer chosen by a persisted cell
                      "menu": menu},
         "self_reset": reset_info,

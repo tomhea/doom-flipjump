@@ -49,6 +49,23 @@ def door_decls(ndoors: int) -> list:
     ]
 
 
+def _cross(p: str, st: str, tag: str, k, lis) -> list:
+    """`if state == k: toggle every one of this door's blocking bits`.
+
+    Emitted only for the step that crosses the threshold, and not at all when there is no crossing
+    to make -- so a door pays this on two frames of an animation and nothing on the rest."""
+    if k is None or not lis:
+        return []
+    return [f"    hex.xor_by 1, {st}, {k}",
+            f"    hex.if0 1, {st}, {p}_{tag}",
+            f"    hex.xor_by 1, {st}, {k}",
+            f"    ;{p}_{tag}_no",
+            f"  {p}_{tag}:",
+            f"    hex.xor_by 1, {st}, {k}",
+            *_unblock_lines(lis),
+            f"  {p}_{tag}_no:"]
+
+
 def _box_test(d: int, box, hit: str, miss: str) -> list:
     """`in_use_box` in fj: four signed compares of the 16.16 player position against baked corners.
 
@@ -69,9 +86,11 @@ def _box_test(d: int, box, hit: str, miss: str) -> list:
     return out
 
 
-def door_tic_lines(slots, nstates, boxes) -> list:
+def door_tic_lines(slots, nstates, boxes, passes=None, lines=None) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
-    `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units.
+    `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units,
+    `passes[si]` the state at which it becomes walk-through-able and `lines[si]` the linedefs
+    whose blocking bit that flips.
 
     The label prefix is `dr{slot}_`, so the emitted names say which door they belong to.
     """
@@ -86,6 +105,12 @@ def door_tic_lines(slots, nstates, boxes) -> list:
         sub = f"dsub + {d}*dw"
         wt = f"dwait + {WAIT_NIBBLES * d}*dw"
         p = f"dr{d}"
+        pw = (passes or {}).get(si)
+        lw = (lines or {}).get(si, ())
+        # A threshold of 0 (passable even shut) or past the last state (never passable) needs no
+        # patch at all -- the baked bit is already right for every state the door can reach.
+        if not pw or pw >= n:
+            pw, lw = None, ()
         out += [f"  // ---- door {d} (sector {si}): {n} states ----",
                 # ---- the trigger: `if used and dr != OPENING` -------------------------------
                 f"    hex.if0 1, duse, {p}_moved",
@@ -127,6 +152,10 @@ def door_tic_lines(slots, nstates, boxes) -> list:
                 f"    hex.xor_by 1, {dr}, {OPENING}",
                 # closing: one step down, and IDLE when it reaches shut
                 f"    hex.dec 1, {st}",
+                # ...and crossing back BELOW it makes the door a wall again. The same constant
+                # does both, because the flip is an xor: pw-1 is the first state that no longer
+                # fits through.
+                *_cross(p, st, "shuts", (pw - 1) if pw else None, lw),
                 f"    hex.if0 1, {st}, {p}_shut",
                 f"    ;{p}_done",
                 f"  {p}_shut:",
@@ -135,6 +164,10 @@ def door_tic_lines(slots, nstates, boxes) -> list:
                 f"  {p}_up:",
                 f"    hex.xor_by 1, {dr}, {OPENING}",
                 f"    hex.inc 1, {st}",
+                # M2-R4 collision: crossing `pass_state` upward is where the door stops being a
+                # wall. Tested by xoring the threshold in and asking for zero, and it fires on
+                # exactly one step of the whole animation.
+                *_cross(p, st, "opens", pw, lw),
                 f"    hex.xor_by 1, {st}, {last}",
                 f"    hex.if0 1, {st}, {p}_open",
                 f"    hex.xor_by 1, {st}, {last}",
@@ -155,3 +188,51 @@ def door_tic_lines(slots, nstates, boxes) -> list:
                 f"    hex.set 1, {sub}, {SPEED}",
                 f"  {p}_done:"]
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# M2-R4 — the COLLISION half, which is ONE BIT.
+#
+# A door's collision opening is baked at its OPEN height (`collision.line_rows`), and its
+# two-sided lines carry FLAG_BLOCKING so a shut door refuses like a wall. Reaching
+# `doors.pass_state` -- the first height whose opening clears DOOM's 56-unit gap -- clears that bit
+# with a single `wflip` into the packed linedef table, and dropping back below it sets the bit
+# again. The same constant does both, because xor.
+#
+# ⚠ THIS SURVIVES THE M1 RESET BECAUSE `lnrow` IS NOT IN THE RESTORE SET (it is a read-only packed
+# table and `emit_reset_part` drops read-only extents -- verified against the shipped set, and
+# asserted by the emitter). If it ever enters the set, a door would re-shut its collision every
+# frame while still LOOKING open, and nothing about the picture would say so.
+#
+# What the threshold gives up: while the door is between passable and fully open, the player's
+# ceiling reads as fully open rather than as the true height. Nothing reads it by then -- `cp_ceil`
+# feeds the gap test and the step logic, both already decided -- and the alternative is a per-state
+# delta table patched on every step.
+# ---------------------------------------------------------------------------------------------
+
+
+def door_line_ids(secs, lds, sds, doors) -> dict:
+    """`{door sector: [linedef index, ...]}` -- the door's TWO-SIDED lines, the ones with an
+    opening a player could pass through. Its one-sided track walls have no opening at any state
+    and stay ordinary walls."""
+    out: dict = {}
+    for li, ld in enumerate(lds):
+        if ld.back == -1 or ld.back == 0xFFFF or ld.back >= len(sds):
+            continue
+        for si in (sds[ld.front].sector, sds[ld.back].sector):
+            if si in doors and li not in out.get(si, ()):
+                out.setdefault(si, []).append(li)
+    return out
+
+
+def _unblock_lines(lis) -> list:
+    """The wflip that toggles FLAG_BLOCKING on each of a door's lines.
+
+    The byte lives in the op's JUMP field (a packed LUT entry is `;value*dw`), so the flip is
+    `value*dw` at `+w`. It is dispatch-free, which is what lets it sit anywhere -- including
+    inside a switch target, should the per-state form ever be needed."""
+    # local import: doomfj.collision imports wall_renderer, which imports THIS module, so a
+    # module-level import would close the cycle. Same precedent as collision's own local import.
+    from doomfj.collision import FLAGS_REST_BYTE, FLAG_BLOCKING, LINE_REST_LEN
+    return [f"    wflip lnrow + {li * LINE_REST_LEN + FLAGS_REST_BYTE}*dw + w, "
+            f"{FLAG_BLOCKING:#x}*dw" for li in lis]

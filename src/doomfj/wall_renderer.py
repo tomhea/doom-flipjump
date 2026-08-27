@@ -28,7 +28,7 @@ from doomfj.mapcompiler import build_blockmap
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
                                KEY_FORWARD_MASK, KEY_BACK_MASK,
-                               KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK)
+                               KEY_TURN_LEFT_MASK, KEY_TURN_RIGHT_MASK, KEY_USE_MASK)
 from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
                                 NF_SUBSECTOR, seg_affine_coeffs, bbox_gate_boxes,
                                 thing_live_subsectors,
@@ -49,7 +49,9 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
-from doomfj.doors import DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states
+from doomfj.doorcode import door_decls, door_line_ids, door_tic_lines
+from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
+                          pass_state, use_boxes_xy)
 from doomfj.lut_generator import (generate_bands_walk_fj, generate_state_switch_fj,
                                   generate_w1r_walls_fj)
 from doomfj.tables import (sine_table, tantoangle_table, slopediv_recip8_table,
@@ -185,7 +187,8 @@ def _player_sim_lines(collide: bool = False) -> list:
     ]
 
 
-def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = False) -> list:
+def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = False,
+                      door_lines=()) -> list:
     """The fj that reads one frame's world state (and, on the bin wire, echoes it back).
 
     Lives at module level so `tests/fj/test_state_wire.py` can assemble THE SAME TEXT in a
@@ -215,6 +218,13 @@ def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = Fal
         # M14-c: the tic runs BEFORE anything is derived from the state and before the echo, so the
         # frame is rendered from the state the host will be handed back -- DOOM's P_Ticker then
         # R_RenderPlayerView, and the reason one run really is one tic.
+        # M2-R4: the use key -> `duse`, then one tic of every door. THE DOORS TIC FIRST, before
+        # the player moves: it is what lets a door opened this frame be walked through on the same
+        # frame, and both mirrors have to agree on the order or they disagree about that frame.
+        *(["hex.zero 1, duse",
+           f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, duse_now, duse_yesw",
+           f"duse_yesw:", "hex.xor_by 1, duse, 1",
+           f"duse_now:", *door_lines] if door_lines else []),
         *(_player_sim_lines(collide) if sim else []),
         *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
         *_int_part_lines("vy", "viewy", "vysx", "vydone"),
@@ -246,6 +256,10 @@ DEFAULT_MENU_SELECTED = 2
 # unrestored. `kbstat`/`kbcode` are ordinary write-before-read scratch; the four flags are the
 # PERSISTED held-key state (build.STANDALONE_PERSIST).
 STANDALONE_SCRATCH_DECLS = [
+    # M2-R4: the USE key's held flag. It is PERSISTENT like the four movement flags (the key is
+    # held across frames and only the device's up/down events change it), so it goes in the same
+    # list and the same persist set.
+    "kb_u: hex.vec 1, 0",
     "kbstat: hex.vec 1", "kbcode: hex.vec 2",
     "kb_f: hex.vec 1", "kb_b: hex.vec 1", "kb_l: hex.vec 1", "kb_r: hex.vec 1",
     # M3: which frame producer runs. 1 = MENU, 0 = world, and it BAKES to 1 so the game boots
@@ -282,7 +296,7 @@ def _menu_lines(cfg, asset_wad, entries, selected: int) -> list:
 
 
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
-                            menu: list | None = None) -> list:
+                            menu: list | None = None, door_lines=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -297,7 +311,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     restore-set scratch, and only the four flags need to survive the reset.
     """
     return [
-        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, mode, bad",
+        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, mode, bad",
         # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
         "hex.zero 2, pkeys",
@@ -305,7 +319,16 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         "hex.if0 1, kb_b, sa_nb", "hex.xor_by pkeys, 0x2", "sa_nb:",
         "hex.if0 1, kb_l, sa_nl", "hex.xor_by pkeys, 0x4", "sa_nl:",
         "hex.if0 1, kb_r, sa_nr", "hex.xor_by pkeys, 0x8", "sa_nr:",
+        # M2-R4: the use key is bit 4, i.e. the HIGH nibble's bit 0 -- see wireformat.KEY_USE.
+        "hex.if0 1, kb_u, sa_nu", "hex.xor_by pkeys + dw, 0x1", "sa_nu:",
         *(menu or []),                     # M3: the menu frame + the branch past the world
+        # M2-R4: the use key -> `duse`, then one tic of every door. THE DOORS TIC FIRST, before
+        # the player moves: it is what lets a door opened this frame be walked through on the same
+        # frame, and both mirrors have to agree on the order or they disagree about that frame.
+        *(["hex.zero 1, duse",
+           f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, duse_nos, duse_yess",
+           f"duse_yess:", "hex.xor_by 1, duse, 1",
+           f"duse_nos:", *door_lines] if door_lines else []),
         *_player_sim_lines(collide),
         *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
         *_int_part_lines("vy", "viewy", "vysx", "vydone"),
@@ -622,6 +645,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                  door_quant))
         for k in range(_dmax)]
     _dsecs_open = _dsecs[-1] if _dsecs else secs      # the union for every "could it ever" question
+
+    # M2-R4: one frame of every door, and the state it walks. Empty for a doors=False build, so
+    # the prologue is the line-for-line text it was before doors existed.
+    _door_lines = door_line_ids(secs, lds, sds, _dst_tbl) if _dst_tbl else {}
+    _door_tic = (door_tic_lines(sorted(_dst_tbl), {si: len(v) for si, v in _dst_tbl.items()},
+                                use_boxes_xy(secs, lds, sds, verts),
+                                {si: pass_state(secs, lds, sds, si) for si in _dst_tbl},
+                                _door_lines)
+                 if (_dst_tbl and player_sim) else [])
 
     def _seg_door(seg):
         """The door sector whose state this seg's constants depend on, or None.
@@ -1786,16 +1818,26 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                               n_bl=_index_nibbles(max(1, len(_cflat))),
                               n_ln=_index_nibbles(len(lds)))
                           + ["    ;simmv_done", "simcollide_skip:"])
-        _collide_tables = collision_tables_fj(cmap, lds, secs, sds, ML_BLOCKING, _cgrid)
+        # M2-R4: a door's lines bake their opening at the door's OPEN height and carry
+        # FLAG_BLOCKING, so a shut door refuses like a wall and one `wflip` at `pass_state` turns
+        # it into an ordinary two-sided line. See doorcode's collision note.
+        _collide_tables = collision_tables_fj(
+            cmap, lds, secs, sds, ML_BLOCKING, _cgrid,
+            secs_open=_dsecs_open,
+            door_line_ids={li for lis in _door_lines.values() for li in lis})
         _collide_decls = list(COLLISION_STATE_DECLS)
         # the SEED descent: the same point-location query the eye's pre-walk runs, at a CANDIDATE
         # position, tagged so it gets its own labels while sharing the partition blocks
         _collide_descend = _bsp_descend_code(
             _pfx(mapname), cmap,
+            # M2-R4: the candidate position's seed ceiling comes from the OPEN map. A door's own
+            # subsectors would otherwise seed the SHUT ceiling (== its floor), so `cp_ceil -
+            # cp_floor` is zero and the player can never stand in a doorway however open the door
+            # is -- while the door's LINE is what actually decides whether they get in.
             lambda s: [f"    hex.set 8, cp_seedf, "
-                       f"{rm._seg_sector(lds, sds, secs, cmap.segs[cmap.subsectors[s].firstseg]).floor_h & 0xFFFFFFFF}",
+                       f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).floor_h & 0xFFFFFFFF}",
                        f"    hex.set 8, cp_seedc, "
-                       f"{rm._seg_sector(lds, sds, secs, cmap.segs[cmap.subsectors[s].firstseg]).ceil_h & 0xFFFFFFFF}"],
+                       f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).ceil_h & 0xFFFFFFFF}"],
             done_label="cs_seeded", tag="cs") + "\ncs_seeded:\n    stl.fret cs_ret\n"
     else:
         _collide_block = _collide_decls = []
@@ -1807,8 +1849,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected)
                    if menu else None)
     pass1 = [
-        *(_standalone_input_lines(collide, menu=_menu_block) if standalone else
-          _state_wire_lines(state_wire, sim=player_sim, collide=collide)),
+        *(_standalone_input_lines(collide, menu=_menu_block, door_lines=_door_tic)
+          if standalone else
+          _state_wire_lines(state_wire, sim=player_sim, collide=collide,
+                            door_lines=_door_tic)),
         *_collide_block,
         # M14-e: the thing positions follow the player's state on the wire, then every leaf's list
         # is rebuilt from them. `hex.input n` counts BYTES, so one call takes a whole 16.16 pair
@@ -2194,7 +2238,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           # state switch dispatches on. Zero is SHUT for every door by construction of
           # `doors.door_states`, so this declaration is the level's initial condition, exactly as
           # `viewx/viewy/viewangle` are for the player.
-          *([f"dstate: hex.vec {len(_dslot)}, 0"] if _dst_tbl else []),
+          *(door_decls(len(_dslot)) if _dst_tbl else []),
           *_collide_decls,                                  # M14-d collision state
           *HOISTED_SCRATCH_DECLS,                           # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2

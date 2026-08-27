@@ -409,6 +409,16 @@ def line_box(row):
     return tuple(row[LINE_BOX_SLICE])
 
 
+# M2-R4: where the runtime door's one patched bit lives. `sim.check_line` reads the rest row
+# into `cl_rest` and tests nibble 18 (`hex.cmp 1, cl_rest + 18*dw, ...`), which is the LOW nibble
+# of this byte -- so FLAG_BLOCKING (bit 1) is in the nibble the wall test reads, and clearing it
+# turns the line back into an ordinary two-sided one.
+FLAGS_REST_INDEX = 5                                    # v1x v1y dx dy slope [flags] opentop ...
+FLAGS_REST_BYTE = sum(LINE_REST_BYTES[:FLAGS_REST_INDEX])
+assert LINE_REST_BYTES[FLAGS_REST_INDEX] == 1, "the flags field is one byte"
+assert FLAGS_REST_BYTE * 2 == 18, "sim.check_line reads the flags nibble at cl_rest + 18*dw"
+
+
 def line_rest(row):
     """Everything the bbox reject does NOT need, in `LINE_REST_BYTES` order."""
     return tuple(row[:4]) + tuple(row[8:])
@@ -421,22 +431,32 @@ FLAG_BLOCKING = 1 << 1
 ST_HORIZONTAL, ST_VERTICAL, ST_POSITIVE, ST_NEGATIVE = 0, 1, 2, 3
 
 
-def line_rows(lds, verts, secs, sds, ml_blocking: int) -> list:
+def line_rows(lds, verts, secs, sds, ml_blocking: int, *, secs_open=None,
+              door_line_ids=frozenset()) -> list:
     """One row per linedef, in `LINE_ROW_BYTES` order, as SIGNED map units where signed.
 
     `dx`/`dy` rather than v2: the runtime test needs the direction for the slope switch and the two
-    FixedMul multipliers, and v2 is one add away when the bbox is wanted."""
+    FixedMul multipliers, and v2 is one add away when the bbox is wanted.
+
+    M2-R4: a line in `door_line_ids` takes its OPENING from `secs_open` (the map with every door
+    fully open) and is marked BLOCKING. A runtime door is then one bit: shut it refuses like a
+    wall, and reaching `doors.pass_state` clears the bit with a single `wflip` into this table.
+    Baking the opening open is what makes that one bit enough -- the alternative is a per-state
+    delta for a `cp_ceil` nothing reads once the gap test has passed."""
     rows = []
-    for ld in lds:
+    secs_open = secs if secs_open is None else secs_open
+    for li, ld in enumerate(lds):
         v1x, v1y = verts[ld.v1]
         v2x, v2y = verts[ld.v2]
         dx, dy = v2x - v1x, v2y - v1y
+        is_door = li in door_line_ids
         flags = (FLAG_ONE_SIDED if ld.back == -1 else 0) | \
-                (FLAG_BLOCKING if ld.flags & ml_blocking else 0)
+                (FLAG_BLOCKING if (ld.flags & ml_blocking or is_door) else 0)
         if ld.back == -1:
             opentop = openbottom = 0
         else:
-            fs, bs = secs[sds[ld.front].sector], secs[sds[ld.back].sector]
+            _sv = secs_open if is_door else secs
+            fs, bs = _sv[sds[ld.front].sector], _sv[sds[ld.back].sector]
             opentop, openbottom = min(fs.ceil_h, bs.ceil_h), max(fs.floor_h, bs.floor_h)
         slope = (ST_HORIZONTAL if dy == 0 else ST_VERTICAL if dx == 0 else
                  ST_POSITIVE if (dy > 0) == (dx > 0) else ST_NEGATIVE)
@@ -525,8 +545,10 @@ class _RowBake:
 
 # ── the emitter's side: everything the renderer needs to collide ──────────────────────────────
 
-def collision_tables_fj(cmap, lds, secs, sds, ml_blocking, grid) -> str:
-    """The three packed tables, as fj data."""
+def collision_tables_fj(cmap, lds, secs, sds, ml_blocking, grid, *, secs_open=None,
+                        door_line_ids=frozenset()) -> str:
+    """The three packed tables, as fj data. `secs_open`/`door_line_ids` are M2-R4's -- see
+    `line_rows`."""
     from doomfj.lut_generator import generate_packed_lut_fj
 
     def pack(vals, widths):
@@ -536,7 +558,8 @@ def collision_tables_fj(cmap, lds, secs, sds, ml_blocking, grid) -> str:
             sh += 8 * nb
         return v
 
-    rows = line_rows(lds, cmap.vertexes, secs, sds, ml_blocking)
+    rows = line_rows(lds, cmap.vertexes, secs, sds, ml_blocking,
+                     secs_open=secs_open, door_line_ids=door_line_ids)
     blocks, flat = block_tables(grid)
     return "\n".join([
         generate_packed_lut_fj("lnbox", [pack(line_box(r), LINE_BOX_BYTES) for r in rows],

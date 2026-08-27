@@ -45,8 +45,11 @@ _STANDALONE_INCLUDES = ["input.fj"]
 # each of these exists and is actually in the set -- see its docstring for why a hole is safe HERE
 # and nowhere else.
 # M3: `mode` joins them -- a mode that reset every frame would flicker between the two pictures.
+# M2-R4: `kb_u` joins them for exactly the reason the other four are here -- it is a HELD key
+# flag, written only by the keyboard device's up/down events, so a reset that cleared it would make
+# the use key un-hold itself every frame.
 STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
-                      "kb_f", "kb_b", "kb_l", "kb_r", "mode")
+                      "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode")
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 

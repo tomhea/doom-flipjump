@@ -238,6 +238,17 @@ def in_use_box(box, x: int, y: int) -> bool:
     return x0 <= x <= x1 and y0 <= y <= y1
 
 
+def in_use_box_fixed(box, x16: int, y16: int) -> bool:
+    """The trigger test in 16.16 — what the emitted fj actually compares.
+
+    The fj side has the player's position in 16.16 and bakes the corners shifted, so it compares
+    there. Comparing in map units instead means shifting the position down first, and `>>` floors:
+    at negative coordinates that rounds the box one unit the wrong way and the two mirrors trigger
+    on different frames. Same predicate, one shift apart, and the shift is the bug."""
+    x0, y0, x1, y1 = box
+    return (x0 << 16) <= x16 <= (x1 << 16) and (y0 << 16) <= y16 <= (y1 << 16)
+
+
 def door_tic(st: tuple, nstates: int, used: bool) -> tuple:
     """One tic of one door. `st` is `(state, dir, sub, wait)`; returns the next one.
 

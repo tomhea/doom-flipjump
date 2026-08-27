@@ -367,12 +367,21 @@ class Scene:
     `sector index -> (floor_h, ceil_h)` and OVERRIDES the wad's values for that sector only.
     Everything else about the sector (textures, light, tag) is unchanged, and every sector not in
     the dict is the wad's, byte-for-byte — so a scene with no doors moving is bit-identical to one
-    built before doors existed, which is what keeps every existing golden valid."""
+    built before doors existed, which is what keeps every existing golden valid.
+
+    M2-R4: `blocked_lines` is the collision half of a RUNTIME door. The emitted program bakes a
+    door's opening at its OPEN height and marks its lines BLOCKING, then clears that bit with one
+    `wflip` when the door reaches `doors.pass_state`. So the oracle is handed the same two facts:
+    a scene whose door sectors are open, plus the set of linedefs that are still walls this frame.
+    It lives on the Scene rather than in three signatures because `check_position`, `try_move` and
+    `move_with_collision` would all have to grow the same argument and every caller pass it
+    through -- and a mirror that is only right when every caller remembers is not a mirror."""
     map_wad: WadFile
     asset_wad: WadFile
     mapname: str
     cmap: CompiledMap
     sector_heights: dict | None = None
+    blocked_lines: frozenset = frozenset()
 
 
 def apply_sector_heights(secs, sector_heights):
@@ -407,13 +416,15 @@ def scene_sectors(scene: Scene):
 
 
 def build_scene(map_wad: WadFile, asset_wad: WadFile, mapname: str,
-                sector_heights: dict | None = None) -> Scene:
+                sector_heights: dict | None = None,
+                blocked_lines: frozenset = frozenset()) -> Scene:
     """Bake the level's BSP once (from the WAD's NODES/SSECTORS/SEGS) and bundle the render inputs.
 
     ⚠ B2: `sector_heights` changes only SECTOR HEIGHTS. The BSP itself is baked from geometry that
     doors do not move (vertices, linedefs, the node tree), so a door opening does NOT invalidate
     `cmap` -- which is what makes doors affordable at all."""
-    return Scene(map_wad, asset_wad, mapname, bake_bsp(map_wad, mapname), sector_heights)
+    return Scene(map_wad, asset_wad, mapname, bake_bsp(map_wad, mapname), sector_heights,
+                 frozenset(blocked_lines))
 
 
 def spawn_state(wad: WadFile, mapname: str, *, player: int = 1) -> SimState:
@@ -791,10 +802,13 @@ class ReferenceModel:
         # full sweep (~7M ops/tic); the oracle's default stays the exhaustive loop, and
         # tests/host/test_collision.py proves the two agree over thousands of positions rather than
         # trusting the argument in `build_blockmap`'s docstring.
+        blocked = getattr(scene, "blocked_lines", frozenset())
         if blockmap is not None:
             cand = blockmap_candidates(blockmap, x >> 16, y >> 16, radius >> 16)
-            lds = [lds[i] for i in cand]
-        for ld in lds:
+            lds = [(i, lds[i]) for i in cand]
+        else:
+            lds = list(enumerate(lds))
+        for _li, ld in lds:
             v1x, v1y = cmap.vertexes[ld.v1]
             v2x, v2y = cmap.vertexes[ld.v2]
             v1x, v1y, v2x, v2y = v1x << 16, v1y << 16, v2x << 16, v2y << 16
@@ -811,7 +825,10 @@ class ReferenceModel:
             # would compare garbage. Pinning them to the seed makes the refusal comparable.
             if ld.back == -1:
                 return False, seed_floor, seed_ceil               # one-sided: a wall
-            if ld.flags & ML_BLOCKING:
+            # M2-R4: ...or it is a door that is not open far enough yet. Same refusal, same
+            # place: a shut door IS a wall, which is exactly what the emitted program's baked
+            # FLAG_BLOCKING bit says until the `wflip` clears it.
+            if (ld.flags & ML_BLOCKING) or _li in blocked:
                 return False, seed_floor, seed_ceil
             opentop, openbottom, _low = self.line_opening(
                 secs[sds[ld.front].sector], secs[sds[ld.back].sector])

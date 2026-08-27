@@ -165,11 +165,27 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
     # CR-2026-08 (IN-3, A0.1) — this pair is the ONLY automated guard that the shipped picture is the
     # one the walker shows and `deg_gate` certifies. It asserted WPX and four features while build.py
     # had moved to W1R + stack_steps/bbox_cull/deg; a fan-out miss the 70-min runtime hid.
+    #
+    # ⚠ EXACT EQUALITY IS DELIBERATE, and it costs something: every flag added to `features` breaks
+    # this until someone states its SHIPPED value here. That is the point — a new picture-shaping
+    # flag must not be able to arrive unnoticed. A subset check would be quieter and would defeat
+    # the guard the comment above describes.
+    #
+    # ⚠⚠ AND IT WAS RED FOR THREE MILESTONES BECAUSE NOBODY PAID THAT COST. `self_reset` joined
+    # `features` in 22ca98a ("M1 WIRED") without landing here, and `standalone` (M5) and `menu` (M3)
+    # followed. The 22-minute runtime and the default deselect meant the failure sat unseen: the
+    # build was fine every time, and the ONLY assertion failing was this one, about its own
+    # bookkeeping. If you add a flag, run `pytest tests/host -m slow` before you call it done.
     assert m["features"] == {"wall_noise": True, "sky": True, "steps": True, "things": True,
                              "stack_steps": True, "bbox_cull": True, "deg": True,
                              # B0: the shipped artifact runs the sim, same as the walker
                              "player_sim": True, "collide": True, "moving_things": True,
-                             "state_wire": "bin"}, m
+                             "state_wire": "bin",
+                             # M1/M5/M3: the three TIER flags. The shipped hosted artifact is the
+                             # non-looping, host-driven, world-only build, so all three are False —
+                             # `self_reset` is what m1_gate's binary turns on, `standalone` +
+                             # `menu` are the no-Python tier (build/doom_e1m1_menu.fjm).
+                             "self_reset": False, "standalone": False, "menu": False}, m
     assert m["tier"] == "lines/W1R/FT1+plane_near", m
     assert SPAN_LO < m["span_words"] < SPAN_HI, m
 

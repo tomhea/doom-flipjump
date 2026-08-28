@@ -40,8 +40,18 @@ CASES = [
      "tests/host/test_doorcode.py::test_use_is_the_first_bit_of_the_second_nibble",
      "use collides with turn-right: pressing use turns the player"),
     ("src/doomfj/doors.py",
-     "def door_tic(",
-     "def door_tic(",                                   # unmutated: the control for this harness
+     "    if used and dr != OPENING:",
+     "    if used and dr == CLOSING:",
+     "tests/host/test_doors_runtime.py::test_a_press_on_a_fully_open_door_restarts_the_wait",
+     "a press only reverses a CLOSING door -- pressing use on an open one no longer holds it"),
+    ("src/doomfj/doors.py",
+     "            if state >= nstates - 1:",
+     "            if state > nstates - 1:",
+     "tests/host/test_doors_runtime.py::test_it_waits_open_then_closes_by_itself",
+     "the door runs one state PAST its last and never latches open -- an off-by-one at the stop"),
+    ("src/doomfj/wall_renderer.py",
+     "def emit_wall_renderer(",
+     "def emit_wall_renderer(",                         # unmutated: the control for this harness
      "tests/host/test_doors_runtime.py",
      "CONTROL -- nothing is broken, so this suite must PASS here and prove the runner works"),
 ]

@@ -40,6 +40,9 @@ def main():
                     help="M3: boot into the menu; enter/esc toggles to the world")
     ap.add_argument("--no-reset", action="store_true",
                     help="skip the self-reset: one frame, no loop, no restore set")
+    # M2-R4: the runtime doors. The shipped restore set carries the per-door state and
+    # build.DOOR_PERSIST keeps it across the reset, so this is the tier the game is played on.
+    ap.add_argument("--doors", action="store_true", help="M2: runtime doors (space opens them)")
     args = ap.parse_args()
 
     out = Path(args.out or ("build/doom_e1m1_std%s.fjm" % ("_noloop" if args.no_reset else "")))
@@ -47,11 +50,12 @@ def main():
     print("wad  : %s  map %s" % (args.wad, args.map))
     print("out  : %s" % out)
     print("reset: %s" % ("OFF -- one frame, no loop" if args.no_reset else "ON -- the program loops"))
+    print("doors: %s" % ("RUNTIME -- space opens them" if args.doors else "off"))
     t = time.perf_counter()
     metrics = build_wall_renderer(
         str(ROOT / args.wad), args.map, cfg=Config(), out_fjm=out, generated_dir=gen,
         flat_max_words=RENDER_FLAT_MAX_WORDS, standalone=True, menu=args.menu,
-        self_reset=not args.no_reset)
+        doors=args.doors, self_reset=not args.no_reset)
     print(json.dumps(metrics, indent=2))
     print("total %.0fs" % (time.perf_counter() - t))
     return 0

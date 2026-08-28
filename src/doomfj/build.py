@@ -50,6 +50,14 @@ _STANDALONE_INCLUDES = ["input.fj"]
 # the use key un-hold itself every frame.
 STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
                       "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode")
+# M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
+# the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
+# reset that restored them would slam every door shut every frame while the picture showed it
+# opening. `duse`/`dbox` are NOT here: they are rewritten from scratch every frame, so they are
+# ordinary residue and the reset should clear them.
+# ⚠ Conditional, because `emit_reset_part` refuses a persist name the build has no label for -- and
+# rightly: naming cells a doors=False program never declares is a typo, not a no-op.
+DOOR_PERSIST = ("dstate", "ddir", "dsub", "dwait")
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 
@@ -325,6 +333,10 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         # refused, exactly as it should. A file that only holds a `def` emits no ops, so appending
         # it moves no address.
         paths = paths + [_SRC_FJ / "m1_reset.fj"]
+        # M5/M2-R4: the labels the reset must leave alone -- computed ONCE and used both to build
+        # the reset and to report it.
+        _persist = ((STANDALONE_PERSIST + (DOOR_PERSIST if doors else ()))
+                    if standalone else ())
         labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
         r1 = FjmRunner(out, flat_max_words=limit)
         core1 = _fjcore.Memory(r1.width, flat_max_words=r1.flat_max_words)
@@ -338,7 +350,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         nss = len(bake_bsp(wad, mapname).subsectors)
         part, n_nib, n_byte = selfreset.emit_reset_part(
             gen, labels1, core1.get_word, restore_set, cfg.VIEW_W, nss, mapname,
-            persist=STANDALONE_PERSIST if standalone else ())
+            persist=_persist)
         # Snapshot pass 1's pristine words at the baked addresses BEFORE releasing the image -- the
         # value check below needs them and re-loading an 85M-word image to get them would not.
         # check_layout=False: emit_reset_part above already resolved this set against labels1 WITH
@@ -374,7 +386,13 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                          "pass 2, e.g. %s -- the reset would restore pass 1's value"
                          % (len(bad), bad[:3]))
         reset_info = {"nibble_cells": n_nib, "byte_cells": n_byte,
-                      "persisted_labels": list(STANDALONE_PERSIST) if standalone else [],
+                      # ⚠ THE SAME TUPLE the reset was built from, not a second expression that
+                      # says the same thing. It WAS a second expression, and the moment
+                      # DOOR_PERSIST arrived the two disagreed: the binary persisted 13 labels and
+                      # this reported 9, so the metrics file said the doors reset every frame while
+                      # the program kept them. A number that describes the build has to come from
+                      # the build.
+                      "persisted_labels": list(_persist),
                       "restore_set": str(restore_set), "labels_moved_in_set": 0,
                       "values_changed_in_set": 0, "baked_cells_value_checked": len(_v1),
                       "view_w": cfg.VIEW_W, "subsectors": nss}

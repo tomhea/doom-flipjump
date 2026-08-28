@@ -26,6 +26,10 @@ ap.add_argument("--out", default="scratchpad/_ca_labels.tsv.gz")
 # M5: the standalone tier is a DIFFERENT program (a keyboard prologue instead of the wire, baked
 # thing bindings, no magic byte), so it has its own label table and its own restore set.
 ap.add_argument("--standalone", action="store_true")
+# M2-R4: a doors build declares per-door state, and those labels have to be in the table the
+# restore set is re-keyed against -- otherwise the set is built for a program that is not the
+# one being shipped.
+ap.add_argument("--doors", action="store_true")
 ap.add_argument("--menu", action="store_true", help="M3: emit the menu frame producer too")
 args = ap.parse_args()
 
@@ -54,7 +58,7 @@ try:
                         generated_dir=ROOT / ("build/generated_calabels%s"
                                               % ("_std" if args.standalone else "")),
                         flat_max_words=RENDER_FLAT_MAX_WORDS, self_reset=True,
-                        standalone=args.standalone, menu=args.menu)
+                        standalone=args.standalone, menu=args.menu, doors=args.doors)
 except Done:
     pass
 labels = RESULT.get("labels")

@@ -61,6 +61,17 @@ from doomfj.config import PNEAR_SEG_BUDGET
 
 NLJ = chr(10)   # newline constant for generated .fj text
 
+# ── THE SHIPPED TIER, pinned ──────────────────────────────────────────────────────────────────────
+# These were `emit_wall_renderer` parameters until the flag retirement, and each now has exactly one
+# value. They live HERE, at module scope, rather than being re-stated by each reader, because a
+# description of the build that is a SECOND EXPRESSION drifts: `metrics["persisted_labels"]` said 9
+# while the reset persisted 13, for exactly that reason, and `build.py` was re-stating these three
+# as string literals in the same file that fixed it.
+TIER = "lines/W1R/FT1+plane_near"      # what every gate log and metrics.json prints
+WALL_MODE, FLOOR_MODE = "W1R", "FT1"   # M13-W1R walls, M13-FT1 floors
+WALL_NOISE = True                      # V1's per-column grain -- what the W1R wall is MADE of
+STATE_WIRE = "bin"                     # doomfj.wireformat; "dec" retired with the flag
+
 
 def _pfx(mapname: str) -> str:
     """The BSP-as-code label prefix for a map (lowercased, flipjump-legal)."""
@@ -491,7 +502,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # M13-W1R walls + M13-FT1 floors: the shipped tier, and since the flag retirement the ONLY
     # tier. The ladder that got here (textured / W1 / W2 / W2S / WPX walls, textured / flat floors)
     # is in the history, not in the emitter.
-    wall_mode, floor_mode = "W1R", "FT1"
+    wall_mode, floor_mode = WALL_MODE, FLOOR_MODE
     # M13-WPX carries its real texels in its OWN per-height bank, so the shared combined table
     # (and `seg_lit`) stays at the W1 tier -- one mode texel per texture, not the 793k-texel one.
     # M13-W1R keeps its OWN tex_mode: same 1x1 canvas shape, but the BRIGHT-HALF mode texel
@@ -556,7 +567,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # V1's grain is not optional: the W1R wall IS the randomized-run tier, and it reads `gnrow`.
     # The flag went with wall_mode -- `wall_noise=False` was unreachable the moment W1R became the
     # only wall there is (the assert that said so is what caught it).
-    wall_noise = True
+    wall_noise = WALL_NOISE
     # CR-2026-08: emit_region has NO rep(w2s) windowed wall emitter (stream_render.fj, the
     # 'KNOWN GAP' note): a sprite-fragmented column in a W2S build would emit no wall piece
     # and let the floor pairs paint the wall rows. Refuse the combination at build time.

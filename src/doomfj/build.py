@@ -24,7 +24,8 @@ from doomfj.mapcompiler import bake_bsp, compile_geometry_streams
 from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
-from doomfj.wall_renderer import emit_wall_renderer, write_program_files
+from doomfj.wall_renderer import (STATE_WIRE, TIER, WALL_NOISE, emit_wall_renderer,
+                                  write_program_files)
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
@@ -406,15 +407,16 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         "headroom": round(limit / span, 3) if span else None,
         "fjm_bytes": out.stat().st_size, "assemble_seconds": assemble_seconds,
         # the tier string is a CONSTANT now: W1R walls, FT1 floors, the lines raster. It stays a
-        # string because every gate log and metrics file in the repo prints it.
-        "tier": "lines/W1R/FT1+plane_near",
+        # string because every gate log and metrics file in the repo prints it -- but it comes FROM
+        # the emitter (R6), not from a copy of it living here.
+        "tier": TIER,
         # CR-2026-08 (IN-3, A0.1): the metrics used to describe only FOUR of the emit-shaping flags,
         # so the three that had silently diverged (stack_steps/bbox_cull/deg) were invisible to every
         # consumer of metrics.json AND to the R4 gate below. A flag that shapes the picture is now
         # reported; add new ones here in the same commit that adds them to the signature.
         # `wall_noise` is a CONSTANT now (V1's grain is what the W1R wall is made of), but every
         # gate log and metrics file reads this key, so it keeps reporting.
-        "features": {"wall_noise": True, "sky": sky, "steps": steps, "things": things,
+        "features": {"wall_noise": WALL_NOISE, "sky": sky, "steps": steps, "things": things,
                      "stack_steps": stack_steps, "bbox_cull": bbox_cull, "deg": deg,
                      # B0: the sim half. Reported for the same reason as the rest -- a flag that
                      # shapes the artifact must be visible in metrics.json, or the next divergence
@@ -422,7 +424,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      "player_sim": player_sim, "collide": collide,
                      # the wire is a CONSTANT now ("dec" retired with the flag), but every gate
                      # log and metrics file in the repo reads this key, so it keeps reporting.
-                     "moving_things": moving_things, "state_wire": "bin",
+                     "moving_things": moving_things, "state_wire": STATE_WIRE,
                      # M1: the program self-resets and loops -- one run renders many frames.
                      "self_reset": self_reset,
                      # M5: no host in the loop -- the keyboard device drives it and the view state

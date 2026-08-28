@@ -8,9 +8,19 @@ Both are already true in `build/doom_e1m1_doors100.fjm` (R2 baked every door ope
 against the shut binary prices them WITHOUT a build. What it does NOT price is the per-state
 dispatch R3 adds -- that is new code, and it gets its own measurement when it exists.
     python scratchpad/m2_ops.py
-R9 CONTROL: the same binary against ITSELF must report a zero delta at every viewpoint. If the
-runner were nondeterministic, or the op counter were reading something other than this frame, the
-deltas below would be noise and the control would show it.
+R9 CONTROLS, and they measure two different things -- the earlier text conflated them:
+  * DETERMINISM (the zero control): the same binary against ITSELF must report a flat zero at every
+    viewpoint, or the deltas below are noise. This says nothing about what any feature costs.
+  * SENSITIVITY (--selftest, the NON-zero control): the meter must MOVE when the program it is
+    reading actually differs. A counter stuck at zero would pass the determinism control perfectly
+    and report every feature as free. This is the control that was missing, and a PR body that
+    inferred "the switch is free" from the zero control alone was reading the wrong one.
+
+⚠ WHAT A DELTA HERE MEANS depends entirely on what `--shut` is. Only a binary built from the SAME
+commit with `m2_rt_build.py --no-doors` is a matched control; anything else prices the difference
+between two builds, not the difference the flag makes.
+
+    python scratchpad/m2_ops.py --selftest      # the two controls, no measurement
 """
 import sys
 from pathlib import Path
@@ -37,6 +47,8 @@ _ap = argparse.ArgumentParser()
 _ap.add_argument("--open", default="build/doom_e1m1_doors100.fjm")
 _ap.add_argument("--shut", default="scratchpad/fjmcache/_ca2_ship_new.fjm")
 _ap.add_argument("--label", default="the R2 binary with all 13 doors baked OPEN")
+_ap.add_argument("--selftest", action="store_true",
+                 help="R9: run the determinism and sensitivity controls and exit")
 _args = _ap.parse_args()
 OPEN_FJM = ROOT / _args.open
 SHUT_FJM = ROOT / _args.shut
@@ -67,6 +79,24 @@ def render(runner, vp):
 shut = FjmRunner(SHUT_FJM)
 opn = FjmRunner(OPEN_FJM)
 assert shut.native and opn.native, "this needs the native engine"
+
+if _args.selftest:
+    # 1. determinism: the same binary, the same viewpoint, twice.
+    zero = [render(shut, vp) - render(shut, vp) for vp in DOOR_VPS]
+    # 2. sensitivity: the same binary at viewpoints that render DIFFERENT pictures. Every pair
+    #    must differ, or the counter is not reading this frame's work and every delta this script
+    #    has ever printed is zero for the wrong reason.
+    seen = [render(shut, vp) for vp in DOOR_VPS + CERT_VPS]
+    moved = len(set(seen)) == len(seen)
+    print("CONTROL 1 determinism  (same binary, same viewpoint): %s -- %s"
+          % (zero, "PASS" if not any(zero) else "!! FAIL, the deltas are noise"))
+    print("CONTROL 2 sensitivity  (same binary, 7 viewpoints):   %s"
+          % ("PASS -- %s distinct op counts, the meter moves" % len(set(seen)) if moved
+             else "!! FAIL -- the counter does not distinguish %d viewpoints" % len(seen)))
+    print("")
+    print("M2 OPS SELFTEST: %s" % ("PASS" if (not any(zero) and moved) else "!! FAIL"))
+    sys.exit(0 if (not any(zero) and moved) else 1)
+
 print("ops/frame: %s vs %s" % (SHUT_FJM.name, OPEN_FJM.name))
 print("           %s" % _args.label)
 print("%-26s %14s %14s %12s" % ("viewpoint", "base", "under test", "delta"))
@@ -85,8 +115,9 @@ print("")
 print("%-26s %14s %14s %11.2f%%"
       % ("TOTAL over 7 viewpoints", format(tot_s, ","), format(tot_o, ","),
          100.0 * (tot_o - tot_s) / tot_s))
-# R9: the same binary against itself must be a flat zero, or the deltas above are noise.
+# R9: DETERMINISM only -- this says the deltas above are real, NOT that any feature is free.
 same = [render(shut, vp) - render(shut, vp) for vp in DOOR_VPS]
 print("")
-print("CONTROL (shut vs shut, same viewpoints): %s -- %s"
+print("CONTROL determinism (shut vs shut, same viewpoints): %s -- %s"
       % (same, "deterministic" if not any(same) else "!! NONDETERMINISTIC, deltas are noise"))
+print("           (run --selftest for the sensitivity control; a zero here is not a cost claim)")

@@ -224,8 +224,7 @@ STANDALONE_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m5_restore_
 
 
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
-                        flat_max_words=None, floor_mode="FT1", wall_mode="W1R",
-                        raster_mode="lines", plane_near=True, wall_noise=True, sky=True,
+                        flat_max_words=None, plane_near=True, wall_noise=True, sky=True,
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
                         state_wire="bin", player_sim=True, collide=True,
@@ -290,8 +289,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
     spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
 
-    parts = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode,
-                               wall_mode=wall_mode, raster_mode=raster_mode, plane_near=plane_near,
+    parts = emit_wall_renderer(wad, mapname, cfg, over_align=False, plane_near=plane_near,
                                wall_noise=wall_noise, sky=sky, steps=steps, things=things,
                                sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
                                deg=deg, state_wire=state_wire, player_sim=player_sim,
@@ -305,7 +303,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a
     # file with the ~50-line program. ⚠ Order is load-bearing -- see write_program_files.
     prog = write_program_files(parts, gen, mapname)
-    includes = (_RENDERER_INCLUDES + (_LINES_INCLUDES if raster_mode == "lines" else [])
+    includes = (_RENDERER_INCLUDES + _LINES_INCLUDES
                 + (_STANDALONE_INCLUDES if standalone else [])   # M5: kb.poll
                 + (_SIM_INCLUDES if player_sim else []))   # B0: sim.fj LAST (R54)
     paths = [consts] + [_SRC_FJ / f for f in includes] + prog
@@ -408,7 +406,9 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         "storage_mode": str(term.storage_mode), "span_words": span, "flat_limit": limit,
         "headroom": round(limit / span, 3) if span else None,
         "fjm_bytes": out.stat().st_size, "assemble_seconds": assemble_seconds,
-        "tier": f"{raster_mode}/{wall_mode}/{floor_mode}" + ("+plane_near" if plane_near else ""),
+        # the tier string is a CONSTANT now: W1R walls, FT1 floors, the lines raster. It stays a
+        # string because every gate log and metrics file in the repo prints it.
+        "tier": "lines/W1R/FT1" + ("+plane_near" if plane_near else ""),
         # CR-2026-08 (IN-3, A0.1): the metrics used to describe only FOUR of the emit-shaping flags,
         # so the three that had silently diverged (stack_steps/bbox_cull/deg) were invisible to every
         # consumer of metrics.json AND to the R4 gate below. A flag that shapes the picture is now

@@ -96,6 +96,62 @@ class Stopper(KeyboardIO):
         return super().read_bit()
 
 
+def seg_cross(p, q, a, b):
+    """do the segments p-q and a-b properly intersect?
+
+    ⚠ NOT a signed-side test on the door's infinite line. That was the first version, and it
+    reported a crossing whenever the player walked past the LINE'S EXTENSION -- which is exactly
+    what the walk was doing, so the control passed while the player never went near the doorway.
+    A control that can be satisfied by walking around the thing it is testing is not a control."""
+    def cross(o, u, v):
+        return (u[0] - o[0]) * (v[1] - o[1]) - (u[1] - o[1]) * (v[0] - o[0])
+    d1, d2 = cross(a, b, p), cross(a, b, q)
+    d3, d4 = cross(p, q, a), cross(p, q, b)
+    return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+
+def plan_to(rm, scene, start, goal, radius, maxf=40, width=24, accept=None):
+    """A beam search over the SIM for a key script that ends within `radius` of `goal`.
+
+    Deterministic: fixed move order, a stable sort, and a pose de-dup that keeps the first (best)
+    of each cell. The oracle is the same simulation the program runs, so a route that arrives here
+    arrives there -- and if it did not, the byte-exact comparison would say so on the frame they
+    parted."""
+    gx, gy = goal
+    moves = [("forward",), ("forward", "turn_left"), ("forward", "turn_right"),
+             ("turn_left",), ("turn_right",)]
+
+    def dist(st):
+        return (((st.x >> 16) - gx) ** 2 + ((st.y >> 16) - gy) ** 2) ** 0.5
+
+    def arrived(st):
+        return dist(st) <= radius and (accept is None or accept(st))
+
+    beam = [(dist(start), start, [])]
+    if arrived(start):
+        return []
+    for _ in range(maxf):
+        nxt = []
+        for _d, st, path in beam:
+            for keys in moves:
+                kd = {k: (k in keys) for k in KEY_NAMES}
+                ns = rm.step_sim(st, kd, scene=scene)
+                if arrived(ns):
+                    return path + [kd]
+                nxt.append((dist(ns), ns, path + [kd]))
+        nxt.sort(key=lambda t: t[0])
+        seen, beam = set(), []
+        for d, st, pth in nxt:
+            k = (st.x >> 22, st.y >> 22, st.angle >> 27)
+            if k in seen:
+                continue
+            seen.add(k)
+            beam.append((d, st, pth))
+            if len(beam) >= width:
+                break
+    return None
+
+
 def plan_route(rm, mw, scene, boxes, target, maxf=90, width=24):
     """A beam search over the SIM for a key script that ends inside `target`'s use box.
 
@@ -236,18 +292,62 @@ def main():
     target = min(order, key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - (sp.x >> 16)) ** 2
                  + ((boxes[si][1] + boxes[si][3]) // 2 - (sp.y >> 16)) ** 2)
 
-    walk_scene = build_scene(mw, art, args.map)          # doors shut: what the walk really sees
-    route = plan_route(rm, mw, walk_scene, boxes, target)
-    assert route, "no route from the spawn into door %d's use box" % target
+    # ⚠ `mw, mw` -- the MAP wad as the asset wad, which is what m3_gate/m5_gate/m2_r4_gate all do
+    # and what the emitter bakes from. Passing the real art wad here renders a different picture
+    # and cost this gate one 2.1-billion-op run that failed on frame 2 with 400 px, nowhere near a
+    # door. The sprites still come from `art`, via render_wall_frame's own `sprite_wad`.
+    walk_scene = build_scene(mw, mw, args.map)           # doors shut: what the walk really sees
+
+    # THE DOORWAY, not the use box. The box is inflated by USE_RANGE and its south edge is 90 units
+    # clear of the opening, so "reach the box" put the player alongside the door and the walk-through
+    # leg then went AROUND it. Both legs aim at the gap between the door's own two line segments:
+    # `approach` a little short of it on the player's side, `beyond` a little past it on the other.
+    door_segs = [(cmap.vertexes[lds[li].v1], cmap.vertexes[lds[li].v2])
+                 for li in sorted(lines_of[target])]
+    (ax, ay), (bx, by) = door_segs[0]
+    mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
+    nx, ny = -(by - ay), (bx - ax)                       # the line's normal
+    nlen = (nx * nx + ny * ny) ** 0.5 or 1.0
+    nx, ny = nx / nlen, ny / nlen
+    sgn = -1.0 if ((sp.x >> 16) - mx) * nx + ((sp.y >> 16) - my) * ny > 0 else 1.0
+    approach = (mx - sgn * nx * 56, my - sgn * ny * 56)  # the player's side of the opening
+    beyond = (mx + sgn * nx * 88, my + sgn * ny * 88)    # through it, and out the far side
+
+    # ⚠ arriving near the approach POINT is not the same as standing where use works: the first
+    # version ended 27 units from it and 15 units OUTSIDE the use box, so the press did nothing and
+    # the door never moved. The acceptance test is the box itself.
+    route = plan_to(rm, walk_scene, sp, approach, 40, maxf=90,
+                    accept=lambda st: in_use_box_fixed(boxes[target], st.x, st.y))
+    assert route, "no route from the spawn to door %d's threshold at %s" % (target, approach)
 
     # menu frames, then the walk, then the press, then stand and watch the door work
     # use, stand while it opens, then WALK THROUGH IT. Standing still would prove the render half
     # only -- the door's passability is a separate claim with its own bit, and the only way to test
     # that bit in this tier is to try to walk through the doorway.
     press = [{"use": True}, {"use": True}]
-    script = ([{} for _ in range(MENU_FRAMES)] + route + press
-              + [{} for _ in range(args.open_wait)]
-              + [{"forward": True} for _ in range(args.walk)]
+    opening = [{} for _ in range(args.open_wait)]
+
+    # PHASE C, planned rather than hard-coded: eight frames of "forward" walked the player PAST the
+    # doorway rather than through it, and the first crossing control -- a signed side test on the
+    # door's infinite line -- called that a crossing. So the walk-through is now a route to a point
+    # on the FAR SIDE of the door's own line segment, planned against the scene with the door open,
+    # and the control below tests segment-against-segment.
+    st, ds = sp, initial_states(secs, lds, sds)
+    for kd in route + press + opening:
+        used = bool(kd.get("use"))
+        ds = {si: door_tic(ds[si], nstates[si],
+                           used and in_use_box_fixed(boxes[si], st.x, st.y)) for si in order}
+        blk = frozenset(li for si in order if ds[si][0] < passes[si]
+                        for li in lines_of.get(si, ()))
+        st = rm.step_sim(st, kd, scene=build_scene(mw, mw, args.map, open_h, blk))
+    assert ds[target][0] == nstates[target] - 1, (
+        "door %d is at state %d, not open, after %d frames of waiting"
+        % (target, ds[target][0], args.open_wait))
+
+    through = plan_to(rm, build_scene(mw, mw, args.map, open_h), st, beyond, 40)
+    assert through, "no route through door %d's opening to %s" % (target, beyond)
+
+    script = ([{} for _ in range(MENU_FRAMES)] + route + press + opening + through
               + [{} for _ in range(args.idle)])
     frames = len(script)
     # enter lands on the FIRST route frame: the poll flips `mode` before the menu branch reads it,
@@ -261,18 +361,12 @@ def main():
           % (target, boxes[target], passes[target]))
     print("script : %d menu -> enter -> %d walk to the door -> %d use -> %d open -> %d through "
           "-> %d idle  (%d frames)"
-          % (MENU_FRAMES, len(route), len(press), args.open_wait, args.walk, args.idle, frames))
+          % (MENU_FRAMES, len(route), len(press), args.open_wait, len(through), args.idle, frames))
+    print("doorway: line %d %s -> approach %s, then through to %s"
+          % (sorted(lines_of[target])[0], door_segs[0],
+             tuple(round(v) for v in approach), tuple(round(v) for v in beyond)))
 
-    # C4: the crossing test. The door's own two-sided line, as a signed side function -- the player
-    # must end on the OTHER side of it from the spawn, which is only possible once the bit cleared.
-    _li = sorted(lines_of[target])[0]
-    _ld = lds[_li]
-    (_ax, _ay), (_bx, _by) = cmap.vertexes[_ld.v1], cmap.vertexes[_ld.v2]
 
-    def side(x, y):
-        return (_bx - _ax) * (y - _ay) - (_by - _ay) * (x - _ax)
-
-    _spawn_side = side(sp.x >> 16, sp.y >> 16)
     if args.plan:
         for i, k in enumerate(script):
             print("  %3d %s" % (i, "".join(n[0] for n in sorted(k) if k[n]) or "-"))
@@ -311,7 +405,7 @@ def main():
     state = sp
     mode = 1                                            # the binary boots into the menu
     ok, menu_pics, in_box_when_pressed = True, [], False
-    seen, sides = set(), []
+    seen, track = set(), []
     first_move = None
     print("  frame  keys      door%-4d  fj px vs oracle" % target)
     for f in range(frames):
@@ -332,7 +426,7 @@ def main():
         blocked = frozenset(li for si in order if dstates[si][0] < passes[si]
                             for li in lines_of.get(si, ()))
         state = rm.step_sim(state, kd, scene=build_scene(mw, mw, args.map, open_h, blocked))
-        rsc = build_scene(mw, art, args.map,
+        rsc = build_scene(mw, mw, args.map,
                           heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}))
         want = bytes(rm.render_wall_frame(state, rsc, wall_mode="W1R", floor_mode_ft1=True,
                                           plane_near=True, wall_noise=True, near_steps=True,
@@ -342,7 +436,7 @@ def main():
         ok &= same
         d0 = dstates[target][0]
         seen.add(d0)
-        sides.append(side(state.x >> 16, state.y >> 16))
+        track.append((state.x >> 16, state.y >> 16))
         if d0 and first_move is None:
             first_move = f
         print("  %5d  %-8s  %6d   %s"
@@ -363,11 +457,12 @@ def main():
                                                                "!! no -- the script missed"))
     print("  CONTROL 3: the %d menu frames are identical to each other: %s"
           % (len(menu_pics), "yes" if menu_same else "!! no -- `mode` is not persisting"))
-    crossed = bool(sides) and any((v > 0) != (_spawn_side > 0) for v in sides)
-    print("  CONTROL 4: the player crossed door %d's line %d (spawn side %s -> %s): %s"
-          % (target, _li, "+" if _spawn_side > 0 else "-",
-             " ".join(sorted({"+" if v > 0 else "-" for v in sides})),
-             "yes -- the blocking bit really cleared" if crossed else
+    crossed = any(seg_cross(track[i], track[i + 1], a, b)
+                  for i in range(len(track) - 1) for a, b in door_segs)
+    print("  CONTROL 4: the player's path crosses door %d's own line SEGMENT (%s): %s"
+          % (target, " / ".join("%s-%s" % (a, b) for a, b in door_segs),
+             "yes -- and every frame is byte-exact, so fj walked the same path, which its "
+             "blocking bit had to clear to allow" if crossed else
              "!! NO -- collision was never tested, this proves the render half only"))
     vac = len(seen) < 3 or not in_box_when_pressed or not menu_same or not crossed
     if vac:

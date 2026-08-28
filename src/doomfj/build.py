@@ -24,7 +24,8 @@ from doomfj.mapcompiler import bake_bsp, compile_geometry_streams
 from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
-from doomfj.wall_renderer import emit_wall_renderer, write_program_files
+from doomfj.wall_renderer import (STATE_WIRE, TIER, WALL_NOISE, emit_wall_renderer,
+                                  write_program_files)
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
@@ -45,8 +46,19 @@ _STANDALONE_INCLUDES = ["input.fj"]
 # each of these exists and is actually in the set -- see its docstring for why a hole is safe HERE
 # and nowhere else.
 # M3: `mode` joins them -- a mode that reset every frame would flicker between the two pictures.
+# M2-R4: `kb_u` joins them for exactly the reason the other four are here -- it is a HELD key
+# flag, written only by the keyboard device's up/down events, so a reset that cleared it would make
+# the use key un-hold itself every frame.
 STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
-                      "kb_f", "kb_b", "kb_l", "kb_r", "mode")
+                      "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode")
+# M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
+# the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
+# reset that restored them would slam every door shut every frame while the picture showed it
+# opening. `duse`/`dbox` are NOT here: they are rewritten from scratch every frame, so they are
+# ordinary residue and the reset should clear them.
+# ⚠ Conditional, because `emit_reset_part` refuses a persist name the build has no label for -- and
+# rightly: naming cells a doors=False program never declares is a typo, not a no-op.
+DOOR_PERSIST = ("dstate", "ddir", "dsub", "dwait")
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 
@@ -213,14 +225,13 @@ STANDALONE_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m5_restore_
 
 
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
-                        flat_max_words=None, floor_mode="FT1", wall_mode="W1R",
-                        raster_mode="lines", plane_near=True, wall_noise=True, sky=True,
+                        flat_max_words=None, sky=True,
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
-                        state_wire="bin", player_sim=True, collide=True,
+                        player_sim=True, collide=True,
                         moving_things=True, standalone=False, menu=False, menu_entries=None,
                         menu_selected=0,
-                        sector_heights=None,
+                        sector_heights=None, doors=False,
                         self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
@@ -279,22 +290,20 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
     spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
 
-    parts = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode,
-                               wall_mode=wall_mode, raster_mode=raster_mode, plane_near=plane_near,
-                               wall_noise=wall_noise, sky=sky, steps=steps, things=things,
+    parts = emit_wall_renderer(wad, mapname, cfg, sky=sky, steps=steps, things=things,
                                sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
-                               deg=deg, state_wire=state_wire, player_sim=player_sim,
+                               deg=deg, player_sim=player_sim,
                                collide=collide, moving_things=moving_things,
                                standalone=standalone, menu=menu, menu_entries=menu_entries,
                                menu_selected=menu_selected,
-                               sector_heights=sector_heights,
+                               sector_heights=sector_heights, doors=doors,
                                return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
     # dispatch tables, per-seg constant blocks, the BSP walk, the baked banks) no longer share a
     # file with the ~50-line program. ⚠ Order is load-bearing -- see write_program_files.
     prog = write_program_files(parts, gen, mapname)
-    includes = (_RENDERER_INCLUDES + (_LINES_INCLUDES if raster_mode == "lines" else [])
+    includes = (_RENDERER_INCLUDES + _LINES_INCLUDES
                 + (_STANDALONE_INCLUDES if standalone else [])   # M5: kb.poll
                 + (_SIM_INCLUDES if player_sim else []))   # B0: sim.fj LAST (R54)
     paths = [consts] + [_SRC_FJ / f for f in includes] + prog
@@ -322,6 +331,10 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         # refused, exactly as it should. A file that only holds a `def` emits no ops, so appending
         # it moves no address.
         paths = paths + [_SRC_FJ / "m1_reset.fj"]
+        # M5/M2-R4: the labels the reset must leave alone -- computed ONCE and used both to build
+        # the reset and to report it.
+        _persist = ((STANDALONE_PERSIST + (DOOR_PERSIST if doors else ()))
+                    if standalone else ())
         labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
         r1 = FjmRunner(out, flat_max_words=limit)
         core1 = _fjcore.Memory(r1.width, flat_max_words=r1.flat_max_words)
@@ -335,7 +348,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         nss = len(bake_bsp(wad, mapname).subsectors)
         part, n_nib, n_byte = selfreset.emit_reset_part(
             gen, labels1, core1.get_word, restore_set, cfg.VIEW_W, nss, mapname,
-            persist=STANDALONE_PERSIST if standalone else ())
+            persist=_persist)
         # Snapshot pass 1's pristine words at the baked addresses BEFORE releasing the image -- the
         # value check below needs them and re-loading an 85M-word image to get them would not.
         # check_layout=False: emit_reset_part above already resolved this set against labels1 WITH
@@ -371,7 +384,13 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                          "pass 2, e.g. %s -- the reset would restore pass 1's value"
                          % (len(bad), bad[:3]))
         reset_info = {"nibble_cells": n_nib, "byte_cells": n_byte,
-                      "persisted_labels": list(STANDALONE_PERSIST) if standalone else [],
+                      # ⚠ THE SAME TUPLE the reset was built from, not a second expression that
+                      # says the same thing. It WAS a second expression, and the moment
+                      # DOOR_PERSIST arrived the two disagreed: the binary persisted 13 labels and
+                      # this reported 9, so the metrics file said the doors reset every frame while
+                      # the program kept them. A number that describes the build has to come from
+                      # the build.
+                      "persisted_labels": list(_persist),
                       "restore_set": str(restore_set), "labels_moved_in_set": 0,
                       "values_changed_in_set": 0, "baked_cells_value_checked": len(_v1),
                       "view_w": cfg.VIEW_W, "subsectors": nss}
@@ -387,18 +406,25 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         "storage_mode": str(term.storage_mode), "span_words": span, "flat_limit": limit,
         "headroom": round(limit / span, 3) if span else None,
         "fjm_bytes": out.stat().st_size, "assemble_seconds": assemble_seconds,
-        "tier": f"{raster_mode}/{wall_mode}/{floor_mode}" + ("+plane_near" if plane_near else ""),
+        # the tier string is a CONSTANT now: W1R walls, FT1 floors, the lines raster. It stays a
+        # string because every gate log and metrics file in the repo prints it -- but it comes FROM
+        # the emitter (R6), not from a copy of it living here.
+        "tier": TIER,
         # CR-2026-08 (IN-3, A0.1): the metrics used to describe only FOUR of the emit-shaping flags,
         # so the three that had silently diverged (stack_steps/bbox_cull/deg) were invisible to every
         # consumer of metrics.json AND to the R4 gate below. A flag that shapes the picture is now
         # reported; add new ones here in the same commit that adds them to the signature.
-        "features": {"wall_noise": wall_noise, "sky": sky, "steps": steps, "things": things,
+        # `wall_noise` is a CONSTANT now (V1's grain is what the W1R wall is made of), but every
+        # gate log and metrics file reads this key, so it keeps reporting.
+        "features": {"wall_noise": WALL_NOISE, "sky": sky, "steps": steps, "things": things,
                      "stack_steps": stack_steps, "bbox_cull": bbox_cull, "deg": deg,
                      # B0: the sim half. Reported for the same reason as the rest -- a flag that
                      # shapes the artifact must be visible in metrics.json, or the next divergence
                      # is invisible again.
                      "player_sim": player_sim, "collide": collide,
-                     "moving_things": moving_things, "state_wire": state_wire,
+                     # the wire is a CONSTANT now ("dec" retired with the flag), but every gate
+                     # log and metrics file in the repo reads this key, so it keeps reporting.
+                     "moving_things": moving_things, "state_wire": STATE_WIRE,
                      # M1: the program self-resets and loops -- one run renders many frames.
                      "self_reset": self_reset,
                      # M5: no host in the loop -- the keyboard device drives it and the view state
@@ -409,6 +435,10 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      # a per-sector dict, and what the guard needs to catch is a build that has
                      # them at all. (CR PR#78, R6.)
                      "sector_heights": bool(sector_heights),
+                     # M2-R3: the runtime door. Picture-shaping and opt-in, so it belongs in
+                     # the exact-equality features guard for the same reason sector_heights
+                     # does -- a tier flag that can arrive unnoticed is the CR-2026-08 miss.
+                     "doors": bool(doors),
                      # M3: the menu is a second frame producer chosen by a persisted cell
                      "menu": menu},
         "self_reset": reset_info,

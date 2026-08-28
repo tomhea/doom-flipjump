@@ -1,6 +1,6 @@
 """M14-b/M14-c — the binary state wire and the player sim, tested as fj without building a renderer.
 
-`emit_wall_renderer(state_wire="bin", player_sim=True)` replaces three `hex.input_dec_*` calls with:
+`emit_wall_renderer(player_sim=True)` replaces three `hex.input_dec_*` calls with:
 a MAGIC byte check, three raw 32-bit reads, a key byte, ONE TIC of the player simulation, the
 16.16 -> integer-map-unit derivation the BSP walk needs, and the state echo. Every one of those is a
 few lines of fj, and every one is checkable in a program that assembles in seconds -- so none of
@@ -40,7 +40,7 @@ RM = ReferenceModel(CFG)
 def _program(sim: bool) -> str:
     return "\n".join([
         "stl.startup_and_init_all",
-        *_state_wire_lines("bin", sim=sim),
+        *_state_wire_lines(sim=sim),
         # ... then dump the DERIVED integer coords and the key byte, which the echo does not carry
         "hex.print_as_digit 10, vx, 0", "stl.output 10",
         "hex.print_as_digit 10, vy, 0", "stl.output 10",

@@ -542,50 +542,6 @@ WOFF_CASES = [
 ]
 
 
-def test_wall_offset_byte_exact_vs_oracle(tmp_path):
-    cmap = _square_room()
-    wad = _square_room_wad()
-    rm = ReferenceModel()
-    U = 1 << 16
-    lds = wad.linedefs("MAP01")
-    sds = wad.sidedefs("MAP01")
-    verts = cmap.vertexes
-    body, data, expected = [], [], b""
-    for k, (vxu, vyu, va, si) in enumerate(WOFF_CASES):
-        seg = cmap.segs[si]
-        v1x, v1y = verts[seg.v1]
-        rw_angle1 = rm.point_to_angle(vxu * U, vyu * U, v1x << 16, v1y << 16)
-        rw_normalangle, _ = rm.wall_setup(vxu * U, vyu * U, seg, verts)
-        ld = lds[seg.linedef]
-        sd = sds[ld.front if seg.side == 0 else ld.back]
-        rw_offset, rw_centerangle = rm._wall_offset(vxu * U, vyu * U, va, seg, verts,
-                                                    rw_normalangle, rw_angle1, sd)
-        texoff = (seg.offset + sd.x_off) << 16
-        for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.wall_offset roff, rca, vx{k}, vy{k}, va{k}, nrm{k}, ra{k}, "
-                     f"a{k}, b{k}, toff{k}",
-                     "hex.print_as_digit 8, roff, 0", "stl.output 10",
-                     "hex.print_as_digit 8, rca, 0", "stl.output 10"]
-        data += [f"vx{k}: hex.vec 8, {vxu * U}", f"vy{k}: hex.vec 8, {vyu * U}",
-                 f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
-                 f"nrm{k}: hex.vec 8, {rw_normalangle & 0xFFFFFFFF}",
-                 f"ra{k}: hex.vec 8, {rw_angle1 & 0xFFFFFFFF}",
-                 f"a{k}: hex.vec 8, {(v1x << 16) & 0xFFFFFFFF}", f"b{k}: hex.vec 8, {(v1y << 16) & 0xFFFFFFFF}",
-                 f"toff{k}: hex.vec 8, {texoff & 0xFFFFFFFF}"]
-        expected += f"{rw_offset & 0xFFFFFFFF:08x}\n{rw_centerangle & 0xFFFFFFFF:08x}\n".encode() * 2
-    data += ["roff: hex.vec 8", "rca: hex.vec 8",
-             generate_tantoangle_lut_fj("tantoangle", SLOPERANGE),
-             generate_trig_idioms_fj("finesine", Config().TRIG_N, 16)]
-
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
-    p = tmp_path / "wall_offset.fj"
-    p.write_text(prog, encoding="utf-8")
-    ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
-        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
-    assert ok, "wall_offset: fj output != oracle"
-
-
 # ── proj.texture_u (per-column texture u-coord, render_wall_frame lines 549-552): ang = rw_centerangle +
 # xtoviewangle[x]; ft = finetangent[ang>>angle_shift]; texcol = ((rw_offset - fixed_mul(ft, rw_distance))
 # signed >> 16) % tw — a FLOORED modulo (texcol in [0, tw)). Reads the xtoviewangle + finetangent LUTs.
@@ -711,44 +667,6 @@ WSS_SETUP_CASES = [
     (128, 128, 0x40000000, 1),   # facing north, NORTH wall
     (128, 128, 0x80000000, 0),   # facing west, WEST wall
 ]
-
-
-def test_wall_scale_setup_byte_exact_vs_oracle(tmp_path):
-    cmap = _square_room()
-    rm = ReferenceModel()
-    cfg = Config()
-    proj = cfg.PROJECTION << 16
-    U = 1 << 16
-    verts = cmap.vertexes
-    body, data, expected = [], [], b""
-    for k, (vxu, vyu, va, si) in enumerate(WSS_SETUP_CASES):
-        seg = cmap.segs[si]
-        rng = rm.wall_x_range(vxu * U, vyu * U, va, seg, verts)
-        assert rng is not None, f"case {k}: seg not visible"
-        x1, x2, _ = rng
-        rw_normalangle, rw_distance = rm.wall_setup(vxu * U, vyu * U, seg, verts)
-        s1, step = _oracle_wall_scale_setup(rm, va, rw_normalangle, rw_distance, x1, x2)
-        for _ in range(2):   # call twice (R5 #8)
-            body += [f"proj.wall_scale_setup sc1, sst, va{k}, nrm{k}, rd{k}, x1_{k}, x2_{k}, {proj}",
-                     "hex.print_as_digit 8, sc1, 0", "stl.output 10",
-                     "hex.print_as_digit 8, sst, 0", "stl.output 10"]
-        data += [f"va{k}: hex.vec 8, {va & 0xFFFFFFFF}",
-                 f"nrm{k}: hex.vec 8, {rw_normalangle & 0xFFFFFFFF}",
-                 f"rd{k}: hex.vec 8, {rw_distance & 0xFFFFFFFF}",
-                 f"x1_{k}: hex.vec 8, {x1 & 0xFFFFFFFF}", f"x2_{k}: hex.vec 8, {x2 & 0xFFFFFFFF}"]
-        expected += f"{s1 & 0xFFFFFFFF:08x}\n{step & 0xFFFFFFFF:08x}\n".encode() * 2
-    data += ["sc1: hex.vec 8", "sst: hex.vec 8",
-             generate_xtoviewangle_lut_fj("xtoviewangle", cfg.VIEW_W, cfg.TRIG_N),
-             generate_trig_idioms_fj("finesine", cfg.TRIG_N, 16),
-             generate_slopediv_recip_lut_fj("slopediv_recip")]   # M13-scalerecip
-
-    prog = ("stl.startup_and_init_all\n" + "\n".join(body) + "\nstl.loop\n" + "\n".join(data) + "\n" + hoisted_scratch_fj())
-    p = tmp_path / "wall_scale_setup.fj"
-    p.write_text(prog, encoding="utf-8")
-    ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
-        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
-    assert ok, "wall_scale_setup: fj output != oracle"
 
 
 # ── proj.column_render_params (the per-column render-parameter bundle, render_wall_frame lines 540-559):

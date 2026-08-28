@@ -36,7 +36,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from doomfj import selfreset                                   # noqa: E402
-from doomfj.build import STANDALONE_PERSIST                    # noqa: E402
+from doomfj.build import DOOR_PERSIST, STANDALONE_PERSIST      # noqa: E402
+from doomfj.doorcode import door_decls                         # noqa: E402
+from doomfj.doors import door_states                           # noqa: E402
+from doomfj.wad import WadFile                                 # noqa: E402
 from doomfj.harness import W                                   # noqa: E402
 from doomfj.selfreset import decl_words                        # noqa: E402
 from doomfj.wall_renderer import STANDALONE_SCRATCH_DECLS      # noqa: E402
@@ -59,7 +62,22 @@ def read_labels(path):
     return [addresses[i] for i in order], [names[i] for i in order]
 
 
-def derive(doc, addresses, names):
+def standalone_globals(doors_wad=None, mapname="E1M1"):
+    """The declarations a STANDALONE build adds on top of the certified hosted program.
+
+    M2-R4: with doors, that is the keyboard scratch PLUS the per-door state -- and the door
+    declarations are map-shaped (`hex.vec <ndoors>`), so the wad decides how wide they are. Reading
+    them from `door_decls` rather than restating them here is the same rule the rest of this script
+    follows: the set is RE-KEYED from what the emitter declares, never re-derived from a guess."""
+    out = list(STANDALONE_SCRATCH_DECLS)
+    if doors_wad is not None:
+        w = WadFile.from_path(str(doors_wad))
+        nd = len(door_states(w.sectors(mapname), w.linedefs(mapname), w.sidedefs(mapname)))
+        out += door_decls(nd)
+    return out
+
+
+def derive(doc, addresses, names, globals_decls=None, persist=None):
     """Return (doc, dropped, added_words). Refuses rather than skipping anything it cannot verify."""
     bits = {}
     for address, name in zip(addresses, names):
@@ -90,9 +108,11 @@ def derive(doc, addresses, names):
     # ---- 3. the globals the standalone tier ADDS -------------------------------------------
     have = {e[0] for e in doc["entries"]}
     added = 0
-    for name, declared_words in (decl_words(d) for d in STANDALONE_SCRATCH_DECLS):
+    for name, declared_words in (decl_words(d) for d in
+                                 (globals_decls or STANDALONE_SCRATCH_DECLS)):
         assert name in bits, (
-            "STANDALONE_SCRATCH_DECLS names %r but the standalone label table does not have it -- "
+            "the standalone globals list names %r but the standalone label table does not have "
+            "it -- "
             "the emitter and this script disagree about what the tier declares" % name)
         if name in have:
             continue
@@ -107,7 +127,7 @@ def derive(doc, addresses, names):
 
     # ---- 4. the persist set has to be IN the set -------------------------------------------
     present = {e[0] for e in doc["entries"]}
-    absent = [n for n in STANDALONE_PERSIST if n not in present]
+    absent = [n for n in (persist or STANDALONE_PERSIST) if n not in present]
     assert not absent, (
         "build.STANDALONE_PERSIST names %r, which the set does not carry. emit_reset_part would "
         "refuse an hour into the build; refuse here instead." % absent)
@@ -150,7 +170,15 @@ def selftest():
         return {"format": "label+offset", "words": 0, "labels": 0, "entries": entries}
 
     got, gone, added = derive(doc(), addresses, names)
-    ok = (gone == ["wmagic"] and added == sum(widths.values())
+    # ⚠ `added` counts the globals that were MISSING from the input set, not every declared one.
+    # This used to compare against `sum(widths.values())`, which silently became wrong the moment a
+    # declaration the synthetic doc already carries joined the list (`mode`, in M3) -- so this
+    # positive check has been reporting MISMATCH ever since, and the run it belongs to has not been
+    # made since. The negative controls C1-C4 were unaffected and still pass, which is why nothing
+    # else noticed.
+    in_doc = {e[0] for e in doc()["entries"]}
+    expect_added = sum(w for n, w in widths.items() if n not in in_doc)
+    ok = (gone == ["wmagic"] and added == expect_added
           and all(n in {e[0] for e in got["entries"]} for n in STANDALONE_PERSIST))
     print("P  wmagic dropped, %d globals added at declared width, persist set present -> %s"
           % (len(widths), "ok" if ok else "!! MISMATCH"))
@@ -195,6 +223,12 @@ def main():
     ap.add_argument("--labels", default="scratchpad/_m5_labels_std.tsv.gz")
     ap.add_argument("--out", default="src/doomfj/data/m5_restore_set.json.gz")
     ap.add_argument("--selftest", action="store_true")
+    # M2-R4: a doors build declares per-door state (`dstate`/`ddir`/`dsub`/`dwait`), and those
+    # cells must SURVIVE the reset like the player's position does. Pass the map wad so the widths
+    # come from `door_decls` rather than from a number written out here a second time.
+    ap.add_argument("--doors", metavar="WAD", default=None,
+                    help="the map wad, to add the per-door state cells (a doors=True build)")
+    ap.add_argument("--map", default="E1M1")
     args = ap.parse_args()
     if args.selftest:
         return selftest()
@@ -202,14 +236,17 @@ def main():
     addresses, names = read_labels(args.labels)
     doc = json.load(gzip.open(args.set, "rt", encoding="utf-8"))
     before = (doc["words"], len(doc["entries"]))
-    doc, gone, added = derive(doc, addresses, names)
+    decls = standalone_globals(args.doors, args.map)
+    persist = STANDALONE_PERSIST + (DOOR_PERSIST if args.doors else ())
+    doc, gone, added = derive(doc, addresses, names, decls, persist)
     doc["generated_by"] = "scratchpad/m5_setfile.py --labels %s --set %s" % (args.labels, args.set)
     json.dump(doc, gzip.open(args.out, "wt", encoding="utf-8"))
-    print("dropped %s; added %d words over %d standalone globals"
-          % (", ".join(gone) or "nothing", added, len(STANDALONE_SCRATCH_DECLS)))
+    print("dropped %s; added %d words over %d standalone globals%s"
+          % (", ".join(gone) or "nothing", added, len(decls),
+             " (incl. the per-door state)" if args.doors else ""))
     print("%s: %d -> %d words over %d -> %d entries"
           % (args.out, before[0], doc["words"], before[1], doc["labels"]))
-    print("persist: %s" % ", ".join(STANDALONE_PERSIST))
+    print("persist: %s" % ", ".join(persist))
     return 0
 
 

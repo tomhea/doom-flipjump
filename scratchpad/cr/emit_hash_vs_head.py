@@ -35,13 +35,31 @@ for _i, _a in enumerate(sys.argv):
 # HEAD's src tree, complete, so the import graph resolves exactly as it does in the working tree
 head_dir = Path(tempfile.mkdtemp()) / "src"
 shutil.copytree(ROOT / "src", head_dir)
-head_txt = subprocess.run(["git", "show", REF + ":src/doomfj/wall_renderer.py"], cwd=ROOT,
-                          capture_output=True, check=True).stdout.decode("utf-8")
-if SELFTEST:
-    # the mutation: one baked constant, one character -- the smallest thing that must still trip it
-    assert "sp_dw: hex.vec 2" in head_txt, "the self-test's anchor moved; pick another"
-    head_txt = head_txt.replace("sp_dw: hex.vec 2", "sp_dw: hex.vec 3", 1)
-(head_dir / "doomfj" / "wall_renderer.py").write_text(head_txt, encoding="utf-8")
+# ⚠ EVERY MODULE THE EMISSION GOES THROUGH, not just `wall_renderer.py`. Swapping one file and
+# keeping the rest at the working tree's version means a change in ANY of the others is present on
+# BOTH sides and the diff cannot see it -- which is a control that reports SAME for a change it was
+# run to catch. M2-R4 moved `collision.py` (the linedef rows a door bakes open) and would have
+# passed silently. A module the ref does not have is simply left as the working tree's, so a
+# NEW file (doorcode.py) is not an error.
+SWAP = ["wall_renderer.py", "collision.py", "doors.py", "doorcode.py", "wireformat.py",
+        "lut_generator.py", "reference_model.py"]
+swapped, absent = [], []
+for _mod in SWAP:
+    _r = subprocess.run(["git", "show", f"{REF}:src/doomfj/{_mod}"], cwd=ROOT,
+                        capture_output=True)
+    if _r.returncode:
+        absent.append(_mod)
+        continue
+    _txt = _r.stdout.decode("utf-8")
+    if SELFTEST and _mod == "wall_renderer.py":
+        # the mutation: one baked constant, one character -- the smallest thing that must still trip it
+        assert "sp_dw: hex.vec 2" in _txt, "the self-test's anchor moved; pick another"
+        _txt = _txt.replace("sp_dw: hex.vec 2", "sp_dw: hex.vec 3", 1)
+    (head_dir / "doomfj" / _mod).write_text(_txt, encoding="utf-8")
+    swapped.append(_mod)
+print("ref %s: swapped %s%s" % (REF, ", ".join(swapped),
+                                ("; absent at the ref (kept from the working tree): "
+                                 + ", ".join(absent)) if absent else ""))
 
 CONFIGS = {
     # what the M14 gates certify

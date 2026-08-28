@@ -23,9 +23,10 @@ from pathlib import Path
 
 import pytest
 
-from doomfj.build import STANDALONE_PERSIST
+from doomfj.build import DOOR_PERSIST, STANDALONE_PERSIST
 from doomfj.collision import CHECK_SCRATCH_DECLS
 from doomfj.selfreset import decl_words
+from doomfj.wad import WadFile
 from doomfj.wall_renderer import HOISTED_SCRATCH_DECLS, STANDALONE_SCRATCH_DECLS
 
 DATA = Path(__file__).resolve().parents[2] / "src/doomfj/data"
@@ -163,9 +164,19 @@ def test_the_standalone_set_drops_only_the_wire_magic():
     standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
     assert hosted - standalone == {"wmagic"}, (
         "the standalone set drops %s; only 'wmagic' may go" % sorted(hosted - standalone))
-    assert standalone - hosted == {name for name, _ in
-                                   (decl_words(d) for d in STANDALONE_SCRATCH_DECLS)}, (
-        "the standalone set adds %s, which is not STANDALONE_SCRATCH_DECLS"
+    # M2-R4: ...and the per-door state, because the shipped standalone tier has RUNTIME DOORS. The
+    # names come from `door_decls` at the map's own door count rather than being written out here,
+    # so a map with a different number of doors does not need this test edited -- and `duse`/`dbox`
+    # are deliberately absent: they are rewritten every frame, so they are ordinary residue the
+    # reset restores like anything else.
+    from doomfj.doorcode import door_decls
+    from doomfj.doors import door_states
+    _w = WadFile.from_path("tests/fixtures/freedoom_e1m1.wad")
+    _nd = len(door_states(_w.sectors("E1M1"), _w.linedefs("E1M1"), _w.sidedefs("E1M1")))
+    expected = {name for name, _ in
+                (decl_words(d) for d in list(STANDALONE_SCRATCH_DECLS) + door_decls(_nd))}
+    assert standalone - hosted == expected, (
+        "the standalone set adds %s, which is not STANDALONE_SCRATCH_DECLS + the door state"
         % sorted(standalone - hosted))
 
 
@@ -176,6 +187,20 @@ def test_the_persist_labels_are_all_in_the_standalone_set():
     standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
     absent = [n for n in STANDALONE_PERSIST if n not in standalone]
     assert not absent, "STANDALONE_PERSIST names %s, absent from the standalone set" % absent
+
+
+def test_the_door_cells_are_in_the_standalone_set_too():
+    """M2-R4, and the owner's standing rule as a test: a feature is not complete until the M1 reset
+    loop carries its labels. `DOOR_PERSIST` is what keeps a door open across the reset -- without
+    these four in the set, `emit_reset_part` cannot exclude them, the reset restores their pristine
+    zeros, and every door in the level re-shuts on every single frame. The program would still
+    render, still pass a one-frame check, and be unplayable.
+
+    This is separate from the test above because the two tuples arrive by different routes:
+    STANDALONE_PERSIST has been in the set since M5, DOOR_PERSIST since M2-R4 re-keyed it."""
+    standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
+    absent = [n for n in DOOR_PERSIST if n not in standalone]
+    assert not absent, "DOOR_PERSIST names %s, absent from the standalone set" % absent
 
 
 def test_the_two_sets_are_otherwise_identical():

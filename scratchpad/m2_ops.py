@@ -1,24 +1,32 @@
-"""M2 -- what an OPEN door COSTS, in ops/frame. Measured, both binaries, same viewpoints.
-
-The owner's M2 constraint is "keep ops/frame at similar cost". This is the R2 answer: the SAME
-seven viewpoints the door gate uses, rendered by the doors-SHUT binary and the doors-OPEN one,
-op counts side by side.
-
-!! SCOPE. These are seven viewpoints, NOT the 260-frame sweep median that is the repo's real
-metric (scratchpad/m1_sweep.py). The sweep needs a LOOPING binary and the R2 build has no
-self-reset, so it cannot run here. Three of these seven were chosen precisely because they stare
-at a door, so they OVERSTATE a typical frame's door cost by construction. Read the direction and
-the order of magnitude, not the percentage.
-
+"""M2-R3 pre-measurement -- what does an OPEN door cost in ops, on binaries that already exist?
+The owner's constraint on R3/R4 is "keep ops/frame at similar cost". Before designing the runtime
+door it is worth knowing what the RENDER side of a door costs when it is open, because two of R3's
+required changes only bite when a door is open:
+  * the walk can no longer PRUNE a shut door's subsector (13 subsectors + their segs come back);
+  * `thing_live_subsectors` can no longer call a shut door uninhabitable.
+Both are already true in `build/doom_e1m1_doors100.fjm` (R2 baked every door open), so the delta
+against the shut binary prices them WITHOUT a build. What it does NOT price is the per-state
+dispatch R3 adds -- that is new code, and it gets its own measurement when it exists.
     python scratchpad/m2_ops.py
+R9 CONTROLS, and they measure two different things -- the earlier text conflated them:
+  * DETERMINISM (the zero control): the same binary against ITSELF must report a flat zero at every
+    viewpoint, or the deltas below are noise. This says nothing about what any feature costs.
+  * SENSITIVITY (--selftest, the NON-zero control): the meter must MOVE when the program it is
+    reading actually differs. A counter stuck at zero would pass the determinism control perfectly
+    and report every feature as free. This is the control that was missing, and a PR body that
+    inferred "the switch is free" from the zero control alone was reading the wrong one.
+
+⚠ WHAT A DELTA HERE MEANS depends entirely on what `--shut` is. Only a binary built from the SAME
+commit with `m2_rt_build.py --no-doors` is a matched control; anything else prices the difference
+between two builds, not the difference the flag makes.
+
+    python scratchpad/m2_ops.py --selftest      # the two controls, no measurement
 """
 import sys
 from pathlib import Path
-
 ROOT = Path(__file__).resolve().parents[1]
 for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
-
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
@@ -31,12 +39,19 @@ from doomfj.wireformat import (encode_bindings, encode_feed,              # noqa
 from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory   # noqa: E402
 from flipjump.utils.exceptions import IOReadOnEOF                              # noqa: E402
 from tests.fj.stream_screen import StreamScreen                                # noqa: E402
-
-VPS = [("DOOR", (461, 2015, 0x40000000)), ("DOOR", (845, 1631, 0xC0000000)),
-       ("DOOR", (461, 863, 0x40000000)), ("CERT", (664, 291, 0x18000000)),
-       ("CERT", (1272, -724, 0x40000000)), ("CERT", (1869, 479, 0x80000000)),
-       ("CERT", (-416, 256, 0x0))]
-
+DOOR_VPS = [(461, 2015, 0x40000000), (845, 1631, 0xC0000000), (461, 863, 0x40000000)]
+CERT_VPS = [(664, 291, 0x18000000), (1272, -724, 0x40000000),
+            (1869, 479, 0x80000000), (-416, 256, 0x0)]
+import argparse
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--open", default="build/doom_e1m1_doors100.fjm")
+_ap.add_argument("--shut", default="scratchpad/fjmcache/_ca2_ship_new.fjm")
+_ap.add_argument("--label", default="the R2 binary with all 13 doors baked OPEN")
+_ap.add_argument("--selftest", action="store_true",
+                 help="R9: run the determinism and sensitivity controls and exit")
+_args = _ap.parse_args()
+OPEN_FJM = ROOT / _args.open
+SHUT_FJM = ROOT / _args.shut
 mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 rm = ReferenceModel(Config())
@@ -45,40 +60,64 @@ drawable = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is no
 baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES)
 nvis = len(vanishable_slots(drawable, baked, VANISHABLE_TYPES))
 runtime = [t for t, b in zip(drawable, baked) if not b]
-tail = (encode_things([(t.x << 16, t.y << 16) for t in runtime])
-        + encode_bindings([rm.point_in_subsector(cmap, t.x, t.y) for t in runtime])
-        + encode_visibility([1] * nvis))
-
-
-def ops_at(runner, vp):
+blob_tail = (encode_things([(t.x << 16, t.y << 16) for t in runtime])
+             + encode_bindings([rm.point_in_subsector(cmap, t.x, t.y) for t in runtime])
+             + encode_visibility([1] * nvis))
+def render(runner, vp):
     vx, vy, va = vp
     core = _fjcore.Memory(runner.width, flat_max_words=runner.flat_max_words)
     for seg, n in runner._segments:
         core.add_segment(seg, n)
     for start, vals in runner._runs:
         core.set_words(start, vals)
-    scr = StreamScreen(stdin=encode_feed(vx << 16, vy << 16, va, 0) + tail, n_things=len(runtime))
+    scr = StreamScreen(stdin=encode_feed(vx << 16, vy << 16, va, 0) + blob_tail,
+                       n_things=len(runtime))
     scr.attach_memory(NativeDeviceMemory(core, runner.width))
     _c, ops, _e, _l, _p = core.run(scr.read_bit, scr.write_bit, IOReadOnEOF, last_ops_length=0)
     del core, scr
     return ops
+shut = FjmRunner(SHUT_FJM)
+opn = FjmRunner(OPEN_FJM)
+assert shut.native and opn.native, "this needs the native engine"
 
+if _args.selftest:
+    # 1. determinism: the same binary, the same viewpoint, twice.
+    zero = [render(shut, vp) - render(shut, vp) for vp in DOOR_VPS]
+    # 2. sensitivity: the same binary at viewpoints that render DIFFERENT pictures. Every pair
+    #    must differ, or the counter is not reading this frame's work and every delta this script
+    #    has ever printed is zero for the wrong reason.
+    seen = [render(shut, vp) for vp in DOOR_VPS + CERT_VPS]
+    moved = len(set(seen)) == len(seen)
+    print("CONTROL 1 determinism  (same binary, same viewpoint): %s -- %s"
+          % (zero, "PASS" if not any(zero) else "!! FAIL, the deltas are noise"))
+    print("CONTROL 2 sensitivity  (same binary, 7 viewpoints):   %s"
+          % ("PASS -- %s distinct op counts, the meter moves" % len(set(seen)) if moved
+             else "!! FAIL -- the counter does not distinguish %d viewpoints" % len(seen)))
+    print("")
+    print("M2 OPS SELFTEST: %s" % ("PASS" if (not any(zero) and moved) else "!! FAIL"))
+    sys.exit(0 if (not any(zero) and moved) else 1)
 
-shut = FjmRunner(ROOT / "scratchpad/fjmcache/_ca2_ship_new.fjm")
-open_ = FjmRunner(ROOT / "build/doom_e1m1_doors100.fjm")
-print("        viewpoint                   doors SHUT      doors OPEN         delta")
+print("ops/frame: %s vs %s" % (SHUT_FJM.name, OPEN_FJM.name))
+print("           %s" % _args.label)
+print("%-26s %14s %14s %12s" % ("viewpoint", "base", "under test", "delta"))
 tot_s = tot_o = 0
-for label, vp in VPS:
-    a, b = ops_at(shut, vp), ops_at(open_, vp)
-    tot_s += a; tot_o += b
-    print("  %s (%5d,%5d,%#010x)  %12s  %12s  %+12s  %+6.2f%%"
-          % (label, vp[0], vp[1], vp[2], format(a, ","), format(b, ","),
-             format(b - a, ","), 100.0 * (b - a) / a))
+rows = []
+for tag, vps in (("DOOR", DOOR_VPS), ("CERT", CERT_VPS)):
+    for vp in vps:
+        a, b = render(shut, vp), render(opn, vp)
+        tot_s += a
+        tot_o += b
+        rows.append((tag, vp, a, b))
+        print("%-4s %-21s %14s %14s %11.2f%%"
+              % (tag, "(%d,%d,0x%08x)" % vp, format(a, ","), format(b, ","),
+                 100.0 * (b - a) / a))
 print("")
-print("  TOTAL over %d viewpoints        %12s  %12s  %+12s  %+6.2f%%"
-      % (len(VPS), format(tot_s, ","), format(tot_o, ","), format(tot_o - tot_s, ","),
+print("%-26s %14s %14s %11.2f%%"
+      % ("TOTAL over 7 viewpoints", format(tot_s, ","), format(tot_o, ","),
          100.0 * (tot_o - tot_s) / tot_s))
+# R9: DETERMINISM only -- this says the deltas above are real, NOT that any feature is free.
+same = [render(shut, vp) - render(shut, vp) for vp in DOOR_VPS]
 print("")
-print("  !! three of these seven stare AT a door and were picked for that, so this OVERSTATES a")
-print("     typical frame. The real metric is the 260-frame sweep median, which needs a looping")
-print("     binary the R2 build does not have.")
+print("CONTROL determinism (shut vs shut, same viewpoints): %s -- %s"
+      % (same, "deterministic" if not any(same) else "!! NONDETERMINISTIC, deltas are noise"))
+print("           (run --selftest for the sensitivity control; a zero here is not a cost claim)")

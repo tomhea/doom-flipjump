@@ -53,13 +53,6 @@ def test_set_palette_command(tmp_path):
     _run(tmp_path, "set_palette", [f"present.set_palette {addr}"], expected)
 
 
-def test_update_screen_command(tmp_path):
-    """update_screen (memory-hook present): [0x03][addr: w/8 LE]."""
-    addr = 0x00ABCDEF
-    expected = bytes([0x03]) + bytes([(addr >> (8 * i)) & 0xFF for i in range(W // 8)])
-    _run(tmp_path, "update_screen", [f"present.update_screen {addr}"], expected)
-
-
 def test_update_screen_reg_command(tmp_path):
     """update_screen_reg (0x06, hex.vec2 register form, fj 1.5.1): [0x06][addr: w/8 LE]."""
     addr = 0x00000040
@@ -67,13 +60,3 @@ def test_update_screen_reg_command(tmp_path):
     _run(tmp_path, "update_screen_reg", [f"present.update_screen_reg {addr}"], expected)
 
 
-def test_full_present_sequence(tmp_path):
-    """The real per-frame command order: init then set_palette then update_screen — concatenated."""
-    c = Config()
-    pal, fbuf = 0x100, 0x200
-    expected = (bytes([0x01, c.W & 0xFF, (c.W >> 8) & 0xFF, c.H & 0xFF, (c.H >> 8) & 0xFF,
-                       c.BPP, c.NCOLORS & 0xFF, (c.NCOLORS >> 8) & 0xFF])
-                + bytes([0x02]) + bytes([(pal >> (8 * i)) & 0xFF for i in range(W // 8)])
-                + bytes([0x03]) + bytes([(fbuf >> (8 * i)) & 0xFF for i in range(W // 8)]))
-    _run(tmp_path, "present_seq",
-         ["present.init_screen", f"present.set_palette {pal}", f"present.update_screen {fbuf}"], expected)

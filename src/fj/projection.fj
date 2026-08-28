@@ -1062,47 +1062,6 @@ ns proj {
     //   (DOOM's sign rule); then += texoff (= (seg.offset + sd.x_off)<<16). rw_centerangle = ANG90 +
     //   viewangle - rw_normalangle. All angle compares are unsigned BAM (hex.cmp). Mirrors the oracle
     //   exactly. @requires hex.init & stl.ptr_init  (inlines point_to_dist + finesine.read_sin)
-    def wall_offset rw_offset, rw_centerangle, viewx, viewy, viewangle, rw_normalangle, rw_angle1, v1x, v1y, texoff \
-            @ offsetangle, oa_abs, hyp, sin_idx, sinv, cang90, cang180, \
-              gt180, le180, gt90, le90, doneg, skipneg, end {
-        .point_to_dist hyp, viewx, viewy, v1x, v1y     // hyp = view->v1 distance
-        hex.mov 8, offsetangle, rw_normalangle
-        hex.sub 8, offsetangle, rw_angle1              // offsetangle = rw_normalangle - rw_angle1
-
-        hex.mov 8, oa_abs, offsetangle                 // oa_abs = BAM abs(offsetangle), clamp to ANG90
-        hex.cmp 8, oa_abs, cang180, le180, le180, gt180
-      gt180:
-        hex.neg 8, oa_abs
-      le180:
-        hex.cmp 8, oa_abs, cang90, le90, le90, gt90
-      gt90:
-        hex.mov 8, oa_abs, cang90
-      le90:
-        hex.shr_hex 8, 5, oa_abs                       // read_sin: idx = oa_abs >> 20 (low 3 nibbles)
-        hex.mov 3, sin_idx, oa_abs
-        finesine.read_sin sinv, sin_idx
-        hex.fixed_mul_lo 8, 4, rw_offset, hyp, sinv       // rw_offset = hyp * sin(oa_abs)
-
-        hex.cmp 8, offsetangle, cang180, doneg, skipneg, skipneg   // UNFOLDED offsetangle < ANG180 -> negate
-      doneg:
-        hex.neg 8, rw_offset
-      skipneg:
-        hex.add 8, rw_offset, texoff                   // += (seg.offset + sd.x_off) << 16
-
-        hex.mov 8, rw_centerangle, viewangle           // rw_centerangle = ANG90 + viewangle - rw_normalangle
-        hex.add 8, rw_centerangle, cang90
-        hex.sub 8, rw_centerangle, rw_normalangle
-        ;end
-
-      offsetangle: hex.vec 8
-      oa_abs: hex.vec 8
-      hyp: hex.vec 8
-      sin_idx: hex.vec 3
-      sinv: hex.vec 8
-      cang90: hex.vec 8, 0x40000000
-      cang180: hex.vec 8, 0x80000000
-      end:
-    }
 
     // proj.texture_u dst, rw_centerangle, rw_offset, rw_distance, x, tw (per-column texture u-coord,
     //   render_wall_frame lines 549-552): dst = the texture column [0, tw) for screen column x.
@@ -1272,23 +1231,6 @@ ns proj {
     //   xtoviewangle lookup + scale_from_global_angle (M12q) x2 + scalestep (M12u). x1/x2 are columns
     //   (read as 2-nibble indices into xtoviewangle). `projection` is the compile-time Config arg (R6).
     //   Mirrors the oracle EXACTLY. @requires hex.init & stl.ptr_init   (read_table + finesine.read_sin)
-    def wall_scale_setup scale1, scalestep_out, viewangle, rw_normalangle, rw_distance, x1, x2, projection \
-            @ visang1, visang2, scale2, end \
-            < xtoviewangle {
-        hex.read_table_packed 4, visang1, xtoviewangle, 2, x1  // xtoviewangle[x1]
-        hex.add 8, visang1, viewangle                   // visangle@x1 = viewangle + xtoviewangle[x1]
-        .scale_from_global_angle scale1, visang1, viewangle, rw_normalangle, rw_distance, projection, 0, x1
-        hex.read_table_packed 4, visang2, xtoviewangle, 2, x2  // xtoviewangle[x2]
-        hex.add 8, visang2, viewangle                   // visangle@x2
-        .scale_from_global_angle scale2, visang2, viewangle, rw_normalangle, rw_distance, projection, 0, x2
-        .scalestep scalestep_out, scale1, scale2, x1, x2   // trunc((scale2-scale1)/(x2-x1)) toward zero
-        ;end
-
-      visang1: hex.vec 8
-      visang2: hex.vec 8
-      scale2: hex.vec 8
-      end:
-    }
 
     // proj.wall_scale_setup_m — the LINES-mode wall_scale_setup (M13-XTADISP). Identical values and
     // identical output, but the two xtoviewangle reads go through the D4 per-entry DISPATCH table
@@ -1344,22 +1286,6 @@ ns proj {
     // setup (column_setup) are DEAD in the column-stream renderer's W1 mode (the wall run is one
     // baked lit byte; planes come from the shared band lists), so this variant skips them — the
     // measured bulk of the old per-column cost.
-    def column_render_params_stream top, bottom, scale, ceilfix, floorfix, viewz, centery, viewh1 \
-            @ c_viewh1, tneg, tok, bok, bhi, end {
-        .wall_screen_span top, bottom, ceilfix, floorfix, viewz, scale, centery*0x10000
-        hex.sign 8, top, tneg, tok          // top = max(0, top)  (signed)
-      tneg:
-        hex.zero 8, top
-      tok:
-        hex.set 8, c_viewh1, viewh1         // bottom = min(VIEW_H-1, bottom)  (signed)
-        hex.scmp 8, bottom, c_viewh1, bok, bok, bhi
-      bhi:
-        hex.mov 8, bottom, c_viewh1
-      bok:
-        ;end
-      c_viewh1: hex.vec 8
-      end:
-    }
 
     // proj.project_thing (V4 THINGS) — R_ProjectSprite: one billboard's screen box.
     //   Sets `vis` = 1 and (x1o, x2o, ytopo, hpxo, istepo) = the inclusive column range, the screen

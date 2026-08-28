@@ -62,42 +62,9 @@ ns stream {
     // [n:1B] then n x ([count:1B] via byte.emit + the (base,zrow) pair collapsed to ONE final
     // colour byte via cm.emit — the colormap lookup now runs once per VISPLANE ENTRY (~dozens),
     // not once per emitted column run). An unbuilt vp's slot0 is still 0-init => emits just [0].
-    def emit_vp_bank base, nvps, stride {
-        rep(nvps, v) .emit_vp_list base + v*(1+stride)*dw
-    }
-    def emit_vp_list buf @ ptr, n, i, cnt, cidx, vloop, vbody, vdone, vskip {
-        hex.set w/4, ptr, buf
-        hex.read_byte_and_inc n, ptr
-        byte.emit n
-        hex.zero 2, i
-      vloop:
-        hex.cmp 2, i, n, vbody, vdone, vdone
-      vbody:
-        hex.read_byte_and_inc cnt, ptr
-        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
-        byte.emit cnt
-        cm.emit cidx
-        hex.inc 2, i
-        ;vloop
-      vdone:
-        ;vskip
-      ptr: hex.vec w/4
-      n: hex.vec 2
-      i: hex.vec 2
-      cnt: hex.vec 2
-      cidx: hex.vec 4
-      vskip:
-    }
 
     // One column's 5-byte record: [cexcl][fstart][lit][cvp][fvp] — five compile-time-cell reads,
     // five byte.emits, no loops, no pointer derefs. The device does the rest.
-    def emit_column_rec cexcl_cell, fstart_cell, lit_cell, cvp_cell, fvp_cell {
-        byte.emit cexcl_cell
-        byte.emit fstart_cell
-        byte.emit lit_cell
-        byte.emit cvp_cell
-        byte.emit fvp_cell
-    }
 
     // M13pS2-crush2b — emit a PREFIX of a shared FULL-RANGE band list: the first `take_src` rows.
     // `arr_cell` is a RUNTIME cell (a per-column col array slot) holding the visplane buffer's
@@ -184,129 +151,6 @@ ns stream {
     // INDICES (planesproto stores indices, not addresses) as base + idx*(1+stride)*dw. An UNCLAIMED
     // column (fvp==0xFF) emits nothing. The frame's trailing 0xFF-x sentinel is emitted by the caller,
     // once, after all columns. @requires the "byte"/"cm" emit tables + hex.init & stl.ptr_init.
-    def emit_column_spans x, cexcl_cell, fstart_cell, lit_cell, cvp_cell, fvp_cell, \
-            vpc_bufs, vpf_bufs, band_stride \
-            @ claimed, cok, cclamp, ceil, cloop, cemit_full, cemit_part, wall, floor, \
-              floop, fbody, fskipall, fpartial, fread, fcont, fdone, skip, \
-              fvpv, cexclv, fstartv, litv, cvpv, cbuf, fbuf, ctake, ycur, y2, ptr, cnt, n_ent, ent_i, \
-              cidx, take, wlen, cFF {
-        hex.mov 2, fvpv, fvp_cell
-        hex.set 2, cFF, 0xFF
-        hex.cmp 2, fvpv, cFF, claimed, skip, claimed  // fvp == 0xFF -> unclaimed, emit nothing
-      claimed:
-        hex.mov 2, cexclv, cexcl_cell
-        hex.mov 2, fstartv, fstart_cell
-        hex.mov 2, litv, lit_cell
-        hex.mov 2, cvpv, cvp_cell
-        // cbuf = vpc_bufs + cvp*(1+band_stride)*dw ; fbuf = vpf_bufs + fvp*(1+band_stride)*dw
-        hex.zero w/4, cbuf
-        hex.mov 2, cbuf, cvpv
-        hex.mul_const w/4, cbuf, cbuf, (1+band_stride)*dw
-        hex.set w/4, ptr, vpc_bufs
-        hex.add w/4, cbuf, ptr
-        hex.zero w/4, fbuf
-        hex.mov 2, fbuf, fvpv
-        hex.mul_const w/4, fbuf, fbuf, (1+band_stride)*dw
-        hex.set w/4, ptr, vpf_bufs
-        hex.add w/4, fbuf, ptr
-        // ctake = min(cexcl, fstart) ; ycur = 0
-        hex.mov 2, ctake, cexclv
-        hex.cmp 2, ctake, fstartv, cok, cok, cclamp
-      cclamp:
-        hex.mov 2, ctake, fstartv
-      cok:
-        hex.zero 2, ycur
-      ceil:                                            // ceiling PREFIX over [0, ctake)
-        hex.if0 2, ctake, wall
-        hex.mov w/4, ptr, cbuf
-        hex.read_byte_and_inc cnt, ptr                 // consume the entry-count header byte
-        hex.mov 2, take, ctake                         // rows still to emit
-      cloop:
-        hex.read_byte_and_inc cnt, ptr                 // run length
-        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr   // cidx = (base, zrow)
-        hex.cmp 2, cnt, take, cemit_full, cemit_full, cemit_part   // cnt <= take -> whole band
-      cemit_full:
-        stl.output_char x                              // [x]
-        byte.emit ycur                                 // [y1]
-        hex.mov 2, y2, ycur
-        hex.add 2, y2, cnt
-        byte.emit y2                                   // [y2]
-        cm.emit cidx                                   // [colour]
-        hex.mov 2, ycur, y2
-        hex.sub 2, take, cnt
-        hex.if0 2, take, wall                          // ceiling filled up to ctake
-        ;cloop
-      cemit_part:                                      // cnt > take: emit the remaining `take` rows
-        stl.output_char x
-        byte.emit ycur
-        hex.mov 2, y2, ycur
-        hex.add 2, y2, take
-        byte.emit y2
-        cm.emit cidx
-        hex.mov 2, ycur, y2
-        ;wall
-      wall:                                            // ycur == ctake here; wall run [ctake, fstart)
-        hex.mov 2, wlen, fstartv
-        hex.sub 2, wlen, ctake
-        hex.if0 2, wlen, floor
-        stl.output_char x
-        byte.emit ycur                                 // y1 == ctake
-        byte.emit fstartv                              // y2 == fstart
-        byte.emit litv                                 // wall colour (already final, no cm)
-        hex.mov 2, ycur, fstartv
-      floor:                                           // floor SUFFIX over [fstart, view_h)
-        hex.mov 2, ycur, fstartv
-        hex.mov w/4, ptr, fbuf
-        hex.read_byte_and_inc n_ent, ptr               // n (entry count)
-        hex.zero 2, ent_i
-        hex.mov 2, take, fstartv                       // skip the first fstart rows
-      floop:
-        hex.cmp 2, ent_i, n_ent, fbody, fdone, fdone
-      fbody:
-        hex.read_byte_and_inc cnt, ptr                 // run length
-        hex.if0 2, take, fread                         // done skipping -> emit this band
-        hex.cmp 2, take, cnt, fpartial, fskipall, fskipall
-      fskipall:                                        // skip >= cnt: hop the band's 2 colour bytes
-        hex.sub 2, take, cnt
-        hex.ptr_add ptr, 2
-        ;fcont
-      fpartial:                                        // 0 < skip < cnt: emit the band remainder
-        hex.sub 2, cnt, take
-        hex.zero 2, take
-      fread:
-        rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
-        stl.output_char x
-        byte.emit ycur
-        hex.mov 2, y2, ycur
-        hex.add 2, y2, cnt
-        byte.emit y2
-        cm.emit cidx
-        hex.mov 2, ycur, y2
-      fcont:
-        hex.inc 2, ent_i
-        ;floop
-      fdone:
-        ;skip
-      fvpv: hex.vec 2
-      cexclv: hex.vec 2
-      fstartv: hex.vec 2
-      litv: hex.vec 2
-      cvpv: hex.vec 2
-      cbuf: hex.vec w/4
-      fbuf: hex.vec w/4
-      ctake: hex.vec 2
-      ycur: hex.vec 2
-      y2: hex.vec 2
-      ptr: hex.vec w/4
-      cnt: hex.vec 2
-      n_ent: hex.vec 2
-      ent_i: hex.vec 2
-      cidx: hex.vec 4
-      take: hex.vec 2
-      wlen: hex.vec 2
-      cFF: hex.vec 2
-      skip:
-    }
 
     // One column's 3 windows over the SHARED per-visplane full-range lists (M13pS2-crush2b):
     // ceiling = the ceiling visplane list's PREFIX [0, min(cexcl, fstart)) — the min gives the
@@ -473,9 +317,6 @@ ns stream {
     // pairs until one crosses ctake (clamped there); the floor SUFFIX skips pairs at or below
     // fstart and streams the rest (the device cursor is already at fstart after the wall pair).
     // @requires hex.init & stl.ptr_init
-    def call_walk leaf, ret {
-        stl.fcall leaf, ret
-    }
 
     // ══ M13-2S rung 3b — the TWO-SIDED emit ══════════════════════════════════════════════════
     // The 0x0B protocol needs ONE contiguous top-to-bottom record per column, but walking segs
@@ -491,153 +332,21 @@ ns stream {
     //   kind 0 = ceiling band (arg = the sector's plane-pair id), 1 = floor band, 2 = wall run
     //   (arg = the WPX bank block index).
 
-    def entry_append ptr, cnt, kind, arg, y1, yend @ kind_r, end {
-        hex.set 2, kind_r, kind
-        hex.write_byte_and_inc ptr, kind_r
-        hex.write_byte_and_inc ptr, arg                  // arg is 4 nibbles: a plane-pair id, or a
-        hex.write_byte_and_inc ptr, arg + 2*dw           // WPX block index (E1M1 has 622 of them)
-        hex.write_byte_and_inc ptr, y1
-        hex.write_byte_and_inc ptr, yend
-        hex.inc 2, cnt
-        ;end
-      kind_r: hex.vec 2
-      end:
-    }
-
-    def band_pair sink, cnt, y2r, colr, buf {
-        rep(buf, k) .band_pair_buf sink, cnt, y2r, colr
-        rep(1-buf, k) .band_pair_emit y2r, colr
-    }
-
-    def band_pair_buf sink, cnt, y2r, colr {
-        hex.write_byte_and_inc sink, y2r
-        hex.write_byte_and_inc sink, colr
-        hex.add_constant 2, cnt, 2
-    }
-
-    def band_pair_emit y2r, colr {
-        byte.emit y2r
-        byte.emit colr
-    }
-
     // one band-list HALF over the row sub-range [y1, yend): skip entries ending at or above y1,
     // emit the rest, clamp the entry that crosses `yend` and stop there. The shipped prefix (pwalk)
     // and suffix (swalk) walks are both special cases -- rung 3b needs the general form, because a
     // plane region is now bounded by two SEGS, not by the window edge.
-    def band_half sink, cnt, listp, y1, yend, buf @ loop, body, skip, check_end, emit, emit_last, clamp, done, ptr, n_ent, ent_i, y2r, colr, end {
-        hex.mov w/4, ptr, listp
-        hex.read_byte_and_inc n_ent, ptr
-        hex.zero 2, ent_i
-      loop:
-        hex.cmp 2, ent_i, n_ent, body, done, done
-      body:
-        hex.read_byte_and_inc y2r, ptr
-        hex.read_byte_and_inc colr, ptr
-        hex.inc 2, ent_i
-        hex.cmp 2, y2r, y1, skip, skip, check_end  // ends at/above the range start -> not ours
-      skip:
-        ;loop
-      check_end:
-        hex.cmp 2, y2r, yend, emit, emit_last, clamp
-      emit:
-        .band_pair sink, cnt, y2r, colr, buf
-        ;loop
-      clamp:
-        hex.mov 2, y2r, yend                     // the entry crossing the end: clamp, then stop
-      emit_last:
-        .band_pair sink, cnt, y2r, colr, buf
-      done:
-        ;end
-      ptr: hex.vec w/4
-      n_ent: hex.vec 2
-      ent_i: hex.vec 2
-      y2r: hex.vec 2
-      colr: hex.vec 2
-      end:
-    }
 
     // a plane REGION [y1, yend) of one surface: the asc half always (its entries all end at or
     // below CENTERY, so it self-skips when the region starts below), the desc half only when the
     // region actually reaches past CENTERY -- otherwise its first entry (ending at CENTERY+1)
     // would clamp to `yend` and emit a phantom pair.
-    def band_range sink, cnt, lista, listd, y1, yend, centery, buf @ desc, done, ccy, end {
-        .band_half sink, cnt, lista, y1, yend, buf
-        hex.set 2, ccy, centery
-        hex.cmp 2, yend, ccy, done, done, desc
-      desc:
-        .band_half sink, cnt, listd, y1, yend, buf
-      done:
-        ;end
-      ccy: hex.vec 2
-      end:
-    }
 
     // one WPX 1x1 wall run over the rows [y1, yend): the list baked for this EXACT height, `rel`
     // measured from the run's top, the final run (the `rel == 0` sentinel) ending at yend.
-    def wall_run sink, cnt, y1, yend, wstrip, wstripbase, wpxstride, buf @ wloop, wdone, ptr, wlen, y2r, colr, end {
-        hex.mov 2, wlen, yend
-        hex.sub 2, wlen, y1
-        hex.zero w/4, ptr
-        hex.mov 2, ptr, wlen
-        hex.mul_const w/4, ptr, ptr, wpxstride*dw
-        hex.add w/4, ptr, wstripbase
-        hex.add w/4, ptr, wstrip
-      wloop:
-        hex.read_byte_and_inc y2r, ptr
-        hex.if0 2, y2r, wdone
-        hex.read_byte_and_inc colr, ptr
-        hex.add 2, y2r, y1
-        .band_pair sink, cnt, y2r, colr, buf
-        ;wloop
-      wdone:
-        hex.read_byte_and_inc colr, ptr
-        .band_pair sink, cnt, yend, colr, buf
-        ;end
-      ptr: hex.vec w/4
-      wlen: hex.vec 2
-      y2r: hex.vec 2
-      colr: hex.vec 2
-      end:
-    }
 
     // expand ONE buffered region straight to the device (buf = 0: pairs go out as they are
     // produced, so nothing is ever stored twice).
-    def entry_expand_body centery, half_slots, wpxstride, wpxblock @ isceil, isfloor, iswall, done, kind, arg, y1, yend, c_one, dead, woff, wlen, end < cbufa, cbufd, fbufa, fbufd, wstripbase, eptr, exp_ret {
-        hex.read_byte_and_inc kind, eptr
-        hex.zero 4, arg
-        hex.read_byte_and_inc arg, eptr
-        hex.read_byte_and_inc arg + 2*dw, eptr
-        hex.read_byte_and_inc y1, eptr
-        hex.read_byte_and_inc yend, eptr
-        hex.set 2, c_one, 1
-        hex.cmp 2, kind, c_one, isceil, isfloor, iswall
-      isceil:
-        frame.lines_pid_addrs arg, half_slots, cbufa, cbufd, fbufa, fbufd
-        .band_range dead, dead, cbufa, cbufd, y1, yend, centery, 0
-        ;done
-      isfloor:
-        frame.lines_pid_addrs arg, half_slots, cbufa, cbufd, fbufa, fbufd
-        .band_range dead, dead, fbufa, fbufd, y1, yend, centery, 0
-        ;done
-      iswall:
-        hex.zero w/4, woff
-        hex.mov 4, woff, arg
-        hex.mul_const w/4, woff, woff, wpxblock*dw       // block index -> bank offset
-        hex.mov 2, wlen, yend
-        hex.sub 2, wlen, y1
-        .wpx_wall y1, wlen, yend, woff, wstripbase, wpxstride, 0, 0   // 2S tier: no grain
-      done:
-        stl.fret exp_ret
-      kind: hex.vec 2
-      arg: hex.vec 4
-      y1: hex.vec 2
-      yend: hex.vec 2
-      c_one: hex.vec 2
-      dead: hex.vec w/4                                  // a throwaway sink/count: buf=0 never writes
-      woff: hex.vec w/4
-      wlen: hex.vec 2
-      end:
-    }
 
 
 

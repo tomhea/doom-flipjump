@@ -64,38 +64,6 @@ ns plane {
     // light (2, the RAW sector light 0..255), pbase (2, the flat base palette index), y (2, screen row).
     // Reads the yslope/zlight tables + cm.apply. Returns via stl.fret plane_ret (the data below is never
     // fallen into — lesson #2). The @-local data regs are allocated after the fret.
-    def draw_pixel \
-            @ ys, dist, zidx, lvl, zlidx, zrow, cmidx, c127, zok, zclamp \
-            < planeheight, light, pbase, y, lit, yslope, zlight, plane_ret {
-        hex.read_table 8, ys, yslope, 2, y           // ys = yslope[y]   (y in [0, VIEW_H) -> 2-nibble index)
-        hex.fixed_mul_lo 8, 4, dist, planeheight, ys    // dist = FixedMul(planeheight, ys) (16.16, wraps mod 2^32)
-        hex.shr_hex 8, 5, dist                       // dist >>= 20 (LIGHTZSHIFT): the distance bucket
-        hex.mov 3, zidx, dist                        // zidx = bucket (the low 3 nibbles; the high nibbles are 0)
-        hex.set 3, c127, 127                         // MAXLIGHTZ-1
-        hex.cmp 3, zidx, c127, zok, zok, zclamp      // zidx > 127 -> clamp to 127 (min)
-      zclamp:
-        hex.mov 3, zidx, c127
-      zok:
-        hex.mov 2, lvl, light
-        hex.shr_hex 2, 1, lvl                        // lvl = light >> 4 (LIGHTSEGSHIFT) -> 0..15
-        hex.mul_const 3, zlidx, lvl, 128             // zlidx = lvl * MAXLIGHTZ
-        hex.add 3, zlidx, zidx                       // + zidx (disjoint: zidx<128) -> lvl*128 + zidx
-        hex.read_table 2, zrow, zlight, 3, zlidx     // zrow = zlight[lvl*MAXLIGHTZ + zidx]
-        hex.zero 4, cmidx
-        hex.mov 2, cmidx, pbase                      // cmidx low byte = the flat base colour
-        hex.mov 2, cmidx + 2*dw, zrow                // cmidx high byte = the zlight colormap row
-        cm.apply lit, cmidx                          // lit = colormap[zrow][pbase]
-        stl.fret plane_ret
-
-      ys: hex.vec 8
-      dist: hex.vec 8
-      zidx: hex.vec 3
-      lvl: hex.vec 3                                    // read at 3 nibbles by mul_const 3 (high nibble kept 0)
-      zlidx: hex.vec 3
-      zrow: hex.vec 2
-      cmidx: hex.vec 4
-      c127: hex.vec 3
-    }
 
     // M13d2 — the per-frame R_ClearPlanes seeds basexscale/baseyscale (DOOM R_ClearPlanes). Computed ONCE per
     // frame from the view angle; every span's xstep/ystep = FixedMul(distance, base?scale). Mirrors the oracle

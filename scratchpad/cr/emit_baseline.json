@@ -1,0 +1,94 @@
+{
+ "configs": {
+  "certified": {
+   "entry": [
+    "c6906067aa3472ceb641501ed5cd6327adaf57f4eaf8fd393c3ef28fa723391d",
+    2411
+   ],
+   "tables": [
+    "dcfda875f874005704301b254cf7b67c64f404935928861acb44afe3d706ccac",
+    9614135
+   ],
+   "main": [
+    "ce4bd629878980c6dabd271cd2572cfdf6365287d5358e1e8fe92197f0ca912b",
+    5217
+   ],
+   "segconsts": [
+    "e7a90bda513a3bfa9f7ef68a5c462b4c1dbafe3bd16e481b792a3203cdd0f817",
+    1336259
+   ],
+   "walk": [
+    "2e57d7e3b73afd0e514650c629b324b6d9197833635f767c23d910404bdf9687",
+    3426876
+   ],
+   "state": [
+    "7d6964700ae30320ca797c5d8f20ef111ed62be878fed6f9c15b04ad5b27356a",
+    9866
+   ],
+   "banks": [
+    "e153165749ef7766d3b81462cefb8ee42c1b06ade1ba0ae1792edf4af46c29e2",
+    124315644
+   ]
+  },
+  "standalone": {
+   "entry": [
+    "c6906067aa3472ceb641501ed5cd6327adaf57f4eaf8fd393c3ef28fa723391d",
+    2411
+   ],
+   "tables": [
+    "2e2ba985dffde536d29f6279a779a0f2ef8d53aac7414682804f95d26f3c3d8e",
+    9615592
+   ],
+   "main": [
+    "8c1cd70589870b0196a83c7fc3d911d9ad01d64e74b56219b35b1e020ea37edc",
+    57504
+   ],
+   "segconsts": [
+    "5ffb6c66d5093b9794fa2973d1e9f16ef02d94cb19b7d7523f8c5c1e5188f56e",
+    2010998
+   ],
+   "walk": [
+    "f595459bf486737653e588c093046038637a2f62b3f3379fe36b8f129ebc1ee0",
+    3428706
+   ],
+   "state": [
+    "f3dfc3882fadd6bf773b42937471a96345081d3aa5ee013a15f399fa9fb85702",
+    10132
+   ],
+   "banks": [
+    "b45ce46ec99a81b5b62b7f4ee52a2b10bf8367f7a1f2e15d0912a8c0a8b8cf50",
+    135627081
+   ]
+  },
+  "hosted_doors": {
+   "entry": [
+    "c6906067aa3472ceb641501ed5cd6327adaf57f4eaf8fd393c3ef28fa723391d",
+    2411
+   ],
+   "tables": [
+    "9db5d4d405721ff72a59540f3a01d7a18d92c58b180db449e9ca5b47fb4efc4e",
+    9614138
+   ],
+   "main": [
+    "9c90a5e9ba3c3b6648d6425119c2987c303985cd33bec344bcac3abee463d4d3",
+    37766
+   ],
+   "segconsts": [
+    "5ffb6c66d5093b9794fa2973d1e9f16ef02d94cb19b7d7523f8c5c1e5188f56e",
+    2010998
+   ],
+   "walk": [
+    "f595459bf486737653e588c093046038637a2f62b3f3379fe36b8f129ebc1ee0",
+    3428706
+   ],
+   "state": [
+    "281eea6a0cd1fba7aa613f58adde01bb938d68c74b8b5a5a1864e6f8ab9cda52",
+    9987
+   ],
+   "banks": [
+    "e4c7058761dbd6b1a4a84fe9e2c999f2f0666d2c9704c38d977a1f495e592003",
+    135625002
+   ]
+  }
+ }
+}

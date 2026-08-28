@@ -711,3 +711,29 @@ class StreamScreen(InMemoryScreen):
             if self.flush_mode == 0:
                 self._present()
                 self.flush_count += 1
+
+
+# MOVED HERE from tests/fj/test_wall_render.py, which was the framebuffer wall
+# renderer's test module and went with that renderer. A shared helper living inside a TEST
+# module is invisible until the module is deleted -- test_plane_span_pass.py imported it and
+# the whole fj suite stopped COLLECTING.
+class _ScreenWithInput(InMemoryScreen):
+    """An InMemoryScreen that ALSO feeds stdin (the runtime viewpoint), so one assembled binary can be
+    re-run over several stdin viewpoints. read_bit mirrors FixedIO (lsb-first from a bytes buffer)."""
+    def __init__(self, stdin: bytes):
+        super().__init__()
+        self._inp = stdin
+        self._byte = 0
+        self._bits = 0
+
+    def read_bit(self) -> bool:
+        if self._bits == 0:
+            if not self._inp:
+                from flipjump.utils.exceptions import IOReadOnEOF
+                raise IOReadOnEOF("EOF on _ScreenWithInput")
+            self._byte, self._inp = self._inp[0], self._inp[1:]
+            self._bits = 8
+        bit = (self._byte & 1) == 1
+        self._byte >>= 1
+        self._bits -= 1
+        return bit

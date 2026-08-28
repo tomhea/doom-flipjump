@@ -32,6 +32,7 @@
 //     'w' 0x77   up    0x80     forward        'a' 0x61   left  0x82     turn left
 //     's' 0x73   down  0x81     back           'd' 0x64   right 0x83     turn right
 //     enter 0x0D  esc 0x1B      toggle `mode` -- M3's menu, on the DOWN edge only
+//     space 0x20                 M2-R4's USE key: the door flag, held like the four above
 // Anything else is read and DISCARDED. The discard happens AFTER the keycode byte is consumed --
 // there is deliberately no early exit that would skip that read.
 // ==============================================================================================
@@ -40,7 +41,7 @@ ns kb {
     // One poll. `stat` is a 1-hex scratch, `code` a 2-hex scratch (both written before they are
     // read, so both are ordinary restore-set cells); `f`/`b`/`l`/`r` are the persistent 1-hex
     // held-key flags, in wireformat.py's key order: forward, back, turn_left, turn_right.
-    def poll stat, code, f, b, l, r, mode, bad @ done, legal, hi1, hi6, hi7, lo0, lo1, k_mode, mode_dn, hi8, k_fwd, k_back, k_left, k_right, lo6, lo6_d, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn {
+    def poll stat, code, f, b, l, r, u, mode, bad @ done, legal, hi1, hi2, hi6, hi7, lo0, lo1, lo2, k_mode, mode_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, lo6, lo6_d, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn {
         hex.input_hex stat
         // 0x0, 0x8 and 0x9 are the ONLY statuses the keyboard device produces. Anything else means
         // this program is not reading a keyboard -- someone piped a file in, or ran it with the
@@ -55,7 +56,9 @@ ns kb {
         // ---- which key? two nibble tests per candidate, the wmagic idiom ----
         hex.if_flags code+dw, 1<<0x0, hi1, lo0
       hi1:
-        hex.if_flags code+dw, 1<<0x1, hi6, lo1
+        hex.if_flags code+dw, 1<<0x1, hi2, lo1
+      hi2:
+        hex.if_flags code+dw, 1<<0x2, hi6, lo2
       hi6:
         hex.if_flags code+dw, 1<<0x6, hi7, lo6
       hi7:
@@ -67,6 +70,8 @@ ns kb {
         hex.if_flags code, 1<<0xD, done, k_mode
       lo1:                                      // 0x1_ : esc (0x1B) does the same
         hex.if_flags code, 1<<0xB, done, k_mode
+      lo2:                                      // 0x2_ : space (0x20) is M2-R4's USE key
+        hex.if_flags code, 1<<0x0, done, k_use
 
       lo6:                                      // 0x6_ : 'a' turn left, 'd' turn right
         hex.if_flags code, 1<<0x1, lo6_d, k_left
@@ -89,6 +94,13 @@ ns kb {
 
         // ---- set or clear that key's flag. stat's bit 0 is is_down, and the only two statuses
         // that reach here are 0x8 (up) and 0x9 (down), so the odd-nibble mask separates them.
+      k_use:
+        hex.if_flags stat, 0xAAAA, u_up, u_dn
+      u_dn: hex.set 1, u, 1
+            ;done
+      u_up: hex.zero 1, u
+            ;done
+
       k_fwd:
         hex.if_flags stat, 0xAAAA, f_up, f_dn
       f_dn: hex.set 1, f, 1

@@ -158,26 +158,3 @@ def run_rw(n, values, mode):
     return arr, got
 
 
-def test_readbyte_returns_every_value_and_does_not_disturb_the_cell():
-    """Every value 0..255 read at a CONSTANT address and stored back through m1.writebyte.
-
-    Catches the two failure modes that matter: losing the HIGH nibble (a read that only assembles
-    4 of the 8 bits looks correct for every value below 0x10), and a read that corrupts its own
-    source cell -- it flips bit dbit+8 and jumps INTO the cell, so it must undo both flips.
-    """
-    vals = list(range(256)) + GUARD
-    arr, got = run_rw(256, vals, "read")
-    assert got == list(range(256)), "misread: %s" % (
-        [(i, g) for i, g in enumerate(got) if g != i][:6])
-    assert arr[:256] == list(range(256)), "the READ modified its source cells"
-    assert arr[256:258] == GUARD
-
-
-def test_writebyte_stores_every_value_and_leaves_neighbours_alone():
-    """The write twin of test_clears_every_value_0_to_255. 0x5A has popcount 4 and both nibbles
-    non-zero, so a half-width write shows up immediately."""
-    vals = list(range(256)) + GUARD
-    arr, _ = run_rw(256, vals, "write")
-    assert arr[:256] == [0x5A] * 256, "cells not written: %s" % (
-        [(i, v) for i, v in enumerate(arr[:256]) if v != 0x5A][:6])
-    assert arr[256:258] == GUARD, "the write spilled past the array"

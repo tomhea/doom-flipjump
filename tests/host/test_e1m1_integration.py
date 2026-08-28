@@ -186,8 +186,10 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
                              # `self_reset` is what m1_gate's binary turns on, `standalone` +
                              # `menu` are the no-Python tier (build/doom_e1m1_menu.fjm).
                              "self_reset": False, "standalone": False, "menu": False,
-                             # M2: a door override moves pixels; the shipped tier has none
-                             "sector_heights": False}, m
+                             # M2: a door override moves pixels; the shipped tier has none, and
+                             # neither does it have the RUNTIME door (`doors`), which bakes every
+                             # door once per state and dispatches on a state nibble.
+                             "sector_heights": False, "doors": False}, m
     assert m["tier"] == "lines/W1R/FT1+plane_near", m
     assert SPAN_LO < m["span_words"] < SPAN_HI, m
 

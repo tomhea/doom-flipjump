@@ -59,6 +59,36 @@
     "b45ce46ec99a81b5b62b7f4ee52a2b10bf8367f7a1f2e15d0912a8c0a8b8cf50",
     135627081
    ]
+  },
+  "hosted_doors": {
+   "entry": [
+    "c6906067aa3472ceb641501ed5cd6327adaf57f4eaf8fd393c3ef28fa723391d",
+    2411
+   ],
+   "tables": [
+    "9db5d4d405721ff72a59540f3a01d7a18d92c58b180db449e9ca5b47fb4efc4e",
+    9614138
+   ],
+   "main": [
+    "9c90a5e9ba3c3b6648d6425119c2987c303985cd33bec344bcac3abee463d4d3",
+    37766
+   ],
+   "segconsts": [
+    "5ffb6c66d5093b9794fa2973d1e9f16ef02d94cb19b7d7523f8c5c1e5188f56e",
+    2010998
+   ],
+   "walk": [
+    "f595459bf486737653e588c093046038637a2f62b3f3379fe36b8f129ebc1ee0",
+    3428706
+   ],
+   "state": [
+    "281eea6a0cd1fba7aa613f58adde01bb938d68c74b8b5a5a1864e6f8ab9cda52",
+    9987
+   ],
+   "banks": [
+    "e4c7058761dbd6b1a4a84fe9e2c999f2f0666d2c9704c38d977a1f495e592003",
+    135625002
+   ]
   }
  }
 }

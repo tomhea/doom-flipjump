@@ -192,7 +192,7 @@ Full metrics, from the run that produced each binary:
 | standalone, no self-reset (`_m5_build_noloop.log`) | 84,155,496 | 1.595 | 30,948,902 | 684 s |
 | standalone + self-reset (`_m5_build_loop.log`) | 84,892,508 | 1.581 | 31,221,481 | 3,405 s (**two passes**) |
 | + menu (`_m3_build.log`) | 85,209,916 | 1.575 | 31,252,015 | 2,867 s (two passes) |
-| + runtime doors (`_m5_menu_doors.log`) | 89,494,606 | 1.500 | 32,879,690 | 4,966 s (two passes) |
+| + runtime doors (`_m2_menu_build.log`) | 89,494,606 | 1.500 | 32,879,690 | 3,389 s (two passes) |
 
 The **+4,284,690** on the doors row is the whole M2 runtime-door tier: every door-touching
 segment's constant block baked once **per state** plus the 1-nibble switch that picks one, which is

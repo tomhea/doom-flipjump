@@ -227,7 +227,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                         flat_max_words=None, plane_near=True, wall_noise=True, sky=True,
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
-                        state_wire="bin", player_sim=True, collide=True,
+                        player_sim=True, collide=True,
                         moving_things=True, standalone=False, menu=False, menu_entries=None,
                         menu_selected=0,
                         sector_heights=None, doors=False,
@@ -289,10 +289,10 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
     spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
 
-    parts = emit_wall_renderer(wad, mapname, cfg, over_align=False, plane_near=plane_near,
+    parts = emit_wall_renderer(wad, mapname, cfg, plane_near=plane_near,
                                wall_noise=wall_noise, sky=sky, steps=steps, things=things,
                                sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
-                               deg=deg, state_wire=state_wire, player_sim=player_sim,
+                               deg=deg, player_sim=player_sim,
                                collide=collide, moving_things=moving_things,
                                standalone=standalone, menu=menu, menu_entries=menu_entries,
                                menu_selected=menu_selected,
@@ -419,7 +419,9 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      # shapes the artifact must be visible in metrics.json, or the next divergence
                      # is invisible again.
                      "player_sim": player_sim, "collide": collide,
-                     "moving_things": moving_things, "state_wire": state_wire,
+                     # the wire is a CONSTANT now ("dec" retired with the flag), but every gate
+                     # log and metrics file in the repo reads this key, so it keeps reporting.
+                     "moving_things": moving_things, "state_wire": "bin",
                      # M1: the program self-resets and loops -- one run renders many frames.
                      "self_reset": self_reset,
                      # M5: no host in the loop -- the keyboard device drives it and the view state

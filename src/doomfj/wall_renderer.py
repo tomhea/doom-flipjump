@@ -187,8 +187,7 @@ def _player_sim_lines(collide: bool = False) -> list:
     ]
 
 
-def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = False,
-                      door_lines=()) -> list:
+def _state_wire_lines(*, sim: bool = False, collide: bool = False, door_lines=()) -> list:
     """The fj that reads one frame's world state (and, on the bin wire, echoes it back).
 
     Lives at module level so `tests/fj/test_state_wire.py` can assemble THE SAME TEXT in a
@@ -199,13 +198,6 @@ def _state_wire_lines(state_wire: str, *, sim: bool = False, collide: bool = Fal
     vx/vy derived from the position rather than the other way round. At an integer viewpoint both
     leave viewx/viewy/vx/vy holding identical bits -- which is what makes a bin frame byte-identical
     to a dec frame, and is what `scratchpad/m14_gate.py` gates."""
-    if state_wire != "bin":
-        assert not sim, "the player sim needs the bin wire (there is no key byte on the dec wire)"
-        assert not collide, "collision rides the player sim, which needs the bin wire"
-        return ["hex.input_dec_int 10, vx, bad", "hex.input_dec_int 10, vy, bad",
-                "hex.input_dec_uint 8, viewangle, bad",
-                "hex.mov 8, viewx, vx", "hex.shl_hex 8, 4, viewx",
-                "hex.mov 8, viewy, vy", "hex.shl_hex 8, 4, viewy"]
     # MAGIC first: a junk feed must still reach `bad:` and halt, or the R0 build gate (which feeds
     # one junk byte) would block reading the other 13 bytes and die on EOF instead of gating.
     return [
@@ -415,13 +407,13 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
             [rm.point_in_subsector(cmap, t.x, t.y) for t in things])
 
 
-def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=False,
+def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                        ablate: frozenset = frozenset(),
                        plane_near: bool = False,
                        wall_noise: bool = False, sky: bool = False, steps: bool = False,
                        things: bool = False, sprite_wad=None,
                        bbox_cull: bool = False, stack_steps: bool = False,
-                       deg: bool = False, state_wire: str = "dec",
+                       deg: bool = False,
                        player_sim: bool = False, collide: bool = False,
                        moving_things: bool = False, standalone: bool = False,
                        menu: bool = False, menu_entries=None, menu_selected: int = 0,
@@ -511,7 +503,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # column-claim time. The framebuffer/stream/spans/raster/proj pipelines were the ladder to it
     # and are retired; `lines` is the only raster there is.
     lines = True
-    stream = raster = projm = False
     assert not plane_near or lines, "plane_near is a lines-mode tier (M13-2S rung 3a)"
     # ablate "pnearcol" prices the emit half alone (per-column attribution OFF, the two-sided claim
     # walk still emitted); "pnearwalk" prices the walk alone (claim sites dropped, per-column ON).
@@ -532,30 +523,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     w2s_flag = wpx_flag = 0                     # retired tiers, kept as the leaf's 0 arguments
     w1r_flag = 1                                # M13-W1R (randomized runs): the shipped wall
     deg_flag = 1 if deg else 0                  # 25M-CAP: load-adaptive degradation package
-    if stream or raster or projm or lines:
-        assert lines, "W1R walls and FT1 floors are the lines tier"
     # M14-b: the state wire. "dec" is the historical three-decimals-on-stdin viewpoint; "bin" is the
     # M14 round-trip format (doomfj.wireformat) -- 16.16 position + BAM + key byte in, state back
     # out ahead of the frame. The echo goes out through `stream.emit_bytes4`, i.e. `byte.emit`,
     # which only the run-stream modes bake a table for.
-    assert state_wire in ("dec", "bin"), f"state_wire={state_wire!r} is not 'dec' or 'bin'"
-    assert state_wire == "dec" or (stream or raster or projm or lines), \
-        "state_wire='bin' needs a run-stream mode (byte.emit's table is not baked for framebuffer)"
     # M14-e: the runtime thing table. Positions arrive on the wire after the player's state, so it
     # needs the binary wire; and there is nothing to re-bind unless sprites are being emitted.
     assert not moving_things or (things and lines), \
         "moving_things=True is the runtime thing table -- it needs things=True on the lines tier"
-    assert not moving_things or state_wire == "bin", \
-        "moving_things=True reads the position array off the binary wire (see wireformat.encode_things)"
     # M5 -- the STANDALONE tier: no host, so no wire in either direction. It keeps the view state
     # across the M1 reset and reads the keyboard device instead, which means the player sim is not
     # optional here: without it nothing would ever move and the keys would go nowhere.
     assert not standalone or player_sim, (
         "standalone=True needs player_sim=True -- the keyboard drives the sim, and nothing else "
         "moves the player")
-    assert not standalone or state_wire == "bin", (
-        "standalone=True shares the bin tier's registers (pkeys, the 16.16 view state); "
-        "state_wire='dec' has neither")
     assert not standalone or lines, (
         "standalone=True presents 0x0B column run-lists, which is the lines tier")
     # the player start, which only the standalone tier bakes (see the view-state declaration)
@@ -727,17 +708,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         t = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=tex_mode)
         seg_texinfo[si] = info[sd.middle.upper()] if t is not None else info["__WALLBG__"]
 
-    tex = _texel_table("tex", combined, "per_entry", over_align=over_align)
+    tex = _texel_table("tex", combined, "per_entry", over_align=False)
 
     # M13-proj: compact one-sided-seg ids (walk-independent, seg-index order) for the 2-byte wire
     # records + the device-resident geometry table (30 B/row packed bytes via _bytes_stream --
     # stream_screen.PROJ_ROW_BYTES must match this layout).
-    proj_sid = {}
-    proj_geom_txt = ""
-    if projm:
-        for si, seg in enumerate(cmap.segs):
-            if lds[seg.linedef].back == -1:
-                proj_sid[si] = len(proj_sid)
 
     # M13d2 — the combined FLAT texel table over every distinct ceil/floor flat the one-sided seg sectors use
     # (64x64 RAW, NO downscale; the `&63` wraps). Each flat gets a SLICE offset; the textured span pass samples
@@ -761,29 +736,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         for nm in sorted(flat_names):
             flat_slice[nm] = len(flat_combined)
             flat_combined += list(rm._flat_texels(asset_wad, nm, flat_texcache))
-        flat_table = _texel_table("flat", flat_combined, "per_entry", over_align=over_align)
+        flat_table = _texel_table("flat", flat_combined, "per_entry", over_align=False)
 
     def _flatval(name: str) -> int:
         return (flat_slice[name.upper()] if floor_mode == "textured"
                 else rm._flat_base(asset_wad, name, flat_basecache))
-    # M13-proj: the device-resident geometry rows (needs _flatval, hence built here)
-    if projm:
-            rows = []
-            for si in proj_sid:
-                seg = cmap.segs[si]
-                v1x, v1y = verts[seg.v1]
-                v2x, v2y = verts[seg.v2]
-                sa, sb, sc = seg_affine_coeffs(seg, verts)
-                gsec = rm._seg_sector(lds, sds, secs, seg)
-                gtb = seg_texinfo[si][0]
-                rows.append((v1x & 0xFFFF, v1y & 0xFFFF, v2x & 0xFFFF, v2y & 0xFFFF, seg.angle,
-                             sa, sb, sc, gsec.ceil_h & 0xFFFF, gsec.floor_h & 0xFFFF,
-                             gsec.light & 0xFF,
-                             colormap[max(0, min(COLORMAP_LIGHTS - 1, gsec.light >> LIGHT_SHIFT))][combined[gtb]],
-                             _flatval(gsec.ceil_tex), _flatval(gsec.floor_tex)))
-            proj_geom_txt = _bytes_stream("seg_geom", rows, (2, 2, 2, 2, 2, 4, 4, 4, 2, 2, 1, 1, 1, 1))
-
-    if stream or lines:
+    if lines:
         # M13pS2: nothing calls `cm.apply` in stream mode -- the `cm` label carries the EMIT dispatch
         # table instead (`cm.emit`, band-run colours; same flattened light<<8|colour values), plus the
         # `byte.emit` identity table (run counts + the baked col_lit wall bytes). Same label as
@@ -794,13 +752,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
             generate_emit_dispatch_table_fj("cm", cmv, index_nibbles=_index_nibbles(len(cmv)),
                                             over_align=True),
         ])
-    elif raster or projm:
-        # M13-raster/proj: nothing calls cm.emit OR cm.apply -- the device does its OWN colormap
-        # lookup from the raw packed colormap table (present.load_raster_tables); only byte.emit
-        # (runtime-byte emit: record fields / header bytes / seg ids) is needed.
-        cm = generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)
     else:
-        cm = compile_colormap("cm", asset_wad, lights=COLORMAP_LIGHTS, over_align=over_align)
+        cm = compile_colormap("cm", asset_wad, lights=COLORMAP_LIGHTS, over_align=False)
     palette = compile_palette("palette", asset_wad)
     tantoangle = generate_tantoangle_lut_fj("tantoangle", SLOPERANGE)
     # M13-ATANDISP (lines mode): the SAME tantoangle values as a D4 per-entry dispatch table, so
@@ -1307,12 +1260,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
 
     _cid = [0]
     xorby_blocks = {}                                        # M12pp: seg{si}_xorby blocks, emitted once each
-    # M13pS2-crush2b: per-seg VISPLANE ids -- segs sharing (plane height, light, flat base) share ONE
-    # full-range band list per frame (built on first claim, sliced per column at emit). Keyed on the
-    # BAKED triple (planeheight derives from height+runtime viewz identically for equal heights).
-    cvp_ids: dict = {}
-    fvp_ids: dict = {}
-
     def subsector_action(s):
         ss = cmap.subsectors[s]
         cid = _cid[0]; _cid[0] += 1
@@ -1542,11 +1489,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 ssec = rm._seg_sector(lds, sds, secs, seg)
                 tb, th, tw = seg_texinfo.get(si, (0, 1, 1))
                 sa, sb, sc = seg_affine_coeffs(seg, verts)
-                # the band-bank key carries the flat NAME too, so M13-FT1 can sample its texels
-                ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
-                        ssec.ceil_tex.upper())
-                fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
-                        ssec.floor_tex.upper())
                 # M13-splitxb: GEOM block (part 1's cull inputs) vs REST block (part 2 only) --
                 # 375 of 432 walked segs stop in part 1, never paying the rest block's SET+CLEAR.
                 gfields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
@@ -1602,88 +1544,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                 out = ([f"    hex.if0 1, full, ss{cid}_visit", f"    ;ss{cid}_occluded", f"  ss{cid}_visit:"]
                        + out + [f"  ss{cid}_occluded:"])
             return out
-        # player-subsector setup (runs only at the FIRST subsector visited = order[0] = the player's): set the
-        # runtime viewz (player sector floor + VIEWHEIGHT) that every seg's worldtop + ceil/floor planeheight use.
-        out = [
-            f"    hex.if0 1, vz_set, e1pset{cid}",
-            f"    ;e1psegs{cid}",
-            f"  e1pset{cid}:",
-            f"    hex.set 8, viewz, {viewz_val & 0xFFFFFFFF}",
-            f"    hex.set 8, viewzw, {(viewz_val >> 16) & 0xFFFFFFFF}",
-            # M13-proj: the device's positional framing expects viewz right after the 8-byte header,
-            # before any seg id -- the first visited subsector's block runs before its segs emit.
-            *(["    stream.emit_bytes4 viewz"] if projm else []),
-            # M13-bakedbands: aim the frame's band-list bank at this subsector's viewz class
-            *(([f"    hex.set w/4, vzcbase, {lines_vz_classes[viewz_val] * n_bank_keys * 2}"]
-               if ascode else
-               [f"    hex.set w/4, vzbank, vpbank + "
-                f"{lines_vz_classes[viewz_val] * n_bank_keys * 130}*dw"]) if lines else []),
-            "    hex.set 1, vz_set, 1",
-            f"  e1psegs{cid}:",
-        ]
-        for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
-            seg = cmap.segs[si]
-            ld = lds[seg.linedef]
-            if ld.back != -1:
-                continue
-            v1x, v1y = verts[seg.v1]
-            v2x, v2y = verts[seg.v2]
-            sd = sds[ld.front if seg.side == 0 else ld.back]
-            texoff = (seg.offset + sd.x_off) << 16
-            ssec = rm._seg_sector(lds, sds, secs, seg)
-            tb, th, tw = seg_texinfo[si]
-            sa, sb, sc = seg_affine_coeffs(seg, verts)   # perf #9: baked affine rw_distance coeffs (SSOT)
-            if projm:
-                # M13-proj: the leaf only needs the wedge + back-face inputs and the wire id --
-                # everything else lives in the device-resident geometry table.
-                fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
-                          ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
-                          ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc),
-                          ("seg_sid", 4, proj_sid[si])]
-                xorby_blocks[si] = _seg_xorby_block(f"seg{si}_consts", fields)
-                out += _seg_xorby_use(f"seg{si}_consts")
-                continue
-            fields = [("seg_v1x", 8, (v1x << 16) & 0xFFFFFFFF), ("seg_v1y", 8, (v1y << 16) & 0xFFFFFFFF),
-                      ("seg_v2x", 8, (v2x << 16) & 0xFFFFFFFF), ("seg_v2y", 8, (v2y << 16) & 0xFFFFFFFF),
-                      ("seg_segangle", 8, seg.angle), ("seg_a", 8, sa), ("seg_b", 8, sb), ("seg_c", 8, sc),
-                      ("seg_texoff", 8, texoff & 0xFFFFFFFF),
-                      ("seg_texbase", 5, tb), ("seg_texheight", 4, th), ("seg_tw", 8, tw),
-                      ("seg_hm", 3, th - 1), ("seg_light", 2, lrow(ssec.light)),
-                      ("ceilfix", 8, (ssec.ceil_h << 16) & 0xFFFFFFFF),
-                      ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
-                      ("seg_ceil", 8, ssec.ceil_h & 0xFFFFFFFF),   # M12pp: worldtop = seg_ceil - viewzw in-leaf
-                      ("seg_floor", 8, ssec.floor_h & 0xFFFFFFFF),  # M13c3: floor planeheight = |floor_h<<16 - viewz|
-                      ("seg_plight", 2, ssec.light & 0xFF),         # RAW sector light (zlight does >>4)
-                      ("seg_ceilbase", 5, _flatval(ssec.ceil_tex)),   # M13d2 slice offset / M13p1 base index
-                      ("seg_floorbase", 5, _flatval(ssec.floor_tex))]
-            if stream or raster:
-                # M13pS2c: the W1 wall's lit colour is fully constant (one texel, one light row) --
-                # bake the FINAL palette byte at Python emit time (no runtime colormap lookup at all).
-                # (Lines mode never reaches this half of the action -- it returned above -- so the
-                # old `or lines` term here and the _LINES_DEAD_FIELDS filter below it were dead;
-                # removed in the CR-2026-08 refactor on the same unreachability proof as the arm.)
-                fields.append(("seg_lit", 2, wlit(ssec.light, combined[tb],
-                                                  flat_wall=tb in w1r_flat_tb)))
-                if w1r_flag:
-                    fields.append(("seg_lit2", 2, wlit(ssec.light, combined[tb + 1],
-                                                       flat_wall=tb in w1r_flat_tb)))
-                    fields.append(("seg_w1rf", 1, 1 if tb in w1r_flat_tb else 0))
-                # M13pS2-crush2b: the seg's ceiling/floor visplane indices (shared band lists in
-                # stream mode; shared device-side row->colour arrays in raster mode).
-                ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
-                        ssec.ceil_tex.upper())
-                fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
-                        ssec.floor_tex.upper())
-                fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
-                fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
-            xorby_blocks[si] = _seg_xorby_block(f"seg{si}_consts", fields)
-            out += _seg_xorby_use(f"seg{si}_consts")
-        if stream or raster or lines:
-            # M13pG1: skip the whole action (incl. every seg's xorby SET/CLEAR pair) once the screen
-            # is full -- the leaf would fret per seg anyway, but the involution flips aren't free.
-            out = ([f"    hex.if0 1, full, ss{cid}_visit", f"    ;ss{cid}_occluded", f"  ss{cid}_visit:"]
-                   + out + [f"  ss{cid}_occluded:"])
-        return out
 
     # M13-15M: the BBOX WEDGE CULL. Gate boxes come from the SSOT (bbox_gate_boxes); the gate
     # decides which marking segs spend PNEAR budget, so both sides must agree on the gated set to
@@ -1714,7 +1574,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                    f"  bbgo{i}:"])
 
     bsp = _bsp_as_code(_pfx(mapname), cmap, done_label="bsp_done", subsector_action=subsector_action,
-                       full_abort_label="full" if (stream or raster or lines) else None,   # M13pG1
+                       full_abort_label="full",                              # M13pG1
                        # inline_side=True measured +0.42M on E1M1 (code bloat beats the
                        # fcall savings -- the layout tax again); kept available, OFF.
                        prune=_lines_prune if lines else None, inline_side=False,
@@ -1775,7 +1635,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, door_lines=_door_tic)
           if standalone else
-          _state_wire_lines(state_wire, sim=player_sim, collide=collide,
+          _state_wire_lines(sim=player_sim, collide=collide,
                             door_lines=_door_tic)),
         *_collide_block,
         # M14-e: the thing positions follow the player's state on the wire, then every leaf's list
@@ -1815,27 +1675,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
            "hex.shr_hex 10, 6, wnt", "hex.shr_bit 10, wnt",
            "hex.zero 4, wnoff", "hex.mov 4, wnoff, wnt"] if (lines and w1r_flag) else []),
     ]
-    if stream or raster:
-        # M13pS2-crush2b: per-frame reset of the visplane built-flags (compile-time-unrolled zeroing)
-        pass1 += [f"rep({max(1, len(cvp_ids))}, v) hex.zero 1, vpc_flags + v*dw",
-                  f"rep({max(1, len(fvp_ids))}, v) hex.zero 1, vpf_flags + v*dw"]
     # M13-bakedbands: lines mode has NO per-frame band state to reset (the lists are static data)
-    if raster:
-        # M13-wedge: the per-frame half-plane descriptors for the conservative FOV pre-cull (the
-        # outward-rounded 45-degree wedge that strictly contains the FOV). Once per frame; the
-        # per-seg test that uses them is multiply-free.
-        pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
-        pass1.append("present.begin_frame_raster")   # M13-raster: starts the per-frame record stream;
-                                                       # the walk below emits vp/seg records INLINE
-    if projm:
-        # M13-proj: same per-frame wedge descriptors, then the 0x0F frame + the positional 8-byte
-        # header (viewx/viewy as signed 16-bit map units -- exactly the parsed vx/vy low bytes --
-        # then the 4-byte viewangle); viewz follows from the player-subsector block inside the walk.
-        pass1.append("proj.wedge_setup wqa, wna, wqb, wnb, wex, wey, weyx, wexy, viewangle, viewx, viewy")
-        pass1 += ["present.begin_frame_proj",
-                  "byte.emit vx", "byte.emit vx + 2*dw",
-                  "byte.emit vy", "byte.emit vy + 2*dw",
-                  "stream.emit_bytes4 viewangle"]
     if lines:
         # M13-lines: wedge descriptors, the descend pre-walk (viewz + band bank), then the 0x0B
         # frame opens BEFORE the walk -- the leaf emits records inline at column-claim time.
@@ -1850,21 +1690,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
         pass1.append("bsp_done:")
     else:
         pass1 += [f";{_pfx(mapname)}_bspcode_walk", "bsp_done:"]
-    pass2 = []                                            # pass 2a: walls (M12oo shared-compare trampoline)
-    if "pass2" not in ablate and not (stream or raster or projm or lines):   # M13p0 ablate / M13pS2: stream/raster have NO fb raster
-        for x in range(cfg.VIEW_W):
-            pass2.append(f"frame.load_col_mtw col_top + {8 * x}*dw, col_bottom + {8 * x}*dw, col_base + {8 * x}*dw, "
-                         f"col_light + {8 * x}*dw, col_step + {8 * x}*dw, col_frac0 + {8 * x}*dw, "
-                         f"col_heightmask + {8 * x}*dw")
-            for y in range(cfg.H):                                # M12oo: the shared-compare trampoline (y runtime)
-                pass2.append(f"frame.pixel_tramp framebuffer + {2 * (y * cfg.W + x)}*dw")
-    # pass 2b: floor/ceiling visplanes (M13d2) — the per-frame clear_planes seeds + the runtime per-ROW
-    # R_MakeSpans textured span pass (replaces the M13c3 per-column plane_tramp unroll).
-    plane_pass = []
-    if "planes" not in ablate and not (stream or raster or projm or lines):   # M13pS2/raster: planes render via bands/device instead
-        plane_pass = ["stl.fcall clear_leaf, clear_ret",
-                      f"frame.render_planes_spans {cfg.VIEW_W}, {cfg.VIEW_H}"]
-
+    pass2 = []          # pass 2a (walls) and 2b (planes) were the FRAMEBUFFER raster's; the
+    plane_pass = []     # lines tier emits both inline during the walk, so both stay empty.
     yslope = generate_yslope_lut_fj("yslope", cfg.VIEW_W, cfg.VIEW_H)
     zlight = generate_zlight_lut_fj("zlight", cfg.VIEW_W, COLORMAP_LIGHTS)
     distscale = generate_distscale_lut_fj("distscale", cfg.VIEW_W, cfg.TRIG_N)
@@ -1872,14 +1699,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # M13pS2: the stream present -- the frame leaves the program AS the emitted run bytes (device
     # DMA decode); one unrolled emit_column per screen column, every col_* read at a compile-time
     # address. Replaces update_screen_reg + the whole fb/pass-2/plane-pass raster.
-    # M13-planesproto: the frame leaves as SHARED per-visplane band lists (each entry's colour
-    # cm.emit-mapped ONCE) + one 5-byte record per column -- the device does the per-column
-    # prefix/suffix clipping that stream.emit_column paid ~15M fj ops/frame for.
-    # col_struct's per-column stride is 11 dw: offset 0 = drawn (packed byte, not read here),
-    # 1-10 = cexcl/fstart/lit/cvp/fvp each a 2-nibble-vec pair -- the emit reads each pair's LOW-nibble
-    # address (idx/idx+1*dw are its two nibbles).
-    _cell = lambda x: (f"col_struct + {11 * x + 1}*dw, col_struct + {11 * x + 3}*dw, "
-                       f"col_struct + {11 * x + 5}*dw, col_struct + {11 * x + 7}*dw, col_struct + {11 * x + 9}*dw")
     # M13-lines: fillCol records were emitted inline during the walk; one 0xFF x-sentinel ends
     # the frame (x is never 0xFF for real: VIEW_W = 160).
     present_tail = ["stl.output_char 0xFF"]
@@ -1931,20 +1750,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
     # run before pass1 -- otherwise their command bytes would land INSIDE the interleaved raster
     # stream and corrupt it (every other mode buffers-then-emits in present_tail, safely after
     # set_palette). All other modes keep set_palette in its original post-pass1 position.
-    if raster:
-        yslope_packed_addr, zlight_packed_addr, colormap_packed_addr = (
-            "yslope_packed", "zlight_packed", "colormap_packed")
-        prelude = ["present.set_palette palette",
-                  f"present.load_raster_tables {yslope_packed_addr}, {zlight_packed_addr}, {colormap_packed_addr}"]
-        postlude_palette = []
-    elif projm:
-        # M13-proj: same inline-emission constraint as raster -- palette + BOTH DMA handoffs must
-        # precede pass1's begin_frame_proj.
-        prelude = ["present.set_palette palette",
-                  "present.load_raster_tables yslope_packed, zlight_packed, colormap_packed",
-                  f"present.load_proj_tables seg_geom, {len(proj_sid)}"]
-        postlude_palette = []
-    elif lines:
+    if lines:
         # M13-lines: inline emission during the walk => palette must precede pass1.
         prelude = ["present.set_palette palette"]
         postlude_palette = []
@@ -2003,7 +1809,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           # 8-byte init. `flush_mode` governs only the 0x07 pixel-stream mode, which the 0x0B
           # frames this tier presents do not use, so dropping it costs the picture nothing.
           "present.init_screen" if standalone else
-          ("present.init_screen_stream 0" if (stream or raster or projm or lines) else "present.init_screen"),
+          "present.init_screen_stream 0",
           *prelude,
           *pass1, *pass2, *plane_pass,
           # M3: both frame producers fall into ONE tail. The label goes BEFORE the tail's
@@ -2025,10 +1831,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
              # lines mode fcalls a pass-2 leaf too, so the stub ladder has to define one (it is never
              # reached: part 1 always leaves `proceed` = 0 here).
              + (["seg_pass2_leaf:", "stl.fret seg_ret2"] if lines else [])) if "xrstub" in ablate else
-            ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_raster {proj}"]
-            if raster else
-            ["seg_pass1_leaf:", "frame.seg_pass1_leaf_body_proj"]
-            if projm else
             ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
              f"{1 if 'noprescan' in ablate else 0}",
              # CR-2026-08: the deg attribution budget must provably never bind (a binding budget
@@ -2064,12 +1866,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
               f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
               f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}, "
               f"{deg_flag}, {DEG_SLIVER_W}")]
-            if lines else
-            ["seg_pass1_leaf:",
-             f"frame.seg_pass1_leaf_body_stream {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, {BAND_STRIDE}"]
-            if stream else
-            ["seg_pass1_leaf:",
-             f"frame.seg_pass1_leaf_body_mtlwp {cfg.CENTERY}, {cfg.TEXTURE_DOWNSCALE}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}"]),
+            ),
           # the stub ablations replace the lines leaves wholesale, so the two-sided claim leaf the
           # plane_near call sites jump to has to be stubbed alongside them (measurement only).
           *(["seg_pass1_ts_leaf:", "stl.fret seg_ret"]
@@ -2091,7 +1888,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           *([_mt_ptloc] if moving_things else []),
       ]),
       ("state", [
-          *([] if (stream or raster or projm or lines) else [f"framebuffer: hex.vec {2 * cfg.FB_SIZE}"]),   # no fb in stream/raster/proj mode
           "vx: hex.vec 10", "vy: hex.vec 10",
           # M5: the standalone tier BAKES the player start into the view state, because nothing
           # else ever writes it: there is no wire, the sim only ever adds a delta to it, and the
@@ -2111,7 +1907,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2
           # nibbles). M5: standalone has no wire and so no magic byte, but it still builds `pkeys`.
           *(["pkeys: hex.vec 2"] if standalone else
-            (["wmagic: hex.vec 2", "pkeys: hex.vec 2"] if state_wire == "bin" else [])),
+            ["wmagic: hex.vec 2", "pkeys: hex.vec 2"]),
           # M5: the keyboard poll's scratch, and the four PERSISTENT held-key flags. The flags are
           # the only cells besides the view state that the M1 reset must leave alone.
           *(STANDALONE_SCRATCH_DECLS if standalone else []),
@@ -2165,7 +1961,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
           f"col_floorbase: rep({cfg.VIEW_W}, i) hex.vec 8, 0",
           # M13-raster/lines declare their OWN packed-byte `drawn` (stride 1, in their hotdata decls)
           # -- this shared nibble-vec (stride 4) declaration is for fb-mode/stream-mode only.
-          *([] if (raster or lines) else [f"drawn: rep({cfg.VIEW_W}, i) hex.vec 4, 0"]),
           # M13opt-P1 byte-exact early-out: count claimed columns; `full` short-circuits later (occluded) segs.
           "n_drawn: hex.vec 2", "full: hex.vec 1", f"vieww: hex.vec 2, {cfg.VIEW_W}",
           # M13-2S rung 3a: the per-column PLANE ATTRIBUTION state -- ONE byte per column holding the
@@ -2236,7 +2031,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
                               floor_mode == "FT1")] if (lines and not ascode) else []),
           *([bands_code] if ascode else []),
           *([lines_wstrip_txt] if lines_wstrip_txt else []),
-          *([] if (stream or raster or projm or lines) else      # M13-hotdata: in stream/raster/proj mode these sit up front
+          *([] if True else      # M13-hotdata: retired with the non-lines modes
             [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle, tex, cm]),
           palette,
           yslope, zlight, distscale, flat_table,        # M13d2 textured-floor LUTs + combined flat table

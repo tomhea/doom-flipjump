@@ -26,7 +26,7 @@ from doomfj.reference_model import ReferenceModel, ANG90, ANGLE_MASK
 from doomfj.texturecompiler import compile_colormap, compile_palette, _texel_table
 from doomfj.wad import WadFile
 
-from tests.fj.test_wall_render import _ScreenWithInput
+from tests.fj.stream_screen import _ScreenWithInput
 
 PRESENT_FJ = Path("src/fj/present.fj")
 FRAME_FJ = Path("src/fj/frame_render.fj")

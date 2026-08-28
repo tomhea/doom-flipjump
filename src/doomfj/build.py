@@ -224,7 +224,7 @@ STANDALONE_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m5_restore_
 
 
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
-                        flat_max_words=None, plane_near=True, wall_noise=True, sky=True,
+                        flat_max_words=None, sky=True,
                         steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         stack_steps=True, bbox_cull=True, deg=True,
                         player_sim=True, collide=True,
@@ -289,8 +289,7 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
     spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
 
-    parts = emit_wall_renderer(wad, mapname, cfg, plane_near=plane_near,
-                               wall_noise=wall_noise, sky=sky, steps=steps, things=things,
+    parts = emit_wall_renderer(wad, mapname, cfg, sky=sky, steps=steps, things=things,
                                sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
                                deg=deg, player_sim=player_sim,
                                collide=collide, moving_things=moving_things,
@@ -408,12 +407,14 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         "fjm_bytes": out.stat().st_size, "assemble_seconds": assemble_seconds,
         # the tier string is a CONSTANT now: W1R walls, FT1 floors, the lines raster. It stays a
         # string because every gate log and metrics file in the repo prints it.
-        "tier": "lines/W1R/FT1" + ("+plane_near" if plane_near else ""),
+        "tier": "lines/W1R/FT1+plane_near",
         # CR-2026-08 (IN-3, A0.1): the metrics used to describe only FOUR of the emit-shaping flags,
         # so the three that had silently diverged (stack_steps/bbox_cull/deg) were invisible to every
         # consumer of metrics.json AND to the R4 gate below. A flag that shapes the picture is now
         # reported; add new ones here in the same commit that adds them to the signature.
-        "features": {"wall_noise": wall_noise, "sky": sky, "steps": steps, "things": things,
+        # `wall_noise` is a CONSTANT now (V1's grain is what the W1R wall is made of), but every
+        # gate log and metrics file reads this key, so it keeps reporting.
+        "features": {"wall_noise": True, "sky": sky, "steps": steps, "things": things,
                      "stack_steps": stack_steps, "bbox_cull": bbox_cull, "deg": deg,
                      # B0: the sim half. Reported for the same reason as the rest -- a flag that
                      # shapes the artifact must be visible in metrics.json, or the next divergence

@@ -56,37 +56,9 @@ ns m1 {
 
     // READ the byte at CONSTANT address `c`, leaving it in `hex.pointers.read_byte` -- no copy, so
     // this is the cheapest form when the caller only wants to test it.
-    def readbyte_reg c @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {
-        hex.zero 2, hex.pointers.read_byte
-        wflip hex.pointers.ret_after_read_byte+w, back
-        c+dbit+8; c
-      back:
-        wflip hex.pointers.ret_after_read_byte+w, back
-        c+dbit+8;
-    }
 
     // READ the byte at CONSTANT address `c` into the hex[:2] register `dst`.
-    def readbyte dst, c @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {
-        hex.zero 2, hex.pointers.read_byte
-        wflip hex.pointers.ret_after_read_byte+w, back
-        c+dbit+8; c
-      back:
-        wflip hex.pointers.ret_after_read_byte+w, back
-        c+dbit+8;
-        hex.mov 2, dst, hex.pointers.read_byte
-    }
 
     // STORE the hex[:2] register `src` into the byte cell at CONSTANT address `c`.
     // Read v, make read_byte = v ^ src, then xor THAT onto c:  c = v ^ (v ^ src) = src.
-    def writebyte c, src @ back < hex.pointers.read_byte, hex.pointers.ret_after_read_byte {
-        hex.zero 2, hex.pointers.read_byte
-        wflip hex.pointers.ret_after_read_byte+w, back
-        c+dbit+8; c
-      back:
-        wflip hex.pointers.ret_after_read_byte+w, back
-        c+dbit+8;
-        hex.xor 2, hex.pointers.read_byte, src
-        hex.exact_xor c+dbit+3, c+dbit+2, c+dbit+1, c+dbit+0, hex.pointers.read_byte
-        hex.exact_xor c+dbit+7, c+dbit+6, c+dbit+5, c+dbit+4, hex.pointers.read_byte+dw
-    }
 }

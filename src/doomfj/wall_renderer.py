@@ -409,8 +409,8 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
 
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                        ablate: frozenset = frozenset(),
-                       plane_near: bool = False,
-                       wall_noise: bool = False, sky: bool = False, steps: bool = False,
+
+                       sky: bool = False, steps: bool = False,
                        things: bool = False, sprite_wad=None,
                        bbox_cull: bool = False, stack_steps: bool = False,
                        deg: bool = False,
@@ -503,7 +503,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # column-claim time. The framebuffer/stream/spans/raster/proj pipelines were the ladder to it
     # and are retired; `lines` is the only raster there is.
     lines = True
-    assert not plane_near or lines, "plane_near is a lines-mode tier (M13-2S rung 3a)"
+    # M13-2S rung 3a: per-column plane attribution. The shipped tier has always set it, and with
+    # the framebuffer/stream plane passes retired there is no other way to draw a floor -- a
+    # `plane_near=False` lines build renders an EMPTY frame, which is how this was found.
+    plane_near = True
     # ablate "pnearcol" prices the emit half alone (per-column attribution OFF, the two-sided claim
     # walk still emitted); "pnearwalk" prices the walk alone (claim sites dropped, per-column ON).
     # Both render wrong on purpose -- measurement only.
@@ -550,7 +553,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
         "sp_base2, which are only declared under those two flags")
     # M13-W1R rides V1's per-column grain group (`gnrow` via the wnoise lookup) and V1's ditto
     # comparison of it -- without the grain the pattern key does not exist at runtime.
-    assert not w1r_flag or wall_noise, "wall_mode='W1R' requires wall_noise=True (V1's gnrow)"
+    # V1's grain is not optional: the W1R wall IS the randomized-run tier, and it reads `gnrow`.
+    # The flag went with wall_mode -- `wall_noise=False` was unreachable the moment W1R became the
+    # only wall there is (the assert that said so is what caught it).
+    wall_noise = True
     # CR-2026-08: emit_region has NO rep(w2s) windowed wall emitter (stream_render.fj, the
     # 'KNOWN GAP' note): a sprite-fragmented column in a W2S build would emit no wall piece
     # and let the floor pairs paint the wall rows. Refuse the combination at build time.
@@ -945,7 +951,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     _wn_idx = 3 if w1r_flag else 2
     wnoise = (generate_dispatch_table_fj(
         "wnoise", [rm.wall_noise(x) for x in range(_wn_dom)],
-        index_nibbles=_wn_idx, result_nibbles=2) if lines and wall_noise else "")
+        index_nibbles=_wn_idx, result_nibbles=2) if lines else "")
     # M13-W1R: the randomized-wall walkers, baked from the oracle's own pattern tables (R6).
     w1rpat = (generate_w1r_walls_fj(rm.W1R_TIER_BOUNDS, rm.W1R_PATTERNS)
               if lines and w1r_flag else "")
@@ -1861,7 +1867,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
               f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {w1r_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
               f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
               f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
-              f"{1 if wall_noise else 0}, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
+              f"1, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
               f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
               f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
               f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}, "

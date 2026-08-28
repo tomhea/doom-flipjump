@@ -179,7 +179,8 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | + constant-address round 2, `self_reset=False` | **84,756,676** | 1.26× OVER | **0.631×** | **flat** (asserted) |
 | **M5 standalone, `self_reset=False`** | **84,155,496** | 1.25× OVER | **0.627×** | **flat** (asserted) |
 | **M5 standalone + `self_reset=True`** (shipped `doom_e1m1_std.fjm`) | **84,892,508** | 1.27× OVER | **0.633×** | **flat** (asserted) |
-| **M3 the same + `menu=True`** (shipped `doom_e1m1_menu.fjm`) | **85,209,916** | 1.27× OVER | **0.635×** | **flat** (asserted) |
+| **M3 the same + `menu=True`** (`doom_e1m1_menu.fjm` as of M3, before doors) | **85,209,916** | 1.27× OVER | **0.635×** | **flat** (asserted) |
+| **M2 the same + `doors=True`** (**the shipped `doom_e1m1_menu.fjm` today**) | **89,494,606** | 1.33× OVER | **0.667×** | **flat** (asserted) |
 
 ⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
 and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the
@@ -191,6 +192,13 @@ Full metrics, from the run that produced each binary:
 | standalone, no self-reset (`_m5_build_noloop.log`) | 84,155,496 | 1.595 | 30,948,902 | 684 s |
 | standalone + self-reset (`_m5_build_loop.log`) | 84,892,508 | 1.581 | 31,221,481 | 3,405 s (**two passes**) |
 | + menu (`_m3_build.log`) | 85,209,916 | 1.575 | 31,252,015 | 2,867 s (two passes) |
+| + runtime doors (`_m5_menu_doors.log`) | 89,494,606 | 1.500 | 32,879,690 | 4,966 s (two passes) |
+
+The **+4,284,690** on the doors row is the whole M2 runtime-door tier: every door-touching
+segment's constant block baked once **per state** plus the 1-nibble switch that picks one, which is
+where a single binary holding every door position has to put the space. It buys +0.46% ops/frame
+(MEASURED, `scratchpad/m2_ops.py --open`) and zero ops on the collision path, since a door line's
+passability is one baked `FLAG_BLOCKING` bit that a `wflip` clears.
 
 Two things this table is **not** evidence for. The **+737,012** between the first two rows is the
 self-reset part for the *standalone* set (12,082 words, seven labels persisted), and is not the

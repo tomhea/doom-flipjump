@@ -203,7 +203,7 @@ def main():
                                       # built and gated since M14/M14.5, wired in here for the
                                       # first time. `collide=True` is what makes walls solid
                                       # without the host testing a single linedef.
-                                      **(dict(state_wire="bin", player_sim=True, collide=True,
+                                      **(dict(player_sim=True, collide=True,
                                               moving_things=True) if sim else {}))
         print(f"emitted {len(main_txt):,} chars in {time.perf_counter() - t0:.0f}s", flush=True)
         tmp = Path(tempfile.mkdtemp())

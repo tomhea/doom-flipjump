@@ -182,7 +182,7 @@ if args.m14:
     screen = StreamScreen(stdin=feed, n_things=len(_draw))
     print(f"M14 wire: {len(_draw)} things, {len(feed)} bytes, WARM bindings, keys=0", flush=True)
 else:
-    screen = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+    screen = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
 print(f"running {args.map} @ ({vx},{vy}) under the PYTHON loop -- this is the slow part", flush=True)
 t1 = time.time()
 term = fj.run(fjm, io_device=screen, profile=True, print_time=False, print_termination=False,

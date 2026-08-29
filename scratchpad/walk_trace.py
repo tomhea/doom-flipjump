@@ -19,6 +19,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 import flipjump as fj                                                     # noqa: E402
 from flipjump.utils.classes import RunStatistics                          # noqa: E402
 from flipjump.utils.functions import load_debugging_labels                # noqa: E402
+from doomfj.wireformat import encode_feed_mapunits            # noqa: E402
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -54,7 +55,7 @@ def hook(self, ip):
 
 RunStatistics.register_op_address = hook
 vx, vy, va = (int(v) for v in args.vp.split(","))
-screen = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+screen = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
 term = fj.run(fjm, io_device=screen, profile=True, print_time=False, print_termination=False,
               flat_max_words=1 << 26)
 print(f"ops={term.op_counter:,}  raw events={len(events)}")

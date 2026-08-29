@@ -30,6 +30,7 @@ import doomfj.config as CFGM                                              # noqa
 import doomfj.reference_model as RM                                       # noqa: E402
 import doomfj.wall_renderer as WR                                         # noqa: E402
 from doomfj.config import Config                                          # noqa: E402
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.fastrun import FjmRunner                                      # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.harness import W                                              # noqa: E402
@@ -148,7 +149,7 @@ r = FjmRunner(build())
 print(f"\n### {label}")
 tot = 0
 for i, (vx, vy, va, tag) in enumerate(VPS):
-    scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+    scr = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
     ops = r.run(scr)
     tot = max(tot, ops)
     ok = "" if WANT is None else ("  BYTE-EXACT" if bytes(scr.pixel_indices) == WANT[i]

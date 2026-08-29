@@ -56,7 +56,6 @@ from doomfj.lut_generator import (generate_bands_walk_fj, generate_state_switch_
                                   generate_w1r_walls_fj)
 from doomfj.tables import (sine_table, tantoangle_table, slopediv_recip8_table,
                            slopediv_recip_table, viewangletox_table, xtoviewangle_table)
-from doomfj.config import PNEAR_SEG_BUDGET
 
 
 NLJ = chr(10)   # newline constant for generated .fj text
@@ -76,7 +75,16 @@ STATE_WIRE = "bin"                     # doomfj.wireformat; "dec" retired with t
 # degradation package. Reported by `metrics['features']` FROM HERE, because every
 # gate log in the repo reads those keys and a description of the build that is a
 # second expression drifts (see persisted_labels).
-SKY = STEPS = STACK_STEPS = BBOX_CULL = DEG = True
+STEPS = STACK_STEPS = BBOX_CULL = DEG = True
+
+
+def map_has_sky(secs) -> bool:
+    """Does this map use the sky flat at all? THE one source for that question.
+
+    `SKY` used to sit in the line above as a constant True, which was a second expression: the
+    emitter asked the map (`_has_sky`) while `metrics["features"]["sky"]` asserted True even for a
+    wad with no F_SKY1 ceiling. Same shape as the persisted_labels bug, so the same fix."""
+    return any(sec.ceil_tex.upper() == "F_SKY1" for sec in secs)
 
 
 def _pfx(mapname: str) -> str:
@@ -595,7 +603,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # the flag gone the second meaning has to come from the data, or a sky-less map emits
     # `skyoff.lookup` against a bank that was never built -- an ASSEMBLY error, not a wrong
     # picture, and one no baseline config could have shown because all three are E1M1.
-    _has_sky = any(sec.ceil_tex.upper() == "F_SKY1" for sec in secs)
+    _has_sky = map_has_sky(secs)
 
     # ---- M2-R3: THE RUNTIME DOOR -------------------------------------------------------------
     # R2 baked ONE height per door through `sector_heights`, now retired. `doors=True` bakes them ALL, once per

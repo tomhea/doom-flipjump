@@ -83,10 +83,19 @@ do not quote these. Emission (~7 min for the sprite-bank tier) did **not** chang
 larger half of most of these.
 
 All three `cr/` tools have self-tests — `alpha_check.py --selftest`, `expand_check.py --selftest`,
-`emit_hash.py --selftest`. Run the one you touched. (⚠ CR-2026-08: this line used to claim "both
+`emit_baseline.py --check --selftest`. Run the one you touched. (⚠ CR-2026-08: this line used to claim "both
 tools" had them when only `alpha_check` did — a false statement about R9 compliance, in the file
 that states R9. If you add a tool whose output you intend to quote as proof, it does not exist
 until its `--selftest` does.)
+
+⚠ **`emit_hash.py`, `emit_hash_vs_head.py` and `r2_check.py` are RETIRED (2026-08-29).** They
+compared against a git ref by calling THE SAME SIGNATURE on both sides, which stops working the
+moment a parameter is deleted — and the flag retirements deleted thirteen. `emit_baseline.py`
+replaces them and exists precisely because it re-checks through whatever the API became: it freezes
+the emitted text's per-part SHA-256 to disk, drops kwargs the signature no longer accepts, and
+REPORTS which. Its two negative controls move real emitter constants (`WALL_BG` reaches
+`segconsts`+`tables`, `SPR_BLOCK_STRIDE` reaches `banks`); `entry`, `state` and `walk` are covered
+by neither, which the run says out loud.
 
 ## The generated program
 

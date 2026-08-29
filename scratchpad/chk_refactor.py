@@ -6,6 +6,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj.config import Config
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.fastrun import FjmRunner
 from doomfj.fixedpoint import _signed
 from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
@@ -28,7 +29,7 @@ for vx, vy, va, tag in [(sx, sy, sp.angle, "spawn"), (1400, 1200, 0, "courtyard"
                                 wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
                                 wall_noise=True, sky=True, near_steps=True, things=True,
                                 sprite_wad=art, bbox_cull=True)
-    scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+    scr = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
     r.run(scr)
     same = bytes(scr.pixel_indices) == bytes(want)
     ok &= same

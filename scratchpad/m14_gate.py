@@ -230,7 +230,7 @@ def phase1b(fjm):
     for vx, vy, va, fx, fy, why in FRAC_VPS:
         x16 = ((vx << 16) + fx) & 0xFFFFFFFF
         y16 = ((vy << 16) + fy) & 0xFFFFFFFF
-        want = rm.render_wall_frame(SimState(x16, y16, va, "E1M1"), scene, **RENDER_KW)
+        want = rm.render_wall_frame(SimState(x16, y16, va, "E1M1"), scene, **RENDER_KW, sky=True, near_steps=True, stack_steps=True, bbox_cull=True, degrade=True)
         scr, term = run(fjm, feed((_signed(x16, 32), _signed(y16, 32), va), 0,
                                   bindings=SPAWN_BINDINGS))
         same = bytes(scr.pixel_indices) == bytes(want)
@@ -248,7 +248,7 @@ def phase1(fjm):
     ok = True
     print("\nPHASE 1 -- still (keys=0), against deg_gate's viewpoints", flush=True)
     for i, (vx, vy, va) in enumerate(VPS):
-        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene, **RENDER_KW)
+        want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene, **RENDER_KW, sky=True, near_steps=True, stack_steps=True, bbox_cull=True, degrade=True)
         scr, term = run(fjm, feed((vx << 16, vy << 16, va), 0,
                                   bindings=SPAWN_BINDINGS))
         same = bytes(scr.pixel_indices) == bytes(want)
@@ -308,11 +308,11 @@ def phase2(fjm, tics):
             blocked_tics += (_free.x, _free.y) != (s.x, s.y)
         want_state = (_signed(s.x, 32), _signed(s.y, 32), s.angle)
         want = rm.render_wall_frame(SimState(s.x, s.y, s.angle, "E1M1"), scene,
-                                    thing_positions=pos, **RENDER_KW)
+                                    thing_positions=pos, **RENDER_KW, sky=True, near_steps=True, stack_steps=True, bbox_cull=True, degrade=True)
         if MOVING:
             # ... and did the drift actually reach the SCREEN this tic? Same viewpoint, spawn
             # positions: if that renders identically, this tic proves nothing about moving things.
-            _static = rm.render_wall_frame(SimState(s.x, s.y, s.angle, "E1M1"), scene, **RENDER_KW)
+            _static = rm.render_wall_frame(SimState(s.x, s.y, s.angle, "E1M1"), scene, **RENDER_KW, sky=True, near_steps=True, stack_steps=True, bbox_cull=True, degrade=True)
             moved_frames += bytes(_static) != bytes(want)
         same = bytes(scr.pixel_indices) == bytes(want)
         diff = sum(1 for a, b in zip(bytes(scr.pixel_indices), bytes(want)) if a != b)
@@ -380,7 +380,7 @@ def phase3(fjm):
         hid, term = run(fjm, feed(st, 0, bindings=SPAWN_BINDINGS, hidden=hide))
         back, _ = run(fjm, feed(st, 0, bindings=SPAWN_BINDINGS))
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
-                                    thing_hidden=hide, **RENDER_KW)
+                                    thing_hidden=hide, **RENDER_KW, sky=True, near_steps=True, stack_steps=True, bbox_cull=True, degrade=True)
         same = bytes(hid.pixel_indices) == bytes(want)
         moved = bytes(hid.pixel_indices) != bytes(shown.pixel_indices)
         restored = bytes(back.pixel_indices) == bytes(shown.pixel_indices)
@@ -404,7 +404,7 @@ def probe(fjm, argv):
     scr, term = run(fjm, feed((vx << 16, vy << 16, va), keys))
     st = scr.state
     want = rm.render_wall_frame(SimState(st[0] & 0xFFFFFFFF, st[1] & 0xFFFFFFFF, st[2], "E1M1"),
-                                scene, **RENDER_KW)
+                                scene, **RENDER_KW, sky=True, near_steps=True, stack_steps=True, bbox_cull=True, degrade=True)
     got = bytes(scr.pixel_indices)
     diff = sum(1 for a, b in zip(got, bytes(want)) if a != b)
     print(f"probe ({vx},{vy},{va:#x}) keys={keys:04b} -> state {st} ({st[2]:#010x})  "

@@ -36,13 +36,50 @@ def _accepted(fn):
     return set(inspect.signature(fn).parameters)
 
 
+def _dict_literal_keys(node, tree):
+    """The keys of a `**` argument when they can be known statically.
+
+    Three shapes reach the emitter in this repo and all three were INVISIBLE to the first version
+    of this scan, which counted every splat as uncheckable: `**dict(a=1)` inline, `**NAME` where
+    NAME is assigned a dict literal in the same file, and `**(dict(...) if c else {})`. That gap
+    hid five files that were broken at the head which added this guard -- including
+    `scripts/walk_e1m1.py`, the entry point the same change claimed to have repaired. Returns None
+    when the keys genuinely cannot be known."""
+    if isinstance(node, ast.IfExp):                       # **(dict(...) if cond else {})
+        keys = set()
+        for branch in (node.body, node.orelse):
+            got = _dict_literal_keys(branch, tree)
+            if got is None:
+                return None
+            keys |= got
+        return keys
+    if isinstance(node, ast.Dict):                        # **{"a": 1}
+        return {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+    if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "dict":
+        return {kw.arg for kw in node.keywords if kw.arg}
+    if isinstance(node, ast.Name):                        # **FLAGS
+        found = None
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == node.id for t in n.targets
+            ):
+                got = _dict_literal_keys(n.value, tree)
+                if got is None:
+                    return None
+                found = got if found is None else found | got
+        return found
+    return None
+
+
 def bad_keywords(source: str, where: str):
     """`[(where, callee, keyword)]` for every keyword the callee does not accept.
 
-    Returns splat counts too, because a `**kwargs` call is invisible here and saying so is part of
-    the result rather than a footnote nobody reads."""
+    Splats are resolved when their keys are statically knowable (see `_dict_literal_keys`); the
+    count returned is of the ones that are NOT, because a gap in a guard belongs in its output
+    rather than in a footnote nobody reads."""
     out, splats = [], 0
-    for node in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
@@ -52,7 +89,11 @@ def bad_keywords(source: str, where: str):
         accepted = _accepted(fn)
         for kw in node.keywords:
             if kw.arg is None:
-                splats += 1
+                keys = _dict_literal_keys(kw.value, tree)
+                if keys is None:
+                    splats += 1
+                    continue
+                out += [(where, name, k) for k in sorted(keys) if k not in accepted]
                 continue
             if kw.arg not in accepted:
                 out.append((where, name, kw.arg))
@@ -92,6 +133,26 @@ def test_the_scan_rejects_a_keyword_that_does_not_exist():
         "emit_wall_renderer(wad, 'E1M1', cfg, __not_a_real_flag__=True)", "<synthetic>"
     )
     assert bad == [("<synthetic>", "emit_wall_renderer", "__not_a_real_flag__")]
+
+
+def test_the_scan_sees_through_the_three_splat_shapes():
+    """R9, and the control for the gap that hid five broken files. Each of these passes a retired
+    keyword through a `**`; every one must be caught."""
+    for src in (
+        "emit_wall_renderer(w, 'E1M1', c, **dict(__gone__=True))",
+        "FLAGS = dict(__gone__=True)" + chr(10) + "emit_wall_renderer(w, 'E1M1', c, **FLAGS)",
+        "emit_wall_renderer(w, 'E1M1', c, **(dict(__gone__=True) if s else {}))",
+        "emit_wall_renderer(w, 'E1M1', c, **{'__gone__': True})",
+    ):
+        bad, splats = bad_keywords(src, "<synthetic>")
+        assert bad == [("<synthetic>", "emit_wall_renderer", "__gone__")], (src, bad)
+        assert splats == 0, (src, splats)
+
+
+def test_a_splat_it_cannot_resolve_is_still_counted():
+    """... and the other half: an unresolvable splat must be REPORTED, not silently passed."""
+    bad, splats = bad_keywords("emit_wall_renderer(w, 'E1M1', c, **f())", "<synthetic>")
+    assert bad == [] and splats == 1
 
 
 def test_the_scan_accepts_a_keyword_that_does_exist():

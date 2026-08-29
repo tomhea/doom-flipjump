@@ -15,6 +15,7 @@ ROOT = Path('.').resolve()
 for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 from doomfj.config import Config                                          # noqa: E402
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.fastrun import FjmRunner                                      # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.reference_model import spawn_state                            # noqa: E402
@@ -45,7 +46,7 @@ r = FjmRunner(Path(sys.argv[1]))
 print(f"{'viewpoint':11s} {'ops':>12s} {'cols':>5s} {'pairs':>6s} {'pairs/col':>9s} "
       f"{'ditto cols':>10s} {'pairs saved':>11s}")
 for vx, vy, va, tag in VPS:
-    scr = CountScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+    scr = CountScreen(stdin=encode_feed_mapunits(vx, vy, va))
     ops = r.run(scr)
     px = list(scr.pixel_indices)
     W, H = cfg.VIEW_W, cfg.VIEW_H

@@ -24,8 +24,9 @@ from doomfj.mapcompiler import bake_bsp, compile_geometry_streams
 from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
-from doomfj.wall_renderer import (BBOX_CULL, DEG, SKY, STACK_STEPS, STATE_WIRE, STEPS, TIER,
-                                  WALL_NOISE, emit_wall_renderer, write_program_files)
+from doomfj.wall_renderer import (BBOX_CULL, DEG, STACK_STEPS, STATE_WIRE, STEPS, TIER,
+                                  WALL_NOISE, emit_wall_renderer, map_has_sky,
+                                  write_program_files)
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
@@ -414,7 +415,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         # reported; add new ones here in the same commit that adds them to the signature.
         # `wall_noise` is a CONSTANT now (V1's grain is what the W1R wall is made of), but every
         # gate log and metrics file reads this key, so it keeps reporting.
-        "features": {"wall_noise": WALL_NOISE, "sky": SKY, "steps": STEPS, "things": things,
+        "features": {"wall_noise": WALL_NOISE, "sky": map_has_sky(wad.sectors(mapname)),
+                     "steps": STEPS, "things": things,
                      "stack_steps": STACK_STEPS, "bbox_cull": BBOX_CULL, "deg": DEG,
                      # B0: the sim half. Reported for the same reason as the rest -- a flag that
                      # shapes the artifact must be visible in metrics.json, or the next divergence

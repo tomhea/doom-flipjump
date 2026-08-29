@@ -10,6 +10,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 import flipjump as fj
 from PIL import Image
 from doomfj.config import Config
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.reference_model import ReferenceModel, SimState, build_scene
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer
@@ -40,8 +41,8 @@ vx, vy, va = 664, 291, 0x18000000
 want = bytes(rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
                                   wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
                                   wall_noise=True, near_steps=True, stack_steps=True,
-                                  things=True, sprite_wad=art))
-scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+                                  things=True, sprite_wad=art, sky=True, bbox_cull=True, degrade=True))
+scr = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
 fj.run(out, io_device=scr, print_time=False, print_termination=False, flat_max_words=1 << 26)
 got = bytes(scr.pixel_indices)
 
@@ -50,7 +51,7 @@ to: list = []
 rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
                      wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
                      wall_noise=True, near_steps=True, stack_steps=True,
-                     things=True, sprite_wad=art, steps_out=so, things_out=to)
+                     things=True, sprite_wad=art, steps_out=so, things_out=to, sky=True, bbox_cull=True, degrade=True)
 ups, los = so[0]
 sfrag = to[0]
 

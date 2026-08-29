@@ -1,24 +1,25 @@
-"""No tracked file may hand a screen a stdin built from newline-separated decimals.
+"""A screen's `stdin=` must come from the wire encoder. CLOSED-WORLD: anything else is a failure.
 
-WHY THIS EXISTS, and why grep was not enough. `state_wire="dec"` retired; the program has been
-binary-only since. A decimal feed does not error -- the magic byte check fails, the program halts
-at `bad:` after ~200 ops, and the screen shows a blank frame. That reads as a catastrophic render
-bug, and CLAUDE.md documents two whole debugging cycles lost to exactly it.
+WHY THIS EXISTS. `state_wire="dec"` retired; the program is binary-only. A decimal feed does not
+error -- the magic byte fails, the program halts at `bad:` after ~200 ops, and the screen shows a
+blank frame. That reads as a catastrophic render bug, and CLAUDE.md records two debugging cycles
+lost to exactly it. Worse, a gate fed that way still PASSES its own byte-exactness control, because
+two blank frames compare equal. `scratchpad/ca2_sweep.py` -- the governing 260-frame metric -- was
+in precisely that state.
 
-Pattern-matching the f-string to find the stragglers failed TWICE in one review round. It missed
-`scripts/measure_frame.py`, which EMITS AND ASSEMBLES and so printed ~209 halt-ops as `ops/frame=`,
-a number that looks like a measurement. Then it missed six more that build the same bytes another
-way -- `"%d%s%d%s" % (vx, chr(10), vy, chr(10))` in `scratchpad/ca2_sweep.py`, and a bytes literal
-in `scratchpad/walker_perf.py`.
+⚠ WHY THIS IS A WHITELIST AND NOT A PATTERN MATCHER, which is the second thing that went wrong.
+The first version detected the BAD shape: f-strings, `%d` formats, bytes literals of digits. That
+is OPEN-WORLD -- an unrecognised shape passes -- and review found eleven escapes, among them
+`b'%d' % (...)` (bytes, not str), a positional `StreamScreen(feed)`, `"<lf>".join(...)`, `.format`,
+and, most damningly, `feed = f"..."` on one line and `StreamScreen(stdin=feed)` on the next, which
+is the very file the round was written to catch. Trading two fixable false positives for eleven
+false negatives is the "control that cannot fail" this whole review round was about.
 
-`ca2_sweep` is the GOVERNING 260-frame metric, and its own docstring says to point it at deg_gate's
-binary -- which is binary-wire. Its declared R9 control, "byte-exactness over all 260 frames",
-would have compared two blank `bad:` frames and passed.
-
-This detects the BAD SHAPE rather than whitelisting good encoders. The whitelist version flagged
-`StreamScreen(stdin=wire(keys))`, where `wire` is a local helper building the binary feed, and a
-unit test of the screen itself -- and a guard that cries wolf gets an allowlist, which is where
-this class of bug hides in the first place.
+So: the value must be traceable to `encode_feed*`. Names are resolved, concatenation is walked
+(`encode_feed(...) + blob_tail` is how the hosted gates send things), and ONE level of local helper
+is followed, because `scripts/walk_e1m1.py` legitimately wraps the encoder in a `wire()` closure.
+Anything the rule cannot trace is a FAILURE, not a pass -- and the one real exception is named
+below with its reason rather than left to a pattern.
 """
 import ast
 import subprocess
@@ -26,77 +27,232 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCREENS = ("StreamScreen", "CountScreen", "DumpScreen", "Recording", "InMemoryScreen")
-LF = chr(10)
+ENCODER = "encode_feed"
+
+# EXEMPTIONS, each named with its reason and each traced BY HAND on 2026-08-29. This list is the
+# honest end of a closed-world rule: full inter-procedural resolution is a research problem, and an
+# ever-cleverer resolver that quietly gives up is exactly the open-world failure this file exists
+# to avoid. A visible list of six can be re-checked; a silent fallthrough cannot.
+#
+# Every entry below reaches its screen through a helper that returns `encode_feed(...)`, across a
+# module boundary or a tuple unpack the resolver does not follow. Verified by reading each one, and
+# by `grep -c encode_feed` vs any decimal shape: 3/0, 2/0, 0/0 (uses m14_gate's), 3/1 (the one
+# `chr(10)` is a print), 2/0, 2/0.
+EXEMPT = {
+    # the SCREEN'S OWN unit test: two raw bytes to prove `read_bit` drains an independent buffer,
+    # with no program on the other end to care what wire it is
+    "tests/fj/test_stream_screen.py",
+    # `run_one(r, core, feed)` -- fed from `m14_feed()`, which builds the binary wire
+    "scratchpad/dirty_census.py",
+    # `run_one(r, core, blob)` -- fed from `feed()`, `encode_feed(...) + THINGS`
+    "scratchpad/dirty_restore.py",
+    # `G.feed(...)` across a module boundary: G is m14_gate, whose `feed` is binary
+    "scratchpad/m145_diag.py",
+    # `run(fjm, feed)` -- fed from the local `feed()` helper
+    "scratchpad/m14_gate.py",
+    # `m14_feed()` returns (bytes, n_things); its docstring says "the binary wire, exactly as
+    # m14_sweep / dirty_census build it"
+    "scratchpad/m1_dirtymap.py",
+    # `f = feed(...)`, the local helper at :213
+    "scratchpad/m1d_loop.py",
+}
 
 
-def _has_newline(value):
-    if isinstance(value, str):
-        return LF in value
-    if isinstance(value, bytes):
-        return LF.encode() in value
-    return False
+def _returns_of(fn):
+    return [n.value for n in ast.walk(fn) if isinstance(n, ast.Return) and n.value is not None]
 
 
-def _decimal_shaped(node):
-    """the three shapes this repo actually produced, all of them the retired wire"""
-    for n in ast.walk(node):
-        if isinstance(n, ast.JoinedStr):            # f"{x}<lf>{y}<lf>"
-            if any(isinstance(v, ast.Constant) and _has_newline(v.value) for v in n.values):
-                return True
-        if (isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod)
-                and isinstance(n.left, ast.Constant) and isinstance(n.left.value, str)
-                and "%d" in n.left.value):           # "%d%s%d%s" % (...)
+def from_encoder(node, tree, depth=0):
+    """Is this value traceable to `encode_feed*`? Unknown means NO."""
+    if node is None or depth > 3:
+        return False
+    if isinstance(node, ast.Call):
+        name = getattr(node.func, "id", None) or getattr(node.func, "attr", None) or ""
+        if name.startswith(ENCODER):
             return True
-        if isinstance(n, ast.Constant) and _has_newline(n.value):
-            text = n.value if isinstance(n.value, str) else n.value.decode("latin-1")
-            if any(part.strip().lstrip("-").isdigit() for part in text.split(LF) if part.strip()):
-                return True                          # a bytes literal of decimals
+        for fn in ast.walk(tree):                       # one level of local helper
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name == name:
+                rets = _returns_of(fn)
+                return bool(rets) and all(from_encoder(r, tree, depth + 1) for r in rets)
+        return False
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return from_encoder(node.left, tree, depth) or from_encoder(node.right, tree, depth)
+    if isinstance(node, ast.IfExp):
+        return (from_encoder(node.body, tree, depth) and from_encoder(node.orelse, tree, depth))
+    if isinstance(node, ast.Name):
+        assigns = []
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.Assign):
+                continue
+            for t in n.targets:
+                if isinstance(t, ast.Name) and t.id == node.id:
+                    assigns.append(n.value)
+                elif isinstance(t, ast.Tuple):
+                    # `feed, nth = m14_feed(...)` -- five of the six real call sites look like this
+                    names = [e.id for e in t.elts if isinstance(e, ast.Name)]
+                    if node.id in names:
+                        assigns.append(_tuple_element(n.value, names.index(node.id), tree))
+        if assigns:
+            return all(from_encoder(v, tree, depth + 1) for v in assigns)
+        # a PARAMETER: the value arrives from the caller, so trace it there. Without this the rule
+        # flagged five helpers of the shape `def run_one(r, core, feed): StreamScreen(stdin=feed)`,
+        # which are perfectly fine and are handed encoder output at every call site.
+        return _param_always_encoded(node.id, tree, depth)
     return False
 
 
-def decimal_feeds(source: str):
-    """`[(lineno, screen)]` for every screen fed the retired wire's shape"""
+def _tuple_element(value, index, tree):
+    """the `index`-th element of a tuple-valued expression, or None if it cannot be known"""
+    if isinstance(value, ast.Tuple) and index < len(value.elts):
+        return value.elts[index]
+    if isinstance(value, ast.Call):                     # a helper returning a tuple
+        name = getattr(value.func, "id", None) or getattr(value.func, "attr", None) or ""
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name == name:
+                rets = _returns_of(fn)
+                elts = [r.elts[index] for r in rets
+                        if isinstance(r, ast.Tuple) and index < len(r.elts)]
+                if elts and len(elts) == len(rets):
+                    return elts[0] if len(elts) == 1 else None
+    return None
+
+
+def _param_always_encoded(pname, tree, depth):
+    """`pname` is a parameter somewhere; are ALL in-file calls passing an encoded value for it?
+
+    A function nobody calls in this file is unknowable, so it fails -- closed-world."""
+    owners = [fn for fn in ast.walk(tree)
+              if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and any(a.arg == pname for a in fn.args.args)]
+    if not owners:
+        return False
+    for fn in owners:
+        idx = [a.arg for a in fn.args.args].index(pname)
+        calls = [c for c in ast.walk(tree) if isinstance(c, ast.Call)
+                 and (getattr(c.func, "id", None) or getattr(c.func, "attr", None)) == fn.name]
+        if not calls:
+            return False
+        for c in calls:
+            if len(c.args) > idx:
+                value = c.args[idx]
+            else:
+                value = next((kw.value for kw in c.keywords if kw.arg == pname), None)
+            if not from_encoder(value, tree, depth + 1):
+                return False
+    return True
+
+
+def encodes_newline_decimals(source: str):
+    """`[lineno]` for every `<something with a newline>.encode()` -- the ROT CHECK for exemptions.
+
+    This is the pattern matcher that was wrong as the primary rule, doing the job it is actually
+    good at: not "is this feed safe" (open-world, and it missed eleven shapes) but "did an exempted
+    file grow something that LOOKS like the retired wire". A false positive here costs one re-trace;
+    the primary rule stays closed-world. It looks only at `.encode()` receivers, so the `print(f"a
+    newline")` that is all over these diagnostics does not trip it."""
+    LF = chr(10)
     out = []
     for n in ast.walk(ast.parse(source)):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "encode"):
+            continue
+        for sub in ast.walk(n.func.value):
+            if isinstance(sub, ast.JoinedStr) and any(
+                isinstance(v, ast.Constant) and isinstance(v.value, str) and LF in v.value
+                for v in sub.values
+            ):
+                out.append(n.lineno)
+            elif (isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.Mod)
+                  and isinstance(sub.left, ast.Constant) and isinstance(sub.left.value, str)
+                  and "%d" in sub.left.value):
+                out.append(n.lineno)
+    return sorted(set(out))
+
+
+def bad_feeds(source: str):
+    """`[(lineno, screen)]` for every screen whose stdin is not traceable to the wire encoder.
+    Positional first arguments are checked too -- `StreamScreen(feed)` was one of the escapes."""
+    tree = ast.parse(source)
+    out = []
+    for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
             continue
         name = getattr(n.func, "id", None) or getattr(n.func, "attr", None)
         if name not in SCREENS:
             continue
-        for kw in n.keywords:
-            if kw.arg == "stdin" and _decimal_shaped(kw.value):
-                out.append((n.lineno, name))
+        value = next((kw.value for kw in n.keywords if kw.arg == "stdin"), None)
+        if value is None and n.args:
+            value = n.args[0]
+        if value is None:
+            continue                                    # no feed at all: nothing to get wrong
+        if not from_encoder(value, tree):
+            out.append((n.lineno, name))
     return out
 
 
-def test_no_tracked_file_feeds_the_retired_decimal_wire():
+def test_every_screen_is_fed_the_binary_wire():
     files = subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT,
                            capture_output=True, text=True).stdout.split()
     assert len(files) > 50, "the listing looks wrong (%d) -- vacuous run" % len(files)
     bad = []
     for rel in files:
+        if rel in EXEMPT:
+            continue
         try:
-            found = decimal_feeds((ROOT / rel).read_text(encoding="utf-8"))
+            found = bad_feeds((ROOT / rel).read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, SyntaxError):
             continue
         bad += [(rel, line, screen) for line, screen in found]
-    assert not bad, "screens fed the retired decimal wire:" + LF + LF.join(
-        "  %s:%d %s(stdin=...)" % (rel, line, screen) for rel, line, screen in bad
-    )
+    assert not bad, ("screens fed something not traceable to encode_feed*:" + chr(10)
+                     + chr(10).join("  %s:%d %s(...)" % t for t in bad))
 
 
-def test_the_scan_catches_every_shape_that_got_through_a_grep():
-    """R9: the three real shapes, as literals. Without this the test above passes just as well
-    when `_decimal_shaped` matches nothing."""
-    for src in ('StreamScreen(stdin=f"{x}' + chr(92) + 'n{y}".encode())',
+def test_it_rejects_every_shape_that_escaped_the_pattern_matcher():
+    """R9, and the reason this file was rewritten. Each of these passed the bad-shape detector."""
+    LF = chr(10)
+    BS = chr(92)
+    for src in ('StreamScreen(stdin=f"{x}' + BS + 'n{y}".encode())',
                 'StreamScreen(stdin=("%d%s" % (vx, chr(10))).encode())',
-                'StreamScreen(stdin=b"-435' + chr(92) + 'n223")'):
-        assert decimal_feeds(src), src
+                'StreamScreen(stdin=b"-435' + BS + 'n223")',
+                'StreamScreen(stdin=b"%d' + BS + 'n%d" % (x, y))',
+                'feed = f"{x}' + BS + 'n{y}".encode()' + LF + 'StreamScreen(stdin=feed)',
+                'StreamScreen(f"{x}' + BS + 'n{y}".encode())',
+                'StreamScreen(stdin="' + BS + 'n".join(parts).encode())',
+                'StreamScreen(stdin="{}' + BS + 'n".format(x).encode())'):
+        assert bad_feeds(src), src
 
 
-def test_the_scan_leaves_the_binary_wire_and_its_helpers_alone():
-    """... and the other half, including the two shapes a whitelist version wrongly flagged."""
-    assert decimal_feeds("StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))") == []
-    assert decimal_feeds("StreamScreen(stdin=encode_feed(x, y, a, 0) + blob_tail)") == []
-    assert decimal_feeds("StreamScreen(stdin=wire(keys), n_things=3)") == []
-    assert decimal_feeds('StreamScreen(stdin=b"' + chr(92) + 'x2a")') == []
+def test_it_accepts_the_binary_wire_and_its_one_legitimate_wrapper():
+    """... and the other half. Without this, a rule that rejects everything would pass above."""
+    LF = chr(10)
+    assert bad_feeds("StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))") == []
+    assert bad_feeds("StreamScreen(stdin=encode_feed(x, y, a, 0) + blob_tail)") == []
+    assert bad_feeds("f = encode_feed_mapunits(x, y, a)" + LF + "StreamScreen(stdin=f)") == []
+    assert bad_feeds("def wire(k):" + LF + "    return encode_feed(x, y, a, k)" + LF
+                     + "StreamScreen(stdin=wire(0))") == []
+    # a parameter, traced to its in-file call sites
+    assert bad_feeds("def run(feed):" + LF + "    StreamScreen(stdin=feed)" + LF
+                     + "run(encode_feed_mapunits(x, y, a))") == []
+
+
+def test_every_exemption_still_exists_and_still_has_no_decimal_shape():
+    """An exemption list rots. Each entry must still be a tracked file, and must still contain no
+    decimal-wire construction -- checked crudely on purpose, because the point is to notice when
+    one of these files changes under the exemption, not to re-derive the trace."""
+    tracked = set(subprocess.run(["git", "ls-files", "*.py"], cwd=ROOT,
+                                 capture_output=True, text=True).stdout.split())
+    for rel in sorted(EXEMPT):
+        assert rel in tracked, f"{rel} is exempted but no longer tracked -- drop it from EXEMPT"
+        found = encodes_newline_decimals((ROOT / rel).read_text(encoding="utf-8"))
+        assert not found, (f"{rel} grew a decimal-wire construction while exempted, at line(s) "
+                           f"{found} -- re-trace it or drop the exemption")
+
+
+def test_a_parameter_fed_a_decimal_value_at_one_call_site_is_caught():
+    """the parameter path must not become a hole: ONE bad call site is enough"""
+    LF = chr(10)
+    BS = chr(92)
+    src = ("def run(feed):" + LF + "    StreamScreen(stdin=feed)" + LF
+           + "run(encode_feed_mapunits(x, y, a))" + LF
+           + 'run(f"{x}' + BS + 'n{y}".encode())')
+    assert bad_feeds(src)

@@ -89,36 +89,34 @@ def _dict_literal_keys(node, tree):
                 merged.add(kw.arg)
         return merged
     if isinstance(node, ast.Name):                        # **FLAGS
-        # ⚠ PARTIAL KNOWLEDGE IS NOT KNOWLEDGE. The first version returned whatever keys it could
-        # see and reported 0 unresolvable splats, so `KW = {}` followed by `KW["sky"] = True`, or
-        # `KW.update(...)`, or an augmented assign, all read as "fully checked, nothing wrong".
-        # Any write to the name that this function cannot read makes the whole splat unknown.
-        found = None
+        # ⚠ MAXIMALLY CONSERVATIVE, after two rounds of cleverness lost to review. Rather than
+        # enumerate the ways a dict can be mutated -- subscript, .update, an alias, a hand-off,
+        # `mutate(d=KW)`, `mutate(*[KW])`, `L = [KW]`, `return KW` -- the rule is: the name may
+        # appear ONLY as the target of the assignments we read and as this splat. Any other
+        # occurrence at all means something we did not model can touch it, so the answer is
+        # "unknown" and the splat is COUNTED. Enumerating escapes is how an open-world check
+        # pretends to be closed.
+        assigns, other = [], 0
         for n in ast.walk(tree):
             if isinstance(n, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == node.id for t in n.targets
             ):
-                got = _dict_literal_keys(n.value, tree)
-                if got is None:
-                    return None
-                found = got if found is None else found | got
-            elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name)                     and n.target.id == node.id:
+                assigns.append(n.value)
+                continue
+            if isinstance(n, ast.Name) and n.id == node.id and n is not node:
+                other += 1
+        # each resolved assignment's target is itself an ast.Name occurrence; allow exactly those
+        if other > len(assigns):
+            return None
+        if not assigns:
+            return None
+        merged = set()
+        for value in assigns:
+            got = _dict_literal_keys(value, tree)
+            if got is None:
                 return None
-            elif isinstance(n, ast.Assign) and any(
-                isinstance(t, (ast.Subscript, ast.Attribute))
-                and getattr(getattr(t, "value", None), "id", None) == node.id
-                for t in n.targets
-            ):
-                return None                                # KW["sky"] = True
-            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)                     and getattr(n.func.value, "id", None) == node.id:
-                return None                                # KW.update(...) and any other method
-            elif isinstance(n, ast.Call) and any(
-                isinstance(a, ast.Name) and a.id == node.id for a in n.args
-            ):
-                return None                                # mutate(KW) -- handed off, unknowable
-            elif isinstance(n, ast.Assign) and isinstance(n.value, ast.Name)                     and n.value.id == node.id:
-                return None                                # A = KW, then A is mutated elsewhere
-        return found
+            merged |= got
+        return merged
     return None
 
 
@@ -214,6 +212,15 @@ def test_a_splat_it_cannot_resolve_is_still_counted():
         "KW = {}" + NL + "KW.update(sky=True)" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
         "KW = dict(things=True)" + NL + "KW += o" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
         "emit_wall_renderer(w, 'E1M1', c, **{k: 1})",
+        # the six review found after the first hardening: every one is a way for something this
+        # function does not model to touch the dict between its assignment and the splat
+        "KW = dict(t=1)" + NL + "mutate(d=KW)" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
+        "KW = dict(t=1)" + NL + "mutate(*[KW])" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
+        "KW = dict(t=1)" + NL + "mutate(**{'d': KW})" + NL + "emit_wall_renderer(w,'E1M1',c, **KW)",
+        "KW = dict(t=1)" + NL + "A, B = KW, 1" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
+        "KW = dict(t=1)" + NL + "L = [KW]" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
+        "def f():" + NL + "    KW = dict(t=1)" + NL + "    return KW" + NL
+        + "emit_wall_renderer(w, 'E1M1', c, **KW)",
     ):
         bad, splats = bad_keywords(src, "<synthetic>")
         assert splats == 1, (src, splats, bad)

@@ -39,7 +39,8 @@ from doomfj.config import Config
 from doomfj.fastrun import FjmRunner
 from doomfj.mapcompiler import bake_bsp
 from doomfj.things import baked_thing_mask, vanishable_slots
-from doomfj.wireformat import (encode_bindings, encode_feed, encode_things,
+from doomfj.wireformat import (encode_bindings, encode_feed,
+                               encode_feed_mapunits, encode_things,
                                encode_visibility)
 from doomfj.fixedpoint import _signed
 import doomfj.wall_renderer as WR
@@ -251,8 +252,11 @@ def main():
         """The frame's stdin. ⚠ BINARY when the sim is on -- a decimal feed halts a state_wire=bin
         program after ~200 ops rather than failing loudly."""
         if not sim:
-            nl = chr(10)          # the three-decimal wire, one value per line
-            return (str(px) + nl + str(py) + nl + str(ang) + nl).encode()
+            # ⚠ THIS BRANCH FED THE DECIMAL WIRE until 2026-08-29, and the docstring above already
+            # said what that costs. `state_wire` retired: the program is binary-only whether or not
+            # the sim is in it, so a --no-sim run was halting at `bad:` after ~200 ops and drawing
+            # a blank frame. Same encoder, map units, no keys.
+            return encode_feed_mapunits(px, py, ang)
         return encode_feed(st[0], st[1], st[2], keys) + THINGS[0] + encode_bindings(binds) + THINGS[1]
 
     def render_headless(keys):

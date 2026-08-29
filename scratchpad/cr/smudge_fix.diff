@@ -1,0 +1,959 @@
+diff --git a/scratchpad/cr/pnear_audit.py b/scratchpad/cr/pnear_audit.py
+new file mode 100644
+index 0000000..7034d4a
+--- /dev/null
++++ b/scratchpad/cr/pnear_audit.py
+@@ -0,0 +1,69 @@
++"""Sweep-wide attribution audit (oracle-side): render the 260-frame grid at deg_mark 64 /
++96 / 128 vs UNLIMITED; report frames + pixels diverging per budget. Finds every frame that
++suffers the (1698,892) phantom class."""
++import sys
++import time
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT, ROOT / "scratchpad"):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++from nb_validate import true_sector, _near_any_line
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++
++gw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++verts = [(v.x, v.y) for v in gw.vertexes("E1M1")]
++lds, sds = gw.linedefs("E1M1"), gw.sidedefs("E1M1")
++xs = [v[0] for v in verts]
++ys = [v[1] for v in verts]
++pts = []
++for x in range(min(xs) + 13, max(xs), 256):
++    for y in range(min(ys) + 7, max(ys), 256):
++        if _near_any_line(verts, lds, x, y, 24.0):
++            continue
++        if true_sector(verts, lds, sds, x, y) == -1:
++            continue
++        pts.append((x, y))
++print(f"{len(pts)} grid points x 4 angles")
++
++BUDGETS = (64, 96, 128)
++stats = {b: [0, 0, []] for b in BUDGETS}      # bad frames, bad px, worst list
++t0 = time.time()
++n = 0
++for i, (x, y) in enumerate(pts):
++    for k in range(4):
++        va = (k << 30) & 0xFFFFFFFF
++        st = SimState(x << 16, y << 16, va, "E1M1")
++        kw = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
++                  near_steps=True, stack_steps=True, sky=True, things=True,
++                  sprite_wad=art, degrade=True)
++        base = bytes(rm.render_wall_frame(st, scene, deg_mark=9999, **kw))
++        for b in BUDGETS:
++            fb = bytes(rm.render_wall_frame(st, scene, deg_mark=b, **kw))
++            d = sum(1 for j in range(len(base)) if fb[j] != base[j])
++            if d:
++                stats[b][0] += 1
++                stats[b][1] += d
++                stats[b][2].append((d, x, y, va))
++        n += 1
++    if (i + 1) % 10 == 0:
++        el = time.time() - t0
++        print(f"  {n} frames, {el:.0f}s", flush=True)
++
++print(f"\n=== attribution divergence vs unlimited ({n} frames) ===")
++for b in BUDGETS:
++    bad, px, lst = stats[b]
++    lst.sort(reverse=True)
++    print(f"deg_mark={b:4}: {bad} frames diverge, {px} px total")
++    for d, x, y, va in lst[:6]:
++        print(f"    {d:6} px @ ({x},{y},{hex(va)})")
+diff --git a/scratchpad/cr/pnear_audit2.py b/scratchpad/cr/pnear_audit2.py
+new file mode 100644
+index 0000000..e300c24
+--- /dev/null
++++ b/scratchpad/cr/pnear_audit2.py
+@@ -0,0 +1,48 @@
++"""Find the deg_mark saturation point: 160/192/256 vs unlimited over the sweep grid."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT, ROOT / "scratchpad"):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++from nb_validate import true_sector, _near_any_line
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++verts = [(v.x, v.y) for v in aw.vertexes("E1M1")]
++lds, sds = aw.linedefs("E1M1"), aw.sidedefs("E1M1")
++xs = [v[0] for v in verts]
++ys = [v[1] for v in verts]
++pts = []
++for x in range(min(xs) + 13, max(xs), 256):
++    for y in range(min(ys) + 7, max(ys), 256):
++        if _near_any_line(verts, lds, x, y, 24.0):
++            continue
++        if true_sector(verts, lds, sds, x, y) == -1:
++            continue
++        pts.append((x, y))
++
++kw = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
++          near_steps=True, stack_steps=True, sky=True, things=True,
++          sprite_wad=art, degrade=True)
++stats = {b: [0, 0] for b in (160, 192, 256)}
++for (x, y) in pts:
++    for k in range(4):
++        st = SimState(x << 16, y << 16, (k << 30) & 0xFFFFFFFF, "E1M1")
++        base = bytes(rm.render_wall_frame(st, scene, deg_mark=9999, **kw))
++        for b in stats:
++            fb = bytes(rm.render_wall_frame(st, scene, deg_mark=b, **kw))
++            d = sum(1 for j in range(len(base)) if fb[j] != base[j])
++            if d:
++                stats[b][0] += 1
++                stats[b][1] += d
++for b, (f, p) in sorted(stats.items()):
++    print(f"deg_mark={b}: {f} frames diverge, {p} px")
+diff --git a/scratchpad/cr/pnear_audit3.py b/scratchpad/cr/pnear_audit3.py
+new file mode 100644
+index 0000000..41a2c54
+--- /dev/null
++++ b/scratchpad/cr/pnear_audit3.py
+@@ -0,0 +1,50 @@
++"""Final attribution check: shipped defaults (DEG_PNEAR=1024 + piece-seg idle stop) vs
++unlimited -- must be 0 px over the whole sweep grid."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT, ROOT / "scratchpad"):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++from nb_validate import true_sector, _near_any_line
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++verts = [(v.x, v.y) for v in aw.vertexes("E1M1")]
++lds, sds = aw.linedefs("E1M1"), aw.sidedefs("E1M1")
++xs = [v[0] for v in verts]
++ys = [v[1] for v in verts]
++pts = []
++for x in range(min(xs) + 13, max(xs), 256):
++    for y in range(min(ys) + 7, max(ys), 256):
++        if _near_any_line(verts, lds, x, y, 24.0):
++            continue
++        if true_sector(verts, lds, sds, x, y) == -1:
++            continue
++        pts.append((x, y))
++
++kw = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
++          near_steps=True, stack_steps=True, sky=True, things=True,
++          sprite_wad=art, degrade=True)
++bad_f = bad_px = 0
++n = 0
++for (x, y) in pts:
++    for k in range(4):
++        st = SimState(x << 16, y << 16, (k << 30) & 0xFFFFFFFF, "E1M1")
++        a = bytes(rm.render_wall_frame(st, scene, **kw))                 # shipped defaults
++        b = bytes(rm.render_wall_frame(st, scene, deg_mark=9999, **kw))  # unlimited
++        d = sum(1 for j in range(len(a)) if a[j] != b[j])
++        if d:
++            bad_f += 1
++            bad_px += d
++            print(f"  DIVERGES {d} px @ ({x},{y},{hex((k << 30) & 0xFFFFFFFF)})")
++        n += 1
++print(f"{n} frames: {bad_f} diverge ({bad_px} px) -- expect 0")
+diff --git a/scratchpad/cr/pop_1698.py b/scratchpad/cr/pop_1698.py
+new file mode 100644
+index 0000000..80728c9
+--- /dev/null
++++ b/scratchpad/cr/pop_1698.py
+@@ -0,0 +1,61 @@
++"""Owner's phantom columns: (1698,892) vs (1715,909), both ang=0x20000000.
++Render both on the certified oracle config, save side-by-side PNG + a column-diff report."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from PIL import Image
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++pal = aw.playpal(0)
++W, H = cfg.VIEW_W, cfg.VIEW_H
++
++VA = 0x20000000
++frames = {}
++for tag, (vx, vy) in {"far": (1698, 892), "near": (1715, 909)}.items():
++    fb = rm.render_wall_frame(SimState(vx << 16, vy << 16, VA, "E1M1"), scene,
++                              wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
++                              wall_noise=True, near_steps=True, stack_steps=True, sky=True,
++                              things=True, sprite_wad=art, degrade=True)
++    frames[tag] = bytes(fb)
++
++img = Image.new("RGB", (W * 2 + 8, H))
++for i, tag in enumerate(("far", "near")):
++    t = Image.new("RGB", (W, H))
++    t.putdata([pal[b] for b in frames[tag]])
++    img.paste(t, (i * (W + 8), 0))
++img = img.resize(((W * 2 + 8) * 4, H * 4), Image.NEAREST)
++img.save(ROOT / "scratchpad" / "cr" / "pop1698_pair.png")
++print("saved scratchpad/cr/pop1698_pair.png  (left=far 1698,892  right=near 1715,909)")
++
++# column report of the FAR frame: for each column, the run structure (top colours)
++fb = frames["far"]
++runs_per_col = []
++for x in range(W):
++    col = [fb[y * W + x] for y in range(H)]
++    runs = 1
++    for y in range(1, H):
++        if col[y] != col[y - 1]:
++            runs += 1
++    runs_per_col.append(runs)
++low = [x for x in range(W) if runs_per_col[x] <= 3]
++print(f"far frame: columns with <=3 colour runs (suspiciously flat): {len(low)}")
++if low:
++    # group consecutive
++    groups, s = [], low[0]
++    for a, b in zip(low, low[1:]):
++        if b != a + 1:
++            groups.append((s, a)); s = b
++    groups.append((s, low[-1]))
++    print("  flat column groups:", groups)
+diff --git a/scratchpad/cr/pop_1698b.py b/scratchpad/cr/pop_1698b.py
+new file mode 100644
+index 0000000..fa9c5d3
+--- /dev/null
++++ b/scratchpad/cr/pop_1698b.py
+@@ -0,0 +1,41 @@
++"""Column-level structure of the two frames: run lists (y-range -> palette byte) mid-screen."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++W, H = cfg.VIEW_W, cfg.VIEW_H
++VA = 0x20000000
++
++def runs(fb, x):
++    col = [fb[y * W + x] for y in range(H)]
++    out, s = [], 0
++    for y in range(1, H + 1):
++        if y == H or col[y] != col[s]:
++            out.append((s, y - 1, col[s]))
++            s = y
++    return out
++
++for tag, (vx, vy) in {"FAR (1698,892) [buggy per owner]": (1698, 892),
++                      "NEAR (1715,909) [correct per owner]": (1715, 909)}.items():
++    fb = bytes(rm.render_wall_frame(SimState(vx << 16, vy << 16, VA, "E1M1"), scene,
++                                    wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
++                                    wall_noise=True, near_steps=True, stack_steps=True, sky=True,
++                                    things=True, sprite_wad=art, degrade=True))
++    print(f"\n=== {tag} ===")
++    for x in (70, 75, 80, 85, 90, 93, 100, 105, 108, 112):
++        r = runs(fb, x)
++        compact = " ".join(f"[{a}-{b}]:{c}" for a, b, c in r[:8])
++        print(f"  x={x:3}: {len(r):2} runs  {compact}{' ...' if len(r) > 8 else ''}")
+diff --git a/scratchpad/cr/pop_1698c.py b/scratchpad/cr/pop_1698c.py
+new file mode 100644
+index 0000000..f1e3e99
+--- /dev/null
++++ b/scratchpad/cr/pop_1698c.py
+@@ -0,0 +1,62 @@
++"""Trace every seg that touches column 108 (and 100) at the two viewpoints: walk order,
++x-range, scales, screen rows -- find the phantom giant projection."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++import doomfj.reference_model as RMM
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++
++cfg = Config()
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++lds, sds = mw.linedefs("E1M1"), mw.sidedefs("E1M1")
++verts = scene.cmap.vertexes
++VA = 0x20000000
++XWATCH = (100, 108)
++
++
++class TraceModel(ReferenceModel):
++    def wall_x_range(self, *a, **k):
++        r = super().wall_x_range(*a, **k)
++        self._last_xr = r
++        return r
++
++
++tm = TraceModel(cfg)
++LOG = []
++_orig_scale = ReferenceModel.scale_from_global_angle
++
++
++for tag, (vx, vy) in {"FAR": (1698, 892), "NEAR": (1715, 909)}.items():
++    # walk the BSP exactly like the renderer, computing each seg's projection ourselves
++    order = list(tm.visible_segs(scene.cmap, vx, vy, va=VA))
++    print(f"\n=== {tag} ({vx},{vy}) -- segs touching x in {XWATCH} (walk order) ===")
++    for si in order:
++        seg = scene.cmap.segs[si]
++        ld = lds[seg.linedef]
++        xr = tm.wall_x_range(vx << 16, vy << 16, VA, seg, verts)
++        if xr is None:
++            continue
++        x1, x2 = xr[0], xr[1]
++        if not any(x1 <= xw <= x2 for xw in XWATCH):
++            continue
++        two = ld.back != -1 and ld.front != -1
++        rwn, rwd = tm.wall_setup(vx << 16, vy << 16, seg, verts)
++        # scale at the watch column(s)
++        sc = {}
++        for xw in XWATCH:
++            if x1 <= xw <= x2:
++                visang = (VA + tm.xtoviewangle[xw]) & 0xFFFFFFFF
++                sc[xw] = tm.scale_from_global_angle(visang, VA, rwn, rwd)
++        v1, v2 = verts[seg.v1], verts[seg.v2]
++        mid = sds[ld.front if seg.side == 0 else ld.back].middle if (ld.front if seg.side == 0 else ld.back) != -1 else "?"
++        print(f"  seg{si:4} {'2S' if two else '1S'} mid={mid!r:10} v1={v1} v2={v2} "
++              f"x[{x1},{x2}] rwd={rwd >> 16} scales={ {k: hex(v) for k, v in sc.items()} }")
+diff --git a/scratchpad/cr/pop_1698d.py b/scratchpad/cr/pop_1698d.py
+new file mode 100644
+index 0000000..2ec8687
+--- /dev/null
++++ b/scratchpad/cr/pop_1698d.py
+@@ -0,0 +1,48 @@
++"""Attribute the phantom paint: dump steps_out (face/stacked pieces) + planes_out (per-column
++plane records) for the FAR frame at the suspicious columns."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++W, H = cfg.VIEW_W, cfg.VIEW_H
++VA = 0x20000000
++WATCH = set(range(96, 114)) | set(range(73, 96))
++
++for tag, (vx, vy) in {"FAR": (1698, 892), "NEAR": (1715, 909)}.items():
++    steps, planes = [], []
++    rm.render_wall_frame(SimState(vx << 16, vy << 16, VA, "E1M1"), scene,
++                         wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
++                         wall_noise=True, near_steps=True, stack_steps=True, sky=True,
++                         things=True, sprite_wad=art, degrade=True,
++                         steps_out=steps, planes_out=planes)
++    print(f"\n=== {tag} ({vx},{vy}) ===")
++    print("steps_out entries:", len(steps))
++    for e in steps:
++        # entry format unknown -- print raw, filtered to watch columns when x present
++        s = repr(e)
++        if any(f"({x}," in s or f" {x}," in s for x in (75, 100, 108)):
++            print("  ", s[:220])
++    if steps and len(steps) < 30:
++        for e in steps:
++            print("  ALL:", repr(e)[:220])
++    if planes:
++        print("planes_out sample (x=75,100,108):")
++        pl = planes[0] if isinstance(planes[0], (list, tuple)) and len(planes) == 1 else planes
++        try:
++            for x in (75, 100, 108):
++                print(f"  x={x}:", repr(pl[x])[:200])
++        except Exception as ex:
++            print("  planes format:", type(pl), len(pl), repr(pl[:2])[:300], ex)
+diff --git a/scratchpad/cr/pop_1698e.py b/scratchpad/cr/pop_1698e.py
+new file mode 100644
+index 0000000..be8d87d
+--- /dev/null
++++ b/scratchpad/cr/pop_1698e.py
+@@ -0,0 +1,32 @@
++"""Unpack planes_out fully at the phantom columns, both frames."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++VA = 0x20000000
++NAMES = ("ceil_hi", "floor_lo", "col_ch", "col_fh", "col_lt", "col_cf", "col_ff")
++
++for tag, (vx, vy) in {"FAR": (1698, 892), "NEAR": (1715, 909)}.items():
++    planes = []
++    rm.render_wall_frame(SimState(vx << 16, vy << 16, VA, "E1M1"), scene,
++                         wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
++                         wall_noise=True, near_steps=True, stack_steps=True, sky=True,
++                         things=True, sprite_wad=art, degrade=True, planes_out=planes)
++    pl = planes[0] if len(planes) == 1 else tuple(planes)
++    print(f"\n=== {tag} ({vx},{vy}) ===")
++    for x in (70, 75, 80, 90, 100, 108, 112, 120):
++        vals = {n: (arr[x] if x < len(arr) else "?") for n, arr in zip(NAMES, pl)}
++        print(f"  x={x:3}: " + "  ".join(f"{n}={v}" for n, v in vals.items()))
+diff --git a/scratchpad/cr/pop_1698f.py b/scratchpad/cr/pop_1698f.py
+new file mode 100644
+index 0000000..b73898c
+--- /dev/null
++++ b/scratchpad/cr/pop_1698f.py
+@@ -0,0 +1,36 @@
++"""Dump ups[x]/los[x] piece lists at the phantom columns, both frames."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++VA = 0x20000000
++
++for tag, (vx, vy) in {"FAR": (1698, 892), "NEAR": (1715, 909)}.items():
++    steps = []
++    rm.render_wall_frame(SimState(vx << 16, vy << 16, VA, "E1M1"), scene,
++                         wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
++                         wall_noise=True, near_steps=True, stack_steps=True, sky=True,
++                         things=True, sprite_wad=art, degrade=True, steps_out=steps)
++    ups, los = steps[0]
++    print(f"\n=== {tag} ({vx},{vy}) ===")
++    for x in (73, 75, 80, 90, 93, 100, 105, 108, 112):
++        def fmt(lst):
++            return " | ".join(
++                f"y[{e[0]},{e[1]}] lt={e[2].light} fh={getattr(e[4], 'floor_h', '?')}"
++                f"/ch={getattr(e[4], 'ceil_h', '?')} bf={getattr(e[4], 'floor_tex', '?')}"
++                for e in lst) or "-"
++        print(f"  x={x:3}: UP {fmt(ups[x])}")
++        print(f"         LO {fmt(los[x])}")
+diff --git a/scratchpad/cr/pop_1698g.py b/scratchpad/cr/pop_1698g.py
+new file mode 100644
+index 0000000..8f5a782
+--- /dev/null
++++ b/scratchpad/cr/pop_1698g.py
+@@ -0,0 +1,53 @@
++"""viewz + full column runs at x=100/108 + which record is physically visible."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT, ROOT / "scratchpad"):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++from nb_validate import true_sector
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++lds, sds, secs = mw.linedefs("E1M1"), mw.sidedefs("E1M1"), mw.sectors("E1M1")
++verts = [(v.x, v.y) for v in mw.vertexes("E1M1")]
++W, H = cfg.VIEW_W, cfg.VIEW_H
++VA = 0x20000000
++
++for tag, (vx, vy) in {"FAR": (1698, 892), "NEAR": (1715, 909)}.items():
++    si = true_sector(verts, lds, sds, vx, vy)
++    sec = secs[si]
++    viewz = rm.view_z(sec.floor_h)
++    print(f"{tag} ({vx},{vy}): sector {si} floor_h={sec.floor_h} light={sec.light} "
++          f"-> viewz={viewz >> 16}")
++
++fbs = {}
++for tag, (vx, vy) in {"FAR": (1698, 892), "NEAR": (1715, 909)}.items():
++    fbs[tag] = bytes(rm.render_wall_frame(SimState(vx << 16, vy << 16, VA, "E1M1"), scene,
++                                          wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
++                                          wall_noise=True, near_steps=True, stack_steps=True,
++                                          sky=True, things=True, sprite_wad=art, degrade=True))
++
++
++def runs(fb, x):
++    col = [fb[y * W + x] for y in range(H)]
++    out, s = [], 0
++    for y in range(1, H + 1):
++        if y == H or col[y] != col[s]:
++            out.append((s, y - 1, col[s]))
++            s = y
++    return out
++
++for tag in ("FAR", "NEAR"):
++    print(f"\n=== {tag} full runs ===")
++    for x in (100, 108):
++        r = runs(fbs[tag], x)
++        print(f"  x={x}: {len(r)} runs: " + " ".join(f"[{a}-{b}]:{c}" for a, b, c in r))
+diff --git a/scratchpad/cr/pop_1698h.py b/scratchpad/cr/pop_1698h.py
+new file mode 100644
+index 0000000..c058745
+--- /dev/null
++++ b/scratchpad/cr/pop_1698h.py
+@@ -0,0 +1,41 @@
++"""Hypothesis test: does a bigger marking budget fix the FAR frame? Render FAR with
++deg_mark 64 (shipped) / 96 / 128 / 9999 and diff columns 96-114."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++W, H = cfg.VIEW_W, cfg.VIEW_H
++VA = 0x20000000
++vx, vy = 1698, 892
++
++frames = {}
++for dm in (64, 96, 128, 9999):
++    planes = []
++    fb = rm.render_wall_frame(SimState(vx << 16, vy << 16, VA, "E1M1"), scene,
++                              wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
++                              wall_noise=True, near_steps=True, stack_steps=True, sky=True,
++                              things=True, sprite_wad=art, degrade=True, deg_mark=dm,
++                              planes_out=planes)
++    frames[dm] = bytes(fb)
++    pl = planes[0]
++    fh100, ff100 = pl[3][100], pl[6][100]
++    fh108, ff108 = pl[3][108], pl[6][108]
++    print(f"deg_mark={dm:5}: x=100 fh={fh100} ff={ff100} | x=108 fh={fh108} ff={ff108}")
++
++base = frames[9999]
++for dm in (64, 96, 128):
++    d = sum(1 for i in range(W * H) if frames[dm][i] != base[i])
++    print(f"deg_mark={dm:5}: {d} px differ vs unlimited")
+diff --git a/scratchpad/cr/skywall_look.py b/scratchpad/cr/skywall_look.py
+new file mode 100644
+index 0000000..8937c6b
+--- /dev/null
++++ b/scratchpad/cr/skywall_look.py
+@@ -0,0 +1,36 @@
++"""Look-check: the SKY1 walls (x=-544, y 288-352) with the new white-brick treatment."""
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from PIL import Image
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, SimState, build_scene
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++pal = aw.playpal(0)
++W, H = cfg.VIEW_W, cfg.VIEW_H
++
++VPS = [(-300, 320, 0x80000000, "west-at-skywalls"),
++       (1869, 479, 0x80000000, "everything-gate")]
++img = Image.new("RGB", (W * len(VPS) + 8 * (len(VPS) - 1), H))
++for i, (vx, vy, va, tag) in enumerate(VPS):
++    fb = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
++                              wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
++                              wall_noise=True, near_steps=True, stack_steps=True, sky=True,
++                              things=True, sprite_wad=art, degrade=True)
++    t = Image.new("RGB", (W, H))
++    t.putdata([pal[b] for b in bytes(fb)])
++    img.paste(t, (i * (W + 8), 0))
++img = img.resize((img.width * 4, H * 4), Image.NEAREST)
++img.save(ROOT / "scratchpad" / "cr" / "skywall_look.png")
++print("saved scratchpad/cr/skywall_look.png")
+diff --git a/scratchpad/cr/white_walls.py b/scratchpad/cr/white_walls.py
+new file mode 100644
+index 0000000..1bdf1da
+--- /dev/null
++++ b/scratchpad/cr/white_walls.py
+@@ -0,0 +1,62 @@
++"""Which walls draw as the FLAT (patternless) tier and why -- texture-less (WALL_BG) vs sky."""
++import sys
++from collections import Counter
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, build_scene, WALL_BG
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++lds, sds = mw.linedefs("E1M1"), mw.sidedefs("E1M1")
++cache = {}
++
++no_tex = Counter()          # middle-texture NAME of walls that resolve to no texture
++sky_tex = Counter()
++examples = {}
++total = 0
++for si, seg in enumerate(scene.cmap.segs):
++    ld = lds[seg.linedef]
++    front = ld.front if seg.side == 0 else ld.back
++    if front == -1:
++        continue
++    sd = sds[front]
++    if ld.back != -1 and (ld.front == -1 or True):
++        # two-sided segs draw no middle wall on the shipped tier; only one-sided walls matter
++        if ld.back != -1 and ld.front != -1:
++            continue
++    total += 1
++    t = rm._wall_texture(aw, sd.middle, cache, wall_mode="W1R")
++    nm = (sd.middle or "-").upper()
++    if t is None:
++        no_tex[nm] += 1
++        examples.setdefault(("notex", nm),
++                            (scene.cmap.vertexes[seg.v1], scene.cmap.vertexes[seg.v2]))
++    elif nm.startswith("SKY"):
++        sky_tex[nm] += 1
++        examples.setdefault(("sky", nm),
++                            (scene.cmap.vertexes[seg.v1], scene.cmap.vertexes[seg.v2]))
++
++print(f"one-sided walk segs: {total}")
++print(f"\nTEXTURE-LESS (flat WALL_BG={WALL_BG}) segs: {sum(no_tex.values())}")
++for nm, c in no_tex.most_common():
++    print(f"  middle={nm!r}: {c} segs   e.g. {examples[('notex', nm)]}")
++print(f"\nSKY-textured (flat by W1R-FLAT design) segs: {sum(sky_tex.values())}")
++for nm, c in sky_tex.most_common():
++    print(f"  middle={nm!r}: {c} segs   e.g. {examples[('sky', nm)]}")
++
++# the final baked colour of a flat wall at a few light levels
++cm = aw.colormap()
++pal = aw.playpal(0)
++for light in (255, 192, 160, 128):
++    row = max(0, min(31, light >> 3))
++    c = cm[row][WALL_BG]
++    print(f"light {light}: colormap row {row} -> palette idx {c} rgb {pal[c]}")
+diff --git a/scratchpad/cr/white_walls2.py b/scratchpad/cr/white_walls2.py
+new file mode 100644
+index 0000000..7396345
+--- /dev/null
++++ b/scratchpad/cr/white_walls2.py
+@@ -0,0 +1,54 @@
++"""Second candidate: walls whose TWO W1R colour bytes bake EQUAL (pattern contrast collapses)."""
++import sys
++from collections import Counter
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, build_scene, COLORMAP_LIGHTS, LIGHT_SHIFT
++from doomfj.texturecompiler import colormap_values
++from doomfj.wad import WadFile
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++scene = build_scene(mw, aw, "E1M1")
++lds, sds, secs = mw.linedefs("E1M1"), mw.sidedefs("E1M1"), mw.sectors("E1M1")
++colormap = aw.colormap()
++cache = {}
++
++eq = Counter()      # (texture, light) of walls whose two baked bytes are EQUAL
++neq = 0
++pal = aw.playpal(0)
++seen_rgb = {}
++for si, seg in enumerate(scene.cmap.segs):
++    ld = lds[seg.linedef]
++    if ld.back != -1 and ld.front != -1:
++        continue
++    front = ld.front if seg.side == 0 else ld.back
++    if front == -1:
++        continue
++    sd = sds[front]
++    sec = secs[sd.sector]
++    t = rm._wall_texture(aw, sd.middle, cache, wall_mode="W1R")
++    if t is None or sd.middle.upper().startswith("SKY"):
++        continue
++    texels, th, tw = t
++    row = max(0, min(COLORMAP_LIGHTS - 1, sec.light >> LIGHT_SHIFT))
++    row = max(0, row - rm.W1R_BASE_BRIGHTEN)
++    b1, b2 = colormap[row][texels[0]], colormap[row][texels[1]]
++    if b1 == b2:
++        eq[(sd.middle.upper(), sec.light)] += 1
++        seen_rgb[(sd.middle.upper(), sec.light)] = (b1, pal[b1])
++    else:
++        neq += 1
++
++print(f"contrast-COLLAPSED walls (both W1R bytes equal): {sum(eq.values())} segs "
++      f"vs {neq} with contrast")
++for (nm, l), c in eq.most_common(15):
++    b, rgb = seen_rgb[(nm, l)]
++    print(f"  {nm} light={l}: {c} segs -> byte {b} rgb {rgb}")
+diff --git a/src/doomfj/reference_model.py b/src/doomfj/reference_model.py
+index f4a4ea6..5988195 100644
+--- a/src/doomfj/reference_model.py
++++ b/src/doomfj/reference_model.py
+@@ -180,8 +180,14 @@ DEG_SLIVER_W = 3                  # a wall whose whole projected span is <= this
+ DEG_STACK_SCALE = 32768           # the SECOND stacked V5 piece only when the boundary's scale is
+                                   # at least this (16.16: 16384 = tz <~ 320 map units). Near
+                                   # stairs keep both risers; far doorways show one.
+-DEG_PNEAR = 64                    # the marking-seg budget under degrade (128 baseline): the far
+-                                  # doorways that lose attribution are the least-visible ones
++DEG_PNEAR = 1024                  # the marking-seg budget under degrade. SMUDGE FIX (owner's
++                                  # (1698,892) phantom columns, 2026-08-09): any budget that can
++                                  # BIND hands mid-screen columns to a far one-sided wall's
++                                  # sector -- giant wrong-colour shafts (73 of 260 sweep frames
++                                  # at the old 64; 17 still wrong at 256). 1024 NEVER binds on
++                                  # this map (< 731 segs total): attribution now runs to its
++                                  # natural stop (all columns wall-drawn), and the budget is
++                                  # only the pathological-map fuse. fj n_tsv is 3 nibbles.
+ DEG_LIP_SCALE = 16384             # V5-DROP far gate: LIP pieces (drop-offs / level flat changes)
+                                   # only when the boundary's scale is at least this (16.16:
+                                   # 16384 = tz <~ 320 map units, the stack gate's radius). A
+@@ -1634,6 +1640,14 @@ class ReferenceModel:
+                     continue
+                 if um_ == 0 == lm_ and n_claimed == cfg.VIEW_W:
+                     continue
++                # SMUDGE FIX part 2 (2026-08-09): the PIECE-seg idle stop. With the count budget
++                # at never-binds (DEG_PNEAR 1024), the cost bound moves here: once every column
++                # is attributed AND the face budget is spent, a piece-carrying seg's scan is
++                # pure reads (face_seg is false, pclaim[] all set) -- skipping it is
++                # PIXEL-NEUTRAL by construction, it only cuts the idle tail (~+14M/frame
++                # measured on stock E1M1 without this stop).
++                if n_claimed == cfg.VIEW_W and n_face[0] >= STEP_SEG_BUDGET:
++                    continue
+                 n_ts += 1
+                 rng2 = self.wall_x_range(viewx, viewy, viewangle, seg, verts)
+                 if rng2 is None:
+@@ -1820,12 +1834,15 @@ class ReferenceModel:
+                         # W1R-2C: `alt` runs draw over the texture's SECOND texel (a different
+                         # material embedded in the wall, still from the same texture).
+                         # W1R-FLAT (owner): walls that are FLAT in the best scenario stay flat
+-                        # -- no texture at all, or a SKY-textured wall (smooth clouds). They
+-                        # render one UNbrightened W1 tone (fj: the seg's baked seg_w1rf flag).
++                        # -- no texture at all. They render one UNbrightened W1 tone (fj: the
++                        # seg's baked seg_w1rf flag). SKY-textured walls USED to stay flat too
++                        # (pre-anchor flicker fix) -- owner 2026-08-09: they read as blank white
++                        # slabs, so they now take the standard masonry pattern (white bricks
++                        # from SKY1's own two dominant texels).
+                         # 25M-CAP SLIVER FLAT: a wall whose whole projected span is <= deg_sliver
+                         # columns renders the flat tone -- a 1-2 column sliver at the horizon
+                         # carries no readable texture anyway, and the heavy frames have dozens.
+-                        if (tex is None or (sd.middle or "").upper().startswith("SKY")
++                        if (tex is None
+                                 or (deg_sliver and x2 - x1 <= deg_sliver)):
+                             cc = (flat_fill if tex is None
+                                   else colormap[light_row][tex[0][0]])
+diff --git a/src/doomfj/wall_renderer.py b/src/doomfj/wall_renderer.py
+index 4e87599..e844775 100644
+--- a/src/doomfj/wall_renderer.py
++++ b/src/doomfj/wall_renderer.py
+@@ -491,10 +491,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
+         return colormap[row][texel]
+ 
+     # W1R-FLAT: the combined-table bases whose walls stay FLAT under W1R -- texture-less
+-    # (the WALL_BG sentinel) and SKY-textured walls (smooth clouds in the best scenario).
+-    w1r_flat_tb = ({info["__WALLBG__"][0]}
+-                   | {info[nm][0] for nm in info if nm != "__WALLBG__" and nm.startswith("SKY")}
+-                   if w1r_flag else set())
++    # (the WALL_BG sentinel) only. SKY-textured walls USED to be here too; owner 2026-08-09:
++    # they read as blank white slabs, so they now take the standard masonry pattern (mirrors
++    # the oracle's W1R-FLAT branch, R6).
++    w1r_flat_tb = {info["__WALLBG__"][0]} if w1r_flag else set()
+ 
+     # M13-bakedbands (the 12M campaign's LUT play): in lines mode EVERY POSSIBLE band list is
+     # baked at compile time -- one list per (viewz class) x (height, light, flat-base) key, with
+@@ -832,12 +832,19 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
+                         # V5-DROP-P2: LIGHT-ONLY marking segs (no pieces possible) stop at
+                         # claim-completion via tsstop; piece-carrying segs call unconditionally
+                         # and stop on the leaf's wall-drawn `full` entry test instead.
+-                        # ... piece segs still respect the BUDGET latch (tsbstop) -- only
+-                        # the claim-complete half of tsstop is theirs to ignore
+-                        _gflag = "tsstop" if not (_um or _lm) else "tsbstop"
+-                        out += [f"    hex.if0 1, {_gflag}, e2go{cid}_{si}",
+-                                f"    ;e2sk{cid}_{si}",
+-                                f"  e2go{cid}_{si}:",
++                        # ... piece segs still respect the BUDGET latch (tsbstop), and (SMUDGE
++                        # FIX part 2) the IDLE stop: claim-complete (tsstop) AND face budget
++                        # spent (fbspent) means the seg provably writes nothing -- skip it.
++                        # Mirrors the oracle's piece-seg idle stop exactly.
++                        if not (_um or _lm):
++                            out += [f"    hex.if0 1, tsstop, e2go{cid}_{si}",
++                                    f"    ;e2sk{cid}_{si}"]
++                        else:
++                            out += [f"    hex.if1 1, tsbstop, e2sk{cid}_{si}",
++                                    f"    hex.if0 1, tsstop, e2go{cid}_{si}",
++                                    f"    hex.if0 1, fbspent, e2go{cid}_{si}",
++                                    f"    ;e2sk{cid}_{si}"]
++                        out += [f"  e2go{cid}_{si}:",
+                                 *_tsq,
+                                 "    stl.fcall seg_pass1_ts_leaf, seg_ret",
+                                 *_tsu,
+@@ -1433,7 +1440,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
+            "fbufa: hex.vec w/4", "fbufd: hex.vec w/4"] if two_sided else []),
+         *([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+            "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
+-           "n_claimed: hex.vec 2", "n_tsv: hex.vec 2", "tsstop: hex.vec 1",
++           # n_tsv is 3 nibbles: the deg attribution budget is 1024 (the never-binds fuse --
++           # see the SMUDGE FIX note in seg_pass1_leaf_body_ts)
++           "n_claimed: hex.vec 2", "n_tsv: hex.vec 3", "tsstop: hex.vec 1",
+            "tsbstop: hex.vec 1",              # V5-DROP-P2b: the budget-only latch
+            "viewh_stub: hex.vec 2, 100",
+            "cpid: hex.vec 2",
+@@ -1448,7 +1457,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
+         *([f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+            f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
+                                       for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
+-           "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
++           "n_face: hex.vec 2", "fbspent: hex.vec 1",   # SMUDGE FIX part 2: faces-spent latch
++           "seg_fmask: hex.vec 2",
+            "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
+            "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
+            "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
+diff --git a/src/fj/frame_render.fj b/src/fj/frame_render.fj
+index 1c59759..7cf4238 100644
+--- a/src/fj/frame_render.fj
++++ b/src/fj/frame_render.fj
+@@ -1624,13 +1624,13 @@ ns frame {
+     }
+ 
+     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
+-            @ nofaces, dofaces, floop, fbody, fwork, fnext, uskip, udo, ugo, ust1, ust2, ust3, uclz, \
++            @ nofaces, dofaces, fspent, fgo, floop, fbody, fwork, fnext, uskip, udo, ugo, ust1, ust2, ust3, uclz, \
+               ukhi, uhicl, uwr, umark, umark2, lskip, ldo, lgo, lst1, lst2, lst3, lclz, lkhi, lhicl, lwr, \
+               lmark, lmark2, fmax, \
+               fcap, fnorm, fdist, fscale, fsstep, fwu1, fwu2, fwl1, fwl2, fra, frb, fcvh, \
+               fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2, fmv, ulipn, llipn, udng, ldng, \
+               fx, fdb, fdp, fdv, fsb, fsp, fsv, fbb, fbp, fidx, fy1, fy2, end \
+-            < viewangle, viewz, sgn_aff, x1, x2, n_face, drawn, sfflag, sfslot, \
++            < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, \
+               seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, \
+               seg_bpid {
+         hex.if0 2, seg_fmask, nofaces           // this boundary carries no face at all (compile-time)
+@@ -1638,6 +1638,13 @@ ns frame {
+         hex.cmp 2, n_face, fcap, dofaces, nofaces, nofaces
+       dofaces:
+         hex.inc 2, n_face
++        // SMUDGE FIX part 2: latch `fbspent` the moment the face budget FILLS -- from here on
++        // the oracle's piece-seg idle stop (claim-complete AND faces-spent) holds, and the
++        // pass-2 call sites skip piece segs that provably cannot write anything.
++        hex.cmp 2, n_face, fcap, fgo, fspent, fspent
++      fspent:
++        hex.set 1, fbspent, 1
++      fgo:
+         proj.wall_setup_sgn fnorm, fdist, sgn_aff, seg_segangle
+         proj.wall_scale_setup_m fscale, fsstep, viewangle, fnorm, fdist, x1, x2, projection
+         // the four world heights as map-unit deltas from the eye, hoisted once per seg exactly as
+@@ -1862,9 +1869,14 @@ ns frame {
+         // nearest-first, so the budget only ever costs FAR attribution -- and it is what BOUNDS the
+         // cost of a frame whose view never closes: with open sky or void on screen `n_claimed` never
+         // reaches VIEW_W, and one such E1M1 viewpoint measured 69.6M ops/frame before this existed.
+-        hex.inc 2, n_tsv
+-        hex.set 2, bcap, budget
+-        hex.cmp 2, n_tsv, bcap, bok, bstop, bok
++        // SMUDGE FIX (owner's (1698,892) phantom columns, 2026-08-09): a budget that BINDS hands
++        // mid-screen columns to a far one-sided wall's sector -- giant wrong-colour shafts. The
++        // deg budget is now 1024 (never binds on this map: < 731 segs total); the counter is
++        // 3 NIBBLES so the compare stays honest. The full-latch above (all columns wall-drawn)
++        // is the real per-frame stop; the budget survives only as the pathological-map fuse.
++        hex.inc 3, n_tsv
++        hex.set 3, bcap, budget
++        hex.cmp 3, n_tsv, bcap, bok, bstop, bok
+       bstop:
+         hex.set 1, tsstop, 1                    // this seg is the last one the budget allows
+         hex.set 1, tsbstop, 1                   // V5-DROP-P2b: the BUDGET-ONLY latch piece-seg
+@@ -1940,7 +1952,7 @@ ns frame {
+       xa: hex.vec 2
+       xb: hex.vec 2
+       pm1: hex.vec 2
+-      bcap: hex.vec 2
++      bcap: hex.vec 3
+     }
+ 
+     // M13-2S rung 3a — a column's two band-list addresses FROM ITS PLANE-PAIR ID. The bank is laid

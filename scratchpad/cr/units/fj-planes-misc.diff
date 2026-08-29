@@ -1,0 +1,970 @@
+diff --git a/src/fj/fixed_point.fj b/src/fj/fixed_point.fj
+index 631da7d..a66142e 100644
+--- a/src/fj/fixed_point.fj
++++ b/src/fj/fixed_point.fj
+@@ -39,6 +39,55 @@ ns hex {
+     }
+ 
+ 
++    // M13-mulcrush — BYTE-EXACT-identical to `fixed_mul n, f, dst, a, b`, ~3x cheaper: the full
++    //  2n-nibble product is TRUNCATED-SCHOOLBOOK'd at n+f nibbles (the only nibbles fixed_mul's
++    //  [f, f+n) result slice can see). Row j adds wa[0..m-j)*wb[j] at offset j with add_mul's own
++    //  mod-16^(m-j) ripple — every pair with i+j < m lands exactly, columns >= m are dropped, so
++    //  res[0..m) == the full product's low m nibbles and dst == fixed_mul's dst, bit for bit.
++    //  Zero-digit rows (e.g. the sign-extension nibbles of small positive operands) skip their
++    //  add_mul behind a 1-nibble if0. No dst/src shifting, no count_bits (hex.mul's per-iteration
++    //  overhead), compile-time offsets throughout.
++    // @Assumes: 0 < f <= n.
++    // @requires hex.init
++    def fixed_mul_lo n, f, dst, a, b @ wide_a, wide_b, res, end {
++        .mov n, wide_a, a
++        .sign_extend n+f, n, wide_a
++        .mov n, wide_b, b
++        .sign_extend n+f, n, wide_b
++        .zero n+f, res
++        rep(n+f, j) .fixed_mul_lo.row n+f, j, res, wide_a, wide_b
++        .mov n, dst, res + f*dw
++        ;end
++
++      wide_a: .vec n+f
++      wide_b: .vec n+f
++      res: .vec n+f
++      end:
++    }
++    ns fixed_mul_lo {
++        // one truncated-schoolbook row: res[j..m) += wa[0..m-j) * wb[j]  (skipped when wb[j]==0)
++        def row m, j, res, wa, wb @ skip {
++            ..if0 1, wb + j*dw, skip
++            ..add_mul m-j, res + j*dw, wa, wb + j*dw
++          skip:
++        }
++    }
++
++
++    // M13-sidemul — BIT-IDENTICAL to `hex.mul n, res, a, b` (both are the product mod 16^n),
++    //  as an unrolled truncated schoolbook: n(n+1)/2 nibble-pairs at compile-time offsets, an
++    //  if0-skip per zero b-digit — no per-iteration shl/shr n, no count_bits, and (unlike
++    //  hex.mul's early-exit) no blow-up on sign-extended NEGATIVE operands (R19). res must not
++    //  alias a or b.
++    // @requires hex.init
++    def mul_lo n, res, a, b @ end {
++        .zero n, res
++        rep(n, j) .fixed_mul_lo.row n, j, res, a, b
++        ;end
++      end:
++    }
++
++
+     //  Time Complexity: n^2(76@+216) + n(15@+50)
+     // Space Complexity: n(45@+600)
+     //   if b==0: goto div0
+@@ -103,6 +152,24 @@ ns hex {
+     // The entry address is computed with the strength-reduced mul_const (no runtime-amount
+     //  shift), then read through a pointer.
+     // @requires hex.init & stl.ptr_init
++    // M13-lutpack — dst[:2*nb] = table[idx] for a PACKED-byte LUT (entry = nb consecutive bytes,
++    //  little-endian, one dw-slot per byte: doomfj generate_packed_lut_fj). Same values as the
++    //  read_table form, ~600 ops/BYTE (read_byte_and_inc) instead of ~1.1k/NIBBLE (read_hex's
++    //  per-nibble pointer re-derivation) — delta-measured, R19-era. dst must not alias idx.
++    // @requires hex.init & stl.ptr_init
++    def read_table_packed nb, dst, table, idx_n, idx @ ptr, table_address, end {
++        .zero w/4, ptr
++        .mov idx_n, ptr, idx
++        .mul_const w/4, ptr, ptr, nb*dw
++        .add w/4, ptr, table_address
++        rep(nb, k) .read_byte_and_inc dst + 2*k*dw, ptr
++        ;end
++
++      ptr: .vec w/4
++      table_address: .vec w/4, table
++      end:
++    }
++
+     def read_table n, dst, table, idx_n, idx @ ptr, table_address, end {
+         .zero w/4, ptr
+         .mov idx_n, ptr, idx
+diff --git a/src/fj/plane_bands.fj b/src/fj/plane_bands.fj
+new file mode 100644
+index 0000000..28b1dec
+--- /dev/null
++++ b/src/fj/plane_bands.fj
+@@ -0,0 +1,510 @@
++// M13pS2c — the LS2 per-column ceiling/floor BAND LIST builder (the column-stream design's floor
++// raster). Replaces the row-major `render_planes_spans`/`plane_col`/`plane.draw_span_flat` (M13c3/p1)
++// with a per-COLUMN walk: seed the window's first row EXACTLY (one real `hex.fixed_mul`, matching
++// `plane.draw_pixel`'s zidx derivation bit-for-bit) then advance via a cheap threshold walk
++// (add/compare only) for the rest — mirrors `ReferenceModel._zidx_band_walk` (R15) exactly, so the fj
++// kernel and the oracle stay byte-identical. @requires hex.init & stl.ptr_init.
++
++ns plane {
++    // perf #11-style: dst = (1<<32)//ph via the SHARED block-FP reciprocal table (`slopediv_recip`,
++    // perf #13's SSOT — the SAME table `proj.slope_div`/`column_setup`'s `ipre` already use). Mirrors
++    // `ReferenceModel._recip_div32` — RIGHT-NORMALIZE ONLY (no left-normalize branch): valid because
++    // any REAL planeheight (16.16, >=1 world unit) has magnitude >= 0x10000, always above the table's
++    // 0xFFF threshold, exactly like `column_setup`'s wall-scale `ipre` (SCALE_MIN=256 gives the same
++    // guarantee). ⚠ scope limit: an implausibly tiny nonzero planeheight (< 0x100, i.e. under ~0.004
++    // world units — never seen in real E1M1 data) would hit the table's unpopulated (zero) region;
++    // not guarded, matching how M13pS2a's oracle prototype also only validated realistic magnitudes.
++    def recip32 @ sph, rc, cfff, czero2, irecip, nrm, more, done, shloop, shmore, shdone \
++            < bb_recip_ph, bb_recip_out, slopediv_recip, plane_recip_ret {
++        hex.mov 8, sph, bb_recip_ph
++        hex.set 2, rc, 0
++        hex.set 8, cfff, 0xFFF
++        hex.set 2, czero2, 0
++      nrm:
++        hex.cmp 8, sph, cfff, done, done, more   // sph > 0xFFF ? gt -> shift right
++      more:
++        hex.shr_hex 8, 1, sph
++        hex.inc 2, rc
++        ;nrm
++      done:
++        hex.read_table_packed 3, irecip, slopediv_recip, 3, sph   // recip[m] (packed, M13-lutpack)
++        hex.zero 8, bb_recip_out
++        hex.mov 5, bb_recip_out, irecip
++        hex.shl_hex 8, 2, bb_recip_out             // recip << 2 nibbles
++      shloop:
++        hex.cmp 2, rc, czero2, shdone, shdone, shmore
++      shmore:
++        hex.shr_hex 8, 1, bb_recip_out
++        hex.dec 2, rc
++        ;shloop
++      shdone:                                       // bb_recip_out = (recip<<2) >> rc = recip<<(2-rc)
++        stl.fret plane_recip_ret
++
++      sph: hex.vec 8
++      rc: hex.vec 2
++      cfff: hex.vec 8
++      czero2: hex.vec 2
++      irecip: hex.vec 6
++    }
++
++    // Build ONE column's ceiling/floor BAND LIST: mirrors `ReferenceModel._zidx_band_walk` (R15)
++    // exactly. Inputs (globals, caller-set): bb_ph (planeheight, 8nib), bb_light (RAW sector light
++    // 0..255, 2nib), bb_base (flat base palette index, 2nib), bb_y0 (window start row, 2nib),
++    // bb_count (window length, 2nib — 0 means no window, writes nothing), bb_ascending (2nib, 1 =
++    // ceiling/yslope increasing, 0 = floor/yslope decreasing), bb_arr (packed-byte output buffer
++    // base, w/4nib, caller-owned, sized for the worst case — see the emitter's MAX_BANDS). Output:
++    // bb_n (band-entry count written, 2nib). Each written entry is 3 PACKED bytes (run-length,
++    // base — constant, repeated per entry so the reader's format stays uniform — , zrow), read back
++    // by `stream.emit_band_list` via `hex.read_byte_and_inc` (byte order: count, base, zrow — the
++    // cm-index `zrow<<8|base` decomposes into exactly these two bytes, so no combine is needed here).
++    // @requires hex.init & stl.ptr_init.
++    // `basewidth` (compile-time 0/1): how many copies of bb_base each entry carries. stream/spans
++    // pass 1 (3-byte entries [runlen][base][zrow] -- the 0x09/0x0A present reads base+zrow as the
++    // colormap index); M13-lines passes 0 (2-byte entries [runlen][zrow] -- the flat base joins at
++    // EMIT time from the seg's own register, letting visplanes sharing (height,light) share a list).
++    def build_bands basewidth \
++            @ i, ys, ysptr, y0w, yadv, zidx, step, threshold_hi, threshold_lo, thi6, tlo6, cFFF6, \
++              zidx8, lvl, zlbase, zlidx, zrow, \
++              cur_zrow, runlen, ptr, c127, dist, \
++              empty, phzero, seed, seedclamp, seedok, chi_gt, chi_ok, chi_done, clo_gt, clo_ok, clo_done, \
++              bhi_gt, bhi_ok, blo_gt, blo_ok, \
++              bloop, bbody, ascloop, ascmaybe, ascmaybe0, ascbump, \
++              descloop, descloop0, descmaybe, descbump, classify, samezidx, diffzidx, cont2, \
++              flush_final, writeentry, done \
++            < bb_ph, bb_light, bb_base, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, \
++              bb_recip_ph, bb_recip_out, yslope_packed, zlight, recip32_leaf, plane_recip_ret, \
++              plane_band_ret {
++        hex.zero 2, bb_n
++        hex.if0 2, bb_count, empty
++        hex.mov w/4, ptr, bb_arr   // bb_arr is a RUNTIME register holding the buffer address (set by
++                                   // the caller per call) -- NOT itself a compile-time array label, so
++                                   // this must be hex.mov (copy the held value), never hex.set (which
++                                   // would bake bb_arr's OWN storage address as a literal instead of
++                                   // reading what's stored there -- the R11-adjacent trap that
++                                   // corrupted memory starting at bb_arr's own location, eventually
++                                   // smashing adjacent globals/code and crashing with ip<2w).
++        // basewidth=0 leaves bb_base unread -- this dummy read (overwritten right below)
++        // keeps the extern used so warning-as-error doesn't trip. rep(0,..) when basewidth=1.
++        rep(1-basewidth, k) hex.mov 2, lvl, bb_base
++        hex.zero 3, lvl
++        hex.mov 2, lvl, bb_light
++        hex.shr_hex 3, 1, lvl                       // lvl = light >> 4 (LIGHTSEGSHIFT)
++        hex.if0 8, bb_ph, phzero
++        ;seed
++
++      phzero:                                        // ph==0 -> ONE band covering the whole window, zidx=0
++        hex.zero 3, zidx
++        hex.mul_const 3, zlidx, lvl, 128
++        hex.read_table 2, zrow, zlight, 3, zlidx
++        hex.write_byte_and_inc ptr, bb_count
++        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
++        hex.write_byte_and_inc ptr, zrow
++        hex.inc 2, bb_n
++        ;done
++
++      seed:                                          // exact zidx at row y0 (mirrors plane.draw_pixel)
++        // the yslope walk: ONE incrementing packed-byte pointer over yslope_packed (3 bytes/row,
++        // little-endian, 6 nibbles -- max real yslope is 0xA00000). MEASURED: the old per-row
++        // `hex.read_table 8` re-derived the full pointer every row at ~10k of the ~12.6k ops/row;
++        // 3x read_byte_and_inc through a running pointer is ~4-7x cheaper (R14's array-walk lesson).
++        hex.set w/4, ysptr, yslope_packed
++        hex.zero w/4, y0w
++        hex.mov 2, y0w, bb_y0
++        hex.mul_const w/4, yadv, y0w, 3*dw
++        hex.add w/4, ysptr, yadv                        // ysptr -> yslope_packed[y0]
++        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys[0:6] = yslope[y0]; ptr -> y0+1
++        hex.fixed_mul_lo 8, 4, dist, bb_ph, ys             // ys[6:8] stay zero-init (R11-safe wide read)
++        hex.shr_hex 8, 5, dist
++        hex.set 3, c127, 127
++        hex.zero 3, zidx
++        hex.mov 3, zidx, dist
++        hex.cmp 3, zidx, c127, seedok, seedok, seedclamp   // zidx>127 -> clamp
++      seedclamp:
++        hex.mov 3, zidx, c127
++      seedok:
++        hex.mov 8, bb_recip_ph, bb_ph
++        stl.fcall recip32_leaf, plane_recip_ret
++        hex.zero 8, step
++        hex.mov 8, step, bb_recip_out
++        hex.shl_hex 8, 1, step                          // step = recip << 1 nibble ( *16 )
++        hex.zero 8, zidx8
++        hex.mov 3, zidx8, zidx
++        hex.mul 8, threshold_lo, step, zidx8            // threshold_lo = step*zidx
++        hex.mov 8, threshold_hi, threshold_lo           // threshold_hi = step*(zidx+1) = lo + step
++        hex.add 8, threshold_hi, step                   //   (one hex.mul saved per call)
++        // the per-row compares run at 6 NIBBLES against CLAMPED copies of the thresholds: ys is at
++        // most 0xA00000 < 0xFFFFFF, so min(threshold, 0xFFFFFF) preserves EVERY comparison outcome
++        // (a true threshold above 2^24 compares the same as 0xFFFFFF against any real ys), and the
++        // clamped copies only need refreshing when a bump changes the threshold -- rare, vs the
++        // per-row compare. Byte-identical to comparing the full-width thresholds.
++        hex.set 8, cFFF6, 0xFFFFFF
++        hex.cmp 8, threshold_hi, cFFF6, chi_ok, chi_ok, chi_gt
++      chi_gt:
++        hex.set 6, thi6, 0xFFFFFF
++        ;chi_done
++      chi_ok:
++        hex.mov 6, thi6, threshold_hi
++      chi_done:
++        hex.cmp 8, threshold_lo, cFFF6, clo_ok, clo_ok, clo_gt
++      clo_gt:
++        hex.set 6, tlo6, 0xFFFFFF
++        ;clo_done
++      clo_ok:
++        hex.mov 6, tlo6, threshold_lo
++      clo_done:
++        hex.mul_const 3, zlbase, lvl, 128               // zlbase = lvl*128 -- CALL-invariant, hoisted
++        hex.mov 3, zlidx, zlbase                        //   out of the per-row classify (R12)
++        hex.add 3, zlidx, zidx
++        hex.read_table 2, cur_zrow, zlight, 3, zlidx    // seed cur_zrow = zlight[lvl*128+zidx]
++        // row y0 is classified AT the seed (runlen=1) and the loop starts at the SECOND row --
++        // mirroring the host `_zidx_band_walk` exactly (out=[seed]; walk only rows[1:]). Walking row
++        // y0 too (the old shape) also risked a spurious first-row bump whenever the approximate
++        // threshold undercuts the exact seed's own yslope.
++        hex.set 2, runlen, 1
++        hex.set 2, i, 1
++
++      bloop:
++        hex.cmp 2, i, bb_count, bbody, flush_final, flush_final
++      bbody:
++        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr   // ys = yslope[y]; ptr -> next row
++        // M13-lines4b: the moved-flag is THREADED away -- the FIRST threshold test's no-move
++        // outcome jumps straight to samezidx (most rows), and `classify` is reached only after
++        // >=1 bump, so the per-row zero/set/if0 flag traffic is gone. Same rows, same output.
++        hex.if0 2, bb_ascending, descloop0
++        hex.cmp 3, zidx, c127, ascmaybe0, samezidx, samezidx
++      ascmaybe0:
++        hex.cmp 6, ys, thi6, samezidx, ascbump, ascbump
++      ascloop:
++        hex.cmp 3, zidx, c127, ascmaybe, classify, classify
++      ascmaybe:
++        hex.cmp 6, ys, thi6, classify, ascbump, ascbump
++      ascbump:
++        hex.inc 3, zidx
++        hex.add 8, threshold_hi, step
++        hex.cmp 8, threshold_hi, cFFF6, bhi_ok, bhi_ok, bhi_gt   // refresh the clamped compare copy
++      bhi_gt:
++        hex.set 6, thi6, 0xFFFFFF
++        ;ascloop
++      bhi_ok:
++        hex.mov 6, thi6, threshold_hi
++        ;ascloop
++      descloop0:
++        hex.if0 3, zidx, samezidx
++        hex.cmp 6, ys, tlo6, descbump, samezidx, samezidx
++      descloop:
++        hex.if0 3, zidx, classify
++      descmaybe:
++        hex.cmp 6, ys, tlo6, descbump, classify, classify
++      descbump:
++        hex.dec 3, zidx
++        hex.sub 8, threshold_lo, step
++        hex.cmp 8, threshold_lo, cFFF6, blo_ok, blo_ok, blo_gt   // refresh the clamped compare copy
++      blo_gt:
++        hex.set 6, tlo6, 0xFFFFFF
++        ;descloop
++      blo_ok:
++        hex.mov 6, tlo6, threshold_lo
++        ;descloop
++      classify:
++        // reached only when zidx MOVED this row. GROUP BY ZROW, not zidx: distinct zidx buckets can
++        // share the same darkest/lightest colormap row (zlight clamps) -- comparing raw zidx here
++        // under-merges bands.
++        hex.mov 3, zlidx, zlbase
++        hex.add 3, zlidx, zidx
++        hex.read_table 2, zrow, zlight, 3, zlidx
++        hex.cmp 2, zrow, cur_zrow, diffzidx, samezidx, diffzidx
++      samezidx:
++        hex.inc 2, runlen
++        ;cont2
++      diffzidx:
++        ;writeentry
++      cont2:
++        hex.inc 2, i
++        ;bloop
++
++      writeentry:
++        hex.write_byte_and_inc ptr, runlen
++        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
++        hex.write_byte_and_inc ptr, cur_zrow
++        hex.inc 2, bb_n
++        hex.mov 2, cur_zrow, zrow
++        hex.set 2, runlen, 1
++        ;cont2
++
++      flush_final:
++        hex.write_byte_and_inc ptr, runlen
++        rep(basewidth, k) hex.write_byte_and_inc ptr, bb_base
++        hex.write_byte_and_inc ptr, cur_zrow
++        hex.inc 2, bb_n
++        ;done
++
++      empty:
++        ;done
++
++      done:
++        stl.fret plane_band_ret
++
++      i: hex.vec 2
++      ys: hex.vec 8
++      ysptr: hex.vec w/4
++      y0w: hex.vec w/4
++      yadv: hex.vec w/4
++      zidx: hex.vec 3
++      step: hex.vec 8
++      threshold_hi: hex.vec 8
++      threshold_lo: hex.vec 8
++      thi6: hex.vec 6
++      tlo6: hex.vec 6
++      cFFF6: hex.vec 8
++      zidx8: hex.vec 8
++      lvl: hex.vec 3
++      zlbase: hex.vec 3
++      zlidx: hex.vec 3
++      zrow: hex.vec 2
++      cur_zrow: hex.vec 2
++      runlen: hex.vec 2
++      ptr: hex.vec w/4
++      c127: hex.vec 3
++      dist: hex.vec 8
++    }
++
++    // M13-lines4 -- build_bands_bs: the BINARY-SEARCH band builder (lines mode only; 2-byte
++    // entries [runlen][zrow]). Identical output to `build_bands 0` -- PROVEN over 1,036 windows
++    // (118 real E1M1-spawn (ph,light) pairs + 400 fuzz, both halves, zero mismatches) -- but
++    // instead of marching all `count` rows it finds each ZROW boundary directly: the only zidx
++    // values where the colormap row changes are baked per light level in `zl_nextcut`/`zl_prevcut`
++    // (lut_generator.generate_zlight_cuts_fj), and each cut's screen row is the first crossing of
++    // a monotone yslope half-window -- a ~6-probe binary search. Typical list: ~3-8 boundaries
++    // instead of ~50 marched rows.
++    //   asc  (ceiling half, ys non-decreasing): boundary(k) = first row with ys >= step*k
++    //   desc (floor half,   ys non-increasing): boundary(k) = first row with ys <  step*(k+1)
++    // After each boundary the zidx re-marches from the boundary row's ys (the walk's own bump
++    // loop, run only at boundaries). Seed/step/clamp arithmetic is copied from build_bands
++    // verbatim, so the fixed_mul seed and recip32 step stay bit-identical.
++    // @requires hex.init & stl.ptr_init
++    def build_bands_bs \
++            @ ptr, ysbase, ysptr, probe, y0w, yadv, ycur, cutz, cutT, cutT6, zidx, zrow_cur, zrow, \
++              step, lvl, zlbase, zlidx, loi, hii, mid, thr, dist, ys, runw, cFF2, c127, cFFF6, \
++              empty, phzero, seed, seedclamp, seedok, gloop, gdesc, gcut, nocut, tok0, tdesc, tmul, \
++              tclamp, tok, bsprep, bsloop, bsbody, pdesc, phi, plo, bsdone, past, wrt, \
++              rasc, rdesc, rabody, rachk, rat1, rat2, rat3, rabump, rastop, \
++              rdbody, rdt1, rdt2, rdt3, rdbump, rdstop, rdone, done \
++            < bb_ph, bb_light, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, \
++              bb_recip_ph, bb_recip_out, yslope_packed, zlight, zl_nextcut, zl_prevcut, \
++              recip32_leaf, plane_recip_ret, plane_band_ret {
++        hex.zero 2, bb_n
++        hex.if0 2, bb_count, empty
++        hex.mov w/4, ptr, bb_arr
++        hex.zero 3, lvl
++        hex.mov 2, lvl, bb_light
++        hex.shr_hex 3, 1, lvl                       // lvl = light >> 4
++        hex.mul_const 3, zlbase, lvl, 128
++        hex.if0 8, bb_ph, phzero
++        ;seed
++
++      phzero:                                        // ph==0 -> ONE band, zidx=0
++        hex.mov 3, zlidx, zlbase
++        hex.read_table 2, zrow, zlight, 3, zlidx
++        hex.write_byte_and_inc ptr, bb_count
++        hex.write_byte_and_inc ptr, zrow
++        hex.inc 2, bb_n
++        ;done
++
++      seed:                                          // exact zidx at y0 (bit-identical to build_bands)
++        hex.set w/4, ysbase, yslope_packed
++        hex.zero w/4, y0w
++        hex.mov 2, y0w, bb_y0
++        hex.mul_const w/4, yadv, y0w, 3*dw
++        hex.add w/4, ysbase, yadv                    // ysbase -> yslope_packed[y0] (window row 0)
++        hex.zero 8, ys
++        hex.mov w/4, ysptr, ysbase
++        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr
++        hex.fixed_mul_lo 8, 4, dist, bb_ph, ys
++        hex.shr_hex 8, 5, dist
++        hex.set 3, c127, 127
++        hex.zero 3, zidx
++        hex.mov 3, zidx, dist
++        hex.cmp 3, zidx, c127, seedok, seedok, seedclamp
++      seedclamp:
++        hex.mov 3, zidx, c127
++      seedok:
++        hex.mov 8, bb_recip_ph, bb_ph
++        stl.fcall recip32_leaf, plane_recip_ret
++        hex.zero 8, step
++        hex.mov 8, step, bb_recip_out
++        hex.shl_hex 8, 1, step                       // step = recip << 4
++        hex.mov 3, zlidx, zlbase
++        hex.add 3, zlidx, zidx
++        hex.read_table 2, zrow_cur, zlight, 3, zlidx
++        hex.set 8, cFFF6, 0xFFFFFF
++        hex.set 2, cFF2, 0xFF
++        hex.zero 2, ycur                             // relative row where the current run starts
++
++      gloop:                                         // == one zrow GROUP per iteration
++        hex.zero 3, cutz
++        hex.mov 3, zlidx, zlbase
++        hex.add 3, zlidx, zidx
++        hex.if0 2, bb_ascending, gdesc
++        hex.read_table_byte cutz, zl_nextcut, 3, zlidx
++        ;gcut
++      gdesc:
++        hex.read_table_byte cutz, zl_prevcut, 3, zlidx
++      gcut:
++        hex.cmp 2, cutz, cFF2, tok0, nocut, nocut
++      nocut:                                         // zrow never changes again -> one final run
++        hex.mov 2, runw, bb_count
++        hex.sub 2, runw, ycur
++        hex.write_byte_and_inc ptr, runw
++        hex.write_byte_and_inc ptr, zrow_cur
++        hex.inc 2, bb_n
++        ;done
++      tok0:
++        hex.if0 2, bb_ascending, tdesc               // T: asc = step*cut ; desc = step*(cut+1)
++        ;tmul
++      tdesc:
++        hex.inc 3, cutz
++      tmul:
++        hex.zero 8, cutT
++        hex.mov 3, cutT, cutz
++        hex.mul_lo 8, cutT6, step, cutT              // (cut is <=3 nonzero nibbles: cheap rows)
++        hex.mov 8, cutT, cutT6
++        hex.cmp 8, cutT, cFFF6, tok, tok, tclamp     // 6-nibble clamped compare copy (as the walk)
++      tclamp:
++        hex.set 6, thr, 0xFFFFFF
++        ;bsprep
++      tok:
++        hex.mov 6, thr, cutT
++      bsprep:                                        // binary search over rows (ycur, count)
++        hex.mov 2, loi, ycur
++        hex.inc 2, loi
++        hex.mov 2, hii, bb_count
++      bsloop:
++        hex.cmp 2, loi, hii, bsbody, bsdone, bsdone
++      bsbody:
++        hex.mov 2, mid, loi                          // mid = (loi+hii)>>1
++        hex.add 2, mid, hii
++        hex.shr_bit 2, mid
++        hex.zero w/4, probe                          // probe -> yslope row (window-relative mid)
++        hex.mov 2, probe, mid
++        hex.mul_const w/4, probe, probe, 3*dw
++        hex.add w/4, probe, ysbase
++        hex.zero 8, ys
++        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, probe
++        hex.if0 2, bb_ascending, pdesc
++        hex.cmp 6, ys, thr, plo, phi, phi            // asc: ys >= T -> boundary at/left of mid
++      pdesc:
++        hex.cmp 6, ys, thr, phi, plo, plo            // desc: ys < T -> boundary at/left of mid
++      phi:
++        hex.mov 2, hii, mid
++        ;bsloop
++      plo:
++        hex.mov 2, loi, mid
++        hex.inc 2, loi
++        ;bsloop
++      bsdone:                                        // loi = the boundary row b
++        hex.cmp 2, loi, bb_count, wrt, past, past
++      past:                                          // b >= count: the run reaches the window end
++        hex.mov 2, runw, bb_count
++        hex.sub 2, runw, ycur
++        hex.write_byte_and_inc ptr, runw
++        hex.write_byte_and_inc ptr, zrow_cur
++        hex.inc 2, bb_n
++        ;done
++      wrt:
++        hex.mov 2, runw, loi
++        hex.sub 2, runw, ycur
++        hex.write_byte_and_inc ptr, runw
++        hex.write_byte_and_inc ptr, zrow_cur
++        hex.inc 2, bb_n
++        hex.mov 2, ycur, loi
++        hex.zero w/4, probe                          // re-read ys at the boundary row
++        hex.mov 2, probe, loi
++        hex.mul_const w/4, probe, probe, 3*dw
++        hex.add w/4, probe, ysbase
++        hex.zero 8, ys
++        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, probe
++        hex.if0 2, bb_ascending, rdesc
++      rasc:                                          // re-march: while zidx<127 && ys >= step*(zidx+1)
++        hex.zero 8, cutT
++        hex.mov 3, cutT, zidx
++        hex.inc 3, cutT
++        hex.mul_lo 8, cutT6, step, cutT
++        hex.mov 8, cutT, cutT6
++      rabody:
++        hex.cmp 3, zidx, c127, rachk, rastop, rastop
++      rachk:
++        hex.cmp 8, cutT, cFFF6, rat1, rat1, rat2
++      rat2:
++        hex.set 6, thr, 0xFFFFFF
++        ;rat3
++      rat1:
++        hex.mov 6, thr, cutT
++      rat3:
++        hex.cmp 6, ys, thr, rastop, rabump, rabump
++      rabump:
++        hex.inc 3, zidx
++        hex.add 8, cutT, step
++        ;rabody
++      rastop:
++        ;rdone
++      rdesc:                                         // re-march: while zidx>0 && ys < step*zidx
++        hex.zero 8, cutT
++        hex.mov 3, cutT, zidx
++        hex.mul_lo 8, cutT6, step, cutT
++        hex.mov 8, cutT, cutT6
++      rdbody:
++        hex.if0 3, zidx, rdstop
++        hex.cmp 8, cutT, cFFF6, rdt1, rdt1, rdt2
++      rdt2:
++        hex.set 6, thr, 0xFFFFFF
++        ;rdt3
++      rdt1:
++        hex.mov 6, thr, cutT
++      rdt3:
++        hex.cmp 6, ys, thr, rdbump, rdstop, rdstop
++      rdbump:
++        hex.dec 3, zidx
++        hex.sub 8, cutT, step
++        ;rdbody
++      rdstop:
++        ;rdone
++      rdone:
++        hex.mov 3, zlidx, zlbase
++        hex.add 3, zlidx, zidx
++        hex.read_table 2, zrow_cur, zlight, 3, zlidx
++        ;gloop
++
++      empty:
++        ;done
++      done:
++        stl.fret plane_band_ret
++
++      ptr: hex.vec w/4
++      ysbase: hex.vec w/4
++      ysptr: hex.vec w/4
++      probe: hex.vec w/4
++      y0w: hex.vec w/4
++      yadv: hex.vec w/4
++      ycur: hex.vec 2
++      cutz: hex.vec 3
++      cutT: hex.vec 8
++      cutT6: hex.vec 8
++      zidx: hex.vec 3
++      zrow_cur: hex.vec 2
++      zrow: hex.vec 2
++      step: hex.vec 8
++      lvl: hex.vec 3
++      zlbase: hex.vec 3
++      zlidx: hex.vec 3
++      loi: hex.vec 2
++      hii: hex.vec 2
++      mid: hex.vec 2
++      thr: hex.vec 6
++      dist: hex.vec 8
++      ys: hex.vec 8
++      runw: hex.vec 2
++      cFF2: hex.vec 2
++      c127: hex.vec 3
++      cFFF6: hex.vec 8
++    }
++}
+diff --git a/src/fj/plane_render.fj b/src/fj/plane_render.fj
+index 7d84e45..ce6686e 100644
+--- a/src/fj/plane_render.fj
++++ b/src/fj/plane_render.fj
+@@ -23,7 +23,7 @@ ns plane {
+             @ ys, dist, zidx, lvl, zlidx, zrow, cmidx, c127, ok, clamp \
+             < planeheight, light, pbase, y, lit, yslope, zlight, plane_ret {
+         hex.read_table 8, ys, yslope, 2, y           // ys = yslope[y]   (y in [0, VIEW_H) -> 2-nibble index)
+-        hex.fixed_mul 8, 4, dist, planeheight, ys    // dist = FixedMul(planeheight, ys) (16.16, wraps mod 2^32)
++        hex.fixed_mul_lo 8, 4, dist, planeheight, ys    // dist = FixedMul(planeheight, ys) (16.16, wraps mod 2^32)
+         hex.shr_hex 8, 5, dist                       // dist >>= 20 (LIGHTZSHIFT): the distance bucket
+         hex.mov 3, zidx, dist                        // zidx = bucket (the low 3 nibbles; the high nibbles are 0)
+         hex.set 3, c127, 127                         // MAXLIGHTZ-1
+@@ -109,29 +109,37 @@ ns plane {
+     // xtoviewangle (8nib read_tables), zlight (2nib), finesine (read_sin/read_cos), the colormap ns `cm`, and
+     // the flat ns. VIEW_W is from fj_consts. Returns via stl.fret BEFORE the @-local data (lesson #2).
+     // @requires hex.init & stl.ptr_init.
++    // M13opt1 — per-pixel [exact] optimizations (perf phase): the per-pixel loop now does NO multiply, NO
++    // framebuffer-address rebuild, and narrower ops. Span-constant values (the zlight colormap row, the flat
++    // slice high nibbles, the fb cell pointer) are computed ONCE in setup; the per-pixel body is: direct-offset
++    // u/v extract (read nibbles 4-5 of xfrac/yfrac — no 8-nib shift), spot, flat.sample, cm.apply (only the pal
++    // low byte updated), a SEQUENTIAL fb write via a running pointer (write_hex_and_inc), and the 6-nibble DDA
++    // step (only bits 0-23 matter for (>>16)&63, so mod 2^24 == mod 2^32 for those bits). Byte-exact vs the
++    // oracle _draw_span. flat slices are 4096-aligned (every flat is exactly 4096 texels) so fidx low 3 = spot
++    // is OR-disjoint with the preset flatbase high nibbles.
+     def draw_span fbase, view_w \
+             @ ys, dist, xstep, ystep, dscale, length, xta, ang, idx, fc, fs, prod, xfrac, yfrac, \
+               zidx, lvl, zlidx, zrow, c127, tt, c3f, u, vv, spot, fidx, pal, cmidx, lit, \
+-              xx, yp, pixp, off, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
++              count, pixp, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
+             < planeheight, light, basexscale, baseyscale, viewx, viewy, viewangle, y, x1, x2, flatbase, \
+               yslope, distscale, xtoviewangle, zlight, span_ret {
+         hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
+-        hex.fixed_mul 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
+-        hex.fixed_mul 8, 4, xstep, dist, basexscale      // xstep = FixedMul(distance, basexscale)
+-        hex.fixed_mul 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
++        hex.fixed_mul_lo 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
++        hex.fixed_mul_lo 8, 4, xstep, dist, basexscale      // xstep = FixedMul(distance, basexscale)
++        hex.fixed_mul_lo 8, 4, ystep, dist, baseyscale      // ystep = FixedMul(distance, baseyscale)
+         hex.read_table 8, dscale, distscale, 2, x1
+-        hex.fixed_mul 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
+-        hex.read_table 8, xta, xtoviewangle, 2, x1
++        hex.fixed_mul_lo 8, 4, length, dist, dscale         // length = FixedMul(distance, distscale[x1])
++        hex.read_table_packed 4, xta, xtoviewangle, 2, x1
+         hex.mov 8, ang, viewangle
+         hex.add 8, ang, xta                              // viewangle + xtoviewangle[x1] (mod 2^32)
+         hex.shr_hex 8, 5, ang                            // >> 20 (angle_shift): the fine index
+         hex.mov 3, idx, ang                              // idx = (.. >> 20) & 0xFFF (3 nibbles)
+         finesine.read_cos fc, idx
+-        hex.fixed_mul 8, 4, prod, fc, length
++        hex.fixed_mul_lo 8, 4, prod, fc, length
+         hex.mov 8, xfrac, viewx
+-        hex.add 8, xfrac, prod                           // xfrac = viewx + FixedMul(finecos[idx], length)
++        hex.add 8, xfrac, prod                           // xfrac = viewx + FixedMul(finecos[idx], length)  (seed @8)
+         finesine.read_sin fs, idx
+-        hex.fixed_mul 8, 4, prod, fs, length
++        hex.fixed_mul_lo 8, 4, prod, fs, length
+         hex.mov 8, yfrac, viewy
+         hex.add 8, yfrac, prod
+         hex.neg 8, yfrac                                 // yfrac = -(viewy + FixedMul(finesin[idx], length))
+@@ -147,42 +155,42 @@ ns plane {
+         hex.shr_hex 2, 1, lvl                            // lvl = light >> 4 (LIGHTSEGSHIFT)
+         hex.mul_const 3, zlidx, lvl, 128
+         hex.add 3, zlidx, zidx
+-        hex.read_table 2, zrow, zlight, 3, zlidx         // row = zlight[lvl*128 + zidx]
++        hex.read_table 2, zrow, zlight, 3, zlidx         // row = zlight[lvl*128 + zidx]  (SPAN-constant)
++        // --- per-span PRESETS for the per-pixel loop (computed once) ---
+         hex.set 2, c3f, 0x3f
+-        hex.mov 8, xx, x1
++        hex.zero 4, cmidx
++        hex.mov 2, cmidx + 2*dw, zrow                    // cmidx high byte = the zlight row (constant per span)
++        hex.mov 5, fidx, flatbase                        // fidx high = flatbase (4096-aligned -> low 3 hold spot)
++        hex.zero 8, pixp
++        hex.mov 2, pixp, y
++        hex.mul_const 8, pixp, pixp, view_w              // pixp = y*VIEW_W  (the only y*W multiply, ONCE per span)
++        hex.zero 8, tt                                   // CLEAR tt (it still holds dist>>20 from the zlight calc)
++        hex.mov 2, tt, x1
++        hex.add 8, pixp, tt                              // + x1  -> the pixel index of (y, x1)
++        hex.shl_bit 8, pixp                              // *2  -> the hex.vec2 cell digit offset
++        hex.set w/4, fbptr, fbase
++        hex.ptr_index cell, fbptr, pixp                  // cell -> &fb[y*VIEW_W + x1]  (the running write pointer)
++        hex.mov 2, count, x2
++        hex.sub 2, count, x1
++        hex.inc 2, count                                 // count = x2 - x1 + 1  (span width, <= VIEW_W)
+       sloop:
+-        hex.scmp 8, xx, x2, sbody, sbody, sdone          // for x in [x1, x2]  (inclusive)
++        hex.if0 2, count, sdone                          // count==0 -> done
+       sbody:
+-        hex.mov 8, tt, xfrac
+-        hex.shr_hex 8, 4, tt                             // xfrac >> 16
+-        hex.mov 2, u, tt
++        hex.mov 2, u, xfrac + 4*dw                       // nibbles 4-5 = bits 16-23 of xfrac (no shift)
+         hex.and 2, u, c3f                                // u = (xfrac>>16) & 63
+-        hex.mov 8, tt, yfrac
+-        hex.shr_hex 8, 4, tt                             // yfrac >> 16
+-        hex.mov 2, vv, tt
++        hex.mov 2, vv, yfrac + 4*dw                      // nibbles 4-5 = bits 16-23 of yfrac
+         hex.and 2, vv, c3f                               // v = (yfrac>>16) & 63
+-        hex.mul_const 3, spot, vv, 64
+-        hex.add 3, spot, u                               // spot = v*64 + u  (flats are 64x64; high nibbles stay 0)
+-        hex.mov 5, fidx, flatbase                        // flatbase is a 5-nibble slice offset (combined flat table
+-        hex.add 5, fidx, spot                            //   up to ~151k texels for E1M1 -> idx_n=5; R11 width)
++        hex.mul_const 3, spot, vv, 64                    // (single-bit const -> one shift)
++        hex.add 3, spot, u                               // spot = v*64 + u
++        hex.mov 3, fidx, spot                            // fidx low 3 = spot (high 2 = flatbase>>12, preset)
+         flat.sample pal, fidx                            // pal = flat[flatbase + spot]
+-        hex.zero 4, cmidx
+-        hex.mov 2, cmidx, pal
+-        hex.mov 2, cmidx + 2*dw, zrow                    // cmidx = (row<<8) | pal
++        hex.mov 2, cmidx, pal                            // cmidx low byte = pal (high byte = zrow, preset)
+         cm.apply lit, cmidx                              // lit = colormap[row][pal]
+-        hex.zero 8, yp
+-        hex.mov 2, yp, y
+-        hex.mul_const 8, pixp, yp, view_w               // pixp = y * VIEW_W
+-        hex.add 8, pixp, xx                              // + x  -> the pixel index
+-        hex.zero w/4, off
+-        hex.mov 8, off, pixp
+-        hex.shl_bit w/4, off                             // off = 2*pixp (the hex.vec2 cell digit offset)
+-        hex.set w/4, fbptr, fbase
+-        hex.ptr_index cell, fbptr, off
+-        hex.write_hex 2, cell, lit                       // fb[y*VIEW_W + x] = lit
+-        hex.add 8, xfrac, xstep
+-        hex.add 8, yfrac, ystep                          // step the u,v DDA
+-        hex.inc 8, xx
++        hex.write_hex_and_inc cell, lit                  // *cell = lit low nibble, cell++
++        hex.write_hex_and_inc cell, lit + 1*dw           // *cell = lit high nibble, cell++  -> next pixel
++        hex.add 6, xfrac, xstep                          // step the DDA (low 6 nibbles; bits 16-21 stay exact)
++        hex.add 6, yfrac, ystep
++        hex.dec 2, count
+         ;sloop
+       sdone:
+         stl.fret span_ret
+@@ -199,7 +207,7 @@ ns plane {
+       fc: hex.vec 8
+       fs: hex.vec 8
+       prod: hex.vec 8
+-      xfrac: hex.vec 8
++      xfrac: hex.vec 8                                  // seed @8; per-pixel add @6 (only bits 0-23 feed the mask)
+       yfrac: hex.vec 8
+       zidx: hex.vec 3
+       lvl: hex.vec 3                                    // read at 3 nibbles by mul_const (high nibble kept 0)
+@@ -208,17 +216,84 @@ ns plane {
+       c127: hex.vec 3
+       tt: hex.vec 8
+       c3f: hex.vec 2
+-      u: hex.vec 3                                      // read at 3 nibbles by add 3 (high nibble kept 0)
+-      vv: hex.vec 3                                     // read at 3 nibbles by mul_const 3 (high nibble kept 0)
+-      spot: hex.vec 5                                   // 5-nib: v*64+u in low 3, high 2 stay 0 (added into fidx)
++      u: hex.vec 3                                      // read at 3 by add 3 (mov 2 writes low 2; nibble 2 = 0)
++      vv: hex.vec 3                                     // read at 3 by mul_const 3 (nibble 2 = 0)
++      spot: hex.vec 3                                   // v*64+u <= 4095 (3 nibbles)
+       fidx: hex.vec 5
+       pal: hex.vec 2
+       cmidx: hex.vec 4
+       lit: hex.vec 2
+-      xx: hex.vec 8
+-      yp: hex.vec 8
++      count: hex.vec 2
++      pixp: hex.vec 8
++      fbptr: hex.vec w/4
++      cell: hex.vec w/4
++    }
++
++    // M13p1 — the FLAT-COLORED span (the M13a tier, spans instead of the retired M13c3 per-column
++    // tramp). One span [x1,x2] at row y: lit = colormap[zlight-row][flat BASE index], written to every
++    // pixel via the running fb pointer. `flatbase` holds the 2-nibble BASE palette index (not a slice
++    // offset). Byte-exact vs the oracle _render_planes_flat/_plane_pixel: distance/zidx/lvl/zrow are
++    // the exact draw_pixel formulas; lit is span-constant because (planeheight, light, base, y) are.
++    // Deletes the whole u,v DDA + flat.sample: no per-span finesine/distscale/xtoviewangle reads, no
++    // per-pixel coord extract/sample/cm.apply (only ONE cm.apply, in setup). Returns via stl.fret
++    // BEFORE the @-local data (lesson #2). @requires hex.init & stl.ptr_init.
++    def draw_span_flat fbase, view_w \
++            @ ys, dist, zidx, lvl, zlidx, zrow, c127, tt, cmidx, lit, \
++              count, pixp, fbptr, cell, sloop, sbody, sdone, zclamp, zok \
++            < planeheight, light, y, x1, x2, flatbase, yslope, zlight, span_ret {
++        hex.read_table 8, ys, yslope, 2, y               // ys = yslope[y]
++        hex.fixed_mul_lo 8, 4, dist, planeheight, ys        // distance = FixedMul(planeheight, yslope[y])
++        hex.mov 8, tt, dist
++        hex.shr_hex 8, 5, tt                             // distance >> 20 (LIGHTZSHIFT)
++        hex.mov 3, zidx, tt
++        hex.set 3, c127, 127
++        hex.cmp 3, zidx, c127, zok, zok, zclamp          // zidx = min(127, distance>>20)
++      zclamp:
++        hex.mov 3, zidx, c127
++      zok:
++        hex.mov 2, lvl, light
++        hex.shr_hex 2, 1, lvl                            // lvl = light >> 4 (LIGHTSEGSHIFT)
++        hex.mul_const 3, zlidx, lvl, 128
++        hex.add 3, zlidx, zidx
++        hex.read_table 2, zrow, zlight, 3, zlidx         // zrow = zlight[lvl*128 + zidx]
++        hex.zero 4, cmidx
++        hex.mov 2, cmidx, flatbase                       // low byte = the flat BASE palette index
++        hex.mov 2, cmidx + 2*dw, zrow
++        cm.apply lit, cmidx                              // lit = colormap[zrow][base]  (SPAN-CONSTANT)
++        hex.zero 8, pixp
++        hex.mov 2, pixp, y
++        hex.mul_const 8, pixp, pixp, view_w              // pixp = y*VIEW_W (once per span)
++        hex.zero 8, tt                                   // CLEAR tt (still holds dist>>20 -- opt1 lesson)
++        hex.mov 2, tt, x1
++        hex.add 8, pixp, tt
++        hex.shl_bit 8, pixp                              // *2 -> the hex.vec2 cell digit offset
++        hex.set w/4, fbptr, fbase
++        hex.ptr_index cell, fbptr, pixp                  // cell -> &fb[y*VIEW_W + x1]
++        hex.mov 2, count, x2
++        hex.sub 2, count, x1
++        hex.inc 2, count                                 // count = x2 - x1 + 1
++      sloop:
++        hex.if0 2, count, sdone
++      sbody:
++        hex.write_hex_and_inc cell, lit                  // *cell = lit low nibble
++        hex.write_hex_and_inc cell, lit + 1*dw           // *cell = lit high nibble -> next pixel
++        hex.dec 2, count
++        ;sloop
++      sdone:
++        stl.fret span_ret
++
++      ys: hex.vec 8
++      dist: hex.vec 8
++      zidx: hex.vec 3
++      lvl: hex.vec 3
++      zlidx: hex.vec 3
++      zrow: hex.vec 2
++      c127: hex.vec 3
++      tt: hex.vec 8
++      cmidx: hex.vec 4
++      lit: hex.vec 2
++      count: hex.vec 2
+       pixp: hex.vec 8
+-      off: hex.vec w/4
+       fbptr: hex.vec w/4
+       cell: hex.vec w/4
+     }
+diff --git a/src/fj/present.fj b/src/fj/present.fj
+index 85c5358..c2e5d24 100644
+--- a/src/fj/present.fj
++++ b/src/fj/present.fj
+@@ -43,4 +43,132 @@ ns present {
+         stl.output_char 0x06
+         .emit_addr addr
+     }
++
++    // M13pS0 — the column-stream device protocol (owned by us; NOT frozen — see the plan's note on
++    // evolving it). ADDITIVE ONLY: `init_screen`/`update_screen*` above are UNCHANGED and every
++    // existing test/build_doom keeps using the stock 8-byte init_screen + the stock InMemoryScreen
++    // device. These two new macros are consumed ONLY by the new stream-composite renderer (M13pS2)
++    // against the in-repo `StreamScreen(InMemoryScreen)` subclass (tests/fj/stream_screen.py), which
++    // expects the EXTENDED 9-byte init and decodes 0x07 — the stock device never sees either.
++
++    // init_screen_stream: [0x01][W:2][H:2][BPP:1][NCOLORS:2][flush_mode:1]. `flush_mode` is a
++    // COMPILE-TIME constant (0 or 1, decided once by the Python emitter, never per-frame) — 0 = flush
++    // the device's presented frame once per FULL FRAME (after column VIEW_W-1 fills; the shipped
++    // default), 1 = flush once per COLUMN (debugging/streaming a partial frame). `stl.output_char`
++    // requires a compile-time operand, so `flush_mode` cannot be a runtime register.
++    def init_screen_stream flush_mode {
++        stl.output_char 0x01
++        stl.output_char W & 0xff
++        stl.output_char (W >> 8) & 0xff
++        stl.output_char H & 0xff
++        stl.output_char (H >> 8) & 0xff
++        stl.output_char BPP
++        stl.output_char NCOLORS & 0xff
++        stl.output_char (NCOLORS >> 8) & 0xff
++        stl.output_char flush_mode & 0xff
++    }
++
++    // begin_frame_stream: [0x07] — resets the device's write cursor to (column 0, row 0). Every byte
++    // that follows, until exactly VIEW_W*VIEW_H pixels have been placed, is consumed as the raw
++    // column-major run stream `[count:1][color:1]` (no per-run command-byte framing — the device
++    // knows the total pixel count from init_screen_stream, so the last run naturally completes the
++    // frame with no explicit end marker). `byte.emit`/`cm.emit`-style EMIT tables are what actually
++    // produce those bytes (see doomfj.lut_generator.generate_emit_dispatch_table_fj).
++    def begin_frame_stream {
++        stl.output_char 0x07
++    }
++
++    // begin_frame_planes: [0x09] (M13-planesproto) — the whole frame arrives as SHARED per-visplane
++    // band lists + one 5-byte record per column ([cexcl][fstart][lit][cvp][fvp]; fvp=0xFF =
++    // unclaimed, paints nothing); the device does the per-column prefix/suffix clipping that
++    // stream.emit_column used to pay fj ops for. Payload layout + exact column semantics:
++    // tests/fj/stream_screen.py::_decode_planes_frame (upstream with the 0x01/0x07 extension).
++    def begin_frame_planes {
++        stl.output_char 0x09
++    }
++
++    // begin_frame_spans: [0x0A] (M13-spanfill) — the DUMB-SCREEN protocol. The whole frame arrives as
++    // a flat list of explicit fillCol records [x:1][y1:1][y2:1][colour:1], terminated by a sentinel
++    // record whose x == 0xFF. The device does NOTHING but fill: for each record it sets column `x`,
++    // rows [y1, y2), to palette index `colour` — no cursor state, no band lists, no clipping, no
++    // lookups. fj does all the geometry/lighting/clipping and hands the device only straight coloured
++    // vertical strips. (A horizontal-span twin — fillRow [x1][x2][y][colour] — is the natural
++    // extension for a row-major floor pass; not emitted yet.) Decode: stream_screen.py::_decode_spans_frame.
++    def begin_frame_spans {
++        stl.output_char 0x0A
++    }
++
++    // M13-lines3 — begin_frame_collines: [0x0B]. The PACKED form of the 0x0A dumb-screen frame:
++    // the device still only prints what it's told, but the wire format drops the redundant per-
++    // record x/y1. Records, tagged by their first byte:
++    //   x < 0xF0: a COLUMN RUN-LIST -- [x], then pairs [y2:1][colour:1] filling rows [prev,y2)
++    //             top-down starting at prev=0, terminated by a single [0xFF] (y2 is <= VIEW_H=100
++    //             for real pairs, so 0xFF is unambiguous).
++    //   0xFF:     end of frame -> present.
++    // (0xFE is reserved for a rect record.) No clipping, no lookups, no decisions device-side:
++    // every row range and colour was computed in fj.
++    def begin_frame_collines {
++        stl.output_char 0x0B
++    }
++
++    // M13-raster — the DEVICE RASTERIZER. fj stays the "brain" (BSP walk, visibility/occlusion
++    // DECISIONS, per-seg projection setup); the device does pure rendering MECHANICS from compact
++    // records: a wall-column DDA (2 adds/column: scale+=scalestep, then a fixed_mul+shift for
++    // top/bottom), a first-writer-wins fill, and a distance-light shade (a threshold march +
++    // table lookups — the SAME arithmetic `plane.build_bands`/`_zidx_band_walk` already do, just
++    // executed device-side instead of costing fj ops). No game state, no visibility decisions: the
++    // walk's front-to-back EMIT ORDER is what encodes occlusion; the device only refuses to
++    // overwrite an already-painted column.
++
++    // load_raster_tables: [0x0C][yslope_addr:w/8][zlight_addr:w/8][colormap_addr:w/8] — ONCE per
++    // program (not per frame, right after set_palette): hands the device the addresses of three
++    // STATIC fj-baked tables it DMA-reads directly (zero fj ops, exactly like set_palette/
++    // update_screen's existing address-handoff DMA). yslope_addr: packed-byte, 3 bytes/row,
++    // VIEW_H rows (the SAME table `plane.build_bands` used, see generate_yslope_packed_lut_fj).
++    // zlight_addr: packed-byte, 2 bytes/entry (wait: nibble-vec 2, 1 byte via read_table), the
++    // LIGHTLEVELS*MAXLIGHTZ flattened distance-light grid (generate_zlight_lut_fj). colormap_addr:
++    // packed-byte, COLORMAP_LIGHTS*256 raw palette-index bytes, ROW-MAJOR [light_row][texel]
++    // (generate_colormap_table_fj — NEW, a raw addressable twin of the flattened cm.emit dispatch).
++    def load_raster_tables yslope_addr, zlight_addr, colormap_addr {
++        stl.output_char 0x0C
++        .emit_addr yslope_addr
++        .emit_addr zlight_addr
++        .emit_addr colormap_addr
++    }
++
++    // begin_frame_raster: [0x0D] — starts the per-frame raster stream. What follows (interleaved,
++    // in BSP front-to-back walk order — no separate "buffer then emit" phase needed since ordering
++    // alone encodes occlusion) is: per newly-referenced visplane, ONE record
++    // [0xFE][planeheight:4][light:1][base:1] (the 0xFE tag disambiguates a visplane record from a
++    // seg record in the flat interleaved stream); per surviving seg, ONE record
++    // [x1:1][x2:1][scale1:4][scalestep:4][wt_ceil:4][wt_floor:4][lit:1][cvp_idx:1][fvp_idx:1]
++    // (21 bytes; x1 != 0xFE so the device can tell it apart from a visplane record by its first
++    // byte). The stream ends with ONE terminator byte 0xFF (never a valid x1 or tag). Decode:
++    // stream_screen.py::_decode_raster_frame.
++    def begin_frame_raster {
++        stl.output_char 0x0D
++    }
++
++    // M13-proj (Path B, lab mode): [0x0E][seg_geom addr][count:2] — hand the device the STATIC
++    // per-one-sided-seg geometry table (packed bytes, 30 B/row: v1x,v1y,v2x,v2y,segangle each 2 B,
++    // a,b,c each 4 B, ceil_h,floor_h each 2 B, light,lit,ceilbase,floorbase each 1 B) ONCE per
++    // program, DMA-read like load_raster_tables' three. With the geometry resident device-side, the
++    // per-frame seg record collapses to a 2-byte compact seg id.
++    def load_proj_tables seg_geom_addr, count {
++        stl.output_char 0x0E
++        .emit_addr seg_geom_addr
++        stl.output_char count & 0xff
++        stl.output_char (count >> 8) & 0xff
++    }
++
++    // begin_frame_proj: [0x0F] — the vertex->column PROJECTION frame (Path B). Framing after the
++    // command byte is positional (no tags): [viewx_map:2 signed][viewy_map:2 signed][viewangle:4]
++    // then [viewz:4] (emitted by the walk's player-subsector block, always before any seg id), then
++    // 2-byte little-endian compact seg ids in BSP front-to-back walk order (fj has already applied
++    // the wedge + affine back-face culls; the device does wall_x_range/scale/DDA/fill/shade from the
++    // resident geometry, first-writer-wins per column), terminated by [0xFF][0xFF] (id hi byte is
++    // never 0xFF: counts are < 0xFF00 segs). Decode: stream_screen.py::_handle_proj_byte.
++    def begin_frame_proj {
++        stl.output_char 0x0F
++    }
+ }

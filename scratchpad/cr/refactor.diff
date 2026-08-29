@@ -1,0 +1,1554 @@
+diff --git a/scratchpad/band_compare.py b/scratchpad/band_compare.py
+index 781cdf7..55259a1 100644
+--- a/scratchpad/band_compare.py
++++ b/scratchpad/band_compare.py
+@@ -6,6 +6,7 @@ from pathlib import Path
+ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ from PIL import Image
+ import doomfj.reference_model as RM
++from doomfj.config import Config
+ from doomfj.reference_model import ReferenceModel, build_scene, spawn_state, frame_hash
+ from doomfj.wad import WadFile
+ 
+@@ -13,7 +14,8 @@ mw = WadFile.from_path("tests/fixtures/freedoom_e1m1.wad")
+ sc = build_scene(mw, mw, "E1M1")
+ st = spawn_state(mw, "E1M1")
+ pal = [tuple(c) for c in mw.playpal()[:256]]
+-W, H = 160, 100
++cfg = Config()
++W, H = cfg.VIEW_W, cfg.VIEW_H
+ 
+ 
+ def render(bandfn):
+diff --git a/scratchpad/cr/r1_check.py b/scratchpad/cr/r1_check.py
+new file mode 100644
+index 0000000..7d5897d
+--- /dev/null
++++ b/scratchpad/cr/r1_check.py
+@@ -0,0 +1,25 @@
++"""cr r1: is generate_yslope_packed_lut_fj byte-identical to
++generate_packed_lut_fj(label, yslope_table(...), 3) for the shipped config?
++(The prerequisite check for the proposed one-line delegation.)"""
++import sys
++sys.path.insert(0, "src")
++
++from doomfj.config import Config
++from doomfj.lut_generator import generate_yslope_packed_lut_fj, generate_packed_lut_fj
++from doomfj.tables import yslope_table
++
++cfg = Config()
++a = generate_yslope_packed_lut_fj("yslope_packed", cfg.VIEW_W, cfg.VIEW_H)
++b = generate_packed_lut_fj("yslope_packed", yslope_table(cfg.VIEW_W, cfg.VIEW_H), 3)
++
++if a == b:
++    print("OK: byte-identical -- delegation is safe")
++else:
++    la, lb = a.splitlines(), b.splitlines()
++    print(f"DIFFER: {len(la)} vs {len(lb)} lines; "
++          f"trailing-newline a={a.endswith(chr(10))} b={b.endswith(chr(10))}")
++    for i, (x, y) in enumerate(zip(la, lb)):
++        if x != y:
++            print(f"  first diff at line {i}: {x!r} vs {y!r}")
++            break
++    print("=> delegation would CHANGE emitted bytes; do NOT delegate")
+diff --git a/scratchpad/cr/r2_check.py b/scratchpad/cr/r2_check.py
+new file mode 100644
+index 0000000..38cf84e
+--- /dev/null
++++ b/scratchpad/cr/r2_check.py
+@@ -0,0 +1,46 @@
++"""CR round-2 refactor check: sha256 of the emitted lines_nosteps text (baseline
++9f0f85cb214a1299...), plus a `pnearwalk`-ablate emission -- ablate forces ascode=0, which is
++the ONLY path that calls _lines_bake_bank (the item-2 refactor target); lines_nosteps takes
++the bands-as-code path and never runs it.
++
++    python scratchpad/cr/r2_check.py <tag>      # writes scratchpad/cr/r2_check_<tag>.json
++"""
++import hashlib
++import json
++import sys
++import time
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[2]
++for q in (ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.config import Config
++from doomfj.wad import WadFile
++from doomfj.wall_renderer import emit_wall_renderer
++
++tag = sys.argv[1] if len(sys.argv) > 1 else "now"
++cfg = Config()
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/e1m1_lite.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++
++CONFIGS = {
++    # the round's designated check config (expected sha256 prefix 9f0f85cb214a1299)
++    "lines_nosteps": dict(asset_wad=aw, over_align=False, floor_mode="FT1", wall_mode="WPX",
++                          raster_mode="lines", plane_near=True, deg=False),
++    # same, ablated so ascode=0 => the _lines_bake_bank DATA bank is emitted and hashed
++    "lines_databank": dict(asset_wad=aw, over_align=False, floor_mode="FT1", wall_mode="WPX",
++                           raster_mode="lines", plane_near=True, deg=False,
++                           ablate=frozenset({"pnearwalk"})),
++}
++out = {}
++for name, kw in CONFIGS.items():
++    t0 = time.time()
++    txt = emit_wall_renderer(mw, "E1M1", cfg, **kw)
++    out[name] = {"sha256": hashlib.sha256(txt.encode()).hexdigest(), "chars": len(txt),
++                 "seconds": round(time.time() - t0)}
++    print(f"{name}: {out[name]['sha256'][:16]}  ({len(txt):,} chars, {out[name]['seconds']}s)",
++          flush=True)
++
++(ROOT / "scratchpad/cr" / f"r2_check_{tag}.json").write_text(json.dumps(out, indent=1))
++print(f"wrote scratchpad/cr/r2_check_{tag}.json")
+diff --git a/scratchpad/cr/sanity1.py b/scratchpad/cr/sanity1.py
+index ad12f2b..2147efd 100644
+--- a/scratchpad/cr/sanity1.py
++++ b/scratchpad/cr/sanity1.py
+@@ -13,7 +13,6 @@ import doomfj.mapcompiler as mc
+ import doomfj.tables as tb
+ import doomfj.build as bd
+ import doomfj.fastrun as fr
+-import doomfj.coarse_cull as cc
+ import tests.fj.stream_screen as ss
+ print("imports OK")
+ 
+diff --git a/scratchpad/pop_probe.py b/scratchpad/pop_probe.py
+index 82359ac..440e1c2 100644
+--- a/scratchpad/pop_probe.py
++++ b/scratchpad/pop_probe.py
+@@ -55,6 +55,7 @@ for j, (vx, vy) in enumerate(P):
+     prev = fb
+ 
+ # second row: the same path with the LIP FAR GATE OFF (deg_lip_scale huge->0 disables gating)
++_orig_lip_scale = RM.DEG_LIP_SCALE
+ RM.DEG_LIP_SCALE = 0
+ for j, (vx, vy) in enumerate(P):
+     fb = render(vx, vy)
+@@ -64,6 +65,6 @@ for j, (vx, vy) in enumerate(P):
+                                                            8 + (H * S + 10)))
+     d = sum(1 for a, b in zip(frames[j], fb) if a != b)
+     print(f"step {j} gate-off px-diff vs gated {d}")
+-RM.DEG_LIP_SCALE = 16384
++RM.DEG_LIP_SCALE = _orig_lip_scale
+ sheet.save(ROOT / "scratchpad" / "pop_probe.png")
+ print("ok")
+diff --git a/scratchpad/rung3a_split.py b/scratchpad/rung3a_split.py
+index 67c2e8f..06e008c 100644
+--- a/scratchpad/rung3a_split.py
++++ b/scratchpad/rung3a_split.py
+@@ -17,9 +17,9 @@ SRC=[ROOT/"src/fj"/f for f in ("fixed_point.fj","present.fj","projection.fj","fr
+ mw=WadFile.from_path(str(ROOT/"tests/fixtures/freedoom_e1m1.wad"))
+ sp=spawn_state(mw,"E1M1"); sx,sy=_signed(sp.x,32)>>16,_signed(sp.y,32)>>16
+ cfg=Config()
+-VPS=[(sx,sy,sp.angle),(-309,636,0),(-480,256,0)]
+-CASES=[("rung 3a (shipped)                   ", True, frozenset()),
+-       ("+ rung 3b PRICE (tsfull)            ", True, frozenset({"tsfull"}))]
++VPS=[(sx,sy,sp.angle),(-309,-44,0),(-309,636,0)]
++CASES=[("rung 3a + ATANDISP (shipped)        ", True, frozenset()),
++       ("+ rung 3b PRICE (tsfull), re-priced ", True, frozenset({"tsfull"}))]
+ for tag, pn, ab in CASES:
+     t0=time.time()
+     main=emit_wall_renderer(mw,"E1M1",cfg,asset_wad=mw,over_align=False,floor_mode="FT1",
+diff --git a/scratchpad/sector_occl.py b/scratchpad/sector_occl.py
+index e77e52f..da0a3ff 100644
+--- a/scratchpad/sector_occl.py
++++ b/scratchpad/sector_occl.py
+@@ -41,11 +41,7 @@ BAMS = [int(a / (2 * math.pi) * (1 << 32)) & ANGLE_MASK for a in DIRS]
+ def vsector(px, py):
+     """index i such that angle(v-eye) in [BAMS[i], BAMS[i+1])."""
+     ang = rm.point_to_angle(sp.x, sp.y, px << 16, py << 16)
+-    best = None
+-    for i, b in enumerate(BAMS):
+-        if ((ang - b) & ANGLE_MASK) < ((ang - BAMS[best]) & ANGLE_MASK) if best is not None else True:
+-            pass
+-    # simpler: find i with (ang - BAMS[i]) mod 2^32 minimal among those where ang >= BAMS[i] going ccw
++    # find i with (ang - BAMS[i]) mod 2^32 minimal among those where ang >= BAMS[i] going ccw
+     diffs = [((ang - b) & ANGLE_MASK) for b in BAMS]
+     return diffs.index(min(diffs))
+ 
+diff --git a/scratchpad/sprite_audit.py b/scratchpad/sprite_audit.py
+index f801d17..09af3d3 100644
+--- a/scratchpad/sprite_audit.py
++++ b/scratchpad/sprite_audit.py
+@@ -1,10 +1,11 @@
+ """Sprite-visibility AUDIT (owner guarantee: "all sprites always shown when possible").
+ 
+-For every sweep frame: ground truth = things that project on-screen with >= 1 column not yet
+-closed by a NEARER wall at record time; compare against what the renderer actually recorded.
+-Classify misses: SLOTS (both fragment slots taken by nearer sprites -- the V4b protocol limit),
+-MINSIZE (smaller than the acceptance bar -- policy), STOPPED (the monotone stop -- must be 0
+-after the full-latch fix), OTHER (bugs).
++For every sweep frame: count things that project_thing ACCEPTS (projected on-screen and past the
++min-size bar) and, via the renderer's `_thing_stats`, how many arrivals the monotone thing-stop
++skipped (`th_claim_stopped` -- must be 0 on non-full frames after the full-latch fix); print the
++worst offending frames. NOTE: it does NOT classify misses further (no SLOTS / MINSIZE / OTHER
++breakdown -- the `miss_slots`/`miss_minsize`/`miss_other` counters are placeholders, never
++incremented).
+ 
+     python scratchpad/sprite_audit.py [--limit N]
+ """
+diff --git a/scratchpad/thing_census.py b/scratchpad/thing_census.py
+index 7f9f3d7..bf72ceb 100644
+--- a/scratchpad/thing_census.py
++++ b/scratchpad/thing_census.py
+@@ -22,14 +22,19 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
+ import doomfj.reference_model as RM                                       # noqa: E402
+ from doomfj.config import Config                                          # noqa: E402
+ from doomfj.fixedpoint import _signed                                     # noqa: E402
+-from doomfj.reference_model import (THING_SPRITE, ReferenceModel, SimState,  # noqa: E402
+-                                    build_scene, spawn_state)
++from doomfj import mapsimplify as MS                                      # noqa: E402
++from doomfj.reference_model import (MONSTER_TYPES, THING_SPRITE, ReferenceModel,  # noqa: E402
++                                    SimState, build_scene, spawn_state)
+ from doomfj.wad import WadFile                                            # noqa: E402
+ 
+-MONSTERS = {9, 58, 64, 65, 66, 67, 68, 69, 71, 84, 3001, 3002, 3003, 3004, 3005, 3006, 7, 16, 88}
+-PICKUPS = {8, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2010, 2011, 2012, 2013, 2014, 2015,
+-           2018, 2019, 2022, 2023, 2024, 2025, 2026, 2045, 2046, 2047, 2048, 2049}
+-STARTS = {1, 2, 3, 4, 11, 14}
++# taxonomy derived from the canonical sources, not re-hardcoded: monsters = the renderer's own
++# MONSTER_TYPES (reference_model, exact match with the old hand list); starts/pickup families =
++# mapsimplify's thing taxonomy. NOTE: the derived PICKUPS is a strict superset of the old hand
++# list -- it adds keys (5,6,13,38,39,40), cell pack (17) and chainsaw (82), which the old list
++# wrongly left in "decor".
++MONSTERS = set(MONSTER_TYPES)
++PICKUPS = MS.WEAPONS | MS.KEYS | MS.BIG_PICKUPS | MS.BONUSES
++STARTS = set(MS.STARTS)
+ 
+ 
+ def category(t):
+diff --git a/scratchpad/twosided_proto.py b/scratchpad/twosided_proto.py
+index f651b44..477e325 100644
+--- a/scratchpad/twosided_proto.py
++++ b/scratchpad/twosided_proto.py
+@@ -129,22 +129,24 @@ def render(vx, vy, va, two_sided=True):
+     return bytes(fb), stats
+ 
+ 
+-sp = spawn_state(mw, "E1M1")
+-sx, sy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+-VPS = [(sx, sy, sp.angle), (-480, 256, 0), (-309, 636, 0)]
+-S, LBL = 3, 22
+-sheet = Image.new("RGB", (W * S * len(VPS), (H * S + LBL) * 2), (16, 16, 18))
+-d = ImageDraw.Draw(sheet)
+-for r, (lab, ts) in enumerate([("NOW: one-sided walls only (72% of surfaces skipped)", False),
+-                               ("WITH two-sided upper/lower walls + plane regions", True)]):
+-    for c, (a, b, ang) in enumerate(VPS):
+-        fbb, st = render(a, b, ang, two_sided=ts)
+-        im = Image.new("RGB", (W, H)); im.putdata([pal[p] for p in fbb])
+-        sheet.paste(im.resize((W * S, H * S), Image.NEAREST), (c * W * S, r * (H * S + LBL) + LBL))
+-        if c == 0:
+-            print(f"{lab[:42]:42s} runs: solid {st['solid']:4d} upper {st['upper']:4d} "
+-                  f"lower {st['lower']:4d} | plane regions c/f {st['cplane']:4d}/{st['fplane']:4d}",
+-                  flush=True)
+-    d.text((6, r * (H * S + LBL) + 6), lab, fill=(235, 235, 240))
+-sheet.save(ROOT / "scratchpad/twosided_proto.png")
+-print("scratchpad/twosided_proto.png written")
++if __name__ == "__main__":
++    sp = spawn_state(mw, "E1M1")
++    sx, sy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
++    VPS = [(sx, sy, sp.angle), (-480, 256, 0), (-309, 636, 0)]
++    S, LBL = 3, 22
++    sheet = Image.new("RGB", (W * S * len(VPS), (H * S + LBL) * 2), (16, 16, 18))
++    d = ImageDraw.Draw(sheet)
++    for r, (lab, ts) in enumerate([("NOW: one-sided walls only (72% of surfaces skipped)", False),
++                                   ("WITH two-sided upper/lower walls + plane regions", True)]):
++        for c, (a, b, ang) in enumerate(VPS):
++            fbb, st = render(a, b, ang, two_sided=ts)
++            im = Image.new("RGB", (W, H)); im.putdata([pal[p] for p in fbb])
++            sheet.paste(im.resize((W * S, H * S), Image.NEAREST), (c * W * S, r * (H * S + LBL) + LBL))
++            if c == 0:
++                print(f"{lab[:42]:42s} runs: solid {st['solid']:4d} upper {st['upper']:4d} "
++                      f"lower {st['lower']:4d} | plane regions c/f {st['cplane']:4d}/{st['fplane']:4d}",
++                      flush=True)
++        d.text((6, r * (H * S + LBL) + 6), lab, fill=(235, 235, 240))
++    sheet.save(ROOT / "scratchpad/twosided_proto.png")
++    print("scratchpad/twosided_proto.png written")
++
+diff --git a/scratchpad/v4_col.py b/scratchpad/v4_col.py
+index 8f2f5ad..c5c58d6 100644
+--- a/scratchpad/v4_col.py
++++ b/scratchpad/v4_col.py
+@@ -46,6 +46,8 @@ class DumpScreen(StreamScreen):
+ fjm = sorted((ROOT / "scratchpad/fjmcache").glob("v4_*.fjm"),
+              key=lambda p: p.stat().st_mtime)[-1]
+ print("binary:", fjm.name)
++print(f"WARNING: picked newest v4_*.fjm by mtime ({fjm.name}); its build flags are NOT verified "
++      "against this script's oracle settings -- a stale/differently-flagged cache diffs falsely")
+ scr = DumpScreen(COLS, stdin=f"{vx}\n{vy}\n{va}\n".encode())
+ try:
+     ops = FjmRunner(fjm).run(scr)
+diff --git a/scratchpad/v5spr_debug.py b/scratchpad/v5spr_debug.py
+index be46fa2..87e39e3 100644
+--- a/scratchpad/v5spr_debug.py
++++ b/scratchpad/v5spr_debug.py
+@@ -73,8 +73,7 @@ for x in sorted(cols):
+         print("  ...")
+         break
+ pal = mw.playpal()
+-im = Image.new("RGB", (VW * 2, VH))
+-im.putdata([pal[c] for c in want] and [])
++im = Image.new("RGB", (VW * 2, VH))   # fully covered by the two pastes below
+ imw = Image.new("RGB", (VW, VH)); imw.putdata([pal[c] for c in want])
+ img = Image.new("RGB", (VW, VH)); img.putdata([pal[c] for c in got])
+ im.paste(imw, (0, 0)); im.paste(img, (VW, 0))
+diff --git a/scratchpad/walk_trace.py b/scratchpad/walk_trace.py
+index 974d152..7cb9245 100644
+--- a/scratchpad/walk_trace.py
++++ b/scratchpad/walk_trace.py
+@@ -59,6 +59,8 @@ term = fj.run(fjm, io_device=screen, profile=True, print_time=False, print_termi
+               flat_max_words=1 << 26)
+ print(f"ops={term.op_counter:,}  raw events={len(events)}")
+ seq = [e for e in events if e != "TSLEAF"]
++# LIMITATION: collapsing ALL consecutive equal events also hides a genuine immediate revisit
++# of the same seg (visit, leave, immediately re-enter) -- acceptable for this diagnostic.
+ dedup = []
+ for e in seq:
+     if not dedup or dedup[-1] != e:
+diff --git a/scripts/count_until_full.py b/scripts/count_until_full.py
+index 2f8db0d..6d7ed86 100644
+--- a/scripts/count_until_full.py
++++ b/scripts/count_until_full.py
+@@ -1,7 +1,7 @@
+ """M13p0 step 3c -- host-side until-full counts (sizes M13pG1's walk-abort win). Calls the oracle's
+-OWN `bsp_render_order`/`wall_x_range`/`_seg_sector` (no duplicated math, no drift) and counts, at each
+-of 3 viewpoints: how many subsectors (and their seg ranges) are visited, and how many segs reach
+-`wall_x_range` BEFORE every screen column is claimed (`all(drawn)`) -- the post-full share is what
++OWN `bsp_render_order`/`wall_x_range` (no duplicated math, no drift) and counts, at each of 3
++viewpoints: how many subsectors and one-sided segs are visited (and how many of those segs pass
++`wall_x_range`) BEFORE every screen column is claimed (`all(drawn)`) -- the post-full share is what
+ pG1's full-abort walk guard deletes.
+ 
+ Usage: python scripts/count_until_full.py
+@@ -21,8 +21,6 @@ def count_one(rm, scene, vx, vy, viewangle):
+     cfg = rm.cfg
+     W = cfg.VIEW_W
+     lds = scene.map_wad.linedefs(scene.mapname)
+-    sds = scene.map_wad.sidedefs(scene.mapname)
+-    secs = scene.map_wad.sectors(scene.mapname)
+     verts = scene.cmap.vertexes
+ 
+     order = rm.bsp_render_order(scene.cmap, vx, vy)         # the front-to-back subsector visit order
+diff --git a/src/doomfj/coarse_cull.py b/src/doomfj/coarse_cull.py
+deleted file mode 100644
+index f7f5c12..0000000
+--- a/src/doomfj/coarse_cull.py
++++ /dev/null
+@@ -1,95 +0,0 @@
+-"""M13-raster coarse cull: the BAKED coarse-angle bounds shared (R6 SSOT) by the fj macro's data table
+-and the host reference / prototype.
+-
+-⚠ STATUS (CR-2026-08): NOT WIRED INTO ANY SHIPPED PATH. No emitter calls generate_coarse_bounds_fj
+-and nothing imports this module outside its scratchpad prototypes (proj.coarse_bracket in
+-projection.fj is equally uninstantiated) -- the shipped cull is the bbox WEDGE cull
+-(mapcompiler.bbox_gate_boxes). Kept as the reference for the per-vertex coarse-slope experiment.
+-Known gap if ever revived: GUARD_DEFAULT covers tantoangle quantization only, NOT _slope_div's
+-block-FP truncation, so the 'guaranteed SUPERSET' claim below must be re-verified against the
+-renderer's actual tta[_slope_div(num,den)] before trusting a cull to it.
+-
+-The division-free coarse cull pins a vertex's absolute BAM angle to a conservative interval [lo,hi]
+-using ONLY sign-folds + integer magnitude compares (NO slope_div): the octant idx
+-(sign(dx)*4 + sign(dy)*2 + (|dx|>|dy|), matching proj.point_to_angle) plus a WEDGE idx that subdivides
+-the octant by comparing the ratio min(|dx|,|dy|)/max(...) against NW-1 fixed thresholds
+-(smaller*NW vs larger*k -- integer, no division). Each (octant, wedge) maps to a compile-time-constant
+-[lo,hi] BAM interval: within a wedge the true `base` = tantoangle[slope] lies in
+-[tantoangle[w*(SLOPERANGE/NW)], tantoangle[(w+1)*(SLOPERANGE/NW)]] (tantoangle is monotone), and the
+-octant's point_to_angle output formula maps that base-range to an angle-range, widened by a small
+-guard for the tantoangle quantization. Because the interval is a guaranteed SUPERSET of the true
+-angle, a seg both of whose vertices' intervals miss the frustum (or whose conservative column span is
+-fully drawn) is provably invisible -> cullable WITHOUT the division. Pure optimization: identical
+-pixels, no oracle change, no re-bless.
+-"""
+-from __future__ import annotations
+-
+-from doomfj.tables import tantoangle_table
+-from doomfj.reference_model import SLOPERANGE
+-
+-ANGMASK = (1 << 32) - 1
+-NW_DEFAULT = 8                 # wedges per octant (73% cull @ E1M1 spawn; diminishing returns above)
+-GUARD_DEFAULT = 1 << 22        # widen each interval for tantoangle quantization (keeps culls conservative)
+-
+-
+-def _octant_map(oct_: int, base: int) -> int:
+-    """proj.point_to_angle's per-octant output formula (projection.fj oct0..oct7), base in [0,ANG45]."""
+-    if oct_ == 0: return (0x3FFFFFFF - base) & ANGMASK
+-    if oct_ == 1: return base & ANGMASK
+-    if oct_ == 2: return (0xC0000000 + base) & ANGMASK
+-    if oct_ == 3: return (-base) & ANGMASK
+-    if oct_ == 4: return (0x40000000 + base) & ANGMASK
+-    if oct_ == 5: return (0x7FFFFFFF - base) & ANGMASK
+-    if oct_ == 6: return (0xBFFFFFFF - base) & ANGMASK
+-    return (0x80000000 + base) & ANGMASK   # oct 7
+-
+-
+-def coarse_angle_bounds(nw: int = NW_DEFAULT, guard: int = GUARD_DEFAULT):
+-    """Return a list of (lo, hi) BAM intervals, indexed by (octant*nw + wedge), 8*nw entries.
+-    Each interval is a conservative superset of the true absolute angle for any vertex whose octant
+-    and ratio-wedge match. lo/hi are unsigned 32-bit (may wrap; the consumer does modular arc tests)."""
+-    tta = tantoangle_table(SLOPERANGE)
+-    assert SLOPERANGE % nw == 0, f"SLOPERANGE={SLOPERANGE} not divisible by nw={nw}"
+-    step = SLOPERANGE // nw
+-    out = []
+-    for oct_ in range(8):
+-        for w in range(nw):
+-            blo = tta[w * step]
+-            bhi = tta[(w + 1) * step]
+-            a = _octant_map(oct_, blo)
+-            b = _octant_map(oct_, bhi)
+-            # the two endpoints may be in either order (formula can flip); pick the short arc
+-            lo, hi = (a, b) if ((b - a) & ANGMASK) < (1 << 31) else (b, a)
+-            out.append(((lo - guard) & ANGMASK, (hi + guard) & ANGMASK))
+-    return out
+-
+-
+-def octant_wedge_idx(dx: int, dy: int, nw: int = NW_DEFAULT):
+-    """The (octant, wedge, combined) indices for a delta, using ONLY sign-folds + integer compares
+-    (the exact computation the fj macro performs; no division). Returns None for the (0,0) degenerate."""
+-    if dx == 0 and dy == 0:
+-        return None
+-    sx = dx < 0
+-    sy = dy < 0
+-    adx, ady = abs(dx), abs(dy)
+-    gt = adx > ady
+-    oct_ = (4 if sx else 0) + (2 if sy else 0) + (1 if gt else 0)
+-    smaller, larger = (ady, adx) if gt else (adx, ady)
+-    w = 0
+-    for k in range(1, nw):
+-        if smaller * nw >= larger * k:     # smaller/larger >= k/nw  (integer, no division)
+-            w = k
+-    return oct_, w, oct_ * nw + w
+-
+-
+-def generate_coarse_bounds_fj(label: str, nw: int = NW_DEFAULT, guard: int = GUARD_DEFAULT) -> str:
+-    """Emit the coarse-bounds data table as fj: 8*nw entries, each two 8-nibble values [lo, hi]
+-    laid out contiguously (entry k's lo at label + k*16*dw, hi at label + (k*16+8)*dw). Read with
+-    hex.read_table 8 / hex.read_table_packed on the combined index (octant*nw + wedge)."""
+-    bounds = coarse_angle_bounds(nw, guard)
+-    lines = [f"// coarse-angle bounds ({8*nw} entries, nw={nw}, guard={guard:#x}) - doomfj.coarse_cull",
+-             f"{label}:"]
+-    for lo, hi in bounds:
+-        lines.append(f"    hex.vec 8, {lo:#x}")
+-        lines.append(f"    hex.vec 8, {hi:#x}")
+-    return "\n".join(lines) + "\n"
+diff --git a/src/doomfj/lut_generator.py b/src/doomfj/lut_generator.py
+index e184519..02c61d4 100644
+--- a/src/doomfj/lut_generator.py
++++ b/src/doomfj/lut_generator.py
+@@ -46,12 +46,18 @@ __all__ = [
+     "generate_trig_idioms_fj",
+     "generate_packed_lut_fj",
+     "generate_tantoangle_lut_fj",
++    "generate_slopediv_recip_lut_fj",
++    "generate_slopediv_recip8_lut_fj",
+     "generate_finetangent_lut_fj",
+     "generate_xtoviewangle_lut_fj",
+     "generate_viewangletox_lut_fj",
+     "generate_yslope_lut_fj",
++    "generate_yslope_packed_lut_fj",
+     "generate_distscale_lut_fj",
+     "generate_zlight_lut_fj",
++    "generate_zlight_packed_lut_fj",
++    "generate_bands_walk_fj",
++    "generate_w1r_walls_fj",
+ ]
+ 
+ 
+@@ -219,10 +225,10 @@ def generate_zlight_packed_lut_fj(label: str, view_w: int, num_colormaps: int) -
+ 
+ 
+ # CR-2026-08: generate_zlight_cuts_fj (the M13-lines4 cut-point tables for the binary-search
+-# band builder) was REMOVED here -- zero callers repo-wide once wall_renderer dropped its dead
+-# import; its only conceptual consumer, plane.build_bands_bs, was never instantiated either
+-# (the shipped band builder is the linear zidx walk). Recover both from git history if the
+-# binary-search experiment is ever picked back up.
++# band builder) was REMOVED here, and its only conceptual consumer -- the never-instantiated
++# plane.build_bands_bs macro -- was removed from plane_bands.fj in the same cleanup (the
++# shipped band builder is the linear zidx walk). Recover both together from git history if
++# the binary-search experiment is ever picked back up.
+ 
+ 
+ def generate_distscale_lut_fj(label: str, view_w: int, trig_n: int) -> str:
+@@ -697,13 +703,6 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
+     for k in range(pad):
+         if k >= n:
+             out.append(f"    ;vpb_clean__ + {k}*dw")
+-        elif owner[k] != k:
+-            # shared content: enter the owner's body through a per-id thunk so the CLEAN still
+-            # un-xors THIS id. The body must therefore end by jumping through a RETURN REGISTER --
+-            # simplest: bodies end at a per-id trampoline. Instead: entries with shared content get
+-            # their own tiny handler that jumps to the owner's PAIR CODE with the exit label in
+-            # vpb_x (a raw jump-target op), and the owner's terminal jumps go through vpb_x.
+-            out.append(f"    ;vpb_t{k}")
+         else:
+             out.append(f"    ;vpb_t{k}")
+     # per-id thunks: fcall the (possibly shared) body, then clean with THIS id. stl.fcall/fret
+@@ -752,14 +751,15 @@ def generate_w1r_walls_fj(tier_bounds, patterns, label: str = "w1rpat") -> str:
+     """M13-W1R -- the RANDOMIZED W1 wall walkers, baked from `ReferenceModel.W1R_TIER_BOUNDS` /
+     `W1R_PATTERNS` (R6: the oracle's own tables, so the two sides cannot drift).
+ 
+-    `walk wlen, ctake, fstart, gnrow, wall_lit, cmidx` emits the full wall [ctake, fstart) as
+-    the (height tier, grain group)'s cycled run list: per run one `hex.add_constant` on the
+-    running y2, one `hex.cmp` vs fstart (>= -> clamp to fstart and stop), `byte.emit` +
+-    `cm.emit` with the run's baked colormap row over the seg's `wall_lit` low byte (V1's grain
++    `walk wlen, ctake, fstart, gnrow, wall_lit, wall_lit2, cmidx` emits the full wall
++    [ctake, fstart) as the (height tier, grain group)'s cycled run list: per run one
++    `hex.add_constant` on the running y2, one `hex.cmp` vs fstart (>= -> clamp to fstart and
++    stop), `byte.emit` + `cm.emit` with the run's baked colormap row over the run's colour low
++    byte -- `wall_lit` or `wall_lit2` per the run's baked W1R-2C alt bit (V1's grain
+     mechanism -- same colour, different shade, never a hue jump). The final pair always ends
+     exactly at fstart, mirroring `ReferenceModel.w1r_runs` pair for pair.
+ 
+-    `walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, cmidx` is the emit_region twin: the
++    `walk_win ctake, fstart, wlo, whi, gnrow, wall_lit, wall_lit2, cmidx` is the emit_region twin: the
+     SAME absolute pattern (anchored at ctake, tier from fstart-ctake) restricted to [wlo, whi)
+     -- runs ending at or before wlo are skipped unemitted, the run crossing whi clamps there.
+     Windowed truncation is exact because a truncated first/last pair covers a row subset of the
+diff --git a/src/doomfj/wall_renderer.py b/src/doomfj/wall_renderer.py
+index 9af775a..60020f8 100644
+--- a/src/doomfj/wall_renderer.py
++++ b/src/doomfj/wall_renderer.py
+@@ -1056,26 +1056,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
+                                                        flat_wall=tb in w1r_flat_tb)))
+                     fields.append(("seg_w1rf", 1, 1 if tb in w1r_flat_tb else 0))
+                 # M13pS2-crush2b: the seg's ceiling/floor visplane indices (shared band lists in
+-                # stream mode; shared device-side row->colour arrays in raster mode)
+-                # M13-lines2: lines mode keys visplanes on (height, light) ONLY -- the flat
+-                # base colour is applied at emit time from the seg's own register, so planes
+-                # differing only in flat share one band list.
+-                if lines:
+-                    # baked DW-OFFSETS into the frame's viewz bank (list stride 130 dw)
+-                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
+-                            ssec.ceil_tex.upper())
+-                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
+-                            ssec.floor_tex.upper())
+-                    fields.append(("seg_cvpidx", "w/4", lines_key_ids[ckey] * 2 if ascode
+-                                   else f"{lines_key_ids[ckey] * 130}*dw"))
+-                    fields.append(("seg_fvpidx", "w/4", f"{lines_key_ids[fkey] * 130}*dw"))
+-                else:
+-                    ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
+-                            ssec.ceil_tex.upper())
+-                    fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
+-                            ssec.floor_tex.upper())
+-                    fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
+-                    fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
++                # stream mode; shared device-side row->colour arrays in raster mode). Lines mode
++                # never reaches this half of the action (it returned above) -- its baked bank
++                # offsets are emitted in the lines branch's own rfields.
++                ckey = (ssec.ceil_h, ssec.light & 0xFF, _flatval(ssec.ceil_tex),
++                        ssec.ceil_tex.upper())
++                fkey = (ssec.floor_h, ssec.light & 0xFF, _flatval(ssec.floor_tex),
++                        ssec.floor_tex.upper())
++                fields.append(("seg_cvpidx", 8, cvp_ids.setdefault(ckey, len(cvp_ids))))
++                fields.append(("seg_fvpidx", 8, fvp_ids.setdefault(fkey, len(fvp_ids))))
+             if lines:
+                 fields = [f for f in fields if f[0] not in _LINES_DEAD_FIELDS]
+             xorby_blocks[si] = _seg_xorby_block(si, fields)
+@@ -1583,6 +1572,11 @@ def _band_pair_lists(rm, cfg, asset_wad, vz_classes: dict, key_ids, ft1: bool =
+         for (h, light, base, flatname) in key_ids:
+             ph = abs((h << 16) - vzs)
+             lvl = max(0, min(15, light >> 4))
++            # M13-FT1: the flat's DIAGONAL texels -- band ordinal j takes texel strip[j & 63]
++            # instead of every band sharing the flat's single base texel. Costs ZERO runtime ops
++            # (it only changes which byte is baked), and gives the floor real depth-varying texel
++            # colour on top of the distance shading. Sampling by band ORDINAL (not world u,v) is
++            # what keeps it free -- see docs/plan-w2-ft1.md for the honest scope statement.
+             strip = None
+             if ft1:
+                 tx = rm._flat_texels(asset_wad, flatname, flatcache)
+@@ -1607,7 +1601,7 @@ def _band_pair_lists(rm, cfg, asset_wad, vz_classes: dict, key_ids, ft1: bool =
+ 
+ def _sky_pair_lists(rm, asset_wad, cfg):
+     """The sky lists in vpb_walk id order (u-major, asc then desc), mirroring _lines_sky_bank's
+-    half() exactly — 2*tw entries of u so skybase+skyoff never needs a mask."""
++    half() exactly — SKY_BANK_MUL*tw entries of u so skybase+skyoff never needs a mask."""
+     tex = rm._wall_texture(asset_wad, "SKY1", {}, wall_mode="textured")
+     if tex is None:
+         return []
+@@ -1637,51 +1631,21 @@ def _lines_bake_bank(rm, cfg, asset_wad, vz_classes: dict, key_ids: dict,
+     """M13-bakedbands: the compile-time band-list bank. For every (viewz class, (h,light,base))
+     pair, both half-window lists ([0,centery) asc + [centery,H) desc) with entries
+     [y2_absolute:1B][final_colour:1B], grouped by FINAL colour (adjacent zrows sharing a colour
+-    merge -- identical pixels, fewer pairs). Values from the SAME host walk the fj runtime build
+-    mirrored (rm._zidx_band_walk + zlight + colormap), so frames are byte-identical to the
++    merge -- identical pixels, fewer pairs). The lists come from `_band_pair_lists` -- the SAME
++    SSOT walk the bands-as-code tier bakes from, itself mirroring the fj runtime build
++    (rm._zidx_band_walk + zlight + colormap) -- so frames are byte-identical to the
+     runtime-built ones. Layout: list (class,key) at (class*len(keys)+key)*130 dw; asc half at +0
+     ([n][pairs]), desc half at +65 dw."""
+-    from doomfj.fixedpoint import _signed as _sgn
+-    colormap = asset_wad.colormap()
+-    flatcache: dict = {}
+-    H, CY = cfg.VIEW_H, cfg.CENTERY
+     half = LINES_HALF_SLOTS
+     out = [f"// M13-bakedbands: {len(vz_classes)} viewz classes x {len(key_ids)} keys, 130 dw/list",
+            "vpbank:"]
+-    for vz in vz_classes:                                    # insertion order == class index
+-        vzs = _sgn(vz, 32)
+-        for (h, light, base, flatname) in key_ids:            # insertion order == key index
+-            ph = abs((h << 16) - vzs)
+-            lvl = max(0, min(15, light >> 4))
+-            # M13-FT1: the flat's DIAGONAL texels -- band ordinal j takes texel strip[j & 63]
+-            # instead of every band sharing the flat's single base texel. Costs ZERO runtime ops
+-            # (it only changes which byte is baked), and gives the floor real depth-varying texel
+-            # colour on top of the distance shading. Sampling by band ORDINAL (not world u,v) is
+-            # what keeps it free -- see docs/plan-w2-ft1.md for the honest scope statement.
+-            strip = None
+-            if ft1:
+-                tx = rm._flat_texels(asset_wad, flatname, flatcache)
+-                strip = [tx[(i * 64 + i) % len(tx)] for i in range(64)]
+-            for rows in (list(range(0, CY)), list(range(CY, H))):
+-                zidx = rm._zidx_band_walk(ph, rows)
+-                zrows = [rm.zlight[lvl][z] for z in zidx]
+-                pairs, ordinal, prev_z = [], 0, None
+-                for k, zr in enumerate(zrows):
+-                    y2 = rows[k] + 1
+-                    if prev_z is not None and zr != prev_z:
+-                        ordinal += 1
+-                    prev_z = zr
+-                    colr = (colormap[zr][strip[ordinal & 63]] if ft1 else colormap[zr][base])
+-                    if pairs and pairs[-1][1] == colr:
+-                        pairs[-1][0] = y2
+-                    else:
+-                        pairs.append([y2, colr])
+-                assert len(pairs) <= MAX_BANDS // 2, f"half list overflow: {len(pairs)}"
+-                cell = [len(pairs)] + [b for pr in pairs for b in pr]
+-                for b in cell:
+-                    out.append(f";{b:#x} * dw")
+-                for _ in range(half - len(cell)):
+-                    out.append(";0 * dw")
++    for pairs in _band_pair_lists(rm, cfg, asset_wad, vz_classes, key_ids, ft1):
++        assert len(pairs) <= MAX_BANDS // 2, f"half list overflow: {len(pairs)}"
++        cell = [len(pairs)] + [b for pr in pairs for b in pr]
++        for b in cell:
++            out.append(f";{b:#x} * dw")
++        for _ in range(half - len(cell)):
++            out.append(";0 * dw")
+     return NLJ.join(out) + NLJ
+ 
+ 
+@@ -2089,15 +2053,18 @@ def _lines_sky_bank(rm, asset_wad, cfg):
+     of static data — nothing beside the 8.9M-character wall bank — and it slots into the ceiling
+     prefix walk that already exists, so V2 adds no emit path.
+ 
+-    At runtime: `u = skybase + skyoff[x]` with `skybase = (viewangle >> shift) & (tw-1)` computed
+-    once per frame, then the ceiling list address is `skybands + u*stride`.
+-
+-    ⚠ The bank holds **2*tw** lists, entry `u` carrying sky column `u & (tw-1)`. Both addends are
+-    already in [0, tw-1], so their sum never exceeds 2*tw-2 and **the wrap needs no mask at all** —
+-    which matters because fj has no cheap AND: masking would cost a dispatch or a compare-and-
+-    subtract per column, while the duplicate half costs only static text (~477k characters against
+-    the 8.9M-character wall bank). Trading a little baked data for an omitted runtime op is the same
+-    bargain the wall bank already makes.
++    At runtime: `u = skybase + skyoff[x]`, then the ceiling list address is `skybands + u*stride`.
++    `skybase` is the shifted viewangle taken as a full UNMASKED byte once per frame
++    (`lines_sky_base`'s 2-nibble mov); the oracle's `sky_base` folds in the `& (tw-1)` the fj
++    never pays — same column either way, since the bank wraps at tw.
++
++    ⚠ The bank holds **SKY_BANK_MUL*tw** lists, entry `u` carrying sky column `u % tw`. `skyoff`
++    stays in [0, tw-1] but the unmasked skybase byte spans [0, 255], so their sum reaches at most
++    255 + tw-1 = SKY_BANK_MUL*tw - 2 (tw=128) and **the wrap needs no mask at all** — which
++    matters because fj has no cheap AND: masking would cost a dispatch or a compare-and-subtract
++    per column, while the extra copies cost only static text (~350k of the bank's ~530k
++    characters, against the 8.9M-character wall bank). Trading a little baked data for an omitted
++    runtime op is the same bargain the wall bank already makes.
+ 
+     Values come from `ReferenceModel.sky_texel_u`, so oracle and fj cannot drift (R6)."""
+     H = cfg.VIEW_H
+diff --git a/src/fj/frame_render.fj b/src/fj/frame_render.fj
+index a31c232..f2c0f86 100644
+--- a/src/fj/frame_render.fj
++++ b/src/fj/frame_render.fj
+@@ -2016,8 +2016,9 @@ ns frame {
+     // perspective and no distance lighting, so a sky column IS just a band list -- which is why the
+     // whole feature costs one dispatch and one add here and adds NO new emit path: the existing
+     // ceiling prefix walk streams it unchanged.
+-    // `u = skybase + skyoff[x]` needs NO MASK: both addends are <= 127 and the bank holds 256
+-    // lists with entry u carrying sky column (u & 127), so the sum can never leave it (max 253).
++    // `u = skybase + skyoff[x]` needs NO MASK: skb is a full unmasked byte (viewangle>>24,
++    // <= 255) and skyoff[x] <= tw-1, and the bank holds SKY_BANK_MUL*tw lists with entry u
++    // carrying sky column (u & (tw-1)), so the sum (max SKY_BANK_MUL*tw - 2) can never leave it.
+     // M13-15M: the ID twin — sky list u's two halves are ids SKY_BASE_ID + u*2 (+1 for desc);
+     // the 16-nibble mul_const + label add of the address form die (they were 0.66M at the tree).
+     def lines_sky_ceil_ids sky_base_id, skyall, cbufa, cbufd, x, skb, soff, issky, pidreg @ notsky, end {
+diff --git a/src/fj/plane_bands.fj b/src/fj/plane_bands.fj
+index 2db4579..b1096c3 100644
+--- a/src/fj/plane_bands.fj
++++ b/src/fj/plane_bands.fj
+@@ -271,247 +271,4 @@ ns plane {
+       c127: hex.vec 3
+       dist: hex.vec 8
+     }
+-
+-    // M13-lines4 -- build_bands_bs: the BINARY-SEARCH band builder (lines mode only; 2-byte
+-    // entries [runlen][zrow]). ⚠ DEAD EXPERIMENT (CR-2026-08): never instantiated by any emitter,
+-    // and its cut-table generator (lut_generator.generate_zlight_cuts_fj) has been removed --
+-    // recover both from git history together if this is ever revived. Kept for the proof record:
+-    // identical output to `build_bands 0` over 1,036 windows
+-    // (118 real E1M1-spawn (ph,light) pairs + 400 fuzz, both halves, zero mismatches) -- but
+-    // instead of marching all `count` rows it finds each ZROW boundary directly: the only zidx
+-    // values where the colormap row changes are baked per light level in `zl_nextcut`/`zl_prevcut`
+-    // (the removed generator), and each cut's screen row is the first crossing of
+-    // a monotone yslope half-window -- a ~6-probe binary search. Typical list: ~3-8 boundaries
+-    // instead of ~50 marched rows.
+-    //   asc  (ceiling half, ys non-decreasing): boundary(k) = first row with ys >= step*k
+-    //   desc (floor half,   ys non-increasing): boundary(k) = first row with ys <  step*(k+1)
+-    // After each boundary the zidx re-marches from the boundary row's ys (the walk's own bump
+-    // loop, run only at boundaries). Seed/step/clamp arithmetic is copied from build_bands
+-    // verbatim, so the fixed_mul seed and recip32 step stay bit-identical.
+-    // @requires hex.init & stl.ptr_init
+-    def build_bands_bs \
+-            @ ptr, ysbase, ysptr, probe, y0w, yadv, ycur, cutz, cutT, cutT6, zidx, zrow_cur, zrow, \
+-              step, lvl, zlbase, zlidx, loi, hii, mid, thr, dist, ys, runw, cFF2, c127, cFFF6, \
+-              empty, phzero, seed, seedclamp, seedok, gloop, gdesc, gcut, nocut, tok0, tdesc, tmul, \
+-              tclamp, tok, bsprep, bsloop, bsbody, pdesc, phi, plo, bsdone, past, wrt, \
+-              rasc, rdesc, rabody, rachk, rat1, rat2, rat3, rabump, rastop, \
+-              rdbody, rdt1, rdt2, rdt3, rdbump, rdstop, rdone, done \
+-            < bb_ph, bb_light, bb_y0, bb_count, bb_ascending, bb_arr, bb_n, \
+-              bb_recip_ph, bb_recip_out, yslope_packed, zlight, zl_nextcut, zl_prevcut, \
+-              recip32_leaf, plane_recip_ret, plane_band_ret {
+-        hex.zero 2, bb_n
+-        hex.if0 2, bb_count, empty
+-        hex.mov w/4, ptr, bb_arr
+-        hex.zero 3, lvl
+-        hex.mov 2, lvl, bb_light
+-        hex.shr_hex 3, 1, lvl                       // lvl = light >> 4
+-        hex.mul_const 3, zlbase, lvl, 128
+-        hex.if0 8, bb_ph, phzero
+-        ;seed
+-
+-      phzero:                                        // ph==0 -> ONE band, zidx=0
+-        hex.mov 3, zlidx, zlbase
+-        hex.read_table 2, zrow, zlight, 3, zlidx
+-        hex.write_byte_and_inc ptr, bb_count
+-        hex.write_byte_and_inc ptr, zrow
+-        hex.inc 2, bb_n
+-        ;done
+-
+-      seed:                                          // exact zidx at y0 (bit-identical to build_bands)
+-        hex.set w/4, ysbase, yslope_packed
+-        hex.zero w/4, y0w
+-        hex.mov 2, y0w, bb_y0
+-        hex.mul_const w/4, yadv, y0w, 3*dw
+-        hex.add w/4, ysbase, yadv                    // ysbase -> yslope_packed[y0] (window row 0)
+-        hex.zero 8, ys
+-        hex.mov w/4, ysptr, ysbase
+-        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, ysptr
+-        hex.fixed_mul_lo 8, 4, dist, bb_ph, ys
+-        hex.shr_hex 8, 5, dist
+-        hex.set 3, c127, 127
+-        hex.zero 3, zidx
+-        hex.mov 3, zidx, dist
+-        hex.cmp 3, zidx, c127, seedok, seedok, seedclamp
+-      seedclamp:
+-        hex.mov 3, zidx, c127
+-      seedok:
+-        hex.mov 8, bb_recip_ph, bb_ph
+-        stl.fcall recip32_leaf, plane_recip_ret
+-        hex.zero 8, step
+-        hex.mov 8, step, bb_recip_out
+-        hex.shl_hex 8, 1, step                       // step = recip << 4
+-        hex.mov 3, zlidx, zlbase
+-        hex.add 3, zlidx, zidx
+-        hex.read_table 2, zrow_cur, zlight, 3, zlidx
+-        hex.set 8, cFFF6, 0xFFFFFF
+-        hex.set 2, cFF2, 0xFF
+-        hex.zero 2, ycur                             // relative row where the current run starts
+-
+-      gloop:                                         // == one zrow GROUP per iteration
+-        hex.zero 3, cutz
+-        hex.mov 3, zlidx, zlbase
+-        hex.add 3, zlidx, zidx
+-        hex.if0 2, bb_ascending, gdesc
+-        hex.read_table_byte cutz, zl_nextcut, 3, zlidx
+-        ;gcut
+-      gdesc:
+-        hex.read_table_byte cutz, zl_prevcut, 3, zlidx
+-      gcut:
+-        hex.cmp 2, cutz, cFF2, tok0, nocut, nocut
+-      nocut:                                         // zrow never changes again -> one final run
+-        hex.mov 2, runw, bb_count
+-        hex.sub 2, runw, ycur
+-        hex.write_byte_and_inc ptr, runw
+-        hex.write_byte_and_inc ptr, zrow_cur
+-        hex.inc 2, bb_n
+-        ;done
+-      tok0:
+-        hex.if0 2, bb_ascending, tdesc               // T: asc = step*cut ; desc = step*(cut+1)
+-        ;tmul
+-      tdesc:
+-        hex.inc 3, cutz
+-      tmul:
+-        hex.zero 8, cutT
+-        hex.mov 3, cutT, cutz
+-        hex.mul_lo 8, cutT6, step, cutT              // (cut is <=3 nonzero nibbles: cheap rows)
+-        hex.mov 8, cutT, cutT6
+-        hex.cmp 8, cutT, cFFF6, tok, tok, tclamp     // 6-nibble clamped compare copy (as the walk)
+-      tclamp:
+-        hex.set 6, thr, 0xFFFFFF
+-        ;bsprep
+-      tok:
+-        hex.mov 6, thr, cutT
+-      bsprep:                                        // binary search over rows (ycur, count)
+-        hex.mov 2, loi, ycur
+-        hex.inc 2, loi
+-        hex.mov 2, hii, bb_count
+-      bsloop:
+-        hex.cmp 2, loi, hii, bsbody, bsdone, bsdone
+-      bsbody:
+-        hex.mov 2, mid, loi                          // mid = (loi+hii)>>1
+-        hex.add 2, mid, hii
+-        hex.shr_bit 2, mid
+-        hex.zero w/4, probe                          // probe -> yslope row (window-relative mid)
+-        hex.mov 2, probe, mid
+-        hex.mul_const w/4, probe, probe, 3*dw
+-        hex.add w/4, probe, ysbase
+-        hex.zero 8, ys
+-        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, probe
+-        hex.if0 2, bb_ascending, pdesc
+-        hex.cmp 6, ys, thr, plo, phi, phi            // asc: ys >= T -> boundary at/left of mid
+-      pdesc:
+-        hex.cmp 6, ys, thr, phi, plo, plo            // desc: ys < T -> boundary at/left of mid
+-      phi:
+-        hex.mov 2, hii, mid
+-        ;bsloop
+-      plo:
+-        hex.mov 2, loi, mid
+-        hex.inc 2, loi
+-        ;bsloop
+-      bsdone:                                        // loi = the boundary row b
+-        hex.cmp 2, loi, bb_count, wrt, past, past
+-      past:                                          // b >= count: the run reaches the window end
+-        hex.mov 2, runw, bb_count
+-        hex.sub 2, runw, ycur
+-        hex.write_byte_and_inc ptr, runw
+-        hex.write_byte_and_inc ptr, zrow_cur
+-        hex.inc 2, bb_n
+-        ;done
+-      wrt:
+-        hex.mov 2, runw, loi
+-        hex.sub 2, runw, ycur
+-        hex.write_byte_and_inc ptr, runw
+-        hex.write_byte_and_inc ptr, zrow_cur
+-        hex.inc 2, bb_n
+-        hex.mov 2, ycur, loi
+-        hex.zero w/4, probe                          // re-read ys at the boundary row
+-        hex.mov 2, probe, loi
+-        hex.mul_const w/4, probe, probe, 3*dw
+-        hex.add w/4, probe, ysbase
+-        hex.zero 8, ys
+-        rep(3, k) hex.read_byte_and_inc ys + 2*k*dw, probe
+-        hex.if0 2, bb_ascending, rdesc
+-      rasc:                                          // re-march: while zidx<127 && ys >= step*(zidx+1)
+-        hex.zero 8, cutT
+-        hex.mov 3, cutT, zidx
+-        hex.inc 3, cutT
+-        hex.mul_lo 8, cutT6, step, cutT
+-        hex.mov 8, cutT, cutT6
+-      rabody:
+-        hex.cmp 3, zidx, c127, rachk, rastop, rastop
+-      rachk:
+-        hex.cmp 8, cutT, cFFF6, rat1, rat1, rat2
+-      rat2:
+-        hex.set 6, thr, 0xFFFFFF
+-        ;rat3
+-      rat1:
+-        hex.mov 6, thr, cutT
+-      rat3:
+-        hex.cmp 6, ys, thr, rastop, rabump, rabump
+-      rabump:
+-        hex.inc 3, zidx
+-        hex.add 8, cutT, step
+-        ;rabody
+-      rastop:
+-        ;rdone
+-      rdesc:                                         // re-march: while zidx>0 && ys < step*zidx
+-        hex.zero 8, cutT
+-        hex.mov 3, cutT, zidx
+-        hex.mul_lo 8, cutT6, step, cutT
+-        hex.mov 8, cutT, cutT6
+-      rdbody:
+-        hex.if0 3, zidx, rdstop
+-        hex.cmp 8, cutT, cFFF6, rdt1, rdt1, rdt2
+-      rdt2:
+-        hex.set 6, thr, 0xFFFFFF
+-        ;rdt3
+-      rdt1:
+-        hex.mov 6, thr, cutT
+-      rdt3:
+-        hex.cmp 6, ys, thr, rdbump, rdstop, rdstop
+-      rdbump:
+-        hex.dec 3, zidx
+-        hex.sub 8, cutT, step
+-        ;rdbody
+-      rdstop:
+-        ;rdone
+-      rdone:
+-        hex.mov 3, zlidx, zlbase
+-        hex.add 3, zlidx, zidx
+-        hex.read_table 2, zrow_cur, zlight, 3, zlidx
+-        ;gloop
+-
+-      empty:
+-        ;done
+-      done:
+-        stl.fret plane_band_ret
+-
+-      ptr: hex.vec w/4
+-      ysbase: hex.vec w/4
+-      ysptr: hex.vec w/4
+-      probe: hex.vec w/4
+-      y0w: hex.vec w/4
+-      yadv: hex.vec w/4
+-      ycur: hex.vec 2
+-      cutz: hex.vec 3
+-      cutT: hex.vec 8
+-      cutT6: hex.vec 8
+-      zidx: hex.vec 3
+-      zrow_cur: hex.vec 2
+-      zrow: hex.vec 2
+-      step: hex.vec 8
+-      lvl: hex.vec 3
+-      zlbase: hex.vec 3
+-      zlidx: hex.vec 3
+-      loi: hex.vec 2
+-      hii: hex.vec 2
+-      mid: hex.vec 2
+-      thr: hex.vec 6
+-      dist: hex.vec 8
+-      ys: hex.vec 8
+-      runw: hex.vec 2
+-      cFF2: hex.vec 2
+-      c127: hex.vec 3
+-      cFFF6: hex.vec 8
+-    }
+ }
+diff --git a/src/fj/projection.fj b/src/fj/projection.fj
+index e7523d8..6102259 100644
+--- a/src/fj/projection.fj
++++ b/src/fj/projection.fj
+@@ -205,153 +205,6 @@ ns proj {
+       done:
+     }
+ 
+-    // proj.coarse_bracket lo, hi, vx, vy, viewx, viewy (M13-raster coarse cull): a DIVISION-FREE
+-    //   conservative [lo,hi] BAM interval bracketing atan2(vy-viewy, vx-viewx). Uses ONLY sign-folds +
+-    //   integer magnitude compares (NO slope_div): octant idx (sign(dx)*4+sign(dy)*2+(|dx|>|dy|),
+-    //   matching point_to_angle) + a wedge idx (0..7) from a 3-deep compare tree on the ratio
+-    //   min/max (smaller*8 vs larger*{1..7}, exact integer, no divide). combined=idx*8+wedge indexes
+-    //   the BAKED `coarse_bounds` table (doomfj.coarse_cull, interleaved 8-nibble lo,hi pairs -> entry
+-    //   2*combined = lo, 2*combined+1 = hi). The interval is a guaranteed SUPERSET of the true angle
+-    //   (baked guard covers tantoangle quantization), so a seg both of whose vertices' intervals miss
+-    //   the frustum is provably invisible -> cullable without the division. @requires hex.init & stl.ptr_init
+-    def coarse_bracket lo, hi, vx, vy, viewx, viewy \
+-            @ dx, dy, idx, smaller, larger, s8, lk, comb, cidx, \
+-              dxneg, dxpos, dyneg, dypos, dxgt, dxle, havesl, \
+-              whi, w67, w7yes, w45, w5yes, wlo, w23, w3yes, w01, w1yes, wdone, \
+-              b1, b2, b4, kone, ktwo, end \
+-            < coarse_bounds {
+-        hex.mov 8, dx, vx
+-        hex.sub 8, dx, viewx                     // dx = vx - viewx  (signed)
+-        hex.mov 8, dy, vy
+-        hex.sub 8, dy, viewy                     // dy = vy - viewy
+-        hex.set 2, idx, 0
+-        hex.sign 8, dx, dxneg, dxpos
+-      dxneg:
+-        hex.add 2, idx, b4                       // idx |= 4
+-        hex.neg 8, dx
+-        ;dxpos
+-      dxpos:
+-        hex.sign 8, dy, dyneg, dypos
+-      dyneg:
+-        hex.add 2, idx, b2                       // idx |= 2
+-        hex.neg 8, dy
+-        ;dypos
+-      dypos:
+-        hex.cmp 8, dx, dy, dxle, dxle, dxgt      // |dx| > |dy| ? (unsigned magnitudes)
+-      dxgt:
+-        hex.add 2, idx, b1                       // idx |= 1
+-        hex.zero 9, smaller
+-        hex.mov 8, smaller, dy                   // smaller = |dy| (min)
+-        hex.zero 9, larger
+-        hex.mov 8, larger, dx                    // larger  = |dx| (max)
+-        ;havesl
+-      dxle:
+-        hex.zero 9, smaller
+-        hex.mov 8, smaller, dx
+-        hex.zero 9, larger
+-        hex.mov 8, larger, dy
+-        ;havesl
+-      havesl:
+-        hex.mul_const 9, s8, smaller, 8          // s8 = smaller*8  (no overflow: 9 nibbles)
+-        hex.mul_const 2, comb, idx, 8            // comb = idx*8  (wedge added below)
+-        // wedge (0..7): comb += largest k in {0..7} with s8 >= larger*k
+-        hex.mul_const 9, lk, larger, 4
+-        hex.cmp 9, s8, lk, wlo, whi, whi         // s8 >= larger*4 ?
+-      whi:
+-        hex.add 2, comb, b4
+-        hex.mul_const 9, lk, larger, 6
+-        hex.cmp 9, s8, lk, w45, w67, w67         // s8 >= larger*6 ?
+-      w67:
+-        hex.add 2, comb, ktwo
+-        hex.mul_const 9, lk, larger, 7
+-        hex.cmp 9, s8, lk, wdone, w7yes, w7yes   // s8 >= larger*7 ?
+-      w7yes:
+-        hex.add 2, comb, kone
+-        ;wdone
+-      w45:
+-        hex.mul_const 9, lk, larger, 5
+-        hex.cmp 9, s8, lk, wdone, w5yes, w5yes   // s8 >= larger*5 ?
+-      w5yes:
+-        hex.add 2, comb, kone
+-        ;wdone
+-      wlo:
+-        hex.mul_const 9, lk, larger, 2
+-        hex.cmp 9, s8, lk, w01, w23, w23         // s8 >= larger*2 ?
+-      w23:
+-        hex.add 2, comb, ktwo
+-        hex.mul_const 9, lk, larger, 3
+-        hex.cmp 9, s8, lk, wdone, w3yes, w3yes   // s8 >= larger*3 ?
+-      w3yes:
+-        hex.add 2, comb, kone
+-        ;wdone
+-      w01:
+-        hex.mov 9, lk, larger                    // larger*1
+-        hex.cmp 9, s8, lk, wdone, w1yes, w1yes   // s8 >= larger*1 ?
+-      w1yes:
+-        hex.add 2, comb, kone
+-        ;wdone
+-      wdone:
+-        hex.mul_const 2, cidx, comb, 2           // interleaved: lo @ 2*comb, hi @ 2*comb+1
+-        hex.read_table 8, lo, coarse_bounds, 2, cidx
+-        hex.add 2, cidx, kone
+-        hex.read_table 8, hi, coarse_bounds, 2, cidx
+-        ;end
+-
+-      dx: hex.vec 8
+-      dy: hex.vec 8
+-      idx: hex.vec 2
+-      smaller: hex.vec 9
+-      larger: hex.vec 9
+-      s8: hex.vec 9
+-      lk: hex.vec 9
+-      comb: hex.vec 2
+-      cidx: hex.vec 2
+-      b1: hex.vec 2, 1
+-      b2: hex.vec 2, 2
+-      b4: hex.vec 2, 4
+-      kone: hex.vec 2, 1
+-      ktwo: hex.vec 2, 2
+-      end:
+-    }
+-
+-    // proj.frustum_sector sect, lo, hi, viewangle (M13-raster coarse cull): classify the coarse
+-    //   angle interval [lo,hi] relative to the view frustum. sect = 1 (LEFT) if the whole bracket is
+-    //   view-relative-angle > +ANG45, 2 (RIGHT) if < -ANG45, else 0 (touches/near the frustum, or
+-    //   ambiguous). A seg is cullable ONLY if BOTH vertices are in the SAME non-zero sector — a wall
+-    //   whose vertices straddle the frustum (opposite sectors) SPANS the view and is visible, so
+-    //   "both vertices outside" alone is NOT sufficient to cull (that wrongly blanks close spanning
+-    //   walls). Signed view-relative compares (rl,rh = lo-va, hi-va as 2's-complement); because the
+-    //   bracket is a narrow CCW arc, requiring BOTH ends past the same ±ANG45 edge keeps it exact.
+-    def frustum_sector sect, lo, hi, viewangle \
+-            @ rl, rh, leftrh, chkright, rightrh, setL, setR, setnone, cang45, cnang45, end {
+-        hex.mov 8, rl, lo
+-        hex.sub 8, rl, viewangle                 // rl = lo - va  (signed view-relative)
+-        hex.mov 8, rh, hi
+-        hex.sub 8, rh, viewangle                 // rh = hi - va
+-        hex.scmp 8, rl, cang45, chkright, chkright, leftrh    // rl > +ANG45 ? (signed)
+-      leftrh:
+-        hex.scmp 8, rh, cang45, chkright, chkright, setL      // rh > +ANG45 ? -> LEFT
+-      chkright:
+-        hex.scmp 8, rl, cnang45, rightrh, setnone, setnone    // rl < -ANG45 ? (signed)
+-      rightrh:
+-        hex.scmp 8, rh, cnang45, setR, setnone, setnone       // rh < -ANG45 ? -> RIGHT
+-      setL:
+-        hex.set 1, sect, 1
+-        ;end
+-      setR:
+-        hex.set 1, sect, 2
+-        ;end
+-      setnone:
+-        hex.set 1, sect, 0
+-        ;end
+-
+-      rl: hex.vec 8
+-      rh: hex.vec 8
+-      cang45: hex.vec 8, 0x20000000
+-      cnang45: hex.vec 8, 0xE0000000
+-      end:
+-    }
+-
+     // ── M13-wedge: the MULTIPLY-FREE conservative FOV pre-cull (proj.wedge_setup + proj.wedge_reject)
+     //
+     // The true FOV is the wedge [viewangle-ANG45, viewangle+ANG45]. Round it OUTWARD to multiples of
+diff --git a/tests/fj/stream_screen.py b/tests/fj/stream_screen.py
+index 33711f6..330b883 100644
+--- a/tests/fj/stream_screen.py
++++ b/tests/fj/stream_screen.py
+@@ -546,7 +546,6 @@ class StreamScreen(InMemoryScreen):
+         centeryfix = (self.height // 2) << 16
+         painted = self._raster_painted
+         scale &= 0xFFFFFFFF
+-        x1c, x2c = max(0, x1), min(self.width, x2)
+         # DOOM accumulates rw_scale from x1 even when x1 < 0 -- but the oracle render loop starts
+         # its scale at x1 and only touches drawn columns; mirror render_wall_frame's loop exactly:
+         for x in range(x1, x2):
+diff --git a/tests/fj/test_floor_planes_fj.py b/tests/fj/test_floor_planes_fj.py
+index e7e9f12..160905d 100644
+--- a/tests/fj/test_floor_planes_fj.py
++++ b/tests/fj/test_floor_planes_fj.py
+@@ -182,7 +182,8 @@ def test_e1m1_flat_planes_full_frame_byte_exact_and_golden(tmp_path):
+ def test_e1m1_textured_planes_full_frame_byte_exact_and_golden(tmp_path):
+     """M13d2 — THE FULL E1M1 TEXTURED floor/ceiling frame through the SHARED emit_wall_renderer (the same
+     emitter build_doom ships, R6), byte-exact vs the host oracle render_wall_frame() (textured DEFAULT) and
+-    matching the published M13b E1M1 spawn golden db5d3da8. The MULTI-SECTOR capstone the single-sector square
++    matching E1M1_TEX_GOLDEN (b7a28e38, the perf-#9+#11 re-blessed textured spawn golden that superseded the
++    original M13b db5d3da8). The MULTI-SECTOR capstone the single-sector square
+     room cannot give: across E1M1's 575 one-sided segs the per-seg ceil/floor heights, flats (the 37-slice
+     combined flat table -> 5-nibble slice offsets), and RAW sector light all VARY; the per-column plane params
+     are baked per seg via the xor_by involution + stored per claimed column, then the runtime per-ROW span pass
+diff --git a/tests/host/test_mapsimplify.py b/tests/host/test_mapsimplify.py
+new file mode 100644
+index 0000000..a561fe1
+--- /dev/null
++++ b/tests/host/test_mapsimplify.py
+@@ -0,0 +1,183 @@
++"""Unit tests for `doomfj.mapsimplify.simplify`'s pure logic, on tiny synthetic maps built
++from the real wad dataclasses (Linedef/Sidedef/Sector/Thing) — the exact record types the
++module consumes. Covers the union-find tolerance grouping (including the documented
++group-range CAP that stops a staircase from transitively collapsing), the untouchable
++special/tag rule, and the thing-thinning policy.
++"""
++from doomfj.mapsimplify import simplify
++from doomfj.wad import Linedef, Sector, Sidedef, Thing
++
++_1S, _2S = 1, 4          # linedef flags: impassable / two-sided
++
++
++def _sd(sector, middle="-"):
++    return Sidedef(0, 0, "-", "-", middle, sector)
++
++
++def _sec(floor_h, *, ceil_h=128, light=160, special=0, tag=0):
++    return Sector(floor_h, ceil_h, "FLOOR0_1", "CEIL1_1", light, special, tag)
++
++
++def _split_room(sec_a, sec_b, *, splitter_special=0, splitter_flags=_2S):
++    """Two cells: sector 0 is x in [0,256] (the HEAVIER perimeter -> group representative),
++    sector 1 is x in [256,384]; one two-sided splitter at x=256 (front=1, back=0)."""
++    verts = [(0, 0), (0, 128), (256, 128), (384, 128), (384, 0), (256, 0)]
++    sds = [_sd(0), _sd(0), _sd(1), _sd(1), _sd(1), _sd(0), _sd(1), _sd(0)]
++    lds = [
++        Linedef(0, 1, _1S, 0, 0, 0, -1),                       # west         (sector 0)
++        Linedef(1, 2, _1S, 0, 0, 1, -1),                       # top-left     (sector 0)
++        Linedef(2, 3, _1S, 0, 0, 2, -1),                       # top-right    (sector 1)
++        Linedef(3, 4, _1S, 0, 0, 3, -1),                       # east         (sector 1)
++        Linedef(4, 5, _1S, 0, 0, 4, -1),                       # bottom-right (sector 1)
++        Linedef(5, 0, _1S, 0, 0, 5, -1),                       # bottom-left  (sector 0)
++        Linedef(5, 2, splitter_flags, splitter_special, 0, 6, 7),   # splitter x=256
++    ]
++    return verts, lds, sds, [sec_a, sec_b]
++
++
++def _corridor(floors):
++    """len(floors) cells in a row, 128 units wide each, adjacent cells joined by a two-sided
++    boundary line. Cell i fronts sector i."""
++    n = len(floors)
++    verts = [(128 * i, 0) for i in range(n + 1)] + [(128 * i, 128) for i in range(n + 1)]
++    top = lambda i: n + 1 + i
++    lds, sds = [], []
++
++    def add(v1, v2, front_sec, back_sec=None, flags=_1S):
++        front = len(sds)
++        sds.append(_sd(front_sec))
++        back = -1
++        if back_sec is not None:
++            back = len(sds)
++            sds.append(_sd(back_sec))
++            flags = _2S
++        lds.append(Linedef(v1, v2, flags, 0, 0, front, back))
++
++    add(0, top(0), 0)                                          # west wall
++    for i in range(n):
++        add(top(i), top(i + 1), i)                             # top of cell i
++        add(i + 1, i, i)                                       # bottom of cell i
++    add(top(n), n, n - 1)                                      # east wall
++    for i in range(n - 1):
++        add(i + 1, top(i + 1), i + 1, i)                       # boundary: front=right cell
++    return verts, lds, sds, [_sec(f) for f in floors]
++
++
++# ── pass 1: tolerance grouping ──
++
++def test_within_tolerance_sectors_merge_and_interior_line_is_deleted():
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(8))      # floors differ by 8 <= 24
++    _, lds2, sds2, secs2, _, st = simplify(verts, lds, sds, secs, [])
++    assert st.sector_groups == 1 and st.sectors_flattened == 1
++    assert st.lines_deleted == 1                               # the splitter vanished
++    assert len(secs2) == 1
++    # the heavier-perimeter sector (0) is the representative: its look wins
++    assert secs2[0].floor_h == 0
++    assert all(sd.sector == 0 for sd in sds2)
++    assert all(ld.back == -1 for ld in lds2)                   # no two-sided line survives
++
++
++def test_chain_with_total_range_over_cap_does_not_transitively_merge():
++    """The module's documented regression: floors 0/16/32/48 differ by 16 pairwise (inside
++    floor_tol=24), but the GROUP range cap must stop the staircase collapsing into one
++    48-unit cliff — it may merge into sub-groups whose internal range stays <= 24, never
++    into fewer than two distinct floor heights."""
++    verts, lds, sds, secs = _corridor([0, 16, 32, 48])
++    _, _, sds2, secs2, _, st = simplify(verts, lds, sds, secs, [])
++    floors = sorted({s.floor_h for s in secs2})
++    assert len(floors) >= 2, "staircase transitively collapsed — the range cap regressed"
++    # the current greedy order yields exactly {0,16} + {32,48}
++    assert floors == [0, 32]
++    assert st.sectors_flattened == 2 and st.sector_groups == 2
++    assert st.lines_deleted == 2                               # the two intra-group boundaries
++    # sector_map: 0/1 land together, 2/3 land together, the two groups stay apart
++    m = st.sector_map
++    assert m[0] == m[1] and m[2] == m[3] and m[0] != m[2]
++
++
++def test_out_of_tolerance_sectors_do_not_merge():
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(64))     # 64 > floor_tol 24
++    _, _, _, secs2, _, st = simplify(verts, lds, sds, secs, [])
++    assert st.sectors_flattened == 0 and st.lines_deleted == 0
++    assert sorted(s.floor_h for s in secs2) == [0, 64]
++
++
++def test_light_tolerance_gates_merging_too():
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(0, light=255))   # 95 > light_tol 32
++    _, _, _, secs2, _, st = simplify(verts, lds, sds, secs, [])
++    assert st.sectors_flattened == 0
++    assert len(secs2) == 2
++
++
++# ── the untouchable rule ──
++
++def test_special_sector_never_merges():
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(8, special=9))   # secret sector
++    _, _, _, secs2, _, st = simplify(verts, lds, sds, secs, [])
++    assert st.sectors_flattened == 0 and st.lines_deleted == 0
++    assert len(secs2) == 2
++
++
++def test_tagged_sector_never_merges():
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(8, tag=7))       # lift/door target
++    _, _, _, secs2, _, st = simplify(verts, lds, sds, secs, [])
++    assert st.sectors_flattened == 0
++    assert len(secs2) == 2
++
++
++def test_special_boundary_line_blocks_merge_and_protects_the_door_sector():
++    # a DR-style door line (special, back sector, no tag) protects its back sector
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(8), splitter_special=1)
++    _, _, _, secs2, _, st = simplify(verts, lds, sds, secs, [])
++    assert st.sectors_flattened == 0 and st.lines_deleted == 0
++    assert len(secs2) == 2
++
++
++def test_impassable_boundary_line_blocks_merge():
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(8), splitter_flags=_2S | 1)
++    _, _, _, secs2, _, st = simplify(verts, lds, sds, secs, [])
++    assert st.sectors_flattened == 0
++    assert len(secs2) == 2
++
++
++# ── pass 5: thing thinning ──
++
++def _things_fixture():
++    return [
++        Thing(10, 10, 0, 3004, 7),     # imp            -> KEEP (monster)
++        Thing(20, 20, 0, 1, 0),        # player 1 start -> KEEP
++        Thing(30, 30, 0, 2001, 0),     # shotgun        -> KEEP (weapon)
++        Thing(40, 40, 0, 5, 0),        # blue keycard   -> KEEP (key)
++        Thing(50, 50, 0, 31, 0),       # small decor    -> DROP
++        Thing(60, 60, 0, 10, 0),       # gore/corpse    -> DROP
++        Thing(0, 200, 0, 2014, 0),     # health bonus   -> KEEP (first of its cluster)
++        Thing(32, 200, 0, 2014, 0),    # health bonus 32u away -> DROP (inside 96u spacing)
++        Thing(300, 200, 0, 2014, 0),   # isolated bonus -> KEEP (outside the radius)
++        Thing(70, 70, 0, 9999, 0),     # unknown type   -> KEEP (safe default)
++    ]
++
++
++def test_thing_thinning_policy():
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(64))     # geometry irrelevant here
++    things = _things_fixture()
++    _, _, _, _, things2, st = simplify(verts, lds, sds, secs, things)
++    kept = [(t.type, t.x, t.y) for t in things2]
++    # every monster/start/weapon/key survives
++    for tt in (3004, 1, 2001, 5):
++        assert any(k[0] == tt for k in kept), f"type {tt} must always be kept"
++    # small decor and gore are gone
++    assert all(k[0] not in (31, 10) for k in kept)
++    # the bonus string thinned spatially: the 32u neighbour dropped, the isolated one kept
++    bonuses = sorted((x, y) for tt, x, y in kept if tt == 2014)
++    assert bonuses == [(0, 200), (300, 200)]
++    # unknown types default to kept
++    assert any(k[0] == 9999 for k in kept)
++    assert st.things_dropped == 3
++
++
++def test_thin_things_false_keeps_everything():
++    verts, lds, sds, secs = _split_room(_sec(0), _sec(64))
++    things = _things_fixture()
++    _, _, _, _, things2, st = simplify(verts, lds, sds, secs, things, thin_things=False)
++    assert things2 == things
++    assert st.things_dropped == 0
+diff --git a/tests/host/test_nodebuilder.py b/tests/host/test_nodebuilder.py
+new file mode 100644
+index 0000000..0cacd8f
+--- /dev/null
++++ b/tests/host/test_nodebuilder.py
+@@ -0,0 +1,216 @@
++"""Characterization tests for `doomfj.nodebuilder` (the EXP-12 BSP node builder).
++
++The module had zero coverage; these tests pin its STRUCTURAL contract (the conventions its
++docstring promises: every seg in exactly one subsector, front/back placement consistent with
++`mapcompiler._point_side`, root = last node, NF_SUBSECTOR child encoding, split offsets and
++vertex dedup) plus a golden-stability pin over serialized lumps. The golden hashes are
++CHARACTERIZATION PINS of the current builder's output, not a spec — if the partition scoring
++or serialization is deliberately changed, re-bless them.
++"""
++import hashlib
++
++from doomfj.mapcompiler import _point_side
++from doomfj.nodebuilder import NF_SUBSECTOR, NodeBuilder, initial_segs, lumps
++from doomfj.wad import Linedef, Sidedef, WadFile
++
++SQUARE_ROOM = "tests/fixtures/square_room.wad"
++
++# flags: 1 = impassable (one-sided walls), 4 = two-sided
++_1S, _2S = 1, 4
++
++
++def _sd(sector):
++    return Sidedef(0, 0, "-", "-", "WALL", sector)
++
++
++def _ld(v1, v2, front, back=-1, flags=_1S):
++    return Linedef(v1, v2, flags, 0, 0, front, back)
++
++
++def _split_room():
++    """Two convex cells side by side: x in [0,256] is sector 0, [256,384] is sector 1,
++    separated by one two-sided vertical line at x=256. All one-sided walls front-face the
++    interior (DOOM's right=front); the splitter's front faces sector 1 (x > 256)."""
++    verts = [(0, 0), (0, 128), (256, 128), (384, 128), (384, 0), (256, 0)]
++    sds = [_sd(0), _sd(0), _sd(1), _sd(1), _sd(1), _sd(0), _sd(1), _sd(0)]
++    lds = [
++        _ld(0, 1, 0),            # west          (sector 0)
++        _ld(1, 2, 1),            # top-left      (sector 0)
++        _ld(2, 3, 2),            # top-right     (sector 1)
++        _ld(3, 4, 3),            # east          (sector 1)
++        _ld(4, 5, 4),            # bottom-right  (sector 1)
++        _ld(5, 0, 5),            # bottom-left   (sector 0)
++        _ld(5, 2, 6, 7, _2S),    # splitter x=256: front=sector 1, back=sector 0
++    ]
++    return verts, lds, sds
++
++
++def _convex_square():
++    """One convex sector — the shape the builder's docstring promises emits NO nodes."""
++    verts = [(0, 0), (0, 128), (128, 128), (128, 0)]
++    sds = [_sd(0)] * 4
++    lds = [_ld(0, 1, 0), _ld(1, 2, 1), _ld(2, 3, 2), _ld(3, 0, 3)]
++    return verts, lds, sds
++
++
++def _leaf_side_invariant(nb, root):
++    """Walk the tree from the root; every subsector's segs must sit on the correct side of
++    EVERY ancestor partition (front: _point_side <= 0 at the seg midpoint, back: >= 0 —
++    on-the-line covers the collinear segs that ride the partition itself)."""
++    seen_ss = set()
++
++    def leaf_segs(ss_idx):
++        n, first = nb.out_ss[ss_idx]
++        return nb.out_segs[first:first + n]
++
++    def check(child, constraints):
++        if child & NF_SUBSECTOR:
++            ss = child & ~NF_SUBSECTOR
++            assert ss < len(nb.out_ss)
++            seen_ss.add(ss)
++            for v1, v2, *_ in leaf_segs(ss):
++                (x1, y1), (x2, y2) = nb.out_verts[v1], nb.out_verts[v2]
++                mx, my = (x1 + x2) / 2, (y1 + y2) / 2
++                for (px, py, pdx, pdy), front in constraints:
++                    s = _point_side(px, py, pdx, pdy, mx, my)
++                    assert (s <= 0) if front else (s >= 0), \
++                        f"seg mid ({mx},{my}) on the wrong side of {(px, py, pdx, pdy)}"
++        else:
++            assert child < len(nb.out_nodes)
++            x, y, dx, dy, _, _, r, l = nb.out_nodes[child]
++            part = (x, y, dx, dy)
++            check(r, constraints + [(part, True)])
++            check(l, constraints + [(part, False)])
++
++    check(root, [])
++    assert seen_ss == set(range(len(nb.out_ss)))
++
++
++def test_convex_room_is_one_leaf_no_nodes():
++    verts, lds, sds = _convex_square()
++    nb = NodeBuilder(verts, lds, sds)
++    root = nb.build()
++    assert root == (0 | NF_SUBSECTOR)          # the leaf ref, NF_SUBSECTOR-tagged
++    assert nb.out_nodes == []                   # "NODES stays empty (the square-room shape)"
++    assert nb.out_ss == [(4, 0)]
++    assert len(nb.out_segs) == 4
++    assert nb.mixed_leaves == 0
++
++
++def test_split_room_structural_invariants():
++    verts, lds, sds = _split_room()
++    nb = NodeBuilder(verts, lds, sds)
++    root = nb.build()
++
++    # the splitter is the only separating candidate: exactly one node, root is its index
++    # (and in general the root is the LAST node record)
++    assert len(nb.out_nodes) == 1
++    assert root == len(nb.out_nodes) - 1
++
++    # every seg lands in exactly one subsector: firstseg/numsegs tile [0, len(out_segs))
++    spans = sorted(nb.out_ss, key=lambda s: s[1])
++    cursor = 0
++    for n, first in spans:
++        assert first == cursor and n > 0
++        cursor += n
++    assert cursor == len(nb.out_segs)
++
++    # no split was needed: 6 one-sided + 2 splitter segs pass through intact, 4 per leaf
++    assert len(nb.out_segs) == len(initial_segs(verts, lds, sds)) == 8
++    assert sorted(n for n, _ in nb.out_ss) == [4, 4]
++    assert nb.mixed_leaves == 0                 # each leaf single-sector
++
++    # child encoding: leaf refs carry NF_SUBSECTOR with a valid low index; node refs (none
++    # here) would have to be earlier records than their parent
++    for *_, r, l in [nb.out_nodes[-1]]:
++        for child in (r, l):
++            if child & NF_SUBSECTOR:
++                assert (child & ~NF_SUBSECTOR) < len(nb.out_ss)
++            else:
++                assert child < len(nb.out_nodes) - 1
++
++    # bbox sanity: DOOM order (top, bottom, left, right)
++    for _, _, _, _, bbr, bbl, _, _ in nb.out_nodes:
++        for top, bottom, left, right in (bbr, bbl):
++            assert top >= bottom and right >= left
++
++    _leaf_side_invariant(nb, root)
++
++
++def test_split_room_partition_sides_match_point_side():
++    """The node's front (right) child holds exactly the sector-1 half (x > 256) — the
++    documented `_point_side` < 0 = front convention, checked against real coordinates."""
++    verts, lds, sds = _split_room()
++    nb = NodeBuilder(verts, lds, sds)
++    root = nb.build()
++    x, y, dx, dy, _, _, r, l = nb.out_nodes[root]
++    for child, front in ((r, True), (l, False)):
++        n, first = nb.out_ss[child & ~NF_SUBSECTOR]
++        for v1, v2, *_ in nb.out_segs[first:first + n]:
++            (x1, y1), (x2, y2) = nb.out_verts[v1], nb.out_verts[v2]
++            s = _point_side(x, y, dx, dy, (x1 + x2) / 2, (y1 + y2) / 2)
++            assert (s <= 0) if front else (s >= 0)
++
++
++def test_spanning_walls_are_split_with_exact_offsets_and_deduped_vertices():
++    """Top and bottom walls span BOTH cells, so the x=256 partition must split them. The
++    split fragments must carry the along-the-linedef offset from the linedef's own start,
++    and the split vertices land exactly on the splitter's endpoints (vertex dedup: no new
++    vertex records)."""
++    verts = [(0, 0), (0, 128), (384, 128), (384, 0), (256, 0), (256, 128)]
++    sds = [_sd(0), _sd(0), _sd(1), _sd(1), _sd(1), _sd(0)]
++    lds = [
++        _ld(0, 1, 0),            # west
++        _ld(1, 2, 1),            # top, spans x=0..384
++        _ld(2, 3, 2),            # east
++        _ld(3, 0, 3),            # bottom, spans x=384..0
++        _ld(4, 5, 4, 5, _2S),    # splitter at x=256
++    ]
++    nb = NodeBuilder(verts, lds, sds)
++    root = nb.build()
++    assert len(nb.out_nodes) == 1 and root == 0
++    # 6 input segs (4 one-sided + 2-sided splitter), 2 splits -> 8 emitted
++    assert len(initial_segs(verts, lds, sds)) == 6
++    assert len(nb.out_segs) == 8
++    # split points (256,128)/(256,0) dedupe onto the splitter's existing vertices
++    assert len(nb.out_verts) == 6
++    # offsets: distance along the linedef from ITS start — top splits at 256, bottom at 128
++    offs = {}
++    for _, _, _, ld, _, off in nb.out_segs:
++        offs.setdefault(ld, set()).add(off)
++    assert offs[1] == {0, 256}                  # top wall fragments
++    assert offs[3] == {0, 128}                  # bottom wall (runs 384 -> 0, split after 128)
++    assert offs[4] == {0}                       # splitter itself never split
++    _leaf_side_invariant(nb, root)
++
++
++# ── golden-stability pins (characterization, not spec — re-bless on deliberate change) ──
++
++def _lump_hash(nb):
++    d = lumps(nb)
++    h = hashlib.sha256()
++    for name in ("VERTEXES", "SEGS", "SSECTORS", "NODES"):
++        h.update(name.encode() + b"\0" + d[name])
++    return h.hexdigest()
++
++
++# computed from the CURRENT builder (this session) and baked in as characterization pins
++SPLIT_ROOM_GOLDEN = "04371eda1e3c02e8d1d732359995d767755a95731d769f332c6d5d9bbea8230e"
++SQUARE_ROOM_GOLDEN = "974cb67bef35a96ff912020e6579ef9f56d0ac8b54f57caca6cd2256dcf94327"
++
++
++def test_split_room_lumps_golden():
++    verts, lds, sds = _split_room()
++    nb = NodeBuilder(verts, lds, sds)
++    nb.build()
++    assert _lump_hash(nb) == SPLIT_ROOM_GOLDEN
++
++
++def test_square_room_wad_lumps_golden():
++    """Rebuild the BSP for the square_room fixture's geometry and pin the serialized lumps."""
++    w = WadFile.from_path(SQUARE_ROOM)
++    verts = [(v.x, v.y) for v in w.vertexes("MAP01")]
++    nb = NodeBuilder(verts, w.linedefs("MAP01"), w.sidedefs("MAP01"))
++    root = nb.build()
++    _leaf_side_invariant(nb, root)
++    assert _lump_hash(nb) == SQUARE_ROOM_GOLDEN
+diff --git a/tests/host/test_plane_bands.py b/tests/host/test_plane_bands.py
+index 44fd7b0..7584c79 100644
+--- a/tests/host/test_plane_bands.py
++++ b/tests/host/test_plane_bands.py
+@@ -4,13 +4,15 @@ step). This is the arithmetic the future fj column-stream band-list emitter (pS2
+ tests pin its correctness and its accepted approximation bound (<=1 row shift vs the always-exact
+ per-pixel formula) BEFORE it is wired into any renderer or oracle output.
+ 
+-Not yet consumed by `_render_planes_flat` (still exact, byte-identical to the shipped flat goldens and
+-the current row-major fj kernel) -- see the docstring on `_render_planes_flat` for why the wiring waits
+-for the fj-side replacement to land in the same rung.
++Now CONSUMED by `_render_planes_flat` (the F4 re-bless): the flat tier's per-row zidx comes from one
++shared full-range `_zidx_band_walk` per planeheight (sliced per column), mirrored bit-for-bit by the fj
++column-stream `plane.build_bands` -- see the docstring on `_render_planes_flat` for the measured <=1-row
++band-edge drift vs the always-exact per-pixel formula.
+ """
+ from doomfj.config import Config
+ from doomfj.fixedpoint import _signed, fixed_mul
+ from doomfj.reference_model import ReferenceModel, build_scene, spawn_state
++from doomfj.tables import LIGHTZSHIFT, MAXLIGHTZ
+ from doomfj.wad import WadFile
+ 
+ E1M1 = "tests/fixtures/freedoom_e1m1.wad"
+@@ -18,7 +20,7 @@ E1M1 = "tests/fixtures/freedoom_e1m1.wad"
+ 
+ def _exact_zidx(rm, ph, y):
+     dist = fixed_mul(ph, rm.yslope[y], 8, 4)
+-    return min(127, dist >> 20)
++    return min(MAXLIGHTZ - 1, dist >> LIGHTZSHIFT)
+ 
+ 
+ def _real_e1m1_planeheights(rm):

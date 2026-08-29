@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # (19 F_SKY1 ceilings); a square-room fixture must stay False, which is why this is not a blanket
 # rewrite of every render_wall_frame in the repo.
 FORCED = ["sky", "near_steps", "stack_steps", "bbox_cull", "degrade"]
-FILES = ["deg_gate", "deg_gate2", "m14_basegate", "m14_gate", "v4_check", "v4b_gate", "v5_gate",
+FILES = ["deg_gate", "deg_gate2", "m14_basegate", "m14_gate", "v4b_gate", "v5_gate",
          "v5spr_debug", "v5spr_debug2", "v5spr_gate", "w1r_faces_gate"]
 
 

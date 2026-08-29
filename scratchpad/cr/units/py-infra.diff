@@ -1,0 +1,458 @@
+diff --git a/src/doomfj/build.py b/src/doomfj/build.py
+index 6fec97f..b7d9f81 100644
+--- a/src/doomfj/build.py
++++ b/src/doomfj/build.py
+@@ -29,6 +29,34 @@ from doomfj.wall_renderer import emit_wall_renderer
+ _SRC_FJ = Path("src/fj")
+ # the fixed include set the runtime wall renderer assembles against (before the emitted main)
+ _RENDERER_INCLUDES = ["fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj"]
++# ... plus these two for raster_mode="lines" (the shipping tier): the packed-byte ceiling/floor BAND
++# lists pass-1 builds, and the 0x0B column-stream present that replaces the framebuffer raster.
++_LINES_INCLUDES = ["plane_bands.fj", "stream_render.fj"]
++# V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
++DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
++
++
++def _resolve_sprite_wad(map_wad, sprite_wad):
++    """The wad V4 takes SPRITE art from: an already-loaded `WadFile`, a path, or the default —
++    falling back to the map wad, and RAISING if nothing in reach carries an S_START..S_END block.
++    Explicit failure, not a silent `things=False`: a feature that quietly does not run is the bug
++    class this renderer has paid for twice (the V4 courtyard, both BSP prunes)."""
++    def _has_sprites(w):
++        return "S_START" in w.names() and "S_END" in w.names()
++
++    if isinstance(sprite_wad, WadFile):
++        if not _has_sprites(sprite_wad):
++            raise ValueError("things=True: the given sprite_wad has no S_START..S_END lumps")
++        return sprite_wad
++    if sprite_wad is not None and Path(sprite_wad).exists():
++        w = WadFile.from_path(str(sprite_wad))
++        if _has_sprites(w):
++            return w
++    if _has_sprites(map_wad):
++        return map_wad
++    raise ValueError(
++        f"things=True needs sprite art: {sprite_wad!r} is absent or carries no sprite lumps, and "
++        f"the map wad has none either. Pass sprite_wad=<a full wad> or build with things=False.")
+ 
+ 
+ def build(fj_src="src/fj/hello.fj", out_fjm="build/hello.fjm", metrics="build/metrics.json") -> dict:
+@@ -154,28 +182,49 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
+ 
+ 
+ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
+-                        flat_max_words=None) -> dict:
++                        flat_max_words=None, floor_mode="FT1", wall_mode="WPX",
++                        raster_mode="lines", plane_near=True, wall_noise=True, sky=True,
++                        steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD) -> dict:
+     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
+     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
+     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
+     (R6 single source) — so every space optimization (M12oo pass-2 trampoline, M12pp/qq xor_by + xor-involution
+-    walk) ships here for free. Assembles against the fixed renderer include set, then R0-gates: assert
++    walk) ships here for free. Assembles against the renderer include set, then R0-gates: assert
+     `storage_mode == flat` and `span < limit`. The renderer's fully-unrolled pass-2 + BSP walk push the span
+     past the 2**23 default, so pass a RAISED `flat_max_words` (2**26) per DESIGN §1.2 (RAM-only cost). The
+     viewpoint `(vx,vy,va)` is read from stdin at runtime; the gate run feeds an invalid byte so the input
+     parser jumps to `bad:` and halts immediately (the span/storage_mode are load-time, so no full render is
+-    needed for the gate — the golden test does the byte-exact render)."""
++    needed for the gate — the golden test does the byte-exact render).
++
++    **The defaults are the SHIPPING tier**, i.e. what `scripts/walk_e1m1.py` puts on screen: the lines
++    raster with WPX 1x1-texel walls + FT1 floors + rung-3a `plane_near`, and all four VISUAL FEATURES
++    (V1 `wall_noise` grain, V2 `sky`, V3 `steps` faces, V4 `things` sprites) ON. Every one is byte-exact
++    against the oracle (`tests/fj/test_visual_features.py`); before this they were emitter keywords that
++    only the walker and that test ever passed, so the shipped binary rendered a strictly older picture
++    than the project's own screenshots. The older tiers stay reachable by keyword
++    (`raster_mode="framebuffer", floor_mode="textured", wall_mode="textured"` is the pre-lines build).
++
++    ⚠ V4 needs SPRITE ART, and a cut-down map wad has no sprite lumps at all — hence `sprite_wad`,
++    which defaults to `assets/freedoom1.wad` and falls back to the map wad when that file is absent.
++    If neither carries sprites this RAISES rather than quietly dropping the feature: a silently
++    not-running feature is exactly the class of bug that cost this repo the most (docs/opt-experiments.md).
++    """
+     from flipjump.interpreter.io_devices.FixedIO import FixedIO
+     cfg = cfg or Config()
+     wad = WadFile.from_path(wad_path)
+     limit = flat_max_words or FLAT_MAX_WORDS
+     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
++    spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
+ 
+-    main = emit_wall_renderer(wad, mapname, cfg, over_align=False)
++    main = emit_wall_renderer(wad, mapname, cfg, over_align=False, floor_mode=floor_mode,
++                              wall_mode=wall_mode, raster_mode=raster_mode, plane_near=plane_near,
++                              wall_noise=wall_noise, sky=sky, steps=steps, things=things,
++                              sprite_wad=spr)
+     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
+     main_p = gen / "renderer_main.fj"
+     main_p.write_text(main, encoding="utf-8")
+-    paths = [consts] + [_SRC_FJ / f for f in _RENDERER_INCLUDES] + [main_p]
++    includes = _RENDERER_INCLUDES + (_LINES_INCLUDES if raster_mode == "lines" else [])
++    paths = [consts] + [_SRC_FJ / f for f in includes] + [main_p]
+ 
+     out = Path(out_fjm); out.parent.mkdir(parents=True, exist_ok=True)
+     t = time.perf_counter()
+@@ -189,6 +238,8 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
+         "storage_mode": str(term.storage_mode), "span_words": span, "flat_limit": limit,
+         "headroom": round(limit / span, 3) if span else None,
+         "fjm_bytes": out.stat().st_size, "assemble_seconds": assemble_seconds,
++        "tier": f"{raster_mode}/{wall_mode}/{floor_mode}" + ("+plane_near" if plane_near else ""),
++        "features": {"wall_noise": wall_noise, "sky": sky, "steps": steps, "things": things},
+     }
+     assert metrics["storage_mode"] == "flat", f"R4: storage_mode {metrics['storage_mode']!r} != flat"
+     assert span < limit, f"R4: span {span} >= flat limit {limit}"
+diff --git a/src/doomfj/coarse_cull.py b/src/doomfj/coarse_cull.py
+new file mode 100644
+index 0000000..47d4df6
+--- /dev/null
++++ b/src/doomfj/coarse_cull.py
+@@ -0,0 +1,87 @@
++"""M13-raster coarse cull: the BAKED coarse-angle bounds shared (R6 SSOT) by the fj macro's data table
++and the host reference / prototype.
++
++The division-free coarse cull pins a vertex's absolute BAM angle to a conservative interval [lo,hi]
++using ONLY sign-folds + integer magnitude compares (NO slope_div): the octant idx
++(sign(dx)*4 + sign(dy)*2 + (|dx|>|dy|), matching proj.point_to_angle) plus a WEDGE idx that subdivides
++the octant by comparing the ratio min(|dx|,|dy|)/max(...) against NW-1 fixed thresholds
++(smaller*NW vs larger*k -- integer, no division). Each (octant, wedge) maps to a compile-time-constant
++[lo,hi] BAM interval: within a wedge the true `base` = tantoangle[slope] lies in
++[tantoangle[w*(SLOPERANGE/NW)], tantoangle[(w+1)*(SLOPERANGE/NW)]] (tantoangle is monotone), and the
++octant's point_to_angle output formula maps that base-range to an angle-range, widened by a small
++guard for the tantoangle quantization. Because the interval is a guaranteed SUPERSET of the true
++angle, a seg both of whose vertices' intervals miss the frustum (or whose conservative column span is
++fully drawn) is provably invisible -> cullable WITHOUT the division. Pure optimization: identical
++pixels, no oracle change, no re-bless.
++"""
++from __future__ import annotations
++
++from doomfj.tables import tantoangle_table
++from doomfj.reference_model import SLOPERANGE
++
++ANGMASK = (1 << 32) - 1
++NW_DEFAULT = 8                 # wedges per octant (73% cull @ E1M1 spawn; diminishing returns above)
++GUARD_DEFAULT = 1 << 22        # widen each interval for tantoangle quantization (keeps culls conservative)
++
++
++def _octant_map(oct_: int, base: int) -> int:
++    """proj.point_to_angle's per-octant output formula (projection.fj oct0..oct7), base in [0,ANG45]."""
++    if oct_ == 0: return (0x3FFFFFFF - base) & ANGMASK
++    if oct_ == 1: return base & ANGMASK
++    if oct_ == 2: return (0xC0000000 + base) & ANGMASK
++    if oct_ == 3: return (-base) & ANGMASK
++    if oct_ == 4: return (0x40000000 + base) & ANGMASK
++    if oct_ == 5: return (0x7FFFFFFF - base) & ANGMASK
++    if oct_ == 6: return (0xBFFFFFFF - base) & ANGMASK
++    return (0x80000000 + base) & ANGMASK   # oct 7
++
++
++def coarse_angle_bounds(nw: int = NW_DEFAULT, guard: int = GUARD_DEFAULT):
++    """Return a list of (lo, hi) BAM intervals, indexed by (octant*nw + wedge), 8*nw entries.
++    Each interval is a conservative superset of the true absolute angle for any vertex whose octant
++    and ratio-wedge match. lo/hi are unsigned 32-bit (may wrap; the consumer does modular arc tests)."""
++    tta = tantoangle_table(SLOPERANGE)
++    assert SLOPERANGE % nw == 0, f"SLOPERANGE={SLOPERANGE} not divisible by nw={nw}"
++    step = SLOPERANGE // nw
++    out = []
++    for oct_ in range(8):
++        for w in range(nw):
++            blo = tta[w * step]
++            bhi = tta[(w + 1) * step]
++            a = _octant_map(oct_, blo)
++            b = _octant_map(oct_, bhi)
++            # the two endpoints may be in either order (formula can flip); pick the short arc
++            lo, hi = (a, b) if ((b - a) & ANGMASK) < (1 << 31) else (b, a)
++            out.append(((lo - guard) & ANGMASK, (hi + guard) & ANGMASK))
++    return out
++
++
++def octant_wedge_idx(dx: int, dy: int, nw: int = NW_DEFAULT):
++    """The (octant, wedge, combined) indices for a delta, using ONLY sign-folds + integer compares
++    (the exact computation the fj macro performs; no division). Returns None for the (0,0) degenerate."""
++    if dx == 0 and dy == 0:
++        return None
++    sx = dx < 0
++    sy = dy < 0
++    adx, ady = abs(dx), abs(dy)
++    gt = adx > ady
++    oct_ = (4 if sx else 0) + (2 if sy else 0) + (1 if gt else 0)
++    smaller, larger = (ady, adx) if gt else (adx, ady)
++    w = 0
++    for k in range(1, nw):
++        if smaller * nw >= larger * k:     # smaller/larger >= k/nw  (integer, no division)
++            w = k
++    return oct_, w, oct_ * nw + w
++
++
++def generate_coarse_bounds_fj(label: str, nw: int = NW_DEFAULT, guard: int = GUARD_DEFAULT) -> str:
++    """Emit the coarse-bounds data table as fj: 8*nw entries, each two 8-nibble values [lo, hi]
++    laid out contiguously (entry k's lo at label + k*16*dw, hi at label + (k*16+8)*dw). Read with
++    hex.read_table 8 / hex.read_table_packed on the combined index (octant*nw + wedge)."""
++    bounds = coarse_angle_bounds(nw, guard)
++    lines = [f"// coarse-angle bounds ({8*nw} entries, nw={nw}, guard={guard:#x}) - doomfj.coarse_cull",
++             f"{label}:"]
++    for lo, hi in bounds:
++        lines.append(f"    hex.vec 8, {lo:#x}")
++        lines.append(f"    hex.vec 8, {hi:#x}")
++    return "\n".join(lines) + "\n"
+diff --git a/src/doomfj/config.py b/src/doomfj/config.py
+index 21b2283..2b782c2 100644
+--- a/src/doomfj/config.py
++++ b/src/doomfj/config.py
+@@ -14,6 +14,18 @@ from pathlib import Path
+ # Default flat-limit (span-words) — flipjump's 2**23 (64 MB at w=32), §1.2. The R-3 budget ceiling.
+ FLAT_MAX_WORDS = 1 << 23
+ 
++# M13-2S rung 3a — how many MARKING TWO-SIDED segs may attribute floor/ceiling surfaces in one frame
++# (see ReferenceModel.render_wall_frame's `plane_near` and wall_renderer's ts leaf). A hard budget, in
++# the spirit of vanilla DOOM's MAXVISPLANES/MAXDRAWSEGS: without one the cost is unbounded, because
++# the natural stopping condition ("every column attributed") never fires when part of the view is open
++# sky or void -- measured on E1M1, 13 of the sweep's 65 viewpoints never attribute all 160 columns and
++# one of them cost 69.6M ops/frame, more than double the owner's 33M ceiling. Segs are visited
++# nearest-first, so the budget only ever costs FAR attribution: those columns fall back to the
++# claiming wall's sector, which is the pre-rung-3a behaviour. 128 was chosen by measurement --
++# scratchpad/rung3a_budget.py: it bounds the worst frame while every viewpoint that closes the view
++# (52 of the 65) needs far fewer. Shared by the oracle and the emitter so they cannot drift (R6).
++PNEAR_SEG_BUDGET = 128
++
+ 
+ @dataclass(frozen=True)
+ class Config:
+diff --git a/src/doomfj/fastrun.py b/src/doomfj/fastrun.py
+new file mode 100644
+index 0000000..882de6c
+--- /dev/null
++++ b/src/doomfj/fastrun.py
+@@ -0,0 +1,107 @@
++"""Run one assembled .fjm MANY times without re-paying the per-run load.
++
++`flipjump.run(path, ...)` is a one-shot API: every call re-parses the .fjm from disk and rebuilds
++the native engine's memory image. That is exactly right for a test, and exactly wrong for the
++walker, which renders the SAME program once per frame — measured on E1M1 (6.36M words), the parse
++costs 1.63s and the run-list prep 0.87s, against a 0.105s actual run. So ~96% of `flipjump.run`'s
++wall time was setup the walker was paying over and over.
++
++`FjmRunner` hoists everything that does not depend on the frame — the parse, the segment list and
++the contiguous word runs — into the constructor, leaving per frame only (a) a fresh
++`_fjcore.Memory` + bulk `set_words`, and (b) the C run loop itself:
++
++    E1M1 spawn frame, WPX+FT1        flipjump.run    FjmRunner
++      per-frame wall time              2.56 s         0.187 s      (13.6x)
++      of which the C run loop          0.105 s        0.105 s      (220M ops/s)
++
++⚠ The memory image MUST be rebuilt per run — it cannot be reused. FlipJump programs self-modify
++(every `wflip`, and this renderer's whole `xor_by` per-seg constant machinery), so a second run on
++a dirty image is not the same program: measured, run 2 on a reused core halts after 9 ops. The
++`set_words` restore is therefore load-bearing, not an optimisation to be tidied away later.
++
++Output is byte-identical to `flipjump.run` — the engine and the IO device are the same ones
++`flipjump.run` would have picked; only the redundant reload is gone.
++"""
++from pathlib import Path
++from typing import List, Optional, Tuple
++
++import flipjump as fj
++from flipjump.fjm import fjm_reader
++from flipjump.fjm.fjm_reader import GarbageHandling
++from flipjump.interpreter.fjm_run import IOReadOnEOF, is_native_engine_active
++from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
++
++try:                                          # the native engine is optional (a source install
++    from flipjump.interpreter import _fjcore  # without the built C extension still works)
++except ImportError:                           # pragma: no cover
++    _fjcore = None
++
++
++class FjmRunner:
++    """An assembled .fjm loaded ONCE and runnable many times. `run(io_device)` returns the op count.
++
++    Falls back to `flipjump.run` (same results, ~14x slower) whenever the native engine is absent
++    or cannot take this program — so callers never need to branch on it; check `.native` only to
++    report which path is live."""
++
++    def __init__(self, fjm_path: Path, flat_max_words: int = 1 << 26) -> None:
++        self.fjm_path = Path(fjm_path)
++        self.flat_max_words = flat_max_words
++        self._mem = fjm_reader.Reader(self.fjm_path)
++        self._mem.assert_runnable()
++        self.native = (_fjcore is not None and is_native_engine_active()
++                       and self._mem.garbage_handling == GarbageHandling.Stop)
++        self.width = self._mem.memory_width
++        self._segments: List[Tuple[int, int]] = []
++        self._runs: List[Tuple[int, List[int]]] = []
++        if self.native:
++            self._segments = [(s.segment_start, s.segment_length)
++                              for s in self._mem.memory_segments]
++            # the loaded words as CONTIGUOUS runs, built once -- per frame this is just one
++            # bulk set_words per run, with no dict walk and no re-sort
++            start: Optional[int] = None
++            nxt, vals = 0, []
++            for addr in sorted(self._mem.memory):
++                if start is None or addr != nxt:
++                    if start is not None:
++                        self._runs.append((start, vals))
++                    start, vals = addr, []
++                vals.append(self._mem.memory[addr])
++                nxt = addr + 1
++            if start is not None:
++                self._runs.append((start, vals))
++            # the parsed dict is now redundant with _runs and would sit on ~350MB for E1M1
++            # (6.36M int->int entries) for the whole session; the runs are all `run` needs
++            self._mem.memory = {}
++
++    def run(self, io_device) -> int:
++        """Run the program once against `io_device`; returns the op count."""
++        if not self.native:
++            return fj.run(self.fjm_path, io_device=io_device, print_time=False,
++                          print_termination=False,
++                          flat_max_words=self.flat_max_words).op_counter
++        # WALKER-PERF: one long-lived core, restored per frame by the C-side freeze()/reset()
++        # snapshot (a single 8B-per-word memcpy) instead of rebuilding a fresh core and pushing
++        # every word back through set_words -- the Python-list reload measured ~0.5s/frame at
++        # the 37M-word image (10x the run loop itself). Older engines without freeze() fall
++        # back to the rebuild path, so this stays correct on a stock flipjump install.
++        core = getattr(self, "_core", None)
++        if core is not None:
++            core.reset()
++        else:
++            core = _fjcore.Memory(self.width, flat_max_words=self.flat_max_words)
++            for seg_start, seg_len in self._segments:
++                core.add_segment(seg_start, seg_len)
++            for start, vals in self._runs:
++                core.set_words(start, vals)
++            if hasattr(core, "freeze"):
++                try:
++                    core.freeze()             # pure-flat programs only; paged falls back below
++                    self._core = core
++                    self._runs = []           # the frozen image supersedes the Python-int runs
++                except RuntimeError:
++                    pass
++        io_device.attach_memory(NativeDeviceMemory(core, self.width))
++        _cause, op_count, _err, _last, _paused = core.run(
++            io_device.read_bit, io_device.write_bit, IOReadOnEOF, last_ops_length=0)
++        return op_count
+diff --git a/src/doomfj/tables.py b/src/doomfj/tables.py
+index a9b6906..cc4c449 100644
+--- a/src/doomfj/tables.py
++++ b/src/doomfj/tables.py
+@@ -17,6 +17,8 @@ LIGHTSEGSHIFT = 4       # sector light (0..255) -> zlight light bucket (0..15)
+ MAXLIGHTZ = 128         # zlight distance buckets (distance >> LIGHTZSHIFT)
+ LIGHTZSHIFT = 20        # distance (16.16) -> zlight distance bucket
+ LIGHTSCALESHIFT = 12    # DOOM R_InitLightTables intermediate shift
++MAXLIGHTSCALE = 48      # DOOM scalelight[] scale buckets (rw_scale >> LIGHTSCALESHIFT)
++DOOM_SCREENWIDTH = 320  # DOOM's reference view width -- scalelight's own view-size compensation
+ DISTMAP = 2             # DOOM distance-darkening rate divisor
+ 
+ 
+@@ -56,6 +58,36 @@ def zlight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
+     return grid
+ 
+ 
++def scalelight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
++    """DOOM's `scalelight[]` (R_ExecuteSetViewSize): the WALL distance-light map — the sibling of
++    `zlight_table`, indexed by the column's projection SCALE instead of a plane distance. Returns a
++    `LIGHTLEVELS × MAXLIGHTSCALE` grid of COLORMAP row indices.
++
++    Index it as `scalelight[light >> LIGHTSEGSHIFT][min(MAXLIGHTSCALE-1, scale >> LIGHTSCALESHIFT)]`
++    (DOOM R_RenderSegLoop). A NEARER column has a larger scale, so a larger bucket j, so a lower
++    (brighter) colormap row — near walls are bright, far walls fade into the dark. This is the cue
++    that makes depth readable, and until M13-WPXLIGHT our walls had none of it: they used the
++    sector's light level alone, flat all the way to the horizon.
++
++    `view_w` is load-bearing, not decoration: DOOM's own formula is
++    `level = startmap - j*SCREENWIDTH/viewwidth/DISTMAP`, and that `SCREENWIDTH/viewwidth` term is
++    what keeps the falloff right on a narrower view. Our projection is `view_w/2`, so at 160 wide our
++    scales are HALF DOOM's at the same distance — drop the term and every wall lands ~6 colormap rows
++    too dark, which is most of a 32-row range. (`zlight_table` takes `view_w` for the same reason.)
++
++    Note `startmap` is 0 for a fully-lit sector (light 255), so DOOM gives such sectors no wall
++    falloff at all — that is DOOM's behaviour, faithfully reproduced, not a bug here."""
++    grid = []
++    for i in range(LIGHTLEVELS):
++        startmap = ((LIGHTLEVELS - 1 - i) * 2) * num_colormaps // LIGHTLEVELS
++        row = []
++        for j in range(MAXLIGHTSCALE):
++            level = startmap - j * (DOOM_SCREENWIDTH // view_w) // DISTMAP
++            row.append(max(0, min(num_colormaps - 1, level)))
++        grid.append(row)
++    return grid
++
++
+ def sine_table(count: int, fraction_bits: int, total_bits: int) -> list[int]:
+     """sin(2*pi*k/count) for k in [0, count), as signed fixed-point words (two's-complement).
+     count=4096 (16**3) is the design's trig table size (§1.2/§2.1)."""
+@@ -153,3 +185,29 @@ def tantoangle_table(slope_range: int = 2048) -> list[int]:
+     (a computed value in [0, SLOPERANGE], §1.3 — not a shift-extracted index). slope_range+1 entries.
+     Shared kernel: the oracle's `point_to_angle` and the fj angle LUT both read these (R6/D12)."""
+     return [round(math.atan(i / slope_range) / (2 * math.pi) * (1 << 32)) for i in range(slope_range + 1)]
++
++
++SLOPEDIV_RECIP_RK = 24   # perf #13: reciprocal table scale (recip[m] = (1<<RK)//m); RK=24 => <=17-bit entries
++
++
++def slopediv_recip_table() -> list[int]:
++    """perf #13 [re-bless]: the block-FP reciprocal table that replaces SlopeDiv's `hex.div` with a
++    normalize + lookup + mul. `m` is the top-3-nibble (12-bit) mantissa of `sden = den>>8` (leading nibble
++    non-zero, so m in [0x100, 0xFFF]); `recip[m] = (1<<24)//m`. The reciprocal of any sden is then
++    `recip[m] >> (exponent)`, and SlopeDiv = `((num<<3) * recip[m]) >> (24 + 4*nibble_exp)`, clamped to
++    SLOPERANGE. 4096 entries (m<0x100 unused -> 0). De-risked PNG-clean on E1M1 (spawn + square goldens
++    byte-identical; off-spawn viewpoints shift sub-pixel). Shared SSOT: the oracle's `_slope_div` and the
++    fj `slope_div` macro both consume THESE values (R6)."""
++    t = [0] * 4096
++    for m in range(0x100, 0x1000):
++        t[m] = (1 << SLOPEDIV_RECIP_RK) // m
++    return t
++
++
++def slopediv_recip8_table() -> list[int]:
++    """M13-coarseslope [re-bless, owner-approved ±1 column]: `slopediv_recip` with SlopeDiv's own
++    <<3 (DBITS) pre-folded into each entry — `recip8[m] = ((1<<24)//m) << 3`, NOT (1<<27)//m (the
++    floor-then-shift order is what the coarse `_slope_div` computes, and the fj macro must match it
++    bit for bit, R6). Lets the fj slope_div multiply the 3-nibble normalized numerator directly
++    (3 schoolbook rows) with no shl_bit at all. Max entry 0x80000 (20 bits, 3 packed bytes)."""
++    return [r << 3 for r in slopediv_recip_table()]
+diff --git a/src/doomfj/texturecompiler.py b/src/doomfj/texturecompiler.py
+index d86eb97..0652862 100644
+--- a/src/doomfj/texturecompiler.py
++++ b/src/doomfj/texturecompiler.py
+@@ -123,6 +123,19 @@ def colormap_values(wad: WadFile, *, lights: int = 32) -> List[int]:
+     return [cm[light][colour] for light in range(lights) for colour in range(256)]
+ 
+ 
++def generate_colormap_packed_table_fj(label: str, wad: WadFile, *, lights: int = 32) -> str:
++    """M13-raster: the colormap as a RAW packed-byte array (NOT a dispatch table) -- one byte per
++    entry, row-major [light_row][colour], addressable at `label + (light*256+colour)*dw`. This is
++    the device rasterizer's third static table (alongside yslope_packed/zlight): the device DMA-reads
++    it directly (an address handoff via `present.load_raster_tables`, zero fj ops) to do its own
++    distance-light shade lookup, instead of fj baking every (light,colour) combo into a compile-time
++    cm.emit dispatch jump target. SAME values as `colormap_values` (R6 SSOT) -- guaranteed to match
++    whatever cm.emit/cm.apply bake elsewhere, since both draw from the identical wad.colormap()."""
++    values = colormap_values(wad, lights=lights)
++    lines = [f"{label}:"] + [f";{v} * dw" for v in values]
++    return "\n".join(lines)
++
++
+ def compile_colormap(label: str, wad: WadFile, *, lights: int = 32, mode: str = "per_entry",
+                      over_align: bool = True) -> str:
+     """Emit the colormap as a dispatch table indexed by `(light<<8 | colour)` -> lit palette byte,
+diff --git a/src/doomfj/wad.py b/src/doomfj/wad.py
+index 636c998..2e1c821 100644
+--- a/src/doomfj/wad.py
++++ b/src/doomfj/wad.py
+@@ -235,6 +235,17 @@ class WadFile:
+             out.append(WadNode(x, y, dx, dy, right, left))
+         return out
+ 
++    def nodes_bbox(self, mapname: str) -> list[tuple]:
++        """The per-child bounding boxes the NODES lump carries (M13-15M: the bbox wedge cull needs
++        them). One (bbox_right, bbox_left) pair per node, each box (top, bottom, left, right)."""
++        data = self._map_lump(mapname, "NODES").data
++        out = []
++        for off in range(0, len(data) - len(data) % 28, 28):
++            bbr = struct.unpack_from("<4h", data, off + 8)
++            bbl = struct.unpack_from("<4h", data, off + 16)
++            out.append((bbr, bbl))
++        return out
++
+     # ── graphics lumps (H4 / M8): palette, colormap, textures, patches, flats ──
+     def playpal(self, index: int = 0) -> list[tuple[int, int, int]]:
+         """One 256-colour RGB palette (PLAYPAL holds 14; index 0 is the game palette)."""

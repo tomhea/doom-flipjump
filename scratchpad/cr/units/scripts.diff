@@ -1,0 +1,750 @@
+diff --git a/scripts/bakeoff_planes.py b/scripts/bakeoff_planes.py
+new file mode 100644
+index 0000000..39233d5
+--- /dev/null
++++ b/scripts/bakeoff_planes.py
+@@ -0,0 +1,206 @@
++"""M13p0 — the procedural-look PNG contact sheet (host-only; NO oracle/fj edits — see the plan's Task
++M13p0 step 4). Renders square-room + E1M1 spawn + E1M1 rotated-45 for:
++  T  current textured (reference)
++  F  flat-colored tier (floor_texturing=False -- already in-tree, M13a)
++  P1 per-flat 16-strip: pal = pat[(x ^ y) & 15], pat[i] = flat_texels[4*i]
++  P2 checker: 4x4 blocks alternating the flat's texel(0,0) / texel(32*64+32)
++  P3 xor-noise: pal = pat[(x ^ (y<<1) ^ (y>>2)) & 15]  (same pat as P1, busier break-up)
++  W1 walls: per-seg solid color = the MODE texel of the seg's downscaled texture
++  W2 walls: per-seg 16-row vertical band strip from the real texture's column 0
++Also renders the OWED #9a+#11 consolidated bless comparison: the CURRENT E1M1/square textured frame
++vs the PRE-GEOMETRY-CAMPAIGN frame (rendered in an isolated git worktree at commit 0f1c94b, the
++commit before perf #9a) -- a pixel-diff highlight, not just a repeat of the two commits' individual
++PNG claims.
++
++Usage: python scripts/bakeoff_planes.py
++Needs Pillow (`pip install pillow`) -- silently skips PNG writing if absent (still prints stats).
++"""
++from __future__ import annotations
++
++import json
++from collections import Counter
++from pathlib import Path
++
++from doomfj.config import Config
++from doomfj.reference_model import ReferenceModel, build_scene, spawn_state, frame_hash
++from doomfj.wad import WadFile
++
++ROOM = "tests/fixtures/square_room.wad"
++ASSET = "tests/fixtures/freedoom_assets.wad"
++E1M1 = "tests/fixtures/freedoom_e1m1.wad"
++OUT = Path("scratchpad/bakeoff")
++PRECAMPAIGN_SQUARE = Path("scratchpad/bakeoff/old_square.bin")   # dumped from the 0f1c94b worktree
++PRECAMPAIGN_E1M1 = Path("scratchpad/bakeoff/old_e1m1.bin")
++
++
++def _save_png(frame, palette, path, cfg, scale=5):
++    try:
++        from PIL import Image
++    except ImportError:
++        return False
++    img = Image.new("RGB", (cfg.VIEW_W, cfg.VIEW_H))
++    img.putdata([palette[b] for b in frame])
++    img.resize((cfg.VIEW_W * scale, cfg.VIEW_H * scale), Image.NEAREST).save(path)
++    return True
++
++
++def _mode_texel(texels) -> int:
++    """The most common palette index in a texel list -- a real representative color (NOT a mean
++    index; palette indices aren't luminance-ordered, so a mean index is a random hue)."""
++    return Counter(texels).most_common(1)[0][0]
++
++
++class PatternModel(ReferenceModel):
++    """Overrides _render_planes_flat (NOT _plane_pixel -- it never receives x, so it can't host an
++    (x,y) pattern) to bake-off the P1/P2/P3 candidates. Keeps the exact distance/zlight math; swaps
++    only the flat-base argument per (x,y)."""
++    pattern = None  # set per-instance: "P1" | "P2" | "P3"
++
++    def _pattern_pal(self, asset_wad, flatcache, name, x, y):
++        texels = self._flat_texels(asset_wad, name, flatcache)  # 64x64 row-major [v*64+u]
++        if self.pattern == "P1":
++            pat = [texels[4 * i] for i in range(16)]
++            return pat[(x ^ y) & 15]
++        if self.pattern == "P2":
++            base, base2 = texels[0], texels[32 * 64 + 32]
++            return base if ((x >> 2) ^ (y >> 2)) & 1 == 0 else base2
++        if self.pattern == "P3":
++            pat = [texels[4 * i] for i in range(16)]
++            return pat[(x ^ (y << 1) ^ (y >> 2)) & 15]
++        raise ValueError(self.pattern)
++
++    def _render_planes_flat(self, fb, colormap, asset_wad, flatcache, viewz,
++                            ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff):
++        cfg = self.cfg
++        W, H = cfg.VIEW_W, cfg.VIEW_H
++        for x in range(W):
++            if ceil_hi[x] >= 0:
++                ph, lt = abs((col_ch[x] << 16) - viewz), col_lt[x]
++                for y in range(0, ceil_hi[x] + 1):
++                    base = self._pattern_pal(asset_wad, flatcache, col_cf[x], x, y)
++                    fb[y * W + x] = self._plane_pixel(colormap, ph, lt, base, y)
++            if floor_lo[x] < H:
++                ph, lt = abs((col_fh[x] << 16) - viewz), col_lt[x]
++                for y in range(floor_lo[x], H):
++                    base = self._pattern_pal(asset_wad, flatcache, col_ff[x], x, y)
++                    fb[y * W + x] = self._plane_pixel(colormap, ph, lt, base, y)
++
++
++class WallModel(ReferenceModel):
++    """Overrides _wall_texture to preview the tiny-canvas wall candidates (W1: 1x1 mode texel, W2:
++    1x16 vertical band strip from column 0). This is the SAME mechanism M13p4a ships -- the preview
++    is exactly what the fj rung will render, not an approximation."""
++    wall_mode = None  # "W1" | "W2"
++
++    def _wall_texture(self, asset_wad, name, cache):
++        real = super()._wall_texture(asset_wad, name, cache)
++        if real is None:
++            return None
++        texels, th, tw = real   # column-major: index = col*th + row
++        col0 = texels[:th]      # column 0's texels, row-major within the column
++        if self.wall_mode == "W1":
++            return [_mode_texel(texels)], 1, 1
++        if self.wall_mode == "W2":
++            n = 16
++            band = [col0[min(th - 1, r * th // n)] for r in range(n)]
++            return band, n, 1
++        raise ValueError(self.wall_mode)
++
++
++def _viewpoints(wad_path, mapname):
++    wad = WadFile.from_path(wad_path)
++    sp = spawn_state(wad, mapname)
++    from doomfj.fixedpoint import _signed
++    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
++    A45 = 0x20000000
++    return wad, [("spawn", spx, spy, sp.angle), ("rot45", spx, spy, A45)]
++
++
++def render_set(label, wad_path, mapname, asset_path, model_factory, floor_texturing=None, cfg=None):
++    cfg = cfg or Config()
++    wad, vps = _viewpoints(wad_path, mapname)
++    asset = WadFile.from_path(asset_path) if asset_path else wad
++    scene = build_scene(wad, asset, mapname)
++    stats = {}
++    for tag, vx, vy, va in vps:
++        rm = model_factory()
++        from doomfj.reference_model import SimState
++        state = SimState(vx << 16, vy << 16, va, mapname)
++        kwargs = {} if floor_texturing is None else {"floor_texturing": floor_texturing}
++        frame = rm.render_wall_frame(state, scene, **kwargs)
++        name = f"{label}_{Path(wad_path).stem}_{tag}"
++        _save_png(frame, asset.playpal(0), OUT / f"{name}.png", cfg)
++        stats[name] = {"hash": frame_hash(frame), "distinct_palette_indices": len(set(frame))}
++    return stats
++
++
++def diff_report(label, old_bytes, new_frame, palette, cfg):
++    diffs = [(i, o, n) for i, (o, n) in enumerate(zip(old_bytes, new_frame)) if o != n]
++    deltas = [abs(o - n) for _, o, n in diffs]
++    if diffs:
++        try:
++            from PIL import Image
++            W, H = cfg.VIEW_W, cfg.VIEW_H
++            img = Image.new("RGB", (W, H))
++            px = [palette[b] for b in new_frame]
++            for i, _, _ in diffs:
++                px[i] = (255, 0, 255)   # magenta highlight over the current frame
++            img.putdata(px)
++            img.resize((W * 5, H * 5), Image.NEAREST).save(OUT / f"{label}_diff_highlight.png")
++        except ImportError:
++            pass
++    return {
++        "changed_px": len(diffs), "total_px": len(new_frame),
++        "changed_pct": round(100 * len(diffs) / len(new_frame), 2),
++        "max_delta": max(deltas) if deltas else 0,
++        "mean_delta": round(sum(deltas) / len(deltas), 2) if deltas else 0,
++    }
++
++
++def main():
++    OUT.mkdir(parents=True, exist_ok=True)
++    cfg = Config()
++    results = {}
++
++    # T (reference) + F (already-in-tree flat tier)
++    results["T"] = render_set("T", ROOM, "MAP01", ASSET, ReferenceModel, cfg=cfg)
++    results["T"].update(render_set("T", E1M1, "E1M1", None, ReferenceModel, cfg=cfg))
++    results["F"] = render_set("F", ROOM, "MAP01", ASSET, ReferenceModel, floor_texturing=False, cfg=cfg)
++    results["F"].update(render_set("F", E1M1, "E1M1", None, ReferenceModel, floor_texturing=False, cfg=cfg))
++
++    # P1/P2/P3 floor patterns
++    for p in ("P1", "P2", "P3"):
++        def factory(p=p):
++            m = PatternModel(cfg); m.pattern = p; return m
++        results[p] = render_set(p, ROOM, "MAP01", ASSET, factory, floor_texturing=False, cfg=cfg)
++        results[p].update(render_set(p, E1M1, "E1M1", None, factory, floor_texturing=False, cfg=cfg))
++
++    # W1/W2 wall candidates (textured floors kept, only the wall texture swapped)
++    for w in ("W1", "W2"):
++        def factory(w=w):
++            m = WallModel(cfg); m.wall_mode = w; return m
++        results[w] = render_set(w, ROOM, "MAP01", ASSET, factory, cfg=cfg)
++        results[w].update(render_set(w, E1M1, "E1M1", None, factory, cfg=cfg))
++
++    # the owed #9a+#11 consolidated bless: current vs pre-campaign (0f1c94b), spawn viewpoint only
++    if PRECAMPAIGN_SQUARE.exists() and PRECAMPAIGN_E1M1.exists():
++        rm = ReferenceModel(cfg)
++        room_wad, asset_wad = WadFile.from_path(ROOM), WadFile.from_path(ASSET)
++        rscene = build_scene(room_wad, asset_wad, "MAP01")
++        rframe = rm.render_wall_frame(spawn_state(room_wad, "MAP01"), rscene)
++        results["bless_square"] = diff_report("bless_square", PRECAMPAIGN_SQUARE.read_bytes(),
++                                              rframe, asset_wad.playpal(0), cfg)
++        e_wad = WadFile.from_path(E1M1)
++        escene = build_scene(e_wad, e_wad, "E1M1")
++        eframe = rm.render_wall_frame(spawn_state(e_wad, "E1M1"), escene)
++        results["bless_e1m1"] = diff_report("bless_e1m1", PRECAMPAIGN_E1M1.read_bytes(),
++                                            eframe, e_wad.playpal(0), cfg)
++    else:
++        results["bless"] = "SKIPPED -- old_square.bin/old_e1m1.bin not found (dump via a pre-campaign worktree first)"
++
++    (OUT / "bakeoff-metrics.json").write_text(json.dumps(results, indent=2))
++    print(json.dumps(results, indent=2))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/count_until_full.py b/scripts/count_until_full.py
+new file mode 100644
+index 0000000..2f8db0d
+--- /dev/null
++++ b/scripts/count_until_full.py
+@@ -0,0 +1,100 @@
++"""M13p0 step 3c -- host-side until-full counts (sizes M13pG1's walk-abort win). Calls the oracle's
++OWN `bsp_render_order`/`wall_x_range`/`_seg_sector` (no duplicated math, no drift) and counts, at each
++of 3 viewpoints: how many subsectors (and their seg ranges) are visited, and how many segs reach
++`wall_x_range` BEFORE every screen column is claimed (`all(drawn)`) -- the post-full share is what
++pG1's full-abort walk guard deletes.
++
++Usage: python scripts/count_until_full.py
++"""
++import json
++from pathlib import Path
++
++from doomfj.config import Config
++from doomfj.fixedpoint import _signed
++from doomfj.reference_model import ReferenceModel, build_scene, spawn_state
++from doomfj.wad import WadFile
++
++E1M1 = "tests/fixtures/freedoom_e1m1.wad"
++
++
++def count_one(rm, scene, vx, vy, viewangle):
++    cfg = rm.cfg
++    W = cfg.VIEW_W
++    lds = scene.map_wad.linedefs(scene.mapname)
++    sds = scene.map_wad.sidedefs(scene.mapname)
++    secs = scene.map_wad.sectors(scene.mapname)
++    verts = scene.cmap.vertexes
++
++    order = rm.bsp_render_order(scene.cmap, vx, vy)         # the front-to-back subsector visit order
++    drawn = bytearray(W)
++
++    def all_drawn():
++        return all(drawn)
++
++    total_subsectors = len(order)
++    total_segs_visited = 0                                   # every one-sided seg entering the loop
++    total_segs_passing_xrange = 0                             # wall_x_range returned non-None
++    subsectors_until_full = None
++    segs_visited_until_full = 0
++    segs_passing_xrange_until_full = 0
++    became_full_at_subsector = None
++
++    for si_pos, ss_idx in enumerate(order):
++        if became_full_at_subsector is None and all_drawn():
++            became_full_at_subsector = si_pos
++        ss = scene.cmap.subsectors[ss_idx]
++        for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
++            seg = scene.cmap.segs[si]
++            ld = lds[seg.linedef]
++            if ld.back != -1:
++                continue
++            total_segs_visited += 1
++            if became_full_at_subsector is None:
++                segs_visited_until_full += 1
++            rng = rm.wall_x_range(vx << 16, vy << 16, viewangle, seg, verts)
++            if rng is None:
++                continue
++            total_segs_passing_xrange += 1
++            if became_full_at_subsector is None:
++                segs_passing_xrange_until_full += 1
++            x1, x2, _ = rng
++            for x in range(x1, x2):
++                drawn[x] = 1
++
++    if became_full_at_subsector is None:
++        became_full_at_subsector = total_subsectors   # never fills (shouldn't happen at a real spawn)
++    subsectors_until_full = became_full_at_subsector
++
++    return {
++        "total_subsectors": total_subsectors, "subsectors_until_full": subsectors_until_full,
++        "total_segs_visited": total_segs_visited, "segs_visited_until_full": segs_visited_until_full,
++        "total_segs_passing_xrange": total_segs_passing_xrange,
++        "segs_passing_xrange_until_full": segs_passing_xrange_until_full,
++        "post_full_subsector_pct": round(100 * (1 - subsectors_until_full / max(1, total_subsectors)), 1),
++        "post_full_seg_pct": round(100 * (1 - segs_visited_until_full / max(1, total_segs_visited)), 1),
++    }
++
++
++def main():
++    cfg = Config()
++    rm = ReferenceModel(cfg)
++    wad = WadFile.from_path(E1M1)
++    scene = build_scene(wad, wad, "E1M1")
++    sp = spawn_state(wad, "E1M1")
++    spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
++    A45 = 0x20000000
++    VIEWPOINTS = {"spawn": (spx, spy, sp.angle), "rot45": (spx, spy, A45)}
++    # a genuinely valid "other sector" viewpoint (mirrors the E1M1 capstone test's convention: a map
++    # THING location, not an arbitrary offset that might land outside a subsector or inside geometry)
++    for t in wad.things("E1M1"):
++        if (t.x, t.y) != (spx, spy):
++            VIEWPOINTS["othersector"] = (t.x, t.y, sp.angle)
++            break
++    results = {tag: count_one(rm, scene, vx, vy, va) for tag, (vx, vy, va) in VIEWPOINTS.items()}
++    Path("scratchpad/bakeoff").mkdir(parents=True, exist_ok=True)
++    Path("scratchpad/bakeoff/until_full_counts.json").write_text(json.dumps(results, indent=2))
++    print(json.dumps(results, indent=2))
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/measure_frame.py b/scripts/measure_frame.py
+new file mode 100644
+index 0000000..4a10046
+--- /dev/null
++++ b/scripts/measure_frame.py
+@@ -0,0 +1,100 @@
++"""M13p0 — measure E1M1 (or square-room) spawn ops/frame through the SHARED emitter, with component
++ablation (see doomfj.wall_renderer.emit_wall_renderer's `ablate` kwarg for the full mode list).
++
++Usage:
++    python scripts/measure_frame.py                          # full frame (sanity: should be ~462.7M for E1M1)
++    python scripts/measure_frame.py --ablate planes
++    python scripts/measure_frame.py --ablate planes,pass2,pass1
++    python scripts/measure_frame.py --ablate segstub
++    python scripts/measure_frame.py --wad tests/fixtures/square_room.wad --map MAP01 --asset tests/fixtures/freedoom_assets.wad
++
++E1M1 assemble is ~605s (> the Bash tool's 600s timeout) -- run this via run_in_background with NO
++shell `timeout` wrapper; the harness notifies on completion.
++"""
++import argparse
++import sys
++import tempfile
++import time
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++sys.path.insert(0, str(ROOT / "src"))
++
++import flipjump as fj
++from doomfj.config import Config
++from doomfj.fixedpoint import _signed
++from doomfj.harness import W
++from doomfj.reference_model import spawn_state
++from doomfj.wad import WadFile
++from doomfj.wall_renderer import emit_wall_renderer
++from tests.fj.test_wall_render import _ScreenWithInput
++from tests.fj.stream_screen import StreamScreen
++
++SRC = [ROOT / "src/fj" / f for f in
++       ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj")]
++# M13pS2: raster_mode="stream" additionally needs the band-list kernel + the run emitter, and the
++# frame decodes through StreamScreen (the run-stream device) instead of the framebuffer screen.
++STREAM_SRC = [ROOT / "src/fj" / f for f in ("plane_bands.fj", "stream_render.fj")]
++
++# R4/DESIGN §1.2: the renderer's span (~20-24M words) exceeds doomfj.config.FLAT_MAX_WORDS (2**23 default)
++# -- every fj.run of this program (build_wall_renderer, the E1M1 capstone test) raises the limit to 2**26.
++# BUG FOUND (2026-07-04): the first version of this script omitted this, so fj.run silently fell back to a
++# non-flat storage mode with a DIFFERENT op cost (453.2M measured vs the true 462.7M baseline) -- always
++# pass this explicitly; never trust a measurement that didn't.
++RENDER_FLAT_WORDS = 1 << 26
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    ap.add_argument("--ablate", default="", help="comma list: planes,pass2,pass1,segstub,xrstub")
++    ap.add_argument("--floor-mode", default="textured", choices=["textured", "flat", "FT1"])
++    ap.add_argument("--wall-mode", default="textured", choices=["textured", "W1", "W2", "W2S", "WPX"])
++    ap.add_argument("--raster-mode", default="framebuffer",
++                    choices=["framebuffer", "stream", "spans", "raster", "proj", "lines"])
++    ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
++    ap.add_argument("--map", default="E1M1")
++    ap.add_argument("--asset", default=None, help="asset wad (defaults to --wad)")
++    ap.add_argument("--vx", type=int, default=None)
++    ap.add_argument("--vy", type=int, default=None)
++    ap.add_argument("--va", type=int, default=None, help="viewangle (defaults to the spawn angle)")
++    args = ap.parse_args()
++    ablate = frozenset(x for x in args.ablate.split(",") if x)
++
++    cfg = Config()
++    mw = WadFile.from_path(str(ROOT / args.wad))
++    aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
++    main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False, ablate=ablate,
++                                  floor_mode=args.floor_mode, wall_mode=args.wall_mode,
++                                  raster_mode=args.raster_mode)
++
++    src = SRC + (STREAM_SRC if args.raster_mode in ("stream", "spans", "raster", "proj", "lines") else [])
++    tmp = Path(tempfile.mkdtemp())
++    consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
++    (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
++    t0 = time.perf_counter()
++    fj.assemble([consts.resolve(), *[p.resolve() for p in src], (tmp / "m.fj").resolve()],
++                tmp / "m.fjm", memory_width=W, print_time=False)
++    assemble_seconds = round(time.perf_counter() - t0, 1)
++
++    sp = spawn_state(mw, args.map)
++    vx = args.vx if args.vx is not None else _signed(sp.x, 32) >> 16
++    vy = args.vy if args.vy is not None else _signed(sp.y, 32) >> 16
++    va = args.va if args.va is not None else sp.angle
++    stdin = f"{vx}\n{vy}\n{va}\n".encode()
++    screen = (StreamScreen(stdin=stdin) if args.raster_mode in ("stream", "spans", "raster", "proj", "lines")
++             else _ScreenWithInput(stdin))
++    term = fj.run(tmp / "m.fjm", io_device=screen, print_time=False, print_termination=False,
++                  flat_max_words=RENDER_FLAT_WORDS)
++    assert str(term.storage_mode) == "flat", (
++        f"R4: storage_mode {term.storage_mode!r} != flat -- ops/frame is NOT comparable to the baseline")
++
++    label = ",".join(sorted(ablate)) or "none"
++    print(f"map={args.map} floor_mode={args.floor_mode} wall_mode={args.wall_mode} "
++          f"raster_mode={args.raster_mode} viewpoint=({vx},{vy},{va}) ablate={label} "
++          f"storage_mode={term.storage_mode} ops/frame={term.op_counter:,} "
++          f"assemble_seconds={assemble_seconds}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/scripts/montage_bakeoff.py b/scripts/montage_bakeoff.py
+new file mode 100644
+index 0000000..e2e72dc
+--- /dev/null
++++ b/scripts/montage_bakeoff.py
+@@ -0,0 +1,28 @@
++"""Combine the bake-off PNGs (scripts/bakeoff_planes.py output) into labeled contact sheets for a
++quick owner look, instead of 29 separate files."""
++from pathlib import Path
++from PIL import Image, ImageDraw
++
++SRC = Path("scratchpad/bakeoff")
++LABEL_H = 22
++
++
++def strip(names, cols_title, out_name, viewpoint="spawn"):
++    imgs = []
++    for tag in names:
++        p = SRC / f"{tag}_freedoom_e1m1_{viewpoint}.png"
++        imgs.append((tag, Image.open(p)))
++    w, h = imgs[0][1].size
++    sheet = Image.new("RGB", (w * len(imgs), h + LABEL_H), (30, 30, 30))
++    draw = ImageDraw.Draw(sheet)
++    for i, (tag, img) in enumerate(imgs):
++        sheet.paste(img, (i * w, LABEL_H))
++        draw.text((i * w + 6, 4), tag, fill=(255, 255, 0))
++    sheet.save(SRC / out_name)
++    print(f"wrote {out_name} ({sheet.size})")
++
++
++strip(["T", "F", "P1", "P2", "P3"], "floor", "contact_floors_spawn.png", "spawn")
++strip(["T", "F", "P1", "P2", "P3"], "floor", "contact_floors_rot45.png", "rot45")
++strip(["T", "W1", "W2"], "wall", "contact_walls_spawn.png", "spawn")
++strip(["T", "W1", "W2"], "wall", "contact_walls_rot45.png", "rot45")
+diff --git a/scripts/walk_e1m1.py b/scripts/walk_e1m1.py
+new file mode 100644
+index 0000000..6ae8a21
+--- /dev/null
++++ b/scripts/walk_e1m1.py
+@@ -0,0 +1,286 @@
++"""walk_e1m1 -- the closest thing to PLAYING the game today: a pygame window you walk around in,
++where EVERY FRAME IS RENDERED BY THE REAL FLIPJUMP PROGRAM (the shipping raster_mode="lines"
++renderer, assembled once at startup). There is no fj-side input/simulation yet (that's M14) --
++this host loop feeds the viewpoint to the .fjm via stdin and re-runs it per move, so movement,
++collision and turning are host-side stand-ins while the RENDERING is 100% the real thing.
++
++Controls:  W/S or Up/Down = forward/back    A/D = strafe    Left/Right = turn
++           Q or Esc = quit                  P = save a screenshot PNG next to this script
++
++Frame rate: the fj program runs on the NATIVE (C) engine at ~220M ops/s, and `doomfj.fastrun`
++loads the .fjm ONCE instead of once per frame (`flipjump.run` re-parses the file and rebuilds the
++memory image on every call -- 96% of its wall time here), so an E1M1 frame costs ~0.19s instead of
++~2.6s: walkable, not a slideshow. Run:
++    python scripts/walk_e1m1.py
++    python scripts/walk_e1m1.py --wad tests/fixtures/square_room.wad --map MAP01 \\
++           --asset tests/fixtures/freedoom_assets.wad
++"""
++import argparse
++import sys
++import tempfile
++import time
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++sys.path.insert(0, str(ROOT / "src"))
++
++import flipjump as fj
++from doomfj.config import Config
++from doomfj.fastrun import FjmRunner
++from doomfj.fixedpoint import _signed
++from doomfj.harness import W
++from doomfj.reference_model import spawn_state
++from doomfj.wad import WadFile
++from doomfj.wall_renderer import emit_wall_renderer
++from tests.fj.stream_screen import StreamScreen
++
++SRC = [ROOT / "src/fj" / f for f in
++       ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
++        "plane_bands.fj", "stream_render.fj")]
++ANG_STEP = 0x08000000          # 11.25 degrees per turn
++MOVE_STEP = 24                 # map units per step
++SCALE = 4                      # window upscale
++
++
++def main():
++    ap = argparse.ArgumentParser()
++    # THE PLAYABLE DEFAULT IS E1M1-LITE (owner 2026-08-01: "use the e1m1... you may modify your
++    # level a bit... keep it good and fun"). Same layout, rooms and monsters as E1M1 -- built by
++    # src/doomfj/mapsimplify.py + the new node builder (segs 2057->1378, nodes 681->470, decor
++    # thinned spatially so every landmark survives; every monster/weapon/key kept). Measured
++    # BYTE-EXACT at six walkable gates: spawn 16.1M ops/frame (stock: 27.7M), worst gate 34.9M
++    # (stock: 39.1M+). The pure-arena and stock maps stay one flag away:
++    #     --wad tests/fixtures/arena.wad         --map MAP01  (16-wall ring, 11.6-13.6M)
++    #     --wad assets/freedoom1.wad             --map E2M8   (542-seg arena, 19.9-24.6M)
++    #     --wad tests/fixtures/freedoom_e1m1.wad --map E1M1   (stock, canonical for goldens)
++    ap.add_argument("--wad", default="tests/fixtures/e1m1_lite.wad")
++    ap.add_argument("--map", default="E1M1")
++    ap.add_argument("--asset", default=None)
++    # W1R is the default (owner 2026-08-02: "make nicer walls... keep the speed up to 16M"):
++    # W1's flat-lit wall split into pseudo-random vertical runs keyed on the V1 grain group +
++    # a height tier (near brighter / far darker), certified median 14.91M / mean 15.22M over
++    # the 260-frame walkable sweep -- +0.46M at the median over plain W1 (14.45M). W1 stays a
++    # flag away, as does the true-texel look: --wall-mode WPX (+2-6M/frame).
++    ap.add_argument("--wall-mode", default="W1R", choices=["W1", "W2S", "WPX", "W1R"])
++    ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
++    ap.add_argument("--two-sided", action="store_true",
++                    help="M13-2S rung 3b: draw the TWO-SIDED walls too (step faces, ledge fronts,"
++                         " door frames) and give every plane region its own bounding seg's sector."
++                         " Byte-exact vs the 2S oracle but ~6x slower than the shipped tier"
++                         " (131M vs 21.7M ops/frame at spawn) -- for looking at, not for playing.")
++    ap.add_argument("--no-plane-near", action="store_true",
++                    help="turn OFF M13-2S rung 3a (attribute each column's floor/ceiling to the"
++                         " nearest MARKING seg instead of to the wall that claims the column) --"
++                         " i.e. go back to the pre-rung-3a look, for comparison")
++    # ── the four VISUAL FEATURES (V1-V4). ON by default: they are what the renderer looks like
++    # now, and every one is byte-exact against the oracle. Each costs ops, so each has an off
++    # switch -- docs/opt-experiments.md has what they are worth.
++    ap.add_argument("--no-grain", action="store_true",
++                    help="V1 OFF: no pseudo-random wall texture grain")
++    ap.add_argument("--no-sky", action="store_true",
++                    help="V2 OFF: sky-flat ceilings go back to a plain plane")
++    ap.add_argument("--no-steps", action="store_true",
++                    help="V3 OFF: no step faces (stair risers, ledge fronts, door lintels)")
++    ap.add_argument("--no-stack", action="store_true",
++                    help="V5 OFF: back to ONE boundary piece per column and no per-boundary"
++                         " floor/ceiling regions (stairs collapse to a single riser again)")
++    ap.add_argument("--no-things", action="store_true",
++                    help="V4 OFF: no thing sprites")
++    ap.add_argument("--no-deg", action="store_true",
++                    help="25M-CAP OFF: disable the load-adaptive degradation package (graduated"
++                         " far-thing acceptance, behind-sprite B-gate, sliver-flat walls, far"
++                         " stacked-piece gate, marking budget 96). Light frames render the same"
++                         " either way; degradation only sheds far detail on already-heavy frames.")
++    ap.add_argument("--sprites", default="assets/freedoom1.wad", metavar="WAD",
++                    help="wad to take SPRITE art from. The cut-down test fixture has no sprite"
++                         " lumps at all, so things need a full wad here; if it is missing, V4"
++                         " turns itself off with a warning rather than failing to build.")
++    ap.add_argument("--frames", type=int, default=0, metavar="N",
++                    help="render N frames HEADLESSLY (no window) and report timings, then exit"
++                         " -- use this to check the fj side independently of pygame")
++    args = ap.parse_args()
++
++    cfg = Config()
++    mw = WadFile.from_path(str(ROOT / args.wad))
++    # A geometry-only PWAD (the arena) carries no COLORMAP/textures/flats, so fall back to the
++    # IWAD for art. A self-contained map wad (the E1M1 fixture) keeps using itself, so its
++    # byte-exact goldens are untouched.
++    if args.asset:
++        aw = WadFile.from_path(str(ROOT / args.asset))
++    elif "COLORMAP" in mw.names():
++        aw = mw
++    else:
++        aw = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++        print(f"  ({args.wad} is geometry-only -- taking art from assets/freedoom1.wad)")
++
++    # V1-V4 ride on the rung-3a (plane_near) lines tier; the rung-3b two-sided tier is a different
++    # emit path that none of them was written against, so they are off there.
++    feats = not args.two_sided
++    # M13-W1R rides V1's per-column grain group; without the grain its pattern key does not
++    # exist at runtime, so W1R forces V1 on rather than failing the emit assert.
++    if args.wall_mode == "W1R" and (args.no_grain or not feats):
++        print("  !! --wall-mode W1R needs V1's grain group -- keeping grain ON")
++        args.no_grain = False
++        assert feats, "--wall-mode W1R is not wired into the two_sided tier"
++    spr_path = ROOT / args.sprites
++    want_things = feats and not args.no_things
++    if want_things and not spr_path.exists():
++        print(f"  !! {args.sprites} not found -- V4 things OFF"
++              " (the cut-down fixture wad has no sprite lumps)")
++        want_things = False
++    spr = WadFile.from_path(str(spr_path)) if want_things else None
++    on = [n for n, f in (("grain", feats and not args.no_grain),
++                         ("sky", feats and not args.no_sky),
++                         ("steps", feats and not args.no_steps),
++                         ("things", want_things)) if f]
++
++    # The fjm CACHE (same shape as bench.py's): the emit is ~7 and the assemble ~16 of the ~23
++    # build minutes, and BOTH are a pure function of (sources, flags, wad bytes) -- so a hash of
++    # exactly those names the binary, and a second launch of the same config opens in seconds
++    # instead of regenerating and reassembling a ~104M-character program every time.
++    import hashlib
++    key = hashlib.sha256()
++    for p in SRC + [ROOT / "src/doomfj/wall_renderer.py", ROOT / "src/doomfj/reference_model.py",
++                    ROOT / "src/doomfj/config.py"]:
++        key.update(p.read_bytes())
++    key.update(repr((args.wall_mode, args.floor_mode, args.two_sided, args.no_plane_near,
++                     args.no_grain, args.no_sky, args.no_steps, args.no_stack, want_things,
++                     args.no_deg, args.map)).encode())
++    key.update((ROOT / args.wad).read_bytes())
++    cache = ROOT / "scratchpad" / "fjmcache"
++    cache.mkdir(parents=True, exist_ok=True)
++    fjm = cache / f"w_{key.hexdigest()[:16]}.fjm"
++    t0 = time.perf_counter()
++    if fjm.exists():
++        print(f"cache HIT {fjm.name} -- skipping the ~23 min build", flush=True)
++    else:
++        print(f"assembling the fj renderer ({args.map}, lines mode, "
++              f"{args.wall_mode}+{args.floor_mode}"
++              f"{'+two_sided' if args.two_sided else '' if args.no_plane_near else '+plane_near'}"
++              f"{'+' + '+'.join(on) if on else ''}) ...")
++        if want_things:
++            print("  (the sprite bank makes this a ~104M-character program: expect ~7 min to"
++                  " emit + ~16 min to assemble; the result is CACHED for later launches)",
++                  flush=True)
++        main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
++                                      floor_mode=args.floor_mode, wall_mode=args.wall_mode,
++                                      raster_mode="lines", two_sided=args.two_sided,
++                                      plane_near=(not args.no_plane_near) and not args.two_sided,
++                                      wall_noise=feats and not args.no_grain,
++                                      sky=feats and not args.no_sky,
++                                      steps=feats and not args.no_steps,
++                                      things=want_things, sprite_wad=spr,
++                                      bbox_cull=True,   # M13-15M: the wedge subtree cull ships
++                                      # V5: stacked boundary pieces + true regions
++                                      stack_steps=(feats and not args.no_steps
++                                                   and not args.no_stack),
++                                      # 25M-CAP + OPT-A: certified median 16.51M / mean 17.34M /
++                                      # worst 41.9M, byte-exact (b_8db722bbd480cd52)
++                                      deg=feats and not args.no_deg)
++        print(f"emitted {len(main_txt):,} chars in {time.perf_counter() - t0:.0f}s", flush=True)
++        tmp = Path(tempfile.mkdtemp())
++        consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
++        (tmp / "m.fj").write_text(main_txt, encoding="utf-8")
++        fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], (tmp / "m.fj").resolve()],
++                    fjm, memory_width=W, print_time=False)
++        print(f"built in {time.perf_counter() - t0:.0f}s (cached as {fjm.name})", flush=True)
++    print("loading the program", flush=True)
++    runner = FjmRunner(fjm)          # parse + memory-image prep ONCE, not once per frame
++    print("engine: " + ("native (C)" if runner.native else
++                        "pure-python FALLBACK -- ~14x slower"), flush=True)
++
++    pal = aw.playpal()
++    sp = spawn_state(mw, args.map)
++    px = _signed(sp.x, 32) >> 16
++    py = _signed(sp.y, 32) >> 16
++    ang = sp.angle
++
++    if args.frames:                      # headless: fj only, no pygame, no window
++        for i in range(args.frames):
++            t = time.perf_counter()
++            screen = StreamScreen(stdin=f"{px}\n{py}\n{ang}\n".encode())
++            ops = runner.run(screen)
++            dt = time.perf_counter() - t
++            print(f"  frame {i + 1}: {ops:,} fj ops in {dt * 1000:.0f}ms ({1 / dt:.1f} fps)",
++                  flush=True)
++            ang = (ang + ANG_STEP) & 0xFFFFFFFF
++        return
++
++    import pygame
++    # display.init(), NOT pygame.init(): the latter also spins up the AUDIO MIXER, which can block
++    # for a long time (or forever) on a Windows box with a flaky/absent audio device -- and the
++    # symptom is exactly "the pygame banner printed and then no window ever appeared". Nothing here
++    # makes a sound, so there is no reason to touch the mixer at all.
++    print("  pygame.display.init() ...", flush=True)
++    pygame.display.init()
++    win = pygame.display.set_mode((cfg.VIEW_W * SCALE, cfg.VIEW_H * SCALE))
++    pygame.display.set_caption("doom-flipjump  --  rendering the first frame ...")
++    # paint + pump BEFORE the first render, so the window is on screen immediately instead of
++    # staying invisible (or "not responding") for however long that first frame takes
++    win.fill((24, 24, 28))
++    pygame.display.flip()
++    pygame.event.pump()
++    print(f"  window open ({pygame.display.get_driver()}) -- rendering the first frame", flush=True)
++    # palette as 256 ready-made RGB triples: the blit is then one C-level map+join instead of
++    # 16,000 per-pixel surf.set_at calls (which cost about as much as the fj run itself now)
++    pal3 = [bytes(pal[i]) for i in range(256)]
++
++    def render():
++        t = time.perf_counter()
++        screen = StreamScreen(stdin=f"{px}\n{py}\n{ang}\n".encode())
++        ops = runner.run(screen)
++        frame = pygame.image.frombuffer(b"".join(map(pal3.__getitem__, screen.pixel_indices)),
++                                        (cfg.VIEW_W, cfg.VIEW_H), "RGB")
++        # .convert(win): frombuffer hands back a 24-bit surface, and scaling INTO the 32-bit
++        # display surface needs a matching format
++        pygame.transform.scale(frame.convert(win), win.get_size(), win)
++        pygame.display.flip()
++        dt = time.perf_counter() - t
++        pygame.display.set_caption(
++            f"doom-flipjump  ({px},{py}) ang={ang:#010x}  "
++            f"{ops:,} fj ops in {dt * 1000:.0f}ms ({1 / dt:.1f} fps)")
++        return ops, dt
++
++    import math
++    ops, dt = render()
++    print(f"first frame: {ops:,} fj ops in {dt * 1000:.0f}ms ({1 / dt:.1f} fps)"
++          f" -- W/S move, A/D strafe, arrows turn, Q quits")
++    running = True
++    while running:
++        moved = False
++        for ev in pygame.event.get():
++            if ev.type == pygame.QUIT:
++                running = False
++            elif ev.type == pygame.KEYDOWN:
++                k = ev.key
++                fx = math.cos(ang / 2**32 * 2 * math.pi)
++                fy = math.sin(ang / 2**32 * 2 * math.pi)
++                if k in (pygame.K_q, pygame.K_ESCAPE):
++                    running = False
++                elif k in (pygame.K_w, pygame.K_UP):
++                    px += round(fx * MOVE_STEP); py += round(fy * MOVE_STEP); moved = True
++                elif k in (pygame.K_s, pygame.K_DOWN):
++                    px -= round(fx * MOVE_STEP); py -= round(fy * MOVE_STEP); moved = True
++                elif k == pygame.K_a:
++                    px -= round(fy * MOVE_STEP); py += round(fx * MOVE_STEP); moved = True
++                elif k == pygame.K_d:
++                    px += round(fy * MOVE_STEP); py -= round(fx * MOVE_STEP); moved = True
++                elif k == pygame.K_LEFT:
++                    ang = (ang + ANG_STEP) & 0xFFFFFFFF; moved = True
++                elif k == pygame.K_RIGHT:
++                    ang = (ang - ANG_STEP) & 0xFFFFFFFF; moved = True
++                elif k == pygame.K_p:
++                    pygame.image.save(win, str(ROOT / "scripts" / "walk_screenshot.png"))
++                    print("screenshot saved to scripts/walk_screenshot.png")
++        if moved and running:
++            try:
++                render()
++            except Exception as e:                       # a viewpoint outside the map can crash the
++                print(f"render failed at ({px},{py}): {e}")   # renderer -- step back and carry on
++        pygame.time.wait(20)
++    pygame.quit()
++
++
++if __name__ == "__main__":
++    main()

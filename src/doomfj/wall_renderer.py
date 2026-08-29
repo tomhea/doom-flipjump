@@ -1777,7 +1777,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                      entoff, _collide_tables]
                   # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
                   # which changes the shipped text and so its emit hash -- caught by
-                  # scratchpad/cr/emit_hash_vs_head.py, which is exactly what that control is for.
+                  # scratchpad/cr/emit_baseline.py, which is exactly what that control is for.
                   + ([_mt_tables] if moving_things else []) + ["__hot_end:"])
     else:
         hotdata = []
@@ -1799,7 +1799,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # the baked banks) assemble as their OWN FILES and the file holding the actual program
     # stays small and readable. ⚠ ORDER IS LOAD-BEARING and the parts are NOT reordered:
     # concatenating them in this order reproduces the previous single-file text BYTE FOR
-    # BYTE (asserted by scratchpad/cr/emit_hash.py), so the assembled binary is unchanged.
+    # BYTE (asserted by scratchpad/cr/emit_baseline.py), so the assembled binary is unchanged.
     # A consequence of not reordering: a few small declarations that sit after the first
     # big array in the original order ride along in the "banks" part rather than "state".
     _parts = [

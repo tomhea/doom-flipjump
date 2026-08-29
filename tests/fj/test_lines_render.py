@@ -100,9 +100,15 @@ def test_square_lines_w1r_ft1_byte_exact_vs_oracle(tmp_path):
     VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45), (24, 24, A45)]
     out = _assemble_lines(tmp_path, mw, "MAP01", cfg, asset_wad=aw)
     for vx, vy, va in VIEWPOINTS:
+        # the emitter's tier, stated rather than inherited from five `False` defaults that no
+        # longer exist on its side. `sky=False` because square_room.wad has NO F_SKY1 ceiling --
+        # `map_has_sky` says so and the emitter skips the whole sky path for it. The other four are
+        # unconditional now; on a one-sector room with no things they change nothing, which is why
+        # this test kept passing while the E1M1 one did not.
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
                                     floor_texturing=False, wall_mode="W1R", floor_mode_ft1=True,
-                                    wall_noise=True, plane_near=True)
+                                    wall_noise=True, plane_near=True, sky=False, near_steps=True,
+                                    stack_steps=True, bbox_cull=True, degrade=True)
         screen, _term = _run_lines(out, vx, vy, va)
         assert bytes(screen.pixel_indices) == bytes(want), \
             f"lines W1R+FT1 @ ({vx},{vy},{va:#x}) != oracle"

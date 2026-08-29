@@ -1,0 +1,21 @@
+{
+ "fj_sources": {
+  "fixed_point.fj": "f569473dafbb841f40c74e29a2ca5b24764077b45d1e915fd1b2dec8ff79fa1a",
+  "present.fj": "202edcac2d7843a1391a38d1a8ed801acacc253cb05412f8400f622bd61a6053",
+  "projection.fj": "fe0dc1bd05edcdf6d63a34a7c064943990c846c09cec506f197f3f6debabfec0",
+  "frame_render.fj": "1d6725b5b0512caeee31b249d1494f3ad24f77a289cbe9f1c6fb82b3b2e41449",
+  "plane_render.fj": "790da8703b2b4990249e0bbed733f76ab9e920fbc75ffaef8669fa95d59162ac",
+  "plane_bands.fj": "d5b71f3b1f5a1cf337ae053d44bb34bd10981014ea39baec6c1dd6b785f8edb8",
+  "stream_render.fj": "ec426bd529c3cbbc219309890fb5e118de505892b0277a75fd76ab7b003aec70"
+ },
+ "certified": {
+  "sha256": "57e78e3d142532da828a3a78e3b7aae2482f1660be40e1ba5b7531017d9aa539",
+  "chars": 107822542,
+  "seconds": 428
+ },
+ "lines_nosteps": {
+  "sha256": "84d1829fafc9519aa6878c6502dde18ee729856996c9e5126246afa4f273b69b",
+  "chars": 84907392,
+  "seconds": 2
+ }
+}

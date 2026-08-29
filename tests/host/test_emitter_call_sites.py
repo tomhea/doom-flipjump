@@ -54,10 +54,25 @@ def _dict_literal_keys(node, tree):
             keys |= got
         return keys
     if isinstance(node, ast.Dict):                        # **{"a": 1}
-        return {k.value for k in node.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        keys = set()
+        for k, v in zip(node.keys, node.values):
+            if k is None:                                 # **{**BAD} -- a nested splat
+                got = _dict_literal_keys(v, tree)
+                if got is None:
+                    return None
+                keys |= got
+            elif isinstance(k, ast.Constant) and isinstance(k.value, str):
+                keys.add(k.value)
+            else:
+                return None                               # a computed key
+        return keys
     if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "dict":
         return {kw.arg for kw in node.keywords if kw.arg}
     if isinstance(node, ast.Name):                        # **FLAGS
+        # ⚠ PARTIAL KNOWLEDGE IS NOT KNOWLEDGE. The first version returned whatever keys it could
+        # see and reported 0 unresolvable splats, so `KW = {}` followed by `KW["sky"] = True`, or
+        # `KW.update(...)`, or an augmented assign, all read as "fully checked, nothing wrong".
+        # Any write to the name that this function cannot read makes the whole splat unknown.
         found = None
         for n in ast.walk(tree):
             if isinstance(n, ast.Assign) and any(
@@ -67,6 +82,16 @@ def _dict_literal_keys(node, tree):
                 if got is None:
                     return None
                 found = got if found is None else found | got
+            elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name)                     and n.target.id == node.id:
+                return None
+            elif isinstance(n, ast.Assign) and any(
+                isinstance(t, (ast.Subscript, ast.Attribute))
+                and getattr(getattr(t, "value", None), "id", None) == node.id
+                for t in n.targets
+            ):
+                return None                                # KW["sky"] = True
+            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)                     and getattr(n.func.value, "id", None) == node.id                     and n.func.attr in ("update", "setdefault", "pop", "__setitem__"):
+                return None                                # KW.update(...)
         return found
     return None
 
@@ -150,9 +175,22 @@ def test_the_scan_sees_through_the_three_splat_shapes():
 
 
 def test_a_splat_it_cannot_resolve_is_still_counted():
-    """... and the other half: an unresolvable splat must be REPORTED, not silently passed."""
-    bad, splats = bad_keywords("emit_wall_renderer(w, 'E1M1', c, **f())", "<synthetic>")
-    assert bad == [] and splats == 1
+    """... and the other half: an unresolvable splat must be REPORTED, not silently passed.
+
+    Every shape here defeated the first version, which returned the keys it COULD see and called
+    that a complete answer -- so a dict built by mutation reported "0 splats, nothing wrong" while
+    checking nothing at all. Partial knowledge is not knowledge; these must all count as 1."""
+    NL = chr(10)
+    for src in (
+        "emit_wall_renderer(w, 'E1M1', c, **f())",
+        "emit_wall_renderer(w, 'E1M1', c, **{**BAD})",
+        "KW = {}" + NL + "KW['sky'] = True" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
+        "KW = {}" + NL + "KW.update(sky=True)" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
+        "KW = dict(things=True)" + NL + "KW += o" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
+        "emit_wall_renderer(w, 'E1M1', c, **{k: 1})",
+    ):
+        bad, splats = bad_keywords(src, "<synthetic>")
+        assert splats == 1, (src, splats, bad)
 
 
 def test_the_scan_accepts_a_keyword_that_does_exist():

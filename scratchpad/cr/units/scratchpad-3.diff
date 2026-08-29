@@ -1,0 +1,198 @@
+diff --git a/scratchpad/w2s_check.py b/scratchpad/w2s_check.py
+new file mode 100644
+index 0000000..1aa6091
+--- /dev/null
++++ b/scratchpad/w2s_check.py
+@@ -0,0 +1,76 @@
++"""W2S tier: fj lines-mode frames byte-exact vs the wall_mode="W2S" oracle, + an E1M1 PNG."""
++import sys
++import tempfile
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
++sys.path.insert(0, str(ROOT / "src"))
++sys.path.insert(0, str(ROOT / "tests"))
++
++import flipjump as fj
++from doomfj.config import Config
++from doomfj.fixedpoint import _signed
++from doomfj.harness import W
++from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
++from doomfj.wad import WadFile
++from doomfj.wall_renderer import emit_wall_renderer
++from tests.fj.stream_screen import StreamScreen
++
++SRC = [ROOT / "src/fj" / f for f in
++       ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
++        "plane_bands.fj", "stream_render.fj")]
++
++
++def build(mw, mapname, cfg, aw, wall_mode, floor_mode="flat"):
++    main = emit_wall_renderer(mw, mapname, cfg, asset_wad=aw, over_align=False,
++                              floor_mode=floor_mode, wall_mode=wall_mode, raster_mode="lines")
++    tmp = Path(tempfile.mkdtemp())
++    consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
++    (tmp / "m.fj").write_text(main, encoding="utf-8")
++    fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], (tmp / "m.fj").resolve()],
++                tmp / "m.fjm", memory_width=W, print_time=False)
++    return tmp / "m.fjm"
++
++
++def run(fjm, vx, vy, va):
++    s = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
++    term = fj.run(fjm, io_device=s, print_time=False, print_termination=False,
++                  flat_max_words=1 << 26)
++    return bytes(s.pixel_indices), term.op_counter
++
++
++cfg = Config()
++rm = ReferenceModel(cfg)
++mw = WadFile.from_path(str(ROOT / "tests/fixtures/square_room.wad"))
++aw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_assets.wad"))
++scene = build_scene(mw, aw, "MAP01")
++sp = spawn_state(mw, "MAP01")
++spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
++A45 = 0x20000000
++VP = [(spx, spy, sp.angle), (spx, spy, A45), (200, 128, 0), (128, 128, A45), (24, 24, A45)]
++fjm = build(mw, "MAP01", cfg, aw, "W2S", "FT1")
++for vx, vy, va in VP:
++    want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "MAP01"), scene,
++                                floor_texturing=False, wall_mode="W2S", floor_mode_ft1=True)
++    got, ops = run(fjm, vx, vy, va)
++    d = sum(1 for a, b in zip(got, bytes(want)) if a != b)
++    print(f"square W2S+FT1 ({vx},{vy},{va:#x}): {'OK' if d == 0 else f'DIFF {d}'}  ops={ops:,}")
++
++mw2 = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
++scene2 = build_scene(mw2, mw2, "E1M1")
++sp2 = spawn_state(mw2, "E1M1")
++s2x, s2y = _signed(sp2.x, 32) >> 16, _signed(sp2.y, 32) >> 16
++fjm2 = build(mw2, "E1M1", cfg, mw2, "W2S", "FT1")
++got2, ops2 = run(fjm2, s2x, s2y, sp2.angle)
++want2 = rm.render_wall_frame(SimState(sp2.x, sp2.y, sp2.angle, "E1M1"), scene2,
++                             floor_texturing=False, wall_mode="W2S", floor_mode_ft1=True)
++d2 = sum(1 for a, b in zip(got2, bytes(want2)) if a != b)
++print(f"E1M1 W2S+FT1 spawn: {'OK' if d2 == 0 else f'DIFF {d2}'}  ops={ops2:,}")
++
++from PIL import Image
++pal = mw2.playpal()
++img = Image.new("RGB", (cfg.VIEW_W, cfg.VIEW_H))
++img.putdata([pal[b] for b in got2])
++img.resize((cfg.VIEW_W * 3, cfg.VIEW_H * 3), Image.NEAREST).save(ROOT / "scratchpad/fj_w2s_ft1.png")
++print("scratchpad/fj_w2s_ft1.png written")
+diff --git a/scratchpad/walk_trace.py b/scratchpad/walk_trace.py
+new file mode 100644
+index 0000000..974d152
+--- /dev/null
++++ b/scratchpad/walk_trace.py
+@@ -0,0 +1,69 @@
++"""Replay the labelled prof.fjm at ONE viewpoint and log the ts-attribution order.
++
++Uses the SAME prof.fjm/prof.dbg pair opprof.py left in scratchpad/fjmcache (build them first,
++with the SAME wad). Records, in execution order, every entry into a `seg<si>T_xorby` block (each
++marking seg's SET runs once before its ts body, so consecutive pairs = one visit) — the exact fj
++walk order over marking segs, to compare against the oracle's.
++
++    python scratchpad/walk_trace.py --vp 1272,-724,1073741824 --watch 746,751,826,784,823
++"""
++import argparse
++import bisect
++import re
++import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++for q in (ROOT / "tests", ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++import flipjump as fj                                                     # noqa: E402
++from flipjump.utils.classes import RunStatistics                          # noqa: E402
++from flipjump.utils.functions import load_debugging_labels                # noqa: E402
++from tests.fj.stream_screen import StreamScreen                           # noqa: E402
++
++ap = argparse.ArgumentParser()
++ap.add_argument("--vp", required=True)
++ap.add_argument("--watch", default="", help="comma list of seg ids to flag in the log")
++ap.add_argument("--max", type=int, default=1200, help="stop logging after N events")
++args = ap.parse_args()
++
++out = ROOT / "scratchpad" / "fjmcache"
++fjm, dbg = out / "prof.fjm", out / "prof.dbg"
++labels = load_debugging_labels(dbg)
++watch = set(int(x) for x in args.watch.split(",") if x)
++
++pat = re.compile(r"seg(\d+)T_xorby", )
++marks = {}
++for name, a in labels.items():
++    m = pat.search(name)
++    if m:
++        marks.setdefault(a, int(m.group(1)))
++tsleaf = [a for n, a in labels.items() if n.endswith("seg_pass1_ts_leaf")]
++for a in tsleaf:
++    marks.setdefault(a, "TSLEAF")
++
++addrs = sorted(marks)
++events = []
++
++
++def hook(self, ip):
++    i = bisect.bisect_right(addrs, ip) - 1
++    if i >= 0 and addrs[i] == ip and len(events) < args.max:
++        events.append(marks[ip])
++
++
++RunStatistics.register_op_address = hook
++vx, vy, va = (int(v) for v in args.vp.split(","))
++screen = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
++term = fj.run(fjm, io_device=screen, profile=True, print_time=False, print_termination=False,
++              flat_max_words=1 << 26)
++print(f"ops={term.op_counter:,}  raw events={len(events)}")
++seq = [e for e in events if e != "TSLEAF"]
++dedup = []
++for e in seq:
++    if not dedup or dedup[-1] != e:
++        dedup.append(e)
++print("ts xorby blocks in fj execution order (SET/CLEAR collapsed):")
++print("  " + " ".join((f"[{s}]" if s in watch else str(s)) for s in dedup))
++n_leaf = sum(1 for e in events if e == "TSLEAF")
++print(f"ts leaf entries: {n_leaf}")
+diff --git a/scratchpad/walker_perf.py b/scratchpad/walker_perf.py
+new file mode 100644
+index 0000000..0c21fbc
+--- /dev/null
++++ b/scratchpad/walker_perf.py
+@@ -0,0 +1,35 @@
++"""Where does the walker's frame wall-time go? restore (set_words) vs the C run loop."""
++import sys
++import time
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++for q in (ROOT / "tests", ROOT / "src", ROOT):
++    sys.path.insert(0, str(q))
++
++from doomfj.fastrun import FjmRunner, _fjcore
++from flipjump.interpreter.fjm_run import IOReadOnEOF
++from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
++from tests.fj.stream_screen import StreamScreen
++
++print("_fjcore API:", [n for n in dir(_fjcore) if not n.startswith("__")])
++print("Memory API:", [n for n in dir(_fjcore.Memory) if not n.startswith("__")])
++
++r = FjmRunner(ROOT / "scratchpad/fjmcache/b_b604d01771039f04.fjm")
++print(f"native={r.native}  runs={len(r._runs)}  words={sum(len(v) for _, v in r._runs):,}")
++
++for i in range(3):
++    t0 = time.perf_counter()
++    core = _fjcore.Memory(r.width, flat_max_words=r.flat_max_words)
++    for seg_start, seg_len in r._segments:
++        core.add_segment(seg_start, seg_len)
++    t1 = time.perf_counter()
++    for start, vals in r._runs:
++        core.set_words(start, vals)
++    t2 = time.perf_counter()
++    scr = StreamScreen(stdin=b"-435\n223\n0\n")
++    scr.attach_memory(NativeDeviceMemory(core, r.width))
++    _c, ops, _e, _l, _p = core.run(scr.read_bit, scr.write_bit, IOReadOnEOF, last_ops_length=0)
++    t3 = time.perf_counter()
++    print(f"alloc {t1-t0:.3f}s  restore {t2-t1:.3f}s  run {t3-t2:.3f}s  "
++          f"ops {ops:,}  fj/s incl. restore {ops/(t3-t0)/1e6:.0f}M  run-only {ops/(t3-t2)/1e6:.0f}M")

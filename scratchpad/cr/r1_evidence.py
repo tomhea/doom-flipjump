@@ -34,6 +34,18 @@ CASES = [
      'DOOR_PERSIST = ("ddir", "dsub", "dwait")',
      "tests/host/test_doorcode.py::test_the_declared_cells_are_exactly_the_ones_the_reset_persists",
      "`dstate` does not survive the M1 reset -- every door re-shuts on every frame"),
+    # the call-site guard, mutated back to the two shapes it was written to catch
+    ("scripts/walk_e1m1.py",
+     "**(dict(player_sim=True, collide=True,",
+     "**(dict(state_wire=\"bin\", player_sim=True, collide=True,",
+     "tests/host/test_emitter_call_sites.py::"
+     "test_every_tracked_caller_passes_keywords_the_emitter_has",
+     "the entry point splats a retired keyword -- the shape that hid five broken files"),
+    ("scratchpad/deg_gate.py",
+     "sprite_wad=art, degrade=True, sky=True, bbox_cull=True)",
+     "sprite_wad=art, degrade=True, bbox_cull=True)",
+     "tests/host/test_oracle_calls_in_step.py::test_every_gate_asks_the_oracle_for_what_it_emits",
+     "deg_gate's oracle drops `sky` while its emitter renders it -- 4 viewpoints of mismatch"),
     ("src/doomfj/wireformat.py",
      "KEY_USE = 1 << 4",
      "KEY_USE = 1 << 3",

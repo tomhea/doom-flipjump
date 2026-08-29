@@ -377,7 +377,9 @@ printing its results.
 
 ⚠ **Honest risk.** R1 and R2 are surgery on a 2,900-line emitter in which the part order IS the
 contract ("every baked address constant depends on the layout"). Expect
-`scratchpad/cr/emit_hash_vs_head.py` to be the tool that keeps single-level emission honest
+`scratchpad/cr/emit_baseline.py` to be the tool that keeps single-level emission honest
+(`emit_hash_vs_head.py` was retired 2026-08-29 -- it compared by calling the same signature on
+both sides, which a deleted parameter breaks)
 throughout - it has its own negative control and it is fast relative to a build.
 
 ### Why the increment is not just "double it"

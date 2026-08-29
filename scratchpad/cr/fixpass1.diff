@@ -1,0 +1,722 @@
+diff --git a/scratchpad/make_arena.py b/scratchpad/make_arena.py
+index 6f1a27a..4d20447 100644
+--- a/scratchpad/make_arena.py
++++ b/scratchpad/make_arena.py
+@@ -28,9 +28,10 @@ ap.add_argument("--radius", type=int, default=512)
+ ap.add_argument("--monsters", type=int, default=24)
+ ap.add_argument("--items", type=int, default=8)
+ ap.add_argument("--ceil", type=int, default=160)
+-ap.add_argument("--roof", default="F_SKY1",
+-                help="ceiling flat. F_SKY1 makes it OPEN-AIR, which both looks better
+-                      and keeps V2 sky on the shipped path instead of special-casing it")
++ap.add_argument("--roof", default="CEIL3_5",
++                help="ceiling flat. The default matches the COMMITTED tests/fixtures/arena.wad "
++                     "(regenerating must reproduce it byte for byte); pass F_SKY1 for an "
++                     "OPEN-AIR arena that exercises V2 sky on the shipped path")
+ ap.add_argument("--light", type=int, default=192)
+ ap.add_argument("--out", default="tests/fixtures/arena.wad")
+ args = ap.parse_args()
+@@ -50,7 +51,7 @@ LINEDEFS = b"".join(struct.pack("<7h", i, (i + 1) % N, 1, 0, 0, i, -1) for i in
+ SIDEDEFS = b"".join(struct.pack("<2h8s8s8sh", 0, 0, b"\0" * 8, b"\0" * 8,
+                                 b"STARTAN3".ljust(8, b"\0"), 0) for _ in range(N))
+ SECTORS = struct.pack("<2h8s8s3h", 0, args.ceil, b"FLOOR4_8".ljust(8, b"\0"),
+-                      b"CEIL3_5".ljust(8, b"\0"), args.light, 0, 0)
++                      args.roof.encode().ljust(8, b"\0"), args.light, 0, 0)
+ 
+ 
+ def bam(x0, y0, x1, y1):
+diff --git a/scratchpad/rung3a_split.py b/scratchpad/rung3a_split.py
+index 67c2e8f..06e008c 100644
+--- a/scratchpad/rung3a_split.py
++++ b/scratchpad/rung3a_split.py
+@@ -17,9 +17,9 @@ SRC=[ROOT/"src/fj"/f for f in ("fixed_point.fj","present.fj","projection.fj","fr
+ mw=WadFile.from_path(str(ROOT/"tests/fixtures/freedoom_e1m1.wad"))
+ sp=spawn_state(mw,"E1M1"); sx,sy=_signed(sp.x,32)>>16,_signed(sp.y,32)>>16
+ cfg=Config()
+-VPS=[(sx,sy,sp.angle),(-309,636,0),(-480,256,0)]
+-CASES=[("rung 3a (shipped)                   ", True, frozenset()),
+-       ("+ rung 3b PRICE (tsfull)            ", True, frozenset({"tsfull"}))]
++VPS=[(sx,sy,sp.angle),(-309,-44,0),(-309,636,0)]
++CASES=[("rung 3a + ATANDISP (shipped)        ", True, frozenset()),
++       ("+ rung 3b PRICE (tsfull), re-priced ", True, frozenset({"tsfull"}))]
+ for tag, pn, ab in CASES:
+     t0=time.time()
+     main=emit_wall_renderer(mw,"E1M1",cfg,asset_wad=mw,over_align=False,floor_mode="FT1",
+diff --git a/scratchpad/twosided_proto.py b/scratchpad/twosided_proto.py
+index f651b44..477e325 100644
+--- a/scratchpad/twosided_proto.py
++++ b/scratchpad/twosided_proto.py
+@@ -129,22 +129,24 @@ def render(vx, vy, va, two_sided=True):
+     return bytes(fb), stats
+ 
+ 
+-sp = spawn_state(mw, "E1M1")
+-sx, sy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+-VPS = [(sx, sy, sp.angle), (-480, 256, 0), (-309, 636, 0)]
+-S, LBL = 3, 22
+-sheet = Image.new("RGB", (W * S * len(VPS), (H * S + LBL) * 2), (16, 16, 18))
+-d = ImageDraw.Draw(sheet)
+-for r, (lab, ts) in enumerate([("NOW: one-sided walls only (72% of surfaces skipped)", False),
+-                               ("WITH two-sided upper/lower walls + plane regions", True)]):
+-    for c, (a, b, ang) in enumerate(VPS):
+-        fbb, st = render(a, b, ang, two_sided=ts)
+-        im = Image.new("RGB", (W, H)); im.putdata([pal[p] for p in fbb])
+-        sheet.paste(im.resize((W * S, H * S), Image.NEAREST), (c * W * S, r * (H * S + LBL) + LBL))
+-        if c == 0:
+-            print(f"{lab[:42]:42s} runs: solid {st['solid']:4d} upper {st['upper']:4d} "
+-                  f"lower {st['lower']:4d} | plane regions c/f {st['cplane']:4d}/{st['fplane']:4d}",
+-                  flush=True)
+-    d.text((6, r * (H * S + LBL) + 6), lab, fill=(235, 235, 240))
+-sheet.save(ROOT / "scratchpad/twosided_proto.png")
+-print("scratchpad/twosided_proto.png written")
++if __name__ == "__main__":
++    sp = spawn_state(mw, "E1M1")
++    sx, sy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
++    VPS = [(sx, sy, sp.angle), (-480, 256, 0), (-309, 636, 0)]
++    S, LBL = 3, 22
++    sheet = Image.new("RGB", (W * S * len(VPS), (H * S + LBL) * 2), (16, 16, 18))
++    d = ImageDraw.Draw(sheet)
++    for r, (lab, ts) in enumerate([("NOW: one-sided walls only (72% of surfaces skipped)", False),
++                                   ("WITH two-sided upper/lower walls + plane regions", True)]):
++        for c, (a, b, ang) in enumerate(VPS):
++            fbb, st = render(a, b, ang, two_sided=ts)
++            im = Image.new("RGB", (W, H)); im.putdata([pal[p] for p in fbb])
++            sheet.paste(im.resize((W * S, H * S), Image.NEAREST), (c * W * S, r * (H * S + LBL) + LBL))
++            if c == 0:
++                print(f"{lab[:42]:42s} runs: solid {st['solid']:4d} upper {st['upper']:4d} "
++                      f"lower {st['lower']:4d} | plane regions c/f {st['cplane']:4d}/{st['fplane']:4d}",
++                      flush=True)
++        d.text((6, r * (H * S + LBL) + 6), lab, fill=(235, 235, 240))
++    sheet.save(ROOT / "scratchpad/twosided_proto.png")
++    print("scratchpad/twosided_proto.png written")
++
+diff --git a/scripts/bakeoff_planes.py b/scripts/bakeoff_planes.py
+index 39233d5..968abfa 100644
+--- a/scripts/bakeoff_planes.py
++++ b/scripts/bakeoff_planes.py
+@@ -18,7 +18,6 @@ Needs Pillow (`pip install pillow`) -- silently skips PNG writing if absent (sti
+ from __future__ import annotations
+ 
+ import json
+-from collections import Counter
+ from pathlib import Path
+ 
+ from doomfj.config import Config
+@@ -44,12 +43,6 @@ def _save_png(frame, palette, path, cfg, scale=5):
+     return True
+ 
+ 
+-def _mode_texel(texels) -> int:
+-    """The most common palette index in a texel list -- a real representative color (NOT a mean
+-    index; palette indices aren't luminance-ordered, so a mean index is a random hue)."""
+-    return Counter(texels).most_common(1)[0][0]
+-
+-
+ class PatternModel(ReferenceModel):
+     """Overrides _render_planes_flat (NOT _plane_pixel -- it never receives x, so it can't host an
+     (x,y) pattern) to bake-off the P1/P2/P3 candidates. Keeps the exact distance/zlight math; swaps
+@@ -86,25 +79,10 @@ class PatternModel(ReferenceModel):
+                     fb[y * W + x] = self._plane_pixel(colormap, ph, lt, base, y)
+ 
+ 
+-class WallModel(ReferenceModel):
+-    """Overrides _wall_texture to preview the tiny-canvas wall candidates (W1: 1x1 mode texel, W2:
+-    1x16 vertical band strip from column 0). This is the SAME mechanism M13p4a ships -- the preview
+-    is exactly what the fj rung will render, not an approximation."""
+-    wall_mode = None  # "W1" | "W2"
+-
+-    def _wall_texture(self, asset_wad, name, cache):
+-        real = super()._wall_texture(asset_wad, name, cache)
+-        if real is None:
+-            return None
+-        texels, th, tw = real   # column-major: index = col*th + row
+-        col0 = texels[:th]      # column 0's texels, row-major within the column
+-        if self.wall_mode == "W1":
+-            return [_mode_texel(texels)], 1, 1
+-        if self.wall_mode == "W2":
+-            n = 16
+-            band = [col0[min(th - 1, r * th // n)] for r in range(n)]
+-            return band, n, 1
+-        raise ValueError(self.wall_mode)
++# CR-2026-08: the old WallModel._wall_texture override is GONE -- since M13p4a the oracle
++# takes wall_mode natively (render_wall_frame(wall_mode="W1"/"W2") -> _tiny_wall_canvas), with
++# the per-mode cache key that the override lacked (it flattened V2 sky's "textured" requests
++# too -- the documented cache-poisoning class). The W1/W2 sets below use the shipped mechanism.
+ 
+ 
+ def _viewpoints(wad_path, mapname):
+@@ -116,7 +94,8 @@ def _viewpoints(wad_path, mapname):
+     return wad, [("spawn", spx, spy, sp.angle), ("rot45", spx, spy, A45)]
+ 
+ 
+-def render_set(label, wad_path, mapname, asset_path, model_factory, floor_texturing=None, cfg=None):
++def render_set(label, wad_path, mapname, asset_path, model_factory, floor_texturing=None, cfg=None,
++               **render_kwargs):
+     cfg = cfg or Config()
+     wad, vps = _viewpoints(wad_path, mapname)
+     asset = WadFile.from_path(asset_path) if asset_path else wad
+@@ -127,7 +106,7 @@ def render_set(label, wad_path, mapname, asset_path, model_factory, floor_textur
+         from doomfj.reference_model import SimState
+         state = SimState(vx << 16, vy << 16, va, mapname)
+         kwargs = {} if floor_texturing is None else {"floor_texturing": floor_texturing}
+-        frame = rm.render_wall_frame(state, scene, **kwargs)
++        frame = rm.render_wall_frame(state, scene, **kwargs, **render_kwargs)
+         name = f"{label}_{Path(wad_path).stem}_{tag}"
+         _save_png(frame, asset.playpal(0), OUT / f"{name}.png", cfg)
+         stats[name] = {"hash": frame_hash(frame), "distinct_palette_indices": len(set(frame))}
+@@ -175,12 +154,11 @@ def main():
+         results[p] = render_set(p, ROOM, "MAP01", ASSET, factory, floor_texturing=False, cfg=cfg)
+         results[p].update(render_set(p, E1M1, "E1M1", None, factory, floor_texturing=False, cfg=cfg))
+ 
+-    # W1/W2 wall candidates (textured floors kept, only the wall texture swapped)
++    # W1/W2 wall candidates (textured floors kept, only the wall texture swapped) -- the
++    # oracle's native wall_mode tier (see the note where WallModel used to be)
+     for w in ("W1", "W2"):
+-        def factory(w=w):
+-            m = WallModel(cfg); m.wall_mode = w; return m
+-        results[w] = render_set(w, ROOM, "MAP01", ASSET, factory, cfg=cfg)
+-        results[w].update(render_set(w, E1M1, "E1M1", None, factory, cfg=cfg))
++        results[w] = render_set(w, ROOM, "MAP01", ASSET, ReferenceModel, cfg=cfg, wall_mode=w)
++        results[w].update(render_set(w, E1M1, "E1M1", None, ReferenceModel, cfg=cfg, wall_mode=w))
+ 
+     # the owed #9a+#11 consolidated bless: current vs pre-campaign (0f1c94b), spawn viewpoint only
+     if PRECAMPAIGN_SQUARE.exists() and PRECAMPAIGN_E1M1.exists():
+diff --git a/scripts/walk_e1m1.py b/scripts/walk_e1m1.py
+index 6ae8a21..91e8c49 100644
+--- a/scripts/walk_e1m1.py
++++ b/scripts/walk_e1m1.py
+@@ -107,11 +107,14 @@ def main():
+     # IWAD for art. A self-contained map wad (the E1M1 fixture) keeps using itself, so its
+     # byte-exact goldens are untouched.
+     if args.asset:
+-        aw = WadFile.from_path(str(ROOT / args.asset))
++        aw_path = ROOT / args.asset
++        aw = WadFile.from_path(str(aw_path))
+     elif "COLORMAP" in mw.names():
++        aw_path = None                     # the map wad itself -- already in the cache key
+         aw = mw
+     else:
+-        aw = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
++        aw_path = ROOT / "assets/freedoom1.wad"
++        aw = WadFile.from_path(str(aw_path))
+         print(f"  ({args.wad} is geometry-only -- taking art from assets/freedoom1.wad)")
+ 
+     # V1-V4 ride on the rung-3a (plane_near) lines tier; the rung-3b two-sided tier is a different
+@@ -141,13 +144,22 @@ def main():
+     # instead of regenerating and reassembling a ~104M-character program every time.
+     import hashlib
+     key = hashlib.sha256()
+-    for p in SRC + [ROOT / "src/doomfj/wall_renderer.py", ROOT / "src/doomfj/reference_model.py",
+-                    ROOT / "src/doomfj/config.py"]:
++    # CR-2026-08: the key hashes EVERY build input -- the fj sources, all emit-shaping python
++    # modules (not just wall_renderer: the LUT/map/texture compilers shape the emitted text
++    # too), the flag tuple, and the BYTES of all three wads (map, asset art, sprites). A
++    # missing input here = a stale binary served after that input changes.
++    for p in SRC + [ROOT / "src/doomfj" / f for f in
++                    ("wall_renderer.py", "reference_model.py", "config.py", "lut_generator.py",
++                     "mapcompiler.py", "texturecompiler.py", "tables.py", "wad.py", "build.py")]:
+         key.update(p.read_bytes())
+     key.update(repr((args.wall_mode, args.floor_mode, args.two_sided, args.no_plane_near,
+                      args.no_grain, args.no_sky, args.no_steps, args.no_stack, want_things,
+                      args.no_deg, args.map)).encode())
+     key.update((ROOT / args.wad).read_bytes())
++    if aw_path is not None:
++        key.update(aw_path.read_bytes())
++    if want_things:
++        key.update(spr_path.read_bytes())
+     cache = ROOT / "scratchpad" / "fjmcache"
+     cache.mkdir(parents=True, exist_ok=True)
+     fjm = cache / f"w_{key.hexdigest()[:16]}.fjm"
+@@ -274,10 +286,12 @@ def main():
+                     pygame.image.save(win, str(ROOT / "scripts" / "walk_screenshot.png"))
+                     print("screenshot saved to scripts/walk_screenshot.png")
+         if moved and running:
++            ppx, ppy, pang = px, py, ang                 # the last good viewpoint
+             try:
+                 render()
+             except Exception as e:                       # a viewpoint outside the map can crash the
+                 print(f"render failed at ({px},{py}): {e}")   # renderer -- step back and carry on
++                px, py, ang = ppx, ppy, pang
+         pygame.time.wait(20)
+     pygame.quit()
+ 
+diff --git a/src/doomfj/build.py b/src/doomfj/build.py
+index b7d9f81..f706c5e 100644
+--- a/src/doomfj/build.py
++++ b/src/doomfj/build.py
+@@ -50,8 +50,13 @@ def _resolve_sprite_wad(map_wad, sprite_wad):
+         return sprite_wad
+     if sprite_wad is not None and Path(sprite_wad).exists():
+         w = WadFile.from_path(str(sprite_wad))
+-        if _has_sprites(w):
+-            return w
++        if not _has_sprites(w):
++            # CR-2026-08: an existing-but-spriteless path raises exactly like a loaded WadFile
++            # does -- silently substituting the map wad here was the one hole in the
++            # "explicit failure" rule this docstring itself states.
++            raise ValueError(
++                f"things=True: {sprite_wad!r} exists but has no S_START..S_END lumps")
++        return w
+     if _has_sprites(map_wad):
+         return map_wad
+     raise ValueError(
+diff --git a/src/doomfj/coarse_cull.py b/src/doomfj/coarse_cull.py
+index 47d4df6..f7f5c12 100644
+--- a/src/doomfj/coarse_cull.py
++++ b/src/doomfj/coarse_cull.py
+@@ -1,6 +1,14 @@
+ """M13-raster coarse cull: the BAKED coarse-angle bounds shared (R6 SSOT) by the fj macro's data table
+ and the host reference / prototype.
+ 
++⚠ STATUS (CR-2026-08): NOT WIRED INTO ANY SHIPPED PATH. No emitter calls generate_coarse_bounds_fj
++and nothing imports this module outside its scratchpad prototypes (proj.coarse_bracket in
++projection.fj is equally uninstantiated) -- the shipped cull is the bbox WEDGE cull
++(mapcompiler.bbox_gate_boxes). Kept as the reference for the per-vertex coarse-slope experiment.
++Known gap if ever revived: GUARD_DEFAULT covers tantoangle quantization only, NOT _slope_div's
++block-FP truncation, so the 'guaranteed SUPERSET' claim below must be re-verified against the
++renderer's actual tta[_slope_div(num,den)] before trusting a cull to it.
++
+ The division-free coarse cull pins a vertex's absolute BAM angle to a conservative interval [lo,hi]
+ using ONLY sign-folds + integer magnitude compares (NO slope_div): the octant idx
+ (sign(dx)*4 + sign(dy)*2 + (|dx|>|dy|), matching proj.point_to_angle) plus a WEDGE idx that subdivides
+diff --git a/src/doomfj/fastrun.py b/src/doomfj/fastrun.py
+index 882de6c..6f30392 100644
+--- a/src/doomfj/fastrun.py
++++ b/src/doomfj/fastrun.py
+@@ -70,9 +70,11 @@ class FjmRunner:
+                 nxt = addr + 1
+             if start is not None:
+                 self._runs.append((start, vals))
+-            # the parsed dict is now redundant with _runs and would sit on ~350MB for E1M1
+-            # (6.36M int->int entries) for the whole session; the runs are all `run` needs
+-            self._mem.memory = {}
++        # the parsed dict is redundant either way and would sit on ~350MB for E1M1 (6.36M
++        # int->int entries) for the whole session: the native path keeps only `_runs`, and the
++        # fallback path re-reads the .fjm from disk inside `fj.run` (CR-2026-08: this release
++        # used to live inside the `if self.native:` block, leaking the dict on the fallback).
++        self._mem.memory = {}
+ 
+     def run(self, io_device) -> int:
+         """Run the program once against `io_device`; returns the op count."""
+diff --git a/src/doomfj/mapcompiler.py b/src/doomfj/mapcompiler.py
+index d97589c..ab314c1 100644
+--- a/src/doomfj/mapcompiler.py
++++ b/src/doomfj/mapcompiler.py
+@@ -118,8 +118,12 @@ def bbox_wedge_miss(m: int, box: tuple, vx: int, vy: int) -> bool:
+     half-plane m, i.e. max over the box of the plane's signed test value is negative. The maximizing
+     corner is a pure function of m: x = left for m<4 else right; y = top for m in {0,1,6,7} else
+     bottom (equivalently, in fj's (q=m&3, n=2<=m<=5) encoding: y = top iff n==0, x = left iff
+-    (q<2) == (n==0)). All in raw 16.0 map units — |Q| < 2^15 for int16 maps, matching the fj
+-    4-nibble slice arithmetic."""
++    (q<2) == (n==0)). All in raw 16.0 map units. ⚠ WIDTH CONTRACT (CR-2026-08): the fj side
++    (proj.wedge_bbox_plane) evaluates Q on 4-nibble slices, so every true Q — including the
++    dx+dy / dy-dx combinations — must fit SIGNED 16 BITS. That is NOT free for "int16 maps":
++    Q reaches ±(span_x + span_y), ~2^17 on a map spanning the full int16 range. The bound is
++    ENFORCED per map by the assert in `bbox_gate_boxes` (span_x + span_y + slack < 2^15);
++    a map that trips it needs the fj slices widened, not the assert loosened."""
+     top, bottom, left, right = box
+     cx = left if m < 4 else right
+     cy = top if m in (0, 1, 6, 7) else bottom
+@@ -176,6 +180,18 @@ def bbox_gate_boxes(cmap: "CompiledMap", *, min_segs: int = 32,
+         if things_below.get(i):
+             box = (box[0] + inflate, box[1] - inflate, box[2] - inflate, box[3] + inflate)
+         out[i] = box
++    # CR-2026-08: bbox_wedge_miss's WIDTH CONTRACT (see its docstring) -- the fj evaluates Q
++    # on signed-16-bit slices, and Q reaches +/-(span_x + span_y) for the dx+dy / dy-dx
++    # planes. Bound the spans over everything a Q can be built from: gated-box corners and
++    # the map's vertexes (the view position stays inside the map), + 256 slack for a view
++    # nudged past the walls.
++    if out:
++        xs = [v for b in out.values() for v in (b[2], b[3])] + [x for x, _ in cmap.vertexes]
++        ys = [v for b in out.values() for v in (b[0], b[1])] + [y for _, y in cmap.vertexes]
++        span = (max(xs) - min(xs)) + (max(ys) - min(ys))
++        assert span + 512 < (1 << 15), (
++            f"bbox wedge cull: map spans {span} units; Q would overflow the fj signed-16-bit "
++            "slices -- widen proj.wedge_bbox_plane before gating this map")
+     return out
+ 
+ 
+diff --git a/src/doomfj/reference_model.py b/src/doomfj/reference_model.py
+index 3bad0c2..f4a4ea6 100644
+--- a/src/doomfj/reference_model.py
++++ b/src/doomfj/reference_model.py
+@@ -439,6 +439,9 @@ class ReferenceModel:
+         is the measured-exact width for real scale operands (12 truncates); precision vs the exact
+         divide: 0.29% max relative over the 320 real spawn scale calls = sub-pixel wall-edge shift
+         (<0.3px), re-blessed under the owner's 'game standards' rule."""
++        # CR-2026-08: den_abs == 0 would spin the left-normalize loop forever -- fail loudly.
++        # (This is the shared SSOT reciprocal kernel; every caller owns a nonzero denominator.)
++        assert den_abs > 0, f"_scale_recip_div: den_abs must be positive, got {den_abs}"
+         sden = den_abs
+         fsh = 6
+         while sden > 0xFFF:
+@@ -932,7 +935,7 @@ class ReferenceModel:
+         only the flat/light changes): a 1-ROW face at the near surface's edge row. The lip is
+         what makes DROP-OFFS visible -- the region-behind machinery then paints the far flat
+         beyond the edge, so descending stairs show treads and the nukage pool shows from its
+-        bank (the owner's green-floor/stairs asks, 2026-08-04). An upper lip between two
++        bank (the owner's green-floor/stairs asks, 2026-08-04). Any upper piece between two
+         F_SKY1 ceilings is suppressed (the V2 sky rule: nothing may draw lines in the sky)."""
+         # V5-DROP-P2 (owner's (1210,1187) field-flip, 2026-08-04): lips fire on HEIGHT or
+         # MATERIAL changes only, never light-only shading. Light-lips were stealing both
+@@ -944,7 +947,10 @@ class ReferenceModel:
+         lo = fsec.floor_h != bsec.floor_h or fsec.floor_tex != bsec.floor_tex
+         um = 0 if not up else (1 if fsec.ceil_h > bsec.ceil_h else 2)
+         lm = 0 if not lo else (1 if bsec.floor_h > fsec.floor_h else 2)
+-        if um == 2 and sky and (fsec.ceil_tex or "").upper() == "F_SKY1" \
++        # CR-2026-08: BOTH upper modes are suppressed between two F_SKY1 ceilings, not just
++        # the lip -- a RISER there is a face floating in the sky (DOOM's own sky hack skips
++        # the upper entirely when both sides are sky).
++        if um and sky and (fsec.ceil_tex or "").upper() == "F_SKY1" \
+                 and (bsec.ceil_tex or "").upper() == "F_SKY1":
+             um = 0
+         return um, lm
+@@ -1146,8 +1152,9 @@ class ReferenceModel:
+                       min_h: int | None = None):
+         """V4 — R_ProjectSprite in this repo's fixed point: the billboard's screen box.
+ 
+-        Returns `(x1, x2, ytop, h, istep)` — inclusive column range, the screen row of the sprite's
+-        top, its exact on-screen pixel height, and the DOWNSCALED-texel-per-column DDA step — or
++        Returns `(x1, x2, ytop, h, istep, tz)` — inclusive column range, the screen row of the
++        sprite's top, its exact on-screen pixel height, the DOWNSCALED-texel-per-column DDA step,
++        and the view-space depth (SPR-NEAR keys quality tiers off it) — or
+         None if the thing is behind the eye, too near, or outside the view. Mirrors DOOM: the two
+         rotated coordinates `tz` (depth) and `tx` (lateral) from one cos/sin pair and four
+         FixedMuls, then ONE FixedDiv for the scale."""
+@@ -1362,9 +1369,9 @@ class ReferenceModel:
+                           sprite_wad=None, things_out: list | None = None,
+                           bbox_cull: bool = False, stack_steps: bool = False,
+                           steps_out: list | None = None,
+-                          deg_things: tuple | None = None, deg_sliver: int = 0,
+-                          deg_stack_scale: int = 0, deg_mark: int = 0,
+-                          deg_lip_scale: int = 0,
++                          deg_things: tuple | None = None, deg_sliver: int | None = None,
++                          deg_stack_scale: int | None = None, deg_mark: int | None = None,
++                          deg_lip_scale: int | None = None,
+                           degrade: bool = False) -> bytes:
+         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
+         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
+@@ -1403,14 +1410,24 @@ class ReferenceModel:
+         bit-exactly (D12)."""
+         cfg = self.cfg
+         # 25M-CAP: `degrade=True` turns on the whole certified adaptive-degradation package;
+-        # the individual deg_* kwargs stay as research overrides (any explicit value wins).
++        # the individual deg_* kwargs stay as research overrides (any explicit value wins --
++        # CR-2026-08: the sentinel is None, not falsiness, so an explicit 0 = "this lever OFF").
+         if degrade:
+-            deg_things = deg_things or (DEG_SOFT_SCENERY, DEG_MINH2_SCENERY,
+-                                        DEG_SOFT_MON, DEG_MINH2_MON)
+-            deg_sliver = deg_sliver or DEG_SLIVER_W
+-            deg_stack_scale = deg_stack_scale or DEG_STACK_SCALE
+-            deg_mark = deg_mark or DEG_PNEAR
+-            deg_lip_scale = deg_lip_scale or DEG_LIP_SCALE
++            if deg_things is None:
++                deg_things = (DEG_SOFT_SCENERY, DEG_MINH2_SCENERY,
++                              DEG_SOFT_MON, DEG_MINH2_MON)
++            if deg_sliver is None:
++                deg_sliver = DEG_SLIVER_W
++            if deg_stack_scale is None:
++                deg_stack_scale = DEG_STACK_SCALE
++            if deg_mark is None:
++                deg_mark = DEG_PNEAR
++            if deg_lip_scale is None:
++                deg_lip_scale = DEG_LIP_SCALE
++        deg_sliver = deg_sliver or 0
++        deg_stack_scale = deg_stack_scale or 0
++        deg_mark = deg_mark or 0
++        deg_lip_scale = deg_lip_scale or 0
+         b_minh = DEG_SPRB_MINH if degrade else 0
+         W, H = cfg.VIEW_W, cfg.VIEW_H
+         fb = bytearray(cfg.FB_SIZE)                          # zero-init; visplanes + walls fill every column
+@@ -1631,8 +1648,6 @@ class ReferenceModel:
+                 # full ~93k wall_scale_setup, and at a heavy viewpoint 128 marking segs would all
+                 # otherwise qualify. Measured: only 2 boundaries at spawn have a face at all.
+                 # V5-DROP: um_/lm_ (0 none / 1 riser / 2 lip) computed above, before the stop
+-                has_up = um_ == 1
+-                has_lo = lm_ == 1
+                 face_seg = near_steps and (um_ or lm_) and n_face[0] < STEP_SEG_BUDGET
+                 if face_seg:
+                     n_face[0] += 1
+diff --git a/src/doomfj/tables.py b/src/doomfj/tables.py
+index cc4c449..e5fde51 100644
+--- a/src/doomfj/tables.py
++++ b/src/doomfj/tables.py
+@@ -82,7 +82,11 @@ def scalelight_table(view_w: int, num_colormaps: int) -> list[list[int]]:
+         startmap = ((LIGHTLEVELS - 1 - i) * 2) * num_colormaps // LIGHTLEVELS
+         row = []
+         for j in range(MAXLIGHTSCALE):
+-            level = startmap - j * (DOOM_SCREENWIDTH // view_w) // DISTMAP
++            # CR-2026-08: DOOM's left-to-right integer order `j*SCREENWIDTH/viewwidth/DISTMAP`,
++            # verbatim -- the earlier `j * (SCREENWIDTH // viewwidth)` pre-floor is identical
++            # whenever view_w divides 320 (all shipped widths) but drifts on any width that
++            # does not, and this table's whole claim is DOOM's formula bit for bit.
++            level = startmap - j * DOOM_SCREENWIDTH // view_w // DISTMAP
+             row.append(max(0, min(num_colormaps - 1, level)))
+         grid.append(row)
+     return grid
+diff --git a/src/doomfj/wall_renderer.py b/src/doomfj/wall_renderer.py
+index ea9dbf7..3d2b26e 100644
+--- a/src/doomfj/wall_renderer.py
++++ b/src/doomfj/wall_renderer.py
+@@ -18,7 +18,6 @@ from doomfj.lut_generator import (
+     generate_slopediv_recip8_lut_fj,
+     generate_yslope_lut_fj, generate_zlight_lut_fj, generate_distscale_lut_fj,
+     generate_emit_dispatch_table_fj, generate_yslope_packed_lut_fj, generate_zlight_packed_lut_fj,
+-    generate_zlight_cuts_fj,
+ )
+ from doomfj.reference_model import ANG90
+ from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _bytes_stream,
+@@ -28,7 +27,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
+                                     SPRITE_HD_H, SPRITE_RUN_CAP_HD,
+                                     DEG_SOFT_SCENERY, DEG_MINH2_SCENERY, DEG_SOFT_MON,
+                                     DEG_MINH2_MON, DEG_SPRB_MINH, DEG_SLIVER_W,
+-                                    DEG_STACK_SCALE, DEG_PNEAR, DEG_HD_BUDGET, DEG_DDA_FACES,
++                                    DEG_STACK_SCALE, DEG_PNEAR, DEG_DDA_FACES,
+                                     DEG_LIP_SCALE, DEG_SPR_LOWRES_H, DEG_SPR_LOWRES_CAP,
+                                     DEG_SPR_NEAR_TZ,
+                                     DEG_SPR_MID_CAP,
+@@ -40,7 +39,6 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
+ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
+                                     texture_texels, _texel_table, downscale_canvas,
+                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
+-from doomfj.coarse_cull import generate_coarse_bounds_fj
+ from doomfj.lut_generator import generate_bands_walk_fj, generate_w1r_walls_fj
+ from doomfj.tables import (tantoangle_table, slopediv_recip8_table, slopediv_recip_table,
+                            xtoviewangle_table)
+@@ -96,6 +94,11 @@ DW_BITS = 64                   # `dw` in address units at w=32 (2w), for baked d
+ TS_ECAP = 24                   # M13-2S rung 3b: buffered REGIONS per column per side,
+                                # 5 bytes each ([kind][arg:2][y1][yend]). Measured worst
+                                # over 30 E1M1 viewpoints: 14 top / 10 bottom.
++# CR-2026-08: flush_frame's ditto byte count is `5*entries` computed in a 2-NIBBLE register
++# (stream_render.fj `hex.mul_const 2, cn, tn, 5`), which wraps silently past 255 -- so the
++# cap must keep 5*(TS_ECAP+1) inside one byte. Raising TS_ECAP past 50 needs that register
++# widened first.
++assert 5 * (TS_ECAP + 1) <= 255, "TS_ECAP overflows flush_frame's 2-nibble ditto byte count"
+ MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Bound: a monotone half-window's
+                                   # zidx walk gives <=32 distinct zrow runs (zlight[lvl][zidx] is monotone in
+                                   # zidx with values in [0,31]); a horizon-STRADDLING window (negative-viewz
+@@ -585,6 +588,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
+         # plane_near the layout is EXACTLY the old shared-key one.
+         lines_bank_keys = ([k for pair in lines_pid for k in pair] if plane_near
+                            else list(lines_key_ids))
++        # CR-2026-08: a pid must fit ONE BYTE everywhere it flows (the per-column pclm store is
++        # `hex.write_byte pptr, seg_pid`, and skypid dispatches on 2 nibbles). E1M1-lite bakes
++        # ~230 pairs; a denser map would silently alias pids without this.
++        assert len(lines_pid) <= 255, f"lines_pid needs one byte, got {len(lines_pid)} pids"
+         # ... and which PIDs are sky at all. A pid is (ceiling key, floor key) and the ceiling key
+         # carries the flat NAME, so sky-ness is decided entirely at compile time: one dispatch per
+         # column tells the emit loop whether to take the sky list or the plane list. pids are 1-based
+@@ -892,7 +899,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
+                                ("floorfix", 8, (ssec.floor_h << 16) & 0xFFFFFFFF),
+                                ("bceilfix", 8, (_bs.ceil_h << 16) & 0xFFFFFFFF),
+                                ("bfloorfix", 8, (_bs.floor_h << 16) & 0xFFFFFFFF),
+-                               ("seg_pid", 4, lines_pid[_plane_keys(ssec)])]
++                               # CR-2026-08: width 2, matching the `seg_pid: hex.vec 2` decl --
++                               # a 4-nibble bake would address the neighbouring declaration
++                               # (pids are byte-sized by the assert at the registry).
++                               ("seg_pid", 2, lines_pid[_plane_keys(ssec)])]
+                     xorby_blocks[si] = (_seg_xorby_block(f"{si}G", gfields)
+                                         + _seg_xorby_block(f"{si}R", rfields))
+                     out += [f"    stl.fcall seg{si}G_xorby, xb_ret",
+@@ -1302,7 +1312,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, over_align=Fals
+               f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
+               f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
+               f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"] if plane_near else []),
+-           *(["thing_leaf:",
++           # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
++           # log2(ds) (`rep(#ds - 1, ...)`), exact only for power-of-two downscales.
++           *([_assert_pow2_ds(cfg.TEXTURE_DOWNSCALE), "thing_leaf:",
+               f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
+               f"{proj}, {cfg.CENTERX}, "
+               f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
+@@ -1967,6 +1979,15 @@ def _spr_nlow(cfg):
+                if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
+ 
+ 
++def _assert_pow2_ds(ds: int) -> str:
++    """Guard project_thing's compile-time istep shift (`rep(#ds - 1, ...)` = /2^log2(ds)):
++    exact only for power-of-two downscales. Returns an empty emitted line so the check can sit
++    inline in the emit list right where the value is consumed."""
++    assert ds >= 1 and (ds & (ds - 1)) == 0, (
++        f"TEXTURE_DOWNSCALE={ds}: project_thing's istep shift needs a power of two")
++    return ""
++
++
+ def _thing_sector(rm, cmap, lds, sds, secs, t):
+     """The sector a thing stands in — its floor is the sprite's base and its light the sprite's."""
+     ss = cmap.subsectors[rm.point_in_subsector(cmap, t.x, t.y)]
+diff --git a/src/fj/frame_render.fj b/src/fj/frame_render.fj
+index 92ca2fa..1c59759 100644
+--- a/src/fj/frame_render.fj
++++ b/src/fj/frame_render.fj
+@@ -2110,9 +2110,13 @@ ns frame {
+         hex.read_byte_and_inc uy1, sbp
+         hex.read_byte_and_inc uy2p1, sbp
+         hex.read_byte_and_inc ucol, sbp         // the face's colour CLASS until step_shade runs
++        // V5 slots are 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 (see
++        // ts_piece_wr / lines_steps_load2). This tier draws piece 1 per side only: skip the
++        // bpid byte + the u2 slot to land on l1.
++        hex.ptr_add sbp, 5
+         ;uhave
+       unone:
+-        hex.ptr_add sbp, 3
++        hex.ptr_add sbp, 8
+         ;uskip
+       uhave:
+         hex.if0 2, ctake, uskip                 // no ceiling region at all in this column
+diff --git a/src/fj/plane_bands.fj b/src/fj/plane_bands.fj
+index 28b1dec..5ebba73 100644
+--- a/src/fj/plane_bands.fj
++++ b/src/fj/plane_bands.fj
+@@ -11,9 +11,13 @@ ns plane {
+     // `ReferenceModel._recip_div32` — RIGHT-NORMALIZE ONLY (no left-normalize branch): valid because
+     // any REAL planeheight (16.16, >=1 world unit) has magnitude >= 0x10000, always above the table's
+     // 0xFFF threshold, exactly like `column_setup`'s wall-scale `ipre` (SCALE_MIN=256 gives the same
+-    // guarantee). ⚠ scope limit: an implausibly tiny nonzero planeheight (< 0x100, i.e. under ~0.004
+-    // world units — never seen in real E1M1 data) would hit the table's unpopulated (zero) region;
+-    // not guarded, matching how M13pS2a's oracle prototype also only validated realistic magnitudes.
++    // guarantee). ⚠ scope limit (re-examined CR-2026-08): this is the RIGHT-normalize half only;
++    // the oracle _recip_div32 also left-normalizes tiny denominators. planeheight < 0x100 would
++    // hit slopediv_recip's unpopulated zero region — but planeheight = |sector_h<<16 - viewz| and
++    // both operands are integer<<16, so any nonzero planeheight is >= 0x10000: the zero region is
++    // UNREACHABLE for every integer-height map, not merely "never seen". (planeheight == 0 — eye
++    // exactly at the plane — yields band rows the emitter never asks for.) If viewz ever gains
++    // sub-unit precision (bobbing), port the oracle's left-normalize here first.
+     def recip32 @ sph, rc, cfff, czero2, irecip, nrm, more, done, shloop, shmore, shdone \
+             < bb_recip_ph, bb_recip_out, slopediv_recip, plane_recip_ret {
+         hex.mov 8, sph, bb_recip_ph
+diff --git a/src/fj/projection.fj b/src/fj/projection.fj
+index a33038f..e7523d8 100644
+--- a/src/fj/projection.fj
++++ b/src/fj/projection.fj
+@@ -1572,7 +1572,9 @@ ns proj {
+       okv:
+         hex.set 8, one16, 0x10000
+         .scale_recip_div istepo, one16, xsc, 1          // (1<<32)/xscale = texels per screen column
+-        rep(ds/2, k) hex.shr_bit 8, istepo              // ... in DOWNSCALED texels
++        // CR-2026-08: /downscale = shift by log2(ds) (#ds-1), NOT ds/2 -- the two agree only
++        // at ds in {1,2,4}; the oracle divides by the value (reference_model.project_thing)
++        rep(#ds - 1, k) hex.shr_bit 8, istepo           // ... in DOWNSCALED texels
+         hex.set 1, vis, 1
+         ;done
+       bad:
+diff --git a/src/fj/stream_render.fj b/src/fj/stream_render.fj
+index 65adddf..b86973e 100644
+--- a/src/fj/stream_render.fj
++++ b/src/fj/stream_render.fj
+@@ -1149,6 +1149,10 @@ ns stream {
+         hex.mov 2, whi, fstart
+       cw3:
+         rep(wpx, k) .wpx_wall_win ctake, fstart, wlo, whi, wstrip, wstripbase, wpxstride, noise, cmidx
++        // ⚠ KNOWN GAP (CR-2026-08, accepted): there is NO rep(w2s) windowed wall emitter --
++        // in the W2S tier a sprite-fragmented column emits no wall piece for its [wlo,whi)
++        // window (the flat pair below is gated off by w2s too). W2S is a non-certified lab
++        // tier that never ships with sprites; wire a w2s window walker before ever doing so.
+         rep(1-w2s-wpx-w1r, k) .w1_wall_win wlo, whi, wall_lit
+         // M13-W1R: the same randomized runs as w1rpat.walk, restricted to the window.
+         // W1R-FLAT: the flat-wall flag takes the plain windowed pair instead.
+diff --git a/tests/fj/stream_screen.py b/tests/fj/stream_screen.py
+index 8f5bc5e..33711f6 100644
+--- a/tests/fj/stream_screen.py
++++ b/tests/fj/stream_screen.py
+@@ -26,7 +26,8 @@ from flipjump.utils.exceptions import IOReadOnEOF
+ # device importing it directly is the same sharing principle as those fj macros already lean on, NOT
+ # an oracle backdoor (colormap, by contrast, IS asset/level data, so it's DMA-read via the wire, not
+ # imported -- see CMD_LOAD_RASTER_TABLES below).
+-from doomfj.tables import slopediv_recip_table, SLOPEDIV_RECIP_RK
++from doomfj.tables import (slopediv_recip_table, SLOPEDIV_RECIP_RK, LIGHTZSHIFT, MAXLIGHTZ,
++                           LIGHTLEVELS, LIGHTSEGSHIFT)
+ 
+ CMD_BEGIN_FRAME_STREAM = 0x07
+ CMD_BEGIN_FRAME_PLANES = 0x09      # M13-planesproto (0x08 stays reserved for M16 write_pixel)
+@@ -46,11 +47,10 @@ SPANS_END_X = 0xFF                 # a fillCol record with x == 0xFF terminates
+ RASTER_TAG_FLOOR_VP = 0xFD
+ RASTER_TAG_CEIL_VP = 0xFE
+ RASTER_TAG_END = 0xFF
+-LIGHTZSHIFT = 20                   # R_MapPlane: distance -> zidx bucket shift (mirrors reference_model)
+-MAXLIGHTZ = 128
+-LIGHTLEVELS = 16                   # zlight light buckets (sector light >> LIGHTSEGSHIFT)
+-LIGHTSEGSHIFT = 4                  # sector light (0..255) -> zlight light bucket (0..15)
+-COLORMAP_LIGHTS = 32                # colormap usable light rows (0..31)
++# CR-2026-08: the light-bucket constants come from the SSOT modules (doomfj.tables import
++# above; COLORMAP_LIGHTS here) instead of local re-hardcodes -- the device and the oracle
++# cannot drift apart on them.
++from doomfj.reference_model import COLORMAP_LIGHTS
+ 
+ 
+ class StreamScreen(InMemoryScreen):
+@@ -268,8 +268,13 @@ class StreamScreen(InMemoryScreen):
+                 return
+             if byte == 0xFE:                           # DITTO: copy column x-1 (owner-approved
+                 x = self._cl_x                         # "rectangles" -- widen the previous lines
++                # CR-2026-08: a ditto for column 0 has no left neighbour -- python's negative
++                # indexing would silently copy the row ABOVE's last pixel; fail loudly instead
++                # (the fj emitter never dittoes column 0: the signature chain starts fresh).
++                assert x > 0, "collines DITTO for column 0 (no left neighbour to copy)"
+                 for y in range(self.height):           # by one column; a pure mechanical copy)
+-                    self.pixel_indices[y * self.width + x] =                         self.pixel_indices[y * self.width + x - 1]
++                    self.pixel_indices[y * self.width + x] = \
++                        self.pixel_indices[y * self.width + x - 1]
+                 self._cl_x = None
+                 return
+             self._cl_pend = byte                       # y2, awaiting its colour
+diff --git a/tests/host/test_e1m1_integration.py b/tests/host/test_e1m1_integration.py
+index c7258af..e6ab66d 100644
+--- a/tests/host/test_e1m1_integration.py
++++ b/tests/host/test_e1m1_integration.py
+@@ -17,10 +17,13 @@ from doomfj.wad import WadFile
+ 
+ E1M1 = Path("tests/fixtures/freedoom_e1m1.wad")
+ SPRITE_WAD = Path("assets/freedoom1.wad")     # V4 art: the cut-down fixture has no sprite lumps
+-SPAN_LO, SPAN_HI = 9_000_000, 18_000_000      # sanity band around the measured shipping-tier span
+-                                              # (12.89M words: the lines raster deletes both 16K-pixel
+-                                              # framebuffer unrolls, which more than pays for the
+-                                              # sprite bank -- the pre-lines tier was ~24.7M)
++SPAN_LO, SPAN_HI = 40_000_000, 62_000_000     # sanity band around the measured default-build span:
++                                              # 51.21M words (CR-2026-08 recalibration -- the old
++                                              # 9-18M band predated V4-HD full-res sprite buckets,
++                                              # V5 stacked pieces/regions and SPR-NEAR's dual bank;
++                                              # this hour-long gate had not run since). The hard
++                                              # ceiling stays the separate `span < 1<<26` assert;
++                                              # HI at 62M leaves real headroom warning-room below it.
+ 
+ 
+ # ── the downscale factor is config-derived (R6) ─────────────────────────────
+diff --git a/tests/host/test_mapbake.py b/tests/host/test_mapbake.py
+index 8ad471a..616cbc1 100644
+--- a/tests/host/test_mapbake.py
++++ b/tests/host/test_mapbake.py
+@@ -163,6 +163,20 @@ def _deep_map():
+                        subsectors=[SubSector(1, i) for i in range(4)], nodes=[n0, n1, root], root=2)
+ 
+ 
++def _signvaried_map():
++    """_deep_map's shape with sign/magnitude-VARIED partition consts: distinct x's, one negative
++    dx, one negative dy, distinct |dx|/|dy| -- so the XOR over all three nodes is NONZERO for
++    every partition register (cpx 3^5^0, cdx_mag 1^2^0, sign_dx 0^1^0, sign_dy 0^0^1, ...).
++    CR-2026-08: the self-zero involution gate used _deep_map, whose all-zero x's and
++    non-negative dx/dy made four of the six registers XOR to 0 even with the CLEARs deleted --
++    the gate was vacuous for exactly the regs M13-possignmag added."""
++    n0 = Node(x=3, y=10, dx=1, dy=0, right=0 | NF_SUBSECTOR, left=1 | NF_SUBSECTOR)
++    n1 = Node(x=5, y=-10, dx=-2, dy=0, right=2 | NF_SUBSECTOR, left=3 | NF_SUBSECTOR)
++    root = Node(x=0, y=0, dx=0, dy=-1, right=0, left=1)
++    return CompiledMap(vertexes=[(0, 0)], segs=[],
++                       subsectors=[SubSector(1, i) for i in range(4)], nodes=[n0, n1, root], root=2)
++
++
+ def _run_bsp_walk(tmp_path, name, cmap, vx, vy):
+     """Emit cmap's BSP-as-code, run the walk from (vx,vy), assert the printed subsector order matches
+     reference_model.bsp_render_order byte-exact."""
+@@ -243,8 +257,10 @@ def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
+     sign_dy = 0 ^ 0 ^ 0), so this directly catches a broken/absent involution (the M12qq regression).
+     Distinct from the order tests (which catch the WRONG side test) — this asserts the post-walk zero
+     state. M13-possignmag: cdx/cdy became cdx_mag/cdy_mag (8-nibble magnitudes) + sign_dx/sign_dy
+-    (1-nibble flags); the involution property is unchanged (xor_by is still self-inverse either way)."""
+-    cmap = _deep_map()                                       # 3 nodes with distinct partition consts
++    (1-nibble flags); the involution property is unchanged (xor_by is still self-inverse either way).
++    CR-2026-08: the map is _signvaried_map, NOT _deep_map -- see its docstring: _deep_map made the
++    gate vacuous for cpx/cdx_mag/sign_dx/sign_dy (their XOR over the walk was 0 regardless)."""
++    cmap = _signvaried_map()                     # 3 nodes; every partition reg's walk-XOR nonzero
+     # empty subsector action: the nodes still run their SET/USE/CLEAR (what we test), but the leaves print
+     # nothing, so the only output is the post-walk partition-reg dump below.
+     code = _bsp_as_code("z", cmap, done_label="bsp_done", subsector_action=lambda s: [])

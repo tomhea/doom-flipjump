@@ -29,7 +29,7 @@ from doomfj.reference_model import spawn_state
 from doomfj.wad import WadFile
 import doomfj.wall_renderer as WR
 from doomfj.wall_renderer import emit_wall_renderer
-from tests.fj.test_wall_render import _ScreenWithInput
+from doomfj.wireformat import encode_feed_mapunits
 from tests.fj.stream_screen import StreamScreen
 
 SRC = [ROOT / "src/fj" / f for f in
@@ -78,7 +78,7 @@ def main():
     vx = args.vx if args.vx is not None else _signed(sp.x, 32) >> 16
     vy = args.vy if args.vy is not None else _signed(sp.y, 32) >> 16
     va = args.va if args.va is not None else sp.angle
-    stdin = f"{vx}\n{vy}\n{va}\n".encode()
+    stdin = encode_feed_mapunits(vx, vy, va)
     screen = StreamScreen(stdin=stdin)     # the lines raster presents 0x0B column run-lists
     term = fj.run(tmp / "m.fjm", io_device=screen, print_time=False, print_termination=False,
                   flat_max_words=RENDER_FLAT_WORDS)

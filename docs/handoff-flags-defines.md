@@ -142,12 +142,19 @@ branch is mostly `*([...] if flag else [])`. Removes conditions, not big blocks;
 win, low structural risk. `deg` and `bbox_cull` also gate budget asserts
 (`_assert_pnear_unbound`) — keep the asserts, drop the condition.
 
-**1b. `things` + `moving_things`** — same shape, but `things` also gates the sprite bank
-(`_lines_sprite_bank`), `_do_things`, and `thing_live_subsectors`. `moving_things` asserts it needs
-`things and lines`.
+**1b. `things` + `moving_things` — DO NOT RETIRE. Measured 2026-08-29, and the premise is wrong.**
+These are not single-valued. `things` is passed True by 11 call sites and **OMITTED by 21**, which
+takes the `False` default — and the omitters include `tests/fj/test_lines_render.py`, whose
+`_assemble_lines` builds the byte-exact lines fixtures. Retiring `things` into True would put the
+sprite bank (~104M characters, ~7 min to emit) into every one of them and turn a 29-minute suite
+into an overnight one. `moving_things` is likewise omitted by 31 call sites, and
+`scratchpad/m145_static_hash.py` selects `moving_things=False` deliberately ("inert BY
+CONSTRUCTION"). A flag with two live values is not bloat; it is a flag.
 
-**1c. `player_sim` + `collide`** — these reach the includes list (`_SIM_INCLUDES`) and the frame
-prologue. Own batch.
+**1c. `player_sim` + `collide` — DO NOT RETIRE, same reason.** Each is omitted by 31 call sites,
+which take `False`, and `collide=False` is explicitly selected by `scratchpad/m14_ablate_price.py`
+and `scratchpad/opprof.py` — a sim build that does not pay for collision is a real measurement
+config. Retiring them would force the sim into every fixture that omits them today.
 
 **1d. `sector_heights`** — R2's static door override, superseded by `doors`. Deleting it retires
 `scratchpad/m2_build.py` and `scratchpad/m2_gate.py` (R2's rung). Keep the built
@@ -157,9 +164,41 @@ prologue. Own batch.
 priced in this repo and every ops number in `docs/` came from it. Do not remove without a new
 instruction.
 
-**1f. The oracle's dead renderers** — `reference_model.render_frame_2s` and the framebuffer/stream
-paths, plus their `wall_mode`/`floor_mode` parameters. **The emission net does NOT cover the
-oracle**; `tests/host` is the arbiter. Own commit.
+**1f. The oracle's dead renderers — DONE, but smaller than it looks.** `render_frame_2s` (131
+lines) was genuinely dead and is gone, with its three tracked probes. The framebuffer/stream paths
+are NOT: `render_frame` is the background reference in `test_floor_planes`, `test_reference_model`
+and `test_wall_frame`, and `render_wall_frame`'s `wall_mode` is still passed five values by tracked
+files — W1 (7), W1R (57), W2 (3), WPX (19), textured (7). The oracle is the reference implementation
+of the whole ladder and the tests compare against several rungs on purpose; deleting a mode there
+deletes a test's expected answer, which is not the same as deleting an emitter branch nothing takes.
+**The emission net does NOT cover the oracle**; `tests/host` is the arbiter.
+
+### PHASE 1 — WHERE IT ACTUALLY LANDED (2026-08-29)
+
+Done: **1a** (`sky`, `steps`, `stack_steps`, `bbox_cull`, `deg`), **1d** (`sector_heights` + R2's
+rung), **1f** (`render_frame_2s`). `emit_wall_renderer` 23 -> 17 parameters, `build_wall_renderer`
+24 -> 18. Every stage EMISSION IDENTICAL across all three baseline configs.
+
+Refused with evidence: **1b** and **1c** (see above). **1e** (`ablate`) kept, per the owner.
+
+Two lessons the batches cost, both worth more than the flags:
+* **A flag can carry two facts.** `sky` meant both "render V2 sky ceilings" and "this wad has no
+  sky lump", which is true of `square_room.wad` and `arena.wad`. Folding it to True made a sky-less
+  map emit `skyoff.lookup` against a bank never built — an ASSEMBLY error no baseline config could
+  show, since all three are E1M1. It is `_has_sky`, read off the map.
+* **Only dedent a block when the WHOLE condition is the constant.** `if steps and (_um or _lm):`
+  became unconditional instead of `if _um or _lm:` — +27,397 chars, caught by the emission baseline
+  and by nothing else.
+
+And the sweep found more than the batches: **32 tracked callers were already broken on `main`** by
+the M2 retirement, including `scripts/walk_e1m1.py`, `scripts/measure_frame.py` and `deg_gate.py`.
+`tests/host/test_emitter_call_sites.py` now guards that class permanently.
+
+⚠ **What this means for PHASE 2's "6 parameters".** That target assumed 1b and 1c would succeed.
+They cannot, so `things`, `sprite_wad`, `player_sim`, `collide` and `moving_things` all have to stay
+expressible. The reachable shape is roughly **11-12**, not 6: `tier` still collapses
+`standalone`+`menu`+`self_reset`, `generated_dir` still derives from `out_fjm`, and
+`flat_max_words`/`door_quant`/`menu_entries`/`menu_selected` still fold into `cfg`.
 
 ### PHASE 2 — the API shape the owner asked for
 

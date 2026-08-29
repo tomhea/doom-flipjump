@@ -579,7 +579,7 @@ disabled a gate and no check noticed for months. Step A will create ~150 such op
 CHEAP, emit-time regression guard, run on every commit, no build required:
 * the **stop census** — count gated nodes / pruned leaves / never-binding budgets
   (`scratchpad/_cr_wr1b.py` is the prototype) and fail if a count drops unexpectedly;
-* the **emit hash** for the shipped config (`scratchpad/cr/emit_hash.py`, now with `--selftest`);
+* the **emit hash** for the shipped config (`scratchpad/cr/emit_hash.py`, now with `--selftest` — that tool was retired 2026-08-29; `cr/emit_baseline.py --check` is the surviving form);
 * a tracked `perf-ledger.json` holding the current median, the four gate viewpoints, assemble time
   and `.fjm` size, updated by whoever lands a rung.
 Without G1, Step A is a bucket with a hole in it.

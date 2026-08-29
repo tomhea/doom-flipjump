@@ -22,6 +22,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 
 import flipjump as fj
 from doomfj.harness import W                                    # noqa: F401  (memory width, doc)
+from doomfj.wireformat import encode_feed_mapunits
 from tests.fj.stream_screen import StreamScreen
 
 FJM = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "scratchpad/fjmcache/b_272d37507ca58434.fjm"
@@ -35,7 +36,7 @@ def pad(n: int, width: int) -> str:
 
 
 def run(sx: str, sy: str, sa: str):
-    scr = StreamScreen(stdin=f"{sx}\n{sy}\n{sa}\n".encode())
+    scr = StreamScreen(stdin=encode_feed_mapunits(sx, sy, sa))
     t = time.perf_counter()
     term = fj.run(FJM, io_device=scr, print_time=False, print_termination=False,
                   flat_max_words=1 << 26)

@@ -67,7 +67,27 @@ def _dict_literal_keys(node, tree):
                 return None                               # a computed key
         return keys
     if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "dict":
-        return {kw.arg for kw in node.keywords if kw.arg}
+        # ⚠ THE SAME partial-knowledge bug lived here after the Name branch was fixed:
+        # `dict(_RETIRED, sky=True)` and `dict(**_RETIRED, sky=True)` have a positional mapping and
+        # a nested splat, and returning just the explicit keywords called that a complete answer.
+        if node.args:                                     # dict(OTHER, a=1)
+            merged = set()
+            for a in node.args:
+                got = _dict_literal_keys(a, tree)
+                if got is None:
+                    return None
+                merged |= got
+        else:
+            merged = set()
+        for kw in node.keywords:
+            if kw.arg is None:                            # dict(**OTHER, a=1)
+                got = _dict_literal_keys(kw.value, tree)
+                if got is None:
+                    return None
+                merged |= got
+            else:
+                merged.add(kw.arg)
+        return merged
     if isinstance(node, ast.Name):                        # **FLAGS
         # ⚠ PARTIAL KNOWLEDGE IS NOT KNOWLEDGE. The first version returned whatever keys it could
         # see and reported 0 unresolvable splats, so `KW = {}` followed by `KW["sky"] = True`, or
@@ -90,8 +110,14 @@ def _dict_literal_keys(node, tree):
                 for t in n.targets
             ):
                 return None                                # KW["sky"] = True
-            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)                     and getattr(n.func.value, "id", None) == node.id                     and n.func.attr in ("update", "setdefault", "pop", "__setitem__"):
-                return None                                # KW.update(...)
+            elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)                     and getattr(n.func.value, "id", None) == node.id:
+                return None                                # KW.update(...) and any other method
+            elif isinstance(n, ast.Call) and any(
+                isinstance(a, ast.Name) and a.id == node.id for a in n.args
+            ):
+                return None                                # mutate(KW) -- handed off, unknowable
+            elif isinstance(n, ast.Assign) and isinstance(n.value, ast.Name)                     and n.value.id == node.id:
+                return None                                # A = KW, then A is mutated elsewhere
         return found
     return None
 

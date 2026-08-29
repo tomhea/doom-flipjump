@@ -651,7 +651,8 @@ cost 4,911,000. Any further "drop N% of things ⇒ save N%" reasoning is wrong f
    tics, **both** vacuity controls non-zero.
 3. `m14_gate.py 10 --things --collide` **PASS** — never gated once during this work (§12.3).
 4. `pytest tests/host -q --deselect …test_build_wall_renderer_e1m1_flat` → 242 passed.
-5. `cr/emit_hash_vs_head.py` → 14/14 parts identical, unless a lever deliberately changes the shipped
+5. `cr/emit_baseline.py --check` → 21/21 parts identical across 3 configs (this replaced
+   `cr/emit_hash_vs_head.py`, retired 2026-08-29), unless a lever deliberately changes the shipped
    path, in which case re-certify instead.
 6. `--cold` sweep reported, so level-load cost is visible.
 7. Any sprite removal or picture change named explicitly in the commit **and** shown as a

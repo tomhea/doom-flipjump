@@ -31,6 +31,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.wad import WadFile                                           # noqa: E402
 from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory  # noqa: E402
 from flipjump.interpreter.fjm_run import IOReadOnEOF                     # noqa: E402
@@ -88,7 +89,7 @@ def image(r):
 
 def run(r, vx, vy, va):
     core = image(r)
-    scr = StreamScreen(stdin=("%d%s%d%s%d%s" % (vx, chr(10), vy, chr(10), va, chr(10))).encode())
+    scr = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
     # the screen device must be attached to THIS core's memory (m1_sweep.py:132 does the same);
     # without it ScreenIO raises "the screen device is not attached to the interpreter memory".
     scr.attach_memory(NativeDeviceMemory(core, r.width))

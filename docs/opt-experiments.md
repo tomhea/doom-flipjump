@@ -117,7 +117,7 @@ byte-exact, so neither number is contaminated):
 near billboards are projected and recorded. That is also the frame most like a future firefight, so
 it is the right one to optimise against.
 
-`scratchpad/v4_check.py --nothings` builds and gates the no-things tier; both binaries stay in the
+`scratchpad/v4_check.py --nothings` (RETIRED 2026-08-29 with the WPX tier; `bench.py --off things` is the surviving form) built and gated the no-things tier; both binaries stayed in the
 cache, so the pair can be re-measured for free after any change.
 
 ## EXP-2 — reject before the divide, and test the cheaper flag first ✅ **KEEP**

@@ -13,6 +13,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT, ROOT / "scratchpad"):
     sys.path.insert(0, str(q))
 
 from doomfj.fastrun import FjmRunner                                      # noqa: E402
+from doomfj.wireformat import encode_feed_mapunits
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -33,7 +34,7 @@ target = frames if args.all else heavy
 r = FjmRunner(args.fjm)
 res = []
 for i, (x, y, a, base) in enumerate(target):
-    scr = StreamScreen(stdin=f"{x}\n{y}\n{a}\n".encode())
+    scr = StreamScreen(stdin=encode_feed_mapunits(x, y, a))
     ops = r.run(scr)
     res.append((x, y, a, base, ops))
     if (i + 1) % 40 == 0:

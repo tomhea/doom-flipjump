@@ -8,6 +8,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj.fastrun import FjmRunner, _fjcore
+from doomfj.wireformat import encode_feed_mapunits
 from flipjump.interpreter.fjm_run import IOReadOnEOF
 from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
 from tests.fj.stream_screen import StreamScreen
@@ -27,7 +28,7 @@ for i in range(3):
     for start, vals in r._runs:
         core.set_words(start, vals)
     t2 = time.perf_counter()
-    scr = StreamScreen(stdin=b"-435\n223\n0\n")
+    scr = StreamScreen(stdin=encode_feed_mapunits(-435, 223, 0))
     scr.attach_memory(NativeDeviceMemory(core, r.width))
     _c, ops, _e, _l, _p = core.run(scr.read_bit, scr.write_bit, IOReadOnEOF, last_ops_length=0)
     t3 = time.perf_counter()

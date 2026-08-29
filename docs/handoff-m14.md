@@ -352,7 +352,8 @@ takes the full 16.16. Option 1's record-level diff was never needed — the kern
   the same call §4b made — but nothing here is inside the 25M cap, and §6 lists it first.
 
   **What the shipped path pays: nothing.** `moving_things` defaults False and
-  `scratchpad/cr/emit_hash_vs_head.py` proves it — it emits the certified AND the shipped config
+  `scratchpad/cr/emit_hash_vs_head.py` proved it — it emitted the certified AND the shipped config
+  (retired 2026-08-29; `cr/emit_baseline.py --check` is the surviving form)
   twice, once from the working tree and once from HEAD, and all 14 parts hash identically. That is
   the same proof `test_build_wall_renderer_e1m1_flat` gives in ~70 minutes, in minutes.
   ⚠ It carries an R9 `--selftest` that mutates HEAD's copy by ONE character and requires a DIFF,

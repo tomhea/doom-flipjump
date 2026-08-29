@@ -41,6 +41,12 @@ CASES = [
      "tests/host/test_emitter_call_sites.py::"
      "test_every_tracked_caller_passes_keywords_the_emitter_has",
      "the entry point splats a retired keyword -- the shape that hid five broken files"),
+    ("scratchpad/ca2_sweep.py",
+     "stdin=encode_feed_mapunits(vx, vy, va)",
+     'stdin=("%d%s%d%s%d%s" % (vx, chr(10), vy, chr(10), va, chr(10))).encode()',
+     "tests/host/test_no_decimal_wire.py::test_no_tracked_file_feeds_the_retired_decimal_wire",
+     "the governing 260-frame sweep feeds the retired wire -- its byte-exactness control would "
+     "then compare two blank `bad:` frames and pass"),
     ("scratchpad/deg_gate.py",
      "sprite_wad=art, degrade=True, sky=True, bbox_cull=True)",
      "sprite_wad=art, degrade=True, bbox_cull=True)",

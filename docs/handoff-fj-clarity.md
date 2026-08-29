@@ -168,8 +168,8 @@ page around the generated artifact, not the Python that generates it.
    (program = pure function of stdin, loop = outside) is one of the most surprising things
    about the project; give it its own section.
 3. **The emitted main's anatomy, with REAL excerpts.** Open an actual cached main
-   (`scratchpad/fjmcache/b_272d37507ca58434.fj` — regenerate via the config in
-   `scratchpad/cr/emit_hash.py` if absent) and quote real snippets, syntax-highlighted and
+   (`scratchpad/fjmcache/b_272d37507ca58434.fj` — regenerate via the `certified` config in
+   `scratchpad/cr/emit_baseline.py` if absent; `cr/emit_hash.py` was retired 2026-08-29) and quote real snippets, syntax-highlighted and
    annotated line by line:
    - a BSP node block (the inlined side test + near/far branch);
    - one seg's visit: `seg{si}G_xorby` SET call → `seg_pass1_leaf` fcall → `proceed` test →

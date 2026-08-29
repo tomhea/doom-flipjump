@@ -432,7 +432,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                        player_sim: bool = False, collide: bool = False,
                        moving_things: bool = False, standalone: bool = False,
                        menu: bool = False, menu_entries=None, menu_selected: int = 0,
-                       sector_heights: dict | None = None,
                        doors: bool = False, door_quant: int = DOOR_QUANT,
                        return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
@@ -589,7 +588,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # reaches every consumer -- pids, the band bank, V5 pieces, collision, thing-liveness.
     # Same helper the oracle's `scene_sectors` uses (R6): a door the two mirrors disagree
     # about is the failure this repo has paid for three times.
-    secs = apply_sector_heights(map_wad.sectors(mapname), sector_heights)
+    secs = map_wad.sectors(mapname)
     # WHETHER THIS MAP HAS A SKY IS A PROPERTY OF THE MAP, not a caller's choice. The retired
     # `sky` flag was carrying two different things: "render V2 sky ceilings" (always yes now) and
     # "this wad has no sky lump at all", which is true of the square-room and arena fixtures. With
@@ -599,7 +598,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     _has_sky = any(sec.ceil_tex.upper() == "F_SKY1" for sec in secs)
 
     # ---- M2-R3: THE RUNTIME DOOR -------------------------------------------------------------
-    # `sector_heights` above bakes ONE height per door (R2). `doors=True` bakes them ALL, once per
+    # R2 baked ONE height per door through `sector_heights`, now retired. `doors=True` bakes them ALL, once per
     # state, and puts a nibble in front: the state cell picks which constant block a door-touching
     # seg runs. `_dsecs[k]` is the whole map with every door at state k -- the same `secs` shape
     # every predicate and field builder below already reads, so a door state is expressed as
@@ -682,7 +681,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # `scene.asset_wad.colormap()` is read from it today, which is why nothing broke -- but "one
     # doored, one not" is precisely the two-mirror drift doors.py exists to prevent, and the next
     # reader of `scene` would have inherited it silently. (CR PR#78, R6.)
-    scene = build_scene(map_wad, asset_wad, mapname, sector_heights)
+    scene = build_scene(map_wad, asset_wad, mapname)
     colormap = scene.asset_wad.colormap()
     proj = cfg.PROJECTION << 16
     defs = {d.name.upper(): d for d in asset_wad.texture_defs("TEXTURE1")}

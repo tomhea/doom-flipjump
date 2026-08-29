@@ -55,6 +55,13 @@ EXEMPT = {
     "scratchpad/m1_dirtymap.py",
     # `f = feed(...)`, the local helper at :213
     "scratchpad/m1d_loop.py",
+    # `run(core, f)` where `f = feed(...)` -- `feed` returns encode_feed(...) + things + bindings.
+    # The resolver is SCOPE-BLIND, and this file binds `f` in four different scopes (two file
+    # handles, a comprehension, the feed), so it cannot tell which one reaches the screen. Exempt
+    # for that reason -- and the file already protects itself better than this guard could:
+    # `assert ops1 > 1_000_000, "CONTROL 3 (vacuity): ... wrong wire"` fires at the ~209 ops a
+    # `bad:` halt produces.
+    "scratchpad/m1c_restore_set.py",
 }
 
 
@@ -80,18 +87,27 @@ def from_encoder(node, tree, depth=0):
     if isinstance(node, ast.IfExp):
         return (from_encoder(node.body, tree, depth) and from_encoder(node.orelse, tree, depth))
     if isinstance(node, ast.Name):
-        assigns = []
+        assigns, seen = [], 0
         for n in ast.walk(tree):
-            if not isinstance(n, ast.Assign):
-                continue
-            for t in n.targets:
-                if isinstance(t, ast.Name) and t.id == node.id:
-                    assigns.append(n.value)
-                elif isinstance(t, ast.Tuple):
-                    # `feed, nth = m14_feed(...)` -- five of the six real call sites look like this
-                    names = [e.id for e in t.elts if isinstance(e, ast.Name)]
-                    if node.id in names:
-                        assigns.append(_tuple_element(n.value, names.index(node.id), tree))
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    if isinstance(t, ast.Name) and t.id == node.id:
+                        assigns.append(n.value)
+                    elif isinstance(t, ast.Tuple):
+                        # `feed, nth = m14_feed(...)` -- most real call sites look like this
+                        names = [e.id for e in t.elts if isinstance(e, ast.Name)]
+                        if node.id in names:
+                            assigns.append(_tuple_element(n.value, names.index(node.id), tree))
+            elif (isinstance(n, ast.Name) and n.id == node.id
+                  and isinstance(n.ctx, (ast.Store, ast.Del))):
+                seen += 1                      # a WRITE we have not read; a read is harmless
+        # ⚠ ANY BINDING WE DID NOT READ makes this unknowable. Walking `ast.Assign` alone let an
+        # `AnnAssign`, a for-target, a `with ... as` or an `AugAssign` rebind the name after a
+        # traceable assignment, and a fully decimal feed then passed. Counting every Name
+        # occurrence was the over-correction: a READ is harmless, and it flagged six constants
+        # that are simply used twice. Stores and deletes only.
+        if seen > len(assigns):
+            return False
         if assigns:
             return all(from_encoder(v, tree, depth + 1) for v in assigns)
         # a PARAMETER: the value arrives from the caller, so trace it there. Without this the rule
@@ -163,8 +179,19 @@ def encodes_newline_decimals(source: str):
             ):
                 out.append(n.lineno)
             elif (isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.Mod)
-                  and isinstance(sub.left, ast.Constant) and isinstance(sub.left.value, str)
-                  and "%d" in sub.left.value):
+                  and isinstance(sub.left, ast.Constant)
+                  and isinstance(sub.left.value, (str, bytes))
+                  and ("%d" in sub.left.value if isinstance(sub.left.value, str)
+                       else b"%d" in sub.left.value)):
+                out.append(n.lineno)
+            elif isinstance(sub, ast.Constant) and isinstance(sub.value, str) and LF in sub.value:
+                out.append(n.lineno)                # "<lf>".join(...), "{}<lf>".format(...)
+    # a bytes literal never reaches `.encode()`, so it needs its own pass -- and it is escape #3
+    # in this file's own R9 control, which the first rot check did not look for
+    for n in ast.walk(ast.parse(source)):
+        if isinstance(n, ast.Constant) and isinstance(n.value, bytes) and LF.encode() in n.value:
+            text = n.value.decode("latin-1")
+            if any(part.strip().lstrip("-").isdigit() for part in text.split(LF) if part.strip()):
                 out.append(n.lineno)
     return sorted(set(out))
 
@@ -246,6 +273,24 @@ def test_every_exemption_still_exists_and_still_has_no_decimal_shape():
         found = encodes_newline_decimals((ROOT / rel).read_text(encoding="utf-8"))
         assert not found, (f"{rel} grew a decimal-wire construction while exempted, at line(s) "
                            f"{found} -- re-trace it or drop the exemption")
+
+
+def test_a_rebind_the_resolver_cannot_read_makes_the_feed_unknown():
+    """R9: the four rebinding forms that are not `ast.Assign`. Each must FAIL even though a
+    traceable assignment comes first -- and a plain second READ of the name must not."""
+    LF = chr(10)
+    for src in ("f = encode_feed_mapunits(x, y, a)" + LF + "f: bytes = other" + LF
+                + "StreamScreen(stdin=f)",
+                "f = encode_feed_mapunits(x, y, a)" + LF + "for f in items: pass" + LF
+                + "StreamScreen(stdin=f)",
+                "f = encode_feed_mapunits(x, y, a)" + LF + "with open(p) as f: pass" + LF
+                + "StreamScreen(stdin=f)",
+                "f = encode_feed_mapunits(x, y, a)" + LF + "f += tail" + LF
+                + "StreamScreen(stdin=f)"):
+        assert bad_feeds(src), src
+    # ... and a second READ is not a rebind: this is the shape of six real constants
+    assert bad_feeds("W = encode_feed_mapunits(x, y, a)" + LF + "print(len(W))" + LF
+                     + "StreamScreen(stdin=W)") == []
 
 
 def test_a_parameter_fed_a_decimal_value_at_one_call_site_is_caught():

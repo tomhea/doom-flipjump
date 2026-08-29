@@ -44,7 +44,7 @@ CASES = [
     ("scratchpad/ca2_sweep.py",
      "stdin=encode_feed_mapunits(vx, vy, va)",
      'stdin=("%d%s%d%s%d%s" % (vx, chr(10), vy, chr(10), va, chr(10))).encode()',
-     "tests/host/test_no_decimal_wire.py::test_no_tracked_file_feeds_the_retired_decimal_wire",
+     "tests/host/test_no_decimal_wire.py::test_every_screen_is_fed_the_binary_wire",
      "the governing 260-frame sweep feeds the retired wire -- its byte-exactness control would "
      "then compare two blank `bad:` frames and pass"),
     ("scratchpad/deg_gate.py",
@@ -75,7 +75,31 @@ CASES = [
 ]
 
 
+def _drop_pyc(path: Path) -> None:
+    """Delete the cached bytecode for a file this harness just restored.
+
+    ⚠ WITHOUT THIS THE RESTORE DOES NOT TAKE. Python invalidates a .pyc by (source mtime in
+    SECONDS, source size), and every mutation here is a same-length edit -- `1 << 4` -> `1 << 3`,
+    `>=` -> `>` -- restored within the same second. Both fields match, so the interpreter keeps
+    using bytecode compiled from the MUTATED source: `git status` is clean, the file on disk reads
+    correctly, and `KEY_USE` is still 8. Every later process in that second inherits it.
+
+    Found by this harness's own PASS-AFTER step, which is what that step is for.
+    """
+    cache = path.parent / "__pycache__"
+    if cache.is_dir():
+        for pyc in cache.glob(path.stem + ".*.pyc"):
+            pyc.unlink()
+
+
+NO_TESTS_RAN = 4          # pytest's exit code for "the nodeid matched nothing"
+
+
 def run(test):
+    """`(returncode, last line)`. ⚠ A nodeid that matches NOTHING exits 4, and the first version
+    scored any non-zero as the required FAIL -- so when round 4 renamed a test, this harness
+    reported its mutation as caught by a test that never ran, and the PR body quoted that line as
+    evidence. `main()` treats 4 as an ERROR now, never as a pass."""
     r = subprocess.run([sys.executable, "-m", "pytest", test, "-q", "--no-header", "-x"],
                        cwd=ROOT, capture_output=True, text=True)
     tail = [ln for ln in r.stdout.splitlines() if ln.strip()][-1] if r.stdout.strip() else "<none>"
@@ -88,20 +112,32 @@ def main():
     print("")
     for path, old, new, test, why in CASES:
         p = ROOT / path
-        src = p.read_text(encoding="utf-8")
+        # ⚠ newline="" both ways: `.gitattributes` pins eol=lf, and a text-mode
+        # round trip on Windows rewrites every line, leaving nine tracked files
+        # "modified" after a run that is supposed to restore the tree exactly.
+        # (Path.read_text gained `newline` only in 3.13, hence the explicit open.)
+        with p.open(encoding="utf-8", newline="") as fh:
+            src = fh.read()
         control = old == new
         if not control:
             if src.count(old) != 1:
                 print("  !! ANCHOR %s x%d in %s -- cannot mutate" % (old[:40], src.count(old), path))
                 ok = False
                 continue
-            p.write_text(src.replace(old, new), encoding="utf-8")
+            with p.open("w", encoding="utf-8", newline="") as fh:
+                fh.write(src.replace(old, new))
         try:
             rc, tail = run(test)
         finally:
-            p.write_text(src, encoding="utf-8")
+            with p.open("w", encoding="utf-8", newline="") as fh:
+                fh.write(src)
+            _drop_pyc(p)
         want_fail = not control
-        good = (rc != 0) if want_fail else (rc == 0)
+        if rc == NO_TESTS_RAN or "no tests ran" in tail:
+            good, rc = False, rc          # a nodeid that matched nothing proves nothing
+            tail = "!! NO TESTS RAN -- the nodeid matched nothing (renamed?): " + tail
+        else:
+            good = (rc != 0) if want_fail else (rc == 0)
         ok &= good
         print("  %-4s %s" % ("FAIL" if rc else "PASS", test.split("::")[-1][:66]))
         print("       %s" % why)

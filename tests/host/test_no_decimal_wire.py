@@ -32,12 +32,12 @@ ENCODER = "encode_feed"
 # EXEMPTIONS, each named with its reason and each traced BY HAND on 2026-08-29. This list is the
 # honest end of a closed-world rule: full inter-procedural resolution is a research problem, and an
 # ever-cleverer resolver that quietly gives up is exactly the open-world failure this file exists
-# to avoid. A visible list of six can be re-checked; a silent fallthrough cannot.
+# to avoid. A visible list can be re-checked; a silent fallthrough cannot. The length is asserted
+# below rather than written in prose, because this comment has now been wrong at six and at seven.
 #
-# Every entry below reaches its screen through a helper that returns `encode_feed(...)`, across a
-# module boundary or a tuple unpack the resolver does not follow. Verified by reading each one, and
-# by `grep -c encode_feed` vs any decimal shape: 3/0, 2/0, 0/0 (uses m14_gate's), 3/1 (the one
-# `chr(10)` is a print), 2/0, 2/0.
+# Every entry below reaches its screen through a helper that returns `encode_feed(...)` -- across
+# a module boundary, a tuple unpack, or a scope the resolver does not follow. Each was verified by
+# reading it, and each is re-checked every run by the rot test below.
 EXEMPT = {
     # the SCREEN'S OWN unit test: two raw bytes to prove `read_bit` drains an independent buffer,
     # with no program on the other end to care what wire it is
@@ -158,6 +158,27 @@ def _param_always_encoded(pname, tree, depth):
     return True
 
 
+def _is_newline_expr(node):
+    """`chr(10)` and the `.join`/`.format` that carry it -- the repo's own newline idiom, which a
+    Constant test cannot see because `chr(10)` is a Call.
+    ⚠ ONLY EVER CALLED ON AN `.encode()` RECEIVER. A newline is not a wire: `chr(10)` is this
+    repo's newline idiom and appears in prints throughout the diagnostics, and `"<lf>".join([...])`
+    is how fj SOURCE is assembled -- flagging either on its own made this fire on
+    `print(chr(10) + "PHASE 1b ...")` and on a test building a two-line fj program. Under an
+    `.encode()`, the same shapes are a feed.
+    """
+    if (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "chr"
+            and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value == 10):
+        return True                                # chr(10) inside an encoded expression
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)             and node.func.attr in ("join", "format"):
+        recv = node.func.value
+        if isinstance(recv, ast.Constant) and isinstance(recv.value, str) and chr(10) in recv.value:
+            return True
+        if _is_newline_expr(recv):
+            return True
+    return False
+
+
 def encodes_newline_decimals(source: str):
     """`[lineno]` for every `<something with a newline>.encode()` -- the ROT CHECK for exemptions.
 
@@ -168,7 +189,8 @@ def encodes_newline_decimals(source: str):
     newline")` that is all over these diagnostics does not trip it."""
     LF = chr(10)
     out = []
-    for n in ast.walk(ast.parse(source)):
+    tree = ast.parse(source)
+    for n in ast.walk(tree):
         if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                 and n.func.attr == "encode"):
             continue
@@ -186,13 +208,21 @@ def encodes_newline_decimals(source: str):
                 out.append(n.lineno)
             elif isinstance(sub, ast.Constant) and isinstance(sub.value, str) and LF in sub.value:
                 out.append(n.lineno)                # "<lf>".join(...), "{}<lf>".format(...)
-    # a bytes literal never reaches `.encode()`, so it needs its own pass -- and it is escape #3
-    # in this file's own R9 control, which the first rot check did not look for
-    for n in ast.walk(ast.parse(source)):
+            elif _is_newline_expr(sub):
+                out.append(n.lineno)                # chr(10).join(...), str(a)+chr(10)+str(b)
+    # ⚠ SHAPES THAT NEVER REACH `.encode()` NEED THEIR OWN PASS. The bytes `%` arm used to sit in
+    # the loop above, where `bytes` has no `.encode()` -- a dead branch that fired only on
+    # `(b"%d" % x).encode()`, which raises at runtime. So `b"%d<lf>%d" % (a, b)`, escape #4 in this
+    # file's own control, went unseen. `chr(10)` is this repo's newline idiom and was invisible too.
+    for n in ast.walk(tree):
         if isinstance(n, ast.Constant) and isinstance(n.value, bytes) and LF.encode() in n.value:
             text = n.value.decode("latin-1")
             if any(part.strip().lstrip("-").isdigit() for part in text.split(LF) if part.strip()):
-                out.append(n.lineno)
+                out.append(n.lineno)                # b"-435<lf>223"
+        elif (isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod)
+              and isinstance(n.left, ast.Constant) and isinstance(n.left.value, bytes)
+              and b"%d" in n.left.value):
+            out.append(n.lineno)                    # b"%d<lf>%d" % (a, b)
     return sorted(set(out))
 
 
@@ -234,6 +264,27 @@ def test_every_screen_is_fed_the_binary_wire():
                      + chr(10).join("  %s:%d %s(...)" % t for t in bad))
 
 
+def test_the_rot_check_sees_every_way_this_repo_writes_a_newline():
+    """R9 for the ROT CHECK itself, which review measured at 7 of 12 shapes: its bytes-`%` arm sat
+    inside the `.encode()` walk, and `bytes` has no `.encode()`, so it fired only on code that
+    raises at runtime. The three GOOD cases are the false positives that shaped it -- a print, and
+    the `"<lf>".join([...])` that assembles fj SOURCE."""
+    BS = chr(92)
+    for src in ('x = f"{a}' + BS + 'n{b}".encode()',
+                'x = ("%d' + BS + 'n%d" % (a, b)).encode()',
+                'x = b"-435' + BS + 'n223"',
+                'x = b"%d' + BS + 'n%d" % (a, b)',
+                'x = chr(10).join(p).encode()',
+                'x = "' + BS + 'n".join(p).encode()',
+                'x = "{}' + BS + 'n".format(a).encode()',
+                'x = (str(a) + chr(10) + str(b)).encode()'):
+        assert encodes_newline_decimals(src), src
+    for src in ('print(chr(10) + "hi")',
+                'main = "' + BS + 'n".join(["stl.startup", "a;b"])',
+                'x = encode_feed_mapunits(a, b, c)'):
+        assert not encodes_newline_decimals(src), src
+
+
 def test_it_rejects_every_shape_that_escaped_the_pattern_matcher():
     """R9, and the reason this file was rewritten. Each of these passed the bad-shape detector."""
     LF = chr(10)
@@ -263,6 +314,9 @@ def test_it_accepts_the_binary_wire_and_its_one_legitimate_wrapper():
 
 
 def test_every_exemption_still_exists_and_still_has_no_decimal_shape():
+    assert len(EXEMPT) == 8, ("EXEMPT changed size -- update this number deliberately, and the "
+                              "reason for each entry. The prose describing it has been wrong "
+                              "twice, which is why the count is asserted and not written out.")
     """An exemption list rots. Each entry must still be a tracked file, and must still contain no
     decimal-wire construction -- checked crudely on purpose, because the point is to notice when
     one of these files changes under the exemption, not to re-derive the trace."""

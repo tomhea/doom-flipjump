@@ -30,6 +30,7 @@ import doomfj.config as CFGM                                              # noqa
 import doomfj.reference_model as RM                                       # noqa: E402
 import doomfj.wall_renderer as WR                                         # noqa: E402
 from doomfj.config import Config                                          # noqa: E402
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.fastrun import FjmRunner                                      # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.harness import W                                              # noqa: E402
@@ -43,16 +44,11 @@ SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection
 ap = argparse.ArgumentParser()
 ap.add_argument("--ablate", action="append", default=[])
 ap.add_argument("--knob", action="append", default=[], metavar="NAME=VALUE")
-ap.add_argument("--off", action="append", default=[],
-                choices=["grain", "sky", "steps", "things", "plane_near", "bboxcull"])
-ap.add_argument("--stack", action="store_true",
-                help="V5: stacked boundary pieces + per-boundary plane regions")
-ap.add_argument("--deg", action="store_true",
-                help="25M-CAP: the load-adaptive degradation package (graduated things, B-gate, "
-                     "sliver-flat, stack far gate, PNEAR 96)")
-ap.add_argument("--wall-mode", default="WPX", choices=["W1", "W2S", "WPX", "W1R"],
-                help="wall tier: WPX = 1x1 texels, W1 = flat-lit walls (the 15M ladder), "
-                     "W1R = W1 + randomized runs (M13-W1R)")
+# ⚠ THIS LIST SHRINKS AS FLAGS RETIRE. grain/plane_near/sky/steps/bboxcull and the --stack and
+# --deg switches are gone because the emitter has one value for each of them now; pricing a
+# feature the program cannot be built without is not a thing this harness can do any more, and
+# `--ablate` is the sanctioned way to price work that IS still switchable.
+ap.add_argument("--off", action="append", default=[], choices=["things"])
 ap.add_argument("--res", default="", metavar="WxH",
                 help="render at a different resolution. Config is fully W/H-derived, so the "
                      "oracle follows and byte-exactness still holds.")
@@ -97,12 +93,7 @@ VPS = ([(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn")]
        [(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn"),
         (1400, 1200, 0, "courtyard"), (2432, 1344, 3221225472, "tree"), (-309, -44, 0, "worst")])
 ABL = frozenset(args.ablate)
-FLAGS = dict(floor_mode="FT1", wall_mode=args.wall_mode, raster_mode="lines",
-             plane_near="plane_near" not in args.off,
-             wall_noise="grain" not in args.off, sky="sky" not in args.off,
-             steps="steps" not in args.off, things="things" not in args.off,
-             bbox_cull="bboxcull" not in args.off, stack_steps=args.stack)
-FLAGS_DEG = args.deg
+FLAGS = dict(things="things" not in args.off)
 
 
 def build():
@@ -113,7 +104,7 @@ def build():
     key.update(repr(sorted(FLAGS.items())).encode())
     key.update(repr(sorted(ABL)).encode())
     key.update(repr(sorted(KNOBS.items())).encode())
-    key.update(repr(FLAGS_DEG).encode())   # ⚠ was missing: a --deg and non-deg build collided
+    # (the --deg key that used to be folded in here went with the flag)
     key.update(args.res.encode())
     key.update((args.wad + args.map + args.asset).encode())
     key.update(Path(args.wad).read_bytes())   # ... the wad CONTENT: a regenerated arena.wad
@@ -126,9 +117,9 @@ def build():
         print(f"cache HIT {fjm.name}", flush=True)
         return fjm
     t0 = time.time()
-    parts = WR.emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
+    parts = WR.emit_wall_renderer(mw, args.map, cfg, asset_wad=aw,
                                   sprite_wad=art if FLAGS["things"] else None, ablate=ABL,
-                                  deg=FLAGS_DEG, return_parts=True, **FLAGS)
+                                  return_parts=True, **FLAGS)
     print(f"emitted {sum(len(x) for _, x in parts):,} chars in {len(parts)} parts "
           f"({time.time() - t0:.0f}s)", flush=True)
     consts = cfg.emit_fj_consts(cache / "fj_consts.fj")
@@ -144,12 +135,11 @@ def build():
 WANT = None
 if not ABL:                                    # an ablated frame is deliberately wrong: price only
     WANT = [bytes(rm.render_wall_frame(SimState(x=vx << 16, y=vy << 16, angle=va, level=args.map),
-                                       scene, wall_mode=FLAGS["wall_mode"], floor_mode_ft1=True,
-                                       plane_near=FLAGS["plane_near"],
-                                       wall_noise=FLAGS["wall_noise"], sky=FLAGS["sky"],
-                                       near_steps=FLAGS["steps"], things=FLAGS["things"],
-                                       sprite_wad=art, bbox_cull=FLAGS["bbox_cull"],
-                                       stack_steps=FLAGS["stack_steps"], degrade=FLAGS_DEG))
+                                       scene, wall_mode=WR.WALL_MODE, floor_mode_ft1=True,
+                                       plane_near=True, wall_noise=WR.WALL_NOISE, sky=WR.SKY,
+                                       near_steps=WR.STEPS, things=FLAGS["things"],
+                                       sprite_wad=art, bbox_cull=WR.BBOX_CULL,
+                                       stack_steps=WR.STACK_STEPS, degrade=WR.DEG))
             for vx, vy, va, _ in VPS]
 
 label = args.tag or (" ".join(f"-{o}" for o in args.off) + " " +
@@ -159,7 +149,7 @@ r = FjmRunner(build())
 print(f"\n### {label}")
 tot = 0
 for i, (vx, vy, va, tag) in enumerate(VPS):
-    scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+    scr = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
     ops = r.run(scr)
     tot = max(tot, ops)
     ok = "" if WANT is None else ("  BYTE-EXACT" if bytes(scr.pixel_indices) == WANT[i]

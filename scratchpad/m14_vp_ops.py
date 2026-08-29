@@ -6,7 +6,9 @@ the same delta the pre-M14 binary shows at the SAME viewpoint. This prints both 
 
   * `--m14 <fjm>`   the M14 `--things` wire (state + 251 spawn positions + WARM bindings, keys=0),
                     i.e. exactly what `m14_sweep.py` feeds and what `opprof.py --m14` feeds;
-  * `--dec <fjm>`   the pre-M14 DECIMAL wire (`vx\\nvy\\nva\\n`), i.e. the certified binary.
+  * `--dec <fjm>`   ⚠ WAS the pre-M14 DECIMAL wire, retired with `state_wire`. Both sides feed
+                    the binary wire now; the flag name is kept only so old command lines in
+                    the handoffs still parse.
 
 Same viewpoints, both binaries, so the difference is MEASURED per frame rather than inferred from
 two different sweeps' medians (docs/handoff-perf.md §4 does the latter, and says so).
@@ -82,7 +84,7 @@ for vx, vy, va in VPS:
     got, px = [], []
     for name, (r, m14) in runners.items():
         feed = (encode_feed_mapunits(vx, vy, va, 0) + THINGS if m14
-                else f"{vx}\n{vy}\n{va}\n".encode())
+                else encode_feed_mapunits(vx, vy, va))
         scr = StreamScreen(stdin=feed, n_things=len(DRAW) if m14 else 0)
         got.append(r.run(scr))
         px.append(bytes(scr.pixel_indices))

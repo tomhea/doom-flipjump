@@ -128,13 +128,13 @@ runs, against the cached binary.
 
 | script | what it does |
 |---|---|
-| `scratchpad/v4_check.py --emit` | the four-viewpoint V4 gate; caches the binary |
-| `... --trace` | + the 0x0B stream anomaly report |
-| `... --nothings` | build without things: the V3 baseline at every viewpoint |
-| `... --reconly` | keep the record half, disable the emit: prices record alone, byte-exact |
-| `... --thingtwice` | double `project_thing` into dead registers: prices all projections |
+| ~~`scratchpad/v4_check.py --emit`~~ | the four-viewpoint V4 gate — RETIRED 2026-08-29 with the WPX tier it built. `deg_gate` covers V4 at the shipped tier |
+| ~~`... --trace`~~ | + the 0x0B stream anomaly report |
+| ~~`... --nothings`~~ | build without things: the V3 baseline at every viewpoint |
+| ~~`... --reconly`~~ | keep the record half, disable the emit: prices record alone, byte-exact |
+| ~~`... --thingtwice`~~ | double `project_thing` into dead registers — `bench.py --ablate thingtwice` is the surviving form |
 | `scratchpad/v4_col.py <vp> <col>...` | one column's fj pairs vs the oracle's runs |
-| `scratchpad/v3_check.py` | the V3 gate |
+| ~~`scratchpad/v3_check.py`~~ | the V3 gate -- RETIRED 2026-08-29, it built the WPX tier. V3 step faces are unconditional now and `deg_gate` covers them |
 | `scratchpad/v3_slotmodel.py` | proves the V3 storage model with no build at all |
 | `scratchpad/v4_oracle.py` | renders the things oracle + its pair/ditto deltas |
 

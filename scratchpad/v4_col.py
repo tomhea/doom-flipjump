@@ -10,6 +10,7 @@ ROOT = Path('.').resolve()
 for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 from doomfj.config import Config
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.fastrun import FjmRunner
 from doomfj.fixedpoint import _signed
 from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
@@ -48,7 +49,7 @@ fjm = sorted((ROOT / "scratchpad/fjmcache").glob("v4_*.fjm"),
 print("binary:", fjm.name)
 print(f"WARNING: picked newest v4_*.fjm by mtime ({fjm.name}); its build flags are NOT verified "
       "against this script's oracle settings -- a stale/differently-flagged cache diffs falsely")
-scr = DumpScreen(COLS, stdin=f"{vx}\n{vy}\n{va}\n".encode())
+scr = DumpScreen(COLS, stdin=encode_feed_mapunits(vx, vy, va))
 try:
     ops = FjmRunner(fjm).run(scr)
 except Exception as e:

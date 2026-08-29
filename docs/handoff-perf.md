@@ -651,7 +651,8 @@ cost 4,911,000. Any further "drop N% of things ⇒ save N%" reasoning is wrong f
    tics, **both** vacuity controls non-zero.
 3. `m14_gate.py 10 --things --collide` **PASS** — never gated once during this work (§12.3).
 4. `pytest tests/host -q --deselect …test_build_wall_renderer_e1m1_flat` → 242 passed.
-5. `cr/emit_hash_vs_head.py` → 14/14 parts identical, unless a lever deliberately changes the shipped
+5. `cr/emit_baseline.py --check` → 21/21 parts identical across 3 configs (this replaced
+   `cr/emit_hash_vs_head.py`, retired 2026-08-29), unless a lever deliberately changes the shipped
    path, in which case re-certify instead.
 6. `--cold` sweep reported, so level-load cost is visible.
 7. Any sprite removal or picture change named explicitly in the commit **and** shown as a
@@ -666,7 +667,7 @@ cost 4,911,000. Any further "drop N% of things ⇒ save N%" reasoning is wrong f
 |---|---|---|
 | `scratchpad/m14_sweep.py <fjm> --things [--cold] [--csv f]` | ~5 min | **THE TARGET METRIC.** 260-frame median on the binary wire. `--cold` feeds all-dirty bindings (a cold start) instead of the steady state. |
 | `scratchpad/m14_gate.py 10 --things [--collide]` | ~25 min build + ~10 min | **THE PROOF.** phase 1 byte-exact ×4 + cold-vs-warm identical pixels; phase 2 N relayed tics, frame AND state AND bindings vs the oracle; two-sided vacuity controls. |
-| `scratchpad/cr/emit_hash_vs_head.py [--selftest]` | ~15 min | the shipped path is unchanged (14/14 parts hash-identical, certified + shipped configs) |
+| `scratchpad/cr/emit_baseline.py --check [--selftest]` | ~31 min | the shipped path is unchanged (21/21 parts hash-identical across 3 configs). ⚠ REPLACES `cr/emit_hash_vs_head.py`, retired 2026-08-29: it compared by calling THE SAME SIGNATURE on both sides, which stops working the moment a parameter is deleted -- and the flag retirements deleted thirteen. |
 | `scratchpad/_bind.py` | ~3 min | `bind_things` COLD vs WARM: identical lists, and the cache is actually taken |
 | `scratchpad/_tpass.py` | ~2 min | every leaf visits exactly its things, in ascending order |
 | ~~`scratchpad/m14_thload_split.py`~~ | — | ⚠ **STALE**: it string-patches `sim.thing_load`'s body to ablate it, and M14-perf rewrote those lines (hot/cold split). Its 45,934 figure stands as a historical measurement of the OLD macro. |
@@ -744,7 +745,10 @@ Every one of these cost at least one wasted build or probe cycle.
 
 ## 11. ⚠ Method traps — these cost more than the fj ones
 
-1. **A STALE BASELINE IS NOT A CONTROL.** `cr/emit_hash.py` compares against a *stored* hash; after
+1. **A STALE BASELINE IS NOT A CONTROL.** (⚠ Both tools named in this item were retired
+   2026-08-29; `cr/emit_baseline.py` is the replacement and it stores hashes ON PURPOSE, re-checking
+   through whatever the API became. The lesson below is why it also ships two mutation controls.)
+   `cr/emit_hash.py` compares against a *stored* hash; after
    a run of milestones it reports DIFF for every config regardless of the change under review, so it
    reads as evidence and is noise. Use **`cr/emit_hash_vs_head.py`**, which self-baselines (emits
    the certified AND shipped config twice in one process, worktree vs HEAD) and ships an R9

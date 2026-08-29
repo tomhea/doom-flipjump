@@ -1,6 +1,5 @@
 """walk_e1m1 -- the closest thing to PLAYING the game today: a pygame window you walk around in,
-where EVERY FRAME IS RENDERED BY THE REAL FLIPJUMP PROGRAM (the shipping raster_mode="lines"
-renderer, assembled once at startup).
+where EVERY FRAME IS RENDERED BY THE REAL FLIPJUMP PROGRAM (the shipping assembled once at startup).
 
 ⚠ B0 (2026-08-18) -- THE SIM NOW RUNS IN FLIPJUMP. This docstring used to say "there is no fj-side
 input/simulation yet (that's M14)", and that was true for months AFTER M14 and M14.5 shipped: both
@@ -40,9 +39,11 @@ from doomfj.config import Config
 from doomfj.fastrun import FjmRunner
 from doomfj.mapcompiler import bake_bsp
 from doomfj.things import baked_thing_mask, vanishable_slots
-from doomfj.wireformat import (encode_bindings, encode_feed, encode_things,
+from doomfj.wireformat import (encode_bindings, encode_feed,
+                               encode_feed_mapunits, encode_things,
                                encode_visibility)
 from doomfj.fixedpoint import _signed
+import doomfj.wall_renderer as WR
 from doomfj.harness import W, FJM_LZMA_FAST
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,
                                     ReferenceModel, spawn_state)
@@ -81,36 +82,16 @@ def main():
     # a height tier (near brighter / far darker), certified median 14.91M / mean 15.22M over
     # the 260-frame walkable sweep -- +0.46M at the median over plain W1 (14.45M). W1 stays a
     # flag away, as does the true-texel look: --wall-mode WPX (+2-6M/frame).
-    ap.add_argument("--wall-mode", default="W1R", choices=["W1", "W2S", "WPX", "W1R"])
-    ap.add_argument("--floor-mode", default="FT1", choices=["flat", "FT1"])
-    ap.add_argument("--two-sided", action="store_true",
-                    help="M13-2S rung 3b: draw the TWO-SIDED walls too (step faces, ledge fronts,"
-                         " door frames) and give every plane region its own bounding seg's sector."
-                         " Byte-exact vs the 2S oracle but ~6x slower than the shipped tier"
-                         " (131M vs 21.7M ops/frame at spawn) -- for looking at, not for playing.")
-    ap.add_argument("--no-plane-near", action="store_true",
-                    help="turn OFF M13-2S rung 3a (attribute each column's floor/ceiling to the"
-                         " nearest MARKING seg instead of to the wall that claims the column) --"
-                         " i.e. go back to the pre-rung-3a look, for comparison")
-    # ── the four VISUAL FEATURES (V1-V4). ON by default: they are what the renderer looks like
-    # now, and every one is byte-exact against the oracle. Each costs ops, so each has an off
-    # switch -- docs/opt-experiments.md has what they are worth.
-    ap.add_argument("--no-grain", action="store_true",
-                    help="V1 OFF: no pseudo-random wall texture grain")
-    ap.add_argument("--no-sky", action="store_true",
-                    help="V2 OFF: sky-flat ceilings go back to a plain plane")
-    ap.add_argument("--no-steps", action="store_true",
-                    help="V3 OFF: no step faces (stair risers, ledge fronts, door lintels)")
-    ap.add_argument("--no-stack", action="store_true",
-                    help="V5 OFF: back to ONE boundary piece per column and no per-boundary"
-                         " floor/ceiling regions (stairs collapse to a single riser again)")
+    # ⚠ THE OFF-SWITCHES ARE GONE, and this is the entry point, so it is worth saying why.
+    # --wall-mode, --floor-mode, --two-sided, --no-plane-near, --no-grain, --no-sky, --no-steps,
+    # --no-stack and --no-deg each selected an emitter flag that has since been retired into its
+    # only live value: the tiers below W1R/FT1 are in the history, and V1/V2/V3/V5 and the 25M-CAP
+    # package are what the renderer IS. Passing them stopped working when the parameters went, and
+    # every one of these forwarded straight into `emit_wall_renderer`, so this script has been
+    # raising TypeError since that retirement. `--ablate` on `scratchpad/bench.py` is where work
+    # that is still switchable gets priced.
     ap.add_argument("--no-things", action="store_true",
                     help="V4 OFF: no thing sprites")
-    ap.add_argument("--no-deg", action="store_true",
-                    help="25M-CAP OFF: disable the load-adaptive degradation package (graduated"
-                         " far-thing acceptance, behind-sprite B-gate, sliver-flat walls, far"
-                         " stacked-piece gate, marking budget 96). Light frames render the same"
-                         " either way; degradation only sheds far detail on already-heavy frames.")
     ap.add_argument("--sprites", default="assets/freedoom1.wad", metavar="WAD",
                     help="wad to take SPRITE art from. The cut-down test fixture has no sprite"
                          " lumps at all, so things need a full wad here; if it is missing, V4"
@@ -150,26 +131,16 @@ def main():
         aw = WadFile.from_path(str(aw_path))
         print(f"  ({args.wad} is geometry-only -- taking art from assets/freedoom1.wad)")
 
-    # V1-V4 ride on the rung-3a (plane_near) lines tier; the rung-3b two-sided tier is a different
-    # emit path that none of them was written against, so they are off there.
-    feats = not args.two_sided
-    # M13-W1R rides V1's per-column grain group; without the grain its pattern key does not
-    # exist at runtime, so W1R forces V1 on rather than failing the emit assert.
-    if args.wall_mode == "W1R" and (args.no_grain or not feats):
-        print("  !! --wall-mode W1R needs V1's grain group -- keeping grain ON")
-        args.no_grain = False
-        assert feats, "--wall-mode W1R is not wired into the two_sided tier"
+    # V1/V2/V3/V5 and the 25M-CAP package used to be conditional here; they are the renderer
+    # now, so the only thing left to decide is whether the sprites go in.
     spr_path = ROOT / args.sprites
-    want_things = feats and not args.no_things
+    want_things = not args.no_things
     if want_things and not spr_path.exists():
         print(f"  !! {args.sprites} not found -- V4 things OFF"
               " (the cut-down fixture wad has no sprite lumps)")
         want_things = False
     spr = WadFile.from_path(str(spr_path)) if want_things else None
-    on = [n for n, f in (("grain", feats and not args.no_grain),
-                         ("sky", feats and not args.no_sky),
-                         ("steps", feats and not args.no_steps),
-                         ("things", want_things)) if f]
+    on = ["grain", "sky", "steps", "stack", "deg"] + (["things"] if want_things else [])
 
     # B0: the sim is the DEFAULT path now. It needs the runtime thing table (moving_things), so
     # it also needs things; --no-things therefore implies --no-sim rather than silently building a
@@ -199,9 +170,11 @@ def main():
     # ⚠ B0: `sim` is IN THE KEY. It changes the binary AND the wire format, so a cached
     # no-sim binary served to the sim path would be fed a wire it cannot parse and would halt
     # after ~200 ops -- the exact failure dirty_census documents for the decimal feed.
-    key.update(repr((args.wall_mode, args.floor_mode, args.two_sided, args.no_plane_near,
-                     args.no_grain, args.no_sky, args.no_steps, args.no_stack, want_things,
-                     args.no_deg, args.map, sim)).encode())
+    # ⚠ the retired switches are out of the KEY as well as out of the call. A key that still
+    # hashed them would be harmless; a key that hashed FEWER things than the build depends on is
+    # how two different binaries collide in the cache, so this list shrinks only when the thing it
+    # names stops shaping the build -- which is exactly what retiring the flag did.
+    key.update(repr((want_things, args.map, sim)).encode())
     key.update((ROOT / args.wad).read_bytes())
     if aw_path is not None:
         key.update(aw_path.read_bytes())
@@ -219,33 +192,19 @@ def main():
         print(f"cache HIT {fjm.name} -- skipping the ~15 min build", flush=True)
     else:
         print(f"assembling the fj renderer ({args.map}, lines mode, "
-              f"{args.wall_mode}+{args.floor_mode}"
-              f"{'+two_sided' if args.two_sided else '' if args.no_plane_near else '+plane_near'}"
+              f"{WR.WALL_MODE}+{WR.FLOOR_MODE}+plane_near"
               f"{'+' + '+'.join(on) if on else ''}) ...")
         if want_things:
             print("  (the sprite bank makes this a ~104M-character program: expect ~7 min to"
                   " emit + ~9 min to assemble; the result is CACHED for later launches)",
                   flush=True)
-        main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False,
-                                      floor_mode=args.floor_mode, wall_mode=args.wall_mode,
-                                      raster_mode="lines", two_sided=args.two_sided,
-                                      plane_near=(not args.no_plane_near) and not args.two_sided,
-                                      wall_noise=feats and not args.no_grain,
-                                      sky=feats and not args.no_sky,
-                                      steps=feats and not args.no_steps,
+        main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw,
                                       things=want_things, sprite_wad=spr,
-                                      bbox_cull=True,   # M13-15M: the wedge subtree cull ships
-                                      # V5: stacked boundary pieces + true regions
-                                      stack_steps=(feats and not args.no_steps
-                                                   and not args.no_stack),
-                                      # 25M-CAP + OPT-A: certified median 16.51M / mean 17.34M /
-                                      # worst 41.9M, byte-exact (b_8db722bbd480cd52)
-                                      deg=feats and not args.no_deg,
                                       # B0: the sim, the collision and the runtime thing table --
                                       # built and gated since M14/M14.5, wired in here for the
                                       # first time. `collide=True` is what makes walls solid
                                       # without the host testing a single linedef.
-                                      **(dict(state_wire="bin", player_sim=True, collide=True,
+                                      **(dict(player_sim=True, collide=True,
                                               moving_things=True) if sim else {}))
         print(f"emitted {len(main_txt):,} chars in {time.perf_counter() - t0:.0f}s", flush=True)
         tmp = Path(tempfile.mkdtemp())
@@ -293,8 +252,11 @@ def main():
         """The frame's stdin. ⚠ BINARY when the sim is on -- a decimal feed halts a state_wire=bin
         program after ~200 ops rather than failing loudly."""
         if not sim:
-            nl = chr(10)          # the three-decimal wire, one value per line
-            return (str(px) + nl + str(py) + nl + str(ang) + nl).encode()
+            # ⚠ THIS BRANCH FED THE DECIMAL WIRE until 2026-08-29, and the docstring above already
+            # said what that costs. `state_wire` retired: the program is binary-only whether or not
+            # the sim is in it, so a --no-sim run was halting at `bad:` after ~200 ops and drawing
+            # a blank frame. Same encoder, map units, no keys.
+            return encode_feed_mapunits(px, py, ang)
         return encode_feed(st[0], st[1], st[2], keys) + THINGS[0] + encode_bindings(binds) + THINGS[1]
 
     def render_headless(keys):

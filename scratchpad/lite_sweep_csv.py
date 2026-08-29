@@ -12,6 +12,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT, ROOT / "scratchpad"):
     sys.path.insert(0, str(q))
 
 from doomfj.fastrun import FjmRunner                                      # noqa: E402
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.wad import WadFile                                            # noqa: E402
 from nb_validate import true_sector, _near_any_line                       # noqa: E402
 from tests.fj.stream_screen import StreamScreen                           # noqa: E402
@@ -45,7 +46,7 @@ rows = []
 for i, (x, y) in enumerate(pts):
     for k in range(args.angles):
         va = (k << 30) & 0xFFFFFFFF
-        scr = StreamScreen(stdin=f"{x}\n{y}\n{va}\n".encode())
+        scr = StreamScreen(stdin=encode_feed_mapunits(x, y, va))
         rows.append((x, y, va, r.run(scr)))
     if (i + 1) % 25 == 0:
         print(f"  ...{i+1}/{len(pts)}", flush=True)

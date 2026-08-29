@@ -196,7 +196,7 @@ python scripts/walk_e1m1.py --frames 3            # headless, no pygame, prints 
 python -m pytest tests/host/test_twosided.py -q    # the 2S oracle gates (fast)
 python -m pytest tests/fj/test_lines_render.py -q  # the fj byte-exact tier gates (~6 min)
 python scratchpad/wpx_sweep.py                     # 63-viewpoint worst-case sweep (~15 min)
-python scratchpad/tsprobe.py                       # the two-sided walk-cost probe
+# (scratchpad/tsprobe.py retired 2026-08-29 -- it priced the WPX/two-sided walk, and both tiers are gone)
 python scratchpad/twosided_proto.py                # standalone picture of the target look
 python scratchpad/twosided_study.py                # population counts
 python -m pytest -q                                # full suite, ~1h15m, 299 passed / 4 skipped

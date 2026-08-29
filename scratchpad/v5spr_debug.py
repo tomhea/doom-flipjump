@@ -10,6 +10,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 import flipjump as fj
 from PIL import Image
 from doomfj.config import Config
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.reference_model import ReferenceModel, SimState, build_scene
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer
@@ -26,10 +27,7 @@ mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 scene = build_scene(mw, mw, "E1M1")
 
-main = emit_wall_renderer(mw, "E1M1", cfg, over_align=False,
-                          floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                          plane_near=True, wall_noise=True, steps=True, stack_steps=True,
-                          things=True, sprite_wad=art)
+main = emit_wall_renderer(mw, "E1M1", cfg, things=True, sprite_wad=art)
 tmp = Path(tempfile.mkdtemp())
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
 p = tmp / "v5d.fj"
@@ -43,8 +41,8 @@ vx, vy, va = 664, 291, 0x18000000
 want = bytes(rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
                                   wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
                                   wall_noise=True, near_steps=True, stack_steps=True,
-                                  things=True, sprite_wad=art))
-scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+                                  things=True, sprite_wad=art, sky=True, bbox_cull=True, degrade=True))
+scr = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
 fj.run(out, io_device=scr, print_time=False, print_termination=False, flat_max_words=1 << 26)
 got = bytes(scr.pixel_indices)
 
@@ -53,7 +51,7 @@ to: list = []
 rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
                      wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
                      wall_noise=True, near_steps=True, stack_steps=True,
-                     things=True, sprite_wad=art, steps_out=so, things_out=to)
+                     things=True, sprite_wad=art, steps_out=so, things_out=to, sky=True, bbox_cull=True, degrade=True)
 ups, los = so[0]
 sfrag = to[0]
 

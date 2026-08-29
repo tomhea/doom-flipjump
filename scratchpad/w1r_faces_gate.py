@@ -13,6 +13,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 
 import flipjump as fj
 from doomfj.config import Config
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.fixedpoint import _signed
 from doomfj.harness import W
 from doomfj.reference_model import ReferenceModel, SimState, build_scene, spawn_state
@@ -31,9 +32,7 @@ sp = spawn_state(mw, "E1M1")
 spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 VPS = [(spx, spy, sp.angle), (-309, 636, 0), (1272, -724, 1073741824)]
 
-main = emit_wall_renderer(mw, "E1M1", cfg, over_align=False,
-                          floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                          plane_near=True, wall_noise=True, steps=True)
+main = emit_wall_renderer(mw, "E1M1", cfg)
 tmp = Path(tempfile.mkdtemp())
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
 p = tmp / "w1rf.fj"
@@ -47,8 +46,8 @@ ok = True
 for vx, vy, va in VPS:
     want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
                                 wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
-                                wall_noise=True, near_steps=True)
-    scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+                                wall_noise=True, near_steps=True, sky=True, stack_steps=True, bbox_cull=True, degrade=True)
+    scr = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
     term = fj.run(out, io_device=scr, print_time=False, print_termination=False,
                   flat_max_words=1 << 26)
     same = bytes(scr.pixel_indices) == bytes(want)

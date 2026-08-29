@@ -22,11 +22,8 @@ gen = ROOT / "build" / "generated_loop"; gen.mkdir(parents=True, exist_ok=True)
 spr = _resolve_sprite_wad(wad, ROOT / "assets/freedoom1.wad")   # build.py's default
 # EXACTLY build.build_wall_renderer's defaults for the shipped tier (B0/A0.1): if these drift the
 # label table describes a different program than the one M1 will be gated on.
-parts = emit_wall_renderer(wad, "E1M1", cfg, over_align=False, floor_mode="FT1",
-                           wall_mode="W1R", raster_mode="lines", plane_near=True,
-                           wall_noise=True, sky=True, steps=True, things=True,
-                           sprite_wad=spr, stack_steps=True, bbox_cull=True, deg=True,
-                           state_wire="bin", player_sim=True, collide=True,
+parts = emit_wall_renderer(wad, "E1M1", cfg, things=True,
+                           sprite_wad=spr, player_sim=True, collide=True,
                            moving_things=True, return_parts=True)
 cfg.emit_fj_consts(gen / "fj_consts.fj")
 paths = write_program_files(parts, gen, "E1M1")

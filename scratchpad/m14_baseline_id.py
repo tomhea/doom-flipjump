@@ -25,6 +25,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj.config import Config                                          # noqa: E402
+from doomfj.wireformat import encode_feed_mapunits
 from doomfj.fastrun import FjmRunner                                      # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
@@ -51,7 +52,7 @@ for wad in ("tests/fixtures/freedoom_e1m1.wad", "tests/fixtures/e1m1_lite.wad"):
     scene = build_scene(mw, mw if wad.endswith("freedoom_e1m1.wad") else ASSETS, "E1M1")
     sp = spawn_state(mw, "E1M1")
     vx, vy, va = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle
-    scr = StreamScreen(stdin=f"{vx}\n{vy}\n{va}\n".encode())
+    scr = StreamScreen(stdin=encode_feed_mapunits(vx, vy, va))
     ops = r.run(scr)
     got = bytes(scr.pixel_indices)
     print(f"\n=== {Path(wad).name} spawn ({vx},{vy},{va:#x}) -- binary ran {ops:,} ops ===",

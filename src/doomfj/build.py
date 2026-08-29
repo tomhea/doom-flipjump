@@ -24,7 +24,8 @@ from doomfj.mapcompiler import bake_bsp, compile_geometry_streams
 from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
-from doomfj.wall_renderer import (STATE_WIRE, TIER, WALL_NOISE, emit_wall_renderer,
+from doomfj.wall_renderer import (BBOX_CULL, DEG, STACK_STEPS, STATE_WIRE, STEPS, TIER,
+                                  WALL_NOISE, emit_wall_renderer, map_has_sky,
                                   write_program_files)
 
 _SRC_FJ = Path("src/fj")
@@ -225,13 +226,12 @@ STANDALONE_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m5_restore_
 
 
 def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
-                        flat_max_words=None, sky=True,
-                        steps=True, things=True, sprite_wad=DEFAULT_SPRITE_WAD,
-                        stack_steps=True, bbox_cull=True, deg=True,
+                        flat_max_words=None,
+                        things=True, sprite_wad=DEFAULT_SPRITE_WAD,
                         player_sim=True, collide=True,
                         moving_things=True, standalone=False, menu=False, menu_entries=None,
                         menu_selected=0,
-                        sector_heights=None, doors=False,
+                        doors=False,
                         self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
@@ -290,13 +290,12 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
     spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
 
-    parts = emit_wall_renderer(wad, mapname, cfg, sky=sky, steps=steps, things=things,
-                               sprite_wad=spr, stack_steps=stack_steps, bbox_cull=bbox_cull,
-                               deg=deg, player_sim=player_sim,
+    parts = emit_wall_renderer(wad, mapname, cfg, things=things,
+                               sprite_wad=spr, player_sim=player_sim,
                                collide=collide, moving_things=moving_things,
                                standalone=standalone, menu=menu, menu_entries=menu_entries,
                                menu_selected=menu_selected,
-                               sector_heights=sector_heights, doors=doors,
+                               doors=doors,
                                return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
@@ -416,8 +415,9 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         # reported; add new ones here in the same commit that adds them to the signature.
         # `wall_noise` is a CONSTANT now (V1's grain is what the W1R wall is made of), but every
         # gate log and metrics file reads this key, so it keeps reporting.
-        "features": {"wall_noise": WALL_NOISE, "sky": sky, "steps": steps, "things": things,
-                     "stack_steps": stack_steps, "bbox_cull": bbox_cull, "deg": deg,
+        "features": {"wall_noise": WALL_NOISE, "sky": map_has_sky(wad.sectors(mapname)),
+                     "steps": STEPS, "things": things,
+                     "stack_steps": STACK_STEPS, "bbox_cull": BBOX_CULL, "deg": DEG,
                      # B0: the sim half. Reported for the same reason as the rest -- a flag that
                      # shapes the artifact must be visible in metrics.json, or the next divergence
                      # is invisible again.
@@ -430,14 +430,10 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
                      # M5: no host in the loop -- the keyboard device drives it and the view state
                      # survives the reset.
                      "standalone": standalone,
-                     # M2: a door override MOVES PIXELS, so it belongs in the guard the same as any
-                     # other picture-shaping input. Reported as a bool: the heights themselves are
-                     # a per-sector dict, and what the guard needs to catch is a build that has
-                     # them at all. (CR PR#78, R6.)
-                     "sector_heights": bool(sector_heights),
                      # M2-R3: the runtime door. Picture-shaping and opt-in, so it belongs in
-                     # the exact-equality features guard for the same reason sector_heights
-                     # does -- a tier flag that can arrive unnoticed is the CR-2026-08 miss.
+                     # the exact-equality features guard -- a tier flag that can arrive unnoticed
+                     # is the CR-2026-08 miss. (R2's static `sector_heights` override was reported
+                     # here too until it retired into `doors`.)
                      "doors": bool(doors),
                      # M3: the menu is a second frame producer chosen by a persisted cell
                      "menu": menu},

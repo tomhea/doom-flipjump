@@ -56,7 +56,6 @@ from doomfj.lut_generator import (generate_bands_walk_fj, generate_state_switch_
                                   generate_w1r_walls_fj)
 from doomfj.tables import (sine_table, tantoangle_table, slopediv_recip8_table,
                            slopediv_recip_table, viewangletox_table, xtoviewangle_table)
-from doomfj.config import PNEAR_SEG_BUDGET
 
 
 NLJ = chr(10)   # newline constant for generated .fj text
@@ -71,6 +70,21 @@ TIER = "lines/W1R/FT1+plane_near"      # what every gate log and metrics.json pr
 WALL_MODE, FLOOR_MODE = "W1R", "FT1"   # M13-W1R walls, M13-FT1 floors
 WALL_NOISE = True                      # V1's per-column grain -- what the W1R wall is MADE of
 STATE_WIRE = "bin"                     # doomfj.wireformat; "dec" retired with the flag
+# The V-tier picture features, retired into the default when their gates certified:
+# V2 sky, V3 step faces, V5 stacked step faces, the thing bbox cull, and the 25M-CAP
+# degradation package. Reported by `metrics['features']` FROM HERE, because every
+# gate log in the repo reads those keys and a description of the build that is a
+# second expression drifts (see persisted_labels).
+STEPS = STACK_STEPS = BBOX_CULL = DEG = True
+
+
+def map_has_sky(secs) -> bool:
+    """Does this map use the sky flat at all? THE one source for that question.
+
+    `SKY` used to sit in the line above as a constant True, which was a second expression: the
+    emitter asked the map (`_has_sky`) while `metrics["features"]["sky"]` asserted True even for a
+    wad with no F_SKY1 ceiling. Same shape as the persisted_labels bug, so the same fix."""
+    return any(sec.ceil_tex.upper() == "F_SKY1" for sec in secs)
 
 
 def _pfx(mapname: str) -> str:
@@ -340,7 +354,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
 
 
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
-                         spr_base, spr_ldbase, spr_dw, spr_cls, *, deg: bool, spr_cache: dict,
+                         spr_base, spr_ldbase, spr_dw, spr_cls, *, spr_cache: dict,
                          keep=None):
     """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
 
@@ -363,7 +377,8 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     allt = map_wad.things(mapname)
     rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, MONSTER_TYPES,
                            MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
-                           deg=deg, spr_near=bool(DEG_SPR_NEAR_TZ), cache=spr_cache, keep=keep)
+                           deg=True, spr_near=bool(DEG_SPR_NEAR_TZ), cache=spr_cache,
+                           keep=keep)
     things = [allt[i] for i in idx]
     ssflr, sslgt_raw = subsector_tables(rm, cmap, lds, sds, secs)
     lns = reachable_lightnums(rm, secs)
@@ -421,14 +436,10 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
 def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                        ablate: frozenset = frozenset(),
 
-                       sky: bool = False, steps: bool = False,
                        things: bool = False, sprite_wad=None,
-                       bbox_cull: bool = False, stack_steps: bool = False,
-                       deg: bool = False,
                        player_sim: bool = False, collide: bool = False,
                        moving_things: bool = False, standalone: bool = False,
                        menu: bool = False, menu_entries=None, menu_selected: int = 0,
-                       sector_heights: dict | None = None,
                        doors: bool = False, door_quant: int = DOOR_QUANT,
                        return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
@@ -536,7 +547,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     table_dbl = 1 if "tabletwice" in ablate else 0
     w2s_flag = wpx_flag = 0                     # retired tiers, kept as the leaf's 0 arguments
     w1r_flag = 1                                # M13-W1R (randomized runs): the shipped wall
-    deg_flag = 1 if deg else 0                  # 25M-CAP: load-adaptive degradation package
+    deg_flag = 1                                # 25M-CAP: load-adaptive degradation package
     # M14-b: the state wire. "dec" is the historical three-decimals-on-stdin viewpoint; "bin" is the
     # M14 round-trip format (doomfj.wireformat) -- 16.16 position + BAM + key byte in, state back
     # out ahead of the frame. The echo goes out through `stream.emit_bytes4`, i.e. `byte.emit`,
@@ -559,9 +570,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # `sim.thing_load` externs the full sprite register set, and an extern that has no global is an
     # assembler error -- so the two OPTIONAL registers must be present. Both are in the certified
     # tier; this refuses at emit time rather than 25 minutes into an assemble.
-    assert not moving_things or (deg and DEG_SPR_NEAR_TZ), (
-        "moving_things=True needs deg=True and DEG_SPR_NEAR_TZ: sim.thing_load loads sp_tzmax2 and "
-        "sp_base2, which are only declared under those two flags")
+    assert not moving_things or DEG_SPR_NEAR_TZ, (
+        "moving_things=True needs DEG_SPR_NEAR_TZ: sim.thing_load loads sp_tzmax2 and sp_base2, "
+        "and sp_base2 is only declared under it")
     # M13-W1R rides V1's per-column grain group (`gnrow` via the wnoise lookup) and V1's ditto
     # comparison of it -- without the grain the pattern key does not exist at runtime.
     # V1's grain is not optional: the W1R wall IS the randomized-run tier, and it reads `gnrow`.
@@ -573,9 +584,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # and let the floor pairs paint the wall rows. Refuse the combination at build time.
     # V5: stacked boundary pieces + per-boundary plane regions ride the V3 slot machinery and
     # the pnear pid bank -- both must be on.
-    stack_flag = 1 if stack_steps else 0
-    assert not stack_flag or (lines and steps and plane_near), \
-        "stack_steps requires the lines tier with steps + plane_near"
+    stack_flag = 1                              # V5: stacked boundary pieces + per-boundary plane regions
     # V5 slot layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all four
     # fit the EXISTING 16-byte stride, so the whole-nibble shift stays.
     asset_wad = asset_wad or map_wad
@@ -587,10 +596,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # reaches every consumer -- pids, the band bank, V5 pieces, collision, thing-liveness.
     # Same helper the oracle's `scene_sectors` uses (R6): a door the two mirrors disagree
     # about is the failure this repo has paid for three times.
-    secs = apply_sector_heights(map_wad.sectors(mapname), sector_heights)
+    secs = map_wad.sectors(mapname)
+    # WHETHER THIS MAP HAS A SKY IS A PROPERTY OF THE MAP, not a caller's choice. The retired
+    # `sky` flag was carrying two different things: "render V2 sky ceilings" (always yes now) and
+    # "this wad has no sky lump at all", which is true of the square-room and arena fixtures. With
+    # the flag gone the second meaning has to come from the data, or a sky-less map emits
+    # `skyoff.lookup` against a bank that was never built -- an ASSEMBLY error, not a wrong
+    # picture, and one no baseline config could have shown because all three are E1M1.
+    _has_sky = map_has_sky(secs)
 
     # ---- M2-R3: THE RUNTIME DOOR -------------------------------------------------------------
-    # `sector_heights` above bakes ONE height per door (R2). `doors=True` bakes them ALL, once per
+    # R2 baked ONE height per door through `sector_heights`, now retired. `doors=True` bakes them ALL, once per
     # state, and puts a nibble in front: the state cell picks which constant block a door-touching
     # seg runs. `_dsecs[k]` is the whole map with every door at state k -- the same `secs` shape
     # every predicate and field builder below already reads, so a door state is expressed as
@@ -673,7 +689,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # `scene.asset_wad.colormap()` is read from it today, which is why nothing broke -- but "one
     # doored, one not" is precisely the two-mirror drift doors.py exists to prevent, and the next
     # reader of `scene` would have inherited it silently. (CR PR#78, R6.)
-    scene = build_scene(map_wad, asset_wad, mapname, sector_heights)
+    scene = build_scene(map_wad, asset_wad, mapname)
     colormap = scene.asset_wad.colormap()
     proj = cfg.PROJECTION << 16
     defs = {d.name.upper(): d for d in asset_wad.texture_defs("TEXTURE1")}
@@ -834,12 +850,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # needs no new emit path at all. One list per sky texture column, in the same
     # [y2_cumulative][colour] form the plane bands already use, plus a compile-time per-column
     # offset table; the frame supplies `skybase` and the existing prefix walk does the rest.
-    skybands, skyoff = _lines_sky_bank(rm, asset_wad, cfg) if (lines and sky) else ("", "")
+    skybands, skyoff = _lines_sky_bank(rm, asset_wad, cfg) if _has_sky else ("", "")
     skypid = ""                     # filled below, once the pid map exists
     # V3: the step-face shade bank + the (light, wall-units) class each face-carrying boundary bakes.
     stepcol, step_cls = (_lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs,
-                                          w1r=bool(w1r_flag), sky=sky, seg_secs=_seg_secs)
-                         if (lines and steps) else ("", {}))
+                                          w1r=bool(w1r_flag), has_sky=_has_sky,
+                                          seg_secs=_seg_secs))
     # V4: the sprite run-list bank + the shade-row bank, and the per-type block bases the things bake.
     _do_things = lines and things
     assert not (things and sprite_wad is None), "things=True needs sprite_wad (see _lines_sprite_bank)"
@@ -914,7 +930,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # M14-e: the runtime half of the same data, baked by INDEX rather than by (subsector, thing).
     _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB, _MT_BINDS = (
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
-                             spr_base, spr_ldbase, spr_dw, spr_cls, deg=deg, spr_cache=spr_cache,
+                             spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
                              keep=_mt_keep)
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
@@ -1074,7 +1090,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
         um_ = lm_ = 0
         for sv in _seg_secs(seg):
             a_, b_ = rm.v5_side_modes(sv[sds[ld_.front if seg.side == 0 else ld_.back].sector],
-                                      sv[sds[ld_.back if seg.side == 0 else ld_.front].sector], sky)
+                                      sv[sds[ld_.back if seg.side == 0 else ld_.front].sector], _has_sky)
             um_, lm_ = um_ or a_, lm_ or b_
         return um_, lm_
 
@@ -1148,7 +1164,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
         skypid = (generate_dispatch_table_fj(
         "skypid",
         [0] + [1 if ck[3] == "F_SKY1" else 0 for (ck, _fk) in lines_pid],
-        index_nibbles=2, result_nibbles=2) if (lines and sky and plane_near) else "")
+        index_nibbles=2, result_nibbles=2) if _has_sky else "")
     n_bank_keys = max(1, len(lines_bank_keys))
 
     # M13-15M BANDS-AS-CODE: the shipping-tier emit path — every band half-list baked as raw-op
@@ -1159,7 +1175,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     if ascode:
         _main_lists = _band_pair_lists(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                                        floor_mode == "FT1")
-        _sky_lists = _sky_pair_lists(rm, asset_wad, cfg) if sky else []
+        _sky_lists = _sky_pair_lists(rm, asset_wad, cfg) if _has_sky else []
         sky_base_id = len(_main_lists)
         bands_code = generate_bands_walk_fj(_main_lists + _sky_lists)
         skybands = ""                          # the sky DATA bank dies with the plane bank
@@ -1247,7 +1263,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
         their riser/lip pieces, the (1210,1187)/(1698,892) divergence class at node level)."""
         if lines_solid_below.get(node_i, 1) != 0:
             return 0
-        return 2 if (steps and lines_piece_below.get(node_i, 0)) else 1
+        return 2 if lines_piece_below.get(node_i, 0) else 1
 
     if lines and _do_things:
         # M14-a: the guard runs on the SAME two callables `_bsp_as_code` is about to be handed, so
@@ -1321,7 +1337,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                         # runtime by degfl once the SOFT count fills (graduated acceptance)
                         *([("sp_tzmax2", 8, rm.sprite_tz_min_size(
                             _art[4], DEG_MINH2_MON if _t.type in MONSTER_TYPES
-                            else DEG_MINH2_SCENERY) & 0xFFFFFFFF)] if deg else []),
+                            else DEG_MINH2_SCENERY) & 0xFFFFFFFF)]),
                         # which budget this thing spends -- baked, because the category is a
                         # property of the thing type and never changes at runtime
                         ("sp_mon", 2, 1 if _t.type in MONSTER_TYPES else 0),
@@ -1340,7 +1356,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                     assert [(n, w) for n, w, _v in _tfields] == [
                         p for p in THING_XORBY_FIELDS
                         if p[0] not in ("sp_tzmax2", "sp_base2")
-                        or (p[0] == "sp_tzmax2" and deg)
+                        or p[0] == "sp_tzmax2"
                         or (p[0] == "sp_base2" and DEG_SPR_NEAR_TZ)], (
                         "the thing xor_by block no longer matches THING_XORBY_FIELDS -- update the "
                         "schema (and sim.thing_pass's clears) together")
@@ -1429,11 +1445,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                         _um, _lm = _seg_piece_modes(seg)
                         _tsq = list(_acall)
                         _tsu = list(_acall)
-                        if steps and (_um or _lm):
+                        # ⚠ ONLY the `steps` half of this test was a constant. Deleting the
+                        # whole condition emitted the face block for EVERY marking seg
+                        # instead of the 709 that carry a face -- +27,397 chars, caught by
+                        # the emission baseline and by nothing else.
+                        if _um or _lm:
                             def _face_fields(sv, _sg=seg, _ld=ld):
                                 f_ = rm._seg_sector(lds, sds, sv, _sg)
                                 b_ = sv[sds[_ld.back if _sg.side == 0 else _ld.front].sector]
-                                u_, l_ = rm.v5_side_modes(f_, b_, sky)
+                                u_, l_ = rm.v5_side_modes(f_, b_, _has_sky)
                                 ln_ = rm.wall_lightnum(f_.light, 0)
                                 return [
                                     ("seg_segangle", 8, _sg.angle),
@@ -1533,7 +1553,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                            # W1R_BASE_BRIGHTEN headroom (R44) so the pattern can darken from it;
                            # a sliver drawn flat must use the true W1-tone the oracle draws.
                            *([("seg_litf", 2, wlit(ssec.light, combined[tb], flat_wall=True))]
-                             if (w1r_flag and deg) else []),
+                             if w1r_flag else []),
                            # M13-2S rung 3a: the emit half derives both list addresses from the
                            # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
                            # (and the same byte is what this seg writes when it claims a column).
@@ -1570,8 +1590,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # off-wedge columns silently, so the inflation now follows `thing_live_subsectors` -- every
     # subtree a thing could ever enter.
     bbox_gate: dict = {}
-    if lines and bbox_cull:
-        bbox_gate = bbox_gate_boxes(cmap, thing_subsectors=_thing_live_gate)
+    bbox_gate = bbox_gate_boxes(cmap, thing_subsectors=_thing_live_gate)
 
     def _bbox_gate_lines(i, ret_reg):
         box = bbox_gate.get(i)
@@ -1758,7 +1777,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
                      entoff, _collide_tables]
                   # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
                   # which changes the shipped text and so its emit hash -- caught by
-                  # scratchpad/cr/emit_hash_vs_head.py, which is exactly what that control is for.
+                  # scratchpad/cr/emit_baseline.py, which is exactly what that control is for.
                   + ([_mt_tables] if moving_things else []) + ["__hot_end:"])
     else:
         hotdata = []
@@ -1780,7 +1799,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
     # the baked banks) assemble as their OWN FILES and the file holding the actual program
     # stays small and readable. ⚠ ORDER IS LOAD-BEARING and the parts are NOT reordered:
     # concatenating them in this order reproduces the previous single-file text BYTE FOR
-    # BYTE (asserted by scratchpad/cr/emit_hash.py), so the assembled binary is unchanged.
+    # BYTE (asserted by scratchpad/cr/emit_baseline.py), so the assembled binary is unchanged.
     # A consequence of not reordering: a few small declarations that sit after the first
     # big array in the original order ride along in the "banks" part rather than "state".
     _parts = [
@@ -1854,9 +1873,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
              # = the smudged-column bug) -- n_ts counts a subset of the map's segs, so total segs
              # below the baked cap is the sufficient condition. 4095 is also the 3-nibble
              # counter's max, enforced together here.
-             *([_assert_pnear_unbound(deg, len(cmap.segs)), "seg_pass1_ts_leaf:",
-                f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR if deg else PNEAR_SEG_BUDGET}, {atan_dbl}, {slope_dbl}, "
-                f"{table_dbl}, {1 if steps else 0}, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
+             *([_assert_pnear_unbound(len(cmap.segs)), "seg_pass1_ts_leaf:",
+                f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR}, {atan_dbl}, {slope_dbl}, "
+                f"{table_dbl}, 1, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
                 f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
                 f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"] if plane_near else []),
              # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
@@ -1878,8 +1897,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
               f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {w1r_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
               f"{eabl_flag}, {1 if 'noproj' in ablate else 0}, "
               f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
-              f"1, {1 if sky else 0}, {2 * LINES_HALF_SLOTS}, "
-              f"{1 if 'skyall' in ablate else 0}, {1 if steps else 0}, "
+              f"1, {1 if _has_sky else 0}, {2 * LINES_HALF_SLOTS}, "
+              f"{1 if 'skyall' in ablate else 0}, 1, "
               f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
               f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}, "
               f"{deg_flag}, {DEG_SLIVER_W}")]
@@ -2019,7 +2038,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None,
              "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
              "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
              "seg_bpid: hex.vec 2",                # V5: the boundary's baked BACK pair id
-             stepcol] if (lines and steps) else []),
+             stepcol]),
           # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (nonzero =
           # this column carries one) so a column without a sprite costs ONE read on the emit path;
           # `spslot[x]` holds [sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row] at a power-of-16 stride.
@@ -2694,7 +2713,7 @@ STEP_SLOT_STRIDE = 16      # V3: bytes per column in `sfslot` -- 6 used, rounded
 STEP_COL_STRIDE = 256      # ... and bytes per light class in `stepcol`, same whole-nibble reason.
 
 
-def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False, sky=False,
+def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False, has_sky=False,
                      seg_secs=None):
     """V3 — the step-face SHADE bank, plus the (lightnum, units) -> class map the segs bake.
 
@@ -2725,7 +2744,7 @@ def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False, sky=Fa
             ln = rm.wall_lightnum(fsec.light, 0)
             # V5-DROP: lips (mode 2) collapse to units=1; risers keep their true delta (R6:
             # exactly the keys the seg bakes below)
-            um, lm = rm.v5_side_modes(fsec, bsec, sky)
+            um, lm = rm.v5_side_modes(fsec, bsec, has_sky)
             if um:
                 cls_of.setdefault((ln, max(1, fsec.ceil_h - bsec.ceil_h)), len(cls_of))
             if lm:
@@ -2835,13 +2854,16 @@ def _spr_nlow(cfg):
                if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
 
 
-def _assert_pnear_unbound(deg: bool, total_segs: int) -> str:
+def _assert_pnear_unbound(total_segs: int) -> str:
     """The deg attribution budget's never-binds proof (see DEG_PNEAR): total segs strictly below
-    the baked cap, and the cap inside the 3-nibble fj counter. Returns an empty emitted line."""
-    if deg:
-        assert total_segs < DEG_PNEAR <= 4095, (
-            f"DEG_PNEAR={DEG_PNEAR} can bind (map has {total_segs} segs) or overflows the "
-            "3-nibble n_tsv counter -- a binding attribution budget paints wrong columns")
+    the baked cap, and the cap inside the 3-nibble fj counter. Returns an empty emitted line.
+
+    The `deg` flag that used to gate this is retired, so the proof is unconditional -- which is
+    what it should always have been: a budget that can bind paints wrong columns, and the
+    condition only ever said "do not check when the package is off"."""
+    assert total_segs < DEG_PNEAR <= 4095, (
+        f"DEG_PNEAR={DEG_PNEAR} can bind (map has {total_segs} segs) or overflows the "
+        "3-nibble n_tsv counter -- a binding attribution budget paints wrong columns")
     return ""
 
 

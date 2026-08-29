@@ -62,7 +62,6 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--wad", default="tests/fixtures/square_room.wad")
 ap.add_argument("--map", default="MAP01")
 ap.add_argument("--asset", default="tests/fixtures/freedoom_assets.wad")
-ap.add_argument("--sky", action="store_true", help="the fixture room has no sky flat")
 ap.add_argument("--top", type=int, default=25)
 ap.add_argument("--vp", default="", metavar="X,Y,ANG",
                 help="profile THIS viewpoint instead of spawn (profile the frame that hurts)")
@@ -86,10 +85,8 @@ fjm, dbg = out / f"{tag}.fjm", out / f"{tag}.dbg"
 
 # ⚠ the M14 emit kwargs are m14_gate.py's, verbatim. If they drift, the profile stops describing
 # the binary the sweep measured -- which is what the byte-compare below is there to catch.
-M14_EMIT = dict(return_parts=True, over_align=False, floor_mode="FT1", wall_mode="W1R",
-                raster_mode="lines", plane_near=True, wall_noise=True, steps=True,
-                stack_steps=True, things=True, deg=True, bbox_cull=True,
-                state_wire="bin", player_sim=True, collide=False, moving_things=True)
+M14_EMIT = dict(return_parts=True, things=True,
+                player_sim=True, collide=False, moving_things=True)
 # ⚠ CR-2026-08 (IN-3, A0.1): `bbox_cull=True` added to keep the "m14_gate.py's, verbatim" contract
 # above true after A0.1 unified the four configurations. A profile of a different picture ranks the
 # wrong macros -- and the ranking is what A2's whole batch order rests on.
@@ -110,10 +107,7 @@ elif args.m14:
     print(f"assembled + labelled in {time.time() - t0:.0f}s "
           f"({fjm.stat().st_size:,} bytes)", flush=True)
 else:
-    main = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, over_align=False, floor_mode="FT1",
-                              wall_mode="WPX", raster_mode="lines", plane_near=True,
-                              wall_noise=True,
-                              sky=args.sky, steps=True, things=True, sprite_wad=art)
+    main = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, things=True, sprite_wad=art)
     consts = cfg.emit_fj_consts(out / "fj_consts.fj")
     mp = out / "prof.fj"
     mp.write_text(main, encoding="utf-8")

@@ -26,10 +26,7 @@ mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 scene = build_scene(mw, mw, "E1M1")
 
-main = emit_wall_renderer(mw, "E1M1", cfg, over_align=False,
-                          floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                          plane_near=True, wall_noise=True, steps=True, stack_steps=True,
-                          things=True, sprite_wad=art)
+main = emit_wall_renderer(mw, "E1M1", cfg, things=True, sprite_wad=art)
 tmp = Path(tempfile.mkdtemp())
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
 p = tmp / "v5d.fj"

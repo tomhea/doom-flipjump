@@ -51,7 +51,7 @@ SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection
 # different picture by construction -- but it bounds the WHOLE sprite bill at the median, which
 # is what §7 needs before any sprite option can be proposed (docs/handoff-perf.md §4, §7).
 NOTHINGS = "--nothings" in sys.argv
-# ⚠ CR-2026-08 (IN-3, A0.1): `bbox_cull=True` added below, because this file's whole contract is
+# ⚠ CR-2026-08 (IN-3, A0.1): `because this file's whole contract is
 # "deg_gate.py's emit call VERBATIM" and deg_gate gained the cull in A0.1 -- leaving it out would
 # have quietly turned the baseline back into a DIFFERENT PICTURE, which is the exact failure this
 # harness was written to fix. It changes the binary, so the cache name changes with it: the
@@ -67,8 +67,7 @@ sp = spawn_state(mw, "E1M1")
 spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 VPS = [(664, 291, 0x18000000), (1272, -724, 1073741824),
        (1869, 479, 2147483648), (spx, spy, sp.angle)]
-RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
-                 near_steps=True, stack_steps=True, things=not NOTHINGS,
+RENDER_KW = dict(floor_mode_ft1=True, near_steps=True, things=not NOTHINGS,
                  sprite_wad=None if NOTHINGS else art, degrade=True)
 
 if CACHE.exists() and "--rebuild" not in sys.argv:
@@ -76,11 +75,8 @@ if CACHE.exists() and "--rebuild" not in sys.argv:
 else:
     t0 = time.time()
     # ⚠ deg_gate.py's emit call, verbatim. Any drift here and this stops being the baseline.
-    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, over_align=False,
-                               floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                               plane_near=True, wall_noise=True, steps=True, stack_steps=True,
-                               things=not NOTHINGS,
-                               sprite_wad=None if NOTHINGS else art, deg=True, bbox_cull=True)
+    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, things=not NOTHINGS,
+                               sprite_wad=None if NOTHINGS else art)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     prog = write_program_files(parts, tmp, "e1m1")        # ⚠ order is the contract

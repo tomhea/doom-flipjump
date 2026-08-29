@@ -1,9 +1,7 @@
 """M14 GATE — the binary state wire and the player sim, gated the way deg_gate gates the renderer.
 
 Same map, same tier, same degrade=True oracle as `scratchpad/deg_gate.py`; the differences are
-`state_wire="bin"` and `player_sim=True`. Two phases:
-
-  PHASE 1 -- STILL. The four deg_gate viewpoints, fed with keys=0. The sim is a no-op with no key
+`fed with keys=0. The sim is a no-op with no key
     pressed (proved exhaustively over all 16 combinations in tests/fj/test_state_wire.py), so every
     frame must still be byte-exact against the oracle, the echoed state must come back unchanged,
     and the op counts should differ from the dec wire only by the input path -- three decimal
@@ -77,8 +75,7 @@ F, B, L, R = 0b0001, 0b0010, 0b0100, 0b1000
 SCRIPT = ([L, L, L, L, F, F, F, F, F]
           + [L, L, F, F, F | L, F | L, F, F | R, B, F | B, L | R, F, F, F | R, R, F])
 
-RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
-                 near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
+RENDER_KW = dict(floor_mode_ft1=True, near_steps=True, things=True, sprite_wad=art, degrade=True)
 
 
 # ⚠ B0 (2026-08-18): COLLISION IS ON BY DEFAULT, because build.py and walk_e1m1.py now SHIP
@@ -93,10 +90,9 @@ MOVING = "--things" in sys.argv                  # M14-e: the RUNTIME thing tabl
 # not a flag, for exactly that reason: the whole point of A0.1 is that there is one configuration.
 # ⚠ ...and it changes the binary, so it is IN THE CACHE KEY. The pre-A0.1 `m14_bin*.fjm` caches
 # were built without the cull and must not be silently reused under the new config.
-BBOX_CULL = True
 CACHE = ROOT / ("scratchpad/fjmcache/m14_bin%s%s%s.fjm"
                 % ("_coll" if COLLIDE else "", "_things" if MOVING else "",
-                   "_cull" if BBOX_CULL else ""))
+                   "_cull"))
 
 # M14-e — the drawable things, in the ONE order both mirrors index by: wad order, filtered to the
 # types that have art. `thing_rows` (fj side) and `render_wall_frame`'s `_drawable` (oracle side)
@@ -174,11 +170,8 @@ def build():
     if CACHE.exists() and "--rebuild" not in sys.argv:
         print(f"cache HIT {CACHE.name} ({CACHE.stat().st_size:,} bytes)", flush=True)
         return CACHE
-    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, over_align=False,
-                               floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                               plane_near=True, wall_noise=True, steps=True, stack_steps=True,
-                               things=True, sprite_wad=art, deg=True, bbox_cull=BBOX_CULL,
-                               state_wire="bin", player_sim=True, collide=COLLIDE,
+    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, things=True, sprite_wad=art,
+                               player_sim=True, collide=COLLIDE,
                                moving_things=MOVING)
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")

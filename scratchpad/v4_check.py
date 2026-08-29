@@ -88,8 +88,7 @@ def build():
         print(f"cache HIT {fjm.name}", flush=True)
         return fjm
     t0 = time.time()
-    main = emit_wall_renderer(mw, "E1M1", cfg, asset_wad=mw, over_align=False,
-                              sprite_wad=art, ablate=ABL, **FLAGS)
+    main = emit_wall_renderer(mw, "E1M1", cfg, asset_wad=mw, sprite_wad=art, ablate=ABL, **FLAGS)
     print(f"emitted {len(main):,} chars ({time.time() - t0:.0f}s)", flush=True)
     consts = cfg.emit_fj_consts(cache / "fj_consts.fj")
     mp = cache / f"v4_{tag}.fj"

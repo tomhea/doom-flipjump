@@ -31,9 +31,7 @@ sp = spawn_state(mw, "E1M1")
 spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 VPS = [(spx, spy, sp.angle), (-309, 636, 0), (1272, -724, 1073741824)]
 
-main = emit_wall_renderer(mw, "E1M1", cfg, over_align=False,
-                          floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                          plane_near=True, wall_noise=True, steps=True)
+main = emit_wall_renderer(mw, "E1M1", cfg)
 tmp = Path(tempfile.mkdtemp())
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
 p = tmp / "w1rf.fj"

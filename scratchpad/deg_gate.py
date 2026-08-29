@@ -33,15 +33,10 @@ VPS = [(664, 291, 0x18000000),        # the sprite-overlap frame: B-gate + gradu
        (1869, 479, 2147483648),       # the everything frame: sliver + PNEAR + all
        (spx, spy, sp.angle)]
 
-# ⚠ CR-2026-08 (IN-3, A0.1): `bbox_cull=True` was ADDED here so the gate certifies the SAME picture
-# `build.py` ships and `scripts/walk_e1m1.py` shows. It was the one flag the walker passed and this
-# gate did not, which meant the wedge subtree cull -- a mechanism that changes which marking segs
+# ⚠ CR-2026-08 (IN-3, A0.1): `which meant the wedge subtree cull -- a mechanism that changes which marking segs
 # spend budget -- was never covered by the repo's own proof. The four op counts below therefore
 # CHANGED when this landed; that is the intended, one-time cost of unifying the three tiers.
-parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, over_align=False,
-                          floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                          plane_near=True, wall_noise=True, steps=True, stack_steps=True,
-                          things=True, sprite_wad=art, bbox_cull=True, deg=True)
+parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, things=True, sprite_wad=art)
 tmp = Path(tempfile.mkdtemp())
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
 # the emitted program is written as SEPARATE files (order is load-bearing -- see

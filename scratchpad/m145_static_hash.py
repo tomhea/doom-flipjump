@@ -42,9 +42,6 @@ mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 
 # the shipped tier, as m14_basegate builds it: things ON, moving_things OFF
-parts = emit_wall_renderer(mw, "E1M1", Config(), return_parts=True, over_align=False,
-                           floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                           plane_near=True, wall_noise=True, steps=True, stack_steps=True,
-                           things=True, sprite_wad=art, deg=True)
+parts = emit_wall_renderer(mw, "E1M1", Config(), return_parts=True, things=True, sprite_wad=art)
 text = "".join(t for _n, t in parts) if isinstance(parts, list) else parts
 print(f"static emission: {hashlib.sha256(text.encode()).hexdigest()}  {len(text):,} chars")

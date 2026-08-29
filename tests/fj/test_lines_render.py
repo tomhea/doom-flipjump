@@ -119,9 +119,15 @@ def test_e1m1_lines_w1r_ft1_byte_exact_vs_oracle(tmp_path):
     VIEWPOINTS = [(spx, spy, sp.angle), (spx, spy, (sp.angle + 0x40000000) & 0xFFFFFFFF)]
     out = _assemble_lines(tmp_path, mw, "E1M1", cfg)
     for k, (vx, vy, va) in enumerate(VIEWPOINTS):
+        # ⚠ THE ORACLE HAS TO BE ASKED FOR THE PICTURE THE EMITTER NOW ALWAYS MAKES. sky, step
+        # faces, stacked pieces, the bbox cull and the degradation package were emitter FLAGS that
+        # defaulted to False, and this call inherited that default by omitting them. They are the
+        # renderer now, so omitting them here asks the oracle for a tier that no longer exists --
+        # which is a mismatch on E1M1 (19 sky ceilings) and invisible on the square room (none).
         want = rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
                                     floor_texturing=False, wall_mode="W1R", floor_mode_ft1=True,
-                                    wall_noise=True, plane_near=True)
+                                    wall_noise=True, plane_near=True, sky=True, near_steps=True,
+                                    stack_steps=True, bbox_cull=True, degrade=True)
         screen, term = _run_lines(out, vx, vy, va)
         assert bytes(screen.pixel_indices) == bytes(want), \
             f"lines W1R+FT1 @ ({vx},{vy},{va:#x}) != E1M1 oracle"

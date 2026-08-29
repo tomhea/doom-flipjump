@@ -27,6 +27,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCREENS = ("StreamScreen", "CountScreen", "DumpScreen", "Recording", "InMemoryScreen")
+# `NL = chr(10)` is a LIVE idiom here -- scratchpad/ca2_parse_check.py and ca2_price.py, the
+# same ca2 family `ca2_sweep.py` belongs to. A newline bound to a name was invisible.
+NEWLINE_NAMES = ("NL", "LF", "EOL", "NEWLINE")
+LF = chr(10)
 ENCODER = "encode_feed"
 
 # EXEMPTIONS, each named with its reason and each traced BY HAND on 2026-08-29. This list is the
@@ -77,10 +81,17 @@ def from_encoder(node, tree, depth=0):
         name = getattr(node.func, "id", None) or getattr(node.func, "attr", None) or ""
         if name.startswith(ENCODER):
             return True
-        for fn in ast.walk(tree):                       # one level of local helper
-            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name == name:
-                rets = _returns_of(fn)
-                return bool(rets) and all(from_encoder(r, tree, depth + 1) for r in rets)
+        defs = [fn for fn in ast.walk(tree)
+                if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and fn.name == name]
+        if defs:
+            # a `def` can be replaced: `def mk(): return encode_feed(...)` then `mk = lambda: ...`
+            # rebinds the NAME, and only the value namespace was checked for that
+            rebound = any(isinstance(n, ast.Name) and n.id == name
+                          and isinstance(n.ctx, (ast.Store, ast.Del)) for n in ast.walk(tree))
+            if rebound or len(defs) > 1:
+                return False
+            rets = _returns_of(defs[0])
+            return bool(rets) and all(from_encoder(r, tree, depth + 1) for r in rets)
         return False
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return from_encoder(node.left, tree, depth) or from_encoder(node.right, tree, depth)
@@ -170,11 +181,28 @@ def _is_newline_expr(node):
     if (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "chr"
             and node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value == 10):
         return True                                # chr(10) inside an encoded expression
+    if isinstance(node, ast.Name) and node.id in NEWLINE_NAMES:
+        return True                                # NL = chr(10)
+    if (isinstance(node, ast.Attribute) and node.attr == "linesep"
+            and getattr(node.value, "id", None) == "os"):
+        return True                                # os.linesep
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)             and node.func.attr in ("join", "format"):
         recv = node.func.value
         if isinstance(recv, ast.Constant) and isinstance(recv.value, str) and chr(10) in recv.value:
             return True
         if _is_newline_expr(recv):
+            return True
+    return False
+
+
+def _newline_inside(node):
+    """does this expression carry a newline in any form this repo writes one?"""
+    for n in ast.walk(node):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and LF in n.value:
+            return True
+        if isinstance(n, ast.Constant) and isinstance(n.value, bytes) and LF.encode() in n.value:
+            return True
+        if _is_newline_expr(n):
             return True
     return False
 
@@ -223,6 +251,20 @@ def encodes_newline_decimals(source: str):
               and isinstance(n.left, ast.Constant) and isinstance(n.left.value, bytes)
               and b"%d" in n.left.value):
             out.append(n.lineno)                    # b"%d<lf>%d" % (a, b)
+        elif (isinstance(n, ast.Call) and getattr(n.func, "id", None) == "bytes"
+              and n.args and _newline_inside(n.args[0])):
+            out.append(n.lineno)                    # bytes("%d<lf>%d" % (a, b), "ascii")
+        elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+              and n.func.attr == "join" and isinstance(n.func.value, ast.Constant)
+              and isinstance(n.func.value.value, bytes) and LF.encode() in n.func.value.value):
+            out.append(n.lineno)                    # b"<lf>".join([...])
+        elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+              and n.func.attr == "encode" and getattr(n.func.value, "id", None) == "str"
+              and n.args and _newline_inside(n.args[0])):
+            out.append(n.lineno)                    # str.encode(s)
+        elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+              and n.func.attr in ("join", "format") and _is_newline_expr(n.func.value)):
+            out.append(n.lineno)                    # os.linesep.join(...), NL.join(...)
     return sorted(set(out))
 
 
@@ -230,21 +272,60 @@ def bad_feeds(source: str):
     """`[(lineno, screen)]` for every screen whose stdin is not traceable to the wire encoder.
     Positional first arguments are checked too -- `StreamScreen(feed)` was one of the escapes."""
     tree = ast.parse(source)
+    # `from ... import StreamScreen as S` -- the screen under another name
+    aliases = {a.asname for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+               for a in n.names if a.asname and a.name in SCREENS}
     out = []
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
             continue
         name = getattr(n.func, "id", None) or getattr(n.func, "attr", None)
-        if name not in SCREENS:
+        if name not in SCREENS and name not in aliases:
             continue
         value = next((kw.value for kw in n.keywords if kw.arg == "stdin"), None)
+        splat = [kw.value for kw in n.keywords if kw.arg is None]
         if value is None and n.args:
             value = n.args[0]
+        if value is None and splat:
+            # ⚠ `StreamScreen(**{"stdin": ...})` used to fall through as "no feed at all" -- the
+            # SAME defect round 2 forced out of the sibling guard, reappearing here. If the splat's
+            # `stdin` can be read statically, judge it; if it cannot, the call is untraceable and
+            # that is a FAILURE, which is this file's stated contract.
+            value = _splat_stdin(splat, tree)
+            if value is None:
+                out.append((n.lineno, name))
+                continue
         if value is None:
             continue                                    # no feed at all: nothing to get wrong
         if not from_encoder(value, tree):
             out.append((n.lineno, name))
     return out
+
+
+def _splat_stdin(splats, tree):
+    """the `stdin` value inside `**{...}` / `**NAME`, or None when it cannot be read"""
+    for node in splats:
+        if isinstance(node, ast.Name):
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Assign) and any(
+                    isinstance(t, ast.Name) and t.id == node.id for t in n.targets
+                ):
+                    node = n.value
+                    break
+            else:
+                return None
+        if isinstance(node, ast.Dict):
+            for k, v in zip(node.keys, node.values):
+                if isinstance(k, ast.Constant) and k.value == "stdin":
+                    return v
+            return None                                 # a splat with no readable stdin key
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "dict":
+            for kw in node.keywords:
+                if kw.arg == "stdin":
+                    return kw.value
+            return None
+        return None
+    return None
 
 
 def test_every_screen_is_fed_the_binary_wire():
@@ -264,12 +345,20 @@ def test_every_screen_is_fed_the_binary_wire():
                      + chr(10).join("  %s:%d %s(...)" % t for t in bad))
 
 
-def test_the_rot_check_sees_every_way_this_repo_writes_a_newline():
-    """R9 for the ROT CHECK itself, which review measured at 7 of 12 shapes: its bytes-`%` arm sat
-    inside the `.encode()` walk, and `bytes` has no `.encode()`, so it fired only on code that
-    raises at runtime. The three GOOD cases are the false positives that shaped it -- a print, and
-    the `"<lf>".join([...])` that assembles fj SOURCE."""
+def test_the_rot_check_covers_the_thirteen_shapes_measured_so_far():
+    """R9 for the ROT CHECK, and the name says MEASURED rather than "every" on purpose.
+
+    This is a secondary, OPEN-WORLD check -- it exists to notice when an exempted file grows
+    something wire-shaped, not to prove one safe; `bad_feeds` above is the closed-world rule. An
+    earlier version of this test was called "every way this repo writes a newline" and was measured
+    at 7 of 12 by review, then at 11 of 16 by the next count. Claiming completeness for an
+    open-world check is the mistake this PR keeps finding, so the number is in the name and it is
+    the number that was actually run.
+
+    The three GOOD cases are the false positives that shaped it: a print, and the `"<lf>".join`
+    that assembles fj SOURCE -- a newline is not a wire."""
     BS = chr(92)
+    NL = chr(10)
     for src in ('x = f"{a}' + BS + 'n{b}".encode()',
                 'x = ("%d' + BS + 'n%d" % (a, b)).encode()',
                 'x = b"-435' + BS + 'n223"',
@@ -277,12 +366,34 @@ def test_the_rot_check_sees_every_way_this_repo_writes_a_newline():
                 'x = chr(10).join(p).encode()',
                 'x = "' + BS + 'n".join(p).encode()',
                 'x = "{}' + BS + 'n".format(a).encode()',
-                'x = (str(a) + chr(10) + str(b)).encode()'):
+                'x = (str(a) + chr(10) + str(b)).encode()',
+                # `NL = chr(10)` is LIVE in scratchpad/ca2_parse_check.py and ca2_price.py
+                'NL = chr(10)' + NL + 'x = (str(a) + NL + str(b)).encode()',
+                'x = bytes("%d' + BS + 'n%d" % (a, b), "ascii")',
+                'x = b"' + BS + 'n".join(parts)',
+                'x = str.encode("%d' + BS + 'n%d" % (a, b))',
+                'import os' + NL + 'x = os.linesep.join(p).encode()'):
         assert encodes_newline_decimals(src), src
     for src in ('print(chr(10) + "hi")',
                 'main = "' + BS + 'n".join(["stl.startup", "a;b"])',
                 'x = encode_feed_mapunits(a, b, c)'):
         assert not encodes_newline_decimals(src), src
+
+
+def test_a_splat_or_an_alias_at_the_screen_is_not_a_free_pass():
+    """R9. `StreamScreen(**{"stdin": ...})` fell through as "no feed at all" -- the IDENTICAL hole
+    round 2 forced out of the sibling guard, reappearing here. Latent (no live use), which is
+    exactly why it needs a fixture."""
+    LF_ = chr(10)
+    BS = chr(92)
+    for src in ('StreamScreen(**{"stdin": f"{x}' + BS + 'n{y}".encode()})',
+                'd = dict(stdin=b"1' + BS + 'n2")' + LF_ + 'StreamScreen(**d)',
+                'StreamScreen(**kw)',                       # unreadable: untraceable is a FAILURE
+                'from a import StreamScreen as S' + LF_ + 'S(stdin=b"1' + BS + 'n2")',
+                'def mk():' + LF_ + '    return encode_feed(x, y, a, 0)' + LF_
+                + 'mk = lambda: b"1' + BS + 'n2"' + LF_ + 'StreamScreen(stdin=mk())'):
+        assert bad_feeds(src), src
+    assert bad_feeds('StreamScreen(**{"stdin": encode_feed_mapunits(x, y, a)})') == []
 
 
 def test_it_rejects_every_shape_that_escaped_the_pattern_matcher():

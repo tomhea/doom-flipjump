@@ -41,7 +41,7 @@ t0 = time.perf_counter()
 print("building the SHIPPED tier (self_reset=False) -> %s" % out, flush=True)
 info = build_wall_renderer(ROOT / args.wad, "E1M1",
                            out_fjm=out,
-                           tier="render")
+                           tier="hosted")
 dt = time.perf_counter() - t0
 sha = hashlib.sha256(out.read_bytes()).hexdigest()
 print("")

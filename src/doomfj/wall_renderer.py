@@ -102,8 +102,16 @@ TIERS = {
     # program's shape.
     "hosted-nocollide": dict(things=True, player_sim=True, moving_things=True),
     "hosted-static": dict(things=True, player_sim=True, collide=True),
-    # the M1 self-reset loop with nothing else in it -- what the label/fixed-point probes drive
+    # the fourth corner of m14_gate's two switches: no collision AND no runtime thing table
+    "hosted-nosim-nocollide": dict(things=True, player_sim=True),
+    # the M1 self-reset loop with nothing else in it
     "loop": dict(self_reset=True),
+    # ... and the hosted renderer WITH the loop, which is what the label and fixed-point probes
+    # actually drive. Added after review: `build_wall_renderer` defaulted things/player_sim/
+    # collide/moving_things to TRUE while the emitter defaulted them FALSE, so a build call that
+    # omitted them meant `hosted`, and the migration read it as `loop`.
+    "hosted-loop": dict(things=True, player_sim=True, collide=True, moving_things=True,
+                        self_reset=True),
 }
 TIER_FLAGS = ("things", "player_sim", "collide", "moving_things",
               "standalone", "menu", "doors", "self_reset")

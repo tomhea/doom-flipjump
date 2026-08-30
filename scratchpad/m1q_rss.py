@@ -142,7 +142,7 @@ s = Sampler(args.interval).start()
 t0w, t0c = time.perf_counter(), time.process_time()
 s.mark("start")
 m = build_wall_renderer(ROOT / "tests/fixtures/freedoom_e1m1.wad", "E1M1",
-                        out_fjm=OUT, tier="render")
+                        out_fjm=OUT, tier="hosted")
 s.mark("done")
 peak = s.stop()
 dtw, dtc = time.perf_counter() - t0w, time.process_time() - t0c

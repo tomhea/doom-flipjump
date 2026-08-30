@@ -172,9 +172,13 @@ def build():
         return CACHE
     # the two measurement switches this gate has always had are TIER NAMES now, so the set of
     # programs it can build is enumerable instead of being a product of booleans
+    # ⚠ FOUR combinations, not three. The first version was a chained ternary that fell through
+    # to `hosted-static` (collide ON) when both switches were off -- a gate quietly measuring a
+    # different program. A table cannot fall through.
+    _TIER = {(True, True): "hosted", (False, True): "hosted-nocollide",
+             (True, False): "hosted-static", (False, False): "hosted-nosim-nocollide"}
     parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, sprite_wad=art,
-                               tier=("hosted" if COLLIDE and MOVING else
-                                     "hosted-nocollide" if MOVING else "hosted-static"))
+                               tier=_TIER[(bool(COLLIDE), bool(MOVING))])
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     prog = write_program_files(parts, tmp, "e1m1")     # ⚠ order is the contract

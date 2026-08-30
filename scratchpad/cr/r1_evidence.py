@@ -36,11 +36,23 @@ CASES = [
      "`dstate` does not survive the M1 reset -- every door re-shuts on every frame"),
     # the call-site guard, mutated back to the two shapes it was written to catch
     ("scripts/walk_e1m1.py",
-     "**(dict(player_sim=True, collide=True,",
-     "**(dict(state_wire=\"bin\", player_sim=True, collide=True,",
+     "            mw, args.map, cfg, asset_wad=aw, sprite_wad=spr,",
+     "            mw, args.map, cfg, asset_wad=aw, sprite_wad=spr, **dict(state_wire=\"bin\"),",
      "tests/host/test_emitter_call_sites.py::"
      "test_every_tracked_caller_passes_keywords_the_emitter_has",
      "the entry point splats a retired keyword -- the shape that hid five broken files"),
+    # PHASE 2's two real bugs, mutated back
+    ("src/doomfj/build.py",
+     "    limit = RENDER_FLAT_MAX_WORDS          # config.py's module constant, not a Config field",
+     "    limit = cfg.RENDER_FLAT_MAX_WORDS",
+     "tests/host/test_build_wall_renderer_setup.py::test_it_gets_past_its_own_first_lines",
+     "the flat limit is read off `Config`, which has no such field -- every caller dies on setup "
+     "and no gate notices, because none of them call the builder"),
+    ("src/doomfj/wall_renderer.py",
+     '    "hosted": dict(things=True, player_sim=True, collide=True, moving_things=True),',
+     '    "hosted": dict(things=True, player_sim=True),',
+     "tests/host/test_build_wall_renderer_setup.py::test_each_tier_means_exactly_what_it_says",
+     "a tier quietly means something else -- the failure the whole registry exists to prevent"),
     ("scratchpad/ca2_sweep.py",
      "stdin=encode_feed_mapunits(vx, vy, va)",
      'stdin=("%d%s%d%s%d%s" % (vx, chr(10), vy, chr(10), va, chr(10))).encode()',

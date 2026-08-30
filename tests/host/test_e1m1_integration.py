@@ -150,7 +150,7 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
     ~42M-character program. (The assembler is LINEAR in program size -- measured exponent 1.12 --
     not "~cubic" as this repo long assumed; what made it slow was paging, now fixed.)"""
     m = build_wall_renderer(E1M1, "E1M1", out_fjm=tmp_path / "renderer.fjm",
-                            tier="render")
+                            tier="hosted")
     # G1/R2: this 30-minute run is the only place the shipped tier's span, .fjm size and assemble
     # time are measured. It used to assert them and print NOTHING, so a passing run left no number
     # for the perf ledger and the next session had to spend the 30 minutes again to learn one.

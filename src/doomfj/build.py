@@ -15,7 +15,8 @@ from pathlib import Path
 import flipjump as fj
 from flipjump.fjm.fjm_reader import Reader
 
-from doomfj.config import Config, FLAT_MAX_WORDS
+from doomfj.config import (DEFAULT_MAP_WAD, FLAT_MAX_WORDS, RENDER_FLAT_MAX_WORDS,
+                           Config)
 from doomfj.harness import W, FJM_LZMA_FAST, assemble_fjm, run_fjm
 from doomfj.lut_generator import (
     generate_dispatch_table_fj, generate_offset_deposit_table_fj, generate_trig_idioms_fj,
@@ -218,8 +219,9 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
 # The M1 restore set SHIPS WITH THE PACKAGE. It is the default so the path is not re-typed at
 # every call site (and so an installed copy uses the same one the tests do).
 DEFAULT_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m1_restore_set.json.gz"
-# the map every caller but one was passing by hand
-DEFAULT_WAD = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "freedoom_e1m1.wad"
+# R6: the map every caller but one was passing by hand. It lives in config.py with the other
+# constants -- a path resolved out of the package by `parents[2]` is not a build-module fact.
+DEFAULT_WAD = DEFAULT_MAP_WAD
 # M5: the standalone tier is a DIFFERENT PROGRAM (a keyboard prologue instead of the wire, no magic
 # byte, baked thing bindings), so it has its own set -- derived from the certified one by
 # scratchpad/m5_setfile.py, never re-measured. Pairing a set with the wrong program is caught by the
@@ -287,7 +289,7 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
     things, standalone, self_reset = _t["things"], _t["standalone"], _t["self_reset"]
     player_sim, collide = _t["player_sim"], _t["collide"]
     moving_things, menu, doors = _t["moving_things"], _t["menu"], _t["doors"]
-    limit = cfg.RENDER_FLAT_MAX_WORDS
+    limit = RENDER_FLAT_MAX_WORDS          # config.py's module constant, not a Config field
     # the generated .fj lands beside the binary, named for it. Every caller passed a matching pair,
     # which is a parameter that only existed to be kept in step by hand.
     out_fjm = Path(out_fjm)

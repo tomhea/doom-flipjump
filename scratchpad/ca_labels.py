@@ -58,7 +58,7 @@ try:
     build_wall_renderer(
         ROOT / ("build/ca_labels%s.fjm" % ("_std" if args.standalone else "")),
         wad_path=ROOT / "tests/fixtures/freedoom_e1m1.wad", mapname="E1M1",
-        tier="game" if args.standalone else "loop")
+        tier="game" if args.standalone else "hosted-loop")
 except Done:
     pass
 labels = RESULT.get("labels")

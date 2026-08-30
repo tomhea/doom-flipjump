@@ -210,7 +210,7 @@ def test_a_splat_it_cannot_resolve_is_still_counted():
         "emit_wall_renderer(w, 'E1M1', c, **{**BAD})",
         "KW = {}" + NL + "KW['sky'] = True" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
         "KW = {}" + NL + "KW.update(sky=True)" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
-        "KW = dict(things=True)" + NL + "KW += o" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
+        "KW = dict(tier='game')" + NL + "KW += o" + NL + "emit_wall_renderer(w, 'E1M1', c, **KW)",
         "emit_wall_renderer(w, 'E1M1', c, **{k: 1})",
         # the six review found after the first hardening: every one is a way for something this
         # function does not model to touch the dict between its assignment and the splat
@@ -229,7 +229,7 @@ def test_a_splat_it_cannot_resolve_is_still_counted():
 def test_the_scan_accepts_a_keyword_that_does_exist():
     """... and the other half of the control: it must not reject a REAL keyword, or the test above
     would pass for a scan that rejects everything."""
-    bad, _ = bad_keywords("emit_wall_renderer(wad, 'E1M1', cfg, things=True)", "<synthetic>")
+    bad, _ = bad_keywords("emit_wall_renderer(wad, 'E1M1', cfg, tier='game')", "<synthetic>")
     assert bad == []
 
 

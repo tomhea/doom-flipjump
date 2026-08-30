@@ -119,7 +119,7 @@ def build():
     t0 = time.time()
     parts = WR.emit_wall_renderer(mw, args.map, cfg, asset_wad=aw,
                                   sprite_wad=art if FLAGS["things"] else None, ablate=ABL,
-                                  return_parts=True, **FLAGS)
+                                  return_parts=True, **FLAGS, tier="render")
     print(f"emitted {sum(len(x) for _, x in parts):,} chars in {len(parts)} parts "
           f"({time.time() - t0:.0f}s)", flush=True)
     consts = cfg.emit_fj_consts(cache / "fj_consts.fj")

@@ -39,7 +39,7 @@ VPS = [(664, 291, 0x18000000),        # two near sprites: the HD budget's riskie
        (1869, 479, 2147483648),       # everything at once
        (spx, spy, sp.angle)]
 
-main = emit_wall_renderer(mw, "E1M1", cfg, things=True, sprite_wad=art)
+main = emit_wall_renderer(mw, "E1M1", cfg, sprite_wad=art, tier="visual")
 tmp = Path(tempfile.mkdtemp())
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
 p = tmp / "ab.fj"

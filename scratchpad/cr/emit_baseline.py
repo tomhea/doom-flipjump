@@ -35,23 +35,12 @@ from doomfj.wad import WadFile                                            # noqa
 BASELINE = ROOT / "scratchpad/cr/emit_baseline.json"
 
 CONFIGS = {
-    "certified": dict(over_align=False, floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                      plane_near=True, wall_noise=True, steps=True, stack_steps=True, things=True,
-                      deg=True, state_wire="bin", player_sim=True, collide=True,
-                      moving_things=True, sky=True, bbox_cull=True),
-    "standalone": dict(over_align=False, floor_mode="FT1", wall_mode="W1R", raster_mode="lines",
-                       plane_near=True, wall_noise=True, sky=True, steps=True, things=True,
-                       stack_steps=True, bbox_cull=True, deg=True, state_wire="bin",
-                       player_sim=True, collide=True, moving_things=True,
-                       standalone=True, menu=True, doors=True),
-    # The third point in flag space, added 2026-08-28 before the next deletion batch: the HOSTED
-    # tier with doors on. That is the binary `m2_r3_gate` / `m2_r4_gate` / `m2_ops` build, and
-    # neither config above reaches it -- `certified` has no doors, `standalone` has doors only
-    # together with standalone+menu. Without it a deletion could move the door emission in the
-    # hosted tier and every part would still read SAME.
-    "hosted_doors": dict(sky=True, steps=True, things=True, stack_steps=True, bbox_cull=True,
-                         deg=True, player_sim=True, collide=True, moving_things=True,
-                         doors=True),
+    # ⚠ THE SAME THREE PROGRAMS, named instead of spelled out. The baseline hashes were frozen when
+    # these were eight booleans each; if a tier emits the same text, `--check` still says SAME --
+    # which is exactly the proof that collapsing them into a name changed nothing.
+    "certified": dict(tier="hosted"),
+    "standalone": dict(tier="game"),
+    "hosted_doors": dict(tier="hosted-doors"),
 }
 
 

@@ -63,7 +63,7 @@ def main():
     cfg = Config()
     mw = WadFile.from_path(str(ROOT / args.wad))
     aw = WadFile.from_path(str(ROOT / args.asset)) if args.asset else mw
-    main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, ablate=ablate)
+    main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, ablate=ablate, tier="render")
 
     src = SRC + STREAM_SRC                     # the lines raster is the only one there is
     tmp = Path(tempfile.mkdtemp())

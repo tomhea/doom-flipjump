@@ -112,21 +112,38 @@ e1m1_04_walk   e1m1_05_state   e1m1_06_banks
 to their concatenation — which is what made the split provably safe. Never sort these paths, never
 glob them, never reorder the parts: every baked address constant depends on the layout.
 
-## The two tiers
+## The tiers
 
-One emitter, two programs, and the difference is only where the world comes from:
+**ONE NAME, not a pile of booleans.** `wall_renderer.TIERS` is the registry, and the rule that
+keeps it a registry is: **a new combination is a NEW ROW, never a new parameter.** Eight
+independent flags described 256 nominal programs; the repo ever used seven, so the API is now
 
-- **hosted** (`build_wall_renderer()` defaults) — a Python host writes **887 bytes of state per
-  frame** to stdin and reads the new state back. `scripts/walk_e1m1.py` is this.
-- **standalone** (`standalone=True`) — no host at all. The player start is BAKED, the keyboard
-  device drives the sim (`src/fj/input.fj`), thing bindings and visibility bake, nothing is
-  echoed, and the view state + held-key flags SURVIVE the M1 reset (`build.STANDALONE_PERSIST`,
-  the one place a hole in the restore set is intended). Run it with
-  `fj build/doom_e1m1_std.fjm --io pc --flat-max-words 134217728`.
+    build_wall_renderer(out_fjm, *, wad_path=..., mapname="E1M1", cfg=None,
+                        tier="game", ablate=frozenset())
+
+Six parameters, down from ~30 before the retirements. Everything else derives: `generated_dir`
+from `out_fjm`, `flat_max_words` from `cfg`, the restore set from the tier (so the two sets cannot
+be crossed), `sprite_wad` resolved internally.
+
+| tier | what it is |
+|---|---|
+| **`game`** | the shipped playable binary, and the DEFAULT. Standalone + menu + doors + self-reset. |
+| `hosted` | a Python host writes **887 bytes of state per frame** to stdin and reads the new state back. `scripts/walk_e1m1.py` is this. |
+| `hosted-doors` | the same with runtime doors — what the M2 gates build |
+| `visual` | sprites, no simulation — the picture gates, including `deg_gate` |
+| `render` | **the cheap one**: no sprite bank at all, which is what keeps `tests/fj` at half an hour rather than overnight (the bank scales with the ASSET wad, ~104M chars and ~7 min to emit) |
+| `hosted-nocollide`, `hosted-static`, `loop` | measurement tiers: they render a different program ON PURPOSE, so pricing a feature needs no parameter |
+
+**game** has no host at all: the player start is BAKED, the keyboard device drives the sim
+(`src/fj/input.fj`), thing bindings and visibility bake, nothing is echoed, and the view state,
+held-key flags and door cells SURVIVE the M1 reset (`build.STANDALONE_PERSIST` / `DOOR_PERSIST`,
+the one place a hole in the restore set is intended). Run it with
+`fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728`.
 
 ⚠ They are DIFFERENT PROGRAMS and each has its own restore set (`m1_` / `m5_restore_set.json.gz`);
-`build_wall_renderer` picks by tier so they cannot be crossed. Add an emit-shaping flag to BOTH
-or neither — three entry points building three renderers is the divergence A0.1 closed.
+`build_wall_renderer` picks by tier so they cannot be crossed — the tier name is now the ONLY
+thing that chooses, which is what makes crossing them impossible rather than merely discouraged.
+Three entry points building three renderers is the divergence A0.1 closed.
 
 ## Cost model
 

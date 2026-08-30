@@ -53,12 +53,12 @@ selfreset.emit_reset_part = spy
 t0 = time.perf_counter()
 print("driving build_wall_renderer(self_reset=True) to pass 1 ...", flush=True)
 try:
-    build_wall_renderer(ROOT / "tests/fixtures/freedoom_e1m1.wad", "E1M1",
-                        out_fjm=ROOT / ("build/ca_labels%s.fjm" % ("_std" if args.standalone else "")),
-                        generated_dir=ROOT / ("build/generated_calabels%s"
-                                              % ("_std" if args.standalone else "")),
-                        flat_max_words=RENDER_FLAT_MAX_WORDS, self_reset=True,
-                        standalone=args.standalone, menu=args.menu, doors=args.doors)
+    # this captures the labels of a REAL build, so it must drive the same tier the artifact
+    # ships as -- `--standalone` is the game, anything else is the hosted loop
+    build_wall_renderer(
+        ROOT / ("build/ca_labels%s.fjm" % ("_std" if args.standalone else "")),
+        wad_path=ROOT / "tests/fixtures/freedoom_e1m1.wad", mapname="E1M1",
+        tier="game" if args.standalone else "loop")
 except Done:
     pass
 labels = RESULT.get("labels")

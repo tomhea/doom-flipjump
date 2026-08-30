@@ -63,9 +63,7 @@ print("running build_wall_renderer(self_reset=True) as far as pass 1 ...", flush
 try:
     build_wall_renderer(ROOT / "tests/fixtures/freedoom_e1m1.wad", "E1M1",
                         out_fjm=ROOT / "build/fpcheck.fjm",
-                        generated_dir=ROOT / "build/generated_fpcheck",
-                        flat_max_words=RENDER_FLAT_MAX_WORDS,
-                        self_reset=True)
+                        tier="loop")
 except Done:
     pass
 print("pass 1 reached in %.0fs, %s labels" % (time.perf_counter() - t0,

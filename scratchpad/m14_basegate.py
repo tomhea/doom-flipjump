@@ -76,8 +76,9 @@ if CACHE.exists() and "--rebuild" not in sys.argv:
 else:
     t0 = time.time()
     # ⚠ deg_gate.py's emit call, verbatim. Any drift here and this stops being the baseline.
-    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, things=not NOTHINGS,
-                               sprite_wad=None if NOTHINGS else art)
+    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True,
+                               sprite_wad=None if NOTHINGS else art,
+                               tier="render" if NOTHINGS else "visual")
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     prog = write_program_files(parts, tmp, "e1m1")        # ⚠ order is the contract

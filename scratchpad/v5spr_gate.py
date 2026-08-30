@@ -32,7 +32,7 @@ sp = spawn_state(mw, "E1M1")
 spx, spy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
 VPS = [(664, 291, 0x18000000), (1272, -724, 1073741824), (spx, spy, sp.angle)]
 
-main = emit_wall_renderer(mw, "E1M1", cfg, things=True, sprite_wad=art)
+main = emit_wall_renderer(mw, "E1M1", cfg, sprite_wad=art, tier="visual")
 tmp = Path(tempfile.mkdtemp())
 consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
 p = tmp / "v5s.fj"

@@ -170,9 +170,11 @@ def build():
     if CACHE.exists() and "--rebuild" not in sys.argv:
         print(f"cache HIT {CACHE.name} ({CACHE.stat().st_size:,} bytes)", flush=True)
         return CACHE
-    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, things=True, sprite_wad=art,
-                               player_sim=True, collide=COLLIDE,
-                               moving_things=MOVING)
+    # the two measurement switches this gate has always had are TIER NAMES now, so the set of
+    # programs it can build is enumerable instead of being a product of booleans
+    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, sprite_wad=art,
+                               tier=("hosted" if COLLIDE and MOVING else
+                                     "hosted-nocollide" if MOVING else "hosted-static"))
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     prog = write_program_files(parts, tmp, "e1m1")     # ⚠ order is the contract

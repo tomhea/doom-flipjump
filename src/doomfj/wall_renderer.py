@@ -104,8 +104,6 @@ TIERS = {
     "hosted-static": dict(things=True, player_sim=True, collide=True),
     # the fourth corner of m14_gate's two switches: no collision AND no runtime thing table
     "hosted-nosim-nocollide": dict(things=True, player_sim=True),
-    # the M1 self-reset loop with nothing else in it
-    "loop": dict(self_reset=True),
     # ... and the hosted renderer WITH the loop, which is what the label and fixed-point probes
     # actually drive. Added after review: `build_wall_renderer` defaulted things/player_sim/
     # collide/moving_things to TRUE while the emitter defaulted them FALSE, so a build call that
@@ -487,9 +485,8 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
             [rm.point_in_subsector(cmap, t.x, t.y) for t in things])
 
 
-def emit_wall_renderer(map_wad, mapname, cfg, *, asset_wad=None, sprite_wad=None,
-                       tier: str = "game", ablate: frozenset = frozenset(),
-                       return_parts: bool = False):
+def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, sprite_wad=None,
+                       ablate: frozenset = frozenset(), return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
     the fixed includes). Uses the optimized SHARED macros (pixel_tramp/compare_y wall trampoline, the
     xor_by-involution walk, and the M13c3 plane_tramp visplane raster), so this is the single source both

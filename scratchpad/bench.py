@@ -93,8 +93,11 @@ VPS = ([(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn")]
        [(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn"),
         (1400, 1200, 0, "courtyard"), (2432, 1344, 3221225472, "tree"), (-309, -44, 0, "worst")])
 ABL = frozenset(args.ablate)
-# the one switch left is a TIER, not a flag: `--off things` drops the sprite bank
-TIER = "render" if "things" in args.off else "hosted"
+# the one switch left is a TIER, not a flag: `--off things` drops the sprite bank.
+# ⚠ `visual`, NOT `hosted`. This harness feeds a bare viewpoint (`encode_feed_mapunits` below) and
+# its oracle renders no simulation; a sim tier reads a thing table, bindings and visibility off a
+# wire that does not carry them. `main` built `things=True` and nothing else, which is `visual`.
+TIER = "render" if "things" in args.off else "visual"
 
 
 def build():

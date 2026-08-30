@@ -12,6 +12,8 @@ So this stubs the two expensive things -- the emitter and the assembler -- and a
 function DERIVES. It costs milliseconds and it would have caught that on the first run.
 """
 
+import sys
+
 import pytest
 
 from doomfj import build as B
@@ -73,7 +75,6 @@ def test_each_tier_means_exactly_what_it_says():
         "hosted-nosim-nocollide": "things player_sim",
         "visual":      "things",
         "render":      "",
-        "loop":        "self_reset",
     }
     assert set(expected) == set(TIERS), (
         "TIERS changed shape -- add the new tier's meaning here deliberately. A tier is a promise "
@@ -87,6 +88,46 @@ def test_the_default_tier_is_the_game(tmp_path):
     """The owner's tier-1 flip: a bare call builds the playable binary."""
     assert _run(tmp_path)["tier"] == "game"
     assert tier_flags("game")["standalone"] and tier_flags("game")["self_reset"]
+
+
+def test_the_flat_limit_and_the_restore_set_are_what_reach_the_build(tmp_path):
+    """⚠ R9: the two derivations this file's docstring CLAIMS to cover and did not.
+
+    Review mutated `limit` and the restore-set choice four ways and all nine tests stayed green:
+    every assertion here stopped at the emitter, and both of those are consumed AFTER it. A test
+    that names a thing it does not check is worse than one that stays quiet. These read the values
+    out of the frame that computed them, which is the only place they exist before the assemble.
+    """
+    import doomfj.build as mod
+
+    seen = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_emit(*a, **k):
+        # the caller's frame IS build_wall_renderer's, mid-setup
+        frame = sys._getframe(1)
+        seen.update(limit=frame.f_locals.get("limit"),
+                    restore_set=frame.f_locals.get("restore_set"),
+                    gen=frame.f_locals.get("gen"))
+        raise _Stop()
+
+    real = mod.emit_wall_renderer
+    mod.emit_wall_renderer = fake_emit
+    try:
+        for tier, want_set in (("game", B.STANDALONE_RESTORE_SET),
+                               ("hosted", B.DEFAULT_RESTORE_SET),
+                               ("hosted-loop", B.DEFAULT_RESTORE_SET)):
+            seen.clear()
+            try:
+                mod.build_wall_renderer(tmp_path / ("%s.fjm" % tier), tier=tier)
+            except _Stop:
+                pass
+            assert seen["limit"] == RENDER_FLAT_MAX_WORDS, (tier, seen["limit"])
+            assert seen["restore_set"] == want_set, (tier, seen["restore_set"])
+    finally:
+        mod.emit_wall_renderer = real
 
 
 def test_the_generated_dir_is_derived_from_the_out_path(tmp_path):
@@ -110,6 +151,18 @@ def test_a_things_tier_resolves_sprite_art_and_a_render_tier_does_not(tmp_path):
     """`sprite_wad` stopped being a parameter, so the tier has to decide it."""
     assert _run(tmp_path, tier="visual")["sprite_wad"] is not None
     assert _run(tmp_path, tier="render")["sprite_wad"] is None
+
+
+def test_the_emitter_requires_a_tier_rather_than_defaulting_to_the_whole_game():
+    """When `tier` replaced eight flags, the emitter's default went from "everything off" to "the
+    shipped game" -- so a call that forgot it would silently emit the biggest program there is,
+    sprite bank and all. `build_wall_renderer` keeps the friendly default (that IS the owner's
+    tier-1 flip); the internal emitter takes no chances."""
+    import inspect
+
+    from doomfj.wall_renderer import emit_wall_renderer
+    p = inspect.signature(emit_wall_renderer).parameters["tier"]
+    assert p.default is inspect.Parameter.empty, "emit_wall_renderer's tier must stay required"
 
 
 def test_an_unknown_tier_fails_loudly_and_names_the_choices():

@@ -200,35 +200,39 @@ expressible. The reachable shape is roughly **11-12**, not 6: `tier` still colla
 `standalone`+`menu`+`self_reset`, `generated_dir` still derives from `out_fjm`, and
 `flat_max_words`/`door_quant`/`menu_entries`/`menu_selected` still fold into `cfg`.
 
-### PHASE 2 — the API shape the owner asked for
+### PHASE 2 — DONE (2026-08-29). The API is SIX parameters.
 
-Target **6 parameters** (owner's ask: "fewer than 10, as few as possible"):
+    build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=None,
+                        tier="game", ablate=frozenset())
 
-| # | param | note |
-|---|---|---|
-| 1 | `out_fjm` | the only required one |
-| 2 | `wad_path` | default the E1M1 fixture |
-| 3 | `mapname` | already defaulted |
-| 4 | **`tier`** = `"game"` \| `"hosted"` | replaces `standalone`+`menu`+`self_reset`; default **`"game"`** |
-| 5 | `cfg` | absorbs `flat_max_words` (already `config.RENDER_FLAT_MAX_WORDS`), `door_quant`, `sprite_wad`, `menu_entries`, `menu_selected` |
-| 6 | `ablate` | measurement only |
+`emit_wall_renderer` went 17 -> 8 the same way. The target was 6 and the earlier note here said
+11-12 was the reachable shape; that note was wrong, and the reason is worth keeping:
 
-Plus **`generated_dir` derived from `out_fjm`** (every caller passes a matching pair today) and
-`restore_set` derived from `tier`.
+**The flags were never the problem. The absence of NAMES was.** `things`, `player_sim`, `collide`
+and `moving_things` each had two live values, which is why PHASE 1 refused to retire them -- but
+they do not vary INDEPENDENTLY. Eight booleans describe 256 nominal programs; the repo ever built
+seven. Naming those seven collapses all eight parameters into one, and keeps every configuration
+that made retiring them impossible.
 
-**2c. `doors` defaults True** — the owner's explicit request, and the one thing from last session
-that was described and then not done. Keep `doors` as a 7th parameter TEMPORARILY: the pre-doors
-gates still certify the doors-less picture and need to be able to build both. Retire it into `tier`
-once they are re-run.
+`wall_renderer.TIERS` is the registry. **A new combination is a new ROW, not a new parameter** --
+that is the whole mechanism, and it is what stops the count creeping back up.
 
-⚠ **Flipping any tier-1 default CHANGES THE SHIPPED PROGRAM**, so `deg_gate`, `m1_gate` and the
-260-frame sweep stop transferring and must be re-run. Do the flip and those gates as ONE unit, not
-separately. (They did not need re-running for stages 1–3 precisely because the emission was
-identical.)
+| tier | what it is |
+|---|---|
+| `game` | the shipped playable binary, and the DEFAULT (the owner's tier-1 flip, delivered) |
+| `hosted` | the hosted renderer a Python host drives over the wire |
+| `hosted-doors` | the same with runtime doors -- what the M2 gates build |
+| `visual` | sprites, no simulation -- the picture gates, `deg_gate` among them |
+| `render` | the cheap fixture tier: NO sprite bank, which is what keeps `tests/fj` at half an hour |
+| `hosted-nocollide` / `hosted-static` / `loop` | measurement tiers -- pricing needs no parameter |
 
-Callers to update when `tier` lands: `scratchpad/ca2_shipbuild.py`, `ca_labels.py`, `m1_fpcheck.py`,
-`m1_wired_build.py`, `m1q_rss.py`, `ship_gate.py`, `m2_build.py`, `m2_rt_build.py`, `m5_build.py`,
-`tests/host/test_e1m1_integration.py`.
+Everything else derives: `generated_dir` from `out_fjm`, `flat_max_words` from `cfg`, the restore
+set from the tier (so the hosted and standalone sets cannot be crossed), `sprite_wad` internally.
+`menu_entries`, `menu_selected` and `door_quant` were constants every caller already left alone.
+
+⚠ **`m5_build.py` no longer builds partial standalone combinations** (`--menu`/`--doors`/
+`--no-reset` assert instead). They were rungs on the way to `game`; the owner confirmed they are
+not needed. If one is ever wanted again it is a TIERS row.
 
 ### PHASE 2d — CR the whole retirement into main
 

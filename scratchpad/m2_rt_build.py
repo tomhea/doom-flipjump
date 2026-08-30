@@ -49,10 +49,8 @@ def main():
     print("out  : %s" % args.out, flush=True)
 
     t = time.perf_counter()
-    m = build_wall_renderer(ROOT / args.wad, args.map,
-                            out_fjm=ROOT / args.out, generated_dir=ROOT / args.gen,
-                            flat_max_words=RENDER_FLAT_MAX_WORDS,
-                            doors=not args.no_doors)
+    m = build_wall_renderer(ROOT / args.out, wad_path=ROOT / args.wad, mapname=args.map,
+                            tier="hosted" if args.no_doors else "hosted-doors")
     print(json.dumps(m, indent=2, default=str))
     print("built in %.0f s" % (time.perf_counter() - t))
 

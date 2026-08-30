@@ -44,8 +44,7 @@ if CACHE.exists() and "--rebuild" not in sys.argv:
     print(f"cache HIT {CACHE.name}", flush=True)
 else:
     t0 = time.time()
-    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, things=True, sprite_wad=art, player_sim=True, collide=False,
-                               moving_things=True, ablate=frozenset({abl}))
+    parts = emit_wall_renderer(mw, "E1M1", cfg, return_parts=True, sprite_wad=art, ablate=frozenset({abl}), tier="hosted-nocollide")
     tmp = Path(tempfile.mkdtemp())
     consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")
     prog = write_program_files(parts, tmp, "e1m1")

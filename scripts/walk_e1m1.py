@@ -198,14 +198,14 @@ def main():
             print("  (the sprite bank makes this a ~104M-character program: expect ~7 min to"
                   " emit + ~9 min to assemble; the result is CACHED for later launches)",
                   flush=True)
-        main_txt = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw,
-                                      things=want_things, sprite_wad=spr,
-                                      # B0: the sim, the collision and the runtime thing table --
-                                      # built and gated since M14/M14.5, wired in here for the
-                                      # first time. `collide=True` is what makes walls solid
-                                      # without the host testing a single linedef.
-                                      **(dict(player_sim=True, collide=True,
-                                              moving_things=True) if sim else {}))
+        # B0: the sim, the collision and the runtime thing table -- built and gated since
+        # M14/M14.5, wired in here for the first time. `hosted` is what makes walls solid without
+        # the host testing a single linedef; `visual` is the same picture with no simulation, and
+        # `render` drops the sprite bank, which is what makes a no-things build quick.
+        main_txt = emit_wall_renderer(
+            mw, args.map, cfg, asset_wad=aw, sprite_wad=spr,
+            tier=("hosted" if sim and want_things else
+                  "visual" if want_things else "render"))
         print(f"emitted {len(main_txt):,} chars in {time.perf_counter() - t0:.0f}s", flush=True)
         tmp = Path(tempfile.mkdtemp())
         consts = cfg.emit_fj_consts(tmp / "fj_consts.fj")

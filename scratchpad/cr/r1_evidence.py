@@ -9,8 +9,17 @@ own mutation is not evidence of anything, and this says so instead of printing a
 This is R9's negative-control pattern applied to the test suite rather than to a tool: the output
 below is only worth quoting because every FAIL is a real regression the file caught.
 
+⚠ **RUN IT ALONE. IT CORRUPTS THE WORKING TREE ON PURPOSE.** For a few hundred milliseconds at a
+time `src/doomfj/wall_renderer.py` and `src/doomfj/build.py` hold a deliberate bug. Anything else
+reading the tree in that window reads the mutation -- which is not hypothetical: launching this
+beside `emit_baseline.py --check` made the arbiter report EMISSION MOVED on two configs, and cost
+an hour proving the emitter was fine (it was; the same text hashes identically under two hash
+seeds). CLAUDE.md's "one heavy job at a time" is about RAM; this is about correctness, and it
+applies to cheap jobs too.
+
     python scratchpad/cr/r1_evidence.py            # the FAIL-before / PASS-after pair
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -36,11 +45,23 @@ CASES = [
      "`dstate` does not survive the M1 reset -- every door re-shuts on every frame"),
     # the call-site guard, mutated back to the two shapes it was written to catch
     ("scripts/walk_e1m1.py",
-     "**(dict(player_sim=True, collide=True,",
-     "**(dict(state_wire=\"bin\", player_sim=True, collide=True,",
+     "            mw, args.map, cfg, asset_wad=aw, sprite_wad=spr,",
+     "            mw, args.map, cfg, asset_wad=aw, sprite_wad=spr, **dict(state_wire=\"bin\"),",
      "tests/host/test_emitter_call_sites.py::"
      "test_every_tracked_caller_passes_keywords_the_emitter_has",
      "the entry point splats a retired keyword -- the shape that hid five broken files"),
+    # PHASE 2's two real bugs, mutated back
+    ("src/doomfj/build.py",
+     "    limit = RENDER_FLAT_MAX_WORDS          # config.py's module constant, not a Config field",
+     "    limit = cfg.RENDER_FLAT_MAX_WORDS",
+     "tests/host/test_build_wall_renderer_setup.py::test_it_gets_past_its_own_first_lines",
+     "the flat limit is read off `Config`, which has no such field -- every caller dies on setup "
+     "and no gate notices, because none of them call the builder"),
+    ("src/doomfj/wall_renderer.py",
+     '    "hosted": dict(things=True, player_sim=True, collide=True, moving_things=True),',
+     '    "hosted": dict(things=True, player_sim=True),',
+     "tests/host/test_build_wall_renderer_setup.py::test_each_tier_means_exactly_what_it_says",
+     "a tier quietly means something else -- the failure the whole registry exists to prevent"),
     ("scratchpad/ca2_sweep.py",
      "stdin=encode_feed_mapunits(vx, vy, va)",
      'stdin=("%d%s%d%s%d%s" % (vx, chr(10), vy, chr(10), va, chr(10))).encode()',
@@ -75,6 +96,22 @@ CASES = [
 ]
 
 
+def _warn_if_not_alone() -> None:
+    """Refuse to mutate the tree while another python could be reading it."""
+    try:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq python.exe"],
+                             capture_output=True, text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return                                  # not Windows, or no tasklist: nothing to check
+    others = [l for l in out.splitlines() if l.lower().startswith("python.exe")]
+    if len(others) > 1 and not os.environ.get('R1_EVIDENCE_FORCE'):
+        raise SystemExit(
+            'REFUSING TO RUN: %d python processes are alive. This harness mutates real '
+            'source and restores it; anything reading the tree meanwhile reads the bug. '
+            'Wait for them, then re-run. (R1_EVIDENCE_FORCE=1 overrides -- do not quote '
+            'the result if you do.)' % len(others))
+
+
 def _drop_pyc(path: Path) -> None:
     """Delete the cached bytecode for a file this harness just restored.
 
@@ -107,6 +144,9 @@ def run(test):
 
 
 def main():
+    # a crude interlock: if another python is running, it may be reading the tree we are about to
+    # mutate. Refuse rather than produce a result nobody can trust.
+    _warn_if_not_alone()
     ok = True
     print("R1 FAIL-BEFORE -- each line mutates REAL source back to the bug and requires a FAIL")
     print("")

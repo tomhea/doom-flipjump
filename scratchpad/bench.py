@@ -93,7 +93,11 @@ VPS = ([(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn")]
        [(_signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16, sp.angle, "spawn"),
         (1400, 1200, 0, "courtyard"), (2432, 1344, 3221225472, "tree"), (-309, -44, 0, "worst")])
 ABL = frozenset(args.ablate)
-FLAGS = dict(things="things" not in args.off)
+# the one switch left is a TIER, not a flag: `--off things` drops the sprite bank.
+# ⚠ `visual`, NOT `hosted`. This harness feeds a bare viewpoint (`encode_feed_mapunits` below) and
+# its oracle renders no simulation; a sim tier reads a thing table, bindings and visibility off a
+# wire that does not carry them. `main` built `things=True` and nothing else, which is `visual`.
+TIER = "render" if "things" in args.off else "visual"
 
 
 def build():
@@ -101,7 +105,7 @@ def build():
     for p in SRC + [ROOT / "src/doomfj/wall_renderer.py", ROOT / "src/doomfj/reference_model.py",
                     ROOT / "src/doomfj/config.py"]:
         key.update(p.read_bytes())
-    key.update(repr(sorted(FLAGS.items())).encode())
+    key.update(TIER.encode())
     key.update(repr(sorted(ABL)).encode())
     key.update(repr(sorted(KNOBS.items())).encode())
     # (the --deg key that used to be folded in here went with the flag)
@@ -118,8 +122,8 @@ def build():
         return fjm
     t0 = time.time()
     parts = WR.emit_wall_renderer(mw, args.map, cfg, asset_wad=aw,
-                                  sprite_wad=art if FLAGS["things"] else None, ablate=ABL,
-                                  return_parts=True, **FLAGS)
+                                  sprite_wad=None if TIER == "render" else art, ablate=ABL,
+                                  return_parts=True, tier=TIER)
     print(f"emitted {sum(len(x) for _, x in parts):,} chars in {len(parts)} parts "
           f"({time.time() - t0:.0f}s)", flush=True)
     consts = cfg.emit_fj_consts(cache / "fj_consts.fj")
@@ -137,7 +141,7 @@ if not ABL:                                    # an ablated frame is deliberatel
     WANT = [bytes(rm.render_wall_frame(SimState(x=vx << 16, y=vy << 16, angle=va, level=args.map),
                                        scene, wall_mode=WR.WALL_MODE, floor_mode_ft1=True,
                                        plane_near=True, wall_noise=WR.WALL_NOISE, sky=WR.SKY,
-                                       near_steps=WR.STEPS, things=FLAGS["things"],
+                                       near_steps=WR.STEPS, things=TIER != "render",
                                        sprite_wad=art, bbox_cull=WR.BBOX_CULL,
                                        stack_steps=WR.STACK_STEPS, degrade=WR.DEG))
             for vx, vy, va, _ in VPS]

@@ -85,8 +85,9 @@ fjm, dbg = out / f"{tag}.fjm", out / f"{tag}.dbg"
 
 # ⚠ the M14 emit kwargs are m14_gate.py's, verbatim. If they drift, the profile stops describing
 # the binary the sweep measured -- which is what the byte-compare below is there to catch.
-M14_EMIT = dict(return_parts=True, things=True,
-                player_sim=True, collide=False, moving_things=True)
+# ⚠ the M14 emit kwargs are m14_gate.py's, verbatim -- and "verbatim" is a TIER NAME now, which
+# is the point: the two cannot drift apart by one boolean any more.
+M14_EMIT = dict(return_parts=True, tier="hosted-nocollide")
 # ⚠ CR-2026-08 (IN-3, A0.1): `bbox_cull=True` added to keep the "m14_gate.py's, verbatim" contract
 # above true after A0.1 unified the four configurations. A profile of a different picture ranks the
 # wrong macros -- and the ranking is what A2's whole batch order rests on.
@@ -107,7 +108,7 @@ elif args.m14:
     print(f"assembled + labelled in {time.time() - t0:.0f}s "
           f"({fjm.stat().st_size:,} bytes)", flush=True)
 else:
-    main = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, things=True, sprite_wad=art)
+    main = emit_wall_renderer(mw, args.map, cfg, asset_wad=aw, sprite_wad=art, tier="visual")
     consts = cfg.emit_fj_consts(out / "fj_consts.fj")
     mp = out / "prof.fj"
     mp.write_text(main, encoding="utf-8")

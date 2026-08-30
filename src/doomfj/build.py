@@ -15,7 +15,8 @@ from pathlib import Path
 import flipjump as fj
 from flipjump.fjm.fjm_reader import Reader
 
-from doomfj.config import Config, FLAT_MAX_WORDS
+from doomfj.config import (DEFAULT_MAP_WAD, FLAT_MAX_WORDS, RENDER_FLAT_MAX_WORDS,
+                           Config)
 from doomfj.harness import W, FJM_LZMA_FAST, assemble_fjm, run_fjm
 from doomfj.lut_generator import (
     generate_dispatch_table_fj, generate_offset_deposit_table_fj, generate_trig_idioms_fj,
@@ -25,7 +26,7 @@ from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import (BBOX_CULL, DEG, STACK_STEPS, STATE_WIRE, STEPS, TIER,
-                                  WALL_NOISE, emit_wall_renderer, map_has_sky,
+                                  WALL_NOISE, emit_wall_renderer, map_has_sky, tier_flags,
                                   write_program_files)
 
 _SRC_FJ = Path("src/fj")
@@ -218,6 +219,9 @@ def build_doom(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
 # The M1 restore set SHIPS WITH THE PACKAGE. It is the default so the path is not re-typed at
 # every call site (and so an installed copy uses the same one the tests do).
 DEFAULT_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m1_restore_set.json.gz"
+# R6: the map every caller but one was passing by hand. It lives in config.py with the other
+# constants -- a path resolved out of the package by `parents[2]` is not a build-module fact.
+DEFAULT_WAD = DEFAULT_MAP_WAD
 # M5: the standalone tier is a DIFFERENT PROGRAM (a keyboard prologue instead of the wire, no magic
 # byte, baked thing bindings), so it has its own set -- derived from the certified one by
 # scratchpad/m5_setfile.py, never re-measured. Pairing a set with the wrong program is caught by the
@@ -225,14 +229,8 @@ DEFAULT_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m1_restore_set
 STANDALONE_RESTORE_SET = Path(__file__).resolve().parent / "data" / "m5_restore_set.json.gz"
 
 
-def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generated_dir,
-                        flat_max_words=None,
-                        things=True, sprite_wad=DEFAULT_SPRITE_WAD,
-                        player_sim=True, collide=True,
-                        moving_things=True, standalone=False, menu=False, menu_entries=None,
-                        menu_selected=0,
-                        doors=False,
-                        self_reset=False, restore_set=DEFAULT_RESTORE_SET) -> dict:
+def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=None,
+                        tier: str = "game", ablate: frozenset = frozenset()) -> dict:
     """M12rr — wire the OPTIMIZED runtime wall renderer into a shipped `.fjm` (replacing the M10 halt-only
     `build_doom` mainline for the renderer path). Emits the renderer via the SHARED
     `doomfj.wall_renderer.emit_wall_renderer` — the SAME emitter the byte-exact golden test renders through
@@ -286,16 +284,23 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
     from flipjump.interpreter.io_devices.FixedIO import FixedIO
     cfg = cfg or Config()
     wad = WadFile.from_path(wad_path)
-    limit = flat_max_words or FLAT_MAX_WORDS
-    gen = Path(generated_dir); gen.mkdir(parents=True, exist_ok=True)
-    spr = _resolve_sprite_wad(wad, sprite_wad) if things else None
+    # ONE NAME, and everything that used to be a parameter falls out of it or out of `cfg`.
+    _t = tier_flags(tier)
+    things, standalone, self_reset = _t["things"], _t["standalone"], _t["self_reset"]
+    player_sim, collide = _t["player_sim"], _t["collide"]
+    moving_things, menu, doors = _t["moving_things"], _t["menu"], _t["doors"]
+    limit = RENDER_FLAT_MAX_WORDS          # config.py's module constant, not a Config field
+    # the generated .fj lands beside the binary, named for it. Every caller passed a matching pair,
+    # which is a parameter that only existed to be kept in step by hand.
+    out_fjm = Path(out_fjm)
+    gen = out_fjm.parent / ("generated_" + out_fjm.stem)
+    gen.mkdir(parents=True, exist_ok=True)
+    # the tier that keeps state across the reset needs its OWN restore set; picking it here is what
+    # makes the two impossible to cross (A0.1).
+    restore_set = STANDALONE_RESTORE_SET if standalone else DEFAULT_RESTORE_SET
+    spr = _resolve_sprite_wad(wad, DEFAULT_SPRITE_WAD) if things else None
 
-    parts = emit_wall_renderer(wad, mapname, cfg, things=things,
-                               sprite_wad=spr, player_sim=player_sim,
-                               collide=collide, moving_things=moving_things,
-                               standalone=standalone, menu=menu, menu_entries=menu_entries,
-                               menu_selected=menu_selected,
-                               doors=doors,
+    parts = emit_wall_renderer(wad, mapname, cfg, sprite_wad=spr, tier=tier, ablate=ablate,
                                return_parts=True)
     consts = cfg.emit_fj_consts(gen / "fj_consts.fj")
     # The emitted program goes out as SEPARATE files: the huge machine-written regions (LUT and
@@ -319,8 +324,6 @@ def build_wall_renderer(wad_path, mapname="E1M1", *, cfg=None, out_fjm, generate
         # the same address. That is ASSERTED below, not assumed: a reset writing shifted addresses
         # does not produce a wrong pixel, it produces a different program.
         assert restore_set, "self_reset=True requires restore_set (see docs/handoff-m1-reset.md)"
-        if standalone and Path(restore_set) == DEFAULT_RESTORE_SET:
-            restore_set = STANDALONE_RESTORE_SET      # the tier's own set, see its definition
         from doomfj import selfreset
         from doomfj.fastrun import FjmRunner, _fjcore
         # ⚠ m1_reset.fj goes LAST, AFTER the emitted parts -- not into `includes`. A macro-expansion

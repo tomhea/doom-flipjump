@@ -33,6 +33,10 @@ FLAT_MAX_WORDS = 1 << 23
 # at 68.2M of 134.2M the shipped tier now has ~1.97x, not the ~1.02x it had against 2**26.
 RENDER_FLAT_MAX_WORDS = 1 << 27
 
+# The map the renderer is built for unless a caller names another. Here rather than in
+# build.py because a path resolved out of the package is a project constant, not a build fact.
+DEFAULT_MAP_WAD = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "freedoom_e1m1.wad"
+
 # M13-2S rung 3a — how many MARKING TWO-SIDED segs may attribute floor/ceiling surfaces in one frame
 # (see ReferenceModel.render_wall_frame's `plane_near` and wall_renderer's ts leaf). A hard budget, in
 # the spirit of vanilla DOOM's MAXVISPLANES/MAXDRAWSEGS: without one the cost is unbounded, because

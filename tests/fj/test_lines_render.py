@@ -35,7 +35,7 @@ def _assemble_lines(tmp_path, map_wad, mapname, cfg, asset_wad=None):
     """The shipped tier: W1R walls, FT1 floors, the lines raster. Those were arguments while the
     ladder was being climbed (W1/flat -> WPX -> W1R -> W2S -> two-sided); they are the emitter's
     only behaviour now, so the rungs below W1R went with them."""
-    main = emit_wall_renderer(map_wad, mapname, cfg, asset_wad=asset_wad)
+    main = emit_wall_renderer(map_wad, mapname, cfg, asset_wad=asset_wad, tier="render")
     consts = cfg.emit_fj_consts(tmp_path / "fj_consts.fj")
     p = tmp_path / "lines.fj"
     p.write_text(main, encoding="utf-8")

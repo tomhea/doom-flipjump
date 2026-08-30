@@ -52,10 +52,14 @@ def main():
     print("reset: %s" % ("OFF -- one frame, no loop" if args.no_reset else "ON -- the program loops"))
     print("doors: %s" % ("RUNTIME -- space opens them" if args.doors else "off"))
     t = time.perf_counter()
-    metrics = build_wall_renderer(
-        str(ROOT / args.wad), args.map, cfg=Config(), out_fjm=out, generated_dir=gen,
-        flat_max_words=RENDER_FLAT_MAX_WORDS, standalone=True, menu=args.menu,
-        doors=args.doors, self_reset=not args.no_reset)
+    # ⚠ `--menu/--doors/--no-reset` used to be three booleans forwarded straight through. The
+    # SHIPPED combination is `game`; the others were only ever built while it was being assembled
+    # rung by rung, and each now needs a name in wall_renderer.TIERS rather than a flag here.
+    assert args.menu and args.doors and not args.no_reset, (
+        "m5_build now builds the `game` tier. The partial standalone combinations (no menu, no "
+        "doors, no reset) were rungs on the way to it -- add a TIERS row if one is needed again.")
+    metrics = build_wall_renderer(out, wad_path=str(ROOT / args.wad), mapname=args.map,
+                                  cfg=Config(), tier="game")
     print(json.dumps(metrics, indent=2))
     print("total %.0fs" % (time.perf_counter() - t))
     return 0

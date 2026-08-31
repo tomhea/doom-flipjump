@@ -1,7 +1,7 @@
 # Handoff — M4: nine levels in one image
 
 **Written 2026-08-31, at the end of the session that merged M2, the flag retirement and the tier
-API. Start at section 3. Nothing has been built or measured for M4 yet — section 2 is the whole
+API. Start at section 2b (PHASE A), then section 3. Nothing has been built or measured for M4 yet — section 2 is the whole
 job, and R0 is deliberately the cheapest rung.**
 
 Every number below is either MEASURED in that session (and says so) or is marked UNVERIFIED.
@@ -91,6 +91,77 @@ about WHICH PROGRAM; the level list is data, like the wad — `cfg` is the natur
 multi-level work needs the full wad, and that changes the texture/flat union — so a multi-level
 emission is NOT comparable to the baseline hashes. Keep single-level emission byte-identical
 (that is what `emit_baseline` is for) and gate the multi-level program separately.
+
+---
+
+## 2b. PHASE A — the two loose ends, FIRST. No build, and it feeds M4 directly.
+
+The owner asked for these before M4 starts. Both are no-build reading tasks, and both were
+triaged on 2026-08-31 so this section names the specific items rather than pointing at 170.
+
+**Read them through one lens: `M4 MULTIPLIES PER-MAP THINGS BY 14.8`.** A finding about work done
+per SEG or per SECTOR is worth ~15x more in a nine-level image than it was when it was written —
+if the thing it names is BAKED (emitted code), it is a size lever against the 21.7% break-even; if
+it is RUNTIME, it is only ever the active level and the multiplier does not apply. **Sorting each
+finding into baked-vs-runtime is the whole triage, and it is the first thing to do.**
+
+### A1 — the `stl.fcall` early-out
+
+Status corrected: **the pixel path already has it.** `frame_render.fj`'s `pixel_tramp` says so —
+*"a skip falls straight to `end` with NO fcall (so the DDA only advances over the wall's rows)"*.
+The branch `m13opt3-early-out` is named for a check that was, in the hot path, already taken.
+
+So the open question is **the other fcall sites**: 8 in `frame_render.fj`, 4 in `stream_render.fj`,
+2 in `projection.fj`, 2 in `sim.fj`, 1 in `plane_bands.fj`. For each, ask what `pixel_tramp`
+answered yes to: *is there a cheap test that lets the caller skip the call entirely, rather than
+calling and returning early?* An fcall is a trampoline plus a return-register write; skipping it
+beats returning from it.
+
+⚠ **Treat this as a LEAD, not a known win.** The note predates the retirements and the 15M
+campaign, so the code may no longer look as described — and "cheap and unverified" is precisely the
+shape of the "26 pids" claim that turned out to be 94. Read first, measure with
+`scratchpad/bench.py --ablate`, and only then decide.
+
+### A2 — the cr2 findings, triaged
+
+`scratchpad/cr2/findings/` is **10 files, ~170 numbered findings**, from a READ-ONLY review: no
+build, no test, no gate was run, and every number is either read from source or labelled
+UNVERIFIED. Round 1 was fixed; the rest were never worked. Do NOT sweep them — pull the ones that
+serve M4.
+
+**Correctness, and all three are multi-level risks:**
+
+| finding | why it matters for nine levels |
+|---|---|
+| `py-infra` **IN-5** — `build_blockmap` is a SAMPLED rasteriser, not an exact one; its soundness rests on a test, not on the argument in its docstring | the sampling was only ever validated against E1M1. Eight other maps with different geometry is exactly how a sampled rasteriser gets caught. **Same shape as `door_states` throwing on five of nine.** |
+| `fj-projection` **PJ-3** — the entire SHIPPED lines/stream projection path has no kernel-level unit test | the path every level renders through, unprotected, while M4 changes the tables under it |
+| `fj-planes-misc` **PM-12** — nine of `present.fj`'s fourteen command emitters have no byte-level test | the presentation layer is shared by all levels |
+
+**Optimisations — check BAKED vs RUNTIME for each, because that decides whether M4 multiplies it:**
+
+| finding | claim |
+|---|---|
+| `py-reference_model` **RM-4** — level-invariant thing data is recomputed on every rendered frame | the name says "level-invariant"; in a nine-level image that phrase means something new |
+| `fj-projection` **PJ-7** — `wedge_qt`'s `q` dispatch tree is loop-invariant: 4 identical per-frame decisions re-taken PER SEG | per-seg. 2,057 segs on E1M1, **30,439 across nine**. If the tree is baked, this is a 14.8x size lever |
+| `fj-projection` **PJ-5** — `scale_from_global_angle`'s `anglea` is identically `ANG90 + xtoviewangle[x]`: the viewangle cancels, so the whole term is a per-COLUMN constant | pure hot-path ops |
+| `fj-sim` **SI-6** — six loop-invariant `hex.set w/4, <ptr>, <label>`s that a data initializer deletes outright | size, shared |
+| `fj-planes-misc` **PM-7 / PM-8** — a per-row loop re-tests a call-invariant branch; the per-row cost is 3 `read_byte_and_inc` (~4k ops/row) and the alternative was deleted, not measured away | per-row, hot path |
+
+**Also worth one pass:** `IN-1` says DESIGN.md's span ledger was stale by 3-5x. It has since gained
+the M2 row, and **M4 must add a nine-level row anyway (R4 of the CR rules)** — so fix the ledger in
+that same pass rather than as separate work.
+
+### What Phase A must produce
+
+1. **A baked-vs-runtime verdict for every optimisation finding above**, because that is what says
+   whether M4 multiplies it by 14.8 or not at all.
+2. **Any per-map assumption found by reading** — the `door_states` and `sky` class. Cheaper here
+   than in a failed assembly, and section 7 GAP 2 says there will be more.
+3. **A short list of what to actually take**, with each one's cost measured, not asserted.
+
+⚠ Nothing in Phase A may move the shipped picture. `emit_baseline --check` stays 21/21 SAME, and
+an ops change must be measured on a MATCHED pair from the same commit (`scratchpad/m2_ops.py`) —
+never against a stale cache binary. That mistake is on the record in PR #79.
 
 ---
 
@@ -229,8 +300,10 @@ box; the ladder is what says whether nine is possible here at all.
 ## 6. Loose ends carried forward
 
 - **`DESIGN.md` 1.2 has no span row for the 9-level binary** — R4 must add one (R4 of the CR rules).
-- The `stl.fcall` early-out check is still untaken.
-- **10 open findings** in `scratchpad/cr2/findings/`.
+- The `stl.fcall` early-out check — **now PHASE A1 (section 2b), and its status is corrected
+  there: the pixel path already has it.**
+- **~170 open findings in 10 files** under `scratchpad/cr2/findings/` — **triaged into PHASE A2
+  (section 2b)**; only the ones that serve M4 are named there.
 - `self_reset=False` has not been built on the post-hoist tree, so the reset part's own span is
   unmeasured.
 - `flipjump-151`'s `origin` remote redirects; the URL is not updated.

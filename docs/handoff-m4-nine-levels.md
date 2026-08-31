@@ -238,6 +238,49 @@ This is the one to do first and it is fully enumerated, so it can be done withou
     :1639  hex.cmp 2, pval8, dpid   (lines_ditto_plane)    -> pidn
     :1643  hex.mov 2, dpid, pval8   (lines_save_plane)     -> pidn
 
+#### ⚠⚠⚠⚠ BISECTED 2026-09-01: IT IS THE STRIDE, NOT THE PIECE LAYOUT.
+
+**Start here. The piece-layout rewrite described below was chasing the wrong thing.**
+
+One run settled it. `SLOT_SHIFT` forced to 2 (stride 16 -> 256) with **the pid still NARROW and the
+piece layout completely untouched** -- the only change in the tree -- and the picture breaks:
+
+    (664,291)     41,983,391 ops   !! 2042 px DIFFER      (2074 with the full V5 change)
+    (1272,-724)   34,294,708 ops   !!   85 px DIFFER      (97   with the full V5 change)
+
+Nearly the same damage as the full change, from the stride ALONE. So `ts_piece_wr`, the readers,
+`PIECE_BYTES`, the slotoffs and the widened `*bp` registers are all INNOCENT, and the search space
+is one line of arithmetic instead of twenty sites.
+
+`banks` grew by exactly 38,400 lines = `VIEW_W * (256-16)`, so the stride change did what it was
+meant to and nothing else -- the emission is confined to `sfslot`.
+
+**What was CHECKED and is not the cause:**
+
+* `shl_hex n, times, dst` shifts by `times` NIBBLES (stdlib `shifts.fj:34`, `dst[:n] <<= 4*times`),
+  so SLOT_SHIFT=2 really is x256, and `@Assumes times <= n` holds at n=w/4=8.
+* `tsf_slot_idx` and `slot_idx` are both `hex.vec w/4` -- x*256 = 40,704 = 0x9F00 cannot overflow.
+* `ptr_index` and `ptr_add` both advance in dw-slots, and `sfslot` is sized `VIEW_W * stride`.
+* the within-column group layout is UNCHANGED in this experiment (0 and 8, 4-byte pieces).
+* the only two live uses of `STEP_SLOT_STRIDE` in the emitter were both updated.
+
+**So something still assumes 16 that reading did not find.** Candidates for the next session, and
+note the third reader that the V5 work never touched:
+
+1. `frame_render.fj:1318-1398` is a THIRD sfslot reader (the non-stacked V3 path). It hardcodes
+   `hex.ptr_add sfslot_p, 5` after three reads and `hex.ptr_add sfslot_p, 8` -- group offsets, so
+   they survive a stride change in principle. Verify that in practice.
+2. Anything that reaches `sfslot` by ADDRESS ARITHMETIC rather than through `sfslot_p` -- a baked
+   constant or a neighbouring hot array whose position the emitter computes.
+3. Whether the hot-data region has a size or ordering assumption that 38,400 extra slots breaks
+   (`;__hot_end`, the jump guard).
+
+**And question the premise.** The stride only has to grow because a 5-byte piece x4 needs 20 bytes.
+A pid high-nibble stored in a SEPARATE per-column array would keep the stride at 16 and sidestep
+this entirely -- uglier, but it does not depend on finding this bug.
+
+---
+
 #### ⚠⚠⚠ THE V5 HALF WAS ATTEMPTED 2026-09-01 AND FAILED. READ THIS FIRST.
 
 The slot-layout change below was implemented in full and REVERTED. It is not a matter of missing

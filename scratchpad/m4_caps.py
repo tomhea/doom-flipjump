@@ -20,9 +20,10 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from doomfj import wall_renderer as WR                                    # noqa: E402
 from doomfj.config import Config                                          # noqa: E402
-from doomfj.doors import door_states                                      # noqa: E402
+from doomfj.doors import door_states, heights_for_states                  # noqa: E402
 from doomfj.reference_model import ReferenceModel                         # noqa: E402
 from doomfj.mapcompiler import bake_bsp                                    # noqa: E402
+from doomfj.reference_model import apply_sector_heights                    # noqa: E402
 from doomfj.things import baked_thing_mask, drawable_things                # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 
@@ -55,6 +56,17 @@ def main():
         baked = baked_thing_mask(rm, cmap, draw, WR.MONSTER_TYPES)
         nt = len({i for i, b in zip(draw_idx, baked) if not b})
         st = door_states(secs, lds, sds)
+        # THE REAL BOUND on the n_tsv counter -- what wall_renderer.marking_seg_count computes,
+        # through the same module-level SSOT so the two cannot drift. A seg marks if it marks in
+        # ANY door state, so the union is taken over every state the doors can stop at.
+        variants = [secs]
+        for si, stops in st.items():
+            for k in range(len(stops)):
+                variants.append(apply_sector_heights(
+                    secs, heights_for_states(secs, lds, sds, {si: k})))
+        marking = sum(1 for seg in cmap.segs
+                      if lds[seg.linedef].back != -1
+                      and any(WR.seg_marks_in(lds, sds, seg, v) for v in variants))
         # An ESTIMATE of `lines_pid` with NO GUARANTEED DIRECTION -- do not read it as a bound.
         # A pid is a distinct (ceiling key, floor key) pair. This counts one per SECTOR, and the
         # emitter both ADDS to that (a variant per door STATE, plus the back sectors of stacked
@@ -68,15 +80,17 @@ def main():
             WR, "_pid_ceil_key") else len({((s2.ceil_h, s2.light & 0xFF, s2.ceil_tex.upper()),
                                             (s2.floor_h, s2.light & 0xFF, s2.floor_tex.upper()))
                                            for s2 in secs})
-        rows.append(dict(map=m, segs=len(segs), ssecs=len(wad.subsectors(m)),
+        rows.append(dict(map=m, segs=len(segs), marking=marking, ssecs=len(wad.subsectors(m)),
                          nodes=len(wad.nodes(m)), draw=len(draw), nt=nt, pid_lo=pid_lo,
                          doors=len(st), maxstate=max((len(v) for v in st.values()), default=0),
                          sky=WR.map_has_sky(secs)))
 
     caps = [
-        ("segs < DEG_PNEAR", "segs", WR.DEG_PNEAR,
-         "the deg attribution budget must provably never bind (_assert_pnear_unbound); the fj "
-         "counter n_tsv is 3 nibbles, so the cap cannot simply be raised"),
+        ("MARKING segs < DEG_PNEAR", "marking", WR.DEG_PNEAR,
+         "the deg attribution budget must provably never bind (_assert_pnear_unbound). Only "
+         "MARKING two-sided segs reach seg_pass1_ts_leaf, so the bound is the marking count, not "
+         "the total -- using the total rejected E1M6 (4,409 segs / 2,550 marking) for nothing. "
+         "n_tsv is 3 nibbles, so the cap itself cannot be raised past 4095"),
         ("runtime things < 0xFF", "nt", 0xFF,
          "0xFF is the empty/end sentinel of BOTH thing linked-list arrays (wall_renderer:470). "
          "This is the M14.5 RUNTIME subset the assert actually counts, not the drawable count"),
@@ -84,12 +98,12 @@ def main():
          "the fj door switch index is one nibble (doors.MAX_STATES)"),
     ]
 
-    print("%-6s %7s %7s %7s %7s %6s %7s %7s %9s %5s" %
-          ("map", "segs", "ssecs", "nodes", "draw", "nt", "pid~", "doors", "maxstate", "sky"))
+    print("%-6s %7s %8s %7s %7s %6s %7s %7s %5s" %
+          ("map", "segs", "marking", "ssecs", "draw", "nt", "pid~", "doors", "sky"))
     for r in rows:
-        print("%-6s %7d %7d %7d %7d %6d %7d %7d %9d %5s" %
-              (r["map"], r["segs"], r["ssecs"], r["nodes"], r["draw"], r["nt"], r["pid_lo"],
-               r["doors"], r["maxstate"], "yes" if r["sky"] else "NO"))
+        print("%-6s %7d %8d %7d %7d %6d %7d %7d %5s" %
+              (r["map"], r["segs"], r["marking"], r["ssecs"], r["draw"], r["nt"], r["pid_lo"],
+               r["doors"], "yes" if r["sky"] else "NO"))
 
     print()
     bad = 0

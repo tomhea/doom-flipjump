@@ -110,6 +110,53 @@ emission is NOT comparable to the baseline hashes. Keep single-level emission by
 
 ---
 
+## 2-OWNER. THREE DECISIONS, 2026-08-31, AFTER Phase A's measurements
+
+These are the owner's, taken with the Phase A numbers in front of them. They supersede the
+open questions section 2a raised.
+
+| | decision |
+|---|---|
+| **the x4 budget** | **4x the OLD span: 357,978,424 words.** The one-level span is now 74,091,162, so that ceiling is 4.83x it -- the Phase A clamp-tail win is HEADROOM, not a smaller budget. |
+| **E1M6 / E1M7** | Include them only if a SIMPLE fix makes **only those two** more time-expensive. Otherwise **start without them** and decide at the end. |
+| **the level menu** | a **3x3 GRID, laid out like phone digits** -- 1-9, top-left to bottom-right. That answers GAP 6: `mode` is a 1-bit toggle and the level select needs an N-way choice, so the grid IS the UI. |
+
+### What the E1M6/E1M7 test came back with
+
+**One of the three caps was free to fix and it unblocked E1M6's seg cap entirely.**
+`_assert_pnear_unbound` proved the attribution budget never binds using `len(cmap.segs)` -- but
+`seg_pass1_ts_leaf` is called ONLY from `ss<c>_seg<s>_mark` blocks, which are emitted only for
+MARKING two-sided segs. One-sided segs never reach it. Measured over every door state of every map
+(`wall_renderer.marking_seg_count`, now a module-level SSOT so the predicate has ONE definition):
+
+    map    segs  MARKING          map    segs  MARKING
+    E1M1   2057     1445          E1M6   4409     2550   <- was rejected, fits with 1,545 spare
+    E1M2   3650     2242          E1M7   6947     4183   <- still over 4,095, by 88
+    E1M3   2981     1300          E1M8   1796     1284
+    E1M4   3502     2036          E1M9   3164     2051
+    E1M5   1933     1251
+
+The old bound was over-conservative by 2-3x and **cost a level for nothing**. Tightening it moves
+NOT ONE BYTE of the emitted program (`_assert_pnear_unbound` returns `""`), so it is free in every
+sense. Pinned by `tests/host/test_marking_seg_bound.py`, whose control requires the OLD bound to
+reject E1M6 -- if that ever stops being true the test has stopped proving anything.
+
+**The remaining blocker is SHARED, so the answer to the owner's question is no.** After the fix:
+
+    E1M6   blocked ONLY by runtime things 344 > 254
+    E1M7   blocked by things 330, marking segs 4,183 > 4,095, and the stranded thing (2.4)
+
+The thing index is the `0xFF` sentinel of `sshead`/`thnext`, walked by `sim.fj`'s `bind_things` and
+`thing_pass` -- **shared code in a shared image**, so widening it to two bytes costs EVERY level a
+little (order 1-2% of the median frame, UNMEASURED), not just E1M6 and E1M7. There is no per-map
+version of it: the width is a compile-time property of macros every level runs.
+
+**So: SHIP SEVEN.** E1M1-E1M5, E1M8, E1M9 -- which is exactly the set the pid widening alone
+unlocks. E1M6 costs one shared widening on top; E1M7 costs that plus a 4-nibble `n_tsv` plus the
+2.4 decision. Bring the measured cost of the thing widening to the owner before spending it.
+
+---
+
 ## 2a. PHASE A IS DONE (2026-08-31) -- and it changed the plan below
 
 **Read `docs/handoff-m4-phase-a.md` before section 3.** Section 2b (the Phase A brief) is kept
@@ -564,6 +611,28 @@ A ten-second survey of `assets/freedoom1.wad` overturned an assumption the whole
 | E1M9 | 1935 | 2908 | 297 | 3164 | 913 | 124 | 51 | **throws** | 368 |
 | **SUM9** | 19152 | 27568 | 2868 | **30439** | **9312** | union **343** | union **146** | | types **76** |
 
+### ⚠ GAP 1'S MULTIPLIER IS THE WRONG ONE FOR THE DOMINANT TERM -- measured 2026-08-31
+
+GAP 1 below projects the whole span with the SEG ratio (14.8x). That is right for `segconsts` and
+`walk`, which really are per-seg and per-node -- but they are only ~5.6 MB of a 95.6 MB emission.
+**The dominant term is `vpb_*` (78% of banks), and band half-lists do NOT scale with segs**: the
+count is `2 * vz_classes * bank_keys`, and both factors grow far slower than seg count.
+
+Over the three maps that emit, MEASURED:
+
+    band half-lists   43,392 -> 74,676   1.72x E1M1
+    segs               2,057 ->  5,786   2.81x E1M1
+    the dominant term grows 1.63x SLOWER than segs
+
+Applied to nine levels, GAP 1's 14.8x becomes roughly **9.1x on the band term** -- which is close
+to the naive "9x" the handoff spent a section debunking, for a completely different and this time
+MEASURED reason. **Every projection below that multiplies the whole span by 14.8 is pessimistic.**
+
+⚠ Three maps is a thin base for a curve and four of the remaining six are the ones the pid cap
+blocks, so this is a CORRECTION OF DIRECTION, not a new number to quote. The real figure is R2's:
+emit the seven-level set once the pid is widened and count the union. Do not re-derive `P` from
+seg ratios again.
+
 ### GAP 1 — "nine levels" is not 9x. It is **14.8x**.
 
 E1M1 is nearly the SMALLEST map in the episode. Nine maps are **14.8x its segs** and 13.65x its
@@ -626,10 +695,45 @@ the FULL wad, whose texture union is 3.0x — so a multi-level emission is not c
 frozen hashes. **Keep single-level emission byte-identical (that is what the baseline is for) and
 add a SEPARATE net for the multi-level program.** Do not re-save the baseline to make it pass.
 
-### GAP 6 — the level-select UI is unplanned
+### GAP 6 — the level-select UI — ANSWERED by the owner 2026-08-31: a 3x3 GRID
 
 `DEFAULT_MENU` is a constant list of four strings. A configurable level list needs configurable
 menu entries, and M3's `mode` cell is a 1-bit toggle, not an N-way select. R3 must extend it.
+
+**The owner's answer: lay the levels out like PHONE DIGITS -- a 3x3 grid, 1..9, top-left to
+bottom-right.** That is a good fit for what this renderer can already do cheaply:
+
+* the menu is a BAKED frame (M3: ~2,344 ops against 28M), so a 3x3 grid of nine cells costs
+  essentially nothing to draw -- it is one more baked picture, not a layout engine;
+* **the digit IS the index.** A 3x3 grid keyed 1-9 means the level cell can be written straight
+  from the keypress with no cursor state at all -- no up/down/left/right walk, no selection
+  highlight to persist across the M1 reset. That is strictly less machinery than the four-entry
+  list menu M3 already ships;
+* it degrades honestly when fewer than nine levels ship (the owner's fallback): cells with no
+  level are drawn dead and their digit does nothing. **The binary stays honest about what it
+  holds**, which was the owner's stated reason for making the count configurable.
+
+⚠ The level cell must survive the M1 reset (`build.STANDALONE_PERSIST`), exactly as `mode` does,
+and the owner's standing rule applies: not complete until the reset loop carries its label.
+⚠ **AND THE DIGIT KEYS ARE NOT POLLED -- CHECKED, not assumed.** `src/fj/input.fj`'s `kb.poll`
+recognises exactly w/a/s/d, the four arrows, enter, esc and space; its own header says "anything
+else is read and DISCARDED". `'1'..'9'` are `0x31..0x39`, so the grid needs a new `0x3_` arm in the
+high-nibble dispatch plus a low-nibble 1..9 fan -- contained, but real work in the one macro that
+decides what the player can do.
+
+⚠⚠ **AND `kb.poll`'S SIGNATURE IS A KNOWN FAN-OUT TRAP.** Commit `f8a19ca` is titled *"M2-R4 fix:
+kb.poll's new `u` parameter had two callers in tests/ that I did not grep for"* -- the exact same
+macro, the exact same kind of change, one milestone ago. Adding a `level` output repeats it unless
+`src/`, `scratchpad/` AND `tests/` are grepped for `kb.poll` first (CLAUDE.md rule 5).
+
+**The grep, done 2026-08-31 so it cannot be skipped -- THREE call sites, TWO of them in tests:**
+
+    src/doomfj/wall_renderer.py:383   rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l,
+                                      kb_r, kb_u, mode, bad        <- the emitted program
+    tests/fj/test_keyboard_input.py:43   rep(POLLS, i) kb.poll kstat, kcode, ..., kuse, kmode, bad
+    tests/fj/test_menu_mode.py:41        rep(4, i) kb.poll kbstat, kbcode, ..., kb_u, mode, bad
+
+(`scratchpad/m2_std_gate.py` mentions `kb.poll` only in a comment about edge-triggering.)
 
 ### GAP 7 — R0 as originally scoped costs ~2.25 hours
 

@@ -139,10 +139,16 @@ sky half slots -- are measured by `scratchpad/m4_bands.py` instead, and `m4_caps
 own output rather than implying it covered them.
 
 **The order the caps bind in is the fallback ladder, and it is a good one.** Widening the pid ALONE
-builds E1M1, E1M2, E1M3, E1M4, E1M5, E1M8 and E1M9 -- **seven of nine**. E1M6 needs the thing index
-and the seg counter as well; E1M7 needs those plus the uninhabitable-sector question in 2.4. So
-"drop levels, keep full detail" has a natural first rung that costs exactly one widening, and the
-last two levels are each individually expensive.
+builds E1M1, E1M2, E1M3, E1M4, E1M5, E1M8 and E1M9 -- **seven of nine**, verified cap by cap. After
+the marking-bound fix above, **E1M6 is blocked by the thing index ALONE** and E1M7 by the thing
+index plus the marking counter plus the 2.4 question. So "drop levels, keep full detail" has a
+first rung that costs exactly one widening.
+
+⚠ **The owner asked whether E1M6/E1M7 could be bought with a fix that costs only THEM. The answer
+is no**, and it is worth stating why so it is not re-asked: the thing index is the `0xFF` sentinel
+of `sshead`/`thnext`, walked by `sim.fj`'s `bind_things`/`thing_pass` -- SHARED macros in a SHARED
+image. Its width is a compile-time property every level runs, so widening it to two bytes taxes all
+nine (order 1-2% of the median frame, UNMEASURED). Only the marking bound turned out to be free.
 
 ### 2.4 E1M7 has a THIRD blocker, and the door fix in 2.1 is what exposed it
 
@@ -380,8 +386,13 @@ with teeth -- two mutations of the real generator each fail three of the cases.
    deciding how wide a pid is.
 4. **`runtime things < 0xFF`** (2.2). E1M6 and E1M7 only -- i.e. this is what levels eight and nine
    cost, and it can be deferred behind a 7-level build.
-5. **`segs < DEG_PNEAR`** (2.2). Binds on two of nine. A 4-nibble `n_tsv` is a charge against the
-   +10% ops budget -- measure it with `scratchpad/m2_ops.py` on a matched pair.
+5. **DONE -- `segs < DEG_PNEAR` was the WRONG BOUND** (2.2). The counter is only reached by MARKING
+   two-sided segs, not by every seg, and the difference is 2-3x. Measured over every door state:
+   E1M6 is 2,550 marking against 4,095, not 4,409 -- **the old bound was costing a level for
+   nothing**. E1M7 is 4,183, still over by 88. Tightening it moves NOT ONE BYTE of the emitted
+   program (`_assert_pnear_unbound` returns `""`), and the predicate is now a module-level SSOT
+   (`seg_marks_in` / `marking_seg_count`) so it has one definition rather than two. Pinned by
+   `tests/host/test_marking_seg_bound.py`, whose control requires the OLD bound to reject E1M6.
 6. **Delete `plane_bands.fj`** (2.3) -- inside the GAP 3 restore-set re-key, not before.
 7. **`RM-4`** -- when the multi-level gate exists, not before.
 8. **`PJ-7` / `PJ-5`** -- held in reserve, to pay for the wider indices 3-5 are about to cost.

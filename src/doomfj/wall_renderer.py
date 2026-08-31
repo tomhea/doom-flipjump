@@ -1074,15 +1074,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # DOOM's R_StoreWallRange markfloor/markceiling test. Equal on both sides => attributing the
     # plane to either sector renders identically, so skipping it is free of error BY CONSTRUCTION.
     def _seg_marks_in(seg, sv) -> bool:
-        ld_ = lds[seg.linedef]
-        if ld_.back == -1:
-            return True
-        fs_ = sv[sds[ld_.front if seg.side == 0 else ld_.back].sector]
-        bs_ = sv[sds[ld_.back if seg.side == 0 else ld_.front].sector]
-        return ((fs_.ceil_h, fs_.light & 0xFF, fs_.ceil_tex.upper())
-                != (bs_.ceil_h, bs_.light & 0xFF, bs_.ceil_tex.upper())
-                or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
-                != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
+        return seg_marks_in(lds, sds, seg, sv)
 
     def _seg_marks(seg) -> bool:
         """M2-R3: ANY state. A seg the program must be able to mark in some door position has to be
@@ -1843,7 +1835,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              # = the smudged-column bug) -- n_ts counts a subset of the map's segs, so total segs
              # below the baked cap is the sufficient condition. 4095 is also the 3-nibble
              # counter's max, enforced together here.
-             *([_assert_pnear_unbound(len(cmap.segs)), "seg_pass1_ts_leaf:",
+             *([_assert_pnear_unbound(marking_seg_count(cmap, lds, _seg_marks)),
+                "seg_pass1_ts_leaf:",
                 f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR}, {atan_dbl}, {slope_dbl}, "
                 f"{table_dbl}, 1, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
                 f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
@@ -2824,15 +2817,53 @@ def _spr_nlow(cfg):
                if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
 
 
+def seg_marks_in(lds, sds, seg, sv) -> bool:
+    """Does this seg MARK -- i.e. attribute a plane -- with sectors in state `sv`?
+
+    THE SSOT for that question. It was a closure inside `emit_wall_renderer`; it is module-level so
+    that `marking_seg_count` below and any tool can ask it WITHOUT a second copy of the rule
+    (CLAUDE.md rule 5: a definition that both sides re-derive is the bug).
+
+    DOOM's R_AddLine markfloor/markceiling test: a two-sided seg is skipped only when BOTH band-bank
+    keys (height, light, flat) are equal on the two sides, where attributing the plane to the back
+    sector renders identically anyway. A one-sided seg always marks."""
+    ld_ = lds[seg.linedef]
+    if ld_.back == -1:
+        return True
+    fs_ = sv[sds[ld_.front if seg.side == 0 else ld_.back].sector]
+    bs_ = sv[sds[ld_.back if seg.side == 0 else ld_.front].sector]
+    return ((fs_.ceil_h, fs_.light & 0xFF, fs_.ceil_tex.upper())
+            != (bs_.ceil_h, bs_.light & 0xFF, bs_.ceil_tex.upper())
+            or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
+            != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
+
+
+def marking_seg_count(cmap, lds, seg_marks) -> int:
+    """How many segs can reach `seg_pass1_ts_leaf`, i.e. the real bound on the `n_tsv` counter.
+
+    ⚠ THIS REPLACED `len(cmap.segs)`, WHICH WAS OVER-CONSERVATIVE BY 2-3x AND WOULD HAVE COST TWO
+    LEVELS. The leaf is called only from a `ss<c>_seg<s>_mark` block, and those are emitted only for
+    TWO-SIDED segs that survive the `_seg_marks` cull -- one-sided segs never reach it. Each seg
+    belongs to exactly one subsector and the BSP walk visits a subsector at most once per frame, so
+    the count below is a hard per-frame ceiling on the counter.
+
+    MEASURED 2026-08-31 across E1: total segs rejects E1M6 (4,409) and E1M7 (6,947) against the
+    3-nibble counter's 4,095, while the real marking counts are 2,550 and 4,183 -- so E1M6 fits with
+    1,545 to spare and only E1M7 is genuinely over, by 88. `seg_marks` is passed in (not re-derived)
+    because it closes over the DOOR STATE VARIANTS: a seg that marks in any door position counts."""
+    return sum(1 for seg in cmap.segs if lds[seg.linedef].back != -1 and seg_marks(seg))
+
+
 def _assert_pnear_unbound(total_segs: int) -> str:
-    """The deg attribution budget's never-binds proof (see DEG_PNEAR): total segs strictly below
-    the baked cap, and the cap inside the 3-nibble fj counter. Returns an empty emitted line.
+    """The deg attribution budget's never-binds proof (see DEG_PNEAR): the MARKING seg count
+    strictly below the baked cap, and the cap inside the 3-nibble fj counter. Returns an empty
+    emitted line -- so tightening this bound moves not one byte of the emitted program.
 
     The `deg` flag that used to gate this is retired, so the proof is unconditional -- which is
     what it should always have been: a budget that can bind paints wrong columns, and the
     condition only ever said "do not check when the package is off"."""
     assert total_segs < DEG_PNEAR <= 4095, (
-        f"DEG_PNEAR={DEG_PNEAR} can bind (map has {total_segs} segs) or overflows the "
+        f"DEG_PNEAR={DEG_PNEAR} can bind (map has {total_segs} MARKING segs) or overflows the "
         "3-nibble n_tsv counter -- a binding attribution budget paints wrong columns")
     return ""
 

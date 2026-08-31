@@ -398,7 +398,49 @@ discipline caught "26 pids" (really 94) and "102 labels" (really 16,412).
 **Deliverable: a per-map table, and a recommendation of which N levels fit and in what order to
 drop them.** Bring it to the owner before R4.
 
-### R1 — a geometry-only emission mode
+### R1 -- RUN 2026-08-31. The label gate exists, and it FAILS on exactly two names.
+
+`scratchpad/m4_r1_labels.py`. No build, no new emitter mode: a geometry-only emission is a
+PROJECTION of the normal one (take the `segconsts` and `walk` parts, drop the rest), so it is the
+same text a dedicated tier would emit and it cannot drift from what ships.
+
+    E1M1  geometry defines 25,621 labels   (whole emission 861,969)
+    E1M5  geometry defines 20,351          (407,924)
+    E1M8  geometry defines 20,042          (499,494)
+
+    CHECK 1  a geometry part defines only names the full emission does .... ok x3
+    CHECK 2  two PREFIXED geometry emissions must not collide ............. !! 2 COLLIDE
+             E1M1 vs E1M5   ['cs_seeded', 'ptloc_walk']
+             E1M1 vs E1M8   ['cs_seeded', 'ptloc_walk']    <- the SAME pair
+    CHECK 3  NEGATIVE CONTROL: unprefixed, the same pairs must COLLIDE .... 5,116 / 5,753 ok
+    CHECK 4  every free name resolvable from the shared emission or src/fj  0 free names x3
+
+**Two labels block concatenation, and they are the same two for every pair.** Both are FIXED
+NAMES attached to PER-MAP code -- which is why `doomfj.mapprefix` deliberately keeps them, and why
+nothing before this gate could have noticed:
+
+| label | what it is | the fix, and it is cheap |
+|---|---|---|
+| `cs_seeded` | the collide-descend's `done_label` (`wall_renderer.py`, the `_bsp_descend_code` call). Its body is literally `stl.fret cs_ret` -- **identical on every map**; the descend's other labels already carry `_pfx(mapname)`, which is why only this one collides | **HOIST IT SHARED.** One copy, every map's descend jumps to it, zero cost. The same argument as the Phase A clamp-tail share: identical bodies do not need N copies |
+| `ptloc_walk` | the entry of the baked per-thing point-location walk. `sim.fj:427` declares it EXTERN (`< ... ptloc_walk, ptloc_ret`) and `sim.fj:519` calls `stl.fcall ptloc_walk, ptloc_ret` | **PREFIX IT PER MAP** (`e1m5_ptloc_walk`) and leave a one-op shared `ptloc_walk:` trampoline whose target R3's level switch rewrites. `sim.fj`'s extern keeps resolving; it is called once per DIRTY thing, so a jump is noise. The M12oo wflip-trampoline idiom, already proven in `pixel_tramp` |
+
+⚠ **R1 AND R3 ARE COUPLED, which this plan did not say.** `ptloc_walk` cannot be resolved by
+prefixing alone -- something has to point the shared name at the ACTIVE map, and that something is
+R3's persisted `level` cell (M3's `mode` machinery). Do R1's prefixing and R3's trampoline in one
+go, or R1 cannot be gated green.
+
+The gate is cheap to re-run: label sets are cached per map under `scratchpad/_m4_r1/`, and
+`--from-dir MAP=build/generated_...` takes a map's parts from an existing build instead of
+re-emitting (~13 min/map otherwise).
+
+⚠ **The checker took four versions to stop passing for the wrong reason**, and every fix was a
+scope error rather than a loosened threshold: 237 free names -> 156 -> 136 -> 0. It did not know
+about `src/fj`'s registers and macros; it carried `m4_labels.py`'s `(?!hex.vec)` lookahead (a
+DECLARATION is a definition); it did not record `def <name>` macro names (the walk emits thousands
+of `dsw_seg####_*_go`); and it counted the segments of dotted paths like
+`hex.tables.clean_table_entry__table` as free names.
+
+### R1 (original wording) -- a geometry-only emission mode
 
 `emit_wall_renderer(..., shared_tables=False)` — or, preferably, a TIERS row, since that is the
 mechanism now: maps 2..N emit their `segconsts` + `walk` and nothing else.

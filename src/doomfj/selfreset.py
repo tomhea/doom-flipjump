@@ -56,7 +56,7 @@ _DECLARED_RATIO = {"sshead": 2, "pclm": 1, "sfflag": 1}
 def decl_words(decl):
     """`"name: hex.vec N"` -> (name, words) for a scratch DECLARATION string.
 
-    ONE parser for every consumer of CHECK_SCRATCH_DECLS / HOISTED_SCRATCH_DECLS (R6):
+    ONE parser for every consumer of CHECK_SCRATCH_DECLS / hoisted_scratch_decls() (R6):
     scratchpad/m1_add_globals.py, which re-attaches them to the restore set, and
     tests/host/test_restore_set_shipped.py, which asserts they are all present at full extent.
 

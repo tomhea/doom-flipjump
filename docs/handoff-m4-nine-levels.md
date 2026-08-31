@@ -238,6 +238,114 @@ This is the one to do first and it is fully enumerated, so it can be done withou
     :1639  hex.cmp 2, pval8, dpid   (lines_ditto_plane)    -> pidn
     :1643  hex.mov 2, dpid, pval8   (lines_save_plane)     -> pidn
 
+#### ⚠⚠ STATUS: HALF DONE, AND GUARDED. READ THIS BEFORE TOUCHING THE WIDTH.
+
+`Config.PID_NIBBLES` exists, defaults to 2, and the **pclm half is finished and PROVEN INERT**.
+`emit_wall_renderer` ASSERTS `PID_NIBBLES == 2` because **the V5 back-pid half is not done**.
+
+**THE BUG THE SWEEP FOUND, and the lesson is the important part.** At width 4 all FOUR deg_gate
+viewpoints were byte-exact -- and `scratchpad/ca2_sweep.py` over 260 frames found three that were
+not:
+
+    !! (-435,223,0x0):            2 px DIFFER
+    !! (-435,223,0xc0000000):   292 px DIFFER
+    !! (-179,1247,0x40000000):  940 px DIFFER
+
+**A PID CHANGE IS PROVED BY THE SWEEP, NOT BY THE GATE.** The failure is intermittent by nature:
+a too-narrow source register is read for `PID_NIBBLES` nibbles, and the neighbouring declaration
+is usually zero -- so it is right on ~99% of frames. Four viewpoints cannot see that.
+
+**WHAT IS MISSING -- the pid lives in FOUR places, not one.** The audit (every fj op touching a
+pid register) is:
+
+    DONE   pclm[] / pval8 / cpid / p2_dpid           frame_render.fj, all PID_NIBBLES
+    TODO   seg_bpid                                  the emitter's field (:1474) and decl (:2014)
+    TODO   the PIECE SLOT layout                     `ts_piece_wr` writes fy1, fy2, cls, bpid as
+                                                     FOUR BYTES, piece 1 at `off+4`, group at
+                                                     `off+8`, `ptr_sub off+8`
+    TODO   the read side                             `hex.read_byte_and_inc u1bp/u2bp/l1bp/l2bp`
+                                                     (:1449,1455,1469,1475) + `hex.zero 2`
+                                                     (:1420,1424,1429,1433)
+    TODO   the ditto copies                          `hex.mov 2, p2_du*bp` (:1983,1987,1992,1996)
+                                                     and `hex.cmp 2, u*bp, p2_du*bp` (rep-guarded,
+                                                     :1919,1927,1936,1944)
+    TODO   the slotoff call-site constants           `0` and `8` (:1019, :1045)
+
+The layout becomes **PB = 3 + PID_NIBBLES/2 bytes per piece** (4 today, 5 at width 4), group
+`2*PB`, and `STEP_SLOT_STRIDE` HAS ROOM -- it is 16 with 6 used, though it is documented as a
+power of 16 so widening may want 32. **Writer and reader offsets must match exactly; a mismatch
+corrupts pieces silently, which is exactly the 3-in-260 symptom above.**
+
+⚠ Re-run `ca2_sweep` on a matched narrow/wide pair after ANY attempt. `deg_gate` is necessary and
+NOT sufficient here, which is now measured rather than asserted.
+
+---
+
+#### ⚠ SOLVED 2026-08-31 -- IT IS `fj_consts.fj`, AND IT COSTS ZERO SIGNATURES
+
+**The section below recommended threading the width as a MACRO ARGUMENT. That is superseded --
+do not do it.** It would have touched 13 macro signatures across two files (the transitive chain
+is `lines_*` x8 + `seg_pass2_leaf_body_lines` in frame_render.fj, plus `emit_col_lines`,
+`emit_region`, `steps_splice_c`, `steps_splice_f` in stream_render.fj) and every one of their call
+sites. **None of that is necessary.**
+
+The rejected routes below both put the constant in a LATER file. `fj_consts.fj` is assembled
+**FIRST** everywhere -- `paths = [consts] + includes + prog` in `build.py`, and consts-first in
+`deg_gate` and every `tests/fj` helper -- so a constant there is a BACKWARD reference. TESTED:
+a `rep(PIDN, i)` in a later file assembles fine against `PIDN = 3` in an earlier one.
+
+So `PID_NIBBLES` is a `Config` field (default **2**), it rides into `fj_consts.fj` through
+`Config.constants()` for free, and the fj macros read it directly. **`stream_render.fj` is not
+touched at all.** What changes is nine macro BODIES in `frame_render.fj` and the emitter's pid
+declarations -- and because macro bodies do not live in the emitted parts, the EMITTED TEXT IS
+UNCHANGED at width 2.
+
+**THE PAIR OF GATES IS THE PROOF, and neither half can pass by accident.** The narrow run must
+be INERT (op counts identical to the digit -- nothing hides there); the wide run must be EFFECTIVE
+(same picture, but MORE ops). A wide run that came back op-identical would mean `PID_NIBBLES` never
+reached the fj and both gates were grading the same program.
+
+    viewpoint        narrow(2)      wide(4)       delta
+    (664,291)       43,192,505   43,220,275     +27,770   +0.064%
+    (1272,-724)     34,296,270   35,038,597    +742,327   +2.164%   <- the stairs frame
+    (1869,479)      39,327,546   39,436,901    +109,355   +0.278%
+    (-416,256)      32,861,669   33,262,386    +400,717   +1.219%
+    total          149,678,000  150,958,159  +1,280,159   +0.855%
+    both runs BYTE-EXACT x4, PASS. `scratchpad/m4_pid4_gate.py` is the wide half.
+
+**The wide pid is not a flat tax: 0.06% to 2.16%.** It concentrates where V5 stacked pieces
+re-derive plane ids per column, which is why the stairs viewpoint is an order of magnitude dearer
+than the sprite-overlap one. Four viewpoints are WORST CASES, not the cost model -- the governing
+number is `ca2_sweep`'s 260-frame median on the narrow/wide pair.
+
+Emitted parts at width 4 differ from width 2 in exactly one place: `tables` +160 lines, which is
+`VIEW_W` extra `pclm` slots (two bytes per column). Everything else identical -- so the width
+demonstrably reaches the emitter and changes nothing it should not.
+
+MEASURED at `PID_NIBBLES=2`, which is the whole safety argument:
+
+    deg_gate   43,192,505 / 34,296,270 / 39,327,546 / 32,861,669 ops   BYTE-EXACT x4, PASS
+               -- IDENTICAL TO THE DIGIT against the shipped numbers
+    parts      entry 32, tables 333,476, main 64, segconsts 44,419, walk 73,941, state 424,
+               banks 3,247,543 -- identical to the previous run
+    tests/host 485 passed
+
+⚠ The widening is `rep`-GUARDED and must stay so. `hex.read_byte 1, dst, ptr` is NOT
+`hex.read_byte dst, ptr` -- the n-form is `rep(n,i) read_byte_and_inc` plus a `ptr_sub`, so
+switching outright would cost the shipped build a `ptr_inc`/`ptr_sub` pair per column AND destroy
+the op-identical proof above:
+
+    rep(2-PID_NIBBLES/2, k) hex.read_byte pval8, pptr             // width 2: the original
+    rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, pval8, pptr   // width 4: the n-form
+
+⚠ AND THE FAN-OUT BIT ANYWAY, in a way rule 5 predicts. Making `HOISTED_SCRATCH_DECLS` a function
+(`p2_dpid` needs the width, and a module-level list has no `cfg` in scope -- an f-string there is a
+NameError at IMPORT) broke two importers of the UPPERCASE constant. Grepping the lowercase helper
+names was not enough; `tests/host/test_restore_set_shipped.py` and `scratchpad/m1_add_globals.py`
+import `HOISTED_SCRATCH_DECLS` directly. The host suite caught it.
+
+---
+
 #### HOW the width reaches the fj -- two routes TESTED and REJECTED, 2026-08-31
 
 Do not spend the time again. The obvious idea is a single global constant so no signature changes:

@@ -59,6 +59,21 @@ class Config:
     BPP: int = 8        # bits/pixel -> 256 colors
     TRIG_N: int = 4096  # trig LUT entries, 16**3 (§1.2/§2.1)
     NATIVE_W: int = 320  # DOOM's native authoring width (the F8 UI + D5 texture downscale reference)
+    # M4 -- HOW WIDE A PLANE-PAIR ID IS, in nibbles. 2 (one byte) is E1M1's shipped width and the
+    # DEFAULT, so every existing build and every gate is byte-identical under it.
+    #
+    # It lives HERE, and reaches the fj through `fj_consts.fj`, because that file is assembled
+    # FIRST everywhere (`paths = [consts] + includes + prog`) and a constant in an earlier file IS
+    # usable as a `rep` count later. TWO other routes were TESTED AND REJECTED (see
+    # docs/handoff-m4-nine-levels.md): a constant emitted into a LATER part is refused at
+    # macro-DEFINITION time, and declaring it `< EXTERN` satisfies the label checker but not the
+    # preprocessor, which needs a VALUE to expand `rep`. Threading it as a macro argument instead
+    # would have touched 13 macro signatures across two files; this touches none.
+    #
+    # ⚠ A pid is stored as PID_NIBBLES/2 BYTES per column in `pclm[]`, so this must stay EVEN.
+    # MEASURED per map (scratchpad/m4_bands.py): E1M1 222, E1M5 147, E1M8 90 fit 2 nibbles;
+    # E1M2 376, E1M3 337, E1M4 276, E1M9 340 need 4. A global seven-level space is ~1,788.
+    PID_NIBBLES: int = 2
 
     @property
     def TEXTURE_DOWNSCALE(self) -> int:
@@ -125,6 +140,7 @@ class Config:
             "VIEW_W": self.VIEW_W, "VIEW_H": self.VIEW_H,
             "CENTERX": self.CENTERX, "CENTERY": self.CENTERY, "PROJECTION": self.PROJECTION,
             "FB_SIZE": self.FB_SIZE, "PALETTE_SIZE": self.PALETTE_SIZE,
+            "PID_NIBBLES": self.PID_NIBBLES,
         }
 
     def span_ledger(self) -> dict:

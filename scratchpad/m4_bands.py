@@ -81,7 +81,7 @@ def digests(lists):
 
 def measure(wad, m, cfg, spr, tier):
     CACHE.mkdir(parents=True, exist_ok=True)
-    f = CACHE / ("%s_%s.json" % (m, tier))
+    f = CACHE / ("%s_%s_p%d.json" % (m, tier, cfg.PID_NIBBLES))
     if f.exists():
         return json.loads(f.read_text()), 0.0
     t0 = time.perf_counter()
@@ -111,13 +111,16 @@ def main():
     ap.add_argument("--maps", default=",".join("E1M%d" % i for i in range(1, 10)))
     ap.add_argument("--tier", default="game")
     ap.add_argument("--report", action="store_true", help="union only what is already cached")
+    ap.add_argument("--pid-nibbles", type=int, default=2,
+                    help="M4: how wide a plane-pair id is. 2 (one byte) is the shipped width and "
+                         "blocks E1M2/M3/M4/M9 at the `lines_pid <= 255` assert; 4 admits them.")
     args = ap.parse_args()
 
     maps = args.maps.split(",")
     recs = []
     if not args.report:
         wad = WadFile.from_path(str(ROOT / args.wad))
-        cfg = Config()
+        cfg = Config(PID_NIBBLES=args.pid_nibbles)
         spr = _resolve_sprite_wad(wad, DEFAULT_SPRITE_WAD)
         print("%-6s %5s %6s %6s %9s %9s %7s %8s" %
               ("map", "nvz", "pids", "keys", "lists", "uniq", "sky", "sec"))
@@ -134,7 +137,15 @@ def main():
             sys.stdout.flush()
     else:
         for m in maps:
-            f = CACHE / ("%s_%s.json" % (m, args.tier))
+            # A band half-list does NOT depend on PID_NIBBLES -- `_band_pair_lists` reads cfg only
+            # for VIEW_H/CENTERY -- so a union may mix widths. Prefer the requested width, then
+            # fall back, so the seven-level union can be built from the width-2 records of the maps
+            # that never needed widening plus the width-4 records of the four that did.
+            f = CACHE / ("%s_%s_p%d.json" % (m, args.tier, args.pid_nibbles))
+            if not f.exists():
+                alts = sorted(CACHE.glob("%s_%s_p*.json" % (m, args.tier)))
+                if alts:
+                    f = alts[0]
             if f.exists():
                 r = json.loads(f.read_text())
                 if "failed" in r:
@@ -177,9 +188,14 @@ def main():
           % (tvz, tk, 2 * tvz * tk, (2 * tvz * tk) / max(1, sum_n)))
 
     print()
-    print("PID BYTE -- the emitter asserts len(lines_pid) <= 255")
-    print("  per-map max %d; a GLOBAL pid space would be %d and OVERFLOWS the byte."
-          % (max(r["npid"] for r in recs), sum(r["npid"] for r in recs)))
+    mx, tot = max(r["npid"] for r in recs), sum(r["npid"] for r in recs)
+    print("PID WIDTH -- the emitter asserts len(lines_pid) < 16**Config.PID_NIBBLES")
+    print("  per-map max %d, a GLOBAL space across these maps %d" % (mx, tot))
+    for nib in (2, 4):
+        cap = 16 ** nib - 1
+        print("    %d nibbles (cap %5d):  per-map %s   global %s"
+              % (nib, cap, "ok" if mx <= cap else "OVERFLOWS",
+                 "ok" if tot <= cap else "OVERFLOWS"))
 
 
 if __name__ == "__main__":

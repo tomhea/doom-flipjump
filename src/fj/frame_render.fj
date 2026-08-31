@@ -1146,16 +1146,22 @@ ns frame {
         hex.zero 8, x
         hex.mov 2, x, xa                        // the claim scan over the stride-1 pclm[]
         hex.set w/4, pbase, pclm
-        hex.ptr_index pptr, pbase, x            // ptr_index reads w/4 nibbles of its index (R11)
+        // M4: `x` is the LOOP COUNTER as well as the index, so a wide pid cannot scale it in place
+        rep(2-PID_NIBBLES/2, k) hex.ptr_index pptr, pbase, x  // reads w/4 nibbles of its index (R11)
+        rep(PID_NIBBLES/2-1, k) .lines_pclm_index2 pptr, pbase, x
       col_loop:
         hex.cmp 2, x, xb, col_body, ret, ret
       col_body:
-        hex.read_byte pval8, pptr
-        hex.if0 2, pval8, claim
-        hex.ptr_add pptr, 1                     // a nearer seg already attributed this column
+        rep(2-PID_NIBBLES/2, k) hex.read_byte pval8, pptr
+        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, pval8, pptr
+        hex.if0 PID_NIBBLES, pval8, claim
+        hex.ptr_add pptr, PID_NIBBLES/2         // a nearer seg already attributed this column
         ;col_next
       claim:
-        hex.write_byte_and_inc pptr, seg_pid    // pclm[x] = this seg's plane-pair id (advances too)
+        // pclm[x] = this seg's plane-pair id, and advance. write_byte_and_inc has no n-form.
+        rep(2-PID_NIBBLES/2, k) hex.write_byte_and_inc pptr, seg_pid
+        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, pptr, seg_pid
+        rep(PID_NIBBLES/2-1, k) hex.ptr_add pptr, PID_NIBBLES/2
         hex.inc 2, n_claimed
         hex.cmp 2, n_claimed, vieww, col_next, claim_done, col_next
       claim_done:
@@ -1189,7 +1195,7 @@ ns frame {
     // shrinks from mul_const 4*half_slots*dw to mul_const 4.
     def lines_pid_ids pidreg, cbufa, cbufd, fbufa, fbufd < vzcbase {
         hex.zero w/4, cbufa
-        hex.mov 2, cbufa, pidreg
+        hex.mov PID_NIBBLES, cbufa, pidreg
         hex.mul_const w/4, cbufa, cbufa, 4
         hex.add w/4, cbufa, vzcbase
         hex.sub_constant w/4, cbufa, 4                     // pids are 1-based (0 = unattributed)
@@ -1202,8 +1208,8 @@ ns frame {
     }
 
     def lines_pid_addrs pidreg, half_slots, cbufa, cbufd, fbufa, fbufd < vzbank {
-        hex.zero w/4, cbufa                                // widen the 2-nibble pid first: mul_const
-        hex.mov 2, cbufa, pidreg                           // reads w/4 nibbles of its source (R11)
+        hex.zero w/4, cbufa                                // widen the pid first: mul_const
+        hex.mov PID_NIBBLES, cbufa, pidreg                 // reads w/4 nibbles of its source (R11)
         hex.mul_const w/4, cbufa, cbufa, 4*half_slots*dw
         hex.add w/4, cbufa, vzbank
         hex.sub_constant w/4, cbufa, 4*half_slots*dw       // pids are 1-based (0 = unattributed)
@@ -1545,21 +1551,23 @@ ns frame {
     def lines_col_plane_ids cbufa, cbufd, fbufa, fbufd \
             @ own, have, recalc, pdone, end \
             < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
-        hex.read_byte pval8, pptr
-        hex.if0 2, pval8, own
+        rep(2-PID_NIBBLES/2, k) hex.read_byte pval8, pptr
+        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, pval8, pptr
+        hex.if0 PID_NIBBLES, pval8, own
         ;have
       own:
-        hex.write_byte pptr, seg_pid
-        hex.mov 2, pval8, seg_pid
+        rep(2-PID_NIBBLES/2, k) hex.write_byte pptr, seg_pid
+        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, pptr, seg_pid
+        hex.mov PID_NIBBLES, pval8, seg_pid
         hex.inc 2, n_claimed
         hex.cmp 2, n_claimed, vieww, have, pdone, have
       pdone:
         hex.set 1, tsstop, 1
       have:
-        hex.ptr_add pptr, 1
-        hex.cmp 2, pval8, cpid, recalc, end, recalc
+        hex.ptr_add pptr, PID_NIBBLES/2
+        hex.cmp PID_NIBBLES, pval8, cpid, recalc, end, recalc
       recalc:
-        hex.mov 2, cpid, pval8
+        hex.mov PID_NIBBLES, cpid, pval8
         .lines_pid_ids pval8, cbufa, cbufd, fbufa, fbufd
       end:
     }
@@ -1567,37 +1575,54 @@ ns frame {
     def lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd \
             @ own, have, recalc, pdone, end \
             < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
-        hex.read_byte pval8, pptr
-        hex.if0 2, pval8, own
+        rep(2-PID_NIBBLES/2, k) hex.read_byte pval8, pptr
+        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, pval8, pptr
+        hex.if0 PID_NIBBLES, pval8, own
         ;have
       own:
-        hex.write_byte pptr, seg_pid            // claim this column for this seg's front sector
-        hex.mov 2, pval8, seg_pid
+        rep(2-PID_NIBBLES/2, k) hex.write_byte pptr, seg_pid   // claim this column for this seg
+        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, pptr, seg_pid
+        hex.mov PID_NIBBLES, pval8, seg_pid
         hex.inc 2, n_claimed
         hex.cmp 2, n_claimed, vieww, have, pdone, have
       pdone:
         hex.set 1, tsstop, 1
       have:
-        hex.ptr_add pptr, 1                     // in lockstep with dptr: one column per iteration
+        hex.ptr_add pptr, PID_NIBBLES/2         // in lockstep with dptr: one column per iteration
         // the four addresses are a function of the pid ALONE, so keep the last pid computed and
         // recompute only when it changes: a frame's 160 columns cover a handful of distinct
         // surfaces, and the strength-reduced multiply is ~15 shifts of w/4 (measured +1.1M/frame
         // when paid per column).
-        hex.cmp 2, pval8, cpid, recalc, end, recalc
+        hex.cmp PID_NIBBLES, pval8, cpid, recalc, end, recalc
       recalc:
-        hex.mov 2, cpid, pval8
+        hex.mov PID_NIBBLES, cpid, pval8
         .lines_pid_addrs pval8, half_slots, cbufa, cbufd, fbufa, fbufd
       end:
+    }
+
+    // M4 -- `pclm[]` holds PID_NIBBLES/2 BYTES per column, so a wide pid has to scale the column
+    // index before ptr_index. Its own macro because `x`/`x1` is also the caller's LOOP COUNTER and
+    // cannot be scaled in place. Every use is `rep`-guarded, so at PID_NIBBLES==2 this expands
+    // ZERO times and the byte-wide path is literally the code it always was.
+    def lines_pclm_index2 dst, base, idx @ over, tmp {
+        ;over
+      tmp: hex.vec w/4
+      over:
+        hex.zero w/4, tmp
+        hex.mov w/4, tmp, idx
+        hex.shl_bit w/4, tmp              // idx*2: two bytes per column
+        hex.ptr_index dst, base, tmp
     }
 
     // per-SEG setup / per-column advance of the pclm[] pointer (the lockstep partner of dptr).
     def lines_plane_ptr x1 < pclm, pbase, pptr {
         hex.set w/4, pbase, pclm
-        hex.ptr_index pptr, pbase, x1
+        rep(2-PID_NIBBLES/2, k) hex.ptr_index pptr, pbase, x1
+        rep(PID_NIBBLES/2-1, k) .lines_pclm_index2 pptr, pbase, x1
     }
 
     def lines_plane_step < pptr {
-        hex.ptr_add pptr, 1
+        hex.ptr_add pptr, PID_NIBBLES/2
     }
 
     // M13-15M: the ID twin of lines_seg_plane — seg_cvpidx/seg_fvpidx are baked as LIST-ID
@@ -1636,11 +1661,11 @@ ns frame {
     }
 
     def lines_ditto_plane pval8, dpid, same, diff {
-        hex.cmp 2, pval8, dpid, diff, same, diff
+        hex.cmp PID_NIBBLES, pval8, dpid, diff, same, diff
     }
 
     def lines_save_plane pval8, dpid {
-        hex.mov 2, dpid, pval8
+        hex.mov PID_NIBBLES, dpid, pval8
     }
 
     // M13-splitxb part 1 -- the CULL HALF: wedge pre-cull, map-unit projection/frustum cull,

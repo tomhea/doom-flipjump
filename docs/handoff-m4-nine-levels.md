@@ -272,9 +272,22 @@ pid register) is:
     TODO   the slotoff call-site constants           `0` and `8` (:1019, :1045)
 
 The layout becomes **PB = 3 + PID_NIBBLES/2 bytes per piece** (4 today, 5 at width 4), group
-`2*PB`, and `STEP_SLOT_STRIDE` HAS ROOM -- it is 16 with 6 used, though it is documented as a
-power of 16 so widening may want 32. **Writer and reader offsets must match exactly; a mismatch
-corrupts pieces silently, which is exactly the 3-in-260 symptom above.**
+`2*PB`, slotoff `0` and `2*PB`.
+
+⚠ **CORRECTION -- `STEP_SLOT_STRIDE` DOES NOT HAVE ROOM.** An earlier draft of this section said
+"16 with 6 used", quoting the constant's own comment. That comment is from V3, when a slot held
+`[uy1][uy2][ucls][ly1][ly2][lcls]`. V5 added a second piece per group AND the bpid byte, so it is
+now 2 groups x 2 pieces x 4 bytes = **16 of 16, completely full**.
+
+The stride must stay a POWER OF 16, because the per-column offset is `hex.shl_hex w/4, 1,
+slot_idx` (one nibble = x16) and the alternative is a `mul_const` the comment prices at ~72@. So
+width 4 wants **stride 256 with `shl_hex 2`** -- the SAME op count, just a different constant --
+and `sfslot` grows from `VIEW_W*16` to `VIEW_W*256` = +38,400 words, which is 0.05% of the span.
+(Stride 32 would need `shl_hex 1` + `shl_bit`, an extra op per column, to save words that do not
+matter. Prefer 256.)
+
+**Writer and reader offsets must match exactly; a mismatch corrupts pieces silently, which is
+exactly the 3-in-260 symptom above.**
 
 ⚠ Re-run `ca2_sweep` on a matched narrow/wide pair after ANY attempt. `deg_gate` is necessary and
 NOT sufficient here, which is now measured rather than asserted.

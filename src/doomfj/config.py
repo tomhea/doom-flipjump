@@ -76,6 +76,20 @@ class Config:
     PID_NIBBLES: int = 2
 
     @property
+    def SLOT_SHIFT(self) -> int:
+        """Whole-nibble shifts for the per-column `sfslot` offset: log16(STEP_SLOT_STRIDE).
+
+        V5 fills the slot COMPLETELY at the default width -- 2 groups x 2 pieces x 4 bytes
+        (fy1, fy2, cls, bpid) = 16 of 16. (The constant's own comment still says "6 used", which
+        is V3-era, before the second piece and the bpid byte.) A wider pid makes a piece 5 bytes,
+        so the stride must grow -- and it must stay a POWER OF 16, because the offset is
+        `hex.shl_hex w/4, SLOT_SHIFT, idx` and the alternative is a mul_const priced at ~72@.
+        16 -> 256 is therefore the right jump: the SAME op count with a different constant, at
+        +VIEW_W*240 words of `sfslot` (0.05% of the span). Stride 32 would need an extra shift op
+        per column to save words that do not matter."""
+        return 1 if self.PID_NIBBLES == 2 else 2
+
+    @property
     def TEXTURE_DOWNSCALE(self) -> int:
         """World-texture D5 span-lever factor = NATIVE_W // W: 2 at W=160 (the R0 decision), 1 at the
         native 320 (no downscale — raise --flat-max-words instead, DESIGN §1.2 320 stretch). The single
@@ -140,7 +154,7 @@ class Config:
             "VIEW_W": self.VIEW_W, "VIEW_H": self.VIEW_H,
             "CENTERX": self.CENTERX, "CENTERY": self.CENTERY, "PROJECTION": self.PROJECTION,
             "FB_SIZE": self.FB_SIZE, "PALETTE_SIZE": self.PALETTE_SIZE,
-            "PID_NIBBLES": self.PID_NIBBLES,
+            "PID_NIBBLES": self.PID_NIBBLES, "SLOT_SHIFT": self.SLOT_SHIFT,
         }
 
     def span_ledger(self) -> dict:

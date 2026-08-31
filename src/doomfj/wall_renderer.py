@@ -1209,7 +1209,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # **A pid change is proved by the SWEEP, not by the gate.**
     #
     # What remains is in docs/handoff-m4-nine-levels.md: the slot layout has to become
-    # PB = 3 + PID_NIBBLES/2 bytes per piece (STEP_SLOT_STRIDE has room, 6 of 16 used), on BOTH the
+    # PB = 3 + PID_NIBBLES/2 bytes per piece, on BOTH the
     # `ts_piece_wr` write side and the `ts_piece_load` read side, plus the two `slotoff` call-site
     # constants (0 and 8), the four `hex.zero`/`hex.read_byte_and_inc`/`hex.mov`/`hex.cmp` groups,
     # and `seg_bpid`'s own field and declaration.
@@ -2712,8 +2712,14 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
     ]
 
-STEP_SLOT_STRIDE = 16      # V3: bytes per column in `sfslot` -- 6 used, rounded to a POWER OF 16 so
-                           # the per-column byte offset is `x << 1 nibble`, not a mul_const (~72@).
+STEP_SLOT_STRIDE = 16      # bytes per column in `sfslot`, at the DEFAULT pid width. Rounded to a
+                           # POWER OF 16 so the per-column byte offset is a whole-nibble shift
+                           # (`hex.shl_hex w/4, SLOT_SHIFT, idx`) rather than a mul_const (~72@).
+                           # ⚠ THE "6 used" THIS COMMENT USED TO CLAIM IS V3-ERA AND WRONG NOW.
+                           # V5 stores TWO pieces per group and added the bpid byte, so a slot is
+                           # 2 groups x 2 pieces x 4 bytes (fy1, fy2, cls, bpid) = 16 of 16 --
+                           # COMPLETELY FULL. A wider pid makes a piece 5 bytes and the stride has
+                           # to go to 256; `Config.SLOT_SHIFT` is the derivation, and it is 1 here.
 STEP_COL_STRIDE = 256      # ... and bytes per light class in `stepcol`, same whole-nibble reason.
 
 

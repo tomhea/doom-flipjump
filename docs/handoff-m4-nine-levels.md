@@ -238,6 +238,56 @@ This is the one to do first and it is fully enumerated, so it can be done withou
     :1639  hex.cmp 2, pval8, dpid   (lines_ditto_plane)    -> pidn
     :1643  hex.mov 2, dpid, pval8   (lines_save_plane)     -> pidn
 
+#### ⚠⚠⚠ THE V5 HALF WAS ATTEMPTED 2026-09-01 AND FAILED. READ THIS FIRST.
+
+The slot-layout change below was implemented in full and REVERTED. It is not a matter of missing
+sites -- every one named in this section was done -- so do not simply redo it and expect a
+different answer.
+
+**What was built:** `Config.PIECE_BYTES` (3 + PID_NIBBLES/2) and `Config.SLOT_SHIFT`
+(log16 of the stride), both riding into `fj_consts.fj`; `ts_piece_wr` writing PIECE_BYTES per
+piece with a 2-byte bpid; the face-load block reading the same layout back; the `up_one`/`up_none`
+skips in pieces; the lower-group `slotoff` as `2*PIECE_BYTES`; `seg_bpid`, `u1bp`/`u2bp`/`l1bp`/
+`l2bp` and the four `p2_d*bp` copies all at PID_NIBBLES; the four `hex.shl_hex w/4, 1` sites at
+SLOT_SHIFT; the stride 16 -> 256 and `sfslot` sized to match.
+
+**Narrow stayed perfect throughout** -- `deg_gate` at width 2 gave 43,192,505 / 34,296,270 /
+39,327,546 / 32,861,669, identical to the digit, on a clean build. So the parameterisation is
+inert, which is not the problem.
+
+**Wide got WORSE, not better:**
+
+    before the V5 work   all 4 deg_gate viewpoints BYTE-EXACT; 3 of 260 sweep frames wrong
+    after  the V5 work   all 4 WRONG: 2074 / 97 / 2301 / 41 px
+
+⚠ **AND THE SAME FOUR NUMBERS CAME BACK AFTER FIXING A REAL BUG**, which is the most useful clue
+in this section. `lines_pclm_index2` was doing `hex.mov w/4, tmp, idx` -- reading eight nibbles of
+a two-nibble column index, the same over-read class as the u1bp one. Fixing it moved the op counts
+slightly and left the pixel diffs IDENTICAL (2074/97/2301/41). So that over-read was real but is
+NOT the cause, and the cause is something the V5 change introduced that is still unidentified.
+
+**Where to look next, in order of suspicion:**
+
+1. **The stride 16 -> 256.** It is the only structural change that touches columns with no stacked
+   pieces at all, and viewpoint 1 (sprite overlap, 2074 px) is exactly such a frame. Everything
+   that indexes `sfslot` must agree: the setup shift, `ptr_add tsf_sfslot_p, slotstride` per
+   column, and the array's own size. `tsf_slot_idx` was CHECKED and is `hex.vec w/4`, so it is not
+   an index overflow.
+2. Whether anything else keys off 16 for `sfslot` that greps did not surface (a bare literal, or a
+   `rep(.../16)` like `thing_record_body`'s at :716 -- that one takes SPR_SLOT_STRIDE and was
+   cleared, but the shape exists in this file).
+3. The write/read offset symmetry, re-derived by hand rather than by reading the diff.
+
+**A cheaper way to find it than a 35-minute cycle:** bisect the change. Apply the stride/SLOT_SHIFT
+half ALONE at width 2 (it should be inert) and then at width 4 with the pid still narrow -- if
+width 4 breaks with only the stride moved, the fault is there and the piece layout is innocent.
+
+`scratchpad/m4_width_lint.py --regs <the pid registers>` is the over-read check that would have
+caught both known bugs; `scratchpad/m4_pid_pair.py` builds both halves from one tree and sweeps
+them, so the pair can never be mismatched by hand.
+
+---
+
 #### ⚠⚠ STATUS: HALF DONE, AND GUARDED. READ THIS BEFORE TOUCHING THE WIDTH.
 
 `Config.PID_NIBBLES` exists, defaults to 2, and the **pclm half is finished and PROVEN INERT**.

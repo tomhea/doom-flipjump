@@ -112,6 +112,11 @@ would not fit anyway: they are the bulk of the 89.5M words.
 
 ### R0 — the shared/per-map boundary. NO BUILD. DO THIS FIRST.
 
+⚠ **Section 7 rewrote this rung. Run `python scratchpad/m4_survey.py` first (ten seconds), then
+read section 7 before doing anything else — it already answers half of what R0 was going to ask,
+and it moved the milestone's gate to a single number: the map-specific fraction `P`, break-even
+21.7%.**
+
 Emit several DIFFERENT maps and diff the seven parts. That turns "which blocks are map-derived"
 from a reading of the emitter into a list from the emitter's own output.
 
@@ -232,3 +237,172 @@ box; the ladder is what says whether nine is possible here at all.
 - The V-gate oddity: `v5_gate` and `w1r_faces_gate` build a THINGS-LESS program (tier `render`).
   That predates this session and was preserved exactly rather than silently "fixed" — but it means
   those two gates certify less than their names suggest.
+
+---
+
+## 7. GAPS IN THE PLAN ABOVE — found 2026-08-31 by measuring the nine maps, no build
+
+A ten-second survey of `assets/freedoom1.wad` overturned an assumption the whole plan rested on.
+**Do this survey again first thing; it is `scratchpad/m4_survey.py` and it costs nothing.**
+
+| map | lines | sides | sectors | segs | ssecs | tex | flats | doors | things |
+|---|---|---|---|---|---|---|---|---|---|
+| E1M1 | 1175 | 1829 | 182 | 2057 | 682 | 114 | 44 | 13 | 292 |
+| E1M2 | 2290 | 3296 | 380 | 3650 | 1104 | 126 | 64 | 8 | 356 |
+| E1M3 | 2169 | 2822 | 330 | 2981 | 821 | 100 | 36 | **throws** | 382 |
+| E1M4 | 2283 | 3211 | 274 | 3502 | 1202 | 93 | 40 | **throws** | 378 |
+| E1M5 | 1215 | 1831 | 214 | 1933 | 501 | 66 | 31 | **throws** | 364 |
+| E1M6 | 2818 | 3972 | 395 | 4409 | 1398 | 85 | 51 | **throws** | 490 |
+| E1M7 | 4337 | 6253 | 699 | 6947 | 2064 | 106 | 60 | **throws** | 714 |
+| E1M8 | 930 | 1446 | 97 | 1796 | 627 | 50 | 34 | **0** | 123 |
+| E1M9 | 1935 | 2908 | 297 | 3164 | 913 | 124 | 51 | **throws** | 368 |
+| **SUM9** | 19152 | 27568 | 2868 | **30439** | **9312** | union **343** | union **146** | | types **76** |
+
+### GAP 1 — "nine levels" is not 9x. It is **14.8x**.
+
+E1M1 is nearly the SMALLEST map in the episode. Nine maps are **14.8x its segs** and 13.65x its
+subsectors; E1M7 alone is 3.4x E1M1. Everything in the older handoffs that reasons from "9x" — the
+per-level increment, the band-index projection, the build-time estimate — is wrong by ~60%.
+
+**The arithmetic that follows, and it is the gate for the whole milestone.** If `P` is the fraction
+of the 89,494,606-word span that is MAP-SPECIFIC, nine levels cost `span * ((1-P) + 14.8P)`:
+
+| P | projected span | vs the x4 budget (357,978,424) |
+|---|---|---|
+| 5% | 151,245,884 | fits |
+| 10% | 212,997,162 | fits |
+| 15% | 274,748,440 | fits |
+| 20% | 336,499,719 | fits |
+| **21.7%** | **357,495,153** | **break-even** |
+| 25% | 398,250,997 | over by 1.11x |
+| 30% | 460,002,275 | over by 1.29x |
+
+**If more than ~22% of the span is map-specific, nine levels do not fit in x4 and the fallback
+starts.** Known map-specific TEXT today is only 3.3% (`walk` 2.4% + `segconsts` 0.9%). The decisive
+unknown is **how much of `banks` — 89.8% of the emitted text — is bands-as-code (per-map) versus
+the sprite/texture/colormap banks (shared).** That single number decides the milestone, and R0
+exists to get it. Get it before anything else.
+
+### GAP 2 — `door_states` THROWS on five of the nine maps
+
+    E1M3  door sector 302: state 0 must be shut and the last state fully open, got [84, 88]
+    E1M5  door sector 178: ... got [76, 144]
+    E1M9  door sector 255: ... got [52, 56]
+
+E1M4, E1M6 and E1M7 too. **The door SSOT assumes every door sector is STORED SHUT — an
+E1M1-specific fact.** Other maps ship doors already part-open. E1M8 has ZERO doors, which exercises
+the empty-`_dst_tbl` path.
+
+This is hazard 4 (a flag/assumption carrying a per-map fact) arriving before a line of code was
+written, and it is exactly the `sky` shape. **Expect more of them**: sky-less maps, thing types
+E1M1 lacks, maps with no two-sided doors. Each is an assembly error or an assert, not a wrong
+picture — cheap to find, so find them by SURVEY before emitting.
+
+### GAP 3 — the M1 restore set was never considered
+
+The shipped standalone set is **461 entries for ONE level**. With nine levels every level's dirty
+cells live in the same image and the reset must cover all of them, or the loop hangs — CLAUDE.md's
+"a hole HANGS the next frame". `scratchpad/ca_labels.py` + `m5_setfile.py` must re-key at 9-level
+scale, the reset part's own span grows, and the owner's standing rule applies: **not complete until
+the reset loop carries the new labels.** `tests/host/test_restore_set_shipped.py` is where it gets
+pinned. Budget real time for this; it is not a footnote.
+
+### GAP 4 — no multi-level gate exists or is planned
+
+Every gate is single-map. Nine levels need the `m2_std_gate` treatment: **switch to level N, render
+byte-exact against the oracle for THAT map**, for every N, plus a vacuity control proving the
+switch actually changed the picture. Without it, "nine levels" is proven by a build that assembles.
+
+### GAP 5 — the emission baseline cannot cover multi-level
+
+All three `emit_baseline` configs are E1M1 on `tests/fixtures/freedoom_e1m1.wad`. Multi-level needs
+the FULL wad, whose texture union is 3.0x — so a multi-level emission is not comparable to the
+frozen hashes. **Keep single-level emission byte-identical (that is what the baseline is for) and
+add a SEPARATE net for the multi-level program.** Do not re-save the baseline to make it pass.
+
+### GAP 6 — the level-select UI is unplanned
+
+`DEFAULT_MENU` is a constant list of four strings. A configurable level list needs configurable
+menu entries, and M3's `mode` cell is a 1-bit toggle, not an N-way select. R3 must extend it.
+
+### GAP 7 — R0 as originally scoped costs ~2.25 hours
+
+"Emit each of nine maps, ~15 min each." Replace with: the free survey above, then **two or three
+targeted emissions** (E1M1 as the reference, E1M8 as the smallest, E1M7 as the largest) — enough to
+fit the per-map growth curve and split `banks`. Nine full emissions buys almost nothing more.
+
+---
+
+## 8. OPTIMIZATIONS — where the size and the time actually are
+
+### THE BIG ONE: deduplicate, do not concatenate
+
+The old plan says the multi-map bands walk is *"a concatenation, with each map's
+`seg_cvpidx`/`seg_fvpidx` shifted by its base"*. **Concatenation is the naive choice and it is
+probably the most expensive mistake available in this milestone.**
+
+`lines_bank_keys` are KEYS — a band half-list is a run of `[y2_cumulative][colour]` pairs derived
+from heights, light and flat/texture. Across nine maps of the same episode, sharing a texture set
+that overlaps 60%, **a large fraction of band lists will be bit-identical**. Deduplicating the
+union instead of concatenating it pays three times over:
+
+1. **Size** — the bands-as-code bank is the suspected bulk of the per-map growth, i.e. the thing
+   that decides GAP 1's `P`. Dedup attacks the dominant term directly.
+2. **Speed, by not spending the ops budget** — the +10% exists to pay for a wider band index. If
+   dedup keeps the union under **65,536**, the index stays at 4 nibbles and the frame cost of
+   nine levels is **zero**. Widening is a fallback, not a plan.
+3. **Assemble time and RAM** — the assembler is MEMORY-bound (129.4 MB of source became ~13.6 GB
+   live before the 2026-08-20 work). Less emitted text is less peak RSS, which is the constraint
+   most likely to make nine levels impossible on a 16.8 GB box.
+
+**Measure the dedup rate in R0** — emit the band lists for two maps and count identical ones. It is
+a dict lookup, not a build. If the rate is high this milestone gets much easier; if it is near zero,
+GAP 1's arithmetic says start the fallback ladder early.
+
+The same argument applies to **`segconsts`**: one `xor_by` block per seg, 30,439 segs across nine
+maps. Segs with identical baked constants (same texture, same heights, same light) can share a
+block. Measure the duplicate rate the same way.
+
+### Size levers, in order of expected value
+
+| lever | expected | why |
+|---|---|---|
+| **dedup band lists across maps** | large, unmeasured | see above; also keeps the index at 4 nibbles |
+| **dedup seg constant blocks** | medium, unmeasured | 30,439 segs, many geometrically identical |
+| **texture/flat union** | **already sub-linear** | union 343 vs E1M1's 114 = **3.0x**, not 9x. Overlap saves **60%** against the naive sum. Nothing to do; just do not regress it by baking per-map texture tables. |
+| **sprite bank** | **already near-flat** | thing TYPES 49 -> 76 = **1.55x**. The bank scales with types, not maps, and it is the single biggest block. |
+| **raise the cap** | free | 2**29 is authorised. A limit is not an allocation; only the real span costs RAM. |
+
+⚠ **The lever NOT to pull: bands-as-code -> bands-as-data for dormant levels.** It looks appealing
+(only one level is walked at a time, so eight levels' walk code never executes) and it is wrong:
+any level can become the active one, so all nine must be fast. Making levels 2-9 slower is exactly
+the fallback the owner rejected — they chose **drop levels, keep full detail**.
+
+### Time levers
+
+**Frame ops.** Level count does not change what the frame walks — only the CURRENT level's BSP is
+walked, dormant levels sit inert. The only per-frame cost of more levels is **wider dispatch
+tables**: a 5-nibble band index costs one extra dispatch per lookup on the hot path. So the whole
++10% budget is really a budget for table width, and **dedup is how you avoid spending it**.
+Measure ops with `scratchpad/m2_ops.py` against a matched pair (same commit, levels on/off) —
+never against a stale cache binary; that mistake is on the record in PR #79.
+
+**Assemble time and RAM — the real risk to the milestone.** One level is ~55 min two-pass and
+peaks at ~9.5 GB of 16.8 GB. At 14.8x on the map-specific text this is where nine levels most
+plausibly become impossible on this machine. The owner's instruction is the mitigation: **build 2,
+3 and 4 levels and extrapolate time AND peak RSS before attempting nine.** Record RSS at every
+rung. If the curve is superlinear, say so early — the fallback is dropping levels, and finding out
+at rung 4 costs hours instead of a night.
+
+Two smaller assemble-time notes: the 2026-08-20 assembler work (`flipjump-151` `06385ad` +
+`108e391`) cut the live set 3.1x and is what makes this feasible at all; and CLAUDE.md rule 1's
+clause about a finished build holding its memory for MINUTES after printing its last line applies
+at every rung — check the PROCESS is gone, not the log.
+
+### What NOT to optimise
+
+- **Do not touch the shipped single-level picture.** `emit_baseline --check` must stay 21/21 SAME
+  through every rung. Every optimisation above is about the MULTI-map union; none of them may move
+  a byte of the one-map program.
+- **Do not spend the ops budget speculatively.** +10% is a ceiling to be paid only when a
+  measurement says the index must widen.

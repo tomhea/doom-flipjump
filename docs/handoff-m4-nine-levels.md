@@ -94,6 +94,123 @@ emission is NOT comparable to the baseline hashes. Keep single-level emission by
 
 ---
 
+## 2a. PHASE A IS DONE (2026-08-31) -- and it changed the plan below
+
+**Read `docs/handoff-m4-phase-a.md` before section 3.** Section 2b (the Phase A brief) is kept
+underneath for provenance; this is what it produced.
+
+### The plan's first rung is no longer R0, because R0 cannot run
+
+`scratchpad/m4_caps.py` evaluates every statically-checkable emitter cap against all nine maps.
+**Three of four bind**, and the important part is that they bind on SINGLE maps:
+
+    [OVER] segs < DEG_PNEAR       cap  4095  worst 6947  BINDS: E1M6(4409), E1M7(6947)
+    [OVER] runtime things < 0xFF  cap   255  worst  344  BINDS: E1M6(344), E1M7(330)
+    [ok  ] door states <= 16      cap    16  worst   10
+
+...plus `lines_pid <= 255`, which is NOT statically checkable and so is MEASURED by running the
+emitter (`scratchpad/m4_bands.py`): E1M1 222, E1M5 147, E1M8 90 pass; **E1M2 376, E1M3 337,
+E1M4 276 and E1M9 340 fail**; E1M6 and E1M7 never reach it because the thing cap stops them first.
+
+**Three maps emit today: E1M1, E1M5, E1M8.** (So the abandoned E1M1+E1M5+E1M8 triple would in fact
+have built -- an earlier draft of this section said it would not, from a bad estimate. It is still
+a triple with no recorded rationale, but it was not unbuildable.)
+
+**And the order the caps bind in IS the fallback ladder.** Widening the pid ALONE takes the
+buildable set from three maps to **seven** (E1M1-E1M5, E1M8, E1M9). Only E1M6 and E1M7 also need
+the thing index and the seg counter. The owner's chosen fallback -- drop levels, keep full detail
+-- therefore has a first rung that costs exactly one widening.
+
+⚠ **The first version of the caps table was wrong in both directions**, and it is recorded in
+`docs/handoff-m4-phase-a.md` because it is this repo's own recurring failure: the thing row counted
+DRAWABLES (463 for E1M6) instead of the M14.5 runtime subset the assert counts (344), and claimed
+seven of nine maps overflow when two do; and the pid row was labelled a LOWER BOUND when it is not
+a bound in either direction. The tool now reproduces the emitter's own 344 exactly, which is the
+cross-check that says it is right this time.
+
+### The design that follows, and it is ONE idea repeated
+
+**Every cap becomes a COMPILE-TIME WIDTH derived from the level set.** Not a parameter -- derived,
+the same way `flat_max_words` and the restore set already derive. A one-level E1M1 build keeps
+today's widths and stays byte-exact; a nine-level build pays for the widths it needs, and the
++10% ops budget is exactly the budget for that.
+
+| cap | today | nine levels | where it costs |
+|---|---|---|---|
+| `seg_pid` / `pclm[x]` / `pval8` / `skypid` | 2 nibbles, 1 byte per column | 4 nibbles, 2 bytes per column | `hex.read_byte 2` / `write_byte 2` per column per marking seg -- the hot one |
+| `n_tsv` vs `DEG_PNEAR` | 3 nibbles, cap 4095 | 4 nibbles | one counter per attributed seg |
+| the thing linked lists | 1 byte, 0xFF sentinel | 2 bytes | `sim.fj` `bind_things` / `thing_pass` |
+
+#### The pid width, site by site -- READ OFF THE SOURCE, not guessed
+
+This is the one to do first and it is fully enumerated, so it can be done without re-deriving it.
+`pidn` = pid nibbles (2 today, 4 when the level set needs it), `pidb = pidn/2` bytes.
+
+**Emitter (`wall_renderer.py`)**
+
+| where | today | becomes |
+|---|---|---|
+| the `lines_pid` assert (~:1195) | `assert len(lines_pid) <= 255` | derive `pidn`; assert against 65,535 |
+| `skypid` (~:1200) | `index_nibbles=2` | `index_nibbles=pidn` |
+| `seg_pid` decl (~:2670) | `hex.vec 2` | `hex.vec {pidn}` |
+| `pval8` / `cpid` decls (~:1984, :1995) | `hex.vec 2` | `hex.vec {pidn}` |
+| `p2_dpid` decl (~:2092) | `hex.vec 2` | `hex.vec {pidn}` |
+| `pclm` in `_hot_arrays` (~:1737) | `VIEW_W` dw-slots | `VIEW_W * pidb` |
+| the per-seg baked value (~:1433, :1561) | `("seg_pid", 2, ...)` | width `pidn` |
+
+**fj (`frame_render.fj`)** -- every site, and the pointer arithmetic is the part to be careful with:
+
+    :1153  hex.read_byte pval8, pptr              -> hex.read_byte pidb, pval8, pptr
+    :1154  hex.if0 2, pval8, claim                -> hex.if0 pidn, ...
+    :1158  hex.write_byte_and_inc pptr, seg_pid   -> hex.write_byte pidb + hex.ptr_add pptr, pidb
+    :1192  hex.mov 2, cbufa, pidreg   (lines_pid_ids)      -> pidn
+    :1206  hex.mov 2, cbufa, pidreg   (lines_pid_addrs)    -> pidn
+    :1548/1570  hex.read_byte pval8, pptr         -> pidb
+    :1549/1571  hex.if0 2, pval8, own             -> pidn
+    :1552/1574  hex.write_byte pptr, seg_pid      -> hex.write_byte pidb, pptr, seg_pid
+    :1553/1575  hex.mov 2, pval8, seg_pid         -> pidn
+    :1560/1586  hex.cmp 2, pval8, cpid            -> pidn
+    :1562/1588  hex.mov 2, cpid, pval8            -> pidn
+    :1594  lines_plane_ptr -- pbase/pptr setup, scale the x1 offset by pidb
+    :1639  hex.cmp 2, pval8, dpid   (lines_ditto_plane)    -> pidn
+    :1643  hex.mov 2, dpid, pval8   (lines_save_plane)     -> pidn
+
+**The property that makes this safe to land, stated honestly:** at `pidn=2` the ASSEMBLED PROGRAM
+must be identical -- same ops, same span, same pixels -- because every changed number expands to
+the value it already had. The emitted TEXT is not identical: a compile-time argument added to a
+macro shows up in that macro's call site inside the emitted parts, so `emit_baseline --check` will
+report the `main` part CHANGED and it is right to. **Do not read that as the proof; the proof is
+`deg_gate` byte-exact with OP COUNTS IDENTICAL TO THE DIGIT**, which is the one thing an
+expands-to-the-same-value change cannot fake. Re-freeze the baseline afterwards with that run as
+its evidence. A width that is DERIVED rather than passed also means no seventh parameter -- the
+owner's six stand.
+
+⚠ Adding a compile-time argument to these macros is a FAN-OUT edit (CLAUDE.md rule 5) and the fj
+ABI is frozen against RENAMES, not against a deliberate new parameter. **The fan-out was checked:**
+grepping `src/`, `scratchpad/` and `tests/` for the six macro names finds NO test that instantiates
+any of them and no live scratchpad caller -- only two stale patch scripts (`_patch12c.py`,
+`rung3a_bisect.py`) that already do not apply. Every live call site is inside `frame_render.fj`
+itself and in the emitted parts. That is a smaller blast radius than the rule usually implies, and
+it is also why nothing cheap would have caught a mistake here -- see PJ-3.
+
+`hex.read_byte n, dst, ptr` and `hex.write_byte n, ptr, src` already exist in the stdlib, so the
+widening is a width argument, not new machinery. **The fj ABI is frozen against RENAMES, not
+against a deliberate new parameter** -- but it is a fan-out edit (CLAUDE.md rule 5): `src/`,
+`scratchpad/` and `tests/`.
+
+### And Phase A found the milestone's biggest size lever
+
+`vpb_*` is ~78% of the whole emitted program, and inside it the inlined `_raw_byte_out` clamp arms
+are 58.3 MB. They are byte-identical to each other. Sharing them per COLOUR is **MEASURED at
+11,401,761 words = 12.74% of the 89,494,606-word span** (`scratchpad/m4_rawbyte_cost.py` assembles
+both shapes and reports 283.1 vs 2.0 words per arm). It is pixel-neutral by construction and it
+shrinks the ONE-map program too, so it is headroom for every rung below.
+
+⚠ It moves the `banks` part on purpose, so `emit_baseline` must be RE-FROZEN with `deg_gate` as
+the evidence. Until that is done the M4 emission net is not armed.
+
+---
+
 ## 2b. PHASE A — the two loose ends, FIRST. No build, and it feeds M4 directly.
 
 The owner asked for these before M4 starts. Both are no-build reading tasks, and both were
@@ -407,6 +524,42 @@ fit the per-map growth curve and split `banks`. Nine full emissions buys almost 
 ---
 
 ## 8. OPTIMIZATIONS — where the size and the time actually are
+
+### MEASURED 2026-08-31 -- the LAYOUT is the lever, the dedup is not
+
+`scratchpad/m4_bands.py` runs the real emitter per map and records every band half-list. Three
+maps emit today (E1M1, E1M5, E1M8 -- the rest hit the caps in section 2a), and they settle both
+halves of the argument below:
+
+    map    nvz  pids  keys    lists   uniq
+    E1M1    48   222   444    43392   8957
+    E1M5    31   147   294    18996   3630
+    E1M8    32    90   180    12288   4889
+
+    PER-MAP BLOCK LAYOUT (map m based at its own offset)  74,676 lists   15,286 unique bodies
+    NAIVE GLOBAL GRID (all vz-classes x all keys)        203,796 lists   = 2.7x MORE
+    cross-map dedup of identical bodies                   saves 12.5%
+
+**So the two levers are not the size the older text guessed.**
+
+* **The layout is worth 2.7x and it is the whole game.** `_band_pair_lists` is a CROSS PRODUCT --
+  `n = 2 * len(vz_classes) * len(bank_keys)`, class-major -- and both factors are per-map. Crossing
+  every map's view-z classes with every map's keys is quadratic in map count; basing each map's ids
+  at its own offset is linear. **Nothing else in M4 is worth as much as getting this right.**
+* **The dedup is worth 12.5%, not "a large fraction".** The generator ALREADY dedups identical
+  lists (`first_of`/`owner`), within a map and across the union alike, so the union costs nothing
+  extra to obtain -- but three maps of the same episode share only an eighth of their bodies. The
+  text below hoped for much more. It was a guess; this is the measurement.
+
+* **Three maps already need 5 index nibbles** (pad 131,072 > 65,536). Nine will need 5 or 6. The
+  +10% ops budget is being spent whatever happens, so PJ-5/PJ-7 (section 2a) are the reserve.
+
+* **The sky lists are 768 on EVERY map and they are the same 768.** They come from
+  `_sky_pair_lists`, which reads the SKY1 texture and nothing about the map, so nine levels need
+  ONE copy at a single global base -- not nine. Small (768 of ~700k) but it is free, and getting it
+  wrong means `sky_base_id` has to become per-map for no reason.
+
+### The original argument, kept because its REASONING still holds
 
 ### THE BIG ONE: deduplicate, do not concatenate
 

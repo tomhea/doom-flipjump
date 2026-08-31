@@ -52,6 +52,22 @@ across two review rounds. `scratchpad/to_tier.py --selftest` pins the distinctio
     tests/host       460 passed, 1 deselected      tests/fj  156 passed (~29:30)
     peak assembler RSS ~9.5 GB of 16.8 GB for ONE level
 
+⚠ **THE SPAN AND BUILD FIGURES ABOVE ARE SUPERSEDED as of the Phase A clamp-tail change** (they
+remain the record of what `main` measured at aac9a3c). The same `game`-tier build now reports:
+
+    shipped binary   74,091,162 span-words | 26,669,803 bytes | headroom 1.812 | flat
+                     1,514 s total, 979.7 s assemble
+    emit_baseline    certified 83,947,547 | standalone 91,165,493 chars   (both -39.5%)
+    deg_gate         PASS byte-exact x4 at
+                     43,192,505 / 34,296,270 / 39,327,546 / 32,861,669 ops
+    ca2_sweep        260/260 frames byte-exact, median 24,306,866 ops (+0.10%)
+    tests/host       464 passed, 1 deselected      tests/fj  168 passed (27:01)
+
+Everything downstream that reasons from 89.5M -- the x4 budget arithmetic in section 2, the
+break-even P in section 7 -- is CONSERVATIVE by that much. The x4 budget was set against the OLD
+span, so re-deriving it is an owner decision, not an assumption to make here: 4 x 89,494,606 =
+357,978,424 either way, but it is now 4.83x the new one-level span rather than 4.0x.
+
 ---
 
 ## 2. THE OWNER'S DECISION, 2026-08-31 — this supersedes the three-level plan
@@ -201,13 +217,24 @@ against a deliberate new parameter** -- but it is a fan-out edit (CLAUDE.md rule
 ### And Phase A found the milestone's biggest size lever
 
 `vpb_*` is ~78% of the whole emitted program, and inside it the inlined `_raw_byte_out` clamp arms
-are 58.3 MB. They are byte-identical to each other. Sharing them per COLOUR is **MEASURED at
-11,401,761 words = 12.74% of the 89,494,606-word span** (`scratchpad/m4_rawbyte_cost.py` assembles
-both shapes and reports 283.1 vs 2.0 words per arm). It is pixel-neutral by construction and it
-shrinks the ONE-map program too, so it is headroom for every rung below.
+are 58.3 MB. They are byte-identical to each other. Sharing them per COLOUR is **MEASURED by a full
+`game`-tier build** at:
 
-⚠ It moves the `banks` part on purpose, so `emit_baseline` must be RE-FROZEN with `deg_gate` as
+    span_words   89,494,606 -> 74,091,162   -17.21%
+    .fjm bytes   32,879,690 -> 26,669,803   -18.9%
+    build wall   3,389 s    -> 1,514 s      2.24x FASTER
+    median ops   24,282,566 -> 24,306,866   +0.10%, and 260/260 sweep frames byte-exact
+
+It is pixel-neutral by construction and it shrinks the ONE-map program, so **every rung below
+starts with 17% more span headroom and a build that is twice as fast** -- and the assembler being
+MEMORY-bound is the thing most likely to make nine levels impossible on this box.
+
+⚠ It moves the `banks` part on purpose, so `emit_baseline` must be RE-FROZEN with these gates as
 the evidence. Until that is done the M4 emission net is not armed.
+
+⚠ `scratchpad/m4_rawbyte_cost.py` predicted 12.74% from N copies in a small assembled program; the
+real build gives 17.21% (379.7 words/arm against a predicted 281.1). **That method reads LOW** --
+treat its output as a floor and never as a quotable figure.
 
 ---
 
@@ -588,6 +615,32 @@ GAP 1's arithmetic says start the fallback ladder early.
 The same argument applies to **`segconsts`**: one `xor_by` block per seg, 30,439 segs across nine
 maps. Segs with identical baked constants (same texture, same heights, same light) can share a
 block. Measure the duplicate rate the same way.
+
+### WHERE THE NEXT SIZE LEVER IS -- measured on the post-clamp-tail emission
+
+Re-reading `banks` by label family after the Phase A change (`build/generated_doom_e1m1_menu_m4`):
+
+    BEFORE  vpb 86.1% of banks   sprite  9.5%   other 4.4%
+    AFTER   vpb 78.1% of banks   sprite 16.9%   other 5.0%
+    top families now: lo_b# 27.2%, hi_b# 27.2%, sprbank 16.2%, em 4.1%, ls 4.0%, vpb_t# 4.0%
+
+The `rb_*` families (41% of banks) are GONE. What dominates now is **`lo_b#` + `hi_b#` = 54.4% of
+banks, ~43.5 MB**: the two `_cmp3_tree` compare chains every band pair carries -- one against
+`vq_lo`, one against `vq_hi`.
+
+**They are NOT shareable the way the clamp tail was**, and the reason is worth writing down so
+nobody re-derives it: `_cmp3_tree` is specialised on the CONSTANT `y2`'s bits AND jumps to three
+per-pair targets. The clamp tail was shareable precisely because it had no per-pair content at all
+(it emits a runtime register) and a single per-colour exit.
+
+⚠ **A LEAD, not a plan.** `y2` is a screen row + 1 and VIEW_H is 100, so there are at most 100
+distinct values -- one tree per `y2` could serve every pair IF the three exits were reached
+through a return register instead of
+baked labels -- i.e. an `stl.fcall` per compare. That is TWO fcalls per pair ON THE HOT PATH, where
+the clamp tail was one jump on an arm taken at most once per walk. So it trades ~43 MB against real
+ops, in the opposite direction to the change that just landed. The +10% budget has room (the sweep
+measured +0.10%), but this needs `ca2_sweep` on a matched pair BEFORE anyone believes it -- and it
+is the same shape as the '26 pids' claim: cheap-looking, unmeasured, and about the hot path.
 
 ### Size levers, in order of expected value
 

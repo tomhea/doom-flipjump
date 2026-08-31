@@ -61,6 +61,17 @@ def main():
     u_t, u_f = set().union(*tex_of.values()), set().union(*flat_of.values())
     naive = sum(len(v) for v in tex_of.values())
     print("")
+    # !! A CLEAN `doors` COLUMN IS NOT "THIS MAP BUILDS". Since the 2026-08-31 door filter every map
+    # produces a door table, so nothing throws here -- but MEASURED by running the real emitter
+    # (scratchpad/m4_bands.py), only THREE of the nine emit at all.
+    print("  !! DOORS OK != EMITS. Measured 2026-08-31 by running the emitter per map:")
+    print("       emits today                    E1M1  E1M5  E1M8")
+    print("       fails on the pid byte (<=255)  E1M2 376  E1M3 337  E1M4 276  E1M9 340")
+    print("       fails earlier                  E1M6 (344 runtime things); E1M7 (a thing spawns")
+    print("                                      in a sector the door filter left permanently")
+    print("                                      shut -- see docs/handoff-m4-phase-a.md 2.4)")
+    print("     scratchpad/m4_caps.py has the caps; scratchpad/m4_bands.py has the counts.")
+    print("")
     print("  segs 9-map / E1M1        %.2fx     <- NOT 9x. E1M1 is nearly the smallest map." % mult)
     print("  texture union %d vs E1M1 %d = %.1fx, overlap saves %.0f%% against the naive sum"
           % (len(u_t), len(tex_of[maps[0]]), len(u_t) / len(tex_of[maps[0]]), 100 * (1 - len(u_t) / naive)))

@@ -679,12 +679,27 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
 
     Identical lists SHARE a handler (switch entries just point at the same label) — measured on
     E1M1-lite: 17,280 half-lists, 5,855 unique. Dead/padding entries clean with their OWN index
-    (the clean un-xors the dispatched index out of the dsp op)."""
+    (the clean un-xors the dispatched index out of the dsp op).
+
+    M4 (2026-08-31) — AND SO DOES THE CLAMP TAIL, per colour. The `y2 > vq_hi` arm ends the walk
+    with `raw_byte_out(vq_hi)` + one const `output_char` + a return, and the raw-byte chain is
+    byte-for-byte identical every time; since every `vpb_fin` is the same `stl.fret vpb_x`, the
+    shared block frets directly and the per-pair arm is ONE JUMP. MEASURED by assembling both
+    shapes (`scratchpad/m4_rawbyte_cost.py`): 283.1 span-words inlined vs 2.0 as a jump, 284 words
+    of fixed cost per distinct colour, over the 40,567 clamp arms the shipped E1M1 emission has.
+    MEASURED for real by a full `game`-tier build: span 89,494,606 -> 74,091,162 (-17.21%), .fjm
+    32,879,690 -> 26,669,803 bytes, build 3,389 s -> 1,514 s, median ops +0.10% with 260/260 sweep
+    frames byte-exact. (The micro-benchmark predicted 12.74%; it reads LOW -- the same construct
+    costs 379.7 words/arm inside a 90M-word program against 281.1 in a 17k-word one.)
+    Pixel-neutral by construction: the same bytes, in the same order, from one copy instead of
+    forty thousand.
+    Contract-tested at the kernel level by `tests/fj/test_bands_walk.py`."""
     n = len(lists)
     pad = 1 << max(1, (n - 1).bit_length())
     if 4 * index_nibbles < (pad - 1).bit_length():
         raise ValueError(f"bands walk: {n} lists need a wider index than {index_nibbles} nibbles")
     first_of = {}
+    clamp_cols: set = set()
     owner = []
     for k, pairs in enumerate(lists):
         key = tuple(map(tuple, pairs))
@@ -730,12 +745,28 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
             for ch in (y2, c):
                 out.append(f"    stl.output_char {ch}")
             out.append(f"    ;vpb_fin{k}")
+            # M4: the clamp tail is SHARED PER COLOUR, not inlined per pair. Its three parts are
+            # `_raw_byte_out(vq_hi)` (byte-for-byte identical every time), one const output_char,
+            # and a jump to `vpb_fin{k}` -- and every `vpb_fin` is the same `stl.fret vpb_x`, so a
+            # per-colour block can fret directly and the arm collapses to ONE jump. MEASURED
+            # 2026-08-31 (`scratchpad/m4_rawbyte_cost.py`, assembled both shapes): the inlined arm
+            # is 283.1 span-words, the jump is 2.0, and the shipped E1M1 emission has 40,567 of
+            # them -- 11,401,761 words, 12.7% of the whole 89,494,606-word span, for 284 words per
+            # distinct colour of fixed cost. It is the largest single size lever in the program and
+            # it is pixel-neutral by construction: the same bytes in the same order.
             out.append(f"{t}_cl:")
-            out += _raw_byte_out("vq_hi", f"{t}_rb")
-            out.append(f"    stl.output_char {c}")
-            out.append(f"    ;vpb_fin{k}")
+            out.append(f"    ;vpb_cl_{c}")
+            clamp_cols.add(c)
             out.append(f"{nxt}:")
         out += [f"vpb_fin{k}:",
+                "    stl.fret vpb_x"]
+    # ... the shared tails themselves. Only colours a clamp arm actually reaches get one. They sit
+    # AFTER the last body (which ends in a fret, so nothing falls into them) and each ends in the
+    # fret that `vpb_fin` used to do on their behalf.
+    for c in sorted(clamp_cols):
+        out.append(f"vpb_cl_{c}:")
+        out += _raw_byte_out("vq_hi", f"vpb_clt{c}")
+        out += [f"    stl.output_char {c}",
                 "    stl.fret vpb_x"]
     out += ["vpb_x: ;0",
             "vpb_clean__:",

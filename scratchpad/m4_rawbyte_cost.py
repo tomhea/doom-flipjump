@@ -9,6 +9,13 @@ Characters are not the currency; SPAN-WORDS are. This assembles N copies of the 
 N copies of the fcall replacement and reports words/copy for each, so the saving is a measurement
 and not an inference from file size.
 
+⚠⚠ THIS TOOL READS LOW, AND THAT IS NOW MEASURED. It predicted 281.1 words/arm => 11,401,761 words
+=> 12.74% of the span. The real `game`-tier build came in at 15,403,444 => 17.21%, i.e. 379.7
+words/arm -- 35% MORE. The same construct costs more inside a 90M-word program than in the 17k-word
+one this assembles. **Treat the output as a FLOOR, never as a quotable figure**; a full build is the
+only authority on span. It is still useful for the thing it is good at: comparing two SHAPES against
+each other under identical conditions.
+
     python scratchpad/m4_rawbyte_cost.py [--n 200]
 """
 import argparse
@@ -100,8 +107,10 @@ def main():
     per = perc
     print()
     arms = 40567          # MEASURED: grep -c "_rb_z0:" build/generated_menu/e1m1_06_banks.fj
-    print("shipped E1M1 has %d clamp arms -> %s words saved (%.2f%% of the 89,494,606 span)"
+    print("shipped E1M1 has %d clamp arms -> %s words (%.2f%% of the 89,494,606 span)"
           % (arms, format(int(per * arms), ","), 100 * per * arms / 89_494_606))
+    print("!! THAT IS A FLOOR. The real build measured 15,403,444 words = 17.21% (379.7 words/arm)."
+          " This harness under-reads by ~35%; see the module docstring.")
 
 
 if __name__ == "__main__":

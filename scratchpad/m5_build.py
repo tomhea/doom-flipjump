@@ -35,7 +35,6 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--out", default=None)
-    ap.add_argument("--gen", default=None)
     ap.add_argument("--menu", action="store_true",
                     help="M3: boot into the menu; enter/esc toggles to the world")
     ap.add_argument("--no-reset", action="store_true",
@@ -46,9 +45,14 @@ def main():
     args = ap.parse_args()
 
     out = Path(args.out or ("build/doom_e1m1_std%s.fjm" % ("_noloop" if args.no_reset else "")))
-    gen = Path(args.gen or ("build/generated_std%s" % ("_noloop" if args.no_reset else "")))
     print("wad  : %s  map %s" % (args.wad, args.map))
     print("out  : %s" % out)
+    # PHASE 2 made the emitter DERIVE the generated dir from out_fjm ('generated_' + stem), so
+    # there is no --gen any more. It survived the refactor as an argument that was parsed and
+    # then silently ignored -- including in the invocation docs/handoff-flags-defines.md
+    # printed -- which sent this session looking in the wrong directory. Print what will
+    # actually be written instead.
+    print("gen  : %s" % (out.parent / ("generated_" + out.stem)))
     print("reset: %s" % ("OFF -- one frame, no loop" if args.no_reset else "ON -- the program loops"))
     print("doors: %s" % ("RUNTIME -- space opens them" if args.doors else "off"))
     t = time.perf_counter()

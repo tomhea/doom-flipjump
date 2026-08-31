@@ -118,7 +118,7 @@ recording, because it is this repo's own recurring failure -- a checking tool th
 
     E1M1  222        E1M2  376 OVER   E1M3  337 OVER   E1M4  276 OVER
     E1M5  147        E1M8   90        E1M9  340 OVER
-    E1M6, E1M7  UNMEASURED -- both die on the thing cap at :970, before the pid assert at :1195
+    E1M6, E1M7  UNMEASURED -- both die earlier, see 2.4
 
 * **`segs < DEG_PNEAR`** (`_assert_pnear_unbound`). The deg attribution budget must provably never
   bind, and its counter `n_tsv` is **3 nibbles** -- so the cap cannot simply be raised to 6,947. It
@@ -139,9 +139,34 @@ sky half slots -- are measured by `scratchpad/m4_bands.py` instead, and `m4_caps
 own output rather than implying it covered them.
 
 **The order the caps bind in is the fallback ladder, and it is a good one.** Widening the pid ALONE
-builds E1M1, E1M2, E1M3, E1M4, E1M5, E1M8 and E1M9 -- **seven of nine**. Only E1M6 and E1M7 need
-the thing index and the seg counter as well. So "drop levels, keep full detail" has a natural first
-rung that costs exactly one widening.
+builds E1M1, E1M2, E1M3, E1M4, E1M5, E1M8 and E1M9 -- **seven of nine**. E1M6 needs the thing index
+and the seg counter as well; E1M7 needs those plus the uninhabitable-sector question in 2.4. So
+"drop levels, keep full detail" has a natural first rung that costs exactly one widening, and the
+last two levels are each individually expensive.
+
+### 2.4 E1M7 has a THIRD blocker, and the door fix in 2.1 is what exposed it
+
+    E1M7 !! thing_live_subsectors says subsectors [445] are uninhabitable, yet E1M7 spawns
+            drawable things in them: [(2047, 1528, 2112)]
+
+That is the emitter's deliberate loud failure (handoff-m14: "a silent vanish is unacceptable, a
+hard failure is fine"), and it is **directly caused by 2.1**. Traced: subsector 445 is sector 274,
+floor 128 / ceiling 128, behind a special linedef, `min(neighbouring ceiling) - 4 = 124` -- i.e. it
+is EXACTLY the sector E1M7's original `door_states` error named ("door sector 274: ... got
+[124, 128]"). The filter drops it, so it is no longer a door, so it stays stored-shut, so
+`thing_live_subsectors` calls its subsector uninhabitable -- and a thing spawns in it.
+
+**So 2.1 did not make all nine maps emit; it moved E1M7's failure from one assert to another.** Both
+are hard failures and E1M7 was unbuildable either way, but `m4_survey.py` now shows E1M7 with 16
+doors and no throw, which makes it LOOK fixed. It is not. Stated here so nobody reads that table as
+a green light.
+
+The underlying question is a modelling one and it is not Phase A's to settle: DOOM routinely spawns
+items behind closed doors, and `thing_live_subsectors` is right to call `ceil <= floor`
+uninhabitable *unless the door can open*. For a door whose open height is below its own floor,
+nothing can open it, and the item is genuinely unreachable but still in the map. Whatever is
+decided has to be decided in BOTH mirrors. E1M7 is the last map to become buildable anyway (it also
+needs the thing cap and the seg cap), so this sits behind those.
 
 ### 2.3 `src/fj/plane_bands.fj` is entirely dead code
 
@@ -208,6 +233,135 @@ arm collapses to one jump.
 It is pixel-neutral by construction -- the same bytes in the same order -- and it is a **shared**
 saving, so it applies to the one-map program and to all nine. Implemented in
 `generate_bands_walk_fj`.
+
+### The gate, and the op counts it moved
+
+`deg_gate` on the changed tree, against the 2026-08-29 run of the same gate (all six other parts
+identical to the digit, so the only difference between the two programs is this change):
+
+    part sizes   banks 5,373,317 -> 3,247,543 lines   -39.6% on banks, -36.5% on the emission
+    .fjm bytes   15,390,938 -> 11,811,428             -23.3%
+
+    viewpoint            before        after       delta
+    (664,291)        43,199,791   43,192,505      -7,286   BYTE-EXACT
+    (1272,-724)      34,296,380   34,296,270        -110   BYTE-EXACT
+    (1869,479)       39,341,354   39,327,546     -13,808   BYTE-EXACT
+    (-416,256)       32,812,917   32,861,669     +48,752   BYTE-EXACT
+    PASS
+
+**The op counts moved, and CLAUDE.md says that has to be investigated rather than waved through.**
+The prediction was exactly zero: the arm gains one jump (`;vpb_cl_c`) and loses one (`;vpb_fin{k}`,
+because the shared tail frets directly).
+
+**The SIGNS are the discriminator.** A control-flow change costs `k` ops per EXECUTED clamp arm, so
+its delta would carry the same sign at every viewpoint and scale with how many arms that viewpoint
+runs. Three fell and one rose. That rules out a per-arm cost. What remains is address placement:
+dispatch and `wflip` cost in this program scales with the SET BITS of the target address, and
+deleting 2.1M lines moves every later label. There is in-repo precedent with exactly this
+signature -- the M13-hotdata note in `wall_renderer.py` records moving data changing 78.54M ->
+76.39M ops/frame with the frame byte-identical.
+
+Spread is -0.035% to +0.149%, against a +10% budget. Four viewpoints are worst cases, not the cost
+model, so the claim rests on the governing 260-frame sweep instead -- run on the SAME matched pair
+of binaries (`scratchpad/ca2_sweep.py --a <pre> --b <post>`, both sha256'd in its log):
+
+                    median          mean           min           max
+    A base      24,282,566    24,404,895     6,219,980    47,935,811
+    B new       24,306,866    24,408,647     6,219,980    47,937,393
+    delta           24,300         3,751             0         1,582
+    pct              0.10%         0.02%
+
+    PICTURE CONTROL : 260 of 260 frames byte-exact       ok
+    VACUITY CONTROL : 254 distinct pictures across 260   ok
+    ca2_sweep: PASS
+
+**260 of 260 frames byte-exact** -- a strictly stronger picture proof than the gate -- and the
+governing median moves **+0.10%**. Note the MIN delta is exactly 0: the cheapest frames are
+unchanged, which is what address placement predicts and what a per-arm control-flow cost could not
+produce. Its two controls were checked before the numbers were quoted (hazard 2: this tool once
+"proved" byte-exactness by comparing two blank `bad:` frames) -- it counts a mismatch on every one
+of the 260 and requires >65 distinct pictures.
+
+### The emission-identity proof, done against the SHIPPED artifact
+
+Better than `emit_baseline` for this one change, because it compares the new emission part-by-part
+against `build/generated_menu` -- the emission the 89,494,606-word shipped binary was built from --
+instead of against a saved hash:
+
+    00_entry      70dcbdd0fbe050a1   SAME
+    01_tables     d22b703bbfc12d67   SAME
+    03_segconsts  def001b533cf662a   SAME
+    04_walk       19799a7d2c3d18eb   SAME
+    05_state      3d64230c653114fa   SAME
+    06_banks      142,299,711 -> 79,966,363 bytes   -43.8%
+
+`02_main` differs by ONE line and it is not this change: `;m1_reset` vs `stl.loop`, which is the
+pass-2 self-reset patch the shipped emission already carries and a mid-flight build has not applied
+yet. Everything else is SHA-256 identical, which is the proof that the change is confined to the
+one part it should touch.
+
+Whole emission, game tier: **157.9 MB -> 95.6 MB, -39.5%** -- deeper than the visual tier's -36.5%
+because the game tier bakes more band lists.
+
+### The SPAN, which is the currency the owner's x4 budget is written in
+
+The full `game`-tier build (`scratchpad/m5_build.py --menu --doors`), against the shipped
+89,494,606-word artifact:
+
+    span_words   89,494,606 -> 74,091,162     -15,403,444   -17.21%
+    headroom     1.500      -> 1.812          (against 2**27)
+    .fjm bytes   32,879,690 -> 26,669,803     -18.9%
+    build wall   3,389 s    -> 1,514 s        2.24x FASTER
+
+**And the M1 self-reset survived 2.1M lines vanishing**, which was the real risk -- the restore set
+is keyed by label and the build asserts a layout fingerprint over (label, span-to-next-label):
+
+    "labels_moved_in_set": 0,  "values_changed_in_set": 0,
+    "baked_cells_value_checked": 12234,  all 13 persisted labels present
+
+⚠ **AND THE MICRO-BENCHMARK READ LOW -- do not reuse that method for a load-bearing number.**
+`m4_rawbyte_cost.py` assembles N copies of each shape in a small program and predicted 281.1
+words/arm => 11,401,761 words => 12.74%. The real build gives 15,403,444 => **17.21%**, i.e.
+**379.7 words per arm, 35% more than predicted**. The same construct costs more inside a 90M-word
+program than in a 17k-word one, so the isolated figure is a floor, not an estimate. The BUILD is
+the authority and 17.21% is the number to quote.
+
+The 2.24x build speedup is a second-order win that matters for M4 specifically: the assembler is
+MEMORY-bound (CLAUDE.md rule 1), and peak RSS is the constraint most likely to make nine levels
+impossible on a 16.8 GB box.
+
+### The emission baseline, across all THREE shipped programs
+
+`emit_baseline --check` before re-freezing, which is the record of what moved:
+
+    certified     banks  DIFF  124,315,644 -> 69,552,783   -44.0%
+    hosted_doors  banks  DIFF  135,625,002 -> 76,038,071   -43.9%
+    standalone    banks  DIFF  135,627,081 -> 76,040,150   -43.9%
+    entry / main / segconsts / state / tables / walk       SAME, all three configs
+    EMISSION !! MOVED
+
+**18 of 21 parts byte-identical across three DIFFERENT programs; only `banks` moved.** The MOVED
+verdict is the tool doing its job -- it shouts when any part changes and one did, on purpose. What
+makes it evidence rather than noise is WHICH: six parts x three programs unchanged to the hash.
+
+Re-frozen with this section as the justification. (The 76,040,150 chars here against the
+79,966,363 bytes the same part has on disk is CRLF: ~3.93M lines, one extra byte each.)
+
+### The suites
+
+    tests/host   464 passed, 1 deselected   (460 before; +4 door tests)
+    tests/fj     168 passed in 27:01        (156 before; +12 from test_bands_walk.py)
+
+**The whole trade, measured end to end: -17.21% span, -18.9% .fjm bytes, -39.5% emitted text,
+2.24x faster to build, +0.10% median ops, 260/260 frames byte-exact.**
+
+### Why the text falls 39.5% but the span only 17.2%
+
+Worth stating, because the two numbers get conflated and only the span is what the owner's x4
+budget is written in. The deleted lines are LABEL-AND-JUMP DENSE: three of every seven are things
+like `t12345_67_rb_n3:`, which cost many characters and ZERO words. Across the whole program the
+ratio is 1.76 bytes per span-word; across the deleted region it is 4.05 -- 2.3x more
+character-dense than average. The `.fjm` tracks the span (-18.9%), not the text.
 
 **And it had no test.** `generate_bands_walk_fj` emits ~78% of the program's text and the only thing
 that ever checked it was a twenty-minute whole-frame gate. `tests/fj/test_bands_walk.py` is new: it

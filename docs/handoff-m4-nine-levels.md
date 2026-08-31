@@ -191,6 +191,37 @@ This is the one to do first and it is fully enumerated, so it can be done withou
     :1639  hex.cmp 2, pval8, dpid   (lines_ditto_plane)    -> pidn
     :1643  hex.mov 2, dpid, pval8   (lines_save_plane)     -> pidn
 
+#### HOW the width reaches the fj -- two routes TESTED and REJECTED, 2026-08-31
+
+Do not spend the time again. The obvious idea is a single global constant so no signature changes:
+
+1. **A constant defined in a LATER file** (e.g. the emitter writing `PID_NIBBLES = 2` into the
+   `entry` part). REJECTED by the assembler at MACRO-DEFINITION time, not at expansion:
+   `In macro useit: Used a not global/parameter/declared-extern label: PIDN.`
+2. **The same, with the macro declaring `< PIDN`** -- the error message above names
+   "declared-extern" as acceptable, so this looks like the fix. It is not:
+   `Can't evaluate how many times to repeat in 'rep ...'`. An extern satisfies the LABEL checker,
+   but a `rep` count must be known at PREPROCESSING and an extern label is not a value.
+
+That leaves two workable routes, and the second is better:
+
+* `fj_consts.fj` (assembled FIRST, so a backward reference) -- but it is written by
+  `Config.emit_fj_consts`, which does not know the map, so the width would have to be plumbed out
+  of the emitter and every gate that writes its own consts becomes a fan-out site.
+* **A MACRO ARGUMENT from the emitted call site -- which is how every other compile-time knob in
+  this emitter already flows** (`{atan_dbl}, {slope_dbl}, {table_dbl}, {stack_flag}` ... on
+  `seg_pass2_leaf_body_lines`). No new mechanism, and the fan-out is just the two leaf-body macros,
+  their emitted call sites and the ablate stubs. **Take this one.**
+
+⚠ And the widening itself must be `rep`-GUARDED, not switched wholesale: `hex.read_byte 1, dst,
+ptr` is NOT `hex.read_byte dst, ptr` -- the n-form is `rep(n,i) read_byte_and_inc` plus a
+`ptr_sub`, so it costs the shipped build a `ptr_inc`/`ptr_sub` pair per column for nothing AND
+destroys the sharpest test available (op counts identical to the digit at `pidn=2`). Use the
+repo's own idiom:
+
+    rep(2-pidb, k) hex.read_byte pval8, pptr          // pidb==1: the original, byte-identical
+    rep(pidb-1, k) hex.read_byte pidb, pval8, pptr    // pidb==2: the n-form
+
 **The property that makes this safe to land, stated honestly:** at `pidn=2` the ASSEMBLED PROGRAM
 must be identical -- same ops, same span, same pixels -- because every changed number expands to
 the value it already had. The emitted TEXT is not identical: a compile-time argument added to a
@@ -201,13 +232,29 @@ expands-to-the-same-value change cannot fake. Re-freeze the baseline afterwards 
 its evidence. A width that is DERIVED rather than passed also means no seventh parameter -- the
 owner's six stand.
 
-⚠ Adding a compile-time argument to these macros is a FAN-OUT edit (CLAUDE.md rule 5) and the fj
-ABI is frozen against RENAMES, not against a deliberate new parameter. **The fan-out was checked:**
-grepping `src/`, `scratchpad/` and `tests/` for the six macro names finds NO test that instantiates
-any of them and no live scratchpad caller -- only two stale patch scripts (`_patch12c.py`,
-`rung3a_bisect.py`) that already do not apply. Every live call site is inside `frame_render.fj`
-itself and in the emitted parts. That is a smaller blast radius than the rule usually implies, and
-it is also why nothing cheap would have caught a mistake here -- see PJ-3.
+⚠⚠ **THE FAN-OUT IS BIGGER THAN THE LIST ABOVE, AND THE LIST ABOVE IS THIS DOCUMENT'S OWN** --
+found 2026-08-31 by starting the edit and grepping for callers left without the new argument.
+The site list is `frame_render.fj` only. It is not enough:
+
+    src/fj/stream_render.fj:650,673   frame.lines_pid_ids u1bp/u2bp, ...   (steps_splice_c)
+    src/fj/stream_render.fj:721,740   frame.lines_pid_ids l1bp/l2bp, ...   (steps_splice_f)
+
+Those are the V5 stacked-piece splices, and `pidn` has to be threaded through their whole chain:
+`steps_splice_c`/`steps_splice_f` (2 call sites each) <- `emit_region` (**6+ call sites, 32
+arguments each**) <- its own callers. Call it ~10 signatures and ~15 long call sites in a SECOND
+file -- and `u1bp`/`u2bp`/`l1bp`/`l2bp` are emitter-declared `hex.vec 2` registers that must widen
+with it.
+
+**That path has no kernel test** (`PJ-3`), so the only thing that would catch an error is
+`deg_gate`'s third viewpoint at ~25 minutes a cycle. **Budget for that before starting, and do the
+grep for `.lines_pid_ids`/`.lines_col_plane`/`.lines_plane_ptr`/`.lines_plane_step`/
+`.lines_ditto_plane`/`.lines_save_plane` across ALL of `src/fj` FIRST.** An attempt on 2026-08-31
+got through `frame_render.fj` cleanly and was reverted on discovering this, rather than leave a
+half-threaded frozen-ABI edit across two files.
+
+What that attempt DID establish, and it still holds: no test and no live scratchpad caller
+instantiates any of the six `frame_render` macros (only two stale patch scripts that already do
+not apply), so the blast radius is entirely inside `src/fj` and the emitted parts.
 
 `hex.read_byte n, dst, ptr` and `hex.write_byte n, ptr, src` already exist in the stdlib, so the
 widening is a width argument, not new machinery. **The fj ABI is frozen against RENAMES, not

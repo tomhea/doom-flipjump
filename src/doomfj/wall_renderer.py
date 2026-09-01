@@ -140,6 +140,9 @@ def map_has_sky(secs) -> bool:
     return any(sec.ceil_tex.upper() == "F_SKY1" for sec in secs)
 
 
+BSn = chr(10)          # a newline, spelled without an escape
+
+
 def _pfx(mapname: str) -> str:
     """The BSP-as-code label prefix for a map (lowercased, flipjump-legal)."""
     return mapname.lower().replace("-", "_")
@@ -1663,7 +1666,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                        f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).floor_h & 0xFFFFFFFF}",
                        f"    hex.set 8, cp_seedc, "
                        f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).ceil_h & 0xFFFFFFFF}"],
-            done_label="cs_seeded", tag="cs") + "\ncs_seeded:\n    stl.fret cs_ret\n"
+            # M4-R1: MAP-PREFIXED. Every other label this descent emits is already keyed on
+            # `pfx` (+ `tag`); this one was the lone global, so two maps would both define it --
+            # one of exactly the two collisions the R1 label gate found (m4_r1_labels.py). The
+            # body is `stl.fret cs_ret` and `cs_ret` stays SHARED, so this costs one 2-line
+            # block per map and nothing else.
+            done_label=f"{_pfx(mapname)}_cs_seeded", tag="cs")
+        _collide_descend += (BSn + _pfx(mapname) + "_cs_seeded:" + BSn
+                             + "    stl.fret cs_ret" + BSn)
     else:
         _collide_block = _collide_decls = []
         _collide_tables = _collide_descend = ""

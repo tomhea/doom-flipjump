@@ -201,6 +201,72 @@ Design sketch, to be settled with the maintainer:
     -D ptr16          pad 65536 + 65,536-entry table  16-bit slots; INCLUDES the 12-bit case,
                                                       since one table serves every width
 
+### 3a. FIRST, `-D` MUST OVERRIDE — today it is a hard error, and that blocks this design
+
+**Owner's requirement (2026-09-01): a `-D` define must SUPERSEDE an in-source declaration of the
+same constant.** If the code says `PTRSIZE = 8` on line 873 and the build passes `-D PTRSIZE=12`,
+the compiler must behave **as if line 873 were never written** — not error, not warn.
+
+**That is not what it does today.** `fj_parser.py:714-718`:
+
+    @_('ID "=" expr')
+    def statement(self, p):
+        name = self.ns_full_name(p.ID)
+        if name in self.consts:
+            syntax_error(p.lineno, f'Can't redeclare the variable "{name}".')
+
+and `-D`'s own help text documents this as intended: *"redefining an stl constant is an assembly
+error, not a silent override"*. Measured on the real `fj` this session, with a control:
+
+    A  source declares PTRSIZE = 8, no -D                assembles
+    B  source declares PTRSIZE = 8, -D "PTRSIZE = 12"    Syntax Error in file _dtest.fj (line 1):
+                                                           Can't redeclare the variable "PTRSIZE".
+    C  source declares nothing,     -D "PTRSIZE = 12"    assembles   <- so -D works; B is the collision
+
+B is the whole problem: the error is raised **at the user's line**, and the only way to use `-D`
+today is to DELETE the in-source default first. A constant nobody can ship a default for is not an
+opt-in. **So this is a prerequisite of P3, not a footnote.**
+
+**The minimal change.** `_defines.fj` is inserted first among the user files, so a `-D` name is
+already in `self.consts` when the source line is parsed. Record which names came from that file,
+and make a later assignment to one of them a silent no-op instead of an error:
+
+    if name in self.consts:
+        if name in self.cmdline_defined:   # -D wins; the source line is as if unwritten
+            return
+        syntax_error(...)
+
+⚠ **The skip must not swallow the defines file's own line** — that line is what puts the name in
+`cmdline_defined` in the first place, and a naive "name in set -> return" makes every `-D` silently
+do nothing. Gate on the assignment's own `CodePosition` file, or seed the consts before parsing.
+
+⚠ **The source expression stops being evaluated at all.** `PTRSIZE = <something unresolvable>` on
+line 873 would no longer raise. That is the intended semantics ("as if not written"), but it is a
+real behaviour change and belongs in the commit message.
+
+⚠ **And the help text must change**, because it currently promises the opposite. Leaving it turns
+the documentation into a false statement about the tool's contract.
+
+### 3b. TWO HARD CONSTRAINTS ON THE CONSTANT'S NAME — both measured, one of them SILENT
+
+**The constant must be declared at TOP LEVEL. `-D` cannot reach a name inside a namespace, and the
+failure mode is silence.** Both probed this session:
+
+    D  -D "hex.PTRSIZE = 12"          FlipJumpParsingException in _defines.fj -- the assignment rule
+                                      is `ID "=" expr` and a dotted name lexes as DOT_ID, not ID. So
+                                      -D can only ever define a TOP-LEVEL name. (And it points the
+                                      error at a temp file the user never wrote.)
+    E  `ns hex { PTRSIZE = 8 }`       NO error, byte-IDENTICAL output, -D silently ignored: the two
+       plus -D "PTRSIZE = 12"         names are `hex.PTRSIZE` and `PTRSIZE`, so they never collide.
+
+**E is the dangerous one** — override semantics would not fix it, because there is nothing to
+override. `ptr_init` lives at `hex.pointers.ptr_init`, so the natural place to put a width constant
+is exactly the place where `-D` can never reach it and will never say so. **Declare it top level
+(or have `hex` read a top-level name), and gate that with a test that asserts the define actually
+moved the bytes** — E proves "it assembled" is not evidence.
+
+### 3c. The table selection itself
+
 `ptr_init` reads the define and picks `k`, the table size and the two `dbit+k` constants. **It stays
 exactly where it is** — inside `startup_and_init_all`, as section 2.1 records — so the change is to
 one macro's body and nothing relocates. The default path must be **provably unchanged**: that is
@@ -320,9 +386,21 @@ before spending anything.
 
 ### P3. The stl primitive, on `origin/1.5.1` (fetch first — local 1.5.1 is stale).
 
-Build the **16-bit** form only; one 2^16 table serves every width, and 12-bit buys nothing extra.
-Follow `953ddd9`'s template in full, take the naming decision first, and gate the default path as
-byte-identical with and without `-D`.
+**P3.0 comes first and is separable: make `-D` override.** Section 3a — today `-D X=…` against a
+source that declares `X` is a hard `Can't redeclare the variable` error at the USER's line, so the
+opt-in cannot ship a default. Small change (`fj_parser.py:714-718` plus a `cmdline_defined` set),
+its own commit, its own tests:
+
+  * source `X = 8` + `-D "X = 12"` assembles to the **same bytes** as source `X = 12` with no `-D`;
+  * **negative control:** the same source with no `-D` must produce **different** bytes — otherwise
+    the first assertion is true of a define that did nothing (this is exactly probe E's failure);
+  * the defines file's own line still takes effect (the naive fix silently disables every `-D`);
+  * update the `-D` help text, which currently promises the opposite.
+
+Then the primitive itself: build the **16-bit** form only; one 2^16 table serves every width, and
+12-bit buys nothing extra. Follow `953ddd9`'s template in full, take the naming decision first,
+declare the width constant **top level** (section 3b: a name inside `ns hex` is silently
+unreachable from `-D`), and gate the default path as byte-identical with and without `-D`.
 
 ### P4. Convert doom's multi-byte runs, one at a time, each gated.
 

@@ -247,25 +247,73 @@ real behaviour change and belongs in the commit message.
 ⚠ **And the help text must change**, because it currently promises the opposite. Leaving it turns
 the documentation into a false statement about the tool's contract.
 
-### 3b. TWO HARD CONSTRAINTS ON THE CONSTANT'S NAME — both measured, one of them SILENT
+### 3b. A NAMESPACED CONSTANT IS ADDRESSED AS `a.b.name`, AND ONLY THAT WAY
 
-**The constant must be declared at TOP LEVEL. `-D` cannot reach a name inside a namespace, and the
-failure mode is silence.** Both probed this session:
+**Owner's requirement (2026-09-01).** `-D hex.PTRSIZE = 16` overrides the constant declared inside
+`ns hex`. A bare `-D PTRSIZE = 16` must **not** reach it — the fully-qualified spelling is the only
+one that works.
 
-    D  -D "hex.PTRSIZE = 12"          FlipJumpParsingException in _defines.fj -- the assignment rule
-                                      is `ID "=" expr` and a dotted name lexes as DOT_ID, not ID. So
-                                      -D can only ever define a TOP-LEVEL name. (And it points the
-                                      error at a temp file the user never wrote.)
-    E  `ns hex { PTRSIZE = 8 }`       NO error, byte-IDENTICAL output, -D silently ignored: the two
-       plus -D "PTRSIZE = 12"         names are `hex.PTRSIZE` and `PTRSIZE`, so they never collide.
+**Today the qualified spelling does not parse at all.** Measured:
 
-**E is the dangerous one** — override semantics would not fix it, because there is nothing to
-override. `ptr_init` lives at `hex.pointers.ptr_init`, so the natural place to put a width constant
-is exactly the place where `-D` can never reach it and will never say so. **Declare it top level
-(or have `hex` read a top-level name), and gate that with a test that asserts the define actually
-moved the bytes** — E proves "it assembled" is not evidence.
+    -D "hex.PTRSIZE = 12"     FlipJumpParsingException in _defines.fj
 
-### 3c. The table selection itself
+because the assignment rule is `ID "=" expr` and a dotted name lexes as `DOT_ID`, a different token.
+(The error also points at a temp file the user never wrote — the same complaint `6cd2b4f` raised
+about a bare `-D NAME`.)
+
+**The fix is small and already has a template in the file.** The `id` nonterminal
+(`fj_parser.py:676-682`) accepts both spellings and routes `DOT_ID` through
+`base_name_to_ns_full_name`, which resolves leading dots and returns an already-qualified name
+unchanged. Add the mirror rule for assignment:
+
+    @_('DOT_ID "=" expr')     ->  name = self.base_name_to_ns_full_name(p.DOT_ID, p.lineno)
+
+⚠ Add it as its **own rule**; do not widen `ID "=" expr` to `id "=" expr`, which risks an LALR
+conflict with the macro-call rules that already consume `id`.
+
+⚠ Note the two helpers differ, and the difference is the correct behaviour here:
+`ns_full_name` prefixes the *current* namespace; `base_name_to_ns_full_name` does not. So a
+qualified name means the same thing wherever it is written, which is what makes it usable from a
+defines file that is always at top level.
+
+### 3c. `-D` MAY ONLY OVERRIDE — NEVER DEFINE
+
+**Owner's requirement (2026-09-01): if the program does not declare the constant itself, `-D` is a
+parse error — "override of non-defined constant".** `-D` stops being a way to inject a name and
+becomes strictly a way to supersede one.
+
+**This is what makes 3b safe.** Probe E was the dangerous case: `ns hex { PTRSIZE = 8 }` plus a
+top-level `-D "PTRSIZE = 12"` produced **no error and byte-identical output** — the define silently
+did nothing, because `hex.PTRSIZE` and `PTRSIZE` never collide. Under this rule that same command
+now fails loudly with *override of non-defined constant: PTRSIZE*, and the correct spelling from 3b
+is the one that works. **The two requirements together turn the one silent failure mode in this
+design into a loud one.**
+
+**⚠ The check CANNOT run when the define is parsed.** The declaration it is looking for may be on
+line 873 of the last file. It is an **end-of-parse** check, after `_parse_files_into_parser`
+returns and before `parse_macro_tree` hands back the macro tree.
+
+**⚠ And "was a later assignment skipped?" is the WRONG predicate** — it misses the case where the
+declaration came *first*. An stl constant is declared before `_defines.fj` (which is inserted first
+among the USER files, i.e. after the stl), so nothing later is ever skipped and a legitimate
+override would be rejected. **The cache-safe predicate:** a define is backed by a real declaration
+iff the name was **already in `self.consts` when the defines line was parsed**, *or* a later
+assignment to it was skipped. Record the first at define time.
+
+⚠ **Why "cache-safe" matters:** `_parse_files_into_parser` can *skip re-parsing the stl* and restore
+a snapshot, and that snapshot carries **`consts` and nothing else** (`fj_parser.py:955-957`,
+`:970-972`). Any new tracking set added to the parser is **not** restored on a cache hit, so a
+predicate that depends on having *observed* the stl's assignments breaks intermittently — passing on
+a cold cache and failing on a warm one. Testing `name in self.consts` depends only on what the
+snapshot does carry. (`_defines.fj` lives in a temp dir, so it breaks the stl prefix and is never
+itself cached — but do not move it before the stl without adding the defines to the cache key.)
+
+**⚠ FAN-OUT: this breaks all four shipped `-D` tests.** `tests/unit/test_cli.py`'s `DEFINE_PROG`
+*uses* `GREET` and never declares it, so every one of them becomes an *override of non-defined
+constant* error. They need a `GREET = 0` line added. Nothing in doom passes `-D` today, so the
+blast radius is exactly those four.
+
+### 3d. The table selection itself
 
 `ptr_init` reads the define and picks `k`, the table size and the two `dbit+k` constants. **It stays
 exactly where it is** — inside `startup_and_init_all`, as section 2.1 records — so the change is to
@@ -386,16 +434,25 @@ before spending anything.
 
 ### P3. The stl primitive, on `origin/1.5.1` (fetch first — local 1.5.1 is stale).
 
-**P3.0 comes first and is separable: make `-D` override.** Section 3a — today `-D X=…` against a
-source that declares `X` is a hard `Can't redeclare the variable` error at the USER's line, so the
-opt-in cannot ship a default. Small change (`fj_parser.py:714-718` plus a `cmdline_defined` set),
-its own commit, its own tests:
+**P3.0 comes first, is separable, and is three requirements in one commit — `-D` becomes an
+OVERRIDE-ONLY mechanism.** Sections 3a/3b/3c. Today `-D X=…` against a source that declares `X` is a
+hard `Can't redeclare the variable` error at the USER's line, so the opt-in cannot ship a default at
+all. Touches `fj_parser.py:714-718`, one new grammar rule, and one end-of-parse check. Tests:
 
-  * source `X = 8` + `-D "X = 12"` assembles to the **same bytes** as source `X = 12` with no `-D`;
-  * **negative control:** the same source with no `-D` must produce **different** bytes — otherwise
-    the first assertion is true of a define that did nothing (this is exactly probe E's failure);
-  * the defines file's own line still takes effect (the naive fix silently disables every `-D`);
-  * update the `-D` help text, which currently promises the opposite.
+  * **override** — source `X = 8` + `-D "X = 12"` assembles to the **same bytes** as source
+    `X = 12` with no `-D`;
+  * **negative control** — the same source with no `-D` must produce **different** bytes, or the
+    first assertion is equally true of a define that did nothing (that is literally probe E);
+  * **qualified name** — `ns hex { PTRSIZE = 8 }` + `-D "hex.PTRSIZE = 12"` moves the bytes;
+  * **bare name is refused** — the same program + `-D "PTRSIZE = 12"` is now an *override of
+    non-defined constant* error, NOT a silent no-op;
+  * **undeclared is refused** — `-D "NEVER_DECLARED = 1"` errors;
+  * **declaration-first still works** — overriding a constant the stl declared *before* the defines
+    file must succeed, and must keep succeeding on a **warm stl-prefix cache** (3c: the snapshot
+    carries `consts` only);
+  * the defines file's own line still takes effect — the naive fix silently disables every `-D`;
+  * **fix the four shipped `-D` tests** (3c): `DEFINE_PROG` never declares `GREET`;
+  * update the `-D` help text, which currently promises the opposite of all of this.
 
 Then the primitive itself: build the **16-bit** form only; one 2^16 table serves every width, and
 12-bit buys nothing extra. Follow `953ddd9`'s template in full, take the naming decision first,

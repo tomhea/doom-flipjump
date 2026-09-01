@@ -156,11 +156,40 @@ quote 3.9 or 4.57 as a span.
    Per-map id bases versus a naive `vz_classes x keys` global grid remains the most valuable
    structural decision in the milestone.
 
-### What R2 still owes
+### The band index at 5 nibbles is DONE and it is FREE -- measured 2026-09-01
 
-The band index must go **4 -> 5 nibbles**. That is one extra dispatch per lookup on the hot path,
-and it lands on top of the pid widening's +6.74%. Against a +10% ceiling that is tight: measure it
-before assuming, and PJ-5/PJ-7 are the held reserve.
+`Config.BAND_NIBBLES` (default 4). The seven-level set needs 5. **The switch table does NOT grow
+with the width** -- `generate_bands_walk_fj` derives its `pad` from the LIST COUNT -- so raising
+it alone costs one extra `hex.xor` per band lookup and nothing else. That is what made it
+measurable on E1M1, which needs only 4:
+
+    deg_gate @ 4   43,192,505 / 34,296,270 / 39,327,546 / 32,861,669   (identical to shipped)
+    deg_gate @ 5   43,086,924 / 34,381,630 / 38,923,162 / 32,872,532   BYTE-EXACT x4
+
+    ca2_sweep, matched pair, 260 frames:
+      median  24,306,866 -> 24,251,849   -0.23%
+      mean    24,408,647 -> 24,351,715   -0.23%
+      PICTURE 260 of 260 byte-exact ok    VACUITY 254 distinct ok    PASS
+
+**It costs nothing.** The median moves -0.23%, i.e. slightly NEGATIVE -- one extra op per lookup is
+swamped by address placement, the same effect the M13-hotdata note records (78.54M -> 76.39M with
+the frame byte-identical). Do not read the minus sign as a saving; read it as zero.
+
+⚠ It also breaks a vacuity assumption I wrote down: "identical ops would mean the width never took
+effect". A DECREASE is equally consistent with it taking effect. For a change this small the ops
+are placement noise and **byte-exactness is the only signal**; the four viewpoints even disagreed
+in sign (-0.24%, +0.25%, -1.03%, +0.03%).
+
+### THE BUDGET, COMPLETE
+
+    pid width   2 -> 4 nibbles     +6.74%   (median, 260 frames)
+    band index  4 -> 5 nibbles     -0.23%   (median, 260 frames)
+    ------------------------------------------------------------
+    total                          ~+6.5%   against the owner's +10% ceiling
+
+**Seven levels fit BOTH budgets**: size by the 4.57x body growth against 4.83x of headroom, and
+ops by ~6.5% against +10%. PJ-5/PJ-7 stay in reserve and are no longer needed to make the
+arithmetic work.
 
 ---
 

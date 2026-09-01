@@ -75,6 +75,16 @@ class Config:
     # E1M2 376, E1M3 337, E1M4 276, E1M9 340 need 4. A global seven-level space is ~1,788.
     PID_NIBBLES: int = 2
 
+    # M4-R2 -- HOW WIDE THE BAND-LIST INDEX IS, in nibbles. 4 (65,536 ids) is E1M1's shipped
+    # width and the DEFAULT. MEASURED 2026-09-01: the seven shippable levels need 384,156 ids,
+    # whose pad is 524,288, so a multi-level image needs 5.
+    #
+    # ⚠ THE TABLE DOES NOT GROW WITH THIS. `generate_bands_walk_fj` derives its `pad` from the
+    # LIST COUNT, so raising the width alone costs only `rep(index_nibbles, i) hex.xor ...` -- one
+    # extra nibble of dispatch per band lookup. That is what makes the cost measurable on E1M1,
+    # which needs only 4: force 5, and the picture must stay byte-exact while ops rise.
+    BAND_NIBBLES: int = 4
+
     @property
     def SLOT_SHIFT(self) -> int:
         """Whole-nibble shifts for the per-column `sfslot` offset: log16(STEP_SLOT_STRIDE).
@@ -164,6 +174,7 @@ class Config:
             "CENTERX": self.CENTERX, "CENTERY": self.CENTERY, "PROJECTION": self.PROJECTION,
             "FB_SIZE": self.FB_SIZE, "PALETTE_SIZE": self.PALETTE_SIZE,
             "PID_NIBBLES": self.PID_NIBBLES, "SLOT_SHIFT": self.SLOT_SHIFT,
+            "BAND_NIBBLES": self.BAND_NIBBLES,
             "PIECE_BYTES": self.PIECE_BYTES,
         }
 

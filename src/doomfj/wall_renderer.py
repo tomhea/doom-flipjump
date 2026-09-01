@@ -1221,7 +1221,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                        True)
         _sky_lists = _sky_pair_lists(rm, asset_wad, cfg) if _has_sky else []
         sky_base_id = len(_main_lists)
-        bands_code = generate_bands_walk_fj(_main_lists + _sky_lists)
+        bands_code = generate_bands_walk_fj(_main_lists + _sky_lists,
+                                            index_nibbles=cfg.BAND_NIBBLES)
         skybands = ""                          # the sky DATA bank dies with the plane bank
 
     # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be

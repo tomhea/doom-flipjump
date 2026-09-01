@@ -494,3 +494,139 @@ and for every open question.
 things:** the 2^12 placement claim was inverted (only two ops precede the table, not ~7,000), and
 `-D` was found to be on `origin/1.5.1` after the stale local branch made it look absent. Both errors
 would have gone straight into the plan.
+
+---
+
+## 10. GAPS IN THIS PLAN — found by auditing it against the stl source
+
+Written after the plan, by reading `basic_pointers.fj`, `read_pointers.fj`, `xor_from_pointer.fj`
+and doom's `fixed_point.fj`. **Two of these are errors in sections 2 and 7, not omissions.** Ordered
+by what would hurt most.
+
+### G1 (CORRECTION). Section 2.2's advance recipe is INCOMPLETE — it would read the wrong address
+
+`set_flip_and_jump_pointers` (`basic_pointers.fj:75-79`) sets **two** things from the pointer:
+
+    address_and_variable_xor        w/4, to_flip,   to_flip_var, to_flip_var
+    address_and_variable_xor        w/4, to_jump+w, to_jump_var, to_jump_var
+    address_and_variable_double_xor w/4, to_flip, to_flip_var, to_jump+w, to_jump_var, ptr
+
+Section 2.2 says the advance is `wflip to_flip, delta`. **`to_jump+w` must advance too**, or the
+code arms slot *k+1* and jumps to slot *k*. Cost is still trivial (two wflips, `popcount(delta)`
+each) — but as written the recipe is a bug, not an optimisation.
+
+### G2 (CORRECTION). The restore is mandatory for a reason the plan does not state: SHADOW COHERENCE
+
+`to_flip_var` / `to_jump_var` are shadow copies that `address_and_variable_xor` uses to **xor out the
+previous value**. Advancing `to_flip`/`to_jump` with a raw `wflip` leaves the shadows stale, so **the
+next genuine `set_flip_and_jump_pointers` xors out a value that is no longer there and produces a
+corrupt address** — at some later, unrelated call site.
+
+P1 already says "restore constant is `nb*dw`, not `(nb-1)*dw`", but frames it as returning the
+pointer. The real invariant is: **`to_flip`/`to_jump` must be back to what the shadows believe before
+any other dereference happens.** State it that way, or the R9 negative control tests the wrong thing.
+
+### G3. The amortised span must contain NO other dereference — an unstated PRECONDITION
+
+`to_flip`, `to_jump`, `to_flip_var`, `to_jump_var` and `read_byte` are **global singletons**
+(`ptr_init` declares them once). Any dereference between the first setup and the last read clobbers
+all of it. `read_table_packed` is straight-line and safe (`fixed_point.fj:186-197`), but **P4's
+`lines_steps_load2` is not obviously so**, and the plan never says this must be checked per site.
+It is a correctness precondition, not a performance note.
+
+### G4 (THE BIG ONE). At P1's own call sites, a LARGER win sits next to the one I planned
+
+`read_table_packed nb` (`fixed_point.fj:186-197`) is not just `nb` dereferences. Its own complexity
+comment prices the address arithmetic at `#(n*dw)(w/4(1.5@+10))`. Decomposed at **w=32, @=25**
+(the model reproduces the stl's published `read_hex`=948 and `read_byte`=998 exactly, which is what
+says the decomposition is right):
+
+    4x read_byte_and_inc      4,948   55%
+    mul_const + add           3,420   38%   <- NO PHASE IN THIS PLAN TOUCHES IT
+    fixed tail                  610
+    TOTAL                     8,978
+
+`mul_const n, dst, src, c` is doom's own macro and loops `#c` times shifting by one bit. For
+`c = nb*dw = 256` that is **nine `shl_bit` passes to multiply by 2^8** — when `256` is two whole hex
+digits, i.e. a lane relabel: `mov` 6 hexes + `zero` 2 = 14@ = **~350 ops**.
+
+    P1 amortise the setup      saves ~3,224   (36% of the call)
+    + 16-bit reads             saves ~3,508   cumulative
+    + shift instead of mul     saves ~3,070   <- LARGEST SINGLE ITEM, and the simplest
+    all three:  8,978 -> ~2,400  (-73%)
+
+**The plan optimises the 55% and ignores a 38% that is cheaper to fix.** These are DERIVED from the
+macros' own complexity comments, not measured — but they are derived from the same comments the plan
+already trusts, and they reorder the work.
+
+The `.add w/4, ptr, table_address` is the same story: adding a compile-time constant base to an
+offset is an XOR when the table is aligned to its own size, and an XOR of a constant is a `wflip`.
+
+### G5. `-D ptr16` TAXES every narrow read, and the plan presents it as free
+
+Step 1 of the dance is `hex.zero 2, hex.pointers.read_byte` — **inside** the read. A 16-bit table
+needs `read_byte: hex.vec 4` and a four-branch entry expression, so that zero becomes `hex.zero 4`
+and **every existing byte read pays +2@ (~50 ops on ~998, +5%)** for a width it does not use.
+
+Avoidable — but only if the width is a **per-call-site parameter**, not a global define. That is a
+real design fork the plan never surfaces: `-D ptr16` sizes the *table*, and the *macro* must still
+choose how many hexes to clear.
+
+### G6. A speculative read of an uninitialised slot does not read garbage — it EXECUTES garbage
+
+P4 proposes reading all 16 slot bytes speculatively and argues the slots are always initialised. But
+section 1's whole point is that **a pointed-to value IS a jump address**. Arming a slot that holds
+junk `G` makes the program jump to `(G+256)*dw` — outside the table, into arbitrary code. The failure
+is not a wrong pixel, it is an unbounded jump.
+
+So "the slots are always initialised" is a **hard safety precondition**, not a value-correctness
+nicety, and it must be proven for the whole speculative range — not sampled.
+
+### G7. Nothing in the plan carries the new state into the M1 restore set
+
+Standing repo rule: a feature is not complete until the M1 self-reset loop carries its labels.
+A wider `read_byte`, any new shadow, and any new scratch are **global singletons in `ptr_init`** and
+therefore exactly the kind of thing the restore set exists for. No phase mentions it. Add it to P3
+and P4's definition of done, and check `build.STANDALONE_PERSIST` / the `m5_` set.
+
+### G8. The write side is not in the plan at all
+
+`xor_to_pointer.fj` is symmetric and section 6 even notes the write side already does two nibbles per
+setup. Doom has 36 pointer-macro call sites; the plan's four phases are all reads. Either the same
+two prizes apply to writes (and the plan is under-scoped by half), or they do not and the plan should
+say why.
+
+### G9. Ordering: P1's target was chosen using the census P2 exists to fix
+
+Section 4's value estimate and P1's choice of `read_table_packed 4` both rest on a census that
+**P2 itself says contradicts itself** (`plane_render`/`plane_bands` called dead and hot). Running P1
+first is defensible — it is a mechanism test and its own op counts are self-validating — but the
+plan should say plainly that *the target selection is not yet evidence-backed*, and re-run the census
+before P4 picks sites.
+
+### G10. Smaller, but each would cost a session
+
+* **No abort threshold.** The plan predicts, but never says what result kills it. Given the repo's
+  history (a pre-pass built before it was priced, +24.7M), P1 needs a number below which P3/P4 do not
+  start.
+* **No compile-time guard on `k`.** Section 2.1 has the `dbit+k < dw` ceiling but no phase asserts it.
+  The stl is general-purpose: at small `w` a 16-bit table is impossible, and it must fail loudly at
+  assembly time rather than silently corrupt.
+* **`bit.pointers.ptr_init` exists too** (`ptrlib.fj:7-9` calls both). A second table, never mentioned.
+* **`@` is `log2(total ops)`, so it is program-size dependent.** Adding 65,536 table ops to a ~42M-op
+  image moves `@` by ~0.002 — negligible, and worth one line to close rather than leave as a doubt.
+* **No named measurement command** for P1's before/after, in a repo whose rules forbid quoting an
+  unmeasured number.
+* **The plan only makes dereferences cheaper, never fewer.** G4 is one instance of the wider miss:
+  no phase asks which pointed-to reads could become fixed-address reads through the specialisation
+  doom already does elsewhere (BSP-as-code). For a repo whose cost model says *stops beat budgets*,
+  that is the missing question.
+
+### What I would change in the plan
+
+1. **Fix G1 and G2 in section 2.2 and P1 before anyone implements from this document.**
+2. **Add the `mul_const`-to-shift change as P0** — largest single item, simplest, no stl change, no
+   table, and it is gated by the same `deg_gate`+sweep run as P1.
+3. **Make G3's "no dereference inside the amortised span" an explicit per-site checklist item.**
+4. Fold G7 (restore set) into the definition of done for P3 and P4.
+5. Decide G5's fork — global table width vs per-call-site clear width — before writing the macro.

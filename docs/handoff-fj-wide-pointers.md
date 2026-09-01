@@ -7,6 +7,68 @@ conclusions. Nothing is implemented.
 
 ---
 
+## 0. STANDING REQUIREMENTS — these bind EVERY phase below
+
+**Owner's rules, 2026-09-01. They are not advice; a change that breaks one is not finished.**
+
+### 0.1 READ AND WRITE MOVE TOGETHER — in both directions
+
+> **Every improvement or change made to READING memory must be made for WRITING memory as well —
+> and vice versa.**
+
+Not "consider it", not "if it applies". The two paths are mirror images (`xor_from_pointer.fj` /
+`xor_to_pointer.fj`, `read_pointers.fj` / `write_pointers.fj`) and they share every global they
+touch — `to_flip`, `to_jump`, the shadow(s), `read_byte`. **A one-sided optimisation is how the two
+halves drift apart**, and drift in shared pointer state is not a slow path, it is a wild jump
+(§11.12 A).
+
+This is already load-bearing for what is planned here:
+
+| lever | read side | write side — MUST be done too |
+|---|---|---|
+| S1 one shadow | `set_flip_and_jump_pointers` | `set_flip_pointer` / `set_jump_pointer` **must be absorbed**, or `stl.return` breaks (§11.12 A) |
+| S4 amortised setup | `read_byte n`, `read_table_packed` | `write_hex n` / `write_byte n` are the same `n`-setups-for-one shape (`write_pointers.fj:49-61`) |
+| S5 wide 16-bit access | `read_word`-style | the write side already does 2 nibbles per setup (§6) — widen it in the same commit |
+| S2/S3 address arithmetic | `ptr_index` -> constant xor | the same `ptr_index` feeds `write_nth_*`; doom has 11 + 26 write sites (§11.12 C) |
+| `-D ptr16` table width | slot decode | **whatever writes a slot must agree on `k`** — a slot written 8-bit and read 16-bit is not a wrong value, it is an unbounded jump (§10 G6) |
+
+⚠ **G8 exists because I broke this rule once already**: sections 7 and 10 planned four read phases
+and no write phase, across a call-site census that is 37 write sites out of ~139. Any phase below
+that names only a read macro is **incomplete as written**.
+
+### 0.2 THE EXISTING TESTS MUST PASS — all of them, both repos
+
+An stl change is a change to a library `doom`, `bf2fj` and `c2fj` all build against
+(`pip show flipjump` — editable install). So:
+
+* **flipjump**: `test_compile_fast`, `test_compile_medium`, `test_run_medium` at minimum
+  (`hex_ptr`, `bit_ptr`, `startup_init_all`, `func1`-`func7`), and `test_compile_slow` for the four
+  `bubble_sort` variants. `hex_ptr.fj` is the one that runs `ptr_flip -> ptr_jump -> ptr_wflip ->`
+  combined setter in sequence — the exact pattern a naive merge destroys.
+* **doom**: `python -m pytest tests/host -q`, `tests/fj`, then the picture gates. Check the
+  **"N deselected"** line so you know what the filter actually bound.
+* ⚠ **A passing doom gate does NOT clear an stl change.** Doom calls neither one-sided setter, so
+  `deg_gate` and `m5_gate` will happily pass a build that has already broken `stl.call`/`stl.return`
+  for every other program. The flipjump suite is not optional here; it is the only thing watching
+  that half.
+
+### 0.3 EVERY NEW MACRO SHIPS TESTS OF THE SAME SHAPE AS THE ONE IT MIRRORS
+
+A new macro is not done when it assembles. For each one added — `triple_exact_xor`,
+`address_and_variable_triple_xor`, a wide read, **and its write-side twin** — ship:
+
+1. a test in the same file and style as the tests for the macro it parallels (§6 has the
+   `953ddd9` template);
+2. **a mutation control (R9)**: a deliberately broken variant the test must REJECT. This is not
+   optional here — the adjacent, easiest-to-make error in these chains (an off-by-one in the
+   destination walk) fails **silently with wrong data**, not with a crash: `read_byte` returned
+   `0x0` where `0xb` was written, and `write_byte` wrote back the value it had just read;
+3. a **read/write round-trip** assertion — write a value through the new write path, read it back
+   through the new read path, and compare. That is the cheapest test that catches the two halves
+   drifting, which is what §0.1 exists to prevent.
+
+---
+
 ## 1. HOW THE POINTER READ ACTUALLY WORKS
 
 Read this section before touching anything. Everything else follows from it.
@@ -408,6 +470,10 @@ table.
 
 ## 7. THE PLAN — four gated phases
 
+⚠ **Every phase below is governed by §0.** In particular §0.1: any phase named after a read macro is
+**incomplete as written** until its write-side twin is in the same commit. P1 and P4 are both written
+that way and both need amending before work starts.
+
 ### P1. Prove the amortised setup on ONE call site. No stl change, no table.
 
 Cheapest test of the load-bearing assumption. Target `hex.read_table_packed 4`
@@ -588,6 +654,17 @@ Standing repo rule: a feature is not complete until the M1 self-reset loop carri
 A wider `read_byte`, any new shadow, and any new scratch are **global singletons in `ptr_init`** and
 therefore exactly the kind of thing the restore set exists for. No phase mentions it. Add it to P3
 and P4's definition of done, and check `build.STANDALONE_PERSIST` / the `m5_` set.
+
+**⚠ CHECKED SINCE, and the answer is the reassuring one — with a caveat.** `m5_restore_set.json.gz`
+is 461 labels / 12,234 words and holds **no stl internals at all**: `to_flip_var`, `to_jump_var`,
+`to_flip`, `to_jump`, `read_byte`, `nth_ptr` all score zero. *(Positive-controlled, because zero for
+everything is the shape of a broken check: `hex`, `pointers` and `stl` also score zero — the set is
+purely doom's own labels.)* So **deleting `to_jump_var` cannot break the restore set.**
+
+The caveat is the interesting half: the pointer shadow is **stateful across frames and restored by
+nothing**. That is safe only because the address field is equally unrestored, so the two stay mutually
+consistent across an M1 reset. **One shadow makes that strictly safer** — there is one less thing left
+to be consistent with. Any phase that adds a *new* pointer global re-opens this and must re-check.
 
 ### G8. The write side is not in the plan at all
 
@@ -836,6 +913,37 @@ already written three times. With one shadow:
     read_byte   998 -> 766   (-23.2%)      doom's own m1_reset.fj:20-24 MEASURED read_byte at
                                            628.0, not 998. The `@` in a docstring is a WORST CASE.
                                            Measured saving is -18% to -20%, not -23%/-24%.
+
+### 11.10a WHY `@+4(k-1)` IS A MECHANISM, NOT A CURVE FIT
+
+Challenged, so here is the derivation rather than the extrapolation. `exact_xor`
+(`logics.fj:28-49`) is a **16-entry jump table**:
+
+    wflip src+w, switch, src      // retarget the SOURCE HEX's jump field to `switch`, then jump INTO it
+    pad 16
+  switch:
+      ;end            //  0
+    d0;end            //  1
+    d1;switch+1*dw    //  3      <- flips d1, then falls to entry 1, which flips d0
+    ...
+  end:
+    wflip src+w, switch           // put the source hex back
+
+The source hex is `;V*dw`; xoring its jump field by a 16-op-aligned `switch` lands execution on entry
+**V**, and each entry flips one destination bit and jumps to *V minus its top set bit* — so the walk
+is `popcount(V)` long. **`pad 16` is what makes this safe**: `switch` is a multiple of `16*dw`, so its
+low bits are zero and the restoring `wflip` cannot disturb the value bits at `dbit`. The documented
+`@` is the two `wflip`s of a **code address**, whose cost is that address's on-bit count.
+
+`double_exact_xor` (`:101-139`) then **ping-pongs between two such tables**: `first_flip[V]` flips a
+`d` bit and jumps to `second_flip[V]`, which flips a `t` bit and jumps to `first_flip[V minus top
+bit]`. **So the walk visits k destination bits per set bit of the source** — worst case 4 set bits in
+a hex, hence `4k` ops, hence `@+4(k-1)` relative to `k=1`. Two parameters, six published numbers:
+
+    k=1  time @     space @+12       k=2  time @+4   space @+28       k=4  time @+12  space @+60
+
+and both setup totals reproduce to the digit — `w(0.75@+5)` and `w(0.75@+29)`. `k=3` is `@+8` / `@+44`
+by mechanism. **The STRUCTURE is trustworthy; §11.12 B is why the levels are not.**
 
 ### 11.11 So why are there two shadows? For a capability doom never uses.
 

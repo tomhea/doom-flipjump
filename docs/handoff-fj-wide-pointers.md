@@ -674,7 +674,8 @@ program**, with no change at any call site.
 `xor_to_pointer.fj:10,37,46,155` and `basic_pointers.fj:114` use the one-sided `set_flip_pointer` /
 `set_jump_pointer`. Under a merged shadow those must maintain both fields, costing them
 `528` vs `464` (**+14%**). **In doom that is a near-pure win:** the census below shows doom's traffic
-is 57 sites through `set_flip_and_jump_pointers` and none through the one-sided pair.
+is ~139 sites through `set_flip_and_jump_pointers` and none through the one-sided pair. (**⚠ "57" was my
+undercount — it missed the `_and_inc` variants, which are the majority. See §11.12.**)
 
 ### 11.3 REFUTED — fusing `to_flip` and `to_jump` into one op
 
@@ -732,7 +733,7 @@ dereference, and it is visible in four lines of one macro.
 
 ### 11.7 The sharing taxonomy, with what each is worth
 
-    S1  merged shadow                    -232 per dereference    ALL 57 doom sites, no call-site edit
+    S1  merged shadow                    ~-19% per dereference   ~139 doom sites; NOT a drop-in (§11.12)
     S2  constant base -> xor, not add    ~-1,968 (+ the set)     the 35 ptr_index sites
     S3  one index, N arrays              a whole ptr_index each  pairs at :630/:632, :967/:969
     S4  adjacent cells, one setup        -760 and -239 (ptr_inc) read_byte n, read_table_packed  (P1)
@@ -797,7 +798,7 @@ nowhere.** The one-sided setters violate it outright, which is the +14% already 
   consecutive amortised reads would leave `to_flip` permanently offset. (That already breaks today's
   weaker invariant too — worth knowing before someone "saves" two wflips per read.)
 
-**§11.2 should be read as:** the two shadows are equal *on the path doom actually uses* — 57 sites
+**§11.2 should be read as:** the two shadows are equal *on the path doom actually uses* — ~139 sites
 through `set_flip_and_jump_pointers`, none through the one-sided pair — not as a property of the stl.
 That is what makes S1 attractive **for doom** and a much bigger question for the stl in general.
 
@@ -831,8 +832,10 @@ already written three times. With one shadow:
 
 **In the stl's own notation the setup goes `w(0.75@+5)` -> `w(0.5@+4)`.** At w=32, @=25:
 
-    read_hex    948 -> 716   (-24.5%)
-    read_byte   998 -> 766   (-23.2%)
+    read_hex    948 -> 716   (-24.5%)      ⚠ THESE LEVELS ARE REFUTED — see §11.12.
+    read_byte   998 -> 766   (-23.2%)      doom's own m1_reset.fj:20-24 MEASURED read_byte at
+                                           628.0, not 998. The `@` in a docstring is a WORST CASE.
+                                           Measured saving is -18% to -20%, not -23%/-24%.
 
 ### 11.11 So why are there two shadows? For a capability doom never uses.
 
@@ -845,7 +848,7 @@ That is a real capability. Its users:
     doom   xor_hex_to_ptr 0   xor_byte_to_ptr 0   ptr_flip 0   ptr_jump 0
            set_flip_pointer 0   set_jump_pointer 0   xor_hex_to_flip_ptr 0
 
-**Zero.** All 57 of doom's pointer sites go through `set_flip_and_jump_pointers`. And even in the stl,
+**Zero.** All ~139 of doom's pointer sites go through `set_flip_and_jump_pointers`. And even in the stl,
 each one-sided setter is used only by its own standalone macro — nothing depends on the *other* field
 surviving across it.
 
@@ -859,9 +862,110 @@ assertion. What remains is only the transient requirement, unchanged: the three 
 `to_flip` by a compile-time constant (`dbit+8`, `dbit`, and the Gray walk) must restore it, which they
 already do.
 
-One-sided callers, if kept, pay `w(0.5@+4)` = 528 instead of `w(0.5@+2)` = 464 — **+64, +13.8%**, on
-paths doom does not have.
+⚠⚠ **THIS NEXT SENTENCE WAS WRONG AND DANGEROUS — SEE §11.12.** I wrote that one-sided callers "if
+kept" merely pay +64. They cannot be kept. Keeping them with a merged shadow is a **silent wild
+jump**, and `stl.return` is one of them.
 
 ⚠ **Scope, honestly:** this is ~24% off an isolated read, and isolated reads are where §4 says most
 dereferences are. But at doom's 35 `ptr_index` sites the setup is only ~23% of the cost, so there it
 is ~7%. **S2 and S3 remain the larger prizes; S1 is the one that costs no call-site changes.**
+
+### 11.12 AMENDMENT — the claim was adversarially tested. It survives in STRUCTURE and fails in DETAIL.
+
+Six independent reviewers (four lenses, two skeptics briefed to kill it, one adjudicator). **All six
+returned `claim_needs_amendment`.** I re-verified every load-bearing correction against the source
+myself. Three of my statements were wrong, and one was dangerous.
+
+#### A. CORRECTNESS — the conclusion holds, my REASON did not, and §11.11 as written ships a wild jump
+
+I wrote that with one shadow the divergence case "disappears *by construction*". That is only true if
+the one-sided setters are **absorbed or deleted**. Merge the shadow and leave them, and:
+
+    state (to_flip=P, to_jump+w=P, shadow=P)
+    set_flip_pointer Q           ->  (Q, P, Q)
+    set_flip_and_jump_pointers R ->  to_jump+w = P^Q^R
+    the dance then jumps through to_jump   ->   JUMP TO P^Q^R
+
+**And `stl.return` is one of those callers.** Verified: `ptrlib.fj:70-72` is
+`def return { hex.ptr_jump hex.pointers.sp }` -> `basic_pointers.fj:113-115` `ptr_jump` ->
+`set_jump_pointer`. `hex/pointers/stack.fj:42,:51` reach `set_flip_pointer` via `ptr_wflip`.
+
+⚠ **Doom cannot catch this for you.** Doom calls neither macro, so `deg_gate` and `m5_gate` would both
+**pass** a build that has already broken `stl.call`/`stl.return` for every other program on this stl —
+and `flipjump-151` is an editable install shared with `bf2fj` and `c2fj`. This is a library edit, not
+a doom-local optimisation.
+
+The right invariant is **"all three fields are equal at every setter entry"**, held by making
+`set_flip_pointer`/`set_jump_pointer` aliases of the merged three-field setter. Safe in `hex`:
+`to_jump` has exactly two readers (`basic_pointers.fj:115`, `xor_from_pointer.fj:47`), both
+immediately after a setter that wrote it.
+
+⚠ **Leave `bit/` alone.** `bit/pointers.fj` has **zero** `set_flip_and_jump_pointers` (verified) —
+nothing to merge, no saving — and its `exact_xor_from_ptr` genuinely holds two different live
+addresses across a setter boundary.
+
+#### B. COST — mechanism confirmed, every ABSOLUTE NUMBER refuted, including by this repo
+
+`@+4(k-1)` and `@+12+16(k-1)` are confirmed, and the merge really does delete **one dispatch instance
+and one table pass per hex, eight times per call**. But **the `@` in a docstring is a WORST CASE**:
+`wflip` costs `popcount(address)`, on average half the bit-length.
+
+**doom already measured this and I did not look.** `src/fj/m1_reset.fj:20-24`, from
+`scratchpad/ptr_price_list.py` with vacuity, body-removed and `--selftest` negative controls:
+
+    MEASURED   hex.read_byte  628.0    hex.write_byte  805.6    hex.zero_ptr 795.9
+    my model   read_byte      998      write_byte     1222
+
+The model runs **~1.5-1.6x high**. So `760 / 528 / 232 / 948 / 716 / 998 / 766` and the derived
+**-24% / -23% are not costs** — they are worst-case model levels. Measured on a real build at
+`@ ~ 16.4`: `read_byte -19.3%`, `read_byte_and_inc -20.4%`, `write_byte -18.4%`,
+`write_byte_and_inc -18.1%`; **site-weighted -19.4%**, and **-15% to -21%** across three layouts up to
+`@ = 20.4`. Doom's real `@` is **25.415** (`build/doom_e1m1_menu.fjm`: max word address 89,494,606 ->
+44,747,303 ops) — **and nothing has been measured there.**
+
+Space goes the favourable way: the merged program is **smaller** by a flat ~384 program-ops per site
+(`pad 16` makes per-instance space `16(k+1)`, with no `@` term), so the "a bigger program raises `@`"
+worry is refuted with the good sign.
+
+**Use this instead:** *one dispatch instance and one table pass fewer per hex per setter call;
+measured -18% to -20% on doom's dereference macros at @ ~ 16.5, and -15% to -21% across layouts to
+@ <= 20.4; unmeasured at doom's @ = 25.4.*
+
+#### C. SCOPE — right about doom, and my site count was out by 2.4x
+
+"Doom uses the one-sided capability zero times" is **CONFIRMED**, more firmly than I put it: zero in
+`src/fj`, zero in `src/doomfj/*.py`, zero in all nine emitted files of `build/generated_menu/`.
+
+But **"57 sites" was wrong — it is ~139.** I counted `read_byte`/`write_byte`/`read_hex`/`write_hex`
+and **missed the `_and_inc` variants, which are the majority**: `read_byte_and_inc` 66, `read_byte` 31,
+`write_byte_and_inc` 26, `write_byte` 11, `write_hex_and_inc` 4, `read_hex` 4, `write_hex` 1. Any
+whole-frame extrapolation off 57 is wrong by 2.4x.
+
+⚠ And **139 is SOURCE call sites, in macros that are themselves `rep`-expanded.** Image size is
+governed by expanded instances; ops/frame by dynamic executions. **Neither has been measured, and
+neither is 139.**
+
+#### The two steps, in this order
+
+1. **~20 min, no doom build, retires part A.** In a **copy** of the stl (never the shared editable
+   install in place): add the three-group macros, rewrite all three setters over one shadow, delete
+   `to_jump_var`, leave `bit/` untouched. Run flipjump's own `test_compile_fast` /
+   `test_compile_medium` / `test_run_medium` — they cover `hex_ptr`, `bit_ptr`, `startup_init_all`,
+   `func1`-`func7`, and `hex_ptr.fj` exercises `ptr_flip` -> `ptr_jump` -> `ptr_wflip` -> combined
+   setter in the exact sequence a naive merge destroys. **Gate it with a mutation control first** — an
+   off-by-one in the chain fails **silently with wrong data** (`read_byte` returning 0x0 for 0xb), not
+   with a crash.
+2. **One heavy build, and the only honest doom number.** `render` tier + `scratchpad/deg_gate.py`:
+   byte-exactness x4, the ops/frame delta at doom's real `@` and layout, and the image-size delta, all
+   in one run. Op counts in every existing gate will move — that is re-baselining, not re-running.
+
+**Do not do 2 before 1.** Step 1 is the cheap pre-gate; per rule 3 it saves twenty minutes, it does
+not replace the gate.
+
+#### One process note
+
+The reviewers' own evidence was not uniformly sound: one skeptic cited a harness (`scratchpad/
+stl_merged`, `stl_mut1`, `negctl.py`, `bench3.py`) whose files **do not exist**, so its numbers are
+unquotable however good its reasoning. The numbers kept above are the ones whose harness is on disk
+(`scratchpad/killcost/`, logs included) plus this repo's own `m1_reset.fj:20-24`. **R9 applies to
+reviewers too.**

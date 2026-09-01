@@ -193,6 +193,37 @@ arithmetic work.
 
 ---
 
+## 0. PHASE 0 COMES FIRST NOW -- WIDE POINTER READS. See `docs/handoff-fj-wide-pointers.md`.
+
+**The owner redirected the work on 2026-09-01**, and this is the new first phase. It is not M4
+scope -- it is an stl change in the `flipjump-151` repo, on branch `1.5.1` -- but it lands ahead of
+M4 because it plausibly pays back everything M4's widths cost.
+
+**The observation:** `hex.read_hex` (1 nibble) and `hex.read_byte` (2 nibbles) cost almost the
+same, because the dominant term is `set_flip_and_jump_pointers` -- w(0.75@+5) = 24@+160 at w=32 --
+paid PER DEREFERENCE. And the n-forms are `rep(n)` of the single form, so `hex.read_byte 2` pays
+the whole dereference twice: 84@+374 where one wider read would be ~39@+173. **~2.16x, flat in @.**
+
+**Researched by six agents; both feasibility verdicts survived adversarial refutation.** The key
+finding is that the `8` in `wflip to_flip, dbit+8` is **not a fetch width** -- FlipJump has no
+fetch width at all. It is `log2(table base index)`, and the stl proves it internally:
+`basic_pointers.fj:20-21` says *"4/8 ... (4 is for reading from an hex memory, 8 is for byte
+memory)"* -- the same constant and table already serve two different widths.
+
+**Worth, banded honestly: 0.5M-2.5M ops/frame, most likely ~1.0-1.5M = 2%-8.5% of the frame,**
+middle 3.5%-5%. Cross-checked against a MEASURED datum: `set_flip_and_jump_pointers` is 12.7% of
+the frame (`handoff-m14_5.md:69`). ⚠ Discounted by this repo's own realisation factor -- one
+stl-docstring prediction measured at **45%** of its documented cost.
+
+⚠ Two traps recorded there: the name **`read_word` is wrong** (`word` is w bits here, and both
+`read_hex n` and `read_byte n` are taken), and a 2^k decoder table is **address-pinned** to
+`[2^k, 2^(k+1))`, which collides with the M13-hotdata placement that is already worth 2.15M
+ops/frame. **12-bit is the HARDER width, not the easier one.**
+
+**Status: PLANNED ONLY. Nothing implemented, by instruction.**
+
+---
+
 ## 2-OWNER. THREE DECISIONS, 2026-08-31, AFTER Phase A's measurements
 
 These are the owner's, taken with the Phase A numbers in front of them. They supersede the

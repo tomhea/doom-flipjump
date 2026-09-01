@@ -796,6 +796,25 @@ discipline caught "26 pids" (really 94) and "102 labels" (really 16,412).
 **Deliverable: a per-map table, and a recommendation of which N levels fit and in what order to
 drop them.** Bring it to the owner before R4.
 
+### R1 -- RE-RUN 2026-09-01 after prefixing `cs_seeded`: ONE collision left
+
+    E1M1 vs E1M5   !! 1 COLLIDE: ['ptloc_walk']
+    E1M1 vs E1M8   !! 1 COLLIDE: ['ptloc_walk']
+    NEGATIVE CONTROL  unprefixed: 5115 / 5752 collisions   ok
+    CHECK 4           0 free names x3
+    m4_r1_labels: FAIL   <- correct: one collision is still one
+
+`cs_seeded` is gone from the set, MEASURED rather than argued -- and the negative control moved by
+exactly one in each pair (5,116 -> 5,115 and 5,753 -> 5,752), which is what removing a single
+shared unprefixed name should do. That agreement is the check on the check.
+
+**What is left is `ptloc_walk`, and it CANNOT be fixed by prefixing.** `sim.fj:427` declares it
+EXTERN and `sim.fj:519` fcalls it by name, so something has to point the shared name at the ACTIVE
+map. That something is R3's persisted `level` cell. **R1 goes green only when R3 lands** -- prefix
+the per-map walks (`<map>_ptloc_walk`) and leave a one-op shared `ptloc_walk:` trampoline whose
+target the level switch rewrites (the M12oo wflip idiom, already proven in `pixel_tramp`). It is
+called once per DIRTY thing, so a jump is noise.
+
 ### R1 -- RUN 2026-08-31. The label gate exists, and it FAILS on exactly two names.
 
 `scratchpad/m4_r1_labels.py`. No build, no new emitter mode: a geometry-only emission is a

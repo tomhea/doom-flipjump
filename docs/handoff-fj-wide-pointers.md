@@ -749,3 +749,54 @@ optimal, no win there. But two consequences the plan missed: a write costs a ful
 read, so S1/S2/S4 apply to doom's 13 `write_byte` sites too; and **a read of `*p` and a later write to
 `*p` at two separate call sites do NOT share** — the write redoes the setup. Fusing those is another
 760.
+
+### 11.9 CORRECTION — `to_flip` and `to_jump` are NOT the same pointer. The owner is right.
+
+My §11.2 headline was too strong. Enumerating **every** write to the two address fields:
+
+**`to_jump+w` is written by exactly two macros** — `set_jump_pointer` and
+`set_flip_and_jump_pointers` — and is **never** offset.
+
+**`to_flip` is written by those setups AND transiently offset by a compile-time constant in three
+separate macros**, each of which restores it:
+
+    xor_from_pointer.fj:36 / :52    wflip to_flip, dbit+8        arm / disarm  <- the owner's example
+    xor_to_pointer.fj:26 / :28      wflip to_flip, dbit          ptr_flip_dbit
+    xor_to_pointer.fj:123-141       dbit+0 -> +1 -> +3 -> +2 -> 0   a GRAY-CODE WALK in
+                                                                    xor_hex_to_flip_ptr
+
+So **inside the dance, `to_flip` = ptr+dbit+8 while `to_jump+w` = ptr** — exactly as the owner said —
+and `xor_hex_to_flip_ptr` walks `to_flip` through four offsets on a data-dependent path. The design
+does this deliberately: offsetting `to_flip` by a compile-time constant is a `wflip` costing
+`popcount`, which is why the *flip* field is the one that gets perturbed and the *jump* field never is.
+
+**And they differ DURABLY too, not just transiently** — the stronger case. `xor_hex_to_ptr`,
+`xor_byte_to_ptr` and `ptr_flip` (`xor_to_pointer.fj:10,37,46,155`) call **`set_flip_pointer`**, which
+advances `to_flip`+`to_flip_var` and leaves `to_jump`/`to_jump_var` pointing at an **older, unrelated
+address**; `ptr_jump` (`basic_pointers.fj:114`) does the mirror image. `xor_hex_to_flip_ptr` even
+documents it: *"use after: .pointers.set_flip_pointer ptr"*.
+
+**What this does to S1.** It does not refute it, but it renames the precondition, and the difference
+is the whole point:
+
+    today   each address field equals ITS OWN shadow at setup entry   -- two independent invariants,
+            and the one-sided setters keep each field self-consistent
+    S1      both address fields equal THE SAME shadow                 -- strictly stronger
+
+The three transient offsets are all restored before their macro exits, so they do not violate the
+stronger invariant *at a setup call* — **but S1 converts "three macros each happen to restore
+`to_flip`" from an incidental property into a load-bearing one, spread across two files, asserted
+nowhere.** The one-sided setters violate it outright, which is the +14% already priced in §11.2.
+
+**Therefore, if S1 is attempted:**
+
+* state the invariant explicitly — `to_flip == to_jump+w` at every entry to the setup — and give it a
+  test that a mutation must break (R9);
+* the one-sided setters must maintain **both** fields, or be deleted;
+* ⚠ **and it forbids the obvious S4 micro-optimisation**: skipping the `dbit+8` restore between
+  consecutive amortised reads would leave `to_flip` permanently offset. (That already breaks today's
+  weaker invariant too — worth knowing before someone "saves" two wflips per read.)
+
+**§11.2 should be read as:** the two shadows are equal *on the path doom actually uses* — 57 sites
+through `set_flip_and_jump_pointers`, none through the one-sided pair — not as a property of the stl.
+That is what makes S1 attractive **for doom** and a much bigger question for the stl in general.

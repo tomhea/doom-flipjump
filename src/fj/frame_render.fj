@@ -802,20 +802,24 @@ ns frame {
     // the slot pointer where it was. count (0 or 1) lives in the flag cell `cnt`.
     def ts_piece_wr cnt, fbp, off, fy1, fy2, cls, bpid @ first_piece, end {
         hex.if0 1, cnt, first_piece
-        hex.ptr_add fbp, off+4
+        hex.ptr_add fbp, off+PIECE_BYTES
         hex.write_byte_and_inc fbp, fy1
         hex.write_byte_and_inc fbp, fy2
         hex.write_byte_and_inc fbp, cls
-        hex.write_byte_and_inc fbp, bpid
-        hex.ptr_sub fbp, off+8
+        rep(2-PID_NIBBLES/2, k) hex.write_byte_and_inc fbp, bpid
+        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, fbp, bpid
+        rep(PID_NIBBLES/2-1, k) hex.ptr_add fbp, PID_NIBBLES/2
+        hex.ptr_sub fbp, off+2*PIECE_BYTES
         ;end
       first_piece:
         hex.ptr_add fbp, off
         hex.write_byte_and_inc fbp, fy1
         hex.write_byte_and_inc fbp, fy2
         hex.write_byte_and_inc fbp, cls
-        hex.write_byte_and_inc fbp, bpid
-        hex.ptr_sub fbp, off+4
+        rep(2-PID_NIBBLES/2, k) hex.write_byte_and_inc fbp, bpid
+        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, fbp, bpid
+        rep(PID_NIBBLES/2-1, k) hex.ptr_add fbp, PID_NIBBLES/2
+        hex.ptr_sub fbp, off+PIECE_BYTES
         ;end
       end:
     }
@@ -965,7 +969,7 @@ ns frame {
         hex.ptr_index tsf_sfflag_p, tsf_sfflag_b, tsf_col_x
         hex.zero w/4, tsf_slot_idx
         hex.mov 2, tsf_slot_idx, tsf_col_x
-        hex.shl_hex w/4, 1, tsf_slot_idx            // slotstride = 16 bytes -> a whole-nibble shift
+        hex.shl_hex w/4, SLOT_SHIFT, tsf_slot_idx            // slotstride = 16 bytes -> a whole-nibble shift
         hex.set w/4, tsf_sfslot_b, sfslot
         hex.ptr_index tsf_sfslot_p, tsf_sfslot_b, tsf_slot_idx
       col_loop:
@@ -1041,8 +1045,8 @@ ns frame {
         hex.mov 8, tsf_row_a, tsf_row_b
       lo_not_lip:
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
-        rep(stack, k) .ts_clamp2_lo tsf_row_b, tsf_sfflag_v + 1*dw, tsf_sfslot_p, 8
-        .ts_piece_store tsf_row_a, tsf_row_b, tsf_cviewh1, tsf_out_y1, tsf_out_y2, tsf_sfflag_v + 1*dw, tsf_sfflag_v, tsf_sfflag_p, tsf_sfslot_p, 8, seg_lcls, seg_bpid, lo_skip
+        rep(stack, k) .ts_clamp2_lo tsf_row_b, tsf_sfflag_v + 1*dw, tsf_sfslot_p, 2*PIECE_BYTES
+        .ts_piece_store tsf_row_a, tsf_row_b, tsf_cviewh1, tsf_out_y1, tsf_out_y2, tsf_sfflag_v + 1*dw, tsf_sfflag_v, tsf_sfflag_p, tsf_sfslot_p, 2*PIECE_BYTES, seg_lcls, seg_bpid, lo_skip
       lo_skip:
       col_next:
         hex.ptr_add tsf_drawn_p, 1
@@ -1342,7 +1346,7 @@ ns frame {
       ctake_done:
         hex.zero w/4, slot_idx
         hex.mov 2, slot_idx, x
-        hex.shl_hex w/4, 1, slot_idx            // 16 bytes per column -> a whole-nibble shift
+        hex.shl_hex w/4, SLOT_SHIFT, slot_idx            // 16 bytes per column -> a whole-nibble shift
         hex.set w/4, sfslot_b, sfslot
         hex.ptr_index sfslot_p, sfslot_b, slot_idx
         hex.set w/4, shade_b, stepcol
@@ -1354,10 +1358,10 @@ ns frame {
         // V5 slots are 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 (see
         // ts_piece_wr / lines_steps_load2). This tier draws piece 1 per side only: skip the
         // bpid byte + the u2 slot to land on l1.
-        hex.ptr_add sfslot_p, 5
+        hex.ptr_add sfslot_p, PID_NIBBLES/2+PIECE_BYTES   // past this piece's pid, then all of u2
         ;up_have
       up_none:
-        hex.ptr_add sfslot_p, 8
+        hex.ptr_add sfslot_p, 2*PIECE_BYTES     // the whole upper group
         ;up_skip
       up_have:
         hex.if0 2, ctake, up_skip               // no ceiling region at all in this column
@@ -1417,20 +1421,20 @@ ns frame {
         hex.zero 2, u1y1
         hex.zero 2, u1y2
         hex.zero 2, u1cls
-        hex.zero 2, u1bp
+        hex.zero PID_NIBBLES, u1bp
         hex.zero 2, u2y1
         hex.zero 2, u2y2
         hex.zero 2, u2cls
-        hex.zero 2, u2bp
+        hex.zero PID_NIBBLES, u2bp
         hex.zero 2, lcnt
         hex.zero 2, l1y1
         hex.zero 2, l1y2
         hex.zero 2, l1cls
-        hex.zero 2, l1bp
+        hex.zero PID_NIBBLES, l1bp
         hex.zero 2, l2y1
         hex.zero 2, l2y2
         hex.zero 2, l2cls
-        hex.zero 2, l2bp
+        hex.zero PID_NIBBLES, l2bp
         hex.set w/4, sfflag_b, sfflag
         hex.ptr_index sfflag_p, sfflag_b, x
         hex.read_byte flags_v, sfflag_p
@@ -1439,40 +1443,48 @@ ns frame {
         hex.mov 1, lcnt, flags_v + 1*dw
         hex.zero w/4, slot_idx
         hex.mov 2, slot_idx, x
-        hex.shl_hex w/4, 1, slot_idx
+        hex.shl_hex w/4, SLOT_SHIFT, slot_idx
         hex.set w/4, sfslot_b, sfslot
         hex.ptr_index sfslot_p, sfslot_b, slot_idx
         hex.if0 1, ucnt, up_none
         hex.read_byte_and_inc u1y1, sfslot_p
         hex.read_byte_and_inc u1y2, sfslot_p
         hex.read_byte_and_inc u1cls, sfslot_p
-        hex.read_byte_and_inc u1bp, sfslot_p
+        rep(2-PID_NIBBLES/2, k) hex.read_byte_and_inc u1bp, sfslot_p
+        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, u1bp, sfslot_p
+        rep(PID_NIBBLES/2-1, k) hex.ptr_add sfslot_p, PID_NIBBLES/2
         hex.dec 1, ucnt
         hex.if0 1, ucnt, up_one                 // count was 1 -> no second upper stored
         hex.read_byte_and_inc u2y1, sfslot_p
         hex.read_byte_and_inc u2y2, sfslot_p
         hex.read_byte_and_inc u2cls, sfslot_p
-        hex.read_byte_and_inc u2bp, sfslot_p
+        rep(2-PID_NIBBLES/2, k) hex.read_byte_and_inc u2bp, sfslot_p
+        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, u2bp, sfslot_p
+        rep(PID_NIBBLES/2-1, k) hex.ptr_add sfslot_p, PID_NIBBLES/2
         hex.inc 1, ucnt
         ;lo_read
       up_one:
-        hex.ptr_add sfslot_p, 4
+        hex.ptr_add sfslot_p, PIECE_BYTES       // skip the second upper piece
         hex.inc 1, ucnt
         ;lo_read
       up_none:
-        hex.ptr_add sfslot_p, 8
+        hex.ptr_add sfslot_p, 2*PIECE_BYTES     // skip the whole upper group
       lo_read:
         hex.if0 1, lcnt, end
         hex.read_byte_and_inc l1y1, sfslot_p
         hex.read_byte_and_inc l1y2, sfslot_p
         hex.read_byte_and_inc l1cls, sfslot_p
-        hex.read_byte_and_inc l1bp, sfslot_p
+        rep(2-PID_NIBBLES/2, k) hex.read_byte_and_inc l1bp, sfslot_p
+        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, l1bp, sfslot_p
+        rep(PID_NIBBLES/2-1, k) hex.ptr_add sfslot_p, PID_NIBBLES/2
         hex.dec 1, lcnt
         hex.if0 1, lcnt, lo_one
         hex.read_byte_and_inc l2y1, sfslot_p
         hex.read_byte_and_inc l2y2, sfslot_p
         hex.read_byte_and_inc l2cls, sfslot_p
-        hex.read_byte_and_inc l2bp, sfslot_p
+        rep(2-PID_NIBBLES/2, k) hex.read_byte_and_inc l2bp, sfslot_p
+        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, l2bp, sfslot_p
+        rep(PID_NIBBLES/2-1, k) hex.ptr_add sfslot_p, PID_NIBBLES/2
         hex.inc 1, lcnt
         ;end
       lo_one:
@@ -1512,7 +1524,7 @@ ns frame {
         hex.if0 2, sprfl, end
         hex.zero w/4, slot_idx
         hex.mov 2, slot_idx, x
-        hex.shl_hex w/4, 1, slot_idx            // 16 bytes per column -> a whole-nibble shift
+        hex.shl_hex w/4, 1, slot_idx            // spslot's OWN stride (SPR_SLOT_STRIDE), NOT sfslot's -- do NOT convert this to SLOT_SHIFT
         hex.set w/4, spslot_b, spslot
         hex.ptr_index spslot_p, spslot_b, slot_idx
         hex.read_byte_and_inc ssy1, spslot_p
@@ -1916,7 +1928,7 @@ ns frame {
       ck_u1cls:
         rep(stack, k) hex.cmp 2, u1cls, p2_du1cls, emit_full, ck_u1bp, emit_full
       ck_u1bp:
-        rep(stack, k) hex.cmp 2, u1bp, p2_du1bp, emit_full, ck_u2y1, emit_full
+        rep(stack, k) hex.cmp PID_NIBBLES, u1bp, p2_du1bp, emit_full, ck_u2y1, emit_full
       ck_u2y1:
         rep(stack, k) hex.cmp 2, u2y1, p2_du2y1, emit_full, ck_u2y2, emit_full
       ck_u2y2:
@@ -1924,7 +1936,7 @@ ns frame {
       ck_u2cls:
         rep(stack, k) hex.cmp 2, u2cls, p2_du2cls, emit_full, ck_u2bp, emit_full
       ck_u2bp:
-        rep(stack, k) hex.cmp 2, u2bp, p2_du2bp, emit_full, ck_lower_pieces, emit_full
+        rep(stack, k) hex.cmp PID_NIBBLES, u2bp, p2_du2bp, emit_full, ck_lower_pieces, emit_full
       ck_lower_pieces:
         rep(stack, k) hex.if0 1, lcnt, ck_plane
         rep(stack, k) hex.cmp 2, l1y1, p2_dl1y1, emit_full, ck_l1y2, emit_full
@@ -1933,7 +1945,7 @@ ns frame {
       ck_l1cls:
         rep(stack, k) hex.cmp 2, l1cls, p2_dl1cls, emit_full, ck_l1bp, emit_full
       ck_l1bp:
-        rep(stack, k) hex.cmp 2, l1bp, p2_dl1bp, emit_full, ck_l2y1, emit_full
+        rep(stack, k) hex.cmp PID_NIBBLES, l1bp, p2_dl1bp, emit_full, ck_l2y1, emit_full
       ck_l2y1:
         rep(stack, k) hex.cmp 2, l2y1, p2_dl2y1, emit_full, ck_l2y2, emit_full
       ck_l2y2:
@@ -1941,7 +1953,7 @@ ns frame {
       ck_l2cls:
         rep(stack, k) hex.cmp 2, l2cls, p2_dl2cls, emit_full, ck_l2bp, emit_full
       ck_l2bp:
-        rep(stack, k) hex.cmp 2, l2bp, p2_dl2bp, emit_full, pieces_done, emit_full
+        rep(stack, k) hex.cmp PID_NIBBLES, l2bp, p2_dl2bp, emit_full, pieces_done, emit_full
       pieces_done:
       ck_plane:
         // ... and (pnear) the same two plane surfaces, else the pair lists differ after all
@@ -1980,20 +1992,20 @@ ns frame {
         hex.mov 2, p2_du1y1, u1y1                  // (the p2_dgn rule: the cells must never be unused)
         hex.mov 2, p2_du1y2, u1y2
         hex.mov 2, p2_du1cls, u1cls
-        hex.mov 2, p2_du1bp, u1bp
+        hex.mov PID_NIBBLES, p2_du1bp, u1bp
         hex.mov 2, p2_du2y1, u2y1
         hex.mov 2, p2_du2y2, u2y2
         hex.mov 2, p2_du2cls, u2cls
-        hex.mov 2, p2_du2bp, u2bp
+        hex.mov PID_NIBBLES, p2_du2bp, u2bp
         hex.mov 2, p2_dlcnt, lcnt
         hex.mov 2, p2_dl1y1, l1y1
         hex.mov 2, p2_dl1y2, l1y2
         hex.mov 2, p2_dl1cls, l1cls
-        hex.mov 2, p2_dl1bp, l1bp
+        hex.mov PID_NIBBLES, p2_dl1bp, l1bp
         hex.mov 2, p2_dl2y1, l2y1
         hex.mov 2, p2_dl2y2, l2y2
         hex.mov 2, p2_dl2cls, l2cls
-        hex.mov 2, p2_dl2bp, l2bp
+        hex.mov PID_NIBBLES, p2_dl2bp, l2bp
         hex.mov 2, p2_dsoff, p2_soff                  // V2: unconditional, same reason as p2_dgn
         hex.mov 2, p2_dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
         hex.mov 2, p2_dgn3, gnrow3

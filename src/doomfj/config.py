@@ -90,6 +90,15 @@ class Config:
         return 1 if self.PID_NIBBLES == 2 else 2
 
     @property
+    def PIECE_BYTES(self) -> int:
+        """Bytes per stored V5 boundary piece in `sfslot`: fy1, fy2, cls, then the back pid.
+
+        4 at the default width, 5 when a pid needs two bytes. A slot is FOUR pieces -- u1@0, u2@4,
+        l1@8, l2@12 at the default -- so the group offset is 2*PIECE_BYTES and the slot is
+        4*PIECE_BYTES, which is why the stride has to grow with it."""
+        return 3 + self.PID_NIBBLES // 2
+
+    @property
     def TEXTURE_DOWNSCALE(self) -> int:
         """World-texture D5 span-lever factor = NATIVE_W // W: 2 at W=160 (the R0 decision), 1 at the
         native 320 (no downscale — raise --flat-max-words instead, DESIGN §1.2 320 stretch). The single
@@ -155,6 +164,7 @@ class Config:
             "CENTERX": self.CENTERX, "CENTERY": self.CENTERY, "PROJECTION": self.PROJECTION,
             "FB_SIZE": self.FB_SIZE, "PALETTE_SIZE": self.PALETTE_SIZE,
             "PID_NIBBLES": self.PID_NIBBLES, "SLOT_SHIFT": self.SLOT_SHIFT,
+            "PIECE_BYTES": self.PIECE_BYTES,
         }
 
     def span_ledger(self) -> dict:

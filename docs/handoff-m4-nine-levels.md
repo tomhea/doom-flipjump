@@ -238,6 +238,60 @@ This is the one to do first and it is fully enumerated, so it can be done withou
     :1639  hex.cmp 2, pval8, dpid   (lines_ditto_plane)    -> pidn
     :1643  hex.mov 2, dpid, pval8   (lines_save_plane)     -> pidn
 
+#### ✅ THE PID WIDTH IS DONE, 2026-09-01. `Config.PID_NIBBLES` WORKS AT 2 AND AT 4.
+
+Everything below this heading is the history of getting here; this is the result. The guard is
+gone, and `PID_NIBBLES=4` is a correct program.
+
+    NARROW (2) -- INERT
+      deg_gate  43,192,505 / 34,296,270 / 39,327,546 / 32,861,669  BYTE-EXACT x4
+                IDENTICAL TO THE DIGIT against the shipped numbers
+
+    WIDE (4) -- EFFECTIVE AND CORRECT
+      deg_gate  44,853,168 / 36,124,727 / 40,656,335 / 34,398,141  BYTE-EXACT x4
+      ca2_sweep on the matched pair, 260 frames:
+                median 24,306,866 -> 25,945,337   +6.74%
+                mean   24,408,647 -> 25,885,915   +6.05%
+                PICTURE 260 of 260 byte-exact ok    VACUITY 254 distinct ok    PASS
+
+**⚠ THE COST IS TWO-THIRDS OF THE OWNER'S BUDGET.** +6.74% on the governing median against a
+stated ceiling of +10%. It buys E1M2/M3/M4/M9 -- **seven levels** -- but it leaves only ~3% for
+everything else M4 wants, and R2 may still need a wider BAND index. `PJ-5` and `PJ-7` (section 2a)
+are the reserve for winning some of it back; they are loop-invariant work in the shared leaves and
+were held for exactly this.
+
+**Bring that trade to the owner before spending more of the budget.** Seven levels at +6.74% is a
+different proposition from seven levels at +10%, and the choice is theirs.
+
+---
+
+#### ROOT CAUSE FOUND 2026-09-01: `slot_idx` NAMES TWO DIFFERENT ARRAYS
+
+The bisect below localised the fault to the stride. The cause is one line, and it was mine:
+
+    frame_render.fj  968   hex.shl_hex w/4, 1, tsf_slot_idx   -> sfslot   CONVERT
+                    1345   hex.shl_hex w/4, 1, slot_idx       -> sfslot   CONVERT
+                    1442   hex.shl_hex w/4, 1, slot_idx       -> sfslot   CONVERT
+                    1515   hex.shl_hex w/4, 1, slot_idx       -> spslot   ⚠ DO NOT ⚠
+
+**`sfslot` and `spslot` are different arrays with different strides** -- `STEP_SLOT_STRIDE` and
+`SPR_SLOT_STRIDE`, both 16 today, which is why nothing complained. Their index registers are both
+macro-locals called `slot_idx`, so a `str.replace` of the shift line hit all three and scaled the
+SPRITE index by 256 into an array still sized for 16.
+
+**The evidence was in the failure all along and I misread it.** Viewpoint (664,291) is deg_gate's
+SPRITE-OVERLAP frame and it took by far the worst damage -- 2074 px with the full change, 2042 px
+with the stride alone -- while the stairs frame, which is what actually exercises the V5 piece
+slots, lost only 97 and 85. I spent three cycles rewriting the piece layout because I assumed the
+pid work had broken the pid path; the frame that hurt most was telling me it was the sprites.
+
+**The rule that comes out of it:** when a stride becomes derived, convert the shift sites BY LINE
+after checking which ARRAY each one indexes -- never by matching the index register's name. The
+names are macro-locals and they collide across unrelated readers. Line 1515 now carries a comment
+saying so.
+
+---
+
 #### ⚠⚠⚠⚠ BISECTED 2026-09-01: IT IS THE STRIDE, NOT THE PIECE LAYOUT.
 
 **Start here. The piece-layout rewrite described below was chasing the wrong thing.**

@@ -1194,29 +1194,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         f"{cfg.PID_NIBBLES}-nibble pid addresses -- raise Config.PID_NIBBLES (it must stay EVEN: "
         "a pid is PID_NIBBLES/2 whole bytes per column in pclm[])")
     assert cfg.PID_NIBBLES % 2 == 0, "PID_NIBBLES must be even: pclm[] stores whole bytes"
-    # ⚠⚠ WIDTH 4 IS NOT FINISHED AND MUST NOT BE USED. The pclm/pval8/cpid/p2_dpid half is done and
-    # PROVEN INERT at width 2 (deg_gate op counts identical to the digit, emission identical 21/21,
-    # 485 host + 168 fj tests). The V5 BACK-PID half is NOT: `seg_bpid` is serialised as the 4th
-    # BYTE of each piece slot by `ts_piece_wr` (fy1, fy2, cls, bpid), the second piece sits at
-    # `off+4` and the group at `off+8`, and `u1bp`/`u2bp`/`l1bp`/`l2bp` read it back with
-    # `hex.read_byte_and_inc`. At width 4 those still read ONE byte into a register the callee then
-    # reads FOUR nibbles of -- so `lines_pid_ids` picks up whatever sits next to it.
-    #
-    # THAT IS NOT THEORETICAL AND deg_gate DID NOT CATCH IT. All four deg_gate viewpoints were
-    # byte-exact at width 4; `scratchpad/ca2_sweep.py` over 260 frames found three that were not
-    # (-435,223,0x0 by 2 px; -435,223,0xc0000000 by 292 px; -179,1247,0x40000000 by 940 px) --
-    # because the neighbouring register is usually zero and only sometimes is not.
-    # **A pid change is proved by the SWEEP, not by the gate.**
-    #
-    # What remains is in docs/handoff-m4-nine-levels.md: the slot layout has to become
-    # PB = 3 + PID_NIBBLES/2 bytes per piece, on BOTH the
-    # `ts_piece_wr` write side and the `ts_piece_load` read side, plus the two `slotoff` call-site
-    # constants (0 and 8), the four `hex.zero`/`hex.read_byte_and_inc`/`hex.mov`/`hex.cmp` groups,
-    # and `seg_bpid`'s own field and declaration.
-    assert cfg.PID_NIBBLES == 2, (
-        f"PID_NIBBLES={cfg.PID_NIBBLES}: the V5 back-pid path (seg_bpid -> the piece slot -> "
-        "u1bp/u2bp/l1bp/l2bp) is still one byte wide, so a wider pid reads past those registers "
-        "and paints wrong pixels on ~1% of frames. See the comment above and the handoff.")
+    # M4: the pid is PID_NIBBLES wide in every place it lives -- pclm[]/pval8/cpid/p2_dpid, the
+    # skypid index, `seg_bpid`, and the V5 PIECE SLOT (PIECE_BYTES per piece, written by
+    # `ts_piece_wr` and read back by BOTH the stacked and the non-stacked loaders).
+    # ⚠ `sfslot`'s stride grows with it (Config.SLOT_SHIFT) -- but `spslot` has its OWN
+    # SPR_SLOT_STRIDE and must NOT be scaled with it. Blanket-replacing the shift sites (they share
+    # the local name `slot_idx`) scaled the SPRITE index into an array still sized for 16 and cost
+    # three gate cycles. **A pid change is proved by ca2_sweep, not by deg_gate.**
     # ... and which PIDs are sky at all. A pid is (ceiling key, floor key) and the ceiling key
     # carries the flat NAME, so sky-ness is decided entirely at compile time: one dispatch per
     # column tells the emit loop whether to take the sky list or the plane list. pids are 1-based
@@ -1494,7 +1478,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                 (ln_, max(1, b_.floor_h - f_.floor_h)), 0) if l_ else 0),
                             # V5: the boundary's BACK pair id -- the plane region behind a
                             # stored piece re-derives its band lists from this
-                            *([("seg_bpid", 2, lines_pid[_plane_keys(b_)])]
+                            *([("seg_bpid", cfg.PID_NIBBLES, lines_pid[_plane_keys(b_)])]
                               if stack_flag else [])]
                     _fblk, _fcall = _door_blocks(si, seg, f"seg{si}_face_consts",
                                                  _face_fields)
@@ -1872,7 +1856,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 "seg_pass1_ts_leaf:",
                 f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR}, {atan_dbl}, {slope_dbl}, "
                 f"{table_dbl}, 1, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
-                f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
+                f"{cfg.VIEW_H - 1}, {proj}, {16 ** cfg.SLOT_SHIFT}, {stack_flag}, {deg_flag}, "
                 f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"]),
              # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
              # log2(ds) (`rep(#ds - 1, ...)`), exact only for power-of-two downscales.
@@ -2029,12 +2013,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # (STEP_SEG_BUDGET) -- separate from n_tsv, because it must count only the boundaries that
           # actually pay a wall_scale_setup_m.
           *([             f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
-                                        for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
+                                        for _ in range(cfg.VIEW_W * 16 ** cfg.SLOT_SHIFT)),
              "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
              "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
              "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
              "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
-             "seg_bpid: hex.vec 2",                # V5: the boundary's baked BACK pair id
+             f"seg_bpid: hex.vec {cfg.PID_NIBBLES}",  # V5: the boundary's baked BACK pair id
              stepcol]),
           # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (nonzero =
           # this column carries one) so a column without a sprite costs ONE read on the emit path;
@@ -2111,11 +2095,11 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "p2_dgn: hex.vec 2",
         "p2_dgn2: hex.vec 2",
         "p2_dgn3: hex.vec 2",
-        "p2_dl1bp: hex.vec 2",
+        f"p2_dl1bp: hex.vec {cfg.PID_NIBBLES}",
         "p2_dl1cls: hex.vec 2",
         "p2_dl1y1: hex.vec 2",
         "p2_dl1y2: hex.vec 2",
-        "p2_dl2bp: hex.vec 2",
+        f"p2_dl2bp: hex.vec {cfg.PID_NIBBLES}",
         "p2_dl2cls: hex.vec 2",
         "p2_dl2y1: hex.vec 2",
         "p2_dl2y2: hex.vec 2",
@@ -2136,11 +2120,11 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "p2_dsy0b: hex.vec 4",
         "p2_dsy0bb: hex.vec 4",
         "p2_dtop: hex.vec 8",
-        "p2_du1bp: hex.vec 2",
+        f"p2_du1bp: hex.vec {cfg.PID_NIBBLES}",
         "p2_du1cls: hex.vec 2",
         "p2_du1y1: hex.vec 2",
         "p2_du1y2: hex.vec 2",
-        "p2_du2bp: hex.vec 2",
+        f"p2_du2bp: hex.vec {cfg.PID_NIBBLES}",
         "p2_du2cls: hex.vec 2",
         "p2_du2y1: hex.vec 2",
         "p2_du2y2: hex.vec 2",
@@ -2694,11 +2678,11 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         # V5: the current column's stacked boundary pieces (GLOBALS so emit_region's windowed
         # splices reach them without threading 18 parameters through every signature)
         "ucnt: hex.vec 2", "u1y1: hex.vec 2", "u1y2: hex.vec 2", "u1cls: hex.vec 2",
-        "u1bp: hex.vec 2", "u2y1: hex.vec 2", "u2y2: hex.vec 2", "u2cls: hex.vec 2",
-        "u2bp: hex.vec 2",
+        f"u1bp: hex.vec {cfg.PID_NIBBLES}", "u2y1: hex.vec 2", "u2y2: hex.vec 2",
+        "u2cls: hex.vec 2", f"u2bp: hex.vec {cfg.PID_NIBBLES}",
         "lcnt: hex.vec 2", "l1y1: hex.vec 2", "l1y2: hex.vec 2", "l1cls: hex.vec 2",
-        "l1bp: hex.vec 2", "l2y1: hex.vec 2", "l2y2: hex.vec 2", "l2cls: hex.vec 2",
-        "l2bp: hex.vec 2",
+        f"l1bp: hex.vec {cfg.PID_NIBBLES}", "l2y1: hex.vec 2", "l2y2: hex.vec 2",
+        "l2cls: hex.vec 2", f"l2bp: hex.vec {cfg.PID_NIBBLES}",
         "seg_wstrip: hex.vec w/4", "wstripbase: hex.vec w/4",   # M13-W2S strip bank
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
         f"seg_pid: hex.vec {cfg.PID_NIBBLES}",         # M13-2S rung 3a: baked plane-pair id (1-based)

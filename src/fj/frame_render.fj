@@ -806,9 +806,9 @@ ns frame {
         hex.write_byte_and_inc fbp, fy1
         hex.write_byte_and_inc fbp, fy2
         hex.write_byte_and_inc fbp, cls
-        rep(2-PID_NIBBLES/2, k) hex.write_byte_and_inc fbp, bpid
-        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, fbp, bpid
-        rep(PID_NIBBLES/2-1, k) hex.ptr_add fbp, PID_NIBBLES/2
+        rep(2-PID_BYTES, k) hex.write_byte_and_inc fbp, bpid
+        rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, fbp, bpid
+        rep(PID_BYTES-1, k) hex.ptr_add fbp, PID_BYTES
         hex.ptr_sub fbp, off+2*PIECE_BYTES
         ;end
       first_piece:
@@ -816,9 +816,9 @@ ns frame {
         hex.write_byte_and_inc fbp, fy1
         hex.write_byte_and_inc fbp, fy2
         hex.write_byte_and_inc fbp, cls
-        rep(2-PID_NIBBLES/2, k) hex.write_byte_and_inc fbp, bpid
-        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, fbp, bpid
-        rep(PID_NIBBLES/2-1, k) hex.ptr_add fbp, PID_NIBBLES/2
+        rep(2-PID_BYTES, k) hex.write_byte_and_inc fbp, bpid
+        rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, fbp, bpid
+        rep(PID_BYTES-1, k) hex.ptr_add fbp, PID_BYTES
         hex.ptr_sub fbp, off+PIECE_BYTES
         ;end
       end:
@@ -1151,21 +1151,21 @@ ns frame {
         hex.mov 2, x, xa                        // the claim scan over the stride-1 pclm[]
         hex.set w/4, pbase, pclm
         // M4: `x` is the LOOP COUNTER as well as the index, so a wide pid cannot scale it in place
-        rep(2-PID_NIBBLES/2, k) hex.ptr_index pptr, pbase, x  // reads w/4 nibbles of its index (R11)
-        rep(PID_NIBBLES/2-1, k) .lines_pclm_index2 pptr, pbase, x
+        rep(2-PID_BYTES, k) hex.ptr_index pptr, pbase, x  // reads w/4 nibbles of its index (R11)
+        rep(PID_BYTES-1, k) .lines_pclm_index2 pptr, pbase, x
       col_loop:
         hex.cmp 2, x, xb, col_body, ret, ret
       col_body:
-        rep(2-PID_NIBBLES/2, k) hex.read_byte pval8, pptr
-        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, pval8, pptr
+        rep(2-PID_BYTES, k) hex.read_byte pval8, pptr
+        rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, pval8, pptr
         hex.if0 PID_NIBBLES, pval8, claim
-        hex.ptr_add pptr, PID_NIBBLES/2         // a nearer seg already attributed this column
+        hex.ptr_add pptr, PID_BYTES         // a nearer seg already attributed this column
         ;col_next
       claim:
         // pclm[x] = this seg's plane-pair id, and advance. write_byte_and_inc has no n-form.
-        rep(2-PID_NIBBLES/2, k) hex.write_byte_and_inc pptr, seg_pid
-        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, pptr, seg_pid
-        rep(PID_NIBBLES/2-1, k) hex.ptr_add pptr, PID_NIBBLES/2
+        rep(2-PID_BYTES, k) hex.write_byte_and_inc pptr, seg_pid
+        rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
+        rep(PID_BYTES-1, k) hex.ptr_add pptr, PID_BYTES
         hex.inc 2, n_claimed
         hex.cmp 2, n_claimed, vieww, col_next, claim_done, col_next
       claim_done:
@@ -1358,7 +1358,7 @@ ns frame {
         // V5 slots are 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 (see
         // ts_piece_wr / lines_steps_load2). This tier draws piece 1 per side only: skip the
         // bpid byte + the u2 slot to land on l1.
-        hex.ptr_add sfslot_p, PID_NIBBLES/2+PIECE_BYTES   // past this piece's pid, then all of u2
+        hex.ptr_add sfslot_p, PID_BYTES+PIECE_BYTES   // past this piece's pid, then all of u2
         ;up_have
       up_none:
         hex.ptr_add sfslot_p, 2*PIECE_BYTES     // the whole upper group
@@ -1450,17 +1450,17 @@ ns frame {
         hex.read_byte_and_inc u1y1, sfslot_p
         hex.read_byte_and_inc u1y2, sfslot_p
         hex.read_byte_and_inc u1cls, sfslot_p
-        rep(2-PID_NIBBLES/2, k) hex.read_byte_and_inc u1bp, sfslot_p
-        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, u1bp, sfslot_p
-        rep(PID_NIBBLES/2-1, k) hex.ptr_add sfslot_p, PID_NIBBLES/2
+        rep(2-PID_BYTES, k) hex.read_byte_and_inc u1bp, sfslot_p
+        rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, u1bp, sfslot_p
+        rep(PID_BYTES-1, k) hex.ptr_add sfslot_p, PID_BYTES
         hex.dec 1, ucnt
         hex.if0 1, ucnt, up_one                 // count was 1 -> no second upper stored
         hex.read_byte_and_inc u2y1, sfslot_p
         hex.read_byte_and_inc u2y2, sfslot_p
         hex.read_byte_and_inc u2cls, sfslot_p
-        rep(2-PID_NIBBLES/2, k) hex.read_byte_and_inc u2bp, sfslot_p
-        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, u2bp, sfslot_p
-        rep(PID_NIBBLES/2-1, k) hex.ptr_add sfslot_p, PID_NIBBLES/2
+        rep(2-PID_BYTES, k) hex.read_byte_and_inc u2bp, sfslot_p
+        rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, u2bp, sfslot_p
+        rep(PID_BYTES-1, k) hex.ptr_add sfslot_p, PID_BYTES
         hex.inc 1, ucnt
         ;lo_read
       up_one:
@@ -1474,17 +1474,17 @@ ns frame {
         hex.read_byte_and_inc l1y1, sfslot_p
         hex.read_byte_and_inc l1y2, sfslot_p
         hex.read_byte_and_inc l1cls, sfslot_p
-        rep(2-PID_NIBBLES/2, k) hex.read_byte_and_inc l1bp, sfslot_p
-        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, l1bp, sfslot_p
-        rep(PID_NIBBLES/2-1, k) hex.ptr_add sfslot_p, PID_NIBBLES/2
+        rep(2-PID_BYTES, k) hex.read_byte_and_inc l1bp, sfslot_p
+        rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, l1bp, sfslot_p
+        rep(PID_BYTES-1, k) hex.ptr_add sfslot_p, PID_BYTES
         hex.dec 1, lcnt
         hex.if0 1, lcnt, lo_one
         hex.read_byte_and_inc l2y1, sfslot_p
         hex.read_byte_and_inc l2y2, sfslot_p
         hex.read_byte_and_inc l2cls, sfslot_p
-        rep(2-PID_NIBBLES/2, k) hex.read_byte_and_inc l2bp, sfslot_p
-        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, l2bp, sfslot_p
-        rep(PID_NIBBLES/2-1, k) hex.ptr_add sfslot_p, PID_NIBBLES/2
+        rep(2-PID_BYTES, k) hex.read_byte_and_inc l2bp, sfslot_p
+        rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, l2bp, sfslot_p
+        rep(PID_BYTES-1, k) hex.ptr_add sfslot_p, PID_BYTES
         hex.inc 1, lcnt
         ;end
       lo_one:
@@ -1563,20 +1563,20 @@ ns frame {
     def lines_col_plane_ids cbufa, cbufd, fbufa, fbufd \
             @ own, have, recalc, pdone, end \
             < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
-        rep(2-PID_NIBBLES/2, k) hex.read_byte pval8, pptr
-        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, pval8, pptr
+        rep(2-PID_BYTES, k) hex.read_byte pval8, pptr
+        rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, pval8, pptr
         hex.if0 PID_NIBBLES, pval8, own
         ;have
       own:
-        rep(2-PID_NIBBLES/2, k) hex.write_byte pptr, seg_pid
-        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, pptr, seg_pid
+        rep(2-PID_BYTES, k) hex.write_byte pptr, seg_pid
+        rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
         hex.mov PID_NIBBLES, pval8, seg_pid
         hex.inc 2, n_claimed
         hex.cmp 2, n_claimed, vieww, have, pdone, have
       pdone:
         hex.set 1, tsstop, 1
       have:
-        hex.ptr_add pptr, PID_NIBBLES/2
+        hex.ptr_add pptr, PID_BYTES
         hex.cmp PID_NIBBLES, pval8, cpid, recalc, end, recalc
       recalc:
         hex.mov PID_NIBBLES, cpid, pval8
@@ -1587,20 +1587,20 @@ ns frame {
     def lines_col_plane half_slots, cbufa, cbufd, fbufa, fbufd \
             @ own, have, recalc, pdone, end \
             < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
-        rep(2-PID_NIBBLES/2, k) hex.read_byte pval8, pptr
-        rep(PID_NIBBLES/2-1, k) hex.read_byte PID_NIBBLES/2, pval8, pptr
+        rep(2-PID_BYTES, k) hex.read_byte pval8, pptr
+        rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, pval8, pptr
         hex.if0 PID_NIBBLES, pval8, own
         ;have
       own:
-        rep(2-PID_NIBBLES/2, k) hex.write_byte pptr, seg_pid   // claim this column for this seg
-        rep(PID_NIBBLES/2-1, k) hex.write_byte PID_NIBBLES/2, pptr, seg_pid
+        rep(2-PID_BYTES, k) hex.write_byte pptr, seg_pid   // claim this column for this seg
+        rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
         hex.mov PID_NIBBLES, pval8, seg_pid
         hex.inc 2, n_claimed
         hex.cmp 2, n_claimed, vieww, have, pdone, have
       pdone:
         hex.set 1, tsstop, 1
       have:
-        hex.ptr_add pptr, PID_NIBBLES/2         // in lockstep with dptr: one column per iteration
+        hex.ptr_add pptr, PID_BYTES         // in lockstep with dptr: one column per iteration
         // the four addresses are a function of the pid ALONE, so keep the last pid computed and
         // recompute only when it changes: a frame's 160 columns cover a handful of distinct
         // surfaces, and the strength-reduced multiply is ~15 shifts of w/4 (measured +1.1M/frame
@@ -1612,7 +1612,8 @@ ns frame {
       end:
     }
 
-    // M4 -- `pclm[]` holds PID_NIBBLES/2 BYTES per column, so a wide pid has to scale the column
+    // M4 -- `pclm[]` holds PID_BYTES per column (the STORAGE width; the VALUE width is
+    // PID_NIBBLES and may be narrower -- 3 nibbles live in 2 bytes), so a wide pid has to scale the column
     // index before ptr_index. Its own macro because `x`/`x1` is also the caller's LOOP COUNTER and
     // cannot be scaled in place. Every use is `rep`-guarded, so at PID_NIBBLES==2 this expands
     // ZERO times and the byte-wide path is literally the code it always was.
@@ -1629,12 +1630,12 @@ ns frame {
     // per-SEG setup / per-column advance of the pclm[] pointer (the lockstep partner of dptr).
     def lines_plane_ptr x1 < pclm, pbase, pptr {
         hex.set w/4, pbase, pclm
-        rep(2-PID_NIBBLES/2, k) hex.ptr_index pptr, pbase, x1
-        rep(PID_NIBBLES/2-1, k) .lines_pclm_index2 pptr, pbase, x1
+        rep(2-PID_BYTES, k) hex.ptr_index pptr, pbase, x1
+        rep(PID_BYTES-1, k) .lines_pclm_index2 pptr, pbase, x1
     }
 
     def lines_plane_step < pptr {
-        hex.ptr_add pptr, PID_NIBBLES/2
+        hex.ptr_add pptr, PID_BYTES
     }
 
     // M13-15M: the ID twin of lines_seg_plane — seg_cvpidx/seg_fvpidx are baked as LIST-ID

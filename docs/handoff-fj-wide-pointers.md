@@ -800,3 +800,68 @@ nowhere.** The one-sided setters violate it outright, which is the +14% already 
 **§11.2 should be read as:** the two shadows are equal *on the path doom actually uses* — 57 sites
 through `set_flip_and_jump_pointers`, none through the one-sided pair — not as a property of the stl.
 That is what makes S1 attractive **for doom** and a much bigger question for the stl in general.
+
+### 11.10 The owner's structural point — one shadow, because the two fields are different PARTS
+
+*"They can be the same variable, as one is in the flip part and one is in the jump part."*
+
+This is the right way to see it, and it **removes** my §11.9 objection instead of working around it.
+
+`to_flip: 0;0` holds its address in the **flip part** — word 0, at `to_flip+0`.
+`to_jump:  ;0` holds its address in the **jump part** — word 1, at `to_jump+w`.
+
+They are two distinct *destinations*, but they always hold **one value: the address being pointed at**.
+Being in different parts is exactly why a single shadow can serve both — there is no aliasing to
+worry about, only two places to write the same number. The current pair of shadows is not required by
+the structure; **the structure is the reason one is enough.**
+
+**The arithmetic checks out against the family that already exists** (`logics.fj`):
+
+    exact_xor            1 destination group    @
+    double_exact_xor     2                      @+4
+    quadrupled_exact_xor 4                      @+12          ->  @ + 4(k-1)
+
+so a three-destination form is `@+8`. It does not exist yet, but it is an interpolation of a template
+already written three times. With one shadow:
+
+    clear   to_flip, to_jump+w, shadow     (w/4)(@+8)
+    set     to_flip, to_jump+w, shadow     (w/4)(@+8)
+                                           ------------
+                                           w(0.5@+4)  = 528     vs  w(0.75@+5) = 760
+
+**In the stl's own notation the setup goes `w(0.75@+5)` -> `w(0.5@+4)`.** At w=32, @=25:
+
+    read_hex    948 -> 716   (-24.5%)
+    read_byte   998 -> 766   (-23.2%)
+
+### 11.11 So why are there two shadows? For a capability doom never uses.
+
+Two shadows exist for exactly one reason: `set_flip_pointer` and `set_jump_pointer` let the two fields
+hold **two different live pointers at once** — one address armed for flipping, another for jumping.
+That is a real capability. Its users:
+
+    stl    set_flip_pointer  at xor_to_pointer.fj:10,37,46,155   (xor_*_to_ptr, ptr_flip)
+           set_jump_pointer  at basic_pointers.fj:114            (ptr_jump)
+    doom   xor_hex_to_ptr 0   xor_byte_to_ptr 0   ptr_flip 0   ptr_jump 0
+           set_flip_pointer 0   set_jump_pointer 0   xor_hex_to_flip_ptr 0
+
+**Zero.** All 57 of doom's pointer sites go through `set_flip_and_jump_pointers`. And even in the stl,
+each one-sided setter is used only by its own standalone macro — nothing depends on the *other* field
+surviving across it.
+
+So the two-shadow design buys a capability nothing in doom uses, and charges **232 ops for it on every
+single dereference**.
+
+**The consequence for §11.9's objection.** With one shadow there is one setter, and "both address
+fields equal the same shadow" stops being an emergent property spread across two files — it becomes a
+**single macro's postcondition**. The durable-divergence case disappears *by construction*, not by
+assertion. What remains is only the transient requirement, unchanged: the three macros that offset
+`to_flip` by a compile-time constant (`dbit+8`, `dbit`, and the Gray walk) must restore it, which they
+already do.
+
+One-sided callers, if kept, pay `w(0.5@+4)` = 528 instead of `w(0.5@+2)` = 464 — **+64, +13.8%**, on
+paths doom does not have.
+
+⚠ **Scope, honestly:** this is ~24% off an isolated read, and isolated reads are where §4 says most
+dereferences are. But at doom's 35 `ptr_index` sites the setup is only ~23% of the cost, so there it
+is ~7%. **S2 and S3 remain the larger prizes; S1 is the one that costs no call-site changes.**

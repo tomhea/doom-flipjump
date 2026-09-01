@@ -110,6 +110,60 @@ emission is NOT comparable to the baseline hashes. Keep single-level emission by
 
 ---
 
+## 2-R2. THE SEVEN-LEVEL NUMBERS, MEASURED 2026-09-01 -- AND THEY FIT
+
+All seven shippable maps emitted through the real emitter at `PID_NIBBLES=4`
+(`scratchpad/m4_bands.py --pid-nibbles 4`), so this is R2's input, not a projection:
+
+    map      nvz   pids   keys     lists      uniq
+    E1M1      48    222    444     43392      8957
+    E1M2      55    376    752     83488     17092
+    E1M3      62    337    674     84344      9363
+    E1M4      53    276    552     59280      7191
+    E1M5      31    147    294     18996      3630
+    E1M8      32     90    180     12288      4889
+    E1M9      60    340    680     82368     13070
+
+    sum of per-map list counts    384,156   (8.85x E1M1)
+    sum of per-map unique bodies   64,192
+    UNION unique bodies            40,902   cross-map dedup saves 36.3%
+    BODY growth vs E1M1              4.57x
+    band index                     4 -> 5 nibbles (pad 524,288, switch table 8x)
+    naive global grid            2,438,832 lists = 6.3x WORSE than per-map bases
+    pid global space                 1,788   fits 4 nibbles comfortably
+
+### They fit the budget, and here is the argument
+
+The x4 budget is 357,978,424 words (4x the OLD span, the owner's ruling). The one-level span is
+now **74,091,162** after the Phase A clamp-tail win, so the budget is **4.83x** the current
+program. The dominant per-map term -- the band bodies -- grows **4.57x**, and the shared parts
+(trig/reciprocal tables, the sprite bank, the colormap) do not grow at all. Total growth is
+therefore strictly BELOW 4.57x, which is below 4.83x. **Seven levels fit, with margin.**
+
+⚠ That is a bound, not a span measurement. `walk` and `segconsts` grow with SEGS (9.28x over these
+seven) but they are only ~5.9% of the emitted text; the sprite bank grows 1.55x with thing TYPES.
+A text-weighted estimate lands near 3.9x. **The real number needs R4's build ladder** -- do not
+quote 3.9 or 4.57 as a span.
+
+### Two corrections to what this handoff said before
+
+1. **The cross-map dedup DOES scale, and section 8's instinct was right.** An earlier measurement
+   over the three small maps that could emit put it at 12.5% and I concluded "the layout is the
+   lever, the dedup is not". Over the real seven it is **36.3%** -- it absorbs half the list
+   growth (8.85x of lists becomes 4.57x of bodies). The conclusion was drawn from the only three
+   maps the pid cap allowed, and they were the SMALL ones.
+2. **The layout is worth even more than measured before**: 6.3x here against 2.7x at three maps.
+   Per-map id bases versus a naive `vz_classes x keys` global grid remains the most valuable
+   structural decision in the milestone.
+
+### What R2 still owes
+
+The band index must go **4 -> 5 nibbles**. That is one extra dispatch per lookup on the hot path,
+and it lands on top of the pid widening's +6.74%. Against a +10% ceiling that is tight: measure it
+before assuming, and PJ-5/PJ-7 are the held reserve.
+
+---
+
 ## 2-OWNER. THREE DECISIONS, 2026-08-31, AFTER Phase A's measurements
 
 These are the owner's, taken with the Phase A numbers in front of them. They supersede the

@@ -630,3 +630,122 @@ before P4 picks sites.
 3. **Make G3's "no dereference inside the amortised span" an explicit per-site checklist item.**
 4. Fold G7 (restore set) into the definition of done for P3 and P4.
 5. Decide G5's fork — global table width vs per-call-site clear width — before writing the macro.
+
+---
+
+## 11. SHARING `set_flip_and_jump_pointers` — the deep dive
+
+The owner's question: the setup is the slow part; **where else can it be shared?** Answered by taking
+it apart. Everything below is **DERIVED** from the stl's own published complexity comments at
+**w=32, @=25** (`@` is `log2(total ops)`, README line 75), and the decomposition reproduces
+`read_hex`=948 and `read_byte`=998 exactly. **Nothing here is measured. No build was run.**
+
+### 11.1 What the setup actually is: three passes over the pointer's hexes
+
+    address_and_variable_xor        w/4, to_flip,   to_flip_var, to_flip_var   (w/4)(@+4) = 232
+    address_and_variable_xor        w/4, to_jump+w, to_jump_var, to_jump_var   (w/4)(@+4) = 232
+    address_and_variable_double_xor w/4, to_flip, to_flip_var,
+                                         to_jump+w, to_jump_var, ptr           (w/4)(@+12) = 296
+                                                                               ------------------
+                                                                               w(0.75@+5) = 760
+
+`logics.fj:88-93,149-156`: each pass is `rep(n, i) <exact_xor over one hex>`, priced `@+4` for two
+destinations and `@+12` for four — **+4 per extra destination**. So the setup is **exactly linear in
+the number of pointer hexes: 95 ops per hex.** That single fact drives everything below.
+
+**Passes 1 and 2 are pure bookkeeping** — they exist only to xor out the *previous* pointer. They are
+**464 of 760, i.e. 61% of the setup**, and they do no work related to the read at hand.
+
+### 11.2 S1 — merge the two shadows. −232 ops on EVERY dereference, no call-site changes.
+
+`to_flip_var` and `to_jump_var` are two `hex.vec w/4` registers, and inside
+`set_flip_and_jump_pointers` they are **always assigned the same value and always zeroed together**.
+With one shared shadow and a three-destination `exact_xor` (`@+8`, by the +4-per-destination rule):
+
+    clear to_flip, to_jump+w, shadow    (w/4)(@+8) = 264
+    set   to_flip, to_jump+w, shadow    (w/4)(@+8) = 264
+                                        ---------------
+                                                     528     vs 760  ->  -30.5%
+
+Setup is 80% of a `read_hex`, so this is **≈ −24% on every pointer read and write in any FlipJump
+program**, with no change at any call site.
+
+⚠ **The catch, and it is checkable:** the shadows are *not* always equal, because
+`xor_to_pointer.fj:10,37,46,155` and `basic_pointers.fj:114` use the one-sided `set_flip_pointer` /
+`set_jump_pointer`. Under a merged shadow those must maintain both fields, costing them
+`528` vs `464` (**+14%**). **In doom that is a near-pure win:** the census below shows doom's traffic
+is 57 sites through `set_flip_and_jump_pointers` and none through the one-sided pair.
+
+### 11.3 REFUTED — fusing `to_flip` and `to_jump` into one op
+
+Tempting: one op `(ptr+dbit+8) ; ptr` both arms the slot and jumps into it, which would delete pass 2
+(232 ops). **It does not work.** The dance uses the flip op **twice** — once to arm (jumping onward
+to the slot) and once to disarm (jumping onward to `cleanup`). The current design keeps every jump
+field a **compile-time code label**, so retargeting between the two uses is a constant `wflip`.
+Putting the runtime address `ptr` in a jump field makes that retarget a runtime xor, and you still
+need two address-bearing ops. Recorded so nobody re-derives it.
+
+### 11.4 The census says the setup is NOT doom's biggest pointer cost
+
+Call sites in `src/fj/*.fj`:
+
+    read_byte   38     ptr_index   35     write_byte  13     ptr_sub  6     read_hex  5     write_hex 1
+
+**`ptr_index` is as common as `read_byte`.** And an indexed read is priced `w(3@+10.25) + 7@+13`,
+against `read_hex`'s `w(0.75@+5) + 7@+13` — so `ptr_index` alone is `w(2.25@+5.25)` ≈ **1,968 ops,
+2.6x the setup.** For doom's most common pointer pattern the split is roughly
+
+    address arithmetic  ~1,968   (~60%)
+    setup                  760   (~23%)
+    the actual read        238   ( ~7%)
+
+**Sharing the setup is optimising the 23%.** That is worth doing — but it is not where the money is.
+
+### 11.5 S2 — the base is a COMPILE-TIME CONSTANT, and doom pays runtime for it
+
+`frame_render.fj:629-632`, four consecutive lines:
+
+    hex.set     w/4, trb_drawn_b,   drawn                  // materialise a LABEL into 8 hexes
+    hex.ptr_index     trb_drawn_p,  trb_drawn_b, trb_col_x // then a runtime 8-hex ADD of it
+    hex.set     w/4, trb_sprflag_b, sprflag                // again
+    hex.ptr_index     trb_sprflag_p, trb_sprflag_b, trb_col_x
+
+`ptr_index` (`pointer_arithmetics.fj:46-52`) is `mov w/4` + two `shl_hex` + `rep(8-#w) shr_bit` +
+**`add w/4, dst, ptr`**. When `ptr` is a constant and the array is aligned to its own size,
+`base + offset == base XOR offset`, so **the whole runtime add — and the `hex.set` that existed only
+to feed it — collapse to a compile-time constant.** The shifts then only need to cover the hexes a
+bounded index can reach, not all eight.
+
+`read_table_packed` has the identical shape: `table_address: .vec w/4, table` is a compile-time
+label stored in a register purely so a runtime `add` can consume it (§10 G4).
+
+### 11.6 S3 — one index, several arrays: share the arithmetic, not the setup
+
+Lines 630 and 632 index **two different arrays with the same `trb_col_x`**. Same at `:967/:969`
+(`tsf_drawn_p`, `tsf_sfflag_p` from `tsf_col_x`). Since both bases are compile-time constants,
+
+    second_ptr = first_ptr + (base2 - base1)      // a COMPILE-TIME constant
+
+so the second `ptr_index` **and** its `hex.set` are entirely redundant — one shift feeds every array
+indexed by that column. This is the owner's "share it more often" applied one level up from the
+dereference, and it is visible in four lines of one macro.
+
+### 11.7 The sharing taxonomy, with what each is worth
+
+    S1  merged shadow                    -232 per dereference    ALL 57 doom sites, no call-site edit
+    S2  constant base -> xor, not add    ~-1,968 (+ the set)     the 35 ptr_index sites
+    S3  one index, N arrays              a whole ptr_index each  pairs at :630/:632, :967/:969
+    S4  adjacent cells, one setup        -760 and -239 (ptr_inc) read_byte n, read_table_packed  (P1)
+    S5  16-bit read instead of 2 bytes   ~-898 per byte pair     wherever 2 adjacent bytes are read
+
+**S4 is the only one the plan had.** S1 is the one that needs no call-site change at all, and S2/S3
+are larger than everything else combined.
+
+### 11.8 Writes: already shared, and they pay the full setup
+
+`write_hex` (`write_pointers.fj:9-14`) is `set_flip_and_jump_pointers` -> `read_byte_from_inners_ptrs`
+-> `xor` -> `xor_hex_to_flip_ptr`. **A write IS a read plus a flip-back, through ONE setup** — already
+optimal, no win there. But two consequences the plan missed: a write costs a full 760-op setup like a
+read, so S1/S2/S4 apply to doom's 13 `write_byte` sites too; and **a read of `*p` and a later write to
+`*p` at two separate call sites do NOT share** — the write redoes the setup. Fusing those is another
+760.

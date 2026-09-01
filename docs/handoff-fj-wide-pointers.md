@@ -1077,3 +1077,81 @@ stl_merged`, `stl_mut1`, `negctl.py`, `bench3.py`) whose files **do not exist**,
 unquotable however good its reasoning. The numbers kept above are the ones whose harness is on disk
 (`scratchpad/killcost/`, logs included) plus this repo's own `m1_reset.fj:20-24`. **R9 applies to
 reviewers too.**
+
+---
+
+## 12. STEP 1 IS DONE - what it cost, and the three things it taught
+
+Done 2026-09-02, in an **isolated git worktree**, never the shared editable install:
+`C:/Users/tomhe/Documents/flipjump-wide`, branch `stl-one-shadow`, commit `232f737`.
+`flipjump-151` is untouched, so doom, `bf2fj` and `c2fj` still build against the old stl until
+someone merges it. Point anything at the new one with
+`PYTHONPATH=C:/Users/tomhe/Documents/flipjump-wide` (verified: it redirects `get_stl_paths`).
+
+### 12.1 The change
+
+    was   address_and_variable_xor        to_flip,   to_flip_var, to_flip_var
+          address_and_variable_xor        to_jump+w, to_jump_var, to_jump_var
+          address_and_variable_double_xor to_flip, to_flip_var, to_jump+w, to_jump_var, ptr
+          -> time w(0.75@+5)   space w(0.75@+29)
+    now   address_and_variable_triple_xor to_flip, to_jump+w, to_ptr_var, to_ptr_var
+          address_and_variable_triple_xor to_flip, to_jump+w, to_ptr_var, ptr
+          -> time w(0.5@+4)    space w(0.5@+22)
+
+`set_flip_pointer` and `set_jump_pointer` are **aliases** of the combined setter, as section 11.12 A
+required, and their comments say they must stay aliases. `bit/` untouched. `ptr_init` drops one
+`hex.vec w/4`.
+
+**Section 0.1 is satisfied by construction, not by effort**: the merged setter is the one both
+halves call (`xor_*_from_ptr` reads, `write_*`/`zero_ptr` writes), and the two absorbed one-sided
+setters are one per half (`set_flip_pointer` serves `xor_*_to_ptr`/`ptr_flip`/`ptr_wflip`,
+`set_jump_pointer` serves `ptr_jump`). The new test opens with a read/write round-trip.
+
+### 12.2 The numbers that were MEASURED, not modelled
+
+| what | measured |
+|---|---|
+| `exact_xor` family space, k=1/2/3/4, per instance | **32 / 48 / 64 / 80** ops |
+| `stl.startup_and_init_pointers` at w=64/32/16 | 680 / 600 / 560 ops -> slope exactly **2.5w** |
+| flipjump suites | fast+medium+hexlib **194**, slow **70**, unit **366 passed, 59 skipped** |
+
+The k=1..4 row is worth reading twice. Published space is `@+12 / @+28 / @+44 / @+60`, and the
+measured values sit `@ = 20` above every one of them - the same implied `@` on all four rows. So
+the `@+4(k-1)` / `+16 per k` mechanism of section 11.10a is confirmed by measurement, and the
+interpolated `@+44` for k=3 was right. The startup slope of 2.5w (2w of it `bit.ptr_init`) confirms
+`hex.ptr_init` is now `0.5w + const`, i.e. exactly one `hex.vec w/4` lighter.
+
+### 12.3 Three things the plan did not know
+
+**A. A mutation can HANG rather than crash, and a harness that edits source must survive that.**
+The first mutation-control run sat for 25 minutes and was killed by its own `timeout` - so its
+`finally` never ran and it **left a mutation applied to the stl on disk**. A corrupted setter does
+not fault; it jumps somewhere that loops. The harness now runs every case in a **child process with
+a wall-clock cap** (a timeout is a legitimate, failing result) and writes `.orig` backups it heals
+from on the next start. Any future tool that mutates real source needs both.
+
+**B. The pointer programs are blind to a source nibble of `0xf`.** Mutation M1 - an off-by-one
+reachable only when a source hex is 15 - **survived** `hex_ptr`, `nth_pointers` and the new setter
+test, because their sources are the nibbles of real addresses and never take that value. That is why
+`programs/hexlib_tests/basics1/triple_exact_xor.fj` exists and sweeps all 16. **A k-table macro needs
+a test that feeds it every value**; a test that merely uses the macro is not one.
+
+**C. The wild jump is real, and it lands exactly where 11.12 A said.** Keeping `set_jump_pointer`
+one-sided stops the output at `call:` - that is `stl.return`. Keeping `set_flip_pointer` one-sided
+stops it at `flip-then-read:` - that is `ptr_flip`. Doom calls neither, so no doom gate could ever
+have caught it.
+
+### 12.4 The negative control (R9)
+
+`scratchpad/oneshadow/mutctl.py`: baseline **4/4 programs match the golden `.out` the repo ships**,
+and **8/8 mutations rejected** - three in `triple_exact_xor`, two in
+`address_and_variable_triple_xor`, and M6/M7/M8 in the setters. Golden output for
+`pointer_setters.fj` was captured on the **unmodified** stl before any edit; `triple_exact_xor.out`
+was computed in Python from the xor semantics rather than read off a run.
+
+`scratchpad/oneshadow/complexity_update.py` rewrote **86** published complexity lines and refuses any
+formula whose decomposition does not reproduce what the stl publishes today - **20/20 reproduced**.
+It found one pre-existing error on the way: `stack.fj` published `push_ret_address` as `9@+51` where
+its own parts (`sp_inc` 9@+14 + `zero_ptr` 15@+37) and `ptrlib`'s `stl.call` both give `24@+51`.
+Fixed. It also could not reproduce `runlib`'s `7026 for w=64` (measured 8687); the `-w/4` delta is
+exact so the figure moves to 7010, but **that base was already stale and this work did not fix it**.

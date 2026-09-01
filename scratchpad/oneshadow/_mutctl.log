@@ -1,0 +1,40 @@
+BASELINE (the stl as it stands) -- must PASS
+      triple_exact_xor  match
+      pointer_setters   match
+      hex_ptr           match
+      nth_pointers      match
+
+MUTATIONS -- each must be REJECTED
+  M1 triple_exact_xor: off-by-one in the first walk (only source 0xf reaches it)
+      -> rejected
+      triple_exact_xor  MISMATCH  got=b'triple:05f14e36c05f41b14e72805f8d714ebe405fc9314efa014e\n'
+  M2 triple_exact_xor: the second group bit 0 is never flipped
+      -> rejected
+      triple_exact_xor  MISMATCH  got=b'ASSEMBLE-ERROR: FlipJumpParsingException: Errors found in file C:\\Users\\tomhe\\Do'
+  M3 triple_exact_xor: off-by-one chaining back to the first table
+      -> rejected
+      triple_exact_xor  MISMATCH  got=b'triple:05f14e36c05f41b14e72805f8d714ebe405fc9314efa014e\n'
+  M4 address_and_variable_triple_xor: address2 low bit aimed one bit high
+      -> rejected
+      triple_exact_xor  match
+      pointer_setters   MISMATCH  got=b'<TIMED OUT: the program never terminated>'
+  M5 address_and_variable_triple_xor: the shadow low bit aimed one bit high
+      -> rejected
+      triple_exact_xor  match
+      pointer_setters   MISMATCH  got=b'roundtrip:'
+  M6 set_jump_pointer kept one-sided (the stl.return wild jump)
+      -> rejected
+      triple_exact_xor  match
+      pointer_setters   MISMATCH  got=b'roundtrip:a7\nflip-then-read:a71\nwflip-read-jump:a7N\ncall:'
+  M7 set_flip_pointer kept one-sided (the ptr_flip/ptr_wflip wild jump)
+      -> rejected
+      triple_exact_xor  match
+      pointer_setters   MISMATCH  got=b'roundtrip:a7\nflip-then-read:'
+  M8 set_flip_and_jump_pointers: the clearing pass dropped
+      -> rejected
+      triple_exact_xor  match
+      pointer_setters   MISMATCH  got=b'roundtrip:'
+
+restored: logics.fj, basic_pointers.fj
+
+NEGATIVE CONTROL PASSED -- baseline matches, all 8 mutations rejected.

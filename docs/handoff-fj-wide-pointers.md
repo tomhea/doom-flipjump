@@ -1085,8 +1085,15 @@ reviewers too.**
 Done 2026-09-02, in an **isolated git worktree**, never the shared editable install:
 `C:/Users/tomhe/Documents/flipjump-wide`, branch `stl-one-shadow`, commit `232f737`.
 `flipjump-151` is untouched, so doom, `bf2fj` and `c2fj` still build against the old stl until
-someone merges it. Point anything at the new one with
-`PYTHONPATH=C:/Users/tomhe/Documents/flipjump-wide` (verified: it redirects `get_stl_paths`).
+someone merges it. Point doom at the new one with `scratchpad/oneshadow/deg_with_stl.py --worktree`.
+
+⚠ **Do NOT use `PYTHONPATH` for this** - it cost a run. The flipjump worktree ships its own `tests/`
+package and it is a REGULAR package (`__init__.py`), while `doom-flipjump/tests` is a NAMESPACE one.
+A regular package beats a namespace portion wherever the two sit on `sys.path`, so the worktree on
+`PYTHONPATH` silently rebinds `tests` and `deg_gate` dies at `from tests.fj.stream_screen import
+StreamScreen`. Put the worktree on `sys.path` only long enough to bind `flipjump`, then remove it:
+later `flipjump.*` submodules still resolve through the bound parent, so the stl comes from the
+worktree while every other name comes from doom.
 
 ### 12.1 The change
 
@@ -1155,3 +1162,51 @@ It found one pre-existing error on the way: `stack.fj` published `push_ret_addre
 its own parts (`sp_inc` 9@+14 + `zero_ptr` 15@+37) and `ptrlib`'s `stl.call` both give `24@+51`.
 Fixed. It also could not reproduce `runlib`'s `7026 for w=64` (measured 8687); the `-w/4` delta is
 exact so the figure moves to 7010, but **that base was already stale and this work did not fix it**.
+
+### 12.5 STEP 2 - the only honest doom number, measured 2026-09-02
+
+`scratchpad/deg_gate.py` run twice on the SAME tree and the SAME emitted program (part sizes
+identical to the byte: entry=32, tables=333,476, main=64, segconsts=44,419, walk=73,941, state=424,
+banks=3,247,543), the only difference being which stl the assembler pulled in. Launch with
+`scratchpad/oneshadow/deg_with_stl.py [--worktree]`.
+
+**Both runs PASS. All eight frames byte-exact.** The op counts move; that is the re-baselining
+11.12 warned about, not a failure.
+
+| viewpoint | stock stl | one shadow | delta | |
+|---|---:|---:|---:|---:|
+| (664, 291, 0x18000000) | 43,192,505 | 40,919,374 | -2,273,131 | -5.26% |
+| (1272, -724, 0x40000000) | 34,296,270 | 32,877,007 | -1,419,263 | -4.14% |
+| (1869, 479, 0x80000000) | 39,327,546 | 36,864,338 | -2,463,208 | -6.26% |
+| (-416, 256, 0x0) | 32,861,669 | 31,454,252 | -1,407,417 | -4.28% |
+| **all four** | **149,677,990** | **142,114,971** | **-7,563,019** | **-5.05%** |
+
+The four stock counts reproduce the numbers this tree recorded earlier TO THE DIGIT, so the
+baseline is this session's own measurement, not a quoted one.
+
+**Space went the favourable way, as 11.12 B predicted.** Image span (max word address, read from
+the .fjm segment table - not the lzma-compressed file size):
+
+    40,746,904 -> 40,638,460 words   =  -108,444 words  (-0.27%)
+
+**Read this delta for what it is.** `-5.05%` is a WHOLE FRAME, in which most work is not a pointer
+dereference at all. It is not comparable to 11.12 B's `-18% to -20%`, which is per dereference
+MACRO. Both can be true at once and here they are: doom reaches the combined setter ~139-149 times
+in source and the one-sided pair ZERO times, so every doom site takes the cheaper path and none
+takes the +2w one.
+
+A cross-check on the span: the per-site space saving is `8 x [(@+28)+(@+28)+(@+60)] -
+8 x [(@+44)+(@+44)] = -8@-224` at w=32, i.e. between ~384 and ~427 ops per expanded setter instance
+depending on the `@` actually paid. `108,444 / 2` program-ops over that range implies **~127-141
+expanded setter instances**, which brackets the ~139 source-site census. Consistent, and it is a
+bracket rather than a count because `@` is a popcount that varies per instance.
+
+### 12.6 What is NOT done
+
+* **The stl is not merged.** It lives in the `stl-one-shadow` worktree; `flipjump-151` is untouched,
+  and it is a shared editable install that `bf2fj` and `c2fj` also build against. Merging it is the
+  owner's call, not a side effect of this work.
+* **doom's `tests/fj` and `m5_gate` have not been run against the new stl.** `deg_gate` is four
+  frames of the `visual` tier; `tests/fj` covers the `render` tier and `m5_gate` is the CUMULATIVE
+  standalone check where a one-ulp drift on frame 0 parts every later frame. Both are the right
+  pre-merge gates, and both are heavy builds.

@@ -1445,3 +1445,68 @@ Verified feasible this session: a conditionally-emitted padded table costs **3 o
 declared before the file that uses it (same parse-time rule as 3g).
 
 **This is the next piece of work, and it comes before any doom repack.**
+
+---
+
+## 14. WHERE THE FRAME ACTUALLY GOES - measured 2026-09-03
+
+Profiled with a per-op IP histogram over `build/doom_e1m1_doors_rt.fjm` (hosted-doors; there is no
+visual-tier .fjm on disk), two full frames: spawn 39,746,213 ops and (664,291) 50,796,118.
+Controls that passed: the histogram sums exactly to the interpreter's `op_counter`; the
+instrumented frame is BYTE-IDENTICAL to the native run; the label table's mtime matches the binary;
+and a shallowest-vs-deepest label-naming sweep moves no category by more than 0.02pp.
+⚠ The hosted-doors image is ~9M ops/frame dearer than the visual tier deg_gate measures, so the
+PERCENTAGES transfer and the absolute totals do not.
+
+### 14.1 THE HEADLINE: two thirds of every frame is one stl macro
+
+Self-time, charging each op to the innermost macro whose body it sits in:
+
+| family | spawn | (664,291) |
+|---|---:|---:|
+| **the `exact_xor` family** (`exact_xor` 46.2%, `double_` 17.2%, `quadrupled_` 3.6%) | **67.32%** | **68.08%** |
+| other stl/hex primitives | 19.74% | 19.64% |
+| `hex.tables.*` switch dispatch | 7.14% | 6.50% |
+| **doom's own macro bodies** | **4.51%** | **4.01%** |
+
+**doom's own code is 4.5% of doom.** Anything that does not make `exact_xor` cheaper, or call it
+less, is working on a fifth of the frame at best.
+
+`exact_xor` is `wflip src+w, switch, src`, up to four table steps, then `wflip src+w, switch`. A
+`wflip` of a code address costs its POPCOUNT, and `switch`'s bit-address is `op_index*dw`, so the
+cost is popcount(op_index). Measured in a small program `hex.xor` is 12-16 ops; at doom's 20.3M
+ops those indices are ~24 bits with popcount ~12, so the two wflips are ~24 of ~29 ops per call.
+**Measuring that at doom's real address range needs a heavy build and has not been done.**
+
+### 14.2 Structural split (disjoint, sums to the frame)
+
+| category | spawn | (664,291) |
+|---|---:|---:|
+| plane / floor+ceiling | 26.03% | 27.75% |
+| BSP walk + one-sided seg projection (pass 1) | 26.75% | 17.67% |
+| column setup (pass 2) | 11.69% | 9.01% |
+| simulation | 11.60% | 9.00% |
+| sprite / thing render | 9.97% | 23.31% |
+| shared stl leaf (caller unknowable) | 9.99% | 9.53% |
+| wall pixels | 2.31% | 2.64% |
+
+The simulation is **view-independent** (4,611,748 vs 4,570,896 across two very different frames).
+Cross-cutting: pointer deref core **11.83% / 15.64%** - which corroborates the documented ~12.7% -
+multiply/divide 23.65% / 21.16%, and actual device byte moves **0.91% / 1.23%**.
+
+### 14.3 What survived adversarial verification: 6,781,000 ops/frame
+
+| idea | ops/frame | effort |
+|---|---:|---|
+| kill the dense-multiplier backface cull (`proj.wall_x_range_m`) | 2,100,000 | medium |
+| class-dispatch the seg affine front test | 1,234,000 | medium |
+| amortise `set_flip_and_jump_pointers` across adjacent cells | 1,150,000 | large |
+| constant-base narrow index (kill runtime `ptr_index`) | 890,000 | large |
+| L-inf map-unit far reject before the tz multiply | 890,000 | medium |
+| cheapen `lines_pid_ids` (`mul_const` -> shifts) | 517,000 | small |
+
+Two were refuted, both for the same reason worth remembering: `deg_gate` builds `tier="visual"`,
+where `moving_things=False`, so `sim.thing_load` and the `throw` table are **not emitted at all**.
+
+**35,528,743 - 6,781,000 = 28,747,743.** That is 44% of the way to 20M, not there. The remaining
+8.7M has to come out of `exact_xor`, which is where the next round points.

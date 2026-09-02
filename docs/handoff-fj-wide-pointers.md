@@ -1346,3 +1346,84 @@ bracket rather than a count because `@` is a popcount that varies per instance.
   frames of the `visual` tier; `tests/fj` covers the `render` tier and `m5_gate` is the CUMULATIVE
   standalone check where a one-ulp drift on frame 0 parts every later frame. Both are the right
   pre-merge gates, and both are heavy builds.
+
+---
+
+## 13. IS A WIDE CELL WORTH IT FOR DOOM? Measured 2026-09-02, and the answer is "not as a global"
+
+### 13.1 The economics, measured at w=32
+
+| operation | ops |
+|---|---:|
+| `read_byte` @ PTR_CELL_BITS=8 | 386.9 |
+| `read_byte` @16 | 484.1 |
+| `read_cell` @16 (two bytes, ONE dereference) | 567.7 |
+| `write_byte` @8 / @16 | 583.2 / 651.1 |
+| `write_cell` @16 | 917.5 |
+
+    two bytes unpacked @8 : 773.9      packed @16 : 567.7      saving per pair : 206.2
+    tax on every UNPACKED dereference  : +97.1  (+25%)
+
+Sanity check on those levels: adding back the one-shadow saving (~235 ops) puts `read_byte` before
+this work at ~622, against the **628.0** this repo measured itself in `src/fj/m1_reset.fj:20-24`.
+
+### 13.2 The tax on doom, on its real program
+
+`deg_gate` with `-D hex.pointers.PTR_CELL_BITS=16` and doom's layout UNCHANGED. All four frames
+**byte-exact** - a wide cell holding a byte reads back the same byte - with these op counts:
+
+| viewpoint | @8 | @16 | delta |
+|---|---:|---:|---:|
+| (664,291,0x18000000) | 40,919,374 | 41,544,124 | +624,750 (+1.53%) |
+| (1272,-724,0x40000000) | 32,877,007 | 32,839,654 | **-37,353 (-0.11%)** |
+| (1869,479,0x80000000) | 36,864,338 | 37,622,461 | +758,123 (+2.06%) |
+| (-416,256,0x0) | 31,454,252 | 31,583,934 | +129,682 (+0.41%) |
+| **total** | 142,114,971 | 143,590,173 | **+1,475,202 (+1.04%)** |
+
+⚠ **One viewpoint got CHEAPER**, which is not noise in the measurement but a real effect: `pad 65536`
+shifts the whole program, so every `wflip` of a code address pays a different popcount. The
+whole-program delta therefore mixes the per-dereference tax with a layout-shift term, and only the
+whole-program number is honest.
+
+**Break-even: ~44% of doom's dereferences must become packed pairs** (1,475,202 / 206.2 = 7,154
+pairs = 14,308 of the ~32,156 dereferences the four frames execute; that count comes from dividing
+the one-shadow saving by its per-dereference value).
+
+### 13.3 What is actually packable - the survey (10 agents, 55 candidates, 4 areas)
+
+Most apparent candidates are **dead code**, and the survey checked call sites rather than
+definitions: `stream.band_walk`/`half_walk` are ablate-only (`ascode` gate); `stream.w2s_wall`/
+`wpx_wall` are retired tiers (`w2s_flag = wpx_flag = 0`); `stream.flush_frame`/`emit_prefix` have
+**no call site at all** and `stream_render.fj:4`'s header naming `stream.entry_append` is STALE
+(no such macro); `plane_bands.fj` and `plane_render.fj` are both marked NOT SHIPPED;
+**`projection.fj` has zero live pointer reads** (every `read_table_packed` is `rep(1-disp)`-gated
+with `disp=1` at every live caller); and the stl's `copy_bytes`/`fill_bytes`/`push`/`pop`/
+`print_ptr_*` have zero doom call sites.
+
+The **live** candidates all sit in the hot per-column and per-linedef loops: the sfslot V5 piece
+read (4 bytes per screen column, unconditional at `frame_render.fj:1811`), spslot (7 bytes/column),
+`sim.check_line`'s 8-byte bbox row and 14-byte linedef row, and the 17-byte thing rows.
+
+Two traps the survey found, worth having before anyone starts:
+* `lut_generator.generate_packed_lut_fj` is the **sole producer** of `lnbox/lnrow/bkoff/bklin/
+  throw/throwc` - one function to change - but `doorcode.py:237` patches a byte INSIDE `lnrow` at
+  runtime with a raw `wflip`, and packing moves both that address and the flag's bit position.
+* odd-width tables (`throw` 17, `throwc` 5, `bkoff` 3) put every second row on an odd byte, so no
+  pair shares a cell without a pad byte.
+
+### 13.4 THE FIX: two tables, not one global width
+
+`PTR_CELL_BITS` as a program-global is the wrong shape, and that - not the packing - is what makes
+the 44% threshold. **The bit you flip selects the table**: `dbit+8` lands a slot in the 256-entry
+table, `dbit+16` in the 65536-entry one. Both can live in one program (256..511 and 65536..131071
+do not overlap), share `ret_after_read_byte`, and share one 4-hex `read_byte` register.
+
+So narrow reads keep costing exactly what they cost today and only the sites actually packed pay
+the wide price - which removes the threshold and makes **every individual conversion profitable on
+its own**.
+
+Verified feasible this session: a conditionally-emitted padded table costs **3 ops when off** and
+131,072 when on, and `-D` switches it on from a declared default of 0. The constant must be
+declared before the file that uses it (same parse-time rule as 3g).
+
+**This is the next piece of work, and it comes before any doom repack.**

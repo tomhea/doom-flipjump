@@ -1,11 +1,11 @@
-"""Prove the CELL_BITS refactor is INERT at its default, and that it really is a knob.
+"""Prove the PTR_CELL_BITS refactor is INERT at its default, and that it really is a knob.
 
 Two claims, and the second is what makes the first mean anything:
 
-  1. at CELL_BITS=8 the assembled bytes are IDENTICAL to the stl before the refactor. A generalised
+  1. at PTR_CELL_BITS=8 the assembled bytes are IDENTICAL to the stl before the refactor. A generalised
      table that quietly emits something else at the default would be a silent regression for every
      program that never touches the knob.
-  2. at CELL_BITS=12 and 16 the bytes DIFFER -- otherwise claim 1 could be true simply because the
+  2. at PTR_CELL_BITS=12 and 16 the bytes DIFFER -- otherwise claim 1 could be true simply because the
      constant reaches nothing.
 
 Each assembly runs in a child process, so the parser's stl-prefix cache cannot carry one stl into
@@ -34,7 +34,7 @@ PROGRAMS = [
     WORKTREE / "programs/concept_checks/hex_ptr.fj",
     WORKTREE / "programs/hexlib_tests/basics2/nth_pointers.fj",
 ]
-BASE_REV = "39601e9"      # the commit before the CELL_BITS refactor
+BASE_REV = "39601e9"      # the commit before the PTR_CELL_BITS refactor
 
 
 def assemble(program, *defines, width=64):
@@ -88,12 +88,12 @@ def main():
 
     problems = []
     try:
-        print("A. the refactored stl, at the default CELL_BITS=8, and at 12 / 16")
+        print("A. the refactored stl, at the default PTR_CELL_BITS=8, and at 12 / 16")
         now, wide12, wide16 = {}, {}, {}
         for prog in PROGRAMS:
             now[prog], m = assemble(prog)
-            wide12[prog], m12 = assemble(prog, "hex.pointers.CELL_BITS = 12")
-            wide16[prog], m16 = assemble(prog, "hex.pointers.CELL_BITS = 16")
+            wide12[prog], m12 = assemble(prog, "hex.pointers.PTR_CELL_BITS = 12")
+            wide16[prog], m16 = assemble(prog, "hex.pointers.PTR_CELL_BITS = 16")
             print("   %-20s default:%-6s  12:%-6s  16:%s" % (prog.name, m, m12, m16))
 
         print(NL + "B. the stl as of " + BASE_REV + " (before the refactor)")
@@ -119,7 +119,7 @@ def main():
         print("%-22s %-14s %-14s %s" % (prog.name, "IDENTICAL" if inert else "DIFFERS",
                                         "yes" if d12 else "NO", "yes" if d16 else "NO"))
         if not inert:
-            problems.append(prog.name + ": not inert at CELL_BITS=8")
+            problems.append(prog.name + ": not inert at PTR_CELL_BITS=8")
         if not (d12 and d16):
             problems.append(prog.name + ": the knob reaches nothing -- inertness proves nothing")
     print()

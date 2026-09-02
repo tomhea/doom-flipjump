@@ -1,6 +1,6 @@
-"""Negative control for the CELL_BITS decoder table (R9).
+"""Negative control for the PTR_CELL_BITS decoder table (R9).
 
-tests/unit/test_cell_bits.py claims that a pointer program is still correct at CELL_BITS 8, 12 and
+tests/unit/test_ptr_cell_bits.py claims that a pointer program is still correct at PTR_CELL_BITS 8, 12 and
 16. This checks the claim can fail: each mutation below breaks the table arithmetic on purpose and
 must be REJECTED.
 
@@ -30,34 +30,34 @@ TOUCHED = (RUNLIB, BASIC, FROM_PTR, TO_PTR)
 ENTRY = "                d==0 ? 0 : (.read_byte + (((#d)-1)/4)*dw + dbit + ((#d)-1)%4), "
 
 MUTATIONS = [
-    ("M1 the table is sized from a literal 256 instead of CELL_BITS", BASIC,
-     "            rep(1<<.CELL_BITS, d) stl.fj ", "            rep(256, d) stl.fj ",
+    ("M1 the table is sized from a literal 256 instead of PTR_CELL_BITS", BASIC,
+     "            rep(1<<.PTR_CELL_BITS, d) stl.fj ", "            rep(256, d) stl.fj ",
      "at 12/16 the table is too short for the entries the slot can reach"),
     ("M2 the table is no longer aligned to its own size", BASIC,
-     "            pad 1<<.CELL_BITS", "            pad 256",
-     "the table does not start at op 2^CELL_BITS, so entry V is not at V"),
+     "            pad 1<<.PTR_CELL_BITS", "            pad 256",
+     "the table does not start at op 2^PTR_CELL_BITS, so entry V is not at V"),
     ("M3 nibble selection off by one hex", BASIC,
      ENTRY, "                d==0 ? 0 : (.read_byte + ((#d)/4)*dw + dbit + ((#d)-1)%4), ",
      "high bits land in the wrong hex of read_byte"),
     ("M4 bit-in-nibble selection off by one", BASIC,
      ENTRY, "                d==0 ? 0 : (.read_byte + (((#d)-1)/4)*dw + dbit + (#d)%4), ",
      "every decoded bit is one position out"),
-    ("M5 the arming flip still adds 256, not 2^CELL_BITS", FROM_PTR,
-     "            wflip hex.pointers.to_flip, dbit+hex.pointers.CELL_BITS" + NL
-     + NL + "            // 2.  *(ptr+w) ^= 2^CELL_BITS",
+    ("M5 the arming flip still adds 256, not 2^PTR_CELL_BITS", FROM_PTR,
+     "            wflip hex.pointers.to_flip, dbit+hex.pointers.PTR_CELL_BITS" + NL
+     + NL + "            // 2.  *(ptr+w) ^= 2^PTR_CELL_BITS",
      "            wflip hex.pointers.to_flip, dbit+8" + NL
-     + NL + "            // 2.  *(ptr+w) ^= 2^CELL_BITS",
-     "the slot lands 2^CELL_BITS-256 entries away from its own"),
+     + NL + "            // 2.  *(ptr+w) ^= 2^PTR_CELL_BITS",
+     "the slot lands 2^PTR_CELL_BITS-256 entries away from its own"),
     ("M6 the read destination is not cleared across the whole cell", FROM_PTR,
-     "            hex.zero hex.pointers.CELL_BITS/4, hex.pointers.read_byte",
+     "            hex.zero hex.pointers.PTR_CELL_BITS/4, hex.pointers.read_byte",
      "            hex.zero 2, hex.pointers.read_byte",
      "a wide read keeps the previous read's high hexes"),
     ("M7 zero_ptr clears only two hexes of a wider cell", TO_PTR,
-     "            rep(hex.pointers.CELL_BITS/4, i) .xor_hex_to_flip_ptr hex+i*dw, 4*i",
+     "            rep(hex.pointers.PTR_CELL_BITS/4, i) .xor_hex_to_flip_ptr hex+i*dw, 4*i",
      "            rep(2, i) .xor_hex_to_flip_ptr hex+i*dw, 4*i",
      "the write side stops matching the read side -- section 0.1"),
-    ("M8 CELL_BITS is declared after the file that uses it", RUNLIB,
-     "        CELL_BITS = 8", "        CELL_BITS = 4",
+    ("M8 PTR_CELL_BITS is declared after the file that uses it", RUNLIB,
+     "        PTR_CELL_BITS = 8", "        PTR_CELL_BITS = 4",
      "a 4-bit cell cannot hold the byte the programs store"),
 ]
 
@@ -65,7 +65,7 @@ MUTATIONS = [
 def run_tests():
     try:
         r = subprocess.run(
-            [sys.executable, "-m", "pytest", "tests/unit/test_cell_bits.py", "-q", "--no-header", "-x"],
+            [sys.executable, "-m", "pytest", "tests/unit/test_ptr_cell_bits.py", "-q", "--no-header", "-x"],
             cwd=str(WORKTREE), capture_output=True, timeout=TIMEOUT, text=True)
     except subprocess.TimeoutExpired:
         return False, "<TIMED OUT>"

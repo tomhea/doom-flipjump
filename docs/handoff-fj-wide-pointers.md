@@ -450,16 +450,16 @@ Suites: unit 371 passed / 59 skipped; fast+medium+hexlib+slow 264 passed.
 override it with `-D hex.pointers.<NAME>=12`. Nothing in 2.1 has been built yet.
 ### 3g. SECTION 2.1 / 3d IS BUILT - `stl-one-shadow` commit `ab44bb3`
 
-`hex.pointers.CELL_BITS` (declared in `runlib.fj`, default 8) is how many BITS one pointed-to cell
-holds, and `ptr_init` lays `2^CELL_BITS` entries at op exactly `2^CELL_BITS`. Override per build
-with `fj ... -D hex.pointers.CELL_BITS=16`. Ceiling `dbit+CELL_BITS < dw` (25 at w=32, 56 at w=64);
+`hex.pointers.PTR_CELL_BITS` (declared in `runlib.fj`, default 8) is how many BITS one pointed-to cell
+holds, and `ptr_init` lays `2^PTR_CELL_BITS` entries at op exactly `2^PTR_CELL_BITS`. Override per build
+with `fj ... -D hex.pointers.PTR_CELL_BITS=16`. Ceiling `dbit+PTR_CELL_BITS < dw` (25 at w=32, 56 at w=64);
 must be a multiple of 4.
 
 | side | what changed |
 |---|---|
-| read | table sized and aligned from `CELL_BITS`; entry `d` flips bit `(#d)-1`, in hex `((#d)-1)/4` at bit `((#d)-1)%4` - the generalisation of the old `(#d)<=4 ? ... : ...+dw`. `read_byte` is `hex.vec CELL_BITS/4`; the dance zeroes and arms with `dbit+CELL_BITS`. |
+| read | table sized and aligned from `PTR_CELL_BITS`; entry `d` flips bit `(#d)-1`, in hex `((#d)-1)/4` at bit `((#d)-1)%4` - the generalisation of the old `(#d)<=4 ? ... : ...+dw`. `read_byte` is `hex.vec PTR_CELL_BITS/4`; the dance zeroes and arms with `dbit+PTR_CELL_BITS`. |
 | write | `xor_cell_to_flip_ptr` covers the whole cell, and `zero_ptr` uses it. |
-| new | `hex.read_cell` / `hex.write_cell` (+ `xor_cell_from_ptr`) move all `CELL_BITS` bits in ONE dereference. At `CELL_BITS=8` they are exactly `read_byte` / `write_byte`. |
+| new | `hex.read_cell` / `hex.write_cell` (+ `xor_cell_from_ptr`) move all `PTR_CELL_BITS` bits in ONE dereference. At `PTR_CELL_BITS=8` they are exactly `read_byte` / `write_byte`. |
 
 ⚠ **The names `read_cell` / `write_cell` are NOT settled** - section 5 says the maintainer picks
 the name and it is the one irreversible decision here. They are additive; no stl-api macro changed.
@@ -468,7 +468,7 @@ the name and it is the one irreversible decision here. They are additive; no stl
 
 A constant is substituted where it is **USED**, at parse time. So an override read after the stl
 arrives too late for anything the stl itself computes from that constant - which is every use of
-`CELL_BITS`. The defines file is now inserted before the stl, not merely before the user files.
+`PTR_CELL_BITS`. The defines file is now inserted before the stl, not merely before the user files.
 A define's VALUE may still use `w` (a parser builtin) and an earlier define, but **not** an stl
 constant such as `dw` - write `2*w`. Side effect worth knowing: a non-stl file first disables the
 parser's stl-prefix cache for that run, which is exactly right, because a cached prefix was parsed
@@ -476,7 +476,7 @@ without the override.
 
 #### What was proven, and the two controls that make it mean something
 
-* **Inert at the default** (`scratchpad/oneshadow/inert_check.py`): at `CELL_BITS=8` the assembled
+* **Inert at the default** (`scratchpad/oneshadow/inert_check.py`): at `PTR_CELL_BITS=8` the assembled
   bytes of `pointer_setters`, `hex_ptr` and `nth_pointers` are IDENTICAL to the stl at `39601e9`.
   The same run asserts the bytes DIFFER at 12 and 16 - and that control is not decoration: **the
   first version reached nothing at all**, and byte-identical-at-8 was equally true of it.
@@ -492,7 +492,7 @@ Suites: unit 385 passed / 59 skipped; fast+medium+hexlib+slow 266 passed.
 
 #### And the doom gate, on the finished stl
 
-`deg_gate` re-run against the stl at `ab44bb3` - the one-shadow setters AND the CELL_BITS table:
+`deg_gate` re-run against the stl at `ab44bb3` - the one-shadow setters AND the PTR_CELL_BITS table:
 
     (664,291,0x18000000):   40,919,374 ops  BYTE-EXACT
     (1272,-724,0x40000000): 32,877,007 ops  BYTE-EXACT
@@ -500,7 +500,7 @@ Suites: unit 385 passed / 59 skipped; fast+medium+hexlib+slow 266 passed.
     (-416,256,0x0):         31,454,252 ops  BYTE-EXACT
     PASS
 
-**Identical to the one-shadow run to the digit** (12.5), which is the inertness of the CELL_BITS
+**Identical to the one-shadow run to the digit** (12.5), which is the inertness of the PTR_CELL_BITS
 refactor demonstrated on doom's real 20.3M-op program rather than on a three-program test set.
 So the whole of phase 0 is worth exactly what 12.5 measured: **-5.05% ops over four frames, span
 -0.27%**, byte-exact throughout.

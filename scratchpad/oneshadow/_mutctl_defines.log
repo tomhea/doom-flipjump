@@ -1,26 +1,32 @@
 BASELINE -- must PASS
-      26 passed, 2 skipped in 0.58s
+      29 passed, 2 skipped in 2.54s
 
 MUTATIONS -- each must be REJECTED
   M1 3a: the override no longer suppresses the declaration
       breaks: the program keeps its own value, or hits Can-t-redeclare
-      -> rejected   1 failed, 6 passed, 2 skipped in 0.41s
+      -> rejected   1 failed, 6 passed, 2 skipped in 0.45s
   M2 3a: the defines file records the value but never publishes it
       breaks: the overridden constant ends up undefined
-      -> rejected   1 failed, 6 passed, 2 skipped in 0.40s
+      -> rejected   1 failed, 6 passed, 2 skipped in 0.45s
   M3 3c: an unmatched override is no longer an error
       breaks: a misspelled -D looks exactly like a working one
-      -> rejected   1 failed, 8 passed, 2 skipped in 0.52s
+      -> rejected   1 failed, 8 passed, 2 skipped in 1.26s
   M4 3c: a define counts as satisfied the moment it is written
       breaks: 3c never fires: a define that meets no declaration is accepted
-      -> rejected   1 failed, 8 passed, 2 skipped in 0.52s
-  M5 -D w: the builtin guard is dropped
-      breaks: -D w=64 silently rewrites w in the const table
-      -> rejected   1 failed, 10 passed, 2 skipped in 0.54s
+      -> rejected   1 failed, 8 passed, 2 skipped in 1.24s
+  M9 3c: a define may satisfy ITSELF the moment it is recorded
+      breaks: a repeated or misspelled -D of an undeclared name is silently accepted
+      -> rejected   1 failed, 8 passed, 2 skipped in 1.26s
+  M10 the public API defines_file never reaches the parse list
+      breaks: flipjump.assemble(defines_file=...) is accepted and silently ignored
+      -> rejected   
+  M5 the CLI puts the defines file AFTER the stl instead of before
+      breaks: an override of a constant the stl itself uses is read too late and silently does nothing
+      -> rejected   1 failed, 6 passed, 2 skipped in 0.46s
   M6 3b: the dotted name is no longer wrapped in its namespaces
       breaks: a.b.NAME becomes a top-level name and misses the constant
-      -> rejected   1 failed, 8 passed, 2 skipped in 0.52s
+      -> rejected   1 failed, 8 passed, 2 skipped in 1.02s
 
-restored: fj_parser.py, flipjump_cli.py
+restored: fj_parser.py, flipjump_cli.py, flipjump_quickstart.py
 
-NEGATIVE CONTROL PASSED -- baseline passes, all 6 mutations rejected.
+NEGATIVE CONTROL PASSED -- baseline passes, all 8 mutations rejected.

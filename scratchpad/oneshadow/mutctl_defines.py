@@ -21,6 +21,7 @@ from pathlib import Path
 WORKTREE = Path("C:/Users/tomhe/Documents/flipjump-wide")
 PARSER = WORKTREE / "flipjump" / "assembler" / "fj_parser.py"
 CLI = WORKTREE / "flipjump" / "flipjump_cli.py"
+QUICKSTART = WORKTREE / "flipjump" / "flipjump_quickstart.py"
 NL = chr(10)
 TIMEOUT = 180
 
@@ -32,11 +33,20 @@ SKIP_BRANCH = (
     + "            return" + NL
 )
 
-UNUSED_CHECK = (
-    "    for name in sorted(set(parser.defines) - parser.used_defines):" + NL
-    + '        syntax_error(parser.defines_lineno[name], f\'override of non-defined constant "{name}".\')' + NL
-)
-BUILTIN_GUARD = "            if name in self.consts and name not in self.builtin_consts:"
+
+def _block(path, first_line_marker, last_line_marker):
+    """the real source lines from `first` through `last`, so an anchor cannot drift out of date
+    (and so this file needs no copy of code containing quotes and escapes)."""
+    lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+    lo = next(i for i, ln in enumerate(lines) if first_line_marker in ln)
+    hi = next(i for i, ln in enumerate(lines) if last_line_marker in ln and i >= lo)
+    return ''.join(lines[lo:hi + 1])
+
+
+UNUSED_CHECK = _block(PARSER, 'unmatched = sorted(set(parser.defines)', 'override of non-defined constant')
+BUILTIN_GUARD = ("            if name in self.consts and name not in self.builtin_consts and name not in self.defines:")
+SELF_SATISFY = BUILTIN_GUARD
+QS_INSERT = "        file_tuples.insert(0, ('d1', defines_file))" + NL
 NS_WRAP = "        *namespaces, base_name = name.split('.')"
 
 # (name, file, find, replace, what it breaks)
@@ -54,9 +64,17 @@ MUTATIONS = [
      "            self.defines_lineno[name] = p.lineno" + NL,
      "            self.defines_lineno[name] = p.lineno" + NL + "            self.used_defines.add(name)" + NL,
      "3c never fires: a define that meets no declaration is accepted"),
-    ("M5 -D w: the builtin guard is dropped", PARSER,
-     BUILTIN_GUARD, "            if name in self.consts:",
-     "-D w=64 silently rewrites w in the const table"),
+    ("M9 3c: a define may satisfy ITSELF the moment it is recorded", PARSER,
+     "            self.defines_lineno[name] = p.lineno",
+     "            self.defines_lineno[name] = p.lineno" + NL + "            self.used_defines.add(name)",
+     "a repeated or misspelled -D of an undeclared name is silently accepted"),
+    ("M10 the public API defines_file never reaches the parse list", QUICKSTART,
+     QS_INSERT, "",
+     "flipjump.assemble(defines_file=...) is accepted and silently ignored"),
+    ("M5 the CLI puts the defines file AFTER the stl instead of before", CLI,
+     "        file_tuples.insert(0, ('d1', defines_file))",
+     "        file_tuples.append(('d1', defines_file))",
+     "an override of a constant the stl itself uses is read too late and silently does nothing"),
     ("M6 3b: the dotted name is no longer wrapped in its namespaces", CLI,
      NS_WRAP, "        namespaces, base_name = [], name",
      "a.b.NAME becomes a top-level name and misses the constant"),
@@ -77,7 +95,7 @@ def run_suite():
 
 def restore_from_backups():
     healed = []
-    for f in (PARSER, CLI):
+    for f in (PARSER, CLI, QUICKSTART):
         bak = f.with_suffix(f.suffix + ".orig")
         if bak.exists():
             f.write_text(bak.read_text(encoding="utf-8"), encoding="utf-8")
@@ -90,7 +108,7 @@ def main():
     healed = restore_from_backups()
     if healed:
         print("HEALED a previous interrupted run: restored " + ", ".join(healed) + NL)
-    originals = {f: f.read_text(encoding="utf-8") for f in (PARSER, CLI)}
+    originals = {f: f.read_text(encoding="utf-8") for f in (PARSER, CLI, QUICKSTART)}
     for f, text in originals.items():
         f.with_suffix(f.suffix + ".orig").write_text(text, encoding="utf-8")
     failures = []

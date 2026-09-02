@@ -375,6 +375,44 @@ itself cached — but do not move it before the stl without adding the defines t
 constant* error. They need a `GREET = 0` line added. Nothing in doom passes `-D` today, so the
 blast radius is exactly those four.
 
+### 3e. WHAT `-D` CAN AND CANNOT DO TODAY - measured 2026-09-02, not read off the source
+
+The `stl-one-shadow` branch is based directly on `6cd2b4f` ("fj -D NAME=VALUE: define a constant
+before the assembled files"), and `origin/1.5.1` resolves to that same commit - so the base IS
+upstream 1.5.1, not stacked on unmerged local work. `-D` is therefore available to this work.
+
+But `-D` as it stands is a **declaration**, not an override. `flipjump_cli.py:435` writes the
+`NAME=VALUE` lines into a temporary `_defines.fj` and inserts it as the FIRST user file - it lands
+after the stl (so a define may use `w`, `dw`) and before every user file. Four cases, each actually
+assembled:
+
+| case | today |
+|---|---|
+| `-D PTRSIZE=12`, program does not declare `PTRSIZE` | **OK** |
+| `-D PTRSIZE=12`, program also has `PTRSIZE = 8` | **Syntax Error** - `Can't redeclare` |
+| `-D hex.pointers.PTRSIZE=12` (namespaced) | **Syntax Error** - the defines file does not parse |
+| `-D TOTALLY_UNUSED_NAME=5`, nothing declares it | **OK** (silently) |
+
+Rows 2, 3 and 4 are exactly the three things sections 3a, 3b and 3c ask for, and all three are the
+OPPOSITE of what happens now. So **section 3 is unbuilt, and it is a hard prerequisite for the wide
+table**: the stl has to be able to declare its own default table width and have the build override
+it. Row 3 is a grammar change, not a flag change - a declaration statement is `ID "=" expr` while
+`a.b.name` lexes as a `DOT_ID`.
+
+**Sizing, for when 3d gets built.** The table must begin at op exactly `2^k` (`pad 2^k`), and
+reading a k-bit cell flips bit `dbit+k` of the slot, so the ceiling is `dbit+k < dw`. At w=32
+(`#w`=6, `dbit`=38, `dw`=64) that is **k <= 25**; at w=64 it is k <= 56. Both 12 and 16 fit, and doom
+assembles at w=32. Cost of the table itself is `2^k` ops: 4,096 for k=12 and 65,536 for k=16, the
+latter being 0.32% of doom's 20.3M-op image - cheap, but it does push all user code past op 65,536,
+which is fine only because `ptr_init` is used BY `startup_and_init_all` and so already sits first.
+
+Two things widen with `k`, and section 0.1 makes them one commit, not two:
+* `read_byte` is `hex.vec 2` today (8 bits). k=12 needs 3 nibbles, k=16 needs 4, and the table
+  entry ternary `(#d)<=4 ? .read_byte+... : .read_byte+dw+...` generalises to nibble `(#d-1)/4`,
+  bit `(#d-1)%4`.
+* the WRITE side must agree on the same `k`: `xor_byte_to_flip_ptr` is `rep(2, i)` and becomes
+  `rep(k/4, i)`. A cell written 8-bit and read 16-bit is not a wrong value, it is an unbounded
+  jump (section 10 G6).
 ### 3d. The table selection itself
 
 `ptr_init` reads the define and picks `k`, the table size and the two `dbit+k` constants. **It stays

@@ -1411,6 +1411,24 @@ Two traps the survey found, worth having before anyone starts:
 * odd-width tables (`throw` 17, `throwc` 5, `bkoff` 3) put every second row on an odd byte, so no
   pair shares a cell without a pad byte.
 
+### 13.3a ⚠ CORRECTION to 13.1 -- the saving is 2-3x what I first measured
+
+13.1 priced a packed pair as **two independent reads of one pointer** (`2 x read_byte` = 773.9)
+against `read_cell` (567.7), giving 206.2. That is the wrong baseline. doom's real shape is
+`read_byte n`, which is `rep(n) read_byte_and_inc` -- **every cell also pays a `ptr_inc`** -- and
+the survey found `read_byte_and_inc` is the majority form (66 of the source sites). Measured at
+w=32 on the run shape:
+
+| | @8, unpacked run | @16, packed | saving |
+|---|---:|---:|---:|
+| two bytes (`read_byte 2` vs `read_cell`) | 1,183.0 | 517.2 | **665.8 (-56%)** |
+| four bytes (`read_byte 4` vs 2x`read_cell`+inc) | 2,323.8 | 1,364.0 | **959.8 (-41%)** |
+
+Packing removes the dereference AND the pointer arithmetic that walked to the next cell. So the
+break-even coverage for the GLOBAL switch is **17-23% of dereferences, not 44%**, and with the two
+tables of 13.4 it is **zero** -- every converted site profits on its own from the first one.
+
+**The 44% in 13.2 should not be quoted.** It is the right arithmetic over the wrong baseline.
 ### 13.4 THE FIX: two tables, not one global width
 
 `PTR_CELL_BITS` as a program-global is the wrong shape, and that - not the packing - is what makes

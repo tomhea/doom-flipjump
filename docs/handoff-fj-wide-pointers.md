@@ -375,7 +375,7 @@ itself cached — but do not move it before the stl without adding the defines t
 constant* error. They need a `GREET = 0` line added. Nothing in doom passes `-D` today, so the
 blast radius is exactly those four.
 
-### 3e. WHAT `-D` CAN AND CANNOT DO TODAY - measured 2026-09-02, not read off the source
+### 3e. WHAT `-D` COULD AND COULD NOT DO - measured 2026-09-02, before section 3 was built
 
 The `stl-one-shadow` branch is based directly on `6cd2b4f` ("fj -D NAME=VALUE: define a constant
 before the assembled files"), and `origin/1.5.1` resolves to that same commit - so the base IS
@@ -413,6 +413,41 @@ Two things widen with `k`, and section 0.1 makes them one commit, not two:
 * the WRITE side must agree on the same `k`: `xor_byte_to_flip_ptr` is `rep(2, i)` and becomes
   `rep(k/4, i)`. A cell written 8-bit and read 16-bit is not a wrong value, it is an unbounded
   jump (section 10 G6).
+### 3f. SECTION 3 IS BUILT - `stl-one-shadow` commit `39601e9`
+
+All three rules now hold, and the four rows of 3e are the four cases the tests pin:
+
+| case | now |
+|---|---|
+| `-D GREET=0x58`, program declares `GREET = 0x41` | **overrides** - byte-identical to writing `0x58` in the source |
+| `-D a.b.GREET=0x58` on a constant in `ns a { ns b {` | **overrides** it |
+| `-D GREET=0x58` on that same namespaced constant | **refused** - `override of non-defined constant` |
+| `-D GREET=...` where nothing declares `GREET` | **refused** - same error |
+| `-D w=64` | **refused** - `w` is set by `-w`, not declared by the program |
+
+**No grammar change was needed**, which is the part worth remembering. The defines file stays an
+ordinary `.fj` file - that is what keeps the whole expression language available to a define
+(`-D GREET = w + 33`, and `-D BASE=0x40 -D GREET=BASE+1` chaining, both still tested) - and a
+dotted NAME is simply wrapped in its namespaces, so `-D a.b.N=1` is written as
+`ns a { ns b { N = 1 } }`. What makes its constants OVERRIDES rather than declarations is that the
+parser is told which file it is (`FJParser.defines_file`).
+
+**The stl-prefix cache needs no new key component.** `_stl_prefix_length` counts only the leading
+files inside the packaged stl directory, and the defines file is a temp file, so it is never inside
+the cached prefix and the cache cannot serve a stale override.
+`test_cli_define_reaches_the_assembled_binary` is the control: its three assemblies run in ONE
+process, so the later ones hit the cache.
+
+**Negative control** (`scratchpad/oneshadow/mutctl_defines.py`): baseline passes, **6/6 mutations
+rejected**. It caught two things, both mine: a mutation that marked names used at DECLARATION time
+SURVIVED because it is a genuine no-op (a never-declared name is never marked either way), and
+`self.consts[name] = ...` in the override branch was **dead code** - the defines file already
+publishes the value when it is read. Removed.
+
+Suites: unit 371 passed / 59 skipped; fast+medium+hexlib+slow 264 passed.
+
+**So 3d is now unblocked** - the stl can declare its own default table width and a build can
+override it with `-D hex.pointers.<NAME>=12`. Nothing in 2.1 has been built yet.
 ### 3d. The table selection itself
 
 `ptr_init` reads the define and picks `k`, the table size and the two `dbit+k` constants. **It stays

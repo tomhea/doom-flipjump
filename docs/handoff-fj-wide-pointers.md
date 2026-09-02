@@ -448,6 +448,54 @@ Suites: unit 371 passed / 59 skipped; fast+medium+hexlib+slow 264 passed.
 
 **So 3d is now unblocked** - the stl can declare its own default table width and a build can
 override it with `-D hex.pointers.<NAME>=12`. Nothing in 2.1 has been built yet.
+### 3g. SECTION 2.1 / 3d IS BUILT - `stl-one-shadow` commit `ab44bb3`
+
+`hex.pointers.CELL_BITS` (declared in `runlib.fj`, default 8) is how many BITS one pointed-to cell
+holds, and `ptr_init` lays `2^CELL_BITS` entries at op exactly `2^CELL_BITS`. Override per build
+with `fj ... -D hex.pointers.CELL_BITS=16`. Ceiling `dbit+CELL_BITS < dw` (25 at w=32, 56 at w=64);
+must be a multiple of 4.
+
+| side | what changed |
+|---|---|
+| read | table sized and aligned from `CELL_BITS`; entry `d` flips bit `(#d)-1`, in hex `((#d)-1)/4` at bit `((#d)-1)%4` - the generalisation of the old `(#d)<=4 ? ... : ...+dw`. `read_byte` is `hex.vec CELL_BITS/4`; the dance zeroes and arms with `dbit+CELL_BITS`. |
+| write | `xor_cell_to_flip_ptr` covers the whole cell, and `zero_ptr` uses it. |
+| new | `hex.read_cell` / `hex.write_cell` (+ `xor_cell_from_ptr`) move all `CELL_BITS` bits in ONE dereference. At `CELL_BITS=8` they are exactly `read_byte` / `write_byte`. |
+
+⚠ **The names `read_cell` / `write_cell` are NOT settled** - section 5 says the maintainer picks
+the name and it is the one irreversible decision here. They are additive; no stl-api macro changed.
+
+#### `-D` had to move BEFORE the stl, and that is a correction to 3f
+
+A constant is substituted where it is **USED**, at parse time. So an override read after the stl
+arrives too late for anything the stl itself computes from that constant - which is every use of
+`CELL_BITS`. The defines file is now inserted before the stl, not merely before the user files.
+A define's VALUE may still use `w` (a parser builtin) and an earlier define, but **not** an stl
+constant such as `dw` - write `2*w`. Side effect worth knowing: a non-stl file first disables the
+parser's stl-prefix cache for that run, which is exactly right, because a cached prefix was parsed
+without the override.
+
+#### What was proven, and the two controls that make it mean something
+
+* **Inert at the default** (`scratchpad/oneshadow/inert_check.py`): at `CELL_BITS=8` the assembled
+  bytes of `pointer_setters`, `hex_ptr` and `nth_pointers` are IDENTICAL to the stl at `39601e9`.
+  The same run asserts the bytes DIFFER at 12 and 16 - and that control is not decoration: **the
+  first version reached nothing at all**, and byte-identical-at-8 was equally true of it.
+* **Correct at every width**: every pointer program is byte-correct at 8/12/16, and `wide_cells.fj`
+  round-trips a full-width value - `cell:21/321/4321`, `ones:ff/fff/ffff`, zeroed at every width,
+  and `lowbyte:21` unchanged, i.e. the byte API still sees the low byte of a wide cell.
+* **Negative control** (`mutctl_cellbits.py`): **8/8 rejected** - but THREE survived at first (a
+  table sized 256, a read clearing only two hexes, a `zero_ptr` clearing only two hexes). All three
+  are invisible unless something stores a value wider than a byte, and nothing did. **That is why
+  `wide_cells.fj` exists**, and it is what turns those three from SURVIVED to rejected.
+
+Suites: unit 385 passed / 59 skipped; fast+medium+hexlib+slow 266 passed.
+
+#### What remains
+
+The stl can now carry 12- or 16-bit cells. **doom cannot use them yet**: its emitter writes one
+BYTE per cell (`mapcompiler.py`), so a wider cell buys nothing until the data layout packs two
+bytes into one cell and the call sites move to `read_cell`/`write_cell`. That is section 7's P4,
+one converted run at a time, each gated - and it is a doom-emitter change, not an stl one.
 ### 3d. The table selection itself
 
 `ptr_init` reads the define and picks `k`, the table size and the two `dbit+k` constants. **It stays

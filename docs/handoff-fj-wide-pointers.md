@@ -490,6 +490,21 @@ without the override.
 
 Suites: unit 385 passed / 59 skipped; fast+medium+hexlib+slow 266 passed.
 
+#### And the doom gate, on the finished stl
+
+`deg_gate` re-run against the stl at `ab44bb3` - the one-shadow setters AND the CELL_BITS table:
+
+    (664,291,0x18000000):   40,919,374 ops  BYTE-EXACT
+    (1272,-724,0x40000000): 32,877,007 ops  BYTE-EXACT
+    (1869,479,0x80000000):  36,864,338 ops  BYTE-EXACT
+    (-416,256,0x0):         31,454,252 ops  BYTE-EXACT
+    PASS
+
+**Identical to the one-shadow run to the digit** (12.5), which is the inertness of the CELL_BITS
+refactor demonstrated on doom's real 20.3M-op program rather than on a three-program test set.
+So the whole of phase 0 is worth exactly what 12.5 measured: **-5.05% ops over four frames, span
+-0.27%**, byte-exact throughout.
+
 #### What remains
 
 The stl can now carry 12- or 16-bit cells. **doom cannot use them yet**: its emitter writes one

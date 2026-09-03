@@ -1,0 +1,145 @@
+// Smoke test: frame.add8_chain vs hex.add 8 on carry-stressing vectors. Prints PAIRS of
+// 8-hex results (chain then stl) -- the harness asserts the pairs match.
+stl.startup_and_init_all
+
+ns frame {
+    // one interior boundary of the chained add: finish nibble dst_prev, arm (dst_next,
+    // src_next), and move hex.tables.ret from `prev` to `next` with ONE wflip.
+    def dance_boundary dst_prev, dst_next, src_next, jumper, prev, next \
+            < hex.tables.ret, hex.tables.res {
+        hex.xor_zero dst_prev, hex.tables.res
+        hex.xor jumper,   dst_next
+        hex.xor jumper+4, src_next
+        wflip hex.tables.ret+w, prev^next, jumper
+    }
+
+    //   dst[:8] += src[:8]   == hex.add 8, dst, src  (10 dances: cc + 8 nibbles + cc), with
+    //   the interior [CLEAR ret_i][SET ret_{i+1}] pairs fused into single XOR-delta wflips.
+    def add8_chain dst, src @ rcc0, r0, r1, r2, r3, r4, r5, r6, r7, rcc1 \
+            < hex.tables.ret, hex.tables.res, hex.add.dst {
+        wflip hex.tables.ret+w, rcc0, hex.add.dst
+      rcc0:
+        hex.zero hex.tables.res
+        hex.xor hex.add.dst,   dst
+        hex.xor hex.add.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
+      r3:
+        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.add.dst, r3, r4
+      r4:
+        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.add.dst, r4, r5
+      r5:
+        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.add.dst, r5, r6
+      r6:
+        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.add.dst, r6, r7
+      r7:
+        hex.xor_zero dst+7*dw, hex.tables.res
+        wflip hex.tables.ret+w, r7^rcc1, hex.add.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.zero hex.tables.res
+    }
+}
+
+// vectors: carry ripple through every nibble (0xffffffff+1), alternating carries, zeros,
+// dense+dense, and a mid-run carry chain.
+    test_pair 0xffffffff, 0x00000001
+    test_pair 0x0fffffff, 0x00000001
+    test_pair 0x12345678, 0x9abcdef0
+    test_pair 0x99999999, 0x99999999
+    test_pair 0x00000000, 0x00000000
+    test_pair 0xf0f0f0f0, 0x10101010
+    test_pair 0xdeadbeef, 0x21524111
+    test_pair 0x7fffffff, 0x7fffffff
+
+
+ns frame {
+    //   dst[:8] -= src[:8]   == hex.sub 8, dst, src.  Same fused skeleton as add8_chain; the
+    //   borrow brackets branch (stl math.fj:227-235) but reconverge without touching
+    //   hex.tables.ret (if0 is exact_xor-family), so every boundary still fuses.
+    def sub8_chain dst, src @ rcc0, cc0_ok, r0, r1, r2, r3, r4, r5, r6, r7, rcc1, done \
+            < hex.tables.ret, hex.tables.res, hex.sub.dst {
+        wflip hex.tables.ret+w, rcc0, hex.sub.dst
+      rcc0:
+        hex.if0 hex.tables.res, cc0_ok         // borrow was 0: res==0, bit already 0
+        hex.sub.not_carry                      // borrow was 1: the entry-0 dance left the bit
+        hex.xor_by hex.tables.res, 0xf         //   SET and res==0xf (math.fj:277-279)
+      cc0_ok:
+        hex.xor hex.sub.dst,   dst
+        hex.xor hex.sub.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.sub.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.sub.dst, r2, r3
+      r3:
+        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.sub.dst, r3, r4
+      r4:
+        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.sub.dst, r4, r5
+      r5:
+        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.sub.dst, r5, r6
+      r6:
+        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.sub.dst, r6, r7
+      r7:
+        hex.xor_zero dst+7*dw, hex.tables.res
+        wflip hex.tables.ret+w, r7^rcc1, hex.sub.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.if0 hex.tables.res, done
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      done:
+    }
+}
+
+    test_pair_sub 0x00000000, 0x00000001
+    test_pair_sub 0x10000000, 0x00000001
+    test_pair_sub 0x9abcdef0, 0x12345678
+    test_pair_sub 0x12345678, 0x9abcdef0
+    test_pair_sub 0xffffffff, 0xffffffff
+    test_pair_sub 0x00000000, 0xffffffff
+    test_pair_sub 0x80000000, 0x7fffffff
+    test_pair_sub 0xdeadbeef, 0x21524111
+
+    stl.loop
+
+  a3:  hex.vec 8, 0
+  b3:  hex.vec 8, 0
+  s3:  hex.vec 8, 0
+
+def test_pair_sub x, y < a3, b3, s3 {
+    hex.set 8, a3, x
+    hex.set 8, s3, y
+    frame.sub8_chain a3, s3
+    hex.print_as_digit 8, a3, 0
+    stl.output '.'
+    hex.set 8, b3, x
+    hex.set 8, s3, y
+    hex.sub 8, b3, s3
+    hex.print_as_digit 8, b3, 0
+    stl.output '\n'
+}
+
+  a:  hex.vec 8, 0
+  b:  hex.vec 8, 0
+  s:  hex.vec 8, 0
+
+def test_pair x, y < a, b, s {
+    hex.set 8, a, x
+    hex.set 8, s, y
+    frame.add8_chain a, s
+    hex.print_as_digit 8, a, 0
+    stl.output '.'
+    hex.set 8, b, x
+    hex.set 8, s, y
+    hex.add 8, b, s
+    hex.print_as_digit 8, b, 0
+    stl.output '\n'
+}

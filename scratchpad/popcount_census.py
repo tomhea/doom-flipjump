@@ -46,15 +46,39 @@ ROOT = Path(__file__).resolve().parents[1]
 def _spy_on_wflips(assembler_module):
     """Wrap BinaryData.insert_wflip_ops to record (base bit-address, popcount) per site, in
     insertion order. Returns (records, unhook). The base address is where the site's first op
-    lands: segment first_address plus the words already emitted."""
-    records = []
+    lands: segment first_address plus the words already emitted.
+
+    Storage is two parallel arrays, not a list of tuples: the doom program has 16.1M wflip
+    sites, and 16M tuples are ~1.5 GB on a box whose assembler already peaks high (rule 1 is
+    about peak RSS); two arrays are ~150 MB. `records` duck-types the list the callers zip."""
+    import array
+
+    class _Records:
+        __slots__ = ("bases", "pcs")
+
+        def __init__(self):
+            self.bases = array.array("q")
+            self.pcs = array.array("b")
+
+        def __len__(self):
+            return len(self.bases)
+
+        def __iter__(self):
+            return iter(zip(self.bases, self.pcs))
+
+        def __getitem__(self, i):
+            if isinstance(i, slice):
+                return list(zip(self.bases[i], self.pcs[i]))
+            return (self.bases[i], self.pcs[i])
+
+    records = _Records()
     binary_data_cls = assembler_module.BinaryData
     orig = binary_data_cls.insert_wflip_ops
+    bases_append, pcs_append = records.bases.append, records.pcs.append
 
     def spy(self, word_address, flip_value, return_address):
-        base = self.first_address + len(self.fj_words) * self.memory_width
-        pc = bin(flip_value).count("1")
-        records.append((base, pc))
+        bases_append(self.first_address + len(self.fj_words) * self.memory_width)
+        pcs_append(bin(flip_value).count("1"))
         return orig(self, word_address, flip_value, return_address)
 
     binary_data_cls.insert_wflip_ops = spy
@@ -282,12 +306,20 @@ def capture_doom(out_path, stl_choice, ptr_cell_bits):
     try:
         # deg_with_stl handles the stl selection and the defines file, then runs deg_gate,
         # which assembles (census recorded here) and gates 4 viewpoints (a free byte-exactness
-        # check on the very build the census describes).
-        runpy.run_path(str(ROOT / "scratchpad" / "oneshadow" / "deg_with_stl.py"),
-                       run_name="__main__")
+        # check on the very build the census describes). deg_gate ends in sys.exit(), so the
+        # SystemExit must be caught HERE or it sails past the census write below -- which is
+        # exactly how the first capture-doom run printed PASS and wrote nothing.
+        try:
+            runpy.run_path(str(ROOT / "scratchpad" / "oneshadow" / "deg_with_stl.py"),
+                           run_name="__main__")
+        except SystemExit as e:
+            if e.code not in (0, None):
+                raise
     finally:
         unhook()
         sys.argv = saved_argv
+    if not records:
+        raise SystemExit("capture-doom recorded ZERO wflip sites -- the spy never fired")
     _write_census(out_path, argv, records)
 
 
@@ -305,7 +337,8 @@ def main():
     capd = sub.add_parser("capture-doom")
     capd.add_argument("--out", required=True)
     capd.add_argument("--stl", choices=["stock", "worktree", "stl-dual"], default="stl-dual")
-    capd.add_argument("--ptr-cell-bits", type=int, default=16)
+    capd.add_argument("--ptr-cell-bits", type=int, default=0,
+                      help="0 = the shipped default (8-bit cells); pass 16 for the wide-cell config")
     pred = sub.add_parser("predict")
     pred.add_argument("--a", required=True)
     pred.add_argument("--b", required=True)

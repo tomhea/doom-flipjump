@@ -1675,3 +1675,63 @@ on the current instruments.** The way past the floor is the popcount census pred
 per-site popcount(flip_value) x execution counts, the ripple becomes computable instead of
 fatal.
 
+
+
+## 17. THE POPCOUNT CENSUS PREDICTOR EXISTS, and 1.5.1 carries the whole pointer campaign (2026-09-03)
+
+### 17.1 scratchpad/popcount_census.py -- the way past the measurement floor
+
+Section 16.2 named the floor: ideas below ~100k/frame cannot prove themselves because a real
+deletion's saving is the same size as the label-shift ripple it triggers. The predictor computes
+the ripple instead of building it:
+
+    predicted delta = sum over wflip sites: visits(site) x (popcount_B - popcount_A)
+
+* **capture**: `BinaryData.insert_wflip_ops` is wrapped for one assembly; each site records
+  (base bit-address, popcount(flip_value)) in insertion order. No .fjm needed beyond what the
+  assembly writes anyway. `capture-doom` drives deg_with_stl (so the census's own build is also
+  deg-gated); `capture` takes any .fj list.
+* **visits**: ONE per-op IP histogram of the baseline -- `ca2_profile.py --bucket-bits 6`
+  (ip>>6 is exactly one op at w=32). Reused across every candidate.
+* **predict**: ordinal join (v1 contract: equal op-stream length -- value-only changes; a shape
+  change is REFUSED and needs the sweep, as before).
+
+Selftest (three controls, all required to pass): a 20-iteration synthetic where ground truth is
+two real runs -- predicted **-40 == measured -40, exact to the op**; predict(A,A)==0 (vacuity);
+a truncated census is refused (join-refusal). It also refuses to pass when the synthetic delta
+is zero, so the ground truth cannot be vacuous.
+
+    python scratchpad/popcount_census.py selftest
+
+Next session's recipe for a sub-100k idea: capture-doom baseline once + one --bucket-bits 6
+profile per gate viewpoint; per candidate, capture (minutes) + predict (seconds); only ideas the
+predictor prices as winners graduate to the sweep.
+
+### 17.2 The fj repo: CR round -> 1.5.1 -> origin (0dcda77)
+
+origin/1.5.1 now carries: one shadow + triple_exact_xor, -D overrides, PTR_CELL_BITS (wide
+decoder table), the DUAL table (PTR_WIDE_BITS: two tables coexist, the flipped bit selects),
+read_cell/write_cell + the _and_inc pair, and the CR round 0dcda77. The CR found one real
+defect: **zero_ptr kept a byte-wide write-back while the read dance decodes PTR_CELL_BITS
+bits** -- at 16-bit cells it zeroed half the cell. Fixed to cover PTR_CELL_BITS/4 hexes; the
+mutant fails wide_cells' zeroptr case at (16,0) on the output assertion (negative control run
+and logged). Tests the merge had been missing, now in: PTR_WIDE_BITS was never enabled by any
+fj test (now 6 width configs incl. (8,16)/(12,16), wide-knob efficacy, (8,8)/(8,10)/(16,12)
+refused); read_cell_and_inc/write_cell_and_inc had never been EXECUTED anywhere (now the pair:
+case walks adjacent cells). Suites: 401 unit + 56 hexlib compile + 56 run, all green; black/
+flake8 clean, mypy at the pre-existing 66-error baseline.
+
+### 17.3 The doom gate against pushed 1.5.1: bit-for-bit the campaign best
+
+Rebuilt deg against the INSTALLED 1.5.1 (flipjump-151 now checked out on it) at the shipped
+default config: deg PASS, 4/4 byte-exact, op counts equal to build 7b **to the digit**
+(38,590,005 / 30,980,768 / 34,943,728 / 29,717,334), and the .fjm sha256 is IDENTICAL to the
+campaign best -- dd9b786a5bd3... == tmpmp25mrno. Same binary, so the 260-frame sweep result
+(median 20,775,735, 260/260 byte-exact) transfers verbatim; nothing to re-run. (_deg_151d.log;
+the census baseline census_151_base.json.gz -- 1,999,255 wflip sites -- came out of the same
+build.)
+
+A second datapoint, from the config-mixup en route: 1.5.1 at PTR_CELL_BITS=16 is also 4/4
+byte-exact (_deg_151c.log: 39.31M / 31.32M / 36.24M / 30.21M) -- correct, and dearer than both
+the shipped 8-bit config and the section-13 dual-table rows, consistent with "a global wide
+cell taxes every dereference". The shipped config remains 8-bit cells.

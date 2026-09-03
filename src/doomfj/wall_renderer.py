@@ -1898,7 +1898,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # said 1552 here and was overfit (+9,550 on one gate viewpoint). The count must stay
             # a multiple of 16 so every downstream `pad 2/4/16` passes the shift through exactly
             # (the stl's larger pads all sit in the low-address table init, which never shifts).
-            ["rep(16, i) stl.fj 0, 0",
+            # (re-tuned 16 -> 4080 with idea 16: the loader restructure grew the pass2 leaf
+            # ~2,240 ops and de-tuned this filler -- joint_tune3.py, 4 frames, all winning.)
+            ["rep(4080, i) stl.fj 0, 0",
              "seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
              f"{1 if 'noprescan' in ablate else 0}",
              # CR-2026-08: the deg attribution budget must provably never bind (a binding budget
@@ -2362,6 +2364,12 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "p2_stepf: hex.vec 8",
         "p2_sfsp: hex.vec w/4",
         "p2_spfp: hex.vec w/4",
+        # idea 16 (2026-09-03): the loader dirty flags -- 1 while the load2/spr_load output
+        # registers may be nonzero. A clean no-piece column skips the zero preambles. Declared
+        # LAST-ish so the addition shifts as few sibling registers as possible (v1 sat mid-list
+        # and the ripple killed the median).
+        "p2_ldirty: hex.vec 1",
+        "p2_sdirty: hex.vec 1",
         "p2_sspp: hex.vec w/4",
         "pth_dbound: hex.vec 8",
         "pth_dtest: hex.vec 8",

@@ -1770,9 +1770,18 @@ ns frame {
     }
 
     def lines_steps_load2 \
-            @ up_one, up_none, lo_read, lo_one, sfslot_p, flags_v, end \
-            < p2_sffp, p2_sfsp, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
+            @ up_one, up_none, lo_read, lo_one, sfslot_p, flags_v, no_pieces, end \
+            < p2_sffp, p2_sfsp, p2_ldirty, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
               lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp {
+        // idea 16: read the flags FIRST. The no-piece column is the common case, and when
+        // the output registers are already all-zero (p2_ldirty == 0) the 18-call zero
+        // preamble (~615 executed ops) is pure waste. The dirty flag is what keeps the V4
+        // change-detection signatures honest: skipping the zeroes on STALE registers would
+        // make a no-piece column look identical to its piece-bearing predecessor.
+        hex.read_byte flags_v, p2_sffp           // idea 11: seeded per seg, stepped at skipcol
+        hex.if0 2, flags_v, no_pieces           // no piece in this column -- the common case
+        // v3: the PIECE path is the ORIGINAL shape plus one flag-set -- v1/v2 taxed
+        // this path with extra branches and the dense gate frames paid for it.
         hex.zero 2, ucnt
         hex.zero 2, u1y1
         hex.zero 2, u1y2
@@ -1791,8 +1800,7 @@ ns frame {
         hex.zero 2, l2y2
         hex.zero 2, l2cls
         hex.zero PID_NIBBLES, l2bp
-        hex.read_byte flags_v, p2_sffp           // idea 11: seeded per seg, stepped at skipcol
-        hex.if0 2, flags_v, end                 // no piece in this column -- the common case
+        hex.set 1, p2_ldirty, 1
         hex.mov 1, ucnt, flags_v                // nibble 0 = upper count, nibble 1 = lower
         hex.mov 1, lcnt, flags_v + 1*dw
         hex.mov w/4, sfslot_p, p2_sfsp           // idea 11: working copy -- the and_incs mutate it
@@ -1842,6 +1850,28 @@ ns frame {
         ;end
       sfslot_p: hex.vec w/4
       flags_v: hex.vec 2
+        ;end
+      no_pieces:
+        hex.if0 1, p2_ldirty, end               // already clean -> nothing at all
+        hex.zero 2, ucnt
+        hex.zero 2, u1y1
+        hex.zero 2, u1y2
+        hex.zero 2, u1cls
+        hex.zero PID_NIBBLES, u1bp
+        hex.zero 2, u2y1
+        hex.zero 2, u2y2
+        hex.zero 2, u2cls
+        hex.zero PID_NIBBLES, u2bp
+        hex.zero 2, lcnt
+        hex.zero 2, l1y1
+        hex.zero 2, l1y2
+        hex.zero 2, l1cls
+        hex.zero PID_NIBBLES, l1bp
+        hex.zero 2, l2y1
+        hex.zero 2, l2y2
+        hex.zero 2, l2cls
+        hex.zero PID_NIBBLES, l2bp
+        hex.zero 1, p2_ldirty                   // the rare dirty->clean transition
       end:
     }
 
@@ -1850,8 +1880,11 @@ ns frame {
     // is most columns. All six are ZEROED when absent: they are the column's ditto signature too,
     // and a stale value from an earlier column would let an empty column ditto a sprite column.
     def lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb \
-            @ spslot_p, has_slot_b, end < p2_spfp, p2_sspp {
-        hex.zero 2, sprfl
+            @ spslot_p, has_slot_b, no_frags, end < p2_spfp, p2_sspp, p2_sdirty {
+        // idea 16, the sprite twin of load2's dirty skip. sprfl's old explicit zero was
+        // REDUNDANT outright -- hex.read_byte zeroes its dst before xoring the value in.
+        hex.read_byte sprfl, p2_spfp             // idea 11
+        hex.if0 2, sprfl, no_frags
         hex.zero 2, ssy1
         hex.zero 2, ssy2
         hex.zero 4, sy0b
@@ -1864,8 +1897,7 @@ ns frame {
         hex.zero 4, sy0bb
         hex.zero 4, sblkb
         hex.zero 2, slrb
-        hex.read_byte sprfl, p2_spfp             // idea 11
-        hex.if0 2, sprfl, end
+        hex.set 1, p2_sdirty, 1
         hex.mov w/4, spslot_p, p2_sspp           // idea 11: working copy
         hex.read_byte_and_inc ssy1, spslot_p
         hex.read_byte_and_inc ssy2, spslot_p
@@ -1892,6 +1924,22 @@ ns frame {
         ;end
       spslot_p: hex.vec w/4
       has_slot_b: hex.vec 2
+        ;end
+      no_frags:
+        hex.if0 1, p2_sdirty, end               // already clean -> nothing at all
+        hex.zero 2, ssy1
+        hex.zero 2, ssy2
+        hex.zero 4, sy0b
+        hex.zero 4, sblk
+        hex.zero 2, slr
+        // V4b: slot B's signature regs zero when absent -- like slot A's, that keeps the ditto
+        // compares meaningful without a flag compare (a real fragment's sy0b is never 0).
+        hex.zero 2, ssy1b
+        hex.zero 2, ssy2b
+        hex.zero 4, sy0bb
+        hex.zero 4, sblkb
+        hex.zero 2, slrb
+        hex.zero 1, p2_sdirty                   // the rare dirty->clean transition
       end:
     }
 
@@ -2068,7 +2116,7 @@ ns frame {
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
     def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, w1r, wpxstride, pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift, spremit, ascode, sky_base_id, stack, deg, dslvw \
             @ col_loop, col_body, notdrawn, skipcol, ret, sliver_done, sliver_yes, screen_full, emit_full, ck_fstart, ck_grain, ck_sky, ck_face_uy1, ck_face_uy2, ck_face_ucol, ck_face_ly1, ck_face_ly2, ck_face_lcol, ck_spr_sy1, ck_spr_sy2, ck_spr_y0, ck_spr_blk, ck_plane, emit_ditto, col_emitted, ck_sprb_sy1, ck_sprb_sy2, ck_sprb_y0, ck_sprb_blk, ck_piece_ucnt, ck_piece_lcnt, ck_upper_pieces, ck_u1y2, ck_u1cls, ck_u1bp, ck_u2y1, ck_u2y2, ck_u2cls, ck_u2bp, ck_lower_pieces, ck_l1y2, ck_l1cls, ck_l1bp, ck_l2y1, ck_l2y2, ck_l2cls, ck_l2bp, pieces_done, ck_grain3, ck_wlen, gate_ucnt, gate_lcnt, gate_ufl, gate_lfl, ck_grain2 \
-            < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, viewz, seg_lit, seg_lit2, seg_wstrip, wstripbase, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, gnrow2, gnrow3, x1, x2, x, dbase, dptr, dval8, pval8, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww, w1rslv, wnoff, p2_cVH, p2_cbufa, p2_cbufd, p2_cexcl, p2_cw16, p2_dbot, p2_dcexcl, p2_dfstart, p2_dgn, p2_dgn2, p2_dgn3, p2_dl1bp, p2_dl1cls, p2_dl1y1, p2_dl1y2, p2_dl2bp, p2_dl2cls, p2_dl2y1, p2_dl2y2, p2_dlcnt, p2_dlcol, p2_dly1, p2_dly2, p2_dpid, p2_dsblk, p2_dsblkb, p2_dscale, p2_dsoff, p2_dsstep, p2_dssy1, p2_dssy1b, p2_dssy2, p2_dssy2b, p2_dsy0b, p2_dsy0bb, p2_dtop, p2_du1bp, p2_du1cls, p2_du1y1, p2_du1y2, p2_du2bp, p2_du2cls, p2_du2y1, p2_du2y2, p2_ducnt, p2_ducol, p2_duy1, p2_duy2, p2_dvalid, p2_face_flags, p2_fbufa, p2_fbufd, p2_fstart, p2_gnrow, p2_issky, p2_lcol, p2_lfl, p2_ly1, p2_ly2p1, p2_one, p2_sblk, p2_sblkb, p2_skb, p2_sliver_cap, p2_sliver_w, p2_slr, p2_slrb, p2_soff, p2_sprfl, p2_ssy1, p2_ssy1b, p2_ssy2, p2_ssy2b, p2_sy0b, p2_sy0bb, p2_ucol, p2_ufl, p2_uy1, p2_uy2p1, p2_wlen, p2_wtc8, p2_wtf8, p2_xkey {
+            < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, viewz, seg_lit, seg_lit2, seg_wstrip, wstripbase, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, gnrow2, gnrow3, x1, x2, x, dbase, dptr, dval8, pval8, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww, w1rslv, wnoff, p2_cVH, p2_cbufa, p2_cbufd, p2_cexcl, p2_cw16, p2_dbot, p2_dcexcl, p2_dfstart, p2_dgn, p2_dgn2, p2_dgn3, p2_dl1bp, p2_dl1cls, p2_dl1y1, p2_dl1y2, p2_dl2bp, p2_dl2cls, p2_dl2y1, p2_dl2y2, p2_dlcnt, p2_dlcol, p2_dly1, p2_dly2, p2_dpid, p2_dsblk, p2_dsblkb, p2_dscale, p2_dsoff, p2_dsstep, p2_dssy1, p2_dssy1b, p2_dssy2, p2_dssy2b, p2_dsy0b, p2_dsy0bb, p2_dtop, p2_du1bp, p2_du1cls, p2_du1y1, p2_du1y2, p2_du2bp, p2_du2cls, p2_du2y1, p2_du2y2, p2_ducnt, p2_ducol, p2_duy1, p2_duy2, p2_dvalid, p2_face_flags, p2_fbufa, p2_fbufd, p2_fstart, p2_gnrow, p2_issky, p2_lcol, p2_ldirty, p2_lfl, p2_ly1, p2_ly2p1, p2_one, p2_sblk, p2_sblkb, p2_sdirty, p2_skb, p2_sliver_cap, p2_sliver_w, p2_slr, p2_slrb, p2_soff, p2_sprfl, p2_ssy1, p2_ssy1b, p2_ssy2, p2_ssy2b, p2_sy0b, p2_sy0bb, p2_ucol, p2_ufl, p2_uy1, p2_uy2p1, p2_wlen, p2_wtc8, p2_wtf8, p2_xkey {
         // ==========================================================================================
         // == 1. PER-SEG SETUP (hoisted out of the column loop) ==
         // angle/scale/distance, the sliver flag, the map-unit world heights, the band bases.
@@ -2116,6 +2164,8 @@ ns frame {
         rep(pnear, k) .lines_plane_ptr x1       // ... and pclm[], walked in lockstep with it
         hex.set 2, p2_one, 1
         hex.set 1, p2_dvalid, 0                    // M13-ditto: no previous emitted column yet
+        hex.set 1, p2_ldirty, 1                    // idea 16: conservative -- first clean
+        hex.set 1, p2_sdirty, 1                    //   column of the frame re-zeroes once
         // HOISTED out of the per-column loop (EXP-14). `viewh` is a compile-time parameter and
         // `p2_cVH` is never written again, so setting it once per SEG instead of once per CLAIMED
         // COLUMN is bit-identical. `hex.set 8` is a zero + a xor across EIGHT nibbles, and

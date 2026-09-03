@@ -1443,9 +1443,45 @@ ns frame {
     // its own clipping and shading against the column's window, so the ditto signature is the
     // raw values + the window rows already in the chain. Zeroed when absent (the signature
     // rule). Layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12.
-    def lines_steps_load2 x \
-            @ up_one, up_none, lo_read, lo_one, sfflag_b, sfflag_p, sfslot_b, sfslot_p, slot_idx, flags_v, end \
-            < sfflag, sfslot, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
+    // idea 11 helpers: seed per seg, step at skipcol, loaders read the shared globals.
+    def lines_steps_seed x1 @ sidx, bteam, end_seed < sfflag, sfslot, p2_sffp, p2_sfsp {
+        hex.set w/4, bteam, sfflag
+        hex.ptr_index p2_sffp, bteam, x1
+        hex.zero w/4, sidx
+        hex.mov 2, sidx, x1
+        hex.shl_hex w/4, SLOT_SHIFT, sidx
+        hex.set w/4, bteam, sfslot
+        hex.ptr_index p2_sfsp, bteam, sidx
+        ;end_seed
+      sidx: hex.vec w/4
+      bteam: hex.vec w/4
+      end_seed:
+    }
+    def lines_spr_seed x1 @ sidx, bteam, end_seed < sprflag, spslot, p2_spfp, p2_sspp {
+        hex.set w/4, bteam, sprflag
+        hex.ptr_index p2_spfp, bteam, x1
+        hex.zero w/4, sidx
+        hex.mov 2, sidx, x1
+        hex.shl_hex w/4, 1, sidx                 // spslot's OWN stride (SPR_SLOT_STRIDE)
+        hex.set w/4, bteam, spslot
+        hex.ptr_index p2_sspp, bteam, sidx
+        ;end_seed
+      sidx: hex.vec w/4
+      bteam: hex.vec w/4
+      end_seed:
+    }
+    def lines_steps_step < p2_sffp, p2_sfsp {
+        hex.ptr_add p2_sffp, 1
+        hex.ptr_add p2_sfsp, 16
+    }
+    def lines_spr_step < p2_spfp, p2_sspp {
+        hex.ptr_add p2_spfp, 1
+        hex.ptr_add p2_sspp, 16                  // SPR_SLOT_STRIDE bytes -- the shl_hex 1 stride
+    }
+
+    def lines_steps_load2 \
+            @ up_one, up_none, lo_read, lo_one, sfslot_p, flags_v, end \
+            < p2_sffp, p2_sfsp, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, \
               lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp {
         hex.zero 2, ucnt
         hex.zero 2, u1y1
@@ -1465,17 +1501,11 @@ ns frame {
         hex.zero 2, l2y2
         hex.zero 2, l2cls
         hex.zero PID_NIBBLES, l2bp
-        hex.set w/4, sfflag_b, sfflag
-        hex.ptr_index sfflag_p, sfflag_b, x
-        hex.read_byte flags_v, sfflag_p
+        hex.read_byte flags_v, p2_sffp           // idea 11: seeded per seg, stepped at skipcol
         hex.if0 2, flags_v, end                 // no piece in this column -- the common case
         hex.mov 1, ucnt, flags_v                // nibble 0 = upper count, nibble 1 = lower
         hex.mov 1, lcnt, flags_v + 1*dw
-        hex.zero w/4, slot_idx
-        hex.mov 2, slot_idx, x
-        hex.shl_hex w/4, SLOT_SHIFT, slot_idx
-        hex.set w/4, sfslot_b, sfslot
-        hex.ptr_index sfslot_p, sfslot_b, slot_idx
+        hex.mov w/4, sfslot_p, p2_sfsp           // idea 11: working copy -- the and_incs mutate it
         hex.if0 1, ucnt, up_none
         hex.read_byte_and_inc u1y1, sfslot_p
         hex.read_byte_and_inc u1y2, sfslot_p
@@ -1520,11 +1550,7 @@ ns frame {
       lo_one:
         hex.inc 1, lcnt
         ;end
-      sfflag_b: hex.vec w/4
-      sfflag_p: hex.vec w/4
-      sfslot_b: hex.vec w/4
       sfslot_p: hex.vec w/4
-      slot_idx: hex.vec w/4
       flags_v: hex.vec 2
       end:
     }
@@ -1533,8 +1559,8 @@ ns frame {
     // filled. Six bytes, but a column WITHOUT a sprite pays only the one `sprflag` read -- and that
     // is most columns. All six are ZEROED when absent: they are the column's ditto signature too,
     // and a stale value from an earlier column would let an empty column ditto a sprite column.
-    def lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb, x \
-            @ sprflag_b, sprflag_p, spslot_b, spslot_p, slot_idx, has_slot_b, end < sprflag, spslot {
+    def lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb \
+            @ spslot_p, has_slot_b, end < p2_spfp, p2_sspp {
         hex.zero 2, sprfl
         hex.zero 2, ssy1
         hex.zero 2, ssy2
@@ -1548,15 +1574,9 @@ ns frame {
         hex.zero 4, sy0bb
         hex.zero 4, sblkb
         hex.zero 2, slrb
-        hex.set w/4, sprflag_b, sprflag
-        hex.ptr_index sprflag_p, sprflag_b, x
-        hex.read_byte sprfl, sprflag_p
+        hex.read_byte sprfl, p2_spfp             // idea 11
         hex.if0 2, sprfl, end
-        hex.zero w/4, slot_idx
-        hex.mov 2, slot_idx, x
-        hex.shl_hex w/4, 1, slot_idx            // spslot's OWN stride (SPR_SLOT_STRIDE), NOT sfslot's -- do NOT convert this to SLOT_SHIFT
-        hex.set w/4, spslot_b, spslot
-        hex.ptr_index spslot_p, spslot_b, slot_idx
+        hex.mov w/4, spslot_p, p2_sspp           // idea 11: working copy
         hex.read_byte_and_inc ssy1, spslot_p
         hex.read_byte_and_inc ssy2, spslot_p
         // M13-15M: y0 is TWO bytes, bias 32768. One biased byte wrapped for y0 < -128 -- a tall
@@ -1580,11 +1600,7 @@ ns frame {
         hex.read_byte_and_inc sblkb + 2*dw, spslot_p
         hex.read_byte_and_inc slrb, spslot_p
         ;end
-      sprflag_b: hex.vec w/4
-      sprflag_p: hex.vec w/4
-      spslot_b: hex.vec w/4
       spslot_p: hex.vec w/4
-      slot_idx: hex.vec w/4
       has_slot_b: hex.vec 2
       end:
     }
@@ -1803,6 +1819,9 @@ ns frame {
         rep((1-pnear)*ascode, k) .lines_seg_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
         hex.ptr_index dptr, dbase, x1
+        // idea 11: the load pointers walk in LOCKSTEP with x, like dptr/pclm above.
+        rep(steps*stack, k) .lines_steps_seed x1
+        rep(things*spremit, k) .lines_spr_seed x1
         rep(pnear, k) .lines_plane_ptr x1       // ... and pclm[], walked in lockstep with it
         hex.set 2, p2_one, 1
         hex.set 1, p2_dvalid, 0                    // M13-ditto: no previous emitted column yet
@@ -1840,12 +1859,12 @@ ns frame {
         // its clip rows, the third feature in a row to hit that (see the ck_grain chain).
         rep(steps*(1-stack), k) .lines_step_load p2_face_flags, p2_ufl, p2_uy1, p2_uy2p1, p2_ucol, p2_lfl, p2_ly1, p2_ly2p1, p2_lcol, x, p2_cexcl, p2_fstart
         // V5: the stacked load -- RAW slot bytes + per-side counts; the emit splices clip
-        rep(steps*stack, k) .lines_steps_load2 x
+        rep(steps*stack, k) .lines_steps_load2
         // ablate "sprnoemit" (measurement only): keep the RECORD half, never read the
         // fragments back. The frame is then identical to a things=False build, so the
         // delta against p2_one prices the record half ALONE -- by subtraction from a
         // byte-exact frame, not by stubbing something the rest of the frame depends on.
-        rep(things*spremit, k) .lines_spr_load p2_sprfl, p2_ssy1, p2_ssy2, p2_sy0b, p2_sblk, p2_slr, p2_ssy1b, p2_ssy2b, p2_sy0bb, p2_sblkb, p2_slrb, x
+        rep(things*spremit, k) .lines_spr_load p2_sprfl, p2_ssy1, p2_ssy2, p2_sy0b, p2_sblk, p2_slr, p2_ssy1b, p2_ssy2b, p2_sy0bb, p2_sblkb, p2_slrb
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
@@ -2052,6 +2071,8 @@ ns frame {
       screen_full:
         hex.set 1, full, 1
       skipcol:
+        rep(steps*stack, k) .lines_steps_step        // idea 11: lockstep advance
+        rep(things*spremit, k) .lines_spr_step
         hex.inc 2, x
         hex.add 8, scale, scalestep
         ;col_loop

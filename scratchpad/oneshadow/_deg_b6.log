@@ -1,0 +1,4 @@
+STL: C:\Users\tomhe\Documents\flipjump-wide\flipjump\stl
+program parts: entry=32, tables=338,598, main=64, segconsts=44,419, walk=73,941, state=430, banks=3,242,421
+Syntax Warning in file C:\Users\tomhe\Documents\doom-flipjump\src\fj\frame_render.fj line 1477:
+  In macro frame.lines_spr_step:  Used a not global/parameter/declared-extern label: SPR_SLOT_STRIDE.

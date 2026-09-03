@@ -1,0 +1,22 @@
+A (baseline): C:\Users\tomhe\AppData\Local\Temp\tmpjeuzzt9_\deg.fjm  sha256 5eb708fc26ab97ff0eebaf4d77f591a2bc3ae8fa7b20b00d34c59bf33aaa45a4
+B (new)     : C:\Users\tomhe\AppData\Local\Temp\tmp8fgm3giq\deg.fjm  sha256 35c73e1be8225cdc6e52284683fc22d3ebc9bedc6047842be631b721360c6411
+
+65 walkable grid points x 4 angles = 260 frames
+   40/260 frames (48s)
+   80/260 frames (96s)
+   120/260 frames (145s)
+   160/260 frames (194s)
+   200/260 frames (242s)
+   240/260 frames (292s)
+
+============================================================================================
+                   median           mean            min            max
+A base         22,079,496     22,438,843      5,729,861     44,440,996
+B new          22,040,310     22,386,537      5,685,427     44,334,552
+delta             -39,186        -52,306        -44,434       -106,444
+pct                -0.18%         -0.23%
+============================================================================================
+PICTURE CONTROL : 260 of 260 frames byte-exact between A and B  ok
+VACUITY CONTROL : 254 distinct pictures across 260 frames  ok
+
+ca2_sweep: PASS

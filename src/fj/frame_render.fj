@@ -639,8 +639,8 @@ ns frame {
       u_clamp:
         hex.mov 2, trb_u, trb_dw_max
       col_check:
-        hex.read_byte trb_drawn_v, trb_drawn_p
-        hex.if0 2, trb_drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
+        hex.read_hex trb_drawn_v, trb_drawn_p     // drawn[] holds 0/1 -- one nibble (idea 10)
+        hex.if0 1, trb_drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
         ;col_next
       slot_check:
         hex.read_byte trb_sprflag_v, trb_sprflag_p
@@ -975,8 +975,8 @@ ns frame {
       col_loop:
         hex.cmp 2, tsf_col_x, x2, col_body, nofaces, nofaces
       col_body:
-        hex.read_byte tsf_drawn_v, tsf_drawn_p
-        hex.if0 2, tsf_drawn_v, col_work            // already painted by a nearer wall -> nothing to show
+        hex.read_hex tsf_drawn_v, tsf_drawn_p     // drawn[] holds 0/1 -- one nibble (idea 10)
+        hex.if0 1, tsf_drawn_v, col_work            // already painted by a nearer wall -> nothing to show
         ;col_next
       col_work:
         hex.read_byte tsf_sfflag_v, tsf_sfflag_p
@@ -1744,8 +1744,8 @@ ns frame {
       occscan:
         hex.cmp 2, x, x2, occchk, occdone, occdone
       occchk:
-        hex.read_byte dval8, dptr
-        hex.if0 2, dval8, occproc                // an unclaimed column exists -> render this seg
+        hex.read_hex dval8, dptr                // drawn[] holds 0/1 -- one nibble (idea 10)
+        hex.if0 1, dval8, occproc                // an unclaimed column exists -> render this seg
         hex.ptr_add dptr, 1
         hex.inc 2, x
         ;occscan
@@ -1814,8 +1814,8 @@ ns frame {
       col_loop:
         hex.cmp 2, x, x2, col_body, ret, ret
       col_body:
-        hex.read_byte dval8, dptr
-        hex.if0 2, dval8, notdrawn
+        hex.read_hex dval8, dptr                // drawn[] holds 0/1 -- one nibble (idea 10)
+        hex.if0 1, dval8, notdrawn
         hex.ptr_add dptr, 1                     // already claimed -> next column
         rep(pnear, k) .lines_plane_step
         hex.set 1, p2_dvalid, 0                    // M13-ditto: a gap breaks x-adjacency
@@ -2046,7 +2046,7 @@ ns frame {
         rep(pnear, k) .lines_save_plane pval8, p2_dpid
         hex.set 1, p2_dvalid, 1
       col_emitted:
-        hex.write_byte_and_inc dptr, p2_one        // drawn = 1 (advances to the next column's slot)
+        hex.write_hex_and_inc dptr, p2_one       // one nibble is the whole value (idea 10)        // drawn = 1 (advances to the next column's slot)
         hex.inc 2, n_drawn
         hex.cmp 2, n_drawn, vieww, skipcol, screen_full, skipcol
       screen_full:

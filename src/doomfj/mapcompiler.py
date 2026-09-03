@@ -548,6 +548,10 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
     # unrolled per node (681 copies of two hex.mul 10 blow up the assemble). Each node sets the partition
     # const regs then fcalls it; the leaf writes `_side` and returns.
     if bsp.nodes:
+        # Hot-region base tuning, the pos_leaf twin (2026-09-03): 16 unexecuted ops, tuned
+        # JOINTLY with the pass-1 filler across 7 per-op frame profiles (see the comment at the
+        # pass-1 site in wall_renderer.py). Multiple of 16, same pad-transparency rule.
+        lines.append("    rep(16, i) stl.fj 0, 0")
         lines.append(f"{L}_pos_leaf:")
         lines.append(f"    proj.point_on_side_leaf {L}_side, vx, vy, "
                      f"{L}_cpx, {L}_cpy, {L}_cdx_mag, {L}_cdy_mag, {L}_sign_dx, {L}_sign_dy, {L}_pos_ret")

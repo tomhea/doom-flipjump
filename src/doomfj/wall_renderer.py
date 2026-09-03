@@ -1889,7 +1889,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              # lines mode fcalls a pass-2 leaf too, so the stub ladder has to define one (it is never
              # reached: part 1 always leaves `proceed` = 0 here).
              + (["seg_pass2_leaf:", "stl.fret seg_ret2"])) if "xrstub" in ablate else
-            ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
+            # Hot-region base tuning (2026-09-03): 16 UNEXECUTED ops land the pass-1 leaf
+            # region -- whose hex.add/sub/cmp switch labels are the frame's bulk wflip values --
+            # on a cheaper base address. Tuned JOINTLY with the pos_leaf filler across 7 per-op
+            # frame profiles (4 deg viewpoints + 3 sweep-grid frames) by the popcount census
+            # predictor (scratchpad/popcount_census.py + joint_tune.py), constrained so that NO
+            # profiled frame loses: predicted -94,702..-268,178 per frame. A single-frame tune
+            # said 1552 here and was overfit (+9,550 on one gate viewpoint). The count must stay
+            # a multiple of 16 so every downstream `pad 2/4/16` passes the shift through exactly
+            # (the stl's larger pads all sit in the low-address table init, which never shifts).
+            ["rep(16, i) stl.fj 0, 0",
+             "seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
              f"{1 if 'noprescan' in ablate else 0}",
              # CR-2026-08: the deg attribution budget must provably never bind (a binding budget
              # = the smudged-column bug) -- n_ts counts a subset of the map's segs, so total segs

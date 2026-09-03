@@ -43,7 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # ---------------------------------------------------------------------------- census capture
 
 
-def _spy_on_wflips(assembler_module):
+def _spy_on_wflips(assembler_module, record_values=False):
     """Wrap BinaryData.insert_wflip_ops to record (base bit-address, popcount) per site, in
     insertion order. Returns (records, unhook). The base address is where the site's first op
     lands: segment first_address plus the words already emitted.
@@ -54,11 +54,12 @@ def _spy_on_wflips(assembler_module):
     import array
 
     class _Records:
-        __slots__ = ("bases", "pcs")
+        __slots__ = ("bases", "pcs", "values")
 
         def __init__(self):
             self.bases = array.array("q")
             self.pcs = array.array("b")
+            self.values = array.array("Q")
 
         def __len__(self):
             return len(self.bases)
@@ -75,11 +76,19 @@ def _spy_on_wflips(assembler_module):
     binary_data_cls = assembler_module.BinaryData
     orig = binary_data_cls.insert_wflip_ops
     bases_append, pcs_append = records.bases.append, records.pcs.append
+    values_append = records.values.append
 
-    def spy(self, word_address, flip_value, return_address):
-        bases_append(self.first_address + len(self.fj_words) * self.memory_width)
-        pcs_append(bin(flip_value).count("1"))
-        return orig(self, word_address, flip_value, return_address)
+    if record_values:
+        def spy(self, word_address, flip_value, return_address):
+            bases_append(self.first_address + len(self.fj_words) * self.memory_width)
+            pcs_append(bin(flip_value).count("1"))
+            values_append(flip_value)
+            return orig(self, word_address, flip_value, return_address)
+    else:
+        def spy(self, word_address, flip_value, return_address):
+            bases_append(self.first_address + len(self.fj_words) * self.memory_width)
+            pcs_append(bin(flip_value).count("1"))
+            return orig(self, word_address, flip_value, return_address)
 
     binary_data_cls.insert_wflip_ops = spy
 
@@ -108,20 +117,29 @@ def capture_fj(fj_paths, out_path, memory_width=32, defines_file=None):
 
 
 def _write_census(out_path, source_desc, records):
+    values = list(getattr(records, "values", []) or [])
     payload = {
         "source": [str(p) for p in source_desc],
         "n_sites": len(records),
         "sites": [[base, pc] for base, pc in records],
     }
+    if len(values) == len(records):
+        payload["values"] = values
     with gzip.open(out_path, "wt", encoding="utf-8") as f:
         json.dump(payload, f)
     print(f"census -> {out_path}  ({len(records):,} wflip sites)")
 
 
-def _read_census(path):
+def _read_census(path, with_values=False):
     with gzip.open(path, "rt", encoding="utf-8") as f:
         payload = json.load(f)
-    return [(base, pc) for base, pc in payload["sites"]]
+    sites = [(base, pc) for base, pc in payload["sites"]]
+    if not with_values:
+        return sites
+    values = payload.get("values")
+    if not values:
+        raise SystemExit(f"{path} has no recorded values -- re-capture with the current tool")
+    return sites, values
 
 
 # ---------------------------------------------------------------------------- prediction
@@ -169,6 +187,139 @@ def _report(delta, diags):
         print("top contributors (site ordinal, A-address, costA->costB, visits, ops):")
         for _absterm, ordinal, base_a, ca, cb, visits, term in diags["top"]:
             print(f"  #{ordinal:<9,} {hex(base_a):>14} {ca:>2}->{cb:<2} x {visits:>11,} = {term:+,}")
+
+
+# ---------------------------------------------------------------------------- rank
+
+
+PART_OPS = [
+    # (name, ops) in emission order -- the deg-tier part sizes, for coarse attribution.
+    ("entry", 32), ("tables", 338598), ("main", 64), ("segconsts", 44419),
+    ("walk", 73941), ("state", 434), ("banks", 3242421),
+]
+
+
+def rank(census, hist, hist_shift, top_n, dw_bits=64):
+    """where the frame's wflip ops actually go, site by site, from the baseline alone:
+    executed(site) = visits x max(1, popcount). This is the target list for hot-address
+    placement -- no candidate build needed."""
+    total_frame = sum(hist.values())
+    rows = []
+    total_wflip = 0
+    for ordinal, (base, pc) in enumerate(census):
+        visits = hist.get(base >> hist_shift, 0)
+        if not visits:
+            continue
+        cost = visits * max(1, pc)
+        total_wflip += cost
+        rows.append((cost, ordinal, base, pc, visits))
+    rows.sort(reverse=True)
+
+    bounds, acc = [], 0
+    for name, ops in PART_OPS:
+        acc += ops
+        bounds.append((acc, name))
+
+    def part_of(base):
+        op_index = base // dw_bits
+        for end, name in bounds:
+            if op_index < end:
+                return name
+        return "wflip-area"
+
+    print(f"frame ops        : {total_frame:,}")
+    print(f"wflip ops        : {total_wflip:,}  ({100.0 * total_wflip / total_frame:.1f}% of the frame)")
+    print(f"hot wflip sites  : {len(rows):,} of {len(census):,}")
+    print()
+    print(f"top {top_n} sites by executed wflip ops:")
+    print(f"{'ops':>13} {'share':>6} {'addr':>14} {'op#':>9} {'pc':>3} {'visits':>11}  part")
+    shown = 0
+    for cost, ordinal, base, pc, visits in rows[:top_n]:
+        print(f"{cost:>13,} {100.0 * cost / total_frame:>5.2f}% {hex(base):>14} "
+              f"{base // dw_bits:>9,} {pc:>3} {visits:>11,}  {part_of(base)}")
+        shown += cost
+    print(f"top {top_n} together: {shown:,} ops = {100.0 * shown / total_frame:.1f}% of the frame")
+
+    by_part = {}
+    for cost, _o, base, _p, _v in rows:
+        by_part[part_of(base)] = by_part.get(part_of(base), 0) + cost
+    print()
+    print("wflip ops by part:")
+    for name, cost in sorted(by_part.items(), key=lambda kv: -kv[1]):
+        print(f"  {name:<12} {cost:>13,}  ({100.0 * cost / total_frame:.1f}% of the frame)")
+    return rows
+
+
+def rank_values(census, values, hist, hist_shift, top_n, labels_path=None):
+    """group executed wflip cost by the VALUE flipped. A hot value is a label whose ADDRESS
+    thousands of sites pay popcount for -- the placement lever: move THAT label to a
+    low-popcount address and every referencing site gets cheaper at once."""
+    from collections import defaultdict
+
+    cost_by_value = defaultdict(int)
+    sites_by_value = defaultdict(int)
+    hot_sites_by_value = defaultdict(int)
+    total = 0
+    for (base, pc), value in zip(census, values):
+        visits = hist.get(base >> hist_shift, 0)
+        sites_by_value[value] += 1
+        if not visits:
+            continue
+        c = visits * max(1, pc)
+        cost_by_value[value] += c
+        hot_sites_by_value[value] += 1
+        total += c
+    top = sorted(cost_by_value.items(), key=lambda kv: -kv[1])[:top_n]
+
+    names = {}
+    if labels_path and Path(labels_path).exists():
+        want = {v for v, _ in top}
+        with gzip.open(labels_path, "rt", encoding="utf-8") as fh:
+            for line in fh:
+                name, _, addr = line.rstrip().rpartition(chr(9))
+                try:
+                    a = int(addr)
+                except ValueError:
+                    continue
+                if a in want and (a not in names or len(name) < len(names[a])):
+                    names[a] = name
+    frame = sum(hist.values())
+    print(f"frame ops       : {frame:,}   wflip ops: {total:,} ({100.0 * total / frame:.1f}%)")
+    print(f"distinct values : {len(cost_by_value):,} hot / {len(sites_by_value):,} present")
+    print()
+    print(f"top {top_n} VALUES by executed wflip ops (the placement targets):")
+    print(f"{'ops':>13} {'share':>6} {'value':>12} {'pc':>3} {'sites':>9} {'hot':>7}  label")
+    for value, cost in top:
+        pc = bin(value).count("1")
+        print(f"{cost:>13,} {100.0 * cost / frame:>5.2f}% {hex(value):>12} {pc:>3} "
+              f"{sites_by_value[value]:>9,} {hot_sites_by_value[value]:>7,}  {names.get(value, chr(63))}")
+    shown = sum(c for _, c in top)
+    print(f"top {top_n} together: {shown:,} ops = {100.0 * shown / frame:.1f}% of the frame")
+    return top
+
+
+def simulate_shift(census, values, hist, hist_shift, at_addr, filler_ops, dw_bits=64):
+    """predicted delta of inserting `filler_ops` unexecuted ops at bit-address `at_addr`:
+    every site and every value at-or-after the point shifts by filler_ops*dw, and only the
+    popcounts of the shifted VALUES change the executed cost (a base shift moves the site,
+    but its visits move with it).
+
+    CAVEAT, and why the real capture must confirm a winner: a recorded value that is NOT a
+    plain address in the shifted region (an XOR of two labels, dbit+k, a constant that
+    happens to be numerically >= at_addr) is mis-modelled here. This is the instant search
+    rung, not the certifier."""
+    shift = filler_ops * dw_bits
+    delta = 0
+    for (base, pc), v in zip(census, values):
+        if v < at_addr:
+            continue
+        visits = hist.get(base >> hist_shift, 0)
+        if not visits:
+            continue
+        new_pc = bin(v + shift).count("1")
+        if new_pc != pc:
+            delta += visits * (max(1, new_pc) - max(1, pc))
+    return delta
 
 
 # ---------------------------------------------------------------------------- selftest
@@ -289,6 +440,26 @@ def selftest():
 # ---------------------------------------------------------------------------- doom capture
 
 
+def _spy_on_labels(assembler_module, out_path):
+    """Wrap labels_resolve to dump the resolved label table of the SAME build the census
+    describes -- name<TAB>bit-address, gzipped. This is what names a hot wflip VALUE."""
+    orig = assembler_module.labels_resolve
+
+    def spy(ops, labels, memory_width, fjm_writer, **kw):
+        with gzip.open(out_path, "wt", encoding="utf-8") as fh:
+            for name, addr in labels.items():
+                fh.write(f"{name}\t{addr}\n")
+        print(f"labels -> {out_path}  ({len(labels):,} labels)", flush=True)
+        return orig(ops, labels, memory_width, fjm_writer, **kw)
+
+    assembler_module.labels_resolve = spy
+
+    def unhook():
+        assembler_module.labels_resolve = orig
+
+    return unhook
+
+
 def capture_doom(out_path, stl_choice, ptr_cell_bits):
     """the deg-tier build with the spy on. HEAVY: a full assembly, rule 1 applies."""
     argv = ["deg_with_stl.py"]
@@ -302,7 +473,9 @@ def capture_doom(out_path, stl_choice, ptr_cell_bits):
 
     import flipjump.assembler.assembler as asm
 
-    records, unhook = _spy_on_wflips(asm)
+    records, unhook = _spy_on_wflips(asm, record_values=True)
+    labels_path = str(Path(out_path).with_suffix("")) + ".labels.tsv.gz"
+    unhook_labels = _spy_on_labels(asm, labels_path)
     try:
         # deg_with_stl handles the stl selection and the defines file, then runs deg_gate,
         # which assembles (census recorded here) and gates 4 viewpoints (a free byte-exactness
@@ -317,6 +490,7 @@ def capture_doom(out_path, stl_choice, ptr_cell_bits):
                 raise
     finally:
         unhook()
+        unhook_labels()
         sys.argv = saved_argv
     if not records:
         raise SystemExit("capture-doom recorded ZERO wflip sites -- the spy never fired")
@@ -339,6 +513,20 @@ def main():
     capd.add_argument("--stl", choices=["stock", "worktree", "stl-dual"], default="stl-dual")
     capd.add_argument("--ptr-cell-bits", type=int, default=0,
                       help="0 = the shipped default (8-bit cells); pass 16 for the wide-cell config")
+    rk = sub.add_parser("rank")
+    rk.add_argument("--census", required=True)
+    rk.add_argument("--hist", required=True)
+    rk.add_argument("--top", type=int, default=40)
+    rkv = sub.add_parser("rank-values")
+    rkv.add_argument("--census", required=True)
+    rkv.add_argument("--hist", required=True)
+    rkv.add_argument("--labels", default="", help="the .labels.tsv.gz written by capture-doom")
+    rkv.add_argument("--top", type=int, default=40)
+    sim = sub.add_parser("simulate-shift")
+    sim.add_argument("--census", required=True)
+    sim.add_argument("--hist", required=True)
+    sim.add_argument("--at", required=True, help="bit-address (hex ok) where filler is inserted")
+    sim.add_argument("--ops", required=True, help="filler op counts to try: N, N-M, or comma list")
     pred = sub.add_parser("predict")
     pred.add_argument("--a", required=True)
     pred.add_argument("--b", required=True)
@@ -353,6 +541,42 @@ def main():
     if args.mode == "capture-doom":
         choice = {"stock": None, "worktree": "--worktree", "stl-dual": "--stl-dual"}[args.stl]
         capture_doom(args.out, choice, args.ptr_cell_bits)
+        return
+    if args.mode == "rank":
+        hist_payload = json.loads(Path(args.hist).read_text(encoding="utf-8"))
+        if hist_payload.get("bucket_bits") != 6:
+            raise SystemExit("hist bucket_bits must be 6 (per-op)")
+        hist = {int(k): v for k, v in hist_payload["hist"].items()}
+        rank(_read_census(args.census), hist, 6, args.top)
+        return
+    if args.mode == "rank-values":
+        hist_payload = json.loads(Path(args.hist).read_text(encoding="utf-8"))
+        if hist_payload.get("bucket_bits") != 6:
+            raise SystemExit("hist bucket_bits must be 6 (per-op)")
+        hist = {int(k): v for k, v in hist_payload["hist"].items()}
+        sites, values = _read_census(args.census, with_values=True)
+        rank_values(sites, values, hist, 6, args.top, labels_path=args.labels or None)
+        return
+    if args.mode == "simulate-shift":
+        hist_payload = json.loads(Path(args.hist).read_text(encoding="utf-8"))
+        if hist_payload.get("bucket_bits") != 6:
+            raise SystemExit("hist bucket_bits must be 6 (per-op)")
+        hist = {int(k): v for k, v in hist_payload["hist"].items()}
+        sites, values = _read_census(args.census, with_values=True)
+        at = int(args.at, 0)
+        spec = args.ops
+        if "-" in spec and "," not in spec:
+            lo, hi = spec.split("-")
+            trials = range(int(lo), int(hi) + 1)
+        else:
+            trials = [int(x) for x in spec.split(",")]
+        results = []
+        for n in trials:
+            d = simulate_shift(sites, values, hist, 6, at, n)
+            results.append((d, n))
+            print(f"  {n:>5} filler ops at {hex(at)}: predicted {d:+,}")
+        best = min(results)
+        print(f"BEST: {best[1]} ops -> {best[0]:+,}")
         return
     if args.mode == "predict":
         hist_payload = json.loads(Path(args.hist).read_text(encoding="utf-8"))

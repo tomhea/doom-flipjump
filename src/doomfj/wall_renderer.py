@@ -11,6 +11,8 @@ unrolled pass 2 rasters them through the shared-compare trampoline.
 """
 from __future__ import annotations
 
+import math
+
 from pathlib import Path
 
 from doomfj.lut_generator import (
@@ -1390,6 +1392,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     or (p[0] == "sp_base2" and DEG_SPR_NEAR_TZ)], (
                     "the thing xor_by block no longer matches THING_XORBY_FIELDS -- update the "
                     "schema (and sim.thing_pass's clears) together")
+                # T4's L-inf far reject derives its bound from sp_tzmax at runtime as
+                # (tz_map<<2) + (tz_map>>2) + 2 with tz_map = floor(tzmax). That over-approximates
+                # sqrt(17)*tzmax only when 0.127*tzmax > the truncation slop -- true for
+                # tzmax >= 18 map units. E1M1's smallest baked tzmax is 266; this guard is for
+                # M4's other maps, where a tiny sprite category could break the margin SILENTLY
+                # (a wrongly rejected thing is missing pixels, not a crash).
+                _tzmax_fixed = dict((n, v) for n, w, v in _tfields)["sp_tzmax"]
+                _tz_map = _tzmax_fixed >> 16
+                assert (_tz_map << 2) + (_tz_map >> 2) + 2 >= math.ceil(math.sqrt(17) * (_tz_map + 1)) + 1, (
+                    f"T4 far-reject margin broken: tzmax={_tz_map} map units is too small for the "
+                    f"4.25x+2 bound. Widen the margin in projection.fj's L-inf reject or reject "
+                    f"this sprite category at emit time.")
                 xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
                 out += [
                     # M14.5 §3.3: read-many, write-rarely, and the index is a COMPILE-TIME
@@ -2331,6 +2345,8 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "wxr_tx1: hex.vec 8",
         "wxr_tx2: hex.vec 8",
         "pth_ang: hex.vec 8",
+        "pth_dbound: hex.vec 8",
+        "pth_dtest: hex.vec 8",
         "pth_c_centerxfix: hex.vec 8",
         "pth_c_centeryfix: hex.vec 8",
         "pth_c_viewh: hex.vec 8",

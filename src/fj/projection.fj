@@ -1300,13 +1300,53 @@ ns proj {
     //   the fj reads next to r_things.c (see the conventions header).
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
     def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg, spn, neartz \
-            @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, h_ok, h_fits, clamp_tall, set_far, far_done, trig_calc, trig_have, reject, done, end, deg_far_hard \
-            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_c_centerxfix, pth_c_centeryfix, pth_c_viewh, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_gzt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
+            @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, h_ok, h_fits, clamp_tall, set_far, far_done, trig_calc, trig_have, linf_x_ok, linf_y_ok, reject, done, end, deg_far_hard \
+            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_dbound, pth_dtest, pth_c_centerxfix, pth_c_centeryfix, pth_c_viewh, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_gzt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
         hex.set 1, vis, 0
         hex.mov 8, pth_tr_x, sp_x
         hex.sub 8, pth_tr_x, viewx
         hex.mov 8, pth_tr_y, sp_y
         hex.sub 8, pth_tr_y, viewy
+        // T4 L-INF FAR REJECT (2026-09-03), before the two rotation multiplies. Measured in the
+        // attribution round: this leaf runs 140-163 times a frame, accepts exactly 7, and 62-90%
+        // of calls die on the depth test at the tz compare -- AFTER paying the two fixed_mul_lo
+        // (~8.2k ops). Any ACCEPTED thing has tz <= sp_tzmax and |tx| <= tz<<2, so
+        // d = sqrt(tz^2 + tx^2) <= sqrt(17)*sp_tzmax, and max(|tr_x|,|tr_y|) <= d. Rejecting on
+        // |tr| > bound therefore kills only things the later chain rejects anyway.
+        //
+        // The bound comes from sp_tzmax AT RUNTIME -- no new baked field, no sim/throw-row or
+        // schema fan-out: 4.25 = 4 + 1/4 > sqrt(17), bound = (tz_map<<2) + (tz_map>>2) + 2,
+        // where tz_map is sp_tzmax's integer part. FIVE nibbles so the <<2 cannot wrap, and the
+        // +2 covers both floors (the >>2 truncation, and |floor(tr)| understating |tr| by <1 on
+        // the positive side). Every rounding error ADMITS a thing; none can reject one the old
+        // chain accepted. sp_tzmax >= sp_tzmax2, so the one bound is conservative for the degfl
+        // path as well.
+        // ⚠ the tr slices are FOUR nibbles then sign_extend'ed to five: a `mov 5` from
+        // tr+4*dw reads past the 8-nibble register into its neighbour. The gate caught
+        // exactly that as thousands of missing sprite pixels (mass over-reject), 2026-09-03.
+        hex.zero 5, pth_dbound
+        hex.mov 4, pth_dbound, sp_tzmax + 4*dw
+        hex.shl_bit 5, pth_dbound
+        hex.shl_bit 5, pth_dbound
+        hex.zero 5, pth_dtest
+        hex.mov 4, pth_dtest, sp_tzmax + 4*dw
+        hex.shr_bit 5, pth_dtest
+        hex.shr_bit 5, pth_dtest
+        hex.add 5, pth_dbound, pth_dtest
+        hex.inc 5, pth_dbound
+        hex.inc 5, pth_dbound
+        hex.zero 5, pth_dtest
+        hex.mov 4, pth_dtest, pth_tr_x + 4*dw
+        hex.sign_extend 5, 4, pth_dtest
+        hex.abs 5, pth_dtest
+        hex.cmp 5, pth_dtest, pth_dbound, linf_x_ok, linf_x_ok, reject
+      linf_x_ok:
+        hex.zero 5, pth_dtest
+        hex.mov 4, pth_dtest, pth_tr_y + 4*dw
+        hex.sign_extend 5, 4, pth_dtest
+        hex.abs 5, pth_dtest
+        hex.cmp 5, pth_dtest, pth_dbound, linf_y_ok, linf_y_ok, reject
+      linf_y_ok:
         // sin/cos of the VIEW angle: constant for the whole frame, but this leaf runs once per
         // THING (250 of them on E1M1). A `finesine` lookup carries result_nibbles=8, i.e. EIGHT
         // dispatches, so the pair costs ~8.6k ops -- against a 1-nibble `if0` to reuse them. A

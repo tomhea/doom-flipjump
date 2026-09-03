@@ -1595,3 +1595,44 @@ the address-dependent fraction is tens of ops per deref, and the sweep said -16k
 * The V5 slot pack (stacks with T-HOTSLOTS; census says live traffic is 4-byte runs).
 * The 12M target needs -55% from here (22.08M): only the exact_xor family itself (67% of the
   frame) is big enough, via the two levers above.
+
+---
+
+## 16. THE WORKED-IDEAS CAMPAIGN (running board, 2026-09-03)
+
+Goal: 20 ideas that ship through BOTH gates; every kill generates a replacement. The
+campaign metric is the ca2_sweep median; every ship is 260/260 byte-exact.
+
+| # | idea | median effect |
+|---|---|---:|
+| 1 | one shadow for both pointer address fields | -6.23% |
+| 2 | mul_const x4 -> two shifts at lines_pid_ids | -1.78% |
+| 3 | vzcbase -4 fold (baked) | (bundle) |
+| 4 | lines_pid_ids dead-output split (_c/_f) | (bundle) -1.06% |
+| 5 | dead ssc_zero_row zeroes deleted | (rider) |
+| 6 | add_constant 1 -> hex.inc | (bundle) |
+| 7 | sfslot/spslot into the hotdata block | -0.07% |
+| 8 | L-inf far reject before the tz multiplies | -0.24% |
+| 9 | drawn[] is one nibble (read_hex/write_hex/if0 1) | -0.18% |
+| 10 | incremental lockstep pointers for the p2 loaders | -1.95% |
+| 11 | DDA the wall top/bottom (column_params_dda) | **-3.87%** |
+
+**Median: 24,306,866 (M4 baseline) -> 20,775,735 = -14.5%.**
+
+Killed-and-replaced: dispatch-trampoline pad alignment (all four viewpoints +300-550k -- pads
+inside per-expansion macros are a shotgun) -> replaced by #10; vertex-share cache (real hit rate
+19.7%, EV negative) -> replaced by #11. Moot on inspection: the 2s DDA (column_params_m has no
+callers left -- #11's conversion covered the whole per-column wall projection) and the ts-loop
+incremental pointers (that loop ALREADY seeds per seg and steps at col_next -- it is the
+pattern's origin). point_on_side strength-reduction: the live leaf already does it (magnitudes,
+signs, 8-nibble mul_lo, xor-involution sets); the TODO comment belongs to the unused generic.
+
+Two implementation bugs the byte-exact gate caught before they could ship: an out-of-bounds
+`mov 5` register read in the far reject (mass over-rejection, 41-2,290 px), and 6-row truncated
+DDA seeds (f(s) = W*(s mod 16^6) is not linear under the mod-2^32 scale walk; scalestep's
+sign-extension lives exactly in the dropped rows -- 2,152-3,990 px). Full 8-row seeds equal the
+old values wherever scale < 256.0, DOOM's classic cap.
+
+Queued: the sfslot wide-cell pack over the dual decoder table (all three accessor clusters now
+centralised by #10), the spslot pack (needs an 8-byte layout -- 7 is odd and mixed widths in one
+region are forbidden), per-face stepcol_b/cviewh1 hoists (~40k, borderline vs sweep noise).

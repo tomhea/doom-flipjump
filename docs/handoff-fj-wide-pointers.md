@@ -1662,5 +1662,16 @@ code's offsets were never zero), fixed by rep-gating; and nothing else -- the pa
 was clean, which is worth knowing for a future retry on a program without the hot-block
 collision.
 
-Still queued: the spslot variant is dead with this; the per-face stepcol_b/cviewh1 hoists remain
-(~40k, borderline vs sweep noise).
+### 16.2 The constant-base hoists: built, gated, killed BY THE RULE (2026-09-03)
+
+stepcol_b (re-set per FACE, ~300/frame) and dbase (per SEG) hoisted to one per-frame set each.
+deg: all four byte-exact, -322,596 total. Sweep: mean -39,072, min AND max better -- but
+**median +56,243 (+0.27%)**, and the median is the repo's stated cost model. Killed by the rule.
+
+The split verdict is the measurement floor showing itself: a 3-line deletion's direct saving
+(~50-130k, real -- deg showed it) is the same size as the label-shift ripple it triggers, and
+which frames pay the ripple is unpredictable. **Ideas below ~100k/frame cannot prove themselves
+on the current instruments.** The way past the floor is the popcount census predictor: with
+per-site popcount(flip_value) x execution counts, the ripple becomes computable instead of
+fatal.
+

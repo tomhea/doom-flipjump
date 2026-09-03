@@ -1,0 +1,4 @@
+STL: C:\Users\tomhe\Documents\flipjump-wide\flipjump\stl
+program parts: entry=32, tables=338,598, main=66, segconsts=44,419, walk=73,941, state=434, banks=3,242,422
+Syntax Warning in file C:\Users\tomhe\Documents\doom-flipjump\src\fj\frame_render.fj line 1758:
+  In macro frame.seg_pass1_leaf_body_lines(4):  unused labels: drawn.

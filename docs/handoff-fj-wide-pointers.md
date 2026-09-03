@@ -1450,6 +1450,35 @@ declared before the file that uses it (same parse-time rule as 3g).
 
 ## 14. WHERE THE FRAME ACTUALLY GOES - measured 2026-09-03
 
+### 14.0 ⚠ FIRST, A CORRECTION: "the mean frame" is NOT deg_gate's four viewpoints
+
+Everything in sections 12 and 13 quotes deg_gate's four viewpoints and their mean of 35,528,743.
+**That is not the mean frame, and it was never meant to be.** deg_gate's own docstring says it
+picks "4 viewpoints that exercise every lever", and its comments name them: the sprite-overlap
+frame, the stack-far-gate stairs, and "the everything frame: sliver + PNEAR + all". They are the
+WORST CASES, chosen to make levers fire.
+
+`scratchpad/ca2_sweep.py` says so in its own header, and names the right metric:
+
+> Why not deg_gate alone: deg_gate's four viewpoints are WORST CASES. The repo's cost model is the
+> MEDIAN over the sweep's 65 walkable grid points x 4 angles, and the two disagree by ~40%.
+
+The governing metric, over 260 frames at `PID_NIBBLES=2` (which is what `config.py` still
+defaults to):
+
+    median 24,306,866    mean 24,408,647    min 6,219,980    max 47,937,393
+
+So the deg_gate mean overstates a typical frame by **46%**. A target of "under 20M" is a **-18%**
+cut from the sweep median, not the -44% section 13 implies. And the 6,781,000 ops/frame of
+confirmed reductions in 14.3 were sized against deg_gate frames; scaled by the same ratio they are
+~4.7M, which would put the median near 19.7M -- i.e. **the target may already be within reach of
+the confirmed list, with no attack on `exact_xor` at all**. That scaling is an ASSUMPTION (savings
+that track seg or column count do not scale uniformly), and it is measured, not assumed, by
+re-running ca2_sweep.
+
+**Quote the sweep median. Do not quote a deg_gate mean as a frame cost.**
+
+
 Profiled with a per-op IP histogram over `build/doom_e1m1_doors_rt.fjm` (hosted-doors; there is no
 visual-tier .fjm on disk), two full frames: spawn 39,746,213 ops and (664,291) 50,796,118.
 Controls that passed: the histogram sums exactly to the interpreter's `op_counter`; the

@@ -1728,6 +1728,15 @@ ns frame {
       done:
     }
 
+    // idea 17 (2026-09-03): read a byte into a dst the caller PROVABLY just zeroed --
+    // hex.read_byte's own `.zero 2, dst` (~30 executed ops) is redundant there. Only the
+    // loaders' piece paths use this, right after their Z-blocks; a dst that can be nonzero
+    // must keep hex.read_byte_and_inc.
+    def read0_byte_and_inc dst, ptr {
+        hex.xor_byte_from_ptr dst, ptr
+        hex.ptr_inc ptr
+    }
+
     def lines_dda_step < p2_prodc, p2_prodf, p2_stepc, p2_stepf {
         .add8_chain p2_prodc, p2_stepc               // idea 14: was hex.add 8 -- same 962 ops
         .add8_chain p2_prodf, p2_stepf               //   of space, ~170 fewer executed per call
@@ -1805,18 +1814,18 @@ ns frame {
         hex.mov 1, lcnt, flags_v + 1*dw
         hex.mov w/4, sfslot_p, p2_sfsp           // idea 11: working copy -- the and_incs mutate it
         hex.if0 1, ucnt, up_none
-        hex.read_byte_and_inc u1y1, sfslot_p
-        hex.read_byte_and_inc u1y2, sfslot_p
-        hex.read_byte_and_inc u1cls, sfslot_p
-        rep(2-PID_BYTES, k) hex.read_byte_and_inc u1bp, sfslot_p
+        frame.read0_byte_and_inc u1y1, sfslot_p
+        frame.read0_byte_and_inc u1y2, sfslot_p
+        frame.read0_byte_and_inc u1cls, sfslot_p
+        rep(2-PID_BYTES, k) frame.read0_byte_and_inc u1bp, sfslot_p
         rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, u1bp, sfslot_p
         rep(PID_BYTES-1, k) hex.ptr_add sfslot_p, PID_BYTES
         hex.dec 1, ucnt
         hex.if0 1, ucnt, up_one                 // count was 1 -> no second upper stored
-        hex.read_byte_and_inc u2y1, sfslot_p
-        hex.read_byte_and_inc u2y2, sfslot_p
-        hex.read_byte_and_inc u2cls, sfslot_p
-        rep(2-PID_BYTES, k) hex.read_byte_and_inc u2bp, sfslot_p
+        frame.read0_byte_and_inc u2y1, sfslot_p
+        frame.read0_byte_and_inc u2y2, sfslot_p
+        frame.read0_byte_and_inc u2cls, sfslot_p
+        rep(2-PID_BYTES, k) frame.read0_byte_and_inc u2bp, sfslot_p
         rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, u2bp, sfslot_p
         rep(PID_BYTES-1, k) hex.ptr_add sfslot_p, PID_BYTES
         hex.inc 1, ucnt
@@ -1829,18 +1838,18 @@ ns frame {
         hex.ptr_add sfslot_p, 2*PIECE_BYTES     // skip the whole upper group
       lo_read:
         hex.if0 1, lcnt, end
-        hex.read_byte_and_inc l1y1, sfslot_p
-        hex.read_byte_and_inc l1y2, sfslot_p
-        hex.read_byte_and_inc l1cls, sfslot_p
-        rep(2-PID_BYTES, k) hex.read_byte_and_inc l1bp, sfslot_p
+        frame.read0_byte_and_inc l1y1, sfslot_p
+        frame.read0_byte_and_inc l1y2, sfslot_p
+        frame.read0_byte_and_inc l1cls, sfslot_p
+        rep(2-PID_BYTES, k) frame.read0_byte_and_inc l1bp, sfslot_p
         rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, l1bp, sfslot_p
         rep(PID_BYTES-1, k) hex.ptr_add sfslot_p, PID_BYTES
         hex.dec 1, lcnt
         hex.if0 1, lcnt, lo_one
-        hex.read_byte_and_inc l2y1, sfslot_p
-        hex.read_byte_and_inc l2y2, sfslot_p
-        hex.read_byte_and_inc l2cls, sfslot_p
-        rep(2-PID_BYTES, k) hex.read_byte_and_inc l2bp, sfslot_p
+        frame.read0_byte_and_inc l2y1, sfslot_p
+        frame.read0_byte_and_inc l2y2, sfslot_p
+        frame.read0_byte_and_inc l2cls, sfslot_p
+        rep(2-PID_BYTES, k) frame.read0_byte_and_inc l2bp, sfslot_p
         rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, l2bp, sfslot_p
         rep(PID_BYTES-1, k) hex.ptr_add sfslot_p, PID_BYTES
         hex.inc 1, lcnt
@@ -1872,6 +1881,10 @@ ns frame {
         hex.zero 2, l2cls
         hex.zero PID_NIBBLES, l2bp
         hex.zero 1, p2_ldirty                   // the rare dirty->clean transition
+        ;end
+        // idea 17 size-freeze: the 30 zero-eliding reads shrank this leaf by 70 ops
+        // per site; unreachable filler restores the layout (the idea-16 lesson).
+        rep(1120, i) stl.fj 0, 0
       end:
     }
 
@@ -1899,28 +1912,28 @@ ns frame {
         hex.zero 2, slrb
         hex.set 1, p2_sdirty, 1
         hex.mov w/4, spslot_p, p2_sspp           // idea 11: working copy
-        hex.read_byte_and_inc ssy1, spslot_p
-        hex.read_byte_and_inc ssy2, spslot_p
+        frame.read0_byte_and_inc ssy1, spslot_p
+        frame.read0_byte_and_inc ssy2, spslot_p
         // M13-15M: y0 is TWO bytes, bias 32768. One biased byte wrapped for y0 < -128 -- a tall
         // near sprite's top row -- and the wrap turned (1869,479,W)'s fragment into an empty
         // above-region plus one bogus clamped run (the oracle keeps raw ints, so only fj wrapped).
-        hex.read_byte_and_inc sy0b, spslot_p
-        hex.read_byte_and_inc sy0b + 2*dw, spslot_p
-        hex.read_byte_and_inc sblk, spslot_p
-        hex.read_byte_and_inc sblk + 2*dw, spslot_p
-        hex.read_byte_and_inc slr, spslot_p
+        frame.read0_byte_and_inc sy0b, spslot_p
+        frame.read0_byte_and_inc sy0b + 2*dw, spslot_p
+        frame.read0_byte_and_inc sblk, spslot_p
+        frame.read0_byte_and_inc sblk + 2*dw, spslot_p
+        frame.read0_byte_and_inc slr, spslot_p
         // V4b: sprfl == 2 -> the SECOND fragment at byte offset 8 of the same slot
         hex.mov 2, has_slot_b, sprfl
         hex.dec 2, has_slot_b
         hex.if0 2, has_slot_b, end
         hex.ptr_add spslot_p, 1                 // bytes 0-6 read -> skip byte 7 to land on 8
-        hex.read_byte_and_inc ssy1b, spslot_p
-        hex.read_byte_and_inc ssy2b, spslot_p
-        hex.read_byte_and_inc sy0bb, spslot_p
-        hex.read_byte_and_inc sy0bb + 2*dw, spslot_p
-        hex.read_byte_and_inc sblkb, spslot_p
-        hex.read_byte_and_inc sblkb + 2*dw, spslot_p
-        hex.read_byte_and_inc slrb, spslot_p
+        frame.read0_byte_and_inc ssy1b, spslot_p
+        frame.read0_byte_and_inc ssy2b, spslot_p
+        frame.read0_byte_and_inc sy0bb, spslot_p
+        frame.read0_byte_and_inc sy0bb + 2*dw, spslot_p
+        frame.read0_byte_and_inc sblkb, spslot_p
+        frame.read0_byte_and_inc sblkb + 2*dw, spslot_p
+        frame.read0_byte_and_inc slrb, spslot_p
         ;end
       spslot_p: hex.vec w/4
       has_slot_b: hex.vec 2
@@ -1940,6 +1953,10 @@ ns frame {
         hex.zero 4, sblkb
         hex.zero 2, slrb
         hex.zero 1, p2_sdirty                   // the rare dirty->clean transition
+        ;end
+        // idea 17 size-freeze: the 30 zero-eliding reads shrank this leaf by 70 ops
+        // per site; unreachable filler restores the layout (the idea-16 lesson).
+        rep(980, i) stl.fj 0, 0
       end:
     }
 

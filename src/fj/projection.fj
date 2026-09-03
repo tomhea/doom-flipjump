@@ -823,7 +823,8 @@ ns proj {
         hex.mov 8, scale, sga_csmax
         ;end                                    // SCALE_MAX > SCALE_MIN, so the min-clamp is satisfied
       chk_min:
-        hex.cmp 8, scale, sga_csmin, set_min, end, end            // max(SCALE_MIN, scale): < -> clamp (unsigned)
+        hex.cmp 6, scale, sga_csmin, set_min, end, end            // max(SCALE_MIN, scale): < -> clamp. idea 19:
+                                                                  //   POST-max-clamp scale <= 0x400000 < 16^6
       set_min:
         hex.mov 8, scale, sga_csmin
         ;end
@@ -1617,7 +1618,10 @@ ns proj {
       tneg:
         hex.zero 8, top
       tok:
-        hex.scmp 8, bottom, cpm_c_viewh1, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
+        // idea 19: scmp 8 -> 4. `bottom` was just built by sign_extend 8,4 -- BY CONSTRUCTION
+        // a sign-extension of its low 4 nibbles -- and viewh1 (~199) is its own low-4
+        // extension, so the signed compare of the low 4 nibbles decides identically.
+        hex.scmp 4, bottom, cpm_c_viewh1, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
       bhi:
         hex.mov 8, bottom, cpm_c_viewh1
       bok:

@@ -992,14 +992,14 @@ ns frame {
         rep(deg, k) hex.dec 1, tsf_fmode
         rep(deg, k) hex.if0 1, tsf_fmode, up_lip_ok
         rep(deg, k) hex.set 8, tsf_out_y1, dlipscale
-        rep(deg, k) hex.cmp 8, tsf_face_scale, tsf_out_y1, up_skip, up_lip_ok, up_lip_ok
+        rep(deg, k) hex.cmp 6, tsf_face_scale, tsf_out_y1, up_skip, up_lip_ok, up_lip_ok    // idea 19: both < 16^6
       up_lip_ok:
         // 25M-CAP STACK FAR GATE: a SECOND stacked piece only when the boundary is near enough
         // (scale >= dstkscale, one unsigned compare on the register the DDA already carries).
         // tsf_out_y1 is dead until up_store, so it serves as the constant cell.
         rep(deg*stack, k) hex.if0 1, tsf_sfflag_v, up_gates_ok    // the FIRST piece is never gated
         rep(deg*stack, k) hex.set 8, tsf_out_y1, dstkscale
-        rep(deg*stack, k) hex.cmp 8, tsf_face_scale, tsf_out_y1, up_skip, up_gates_ok, up_gates_ok
+        rep(deg*stack, k) hex.cmp 6, tsf_face_scale, tsf_out_y1, up_skip, up_gates_ok, up_gates_ok    // idea 19
       up_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtu1, tsf_wtu2, centeryfix_c
         rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_u1, tsf_frac_u2
@@ -1030,11 +1030,11 @@ ns frame {
         rep(deg, k) hex.dec 1, tsf_fmode
         rep(deg, k) hex.if0 1, tsf_fmode, lo_lip_ok
         rep(deg, k) hex.set 8, tsf_out_y1, dlipscale
-        rep(deg, k) hex.cmp 8, tsf_face_scale, tsf_out_y1, lo_skip, lo_lip_ok, lo_lip_ok
+        rep(deg, k) hex.cmp 6, tsf_face_scale, tsf_out_y1, lo_skip, lo_lip_ok, lo_lip_ok    // idea 19: both < 16^6
       lo_lip_ok:
         rep(deg*stack, k) hex.if0 1, tsf_sfflag_v + 1*dw, lo_gates_ok   // ... and the LOWER side's mirror
         rep(deg*stack, k) hex.set 8, tsf_out_y1, dstkscale
-        rep(deg*stack, k) hex.cmp 8, tsf_face_scale, tsf_out_y1, lo_skip, lo_gates_ok, lo_gates_ok
+        rep(deg*stack, k) hex.cmp 6, tsf_face_scale, tsf_out_y1, lo_skip, lo_gates_ok, lo_gates_ok    // idea 19
       lo_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtl1, tsf_wtl2, centeryfix_c
         rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_l1, tsf_frac_l2

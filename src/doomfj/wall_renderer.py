@@ -1908,7 +1908,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              # below the baked cap is the sufficient condition. 4095 is also the 3-nibble
              # counter's max, enforced together here.
              *([_assert_pnear_unbound(marking_seg_count(cmap, lds, _seg_marks)),
+                # idea 19 coupled retune: 1200 ops land the ts leaf region on a cheaper base
+                # (tune_round on the narrowed-compare layout; first time this point fires).
+                "rep(1200, i) stl.fj 0, 0",
                 "seg_pass1_ts_leaf:",
+                # idea 19's narrowed gate compares (hex.cmp 6) require every operand < 16^6:
+                # the face scale is the clamped [SCALE_MIN, 0x400000] interpolant, and these
+                # two baked gate constants are asserted so a retune cannot silently break it.
+                _assert_gate_scales_fit((DEG_STACK_SCALE, DEG_LIP_SCALE)),
                 f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR}, {atan_dbl}, {slope_dbl}, "
                 f"{table_dbl}, 1, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
                 f"{cfg.VIEW_H - 1}, {proj}, {16 ** cfg.SLOT_SHIFT}, {stack_flag}, {deg_flag}, "
@@ -2955,6 +2962,14 @@ def marking_seg_count(cmap, lds, seg_marks) -> int:
     1,545 to spare and only E1M7 is genuinely over, by 88. `seg_marks` is passed in (not re-derived)
     because it closes over the DOOR STATE VARIANTS: a seg that marks in any door position counts."""
     return sum(1 for seg in cmap.segs if lds[seg.linedef].back != -1 and seg_marks(seg))
+
+
+def _assert_gate_scales_fit(scales):
+    """idea 19: hex.cmp 6 on the ts gates is only sound while every compared constant
+    fits six nibbles. Returns an empty line so it can sit in an emitted-lines list."""
+    for s in scales:
+        assert 0 <= s < 16**6, f"gate scale {s:#x} does not fit cmp 6 -- widen the compare"
+    return ""
 
 
 def _assert_pnear_unbound(total_segs: int) -> str:

@@ -1461,9 +1461,65 @@ ns frame {
         hex.zero 8, p2_stepf
         rep(8, j) hex.fixed_mul_lo.row 8, j, p2_stepf, wtf8, scalestep
     }
+    // ==========================================================================================
+    // Idea 14, XOR-delta chained add (2026-09-03). hex.add 8 is TEN dances (carry bracket +
+    // 8 nibbles + bracket), each paying set+clear of hex.tables.ret = 2 x popcount(a leaf-
+    // resident return label, ~10-13 bits) per dance. Fusing every interior [CLEAR r_i]
+    // [SET r_{i+1}] pair into one wflip of r_i^r_{i+1} (adjacent labels, popcount ~2-4) keeps
+    // the data ops bit-identical -- proven by scratchpad/oneshadow/chain_smoke.fj, 8 carry-
+    // stressing vectors vs hex.add 8 -- and the expansion is the same 962 ops, so the swap is
+    // layout-neutral (only the wflip-area chains shrink).
+    // The XOR-of-locals wflip value follows the stl's own precedent (xor_from_pointer.fj:
+    // `wflip ..., read_ptr_and_flip_back^cleanup`).
+    // WARNING - HERMETIC WINDOW: from the first wflip to the last, hex.tables.ret holds a
+    // LIVE label. No other tables.ret-family dance (hex.add/sub/or/and/mul/cmp or their
+    // brackets) may EVER be inserted inside these bodies -- the next dance would arm a stale
+    // ret and wild-jump. exact_xor-family ops (hex.xor, xor_zero, zero, if_flags/if0) are the
+    // only safe interior ops; they wflip their own words, never hex.tables.ret.
+    // one interior boundary of the chained add: finish nibble dst_prev, arm (dst_next,
+    // src_next), and move hex.tables.ret from `prev` to `next` with ONE wflip.
+    def dance_boundary dst_prev, dst_next, src_next, jumper, prev, next \
+            < hex.tables.ret, hex.tables.res {
+        hex.xor_zero dst_prev, hex.tables.res
+        hex.xor jumper,   dst_next
+        hex.xor jumper+4, src_next
+        wflip hex.tables.ret+w, prev^next, jumper
+    }
+
+    //   dst[:8] += src[:8]   == hex.add 8, dst, src  (10 dances: cc + 8 nibbles + cc), with
+    //   the interior [CLEAR ret_i][SET ret_{i+1}] pairs fused into single XOR-delta wflips.
+    def add8_chain dst, src @ rcc0, r0, r1, r2, r3, r4, r5, r6, r7, rcc1 \
+            < hex.tables.ret, hex.tables.res, hex.add.dst {
+        wflip hex.tables.ret+w, rcc0, hex.add.dst
+      rcc0:
+        hex.zero hex.tables.res
+        hex.xor hex.add.dst,   dst
+        hex.xor hex.add.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
+      r3:
+        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.add.dst, r3, r4
+      r4:
+        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.add.dst, r4, r5
+      r5:
+        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.add.dst, r5, r6
+      r6:
+        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.add.dst, r6, r7
+      r7:
+        hex.xor_zero dst+7*dw, hex.tables.res
+        wflip hex.tables.ret+w, r7^rcc1, hex.add.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.zero hex.tables.res
+    }
     def lines_dda_step < p2_prodc, p2_prodf, p2_stepc, p2_stepf {
-        hex.add 8, p2_prodc, p2_stepc
-        hex.add 8, p2_prodf, p2_stepf
+        .add8_chain p2_prodc, p2_stepc               // idea 14: was hex.add 8 -- same 962 ops
+        .add8_chain p2_prodf, p2_stepf               //   of space, ~170 fewer executed per call
     }
 
     // idea 11 helpers: seed per seg, step at skipcol, loaders read the shared globals.
@@ -2099,8 +2155,17 @@ ns frame {
         rep(steps*stack, k) .lines_steps_step        // idea 11: lockstep advance
         rep(things*spremit, k) .lines_spr_step
         hex.inc 2, x
-        hex.add 8, scale, scalestep
+        // idea 13 (2026-09-03): the per-column `hex.add 8, scale, scalestep` was DEAD -- the
+        // wall DDA (idea 12 of the worked-ideas board) left `scale` with exactly two uses,
+        // wall_scale_setup_m's per-seg write and lines_dda_seed's per-seg read, so the
+        // per-column step fed nothing. Its exact expansion size (962 ops, measured by
+        // micro-assembly) stays as filler so no downstream label moves and the sweep sees
+        // only the deleted work, not a label-shift ripple. The loop-back jump comes FIRST:
+        // the filler is `0;0` ops, which are only inert while UNREACHABLE -- the first gate
+        // run of this idea had them in the fall-through path and the frame jumped to
+        // address 0 (10.5M ops, 15,875 px wrong; _deg_i13.log).
         ;col_loop
+        rep(962, i) stl.fj 0, 0
       ret:
         stl.fret seg_ret2
                                                 //     two-byte biased y0, see lines_spr_load)

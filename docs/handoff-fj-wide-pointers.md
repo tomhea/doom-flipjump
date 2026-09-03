@@ -1735,3 +1735,51 @@ A second datapoint, from the config-mixup en route: 1.5.1 at PTR_CELL_BITS=16 is
 byte-exact (_deg_151c.log: 39.31M / 31.32M / 36.24M / 30.21M) -- correct, and dearer than both
 the shipped 8-bit config and the section-13 dual-table rows, consistent with "a global wide
 cell taxes every dereference". The shipped config remains 8-bit cells.
+
+
+## 18. THE CAMPAIGN CLOSES: 20 worked ideas, median 19,716,925 (2026-09-04)
+
+The goal was 20 sweep-certified ideas and a median below 20,000,000. Both stand. From the
+original 24,306,866: **-18.9%**. Today's nine (each: deg 4/4 byte-exact + 260/260-byte-exact
+sweep with the median improved):
+
+| # | idea | median delta | commit |
+|---|---|---|---|
+| 12 | hot-region base tuning, 32 filler ops jointly tuned over 7 profiles | -31,581 | dae0186 |
+| 13 | the DEAD per-column `hex.add 8, scale, scalestep`, layout-frozen | -152,362 | a38d965 |
+| 14 | XOR-delta chained add/sub, wave 1 (6 sites) | -97,396 | c543fe5 |
+| 15 | chain wave 2 -- EVERY direct add/sub {2,4,8,10}, 137 sites | **-464,358** | c543fe5 |
+| 16 | loader dirty-skips + the first coupled retune | -11,354 | b1ae6d2 |
+| 17 | zero-eliding burst reads (read0_byte_and_inc), size-frozen | -60,626 | c78d2e0 |
+| 18 | tuning round 3 (pass1 5136, pos 2400) | -90,108 | d26f757 |
+| 19 | compare narrowing under proved bounds + coupled retune (ts point fires) | -128,028 | c1d79ed |
+| 20 | zero-overwrite trims + round 5 (pass2 point fires) | -22,996 | 6e1115d |
+
+**Killed en route** (all at the gate or by the rule, none shipped broken): idea-13's first
+form (filler in the fall-through path -- 0;0 ops are only inert while UNREACHABLE); the
+pair-fused chains (at a tuned layout the fused brackets' labels are already cheap:
++2k..+8.6k on all four gates); idea-16 v1/v2 (median +49,624 / gates worse); the bare
+compare narrowing (all gates worse before its retune); placement rounds 2 and 4 (the tuner
+itself said "nothing feasible" -- killed for free, no build).
+
+**The doctrine the campaign leaves behind:**
+1. **Shape and placement are COUPLED.** Any idea that resizes a hot region de-tunes the
+   filler placement and must ship WITH a tune_round of the fillers -- learned over three
+   killed idea-16 variants, applied inside ideas 19 and 20.
+2. **Layout-freeze turns deletions pure.** Replace deleted emitted ops with same-size
+   UNREACHABLE filler (behind the jump, never in the fall-through) and the sweep sees only
+   the deleted work.
+3. **The predictor's reach**: exact for value-only changes (idea 12's four gate predictions
+   landed within 296..2,437 ops); censuses + per-op profiles make every tuning round a
+   5-minute search; rank/rank-values names the next pool. Chains turned the bulk values
+   into label DELTAS, which are shift-invariant -- that is WHY placement dried up after
+   wave 2 until new shape changes re-opened it.
+4. **The instruments**: popcount_census.py (capture/rank/rank-values/simulate-shift/predict),
+   tune_round.py, ca2_profile --bucket-bits 6, and chain_smoke{,2,3}.fj racing every chain
+   macro against the stl on ripple/borrow vectors.
+
+Follow-ups parked: the game tier's M1/M5 restore sets need re-keying for p2_ldirty/p2_sdirty
+on its next rebuild; add1/add5 chains (7 calls) unconverted; the ts_step_faces pool (3.3M on
+the median frame) still holds the largest untapped mass -- its per-face-column pointer
+re-derivation wants the idea-11 treatment; the emit_col pool (1.7M) needs a device-protocol
+change to touch.

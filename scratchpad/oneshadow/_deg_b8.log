@@ -1,0 +1,3 @@
+STL: C:\Users\tomhe\Documents\flipjump-dual\flipjump\stl
+PTR_WIDE_BITS: 16 (defines file before the stl)
+program parts: entry=32, tables=338,598, main=64, segconsts=44,419, walk=73,941, state=434, banks=3,242,421

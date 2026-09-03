@@ -1633,6 +1633,34 @@ DDA seeds (f(s) = W*(s mod 16^6) is not linear under the mod-2^32 scale walk; sc
 sign-extension lives exactly in the dropped rows -- 2,152-3,990 px). Full 8-row seeds equal the
 old values wherever scale < 256.0, DOOM's classic cap.
 
-Queued: the sfslot wide-cell pack over the dual decoder table (all three accessor clusters now
-centralised by #10), the spslot pack (needs an 8-byte layout -- 7 is odd and mixed widths in one
-region are forbidden), per-face stepcol_b/cviewh1 hoists (~40k, borderline vs sweep noise).
+### 16.1 THE PACK WAS BUILT, GATED, AND KILLED -- with the attribution that matters (2026-09-03)
+
+The sfslot pack ([y2|y1][bpid|cls] as two 16-bit cells over the dual table, stride kept at 16
+cells so no index math moved) was implemented in full and was **byte-exact on all four
+viewpoints** -- the layout, the extracts and the clamps were all CORRECT. It cost +440k to +706k
+per frame anyway, and an isolation build (same stl, PTR_WIDE_BITS=16, pack reverted) split the
+blame:
+
+| viewpoint | TABLE presence | PACK accessors |
+|---|---:|---:|
+| (664,291) | +205,731 | +234,119 |
+| (1272,-724) | +55,042 | +488,225 |
+| (1869,479) | +620,891 | +85,250 |
+
+Two findings, both architectural:
+* **The wide table's mandated position (op exactly 2^16) lands inside the M13-hotdata block**
+  (8,655..459,480), displacing ~64k ops of hot content upward -- so at doom scale the dual-table
+  premise 'only packed sites pay' holds per macro but NOT for placement. PTR_WIDE_BITS=12 cannot
+  rescue the byte-pair use (two bytes need 16 bits).
+* **The pack's per-pair arithmetic was right (-300/pair on paper) and still lost** -- the same
+  no-local-model lesson as every other regression. Without the popcount census predictor, wide
+  cells should not be retried on doom.
+
+The two implementation bugs its builds caught en route: `ptr_add ptr, 0` is an ASSEMBLY error
+(add_constant computes a shift from the constant's trailing zeros -- undefined at 0; the old
+code's offsets were never zero), fixed by rep-gating; and nothing else -- the pack logic itself
+was clean, which is worth knowing for a future retry on a program without the hot-block
+collision.
+
+Still queued: the spslot variant is dead with this; the per-face stepcol_b/cviewh1 hoists remain
+(~40k, borderline vs sweep noise).

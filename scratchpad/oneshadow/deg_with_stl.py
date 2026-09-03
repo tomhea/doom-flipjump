@@ -18,8 +18,14 @@ import sys
 from pathlib import Path
 
 WORKTREE = Path("C:/Users/tomhe/Documents/flipjump-wide")
+# --stl-dual: the stl-dual-table worktree instead -- a superset of flipjump-wide (77fc443 +
+# the two coexisting decoder tables + read_cell/write_cell). Needed by wide-cell builds.
+DUAL = Path("C:/Users/tomhe/Documents/flipjump-dual")
 
 want_worktree = "--worktree" in sys.argv
+if "--stl-dual" in sys.argv:
+    WORKTREE = DUAL
+    want_worktree = True
 if want_worktree:
     sys.path.insert(0, str(WORKTREE))
 import flipjump  # noqa: E402
@@ -37,6 +43,31 @@ print("STL: " + str(stl), flush=True)
 # fj.assemble() directly, so the CLI -D path is not involved -- the override is injected the same
 # way the CLI does it, as a defines file placed BEFORE the stl.
 bits = None
+if "--ptr-wide-bits" in sys.argv:
+    bits = int(sys.argv[sys.argv.index("--ptr-wide-bits") + 1])
+    import tempfile as _tf
+    from flipjump.utils import functions as _fjf
+    _dw = Path(_tf.mkdtemp()) / "_defines.fj"
+    _dw.write_text("ns hex {" + chr(10) + "ns pointers {" + chr(10)
+                   + "PTR_WIDE_BITS = %d" % bits + chr(10) + "}" + chr(10) + "}" + chr(10))
+    _orig_gft = _fjf.get_file_tuples
+
+    def _with_wide(files, *, no_stl=False):
+        return [("d1", _dw)] + _orig_gft(files, no_stl=no_stl)
+
+    _fjf.get_file_tuples = _with_wide
+    import flipjump.flipjump_quickstart as _qsw
+    _qsw.get_file_tuples = _with_wide
+    import flipjump.assembler.assembler as _asmw
+    _orig_asm_w = _asmw.assemble
+
+    def _asm_wide(input_files, memory_width, fjm_writer, **kw):
+        kw["defines_file"] = _dw
+        return _orig_asm_w(input_files, memory_width, fjm_writer, **kw)
+
+    _asmw.assemble = _asm_wide
+    print("PTR_WIDE_BITS: %d (defines file before the stl)" % bits, flush=True)
+
 if "--ptr-cell-bits" in sys.argv:
     bits = int(sys.argv[sys.argv.index("--ptr-cell-bits") + 1])
     import tempfile

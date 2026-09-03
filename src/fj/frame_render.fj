@@ -567,7 +567,7 @@ ns frame {
         hex.zero w/4, trb_tab_idx                   // of its own nibbles)
         hex.mov 2, trb_tab_idx, trb_bucket
         hex.add w/4, trb_blk_const, trb_tab_idx
-        hex.zero 8, trb_bucket_h                    // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT
+        hex.zero 6, trb_bucket_h + 2*dw             // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT (idea 20: the mov 2 below covers nibbles 0-1)
         hex.mov 2, trb_bucket_h, trb_bucket + 2*dw      // nibbles of src, so a 2-nibble register would
         hex.mov 8, trb_y0, trb_tytop                    // drag its neighbours in as high nibbles.
         frame.add8_chain trb_y0, trb_thpx                     // FEET planted: the trb_bucket moves the sprite's TOP
@@ -765,7 +765,7 @@ ns frame {
         hex.ptr_add fbp, off+1
         hex.read_byte prev_y, fbp
         hex.ptr_sub fbp, off+1
-        hex.zero 8, prev_end
+        hex.zero 6, prev_end + 2*dw             // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, prev_end, prev_y
         hex.inc 8, prev_end                     // stored prev y2 + 1 (sentinel bytes included)
         hex.scmp 8, fra, prev_end, doclamp, noprev, noprev
@@ -961,13 +961,13 @@ ns frame {
         hex.sign_extend 8, 4, tsf_wtl2
         hex.set 8, tsf_cviewh1, viewh1
         rep(dda, k) .ts_dda_setup tsf_face_scale, tsf_face_scalestep, tsf_wtu1, tsf_wtu2, tsf_wtl1, tsf_wtl2, centeryfix_c, tsf_frac_u1, tsf_frac_u2, tsf_frac_l1, tsf_frac_l2, tsf_step_u1, tsf_step_u2, tsf_step_l1, tsf_step_l2
-        hex.zero 8, tsf_col_x
+        hex.zero 6, tsf_col_x + 2*dw            // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_col_x, x1
         hex.set w/4, tsf_drawn_b, drawn             // the occlusion flag, read but never written here
         hex.ptr_index tsf_drawn_p, tsf_drawn_b, tsf_col_x
         hex.set w/4, tsf_sfflag_b, sfflag           // one byte per column: which slots are filled
         hex.ptr_index tsf_sfflag_p, tsf_sfflag_b, tsf_col_x
-        hex.zero w/4, tsf_slot_idx
+        hex.zero w/4 - 2, tsf_slot_idx + 2*dw   // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_slot_idx, tsf_col_x
         hex.shl_hex w/4, SLOT_SHIFT, tsf_slot_idx            // slotstride = 16 bytes -> a whole-nibble shift
         hex.set w/4, tsf_sfslot_b, sfslot
@@ -2229,7 +2229,7 @@ ns frame {
         // W1R-ANCHOR: the pattern key is (x + wnoff), wnoff = viewangle*640/turn computed
         // once per frame -- turning slides the masonry WITH the walls instead of
         // re-rolling it (the flickering-TV fix's temporal half).
-        rep(w1r, k) hex.zero 4, p2_xkey
+        rep(w1r, k) hex.zero 2, p2_xkey + 2*dw  // idea 20: the mov 2 below covers nibbles 0-1
         rep(w1r, k) hex.mov 2, p2_xkey, x
         rep(w1r, k) frame.add4_chain p2_xkey, wnoff
         rep(noise*(1-w1r), k) wnoise.lookup p2_gnrow, x   // V1 grain (non-W1R): unanchored

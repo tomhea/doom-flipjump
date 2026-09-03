@@ -551,7 +551,7 @@ def _bsp_as_code(pfx: str, bsp: CompiledMap, *, done_label: str = "bsp_done",
         # Hot-region base tuning, the pos_leaf twin (2026-09-03): 16 unexecuted ops, tuned
         # JOINTLY with the pass-1 filler across 7 per-op frame profiles (see the comment at the
         # pass-1 site in wall_renderer.py). Multiple of 16, same pad-transparency rule.
-        lines.append("    rep(3008, i) stl.fj 0, 0")  # idea-19 coupled retune (2400 before)
+        lines.append("    rep(3104, i) stl.fj 0, 0")  # round-5 (3008, 2400, 3632, 16 before)
         lines.append(f"{L}_pos_leaf:")
         lines.append(f"    proj.point_on_side_leaf {L}_side, vx, vy, "
                      f"{L}_cpx, {L}_cpy, {L}_cdx_mag, {L}_cdy_mag, {L}_sign_dx, {L}_sign_dy, {L}_pos_ret")

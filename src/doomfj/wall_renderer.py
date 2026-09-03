@@ -1934,6 +1934,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              *(["thing_pass_leaf:",
                 f"sim.thing_pass throw, {_MT_NTH}, thpos_rt",
                 "stl.fret tp_ret"] if moving_things else []),
+             # idea 20 / tuning round 5: 288 ops land the pass-2 leaf region on a cheaper
+             # base -- the first time THIS point fired in five rounds.
+             "rep(288, i) stl.fj 0, 0",
              "seg_pass2_leaf:",
              (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
               f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {w1r_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "

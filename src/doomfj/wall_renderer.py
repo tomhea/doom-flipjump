@@ -1765,6 +1765,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                              for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
                     f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
                     f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
+                   # T-HOTSLOTS (2026-09-03): sfslot/spslot were the LAST hot pointer-walked
+                   # arrays still in the ~20M-word tail -- every one of their ~1,530 derefs a
+                   # frame paid wflip chains on a dense 31-bit address, the exact cost this
+                   # block exists to avoid (see the R20 note above; the same move measured
+                   # 78.54M -> 76.39M once). Same decls, same labels, hot addresses.
+                   + [f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
+                                        for _ in range(cfg.VIEW_W * 16 ** cfg.SLOT_SHIFT))]
+                   + ([f"spslot:{NLJ}" + NLJ.join(";0 * dw"
+                                        for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE))]
+                      if _do_things else [])
                    + ([f"sshead: hex.vec {2 * _MT_NSS}",
                        f"thnext: hex.vec {2 * _MT_NT}"]
                       # M5: the hosted tier is fed last frame's binding; standalone bakes the
@@ -2031,8 +2041,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # so its byte offset is a whole-nibble shift. `n_face` is the per-frame SEG budget counter
           # (STEP_SEG_BUDGET) -- separate from n_tsv, because it must count only the boundaries that
           # actually pay a wall_scale_setup_m.
-          *([             f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
-                                        for _ in range(cfg.VIEW_W * 16 ** cfg.SLOT_SHIFT)),
+          # sfslot itself moved to the M13-hotdata block (T-HOTSLOTS) -- the layout comment
+          # above still describes it; only its ADDRESS changed.
+          *([
              "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
              "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
              "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
@@ -2044,8 +2055,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # `spslot[x]` holds [sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row] at a power-of-16 stride.
           # `y0` is BIASED by 128 because a near sprite's top sits above row 0 and the slot is bytes;
           # h <= VIEW_H bounds it to +-99. `n_thing`/`tstop` are the budget and its monotone early-out.
-          *([             f"spslot:{NLJ}" + NLJ.join(";0 * dw"
-                                        for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
+          # spslot moved to the M13-hotdata block (T-HOTSLOTS), as above.
+          *([
              "n_thing: hex.vec 2", "n_mon: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
              "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
              "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",

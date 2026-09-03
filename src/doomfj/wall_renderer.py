@@ -1900,7 +1900,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # (the stl's larger pads all sit in the low-address table init, which never shifts).
             # (re-tuned 16 -> 4080 with idea 16: the loader restructure grew the pass2 leaf
             # ~2,240 ops and de-tuned this filler -- joint_tune3.py, 4 frames, all winning.)
-            ["rep(4080, i) stl.fj 0, 0",
+            ["rep(5136, i) stl.fj 0, 0",
              "seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
              f"{1 if 'noprescan' in ablate else 0}",
              # CR-2026-08: the deg attribution budget must provably never bind (a binding budget

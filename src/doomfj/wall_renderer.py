@@ -1312,7 +1312,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _vz = rm.view_z(_sec.floor_h)
         if ascode:
             return [f"    hex.set 8, viewz, {_vz & 0xFFFFFFFF}",
-                    f"    hex.set w/4, vzcbase, {lines_vz_classes[_vz] * n_bank_keys * 2}"]
+                    # T1: the "-4" (pids are 1-based) folded INTO the baked base, so lines_pid_ids does not
+                    # subtract it per call. Class 0 wraps to 0xFFFFFFFC; the downstream add is mod 2^32
+                    # and pid >= 1, so the ids are identical.
+                    f"    hex.set w/4, vzcbase, {(lines_vz_classes[_vz] * n_bank_keys * 2 - 4) & 0xFFFFFFFF}"]
         return [f"    hex.set 8, viewz, {_vz & 0xFFFFFFFF}",
                 f"    hex.set w/4, vzbank, vpbank + "
                 f"{lines_vz_classes[_vz] * n_bank_keys * 130}*dw"]

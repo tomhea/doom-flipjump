@@ -624,7 +624,7 @@ ns stream {
     // per piece from the baked back pid via frame.lines_pid_ids into SCRATCH registers.
     def steps_splice_c ctake, rlo, rhi, w1r, gnrow, cmidx, cbufa, cbufd, ccy \
             @ ceil_only, cend_ok, cend_clamp, ceil_go, piece1_in_win, walk_region0, region0_end, bound1_at_end, bound1_at_piece2, walk_region1, region1_end, piece2_in_win, walk_region2, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, ceil_done, end \
-            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ssc_ceil_end, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd, ssc_rlo2, ssc_ucnt2, ssc_win_end, ssc_win_lo, ssc_zero_row {
+            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ssc_ceil_end, ssc_rcbufa, ssc_rcbufd, ssc_rlo2, ssc_ucnt2, ssc_win_end, ssc_win_lo, ssc_zero_row {
         hex.if0 2, ctake, ceil_done             // no ceiling half at all
         hex.mov 2, ssc_ceil_end, ctake              // V5-SPR: the piece window [rlo, min(ctake,rhi))
         hex.cmp 2, ssc_ceil_end, rhi, cend_ok, cend_ok, cend_clamp
@@ -645,9 +645,8 @@ ns stream {
       walk_region0:                             // window still pays the loaders
         .half_walk_code cbufa, cbufd, ssc_win_lo, ssc_win_end, ccy
       region0_end:
-        hex.zero 2, ssc_zero_row
         .steps_face u1y1, u1y2, u1cls, ssc_zero_row, ctake, ssc_rlo2, ssc_ceil_end, w1r, gnrow, cmidx
-        frame.lines_pid_ids u1bp, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd
+        frame.lines_pid_ids_c u1bp, ssc_rcbufa, ssc_rcbufd
         hex.mov 2, ssc_win_lo, u1y2
         hex.inc 2, ssc_win_lo                       // region 1 starts at the STORED end + 1 --
         hex.cmp 2, ssc_win_lo, ssc_rlo2, lo1_clamp, lo1_ok, lo1_ok   // clamped to the window start: a
@@ -668,9 +667,8 @@ ns stream {
         hex.if0 1, ssc_ucnt2, ceil_done
         hex.cmp 2, u2y1, ssc_ceil_end, piece2_in_win, ceil_done, ceil_done  // piece 2 out -> done
       piece2_in_win:
-        hex.zero 2, ssc_zero_row
         .steps_face u2y1, u2y2, u2cls, ssc_zero_row, ctake, ssc_rlo2, ssc_ceil_end, w1r, gnrow, cmidx
-        frame.lines_pid_ids u2bp, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd
+        frame.lines_pid_ids_c u2bp, ssc_rcbufa, ssc_rcbufd
         hex.mov 2, ssc_win_lo, u2y2
         hex.inc 2, ssc_win_lo
         hex.cmp 2, ssc_win_lo, ssc_rlo2, lo2_clamp, lo2_ok, lo2_ok
@@ -696,7 +694,7 @@ ns stream {
     // one claimed walk.
     def steps_splice_f fstart, viewh, rlo, rhi, w1r, gnrow, cmidx, fbufa, fbufd, ccy \
             @ floor_only, fend_ok, fend_clamp, flo_clamp, flo_ok, bound2_ok, bound2_clamp, walk_region2, region2_end, bound1_ok, bound1_clamp, walk_region1, region1_end, walk_region0, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, piece1, floor_go, floor_done, end \
-            < lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, ssf_cviewh, ssf_floor_end, ssf_floor_lo, ssf_fstart2, ssf_lcnt2, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd, ssf_win_end, ssf_win_lo {
+            < lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, ssf_cviewh, ssf_floor_end, ssf_floor_lo, ssf_fstart2, ssf_lcnt2, ssf_rfbufa, ssf_rfbufd, ssf_win_end, ssf_win_lo {
         hex.set 2, ssf_cviewh, viewh
         hex.mov 2, ssf_floor_end, ssf_cviewh            // V5-SPR: the window [max(fstart,rlo), min(viewh,rhi))
         hex.cmp 2, ssf_floor_end, rhi, fend_ok, fend_ok, fend_clamp
@@ -718,7 +716,7 @@ ns stream {
         hex.dec 1, ssf_lcnt2
         hex.if0 1, ssf_lcnt2, piece1                // one piece: skip the piece-2 prefix
         // -- two pieces: the region behind boundary 2 (farthest), then its face
-        frame.lines_pid_ids l2bp, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd
+        frame.lines_pid_ids_f l2bp, ssf_rfbufa, ssf_rfbufd
         hex.mov 2, ssf_win_end, l2y1
         hex.cmp 2, ssf_win_end, ssf_floor_end, bound2_ok, bound2_clamp, bound2_clamp
       bound2_clamp:
@@ -737,7 +735,7 @@ ns stream {
       lo2_ok:
       piece1:
         // -- the region behind boundary 1, its face, then the claimed floor in front of it
-        frame.lines_pid_ids l1bp, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd
+        frame.lines_pid_ids_f l1bp, ssf_rfbufa, ssf_rfbufd
         hex.mov 2, ssf_win_end, l1y1
         hex.cmp 2, ssf_win_end, ssf_floor_end, bound1_ok, bound1_clamp, bound1_clamp
       bound1_clamp:

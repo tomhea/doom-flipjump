@@ -1443,6 +1443,29 @@ ns frame {
     // its own clipping and shading against the column's window, so the ditto signature is the
     // raw values + the window rows already in the chain. Zeroed when absent (the signature
     // rule). Layout: 4-byte pieces [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12.
+    // idea 12: the wall top/bottom DDA. prod = wt*scale and step = wt*scalestep are seeded per
+    // seg (four FULL 8-row multiplies -- the macro's 6-row truncation drops the second
+    // operand's top nibbles, and f(s)=W*(s mod 16^6) is NOT linear under the mod-2^32 scale
+    // walk: scalestep is negative, so its sign-extension lives exactly in the dropped rows.
+    // The gate proved it: 2,152-3,990 px per viewpoint with 6-row seeds); per column the
+    // two adds at skipcol replace the two 6-row
+    // multiplies column_params_m ran. Exact: low32 multiplication distributes over the mod-2^32
+    // scale walk, the same identity the Option-A face DDA relies on.
+    def lines_dda_seed scale, scalestep, wtc8, wtf8 < p2_prodc, p2_prodf, p2_stepc, p2_stepf {
+        hex.zero 8, p2_prodc
+        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_prodc, wtc8, scale
+        hex.zero 8, p2_stepc
+        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_stepc, wtc8, scalestep
+        hex.zero 8, p2_prodf
+        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_prodf, wtf8, scale
+        hex.zero 8, p2_stepf
+        rep(8, j) hex.fixed_mul_lo.row 8, j, p2_stepf, wtf8, scalestep
+    }
+    def lines_dda_step < p2_prodc, p2_prodf, p2_stepc, p2_stepf {
+        hex.add 8, p2_prodc, p2_stepc
+        hex.add 8, p2_prodf, p2_stepf
+    }
+
     // idea 11 helpers: seed per seg, step at skipcol, loaders read the shared globals.
     def lines_steps_seed x1 @ sidx, bteam, end_seed < sfflag, sfslot, p2_sffp, p2_sfsp {
         hex.set w/4, bteam, sfflag
@@ -1820,6 +1843,7 @@ ns frame {
         hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
         hex.ptr_index dptr, dbase, x1
         // idea 11: the load pointers walk in LOCKSTEP with x, like dptr/pclm above.
+        rep(1-noproj, k) .lines_dda_seed scale, scalestep, p2_wtc8, p2_wtf8
         rep(steps*stack, k) .lines_steps_seed x1
         rep(things*spremit, k) .lines_spr_seed x1
         rep(pnear, k) .lines_plane_ptr x1       // ... and pclm[], walked in lockstep with it
@@ -1840,13 +1864,13 @@ ns frame {
         hex.set 1, p2_dvalid, 0                    // M13-ditto: a gap breaks x-adjacency
         ;skipcol
       notdrawn:
-        rep(1-noproj, k) .lines_projcall centery*0x10000, viewh1, top, bottom, scale, p2_wtc8, p2_wtf8
+        rep(1-noproj, k) .lines_projcall centery*0x10000, viewh1, top, bottom
         rep(noproj, k) .lines_projstub centery, top, bottom
         // ablate "projtwice" (measurement only): the SAME call with the SAME operands into dead
         // destinations. Measuring by ADDING keeps the frame byte-exact -- unlike "noproj", whose
         // stub shrinks every wall and so changes the WPX emit volume too (its delta is NOT the
         // projection's cost; see docs/handoff-m13-2s-fast.md §1).
-        rep(ptwice, k) .lines_projcall centery*0x10000, viewh1, p2_dtop, p2_dbot, scale, p2_wtc8, p2_wtf8
+        rep(ptwice, k) .lines_projcall centery*0x10000, viewh1, p2_dtop, p2_dbot
         .clip_rows p2_cexcl, p2_fstart, top, bottom, p2_cVH
         // M13-2S rung 3a: which SURFACES this column's plane regions belong to (see lines_col_plane)
         rep(pnear*(1-ascode), k) .lines_col_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
@@ -2071,6 +2095,7 @@ ns frame {
       screen_full:
         hex.set 1, full, 1
       skipcol:
+        rep(1-noproj, k) .lines_dda_step             // idea 12: the wall DDA
         rep(steps*stack, k) .lines_steps_step        // idea 11: lockstep advance
         rep(things*spremit, k) .lines_spr_step
         hex.inc 2, x
@@ -2081,8 +2106,8 @@ ns frame {
                                                 //     two-byte biased y0, see lines_spr_load)
     }
 
-    def lines_projcall centeryfix_c, viewh1, top, bottom, scale, wtc8, wtf8 {
-        proj.column_params_m top, bottom, scale, wtc8, wtf8, centeryfix_c, viewh1
+    def lines_projcall centeryfix_c, viewh1, top, bottom {
+        proj.column_params_dda top, bottom, centeryfix_c, viewh1
     }
 
     def lines_projstub centery, top, bottom {

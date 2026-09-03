@@ -1590,6 +1590,41 @@ ns proj {
       end:
     }
 
+    // idea 12: column_params_m with the two per-column multiplies replaced by the p2_prod DDA
+    // accumulators frame_render seeds per seg and steps per column. Identical latch, identical
+    // shift/sign-extend/clamp tail -- only where wt*scale comes from changed, and the identity
+    // low32(w*(s+k*d)) == low32(low32(w*s)+k*low32(w*d)) is exact mod 2^32 (the Option-A face
+    // DDA note proves the same identity).
+    def column_params_dda top, bottom, centeryfix_c, viewh1 \
+            @ set_consts, consts_ready, tneg, tok, bok, bhi, end \
+            < cpm_c_centeryfix, cpm_c_viewh1, cpm_consts_set, p2_prodc, p2_prodf {
+        hex.if0 1, cpm_consts_set, set_consts
+        ;consts_ready
+      set_consts:
+        hex.set 8, cpm_c_centeryfix, centeryfix_c
+        hex.set 8, cpm_c_viewh1, viewh1
+        hex.set 1, cpm_consts_set, 1
+      consts_ready:
+        hex.mov 8, top, cpm_c_centeryfix
+        hex.sub 8, top, p2_prodc                // topfrac = centeryfix - wt*scale (the DDA copy)
+        hex.shr_hex 8, 4, top
+        hex.sign_extend 8, 4, top
+        hex.mov 8, bottom, cpm_c_centeryfix
+        hex.sub 8, bottom, p2_prodf
+        hex.shr_hex 8, 4, bottom
+        hex.sign_extend 8, 4, bottom
+        hex.sign 8, top, tneg, tok          // top = max(0, top)
+      tneg:
+        hex.zero 8, top
+      tok:
+        hex.scmp 8, bottom, cpm_c_viewh1, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
+      bhi:
+        hex.mov 8, bottom, cpm_c_viewh1
+      bok:
+        ;end
+      end:
+    }
+
     // proj.point_on_side back, vx, vy, px, py, dx, dy (R_PointOnSide / mapcompiler._point_side): the BSP
     //   partition side test the bake-as-code walk (opt #7) branches on. back[:2] = 1 iff
     //   dx*(vy-py) - dy*(vx-px) > 0 (the "back/left" side; <0 or ON the line -> front -> 0). vx,vy are the

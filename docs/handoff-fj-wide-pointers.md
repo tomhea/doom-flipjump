@@ -1539,3 +1539,59 @@ where `moving_things=False`, so `sim.thing_load` and the `throw` table are **not
 
 **35,528,743 - 6,781,000 = 28,747,743.** That is 44% of the way to 20M, not there. The remaining
 8.7M has to come out of `exact_xor`, which is where the next round points.
+
+---
+
+## 15. THE TWENTY THEORIES - all resolved, 2026-09-03
+
+Protocol after the 3/3 mispredictions: every theory earns a measured verdict (micro, population
+count from real emitted data, or code-level proof); survivors get builds ONE at a time; nothing
+ships except on the 260-frame sweep median. An adversarial skeptic pass (5 agents) re-challenged
+everything in flight and found the master mechanism.
+
+| # | theory | verdict |
+|---|---|---|
+| 1 | fold the -4 into baked vzcbase | **SHIPPED** (bundle, -1.06%) |
+| 2 | split lines_pid_ids' dead outputs | **SHIPPED** (same bundle) |
+| 3 | delete the dead ssc_zero_row zeroes | **SHIPPED** (rider) |
+| 4 | L-inf far reject before the tz multiplies | **SHIPPED** (-0.24% median, mean flat) |
+| 5 | pack the V5 slot into wide cells | superseded by T-HOTSLOTS (**SHIPPED**, -0.07%); pack still stackable |
+| 6 | vertex-share angle cache | KILLED by skeptic: real hit rate 19.7% not 29%, EV negative |
+| 7 | mov -> xor_zero where src dead | quantified-not-built: <60k/frame of sites |
+| 8 | add_constant 1 -> hex.inc | **SHIPPED** (bundle; 128.1 -> 16.1/call) |
+| 9 | sub_constant -> add complement | refuted: complement is dense, 4.5x worse |
+| 10 | bias hot values sparse | refuted-immaterial (+1 op/set bit vs ~11.6 fixed) |
+| 11 | top-nibble guard before cmp | refuted: hex.cmp already early-outs (47.2 vs 369.0) |
+| 12 | fuse shl_hex pairs | refuted: every doom site already uses the times form |
+| 13 | bit flags for hex flags | refuted: 13.7 vs 12.8, immaterial |
+| 14 | move read-dance zero to consumers | refuted by analysis: the write path re-zeroes |
+| 15 | splice empty-list early-out | refuted: floor_go/floor_done + if0 lcnt already exist |
+| 16 | delta-set viewz/vzcbase | refuted-immaterial (~20k/frame) |
+| 17 | cache pass1 angles for pass2 | refuted: pass2 already consumes stored piece slots |
+| 18 | sign-dispatch point_on_side | declined: the exact mechanism that regressed 3x |
+| 19 | wedge_reject before the backface | refuted: already ordered cheap-first at both sites |
+| 20 | multiway cls dispatch | refuted: cls is data, no chain exists |
+
+### 15.1 The master mechanism, finally correct
+
+**A wflip executes popcount(flip_VALUE) ops** - the label/data ADDRESS being written. Chain dedup
+in the assembler is space-only. This explains, at once: the 3/3 per-call mispredictions (any code
+change shifts every downstream label by +-1-3 popcount bits x millions of executions), the
+M13-hotdata -2.15M precedent (`wall_renderer.py:1759` documents the mechanism - the repo knew),
+and my earlier false retraction (that experiment moved all 40 switch tables together, so their
+average popcount barely moved; the one dense-address data point DID show +5.8 and I read past it).
+
+⚠ Even with the right mechanism, ESTIMATE = mechanism x population x per-execution-delta. The
+skeptic priced T-HOTSLOTS at ~847k by attributing the sites' whole profile cost to the mechanism;
+the address-dependent fraction is tens of ops per deref, and the sweep said -16k.
+
+### 15.2 What is still on the table
+
+* **The popcount census predictor**: dump popcount(flip_value) per source site from label
+  resolve, weight by the attribution's execution counts - predicts a change's frame delta in
+  minutes, no build. THE instrument this session lacked; build it before the next perf round.
+* **Hot-ret label alignment**: pad the per-pixel trampoline's ret labels to low-popcount
+  addresses. Millions of executions x a few bits - potentially the largest single lever left.
+* The V5 slot pack (stacks with T-HOTSLOTS; census says live traffic is 4-byte runs).
+* The 12M target needs -55% from here (22.08M): only the exact_xor family itself (67% of the
+  frame) is big enough, via the two levers above.

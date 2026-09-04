@@ -217,6 +217,24 @@ same commit rather than left to break in a later session.
 > filler is a TOTAL, never an increment on the one already there.
 > (micro said 1182+21; the 21 is the address-dependent wflip size of FINDINGS N, as expected.)
 
+
+| P3-2b | P3 | freeze correction, filler 1998 -> 1182 | +226,494 / +109,561 / +140,819 / +157,455 | 17,813,823 (+139,917, +0.79%) | **KILL** | reverted |
+
+**P3-2b: the correction was RIGHT and the result was WORSE, which re-prices P3-2.** Restoring the
+size-preserving filler moved every label back exactly (-16,320, undoing the miss to the op) and
+cost **+139,917 ops per median frame**. So the accidental shift was worth that much: it moved hot
+code onto cheaper addresses, because a wflip costs popcount of its operand and alignment is worth
+real ops.
+
+**Therefore P3-2's honest split is -105,209 algorithm + -139,917 placement**, not -245,126 of
+idea. The headline number stands as the shipped median, but 57% of it was luck, and this ledger
+says so. The filler stays at 1998 as a deliberate PLACEMENT CHOICE (the median is the ship
+criterion) and the source comment now says it is not a freeze.
+
+**What this opens.** A RANDOM 16,320-op shift bought 140k. Deliberate placement tuning is
+therefore a live pool worth real ops -- the plan's P7, and `scratchpad/oneshadow/tune_round.py`
+already exists to do it. Nothing in this campaign has run a tuning round yet.
+
 ### Running total after 13 ideas: 18,982,338 -> 17,673,906 = **-1,308,432 (-6.89%)**
 The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.
 The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.

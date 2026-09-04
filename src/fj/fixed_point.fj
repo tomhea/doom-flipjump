@@ -113,9 +113,18 @@ ns hex {
       bpos:                                    // bneg FALLS THROUGH to here -- no jump
         .mov n, dst, res + f*dw
         ;end
-        // LAYOUT FREEZE for the 795 ops each expansion loses. Unreachable: the `;end` above
+        // LAYOUT FREEZE. Unreachable: the `;end` above
         // exists precisely to step over this data region. One number freezes every whole-macro
         // call site, because every one of them is `8, 4`.
+        // ⚠ 1,998 IS DELIBERATE AND IT IS NOT A FREEZE. The size-restoring value is 1,182: a
+        // measured filler is the TOTAL the macro needs, never an increment on the one already
+        // there, and the multiplier is EXPANSIONS (20 here) not call sites (12) -- adding P3-2's
+        // measured 1,203 to P3-1's 795 double-counted and grew the program by 20 x 816 = 16,320.
+        // But the correctly-frozen build was MEASURED and it is 139,917 ops per median frame
+        // SLOWER: the accidental +16,320 shift moved hot code onto cheaper addresses (a wflip
+        // costs popcount of its operand, so alignment is worth real ops). The median is the ship
+        // criterion, so the shift stays -- as a PLACEMENT CHOICE, deliberately recorded, not as
+        // a freeze. Anyone re-tuning placement should treat this number as adjustable.
         rep(1998, i) stl.fj 0, 0
 
       res: .vec n+f

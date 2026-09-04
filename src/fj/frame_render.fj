@@ -823,20 +823,20 @@ ns frame {
     def ts_piece_wr cnt, fbp, off, fy1, fy2, cls, bpid @ first_piece, end {
         hex.if0 1, cnt, first_piece
         hex.ptr_add fbp, off+PIECE_BYTES
-        hex.write_byte_and_inc fbp, fy1
-        hex.write_byte_and_inc fbp, fy2
-        hex.write_byte_and_inc fbp, cls
-        rep(2-PID_BYTES, k) hex.write_byte_and_inc fbp, bpid
+        frame.write_byte_and_inc5 fbp, fy1
+        frame.write_byte_and_inc5 fbp, fy2
+        frame.write_byte_and_inc5 fbp, cls
+        rep(2-PID_BYTES, k) frame.write_byte_and_inc5 fbp, bpid
         rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, fbp, bpid
         rep(PID_BYTES-1, k) hex.ptr_add fbp, PID_BYTES
         hex.ptr_sub fbp, off+2*PIECE_BYTES
         ;end
       first_piece:
         hex.ptr_add fbp, off
-        hex.write_byte_and_inc fbp, fy1
-        hex.write_byte_and_inc fbp, fy2
-        hex.write_byte_and_inc fbp, cls
-        rep(2-PID_BYTES, k) hex.write_byte_and_inc fbp, bpid
+        frame.write_byte_and_inc5 fbp, fy1
+        frame.write_byte_and_inc5 fbp, fy2
+        frame.write_byte_and_inc5 fbp, cls
+        rep(2-PID_BYTES, k) frame.write_byte_and_inc5 fbp, bpid
         rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, fbp, bpid
         rep(PID_BYTES-1, k) hex.ptr_add fbp, PID_BYTES
         hex.ptr_sub fbp, off+PIECE_BYTES
@@ -969,7 +969,7 @@ ns frame {
       write:
         .ts_piece_wr flagv, slotp, slotoff, oy1, oy2, cls, bpid
         hex.inc 1, flagv
-        hex.write_byte flagp, flagbyte          // the WHOLE byte: nibble 0 upper, 1 lower
+        frame.write_byte5 flagp, flagbyte        // the WHOLE byte: nibble 0 upper, 1 lower
     }
 
     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
@@ -1890,6 +1890,33 @@ ns frame {
       end:
     }
 
+    // The rest of the dereference family on the narrow arm. Each is its stl twin with .arm5 in
+    // place of hex.pointers.set_flip_and_jump_pointers, and because arm5 carries its own filler
+    // every one of them is size-identical to the macro it replaces -- no call site needs a local
+    // freeze. Use these ONLY where the census proved every reachable predecessor arm is also in
+    // the sub-2^20 hot-data block; hex.* stays for the sprite-bank (high-cluster) pointers.
+    def read_byte5 dst, ptr < hex.pointers.read_byte {
+        hex.zero 2, dst
+        .arm5 ptr
+        hex.pointers.read_byte_from_inners_ptrs
+        hex.xor 2, dst, hex.pointers.read_byte
+    }
+    def read_hex5 dst, ptr < hex.pointers.read_byte {
+        hex.zero dst
+        .arm5 ptr
+        hex.pointers.read_byte_from_inners_ptrs
+        hex.xor dst, hex.pointers.read_byte
+    }
+    def write_byte5 ptr, src < hex.pointers.read_byte {
+        .arm5 ptr
+        hex.pointers.read_byte_from_inners_ptrs
+        hex.xor 2, hex.pointers.read_byte, src
+        hex.pointers.xor_byte_to_flip_ptr hex.pointers.read_byte
+    }
+    def write_byte_and_inc5 ptr, src {
+        .write_byte5 ptr, src
+        hex.ptr_inc ptr
+    }
     // idea 17's read, now on the narrow arm. All 30 call sites walk sfslot_p or spslot_p, both
     // in the hot-data block, and the audit confirmed every reachable predecessor arm in these
     // two loaders is also low-cluster -- so even the FIRST read of a run is 5-hex-safe.

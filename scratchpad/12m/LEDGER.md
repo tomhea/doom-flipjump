@@ -134,5 +134,15 @@ to its 8-hex twin: **freeze exact, 0 of 781,326 labels moved**.
 > sfslot alone 2,621,440 bits and would break every narrow arm silently.
 
 ### Running total after 8 ideas: 18,982,338 -> 18,474,050 = **-508,288 (-2.68%)**
+
+| P2-4 | P2 | the narrow arm on the ts piece writes (8 `write_byte_and_inc` + 1 `write_byte`) | -185,592 / -153,913 / -128,870 / -141,972 | **18,388,677** (-85,373, -0.46%) | SHIP | (commit) |
+
+**P2-4 detail.** `ts_piece_wr` writes a 4-byte piece twice over (first-piece and later-piece
+branches), all eight writes walking `fbp` through sfslot; `ts_piece_store` then writes the flag
+byte through sfflag. Both tables are in the hot-data block, so all nine take `arm5`.
+Because arm5 carries its own filler, the whole family (`read_byte5`, `read_hex5`, `write_byte5`,
+`write_byte_and_inc5`) is size-identical to its stl twins: **freeze exact again**.
+
+### Running total after 9 ideas: 18,982,338 -> 18,388,677 = **-593,661 (-3.13%)**
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals
 (-16, -192) were carried forward and closed out.

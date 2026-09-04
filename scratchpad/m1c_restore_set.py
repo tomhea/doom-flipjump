@@ -287,7 +287,7 @@ for p in _fjsrc:
 for _n, _why in (("ba", "hex.scmp's NEXT-LINE `ba:` / `.vec n` (stl)"),
                  ("bb", "hex.scmp's NEXT-LINE `bb:` / `.vec n` (stl)"),
                  ("wl2", "w1rpat.walk_win's `wl2: hex.vec 2` -- a GENERATED macro, src/fj has it not"),
-                 ("wide_a", "hex.fixed_mul_lo's scratch"),
+                 ("res", "hex.fixed_mul_lo's accumulator (was wide_a until P3-2 deleted it)"),
                  ("col_top", "an emitter-declared per-column array")):
     assert _n in VECNAMES, f"CONTROL FAILED: the vec parser no longer sees {_n} -- {_why}"
 print(f"  {len(_fjsrc)} fj sources -> {len(VECNAMES)} names ever declared as a vec")

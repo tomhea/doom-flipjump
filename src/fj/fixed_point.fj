@@ -95,24 +95,31 @@ ns hex {
     // @Assumes: `b` is read LIVE across the row loop, never snapshotted, so no caller may write
     //   it during the call -- the mirror of the assumption proj.scale_from_global_angle already
     //   states for its own static operand.
-    def fixed_mul_lo n, f, dst, a, b @ wide_a, res, fnib, bneg, bpos, end {
-        .mov n, wide_a, a
-        .sign_extend n+f, n, wide_a
+    def fixed_mul_lo n, f, dst, a, b @ res, asgn, fnib, aneg, apos, bneg, bpos, end {
+        // P3-2 (2026-09-04): wide_a is gone too. It was only [a's n nibbles, then f copies of
+        //   a's sign], so a row reads `a` directly for its first min(n, m-j) nibbles and a
+        //   4-nibble all-sign vector for the rest. `asgn` is written before it is read (zero,
+        //   then NOT if a is negative), which keeps M1's zero-@-local-keys property.
         .zero n+f, res
-        rep(n, j) .fixed_mul_lo.rowa n+f, j, res, wide_a, b + j*dw
+        .zero f, asgn
+        .sign n, a, aneg, apos
+      aneg:
+        .not f, asgn                           // a < 0: its sign nibbles are 0xF
+      apos:
+        rep(n, j) .fixed_mul_lo.rowb n+f, n, j, res, a, asgn, b + j*dw
         .sign n, b, bneg, bpos
       bneg:                                    // b < 0: the f sign nibbles are 0xF, so run them
-        rep(f, k) .add_mul f-k, res+(n+k)*dw, wide_a, fnib
+        rep(f, k) .fixed_mul_lo.rowb n+f, n, n+k, res, a, asgn, fnib
       bpos:                                    // bneg FALLS THROUGH to here -- no jump
         .mov n, dst, res + f*dw
         ;end
         // LAYOUT FREEZE for the 795 ops each expansion loses. Unreachable: the `;end` above
         // exists precisely to step over this data region. One number freezes every whole-macro
         // call site, because every one of them is `8, 4`.
-        rep(795, i) stl.fj 0, 0
+        rep(1998, i) stl.fj 0, 0
 
-      wide_a: .vec n+f
       res: .vec n+f
+      asgn: .vec f
       fnib: .hex 0xf
       end:
     }
@@ -129,6 +136,22 @@ ns hex {
         }
         def row m, j, res, wa, wb {
             .rowa m, j, res, wa, wb + j*dw
+        }
+        // P3-2: the SPLIT row -- `lo` nibbles of the multiplicand come from `a`, the rest from
+        // the all-sign vector. hex.add_mul brackets its inner loop with .mul.clear_carry, so
+        // calling it twice would clear the carry BETWEEN the halves and lose it; the split has
+        // to happen inside one bracket, over the 2-arg .add_mul, which carries no clear_carry.
+        // Checked in the IDENTITY configuration (both halves aimed at the same vector) against
+        // `row` at j = 0, 3, 7, 11: identical space and identical executed ops.
+        def rowb m, n, j, res, a, asgn, wbj @ skip < hex.mul.dst {
+            ..if0 1, wbj, skip
+            ..mul.clear_carry
+            ..xor hex.mul.dst, wbj
+            rep((m-j < n ? m-j : n), i) ..add_mul res + (j+i)*dw, a + i*dw
+            rep((m-j > n ? m-j-n : 0), i) ..add_mul res + (j+n+i)*dw, asgn + i*dw
+            ..xor hex.mul.dst, wbj
+            ..mul.clear_carry
+          skip:
         }
     }
 

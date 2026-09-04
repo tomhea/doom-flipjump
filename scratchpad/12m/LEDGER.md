@@ -195,6 +195,29 @@ Also: `proj.scale_from_global_angle`'s M13-CPROJSTATIC comment documented the ol
 status, and the comment says so.
 
 ### Running total after 12 ideas: 18,982,338 -> 17,919,032 = **-1,063,306 (-5.60%)**
+
+| P3-2 | P3 | `fixed_mul_lo` reads `a` in place; `wide_a` deleted | -514,968 / -411,759 / -460,255 / -464,279 | **17,673,906** (-245,126, -1.37%) | SHIP | (commit) |
+
+**P3-2 detail.** `wide_a` was only [a's n nibbles, then f copies of its sign], so rows read `a`
+directly and take the tail from a 4-nibble all-sign vector written before it is read.
+THE TRAP: `hex.add_mul n, res, a, b` brackets its inner loop with `.mul.clear_carry`, so calling
+it twice per row would clear the carry BETWEEN the halves and lose it. The split has to happen
+inside ONE bracket, over the 2-arg `.add_mul`, which carries no clear_carry. Verified by an
+IDENTITY CONFIGURATION first -- the split row aimed at the same vector for both halves must
+reproduce today's `row` exactly -- identical space and executed ops at j = 0, 3, 7, 11; only then
+were products checked against Python. -210.8 executed ops/call.
+`scratchpad/m1c_restore_set.py` asserted on the literal `wide_a`; re-anchored to `res` in the
+same commit rather than left to break in a later session.
+
+> ⚠ **FREEZE MISS: +16,320 ops, AND IT WAS AN ARITHMETIC ERROR, not tool drift.** micro.py
+> measured 1203 as the TOTAL filler for the new macro to match the current one -- and I added it
+> to P3-1's existing 795, double-counting. The label table settles it: `fixed_mul_lo` has 12 call
+> sites but **20 EXPANSIONS** (some sit inside `rep`), and 20 x (1998 - 1182) = 16,320 exactly.
+> **The correct filler is 1182.** Count EXPANSIONS, not call sites, and remember that a measured
+> filler is a TOTAL, never an increment on the one already there.
+> (micro said 1182+21; the 21 is the address-dependent wflip size of FINDINGS N, as expected.)
+
+### Running total after 13 ideas: 18,982,338 -> 17,673,906 = **-1,308,432 (-6.89%)**
 The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.
 The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals

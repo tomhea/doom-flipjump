@@ -84,3 +84,14 @@ lockstep pointers; L-infinity far reject; drawn[] as one nibble; the loader dirt
 zero-eliding burst reads; zero-before-overwrite trims; baked gate thresholds; per-seg lip
 modes; fmask-gated DDA; the 5-nibble row datapath; the lip single-row; the width-6 scale
 advance; five placement/tuning rounds. See LEDGER.md and handoff sections 16-19.
+
+## F. Subagent spend (owner instruction: use simpler models)
+
+Default HAIKU for subagents; escalate to sonnet only on a stated trigger (plan section 2.3),
+opus only for panel synthesis and CR judgment on device/stl changes. Calibration: the two
+idea panels of the previous campaign cost 2.6M and 1.8M subagent tokens at the inherited
+model, and most of their work was mechanical file reading that haiku handles.
+
+Record here, as evidence accumulates, which task CLASSES actually needed escalation -- the
+tiering should get sharper with data, not stay a guess:
+- (no entries yet)

@@ -77,15 +77,32 @@ the doctrine paragraph, the FINDINGS.md path (read it first), and this required 
 Main thread appends FUTURE-RELEVANT to FINDINGS.md before continuing. That is the mechanism by
 which a subagent's lesson survives its own context being discarded.
 
-### 2.3 Subagent model tiers (use the cheapest that fits)
+### 2.3 Subagent models -- CHEAP BY DEFAULT (owner instruction)
 
-- **haiku** -- mechanical: grep a census, price a macro by micro-assembly, tail a log and
-  report five lines, apply a patch script and report the assertion results, list call sites.
-- **sonnet** -- analytical: read a macro family and report its structure/invariants, verify a
-  width or aliasing proof, price a pool from a profile, draft a patch script.
-- **opus / fork** -- only for design decisions, adversarial review of a risky mechanism, and
-  CR-level judgment on a device or stl change.
-- Idea-generation panels: sonnet generators + sonnet skeptics, opus only for the synthesis.
+**Default to haiku. Escalate only on a stated trigger.** A small model with a precise
+prompt and FINDINGS.md in hand beats a large one working blind, and this campaign runs
+~100 ideas: subagent spend is a real budget line. (For calibration: the two idea panels
+in the previous campaign burned 2.6M and 1.8M subagent tokens at the inherited model --
+most of that work was mechanical reading that haiku does fine.)
+
+| model | use for | examples |
+|---|---|---|
+| **haiku** (default) | anything mechanical or well-specified | grep a census; price a macro by micro-assembly; list call sites of a symbol; tail a log and report 5 lines; apply a patch script and report its assertions; count segs by class; check a label diff; summarize one file's structure |
+| **sonnet** (escalate) | genuine analysis over multiple files | read a macro family and report invariants; verify a width or aliasing proof; price a pool from a profile; draft a patch script; generate and attack ideas in a panel |
+| **opus / fork** (rare) | only where a wrong call costs a build or ships a bug | final synthesis of an idea panel; CR judgment on a device or stl change; adversarial review of a mechanism that touches the arm protocol or byte-exactness |
+
+Escalation triggers -- name the one you used when you escalate:
+1. the task requires holding >3 files in relation to each other at once;
+2. a wrong answer would produce a wrong PROOF (width bounds, aliasing, hermetic windows);
+3. the output is a design decision the main thread will act on without re-checking;
+4. a haiku attempt came back visibly shallow or wrong -- retry once at sonnet, and record
+   in FINDINGS.md what class of task needed it, so the tiering improves with evidence.
+
+Idea panels: haiku or sonnet generators + sonnet skeptics; opus only for the synthesis,
+and only when the panel produced enough survivors to be worth ranking carefully.
+
+This is a spend policy, not a quality ceiling: every idea still faces the same gate, so a
+cheap agent's mistake costs a build at worst, never a wrong ship.
 
 ### 2.4 Safety rules for parallel agents
 
@@ -192,9 +209,10 @@ Paste this as the first message of the new session:
     260-frame ca2_sweep median below 12,000,000 ops/frame (currently 18,982,338 on branch
     m4-nine-levels, tip acaed54 + the plan commit). Follow its doctrine exactly, especially
     section 2 (context discipline: LEDGER.md / FINDINGS.md / ATLAS.md in scratchpad/12m/,
-    delegate anything over ~200 lines, cheapest-model-that-fits for subagents, subagents never
-    launch builds) and section 0 (strict per-idea sweeps; the screen device may change only
-    while staying "stupid" by the four-part test; doom-local macros first).
+    delegate anything over ~200 lines, subagents default to HAIKU and escalate only on a
+    stated trigger, subagents never launch builds) and section 0 (strict per-idea sweeps;
+    the screen device may change only while staying "stupid" by the four-part test;
+    doom-local macros first).
 
     Start with Phase 0: build the atlas (per-op profiles on ~8 population-spanning frames of
     the current best binary + per-line pricing of every macro region -> ATLAS.md) and the

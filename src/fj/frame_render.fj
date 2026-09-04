@@ -830,7 +830,7 @@ ns frame {
     // pure ops savings, never a pixel change. Setup runs once per face seg (4 bases + 4 steps);
     // the steps use 8 schoolbook rows because a negative scalestep is dense in two's complement.
     def ts_dda_setup fscale, fsstep, fwu1, fwu2, fwl1, fwl2, ccy_c, fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2 \
-            @ ccyfix, u_done, l_done, end < seg_fmask {
+            @ ccyfix, u_done, l_done, end < seg_fmask, tsf_lip_u, tsf_lip_l {
         hex.set 8, ccyfix, ccy_c
         // ts-idea 2: a side with no face (fmask nibble 0) never reads its fracs -- its
         // 2 frac and 2 step multiplies (6+8 rows each) are dead weight. Gate per side.
@@ -839,28 +839,30 @@ ns frame {
         rep(6, j) hex.fixed_mul_lo.row 8, j, fru1, fwu1, fscale
         hex.neg 8, fru1
         frame.add8_chain fru1, ccyfix
+        hex.zero 8, stu1
+        rep(8, j) hex.fixed_mul_lo.row 8, j, stu1, fwu1, fsstep
+        hex.if1 1, tsf_lip_u, u_done               // ts-idea 4: a lip's frac2 is dead
         hex.zero 8, fru2
         rep(6, j) hex.fixed_mul_lo.row 8, j, fru2, fwu2, fscale
         hex.neg 8, fru2
         frame.add8_chain fru2, ccyfix
-        hex.zero 8, stu1
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stu1, fwu1, fsstep
         hex.zero 8, stu2
         rep(8, j) hex.fixed_mul_lo.row 8, j, stu2, fwu2, fsstep
       u_done:
         hex.if0 1, seg_fmask + 1*dw, l_done
-        hex.zero 8, frl1
-        rep(6, j) hex.fixed_mul_lo.row 8, j, frl1, fwl1, fscale
-        hex.neg 8, frl1
-        frame.add8_chain frl1, ccyfix
         hex.zero 8, frl2
         rep(6, j) hex.fixed_mul_lo.row 8, j, frl2, fwl2, fscale
         hex.neg 8, frl2
         frame.add8_chain frl2, ccyfix
-        hex.zero 8, stl1
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stl1, fwl1, fsstep
         hex.zero 8, stl2
         rep(8, j) hex.fixed_mul_lo.row 8, j, stl2, fwl2, fsstep
+        hex.if1 1, tsf_lip_l, l_done               // ts-idea 4: a lower lip's frac1 is dead
+        hex.zero 8, frl1
+        rep(6, j) hex.fixed_mul_lo.row 8, j, frl1, fwl1, fscale
+        hex.neg 8, frl1
+        frame.add8_chain frl1, ccyfix
+        hex.zero 8, stl1
+        rep(8, j) hex.fixed_mul_lo.row 8, j, stl1, fwl1, fsstep
       l_done:
         ;end
       ccyfix: hex.vec 8
@@ -868,6 +870,12 @@ ns frame {
     }
 
     // ... the per-column row derivation (frac >> 16 arithmetic, exactly step_rows' epilogue)
+    // ts-idea 4: one row alone -- the lip path overwrites the other row anyway.
+    def ts_dda_row_one fr, fX {
+        hex.mov 4, fr, fX + 4*dw
+        hex.sign_extend 5, 4, fr
+    }
+
     def ts_dda_rows fra, frb, fA, fB {
         // ts-idea 3: frac>>16 IS the frac's top four nibbles -- mov them and extend to
         // the row datapath's 5-nibble width (the old form built a full 8-wide value).
@@ -878,16 +886,18 @@ ns frame {
     }
 
     // ... and the per-column advance (frac -= wt*scalestep, mod 2^32 = the 8-nibble sub)
-    def ts_dda_adv fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2 @ u_done, l_done < seg_fmask {
+    def ts_dda_adv fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2 @ u_done, l_done < seg_fmask, tsf_lip_u, tsf_lip_l {
         // ts-idea 2: an absent side's fracs are never read -- skip their advance. The
         // if0 costs ~31; the skipped pair of sub-chains ~190.
         hex.if0 1, seg_fmask, u_done
         frame.sub8_chain fru1, stu1
+        hex.if1 1, tsf_lip_u, u_done               // ts-idea 4: a lip never reads frac2
         frame.sub8_chain fru2, stu2
       u_done:
         hex.if0 1, seg_fmask + 1*dw, l_done
+        frame.sub8_chain frl2, stl2                // ts-idea 4: frl2 first -- a lip keeps it
+        hex.if1 1, tsf_lip_l, l_done               //   and never reads frl1
         frame.sub8_chain frl1, stl1
-        frame.sub8_chain frl2, stl2
       l_done:
     }
 
@@ -943,7 +953,7 @@ ns frame {
     }
 
     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
-            @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, piece_max, c_lip, c_stk, end \
+            @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, up_riser_rows, lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, lo_riser_rows, piece_max, c_lip, c_stk, end \
             < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, seg_bpid, tsf_col_x, tsf_cviewh1, tsf_drawn_b, tsf_drawn_p, tsf_drawn_v, tsf_face_cap, tsf_face_dist, tsf_face_norm, tsf_face_scale, tsf_face_scalestep, tsf_frac_l1, tsf_frac_l2, tsf_frac_u1, tsf_frac_u2, tsf_lip_u, tsf_lip_l, tsf_out_y1, tsf_out_y2, tsf_row_a, tsf_row_b, tsf_sfflag_b, tsf_sfflag_p, tsf_sfflag_v, tsf_sfslot_b, tsf_sfslot_p, tsf_slot_idx, tsf_step_l1, tsf_step_l2, tsf_step_u1, tsf_step_u2, tsf_wtl1, tsf_wtl2, tsf_wtu1, tsf_wtu2 {
         hex.if0 2, seg_fmask, nofaces           // this boundary carries no face at all (compile-time)
         hex.set 2, tsf_face_cap, budget
@@ -977,10 +987,10 @@ ns frame {
         hex.set 8, tsf_cviewh1, viewh1
         // ts-idea 1: the lip mode (fmask-1 per side) is PER-SEG -- computed once here,
         // where four per-column sites used to redo mov+dec each visit.
-        rep(deg, k) hex.mov 1, tsf_lip_u, seg_fmask
-        rep(deg, k) hex.dec 1, tsf_lip_u
-        rep(deg, k) hex.mov 1, tsf_lip_l, seg_fmask + 1*dw
-        rep(deg, k) hex.dec 1, tsf_lip_l
+        hex.mov 1, tsf_lip_u, seg_fmask             // ts-idea 4: unconditional -- the rows/
+        hex.dec 1, tsf_lip_u                        //   adv/setup lip gates need them in
+        hex.mov 1, tsf_lip_l, seg_fmask + 1*dw      //   every tier now, not just deg
+        hex.dec 1, tsf_lip_l
         rep(dda, k) .ts_dda_setup tsf_face_scale, tsf_face_scalestep, tsf_wtu1, tsf_wtu2, tsf_wtl1, tsf_wtl2, centeryfix_c, tsf_frac_u1, tsf_frac_u2, tsf_frac_l1, tsf_frac_l2, tsf_step_u1, tsf_step_u2, tsf_step_l1, tsf_step_l2
         hex.zero 6, tsf_col_x + 2*dw            // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_col_x, x1
@@ -1019,14 +1029,17 @@ ns frame {
         rep(deg*stack, k) hex.cmp 6, tsf_face_scale, c_stk, up_skip, up_gates_ok, up_gates_ok    // ts-idea 1
       up_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtu1, tsf_wtu2, centeryfix_c
-        rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_u1, tsf_frac_u2
-        hex.dec 5, tsf_row_b                        // ... ends one row ABOVE the back ceiling (ts-idea 3: 5-nibble rows)
+        // ts-idea 4: a LIP stores rowb = rowa, so its rowb derivation (and dec) was dead.
         // V5-DROP: mode 2 = LIP -- the near ceiling's edge row ALONE; the stored
         // region-behind then paints the far ceiling below it (mode 1 keeps the riser)
-        rep(1-deg, k) hex.mov 1, tsf_lip_u, seg_fmask
-        rep(1-deg, k) hex.dec 1, tsf_lip_u          // non-deg tiers: no prologue hoist ran
-        hex.if0 1, tsf_lip_u, up_not_lip            // ts-idea 1: the per-seg reg
-        hex.mov 5, tsf_row_b, tsf_row_a             // ts-idea 3
+        rep(dda, k) .ts_dda_row_one tsf_row_a, tsf_frac_u1
+        rep(1-dda, k) hex.dec 5, tsf_row_b          // non-dda: step_rows built both rows
+        hex.if0 1, tsf_lip_u, up_riser_rows
+        hex.mov 5, tsf_row_b, tsf_row_a
+        ;up_not_lip
+      up_riser_rows:
+        rep(dda, k) .ts_dda_row_one tsf_row_b, tsf_frac_u2
+        rep(dda, k) hex.dec 5, tsf_row_b            // ... ends one row ABOVE the back ceiling
       up_not_lip:
         // V5: a second piece clips past the STORED first piece's end (sentinels included)
         rep(stack, k) .ts_clamp2 tsf_row_a, tsf_sfflag_v, tsf_sfslot_p, 0
@@ -1050,12 +1063,14 @@ ns frame {
         rep(deg*stack, k) hex.cmp 6, tsf_face_scale, c_stk, lo_skip, lo_gates_ok, lo_gates_ok    // ts-idea 1
       lo_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtl1, tsf_wtl2, centeryfix_c
-        rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_l1, tsf_frac_l2
-        // V5-DROP: mode 2 = LIP -- the near floor's edge row alone (the tread-lip line)
-        rep(1-deg, k) hex.mov 1, tsf_lip_l, seg_fmask + 1*dw
-        rep(1-deg, k) hex.dec 1, tsf_lip_l          // non-deg tiers: no prologue hoist ran
-        hex.if0 1, tsf_lip_l, lo_not_lip            // ts-idea 1: the per-seg reg
-        hex.mov 5, tsf_row_a, tsf_row_b             // ts-idea 3
+        // ts-idea 4 + V5-DROP: mode 2 = LIP -- the near floor's edge row alone; its rowa
+        // derivation was dead (rowa <- rowb).
+        rep(dda, k) .ts_dda_row_one tsf_row_b, tsf_frac_l2
+        hex.if0 1, tsf_lip_l, lo_riser_rows
+        hex.mov 5, tsf_row_a, tsf_row_b
+        ;lo_not_lip
+      lo_riser_rows:
+        rep(dda, k) .ts_dda_row_one tsf_row_a, tsf_frac_l1
       lo_not_lip:
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
         rep(stack, k) .ts_clamp2_lo tsf_row_b, tsf_sfflag_v + 1*dw, tsf_sfslot_p, 2*PIECE_BYTES
@@ -1078,7 +1093,7 @@ ns frame {
       c_lip: hex.vec 6, dlipscale
       c_stk: hex.vec 6, dstkscale
       // ts-idea 1 size-freeze (net shrink 1,368-210-12 measured by micro-assembly):
-        rep(11893, i) stl.fj 0, 0  // ts-idea 3's width shrink (-10,795 measured op-by-op) + ts2's +16 drift folded in
+        rep(11823, i) stl.fj 0, 0  // ts-idea 4 grew ~134 (4 if1s + 2 jumps); +64 residual from ts3's drift
       end:
     }
 

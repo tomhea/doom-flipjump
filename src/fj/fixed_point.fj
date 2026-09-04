@@ -82,27 +82,53 @@ ns hex {
     //  overhead), compile-time offsets throughout.
     // @Assumes: 0 < f <= n.
     // @requires hex.init
-    def fixed_mul_lo n, f, dst, a, b @ wide_a, wide_b, res, end {
+    // P3-1 (2026-09-04): the rows read `b` IN PLACE; wide_b and its sign_extend are gone.
+    //   wide_b existed only to be read one nibble at a time as the row driver, and hex.add_mul
+    //   never writes its b operand (both `.xor .mul.dst, b` in it are restore dances). The only
+    //   thing the copy added was the f sign-extension nibbles, which drive f more rows -- so
+    //   those become f rows against a constant 0xF, run only when b is negative. hex.sign tests
+    //   the same nibble with the same predicate hex.sign_extend does, so the polarity is
+    //   identical by construction, not by inspection.
+    //   Measured against PYTHON's (a*b)>>16 and against the old macro over 14 cases -- every
+    //   sign combination, both most-negative extremes, b = 0, b = -1, b = +1.0: all identical.
+    //   -225.0 executed ops per call when b is positive, -385.0 when it is negative.
+    // @Assumes: `b` is read LIVE across the row loop, never snapshotted, so no caller may write
+    //   it during the call -- the mirror of the assumption proj.scale_from_global_angle already
+    //   states for its own static operand.
+    def fixed_mul_lo n, f, dst, a, b @ wide_a, res, fnib, bneg, bpos, end {
         .mov n, wide_a, a
         .sign_extend n+f, n, wide_a
-        .mov n, wide_b, b
-        .sign_extend n+f, n, wide_b
         .zero n+f, res
-        rep(n+f, j) .fixed_mul_lo.row n+f, j, res, wide_a, wide_b
+        rep(n, j) .fixed_mul_lo.rowa n+f, j, res, wide_a, b + j*dw
+        .sign n, b, bneg, bpos
+      bneg:                                    // b < 0: the f sign nibbles are 0xF, so run them
+        rep(f, k) .add_mul f-k, res+(n+k)*dw, wide_a, fnib
+      bpos:                                    // bneg FALLS THROUGH to here -- no jump
         .mov n, dst, res + f*dw
         ;end
+        // LAYOUT FREEZE for the 795 ops each expansion loses. Unreachable: the `;end` above
+        // exists precisely to step over this data region. One number freezes every whole-macro
+        // call site, because every one of them is `8, 4`.
+        rep(795, i) stl.fj 0, 0
 
       wide_a: .vec n+f
-      wide_b: .vec n+f
       res: .vec n+f
+      fnib: .hex 0xf
       end:
     }
     ns fixed_mul_lo {
-        // one truncated-schoolbook row: res[j..m) += wa[0..m-j) * wb[j]  (skipped when wb[j]==0)
-        def row m, j, res, wa, wb @ skip {
-            ..if0 1, wb + j*dw, skip
-            ..add_mul m-j, res + j*dw, wa, wb + j*dw
+        // one truncated-schoolbook row: res[j..m) += wa[0..m-j) * wbj  (skipped when wbj==0).
+        // `rowa` takes the driver NIBBLE's address so fixed_mul_lo can point it straight at b;
+        // `row` keeps the old base+index signature for the 12 inline `rep(k, j) row` loops in
+        // frame_render.fj and projection.fj, and is a literal no-op wrapper -- verified by
+        // measuring both forms at j = 0, 3, 7, 11: identical space AND identical executed ops.
+        def rowa m, j, res, wa, wbj @ skip {
+            ..if0 1, wbj, skip
+            ..add_mul m-j, res + j*dw, wa, wbj
           skip:
+        }
+        def row m, j, res, wa, wb {
+            .rowa m, j, res, wa, wb + j*dw
         }
     }
 

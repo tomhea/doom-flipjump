@@ -781,10 +781,13 @@ ns proj {
         hex.mov 3, sga_sin_idx, sga_angleb              //   read_sin idx = sga_angleb >> 20 (low 3 nibbles)
         finesine.read_sin sga_sinv, sga_sin_idx
         // M13-CPROJSTATIC: `hex.set 8, cproj, projection` used to run HERE, once per call, to
-        // reload a value fixed at emit time. hex.fixed_mul_lo reads its operands via
-        // `.mov n, wide_b, b` (fixed_point.fj:80) and never writes b, so cproj is never
-        // disturbed -- the vec below carries the constant instead. 127.3 ops/call saved
-        // (scratchpad/_ptr_price.log, "hex.set 8 (const addr)").
+        // reload a value fixed at emit time. hex.fixed_mul_lo never writes its operands, so
+        // cproj is never disturbed -- the vec below carries the constant instead. 127.3 ops/call
+        // saved (scratchpad/_ptr_price.log, "hex.set 8 (const addr)").
+        // ⚠ P3-1 SHARPENED THIS. The macro used to SNAPSHOT b into wide_b before the row loop;
+        // it now reads b LIVE, one nibble per row. "Never writes b" was a convenience then and
+        // is a REQUIREMENT now, and it holds for the same reason: hex.add_mul's two
+        // `.xor .mul.dst, b` are restore dances, so b leaves every row exactly as it entered.
         // M13-mulorder: operands SWAPPED vs the obvious order. fixed_mul_lo runs one schoolbook row
         // per NONZERO nibble of its SECOND operand, and a negative 16.16 sine sign-extends to a dense
         // 12-nibble pattern (~10k ops as a multiplier) while cproj = PROJECTION<<16 has ONE nonzero

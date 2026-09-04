@@ -172,6 +172,29 @@ only that the arm already points there -- so it needs no window invariant and no
 All four deg viewpoints moved by exactly -61,600: a fixed number of claims per frame.
 
 ### Running total after 11 ideas: 18,982,338 -> 18,171,018 = **-811,320 (-4.27%)**
+
+| P3-1 | P3 | `fixed_mul_lo` drives its rows off `b` in place; `wide_b` deleted | -450,083 / -478,242 / -467,052 / -462,600 | **17,919,032** (-251,986, -1.39%) | SHIP | (commit) |
+
+**P3-1 detail -- the biggest idea of the campaign.** The macro copied BOTH operands into
+12-nibble scratch vectors, but `wide_b` existed only to be read one nibble at a time as the row
+driver and `hex.add_mul` never writes its `b`. So the rows read `b` in place, and the f
+sign-extension nibbles -- the only thing the copy contributed -- become f rows against a constant
+0xF, run only when b is negative. -225.0 executed ops/call (b positive), -385.0 (b negative).
+Verified against PYTHON's own (a*b)>>16 AND the old macro over 14 cases: every sign combination,
+both most-negative extremes, b = 0, -1, +1.0. Predicted -185k, got -251,986.
+
+Three things the process caught that the gate would otherwise have:
+1. My first value check showed the new form returning 0 for 11 of 14 cases. That was MY HARNESS:
+   `compare` builds one program per variant, so I was reading the *current* variant's copy of a
+   register only the *new* variant writes. It looks exactly like a broken optimisation.
+2. The `0xF` constant must be a MACRO-LOCAL after the `;end` -- a file-scope `hex.hex` is a live
+   op and would wild-jump (invariant C-1).
+3. `bneg:` must FALL THROUGH to `bpos:`; a `;bpos` there would skip the result mov.
+Also: `proj.scale_from_global_angle`'s M13-CPROJSTATIC comment documented the old SNAPSHOT of b.
+"Never writes b" was a convenience then and is a REQUIREMENT now -- same fact, new load-bearing
+status, and the comment says so.
+
+### Running total after 12 ideas: 18,982,338 -> 17,919,032 = **-1,063,306 (-5.60%)**
 The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.
 The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals

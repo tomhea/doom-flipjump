@@ -556,3 +556,58 @@ is padding ~= the number of wflip-chain ops that region would otherwise push int
    set-and-clear pair that flips by that label (~x/2 each).
 2. Hot, frequently-jumped-into macros at LOW addresses (0 .. 65535*dw) are cheaper to wflip to and
    from, because a small address has few set bits.
+
+## V. WHERE TUNING'S LIMITS ACTUALLY ARE -- measured on the current binary (2026-09-04)
+
+Census of the shipped tree (P7A = the P3-2 binary), joined to a per-op profile of the same binary.
+
+**wflips ARE the program: 15,260,433 of 18,812,927 executed ops = 81.1%.**
+Mean popcount of an executed wflip: **7.76**. The cost distribution peaks at popcount 9 (21.0%),
+with popcounts 7-11 holding 79% of it -- i.e. the hot values look exactly like ~30-bit addresses,
+NOT like the small deltas the top-of-table suggests.
+
+⚠ **Do not read the `rank-values` top table as the pool.** Cost is spread over 33,759 distinct hot
+values; the top 28 together are only 503,848 ops = 2.7% of the frame. A label expanded N times has
+N DIFFERENT addresses, so per-value ranking fragments exactly the thing you want to aggregate. It
+is the right lens for GLOBAL labels and the wrong one for macro-locals.
+
+**THE ALIGNMENT CEILING** -- if EVERY flipped value in the program had its low x bits zeroed:
+
+| align to | ops saved | of wflip cost | of frame |
+|---|---:|---:|---:|
+| 2^4 (pad 16) | 65,718 | 0.4% | 0.3% |
+| 2^6 | 84,904 | 0.6% | 0.5% |
+| 2^8 (pad 256) | 293,603 | 1.9% | 1.6% |
+| 2^10 (pad 1024) | 528,066 | 3.5% | 2.8% |
+| 2^12 | 2,208,250 | 14.5% | 11.7% |
+| 2^16 | 5,656,182 | 37.1% | 30.1% |
+
+These are CEILINGS assuming free, universal alignment. They are not reachable: aligning a label
+expanded 80,834 times to 32 costs ~1.3M ops of space for at most ~75k, and pad-4096 on everything
+is absurd. A realistic round is a fraction of the 2^8 row.
+
+**THE KNOBS ARE ALREADY TUNED.** `simulate-shift` on the three inter-leaf placement points says the
+best available move is -5,286 (thing_leaf, 256 ops); every other size at every point is WORSE.
+Five placement rounds in earlier campaigns tuned exactly these.
+
+**AND THE ONE NEW KNOB IS TOO.** `fixed_mul_lo`'s in-macro filler shifts at 20 expansions at once
+(the compound shift that accidentally bought 139,917 on P3-2). `scratchpad/12m/multishift.py`
+generalises the predictor to that case and searched 1182..3000 at step 16: **1998 -- the accidental
+value -- is the best in the range**, everything else is worse. Saved a 20-minute gate by predicting.
+Predictor validated against the one real measurement: it says 1182 costs +251,069 on the profiled
+frame where the sweep median measured +139,917 -- same sign, same order, different quantities
+(one frame vs a 260-frame median). Directionally reliable, magnitude approximate.
+
+**SO: the accessible placement gain from here is tens of thousands of ops, not hundreds.** The
+shift lottery has ±140-250k variance but it is ONE global degree of freedom and it is already
+sampled at a good point; it cannot be accumulated. Tuning is not the next big win. It was worth
+measuring precisely because the P3-2b accident made it look like it was.
+
+**A tooling caveat that came out of this, worth checking before trusting the atlas further.**
+`insert_wflip_ops` emits the FIRST op of a wflip chain inline and sends the remaining
+popcount-1 ops to `get_wflip_spot()` -- padding, else the segment's wflip area. At mean popcount
+7.76 that is ~87% of all wflip cost executing at addresses that are NOT the issuing source line.
+The atlas attributes by address, so that cost lands on whatever label precedes those ops. This
+does not invalidate the pool table (the chain ops sit near their expansion), but any claim of the
+form "line X costs N" is really "line X's region costs N". Do not push the per-line numbers harder
+than that without checking where the chain ops actually landed.

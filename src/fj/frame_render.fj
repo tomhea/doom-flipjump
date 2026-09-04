@@ -1081,7 +1081,7 @@ ns frame {
         hex.ptr_add tsf_sfflag_p, 1
         hex.ptr_add tsf_sfslot_p, slotstride
         hex.inc 2, tsf_col_x
-        frame.add8_chain tsf_face_scale, tsf_face_scalestep   // the interpolated scale advances on EVERY column
+        frame.add6_chain tsf_face_scale, tsf_face_scalestep   // ts-idea 5: scale < 0x400000 < 16^6, so nibbles 6-7 stay 0
         rep(dda, k) .ts_dda_adv tsf_frac_u1, tsf_frac_u2, tsf_frac_l1, tsf_frac_l2, tsf_step_u1, tsf_step_u2, tsf_step_l1, tsf_step_l2
         ;col_loop
       nofaces:
@@ -1093,7 +1093,7 @@ ns frame {
       c_lip: hex.vec 6, dlipscale
       c_stk: hex.vec 6, dstkscale
       // ts-idea 1 size-freeze (net shrink 1,368-210-12 measured by micro-assembly):
-        rep(11823, i) stl.fj 0, 0  // ts-idea 4 grew ~134 (4 if1s + 2 jumps); +64 residual from ts3's drift
+        rep(12047, i) stl.fj 0, 0  // ts-idea 5: add8->add6 scale advance shrank 224; +64 ts3 residual
       end:
     }
 
@@ -1653,6 +1653,33 @@ ns frame {
       r3:
         hex.xor_zero dst+3*dw, hex.tables.res
         wflip hex.tables.ret+w, r3^rcc1, hex.add.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.zero hex.tables.res
+    }
+
+    //   dst[:6] += src[:6]   == hex.add 6, dst, src, boundary-fused (see add8_chain).
+    def add6_chain dst, src @ rcc0, r0, r1, r2, r3, r4, r5, rcc1 \
+            < hex.tables.ret, hex.tables.res, hex.add.dst {
+        wflip hex.tables.ret+w, rcc0, hex.add.dst
+      rcc0:
+        hex.zero hex.tables.res
+        hex.xor hex.add.dst,   dst
+        hex.xor hex.add.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
+      r3:
+        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.add.dst, r3, r4
+      r4:
+        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.add.dst, r4, r5
+      r5:
+        hex.xor_zero dst+5*dw, hex.tables.res
+        wflip hex.tables.ret+w, r5^rcc1, hex.add.dst
       rcc1:
         wflip hex.tables.ret+w, rcc1
         hex.zero hex.tables.res

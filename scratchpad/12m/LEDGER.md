@@ -158,6 +158,21 @@ content assertions, not text substitution, which would have silently taken all t
 `thing_record_body`: the FIRST write of the spslot run keeps the full arm, the six after it do not.
 
 ### Running total after 10 ideas: 18,982,338 -> 18,233,878 = **-748,460 (-3.94%)**
+
+| P2-6 | P2 | the prearmed write -- the arm was a no-op | -61,600 x4 (identical) | **18,171,018** (-62,860, -0.34%) | SHIP | (commit) |
+
+**P2-6 detail -- a different mechanism: DELETE the arm, do not narrow it.** At three sites the
+code reads through `pptr`, branches on the value, and on the taken branch writes through the SAME
+`pptr` -- only the not-taken path does the `ptr_add`. `claim:`/`own:` each have exactly one
+predecessor (that if0), and the read dance restores to_flip before returning, so the write's
+`set_flip_and_jump_pointers` is a CLEAR then a SET of the identical address. -243.0 per site,
+verified by writing through the prearmed form and reading the cell back (0x6D both ways).
+Its precondition is far WEAKER than arm5's -- prearming does not care where the pointer points,
+only that the arm already points there -- so it needs no window invariant and no cluster proof.
+All four deg viewpoints moved by exactly -61,600: a fixed number of claims per frame.
+
+### Running total after 11 ideas: 18,982,338 -> 18,171,018 = **-811,320 (-4.27%)**
+The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.
 The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals
 (-16, -192) were carried forward and closed out.

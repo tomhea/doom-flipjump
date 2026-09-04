@@ -1221,7 +1221,7 @@ ns frame {
         ;col_next
       claim:
         // pclm[x] = this seg's plane-pair id, and advance. write_byte_and_inc has no n-form.
-        rep(2-PID_BYTES, k) hex.write_byte_and_inc pptr, seg_pid
+        rep(2-PID_BYTES, k) frame.write_byte_and_inc_prearmed pptr, seg_pid
         rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
         rep(PID_BYTES-1, k) hex.ptr_add pptr, PID_BYTES
         hex.inc 2, n_claimed
@@ -1898,6 +1898,29 @@ ns frame {
     // every one of them is size-identical to the macro it replaces -- no call site needs a local
     // freeze. Use these ONLY where the census proved every reachable predecessor arm is also in
     // the sub-2^20 hot-data block; hex.* stays for the sprite-bank (high-cluster) pointers.
+    // P2-6 (2026-09-04): a write whose arm is ENTIRELY redundant.
+    //   Three macros share one shape: read pval8 through pptr, branch on it, and on the taken
+    //   branch write through the SAME pptr -- which nothing has moved, because only the
+    //   not-taken path does the ptr_add. `claim:` and `own:` each have exactly one predecessor
+    //   (that if0), and the read dance restores to_flip before it returns, so on entry the three
+    //   address fields still hold precisely the address the read armed. The write's
+    //   set_flip_and_jump_pointers is then a CLEAR followed by a SET of the identical value.
+    //   Measured: -243.0 executed ops per site, and the byte still lands where it should
+    //   (written through the prearmed form and read back, 0x6D both ways).
+    // This precondition is much WEAKER than arm5's: prearming does not care where the pointer
+    // points, only that the arm already points there -- so it is safe at any address cluster.
+    def write_byte_prearmed src @ end < hex.pointers.read_byte {
+        hex.pointers.read_byte_from_inners_ptrs
+        hex.xor 2, hex.pointers.read_byte, src
+        hex.pointers.xor_byte_to_flip_ptr hex.pointers.read_byte
+        ;end
+        rep(1023, i) stl.fj 0, 0
+      end:
+    }
+    def write_byte_and_inc_prearmed ptr, src {
+        .write_byte_prearmed src
+        hex.ptr_inc ptr
+    }
     def read_byte5 dst, ptr < hex.pointers.read_byte {
         hex.zero 2, dst
         .arm5 ptr
@@ -2162,7 +2185,7 @@ ns frame {
         hex.if0 PID_NIBBLES, pval8, own
         ;have
       own:
-        rep(2-PID_BYTES, k) hex.write_byte pptr, seg_pid
+        rep(2-PID_BYTES, k) frame.write_byte_prearmed seg_pid
         rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
         hex.mov PID_NIBBLES, pval8, seg_pid
         hex.inc 2, n_claimed
@@ -2186,7 +2209,7 @@ ns frame {
         hex.if0 PID_NIBBLES, pval8, own
         ;have
       own:
-        rep(2-PID_BYTES, k) hex.write_byte pptr, seg_pid   // claim this column for this seg
+        rep(2-PID_BYTES, k) frame.write_byte_prearmed seg_pid   // claim this column for this seg
         rep(PID_BYTES-1, k) hex.write_byte PID_BYTES, pptr, seg_pid
         hex.mov PID_NIBBLES, pval8, seg_pid
         hex.inc 2, n_claimed

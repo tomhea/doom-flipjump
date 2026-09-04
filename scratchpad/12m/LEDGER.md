@@ -101,3 +101,16 @@ frame; 554.8 of that is one `hex.add w/4`. Swapping it for `frame.add8_chain` ne
 anything, applies at every site, and is SIZE-IDENTICAL -- so a 22-site change moved 0 of 781,326
 labels. All four deg viewpoints improved. Predicted -64k, got -57,501.
 The filler carrying P7-1's +192 residual was right: freeze exact.
+
+| P2-2 | P2 | `ptr_index` shift stage at the proven width, 19 of 22 sites | -123,377 / -94,831 / -131,202 / -120,621 | **18,624,169** (-73,232, -0.39%) | SHIP | (commit) |
+
+**P2-2 detail.** 12 sites at width 4 (column indices, proven <= 161), 4 at width 5 (column x 16,
+<= 2,576), 3 at width 6 (the two 4-nibble packed indices); the three sprite-BLOCK indices stay at
+8. Per-call: -219 / -151 / -87 including the jump.
+THE FILLER LIVES INSIDE THE MACRO, behind its own jump, so each of the 19 expansions compensates
+itself and no local fillers were needed anywhere: **freeze exact, 0 of 781,326 labels moved**.
+All four deg viewpoints improved by ~0.4%. Predicted -100k..-130k, got -73,232.
+
+### Running total after 7 ideas: 18,982,338 -> 18,624,169 = **-358,169 (-1.89%)**
+Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals
+(-16, -192) were carried forward and closed out.

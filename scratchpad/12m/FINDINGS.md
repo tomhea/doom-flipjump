@@ -351,3 +351,45 @@ width-4 shift stage may be available at ~11 of the 22 sites -- unmeasured, worth
 
 `hex.ptr_index` call sites: 22 live ones (20 in frame_render.fj, 2 in stream_render.fj); the 8 in
 sim.fj and 3 in plane_render.fj are not in the visual tier. None is emitted from Python.
+
+## Q. frame.ptr_index's shift stage: the exact bound, measured (2026-09-04)
+
+ptr_index computes `ptr + index * 2w`, and **2w = 64**. So a shift stage of width `sw` is exact
+iff **index < 16^sw / 64**:
+
+| sw | index must be under | measured saving vs width 8 | space |
+|---|---|---|---|
+| 6 | 262,144 | -92.2 executed ops/call | -384 |
+| 5 | 16,384 | -147.7 | -576 |
+| 4 | **1,024** | **-217.9** (18% of the whole macro) | -768 |
+
+⚠ I first derived `16^sw / 32` from reading the macro (shl_hex, 3x shr_bit, shl_hex = x32) and it
+is WRONG BY A FACTOR OF 2. The negative control caught it: index 2047 is under 2,048 yet sw=4
+produced a different pointer. **Do not re-derive this rule from the shift sequence -- the measured
+table above is the authority.** Evidence: 159 -> all widths agree; 2047 and 8036 -> sw=4 differs;
+32767 and 65535 -> sw=5 and sw=4 differ, sw=6 agrees.
+
+A column index (< VIEW_W = 160) is comfortably sw=4. `sh_idx = (cls<<8)|h` < 65,536 needs sw=6.
+This is the second lever on the ~760 ptr_index calls per median frame; P2-1 took the first.
+
+### Q2. The per-site bound census for frame.ptr_index (subagent, 2026-09-04) -- all 22 PROVEN
+
+Nobody should re-derive these. Reusable emitter constants found in the process: SLOT_SHIFT = 1
+nibble (because PID_BYTES = 1), PIECE_BYTES = 4, SPRITE_HEIGHT_BUCKETS = 32,
+SPR_BLOCK_STRIDE = 64 (blkshift 6), STEP_COL_STRIDE = 256, sp_base baked as `hex.set 4`.
+
+| shape | bound | sw | which sites |
+|---|---|---|---|
+| plain COLUMN index | <= 161 | 4 | `trb_col_x` x2, `tsf_col_x` x2, `x` in seg_pass1_leaf_body_ts and lines_step_load, `x1` in lines_steps_seed / lines_spr_seed / lines_plane_ptr / seg_pass1_leaf_body_lines / seg_pass2_leaf_body_lines, `tmp` in lines_pclm_index2 (= idx*2) |
+| COLUMN x 16 | <= 2,576 | 5 | `tsf_slot_idx`, `slot_idx`, `sidx` x2 |
+| 4-nibble packed index | < 65,536 | 6 | `sh_idx` = cls*256+h; `trb_tab_idx` = sp_lt*256+bucket_h |
+| sprite BLOCK index << 6 | < 4,194,240 | 7 | `trb_blk_ofs`, `srw_sidx`, `srn_sidx` -- left at 8, sw=7 is unpriced and barely narrower |
+
+The column bound is `proj.wall_x_range_m`'s FOV clip (the source says so: "x/x2 are clipped
+columns in [0,161]"); thing columns get it from `project_thing`'s x1_ok reject plus
+`thing_record_body`'s zero-on-negative. The two 4-nibble bounds are the EMITTER'S OWN asserts:
+`assert len(cls_of)*STEP_COL_STRIDE <= 0x10000` and `assert blk < 0x10000`.
+
+⚠ `trb_tab_idx` is reached with TWO different bounds at its two sites (<= 65,381 at the table
+seed, <= 2,552 at the block lookup). Shipped at sw=6 at BOTH -- paying ~64 ops/call rather than
+depend on a reused-register argument, which is exactly trap 2 of section I.

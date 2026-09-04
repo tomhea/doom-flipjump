@@ -1609,21 +1609,31 @@ ns proj {
         hex.mov 8, top, cpm_c_centeryfix
         frame.sub8_chain top, p2_prodc          // topfrac = centeryfix - wt*scale (the DDA copy;
         hex.shr_hex 8, 4, top                   //   idea 15: chained sub -- see add8_chain's
-        hex.sign_extend 8, 4, top               //   hermetic-window warning in frame_render.fj)
+        // P1-2 (2026-09-04): sign-extend to 5, not 8. clip_rows -- the ONLY reader of `top` and
+        // `bottom` -- reads 5 nibbles since P1-1, and shr_hex leaves nibbles 4..7 ZERO (its body
+        // ends in xor_zero, which clears the source), so writing only nibble 4 gives a width-5
+        // read exactly the value an 8-wide extension would have. The `hex.sign` below MUST move
+        // to 5 with it: with nibbles 5..7 left at 0, an 8-wide sign test would call every
+        // negative top positive. Measured: identical at width 5 over 8 cases, -56..-144 executed
+        // ops per call, -512 ops of space.
+        hex.sign_extend 5, 4, top               //   hermetic-window warning in frame_render.fj)
         hex.mov 8, bottom, cpm_c_centeryfix
         frame.sub8_chain bottom, p2_prodf       // idea 15: chained
         hex.shr_hex 8, 4, bottom
-        hex.sign_extend 8, 4, bottom
-        hex.sign 8, top, tneg, tok          // top = max(0, top)
+        hex.sign_extend 5, 4, bottom
+        hex.sign 5, top, tneg, tok          // top = max(0, top)
+        // LAYOUT FREEZE for the 512 ops deleted here; this macro is expanded once. UNREACHABLE:
+        // hex.sign always jumps to one of its two labels.
+        rep(512, i) stl.fj 0, 0
       tneg:
-        hex.zero 8, top
+        hex.zero 5, top
       tok:
         // idea 19: scmp 8 -> 4. `bottom` was just built by sign_extend 8,4 -- BY CONSTRUCTION
         // a sign-extension of its low 4 nibbles -- and viewh1 (~199) is its own low-4
         // extension, so the signed compare of the low 4 nibbles decides identically.
         hex.scmp 4, bottom, cpm_c_viewh1, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
       bhi:
-        hex.mov 8, bottom, cpm_c_viewh1
+        hex.mov 5, bottom, cpm_c_viewh1     // P1-2: viewh1 (99) is 2 nibbles; bottom is read at 5
       bok:
         ;end
       end:

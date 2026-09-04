@@ -252,3 +252,32 @@ Full table in ATLAS.md. The headline shape, which is NOT what the stale table sa
 **Do NOT re-propose:** dropping the fixed_mul row count from 8 to 6 for `scalestep` operands. The
 code comment records that the gate already killed it -- scalestep is negative and its sign
 extension lives exactly in the dropped rows: 2,152-3,990 px wrong per viewpoint.
+
+## M. WHY P1-2 MISSED ITS ESTIMATE BY 7x -- op cost is OPERAND-DEPENDENT (2026-09-04)
+
+P1-2 (`sign_extend 8,4` -> `5,4` on top/bottom) measured -56..-144 executed ops per call on
+micro.py's cases and delivered **-4,160** on the median frame, not the ~30k predicted.
+
+THE CAUSE, and it generalises. `hex.sign_extend n, k, x` writes the sign into nibbles k..n-1.
+Those nibbles were just ZEROED by `shr_hex`, so for a POSITIVE x the write is a wflip by 0 --
+one op, not ~28. Narrowing 8->5 therefore removes three nearly-free ops on the common path and
+only pays off on negatives. micro.py's case list was half negative and so overweighted the
+expensive path by an order of magnitude.
+
+THE RULE THIS BUYS:
+- **Structural savings** are reliable: `hex.mov`, `hex.cmp`/`scmp`, `hex.zero`, `hex.inc`/`dec`
+  walk a table per nibble and cost ~28 executed ops per nibble REGARDLESS of value. Narrow these.
+- **Value-dependent savings** are not: `hex.sign_extend`, `hex.set`, `hex.xor` and every raw
+  `wflip` cost popcount(the delta), which collapses to ~1 op when the target already holds the
+  value. Narrowing these buys almost nothing on the common path.
+- So when micro.py prices a candidate, WEIGHT THE CASES BY THE REAL OPERAND DISTRIBUTION, or
+  price only the structural ops and treat the value-dependent ones as free.
+- Cross-check every estimate against the atlas region price: est_frame_delta =
+  atlas_ops_for_that_region x (fraction of its executed cost the change removes). P1-2's atlas
+  region was ~85k for the two shr_hex sites, so a -30k prediction was already implausible.
+
+**Call counts are NOT shared by adjacent call sites.** P1-1 (clip_rows) and P1-2
+(column_params_dda) are invoked from consecutive lines of the same column loop, and P1-1's saving
+was a CONSTANT -107,200 on every one of the 260 frames while P1-2's varied (-30,560 on the
+cheapest frame, -4,160 on the median, -5,701 on the dearest). Never infer one macro's call count
+from a neighbour's.

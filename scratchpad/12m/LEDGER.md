@@ -54,3 +54,11 @@ Sweep MIN and MAX both moved by exactly -107,200 -- the saving is constant acros
 so clip_rows runs a fixed number of times per frame regardless of viewpoint.
 Estimate vs actual: predicted ~81k from the atlas region price, got 107,200 (25% low). micro.py
 estimates are within tens of percent here -- nothing like the historical 5-9x optimism.
+| P1-2 | P1 | `proj.column_params_dda` tail width 8 -> 5 | -7,238 / -4,428 / -10,002 / -4,160 | **18,870,978** (-4,160, -0.02%) | SHIP (thin) | (commit) |
+
+**P1-2 detail.** clip_rows is the only reader of `top`/`bottom`, so the producer stopped
+maintaining nibbles 5-7. Byte-exact 4/4 and 260/260, freeze exact again (0 of 781,326 moved).
+But it delivered -4,160 against a ~30,000 estimate: `sign_extend`'s cost is a wflip by the sign,
+which is ~1 op when the target nibbles are already 0 -- and `shr_hex` had just zeroed them. See
+FINDINGS section M: narrow STRUCTURAL ops (mov/cmp/zero/inc, ~28 executed ops per nibble
+regardless of value), not VALUE-DEPENDENT ones (sign_extend/set/xor, popcount of the delta).

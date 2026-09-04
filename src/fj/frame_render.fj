@@ -663,7 +663,7 @@ ns frame {
         hex.if0 1, trb_drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
         ;col_next
       slot_check:
-        hex.read_byte trb_sprflag_v, trb_sprflag_p
+        frame.read_byte5 trb_sprflag_v, trb_sprflag_p
         hex.if0 2, trb_sprflag_v, slot_a            // no fragment yet -> slot A (offset 0, flag 1)
         // V4b: slot A taken -- take slot B (byte offset 8 of the same 16-byte slot, flag 2),
         // else both slots are spent and this thing is hidden here. Walk-arrival order makes
@@ -737,14 +737,17 @@ ns frame {
         hex.add w/4, trb_tab_idx, trb_slot_ofs          // V4b: slot B lives at byte offset 8
         hex.set w/4, trb_tbl_b, spslot
         frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
+        // P2-5: the FIRST write keeps the full arm -- on the first pass its predecessor can be
+        // a sprite-bank (high-cluster) arm. Every later write in the run follows it, so they are
+        // all inside spslot and take the narrow one.
         hex.write_byte_and_inc trb_tbl_p, trb_sy1
-        hex.write_byte_and_inc trb_tbl_p, trb_sy2
-        hex.write_byte_and_inc trb_tbl_p, trb_y0_biased
-        hex.write_byte_and_inc trb_tbl_p, trb_y0_biased + 2*dw
-        hex.write_byte_and_inc trb_tbl_p, trb_blk
-        hex.write_byte_and_inc trb_tbl_p, trb_blk + 2*dw
-        hex.write_byte_and_inc trb_tbl_p, trb_shade_row
-        hex.write_byte trb_sprflag_p, trb_slot_flag     // V4b: 1 = A only, 2 = A + B
+        frame.write_byte_and_inc5 trb_tbl_p, trb_sy2
+        frame.write_byte_and_inc5 trb_tbl_p, trb_y0_biased
+        frame.write_byte_and_inc5 trb_tbl_p, trb_y0_biased + 2*dw
+        frame.write_byte_and_inc5 trb_tbl_p, trb_blk
+        frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw
+        frame.write_byte_and_inc5 trb_tbl_p, trb_shade_row
+        frame.write_byte5 trb_sprflag_p, trb_slot_flag   // V4b: 1 = A only, 2 = A + B
       col_next:
         hex.ptr_add trb_drawn_p, 1
         hex.ptr_add trb_sprflag_p, 1
@@ -783,7 +786,7 @@ ns frame {
     def ts_clamp2 fra, cnt, fbp, off @ doclamp, noprev, prev_y, prev_end, end {
         hex.if0 1, cnt, noprev
         hex.ptr_add fbp, off+1
-        hex.read_byte prev_y, fbp
+        frame.read_byte5 prev_y, fbp
         hex.ptr_sub fbp, off+1
         hex.zero 3, prev_end + 2*dw             // ts-idea 3: the row datapath is 5 nibbles
         hex.mov 2, prev_end, prev_y
@@ -803,7 +806,7 @@ ns frame {
     def ts_clamp2_lo frb, cnt, fbp, off @ doclamp, noprev, prev_y, prev_start, end {
         hex.if0 1, cnt, noprev
         hex.ptr_add fbp, off
-        hex.read_byte prev_y, fbp
+        frame.read_byte5 prev_y, fbp
         hex.ptr_sub fbp, off
         hex.zero 3, prev_start + 2*dw           // ts-idea 3: 5-nibble rows (mov 2 covers 0-1)
         hex.mov 2, prev_start, prev_y
@@ -1030,7 +1033,7 @@ ns frame {
         hex.if0 1, tsf_drawn_v, col_work            // already painted by a nearer wall -> nothing to show
         ;col_next
       col_work:
-        hex.read_byte tsf_sfflag_v, tsf_sfflag_p
+        frame.read_byte5 tsf_sfflag_v, tsf_sfflag_p
         // ---- the UPPER face(s) ----------------------------------------------------------------
         // V5: the flag nibbles are per-side COUNTS (0..1+stack); slot layout is 4-byte pieces
         // [y1][y2][cls][bpid] at u1@0, u2@4, l1@8, l2@12 -- all inside the 16-byte stride.
@@ -1977,7 +1980,7 @@ ns frame {
         // preamble (~615 executed ops) is pure waste. The dirty flag is what keeps the V4
         // change-detection signatures honest: skipping the zeroes on STALE registers would
         // make a no-piece column look identical to its piece-bearing predecessor.
-        hex.read_byte flags_v, p2_sffp           // idea 11: seeded per seg, stepped at skipcol
+        frame.read_byte5 flags_v, p2_sffp           // idea 11: seeded per seg, stepped at skipcol
         hex.if0 2, flags_v, no_pieces           // no piece in this column -- the common case
         // v3: the PIECE path is the ORIGINAL shape plus one flag-set -- v1/v2 taxed
         // this path with extra branches and the dense gate frames paid for it.
@@ -2086,7 +2089,7 @@ ns frame {
             @ spslot_p, has_slot_b, no_frags, end < p2_spfp, p2_sspp, p2_sdirty {
         // idea 16, the sprite twin of load2's dirty skip. sprfl's old explicit zero was
         // REDUNDANT outright -- hex.read_byte zeroes its dst before xoring the value in.
-        hex.read_byte sprfl, p2_spfp             // idea 11
+        frame.read_byte5 sprfl, p2_spfp             // idea 11
         hex.if0 2, sprfl, no_frags
         hex.zero 2, ssy1
         hex.zero 2, ssy2
@@ -2154,7 +2157,7 @@ ns frame {
     def lines_col_plane_ids cbufa, cbufd, fbufa, fbufd \
             @ own, have, recalc, pdone, end \
             < pptr, pval8, seg_pid, cpid, n_claimed, tsstop, vieww {
-        rep(2-PID_BYTES, k) hex.read_byte pval8, pptr
+        rep(2-PID_BYTES, k) frame.read_byte5 pval8, pptr
         rep(PID_BYTES-1, k) hex.read_byte PID_BYTES, pval8, pptr
         hex.if0 PID_NIBBLES, pval8, own
         ;have
@@ -2388,7 +2391,7 @@ ns frame {
       col_loop:
         hex.cmp 2, x, x2, col_body, ret, ret
       col_body:
-        hex.read_hex dval8, dptr                // drawn[] holds 0/1 -- one nibble (idea 10)
+        frame.read_hex5 dval8, dptr                // drawn[] holds 0/1 -- one nibble (idea 10)
         hex.if0 1, dval8, notdrawn
         hex.ptr_add dptr, 1                     // already claimed -> next column
         rep(pnear, k) .lines_plane_step

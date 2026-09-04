@@ -144,5 +144,20 @@ Because arm5 carries its own filler, the whole family (`read_byte5`, `read_hex5`
 `write_byte_and_inc5`) is size-identical to its stl twins: **freeze exact again**.
 
 ### Running total after 9 ideas: 18,982,338 -> 18,388,677 = **-593,661 (-3.13%)**
+
+| P2-5 | P2 | the narrow arm on the remaining 15 vetted sites | -221,650 / -128,149 / -180,151 / -126,275 | **18,233,878** (-154,799, -0.84%) | SHIP | (commit) |
+
+**P2-5 detail.** The rest of the census's unconditional set: `ts_clamp2`/`ts_clamp2_lo`,
+`ts_step_faces`'s sfflag read, `lines_steps_load2`, `lines_spr_load`, `lines_col_plane_ids`,
+`seg_pass2_leaf_body_lines`'s drawn read, and in `thing_record_body` the sprflag read plus writes
+2-7 of the spslot run and the slot-flag write.
+PRECISION MATTERED: three sites share the exact text `hex.read_byte pval8, pptr` and only ONE
+(`lines_col_plane_ids`) was cleared -- the copies in `seg_pass1_leaf_body_ts` and
+`lines_col_plane` can be reached with a sprite-bank arm standing. Line-targeted edits with
+content assertions, not text substitution, which would have silently taken all three. Same in
+`thing_record_body`: the FIRST write of the spslot run keeps the full arm, the six after it do not.
+
+### Running total after 10 ideas: 18,982,338 -> 18,233,878 = **-748,460 (-3.94%)**
+The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals
 (-16, -192) were carried forward and closed out.

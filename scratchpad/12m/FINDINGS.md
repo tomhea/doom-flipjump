@@ -611,3 +611,42 @@ The atlas attributes by address, so that cost lands on whatever label precedes t
 does not invalidate the pool table (the chain ops sit near their expansion), but any claim of the
 form "line X costs N" is really "line X's region costs N". Do not push the per-line numbers harder
 than that without checking where the chain ops actually landed.
+
+## W. The alignment ceiling IS concentrated -- but the mass is in values `pad` cannot change
+
+Correcting section V, which said the pool was flat. It is not, and that reasoning was wrong:
+
+| align to | top 10 | top 25 | top 50 | of the ceiling (top 25) |
+|---|---:|---:|---:|---:|
+| 2^8 | 134,090 | 181,378 | 192,250 | 61.8% |
+| 2^10 | 162,367 | 245,669 | 265,649 | 46.5% |
+
+So 25 labels hold half the ceiling. If those were alignable labels, `pad 1024` on 25 of them would
+be -245,669 ops for ~12,800 ops of space -- the biggest idea in the campaign. **They are not.**
+
+**NAMING THEM IS WHAT SETTLES IT. Only 2 of the top 25 are label ADDRESSES at all:**
+
+| value | ops | what it is |
+|---|---:|---|
+| **0x2E** | 44,104 | **`dbit + 8`**, and `dbit = w + #w` = 38 at w=32. The read dance's `wflip to_flip, dbit+bits`. A CONSTANT of the memory width -- placement cannot touch it. |
+| 0x3C0, 0x300, 0x1C0, 0x2C0, 0x180, 0x340, 0x140, 0x280, 0x240 | ~60k total | macro-local DELTAS (0x3C0 = 960 bits = a 15-op stride) at 6,000-36,000 sites each. Alignable in principle -- make the stride a power of two -- but the pad is per EXPANSION, so the space runs to hundreds of thousands of ops for tens of thousands saved. |
+| 0x28, 0x2A, 0x2C, 0x26, 0xE, 0x6 | ~30k total | more `dbit+k` dance constants. Unalignable. |
+| **0x80C0** | **22,052** | **`hex.pointers.to_flip`** -- a REAL, once-emitted label at op 515. **This one is worth taking.** |
+| 0x40 | 8,874 | `stl.IO` at op 1, popcount already 1. Nothing to gain (a wflip costs max(1, popcount)). |
+
+**THE ONE CLEAN WIN: `hex.pointers.to_flip`.** It sits at 0x80C0 (op 515), popcount 3. The table
+`read_ptr_byte_table` is pinned at op 256 and runs 256 ops, so op 512 = 0x8000 is free and has
+popcount 1. Moving `to_flip:` to be the first declaration after the table is a REORDER, not a pad:
+**-22,052 ops on the profiled frame for ZERO ops of space.** It is an stl change (ptr_init in
+basic_pointers.fj) so it needs a CR into flipjump-151/1.5.1, and the
+`to_flip == to_jump+w == to_ptr_var` invariant must be re-checked -- that invariant is about the
+VALUES those fields hold, not their layout, so a reorder should be safe, but "should" is not
+"gated".
+
+**THE HONEST SUMMARY.** Section V's conclusion (tuning is not the next big win) survives, but its
+reasoning did not. The pool is concentrated, not flat; it is just concentrated in width constants
+and in per-expansion deltas whose padding costs more than it saves. Realistic accessible gain:
+~22k from the to_flip reorder, plus whatever the chain-delta stride restructure nets after its
+space -- which nobody has costed properly and which the workflow's ~52k space estimate looks
+optimistic about, since `pad N` aligns to N OPS and the chain has ~10 slots per expansion across
+thousands of expansions.

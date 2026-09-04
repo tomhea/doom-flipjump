@@ -469,3 +469,48 @@ one) could push them across that line and the frame would break SILENTLY. So thi
 ASSEMBLE-TIME assert in the fj, in the stl's own style
 (`rep(condition, i) .name_that_states_the_rule` fails the assembly and names the rule), which
 needs the emitter to mark the end of the slot block with a label. A comment is not enough here.
+
+## T. The pool table after the pointer work (P2-6 binary, median frame 19,307,813)
+
+The atlas was rebuilt on the same eight viewpoints as the baseline, so these diff directly.
+Median profile 20,204,970 -> 19,307,813 (-897,157, -4.4%).
+
+**What the pointer work actually moved:**
+
+| pool | at BASE | now | delta |
+|---|---:|---:|---:|
+| `set_flip_and_jump_pointers` (the ARM) | 2,022,344 | **1,398,329** | **-624,015** |
+| `frame.seg_pass2_leaf_body_lines` | 7,865,735 | 7,371,955 | -493,780 |
+| `frame.seg_pass1_leaf_body_ts` | 4,762,279 | 4,466,123 | -296,156 |
+| `frame.ts_step_faces` | 3,563,542 | 3,276,489 | -287,053 |
+| `frame.ts_piece_store` | 1,632,509 | 1,432,304 | -200,205 |
+| `frame.dance_boundary` | 1,290,578 | 1,491,021 | **+200,443** |
+
+dance_boundary went UP because ptr_index now routes through add8_chain -- work MOVED into the
+chain and the net was -57,501. Do not read that row as a regression.
+
+**THE TOP TEN HAND-WRITTEN LINES NOW** (this is the ranking that matters):
+
+| site | ops | share | what |
+|---|---:|---:|---|
+| `f2:l104` | **1,844,048** | **9.55%** | `add_mul` in `fixed_mul_lo.row` -- the multiply |
+| `f5:l1546` | 702,752 | 3.64% | `hex.xor jumper, dst_next` in dance_boundary |
+| `f5:l1545` | 685,879 | 3.55% | `hex.xor_zero dst_prev, hex.tables.res` |
+| `f8:l1090` | 653,910 | 3.39% | `w1rpat.walk` |
+| `f8:l607` | 543,429 | 2.81% | `w1rpat.walk_win` |
+| `f5:l1889` | 459,696 | 2.38% | arm5's CLEAR pass |
+| `f5:l1890` | 422,090 | 2.19% | arm5's SET pass |
+| `f5:l1940` | 244,750 | 1.27% | `xor_byte_to_flip_ptr` (the write dance) |
+| `f5:l949` | 178,684 | 0.93% | `hex.scmp 5` in ts_piece_store |
+| `f2:l86/88/90/92` | 493,073 | 2.55% | fixed_mul_lo's setup movs + zero |
+
+So the MULTIPLY FAMILY (add_mul + setup) is **2,337,121 = 12.1%**, the biggest addressable pool
+left, and the arm remainder is 881,786 at the two arm5 lines plus the un-narrowed full arms.
+
+**AN OPEN QUESTION worth someone's time.** `dance_boundary`'s two structurally identical
+single-hex xors cost wildly different amounts:
+    `hex.xor jumper,   dst_next`  702,752
+    `hex.xor jumper+4, src_next`  102,390     <- 6.9x cheaper, same call count
+Both are one `hex.xor` of one hex in the same macro body, so the difference must be in the VALUES
+(cost is popcount-driven, FINDINGS M). Nobody has explained it. Whatever makes the second one
+cheap may be arrangeable for the first -- 600k sits in that gap. Not investigated.

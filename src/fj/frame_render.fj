@@ -765,12 +765,12 @@ ns frame {
         hex.ptr_add fbp, off+1
         hex.read_byte prev_y, fbp
         hex.ptr_sub fbp, off+1
-        hex.zero 6, prev_end + 2*dw             // idea 20: the mov 2 below covers nibbles 0-1
+        hex.zero 3, prev_end + 2*dw             // ts-idea 3: the row datapath is 5 nibbles
         hex.mov 2, prev_end, prev_y
-        hex.inc 8, prev_end                     // stored prev y2 + 1 (sentinel bytes included)
-        hex.scmp 8, fra, prev_end, doclamp, noprev, noprev
+        hex.inc 5, prev_end                     // stored prev y2 + 1 (sentinel bytes included)
+        hex.scmp 5, fra, prev_end, doclamp, noprev, noprev
       doclamp:
-        hex.mov 8, fra, prev_end
+        hex.mov 5, fra, prev_end
       noprev:
         ;end
       prev_y: hex.vec 2
@@ -785,12 +785,12 @@ ns frame {
         hex.ptr_add fbp, off
         hex.read_byte prev_y, fbp
         hex.ptr_sub fbp, off
-        hex.zero 8, prev_start
+        hex.zero 3, prev_start + 2*dw           // ts-idea 3: 5-nibble rows (mov 2 covers 0-1)
         hex.mov 2, prev_start, prev_y
-        hex.dec 8, prev_start                   // stored prev y1 - 1
-        hex.scmp 8, frb, prev_start, noprev, noprev, doclamp
+        hex.dec 5, prev_start                   // stored prev y1 - 1 (-1 == 0xFFFFF at width 5)
+        hex.scmp 5, frb, prev_start, noprev, noprev, doclamp
       doclamp:
-        hex.mov 8, frb, prev_start
+        hex.mov 5, frb, prev_start
       noprev:
         ;end
       prev_y: hex.vec 2
@@ -869,12 +869,12 @@ ns frame {
 
     // ... the per-column row derivation (frac >> 16 arithmetic, exactly step_rows' epilogue)
     def ts_dda_rows fra, frb, fA, fB {
-        hex.mov 8, fra, fA
-        hex.shr_hex 8, 4, fra
-        hex.sign_extend 8, 4, fra
-        hex.mov 8, frb, fB
-        hex.shr_hex 8, 4, frb
-        hex.sign_extend 8, 4, frb
+        // ts-idea 3: frac>>16 IS the frac's top four nibbles -- mov them and extend to
+        // the row datapath's 5-nibble width (the old form built a full 8-wide value).
+        hex.mov 4, fra, fA + 4*dw
+        hex.sign_extend 5, 4, fra
+        hex.mov 4, frb, fB + 4*dw
+        hex.sign_extend 5, 4, frb
     }
 
     // ... and the per-column advance (frac -= wt*scalestep, mod 2^32 = the 8-nibble sub)
@@ -910,29 +910,32 @@ ns frame {
     // (255, 254). Both keep y1 > y2, so lines_step_load rejects them before drawing.
     def ts_piece_store rowa, rowb, cvh, oy1, oy2, flagv, flagbyte, flagp, slotp, slotoff, cls, bpid, skip \
             @ vis_ok, onscr, store, off_above, off_below, y1_clamp0, y1_done, y2_clamp, write {
-        hex.scmp 8, rowa, rowb, vis_ok, vis_ok, skip
+        // ts-idea 3: rows are 5-nibble sign-extended 16-bit values; every compare, sign
+        // test and byte-feeding write below is value-identical at width 5. oy1/oy2 keep
+        // their 8-wide vecs but only the low 5 are written -- ts_piece_wr reads 2.
+        hex.scmp 5, rowa, rowb, vis_ok, vis_ok, skip
       vis_ok:
-        hex.sign 8, rowb, off_above, onscr
+        hex.sign 5, rowb, off_above, onscr
       onscr:
-        hex.scmp 8, rowa, cvh, store, store, off_below
+        hex.scmp 5, rowa, cvh, store, store, off_below
       off_above:
-        hex.set 8, oy1, 1
-        hex.zero 8, oy2
+        hex.set 5, oy1, 1
+        hex.zero 5, oy2
         ;write
       off_below:
-        hex.set 8, oy1, 255
-        hex.set 8, oy2, 254
+        hex.set 5, oy1, 255
+        hex.set 5, oy2, 254
         ;write
       store:
-        hex.mov 8, oy1, rowa
-        hex.sign 8, rowa, y1_clamp0, y1_done
+        hex.mov 5, oy1, rowa
+        hex.sign 5, rowa, y1_clamp0, y1_done
       y1_clamp0:
-        hex.zero 8, oy1
+        hex.zero 5, oy1
       y1_done:
-        hex.mov 8, oy2, rowb
-        hex.scmp 8, rowb, cvh, write, write, y2_clamp
+        hex.mov 5, oy2, rowb
+        hex.scmp 5, rowb, cvh, write, write, y2_clamp
       y2_clamp:
-        hex.mov 8, oy2, cvh
+        hex.mov 5, oy2, cvh
       write:
         .ts_piece_wr flagv, slotp, slotoff, oy1, oy2, cls, bpid
         hex.inc 1, flagv
@@ -1017,13 +1020,13 @@ ns frame {
       up_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtu1, tsf_wtu2, centeryfix_c
         rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_u1, tsf_frac_u2
-        hex.dec 8, tsf_row_b                        // ... ends one row ABOVE the back ceiling
+        hex.dec 5, tsf_row_b                        // ... ends one row ABOVE the back ceiling (ts-idea 3: 5-nibble rows)
         // V5-DROP: mode 2 = LIP -- the near ceiling's edge row ALONE; the stored
         // region-behind then paints the far ceiling below it (mode 1 keeps the riser)
         rep(1-deg, k) hex.mov 1, tsf_lip_u, seg_fmask
         rep(1-deg, k) hex.dec 1, tsf_lip_u          // non-deg tiers: no prologue hoist ran
         hex.if0 1, tsf_lip_u, up_not_lip            // ts-idea 1: the per-seg reg
-        hex.mov 8, tsf_row_b, tsf_row_a
+        hex.mov 5, tsf_row_b, tsf_row_a             // ts-idea 3
       up_not_lip:
         // V5: a second piece clips past the STORED first piece's end (sentinels included)
         rep(stack, k) .ts_clamp2 tsf_row_a, tsf_sfflag_v, tsf_sfslot_p, 0
@@ -1052,7 +1055,7 @@ ns frame {
         rep(1-deg, k) hex.mov 1, tsf_lip_l, seg_fmask + 1*dw
         rep(1-deg, k) hex.dec 1, tsf_lip_l          // non-deg tiers: no prologue hoist ran
         hex.if0 1, tsf_lip_l, lo_not_lip            // ts-idea 1: the per-seg reg
-        hex.mov 8, tsf_row_a, tsf_row_b
+        hex.mov 5, tsf_row_a, tsf_row_b             // ts-idea 3
       lo_not_lip:
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
         rep(stack, k) .ts_clamp2_lo tsf_row_b, tsf_sfflag_v + 1*dw, tsf_sfslot_p, 2*PIECE_BYTES
@@ -1075,7 +1078,7 @@ ns frame {
       c_lip: hex.vec 6, dlipscale
       c_stk: hex.vec 6, dstkscale
       // ts-idea 1 size-freeze (net shrink 1,368-210-12 measured by micro-assembly):
-        rep(1114, i) stl.fj 0, 0   // ts-idea 2 grew the leaf by 4 if0s (124); was 1238
+        rep(11893, i) stl.fj 0, 0  // ts-idea 3's width shrink (-10,795 measured op-by-op) + ts2's +16 drift folded in
       end:
     }
 

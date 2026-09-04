@@ -1783,3 +1783,44 @@ on its next rebuild; add1/add5 chains (7 calls) unconverted; the ts_step_faces p
 the median frame) still holds the largest untapped mass -- its per-face-column pointer
 re-derivation wants the idea-11 treatment; the emit_col pool (1.7M) needs a device-protocol
 change to touch.
+
+
+## 19. THE ts_step_faces ROUND: 5 for 5, median 18,982,338 (2026-09-04)
+
+Targeted the biggest untapped pool (the two-sided step-faces walker, ~3.3M/median-frame).
+Five ideas asked for, five sweep-certified (deg 4/4 byte-exact + 260/260-byte-exact sweep,
+median improved each time). 19,716,925 -> 18,982,338 = **-734,587 (-3.7%)** on top of the
+20-idea campaign; from the original 24,306,866, **-21.9%**.
+
+| # | idea | median delta | commit |
+|---|---|---|---|
+| ts1 | gate thresholds baked as data + per-seg lip modes (4 sites each) | -41,974 | d83b013 |
+| ts2 | fmask-gated DDA: an absent side skips its setup + per-column advance | -104,963 | 7c44fd7 |
+| ts3 | the row datapath at 5 sign-extended nibbles (was 8) | **-386,260** | c6a4fdc |
+| ts4 | a lip side derives ONE row -- its twin's row/dec/frac/setup are dead | -170,449 | a9a4f6f |
+| ts5 | the per-column scale advance at width 6 (scale < 16^6) | -30,941 | acaed54 |
+
+ts3 is the campaign's second-biggest single idea, after chain wave 2. The pool's dominant
+tax was WIDTH: 8-nibble registers carrying 16-bit rows through hex.scmp (1,566 ops of
+space each), mov, sign and the two clamps -- narrowing to 5 halved all of it, bit-identical
+by the sign-extension argument, proven in pixels.
+
+New doctrine from this round:
+- **A ts-scoped (marking-seg-only) idea should move the min sweep frame by +-0** -- that
+  frame carries no marking segs. ts1 and ts5 both showed exactly 0 there; it is a free
+  correctness signal that the change is confined to its intended path.
+- **The freeze filler MUST be re-checked by label diff every build, not trusted to the
+  op-by-op estimate.** Three ts builds drifted (+80 ts1, +16 ts2, -80 ts3) because a
+  state-register addition or an if-count guess was off; each was caught by comparing the
+  downstream leaf addresses to the prior build and folded into the next filler. ts5 landed
+  +0 once the residuals were tracked forward.
+- **Width was the hidden cost.** scmp/mov/set/dec/zero all scale ~linearly with nibble
+  count; the campaign had been treating them as fixed. Any register proven to hold a
+  bounded value is a narrowing candidate -- measured op-by-op, never guessed.
+
+NOT taken (deferred as high-variance): the sfflag-into-drawn fold (panel's #1 for raw size
+but entangles pass 1's writer, pass 2's reader, and the reset's BYTE_ARRAY_NAMES -- a
+sub-nibble count field and a three-way restore-set change); the arm-carried piece-write run
+in ts_piece_wr (a doom-local second write-arm clone -- the largest remaining single target,
+~1.26M still in ts_piece_store after the width shrink). Either is the natural start of a
+next ts round.

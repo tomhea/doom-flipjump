@@ -514,3 +514,45 @@ single-hex xors cost wildly different amounts:
 Both are one `hex.xor` of one hex in the same macro body, so the difference must be in the VALUES
 (cost is popcount-driven, FINDINGS M). Nobody has explained it. Whatever makes the second one
 cheap may be arrangeable for the first -- 600k sits in that gap. Not investigated.
+
+## U. `pad` vs `stl.fj 0, 0`: padding is NOT wasted space, filler IS (2026-09-04, owner + assembler)
+
+Verified in `flipjump-151/flipjump/assembler/assembler.py`, not paraphrased:
+
+```python
+def get_wflip_spot(self):
+    if self.padding_ops_indices:            # <- PADDING IS CONSUMED FIRST
+        index = self.padding_ops_indices.pop()
+        return WFlipSpot(self.fj_words, index, self.first_address + self.memory_width * index)
+    wflip_spot = WFlipSpot(self.wflip_words, len(self.wflip_words), self.next_wflip_address)
+    ...                                     # otherwise: the segment's wflip area, at the end
+
+def insert_padding(self, ops_count):        # <- what the `pad` directive calls
+    for i in range(len(self.fj_words), len(self.fj_words) + 2*ops_count, 2):
+        self.padding_ops_indices.append(i)  # <- REGISTERED as an available wflip slot
+        self.fj_words.extend((0, 0))
+```
+
+**So `pad` slots are storage the assembler REUSES for wflip chain ops, and it prefers them over
+the wflip area at the end of the segment.** A multi-bit wflip expands into a chain of ops that has
+to live somewhere; padding is where they go. The space is not lost.
+
+**⚠ THE CAMPAIGN'S FREEZE FILLERS DO NOT DO THIS.** `rep(N, i) stl.fj 0, 0` emits ordinary ops
+through `insert_fj_op`; they are never added to `padding_ops_indices`, so no wflip chain can ever
+use them. Every filler this campaign has placed -- 24,837 ops in section G plus P3-1's 795 and
+P3-2's 1,998 -- is genuinely dead space, while the same ops written as `pad` would have absorbed
+wflip chains AND put those chain ops near the code that jumps to them instead of at the segment's
+end. That is worth re-examining: it is a free-ish win available at every filler site already in
+the tree.
+
+**The tension to respect.** `pad N` aligns to a multiple of N, so its SIZE is whatever the current
+address needs -- it cannot express "exactly K ops" the way the freeze fillers must. And the owner's
+caution: **do not pad more than the wflip chains will actually consume**, or the surplus is back to
+being dead space AND it shifts everything after it (re-rolling every later address). The sweet spot
+is padding ~= the number of wflip-chain ops that region would otherwise push into the wflip area.
+
+**Two mechanisms, both from the owner, both now grounded in the source:**
+1. `pad 2^x` before a hot label zeroes the low x bits of its address, saving ~x ops per
+   set-and-clear pair that flips by that label (~x/2 each).
+2. Hot, frequently-jumped-into macros at LOW addresses (0 .. 65535*dw) are cheaper to wflip to and
+   from, because a small address has few set bits.

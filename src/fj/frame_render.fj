@@ -830,8 +830,11 @@ ns frame {
     // pure ops savings, never a pixel change. Setup runs once per face seg (4 bases + 4 steps);
     // the steps use 8 schoolbook rows because a negative scalestep is dense in two's complement.
     def ts_dda_setup fscale, fsstep, fwu1, fwu2, fwl1, fwl2, ccy_c, fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2 \
-            @ ccyfix, end {
+            @ ccyfix, u_done, l_done, end < seg_fmask {
         hex.set 8, ccyfix, ccy_c
+        // ts-idea 2: a side with no face (fmask nibble 0) never reads its fracs -- its
+        // 2 frac and 2 step multiplies (6+8 rows each) are dead weight. Gate per side.
+        hex.if0 1, seg_fmask, u_done
         hex.zero 8, fru1
         rep(6, j) hex.fixed_mul_lo.row 8, j, fru1, fwu1, fscale
         hex.neg 8, fru1
@@ -840,6 +843,12 @@ ns frame {
         rep(6, j) hex.fixed_mul_lo.row 8, j, fru2, fwu2, fscale
         hex.neg 8, fru2
         frame.add8_chain fru2, ccyfix
+        hex.zero 8, stu1
+        rep(8, j) hex.fixed_mul_lo.row 8, j, stu1, fwu1, fsstep
+        hex.zero 8, stu2
+        rep(8, j) hex.fixed_mul_lo.row 8, j, stu2, fwu2, fsstep
+      u_done:
+        hex.if0 1, seg_fmask + 1*dw, l_done
         hex.zero 8, frl1
         rep(6, j) hex.fixed_mul_lo.row 8, j, frl1, fwl1, fscale
         hex.neg 8, frl1
@@ -848,14 +857,11 @@ ns frame {
         rep(6, j) hex.fixed_mul_lo.row 8, j, frl2, fwl2, fscale
         hex.neg 8, frl2
         frame.add8_chain frl2, ccyfix
-        hex.zero 8, stu1
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stu1, fwu1, fsstep
-        hex.zero 8, stu2
-        rep(8, j) hex.fixed_mul_lo.row 8, j, stu2, fwu2, fsstep
         hex.zero 8, stl1
         rep(8, j) hex.fixed_mul_lo.row 8, j, stl1, fwl1, fsstep
         hex.zero 8, stl2
         rep(8, j) hex.fixed_mul_lo.row 8, j, stl2, fwl2, fsstep
+      l_done:
         ;end
       ccyfix: hex.vec 8
       end:
@@ -872,11 +878,17 @@ ns frame {
     }
 
     // ... and the per-column advance (frac -= wt*scalestep, mod 2^32 = the 8-nibble sub)
-    def ts_dda_adv fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2 {
+    def ts_dda_adv fru1, fru2, frl1, frl2, stu1, stu2, stl1, stl2 @ u_done, l_done < seg_fmask {
+        // ts-idea 2: an absent side's fracs are never read -- skip their advance. The
+        // if0 costs ~31; the skipped pair of sub-chains ~190.
+        hex.if0 1, seg_fmask, u_done
         frame.sub8_chain fru1, stu1
         frame.sub8_chain fru2, stu2
+      u_done:
+        hex.if0 1, seg_fmask + 1*dw, l_done
         frame.sub8_chain frl1, stl1
         frame.sub8_chain frl2, stl2
+      l_done:
     }
 
     // A4: the per-side STORE TAIL of ts_step_faces. The upper and lower halves ran the same 27
@@ -1063,7 +1075,7 @@ ns frame {
       c_lip: hex.vec 6, dlipscale
       c_stk: hex.vec 6, dstkscale
       // ts-idea 1 size-freeze (net shrink 1,368-210-12 measured by micro-assembly):
-        rep(1238, i) stl.fj 0, 0   // measured: the first freeze was 80 short (label diff)
+        rep(1114, i) stl.fj 0, 0   // ts-idea 2 grew the leaf by 4 if0s (124); was 1238
       end:
     }
 

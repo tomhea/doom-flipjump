@@ -925,7 +925,7 @@ ns stream {
         hex.mov 4, srw_sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, srw_sidx
         hex.set w/4, srw_sbase, sprbank
-        hex.ptr_index srw_ptr, srw_sbase, srw_sidx
+        frame.ptr_index srw_ptr, srw_sbase, srw_sidx
         hex.ptr_add srw_ptr, 3
         hex.zero 4, srw_smidx
         hex.mov 2, srw_smidx + 2*dw, slr
@@ -983,7 +983,7 @@ ns stream {
         // to become an address (cf. lines_pid_addrs's `mul_const ..., 4*half_slots*dw`). Added raw
         // it lands 64x short, the entry count reads garbage, and the walk runs on through the whole
         // bank emitting a slowly-creeping cycle of pairs.
-        hex.ptr_index srn_ptr, srn_sbase, srn_sidx
+        frame.ptr_index srn_ptr, srn_sbase, srn_sidx
         hex.ptr_add srn_ptr, 3                      // past the WHOLE [r0][last_rel][n_ent] header
         hex.zero 4, srn_smidx
         hex.mov 2, srn_smidx + 2*dw, slr

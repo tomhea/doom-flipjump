@@ -281,3 +281,18 @@ THE RULE THIS BUYS:
 was a CONSTANT -107,200 on every one of the 260 frames while P1-2's varied (-30,560 on the
 cheapest frame, -4,160 on the median, -5,701 on the dearest). Never infer one macro's call count
 from a neighbour's.
+
+## N. micro.py's SPACE figure is close, not exact -- and why (2026-09-04)
+
+P1-3's fillers were computed from micro.py's measured space deltas and came out **16 ops short**:
+20,683 labels moved by exactly -16 ops, a clean single-mode shift.
+
+THE CAUSE: a `wflip` emits ONE OP PER SET BIT of the value it flips, so the emitted SIZE of any
+op whose operand is an address depends on that address's popcount -- and in a micro program every
+address differs from the real one. micro.py's executed-op figure is exact (it is a slope on real
+runs); its SPACE figure is within a few tens of ops, no better.
+
+CONSEQUENCE FOR THE RITUAL: compute the filler from micro, then let the label diff tell you the
+residual and CARRY IT INTO THE NEXT FILLER (invariant C-2, now with a mechanism behind it). Do
+not spend a 12-minute build correcting a residual on its own -- a uniform shift of a few ops
+de-tunes placement only marginally, and the next idea's build absorbs it for free.

@@ -62,3 +62,18 @@ But it delivered -4,160 against a ~30,000 estimate: `sign_extend`'s cost is a wf
 which is ~1 op when the target nibbles are already 0 -- and `shr_hex` had just zeroed them. See
 FINDINGS section M: narrow STRUCTURAL ops (mov/cmp/zero/inc, ~28 executed ops per nibble
 regardless of value), not VALUE-DEPENDENT ones (sign_extend/set/xor, popcount of the delta).
+
+| P1-3 | P1 | shift adjacency at 2 sites (`lines_sky_base`, `thing_record_body`'s trb_u) | -102,922 / -29,106 / -107,288 / -64,213 | **18,771,151** (-99,827, -0.53%) | SHIP | (commit) |
+
+**P1-3 detail.** `hex.mov N, t, src` followed by `hex.shr_hex N, K, t` is byte-identically
+`hex.mov r, t, src + K*dw` when t is read at width r and K is a whole-nibble shift, because
+shr_hex's result nibble i IS source nibble i+K. Measured identical over 8 values;
+-279 executed ops/call at the sky site, -243 at trb_u. Structural ops, so the estimate held:
+predicted ~-79k, got -99,827.
+
+> ⚠ **FREEZE RESIDUAL: -16 ops, CARRY IT FORWARD.** 20,683 labels all moved by exactly -16 ops
+> (a clean single-mode shift), so the fillers were 16 ops short in total. micro.py's SPACE
+> figure is measured in a micro program where every address differs from the real one, and a
+> `wflip` emits one op per SET BIT of its value -- so emitted size is address-dependent and
+> micro's space number is close but not exact. **The next idea's filler must be 16 ops LARGER**
+> than its own measured delta. This is invariant C-2 doing its job.

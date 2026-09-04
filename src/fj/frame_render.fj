@@ -645,9 +645,17 @@ ns frame {
       col_loop:
         hex.cmp 2, trb_col_x, trb_tx2, col_body, col_body, ret
       col_body:
-        hex.mov 8, trb_u, trb_frac_u                    // trb_u = min(dw-1, frac >> 16)
-        hex.shr_hex 8, 4, trb_u
+        // P1-3 (2026-09-04) shift adjacency: `mov 8 + shr_hex 8,4` was a copy of all eight
+        // nibbles followed by a shift that keeps four and zeroes four, when every reader of
+        // trb_u takes TWO (the cmp below and the `mov 2, trb_blk, trb_u` in the block address).
+        // shr_hex's result nibble i IS source nibble i+4, so this is byte-identical and drops
+        // both ops. trb_frac_u stays the 8-nibble mod-2^32 DDA accumulator it was.
+        // Measured: identical over 8 values, -243 executed ops per call, -703 ops of space.
+        hex.mov 2, trb_u, trb_frac_u + 4*dw             // trb_u = min(dw-1, frac >> 16)
         hex.cmp 2, trb_u, trb_dw_max, col_check, col_check, u_clamp
+        // LAYOUT FREEZE for those 703 ops. UNREACHABLE: hex.cmp always jumps to one of its
+        // three labels. Inside the same macro, so it stays balanced however often it expands.
+        rep(703, i) stl.fj 0, 0
       u_clamp:
         hex.mov 2, trb_u, trb_dw_max
       col_check:
@@ -1309,12 +1317,16 @@ ns frame {
     // drawn[] pointer, so there is no per-column ptr_index (w(2.25@)) at all.
     // V2 - the frame's sky scroll = viewangle >> 24, i.e. exactly 6 nibbles. That is why SKY_TURN
     // is 2 and not 4: fj shifts cheaply only by whole nibbles (ReferenceModel._sky_shift).
-    def lines_sky_base skb @ va8, end < viewangle {
-        hex.mov 8, va8, viewangle
-        hex.shr_hex 8, 6, va8
-        hex.mov 2, skb, va8
+    def lines_sky_base skb @ end < viewangle {
+        // P1-3: same shift adjacency. The scratch va8 held viewangle only to be shifted down
+        // six nibbles and read at two -- so read those two straight out of viewangle. The
+        // hex.vec 8 scratch disappears with it. Measured: identical over 8 viewangles,
+        // -279 executed ops per call, -809 ops of space (the whole macro: 939 -> 130).
+        hex.mov 2, skb, viewangle + 6*dw
         ;end
-      va8: hex.vec 8
+        // LAYOUT FREEZE. The jump above is what makes this unreachable; it costs the one op
+        // subtracted from the 809 (808 + the jump = 809).
+        rep(808, i) stl.fj 0, 0
       end:
     }
 

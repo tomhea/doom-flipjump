@@ -447,16 +447,28 @@ ns frame {
     // doing what they already do -- this macro only reads cVH.
     def clip_rows cexcl, fstart, top, bottom, cVH \
             @ cexcl_clamp, cexcl_done, fstart_neg, fstart_done {
-        hex.mov 8, cexcl, top
-        hex.scmp 8, top, cVH, cexcl_done, cexcl_clamp, cexcl_clamp   // top < VIEW_H ? keep : clamp
+        // P1-1 (2026-09-04): width 8 -> 5. `top` and `bottom` arrive straight out of
+        // `hex.sign_extend 8, 4` (projection.fj's arithmetic >>16), so nibbles 4..7 are a copy
+        // of the sign and nibbles 0..4 hold the SAME SIGNED VALUE. fstart = bottom+1 stays in
+        // [-32767, 32768], which still fits 5 nibbles signed -- that is why this is 5 and not 4:
+        // at width 4, bottom = 32767 would make bottom+1 read as negative. Measured on the real
+        // interpreter over 9 (top, bottom) cases including every edge: identical outputs,
+        // -363 executed ops per call, -1,360 ops of space.
+        hex.mov 5, cexcl, top
+        hex.scmp 5, top, cVH, cexcl_done, cexcl_clamp, cexcl_clamp   // top < VIEW_H ? keep : clamp
+        // LAYOUT FREEZE for the 1,360 ops the narrowing deleted. This macro is expanded ONCE
+        // (inside seg_pass2_leaf), so putting them back here leaves every later address exactly
+        // where it was. UNREACHABLE: a hex.scmp jumps to one of its three labels and never falls
+        // through, so nothing can execute into this.
+        rep(1360, i) stl.fj 0, 0
       cexcl_clamp:
-        hex.mov 8, cexcl, cVH
+        hex.mov 5, cexcl, cVH
       cexcl_done:
-        hex.mov 8, fstart, bottom
-        hex.inc 8, fstart
-        hex.sign 8, fstart, fstart_neg, fstart_done                  // (bottom+1) < 0 -> 0
+        hex.mov 5, fstart, bottom
+        hex.inc 5, fstart
+        hex.sign 5, fstart, fstart_neg, fstart_done                  // (bottom+1) < 0 -> 0
       fstart_neg:
-        hex.zero 8, fstart
+        hex.zero 5, fstart
       fstart_done:
     }
 

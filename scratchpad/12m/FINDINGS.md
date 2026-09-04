@@ -393,3 +393,47 @@ columns in [0,161]"); thing columns get it from `project_thing`'s x1_ok reject p
 ⚠ `trb_tab_idx` is reached with TWO different bounds at its two sites (<= 65,381 at the table
 seed, <= 2,552 at the block lookup). Shipped at sw=6 at BOTH -- paying ~64 ops/call rather than
 depend on a reused-register argument, which is exactly trap 2 of section I.
+
+## R. THE POINTER ARM -- measured, and what narrowing it would take (2026-09-04)
+
+**The prize.** Every dereference pays `set_flip_and_jump_pointers`, which is two
+`address_and_variable_triple_xor w/4` passes (a CLEAR of the old address out of three fields,
+then a SET of the new one in). Measured on the interpreter:
+
+| arm width | executed ops/call | space |
+|---|---|---|
+| 8 hexes (the stl) | **192.0** | 1,010 |
+| 6 | ~145 (interp.) | ~754 |
+| 5 | 121.8 | 626 |
+| 4 | 104.1 | 498 |
+| 3 | 74.0 | 370 |
+| 2 | 48.0 | 242 |
+
+The atlas puts the arm at 2,021,051 ops on the median frame, so **~10,526 arms per frame**, and
+dereferences in total cost 2,912,865 (14.66%) across 38 sites -- the arm is 69% of that. Narrowing
+every arm to 6 hexes would be worth roughly 495,000 ops/frame; to 4 hexes, over 900,000.
+
+**Why it is not a one-line change.** The CLEAR pass xors out whatever address was armed LAST, so a
+narrow arm is exact only when the previous and next addresses agree above the narrowed nibble.
+The program's pointer targets fall in TWO clusters (bit addresses, from the P2-2 label table):
+
+| cluster | span | nibbles 6-7 |
+|---|---|---|
+| the per-column tables: `pclm`, `sfflag`, `sprflag`, `sfslot`, `spslot`, `seg_wstrip`, `wstripbase`, `vzbank`, `drawn`, `slopediv_recip` | 0x000873C0 .. 0x00164180 | **always 0x00** |
+| the sprite bank: `stepcol`, `sp_base`, `sp_base2`, `sprlight`, `sprbank` | 0x11A69B40 .. 0x11D6E000 | **always 0x11** |
+
+So a **6-hex arm is exact for any consecutive pair of arms WITHIN either cluster** -- the low
+cluster fits in 6 nibbles outright, and the high cluster shares its top two. What breaks it is a
+crossing: a low arm following a high one leaves nibbles 6-7 holding 0x11.
+
+**Hence the plan's second-arm apparatus is the right shape**, and this measurement says what it is
+worth: give the sprite-bank pointers their own `to_flip2`/`to_jump2`/shadow2 so the main arm only
+ever sees low-cluster addresses, and then EVERY main arm is 6 hexes with no per-site proof at all.
+It needs: the doom-local second arm + a dance-only read/write clone against the SHARED stl decoder
+table, an R9 negative control written BEFORE first use, and both restore sets re-keyed.
+Estimated 350k-500k, the largest single mechanism the atlas has identified.
+
+**A cheaper first slice exists** if that is too big to start with: inside a tight walk (e.g.
+`frame.read0_byte_and_inc`, one site, 561,948 ops) consecutive arms are the same pointer +-1 cell,
+so a 6-hex arm is exact for every iteration after the first -- provided the loop is entered with a
+full arm. That is one macro and one loop, not an apparatus.

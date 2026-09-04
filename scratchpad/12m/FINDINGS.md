@@ -696,3 +696,35 @@ constraint is that the binary must not grow much, and that is the number that de
 **THE LESSON ABOUT MY OWN METHOD.** Twice I concluded a pool was thin from an aggregate that had
 the wrong grouping. `rank-values` groups by value; the actionable unit is the MACRO. Always
 re-group a census by the thing an edit actually changes before pricing a pool.
+
+## Y. PAD SPACE SCALES WITH *TOTAL* EXPANSIONS, SAVING WITH *HOT* ONES (2026-09-05)
+
+P7-5 died in the ASSEMBLER: `OverflowError: Python int too large to convert to C unsigned long`
+-- the image outgrew the addressable space. Cause: I padded `bit.exact_xor` from 8 to 128 having
+priced it from the census, which sees only the 331 HOT targets. The macro actually expands about
+**600,000** times (1,200,416 label mentions / 2 labels per expansion), so the pad cost ~64 ops x
+600k = **~38M ops of padding on a ~12.6M-op image**.
+
+**The rule, and it is not optional: before widening any pad, count TOTAL expansions from the
+label table, not hot ones from the census.** The two differ by 1,800x for bit.exact_xor.
+
+    zcat <build>.labels.tsv.gz | grep -c "macro.name("      # mentions
+    expansions ~= mentions / (number of labels the macro defines)
+
+Expansion counts measured on the P7-4 build:
+
+| macro | label mentions | ~expansions | pad cost |
+|---|---:|---:|---|
+| `bit.exact_xor` | 1,200,416 | ~600,000 | **catastrophic -- leave at 8** |
+| `hex.exact_xor` | 160,228 | ~80,000 | 16->128 cost ~4.5M ops (shipped, +25.8% binary) |
+| `hex.if_flags` | 75,232 | ~25,000 | 16->64 ~ 600k ops |
+| `hex.double_exact_xor` | 23,277 | ~7,800 | 16->64 ~ 190k ops |
+| `hex.tables.jump_to_table_entry` | 17,920 | ~18,000 | none->64 ~ 570k ops |
+| `hex.add.clear_carry` | 10,662 | ~11,000 | none->64 ~ 350k ops |
+| `hex.triple_exact_xor` | 5,592 | ~1,400 | 16->128 ~ 78k ops |
+| `hex.sub.clear_carry` | 588 | ~590 | none->64 ~ 19k ops |
+
+The saving-to-space ratio a census gives is an OVERESTIMATE by exactly (total / hot). Recompute
+with the table above before proposing any further pad. The address-space ceiling is real: at
+w = 32 the image cannot grow without bound, and the assembler's failure mode is an OverflowError
+with no indication of which macro caused it.

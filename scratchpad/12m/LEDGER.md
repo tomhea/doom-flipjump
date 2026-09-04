@@ -263,6 +263,24 @@ Predicted -1,420,476 for the pad alone; got -607,482 net of the anchor's placeme
 Watch this number on every further pad -- it is the owner's stated constraint.
 
 ### Running total after 14 ideas: 18,982,338 -> 17,066,424 = **-1,915,914 (-10.09%)**
+
+| P7-5 | P7 | six pads incl. `bit.exact_xor` 8 -> 128 | assembler OverflowError | -- | **KILL** | reverted |
+| P7-6 | P7 | five pads: double/triple_exact_xor, if_flags, add+sub.clear_carry, jump_to_table_entry | -441,819 / -482,729 / -163,273 / -453,320 | **16,911,740** (-154,683, -0.91%) | SHIP | (commit) |
+
+**P7-5 KILLED in the ASSEMBLER**, not the gate: `OverflowError: Python int too large to convert
+to C unsigned long` -- the image outgrew the addressable space. `bit.exact_xor` expands ~600,000
+times (1,200,416 label mentions), so `pad 8 -> 128` meant ~38M ops of padding on a ~12.6M-op
+image. **PAD SAVING SCALES WITH HOT EXPANSIONS; PAD SPACE SCALES WITH TOTAL EXPANSIONS**, and I
+had priced both from the census, which only sees the hot set -- a 1,800x undercount here.
+FINDINGS Y carries the expansion table for every candidate. The assembler's error names no macro,
+so that table is the only way to see this coming.
+
+**P7-6: the same five pads minus that one, and they ship.** Binary 14,219,263 -> 14,235,077 bytes
+= **+15,814 (+0.1%)** while adding ~1.8M ops of padding: this time `get_wflip_spot` absorbed it
+into wflip chains almost exactly. Padding really is close to free when it is not enormous.
+
+### Running total after 15 ideas: 18,982,338 -> 16,911,740 = **-2,070,598 (-10.91%)**
+Pads alone (P7-4 + P7-6): **-762,165**.
 The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.
 The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals

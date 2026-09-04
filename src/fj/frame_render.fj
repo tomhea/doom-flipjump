@@ -928,8 +928,8 @@ ns frame {
     }
 
     def ts_step_faces budget, centeryfix_c, viewh1, projection, slotstride, stack, deg, dstkscale, dda, dlipscale \
-            @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, piece_max, end \
-            < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, seg_bpid, tsf_col_x, tsf_cviewh1, tsf_drawn_b, tsf_drawn_p, tsf_drawn_v, tsf_face_cap, tsf_face_dist, tsf_face_norm, tsf_face_scale, tsf_face_scalestep, tsf_fmode, tsf_frac_l1, tsf_frac_l2, tsf_frac_u1, tsf_frac_u2, tsf_out_y1, tsf_out_y2, tsf_row_a, tsf_row_b, tsf_sfflag_b, tsf_sfflag_p, tsf_sfflag_v, tsf_sfslot_b, tsf_sfslot_p, tsf_slot_idx, tsf_step_l1, tsf_step_l2, tsf_step_u1, tsf_step_u2, tsf_wtl1, tsf_wtl2, tsf_wtu1, tsf_wtu2 {
+            @ nofaces, dofaces, budget_full, budget_ok, col_loop, col_body, col_work, col_next, up_skip, up_do, up_gates_ok, up_lip_ok, up_not_lip, lo_skip, lo_do, lo_gates_ok, lo_lip_ok, lo_not_lip, piece_max, c_lip, c_stk, end \
+            < viewangle, viewz, sgn_aff, x1, x2, n_face, fbspent, drawn, sfflag, sfslot, seg_segangle, seg_fmask, seg_uh1, seg_uh2, seg_lh1, seg_lh2, seg_ucls, seg_lcls, seg_bpid, tsf_col_x, tsf_cviewh1, tsf_drawn_b, tsf_drawn_p, tsf_drawn_v, tsf_face_cap, tsf_face_dist, tsf_face_norm, tsf_face_scale, tsf_face_scalestep, tsf_frac_l1, tsf_frac_l2, tsf_frac_u1, tsf_frac_u2, tsf_lip_u, tsf_lip_l, tsf_out_y1, tsf_out_y2, tsf_row_a, tsf_row_b, tsf_sfflag_b, tsf_sfflag_p, tsf_sfflag_v, tsf_sfslot_b, tsf_sfslot_p, tsf_slot_idx, tsf_step_l1, tsf_step_l2, tsf_step_u1, tsf_step_u2, tsf_wtl1, tsf_wtl2, tsf_wtu1, tsf_wtu2 {
         hex.if0 2, seg_fmask, nofaces           // this boundary carries no face at all (compile-time)
         hex.set 2, tsf_face_cap, budget
         hex.cmp 2, n_face, tsf_face_cap, dofaces, nofaces, nofaces
@@ -960,6 +960,12 @@ ns frame {
         frame.sub4_chain tsf_wtl2, viewz + 4*dw
         hex.sign_extend 8, 4, tsf_wtl2
         hex.set 8, tsf_cviewh1, viewh1
+        // ts-idea 1: the lip mode (fmask-1 per side) is PER-SEG -- computed once here,
+        // where four per-column sites used to redo mov+dec each visit.
+        rep(deg, k) hex.mov 1, tsf_lip_u, seg_fmask
+        rep(deg, k) hex.dec 1, tsf_lip_u
+        rep(deg, k) hex.mov 1, tsf_lip_l, seg_fmask + 1*dw
+        rep(deg, k) hex.dec 1, tsf_lip_l
         rep(dda, k) .ts_dda_setup tsf_face_scale, tsf_face_scalestep, tsf_wtu1, tsf_wtu2, tsf_wtl1, tsf_wtl2, centeryfix_c, tsf_frac_u1, tsf_frac_u2, tsf_frac_l1, tsf_frac_l2, tsf_step_u1, tsf_step_u2, tsf_step_l1, tsf_step_l2
         hex.zero 6, tsf_col_x + 2*dw            // idea 20: the mov 2 below covers nibbles 0-1
         hex.mov 2, tsf_col_x, x1
@@ -988,27 +994,23 @@ ns frame {
       up_do:
         // V5-DROP FAR GATE: a LIP farther than dlipscale projects to a sub-pixel line
         // -- skip the whole piece. Risers are never lip-gated (they ARE the stairs).
-        rep(deg, k) hex.mov 1, tsf_fmode, seg_fmask
-        rep(deg, k) hex.dec 1, tsf_fmode
-        rep(deg, k) hex.if0 1, tsf_fmode, up_lip_ok
-        rep(deg, k) hex.set 8, tsf_out_y1, dlipscale
-        rep(deg, k) hex.cmp 6, tsf_face_scale, tsf_out_y1, up_skip, up_lip_ok, up_lip_ok    // idea 19: both < 16^6
+        rep(deg, k) hex.if0 1, tsf_lip_u, up_lip_ok        // ts-idea 1: per-seg lip mode
+        rep(deg, k) hex.cmp 6, tsf_face_scale, c_lip, up_skip, up_lip_ok, up_lip_ok    // vs the BAKED constant
       up_lip_ok:
         // 25M-CAP STACK FAR GATE: a SECOND stacked piece only when the boundary is near enough
         // (scale >= dstkscale, one unsigned compare on the register the DDA already carries).
         // tsf_out_y1 is dead until up_store, so it serves as the constant cell.
         rep(deg*stack, k) hex.if0 1, tsf_sfflag_v, up_gates_ok    // the FIRST piece is never gated
-        rep(deg*stack, k) hex.set 8, tsf_out_y1, dstkscale
-        rep(deg*stack, k) hex.cmp 6, tsf_face_scale, tsf_out_y1, up_skip, up_gates_ok, up_gates_ok    // idea 19
+        rep(deg*stack, k) hex.cmp 6, tsf_face_scale, c_stk, up_skip, up_gates_ok, up_gates_ok    // ts-idea 1
       up_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtu1, tsf_wtu2, centeryfix_c
         rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_u1, tsf_frac_u2
         hex.dec 8, tsf_row_b                        // ... ends one row ABOVE the back ceiling
         // V5-DROP: mode 2 = LIP -- the near ceiling's edge row ALONE; the stored
         // region-behind then paints the far ceiling below it (mode 1 keeps the riser)
-        hex.mov 1, tsf_fmode, seg_fmask
-        hex.dec 1, tsf_fmode
-        hex.if0 1, tsf_fmode, up_not_lip
+        rep(1-deg, k) hex.mov 1, tsf_lip_u, seg_fmask
+        rep(1-deg, k) hex.dec 1, tsf_lip_u          // non-deg tiers: no prologue hoist ran
+        hex.if0 1, tsf_lip_u, up_not_lip            // ts-idea 1: the per-seg reg
         hex.mov 8, tsf_row_b, tsf_row_a
       up_not_lip:
         // V5: a second piece clips past the STORED first piece's end (sentinels included)
@@ -1026,22 +1028,18 @@ ns frame {
         hex.if0 1, seg_fmask + 1*dw, lo_skip
         hex.cmp 1, tsf_sfflag_v + 1*dw, piece_max, lo_do, lo_skip, lo_skip   // lower count < 1+stack -> room
       lo_do:
-        rep(deg, k) hex.mov 1, tsf_fmode, seg_fmask + 1*dw   // V5-DROP far gate, lower mirror
-        rep(deg, k) hex.dec 1, tsf_fmode
-        rep(deg, k) hex.if0 1, tsf_fmode, lo_lip_ok
-        rep(deg, k) hex.set 8, tsf_out_y1, dlipscale
-        rep(deg, k) hex.cmp 6, tsf_face_scale, tsf_out_y1, lo_skip, lo_lip_ok, lo_lip_ok    // idea 19: both < 16^6
+        rep(deg, k) hex.if0 1, tsf_lip_l, lo_lip_ok        // ts-idea 1: per-seg lip mode, lower
+        rep(deg, k) hex.cmp 6, tsf_face_scale, c_lip, lo_skip, lo_lip_ok, lo_lip_ok    // vs the BAKED constant
       lo_lip_ok:
         rep(deg*stack, k) hex.if0 1, tsf_sfflag_v + 1*dw, lo_gates_ok   // ... and the LOWER side's mirror
-        rep(deg*stack, k) hex.set 8, tsf_out_y1, dstkscale
-        rep(deg*stack, k) hex.cmp 6, tsf_face_scale, tsf_out_y1, lo_skip, lo_gates_ok, lo_gates_ok    // idea 19
+        rep(deg*stack, k) hex.cmp 6, tsf_face_scale, c_stk, lo_skip, lo_gates_ok, lo_gates_ok    // ts-idea 1
       lo_gates_ok:
         rep(1-dda, k) proj.step_rows tsf_row_a, tsf_row_b, tsf_face_scale, tsf_wtl1, tsf_wtl2, centeryfix_c
         rep(dda, k) .ts_dda_rows tsf_row_a, tsf_row_b, tsf_frac_l1, tsf_frac_l2
         // V5-DROP: mode 2 = LIP -- the near floor's edge row alone (the tread-lip line)
-        hex.mov 1, tsf_fmode, seg_fmask + 1*dw
-        hex.dec 1, tsf_fmode
-        hex.if0 1, tsf_fmode, lo_not_lip
+        rep(1-deg, k) hex.mov 1, tsf_lip_l, seg_fmask + 1*dw
+        rep(1-deg, k) hex.dec 1, tsf_lip_l          // non-deg tiers: no prologue hoist ran
+        hex.if0 1, tsf_lip_l, lo_not_lip            // ts-idea 1: the per-seg reg
         hex.mov 8, tsf_row_a, tsf_row_b
       lo_not_lip:
         // V5: a second (farther) piece clips ABOVE the stored first piece's start
@@ -1059,6 +1057,13 @@ ns frame {
       nofaces:
         ;end
       piece_max: hex.vec 1, 1+stack             // V5: pieces allowed per side per column
+      // ts-idea 1: the two gate thresholds are BAKED data, like piece_max above -- the
+      // per-column `hex.set 8` that used to materialize them is deleted (4 sites, 243
+      // ops of space each). cmp 6 needs six nibbles; idea 19's emit assert bounds both.
+      c_lip: hex.vec 6, dlipscale
+      c_stk: hex.vec 6, dstkscale
+      // ts-idea 1 size-freeze (net shrink 1,368-210-12 measured by micro-assembly):
+        rep(1238, i) stl.fj 0, 0   // measured: the first freeze was 80 short (label diff)
       end:
     }
 

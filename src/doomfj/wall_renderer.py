@@ -2243,7 +2243,6 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "tsf_face_norm: hex.vec 8",
         "tsf_face_scale: hex.vec 8",
         "tsf_face_scalestep: hex.vec 8",
-        "tsf_fmode: hex.vec 1",
         "tsf_frac_l1: hex.vec 8",
         "tsf_frac_l2: hex.vec 8",
         "tsf_frac_u1: hex.vec 8",
@@ -2379,6 +2378,10 @@ def hoisted_scratch_decls(cfg=None) -> list:
         # LAST-ish so the addition shifts as few sibling registers as possible (v1 sat mid-list
         # and the ripple killed the median).
         "p2_ldirty: hex.vec 1",
+        # ts-idea 1: the per-seg lip modes (fmask-1 per side), hoisted out of four per-column
+        # sites in ts_step_faces.
+        "tsf_lip_u: hex.vec 1",
+        "tsf_lip_l: hex.vec 1",
         "p2_sdirty: hex.vec 1",
         "p2_sspp: hex.vec w/4",
         "pth_dbound: hex.vec 8",

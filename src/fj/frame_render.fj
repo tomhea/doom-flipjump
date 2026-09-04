@@ -1862,8 +1862,41 @@ ns frame {
     // hex.read_byte's own `.zero 2, dst` (~30 executed ops) is redundant there. Only the
     // loaders' piece paths use this, right after their Z-blocks; a dst that can be nonzero
     // must keep hex.read_byte_and_inc.
-    def read0_byte_and_inc dst, ptr {
-        hex.xor_byte_from_ptr dst, ptr
+    // P2-3 (2026-09-04): the ARM, narrowed to five hexes.
+    //   hex.pointers.set_flip_and_jump_pointers moves three address fields from the previously
+    //   armed address to the new one, in two passes over all EIGHT hexes -- 192.0 executed ops,
+    //   ~10,526 times per median frame. A pass over only the low n hexes is EXACT whenever the
+    //   two addresses agree in every nibble at or above n, and it leaves the three fields holding
+    //   the complete address (the untouched nibbles were already right), so narrowing is a purely
+    //   LOCAL decision that composes with full arms anywhere else.
+    //   Five is the widest safe width here, not four: a slot run starts at
+    //   sfslot + col*0x400 + piece*0x100 and spans 0xC0 bits, so column 5 piece 0 runs from
+    //   0x8FFC0 to 0x90080 and changes nibbles 3 AND 4.
+    // ⚠ THE INVARIANT THIS RESTS ON: every narrow-armed table must lie inside ONE 16^5 window.
+    //   The hot-data block does today -- `pclm` 0x873C0 through `wrej`, all below 2^20, with
+    //   about 1,827 ops of headroom. It is NOT self-evident and it is NOT safe to assume:
+    //   config.py turns SLOT_SHIFT into 2 the moment PID_BYTES becomes 2, which makes sfslot
+    //   alone 2,621,440 bits and would break every narrow arm SILENTLY. fj has no assert
+    //   directive and rep() cannot take a label-dependent count, so the check lives in
+    //   scratchpad/12m/ritual.py, which refuses to keep a build that violates it.
+    // The filler is INSIDE the macro behind its own jump, so every expansion is exactly the size
+    // of the 8-hex arm (626 + 1 + 383 = 1,010) and no call site needs a local filler.
+    def arm5 ptr @ end \
+            < hex.pointers.to_flip, hex.pointers.to_jump, hex.pointers.to_ptr_var {
+        hex.address_and_variable_triple_xor 5, hex.pointers.to_flip, hex.pointers.to_jump+w, hex.pointers.to_ptr_var, hex.pointers.to_ptr_var
+        hex.address_and_variable_triple_xor 5, hex.pointers.to_flip, hex.pointers.to_jump+w, hex.pointers.to_ptr_var, ptr
+        ;end
+        rep(383, i) stl.fj 0, 0
+      end:
+    }
+
+    // idea 17's read, now on the narrow arm. All 30 call sites walk sfslot_p or spslot_p, both
+    // in the hot-data block, and the audit confirmed every reachable predecessor arm in these
+    // two loaders is also low-cluster -- so even the FIRST read of a run is 5-hex-safe.
+    def read0_byte_and_inc dst, ptr < hex.pointers.read_byte {
+        .arm5 ptr
+        hex.pointers.read_byte_from_inners_ptrs
+        hex.xor 2, dst, hex.pointers.read_byte
         hex.ptr_inc ptr
     }
 

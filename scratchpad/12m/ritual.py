@@ -167,6 +167,11 @@ def do_build(idx, stl, want_census, force):
         raise SystemExit("a viewpoint is not BYTE-EXACT -- NOT writing artifacts")
     if not seen:
         raise SystemExit("the assemble spy never fired -- no binary to keep")
+    ok, msg = narrow_arm_window(str(art(idx, ".labels.tsv.gz")))
+    _p("narrow-arm window: %s  %s" % (msg, "ok" if ok else "!! VIOLATED"))
+    if not ok:
+        raise SystemExit("the narrow pointer arm (frame.arm5) is no longer exact: "
+                         + msg + " -- NOT writing artifacts")
     shutil.copy2(seen[-1], fjm_dest)
     json.dump({"id": idx, "stl": stl, "wall_s": round(wall, 1), "viewpoints": vps,
                "input_files": files_seen[-1] if files_seen else [],
@@ -183,6 +188,36 @@ def do_build(idx, stl, want_census, force):
 
 
 # ------------------------------------------------------------------------------------ freeze
+
+
+# P2-3's narrow pointer arm (frame.arm5) rewrites only the low FIVE hexes of the three address
+# fields. That is exact only while every narrow-armed table lies inside ONE 16^5 window, so that
+# nibbles 5..7 are equal on both sides of every consecutive pair of arms. fj has no assert
+# directive and rep() cannot take a label-dependent count, so the check has to live here -- and
+# it is not hypothetical: config.py sets SLOT_SHIFT = 2 as soon as PID_BYTES becomes 2, which
+# makes sfslot alone 2,621,440 bits and would break every narrow arm SILENTLY.
+NARROW_ARM_LO = "pclm"     # the lowest table in the hot-data block
+NARROW_ARM_HI = "wrej"     # the first label after `drawn`, the highest
+
+
+def narrow_arm_window(labels_path):
+    """-> (ok, message). The hot-data block must not straddle a 16^5 (2^20 bit) boundary."""
+    want = {NARROW_ARM_LO, NARROW_ARM_HI}
+    got = {}
+    with gzip.open(labels_path, "rt", encoding="utf-8") as f:
+        for line in f:
+            name, _, addr = line.rstrip(chr(10)).rpartition(chr(9))
+            if name in want:
+                got[name] = int(addr)
+                if len(got) == len(want):
+                    break
+    if len(got) != len(want):
+        return False, "could not find %s in the label table" % (want - set(got))
+    lo, hi = got[NARROW_ARM_LO], got[NARROW_ARM_HI]
+    ok = (lo >> 20) == ((hi - 1) >> 20)
+    head = ((lo >> 20) + 1 << 20) - hi
+    return ok, ("hot-data block %s(0x%X) .. %s(0x%X), %s ops of headroom to the 16^5 boundary"
+                % (NARROW_ARM_LO, lo, NARROW_ARM_HI, hi, format(head // 64, ",")))
 
 
 def _globals_only(path):

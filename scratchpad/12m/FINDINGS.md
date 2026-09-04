@@ -437,3 +437,35 @@ Estimated 350k-500k, the largest single mechanism the atlas has identified.
 `frame.read0_byte_and_inc`, one site, 561,948 ops) consecutive arms are the same pointer +-1 cell,
 so a 6-hex arm is exact for every iteration after the first -- provided the loop is entered with a
 full arm. That is one macro and one loop, not an apparatus.
+
+## S. The pointer RUN: measured, plus one negative result (2026-09-04)
+
+The piece loaders read 3-4 consecutive bytes off one walking pointer with
+`frame.read0_byte_and_inc`, and every read pays a full 8-hex arm. Measured on the interpreter,
+one 4-read run:
+
+| variant | executed ops | delta | space |
+|---|---|---|---|
+| all full arms (today) | 2,114.1 | -- | 6,328 |
+| full arm + 3 x **5-hex** arms | **1,757.9** | **-356.2** | 5,176 |
+| full arm + 3 x 6-hex arms | 1,850.1 | -264.0 | 5,560 |
+| 5-hex arms + a 5-nibble ptr_inc | 1,809.8 | -304.4 | 4,888 |
+
+One read alone: 602.9 with a full arm, 492.9 with a 5-hex one.
+
+**NEGATIVE RESULT -- do not narrow `hex.ptr_inc`.** It is `hex.add_constant w/4, ptr, dw`, and
+narrowing that to 5 nibbles makes the run *dearer* (-304.4 instead of -356.2). `hex.add_constant`
+goes through `add_constant_with_leading_zeros`, which already skips the constant's leading zero
+hexes, so an 8-wide add of dw = 64 touches only the low nibbles anyway and a narrower width just
+adds carry work. Do not re-propose narrowing add_constant anywhere.
+
+**Independently confirmed:** `hex.ptr_inc` never touches to_flip / to_jump / to_ptr_var (its whole
+body is that one add_constant), so a walk does not disturb the arm between reads.
+
+**THE HAZARD THIS IDEA CARRIES.** The 5-hex arm is exact only while the slot tables lie inside one
+16^5 window. They do today -- `sfslot` at 0x8EBC0, `spslot` at 0xB6BC0, both tables together
+ending near 0xDEC00, all under 2^20 -- but a future layout change (M4's nine levels is the obvious
+one) could push them across that line and the frame would break SILENTLY. So this ships with an
+ASSEMBLE-TIME assert in the fj, in the stl's own style
+(`rep(condition, i) .name_that_states_the_rule` fails the assembly and names the rule), which
+needs the emitter to mark the end of the slot block with a label. A comment is not enough here.

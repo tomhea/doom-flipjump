@@ -112,5 +112,27 @@ itself and no local fillers were needed anywhere: **freeze exact, 0 of 781,326 l
 All four deg viewpoints improved by ~0.4%. Predicted -100k..-130k, got -73,232.
 
 ### Running total after 7 ideas: 18,982,338 -> 18,624,169 = **-358,169 (-1.89%)**
+
+| P2-3 | P2 | the pointer ARM narrowed to 5 hexes in `read0_byte_and_inc` | -235,780 / -126,209 / -160,718 / -117,494 | **18,474,050** (-150,118, -0.81%) | SHIP | (commit) |
+
+**P2-3 detail -- the biggest idea so far.** The arm is 192.0 executed ops and runs ~10,526 times
+per median frame. A 5-hex arm (121.8) is exact whenever consecutive armed addresses agree above
+nibble 4; all 30 call sites walk `sfslot_p`/`spslot_p`, and a 10-agent census proved every
+reachable predecessor arm in both loaders is also in the sub-2^20 hot-data block -- so even the
+FIRST read of a run is safe and no restructuring was needed.
+Three adversarial lenses attacked the proof and NONE refuted it, but two changed the design:
+width 4 is unsafe (column 5 piece 0 runs 0x8FFC0 -> 0x90080, changing nibbles 3 AND 4), and the
+scope grew from "later reads in a run" to every read.
+The filler sits inside `arm5` itself, so every macro built on it is automatically size-identical
+to its 8-hex twin: **freeze exact, 0 of 781,326 labels moved**.
+
+> ⚠ **A MACHINE-CHECKED INVARIANT NOW GUARDS THIS.** The narrow arm is exact only while every
+> narrow-armed table lies in one 16^5 window. fj has no assert directive and rep() cannot take a
+> label-dependent count, so `ritual.py` checks it on every build and refuses to keep artifacts if
+> violated: *hot-data block pclm(0x873C0)..wrej(0xE3740), 1,827 ops of headroom*. This is NOT
+> hypothetical -- config.py sets SLOT_SHIFT = 2 as soon as PID_BYTES becomes 2, which makes
+> sfslot alone 2,621,440 bits and would break every narrow arm silently.
+
+### Running total after 8 ideas: 18,982,338 -> 18,474,050 = **-508,288 (-2.68%)**
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals
 (-16, -192) were carried forward and closed out.

@@ -702,14 +702,21 @@ ns proj {
         // non-lines tiers -- which have no `srdisp` table -- keep the packed read.
         rep(1-disp, k) hex.read_table_packed 3, srd_recip, slopediv_recip, 3, srd_den_norm  // srd_recip[m]=(1<<24)//m
         rep(disp, k) srdisp.lookup srd_recip, srd_den_norm
-        hex.zero 14, srd_num_wide
+        // P7-1 (2026-09-04): the two `hex.zero 14` that stood here are dead. hex.mov ZEROES its
+        // destination before xoring the source in (proved on the interpreter by moving into a
+        // pre-dirtied register), so the mov below already clears nibbles 4..11 of srd_num_wide
+        // and 0..5 of srd_recip_wide -- and the nibbles it does NOT cover are written by nothing
+        // in the tree (both registers appear only in their hex.vec 14 declarations and these two
+        // lines), so they hold their zero-init forever. -196 and -202 executed ops per call.
         hex.mov 8, srd_num_wide + 4*dw, num          // srd_num_wide = num << 16 (4 nibbles, by placement)
-        hex.zero 14, srd_recip_wide
         hex.mov 6, srd_recip_wide, srd_recip
         hex.zero 14, srd_prod
         rep(5, j) hex.fixed_mul_lo.row 14, j, srd_prod, srd_num_wide, srd_recip_wide   // mod 16^14
         // srd_shift_nibs in [4,11]: den has 1..8 significant nibbles -> at most 5 right- or 2 left-shifts
         hex.cmp 2, srd_shift_nibs, srd_csh8, shift_lo, shift8, shift_hi
+        // LAYOUT FREEZE for the 864 ops the two deleted zeros above cost. UNREACHABLE: hex.cmp
+        // always jumps to one of its three labels.
+        rep(864, i) stl.fj 0, 0
       shift_lo:
         hex.cmp 2, srd_shift_nibs, srd_csh5, shift4, shift5, shift_67
       shift_67:

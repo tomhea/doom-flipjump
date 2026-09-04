@@ -2107,8 +2107,14 @@ ns frame {
     def lines_pclm_index2 dst, base, idx @ over, tmp {
         ;over
       tmp: hex.vec w/4
+        // P7-1: the `hex.zero w/4, tmp` that stood below the `over:` label was entirely dead --
+        // the mov that followed it covers the SAME register at the SAME width from nibble 0, and
+        // hex.mov zeroes its destination first. -122 executed ops per call.
+        // LAYOUT FREEZE, 240 for that zero plus the 16-op residual P1-3's fillers left behind
+        // (FINDINGS N). UNREACHABLE: it sits behind the `;over` jump, beside the vec it shares
+        // the gap with.
+        rep(256, i) stl.fj 0, 0
       over:
-        hex.zero w/4, tmp
         hex.mov w/4, tmp, idx
         hex.shl_bit w/4, tmp              // idx*2: two bytes per column
         hex.ptr_index dst, base, tmp

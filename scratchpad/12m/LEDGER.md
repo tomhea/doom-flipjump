@@ -77,3 +77,19 @@ predicted ~-79k, got -99,827.
 > `wflip` emits one op per SET BIT of its value -- so emitted size is address-dependent and
 > micro's space number is close but not exact. **The next idea's filler must be 16 ops LARGER**
 > than its own measured delta. This is invariant C-2 doing its job.
+
+| P7-1 | P7 | delete 3 `hex.zero` the next `hex.mov` already performs | +4,077 / -35,442 / -14,229 / -25,121 | **18,754,902** (-16,249, -0.09%) | SHIP | (commit) |
+
+**P7-1 detail.** `hex.mov` zeroes its destination before xoring the source in -- proved on the
+interpreter by moving into a PRE-DIRTIED register, which is the first hard evidence for a fact
+the source only asserted in a comment. So `lines_pclm_index2`'s `hex.zero w/4, tmp` (full cover)
+and `scale_recip_div`'s two `hex.zero 14` (partial cover, uncovered nibbles written by nothing in
+the tree) are dead. -122 / -196 / -202 executed ops per call.
+
+> ⚠ **FREEZE RESIDUAL: -192 ops, CARRY IT FORWARD.** 20,682 labels moved -192 (plus 4 at -256,
+> 1 at -128, 1 at -64), so the real deletion was 1,312 ops against micro.py's 1,104 -- a 208-op
+> under-estimate, an order worse than P1-3's 16. Deleting a `hex.zero` removes wflips whose
+> operands are REAL ADDRESSES, and their emitted size is popcount-driven (FINDINGS N), so the
+> micro estimate is weakest exactly for deletions. One deg viewpoint got WORSE (+4,077) and the
+> sweep MAX went +164 while the median improved -- that is the placement de-tuning a -192 shift
+> causes. **The next filler carries +192.**

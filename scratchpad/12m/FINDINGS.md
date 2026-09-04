@@ -296,3 +296,58 @@ CONSEQUENCE FOR THE RITUAL: compute the filler from micro, then let the label di
 residual and CARRY IT INTO THE NEXT FILLER (invariant C-2, now with a mechanism behind it). Do
 not spend a 12-minute build correcting a residual on its own -- a uniform shift of a few ops
 de-tunes placement only marginally, and the next idea's build absorbs it for free.
+
+## O. hex.zero / hex.mov redundant-work audit (subagent, 2026-09-04): 46 pairs, 5 dead, 0 unsure
+
+Full census of adjacent `hex.zero N,X` / `hex.mov m,X[+k*dw]` in fixed_point / projection /
+frame_render / stream_render / present.fj. Three shipped as P7-1 (independently agreed by the
+audit). **Two more verified dead, not yet shipped:** `proj.slope_div`'s and `proj.slope_div_m`'s
+`recip_wide` -- each a separate macro-local, `zero 8` + `mov 6,k=0`, and the uncovered nibbles
+6..7 are read only as a zero-extended `fixed_mul_lo.row` operand and written by nothing.
+
+**THE TWO PATTERNS THAT MAKE ~90% OF THESE ZEROS LOOK REDUNDANT BUT AREN'T** -- read this before
+proposing any further zero deletion:
+1. **Index to `hex.ptr_index`.** That macro reads its index argument at the full w/4 = 8 nibbles
+   no matter how narrow the caller's data is (R37/R11). Live at `seg_pass1_leaf_body_ts`'s `x`,
+   `step_shade`'s `sh_idx`, `lines_step_load`'s `slot_idx`, `lines_steps_seed`/`lines_spr_seed`'s
+   `sidx`, `sprite_runs(_win)`'s `srw_sidx`/`srn_sidx`. All KEEP.
+2. **shr_hex / shl_hex / shl_bit / add_chain / mul_lo / mul_const rewrite the full width they
+   declare**, so a zero followed by a narrower mov is CONSUMED, not redundant, whenever one of
+   those is the next instruction. That is ~30 of the 41 KEEPs.
+3. Self-dirtying: `slope_div_m`'s `den_norm`/`num_norm` are re-zeroed every call because that same
+   macro's `shr_hex 6,K` arms rewrite all 6 nibbles on a call that takes the shift path.
+4. Five registers are KEEP only because *some* later op writes the uncovered nibbles before the
+   first read (`project_thing`'s `pth_dtest`, `sprite_runs(_win)`'s `s{rw,rn}_smidx`,
+   `wpx_grain_col`'s `cmidx`). A control-flow proof might downgrade them; not attempted.
+
+**NOT the redundant-zero shape at all** (do not flag again): the "zero the HIGH nibbles, mov the
+LOW ones" idiom where the zero has the offset and the mov does not -- disjoint ranges, both
+required. Live at `trb_bucket_h`, `ts_clamp2`/`ts_clamp2_lo`'s `prev_end`/`prev_start`,
+`ts_step_faces`'s `tsf_col_x`/`tsf_slot_idx`, all already commented as deliberate.
+
+## P. hex.ptr_index priced stage by stage (2026-09-04) -- 1,196.8 executed ops per call
+
+    def ptr_index dst, ptr, index {        measured, index = 0x1F64, w = 32
+        .mov w/4, dst, index                 200.4
+        .shl_hex w/4, dst                  }
+        rep(8-#w, i) .shr_bit w/4, dst     }  441.6  (the three shift ops together)
+        .shl_hex w/4, dst                  }
+        .add w/4, dst, ptr                   554.8   <- nearly half the macro
+    }                                       1196.8 total, 2,978 ops of space
+
+TWO INDEPENDENT LEVERS, both measured value-identical for indices 0x42 / 0x1F64 / 0xFFFF:
+
+1. **The final `hex.add w/4` -> `frame.add8_chain`: -84.0 executed ops per call, and ZERO ops of
+   space** (the chain is size-identical to the stl add, so the swap moves no label). Needs NO
+   bound on anything -- it applies to every ptr_index call in the program. The chain is the last
+   statement of the macro, so nothing runs inside its hermetic window.
+2. **Shift stage at width 6 instead of w/4: a further -92** -- but only where the index is
+   provably < 16^4, because after the net five-bit left shift the value must still fit 6 nibbles.
+   Both together: -176.2 per call, -384 ops of space.
+
+The whole program runs ~760 ptr_index calls per median frame (909,630 ops / 1,196.8). Column
+indices (`x`, `x1`, `trb_col_x`, `tsf_col_x`) are < VIEW_W = 160, i.e. TWO nibbles, so a
+width-4 shift stage may be available at ~11 of the 22 sites -- unmeasured, worth a probe.
+
+`hex.ptr_index` call sites: 22 live ones (20 in frame_render.fj, 2 in stream_render.fj); the 8 in
+sim.fj and 3 in plane_render.fj are not in the visual tier. None is emitted from Python.

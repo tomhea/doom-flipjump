@@ -650,3 +650,49 @@ and in per-expansion deltas whose padding costs more than it saves. Realistic ac
 space -- which nobody has costed properly and which the workflow's ~52k space estimate looks
 optimistic about, since `pad N` aligns to N OPS and the chain has ~10 slots per expansion across
 thousands of expansions.
+
+## X. THE PAD POOL IS REAL AND IT IS ~2.2M -- I had it wrong twice (2026-09-05)
+
+Sections V and W concluded the pad pool was ~77k. **That was wrong, and the error was in what I
+measured, not in the arithmetic.** I ranked by DISTINCT VALUE, which fragments a macro-local label
+across every expansion, and then I costed "move one label" instead of "widen one pad in one macro,
+which realigns EVERY expansion at once".
+
+**Group the hot wflip values by the MACRO + LABEL they belong to, and the pool is enormous:**
+
+| family :: label | expansions | visits/frame | cost now | saving if trampolined to pc 1 |
+|---|---:|---:|---:|---:|
+| `hex.exact_xor :: switch` | 18,708 | 953,688 | 8,226,900 | 6,319,524 |
+| `hex.double_exact_xor :: first_flip` | 3,842 | 157,494 | 1,355,978 | 1,040,990 |
+| `hex.if_flags :: switch` | 2,558 | 109,522 | 953,892 | 734,848 |
+| `hex.cmp :: ret` | 1,110 | 57,474 | 557,362 | 442,414 |
+| `hex.add.clear_carry :: ret` | 928 | 46,236 | -- | 364,030 |
+| `bit.exact_xor :: base_jump_label` | 331 | 43,190 | 398,806 | 312,426 |
+| `hex.triple_exact_xor :: first_flip` | 636 | 122,060 | 1,055,132 | 725,334 |
+| `hex.tables.jump_to_table_entry :: return` | 350 | 24,580 | -- | 193,260 |
+
+**`hex.exact_xor` is 33.6% of the whole frame in ONE label.** Its body is
+`wflip src+w, switch, src` … `pad 16` … `switch:` … `end: wflip src+w, switch` -- two wflips by
+its own switch label per call, and that label is aligned only to 16 ops.
+
+**WIDENING THAT ONE PAD IS THE IDEA.** Measured from the census values, across the six families:
+
+| pad | saving | of frame | space | of image |
+|---|---:|---:|---:|---:|
+| 32 | 782,140 | 4.16% | 434,960 | +3.4% |
+| 64 | 1,486,072 | 7.90% | 869,920 | +6.9% |
+| **128** | **2,200,804** | **11.70%** | 1,739,840 | +13.8% |
+| 256 | 2,921,386 | 15.53% | 3,479,680 | +27.5% |
+
+Best RATIO at pad 128 (saving per op of space): `bit.exact_xor` 3.97, `triple_exact_xor` 3.92,
+`hex.cmp` 1.94, `exact_xor` 1.19, `if_flags` 1.00, `double_exact_xor` 0.96.
+
+**And the space is not really spent:** `get_wflip_spot` pops `padding_ops_indices` before it
+allocates in the segment's wflip area (FINDINGS U), so padded ops are exactly where multi-bit
+wflip chains get placed. The image already carries millions of chain ops; padding should absorb
+them rather than add to them. **Measure the .fjm size on every one of these builds** -- the owner's
+constraint is that the binary must not grow much, and that is the number that decides it.
+
+**THE LESSON ABOUT MY OWN METHOD.** Twice I concluded a pool was thin from an aggregate that had
+the wrong grouping. `rank-values` groups by value; the actionable unit is the MACRO. Always
+re-group a census by the thing an edit actually changes before pricing a pool.

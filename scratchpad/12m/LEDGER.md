@@ -236,6 +236,33 @@ therefore a live pool worth real ops -- the plan's P7, and `scratchpad/oneshadow
 already exists to do it. Nothing in this campaign has run a tuning round yet.
 
 ### Running total after 13 ideas: 18,982,338 -> 17,673,906 = **-1,308,432 (-6.89%)**
+
+| P7-3 | P7 | hot-data anchor + to_flip reorder + mul.init pad 4096 | +507,008 / +200,181 / +653,402 / +317,009 | 18,013,859 (+1.92%) | **KILL** | reverted |
+| P7-4 | P7 | **`hex.exact_xor` pad 16 -> 128** + hot-data anchor + `to_flip` reorder | -1,538,847 / -1,364,340 / -1,322,658 / -1,192,639 | **17,066,424** (-607,482, -3.44%) | SHIP | (commit) |
+
+**P7-2 KILLED, and it broke the frame.** `hex.mul.init`'s `pad 256 -> 4096` shifted the hot-data
+block 2,048 ops against 1,827 of headroom, so the narrow arm's 16^5 window was VIOLATED by 221
+ops and every arm5 pointer went wild: 15,975 px wrong, the run died at 5.7M ops. My own invariant
+caught it -- but `ritual.py` ran the check AFTER the deg gate, so it presented as an unexplained
+pixel diff. **The check now runs the moment the label table exists**, before the viewpoints.
+
+**P7-3 KILLED (+339,953).** Anchoring the hot-data block with `pad 16384` is structurally right,
+but alone it forced a +32,768-op shift (it aligns to the NEXT multiple, and mul.init's pad had
+already pushed past 16,384) and that placement re-roll cost more than the alignment won.
+⚠ But its binary got SMALLER: 11,231,004 vs 11,307,396 bytes while ADDING 32,768 ops of padding.
+`get_wflip_spot` fills padding with chains that were extending the wflip area. Padding can be
+better than free.
+
+**P7-4: the biggest gate of the campaign.** `hex.exact_xor` is 33.6% of the frame in ONE label --
+its `switch` is flipped twice per call, 953,688 times a frame, and was aligned only to 16 ops.
+`pad 16 -> 128` is a ONE-TOKEN change. Bundled with the anchor (required: the pad shifts the
+layout by ~1.2M ops and would otherwise break the window again) and the to_flip reorder, because
+they share one re-roll and pricing them apart would price a layout none of them ships with.
+Predicted -1,420,476 for the pad alone; got -607,482 net of the anchor's placement cost.
+⚠ **BINARY: 11,307,396 -> 14,219,263 bytes (+25.8%).** This padding was too large to be absorbed.
+Watch this number on every further pad -- it is the owner's stated constraint.
+
+### Running total after 14 ideas: 18,982,338 -> 17,066,424 = **-1,915,914 (-10.09%)**
 The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.
 The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals

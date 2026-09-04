@@ -1798,7 +1798,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                    + [f"    hex.vec 16, {ss}" for ss in _MT_BINDS])]
                          if standalone else [f"thss_rt: hex.vec {16 * _MT_NT}"])
                       if moving_things else []))
-    hotdata = ([";__hot_end"] + _hot_arrays
+    # ⚠ ANCHOR, not decoration. frame.arm5 -- the five-hex pointer arm -- is exact only while
+    # every narrow-armed table lies inside ONE 16^5 window, and this block IS those tables
+    # (pclm .. wrej). Left to float, its position is whatever the sum of everything before it
+    # happens to be, so ANY upstream change can push it across the boundary and make every
+    # narrow arm produce a wild pointer. That is not hypothetical: widening a `pad` inside
+    # hex.mul.init moved it 2,048 ops against 1,827 of headroom and cost a build (15,975 px
+    # wrong, and the run died early). `pad 16384` puts pclm on op 16,384 = bit 0x100000, which
+    # is both popcount 1 and the base of a fresh window -- the block is ~5,900 ops, so it now has
+    # ~10,500 ops of headroom and upstream padding cannot reach it.
+    # Unreachable: the `;__hot_end` guard below jumps over all of this.
+    hotdata = ([";__hot_end", "pad 16384"] + _hot_arrays
               + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                   False)
               + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,

@@ -152,6 +152,17 @@ def do_build(idx, stl, want_census, force):
             unhook_census()
     wall = time.perf_counter() - t0
 
+    # CHECK THE WINDOW FIRST. It is decided at assembly, and a violation makes frame.arm5
+    # produce wild pointers -- which shows up as a pixel diff whose cause is invisible.
+    # P7-2 cost a 15-minute build learning that: -221 ops of headroom, 15,975 px wrong.
+    lab = art(idx, ".labels.tsv.gz")
+    if lab.exists():
+        ok, msg = narrow_arm_window(str(lab))
+        _p("narrow-arm window: %s  %s" % (msg, "ok" if ok else "!! VIOLATED"))
+        if not ok:
+            raise SystemExit("the narrow pointer arm (frame.arm5) is NOT exact in this "
+                             "layout: " + msg + " -- the frame would be wrong. "
+                             "NOT writing artifacts.")
     text = "".join(sink)
     if "\nPASS" not in text and not text.rstrip().endswith("PASS"):
         raise SystemExit("deg_gate did not print PASS -- NOT writing artifacts")
@@ -167,11 +178,6 @@ def do_build(idx, stl, want_census, force):
         raise SystemExit("a viewpoint is not BYTE-EXACT -- NOT writing artifacts")
     if not seen:
         raise SystemExit("the assemble spy never fired -- no binary to keep")
-    ok, msg = narrow_arm_window(str(art(idx, ".labels.tsv.gz")))
-    _p("narrow-arm window: %s  %s" % (msg, "ok" if ok else "!! VIOLATED"))
-    if not ok:
-        raise SystemExit("the narrow pointer arm (frame.arm5) is no longer exact: "
-                         + msg + " -- NOT writing artifacts")
     shutil.copy2(seen[-1], fjm_dest)
     json.dump({"id": idx, "stl": stl, "wall_s": round(wall, 1), "viewpoints": vps,
                "input_files": files_seen[-1] if files_seen else [],

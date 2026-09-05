@@ -291,6 +291,16 @@ past it. `mul.init`'s pad 4096 is the retry of the change that BROKE the frame i
 anchored, so the shift is absorbed. Binary +36,428 bytes (+0.26%).
 
 ### Running total after 16 ideas: 18,982,338 -> 16,861,090 = **-2,121,248 (-11.17%)**
+
+| P7-8 | P7 | `hex.exact_xor` pad 128 -> 256 | -980,804 / -530,897 / -1,228,792 / -678,735 | **16,136,363** (-724,727, -4.30%) | SHIP | (commit) |
+
+**P7-8.** One more power of two on the same token. Binary 14,271,505 -> 15,402,408 bytes
+(+1,130,903, +7.9%) -- much cheaper in space than the 16->128 step, whose 4.5M ops of padding
+cost +25.8%. The marginal return did NOT thin out: 128 gave -607,482 (bundled with the anchor),
+256 gives another -724,727 on its own.
+
+### Running total after 17 ideas: 18,982,338 -> 16,136,363 = **-2,845,975 (-14.99%)**
+Pads alone (P7-4, P7-6, P7-7, P7-8): **-1,537,542**.
 Pads alone (P7-4, P7-6, P7-7): **-812,815**.
 Pads alone (P7-4 + P7-6): **-762,165**.
 The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.

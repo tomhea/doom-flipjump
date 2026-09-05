@@ -32,6 +32,8 @@ LISTS = [
     [(10, 0x11), (20, 0x22), (30, 0x33)],      # identical to list 0 -> shares its body
     [(5, 0xAA)],
     [(8, 0x01), (200, 0x02)],
+    [(10, 0x11), (200, 0x02)],                 # shares (10,0x11) with list 0 and (200,0x02) with
+                                               # list 3 -- the CROSS-BODY pair sharing S2 added
 ]
 
 
@@ -88,6 +90,8 @@ def _run(tmp_path, idx, lo, hi, expected):
     (2, 5, 255),      # ... whose only pair is skipped: empty output
     (3, 0, 100),      # clamp far below the pair's own y2
     (3, 8, 200),      # skip then hit the == arm
+    (4, 0, 100),      # a body whose every pair-block is SHARED with another body
+    (4, 0, 200),      # ... and its == arm
 ])
 def test_walk_matches_the_contract(tmp_path, idx, lo, hi):
     _run(tmp_path, idx, lo, hi, walk(LISTS[idx], lo, hi))
@@ -97,7 +101,7 @@ def test_identical_lists_share_one_body(tmp_path):
     """`owner` dedup: lists 0 and 1 are equal, so exactly one `vpb_body` exists for the pair."""
     src = generate_bands_walk_fj(LISTS)
     bodies = [l for l in src.splitlines() if l.startswith("vpb_body")]
-    assert len(bodies) == 3, bodies          # lists 0/1 share, 2 and 3 are their own
+    assert len(bodies) == 4, bodies          # lists 0/1 share; 2, 3 and 4 are their own
 
 
 def test_the_clamp_tail_is_shared_per_colour(tmp_path):
@@ -110,3 +114,24 @@ def test_the_clamp_tail_is_shared_per_colour(tmp_path):
     assert len(tails) == len(colours), (tails, colours)
     # ... and no pair inlines a raw-byte chain any more
     assert not [l for l in src if "_rb_z0:" in l]
+
+
+def test_pair_blocks_are_shared_per_distinct_pair(tmp_path):
+    """S2: one `vpb_pb_<y2>_<c>` per DISTINCT (y2, colour) across ALL bodies, each emitted once,
+    and no body inlines a compare tree any more. The negative control for the size claim -- if
+    blocks were re-inlined, tree labels would track the pair-INSTANCE count again."""
+    src = generate_bands_walk_fj(LISTS).splitlines()
+    blocks = [l for l in src if l.startswith("vpb_pb_") and l.endswith(":")
+              and "_lo_b" not in l and "_hi_b" not in l and "_in" not in l
+              and "_em" not in l and "_ls" not in l and "_cl" not in l and "_ct" not in l]
+    distinct = {p for pairs in LISTS for p in pairs}
+    assert len(blocks) == len(distinct), (len(blocks), len(distinct), blocks)
+    # bodies contain calls and lanes, never a bit.if of their own
+    in_body = False
+    for line in src:
+        if line.startswith("vpb_body"):
+            in_body = True
+        elif line.startswith("vpb_pb_") or line.startswith("vpb_cl_"):
+            in_body = False
+        elif in_body and "bit.if" in line:
+            raise AssertionError("a body still inlines a compare tree: %r" % line)

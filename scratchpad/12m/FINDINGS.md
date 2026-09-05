@@ -759,3 +759,623 @@ across the campaign: the pads removed 1.64M ops from the dominant cost class rat
 work around. Binary 11,307,396 -> 15,168,954 bytes (+34%), non-monotonic throughout -- P7-6 added
 1.8M ops of padding for +0.1%, and P7-10 SHRANK the image by 615,204 bytes while adding padding,
 because `get_wflip_spot` pulls chains out of the segment's wflip area into it.
+
+## AA. WHY A PAD IS SOMETIMES FREE AND SOMETIMES EXPENSIVE: ABSORPTION (2026-09-05)
+
+The add_mul/cmp anomaly -- `pad 4 -> 32` SHRANK the binary by 615,204 bytes while `pad 32 -> 64`
+GREW it by 381,750 -- is not a lottery. The label diffs settle it:
+
+| gate | change | labels moved |
+|---|---|---|
+| P7-10 | pad 4 -> 32 | **0 of 781,326 -- FROZEN** |
+| P7-11 | pad 32 -> 64 | 20,687, every one by **exactly +256 ops** |
+
+**A pad's shift is ABSORBED by the next downstream `pad M` whenever the accumulated shift is less
+than that pad's slack.** Below the threshold the change is purely LOCAL: the label gets aligned,
+nothing after it moves, and the byte cost is ~zero (padding is zero words; a chain op in a padding
+slot costs what it would have cost in the wflip area). Above the threshold everything after jumps
+by a FULL BLOCK, re-rolling every other site's popcount.
+
+The +256 granularity names the grid: `hex.exact_xor`'s `pad 256` is expanded ~80,000 times across
+the image, so 256-op re-anchors are everywhere. That is the absorption grid the whole program now
+sits on.
+
+**THE RULE THIS GIVES US, and it is the most useful thing in this file:**
+> Prefer pad increments SMALL enough to be absorbed, and CHECK THE LABEL DIFF. `MOVED: none` means
+> the pad was free and you keep the alignment gain outright. Any nonzero MOVED means the pad
+> crossed a re-anchor and you are now paying a whole-image re-roll for it -- judge it on the sweep
+> median, not on the alignment argument.
+
+**And it explains the two metrics diverging.** File size tracks SUM POPCOUNT OVER ALL 1,992,624
+wflip sites (every chain op is content whether or not it executes); runtime tracks
+SUM VISITS x POPCOUNT, dominated by 33,759 hot values -- 1.7% of sites. A propagating shift plays
+both lotteries, but the size one is decided by the cold 98.3% that runtime never sees. Measured
+across the campaign: static popcount 17,420,626 -> 18,480,671 (WORSE by 1.06M) while weighted cost
+15,260,433 -> 13,619,278 (BETTER by 1.64M).
+
+⚠ **No tool reports static popcount.** If size matters as much as speed, that is the number to
+add to the ritual -- it is one line over the census and nobody has been watching it.
+
+## AB. THE 50-PAD TABLE, RANKED BY OPS-PER-KILOBYTE (`padrank.py`, 2026-09-05)
+
+New instrument: `scratchpad/12m/padrank.py --selftest` (3 negative controls: vacuity, bit-mask,
+rarity-ordering). It is the first tool that ranks the two pad columns AGAINST each other --
+census visits for speed, LABEL-TABLE rows for space -- instead of one at a time, which is the
+confusion that cost P7-5 an assembler overflow.
+
+Full table: `scratchpad/12m/atlas/PADS50.txt`. Read on the P7-11 certified layout
+(frame 17,130,098; image 15,168,954 B; 89.6% of hot visits resolve to a named label).
+
+**Seven of the top 50 are pads a sweep has ALREADY REFUTED** -- and they are the seven biggest
+predicted savings in the table (303,236 of the 391,692 ops). The tool prints them as `<-- refuted`
+rather than dropping them, because their presence is the point: the census keeps offering
+`hex.cmp 64->128` and the gate keeps saying no. FINDINGS Z's trap, now printed at the point of use.
+
+**The 43 rows no gate has ruled on are worth 88,456 ops for 517,128 bytes** -- 0.52% of the frame
+for +3.4% of the image. Grouped by the edit that would deliver them:
+
+| # | edit | rows | ops | bytes | ops/KB |
+|---|---|---:|---:|---:|---:|
+| E | `hex.{and,or,add}.init` -- **one expansion each** | 5 | 9,367 | 7,168 | 1,338 |
+| C | `hex.pointers.xor_hex_to_flip_ptr :: after_flip_bit*` 2/4 -> 16 | 2 | 12,240 | 5,928 | 2,114 |
+| A | `lut_generator.py def lookup :: return` -- ONE emitter line | 11 | 1,864 | 2,016 | 947 |
+| D | `read_cell_from_inners_ptrs :: cleanup` 2 -> 16 | 1 | 5,513 | 6,328 | 892 |
+| B | `frame.{add,sub}{2,4,6,8,10}_chain :: rcc0/rcc1` 1/2 -> 16 | 14 | 11,173 | 31,224 | 366 |
+| F | `hex.shifts.sh{l,r}_bit_once :: switch` 16 -> 32 | 2 | 15,130 | 92,416 | 168 |
+| G | `hex.mul.clear_carry :: return` 32 -> 64 | 1 | 12,568 | 100,864 | 128 |
+| H | `v{ql,qh}_load`, `vpb_walk :: return` 2 -> 16 | 3 | 3,036 | 12,544 | 248 |
+
+**A/B/C/D/E are 34 of the 43 rows, 40,157 ops, and 21,440+31,224 = 52,664 bytes (+0.35% image).**
+That is the bundle worth building. F/G/H double the ops for 4x the bytes.
+
+**WHY THESE ARE STRUCTURALLY DIFFERENT FROM THE REFUTED SEVEN, and it follows from FINDINGS AA:**
+every row in A-E is a SMALL increment (1 or 2 -> 16, or a 512 -> 1024 on a once-expanded macro).
+`hex.exact_xor`'s `pad 256` expands 80,114 times, so 256-op re-anchors sit roughly every 200 ops
+of image -- a shift of <=15 ops has nowhere to go but the next one. **These pads should be
+ABSORBED: aligned label, zero labels moved, no whole-image popcount re-roll.** The refuted seven
+were all +64 or +128 increments on macros expanded thousands of times, which is precisely the
+regime that propagates. The label diff on the gate build is the check that decides it.
+
+**THE ONE-LINE EDIT WORTH MOST PER KEYSTROKE** is `lut_generator.py`'s `def lookup`:
+
+    wflip hex.tables.ret+w, return, .dsp
+  return:                                    <-- unaligned; every LUT in the program shares this
+    wflip hex.tables.ret+w, return
+
+Two wflips by the label's own address, no pad, in the macro every baked table is read through.
+`pad 16` before `return:` covers eleven separate table families at once.
+
+⚠ The savings are SMALL in absolute terms -- 88,456 ops is 0.52% of the frame. **This confirms the
+FINDINGS Z verdict rather than overturning it: the pad pool is essentially exhausted, and what is
+left is a long tail of cheap-but-thin rows.** The 12M target will not come from padding.
+
+⚠ **AB caveat -- padrank overstates families with CONSECUTIVE labels.** It scores each label as if
+alignable alone. `xor_hex_to_flip_ptr`'s after_flip_bit0..3 sit at base+0..+3 behind ONE `pad 4`,
+so only bit0 can be 16-aligned and the rest inherit +1/+2/+3. Group C's 12,240 is therefore an
+upper bound on what one `pad 4 -> 16` delivers, not a prediction. Any macro appearing on more than
+one row of PADS50.txt needs this check before its rows are added together.
+
+⚠ **AB correction -- the predictor's frame is NOT the ship criterion's frame.** Every visit count
+in padrank (and in popcount_census, and in multishift) comes from ONE profiled viewpoint's IP
+histogram, `h57_1`. That viewpoint is the 6th of 8 and deliberately heavy:
+
+| build | h57_1 | ca2_sweep median | h57_1 is |
+|---|---:|---:|---:|
+| BASE | 20,204,970 | 18,982,338 | +6.4% |
+| P7-11 | 17,130,098 | 16,038,392 | +6.8% |
+
+So an ops figure from any census tool is **~6% above the median delta a gate will report**, because
+savings scale with visits and that frame has ~6% more of them. The percentages survive the scaling;
+the absolutes do not. `padrank.py` now prints both lines. **The eight profiled viewpoints span
+3.67M to 39.5M ops -- a 10.8x range -- so "the frame" is never a single number in this repo,** and
+any figure quoted without naming its viewpoint is ambiguous by up to 10x.
+
+## AC. THE REAL MAP (2026-09-05, new instrument `wprof.py`, selftest PASS)
+
+`scratchpad/12m/wprof.py` attributes wflip cost to **the site that ISSUED the chain**, not to where
+the chain ops executed. The census records each site's FIRST op (inline, at the source line) and
+the whole chain's popcount; joining that to the IP histogram gives issues x popcount charged to the
+causing line. This fixes the blur FINDINGS V flagged, where ~87% of wflip ops execute in the wflip
+area and an IP histogram smears them onto whatever label precedes it. Three negative controls:
+conservation, attribution (after a label yes / before it no), vacuity.
+
+**On P7-11 (h57_1 viewpoint, 17,130,098 ops): 1,966,215 wflip ISSUES carrying 13,619,278 ops =
+79.5% of the frame. Mean chain 6.93. The other 20.5% is plain jumps.**
+
+### The cost is in ONE leaf and NO caller
+
+| level | top entry | share |
+|---|---|---:|
+| leaf (`--level inner`) | **`hex.exact_xor`** | **39.86%** (6,827,389 ops, 943,572 issues) |
+| leaf, top three | + double_ (7.10%) + triple_ (5.25%) | **52.2%** |
+| doom caller (`--level doom`) | `frame.dance_boundary` | 6.13% -- flat over 147 macros |
+| exact_xor's callers (`--only`) | `frame.dance_boundary` | 3.71% -- flat over 120 macros |
+
+**So there is no caller-side fix at the 4M scale.** exact_xor is two wflips per call, both flipping
+`switch`'s own ~25-bit address: `wflip src+w, switch, src` ... `end: wflip src+w, switch`.
+471,786 calls/frame x 2 x 7.24 popcount = the 6.8M.
+
+### WHY pad 512 REVERSED -- the mechanism, and it is now PREDICTIVE
+
+| quantity | value |
+|---|---:|
+| chain ops needing a `get_wflip_spot()` slot (sum of popcount-1 over ALL sites) | **16,488,047** |
+| padding slots from exact_xor at `pad 256` (80,114 x 128 avg slack) | 10,254,592 |
+| ... at `pad 512` (80,114 x 256) | **20,514,304** |
+
+At 256 the padding is **fully absorbed** -- there are more chain ops than slots, so the pad costs
+ZERO image space and buys 8 zeroed address bits for free. At 512 the slack (20.5M) EXCEEDS demand
+(16.5M), the surplus becomes dead space, the image grows, every address widens, and popcount rises
+everywhere. That is the measured +316,510. **The rule: a pad is free while total slack stays under
+16.5M chain ops, and starts costing the moment it passes it.** Nobody had this before; it predicts
+the one result the campaign could only observe.
+
+### The image, and why address width is a first-class cost
+
+Highest wflip site: **op 31,092,386 = 24.89 bits.** Chain ops are 16.5M of that 31M = **53% of the
+image is wflip chain**. Every bit of span costs ~0.5 popcount on all 1.97M issues ~ 1M ops/frame.
+
+| macro | sites | hot | hot% | chain ops | %chain |
+|---|---:|---:|---:|---:|---:|
+| (top level, emitted doom) | 870,690 | 19,138 | 2.2% | 6,992,912 | 42.4% |
+| **`bit.exact_xor`** | **601,104** | **475** | **0.1%** | **6,409,943** | **38.9%** |
+| `hex.exact_xor` | 173,978 | 37,555 | 21.6% | 1,128,581 | 6.8% |
+| `stl.fcall` | 85,085 | 3,548 | 4.2% | 939,301 | 5.7% |
+
+**`bit.exact_xor` is 20.6% of the whole image span and 99.9% of it never executes.**
+
+### THE CEILING THAT MATTERS -- concentration
+
+exact_xor cost over its 37,555 hot sites is concentrated:
+
+| top N sites | % of issues | % of exact_xor cost |
+|---:|---:|---:|
+| 1,000 | 17.3% | 21.5% |
+| 2,000 | 32.4% | 37.3% |
+| **5,000** | 59.8% | **62.8%** |
+| 10,000 | 76.6% | 78.9% |
+
+Addresses below 2^24 with popcount <= q: q<=2: 301, q<=3: 2,325, q<=4: 12,951, q<=5: 55,455.
+
+| if the N hottest sites sat at popcount q | ops saved | of frame |
+|---|---:|---:|
+| top 2,325 at q=3 | 1,801,146 | 10.51% |
+| **top 12,951 at q=4** | **2,680,701** | **15.65%** |
+| top 500 expansions (1,000 sites) at q=3 | ~975,648 | 5.70% |
+
+⚠ These are CEILINGS. Realising them needs the dispatch table HOISTED out of the macro so its
+address can be chosen -- `pad` can only align, never select a sparse address. The gaps between
+sparse slots would have to be filled with baked data, which the doom image has in abundance
+(4.8M lines). This is an architecture change, not a tuning knob, and it cannot reach expansions
+that sit inside stl macros. **But it is the only measured idea at the 4M scale, and the smaller
+version -- the top ~500 expansions for ~975k -- is a legitimate first rung.**
+
+## AD. THE PAD BUDGET IS A KNAPSACK, AND THE CEILING IS NOT REACHABLE (2026-09-05)
+
+Owner's idea: give `exact_xor` a PAD PARAMETER -- `sparse_exact_xor PAD, ...` -- so the regular
+macro passes a small pad and only the hottest call sites get a big one. That is the tractable form
+of AC's hoisting idea: it needs an stl macro change plus call-site edits, where hoisting needs the
+emitter to enumerate expansions. Priced it. Three results, in order of how much they change the plan.
+
+### 1. The execution profile (owner asked for it, and it kills the "16k times" intuition)
+
+Per-op, whole frame, 593,428 distinct ops executed at least once:
+
+| runs/frame | #ops | % of distinct | % of frame |
+|---:|---:|---:|---:|
+| exactly 1 | 108,996 | 18.37% | 0.64% |
+| 2-9 | 265,673 | 44.77% | 8.48% |
+| 10-99 | 170,384 | 28.71% | 28.44% |
+| **100-999** | **47,780** | **8.05%** | **48.57%** |
+| 1,000-9,999 | 560 | 0.09% | 7.37% |
+| >=10,000 | 35 | 0.01% | 6.51% |
+
+**There is no per-pixel inner loop to exploit.** The single hottest op runs ~140,000 times and is
+0.82% of the frame. The mass is 48,375 ops running 100-999x carrying 62.4%. Padding has to target a
+WIDE band, not a handful of ops -- which is exactly why the budget below binds.
+
+### 2. Padding is free only under a hard budget
+
+Chain ops needing a `get_wflip_spot()` slot: **16,488,047** (FINDINGS AC). Total padding slack from
+all pads must stay under that or the surplus becomes dead space (the pad-512 mechanism). Today
+exact_xor supplies 10,254,592. Dropping its **61,337 COLD expansions** (78% of 80,114) to `pad 16`
+frees **7,360,440**, giving ~14-15.5M to spend.
+
+Single-tier optima, cold at 16 and the N hottest at 2^k (popcount modelled as
+`7.24 * (24.89-k) / 16.89`, calibrated so pad 256 reproduces the measured 7.24):
+
+| pad | expansions affordable | ops saved | % frame |
+|---:|---:|---:|---:|
+| 1,024 | 18,778 (all hot) | +804,863 | 4.70% |
+| 4,096 | 8,634 | +1,420,133 | 8.29% |
+| **8,192** | **4,308** | **+1,493,148** | **8.72%** |
+| 16,384 | 2,152 | +1,389,783 | 8.11% |
+| 65,536 | 537 | +621,796 | 3.63% |
+
+### 3. ⚠ THE ADDRESSABLE UNIT IS A SOURCE CALL SITE, NOT AN EXPANSION -- and that is the whole gap
+
+AC's 3,231,454 ceiling assumed each of the 7,547 hottest EXPANSIONS could be aligned independently.
+It cannot: a `pad` lives in source, so every expansion of that line pays the slack, hot or cold.
+Re-ranked by FULL macro path (expansion indices stripped -- the true editable unit):
+
+**1,332 distinct exact_xor call sites carry the 6,827,389 ops. Greedy fill under a 14M slack
+budget: 808 sites -> +1,098,896 ops = 6.42% of the frame.**
+
+The optimum pad is almost always **1,024**: saving grows linearly in k while slack doubles, so the
+ratio always favours the smallest useful pad, and the budget favours breadth over depth.
+
+⚠ Top sites are deep stl chains -- `hex.zero/hex.zero/hex.xor/hex.exact_xor`,
+`hex.cmp/hex.cmp_eq_next/hex.cmp/hex.xor/hex.exact_xor` -- so reaching them means threading a PAD
+parameter through `hex.zero`, `hex.mov`, `hex.xor`, `hex.cmp`, `byte.emit`. That is an stl ABI
+change (CLAUDE.md rule 4) and a CR into flipjump-151.
+
+**HONEST BOUND: this idea is worth ~0.8-1.1M (5-6.4%), not 3.2M.** It takes 16,038,392 to about
+14.9M. It is the largest single measured idea in the campaign and it does not close the 4M alone.
+
+⚠ And the prediction is directional only: 14M ops of redistributed padding re-rolls every address
+in the image (FINDINGS AA). Total slack stays under the 16.49M demand so the span should not grow,
+but only the sweep decides.
+
+## AE. THE >=1000-RUNS/FRAME BAND IS NOT A SEPARATE POOL (2026-09-05, owner-directed)
+
+Owner asked to address the ops run >=1000 times per frame before anything else. **595 ops,
+2,376,029 runs = 13.87% of the frame.** Decomposed them. The band is real but it is the SAME cost
+the leaf profile already names, seen per-op, and its placement-addressable parts are already tuned.
+
+| machinery | #ops | runs | %frame | is it a fresh lever? |
+|---|---:|---:|---:|---|
+| `hex.exact_xor` | 220 | 565,902 | 3.30% | **No -- these ARE the chain ops of hot exact_xor wflips**, parked in its own pad-256 region. Already the 6.8M the pad plan targets; counting them again would double-count. |
+| shared global dispatch words | 22 | 735,697 | 4.29% | **No.** `hex.tables.ret` (139,975), `.res` (98,385), `hex.mul.dst`, `hex.add.dst` ... each is ONE op executing once per visit. 1 op is the floor. |
+| `hex.mul.init` | 39 | 287,381 | 1.68% | partly -- its wflip targets are already popcount 1 |
+| `hex.tables.clean_table_entry__table` | 54 | 195,408 | 1.14% | table-entry cleanup after dispatch |
+| `hex.add.init` | 9 | 59,604 | 0.35% | already popcount 1 |
+
+Only **12 of the 595** are wflip first-ops at all, and the three biggest of those
+(`hex.add.init::switch__without_carry`, `hex.mul.init::after_add`, `hex.mul.init::add_res`) are
+**already at popcount 1** from the P7 stl pad round. The band is 98% chain ops and plain dispatch.
+
+### The owner's "first addresses" lever, measured and CLOSED
+
+Hypothesis: put the most-jumped-into globals at low addresses so wflips to them are cheap. Measured
+every shared global's address AND how often it appears as a wflip VALUE:
+
+| global | op | popcount | visits as a VALUE |
+|---|---:|---:|---:|
+| `hex.pointers.to_flip` | 512 | **1** | 25,374 |
+| `stl.IO` | 1 | **1** | 8,491 |
+| `hex.tables.ret` | 600 | 4 | **0** |
+| `hex.tables.res` | 601 | 5 | **0** |
+| `hex.mul.dst`, `hex.add.dst`, `hex.sub.dst`, `hex.cmp.dst`, `hex.mul.ret`, ... | -- | 2-5 | **0** |
+
+**Moving every one of them to a popcount-1 address would save 6 ops.** The two that matter are
+already there (`to_flip` from the P7 reorder, `stl.IO` by construction). The rest are jumped INTO,
+never flipped AS a value -- and the cost of `wflip X+w, V` is popcount(V), never popcount(X). So
+the address of a jump TARGET is free; only the address of a flipped VALUE is paid.
+
+**That distinction is the whole lever and it is now exhausted.** Being executed 139,975 times does
+not make an op's address worth anything; being *named as a wflip value* does.
+
+**CONSEQUENCE FOR THE CAMPAIGN: the >=1000 band yields no new idea.** The pad plan (AD, ~0.8-1.1M)
+remains the largest measured item, and the remaining gap to 12M still has no identified source.
+
+## AF. P8-1 IMPLEMENTED: the pad became a parameter (2026-09-05)
+
+Owner's design, built. **`pad` accepts a macro parameter** -- that was the load-bearing unknown and
+it is now proven by assembly, not argument:
+
+| `tp.sparse_xor PAD` | executed | space |
+|---|---:|---:|
+| pad 16 | 14.9 | 22 |
+| pad 256 | 6.8 | 198 |
+| pad 1024 | 6.8 | 710 |
+| pad 4096 | 2.6 | 1,734 |
+
+### What changed
+
+`flipjump-151/flipjump/stl/hex/logics.fj`
+* `sparse_exact_xor PAD, d3, d2, d1, d0, src` -- exact_xor's body verbatim with `pad PAD`.
+* `exact_xor` KEEPS its signature and delegates with 256. Rule 4 (frozen ABI) is not touched:
+  no existing macro name, arity or parameter order changed.
+* `sparse_xor PAD, dst, src` and `sparse_xor PAD, n, dst, src`; `xor` delegates with 256.
+
+`flipjump-151/flipjump/stl/hex/memory.fj`
+* `sparse_zero PAD, hex` / `sparse_zero PAD, n, x`, `sparse_mov PAD, dst, src` / `PAD, n, dst, src`.
+
+⚠ A namespace constant (`hex.DEFAULT_XOR_PAD = 256`) FAILED -- inside a macro it trips
+"Used a not global/parameter/declared-extern label", the same werror trap as the extern rule.
+The literal 256 is inlined at the two delegation points instead.
+
+### Controls run before the gate
+
+1. **VALUE, all 16 src values**, `hex.xor` vs `sparse_xor` at pads 16/256/1024/4096, each checked
+   against PYTHON's own xor so the fj forms cannot be jointly wrong: **all 16 identical at every
+   width.** `sparse_mov`/`sparse_zero` likewise identical to the plain macros.
+2. **NEUTRALITY of the refactor** -- the delegation must not change what today's callers emit.
+   Measured on the old tree and the new, four shapes, EXACTLY equal:
+
+   | | old | new |
+   |---|---|---|
+   | `hex.xor 1` | 6.75 exec / 198 space | 6.75 / 198 |
+   | `hex.xor 8` | 71.75 / 1,990 | 71.75 / 1,990 |
+   | `hex.mov 8` | 152.88 / 4,038 | 152.88 / 4,038 |
+   | `hex.zero 8` | 69.75 / 1,990 | 69.75 / 1,990 |
+
+### The conversion
+
+286 call sites in **37** of the 62 target macros, at pad 1024, by brace-matched scripted edit:
+`frame_render.fj` 176, `stream_render.fj` 57, `projection.fj` 53. The remaining 25 are either
+emitted by `lut_generator.py` (the 10 `*.lookup` families -- one emitter line, saved for a second
+gate) or named differently inside their namespace.
+
+**PREDICTION: -682,545 ops on the h57_1 viewpoint (3.98%), ~-639,000 on the sweep median**
+(x0.9363, FINDINGS AB), for 5,231,616 ops of extra padding slack -- which stays under the
+16,488,047 chain demand, so it should be absorbed and cost no image space. Purely additive:
+unconverted expansions keep pad 256, so no site can regress by construction.
+
+⚠ Only 37 of 62 macros converted, so the realised figure should be BELOW the prediction. The
+prediction also ignores the whole-image re-roll (FINDINGS AA), which at 5.2M ops of new padding
+will be large. Gate P8-1 decides.
+
+## AG. THERE ARE ONLY 12 HOT WFLIPS, AND THEY ARE ALL ALREADY AT POPCOUNT ~1 (2026-09-05)
+
+Owner asked to pad every wflip among the 595 ops that run >=1000x/frame, trying 2048 and larger.
+**Measured: only 12 wflip SITES fire >=1000x, they cost 131,446 ops = 0.77% of the frame, and
+every one is already at mean popcount 1.00-4.00.**
+
+| target the wflip flips | sites | visits | cost | mean pc |
+|---|---:|---:|---:|---:|
+| value `0x0` | 4 | 58,211 | 58,211 | **1.00** |
+| `hex.mul.init::after_add` | 2 | 54,270 | 54,270 | **1.00** |
+| value `0x3C0` | 1 | 1,847 | 7,388 | 4.00 |
+| value `0x300` | 2 | 2,766 | 5,532 | 2.00 |
+| value `0x100` | 2 | 3,472 | 3,472 | **1.00** |
+| `stl.IO` | 1 | 2,573 | 2,573 | **1.00** |
+
+**A wflip costs `max(1, popcount(value))`. Nine of these twelve already cost exactly 1 op per
+visit -- the hard floor. No pad of any size can improve them.** The three above 1 flip `0x3C0`,
+`0x300`, `0x100`, which are NOT labels but small macro-local strides (0x3C0 = 960 bits = a 15-op
+stride); FINDINGS W already classified those as unalignable by `pad`. Total reachable: under 8,000
+ops even if the impossible were done.
+
+### WHY THE >=1000 OP BAND IS 13.87% BUT THE >=1000 WFLIP-SITE BAND IS 0.77%
+
+This is the distinction that matters and it was implicit until now. **The op band counts CHAIN OPS
+individually.** A site that fires 200 times with popcount 8 emits 8 ops that each run 200 times --
+those chain ops land in the >=100 band and are hot, but the SITE fires only 200 times and never
+appears in a >=1000 site census. So:
+
+> The hot-op band is made of chain ops belonging to MANY MODERATELY-WARM sites, not of a few
+> blazing-hot wflips. There is no small set of hot wflips to pad. The 6.8M of exact_xor is
+> 471,786 calls averaging 14.5 ops, not a handful of sites averaging thousands.
+
+**CONSEQUENCE: "find the hottest wflips and pad them huge" has no target in this program.** The
+only shape that works is the P8-1 shape -- pad MANY moderately-warm call sites a moderate amount --
+and its size is bounded by the slack budget, not by how big a pad we are willing to write.
+
+## AH. BIG PADS ARE AFFORDABLE ONLY FOR RARE MACROS -- the per-macro knapsack (2026-09-05)
+
+Owner asked to try 2048 and larger. **Uniformly, they are not affordable, and the arithmetic is
+short.** The 36 converted macros hold **11,927 exact_xor expansions**, and slack scales with
+expansions, not with call sites:
+
+| pad, applied uniformly | slack needed | of the 5,233,455 headroom |
+|---:|---:|---:|
+| 512 | 1,526,656 | 29% |
+| 1,024 | 4,579,968 | 88% |
+| **2,048** | **10,686,592** | **204% -- OVER** |
+| 4,096 | 22,899,840 | 438% |
+| 16,384 | 96,179,328 | 1,838% |
+
+Past the headroom the slack exceeds the 16,488,047 chain demand, the surplus becomes dead space,
+every address widens -- the exact mechanism that made a global `pad 512` cost +316,510 (FINDINGS AC).
+
+**BUT PER MACRO THEY ARE, AND THE OWNER'S INSTINCT WAS RIGHT.** Slack is `expansions x (pad-256)/2`,
+so a macro with 34 expansions can take `pad 8192` for 137k of slack while one with 2,607 expansions
+cannot afford 512. Running the knapsack per macro over pads 512..262144:
+
+| allocation | ops saved | of frame | slack |
+|---|---:|---:|---:|
+| uniform 1,024 | +585,911 | 3.42% | 4,579,968 |
+| **per-macro optimal** | **+753,256** | **4.40%** | 5,231,744 |
+
+**+167,345 ops purely from choosing the width per macro instead of one number for all.**
+
+Chosen widths: 512 x10, 1024 x7, 2048 x5, 4096 x6, 8192 x5, 16384 x3. The big pads land exactly
+where the owner predicted -- on the RARE hot macros: `add6_chain` (4 expansions) 16384,
+`lines_sky_base` (3) 16384, `read_hex5` (4) 16384, `ts_dda_row_one` (34) 8192, `clip_rows` (62)
+8192 -- while the common ones are held down: `project_thing` (2,607 expansions) 512,
+`thing_record_body` (954) 512.
+
+**THE RULE: pad width should be inversely proportional to expansion count.** "Hot and rare" again,
+the same criterion padrank found, now applied to width rather than to whether-to-pad. Applied:
+282 call sites in 36 macros. Gate P8-1.
+
+## AI. ⚠ THE ABSORPTION MODEL IS WRONG -- MEASURED 12.3%, NOT 100% (2026-09-05)
+
+**Retracting the central cost premise of AC, AD and AH.** They all assumed padding is free because
+`get_wflip_spot()` fills padding with wflip chains before using the segment's wflip area, and total
+slack (would-be 15.5M) stayed under the 16,488,047 chain demand. The P8-1 freeze measures it
+directly, and the premise does not hold:
+
+| | ops |
+|---|---:|
+| slack added by the per-macro pads | 5,231,744 |
+| image growth measured by the label diff | **4,587,520** |
+| absorbed | 644,224 = **12.3%** |
+| became image | **87.7%** |
+
+781,207 of 781,326 top-level labels moved, nearly all by exactly +4,587,520 ops. Image span
+31,092,386 -> 35,679,906 ops, **24.89 -> 25.09 bits.**
+
+**Why the model failed.** "Total slack < total chain demand" is a GLOBAL accounting identity, and
+allocation is not global. `get_wflip_spot()` consumes padding as it goes; padding created in a
+region whose nearby chain demand is already satisfied is never claimed. The 10.25M of pre-existing
+`pad 256` was evidently already meeting most of the demand it could reach, so 5.2M of NEW padding
+in hot macros found almost nothing left to absorb. **Slack is only free where unmet demand is
+adjacent to it -- a locality property the census cannot see.**
+
+**What this invalidates.** Every "for N ops of slack, absorbed, so no image cost" claim in AC/AD/AH
+is wrong by ~8x on the cost side. The pad knapsack's budget was not 5.2M of free space; it was 5.2M
+of which ~4.6M is real growth. It does NOT invalidate the SAVING side (popcount reduction at the
+padded call sites), but it adds a cost term that was priced at zero:
++0.20 bits of span across 1,966,215 wflip issues is roughly +200k ops, plus an unpriced whole-image
+re-roll of every one of the 781,207 moved labels.
+
+⚠ **This also means the FINDINGS AC explanation of the pad-512 reversal, while directionally right,
+had the wrong quantities** -- 512 did not fail because slack crossed a 16.5M threshold; it failed
+because padding barely absorbs at all, so ANY widening applied broadly is close to pure growth.
+
+**STATUS: P8-1 is UNMEASURED.** Two gate runs were killed externally (no OOM: 8.6 GB free, no
+error, no termination events). The second reached the label dump but never wrote a .fjm, so no
+sweep is possible. The sign of P8-1 is genuinely unknown: predicted -753k of saving against a newly
+discovered cost term of ~+200k plus the re-roll. **Do not quote a P8-1 number until a sweep runs.**
+
+## AJ. P8-1 KILLED: +649,387 (+4.05%). THE PAD POOL IS DEFINITIVELY CLOSED (2026-09-05)
+
+Measured, not modelled:
+
+```
+MEDIAN 16,038,392 -> 16,687,779   (+649,387, +4.05%)   MIN +35,156  MAX +1,670,772
+DEG    +988,759 / +180,722 / +1,234,100 / +122,130   -- all four viewpoints WORSE
+PICTURE CONTROL 260/260 byte-exact   VACUITY 254 distinct   ca2_sweep PASS
+```
+
+**Predicted -753,256. Measured +649,387. Wrong by 1.4M and wrong in SIGN.**
+
+Correctness was never the issue -- 260/260 byte-exact confirms `sparse_exact_xor`/`sparse_xor`/
+`sparse_zero`/`sparse_mov` compute exactly what the originals do, as the micro controls said. The
+idea is simply not worth its space.
+
+**WHERE THE 1.4M WENT.** AI measured the image growth (+4,587,520 ops, 24.89 -> 25.09 bits) and I
+priced it at ~+200k from a log2-of-span popcount model. The truth is ~7x that. The span model is
+not predictive because growth does not scale addresses uniformly -- **781,207 labels moved and each
+one's popcount RE-ROLLED arbitrarily.** FINDINGS AA flagged the re-roll as unpriced; this measures
+it. The exchange rate implied by P8-1:
+
+> **~0.3 executed ops/frame per op of image growth.**
+
+**THE BAR A PAD MUST NOW CLEAR.** For a macro with E expansions and V visits, widening 256 -> P:
+  saving  ~ V * dpc          cost ~ 0.3 * 0.877 * E * (P-256)/2  ~  0.13 * E * (P-256)
+A pad pays only when `V * dpc > 0.13 * E * (P-256)`. At the campaign's typical dpc (~1-2 ops) that
+demands V/E ratios no macro in this program has -- which is why the greedy, run against the CORRECT
+cost function, selects nothing.
+
+**CONSEQUENCE: the pad toolbox is closed, and FINDINGS X/Y/Z/AB/AD/AH overstated it throughout.**
+Every one of those priced padding at or near zero space. The correct statement is:
+
+> Padding is ~12% absorbed and ~88% image growth, and image growth costs ~0.3 ops/frame per op.
+> A pad is worth it only where the popcount saving beats that. The P7 round's -1.6M was real
+> because those pads were SMALL and applied to already-hot shared stl leaves with tiny expansion
+> counts; nothing of that shape remains.
+
+⚠ **METHOD FAILURE TO CARRY FORWARD.** Three successive analyses (AC, AD, AH) built on an
+unmeasured premise -- "padding is absorbed, so it is free" -- that a single label diff would have
+falsified at any point. The premise came from reading `get_wflip_spot()` and reasoning globally
+about an allocator that works locally. **Rule 3 of CLAUDE.md exists for exactly this: the cheap
+pre-gate is not the gate, and a mechanism argument is not a measurement.** The freeze step, which
+costs seconds, should have been run against a scratch build BEFORE the knapsack was ever written.
+
+### AJ.1 Re-pricing with the measured cost -- what is left is inside the noise
+
+Calibrating from P8-1: 4,587,520 ops of image growth cost 1,402,643 ops/frame (the +649,387
+measured regression PLUS the 753,256 of predicted saving it cancelled) =
+**0.306 executed ops/frame per op of image growth.**
+
+Re-pricing all 62 candidate macros with that rate instead of ~0:
+
+| | |
+|---|---:|
+| macros with positive net | 24 of 62 |
+| best-subset total | +173,882 on the viewpoint, **~+162,806 on the median** |
+| slack it would add | 497,280 ops |
+| net over ALL 62 (what P8-1 did) | **-720,317** |
+
+**+162,806 is INSIDE the placement lottery's own variance** -- FINDINGS V measured that shift luck
+moves the median by 140,000-250,000 ops, and P3-2b was a 139,917-op swing from placement alone.
+A gate cannot distinguish this subset from luck, and each gate is ~45 minutes.
+
+⚠ And the 0.306 rate is ONE SAMPLE of a noisy process, not a linear law: most of that cost is the
+re-roll, which is a lottery, not a function of growth. Using it to select a 24-macro subset is
+fitting a subset to a single noisy calibration -- exactly the overfitting that produced P8-1.
+
+**THE PAD TOOLBOX IS CLOSED. Do not open it again without a new mechanism** (one that changes
+popcount WITHOUT moving anything else -- which `pad` cannot do, because alignment is global).
+
+## AK. S1 SHIPPED-MECHANISM + S2 IMPLEMENTED (2026-09-05) -- the 12MB-file campaign
+
+Owner's target: file ~12,000,000 bytes, median unchanged (~16.04M). Two mechanisms, measured-first.
+
+### S1: LZMA 9|EXTREME repack -- PROVEN, -1,088,717 bytes for zero ops change
+The .fjm is FORMAT_RAW LZMA2 at library-default preset 6 (the recompression control reproduced the
+shipped blob BYTE-EXACTLY, which also proves the build did NOT use the fast match finder despite
+FJM_LZMA_FAST=True in harness.py -- the deg/ritual path evidently writes without it).
+* preset 9 alone: +1.86% (WORSE). dict 256MB: +2.43% (WORSE) -- **the long-range-redundancy
+  hypothesis is refuted**; region B's per-seg leaves do not cross-match at distance.
+* **9|EXTREME: 15,168,954 -> 14,080,237 (-7.18%). Decode 1.00s vs 1.11s -- FASTER. Encode 581-676s,
+  once, at ship time.**
+* `scratchpad/12m/repack.py` (selftest PASS incl. corrupt-byte negative control) repacks any .fjm;
+  flipjump-151 reader got `dict_size: 1<<26` in _LZMA_DECOMPRESSION_FILTERS (reads old files too).
+
+### S2: shared pair-blocks in generate_bands_walk_fj -- IMPLEMENTED, gate P9-1 RUNNING
+Census: 40,567 pair instances, **5,326 distinct (y2,c)**, reuse 7.6x, ~172 static ops each; the
+pair trees own ~85% of region D's 5.47MB. The M4 clamp-tail move applied one level up.
+
+**The 3-outcome fcall lane mechanism** (stl.fcall's landing op IS its disarm):
+body: `wflip vpb_px+w, ret, vpb_pb_Y_C` / `pad 4` / ret: 3 lane wflips (clamp/stop/continue),
+each lane disarming with its own armed value. Block reports outcome by flipping bit 6 or 7 of
+vpb_px's jump field before `;vpb_px`. Cell provably zero on every path.
+
+Verified before any build:
+* `p9_1_shared_pairs.py`: byte-identical output over 6 windows + an 18-walk sequence; lane-swap
+  sabotage DETECTED. ⚠ first run was VACUOUS -- micro.compare's `if printer:` skips capture for
+  an EMPTY list and returns None digits; the R9 control caught my own harness. Non-empty printer
+  + an assert on capture now guard it.
+* `tests/fj/test_bands_walk.py`: 15/15 through the real assembler+interpreter vs the oracle,
+  including new cross-body-sharing cases and the block-count negative control.
+
+Projection (site arithmetic, NOT a promise): body side 4 wflip sites/pair vs 14.8 today ->
+~-4M static ops in region D. Runtime +~2x popcount(ret) per WALKED pair (~1.1k/frame) ~ +30-40k
+ops/frame. The sweep decides; the file size is read off the artifact.
+
+## AL. P9-1 SHIPPED: THE FILE HALVED AND THE FRAME DID NOT MOVE (2026-09-05)
+
+```
+PICTURE 260/260 byte-exact      VACUITY 254 distinct     ca2_sweep PASS
+MEDIAN  16,038,392 -> 16,055,788   (+17,396, +0.11% -- a tenth of placement-lottery noise)
+DEG     -3,272 / +38,179 / +16,916 / +15,987
+FILE    15,168,954 -> 7,923,027    (-47.8%)          banks part -34% lines, labels -72%
+```
+
+Ship criterion for this gate is the owner's stated goal (file ~12M, speed unchanged), so the
+ritual's ops-sign KILL label does not apply: **SHIP.** The 12MB target is overshot by 4MB before
+the 9E repack is even applied.
+
+**Why it beat the projection (~-4M ops of content predicted, ~-7.2MB of file delivered):** the
+windowed attribution priced the trees' own bytes but not their NEIGHBORHOOD effect -- 599k
+high-entropy wflip chains interleaved with everything in region D also poisoned the
+compressibility of what they sat next to. Removing content can be worth more than its own bytes.
+
+**Regression net:** tests/fj/test_bands_walk.py 15/15 (incl. new cross-body sharing cases +
+block-count negative control). tests/host: 6 failures, ALL PRE-EXISTING on this dirty branch
+(verified by stash: identical 6 fail with the change absent); 479 pass both ways.
+
+**The S-campaign scoreboard:** S2 alone lands 7,923,027. S1 (repack 9|EXTREME, proven -7.18% on
+the old image, decode FASTER) applies on top; result recorded when the encode lands. The two
+compose: S2 shrinks content, S1 shrinks encoding.
+
+### AL.1 S1-on-S2, measured: the two levers do NOT stack linearly
+
+Repacking the P9-1 artifact at 9|EXTREME: **7,923,027 -> 7,795,688 (-1.61%)**, bit-identical
+through the reader. On the OLD image the same repack was -7.18%. The S2 content removal took
+most of what 9E's deeper search was finding -- the entropy the EXTREME pass exploited WAS largely
+the tree chains. So: final artifact 7,795,688 bytes; keep the repack in the ship pipeline (it is
+~free at ship time and decode is faster), but do not book -7% for it on future images.
+
+### AL.2 S1 RETIRED (owner decision, 2026-09-05): -127,339 bytes is not worth the moving parts
+
+With S2 shipped, 9|EXTREME saves 1.61%, costs ~16 min of encode at ship, and requires a reader
+dict bump in flipjump-151. Owner: skip it. The reader revert is done (fjm_consts.py back to
+stock), the 9E artifact is deleted, and THE ship artifact is P9-1.fjm -- 7,923,027 bytes, written
+by the untouched standard build pipeline. `repack.py` stays in scratchpad/12m as a proven tool
+(selftest + negative control) should a future image want it -- rememeber its saving must be
+re-measured per image (AL.1: it shrank 7.18% -> 1.61% when S2 removed the entropy it fed on).

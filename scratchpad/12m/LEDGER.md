@@ -354,3 +354,5 @@ The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.
 The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.
 Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two residuals
 (-16, -192) were carried forward and closed out.
+| P8-1 | P8 | sparse_exact_xor PAD parameter; per-macro pads 512-16384 on 282 call sites in 36 hot doom macros | +988759/+180722/+1234100/+122130 | 16,687,779 (+4.05%) | KILL | reverted |
+| P9-1 | S(ize) | shared pair-blocks: one vpb_pb per distinct (y2,c) via 3-lane fcall; 40,567 instances -> 5,326 blocks | -3272/+38179/+16916/+15987 | 16,055,788 (+0.11%) | **SHIP (size criterion)** | fjm 15,168,954 -> 7,923,027 (-47.8%); 260/260 byte-exact |

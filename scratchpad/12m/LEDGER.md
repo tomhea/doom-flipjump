@@ -312,6 +312,40 @@ cost +25.8%. The marginal return did NOT thin out: 128 gave -607,482 (bundled wi
 new pads pulled wflip chains out of the segment's wflip area. Padding can shrink the image.
 
 ### Running total after 18 ideas: 18,982,338 -> 16,052,722 = **-2,929,616 (-15.43%)**
+
+| P7-11 | P7 | `add_mul` + `cmp` return pads 32 -> 64 | -33,071 / -46,686 / -13,604 / -19,516 | **16,038,392** (-14,330, -0.09%) | SHIP (thin) | (commit) |
+
+**P7-11: the lever is done.** 4 -> 32 gave -83,640; 32 -> 64 gives -14,330 for +381,750 bytes.
+Diminishing, unlike exact_xor where the second doubling beat the first. Stop here on these two.
+
+### Running total after 19 ideas: 18,982,338 -> 16,038,392 = **-2,943,946 (-15.51%)**
+
+| P7-12 | P7 | widen five pad families (triple 256, double/if_flags/clear_carry/jump_table 128) | -38,405 / +348,870 / +14,733 / +286,933 | 16,257,841 (+1.37%) | **KILL** | reverted |
+
+**P7-12 KILLED, and it closes the pool.** Two consecutive widening attempts have now reversed --
+`exact_xor` 256 -> 512 (+316,510) and this five-family bundle (+219,449). Every pad in the tree
+is at or near its measured optimum: exact_xor 256, double_exact_xor 64, triple_exact_xor 128,
+if_flags 64, clear_carry 64, jump_to_table_entry 64, read dance 64, add_mul/cmp 64, mul.init 4096.
+
+### THE PAD POOL IS EXHAUSTED. Final: **-1,635,512 over 15 shipped directions**, 4 kills.
+What remains is not reachable: `bit.exact_xor` holds 392,250 but has ~600,000 expansions and
+padding it overflows the address space; `hex.exact_xor` still shows 5,147,872 'available' but is
+past its optimum at 256. The census's 'available' column is an upper bound assuming free
+alignment -- it is not a to-do list.
+
+### FINAL: 19 ideas shipped, 18,982,338 -> 16,038,392 = **-2,943,946 (-15.51%)**
+
+| pool | ideas | delta |
+|---|---:|---:|
+| P1 width doctrine | 3 | -211,187 |
+| P7 zero deletions | 1 | -16,249 |
+| P2 pointer family | 6 | -594,650 |
+| P3 multiply | 2 | -497,112 |
+| **P7 pads** | **15** | **-1,635,512** |
+
+Binary 11,307,396 -> 15,168,954 bytes (+34%). wflip cost 15,260,433 (81.1% of frame) ->
+13,619,278 (79.5%): the pads took 1.64M ops out of the dominant cost class directly.
+Pads alone, 15 directions: **-1,635,512**.
 Pads alone, 14 directions: **-1,621,182**.
 Pads alone (P7-4, P7-6, P7-7, P7-8): **-1,537,542**.
 Pads alone (P7-4, P7-6, P7-7): **-812,815**.

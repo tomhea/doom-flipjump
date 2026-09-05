@@ -728,3 +728,34 @@ The saving-to-space ratio a census gives is an OVERESTIMATE by exactly (total / 
 with the table above before proposing any further pad. The address-space ceiling is real: at
 w = 32 the image cannot grow without bound, and the assembler's failure mode is an OverflowError
 with no indication of which macro caused it.
+
+## Z. THE PAD POOL, CLOSED: -1,635,512 over 15 directions, and where each lever stops
+
+Every pad in the stl is now at a MEASURED optimum. Two consecutive widening attempts reversed --
+`hex.exact_xor` 256 -> 512 (+316,510) and a five-family widening bundle (+219,449) -- which is the
+empirical signal that the pool is done.
+
+| macro :: label | optimum | evidence |
+|---|---|---|
+| `hex.exact_xor :: switch` | **256** | 16->128 -607,482; 128->256 -724,727; 256->512 **+316,510** |
+| `hex.double_exact_xor :: first_flip` | 64 | 128 was worse in the P7-12 bundle |
+| `hex.triple_exact_xor :: first_flip` | 128 | 256 was worse in the P7-12 bundle |
+| `hex.if_flags :: switch` | 64 | 128 worse |
+| `hex.{add,sub}.clear_carry :: ret` | 64 | 128 worse; had NO pad before |
+| `hex.tables.jump_to_table_entry :: return` | 64 | 128 worse; had NO pad before |
+| `read_cell_from_inners_ptrs` | 64 | aligns two labels at once, ~340 expansions |
+| `hex.add_mul :: ret`, `hex.cmp :: ret` | 64 | 4->32 -83,640; 32->64 only -14,330 |
+| `hex.mul.init :: after_add` | 4096 | needs the consumer's window anchored first |
+| `bit.exact_xor :: base_jump_label` | **8 -- DO NOT PAD** | ~600,000 expansions; overflows the address space |
+
+**THE TRAP TO REMEMBER.** The census's "available" column (visits x (popcount-1)) is an UPPER
+BOUND assuming free alignment. After all this work it still reports 5,147,872 available on
+`hex.exact_xor` and 392,250 on `bit.exact_xor` -- both unreachable, one past its optimum and one
+unpaddable. **It is not a to-do list.** The reachable figure is bounded by the re-roll each pad
+causes and by expansion count, neither of which the census sees.
+
+**WHAT PADS ACTUALLY DID.** wflip cost went 15,260,433 (81.1% of frame) -> 13,619,278 (79.5%)
+across the campaign: the pads removed 1.64M ops from the dominant cost class rather than moving
+work around. Binary 11,307,396 -> 15,168,954 bytes (+34%), non-monotonic throughout -- P7-6 added
+1.8M ops of padding for +0.1%, and P7-10 SHRANK the image by 615,204 bytes while adding padding,
+because `get_wflip_spot` pulls chains out of the segment's wflip area into it.

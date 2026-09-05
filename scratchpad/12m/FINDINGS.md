@@ -1379,3 +1379,289 @@ stock), the 9E artifact is deleted, and THE ship artifact is P9-1.fjm -- 7,923,0
 by the untouched standard build pipeline. `repack.py` stays in scratchpad/12m as a proven tool
 (selftest + negative control) should a future image want it -- rememeber its saving must be
 re-measured per image (AL.1: it shrank 7.18% -> 1.61% when S2 removed the entropy it fed on).
+
+## AM. ⚠ THE HOSTED-LOOP TIER NO LONGER ASSEMBLES ON THIS BRANCH (2026-09-05)
+
+Regenerating the m1 restore set needs `ca_labels.py` to build the `hosted-loop` tier to pass 1.
+It DIES:
+
+```
+insert_wflip_ops: ops_list[last_address_index] = wflip_spot.address
+OverflowError: Python int too large to convert to C unsigned long
+```
+
+Same failure class as P7-5 (FINDINGS Y): an address exceeded the assembler's ceiling (on Windows,
+array('L') is 32-bit -> 2^32 bits = 67.1M ops of span). The `game`/deg (visual) tier P9-1 builds
+fine (~35.7M ops span), so this is specific to the hosted-loop tier's layout.
+
+**This is almost certainly why the restore-set regen was interrupted WIP** (m5_setfile/ca_labels
+dirty at session start). Timeline: restore set last regenerated Aug 25 (hosted-loop built fine);
+idea 11 (Sep 3) added the p2_* globals; the P7 pad round (committed on this branch, and in the
+flipjump-151 1.5.1 stl at d22e1d8 "add_mul and cmp return pads to 64") inflated the address span
+across all tiers. S2 is in the tree and shrinks the bands bank hard, yet the hosted-loop tier still
+overflows -- so S2's saving is not enough to bring THIS tier back under the ceiling on its own.
+
+**CONSEQUENCE FOR THE MERGE:** the branch has a broken build path (hosted self-reset), not just 2
+red tests. The 4 mapbake fixes are committed and real; the 2 restore_set tests cannot go green
+until the hosted-loop tier assembles again. That is a genuine regression to investigate (reduce
+that tier's span -- extend S2's reach, or selectively back off the pads that pushed it over), not
+a test-harness fix. Flagged to the owner rather than grinding heavy builds against an overflow.
+
+## AM.1 The overshoot is static + banks-dominated, and pinning the exact cause needs milestone work
+
+Overflow probe: hosted-loop peak wflip address 194,308,162 words vs 134,217,728 ceiling =
+**+60,090,434 words, 44.8% over.** Only 14,003 wflip spots handed out before the crash, so peak
+~= first_address -- the INLINE (static, pre-chain) section is already ~194M words.
+
+Emit-only part sizes (chars of fj source, hosted-loop tier, S2 active):
+  entry 2,455 | tables 10,026,130 | main 5,509 | segconsts 1,379,539 | walk 3,524,713 |
+  state 10,630 | banks 35,205,634  -> TOTAL 50,154,610 chars.
+The banks part dominates (70%), tables next (20%). 50M chars of source expand (rep/macros) to the
+~97M inline ops (194M words) that overflow.
+
+⚠ THE MURKY PART: the `visual` tier (P9-1, S2) ASSEMBLES and fits at ~71M words with a comparable
+(larger, even) source. hosted-loop = visual + {player_sim, collide, moving_things, self_reset}.
+Those flags add modest CODE, yet the assembled static size is 2.7x visual's. Pinning why needs an
+apples-to-apples visual-vs-hosted-loop assembled-size comparison (more heavy builds) -- the source
+char counts alone do not explain a 2.7x assembled-size gap, which points at wflip-chain/popcount
+expansion differing by tier, i.e. back at the pad-inflated address span.
+
+**BOTTOM LINE: this is a milestone-scale size-reduction on a pre-existing (Aug-25-buildable,
+now-broken) tier, not a session trim. It is ORTHOGONAL to the delivered size win** (P9-1 game/deg
+binary, 7.9MB, +0.11%, committed). It blocks the restore-set regen -> the 2 restore_set tests ->
+the branch merge cleanup, but not the shipped picture the ritual gates.
+
+⚠ OPEN QUESTION worth one build before any merge decision: does the SHIPPED `game` tier (more flags
+than hosted-loop) also overflow? If yes, the branch's playable product is un-assemblable and that
+is the real priority; if no, only the m1-capture path is blocked.
+
+## AN. ⚠⚠ THE SHIPPED GAME TIER ALSO OVERFLOWS -- and the signature says SINGLE CAUSE (2026-09-05)
+
+game tier: peak 195,391,042 words, **+61,173,314 (45.6%) over** the 2^27 ceiling.
+hosted-loop: 194,308,162 words, +60,090,434 (44.8%).
+
+**Both crash at EXACTLY 14,003 wflip spots and within 1M words of each other**, despite the game
+tier having 3 more flags (standalone/menu/doors) and much more content. That near-identical
+signature means the overflow is NOT diffuse tier content -- it is a SINGLE cause common to both,
+which is everything they share and the visual/deg tier (62M words, FITS) does not: **self_reset**.
+
+Peak ~= first_address (only 14,003 spots), so the WFLIP AREA of the first segment starts at ~194M
+words -- i.e. the inline section that precedes it is ~194M words for both self_reset tiers vs ~62M
+for the non-self_reset visual tier. self_reset appends m1_reset.fj and lays out the reset image;
+the ~132M-word gap is almost certainly a memory-layout / reset-region effect, not 132M words of
+real code.
+
+**This reframes the whole session's cleanup: the branch's PLAYABLE product does not assemble.**
+The delivered 7.9MB size win stands (it is the deg/visual tier, which fits and is byte-exact) --
+but the game a user would run is broken on this branch. Fixing this is the priority over any merge.
+
+Encouraging: a single shared cause at a fixed ~194M first_address is far more likely a targeted
+fix (a reset-layout base address, a mis-sized reserved region, or one baked reset structure) than
+a 60M-word diffuse-bloat problem. Next: find what sets first_address so high for self_reset builds
+-- start OFFLINE in the memory map / selfreset layout before spending another build.
+
+## AN.1 self_reset EXONERATED -- it is the `hosted` tier's sim CONTENT (2026-09-05)
+
+Bisect: probe(tier="hosted", self_reset=FALSE) overflows at peak **194,308,162 words -- byte-
+identical to hosted-loop (self_reset=TRUE)**, same 14,003 spots. So self_reset adds nothing to the
+overflow (its pass-1 file is empty, as deduced). game is 195,391,042 (the extra ~1M from
+standalone/menu/doors).
+
+The cause is the `hosted` content = `things + {player_sim, collide, moving_things}`. The `visual`
+tier (things only) fits at 62M words; the three sim flags turn ~3% more SOURCE TEXT into ~132M more
+inline words -- the signature of a rep(N) unroll (a few chars -> millions of ops), NOT content
+volume and NOT a reserve (grep found no large reserve/hex.vec in source). Most likely the collide
+(geometry-as-code) or moving_things (runtime thing table) bake.
+
+NEXT (not yet run -- checkpoint): bisect the flag with the sub-tiers that toggle ONE each --
+`hosted-nosim-nocollide` (things+player_sim), `hosted-nocollide` (+moving_things), `hosted-static`
+(+collide). Whichever fits vs overflows names the flag; then find the rep(N) in that flag's emitter
+and cap/share it (S2-style) so the tier fits under 2^27 words. Each probe is one heavy build.
+
+## AO. ROOT CAUSE: THE PADS. Pre-pad hosted = 41.5M words (FITS); with pads = 194M (2026-09-05)
+
+Owner's method (revert the optimization) settled it. Checked out flipjump-151 to 0dcda77 (the last
+PRE-PAD commit, before the P7 round c6b9634..d22e1d8) and re-probed:
+
+| tier | pre-pad stl (0dcda77) | with pads (d22e1d8, current) | ceiling |
+|---|---:|---:|---:|
+| hosted | **41,541,186 words -- FITS** | 194,305,602 -- overflow | 134,217,728 |
+
+**The P7 pad round adds 152,764,416 words -- a 4.7x blowup -- and it is uniform across every
+region:** seg_pass2_leaf 4.5M->29.2M (6.5x), each cm*_vyd 2.16M->9.96M (4.6x), sprbank unchanged
+(2.92M, no exact_xor). The multiplier tracks exact_xor density: `pad 256` on a macro that expands
+tens of thousands of times inserts ~128+ filler ops PER EXPANSION, and exact_xor underlies every
+hex.xor in the program. This is FINDINGS Y ("pad space scales with TOTAL expansions") realized at
+catastrophic scale -- the census only ever saw the ~34k HOT expansions, never the ~total that
+padding actually inflates.
+
+**Why only hosted/game broke:** the deg/visual tier is small enough (13M pre-pad -> 62M padded)
+that even 4.7x stays under 134M. The hosted tier, 3x larger from M14 collision (baked point-
+location + 4 movement descents, all from 2026-08-13, pre-dating the Aug-25 fitting build), is
+41.5M pre-pad -> 194M padded -> over. So M14 is the large base and the SEPTEMBER PADS are the
+straw, exactly as the owner suspected.
+
+**THE TRADE THE PADS MADE, now fully priced:**
+- BOUGHT: -1.6M ops on the deg-tier sweep median (the P7 ledger).
+- COST: +49M words on the deg tier (the +3.86MB file bloat S2 later had to undo), AND +153M words
+  on the hosted/game tiers -- which makes the SHIPPED PLAYABLE GAME UN-ASSEMBLABLE.
+
+**RECOMMENDATION: revert the P7 pad round in flipjump-151.** It fixes the game/hosted overflow,
+shrinks the deg binary further (S2 stacks on a pre-pad base), and costs the -1.6M-op speed gain
+(deg median ~16.0M -> ~17.6M). The pad pool was already declared closed (FINDINGS Z) and P8-1's
+sparse-pad retry was KILLED (AJ); this shows the ORIGINAL pads were net-negative too once the game
+tier is in scope. Speed-vs-size-vs-shippability is the owner's call.
+
+## AP. P10-1: PAD REVERT + SPARSE-ON-HOT -- slim won, speed half-recovered (2026-09-05)
+
+```
+SIZE   P7B 15,168,954 -> P9-1(S2) 7,923,027 -> P10-1 6,943,453  (-54% vs P7B, -12% vs P9-1)
+MEDIAN 16,038,392 -> 17,135,838  (+1,097,446, +6.84%)   260/260 byte-exact
+GAME   assembles (42M words first_address, was 195M) -- the overflow is FIXED
+```
+stl: pad round reverted (0dcda77) + sparse_exact_xor/xor/zero/mov re-added (defaults pad 16).
+doom: 282 hot call sites (36 macros, from the h57_1 knapsack) use sparse_ at pad 512-16384.
+
+**The trade, measured:** slim binary + shippable game, but only ~0.5M of the pads' ~1.6M speed
+recovered. Pure pre-pad would be ~+1.6M (+10%); sparse-on-hot lands +1.1M (+6.84%).
+
+**WHY speed under-recovered -- HOT IS VIEWPOINT-DEPENDENT.** The convert list came from ONE frame
+(h57_1). DEG's four viewpoints regressed +6.25..+8.92% -- they hammer exact_xor sites h57_1 did
+not flag, which stayed un-padded (pad 16) here but were pad 256 in P7B. Padding one viewpoint's hot
+set under-covers the others and the sweep.
+
+**NEXT RUNG (the fix): union-over-sweep hot set.** Pad every site hot in ANY sweep frame, not just
+h57_1. Cold-in-every-frame expansions (the bulk / the 4.7x bloat) stay un-padded so the binary
+stays slim; sites hot in any frame get the pad, recovering that frame's lost speed. Headroom is
+~92M words (ceiling 134M, current first_address ~42M pre-pad), so broad coverage is affordable.
+Needs per-frame profiles across the sweep viewpoints to build the union.
+
+## AQ. SPARSE-ON-HOT UNDERDELIVERS: width > coverage, and non-exact_xor pads are unreachable (2026-09-05)
+
+Two shippable (game-assembles) rungs on the reverted base:
+| build | coverage | pad | median vs P7B | size |
+|---|---|---|---|---|
+| P10-1 | 36 macros (h57_1) | per-macro 512-16384 | +6.84% | 6.94MB |
+| P10-2 | 63 macros (union of 5 vps) | uniform 256 | **+8.39%** | 6.86MB |
+
+**P10-2 is SLOWER despite more coverage** -- uniform pad 256 recovers less per site than P10-1's
+wider per-macro pads. WIDTH dominates COVERAGE for speed recovery.
+
+**And broadening exact_xor barely moved DEG (+6.3..7.8% both rungs), because the residual is NOT
+exact_xor.** The P7 pad round padded ~8 stl macros; I only built sparse_ variants for exact_xor
+(via hex.xor/zero/mov). The pads on `if_flags`, `mul.init`(4096), `add_mul`, `cmp`,
+`double_exact_xor`, `triple_exact_xor`, `jump_to_table_entry` are reverted and UNREACHABLE by any
+exact_xor tuning. Their share of the -1.6M is simply gone.
+
+**Union-at-full-widths is not an option:** the per-macro-optimal widths on 111 macros = 83M words
+of slack = 93% of the ceiling -> would re-overflow. So there is no single (coverage x width) that
+both recovers the full -1.6M and stays under 2^27.
+
+**HONEST CONCLUSION.** The pads' 16.04M was NEVER a shippable-game number (it overflows the game
+tier). The shippable baseline is pre-pad ~17.6M. P10-1 recovers to 17.14M (+6.84%) at 6.94MB with
+the game assembling -- the best shippable result. Fully reaching 16.04M would need sparse_ variants
+of ALL padded stl macros at tuned widths, under the ceiling: a large multi-gate optimization with
+uncertain payoff. The size+shippability win is banked regardless (6.86-6.94MB vs 15.2MB, game builds).
+
+## AR. THE RESEARCH: how to get 16M on a SHIPPABLE game via selective padding (2026-09-05)
+
+Padding multiplies CODE regions ~4.6x (measured, region-probe diff; sprbank/data is 1.0x). So
+padding EVERY expansion overflows, but padding is cheap where EXPANSIONS are few. Per padded macro,
+speed-at-stake (union-max hot cost over 5 viewpoints) vs expansions (size driver):
+
+| macro | hot cost | expansions | plan |
+|---|---:|---:|---|
+| hex.exact_xor | 12,292,049 | 80,114 | SPARSE-on-hot (size killer) |
+| hex.double_exact_xor | 2,427,434 | 23,277 | SPARSE-on-hot |
+| hex.triple_exact_xor | 1,585,209 | 5,592 | **KEEP padded -- cheap** |
+| hex.if_flags | 759,654 | 75,232 | SPARSE-on-hot |
+| hex.add_mul | 715,258 | 2,532 | **KEEP padded** |
+| hex.add.clear_carry | 609,960 | 4,456 | **KEEP padded** |
+| hex.cmp | 372,196 | 62,944 | SPARSE-on-hot |
+| hex.tables.jump_to_table_entry | 346,700 | 2,240 | **KEEP padded** |
+| read_cell_from_inners_ptrs | 202,078 | 226 | **KEEP padded** |
+| hex.mul.init | 115,356 | 14 | **KEEP padded** |
+| hex.sub.clear_carry | 44,640 | 185 | **KEEP padded** |
+
+**WHY P10-1/P10-2 ONLY GOT HALF:** they sparse-restored ONLY exact_xor and NEVER re-padded the 7
+cheap macros. Those 7 hold ~3.6M of speed-at-stake for ~15k expansions -- re-padding them in the
+stl DEFINITION is nearly free on size (~1-2M words vs 92M headroom) and recovers their full speed.
+
+**THE PLAN (selective padding):**
+1. RE-PAD the 7 cheap low-expansion macros in the stl definition (free full speed).
+2. SPARSE-on-hot the 4 size killers (exact_xor + double_exact_xor + if_flags + cmp) at wide pads
+   on hot sites only.
+Budget: cheap-keep ~1-2M words + sparse-on-hot hot-only ~10-15M words << 92M headroom. The game
+tier stays well under 2^27 AND recovers toward the full -1.6M -> ~16M on a SHIPPABLE game.
+
+Config A (this step): re-pad the 7 cheap + exact_xor sparse-on-hot (P10-1 wide widths). Measures
+the cheap-keep contribution on top of exact_xor. double_exact_xor/if_flags/cmp sparse come next
+if needed.
+
+## AS. FULL-COVERAGE DEF PADDING BEATS SPARSE-ON-HOT (2026-09-05)
+
+Progress on the shippable path (pads reverted, game-tier-aware):
+| config | median vs P7B | size | note |
+|---|---|---|---|
+| P10-1 sparse 36 macros wide | +6.84% | 6.94MB | sparse under-covers exact_xor's call paths |
+| P10-2 sparse 63 macros @256 | +8.39% | 6.86MB | width < coverage; 256 too narrow |
+| P10-3 cheap-keep + sparse 36 | +6.94% | 6.80MB | cheap-keep ~0 on MEDIAN (hot in DEG, not median) |
+| **P10-4 exact_xor DEF pad 128 full** | **+5.33%** | **7.39MB** | **best; full coverage reaches all call paths** |
+
+**KEY: exact_xor is -1.33M of the pads' -1.6M (P7 ledger: 16->128 -607k, 128->256 -724k), called
+from MANY paths (stl-internal mov/cmp, cold doom sites) that sparse-on-hot cannot reach by hand.
+Definition-padding covers ALL of them at once.** DEG viewpoints tightened to +4.3..6.2% (vs sparse
++6.25..10.5%). Full coverage is the right lever.
+
+Remaining gap to 16M = ~890k, which is exactly exact_xor 128->256 (-724k) + the double/if_flags/cmp
+defs (un-restored). BUT exact_xor def 256 = ~4.6x code = game first_address ~170M > 2^27 (overflow).
+def 128 game first_address is 105.9M/134M. So the max full-coverage width is bounded; def 256's
+full -1.33M does not fit the game tier. Reaching <16M needs either the max fitting width (~160-192)
++ double/if_flags/cmp def-pads, or shrinking the game base (M14 collision bake) to open room.
+
+## AT. THE PADDING CEILING ON A SHIPPABLE GAME: ~16.58M (+3.41%) (2026-09-06)
+
+Full-coverage selective padding ladder (pads reverted, then re-added definition-wide by hot-cost,
+game-tier-aware):
+| config | median | size | note |
+|---|---|---|---|
+| P10-4 exact_xor def 128 | +5.33% (16.89M) | 7.39MB | full coverage >> sparse |
+| P10-5 + double64 + if_flags64 | **+3.41% (16.58M)** | 7.62MB | **BEST shippable** |
+| P10-6 + cmp64 | +3.61% (16.62M) | 8.03MB | cmp NET-NEGATIVE on median; reverted |
+
+**BEST SHIPPABLE = P10-5: exact_xor def 128 + double_exact_xor 64 + if_flags 64 + 7 cheap-keep +
+S2. Median +3.41% (16,584,954), 7.62MB, and the GAME TIER ASSEMBLES** (overflow probe: "reached
+emit_reset_part WITHOUT overflow", 105.9M words, 21% headroom at exact_xor 128).
+
+**WHY IT PLATEAUS ~540k ABOVE P7B's 16.04M:** the remaining gap is exact_xor 128->256 (-724k in
+the P7 ledger). But exact_xor def 256 = ~4.6x code -> game first_address ~170M >> 2^27 (overflow),
+and even def 160 THRASHED (9.7GB RSS, 0.23GB free, ~30% CPU -- the assembler is memory-bound). So
+128 is the RAM/address ceiling for exact_xor on the game tier. The median is measured on the DEG
+tier but the exact_xor pad is ONE stl definition shared by both tiers, so the game's 128 cap bounds
+the DEG median too.
+
+**TO GO BELOW 16M: shrink the GAME BASE first.** The game tier is ~42M words pre-pad, dominated by
+the M14 collision bake (ptloc baked point-location + cm*_vyd x4, ~40M words). S2-style sharing on
+THAT (as S2 halved the bands) frees address+RAM room for exact_xor pad 256, which drops the median
+to ~16.04M or below. That is the next lever; padding alone is exhausted at 16.58M.
+
+## AU. BELOW-16M IS NOT REACHABLE VIA PADDING -- the arithmetic (2026-09-06)
+
+The median (ship criterion, DEG tier) reaches 16.04M only with exact_xor pad 256 (the -1.33M lever).
+exact_xor 256 multiplies the game tier 4.6x (measured: 42M base -> 195M). To fit under 2^27 (134M)
+at 4.6x, the base must be < 29.1M -- a 13M cut (31% of the 42M base).
+
+Collision bake, pre-pad (region probe): candidate blocks 8.64M (cmh check_position 2.15M + cma/cmb/
+cmc try_move 2.16M x3), + seg_pass1_ts_leaf 0.79M + simcollide 0.35M + seg_pass1_leaf 0.25M ~=
+10M total. **S2-style try_move sharing saves ~4.3M (2x of the 3 try_move copies); ALL collision is
+~10M.** Even cutting all 10M -> base 32M -> x4.6 = 147M -> STILL overflows.
+
+**THE 13M CUT NEEDED FOR exact_xor 256 IS LARGER THAN THE ENTIRE COLLISION BAKE.** So exact_xor 256
+cannot fit the game tier by any collision reduction, and below-16M is not reachable via padding.
+
+What collision sharing CAN do: base 42M -> ~37.7M, allowing exact_xor ~192 (37.7 x ~3.4 = 128M <
+134M) -> median ~16.3M. Better than P10-5's 16.58M, not below 16M.
+
+**DEFINITIVE: the padded 16.04M (P7B) is a DEG-tier-only number that overflows the game. On a
+SHIPPABLE game the padding floor is ~16.3-16.58M. Below 16M needs a fundamentally smaller program
+(fewer hex ops / width doctrine / renderer doing less work), not more/wider padding.**

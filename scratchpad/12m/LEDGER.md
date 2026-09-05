@@ -356,3 +356,9 @@ Every idea byte-exact 4/4 and 260/260. Freeze exact on 5 of 7 builds; the two re
 (-16, -192) were carried forward and closed out.
 | P8-1 | P8 | sparse_exact_xor PAD parameter; per-macro pads 512-16384 on 282 call sites in 36 hot doom macros | +988759/+180722/+1234100/+122130 | 16,687,779 (+4.05%) | KILL | reverted |
 | P9-1 | S(ize) | shared pair-blocks: one vpb_pb per distinct (y2,c) via 3-lane fcall; 40,567 instances -> 5,326 blocks | -3272/+38179/+16916/+15987 | 16,055,788 (+0.11%) | **SHIP (size criterion)** | fjm 15,168,954 -> 7,923,027 (-47.8%); 260/260 byte-exact |
+| P10-1 | P10 | pad round REVERTED in stl + sparse_ on 282 hot sites (h57_1) + S2; cold un-padded | +2621853/+1499598/+2479523/+1441704 | 17,135,838 (+6.84%) | slim WIN / speed partial | fjm 6,943,453 (-54% vs P7B, -12% vs P9-1); 260/260 byte-exact; game tier fits (42M words) |
+| P10-2 | P10 | union-over-5-viewpoints hot set: 63 macros @ pad 256 + S2, pads reverted | +2084474/+1863065/+2021272/+1412286 | 17,384,587 (+8.39%) | slimmer but SLOWER than P10-1 | fjm 6,855,480; width>coverage: uniform 256 < P10-1's per-macro 512-16384 |
+| P10-3 | P10 | 7 cheap-keep pads + exact_xor sparse-on-hot(36) + S2 | +2653820/+1080889/+2922461/+1110655 | 17,151,507 (+6.94%) | cheap-keep ~neutral on median | fjm 6,799,822 |
+| P10-4 | P10 | exact_xor DEF pad 128 (FULL coverage) + 7 cheap-keep + S2 | +1308862/+1389537/+1403760/+1395982 | 16,892,522 (+5.33%) | BEST; full-coverage > sparse | fjm 7,387,587; deg fits; game-fit pending |
+| P10-5 | P10 | exact_xor128 + double64 + if_flags64 + 7 cheap-keep + S2 (full-coverage) | +1308862(deg approx) | 16,584,954 (+3.41%) | BEST shippable padding config | fjm 7,616,097; game fits at exact_xor128 (105.9M words, 21% headroom) |
+| P10-6 | P10 | P10-5 + cmp64 | -- | 16,617,424 (+3.61%) | WORSE than P10-5 (cmp def-pad net-negative on median) + bigger | fjm 8,025,514; reverted |

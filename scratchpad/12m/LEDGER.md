@@ -280,6 +280,18 @@ so that table is the only way to see this coming.
 into wflip chains almost exactly. Padding really is close to free when it is not enormous.
 
 ### Running total after 15 ideas: 18,982,338 -> 16,911,740 = **-2,070,598 (-10.91%)**
+
+| P7-7 | P7 | `read_cell_from_inners_ptrs` pad 4 -> 64 + `mul.init` after_add pad 4096 (retry) | -128,232 / -125,210 / -118,292 / -96,272 | **16,861,090** (-50,650, -0.30%) | SHIP | (commit) |
+
+**P7-7.** Both chosen by the FINDINGS-Y rule (count TOTAL expansions first):
+`read_cell_from_inners_ptrs` is only ~340 expansions, and its pad aligns TWO hot labels at once --
+`read_ptr_and_flip_back` (flipped as a full value on every dereference) and `cleanup`, two ops
+past it. `mul.init`'s pad 4096 is the retry of the change that BROKE the frame in P7-2: its
+~1,800-op shift used to push the narrow-arm window over a 16^5 boundary, and that window is now
+anchored, so the shift is absorbed. Binary +36,428 bytes (+0.26%).
+
+### Running total after 16 ideas: 18,982,338 -> 16,861,090 = **-2,121,248 (-11.17%)**
+Pads alone (P7-4, P7-6, P7-7): **-812,815**.
 Pads alone (P7-4 + P7-6): **-762,165**.
 The pointer pool (P2-1..P2-6) is **-594,650** of that, in six gates.
 The arm family alone (P2-3/4/5) is **-390,290** of that, in three gates.

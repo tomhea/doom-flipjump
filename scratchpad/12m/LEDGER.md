@@ -300,6 +300,19 @@ cost +25.8%. The marginal return did NOT thin out: 128 gave -607,482 (bundled wi
 256 gives another -724,727 on its own.
 
 ### Running total after 17 ideas: 18,982,338 -> 16,136,363 = **-2,845,975 (-14.99%)**
+
+| P7-9 | P7 | `exact_xor` pad 256 -> 512 | +760,500 / -289,139 / +767,339 / -103,848 | 16,452,873 (+1.96%) | **KILL** | reverted |
+| P7-10 | P7 | `hex.add_mul` + `hex.cmp` return pads 4 -> 32 | -169,402 / -153,564 / -145,728 / -130,180 | **16,052,722** (-83,640, -0.52%) | SHIP | (commit) |
+
+**P7-9 KILLED -- and it locates the optimum.** exact_xor's pad: 16->128 gave -607,482,
+128->256 a further -724,727, 256->512 REVERSED to +316,510 with two deg viewpoints ~760k worse.
+**256 is the measured optimum**, now recorded in the stl source so nobody rediscovers it.
+
+**P7-10.** Binary 15,402,408 -> 14,787,204 = **-615,204 bytes (-4%)** while ADDING padding: the
+new pads pulled wflip chains out of the segment's wflip area. Padding can shrink the image.
+
+### Running total after 18 ideas: 18,982,338 -> 16,052,722 = **-2,929,616 (-15.43%)**
+Pads alone, 14 directions: **-1,621,182**.
 Pads alone (P7-4, P7-6, P7-7, P7-8): **-1,537,542**.
 Pads alone (P7-4, P7-6, P7-7): **-812,815**.
 Pads alone (P7-4 + P7-6): **-762,165**.

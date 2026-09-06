@@ -1,5 +1,11 @@
 """THE SUCCESS-METRIC INSTRUMENT for the combined-full-game campaign (owner spec, 2026-09-06).
 
+⚠ DRAFT -- `measure_speed()` IS NOT RUNNABLE YET. Its `PcIO` import and kwargs are a GUESS;
+the real device is the `Recording`/`Stopper`/`PcIO`/`NativeDeviceMemory` composition in
+`scratchpad/m2_std_gate.py:run_fj`. It also has no R9 negative control and no assertion that 100
+frames were actually presented, so NO NUMBER FROM THIS FILE MAY BE QUOTED AS EVIDENCE YET.
+See docs/handoff-fullgame-metrics.md §2 and gaps G5/G6. `word_pct()` alone is finished and correct.
+
 Two measured metrics, and nothing else is the success criterion:
 
   SPEED  -- play 10 different games of 100 frames each on the FULL game binary (collisions, sim,

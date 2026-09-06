@@ -156,10 +156,20 @@ Finished 2026-09-06 after CR-2026-09-06 (PR #83) found the draft's `measure_spee
 * **G6 is closed at the boundary.** `_demand_full_length` runs on every runner's result inside
   `measure_speed`, not inside `one_run` — the first version put it in `one_run` and its own
   negative control walked straight past it, reporting 250 ops/frame for a run that lost a frame.
-* **G5 is closed and measured.** The ten scripts fan out to ten different headings before walking.
-  `--validate` steps the ORACLE through all ten; the controls require ≥6 distinct end cells, every
-  run moving, and ≥256 units of spread. Measured: **9 distinct end cells of 10, minimum 276 units
-  travelled, 1,621-unit spread.**
+* **G5 — closed, RE-OPENED by CR-2026-09-06 on PR #84, and closed again properly.** The first
+  attempt was open-loop key patterns plus a `travelled >= 64` check, and it was wrong in both
+  halves: a fixed key pattern cannot know where the walls are, so nine of ten runs were pinned
+  against geometry for the majority of their movement frames — the 80th-percentile run, the
+  headline number of the whole campaign, **moved on 5 of its 92 movement frames** — and the
+  aggregate distance check passed them anyway, because a player scraping a wall still accumulates
+  distance. `script()` now GENERATES each run by stepping the oracle (walk; turn when the geometry
+  refuses), and `--validate` counts blocked frames PER FRAME. Measured after the fix: **every run
+  moves on 100% of its movement frames**, 9 distinct end cells of 10, 2,258-unit spread. The
+  control is mutation-tested against the old scripts and rejects them at 95% blocked.
+
+  ⚠ The lesson is the one CLAUDE.md rule 3 already states, in the file that states it: an
+  aggregate check is not a control. "Total distance > 0" and "the player is playing" are different
+  claims, and only the second one is the metric's premise.
 * **R9 is satisfied: `--selftest`, 13 controls, and they have already caught two real bugs**
   (the misplaced frame assertion above, and `emit_sizes` measuring `repr()`). `--selftest --fjm
   <path>` adds determinism on a real binary.
@@ -391,7 +401,14 @@ more size lever (the obvious candidate: S2-style sharing of the collision `try_m
 words, which would land it at ~34%). **Measure the real decompressed number the moment the pre-pad
 game is built; do not carry the 31% estimate forward.**
 
-### G3. The arithmetic to 20M ops/frame does not close.
+### G3. The arithmetic to 20M ops/frame does not close. — INPUT UNDER RE-MEASUREMENT
+
+⚠ G3 prices every rung against a baseline of ~33.4M, which came from `m2_std_gate`'s single
+door-route trajectory **including its menu frames over 45 frames**. Like-for-like against the
+metric (menu subtracted, per-frame) that route is **34,984,855 ops/frame**. Whether the
+ten-run 80th percentile is above or below it is a measured question, not an assumed one, and the
+first attempt to answer it used broken scripts (see G5). Do not treat either number as the
+baseline until a `gamespeed` run whose `--validate` output is attached says so.
 
 Baseline ~33.4M, target 20M — a 13.4M cut. The rungs, generously priced: collision ~11.6M, of which
 maybe half is redundant (~5.8M); render width doctrine (~1-2M, unmeasured); self-reset (unknown).
@@ -409,7 +426,17 @@ redundant work** (the repeated seed descents, dead candidates after an early exi
 sharing. Sharing belongs to the SIZE metric (and see G2 — it is likely needed there). Split the
 rung in two and price each against its own metric.
 
-### G5. The 10 games are not validated as representative — and the metric is 11x sensitive to that.
+### G5 — RAISED, IGNORED, AND THEN VINDICATED. Read this before writing any harness here.
+
+**This gap was written, then closed on a control that could not fail, and the CR that caught it
+had to run the very dump this section names.** The paragraph below is unchanged from when it was
+written; it predicted the exact failure that occurred. Its instruction — *"dump each run's end
+position and a frame or two, and require the 10 to differ meaningfully"* — was not carried out
+before the first baseline was taken and promoted into `CLAUDE.md`. §2 records the fix.
+
+Note also what this section says about `m2_std_gate`'s route: *"the play-test's oracle-planned
+route is the model — it walks somewhere real"*. That was correct. The first baseline PR called that
+route "unrepresentative" while its own scripts were the broken ones.
 
 `script(seed)` emits deterministic key patterns, but nothing checks that they explore anything: a
 script that walks into a wall for 100 frames measures a cheap corner. The render alone spans

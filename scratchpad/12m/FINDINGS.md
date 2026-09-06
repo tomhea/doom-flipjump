@@ -1773,6 +1773,9 @@ pad. ~28x more size-efficient for ~half the win.
 and their callers are dominated by `hex.zero` (33.08%), `hex.xor_zero` (15.52%), `hex.xor`
 (12.63%) and `hex.pointers.set_flip_and_jump_pointers` (9.76%).
 
+## AY — ⚠⚠ RETRACTED, see FINDINGS BA. The premise was a PROFILER ARTIFACT.
+## (kept verbatim below because the way it was wrong is the useful part)
+
 ## AY — `distscale` is declared 8 nibbles and needs 5. Up to ~1.19M ops/frame.
 
 `distscale` is the largest single DOOM macro in the game-tier profile: **12.14% of all ops**
@@ -1843,3 +1846,47 @@ whole 16384 tier — but that is a hypothesis, not a measurement. Separate them 
 Pad the hot sites to ~1024-4096 and stop. `ops per instance` selects WHICH sites (FINDINGS AX);
 this bounds HOW FAR. Anything that grows the image measurably is paying downstream interest on
 every wflip in the program.
+
+
+## BA — AY IS RETRACTED: `distscale`'s 12.14% was 100% MISATTRIBUTED, and the change is worth 0
+
+AY claimed `distscale` was the largest single doom macro at 12.14% of the frame and that narrowing
+it 8 -> 5 nibbles was worth ~1.19M ops/frame. **Built it, gated it, measured it. It is worth
+nothing**, and the premise was false.
+
+| | S2 | D1 (`distscale` 8->5) | delta |
+|---|---:|---:|---:|
+| binding | 23,493,680 | 23,495,707 | **+2,027** |
+| mean | 21,466,274 | 21,468,300 | +2,026 |
+| p80 | 25,521,087 | 25,523,113 | +2,026 |
+| words | 51,095,972 | 51,099,046 | +3,074 |
+
+`m2_std_gate` PASS, so the narrowing is CORRECT -- the 160 values provably fit 5 nibbles
+(`generate_lut_fj` validates and would have raised), the stride agrees on both sides, and every
+frame stayed byte-exact. It simply saves nothing, and is fractionally worse. Reverted.
+
+### The root cause: nearest-preceding-label attribution, with no next label
+
+`hotpath.LabelTable.lookup` returns the nearest label at or before an address. **`distscale` is the
+LAST top-level label in the doom image**, so every op after it in the address space was credited to
+it. Measured directly:
+
+    ops attributed to `distscale`            : 9,726,044  (12.14% of the frame)
+    ...actually inside the 81,920-bit table  :         0  (0.00%)
+    ...code that merely FOLLOWS the label    : 9,726,044  (100.00%)
+
+The table is 160 entries x 8 nibbles = 81,920 bits. Not one profiled op was in it.
+
+### What is and is not affected
+
+* **The xor-family analysis (AW/AX/AZ) stands.** It keys on macro EXPANSION PATHS (`a---b---c`),
+  which encode real nesting, not address proximity. S2's measured -2.00% is unaffected.
+* **Any BARE top-level label in the doom-macro ranking is suspect** -- `distscale` was the extreme
+  case only because nothing follows it.
+
+### The fix, shipped
+
+`rank()` now refuses to credit an op that sits more than 4096 ops past a BARE label, counting it
+UNATTRIBUTED instead, and says how many it dropped. Two controls (C5) require that the guard fires
+on a far op and does NOT fire on a near one. The lesson is the general one: a profiler that always
+returns an answer will always return an answer, including for addresses it knows nothing about.

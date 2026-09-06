@@ -1178,17 +1178,17 @@ ns frame {
         // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
         // byte: at (-309,636) that is 769 column reads cut to 201, and 37 of the 60 projected segs
         // exit here outright. The bounds are maintained WITHOUT any extra reads -- see below.
-        hex.mov 2, xa, x1
+        hex.sparse_mov 1024, 2, xa, x1
         hex.cmp 2, xa, pmin, xa_use_pmin, xa_done, xa_done   // xa = max(x1, pmin)
       xa_use_pmin:
-        hex.mov 2, xa, pmin
+        hex.sparse_mov 1024, 2, xa, pmin
       xa_done:
-        hex.mov 2, pm1, pmax
+        hex.sparse_mov 1024, 2, pm1, pmax
         hex.inc 2, pm1
-        hex.mov 2, xb, x2
+        hex.sparse_mov 1024, 2, xb, x2
         hex.cmp 2, xb, pm1, xb_done, xb_done, xb_use_pm1     // xb = min(x2, pmax+1)
       xb_use_pm1:
-        hex.mov 2, xb, pm1
+        hex.sparse_mov 1024, 2, xb, pm1
       xb_done:
         hex.cmp 2, xa, xb, scan, ret, ret       // window empty for this seg -> nothing to attribute
       scan:
@@ -1198,15 +1198,15 @@ ns frame {
         // it makes pm1 = 0, so every later seg finds an empty window, which is exactly the truth.)
         hex.cmp 2, xa, pmin, pmin_keep, pmin_bump, pmin_keep
       pmin_bump:
-        hex.mov 2, pmin, xb
+        hex.sparse_mov 1024, 2, pmin, xb
       pmin_keep:
         hex.cmp 2, xb, pm1, pmax_keep, pmax_drop, pmax_keep
       pmax_drop:
-        hex.mov 2, pmax, xa
+        hex.sparse_mov 1024, 2, pmax, xa
         hex.dec 2, pmax
       pmax_keep:
-        hex.zero 8, x
-        hex.mov 2, x, xa                        // the claim scan over the stride-1 pclm[]
+        hex.sparse_zero 1024, 8, x
+        hex.sparse_mov 1024, 2, x, xa                        // the claim scan over the stride-1 pclm[]
         hex.set w/4, pbase, pclm
         // M4: `x` is the LOOP COUNTER as well as the index, so a wide pid cannot scale it in place
         rep(2-PID_BYTES, k) frame.ptr_index4 pptr, pbase, x  // reads w/4 nibbles of its index (R11)
@@ -2329,7 +2329,7 @@ ns frame {
         // M13-mapunits: the map-unit variant -- 4-nibble atan front end, no rwa (dead here)
         proj.wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn_aff, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
-        hex.mov 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
+        hex.sparse_mov 4096, 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
         frame.ptr_index4 dptr, dbase, x1
         rep(noscan, k) .lines_jmp occproc        // ablate: what does the pre-scan actually buy?
@@ -2372,7 +2372,7 @@ ns frame {
         // column horizon sliver carries no readable texture; the heavy skyline frames have
         // dozens. Ditto-safe: p2_dvalid resets per seg, so a ditto never crosses into this seg.
         rep(deg*w1r, k) hex.set 1, w1rslv, 0
-        rep(deg*w1r, k) hex.mov 2, p2_sliver_w, x2
+        rep(deg*w1r, k) hex.sparse_mov 1024, 2, p2_sliver_w, x2
         rep(deg*w1r, k) frame.sub2_chain p2_sliver_w, x1
         rep(deg*w1r, k) hex.set 2, p2_sliver_cap, dslvw
         rep(deg*w1r, k) hex.cmp 2, p2_sliver_w, p2_sliver_cap, sliver_yes, sliver_yes, sliver_done
@@ -2381,10 +2381,10 @@ ns frame {
       sliver_done:
         // M13-paramhoist: the map-unit world heights, once per seg (the per-column subtracts and
         // the 12-nibble fixed_mul width both die; see proj.column_params_m).
-        hex.mov 4, p2_wtc8, ceilfix + 4*dw
+        hex.sparse_mov 1024, 4, p2_wtc8, ceilfix + 4*dw
         frame.sub4_chain p2_wtc8, viewz + 4*dw
         hex.sign_extend 8, 4, p2_wtc8
-        hex.mov 4, p2_wtf8, floorfix + 4*dw
+        hex.sparse_mov 1024, 4, p2_wtf8, floorfix + 4*dw
         frame.sub4_chain p2_wtf8, viewz + 4*dw
         hex.sign_extend 8, 4, p2_wtf8
 
@@ -2395,7 +2395,7 @@ ns frame {
         // NEAREST MARKING seg's, per column, so the addresses move into the loop below.
         rep((1-pnear)*(1-ascode), k) .lines_seg_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         rep((1-pnear)*ascode, k) .lines_seg_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
-        hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
+        hex.sparse_mov 1024, 8, x, x1                        // the claim loop: re-aim drawn[] at x1
         frame.ptr_index4 dptr, dbase, x1
         // idea 11: the load pointers walk in LOCKSTEP with x, like dptr/pclm above.
         rep(1-noproj, k) .lines_dda_seed scale, scalestep, p2_wtc8, p2_wtf8
@@ -2452,8 +2452,8 @@ ns frame {
         // W1R-ANCHOR: the pattern key is (x + wnoff), wnoff = viewangle*640/turn computed
         // once per frame -- turning slides the masonry WITH the walls instead of
         // re-rolling it (the flickering-TV fix's temporal half).
-        rep(w1r, k) hex.zero 2, p2_xkey + 2*dw  // idea 20: the mov 2 below covers nibbles 0-1
-        rep(w1r, k) hex.mov 2, p2_xkey, x
+        rep(w1r, k) hex.sparse_zero 1024, 2, p2_xkey + 2*dw  // idea 20: the mov 2 below covers nibbles 0-1
+        rep(w1r, k) hex.sparse_mov 1024, 2, p2_xkey, x
         rep(w1r, k) frame.add4_chain p2_xkey, wnoff
         rep(noise*(1-w1r), k) wnoise.lookup p2_gnrow, x   // V1 grain (non-W1R): unanchored
         rep(noise*w1r, k) wnoise.lookup p2_gnrow, p2_xkey
@@ -2486,7 +2486,7 @@ ns frame {
         // ... the fine 2-px key matters only for FAR-tier walls (p2_wlen < 16) or columns that
         // carry a boundary piece/face (faces pick their pattern by their own height): gate
         // the compare so near plain columns keep their 4-px ditto granularity
-        rep(w1r, k) hex.mov 2, p2_wlen, p2_fstart
+        rep(w1r, k) hex.sparse_mov 1024, 2, p2_wlen, p2_fstart
         rep(w1r, k) frame.sub2_chain p2_wlen, p2_cexcl
         rep(w1r, k) hex.if0 2, p2_wlen, gate_ucnt
         rep(w1r, k) hex.cmp 2, p2_wlen, p2_cw16, ck_grain2, gate_ucnt, gate_ucnt
@@ -2603,44 +2603,44 @@ ns frame {
       emit_full:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
         stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, deg, p2_gnrow, x, p2_cexcl, p2_fstart, p2_ufl, p2_uy1, p2_uy2p1, p2_ucol, p2_lfl, p2_ly1, p2_ly2p1, p2_lcol, p2_sprfl, p2_ssy1, p2_ssy2, p2_sy0b, p2_sblk, p2_slr, p2_ssy1b, p2_ssy2b, p2_sy0bb, p2_sblkb, p2_slrb, seg_lit, seg_lit2, seg_wstrip, wstripbase, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
-        hex.mov 2, p2_dcexcl, p2_cexcl                // remember this column's clip rows for the ditto test
-        hex.mov 2, p2_dfstart, p2_fstart
-        hex.mov 2, p2_duy1, p2_uy1                    // V3: the face signature, unconditional (same
-        hex.mov 2, p2_duy2, p2_uy2p1                  // reason as p2_dgn -- an unused label is an error)
-        hex.mov 2, p2_ducol, p2_ucol
-        hex.mov 2, p2_dly1, p2_ly1
-        hex.mov 2, p2_dly2, p2_ly2p1
-        hex.mov 2, p2_dlcol, p2_lcol
-        hex.mov 2, p2_dssy1, p2_ssy1                  // V4: the sprite signature, unconditional
-        hex.mov 2, p2_dssy2, p2_ssy2
-        hex.mov 4, p2_dsy0b, p2_sy0b
-        hex.mov 4, p2_dsblk, p2_sblk
-        hex.mov 2, p2_dssy1b, p2_ssy1b                // V4b: the second fragment's signature
-        hex.mov 2, p2_dssy2b, p2_ssy2b
-        hex.mov 4, p2_dsy0bb, p2_sy0bb
-        hex.mov 4, p2_dsblkb, p2_sblkb
-        hex.mov 2, p2_ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
-        hex.mov 2, p2_du1y1, u1y1                  // (the p2_dgn rule: the cells must never be unused)
-        hex.mov 2, p2_du1y2, u1y2
-        hex.mov 2, p2_du1cls, u1cls
-        hex.mov PID_NIBBLES, p2_du1bp, u1bp
-        hex.mov 2, p2_du2y1, u2y1
-        hex.mov 2, p2_du2y2, u2y2
-        hex.mov 2, p2_du2cls, u2cls
-        hex.mov PID_NIBBLES, p2_du2bp, u2bp
-        hex.mov 2, p2_dlcnt, lcnt
-        hex.mov 2, p2_dl1y1, l1y1
-        hex.mov 2, p2_dl1y2, l1y2
-        hex.mov 2, p2_dl1cls, l1cls
-        hex.mov PID_NIBBLES, p2_dl1bp, l1bp
-        hex.mov 2, p2_dl2y1, l2y1
-        hex.mov 2, p2_dl2y2, l2y2
-        hex.mov 2, p2_dl2cls, l2cls
-        hex.mov PID_NIBBLES, p2_dl2bp, l2bp
-        hex.mov 2, p2_dsoff, p2_soff                  // V2: unconditional, same reason as p2_dgn
-        hex.mov 2, p2_dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
-        hex.mov 2, p2_dgn3, gnrow3
-        hex.mov 2, p2_dgn, p2_gnrow                   // V1: unconditional so `p2_dgn` is never an UNUSED
+        hex.sparse_mov 1024, 2, p2_dcexcl, p2_cexcl                // remember this column's clip rows for the ditto test
+        hex.sparse_mov 1024, 2, p2_dfstart, p2_fstart
+        hex.sparse_mov 1024, 2, p2_duy1, p2_uy1                    // V3: the face signature, unconditional (same
+        hex.sparse_mov 1024, 2, p2_duy2, p2_uy2p1                  // reason as p2_dgn -- an unused label is an error)
+        hex.sparse_mov 1024, 2, p2_ducol, p2_ucol
+        hex.sparse_mov 1024, 2, p2_dly1, p2_ly1
+        hex.sparse_mov 1024, 2, p2_dly2, p2_ly2p1
+        hex.sparse_mov 1024, 2, p2_dlcol, p2_lcol
+        hex.sparse_mov 1024, 2, p2_dssy1, p2_ssy1                  // V4: the sprite signature, unconditional
+        hex.sparse_mov 1024, 2, p2_dssy2, p2_ssy2
+        hex.sparse_mov 1024, 4, p2_dsy0b, p2_sy0b
+        hex.sparse_mov 1024, 4, p2_dsblk, p2_sblk
+        hex.sparse_mov 1024, 2, p2_dssy1b, p2_ssy1b                // V4b: the second fragment's signature
+        hex.sparse_mov 1024, 2, p2_dssy2b, p2_ssy2b
+        hex.sparse_mov 1024, 4, p2_dsy0bb, p2_sy0bb
+        hex.sparse_mov 1024, 4, p2_dsblkb, p2_sblkb
+        hex.sparse_mov 1024, 2, p2_ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
+        hex.sparse_mov 1024, 2, p2_du1y1, u1y1                  // (the p2_dgn rule: the cells must never be unused)
+        hex.sparse_mov 1024, 2, p2_du1y2, u1y2
+        hex.sparse_mov 1024, 2, p2_du1cls, u1cls
+        hex.sparse_mov 1024, PID_NIBBLES, p2_du1bp, u1bp
+        hex.sparse_mov 1024, 2, p2_du2y1, u2y1
+        hex.sparse_mov 1024, 2, p2_du2y2, u2y2
+        hex.sparse_mov 1024, 2, p2_du2cls, u2cls
+        hex.sparse_mov 1024, PID_NIBBLES, p2_du2bp, u2bp
+        hex.sparse_mov 1024, 2, p2_dlcnt, lcnt
+        hex.sparse_mov 1024, 2, p2_dl1y1, l1y1
+        hex.sparse_mov 1024, 2, p2_dl1y2, l1y2
+        hex.sparse_mov 1024, 2, p2_dl1cls, l1cls
+        hex.sparse_mov 1024, PID_NIBBLES, p2_dl1bp, l1bp
+        hex.sparse_mov 1024, 2, p2_dl2y1, l2y1
+        hex.sparse_mov 1024, 2, p2_dl2y2, l2y2
+        hex.sparse_mov 1024, 2, p2_dl2cls, l2cls
+        hex.sparse_mov 1024, PID_NIBBLES, p2_dl2bp, l2bp
+        hex.sparse_mov 1024, 2, p2_dsoff, p2_soff                  // V2: unconditional, same reason as p2_dgn
+        hex.sparse_mov 1024, 2, p2_dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
+        hex.sparse_mov 1024, 2, p2_dgn3, gnrow3
+        hex.sparse_mov 1024, 2, p2_dgn, p2_gnrow                   // V1: unconditional so `p2_dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
                                                 // rejects those outright. ~55 ops x 160 columns.
         rep(pnear, k) .lines_save_plane pval8, p2_dpid

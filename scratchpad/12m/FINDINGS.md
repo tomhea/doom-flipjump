@@ -1665,3 +1665,146 @@ What collision sharing CAN do: base 42M -> ~37.7M, allowing exact_xor ~192 (37.7
 **DEFINITIVE: the padded 16.04M (P7B) is a DEG-tier-only number that overflows the game. On a
 SHIPPABLE game the padding floor is ~16.3-16.58M. Below 16M needs a fundamentally smaller program
 (fewer hex ops / width doctrine / renderer doing less work), not more/wider padding.**
+
+## AV — `game-nocollide` is NOT buildable: the standalone main references collision labels
+
+Tried to price collision by an exact A/B on the shipped program shape (a `game-nocollide` TIERS row
+differing from `game` in `collide` alone — verified `{'collide': (True, False)}` and nothing else).
+The build dies in pass 2:
+
+    Can't evaluate label lnrow in expression lnrow in op
+    Flip Word ((lnrow + 49856) + 32) by 128 ... e1m1_02_main.fj (line 939)
+
+`lnrow` is emitted only when collision is on, but the STANDALONE main path references it
+unconditionally. So the flag combination was never valid and the registry row was reverted rather
+than left broken (a tier is a promise about which program gets built).
+
+CONSEQUENCE: collision's cost on the game tier cannot be measured by subtraction without emitter
+work — guarding the standalone main's `lnrow` reference behind the collide flag. Until then the
+campaign's "~11.6M/frame" for collision remains UNVERIFIED and cross-tier, and rung 0 showed a
+cross-tier estimate missing by 2x. Do not plan a 6.2M cut against it.
+
+## AW — the game-tier hot path, MEASURED by playing a walk in the shipped collide binary
+
+`scratchpad/12m/hotpath.py` on `build/doom_e1m1_menu_rung0.fjm`, walk seed 0, 2 game frames
+(80,111,139 ops, **100.0% attributed**, hook total == interpreter counter). Labels from
+`ca_labels --standalone` (2,084,703 labels). Raw histogram saved to `_hotpath_hist.json.gz`, so
+re-analysis needs no second instrumented run.
+
+### The xor family is the frame
+
+| primitive | ops | share | pad after rung 0 |
+|---|---:|---:|---:|
+| `hex.exact_xor` | 32,400,303 | **40.44%** | 16 |
+| `hex.double_exact_xor` | 7,146,190 | 8.92% | 16 |
+| `hex.triple_exact_xor` | 6,496,215 | 8.11% | 16 |
+| **xor family total** | **46,217,900** | **57.69%** | |
+
+Scaled to the p80 run that defines the metric: the xor family is **~15,116,123 ops/frame** of
+26,201,318. Nothing else is close — the next primitive is `hex.shifts.shl_bit_once` at 2.04%.
+
+### ⚠ COLLISION IS ~4.5M OPS/FRAME, NOT ~11.6M. The plan's biggest lever is 2.6x smaller.
+
+By subsystem (deepest non-stl macro, namespace-rolled):
+
+    frame     30.93%    proj  22.51%    sim   17.20%    distscale 12.14%    hex 7.29%
+
+`sim.*` — which is collision AND thing simulation together — is **17.20% = ~4,507,316 ops/frame**.
+The line/block checks alone (`sim.check_line` 6.12% + `sim.check_block` 3.06%) are ~9.2%,
+about **2.4M ops/frame**.
+
+The campaign has carried "collision costs ~11,602,784 ops" from a different tier and built
+§3 rung 2 and §7 G3 on it. On the game tier it is 2.6x smaller, and it **cannot close the
+6,201,318-op gap to the 20M target even if collision were free**. Re-price rung 2 before doing any
+work there. (This is the third cross-tier figure this session to be wrong when measured on the
+game: the padding revert cost 2x its deg prediction, and the pre-pad word count was off by 21%.)
+
+### What this says to do
+
+Pad the xor family. It is 57.69% of the frame, all three macros sit at `pad 16` after rung 0's
+revert, and at 38.28% of the ceiling there is room to spend that 93.5% did not have. That is the
+move — not a spread of small pads across the tail, which is what "the pad pool is exhausted"
+(FINDINGS AU) actually measured.
+
+## AX — sparse beats definition-padding by ~28x, and the selection metric is OPS PER INSTANCE
+
+Measured on the rung-0 game binary (`_hotpath_hist.json.gz` + the 2,084,703-label table). This is
+the instance-level number FINDINGS AJ/AQ never had: AQ tested a fixed set of 63 MACROS at a uniform
+pad and concluded "width beats coverage". It never measured how concentrated the EXECUTIONS are
+across emitted INSTANCES, which is the whole basis for sparse.
+
+### Padding cost is per EMITTED instance; speed is won per EXECUTED op
+
+    xor-family instances emitted in the image : 425,745
+    ...that executed in a 2-frame walk        :  53,226  (12.50%)
+    ...covering 80% of executed xor ops       :  10,000  ( 2.35%)
+
+MEASURED, from `overflow_probe game` before and after: `exact_xor` pad 16 -> 128 on the DEFINITION
+cost **+51,838,592 words** (50,742,890 -> 102,581,482 pass-1), i.e. **121.8 words per instance**,
+to pad 425,745 instances so that ~10,000 of them run faster.
+
+### ⚠ Rank by OPS PER INSTANCE, not by ops. The spread is 150x.
+
+| emission site | ops share | instances | ops/instance |
+|---|---:|---:|---:|
+| `proj.point_on_side_leaf` | 7.04% | 478 | **64x** |
+| `frame.seg_pass1_leaf_body_lines` | 19.58% | 3,096 | **27x** |
+| `sim.thing_pass` | 6.72% | 1,707 | **17x** |
+| `sim.bind_things` | 2.75% | 1,035 | **11x** |
+| `frame.seg_pass1_leaf_body_ts` | 14.17% | 8,733 | **6.9x** |
+| `frame.thing_record_body` | 8.06% | 13,386 | 2.6x |
+| `frame.seg_pass2_leaf_body_lines` | 26.44% | 58,977 | 1.9x |
+| `sim.check_position` | 5.27% | 23,954 | 0.94x |
+| `sim.try_move` | 7.33% | **72,444** | **0.43x** |
+
+`sim.try_move` is the trap: the 4th-largest ops share and the LARGEST instance count. Selecting the
+"top sites by ops" would have included it and spent 17% of the size budget for 7% of the win.
+
+### The surgical set
+
+The top five by ops/instance carry **50.3% of the xor family in 15,049 instances (3.54%)** —
+predicted **~+1.8M words = +1.4 points of ceiling**, against **+38.6 points** for the definition
+pad. ~28x more size-efficient for ~half the win.
+
+### Only THREE macros reach the family, so the sparse threading is shallow
+
+    hex.xor 70.37%   hex.double_xor 15.52%   hex.address_and_variable_triple_xor 14.11%
+
+and their callers are dominated by `hex.zero` (33.08%), `hex.xor_zero` (15.52%), `hex.xor`
+(12.63%) and `hex.pointers.set_flip_and_jump_pointers` (9.76%).
+
+## AY — `distscale` is declared 8 nibbles and needs 5. Up to ~1.19M ops/frame.
+
+`distscale` is the largest single DOOM macro in the game-tier profile: **12.14% of all ops**
+(9,726,044 of 80,111,139), and unlike the xor family those ops are its own lookup machinery
+(`hex.zero dst`, `rep hex.xor .dsp+4*i, idx+i*dw`, `hex.xor_zero dst, res`), which scales with the
+declared nibble width.
+
+    distscale_table(W=160, TRIG_N=4096): 160 entries
+    min 65,537 (0x10001)   max 92,398 (0x168EE)   all positive
+    nibbles needed: 5      declared: 8
+
+Narrowing 8 -> 5 removes 3/8 of the per-read chain: **~38% of 12.14% = up to ~4.55% of all ops,
+~1.19M ops/frame** against the 6,201,318 the campaign needs.
+
+⚠ NOT free, and not yet attempted. The consumer is `length = FixedMul(distance, distscale[x1])`,
+which works in 16.16; a 5-nibble table must be zero-extended into the 8-nibble multiply register,
+so the saving is in the READ, not the multiply, and the extension must not cost back what the
+narrowing saves. This is the width doctrine the handoff's rung 3 names, and it is a FEWER-CALLS
+lever -- the only kind FINDINGS AC says can move `exact_xor`, since there is no caller-side fix.
+
+Check every other wide LUT the same way before assuming this one is special.
+
+### AY addendum — the full LUT width survey, so nobody re-runs it
+
+| LUT | declared | needed (max value) | verdict |
+|---|---:|---:|---|
+| `distscale` | 8 | **5** (92,398) | **wastes 3** — and it is 12.14% of the frame |
+| `yslope` | 8 | **6** (10,485,760) | wastes 2, but a small profile share |
+| `slopediv_recip`, `slopediv_recip8` | packed 3 bytes | — | ALREADY packed (M13-lutpack); not a candidate |
+| `finetangent` | 8 | 8 (4,294,967,195) | tight |
+| `xtoviewangle` | 8 | 8 (4,290,772,992) | tight |
+| `zlight`, `scalelight` | 2 | 2 (31) | tight |
+
+Only `distscale` is worth the risk; `yslope` is a minor follow-on. The rest are already correct,
+so "narrow the wide LUTs" is a TWO-table job, not a sweep.

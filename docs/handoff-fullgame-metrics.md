@@ -7,7 +7,7 @@ movement, input and the M1 self-reset all included):
 
 | metric | how it is measured | target |
 |---|---|---|
-| **SPEED** | play **10 different games of 100 frames each**; each RUN's stat is `total_ops / 100` = that run's average ops/frame. Report the **mean run-average** and the **80th-percentile RUN** (the run at the 80%-high mark, by its average), showing that run's average-per-frame. | **80th-pct run ≤ 20,000,000 ops/frame** |
+| **SPEED** | play **10 different games of 100 frames each**; each RUN's stat is `total_ops / 100` = that run's average ops/frame. The **BINDING** number is the **average of the mean run-average and the 80th-percentile run** (owner, 2026-09-06). Report all three, plus the spread. | **(mean + p80) / 2 ≤ 20,000,000 ops/frame** |
 | **SIZE** | the game binary's **decompressed word count as a percentage of 2^27** (134,217,728 words — the w=32 address ceiling) | **≤ 35%** |
 
 Nothing else is the criterion. In particular the `ca2_sweep` deg-tier median — the number the whole

@@ -209,15 +209,31 @@ def percentile_run(run_avgs, pct=0.8):
     return s[min(len(s) - 1, math.ceil(pct * len(s)) - 1)]
 
 
+def binding_speed(run_avgs):
+    """THE BINDING SPEED METRIC (owner, 2026-09-06): the average of the mean run-average and the
+    80th-percentile run.
+
+    The mean alone flatters a binary -- it is dragged down by the cheap viewpoints, and the run
+    spread here is ~1.9x. The p80 alone is one specific trajectory, so a change that helps typical
+    frames can look like a regression because it did not help THAT run (S1 measured exactly that:
+    mean -0.75%, p80 +0.10%). Averaging the two keeps the percentile's protection against a
+    flattering mean while not letting a single run decide the verdict.
+    """
+    return (sum(run_avgs) / len(run_avgs) + percentile_run(run_avgs)) / 2.0
+
+
 def report(run_avgs, raw_avgs, size):
     mean = sum(run_avgs) / len(run_avgs)
     p80 = percentile_run(run_avgs)
-    speed_ok, size_ok = p80 <= SPEED_TARGET, size.data_pct <= SIZE_TARGET_PCT
+    binding = binding_speed(run_avgs)
+    speed_ok, size_ok = binding <= SPEED_TARGET, size.data_pct <= SIZE_TARGET_PCT
     print("")
     print("=" * 78)
+    print("SPEED  BINDING (mean+p80)/2: %s ops/frame   (target <= %s)  %s"
+          % (format(int(binding), ","), format(SPEED_TARGET, ","),
+             "PASS" if speed_ok else "OVER"))
     print("SPEED  mean run-average   : %s ops/frame" % format(int(mean), ","))
-    print("SPEED  80th-pct run avg   : %s ops/frame   (target <= %s)  %s"
-          % (format(int(p80), ","), format(SPEED_TARGET, ","), "PASS" if speed_ok else "OVER"))
+    print("SPEED  80th-pct run avg   : %s ops/frame" % format(int(p80), ","))
     print("SPEED  spread lo..hi      : %s .. %s ops/frame"
           % (format(int(min(run_avgs)), ","), format(int(max(run_avgs)), ",")))
     print("SPEED  raw (menu included): mean %s, 80th-pct %s ops/frame"
@@ -342,6 +358,18 @@ def selftest(fjm=None):
           percentile_run([1.0, 5.0, 9.0]) in (1.0, 5.0, 9.0))
     check("N4 it is order-independent",
           percentile_run([10, 3, 7, 1]) == percentile_run([1, 3, 7, 10]))
+    # N4b THE BINDING METRIC: strictly between the mean and the p80, and it MOVES with both.
+    xs = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
+    m, p = sum(xs) / len(xs), percentile_run(xs)
+    check("N4b binding is the average of the mean and the p80",
+          abs(binding_speed(xs) - (m + p) / 2) < 1e-9, "mean %.1f p80 %.1f -> %.1f"
+          % (m, p, binding_speed(xs)))
+    check("N4b it lies between them (never outside)", m <= binding_speed(xs) <= p)
+    lowered = xs[:-1] + [10.0]                     # make the SLOWEST run fast: mean falls, p80 same
+    check("N4b it responds to a change the p80 alone cannot see",
+          binding_speed(lowered) < binding_speed(xs),
+          "%.1f -> %.1f while p80 stays %.1f"
+          % (binding_speed(xs), binding_speed(lowered), percentile_run(lowered)))
 
     # N5  THE SIZE CONTROL is fjmsize's, and it is a different file -- assert the wiring, and that
     #     the ceiling this file compares against is derived rather than typed.

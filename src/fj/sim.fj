@@ -487,11 +487,11 @@ ns sim {
         // `shl_hex 1`, then read_hex / write_hex. So a thss entry is 16 nibbles (8 wire bytes) even
         // though it holds 4 -- the cost is ~0.26M of wire round-trip against the 25M this saves,
         // and it reuses the one accessor this file has proven rather than inventing a third.
-        hex.mov w/4, poff, t
+        hex.sparse_mov 4096, w/4, poff, t
         hex.shl_hex w/4, 1, poff
         hex.set w/4, pbase, thss
         hex.ptr_index sptr, pbase, poff
-        hex.zero w/4, ptss
+        hex.sparse_zero 4096, w/4, ptss
         hex.read_hex 4, ptss, sptr
         hex.cmp 4, ptss, dv, clean, dirty, clean
       dirty:
@@ -499,19 +499,19 @@ ns sim {
         // position array is a hex.vec (one NIBBLE per slot), not a packed table (one BYTE per
         // slot), so read_table_packed cannot address it. A 16.16 pair is 16 nibbles and 16 is one
         // nibble of SHIFT, so the index scales without a multiply.
-        hex.mov w/4, poff, t
+        hex.sparse_mov 4096, w/4, poff, t
         hex.shl_hex w/4, 1, poff
         hex.set w/4, pbase, thpos
         hex.ptr_index pptr, pbase, poff
         hex.read_hex 16, pos, pptr
-        hex.zero 10, ptx
-        hex.mov 4, ptx, pos + 4*dw             // the INTEGER part of a 16.16 is nibbles 4..7
+        hex.sparse_zero 4096, 10, ptx
+        hex.sparse_mov 4096, 4, ptx, pos + 4*dw             // the INTEGER part of a 16.16 is nibbles 4..7
         hex.sign 4, pos + 4*dw, xn, xp
       xn:
         hex.set 6, ptx + 4*dw, 0xFFFFFF
       xp:
-        hex.zero 10, pty
-        hex.mov 4, pty, pos + 12*dw
+        hex.sparse_zero 4096, 10, pty
+        hex.sparse_mov 4096, 4, pty, pos + 12*dw
         hex.sign 4, pos + 12*dw, yn, yp
       yn:
         hex.set 6, pty + 4*dw, 0xFFFFFF
@@ -531,7 +531,7 @@ ns sim {
         // index`), so aliasing dst onto the base destroys the base before it is added in.
         hex.ptr_index r, q, t
         hex.write_byte r, hv
-        hex.mov 2, tv, t   // (hex.mov zeroes dst first)
+        hex.sparse_mov 4096, 2, tv, t   // (hex.sparse_mov 4096, zeroes dst first)
         hex.inc 2, tv                          // stored ENCODED as t+1, so 0 can mean "empty"
         hex.write_byte p, tv
         ;bl
@@ -574,7 +574,7 @@ ns sim {
       body:
         hex.set w/4, hq, sshead
         hex.ptr_index hp, hq, cur_ss
-        hex.zero w/4, h                        // read_byte fills only 2 nibbles; the rest must be
+        hex.sparse_zero 1024, w/4, h                        // read_byte fills only 2 nibbles; the rest must be
         hex.read_byte h, hp                    // cleared or the 0 test reads a stale high half
         hex.if0 w/4, h, empty                  // nothing bound here: nothing to load, nothing to
                                                // dirty, so the leaf pays one test and leaves
@@ -590,7 +590,7 @@ ns sim {
         stl.fcall thing_leaf, thing_ret
         hex.set w/4, hq, thnext
         hex.ptr_index hp, hq, h                // h is consumed as the INDEX before being reloaded
-        hex.zero w/4, h
+        hex.sparse_zero 1024, w/4, h
         hex.read_byte h, hp
         ;loop
       done:
@@ -598,19 +598,19 @@ ns sim {
         // widths: thing_load writes the whole cell, so a narrower clear would leave high nibbles
         // set and the next baked xor_by would still land on a non-zero register.
       clear:
-        hex.zero 8, sp_x
-        hex.zero 8, sp_y
-        hex.zero 8, sp_z
-        hex.zero 8, sp_left
-        hex.zero 8, sp_w
-        hex.zero 8, sp_hh
-        hex.zero 8, sp_tzmax
-        hex.zero 8, sp_tzmax2
-        hex.zero 2, sp_mon
-        hex.zero 4, sp_base
-        hex.zero 4, sp_base2
-        hex.zero 2, sp_dw
-        hex.zero 2, sp_lt
+        hex.sparse_zero 1024, 8, sp_x
+        hex.sparse_zero 1024, 8, sp_y
+        hex.sparse_zero 1024, 8, sp_z
+        hex.sparse_zero 1024, 8, sp_left
+        hex.sparse_zero 1024, 8, sp_w
+        hex.sparse_zero 1024, 8, sp_hh
+        hex.sparse_zero 1024, 8, sp_tzmax
+        hex.sparse_zero 1024, 8, sp_tzmax2
+        hex.sparse_zero 1024, 2, sp_mon
+        hex.sparse_zero 1024, 4, sp_base
+        hex.sparse_zero 1024, 4, sp_base2
+        hex.sparse_zero 1024, 2, sp_dw
+        hex.sparse_zero 1024, 2, sp_lt
       empty:
     }
 }

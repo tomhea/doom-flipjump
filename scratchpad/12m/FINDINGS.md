@@ -1890,3 +1890,47 @@ The table is 160 entries x 8 nibbles = 81,920 bits. Not one profiled op was in i
 UNATTRIBUTED instead, and says how many it dropped. Two controls (C5) require that the guard fires
 on a far op and does NOT fire on a near one. The lesson is the general one: a profiler that always
 returns an answer will always return an answer, including for addresses it knows nothing about.
+
+
+## BB — THE AUTHORITATIVE PROFILE (S2 binary, matched labels). A profile is a JOIN; check the key.
+
+Every earlier profile in this campaign attributed a histogram against a label table captured from a
+DIFFERENT BUILD. That is the single root cause behind AY, BA, and two further wrong hypotheses I
+chased today. Fixed by capturing labels for the same tree that produced the binary
+(`scratchpad/12m/labels2.py`, which keeps the LAST `labels_resolve` instead of aborting at the
+first) and profiling the matching `.fjm`.
+
+    S2 binary + S2 labels: 78,675,599 ops over 2 game frames, 100.0% ATTRIBUTED
+    (the guard withheld 13,219 ops, 0.017% -- against 9,726,044 under the mismatched pair)
+
+The 12.14% "dark region" was never real code we could not name. It was the mismatch.
+
+### The frame, correctly
+
+| primitive | share |  | doom macro | share |
+|---|---:|---|---|---:|
+| `hex.exact_xor` | 39.48% |  | `frame.dance_boundary` | 6.72% |
+| `hex.sparse_exact_xor` | 11.93% |  | `sim.check_line` | 6.00% |
+| `hex.double_exact_xor` | 8.63% |  | `frame.seg_pass2_leaf_body_lines` | 5.61% |
+| `hex.triple_exact_xor` | 8.55% |  | `proj.wall_x_range_m` | 4.67% |
+| **xor family** | **68.59%** |  | `proj.point_on_side_leaf` | 4.54% |
+| `stl.comp_if1` | 2.17% |  | `m1.zerobyte` (the M1 reset) | 2.11% |
+
+**The xor family is 68.59% of the frame** -- higher than the 57.69% the mismatched pair reported,
+because everything now attributes. `hex.sparse_exact_xor` at 11.93% is S2's own padded calls, which
+confirms the tiering hit hot code.
+
+### ⚠ THE FRAME IS FLAT. There is no next big lever.
+
+No doom macro exceeds 6.72%, and the top sixteen together are under half the frame. Eliminating any
+ONE of them entirely would not close the 3,493,680-op gap (14.9%). This is not a profile with a hot
+spot; it is a profile with one hot PRIMITIVE reached from everywhere.
+
+Consequences for planning:
+* The M1 self-reset is **2.11%, ~830,000 ops/frame** -- measured at last. Rung 4 is real but small,
+  and cannot be the answer. (My two intermediate guesses, ~4.9M and ~14k, were both wrong; this is
+  the number from the matched pair.)
+* Collision (`sim.*`) totals roughly 18% -- again real, again not sufficient alone.
+* Per FINDINGS AC the only thing that moves `exact_xor` is FEWER CALLS, and per AZ padding is
+  bounded. So the remaining route is a broad reduction in hex operations across many macros, or a
+  fidelity decision -- not one more surgical strike.

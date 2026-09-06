@@ -1808,3 +1808,38 @@ Check every other wide LUT the same way before assuming this one is special.
 
 Only `distscale` is worth the risk; `yslope` is a minor follow-on. The rest are already correct,
 so "narrow the wide LUTs" is a TWO-table job, not a sweep.
+
+## AZ — padding is NOT monotonic: there is an optimum, and overshooting it costs BOTH metrics
+
+Three builds of the same lever at increasing coverage and width, each gated and measured on the
+shipped binary with the (mean+p80)/2 binding metric:
+
+| config | sites | coverage of xor ops | binding | size |
+|---|---:|---:|---:|---:|
+| rung 0 | 0 | — | 23,973,882 | 38.28% |
+| S1 | 44 @128 | 29.7% | 23,905,040 (−0.29%) | 38.10% |
+| **S2** | 89 @1024/4096 | 77.4% | **23,493,680 (−2.00%)** | **38.07%** |
+| S3 | 133 @1024/4096/16384 | ~98% | 23,709,974 (**+0.92% vs S2**) | 39.95% (**+1.88 pts**) |
+
+**S3 is worse than S2 on speed AND size.** More padding is not better.
+
+### Why: a pad helps its own site and hurts every site after it
+
+A `wflip` costs `popcount(target)`. Padding lowers the popcount of the target it aligns, but the
+inserted shift pushes ALL later code to higher addresses, raising popcount for every downstream
+wflip. Below the knee the shift dies at the next downstream `pad` (absorption) and costs nothing —
+S1 and S2 both came out SMALLER than rung 0. Above it the image really grows (+2,523,402 words S2
+-> S3) and the downstream cost exceeds the local win.
+
+### The knee, located
+
+Between S2 and S3. Two variables moved together in S3 (widths 1024/4096 -> 4096/16384, AND three
+new sites), so which one crossed the knee is NOT established. The likelier culprit is the new
+sites by instance count — `sim.try_move` alone is **72,444 instances** against ~20 sites in the
+whole 16384 tier — but that is a hypothesis, not a measurement. Separate them before pushing again.
+
+### Practical rule
+
+Pad the hot sites to ~1024-4096 and stop. `ops per instance` selects WHICH sites (FINDINGS AX);
+this bounds HOW FAR. Anything that grows the image measurably is paying downstream interest on
+every wflip in the program.

@@ -9,3 +9,8 @@ assets/freedoom1.wad
 assets/freedoom2.wad
 assets/freedoom-*.zip
 assets/freedoom-*/
+
+# the 12M campaign's build artifacts: one 25 MB label table and an 11 MB image PER IDEA.
+# The numbers that matter live in scratchpad/12m/{LEDGER,FINDINGS,ATLAS}.md, which ARE tracked.
+scratchpad/12m/atlas/
+scratchpad/12m/bak/

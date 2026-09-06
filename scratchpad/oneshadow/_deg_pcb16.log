@@ -1,0 +1,9 @@
+STL: C:\Users\tomhe\Documents\flipjump-wide\flipjump\stl
+PTR_CELL_BITS: 16 (defines file before the stl)
+program parts: entry=32, tables=333,476, main=64, segconsts=44,419, walk=73,941, state=424, banks=3,247,543
+assembled
+(664,291,0x18000000): 41,544,124 ops  BYTE-EXACT
+(1272,-724,0x40000000): 32,839,654 ops  BYTE-EXACT
+(1869,479,0x80000000): 37,622,461 ops  BYTE-EXACT
+(-416,256,0x0): 31,583,934 ops  BYTE-EXACT
+PASS

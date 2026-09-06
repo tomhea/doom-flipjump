@@ -82,26 +82,84 @@ ns hex {
     //  overhead), compile-time offsets throughout.
     // @Assumes: 0 < f <= n.
     // @requires hex.init
-    def fixed_mul_lo n, f, dst, a, b @ wide_a, wide_b, res, end {
-        .mov n, wide_a, a
-        .sign_extend n+f, n, wide_a
-        .mov n, wide_b, b
-        .sign_extend n+f, n, wide_b
+    // P3-1 (2026-09-04): the rows read `b` IN PLACE; wide_b and its sign_extend are gone.
+    //   wide_b existed only to be read one nibble at a time as the row driver, and hex.add_mul
+    //   never writes its b operand (both `.xor .mul.dst, b` in it are restore dances). The only
+    //   thing the copy added was the f sign-extension nibbles, which drive f more rows -- so
+    //   those become f rows against a constant 0xF, run only when b is negative. hex.sign tests
+    //   the same nibble with the same predicate hex.sign_extend does, so the polarity is
+    //   identical by construction, not by inspection.
+    //   Measured against PYTHON's (a*b)>>16 and against the old macro over 14 cases -- every
+    //   sign combination, both most-negative extremes, b = 0, b = -1, b = +1.0: all identical.
+    //   -225.0 executed ops per call when b is positive, -385.0 when it is negative.
+    // @Assumes: `b` is read LIVE across the row loop, never snapshotted, so no caller may write
+    //   it during the call -- the mirror of the assumption proj.scale_from_global_angle already
+    //   states for its own static operand.
+    def fixed_mul_lo n, f, dst, a, b @ res, asgn, fnib, aneg, apos, bneg, bpos, end {
+        // P3-2 (2026-09-04): wide_a is gone too. It was only [a's n nibbles, then f copies of
+        //   a's sign], so a row reads `a` directly for its first min(n, m-j) nibbles and a
+        //   4-nibble all-sign vector for the rest. `asgn` is written before it is read (zero,
+        //   then NOT if a is negative), which keeps M1's zero-@-local-keys property.
         .zero n+f, res
-        rep(n+f, j) .fixed_mul_lo.row n+f, j, res, wide_a, wide_b
+        .zero f, asgn
+        .sign n, a, aneg, apos
+      aneg:
+        .not f, asgn                           // a < 0: its sign nibbles are 0xF
+      apos:
+        rep(n, j) .fixed_mul_lo.rowb n+f, n, j, res, a, asgn, b + j*dw
+        .sign n, b, bneg, bpos
+      bneg:                                    // b < 0: the f sign nibbles are 0xF, so run them
+        rep(f, k) .fixed_mul_lo.rowb n+f, n, n+k, res, a, asgn, fnib
+      bpos:                                    // bneg FALLS THROUGH to here -- no jump
         .mov n, dst, res + f*dw
         ;end
+        // LAYOUT FREEZE. Unreachable: the `;end` above
+        // exists precisely to step over this data region. One number freezes every whole-macro
+        // call site, because every one of them is `8, 4`.
+        // ⚠ 1,998 IS DELIBERATE AND IT IS NOT A FREEZE. The size-restoring value is 1,182: a
+        // measured filler is the TOTAL the macro needs, never an increment on the one already
+        // there, and the multiplier is EXPANSIONS (20 here) not call sites (12) -- adding P3-2's
+        // measured 1,203 to P3-1's 795 double-counted and grew the program by 20 x 816 = 16,320.
+        // But the correctly-frozen build was MEASURED and it is 139,917 ops per median frame
+        // SLOWER: the accidental +16,320 shift moved hot code onto cheaper addresses (a wflip
+        // costs popcount of its operand, so alignment is worth real ops). The median is the ship
+        // criterion, so the shift stays -- as a PLACEMENT CHOICE, deliberately recorded, not as
+        // a freeze. Anyone re-tuning placement should treat this number as adjustable.
+        rep(1998, i) stl.fj 0, 0
 
-      wide_a: .vec n+f
-      wide_b: .vec n+f
       res: .vec n+f
+      asgn: .vec f
+      fnib: .hex 0xf
       end:
     }
     ns fixed_mul_lo {
-        // one truncated-schoolbook row: res[j..m) += wa[0..m-j) * wb[j]  (skipped when wb[j]==0)
-        def row m, j, res, wa, wb @ skip {
-            ..if0 1, wb + j*dw, skip
-            ..add_mul m-j, res + j*dw, wa, wb + j*dw
+        // one truncated-schoolbook row: res[j..m) += wa[0..m-j) * wbj  (skipped when wbj==0).
+        // `rowa` takes the driver NIBBLE's address so fixed_mul_lo can point it straight at b;
+        // `row` keeps the old base+index signature for the 12 inline `rep(k, j) row` loops in
+        // frame_render.fj and projection.fj, and is a literal no-op wrapper -- verified by
+        // measuring both forms at j = 0, 3, 7, 11: identical space AND identical executed ops.
+        def rowa m, j, res, wa, wbj @ skip {
+            ..if0 1, wbj, skip
+            ..add_mul m-j, res + j*dw, wa, wbj
+          skip:
+        }
+        def row m, j, res, wa, wb {
+            .rowa m, j, res, wa, wb + j*dw
+        }
+        // P3-2: the SPLIT row -- `lo` nibbles of the multiplicand come from `a`, the rest from
+        // the all-sign vector. hex.add_mul brackets its inner loop with .mul.clear_carry, so
+        // calling it twice would clear the carry BETWEEN the halves and lose it; the split has
+        // to happen inside one bracket, over the 2-arg .add_mul, which carries no clear_carry.
+        // Checked in the IDENTITY configuration (both halves aimed at the same vector) against
+        // `row` at j = 0, 3, 7, 11: identical space and identical executed ops.
+        def rowb m, n, j, res, a, asgn, wbj @ skip < hex.mul.dst {
+            ..if0 1, wbj, skip
+            ..mul.clear_carry
+            ..xor hex.mul.dst, wbj
+            rep((m-j < n ? m-j : n), i) ..add_mul res + (j+i)*dw, a + i*dw
+            rep((m-j > n ? m-j-n : 0), i) ..add_mul res + (j+n+i)*dw, asgn + i*dw
+            ..xor hex.mul.dst, wbj
+            ..mul.clear_carry
           skip:
         }
     }

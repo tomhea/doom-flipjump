@@ -46,8 +46,25 @@ def door_sectors(secs, lds, sds) -> dict:
         s = secs[si]
         if s.ceil_h != s.floor_h:          # already open: a lift or a trigger sector, not a door
             continue
-        if nb.get(si):
-            out[si] = min(secs[n].ceil_h for n in nb[si]) - OPEN_GAP
+        if not nb.get(si):
+            continue
+        open_h = min(secs[n].ceil_h for n in nb[si]) - OPEN_GAP
+        # M4 (2026-08-31): ...and neither is a sector whose "fully open" ceiling lands BELOW its own
+        # floor. `open_h` is min(neighbouring ceiling) - 4, and on five of the nine E1 maps some
+        # sector behind a special linedef has every neighbour ceiling at or under its floor -- so
+        # opening it would put the ceiling beneath the floor. Those are the sectors that made
+        # `door_states` throw on E1M3/4/5/6/7/9 ("state 0 must be shut and the last state fully
+        # open, got [84, 88]"): `stops` returns a SORTED set, so an open_h below lo silently swaps
+        # the two ends and the assert caught it. Same shape as `sky` in the flag retirement -- one
+        # E1M1 fact ("every door sector has a neighbour that clears its floor") standing in for a
+        # general one.
+        # !! STRICTLY BELOW, and that is what makes this byte-exact on the shipped build: MEASURED
+        # 2026-08-31, E1M1 has 13 door sectors, 0 with open_h < floor_h and 0 with open_h ==
+        # floor_h, so no sector this repo has ever built with leaves the dict. E1M2 likewise.
+        # Counts per map: M3 2/18, M4 7/16, M5 1/7, M6 10/11, M7 5/21, M9 1/11; M8 has no doors.
+        if open_h < s.floor_h:
+            continue
+        out[si] = open_h
     return out
 
 

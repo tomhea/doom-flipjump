@@ -1,0 +1,21 @@
+A. the refactored stl, at the default CELL_BITS=8, and at 12 / 16
+   pointer_setters.fj   default:ok      12:ok      16:ok
+   hex_ptr.fj           default:ok      12:ok      16:ok
+   nth_pointers.fj      default:ok      12:ok      16:ok
+
+B. the stl as of 39601e9 (before the refactor)
+   pointer_setters.fj   ok
+   hex_ptr.fj           ok
+   nth_pointers.fj      ok
+
+restored: runlib.fj, basic_pointers.fj, xor_from_pointer.fj, xor_to_pointer.fj, write_pointers.fj
+
+program                inert at 8?    12 differs?    16 differs?
+pointer_setters.fj     IDENTICAL      NO             NO
+hex_ptr.fj             IDENTICAL      NO             NO
+nth_pointers.fj        IDENTICAL      NO             NO
+
+FAILED:
+    pointer_setters.fj: the knob reaches nothing -- inertness proves nothing
+    hex_ptr.fj: the knob reaches nothing -- inertness proves nothing
+    nth_pointers.fj: the knob reaches nothing -- inertness proves nothing

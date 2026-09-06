@@ -1,0 +1,1826 @@
+# Handoff — WIDE POINTER READS for the FlipJump stl
+
+**Phase 0 of the current M4 work.** Written 2026-09-01. Researched by six agents (two of them
+adversarial refuters, both returning `refuted=False`), then **re-derived by hand at the owner's
+insistence** — which was the right call, because the hand trace CORRECTED two of the agents'
+conclusions. Nothing is implemented.
+
+---
+
+## 0. STANDING REQUIREMENTS — these bind EVERY phase below
+
+**Owner's rules, 2026-09-01. They are not advice; a change that breaks one is not finished.**
+
+### 0.1 READ AND WRITE MOVE TOGETHER — in both directions
+
+> **Every improvement or change made to READING memory must be made for WRITING memory as well —
+> and vice versa.**
+
+Not "consider it", not "if it applies". The two paths are mirror images (`xor_from_pointer.fj` /
+`xor_to_pointer.fj`, `read_pointers.fj` / `write_pointers.fj`) and they share every global they
+touch — `to_flip`, `to_jump`, the shadow(s), `read_byte`. **A one-sided optimisation is how the two
+halves drift apart**, and drift in shared pointer state is not a slow path, it is a wild jump
+(§11.12 A).
+
+This is already load-bearing for what is planned here:
+
+| lever | read side | write side — MUST be done too |
+|---|---|---|
+| S1 one shadow | `set_flip_and_jump_pointers` | `set_flip_pointer` / `set_jump_pointer` **must be absorbed**, or `stl.return` breaks (§11.12 A) |
+| S4 amortised setup | `read_byte n`, `read_table_packed` | `write_hex n` / `write_byte n` are the same `n`-setups-for-one shape (`write_pointers.fj:49-61`) |
+| S5 wide 16-bit access | `read_word`-style | the write side already does 2 nibbles per setup (§6) — widen it in the same commit |
+| S2/S3 address arithmetic | `ptr_index` -> constant xor | the same `ptr_index` feeds `write_nth_*`; doom has 11 + 26 write sites (§11.12 C) |
+| `-D ptr16` table width | slot decode | **whatever writes a slot must agree on `k`** — a slot written 8-bit and read 16-bit is not a wrong value, it is an unbounded jump (§10 G6) |
+
+⚠ **G8 exists because I broke this rule once already**: sections 7 and 10 planned four read phases
+and no write phase, across a call-site census that is 37 write sites out of ~139. Any phase below
+that names only a read macro is **incomplete as written**.
+
+### 0.2 THE EXISTING TESTS MUST PASS — all of them, both repos
+
+An stl change is a change to a library `doom`, `bf2fj` and `c2fj` all build against
+(`pip show flipjump` — editable install). So:
+
+* **flipjump**: `test_compile_fast`, `test_compile_medium`, `test_run_medium` at minimum
+  (`hex_ptr`, `bit_ptr`, `startup_init_all`, `func1`-`func7`), and `test_compile_slow` for the four
+  `bubble_sort` variants. `hex_ptr.fj` is the one that runs `ptr_flip -> ptr_jump -> ptr_wflip ->`
+  combined setter in sequence — the exact pattern a naive merge destroys.
+* **doom**: `python -m pytest tests/host -q`, `tests/fj`, then the picture gates. Check the
+  **"N deselected"** line so you know what the filter actually bound.
+* ⚠ **A passing doom gate does NOT clear an stl change.** Doom calls neither one-sided setter, so
+  `deg_gate` and `m5_gate` will happily pass a build that has already broken `stl.call`/`stl.return`
+  for every other program. The flipjump suite is not optional here; it is the only thing watching
+  that half.
+
+### 0.3 EVERY NEW MACRO SHIPS TESTS OF THE SAME SHAPE AS THE ONE IT MIRRORS
+
+A new macro is not done when it assembles. For each one added — `triple_exact_xor`,
+`address_and_variable_triple_xor`, a wide read, **and its write-side twin** — ship:
+
+1. a test in the same file and style as the tests for the macro it parallels (§6 has the
+   `953ddd9` template);
+2. **a mutation control (R9)**: a deliberately broken variant the test must REJECT. This is not
+   optional here — the adjacent, easiest-to-make error in these chains (an off-by-one in the
+   destination walk) fails **silently with wrong data**, not with a crash: `read_byte` returned
+   `0x0` where `0xb` was written, and `write_byte` wrote back the value it had just read;
+3. a **read/write round-trip** assertion — write a value through the new write path, read it back
+   through the new read path, and compare. That is the cheapest test that catches the two halves
+   drifting, which is what §0.1 exists to prevent.
+
+---
+
+## 1. HOW THE POINTER READ ACTUALLY WORKS
+
+Read this section before touching anything. Everything else follows from it.
+
+### 1.1 A pointed-to value is an OPCODE, and the value IS its jump address
+
+There is no "memory" to fetch from. A data slot is emitted as
+
+    ;V * dw            // "flip nothing, then jump to V*dw"
+
+so the value `V` lives in the opcode's **second word** (the jump address), scaled by `dw`. doom's own
+emitter writes exactly this (`mapcompiler.py:398`), and so does `hex.hex` (`stl/hex/memory.fj:8`).
+
+**This is why there is no "fetch width".** Reading is not moving bits out of a cell — it is *jumping
+to the cell and letting it jump onward to a place that identifies its value*.
+
+### 1.2 The decoder table turns "where we landed" into bits
+
+`ptr_init` (`basic_pointers.fj:18-27`) lays a 256-entry table at op index **exactly 256**:
+
+    pad 256
+  read_ptr_byte_table:
+    rep(256, d) stl.fj         d==0 ? 0 : (#d)<=4 ? (.read_byte    + dbit + (#d)-1)      // top set bit -> nibble 0
+                           : (.read_byte+dw + dbit + (#d)-5),     //             -> nibble 1
+        (d == ((1<<(#d))>>1)) ? .ret_after_read_byte              // that was the last bit: done
+                              : read_ptr_byte_table + (d ^ ((1<<(#d))>>1))*dw
+
+`#d` is d's bit-length, so `(#d)-1` is the index of d's **top set bit**. Entry `d` therefore:
+
+  * flips that one bit into the shared `read_byte` register (nibble 0 for bits 0-3, nibble 1 via
+    `+dw` for bits 4-7), and
+  * jumps to entry `d` with that bit cleared — or to `ret_after_read_byte` if nothing is left.
+
+**Landing on entry V xors V into `read_byte` in `popcount(V)` steps.** That is the "4/8" in the
+table's own complexity note: 4 steps for a 4-bit memory, 8 for an 8-bit one — *the same table serving
+two different widths*, which is the internal proof that 8 is not a width.
+
+### 1.3 The trick: temporarily rewrite the slot so it jumps INTO the table
+
+Table entry V sits at `(256 + V) * dw`. The slot jumps to `V * dw`. So if you can add `256*dw` to
+the slot's jump word, the slot jumps to its own decoder entry.
+
+`dbit = w + #w` (`runlib.fj:3`) is the offset from an opcode's start to its value bits. Flipping bit
+`dbit + 8` of the slot touches bit `#w + 8` of its **second** word, which adds
+
+    2^(#w+8) = 2^#w * 2^8 = dw * 256          (at w=32: bit 46, adding 16384 = 256*dw)
+
+i.e. exactly `V -> V + 256`. **This is the owner's sentence — "making the pointer you want to read
+from point to 256+val, and there is a table from address 256" — and it is literally true.**
+
+### 1.4 The dance, step by step (`xor_from_pointer.fj:29-54`)
+
+`set_flip_and_jump_pointers ptr` first writes the slot's address `P` into two globals:
+`to_flip`'s **first** word (a flip target) and `to_jump`'s **second** word (a jump target). Then:
+
+    1.  hex.zero 2, read_byte                                  clear the destination
+    2.  wflip to_flip, dbit+8                  to_flip's flip address becomes P + dbit+8
+    3.  wflip to_flip+w, read_ptr_and_flip_back, to_flip
+                                               ... point to_flip's jump at (4), then JUMP to it.
+                                               EXECUTING to_flip flips bit dbit+8 AT ADDRESS P --
+                                               the data slot is now `;(V+256)*dw` -- and control
+                                               continues to (4).
+    4.  read_ptr_and_flip_back:
+          wflip to_flip+w, read_ptr_and_flip_back^cleanup      re-aim to_flip's jump at (7)
+          wflip ret_after_read_byte+w, to_flip, to_jump
+                                               ... make the table's exit land on to_flip, then
+                                               JUMP to to_jump -> jumps to P -> the (armed) slot
+                                               executes -> jumps to (V+256)*dw = TABLE ENTRY V
+    5.  the table walks popcount(V) entries, xoring V's bits into read_byte, then jumps to
+        ret_after_read_byte
+    6.  ret_after_read_byte jumps to to_flip -- THE SECOND VISIT -- which flips bit dbit+8 at P
+        BACK, restoring the slot to `;V*dw`, and continues to (7)
+    7.  cleanup: undo the three redirections
+
+**`to_flip` is visited twice: once to arm the slot, once to disarm it.** The program rewrites the
+data it is about to read, reads it by executing it, and puts it back. That symmetry is why the
+setup survives (see 2.2) and why the whole thing is re-entrancy-hostile (`read_byte`, `to_flip`,
+`to_jump` and `ret_after_read_byte` are single shared globals — this is doom's R42 rule).
+
+### 1.5 What that costs
+
+    set_flip_and_jump_pointers    w(0.75@+5)  = 24@+160 at w=32   <- PER DEREFERENCE, the whole cost
+    the dance above               5@+13
+    xor n, dst, read_byte         n@                              <- the only part that scales
+
+which is why `read_hex` (1 nibble) and `read_byte` (2 nibbles) differ by 2@ out of ~33@, and why
+`hex.read_byte 2, dst, ptr` — being `rep(2)` of the single form (`read_pointers.fj:63-66`) — pays
+the **entire dereference twice**: 84@+374 against ~39@+173 for one wider read.
+
+---
+
+## 2. THE TWO PRIZES
+
+### 2.1 A wider table — the owner's idea. FEASIBLE.
+
+Nothing in section 1 knows how many bits `V` has. Widen it by changing **one constant in two
+places** and building a bigger table:
+
+    k     flip      adds        table must begin at op   entries    words
+    8     dbit+8    256*dw      256                      256        512        (today)
+    12    dbit+12   4096*dw     4096                     4,096      8,192
+    16    dbit+16   65536*dw    65536                    65,536     131,072    (+0.26% of a 50M image)
+
+The two `wflip to_flip, dbit+8` sites (`xor_from_pointer.fj:36` arming and `:52` disarming) must
+agree; the decode-walk generalises to `read_word + (b>>2)*dw + dbit + (b&3)` for bit b; the shared
+destination becomes `hex.vec 4`.
+
+**Constraints, all verified by hand:**
+
+  * **The table must begin at op index EXACTLY 2^k** — the flip adds exactly `2^k*dw` and entry V
+    must land at `(2^k+V)*dw`. `pad 2^k` reaches exactly 2^k only if everything before it fits in
+    2^k ops.
+  * **Alignment is fine.** `P ^ (dbit+k) == P + (dbit+k)` needs P's low bits clear through
+    `dbit+k = 38+k`, and dw-alignment gives 6 zero bits with `dw = 64`. **The hard ceiling is
+    `dbit+k < dw`, i.e. k <= 25 at w=32 — so 16 is comfortable and 32 bits is impossible.**
+  * **One table serves every width.** The walk strictly clears bits downward, so entries 0..255 of a
+    2^16 table decode a byte exactly as today. With 16-bit slots, ONE primitive covers 1-, 2-, 3-
+    and 4-nibble reads at one dereference each.
+  * **The decode gets marginally cheaper**, not dearer: `popcount(16-bit)` equals
+    `popcount(lo)+popcount(hi)`, and you pay one terminal return instead of two.
+
+⚠⚠ **I MUST CORRECT THE RESEARCH HERE, AND IT INVERTS ITS CONCLUSION.** An agent reported that a
+2^12 table "must sit below op 4096, which is BELOW `stl.startup_and_init_all`'s ~7,000 ops, so it
+would force splitting that macro", and concluded 12-bit was the harder width. **That is wrong.**
+`startup_and_init_pointers` is:
+
+    stl.startup code_start      // Complexity: 2   <- TWO OPS
+    stl.ptr_init                // pad 256; the table
+
+**Only two ops precede the table.** `hex.init`'s ~6,725 ops come *after* it. So any power-of-two
+size is placeable, and a *bigger* table is if anything easier. The real cost is the opposite one:
+the table occupies `[2^k, 2^(k+1))` and pushes **the entire rest of the program above it** — for
+k=16 the program starts near op 131,072 instead of ~512.
+
+**⚠ WHERE `ptr_init` LIVES IS PART OF THE CONTRACT — do not "fix" it.** (Owner's clarification,
+2026-09-01.) `ptr_init` is invoked BY `startup_and_init_all`, not before it and not after it:
+
+    startup_and_init_all
+        -> startup_and_init_pointers   = stl.startup (2 ops) + stl.ptr_init   <- the table
+        -> hex.init                    (~6,725 ops, all AFTER the table)
+        -> stl.stack_init
+
+**and it should stay that way.** The table's address is not chosen, it is a consequence of this
+nesting: `stl.startup` emits 2 ops, then `pad 2^k` rounds up to exactly `2^k`. A wider table is
+therefore a change to `ptr_init`'s SIZE, never to its position — nothing needs to be hoisted,
+split, or reordered, and moving `ptr_init` out of the startup chain would break the address the
+whole mechanism depends on.
+
+This is also what makes `-D ptr16` a clean opt-in: one macro's body grows, and everything after it
+shifts up uniformly.
+
+That last point is the genuine risk, and it is measurable rather than theoretical: doom's
+M13-hotdata pass moved the hot pointer-walked arrays to low addresses *because wflip cost scales
+with an address's set bits*, worth a **measured** 78.54M -> 76.39M ops/frame
+(`wall_renderer.py:1756-1770`). Pushing everything above 2^17 perturbs exactly that. **Measure it;
+do not assume it is small, and do not assume it is fatal either.**
+
+### 2.2 Amortising the setup — a second prize, no table needed. FEASIBLE.
+
+The owner did not ask for this and it may be the better first move.
+
+Section 1.4 shows the dance **restores every piece of state it touches**: `:51-53` exactly undo
+`:36`, `:39` and `:47`, and `to_jump`/`to_flip_var`/`to_jump_var` are never written at all. The
+write side is symmetric (`xor_to_pointer.fj:141`, `:146`).
+
+**So after a fetch, the setup is still valid — and `read_byte n` throws it away and rebuilds it,
+paying `24@+160` per byte for state that was already correct.**
+
+The cheap advance is `wflip to_flip, delta`, costing `popcount(delta)` ops (1-2). ⚠ But it is an
+XOR, not an add: `base + i*dw == base XOR i*dw` only when the base is `2^ceil(log2 n) * dw`-aligned.
+So this is exact for **straight-line, compile-time-offset, power-of-two-aligned runs** — which is
+precisely `read_table_packed nb`, `read_table n` and `read_byte n`.
+
+Needs no new table, no new data format, and no address relayout. It is the cheaper hypothesis to
+test, and it tests the same load-bearing assumption (that the setup is reusable).
+
+---
+
+## 3. THE OPT-IN — `-D ptr12` / `-D ptr16`
+
+The owner's suggestion, and the mechanism already exists: **`fj -D NAME=VALUE` is commit `6cd2b4f`
+on `origin/1.5.1`.**
+
+⚠ **The LOCAL `1.5.1` branch is 8 commits STALE and does not have it.** `git fetch` and work from
+`origin/1.5.1`, or the flag will appear to be missing — this cost me a wrong conclusion while
+writing this document.
+
+Design sketch, to be settled with the maintainer:
+
+    default (no -D)   pad 256   + 256-entry table     exactly today's behaviour, byte-identical
+    -D ptr12          pad 4096  + 4,096-entry table   12-bit slots
+    -D ptr16          pad 65536 + 65,536-entry table  16-bit slots; INCLUDES the 12-bit case,
+                                                      since one table serves every width
+
+### 3a. FIRST, `-D` MUST OVERRIDE — today it is a hard error, and that blocks this design
+
+**Owner's requirement (2026-09-01): a `-D` define must SUPERSEDE an in-source declaration of the
+same constant.** If the code says `PTRSIZE = 8` on line 873 and the build passes `-D PTRSIZE=12`,
+the compiler must behave **as if line 873 were never written** — not error, not warn.
+
+**That is not what it does today.** `fj_parser.py:714-718`:
+
+    @_('ID "=" expr')
+    def statement(self, p):
+        name = self.ns_full_name(p.ID)
+        if name in self.consts:
+            syntax_error(p.lineno, f'Can't redeclare the variable "{name}".')
+
+and `-D`'s own help text documents this as intended: *"redefining an stl constant is an assembly
+error, not a silent override"*. Measured on the real `fj` this session, with a control:
+
+    A  source declares PTRSIZE = 8, no -D                assembles
+    B  source declares PTRSIZE = 8, -D "PTRSIZE = 12"    Syntax Error in file _dtest.fj (line 1):
+                                                           Can't redeclare the variable "PTRSIZE".
+    C  source declares nothing,     -D "PTRSIZE = 12"    assembles   <- so -D works; B is the collision
+
+B is the whole problem: the error is raised **at the user's line**, and the only way to use `-D`
+today is to DELETE the in-source default first. A constant nobody can ship a default for is not an
+opt-in. **So this is a prerequisite of P3, not a footnote.**
+
+**The minimal change.** `_defines.fj` is inserted first among the user files, so a `-D` name is
+already in `self.consts` when the source line is parsed. Record which names came from that file,
+and make a later assignment to one of them a silent no-op instead of an error:
+
+    if name in self.consts:
+        if name in self.cmdline_defined:   # -D wins; the source line is as if unwritten
+            return
+        syntax_error(...)
+
+⚠ **The skip must not swallow the defines file's own line** — that line is what puts the name in
+`cmdline_defined` in the first place, and a naive "name in set -> return" makes every `-D` silently
+do nothing. Gate on the assignment's own `CodePosition` file, or seed the consts before parsing.
+
+⚠ **The source expression stops being evaluated at all.** `PTRSIZE = <something unresolvable>` on
+line 873 would no longer raise. That is the intended semantics ("as if not written"), but it is a
+real behaviour change and belongs in the commit message.
+
+⚠ **And the help text must change**, because it currently promises the opposite. Leaving it turns
+the documentation into a false statement about the tool's contract.
+
+### 3b. A NAMESPACED CONSTANT IS ADDRESSED AS `a.b.name`, AND ONLY THAT WAY
+
+**Owner's requirement (2026-09-01).** `-D hex.PTRSIZE = 16` overrides the constant declared inside
+`ns hex`. A bare `-D PTRSIZE = 16` must **not** reach it — the fully-qualified spelling is the only
+one that works.
+
+**Today the qualified spelling does not parse at all.** Measured:
+
+    -D "hex.PTRSIZE = 12"     FlipJumpParsingException in _defines.fj
+
+because the assignment rule is `ID "=" expr` and a dotted name lexes as `DOT_ID`, a different token.
+(The error also points at a temp file the user never wrote — the same complaint `6cd2b4f` raised
+about a bare `-D NAME`.)
+
+**The fix is small and already has a template in the file.** The `id` nonterminal
+(`fj_parser.py:676-682`) accepts both spellings and routes `DOT_ID` through
+`base_name_to_ns_full_name`, which resolves leading dots and returns an already-qualified name
+unchanged. Add the mirror rule for assignment:
+
+    @_('DOT_ID "=" expr')     ->  name = self.base_name_to_ns_full_name(p.DOT_ID, p.lineno)
+
+⚠ Add it as its **own rule**; do not widen `ID "=" expr` to `id "=" expr`, which risks an LALR
+conflict with the macro-call rules that already consume `id`.
+
+⚠ Note the two helpers differ, and the difference is the correct behaviour here:
+`ns_full_name` prefixes the *current* namespace; `base_name_to_ns_full_name` does not. So a
+qualified name means the same thing wherever it is written, which is what makes it usable from a
+defines file that is always at top level.
+
+### 3c. `-D` MAY ONLY OVERRIDE — NEVER DEFINE
+
+**Owner's requirement (2026-09-01): if the program does not declare the constant itself, `-D` is a
+parse error — "override of non-defined constant".** `-D` stops being a way to inject a name and
+becomes strictly a way to supersede one.
+
+**This is what makes 3b safe.** Probe E was the dangerous case: `ns hex { PTRSIZE = 8 }` plus a
+top-level `-D "PTRSIZE = 12"` produced **no error and byte-identical output** — the define silently
+did nothing, because `hex.PTRSIZE` and `PTRSIZE` never collide. Under this rule that same command
+now fails loudly with *override of non-defined constant: PTRSIZE*, and the correct spelling from 3b
+is the one that works. **The two requirements together turn the one silent failure mode in this
+design into a loud one.**
+
+**⚠ The check CANNOT run when the define is parsed.** The declaration it is looking for may be on
+line 873 of the last file. It is an **end-of-parse** check, after `_parse_files_into_parser`
+returns and before `parse_macro_tree` hands back the macro tree.
+
+**⚠ And "was a later assignment skipped?" is the WRONG predicate** — it misses the case where the
+declaration came *first*. An stl constant is declared before `_defines.fj` (which is inserted first
+among the USER files, i.e. after the stl), so nothing later is ever skipped and a legitimate
+override would be rejected. **The cache-safe predicate:** a define is backed by a real declaration
+iff the name was **already in `self.consts` when the defines line was parsed**, *or* a later
+assignment to it was skipped. Record the first at define time.
+
+⚠ **Why "cache-safe" matters:** `_parse_files_into_parser` can *skip re-parsing the stl* and restore
+a snapshot, and that snapshot carries **`consts` and nothing else** (`fj_parser.py:955-957`,
+`:970-972`). Any new tracking set added to the parser is **not** restored on a cache hit, so a
+predicate that depends on having *observed* the stl's assignments breaks intermittently — passing on
+a cold cache and failing on a warm one. Testing `name in self.consts` depends only on what the
+snapshot does carry. (`_defines.fj` lives in a temp dir, so it breaks the stl prefix and is never
+itself cached — but do not move it before the stl without adding the defines to the cache key.)
+
+**⚠ FAN-OUT: this breaks all four shipped `-D` tests.** `tests/unit/test_cli.py`'s `DEFINE_PROG`
+*uses* `GREET` and never declares it, so every one of them becomes an *override of non-defined
+constant* error. They need a `GREET = 0` line added. Nothing in doom passes `-D` today, so the
+blast radius is exactly those four.
+
+### 3e. WHAT `-D` COULD AND COULD NOT DO - measured 2026-09-02, before section 3 was built
+
+The `stl-one-shadow` branch is based directly on `6cd2b4f` ("fj -D NAME=VALUE: define a constant
+before the assembled files"), and `origin/1.5.1` resolves to that same commit - so the base IS
+upstream 1.5.1, not stacked on unmerged local work. `-D` is therefore available to this work.
+
+But `-D` as it stands is a **declaration**, not an override. `flipjump_cli.py:435` writes the
+`NAME=VALUE` lines into a temporary `_defines.fj` and inserts it as the FIRST user file - it lands
+after the stl (so a define may use `w`, `dw`) and before every user file. Four cases, each actually
+assembled:
+
+| case | today |
+|---|---|
+| `-D PTRSIZE=12`, program does not declare `PTRSIZE` | **OK** |
+| `-D PTRSIZE=12`, program also has `PTRSIZE = 8` | **Syntax Error** - `Can't redeclare` |
+| `-D hex.pointers.PTRSIZE=12` (namespaced) | **Syntax Error** - the defines file does not parse |
+| `-D TOTALLY_UNUSED_NAME=5`, nothing declares it | **OK** (silently) |
+
+Rows 2, 3 and 4 are exactly the three things sections 3a, 3b and 3c ask for, and all three are the
+OPPOSITE of what happens now. So **section 3 is unbuilt, and it is a hard prerequisite for the wide
+table**: the stl has to be able to declare its own default table width and have the build override
+it. Row 3 is a grammar change, not a flag change - a declaration statement is `ID "=" expr` while
+`a.b.name` lexes as a `DOT_ID`.
+
+**Sizing, for when 3d gets built.** The table must begin at op exactly `2^k` (`pad 2^k`), and
+reading a k-bit cell flips bit `dbit+k` of the slot, so the ceiling is `dbit+k < dw`. At w=32
+(`#w`=6, `dbit`=38, `dw`=64) that is **k <= 25**; at w=64 it is k <= 56. Both 12 and 16 fit, and doom
+assembles at w=32. Cost of the table itself is `2^k` ops: 4,096 for k=12 and 65,536 for k=16, the
+latter being 0.32% of doom's 20.3M-op image - cheap, but it does push all user code past op 65,536,
+which is fine only because `ptr_init` is used BY `startup_and_init_all` and so already sits first.
+
+Two things widen with `k`, and section 0.1 makes them one commit, not two:
+* `read_byte` is `hex.vec 2` today (8 bits). k=12 needs 3 nibbles, k=16 needs 4, and the table
+  entry ternary `(#d)<=4 ? .read_byte+... : .read_byte+dw+...` generalises to nibble `(#d-1)/4`,
+  bit `(#d-1)%4`.
+* the WRITE side must agree on the same `k`: `xor_byte_to_flip_ptr` is `rep(2, i)` and becomes
+  `rep(k/4, i)`. A cell written 8-bit and read 16-bit is not a wrong value, it is an unbounded
+  jump (section 10 G6).
+### 3f. SECTION 3 IS BUILT - `stl-one-shadow` commit `39601e9`
+
+All three rules now hold, and the four rows of 3e are the four cases the tests pin:
+
+| case | now |
+|---|---|
+| `-D GREET=0x58`, program declares `GREET = 0x41` | **overrides** - byte-identical to writing `0x58` in the source |
+| `-D a.b.GREET=0x58` on a constant in `ns a { ns b {` | **overrides** it |
+| `-D GREET=0x58` on that same namespaced constant | **refused** - `override of non-defined constant` |
+| `-D GREET=...` where nothing declares `GREET` | **refused** - same error |
+| `-D w=64` | **refused** - `w` is set by `-w`, not declared by the program |
+
+**No grammar change was needed**, which is the part worth remembering. The defines file stays an
+ordinary `.fj` file - that is what keeps the whole expression language available to a define
+(`-D GREET = w + 33`, and `-D BASE=0x40 -D GREET=BASE+1` chaining, both still tested) - and a
+dotted NAME is simply wrapped in its namespaces, so `-D a.b.N=1` is written as
+`ns a { ns b { N = 1 } }`. What makes its constants OVERRIDES rather than declarations is that the
+parser is told which file it is (`FJParser.defines_file`).
+
+**The stl-prefix cache needs no new key component.** `_stl_prefix_length` counts only the leading
+files inside the packaged stl directory, and the defines file is a temp file, so it is never inside
+the cached prefix and the cache cannot serve a stale override.
+`test_cli_define_reaches_the_assembled_binary` is the control: its three assemblies run in ONE
+process, so the later ones hit the cache.
+
+**Negative control** (`scratchpad/oneshadow/mutctl_defines.py`): baseline passes, **6/6 mutations
+rejected**. It caught two things, both mine: a mutation that marked names used at DECLARATION time
+SURVIVED because it is a genuine no-op (a never-declared name is never marked either way), and
+`self.consts[name] = ...` in the override branch was **dead code** - the defines file already
+publishes the value when it is read. Removed.
+
+Suites: unit 371 passed / 59 skipped; fast+medium+hexlib+slow 264 passed.
+
+**So 3d is now unblocked** - the stl can declare its own default table width and a build can
+override it with `-D hex.pointers.<NAME>=12`. Nothing in 2.1 has been built yet.
+### 3g. SECTION 2.1 / 3d IS BUILT - `stl-one-shadow` commit `ab44bb3`
+
+`hex.pointers.PTR_CELL_BITS` (declared in `runlib.fj`, default 8) is how many BITS one pointed-to cell
+holds, and `ptr_init` lays `2^PTR_CELL_BITS` entries at op exactly `2^PTR_CELL_BITS`. Override per build
+with `fj ... -D hex.pointers.PTR_CELL_BITS=16`. Ceiling `dbit+PTR_CELL_BITS < dw` (25 at w=32, 56 at w=64);
+must be a multiple of 4.
+
+| side | what changed |
+|---|---|
+| read | table sized and aligned from `PTR_CELL_BITS`; entry `d` flips bit `(#d)-1`, in hex `((#d)-1)/4` at bit `((#d)-1)%4` - the generalisation of the old `(#d)<=4 ? ... : ...+dw`. `read_byte` is `hex.vec PTR_CELL_BITS/4`; the dance zeroes and arms with `dbit+PTR_CELL_BITS`. |
+| write | `xor_cell_to_flip_ptr` covers the whole cell, and `zero_ptr` uses it. |
+| new | `hex.read_cell` / `hex.write_cell` (+ `xor_cell_from_ptr`) move all `PTR_CELL_BITS` bits in ONE dereference. At `PTR_CELL_BITS=8` they are exactly `read_byte` / `write_byte`. |
+
+⚠ **The names `read_cell` / `write_cell` are NOT settled** - section 5 says the maintainer picks
+the name and it is the one irreversible decision here. They are additive; no stl-api macro changed.
+
+#### `-D` had to move BEFORE the stl, and that is a correction to 3f
+
+A constant is substituted where it is **USED**, at parse time. So an override read after the stl
+arrives too late for anything the stl itself computes from that constant - which is every use of
+`PTR_CELL_BITS`. The defines file is now inserted before the stl, not merely before the user files.
+A define's VALUE may still use `w` (a parser builtin) and an earlier define, but **not** an stl
+constant such as `dw` - write `2*w`. Side effect worth knowing: a non-stl file first disables the
+parser's stl-prefix cache for that run, which is exactly right, because a cached prefix was parsed
+without the override.
+
+#### What was proven, and the two controls that make it mean something
+
+* **Inert at the default** (`scratchpad/oneshadow/inert_check.py`): at `PTR_CELL_BITS=8` the assembled
+  bytes of `pointer_setters`, `hex_ptr` and `nth_pointers` are IDENTICAL to the stl at `39601e9`.
+  The same run asserts the bytes DIFFER at 12 and 16 - and that control is not decoration: **the
+  first version reached nothing at all**, and byte-identical-at-8 was equally true of it.
+* **Correct at every width**: every pointer program is byte-correct at 8/12/16, and `wide_cells.fj`
+  round-trips a full-width value - `cell:21/321/4321`, `ones:ff/fff/ffff`, zeroed at every width,
+  and `lowbyte:21` unchanged, i.e. the byte API still sees the low byte of a wide cell.
+* **Negative control** (`mutctl_cellbits.py`): **8/8 rejected** - but THREE survived at first (a
+  table sized 256, a read clearing only two hexes, a `zero_ptr` clearing only two hexes). All three
+  are invisible unless something stores a value wider than a byte, and nothing did. **That is why
+  `wide_cells.fj` exists**, and it is what turns those three from SURVIVED to rejected.
+
+Suites: unit 385 passed / 59 skipped; fast+medium+hexlib+slow 266 passed.
+
+#### And the doom gate, on the finished stl
+
+`deg_gate` re-run against the stl at `ab44bb3` - the one-shadow setters AND the PTR_CELL_BITS table:
+
+    (664,291,0x18000000):   40,919,374 ops  BYTE-EXACT
+    (1272,-724,0x40000000): 32,877,007 ops  BYTE-EXACT
+    (1869,479,0x80000000):  36,864,338 ops  BYTE-EXACT
+    (-416,256,0x0):         31,454,252 ops  BYTE-EXACT
+    PASS
+
+**Identical to the one-shadow run to the digit** (12.5), which is the inertness of the PTR_CELL_BITS
+refactor demonstrated on doom's real 20.3M-op program rather than on a three-program test set.
+So the whole of phase 0 is worth exactly what 12.5 measured: **-5.05% ops over four frames, span
+-0.27%**, byte-exact throughout.
+
+#### What remains
+
+The stl can now carry 12- or 16-bit cells. **doom cannot use them yet**: its emitter writes one
+BYTE per cell (`mapcompiler.py`), so a wider cell buys nothing until the data layout packs two
+bytes into one cell and the call sites move to `read_cell`/`write_cell`. That is section 7's P4,
+one converted run at a time, each gated - and it is a doom-emitter change, not an stl one.
+### 3d. The table selection itself
+
+`ptr_init` reads the define and picks `k`, the table size and the two `dbit+k` constants. **It stays
+exactly where it is** — inside `startup_and_init_all`, as section 2.1 records — so the change is to
+one macro's body and nothing relocates. The default path must be **provably unchanged**: that is
+the first gate, and it is cheap — assemble any existing program with and without the flag and diff
+the `.fjm`.
+
+⚠ **A define that silently changes a data format is dangerous.** Slots written as 8-bit and read as
+16-bit are not compatible. Whatever emits pointed-to data must agree with `k`, so the define has to
+reach the *emitter* too, not just the stl. Decide early whether `-D ptr16` widens ALL slots or only
+those the caller opts into.
+
+---
+
+## 4. WHAT IT IS WORTH — banded honestly
+
+    removable dereferences   ~1,500 (2-byte primitive)   ~2,400 (4-byte)
+    each worth               set_flip_and_jump_pointers + the ptr_inc it carries = 33@ + 174
+    =>                       1.1M-1.6M ops/frame (2-byte) or 1.9M-2.6M (4-byte)
+                             against a ~29.4M spawn frame  =  3.6% - 8.7%
+
+**Cross-checked against a MEASURED datum:** `set_flip_and_jump_pointers` is 7,078,474 ops =
+**12.7% of the frame** (`docs/handoff-m14_5.md:69`), 11.4% in a later profile. Removable/total is
+1,510/6,700 = 22.5% (2-byte) or 36% (4-byte). The two routes agree within 15%.
+
+⚠ **Do not quote the top of the band.** This repo has measured one stl-docstring prediction and
+found it **45%** of its documented cost (`read_table_packed 4` documented ~289@, measured ~125@ —
+`docs/handoff-m13-2s-fast.md:294-296`). Honest band:
+
+    0.5M - 2.5M ops/frame, most likely ~1.0-1.5M  =  2% - 8.5%, middle 3.5% - 5%
+
+⚠ **"Pointers are 50% of the time" overstates the REACHABLE part.** Of ~6,700 dereferences/frame,
+**~78% are single-byte RANDOM-index reads** (`drawn[x]`, `pclm[x]`, `sfflag[x]`, `sprflag[x]`) that
+neither prize helps — the largest single population is pass-1's occlusion prescan at ~840
+`read_byte`s/frame. The win lives only in multi-byte **runs**. Also: of 225 pointer call sites in
+`src/fj/*.fj`, only ~150 are live in the shipped `game` tier.
+
+---
+
+## 5. NAMING — `read_word` is not available
+
+* `read_hex n, dst, ptr` and `read_byte n, dst, ptr` are **both taken**, and a FlipJump MacroName is
+  `(name, param_count)` — a 3-parameter `read_hex` collides.
+* **`word` means w bits in this codebase.** `hex.read_word` would name a 16-bit read "word" in a
+  repo where a word is 32.
+
+Two candidates with stl precedent, neither unambiguously native:
+  (a) a count-led plural after `fill_bytes`/`copy_bytes` — e.g. `hex.read_nibbles n, dst, ptr`;
+  (b) a shape-infix name after `read_nth_hex`, naming the mechanism rather than the width.
+
+**Put both in the PR and let the maintainer choose.** CONTRIBUTING says *"Don't change the stl-api,
+only offer new options"*, so the name is the one irreversible decision here.
+
+---
+
+## 6. HOW stl CODE IS WRITTEN AND TESTED
+
+**stl macros have NO Python unit test** — they are proven by a small `.fj` program whose stdout is
+diffed against a recorded fixture. Commit **`953ddd9`** (`ptr_index` + `read_nth_hex/byte` +
+`write_nth_hex/byte`) is the exact template:
+
+    1. the stl edit
+    2. programs/hexlib_tests/<group>/<name>.fj
+    3. two rows: tests/tests_tables/test_compile_hexlib.csv and test_run_hexlib.csv
+    4. one recorded .out fixture
+
+The doc block is rigid, immediately above the `def`, in this order and with no blank lines:
+
+    //  Time Complexity: <expr in @ and w>      (two spaces, so Time/Space right-align)
+    // Space Complexity: <expr>
+    // @note: ...                               (only if the numbers assume a particular w)
+    //   like:  dst[:4] = *ptr                  (three spaces)
+    // <one prose line naming every parameter's TYPE and what is preserved>
+    // @Assumes: <non-obvious precondition>
+    // @requires hex.init and stl.ptr_init (or stl.startup_and_init_all).
+
+Plus: live in `ns hex`, internals in a nested `ns pointers`; `.`/`..` for same/parent ns; **every
+global the body touches must be listed after `<`** or the label collector misses it; a body of 4-5
+lines calling descriptive macros; new shared cells or tables exported from `ptr_init`'s `>` list and
+documented with `// @output-param`.
+
+**Two doc steps `953ddd9` MISSED — do not inherit the miss:** add the macro to the
+`flipjump/stl/hex/README.md` pointers table, and if it introduces a new invariant ("a pointed unit
+is k bits in one dw cell") add a bullet to that README's Conventions section.
+
+⚠ **The write side is already half-done and is the cheaper half.** `xor_byte_to_flip_ptr` is
+`rep(2, i) .xor_hex_to_flip_ptr hex+i*dw, 4*i` (`xor_to_pointer.fj:106-108`) — two nibbles after
+**one** `set_flip_pointer`. A wide WRITE is a rep-count change; only the wide READ needs a bigger
+table.
+
+---
+
+## 7. THE PLAN — four gated phases
+
+⚠ **Every phase below is governed by §0.** In particular §0.1: any phase named after a read macro is
+**incomplete as written** until its write-side twin is in the same commit. P1 and P4 are both written
+that way and both need amending before work starts.
+
+### P1. Prove the amortised setup on ONE call site. No stl change, no table.
+
+Cheapest test of the load-bearing assumption. Target `hex.read_table_packed 4`
+(`projection.fj:593`, `:852`, `plane_render.fj:146`) — nb=4 is a power of two, so the XOR-advance is
+exact.
+
+  * add `pad 4` to those tables in the emitter so the base is `4*dw`-aligned;
+  * restore constant is **`nb*dw`, NOT `(nb-1)*dw`**;
+  * **PREDICT FIRST:** 3 saved setups per call, ~3 x 781 = ~2.3k ops per executed call. If the
+    measured delta is not within a few percent of `call_count x 2.3k`, the model is wrong — stop and
+    find out why instead of banking it;
+  * gate: `deg_gate` byte-exact x4 with op counts matching the prediction, then `ca2_sweep` on a
+    matched pair for the governing median;
+  * **R9 negative control, free here:** set the restore constant back to `(nb-1)*dw` and require the
+    gate to REJECT. If it does not, the gate is not covering the invariant and no result counts.
+
+### P2. Resolve a contradiction before spending on the bigger target.
+
+`hex.read_table 8` (`plane_render.fj:140/144/258`) is n full setups per row and needs **no table
+relayout** (stride `8*dw`, already pow2) — plausibly the larger prize. ⚠ **But the census called
+`plane_render.fj` and `plane_bands.fj` DEAD in the `game` tier and then cited `plane_bands.fj:144`
+as hot (~10k of ~12.6k ops/row). Both cannot be true.** Grep the generated parts and settle it
+before spending anything.
+
+### P3. The stl primitive, on `origin/1.5.1` (fetch first — local 1.5.1 is stale).
+
+**P3.0 comes first, is separable, and is three requirements in one commit — `-D` becomes an
+OVERRIDE-ONLY mechanism.** Sections 3a/3b/3c. Today `-D X=…` against a source that declares `X` is a
+hard `Can't redeclare the variable` error at the USER's line, so the opt-in cannot ship a default at
+all. Touches `fj_parser.py:714-718`, one new grammar rule, and one end-of-parse check. Tests:
+
+  * **override** — source `X = 8` + `-D "X = 12"` assembles to the **same bytes** as source
+    `X = 12` with no `-D`;
+  * **negative control** — the same source with no `-D` must produce **different** bytes, or the
+    first assertion is equally true of a define that did nothing (that is literally probe E);
+  * **qualified name** — `ns hex { PTRSIZE = 8 }` + `-D "hex.PTRSIZE = 12"` moves the bytes;
+  * **bare name is refused** — the same program + `-D "PTRSIZE = 12"` is now an *override of
+    non-defined constant* error, NOT a silent no-op;
+  * **undeclared is refused** — `-D "NEVER_DECLARED = 1"` errors;
+  * **declaration-first still works** — overriding a constant the stl declared *before* the defines
+    file must succeed, and must keep succeeding on a **warm stl-prefix cache** (3c: the snapshot
+    carries `consts` only);
+  * the defines file's own line still takes effect — the naive fix silently disables every `-D`;
+  * **fix the four shipped `-D` tests** (3c): `DEFINE_PROG` never declares `GREET`;
+  * update the `-D` help text, which currently promises the opposite of all of this.
+
+Then the primitive itself: build the **16-bit** form only; one 2^16 table serves every width, and
+12-bit buys nothing extra. Follow `953ddd9`'s template in full, take the naming decision first,
+declare the width constant **top level** (section 3b: a name inside `ns hex` is silently
+unreachable from `-D`), and gate the default path as byte-identical with and without `-D`.
+
+### P4. Convert doom's multi-byte runs, one at a time, each gated.
+
+First candidate: `lines_steps_load2` (`frame_render.fj:1440-1480`) reads four 4-byte piece records in
+sequence, and the slot bytes are always initialised (`sfslot:` is `;0 * dw` padded,
+`wall_renderer.py:2031-2032`), so reading all 16 speculatively in aligned pair-reads should be
+value-identical. **If that holds it goes from ~108 to ~648 removable dereferences — the largest
+single item — and needs no relayout.**
+
+---
+
+## 8. WHAT NOT TO DO
+
+* **Do not generalise before one call site is gated.** The coarse-cull pre-pass was built before
+  being priced and cost +24.7M (R23/R32).
+* **Do not quote the derived @ figures as results.** The one measured conversion came in at 45% of
+  the stl prediction.
+* **Do not touch an existing stl signature.** Add names, never change them.
+* **Do not trust `deg_gate` alone.** This session twice saw four viewpoints pass a build that the
+  260-frame `ca2_sweep` then failed. For anything touching pointers, the sweep is the picture proof.
+* **Do not believe "12-bit is the harder width".** That was an agent's conclusion and the hand trace
+  refuted it — only two ops precede the table.
+
+---
+
+## 9. PROVENANCE, and what the hand trace changed
+
+Six agents: four research angles, two adversarial refuters aimed at the feasibility verdicts. Both
+refutations returned `refuted=False` after line-by-line traces. Full output:
+`scratchpad/_fjptr_findings.txt` — read it for the sixth objection the refuter did not fully close
+and for every open question.
+
+**The owner then required a hand re-derivation before this document was written, and it changed two
+things:** the 2^12 placement claim was inverted (only two ops precede the table, not ~7,000), and
+`-D` was found to be on `origin/1.5.1` after the stale local branch made it look absent. Both errors
+would have gone straight into the plan.
+
+---
+
+## 10. GAPS IN THIS PLAN — found by auditing it against the stl source
+
+Written after the plan, by reading `basic_pointers.fj`, `read_pointers.fj`, `xor_from_pointer.fj`
+and doom's `fixed_point.fj`. **Two of these are errors in sections 2 and 7, not omissions.** Ordered
+by what would hurt most.
+
+### G1 (CORRECTION). Section 2.2's advance recipe is INCOMPLETE — it would read the wrong address
+
+`set_flip_and_jump_pointers` (`basic_pointers.fj:75-79`) sets **two** things from the pointer:
+
+    address_and_variable_xor        w/4, to_flip,   to_flip_var, to_flip_var
+    address_and_variable_xor        w/4, to_jump+w, to_jump_var, to_jump_var
+    address_and_variable_double_xor w/4, to_flip, to_flip_var, to_jump+w, to_jump_var, ptr
+
+Section 2.2 says the advance is `wflip to_flip, delta`. **`to_jump+w` must advance too**, or the
+code arms slot *k+1* and jumps to slot *k*. Cost is still trivial (two wflips, `popcount(delta)`
+each) — but as written the recipe is a bug, not an optimisation.
+
+### G2 (CORRECTION). The restore is mandatory for a reason the plan does not state: SHADOW COHERENCE
+
+`to_flip_var` / `to_jump_var` are shadow copies that `address_and_variable_xor` uses to **xor out the
+previous value**. Advancing `to_flip`/`to_jump` with a raw `wflip` leaves the shadows stale, so **the
+next genuine `set_flip_and_jump_pointers` xors out a value that is no longer there and produces a
+corrupt address** — at some later, unrelated call site.
+
+P1 already says "restore constant is `nb*dw`, not `(nb-1)*dw`", but frames it as returning the
+pointer. The real invariant is: **`to_flip`/`to_jump` must be back to what the shadows believe before
+any other dereference happens.** State it that way, or the R9 negative control tests the wrong thing.
+
+### G3. The amortised span must contain NO other dereference — an unstated PRECONDITION
+
+`to_flip`, `to_jump`, `to_flip_var`, `to_jump_var` and `read_byte` are **global singletons**
+(`ptr_init` declares them once). Any dereference between the first setup and the last read clobbers
+all of it. `read_table_packed` is straight-line and safe (`fixed_point.fj:186-197`), but **P4's
+`lines_steps_load2` is not obviously so**, and the plan never says this must be checked per site.
+It is a correctness precondition, not a performance note.
+
+### G4 (THE BIG ONE). At P1's own call sites, a LARGER win sits next to the one I planned
+
+`read_table_packed nb` (`fixed_point.fj:186-197`) is not just `nb` dereferences. Its own complexity
+comment prices the address arithmetic at `#(n*dw)(w/4(1.5@+10))`. Decomposed at **w=32, @=25**
+(the model reproduces the stl's published `read_hex`=948 and `read_byte`=998 exactly, which is what
+says the decomposition is right):
+
+    4x read_byte_and_inc      4,948   55%
+    mul_const + add           3,420   38%   <- NO PHASE IN THIS PLAN TOUCHES IT
+    fixed tail                  610
+    TOTAL                     8,978
+
+`mul_const n, dst, src, c` is doom's own macro and loops `#c` times shifting by one bit. For
+`c = nb*dw = 256` that is **nine `shl_bit` passes to multiply by 2^8** — when `256` is two whole hex
+digits, i.e. a lane relabel: `mov` 6 hexes + `zero` 2 = 14@ = **~350 ops**.
+
+    P1 amortise the setup      saves ~3,224   (36% of the call)
+    + 16-bit reads             saves ~3,508   cumulative
+    + shift instead of mul     saves ~3,070   <- LARGEST SINGLE ITEM, and the simplest
+    all three:  8,978 -> ~2,400  (-73%)
+
+**The plan optimises the 55% and ignores a 38% that is cheaper to fix.** These are DERIVED from the
+macros' own complexity comments, not measured — but they are derived from the same comments the plan
+already trusts, and they reorder the work.
+
+The `.add w/4, ptr, table_address` is the same story: adding a compile-time constant base to an
+offset is an XOR when the table is aligned to its own size, and an XOR of a constant is a `wflip`.
+
+### G5. `-D ptr16` TAXES every narrow read, and the plan presents it as free
+
+Step 1 of the dance is `hex.zero 2, hex.pointers.read_byte` — **inside** the read. A 16-bit table
+needs `read_byte: hex.vec 4` and a four-branch entry expression, so that zero becomes `hex.zero 4`
+and **every existing byte read pays +2@ (~50 ops on ~998, +5%)** for a width it does not use.
+
+Avoidable — but only if the width is a **per-call-site parameter**, not a global define. That is a
+real design fork the plan never surfaces: `-D ptr16` sizes the *table*, and the *macro* must still
+choose how many hexes to clear.
+
+### G6. A speculative read of an uninitialised slot does not read garbage — it EXECUTES garbage
+
+P4 proposes reading all 16 slot bytes speculatively and argues the slots are always initialised. But
+section 1's whole point is that **a pointed-to value IS a jump address**. Arming a slot that holds
+junk `G` makes the program jump to `(G+256)*dw` — outside the table, into arbitrary code. The failure
+is not a wrong pixel, it is an unbounded jump.
+
+So "the slots are always initialised" is a **hard safety precondition**, not a value-correctness
+nicety, and it must be proven for the whole speculative range — not sampled.
+
+### G7. Nothing in the plan carries the new state into the M1 restore set
+
+Standing repo rule: a feature is not complete until the M1 self-reset loop carries its labels.
+A wider `read_byte`, any new shadow, and any new scratch are **global singletons in `ptr_init`** and
+therefore exactly the kind of thing the restore set exists for. No phase mentions it. Add it to P3
+and P4's definition of done, and check `build.STANDALONE_PERSIST` / the `m5_` set.
+
+**⚠ CHECKED SINCE, and the answer is the reassuring one — with a caveat.** `m5_restore_set.json.gz`
+is 461 labels / 12,234 words and holds **no stl internals at all**: `to_flip_var`, `to_jump_var`,
+`to_flip`, `to_jump`, `read_byte`, `nth_ptr` all score zero. *(Positive-controlled, because zero for
+everything is the shape of a broken check: `hex`, `pointers` and `stl` also score zero — the set is
+purely doom's own labels.)* So **deleting `to_jump_var` cannot break the restore set.**
+
+The caveat is the interesting half: the pointer shadow is **stateful across frames and restored by
+nothing**. That is safe only because the address field is equally unrestored, so the two stay mutually
+consistent across an M1 reset. **One shadow makes that strictly safer** — there is one less thing left
+to be consistent with. Any phase that adds a *new* pointer global re-opens this and must re-check.
+
+### G8. The write side is not in the plan at all
+
+`xor_to_pointer.fj` is symmetric and section 6 even notes the write side already does two nibbles per
+setup. Doom has 36 pointer-macro call sites; the plan's four phases are all reads. Either the same
+two prizes apply to writes (and the plan is under-scoped by half), or they do not and the plan should
+say why.
+
+### G9. Ordering: P1's target was chosen using the census P2 exists to fix
+
+Section 4's value estimate and P1's choice of `read_table_packed 4` both rest on a census that
+**P2 itself says contradicts itself** (`plane_render`/`plane_bands` called dead and hot). Running P1
+first is defensible — it is a mechanism test and its own op counts are self-validating — but the
+plan should say plainly that *the target selection is not yet evidence-backed*, and re-run the census
+before P4 picks sites.
+
+### G10. Smaller, but each would cost a session
+
+* **No abort threshold.** The plan predicts, but never says what result kills it. Given the repo's
+  history (a pre-pass built before it was priced, +24.7M), P1 needs a number below which P3/P4 do not
+  start.
+* **No compile-time guard on `k`.** Section 2.1 has the `dbit+k < dw` ceiling but no phase asserts it.
+  The stl is general-purpose: at small `w` a 16-bit table is impossible, and it must fail loudly at
+  assembly time rather than silently corrupt.
+* **`bit.pointers.ptr_init` exists too** (`ptrlib.fj:7-9` calls both). A second table, never mentioned.
+* **`@` is `log2(total ops)`, so it is program-size dependent.** Adding 65,536 table ops to a ~42M-op
+  image moves `@` by ~0.002 — negligible, and worth one line to close rather than leave as a doubt.
+* **No named measurement command** for P1's before/after, in a repo whose rules forbid quoting an
+  unmeasured number.
+* **The plan only makes dereferences cheaper, never fewer.** G4 is one instance of the wider miss:
+  no phase asks which pointed-to reads could become fixed-address reads through the specialisation
+  doom already does elsewhere (BSP-as-code). For a repo whose cost model says *stops beat budgets*,
+  that is the missing question.
+
+### What I would change in the plan
+
+1. **Fix G1 and G2 in section 2.2 and P1 before anyone implements from this document.**
+2. **Add the `mul_const`-to-shift change as P0** — largest single item, simplest, no stl change, no
+   table, and it is gated by the same `deg_gate`+sweep run as P1.
+3. **Make G3's "no dereference inside the amortised span" an explicit per-site checklist item.**
+4. Fold G7 (restore set) into the definition of done for P3 and P4.
+5. Decide G5's fork — global table width vs per-call-site clear width — before writing the macro.
+
+---
+
+## 11. SHARING `set_flip_and_jump_pointers` — the deep dive
+
+The owner's question: the setup is the slow part; **where else can it be shared?** Answered by taking
+it apart. Everything below is **DERIVED** from the stl's own published complexity comments at
+**w=32, @=25** (`@` is `log2(total ops)`, README line 75), and the decomposition reproduces
+`read_hex`=948 and `read_byte`=998 exactly. **Nothing here is measured. No build was run.**
+
+### 11.1 What the setup actually is: three passes over the pointer's hexes
+
+    address_and_variable_xor        w/4, to_flip,   to_flip_var, to_flip_var   (w/4)(@+4) = 232
+    address_and_variable_xor        w/4, to_jump+w, to_jump_var, to_jump_var   (w/4)(@+4) = 232
+    address_and_variable_double_xor w/4, to_flip, to_flip_var,
+                                         to_jump+w, to_jump_var, ptr           (w/4)(@+12) = 296
+                                                                               ------------------
+                                                                               w(0.75@+5) = 760
+
+`logics.fj:88-93,149-156`: each pass is `rep(n, i) <exact_xor over one hex>`, priced `@+4` for two
+destinations and `@+12` for four — **+4 per extra destination**. So the setup is **exactly linear in
+the number of pointer hexes: 95 ops per hex.** That single fact drives everything below.
+
+**Passes 1 and 2 are pure bookkeeping** — they exist only to xor out the *previous* pointer. They are
+**464 of 760, i.e. 61% of the setup**, and they do no work related to the read at hand.
+
+### 11.2 S1 — merge the two shadows. −232 ops on EVERY dereference, no call-site changes.
+
+`to_flip_var` and `to_jump_var` are two `hex.vec w/4` registers, and inside
+`set_flip_and_jump_pointers` they are **always assigned the same value and always zeroed together**.
+With one shared shadow and a three-destination `exact_xor` (`@+8`, by the +4-per-destination rule):
+
+    clear to_flip, to_jump+w, shadow    (w/4)(@+8) = 264
+    set   to_flip, to_jump+w, shadow    (w/4)(@+8) = 264
+                                        ---------------
+                                                     528     vs 760  ->  -30.5%
+
+Setup is 80% of a `read_hex`, so this is **≈ −24% on every pointer read and write in any FlipJump
+program**, with no change at any call site.
+
+⚠ **The catch, and it is checkable:** the shadows are *not* always equal, because
+`xor_to_pointer.fj:10,37,46,155` and `basic_pointers.fj:114` use the one-sided `set_flip_pointer` /
+`set_jump_pointer`. Under a merged shadow those must maintain both fields, costing them
+`528` vs `464` (**+14%**). **In doom that is a near-pure win:** the census below shows doom's traffic
+is ~139 sites through `set_flip_and_jump_pointers` and none through the one-sided pair. (**⚠ "57" was my
+undercount — it missed the `_and_inc` variants, which are the majority. See §11.12.**)
+
+### 11.3 REFUTED — fusing `to_flip` and `to_jump` into one op
+
+Tempting: one op `(ptr+dbit+8) ; ptr` both arms the slot and jumps into it, which would delete pass 2
+(232 ops). **It does not work.** The dance uses the flip op **twice** — once to arm (jumping onward
+to the slot) and once to disarm (jumping onward to `cleanup`). The current design keeps every jump
+field a **compile-time code label**, so retargeting between the two uses is a constant `wflip`.
+Putting the runtime address `ptr` in a jump field makes that retarget a runtime xor, and you still
+need two address-bearing ops. Recorded so nobody re-derives it.
+
+### 11.4 The census says the setup is NOT doom's biggest pointer cost
+
+Call sites in `src/fj/*.fj`:
+
+    read_byte   38     ptr_index   35     write_byte  13     ptr_sub  6     read_hex  5     write_hex 1
+
+**`ptr_index` is as common as `read_byte`.** And an indexed read is priced `w(3@+10.25) + 7@+13`,
+against `read_hex`'s `w(0.75@+5) + 7@+13` — so `ptr_index` alone is `w(2.25@+5.25)` ≈ **1,968 ops,
+2.6x the setup.** For doom's most common pointer pattern the split is roughly
+
+    address arithmetic  ~1,968   (~60%)
+    setup                  760   (~23%)
+    the actual read        238   ( ~7%)
+
+**Sharing the setup is optimising the 23%.** That is worth doing — but it is not where the money is.
+
+### 11.5 S2 — the base is a COMPILE-TIME CONSTANT, and doom pays runtime for it
+
+`frame_render.fj:629-632`, four consecutive lines:
+
+    hex.set     w/4, trb_drawn_b,   drawn                  // materialise a LABEL into 8 hexes
+    hex.ptr_index     trb_drawn_p,  trb_drawn_b, trb_col_x // then a runtime 8-hex ADD of it
+    hex.set     w/4, trb_sprflag_b, sprflag                // again
+    hex.ptr_index     trb_sprflag_p, trb_sprflag_b, trb_col_x
+
+`ptr_index` (`pointer_arithmetics.fj:46-52`) is `mov w/4` + two `shl_hex` + `rep(8-#w) shr_bit` +
+**`add w/4, dst, ptr`**. When `ptr` is a constant and the array is aligned to its own size,
+`base + offset == base XOR offset`, so **the whole runtime add — and the `hex.set` that existed only
+to feed it — collapse to a compile-time constant.** The shifts then only need to cover the hexes a
+bounded index can reach, not all eight.
+
+`read_table_packed` has the identical shape: `table_address: .vec w/4, table` is a compile-time
+label stored in a register purely so a runtime `add` can consume it (§10 G4).
+
+### 11.6 S3 — one index, several arrays: share the arithmetic, not the setup
+
+Lines 630 and 632 index **two different arrays with the same `trb_col_x`**. Same at `:967/:969`
+(`tsf_drawn_p`, `tsf_sfflag_p` from `tsf_col_x`). Since both bases are compile-time constants,
+
+    second_ptr = first_ptr + (base2 - base1)      // a COMPILE-TIME constant
+
+so the second `ptr_index` **and** its `hex.set` are entirely redundant — one shift feeds every array
+indexed by that column. This is the owner's "share it more often" applied one level up from the
+dereference, and it is visible in four lines of one macro.
+
+### 11.7 The sharing taxonomy, with what each is worth
+
+    S1  merged shadow                    ~-19% per dereference   ~139 doom sites; NOT a drop-in (§11.12)
+    S2  constant base -> xor, not add    ~-1,968 (+ the set)     the 35 ptr_index sites
+    S3  one index, N arrays              a whole ptr_index each  pairs at :630/:632, :967/:969
+    S4  adjacent cells, one setup        -760 and -239 (ptr_inc) read_byte n, read_table_packed  (P1)
+    S5  16-bit read instead of 2 bytes   ~-898 per byte pair     wherever 2 adjacent bytes are read
+
+**S4 is the only one the plan had.** S1 is the one that needs no call-site change at all, and S2/S3
+are larger than everything else combined.
+
+### 11.8 Writes: already shared, and they pay the full setup
+
+`write_hex` (`write_pointers.fj:9-14`) is `set_flip_and_jump_pointers` -> `read_byte_from_inners_ptrs`
+-> `xor` -> `xor_hex_to_flip_ptr`. **A write IS a read plus a flip-back, through ONE setup** — already
+optimal, no win there. But two consequences the plan missed: a write costs a full 760-op setup like a
+read, so S1/S2/S4 apply to doom's 13 `write_byte` sites too; and **a read of `*p` and a later write to
+`*p` at two separate call sites do NOT share** — the write redoes the setup. Fusing those is another
+760.
+
+### 11.9 CORRECTION — `to_flip` and `to_jump` are NOT the same pointer. The owner is right.
+
+My §11.2 headline was too strong. Enumerating **every** write to the two address fields:
+
+**`to_jump+w` is written by exactly two macros** — `set_jump_pointer` and
+`set_flip_and_jump_pointers` — and is **never** offset.
+
+**`to_flip` is written by those setups AND transiently offset by a compile-time constant in three
+separate macros**, each of which restores it:
+
+    xor_from_pointer.fj:36 / :52    wflip to_flip, dbit+8        arm / disarm  <- the owner's example
+    xor_to_pointer.fj:26 / :28      wflip to_flip, dbit          ptr_flip_dbit
+    xor_to_pointer.fj:123-141       dbit+0 -> +1 -> +3 -> +2 -> 0   a GRAY-CODE WALK in
+                                                                    xor_hex_to_flip_ptr
+
+So **inside the dance, `to_flip` = ptr+dbit+8 while `to_jump+w` = ptr** — exactly as the owner said —
+and `xor_hex_to_flip_ptr` walks `to_flip` through four offsets on a data-dependent path. The design
+does this deliberately: offsetting `to_flip` by a compile-time constant is a `wflip` costing
+`popcount`, which is why the *flip* field is the one that gets perturbed and the *jump* field never is.
+
+**And they differ DURABLY too, not just transiently** — the stronger case. `xor_hex_to_ptr`,
+`xor_byte_to_ptr` and `ptr_flip` (`xor_to_pointer.fj:10,37,46,155`) call **`set_flip_pointer`**, which
+advances `to_flip`+`to_flip_var` and leaves `to_jump`/`to_jump_var` pointing at an **older, unrelated
+address**; `ptr_jump` (`basic_pointers.fj:114`) does the mirror image. `xor_hex_to_flip_ptr` even
+documents it: *"use after: .pointers.set_flip_pointer ptr"*.
+
+**What this does to S1.** It does not refute it, but it renames the precondition, and the difference
+is the whole point:
+
+    today   each address field equals ITS OWN shadow at setup entry   -- two independent invariants,
+            and the one-sided setters keep each field self-consistent
+    S1      both address fields equal THE SAME shadow                 -- strictly stronger
+
+The three transient offsets are all restored before their macro exits, so they do not violate the
+stronger invariant *at a setup call* — **but S1 converts "three macros each happen to restore
+`to_flip`" from an incidental property into a load-bearing one, spread across two files, asserted
+nowhere.** The one-sided setters violate it outright, which is the +14% already priced in §11.2.
+
+**Therefore, if S1 is attempted:**
+
+* state the invariant explicitly — `to_flip == to_jump+w` at every entry to the setup — and give it a
+  test that a mutation must break (R9);
+* the one-sided setters must maintain **both** fields, or be deleted;
+* ⚠ **and it forbids the obvious S4 micro-optimisation**: skipping the `dbit+8` restore between
+  consecutive amortised reads would leave `to_flip` permanently offset. (That already breaks today's
+  weaker invariant too — worth knowing before someone "saves" two wflips per read.)
+
+**§11.2 should be read as:** the two shadows are equal *on the path doom actually uses* — ~139 sites
+through `set_flip_and_jump_pointers`, none through the one-sided pair — not as a property of the stl.
+That is what makes S1 attractive **for doom** and a much bigger question for the stl in general.
+
+### 11.10 The owner's structural point — one shadow, because the two fields are different PARTS
+
+*"They can be the same variable, as one is in the flip part and one is in the jump part."*
+
+This is the right way to see it, and it **removes** my §11.9 objection instead of working around it.
+
+`to_flip: 0;0` holds its address in the **flip part** — word 0, at `to_flip+0`.
+`to_jump:  ;0` holds its address in the **jump part** — word 1, at `to_jump+w`.
+
+They are two distinct *destinations*, but they always hold **one value: the address being pointed at**.
+Being in different parts is exactly why a single shadow can serve both — there is no aliasing to
+worry about, only two places to write the same number. The current pair of shadows is not required by
+the structure; **the structure is the reason one is enough.**
+
+**The arithmetic checks out against the family that already exists** (`logics.fj`):
+
+    exact_xor            1 destination group    @
+    double_exact_xor     2                      @+4
+    quadrupled_exact_xor 4                      @+12          ->  @ + 4(k-1)
+
+so a three-destination form is `@+8`. It does not exist yet, but it is an interpolation of a template
+already written three times. With one shadow:
+
+    clear   to_flip, to_jump+w, shadow     (w/4)(@+8)
+    set     to_flip, to_jump+w, shadow     (w/4)(@+8)
+                                           ------------
+                                           w(0.5@+4)  = 528     vs  w(0.75@+5) = 760
+
+**In the stl's own notation the setup goes `w(0.75@+5)` -> `w(0.5@+4)`.** At w=32, @=25:
+
+    read_hex    948 -> 716   (-24.5%)      ⚠ THESE LEVELS ARE REFUTED — see §11.12.
+    read_byte   998 -> 766   (-23.2%)      doom's own m1_reset.fj:20-24 MEASURED read_byte at
+                                           628.0, not 998. The `@` in a docstring is a WORST CASE.
+                                           Measured saving is -18% to -20%, not -23%/-24%.
+
+### 11.10a WHY `@+4(k-1)` IS A MECHANISM, NOT A CURVE FIT
+
+Challenged, so here is the derivation rather than the extrapolation. `exact_xor`
+(`logics.fj:28-49`) is a **16-entry jump table**:
+
+    wflip src+w, switch, src      // retarget the SOURCE HEX's jump field to `switch`, then jump INTO it
+    pad 16
+  switch:
+      ;end            //  0
+    d0;end            //  1
+    d1;switch+1*dw    //  3      <- flips d1, then falls to entry 1, which flips d0
+    ...
+  end:
+    wflip src+w, switch           // put the source hex back
+
+The source hex is `;V*dw`; xoring its jump field by a 16-op-aligned `switch` lands execution on entry
+**V**, and each entry flips one destination bit and jumps to *V minus its top set bit* — so the walk
+is `popcount(V)` long. **`pad 16` is what makes this safe**: `switch` is a multiple of `16*dw`, so its
+low bits are zero and the restoring `wflip` cannot disturb the value bits at `dbit`. The documented
+`@` is the two `wflip`s of a **code address**, whose cost is that address's on-bit count.
+
+`double_exact_xor` (`:101-139`) then **ping-pongs between two such tables**: `first_flip[V]` flips a
+`d` bit and jumps to `second_flip[V]`, which flips a `t` bit and jumps to `first_flip[V minus top
+bit]`. **So the walk visits k destination bits per set bit of the source** — worst case 4 set bits in
+a hex, hence `4k` ops, hence `@+4(k-1)` relative to `k=1`. Two parameters, six published numbers:
+
+    k=1  time @     space @+12       k=2  time @+4   space @+28       k=4  time @+12  space @+60
+
+and both setup totals reproduce to the digit — `w(0.75@+5)` and `w(0.75@+29)`. `k=3` is `@+8` / `@+44`
+by mechanism. **The STRUCTURE is trustworthy; §11.12 B is why the levels are not.**
+
+### 11.11 So why are there two shadows? For a capability doom never uses.
+
+Two shadows exist for exactly one reason: `set_flip_pointer` and `set_jump_pointer` let the two fields
+hold **two different live pointers at once** — one address armed for flipping, another for jumping.
+That is a real capability. Its users:
+
+    stl    set_flip_pointer  at xor_to_pointer.fj:10,37,46,155   (xor_*_to_ptr, ptr_flip)
+           set_jump_pointer  at basic_pointers.fj:114            (ptr_jump)
+    doom   xor_hex_to_ptr 0   xor_byte_to_ptr 0   ptr_flip 0   ptr_jump 0
+           set_flip_pointer 0   set_jump_pointer 0   xor_hex_to_flip_ptr 0
+
+**Zero.** All ~139 of doom's pointer sites go through `set_flip_and_jump_pointers`. And even in the stl,
+each one-sided setter is used only by its own standalone macro — nothing depends on the *other* field
+surviving across it.
+
+So the two-shadow design buys a capability nothing in doom uses, and charges **232 ops for it on every
+single dereference**.
+
+**The consequence for §11.9's objection.** With one shadow there is one setter, and "both address
+fields equal the same shadow" stops being an emergent property spread across two files — it becomes a
+**single macro's postcondition**. The durable-divergence case disappears *by construction*, not by
+assertion. What remains is only the transient requirement, unchanged: the three macros that offset
+`to_flip` by a compile-time constant (`dbit+8`, `dbit`, and the Gray walk) must restore it, which they
+already do.
+
+⚠⚠ **THIS NEXT SENTENCE WAS WRONG AND DANGEROUS — SEE §11.12.** I wrote that one-sided callers "if
+kept" merely pay +64. They cannot be kept. Keeping them with a merged shadow is a **silent wild
+jump**, and `stl.return` is one of them.
+
+⚠ **Scope, honestly:** this is ~24% off an isolated read, and isolated reads are where §4 says most
+dereferences are. But at doom's 35 `ptr_index` sites the setup is only ~23% of the cost, so there it
+is ~7%. **S2 and S3 remain the larger prizes; S1 is the one that costs no call-site changes.**
+
+### 11.12 AMENDMENT — the claim was adversarially tested. It survives in STRUCTURE and fails in DETAIL.
+
+Six independent reviewers (four lenses, two skeptics briefed to kill it, one adjudicator). **All six
+returned `claim_needs_amendment`.** I re-verified every load-bearing correction against the source
+myself. Three of my statements were wrong, and one was dangerous.
+
+#### A. CORRECTNESS — the conclusion holds, my REASON did not, and §11.11 as written ships a wild jump
+
+I wrote that with one shadow the divergence case "disappears *by construction*". That is only true if
+the one-sided setters are **absorbed or deleted**. Merge the shadow and leave them, and:
+
+    state (to_flip=P, to_jump+w=P, shadow=P)
+    set_flip_pointer Q           ->  (Q, P, Q)
+    set_flip_and_jump_pointers R ->  to_jump+w = P^Q^R
+    the dance then jumps through to_jump   ->   JUMP TO P^Q^R
+
+**And `stl.return` is one of those callers.** Verified: `ptrlib.fj:70-72` is
+`def return { hex.ptr_jump hex.pointers.sp }` -> `basic_pointers.fj:113-115` `ptr_jump` ->
+`set_jump_pointer`. `hex/pointers/stack.fj:42,:51` reach `set_flip_pointer` via `ptr_wflip`.
+
+⚠ **Doom cannot catch this for you.** Doom calls neither macro, so `deg_gate` and `m5_gate` would both
+**pass** a build that has already broken `stl.call`/`stl.return` for every other program on this stl —
+and `flipjump-151` is an editable install shared with `bf2fj` and `c2fj`. This is a library edit, not
+a doom-local optimisation.
+
+The right invariant is **"all three fields are equal at every setter entry"**, held by making
+`set_flip_pointer`/`set_jump_pointer` aliases of the merged three-field setter. Safe in `hex`:
+`to_jump` has exactly two readers (`basic_pointers.fj:115`, `xor_from_pointer.fj:47`), both
+immediately after a setter that wrote it.
+
+⚠ **Leave `bit/` alone.** `bit/pointers.fj` has **zero** `set_flip_and_jump_pointers` (verified) —
+nothing to merge, no saving — and its `exact_xor_from_ptr` genuinely holds two different live
+addresses across a setter boundary.
+
+#### B. COST — mechanism confirmed, every ABSOLUTE NUMBER refuted, including by this repo
+
+`@+4(k-1)` and `@+12+16(k-1)` are confirmed, and the merge really does delete **one dispatch instance
+and one table pass per hex, eight times per call**. But **the `@` in a docstring is a WORST CASE**:
+`wflip` costs `popcount(address)`, on average half the bit-length.
+
+**doom already measured this and I did not look.** `src/fj/m1_reset.fj:20-24`, from
+`scratchpad/ptr_price_list.py` with vacuity, body-removed and `--selftest` negative controls:
+
+    MEASURED   hex.read_byte  628.0    hex.write_byte  805.6    hex.zero_ptr 795.9
+    my model   read_byte      998      write_byte     1222
+
+The model runs **~1.5-1.6x high**. So `760 / 528 / 232 / 948 / 716 / 998 / 766` and the derived
+**-24% / -23% are not costs** — they are worst-case model levels. Measured on a real build at
+`@ ~ 16.4`: `read_byte -19.3%`, `read_byte_and_inc -20.4%`, `write_byte -18.4%`,
+`write_byte_and_inc -18.1%`; **site-weighted -19.4%**, and **-15% to -21%** across three layouts up to
+`@ = 20.4`. Doom's real `@` is **25.415** (`build/doom_e1m1_menu.fjm`: max word address 89,494,606 ->
+44,747,303 ops) — **and nothing has been measured there.**
+
+Space goes the favourable way: the merged program is **smaller** by a flat ~384 program-ops per site
+(`pad 16` makes per-instance space `16(k+1)`, with no `@` term), so the "a bigger program raises `@`"
+worry is refuted with the good sign.
+
+**Use this instead:** *one dispatch instance and one table pass fewer per hex per setter call;
+measured -18% to -20% on doom's dereference macros at @ ~ 16.5, and -15% to -21% across layouts to
+@ <= 20.4; unmeasured at doom's @ = 25.4.*
+
+#### C. SCOPE — right about doom, and my site count was out by 2.4x
+
+"Doom uses the one-sided capability zero times" is **CONFIRMED**, more firmly than I put it: zero in
+`src/fj`, zero in `src/doomfj/*.py`, zero in all nine emitted files of `build/generated_menu/`.
+
+But **"57 sites" was wrong — it is ~139.** I counted `read_byte`/`write_byte`/`read_hex`/`write_hex`
+and **missed the `_and_inc` variants, which are the majority**: `read_byte_and_inc` 66, `read_byte` 31,
+`write_byte_and_inc` 26, `write_byte` 11, `write_hex_and_inc` 4, `read_hex` 4, `write_hex` 1. Any
+whole-frame extrapolation off 57 is wrong by 2.4x.
+
+⚠ And **139 is SOURCE call sites, in macros that are themselves `rep`-expanded.** Image size is
+governed by expanded instances; ops/frame by dynamic executions. **Neither has been measured, and
+neither is 139.**
+
+#### The two steps, in this order
+
+1. **~20 min, no doom build, retires part A.** In a **copy** of the stl (never the shared editable
+   install in place): add the three-group macros, rewrite all three setters over one shadow, delete
+   `to_jump_var`, leave `bit/` untouched. Run flipjump's own `test_compile_fast` /
+   `test_compile_medium` / `test_run_medium` — they cover `hex_ptr`, `bit_ptr`, `startup_init_all`,
+   `func1`-`func7`, and `hex_ptr.fj` exercises `ptr_flip` -> `ptr_jump` -> `ptr_wflip` -> combined
+   setter in the exact sequence a naive merge destroys. **Gate it with a mutation control first** — an
+   off-by-one in the chain fails **silently with wrong data** (`read_byte` returning 0x0 for 0xb), not
+   with a crash.
+2. **One heavy build, and the only honest doom number.** `render` tier + `scratchpad/deg_gate.py`:
+   byte-exactness x4, the ops/frame delta at doom's real `@` and layout, and the image-size delta, all
+   in one run. Op counts in every existing gate will move — that is re-baselining, not re-running.
+
+**Do not do 2 before 1.** Step 1 is the cheap pre-gate; per rule 3 it saves twenty minutes, it does
+not replace the gate.
+
+#### One process note
+
+The reviewers' own evidence was not uniformly sound: one skeptic cited a harness (`scratchpad/
+stl_merged`, `stl_mut1`, `negctl.py`, `bench3.py`) whose files **do not exist**, so its numbers are
+unquotable however good its reasoning. The numbers kept above are the ones whose harness is on disk
+(`scratchpad/killcost/`, logs included) plus this repo's own `m1_reset.fj:20-24`. **R9 applies to
+reviewers too.**
+
+---
+
+## 12. STEP 1 IS DONE - what it cost, and the three things it taught
+
+Done 2026-09-02, in an **isolated git worktree**, never the shared editable install:
+`C:/Users/tomhe/Documents/flipjump-wide`, branch `stl-one-shadow`, commit `232f737`.
+`flipjump-151` is untouched, so doom, `bf2fj` and `c2fj` still build against the old stl until
+someone merges it. Point doom at the new one with `scratchpad/oneshadow/deg_with_stl.py --worktree`.
+
+⚠ **Do NOT use `PYTHONPATH` for this** - it cost a run. The flipjump worktree ships its own `tests/`
+package and it is a REGULAR package (`__init__.py`), while `doom-flipjump/tests` is a NAMESPACE one.
+A regular package beats a namespace portion wherever the two sit on `sys.path`, so the worktree on
+`PYTHONPATH` silently rebinds `tests` and `deg_gate` dies at `from tests.fj.stream_screen import
+StreamScreen`. Put the worktree on `sys.path` only long enough to bind `flipjump`, then remove it:
+later `flipjump.*` submodules still resolve through the bound parent, so the stl comes from the
+worktree while every other name comes from doom.
+
+### 12.1 The change
+
+    was   address_and_variable_xor        to_flip,   to_flip_var, to_flip_var
+          address_and_variable_xor        to_jump+w, to_jump_var, to_jump_var
+          address_and_variable_double_xor to_flip, to_flip_var, to_jump+w, to_jump_var, ptr
+          -> time w(0.75@+5)   space w(0.75@+29)
+    now   address_and_variable_triple_xor to_flip, to_jump+w, to_ptr_var, to_ptr_var
+          address_and_variable_triple_xor to_flip, to_jump+w, to_ptr_var, ptr
+          -> time w(0.5@+4)    space w(0.5@+22)
+
+`set_flip_pointer` and `set_jump_pointer` are **aliases** of the combined setter, as section 11.12 A
+required, and their comments say they must stay aliases. `bit/` untouched. `ptr_init` drops one
+`hex.vec w/4`.
+
+**Section 0.1 is satisfied by construction, not by effort**: the merged setter is the one both
+halves call (`xor_*_from_ptr` reads, `write_*`/`zero_ptr` writes), and the two absorbed one-sided
+setters are one per half (`set_flip_pointer` serves `xor_*_to_ptr`/`ptr_flip`/`ptr_wflip`,
+`set_jump_pointer` serves `ptr_jump`). The new test opens with a read/write round-trip.
+
+### 12.2 The numbers that were MEASURED, not modelled
+
+| what | measured |
+|---|---|
+| `exact_xor` family space, k=1/2/3/4, per instance | **32 / 48 / 64 / 80** ops |
+| `stl.startup_and_init_pointers` at w=64/32/16 | 680 / 600 / 560 ops -> slope exactly **2.5w** |
+| flipjump suites | fast+medium+hexlib **194**, slow **70**, unit **366 passed, 59 skipped** |
+
+The k=1..4 row is worth reading twice. Published space is `@+12 / @+28 / @+44 / @+60`, and the
+measured values sit `@ = 20` above every one of them - the same implied `@` on all four rows. So
+the `@+4(k-1)` / `+16 per k` mechanism of section 11.10a is confirmed by measurement, and the
+interpolated `@+44` for k=3 was right. The startup slope of 2.5w (2w of it `bit.ptr_init`) confirms
+`hex.ptr_init` is now `0.5w + const`, i.e. exactly one `hex.vec w/4` lighter.
+
+### 12.3 Three things the plan did not know
+
+**A. A mutation can HANG rather than crash, and a harness that edits source must survive that.**
+The first mutation-control run sat for 25 minutes and was killed by its own `timeout` - so its
+`finally` never ran and it **left a mutation applied to the stl on disk**. A corrupted setter does
+not fault; it jumps somewhere that loops. The harness now runs every case in a **child process with
+a wall-clock cap** (a timeout is a legitimate, failing result) and writes `.orig` backups it heals
+from on the next start. Any future tool that mutates real source needs both.
+
+**B. The pointer programs are blind to a source nibble of `0xf`.** Mutation M1 - an off-by-one
+reachable only when a source hex is 15 - **survived** `hex_ptr`, `nth_pointers` and the new setter
+test, because their sources are the nibbles of real addresses and never take that value. That is why
+`programs/hexlib_tests/basics1/triple_exact_xor.fj` exists and sweeps all 16. **A k-table macro needs
+a test that feeds it every value**; a test that merely uses the macro is not one.
+
+**C. The wild jump is real, and it lands exactly where 11.12 A said.** Keeping `set_jump_pointer`
+one-sided stops the output at `call:` - that is `stl.return`. Keeping `set_flip_pointer` one-sided
+stops it at `flip-then-read:` - that is `ptr_flip`. Doom calls neither, so no doom gate could ever
+have caught it.
+
+### 12.4 The negative control (R9)
+
+`scratchpad/oneshadow/mutctl.py`: baseline **4/4 programs match the golden `.out` the repo ships**,
+and **8/8 mutations rejected** - three in `triple_exact_xor`, two in
+`address_and_variable_triple_xor`, and M6/M7/M8 in the setters. Golden output for
+`pointer_setters.fj` was captured on the **unmodified** stl before any edit; `triple_exact_xor.out`
+was computed in Python from the xor semantics rather than read off a run.
+
+`scratchpad/oneshadow/complexity_update.py` rewrote **86** published complexity lines and refuses any
+formula whose decomposition does not reproduce what the stl publishes today - **20/20 reproduced**.
+It found one pre-existing error on the way: `stack.fj` published `push_ret_address` as `9@+51` where
+its own parts (`sp_inc` 9@+14 + `zero_ptr` 15@+37) and `ptrlib`'s `stl.call` both give `24@+51`.
+Fixed. It also could not reproduce `runlib`'s `7026 for w=64` (measured 8687); the `-w/4` delta is
+exact so the figure moves to 7010, but **that base was already stale and this work did not fix it**.
+
+### 12.5 STEP 2 - the only honest doom number, measured 2026-09-02
+
+`scratchpad/deg_gate.py` run twice on the SAME tree and the SAME emitted program (part sizes
+identical to the byte: entry=32, tables=333,476, main=64, segconsts=44,419, walk=73,941, state=424,
+banks=3,247,543), the only difference being which stl the assembler pulled in. Launch with
+`scratchpad/oneshadow/deg_with_stl.py [--worktree]`.
+
+**Both runs PASS. All eight frames byte-exact.** The op counts move; that is the re-baselining
+11.12 warned about, not a failure.
+
+| viewpoint | stock stl | one shadow | delta | |
+|---|---:|---:|---:|---:|
+| (664, 291, 0x18000000) | 43,192,505 | 40,919,374 | -2,273,131 | -5.26% |
+| (1272, -724, 0x40000000) | 34,296,270 | 32,877,007 | -1,419,263 | -4.14% |
+| (1869, 479, 0x80000000) | 39,327,546 | 36,864,338 | -2,463,208 | -6.26% |
+| (-416, 256, 0x0) | 32,861,669 | 31,454,252 | -1,407,417 | -4.28% |
+| **all four** | **149,677,990** | **142,114,971** | **-7,563,019** | **-5.05%** |
+
+The four stock counts reproduce the numbers this tree recorded earlier TO THE DIGIT, so the
+baseline is this session's own measurement, not a quoted one.
+
+**Space went the favourable way, as 11.12 B predicted.** Image span (max word address, read from
+the .fjm segment table - not the lzma-compressed file size):
+
+    40,746,904 -> 40,638,460 words   =  -108,444 words  (-0.27%)
+
+**Read this delta for what it is.** `-5.05%` is a WHOLE FRAME, in which most work is not a pointer
+dereference at all. It is not comparable to 11.12 B's `-18% to -20%`, which is per dereference
+MACRO. Both can be true at once and here they are: doom reaches the combined setter ~139-149 times
+in source and the one-sided pair ZERO times, so every doom site takes the cheaper path and none
+takes the +2w one.
+
+A cross-check on the span: the per-site space saving is `8 x [(@+28)+(@+28)+(@+60)] -
+8 x [(@+44)+(@+44)] = -8@-224` at w=32, i.e. between ~384 and ~427 ops per expanded setter instance
+depending on the `@` actually paid. `108,444 / 2` program-ops over that range implies **~127-141
+expanded setter instances**, which brackets the ~139 source-site census. Consistent, and it is a
+bracket rather than a count because `@` is a popcount that varies per instance.
+
+### 12.6 What is NOT done
+
+* **The stl is not merged.** It lives in the `stl-one-shadow` worktree; `flipjump-151` is untouched,
+  and it is a shared editable install that `bf2fj` and `c2fj` also build against. Merging it is the
+  owner's call, not a side effect of this work.
+* **doom's `tests/fj` and `m5_gate` have not been run against the new stl.** `deg_gate` is four
+  frames of the `visual` tier; `tests/fj` covers the `render` tier and `m5_gate` is the CUMULATIVE
+  standalone check where a one-ulp drift on frame 0 parts every later frame. Both are the right
+  pre-merge gates, and both are heavy builds.
+
+---
+
+## 13. IS A WIDE CELL WORTH IT FOR DOOM? Measured 2026-09-02, and the answer is "not as a global"
+
+### 13.1 The economics, measured at w=32
+
+| operation | ops |
+|---|---:|
+| `read_byte` @ PTR_CELL_BITS=8 | 386.9 |
+| `read_byte` @16 | 484.1 |
+| `read_cell` @16 (two bytes, ONE dereference) | 567.7 |
+| `write_byte` @8 / @16 | 583.2 / 651.1 |
+| `write_cell` @16 | 917.5 |
+
+    two bytes unpacked @8 : 773.9      packed @16 : 567.7      saving per pair : 206.2
+    tax on every UNPACKED dereference  : +97.1  (+25%)
+
+Sanity check on those levels: adding back the one-shadow saving (~235 ops) puts `read_byte` before
+this work at ~622, against the **628.0** this repo measured itself in `src/fj/m1_reset.fj:20-24`.
+
+### 13.2 The tax on doom, on its real program
+
+`deg_gate` with `-D hex.pointers.PTR_CELL_BITS=16` and doom's layout UNCHANGED. All four frames
+**byte-exact** - a wide cell holding a byte reads back the same byte - with these op counts:
+
+| viewpoint | @8 | @16 | delta |
+|---|---:|---:|---:|
+| (664,291,0x18000000) | 40,919,374 | 41,544,124 | +624,750 (+1.53%) |
+| (1272,-724,0x40000000) | 32,877,007 | 32,839,654 | **-37,353 (-0.11%)** |
+| (1869,479,0x80000000) | 36,864,338 | 37,622,461 | +758,123 (+2.06%) |
+| (-416,256,0x0) | 31,454,252 | 31,583,934 | +129,682 (+0.41%) |
+| **total** | 142,114,971 | 143,590,173 | **+1,475,202 (+1.04%)** |
+
+⚠ **One viewpoint got CHEAPER**, which is not noise in the measurement but a real effect: `pad 65536`
+shifts the whole program, so every `wflip` of a code address pays a different popcount. The
+whole-program delta therefore mixes the per-dereference tax with a layout-shift term, and only the
+whole-program number is honest.
+
+**Break-even: ~44% of doom's dereferences must become packed pairs** (1,475,202 / 206.2 = 7,154
+pairs = 14,308 of the ~32,156 dereferences the four frames execute; that count comes from dividing
+the one-shadow saving by its per-dereference value).
+
+### 13.3 What is actually packable - the survey (10 agents, 55 candidates, 4 areas)
+
+Most apparent candidates are **dead code**, and the survey checked call sites rather than
+definitions: `stream.band_walk`/`half_walk` are ablate-only (`ascode` gate); `stream.w2s_wall`/
+`wpx_wall` are retired tiers (`w2s_flag = wpx_flag = 0`); `stream.flush_frame`/`emit_prefix` have
+**no call site at all** and `stream_render.fj:4`'s header naming `stream.entry_append` is STALE
+(no such macro); `plane_bands.fj` and `plane_render.fj` are both marked NOT SHIPPED;
+**`projection.fj` has zero live pointer reads** (every `read_table_packed` is `rep(1-disp)`-gated
+with `disp=1` at every live caller); and the stl's `copy_bytes`/`fill_bytes`/`push`/`pop`/
+`print_ptr_*` have zero doom call sites.
+
+The **live** candidates all sit in the hot per-column and per-linedef loops: the sfslot V5 piece
+read (4 bytes per screen column, unconditional at `frame_render.fj:1811`), spslot (7 bytes/column),
+`sim.check_line`'s 8-byte bbox row and 14-byte linedef row, and the 17-byte thing rows.
+
+Two traps the survey found, worth having before anyone starts:
+* `lut_generator.generate_packed_lut_fj` is the **sole producer** of `lnbox/lnrow/bkoff/bklin/
+  throw/throwc` - one function to change - but `doorcode.py:237` patches a byte INSIDE `lnrow` at
+  runtime with a raw `wflip`, and packing moves both that address and the flag's bit position.
+* odd-width tables (`throw` 17, `throwc` 5, `bkoff` 3) put every second row on an odd byte, so no
+  pair shares a cell without a pad byte.
+
+### 13.3a ⚠ CORRECTION to 13.1 -- the saving is 2-3x what I first measured
+
+13.1 priced a packed pair as **two independent reads of one pointer** (`2 x read_byte` = 773.9)
+against `read_cell` (567.7), giving 206.2. That is the wrong baseline. doom's real shape is
+`read_byte n`, which is `rep(n) read_byte_and_inc` -- **every cell also pays a `ptr_inc`** -- and
+the survey found `read_byte_and_inc` is the majority form (66 of the source sites). Measured at
+w=32 on the run shape:
+
+| | @8, unpacked run | @16, packed | saving |
+|---|---:|---:|---:|
+| two bytes (`read_byte 2` vs `read_cell`) | 1,183.0 | 517.2 | **665.8 (-56%)** |
+| four bytes (`read_byte 4` vs 2x`read_cell`+inc) | 2,323.8 | 1,364.0 | **959.8 (-41%)** |
+
+Packing removes the dereference AND the pointer arithmetic that walked to the next cell. So the
+break-even coverage for the GLOBAL switch is **17-23% of dereferences, not 44%**, and with the two
+tables of 13.4 it is **zero** -- every converted site profits on its own from the first one.
+
+**The 44% in 13.2 should not be quoted.** It is the right arithmetic over the wrong baseline.
+### 13.4 THE FIX: two tables, not one global width
+
+`PTR_CELL_BITS` as a program-global is the wrong shape, and that - not the packing - is what makes
+the 44% threshold. **The bit you flip selects the table**: `dbit+8` lands a slot in the 256-entry
+table, `dbit+16` in the 65536-entry one. Both can live in one program (256..511 and 65536..131071
+do not overlap), share `ret_after_read_byte`, and share one 4-hex `read_byte` register.
+
+So narrow reads keep costing exactly what they cost today and only the sites actually packed pay
+the wide price - which removes the threshold and makes **every individual conversion profitable on
+its own**.
+
+Verified feasible this session: a conditionally-emitted padded table costs **3 ops when off** and
+131,072 when on, and `-D` switches it on from a declared default of 0. The constant must be
+declared before the file that uses it (same parse-time rule as 3g).
+
+**This is the next piece of work, and it comes before any doom repack.**
+
+---
+
+## 14. WHERE THE FRAME ACTUALLY GOES - measured 2026-09-03
+
+### 14.0 ⚠ FIRST, A CORRECTION: "the mean frame" is NOT deg_gate's four viewpoints
+
+Everything in sections 12 and 13 quotes deg_gate's four viewpoints and their mean of 35,528,743.
+**That is not the mean frame, and it was never meant to be.** deg_gate's own docstring says it
+picks "4 viewpoints that exercise every lever", and its comments name them: the sprite-overlap
+frame, the stack-far-gate stairs, and "the everything frame: sliver + PNEAR + all". They are the
+WORST CASES, chosen to make levers fire.
+
+`scratchpad/ca2_sweep.py` says so in its own header, and names the right metric:
+
+> Why not deg_gate alone: deg_gate's four viewpoints are WORST CASES. The repo's cost model is the
+> MEDIAN over the sweep's 65 walkable grid points x 4 angles, and the two disagree by ~40%.
+
+The governing metric, over 260 frames at `PID_NIBBLES=2` (which is what `config.py` still
+defaults to):
+
+    median 24,306,866    mean 24,408,647    min 6,219,980    max 47,937,393
+
+So the deg_gate mean overstates a typical frame by **46%**. A target of "under 20M" is a **-18%**
+cut from the sweep median, not the -44% section 13 implies. And the 6,781,000 ops/frame of
+confirmed reductions in 14.3 were sized against deg_gate frames; scaled by the same ratio they are
+~4.7M, which would put the median near 19.7M -- i.e. **the target may already be within reach of
+the confirmed list, with no attack on `exact_xor` at all**. That scaling is an ASSUMPTION (savings
+that track seg or column count do not scale uniformly), and it is measured, not assumed, by
+re-running ca2_sweep.
+
+**Quote the sweep median. Do not quote a deg_gate mean as a frame cost.**
+
+
+Profiled with a per-op IP histogram over `build/doom_e1m1_doors_rt.fjm` (hosted-doors; there is no
+visual-tier .fjm on disk), two full frames: spawn 39,746,213 ops and (664,291) 50,796,118.
+Controls that passed: the histogram sums exactly to the interpreter's `op_counter`; the
+instrumented frame is BYTE-IDENTICAL to the native run; the label table's mtime matches the binary;
+and a shallowest-vs-deepest label-naming sweep moves no category by more than 0.02pp.
+⚠ The hosted-doors image is ~9M ops/frame dearer than the visual tier deg_gate measures, so the
+PERCENTAGES transfer and the absolute totals do not.
+
+### 14.1 THE HEADLINE: two thirds of every frame is one stl macro
+
+Self-time, charging each op to the innermost macro whose body it sits in:
+
+| family | spawn | (664,291) |
+|---|---:|---:|
+| **the `exact_xor` family** (`exact_xor` 46.2%, `double_` 17.2%, `quadrupled_` 3.6%) | **67.32%** | **68.08%** |
+| other stl/hex primitives | 19.74% | 19.64% |
+| `hex.tables.*` switch dispatch | 7.14% | 6.50% |
+| **doom's own macro bodies** | **4.51%** | **4.01%** |
+
+**doom's own code is 4.5% of doom.** Anything that does not make `exact_xor` cheaper, or call it
+less, is working on a fifth of the frame at best.
+
+`exact_xor` is `wflip src+w, switch, src`, up to four table steps, then `wflip src+w, switch`. A
+`wflip` of a code address costs its POPCOUNT, and `switch`'s bit-address is `op_index*dw`, so the
+cost is popcount(op_index). Measured in a small program `hex.xor` is 12-16 ops; at doom's 20.3M
+ops those indices are ~24 bits with popcount ~12, so the two wflips are ~24 of ~29 ops per call.
+**Measuring that at doom's real address range needs a heavy build and has not been done.**
+
+### 14.2 Structural split (disjoint, sums to the frame)
+
+| category | spawn | (664,291) |
+|---|---:|---:|
+| plane / floor+ceiling | 26.03% | 27.75% |
+| BSP walk + one-sided seg projection (pass 1) | 26.75% | 17.67% |
+| column setup (pass 2) | 11.69% | 9.01% |
+| simulation | 11.60% | 9.00% |
+| sprite / thing render | 9.97% | 23.31% |
+| shared stl leaf (caller unknowable) | 9.99% | 9.53% |
+| wall pixels | 2.31% | 2.64% |
+
+The simulation is **view-independent** (4,611,748 vs 4,570,896 across two very different frames).
+Cross-cutting: pointer deref core **11.83% / 15.64%** - which corroborates the documented ~12.7% -
+multiply/divide 23.65% / 21.16%, and actual device byte moves **0.91% / 1.23%**.
+
+### 14.3 What survived adversarial verification: 6,781,000 ops/frame
+
+| idea | ops/frame | effort |
+|---|---:|---|
+| kill the dense-multiplier backface cull (`proj.wall_x_range_m`) | 2,100,000 | medium |
+| class-dispatch the seg affine front test | 1,234,000 | medium |
+| amortise `set_flip_and_jump_pointers` across adjacent cells | 1,150,000 | large |
+| constant-base narrow index (kill runtime `ptr_index`) | 890,000 | large |
+| L-inf map-unit far reject before the tz multiply | 890,000 | medium |
+| cheapen `lines_pid_ids` (`mul_const` -> shifts) | 517,000 | small |
+
+Two were refuted, both for the same reason worth remembering: `deg_gate` builds `tier="visual"`,
+where `moving_things=False`, so `sim.thing_load` and the `throw` table are **not emitted at all**.
+
+**35,528,743 - 6,781,000 = 28,747,743.** That is 44% of the way to 20M, not there. The remaining
+8.7M has to come out of `exact_xor`, which is where the next round points.
+
+---
+
+## 15. THE TWENTY THEORIES - all resolved, 2026-09-03
+
+Protocol after the 3/3 mispredictions: every theory earns a measured verdict (micro, population
+count from real emitted data, or code-level proof); survivors get builds ONE at a time; nothing
+ships except on the 260-frame sweep median. An adversarial skeptic pass (5 agents) re-challenged
+everything in flight and found the master mechanism.
+
+| # | theory | verdict |
+|---|---|---|
+| 1 | fold the -4 into baked vzcbase | **SHIPPED** (bundle, -1.06%) |
+| 2 | split lines_pid_ids' dead outputs | **SHIPPED** (same bundle) |
+| 3 | delete the dead ssc_zero_row zeroes | **SHIPPED** (rider) |
+| 4 | L-inf far reject before the tz multiplies | **SHIPPED** (-0.24% median, mean flat) |
+| 5 | pack the V5 slot into wide cells | superseded by T-HOTSLOTS (**SHIPPED**, -0.07%); pack still stackable |
+| 6 | vertex-share angle cache | KILLED by skeptic: real hit rate 19.7% not 29%, EV negative |
+| 7 | mov -> xor_zero where src dead | quantified-not-built: <60k/frame of sites |
+| 8 | add_constant 1 -> hex.inc | **SHIPPED** (bundle; 128.1 -> 16.1/call) |
+| 9 | sub_constant -> add complement | refuted: complement is dense, 4.5x worse |
+| 10 | bias hot values sparse | refuted-immaterial (+1 op/set bit vs ~11.6 fixed) |
+| 11 | top-nibble guard before cmp | refuted: hex.cmp already early-outs (47.2 vs 369.0) |
+| 12 | fuse shl_hex pairs | refuted: every doom site already uses the times form |
+| 13 | bit flags for hex flags | refuted: 13.7 vs 12.8, immaterial |
+| 14 | move read-dance zero to consumers | refuted by analysis: the write path re-zeroes |
+| 15 | splice empty-list early-out | refuted: floor_go/floor_done + if0 lcnt already exist |
+| 16 | delta-set viewz/vzcbase | refuted-immaterial (~20k/frame) |
+| 17 | cache pass1 angles for pass2 | refuted: pass2 already consumes stored piece slots |
+| 18 | sign-dispatch point_on_side | declined: the exact mechanism that regressed 3x |
+| 19 | wedge_reject before the backface | refuted: already ordered cheap-first at both sites |
+| 20 | multiway cls dispatch | refuted: cls is data, no chain exists |
+
+### 15.1 The master mechanism, finally correct
+
+**A wflip executes popcount(flip_VALUE) ops** - the label/data ADDRESS being written. Chain dedup
+in the assembler is space-only. This explains, at once: the 3/3 per-call mispredictions (any code
+change shifts every downstream label by +-1-3 popcount bits x millions of executions), the
+M13-hotdata -2.15M precedent (`wall_renderer.py:1759` documents the mechanism - the repo knew),
+and my earlier false retraction (that experiment moved all 40 switch tables together, so their
+average popcount barely moved; the one dense-address data point DID show +5.8 and I read past it).
+
+⚠ Even with the right mechanism, ESTIMATE = mechanism x population x per-execution-delta. The
+skeptic priced T-HOTSLOTS at ~847k by attributing the sites' whole profile cost to the mechanism;
+the address-dependent fraction is tens of ops per deref, and the sweep said -16k.
+
+### 15.2 What is still on the table
+
+* **The popcount census predictor**: dump popcount(flip_value) per source site from label
+  resolve, weight by the attribution's execution counts - predicts a change's frame delta in
+  minutes, no build. THE instrument this session lacked; build it before the next perf round.
+* **Hot-ret label alignment**: pad the per-pixel trampoline's ret labels to low-popcount
+  addresses. Millions of executions x a few bits - potentially the largest single lever left.
+* The V5 slot pack (stacks with T-HOTSLOTS; census says live traffic is 4-byte runs).
+* The 12M target needs -55% from here (22.08M): only the exact_xor family itself (67% of the
+  frame) is big enough, via the two levers above.
+
+---
+
+## 16. THE WORKED-IDEAS CAMPAIGN (running board, 2026-09-03)
+
+Goal: 20 ideas that ship through BOTH gates; every kill generates a replacement. The
+campaign metric is the ca2_sweep median; every ship is 260/260 byte-exact.
+
+| # | idea | median effect |
+|---|---|---:|
+| 1 | one shadow for both pointer address fields | -6.23% |
+| 2 | mul_const x4 -> two shifts at lines_pid_ids | -1.78% |
+| 3 | vzcbase -4 fold (baked) | (bundle) |
+| 4 | lines_pid_ids dead-output split (_c/_f) | (bundle) -1.06% |
+| 5 | dead ssc_zero_row zeroes deleted | (rider) |
+| 6 | add_constant 1 -> hex.inc | (bundle) |
+| 7 | sfslot/spslot into the hotdata block | -0.07% |
+| 8 | L-inf far reject before the tz multiplies | -0.24% |
+| 9 | drawn[] is one nibble (read_hex/write_hex/if0 1) | -0.18% |
+| 10 | incremental lockstep pointers for the p2 loaders | -1.95% |
+| 11 | DDA the wall top/bottom (column_params_dda) | **-3.87%** |
+
+**Median: 24,306,866 (M4 baseline) -> 20,775,735 = -14.5%.**
+
+Killed-and-replaced: dispatch-trampoline pad alignment (all four viewpoints +300-550k -- pads
+inside per-expansion macros are a shotgun) -> replaced by #10; vertex-share cache (real hit rate
+19.7%, EV negative) -> replaced by #11. Moot on inspection: the 2s DDA (column_params_m has no
+callers left -- #11's conversion covered the whole per-column wall projection) and the ts-loop
+incremental pointers (that loop ALREADY seeds per seg and steps at col_next -- it is the
+pattern's origin). point_on_side strength-reduction: the live leaf already does it (magnitudes,
+signs, 8-nibble mul_lo, xor-involution sets); the TODO comment belongs to the unused generic.
+
+Two implementation bugs the byte-exact gate caught before they could ship: an out-of-bounds
+`mov 5` register read in the far reject (mass over-rejection, 41-2,290 px), and 6-row truncated
+DDA seeds (f(s) = W*(s mod 16^6) is not linear under the mod-2^32 scale walk; scalestep's
+sign-extension lives exactly in the dropped rows -- 2,152-3,990 px). Full 8-row seeds equal the
+old values wherever scale < 256.0, DOOM's classic cap.
+
+### 16.1 THE PACK WAS BUILT, GATED, AND KILLED -- with the attribution that matters (2026-09-03)
+
+The sfslot pack ([y2|y1][bpid|cls] as two 16-bit cells over the dual table, stride kept at 16
+cells so no index math moved) was implemented in full and was **byte-exact on all four
+viewpoints** -- the layout, the extracts and the clamps were all CORRECT. It cost +440k to +706k
+per frame anyway, and an isolation build (same stl, PTR_WIDE_BITS=16, pack reverted) split the
+blame:
+
+| viewpoint | TABLE presence | PACK accessors |
+|---|---:|---:|
+| (664,291) | +205,731 | +234,119 |
+| (1272,-724) | +55,042 | +488,225 |
+| (1869,479) | +620,891 | +85,250 |
+
+Two findings, both architectural:
+* **The wide table's mandated position (op exactly 2^16) lands inside the M13-hotdata block**
+  (8,655..459,480), displacing ~64k ops of hot content upward -- so at doom scale the dual-table
+  premise 'only packed sites pay' holds per macro but NOT for placement. PTR_WIDE_BITS=12 cannot
+  rescue the byte-pair use (two bytes need 16 bits).
+* **The pack's per-pair arithmetic was right (-300/pair on paper) and still lost** -- the same
+  no-local-model lesson as every other regression. Without the popcount census predictor, wide
+  cells should not be retried on doom.
+
+The two implementation bugs its builds caught en route: `ptr_add ptr, 0` is an ASSEMBLY error
+(add_constant computes a shift from the constant's trailing zeros -- undefined at 0; the old
+code's offsets were never zero), fixed by rep-gating; and nothing else -- the pack logic itself
+was clean, which is worth knowing for a future retry on a program without the hot-block
+collision.
+
+### 16.2 The constant-base hoists: built, gated, killed BY THE RULE (2026-09-03)
+
+stepcol_b (re-set per FACE, ~300/frame) and dbase (per SEG) hoisted to one per-frame set each.
+deg: all four byte-exact, -322,596 total. Sweep: mean -39,072, min AND max better -- but
+**median +56,243 (+0.27%)**, and the median is the repo's stated cost model. Killed by the rule.
+
+The split verdict is the measurement floor showing itself: a 3-line deletion's direct saving
+(~50-130k, real -- deg showed it) is the same size as the label-shift ripple it triggers, and
+which frames pay the ripple is unpredictable. **Ideas below ~100k/frame cannot prove themselves
+on the current instruments.** The way past the floor is the popcount census predictor: with
+per-site popcount(flip_value) x execution counts, the ripple becomes computable instead of
+fatal.
+
+
+
+## 17. THE POPCOUNT CENSUS PREDICTOR EXISTS, and 1.5.1 carries the whole pointer campaign (2026-09-03)
+
+### 17.1 scratchpad/popcount_census.py -- the way past the measurement floor
+
+Section 16.2 named the floor: ideas below ~100k/frame cannot prove themselves because a real
+deletion's saving is the same size as the label-shift ripple it triggers. The predictor computes
+the ripple instead of building it:
+
+    predicted delta = sum over wflip sites: visits(site) x (popcount_B - popcount_A)
+
+* **capture**: `BinaryData.insert_wflip_ops` is wrapped for one assembly; each site records
+  (base bit-address, popcount(flip_value)) in insertion order. No .fjm needed beyond what the
+  assembly writes anyway. `capture-doom` drives deg_with_stl (so the census's own build is also
+  deg-gated); `capture` takes any .fj list.
+* **visits**: ONE per-op IP histogram of the baseline -- `ca2_profile.py --bucket-bits 6`
+  (ip>>6 is exactly one op at w=32). Reused across every candidate.
+* **predict**: ordinal join (v1 contract: equal op-stream length -- value-only changes; a shape
+  change is REFUSED and needs the sweep, as before).
+
+Selftest (three controls, all required to pass): a 20-iteration synthetic where ground truth is
+two real runs -- predicted **-40 == measured -40, exact to the op**; predict(A,A)==0 (vacuity);
+a truncated census is refused (join-refusal). It also refuses to pass when the synthetic delta
+is zero, so the ground truth cannot be vacuous.
+
+    python scratchpad/popcount_census.py selftest
+
+Next session's recipe for a sub-100k idea: capture-doom baseline once + one --bucket-bits 6
+profile per gate viewpoint; per candidate, capture (minutes) + predict (seconds); only ideas the
+predictor prices as winners graduate to the sweep.
+
+### 17.2 The fj repo: CR round -> 1.5.1 -> origin (0dcda77)
+
+origin/1.5.1 now carries: one shadow + triple_exact_xor, -D overrides, PTR_CELL_BITS (wide
+decoder table), the DUAL table (PTR_WIDE_BITS: two tables coexist, the flipped bit selects),
+read_cell/write_cell + the _and_inc pair, and the CR round 0dcda77. The CR found one real
+defect: **zero_ptr kept a byte-wide write-back while the read dance decodes PTR_CELL_BITS
+bits** -- at 16-bit cells it zeroed half the cell. Fixed to cover PTR_CELL_BITS/4 hexes; the
+mutant fails wide_cells' zeroptr case at (16,0) on the output assertion (negative control run
+and logged). Tests the merge had been missing, now in: PTR_WIDE_BITS was never enabled by any
+fj test (now 6 width configs incl. (8,16)/(12,16), wide-knob efficacy, (8,8)/(8,10)/(16,12)
+refused); read_cell_and_inc/write_cell_and_inc had never been EXECUTED anywhere (now the pair:
+case walks adjacent cells). Suites: 401 unit + 56 hexlib compile + 56 run, all green; black/
+flake8 clean, mypy at the pre-existing 66-error baseline.
+
+### 17.3 The doom gate against pushed 1.5.1: bit-for-bit the campaign best
+
+Rebuilt deg against the INSTALLED 1.5.1 (flipjump-151 now checked out on it) at the shipped
+default config: deg PASS, 4/4 byte-exact, op counts equal to build 7b **to the digit**
+(38,590,005 / 30,980,768 / 34,943,728 / 29,717,334), and the .fjm sha256 is IDENTICAL to the
+campaign best -- dd9b786a5bd3... == tmpmp25mrno. Same binary, so the 260-frame sweep result
+(median 20,775,735, 260/260 byte-exact) transfers verbatim; nothing to re-run. (_deg_151d.log;
+the census baseline census_151_base.json.gz -- 1,999,255 wflip sites -- came out of the same
+build.)
+
+A second datapoint, from the config-mixup en route: 1.5.1 at PTR_CELL_BITS=16 is also 4/4
+byte-exact (_deg_151c.log: 39.31M / 31.32M / 36.24M / 30.21M) -- correct, and dearer than both
+the shipped 8-bit config and the section-13 dual-table rows, consistent with "a global wide
+cell taxes every dereference". The shipped config remains 8-bit cells.
+
+
+## 18. THE CAMPAIGN CLOSES: 20 worked ideas, median 19,716,925 (2026-09-04)
+
+The goal was 20 sweep-certified ideas and a median below 20,000,000. Both stand. From the
+original 24,306,866: **-18.9%**. Today's nine (each: deg 4/4 byte-exact + 260/260-byte-exact
+sweep with the median improved):
+
+| # | idea | median delta | commit |
+|---|---|---|---|
+| 12 | hot-region base tuning, 32 filler ops jointly tuned over 7 profiles | -31,581 | dae0186 |
+| 13 | the DEAD per-column `hex.add 8, scale, scalestep`, layout-frozen | -152,362 | a38d965 |
+| 14 | XOR-delta chained add/sub, wave 1 (6 sites) | -97,396 | c543fe5 |
+| 15 | chain wave 2 -- EVERY direct add/sub {2,4,8,10}, 137 sites | **-464,358** | c543fe5 |
+| 16 | loader dirty-skips + the first coupled retune | -11,354 | b1ae6d2 |
+| 17 | zero-eliding burst reads (read0_byte_and_inc), size-frozen | -60,626 | c78d2e0 |
+| 18 | tuning round 3 (pass1 5136, pos 2400) | -90,108 | d26f757 |
+| 19 | compare narrowing under proved bounds + coupled retune (ts point fires) | -128,028 | c1d79ed |
+| 20 | zero-overwrite trims + round 5 (pass2 point fires) | -22,996 | 6e1115d |
+
+**Killed en route** (all at the gate or by the rule, none shipped broken): idea-13's first
+form (filler in the fall-through path -- 0;0 ops are only inert while UNREACHABLE); the
+pair-fused chains (at a tuned layout the fused brackets' labels are already cheap:
++2k..+8.6k on all four gates); idea-16 v1/v2 (median +49,624 / gates worse); the bare
+compare narrowing (all gates worse before its retune); placement rounds 2 and 4 (the tuner
+itself said "nothing feasible" -- killed for free, no build).
+
+**The doctrine the campaign leaves behind:**
+1. **Shape and placement are COUPLED.** Any idea that resizes a hot region de-tunes the
+   filler placement and must ship WITH a tune_round of the fillers -- learned over three
+   killed idea-16 variants, applied inside ideas 19 and 20.
+2. **Layout-freeze turns deletions pure.** Replace deleted emitted ops with same-size
+   UNREACHABLE filler (behind the jump, never in the fall-through) and the sweep sees only
+   the deleted work.
+3. **The predictor's reach**: exact for value-only changes (idea 12's four gate predictions
+   landed within 296..2,437 ops); censuses + per-op profiles make every tuning round a
+   5-minute search; rank/rank-values names the next pool. Chains turned the bulk values
+   into label DELTAS, which are shift-invariant -- that is WHY placement dried up after
+   wave 2 until new shape changes re-opened it.
+4. **The instruments**: popcount_census.py (capture/rank/rank-values/simulate-shift/predict),
+   tune_round.py, ca2_profile --bucket-bits 6, and chain_smoke{,2,3}.fj racing every chain
+   macro against the stl on ripple/borrow vectors.
+
+Follow-ups parked: the game tier's M1/M5 restore sets need re-keying for p2_ldirty/p2_sdirty
+on its next rebuild; add1/add5 chains (7 calls) unconverted; the ts_step_faces pool (3.3M on
+the median frame) still holds the largest untapped mass -- its per-face-column pointer
+re-derivation wants the idea-11 treatment; the emit_col pool (1.7M) needs a device-protocol
+change to touch.
+
+
+## 19. THE ts_step_faces ROUND: 5 for 5, median 18,982,338 (2026-09-04)
+
+Targeted the biggest untapped pool (the two-sided step-faces walker, ~3.3M/median-frame).
+Five ideas asked for, five sweep-certified (deg 4/4 byte-exact + 260/260-byte-exact sweep,
+median improved each time). 19,716,925 -> 18,982,338 = **-734,587 (-3.7%)** on top of the
+20-idea campaign; from the original 24,306,866, **-21.9%**.
+
+| # | idea | median delta | commit |
+|---|---|---|---|
+| ts1 | gate thresholds baked as data + per-seg lip modes (4 sites each) | -41,974 | d83b013 |
+| ts2 | fmask-gated DDA: an absent side skips its setup + per-column advance | -104,963 | 7c44fd7 |
+| ts3 | the row datapath at 5 sign-extended nibbles (was 8) | **-386,260** | c6a4fdc |
+| ts4 | a lip side derives ONE row -- its twin's row/dec/frac/setup are dead | -170,449 | a9a4f6f |
+| ts5 | the per-column scale advance at width 6 (scale < 16^6) | -30,941 | acaed54 |
+
+ts3 is the campaign's second-biggest single idea, after chain wave 2. The pool's dominant
+tax was WIDTH: 8-nibble registers carrying 16-bit rows through hex.scmp (1,566 ops of
+space each), mov, sign and the two clamps -- narrowing to 5 halved all of it, bit-identical
+by the sign-extension argument, proven in pixels.
+
+New doctrine from this round:
+- **A ts-scoped (marking-seg-only) idea should move the min sweep frame by +-0** -- that
+  frame carries no marking segs. ts1 and ts5 both showed exactly 0 there; it is a free
+  correctness signal that the change is confined to its intended path.
+- **The freeze filler MUST be re-checked by label diff every build, not trusted to the
+  op-by-op estimate.** Three ts builds drifted (+80 ts1, +16 ts2, -80 ts3) because a
+  state-register addition or an if-count guess was off; each was caught by comparing the
+  downstream leaf addresses to the prior build and folded into the next filler. ts5 landed
+  +0 once the residuals were tracked forward.
+- **Width was the hidden cost.** scmp/mov/set/dec/zero all scale ~linearly with nibble
+  count; the campaign had been treating them as fixed. Any register proven to hold a
+  bounded value is a narrowing candidate -- measured op-by-op, never guessed.
+
+NOT taken (deferred as high-variance): the sfflag-into-drawn fold (panel's #1 for raw size
+but entangles pass 1's writer, pass 2's reader, and the reset's BYTE_ARRAY_NAMES -- a
+sub-nibble count field and a three-way restore-set change); the arm-carried piece-write run
+in ts_piece_wr (a doom-local second write-arm clone -- the largest remaining single target,
+~1.26M still in ts_piece_store after the width shrink). Either is the natural start of a
+next ts round.

@@ -84,7 +84,7 @@ ns stream {
       p_emit_full:                                 // cnt <= take: emit the whole band, continue
         byte.emit cnt
         cm.emit cidx
-        hex.sub 2, take, cnt
+        frame.sub2_chain take, cnt
         hex.if0 2, take, pdone
         ;ploop
       p_emit_part:                                 // cnt > take: emit the remaining rows, done
@@ -117,11 +117,11 @@ ns stream {
         hex.if0 2, skip_rows, sread                // done skipping -> read the colour + emit the band
         hex.cmp 2, skip_rows, cnt, spartial, sskipall, sskipall
       sskipall:                                    // skip >= cnt: the band is entirely above the window --
-        hex.sub 2, skip_rows, cnt                  // HOP its 2 colour bytes without the (expensive)
+        frame.sub2_chain skip_rows, cnt                  // HOP its 2 colour bytes without the (expensive)
         hex.ptr_add ptr, 2                         // pointer READS (the skip-scan dominated the emit cost)
         ;scont
       spartial:                                    // 0 < skip < cnt: emit the band's remainder
-        hex.sub 2, cnt, skip_rows
+        frame.sub2_chain cnt, skip_rows
         hex.zero 2, skip_rows
       sread:
         rep(2, k) hex.read_byte_and_inc cidx + 2*k*dw, ptr
@@ -170,7 +170,7 @@ ns stream {
       cok:
         .emit_prefix cbuf_cell, ctake
         hex.mov 2, wlen, fstart   // (hex.mov zeroes dst first)
-        hex.sub 2, wlen, ctake                    // wlen = fstart - ctake (>= 0 by the clamp)
+        frame.sub2_chain wlen, ctake                    // wlen = fstart - ctake (>= 0 by the clamp)
         hex.if0 2, wlen, nowall
         byte.emit wlen
         byte.emit wall_lit
@@ -226,7 +226,7 @@ ns stream {
         hex.mul_lo 4, mul_out, mul_cum, mul_wlen   // cum * wlen  (<=16 x <=100)
         hex.shr_hex 4, 1, mul_out                  // >> 4 bits = the 1/16 split
         hex.mov 2, y2r, mul_out
-        hex.add 2, y2r, ctake                      // y2 = ctake + ((cum*wlen) >> 4)
+        frame.add2_chain y2r, ctake                      // y2 = ctake + ((cum*wlen) >> 4)
         hex.cmp 2, y2r, ycur, wsnext, wsnext, wsemit   // no advance -> skip this band
       wsemit:
         byte.emit y2r
@@ -277,7 +277,7 @@ ns stream {
         hex.read_byte_and_inc y2r, ptr                 // this run's end row, relative to the top
         hex.if0 2, y2r, wdone                          // rel==0 SENTINEL: every real run ends >=1,
         hex.read_byte_and_inc colr, ptr                // so no counter register, no per-run compare
-        hex.add 2, y2r, ctake
+        frame.add2_chain y2r, ctake
         byte.emit y2r
         rep(1-noise, k) byte.emit colr
         rep(noise, k) .wpx_grain colr, cmidx
@@ -558,7 +558,7 @@ ns stream {
     // shared randomized walker with the face's baked (pre-brightened) colour as the base byte.
     def face_pattern y2f, colf, y1, gnrow, cmidx @ face_h, end {
         hex.mov 2, face_h, y2f
-        hex.sub 2, face_h, y1
+        frame.sub2_chain face_h, y1
         w1rpat.walk face_h, y1, y2f, gnrow, colf, colf, cmidx
         ;end
       face_h: hex.vec 2
@@ -624,7 +624,7 @@ ns stream {
     // per piece from the baked back pid via frame.lines_pid_ids into SCRATCH registers.
     def steps_splice_c ctake, rlo, rhi, w1r, gnrow, cmidx, cbufa, cbufd, ccy \
             @ ceil_only, cend_ok, cend_clamp, ceil_go, piece1_in_win, walk_region0, region0_end, bound1_at_end, bound1_at_piece2, walk_region1, region1_end, piece2_in_win, walk_region2, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, ceil_done, end \
-            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ssc_ceil_end, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd, ssc_rlo2, ssc_ucnt2, ssc_win_end, ssc_win_lo, ssc_zero_row {
+            < ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, ssc_ceil_end, ssc_rcbufa, ssc_rcbufd, ssc_rlo2, ssc_ucnt2, ssc_win_end, ssc_win_lo, ssc_zero_row {
         hex.if0 2, ctake, ceil_done             // no ceiling half at all
         hex.mov 2, ssc_ceil_end, ctake              // V5-SPR: the piece window [rlo, min(ctake,rhi))
         hex.cmp 2, ssc_ceil_end, rhi, cend_ok, cend_ok, cend_clamp
@@ -645,9 +645,8 @@ ns stream {
       walk_region0:                             // window still pays the loaders
         .half_walk_code cbufa, cbufd, ssc_win_lo, ssc_win_end, ccy
       region0_end:
-        hex.zero 2, ssc_zero_row
         .steps_face u1y1, u1y2, u1cls, ssc_zero_row, ctake, ssc_rlo2, ssc_ceil_end, w1r, gnrow, cmidx
-        frame.lines_pid_ids u1bp, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd
+        frame.lines_pid_ids_c u1bp, ssc_rcbufa, ssc_rcbufd
         hex.mov 2, ssc_win_lo, u1y2
         hex.inc 2, ssc_win_lo                       // region 1 starts at the STORED end + 1 --
         hex.cmp 2, ssc_win_lo, ssc_rlo2, lo1_clamp, lo1_ok, lo1_ok   // clamped to the window start: a
@@ -668,9 +667,8 @@ ns stream {
         hex.if0 1, ssc_ucnt2, ceil_done
         hex.cmp 2, u2y1, ssc_ceil_end, piece2_in_win, ceil_done, ceil_done  // piece 2 out -> done
       piece2_in_win:
-        hex.zero 2, ssc_zero_row
         .steps_face u2y1, u2y2, u2cls, ssc_zero_row, ctake, ssc_rlo2, ssc_ceil_end, w1r, gnrow, cmidx
-        frame.lines_pid_ids u2bp, ssc_rcbufa, ssc_rcbufd, ssc_rfbufa, ssc_rfbufd
+        frame.lines_pid_ids_c u2bp, ssc_rcbufa, ssc_rcbufd
         hex.mov 2, ssc_win_lo, u2y2
         hex.inc 2, ssc_win_lo
         hex.cmp 2, ssc_win_lo, ssc_rlo2, lo2_clamp, lo2_ok, lo2_ok
@@ -696,7 +694,7 @@ ns stream {
     // one claimed walk.
     def steps_splice_f fstart, viewh, rlo, rhi, w1r, gnrow, cmidx, fbufa, fbufd, ccy \
             @ floor_only, fend_ok, fend_clamp, flo_clamp, flo_ok, bound2_ok, bound2_clamp, walk_region2, region2_end, bound1_ok, bound1_clamp, walk_region1, region1_end, walk_region0, lo1_clamp, lo1_ok, lo2_clamp, lo2_ok, piece1, floor_go, floor_done, end \
-            < lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, ssf_cviewh, ssf_floor_end, ssf_floor_lo, ssf_fstart2, ssf_lcnt2, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd, ssf_win_end, ssf_win_lo {
+            < lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, ssf_cviewh, ssf_floor_end, ssf_floor_lo, ssf_fstart2, ssf_lcnt2, ssf_rfbufa, ssf_rfbufd, ssf_win_end, ssf_win_lo {
         hex.set 2, ssf_cviewh, viewh
         hex.mov 2, ssf_floor_end, ssf_cviewh            // V5-SPR: the window [max(fstart,rlo), min(viewh,rhi))
         hex.cmp 2, ssf_floor_end, rhi, fend_ok, fend_ok, fend_clamp
@@ -718,7 +716,7 @@ ns stream {
         hex.dec 1, ssf_lcnt2
         hex.if0 1, ssf_lcnt2, piece1                // one piece: skip the piece-2 prefix
         // -- two pieces: the region behind boundary 2 (farthest), then its face
-        frame.lines_pid_ids l2bp, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd
+        frame.lines_pid_ids_f l2bp, ssf_rfbufa, ssf_rfbufd
         hex.mov 2, ssf_win_end, l2y1
         hex.cmp 2, ssf_win_end, ssf_floor_end, bound2_ok, bound2_clamp, bound2_clamp
       bound2_clamp:
@@ -737,7 +735,7 @@ ns stream {
       lo2_ok:
       piece1:
         // -- the region behind boundary 1, its face, then the claimed floor in front of it
-        frame.lines_pid_ids l1bp, ssf_rcbufa, ssf_rcbufd, ssf_rfbufa, ssf_rfbufd
+        frame.lines_pid_ids_f l1bp, ssf_rfbufa, ssf_rfbufd
         hex.mov 2, ssf_win_end, l1y1
         hex.cmp 2, ssf_win_end, ssf_floor_end, bound1_ok, bound1_clamp, bound1_clamp
       bound1_clamp:
@@ -797,7 +795,7 @@ ns stream {
         hex.cmp 2, wlo, whi, wgo, end, end
       wgo:
         hex.mov 2, wlen, fstart
-        hex.sub 2, wlen, ctake
+        frame.sub2_chain wlen, ctake
         hex.if0 2, wlen, end
         hex.zero w/4, ptr
         hex.mov 2, ptr, wlen
@@ -808,7 +806,7 @@ ns stream {
         hex.read_byte_and_inc y2r, ptr
         hex.if0 2, y2r, wdone
         hex.read_byte_and_inc colr, ptr
-        hex.add 2, y2r, ctake
+        frame.add2_chain y2r, ctake
         hex.cmp 2, y2r, wlo, wskip, wskip, wtest
       wskip:
         ;wloop
@@ -927,7 +925,7 @@ ns stream {
         hex.mov 4, srw_sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, srw_sidx
         hex.set w/4, srw_sbase, sprbank
-        hex.ptr_index srw_ptr, srw_sbase, srw_sidx
+        frame.ptr_index srw_ptr, srw_sbase, srw_sidx
         hex.ptr_add srw_ptr, 3
         hex.zero 4, srw_smidx
         hex.mov 2, srw_smidx + 2*dw, slr
@@ -950,7 +948,7 @@ ns stream {
         hex.zero 4, srw_rel_w
         hex.mov 2, srw_rel_w, srw_rel
         hex.mov 4, srw_yabs, srw_y0
-        hex.add 4, srw_yabs, srw_rel_w
+        frame.add4_chain srw_yabs, srw_rel_w
         hex.scmp 4, srw_yabs, srw_wlo4, snext, snext, spos // ends at or above the window -> skip unemitted
       spos:
         hex.scmp 4, srw_yabs, srw_whi4, semit, sfin, sclamp
@@ -985,7 +983,7 @@ ns stream {
         // to become an address (cf. lines_pid_addrs's `mul_const ..., 4*half_slots*dw`). Added raw
         // it lands 64x short, the entry count reads garbage, and the walk runs on through the whole
         // bank emitting a slowly-creeping cycle of pairs.
-        hex.ptr_index srn_ptr, srn_sbase, srn_sidx
+        frame.ptr_index srn_ptr, srn_sbase, srn_sidx
         hex.ptr_add srn_ptr, 3                      // past the WHOLE [r0][last_rel][n_ent] header
         hex.zero 4, srn_smidx
         hex.mov 2, srn_smidx + 2*dw, slr
@@ -1011,7 +1009,7 @@ ns stream {
         hex.zero 4, srn_rel_w
         hex.mov 2, srn_rel_w, srn_rel
         hex.mov 4, srn_yabs, srn_y0
-        hex.add 4, srn_yabs, srn_rel_w
+        frame.add4_chain srn_yabs, srn_rel_w
         hex.sign 4, srn_yabs, snext, spos           // this run ends above row 0 -> nothing of it shows
       spos:
         hex.if0 4, srn_yabs, snext
@@ -1074,7 +1072,7 @@ ns stream {
         rep(stack, k) .steps_splice_c ecl_ctake, ecl_full_lo, ecl_full_hi, w1r, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
       wall:                                      // -- wall run [ecl_ctake, fstart)
         hex.mov 2, ecl_wlen, fstart
-        hex.sub 2, ecl_wlen, ecl_ctake
+        frame.sub2_chain ecl_wlen, ecl_ctake
         hex.if0 2, ecl_wlen, floor
         rep(1-w2s-wpx-w1r, k) .w1_wall fstart, wall_lit
         // M13-W1R: W1's one lit byte as pseudo-random runs, keyed (tier(ecl_wlen), gnrow) -- both

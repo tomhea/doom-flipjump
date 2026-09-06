@@ -27,7 +27,7 @@ from doomfj.build import DOOR_PERSIST, STANDALONE_PERSIST
 from doomfj.collision import CHECK_SCRATCH_DECLS
 from doomfj.selfreset import decl_words
 from doomfj.wad import WadFile
-from doomfj.wall_renderer import HOISTED_SCRATCH_DECLS, STANDALONE_SCRATCH_DECLS
+from doomfj.wall_renderer import hoisted_scratch_decls, STANDALONE_SCRATCH_DECLS
 
 DATA = Path(__file__).resolve().parents[2] / "src/doomfj/data"
 SETS = {"hosted": DATA / "m1_restore_set.json.gz", "standalone": DATA / "m5_restore_set.json.gz"}
@@ -52,7 +52,7 @@ def doc(tier):
 def _declared(tier="hosted"):
     """Every global the restore set must carry, from ALL its sources.
 
-    CHECK_SCRATCH_DECLS replaced the sim @-locals bdf1f1a hoisted; HOISTED_SCRATCH_DECLS replaced
+    CHECK_SCRATCH_DECLS replaced the sim @-locals bdf1f1a hoisted; hoisted_scratch_decls() replaced
     the 319 renderer @-locals the M1-HOIST rounds moved; STANDALONE_SCRATCH_DECLS is M5's keyboard
     state, which only the standalone program declares. Same hazard for all three: a re-key DROPS a
     key whose register no longer exists, and a dropped cell is a HOLE -- which hangs the next frame
@@ -62,7 +62,7 @@ def _declared(tier="hosted"):
     which is why it could only ever cover CHECK_SCRATCH_DECLS -- the 319 globals most at risk were
     silently out of scope. selfreset.decl_words is the one parser (R6).
     """
-    decls = list(CHECK_SCRATCH_DECLS) + list(HOISTED_SCRATCH_DECLS)
+    decls = list(CHECK_SCRATCH_DECLS) + list(hoisted_scratch_decls())
     if tier == "standalone":
         decls += list(STANDALONE_SCRATCH_DECLS)
     out = {}

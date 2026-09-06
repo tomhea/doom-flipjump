@@ -1,0 +1,8 @@
+STL: C:\Users\tomhe\Documents\flipjump-wide\flipjump\stl
+program parts: entry=32, tables=338,598, main=64, segconsts=44,419, walk=73,941, state=426, banks=3,242,421
+assembled
+(664,291,0x18000000): 30,135,927 ops  !! 1905 px DIFFER
+(1272,-724,0x40000000): 28,492,283 ops  !! 85 px DIFFER
+(1869,479,0x80000000): 26,527,737 ops  !! 2290 px DIFFER
+(-416,256,0x0): 28,354,859 ops  !! 41 px DIFFER
+FAIL

@@ -1,0 +1,8 @@
+STL: C:\Users\tomhe\Documents\flipjump-wide\flipjump\stl
+program parts: entry=32, tables=338,598, main=64, segconsts=44,419, walk=73,941, state=430, banks=3,242,421
+assembled
+(664,291,0x18000000): 39,453,680 ops  BYTE-EXACT
+(1272,-724,0x40000000): 31,970,423 ops  BYTE-EXACT
+(1869,479,0x80000000): 35,511,493 ops  BYTE-EXACT
+(-416,256,0x0): 30,694,850 ops  BYTE-EXACT
+PASS

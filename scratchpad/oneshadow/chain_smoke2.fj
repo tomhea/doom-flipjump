@@ -1,0 +1,389 @@
+stl.startup_and_init_all
+
+ns frame {
+    def dance_boundary dst_prev, dst_next, src_next, jumper, prev, next             < hex.tables.ret, hex.tables.res {
+        hex.xor_zero dst_prev, hex.tables.res
+        hex.xor jumper,   dst_next
+        hex.xor jumper+4, src_next
+        wflip hex.tables.ret+w, prev^next, jumper
+    }
+
+    //   dst[:2] += src[:2]   == hex.add 2, dst, src, boundary-fused (see add8_chain).
+    def add2_chain dst, src @ rcc0, r0, r1, rcc1 \
+            < hex.tables.ret, hex.tables.res, hex.add.dst {
+        wflip hex.tables.ret+w, rcc0, hex.add.dst
+      rcc0:
+        hex.zero hex.tables.res
+        hex.xor hex.add.dst,   dst
+        hex.xor hex.add.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
+      r1:
+        hex.xor_zero dst+1*dw, hex.tables.res
+        wflip hex.tables.ret+w, r1^rcc1, hex.add.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.zero hex.tables.res
+    }
+
+    //   dst[:2] -= src[:2]   == hex.sub 2, dst, src, boundary-fused (see add8_chain).
+    def sub2_chain dst, src @ rcc0, cc0_ok, r0, r1, rcc1, done \
+            < hex.tables.ret, hex.tables.res, hex.sub.dst {
+        wflip hex.tables.ret+w, rcc0, hex.sub.dst
+      rcc0:
+        hex.if0 hex.tables.res, cc0_ok
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      cc0_ok:
+        hex.xor hex.sub.dst,   dst
+        hex.xor hex.sub.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
+      r1:
+        hex.xor_zero dst+1*dw, hex.tables.res
+        wflip hex.tables.ret+w, r1^rcc1, hex.sub.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.if0 hex.tables.res, done
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      done:
+    }
+
+    //   dst[:4] += src[:4]   == hex.add 4, dst, src, boundary-fused (see add8_chain).
+    def add4_chain dst, src @ rcc0, r0, r1, r2, r3, rcc1 \
+            < hex.tables.ret, hex.tables.res, hex.add.dst {
+        wflip hex.tables.ret+w, rcc0, hex.add.dst
+      rcc0:
+        hex.zero hex.tables.res
+        hex.xor hex.add.dst,   dst
+        hex.xor hex.add.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
+      r3:
+        hex.xor_zero dst+3*dw, hex.tables.res
+        wflip hex.tables.ret+w, r3^rcc1, hex.add.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.zero hex.tables.res
+    }
+
+    //   dst[:4] -= src[:4]   == hex.sub 4, dst, src, boundary-fused (see add8_chain).
+    def sub4_chain dst, src @ rcc0, cc0_ok, r0, r1, r2, r3, rcc1, done \
+            < hex.tables.ret, hex.tables.res, hex.sub.dst {
+        wflip hex.tables.ret+w, rcc0, hex.sub.dst
+      rcc0:
+        hex.if0 hex.tables.res, cc0_ok
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      cc0_ok:
+        hex.xor hex.sub.dst,   dst
+        hex.xor hex.sub.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.sub.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.sub.dst, r2, r3
+      r3:
+        hex.xor_zero dst+3*dw, hex.tables.res
+        wflip hex.tables.ret+w, r3^rcc1, hex.sub.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.if0 hex.tables.res, done
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      done:
+    }
+
+    //   dst[:8] += src[:8]   == hex.add 8, dst, src, boundary-fused (see add8_chain).
+    def add8_chain dst, src @ rcc0, r0, r1, r2, r3, r4, r5, r6, r7, rcc1 \
+            < hex.tables.ret, hex.tables.res, hex.add.dst {
+        wflip hex.tables.ret+w, rcc0, hex.add.dst
+      rcc0:
+        hex.zero hex.tables.res
+        hex.xor hex.add.dst,   dst
+        hex.xor hex.add.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
+      r3:
+        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.add.dst, r3, r4
+      r4:
+        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.add.dst, r4, r5
+      r5:
+        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.add.dst, r5, r6
+      r6:
+        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.add.dst, r6, r7
+      r7:
+        hex.xor_zero dst+7*dw, hex.tables.res
+        wflip hex.tables.ret+w, r7^rcc1, hex.add.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.zero hex.tables.res
+    }
+
+    //   dst[:8] -= src[:8]   == hex.sub 8, dst, src, boundary-fused (see add8_chain).
+    def sub8_chain dst, src @ rcc0, cc0_ok, r0, r1, r2, r3, r4, r5, r6, r7, rcc1, done \
+            < hex.tables.ret, hex.tables.res, hex.sub.dst {
+        wflip hex.tables.ret+w, rcc0, hex.sub.dst
+      rcc0:
+        hex.if0 hex.tables.res, cc0_ok
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      cc0_ok:
+        hex.xor hex.sub.dst,   dst
+        hex.xor hex.sub.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.sub.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.sub.dst, r2, r3
+      r3:
+        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.sub.dst, r3, r4
+      r4:
+        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.sub.dst, r4, r5
+      r5:
+        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.sub.dst, r5, r6
+      r6:
+        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.sub.dst, r6, r7
+      r7:
+        hex.xor_zero dst+7*dw, hex.tables.res
+        wflip hex.tables.ret+w, r7^rcc1, hex.sub.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.if0 hex.tables.res, done
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      done:
+    }
+
+    //   dst[:10] += src[:10]   == hex.add 10, dst, src, boundary-fused (see add8_chain).
+    def add10_chain dst, src @ rcc0, r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, rcc1 \
+            < hex.tables.ret, hex.tables.res, hex.add.dst {
+        wflip hex.tables.ret+w, rcc0, hex.add.dst
+      rcc0:
+        hex.zero hex.tables.res
+        hex.xor hex.add.dst,   dst
+        hex.xor hex.add.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.add.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.add.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.add.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.add.dst, r2, r3
+      r3:
+        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.add.dst, r3, r4
+      r4:
+        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.add.dst, r4, r5
+      r5:
+        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.add.dst, r5, r6
+      r6:
+        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.add.dst, r6, r7
+      r7:
+        .dance_boundary dst+7*dw, dst+8*dw, src+8*dw, hex.add.dst, r7, r8
+      r8:
+        .dance_boundary dst+8*dw, dst+9*dw, src+9*dw, hex.add.dst, r8, r9
+      r9:
+        hex.xor_zero dst+9*dw, hex.tables.res
+        wflip hex.tables.ret+w, r9^rcc1, hex.add.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.zero hex.tables.res
+    }
+
+    //   dst[:10] -= src[:10]   == hex.sub 10, dst, src, boundary-fused (see add8_chain).
+    def sub10_chain dst, src @ rcc0, cc0_ok, r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, rcc1, done \
+            < hex.tables.ret, hex.tables.res, hex.sub.dst {
+        wflip hex.tables.ret+w, rcc0, hex.sub.dst
+      rcc0:
+        hex.if0 hex.tables.res, cc0_ok
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      cc0_ok:
+        hex.xor hex.sub.dst,   dst
+        hex.xor hex.sub.dst+4, src
+        wflip hex.tables.ret+w, rcc0^r0, hex.sub.dst
+      r0:
+        .dance_boundary dst+0*dw, dst+1*dw, src+1*dw, hex.sub.dst, r0, r1
+      r1:
+        .dance_boundary dst+1*dw, dst+2*dw, src+2*dw, hex.sub.dst, r1, r2
+      r2:
+        .dance_boundary dst+2*dw, dst+3*dw, src+3*dw, hex.sub.dst, r2, r3
+      r3:
+        .dance_boundary dst+3*dw, dst+4*dw, src+4*dw, hex.sub.dst, r3, r4
+      r4:
+        .dance_boundary dst+4*dw, dst+5*dw, src+5*dw, hex.sub.dst, r4, r5
+      r5:
+        .dance_boundary dst+5*dw, dst+6*dw, src+6*dw, hex.sub.dst, r5, r6
+      r6:
+        .dance_boundary dst+6*dw, dst+7*dw, src+7*dw, hex.sub.dst, r6, r7
+      r7:
+        .dance_boundary dst+7*dw, dst+8*dw, src+8*dw, hex.sub.dst, r7, r8
+      r8:
+        .dance_boundary dst+8*dw, dst+9*dw, src+9*dw, hex.sub.dst, r8, r9
+      r9:
+        hex.xor_zero dst+9*dw, hex.tables.res
+        wflip hex.tables.ret+w, r9^rcc1, hex.sub.dst
+      rcc1:
+        wflip hex.tables.ret+w, rcc1
+        hex.if0 hex.tables.res, done
+        hex.sub.not_carry
+        hex.xor_by hex.tables.res, 0xf
+      done:
+    }
+}
+
+    tp_add2 0xff, 0x1
+    tp_add2 0x37, 0x9a
+    tp_add2 0x0, 0x0
+    tp_add2 0xf0, 0x1f
+    tp_sub2 0xff, 0x1
+    tp_sub2 0x37, 0x9a
+    tp_sub2 0x0, 0x0
+    tp_sub2 0xf0, 0x1f
+    tp_add4 0xffff, 0x1
+    tp_add4 0x1234, 0xedcb
+    tp_add4 0x8000, 0x8000
+    tp_add4 0xfff, 0x1
+    tp_sub4 0xffff, 0x1
+    tp_sub4 0x1234, 0xedcb
+    tp_sub4 0x8000, 0x8000
+    tp_sub4 0xfff, 0x1
+    tp_add8 0xffffffff, 0x1
+    tp_add8 0x12345678, 0x9abcdef0
+    tp_add8 0x7fffffff, 0x7fffffff
+    tp_sub8 0xffffffff, 0x1
+    tp_sub8 0x12345678, 0x9abcdef0
+    tp_sub8 0x7fffffff, 0x7fffffff
+    tp_add10 0xffffffffff, 0x1
+    tp_add10 0x123456789a, 0xedcba98765
+    tp_add10 0x8000000000, 0x7fffffffff
+    tp_sub10 0xffffffffff, 0x1
+    tp_sub10 0x123456789a, 0xedcba98765
+    tp_sub10 0x8000000000, 0x7fffffffff
+
+    stl.loop
+
+  ta: hex.vec 10, 0
+  tb: hex.vec 10, 0
+  ts: hex.vec 10, 0
+
+def tp_add2 x, y < ta, tb, ts {
+    hex.set 2, ta, x
+    hex.set 2, ts, y
+    frame.add2_chain ta, ts
+    hex.print_as_digit 2, ta, 0
+    stl.output '.'
+    hex.set 2, tb, x
+    hex.set 2, ts, y
+    hex.add 2, tb, ts
+    hex.print_as_digit 2, tb, 0
+    stl.output '\n'
+}
+
+def tp_sub2 x, y < ta, tb, ts {
+    hex.set 2, ta, x
+    hex.set 2, ts, y
+    frame.sub2_chain ta, ts
+    hex.print_as_digit 2, ta, 0
+    stl.output '.'
+    hex.set 2, tb, x
+    hex.set 2, ts, y
+    hex.sub 2, tb, ts
+    hex.print_as_digit 2, tb, 0
+    stl.output '\n'
+}
+
+def tp_add4 x, y < ta, tb, ts {
+    hex.set 4, ta, x
+    hex.set 4, ts, y
+    frame.add4_chain ta, ts
+    hex.print_as_digit 4, ta, 0
+    stl.output '.'
+    hex.set 4, tb, x
+    hex.set 4, ts, y
+    hex.add 4, tb, ts
+    hex.print_as_digit 4, tb, 0
+    stl.output '\n'
+}
+
+def tp_sub4 x, y < ta, tb, ts {
+    hex.set 4, ta, x
+    hex.set 4, ts, y
+    frame.sub4_chain ta, ts
+    hex.print_as_digit 4, ta, 0
+    stl.output '.'
+    hex.set 4, tb, x
+    hex.set 4, ts, y
+    hex.sub 4, tb, ts
+    hex.print_as_digit 4, tb, 0
+    stl.output '\n'
+}
+
+def tp_add8 x, y < ta, tb, ts {
+    hex.set 8, ta, x
+    hex.set 8, ts, y
+    frame.add8_chain ta, ts
+    hex.print_as_digit 8, ta, 0
+    stl.output '.'
+    hex.set 8, tb, x
+    hex.set 8, ts, y
+    hex.add 8, tb, ts
+    hex.print_as_digit 8, tb, 0
+    stl.output '\n'
+}
+
+def tp_sub8 x, y < ta, tb, ts {
+    hex.set 8, ta, x
+    hex.set 8, ts, y
+    frame.sub8_chain ta, ts
+    hex.print_as_digit 8, ta, 0
+    stl.output '.'
+    hex.set 8, tb, x
+    hex.set 8, ts, y
+    hex.sub 8, tb, ts
+    hex.print_as_digit 8, tb, 0
+    stl.output '\n'
+}
+
+def tp_add10 x, y < ta, tb, ts {
+    hex.set 10, ta, x
+    hex.set 10, ts, y
+    frame.add10_chain ta, ts
+    hex.print_as_digit 10, ta, 0
+    stl.output '.'
+    hex.set 10, tb, x
+    hex.set 10, ts, y
+    hex.add 10, tb, ts
+    hex.print_as_digit 10, tb, 0
+    stl.output '\n'
+}
+
+def tp_sub10 x, y < ta, tb, ts {
+    hex.set 10, ta, x
+    hex.set 10, ts, y
+    frame.sub10_chain ta, ts
+    hex.print_as_digit 10, ta, 0
+    stl.output '.'
+    hex.set 10, tb, x
+    hex.set 10, ts, y
+    hex.sub 10, tb, ts
+    hex.print_as_digit 10, tb, 0
+    stl.output '\n'
+}

@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from doomfj import selfreset                              # noqa: E402
 from doomfj.selfreset import decl_words                   # noqa: E402
 from doomfj.collision import CHECK_SCRATCH_DECLS          # noqa: E402
-from doomfj.wall_renderer import HOISTED_SCRATCH_DECLS   # noqa: E402
+from doomfj.wall_renderer import hoisted_scratch_decls   # noqa: E402
 from doomfj.harness import W                              # noqa: E402
 
 ap = argparse.ArgumentParser()
@@ -48,7 +48,7 @@ CELL_WORDS = 2          # a hex cell is dw = 2w bits = 2 words
 
 def declared():
     """(name, words|None) for every decl, via selfreset.decl_words -- ONE parser (R6)."""
-    return [decl_words(d) for d in list(CHECK_SCRATCH_DECLS) + list(HOISTED_SCRATCH_DECLS)]
+    return [decl_words(d) for d in list(CHECK_SCRATCH_DECLS) + list(hoisted_scratch_decls())]
 
 
 def read_labels(path):
@@ -147,5 +147,5 @@ doc["generated_by"] = ("scratchpad/ca_remap_set.py --labels %s   then   "
                        "scratchpad/m1_add_globals.py --labels %s" % (args.labels, args.labels))
 json.dump(doc, gzip.open(args.out, "wt", encoding="utf-8"))
 print("added %d words over %d globals (%d check + %d hoisted)"
-      % (added, len(declared()), len(CHECK_SCRATCH_DECLS), len(HOISTED_SCRATCH_DECLS)))
+      % (added, len(declared()), len(CHECK_SCRATCH_DECLS), len(hoisted_scratch_decls())))
 print("%s: %d -> %d words over %d entries" % (args.out, before, doc["words"], doc["labels"]))

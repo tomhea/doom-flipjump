@@ -1,0 +1,166 @@
+## Verdict up front
+
+| Part | Verdict | One line |
+|---|---|---|
+| **A -- correctness** | **AMENDED (and the amendment is safety-critical)** | The merge works, but *not* for the stated reason, and *only* if the two one-sided setters are absorbed into it. As literally written, Part A ships a wild jump. |
+| **B -- cost** | **AMENDED -- structure confirmed, every absolute number refuted** | `@+8` for three groups is right by the stl's own convention. `232 / 760 / 528 / 948 / 716` are worst-case docstring levels that no harness reproduces; I measured **-18% to -20% per dereference**, and the on-disk harness spans **-12.5% to -33.7%** by program layout alone. |
+| **C -- scope** | **AMENDED -- right about doom, wrong about the library** | Doom is clean (I re-counted: **zero** one-sided sites). But the site count is **139, not 57**, and the edit lands in the shared `flipjump-151` stl where `stl.return` *is* a one-sided setter call. |
+
+---
+
+## First: correcting the framing I was handed
+
+The brief told me "nothing has been built or run." **That is not true, and the difference matters for how you weigh the reviewers.**
+
+- **Refuter 2's harness is real and on disk**, timestamped today: `C:/Users/tomhe/Documents/doom-flipjump/scratchpad/killcost/` (`triple.fj`, `mix.py`, `front.py`, `sweep.py`, `anat.py`) with five logs whose contents match its quoted numbers line for line. `C:/Users/tomhe/Documents/doom-flipjump/scratchpad/xorcost_k3/` (LENS costmodel, cited as `xorcost/`) also exists, scripts but no logs.
+- **Refuter 1's artifacts do not exist.** I searched `doom-flipjump/` and `flipjump-151/` for every path it cited: `scratchpad/stl_merged`, `scratchpad/stl_mut1`, `scratchpad/stl_mut2`, `scratchpad/negctl.py`, `scratchpad/bench.py`(its version), `bench3.py`, `bench4.py`, `batch.py`, `adv.fj` -- **none of them are there.** So its headline evidence ("byte-identical on twenty programs including six `bubble_sort` configs, with two negative controls, MUT2 caught only by bubble_sort") is unreproducible. Its numbers (`read_byte 588.1 -> 428.9`, *bit-identical at 2^18 and 2^20 fill*) are also internally suspicious: every reproducible measurement, mine included, shows strong layout dependence, so a per-call cost that is identical to one decimal across a 4x program-size change is the one result that should not happen.
+
+Under your own rules ("a verification tool used as evidence MUST ship a negative control", "never quote a number without re-running the harness"), **Refuter 1's qualitative reasoning is good and its numbers must not be quoted.** Refuter 2's numbers can be, because the harness is there and I re-ran it.
+
+**What I ran this session** (flipjump-151 editable install, `w=32`, `doomfj.fastrun` native core, slope from n=16 vs n=48, post-state asserted on every point):
+
+```
+python scratchpad/killcost/mix.py 0
+macro                  sites   progops      @   ops/call  postcheck
+read_byte                 30     86382 16.398     525.47  OK
+read_byte_MERGED          30     67950 16.052     423.81  OK
+read_byte_and_inc         64    104052 16.667     697.69  OK
+read_byte_and_inc_M       64     85620 16.386     555.66  OK
+write_byte                11     95606 16.545     731.25  OK
+write_byte_MERGED         11     77174 16.236     597.06  OK
+write_byte_and_inc        26    113268 16.789     893.94  OK
+write_byte_and_incM       26     94836 16.533     732.28  OK
+
+  read_byte           525.47 -> 423.81  -101.66  (-19.3%)  x30
+  read_byte_and_inc   697.69 -> 555.66  -142.03  (-20.4%)  x64
+  write_byte          731.25 -> 597.06  -134.19  (-18.4%)  x11
+  write_byte_and_inc  893.94 -> 732.28  -161.66  (-18.1%)  x26
+  SITE-WEIGHTED over doom's 131 read/write-byte sites: -19.4%
+```
+
+**Plus a negative control I wrote and ran** (the harness had none of its own; R9): `?/scratchpad/negctl.py` in the session scratchpad, which re-runs the same build+postcheck against three versions of `triple.fj`:
+
+```
+(a) unmutated    read_byte_merged=PASS                     write_byte_merged=PASS
+(b) chain off-1  read_byte_merged=FAIL(dstb=0x0, want 0xb) write_byte_merged=FAIL(arr[0]=0xb, want 0x5a)
+(c) wrong dest   read_byte_merged=ASSEMBLE-ERROR           write_byte_merged=ASSEMBLE-ERROR
+```
+
+Mutant (b) is exactly the indexing trap three reviewers flagged -- `second_flip`'s chain targets shifted by one, i.e. `double_exact_xor`'s 1-offset convention pasted into a 0-indexed table. **It fails silently with wrong data, not with a crash**: `read_byte` returns 0 and `write_byte` writes the value it read instead of the value it was given. The postcheck catches it, so the numbers above are costs of a *working* macro.
+
+**Doom's `@`, measured this session** from the shipped image: `build/doom_e1m1_menu.fjm` -> max word address 89,494,606 -> 44,747,303 ops -> **@ = 25.415**. "@ ~ 25" is sound and slightly conservative.
+
+---
+
+## Part A -- correctness: **AMENDED**
+
+### The conclusion survives. The stated premise is false, twice.
+
+I read the transfer function off the merged macro rather than trusting anyone. `scratchpad/killcost/triple.fj` defines `set_flip_and_jump_pointers_merged` as two passes of `address_and_variable_triple_xor` over destination groups {`to_flip`, `to_jump+w`, `to_flip_var`}, sourced first from `to_flip_var` and then from `ptr`. That is, for **both** address fields:
+
+```
+X_new = X_old ? shadow_old ? ptr        shadow_new = ptr
+```
+
+So the merged setter keeps the three fields in lockstep from any state where they *entered* in lockstep. One shadow suffices -- but the invariant that makes it suffice is **"the three fields are equal at every setter entry"**, not the claim's "both address fields always hold the same value."
+
+**Falsehood 1 (transient, harmless, but it kills the claim's proof).** `xor_from_pointer.fj:36` does `wflip hex.pointers.to_flip, dbit+8`, driving `to_flip` to `ptr^(dbit+8)` while `to_jump+w` still holds `ptr`, and then transfers control through **both** ops in that state (`:39` jumps through `to_flip`, `:47` `wflip ret_after_read_byte+w, to_flip, to_jump` jumps through `to_jump`). It is undone at `:52`. This happens on **every dereference doom performs**, so "always hold the same value" is false 139 times over. The merge survives because that divergence is made with raw `wflip`s that never touch a shadow and is involutive.
+
+**Falsehood 2 (durable, and this is the dangerous one).** `set_flip_pointer` (`basic_pointers.fj:64-67`) writes only `to_flip` and `to_flip_var`; `set_jump_pointer` (`:54-57`) writes only `to_jump+w` and `to_jump_var`. With two shadows each pair is independently self-consistent. **With one shadow and the one-sided setters left alone, you get a wild jump:**
+
+```
+state (to_flip=P, to_jump+w=P, shadow=P)
+set_flip_pointer Q  (naively merged)  ->  (Q, P, Q)
+set_flip_and_jump_pointers R          ->  to_jump+w = P^Q^R
+read_byte_from_inners_ptrs: wflip ret_after_read_byte+w, to_flip, to_jump   ->  jumps to P^Q^R
+```
+
+The fix is to **absorb**: make `set_flip_pointer` and `set_jump_pointer` aliases of the merged three-field setter (or delete them). I verified this is safe in hex by enumerating *every* use of `to_jump` in `flipjump/stl/hex/`:
+
+```
+basic_pointers.fj:36  declaration          basic_pointers.fj:54-56  set_jump_pointer
+basic_pointers.fj:75-78  combined setter   basic_pointers.fj:115  ;to_jump  (ptr_jump)
+xor_from_pointer.fj:47  wflip ret_after_read_byte+w, to_flip, to_jump
+```
+
+`to_jump` is **read in exactly two places, both immediately after a setter that wrote it**. Nothing in hex reads a stale `to_jump`, so writing it extra times can only overwrite a dead value. Absorption is behaviour-preserving.
+
+### Resolving the reviewer disagreement
+
+**LENS scope's FATAL -- "`programs/concept_checks/hex_ptr.fj` would silently break" -- is wrong as stated, and I'll say why.** I read the program (`:6 ptr_flip p0`, `:16 ptr_jump p1`, `:25-26 ptr_wflip p2 + ptr_jump p2_jump`, `:41 xor_hex_from_ptr d3_var, p3`). Under the **absorbed** merge, `ptr_flip`/`ptr_jump`/`ptr_wflip` all leave all three fields equal, so `test3`'s combined setter enters in lockstep and needs only one shadow. LENS scope's trace is a correct description of the **naive** merge (shadow merged, setters left one-sided) -- which is exactly the hazard above. So `hex_ptr.fj` is an excellent *detector* for getting it wrong, not an argument that the merge is wrong.
+
+**LENS correctness / LENS coupling / Refuter 1 all flag `ptr_flip_dbit`, and they are right.** `xor_to_pointer.fj:25-29` offsets `to_flip` by `dbit` **before** calling the setter, so the merged setter provably *exits* with `to_flip = ptr^dbit ? shadow`. It still works (the enclosing macro restores it), but ?11.11's "the durable-divergence case disappears BY CONSTRUCTION, not by assertion" is false. **Operational consequence: do not add an emit-time or runtime assertion that `to_flip == shadow` at setter entry or exit -- `ptr_flip_dbit` trips both.**
+
+**The audit's completeness claim is false by one site, and I confirmed it.** ?11.9 says it enumerates *every* write to the two address fields and lists three. There is a fourth: `xor_to_pointer.fj:169`, `rep(n, i) bit.exact_not hex.pointers.to_flip+i` inside `advance_by_one_and_flip__ptr_wflip`, driven by `:156`'s `rep(w, i) ? (#(i^((i+1)%w)))`. It is not a `wflip` of a constant and it is not restored by a paired `wflip` inside the macro -- it is restored by the *emit-time* modular arithmetic summing to a full wrap of the low `#w` bits. It does restore (I traced the wrap: `i ^ (i+1)` has its top set bit at position n-1, so flipping bits 0..n-1 advances the counter, and the `w-1 -> 0` step closes the cycle). But a stated-complete enumeration that is incomplete is not evidence.
+
+**One thing the claim gets right and does not defend, so I checked it myself:** the self-xor in pass 1 (shadow is simultaneously source and destination) is sound. `logics.fj:102` `wflip src+w, first_flip, src` latches the source value into the program counter *before* any destination bit is flipped -- valid because `pad 16` (`logics.fj:103`) zeroes the low 10 bits of `first_flip` while `15*dw = 960 < 1024`, so the xor is an add. From there the walk is table-driven and nothing re-enters `src`; the closing `wflip src+w, first_flip` yields 0 when `src` was also a destination and `v*dw` when it was not. This already ships in production at `basic_pointers.fj:76`. The three destination regions are bit-disjoint (`to_flip`'s flip word `[to_flip, to_flip+w)`, `to_jump`'s jump word `[to_flip+3w, to_flip+4w)` since the two ops are adjacent at `:34-37`, and a separate `hex.vec`), so flip order among them is irrelevant.
+
+---
+
+## Part B -- cost: **AMENDED**
+
+### The structure is confirmed -- DERIVED, and it is a derivation I trust
+
+From the stl's own docstrings: `exact_xor` @ / `@+12` (`logics.fj:6-7`), `double_exact_xor` `@+4` / `@+28` (`:95-96`), `quadrupled_exact_xor` `@+12` / `@+60` (`:158-159`). Time = `@ + 4(k-1)`, space = `@ + 12 + 16(k-1)`. So `k=3` -> `@+8`. And the interpolation *reproduces the existing published totals exactly*: `set_flip_and_jump_pointers` = 2?(w/4)(@+4) + (w/4)(@+12) = w(0.75@+5) ? (`basic_pointers.fj:69`), `set_flip_pointer` = 2?(w/4)(@+4) = w(0.5@+2) ? (`:48`). Merged = 2?(w/4)(@+8) = **w(0.5@+4)**. Part B's arithmetic is internally correct.
+
+The mechanism is also confirmed structurally rather than by extrapolation: the merge replaces **three** dispatch instances per hex (two 2-group + one 4-group) with **two** 3-group instances, i.e. it deletes one instance and one table pass per hex, eight times per call.
+
+### Every absolute number is refuted
+
+The `@` in those docstrings is a **worst case**: real cost is `2?popcount(the concrete 16-op-aligned table address) + k?popcount(the source hex)`, and `popcount` is on average half the bit-length. The stl's README (`flipjump/stl/README.md:75` -- note the claim cites `hex/README.md`, which does not exist) says exactly this: "`wflip address, value` has the complexity of the number of on-bits in *address*."
+
+Consequences:
+
+- **Time.** Three layouts measured: mine at @~16.4-16.8 gives **-19.4% site-weighted**; `mix1.log` at @~20.05 gives **-15.2%**; `mix2.log` at @~20.4 gives **-20.9%**. The single-dereference saving across the on-disk sweep spans **74.75 to 253.50 ops** (`front1/front2/sweep1.log`), with the killer control being two runs differing *only* in program size (1,086,382 vs 1,386,382 ops) giving -74.75 and -141.78 for the identical code change. **Nowhere is the saving 232, and nowhere does `read_hex` cost 948.**
+- Your own repo already says so: `src/fj/m1_reset.fj:20-24` records a measured `hex.read_byte 628.0` and `hex.write_byte 805.6` against the model's 998 and 1222 -- the model runs ~1.5-1.6x high, in the same direction and roughly the same magnitude as I measured.
+- **Space.** LENS costmodel's finding that the docstring space complexities carry a phantom `@` term is **right, and I corroborated the difference exactly**: in my run the merged program is smaller by exactly **18,432 ops over 48 sites = 384 program-ops per dereference site**, identical for all four macros. The docstring model predicts 424. (`mix2.log` also gives exactly 384; `mix1.log`'s layout gives ~366-374 from `pad 16` alignment slack.) Cause: `pad 16` rounds each instance to 16 ops and the assembler shares wflip chains through `wflips_dict` (`flipjump/assembler/assembler.py:185-227`), so per-instance space is a flat 16(k+1) with no `@` dependence. **The merge makes the program smaller, so the `@`-feedback worry is refuted with the favourable sign.**
+- **The headline macro is the wrong one.** `-24% on read_hex` is quoted about a macro doom calls **3 times out of 139**. The macros carrying 131 of the sites measure -18.1% to -20.4% in my run. And the claim's own model predicts this: `read_byte_and_inc` = `read_byte` + `ptr_inc`, whose docstring is `w(0.75@+5) + 18@+27` (`read_pointers.fj:49`), so the setup is a smaller fraction of the macro than the `read_hex` headline divides by.
+
+**Bottom line for Part B: quote the percentage band and the mechanism, never the levels.** Honest statement: *"-15% to -21% on doom's dereference macros, measured at @ = 16-20; direction is monotone in @ and doom is at @ = 25.4, so the true figure is probably at the top of that band or a little above -- but it has not been measured at doom's size."* The highest `@` any harness reached is 21.97.
+
+---
+
+## Part C -- scope: **AMENDED**
+
+### Right about doom -- I re-counted, and the direction is stronger than claimed
+
+Comment-stripped census over `src/fj/*.fj`, run by me:
+
+```
+64 hex.read_byte_and_inc    30 hex.read_byte      26 hex.write_byte_and_inc
+11 hex.write_byte            4 hex.write_hex_and_inc  3 hex.read_hex   1 hex.write_hex   = 139
+35 hex.ptr_add              31 hex.ptr_index       6 hex.ptr_sub        = 72 arithmetic sites
+```
+
+Zero `ptr_flip` / `ptr_wflip` / `ptr_jump` / `xor_*_to_ptr` / `set_flip_pointer` / `set_jump_pointer` / `stl.call` / `stl.return` / `hex.push*` / `hex.pop*`. Same grep over `src/doomfj/*.py`: **zero hits** (not even prose). Same grep over the nine emitted files in `build/generated_menu/`: **zero on every file** -- every dereference lives inside doom's own hand-written fj macros. And I confirmed the combined setter is the only one on doom's path: `write_pointers.fj:10, :21, :31` (`write_hex`, `zero_ptr`, `write_byte`) all call `set_flip_and_jump_pointers`.
+
+So **"doom uses the one-sided capability zero times" is CONFIRMED**, more firmly than the claim states it.
+
+### But "57 sites" and "no losers" are both wrong
+
+- **139, not 57** -- a 2.4x error, plus 72 arithmetic sites the merge cannot touch. Any whole-frame extrapolation from a 57-site base is wrong by 2.4x in the numerator. The claim's own ?11.4 census disagrees with its ?11.11 total, and both disagree with the source.
+- **A caveat neither reviewer raised, and it matters more than the 57-vs-139 error:** 139 counts *source* call sites in macros that are themselves `rep`-expanded. The number that governs image size is expanded instances, and the number that governs ops/frame is dynamic executions. **Neither is 139, and neither has been measured.** `139 x 384 = 53,376` program-ops is a floor, not an estimate.
+- **The library has losers.** `ptrlib.fj:70-71` -- `def return { hex.ptr_jump hex.pointers.sp }` -- so `stl.return` **is** a one-sided setter call; and `hex/pointers/stack.fj:42` and `:51` route `push_ret_address` / `pop_ret_address` through `ptr_wflip_2nd_word` -> `hex.ptr_wflip` -> `set_flip_pointer` (`xor_to_pointer.fj:155`). Absorbing costs those `w(0.5@+2) -> w(0.5@+4)` (DERIVED: +64 at w=32, @=25; measured percentage unknown). `pip show flipjump` makes this an editable install shared with `bf2fj`, `c2fj` and `doomfj`. **The correct framing is "doom-positive, upstream-mixed", not "no losers".**
+- **The bit mirror needs a different answer than either reviewer gave.** `bit/pointers.fj:13` declares the same four globals and `:29-41` the same two one-sided setters, but **there is no `set_flip_and_jump_pointers` anywhere in the file** (I grepped) -- so there is nothing to merge and zero saving. And `exact_xor_from_ptr` (`:157-168`) genuinely holds two different live addresses across a setter boundary: `ptr_wflip_2nd_word` leaves `to_flip = target+w`, then `ptr_jump` sets `to_jump = target`. Under a *naive* bit merge, cleanup's clear pass would compute `(target+w) ? target = w` -- a wild pointer, exactly as LENS scope says. Under absorption it would survive, but there is no reason to find out. **Answer: leave `bit/` alone.**
+
+---
+
+## The single most important amendment
+
+**This is not a doom-local optimization. It is an edit to a library `doom`, `bf2fj` and `c2fj` all build against, and the version of it described in ?11.10/?11.11 -- merge the shadow, leave the one-sided setters -- is a silent wild jump the first time any other program executes `stl.return`.**
+
+Merge the shadow **only together with deleting `set_flip_pointer` and `set_jump_pointer`** (make them aliases of the merged three-field setter). That absorption is safe in hex -- I verified `to_jump` has exactly two readers, both immediately after a setter that writes it -- and it costs those callers roughly +64 ops each. Doom will not catch the mistake for you: it calls neither macro, so `deg_gate` and `m5_gate` would both pass a build that has already broken `stl.call`/`stl.return` for everyone else. And my negative control shows the failure mode of the adjacent, easier-to-make error is **silent wrong data** (`read_byte` returned 0x0 instead of 0xb), not a crash.
+
+Second, on numbers: strike `232 / 760 / 528 / 948 / 716 / -24% / -23%` from the document. They are worst-case docstring levels, and `docs/handoff-fj-wide-pointers.md:641` already admits "Nothing here is measured." Replace with: **"one dispatch instance and one table pass fewer per hex, per setter call; measured -18% to -20% on doom's dereference macros and -384 program-ops per site at @ ~ 16.5, -15% to -21% across three layouts at @ <= 20.4; unmeasured at doom's @ = 25.4."**
+
+---
+
+## The cheapest experiment that settles what is still open
+
+What is still open is the only question you actually care about: **what fraction of a doom frame is `set_flip_and_jump_pointers`?** Nobody measured it. Per-call is not per-frame, and 139 source sites is not the instance count.
+
+**Step 1 -- ~20 minutes, no doom build, and it retires Part A completely.** In a *copy* of the stl (never the shared editable install in place), add `triple_exact_xor` + `address_and_variable_triple_xor` from `scratchpad/killcost/triple.fj`, rewrite all three setters over one shadow, delete `to_jump_var`, leave `bit/` untouched. Then run flipjump's own registered suites -- `test_compile_fast`, `test_compile_medium`, `test_run_medium` cover `hex_ptr`, `bit_ptr`, `startup_init_all`, `macro_bit_pointer`, `func1`-`func7`, and `test_compile_slow` adds the four `bubble_sort` variants. Gate it with a mutation control first: my `negctl.py` mutant (b) is ready-made and takes seconds. `hex_ptr.fj` is the specific program that exercises `ptr_flip` -> `ptr_jump` -> `ptr_wflip` -> combined setter in sequence, which is precisely the pattern the naive merge destroys.
+
+**Step 2 -- one heavy build, and it is the only thing that produces an honest doom number.** Build the **`render` tier** (the cheap one, no sprite bank) against the merged stl and run `scratchpad/deg_gate.py`. That single run gives you all three things at once: byte-exactness at four viewpoints (rule 2), the **ops/frame delta at doom's real @ = 25.415 and real layout** -- which is the per-call saving times the frame's true dereference count, the number no one has -- and the image-size delta. One build, so rule 1 holds; and remember that the op counts in every existing gate will move, which under your own note ("an op-count change with byte-exact pixels still means you changed structure") means re-baselining, not just re-running.
+
+Do not do Step 2 before Step 1. Step 1 is the cheap pre-gate, and per rule 3, it is for saving twenty minutes -- not for replacing the gate.

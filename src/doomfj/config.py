@@ -59,6 +59,73 @@ class Config:
     BPP: int = 8        # bits/pixel -> 256 colors
     TRIG_N: int = 4096  # trig LUT entries, 16**3 (§1.2/§2.1)
     NATIVE_W: int = 320  # DOOM's native authoring width (the F8 UI + D5 texture downscale reference)
+    # M4 -- HOW WIDE A PLANE-PAIR ID IS, in nibbles. 2 (one byte) is E1M1's shipped width and the
+    # DEFAULT, so every existing build and every gate is byte-identical under it.
+    #
+    # It lives HERE, and reaches the fj through `fj_consts.fj`, because that file is assembled
+    # FIRST everywhere (`paths = [consts] + includes + prog`) and a constant in an earlier file IS
+    # usable as a `rep` count later. TWO other routes were TESTED AND REJECTED (see
+    # docs/handoff-m4-nine-levels.md): a constant emitted into a LATER part is refused at
+    # macro-DEFINITION time, and declaring it `< EXTERN` satisfies the label checker but not the
+    # preprocessor, which needs a VALUE to expand `rep`. Threading it as a macro argument instead
+    # would have touched 13 macro signatures across two files; this touches none.
+    #
+    # ⚠ A pid is stored as PID_NIBBLES/2 BYTES per column in `pclm[]`, so this must stay EVEN.
+    # MEASURED per map (scratchpad/m4_bands.py): E1M1 222, E1M5 147, E1M8 90 fit 2 nibbles;
+    # E1M2 376, E1M3 337, E1M4 276, E1M9 340 need 4. A global seven-level space is ~1,788.
+    # ⚠ THIS IS THE VALUE WIDTH, NOT THE STORAGE WIDTH -- they are separable and an earlier
+    # version of this comment wrongly claimed the width "must stay EVEN". Only `pclm[]` storage is
+    # byte-granular (`hex.write_byte`); the ARITHMETIC has no such constraint. So a multi-level
+    # image reads TWO BYTES per column and then does every mov/cmp/if0/zero and the skypid dispatch
+    # on the low THREE nibbles -- 4,095 values, against a global seven-map pid space of 1,788.
+    #
+    # It is worth doing because of hex.cmp's cost model: m(3@+8) counting DOWN FROM THE MOST
+    # SIGNIFICANT nibble, and m=n when the two values are EQUAL -- which is the ditto-hit common
+    # case. A permanently-zero top nibble is paid in full on every equal compare, and the V5 ditto
+    # block runs four of them per column.
+    PID_NIBBLES: int = 2
+
+    # M4-R2 -- HOW WIDE THE BAND-LIST INDEX IS, in nibbles. 4 (65,536 ids) is E1M1's shipped
+    # width and the DEFAULT. MEASURED 2026-09-01: the seven shippable levels need 384,156 ids,
+    # whose pad is 524,288, so a multi-level image needs 5.
+    #
+    # ⚠ THE TABLE DOES NOT GROW WITH THIS. `generate_bands_walk_fj` derives its `pad` from the
+    # LIST COUNT, so raising the width alone costs only `rep(index_nibbles, i) hex.xor ...` -- one
+    # extra nibble of dispatch per band lookup. That is what makes the cost measurable on E1M1,
+    # which needs only 4: force 5, and the picture must stay byte-exact while ops rise.
+    BAND_NIBBLES: int = 4
+
+    @property
+    def PID_BYTES(self) -> int:
+        """Bytes of `pclm[]` storage per column: ceil(PID_NIBBLES/2).
+
+        The STORAGE is byte-granular because the array is walked with `hex.read_byte`/
+        `hex.write_byte` and a pointer stepped per column. The VALUE width is PID_NIBBLES and is
+        free of that: 3 nibbles live in 2 bytes with the top nibble permanently zero."""
+        return (self.PID_NIBBLES + 1) // 2
+
+    @property
+    def SLOT_SHIFT(self) -> int:
+        """Whole-nibble shifts for the per-column `sfslot` offset: log16(STEP_SLOT_STRIDE).
+
+        V5 fills the slot COMPLETELY at the default width -- 2 groups x 2 pieces x 4 bytes
+        (fy1, fy2, cls, bpid) = 16 of 16. (The constant's own comment still says "6 used", which
+        is V3-era, before the second piece and the bpid byte.) A wider pid makes a piece 5 bytes,
+        so the stride must grow -- and it must stay a POWER OF 16, because the offset is
+        `hex.shl_hex w/4, SLOT_SHIFT, idx` and the alternative is a mul_const priced at ~72@.
+        16 -> 256 is therefore the right jump: the SAME op count with a different constant, at
+        +VIEW_W*240 words of `sfslot` (0.05% of the span). Stride 32 would need an extra shift op
+        per column to save words that do not matter."""
+        return 1 if self.PID_BYTES == 1 else 2
+
+    @property
+    def PIECE_BYTES(self) -> int:
+        """Bytes per stored V5 boundary piece in `sfslot`: fy1, fy2, cls, then the back pid.
+
+        4 at the default width, 5 when a pid needs two bytes. A slot is FOUR pieces -- u1@0, u2@4,
+        l1@8, l2@12 at the default -- so the group offset is 2*PIECE_BYTES and the slot is
+        4*PIECE_BYTES, which is why the stride has to grow with it."""
+        return 3 + self.PID_BYTES
 
     @property
     def TEXTURE_DOWNSCALE(self) -> int:
@@ -125,6 +192,10 @@ class Config:
             "VIEW_W": self.VIEW_W, "VIEW_H": self.VIEW_H,
             "CENTERX": self.CENTERX, "CENTERY": self.CENTERY, "PROJECTION": self.PROJECTION,
             "FB_SIZE": self.FB_SIZE, "PALETTE_SIZE": self.PALETTE_SIZE,
+            "PID_NIBBLES": self.PID_NIBBLES, "PID_BYTES": self.PID_BYTES,
+            "SLOT_SHIFT": self.SLOT_SHIFT,
+            "BAND_NIBBLES": self.BAND_NIBBLES,
+            "PIECE_BYTES": self.PIECE_BYTES,
         }
 
     def span_ledger(self) -> dict:

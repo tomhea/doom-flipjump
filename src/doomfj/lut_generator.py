@@ -679,12 +679,27 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
 
     Identical lists SHARE a handler (switch entries just point at the same label) — measured on
     E1M1-lite: 17,280 half-lists, 5,855 unique. Dead/padding entries clean with their OWN index
-    (the clean un-xors the dispatched index out of the dsp op)."""
+    (the clean un-xors the dispatched index out of the dsp op).
+
+    M4 (2026-08-31) — AND SO DOES THE CLAMP TAIL, per colour. The `y2 > vq_hi` arm ends the walk
+    with `raw_byte_out(vq_hi)` + one const `output_char` + a return, and the raw-byte chain is
+    byte-for-byte identical every time; since every `vpb_fin` is the same `stl.fret vpb_x`, the
+    shared block frets directly and the per-pair arm is ONE JUMP. MEASURED by assembling both
+    shapes (`scratchpad/m4_rawbyte_cost.py`): 283.1 span-words inlined vs 2.0 as a jump, 284 words
+    of fixed cost per distinct colour, over the 40,567 clamp arms the shipped E1M1 emission has.
+    MEASURED for real by a full `game`-tier build: span 89,494,606 -> 74,091,162 (-17.21%), .fjm
+    32,879,690 -> 26,669,803 bytes, build 3,389 s -> 1,514 s, median ops +0.10% with 260/260 sweep
+    frames byte-exact. (The micro-benchmark predicted 12.74%; it reads LOW -- the same construct
+    costs 379.7 words/arm inside a 90M-word program against 281.1 in a 17k-word one.)
+    Pixel-neutral by construction: the same bytes, in the same order, from one copy instead of
+    forty thousand.
+    Contract-tested at the kernel level by `tests/fj/test_bands_walk.py`."""
     n = len(lists)
     pad = 1 << max(1, (n - 1).bit_length())
     if 4 * index_nibbles < (pad - 1).bit_length():
         raise ValueError(f"bands walk: {n} lists need a wider index than {index_nibbles} nibbles")
     first_of = {}
+    clamp_cols: set = set()
     owner = []
     for k, pairs in enumerate(lists):
         key = tuple(map(tuple, pairs))
@@ -712,32 +727,67 @@ def generate_bands_walk_fj(lists, *, index_nibbles: int = 4) -> str:
         out += [f"vpb_t{k}:",
                 f"    stl.fcall vpb_body{owner[k]}, vpb_x",
                 f"    ;vpb_clean__ + {k}*dw"]
+    # S2 (2026-09-05): the PAIR-BLOCK is shared per DISTINCT (y2, colour), the same move M4 made
+    # for the clamp tail, one level up. Census of the shipped bank: 40,567 pair instances, 5,326
+    # distinct (mean reuse 7.6x), each block ~172 static ops -- two 8-level bit.if trees whose
+    # exact_xor wflips are the bulk of region D's file bytes. A body now CALLS the block through
+    # `vpb_px` and the block reports one of THREE outcomes by flipping bits of the return cell's
+    # jump field before fret: stl.fcall's landing op is its own disarm, so with `pad 4` making the
+    # landing 4-op aligned, ret / ret+dw / ret+2dw are three lanes (clamp / stop / continue), each
+    # disarming with ITS OWN armed value -- vpb_px is zero again on every path. Verified byte-
+    # identical against the inlined shape over every arc and an 18-walk sequence, with a swapped-
+    # lane negative control, by `scratchpad/12m/p9_1_shared_pairs.py`. Costs one call round-trip
+    # (~2x popcount of the landing address) per WALKED pair; removes ~11 of ~15 wflip sites per
+    # INSTANCE from the image.
+    pair_blocks: set = set()
     for k, pairs in enumerate(lists):
         if owner[k] != k:
             continue
         out.append(f"vpb_body{k}:")
         for j, (y2, c) in enumerate(pairs):
             t = f"vpb_{k}_{j}"
-            nxt = f"{t}_nx"
-            out += _cmp3_tree("vq_lo", y2, f"{t}_in", nxt, nxt, f"{t}_lo")
-            out.append(f"{t}_in:")
-            out += _cmp3_tree("vq_hi", y2, f"{t}_cl", f"{t}_ls", f"{t}_em", f"{t}_hi")
-            out.append(f"{t}_em:")
-            for ch in (y2, c):
-                out.append(f"    stl.output_char {ch}")
-            out.append(f"    ;{nxt}")
-            out.append(f"{t}_ls:")
-            for ch in (y2, c):
-                out.append(f"    stl.output_char {ch}")
-            out.append(f"    ;vpb_fin{k}")
-            out.append(f"{t}_cl:")
-            out += _raw_byte_out("vq_hi", f"{t}_rb")
-            out.append(f"    stl.output_char {c}")
-            out.append(f"    ;vpb_fin{k}")
-            out.append(f"{nxt}:")
+            pair_blocks.add((y2, c))
+            clamp_cols.add(c)
+            out += [f"    wflip vpb_px+w, {t}_r, vpb_pb_{y2}_{c}",
+                    "    pad 4",
+                    f"{t}_r:",
+                    f"    wflip vpb_px+w, {t}_r, vpb_cl_{c}",           # lane 0: CLAMP
+                    f"    wflip vpb_px+w, {t}_r+dw, vpb_fin{k}",        # lane 1: STOP
+                    f"    wflip vpb_px+w, {t}_r+2*dw"]                  # lane 2: continue
         out += [f"vpb_fin{k}:",
                 "    stl.fret vpb_x"]
+    # ... the shared pair-blocks. R42 holds: bit.if, output_char and raw flips only. The trees are
+    # `_cmp3_tree` verbatim; the M4 clamp-tail sharing is unchanged (lane 0 jumps into it).
+    for (y2, c) in sorted(pair_blocks):
+        t = f"vpb_pb_{y2}_{c}"
+        out.append(f"{t}:")
+        out += _cmp3_tree("vq_lo", y2, f"{t}_in", f"{t}_ct", f"{t}_ct", f"{t}_lo")
+        out.append(f"{t}_in:")
+        out += _cmp3_tree("vq_hi", y2, f"{t}_cl", f"{t}_ls", f"{t}_em", f"{t}_hi")
+        out.append(f"{t}_em:")
+        for ch in (y2, c):
+            out.append(f"    stl.output_char {ch}")
+        out.append(f"    ;{t}_ct")
+        out.append(f"{t}_ls:")
+        for ch in (y2, c):
+            out.append(f"    stl.output_char {ch}")
+        out += ["    vpb_px+w+6;",                                      # -> lane 1 (stop)
+                "    ;vpb_px"]
+        out += [f"{t}_cl:",
+                "    ;vpb_px"]                                          # -> lane 0 (clamp)
+        out += [f"{t}_ct:",
+                "    vpb_px+w+7;",                                      # -> lane 2 (continue)
+                "    ;vpb_px"]
+    # ... the shared tails themselves. Only colours a clamp arm actually reaches get one. They sit
+    # AFTER the last body (which ends in a fret, so nothing falls into them) and each ends in the
+    # fret that `vpb_fin` used to do on their behalf.
+    for c in sorted(clamp_cols):
+        out.append(f"vpb_cl_{c}:")
+        out += _raw_byte_out("vq_hi", f"vpb_clt{c}")
+        out += [f"    stl.output_char {c}",
+                "    stl.fret vpb_x"]
     out += ["vpb_x: ;0",
+            "vpb_px: ;0",
             "vpb_clean__:",
             f"    hex.tables.clean_table_entry__table {pad}, vpb_dsp, hex.tables.ret",
             "vq_lo: bit.vec 8", "vq_hi: bit.vec 8",

@@ -11,6 +11,8 @@ unrolled pass 2 rasters them through the shared-compare trampoline.
 """
 from __future__ import annotations
 
+import math
+
 from pathlib import Path
 
 from doomfj.lut_generator import (
@@ -24,6 +26,7 @@ from doomfj.lut_generator import (
 from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
+from doomfj.config import Config
 from doomfj.mapcompiler import build_blockmap
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
@@ -137,6 +140,9 @@ def map_has_sky(secs) -> bool:
     emitter asked the map (`_has_sky`) while `metrics["features"]["sky"]` asserted True even for a
     wad with no F_SKY1 ceiling. Same shape as the persisted_labels bug, so the same fix."""
     return any(sec.ceil_tex.upper() == "F_SKY1" for sec in secs)
+
+
+BSn = chr(10)          # a newline, spelled without an escape
 
 
 def _pfx(mapname: str) -> str:
@@ -1074,15 +1080,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # DOOM's R_StoreWallRange markfloor/markceiling test. Equal on both sides => attributing the
     # plane to either sector renders identically, so skipping it is free of error BY CONSTRUCTION.
     def _seg_marks_in(seg, sv) -> bool:
-        ld_ = lds[seg.linedef]
-        if ld_.back == -1:
-            return True
-        fs_ = sv[sds[ld_.front if seg.side == 0 else ld_.back].sector]
-        bs_ = sv[sds[ld_.back if seg.side == 0 else ld_.front].sector]
-        return ((fs_.ceil_h, fs_.light & 0xFF, fs_.ceil_tex.upper())
-                != (bs_.ceil_h, bs_.light & 0xFF, bs_.ceil_tex.upper())
-                or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
-                != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
+        return seg_marks_in(lds, sds, seg, sv)
 
     def _seg_marks(seg) -> bool:
         """M2-R3: ANY state. A seg the program must be able to mark in some door position has to be
@@ -1192,7 +1190,27 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # CR-2026-08: a pid must fit ONE BYTE everywhere it flows (the per-column pclm store is
     # `hex.write_byte pptr, seg_pid`, and skypid dispatches on 2 nibbles). E1M1-lite bakes
     # ~230 pairs; a denser map would silently alias pids without this.
-    assert len(lines_pid) <= 255, f"lines_pid needs one byte, got {len(lines_pid)} pids"
+    # M4: the pid is PID_NIBBLES wide everywhere it flows -- the per-column pclm store, pval8/cpid,
+    # and skypid's dispatch index. 2 nibbles (one byte) is the default and E1M1's shipped width;
+    # the seven-level set needs 4. MEASURED per map: E1M1 222, E1M5 147, E1M8 90 fit a byte;
+    # E1M2 376, E1M3 337, E1M4 276, E1M9 340 do not.
+    assert len(lines_pid) < 16 ** cfg.PID_NIBBLES, (
+        f"{mapname} bakes {len(lines_pid)} pids, past the {16 ** cfg.PID_NIBBLES - 1} that "
+        f"{cfg.PID_NIBBLES} nibbles address -- raise Config.PID_NIBBLES")
+    # ⚠ THERE IS NO "MUST BE EVEN" RULE, and an assert here used to claim there was. Only pclm[]
+    # STORAGE is byte-granular (PID_BYTES = ceil(PID_NIBBLES/2)); the VALUE width is free. 3
+    # nibbles is the right choice for a multi-level image: 4,095 against a global seven-map space
+    # of 1,788, stored in 2 bytes with the top nibble permanently zero.
+    # It is not cosmetic. `hex.cmp` bills m(3@+8) counting DOWN FROM THE MOST SIGNIFICANT nibble,
+    # with m=n when the values are EQUAL -- the ditto-hit common case -- so an always-zero top
+    # nibble is paid in full on every equal compare, four times per column in the V5 ditto block.
+    # M4: the pid is PID_NIBBLES wide in every place it lives -- pclm[]/pval8/cpid/p2_dpid, the
+    # skypid index, `seg_bpid`, and the V5 PIECE SLOT (PIECE_BYTES per piece, written by
+    # `ts_piece_wr` and read back by BOTH the stacked and the non-stacked loaders).
+    # ⚠ `sfslot`'s stride grows with it (Config.SLOT_SHIFT) -- but `spslot` has its OWN
+    # SPR_SLOT_STRIDE and must NOT be scaled with it. Blanket-replacing the shift sites (they share
+    # the local name `slot_idx`) scaled the SPRITE index into an array still sized for 16 and cost
+    # three gate cycles. **A pid change is proved by ca2_sweep, not by deg_gate.**
     # ... and which PIDs are sky at all. A pid is (ceiling key, floor key) and the ceiling key
     # carries the flat NAME, so sky-ness is decided entirely at compile time: one dispatch per
     # column tells the emit loop whether to take the sky list or the plane list. pids are 1-based
@@ -1200,7 +1218,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     skypid = (generate_dispatch_table_fj(
     "skypid",
     [0] + [1 if ck[3] == "F_SKY1" else 0 for (ck, _fk) in lines_pid],
-    index_nibbles=2, result_nibbles=2) if _has_sky else "")
+    index_nibbles=cfg.PID_NIBBLES, result_nibbles=2) if _has_sky else "")
     n_bank_keys = max(1, len(lines_bank_keys))
 
     # M13-15M BANDS-AS-CODE: the shipping-tier emit path — every band half-list baked as raw-op
@@ -1213,7 +1231,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                        True)
         _sky_lists = _sky_pair_lists(rm, asset_wad, cfg) if _has_sky else []
         sky_base_id = len(_main_lists)
-        bands_code = generate_bands_walk_fj(_main_lists + _sky_lists)
+        bands_code = generate_bands_walk_fj(_main_lists + _sky_lists,
+                                            index_nibbles=cfg.BAND_NIBBLES)
         skybands = ""                          # the sky DATA bank dies with the plane bank
 
     # M13-prune (lines): count one-sided segs below every subtree; zero => the subtree can be
@@ -1295,7 +1314,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _vz = rm.view_z(_sec.floor_h)
         if ascode:
             return [f"    hex.set 8, viewz, {_vz & 0xFFFFFFFF}",
-                    f"    hex.set w/4, vzcbase, {lines_vz_classes[_vz] * n_bank_keys * 2}"]
+                    # T1: the "-4" (pids are 1-based) folded INTO the baked base, so lines_pid_ids does not
+                    # subtract it per call. Class 0 wraps to 0xFFFFFFFC; the downstream add is mod 2^32
+                    # and pid >= 1, so the ids are identical.
+                    f"    hex.set w/4, vzcbase, {(lines_vz_classes[_vz] * n_bank_keys * 2 - 4) & 0xFFFFFFFF}"]
         return [f"    hex.set 8, viewz, {_vz & 0xFFFFFFFF}",
                 f"    hex.set w/4, vzbank, vpbank + "
                 f"{lines_vz_classes[_vz] * n_bank_keys * 130}*dw"]
@@ -1370,6 +1392,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     or (p[0] == "sp_base2" and DEG_SPR_NEAR_TZ)], (
                     "the thing xor_by block no longer matches THING_XORBY_FIELDS -- update the "
                     "schema (and sim.thing_pass's clears) together")
+                # T4's L-inf far reject derives its bound from sp_tzmax at runtime as
+                # (tz_map<<2) + (tz_map>>2) + 2 with tz_map = floor(tzmax). That over-approximates
+                # sqrt(17)*tzmax only when 0.127*tzmax > the truncation slop -- true for
+                # tzmax >= 18 map units. E1M1's smallest baked tzmax is 266; this guard is for
+                # M4's other maps, where a tiny sprite category could break the margin SILENTLY
+                # (a wrongly rejected thing is missing pixels, not a crash).
+                _tzmax_fixed = dict((n, v) for n, w, v in _tfields)["sp_tzmax"]
+                _tz_map = _tzmax_fixed >> 16
+                assert (_tz_map << 2) + (_tz_map >> 2) + 2 >= math.ceil(math.sqrt(17) * (_tz_map + 1)) + 1, (
+                    f"T4 far-reject margin broken: tzmax={_tz_map} map units is too small for the "
+                    f"4.25x+2 bound. Widen the margin in projection.fj's L-inf reject or reject "
+                    f"this sprite category at emit time.")
                 xorby_blocks[f"T{_tag}"] = _seg_xorby_block(f"thing{_tag}_consts", _tfields)
                 out += [
                     # M14.5 §3.3: read-many, write-rarely, and the index is a COMPILE-TIME
@@ -1430,7 +1464,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                         ("seg_v2x", 8, (_v2x << 16) & 0xFFFFFFFF),
                         ("seg_v2y", 8, (_v2y << 16) & 0xFFFFFFFF),
                         ("seg_a", 8, _sa), ("seg_b", 8, _sb), ("seg_c", 8, _sc),
-                        ("seg_pid", 2,
+                        ("seg_pid", cfg.PID_BYTES * 2,
                          lines_pid[_plane_keys(rm._seg_sector(lds, sds, sv, _sg))])])
                 xorby_blocks[si] = _ablk
                 # V3: a SECOND block, emitted only for boundaries that actually carry a step
@@ -1470,7 +1504,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                 (ln_, max(1, b_.floor_h - f_.floor_h)), 0) if l_ else 0),
                             # V5: the boundary's BACK pair id -- the plane region behind a
                             # stored piece re-derives its band lists from this
-                            *([("seg_bpid", 2, lines_pid[_plane_keys(b_)])]
+                            *([("seg_bpid", cfg.PID_BYTES * 2, lines_pid[_plane_keys(b_)])]
                               if stack_flag else [])]
                     _fblk, _fcall = _door_blocks(si, seg, f"seg{si}_face_consts",
                                                  _face_fields)
@@ -1558,7 +1592,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                        # M13-2S rung 3a: the emit half derives both list addresses from the
                        # column's plane-pair id, so ONE 2-nibble bake replaces the two offsets
                        # (and the same byte is what this seg writes when it claims a column).
-                       *([("seg_pid", 2, lines_pid[(ckey, fkey)])])]
+                       *([("seg_pid", cfg.PID_BYTES * 2, lines_pid[(ckey, fkey)])])]
             # M2-R3: only the RENDER block moves with a door -- the geom block is vertices and
             # affine coefficients, which a ceiling cannot change. So a door's own wall pays one
             # switch dispatch, not two, and its pass-1 cull is untouched.
@@ -1654,7 +1688,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                        f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).floor_h & 0xFFFFFFFF}",
                        f"    hex.set 8, cp_seedc, "
                        f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).ceil_h & 0xFFFFFFFF}"],
-            done_label="cs_seeded", tag="cs") + "\ncs_seeded:\n    stl.fret cs_ret\n"
+            # M4-R1: MAP-PREFIXED. Every other label this descent emits is already keyed on
+            # `pfx` (+ `tag`); this one was the lone global, so two maps would both define it --
+            # one of exactly the two collisions the R1 label gate found (m4_r1_labels.py). The
+            # body is `stl.fret cs_ret` and `cs_ret` stays SHARED, so this costs one 2-line
+            # block per map and nothing else.
+            done_label=f"{_pfx(mapname)}_cs_seeded", tag="cs")
+        _collide_descend += (BSn + _pfx(mapname) + "_cs_seeded:" + BSn
+                             + "    stl.fret cs_ret" + BSn)
     else:
         _collide_block = _collide_decls = []
         _collide_tables = _collide_descend = ""
@@ -1734,9 +1775,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # cm/byte EMIT tables) moves from the ~20M-word program tail to just after startup, behind a
     # jump guard (the static tables' own `;end` headers only matter on fall-through, which the
     # guard prevents). Measured: 78.54M -> 76.39M ops/frame, frame byte-identical.
-    _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
+    _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw"
+                                             for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
                     f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
                     f"sprflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W))]
+                   # T-HOTSLOTS (2026-09-03): sfslot/spslot were the LAST hot pointer-walked
+                   # arrays still in the ~20M-word tail -- every one of their ~1,530 derefs a
+                   # frame paid wflip chains on a dense 31-bit address, the exact cost this
+                   # block exists to avoid (see the R20 note above; the same move measured
+                   # 78.54M -> 76.39M once). Same decls, same labels, hot addresses.
+                   + [f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
+                                        for _ in range(cfg.VIEW_W * 16 ** cfg.SLOT_SHIFT))]
+                   + ([f"spslot:{NLJ}" + NLJ.join(";0 * dw"
+                                        for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE))]
+                      if _do_things else [])
                    + ([f"sshead: hex.vec {2 * _MT_NSS}",
                        f"thnext: hex.vec {2 * _MT_NT}"]
                       # M5: the hosted tier is fed last frame's binding; standalone bakes the
@@ -1746,7 +1798,17 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                    + [f"    hex.vec 16, {ss}" for ss in _MT_BINDS])]
                          if standalone else [f"thss_rt: hex.vec {16 * _MT_NT}"])
                       if moving_things else []))
-    hotdata = ([";__hot_end"] + _hot_arrays
+    # ⚠ ANCHOR, not decoration. frame.arm5 -- the five-hex pointer arm -- is exact only while
+    # every narrow-armed table lies inside ONE 16^5 window, and this block IS those tables
+    # (pclm .. wrej). Left to float, its position is whatever the sum of everything before it
+    # happens to be, so ANY upstream change can push it across the boundary and make every
+    # narrow arm produce a wild pointer. That is not hypothetical: widening a `pad` inside
+    # hex.mul.init moved it 2,048 ops against 1,827 of headroom and cost a build (15,975 px
+    # wrong, and the run died early). `pad 16384` puts pclm on op 16,384 = bit 0x100000, which
+    # is both popcount 1 and the base of a fresh window -- the block is ~5,900 ops, so it now has
+    # ~10,500 ops of headroom and upstream padding cannot reach it.
+    # Unreachable: the `;__hot_end` guard below jumps over all of this.
+    hotdata = ([";__hot_end", "pad 16384"] + _hot_arrays
               + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                   False)
               + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
@@ -1837,16 +1899,36 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              # lines mode fcalls a pass-2 leaf too, so the stub ladder has to define one (it is never
              # reached: part 1 always leaves `proceed` = 0 here).
              + (["seg_pass2_leaf:", "stl.fret seg_ret2"])) if "xrstub" in ablate else
-            ["seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
+            # Hot-region base tuning (2026-09-03): 16 UNEXECUTED ops land the pass-1 leaf
+            # region -- whose hex.add/sub/cmp switch labels are the frame's bulk wflip values --
+            # on a cheaper base address. Tuned JOINTLY with the pos_leaf filler across 7 per-op
+            # frame profiles (4 deg viewpoints + 3 sweep-grid frames) by the popcount census
+            # predictor (scratchpad/popcount_census.py + joint_tune.py), constrained so that NO
+            # profiled frame loses: predicted -94,702..-268,178 per frame. A single-frame tune
+            # said 1552 here and was overfit (+9,550 on one gate viewpoint). The count must stay
+            # a multiple of 16 so every downstream `pad 2/4/16` passes the shift through exactly
+            # (the stl's larger pads all sit in the low-address table init, which never shifts).
+            # (re-tuned 16 -> 4080 with idea 16: the loader restructure grew the pass2 leaf
+            # ~2,240 ops and de-tuned this filler -- joint_tune3.py, 4 frames, all winning.)
+            ["rep(5136, i) stl.fj 0, 0",
+             "seg_pass1_leaf:", f"frame.seg_pass1_leaf_body_lines {atan_dbl}, {slope_dbl}, {table_dbl}, "
              f"{1 if 'noprescan' in ablate else 0}",
              # CR-2026-08: the deg attribution budget must provably never bind (a binding budget
              # = the smudged-column bug) -- n_ts counts a subset of the map's segs, so total segs
              # below the baked cap is the sufficient condition. 4095 is also the 3-nibble
              # counter's max, enforced together here.
-             *([_assert_pnear_unbound(len(cmap.segs)), "seg_pass1_ts_leaf:",
+             *([_assert_pnear_unbound(marking_seg_count(cmap, lds, _seg_marks)),
+                # idea 19 coupled retune: 1200 ops land the ts leaf region on a cheaper base
+                # (tune_round on the narrowed-compare layout; first time this point fires).
+                "rep(1200, i) stl.fj 0, 0",
+                "seg_pass1_ts_leaf:",
+                # idea 19's narrowed gate compares (hex.cmp 6) require every operand < 16^6:
+                # the face scale is the clamped [SCALE_MIN, 0x400000] interpolant, and these
+                # two baked gate constants are asserted so a retune cannot silently break it.
+                _assert_gate_scales_fit((DEG_STACK_SCALE, DEG_LIP_SCALE)),
                 f"frame.seg_pass1_leaf_body_ts {DEG_PNEAR}, {atan_dbl}, {slope_dbl}, "
                 f"{table_dbl}, 1, {STEP_SEG_BUDGET}, {cfg.CENTERY * 0x10000}, "
-                f"{cfg.VIEW_H - 1}, {proj}, {STEP_SLOT_STRIDE}, {stack_flag}, {deg_flag}, "
+                f"{cfg.VIEW_H - 1}, {proj}, {16 ** cfg.SLOT_SHIFT}, {stack_flag}, {deg_flag}, "
                 f"{DEG_STACK_SCALE}, {1 if DEG_DDA_FACES else 0}, {DEG_LIP_SCALE}"]),
              # CR-2026-08: project_thing's istep/downscale is a compile-time SHIFT by
              # log2(ds) (`rep(#ds - 1, ...)`), exact only for power-of-two downscales.
@@ -1862,6 +1944,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              *(["thing_pass_leaf:",
                 f"sim.thing_pass throw, {_MT_NTH}, thpos_rt",
                 "stl.fret tp_ret"] if moving_things else []),
+             # idea 20 / tuning round 5: 288 ops land the pass-2 leaf region on a cheaper
+             # base -- the first time THIS point fired in five rounds.
+             "rep(288, i) stl.fj 0, 0",
              "seg_pass2_leaf:",
              (f"frame.seg_pass2_leaf_body_lines {cfg.CENTERY}, {cfg.VIEW_H - 1}, {cfg.VIEW_H}, {proj}, "
               f"{LINES_HALF_SLOTS}, {w2s_flag}, {wpx_flag}, {w1r_flag}, {2 * WPX_RUN_CAP}, {pnear_flag}, "
@@ -1909,7 +1994,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # `viewx/viewy/viewangle` are for the player.
           *(door_decls(len(_dslot)) if _dst_tbl else []),
           *_collide_decls,                                  # M14-d collision state
-          *HOISTED_SCRATCH_DECLS,                           # M1-HOIST: ex-@-local storage
+          *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2
           # nibbles). M5: standalone has no wire and so no magic byte, but it still builds `pkeys`.
           *(["pkeys: hex.vec 2"] if standalone else
@@ -1981,7 +2066,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # length trailer per block is a hard bound, not a guess.
       ]),
       ("banks", [
-          *([             "pbase: hex.vec w/4", "pptr: hex.vec w/4", "pval8: hex.vec 2",
+          *([             "pbase: hex.vec w/4", "pptr: hex.vec w/4",
+             f"pval8: hex.vec {cfg.PID_BYTES * 2}",
              # n_tsv is 3 nibbles: the deg attribution budget is DEG_PNEAR=4095 (its max), with
              # never-binds ENFORCED by _assert_pnear_unbound -- see seg_pass1_leaf_body_ts
              "n_claimed: hex.vec 2", "n_tsv: hex.vec 3", "tsstop: hex.vec 1",
@@ -1992,7 +2078,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              # near_steps off, n_face never fills so the idle stop never fires.
              "fbspent: hex.vec 1",
              "viewh_stub: hex.vec 2, 100",
-             "cpid: hex.vec 2",
+             f"cpid: hex.vec {cfg.PID_BYTES * 2}",
              # the UNATTRIBUTED-COLUMN WINDOW: every column < pmin or > pmax is attributed already
              "pmin: hex.vec 2, 0", f"pmax: hex.vec 2, {cfg.VIEW_W - 1}"]),
           # V3 step faces: the per-column WRITE-ONCE slots. `sfflag[x]` is one byte (nibble 0 = an
@@ -2001,21 +2087,22 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # so its byte offset is a whole-nibble shift. `n_face` is the per-frame SEG budget counter
           # (STEP_SEG_BUDGET) -- separate from n_tsv, because it must count only the boundaries that
           # actually pay a wall_scale_setup_m.
-          *([             f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
-                                        for _ in range(cfg.VIEW_W * STEP_SLOT_STRIDE)),
+          # sfslot itself moved to the M13-hotdata block (T-HOTSLOTS) -- the layout comment
+          # above still describes it; only its ADDRESS changed.
+          *([
              "n_face: hex.vec 2", "seg_fmask: hex.vec 2",
              "seg_uh1: hex.vec 4", "seg_uh2: hex.vec 4",
              "seg_lh1: hex.vec 4", "seg_lh2: hex.vec 4",
              "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
-             "seg_bpid: hex.vec 2",                # V5: the boundary's baked BACK pair id
+             f"seg_bpid: hex.vec {cfg.PID_BYTES * 2}",  # V5: the boundary's baked BACK pair id
              stepcol]),
           # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (nonzero =
           # this column carries one) so a column without a sprite costs ONE read on the emit path;
           # `spslot[x]` holds [sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row] at a power-of-16 stride.
           # `y0` is BIASED by 128 because a near sprite's top sits above row 0 and the slot is bytes;
           # h <= VIEW_H bounds it to +-99. `n_thing`/`tstop` are the budget and its monotone early-out.
-          *([             f"spslot:{NLJ}" + NLJ.join(";0 * dw"
-                                        for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
+          # spslot moved to the M13-hotdata block (T-HOTSLOTS), as above.
+          *([
              "n_thing: hex.vec 2", "n_mon: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
              "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
              "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
@@ -2064,346 +2151,372 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 # shared cell; scratchpad/m1_hoist.py refuses those unless the caller has checked they may share.
 #
 # Generated by: python scratchpad/m1_hoist.py --file F --macro M --prefix P
-HOISTED_SCRATCH_DECLS = [
-    # ROUND 1: single-instantiation macros (exact by construction)
-    "p2_cVH: hex.vec 8",
-    "p2_cbufa: hex.vec w/4",
-    "p2_cbufd: hex.vec w/4",
-    "p2_cexcl: hex.vec 8",
-    "p2_cw16: hex.vec 2, 16",
-    "p2_dbot: hex.vec 8",
-    "p2_dcexcl: hex.vec 2",
-    "p2_dfstart: hex.vec 2",
-    "p2_dgn: hex.vec 2",
-    "p2_dgn2: hex.vec 2",
-    "p2_dgn3: hex.vec 2",
-    "p2_dl1bp: hex.vec 2",
-    "p2_dl1cls: hex.vec 2",
-    "p2_dl1y1: hex.vec 2",
-    "p2_dl1y2: hex.vec 2",
-    "p2_dl2bp: hex.vec 2",
-    "p2_dl2cls: hex.vec 2",
-    "p2_dl2y1: hex.vec 2",
-    "p2_dl2y2: hex.vec 2",
-    "p2_dlcnt: hex.vec 2",
-    "p2_dlcol: hex.vec 2",
-    "p2_dly1: hex.vec 2",
-    "p2_dly2: hex.vec 2",
-    "p2_dpid: hex.vec 2",
-    "p2_dsblk: hex.vec 4",
-    "p2_dsblkb: hex.vec 4",
-    "p2_dscale: hex.vec 8",
-    "p2_dsoff: hex.vec 2",
-    "p2_dsstep: hex.vec 8",
-    "p2_dssy1: hex.vec 2",
-    "p2_dssy1b: hex.vec 2",
-    "p2_dssy2: hex.vec 2",
-    "p2_dssy2b: hex.vec 2",
-    "p2_dsy0b: hex.vec 4",
-    "p2_dsy0bb: hex.vec 4",
-    "p2_dtop: hex.vec 8",
-    "p2_du1bp: hex.vec 2",
-    "p2_du1cls: hex.vec 2",
-    "p2_du1y1: hex.vec 2",
-    "p2_du1y2: hex.vec 2",
-    "p2_du2bp: hex.vec 2",
-    "p2_du2cls: hex.vec 2",
-    "p2_du2y1: hex.vec 2",
-    "p2_du2y2: hex.vec 2",
-    "p2_ducnt: hex.vec 2",
-    "p2_ducol: hex.vec 2",
-    "p2_duy1: hex.vec 2",
-    "p2_duy2: hex.vec 2",
-    "p2_dvalid: hex.vec 1",
-    "p2_face_flags: hex.vec 2",
-    "p2_fbufa: hex.vec w/4",
-    "p2_fbufd: hex.vec w/4",
-    "p2_fstart: hex.vec 8",
-    "p2_gnrow: hex.vec 2",
-    "p2_issky: hex.vec 2",
-    "p2_lcol: hex.vec 2",
-    "p2_lfl: hex.vec 1",
-    "p2_ly1: hex.vec 2",
-    "p2_ly2p1: hex.vec 2",
-    "p2_one: hex.vec 2",
-    "p2_sblk: hex.vec 4",
-    "p2_sblkb: hex.vec 4",
-    "p2_skb: hex.vec 2",
-    "p2_sliver_cap: hex.vec 2",
-    "p2_sliver_w: hex.vec 2",
-    "p2_slr: hex.vec 2",
-    "p2_slrb: hex.vec 2",
-    "p2_soff: hex.vec 2",
-    "p2_sprfl: hex.vec 2",
-    "p2_ssy1: hex.vec 2",
-    "p2_ssy1b: hex.vec 2",
-    "p2_ssy2: hex.vec 2",
-    "p2_ssy2b: hex.vec 2",
-    "p2_sy0b: hex.vec 4",
-    "p2_sy0bb: hex.vec 4",
-    "p2_ucol: hex.vec 2",
-    "p2_ufl: hex.vec 1",
-    "p2_uy1: hex.vec 2",
-    "p2_uy2p1: hex.vec 2",
-    "p2_wlen: hex.vec 2",
-    "p2_wtc8: hex.vec 8",
-    "p2_wtf8: hex.vec 8",
-    "p2_xkey: hex.vec 4",
-    "tsf_col_x: hex.vec 8",
-    "tsf_cviewh1: hex.vec 8",
-    "tsf_drawn_b: hex.vec w/4",
-    "tsf_drawn_p: hex.vec w/4",
-    "tsf_drawn_v: hex.vec 2",
-    "tsf_face_cap: hex.vec 2",
-    "tsf_face_dist: hex.vec 8",
-    "tsf_face_norm: hex.vec 8",
-    "tsf_face_scale: hex.vec 8",
-    "tsf_face_scalestep: hex.vec 8",
-    "tsf_fmode: hex.vec 1",
-    "tsf_frac_l1: hex.vec 8",
-    "tsf_frac_l2: hex.vec 8",
-    "tsf_frac_u1: hex.vec 8",
-    "tsf_frac_u2: hex.vec 8",
-    "tsf_out_y1: hex.vec 8",
-    "tsf_out_y2: hex.vec 8",
-    "tsf_row_a: hex.vec 8",
-    "tsf_row_b: hex.vec 8",
-    "tsf_sfflag_b: hex.vec w/4",
-    "tsf_sfflag_p: hex.vec w/4",
-    "tsf_sfflag_v: hex.vec 2",
-    "tsf_sfslot_b: hex.vec w/4",
-    "tsf_sfslot_p: hex.vec w/4",
-    "tsf_slot_idx: hex.vec w/4",
-    "tsf_step_l1: hex.vec 8",
-    "tsf_step_l2: hex.vec 8",
-    "tsf_step_u1: hex.vec 8",
-    "tsf_step_u2: hex.vec 8",
-    "tsf_wtl1: hex.vec 8",
-    "tsf_wtl2: hex.vec 8",
-    "tsf_wtu1: hex.vec 8",
-    "tsf_wtu2: hex.vec 8",
-    "ecl_ccy: hex.vec 2",
-    "ecl_cmidx: hex.vec 4",
-    "ecl_colr: hex.vec 2",
-    "ecl_ctake: hex.vec 2",
-    "ecl_ent_i: hex.vec 2",
-    "ecl_full_hi: hex.vec 2",
-    "ecl_full_lo: hex.vec 2",
-    "ecl_n_ent: hex.vec 2",
-    "ecl_ptr: hex.vec w/4",
-    "ecl_spr_bot: hex.vec 2",
-    "ecl_spr_top: hex.vec 2",
-    "ecl_whi: hex.vec 2",
-    "ecl_win_end: hex.vec 2",
-    "ecl_win_hi: hex.vec 2",
-    "ecl_win_lo: hex.vec 2",
-    "ecl_wlen: hex.vec 2",
-    "ecl_wlo: hex.vec 2",
-    "ecl_y2r: hex.vec 2",
-    "ws_angt: hex.vec 8",
-    "ws_c1: hex.vec 1, 1",
-    "ws_c2: hex.vec 1, 2",
-    "ws_c4: hex.vec 1, 4",
-    "ws_c6: hex.vec 1, 6",
-    "ws_cang45: hex.vec 8, 0x20000000",
-    "ws_cang90m1: hex.vec 8, 0x3FFFFFFF",
-    "ws_mdir: hex.vec 1",
-    "ws_nout: hex.vec 1",
-    "ws_qout: hex.vec 1",
-    "pos_dxv: hex.vec 10",
-    "pos_dxv_mag: hex.vec 8",
-    "pos_dyv: hex.vec 10",
-    "pos_dyv_mag: hex.vec 8",
-    "pos_p1: hex.vec 8",
-    "pos_p2: hex.vec 8",
-    "pos_signA: hex.vec 1",
-    "pos_signB: hex.vec 1",
-    "pos_sign_dxv: hex.vec 1",
-    "pos_sign_dyv: hex.vec 1",
-    "cpm_c_centeryfix: hex.vec 8",
-    "cpm_c_viewh1: hex.vec 8",
-    "cpm_consts_set: hex.vec 1",
-    "cpm_prod: hex.vec 8",
+def hoisted_scratch_decls(cfg=None) -> list:
+    """The ex-@-local registers, hoisted to globals by M1. ONE definition (R6).
 
-    # ROUND 2 (under bisection): multi-instantiation macros sharing one cell each
-    "trb_blk: hex.vec w/4",
-    "trb_blk_const: hex.vec w/4",
-    "trb_blk_ofs: hex.vec w/4",
-    "trb_bucket: hex.vec 4",
-    "trb_bucket_h: hex.vec 8",
-    "trb_cbound: hex.vec 8",
-    "trb_climit: hex.vec 2",
-    "trb_col_x: hex.vec 8",
-    "trb_drawn_b: hex.vec w/4",
-    "trb_drawn_p: hex.vec w/4",
-    "trb_drawn_v: hex.vec 2",
-    "trb_dthp: hex.vec 8",
-    "trb_dtis: hex.vec 8",
-    "trb_dtx1: hex.vec 8",
-    "trb_dtx2: hex.vec 8",
-    "trb_dtyt: hex.vec 8",
-    "trb_dvis: hex.vec 1",
-    "trb_dw_max: hex.vec 2",
-    "trb_frac_u: hex.vec 8",
-    "trb_negx1: hex.vec 8",
-    "trb_run_last: hex.vec 2",
-    "trb_run_r0: hex.vec 2",
-    "trb_run_w8: hex.vec 8",
-    "trb_shade_row: hex.vec 2",
-    "trb_slot_flag: hex.vec 2",
-    "trb_slot_ofs: hex.vec w/4",
-    "trb_sprflag_b: hex.vec w/4",
-    "trb_sprflag_p: hex.vec w/4",
-    "trb_sprflag_v: hex.vec 2",
-    "trb_sy1: hex.vec 8",
-    "trb_sy2: hex.vec 8",
-    "trb_tab_idx: hex.vec w/4",
-    "trb_tbl_b: hex.vec w/4",
-    "trb_tbl_p: hex.vec w/4",
-    "trb_thpx: hex.vec 8",
-    "trb_tistep: hex.vec 8",
-    "trb_tx1: hex.vec 8",
-    "trb_tx2: hex.vec 8",
-    "trb_tytop: hex.vec 8",
-    "trb_u: hex.vec 8",
-    "trb_vis: hex.vec 1",
-    "trb_y0: hex.vec 8",
-    "trb_y0_biased: hex.vec 8",
-    "trb_y_base: hex.vec 8",
-    "wxr_adup: hex.vec 8",
-    "wxr_ang1: hex.vec 8",
-    "wxr_ang2: hex.vec 8",
-    "wxr_c2clip: hex.vec 8, 0x40000000",
-    "wxr_cclip: hex.vec 8, 0x20000000",
-    "wxr_cnegclip: hex.vec 8, 0xE0000000",
-    "wxr_diff: hex.vec 8",
-    "wxr_sgn_b: hex.vec 8",
-    "wxr_span: hex.vec 8",
-    "wxr_tspan: hex.vec 8",
-    "wxr_tx1: hex.vec 8",
-    "wxr_tx2: hex.vec 8",
-    "pth_ang: hex.vec 8",
-    "pth_c_centerxfix: hex.vec 8",
-    "pth_c_centeryfix: hex.vec 8",
-    "pth_c_viewh: hex.vec 8",
-    "pth_c_vieww: hex.vec 8",
-    "pth_cproj: hex.vec 8",
-    "pth_czlim: hex.vec 8",
-    "pth_gxt: hex.vec 8",
-    "pth_gyt: hex.vec 8",
-    "pth_gzt: hex.vec 8",
-    "pth_one16: hex.vec 8",
-    "pth_sin_idx: hex.vec 3",
-    "pth_tmp: hex.vec 8",
-    "pth_tr_x: hex.vec 8",
-    "pth_tr_y: hex.vec 8",
-    "pth_trig_cached: hex.vec 1",
-    "pth_tx: hex.vec 8",
-    "pth_tx_abs: hex.vec 8",
-    "pth_tx_left: hex.vec 8",
-    "pth_tx_right: hex.vec 8",
-    "pth_tz: hex.vec 8",
-    "pth_tz_lim: hex.vec 8",
-    "pth_vcos: hex.vec 8",
-    "pth_vsin: hex.vec 8",
-    "pth_xscale: hex.vec 8",
-    "ssc_ceil_end: hex.vec 2",
-    "ssc_rcbufa: hex.vec w/4",
-    "ssc_rcbufd: hex.vec w/4",
-    "ssc_rfbufa: hex.vec w/4",
-    "ssc_rfbufd: hex.vec w/4",
-    "ssc_rlo2: hex.vec 2",
-    "ssc_ucnt2: hex.vec 1",
-    "ssc_win_end: hex.vec 2",
-    "ssc_win_lo: hex.vec 2",
-    "ssc_zero_row: hex.vec 2",
-    "ssf_cviewh: hex.vec 2",
-    "ssf_floor_end: hex.vec 2",
-    "ssf_floor_lo: hex.vec 2",
-    "ssf_fstart2: hex.vec 2",
-    "ssf_lcnt2: hex.vec 1",
-    "ssf_rcbufa: hex.vec w/4",
-    "ssf_rcbufd: hex.vec w/4",
-    "ssf_rfbufa: hex.vec w/4",
-    "ssf_rfbufd: hex.vec w/4",
-    "ssf_win_end: hex.vec 2",
-    "ssf_win_lo: hex.vec 2",
-    "wss_scale2: hex.vec 8",
-    "wss_visang1: hex.vec 8",
-    "wss_visang2: hex.vec 8",
-    "sst_diff: hex.vec 8",
-    "sst_quot: hex.vec 8",
-    "sst_rem: hex.vec 8",
-    "sst_span: hex.vec 8",
-    "srw_ptr: hex.vec w/4",
-    "srw_rel: hex.vec 2",
-    "srw_rel_w: hex.vec 4",
-    "srw_sbase: hex.vec w/4",
-    "srw_sidx: hex.vec w/4",
-    "srw_smidx: hex.vec 4",
-    "srw_tex: hex.vec 2",
-    "srw_whi4: hex.vec 4",
-    "srw_wlo4: hex.vec 4",
-    "srw_y0: hex.vec 4",
-    "srw_yabs: hex.vec 4",
-    "srn_cvh: hex.vec 4",
-    "srn_ptr: hex.vec w/4",
-    "srn_rel: hex.vec 2",
-    "srn_rel_w: hex.vec 4",
-    "srn_sbase: hex.vec w/4",
-    "srn_sidx: hex.vec w/4",
-    "srn_smidx: hex.vec 4",
-    "srn_tex: hex.vec 2",
-    "srn_y0: hex.vec 4",
-    "srn_yabs: hex.vec 4",
-    "srd_csh10: hex.vec 2, 10",
-    "srd_csh5: hex.vec 2, 5",
-    "srd_csh6: hex.vec 2, 6",
-    "srd_csh8: hex.vec 2, 8",
-    "srd_den_norm: hex.vec 8",
-    "srd_num_wide: hex.vec 14",
-    "srd_prod: hex.vec 14",
-    "srd_recip: hex.vec 6",
-    "srd_recip_wide: hex.vec 14",
-    "srd_shift_nibs: hex.vec 2",
-    "sga_anglea: hex.vec 8",
-    "sga_angleb: hex.vec 8",
-    "sga_cang90: hex.vec 8, 0x40000000",
-    "sga_csmax: hex.vec 8, 0x400000",
-    "sga_csmin: hex.vec 8, 0x100",
-    "sga_den: hex.vec 8",
-    "sga_num: hex.vec 8",
-    "sga_qneg: hex.vec 1",
-    "sga_sin_idx: hex.vec 3",
-    "sga_sinv: hex.vec 8",
-    # ── proj.point_to_angle (x4 expansions) ──────────────────────────────────────────────
-    # CR 2026-08-25: this macro was believed unhoistable. It was not -- m1_hoist.py appended
-    # declarations it declined to hoist AFTER the body, and point_to_angle's last body line is
-    # its terminal label `done:`, so data words landed in the fall-through EXIT. The six-run
-    # bisect measured the TOOL. Fixed there; these are the registers it always could have taken.
-    "pta_c1: hex.vec 1, 1",
-    "pta_c2: hex.vec 1, 2",
-    "pta_c4: hex.vec 1, 4",
-    "pta_c6: hex.vec 1, 6",
-    "pta_den: hex.vec 8",
-    "pta_dx: hex.vec 8",
-    "pta_dy: hex.vec 8",
-    "pta_num: hex.vec 8",
-    "pta_oct_idx: hex.vec 1",
-    "pta_slope_idx: hex.vec 3",
-    "pta_tan_base: hex.vec 8",
-]
+    It became a function when M4 made `p2_dpid` PID_NIBBLES wide: it was a module-level list, so
+    `cfg` was not in scope and an f-string there is a NameError at IMPORT. `cfg` is optional so
+    the nine no-arg callers in tests/fj/test_projection_kernels.py keep working unchanged."""
+    cfg = cfg or Config()
+    return [
+        # ROUND 1: single-instantiation macros (exact by construction)
+        "p2_cVH: hex.vec 8",
+        "p2_cbufa: hex.vec w/4",
+        "p2_cbufd: hex.vec w/4",
+        "p2_cexcl: hex.vec 8",
+        "p2_cw16: hex.vec 2, 16",
+        "p2_dbot: hex.vec 8",
+        "p2_dcexcl: hex.vec 2",
+        "p2_dfstart: hex.vec 2",
+        "p2_dgn: hex.vec 2",
+        "p2_dgn2: hex.vec 2",
+        "p2_dgn3: hex.vec 2",
+        f"p2_dl1bp: hex.vec {cfg.PID_BYTES * 2}",
+        "p2_dl1cls: hex.vec 2",
+        "p2_dl1y1: hex.vec 2",
+        "p2_dl1y2: hex.vec 2",
+        f"p2_dl2bp: hex.vec {cfg.PID_BYTES * 2}",
+        "p2_dl2cls: hex.vec 2",
+        "p2_dl2y1: hex.vec 2",
+        "p2_dl2y2: hex.vec 2",
+        "p2_dlcnt: hex.vec 2",
+        "p2_dlcol: hex.vec 2",
+        "p2_dly1: hex.vec 2",
+        "p2_dly2: hex.vec 2",
+        f"p2_dpid: hex.vec {cfg.PID_BYTES * 2}",
+        "p2_dsblk: hex.vec 4",
+        "p2_dsblkb: hex.vec 4",
+        "p2_dscale: hex.vec 8",
+        "p2_dsoff: hex.vec 2",
+        "p2_dsstep: hex.vec 8",
+        "p2_dssy1: hex.vec 2",
+        "p2_dssy1b: hex.vec 2",
+        "p2_dssy2: hex.vec 2",
+        "p2_dssy2b: hex.vec 2",
+        "p2_dsy0b: hex.vec 4",
+        "p2_dsy0bb: hex.vec 4",
+        "p2_dtop: hex.vec 8",
+        f"p2_du1bp: hex.vec {cfg.PID_BYTES * 2}",
+        "p2_du1cls: hex.vec 2",
+        "p2_du1y1: hex.vec 2",
+        "p2_du1y2: hex.vec 2",
+        f"p2_du2bp: hex.vec {cfg.PID_BYTES * 2}",
+        "p2_du2cls: hex.vec 2",
+        "p2_du2y1: hex.vec 2",
+        "p2_du2y2: hex.vec 2",
+        "p2_ducnt: hex.vec 2",
+        "p2_ducol: hex.vec 2",
+        "p2_duy1: hex.vec 2",
+        "p2_duy2: hex.vec 2",
+        "p2_dvalid: hex.vec 1",
+        "p2_face_flags: hex.vec 2",
+        "p2_fbufa: hex.vec w/4",
+        "p2_fbufd: hex.vec w/4",
+        "p2_fstart: hex.vec 8",
+        "p2_gnrow: hex.vec 2",
+        "p2_issky: hex.vec 2",
+        "p2_lcol: hex.vec 2",
+        "p2_lfl: hex.vec 1",
+        "p2_ly1: hex.vec 2",
+        "p2_ly2p1: hex.vec 2",
+        "p2_one: hex.vec 2",
+        "p2_sblk: hex.vec 4",
+        "p2_sblkb: hex.vec 4",
+        "p2_skb: hex.vec 2",
+        "p2_sliver_cap: hex.vec 2",
+        "p2_sliver_w: hex.vec 2",
+        "p2_slr: hex.vec 2",
+        "p2_slrb: hex.vec 2",
+        "p2_soff: hex.vec 2",
+        "p2_sprfl: hex.vec 2",
+        "p2_ssy1: hex.vec 2",
+        "p2_ssy1b: hex.vec 2",
+        "p2_ssy2: hex.vec 2",
+        "p2_ssy2b: hex.vec 2",
+        "p2_sy0b: hex.vec 4",
+        "p2_sy0bb: hex.vec 4",
+        "p2_ucol: hex.vec 2",
+        "p2_ufl: hex.vec 1",
+        "p2_uy1: hex.vec 2",
+        "p2_uy2p1: hex.vec 2",
+        "p2_wlen: hex.vec 2",
+        "p2_wtc8: hex.vec 8",
+        "p2_wtf8: hex.vec 8",
+        "p2_xkey: hex.vec 4",
+        "tsf_col_x: hex.vec 8",
+        "tsf_cviewh1: hex.vec 8",
+        "tsf_drawn_b: hex.vec w/4",
+        "tsf_drawn_p: hex.vec w/4",
+        "tsf_drawn_v: hex.vec 2",
+        "tsf_face_cap: hex.vec 2",
+        "tsf_face_dist: hex.vec 8",
+        "tsf_face_norm: hex.vec 8",
+        "tsf_face_scale: hex.vec 8",
+        "tsf_face_scalestep: hex.vec 8",
+        "tsf_frac_l1: hex.vec 8",
+        "tsf_frac_l2: hex.vec 8",
+        "tsf_frac_u1: hex.vec 8",
+        "tsf_frac_u2: hex.vec 8",
+        "tsf_out_y1: hex.vec 8",
+        "tsf_out_y2: hex.vec 8",
+        "tsf_row_a: hex.vec 8",
+        "tsf_row_b: hex.vec 8",
+        "tsf_sfflag_b: hex.vec w/4",
+        "tsf_sfflag_p: hex.vec w/4",
+        "tsf_sfflag_v: hex.vec 2",
+        "tsf_sfslot_b: hex.vec w/4",
+        "tsf_sfslot_p: hex.vec w/4",
+        "tsf_slot_idx: hex.vec w/4",
+        "tsf_step_l1: hex.vec 8",
+        "tsf_step_l2: hex.vec 8",
+        "tsf_step_u1: hex.vec 8",
+        "tsf_step_u2: hex.vec 8",
+        "tsf_wtl1: hex.vec 8",
+        "tsf_wtl2: hex.vec 8",
+        "tsf_wtu1: hex.vec 8",
+        "tsf_wtu2: hex.vec 8",
+        "ecl_ccy: hex.vec 2",
+        "ecl_cmidx: hex.vec 4",
+        "ecl_colr: hex.vec 2",
+        "ecl_ctake: hex.vec 2",
+        "ecl_ent_i: hex.vec 2",
+        "ecl_full_hi: hex.vec 2",
+        "ecl_full_lo: hex.vec 2",
+        "ecl_n_ent: hex.vec 2",
+        "ecl_ptr: hex.vec w/4",
+        "ecl_spr_bot: hex.vec 2",
+        "ecl_spr_top: hex.vec 2",
+        "ecl_whi: hex.vec 2",
+        "ecl_win_end: hex.vec 2",
+        "ecl_win_hi: hex.vec 2",
+        "ecl_win_lo: hex.vec 2",
+        "ecl_wlen: hex.vec 2",
+        "ecl_wlo: hex.vec 2",
+        "ecl_y2r: hex.vec 2",
+        "ws_angt: hex.vec 8",
+        "ws_c1: hex.vec 1, 1",
+        "ws_c2: hex.vec 1, 2",
+        "ws_c4: hex.vec 1, 4",
+        "ws_c6: hex.vec 1, 6",
+        "ws_cang45: hex.vec 8, 0x20000000",
+        "ws_cang90m1: hex.vec 8, 0x3FFFFFFF",
+        "ws_mdir: hex.vec 1",
+        "ws_nout: hex.vec 1",
+        "ws_qout: hex.vec 1",
+        "pos_dxv: hex.vec 10",
+        "pos_dxv_mag: hex.vec 8",
+        "pos_dyv: hex.vec 10",
+        "pos_dyv_mag: hex.vec 8",
+        "pos_p1: hex.vec 8",
+        "pos_p2: hex.vec 8",
+        "pos_signA: hex.vec 1",
+        "pos_signB: hex.vec 1",
+        "pos_sign_dxv: hex.vec 1",
+        "pos_sign_dyv: hex.vec 1",
+        "cpm_c_centeryfix: hex.vec 8",
+        "cpm_c_viewh1: hex.vec 8",
+        "cpm_consts_set: hex.vec 1",
+        "cpm_prod: hex.vec 8",
+
+        # ROUND 2 (under bisection): multi-instantiation macros sharing one cell each
+        "trb_blk: hex.vec w/4",
+        "trb_blk_const: hex.vec w/4",
+        "trb_blk_ofs: hex.vec w/4",
+        "trb_bucket: hex.vec 4",
+        "trb_bucket_h: hex.vec 8",
+        "trb_cbound: hex.vec 8",
+        "trb_climit: hex.vec 2",
+        "trb_col_x: hex.vec 8",
+        "trb_drawn_b: hex.vec w/4",
+        "trb_drawn_p: hex.vec w/4",
+        "trb_drawn_v: hex.vec 2",
+        "trb_dthp: hex.vec 8",
+        "trb_dtis: hex.vec 8",
+        "trb_dtx1: hex.vec 8",
+        "trb_dtx2: hex.vec 8",
+        "trb_dtyt: hex.vec 8",
+        "trb_dvis: hex.vec 1",
+        "trb_dw_max: hex.vec 2",
+        "trb_frac_u: hex.vec 8",
+        "trb_negx1: hex.vec 8",
+        "trb_run_last: hex.vec 2",
+        "trb_run_r0: hex.vec 2",
+        "trb_run_w8: hex.vec 8",
+        "trb_shade_row: hex.vec 2",
+        "trb_slot_flag: hex.vec 2",
+        "trb_slot_ofs: hex.vec w/4",
+        "trb_sprflag_b: hex.vec w/4",
+        "trb_sprflag_p: hex.vec w/4",
+        "trb_sprflag_v: hex.vec 2",
+        "trb_sy1: hex.vec 8",
+        "trb_sy2: hex.vec 8",
+        "trb_tab_idx: hex.vec w/4",
+        "trb_tbl_b: hex.vec w/4",
+        "trb_tbl_p: hex.vec w/4",
+        "trb_thpx: hex.vec 8",
+        "trb_tistep: hex.vec 8",
+        "trb_tx1: hex.vec 8",
+        "trb_tx2: hex.vec 8",
+        "trb_tytop: hex.vec 8",
+        "trb_u: hex.vec 8",
+        "trb_vis: hex.vec 1",
+        "trb_y0: hex.vec 8",
+        "trb_y0_biased: hex.vec 8",
+        "trb_y_base: hex.vec 8",
+        "wxr_adup: hex.vec 8",
+        "wxr_ang1: hex.vec 8",
+        "wxr_ang2: hex.vec 8",
+        "wxr_c2clip: hex.vec 8, 0x40000000",
+        "wxr_cclip: hex.vec 8, 0x20000000",
+        "wxr_cnegclip: hex.vec 8, 0xE0000000",
+        "wxr_diff: hex.vec 8",
+        "wxr_sgn_b: hex.vec 8",
+        "wxr_span: hex.vec 8",
+        "wxr_tspan: hex.vec 8",
+        "wxr_tx1: hex.vec 8",
+        "wxr_tx2: hex.vec 8",
+        "pth_ang: hex.vec 8",
+        "p2_sffp: hex.vec w/4",
+        "p2_prodc: hex.vec 8",
+        "p2_prodf: hex.vec 8",
+        "p2_stepc: hex.vec 8",
+        "p2_stepf: hex.vec 8",
+        "p2_sfsp: hex.vec w/4",
+        "p2_spfp: hex.vec w/4",
+        # idea 16 (2026-09-03): the loader dirty flags -- 1 while the load2/spr_load output
+        # registers may be nonzero. A clean no-piece column skips the zero preambles. Declared
+        # LAST-ish so the addition shifts as few sibling registers as possible (v1 sat mid-list
+        # and the ripple killed the median).
+        "p2_ldirty: hex.vec 1",
+        # ts-idea 1: the per-seg lip modes (fmask-1 per side), hoisted out of four per-column
+        # sites in ts_step_faces.
+        "tsf_lip_u: hex.vec 1",
+        "tsf_lip_l: hex.vec 1",
+        "p2_sdirty: hex.vec 1",
+        "p2_sspp: hex.vec w/4",
+        "pth_dbound: hex.vec 8",
+        "pth_dtest: hex.vec 8",
+        "pth_c_centerxfix: hex.vec 8",
+        "pth_c_centeryfix: hex.vec 8",
+        "pth_c_viewh: hex.vec 8",
+        "pth_c_vieww: hex.vec 8",
+        "pth_cproj: hex.vec 8",
+        "pth_czlim: hex.vec 8",
+        "pth_gxt: hex.vec 8",
+        "pth_gyt: hex.vec 8",
+        "pth_gzt: hex.vec 8",
+        "pth_one16: hex.vec 8",
+        "pth_sin_idx: hex.vec 3",
+        "pth_tmp: hex.vec 8",
+        "pth_tr_x: hex.vec 8",
+        "pth_tr_y: hex.vec 8",
+        "pth_trig_cached: hex.vec 1",
+        "pth_tx: hex.vec 8",
+        "pth_tx_abs: hex.vec 8",
+        "pth_tx_left: hex.vec 8",
+        "pth_tx_right: hex.vec 8",
+        "pth_tz: hex.vec 8",
+        "pth_tz_lim: hex.vec 8",
+        "pth_vcos: hex.vec 8",
+        "pth_vsin: hex.vec 8",
+        "pth_xscale: hex.vec 8",
+        "ssc_ceil_end: hex.vec 2",
+        "ssc_rcbufa: hex.vec w/4",
+        "ssc_rcbufd: hex.vec w/4",
+        "ssc_rfbufa: hex.vec w/4",
+        "ssc_rfbufd: hex.vec w/4",
+        "ssc_rlo2: hex.vec 2",
+        "ssc_ucnt2: hex.vec 1",
+        "ssc_win_end: hex.vec 2",
+        "ssc_win_lo: hex.vec 2",
+        "ssc_zero_row: hex.vec 2",
+        "ssf_cviewh: hex.vec 2",
+        "ssf_floor_end: hex.vec 2",
+        "ssf_floor_lo: hex.vec 2",
+        "ssf_fstart2: hex.vec 2",
+        "ssf_lcnt2: hex.vec 1",
+        "ssf_rcbufa: hex.vec w/4",
+        "ssf_rcbufd: hex.vec w/4",
+        "ssf_rfbufa: hex.vec w/4",
+        "ssf_rfbufd: hex.vec w/4",
+        "ssf_win_end: hex.vec 2",
+        "ssf_win_lo: hex.vec 2",
+        "wss_scale2: hex.vec 8",
+        "wss_visang1: hex.vec 8",
+        "wss_visang2: hex.vec 8",
+        "sst_diff: hex.vec 8",
+        "sst_quot: hex.vec 8",
+        "sst_rem: hex.vec 8",
+        "sst_span: hex.vec 8",
+        "srw_ptr: hex.vec w/4",
+        "srw_rel: hex.vec 2",
+        "srw_rel_w: hex.vec 4",
+        "srw_sbase: hex.vec w/4",
+        "srw_sidx: hex.vec w/4",
+        "srw_smidx: hex.vec 4",
+        "srw_tex: hex.vec 2",
+        "srw_whi4: hex.vec 4",
+        "srw_wlo4: hex.vec 4",
+        "srw_y0: hex.vec 4",
+        "srw_yabs: hex.vec 4",
+        "srn_cvh: hex.vec 4",
+        "srn_ptr: hex.vec w/4",
+        "srn_rel: hex.vec 2",
+        "srn_rel_w: hex.vec 4",
+        "srn_sbase: hex.vec w/4",
+        "srn_sidx: hex.vec w/4",
+        "srn_smidx: hex.vec 4",
+        "srn_tex: hex.vec 2",
+        "srn_y0: hex.vec 4",
+        "srn_yabs: hex.vec 4",
+        "srd_csh10: hex.vec 2, 10",
+        "srd_csh5: hex.vec 2, 5",
+        "srd_csh6: hex.vec 2, 6",
+        "srd_csh8: hex.vec 2, 8",
+        "srd_den_norm: hex.vec 8",
+        "srd_num_wide: hex.vec 14",
+        "srd_prod: hex.vec 14",
+        "srd_recip: hex.vec 6",
+        "srd_recip_wide: hex.vec 14",
+        "srd_shift_nibs: hex.vec 2",
+        "sga_anglea: hex.vec 8",
+        "sga_angleb: hex.vec 8",
+        "sga_cang90: hex.vec 8, 0x40000000",
+        "sga_csmax: hex.vec 8, 0x400000",
+        "sga_csmin: hex.vec 8, 0x100",
+        "sga_den: hex.vec 8",
+        "sga_num: hex.vec 8",
+        "sga_qneg: hex.vec 1",
+        "sga_sin_idx: hex.vec 3",
+        "sga_sinv: hex.vec 8",
+        # ── proj.point_to_angle (x4 expansions) ──────────────────────────────────────────────
+        # CR 2026-08-25: this macro was believed unhoistable. It was not -- m1_hoist.py appended
+        # declarations it declined to hoist AFTER the body, and point_to_angle's last body line is
+        # its terminal label `done:`, so data words landed in the fall-through EXIT. The six-run
+        # bisect measured the TOOL. Fixed there; these are the registers it always could have taken.
+        "pta_c1: hex.vec 1, 1",
+        "pta_c2: hex.vec 1, 2",
+        "pta_c4: hex.vec 1, 4",
+        "pta_c6: hex.vec 1, 6",
+        "pta_den: hex.vec 8",
+        "pta_dx: hex.vec 8",
+        "pta_dy: hex.vec 8",
+        "pta_num: hex.vec 8",
+        "pta_oct_idx: hex.vec 1",
+        "pta_slope_idx: hex.vec 3",
+        "pta_tan_base: hex.vec 8",
+    ]
 
 
-def hoisted_scratch_fj() -> str:
-    """HOISTED_SCRATCH_DECLS as fj text, for any program that expands these macros STANDALONE.
+def hoisted_scratch_fj(cfg=None) -> str:
+    """`hoisted_scratch_decls` as fj text, for any program that expands these macros STANDALONE.
 
     The macros now name these registers in their `<` lists, so a program that expands one but
     does not emit the `state` part fails to assemble ("Can't evaluate label pos_dxv"). The
     shipped build gets them via the state part; tests get them from here, so there is ONE
     source (R6) and a new hoist cannot leave the tests behind.
     """
-    return NLJ.join(HOISTED_SCRATCH_DECLS) + NLJ
+    return NLJ.join(hoisted_scratch_decls(cfg)) + NLJ
 
 
 def write_program_files(parts, outdir, mapname: str = "e1m1") -> list:
@@ -2660,14 +2773,14 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         # V5: the current column's stacked boundary pieces (GLOBALS so emit_region's windowed
         # splices reach them without threading 18 parameters through every signature)
         "ucnt: hex.vec 2", "u1y1: hex.vec 2", "u1y2: hex.vec 2", "u1cls: hex.vec 2",
-        "u1bp: hex.vec 2", "u2y1: hex.vec 2", "u2y2: hex.vec 2", "u2cls: hex.vec 2",
-        "u2bp: hex.vec 2",
+        f"u1bp: hex.vec {cfg.PID_BYTES * 2}", "u2y1: hex.vec 2", "u2y2: hex.vec 2",
+        "u2cls: hex.vec 2", f"u2bp: hex.vec {cfg.PID_BYTES * 2}",
         "lcnt: hex.vec 2", "l1y1: hex.vec 2", "l1y2: hex.vec 2", "l1cls: hex.vec 2",
-        "l1bp: hex.vec 2", "l2y1: hex.vec 2", "l2y2: hex.vec 2", "l2cls: hex.vec 2",
-        "l2bp: hex.vec 2",
+        f"l1bp: hex.vec {cfg.PID_BYTES * 2}", "l2y1: hex.vec 2", "l2y2: hex.vec 2",
+        "l2cls: hex.vec 2", f"l2bp: hex.vec {cfg.PID_BYTES * 2}",
         "seg_wstrip: hex.vec w/4", "wstripbase: hex.vec w/4",   # M13-W2S strip bank
         "seg_cvpidx: hex.vec w/4", "seg_fvpidx: hex.vec w/4",   # baked dw-offsets into the bank
-        "seg_pid: hex.vec 2",                          # M13-2S rung 3a: baked plane-pair id (1-based)
+        f"seg_pid: hex.vec {cfg.PID_BYTES * 2}",         # M13-2S rung 3a: baked plane-pair id (1-based)
         "vzbank: hex.vec w/4",                         # set per frame by the player-subsector block
         "vzcbase: hex.vec w/4",                        # M13-15M: the as-code per-frame class base ID
         # M13-splitxb: part-1/part-2 shared state + the rest-block gate
@@ -2678,8 +2791,14 @@ def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,
         "wex: hex.vec 8", "wey: hex.vec 8", "weyx: hex.vec 8", "wexy: hex.vec 8",
     ]
 
-STEP_SLOT_STRIDE = 16      # V3: bytes per column in `sfslot` -- 6 used, rounded to a POWER OF 16 so
-                           # the per-column byte offset is `x << 1 nibble`, not a mul_const (~72@).
+STEP_SLOT_STRIDE = 16      # bytes per column in `sfslot`, at the DEFAULT pid width. Rounded to a
+                           # POWER OF 16 so the per-column byte offset is a whole-nibble shift
+                           # (`hex.shl_hex w/4, SLOT_SHIFT, idx`) rather than a mul_const (~72@).
+                           # ⚠ THE "6 used" THIS COMMENT USED TO CLAIM IS V3-ERA AND WRONG NOW.
+                           # V5 stores TWO pieces per group and added the bpid byte, so a slot is
+                           # 2 groups x 2 pieces x 4 bytes (fy1, fy2, cls, bpid) = 16 of 16 --
+                           # COMPLETELY FULL. A wider pid makes a piece 5 bytes and the stride has
+                           # to go to 256; `Config.SLOT_SHIFT` is the derivation, and it is 1 here.
 STEP_COL_STRIDE = 256      # ... and bytes per light class in `stepcol`, same whole-nibble reason.
 
 
@@ -2824,15 +2943,61 @@ def _spr_nlow(cfg):
                if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
 
 
+def seg_marks_in(lds, sds, seg, sv) -> bool:
+    """Does this seg MARK -- i.e. attribute a plane -- with sectors in state `sv`?
+
+    THE SSOT for that question. It was a closure inside `emit_wall_renderer`; it is module-level so
+    that `marking_seg_count` below and any tool can ask it WITHOUT a second copy of the rule
+    (CLAUDE.md rule 5: a definition that both sides re-derive is the bug).
+
+    DOOM's R_AddLine markfloor/markceiling test: a two-sided seg is skipped only when BOTH band-bank
+    keys (height, light, flat) are equal on the two sides, where attributing the plane to the back
+    sector renders identically anyway. A one-sided seg always marks."""
+    ld_ = lds[seg.linedef]
+    if ld_.back == -1:
+        return True
+    fs_ = sv[sds[ld_.front if seg.side == 0 else ld_.back].sector]
+    bs_ = sv[sds[ld_.back if seg.side == 0 else ld_.front].sector]
+    return ((fs_.ceil_h, fs_.light & 0xFF, fs_.ceil_tex.upper())
+            != (bs_.ceil_h, bs_.light & 0xFF, bs_.ceil_tex.upper())
+            or (fs_.floor_h, fs_.light & 0xFF, fs_.floor_tex.upper())
+            != (bs_.floor_h, bs_.light & 0xFF, bs_.floor_tex.upper()))
+
+
+def marking_seg_count(cmap, lds, seg_marks) -> int:
+    """How many segs can reach `seg_pass1_ts_leaf`, i.e. the real bound on the `n_tsv` counter.
+
+    ⚠ THIS REPLACED `len(cmap.segs)`, WHICH WAS OVER-CONSERVATIVE BY 2-3x AND WOULD HAVE COST TWO
+    LEVELS. The leaf is called only from a `ss<c>_seg<s>_mark` block, and those are emitted only for
+    TWO-SIDED segs that survive the `_seg_marks` cull -- one-sided segs never reach it. Each seg
+    belongs to exactly one subsector and the BSP walk visits a subsector at most once per frame, so
+    the count below is a hard per-frame ceiling on the counter.
+
+    MEASURED 2026-08-31 across E1: total segs rejects E1M6 (4,409) and E1M7 (6,947) against the
+    3-nibble counter's 4,095, while the real marking counts are 2,550 and 4,183 -- so E1M6 fits with
+    1,545 to spare and only E1M7 is genuinely over, by 88. `seg_marks` is passed in (not re-derived)
+    because it closes over the DOOR STATE VARIANTS: a seg that marks in any door position counts."""
+    return sum(1 for seg in cmap.segs if lds[seg.linedef].back != -1 and seg_marks(seg))
+
+
+def _assert_gate_scales_fit(scales):
+    """idea 19: hex.cmp 6 on the ts gates is only sound while every compared constant
+    fits six nibbles. Returns an empty line so it can sit in an emitted-lines list."""
+    for s in scales:
+        assert 0 <= s < 16**6, f"gate scale {s:#x} does not fit cmp 6 -- widen the compare"
+    return ""
+
+
 def _assert_pnear_unbound(total_segs: int) -> str:
-    """The deg attribution budget's never-binds proof (see DEG_PNEAR): total segs strictly below
-    the baked cap, and the cap inside the 3-nibble fj counter. Returns an empty emitted line.
+    """The deg attribution budget's never-binds proof (see DEG_PNEAR): the MARKING seg count
+    strictly below the baked cap, and the cap inside the 3-nibble fj counter. Returns an empty
+    emitted line -- so tightening this bound moves not one byte of the emitted program.
 
     The `deg` flag that used to gate this is retired, so the proof is unconditional -- which is
     what it should always have been: a budget that can bind paints wrong columns, and the
     condition only ever said "do not check when the package is off"."""
     assert total_segs < DEG_PNEAR <= 4095, (
-        f"DEG_PNEAR={DEG_PNEAR} can bind (map has {total_segs} segs) or overflows the "
+        f"DEG_PNEAR={DEG_PNEAR} can bind (map has {total_segs} MARKING segs) or overflows the "
         "3-nibble n_tsv counter -- a binding attribution budget paints wrong columns")
     return ""
 

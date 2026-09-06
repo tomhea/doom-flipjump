@@ -7,13 +7,16 @@ frame. A Python twin — the **oracle** (`src/doomfj/reference_model.py`) — re
 independently, and the two must agree **byte for byte**.
 
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
-`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-m5-m2-m3-m4.md`.**
-**M1** (the self-resetting loop), **M5** (the standalone `.fjm`) and **M3** (the menu — a second
-frame producer chosen by a persisted `mode` cell) are DONE:
+`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-m4-nine-levels.md` — and run
+`python scratchpad/m4_survey.py` (ten seconds) before anything else.**
+**M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
+frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
+whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:
 `fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
-starts the game. **M2** has its two foundation rungs done (the band-index cap cleared; a door baked
-open renders byte-exact, at no ops cost) and owes the runtime door. **M4** — three levels in one
-image — is the only milestone that changes the emitter's shape; its plan is section 5. Then M6.
+starts the game, WASD moves, space opens doors. **M4** — now ALL NINE E1 levels in one image,
+configurable — is the only milestone left that changes the emitter's shape. Then M6 (ship).
+⚠ The three-level plan in `handoff-m5-m2-m3-m4.md` section 5 is SUPERSEDED, and its "9x" reasoning
+is wrong: nine maps are 14.8x E1M1, which is nearly the smallest map in the episode.
 `docs/handoff-complete-game.md` is the full roadmap behind it.
 
 ---

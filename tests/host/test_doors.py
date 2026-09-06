@@ -11,10 +11,12 @@ already been got wrong once in this repo:
     multiple of the quantum, and no E1M1 door opens to one;
   * a `frac=0` override that is not a no-op — which would move every existing golden.
 """
+from pathlib import Path
+
 import pytest
 
-from doomfj.doors import (DEFAULT_QUANT, OPEN_GAP, door_sectors, heights_at, neighbours,
-                          quantise, stops)
+from doomfj.doors import (DEFAULT_QUANT, MAX_STATES, OPEN_GAP, door_sectors, door_states,
+                          heights_at, neighbours, quantise, stops)
 from doomfj.reference_model import apply_sector_heights
 from doomfj.wad import WadFile
 
@@ -153,3 +155,80 @@ def test_the_override_moves_only_ceilings_of_doors(level):
             assert after.light == before.light and after.ceil_tex == before.ceil_tex
         else:
             assert after == before, "sector %d moved and is not a door" % i
+
+
+# -- M4: the nine-map facts ----------------------------------------------------------------------
+# `door_sectors` used to accept any sector behind a special linedef whose ceiling sits on its floor.
+# On five of the nine E1 maps that admits a sector whose min(neighbouring ceiling) - 4 is BELOW its
+# own floor, i.e. a "door" that opens downward through the floor -- and `stops` returns a SORTED
+# list, so the two ends swapped and `door_states` threw. These pin the fix AND its E1M1 neutrality.
+
+FULL_WAD = Path("assets/freedoom1.wad")
+E1 = ["E1M%d" % i for i in range(1, 10)]
+
+
+@pytest.fixture(scope="module")
+def full():
+    if not FULL_WAD.exists():
+        pytest.skip("the full episode wad is not present")
+    return WadFile.from_path(str(FULL_WAD))
+
+
+def test_door_states_works_on_every_e1_map(full):
+    """The regression this fix exists for: five of nine used to raise."""
+    for m in E1:
+        secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
+        tbl = door_states(secs, lds, sds)                  # must not raise
+        for si, st in tbl.items():
+            assert st[0] == secs[si].floor_h, (m, si, st)
+            assert st[-1] == door_sectors(secs, lds, sds)[si], (m, si, st)
+            assert len(st) <= MAX_STATES, (m, si, st)
+
+
+def test_the_excluded_sectors_are_exactly_the_downward_ones(full):
+    """A door is dropped for ONE reason and it is checkable: its open height is below its floor.
+    Anything else leaving the dict is a different bug wearing this fix's clothes."""
+    for m in E1:
+        secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
+        nb = neighbours(lds, sds)
+        kept = door_sectors(secs, lds, sds)
+        for ld in lds:
+            if not ld.special or ld.back == 0xFFFF or ld.back >= len(sds):
+                continue
+            si = sds[ld.back].sector
+            s = secs[si]
+            if s.ceil_h != s.floor_h or not nb.get(si):
+                continue
+            open_h = min(secs[n].ceil_h for n in nb[si]) - OPEN_GAP
+            assert (si in kept) == (open_h >= s.floor_h), (m, si, s.floor_h, open_h)
+
+
+def test_e1m1_and_e1m2_lose_no_door(full):
+    """THE byte-exactness argument. The shipped build is E1M1; if the filter removed one of its 13
+    doors the picture would move, so this is the pin that says it cannot."""
+    for m, n in (("E1M1", 13), ("E1M2", 8)):
+        secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
+        assert len(door_sectors(secs, lds, sds)) == n
+        assert all(door_sectors(secs, lds, sds)[si] > secs[si].floor_h
+                   for si in door_sectors(secs, lds, sds))
+
+
+def test_the_filter_has_teeth(full):
+    """A negative control (R9): the maps it fires on, and the sectors it drops, are named. If a
+    later change makes this list empty the test above stops proving anything."""
+    dropped = {}
+    for m in E1:
+        secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
+        nb = neighbours(lds, sds)
+        n = 0
+        for ld in lds:
+            if not ld.special or ld.back == 0xFFFF or ld.back >= len(sds):
+                continue
+            si = sds[ld.back].sector
+            s = secs[si]
+            if s.ceil_h == s.floor_h and nb.get(si) and (
+                    min(secs[k].ceil_h for k in nb[si]) - OPEN_GAP) < s.floor_h:
+                n += 1
+        if n:
+            dropped[m] = len({si for si in ()} ) or n
+    assert set(dropped) == {"E1M3", "E1M4", "E1M5", "E1M6", "E1M7", "E1M9"}

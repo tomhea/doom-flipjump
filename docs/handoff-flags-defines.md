@@ -389,8 +389,12 @@ defines it can pass its own `.fj` file, which is what `-D` is sugar for).
 
     # builds (~20 min hosted, ~80 min standalone two-pass)
     python scratchpad/m2_rt_build.py                  # hosted + doors (the gates' binary)
-    python scratchpad/m5_build.py --menu --doors --out build/doom_e1m1_menu.fjm \
-        --gen build/generated_menu                    # THE PLAYABLE ARTIFACT
+    python scratchpad/m5_build.py --menu --doors --out build/doom_e1m1_menu.fjm
+        # THE PLAYABLE ARTIFACT. No --gen: PHASE 2 made the emitter DERIVE the generated
+        # dir from out_fjm, so this writes build/generated_doom_e1m1_menu/. The flag was
+        # parsed and then silently IGNORED from PHASE 2 until 2026-08-31 -- this very
+        # invocation named a directory the build had stopped writing. It is gone now, and
+        # m5_build prints the path it will actually use.
 
     # the standalone restore set, when a new global must survive the reset
     python scratchpad/ca_labels.py --standalone --menu --doors --out scratchpad/_labels.tsv.gz

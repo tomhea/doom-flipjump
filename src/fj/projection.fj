@@ -158,9 +158,9 @@ ns proj {
             @ czero, dx_neg, dx_pos, dx_done, dy_neg, dy_pos, dy_done, dx_zero, both_zero, nonzero, dx_major, dy_major, numden_set, oct_lo4, oct_lo2, oct_hi4, oct0, oct1, oct2, oct3, oct4, oct5, oct6, oct7, done \
             < tantoangle, pta_c1, pta_c2, pta_c4, pta_c6, pta_den, pta_dx, pta_dy, pta_num, pta_oct_idx, pta_slope_idx, pta_tan_base {
         hex.mov 8, pta_dx, x2
-        hex.sub 8, pta_dx, x1                        // pta_dx = x2 - x1   (signed 16.16)
+        frame.sub8_chain pta_dx, x1                        // pta_dx = x2 - x1   (signed 16.16)
         hex.mov 8, pta_dy, y2
-        hex.sub 8, pta_dy, y1                        // pta_dy = y2 - y1
+        frame.sub8_chain pta_dy, y1                        // pta_dy = y2 - y1
         hex.set 1, pta_oct_idx, 0
 
         hex.sign 8, pta_dx, dx_neg, dx_pos           // pta_dx<0 ? fold x negative, set the octant bit
@@ -221,34 +221,34 @@ ns proj {
         hex.cmp 1, pta_oct_idx, pta_c6, oct5, oct6, oct7
       oct0:
         hex.set 8, dst, 0x3FFFFFFF
-        hex.sub 8, dst, pta_tan_base
+        frame.sub8_chain dst, pta_tan_base
         ;done
       oct1:
         hex.mov 8, dst, pta_tan_base
         ;done
       oct2:
         hex.set 8, dst, 0xC0000000
-        hex.add 8, dst, pta_tan_base
+        frame.add8_chain dst, pta_tan_base
         ;done
       oct3:
         hex.zero 8, dst
-        hex.sub 8, dst, pta_tan_base
+        frame.sub8_chain dst, pta_tan_base
         ;done
       oct4:
         hex.set 8, dst, 0x40000000
-        hex.add 8, dst, pta_tan_base
+        frame.add8_chain dst, pta_tan_base
         ;done
       oct5:
         hex.set 8, dst, 0x7FFFFFFF
-        hex.sub 8, dst, pta_tan_base
+        frame.sub8_chain dst, pta_tan_base
         ;done
       oct6:
         hex.set 8, dst, 0xBFFFFFFF
-        hex.sub 8, dst, pta_tan_base
+        frame.sub8_chain dst, pta_tan_base
         ;done
       oct7:
         hex.set 8, dst, 0x80000000
-        hex.add 8, dst, pta_tan_base
+        frame.add8_chain dst, pta_tan_base
         ;done
 
       czero: hex.vec 8, 0                        // ⚠ declared + reserved but never referenced
@@ -313,12 +313,12 @@ ns proj {
         //   4-nibble contract (see bbox_wedge_miss's WIDTH CONTRACT docstring and its per-map
         //   assert). ⇒ fj is UNCHANGED by PJ-1; the emitted program and its op counts do not move.
         hex.mov 8, weyx, viewy
-        hex.sub 8, weyx, viewx              // weyx = viewy - viewx   (readers take floor via +4*dw)
+        frame.sub8_chain weyx, viewx              // weyx = viewy - viewx   (readers take floor via +4*dw)
         hex.mov 8, wexy, viewx
-        hex.add 8, wexy, viewy              // wexy = viewx + viewy
+        frame.add8_chain wexy, viewy              // wexy = viewx + viewy
 
         hex.mov 8, ws_angt, viewangle
-        hex.sub 8, ws_angt, ws_cang45             // (va - ANG45) mod 2^32
+        frame.sub8_chain ws_angt, ws_cang45             // (va - ANG45) mod 2^32
         hex.shr_hex 8, 7, ws_angt              // >> 28 bits ...
         hex.shr_bit 8, ws_angt                 //   ... then >> 1 = floor(./ANG45), in [0,7]
         hex.mov 1, ws_mdir, ws_angt
@@ -327,7 +327,7 @@ ns proj {
         hex.mov 1, na, ws_nout
 
         hex.mov 8, ws_angt, viewangle
-        hex.add 8, ws_angt, ws_cang90m1           // va + ANG45 + (ANG45-1)  =>  ceil((va+ANG45)/ANG45)
+        frame.add8_chain ws_angt, ws_cang90m1           // va + ANG45 + (ANG45-1)  =>  ceil((va+ANG45)/ANG45)
         hex.shr_hex 8, 7, ws_angt
         hex.shr_bit 8, ws_angt
         hex.mov 1, ws_mdir, ws_angt
@@ -437,21 +437,21 @@ ns proj {
         hex.cmp 1, q, c3, calc_q2, calc_q3, calc_q3
       calc_q0:
         hex.mov 4, qval, vy + 4*dw          // Q0 = vy - viewy
-        hex.sub 4, qval, wey + 4*dw
+        frame.sub4_chain qval, wey + 4*dw
         ;q_ready
       calc_q1:
         hex.mov 4, qval, vy + 4*dw          // Q1 = (vy - vx) - (viewy - viewx)
-        hex.sub 4, qval, vx + 4*dw
-        hex.sub 4, qval, weyx + 4*dw
+        frame.sub4_chain qval, vx + 4*dw
+        frame.sub4_chain qval, weyx + 4*dw
         ;q_ready
       calc_q2:
         hex.mov 4, qval, vx + 4*dw          // Q2 = vx - viewx
-        hex.sub 4, qval, wex + 4*dw
+        frame.sub4_chain qval, wex + 4*dw
         ;q_ready
       calc_q3:
         hex.mov 4, qval, vx + 4*dw          // Q3 = (vx + vy) - (viewx + viewy)
-        hex.add 4, qval, vy + 4*dw
-        hex.sub 4, qval, wexy + 4*dw
+        frame.add4_chain qval, vy + 4*dw
+        frame.sub4_chain qval, wexy + 4*dw
         ;q_ready
       q_ready:
         // sign/if0 rather than scmp-against-zero: hex.scmp is ~2.7x the cost (measured).
@@ -501,21 +501,21 @@ ns proj {
         hex.cmp 1, q, c3, calc_q2, calc_q3, calc_q3
       calc_q0:
         hex.mov 4, qval, cy_hi              // Q0 = cy - viewy
-        hex.sub 4, qval, wey + 4*dw
+        frame.sub4_chain qval, wey + 4*dw
         ;q_ready
       calc_q1:
         hex.mov 4, qval, cy_hi              // Q1 = (cy - cx) - (viewy - viewx)
-        hex.sub 4, qval, cx_hi
-        hex.sub 4, qval, weyx + 4*dw
+        frame.sub4_chain qval, cx_hi
+        frame.sub4_chain qval, weyx + 4*dw
         ;q_ready
       calc_q2:
         hex.mov 4, qval, cx_hi              // Q2 = cx - viewx
-        hex.sub 4, qval, wex + 4*dw
+        frame.sub4_chain qval, wex + 4*dw
         ;q_ready
       calc_q3:
         hex.mov 4, qval, cx_hi              // Q3 = (cx + cy) - (viewx + viewy)
-        hex.add 4, qval, cy_hi
-        hex.sub 4, qval, wexy + 4*dw
+        frame.add4_chain qval, cy_hi
+        frame.sub4_chain qval, wexy + 4*dw
       q_ready:
         hex.if0 1, n, plain_test
         hex.sign 4, qval, insid, neg_nonzero   // negated test: outside iff Q > 0
@@ -563,10 +563,10 @@ ns proj {
               sine_zero, sine_nz, baddiv, done \
             < tantoangle {
         hex.mov 8, dx, x
-        hex.sub 8, dx, viewx
+        frame.sub8_chain dx, viewx
         hex.abs 8, dx                            // dx = |x - viewx|
         hex.mov 8, dy, y
-        hex.sub 8, dy, viewy
+        frame.sub8_chain dy, viewy
         hex.abs 8, dy                            // dy = |y - viewy|
 
         hex.cmp 8, dy, dx, no_swap, no_swap, do_swap   // dy > dx ? -> fold to the major octant (dx>=dy)
@@ -591,7 +591,7 @@ ns proj {
         hex.set 3, slope_idx, 0x800
       keep_idx:
         hex.read_table_packed 4, angle, tantoangle, 3, slope_idx   // tantoangle[idx]
-        hex.add 8, angle, cang90                        // angle = tantoangle[idx] + ANG90
+        frame.add8_chain angle, cang90                        // angle = tantoangle[idx] + ANG90
         hex.shr_hex 8, 5, angle                         // finesine index = angle >> 20 bits (= 5 nibbles;
         hex.mov 3, slope_idx, angle                     //   32 - log2(TRIG_N=4096) = 20). low 3 nibbles.
                                                         //   ⚠ slope_idx is REUSED: from here on it holds
@@ -638,12 +638,12 @@ ns proj {
             @ bviewy, cang90, end {
         hex.zero 8, rw_normalangle
         hex.mov 4, rw_normalangle + 4*dw, segangle      // rw_normalangle = segangle << 16 ...
-        hex.add 8, rw_normalangle, cang90               //   ... + ANG90 (the wall normal)
+        frame.add8_chain rw_normalangle, cang90               //   ... + ANG90 (the wall normal)
 
         hex.fixed_mul_lo 8, 4, rw_distance, a, viewx       // rw_distance = a*viewx ...
         hex.fixed_mul_lo 8, 4, bviewy, b, viewy
-        hex.add 8, rw_distance, bviewy                  //   + b*viewy ...
-        hex.add 8, rw_distance, c                       //   + c  (signed perpendicular distance, mod 2^32)
+        frame.add8_chain rw_distance, bviewy                  //   + b*viewy ...
+        frame.add8_chain rw_distance, c                       //   + c  (signed perpendicular distance, mod 2^32)
         hex.abs 8, rw_distance                          // front-facing => signed>0 => abs is a no-op
         ;end                                            // skip the data block (else it runs as code)
 
@@ -661,7 +661,7 @@ ns proj {
             @ cang90, end {
         hex.zero 8, rw_normalangle
         hex.mov 4, rw_normalangle + 4*dw, segangle      // rw_normalangle = segangle << 16 ...
-        hex.add 8, rw_normalangle, cang90               //   ... + ANG90 (the wall normal)
+        frame.add8_chain rw_normalangle, cang90               //   ... + ANG90 (the wall normal)
         hex.mov 8, rw_distance, sgn
         hex.abs 8, rw_distance                          // front-facing => sgn>0 => abs is a no-op
         ;end
@@ -702,14 +702,21 @@ ns proj {
         // non-lines tiers -- which have no `srdisp` table -- keep the packed read.
         rep(1-disp, k) hex.read_table_packed 3, srd_recip, slopediv_recip, 3, srd_den_norm  // srd_recip[m]=(1<<24)//m
         rep(disp, k) srdisp.lookup srd_recip, srd_den_norm
-        hex.zero 14, srd_num_wide
+        // P7-1 (2026-09-04): the two `hex.zero 14` that stood here are dead. hex.mov ZEROES its
+        // destination before xoring the source in (proved on the interpreter by moving into a
+        // pre-dirtied register), so the mov below already clears nibbles 4..11 of srd_num_wide
+        // and 0..5 of srd_recip_wide -- and the nibbles it does NOT cover are written by nothing
+        // in the tree (both registers appear only in their hex.vec 14 declarations and these two
+        // lines), so they hold their zero-init forever. -196 and -202 executed ops per call.
         hex.mov 8, srd_num_wide + 4*dw, num          // srd_num_wide = num << 16 (4 nibbles, by placement)
-        hex.zero 14, srd_recip_wide
         hex.mov 6, srd_recip_wide, srd_recip
         hex.zero 14, srd_prod
         rep(5, j) hex.fixed_mul_lo.row 14, j, srd_prod, srd_num_wide, srd_recip_wide   // mod 16^14
         // srd_shift_nibs in [4,11]: den has 1..8 significant nibbles -> at most 5 right- or 2 left-shifts
         hex.cmp 2, srd_shift_nibs, srd_csh8, shift_lo, shift8, shift_hi
+        // LAYOUT FREEZE for the 864 ops the two deleted zeros above cost. UNREACHABLE: hex.cmp
+        // always jumps to one of its three labels.
+        rep(864, i) stl.fj 0, 0
       shift_lo:
         hex.cmp 2, srd_shift_nibs, srd_csh5, shift4, shift5, shift_67
       shift_67:
@@ -764,20 +771,23 @@ ns proj {
             @ cproj, den_zero, num_neg, num_pos, den_neg, den_pos, dodiv, chk_min, set_max, set_min, end \
             < sga_anglea, sga_angleb, sga_cang90, sga_csmax, sga_csmin, sga_den, sga_num, sga_qneg, sga_sin_idx, sga_sinv {
         rep(1-disp, k) hex.mov 8, sga_anglea, visangle
-        rep(1-disp, k) hex.sub 8, sga_anglea, viewangle
-        rep(1-disp, k) hex.add 8, sga_anglea, sga_cang90               // sga_anglea = ANG90 + (visangle - viewangle)
+        rep(1-disp, k) frame.sub8_chain sga_anglea, viewangle
+        rep(1-disp, k) frame.add8_chain sga_anglea, sga_cang90               // sga_anglea = ANG90 + (visangle - viewangle)
         hex.mov 8, sga_angleb, visangle
-        hex.sub 8, sga_angleb, rw_normalangle
-        hex.add 8, sga_angleb, sga_cang90               // sga_angleb = ANG90 + (visangle - rw_normalangle)
+        frame.sub8_chain sga_angleb, rw_normalangle
+        frame.add8_chain sga_angleb, sga_cang90               // sga_angleb = ANG90 + (visangle - rw_normalangle)
 
         hex.shr_hex 8, 5, sga_angleb                // sga_num = fixed_mul(PROJECTION<<16, read_sin(sga_angleb))
         hex.mov 3, sga_sin_idx, sga_angleb              //   read_sin idx = sga_angleb >> 20 (low 3 nibbles)
         finesine.read_sin sga_sinv, sga_sin_idx
         // M13-CPROJSTATIC: `hex.set 8, cproj, projection` used to run HERE, once per call, to
-        // reload a value fixed at emit time. hex.fixed_mul_lo reads its operands via
-        // `.mov n, wide_b, b` (fixed_point.fj:80) and never writes b, so cproj is never
-        // disturbed -- the vec below carries the constant instead. 127.3 ops/call saved
-        // (scratchpad/_ptr_price.log, "hex.set 8 (const addr)").
+        // reload a value fixed at emit time. hex.fixed_mul_lo never writes its operands, so
+        // cproj is never disturbed -- the vec below carries the constant instead. 127.3 ops/call
+        // saved (scratchpad/_ptr_price.log, "hex.set 8 (const addr)").
+        // ⚠ P3-1 SHARPENED THIS. The macro used to SNAPSHOT b into wide_b before the row loop;
+        // it now reads b LIVE, one nibble per row. "Never writes b" was a convenience then and
+        // is a REQUIREMENT now, and it holds for the same reason: hex.add_mul's two
+        // `.xor .mul.dst, b` are restore dances, so b leaves every row exactly as it entered.
         // M13-mulorder: operands SWAPPED vs the obvious order. fixed_mul_lo runs one schoolbook row
         // per NONZERO nibble of its SECOND operand, and a negative 16.16 sine sign-extends to a dense
         // 12-nibble pattern (~10k ops as a multiplier) while cproj = PROJECTION<<16 has ONE nonzero
@@ -823,7 +833,8 @@ ns proj {
         hex.mov 8, scale, sga_csmax
         ;end                                    // SCALE_MAX > SCALE_MIN, so the min-clamp is satisfied
       chk_min:
-        hex.cmp 8, scale, sga_csmin, set_min, end, end            // max(SCALE_MIN, scale): < -> clamp (unsigned)
+        hex.cmp 6, scale, sga_csmin, set_min, end, end            // max(SCALE_MIN, scale): < -> clamp. idea 19:
+                                                                  //   POST-max-clamp scale <= 0x400000 < 16^6
       set_min:
         hex.mov 8, scale, sga_csmin
         ;end
@@ -842,7 +853,7 @@ ns proj {
             @ angt, vtx_idx, cang90, cmaxidx, clampmax, keep, end \
             < viewangletox {
         hex.mov 8, angt, angle
-        hex.add 8, angt, cang90            // angle + ANG90 (mod 2^32)
+        frame.add8_chain angt, cang90            // angle + ANG90 (mod 2^32)
         hex.shr_hex 8, 5, angt             // >> angle_shift = 20 bits (5 nibbles)
         hex.mov 3, vtx_idx, angt           // idx = top 12 bits of (angle+ANG90)  (low 3 nibbles)
         hex.cmp 3, vtx_idx, cmaxidx, keep, keep, clampmax   // idx > len-1 ? -> clamp (unsigned; idx>=0)
@@ -923,38 +934,38 @@ ns proj {
         //   about emitter-generated calls, does not apply. Checked by grep over src/doomfj/.
         hex.fixed_mul_lo 8, 4, sgn, viewx, a
         hex.fixed_mul_lo 8, 4, sgn_b, viewy, b
-        hex.add 8, sgn, sgn_b
-        hex.add 8, sgn, c
+        frame.add8_chain sgn, sgn_b
+        frame.add8_chain sgn, c
         hex.sign 8, sgn, end, frontok      // sgn < 0 -> back-facing, cull (visible=0)
       frontok:
         hex.if0 8, sgn, end                // sgn == 0 -> on the line, cull
         .point_to_angle ang1, viewx, viewy, v1x, v1y, 0   // absolute angle to v1 (left)
         .point_to_angle ang2, viewx, viewy, v2x, v2y, 0   // absolute angle to v2 (right)
         hex.mov 8, span, ang1
-        hex.sub 8, span, ang2                          // span = (ang1 - ang2) mod 2^32
+        frame.sub8_chain span, ang2                          // span = (ang1 - ang2) mod 2^32
         hex.sign 8, span, end, notback                 // span >= ANG180 <=> bit 31 set -> cull
       notback:
         hex.mov 8, ang1_world, ang1                      // rw_angle1 = the WORLD-frame ang1, saved before
                                                          //   ang1 goes view-relative (committed on success)
-        hex.sub 8, ang1, viewangle                     // ang1 view-relative
-        hex.sub 8, ang2, viewangle                     // ang2 view-relative
+        frame.sub8_chain ang1, viewangle                     // ang1 view-relative
+        frame.sub8_chain ang2, viewangle                     // ang2 view-relative
 
         hex.mov 8, tspan, ang1                         // LEFT edge: tspan = ang1 + CLIPANGLE
-        hex.add 8, tspan, cclip
+        frame.add8_chain tspan, cclip
         hex.cmp 8, tspan, c2clip, leftok, leftok, leftclip   // tspan > 2*CLIP ?
       leftclip:
         hex.mov 8, diff, tspan
-        hex.sub 8, diff, c2clip
+        frame.sub8_chain diff, c2clip
         hex.cmp 8, diff, span, setleft, end, end       // (tspan-2*CLIP) >= span -> off the left, cull
       setleft:
         hex.mov 8, ang1, cclip                         // ang1 = CLIPANGLE
       leftok:
         hex.mov 8, tspan, cclip                        // RIGHT edge: tspan = CLIPANGLE - ang2
-        hex.sub 8, tspan, ang2
+        frame.sub8_chain tspan, ang2
         hex.cmp 8, tspan, c2clip, rightok, rightok, rightclip
       rightclip:
         hex.mov 8, diff, tspan
-        hex.sub 8, diff, c2clip
+        frame.sub8_chain diff, c2clip
         hex.cmp 8, diff, span, setright, end, end      // off the right, cull
       setright:
         hex.mov 8, ang2, cnegclip                      // ang2 = -CLIPANGLE (0xE0000000)
@@ -996,18 +1007,18 @@ ns proj {
     def wall_screen_span top, bottom, ceilfix, floorfix, viewz, scale, centeryfix \
             @ world_h, prod, end {
         hex.mov 8, world_h, ceilfix
-        hex.sub 8, world_h, viewz           // worldtop = ceilfix - viewz
+        frame.sub8_chain world_h, viewz           // worldtop = ceilfix - viewz
         hex.fixed_mul_lo 8, 4, prod, scale, world_h   // M14-perf ROW RULE: world_h's low 4
         hex.set 8, top, centeryfix                    // nibbles are 0 (integer<<16), scale is dense
-        hex.sub 8, top, prod                // topfrac = centeryfix - worldtop*scale
+        frame.sub8_chain top, prod                // topfrac = centeryfix - worldtop*scale
         hex.shr_hex 8, 4, top               // >> 16 (logical) ...
         hex.sign_extend 8, 4, top           //   ... + sign-extend low 4 nibbles = arithmetic >> 16
 
         hex.mov 8, world_h, floorfix
-        hex.sub 8, world_h, viewz           // worldbottom = floorfix - viewz
+        frame.sub8_chain world_h, viewz           // worldbottom = floorfix - viewz
         hex.fixed_mul_lo 8, 4, prod, scale, world_h   // M14-perf ROW RULE (see above)
         hex.set 8, bottom, centeryfix
-        hex.sub 8, bottom, prod
+        frame.sub8_chain bottom, prod
         hex.shr_hex 8, 4, bottom
         hex.sign_extend 8, 4, bottom
         ;end
@@ -1033,9 +1044,9 @@ ns proj {
         ;end
       have_span:
         hex.mov 8, sst_span, x2
-        hex.sub 8, sst_span, x1                 // sst_span = x2 - x1  (> 0)
+        frame.sub8_chain sst_span, x1                 // sst_span = x2 - x1  (> 0)
         hex.mov 8, sst_diff, scale2
-        hex.sub 8, sst_diff, scale1             // sst_diff = scale2 - scale1 (signed)
+        frame.sub8_chain sst_diff, scale1             // sst_diff = scale2 - scale1 (signed)
         hex.sign 8, sst_diff, diff_neg, diff_pos
       diff_neg:
         hex.neg 8, sst_diff                     // |sst_diff|
@@ -1076,13 +1087,13 @@ ns proj {
               tpos, tneg, rem_zero, rem_nz, baddiv, end \
             < xtoviewangle, finetangent {
         hex.read_table_packed 4, ang, xtoviewangle, 2, x      // xtoviewangle[x]   (idx = screen column)
-        hex.add 8, ang, rw_centerangle                 // ang = rw_centerangle + xtoviewangle[x]
+        frame.add8_chain ang, rw_centerangle                 // ang = rw_centerangle + xtoviewangle[x]
         hex.shr_hex 8, 5, ang                          // ang >> angle_shift(20) = 5 nibbles
         hex.mov 3, ft_idx, ang                         //   low 3 nibbles = the finetangent index
         hex.read_table_packed 4, ft, finetangent, 3, ft_idx   // ft = finetangent[idx]  (signed)
         hex.fixed_mul_lo 8, 4, prod, ft, rw_distance      // prod = ft * rw_distance (signed)
         hex.mov 8, tcol, rw_offset
-        hex.sub 8, tcol, prod                          // rw_offset - prod
+        frame.sub8_chain tcol, prod                          // rw_offset - prod
         hex.shr_hex 8, 4, tcol
         hex.sign_extend 8, 4, tcol                     // arithmetic >> 16 -> signed texel column tcol
 
@@ -1101,7 +1112,7 @@ ns proj {
         ;end
       rem_nz:
         hex.mov 8, dst, tw
-        hex.sub 8, dst, rem                            // dst = tw - (|tcol| % tw)  in (0, tw)
+        frame.sub8_chain dst, rem                            // dst = tw - (|tcol| % tw)  in (0, tw)
         ;end
       baddiv:                                          // tw == 0 unreachable; safe fallback
         hex.zero 8, dst
@@ -1185,10 +1196,10 @@ ns proj {
       tm_done:
         hex.set 8, c_centery, centery
         hex.mov 8, row_off, top
-        hex.sub 8, row_off, c_centery                      // row_off = top - CENTERY (signed)
+        frame.sub8_chain row_off, c_centery                      // row_off = top - CENTERY (signed)
         hex.mul 8, prod, row_off, iscale                   // (top-CENTERY)*iscale (signed, mod 2^32)
         hex.mov 8, vfrac, texmid
-        hex.add 8, vfrac, prod                             // vfrac = texturemid + (top-CENTERY)*iscale
+        frame.add8_chain vfrac, prod                             // vfrac = texturemid + (top-CENTERY)*iscale
 
         hex.shr_hex 8, 2, iscale                           // step = (iscale >> 8) & 0xFFFF
         hex.mov 4, step, iscale
@@ -1242,10 +1253,10 @@ ns proj {
             @ end \
             < wss_scale2, wss_visang1, wss_visang2 {
         xtadisp.lookup wss_visang1, x1                      // xtoviewangle[x1]
-        hex.add 8, wss_visang1, viewangle                   // visangle@x1 = viewangle + xtoviewangle[x1]
+        frame.add8_chain wss_visang1, viewangle             // visangle@x1 (idea 15: chained add)
         .scale_from_global_angle scale1, wss_visang1, viewangle, rw_normalangle, rw_distance, projection, 1, x1
         xtadisp.lookup wss_visang2, x2                      // xtoviewangle[x2]
-        hex.add 8, wss_visang2, viewangle                   // visangle@x2
+        frame.add8_chain wss_visang2, viewangle             // visangle@x2 (idea 15: chained add)
         .scale_from_global_angle wss_scale2, wss_visang2, viewangle, rw_normalangle, rw_distance, projection, 1, x2
         .scalestep scalestep_out, scale1, wss_scale2, x1, x2   // trunc((wss_scale2-scale1)/(x2-x1)) toward zero
         ;end
@@ -1300,13 +1311,53 @@ ns proj {
     //   the fj reads next to r_things.c (see the conventions header).
     //   Mirrors ReferenceModel.project_thing EXACTLY. @requires hex.init & stl.ptr_init
     def project_thing vis, x1o, x2o, ytopo, hpxo, istepo, minz, projection, centerx, centery, vieww, viewh, ds, deg, spn, neartz \
-            @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, h_ok, h_fits, clamp_tall, set_far, far_done, trig_calc, trig_have, reject, done, end, deg_far_hard \
-            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_c_centerxfix, pth_c_centeryfix, pth_c_viewh, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_gzt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
+            @ past_far, past_minz, xscale_done, in_fov, x2_ok, x1_ok, cols_ok, h_ok, h_fits, clamp_tall, set_far, far_done, trig_calc, trig_have, linf_x_ok, linf_y_ok, reject, done, end, deg_far_hard \
+            < viewx, viewy, viewangle, viewz, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, degfl, thfar, pth_ang, pth_dbound, pth_dtest, pth_c_centerxfix, pth_c_centeryfix, pth_c_viewh, pth_c_vieww, pth_cproj, pth_czlim, pth_gxt, pth_gyt, pth_gzt, pth_one16, pth_sin_idx, pth_tmp, pth_tr_x, pth_tr_y, pth_trig_cached, pth_tx, pth_tx_abs, pth_tx_left, pth_tx_right, pth_tz, pth_tz_lim, pth_vcos, pth_vsin, pth_xscale {
         hex.set 1, vis, 0
         hex.mov 8, pth_tr_x, sp_x
-        hex.sub 8, pth_tr_x, viewx
+        frame.sub8_chain pth_tr_x, viewx
         hex.mov 8, pth_tr_y, sp_y
-        hex.sub 8, pth_tr_y, viewy
+        frame.sub8_chain pth_tr_y, viewy
+        // T4 L-INF FAR REJECT (2026-09-03), before the two rotation multiplies. Measured in the
+        // attribution round: this leaf runs 140-163 times a frame, accepts exactly 7, and 62-90%
+        // of calls die on the depth test at the tz compare -- AFTER paying the two fixed_mul_lo
+        // (~8.2k ops). Any ACCEPTED thing has tz <= sp_tzmax and |tx| <= tz<<2, so
+        // d = sqrt(tz^2 + tx^2) <= sqrt(17)*sp_tzmax, and max(|tr_x|,|tr_y|) <= d. Rejecting on
+        // |tr| > bound therefore kills only things the later chain rejects anyway.
+        //
+        // The bound comes from sp_tzmax AT RUNTIME -- no new baked field, no sim/throw-row or
+        // schema fan-out: 4.25 = 4 + 1/4 > sqrt(17), bound = (tz_map<<2) + (tz_map>>2) + 2,
+        // where tz_map is sp_tzmax's integer part. FIVE nibbles so the <<2 cannot wrap, and the
+        // +2 covers both floors (the >>2 truncation, and |floor(tr)| understating |tr| by <1 on
+        // the positive side). Every rounding error ADMITS a thing; none can reject one the old
+        // chain accepted. sp_tzmax >= sp_tzmax2, so the one bound is conservative for the degfl
+        // path as well.
+        // ⚠ the tr slices are FOUR nibbles then sign_extend'ed to five: a `mov 5` from
+        // tr+4*dw reads past the 8-nibble register into its neighbour. The gate caught
+        // exactly that as thousands of missing sprite pixels (mass over-reject), 2026-09-03.
+        hex.zero 5, pth_dbound
+        hex.mov 4, pth_dbound, sp_tzmax + 4*dw
+        hex.shl_bit 5, pth_dbound
+        hex.shl_bit 5, pth_dbound
+        hex.zero 5, pth_dtest
+        hex.mov 4, pth_dtest, sp_tzmax + 4*dw
+        hex.shr_bit 5, pth_dtest
+        hex.shr_bit 5, pth_dtest
+        hex.add 5, pth_dbound, pth_dtest
+        hex.inc 5, pth_dbound
+        hex.inc 5, pth_dbound
+        hex.zero 5, pth_dtest
+        hex.mov 4, pth_dtest, pth_tr_x + 4*dw
+        hex.sign_extend 5, 4, pth_dtest
+        hex.abs 5, pth_dtest
+        hex.cmp 5, pth_dtest, pth_dbound, linf_x_ok, linf_x_ok, reject
+      linf_x_ok:
+        hex.zero 5, pth_dtest
+        hex.mov 4, pth_dtest, pth_tr_y + 4*dw
+        hex.sign_extend 5, 4, pth_dtest
+        hex.abs 5, pth_dtest
+        hex.cmp 5, pth_dtest, pth_dbound, linf_y_ok, linf_y_ok, reject
+      linf_y_ok:
         // sin/cos of the VIEW angle: constant for the whole frame, but this leaf runs once per
         // THING (250 of them on E1M1). A `finesine` lookup carries result_nibbles=8, i.e. EIGHT
         // dispatches, so the pair costs ~8.6k ops -- against a 1-nibble `if0` to reuse them. A
@@ -1344,7 +1395,7 @@ ns proj {
         hex.fixed_mul_lo 8, 4, pth_gxt, pth_vcos, pth_tr_x
         hex.fixed_mul_lo 8, 4, pth_gyt, pth_vsin, pth_tr_y
         hex.mov 8, pth_tz, pth_gxt
-        hex.add 8, pth_tz, pth_gyt
+        frame.add8_chain pth_tz, pth_gyt
         // ⚠ pth_czlim is REUSED: it carries MINZ here and the SPR-NEAR detail radius below.
         hex.set 8, pth_czlim, minz
         hex.scmp 8, pth_tz, pth_czlim, reject, past_minz, past_minz
@@ -1374,7 +1425,7 @@ ns proj {
         hex.fixed_mul_lo 8, 4, pth_gxt, pth_vsin, pth_tr_x         // same swap, same reason
         hex.fixed_mul_lo 8, 4, pth_gyt, pth_vcos, pth_tr_y
         hex.mov 8, pth_tx, pth_gxt
-        hex.sub 8, pth_tx, pth_gyt
+        frame.sub8_chain pth_tx, pth_gyt
         hex.mov 8, pth_tx_abs, pth_tx                           // |pth_tx| > pth_tz<<2 -> outside the view
         hex.abs 8, pth_tx_abs
         hex.mov 8, pth_tz_lim, pth_tz
@@ -1400,16 +1451,16 @@ ns proj {
       xscale_done:                                      // ⚠ label is never jumped to (dead)
         hex.set 8, pth_c_centerxfix, centerx*0x10000
         hex.mov 8, pth_tx_left, pth_tx
-        hex.sub 8, pth_tx_left, sp_left
+        frame.sub8_chain pth_tx_left, sp_left
         hex.fixed_mul_lo 8, 4, pth_tmp, pth_tx_left, pth_xscale
-        hex.add 8, pth_tmp, pth_c_centerxfix
+        frame.add8_chain pth_tmp, pth_c_centerxfix
         hex.shr_hex 8, 4, pth_tmp
         hex.sign_extend 8, 4, pth_tmp
         hex.mov 8, x1o, pth_tmp
         hex.mov 8, pth_tx_right, pth_tx_left
-        hex.add 8, pth_tx_right, sp_w
+        frame.add8_chain pth_tx_right, sp_w
         hex.fixed_mul_lo 8, 4, pth_tmp, pth_tx_right, pth_xscale
-        hex.add 8, pth_tmp, pth_c_centerxfix
+        frame.add8_chain pth_tmp, pth_c_centerxfix
         hex.shr_hex 8, 4, pth_tmp
         hex.sign_extend 8, 4, pth_tmp
         hex.dec 8, pth_tmp
@@ -1422,11 +1473,11 @@ ns proj {
         hex.scmp 8, x2o, x1o, reject, cols_ok, cols_ok  // x2 < x1 -> sub-column
       cols_ok:
         hex.mov 8, pth_gzt, sp_z                            // pth_gzt = (thing floor + sprite top) - viewz
-        hex.sub 8, pth_gzt, viewz
+        frame.sub8_chain pth_gzt, viewz
         hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, pth_gzt        // M14-perf ROW RULE: pth_gzt is integer<<16
         hex.set 8, pth_c_centeryfix, centery*0x10000
         hex.mov 8, ytopo, pth_c_centeryfix
-        hex.sub 8, ytopo, pth_tmp
+        frame.sub8_chain ytopo, pth_tmp
         hex.shr_hex 8, 4, ytopo
         hex.sign_extend 8, 4, ytopo
         hex.fixed_mul_lo 8, 4, pth_tmp, pth_xscale, sp_hh      // M14-perf ROW RULE: sp_hh is integer<<16
@@ -1442,8 +1493,8 @@ ns proj {
         // SPR-NEAR: a too-near sprite clamps to the tallest bucket instead of VANISHING --
         // feet planted: the top moves DOWN by the overflow so the bottom row stays true
         hex.mov 8, pth_tmp, hpxo
-        hex.sub 8, pth_tmp, pth_c_viewh
-        hex.add 8, ytopo, pth_tmp
+        frame.sub8_chain pth_tmp, pth_c_viewh
+        frame.add8_chain ytopo, pth_tmp
         hex.mov 8, hpxo, pth_c_viewh
       h_fits:
         hex.set 8, pth_one16, 0x10000
@@ -1474,13 +1525,13 @@ ns proj {
         rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wta8, scale
         hex.set 8, c_centeryfix, centeryfix_c
         hex.mov 8, ra, c_centeryfix
-        hex.sub 8, ra, prod                 // rowfrac = centeryfix - wt*scale
+        frame.sub8_chain ra, prod                 // rowfrac = centeryfix - wt*scale
         hex.shr_hex 8, 4, ra                // >> 16 arithmetic:
         hex.sign_extend 8, 4, ra            //   logical shift + sign-extend the low half
         hex.zero 8, prod
         rep(6, j) hex.fixed_mul_lo.row 8, j, prod, wtb8, scale
         hex.mov 8, rb, c_centeryfix
-        hex.sub 8, rb, prod
+        frame.sub8_chain rb, prod
         hex.shr_hex 8, 4, rb
         hex.sign_extend 8, 4, rb
         ;end
@@ -1529,13 +1580,13 @@ ns proj {
         hex.zero 8, cpm_prod
         rep(6, j) hex.fixed_mul_lo.row 8, j, cpm_prod, wtc8, scale
         hex.mov 8, top, cpm_c_centeryfix
-        hex.sub 8, top, cpm_prod                // topfrac = centeryfix - wt*scale
+        frame.sub8_chain top, cpm_prod                // topfrac = centeryfix - wt*scale
         hex.shr_hex 8, 4, top               // >> 16 arithmetic:
         hex.sign_extend 8, 4, top           //   logical shift + sign-extend the low half
         hex.zero 8, cpm_prod
         rep(6, j) hex.fixed_mul_lo.row 8, j, cpm_prod, wtf8, scale
         hex.mov 8, bottom, cpm_c_centeryfix
-        hex.sub 8, bottom, cpm_prod
+        frame.sub8_chain bottom, cpm_prod
         hex.shr_hex 8, 4, bottom
         hex.sign_extend 8, 4, bottom
         hex.sign 8, top, tneg, tok          // top = max(0, top)
@@ -1545,6 +1596,54 @@ ns proj {
         hex.scmp 8, bottom, cpm_c_viewh1, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
       bhi:
         hex.mov 8, bottom, cpm_c_viewh1
+      bok:
+        ;end
+      end:
+    }
+
+    // idea 12: column_params_m with the two per-column multiplies replaced by the p2_prod DDA
+    // accumulators frame_render seeds per seg and steps per column. Identical latch, identical
+    // shift/sign-extend/clamp tail -- only where wt*scale comes from changed, and the identity
+    // low32(w*(s+k*d)) == low32(low32(w*s)+k*low32(w*d)) is exact mod 2^32 (the Option-A face
+    // DDA note proves the same identity).
+    def column_params_dda top, bottom, centeryfix_c, viewh1 \
+            @ set_consts, consts_ready, tneg, tok, bok, bhi, end \
+            < cpm_c_centeryfix, cpm_c_viewh1, cpm_consts_set, p2_prodc, p2_prodf {
+        hex.if0 1, cpm_consts_set, set_consts
+        ;consts_ready
+      set_consts:
+        hex.set 8, cpm_c_centeryfix, centeryfix_c
+        hex.set 8, cpm_c_viewh1, viewh1
+        hex.set 1, cpm_consts_set, 1
+      consts_ready:
+        hex.mov 8, top, cpm_c_centeryfix
+        frame.sub8_chain top, p2_prodc          // topfrac = centeryfix - wt*scale (the DDA copy;
+        hex.shr_hex 8, 4, top                   //   idea 15: chained sub -- see add8_chain's
+        // P1-2 (2026-09-04): sign-extend to 5, not 8. clip_rows -- the ONLY reader of `top` and
+        // `bottom` -- reads 5 nibbles since P1-1, and shr_hex leaves nibbles 4..7 ZERO (its body
+        // ends in xor_zero, which clears the source), so writing only nibble 4 gives a width-5
+        // read exactly the value an 8-wide extension would have. The `hex.sign` below MUST move
+        // to 5 with it: with nibbles 5..7 left at 0, an 8-wide sign test would call every
+        // negative top positive. Measured: identical at width 5 over 8 cases, -56..-144 executed
+        // ops per call, -512 ops of space.
+        hex.sign_extend 5, 4, top               //   hermetic-window warning in frame_render.fj)
+        hex.mov 8, bottom, cpm_c_centeryfix
+        frame.sub8_chain bottom, p2_prodf       // idea 15: chained
+        hex.shr_hex 8, 4, bottom
+        hex.sign_extend 5, 4, bottom
+        hex.sign 5, top, tneg, tok          // top = max(0, top)
+        // LAYOUT FREEZE for the 512 ops deleted here; this macro is expanded once. UNREACHABLE:
+        // hex.sign always jumps to one of its two labels.
+        rep(512, i) stl.fj 0, 0
+      tneg:
+        hex.zero 5, top
+      tok:
+        // idea 19: scmp 8 -> 4. `bottom` was just built by sign_extend 8,4 -- BY CONSTRUCTION
+        // a sign-extension of its low 4 nibbles -- and viewh1 (~199) is its own low-4
+        // extension, so the signed compare of the low 4 nibbles decides identically.
+        hex.scmp 4, bottom, cpm_c_viewh1, bok, bok, bhi   // bottom = min(VIEW_H-1, ...)
+      bhi:
+        hex.mov 5, bottom, cpm_c_viewh1     // P1-2: viewh1 (99) is 2 nibbles; bottom is read at 5
       bok:
         ;end
       end:
@@ -1564,15 +1663,15 @@ ns proj {
             @ cpx, cpy, cdx, cdy, dxv, dyv, p1, p2, czero, setback, front, end {
         hex.set 10, cpx, px
         hex.mov 10, dxv, vx
-        hex.sub 10, dxv, cpx              // dxv = vx - px   (signed)
+        frame.sub10_chain dxv, cpx              // dxv = vx - px   (signed)
         hex.set 10, cpy, py
         hex.mov 10, dyv, vy
-        hex.sub 10, dyv, cpy              // dyv = vy - py
+        frame.sub10_chain dyv, cpy              // dyv = vy - py
         hex.set 10, cdx, dx
         hex.mul_lo 10, p1, cdx, dyv          // p1 = dx*(vy-py)   (signed 2's-comp, low 10 nibbles)
         hex.set 10, cdy, dy
         hex.mul_lo 10, p2, cdy, dxv          // p2 = dy*(vx-px)
-        hex.sub 10, p1, p2                // side = dx*(vy-py) - dy*(vx-px)
+        frame.sub10_chain p1, p2                // side = dx*(vy-py) - dy*(vx-px)
         hex.set 10, czero, 0
         hex.scmp 10, p1, czero, front, front, setback   // <0 & ==0 -> front(0); >0 -> back(1)
       setback:
@@ -1615,9 +1714,9 @@ ns proj {
             @ dyv_neg, dyv_pos, dyv_done, dxv_neg, dxv_pos, dxv_done, signA_pos, signA_neg, both_pos, pos_neg, check_p2, both_neg, setback, front, end \
             < pos_dxv, pos_dxv_mag, pos_dyv, pos_dyv_mag, pos_p1, pos_p2, pos_signA, pos_signB, pos_sign_dxv, pos_sign_dyv {
         hex.mov 10, pos_dxv, vx
-        hex.sub 10, pos_dxv, cpx              // pos_dxv = vx - px   (signed, 10-nib -- unchanged width)
+        frame.sub10_chain pos_dxv, cpx              // pos_dxv = vx - px   (signed, 10-nib -- unchanged width)
         hex.mov 10, pos_dyv, vy
-        hex.sub 10, pos_dyv, cpy              // pos_dyv = vy - py
+        frame.sub10_chain pos_dyv, cpy              // pos_dyv = vy - py
 
         hex.sign 10, pos_dyv, dyv_neg, dyv_pos
       dyv_neg:
@@ -1758,9 +1857,9 @@ ns proj {
               oct_lo4, oct_lo2, oct_hi4, oct0, oct1, oct2, oct3, oct4, oct5, oct6, oct7, done \
             {
         hex.mov 4, dx, x2
-        hex.sub 4, dx, x1                        // dx = x2 - x1   (signed map units)
+        frame.sub4_chain dx, x1                        // dx = x2 - x1   (signed map units)
         hex.mov 4, dy, y2
-        hex.sub 4, dy, y1
+        frame.sub4_chain dy, y1
         hex.set 1, oct_idx, 0
 
         hex.sign 4, dx, dx_neg, dx_pos
@@ -1815,34 +1914,34 @@ ns proj {
         hex.cmp 1, oct_idx, c6, oct5, oct6, oct7
       oct0:
         hex.set 8, dst, 0x3FFFFFFF
-        hex.sub 8, dst, tan_base
+        frame.sub8_chain dst, tan_base
         ;done
       oct1:
         hex.mov 8, dst, tan_base
         ;done
       oct2:
         hex.set 8, dst, 0xC0000000
-        hex.add 8, dst, tan_base
+        frame.add8_chain dst, tan_base
         ;done
       oct3:
         hex.zero 8, dst
-        hex.sub 8, dst, tan_base
+        frame.sub8_chain dst, tan_base
         ;done
       oct4:
         hex.set 8, dst, 0x40000000
-        hex.add 8, dst, tan_base
+        frame.add8_chain dst, tan_base
         ;done
       oct5:
         hex.set 8, dst, 0x7FFFFFFF
-        hex.sub 8, dst, tan_base
+        frame.sub8_chain dst, tan_base
         ;done
       oct6:
         hex.set 8, dst, 0xBFFFFFFF
-        hex.sub 8, dst, tan_base
+        frame.sub8_chain dst, tan_base
         ;done
       oct7:
         hex.set 8, dst, 0x80000000
-        hex.add 8, dst, tan_base
+        frame.add8_chain dst, tan_base
         ;done
 
       dx: hex.vec 4
@@ -1916,8 +2015,8 @@ ns proj {
         //   about emitter-generated calls, does not apply. Checked by grep over src/doomfj/.
         hex.fixed_mul_lo 8, 4, sgn, viewx, a
         hex.fixed_mul_lo 8, 4, wxr_sgn_b, viewy, b
-        hex.add 8, sgn, wxr_sgn_b
-        hex.add 8, sgn, c
+        frame.add8_chain sgn, wxr_sgn_b
+        frame.add8_chain sgn, c
         hex.sign 8, sgn, end, frontok
       frontok:
         hex.if0 8, sgn, end
@@ -1930,28 +2029,28 @@ ns proj {
         rep(dsl + dtb, k) .point_to_angle wxr_adup, viewx, viewy, v1x, v1y, 1
         rep(dbl, k) .atan_dup wxr_adup, viewx, viewy, v1x, v1y, v2x, v2y
         hex.mov 8, wxr_span, wxr_ang1
-        hex.sub 8, wxr_span, wxr_ang2
+        frame.sub8_chain wxr_span, wxr_ang2
         hex.sign 8, wxr_span, end, notback
       notback:
-        hex.sub 8, wxr_ang1, viewangle
-        hex.sub 8, wxr_ang2, viewangle
+        frame.sub8_chain wxr_ang1, viewangle
+        frame.sub8_chain wxr_ang2, viewangle
 
         hex.mov 8, wxr_tspan, wxr_ang1
-        hex.add 8, wxr_tspan, wxr_cclip
+        frame.add8_chain wxr_tspan, wxr_cclip
         hex.cmp 8, wxr_tspan, wxr_c2clip, leftok, leftok, leftclip
       leftclip:
         hex.mov 8, wxr_diff, wxr_tspan
-        hex.sub 8, wxr_diff, wxr_c2clip
+        frame.sub8_chain wxr_diff, wxr_c2clip
         hex.cmp 8, wxr_diff, wxr_span, setleft, end, end
       setleft:
         hex.mov 8, wxr_ang1, wxr_cclip
       leftok:
         hex.mov 8, wxr_tspan, wxr_cclip
-        hex.sub 8, wxr_tspan, wxr_ang2
+        frame.sub8_chain wxr_tspan, wxr_ang2
         hex.cmp 8, wxr_tspan, wxr_c2clip, rightok, rightok, rightclip
       rightclip:
         hex.mov 8, wxr_diff, wxr_tspan
-        hex.sub 8, wxr_diff, wxr_c2clip
+        frame.sub8_chain wxr_diff, wxr_c2clip
         hex.cmp 8, wxr_diff, wxr_span, setright, end, end
       setright:
         hex.mov 8, wxr_ang2, wxr_cnegclip

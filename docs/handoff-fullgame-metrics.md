@@ -194,3 +194,100 @@ costs per frame. Measure it before optimising it; it may be small, or it may be 
   3.71%: there is no caller-side fix, only fewer calls.
 * **AJ/AQ** — sparse-on-hot padding under-delivers (width beats coverage; the residual lives in
   other stl macros). Do not re-open it.
+
+---
+
+## 7. GAPS IN THIS PLAN — read before executing it
+
+Written by the author of the plan, immediately after writing it. Two are load-bearing enough to
+change what rung 0 means.
+
+### G1 (STRATEGIC, the biggest). The size target cannot serve its stated purpose at w=32.
+
+The owner set the size goal because 93.5% "doesn't allow adding of new levels". But
+`docs/handoff-m4-nine-levels.md` §2 budgets nine levels at **~358M words** and says "the cap goes
+to 2^29 = 536,870,912; the owner is fine raising it".
+
+**At w=32 that is impossible.** An address is 32 bits, a word is 32 bits, so the program cannot
+exceed `2^32 bits / 32 = 2^27 = 134,217,728 words`. This is not a tunable cap: it is the assembler's
+`array('I')`, and it is exactly the `OverflowError` this session hit. `flat_max_words` (2^27, and
+M4's proposed 2^29) is a RUNTIME allocation limit and a DIFFERENT thing — raising it does not widen
+the address space.
+
+**Nine levels at ~358M words is 2.67x the entire w=32 ceiling.** Even at 0% usage they do not fit.
+So the honest position is one of:
+* nine levels needs **w=64** (a memory-width change, with its own large cost), or
+* levels must get ~8x cheaper than the M4 budget assumed, or
+* ship fewer levels (M4 already lists "drop levels, keep full detail" as the fallback).
+
+**This must be settled with the owner before the campaign optimises for a 35% target whose purpose
+is undeliverable at w=32.** The 35% goal is still worth hitting — headroom is good, RAM is real,
+and it keeps the tier assemblable — but it should be adopted for its own sake, not as "room for
+nine levels", until the width question is answered.
+
+### G2 (QUANTIFIED). Rung 0 probably does NOT pass the size metric on its own.
+
+§3 claims reverting the padding takes size to "~31%". That number came from the pass-1 overflow
+probe's `first_address` (42,034,242 words) — which is **not** what the metric measures. The metric
+is the DECOMPRESSED IMAGE, and the probe aborts before pass 2 adds the reset part.
+
+Calibrated on the padded build, where both numbers exist:
+
+| | pass-1 probe | decompressed | ratio |
+|---|---:|---:|---:|
+| padded game | 105,989,350 | 125,492,170 | **1.184** |
+
+Applying that ratio to the pre-pad probe: **42,034,242 x 1.184 = ~49.8M words = ~37.1%** — over the
+35% target by ~2.8M words. So rung 0 gets *close* and does not finish the job. Expect to need one
+more size lever (the obvious candidate: S2-style sharing of the collision `try_move`, worth ~4.3M
+words, which would land it at ~34%). **Measure the real decompressed number the moment the pre-pad
+game is built; do not carry the 31% estimate forward.**
+
+### G3. The arithmetic to 20M ops/frame does not close.
+
+Baseline ~33.4M, target 20M — a 13.4M cut. The rungs, generously priced: collision ~11.6M, of which
+maybe half is redundant (~5.8M); render width doctrine (~1-2M, unmeasured); self-reset (unknown).
+That is ~8M and leaves ~25M. **The plan as written does not reach the target**, and no rung is
+sized from a measurement. Either a fourth large lever exists (the per-frame self-reset is the only
+unmeasured candidate big enough) or 20M needs the renderer to do less work — fewer columns, coarser
+spans — which is a fidelity decision, not an optimisation. Do rung 1, then re-price every rung
+against the real baseline before promising the target.
+
+### G4. Rung 2 conflates a SIZE lever with a SPEED lever.
+
+"Share `try_move` the way S2 shared the pair-blocks" saves ~4.3M **words**. It does not save ops —
+S2 itself cost +0.11% ops. Under the SPEED metric the collision win must come from **eliminating
+redundant work** (the repeated seed descents, dead candidates after an early exit), not from
+sharing. Sharing belongs to the SIZE metric (and see G2 — it is likely needed there). Split the
+rung in two and price each against its own metric.
+
+### G5. The 10 games are not validated as representative — and the metric is 11x sensitive to that.
+
+`script(seed)` emits deterministic key patterns, but nothing checks that they explore anything: a
+script that walks into a wall for 100 frames measures a cheap corner. The render alone spans
+**2.96M to 33.4M ops/frame across viewpoints (11x)**, so the answer is dominated by where the 10
+games go. Before trusting any baseline: dump each run's end position and a frame or two, and require
+the 10 to differ meaningfully (the play-test's oracle-planned route is the model — it walks
+somewhere real). The 80th-percentile-of-runs choice partly defends against this, but only if the
+runs actually differ.
+
+### G6. `gamespeed.py` has no vacuity control.
+
+A run that dies early returns a small op total and looks like a *win*. The device must report the
+number of frames actually presented and the harness must assert it equals 100. Add that with the R9
+negative control (§2) before any number from this tool is quoted.
+
+### G7. No before/after comparison at the metric.
+
+The plan reverts the padding (rung 0) and then baselines (rung 1), so the padded state is never
+measured under the new metric. That forfeits the one clean data point on what the padding actually
+costs/buys the FULL GAME. If it is affordable, take a short measurement (fewer runs) on the current
+padded binary first — it thrashes, so cost it before committing.
+
+### G8. Smaller, but real.
+* The 100 frames include ~2 near-free menu frames (~2,344 ops each) and the one-time startup, both
+  of which bias the run average — state whether the metric includes them (currently: it does).
+* The metric is defined on E1M1 with `--menu --doors`. Pin that as the measured configuration, or
+  the number silently changes when the shipped config does.
+* No rule for an idea that improves one metric and worsens the other; both are hard thresholds, so
+  decide the arbitration rule before the first such idea appears.

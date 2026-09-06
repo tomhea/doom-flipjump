@@ -10,10 +10,10 @@ Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review c
 `docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-fullgame-metrics.md` — the owner's goal changed
 on 2026-09-06 and the 12M-ops render target is SUPERSEDED.** Success is now two numbers on the
 COMBINED FULL GAME (collision + sim + reset included): the 80th-percentile RUN of 10x100 frames
-at <= 20M ops/frame, and the binary at <= 35% of 2^27 words. SIZE is measured:
-**125,492,170 words = 93.50% of 2^27** (`scratchpad/12m/fjmsize.py`) -- FAIL. SPEED is being
-re-measured: the first 10x100 run used scripts that walked into walls (nine of ten runs blocked on
-most of their movement frames), so its number is withdrawn -- see the handoff's §2 and G5. `docs/handoff-m4-nine-levels.md` is still the M4 reference.
+at <= 20M ops/frame, and the binary at <= 35% of 2^27 words. MEASURED baseline (2026-09-06, padded
+game binary, `--validate` attached): **80th-pct run 24,723,058 ops/frame** (needs -19.1%) and
+**125,492,170 words = 93.50% of 2^27** -- both FAIL. ⚠ An earlier 26,001,449 is WITHDRAWN: its
+scripts walked into walls. No speed number belongs in this file without its `--validate` output. `docs/handoff-m4-nine-levels.md` is still the M4 reference.
 **M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
 whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:

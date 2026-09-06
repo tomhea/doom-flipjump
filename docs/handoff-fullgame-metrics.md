@@ -60,78 +60,48 @@ backwards in four places; both directions are now named separately.)
 
 ### The measured baseline, and why it fails BOTH metrics
 
-✅ **MEASURED 2026-09-06 with the controlled instrument.** The earlier estimates in this section
-have been replaced by a real `gamespeed` run — the first end-to-end execution of the actual success
-criterion. Command, verbatim:
+✅ **MEASURED 2026-09-06, second attempt.** The first attempt is withdrawn — its scripts walked
+into walls (§7 G5). This run uses oracle-planned scripts whose `--validate` output is attached, per
+the rule that no number enters this document without it.
 
 ```
 python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_menu_p105.fjm --runs 10 --frames 100
 ```
 
-```
-SIZE: w=32  segments=1  data=125,492,170 words (93.50% of 2^27)  span=125,492,170 words (93.50%)  file=36,442,805 bytes
-calibration: startup + 2 menu frames = 538,417 ops (subtracted from every run)
-  run  0: 3,320,303,411 ops / 102 presented -> game-only 33,197,649 ops/frame
-  run  1: 2,558,390,067 ops / 102 presented -> game-only 25,578,516 ops/frame
-  run  2: 1,309,995,795 ops / 102 presented -> game-only 13,094,573 ops/frame
-  run  3: 3,209,977,696 ops / 102 presented -> game-only 32,094,392 ops/frame
-  run  4: 2,600,683,332 ops / 102 presented -> game-only 26,001,449 ops/frame
-  run  5: 1,562,531,076 ops / 102 presented -> game-only 15,619,926 ops/frame
-  run  6: 2,033,497,481 ops / 102 presented -> game-only 20,329,590 ops/frame
-  run  7: 1,431,574,147 ops / 102 presented -> game-only 14,310,357 ops/frame
-  run  8: 1,928,924,602 ops / 102 presented -> game-only 19,283,861 ops/frame
-  run  9: 1,457,554,661 ops / 102 presented -> game-only 14,570,162 ops/frame
-
-SPEED  mean run-average   : 21,408,048 ops/frame
-SPEED  80th-pct run avg   : 26,001,449 ops/frame   (target <= 20,000,000)  OVER
-SPEED  spread lo..hi      : 13,094,573 .. 33,197,649 ops/frame
-SPEED  raw (menu included): mean 20,993,561, 80th-pct 25,496,895 ops/frame
-SIZE   words              : 125,492,170 = 93.50% of 2^27   (target <= 35%)  OVER
-SIZE   span / file        : 125,492,170 words (93.50%) / 36,442,805 bytes
-```
-
-⚠ Still UNVERIFIED and NOT replaced by this run: `overflow_probe`'s pass-1 numbers (the 45.6%
-overflow, the pre-pad ~42M words) and the 1.184 pass-1→decompressed ratio. Those need an
-`overflow_probe game` run of their own, which rung 0 will produce anyway.
+Full logs: `scratchpad/12m/g7_padded_baseline.log` and `scratchpad/12m/g7_validate.log`
+(**all ten runs move on 100% of their movement frames**, 9 distinct end cells, 2,258-unit spread).
 
 | | measured | target | verdict |
 |---|---:|---:|---|
 | game binary words (DATA) | **125,492,170 = 93.50% of 2^27** | ≤35% | **FAIL** |
 | game binary words (SPAN) | 125,492,170 = 93.50% | — | equal to DATA: one segment, nothing sparse |
 | game binary file | 36,442,805 bytes | — | |
-| **80th-pct run** | **26,001,449 ops/frame** | ≤20M | **FAIL — needs −23.1%** |
-| mean run-average | 21,408,048 ops/frame | — | |
-| run spread | 13,094,573 .. 33,197,649 | — | **2.54×** — why the metric is a percentile, not a mean |
+| **80th-pct run** | **24,723,058 ops/frame** | ≤20M | **FAIL — needs −19.1%** |
+| mean run-average | 20,579,907 ops/frame | — | just above target; the p80 is what binds |
+| run spread | 14,489,277 .. 27,880,595 | — | 1.92× — why the metric is a percentile |
 
-### ⚠ The old ~33.4M figure was NOT representative, and the gap is half what §7's G3 assumed
+### How this compares to `m2_std_gate`'s route, like for like
 
-This handoff carried **~33.4M ops/frame**, taken from `m2_std_gate`'s single door-route trajectory.
-Measured across ten diverse runs, that route sits near the TOP of the range: the 80th-percentile
-run is **26.0M**. So the gap to target is **6.0M, not 13.4M**.
+The handoff previously carried **~33.4M ops/frame** from `m2_std_gate`'s door route. That figure is
+menu-INCLUDED over 45 frames; converted to the metric's basis (menu subtracted, per game frame) it
+is `(1,504,887,174 − 538,417)/43 =` **34,984,855 ops/frame**.
 
-That matters for G3, which concluded "the plan as written does not reach the target" by pricing
-rungs against 33.4M. Against 26.0M the arithmetic is far more comfortable — collision alone
-(~11.6M/frame, never optimised) is nearly twice the whole remaining gap.
+So that one route is **more expensive than all ten** of these runs (max 27,880,595). It is a real
+trajectory the program really executes — §7 G5 is right that it "walks somewhere real" — it simply
+sits above this sample's range. Both statements can hold: it is a valid route AND it is not the
+80th percentile of ten varied ones. No claim is made here about which better represents "play";
+the owner's spec defines the metric as the ten-run p80, and that is **24,723,058**.
 
-⚠ Two cautions before anyone celebrates. First, the mean (21.4M) is *just* above target while the
-p80 (26.0M) is 30% over — a mean-based reading of this same data would have flattered the binary,
-which is exactly the failure the owner's percentile spec prevents. Second, this is the PADDED
-binary; rung 0 reverts that padding and gives some speed back (LEDGER P10-1 vs P10-5: deg median
-17,135,838 vs 16,584,954, +3.3%), so expect the baseline to move to roughly 26.5M.
+⚠ **The withdrawn first attempt read 26,001,449 — HIGHER than this corrected run.** The
+wall-scraping runs were more expensive, not cheaper: a near surface filling the view costs more
+than an open corridor. Anyone assuming a broken harness must have under-reported would have drawn
+the wrong conclusion twice.
 
-### Why the full game costs ~2× the render
+### What still has to come off
 
-The deg/visual tier renders and stops. The game also runs, per frame:
-
-| component | ~ops/frame | source |
-|---|---:|---|
-| render (walls/floors/things) | ~16M | the ca2_sweep median |
-| **collision** | **~11.6M** | FINDINGS: "M14-d's four descents cost 11,602,784 ops" |
-| sim + thing movement + input | few M | |
-| M1 self-reset | per-frame overhead | the game loops and restores state every frame |
-
-**Collision is ~35% of the full frame and the 12M campaign never touched it.** That is the single
-biggest untouched lever and the reason 20M is plausible at all.
+**−4,723,058 ops/frame, or −19.1%.** Collision is the untouched lever
+(~11.6M/frame per FINDINGS — ⚠ UNVERIFIED, and it is measured on a different tier; price it before
+planning against it).
 
 ---
 

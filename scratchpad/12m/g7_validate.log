@@ -1,0 +1,11 @@
+  run  0: ends (   674,   256)   1090 from spawn    1213 travelled  moved on  74/ 74 move-frames (0% blocked)
+  run  1: ends (   683,   470)   1119 from spawn    1404 travelled  moved on  74/ 74 move-frames (0% blocked)
+  run  2: ends (   827,  -210)   1327 from spawn    1810 travelled  moved on  74/ 74 move-frames (0% blocked)
+  run  3: ends (   128,  1424)   1288 from spawn    1805 travelled  moved on  74/ 74 move-frames (0% blocked)
+  run  4: ends (   128,  -834)   1218 from spawn    1634 travelled  moved on  76/ 76 move-frames (0% blocked)
+  run  5: ends (   449,   788)   1015 from spawn    1506 travelled  moved on  74/ 74 move-frames (0% blocked)
+  run  6: ends (   857,  -210)   1355 from spawn    1781 travelled  moved on  74/ 74 move-frames (0% blocked)
+  run  7: ends (  -356,   407)    162 from spawn     378 travelled  moved on  74/ 74 move-frames (0% blocked)
+  run  8: ends (   515,  -818)   1421 from spawn    2091 travelled  moved on  74/ 74 move-frames (0% blocked)
+  run  9: ends (  -356,   389)    145 from spawn     359 travelled  moved on  74/ 74 move-frames (0% blocked)
+  distinct end cells: 9/10 ; widest spread 2258 units ; worst run 0% blocked

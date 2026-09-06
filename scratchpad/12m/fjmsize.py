@@ -20,9 +20,19 @@ constants were assumptions that happen to hold for today's builds:
   * `64` is `20 + 12 + 32*segment_num` and is right only when `segment_num == 1`;
   * `// 4` is `memory_width // 8` and is right only when `memory_width == 32`.
 
-Neither was asserted, so the failure mode was a WRONG NUMBER rather than a crash -- and at w=64 it
-under-reports by 2x, i.e. it would report the SIZE metric as PASSING when it fails. The header is
-now parsed with the fjm's own struct formats (`flipjump.fjm.fjm_consts`), so both derive.
+Neither was asserted, so the failure mode was a WRONG NUMBER rather than a crash.
+
+The two constants fail in OPPOSITE directions, and only one of them is dangerous:
+
+  * `// 4` at w != 32 OVER-counts. A w=64 payload is 8 bytes per word, so dividing by 4 reports
+    TWICE the words (control C2: correct=21,470, old reader=42,940). Over-counting inflates the
+    percentage of the ceiling, so it turns a PASS into a FAIL -- wrong, but loud.
+  * `data[64:]` at segment_num != 1 slices into the SEGMENT TABLE rather than the payload, and the
+    decompression then yields nothing: control C3 measures a 60-word file as **0 words**. Zero
+    words is 0% of the ceiling, so THIS is the false-PASS mode -- wrong, and silent.
+
+The header is now parsed with the fjm's own struct formats
+(`flipjump.fjm.fjm_consts`), so both derive.
 
 Two word counts are reported because they answer different questions:
 
@@ -113,7 +123,10 @@ def read_fjm_size(path):
 
 
 # ----------------------------------------------------------------------------------------------
-# R9: the negative controls. Every one of these FAILS against the code this file replaces.
+# R9. C2-C5 are true negative controls: each FAILS against the code this file replaces.
+# C0-C1 are agreement checks and are labelled as such -- claiming them as controls was a
+# CR-2026-09-06 finding, since C1's w=32 single-segment case is the one the old reader
+# handles correctly.
 # ----------------------------------------------------------------------------------------------
 
 TINY = "stl.startup_and_init_all\n    stl.loop\n"
@@ -156,8 +169,14 @@ def selftest():
         if not cond:
             fails.append(name)
 
-    print("fjmsize selftest -- every control below FAILS against the "
-          "`data[64:]` + `//4` reader it replaces", flush=True)
+    print("fjmsize selftest -- C2..C5 are the negative controls: each FAILS against the",
+          flush=True)
+    print("  `data[64:]` + `//4` reader this replaces. C0/C1 are AGREEMENT checks, not",
+          flush=True)
+    print("  controls -- C0 tests a function the old reader never had, and C1 uses the w=32",
+          flush=True)
+    print("  single-segment file the old reader gets RIGHT (it also reports 21,406).",
+          flush=True)
 
     # C0  the ceiling is arithmetic, not a constant someone typed
     check("C0 ceiling_words(32) == 134,217,728 == 2^27", ceiling_words(32) == 134_217_728)

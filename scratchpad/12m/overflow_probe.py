@@ -1,6 +1,7 @@
 """Does a tier FIT under the address ceiling, and if not, by how much?
 
-This is the tool that found the shipped `game` tier 45.6% over the ceiling after the P7 pad round
+This is the tool that found the shipped `game` tier over the ceiling after the P7 pad round
+(reported at the time as 45.6% over -- UNVERIFIED, measured before this probe had controls)
 -- an assembler `OverflowError` that every gate missed, because every gate built the `deg` tier.
 `docs/handoff-fullgame-metrics.md` §6b therefore makes it MANDATORY on any stl or shared-emitter
 change.
@@ -12,9 +13,10 @@ and report it in words against `fjmsize.ceiling_words(w)`. The build is driven o
 pass 1 (`selfreset.emit_reset_part` aborts it), so a doomed tier costs one pass, not two.
 
 ⚠ The peak this reports is a PASS-1 number and is NOT the decompressed word count the SIZE metric
-measures -- pass 2 adds the reset part. On the padded game build, where both exist, the ratio was
-105,989,350 -> 125,492,170 = 1.184. Use `fjmsize.py` on the built .fjm for the metric; use this to
-answer "will it assemble at all".
+measures -- pass 2 adds the reset part. A pass-1 -> decompressed ratio of ~1.184 was recorded on
+the padded game build, but BOTH of its numbers predate the controls in this file and in
+`fjmsize.py`, so it is UNVERIFIED and is a planning estimate only; rung 1 re-measures it. Use
+`fjmsize.py` on the built .fjm for the metric; use this to answer "will it assemble at all".
 
     python scratchpad/12m/overflow_probe.py game
     python scratchpad/12m/overflow_probe.py --selftest

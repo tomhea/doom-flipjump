@@ -119,8 +119,12 @@ def selftest():
     except TypeError as e:
         check("C3 a part with no .text is REJECTED, not measured as its repr()",
               "repr()" in str(e))
-    check("C3 (the old code would have reported this many chars)",
-          len(str(Opaque())) < 100, "repr is %d chars, the part is not" % len(str(Opaque())))
+    # ... and the control that this is not merely strict: the OLD expression, run here, silently
+    # produces a size. That is the mutation this check rejects.
+    old_expression = getattr(Opaque(), "text", str(Opaque()))
+    check("C3 the OLD `getattr(t, 'text', str(t))` silently sizes a part it cannot read",
+          isinstance(old_expression, str) and len(old_expression) < 200,
+          "it would have reported %d chars for a multi-megabyte part" % len(old_expression))
 
     # C4 empty parts total zero rather than raising
     check("C4 an empty part list totals nothing", measure([]) == [])

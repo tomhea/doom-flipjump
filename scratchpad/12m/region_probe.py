@@ -54,33 +54,51 @@ def regions(labels, memory_width):
     return gaps
 
 
-def run(tier):
-    from doomfj import selfreset
-    from doomfj.build import build_wall_renderer
+class Done(Exception):
+    """raised by the hook to abort the build once the labels are in hand"""
+
+
+def install_label_hook(grab, stop=True):
+    """wrap `asm.labels_resolve` so the resolved labels are captured; returns the uninstaller.
+
+    Extracted so the selftest can fire it against a REAL assembly. CR-2026-09-06: every control in
+    this file ran on a synthetic dict, so nothing checked the one thing the tool actually does --
+    and a hook that silently stopped firing would report "NO LABELS CAPTURED" forever while looking
+    like a tool that works.
+    """
     import flipjump.assembler.assembler as asm
-
-    grab = {}
     real = asm.labels_resolve
-
-    class Done(Exception):
-        pass
 
     def hook(ops, labels, memory_width, fjm_writer, **k):
         grab["labels"], grab["mw"] = labels, memory_width
-        raise Done()
+        if stop:
+            raise Done()
+        return real(ops, labels, memory_width, fjm_writer, **k)
 
     asm.labels_resolve = hook
+    return lambda: setattr(asm, "labels_resolve", real)
+
+
+def run(tier):
+    from doomfj import selfreset
+    from doomfj.build import build_wall_renderer
+
+    grab = {}
+    uninstall = install_label_hook(grab)
     real_emit = selfreset.emit_reset_part
     selfreset.emit_reset_part = lambda *a, **k: (_ for _ in ()).throw(Done())
     print("resolving macros for tier %r (abort before wflip-resolve) ..." % tier, flush=True)
     try:
         build_wall_renderer(ROOT / "build/region_probe.fjm", tier=tier)
-    except Done:
-        pass
     except Exception as e:                                            # noqa: BLE001
-        print("build raised %s: %s" % (type(e).__name__, str(e)[:100]), flush=True)
+        # ⚠ NOT `except Done`. The assembler catches everything and re-raises it as
+        # FlipJumpAssemblerException("Unknown exception ... please report this bug"), so our own
+        # abort never arrives as itself. The signal that the hook worked is the GRAB, not the
+        # exception type -- which is why only an uncaptured grab is worth reporting.
+        if not grab.get("labels"):
+            print("build raised %s: %s" % (type(e).__name__, str(e)[:100]), flush=True)
     finally:
-        asm.labels_resolve = real
+        uninstall()
         selfreset.emit_reset_part = real_emit
 
     labels = grab.get("labels")
@@ -152,10 +170,53 @@ def selftest():
           "w32=%s w64=%s" % ([g for g, _a, _b in r], [g for g, _a, _b in r64]))
 
     # C5  VACUITY. No labels must not look like a small tier.
-    check("C5 an empty label map yields no regions (and run() says NO LABELS CAPTURED)",
+    check("C5 an empty label map yields no regions",
           regions({}, 32) == [])
     check("C5 a single label yields no regions (nothing to diff)",
           regions({"only": 0}, 32) == [])
+
+    # C6  THE HOOK CONTROL, against the REAL assembler -- the pattern overflow_probe C4 uses and
+    #     that this file was missing. Everything above runs on a synthetic dict, so none of it
+    #     would notice if `labels_resolve` were renamed and the hook silently stopped firing.
+    import tempfile
+    import flipjump as fj
+    TINY = chr(10).join(["stl.startup_and_init_all", "    stl.loop", ""])
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        src = tmp / "tiny.fj"
+        src.write_text(TINY, encoding="utf-8")
+
+        grab = {}
+        un = install_label_hook(grab)
+        try:
+            fj.assemble([src], tmp / "tiny.fjm", memory_width=32, print_time=False)
+        except Exception:                                             # noqa: BLE001
+            pass          # the assembler re-wraps our Done; the grab is the signal, not the type
+        finally:
+            un()
+        check("C6 the hook FIRES on a real assembly", "labels" in grab)
+        check("C6 it captures real labels, and the width with them",
+              len(grab.get("labels", {})) > 0 and grab.get("mw") == 32,
+              "%s labels at w=%s" % (format(len(grab.get("labels", {})), ","), grab.get("mw")))
+        check("C6 those real labels attribute into regions",
+              len(regions(grab.get("labels", {}), grab.get("mw", 32))) > 0,
+              "%d regions" % len(regions(grab.get("labels", {}), grab.get("mw", 32))))
+
+        # ... and uninstall must really uninstall. Install into a SECOND dict, remove the hook,
+        # then assemble again: if the uninstaller did not restore `labels_resolve`, this dict
+        # fills and the build aborts. (Checking an untouched dict is falsy would prove nothing.)
+        after = {}
+        un2 = install_label_hook(after)
+        un2()
+        raised = None
+        try:
+            fj.assemble([src], tmp / "tiny2.fjm", memory_width=32, print_time=False)
+        except Exception as e:                                        # noqa: BLE001
+            raised = type(e).__name__
+        check("C6 uninstall really uninstalls (a later build is untouched)",
+              not after and raised is None,
+              "captured %d labels, raised=%s" % (len(after), raised))
+
 
     print("")
     print("SELFTEST %s%s" % ("PASS" if not fails else "FAIL",

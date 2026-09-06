@@ -101,8 +101,10 @@ def word_pct(fjm_path):
     """Decompressed words as a percent of the address ceiling.
 
     Delegates to `fjmsize`, which derives the header offset from `segment_num` and the word size
-    from `memory_width`. The version this replaced hardcoded `data[64:]` and `// 4`; at w=64 that
-    reported TWICE the true word count, i.e. it would have called a failing SIZE a PASS.
+    from `memory_width`. The version this replaced hardcoded both, and they fail in opposite
+    directions: `// 4` at w=64 reports TWICE the words (a false FAIL -- loud), while `data[64:]`
+    at segment_num > 1 slices into the segment table and measures ZERO words (a false PASS --
+    silent). See `fjmsize` controls C2 and C3.
     """
     size = read_fjm_size(fjm_path)
     return size.data_words, size.data_pct, size

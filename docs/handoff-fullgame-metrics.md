@@ -36,8 +36,12 @@ should enter the binary at later stage."* So:
 * an idea that grows the image and does **not** cut ops needs a size reason of its own.
 
 ⚠ This makes the SIZE instrument load-bearing rather than decorative, which is why
-CR-2026-09-06's finding on `word_pct` mattered: a size number that reads low by 2x would let the
-campaign spend a budget it does not have.
+CR-2026-09-06's finding on `word_pct` mattered. The dangerous failure is the one that reads LOW:
+the old reader's `data[64:]` offset, on a file with more than one segment, slices into the segment
+table and measures **zero words** — 0% of the ceiling, a silent PASS, and a budget the campaign
+would then spend without having it. (Its other constant, `// 4`, fails the *other* way — it
+over-counts 2x at w=64, which is a loud false FAIL. CR round 2 caught this description stated
+backwards in four places; both directions are now named separately.)
 
 ---
 
@@ -95,9 +99,9 @@ Finished 2026-09-06 after CR-2026-09-06 (PR #83) found the draft's `measure_spee
 * **`word_pct()` now delegates to `scratchpad/12m/fjmsize.py`.** The draft did
   `lzma.decompress(data[64:])` then `len(raw) // 4`. Both constants were unasserted assumptions:
   `64` is `20 + 12 + 32*segment_num` and holds only at `segment_num == 1`, and `// 4` is
-  `memory_width // 8` and holds only at w=32. **At w=64 the draft reported twice the true word
-  count** — i.e. it would have called a failing SIZE a PASS, on the very width question §7's G1
-  raises. `fjmsize` derives both from the header and reports DATA words (the metric) and SPAN
+  `memory_width // 8` and holds only at w=32. They fail in OPPOSITE directions and only one is
+  dangerous: `// 4` over-counts 2x at w=64 (a loud false FAIL), while `data[64:]` on a
+  multi-segment file measures **zero words** — a silent false PASS. Controls C2 and C3. `fjmsize` derives both from the header and reports DATA words (the metric) and SPAN
   words = `max(start+len)` (what must fit under the ceiling) separately.
 * **`measure_speed()` imports the real device.** It does not construct one: it calls
   `m2_std_gate.run_fj`, the `Recording`/`Stopper`/`PcIO`/`NativeDeviceMemory` composition that

@@ -10,8 +10,9 @@ Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review c
 `docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-fullgame-metrics.md` — the owner's goal changed
 on 2026-09-06 and the 12M-ops render target is SUPERSEDED.** Success is now two numbers on the
 COMBINED FULL GAME (collision + sim + reset included): the 80th-percentile RUN of 10x100 frames
-at <= 20M ops/frame, and the binary at <= 35% of 2^27 words. Baseline: 93.5% of the ceiling and
-~33.4M ops/frame -- both FAIL. `docs/handoff-m4-nine-levels.md` is still the M4 reference.
+at <= 20M ops/frame, and the binary at <= 35% of 2^27 words. Baseline: ~93.5% of the ceiling and
+~33.4M ops/frame -- both FAIL, both UNVERIFIED (measured before the tools had controls; rung 1
+re-measures with `scratchpad/12m/gamespeed.py`). `docs/handoff-m4-nine-levels.md` is still the M4 reference.
 **M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
 whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:

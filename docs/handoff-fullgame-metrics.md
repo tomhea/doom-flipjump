@@ -16,6 +16,31 @@ but a change is judged by the two metrics above.
 
 ---
 
+## 0. OWNER DECISIONS (2026-09-06) — these settle G1 and G8
+
+**G1 — what the size target means: "pick the N that fits."** w=32 stays. Nine levels was never
+achievable at this width (the M4 budget of 357,978,424 words is **2.67x** the hard ceiling of
+2^27 = 134,217,728, so they do not fit at any usage %), and the width change is not being taken on
+now. The size goal is therefore **not** "make room for nine levels" but: *keep the binary small
+enough that levels can be added, and find the N that actually fits.* Concretely — at the
+post-Phase-A measured one-level span of 74,091,162 words, exactly ONE level fits. Making a level
+cheap enough that several fit is a real engineering goal; "nine levels" is not one at w=32.
+
+**G8 — arbitration between the two metrics: SPEED is the binding one, size must stay sane.**
+The owner's words: *"Speed is the more important one, but keep size at a sane size as more levels
+should enter the binary at later stage."* So:
+
+* an idea that cuts ops and grows the image is **acceptable while size stays under target**;
+* size is a **budget to spend on speed**, not a co-equal threshold — but it is a budget with a
+  purpose (levels land in this binary later), so spending it to zero is not "sane";
+* an idea that grows the image and does **not** cut ops needs a size reason of its own.
+
+⚠ This makes the SIZE instrument load-bearing rather than decorative, which is why
+CR-2026-09-06's finding on `word_pct` mattered: a size number that reads low by 2x would let the
+campaign spend a budget it does not have.
+
+---
+
 ## 1. Where the tree stands (2026-09-06)
 
 `main` is at **4218d27** (PR #82 merged, crist-APPROVED). It carries:
@@ -30,6 +55,12 @@ but a change is judged by the two metrics above.
 * `tests/host`: **485 passed, 0 failed**.
 
 ### The measured baseline, and why it fails BOTH metrics
+
+⚠ **Every number in the next two tables was produced by a tool that had no negative control at the
+time it ran** (`overflow_probe`, and `gamespeed`'s draft `word_pct`). Those controls now exist, so
+the numbers are re-measurable — but until they have been re-measured they are **UNVERIFIED** in the
+sense CLAUDE.md's "Performance Claims" rule means, and rung 1 exists to replace them. Do not carry
+them into a commit message or a claim without re-running the measurement.
 
 | | measured | target | verdict |
 |---|---:|---:|---|
@@ -57,31 +88,34 @@ biggest untouched lever and the reason 20M is plausible at all.
 
 ---
 
-## 2. THE INSTRUMENT — build this first, it does not exist yet
+## 2. THE INSTRUMENT — `scratchpad/12m/gamespeed.py`, and it now runs
 
-`scratchpad/12m/gamespeed.py` is **drafted to the owner's spec but NOT RUNNABLE.** Finish it before
-anything else; every claim in this campaign is measured with it.
+Finished 2026-09-06 after CR-2026-09-06 (PR #83) found the draft's `measure_speed()` was a guess.
 
-* **`word_pct()` — DONE and correct.** Decompresses the `.fjm` (LZMA2 raw, 64-byte header) and
-  returns `(words, 100*words/2^27)`.
-* **`measure_speed()` — the one thing to fix.** It needs the scripted-keyboard device the shipped
-  binary actually uses. The placeholder `from flipjump.interpreter.io_devices.pc_io import PcIO`
-  with `key_script=`/`frame_limit=` kwargs is a GUESS. **Read `scratchpad/m2_std_gate.py` and
-  `scratchpad/m5_gate.py`** — they build the stock `--io pc` device plus a screen that EOFs the
-  keyboard once N frames have been presented (`m2_std_gate` lines ~74–95). Reuse that object; do
-  not invent one. The point of the gates' device is that it is the same thing a human runs.
-* **Why one `run()` per game is enough:** `FjmRunner.run()` returns the run's total op count, and
-  the game self-resets internally, so a 100-frame key script is ONE native run. No per-frame
-  capture is needed — which is exactly why the owner asked for per-RUN percentiles.
-* **The 10 games** are deterministic index-driven key patterns (`script(seed)`), no RNG, so a
-  re-measure is reproducible.
-
-**R9 (a tool used as evidence needs a negative control): `gamespeed.py` has none yet.** Add one —
-e.g. a `--selftest` that measures a binary twice and requires identical run averages (determinism),
-and that a deliberately shortened frame limit changes the totals. A metric that cannot fail is not
-a metric.
-
----
+* **`word_pct()` now delegates to `scratchpad/12m/fjmsize.py`.** The draft did
+  `lzma.decompress(data[64:])` then `len(raw) // 4`. Both constants were unasserted assumptions:
+  `64` is `20 + 12 + 32*segment_num` and holds only at `segment_num == 1`, and `// 4` is
+  `memory_width // 8` and holds only at w=32. **At w=64 the draft reported twice the true word
+  count** — i.e. it would have called a failing SIZE a PASS, on the very width question §7's G1
+  raises. `fjmsize` derives both from the header and reports DATA words (the metric) and SPAN
+  words = `max(start+len)` (what must fit under the ceiling) separately.
+* **`measure_speed()` imports the real device.** It does not construct one: it calls
+  `m2_std_gate.run_fj`, the `Recording`/`Stopper`/`PcIO`/`NativeDeviceMemory` composition that
+  `fj --io pc` builds. The draft's `flipjump.interpreter.io_devices.pc_io` does not exist.
+* **The menu is measured and subtracted.** A run is `MENU_FRAMES` near-free menu frames plus
+  one-time startup, then the game; leaving them in the numerator deflates the average for a
+  reason that has nothing to do with the renderer. One calibration run measures the constant and
+  every run subtracts it — and BOTH figures print, so the choice is visible (gap G8).
+* **G6 is closed at the boundary.** `_demand_full_length` runs on every runner's result inside
+  `measure_speed`, not inside `one_run` — the first version put it in `one_run` and its own
+  negative control walked straight past it, reporting 250 ops/frame for a run that lost a frame.
+* **G5 is closed and measured.** The ten scripts fan out to ten different headings before walking.
+  `--validate` steps the ORACLE through all ten; the controls require ≥6 distinct end cells, every
+  run moving, and ≥256 units of spread. Measured: **9 distinct end cells of 10, minimum 276 units
+  travelled, 1,621-unit spread.**
+* **R9 is satisfied: `--selftest`, 13 controls, and they have already caught two real bugs**
+  (the misplaced frame assertion above, and `emit_sizes` measuring `repr()`). `--selftest --fjm
+  <path>` adds determinism on a real binary.
 
 ## 3. THE PLAN
 
@@ -89,8 +123,8 @@ a metric.
 
 The P10-5 selective padding is **~83M of the game's 125.5M words**. Reverting it:
 
-* size **93.5% → ~31% of 2^27** (the pre-pad game base is ~42M words, measured by
-  `scratchpad/12m/overflow_probe.py game`) — **the SIZE metric PASSES**;
+* size **93.5% → ~31% of 2^27** (the pre-pad game base is ~42M words — UNVERIFIED, `scratchpad/12m/overflow_probe.py game`
+  before it had a control) — **the SIZE metric PASSES**;
 * the image drops ~36MB → ~10–12MB and ~9.5GB → ~3GB of RAM, which is what makes a 10×100-frame
   measurement runnable at all (the current image thrashes; a 1,000-frame run would take hours);
 * it costs the padding's speed (deg median ~16.6M → ~17.6M), which **does not matter** under the
@@ -169,7 +203,8 @@ costs per frame. Measure it before optimising it; it may be small, or it may be 
 
 | tool | what it gives |
 |---|---|
-| `scratchpad/12m/gamespeed.py` | **the new success metric** — ⚠ speed half unfinished, no negative control yet |
+| `scratchpad/12m/gamespeed.py` | **the success metric** — mean + 80th-pct-run avg/frame + word%; `--validate`, `--selftest` (13 controls) |
+| `scratchpad/12m/fjmsize.py` | the ONE definition of the address ceiling `(1<<w)//w` and of an .fjm's word count; `--selftest` |
 | `scratchpad/12m/overflow_probe.py <tier>` | peak wflip address vs the 2^27 ceiling; says whether a tier assembles |
 | `scratchpad/12m/region_probe.py <tier>` | words per top-level region (label-gap attribution) — names WHERE the size is |
 | `scratchpad/12m/emit_sizes.py <tier>` | emitted source chars per program part |
@@ -263,7 +298,11 @@ applies here.
 Written by the author of the plan, immediately after writing it. Two are load-bearing enough to
 change what rung 0 means.
 
-### G1 (STRATEGIC, the biggest). The size target cannot serve its stated purpose at w=32.
+### G1 — ANSWERED 2026-09-06, see §0: "pick the N that fits", w=32 stays.
+
+*The analysis that raised it, kept because the arithmetic is the reason for the ruling:*
+
+#### G1 (STRATEGIC, the biggest). The size target cannot serve its stated purpose at w=32.
 
 The owner set the size goal because 93.5% "doesn't allow adding of new levels". But
 `docs/handoff-m4-nine-levels.md` §2 budgets nine levels at **~358M words** and says "the cap goes
@@ -292,7 +331,8 @@ nine levels", until the width question is answered.
 probe's `first_address` (42,034,242 words) — which is **not** what the metric measures. The metric
 is the DECOMPRESSED IMAGE, and the probe aborts before pass 2 adds the reset part.
 
-Calibrated on the padded build, where both numbers exist:
+Calibrated on the padded build, where both numbers exist — ⚠ both from the pre-control tools,
+so the ratio is a planning estimate and not a measurement:
 
 | | pass-1 probe | decompressed | ratio |
 |---|---:|---:|---:|
@@ -350,5 +390,5 @@ padded binary first — it thrashes, so cost it before committing.
   of which bias the run average — state whether the metric includes them (currently: it does).
 * The metric is defined on E1M1 with `--menu --doors`. Pin that as the measured configuration, or
   the number silently changes when the shipped config does.
-* No rule for an idea that improves one metric and worsens the other; both are hard thresholds, so
-  decide the arbitration rule before the first such idea appears.
+* ~~No rule for an idea that improves one metric and worsens the other~~ — **ANSWERED, see §0:
+  speed binds, size is a budget to spend on it while staying sane.**

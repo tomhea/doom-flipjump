@@ -60,21 +60,64 @@ backwards in four places; both directions are now named separately.)
 
 ### The measured baseline, and why it fails BOTH metrics
 
-⚠ **Every number in the next two tables was produced by a tool that had no negative control at the
-time it ran** (`overflow_probe`, and `gamespeed`'s draft `word_pct`). Those controls now exist, so
-the numbers are re-measurable — but until they have been re-measured they are **UNVERIFIED** in the
-sense CLAUDE.md's "Performance Claims" rule means, and rung 1 exists to replace them. Do not carry
-them into a commit message or a claim without re-running the measurement.
+✅ **MEASURED 2026-09-06 with the controlled instrument.** The earlier estimates in this section
+have been replaced by a real `gamespeed` run — the first end-to-end execution of the actual success
+criterion. Command, verbatim:
+
+```
+python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_menu_p105.fjm --runs 10 --frames 100
+```
+
+```
+SIZE: w=32  segments=1  data=125,492,170 words (93.50% of 2^27)  span=125,492,170 words (93.50%)  file=36,442,805 bytes
+calibration: startup + 2 menu frames = 538,417 ops (subtracted from every run)
+  run  0: 3,320,303,411 ops / 102 presented -> game-only 33,197,649 ops/frame
+  run  1: 2,558,390,067 ops / 102 presented -> game-only 25,578,516 ops/frame
+  run  2: 1,309,995,795 ops / 102 presented -> game-only 13,094,573 ops/frame
+  run  3: 3,209,977,696 ops / 102 presented -> game-only 32,094,392 ops/frame
+  run  4: 2,600,683,332 ops / 102 presented -> game-only 26,001,449 ops/frame
+  run  5: 1,562,531,076 ops / 102 presented -> game-only 15,619,926 ops/frame
+  run  6: 2,033,497,481 ops / 102 presented -> game-only 20,329,590 ops/frame
+  run  7: 1,431,574,147 ops / 102 presented -> game-only 14,310,357 ops/frame
+  run  8: 1,928,924,602 ops / 102 presented -> game-only 19,283,861 ops/frame
+  run  9: 1,457,554,661 ops / 102 presented -> game-only 14,570,162 ops/frame
+
+SPEED  mean run-average   : 21,408,048 ops/frame
+SPEED  80th-pct run avg   : 26,001,449 ops/frame   (target <= 20,000,000)  OVER
+SPEED  spread lo..hi      : 13,094,573 .. 33,197,649 ops/frame
+SPEED  raw (menu included): mean 20,993,561, 80th-pct 25,496,895 ops/frame
+SIZE   words              : 125,492,170 = 93.50% of 2^27   (target <= 35%)  OVER
+SIZE   span / file        : 125,492,170 words (93.50%) / 36,442,805 bytes
+```
+
+⚠ Still UNVERIFIED and NOT replaced by this run: `overflow_probe`'s pass-1 numbers (the 45.6%
+overflow, the pre-pad ~42M words) and the 1.184 pass-1→decompressed ratio. Those need an
+`overflow_probe game` run of their own, which rung 0 will produce anyway.
 
 | | measured | target | verdict |
 |---|---:|---:|---|
-| game binary words | **125,492,170 = 93.5% of 2^27** | ≤35% | **FAIL — and no room for new levels** |
-| game binary file | 36.4 MB | — | (fast-LZMA; 13.8× vs deg's 26.2×) |
-| full-game ops/frame | **~33.4M** (1,504,887,174 ops / 45 frames, `m2_std_gate`) | ≤20M @ p80 | **FAIL — needs ~40% off** |
+| game binary words (DATA) | **125,492,170 = 93.50% of 2^27** | ≤35% | **FAIL** |
+| game binary words (SPAN) | 125,492,170 = 93.50% | — | equal to DATA: one segment, nothing sparse |
+| game binary file | 36,442,805 bytes | — | |
+| **80th-pct run** | **26,001,449 ops/frame** | ≤20M | **FAIL — needs −23.1%** |
+| mean run-average | 21,408,048 ops/frame | — | |
+| run spread | 13,094,573 .. 33,197,649 | — | **2.54×** — why the metric is a percentile, not a mean |
 
-⚠ **The ~33.4M is a trajectory average from the play-test, not the new metric.** It is the only
-full-game number that exists. The first job of this campaign is to replace it with a real
-`gamespeed` baseline.
+### ⚠ The old ~33.4M figure was NOT representative, and the gap is half what §7's G3 assumed
+
+This handoff carried **~33.4M ops/frame**, taken from `m2_std_gate`'s single door-route trajectory.
+Measured across ten diverse runs, that route sits near the TOP of the range: the 80th-percentile
+run is **26.0M**. So the gap to target is **6.0M, not 13.4M**.
+
+That matters for G3, which concluded "the plan as written does not reach the target" by pricing
+rungs against 33.4M. Against 26.0M the arithmetic is far more comfortable — collision alone
+(~11.6M/frame, never optimised) is nearly twice the whole remaining gap.
+
+⚠ Two cautions before anyone celebrates. First, the mean (21.4M) is *just* above target while the
+p80 (26.0M) is 30% over — a mean-based reading of this same data would have flattered the binary,
+which is exactly the failure the owner's percentile spec prevents. Second, this is the PADDED
+binary; rung 0 reverts that padding and gives some speed back (LEDGER P10-1 vs P10-5: deg median
+17,135,838 vs 16,584,954, +3.3%), so expect the baseline to move to roughly 26.5M.
 
 ### Why the full game costs ~2× the render
 

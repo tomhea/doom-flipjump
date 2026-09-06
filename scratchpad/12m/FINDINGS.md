@@ -1934,3 +1934,44 @@ Consequences for planning:
 * Per FINDINGS AC the only thing that moves `exact_xor` is FEWER CALLS, and per AZ padding is
   bounded. So the remaining route is a broad reduction in hex operations across many macros, or a
   fidelity decision -- not one more surgical strike.
+
+## BC — op attribution RANKS correctly but does NOT predict savings. W1 came in 7.9x short.
+
+W1 narrowed the two 8-nibble `hex.sparse_mov PAD, 8, x, x1` calls in `seg_pass1_leaf_body_lines`
+and `seg_pass2_leaf_body_lines` to `sparse_zero 8` + `sparse_mov 2`. Provably identical (x1 is a
+clipped column in [0,161], so `mov 8` already wrote zeros into x's top 6), and `m2_std_gate` PASS
+confirms it — every frame byte-exact.
+
+| | S2 | W1 | delta |
+|---|---:|---:|---:|
+| binding | 23,493,680 | 23,447,960 | **−45,720** |
+| mean | 21,466,274 | 21,397,319 | −68,955 |
+| p80 | 25,521,087 | 25,498,601 | −22,486 |
+| words | 51,095,972 | 51,094,744 | −1,228 |
+
+**Predicted ~362,000 ops/frame. Measured 45,720. 7.9x short.**
+
+The prediction came from the matched profile: the l2332 call is attributed 1,840,988 ops and the
+l2398 call 1,059,850, and the transform removes 4 of 16 nibble-ops (25%). Both inputs were right;
+the inference was not.
+
+### Why: attributed ops are not removable ops
+
+Ops attributed to a call site include machinery that survives the narrowing — the wflip chain
+whose cost is `popcount(target)` regardless of how many nibbles follow, the switch-table walk, and
+the pointer arithmetic. Removing 25% of a call's NIBBLE positions does not remove 25% of its ops.
+
+**Rule: use the profile to RANK targets, never to size them.** Size them by building.
+The campaign's estimate errors, in order: pad size +2M then +33M words (absorption), `distscale`
+~1.19M ops (attribution artifact), W1 ~362k ops (this). Three different mechanisms, one habit.
+
+### What this says about the 20M target
+
+The gap after W1 is **3,447,960 ops/frame**. At W1's measured rate that is **~75 more changes of
+the same kind**, each needing its own build, gate and measurement. The frame is flat (BB): no macro
+above 6.72%, one hot primitive reached from everywhere. Width narrowing is real and safe but it is
+a ~0.2%-per-change lever.
+
+20M is not reachable by this class of work. Reaching it needs either a structural change to how the
+renderer uses hex operations, or a fidelity decision (fewer columns, coarser spans) — which is the
+owner's call, not an optimisation.

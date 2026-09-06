@@ -2329,7 +2329,14 @@ ns frame {
         // M13-mapunits: the map-unit variant -- 4-nibble atan front end, no rwa (dead here)
         proj.wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn_aff, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
-        hex.sparse_mov 4096, 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
+        // W1: `mov 8` -> `zero 8` + `mov 2`. Provably identical: x1 is a CLIPPED COLUMN in
+        // [0,161] (2 nibbles), so `mov 8` already writes zeros into x's top 6 -- this writes
+        // the same final state with 12 nibble-ops instead of 16. Safe here and NOT at l1208,
+        // because there `frame.ptr_index4` indexes by `x` (8 nibbles, R11) while here it
+        // indexes by `x1`, and x is only ever read 2-wide (`hex.cmp 2`, `hex.inc 2`).
+        // Measured: this one call is 1,840,988 ops = 2.34% of the frame (FINDINGS BC).
+        hex.sparse_zero 4096, 8, x
+        hex.sparse_mov 4096, 2, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
         frame.ptr_index4 dptr, dbase, x1
         rep(noscan, k) .lines_jmp occproc        // ablate: what does the pre-scan actually buy?
@@ -2395,7 +2402,10 @@ ns frame {
         // NEAREST MARKING seg's, per column, so the addresses move into the loop below.
         rep((1-pnear)*(1-ascode), k) .lines_seg_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         rep((1-pnear)*ascode, k) .lines_seg_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
-        hex.sparse_mov 1024, 8, x, x1                        // the claim loop: re-aim drawn[] at x1
+        // W1: see the note at the pass-1 site -- same transform, same reason (indexed by x1).
+        // Measured: 1,059,850 ops = 1.35% of the frame.
+        hex.sparse_zero 1024, 8, x
+        hex.sparse_mov 1024, 2, x, x1                        // the claim loop: re-aim drawn[] at x1
         frame.ptr_index4 dptr, dbase, x1
         // idea 11: the load pointers walk in LOCKSTEP with x, like dptr/pclm above.
         rep(1-noproj, k) .lines_dda_seed scale, scalestep, p2_wtc8, p2_wtf8

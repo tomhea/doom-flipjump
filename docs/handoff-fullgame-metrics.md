@@ -197,6 +197,67 @@ costs per frame. Measure it before optimising it; it may be small, or it may be 
 
 ---
 
+## 6b. BRANCH, COMMIT, CHECK AND CR RULES for this campaign
+
+The process this campaign runs under. `docs/cr-rules.md` (R1-R9) is the contract; this pins how it
+applies here.
+
+### Branch
+
+* **Start from `main`** (currently **4218d27**), not from `m4-nine-levels`. That branch is merged
+  and its remaining purpose is M4 groundwork; carrying its 100+ commits again is how a 2,214-line
+  PR happened, and it is what made review expensive.
+* **One branch per rung**, named per R7: `m6-fullgame-metrics` for the campaign's milestone work,
+  `s-<topic>` for a spike (e.g. `s-collision-descents` to measure before committing to a design),
+  `fix/<slug>` for a hotfix. **Not** a single long-lived branch accumulating the whole campaign.
+* ⚠ **`flipjump-151` is a SECOND repo** on branch `1.5.1`, wired in as an editable install. An stl
+  change is a separate commit there with its own message, and the doom PR body must name the stl
+  commit it depends on (this campaign's baseline needs **dc9ff1a**). **As of 2026-09-06 that repo
+  has 9 unpushed commits, including the one `main` already depends on** — settle that before
+  building on it, or a fresh clone silently builds the wrong stl and hits the game-tier overflow.
+
+### Commit
+
+* **One idea per commit**, message carrying the PROOF NUMBERS (op counts, word counts, byte-exact
+  frame counts, test names) and no adjectives — CLAUDE.md's housekeeping rule.
+* **Never `git add -A scratchpad/`.** Stage named files only; `scratchpad/` holds hundreds of
+  untracked artifacts and one careless add swept 204 MB of label tables this session.
+* A KILLED idea still gets a commit or a LEDGER row with its measured numbers. The killed rungs
+  (P3-2b, P7-12, P8-1, P10-2, P10-6) are why the pad pool is closed rather than re-tried.
+* Never write "verified"/"identical" for a property no gate actually ran on (R9's last line).
+
+### Check — what must pass before a PR
+
+| check | cost | when |
+|---|---|---|
+| `python -m pytest tests/host -q` | ~1 min | every change |
+| `python -m pytest tests/fj/<touched>.py -q` | seconds | emitter changes |
+| `scratchpad/12m/ritual.py all --id <ID> --base <BASE>` | heavy | any change that can move a pixel or an op — gives deg 4/4 + sweep 260/260 + the ledger row |
+| `scratchpad/12m/overflow_probe.py game` | heavy | **any stl or shared-emitter change** — the pad round broke the shipped game for weeks because every gate built deg |
+| `scratchpad/m2_std_gate.py --fjm <game>` | heavy | before any merge — the only check that exercises collision, doors, menu and the reset together |
+| `scratchpad/12m/gamespeed.py --fjm <game>` | heavy | **the ship criterion**: mean + 80th-pct-run avg-per-frame + word% |
+
+⚠ **One heavy build at a time** (CLAUDE.md rule 1), and check the PROCESS is gone
+(`Get-Process python`), not that the log looks finished.
+
+### CR
+
+* **Every merge to `main` goes through a PR reviewed by `crist`** (`Agent(subagent_type="crist")`,
+  invoke with the PR number). It reviews against R1-R9 and posts the verdict with `gh`.
+* **Loop until APPROVED**, then merge. The PR #82 round is the worked example: CHANGES_REQUESTED
+  with 3 findings (R5 missing a call-twice reentrancy test, R1 missing FAIL/PASS fences, R7 title
+  and headers), fixed, re-reviewed, APPROVED, merged.
+* **PR body shape is not optional** (R1/R7): a fenced **FAIL** log (the test red before the change)
+  and a fenced **PASS** log (after), under `## TDD evidence (R1)`, plus `## Integration evidence
+  (R2)` carrying the measured whole-program numbers. Prose summaries do not satisfy R1 — that was
+  a finding this session.
+* **R9 applies to this campaign's own instrument.** `gamespeed.py` is quoted as the success metric,
+  so it may not be cited until it has a negative control (§2, and gap G6).
+* **Docs-only changes still go through a PR** — small, but the handoff is the thing the next
+  session reads, and it belongs on `main` rather than on a branch.
+
+---
+
 ## 7. GAPS IN THIS PLAN — read before executing it
 
 Written by the author of the plan, immediately after writing it. Two are load-bearing enough to

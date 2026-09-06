@@ -97,6 +97,36 @@ def test_walk_matches_the_contract(tmp_path, idx, lo, hi):
     _run(tmp_path, idx, lo, hi, walk(LISTS[idx], lo, hi))
 
 
+def test_walk_is_reentrant_call_twice_per_entry(tmp_path):
+    """R5: `vpb_walk` is a dispatch through the SHARED cells `vpb_dsp` (the xored index) and, after
+    S2, `vpb_px` (the pair-block fcall's 3-lane return). Both MUST restore to zero between calls, or
+    the SECOND walk of any entry drifts. A single-call test cannot see that -- the risk the new
+    self-modifying `vpb_px` lanes add is precisely non-restoration across calls. So walk the SAME
+    entry twice in one program (and two DIFFERENT entries, and a shared-body pair) and require every
+    call's output to match the oracle. The second call proving correct is the reentrancy proof."""
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
+    # (idx, lo, hi) pairs run back-to-back through ONE program; each must be byte-exact on its own.
+    seq = [(0, 0, 25),      # a clamp, twice in a row -> vpb_px lanes must reset
+           (0, 0, 25),
+           (3, 8, 200),     # a different entry (==/stop arm) right after
+           (1, 0, 25),      # the SHARED body of list 0, after list 0 itself ran twice
+           (4, 0, 200)]     # a cross-body-shared entry last
+    body = ["stl.startup_and_init_all", generate_bands_walk_fj(LISTS)]
+    printer = []
+    for k, (idx, lo, hi) in enumerate(seq):
+        body += [f"    hex.set 2, tqlo, {lo}", f"    hex.set 2, tqhi, {hi}",
+                 "    vql_load tqlo", "    vqh_load tqhi",
+                 f"    hex.set 4, twid, {idx}", "    vpb_walk twid"]
+    body += ["    stl.loop", "tqlo: hex.vec 2", "tqhi: hex.vec 2", "twid: hex.vec 4", ""]
+    p = tmp_path / "bands_twice.fj"
+    p.write_text(chr(10).join(body), encoding="utf-8")
+    expected = b"".join(walk(LISTS[idx], lo, hi) for (idx, lo, hi) in seq)
+    ok = fj.assemble_and_run_test_output(
+        [consts.resolve(), p.resolve()], b"", expected,
+        memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
+    assert ok, "vpb_walk is not reentrant: a repeated/second call drifted (vpb_dsp or vpb_px not restored)"
+
+
 def test_identical_lists_share_one_body(tmp_path):
     """`owner` dedup: lists 0 and 1 are equal, so exactly one `vpb_body` exists for the pair."""
     src = generate_bands_walk_fj(LISTS)

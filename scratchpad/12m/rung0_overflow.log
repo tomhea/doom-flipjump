@@ -1,0 +1,8 @@
+driving the 'game' build to pass 1 (instrumented) ...
+reached emit_reset_part without an OverflowError -- pass 1 completed
+
+wflip spots handed out : 10,841,319
+peak wflip address     : 1,623,772,480 bits = 50,742,890 words
+ceiling (w=32)          : 134,217,728 words (2^27)
+OVER by                : -83,474,838 words (-62.2% of the ceiling)
+VERDICT                : FITS

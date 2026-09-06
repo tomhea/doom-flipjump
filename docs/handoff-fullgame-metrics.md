@@ -162,6 +162,55 @@ state at `0dcda77`, keeping the `sparse_*` macros as an unused tool), one rebuil
 
 ⚠ It changes what is on `main`, so it goes through the normal gate + a small PR.
 
+### Rung 0 — DONE and MEASURED (2026-09-06). Size −59.1%, speed +5.98%.
+
+Reverted `flipjump-151`'s 9 padded stl files to `0dcda77`, keeping the three `sparse_*` macros as
+an inert tool (nothing calls them; FINDINGS AJ/AQ says do not re-open that direction). Rebuilt with
+`python scratchpad/m5_build.py --menu --doors`, 830 s.
+
+| | baseline (padded) | **rung 0** | Δ |
+|---|---:|---:|---:|
+| **80th-pct run** | 24,723,058 | **26,201,318** | **+5.98%** |
+| mean run-average | 20,579,907 | 21,746,446 | +5.67% |
+| **words** | 125,492,170 = 93.50% | **51,377,724 = 38.28%** | **−59.1%** |
+| file | 36,442,805 B | 18,087,200 B | −50.4% |
+
+**Checks, all run, logs committed:**
+* `overflow_probe game` → **FITS**, peak 50,742,890 words, 62.2% under the ceiling
+  (`scratchpad/12m/rung0_overflow.log`)
+* `m2_std_gate` → **PASS**, 45/45 frames byte-exact, door 48 reaching 9 distinct states carried
+  across the M1 reset, all four controls (`scratchpad/12m/rung0_m2gate.log`)
+* `gamespeed --runs 10 --frames 100` (`scratchpad/12m/rung0_speed.log`)
+
+**Two numbers G2 reasoned from were both wrong, and the errors partly cancelled:**
+
+| figure | G2 assumed | MEASURED | error |
+|---|---:|---:|---|
+| pre-pad pass-1 words | 42,034,242 | **50,742,890** | +20.7% |
+| pass-1 → decompressed ratio | 1.184 | **1.0125** | −14.5% |
+
+G2's ~37.1% prediction landed near the true 38.28% because those two errors ran opposite ways.
+That is luck, not method — and the reason CR-2026-09-06 refused to let either be re-labelled
+instead of re-measured. ⚠ The LEDGER's P10-1 row ("game tier fits, 42M words") describes a config
+with MORE padding than this revert yet records a SMALLER size; that ordering is backwards, so treat
+that row as a pre-control mismeasurement until someone re-runs it.
+
+**The trade, priced:** rung 0 bought 55.2 points of ceiling for 1,478,260 ops/frame — about
+**26,771 ops/frame per point of size freed**. Under the owner's G8 ruling (speed binds, size stays
+sane for future levels) this is the right direction: 93.50% was not sane, and it is what prompted
+the goal. But it is a speed REGRESSION and must be booked as one.
+
+### Where rung 0 leaves the two targets
+
+| | now | target | gap |
+|---|---:|---:|---:|
+| speed (p80) | 26,201,318 | 20,000,000 | **−6,201,318, i.e. −23.7%** |
+| size | 51,377,724 = 38.28% | ≤35% | **−4,401,520 words, −8.6%** |
+
+G2 named the next size lever before any of this was measured: S2-style sharing of the collision
+`try_move`, worth ~4.3M words against a 4,401,520-word shortfall. That is the right size — but per
+**G4 it is a SIZE lever and buys no ops**, so it does not touch the speed gap.
+
 ### Rung 1 — the baseline
 
 Rebuild the game (`python scratchpad/m5_build.py --menu --doors --out build/<name>.fjm`), then

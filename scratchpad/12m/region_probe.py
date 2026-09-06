@@ -175,9 +175,11 @@ def selftest():
     check("C5 a single label yields no regions (nothing to diff)",
           regions({"only": 0}, 32) == [])
 
-    # C6  THE HOOK CONTROL, against the REAL assembler -- the pattern overflow_probe C4 uses and
-    #     that this file was missing. Everything above runs on a synthetic dict, so none of it
-    #     would notice if `labels_resolve` were renamed and the hook silently stopped firing.
+    # C6  THE HOOK CONTROL, against the REAL assembler. Everything above runs on a synthetic dict,
+    #     so none of it would notice if `labels_resolve` were renamed and the hook silently stopped
+    #     firing. `overflow_probe` C4 is the sibling control; its FIRE half was the model here, but
+    #     its UNINSTALL half was vacuous (a fresh spy asserted empty, which is true by
+    #     construction) and has since been fixed to the shape used below. CR-2026-09-06 round 3.
     import tempfile
     import flipjump as fj
     TINY = chr(10).join(["stl.startup_and_init_all", "    stl.loop", ""])

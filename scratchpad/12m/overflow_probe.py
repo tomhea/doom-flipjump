@@ -193,10 +193,17 @@ def selftest():
               % (format(hooked.spots, ","), format(hooked.peak_words, ",")))
         check("C4 a real tiny program FITS", hooked.verdict() == "FITS")
 
+        # ... and uninstall must really uninstall. INSTALL a second spy, remove it, then assemble:
+        # if the uninstaller were a no-op the hook would still be live and this spy would fill.
+        # ⚠ The first version of this check just made a fresh spy and asserted `spots == 0` --
+        # true by construction, and a no-op uninstaller passed it. CR-2026-09-06 round 3.
         after = WflipSpy(32)
+        un2 = install(after)
+        un2()
         fj.assemble([src], tmp / "unhooked.fjm", memory_width=32, print_time=False)
-        check("C4 uninstall really uninstalls (a fresh spy sees nothing)", after.spots == 0,
-              "and it therefore reports %s" % after.verdict())
+        check("C4 uninstall really uninstalls (an installed-then-removed spy stays empty)",
+              after.spots == 0,
+              "captured %s spots after uninstall" % format(after.spots, ","))
 
     print("")
     print("SELFTEST %s%s" % ("PASS" if not fails else "FAIL",

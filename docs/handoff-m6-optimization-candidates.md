@@ -36,9 +36,12 @@ target whose removal closes the 3,447,960 gap. Expect many small wins, or a stru
 
 ## THE BIGGEST SINGLE FINDING, and it spans places 7 and 8
 
+⚠ **THE FIX NAMED HERE WAS TRIED AND IS WORSE — see idea 7.1.** The measurement stands as the
+reason: the call really is 5.12% of the frame, but making it lazy costs more than it saves.
+
 `hex.read_table_packed 8, cl_box, lnbox, n_ln, li` is **55.4% of `sim.try_move` and 49.4% of
 `sim.check_position`** — together **5.12% of the whole frame** in ONE call. The comment directly
-above it already names the fix and does not apply it:
+above it names a fix that does not survive measurement:
 
 > *"the BBOX HALF ONLY — 8 bytes... Most candidates die on the four compares below, and every byte
 > read for them was wasted... Same lever M14.5 applied to `thing_load`."*
@@ -208,7 +211,18 @@ Hot calls: `mul_lo@l1743` (16.3%), `@l1744` (15.3%), `sparse_mov@l1741` (width 5
 Hot calls: **`read_table_packed@l123` (width 8, 55.4%)**, `read_table_packed@l258` (width 8,
 22.9%), `scmp@l127`/`@l130` (width 8, 7.9%), `read_table_packed@l248` (2.7%).
 
-1. **[M] ⚠ THE ONE TO TRY FIRST — lazy bbox read.** `read_table_packed 8` fetches all 8 bbox bytes
+1. **[M] ⚠⚠ TRIED AND KILLED — lazy bbox read is WORSE (C5b, 2026-09-07).** Built it, gated it,
+   measured it: binding **23,447,960 → 23,783,743 (+1.43%)**, size +216,488 words. Reverted.
+   Splitting `lnbox` into `lnboxx`/`lnboxy` and fetching y only on surviving the x rejects adds a
+   second `read_table_packed` pointer setup (`zero ptr`, `mul_const`, `add`, all 8-nibble) on the
+   SURVIVAL path — and it lost, which means **most candidates SURVIVE the x rejects** rather than
+   dying on them. The source comment's premise ("most candidates die on the four compares") is not
+   what the runtime does, or the setup dominates the saved byte reads. A 4-way split would be
+   worse still: more setups. `m2_std_gate` PASS throughout, so this was a performance result, not
+   a correctness one. Original text kept below because the reasoning was sound and the measurement
+   refuted it — that is the point of measuring.
+
+   ~~**THE ONE TO TRY FIRST — lazy bbox read.**~~ `read_table_packed 8` fetches all 8 bbox bytes
    before four compares that reject most candidates. Read minx (2 bytes), compare, and fetch the
    rest only on survival. The source comment already identifies this and cites M14.5 doing exactly
    this for `thing_load`. Affects places 7 AND 8 — **5.12% of the whole frame**.

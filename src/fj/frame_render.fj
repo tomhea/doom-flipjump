@@ -715,14 +715,14 @@ ns frame {
         // ⚠ the baked run list is relative to r0 (the column's FIRST OPAQUE row), not to the
         // sprite's row 0 -- exactly as the oracle's fragment stores `ytop_b + st[0]` as its base.
         // Fold r0 in ONCE here, so the emit's `trb_y0 + rel` is right and `trb_sy1` is the same row.
-        hex.zero 8, trb_run_w8                      // ... widened: `hex.add 8` reads EIGHT nibbles
+        hex.zero 6, trb_run_w8 + 2*dw   // ... widened: `hex.add 8` reads EIGHT nibbles
         hex.mov 2, trb_run_w8, trb_run_r0
         hex.mov 8, trb_y_base, trb_y0
         frame.add8_chain trb_y_base, trb_run_w8
         hex.set 8, trb_cbound, viewh
         hex.mov 8, trb_sy1, trb_y_base
         .clamp_row trb_sy1, trb_cbound
-        hex.zero 8, trb_run_w8
+        hex.zero 6, trb_run_w8 + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.mov 2, trb_run_w8, trb_run_last
         hex.mov 8, trb_sy2, trb_y_base
         frame.add8_chain trb_sy2, trb_run_w8
@@ -1205,7 +1205,7 @@ ns frame {
         hex.sparse_mov HOT_PAD, 2, pmax, xa
         hex.dec 2, pmax
       pmax_keep:
-        hex.sparse_zero HOT_PAD, 8, x
+        hex.sparse_zero HOT_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.sparse_mov HOT_PAD, 2, x, xa                        // the claim scan over the stride-1 pclm[]
         hex.set w/4, pbase, pclm
         // M4: `x` is the LOOP COUNTER as well as the index, so a wide pid cannot scale it in place
@@ -2339,7 +2339,7 @@ ns frame {
         // `ptr_index_fill` opens with `hex.mov w/4, dst, index` -- eight nibbles. The correctness
         // of this rewrite rests on the `zero 8` clearing all of them, NOT on x being narrow.
         // Measured: this one call is 1,840,988 ops = 2.34% of the frame.
-        hex.sparse_zero HOTTER_PAD, 8, x
+        hex.sparse_zero HOTTER_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.sparse_mov HOTTER_PAD, 2, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
         frame.ptr_index4 dptr, dbase, x1
@@ -2409,7 +2409,7 @@ ns frame {
         // W1: see the note at the pass-1 site. Same transform; the `zero 8` is load-bearing
         // because `x` IS read 8-wide downstream (frame.lines_step_load -> ptr_index4 -> mov w/4).
         // Measured: 1,059,850 ops = 1.35% of the frame.
-        hex.sparse_zero HOT_PAD, 8, x
+        hex.sparse_zero HOT_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.sparse_mov HOT_PAD, 2, x, x1                        // the claim loop: re-aim drawn[] at x1
         frame.ptr_index4 dptr, dbase, x1
         // idea 11: the load pointers walk in LOCKSTEP with x, like dptr/pclm above.

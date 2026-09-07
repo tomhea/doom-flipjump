@@ -117,7 +117,7 @@ ns proj {
         rep(1-disp, k) hex.read_table_packed 3, recip, slopediv_recip8, 3, den_norm  // recip8[m] = ((1<<24)//m) << 3
         rep(disp, k) sdrecip.lookup recip, den_norm
 
-        hex.zero 8, recip_wide
+        hex.zero 2, recip_wide + 6*dw   // only the HIGH 2: the mov below zeroes the low 6
         hex.mov 6, recip_wide, recip
         // the mod-16^8 product needs only num_norm's 3 post-normalize nibbles as multiplier rows
         hex.zero 8, prod
@@ -1108,7 +1108,7 @@ ns proj {
         hex.div 8, 8, quot, rem, tcol_abs, tw, baddiv  // rem = |tcol| % tw
         hex.cmp 8, rem, czero, rem_nz, rem_zero, rem_nz   // rem == 0 ? (unsigned magnitude)
       rem_zero:
-        hex.zero 8, dst                                // exact multiple -> 0
+        // (zero dropped: the mov below zeroes all 8 nibbles itself)
         ;end
       rem_nz:
         hex.mov 8, dst, tw
@@ -1164,7 +1164,7 @@ ns proj {
         ;recip_norm
       recip_norm_done:
         hex.read_table_packed 3, recip_m, slopediv_recip, 3, scale_norm   // recip[m]  (m = low 3 nibbles)
-        hex.zero 8, iscale_pre
+        hex.zero 3, iscale_pre + 5*dw   // only the HIGH 3: the mov below zeroes the low 5
         hex.mov 5, iscale_pre, recip_m
         hex.shl_hex 8, 2, iscale_pre                            // recip << 2 nibbles
       recip_shift:
@@ -1335,24 +1335,24 @@ ns proj {
         // ⚠ the tr slices are FOUR nibbles then sign_extend'ed to five: a `mov 5` from
         // tr+4*dw reads past the 8-nibble register into its neighbour. The gate caught
         // exactly that as thousands of missing sprite pixels (mass over-reject), 2026-09-03.
-        hex.zero 5, pth_dbound
+        hex.zero 1, pth_dbound + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
         hex.mov 4, pth_dbound, sp_tzmax + 4*dw
         hex.shl_bit 5, pth_dbound
         hex.shl_bit 5, pth_dbound
-        hex.zero 5, pth_dtest
+        hex.zero 1, pth_dtest + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
         hex.mov 4, pth_dtest, sp_tzmax + 4*dw
         hex.shr_bit 5, pth_dtest
         hex.shr_bit 5, pth_dtest
         hex.add 5, pth_dbound, pth_dtest
         hex.inc 5, pth_dbound
         hex.inc 5, pth_dbound
-        hex.zero 5, pth_dtest
+        hex.zero 1, pth_dtest + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
         hex.mov 4, pth_dtest, pth_tr_x + 4*dw
         hex.sign_extend 5, 4, pth_dtest
         hex.abs 5, pth_dtest
         hex.cmp 5, pth_dtest, pth_dbound, linf_x_ok, linf_x_ok, reject
       linf_x_ok:
-        hex.zero 5, pth_dtest
+        hex.zero 1, pth_dtest + 4*dw   // only the HIGH 1: the mov below zeroes the low 4
         hex.mov 4, pth_dtest, pth_tr_y + 4*dw
         hex.sign_extend 5, 4, pth_dtest
         hex.abs 5, pth_dtest
@@ -1726,7 +1726,7 @@ ns proj {
       dyv_pos:                             // (two's-complement truncation identity)
         hex.set 1, pos_sign_dyv, 0
       dyv_done:
-        hex.sparse_zero HOTTER_PAD, 8, pos_dyv_mag
+        hex.sparse_zero HOTTER_PAD, 3, pos_dyv_mag + 5*dw   // only the HIGH 3: the mov below zeroes the low 5
         hex.sparse_mov HOTTER_PAD, 5, pos_dyv_mag, pos_dyv
 
         hex.sign 10, pos_dxv, dxv_neg, dxv_pos
@@ -1737,7 +1737,7 @@ ns proj {
       dxv_pos:
         hex.set 1, pos_sign_dxv, 0
       dxv_done:
-        hex.sparse_zero HOTTER_PAD, 8, pos_dxv_mag
+        hex.sparse_zero HOTTER_PAD, 3, pos_dxv_mag + 5*dw   // only the HIGH 3: the mov below zeroes the low 5
         hex.sparse_mov HOTTER_PAD, 5, pos_dxv_mag, pos_dxv
 
         hex.mul_lo 8, pos_p1, pos_dyv_mag, cdx_mag   // pos_p1 = |dx|*|pos_dyv|
@@ -1823,7 +1823,7 @@ ns proj {
         // M13-ATANDISP: the reciprocal through the D4 dispatch table too -- 3 x
         // read_byte_and_inc (42@ each) + a mul_const ~ 247@ becomes a ~20@ lookup.
         sdrecip.lookup recip, den_norm
-        hex.zero 8, recip_wide
+        hex.zero 2, recip_wide + 6*dw   // only the HIGH 2: the mov below zeroes the low 6
         hex.mov 6, recip_wide, recip
         hex.zero 8, prod
         rep(3, j) hex.fixed_mul_lo.row 8, j, prod, recip_wide, num_norm

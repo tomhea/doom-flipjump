@@ -46,7 +46,7 @@
 ns sim {
     // sim.sext16 dst, src — sign-extend a 4-nibble int16 into an 8-nibble two's-complement value.
     def sext16 dst, src @ neg, done {
-        hex.zero 8, dst
+        hex.zero 4, dst + 4*dw   // only the HIGH 4: the mov below zeroes the low 4
         hex.mov 4, dst, src
         hex.sign 4, src, neg, done
       neg:
@@ -247,7 +247,7 @@ ns sim {
         hex.add 4, cb_idx, cb_bx
         hex.read_table_packed 3, cb_row, bkoff, n_bk, cb_idx
         hex.mov 4, cb_first, cb_row                    // [offset:2] = the first 4 nibbles
-        hex.zero 4, cb_count
+        hex.zero 2, cb_count + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, cb_count, cb_row + 4*dw             // [count:1]
         hex.mov 4, cb_k, cb_first
         hex.mov 4, cb_kend, cb_first
@@ -504,13 +504,13 @@ ns sim {
         hex.set w/4, pbase, thpos
         hex.ptr_index pptr, pbase, poff
         hex.read_hex 16, pos, pptr
-        hex.sparse_zero HOTTER_PAD, 10, ptx
+        hex.sparse_zero HOTTER_PAD, 6, ptx + 4*dw   // only the HIGH 6: the mov below zeroes the low 4
         hex.sparse_mov HOTTER_PAD, 4, ptx, pos + 4*dw             // the INTEGER part of a 16.16 is nibbles 4..7
         hex.sign 4, pos + 4*dw, xn, xp
       xn:
         hex.set 6, ptx + 4*dw, 0xFFFFFF
       xp:
-        hex.sparse_zero HOTTER_PAD, 10, pty
+        hex.sparse_zero HOTTER_PAD, 6, pty + 4*dw   // only the HIGH 6: the mov below zeroes the low 4
         hex.sparse_mov HOTTER_PAD, 4, pty, pos + 12*dw
         hex.sign 4, pos + 12*dw, yn, yp
       yn:

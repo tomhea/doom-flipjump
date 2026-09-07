@@ -219,9 +219,9 @@ ns stream {
       wsbody:
         hex.read_byte_and_inc y2r, ptr             // cum band index (1..16)
         hex.read_byte_and_inc colr, ptr            // the band's final palette byte
-        hex.zero 4, mul_cum                        // both operands zero-extended to the mul width
+        hex.zero 2, mul_cum + 2*dw   // both operands zero-extended to the mul width
         hex.mov 2, mul_cum, y2r                    // (mul_lo n reads n nibbles from BOTH sources)
-        hex.zero 4, mul_wlen
+        hex.zero 2, mul_wlen + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, mul_wlen, wlen
         hex.mul_lo 4, mul_out, mul_cum, mul_wlen   // cum * wlen  (<=16 x <=100)
         hex.shr_hex 4, 1, mul_out                  // >> 4 bits = the 1/16 split
@@ -931,9 +931,9 @@ ns stream {
         hex.mov 2, srw_smidx + 2*dw, slr
         hex.mov 4, srw_y0, sy0b   // (hex.mov zeroes dst first)
         hex.sub_constant 4, srw_y0, 32768
-        hex.zero 4, srw_wlo4                        // widened window rows (the row math is 4-nibble)
+        hex.zero 2, srw_wlo4 + 2*dw   // widened window rows (the row math is 4-nibble)
         hex.mov 2, srw_wlo4, wlo
-        hex.zero 4, srw_whi4
+        hex.zero 2, srw_whi4 + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, srw_whi4, whi
         // srw_rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
         // no counter register, no per-run compare, no n_ent read. Every real run ends at row
@@ -945,7 +945,7 @@ ns stream {
         hex.read_byte_and_inc srw_rel, srw_ptr
         hex.if0 2, srw_rel, send
         hex.read_byte_and_inc srw_tex, srw_ptr
-        hex.zero 4, srw_rel_w
+        hex.zero 2, srw_rel_w + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, srw_rel_w, srw_rel
         hex.mov 4, srw_yabs, srw_y0
         frame.add4_chain srw_yabs, srw_rel_w
@@ -1006,7 +1006,7 @@ ns stream {
         hex.read_byte_and_inc srn_rel, srn_ptr
         hex.if0 2, srn_rel, send
         hex.read_byte_and_inc srn_tex, srn_ptr
-        hex.zero 4, srn_rel_w
+        hex.zero 2, srn_rel_w + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, srn_rel_w, srn_rel
         hex.mov 4, srn_yabs, srn_y0
         frame.add4_chain srn_yabs, srn_rel_w

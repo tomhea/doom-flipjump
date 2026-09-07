@@ -66,7 +66,7 @@ ns plane {
         ;norm_loop
       norm_done:
         hex.read_table_packed 3, recipv, slopediv_recip, 3, denom   // recip[m] (packed, M13-lutpack)
-        hex.zero 8, bb_recip_out
+        hex.zero 3, bb_recip_out + 5*dw   // only the HIGH 3: the mov below zeroes the low 5
         hex.mov 5, bb_recip_out, recipv
         hex.shl_hex 8, 2, bb_recip_out             // recip << 2 nibbles
       unshift_loop:                                 // undo the normalization: shift back down rshift times
@@ -122,7 +122,7 @@ ns plane {
         // basewidth=0 leaves bb_base unread -- this dummy read (overwritten right below)
         // keeps the extern used so warning-as-error doesn't trip. rep(0,..) when basewidth=1.
         rep(1-basewidth, k) hex.mov 2, lvl, bb_base
-        hex.zero 3, lvl
+        hex.zero 1, lvl + 2*dw   // only the HIGH 1: the mov below zeroes the low 2
         hex.mov 2, lvl, bb_light
         hex.shr_hex 3, 1, lvl                       // lvl = light >> 4 (LIGHTSEGSHIFT)
         hex.if0 8, bb_ph, phzero
@@ -161,7 +161,7 @@ ns plane {
         stl.fcall recip32_leaf, plane_recip_ret
         hex.mov 8, zstep, bb_recip_out   // (hex.mov zeroes dst first)
         hex.shl_hex 8, 1, zstep                         // zstep = recip << 1 nibble ( *16 ) = one zidx bucket
-        hex.zero 8, zidx8
+        hex.zero 5, zidx8 + 3*dw   // only the HIGH 5: the mov below zeroes the low 3
         hex.mov 3, zidx8, zidx
         hex.mul 8, thresh_lo, zstep, zidx8              // thresh_lo = zstep*zidx
         hex.mov 8, thresh_hi, thresh_lo                 // thresh_hi = zstep*(zidx+1) = lo + zstep

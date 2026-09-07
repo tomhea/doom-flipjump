@@ -1,0 +1,10 @@
+TABLE PLACEMENT on the deg gate -- 8,192 tables relocated, run_ops=16, base 0x80000000, span 0x8000000
+
+  viewpoint                        baseline         placed          delta      pct  pixels
+  664,291,0x18000000             33,205,851     31,822,535     -1,383,316   -4.17%  BYTE-EXACT
+  1272,-724,0x40000000           26,407,589     24,517,933     -1,889,656   -7.16%  BYTE-EXACT
+  1869,479,0x80000000            30,631,732     29,413,975     -1,217,757   -3.98%  BYTE-EXACT
+  -416,256,0x0                   24,986,008     22,752,164     -2,233,844   -8.94%  BYTE-EXACT
+  TOTAL                         115,231,180    108,506,607     -6,724,573   -5.84%
+
+  all four BYTE-EXACT: True

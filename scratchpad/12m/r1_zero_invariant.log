@@ -1,0 +1,18 @@
+# R1 evidence for the zero-invariant test, captured by re-running it
+# (a) remove the pad-normalising re.sub -> the test must FAIL
+        # `hex.sparse_zero PAD, n, x` is `hex.zero n, x` with the wflip-target pad passed in (the
+>       assert cleared, "sim.thing_pass clears nothing -- the zero invariant is gone"
+E       AssertionError: sim.thing_pass clears nothing -- the zero invariant is gone
+E       assert {}
+1 failed in 1.23s
+
+# (b) restored -> the test must PASS
+1 passed in 1.12s
+
+# (c) SABOTAGE: delete one sp_ register clear from sim.thing_pass -> must be REJECTED
+# removed: hex.sparse_zero HOT_PAD, 8, sp_x
+        # `hex.sparse_zero PAD, n, x` is `hex.zero n, x` with the wflip-target pad passed in (the
+1 failed in 1.19s
+
+# (d) sabotage reverted -> PASS again
+1 passed in 1.10s

@@ -1,0 +1,28 @@
+# mutation matrix for scratchpad/12m/hotpath.py -- captured af57b68
+# each block: the mutation applied, then the last line of --selftest
+
+MUTATION: FAR_PAST_LABEL_BITS = 4096 * 64  ->  FAR_PAST_LABEL_BITS = 10**18
+SELFTEST FAIL: C6 rank() COUNTS the far ops (not silently zero), C6 a MISMATCHED pair is REJECTED end to end, C5 an op far past a bare label is UNATTRIBUTED, not credited to it
+
+MUTATION:     rank.last_far = far  ->      pass
+SELFTEST FAIL: C6 rank() reports its drop count (the plumbing is exercised), C6 rank() COUNTS the far ops (not silently zero), C6 a MISMATCHED pair is REJECTED end to end
+
+MUTATION:                 far += n  ->                  far += 0
+SELFTEST FAIL: C6 rank() COUNTS the far ops (not silently zero), C6 a MISMATCHED pair is REJECTED end to end
+
+MUTATION:         if got != pv["sha256"]:  ->          if False:
+SELFTEST FAIL: C8 ...and says DIFFERENT BUILDS rather than ranking anyway
+
+MUTATION: (none)
+SELFTEST PASS
+
+# --heavy (C9 drives main() on a real mismatched pair). check_join(far,...) -> check_join(0,...)
+MUTATION: check_join(far, ops, ...)  ->  check_join(0, ops, ...)
+  C9 main() REJECTS a real mismatched pair via the proxy     FAIL  rc=0
+  C9 ...naming it a MISMATCH rather than ranking             FAIL  (no MISMATCH line)
+SELFTEST FAIL: C9 main() REJECTS a real mismatched pair via the proxy, C9 ...naming it a MISMATCH rather than ranking
+
+MUTATION: (none), --heavy
+  C9 main() REJECTS a real mismatched pair via the proxy     ok  rc=1
+  C9 ...naming it a MISMATCH rather than ranking             ok  join   : MISMATCH: 5.24% of ops sit far past a bare label (l
+SELFTEST PASS

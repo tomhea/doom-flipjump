@@ -235,8 +235,8 @@ def rank(rec, table, keyfn, top=25, guard=True):
     if far:
         print("  (guard: %s ops sat > %d ops past a BARE label and were NOT credited to it)"
               % (format(far, ","), FAR_PAST_LABEL_BITS // 64), flush=True)
-    rank.last_far = far
-    return buckets, unattributed
+    rank.last_far = far          # kept for the selftest's plumbing assertions
+    return buckets, unattributed, far
 
 
 def report(buckets, total, unattributed, title, top=25):
@@ -261,13 +261,35 @@ def main():
     ap.add_argument("--out", default=None,
                     help="save the raw ip histogram (json.gz) so re-analysis needs no re-run")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--heavy", action="store_true",
+                    help="also run C9: drive main() on a real mismatched pair")
     a = ap.parse_args()
     if a.selftest:
-        return selftest()
+        return selftest(a.heavy)
 
     print("labels : %s" % a.labels, flush=True)
     table = LabelTable.load(ROOT / a.labels)
     print("         %s addresses" % format(len(table.addrs), ","), flush=True)
+    # ⚠ BEFORE run_walk. Checking after the run meant a bad/mismatched fjm died on the
+    # loader first, so the provenance control passed for the WRONG REASON (CR-2026-09-07).
+    # THE EXACT JOIN CHECK, when the label file carries provenance (labels2.py stamps it).
+    # The drop-rate test below is a PROXY and only a fallback -- CR-2026-09-07 caught that
+    # provenance was stamped and never read, making "checked exactly" false of every code path.
+    pv = provenance_of(ROOT / a.labels)
+    if pv.get("sha256"):
+        import hashlib
+        got = hashlib.sha256((ROOT / a.fjm).read_bytes()).hexdigest()
+        if got != pv["sha256"]:
+            print("VACUOUS: label provenance sha256=%s but %s hashes to %s -- these are DIFFERENT "
+                  "BUILDS. Re-capture with labels2.py --fjm %s."
+                  % (pv["sha256"][:16], a.fjm, got[:16], a.fjm), flush=True)
+            return 1
+        print("join   : EXACT -- labels carry sha256=%s and %s matches"
+              % (got[:16], a.fjm), flush=True)
+    else:
+        print("join   : no provenance in %s -- falling back to the drop-rate PROXY. Re-capture "
+              "with labels2.py for an exact check." % a.labels, flush=True)
+
     print("fjm    : %s  (walk seed %d, %d game frames)" % (a.fjm, a.seed, a.frames), flush=True)
     rec, ops, presented, asked = run_walk(ROOT / a.fjm, a.frames, a.seed)
 
@@ -301,15 +323,15 @@ def main():
         print("saved  : %s (%s distinct addresses)"
               % (a.out, format(len(rec.hits), ",")), flush=True)
 
-    inner, un_i = rank(rec, table, inner_macro)
-    ok, msg = check_join(getattr(rank, "last_far", 0), ops, a.fjm, a.labels)
+    inner, un_i, far = rank(rec, table, inner_macro)
+    ok, msg = check_join(far, ops, a.fjm, a.labels)
     print("join   : %s" % msg, flush=True)
     if not ok:
         print("VACUOUS: refusing to rank a mismatched histogram/label pair -- this is the exact "
               "failure that produced FINDINGS AY.", flush=True)
         return 1
     report(inner, ops, un_i, "HOT PRIMITIVES (innermost macro -- what burns the ops)", a.top)
-    doom, un_d = rank(rec, table, doom_macro)
+    doom, un_d, _f2 = rank(rec, table, doom_macro)
     report(doom, ops, un_d, "HOT DOOM MACROS (deepest non-stl caller -- our code)", a.top)
 
     if (ops - un_i) < 0.5 * ops:
@@ -319,7 +341,7 @@ def main():
     return 0
 
 
-def selftest():
+def selftest(heavy=False):
     fails = []
 
     def check(name, cond, detail=""):
@@ -350,11 +372,17 @@ def selftest():
     class Matched:                     # every op sits just after a label -> nothing dropped
         hits = Counter({1001: 900, 2001: 100})
 
+    # ⚠ A FIXED offset, deliberately NOT derived from FAR_PAST_LABEL_BITS. Addressing the fixture
+    # as `FAR_PAST_LABEL_BITS + 1` makes it scale with the constant under test, so widening the
+    # constant to 10**18 disables detection on the real data while the selftest stays green
+    # (CR-2026-09-07 R9-a). 600M bits ~= 18.7M words: the scale of the real AY gap.
+    FAR_FIXTURE = 600_000_000
+
     class Mismatched:                  # ops far past the last BARE label -> a build mismatch
-        hits = Counter({2000 + FAR_PAST_LABEL_BITS + 1: 900, 2001: 100})
+        hits = Counter({2000 + FAR_FIXTURE: 900, 2001: 100})
 
     rank.last_far = None
-    _b, _u = rank(Matched(), far_tab, inner_macro)
+    _b, _u, _far0 = rank(Matched(), far_tab, inner_macro)
     m_far = rank.last_far
     ok, msg = check_join(m_far or 0, 1000, "a.fjm", "a.labels")
     check("C6 rank() reports its drop count (the plumbing is exercised)", m_far == 0,
@@ -362,7 +390,7 @@ def selftest():
     check("C6 a MATCHED pair is ACCEPTED end to end", ok, msg[:40])
 
     rank.last_far = None
-    _b2, _u2 = rank(Mismatched(), far_tab, inner_macro)
+    _b2, _u2, _far1 = rank(Mismatched(), far_tab, inner_macro)
     x_far = rank.last_far
     ok2, msg2 = check_join(x_far or 0, 1000, "b.fjm", "b.labels")
     check("C6 rank() COUNTS the far ops (not silently zero)", x_far == 900, "far=%s" % x_far)
@@ -371,6 +399,29 @@ def selftest():
     check("C6 the threshold brackets the two REAL calibration pairs "
           "(0.017%% matched, 12.14%% mismatched)",
           0.00017 < JOIN_DROP_LIMIT < 0.1214)
+
+    # C8 THE VERDICT PATH IN main(). C6 exercises rank()+check_join, but main() is what actually
+    # EMITS a verdict, and CR-2026-09-07 R9-b showed it was untested: `check_join(0, ops, ...)` and
+    # `if not ok: -> if False:` both left the selftest green. This drives main() end to end on a
+    # real (tiny) fjm with DELIBERATELY WRONG labels and requires a non-zero exit.
+    import subprocess as _sp, tempfile as _tf2, gzip as _gz2
+    with _tf2.TemporaryDirectory() as _td2:
+        t2 = Path(_td2)
+        fake_fjm = t2 / "wrong.fjm"
+        fake_fjm.write_bytes(bytes(64))
+        wrong = t2 / "wrong_labels.tsv.gz"
+        with _gz2.open(wrong, "wt", encoding="utf-8") as fh:
+            fh.write("# fjm=other.fjm" + chr(10) + "# sha256=" + ("0" * 64) + chr(10))
+            fh.write("lbl" + chr(9) + "64" + chr(10))
+        r = _sp.run([sys.executable, str(Path(__file__).resolve()), "--fjm", str(fake_fjm),
+                     "--labels", str(wrong), "--frames", "1"],
+                    capture_output=True, text=True, timeout=600)
+        out = (r.stdout or "") + (r.stderr or "")
+        check("C8 main() REJECTS a provenance mismatch with a non-zero exit",
+              r.returncode != 0, "rc=%d" % r.returncode)
+        check("C8 ...and says DIFFERENT BUILDS rather than ranking anyway",
+              "DIFFERENT BUILDS" in out or "VACUOUS" in out,
+              (out.strip().splitlines() or ["(no output)"])[-1][:56])
 
     # C7 PROVENANCE -- the EXACT join key, not the drop-rate proxy.
     import hashlib, tempfile as _tf
@@ -389,13 +440,13 @@ def selftest():
 
     # C5 THE OVER-ATTRIBUTION GUARD. An op far past a BARE label must not be credited to it.
     class R:
-        hits = Counter({350 + FAR_PAST_LABEL_BITS + 1: 500})
-    b, un = rank(R(), t, inner_macro)
+        hits = Counter({350 + 600_000_000: 500})
+    b, un, _ = rank(R(), t, inner_macro)
     check("C5 an op far past a bare label is UNATTRIBUTED, not credited to it",
           un == 500 and not b, "unattributed=%d buckets=%s" % (un, str(dict(b))))
     class R2:
         hits = Counter({351: 500})
-    b2, un2 = rank(R2(), t, inner_macro)
+    b2, un2, _ = rank(R2(), t, inner_macro)
     check("C5 an op just after a bare label still IS credited (guard is not always-on)",
           un2 == 0 and b2.get("c") == 500, str(dict(b2)))
 
@@ -411,15 +462,37 @@ def selftest():
     class Rec:
         ops = 5
         hits = Counter({10: 3, 20: 2})
-    b, un = rank(Rec(), t, inner_macro)
+    b, un, _far = rank(Rec(), t, inner_macro)
     check("C1 ops landing before any label count as UNATTRIBUTED, not as label 'a'",
           un == 5 and not b, "unattributed=%d buckets=%s" % (un, dict(b)))
     check("C1 the EOF tolerance is exactly 1 and DIRECTIONAL",
           all(cond == (0 <= d <= 1) for d, cond in
               [(-1, False), (0, True), (1, True), (2, False), (-100, False)]),
           "a hook seeing FEWER ops than executed is still rejected")
-    b2, un2 = rank(type("R", (), {"hits": Counter({150: 7})})(), t, inner_macro)
+    b2, un2, _far = rank(type("R", (), {"hits": Counter({150: 7})})(), t, inner_macro)
     check("C1 ops after a label attribute to it", un2 == 0 and b2["a"] == 7, str(dict(b2)))
+
+    # C9 THE PROXY VERDICT PATH in main(), driven end to end on a REAL mismatched pair.
+    # C8 covers the PROVENANCE path, which rejects first -- so without this, main()'s drop-rate
+    # branch is untested and `check_join(0, ...)` survives (CR-2026-09-07 R9-b). HEAVY (it loads a
+    # real image), so it is opt-in; the PR that added it ran it and pasted the output.
+    if heavy:
+        import subprocess as _sp3
+        print("  -- C9 drives main() on a real mismatched pair (heavy) ...", flush=True)
+        r = _sp3.run([sys.executable, str(Path(__file__).resolve()),
+                      "--fjm", "build/doom_e1m1_w1.fjm",
+                      "--labels", "scratchpad/12m/_rung0_labels.tsv.gz", "--frames", "1"],
+                     capture_output=True, text=True, cwd=str(ROOT))
+        out = (r.stdout or "") + (r.stderr or "")
+        check("C9 main() REJECTS a real mismatched pair via the proxy", r.returncode != 0,
+              "rc=%d" % r.returncode)
+        hit = [l.strip() for l in out.splitlines() if "MISMATCH" in l]
+        check("C9 ...naming it a MISMATCH rather than ranking",
+              "MISMATCH" in out and "VACUOUS" in out,
+              (hit[0][:60] if hit else "(no MISMATCH line)"))
+    else:
+        print("  (C9 skipped -- pass --heavy to drive main()'s proxy path on a real pair)",
+              flush=True)
 
     print("")
     print("SELFTEST %s%s" % ("PASS" if not fails else "FAIL",

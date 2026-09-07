@@ -2062,10 +2062,31 @@ flip only the INDEX within the block:
 That is single-destination sites ALONE. The 2-destination form carries a further 11,980,590 arm+
 disarm ops that the same treatment reaches.
 
-### What is NOT proven
+### The third writer is real, and it reshapes the plan
 
-* **The third-writer assumption.** Blocking requires that nothing but these arms and disarms ever
-  writes `src+w`. C5 states this; it does not check it. One other writer and the design is wrong.
+Scanning the WHOLE image for ops that flip a bit of an exact_xor src word (an op at even word `k`
+flips the bit at `mem[k]`, so `mem[k] >> 5` is the word it writes):
+
+      16,608,704 static ops, 61,617,683 executions = 78.32% of the walk
+
+**78.32% of every op the program executes is a wflip into an exact_xor source word.** The priced
+arm+disarm accounts for 49,390,768; the remaining 12,226,915 are the `triple_`/`sparse_` forms and
+NON-exact_xor users of the same jump word -- `stl.comp_if1`, `hex.shifts.*`, `hex.tables.*`,
+`hex.add.*`. Those jump THROUGH the word, so a pinned block base would send them to a wrong target.
+
+That kills naive blocking. Restricted to words only the family touches, 25,594 of 29,875 words are
+clean (85.7%) but they carry just 283,720 of 2,007,547 calls (14.1%) -- the hot words are precisely
+the shared ones. Clean-only blocking saves 4,601,518 ops = 5.85%, i.e. 22,988,275 -> 21,643,754.
+
+Blocking survives only as a WHOLE-PROGRAM transform: bake the base into the word AND rewrite every
+`wflip W, V` in the program to `wflip W, V ^ BASE`. Correct (the family's V becomes a small index;
+everyone else's popcount is unchanged on average), but it is assembler-wide semantics, not layout.
+
+**PLACEMENT needs none of that.** It moves tables to low-popcount addresses and leaves the word
+resting at 0, so every other writer is untouched. It is the safe first rung, and the 78.32% figure
+says its reach is far wider than exact_xor: every hex table dispatch pays popcount(target).
+
+### What is NOT proven
 * **PINNING IS DEAD.** The stronger variant -- bake the table address into the word and drop both
   wflips -- needs a word used by exactly ONE site. Measured: 6,196 of 374,655 sites (1.7%), 81,529
   of 2,007,547 calls (4.1%), worth 1.98% of the walk. Killed. 64.1% of calls run through words

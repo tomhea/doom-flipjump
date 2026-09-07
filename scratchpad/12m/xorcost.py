@@ -229,6 +229,77 @@ def report(fjm, labels_path, hist_path, base_ops_per_frame):
                     if i < len(pool) and bin(a).count("1") > pool[i])
         print("  top %-7s tables -> %s ops/frame"
               % (format(k, ","), format(int(base_ops_per_frame * (1 - saved / total)), ",")))
+
+    # ---- THE THIRD-WRITER SCAN. Blocking needs the resting value of `src+w` to be a block base,
+    # which is only safe if every writer of that word accounts for it. Scan the WHOLE image: an op
+    # at even word k flips the bit at mem[k], so `mem[k] >> 5` is the word it writes.
+    words = {w_ // reader.memory_width for _, w_, _ in sites}
+    mem = reader.get_memory()
+    flips = 0
+    static = 0
+    for k, v in list(mem.items()):
+        if k & 1:
+            continue
+        if (v >> 5) in words:
+            static += 1
+            flips += hist.get(k * reader.memory_width, 0)
+    print("")
+    print("THIRD-WRITER SCAN -- every op in the image that flips a bit of an exact_xor src word")
+    print("  %s static ops, %s executions = %.2f%% of the walk"
+          % (format(static, ","), format(flips, ","), 100.0 * flips / total))
+    print("  the priced arm+disarm above accounts for %s of those; the remaining %s"
+          % (format(cur + dbl_ops, ","), format(flips - cur - dbl_ops, ",")))
+    print("  are triple_/sparse_ forms and NON-exact_xor users of the same jump word")
+    print("  (stl.comp_if1, hex.shifts.*, hex.tables.*, hex.add.*), which is why a block base")
+    print("  cannot simply be pinned: those writers jump THROUGH the word and would break.")
+
+    # ---- CLEAN WORDS: the subset blocking could pin with no whole-program rewrite. A word is
+    # clean when every op flipping it attributes to the exact_xor family.
+    import bisect as _bs
+    fam = ("hex.exact_xor", "hex.sparse_exact_xor", "hex.double_exact_xor",
+           "hex.triple_exact_xor", "hex.quadrupled_exact_xor", "hex.sparse_double_exact_xor")
+    pairs = sorted((v, k) for k, v in labels.items())
+    laddr = [v for v, _ in pairs]
+    lname = [k for _, k in pairs]
+
+    def innermost(nm):
+        parts = str(nm).split("---")
+        part = parts[-2] if len(parts) >= 2 else parts[0]
+        return part.split(":")[-1].split("(")[0]
+
+    dirty = set()
+    for k, v in list(mem.items()):
+        if k & 1:
+            continue
+        word = v >> 5
+        if word not in words or not hist.get(k * reader.memory_width, 0):
+            continue
+        i = _bs.bisect_right(laddr, k * reader.memory_width) - 1
+        if i < 0 or innermost(lname[i]) not in fam:
+            dirty.add(word)
+    clean = words - dirty
+    groups = defaultdict(list)
+    for switch, word, calls_ in sites:
+        if word // reader.memory_width in clean:
+            groups[word].append((calls_, switch))
+    ccur = cnew = 0
+    for g in groups.values():
+        g.sort(reverse=True)
+        for i, (calls_, switch) in enumerate(g):
+            ccur += 2 * bin(switch).count("1") * calls_
+            cnew += 2 * max(1, bin(i).count("1")) * calls_
+    clean_calls = sum(c for g in groups.values() for c, _ in g)
+    all_calls = sum(c for _, _, c in sites)
+    print("")
+    print("CLEAN WORDS -- the subset a block base could pin with no whole-program rewrite")
+    print("  clean %s of %s words (%.1f%%), carrying %s of %s calls (%.1f%%)"
+          % (format(len(clean), ","), format(len(words), ","), 100.0 * len(clean) / len(words),
+             format(clean_calls, ","), format(all_calls, ","),
+             100.0 * clean_calls / max(all_calls, 1)))
+    print("  blocking restricted to them saves %s ops = %.2f%%  ->  %s ops/frame"
+          % (format(ccur - cnew, ","), 100.0 * (ccur - cnew) / total,
+             format(int(base_ops_per_frame * (1 - (ccur - cnew) / total)), ",")))
+    print("  the hot words are precisely the SHARED ones, so this rung is nearly worthless")
     return 0
 
 

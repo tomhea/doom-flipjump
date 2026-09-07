@@ -33,3 +33,15 @@ PLACEMENT (relocate to low-popcount addresses, hottest first; zero size growth)
   top 4,096   tables -> 18,953,004 ops/frame
   top 16,384  tables -> 17,028,157 ops/frame
   top 49,321  tables -> 16,566,010 ops/frame
+
+THIRD-WRITER SCAN -- every op in the image that flips a bit of an exact_xor src word
+  16,608,704 static ops, 61,617,683 executions = 78.32% of the walk
+  the priced arm+disarm above accounts for 49,390,768 of those; the remaining 12,226,915
+  are triple_/sparse_ forms and NON-exact_xor users of the same jump word
+  (stl.comp_if1, hex.shifts.*, hex.tables.*, hex.add.*), which is why a block base
+  cannot simply be pinned: those writers jump THROUGH the word and would break.
+
+CLEAN WORDS -- the subset a block base could pin with no whole-program rewrite
+  clean 25,594 of 29,875 words (85.7%), carrying 283,720 of 2,007,547 calls (14.1%)
+  blocking restricted to them saves 4,601,518 ops = 5.85%  ->  21,643,754 ops/frame
+  the hot words are precisely the SHARED ones, so this rung is nearly worthless

@@ -2106,3 +2106,75 @@ Seven doom macros own 100% of the top 4,096 tables (52.9% of calls); eleven own 
 `frame.seg_pass1_leaf_body_ts`, `proj.point_on_side_leaf`, `frame.thing_record_body`,
 `sim.thing_pass`, `sim.check_position`, `sim.try_move`, `sim.bind_things`, `proj.wedge_bbox`.
 The frame is flat in MACROS (BB) and concentrated in TABLES; those are not the same statement.
+
+---
+
+## BE -- placement WORKS and is nearly WORTHLESS on the binding metric: -0.21%
+
+BD priced placement at 16,566,010 ops/frame. Built, gated and measured, it delivers **-48,048**.
+
+### What was built
+
+`flipjump-151` branch `table-placement` (20e4a8c, 2f8b981): an opt-in `TablePool` in the assembler
+that relocates lookup tables to low-popcount addresses. Inert when off (byte-identical sha256),
+460 flipjump unit tests pass, and `scratchpad/12m/tablepool_gate.py` PASSES on 4 programs x 4
+run_ops with an R9 negative control that forces its fall-through guard open and shows a program
+break.
+
+On the VISUAL tier it does what BD said it would -- `deg_gate`, 4/4 byte-exact, 8,192 tables:
+
+      TOTAL  115,231,180 -> 108,506,607   -5.84%
+
+### On the GAME tier it does almost nothing
+
+Same source, same harness (`gamespeed.py` unchanged since the z3 commit), same seeds, so the op
+counts are exactly comparable. 16,384 tables relocated, both assemblies identical, self-reset
+verified (`labels_moved_in_set: 0`, `values_changed_in_set: 0`).
+
+      run 0   27,110,806 -> 26,304,020   -2.98%
+      run 5   24,935,526 -> 25,212,338   +1.11%   <-- WORSE
+      run 7   14,945,357 -> 14,186,580   -5.08%
+      run 9   15,707,064 -> 14,869,008   -5.34%
+      mean run-average       21,041,023 -> 20,668,114   -1.77%
+      80th-pct run           24,935,526 -> 25,212,338   +1.11%
+      BINDING (mean+p80)/2   22,988,274 -> 22,940,226   -0.21%
+
+Nine runs improved. ONE regressed -- and it is the p80 run, so the binding metric barely moves.
+SIZE improved slightly: 50,949,650 words (37.96%) vs 51,095,972 (38.07%), because hoisting a table
+reclaims its `pad 16`. Span grew to 71,172,192 words (53.03%), still under the ceiling.
+
+### Why BD was 15x optimistic, and it was not the profile
+
+BC's rule was "attributed ops are not removable ops". This is a different error and worth naming
+separately: **a placement PROJECTION assumed a freedom the mechanism does not have.**
+
+* **The pool must be disjoint from the code.** BD assumed each table could take the k-th cheapest
+  pad-16-aligned address in the current span. A real pool sits above the program, so every
+  relocated table pays `popcount(pool_base)` -- +1 op on both wflips, on every call, forever.
+* **Span is not free.** An unbounded pool reached 96.88% of 2^27 on the first build. Bounding it to
+  2^27 bits costs ~0.6 mean popcount; that cost is not in BD's number.
+* **Coverage collides with cheapness.** Cheap addresses are a fixed supply: below 2^32 only 9,109
+  pad-16-aligned addresses have popcount <= 4. Relocating MORE tables means later ones land on
+  worse addresses, so coverage and per-table saving trade against each other. BD's curve implicitly
+  gave all 16,384 tables the best addresses at once.
+* **Selection was source-ordered, not heat-ordered.** `--owners` matches macro names because exact
+  label paths embed src/fj line numbers and go stale silently. Within the ten hot owners the first
+  16,384 tables emitted were relocated -- roughly a uniform sample of those leaves, not their
+  hottest sites.
+
+### PLACEMENT IS NON-MONOTONIC, exactly like the pads
+
+Run 5 got worse. Relocating a table removes it AND its `pad 16` from the inline stream, which
+shifts every later address -- so tables that happened to sit at low-popcount addresses can be
+pushed onto worse ones. S3 (FINDINGS, pad round) was the same shape. Any future placement work has
+to be judged on the binding metric, never on a mean or on one viewpoint.
+
+### What this says about 12M
+
+Scaling coverage does not rescue it. Holding span at 2^29 bits above a 2^31 pool base, ~50,000
+tables land at mean popcount ~7.1 against today's 9.32, worth ~4.4 ops on a covered call. That is
+arithmetic on measured inputs, NOT a measurement -- BD's projection was arithmetic too and missed
+by 15x -- but it points at roughly -12%, i.e. ~20.2M, not the 16,566,010 BD claimed.
+
+Placement is a real, gated, reusable mechanism that pays for itself in SIZE and costs nothing. It
+is not a route to 12M.

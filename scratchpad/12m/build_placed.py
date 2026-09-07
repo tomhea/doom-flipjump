@@ -73,11 +73,30 @@ def main():
     ap.add_argument("--top", type=int, default=8192)
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=1 << 31)
     ap.add_argument("--run-ops", type=int, default=16)
+    ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=1 << 27,
+                    help="how far above --pool-base the pool may reach. An UNBOUNDED pool scatters "
+                         "to the top of the address space (span 96.9%% of 2^27 on the first render "
+                         "build) for ~0.6 popcount; bounding it buys the ceiling back.")
     ap.add_argument("--owners", nargs="*", default=None,
                     help="relocate tables under these macro names (stable across edits) instead "
                          "of the profile's exact label paths; --top then caps the count")
     a = ap.parse_args()
 
+    # ONE POOL PER ASSEMBLY. The game tier assembles TWICE -- pass 1 resolves labels, pass 2 bakes
+    # them into the M1 self-reset -- and a TablePool is stateful, so sharing one across the passes
+    # makes pass 2 continue from pass 1's cursor and give every table a different address. That is
+    # not a subtle failure: the reset's own check refused the build with "434 baked addresses moved
+    # between passes". `make_pool` is called per assemble() so both passes allocate identically.
+    def make_pool():
+        if a.owners:
+            names = tuple(a.owners)
+            return TablePool(W, a.pool_base, run_ops=a.run_ops, capacity=a.top,
+                             span_bits=a.span_bits,
+                             wants=lambda macro_name, prefix: any(o in prefix for o in names))
+        return TablePool(W, a.pool_base, run_ops=a.run_ops, span_bits=a.span_bits,
+                         wants=lambda macro_name, prefix: prefix in hot)
+
+    hot = None
     if a.owners:
         # STABLE KEY. An exact label path embeds src/fj line numbers, so any edit to those files
         # shifts it and the hot set silently matches nothing. Macro NAMES do not move, and the
@@ -87,19 +106,19 @@ def main():
         owners = tuple(a.owners)
         print("owner mode: relocating tables under %s, capped at %s"
               % (", ".join(owners), format(a.top, ",")), flush=True)
-        pool = TablePool(W, a.pool_base, run_ops=a.run_ops, capacity=a.top,
-                         wants=lambda macro_name, prefix: any(o in prefix for o in owners))
     else:
         hot, live = hot_sites(ROOT / a.labels, ROOT / a.hist, a.top)
         print("profile: %s live tables, relocating the hottest %s"
               % (format(live, ","), format(len(hot), ",")), flush=True)
-        pool = TablePool(W, a.pool_base, run_ops=a.run_ops,
-                         wants=lambda macro_name, prefix: prefix in hot)
-    print("pool: base %s, run_ops %d" % (hex(a.pool_base), a.run_ops), flush=True)
+    print("pool: base %s, span %s, run_ops %d"
+          % (hex(a.pool_base), hex(a.span_bits), a.run_ops), flush=True)
 
     real_assemble = fj.assemble
+    pools = []
 
     def assemble_with_pool(*args, **kwargs):
+        pool = make_pool()
+        pools.append(pool)
         kwargs["table_pool"] = pool
         return real_assemble(*args, **kwargs)
 
@@ -119,6 +138,11 @@ def main():
 
     print(json.dumps(info, indent=2, default=str), flush=True)
     print("", flush=True)
+    print("assemblies: %d; relocated per assembly: %s"
+          % (len(pools), ", ".join(format(q.allocated, ",") for q in pools)), flush=True)
+    if len({q.allocated for q in pools}) > 1:
+        print("*** THE PASSES RELOCATED DIFFERENT COUNTS -- their addresses cannot agree", flush=True)
+    pool = pools[-1] if pools else make_pool()
     print("relocated: %s tables into %s runs; declined %s"
           % (format(pool.allocated, ","), format(len(pool.run_starts), ","),
              format(pool.declined, ",")), flush=True)

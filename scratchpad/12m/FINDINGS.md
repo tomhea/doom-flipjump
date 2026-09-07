@@ -1834,7 +1834,7 @@ shipped binary with the (mean+p80)/2 binding metric:
 |---|---:|---:|---:|---:|
 | rung 0 | 0 | — | 23,973,882 | 38.28% |
 | S1 | 44 @128 | 29.7% | 23,905,040 (−0.29%) | 38.10% |
-| **S2** | 89 @1024/4096 | 77.4% | **23,493,680 (−2.00%)** | **38.07%** |
+| **S2** | 89 @1024/4096 | 77.4% | **23,493,681 (−2.00%)** | **38.07%** |
 | S3 | 133 @1024/4096/16384 | ~98% | 23,709,974 (**+0.92% vs S2**) | 39.95% (**+1.88 pts**) |
 
 **S3 is worse than S2 on speed AND size.** More padding is not better.
@@ -1869,7 +1869,7 @@ nothing**, and the premise was false.
 
 | | S2 | D1 (`distscale` 8->5) | delta |
 |---|---:|---:|---:|
-| binding | 23,493,680 | 23,495,707 | **+2,027** |
+| binding | 23,493,681 | 23,495,707 | **+2,026** |
 | mean | 21,466,274 | 21,468,300 | +2,026 |
 | p80 | 25,521,087 | 25,523,113 | +2,026 |
 | words | 51,095,972 | 51,099,046 | +3,074 |
@@ -1957,12 +1957,12 @@ confirms it — every frame byte-exact.
 
 | | S2 | W1 | delta |
 |---|---:|---:|---:|
-| binding | 23,493,680 | 23,447,960 | **−45,720** |
+| binding | 23,493,681 | 23,447,960 | **−45,721** |
 | mean | 21,466,274 | 21,397,319 | −68,955 |
 | p80 | 25,521,087 | 25,498,601 | −22,486 |
 | words | 51,095,972 | 51,094,744 | −1,228 |
 
-**Predicted ~362,000 ops/frame. Measured 45,720. 7.9x short.**
+**Predicted ~362,000 ops/frame. Measured 45,721. 7.9x short.**
 
 The prediction came from the matched profile: the l2332 call is attributed 1,840,988 ops and the
 l2398 call 1,059,850, and the transform removes 4 of 16 nibble-ops (25%). Both inputs were right;

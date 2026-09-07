@@ -4,7 +4,7 @@
 the matched-label profile of the S2 binary (`scratchpad/12m/_s2_hist.json.gz` +
 `_full_labels.tsv.gz`, 78,675,599 ops, 100.0% attributed). Every idea says what evidence it rests
 on. **No idea carries an ops estimate**, because FINDINGS BC: the profile RANKS correctly and does
-not SIZE anything — W1 was predicted at ~362k ops/frame and measured 45,720, a 7.9x miss, and two
+not SIZE anything — W1 was predicted at ~362k ops/frame and measured 45,721, a 7.9x miss, and two
 earlier estimates missed by 2M and 33M words. Size by building, not by arithmetic.
 
 Confidence tags: **[M]** mechanism measured or read directly in the source · **[R]** reasoned from

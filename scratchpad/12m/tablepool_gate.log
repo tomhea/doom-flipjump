@@ -22,4 +22,10 @@ table-placement gate -- relocating a lookup table must not change the program
       run_ops=256                      b'IK\x02\x01' 618       0       SAME  +0.00% ops
       run_ops=4096                     b'IK\x02\x01' 618       0       SAME  +0.00% ops
 
+  program / blocking                   output     ops       groups  verdict
+  hex.xor                              b'0x1234'  1399      8       SAME  -16.97% ops
+  hex.add/sub                          b'0x8F4D'  5480      9       SAME  -2.00% ops
+  hex.cmp/shift/mul                    b'0x3D'    2515      32      SAME  -13.19% ops
+  bit.exact_xor (fall-through table)   b'IK\x02\x01' 618       0       SAME  +0.00% ops
+
 GATE PASS

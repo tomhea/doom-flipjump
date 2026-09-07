@@ -46,6 +46,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import flipjump as fj                                                        # noqa: E402
 from flipjump.assembler import preprocessor as pp                            # noqa: E402
+from flipjump.assembler.preprocessor import BlockPool                        # noqa: E402
 from flipjump.interpreter.fjm_run import run as fjm_run                      # noqa: E402
 from flipjump.interpreter.io_devices.IODevice import IODevice                # noqa: E402
 from flipjump.utils.exceptions import IOReadOnEOF                            # noqa: E402
@@ -165,6 +166,24 @@ def run_gate(run_ops_list):
                   % ("    run_ops=%d" % run_ops, got, ops, pool.allocated,
                      "SAME" if ok else "*** DIFFERENT ***",
                      "" if not ok else "  %+.2f%% ops" % (100.0 * (ops - ref_ops) / ref_ops)))
+    # BLOCKING (BlockPool) -- two passes, because a block's size must be known before its base is
+    # chosen and a group's tables are scattered through the program.
+    print("")
+    print("  %-36s %-10s %-9s %-7s %s" % ("program / blocking", "output", "ops", "groups", "verdict"))
+    for name, source in PROGRAMS.items():
+        ref_out, ref_ops, _ = build_and_run(source, None)
+        counting = BlockPool(W, POOL_BASE)
+        build_and_run(source, counting)                       # counts only; relocates nothing
+        placing = BlockPool(W, POOL_BASE, counts=counting.counts, widths=counting.widths)
+        got, ops, _ = build_and_run(source, placing)
+        ok = got == ref_out
+        if not ok:
+            failures.append("%s [blocked]" % name)
+        print("  %-36s %-10r %-9d %-7d %s%s"
+              % (name[:36], got, ops, len(placing.groups),
+                 "SAME" if ok else "*** DIFFERENT ***",
+                 "" if not ok else "  %+.2f%% ops" % (100.0 * (ops - ref_ops) / ref_ops)))
+
     print("")
     print("GATE %s%s" % ("PASS" if not failures else "FAIL",
                          "" if not failures else ": " + ", ".join(failures)))

@@ -76,6 +76,20 @@ def doom_macro(name):
 JOIN_DROP_LIMIT = 0.02
 
 
+def provenance_of(path):
+    """the `# key=value` header labels2.py stamps, so the join key can be checked EXACTLY."""
+    out = {}
+    op = gzip.open if str(path).endswith(".gz") else open
+    with op(path, "rt", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.startswith("#"):
+                break
+            if "=" in line:
+                k, v = line[1:].strip().split("=", 1)
+                out[k.strip()] = v.strip()
+    return out
+
+
 def check_join(dropped, total, fjm, labels):
     """⚠ THE JOIN KEY. A profile is a JOIN between a histogram and a label table, and the two are
     comparable only if they came from the SAME BUILD.
@@ -324,15 +338,54 @@ def selftest():
     check("C3 lookup matches a linear scan at and around every boundary", ok)
     check("C3 an address before every label is unattributed, not label 0", t.lookup(50) is None)
 
-    # C6 THE JOIN-KEY CONTROL. A mismatched build/labels pair must be REJECTED, not ranked.
-    # the two REAL pairs this campaign produced, by their measured drop rates
-    ok, msg = check_join(13_219, 78_675_599, "s2.fjm", "s2labels")     # matched: 0.017%
-    check("C6 the MATCHED pair (0.017% dropped) is ACCEPTED", ok, msg[:44])
-    ok2, msg2 = check_join(9_726_044, 80_111_139, "r0.fjm", "r0labels")  # mismatched: 12.14%
-    check("C6 the MISMATCHED pair (12.14% dropped) is REJECTED",
+    # C6 THE JOIN-KEY CONTROL, driven END TO END through rank().
+    #
+    # ⚠ The first version of this control called check_join() with two hand-typed integers and
+    # never ran rank(). That left the whole path that PRODUCES its input -- rank() counting `far`,
+    # stashing it on rank.last_far, main() reading it back -- untested, so the detector FAILED
+    # OPEN: CR-2026-09-07 mutation-proved that `rank.last_far = far` -> `pass` still passed the
+    # selftest. That was round-1's own finding recurring inside its fix. This drives the real path.
+    far_tab = LabelTable([(1000, "aaa"), (2000, "bbb")])
+
+    class Matched:                     # every op sits just after a label -> nothing dropped
+        hits = Counter({1001: 900, 2001: 100})
+
+    class Mismatched:                  # ops far past the last BARE label -> a build mismatch
+        hits = Counter({2000 + FAR_PAST_LABEL_BITS + 1: 900, 2001: 100})
+
+    rank.last_far = None
+    _b, _u = rank(Matched(), far_tab, inner_macro)
+    m_far = rank.last_far
+    ok, msg = check_join(m_far or 0, 1000, "a.fjm", "a.labels")
+    check("C6 rank() reports its drop count (the plumbing is exercised)", m_far == 0,
+          "far=%s" % m_far)
+    check("C6 a MATCHED pair is ACCEPTED end to end", ok, msg[:40])
+
+    rank.last_far = None
+    _b2, _u2 = rank(Mismatched(), far_tab, inner_macro)
+    x_far = rank.last_far
+    ok2, msg2 = check_join(x_far or 0, 1000, "b.fjm", "b.labels")
+    check("C6 rank() COUNTS the far ops (not silently zero)", x_far == 900, "far=%s" % x_far)
+    check("C6 a MISMATCHED pair is REJECTED end to end",
           (not ok2) and "MISMATCH" in msg2, msg2[:44])
-    check("C6 the threshold sits between them, not at an arbitrary point",
+    check("C6 the threshold brackets the two REAL calibration pairs "
+          "(0.017%% matched, 12.14%% mismatched)",
           0.00017 < JOIN_DROP_LIMIT < 0.1214)
+
+    # C7 PROVENANCE -- the EXACT join key, not the drop-rate proxy.
+    import hashlib, tempfile as _tf
+    with _tf.TemporaryDirectory() as _td:
+        q = Path(_td) / "l.tsv.gz"
+        sha = hashlib.sha256(b"binary-bytes").hexdigest()
+        with gzip.open(q, "wt", encoding="utf-8") as fh:
+            fh.write("# fjm=build/x.fjm" + chr(10) + "# sha256=" + sha + chr(10))
+            fh.write("lbl" + chr(9) + "64" + chr(10))
+        pv = provenance_of(q)
+        check("C7 provenance is read back exactly", pv.get("sha256") == sha, str(pv)[:36])
+        check("C7 a different binary's sha does NOT match",
+              pv.get("sha256") != hashlib.sha256(b"other").hexdigest())
+        check("C7 the header does not leak into the label table",
+              LabelTable.load(q).names == ["lbl"])
 
     # C5 THE OVER-ATTRIBUTION GUARD. An op far past a BARE label must not be credited to it.
     class R:

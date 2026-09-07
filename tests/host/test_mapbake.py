@@ -309,8 +309,10 @@ def test_w1_x1_fits_two_nibbles_so_the_narrow_move_is_equivalent():
     from doomfj.tables import viewangletox_table
     cfg = Config()
     tab = viewangletox_table(cfg.W, cfg.TRIG_N)
-    lo, hi = 0x200, 0x600                      # the post-clip window the renderer indexes with
-    window = tab[lo:hi]
+    # ⚠ INCLUSIVE. `setleft` writes ang1 = CLIPANGLE, so idx = 0x600 is indexed on every
+    # left-clipped seg; a half-open slice drops exactly that entry (CR-2026-09-07).
+    lo, hi = 0x200, 0x600
+    window = tab[lo:hi + 1]
     assert window, "empty post-clip window -- the test is vacuous"
     assert all(0 <= v <= cfg.W for v in window), (
         "a post-clip viewangletox entry is not a column in [0,%d]: %r"
@@ -318,8 +320,16 @@ def test_w1_x1_fits_two_nibbles_so_the_narrow_move_is_equivalent():
     assert max(window) < 0x100, (
         "x1 needs more than 2 nibbles (max %d) -- the W1 narrow move is NOT equivalent"
         % max(window))
-    # and the negative control: OUTSIDE the window the table really does hold values that would
-    # break the narrow move, which is why the clip is load-bearing rather than cosmetic.
-    outside = [v for v in tab[:lo] + tab[hi:] if not 0 <= v <= cfg.W]
-    assert outside, ("no out-of-range entries outside the clip window -- then the clip is not what "
-                     "makes W1 safe and this test is testing the wrong property")
+    # THE NEGATIVE CONTROL, and it must test the property W1 actually depends on: that some
+    # entry does NOT fit the 2 nibbles the narrow move copies. `not 0 <= v <= VIEW_W` is NOT that
+    # -- it is satisfied by entries of 161 (0xA1), which `hex.mov 2` copies perfectly well. The
+    # entries that would break W1 are the 509 baked as -1 = 0xFFFFFFFF (CR-2026-09-07).
+    outside = [v for v in tab[:lo] + tab[hi + 1:] if not 0 <= v <= 0xFF]
+    assert outside, ("no entry outside the clip window fails to fit 2 nibbles -- then the frustum "
+                     "clip is not what makes W1 safe, and this test checks the wrong property")
+    # the ones that would actually break `hex.mov 2` are the NEGATIVE sentinels: the table holds
+    # them as -1 and the emitter bakes them as 0xFFFFFFFF, of which a 2-nibble move copies only
+    # 0xFF. (An entry of 161 = 0xA1 is outside [0,VIEW_W] but copies fine, which is why the
+    # earlier predicate `not 0 <= v <= VIEW_W` was not a real control -- CR-2026-09-07.)
+    assert any(v < 0 for v in outside), (
+        "expected the -1 sentinels outside the window; got %r" % sorted(set(outside))[:5])

@@ -268,7 +268,7 @@ ns stream {
     // state. Mirrors ReferenceModel.wall_noise exactly (R6).
     def wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride, noise, cmidx \
             @ ptr, y2r, colr, wloop, wdone, end {
-        hex.zero w/4, ptr
+        hex.zero w/4 - 2, ptr + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, ptr, wlen
         hex.mul_const w/4, ptr, ptr, wpxstride*dw      // the list baked for THIS exact height
         hex.add w/4, ptr, wstripbase
@@ -797,7 +797,7 @@ ns stream {
         hex.mov 2, wlen, fstart
         frame.sub2_chain wlen, ctake
         hex.if0 2, wlen, end
-        hex.zero w/4, ptr
+        hex.zero w/4 - 2, ptr + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, ptr, wlen
         hex.mul_const w/4, ptr, ptr, wpxstride*dw      // the list baked for THIS exact height
         hex.add w/4, ptr, wstripbase
@@ -921,7 +921,7 @@ ns stream {
     def sprite_runs_win sblk, sy0b, slr, wlo, whi, blkshift \
             @ sloop, spos, semit, sfin, sclamp, snext, send, end \
             < sprbank, srw_ptr, srw_rel, srw_rel_w, srw_sbase, srw_sidx, srw_smidx, srw_tex, srw_whi4, srw_wlo4, srw_y0, srw_yabs {
-        hex.zero w/4, srw_sidx
+        hex.zero w/4 - 4, srw_sidx + 4*dw   // Z3: the mov below zeroes the low 4 itself
         hex.mov 4, srw_sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, srw_sidx
         hex.set w/4, srw_sbase, sprbank
@@ -975,7 +975,7 @@ ns stream {
     def sprite_runs sblk, sy0b, slr, viewh, blkshift \
             @ sloop, spos, semit, sfin, sclamp, snext, send, end \
             < sprbank, srn_cvh, srn_ptr, srn_rel, srn_rel_w, srn_sbase, srn_sidx, srn_smidx, srn_tex, srn_y0, srn_yabs {
-        hex.zero w/4, srn_sidx
+        hex.zero w/4 - 4, srn_sidx + 4*dw   // Z3: the mov below zeroes the low 4 itself
         hex.mov 4, srn_sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, srn_sidx  // x SPR_BLOCK_STRIDE = 1<<blkshift SLOTS
         hex.set w/4, srn_sbase, sprbank

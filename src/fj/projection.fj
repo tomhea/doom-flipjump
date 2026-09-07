@@ -1108,7 +1108,12 @@ ns proj {
         hex.div 8, 8, quot, rem, tcol_abs, tw, baddiv  // rem = |tcol| % tw
         hex.cmp 8, rem, czero, rem_nz, rem_zero, rem_nz   // rem == 0 ? (unsigned magnitude)
       rem_zero:
-        // (zero dropped: the mov below zeroes all 8 nibbles itself)
+        // ⚠ NOT DEAD, and Z1 wrongly deleted it (caught by a control-flow audit before it could
+        // ship further): this zero IS the result on this branch -- an exact multiple gives dst=0.
+        // The `hex.mov 8, dst, tw` that Z1 paired it with is on the OTHER branch, past `;end` and
+        // the `rem_nz:` label. A zero-before-mov rewrite is only valid when the mov
+        // UNCONDITIONALLY follows the zero.
+        hex.zero 8, dst                                // exact multiple -> 0
         ;end
       rem_nz:
         hex.mov 8, dst, tw

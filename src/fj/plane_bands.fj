@@ -144,7 +144,7 @@ ns plane {
         // `hex.read_table 8` re-derived the full pointer every row at ~10k of the ~12.6k ops/row;
         // 3x read_byte_and_inc through a running pointer is ~4-7x cheaper (R14's array-walk lesson).
         hex.set w/4, ysptr, yslope_packed
-        hex.zero w/4, y0w
+        hex.zero w/4 - 2, y0w + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, y0w, bb_y0
         hex.mul_const w/4, ysoff, y0w, 3*dw
         hex.add w/4, ysptr, ysoff                       // ysptr -> yslope_packed[y0]

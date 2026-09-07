@@ -574,9 +574,9 @@ ns frame {
       inc_done:
         // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][trb_bucket:2]
         sprbkt.lookup trb_bucket, trb_thpx
-        hex.zero w/4, trb_blk_const                 // the per-thing block base: sp_base + trb_bucket,
+        hex.zero w/4 - 4, trb_blk_const + 4*dw   // Z3: the mov below zeroes the low 4 itself
         hex.mov 4, trb_blk_const, sp_base           // WIDENED first (a narrow add cannot carry out
-        hex.zero w/4, trb_tab_idx                   // of its own nibbles)
+        hex.zero w/4 - 2, trb_tab_idx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, trb_tab_idx, trb_bucket
         hex.add w/4, trb_blk_const, trb_tab_idx
         hex.zero 6, trb_bucket_h + 2*dw             // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT (idea 20: the mov 2 below covers nibbles 0-1)
@@ -683,7 +683,7 @@ ns frame {
         // block = sp_base + trb_u*buckets + trb_bucket, at a POWER-OF-TWO stride so the address is a shift
         // trb_blk = (base + trb_bucket) + trb_u*BUCKETS -- and (base + trb_bucket) is a per-THING constant, so
         // only the `trb_u*BUCKETS` term belongs in the column loop. `trb_blk_const` is that constant, hoisted.
-        hex.zero w/4, trb_blk
+        hex.zero w/4 - 2, trb_blk + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, trb_blk, trb_u
         rep(spn, k) hex.if1 1, hdfl, bucket_mul   // SPR-NEAR: the packed region strides nld
         rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld
@@ -1262,7 +1262,7 @@ ns frame {
     // the other pair is never mentioned again), so the _c/_f variants do not compute the dead
     // pair -- that was ~717/~359 ops of dead work per call.
     def lines_pid_ids pidreg, cbufa, cbufd, fbufa, fbufd < vzcbase {
-        hex.zero w/4, cbufa
+        hex.zero w/4 - PID_NIBBLES, cbufa + PID_NIBBLES*dw   // Z3: the mov below zeroes the low PID_NIBBLES itself
         hex.mov PID_NIBBLES, cbufa, pidreg
         hex.shl_bit w/4, cbufa
         hex.shl_bit w/4, cbufa
@@ -1277,7 +1277,7 @@ ns frame {
 
     // ceiling caller: only the c-pair is ever walked.
     def lines_pid_ids_c pidreg, cbufa, cbufd < vzcbase {
-        hex.zero w/4, cbufa
+        hex.zero w/4 - PID_NIBBLES, cbufa + PID_NIBBLES*dw   // Z3: the mov below zeroes the low PID_NIBBLES itself
         hex.mov PID_NIBBLES, cbufa, pidreg
         hex.shl_bit w/4, cbufa
         hex.shl_bit w/4, cbufa
@@ -1288,7 +1288,7 @@ ns frame {
 
     // floor caller: only the f-pair is ever walked (fbufa = base+2, fbufd = base+3).
     def lines_pid_ids_f pidreg, fbufa, fbufd < vzcbase {
-        hex.zero w/4, fbufa
+        hex.zero w/4 - PID_NIBBLES, fbufa + PID_NIBBLES*dw   // Z3: the mov below zeroes the low PID_NIBBLES itself
         hex.mov PID_NIBBLES, fbufa, pidreg
         hex.shl_bit w/4, fbufa
         hex.shl_bit w/4, fbufa
@@ -1300,7 +1300,7 @@ ns frame {
     }
 
     def lines_pid_addrs pidreg, half_slots, cbufa, cbufd, fbufa, fbufd < vzbank {
-        hex.zero w/4, cbufa                                // widen the pid first: mul_const
+        hex.zero w/4 - PID_NIBBLES, cbufa + PID_NIBBLES*dw   // Z3: the mov below zeroes the low PID_NIBBLES itself
         hex.mov PID_NIBBLES, cbufa, pidreg                 // reads w/4 nibbles of its source (R11)
         hex.mul_const w/4, cbufa, cbufa, 4*half_slots*dw
         hex.add w/4, cbufa, vzbank
@@ -1348,7 +1348,7 @@ ns frame {
         rep(1-skyall, k) hex.if0 2, issky, notsky
         skyoff.lookup soff, x
         frame.add2_chain soff, skb
-        hex.zero w/4, cbufa
+        hex.zero w/4 - 2, cbufa + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, cbufa, soff
         hex.shl_bit w/4, cbufa                  // u*2: the ids interleave asc,desc
         hex.add_constant w/4, cbufa, sky_base_id
@@ -1366,7 +1366,7 @@ ns frame {
         rep(1-skyall, k) hex.if0 2, issky, notsky   // skyall=1: force it (bisect probe)
         skyoff.lookup soff, x
         frame.add2_chain soff, skb
-        hex.zero w/4, cbufa                     // widen before mul_const (R11 reads w/4 nibbles)
+        hex.zero w/4 - 2, cbufa + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, cbufa, soff
         hex.mul_const w/4, cbufa, cbufa, skystride*dw
         hex.set w/4, skybands_b, skybands             // a LABEL base goes through hex.set (the proven
@@ -1436,7 +1436,7 @@ ns frame {
       ctake_use_fstart:
         hex.mov 2, ctake, fstart
       ctake_done:
-        hex.zero w/4, slot_idx
+        hex.zero w/4 - 2, slot_idx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, slot_idx, x
         hex.shl_hex w/4, SLOT_SHIFT, slot_idx            // 16 bytes per column -> a whole-nibble shift
         hex.set w/4, sfslot_b, sfslot
@@ -1962,7 +1962,7 @@ ns frame {
     def lines_steps_seed x1 @ sidx, bteam, end_seed < sfflag, sfslot, p2_sffp, p2_sfsp {
         hex.set w/4, bteam, sfflag
         frame.ptr_index4 p2_sffp, bteam, x1
-        hex.zero w/4, sidx
+        hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, SLOT_SHIFT, sidx
         hex.set w/4, bteam, sfslot
@@ -1975,7 +1975,7 @@ ns frame {
     def lines_spr_seed x1 @ sidx, bteam, end_seed < sprflag, spslot, p2_spfp, p2_sspp {
         hex.set w/4, bteam, sprflag
         frame.ptr_index4 p2_spfp, bteam, x1
-        hex.zero w/4, sidx
+        hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, 1, sidx                 // spslot's OWN stride (SPR_SLOT_STRIDE)
         hex.set w/4, bteam, spslot

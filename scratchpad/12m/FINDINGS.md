@@ -1703,7 +1703,20 @@ re-analysis needs no second instrumented run.
 Scaled to the p80 run that defines the metric: the xor family is **~15,116,123 ops/frame** of
 26,201,318. Nothing else is close — the next primitive is `hex.shifts.shl_bit_once` at 2.04%.
 
-### ⚠ COLLISION IS ~4.5M OPS/FRAME, NOT ~11.6M. The plan's biggest lever is 2.6x smaller.
+### ⚠⚠ AW's SUBSYSTEM SPLIT IS FROM THE MISMATCHED PAIR — superseded by BB. Read BB, not this.
+
+CR-2026-09-07: the numbers in this section were produced by attributing the rung-0 histogram
+against rung-0 PASS-1 labels, which is the mismatched join BA and BB identify. The `distscale
+12.14%` column below is the artifact itself, and the `sim 17.20%` beside it is computed from the
+same bad attribution. **BB is the authoritative profile** (S2 binary + S2 labels, 100.0%
+attributed). BA blessed AW as "unaffected" because AW keys on expansion paths; that was only true
+of AW's XOR-FAMILY table, not of this namespace rollup.
+
+The qualitative conclusion survives BB — collision is far smaller than the plan's ~11.6M — but the
+figure to quote is BB's, not this one, and the "cannot close the gap" phrasing below was true
+against rung 0's 6,201,318-op gap and is NOT true against the post-W1 gap of 3,447,960.
+
+### COLLISION IS FAR SMALLER THAN ~11.6M (superseded numbers below; see BB)
 
 By subsystem (deepest non-stl macro, namespace-rolled):
 

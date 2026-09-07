@@ -68,6 +68,38 @@ def doom_macro(name):
     return inner_macro(name)
 
 
+# A matched pair drops a negligible fraction of ops past bare labels; a mismatched pair drops a
+# huge one. Measured on the two real pairs this campaign produced:
+#   rung-0 histogram vs rung-0 labels (MISMATCHED) : 12.14% of ops far past a bare label
+#   S2 histogram vs S2 labels (MATCHED)            :  0.017%
+# Three orders of magnitude apart, so the threshold is not delicate.
+JOIN_DROP_LIMIT = 0.02
+
+
+def check_join(dropped, total, fjm, labels):
+    """⚠ THE JOIN KEY. A profile is a JOIN between a histogram and a label table, and the two are
+    comparable only if they came from the SAME BUILD.
+
+    Nothing checked this, and it is the single root cause behind FINDINGS AY (a 12.14% macro that
+    did not exist), its retraction BA, a wasted build-gate-measure cycle on D1, and three further
+    wrong hypotheses. BB wrote that history down and STILL shipped no control -- CR-2026-09-07
+    caught that every other control here passes on a mismatched pair.
+
+    ⚠ The obvious test -- "labels must span the executed addresses" -- is WRONG, and was rejected
+    after being tried: execution legitimately runs past the last label into the unlabelled
+    wflip-spot area (~6.4M words on the S2 build), so it flags a MATCHED pair as broken. The
+    signal that actually discriminates is how many ops land far past a BARE label.
+    """
+    frac = dropped / max(1, total)
+    if frac > JOIN_DROP_LIMIT:
+        return (False,
+                "MISMATCH: %.2f%% of ops sit far past a bare label (limit %.0f%%). A matched pair "
+                "drops ~0.02%%. %s and %s are almost certainly from different builds -- re-capture "
+                "with labels2.py." % (100.0*frac, 100.0*JOIN_DROP_LIMIT, fjm, labels))
+    return (True, "%.3f%% of ops dropped past bare labels -- consistent with a matched pair"
+                  % (100.0*frac))
+
+
 class LabelTable:
     """addresses sorted once; `lookup(ip)` is the innermost label at or before ip"""
 
@@ -189,6 +221,7 @@ def rank(rec, table, keyfn, top=25, guard=True):
     if far:
         print("  (guard: %s ops sat > %d ops past a BARE label and were NOT credited to it)"
               % (format(far, ","), FAR_PAST_LABEL_BITS // 64), flush=True)
+    rank.last_far = far
     return buckets, unattributed
 
 
@@ -255,6 +288,12 @@ def main():
               % (a.out, format(len(rec.hits), ",")), flush=True)
 
     inner, un_i = rank(rec, table, inner_macro)
+    ok, msg = check_join(getattr(rank, "last_far", 0), ops, a.fjm, a.labels)
+    print("join   : %s" % msg, flush=True)
+    if not ok:
+        print("VACUOUS: refusing to rank a mismatched histogram/label pair -- this is the exact "
+              "failure that produced FINDINGS AY.", flush=True)
+        return 1
     report(inner, ops, un_i, "HOT PRIMITIVES (innermost macro -- what burns the ops)", a.top)
     doom, un_d = rank(rec, table, doom_macro)
     report(doom, ops, un_d, "HOT DOOM MACROS (deepest non-stl caller -- our code)", a.top)
@@ -284,6 +323,16 @@ def selftest():
     ok = all(t.lookup(x) == linear(x) for x in (0, 99, 100, 101, 199, 200, 349, 350, 351, 10_000))
     check("C3 lookup matches a linear scan at and around every boundary", ok)
     check("C3 an address before every label is unattributed, not label 0", t.lookup(50) is None)
+
+    # C6 THE JOIN-KEY CONTROL. A mismatched build/labels pair must be REJECTED, not ranked.
+    # the two REAL pairs this campaign produced, by their measured drop rates
+    ok, msg = check_join(13_219, 78_675_599, "s2.fjm", "s2labels")     # matched: 0.017%
+    check("C6 the MATCHED pair (0.017% dropped) is ACCEPTED", ok, msg[:44])
+    ok2, msg2 = check_join(9_726_044, 80_111_139, "r0.fjm", "r0labels")  # mismatched: 12.14%
+    check("C6 the MISMATCHED pair (12.14% dropped) is REJECTED",
+          (not ok2) and "MISMATCH" in msg2, msg2[:44])
+    check("C6 the threshold sits between them, not at an arbitrary point",
+          0.00017 < JOIN_DROP_LIMIT < 0.1214)
 
     # C5 THE OVER-ATTRIBUTION GUARD. An op far past a BARE label must not be credited to it.
     class R:

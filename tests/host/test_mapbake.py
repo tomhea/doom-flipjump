@@ -291,3 +291,35 @@ def test_bsp_code_node_consts_self_zero_after_walk(tmp_path):
         [consts.resolve(), FIXED_POINT_FJ.resolve(), FRAME_RENDER_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", b"0" * 38,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "node partition consts did not self-zero after the walk (broken xor-involution)"
+
+
+def test_w1_x1_fits_two_nibbles_so_the_narrow_move_is_equivalent():
+    """W1: `sparse_zero 8, x` + `sparse_mov 2, x, x1` replaced `sparse_mov 8, x, x1` in
+    `seg_pass1_leaf_body_lines` and `seg_pass2_leaf_body_lines`. That is only value-identical while
+    x1 -- a clipped screen column -- fits the 2 nibbles the narrow move copies.
+
+    ⚠ This is NOT obvious from the table. `viewangletox` is 2048 entries of which 509 are -1,
+    baked as 0xFFFFFFFF; it is the frustum clip that keeps the looked-up index inside the window
+    where the value is a real column. So the invariant under test is: over the POST-CLIP window,
+    every entry is a column in [0, VIEW_W] and therefore < 0x100.
+
+    CR-2026-09-07 raised this: three src/fj files changed with no test, and the new invariant was
+    asserted only in a comment -- one whose stated reason was itself wrong.
+    """
+    from doomfj.tables import viewangletox_table
+    cfg = Config()
+    tab = viewangletox_table(cfg.W, cfg.TRIG_N)
+    lo, hi = 0x200, 0x600                      # the post-clip window the renderer indexes with
+    window = tab[lo:hi]
+    assert window, "empty post-clip window -- the test is vacuous"
+    assert all(0 <= v <= cfg.W for v in window), (
+        "a post-clip viewangletox entry is not a column in [0,%d]: %r"
+        % (cfg.W, [v for v in window if not 0 <= v <= cfg.W][:5]))
+    assert max(window) < 0x100, (
+        "x1 needs more than 2 nibbles (max %d) -- the W1 narrow move is NOT equivalent"
+        % max(window))
+    # and the negative control: OUTSIDE the window the table really does hold values that would
+    # break the narrow move, which is why the clip is load-bearing rather than cosmetic.
+    outside = [v for v in tab[:lo] + tab[hi:] if not 0 <= v <= cfg.W]
+    assert outside, ("no out-of-range entries outside the clip window -- then the clip is not what "
+                     "makes W1 safe and this test is testing the wrong property")

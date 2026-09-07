@@ -180,7 +180,12 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **M5 standalone, `self_reset=False`** | **84,155,496** | 1.25× OVER | **0.627×** | **flat** (asserted) |
 | **M5 standalone + `self_reset=True`** (shipped `doom_e1m1_std.fjm`) | **84,892,508** | 1.27× OVER | **0.633×** | **flat** (asserted) |
 | **M3 the same + `menu=True`** (`doom_e1m1_menu.fjm` as of M3, before doors) | **85,209,916** | 1.27× OVER | **0.635×** | **flat** (asserted) |
-| **M2 the same + `doors=True`** (**the shipped `doom_e1m1_menu.fjm` today**) | **89,494,606** | 1.33× OVER | **0.667×** | **flat** (asserted) |
+| **M2 the same + `doors=True`** (**the shipped `doom_e1m1_menu.fjm` today**) | **51,094,744** | 0.38× | **2.63×** | **flat** (asserted) |
+
+⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1): the shipped binary was 89,494,606 words when
+this table was written and is **51,094,744** now — 38.07% of the 2^27 = 134,217,728-word
+w=32 ceiling. Measured with `scratchpad/12m/fjmsize.py`; `m2_std_gate` PASS.
+
 
 ⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
 and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the

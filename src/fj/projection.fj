@@ -1713,9 +1713,9 @@ ns proj {
     def point_on_side_leaf back, vx, vy, cpx, cpy, cdx_mag, cdy_mag, sign_dx, sign_dy, pos_ret \
             @ dyv_neg, dyv_pos, dyv_done, dxv_neg, dxv_pos, dxv_done, signA_pos, signA_neg, both_pos, pos_neg, check_p2, both_neg, setback, front, end \
             < pos_dxv, pos_dxv_mag, pos_dyv, pos_dyv_mag, pos_p1, pos_p2, pos_signA, pos_signB, pos_sign_dxv, pos_sign_dyv {
-        hex.sparse_mov 4096, 10, pos_dxv, vx
+        hex.sparse_mov HOTTER_PAD, 10, pos_dxv, vx
         frame.sub10_chain pos_dxv, cpx              // pos_dxv = vx - px   (signed, 10-nib -- unchanged width)
-        hex.sparse_mov 4096, 10, pos_dyv, vy
+        hex.sparse_mov HOTTER_PAD, 10, pos_dyv, vy
         frame.sub10_chain pos_dyv, cpy              // pos_dyv = vy - py
 
         hex.sign 10, pos_dyv, dyv_neg, dyv_pos
@@ -1726,8 +1726,8 @@ ns proj {
       dyv_pos:                             // (two's-complement truncation identity)
         hex.set 1, pos_sign_dyv, 0
       dyv_done:
-        hex.sparse_zero 4096, 8, pos_dyv_mag
-        hex.sparse_mov 4096, 5, pos_dyv_mag, pos_dyv
+        hex.sparse_zero HOTTER_PAD, 8, pos_dyv_mag
+        hex.sparse_mov HOTTER_PAD, 5, pos_dyv_mag, pos_dyv
 
         hex.sign 10, pos_dxv, dxv_neg, dxv_pos
       dxv_neg:
@@ -1737,16 +1737,16 @@ ns proj {
       dxv_pos:
         hex.set 1, pos_sign_dxv, 0
       dxv_done:
-        hex.sparse_zero 4096, 8, pos_dxv_mag
-        hex.sparse_mov 4096, 5, pos_dxv_mag, pos_dxv
+        hex.sparse_zero HOTTER_PAD, 8, pos_dxv_mag
+        hex.sparse_mov HOTTER_PAD, 5, pos_dxv_mag, pos_dxv
 
         hex.mul_lo 8, pos_p1, pos_dyv_mag, cdx_mag   // pos_p1 = |dx|*|pos_dyv|
         hex.mul_lo 8, pos_p2, pos_dxv_mag, cdy_mag   // pos_p2 = |dy|*|pos_dxv|
 
-        hex.sparse_mov 4096, 1, pos_signA, sign_dx
-        hex.sparse_xor 4096, 1, pos_signA, pos_sign_dyv          // pos_signA = sign(dx*pos_dyv)
-        hex.sparse_mov 4096, 1, pos_signB, sign_dy
-        hex.sparse_xor 4096, 1, pos_signB, pos_sign_dxv          // pos_signB = sign(dy*pos_dxv)
+        hex.sparse_mov HOTTER_PAD, 1, pos_signA, sign_dx
+        hex.sparse_xor HOTTER_PAD, 1, pos_signA, pos_sign_dyv          // pos_signA = sign(dx*pos_dyv)
+        hex.sparse_mov HOTTER_PAD, 1, pos_signB, sign_dy
+        hex.sparse_xor HOTTER_PAD, 1, pos_signB, pos_sign_dxv          // pos_signB = sign(dy*pos_dxv)
 
         hex.if 1, pos_signA, signA_pos, signA_neg
       signA_pos:                            // pos_signA==0 (pos_p1 contributes +|pos_p1|)

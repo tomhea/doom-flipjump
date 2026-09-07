@@ -1,0 +1,9 @@
+tablepool gate selftest
+  C1/C2 relocating hex.xor's tables leaves the output unchanged ok  b'0x1234' vs b'0x1234'
+  C3 tables were relocated                                   ok  113 relocated
+  C3 the op count FELL (a no-op pass would pass C2 too)      ok  1685 -> 1079 (-35.96%)
+  C4 with the guard ON, the fall-through program is correct  ok  b'IK\x02\x01' vs b'IK\x02\x01'
+  C4 with the guard FORCED to accept, it breaks (so the guard is load-bearing) ok  guardless='raised: FlipJumpPreprocessorException' vs b'IK\x02\x01'
+  C4 ...and the guard was restored afterwards                ok
+
+SELFTEST PASS

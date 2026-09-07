@@ -2178,3 +2178,57 @@ by 15x -- but it points at roughly -12%, i.e. ~20.2M, not the 16,566,010 BD clai
 
 Placement is a real, gated, reusable mechanism that pays for itself in SIZE and costs nothing. It
 is not a route to 12M.
+
+---
+
+## BF -- blocking's MECHANISM is validated: 13.13 -> 8.16 ops per xor
+
+BE showed BD's placement projection missed by 15x because it assumed a freedom the mechanism did
+not have. So blocking was validated against the interpreter BEFORE building it, which is what
+should have happened to placement. `scratchpad/12m/blockbench.py` (`--selftest` C1-C3).
+
+### It works
+
+A hex variable is a single op `;val*dw`, so its jump word already holds the VALUE, and
+`wflip src+w, switch` makes it `switch + digit`. Blocking bakes a BASE into the variable instead --
+`;(BASE + val*dw)` -- and puts every table that variable dispatches to in one aligned block at
+BASE, so the arm only flips the INDEX:
+
+      K      stock                    blocked (block=2^n)
+      1      41       looping         21       looping
+      4      76       looping         38       looping
+      16     240      looping         130      looping
+      32     448      looping         274      looping
+
+      MARGINAL ops per xor (K=1 -> K=32):
+        stock   : 13.13 ops/xor
+        blocked : 8.16 ops/xor  (-37.8%)
+
+Measured as a SLOPE, not a total, because the two programs differ in setup: stock must `hex.set`
+the source, blocking bakes it. C1 checks the blocked program REACHES `stl.loop` and computes
+0x3 ^ 0x5 = 6 -- a program that dies early has a lower op count, so op count alone reads as a win.
+
+### Two alignment rules, both learned by breaking them
+
+* **The BLOCK, not the table, sets the alignment.** `pad 16` aligns to ONE table and leaves the
+  index bits (10..13) free to be already set in BASE -- and then the XOR SUBTRACTS. Measured:
+  BASE=556,032 has bit 10 set, so arming index 1 jumped to 555,328 instead of 557,376.
+* **The block size must be a power of two**, for the same reason. C3 is the negative control: a
+  9-table block breaks (`ip<2w`) and the 16-table block for the same K works.
+
+### What it would still cost to ship
+
+Not built. Beyond the pool machinery placement already has, it needs:
+* the block base baked into every hex variable's declaration -- an emitter change;
+* EVERY other `wflip` targeting a pinned word rewritten to `V ^ BASE`. That is one place
+  (`insert_wflip_ops`), which is what makes it tractable -- `stl.comp_if1`, `hex.shifts.*` and
+  `hex.tables.*` are handled by construction rather than by audit;
+* power-of-two block padding. From BD's grouping, 518,514 slots x 16 ops = 16,592,448 words
+  (12.36% of 2^27) ON TOP of the program, against a 35% size target already at 37.96%.
+
+### Do NOT extrapolate this to a frame number
+
+In this toy the stock table addresses are ~popcount 8; in the shipped game they are 9.32, so
+stock's real per-call cost is higher and blocking's margin there is larger. That is exactly the
+reasoning that produced BD's 15x miss. -37.8% is what was MEASURED, on a toy, at the mechanism
+level, and nothing here says what a real build would do.

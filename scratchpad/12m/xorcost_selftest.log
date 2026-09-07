@@ -1,0 +1,10 @@
+xorcost selftest -- the cost model, checked against the shipped image
+  C1 disarm chain is popcount(switch) ops, each run exactly `calls` times (40 hottest) ok  0 site(s) disagreed
+  C2 a lower-popcount table address measures cheaper             ok  28 vs 252
+  C3 a mismatched labels/histogram pair is REFUSED               ok  99.80% far
+  C3 ...and a matched pair is accepted                           ok
+  C4 tables already at popcount 1 predict ~no saving             ok  cur 54, blocked 54
+  C4 ...while scattered tables predict a large one               ok  saves 224 of 252
+  C5 each site in a block gets a DISTINCT index                  ok
+
+SELFTEST PASS

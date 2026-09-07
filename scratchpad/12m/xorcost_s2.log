@@ -1,0 +1,35 @@
+fjm      : build/doom_e1m1_s2.fjm
+histogram: _s2_hist.json.gz  (78,675,599 ops, 4 frames, from build/doom_e1m1_s2.fjm)
+labels   : _full_labels.tsv.gz
+join     : 1.6868% of ops past the last label -- SOUND
+
+single-destination exact_xor sites : 374,655 static, 49,321 executed
+calls in the walk                  : 2,007,547
+mean popcount of an executed table : 9.32
+
+ARM+DISARM ops in the walk
+  today   (2 x popcount of the table address) :    37,410,178 =  47.55% of the walk
+  blocked (2 x popcount of the index)         :     6,183,516 =   7.86%
+  saved                                       :    31,226,662 =  39.69%
+
+  ops/frame if that saving lands: 22,988,275 -> 13,864,136
+  table region needed: 29,875 blocks, 518,514 slots, 16,592,448 words (12.36% of 2^27)
+
+THE 2-DESTINATION FORM (double_exact_xor), untouched by the figures above
+  live tables 8,913, calls 631,118, arm+disarm 11,980,590 ops
+  exact_xor FAMILY arm+disarm total : 49,390,768 ops = 62.78% of the walk
+
+HOTTEST SITE  switch @ 439,278,592 (popcount 12), end @ 439,279,616, 1,056 calls
+  first disarm op at `end`; its 11 chained ops occupy 439,277,888 .. 439,278,528
+  those sit BELOW the table at 439,278,592 -- i.e. inside the `pad 16` alignment gap,
+  which is why widening a pad does not remove them
+
+PINNING (bake the address, drop both wflips) -- needs a word used by ONE site
+  eligible sites 6,196 of 374,655, calls 81,529 of 2,007,547, worth 1,559,730 ops = 1.98% of the walk
+
+PLACEMENT (relocate to low-popcount addresses, hottest first; zero size growth)
+  applies to the 49,321 single-destination sites only
+  supply of pad-16-aligned addresses below 2^32 by popcount: pc<=3 = 1,794, pc<=4 = 9,109
+  top 4,096   tables -> 18,953,004 ops/frame
+  top 16,384  tables -> 17,028,157 ops/frame
+  top 49,321  tables -> 16,566,010 ops/frame

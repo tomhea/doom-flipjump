@@ -1988,3 +1988,100 @@ a ~0.2%-per-change lever.
 20M is not reachable by this class of work. Reaching it needs either a structural change to how the
 renderer uses hex operations, or a fidelity decision (fewer columns, coarser spans) — which is the
 owner's call, not an optimisation.
+
+---
+
+## BD -- 62.78% of the program is two `wflip`s, and their cost is the table's ADDRESS
+
+BC concluded "20M is not reachable by this class of work... reaching it needs a structural change
+to how the renderer uses hex operations". This is that structural change, and unlike every previous
+estimate it is an EXACT per-op accounting checked against the shipped image, not an attribution.
+
+### The mechanism
+
+`hex.exact_xor` (stl `hex/logics.fj`) is reached ~660k times a frame. Its body is:
+
+    wflip src+w, switch, src              <- arm
+    pad 16 ; switch: <16 entries> ; end:  <- the walk, 1..4 ops
+    wflip src+w, switch                   <- disarm
+
+`assembler.py:insert_wflip_ops` emits ONE op per set bit of the flipped value: the first inline, the
+rest chained. Chains are SHARED between call sites with a common suffix -- which saves space and
+never saves ops. So each call costs `walk + 2 * popcount(switch)`, and `switch` is a ~2^30 bit
+address with ~9.3 bits set.
+
+**The dominant cost of the whole program is where the switch tables happened to land.**
+
+### Measured, not modelled
+
+`scratchpad/12m/xorcost.py` (selftest `xorcost_selftest.log`, report `xorcost_s2.log`) walks the
+real disarm chain in `build/doom_e1m1_s2.fjm`. Control C1 checks the claim op by op on the 40
+hottest sites: the chain is exactly `popcount(switch)` ops long and every op in it executes exactly
+`calls` times. 0 sites disagreed.
+
+    single-destination exact_xor sites : 374,655 static, 49,321 executed
+    calls in the walk                  : 2,007,547
+    mean popcount of an executed table : 9.32
+      today   (2 x popcount of the table address) :    37,410,178 =  47.55% of the walk
+
+Adding the 2-destination form (`double_exact_xor`, 8,913 live tables, 631,118 calls, 11,980,590
+arm+disarm ops) takes the family total to 49,390,768 ops = **62.78% of every op executed**. The
+walk itself -- the actual work -- is about 2.06 ops per call.
+
+### Why the pad rounds under-delivered
+
+The chain ops are emitted at the addresses immediately BELOW `switch`, inside the `pad 16` gap. At
+the hottest site the first disarm op is at `end` (439,279,616) and its 11 chained ops occupy
+439,277,888 .. 439,278,528, below the table at 439,278,592.
+The padding is not slack the assembler was wasting; it is already holding the chain.
+Widening a pad moves the table without removing the chain, which is why S2 bought 2.00% and S3 was
+negative.
+
+### Two designs priced
+
+**Placement** -- relocate tables to low-popcount addresses, hottest first. At zero size growth
+(slots inside the current span), over the single-destination sites only:
+
+      top 4,096   tables -> 18,953,004 ops/frame
+      top 16,384  tables -> 17,028,157 ops/frame
+      top 49,321  tables -> 16,566,010 ops/frame
+
+Supply is the binder: of pad-16-aligned addresses below 2^32, only 1,794 have popcount <= 3 and
+9,109 have popcount <= 4.
+
+**Blocking** -- strictly better and needs no low-popcount addresses at all. Every site's `src+w`
+word was recovered from the binary and sites grouped by it (29,875 distinct words). If the tables
+sharing a word sat in ONE aligned block and the word were baked with the block base, the arm would
+flip only the INDEX within the block:
+
+      blocked (2 x popcount of the index)         :     6,183,516 =   7.86%
+      saved                                       :    31,226,662 =  39.69%
+      ops/frame if that saving lands: 22,988,275 -> 13,864,136
+      table region needed: 29,875 blocks, 518,514 slots, 16,592,448 words (12.36% of 2^27)
+
+That is single-destination sites ALONE. The 2-destination form carries a further 11,980,590 arm+
+disarm ops that the same treatment reaches.
+
+### What is NOT proven
+
+* **The third-writer assumption.** Blocking requires that nothing but these arms and disarms ever
+  writes `src+w`. C5 states this; it does not check it. One other writer and the design is wrong.
+* **PINNING IS DEAD.** The stronger variant -- bake the table address into the word and drop both
+  wflips -- needs a word used by exactly ONE site. Measured: 6,196 of 374,655 sites (1.7%), 81,529
+  of 2,007,547 calls (4.1%), worth 1.98% of the walk. Killed. 64.1% of calls run through words
+  shared by 8 or more sites, which is precisely why BLOCKS work and pinning does not.
+* **The enabling mechanism does not exist yet.** fj rejects `segment` inside a macro
+  ("segment can't be declared inside a macro"), and the hot owners are hand-written fj
+  (`frame_render.fj`, `projection.fj`), so Python cannot emit per-table global labels for them.
+  A hoisted, `segment`-placed table DOES assemble and produce identical output at top level -- the
+  proof-of-concept ran at three addresses with identical output and cost tracking popcount at
+  exactly 2.0 ops/bit -- but per-site placement needs an allocator inside the assembler.
+* It is still an estimate until a build measures it. See BC.
+
+### Where the hot tables are
+
+Seven doom macros own 100% of the top 4,096 tables (52.9% of calls); eleven own the top 16,384
+(86.4%). `frame.seg_pass1_leaf_body_lines`, `frame.seg_pass2_leaf_body_lines`,
+`frame.seg_pass1_leaf_body_ts`, `proj.point_on_side_leaf`, `frame.thing_record_body`,
+`sim.thing_pass`, `sim.check_position`, `sim.try_move`, `sim.bind_things`, `proj.wedge_bbox`.
+The frame is flat in MACROS (BB) and concentrated in TABLES; those are not the same statement.

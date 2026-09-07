@@ -305,7 +305,7 @@ Hot calls: `exact_xor@l50` (86.4% of the macro!), `@l49` (5.3%), `zero@l43` (5.1
 1. **One idea per build.** S3 moved two variables and its result is uninterpretable as a result —
    the knee is known to be between S2 and S3 and nothing more.
 2. **`overflow_probe game` on any stl or shared-emitter change**, before the build (§6b).
-3. **`m2_std_gate` is the correctness gate** — 45/45 byte-exact, and it is what caught nothing this
+3. **`m2_std_gate` is the correctness gate** — 43 byte-exact game frames of 45 presented, and it caught nothing this
    session only because every change was genuinely equivalent. Treat a PASS as the evidence, not
    the reasoning that preceded it.
 4. **Rank with the profile, size by building** (BC). Do not put an ops estimate in a commit message

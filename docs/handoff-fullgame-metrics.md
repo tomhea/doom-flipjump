@@ -178,7 +178,8 @@ an inert tool (nothing calls them; FINDINGS AJ/AQ says do not re-open that direc
 **Checks, all run, logs committed:**
 * `overflow_probe game` → **FITS**, peak 50,742,890 words, 62.2% under the ceiling
   (`scratchpad/12m/rung0_overflow.log`)
-* `m2_std_gate` → **PASS**, 45/45 frames byte-exact, door 48 reaching 9 distinct states carried
+* `m2_std_gate` → **PASS**, **43 byte-exact game frames of 45 presented** (frames 0-1 are menu
+  frames this gate does not judge; `m3_gate` certifies those), door 48 reaching 9 distinct states carried
   across the M1 reset, all four controls (`scratchpad/12m/rung0_m2gate.log`)
 * `gamespeed --runs 10 --frames 100` (`scratchpad/12m/rung0_speed.log`)
 

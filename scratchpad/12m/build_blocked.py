@@ -60,6 +60,13 @@ def main():
                     help="cfg.VIEW_W, needed to derive the byte arrays (build metrics print it)")
     ap.add_argument("--subsectors", type=int, default=682,
                     help="subsector count, needed to derive the byte arrays")
+    ap.add_argument("--spread", type=int, default=1,
+                    help="give a big group SPREAD times the slots and hand out only the cheapest "
+                         "indices. The arm costs 2*popcount(index) and the index is as wide as the "
+                         "group (FINDINGS BN); unused slots emit no data, so this spends SPAN, not "
+                         "DATA.")
+    ap.add_argument("--spread-min-count", type=int, default=256,
+                    help="only groups with at least this many tables get the spread")
     ap.add_argument("--merge-aliases", action="store_true",
                     help="merge groups whose source-word expressions resolve to ONE address into a "
                          "single block, instead of un-pinning both (3,801 words on the game tier)")
@@ -173,8 +180,16 @@ def main():
             base = pinned_by_word.get(word_index)
             return (value ^ base) if base else value
 
+        # A COLLAPSE HERE IS SILENT OTHERWISE. spread=4 exhausted the pool, almost every group got
+        # no block, and pinning fell from 25,701 words to 72 -- which builds fine, passes the gate,
+        # and measures like the un-pinned regression. Say it loudly instead.
+        expected = sum(1 for pool in pools for _ in pool.groups)
         print("  reset: stripping the block base from %s pinned words before the LUT test"
               % format(stripped, ","), flush=True)
+        if expected and stripped < expected // 10:
+            print("  *** PINNING COLLAPSED: %s pinned words against %s groups. The pool is almost "
+                  "certainly exhausted -- lower --pool-base or reduce --spread."
+                  % (format(stripped, ","), format(expected, ",")), flush=True)
         return _real_emit(gen_dir, labels, unpinned_word, *rest, **kw)
 
     _selfreset.emit_reset_part = _emit_reset_part
@@ -186,7 +201,9 @@ def main():
     def assemble_blocked(*args, **kwargs):
         if not frozen:
             with tempfile.TemporaryDirectory() as td:
-                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits, wants=wants)
+                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits,
+                                     spread=a.spread, spread_min_count=a.spread_min_count,
+                                     wants=wants)
                 probe = dict(kwargs)
                 probe["table_pool"] = counting
                 out_arg = list(args)
@@ -232,7 +249,8 @@ def main():
                          format(sum(counting.counts.values()), ","), int(time.time() - t0)),
                       flush=True)
         pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
-                         span_bits=a.span_bits, alias=frozen.get("alias"), wants=wants)
+                         span_bits=a.span_bits, alias=frozen.get("alias"),
+                         spread=a.spread, spread_min_count=a.spread_min_count, wants=wants)
         # NEVER PIN A WORD THE M1 SELF-RESET OWNS. emit_reset_part drops a cell from the restore
         # set when `pristine_word >> VAL_SHIFT > 15`, reading it as a packed LUT -- and a pinned
         # word holds `base + value`, so every pinned state cell is misclassified and silently

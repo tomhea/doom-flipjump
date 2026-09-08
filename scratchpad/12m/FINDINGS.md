@@ -2772,3 +2772,54 @@ from ~7.75 down to ~4.25. Two ways to get there:
 
 The cheap decline fixes (raise `max_slot_ops` for the 10,052 too-wide; raise the pool span for the
 5,103 no-block) are worth doing and are worth ~4% of tables, not 4.6M ops.
+
+---
+
+## BO -- sparse indices: -2.14%, and the two bugs they exposed
+
+BN said the arm costs `2 * popcount(index)` and the index is as wide as the group, so big groups --
+which carry 64.1% of calls -- barely benefit. Sparse indices attack that directly: give a group
+`spread` times the slots and hand out only the CHEAPEST indices. Unused slots emit NO data, so this
+spends SPAN (69.93%, ceiling 100%) rather than DATA (32.68%, target 35%).
+
+      isolated: a 1000-table group, mean index popcount 4.93 -> 3.81, arm ~9.9 -> ~7.6 ops
+
+      SPEED  16,598,830 -> 16,244,364   -2.14%   (target <= 20,000,000)  PASS
+      SIZE       33.18% ->     32.68%            (target <= 35%)         PASS
+      span   83,751,840 -> 93,860,768 words (69.93%)
+
+`M2 STANDALONE GATE: PASS`. Real, small, and less than the isolated figure because spread=2 is
+what fits -- see below.
+
+### Two failures that would have read as results
+
+* **spread=4 EXHAUSTED THE POOL.** Pinning fell from 25,701 words to **72** -- and that build would
+  have completed, passed its gate, and measured like the un-pinned regression. Caught only by
+  reading the stripping count against the previous build. There is now a loud
+  `*** PINNING COLLAPSED` warning when pinned words drop below a tenth of the group count.
+* **THE CHEAP-INDEX LIST IS A SUBSET, so an overflow table must DECLINE, not fall back.** A raw
+  index past the end of the list can equal a mapped index already handed out: measured as
+  `seg[207408]` and `seg[207409]` both at 0x96130000, which the fjm writer rejected. Overflow
+  declines rose 2,289 -> 4,008, which is the fix, not a regression.
+
+A third habit came out of it: the failed build left a STALE .fjm in place and the gate ran against
+it, reporting "presented 1 frames, not 45" -- a meaningless number that looked catastrophic. The
+driver now removes the artifact first and the monitor gates only if one exists.
+
+### The campaign
+
+      24,723,058   campaign baseline
+      22,988,274   z3, this session's start
+      21,963,752   blocking, restore set unpinned      (BI)
+      19,419,072   + reset state cells pinned          (BL)  M6 MET
+      16,598,830   + aliased groups merged             (BM)
+      16,244,364   + sparse indices, spread=2          (BO)
+
+**-29.3% from this session's start, both M6 targets passing, every build gated byte-exact.**
+
+### 12M: over by 4,244,364
+
+Sparse indices are near their limit -- spread=4 does not fit in the pool. The remaining lever is
+the one BN identified: **collapse the big groups** so the index is narrow, which means sharing
+tables across call sites via a return trampoline. Nothing else measured touches the 64% of calls
+that run through groups thousands of tables wide.

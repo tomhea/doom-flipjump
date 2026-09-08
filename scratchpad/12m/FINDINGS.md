@@ -2535,3 +2535,60 @@ The first attempt at this build ran 5,408s of CPU against the usual ~1,800s and 
 slow -- QUADRATIC: the reset wrapper rebuilt the resolved label dict inside the per-group loop,
 32,061 groups x ~24M labels. It was caught by treating an unusual runtime as suspicious and
 comparing elapsed CPU against previous builds, rather than assuming a big change is just slower.
+
+---
+
+## BK -- re-profiled: blocking reached 7.58% of the cost it targets, and the hot words are the reset's
+
+Every decision from BD onward rested on a cost model measured on the PRE-BLOCKING binary. This
+re-measures it on both, with `scratchpad/12m/jumpwordcost.py` (selftest C1-C3, conservation clean
+on both runs).
+
+      classifier: an fj op is [flip][jump]; a hex variable is ONE op, so its jump word is the
+      second. A flip landing at `address mod 2w >= w` writes a jump word.
+
+                           baseline (z3)     blocked (gate-passing)
+      ops (4 frames)        77,410,023          72,628,968     -6.18%
+      jump-word writes      68,746,608          63,535,573     -7.58%
+      share of frame            88.81%              87.48%
+
+**Blocking pinned 32,061 groups and 416,797 tables and moved the cost by 7.58%.** The share of the
+frame is essentially unchanged, which is the same story the binding metric told (-4.46%) arriving
+by an independent route.
+
+### Read the classifier honestly
+
+88.81% is HIGHER than BD's 78.32% because this classifier is broader on purpose: a hex's value
+nibble also lives in the jump word, so a table ENTRY flipping `dst+dbit+k` is counted too. That is
+the actual xor work and is not removable. The two numbers bracket the arming cost between roughly
+78% and 89%; neither is a measurement of arming alone.
+
+The signal that does NOT depend on classification is the total: **6.18% fewer ops**. If blocking
+were reaching the bulk of a 62.78% arm/disarm cost, the total would have fallen far more.
+
+### Why -- and it is the same wall BI named
+
+The words blocking cannot pin are the ones that matter:
+
+* 12,400 restore-set words -- the M1 reset's, i.e. the STATE cells the simulation touches every
+  frame, which is precisely why they carry the calls;
+* 3,801 un-pinned as aliased (two expressions, one address, two bases);
+* 16,142 tables declined.
+
+BJ tried to pin the nibble half of the reset's cells and the binary died on the FIRST frame with a
+screen-protocol violation, for a reason that is still not understood. So the campaign's position is
+now measured from two directions and they agree: blocking works, and the hottest words are exactly
+the ones it is not allowed to touch.
+
+### Where that leaves 12M
+
+Binding metric **21,963,752**, size **34.69% PASS**. The target is over by 9,963,752, and no
+identified lever is sized for that gap:
+
+* recovering the 3,801 aliased pins and the 16,142 declines is worth a fraction of the 7.58%
+  already achieved -- real, but small;
+* pinning the reset's cells is the big one and is BLOCKED on an unexplained failure (BJ);
+* the only untried idea of the right magnitude is SHARING tables across call sites via a return
+  trampoline, which would collapse 425,066 tables toward the number of distinct destinations. It is
+  a larger change than anything attempted here and its cost -- an extra indirect jump per call --
+  could eat the gain. Unmeasured.

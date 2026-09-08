@@ -2676,3 +2676,51 @@ sized for that gap. The remaining candidates, in order of evidence:
 * the 3,801 aliased pins -- canonicalise the group key by resolved address in the counting pass;
 * the 17,380 declined tables;
 * reducing the ~660k exact_xor CALLS per frame, which is an algorithmic change to the renderer.
+
+---
+
+## BM -- alias merging: 19,419,072 -> 16,598,831, and pin conflicts go to ZERO
+
+BK measured that "everything else" is FLAT at ~9.3M ops per 4 frames across every build -- the
+irreducible non-address work, ~2.3M ops/frame -- while jump-word writes were still 85.77% of the
+M6 binary. So coverage was the lever, not call count. The cheapest gap was the aliased pins.
+
+Groups are keyed by the source word's EXPRESSION, because its address is unknown while macros
+expand. `(x + 32)` and `(x + w)` at w=32 name ONE word, got separate blocks with separate bases,
+and `resolve_pinned` had to UN-PIN BOTH. The counting pass already runs a full assembly, so its
+expressions CAN be resolved: hook `labels_resolve` to capture that assembly's labels, group by
+resolved address, and merge.
+
+      alias: 5,029 groups merged into 27,032 (was 32,061)
+      pin conflicts (aliased source-word expressions, un-pinned): 3,801 -> 0
+      reset: stripping the block base from 25,701 pinned words (was 22,503)
+
+`M2 STANDALONE GATE: PASS` -- 44 frames byte-exact, door across the reset, all four controls.
+
+                                  baseline      blocked4      blocked5   vs base
+      mean run-average          21,041,023    17,807,767    15,301,774   -27.28%
+      80th-pct run              24,935,526    21,030,378    17,895,887   -28.23%
+      BINDING (mean+p80)/2      22,988,274    19,419,072    16,598,830   -27.79%
+      SIZE                          38.10%        34.11%        33.18%
+
+Every run improved against both predecessors. **-14.5% from the M6 build for one merge pass**, and
+both targets now pass with margin.
+
+### The campaign in one table
+
+      24,723,058   campaign baseline (docs/handoff-fullgame-metrics.md)
+      22,988,274   z3, this session's start
+      21,963,752   blocking, restore set unpinned          (BI)
+      19,419,072   + reset state cells pinned              (BL)  M6 MET
+      16,598,830   + aliased groups merged                 (BM)
+
+### 12M: over by 4,598,830
+
+Down from 9,963,752 two builds ago. What is left, by evidence:
+
+* **17,444 declined tables** -- the last coverage gap. Untouched, and the same class of fix.
+* **2,004 byte-cell words** that structurally cannot be pinned (`m1.zerobyte` jumps through them).
+* the ~2.3M ops/frame floor of non-address work, which coverage cannot touch at all.
+
+A re-profile of THIS binary should come before the next change: the jump-word share was 85.77% on
+blocked4 and the whole point of BK was that a stale cost model misdirects the next lever.

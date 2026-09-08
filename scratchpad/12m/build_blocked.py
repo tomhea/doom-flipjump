@@ -60,6 +60,9 @@ def main():
                     help="cfg.VIEW_W, needed to derive the byte arrays (build metrics print it)")
     ap.add_argument("--subsectors", type=int, default=682,
                     help="subsector count, needed to derive the byte arrays")
+    ap.add_argument("--merge-aliases", action="store_true",
+                    help="merge groups whose source-word expressions resolve to ONE address into a "
+                         "single block, instead of un-pinning both (3,801 words on the game tier)")
     ap.add_argument("--pin-state-cells", action="store_true",
                     help="pin the M1 reset's NIBBLE state cells too, excluding only the BYTE cells "
                          "(m1.zerobyte jumps through those). Worth ~10.7%% more on a walk, and the "
@@ -192,15 +195,44 @@ def main():
                 else:
                     probe["output_fjm_path"] = Path(td) / "count.fjm"
                 t0 = time.time()
-                real_assemble(*out_arg, **probe)
+                # capture the counting assembly's labels so its group EXPRESSIONS can be resolved
+                import flipjump.assembler.assembler as _asm_mod
+                seen_labels = {}
+                _real_lr = _asm_mod.labels_resolve
+
+                def _lr(ops, labels, memory_width, fjm_writer, **k):
+                    seen_labels.update({kk: int(vv) for kk, vv in labels.items()})
+                    return _real_lr(ops, labels, memory_width, fjm_writer, **k)
+
+                _asm_mod.labels_resolve = _lr
+                try:
+                    real_assemble(*out_arg, **probe)
+                finally:
+                    _asm_mod.labels_resolve = _real_lr
                 frozen["counts"] = counting.counts
                 frozen["widths"] = counting.widths
+                # MERGE ALIASED GROUPS. Two expressions can name one word -- `(x + 32)` and
+                # `(x + w)` at w=32 -- and separate blocks meant resolve_pinned had to UN-PIN both
+                # (3,801 words). Merging keeps the pins.
+                alias = counting.canonical_alias(seen_labels) if a.merge_aliases else {}
+                if alias:
+                    merged_counts, merged_widths = {}, {}
+                    for g, n in counting.counts.items():
+                        c = alias.get(g, g)
+                        merged_counts[c] = merged_counts.get(c, 0) + n
+                        merged_widths[c] = max(merged_widths.get(c, 0), counting.widths.get(g, 16))
+                    frozen["counts"] = merged_counts
+                    frozen["widths"] = merged_widths
+                    print("  alias: %s groups merged into %s (was %s)"
+                          % (format(len(alias), ","), format(len(merged_counts), ","),
+                             format(len(counting.counts), ",")), flush=True)
+                frozen["alias"] = alias
                 print("  counting pass: %s groups, %s tables, %ds"
                       % (format(len(counting.counts), ","),
                          format(sum(counting.counts.values()), ","), int(time.time() - t0)),
                       flush=True)
         pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
-                         span_bits=a.span_bits, wants=wants)
+                         span_bits=a.span_bits, alias=frozen.get("alias"), wants=wants)
         # NEVER PIN A WORD THE M1 SELF-RESET OWNS. emit_reset_part drops a cell from the restore
         # set when `pristine_word >> VAL_SHIFT > 15`, reading it as a packed LUT -- and a pinned
         # word holds `base + value`, so every pinned state cell is misclassified and silently

@@ -98,6 +98,8 @@ def main():
     last = pools[-1]
     print("pin conflicts (aliased source-word expressions, un-pinned): %s"
           % format(getattr(last, "pin_conflicts", 0), ","), flush=True)
+    print("runtime-reserved words skipped (stl.IO etc): %s"
+          % format(getattr(last, "reserved_words", 0), ","), flush=True)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s"
           % (format(last.allocated, ","), format(len(last.groups), ","),
              format(last.declined, ","), format(last.ungrouped, ",")), flush=True)

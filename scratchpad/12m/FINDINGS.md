@@ -2385,3 +2385,51 @@ diagnostic should be a DIFFERENTIAL trace against the unblocked binary, or a bis
 groups get pinned -- not another guess. A cheaper loop would help more than either: the render tier
 builds in ~850s against the game tier's ~1,780s and lacks sim and collision, which narrows the
 search while halving the cycle.
+
+---
+
+## BH -- 14,042,442 is WITHDRAWN: the blocked game binary fails the standalone gate
+
+With relocation restricted to the verified-safe `exact_xor` family, blocking passed the deg gate
+4/4 BYTE-EXACT at -18.56% and the game tier then measured:
+
+      SPEED  BINDING (mean+p80)/2: 14,042,442 ops/frame   (target <= 20,000,000)  PASS
+      SIZE   words              : 45,610,646 = 33.98% of 2^27   (target <= 35%)  PASS
+
+Both M6 targets, for the first time, every run improved 27.72%-50.14%, no regression. **And the
+number is void.** `scratchpad/m2_std_gate.py` on the same binary:
+
+      frame  keys      door48    fj px vs oracle
+      2  ft             0   BYTE-EXACT
+      3  ft             0   !! 7831 px differ
+      M2 STANDALONE GATE: FAIL
+
+The baseline passes that gate on the same day, so this is not a broken gate:
+
+      44  -              7   BYTE-EXACT
+      M2 STANDALONE GATE: PASS -- the shipped binary opens a door and KEEPS it open across the M1 reset
+
+**BLOCKING BREAKS THE SIMULATION.** The trajectories part at frame 3, so all ten speed runs walked a
+different -- and cheaper -- path than the baseline. A program that computes the wrong thing is
+trivially faster, which is exactly why the speed harness is not evidence of anything on its own.
+
+### Why the deg gate did not catch it
+
+`deg_gate` renders four STATIC viewpoints. It proves the renderer byte-exact and says nothing about
+the simulation: no movement, no collision, no door state, no M1 reset. The standalone gate drives
+the shipped binary with scripted keypresses and compares every frame, which is the only gate that
+covers the sim -- and it is the one that failed.
+
+This is the campaign's own rule (CLAUDE.md 3) reasserting itself: a cheap pre-gate saves time, it
+never replaces the gate. The deg gate was treated as sufficient because it is byte-exact, and
+byte-exact on the wrong program is still the wrong program.
+
+### What is actually established
+
+* Blocking's mechanism is real: 13.13 -> 8.16 ops/xor (BF), -18.56% byte-exact on the RENDERER.
+* Relocation must be DECLARED, not inferred (BG root cause), and the `exact_xor` family is safe for
+  the renderer.
+* Something in blocking breaks the simulation, and it is NOT the renderer. Unfinished.
+* SIZE 45,610,646 words = 33.98% is measured on the same broken binary and is equally provisional.
+
+The binding metric remains **22,940,226 ops/frame**.

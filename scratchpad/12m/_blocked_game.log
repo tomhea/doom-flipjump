@@ -1,14 +1,15 @@
 blocking: pool base 0x70000000, span unbounded
-  counting pass: 32,064 groups, 425,185 tables, 414s
+macros allowed: hex.double_exact_xor, hex.exact_xor, hex.quadrupled_exact_xor, hex.sparse_double_exact_xor, hex.sparse_exact_xor, hex.triple_exact_xor
+  counting pass: 32,061 groups, 425,066 tables, 428s
 {
   "map": "E1M1",
   "downscale": 2,
   "storage_mode": "flat",
-  "span_words": 83903424,
+  "span_words": 83899584,
   "flat_limit": 134217728,
   "headroom": 1.6,
-  "fjm_bytes": 31511808,
-  "assemble_seconds": 1338.456,
+  "fjm_bytes": 31518092,
+  "assemble_seconds": 1364.082,
   "tier": "lines/W1R/FT1+plane_near",
   "features": {
     "wall_noise": true,
@@ -54,9 +55,9 @@ blocking: pool base 0x70000000, span unbounded
   }
 }
 
-assemblies: 2; blocked per assembly: 415,119, 416,902
+assemblies: 2; blocked per assembly: 415,014, 416,797
 *** THE PASSES BLOCKED DIFFERENT COUNTS -- their addresses cannot agree
 pin conflicts (aliased source-word expressions, un-pinned): 3,801
 runtime-reserved words skipped (stl.IO etc): 0
-blocked: 416,902 tables in 32,064 groups; declined 15,350; ungrouped 135,156
-total 1784s
+blocked: 416,797 tables in 32,061 groups; declined 15,336; ungrouped 0
+total 1805s

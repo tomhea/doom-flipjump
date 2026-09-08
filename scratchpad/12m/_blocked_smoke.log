@@ -1,13 +1,13 @@
-SIZE: w=32  segments=416903  data=45,610,484 words (33.98% of 2^27)  span=83,903,424 words (62.51%)  file=31,511,808 bytes
-Traceback (most recent call last):
-  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\gamespeed.py", line 448, in <module>
-    sys.exit(main())
-             ^^^^^^
-  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\gamespeed.py", line 442, in main
-    run_avgs, raw_avgs, _ = measure_speed(a.fjm, a.runs, a.frames, calibrate=not a.no_calibrate)
-                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\gamespeed.py", line 188, in measure_speed
-    _demand_full_length(menu_frames, menu_ops, presented)
-  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\gamespeed.py", line 173, in _demand_full_length
-    raise AssertionError("the program presented %d frames, not %d (%s ops) -- a short run "
-AssertionError: the program presented 0 frames, not 2 (124 ops) -- a short run reads as a WIN, so it is an error, not a datum
+SIZE: w=32  segments=416798  data=45,610,646 words (33.98% of 2^27)  span=83,899,584 words (62.51%)  file=31,518,092 bytes
+calibration: startup + 2 menu frames = 376,022 ops (subtracted from every run)
+  run  0: 115,908,068 ops / 7 presented -> raw 16,558,295, game-only 23,106,409 ops/frame
+
+==============================================================================
+SPEED  BINDING (mean+p80)/2: 23,106,409 ops/frame   (target <= 20,000,000)  OVER
+SPEED  mean run-average   : 23,106,409 ops/frame
+SPEED  80th-pct run avg   : 23,106,409 ops/frame
+SPEED  spread lo..hi      : 23,106,409 .. 23,106,409 ops/frame
+SPEED  raw (menu included): mean 16,558,295, 80th-pct 16,558,295 ops/frame
+SIZE   words              : 45,610,646 = 33.98% of 2^27   (target <= 35%)  PASS
+SIZE   span / file        : 83,899,584 words (62.51%) / 31,518,092 bytes
+==============================================================================

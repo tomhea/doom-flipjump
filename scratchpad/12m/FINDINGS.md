@@ -2232,3 +2232,72 @@ In this toy the stock table addresses are ~popcount 8; in the shipped game they 
 stock's real per-call cost is higher and blocking's margin there is larger. That is exactly the
 reasoning that produced BD's 15x miss. -37.8% is what was MEASURED, on a toy, at the mechanism
 level, and nothing here says what a real build would do.
+
+---
+
+## BG -- blocking is BUILT and GATED, and does not yet work on the game
+
+BF measured blocking's mechanism at 13.13 -> 8.16 ops per xor. It is now implemented in the
+assembler (`flipjump-151` branch `table-placement`, `BlockPool`), gated with eight controls, and
+**correct on every toy program and broken on the shipped game**. The binding metric is unchanged:
+22,940,226 ops/frame.
+
+### What works
+
+    program / blocking                   output     ops       groups  verdict
+    hex.xor                              b'0x1234'  963       8       SAME  -42.85% ops
+    hex.add/sub                          b'0x8F4D'  4440      9       SAME  -20.60% ops
+    hex.cmp/shift/mul                    b'0x3D'    2129      32      SAME  -26.51% ops
+    bit.exact_xor (fall-through table)   unchanged  618       0       SAME  +0.00% ops
+
+The game tier BUILDS cleanly: 416,902 of 425,185 tables blocked across all 32,064 groups, both
+assemblies identical, self-reset verified (`labels_moved_in_set: 0`, `values_changed_in_set: 0`),
+size 36.73% of 2^27 (better than the baseline's 38.10%), span 62.51%.
+
+And then it presents **0 frames in 124 ops**.
+
+### Five game builds, four causes, none predicted
+
+Every one was caught by a gate, and none by the toy gate:
+
+1. **Non-deterministic allocation.** A stateful pool shared across the game tier's two assemblies
+   made pass 2 relocate nothing. Caught by the M1 reset check: "434 baked addresses moved between
+   passes". Fixed by freezing counts and preallocating bases.
+2. **Alignment waste.** Blocks are power-of-two sized and self-aligned, so encounter-order
+   allocation wasted up to a full block each -- 257,003 of 425,185 tables declined. Fixed by
+   allocating biggest-first.
+3. **One wide table sets its group's slot width.** A 514-op table in a 32,768-slot group wants
+   2.1e9 bits -- the whole pool. Biggest-first made it worse: 9 groups of 32,064 got blocks. Fixed
+   by capping slot width; wider tables stay inline.
+4. **Pinning never engaged.** `begin_relocation` was handed the raw `src + w` from the macro BODY,
+   where `src` is an unbound parameter -- the same object at every call site. All groups stored one
+   expression, which deduped to a single bogus pin. **Every "blocking" number before this was
+   measuring relocation.** With pinning live, hex.xor went -19.47% -> -42.85%.
+5. **The rewrite rule was too broad.** `flip_value ^= base` assumed every wflip on a pinned word
+   installs a jump target, but `hex.set`/`xor_by` wflip the same word to toggle VALUE bits, and
+   XORing base into that destroys the base. Separable by magnitude; gate C7 is the control.
+
+### What is still wrong, and what was ruled out
+
+The game dies at `ip 64 -> POOL -> ip 64`, then a runtime-memory-error at a pool address. TWO
+diagnoses of that were WRONG and are recorded so they are not repeated:
+
+* **NOT declined tables in pinned groups.** A consistent base CANCELS --
+  `(B + digit) ^ (switch ^ B)` is `switch + digit` wherever the table sits. The selftest carried a
+  control asserting otherwise until it failed.
+* **NOT `stl.IO`.** It is at bit address 64 and `bit.output` dispatches through it, so `ip 64 ->
+  POOL` looked damning -- but the toy gate uses `hex.print`, dispatches through the same word, and
+  PASSES. Excluding it from pinning changed nothing, and the relocation guard reported
+  `runtime-reserved words skipped: 0`, so it never applied.
+
+`pin conflicts: 3,801` on the game tier is real, though -- aliased source-word expressions do
+occur, and that guard is load-bearing.
+
+### The actual lesson
+
+**The toy gate is not a proxy for the game.** Four programs with eight controls pass while the real
+program fails, and every cause so far lived in something the toys do not contain. The next
+diagnostic should be a DIFFERENTIAL trace against the unblocked binary, or a bisect over which
+groups get pinned -- not another guess. A cheaper loop would help more than either: the render tier
+builds in ~850s against the game tier's ~1,780s and lacks sim and collision, which narrows the
+search while halving the cycle.

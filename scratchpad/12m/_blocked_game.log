@@ -1,0 +1,62 @@
+blocking: pool base 0x70000000, span unbounded
+  counting pass: 32,064 groups, 425,185 tables, 414s
+{
+  "map": "E1M1",
+  "downscale": 2,
+  "storage_mode": "flat",
+  "span_words": 83903424,
+  "flat_limit": 134217728,
+  "headroom": 1.6,
+  "fjm_bytes": 31511808,
+  "assemble_seconds": 1338.456,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": true,
+    "standalone": true,
+    "doors": true,
+    "menu": true
+  },
+  "self_reset": {
+    "nibble_cells": 3059,
+    "byte_cells": 1002,
+    "persisted_labels": [
+      "viewx",
+      "viewy",
+      "viewangle",
+      "kb_f",
+      "kb_b",
+      "kb_l",
+      "kb_r",
+      "kb_u",
+      "mode",
+      "dstate",
+      "ddir",
+      "dsub",
+      "dwait"
+    ],
+    "restore_set": "C:\\Users\\tomhe\\Documents\\doom-flipjump\\src\\doomfj\\data\\m5_restore_set.json.gz",
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 12400,
+    "view_w": 160,
+    "subsectors": 682
+  }
+}
+
+assemblies: 2; blocked per assembly: 415,119, 416,902
+*** THE PASSES BLOCKED DIFFERENT COUNTS -- their addresses cannot agree
+pin conflicts (aliased source-word expressions, un-pinned): 3,801
+runtime-reserved words skipped (stl.IO etc): 0
+blocked: 416,902 tables in 32,064 groups; declined 15,350; ungrouped 135,156
+total 1784s

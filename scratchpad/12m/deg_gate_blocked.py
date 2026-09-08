@@ -40,12 +40,24 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=1 << 31)
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=None)
+    ap.add_argument("--owners", nargs="*", default=None,
+                    help="only block tables under these macro names. The PLACEMENT run that passes "
+                         "this gate was restricted to six hot owners; BlockPool relocates "
+                         "EVERYTHING, including hex.tables.*, hex.pointers.* and stl internals. "
+                         "Restricting it the same way tests whether the unsafe tables are outside "
+                         "them.")
     ap.add_argument("--no-pin", action="store_true",
                     help="relocate into blocks but do NOT pin the source words")
     a = ap.parse_args()
 
     print("BLOCKING ON: pool base %s, pinning %s"
           % (hex(a.pool_base), "OFF (relocation only)" if a.no_pin else "on"), flush=True)
+
+    _wants = None
+    if a.owners:
+        names = tuple(a.owners)
+        _wants = lambda macro_name, prefix: any(o in prefix for o in names)   # noqa: E731
+        print("  restricted to: %s" % ", ".join(names), flush=True)
 
     frozen = {}
     pools = []
@@ -54,7 +66,7 @@ def main():
     def assemble_blocked(*args, **kwargs):
         if not frozen:
             with tempfile.TemporaryDirectory() as td:
-                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits)
+                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits, wants=_wants)
                 probe = dict(kwargs)
                 probe["table_pool"] = counting
                 out_arg = list(args)
@@ -69,7 +81,7 @@ def main():
                       % (format(len(counting.counts), ","),
                          format(sum(counting.counts.values()), ",")), flush=True)
         pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
-                         span_bits=a.span_bits)
+                         span_bits=a.span_bits, wants=_wants)
         pools.append(pool)
         kwargs["table_pool"] = pool
         return real_assemble(*args, **kwargs)

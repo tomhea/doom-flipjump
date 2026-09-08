@@ -2321,6 +2321,25 @@ Two facts worth carrying into the next attempt:
 * `--no-pin` costs 154 ops against pinned-on's 132, i.e. both die in the same place and pinning
   only changes how far the corpse gets.
 
+### What the search has ruled out
+
+Restricting blocking to the SAME six macros the passing placement run used still fails -- the
+program gets much further (132 ops -> 259,625 / 237,379 / 323,613 / 488,448) but the pixel diffs are
+byte-identical (15975 / 16000 / 15864 / 14893 of 16,000). Essentially every pixel, i.e. nothing
+renders, in all three configurations. So it is systemic to BlockPool's relocation, not one bad
+macro, and not the tables outside those six.
+
+Attempts to reproduce it in a toy, all of which PASS and several of which win big:
+
+    nvars=24 nxor=4  96 groups, 480 tables   stock 7,445 ops -> blocked 2,813   SAME  (-62%)
+    stl.fcall shared leaf                    stock   230 ops -> blocked   288   SAME
+    hex.xor / hex.add / hex.cmp+shift+mul    SAME at every setting (gate, 8 controls)
+
+So it is not: group count, tables per group, sharing degree, `stl.fcall`, or IO dispatch through
+`stl.IO`. A pointer toy was written to test `hex.pointers.*` and is INVALID -- it fails stock -- so
+the pointer machinery remains untested and is the leading suspect, since the renderer uses it and
+none of the passing toys do.
+
 ### The actual lesson
 
 **The toy gate is not a proxy for the game.** Four programs with eight controls pass while the real

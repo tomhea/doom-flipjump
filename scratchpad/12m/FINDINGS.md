@@ -2293,6 +2293,34 @@ diagnoses of that were WRONG and are recorded so they are not repeated:
 `pin conflicts: 3,801` on the game tier is real, though -- aliased source-word expressions do
 occur, and that guard is load-bearing.
 
+### THE BISECT: it is RELOCATION, not pinning
+
+`deg_gate` under blocking reproduces the failure on the VISUAL tier -- so it is not the menu, the
+keyboard, the simulation or the M1 self-reset:
+
+    (664,291,0x18000000): 132 ops  !! 15975 px DIFFER      <- baseline is ~33M ops, BYTE-EXACT
+    (1272,-724,0x40000000): 132 ops  !! 16000 px DIFFER
+    FAIL
+
+`--no-pin` then splits blocking's two halves -- MOVING tables into per-source-word blocks, and
+PINNING the words so the arm flips an index:
+
+    pinning ON  : 132 ops, 15975 px differ   FAIL
+    pinning OFF : 154 ops, 15975 px differ   FAIL       <- IDENTICAL pixel diffs
+
+**The fault is in RELOCATION.** That inverts the assumption this whole rung rested on: pinning was
+the new, unproven half, and placement (BE) already relocates tables through this same gate and
+passes 4/4 byte-exact. So `BlockPool`'s relocation differs from `TablePool`'s in some way that
+matters, and the difference is the layout: TablePool packs tables into contiguous runs at
+increasing addresses, while BlockPool scatters them to `base + index * slot_bits` per group, so a
+group's slots are sparse and interleaved with other groups' in emission order.
+
+Two facts worth carrying into the next attempt:
+* an EARLIER blocked game build with 86,946 tables in 9 groups DID run (7 frames presented), and
+  the current one with 87,458 tables in 8,534 groups does not -- so it is not raw segment count;
+* `--no-pin` costs 154 ops against pinned-on's 132, i.e. both die in the same place and pinning
+  only changes how far the corpse gets.
+
 ### The actual lesson
 
 **The toy gate is not a proxy for the game.** Four programs with eight controls pass while the real

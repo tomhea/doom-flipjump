@@ -2615,3 +2615,64 @@ identified lever is sized for that gap:
   trampoline, which would collapse 425,066 tables toward the number of distinct destinations. It is
   a larger change than anything attempted here and its cost -- an extra indirect jump per call --
   could eat the gain. Unmeasured.
+
+---
+
+## BL -- M6 MET: 19,419,073 ops/frame and 34.11%, both targets, on a gate-passing binary
+
+BJ's frame-38 failure was mine, not the design's. `_emit_reset_part` stripped block bases using
+`pool.pinned_words()` -- the pool's RAW set -- while the assembler bakes from the FILTERED map
+`resolve_pinned` returns after dropping aliased words and the caller's exclusions. Every word in
+the raw set that was never actually pinned got a base XORed in that is not there, the value looked
+enormous, `emit_reset_part` read it as a packed LUT, and the cell SILENTLY VANISHED from the
+restore set. 37 frames of accumulating drift, then a screen-protocol violation.
+
+Two checks confirmed the fix BEFORE the gate ran:
+
+      reset part      blocked2 (passes)  set=535 zero=273 lines=823
+                      blocked3 (broken)  set=529 zero=324 lines=868
+                      blocked4 (fixed)   set=535 zero=273 lines=823   -- diff vs blocked2 EMPTY
+      stripping       26,305 -> 22,503 words, a difference of 3,802 against 3,801 aliased conflicts
+
+`M2 STANDALONE GATE: PASS` -- 44 frames byte-exact, door across the reset, all four controls.
+
+      run      z3 baseline       blocked4          delta      pct
+      0         27,110,806     22,921,988     -4,188,818  -15.45%
+      4         14,795,842     12,458,314     -2,337,528  -15.80%
+      7         14,945,357     12,891,547     -2,053,810  -13.74%
+      mean run-average           21,041,023     17,807,767     -3,233,256  -15.37%
+      80th-pct run               24,935,526     21,030,378     -3,905,148  -15.66%
+      BINDING (mean+p80)/2       22,988,274     19,419,072     -3,569,202  -15.53%
+
+      SPEED  19,419,073  (target <= 20,000,000)  PASS
+      SIZE   45,778,512 = 34.11% of 2^27  (target <= 35%)  PASS
+
+**Every run improved, none regressed, and both M6 targets are met for the first time on a binary
+that passes its gate.** The campaign's headline baseline was 24,723,058; this is 19,419,073.
+
+### What it took, and what it cost to learn
+
+The mechanism was right from BF (13.13 -> 8.16 ops/xor). Everything between was defects in MY
+implementation, each found by a gate and none predicted:
+
+  1. a stateful pool shared across the game tier's two assemblies
+  2. alignment waste declining 257,003 tables
+  3. one wide table setting its group's slot width (9 groups of 32,064 got blocks)
+  4. the group expression never substituted -- pinning silently inert, so every "blocking" number
+     before it was measuring relocation
+  5. a rewrite rule that also clobbered value-bit wflips
+  6. relocation inferred rather than declared (hex.pointers.xor_hex_to_flip_ptr)
+  7. the reset's LUT test misreading a pinned word
+  8. base-stripping from the raw pin set instead of the assembler's filtered one
+
+Two of my diagnoses along the way were wrong and retracted (declined-tables-in-pinned-groups;
+stl.IO), and one measured number was WITHDRAWN because the binary was computing the wrong thing.
+
+### The 12M goal
+
+**Over by 7,419,072.** M6's targets are met; the owner's 12M is not, and nothing measured here is
+sized for that gap. The remaining candidates, in order of evidence:
+
+* the 3,801 aliased pins -- canonicalise the group key by resolved address in the counting pass;
+* the 17,380 declined tables;
+* reducing the ~660k exact_xor CALLS per frame, which is an algorithmic change to the renderer.

@@ -60,6 +60,11 @@ def main():
                     help="cfg.VIEW_W, needed to derive the byte arrays (build metrics print it)")
     ap.add_argument("--subsectors", type=int, default=682,
                     help="subsector count, needed to derive the byte arrays")
+    ap.add_argument("--pin-state-cells", action="store_true",
+                    help="pin the M1 reset's NIBBLE state cells too, excluding only the BYTE cells "
+                         "(m1.zerobyte jumps through those). Worth ~10.7%% more on a walk, and the "
+                         "reason it failed before was the base-stripping using the pool's raw pin "
+                         "set instead of the assembler's filtered one (FINDINGS BJ).")
     ap.add_argument("--no-pin", action="store_true",
                     help="relocate into blocks but do NOT pin the source words. Splits blocking's "
                          "two halves against the standalone gate, the way --no-pin split them "
@@ -117,32 +122,47 @@ def main():
         21,963,752 ops/frame and 34.69% size.
         """
         if excluded["words"] is None:
-            from doomfj.selfreset import load_restore_set
-            from doomfj.build import STANDALONE_RESTORE_SET
-            excluded["words"] = set(load_restore_set(
-                STANDALONE_RESTORE_SET, {k: int(v) for k, v in labels.items()},
-                check_layout=False))
-            print("  pin-exclude: %s restore-set words will NOT be pinned"
-                  % format(len(excluded["words"]), ","), flush=True)
+            if a.pin_state_cells:
+                excluded["words"] = _byte_cell_words(labels)
+                print("  pin-exclude: %s BYTE-cell words only (m1.zerobyte jumps through them); "
+                      "nibble state cells ARE pinned" % format(len(excluded["words"]), ","),
+                      flush=True)
+            else:
+                from doomfj.selfreset import load_restore_set
+                from doomfj.build import STANDALONE_RESTORE_SET
+                excluded["words"] = set(load_restore_set(
+                    STANDALONE_RESTORE_SET, {k: int(v) for k, v in labels.items()},
+                    check_layout=False))
+                print("  pin-exclude: %s restore-set words will NOT be pinned"
+                      % format(len(excluded["words"]), ","), flush=True)
         return (address // W) in excluded["words"]
 
     # STRIP THE BASE before emit_reset_part reads a pristine word. The restore code itself is
     # base-safe; only this read is not.
+    # CAPTURE THE MAP THE ASSEMBLER ACTUALLY USED, not the pool's raw one.
+    #
+    # `pool.pinned_words()` is the set BEFORE resolve_pinned drops aliased words (3,801) and the
+    # caller's exclusions. The BAKE uses the filtered map. Stripping with the raw set therefore
+    # XORs a base into words that never got one -- the value then looks enormous,
+    # emit_reset_part classifies the cell as a packed LUT and SILENTLY DROPS IT from the restore
+    # set. Measured: 4 cells vanished from one `hex.zero 25` run alone, and the binary rendered 37
+    # frames before the missing state showed up as a screen-protocol violation at frame 38.
+    from flipjump.assembler import assembler as _asmmod
+    _real_resolve = _asmmod.resolve_pinned
+    live_pins = {"map": {}}
+
+    def _capture_resolve(pinned_exprs, labels, reserved_below=1024, exclude=None):
+        out, conflicts = _real_resolve(pinned_exprs, labels, reserved_below, exclude)
+        live_pins["map"] = dict(out)
+        return out, conflicts
+
+    _asmmod.resolve_pinned = _capture_resolve
+
     import doomfj.selfreset as _selfreset
     _real_emit = _selfreset.emit_reset_part
 
     def _emit_reset_part(gen_dir, labels, pristine_get_word, *rest, **kw):
-        # HOIST THE LABEL DICT. Building it inside the loop is 32,061 groups x ~24M labels --
-        # quadratic, and the first attempt ran 90 minutes without finishing.
-        resolved = {k: int(v) for k, v in labels.items()}
-        pinned_by_word = {}
-        for pool in pools:
-            for expr, base in pool.pinned_words().items():
-                try:
-                    addr = expr.exact_eval(resolved)
-                except Exception:                                       # noqa: BLE001
-                    continue
-                pinned_by_word[addr // W] = base
+        pinned_by_word = {addr // W: base for addr, base in live_pins["map"].items()}
         stripped = len(pinned_by_word)
 
         def unpinned_word(word_index):
@@ -192,10 +212,10 @@ def main():
         return real_assemble(*args, **kwargs)
 
     fj.assemble = assemble_blocked
-    from flipjump.assembler import assembler as asmmod
-    real_resolve = asmmod.resolve_pinned
+    asmmod = _asmmod
+    real_resolve = _real_resolve
     if a.no_pin:
-        asmmod.resolve_pinned = lambda exprs, labels, reserved_below=1024: ({}, 0)
+        asmmod.resolve_pinned = lambda exprs, labels, reserved_below=1024, exclude=None: ({}, 0)
         print("PINNING OFF -- relocation only", flush=True)
     import doomfj.build as build_module
     assert build_module.fj.assemble is assemble_blocked, "build.py does not call fj.assemble"

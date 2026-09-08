@@ -40,6 +40,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=1 << 31)
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=None)
+    ap.add_argument("--macros", nargs="*", default=None,
+                    help="only block tables emitted by these MACROS. This is the declaration the "
+                         "assembler cannot infer: FINDINGS BG showed 'a maximal run of a;b ops "
+                         "after a pad' is unsound -- hex.pointers.xor_hex_to_flip_ptr's pad-4 block "
+                         "is selected by ADDRESS-BIT FLIPS and contains a wflip, so the rule splits "
+                         "it. Naming the macros whose tables are verified jump-only replaces the "
+                         "guess with an opt-in.")
     ap.add_argument("--owners", nargs="*", default=None,
                     help="only block tables under these macro names. The PLACEMENT run that passes "
                          "this gate was restricted to six hot owners; BlockPool relocates "
@@ -54,7 +61,11 @@ def main():
           % (hex(a.pool_base), "OFF (relocation only)" if a.no_pin else "on"), flush=True)
 
     _wants = None
-    if a.owners:
+    if a.macros:
+        allow = frozenset(a.macros)
+        _wants = lambda macro_name, prefix: macro_name.name in allow      # noqa: E731
+        print("  macros allowed: %s" % ", ".join(sorted(allow)), flush=True)
+    elif a.owners:
         names = tuple(a.owners)
         _wants = lambda macro_name, prefix: any(o in prefix for o in names)   # noqa: E731
         print("  restricted to: %s" % ", ".join(names), flush=True)

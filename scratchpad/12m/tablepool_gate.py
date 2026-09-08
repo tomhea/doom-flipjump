@@ -184,6 +184,29 @@ def run_gate(run_ops_list):
                  "SAME" if ok else "*** DIFFERENT ***",
                  "" if not ok else "  %+.2f%% ops" % (100.0 * (ops - ref_ops) / ref_ops)))
 
+    # THE DECLINE CONTROL. A group that cannot place every table must be UN-PINNED, or its inline
+    # tables become unreachable: pinning makes every writer of that word flip `V ^ base`, which is
+    # only right if the table being armed is in the block. The first game-tier block build hit this
+    # and presented 0 FRAMES IN 124 OPS -- while the M1 reset check and the rows above all passed.
+    # A tiny span forces declines, so this row exercises the path on purpose.
+    print("")
+    print("  %-36s %-10s %-9s %-7s %s" % ("program / blocking, span forced tiny",
+                                          "output", "ops", "declined", "verdict"))
+    for name, source in PROGRAMS.items():
+        ref_out, ref_ops, _ = build_and_run(source, None)
+        counting = BlockPool(W, POOL_BASE, span_bits=1 << 16)
+        build_and_run(source, counting)
+        placing = BlockPool(W, POOL_BASE, counts=counting.counts, widths=counting.widths,
+                            span_bits=1 << 16)
+        got, ops, _ = build_and_run(source, placing)
+        ok = got == ref_out
+        if not ok:
+            failures.append("%s [blocked, declines]" % name)
+        print("  %-36s %-10r %-9d %-7d %s%s"
+              % (name[:36], got, ops, placing.declined,
+                 "SAME" if ok else "*** DIFFERENT ***",
+                 "" if not placing.declined else "  (%d group(s) un-pinned)" % len(placing.broken_groups)))
+
     print("")
     print("GATE %s%s" % ("PASS" if not failures else "FAIL",
                          "" if not failures else ": " + ", ".join(failures)))
@@ -237,6 +260,98 @@ def selftest():
           broken != bit_ref, "guardless=%r vs %r" % (broken, bit_ref))
     restored, _, _ = build_and_run(bit_src, pp.TablePool(W, POOL_BASE, run_ops=16))
     check("C4 ...and the guard was restored afterwards", restored == bit_ref)
+
+    # C5 -- THE UN-PIN IS LOAD-BEARING. Put the broken groups back into pinned_words and a
+    # decline-forced build must produce the WRONG answer. Without this, C4's decline row could be
+    # green for some unrelated reason.
+    decl_src = PROGRAMS["hex.cmp/shift/mul"]
+    decl_ref, _, _ = build_and_run(decl_src, None)
+
+    def forced(_span=None):
+        # UNDERSIZED COUNTS, not a small span. A span-exhausted group is declined BEFORE it is
+        # created, so it was never pinned and the old code was already safe for it. The dangerous
+        # decline is `index >= slots`: a group that WAS created and pinned and then overflows --
+        # which is exactly what the game tier does, where pass 2 sees the M1 reset part's extra
+        # tables (175,533 blocked in pass 1, 177,293 in pass 2).
+        counting = BlockPool(W, POOL_BASE)
+        build_and_run(decl_src, counting)
+        starved = {g: 1 for g in counting.counts}
+        placing = BlockPool(W, POOL_BASE, counts=starved, widths=counting.widths)
+        return placing, build_and_run(decl_src, placing)
+
+    placing, (fixed_out, _, _) = forced()
+    check("C5 with declines, the un-pinned build is correct", fixed_out == decl_ref,
+          "%d declined, %d group(s) un-pinned" % (placing.declined, len(placing.broken_groups)))
+    # PINNING A DECLINED GROUP ANYWAY IS ALSO CORRECT, and asserting otherwise was a false control
+    # this selftest carried until it failed. A consistent base CANCELS:
+    # `(B + digit) ^ (switch ^ B)` is `switch + digit` wherever the table sits. So the un-pin is a
+    # safety margin, not a fix -- and it is NOT what made the broken game build fail.
+    #
+    # ALIASING is the case that genuinely breaks, because two DIFFERENT bases do not cancel.
+    from flipjump.assembler.assembler import resolve_pinned                  # noqa: E402
+
+    class FakeExpr:
+        def __init__(self, value):
+            self.value = value
+
+        def exact_eval(self, _labels):
+            return self.value
+
+    same_a, same_b = FakeExpr(4096), FakeExpr(4096)
+    pinned, conflicts = resolve_pinned({same_a: 0x1000, same_b: 0x2000}, {})
+    check("C6 two expressions on ONE address with DIFFERENT bases are un-pinned",
+          4096 not in pinned and conflicts == 1, "pinned=%s conflicts=%d" % (pinned, conflicts))
+    pinned2, conflicts2 = resolve_pinned({same_a: 0x1000, same_b: 0x1000}, {})
+    check("C6 ...but the SAME base on one address is kept (not a conflict)",
+          pinned2.get(4096) == 0x1000 and conflicts2 == 0, str(pinned2))
+    pinned3, _ = resolve_pinned({FakeExpr(64): 0x1000, FakeExpr(128): 0x2000}, {})
+    check("C6 ...and distinct addresses are both kept", len(pinned3) == 2, str(pinned3))
+
+    # C7 -- THE VALUE-FLIP DISCRIMINATOR IS LOAD-BEARING. Not every wflip on a pinned word installs
+    # a jump target: `hex.set`/`xor_by` wflip the same word to toggle the hex's VALUE bits, and
+    # XORing base into those destroys the base. Rewrite ALL of them and the program must break.
+    from flipjump.assembler import assembler as asmmod                       # noqa: E402
+
+    blk_src = PROGRAMS["hex.xor"]
+    blk_ref, _, _ = build_and_run(blk_src, None)
+
+    def blocked_run():
+        counting = BlockPool(W, POOL_BASE)
+        build_and_run(blk_src, counting)
+        placing = BlockPool(W, POOL_BASE, counts=counting.counts, widths=counting.widths)
+        return placing, build_and_run(blk_src, placing)
+
+    placing, (good_out, good_ops, _) = blocked_run()
+    check("C7 blocking is correct and cheaper", good_out == blk_ref and good_ops < 1685,
+          "%d pinned groups, %d ops" % (len(placing.pinned_words()), good_ops))
+
+    real_insert = asmmod.BinaryData.insert_wflip_ops
+
+    def rewrite_everything(self, word_address, flip_value, return_address):
+        """XOR the base into EVERY wflip on a pinned word -- no magnitude test. Then call the real
+        method with pinning switched off, so the rewrite happens exactly once."""
+        saved = self.pinned
+        if saved:
+            base = saved.get(word_address)
+            if base:
+                flip_value ^= base
+        self.pinned = None
+        try:
+            return real_insert(self, word_address, flip_value, return_address)
+        finally:
+            self.pinned = saved
+
+    asmmod.BinaryData.insert_wflip_ops = rewrite_everything
+    try:
+        _, (bad_out, _, _) = blocked_run()
+    except Exception as exc:                                                # noqa: BLE001
+        bad_out = "raised: %s" % type(exc).__name__
+    finally:
+        asmmod.BinaryData.insert_wflip_ops = real_insert
+    check("C7 ...rewriting EVERY wflip on a pinned word breaks it", bad_out != blk_ref,
+          "all-rewritten=%r vs %r" % (bad_out, blk_ref))
+    _, (restored_out, _, _) = blocked_run()
+    check("C7 ...and the discriminator was restored", restored_out == blk_ref)
 
     print("")
     print("SELFTEST %s%s" % ("PASS" if not fails else "FAIL",

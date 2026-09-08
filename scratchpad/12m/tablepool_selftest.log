@@ -3,7 +3,14 @@ tablepool gate selftest
   C3 tables were relocated                                   ok  113 relocated
   C3 the op count FELL (a no-op pass would pass C2 too)      ok  1685 -> 1079 (-35.96%)
   C4 with the guard ON, the fall-through program is correct  ok  b'IK\x02\x01' vs b'IK\x02\x01'
-  C4 with the guard FORCED to accept, it breaks (so the guard is load-bearing) ok  guardless='raised: FlipJumpPreprocessorException' vs b'IK\x02\x01'
+  C4 with the guard FORCED to accept, it breaks (so the guard is load-bearing) ok  guardless='raised: FlipJumpAssemblerException' vs b'IK\x02\x01'
   C4 ...and the guard was restored afterwards                ok
+  C5 with declines, the un-pinned build is correct           ok  60 declined, 25 group(s) un-pinned
+  C6 two expressions on ONE address with DIFFERENT bases are un-pinned ok  pinned={} conflicts=1
+  C6 ...but the SAME base on one address is kept (not a conflict) ok  {4096: 4096}
+  C6 ...and distinct addresses are both kept                 ok  {64: 4096, 128: 8192}
+  C7 blocking is correct and cheaper                         ok  8 pinned groups, 963 ops
+  C7 ...rewriting EVERY wflip on a pinned word breaks it     ok  all-rewritten=b'' vs b'0x1234'
+  C7 ...and the discriminator was restored                   ok
 
 SELFTEST PASS

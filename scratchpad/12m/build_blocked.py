@@ -96,6 +96,8 @@ def main():
     if len({q.allocated for q in pools}) > 1:
         print("*** THE PASSES BLOCKED DIFFERENT COUNTS -- their addresses cannot agree", flush=True)
     last = pools[-1]
+    print("pin conflicts (aliased source-word expressions, un-pinned): %s"
+          % format(getattr(last, "pin_conflicts", 0), ","), flush=True)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s"
           % (format(last.allocated, ","), format(len(last.groups), ","),
              format(last.declined, ","), format(last.ungrouped, ",")), flush=True)

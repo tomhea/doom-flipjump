@@ -2340,6 +2340,43 @@ So it is not: group count, tables per group, sharing degree, `stl.fcall`, or IO 
 the pointer machinery remains untested and is the leading suspect, since the renderer uses it and
 none of the passing toys do.
 
+### ROOT CAUSE: the table-detection heuristic is UNSOUND
+
+A bisect over which tables get relocated -- on the seconds-long `hex.write_byte` reproduction, not
+the 25-minute gate -- names the culprit exactly:
+
+    smallest failing prefix: 57 tables
+    CULPRIT macro: hex.pointers.xor_hex_to_flip_ptr(2)
+    CULPRIT path : f2:l6:hex.write_byte(2)---...---hex.pointers.xor_hex_to_flip_ptr(2)
+
+Its body (stl `hex/pointers/xor_to_pointer.fj`) is:
+
+        pad 4
+      after_flip_bit0:  hex.pointers.to_flip+dbit+0 ; prepare_flip_bit1     <- FlipJump
+      after_flip_bit1:  hex.pointers.to_flip+dbit+1 ; prepare_flip_bit3     <- FlipJump
+      after_flip_bit2:  wflip hex.pointers.to_flip, dbit+2+bit_shift, ...   <- WordFlip
+      after_flip_bit3:  ...
+
+The four entries are SELECTED BY FLIPPING ADDRESS BITS (`to_flip+dbit+0`, `+dbit+1`), so they must
+stay contiguous and 4-aligned -- exactly like `hex.cmp`'s table. But entry 2 begins with a `wflip`,
+and `relocatable_table_end` ends the table at the first non-FlipJump. So entries 0-1 relocate and
+entries 2-3 stay inline, and the address-bit flip lands on nothing.
+
+**This is not a patchable bug. "A maximal run of `a;b` ops after a `pad`" is not a sound
+characterisation of a relocatable table.** A `pad`-aligned block selected by address-bit flips must
+move as a unit, its entries may be ANY op, and nothing local marks where it ends. The macro author
+knows; the assembler cannot infer it.
+
+The sound design is for the stl macro to DECLARE its relocatable table -- a directive -- rather
+than the assembler guessing. Both passes need that before either is safe in general.
+
+### ⚠ THIS ALSO QUALIFIES THE SHIPPED PLACEMENT RESULT
+
+`TablePool` uses the SAME heuristic. Every placement run that passed a gate was `--owners`-restricted
+to six renderer macros and never relocated a `hex.pointers.*` table. BE's -0.21% is therefore safe
+BECAUSE OF THE RESTRICTION, not because the detection is sound. An unrestricted placement build has
+never been gated, and on this evidence it should be expected to fail the same way.
+
 ### The actual lesson
 
 **The toy gate is not a proxy for the game.** Four programs with eight controls pass while the real

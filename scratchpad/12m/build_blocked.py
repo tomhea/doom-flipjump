@@ -69,6 +69,24 @@ def main():
     wants = (lambda macro_name, prefix: macro_name.name in allow) if allow else None
     print("macros allowed: %s" % ", ".join(sorted(allow)), flush=True)
 
+    restore_words = {"set": None}
+
+    def _reset_owned(address, labels):
+        if restore_words["set"] is None:
+            try:
+                from doomfj.selfreset import load_restore_set
+                from doomfj.build import STANDALONE_RESTORE_SET
+                resolved = {k: int(v) for k, v in labels.items()}
+                restore_words["set"] = set(load_restore_set(STANDALONE_RESTORE_SET, resolved,
+                                                            check_layout=False))
+                print("  pin-exclude: %s restore-set words will NOT be pinned"
+                      % format(len(restore_words["set"]), ","), flush=True)
+            except Exception as exc:                                    # noqa: BLE001
+                print("  *** pin-exclude FAILED to load the restore set (%s) -- nothing excluded, "
+                      "so the reset interaction is LIVE" % type(exc).__name__, flush=True)
+                restore_words["set"] = frozenset()
+        return (address // W) in restore_words["set"]
+
     frozen = {}          # counts/widths from the first counting run, reused by every assembly
     pools = []
     real_assemble = fj.assemble
@@ -94,6 +112,12 @@ def main():
                       flush=True)
         pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
                          span_bits=a.span_bits, wants=wants)
+        # NEVER PIN A WORD THE M1 SELF-RESET OWNS. emit_reset_part drops a cell from the restore
+        # set when `pristine_word >> VAL_SHIFT > 15`, reading it as a packed LUT -- and a pinned
+        # word holds `base + value`, so every pinned state cell is misclassified and silently
+        # stops being restored. The standalone gate saw exactly that: frame 2 byte-exact, frame 3
+        # stale (FINDINGS BH).
+        pool.pin_exclude = _reset_owned
         pools.append(pool)
         kwargs["table_pool"] = pool
         return real_assemble(*args, **kwargs)

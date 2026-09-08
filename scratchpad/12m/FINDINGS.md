@@ -2823,3 +2823,65 @@ Sparse indices are near their limit -- spread=4 does not fit in the pool. The re
 the one BN identified: **collapse the big groups** so the index is narrow, which means sharing
 tables across call sites via a return trampoline. Nothing else measured touches the 64% of calls
 that run through groups thousands of tables wide.
+
+---
+
+## BP -- the trampoline is DEAD, and the wide index is the price of SHARED LEAVES
+
+### Table sharing cannot work, by arithmetic
+
+BN proposed collapsing big groups by sharing tables across call sites via a return trampoline.
+It does not work, and the reason is simple enough that it should have been checked first:
+
+      today   site i uses table i in its word's block      arm = 2*popcount(i)
+      shared  site i uses table j (by destination) AND a return index i
+                                                            arm = 2*popcount(j) + 2*popcount(i)
+
+The per-site RETURN carries exactly the information the table index was carrying, so sharing MOVES
+the width and ADDS to it. Strictly worse.
+
+That generalises to a floor. A call site must identify itself -- ~log2(sites per word) bits -- so
+
+      arm ops >= ~log2(sites_per_word)
+
+A 19,015-site word floors at ~15 ops and measures ~15. **We are already at the floor for the words
+that matter.** No layout change can go below it.
+
+### What the hot words actually are
+
+Recovering each site's source word from the binary and naming it by the nearest label:
+
+      variable (nearest label)                   sites         calls  % calls
+      ?  (below the first top-level label)     153,639       758,430   37.78%
+      hex.tables.res+32                          8,192        49,065    2.44%
+      hex.mul.ret+32                             5,264        50,999    2.54%
+      hex.tables.ret+32                          4,505       109,167    5.44%
+      hex.pointers.read_byte+32                  2,367        12,044    0.60%
+      hex.pointers.read_byte+96                  2,359        12,625    0.63%
+
+      19,188 distinct source words; the top 12 hold 50.6% of sites and 50.3% of calls
+
+**These are stl's SHARED SCRATCH AND RETURN REGISTERS, not doom variables.** `hex.tables.res`,
+`hex.tables.ret`, `hex.mul.ret`, `hex.pointers.read_byte` -- every expansion of those macros
+dispatches through the same word, so every expansion is another site competing for index width.
+
+### The real tradeoff, stated
+
+The wide index is **the price of the shared-leaf architecture** -- the design the repo adopted to
+save SPACE (see the "heavy code in a shared leaf" doctrine). Sharing one register across 153,639
+sites is what makes the index 18 bits wide.
+
+Un-sharing trades space for speed and is quantifiable:
+
+      sites/word   19,015    3,213    1,366     193      43      16
+      arm ops ~       15       12       11        8       6       4
+
+Splitting the hot registers N ways divides their sites by N. At the measured 64.1% of calls running
+through 8+-site words, the arithmetic says split-64 is worth ~2.5M ops/frame and split-256 ~3.4M,
+against a 4,244,364 gap. ⚠ That is ARITHMETIC on measured inputs, not a measurement -- BD's
+arithmetic missed by 15x -- and it ignores the space the copies cost. Size is at 32.68% of a 35%
+target, so the budget for copies is ~2.3 percentage points, about 3M words.
+
+**This is an stl change, not a doom one**, and it runs against a doctrine the repo adopted
+deliberately. It is the only identified route to 12M, and it should be a considered decision rather
+than something slipped in as an optimisation.

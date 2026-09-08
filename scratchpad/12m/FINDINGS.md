@@ -2529,6 +2529,29 @@ LUT-test misread, and the nibble/byte distinction is not where the line falls.
 Reverted. The whole restore set stays unpinned, which is the configuration that PASSES the
 standalone gate at 21,963,752 ops/frame and 34.69% size (BI).
 
+### CORRECTION: it fails at frame 38 of 45, not frame 1 -- and it is 10.7% cheaper
+
+"Zero byte-exact frames" was misread. `run_fj` runs EVERY frame before comparing any, so the
+exception aborted the run before a single comparison printed. Replaying the gate's own captured
+route frame by frame:
+
+      doom_e1m1_blocked2.fjm   OK  frames=45/45 ops=1,451,444,192
+      doom_e1m1_blocked3.fjm   RAISED at frame 38/45: collines run ends at row 37, behind the
+                               fill cursor at 50
+
+Frame 38 sits in the "through" phase -- 2 menu, enter, 24 walk, 2 use, 8 open, 3 THROUGH, 6 idle --
+i.e. walking through the doorway after the door has opened. So the binary renders 37 frames
+correctly, survives 37 M1 resets, and then breaks.
+
+And on a plain walk it is materially faster than the gate-passing build:
+
+      8 frames, gamespeed script:  blocked2 201,435,692 ops   blocked3 179,919,493 ops   -10.7%
+
+**So pinning the reset's state cells is worth roughly double what BI shipped, and the defect is
+narrow rather than fundamental.** It is not "a pinned nibble cell is unsound"; something specific
+about the door/collision state after many resets is. That is a much better lead than BJ first
+recorded, and it is cheap to chase now that the failing frame is known and reproducible in minutes.
+
 ### Also: a self-inflicted 90-minute stall, worth recording
 
 The first attempt at this build ran 5,408s of CPU against the usual ~1,800s and was killed. Not

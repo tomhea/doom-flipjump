@@ -56,6 +56,10 @@ def main():
                     help="only block tables emitted by these MACROS -- the declaration the "
                          "assembler cannot infer (FINDINGS BG). Defaults to the exact_xor family, "
                          "whose tables are verified jump-only.")
+    ap.add_argument("--view-w", type=int, default=160,
+                    help="cfg.VIEW_W, needed to derive the byte arrays (build metrics print it)")
+    ap.add_argument("--subsectors", type=int, default=682,
+                    help="subsector count, needed to derive the byte arrays")
     ap.add_argument("--no-pin", action="store_true",
                     help="relocate into blocks but do NOT pin the source words. Splits blocking's "
                          "two halves against the standalone gate, the way --no-pin split them "
@@ -69,23 +73,88 @@ def main():
     wants = (lambda macro_name, prefix: macro_name.name in allow) if allow else None
     print("macros allowed: %s" % ", ".join(sorted(allow)), flush=True)
 
-    restore_words = {"set": None}
+    # WHICH RESET-OWNED WORDS CAN BE PINNED, and which cannot.
+    #
+    # NIBBLE cells are restored by `hex.set 1, addr, v` / `hex.zero n, addr`, which dispatch THROUGH
+    # the cell and only ever flip its value bits -- so a pinned cell's base survives, and these CAN
+    # be pinned. What broke them was not the restore, it was emit_reset_part READING the pristine
+    # word: `word >> VAL_SHIFT > 15` reads `base + value` as a packed LUT and drops the cell from
+    # the set entirely (FINDINGS BH). Stripping the base before that read fixes it.
+    #
+    # BYTE cells cannot. `m1.zerobyte c` does `c+dbit+8; c` -- it JUMPS THROUGH the cell into the
+    # pointer read table, so the cell's word is a dispatch target whose value the machinery
+    # computes itself. A base there sends it somewhere else.
+    excluded = {"words": None}
+
+    def _byte_cell_words(labels):
+        from doomfj.selfreset import byte_arrays
+        bits = {k: int(v) for k, v in labels.items()}
+        words_sorted = sorted(v // W for v in bits.values())
+        out = set()
+        for name, n in byte_arrays(bits, words_sorted, a.view_w, a.subsectors):
+            base = bits[name] // W
+            for k in range(n):
+                out.add(base + 2 * k)
+                out.add(base + 2 * k + 1)
+        return out
 
     def _reset_owned(address, labels):
-        if restore_words["set"] is None:
-            try:
-                from doomfj.selfreset import load_restore_set
-                from doomfj.build import STANDALONE_RESTORE_SET
-                resolved = {k: int(v) for k, v in labels.items()}
-                restore_words["set"] = set(load_restore_set(STANDALONE_RESTORE_SET, resolved,
-                                                            check_layout=False))
-                print("  pin-exclude: %s restore-set words will NOT be pinned"
-                      % format(len(restore_words["set"]), ","), flush=True)
-            except Exception as exc:                                    # noqa: BLE001
-                print("  *** pin-exclude FAILED to load the restore set (%s) -- nothing excluded, "
-                      "so the reset interaction is LIVE" % type(exc).__name__, flush=True)
-                restore_words["set"] = frozenset()
-        return (address // W) in restore_words["set"]
+        """Words the M1 self-reset owns. THE WHOLE RESTORE SET, not just the byte cells.
+
+        ⚠ PINNING ONLY THE BYTE CELLS WAS TRIED AND FAILED (FINDINGS BJ). The reasoning looked
+        sound -- byte cells are restored by `m1.zerobyte`, which does `c+dbit+8; c` and JUMPS
+        THROUGH the cell, while nibble cells are restored by `hex.set`/`hex.zero`, which only flip
+        value bits and leave a base intact. Excluding 2,004 byte-cell words instead of 12,400 and
+        stripping the base from 26,305 pinned words before emit_reset_part's LUT test built
+        cleanly, verified the reset (labels_moved 0, values_changed 0) -- and then died on the
+        FIRST frame with a screen-protocol violation:
+
+            IODeviceException: collines run ends at row 37, behind the fill cursor at 50
+
+        Zero byte-exact frames. Something else about a pinned state cell is unsound, and the
+        nibble/byte split is not where the line falls. Until that is understood, the whole restore
+        set stays unpinned -- which is the configuration that PASSES the standalone gate at
+        21,963,752 ops/frame and 34.69% size.
+        """
+        if excluded["words"] is None:
+            from doomfj.selfreset import load_restore_set
+            from doomfj.build import STANDALONE_RESTORE_SET
+            excluded["words"] = set(load_restore_set(
+                STANDALONE_RESTORE_SET, {k: int(v) for k, v in labels.items()},
+                check_layout=False))
+            print("  pin-exclude: %s restore-set words will NOT be pinned"
+                  % format(len(excluded["words"]), ","), flush=True)
+        return (address // W) in excluded["words"]
+
+    # STRIP THE BASE before emit_reset_part reads a pristine word. The restore code itself is
+    # base-safe; only this read is not.
+    import doomfj.selfreset as _selfreset
+    _real_emit = _selfreset.emit_reset_part
+
+    def _emit_reset_part(gen_dir, labels, pristine_get_word, *rest, **kw):
+        # HOIST THE LABEL DICT. Building it inside the loop is 32,061 groups x ~24M labels --
+        # quadratic, and the first attempt ran 90 minutes without finishing.
+        resolved = {k: int(v) for k, v in labels.items()}
+        pinned_by_word = {}
+        for pool in pools:
+            for expr, base in pool.pinned_words().items():
+                try:
+                    addr = expr.exact_eval(resolved)
+                except Exception:                                       # noqa: BLE001
+                    continue
+                pinned_by_word[addr // W] = base
+        stripped = len(pinned_by_word)
+
+        def unpinned_word(word_index):
+            value = pristine_get_word(word_index)
+            base = pinned_by_word.get(word_index)
+            return (value ^ base) if base else value
+
+        print("  reset: stripping the block base from %s pinned words before the LUT test"
+              % format(stripped, ","), flush=True)
+        return _real_emit(gen_dir, labels, unpinned_word, *rest, **kw)
+
+    _selfreset.emit_reset_part = _emit_reset_part
 
     frozen = {}          # counts/widths from the first counting run, reused by every assembly
     pools = []

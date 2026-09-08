@@ -2501,3 +2501,37 @@ Relocation without pinning is a REGRESSION -- 24,783,491, +8.0% -- so none of th
 layout; it is all in the pin, and the pin is exactly what the reset forbids on the hot cells.
 
 The binding metric is **21,963,752 ops/frame**. The owner's 12M target is over by 9,963,752.
+
+---
+
+## BJ -- pinning the nibble state cells FAILS: the nibble/byte split is not the line
+
+BI left 12,400 restore-set words unpinned and noted they are "the state cells the simulation
+touches every frame" -- the largest identified share of the missing win. The obvious refinement:
+
+* BYTE cells cannot be pinned. `m1.zerobyte c` does `c+dbit+8; c` -- it JUMPS THROUGH the cell into
+  the pointer read table, so the word is a dispatch target the machinery computes itself.
+* NIBBLE cells looked safe. They are restored by `hex.set 1, addr, v` / `hex.zero n, addr`, which
+  dispatch through the cell and only flip VALUE bits, so a base survives. What broke them was
+  `emit_reset_part` READING the pristine word: `word >> VAL_SHIFT > 15` reads `base + value` as a
+  packed LUT and drops the cell (BH). Stripping the base before that read fixes the read.
+
+Built: 2,004 byte-cell words excluded instead of 12,400, base stripped from 26,305 pinned words.
+Reset verified -- `labels_moved_in_set: 0`, `values_changed_in_set: 0`. Then:
+
+      IODeviceException: collines run ends at row 37, behind the fill cursor at 50
+                         (the cursor only moves forward)
+
+**Zero byte-exact frames** -- it dies on the FIRST frame, with a screen-protocol violation rather
+than a pixel divergence. So a pinned nibble state cell is unsound for a reason that is not the
+LUT-test misread, and the nibble/byte distinction is not where the line falls.
+
+Reverted. The whole restore set stays unpinned, which is the configuration that PASSES the
+standalone gate at 21,963,752 ops/frame and 34.69% size (BI).
+
+### Also: a self-inflicted 90-minute stall, worth recording
+
+The first attempt at this build ran 5,408s of CPU against the usual ~1,800s and was killed. Not
+slow -- QUADRATIC: the reset wrapper rebuilt the resolved label dict inside the per-group loop,
+32,061 groups x ~24M labels. It was caught by treating an unusual runtime as suspicious and
+comparing elapsed CPU against previous builds, rather than assuming a big change is just slower.

@@ -2724,3 +2724,51 @@ Down from 9,963,752 two builds ago. What is left, by evidence:
 
 A re-profile of THIS binary should come before the next change: the jump-word share was 85.77% on
 blocked4 and the whole point of BK was that a stale cost model misdirects the next lever.
+
+---
+
+## BN -- the remaining cost is INDEX WIDTH on the biggest groups, not declines
+
+Re-profiled the 16,598,831 binary and instrumented why tables are declined.
+
+                        ops (4 frames)   jump-word    share    "everything else"
+      baseline           77,410,023      68,746,608   88.81%      8,663,416
+      blocked2           72,628,968      63,535,573   87.48%      9,093,396
+      blocked4           65,026,748      55,770,569   85.77%      9,256,180
+      blocked5           55,699,746      46,319,589   83.16%      9,380,158
+
+      declines by reason: no-block 5,103, too-wide 10,052, overflow 2,289   (17,444 of 425,066)
+
+"Everything else" has not moved in four builds -- ~9.4M per 4 frames, i.e. ~2.3M ops/frame of
+irreducible non-address work. Total fell 28.0%, jump-word writes 32.6%, and **46.3M of
+address-writing remains**, of which only ~5.4M is table-walk work. So ~40.9M is still ARMING:
+10.2M/frame over ~660k calls is **~15.5 ops per call**, i.e. a mean index popcount near 7.75.
+
+### Why arming is still expensive: the index is as wide as the group
+
+Blocking replaces `2 * popcount(full address)` with `2 * popcount(index in block)`. For a 16-table
+group that is ~2 ops against ~18.6 -- enormous. But BD measured one source word with **19,015
+tables**, and words shared by 8+ sites carry **64.1% of all calls**. A 19,015-table group needs a
+15-bit index, mean popcount ~7.5, so its arm costs ~15 ops against the 18.6 it replaced.
+
+**Blocking barely touches exactly the words that carry most of the traffic.** The declines are a
+4% side-issue by comparison.
+
+### What that implies, and a correction to an earlier idea
+
+Reaching 12M needs ~4.6M ops/frame, which at ~660k calls is ~7 ops per call -- mean index popcount
+from ~7.75 down to ~4.25. Two ways to get there:
+
+* **SPARSE INDICES.** Allocate a block of `spread * k` slots and hand out only the `k`
+  lowest-popcount indices. Unused slots emit NO data -- they cost SPAN, not DATA -- and span is at
+  62.40% against a ceiling of 100%, so ~2x is affordable where 4x is not. Estimated value at 2x:
+  mean popcount 7.5 -> ~6.6 on the big groups, roughly 760k ops/frame. Real but not sufficient.
+* **TABLE SHARING via a return trampoline.** Earlier (BK) this was dismissed as "worth a couple of
+  ops per call, not millions", on the grounds that it only shrinks block size. That reasoning was
+  incomplete. A group is huge because ONE variable dispatches thousands of tables that differ only
+  in their RETURN address; sharing collapses them, which shrinks the index WIDTH on precisely the
+  hottest words. It is not a space optimisation -- it is the only identified way to cut the index
+  popcount on the 64% of calls that dominate.
+
+The cheap decline fixes (raise `max_slot_ops` for the 10,052 too-wide; raise the pool span for the
+5,103 no-block) are worth doing and are worth ~4% of tables, not 4.6M ops.

@@ -35,6 +35,14 @@ from doomfj.config import Config                                        # noqa: 
 from doomfj.harness import W                                            # noqa: E402
 from doomfj.wall_renderer import TIERS                                  # noqa: E402
 
+# THE DECLARATION the assembler cannot infer (FINDINGS BG). Every one of these emits
+# `pad N; <label>: <entries that all jump explicitly>; end: wflip` -- a table reached only by jump.
+# `hex.pointers.xor_hex_to_flip_ptr` does NOT: its pad-4 block is selected by ADDRESS-BIT FLIPS and
+# contains a wflip, so "a maximal run of a;b ops after a pad" splits it and the program dies.
+SAFE_TABLE_MACROS = ("hex.exact_xor", "hex.sparse_exact_xor", "hex.double_exact_xor",
+                     "hex.sparse_double_exact_xor", "hex.triple_exact_xor",
+                     "hex.quadrupled_exact_xor")
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -44,10 +52,18 @@ def main():
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=1 << 31)
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=None)
+    ap.add_argument("--macros", nargs="*", default=list(SAFE_TABLE_MACROS),
+                    help="only block tables emitted by these MACROS -- the declaration the "
+                         "assembler cannot infer (FINDINGS BG). Defaults to the exact_xor family, "
+                         "whose tables are verified jump-only.")
     a = ap.parse_args()
 
     print("blocking: pool base %s, span %s"
           % (hex(a.pool_base), hex(a.span_bits) if a.span_bits else "unbounded"), flush=True)
+
+    allow = frozenset(a.macros)
+    wants = (lambda macro_name, prefix: macro_name.name in allow) if allow else None
+    print("macros allowed: %s" % ", ".join(sorted(allow)), flush=True)
 
     frozen = {}          # counts/widths from the first counting run, reused by every assembly
     pools = []
@@ -56,7 +72,7 @@ def main():
     def assemble_blocked(*args, **kwargs):
         if not frozen:
             with tempfile.TemporaryDirectory() as td:
-                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits)
+                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits, wants=wants)
                 probe = dict(kwargs)
                 probe["table_pool"] = counting
                 out_arg = list(args)
@@ -73,7 +89,7 @@ def main():
                          format(sum(counting.counts.values()), ","), int(time.time() - t0)),
                       flush=True)
         pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
-                         span_bits=a.span_bits)
+                         span_bits=a.span_bits, wants=wants)
         pools.append(pool)
         kwargs["table_pool"] = pool
         return real_assemble(*args, **kwargs)

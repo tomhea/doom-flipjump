@@ -2453,3 +2453,51 @@ every frame -- which fits the symptom precisely: frame 2 byte-exact, frame 3 wro
 between them. Not yet proven, and the next probe should test that directly rather than assume it.
 
 The binding metric remains **22,940,226 ops/frame**.
+
+---
+
+## BI -- blocking, GATED and honest: SIZE passes for the first time, speed -4.46%
+
+The reset interaction (BH) is fixed: `resolve_pinned` takes a caller veto and the driver excludes
+the 12,400 M5 restore-set words, because `emit_reset_part` reads a pinned word's `base + value` as
+a packed LUT (`word >> VAL_SHIFT > 15`) and drops it from the restore set.
+
+The shipped binary now passes the STANDALONE gate WITH pinning -- 44 frames byte-exact, all four
+controls, door opening and surviving the M1 reset -- and only then was it measured:
+
+      run      z3 baseline        blocked          delta      pct
+      0         27,110,806     25,536,161     -1,574,645   -5.81%
+      4         14,795,842     13,902,091       -893,751   -6.04%
+      5         24,935,526     23,989,789       -945,737   -3.79%
+      mean run-average           21,041,023     19,937,715     -1,103,308   -5.24%
+      80th-pct run               24,935,526     23,989,789       -945,737   -3.79%
+      BINDING (mean+p80)/2       22,988,274     21,963,752     -1,024,522   -4.46%
+
+      SIZE   words : 46,566,558 = 34.69% of 2^27   (target <= 35%)  PASS
+      SPEED  21,963,752                            (target <= 20,000,000)  OVER by 1,963,752
+
+**SIZE PASSES FOR THE FIRST TIME**, on a gate-passing binary: 38.10% -> 34.69%. Hoisting every
+table reclaims its `pad` alignment from the inline stream. Every speed run improved, none regressed
+-- unlike placement (BE), where one regression landed on the p80 and ate the whole gain.
+
+### The gap between this and the withdrawn number is the lesson
+
+BH's 14,042,442 came from a binary that diverged at frame 3, so its ten runs walked a cheaper path.
+This binary walks the BASELINE's path -- that is what 44 byte-exact frames means -- and measures
+21,963,752. **7.9M of the withdrawn "win" was the program computing the wrong thing.**
+
+### Why the real win is only -4.46%
+
+Blocking's mechanism is worth -18.56% on the RENDERER (deg gate, byte-exact) and 13.13 -> 8.16
+ops/xor in isolation. On the shipped game it delivers a quarter of that, and the arithmetic says
+where the rest went:
+
+* 12,400 restore-set words CANNOT be pinned -- they are the M1 reset's, and they are state cells,
+  i.e. exactly the hot ones the simulation touches every frame;
+* 3,244 more words are un-pinned as aliased (two expressions, one address, two bases);
+* 17,380 tables declined, 425,066 counted.
+
+Relocation without pinning is a REGRESSION -- 24,783,491, +8.0% -- so none of the value is in the
+layout; it is all in the pin, and the pin is exactly what the reset forbids on the hot cells.
+
+The binding metric is **21,963,752 ops/frame**. The owner's 12M target is over by 9,963,752.

@@ -2432,4 +2432,24 @@ byte-exact on the wrong program is still the wrong program.
 * Something in blocking breaks the simulation, and it is NOT the renderer. Unfinished.
 * SIZE 45,610,646 words = 33.98% is measured on the same broken binary and is equally provisional.
 
+### THE SPLIT: relocation is correct on the game, PINNING breaks the simulation
+
+The same `--no-pin` bisect that cracked the renderer, run against the gate that actually failed.
+A relocation-only game build (416,797 tables in 32,061 groups, self-reset verified):
+
+      44  -              7   BYTE-EXACT
+      CONTROL 1: door 48 reached 9 distinct states [0..8] -- carried across the reset
+      CONTROL 2: use was pressed INSIDE the box: yes
+      CONTROL 4: the player's path crosses door 48's own line SEGMENT: yes
+      M2 STANDALONE GATE: PASS -- the shipped binary opens a door and KEEPS it open across the M1 reset
+
+So RELOCATION into per-source-word blocks is correct on the shipped game -- gated on both tiers now,
+deg byte-exact and the standalone play-test with all four controls. PINNING is the broken half, and
+it is the half carrying the big win (`2 * popcount(index)` instead of the full address).
+
+That narrows the remaining bug a great deal. Pinning changes what a hex variable's jump word RESTS
+at, and the M1 self-reset rewrites 5,103 nibble cells and 1,002 byte cells of exactly those words
+every frame -- which fits the symptom precisely: frame 2 byte-exact, frame 3 wrong, the reset runs
+between them. Not yet proven, and the next probe should test that directly rather than assume it.
+
 The binding metric remains **22,940,226 ops/frame**.

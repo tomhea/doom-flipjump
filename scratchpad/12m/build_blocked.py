@@ -56,6 +56,10 @@ def main():
                     help="only block tables emitted by these MACROS -- the declaration the "
                          "assembler cannot infer (FINDINGS BG). Defaults to the exact_xor family, "
                          "whose tables are verified jump-only.")
+    ap.add_argument("--no-pin", action="store_true",
+                    help="relocate into blocks but do NOT pin the source words. Splits blocking's "
+                         "two halves against the standalone gate, the way --no-pin split them "
+                         "against deg_gate (FINDINGS BG).")
     a = ap.parse_args()
 
     print("blocking: pool base %s, span %s"
@@ -95,6 +99,11 @@ def main():
         return real_assemble(*args, **kwargs)
 
     fj.assemble = assemble_blocked
+    from flipjump.assembler import assembler as asmmod
+    real_resolve = asmmod.resolve_pinned
+    if a.no_pin:
+        asmmod.resolve_pinned = lambda exprs, labels, reserved_below=1024: ({}, 0)
+        print("PINNING OFF -- relocation only", flush=True)
     import doomfj.build as build_module
     assert build_module.fj.assemble is assemble_blocked, "build.py does not call fj.assemble"
 
@@ -104,6 +113,7 @@ def main():
                                    cfg=Config(), tier=a.tier)
     finally:
         fj.assemble = real_assemble
+        asmmod.resolve_pinned = real_resolve
 
     print(json.dumps(info, indent=2, default=str), flush=True)
     print("", flush=True)

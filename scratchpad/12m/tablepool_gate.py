@@ -304,8 +304,16 @@ def selftest():
     pinned2, conflicts2 = resolve_pinned({same_a: 0x1000, same_b: 0x1000}, {})
     check("C6 ...but the SAME base on one address is kept (not a conflict)",
           pinned2.get(4096) == 0x1000 and conflicts2 == 0, str(pinned2))
-    pinned3, _ = resolve_pinned({FakeExpr(64): 0x1000, FakeExpr(128): 0x2000}, {})
+    pinned3, _ = resolve_pinned({FakeExpr(4096): 0x1000, FakeExpr(8192): 0x2000}, {})
     check("C6 ...and distinct addresses are both kept", len(pinned3) == 2, str(pinned3))
+
+    # C8 -- THE RUNTIME'S WORDS ARE NOT THE PROGRAM'S. `stl.IO` is at bit address 64 and
+    # `bit.output` dispatches through it, so it looks like an ordinary hex source to the grouper.
+    # Baking a base into it corrupts the program's second op -- the blocked game build jumped
+    # `ip 64 -> POOL -> ip 64` and presented 0 frames in 116 ops.
+    io_pinned, _ = resolve_pinned({FakeExpr(96): 0x70000000, FakeExpr(1 << 20): 0x70001000}, {})
+    check("C8 stl.IO's word (64+w) is NOT pinned", 96 not in io_pinned, str(io_pinned))
+    check("C8 ...while a normal variable's word still is", (1 << 20) in io_pinned)
 
     # C7 -- THE VALUE-FLIP DISCRIMINATOR IS LOAD-BEARING. Not every wflip on a pinned word installs
     # a jump target: `hex.set`/`xor_by` wflip the same word to toggle the hex's VALUE bits, and

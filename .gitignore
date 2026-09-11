@@ -14,3 +14,32 @@ assets/freedoom-*/
 # The numbers that matter live in scratchpad/12m/{LEDGER,FINDINGS,ATLAS}.md, which ARE tracked.
 scratchpad/12m/atlas/
 scratchpad/12m/bak/
+
+# ── scratchpad byproducts ─────────────────────────────────────────────────────────────────────
+# MEASURED 2026-09-11: 1,107 untracked files and 3,509 MB of them, against 0.7 MB of .py. Two
+# label dumps were 683 MB EACH. Every one is something a tool in scratchpad/ produced and can
+# produce again; what was learned from them lives in scratchpad/12m/FINDINGS.md, which is tracked.
+# A `git status` that lists 1,472 files is a `git status` nobody reads, and that is how a real
+# change hides.
+#
+# ⚠ THESE RULES ONLY GOVERN NEW FILES. 134 .log and 3 .png under scratchpad/ are ALREADY TRACKED
+# and stay tracked -- gitignore does not untrack anything. Removing them is a separate decision.
+# ⚠ .py IS DELIBERATELY NOT IGNORED. Probes get cannibalised into real tools, and a tool whose
+# output is quoted as proof must be committed (docs/cr-rules.md R9).
+scratchpad/**/*.json
+scratchpad/**/*.gz
+scratchpad/**/*.fj
+scratchpad/**/*.fjm
+scratchpad/**/*.bin
+scratchpad/**/*.jsonl
+scratchpad/**/*.csv
+scratchpad/**/*.tsv
+scratchpad/**/*.diff
+scratchpad/**/*.bak
+scratchpad/**/*.png
+scratchpad/**/*.gif
+scratchpad/**/*.err
+scratchpad/**/*.log
+# ...except the counts cache, which is 0.4 MB and saves ~13 minutes and a whole assembly on the
+# next blocked build (build_blocked.py --counts-cache; it self-invalidates when the emitter moves).
+!scratchpad/12m/_counts_game.json.gz

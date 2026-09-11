@@ -574,9 +574,9 @@ ns frame {
       inc_done:
         // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][trb_bucket:2]
         sprbkt.lookup trb_bucket, trb_thpx
-        hex.zero w/4, trb_blk_const                 // the per-thing block base: sp_base + trb_bucket,
+        hex.zero w/4 - 4, trb_blk_const + 4*dw   // Z3: the mov below zeroes the low 4 itself
         hex.mov 4, trb_blk_const, sp_base           // WIDENED first (a narrow add cannot carry out
-        hex.zero w/4, trb_tab_idx                   // of its own nibbles)
+        hex.zero w/4 - 2, trb_tab_idx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, trb_tab_idx, trb_bucket
         hex.add w/4, trb_blk_const, trb_tab_idx
         hex.zero 6, trb_bucket_h + 2*dw             // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT (idea 20: the mov 2 below covers nibbles 0-1)
@@ -683,7 +683,7 @@ ns frame {
         // block = sp_base + trb_u*buckets + trb_bucket, at a POWER-OF-TWO stride so the address is a shift
         // trb_blk = (base + trb_bucket) + trb_u*BUCKETS -- and (base + trb_bucket) is a per-THING constant, so
         // only the `trb_u*BUCKETS` term belongs in the column loop. `trb_blk_const` is that constant, hoisted.
-        hex.zero w/4, trb_blk
+        hex.zero w/4 - 2, trb_blk + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, trb_blk, trb_u
         rep(spn, k) hex.if1 1, hdfl, bucket_mul   // SPR-NEAR: the packed region strides nld
         rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld
@@ -715,14 +715,14 @@ ns frame {
         // ⚠ the baked run list is relative to r0 (the column's FIRST OPAQUE row), not to the
         // sprite's row 0 -- exactly as the oracle's fragment stores `ytop_b + st[0]` as its base.
         // Fold r0 in ONCE here, so the emit's `trb_y0 + rel` is right and `trb_sy1` is the same row.
-        hex.zero 8, trb_run_w8                      // ... widened: `hex.add 8` reads EIGHT nibbles
+        hex.zero 6, trb_run_w8 + 2*dw   // ... widened: `hex.add 8` reads EIGHT nibbles
         hex.mov 2, trb_run_w8, trb_run_r0
         hex.mov 8, trb_y_base, trb_y0
         frame.add8_chain trb_y_base, trb_run_w8
         hex.set 8, trb_cbound, viewh
         hex.mov 8, trb_sy1, trb_y_base
         .clamp_row trb_sy1, trb_cbound
-        hex.zero 8, trb_run_w8
+        hex.zero 6, trb_run_w8 + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
         hex.mov 2, trb_run_w8, trb_run_last
         hex.mov 8, trb_sy2, trb_y_base
         frame.add8_chain trb_sy2, trb_run_w8
@@ -952,13 +952,18 @@ ns frame {
       onscr:
         hex.scmp 5, rowa, cvh, store, store, off_below
       off_above:
-        hex.set 5, oy1, 1
-        hex.zero 5, oy2
-        ;write
+        // ⚠ DO NOT STORE AN ENTIRELY OFF-SCREEN PIECE. Storing it consumed one of the two
+        // per-column slots (V5_STACK) while painting NOTHING -- `lines_step_load` rejects
+        // y1 > y2 before drawing -- so an invisible piece evicted a VISIBLE one. MEASURED on
+        // E1M1 door 100: the lintel died at 344 units because an 8-unit ceiling step stored as
+        // (1,0) held slot 0; skipping the store brings it back (38 -> 405 px shut-vs-open, and
+        // 34 -> 327 at 400, 0 -> 177 at 464).
+        // What is given up is the REGION BEHIND the sentinel, which was derived from the stored
+        // bytes. Measured cost of that: ~90 px on a near corridor view, against a whole door.
+        // ⚠ MIRRORED in reference_model.py's ups/los store (`if a <= b and 0 <= b and a <= Hs`).
+        ;skip
       off_below:
-        hex.set 5, oy1, 255
-        hex.set 5, oy2, 254
-        ;write
+        ;skip
       store:
         hex.mov 5, oy1, rowa
         hex.sign 5, rowa, y1_clamp0, y1_done
@@ -1178,17 +1183,17 @@ ns frame {
         // pmax is already attributed by a nearer seg, so scanning it can only re-read a nonzero
         // byte: at (-309,636) that is 769 column reads cut to 201, and 37 of the 60 projected segs
         // exit here outright. The bounds are maintained WITHOUT any extra reads -- see below.
-        hex.mov 2, xa, x1
+        hex.sparse_mov HOT_PAD, 2, xa, x1
         hex.cmp 2, xa, pmin, xa_use_pmin, xa_done, xa_done   // xa = max(x1, pmin)
       xa_use_pmin:
-        hex.mov 2, xa, pmin
+        hex.sparse_mov HOT_PAD, 2, xa, pmin
       xa_done:
-        hex.mov 2, pm1, pmax
+        hex.sparse_mov HOT_PAD, 2, pm1, pmax
         hex.inc 2, pm1
-        hex.mov 2, xb, x2
+        hex.sparse_mov HOT_PAD, 2, xb, x2
         hex.cmp 2, xb, pm1, xb_done, xb_done, xb_use_pm1     // xb = min(x2, pmax+1)
       xb_use_pm1:
-        hex.mov 2, xb, pm1
+        hex.sparse_mov HOT_PAD, 2, xb, pm1
       xb_done:
         hex.cmp 2, xa, xb, scan, ret, ret       // window empty for this seg -> nothing to attribute
       scan:
@@ -1198,15 +1203,15 @@ ns frame {
         // it makes pm1 = 0, so every later seg finds an empty window, which is exactly the truth.)
         hex.cmp 2, xa, pmin, pmin_keep, pmin_bump, pmin_keep
       pmin_bump:
-        hex.mov 2, pmin, xb
+        hex.sparse_mov HOT_PAD, 2, pmin, xb
       pmin_keep:
         hex.cmp 2, xb, pm1, pmax_keep, pmax_drop, pmax_keep
       pmax_drop:
-        hex.mov 2, pmax, xa
+        hex.sparse_mov HOT_PAD, 2, pmax, xa
         hex.dec 2, pmax
       pmax_keep:
-        hex.zero 8, x
-        hex.mov 2, x, xa                        // the claim scan over the stride-1 pclm[]
+        hex.sparse_zero HOT_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
+        hex.sparse_mov HOT_PAD, 2, x, xa                        // the claim scan over the stride-1 pclm[]
         hex.set w/4, pbase, pclm
         // M4: `x` is the LOOP COUNTER as well as the index, so a wide pid cannot scale it in place
         rep(2-PID_BYTES, k) frame.ptr_index4 pptr, pbase, x  // reads w/4 nibbles of its index (R11)
@@ -1262,7 +1267,7 @@ ns frame {
     // the other pair is never mentioned again), so the _c/_f variants do not compute the dead
     // pair -- that was ~717/~359 ops of dead work per call.
     def lines_pid_ids pidreg, cbufa, cbufd, fbufa, fbufd < vzcbase {
-        hex.zero w/4, cbufa
+        hex.zero w/4 - PID_NIBBLES, cbufa + PID_NIBBLES*dw   // Z3: the mov below zeroes the low PID_NIBBLES itself
         hex.mov PID_NIBBLES, cbufa, pidreg
         hex.shl_bit w/4, cbufa
         hex.shl_bit w/4, cbufa
@@ -1277,7 +1282,7 @@ ns frame {
 
     // ceiling caller: only the c-pair is ever walked.
     def lines_pid_ids_c pidreg, cbufa, cbufd < vzcbase {
-        hex.zero w/4, cbufa
+        hex.zero w/4 - PID_NIBBLES, cbufa + PID_NIBBLES*dw   // Z3: the mov below zeroes the low PID_NIBBLES itself
         hex.mov PID_NIBBLES, cbufa, pidreg
         hex.shl_bit w/4, cbufa
         hex.shl_bit w/4, cbufa
@@ -1288,7 +1293,7 @@ ns frame {
 
     // floor caller: only the f-pair is ever walked (fbufa = base+2, fbufd = base+3).
     def lines_pid_ids_f pidreg, fbufa, fbufd < vzcbase {
-        hex.zero w/4, fbufa
+        hex.zero w/4 - PID_NIBBLES, fbufa + PID_NIBBLES*dw   // Z3: the mov below zeroes the low PID_NIBBLES itself
         hex.mov PID_NIBBLES, fbufa, pidreg
         hex.shl_bit w/4, fbufa
         hex.shl_bit w/4, fbufa
@@ -1300,7 +1305,7 @@ ns frame {
     }
 
     def lines_pid_addrs pidreg, half_slots, cbufa, cbufd, fbufa, fbufd < vzbank {
-        hex.zero w/4, cbufa                                // widen the pid first: mul_const
+        hex.zero w/4 - PID_NIBBLES, cbufa + PID_NIBBLES*dw   // Z3: the mov below zeroes the low PID_NIBBLES itself
         hex.mov PID_NIBBLES, cbufa, pidreg                 // reads w/4 nibbles of its source (R11)
         hex.mul_const w/4, cbufa, cbufa, 4*half_slots*dw
         hex.add w/4, cbufa, vzbank
@@ -1348,7 +1353,7 @@ ns frame {
         rep(1-skyall, k) hex.if0 2, issky, notsky
         skyoff.lookup soff, x
         frame.add2_chain soff, skb
-        hex.zero w/4, cbufa
+        hex.zero w/4 - 2, cbufa + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, cbufa, soff
         hex.shl_bit w/4, cbufa                  // u*2: the ids interleave asc,desc
         hex.add_constant w/4, cbufa, sky_base_id
@@ -1366,7 +1371,7 @@ ns frame {
         rep(1-skyall, k) hex.if0 2, issky, notsky   // skyall=1: force it (bisect probe)
         skyoff.lookup soff, x
         frame.add2_chain soff, skb
-        hex.zero w/4, cbufa                     // widen before mul_const (R11 reads w/4 nibbles)
+        hex.zero w/4 - 2, cbufa + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, cbufa, soff
         hex.mul_const w/4, cbufa, cbufa, skystride*dw
         hex.set w/4, skybands_b, skybands             // a LABEL base goes through hex.set (the proven
@@ -1436,7 +1441,7 @@ ns frame {
       ctake_use_fstart:
         hex.mov 2, ctake, fstart
       ctake_done:
-        hex.zero w/4, slot_idx
+        hex.zero w/4 - 2, slot_idx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, slot_idx, x
         hex.shl_hex w/4, SLOT_SHIFT, slot_idx            // 16 bytes per column -> a whole-nibble shift
         hex.set w/4, sfslot_b, sfslot
@@ -1962,7 +1967,7 @@ ns frame {
     def lines_steps_seed x1 @ sidx, bteam, end_seed < sfflag, sfslot, p2_sffp, p2_sfsp {
         hex.set w/4, bteam, sfflag
         frame.ptr_index4 p2_sffp, bteam, x1
-        hex.zero w/4, sidx
+        hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, SLOT_SHIFT, sidx
         hex.set w/4, bteam, sfslot
@@ -1975,7 +1980,7 @@ ns frame {
     def lines_spr_seed x1 @ sidx, bteam, end_seed < sprflag, spslot, p2_spfp, p2_sspp {
         hex.set w/4, bteam, sprflag
         frame.ptr_index4 p2_spfp, bteam, x1
-        hex.zero w/4, sidx
+        hex.zero w/4 - 2, sidx + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, sidx, x1
         hex.shl_hex w/4, 1, sidx                 // spslot's OWN stride (SPR_SLOT_STRIDE)
         hex.set w/4, bteam, spslot
@@ -2329,7 +2334,18 @@ ns frame {
         // M13-mapunits: the map-unit variant -- 4-nibble atan front end, no rwa (dead here)
         proj.wall_x_range_m dbl, dsl, dtb, visible, x1, x2, sgn_aff, viewx, viewy, viewangle, seg_v1x, seg_v1y, seg_v2x, seg_v2y, seg_a, seg_b, seg_c
         hex.if0 1, visible, ret
-        hex.mov 8, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
+        // W1: `mov 8` -> `zero 8` + `mov 2`. Identical final state: x1 is a CLIPPED COLUMN in
+        // [0,161] (2 nibbles), so `mov 8` was already writing zeros into x's top 6 -- this writes
+        // the same value with 12 nibble-ops instead of 16.
+        //
+        // ⚠ THE `zero 8` IS LOAD-BEARING, do not drop it. An earlier version of this comment
+        // claimed `x` is only read 2-wide here; that is FALSE (CR-2026-09-07).
+        // `frame.lines_step_load` does `frame.ptr_index4 sfflag_p, sfflag_b, x`, and
+        // `ptr_index_fill` opens with `hex.mov w/4, dst, index` -- eight nibbles. The correctness
+        // of this rewrite rests on the `zero 8` clearing all of them, NOT on x being narrow.
+        // Measured: this one call is 1,840,988 ops = 2.34% of the frame.
+        hex.sparse_zero HOTTER_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
+        hex.sparse_mov HOTTER_PAD, 2, x, x1                        // occlusion pre-scan over the stride-1 drawn[]
         hex.set w/4, dbase, drawn
         frame.ptr_index4 dptr, dbase, x1
         rep(noscan, k) .lines_jmp occproc        // ablate: what does the pre-scan actually buy?
@@ -2372,7 +2388,7 @@ ns frame {
         // column horizon sliver carries no readable texture; the heavy skyline frames have
         // dozens. Ditto-safe: p2_dvalid resets per seg, so a ditto never crosses into this seg.
         rep(deg*w1r, k) hex.set 1, w1rslv, 0
-        rep(deg*w1r, k) hex.mov 2, p2_sliver_w, x2
+        rep(deg*w1r, k) hex.sparse_mov HOT_PAD, 2, p2_sliver_w, x2
         rep(deg*w1r, k) frame.sub2_chain p2_sliver_w, x1
         rep(deg*w1r, k) hex.set 2, p2_sliver_cap, dslvw
         rep(deg*w1r, k) hex.cmp 2, p2_sliver_w, p2_sliver_cap, sliver_yes, sliver_yes, sliver_done
@@ -2381,10 +2397,10 @@ ns frame {
       sliver_done:
         // M13-paramhoist: the map-unit world heights, once per seg (the per-column subtracts and
         // the 12-nibble fixed_mul width both die; see proj.column_params_m).
-        hex.mov 4, p2_wtc8, ceilfix + 4*dw
+        hex.sparse_mov HOT_PAD, 4, p2_wtc8, ceilfix + 4*dw
         frame.sub4_chain p2_wtc8, viewz + 4*dw
         hex.sign_extend 8, 4, p2_wtc8
-        hex.mov 4, p2_wtf8, floorfix + 4*dw
+        hex.sparse_mov HOT_PAD, 4, p2_wtf8, floorfix + 4*dw
         frame.sub4_chain p2_wtf8, viewz + 4*dw
         hex.sign_extend 8, 4, p2_wtf8
 
@@ -2395,7 +2411,11 @@ ns frame {
         // NEAREST MARKING seg's, per column, so the addresses move into the loop below.
         rep((1-pnear)*(1-ascode), k) .lines_seg_plane half_slots, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         rep((1-pnear)*ascode, k) .lines_seg_plane_ids p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
-        hex.mov 8, x, x1                        // the claim loop: re-aim drawn[] at x1
+        // W1: see the note at the pass-1 site. Same transform; the `zero 8` is load-bearing
+        // because `x` IS read 8-wide downstream (frame.lines_step_load -> ptr_index4 -> mov w/4).
+        // Measured: 1,059,850 ops = 1.35% of the frame.
+        hex.sparse_zero HOT_PAD, 6, x + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
+        hex.sparse_mov HOT_PAD, 2, x, x1                        // the claim loop: re-aim drawn[] at x1
         frame.ptr_index4 dptr, dbase, x1
         // idea 11: the load pointers walk in LOCKSTEP with x, like dptr/pclm above.
         rep(1-noproj, k) .lines_dda_seed scale, scalestep, p2_wtc8, p2_wtf8
@@ -2452,8 +2472,8 @@ ns frame {
         // W1R-ANCHOR: the pattern key is (x + wnoff), wnoff = viewangle*640/turn computed
         // once per frame -- turning slides the masonry WITH the walls instead of
         // re-rolling it (the flickering-TV fix's temporal half).
-        rep(w1r, k) hex.zero 2, p2_xkey + 2*dw  // idea 20: the mov 2 below covers nibbles 0-1
-        rep(w1r, k) hex.mov 2, p2_xkey, x
+        rep(w1r, k) hex.sparse_zero HOT_PAD, 2, p2_xkey + 2*dw  // idea 20: the mov 2 below covers nibbles 0-1
+        rep(w1r, k) hex.sparse_mov HOT_PAD, 2, p2_xkey, x
         rep(w1r, k) frame.add4_chain p2_xkey, wnoff
         rep(noise*(1-w1r), k) wnoise.lookup p2_gnrow, x   // V1 grain (non-W1R): unanchored
         rep(noise*w1r, k) wnoise.lookup p2_gnrow, p2_xkey
@@ -2486,7 +2506,7 @@ ns frame {
         // ... the fine 2-px key matters only for FAR-tier walls (p2_wlen < 16) or columns that
         // carry a boundary piece/face (faces pick their pattern by their own height): gate
         // the compare so near plain columns keep their 4-px ditto granularity
-        rep(w1r, k) hex.mov 2, p2_wlen, p2_fstart
+        rep(w1r, k) hex.sparse_mov HOT_PAD, 2, p2_wlen, p2_fstart
         rep(w1r, k) frame.sub2_chain p2_wlen, p2_cexcl
         rep(w1r, k) hex.if0 2, p2_wlen, gate_ucnt
         rep(w1r, k) hex.cmp 2, p2_wlen, p2_cw16, ck_grain2, gate_ucnt, gate_ucnt
@@ -2603,44 +2623,44 @@ ns frame {
       emit_full:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
         stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, deg, p2_gnrow, x, p2_cexcl, p2_fstart, p2_ufl, p2_uy1, p2_uy2p1, p2_ucol, p2_lfl, p2_ly1, p2_ly2p1, p2_lcol, p2_sprfl, p2_ssy1, p2_ssy2, p2_sy0b, p2_sblk, p2_slr, p2_ssy1b, p2_ssy2b, p2_sy0bb, p2_sblkb, p2_slrb, seg_lit, seg_lit2, seg_wstrip, wstripbase, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
-        hex.mov 2, p2_dcexcl, p2_cexcl                // remember this column's clip rows for the ditto test
-        hex.mov 2, p2_dfstart, p2_fstart
-        hex.mov 2, p2_duy1, p2_uy1                    // V3: the face signature, unconditional (same
-        hex.mov 2, p2_duy2, p2_uy2p1                  // reason as p2_dgn -- an unused label is an error)
-        hex.mov 2, p2_ducol, p2_ucol
-        hex.mov 2, p2_dly1, p2_ly1
-        hex.mov 2, p2_dly2, p2_ly2p1
-        hex.mov 2, p2_dlcol, p2_lcol
-        hex.mov 2, p2_dssy1, p2_ssy1                  // V4: the sprite signature, unconditional
-        hex.mov 2, p2_dssy2, p2_ssy2
-        hex.mov 4, p2_dsy0b, p2_sy0b
-        hex.mov 4, p2_dsblk, p2_sblk
-        hex.mov 2, p2_dssy1b, p2_ssy1b                // V4b: the second fragment's signature
-        hex.mov 2, p2_dssy2b, p2_ssy2b
-        hex.mov 4, p2_dsy0bb, p2_sy0bb
-        hex.mov 4, p2_dsblkb, p2_sblkb
-        hex.mov 2, p2_ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
-        hex.mov 2, p2_du1y1, u1y1                  // (the p2_dgn rule: the cells must never be unused)
-        hex.mov 2, p2_du1y2, u1y2
-        hex.mov 2, p2_du1cls, u1cls
-        hex.mov PID_NIBBLES, p2_du1bp, u1bp
-        hex.mov 2, p2_du2y1, u2y1
-        hex.mov 2, p2_du2y2, u2y2
-        hex.mov 2, p2_du2cls, u2cls
-        hex.mov PID_NIBBLES, p2_du2bp, u2bp
-        hex.mov 2, p2_dlcnt, lcnt
-        hex.mov 2, p2_dl1y1, l1y1
-        hex.mov 2, p2_dl1y2, l1y2
-        hex.mov 2, p2_dl1cls, l1cls
-        hex.mov PID_NIBBLES, p2_dl1bp, l1bp
-        hex.mov 2, p2_dl2y1, l2y1
-        hex.mov 2, p2_dl2y2, l2y2
-        hex.mov 2, p2_dl2cls, l2cls
-        hex.mov PID_NIBBLES, p2_dl2bp, l2bp
-        hex.mov 2, p2_dsoff, p2_soff                  // V2: unconditional, same reason as p2_dgn
-        hex.mov 2, p2_dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
-        hex.mov 2, p2_dgn3, gnrow3
-        hex.mov 2, p2_dgn, p2_gnrow                   // V1: unconditional so `p2_dgn` is never an UNUSED
+        hex.sparse_mov HOT_PAD, 2, p2_dcexcl, p2_cexcl                // remember this column's clip rows for the ditto test
+        hex.sparse_mov HOT_PAD, 2, p2_dfstart, p2_fstart
+        hex.sparse_mov HOT_PAD, 2, p2_duy1, p2_uy1                    // V3: the face signature, unconditional (same
+        hex.sparse_mov HOT_PAD, 2, p2_duy2, p2_uy2p1                  // reason as p2_dgn -- an unused label is an error)
+        hex.sparse_mov HOT_PAD, 2, p2_ducol, p2_ucol
+        hex.sparse_mov HOT_PAD, 2, p2_dly1, p2_ly1
+        hex.sparse_mov HOT_PAD, 2, p2_dly2, p2_ly2p1
+        hex.sparse_mov HOT_PAD, 2, p2_dlcol, p2_lcol
+        hex.sparse_mov HOT_PAD, 2, p2_dssy1, p2_ssy1                  // V4: the sprite signature, unconditional
+        hex.sparse_mov HOT_PAD, 2, p2_dssy2, p2_ssy2
+        hex.sparse_mov HOT_PAD, 4, p2_dsy0b, p2_sy0b
+        hex.sparse_mov HOT_PAD, 4, p2_dsblk, p2_sblk
+        hex.sparse_mov HOT_PAD, 2, p2_dssy1b, p2_ssy1b                // V4b: the second fragment's signature
+        hex.sparse_mov HOT_PAD, 2, p2_dssy2b, p2_ssy2b
+        hex.sparse_mov HOT_PAD, 4, p2_dsy0bb, p2_sy0bb
+        hex.sparse_mov HOT_PAD, 4, p2_dsblkb, p2_sblkb
+        hex.sparse_mov HOT_PAD, 2, p2_ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
+        hex.sparse_mov HOT_PAD, 2, p2_du1y1, u1y1                  // (the p2_dgn rule: the cells must never be unused)
+        hex.sparse_mov HOT_PAD, 2, p2_du1y2, u1y2
+        hex.sparse_mov HOT_PAD, 2, p2_du1cls, u1cls
+        hex.sparse_mov HOT_PAD, PID_NIBBLES, p2_du1bp, u1bp
+        hex.sparse_mov HOT_PAD, 2, p2_du2y1, u2y1
+        hex.sparse_mov HOT_PAD, 2, p2_du2y2, u2y2
+        hex.sparse_mov HOT_PAD, 2, p2_du2cls, u2cls
+        hex.sparse_mov HOT_PAD, PID_NIBBLES, p2_du2bp, u2bp
+        hex.sparse_mov HOT_PAD, 2, p2_dlcnt, lcnt
+        hex.sparse_mov HOT_PAD, 2, p2_dl1y1, l1y1
+        hex.sparse_mov HOT_PAD, 2, p2_dl1y2, l1y2
+        hex.sparse_mov HOT_PAD, 2, p2_dl1cls, l1cls
+        hex.sparse_mov HOT_PAD, PID_NIBBLES, p2_dl1bp, l1bp
+        hex.sparse_mov HOT_PAD, 2, p2_dl2y1, l2y1
+        hex.sparse_mov HOT_PAD, 2, p2_dl2y2, l2y2
+        hex.sparse_mov HOT_PAD, 2, p2_dl2cls, l2cls
+        hex.sparse_mov HOT_PAD, PID_NIBBLES, p2_dl2bp, l2bp
+        hex.sparse_mov HOT_PAD, 2, p2_dsoff, p2_soff                  // V2: unconditional, same reason as p2_dgn
+        hex.sparse_mov HOT_PAD, 2, p2_dgn2, gnrow2                 // W1R-LOD: the two extra key shadows
+        hex.sparse_mov HOT_PAD, 2, p2_dgn3, gnrow3
+        hex.sparse_mov HOT_PAD, 2, p2_dgn, p2_gnrow                   // V1: unconditional so `p2_dgn` is never an UNUSED
                                                 // label when the grain is off -- the assembler
                                                 // rejects those outright. ~55 ops x 160 columns.
         rep(pnear, k) .lines_save_plane pval8, p2_dpid

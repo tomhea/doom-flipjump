@@ -8,8 +8,9 @@
 // list, wall run(s), floor band list, sprite fragments) and pushes each run out as `byte.emit` /
 // `cm.emit` through the device-emit dispatch tables (present.fj's `begin_frame_stream` + the tables
 // `doomfj.lut_generator.generate_emit_dispatch_table_fj` emits, named "byte"/"cm" by the includer).
-// `emit_col_lines` is the shipped per-column entry point; `flush_frame` is the two-sided (rung 3b)
-// whole-frame assembler. (history: docs/handoff-visual-features.md, docs/m13p-procedural-plan.md)
+// `emit_col_lines` is the shipped per-column entry point. (`flush_frame`, the rung-3b whole-frame
+// assembler, was retired 2026-09-11 having never shipped -- docs/handoff-m13-2s.md keeps its
+// design.) (history: docs/handoff-visual-features.md, docs/m13p-procedural-plan.md)
 // @requires hex.init & stl.ptr_init (ptr_index/read_hex) — stl.startup_and_init_all covers both —
 // plus the includer's "byte"/"cm" emit tables. Each such table self-inits via its `<label>: ;end …
 // end:` header at table-declaration time (see lut_generator's `_per_entry_emit_table`), so there is
@@ -27,7 +28,7 @@
 //                ordinals restart there (cbufa/cbufd, fbufa/fbufd, and their region-behind twins
 //                rcbufa/rcbufd/rfbufa/rfbufd).
 //   …p1          value PLUS ONE — an EXCLUSIVE end row (uy2p1, fy2p1).
-//   …_p / …base  a running POINTER (colst_p/colbuf_p in flush_frame; `ptr` is always the walk
+//   …_p / …base  a running POINTER (`ptr` is always the walk
 //                cursor) and the fixed table BASE it derives from (`wstripbase` is the base the
 //                seg's baked `wstrip` offset indexes; `stepcol_b` likewise). ⚠ A `b` is NOT
 //                always "base": on sprite names it is the second, FARTHER fragment B —
@@ -219,9 +220,9 @@ ns stream {
       wsbody:
         hex.read_byte_and_inc y2r, ptr             // cum band index (1..16)
         hex.read_byte_and_inc colr, ptr            // the band's final palette byte
-        hex.zero 4, mul_cum                        // both operands zero-extended to the mul width
+        hex.zero 2, mul_cum + 2*dw   // both operands zero-extended to the mul width
         hex.mov 2, mul_cum, y2r                    // (mul_lo n reads n nibbles from BOTH sources)
-        hex.zero 4, mul_wlen
+        hex.zero 2, mul_wlen + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, mul_wlen, wlen
         hex.mul_lo 4, mul_out, mul_cum, mul_wlen   // cum * wlen  (<=16 x <=100)
         hex.shr_hex 4, 1, mul_out                  // >> 4 bits = the 1/16 split
@@ -268,7 +269,7 @@ ns stream {
     // state. Mirrors ReferenceModel.wall_noise exactly (R6).
     def wpx_wall ctake, wlen, fstart, wstrip, wstripbase, wpxstride, noise, cmidx \
             @ ptr, y2r, colr, wloop, wdone, end {
-        hex.zero w/4, ptr
+        hex.zero w/4 - 2, ptr + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, ptr, wlen
         hex.mul_const w/4, ptr, ptr, wpxstride*dw      // the list baked for THIS exact height
         hex.add w/4, ptr, wstripbase
@@ -349,140 +350,6 @@ ns stream {
     // produced, so nothing is ever stored twice).
 
 
-
-    // M13-2S rung 3b — assemble the WHOLE frame's records, one runtime pass over the columns.
-    // A runtime loop, not an unrolled one: the expansion (band walks + WPX run lists) is a shared
-    // fcall leaf, so it exists ONCE. Unrolling it per column put ~320 copies of it in the program
-    // and the assembler is roughly cubic in unrolled ops (the M11c lesson / heavy-leaf mantra).
-    // Top regions expand in append order; bottom regions in REVERSE append order, which is screen
-    // order, because the walk pushes them upward from the floor.
-    def flush_frame view_w, ecap, colst, colbuf \
-            @ col_loop, col_body, chk_bot, col_emit, col_full, \
-              cmp_bot_n, cmp_bytes, cmp_top_loop, cmp_top_one, cmp_top_next, ditto_top_ok, \
-              cmp_bot_loop, cmp_bot_one, cmp_bot_next, ditto_hit, \
-              top_loop, top_body, bot_start, bot_loop, col_done, next_col, done, end, \
-              colst_p, colbuf_p, n_cols, col_x, n_top, n_bot, top_i, bot_i, \
-              prev_n_top, prev_n_bot, prev_ptr, cmp_i, cmp_n, cmp_a, cmp_b \
-            < eptr, exp_ret, expand_leaf {
-        hex.set w/4, colst_p, colst
-        hex.set w/4, colbuf_p, colbuf
-        hex.zero 2, col_x
-        hex.set 2, n_cols, view_w
-      col_loop:
-        hex.cmp 2, col_x, n_cols, col_body, done, done
-      col_body:
-        hex.ptr_add colst_p, 2
-        hex.read_byte n_top, colst_p
-        hex.ptr_add colst_p, 1
-        hex.read_byte n_bot, colst_p
-        hex.ptr_sub colst_p, 3
-        hex.if0 2, n_top, chk_bot
-        ;col_emit
-      chk_bot:
-        hex.if0 2, n_bot, next_col                // the column was never touched: paint nothing
-      col_emit:
-        // M13-2S rung 3b DITTO: if this column's REGION LIST is byte-identical to the previous
-        // column's, its pixels are too (same surfaces, same rows) -- so emit [x][0xFE], the
-        // device's "copy column x-1", and skip the whole expansion. Comparing ~6 entries costs a
-        // few hundred ops against tens of thousands for the band and run-list walks.
-        hex.if0 2, col_x, col_full               // column 0 has no left neighbour
-        hex.cmp 2, n_top, prev_n_top, col_full, cmp_bot_n, col_full
-      cmp_bot_n:
-        hex.cmp 2, n_bot, prev_n_bot, col_full, cmp_bytes, col_full
-      cmp_bytes:
-        hex.mov w/4, eptr, colbuf_p
-        hex.mov w/4, prev_ptr, colbuf_p
-        hex.sub_constant w/4, prev_ptr, 10*ecap*dw   // the previous column's buffer
-        hex.mul_const 2, cmp_n, n_top, 5         // top BYTES to compare (5 per entry -- a count,
-                                                 // not an address delta: no dw here)
-        hex.zero 2, cmp_i
-      cmp_top_loop:
-        hex.cmp 2, cmp_i, cmp_n, cmp_top_one, ditto_top_ok, ditto_top_ok
-      cmp_top_one:
-        hex.read_byte_and_inc cmp_a, eptr
-        hex.read_byte_and_inc cmp_b, prev_ptr
-        hex.cmp 2, cmp_a, cmp_b, col_full, cmp_top_next, col_full
-      cmp_top_next:
-        hex.inc 2, cmp_i
-        ;cmp_top_loop
-      ditto_top_ok:
-        hex.if0 2, n_bot, ditto_hit              // now the bottom entries, at +5*ecap
-        hex.mov w/4, eptr, colbuf_p
-        hex.add_constant w/4, eptr, 5*ecap*dw
-        hex.mov w/4, prev_ptr, eptr
-        hex.sub_constant w/4, prev_ptr, 10*ecap*dw
-        hex.mul_const 2, cmp_n, n_bot, 5
-        hex.zero 2, cmp_i
-      cmp_bot_loop:
-        hex.cmp 2, cmp_i, cmp_n, cmp_bot_one, ditto_hit, ditto_hit
-      cmp_bot_one:
-        hex.read_byte_and_inc cmp_a, eptr
-        hex.read_byte_and_inc cmp_b, prev_ptr
-        hex.cmp 2, cmp_a, cmp_b, col_full, cmp_bot_next, col_full
-      cmp_bot_next:
-        hex.inc 2, cmp_i
-        ;cmp_bot_loop
-      ditto_hit:
-        byte.emit col_x
-        stl.output_char 0xFE
-        ;next_col
-      col_full:
-        byte.emit col_x
-        hex.mov w/4, eptr, colbuf_p
-        hex.zero 2, top_i
-      top_loop:
-        hex.cmp 2, top_i, n_top, top_body, bot_start, bot_start
-      top_body:
-        stl.fcall expand_leaf, exp_ret           // advances eptr by one 5-byte entry
-        hex.inc 2, top_i
-        ;top_loop
-      bot_start:
-        hex.mov 2, bot_i, n_bot
-      bot_loop:
-        hex.if0 2, bot_i, col_done
-        hex.dec 2, bot_i
-        hex.mov w/4, eptr, colbuf_p
-        hex.add_constant w/4, eptr, 5*ecap*dw
-        .entry_ptr_add eptr, bot_i
-        stl.fcall expand_leaf, exp_ret
-        ;bot_loop
-      col_done:
-        stl.output_char 0xFF
-      next_col:
-        hex.mov 2, prev_n_top, n_top
-        hex.mov 2, prev_n_bot, n_bot
-        hex.ptr_add colst_p, 4
-        hex.ptr_add colbuf_p, 10*ecap
-        hex.inc 2, col_x
-        ;col_loop
-      done:
-        ;end
-      colst_p: hex.vec w/4
-      colbuf_p: hex.vec w/4
-      n_cols: hex.vec 2
-      col_x: hex.vec 2
-      n_top: hex.vec 2
-      n_bot: hex.vec 2
-      top_i: hex.vec 2
-      bot_i: hex.vec 2
-      prev_n_top: hex.vec 2
-      prev_n_bot: hex.vec 2
-      prev_ptr: hex.vec w/4
-      cmp_i: hex.vec 2
-      cmp_n: hex.vec 2
-      cmp_a: hex.vec 2
-      cmp_b: hex.vec 2
-      end:
-    }
-
-    // ptr += n ENTRIES of 5 bytes; n is a runtime count and hex.ptr_add only takes a constant.
-    def entry_ptr_add ptr, n @ off, end {
-        entoff.lookup off, n                     // same dispatch as the append side
-        hex.add w/4, ptr, off
-        ;end
-      off: hex.vec w/4
-      end:
-    }
 
     // M13-EMIT rung 1 (ablate, measurement only) -- the per-pair OUTPUT, isolated so it can be
     // switched off while the list walk still runs: the difference prices the two byte.emit
@@ -797,7 +664,7 @@ ns stream {
         hex.mov 2, wlen, fstart
         frame.sub2_chain wlen, ctake
         hex.if0 2, wlen, end
-        hex.zero w/4, ptr
+        hex.zero w/4 - 2, ptr + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, ptr, wlen
         hex.mul_const w/4, ptr, ptr, wpxstride*dw      // the list baked for THIS exact height
         hex.add w/4, ptr, wstripbase
@@ -921,7 +788,7 @@ ns stream {
     def sprite_runs_win sblk, sy0b, slr, wlo, whi, blkshift \
             @ sloop, spos, semit, sfin, sclamp, snext, send, end \
             < sprbank, srw_ptr, srw_rel, srw_rel_w, srw_sbase, srw_sidx, srw_smidx, srw_tex, srw_whi4, srw_wlo4, srw_y0, srw_yabs {
-        hex.zero w/4, srw_sidx
+        hex.zero w/4 - 4, srw_sidx + 4*dw   // Z3: the mov below zeroes the low 4 itself
         hex.mov 4, srw_sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, srw_sidx
         hex.set w/4, srw_sbase, sprbank
@@ -931,9 +798,9 @@ ns stream {
         hex.mov 2, srw_smidx + 2*dw, slr
         hex.mov 4, srw_y0, sy0b   // (hex.mov zeroes dst first)
         hex.sub_constant 4, srw_y0, 32768
-        hex.zero 4, srw_wlo4                        // widened window rows (the row math is 4-nibble)
+        hex.zero 2, srw_wlo4 + 2*dw   // widened window rows (the row math is 4-nibble)
         hex.mov 2, srw_wlo4, wlo
-        hex.zero 4, srw_whi4
+        hex.zero 2, srw_whi4 + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, srw_whi4, whi
         // srw_rel==0 SENTINEL -- the idiom `wpx_wall` already ships in this file (see its `wloop`):
         // no counter register, no per-run compare, no n_ent read. Every real run ends at row
@@ -945,7 +812,7 @@ ns stream {
         hex.read_byte_and_inc srw_rel, srw_ptr
         hex.if0 2, srw_rel, send
         hex.read_byte_and_inc srw_tex, srw_ptr
-        hex.zero 4, srw_rel_w
+        hex.zero 2, srw_rel_w + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, srw_rel_w, srw_rel
         hex.mov 4, srw_yabs, srw_y0
         frame.add4_chain srw_yabs, srw_rel_w
@@ -975,7 +842,7 @@ ns stream {
     def sprite_runs sblk, sy0b, slr, viewh, blkshift \
             @ sloop, spos, semit, sfin, sclamp, snext, send, end \
             < sprbank, srn_cvh, srn_ptr, srn_rel, srn_rel_w, srn_sbase, srn_sidx, srn_smidx, srn_tex, srn_y0, srn_yabs {
-        hex.zero w/4, srn_sidx
+        hex.zero w/4 - 4, srn_sidx + 4*dw   // Z3: the mov below zeroes the low 4 itself
         hex.mov 4, srn_sidx, sblk
         rep(blkshift, k) hex.shl_bit w/4, srn_sidx  // x SPR_BLOCK_STRIDE = 1<<blkshift SLOTS
         hex.set w/4, srn_sbase, sprbank
@@ -1006,7 +873,7 @@ ns stream {
         hex.read_byte_and_inc srn_rel, srn_ptr
         hex.if0 2, srn_rel, send
         hex.read_byte_and_inc srn_tex, srn_ptr
-        hex.zero 4, srn_rel_w
+        hex.zero 2, srn_rel_w + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
         hex.mov 2, srn_rel_w, srn_rel
         hex.mov 4, srn_yabs, srn_y0
         frame.add4_chain srn_yabs, srn_rel_w

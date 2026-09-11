@@ -1,0 +1,18 @@
+tablepool gate selftest
+  C1/C2 relocating hex.xor's tables leaves the output unchanged ok  b'0x1234' vs b'0x1234'
+  C3 tables were relocated                                   ok  113 relocated
+  C3 the op count FELL (a no-op pass would pass C2 too)      ok  1685 -> 1079 (-35.96%)
+  C4 with the guard ON, the fall-through program is correct  ok  b'IK\x02\x01' vs b'IK\x02\x01'
+  C4 with the guard FORCED to accept, it breaks (so the guard is load-bearing) ok  guardless='raised: FlipJumpAssemblerException' vs b'IK\x02\x01'
+  C4 ...and the guard was restored afterwards                ok
+  C5 with declines, the un-pinned build is correct           ok  60 declined, 25 group(s) un-pinned
+  C6 two expressions on ONE address with DIFFERENT bases are un-pinned ok  pinned={} conflicts=1
+  C6 ...but the SAME base on one address is kept (not a conflict) ok  {4096: 4096}
+  C6 ...and distinct addresses are both kept                 ok  {4096: 4096, 8192: 8192}
+  C8 stl.IO's word (64+w) is NOT pinned                      ok  {1048576: 1879052288}
+  C8 ...while a normal variable's word still is              ok
+  C7 blocking is correct and cheaper                         ok  8 pinned groups, 963 ops
+  C7 ...rewriting EVERY wflip on a pinned word breaks it     ok  all-rewritten=b'' vs b'0x1234'
+  C7 ...and the discriminator was restored                   ok
+
+SELFTEST PASS

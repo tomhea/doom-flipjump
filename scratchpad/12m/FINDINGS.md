@@ -1665,3 +1665,2006 @@ What collision sharing CAN do: base 42M -> ~37.7M, allowing exact_xor ~192 (37.7
 **DEFINITIVE: the padded 16.04M (P7B) is a DEG-tier-only number that overflows the game. On a
 SHIPPABLE game the padding floor is ~16.3-16.58M. Below 16M needs a fundamentally smaller program
 (fewer hex ops / width doctrine / renderer doing less work), not more/wider padding.**
+
+## AV — `game-nocollide` is NOT buildable: the standalone main references collision labels
+
+Tried to price collision by an exact A/B on the shipped program shape (a `game-nocollide` TIERS row
+differing from `game` in `collide` alone — verified `{'collide': (True, False)}` and nothing else).
+The build dies in pass 2:
+
+    Can't evaluate label lnrow in expression lnrow in op
+    Flip Word ((lnrow + 49856) + 32) by 128 ... e1m1_02_main.fj (line 939)
+
+`lnrow` is emitted only when collision is on, but the STANDALONE main path references it
+unconditionally. So the flag combination was never valid and the registry row was reverted rather
+than left broken (a tier is a promise about which program gets built).
+
+CONSEQUENCE: collision's cost on the game tier cannot be measured by subtraction without emitter
+work — guarding the standalone main's `lnrow` reference behind the collide flag. Until then the
+campaign's "~11.6M/frame" for collision remains UNVERIFIED and cross-tier, and rung 0 showed a
+cross-tier estimate missing by 2x. Do not plan a 6.2M cut against it.
+
+## AW — the game-tier hot path, MEASURED by playing a walk in the shipped collide binary
+
+`scratchpad/12m/hotpath.py` on `build/doom_e1m1_menu_rung0.fjm`, walk seed 0, 2 game frames
+(80,111,139 ops, **100.0% attributed**, hook total == interpreter counter). Labels from
+`ca_labels --standalone` (2,084,703 labels). Raw histogram saved to `_hotpath_hist.json.gz`, so
+re-analysis needs no second instrumented run.
+
+### The xor family is the frame
+
+| primitive | ops | share | pad after rung 0 |
+|---|---:|---:|---:|
+| `hex.exact_xor` | 32,400,303 | **40.44%** | 16 |
+| `hex.double_exact_xor` | 7,146,190 | 8.92% | 16 |
+| `hex.triple_exact_xor` | 6,496,215 | 8.11% | 16 |
+| **xor family total** | **46,217,900** | **57.69%** | |
+
+Scaled to the p80 run that defines the metric: the xor family is **~15,116,123 ops/frame** of
+26,201,318. Nothing else is close — the next primitive is `hex.shifts.shl_bit_once` at 2.04%.
+
+### ⚠⚠ AW's SUBSYSTEM SPLIT IS FROM THE MISMATCHED PAIR — superseded by BB. Read BB, not this.
+
+CR-2026-09-07: the numbers in this section were produced by attributing the rung-0 histogram
+against rung-0 PASS-1 labels, which is the mismatched join BA and BB identify. The `distscale
+12.14%` column below is the artifact itself, and the `sim 17.20%` beside it is computed from the
+same bad attribution. **BB is the authoritative profile** (S2 binary + S2 labels, 100.0%
+attributed). BA blessed AW as "unaffected" because AW keys on expansion paths; that was only true
+of AW's XOR-FAMILY table, not of this namespace rollup.
+
+The qualitative conclusion survives BB — collision is far smaller than the plan's ~11.6M — but the
+figure to quote is BB's, not this one, and the "cannot close the gap" phrasing below was true
+against rung 0's 6,201,318-op gap and is NOT true against the post-W1 gap of 3,447,960.
+
+### COLLISION IS FAR SMALLER THAN ~11.6M (superseded numbers below; see BB)
+
+By subsystem (deepest non-stl macro, namespace-rolled):
+
+    frame     30.93%    proj  22.51%    sim   17.20%    distscale 12.14%    hex 7.29%
+
+`sim.*` — which is collision AND thing simulation together — is **17.20% = ~4,507,316 ops/frame**.
+The line/block checks alone (`sim.check_line` 6.12% + `sim.check_block` 3.06%) are ~9.2%,
+about **2.4M ops/frame**.
+
+The campaign has carried "collision costs ~11,602,784 ops" from a different tier and built
+§3 rung 2 and §7 G3 on it. On the game tier it is 2.6x smaller, and it **cannot close the
+6,201,318-op gap to the 20M target even if collision were free**. Re-price rung 2 before doing any
+work there. (This is the third cross-tier figure this session to be wrong when measured on the
+game: the padding revert cost 2x its deg prediction, and the pre-pad word count was off by 21%.)
+
+### What this says to do
+
+Pad the xor family. It is 57.69% of the frame, all three macros sit at `pad 16` after rung 0's
+revert, and at 38.28% of the ceiling there is room to spend that 93.5% did not have. That is the
+move — not a spread of small pads across the tail, which is what "the pad pool is exhausted"
+(FINDINGS AU) actually measured.
+
+## AX — sparse beats definition-padding by ~28x, and the selection metric is OPS PER INSTANCE
+
+Measured on the rung-0 game binary (`_hotpath_hist.json.gz` + the 2,084,703-label table). This is
+the instance-level number FINDINGS AJ/AQ never had: AQ tested a fixed set of 63 MACROS at a uniform
+pad and concluded "width beats coverage". It never measured how concentrated the EXECUTIONS are
+across emitted INSTANCES, which is the whole basis for sparse.
+
+### Padding cost is per EMITTED instance; speed is won per EXECUTED op
+
+    xor-family instances emitted in the image : 425,745
+    ...that executed in a 2-frame walk        :  53,226  (12.50%)
+    ...covering 80% of executed xor ops       :  10,000  ( 2.35%)
+
+MEASURED, from `overflow_probe game` before and after: `exact_xor` pad 16 -> 128 on the DEFINITION
+cost **+51,838,592 words** (50,742,890 -> 102,581,482 pass-1), i.e. **121.8 words per instance**,
+to pad 425,745 instances so that ~10,000 of them run faster.
+
+### ⚠ Rank by OPS PER INSTANCE, not by ops. The spread is 150x.
+
+| emission site | ops share | instances | ops/instance |
+|---|---:|---:|---:|
+| `proj.point_on_side_leaf` | 7.04% | 478 | **64x** |
+| `frame.seg_pass1_leaf_body_lines` | 19.58% | 3,096 | **27x** |
+| `sim.thing_pass` | 6.72% | 1,707 | **17x** |
+| `sim.bind_things` | 2.75% | 1,035 | **11x** |
+| `frame.seg_pass1_leaf_body_ts` | 14.17% | 8,733 | **6.9x** |
+| `frame.thing_record_body` | 8.06% | 13,386 | 2.6x |
+| `frame.seg_pass2_leaf_body_lines` | 26.44% | 58,977 | 1.9x |
+| `sim.check_position` | 5.27% | 23,954 | 0.94x |
+| `sim.try_move` | 7.33% | **72,444** | **0.43x** |
+
+`sim.try_move` is the trap: the 4th-largest ops share and the LARGEST instance count. Selecting the
+"top sites by ops" would have included it and spent 17% of the size budget for 7% of the win.
+
+### The surgical set
+
+The top five by ops/instance carry **50.3% of the xor family in 15,049 instances (3.54%)** —
+predicted **~+1.8M words = +1.4 points of ceiling**, against **+38.6 points** for the definition
+pad. ~28x more size-efficient for ~half the win.
+
+### Only THREE macros reach the family, so the sparse threading is shallow
+
+    hex.xor 70.37%   hex.double_xor 15.52%   hex.address_and_variable_triple_xor 14.11%
+
+and their callers are dominated by `hex.zero` (33.08%), `hex.xor_zero` (15.52%), `hex.xor`
+(12.63%) and `hex.pointers.set_flip_and_jump_pointers` (9.76%).
+
+## AY — ⚠⚠ RETRACTED, see FINDINGS BA. The premise was a PROFILER ARTIFACT.
+## (kept verbatim below because the way it was wrong is the useful part)
+
+## AY — `distscale` is declared 8 nibbles and needs 5. Up to ~1.19M ops/frame.
+
+`distscale` is the largest single DOOM macro in the game-tier profile: **12.14% of all ops**
+(9,726,044 of 80,111,139), and unlike the xor family those ops are its own lookup machinery
+(`hex.zero dst`, `rep hex.xor .dsp+4*i, idx+i*dw`, `hex.xor_zero dst, res`), which scales with the
+declared nibble width.
+
+    distscale_table(W=160, TRIG_N=4096): 160 entries
+    min 65,537 (0x10001)   max 92,398 (0x168EE)   all positive
+    nibbles needed: 5      declared: 8
+
+Narrowing 8 -> 5 removes 3/8 of the per-read chain: **~38% of 12.14% = up to ~4.55% of all ops,
+~1.19M ops/frame** against the 6,201,318 the campaign needs.
+
+⚠ NOT free, and not yet attempted. The consumer is `length = FixedMul(distance, distscale[x1])`,
+which works in 16.16; a 5-nibble table must be zero-extended into the 8-nibble multiply register,
+so the saving is in the READ, not the multiply, and the extension must not cost back what the
+narrowing saves. This is the width doctrine the handoff's rung 3 names, and it is a FEWER-CALLS
+lever -- the only kind FINDINGS AC says can move `exact_xor`, since there is no caller-side fix.
+
+Check every other wide LUT the same way before assuming this one is special.
+
+### AY addendum — the full LUT width survey, so nobody re-runs it
+
+| LUT | declared | needed (max value) | verdict |
+|---|---:|---:|---|
+| `distscale` | 8 | **5** (92,398) | **wastes 3** — and it is 12.14% of the frame |
+| `yslope` | 8 | **6** (10,485,760) | wastes 2, but a small profile share |
+| `slopediv_recip`, `slopediv_recip8` | packed 3 bytes | — | ALREADY packed (M13-lutpack); not a candidate |
+| `finetangent` | 8 | 8 (4,294,967,195) | tight |
+| `xtoviewangle` | 8 | 8 (4,290,772,992) | tight |
+| `zlight`, `scalelight` | 2 | 2 (31) | tight |
+
+Only `distscale` is worth the risk; `yslope` is a minor follow-on. The rest are already correct,
+so "narrow the wide LUTs" is a TWO-table job, not a sweep.
+
+## AZ — padding is NOT monotonic: there is an optimum, and overshooting it costs BOTH metrics
+
+Three builds of the same lever at increasing coverage and width, each gated and measured on the
+shipped binary with the (mean+p80)/2 binding metric:
+
+| config | sites | coverage of xor ops | binding | size |
+|---|---:|---:|---:|---:|
+| rung 0 | 0 | — | 23,973,882 | 38.28% |
+| S1 | 44 @128 | 29.7% | 23,905,040 (−0.29%) | 38.10% |
+| **S2** | 89 @1024/4096 | 77.4% | **23,493,681 (−2.00%)** | **38.07%** |
+| S3 | 133 @1024/4096/16384 | ~98% | 23,709,974 (**+0.92% vs S2**) | 39.95% (**+1.88 pts**) |
+
+**S3 is worse than S2 on speed AND size.** More padding is not better.
+
+### Why: a pad helps its own site and hurts every site after it
+
+A `wflip` costs `popcount(target)`. Padding lowers the popcount of the target it aligns, but the
+inserted shift pushes ALL later code to higher addresses, raising popcount for every downstream
+wflip. Below the knee the shift dies at the next downstream `pad` (absorption) and costs nothing —
+S1 and S2 both came out SMALLER than rung 0. Above it the image really grows (+2,523,402 words S2
+-> S3) and the downstream cost exceeds the local win.
+
+### The knee, located
+
+Between S2 and S3. Two variables moved together in S3 (widths 1024/4096 -> 4096/16384, AND three
+new sites), so which one crossed the knee is NOT established. The likelier culprit is the new
+sites by instance count — `sim.try_move` alone is **72,444 instances** against ~20 sites in the
+whole 16384 tier — but that is a hypothesis, not a measurement. Separate them before pushing again.
+
+### Practical rule
+
+Pad the hot sites to ~1024-4096 and stop. `ops per instance` selects WHICH sites (FINDINGS AX);
+this bounds HOW FAR. Anything that grows the image measurably is paying downstream interest on
+every wflip in the program.
+
+
+## BA — AY IS RETRACTED: `distscale`'s 12.14% was 100% MISATTRIBUTED, and the change is worth 0
+
+AY claimed `distscale` was the largest single doom macro at 12.14% of the frame and that narrowing
+it 8 -> 5 nibbles was worth ~1.19M ops/frame. **Built it, gated it, measured it. It is worth
+nothing**, and the premise was false.
+
+| | S2 | D1 (`distscale` 8->5) | delta |
+|---|---:|---:|---:|
+| binding | 23,493,681 | 23,495,707 | **+2,026** |
+| mean | 21,466,274 | 21,468,300 | +2,026 |
+| p80 | 25,521,087 | 25,523,113 | +2,026 |
+| words | 51,095,972 | 51,099,046 | +3,074 |
+
+`m2_std_gate` PASS, so the narrowing is CORRECT -- the 160 values provably fit 5 nibbles
+(`generate_lut_fj` validates and would have raised), the stride agrees on both sides, and every
+frame stayed byte-exact. It simply saves nothing, and is fractionally worse. Reverted.
+
+### The root cause: nearest-preceding-label attribution, with no next label
+
+`hotpath.LabelTable.lookup` returns the nearest label at or before an address. **`distscale` is the
+LAST top-level label in the doom image**, so every op after it in the address space was credited to
+it. Measured directly:
+
+    ops attributed to `distscale`            : 9,726,044  (12.14% of the frame)
+    ...actually inside the 81,920-bit table  :         0  (0.00%)
+    ...code that merely FOLLOWS the label    : 9,726,044  (100.00%)
+
+The table is 160 entries x 8 nibbles = 81,920 bits. Not one profiled op was in it.
+
+### What is and is not affected
+
+* **The xor-family analysis (AW/AX/AZ) stands.** It keys on macro EXPANSION PATHS (`a---b---c`),
+  which encode real nesting, not address proximity. S2's measured -2.00% is unaffected.
+* **Any BARE top-level label in the doom-macro ranking is suspect** -- `distscale` was the extreme
+  case only because nothing follows it.
+
+### The fix, shipped
+
+`rank()` now refuses to credit an op that sits more than 4096 ops past a BARE label, counting it
+UNATTRIBUTED instead, and says how many it dropped. Two controls (C5) require that the guard fires
+on a far op and does NOT fire on a near one. The lesson is the general one: a profiler that always
+returns an answer will always return an answer, including for addresses it knows nothing about.
+
+
+## BB — THE AUTHORITATIVE PROFILE (S2 binary, matched labels). A profile is a JOIN; check the key.
+
+Every earlier profile in this campaign attributed a histogram against a label table captured from a
+DIFFERENT BUILD. That is the single root cause behind AY, BA, and two further wrong hypotheses I
+chased today. Fixed by capturing labels for the same tree that produced the binary
+(`scratchpad/12m/labels2.py`, which keeps the LAST `labels_resolve` instead of aborting at the
+first) and profiling the matching `.fjm`.
+
+    S2 binary + S2 labels: 78,675,599 ops over 2 game frames, 100.0% ATTRIBUTED
+    (the guard withheld 13,219 ops, 0.017% -- against 9,726,044 under the mismatched pair)
+
+The 12.14% "dark region" was never real code we could not name. It was the mismatch.
+
+### The frame, correctly
+
+| primitive | share |  | doom macro | share |
+|---|---:|---|---|---:|
+| `hex.exact_xor` | 39.48% |  | `frame.dance_boundary` | 6.72% |
+| `hex.sparse_exact_xor` | 11.93% |  | `sim.check_line` | 6.00% |
+| `hex.double_exact_xor` | 8.63% |  | `frame.seg_pass2_leaf_body_lines` | 5.61% |
+| `hex.triple_exact_xor` | 8.55% |  | `proj.wall_x_range_m` | 4.67% |
+| **xor family** | **68.59%** |  | `proj.point_on_side_leaf` | 4.54% |
+| `stl.comp_if1` | 2.17% |  | `m1.zerobyte` (the M1 reset) | 2.11% |
+
+**The xor family is 68.59% of the frame** -- higher than the 57.69% the mismatched pair reported,
+because everything now attributes. `hex.sparse_exact_xor` at 11.93% is S2's own padded calls, which
+confirms the tiering hit hot code.
+
+### ⚠ THE FRAME IS FLAT. There is no next big lever.
+
+No doom macro exceeds 6.72%, and the top sixteen together are under half the frame. Eliminating any
+ONE of them entirely would not close the 3,493,680-op gap (14.9%). This is not a profile with a hot
+spot; it is a profile with one hot PRIMITIVE reached from everywhere.
+
+Consequences for planning:
+* The M1 self-reset is **2.11%, ~830,000 ops/frame** -- measured at last. Rung 4 is real but small,
+  and cannot be the answer. (My two intermediate guesses, ~4.9M and ~14k, were both wrong; this is
+  the number from the matched pair.)
+* Collision (`sim.*`) totals roughly 18% -- again real, again not sufficient alone.
+* Per FINDINGS AC the only thing that moves `exact_xor` is FEWER CALLS, and per AZ padding is
+  bounded. So the remaining route is a broad reduction in hex operations across many macros, or a
+  fidelity decision -- not one more surgical strike.
+
+## BC — op attribution RANKS correctly but does NOT predict savings. W1 came in 7.9x short.
+
+W1 narrowed the two 8-nibble `hex.sparse_mov PAD, 8, x, x1` calls in `seg_pass1_leaf_body_lines`
+and `seg_pass2_leaf_body_lines` to `sparse_zero 8` + `sparse_mov 2`. Provably identical (x1 is a
+clipped column in [0,161], so `mov 8` already wrote zeros into x's top 6), and `m2_std_gate` PASS
+confirms it — every frame byte-exact.
+
+| | S2 | W1 | delta |
+|---|---:|---:|---:|
+| binding | 23,493,681 | 23,447,960 | **−45,721** |
+| mean | 21,466,274 | 21,397,319 | −68,955 |
+| p80 | 25,521,087 | 25,498,601 | −22,486 |
+| words | 51,095,972 | 51,094,744 | −1,228 |
+
+**Predicted ~362,000 ops/frame. Measured 45,721. 7.9x short.**
+
+The prediction came from the matched profile: the l2332 call is attributed 1,840,988 ops and the
+l2398 call 1,059,850, and the transform removes 4 of 16 nibble-ops (25%). Both inputs were right;
+the inference was not.
+
+### Why: attributed ops are not removable ops
+
+Ops attributed to a call site include machinery that survives the narrowing — the wflip chain
+whose cost is `popcount(target)` regardless of how many nibbles follow, the switch-table walk, and
+the pointer arithmetic. Removing 25% of a call's NIBBLE positions does not remove 25% of its ops.
+
+**Rule: use the profile to RANK targets, never to size them.** Size them by building.
+The campaign's estimate errors, in order: pad size +2M then +33M words (absorption), `distscale`
+~1.19M ops (attribution artifact), W1 ~362k ops (this). Three different mechanisms, one habit.
+
+### What this says about the 20M target
+
+The gap after W1 is **3,447,960 ops/frame**. At W1's measured rate that is **~75 more changes of
+the same kind**, each needing its own build, gate and measurement. The frame is flat (BB): no macro
+above 6.72%, one hot primitive reached from everywhere. Width narrowing is real and safe but it is
+a ~0.2%-per-change lever.
+
+20M is not reachable by this class of work. Reaching it needs either a structural change to how the
+renderer uses hex operations, or a fidelity decision (fewer columns, coarser spans) — which is the
+owner's call, not an optimisation.
+
+---
+
+## BD -- 62.78% of the program is two `wflip`s, and their cost is the table's ADDRESS
+
+BC concluded "20M is not reachable by this class of work... reaching it needs a structural change
+to how the renderer uses hex operations". This is that structural change, and unlike every previous
+estimate it is an EXACT per-op accounting checked against the shipped image, not an attribution.
+
+### The mechanism
+
+`hex.exact_xor` (stl `hex/logics.fj`) is reached ~660k times a frame. Its body is:
+
+    wflip src+w, switch, src              <- arm
+    pad 16 ; switch: <16 entries> ; end:  <- the walk, 1..4 ops
+    wflip src+w, switch                   <- disarm
+
+`assembler.py:insert_wflip_ops` emits ONE op per set bit of the flipped value: the first inline, the
+rest chained. Chains are SHARED between call sites with a common suffix -- which saves space and
+never saves ops. So each call costs `walk + 2 * popcount(switch)`, and `switch` is a ~2^30 bit
+address with ~9.3 bits set.
+
+**The dominant cost of the whole program is where the switch tables happened to land.**
+
+### Measured, not modelled
+
+`scratchpad/12m/xorcost.py` (selftest `xorcost_selftest.log`, report `xorcost_s2.log`) walks the
+real disarm chain in `build/doom_e1m1_s2.fjm`. Control C1 checks the claim op by op on the 40
+hottest sites: the chain is exactly `popcount(switch)` ops long and every op in it executes exactly
+`calls` times. 0 sites disagreed.
+
+    single-destination exact_xor sites : 374,655 static, 49,321 executed
+    calls in the walk                  : 2,007,547
+    mean popcount of an executed table : 9.32
+      today   (2 x popcount of the table address) :    37,410,178 =  47.55% of the walk
+
+Adding the 2-destination form (`double_exact_xor`, 8,913 live tables, 631,118 calls, 11,980,590
+arm+disarm ops) takes the family total to 49,390,768 ops = **62.78% of every op executed**. The
+walk itself -- the actual work -- is about 2.06 ops per call.
+
+### Why the pad rounds under-delivered
+
+The chain ops are emitted at the addresses immediately BELOW `switch`, inside the `pad 16` gap. At
+the hottest site the first disarm op is at `end` (439,279,616) and its 11 chained ops occupy
+439,277,888 .. 439,278,528, below the table at 439,278,592.
+The padding is not slack the assembler was wasting; it is already holding the chain.
+Widening a pad moves the table without removing the chain, which is why S2 bought 2.00% and S3 was
+negative.
+
+### Two designs priced
+
+**Placement** -- relocate tables to low-popcount addresses, hottest first. At zero size growth
+(slots inside the current span), over the single-destination sites only:
+
+      top 4,096   tables -> 18,953,004 ops/frame
+      top 16,384  tables -> 17,028,157 ops/frame
+      top 49,321  tables -> 16,566,010 ops/frame
+
+Supply is the binder: of pad-16-aligned addresses below 2^32, only 1,794 have popcount <= 3 and
+9,109 have popcount <= 4.
+
+**Blocking** -- strictly better and needs no low-popcount addresses at all. Every site's `src+w`
+word was recovered from the binary and sites grouped by it (29,875 distinct words). If the tables
+sharing a word sat in ONE aligned block and the word were baked with the block base, the arm would
+flip only the INDEX within the block:
+
+      blocked (2 x popcount of the index)         :     6,183,516 =   7.86%
+      saved                                       :    31,226,662 =  39.69%
+      ops/frame if that saving lands: 22,988,275 -> 13,864,136
+      table region needed: 29,875 blocks, 518,514 slots, 16,592,448 words (12.36% of 2^27)
+
+That is single-destination sites ALONE. The 2-destination form carries a further 11,980,590 arm+
+disarm ops that the same treatment reaches.
+
+### The third writer is real, and it reshapes the plan
+
+Scanning the WHOLE image for ops that flip a bit of an exact_xor src word (an op at even word `k`
+flips the bit at `mem[k]`, so `mem[k] >> 5` is the word it writes):
+
+      16,608,704 static ops, 61,617,683 executions = 78.32% of the walk
+
+**78.32% of every op the program executes is a wflip into an exact_xor source word.** The priced
+arm+disarm accounts for 49,390,768; the remaining 12,226,915 are the `triple_`/`sparse_` forms and
+NON-exact_xor users of the same jump word -- `stl.comp_if1`, `hex.shifts.*`, `hex.tables.*`,
+`hex.add.*`. Those jump THROUGH the word, so a pinned block base would send them to a wrong target.
+
+That kills naive blocking. Restricted to words only the family touches, 25,594 of 29,875 words are
+clean (85.7%) but they carry just 283,720 of 2,007,547 calls (14.1%) -- the hot words are precisely
+the shared ones. Clean-only blocking saves 4,601,518 ops = 5.85%, i.e. 22,988,275 -> 21,643,754.
+
+Blocking survives only as a WHOLE-PROGRAM transform: bake the base into the word AND rewrite every
+`wflip W, V` in the program to `wflip W, V ^ BASE`. Correct (the family's V becomes a small index;
+everyone else's popcount is unchanged on average), but it is assembler-wide semantics, not layout.
+
+**PLACEMENT needs none of that.** It moves tables to low-popcount addresses and leaves the word
+resting at 0, so every other writer is untouched. It is the safe first rung, and the 78.32% figure
+says its reach is far wider than exact_xor: every hex table dispatch pays popcount(target).
+
+### What is NOT proven
+* **PINNING IS DEAD.** The stronger variant -- bake the table address into the word and drop both
+  wflips -- needs a word used by exactly ONE site. Measured: 6,196 of 374,655 sites (1.7%), 81,529
+  of 2,007,547 calls (4.1%), worth 1.98% of the walk. Killed. 64.1% of calls run through words
+  shared by 8 or more sites, which is precisely why BLOCKS work and pinning does not.
+* **The enabling mechanism does not exist yet.** fj rejects `segment` inside a macro
+  ("segment can't be declared inside a macro"), and the hot owners are hand-written fj
+  (`frame_render.fj`, `projection.fj`), so Python cannot emit per-table global labels for them.
+  A hoisted, `segment`-placed table DOES assemble and produce identical output at top level -- the
+  proof-of-concept ran at three addresses with identical output and cost tracking popcount at
+  exactly 2.0 ops/bit -- but per-site placement needs an allocator inside the assembler.
+* It is still an estimate until a build measures it. See BC.
+
+### Where the hot tables are
+
+Seven doom macros own 100% of the top 4,096 tables (52.9% of calls); eleven own the top 16,384
+(86.4%). `frame.seg_pass1_leaf_body_lines`, `frame.seg_pass2_leaf_body_lines`,
+`frame.seg_pass1_leaf_body_ts`, `proj.point_on_side_leaf`, `frame.thing_record_body`,
+`sim.thing_pass`, `sim.check_position`, `sim.try_move`, `sim.bind_things`, `proj.wedge_bbox`.
+The frame is flat in MACROS (BB) and concentrated in TABLES; those are not the same statement.
+
+---
+
+## BE -- placement WORKS and is nearly WORTHLESS on the binding metric: -0.21%
+
+BD priced placement at 16,566,010 ops/frame. Built, gated and measured, it delivers **-48,048**.
+
+### What was built
+
+`flipjump-151` branch `table-placement` (20e4a8c, 2f8b981): an opt-in `TablePool` in the assembler
+that relocates lookup tables to low-popcount addresses. Inert when off (byte-identical sha256),
+460 flipjump unit tests pass, and `scratchpad/12m/tablepool_gate.py` PASSES on 4 programs x 4
+run_ops with an R9 negative control that forces its fall-through guard open and shows a program
+break.
+
+On the VISUAL tier it does what BD said it would -- `deg_gate`, 4/4 byte-exact, 8,192 tables:
+
+      TOTAL  115,231,180 -> 108,506,607   -5.84%
+
+### On the GAME tier it does almost nothing
+
+Same source, same harness (`gamespeed.py` unchanged since the z3 commit), same seeds, so the op
+counts are exactly comparable. 16,384 tables relocated, both assemblies identical, self-reset
+verified (`labels_moved_in_set: 0`, `values_changed_in_set: 0`).
+
+      run 0   27,110,806 -> 26,304,020   -2.98%
+      run 5   24,935,526 -> 25,212,338   +1.11%   <-- WORSE
+      run 7   14,945,357 -> 14,186,580   -5.08%
+      run 9   15,707,064 -> 14,869,008   -5.34%
+      mean run-average       21,041,023 -> 20,668,114   -1.77%
+      80th-pct run           24,935,526 -> 25,212,338   +1.11%
+      BINDING (mean+p80)/2   22,988,274 -> 22,940,226   -0.21%
+
+Nine runs improved. ONE regressed -- and it is the p80 run, so the binding metric barely moves.
+SIZE improved slightly: 50,949,650 words (37.96%) vs 51,095,972 (38.07%), because hoisting a table
+reclaims its `pad 16`. Span grew to 71,172,192 words (53.03%), still under the ceiling.
+
+### Why BD was 15x optimistic, and it was not the profile
+
+BC's rule was "attributed ops are not removable ops". This is a different error and worth naming
+separately: **a placement PROJECTION assumed a freedom the mechanism does not have.**
+
+* **The pool must be disjoint from the code.** BD assumed each table could take the k-th cheapest
+  pad-16-aligned address in the current span. A real pool sits above the program, so every
+  relocated table pays `popcount(pool_base)` -- +1 op on both wflips, on every call, forever.
+* **Span is not free.** An unbounded pool reached 96.88% of 2^27 on the first build. Bounding it to
+  2^27 bits costs ~0.6 mean popcount; that cost is not in BD's number.
+* **Coverage collides with cheapness.** Cheap addresses are a fixed supply: below 2^32 only 9,109
+  pad-16-aligned addresses have popcount <= 4. Relocating MORE tables means later ones land on
+  worse addresses, so coverage and per-table saving trade against each other. BD's curve implicitly
+  gave all 16,384 tables the best addresses at once.
+* **Selection was source-ordered, not heat-ordered.** `--owners` matches macro names because exact
+  label paths embed src/fj line numbers and go stale silently. Within the ten hot owners the first
+  16,384 tables emitted were relocated -- roughly a uniform sample of those leaves, not their
+  hottest sites.
+
+### PLACEMENT IS NON-MONOTONIC, exactly like the pads
+
+Run 5 got worse. Relocating a table removes it AND its `pad 16` from the inline stream, which
+shifts every later address -- so tables that happened to sit at low-popcount addresses can be
+pushed onto worse ones. S3 (FINDINGS, pad round) was the same shape. Any future placement work has
+to be judged on the binding metric, never on a mean or on one viewpoint.
+
+### What this says about 12M
+
+Scaling coverage does not rescue it. Holding span at 2^29 bits above a 2^31 pool base, ~50,000
+tables land at mean popcount ~7.1 against today's 9.32, worth ~4.4 ops on a covered call. That is
+arithmetic on measured inputs, NOT a measurement -- BD's projection was arithmetic too and missed
+by 15x -- but it points at roughly -12%, i.e. ~20.2M, not the 16,566,010 BD claimed.
+
+Placement is a real, gated, reusable mechanism that pays for itself in SIZE and costs nothing. It
+is not a route to 12M.
+
+---
+
+## BF -- blocking's MECHANISM is validated: 13.13 -> 8.16 ops per xor
+
+BE showed BD's placement projection missed by 15x because it assumed a freedom the mechanism did
+not have. So blocking was validated against the interpreter BEFORE building it, which is what
+should have happened to placement. `scratchpad/12m/blockbench.py` (`--selftest` C1-C3).
+
+### It works
+
+A hex variable is a single op `;val*dw`, so its jump word already holds the VALUE, and
+`wflip src+w, switch` makes it `switch + digit`. Blocking bakes a BASE into the variable instead --
+`;(BASE + val*dw)` -- and puts every table that variable dispatches to in one aligned block at
+BASE, so the arm only flips the INDEX:
+
+      K      stock                    blocked (block=2^n)
+      1      41       looping         21       looping
+      4      76       looping         38       looping
+      16     240      looping         130      looping
+      32     448      looping         274      looping
+
+      MARGINAL ops per xor (K=1 -> K=32):
+        stock   : 13.13 ops/xor
+        blocked : 8.16 ops/xor  (-37.8%)
+
+Measured as a SLOPE, not a total, because the two programs differ in setup: stock must `hex.set`
+the source, blocking bakes it. C1 checks the blocked program REACHES `stl.loop` and computes
+0x3 ^ 0x5 = 6 -- a program that dies early has a lower op count, so op count alone reads as a win.
+
+### Two alignment rules, both learned by breaking them
+
+* **The BLOCK, not the table, sets the alignment.** `pad 16` aligns to ONE table and leaves the
+  index bits (10..13) free to be already set in BASE -- and then the XOR SUBTRACTS. Measured:
+  BASE=556,032 has bit 10 set, so arming index 1 jumped to 555,328 instead of 557,376.
+* **The block size must be a power of two**, for the same reason. C3 is the negative control: a
+  9-table block breaks (`ip<2w`) and the 16-table block for the same K works.
+
+### What it would still cost to ship
+
+Not built. Beyond the pool machinery placement already has, it needs:
+* the block base baked into every hex variable's declaration -- an emitter change;
+* EVERY other `wflip` targeting a pinned word rewritten to `V ^ BASE`. That is one place
+  (`insert_wflip_ops`), which is what makes it tractable -- `stl.comp_if1`, `hex.shifts.*` and
+  `hex.tables.*` are handled by construction rather than by audit;
+* power-of-two block padding. From BD's grouping, 518,514 slots x 16 ops = 16,592,448 words
+  (12.36% of 2^27) ON TOP of the program, against a 35% size target already at 37.96%.
+
+### Do NOT extrapolate this to a frame number
+
+In this toy the stock table addresses are ~popcount 8; in the shipped game they are 9.32, so
+stock's real per-call cost is higher and blocking's margin there is larger. That is exactly the
+reasoning that produced BD's 15x miss. -37.8% is what was MEASURED, on a toy, at the mechanism
+level, and nothing here says what a real build would do.
+
+---
+
+## BG -- blocking is BUILT and GATED, and does not yet work on the game
+
+BF measured blocking's mechanism at 13.13 -> 8.16 ops per xor. It is now implemented in the
+assembler (`flipjump-151` branch `table-placement`, `BlockPool`), gated with eight controls, and
+**correct on every toy program and broken on the shipped game**. The binding metric is unchanged:
+22,940,226 ops/frame.
+
+### What works
+
+    program / blocking                   output     ops       groups  verdict
+    hex.xor                              b'0x1234'  963       8       SAME  -42.85% ops
+    hex.add/sub                          b'0x8F4D'  4440      9       SAME  -20.60% ops
+    hex.cmp/shift/mul                    b'0x3D'    2129      32      SAME  -26.51% ops
+    bit.exact_xor (fall-through table)   unchanged  618       0       SAME  +0.00% ops
+
+The game tier BUILDS cleanly: 416,902 of 425,185 tables blocked across all 32,064 groups, both
+assemblies identical, self-reset verified (`labels_moved_in_set: 0`, `values_changed_in_set: 0`),
+size 36.73% of 2^27 (better than the baseline's 38.10%), span 62.51%.
+
+And then it presents **0 frames in 124 ops**.
+
+### Five game builds, four causes, none predicted
+
+Every one was caught by a gate, and none by the toy gate:
+
+1. **Non-deterministic allocation.** A stateful pool shared across the game tier's two assemblies
+   made pass 2 relocate nothing. Caught by the M1 reset check: "434 baked addresses moved between
+   passes". Fixed by freezing counts and preallocating bases.
+2. **Alignment waste.** Blocks are power-of-two sized and self-aligned, so encounter-order
+   allocation wasted up to a full block each -- 257,003 of 425,185 tables declined. Fixed by
+   allocating biggest-first.
+3. **One wide table sets its group's slot width.** A 514-op table in a 32,768-slot group wants
+   2.1e9 bits -- the whole pool. Biggest-first made it worse: 9 groups of 32,064 got blocks. Fixed
+   by capping slot width; wider tables stay inline.
+4. **Pinning never engaged.** `begin_relocation` was handed the raw `src + w` from the macro BODY,
+   where `src` is an unbound parameter -- the same object at every call site. All groups stored one
+   expression, which deduped to a single bogus pin. **Every "blocking" number before this was
+   measuring relocation.** With pinning live, hex.xor went -19.47% -> -42.85%.
+5. **The rewrite rule was too broad.** `flip_value ^= base` assumed every wflip on a pinned word
+   installs a jump target, but `hex.set`/`xor_by` wflip the same word to toggle VALUE bits, and
+   XORing base into that destroys the base. Separable by magnitude; gate C7 is the control.
+
+### What is still wrong, and what was ruled out
+
+The game dies at `ip 64 -> POOL -> ip 64`, then a runtime-memory-error at a pool address. TWO
+diagnoses of that were WRONG and are recorded so they are not repeated:
+
+* **NOT declined tables in pinned groups.** A consistent base CANCELS --
+  `(B + digit) ^ (switch ^ B)` is `switch + digit` wherever the table sits. The selftest carried a
+  control asserting otherwise until it failed.
+* **NOT `stl.IO`.** It is at bit address 64 and `bit.output` dispatches through it, so `ip 64 ->
+  POOL` looked damning -- but the toy gate uses `hex.print`, dispatches through the same word, and
+  PASSES. Excluding it from pinning changed nothing, and the relocation guard reported
+  `runtime-reserved words skipped: 0`, so it never applied.
+
+`pin conflicts: 3,801` on the game tier is real, though -- aliased source-word expressions do
+occur, and that guard is load-bearing.
+
+### THE BISECT: it is RELOCATION, not pinning
+
+`deg_gate` under blocking reproduces the failure on the VISUAL tier -- so it is not the menu, the
+keyboard, the simulation or the M1 self-reset:
+
+    (664,291,0x18000000): 132 ops  !! 15975 px DIFFER      <- baseline is ~33M ops, BYTE-EXACT
+    (1272,-724,0x40000000): 132 ops  !! 16000 px DIFFER
+    FAIL
+
+`--no-pin` then splits blocking's two halves -- MOVING tables into per-source-word blocks, and
+PINNING the words so the arm flips an index:
+
+    pinning ON  : 132 ops, 15975 px differ   FAIL
+    pinning OFF : 154 ops, 15975 px differ   FAIL       <- IDENTICAL pixel diffs
+
+**The fault is in RELOCATION.** That inverts the assumption this whole rung rested on: pinning was
+the new, unproven half, and placement (BE) already relocates tables through this same gate and
+passes 4/4 byte-exact. So `BlockPool`'s relocation differs from `TablePool`'s in some way that
+matters, and the difference is the layout: TablePool packs tables into contiguous runs at
+increasing addresses, while BlockPool scatters them to `base + index * slot_bits` per group, so a
+group's slots are sparse and interleaved with other groups' in emission order.
+
+Two facts worth carrying into the next attempt:
+* an EARLIER blocked game build with 86,946 tables in 9 groups DID run (7 frames presented), and
+  the current one with 87,458 tables in 8,534 groups does not -- so it is not raw segment count;
+* `--no-pin` costs 154 ops against pinned-on's 132, i.e. both die in the same place and pinning
+  only changes how far the corpse gets.
+
+### What the search has ruled out
+
+Restricting blocking to the SAME six macros the passing placement run used still fails -- the
+program gets much further (132 ops -> 259,625 / 237,379 / 323,613 / 488,448) but the pixel diffs are
+byte-identical (15975 / 16000 / 15864 / 14893 of 16,000). Essentially every pixel, i.e. nothing
+renders, in all three configurations. So it is systemic to BlockPool's relocation, not one bad
+macro, and not the tables outside those six.
+
+Attempts to reproduce it in a toy, all of which PASS and several of which win big:
+
+    nvars=24 nxor=4  96 groups, 480 tables   stock 7,445 ops -> blocked 2,813   SAME  (-62%)
+    stl.fcall shared leaf                    stock   230 ops -> blocked   288   SAME
+    hex.xor / hex.add / hex.cmp+shift+mul    SAME at every setting (gate, 8 controls)
+
+So it is not: group count, tables per group, sharing degree, `stl.fcall`, or IO dispatch through
+`stl.IO`. A pointer toy was written to test `hex.pointers.*` and is INVALID -- it fails stock -- so
+the pointer machinery remains untested and is the leading suspect, since the renderer uses it and
+none of the passing toys do.
+
+### ROOT CAUSE: the table-detection heuristic is UNSOUND
+
+A bisect over which tables get relocated -- on the seconds-long `hex.write_byte` reproduction, not
+the 25-minute gate -- names the culprit exactly:
+
+    smallest failing prefix: 57 tables
+    CULPRIT macro: hex.pointers.xor_hex_to_flip_ptr(2)
+    CULPRIT path : f2:l6:hex.write_byte(2)---...---hex.pointers.xor_hex_to_flip_ptr(2)
+
+Its body (stl `hex/pointers/xor_to_pointer.fj`) is:
+
+        pad 4
+      after_flip_bit0:  hex.pointers.to_flip+dbit+0 ; prepare_flip_bit1     <- FlipJump
+      after_flip_bit1:  hex.pointers.to_flip+dbit+1 ; prepare_flip_bit3     <- FlipJump
+      after_flip_bit2:  wflip hex.pointers.to_flip, dbit+2+bit_shift, ...   <- WordFlip
+      after_flip_bit3:  ...
+
+The four entries are SELECTED BY FLIPPING ADDRESS BITS (`to_flip+dbit+0`, `+dbit+1`), so they must
+stay contiguous and 4-aligned -- exactly like `hex.cmp`'s table. But entry 2 begins with a `wflip`,
+and `relocatable_table_end` ends the table at the first non-FlipJump. So entries 0-1 relocate and
+entries 2-3 stay inline, and the address-bit flip lands on nothing.
+
+**This is not a patchable bug. "A maximal run of `a;b` ops after a `pad`" is not a sound
+characterisation of a relocatable table.** A `pad`-aligned block selected by address-bit flips must
+move as a unit, its entries may be ANY op, and nothing local marks where it ends. The macro author
+knows; the assembler cannot infer it.
+
+The sound design is for the stl macro to DECLARE its relocatable table -- a directive -- rather
+than the assembler guessing. Both passes need that before either is safe in general.
+
+### ⚠ THIS ALSO QUALIFIES THE SHIPPED PLACEMENT RESULT
+
+`TablePool` uses the SAME heuristic. Every placement run that passed a gate was `--owners`-restricted
+to six renderer macros and never relocated a `hex.pointers.*` table. BE's -0.21% is therefore safe
+BECAUSE OF THE RESTRICTION, not because the detection is sound. An unrestricted placement build has
+never been gated, and on this evidence it should be expected to fail the same way.
+
+### The actual lesson
+
+**The toy gate is not a proxy for the game.** Four programs with eight controls pass while the real
+program fails, and every cause so far lived in something the toys do not contain. The next
+diagnostic should be a DIFFERENTIAL trace against the unblocked binary, or a bisect over which
+groups get pinned -- not another guess. A cheaper loop would help more than either: the render tier
+builds in ~850s against the game tier's ~1,780s and lacks sim and collision, which narrows the
+search while halving the cycle.
+
+---
+
+## BH -- 14,042,442 is WITHDRAWN: the blocked game binary fails the standalone gate
+
+With relocation restricted to the verified-safe `exact_xor` family, blocking passed the deg gate
+4/4 BYTE-EXACT at -18.56% and the game tier then measured:
+
+      SPEED  BINDING (mean+p80)/2: 14,042,442 ops/frame   (target <= 20,000,000)  PASS
+      SIZE   words              : 45,610,646 = 33.98% of 2^27   (target <= 35%)  PASS
+
+Both M6 targets, for the first time, every run improved 27.72%-50.14%, no regression. **And the
+number is void.** `scratchpad/m2_std_gate.py` on the same binary:
+
+      frame  keys      door48    fj px vs oracle
+      2  ft             0   BYTE-EXACT
+      3  ft             0   !! 7831 px differ
+      M2 STANDALONE GATE: FAIL
+
+The baseline passes that gate on the same day, so this is not a broken gate:
+
+      44  -              7   BYTE-EXACT
+      M2 STANDALONE GATE: PASS -- the shipped binary opens a door and KEEPS it open across the M1 reset
+
+**BLOCKING BREAKS THE SIMULATION.** The trajectories part at frame 3, so all ten speed runs walked a
+different -- and cheaper -- path than the baseline. A program that computes the wrong thing is
+trivially faster, which is exactly why the speed harness is not evidence of anything on its own.
+
+### Why the deg gate did not catch it
+
+`deg_gate` renders four STATIC viewpoints. It proves the renderer byte-exact and says nothing about
+the simulation: no movement, no collision, no door state, no M1 reset. The standalone gate drives
+the shipped binary with scripted keypresses and compares every frame, which is the only gate that
+covers the sim -- and it is the one that failed.
+
+This is the campaign's own rule (CLAUDE.md 3) reasserting itself: a cheap pre-gate saves time, it
+never replaces the gate. The deg gate was treated as sufficient because it is byte-exact, and
+byte-exact on the wrong program is still the wrong program.
+
+### What is actually established
+
+* Blocking's mechanism is real: 13.13 -> 8.16 ops/xor (BF), -18.56% byte-exact on the RENDERER.
+* Relocation must be DECLARED, not inferred (BG root cause), and the `exact_xor` family is safe for
+  the renderer.
+* Something in blocking breaks the simulation, and it is NOT the renderer. Unfinished.
+* SIZE 45,610,646 words = 33.98% is measured on the same broken binary and is equally provisional.
+
+### THE SPLIT: relocation is correct on the game, PINNING breaks the simulation
+
+The same `--no-pin` bisect that cracked the renderer, run against the gate that actually failed.
+A relocation-only game build (416,797 tables in 32,061 groups, self-reset verified):
+
+      44  -              7   BYTE-EXACT
+      CONTROL 1: door 48 reached 9 distinct states [0..8] -- carried across the reset
+      CONTROL 2: use was pressed INSIDE the box: yes
+      CONTROL 4: the player's path crosses door 48's own line SEGMENT: yes
+      M2 STANDALONE GATE: PASS -- the shipped binary opens a door and KEEPS it open across the M1 reset
+
+So RELOCATION into per-source-word blocks is correct on the shipped game -- gated on both tiers now,
+deg byte-exact and the standalone play-test with all four controls. PINNING is the broken half, and
+it is the half carrying the big win (`2 * popcount(index)` instead of the full address).
+
+That narrows the remaining bug a great deal. Pinning changes what a hex variable's jump word RESTS
+at, and the M1 self-reset rewrites 5,103 nibble cells and 1,002 byte cells of exactly those words
+every frame -- which fits the symptom precisely: frame 2 byte-exact, frame 3 wrong, the reset runs
+between them. Not yet proven, and the next probe should test that directly rather than assume it.
+
+The binding metric remains **22,940,226 ops/frame**.
+
+---
+
+## BI -- blocking, GATED and honest: SIZE passes for the first time, speed -4.46%
+
+The reset interaction (BH) is fixed: `resolve_pinned` takes a caller veto and the driver excludes
+the 12,400 M5 restore-set words, because `emit_reset_part` reads a pinned word's `base + value` as
+a packed LUT (`word >> VAL_SHIFT > 15`) and drops it from the restore set.
+
+The shipped binary now passes the STANDALONE gate WITH pinning -- 44 frames byte-exact, all four
+controls, door opening and surviving the M1 reset -- and only then was it measured:
+
+      run      z3 baseline        blocked          delta      pct
+      0         27,110,806     25,536,161     -1,574,645   -5.81%
+      4         14,795,842     13,902,091       -893,751   -6.04%
+      5         24,935,526     23,989,789       -945,737   -3.79%
+      mean run-average           21,041,023     19,937,715     -1,103,308   -5.24%
+      80th-pct run               24,935,526     23,989,789       -945,737   -3.79%
+      BINDING (mean+p80)/2       22,988,274     21,963,752     -1,024,522   -4.46%
+
+      SIZE   words : 46,566,558 = 34.69% of 2^27   (target <= 35%)  PASS
+      SPEED  21,963,752                            (target <= 20,000,000)  OVER by 1,963,752
+
+**SIZE PASSES FOR THE FIRST TIME**, on a gate-passing binary: 38.10% -> 34.69%. Hoisting every
+table reclaims its `pad` alignment from the inline stream. Every speed run improved, none regressed
+-- unlike placement (BE), where one regression landed on the p80 and ate the whole gain.
+
+### The gap between this and the withdrawn number is the lesson
+
+BH's 14,042,442 came from a binary that diverged at frame 3, so its ten runs walked a cheaper path.
+This binary walks the BASELINE's path -- that is what 44 byte-exact frames means -- and measures
+21,963,752. **7.9M of the withdrawn "win" was the program computing the wrong thing.**
+
+### Why the real win is only -4.46%
+
+Blocking's mechanism is worth -18.56% on the RENDERER (deg gate, byte-exact) and 13.13 -> 8.16
+ops/xor in isolation. On the shipped game it delivers a quarter of that, and the arithmetic says
+where the rest went:
+
+* 12,400 restore-set words CANNOT be pinned -- they are the M1 reset's, and they are state cells,
+  i.e. exactly the hot ones the simulation touches every frame;
+* 3,244 more words are un-pinned as aliased (two expressions, one address, two bases);
+* 17,380 tables declined, 425,066 counted.
+
+Relocation without pinning is a REGRESSION -- 24,783,491, +8.0% -- so none of the value is in the
+layout; it is all in the pin, and the pin is exactly what the reset forbids on the hot cells.
+
+The binding metric is **21,963,752 ops/frame**. The owner's 12M target is over by 9,963,752.
+
+---
+
+## BJ -- pinning the nibble state cells FAILS: the nibble/byte split is not the line
+
+BI left 12,400 restore-set words unpinned and noted they are "the state cells the simulation
+touches every frame" -- the largest identified share of the missing win. The obvious refinement:
+
+* BYTE cells cannot be pinned. `m1.zerobyte c` does `c+dbit+8; c` -- it JUMPS THROUGH the cell into
+  the pointer read table, so the word is a dispatch target the machinery computes itself.
+* NIBBLE cells looked safe. They are restored by `hex.set 1, addr, v` / `hex.zero n, addr`, which
+  dispatch through the cell and only flip VALUE bits, so a base survives. What broke them was
+  `emit_reset_part` READING the pristine word: `word >> VAL_SHIFT > 15` reads `base + value` as a
+  packed LUT and drops the cell (BH). Stripping the base before that read fixes the read.
+
+Built: 2,004 byte-cell words excluded instead of 12,400, base stripped from 26,305 pinned words.
+Reset verified -- `labels_moved_in_set: 0`, `values_changed_in_set: 0`. Then:
+
+      IODeviceException: collines run ends at row 37, behind the fill cursor at 50
+                         (the cursor only moves forward)
+
+**Zero byte-exact frames** -- it dies on the FIRST frame, with a screen-protocol violation rather
+than a pixel divergence. So a pinned nibble state cell is unsound for a reason that is not the
+LUT-test misread, and the nibble/byte distinction is not where the line falls.
+
+Reverted. The whole restore set stays unpinned, which is the configuration that PASSES the
+standalone gate at 21,963,752 ops/frame and 34.69% size (BI).
+
+### CORRECTION: it fails at frame 38 of 45, not frame 1 -- and it is 10.7% cheaper
+
+"Zero byte-exact frames" was misread. `run_fj` runs EVERY frame before comparing any, so the
+exception aborted the run before a single comparison printed. Replaying the gate's own captured
+route frame by frame:
+
+      doom_e1m1_blocked2.fjm   OK  frames=45/45 ops=1,451,444,192
+      doom_e1m1_blocked3.fjm   RAISED at frame 38/45: collines run ends at row 37, behind the
+                               fill cursor at 50
+
+Frame 38 sits in the "through" phase -- 2 menu, enter, 24 walk, 2 use, 8 open, 3 THROUGH, 6 idle --
+i.e. walking through the doorway after the door has opened. So the binary renders 37 frames
+correctly, survives 37 M1 resets, and then breaks.
+
+And on a plain walk it is materially faster than the gate-passing build:
+
+      8 frames, gamespeed script:  blocked2 201,435,692 ops   blocked3 179,919,493 ops   -10.7%
+
+**So pinning the reset's state cells is worth roughly double what BI shipped, and the defect is
+narrow rather than fundamental.** It is not "a pinned nibble cell is unsound"; something specific
+about the door/collision state after many resets is. That is a much better lead than BJ first
+recorded, and it is cheap to chase now that the failing frame is known and reproducible in minutes.
+
+### Also: a self-inflicted 90-minute stall, worth recording
+
+The first attempt at this build ran 5,408s of CPU against the usual ~1,800s and was killed. Not
+slow -- QUADRATIC: the reset wrapper rebuilt the resolved label dict inside the per-group loop,
+32,061 groups x ~24M labels. It was caught by treating an unusual runtime as suspicious and
+comparing elapsed CPU against previous builds, rather than assuming a big change is just slower.
+
+---
+
+## BK -- re-profiled: blocking reached 7.58% of the cost it targets, and the hot words are the reset's
+
+Every decision from BD onward rested on a cost model measured on the PRE-BLOCKING binary. This
+re-measures it on both, with `scratchpad/12m/jumpwordcost.py` (selftest C1-C3, conservation clean
+on both runs).
+
+      classifier: an fj op is [flip][jump]; a hex variable is ONE op, so its jump word is the
+      second. A flip landing at `address mod 2w >= w` writes a jump word.
+
+                           baseline (z3)     blocked (gate-passing)
+      ops (4 frames)        77,410,023          72,628,968     -6.18%
+      jump-word writes      68,746,608          63,535,573     -7.58%
+      share of frame            88.81%              87.48%
+
+**Blocking pinned 32,061 groups and 416,797 tables and moved the cost by 7.58%.** The share of the
+frame is essentially unchanged, which is the same story the binding metric told (-4.46%) arriving
+by an independent route.
+
+### Read the classifier honestly
+
+88.81% is HIGHER than BD's 78.32% because this classifier is broader on purpose: a hex's value
+nibble also lives in the jump word, so a table ENTRY flipping `dst+dbit+k` is counted too. That is
+the actual xor work and is not removable. The two numbers bracket the arming cost between roughly
+78% and 89%; neither is a measurement of arming alone.
+
+The signal that does NOT depend on classification is the total: **6.18% fewer ops**. If blocking
+were reaching the bulk of a 62.78% arm/disarm cost, the total would have fallen far more.
+
+### Why -- and it is the same wall BI named
+
+The words blocking cannot pin are the ones that matter:
+
+* 12,400 restore-set words -- the M1 reset's, i.e. the STATE cells the simulation touches every
+  frame, which is precisely why they carry the calls;
+* 3,801 un-pinned as aliased (two expressions, one address, two bases);
+* 16,142 tables declined.
+
+BJ tried to pin the nibble half of the reset's cells and the binary died on the FIRST frame with a
+screen-protocol violation, for a reason that is still not understood. So the campaign's position is
+now measured from two directions and they agree: blocking works, and the hottest words are exactly
+the ones it is not allowed to touch.
+
+### Where that leaves 12M
+
+Binding metric **21,963,752**, size **34.69% PASS**. The target is over by 9,963,752, and no
+identified lever is sized for that gap:
+
+* recovering the 3,801 aliased pins and the 16,142 declines is worth a fraction of the 7.58%
+  already achieved -- real, but small;
+* pinning the reset's cells is the big one and is BLOCKED on an unexplained failure (BJ);
+* the only untried idea of the right magnitude is SHARING tables across call sites via a return
+  trampoline, which would collapse 425,066 tables toward the number of distinct destinations. It is
+  a larger change than anything attempted here and its cost -- an extra indirect jump per call --
+  could eat the gain. Unmeasured.
+
+---
+
+## BL -- M6 MET: 19,419,073 ops/frame and 34.11%, both targets, on a gate-passing binary
+
+BJ's frame-38 failure was mine, not the design's. `_emit_reset_part` stripped block bases using
+`pool.pinned_words()` -- the pool's RAW set -- while the assembler bakes from the FILTERED map
+`resolve_pinned` returns after dropping aliased words and the caller's exclusions. Every word in
+the raw set that was never actually pinned got a base XORed in that is not there, the value looked
+enormous, `emit_reset_part` read it as a packed LUT, and the cell SILENTLY VANISHED from the
+restore set. 37 frames of accumulating drift, then a screen-protocol violation.
+
+Two checks confirmed the fix BEFORE the gate ran:
+
+      reset part      blocked2 (passes)  set=535 zero=273 lines=823
+                      blocked3 (broken)  set=529 zero=324 lines=868
+                      blocked4 (fixed)   set=535 zero=273 lines=823   -- diff vs blocked2 EMPTY
+      stripping       26,305 -> 22,503 words, a difference of 3,802 against 3,801 aliased conflicts
+
+`M2 STANDALONE GATE: PASS` -- 44 frames byte-exact, door across the reset, all four controls.
+
+      run      z3 baseline       blocked4          delta      pct
+      0         27,110,806     22,921,988     -4,188,818  -15.45%
+      4         14,795,842     12,458,314     -2,337,528  -15.80%
+      7         14,945,357     12,891,547     -2,053,810  -13.74%
+      mean run-average           21,041,023     17,807,767     -3,233,256  -15.37%
+      80th-pct run               24,935,526     21,030,378     -3,905,148  -15.66%
+      BINDING (mean+p80)/2       22,988,274     19,419,072     -3,569,202  -15.53%
+
+      SPEED  19,419,073  (target <= 20,000,000)  PASS
+      SIZE   45,778,512 = 34.11% of 2^27  (target <= 35%)  PASS
+
+**Every run improved, none regressed, and both M6 targets are met for the first time on a binary
+that passes its gate.** The campaign's headline baseline was 24,723,058; this is 19,419,073.
+
+### What it took, and what it cost to learn
+
+The mechanism was right from BF (13.13 -> 8.16 ops/xor). Everything between was defects in MY
+implementation, each found by a gate and none predicted:
+
+  1. a stateful pool shared across the game tier's two assemblies
+  2. alignment waste declining 257,003 tables
+  3. one wide table setting its group's slot width (9 groups of 32,064 got blocks)
+  4. the group expression never substituted -- pinning silently inert, so every "blocking" number
+     before it was measuring relocation
+  5. a rewrite rule that also clobbered value-bit wflips
+  6. relocation inferred rather than declared (hex.pointers.xor_hex_to_flip_ptr)
+  7. the reset's LUT test misreading a pinned word
+  8. base-stripping from the raw pin set instead of the assembler's filtered one
+
+Two of my diagnoses along the way were wrong and retracted (declined-tables-in-pinned-groups;
+stl.IO), and one measured number was WITHDRAWN because the binary was computing the wrong thing.
+
+### The 12M goal
+
+**Over by 7,419,072.** M6's targets are met; the owner's 12M is not, and nothing measured here is
+sized for that gap. The remaining candidates, in order of evidence:
+
+* the 3,801 aliased pins -- canonicalise the group key by resolved address in the counting pass;
+* the 17,380 declined tables;
+* reducing the ~660k exact_xor CALLS per frame, which is an algorithmic change to the renderer.
+
+---
+
+## BM -- alias merging: 19,419,072 -> 16,598,831, and pin conflicts go to ZERO
+
+BK measured that "everything else" is FLAT at ~9.3M ops per 4 frames across every build -- the
+irreducible non-address work, ~2.3M ops/frame -- while jump-word writes were still 85.77% of the
+M6 binary. So coverage was the lever, not call count. The cheapest gap was the aliased pins.
+
+Groups are keyed by the source word's EXPRESSION, because its address is unknown while macros
+expand. `(x + 32)` and `(x + w)` at w=32 name ONE word, got separate blocks with separate bases,
+and `resolve_pinned` had to UN-PIN BOTH. The counting pass already runs a full assembly, so its
+expressions CAN be resolved: hook `labels_resolve` to capture that assembly's labels, group by
+resolved address, and merge.
+
+      alias: 5,029 groups merged into 27,032 (was 32,061)
+      pin conflicts (aliased source-word expressions, un-pinned): 3,801 -> 0
+      reset: stripping the block base from 25,701 pinned words (was 22,503)
+
+`M2 STANDALONE GATE: PASS` -- 44 frames byte-exact, door across the reset, all four controls.
+
+                                  baseline      blocked4      blocked5   vs base
+      mean run-average          21,041,023    17,807,767    15,301,774   -27.28%
+      80th-pct run              24,935,526    21,030,378    17,895,887   -28.23%
+      BINDING (mean+p80)/2      22,988,274    19,419,072    16,598,830   -27.79%
+      SIZE                          38.10%        34.11%        33.18%
+
+Every run improved against both predecessors. **-14.5% from the M6 build for one merge pass**, and
+both targets now pass with margin.
+
+### The campaign in one table
+
+      24,723,058   campaign baseline (docs/handoff-fullgame-metrics.md)
+      22,988,274   z3, this session's start
+      21,963,752   blocking, restore set unpinned          (BI)
+      19,419,072   + reset state cells pinned              (BL)  M6 MET
+      16,598,830   + aliased groups merged                 (BM)
+
+### 12M: over by 4,598,830
+
+Down from 9,963,752 two builds ago. What is left, by evidence:
+
+* **17,444 declined tables** -- the last coverage gap. Untouched, and the same class of fix.
+* **2,004 byte-cell words** that structurally cannot be pinned (`m1.zerobyte` jumps through them).
+* the ~2.3M ops/frame floor of non-address work, which coverage cannot touch at all.
+
+A re-profile of THIS binary should come before the next change: the jump-word share was 85.77% on
+blocked4 and the whole point of BK was that a stale cost model misdirects the next lever.
+
+---
+
+## BN -- the remaining cost is INDEX WIDTH on the biggest groups, not declines
+
+Re-profiled the 16,598,831 binary and instrumented why tables are declined.
+
+                        ops (4 frames)   jump-word    share    "everything else"
+      baseline           77,410,023      68,746,608   88.81%      8,663,416
+      blocked2           72,628,968      63,535,573   87.48%      9,093,396
+      blocked4           65,026,748      55,770,569   85.77%      9,256,180
+      blocked5           55,699,746      46,319,589   83.16%      9,380,158
+
+      declines by reason: no-block 5,103, too-wide 10,052, overflow 2,289   (17,444 of 425,066)
+
+"Everything else" has not moved in four builds -- ~9.4M per 4 frames, i.e. ~2.3M ops/frame of
+irreducible non-address work. Total fell 28.0%, jump-word writes 32.6%, and **46.3M of
+address-writing remains**, of which only ~5.4M is table-walk work. So ~40.9M is still ARMING:
+10.2M/frame over ~660k calls is **~15.5 ops per call**, i.e. a mean index popcount near 7.75.
+
+### Why arming is still expensive: the index is as wide as the group
+
+Blocking replaces `2 * popcount(full address)` with `2 * popcount(index in block)`. For a 16-table
+group that is ~2 ops against ~18.6 -- enormous. But BD measured one source word with **19,015
+tables**, and words shared by 8+ sites carry **64.1% of all calls**. A 19,015-table group needs a
+15-bit index, mean popcount ~7.5, so its arm costs ~15 ops against the 18.6 it replaced.
+
+**Blocking barely touches exactly the words that carry most of the traffic.** The declines are a
+4% side-issue by comparison.
+
+### What that implies, and a correction to an earlier idea
+
+Reaching 12M needs ~4.6M ops/frame, which at ~660k calls is ~7 ops per call -- mean index popcount
+from ~7.75 down to ~4.25. Two ways to get there:
+
+* **SPARSE INDICES.** Allocate a block of `spread * k` slots and hand out only the `k`
+  lowest-popcount indices. Unused slots emit NO data -- they cost SPAN, not DATA -- and span is at
+  62.40% against a ceiling of 100%, so ~2x is affordable where 4x is not. Estimated value at 2x:
+  mean popcount 7.5 -> ~6.6 on the big groups, roughly 760k ops/frame. Real but not sufficient.
+* **TABLE SHARING via a return trampoline.** Earlier (BK) this was dismissed as "worth a couple of
+  ops per call, not millions", on the grounds that it only shrinks block size. That reasoning was
+  incomplete. A group is huge because ONE variable dispatches thousands of tables that differ only
+  in their RETURN address; sharing collapses them, which shrinks the index WIDTH on precisely the
+  hottest words. It is not a space optimisation -- it is the only identified way to cut the index
+  popcount on the 64% of calls that dominate.
+
+The cheap decline fixes (raise `max_slot_ops` for the 10,052 too-wide; raise the pool span for the
+5,103 no-block) are worth doing and are worth ~4% of tables, not 4.6M ops.
+
+---
+
+## BO -- sparse indices: -2.14%, and the two bugs they exposed
+
+BN said the arm costs `2 * popcount(index)` and the index is as wide as the group, so big groups --
+which carry 64.1% of calls -- barely benefit. Sparse indices attack that directly: give a group
+`spread` times the slots and hand out only the CHEAPEST indices. Unused slots emit NO data, so this
+spends SPAN (69.93%, ceiling 100%) rather than DATA (32.68%, target 35%).
+
+      isolated: a 1000-table group, mean index popcount 4.93 -> 3.81, arm ~9.9 -> ~7.6 ops
+
+      SPEED  16,598,830 -> 16,244,364   -2.14%   (target <= 20,000,000)  PASS
+      SIZE       33.18% ->     32.68%            (target <= 35%)         PASS
+      span   83,751,840 -> 93,860,768 words (69.93%)
+
+`M2 STANDALONE GATE: PASS`. Real, small, and less than the isolated figure because spread=2 is
+what fits -- see below.
+
+### Two failures that would have read as results
+
+* **spread=4 EXHAUSTED THE POOL.** Pinning fell from 25,701 words to **72** -- and that build would
+  have completed, passed its gate, and measured like the un-pinned regression. Caught only by
+  reading the stripping count against the previous build. There is now a loud
+  `*** PINNING COLLAPSED` warning when pinned words drop below a tenth of the group count.
+* **THE CHEAP-INDEX LIST IS A SUBSET, so an overflow table must DECLINE, not fall back.** A raw
+  index past the end of the list can equal a mapped index already handed out: measured as
+  `seg[207408]` and `seg[207409]` both at 0x96130000, which the fjm writer rejected. Overflow
+  declines rose 2,289 -> 4,008, which is the fix, not a regression.
+
+A third habit came out of it: the failed build left a STALE .fjm in place and the gate ran against
+it, reporting "presented 1 frames, not 45" -- a meaningless number that looked catastrophic. The
+driver now removes the artifact first and the monitor gates only if one exists.
+
+### The campaign
+
+      24,723,058   campaign baseline
+      22,988,274   z3, this session's start
+      21,963,752   blocking, restore set unpinned      (BI)
+      19,419,072   + reset state cells pinned          (BL)  M6 MET
+      16,598,830   + aliased groups merged             (BM)
+      16,244,364   + sparse indices, spread=2          (BO)
+
+**-29.3% from this session's start, both M6 targets passing, every build gated byte-exact.**
+
+### 12M: over by 4,244,364
+
+Sparse indices are near their limit -- spread=4 does not fit in the pool. The remaining lever is
+the one BN identified: **collapse the big groups** so the index is narrow, which means sharing
+tables across call sites via a return trampoline. Nothing else measured touches the 64% of calls
+that run through groups thousands of tables wide.
+
+---
+
+## BP -- the trampoline is DEAD, and the wide index is the price of SHARED LEAVES
+
+### Table sharing cannot work, by arithmetic
+
+BN proposed collapsing big groups by sharing tables across call sites via a return trampoline.
+It does not work, and the reason is simple enough that it should have been checked first:
+
+      today   site i uses table i in its word's block      arm = 2*popcount(i)
+      shared  site i uses table j (by destination) AND a return index i
+                                                            arm = 2*popcount(j) + 2*popcount(i)
+
+The per-site RETURN carries exactly the information the table index was carrying, so sharing MOVES
+the width and ADDS to it. Strictly worse.
+
+That generalises to a floor. A call site must identify itself -- ~log2(sites per word) bits -- so
+
+      arm ops >= ~log2(sites_per_word)
+
+A 19,015-site word floors at ~15 ops and measures ~15. **We are already at the floor for the words
+that matter.** No layout change can go below it.
+
+### What the hot words actually are
+
+Recovering each site's source word from the binary and naming it by the nearest label:
+
+      variable (nearest label)                   sites         calls  % calls
+      ?  (below the first top-level label)     153,639       758,430   37.78%
+      hex.tables.res+32                          8,192        49,065    2.44%
+      hex.mul.ret+32                             5,264        50,999    2.54%
+      hex.tables.ret+32                          4,505       109,167    5.44%
+      hex.pointers.read_byte+32                  2,367        12,044    0.60%
+      hex.pointers.read_byte+96                  2,359        12,625    0.63%
+
+      19,188 distinct source words; the top 12 hold 50.6% of sites and 50.3% of calls
+
+**These are stl's SHARED SCRATCH AND RETURN REGISTERS, not doom variables.** `hex.tables.res`,
+`hex.tables.ret`, `hex.mul.ret`, `hex.pointers.read_byte` -- every expansion of those macros
+dispatches through the same word, so every expansion is another site competing for index width.
+
+### The real tradeoff, stated
+
+The wide index is **the price of the shared-leaf architecture** -- the design the repo adopted to
+save SPACE (see the "heavy code in a shared leaf" doctrine). Sharing one register across 153,639
+sites is what makes the index 18 bits wide.
+
+Un-sharing trades space for speed and is quantifiable:
+
+      sites/word   19,015    3,213    1,366     193      43      16
+      arm ops ~       15       12       11        8       6       4
+
+Splitting the hot registers N ways divides their sites by N. At the measured 64.1% of calls running
+through 8+-site words, the arithmetic says split-64 is worth ~2.5M ops/frame and split-256 ~3.4M,
+against a 4,244,364 gap. ⚠ That is ARITHMETIC on measured inputs, not a measurement -- BD's
+arithmetic missed by 15x -- and it ignores the space the copies cost. Size is at 32.68% of a 35%
+target, so the budget for copies is ~2.3 percentage points, about 3M words.
+
+**This is an stl change, not a doom one**, and it runs against a doctrine the repo adopted
+deliberately. It is the only identified route to 12M, and it should be a considered decision rather
+than something slipped in as an optimisation.
+
+### ⚠ CORRECTION: the 153,639-site word is an ARTIFACT, and the floor is ~6.2, not ~15
+
+The top row above is not a variable. All 153,639 of those sites have a disarm whose flip word is
+**0** -- `wflip x, 0`, which flips nothing -- so their source word is not recoverable this way and
+my code bucketed every one of them at address 0. They are `hex.tables.init_all` initialisation
+tables, and the sampled ones are never executed. Recomputed with them excluded:
+
+      variable                               sites        calls  % calls
+      hex.tables.ret+32                      4,505      109,167    8.74%
+      hex.mul.ret+32                         5,264       50,999    4.08%
+      hex.tables.res+32                      8,192       49,065    3.93%
+      19,187 words, 221,016 sites, 1,249,117 calls
+      CALL-WEIGHTED mean index width: 6.15 bits -> arm floor ~6.2 ops/call
+
+**So "we are already at the floor" was WRONG.** The floor is ~6.2 ops per call and arming measures
+~15.5 -- roughly 6M ops/frame of headroom, which is more than the 4,244,364 gap. The refutation of
+the trampoline still stands (the return carries the site's identity either way), but the claim that
+no layout change can help does not.
+
+The suspect is the DECLINES: 10,052 tables are declined as `too-wide` (wider than
+`max_slot_ops=32`), and `hex.tables.*` is both the hottest word AND the macro with oversized
+tables. A declined table stays inline and pays the FULL address (~18.6 ops), which is exactly the
+kind of thing that drags a 6.2-op floor up to 15.5.
+
+## BQ -- the too-wide declines were the lever, and my "net loss" prediction was WRONG
+
+BN named `too-wide` (10,052 tables declined for exceeding `max_slot_ops=32`) as the suspect behind a
+6.2-op floor measuring 15.5. Raising the cap tests it. I predicted the test would FAIL, in writing,
+mid-build: wide slots eat pool space, and the build log showed pinning falling from 25,701 words to
+14,455, so I called it "recovering 10,052 too-wide tables at the cost of ~11,000 pinned words --
+likely a net loss".
+
+The measurement says otherwise. Every m2_std_gate run drives the SAME 45-frame script, so its total
+op count is a direct A/B between binaries:
+
+    blocked5   spread 1, max_slot_ops  32    1,084,127,944 ops / 45 frames    +2.28%
+    blocked7   spread 2, max_slot_ops  32    1,059,987,820                     baseline
+    blocked8   spread 2, max_slot_ops 512    1,008,082,249                    -4.90%
+
+blocked8 is the fastest binary the campaign has produced, and it is the one whose pinning
+"collapsed". So:
+
+**The pinned-word COUNT is not the figure of merit.** 11,000 words lost their pin and 10,052 wide
+tables gained a block, and the trade was strongly positive -- because the wide tables sit on
+`hex.tables.*`, the hottest source word in the profile, while the starved words are cold. Coverage
+counts sites; cost counts CALLS. A guard that watches the count (the `*** PINNING COLLAPSED`
+warning) is watching the wrong number, and would have vetoed the best result on the board.
+
+**Why blocked8 is nonetheless unshippable, and why that is a SPAN bug not a speed one.** The build
+died after writing its artifact:
+
+    AssertionError: R4: span 134217728 >= flat limit 134217728
+
+134,217,728 words is 2^27, and 2^27 words x 32 bits = 2^32 -- the w=32 address ceiling itself.
+`BlockPool._preallocate` runs its cursor to `1 << memory_width` with no margin, so the pool did not
+overshoot the limit, it filled memory to the last word and landed exactly on it. Groups past that
+point became `declined_overflow`. Note what this means: blocked8's -4.90% was measured with the
+tail of the pool ALREADY dropped.
+
+The artifact existed (the assert fires after the write) and gated `M2 STANDALONE GATE: PASS`, 45
+frames byte-exact -- so the configuration is correct, and only its extent is illegal.
+
+**The fix is a bound, not a retreat.** `--span-bits 0x9e000000` stops the pool at word 133,169,152,
+1,048,576 words under the ceiling, giving up ~1.2% of pool space rather than giving up spread or
+slot width. blocked10 is that build.
+
+CAVEAT, recorded before the number comes in: this parks span at 99.2% of the address space. Data
+words (the 35% size target) are unaffected -- span is not the size metric -- but M4's nine levels
+grow the program, and the pool base has to come down to make room. Span is now a budget the next
+milestone has to spend, and this campaign has spent nearly all of it.
+
+## BR -- the margin cost 13.8%, and a pre-registered guess about broken groups
+
+**The span margin is not a free safety.** BQ fixed blocked8's span overflow with `--span-bits`, and
+I picked the bound by taking a comfortable 0x02000000 off the top. That is 1,048,576 words, 1.2% of
+the pool. It cost 13.8%:
+
+    blocked7   spread 2, slot<= 32                    1,059,987,820 ops / 45 frames
+    blocked8   spread 2, slot<=512, span ILLEGAL      1,008,082,249
+    blocked10  spread 2, slot<=512, margin 1,048,576  1,146,925,640   +13.8% vs blocked8
+
+    blocked10: 4,890 groups blocked (was 27,032), 4,474 pinned words, no-block declines 55,617
+
+`_preallocate` allocates BIGGEST FIRST, so the last sliver of the pool is where the entire tail of
+small groups lives. Trimming 1.2% off the top did not trim 1.2% of the groups, it trimmed 82% of
+them. R4 needs span strictly below 2^27 words, i.e. ONE word of margin: `--span-bits 0x9fffffe0`
+tops out at 134,217,727. blocked11 is that build.
+
+Generalisation worth keeping: **under biggest-first allocation, pool capacity is spent on the big
+blocks and the SMALL groups are the marginal consumer.** Any change that shifts capacity -- margin,
+spread, slot width -- is paid for almost entirely by them.
+
+### Pre-registered: does a declined table really have to break its group?
+
+Recording the prediction BEFORE the build, because the last one I made mid-build (BQ) was wrong.
+
+`pinned_words` excludes `broken_groups` wholly, so ONE declined table un-pins every sibling. The M1
+reset part declines 4,008 tables BY DESIGN -- the driver's own docstring says its tables "land past
+their group's counted slots and are DECLINED, which leaves them inline and safe" -- so this is a
+standing, structural cost, not an accident of tuning.
+
+The arithmetic says the exclusion is unnecessary. `insert_fj_op` rests a pinned word at
+`value*dw ^ base`, and `insert_wflip_ops` rewrites EVERY address-magnitude flip on that word to
+`V ^ base`. An inline table at `A` therefore arms to `(value*dw ^ base) ^ (A ^ base)` = `A + value*dw`
+-- identical to the un-pinned build. It pays a worse popcount, not a wrong address.
+
+Against that, `pinned_words`' docstring records a real failure: a game build presented 0 frames in
+124 ops. But `reserve()` records THE SAME SYMPTOM TO THE DIGIT against a different cause -- stl.IO's
+tables relocated into the pool -- which was diagnosed and fixed separately. One of those two is
+likely the real bug and the other a defensive measure that outlived it.
+
+PREDICTION: `--pin-broken` builds a correct binary and gates PASS. Confidence: moderate, NOT high --
+the arithmetic is clean but rule 3 exists because four such arguments were wrong, twice about the
+checking tools.
+
+⚠ THE TOY GATE CANNOT ADJUDICATE THIS. `pinned_words`' docstring states the four-program gate PASSED
+the version the exclusion guards against. A toy PASS is therefore not evidence, and only
+`m2_std_gate` on the game tier settles it. Queued behind blocked11.
+
+## BS -- 87% of the pool is PADDING, and uniform slots were never required
+
+blocked11 (blocked8's allocation made legal by a one-word margin) gates PASS and is the standing
+best:
+
+    blocked11  spread 2, slot<=512, --span-bits 0x9fffffe0
+               1,007,614,365 ops / 45 frames      -4.94% vs blocked7
+               span 134,217,696 words (< 2^27, R4 passes), M2 STANDALONE GATE: PASS
+
+Its counting pass also carries the new width histogram, and that is the real news:
+
+    width waste: 68,224,992 ops allocated = 9,041,597 real
+                                          + 41,479,139 width-pad
+                                          + 17,704,256 count-pad
+    MIXED groups (widest > 2x most common): 1,058 groups, 21,388 tables
+    broken groups: 12,579 of 27,032   declines: no-block 26,111, too-wide 494, overflow 4,008
+
+**Only 13.3% of the allocated pool holds a table.** 60.8% is WIDTH PADDING: a block's slots are
+uniform, so one 512-op table widens every slot in its group. And BQ established that a full pool is
+exactly what breaks groups -- 46.5% of them here -- with each broken group losing its pin for ALL
+its tables. The padding is not a size problem, it is the speed problem.
+
+**Uniform slots are not required by the mechanism.** Arming needs `base ^ offset == base + offset`,
+which holds for any offset inside a block whose base is aligned to it. Uniform slots are merely the
+easy way to keep popcount(offset) low. Per-width sub-blocks keep that: each bucket is aligned to its
+own size and laid out biggest-first, so a bucket's offset bits sit above its slots' bits and
+popcount adds. The bucket selector costs one or two bits.
+
+Measured on the implementation, not argued: a 302-table group with two 512-op siblings drops
+16,777,216 -> 524,288 bits (32x), a three-width group 2,097,152 -> 65,536 (32x), and a HOMOGENEOUS
+group is unchanged to the bit -- so the blast radius is the 1,058 mixed groups.
+
+⚠ A NOTE ON WHAT THE GATE CANNOT SEE. `bucket_check.py` C8 checks `(base + offset) ^ base == offset`
+-- that arming flips the offset and nothing else. This is a COST property. The base cancels in
+`base ^ (V ^ base) == V` for ANY V, so a mislaid block would still render byte-exact and simply cost
+more ops. No gate would ever catch it. Controls C4 (a bucket past the block end) and C6 (two buckets
+at one offset) are the negative controls; the first version of this file had a C3 that a broken
+layout PASSED, because `base & offset == 0` is trivially true when the base is one high bit.
+
+## BT -- `--pin-broken` PASSES: a declined table never had to break its group
+
+BR pre-registered the prediction at moderate confidence. It holds.
+
+    blocked11  spread 2, slot<=512, span 0x9fffffe0        1,007,614,365 ops / 45 frames
+    blocked12  ...the same, + --pin-broken                   975,434,141   -3.19%
+               M2 STANDALONE GATE: PASS -- 45 frames byte-exact, door opens across the M1 reset
+
+So the exclusion in `pinned_words` was over-conservative, and the arithmetic in BR was the right
+account: `insert_fj_op` rests the word at `value*dw ^ base`, `insert_wflip_ops` rewrites an inline
+table's arm to `A ^ base`, and the base cancels -- `(value*dw ^ base) ^ (A ^ base)` = `A + value*dw`.
+A declined table pays a worse popcount. It was never unreachable.
+
+The "0 frames in 124 ops" recorded in `pinned_words`' docstring is therefore almost certainly the
+OTHER bug wearing the same symptom: stl.IO's tables relocated into the pool, which `reserve()`
+records against the identical fingerprint and which was fixed separately. Two distinct causes, one
+symptom, and the defensive fix for the first outlived the second.
+
+**The size of the win is the surprising part, and it re-reads the earlier numbers.** pin_broken
+added only 402 pinned words (14,455 -> 14,857) for -3.19%. So those 402 groups are extremely hot --
+they are exactly the `too-wide` and `overflow` groups, which includes the M1 self-reset part's
+tables, declined BY DESIGN because they land past their group's counted slots.
+
+It also corrects an inference I drew an hour earlier. "12,579 of 27,032 groups are broken" reads as
+a 46.5% coverage loss, but only ~416 of those broken groups ever HELD a block: the other ~12,163
+were broken by `_preallocate` for lack of room and were never pinnable at all. Two different
+failures were being counted in one bucket. The pinnable-but-unpinned prize was 2.7% of groups, and
+it was worth 3.19% of the frame -- while the remaining 12,163 need POOL SPACE, not a policy change,
+which is what BS's width bucketing is for.
+
+Running totals on the 45-frame gate script (deterministic, same script every run):
+
+    blocked7   1,059,987,820     baseline this session started from (16,244,364 ops/frame measured)
+    blocked11  1,007,614,365     -4.94%   wide slots, legal span
+    blocked12    975,434,141     -7.98%   + pin broken groups
+
+## BU -- width buckets: every group gets a block, and 28% of the address space comes back
+
+BS predicted per-width sub-blocks would recover the 60.8% of the pool spent on width padding.
+Measured, gate-adjudicated:
+
+    blocked12  uniform slots, pin_broken        975,434,141 ops / 45 frames
+    blocked13  + --width-buckets                945,011,309   -3.12%    GATE: PASS
+
+    metric                blocked12      blocked13
+    groups blocked           14,871         27,032   <- ALL of them
+    pinned words             14,857         27,018   (+82%)
+    broken groups            12,579            418
+    no-block declines        26,111          5,103
+    span (words)        134,217,696     96,002,336   <- 38.2M words freed, 28% of the space
+    fjm bytes            31,822,834     31,792,965   (flat: coverage bought nothing in size)
+
+The speed delta (-3.12%) is smaller than the structural change, and that is the honest reading:
+pin_broken had ALREADY recovered most of the value of the groups that had blocks, so bucketing's
+gain is the 12,163 groups that previously got no block at all -- individually cold, collectively
+worth 3%. Its larger contribution is the 38.2M words, which is now spendable.
+
+**Coverage is essentially solved; the remaining declines are structural.** Of 9,605: `overflow
+4,008` and most of `no-block 5,103` are the M1 self-reset part, whose tables are emitted AFTER the
+counting pass by construction, and `too-wide 494` are tables larger than any slot. With pin_broken
+these no longer poison their groups -- 418 groups remain broken, and those never held a block.
+
+**So the lever moves from COVERAGE to INDEX COST.** Cumulative on the 45-frame gate script:
+
+    blocked7   1,059,987,820    session baseline (16,244,364 ops/frame, measured on gamespeed)
+    blocked11  1,007,614,365    -4.94%
+    blocked12    975,434,141    -7.98%
+    blocked13    945,011,309   -10.85%
+
+⚠ These are GATE ops on 45 scripted frames. The binding metric is (mean+p80)/2 over 10x100 frames
+from the player start -- a DIFFERENT workload -- so no conversion between them is quoted here. The
+winner gets its own gamespeed run.
+
+Next, and why: `_cheap_indices` hands a group's `k` tables the `k` lowest-popcount indices out of
+`k*spread` slots. For the hottest word (~19,015 tables) spread=2 gives 65,536 slots whose 19,015
+cheapest indices have popcount <=7 (mean ~6.2); spread=4 gives 131,072 slots where they fit in
+popcount <=6 (mean ~5.5) -- ~0.7 ops off every arm on the hottest half of all calls, for ~12M words
+against 38.2M free. After that, the indices are handed out in ENCOUNTER ORDER, not hotness order,
+which wastes index 0 on whatever macro expanded first.
+
+## BV -- spread=4 exhausts the pool: the second span estimate I got wrong by eye
+
+    blocked13  spread 2, width buckets      945,011,309 ops / 45 frames
+    blocked14  spread 4                   1,450,658,734   +53.5%    (gates PASS, just slow)
+
+    blocked14: 98 groups blocked of 27,032; 26,945 broken; no-block declines 190,398;
+               span back to 134,217,696 (full)
+
+I predicted "~12M words extra against 38.2M free" by pricing the dozen huge groups. But `spread`
+multiplies the slots of EVERY group at or above `spread_min_count=256`, and those are many more
+than a dozen. Demand roughly quadrupled, the pool overflowed, and 99.6% of groups lost their block.
+
+That is twice in one session that a config was launched on an eyeballed span estimate and came back
+31 minutes later exhausted (BR's margin was the first). The counting pass already knows every
+block's exact size, so this was always arithmetic rather than judgement. Two fixes, both landed:
+
+  * `_preflight()` prints `demand X words, capacity Y words (Z% used); N of M groups placed` right
+    after the counting pass, and says outright when a config does not fit -- seconds, not 31 min.
+  * `--counts-cache` freezes counts/widths/width_hist/alias to disk. They depend on the PROGRAM and
+    the allowed macros, never on pool geometry, so every spread/slot/span config can share one
+    counting assembly instead of paying 430s for its own.
+
+The lesson generalises past this pass: spread is not free and not uniform in value. It should be
+spent where the index is WIDE (a 19,015-table group) and withheld where it is already narrow, which
+is what `spread_min_count` controls -- so the next attempt raises that floor rather than the spread.
+
+STANDING BEST: blocked13 -- 945,011,309 gate ops, GATE PASS, data 43,527,560 words = 32.43% of 2^27.
+
+## BW -- MEASURED: 14,229,140 ops/frame, both M6 targets pass, 12M short by 2.23M
+
+The campaign had been ranking candidates on the 45-frame gate script since blocked7. This is the
+binding metric itself, re-measured this session on the standing best binary.
+
+    python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_blocked13.fjm
+
+    SPEED  BINDING (mean+p80)/2: 14,229,140 ops/frame   (target <= 20,000,000)  PASS
+    SPEED  mean run-average   : 13,056,444
+    SPEED  80th-pct run avg   : 15,401,835
+    SPEED  spread lo..hi      :  9,289,183 .. 17,717,101
+    SIZE   words              : 43,527,560 = 32.43% of 2^27   (target <= 35%)  PASS
+    SIZE   span / file        : 96,002,336 words (71.53%) / 31,792,965 bytes
+
+Walk validity is a SEPARATE run, and it passes -- this is the check whose failure withdrew an
+earlier 26,001,449:
+
+    python scratchpad/12m/gamespeed.py --fjm ... --validate
+    distinct end cells: 9/10 ; widest spread 2258 units ; worst run 0% blocked
+
+⚠ `--validate` is a MODE, not a modifier. Passing it runs the walk check and exits WITHOUT
+measuring speed. CLAUDE.md's "no speed number without its --validate output" means two runs, not
+one; attaching the flag to the speed run silently yields no speed number at all.
+
+**THE GATE PROXY RUNS CONSERVATIVE.** Measured -12.40% (16,244,364 -> 14,229,140) where the 45-frame
+gate predicted -10.85%. The proxy under-stated the real gain by ~1.5 points. It remains the right
+ranking tool -- deterministic, 17 min against 4 h -- but treat its deltas as a FLOOR on the binding
+gain, not an estimate of it.
+
+Campaign, measured endpoints only:
+
+    24,723,058   campaign baseline
+    22,988,275   session start
+    16,244,364   blocked7  (wide-ish slots, spread 2)
+    14,229,140   blocked13 (wide slots + legal span + pin_broken + width buckets)   -12.40%
+
+REMAINING GAP TO 12,000,000: 2,229,140 ops/frame, i.e. a further -15.7%.
+
+## BX -- the movement speed was a COLLISION bug, and m2_std_gate was certifying through walls
+
+A playtest reported walking "super fast", being stopped on visibly open floor, and once ending up
+outside the level. Those are one mechanism.
+
+**FORWARD_MOVE = 50 was a units error, not a tuning choice.** DOOM's `forwardmove 0x32` is a THRUST
+fed to `P_Thrust(..., move*2048)` and damped by FRICTION 0xE800 (0.90625/tic), settling at
+50*2048/65536 / 0.09375 = ~16.7 units/tic. This sim has no momentum and applied 50 as DISPLACEMENT,
+i.e. 3x DOOM's run speed.
+
+That broke collision, because `try_move` tests only the DESTINATION box (reference_model.py:847) and
+the box is 2*PLAYER_RADIUS = 32 units wide. A 50-unit step leaves an 18-unit band policed by neither
+the source nor the destination box. MEASURED (scratchpad/12m/stepcheck.py, on the SHIPPING map):
+
+    move 50 u/tic : 1 solid-wall crossing; from the spawn, turn-left x17 then forward walks THROUGH
+                    one-sided linedef 940 on tic 21 and leaves the level
+    move 25 u/tic : 0 crossings
+    move 16 u/tic : 0 crossings
+    dead-stuck on open floor (all-or-nothing step, no partial move): 4.43% -> 3.60% -> 2.85%
+
+FORWARD_MOVE is genuinely SHARED (reference_model.py:63, imported at wall_renderer.py:26 and
+interpolated into the emitted fj), so 50 -> 16 is ONE edit that moves both mirrors. Host suite: 486
+passed. The remaining dead-stops need sub-stepping, which is a DUPLICATED change
+(reference_model.move_with_collision + collision.move_with_collision_lines + src/fj/sim.fj).
+
+### The gate was passing along a route the player cannot take
+
+Fixing the step made `m2_std_gate` unable to plan at all, which exposed why it ever could:
+
+    the gate's own 24-frame route at FORWARD_MOVE=50 crosses ONE-SIDED linedefs 534 and 571
+
+It reached its target BY TUNNELLING. Worse, the target was never reachable: the gate picks the door
+nearest by STRAIGHT LINE (door 48), whose use box starts at y=616, while the walkable region from
+the spawn with doors shut stops at y=488. Of E1M1's 13 door sectors only **10 and 100** are
+genuinely reachable. Two of `gamespeed --validate`'s walk endpoints -- (827,-210) and (128,1424) --
+are also outside the legitimately reachable region, by 129 and 940 units.
+
+Every existing control asks about PIXELS, and a route through a wall renders perfectly, so nothing
+could have caught this. Three fixes, all in the harness (the gate now proves MORE, not less):
+
+  * TARGET = nearest door with a walkable route, decided by the same `try_move` the program runs.
+  * PLANNER = `walkable_cells` (BFS over 16-unit cells, adjacency = try_move accepts) + steering,
+    replacing a width-24 beam sorted by straight-line distance. The beam could not walk around an
+    obstacle, and its pose de-dup bucketed angle at 11.25 degrees while one turn is 3.5 -- three
+    consecutive turns collapsed to one state and were pruned, so it could not even turn in place.
+  * CONTROL 0 = re-simulate the approach leg and REJECT any plan whose centre path crosses a solid
+    linedef. Negative control: it rejects the old beam's plan (crosses 534, 571).
+
+⚠ GENERAL LESSON. A verification tool can be defeated by a bug in the SUBJECT that makes the tool's
+own setup impossible-but-plausible. The gate did not lie about pixels; it walked a path physics
+forbade and then compared those pixels honestly. When a gate builds its own fixture by SEARCHING the
+system under test, the search result is part of what needs a control.
+
+## BY -- WAIT was coupled to the walking speed, and the counts-cache guard earned its keep
+
+Correcting FORWARD_MOVE (BX) exposed a second constant tuned to the old speed. A TIC IS A FRAME
+here, so `doors.WAIT` is really "how far can the player travel while the door is passable":
+
+    WAIT=10 at 50 units/tic  ->  500 units of reach     (fine)
+    WAIT=10 at 16 units/tic  ->  160 units              (the door shuts in your face)
+
+MEASURED: after the use press, door 10 is passable only on frames 3..21, while walking through it
+took until frame 48. `dwait` is WAIT_NIBBLES=2 wide (0..255) and `doorcode` imports WAIT from
+`doors`, so 10 -> 32 is one SHARED edit restoring the old reach (32*16 = 512 units) at no per-frame
+cost. Verified against the door state machine: the player now crosses on through-frame 14 with the
+door at state 8 (fully open), and it closes behind him.
+
+**Generalisation: correcting one constant can invalidate every constant tuned around it.** WAIT was
+never wrong on its own; it was right for a movement speed that was wrong. Anything expressed in
+FRAMES rather than in distance is suspect after a speed change.
+
+### The planner rewrite cost five iterations -- recorded so the traps are not re-entered
+
+  * over-aggressive path simplification handed the steerer a leg it could not drive (the swept path
+    clips a corner the sampled line-of-sight points miss);
+  * the BFS goal tolerance (1.5 cells = 24u) was TIGHTER than the caller's acceptance test (40u),
+    so a threshold with 14 reachable cells inside 40u was reported unreachable -- a planner failing
+    on its own discretisation, not on the geometry;
+  * the fallback to the raw path never ran, because a `return None` on the tic cap short-circuited
+    out of the first attempt. Now `return drive(simple) or drive(path)`.
+  * "inside the use box" is NOT "at the doorway": door 10's box is 256x160 and wraps a corner, so
+    stopping at the first in-box frame ended the walk around a wall from the opening and the
+    walk-through leg detoured 84 waypoints. The approach leg now requires box AND threshold.
+
+### The cache signature guard fired on its first real test
+
+BV added the emitter-source hash to `--counts-cache`'s key precisely because tier/map/wad/macros do
+not change when an emitter does. This build printed `counts cache is for a DIFFERENT program --
+recounting`. Without it, blocked16 would have silently reused blocked15's counts for a program whose
+sim constants had changed.
+
+## BZ -- doors: three defects, two fixed, and why the third is rung-3b work
+
+A playtest reported "I don't see any doors", "a shut door is see-through", and "an open door does
+not look like a door". Three separate causes, all reproduced on the oracle.
+
+### 1. The face was not drawn AT ALL past ~168 units  [FIXED]
+
+`STEP_SEG_BUDGET = 8` is spent by nearer face-carrying boundaries before the walk reaches a door,
+so the lintel -- the only thing that makes a doorway read as a doorway -- was simply absent.
+MEASURED (shut-vs-open pixels of a 16,000 px frame, viewpoint on the doorway normal):
+
+    distance   bud=8   bud=12   bud=16   bud=24
+        176      360     2774     2774     2774
+        192      273      273     2107     2107
+        256      212      212      212      212    <- genuinely sub-pixel; no budget helps
+
+This is a STRAIGHT BUG by CLAUDE.md's own cost model: "Surviving budgets are either provably
+never-binding (asserted at emit time) or shed only invisible work." This one has no assertion
+anywhere and shed the whole visible door. Raised to 16 -- SHARED (reference_model.py:97,
+wall_renderer.py:47 imports it, :1990 interpolates it into the emitted fj), so one line moves both
+mirrors. It costs per-frame ops and that price must be MEASURED, not assumed.
+
+### 2. A shut door is see-through  [ORACLE FIX PROVEN, fj MIRROR IS NOT A PATCH]
+
+`reference_model.py:2023`: `if ld.back != -1: ... continue  # two-sided: not a solid wall`. A
+two-sided line NEVER claims its column, so the far wall paints through the doorway. DOOM's
+`R_ClipSolidWallSegment` has the "a closed door IS a solid seg" test; this renderer has none.
+Separately, the door's upper piece IS computed with the full doorway extent and then >50% of it is
+discarded by the splice, which clips every face to the ceiling band
+(`reference_model.py:2375-2379`; at 112 units, 11,520 face rows stored, 5,312 painted).
+
+ORACLE FIX (5 lines, pictures in scratchpad/12m/door_states_ceilend.png): extend `ceil_end` past
+any upper face that reaches below it. Shut becomes a solid occluding slab; the open frame changes
+by 0 px; every intermediate state shows the gap opening correctly beneath the lintel.
+
+⚠ WHY THE fj MIRROR IS NOT A SMALL CHANGE. The oracle works because faces paint AFTER walls and
+simply overwrite them. The fj device is MONOTONE FORWARD-ONLY -- `stream_render.fj:653` warns that
+emitting sub-cursor pairs makes the device REWIND, "no silent drop" -- so the wall must never EMIT
+the rows the face covers. That couples the wall's start to the face's bottom, and the two are
+produced in DIFFERENT PASSES: `clip_rows` fixes the wall span during the seg walk
+(`frame_render.fj:441,457`, `cexcl = min(top, VIEW_H)`), while faces land in slots afterwards, and
+`ctake = min(cexcl, fstart)` is recomputed independently in two places
+(`stream_render.fj:166`, `frame_render.fj:1434`). Expressing "raise this column's wall top past
+this door's face" needs the pass structure changed, which is what rung 3b already scopes
+(`docs/handoff-m13-2s.md:611`). NOT attempted -- each try costs an ~85-minute build+gate.
+
+### 3. An open door has no lintel to see  [WON'T FIX at this tier]
+
+Fully open, door sector 10's ceiling is -4 against a front ceiling of 0 -- a 4-unit lintel that
+collapses sub-pixel. The DOORTRAK jambs are zero-height when shut and edge-on when open. And the
+real texture is never used: line 55 carries `upper='AQDOOR02'` but the oracle never reads
+`sd.upper` (grep: zero hits) -- faces are flat-shaded `STEP_FACE_BASE = 96`.
+
+### The verification hole this exposed
+
+`m2_std_gate` proves oracle == fj and nothing else. **There is no test anywhere asserting that a
+shut door occludes.** M2 is marked DONE on a gate that could never have caught any of this, and the
+docs' own priority ranking (`docs/handoff-m13-2s.md:383`, "Halve rung 3b: LOWER walls only") assumed
+UPPERS were the less important half -- exactly backwards for doors.
+
+## CA -- an INVISIBLE piece was evicting the visible door, and the code said so
+
+BZ left "why is a shut door not drawn past ~200 units" unanswered, and both of my hypotheses were
+refuted (the ceil_end splice clip helps at 160-192 and not at all past 224; forcing the
+"every column drawn" stop off changes nothing anywhere).
+
+⚠ MY MEASUREMENT WAS ALSO WRONG, TWICE. The sweep walked the player backwards along x=832 and I
+reported that the floor "steps up 160 units at ~192" -- it does not; the floor is -128 along that
+whole line and my sector lookup was crude. And the falloff is not a fade at "224+": on
+geometry-controlled sweeps (sector, floor and sight angle constant) it is a HARD CLIFF, 1,673 px at
+160 -> 2 px at 162, in one 2-unit step, at the same place for doors 10, 34, 54, 64 and 100.
+
+### The real mechanism: two budgets, one of which spends its slot on nothing
+
+`reference_model.py:2142` admits an upper piece only when
+`len(ups[x]) < n_stack and (not ups[x] or stk2)`, with `n_stack = V5_STACK = 2` and
+`stk2 = sc2m >= DEG_STACK_SCALE (32768)` -- and 32768 in 16.16 scale is tz ~= 160 map units. So a
+column keeps TWO upper pieces and the SECOND is refused past 160 units. When the door's lintel gets
+slot 0 there is no cutoff at all (door 48 still drawn at 400 units).
+
+**What burns slot 0 is a piece that paints NOTHING.** An entirely off-screen boundary was stored as
+the sentinel `(1, 0)` (above) or `(255, 254)` (below). Both keep y1 > y2, so the paint loop's
+`if y1c <= y2c` rejects them -- yet they had already consumed a slot. `src/fj/frame_render.fj:940`
+documents the mechanism exactly: "whenever rowa <= rowb EVEN FULLY OFF-SCREEN, and that write
+CONSUMES the slot, blocking farther segs (R40, the 28-column phantom face)."
+
+### The fix, and why its shape is the good one
+
+Do not store an entirely off-screen piece. MEASURED, door 100's clean sweep (floor 0 throughout):
+
+    distance   before   after
+        344       38      405
+        400       34      327
+        464        0      177
+
+    oracle: `if a <= b and 0 <= b and a <= Hs:`      (both the ups and los store sites)
+    fj    : `off_above:` / `off_below:` jump to `skip` instead of `write`   (ts_piece_store)
+
+Two lines each, and both mirrors express the SAME RULE rather than two encodings of it -- which is
+the shape a byte-exactness change wants. 486 host tests pass.
+
+COST: the region BEHIND the sentinel, which was derived from the stored bytes. Measured at ~90 px on
+a near corridor view, against recovering an entire door.
+
+### What is still open
+
+  * 224 units on door 10's near approach: genuine slot EXHAUSTION -- two real pieces hold both
+    slots. Needs V5_STACK 3, and the fj slot layout packs 4 pieces into a 16-byte stride with a
+    whole-nibble shift (SLOT_SHIFT), so a third upper piece breaks the stride. Not a constant bump.
+  * A shut door still does not occlude (BZ #2) -- rung 3b.
+
+LESSON: the budget doctrine in CLAUDE.md says a surviving budget must "shed only invisible work".
+Here the budget was spending itself ON invisible work. Both failures are the same class, and neither
+was caught by any gate, because every control asks about pixels and an evicted piece renders as
+"some other geometry", not as an error.
+
+## CB -- the glass door: occlusion is `drawn[x]`, and the door wears its art on `upper`
+
+The owner asked for a shut door that occludes. Three routes were considered and two are dead ends.
+
+**ROUTE A (extend the face past the ceiling-band clip) CANNOT WORK, and I had claimed it did.**
+I published pictures of a solid grey slab and called it proven. It was measured at ONE viewpoint.
+Checked properly: at another viewpoint Option A changes ZERO pixels in the 22 doorway columns, and
+my claim "the OPEN frame changes by 0 px" is false -- over a 78-viewpoint sweep it moves 5,258
+open-frame pixels, including 400 px at a viewpoint with no door in it at all.
+
+The reason is structural. Occlusion in this renderer is `drawn[x]`, written in exactly ONE place --
+the one-sided wall path (reference_model.py:2332). The two-sided marking leaf deliberately never
+touches it; src/fj/frame_render.fj:418-420 says so in prose. So enlarging a face is OVERDRAW, not
+clipping: the far room's floor still shows below the slab, and a sprite behind the door still paints
+ON TOP of it, because sprites are recorded during the walk (gated on `drawn[x]`) and painted after
+the face splice. No face change can un-record a sprite. This maps exactly onto DOOM's split --
+R_ClipSolidWallSegment produces occlusion, R_StoreWallRange produces pixels.
+
+**ROUTE B (rung 3b) IS NOT AVAILABLE.** It was built and gated, then DELETED on the owner's call in
+the flag retirement: the emitter half in e38b0f2, the oracle's `render_frame_2s` in 6f90832. Priced
+against today's baseline it is ~72M ops/frame and +5.84% of 2^27 in bank size against 2.56% of
+headroom -- it breaks the size ceiling on its own.
+
+**ROUTE C IS THE FIX: send a CLOSED two-sided seg down the one-sided path.** Objective metric --
+perturb only the sector behind the shut door; a door that occludes must leak ZERO pixels:
+
+    blocked19 (shipped)          617,425 px leak
+    route C + upper texture       60,447 px, and 12 of 13 doors are EXACTLY 0
+
+The residual is entirely door 84, whose sector is zero-height when shut -- the probe perturbs the
+door's own sector, so it measures the solid wall rather than a leak. Rendered from both sides it is
+a proper textured door. ⚠ `leakcheck.py` computes the viewer's subsector for control C2 but never
+filters on it; that is a real gap in the tool, recorded rather than papered over.
+
+**OCCLUSION AND TEXTURE ARE COUPLED.** Every door line on E1M1 has `middle='-'` with the art on
+`upper` (AQDOOR02 / BIGDOOR2 / METAL2). Sending a shut door down the solid path with `sd.middle`
+occludes correctly and paints NOTHING recognisable, so the texture change is required, not cosmetic.
+
+### Staging, and why
+
+Solid-vs-marking is decided at COMPILE time in the emitter (`_seg_as_solid`), so:
+  * 80 segs are closed no matter what any door does -> pure compile-time (STAGE A, blocked20).
+  * 54 are closed only while a door is shut -> the emitted code needs BOTH bodies behind a state
+    gate (STAGE B). The gate is cheap: a door is closed exactly when its state == 0 (verified on
+    every door), so it is one `hex.if0` on the door's state cell, and the per-seg state switch
+    `dsw_<label>_go dstate + slot*dw` already exists.
+The oracle excludes door-touching segs for stage A by testing `scene.sector_heights`, which is the
+same set the emitter's `_seg_door(seg) is None` excludes -- if those two ever disagree, the mirrors
+diverge and byte-exactness is gone.
+
+⚠ INCIDENTAL: wall_renderer.py:1615-1639 is UNREACHABLE -- a `continue` at :1614 precedes the whole
+`tsprobe`/`tsmark` ablation arm. Those two ablations cannot have run since that `continue` landed.
+
+## CC -- doors DONE: route C ships, and the honest price is +1.54% on the binding metric
+
+blocked21 = route C (closed two-sided segs take the one-sided path, setting `drawn[x]`) + the
+`upper` texture, staged as 80 compile-time segs and 54 door segs behind a per-state gate.
+
+    M2 STANDALONE GATE: PASS -- 208 frames, 0 pixel differences
+    BINARY playtest (native engine, 174 frames): shut-vs-open 9,401 px at the doorway
+    leak through shut doors (oracle): 617,425 -> 60,447 px, 12 of 13 doors EXACTLY 0
+
+    BEFORE (blocked19)  12,951,426 ops/frame   32.44% size
+    AFTER  (blocked21)  13,151,190 ops/frame   32.53% size
+                        +199,764  (+1.54%)     +0.09pp
+
+⚠ TWO WORKLOADS, TWO ANSWERS, AND THE GATE SCRIPT IS THE MISLEADING ONE. The 208-frame gate got
+5.6% CHEAPER (4,666,452,041 -> 4,404,090,598) because it walks to a door and stands at it, so the
+occlusion saving dominates. The binding metric ROAMS, and there the 134 newly-solid segs pay full
+wall projection far more often than they save by occluding: +1.54%. Quoting the gate delta as the
+cost of this change would have been wrong by 7 points and in the wrong direction.
+
+### The fj shape, for whoever touches it next
+
+  * `_seg_closed_static` (80 segs, compile-time) folds into `_seg_as_solid`.
+  * `_seg_dual` (54 door segs) emits BOTH bodies; the per-seg gate is one op, because a door is
+    closed exactly when its state is 0: `hex.if0 1, dstate + <slot>*dw, ss<c>_seg<s>_solid`.
+  * The texture must move with it -- door lines carry `middle='-'`, art on `upper` -- and BOTH
+    mirrors must pick the same name. `scratchpad/12m/mirrorcheck.py` checks that directly (134
+    segs, 774 seg-state pairs) with a negative control; it exists because changing only the oracle
+    cost a build+gate and failed with "frame 2, 8 px differ".
+
+### ⚠ THE REAL LESSON OF THIS ROUND IS ABOUT DIAGNOSTICS, NOT DOORS
+
+Stage B took four ~7-minute emits. ONE was a genuine bug (the `tsprobe`/`tsmark` arm at
+wall_renderer.py:1615-1639 is preceded by a `continue`, so it was dead code, and routing the dual
+fall-through in front of it silently swallowed every door seg). The other THREE were my own
+instrumentation reporting false zeroes:
+
+  1. the emit smoke ran on the `render` tier, which has NO DOORS -- so "0 gates, all balanced" was
+     vacuously true and read as a pass;
+  2. `emit_wall_renderer(return_parts=True)` returns [(name, JOINED STRING)], not (name, lines), so
+     `for l in ls` walked the string CHARACTER BY CHARACTER and the join put a newline between every
+     character -- `_solid` could never appear as a substring, whatever the emitter did;
+  3. greps of `build/generated_*` raced the build, which regenerates that directory per assembly.
+
+Each time the code was closer to correct than the measurement of it. The rule this repo already
+applies to gates -- a check must ship a negative control -- applies just as hard to a throwaway
+diagnostic: WHEN A CHECK REPORTS ZERO, PROVE IT CAN REPORT NON-ZERO BEFORE BELIEVING IT.
+
+## CD -- the occlusion proof was VACUOUS, and the smoothness knob has a second ceiling
+
+Four verification gaps closed. Two of them were in things this campaign had already quoted as
+evidence, which is the point.
+
+**1. `leakcheck.py` was perturbing the DOOR, not the room behind it.** It moved
+`sds[lds[li].back].sector`, on the reading that a linedef's back side is "behind" it. On E1M1 that
+sector is the door itself -- **all 25 door linedefs carry the moving sector on their BACK side**
+(front = the room). So the "perturbed" frame was a shut door at one shut ceiling versus a shut door
+at another shut ceiling: both occluded, nothing differed, and the tool printed `LEAK 0 px` with a
+straight face. A door made of glass scores exactly the same. Its C1 probe still looked healthy
+because with the door open the same overwrite re-shut it, so C1 was measuring the door opening and
+closing rather than the far room's visibility.
+
+The room beyond a door is the FRONT sector of the door sector's OTHER linedef. That rule now lives
+once, in `doomfj.doorcode.door_rooms`, because the tool and the new test must not hold two opinions
+about it.
+
+**2. C2 computed a point location and threw the answer away.** Fixing it exposed a second wrong
+assumption: requiring the viewer to STAND IN the linedef's front sector dropped all 24 of door 10's
+viewpoints. An E1M1 door's front sector is a one-subsector alcove inside the door frame -- nobody
+far enough back to see the door is ever in it. The filter that works is two conditions:
+`mapcompiler._point_side` for the SIDE, plus point location to REJECT the door sector and the
+perturbed rooms. 12 viewpoints scored, 12 dropped.
+
+    door 10, corrected metric:  LEAK 0 px   probe(open) 30,972 px
+
+**3. The property now has a test, with a negative control.** `tests/host/test_door_occlusion.py`
+-- 0 px leak, 5,373 px probe, 2 viewpoints, 0.8 s. Reverting route C in the oracle makes it leak
+**3,871 px** and the test fails, so it is not passing by construction.
+
+**4. The dead `tsprobe`/`tsmark` arm is gone.** Unreachable since rung 3a (a078491); after the dual
+seg restructure it would have emitted the probe body ON TOP OF the marking body rather than instead
+of it, which is not what it priced. Removal is provably emit-identical: the arm's first statement
+was `if not (ablate & {...}): continue` and no caller has ever passed either mode. Numbers stay in
+`docs/handoff-m13-2s.md`.
+
+**AND THE ONE THAT COST A BUILD: `DEFAULT_QUANT` has a second ceiling nobody had written down.**
+`MAX_STATES = 16` is the documented one. The binding one is **the pid byte**: every door stop is a
+distinct (ceiling key, floor key) pair, a pid must fit `PID_NIBBLES = 2`, and E1M1 spends 142 of
+the 255 on static geometry. quant 10 asked for 121 door pairs = 263 and killed the build ten
+minutes in, on an assert that mentions neither doors nor quant.
+
+| quant | stops | frames @ SPEED 1 | pids | |
+|---|---|---|---|---|
+| 16 | 9 | 8 | 222 | the old value -- every phase visible |
+| 12 | 12 | 11 | **245** | **SHIPPED** -- 10 spare |
+| 11 | 13 | 12 | 255 | fits with ZERO margin |
+| 10 | 14 | 13 | 263 | OVERFLOWS |
+
+The model is not a guess: it reproduces both real builds (222 at quant 16, 263 at quant 10) from
+WAD data alone, and `tests/host/test_doors.py` now runs it in 0.3 s. `emit_wall_renderer` also
+prints `pid bake: N pairs baked, M addressable` on every build, so the budget is visible before the
+assert rather than after it.
+
+⚠ One test had to be LOOSENED, and it was right to. `test_the_endpoint_is_not_free_of_charge`
+asserted every E1M1 door is left short by a floor-only rule -- true only because no door opens to a
+multiple of 16. At quant 10, sectors 64 (-60) and 84 (60) are exact multiples and it failed on a
+coincidence of the old constant, not on a defect. It is now parametrised over every quant the repo
+uses and requires a strict majority.
+
+
+## CE -- the 285-pixel renderer bug that was a BACKGROUND JOB, and what the gate could not see
+
+**The gate reported 285 differing pixels at the first frame door 10 moved, and it was right about
+the pixels and useless about the cause.** Frames 0-155 byte-exact; frame 156, door state 1, 285 px.
+I spent the afternoon on it: dumped the frames, found the diff was the ceiling plane (rows 0..29,
+columns 28-34/38-39) one colormap row brighter with the flat pattern shifted four rows, plus a
+one-pixel floor edge; swept `deg_mark` 60..1024, `STEP_SEG_BUDGET` 8..64, `deg_stack_scale`,
+`deg_lip_scale` -- no budget binds; proved `step_cls` cannot miss its `.get(..., 0)` default
+because both sides use the same `seg_secs` and the same key expression; confirmed no door seg is
+still "closed" at any state >= 1, so the fj gate (`solid iff dstate == 0`) matches route C.
+
+**None of it mattered. The binary was quant 12 and the oracle was quant 11.**
+
+A background job of mine -- a loop that measured pid counts by REWRITING `doors.DEFAULT_QUANT` --
+was still running after I believed it finished, and set the constant to 11 *after* I set it to 12
+and launched the build. Door 10's ceiling at state 1: **-120 in the binary, -121 in the oracle.**
+One map unit. 285 pixels.
+
+The tells were in the logs the whole time:
+
+    gate:      script : ... 2 use -> 14 open ...        <- 13 states = quant 11
+    binary:    seg603_attrib_consts_st0 .. _st11        <- 12 states = quant 12
+
+Re-gated against the matching oracle: **PASS -- 213 frames, 4,483,230,464 ops, every frame
+byte-exact, door 10 through all 12 states and held across the M1 reset.** CONTROL 4 (the path
+crosses the door's own line segment, so collision was really exercised) passes too.
+
+**THE LESSON IS NOT "BE CAREFUL".** It is that the gate could not tell what it was testing. It
+recomputed door stops from whatever `DEFAULT_QUANT` said at run time and compared them to a binary
+built from some other value, with nothing tying the two together. So:
+
+* `doors.geometry_stamp()` -- the SSOT for what a build froze: quant, SPEED, WAIT, MAX_STATES,
+  OPEN_GAP and every door's exact stop heights.
+* `build.py` writes `<binary>.fjm.doors.json` beside every `.fjm` it assembles.
+* **CONTROL 5** loads it and refuses to run on a mismatch, BEFORE the 4.5 billion ops. A missing
+  stamp is also a refusal: a gate whose subject is unknown is not a gate.
+
+R9 control -- corrupt the stamp to the exact mistake and it says, in under a second:
+
+    CONTROL 5 FAIL: the binary and this process disagree about door geometry.
+       quant: binary 11, this process 12
+       door 10 stops: binary [-128, -121, ...], this process [-128, -120, ...]
+       THE RENDERER IS NOT ON TRIAL HERE.
+
+⚠ **AND NEVER LET A BACKGROUND JOB WRITE TRACKED SOURCE.** The probe loop existed to answer "how
+many pids does quant N bake", and it answered it by editing `src/doomfj/doors.py` in place. A
+build, a gate and a GIF all ran against a constant that moved under them.
+
+**SHIPPED (quant 12):** binding metric **13,076,642 ops/frame** (target <= 20M) and
+**43,933,538 words = 32.73%** of 2^27 (target <= 35%). Against blocked21's 13,151,190 at quant 16,
+three extra door stops cost **-0.57% ops** (i.e. nothing measurable) and **+0.20pp size**.
+
+---
+
+## CF -- 971 tests, and the three defects the new tests found that review had not
+
+A coverage sweep (11 areas, survey -> write -> worktree-isolated mutation check) took host coverage
+from **68.4% to 82.5%** of 5,004 statements, 496 -> 971 tests, +8 s on the default run. Every area
+was audited against the real per-file `missing_lines`, not against a guess.
+
+**Three verdicts I did not take on trust, and one that was wrong.**
+
+1. **13 tests were "strengthened" INSIDE a worktree.** The agents' 254/254 mutation score was true
+   of the worktree copies and NOT of what was on disk -- six files on disk still held the version
+   that had FAILED to catch its mutation. Recovered from the run journal and re-applied. A
+   worktree-isolated verify phase improves nothing unless you carry the improvement back.
+
+2. **`MAGIC = 0xD0` -> `0xD1` left every wireformat test green.** Found by running the mutations
+   myself (`scratchpad/12m/mutcheck.py`), not by any agent's self-report. A round-trip suite is
+   STRUCTURALLY BLIND to the value of a symbol it uses on both sides: encode writes MAGIC, decode
+   checks MAGIC, self-consistent at any value. But MAGIC is a wire ABI constant baked into every
+   binary ever built -- change it and an old binary routes the host's first byte to `bad:` and
+   halts, which looks like a crashed renderer, not a version mismatch. Now pinned three ways,
+   including a cross-mirror check that reconstructs the byte from the two `hex.if_flags` NIBBLE
+   tests the emitted program actually branches on.
+
+3. **`window_chrome_fj` caught the wrong exceptions** -- mine, from the same session.
+   `except (KeyError, ValueError, IndexError)` around `decode_picture`, whose first statement is
+   `struct.unpack_from("<4h", data, 0)`. `struct.error` subclasses Exception directly and none of
+   the three catch it, so a lump that is PRESENT but malformed killed a 35-minute build at emit
+   time -- while the docstring promised a missing icon never fails a build. Missing lump: handled.
+   Bad lump: fatal.
+
+4. **Four ablate modes were declared and read by nothing:** `colstub`, `noflush`, and -- the
+   dangerous pair -- `pass2` and `planes`, which `emit_wall_renderer`'s docstring ADVERTISED as
+   working knobs. `assert ablate <= _ABLATE_MODES` accepted them and no arm consumed them, so
+   `ablate={"planes"}` emitted the full program and priced the visplane pass at **zero**. Same
+   failure shape as the `tsprobe`/`tsmark` arm retired the same day. All four retired; the test's
+   orphan allowlist is now EMPTY and a mode cannot be declared without a consumer.
+   ⚠ My first scan called `pnearcol` dead too -- the regex missed `"pnearcol" not in ablate`.
+   Check before deleting.
+
+5. **A `@slow` test had been unrunnable for several milestones.**
+   `test_build_wall_renderer_e1m1_flat` called `build_wall_renderer(E1M1, "E1M1", out_fjm=...)`
+   after the signature became keyword-only, so it could only ever raise TypeError -- and its
+   exact-equality `features` guard still expected `sector_heights`, a key that retired into
+   `doors`. Excluded by default at ~30 minutes a run, so nothing noticed. Both fixed, and two
+   millisecond-scale static guards now pin them: the `features` keys `build.py` constructs must
+   equal the keys the slow test asserts, and the slow test's call must `Signature.bind`.
+
+**`scratchpad/12m/mutcheck.py`** runs ten mutations against the tests as they stand on disk. All
+ten CAUGHT; all seven touched sources restored byte-identical. Its own controls: C1 a mutation
+whose anchor no longer matches is a BROKEN CHECK, never a silent skip; C2 every target file must be
+green before anything is mutated; C3 every file is byte-compared after restore.
+
+**Two xfails are a real M4 blocker, not decoration:** E1M6 has 344 and E1M7 330 runtime things,
+past the 254 the `thnext`/`sshead` byte sentinel allows, so a nine-level build dies on
+`_moving_thing_tables`' `assert nt < 0xFF`. `strict=True`, so it flips to a failure the moment
+either map fits.

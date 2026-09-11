@@ -1,0 +1,11 @@
+BLOCKING ON: pool base 0x80000000, pinning on
+  macros allowed: hex.double_exact_xor, hex.exact_xor, hex.quadrupled_exact_xor, hex.sparse_double_exact_xor, hex.sparse_exact_xor, hex.triple_exact_xor
+program parts: entry=32, tables=338,599, main=68, segconsts=44,419, walk=73,942, state=437, banks=2,137,148
+  counting pass: 8,531 groups, 89,099 tables
+assembled
+(664,291,0x18000000): 27,253,952 ops  BYTE-EXACT
+(1272,-724,0x40000000): 21,539,101 ops  BYTE-EXACT
+(1869,479,0x80000000): 25,069,501 ops  BYTE-EXACT
+(-416,256,0x0): 19,976,377 ops  BYTE-EXACT
+PASS
+blocked: 87,373 tables in 8,531 groups; declined 1,726; ungrouped 0; pin conflicts 1,133

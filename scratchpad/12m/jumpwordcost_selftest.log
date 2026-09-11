@@ -1,0 +1,8 @@
+jumpwordcost selftest -- a classifier that accepts everything reports 100%
+  C2 counts flips into a JUMP word (40, 100)               ok  2 of 4
+  C2 ...and rejects flips into a FLIP word (8, 64)         ok
+  C2 the whole jump-word range [w, 2w) counts              ok
+  C2 ...and the whole flip-word range [0, w) does not      ok
+  C3 an empty run has nothing to divide by                 ok
+
+SELFTEST PASS

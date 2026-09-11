@@ -77,7 +77,13 @@ campaign ships on the 260-frame sweep median, so MEDIAN is the column that ranks
 | `hex.exact_xor` | 8,811,030 | 45.63% |
 | `hex.double_exact_xor` | 1,706,321 | 8.84% |
 | `hex.triple_exact_xor` | 1,398,329 | 7.24% |
-| `<top level: distscale>` | 785,798 | 4.07% |
+| ~~`<top level: distscale>`~~ ⚠ ARTIFACT | ~~785,798~~ | ~~4.07%~~ |
+
+⚠ The `distscale` row above is an OVER-ATTRIBUTION ARTIFACT, not a real cost (FINDINGS BA).
+`distscale` is the last top-level label, so every op after it in the address space was
+credited to it; 0 of the attributed ops were inside the table. `hotpath.py` now guards
+against this and refuses to credit an op sitting >4096 ops past a bare label.
+
 | `stl.comp_if1` | 445,288 | 2.31% |
 | `hex.mul.init` | 405,775 | 2.10% |
 | `hex.tables.clean_table_entry__table` | 325,583 | 1.69% |

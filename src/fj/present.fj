@@ -2,7 +2,7 @@
 // present.fj       drives the screen device: command bytes on the output stream.
 // STATUS  LIVE - the generated main
 // ENTRY   present.init_screen_stream, present.set_palette, present.begin_frame_collines
-// SIZE    14 macros (present.init_screen_stream .. present.emit_cmd_byte)
+// SIZE    16 macros (present.init_screen_stream .. present.emit_cmd_byte)
 // ==============================================================================================
 // F7 (present layer, M11a) — drive the screen device over the output stream.
 // Device protocol (authoritative: flipjump InMemoryScreen / ScreenIO.py): command bytes on the
@@ -31,6 +31,8 @@
 //   0x0D  begin_frame_raster       —                                device-rasterizer tier
 //   0x0E  load_proj_tables         addr + count:2                   proj tier
 //   0x0F  begin_frame_proj         —                                proj tier
+//   0x12  set_window_title         <bytes> 0x00                  window caption
+//   0x13  set_window_icon_header   w,h (+ w*h indices)           window icon
 //   (0x04/0x05/0x08 are not emitted by this file. `emit_addr` is a helper, not a command.)
 //
 // ---------- Conventions that hold in this file
@@ -63,6 +65,33 @@ ns present {
     // emit a w-bit label/address as w/8 little-endian bytes (includes zero bytes, unlike stl.output).
     def emit_addr addr {
         rep(w/8, i) stl.output_char (addr >> (8*i)) & 0xff
+    }
+
+    // set_window_title: [0x12] <utf-8 bytes> 0x00 -- letters until a NUL, as the owner specified.
+    // `text` is a compile-time fj string (a big integer, least-significant BYTE first, which is what
+    // stl.output already assumes); `len` is passed explicitly rather than derived, so an embedded
+    // zero byte cannot silently truncate the name. The device needs no length: ScreenIO's
+    // `_command_length` keeps asking for one more byte until the buffer ends in 0x00.
+    // Cost: 8*(2+len) ops, emitted ONCE at boot -- the M1 self-reset re-enters at `__hot_end`, so
+    // this never runs again and costs nothing on the frame metric.
+    def set_window_title text, len {
+        stl.output_char 0x12
+        rep(len, i) stl.output_char (text >> (8*i)) & 0xff
+        stl.output_char 0x00
+    }
+
+    // set_window_icon_header: [0x13][w][h]. The w*h PALETTE INDICES follow as raw bytes -- one per
+    // pixel, resolved against whatever palette `set_palette` (0x02) registered, again as specified.
+    // The pixels are emitted by the generated icon macro rather than passed here, because a 32x32
+    // icon is 1024 bytes and fj macro parameters are compile-time constants.
+    // ⚠ INDEX 0 IS TRANSPARENT (ScreenIO.ICON_TRANSPARENT_INDEX) -- DOOM's own picture format has
+    // no alpha and uses a key colour, and the device turns index 0 into an SDL colorkey.
+    // ⚠ params are `iw, ih`, NOT `w, h`: `w` is the global memory-width constant from fj_consts
+    // and `h` shadows nothing but reads as its partner, so both are prefixed.
+    def set_window_icon_header iw, ih {
+        stl.output_char 0x13
+        stl.output_char iw
+        stl.output_char ih
     }
 
     // init_screen: [0x01][W:2][H:2][BPP:1][palette_entries=NCOLORS:2]
@@ -153,8 +182,7 @@ ns present {
     //             for real pairs, so 0xFF is unambiguous). If the byte after [x] is [0xFE], the
     //             record is a DITTO instead: copy column x-1's pixels into column x, record done.
     //             Emitted when a column's output would be byte-identical to column x-1's — inline
-    //             by the walk leaf in the shipped tier (frame_render.fj's emit_ditto path), by
-    //             stream_render.fj::flush_frame in the rung-3b mode; never for column 0.
+    //             by the walk leaf (frame_render.fj's emit_ditto path); never for column 0.
     //   0xFF:     end of frame -> present.
     // No clipping, no lookups, no decisions device-side: every row range and colour was computed
     // in fj. Decode: stream_screen.py::_handle_collines_byte.

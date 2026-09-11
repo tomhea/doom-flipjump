@@ -1,0 +1,22 @@
+SIZE: w=32  segments=1  data=51,099,046 words (38.07% of 2^27)  span=51,099,046 words (38.07%)  file=18,240,103 bytes
+calibration: startup + 2 menu frames = 508,235 ops (subtracted from every run)
+  run  0: 2,788,785,496 ops / 102 presented -> raw 27,341,034, game-only 27,882,772 ops/frame
+  run  1: 2,249,895,959 ops / 102 presented -> raw 22,057,803, game-only 22,493,877 ops/frame
+  run  2: 2,914,886,492 ops / 102 presented -> raw 28,577,318, game-only 29,143,782 ops/frame
+  run  3: 2,448,455,060 ops / 102 presented -> raw 24,004,461, game-only 24,479,468 ops/frame
+  run  4: 1,488,966,795 ops / 102 presented -> raw 14,597,713, game-only 14,884,585 ops/frame
+  run  5: 2,552,819,597 ops / 102 presented -> raw 25,027,643, game-only 25,523,113 ops/frame
+  run  6: 2,045,519,097 ops / 102 presented -> raw 20,054,108, game-only 20,450,108 ops/frame
+  run  7: 1,536,806,646 ops / 102 presented -> raw 15,066,731, game-only 15,362,984 ops/frame
+  run  8: 1,830,949,193 ops / 102 presented -> raw 17,950,482, game-only 18,304,409 ops/frame
+  run  9: 1,616,298,426 ops / 102 presented -> raw 15,846,063, game-only 16,157,901 ops/frame
+
+==============================================================================
+SPEED  BINDING (mean+p80)/2: 23,495,707 ops/frame   (target <= 20,000,000)  OVER
+SPEED  mean run-average   : 21,468,300 ops/frame
+SPEED  80th-pct run avg   : 25,523,113 ops/frame
+SPEED  spread lo..hi      : 14,884,585 .. 29,143,782 ops/frame
+SPEED  raw (menu included): mean 21,052,336, 80th-pct 25,027,643 ops/frame
+SIZE   words              : 51,099,046 = 38.07% of 2^27   (target <= 35%)  OVER
+SIZE   span / file        : 51,099,046 words (38.07%) / 18,240,103 bytes
+==============================================================================

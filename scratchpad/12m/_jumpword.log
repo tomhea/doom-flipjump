@@ -1,0 +1,23 @@
+=== BASELINE (z3) ===
+fjm      : build/doom_e1m1_z3.fjm
+frames   : 4 presented
+ops      : 77,410,023 counted by the interpreter, 77,410,024 seen by the hook
+
+  jump-word writes : 68,746,608 = 88.81% of the frame
+  everything else  : 8,663,416 = 11.19%
+
+  FINDINGS BD measured 78.32% on the PRE-BLOCKING binary. A number well below that
+  means the address-writing cost has been paid down and the next lever should be
+  chosen from what is left, not from BD.
+
+=== BLOCKED (gate-passing) ===
+fjm      : build/doom_e1m1_blocked2.fjm
+frames   : 4 presented
+ops      : 72,628,968 counted by the interpreter, 72,628,969 seen by the hook
+
+  jump-word writes : 63,535,573 = 87.48% of the frame
+  everything else  : 9,093,396 = 12.52%
+
+  FINDINGS BD measured 78.32% on the PRE-BLOCKING binary. A number well below that
+  means the address-writing cost has been paid down and the next lever should be
+  chosen from what is left, not from BD.

@@ -1,0 +1,20 @@
+fjm    : build/doom_e1m1_blocked.fjm
+target : door sector 48, use box (480, 616, 624, 808), threshold state 4
+script : 2 menu -> enter -> 24 walk to the door -> 2 use -> 8 open -> 3 through -> 6 idle  (45 frames)
+doorway: line 537 ((544, 744), (544, 680)) -> approach (488, 712), then through to (632, 712)
+running: 1,019,022,990 ops -> 45 frames presented
+
+  frame  keys      door48    fj px vs oracle
+      0  -              -   (menu frame -- m3_gate judges these)
+      1  -              -   (menu frame -- m3_gate judges these)
+      2  ft             0   BYTE-EXACT
+      3  ft             0   !! 7831 px differ
+  -- stopping: once the trajectories part, later frames compare nothing useful
+
+  CONTROL 1: door 48 reached 1 distinct states [0] -- !! NOT ENOUGH: one state is a door that re-shut every frame, which IS the bug
+  CONTROL 2: use was pressed INSIDE the box: !! no -- the script missed
+  CONTROL 3: the 2 menu frames are identical to each other: yes
+  CONTROL 4: the player's path crosses door 48's own line SEGMENT ((544, 744)-(544, 680) / (560, 680)-(560, 744)): !! NO -- collision was never tested, this proves the render half only
+  !! VACUOUS -- fix the SCRIPT, not the verdict
+
+M2 STANDALONE GATE: FAIL

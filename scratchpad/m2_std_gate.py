@@ -44,11 +44,13 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doorcode import door_line_ids                                 # noqa: E402
-from doomfj.doors import (door_states, door_tic, heights_for_states,      # noqa: E402
-                          in_use_box_fixed, initial_states, pass_state, use_boxes_xy)
+from doomfj.doors import (DEFAULT_QUANT, compare_stamp, door_states,     # noqa: E402
+                          door_tic, heights_for_states, in_use_box_fixed, initial_states,
+                          pass_state, read_stamp, stamp_path, use_boxes_xy)
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
-from doomfj.reference_model import (ReferenceModel, build_scene,          # noqa: E402
+from doomfj.reference_model import (ANGLE_TURN, ReferenceModel, build_scene,  # noqa: E402
+                                    _signed,          # noqa: E402
                                     spawn_state)
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.wall_renderer import STANDALONE_POLLS                         # noqa: E402
@@ -108,6 +110,125 @@ def seg_cross(p, q, a, b):
     d1, d2 = cross(a, b, p), cross(a, b, q)
     d3, d4 = cross(p, q, a), cross(p, q, b)
     return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+
+# ── planning that NAVIGATES ────────────────────────────────────────────────────────────────────
+# ⚠ `plan_to` below is a width-24 beam sorted by straight-line distance. MEASURED 2026-09-10: the
+# 24-frame route it returned at FORWARD_MOVE=50 crosses one-sided linedefs 534 and 571 -- it
+# reached door 48 BY WALKING THROUGH TWO WALLS, which the 50-unit unswept step allowed. So this
+# gate was certifying the binary along a path the player cannot legally take, and the door it aims
+# at is not even reachable: with doors shut the walkable region from the spawn stops at y=488 while
+# door 48's use box starts at y=616.
+#
+# Two consequences, both fixed here:
+#   * the TARGET must be a door with a genuinely walkable route, not the nearest by straight line
+#     (measured: of E1M1's 13 door sectors only 10 and 100 are reachable from the spawn);
+#   * the PLANNER must navigate. A greedy frontier cannot walk around an obstacle, and its pose
+#     de-dup buckets angle at 11.25 degrees while one turn is 3.5, so three consecutive turns
+#     collapse to one state and are pruned -- it cannot even turn in place.
+#
+# `walkable_cells` BFSes over 16-unit cells where adjacency is `try_move` actually accepting the
+# step, so it obeys the same collision the program runs and "unreachable" means unreachable.
+# `plan_walkable` then steers along those waypoints. The route it returns is re-simulated by the
+# byte-exact comparison below exactly as before, so this strengthens what the gate proves (the
+# route is now physically walkable) without weakening anything.
+
+NAV_CELL = 16
+
+
+def walkable_cells(rm, scene, sx, sy, goal_pred=None, cell=NAV_CELL, cap=400000):
+    """BFS over grid cells; adjacency is `try_move`. Returns (path_or_None, visited_set)."""
+    import collections
+    start = (int(sx) // cell, int(sy) // cell)
+    seen = {start}
+    q = collections.deque([(start, [start])])
+    steps = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1))
+    n = 0
+    while q and n < cap:
+        (cx, cy), path = q.popleft()
+        wx, wy = cx * cell + cell // 2, cy * cell + cell // 2
+        if goal_pred is not None and goal_pred(wx, wy):
+            return [(px * cell + cell // 2, py * cell + cell // 2) for px, py in path], seen
+        for ddx, ddy in steps:
+            nc = (cx + ddx, cy + ddy)
+            if nc in seen:
+                continue
+            nx, ny = nc[0] * cell + cell // 2, nc[1] * cell + cell // 2
+            n += 1
+            if not rm.try_move(scene, wx << 16, wy << 16, nx << 16, ny << 16):
+                continue
+            seen.add(nc)
+            q.append((nc, path + [nc]))
+    return None, seen
+
+
+def plan_walkable(rm, scene, start, goal, radius, accept=None, max_tics=1500):
+    """Grid-BFS a walkable path to `goal`, then steer along it. Same contract as `plan_to`."""
+    import math
+    gx, gy = goal
+    hit = accept or (lambda st: ((st.x >> 16) - gx) ** 2 + ((st.y >> 16) - gy) ** 2 <= radius ** 2)
+    # ⚠ THE BFS TOLERANCE MUST NOT BE TIGHTER THAN THE ACCEPTANCE TEST. Targeting cells within
+    # 1.5 cells (24 units) while the caller accepts 40 made the search report "unreachable" for a
+    # threshold that had 14 reachable cells inside 40 units -- a planner failing on its own
+    # discretisation, not on the geometry.
+    tol = max(float(radius), NAV_CELL * 1.5)
+    near_goal = lambda wx, wy: (wx - gx) ** 2 + (wy - gy) ** 2 <= tol ** 2      # noqa: E731
+    path, _seen = walkable_cells(rm, scene, _signed(start.x, 32) >> 16,
+                                 _signed(start.y, 32) >> 16, near_goal)
+    if not path:
+        return None
+
+    def drive(waypoints):
+        """Turn toward each waypoint, then walk to it. None if it runs out of tics."""
+        st, script, turn = start, [], ANGLE_TURN
+        for (wx, wy) in list(waypoints[1:]) + [(gx, gy)]:
+            for _ in range(max_tics):
+                if len(script) >= max_tics:
+                    return None
+                x, y = _signed(st.x, 32) / 65536.0, _signed(st.y, 32) / 65536.0
+                if (x - wx) ** 2 + (y - wy) ** 2 <= (NAV_CELL * 0.9) ** 2:
+                    break
+                want = int(math.atan2(wy - y, wx - x) / (2 * math.pi) * (1 << 32)) & 0xFFFFFFFF
+                diff = (want - st.angle) & 0xFFFFFFFF
+                if diff > (1 << 31):
+                    diff -= 1 << 32
+                kd = {k: False for k in KEY_NAMES}
+                if abs(diff) > turn // 2:
+                    kd["turn_left" if diff > 0 else "turn_right"] = True
+                else:
+                    kd["forward"] = True
+                st = rm.step_sim(st, kd, scene=scene)
+                script.append(kd)
+                if hit(st):
+                    return script
+        return script if hit(st) else None
+
+    # SIMPLIFY the cell path before steering: BFS emits a waypoint every 16 units and the steerer
+    # turns to face each at 3.5 degrees per tic, so a short walk burned most of its frames turning.
+    # That matters beyond tidiness -- a door is passable for only WAIT frames, so a needlessly long
+    # walk-through leg arrives after it has shut.
+    def clear(a, bpt):
+        n = max(1, int(((a[0] - bpt[0]) ** 2 + (a[1] - bpt[1]) ** 2) ** 0.5) // 8)
+        for k in range(n + 1):
+            mxp, myp = a[0] + (bpt[0] - a[0]) * k / n, a[1] + (bpt[1] - a[1]) * k / n
+            ok, _f, _c = rm.check_position(scene, int(mxp) << 16, int(myp) << 16)
+            if not ok:
+                return False
+        return True
+
+    simple, i = [path[0]], 0
+    while i < len(path) - 1:
+        j = len(path) - 1
+        while j > i + 1 and not clear(path[i], path[j]):
+            j -= 1
+        simple.append(path[j])
+        i = j
+
+    # ⚠ SIMPLIFICATION IS AN OPTIMISATION, NEVER A CONSTRAINT. Skipping waypoints on a
+    # check_position line-of-sight can hand the steerer a leg it cannot drive (the swept path clips
+    # a corner the sampled points miss), and an earlier version returned None from inside the first
+    # attempt, so the fallback below never ran and a plannable route was reported unreachable.
+    return drive(simple) or drive(path)
 
 
 def plan_to(rm, scene, start, goal, radius, maxf=40, width=24, accept=None):
@@ -260,8 +381,12 @@ def main():
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default="assets/freedoom1.wad")
-    ap.add_argument("--open-wait", type=int, default=8,
-                    help="frames to stand while the door walks up to its last state")
+    ap.add_argument("--open-wait", type=int, default=0,
+                    help="frames to stand while the door walks up to its last state. 0 = derive "
+                         "it from doors.SPEED and the target's stop count, which is what keeps "
+                         "this gate honest when the door speed changes (at SPEED=1 a 9-stop door "
+                         "opened in 8 frames; at SPEED=2 it needs 16, and a fixed 8 would assert "
+                         "'door is at state N, not open').")
     ap.add_argument("--walk", type=int, default=8,
                     help="frames to walk FORWARD through the opened doorway (the collision half)")
     ap.add_argument("--idle", type=int, default=6,
@@ -279,6 +404,36 @@ def main():
     rm = ReferenceModel(Config())
     cmap = bake_bsp(mw, args.map)
     secs, lds, sds = mw.sectors(args.map), mw.linedefs(args.map), mw.sidedefs(args.map)
+    # ── CONTROL 5, BEFORE 4.5 BILLION OPS ───────────────────────────────────────────────────
+    # THE BINARY AND THIS PROCESS MUST AGREE ON WHAT A DOOR IS. The oracle recomputes door stops
+    # from doors.DEFAULT_QUANT; the binary baked them when it was built. Nothing tied the two
+    # together until 2026-09-11, when a background job rewrote DEFAULT_QUANT while a build was in
+    # flight. The gate then ran a quant-11 oracle against a quant-12 binary, reported "285 px
+    # differ" at the first frame the door moved, and sent hours into a renderer bug that did not
+    # exist: door 10's ceiling at state 1 was -120 in the binary and -121 in the oracle. That is
+    # the entire story, and a pixel count cannot show it.
+    _stamp = read_stamp(args.fjm)
+    if _stamp is None:
+        print("  CONTROL 5: NO DOOR STAMP beside %s" % args.fjm)
+        print("     This gate cannot prove the binary and this process agree on door geometry, so")
+        print("     a PASS would prove less than it looks like. Rebuild (build.py writes %s)."
+              % stamp_path(args.fjm).name)
+        print("     Refusing to run: a gate whose subject is unknown is not a gate.")
+        return 1
+    _bad = compare_stamp(_stamp, secs, lds, sds)
+    if _bad:
+        print("  CONTROL 5 FAIL: the binary and this process disagree about door geometry.")
+        for _b in _bad[:8]:
+            print("     %s" % _b)
+        if len(_bad) > 8:
+            print("     ... and %d more" % (len(_bad) - 8))
+        print("     THE RENDERER IS NOT ON TRIAL HERE. Rebuild the binary at DEFAULT_QUANT=%d, or"
+              % DEFAULT_QUANT)
+        print("     check out the source this binary was built from.")
+        return 1
+    print("  CONTROL 5: binary and oracle agree on door geometry (quant %d, %d doors)"
+          % (_stamp["quant"], len(_stamp["stops"])))
+
     tbl = door_states(secs, lds, sds)
     order = sorted(tbl)
     boxes = use_boxes_xy(secs, lds, sds, cmap.vertexes)
@@ -289,7 +444,21 @@ def main():
 
     # the door to walk to: the nearest one to the spawn, by the same measure the planner minimises
     sp = spawn_state(mw, args.map)
-    target = min(order, key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - (sp.x >> 16)) ** 2
+    # ⚠ NEAREST REACHABLE, not nearest. Straight-line nearest picks door 48, whose use box sits
+    # 229 units beyond anything walkable from the spawn with the doors shut; the old beam only
+    # "reached" it by tunnelling through linedefs 534 and 571. Reachability is decided by the same
+    # try_move the program runs, so this cannot select an impossible target again.
+    _reach_scene = build_scene(mw, mw, args.map)
+    _, _cells = walkable_cells(rm, _reach_scene, _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16)
+    def _walkable_door(si):
+        x0, y0, x1, y1 = boxes[si]
+        return any(x0 <= wx <= x1 and y0 <= wy <= y1
+                   for wx, wy in ((cx * NAV_CELL + NAV_CELL // 2, cy * NAV_CELL + NAV_CELL // 2)
+                                  for cx, cy in _cells))
+    _cands = [si for si in order if _walkable_door(si)]
+    assert _cands, ("no door's use box is reachable from the spawn -- with %d walkable cells, the "
+                    "gate cannot test a door in this tier" % len(_cells))
+    target = min(_cands, key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - (sp.x >> 16)) ** 2
                  + ((boxes[si][1] + boxes[si][3]) // 2 - (sp.y >> 16)) ** 2)
 
     # ⚠ `mw, mw` -- the MAP wad as the asset wad, which is what m3_gate/m5_gate/m2_r4_gate all do
@@ -316,8 +485,15 @@ def main():
     # ⚠ arriving near the approach POINT is not the same as standing where use works: the first
     # version ended 27 units from it and 15 units OUTSIDE the use box, so the press did nothing and
     # the door never moved. The acceptance test is the box itself.
-    route = plan_to(rm, walk_scene, sp, approach, 40, maxf=90,
-                    accept=lambda st: in_use_box_fixed(boxes[target], st.x, st.y))
+    # ⚠ IN THE USE BOX IS NOT AT THE DOORWAY. Door 10's box is 256x160 units and wraps a corner,
+    # so "first frame inside the box" ended the walk at (720,449) -- in the box, but around a wall
+    # from the opening, which made the walk-through leg detour 84 waypoints to x=168 and back.
+    # Require BOTH: the box (where `use` actually works) and the threshold (where walking through
+    # is one short straight leg, which matters because the door is only passable for WAIT frames).
+    route = plan_walkable(rm, walk_scene, sp, approach, 40,
+                          accept=lambda st: in_use_box_fixed(boxes[target], st.x, st.y)
+                          and ((st.x >> 16) - approach[0]) ** 2
+                          + ((st.y >> 16) - approach[1]) ** 2 <= 72 ** 2)
     assert route, "no route from the spawn to door %d's threshold at %s" % (target, approach)
 
     # menu frames, then the walk, then the press, then stand and watch the door work
@@ -325,6 +501,9 @@ def main():
     # only -- the door's passability is a separate claim with its own bit, and the only way to test
     # that bit in this tier is to try to walk through the doorway.
     press = [{"use": True}, {"use": True}]
+    if not args.open_wait:
+        from doomfj.doors import SPEED as _DSPEED
+        args.open_wait = _DSPEED * (nstates[target] - 1) + 2
     opening = [{} for _ in range(args.open_wait)]
 
     # PHASE C, planned rather than hard-coded: eight frames of "forward" walked the player PAST the
@@ -344,8 +523,43 @@ def main():
         "door %d is at state %d, not open, after %d frames of waiting"
         % (target, ds[target][0], args.open_wait))
 
-    through = plan_to(rm, build_scene(mw, mw, args.map, open_h), st, beyond, 40)
+    through = plan_walkable(rm, build_scene(mw, mw, args.map, open_h), st, beyond, 40)
     assert through, "no route through door %d's opening to %s" % (target, beyond)
+
+    # ⚠ CONTROL 0 -- THE ROUTE MUST BE PHYSICALLY WALKABLE. The beam this gate used until
+    # 2026-09-10 reached its target by crossing one-sided linedefs 534 and 571; the gate passed
+    # anyway, because every other control asks about PIXELS and a route through a wall renders
+    # perfectly. Nothing here would have caught it, so it is checked explicitly: re-simulate the
+    # approach leg and require that its centre path crosses no solid line. A plan that tunnels is
+    # rejected before a single frame is compared.
+    def _seg_cross(ax, ay, bx, by, cx, cy, dx, dy):
+        def _cr(ox, oy, px, py, qx, qy):
+            return (px - ox) * (qy - oy) - (py - oy) * (qx - ox)
+        d1, d2 = _cr(cx, cy, dx, dy, ax, ay), _cr(cx, cy, dx, dy, bx, by)
+        d3, d4 = _cr(ax, ay, bx, by, cx, cy), _cr(ax, ay, bx, by, dx, dy)
+        return ((d1 > 0) != (d2 > 0)) and ((d3 > 0) != (d4 > 0))
+
+    _vx = cmap.vertexes
+    _tun, _cs = [], sp
+    for _kd in route:
+        _ns = rm.step_sim(_cs, _kd, scene=walk_scene)
+        _a = (_signed(_cs.x, 32) / 65536.0, _signed(_cs.y, 32) / 65536.0)
+        _b = (_signed(_ns.x, 32) / 65536.0, _signed(_ns.y, 32) / 65536.0)
+        if _a != _b:
+            for _li, _ld in enumerate(lds):
+                if _ld.back != -1:
+                    continue
+                _v1, _v2 = _vx[_ld.v1], _vx[_ld.v2]
+                # cmap.vertexes holds TUPLES (the door_segs unpacking above relies on it),
+                # unlike wad.vertexes() which yields Vertex objects with .x/.y
+                if _seg_cross(_a[0], _a[1], _b[0], _b[1], _v1[0], _v1[1], _v2[0], _v2[1]):
+                    _tun.append(_li)
+        _cs = _ns
+    assert not _tun, ("CONTROL 0 FAILED: the planned route walks THROUGH solid linedef(s) %s -- "
+                      "the binary cannot be certified along a path the player cannot take"
+                      % sorted(set(_tun)))
+    print("  CONTROL 0: the planned route crosses no solid linedef: yes (%d frames re-simulated)"
+          % len(route))
 
     script = ([{} for _ in range(MENU_FRAMES)] + route + press + opening + through
               + [{} for _ in range(args.idle)])
@@ -444,6 +658,56 @@ def main():
                  "BYTE-EXACT" if same else
                  "!! %d px differ" % sum(a != b for a, b in zip(got[f], want))), flush=True)
         if not same and not args.selftest:
+            # WHICH PICTURE DID THE PROGRAM DRAW? A pixel count says "they differ"; it does not say
+            # whether the program rendered the wrong door STATE (a dispatch/timing fault) or the
+            # right state wrongly (a rendering fault). Re-render the oracle at every state of the
+            # target door and look for an exact match: if one matches, the program is simply on a
+            # different state and the renderer is fine.
+            idx = [i for i, (a, b) in enumerate(zip(got[f], want)) if a != b]
+            xs = [i % rm.cfg.VIEW_W for i in idx]
+            ys = [i // rm.cfg.VIEW_W for i in idx]
+            print("  -- differing pixels: x %d..%d, y %d..%d" % (min(xs), max(xs), min(ys), max(ys)))
+            for k in range(nstates[target]):
+                alt = {si: dstates[si][0] for si in order}
+                alt[target] = k
+                asc = build_scene(mw, mw, args.map, heights_for_states(secs, lds, sds, alt))
+                pic = bytes(rm.render_wall_frame(state, asc, wall_mode="W1R", floor_mode_ft1=True,
+                                                 plane_near=True, wall_noise=True, near_steps=True,
+                                                 stack_steps=True, things=True, sprite_wad=art,
+                                                 degrade=True))
+                nd = sum(a != b for a, b in zip(got[f], pic))
+                if nd == 0 or k <= dstates[target][0] + 1:
+                    print("     vs oracle with door at state %-2d : %s"
+                          % (k, "EXACT MATCH -- the program is on THIS state" if nd == 0
+                             else "%d px differ" % nd))
+            # SAVE THE EVIDENCE. Re-running the binary to ask one more question costs four
+            # minutes; the frame and the pose it was rendered from cost nothing to keep, and with
+            # them every follow-up experiment is an oracle render away.
+            try:
+                import json as _json
+                Path("scratchpad/12m/_gate_mismatch_f%d.bin" % f).write_bytes(bytes(got[f]))
+                Path("scratchpad/12m/_gate_mismatch_f%d.json" % f).write_text(_json.dumps({
+                    "frame": f, "x": state.x, "y": state.y, "angle": state.angle,
+                    "level": state.level, "target": target,
+                    "dstates": {str(si): dstates[si][0] for si in order}}), encoding="utf-8")
+                print("  -- saved _gate_mismatch_f%d.bin/.json (the fj frame and its pose)" % f)
+            except Exception as e:
+                print("  -- state save failed: %s" % e)
+            try:
+                from PIL import Image
+                pal = art.playpal(0)
+                W_, H_ = rm.cfg.VIEW_W, rm.cfg.VIEW_H
+                sheet = Image.new("RGB", (W_ * 3, H_))
+                for col, px in enumerate((got[f], want, bytes(
+                        255 if a != b else 0 for a, b in zip(got[f], want)))):
+                    im = Image.new("RGB", (W_, H_))
+                    im.putdata([(v, v, v) if col == 2 else tuple(pal[v]) for v in px])
+                    sheet.paste(im, (W_ * col, 0))
+                out = Path("scratchpad/12m/_gate_mismatch_f%d.png" % f)
+                sheet.resize((W_ * 6, H_ * 2), Image.NEAREST).save(out)
+                print("  -- wrote %s  (fj | oracle | diff mask)" % out)
+            except Exception as e:                       # a dump failing must not hide the verdict
+                print("  -- dump failed: %s" % e)
             print("  -- stopping: once the trajectories part, later frames compare nothing useful")
             break
 

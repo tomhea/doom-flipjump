@@ -1,0 +1,34 @@
+owner mode: relocating tables under frame.seg_pass1_leaf_body_lines, frame.seg_pass2_leaf_body_lines, frame.seg_pass1_leaf_body_ts, proj.point_on_side_leaf, frame.thing_record_body, proj.wedge_bbox, capped at 8,192
+pool: base 0x80000000, run_ops 16
+{
+  "map": "E1M1",
+  "downscale": 2,
+  "storage_mode": "flat",
+  "span_words": 130023456,
+  "flat_limit": 134217728,
+  "headroom": 1.032,
+  "fjm_bytes": 5409895,
+  "assemble_seconds": 289.383,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": false,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": false,
+    "collide": false,
+    "moving_things": false,
+    "state_wire": "bin",
+    "self_reset": false,
+    "standalone": false,
+    "doors": false,
+    "menu": false
+  },
+  "self_reset": null
+}
+
+relocated: 8,192 tables into 7,976 runs; declined 10
+total 854s

@@ -7,7 +7,7 @@ movement, input and the M1 self-reset all included):
 
 | metric | how it is measured | target |
 |---|---|---|
-| **SPEED** | play **10 different games of 100 frames each**; each RUN's stat is `total_ops / 100` = that run's average ops/frame. Report the **mean run-average** and the **80th-percentile RUN** (the run at the 80%-high mark, by its average), showing that run's average-per-frame. | **80th-pct run ≤ 20,000,000 ops/frame** |
+| **SPEED** | play **10 different games of 100 frames each**; each RUN's stat is `total_ops / 100` = that run's average ops/frame. The **BINDING** number is the **average of the mean run-average and the 80th-percentile run** (owner, 2026-09-06). Report all three, plus the spread. | **(mean + p80) / 2 ≤ 20,000,000 ops/frame** |
 | **SIZE** | the game binary's **decompressed word count as a percentage of 2^27** (134,217,728 words — the w=32 address ceiling) | **≤ 35%** |
 
 Nothing else is the criterion. In particular the `ca2_sweep` deg-tier median — the number the whole
@@ -60,35 +60,48 @@ backwards in four places; both directions are now named separately.)
 
 ### The measured baseline, and why it fails BOTH metrics
 
-⚠ **Every number in the next two tables was produced by a tool that had no negative control at the
-time it ran** (`overflow_probe`, and `gamespeed`'s draft `word_pct`). Those controls now exist, so
-the numbers are re-measurable — but until they have been re-measured they are **UNVERIFIED** in the
-sense CLAUDE.md's "Performance Claims" rule means, and rung 1 exists to replace them. Do not carry
-them into a commit message or a claim without re-running the measurement.
+✅ **MEASURED 2026-09-06, second attempt.** The first attempt is withdrawn — its scripts walked
+into walls (§7 G5). This run uses oracle-planned scripts whose `--validate` output is attached, per
+the rule that no number enters this document without it.
+
+```
+python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_menu_p105.fjm --runs 10 --frames 100
+```
+
+Full logs: `scratchpad/12m/g7_padded_baseline.log` and `scratchpad/12m/g7_validate.log`
+(**all ten runs move on 100% of their movement frames**, 9 distinct end cells, 2,258-unit spread).
 
 | | measured | target | verdict |
 |---|---:|---:|---|
-| game binary words | **125,492,170 = 93.5% of 2^27** | ≤35% | **FAIL — and no room for new levels** |
-| game binary file | 36.4 MB | — | (fast-LZMA; 13.8× vs deg's 26.2×) |
-| full-game ops/frame | **~33.4M** (1,504,887,174 ops / 45 frames, `m2_std_gate`) | ≤20M @ p80 | **FAIL — needs ~40% off** |
+| game binary words (DATA) | **125,492,170 = 93.50% of 2^27** | ≤35% | **FAIL** |
+| game binary words (SPAN) | 125,492,170 = 93.50% | — | equal to DATA: one segment, nothing sparse |
+| game binary file | 36,442,805 bytes | — | |
+| **80th-pct run** | **24,723,058 ops/frame** | ≤20M | **FAIL — needs −19.1%** |
+| mean run-average | 20,579,907 ops/frame | — | just above target; the p80 is what binds |
+| run spread | 14,489,277 .. 27,880,595 | — | 1.92× — why the metric is a percentile |
 
-⚠ **The ~33.4M is a trajectory average from the play-test, not the new metric.** It is the only
-full-game number that exists. The first job of this campaign is to replace it with a real
-`gamespeed` baseline.
+### How this compares to `m2_std_gate`'s route, like for like
 
-### Why the full game costs ~2× the render
+The handoff previously carried **~33.4M ops/frame** from `m2_std_gate`'s door route. That figure is
+menu-INCLUDED over 45 frames; converted to the metric's basis (menu subtracted, per game frame) it
+is `(1,504,887,174 − 538,417)/43 =` **34,984,855 ops/frame**.
 
-The deg/visual tier renders and stops. The game also runs, per frame:
+So that one route is **more expensive than all ten** of these runs (max 27,880,595). It is a real
+trajectory the program really executes — §7 G5 is right that it "walks somewhere real" — it simply
+sits above this sample's range. Both statements can hold: it is a valid route AND it is not the
+80th percentile of ten varied ones. No claim is made here about which better represents "play";
+the owner's spec defines the metric as the ten-run p80, and that is **24,723,058**.
 
-| component | ~ops/frame | source |
-|---|---:|---|
-| render (walls/floors/things) | ~16M | the ca2_sweep median |
-| **collision** | **~11.6M** | FINDINGS: "M14-d's four descents cost 11,602,784 ops" |
-| sim + thing movement + input | few M | |
-| M1 self-reset | per-frame overhead | the game loops and restores state every frame |
+⚠ **The withdrawn first attempt read 26,001,449 — HIGHER than this corrected run.** The
+wall-scraping runs were more expensive, not cheaper: a near surface filling the view costs more
+than an open corridor. Anyone assuming a broken harness must have under-reported would have drawn
+the wrong conclusion twice.
 
-**Collision is ~35% of the full frame and the 12M campaign never touched it.** That is the single
-biggest untouched lever and the reason 20M is plausible at all.
+### What still has to come off
+
+**−4,723,058 ops/frame, or −19.1%.** Collision is the untouched lever
+(~11.6M/frame per FINDINGS — ⚠ UNVERIFIED, and it is measured on a different tier; price it before
+planning against it).
 
 ---
 
@@ -113,10 +126,20 @@ Finished 2026-09-06 after CR-2026-09-06 (PR #83) found the draft's `measure_spee
 * **G6 is closed at the boundary.** `_demand_full_length` runs on every runner's result inside
   `measure_speed`, not inside `one_run` — the first version put it in `one_run` and its own
   negative control walked straight past it, reporting 250 ops/frame for a run that lost a frame.
-* **G5 is closed and measured.** The ten scripts fan out to ten different headings before walking.
-  `--validate` steps the ORACLE through all ten; the controls require ≥6 distinct end cells, every
-  run moving, and ≥256 units of spread. Measured: **9 distinct end cells of 10, minimum 276 units
-  travelled, 1,621-unit spread.**
+* **G5 — closed, RE-OPENED by CR-2026-09-06 on PR #84, and closed again properly.** The first
+  attempt was open-loop key patterns plus a `travelled >= 64` check, and it was wrong in both
+  halves: a fixed key pattern cannot know where the walls are, so nine of ten runs were pinned
+  against geometry for the majority of their movement frames — the 80th-percentile run, the
+  headline number of the whole campaign, **moved on 5 of its 92 movement frames** — and the
+  aggregate distance check passed them anyway, because a player scraping a wall still accumulates
+  distance. `script()` now GENERATES each run by stepping the oracle (walk; turn when the geometry
+  refuses), and `--validate` counts blocked frames PER FRAME. Measured after the fix: **every run
+  moves on 100% of its movement frames**, 9 distinct end cells of 10, 2,258-unit spread. The
+  control is mutation-tested against the old scripts and rejects them at 95% blocked.
+
+  ⚠ The lesson is the one CLAUDE.md rule 3 already states, in the file that states it: an
+  aggregate check is not a control. "Total distance > 0" and "the player is playing" are different
+  claims, and only the second one is the metric's premise.
 * **R9 is satisfied: `--selftest`, 13 controls, and they have already caught two real bugs**
   (the misplaced frame assertion above, and `emit_sizes` measuring `repr()`). `--selftest --fjm
   <path>` adds determinism on a real binary.
@@ -138,6 +161,56 @@ Do this first. It is one stl change (`flipjump-151` `1.5.1`: revert to the pre-p
 state at `0dcda77`, keeping the `sparse_*` macros as an unused tool), one rebuild, one measurement.
 
 ⚠ It changes what is on `main`, so it goes through the normal gate + a small PR.
+
+### Rung 0 — DONE and MEASURED (2026-09-06). Size −59.1%, speed +5.98%.
+
+Reverted `flipjump-151`'s 9 padded stl files to `0dcda77`, keeping the three `sparse_*` macros as
+an inert tool (nothing calls them; FINDINGS AJ/AQ says do not re-open that direction). Rebuilt with
+`python scratchpad/m5_build.py --menu --doors`, 830 s.
+
+| | baseline (padded) | **rung 0** | Δ |
+|---|---:|---:|---:|
+| **80th-pct run** | 24,723,058 | **26,201,318** | **+5.98%** |
+| mean run-average | 20,579,907 | 21,746,446 | +5.67% |
+| **words** | 125,492,170 = 93.50% | **51,377,724 = 38.28%** | **−59.1%** |
+| file | 36,442,805 B | 18,087,200 B | −50.4% |
+
+**Checks, all run, logs committed:**
+* `overflow_probe game` → **FITS**, peak 50,742,890 words, 62.2% under the ceiling
+  (`scratchpad/12m/rung0_overflow.log`)
+* `m2_std_gate` → **PASS**, **43 byte-exact game frames of 45 presented** (frames 0-1 are menu
+  frames this gate does not judge; `m3_gate` certifies those), door 48 reaching 9 distinct states carried
+  across the M1 reset, all four controls (`scratchpad/12m/rung0_m2gate.log`)
+* `gamespeed --runs 10 --frames 100` (`scratchpad/12m/rung0_speed.log`)
+
+**Two numbers G2 reasoned from were both wrong, and the errors partly cancelled:**
+
+| figure | G2 assumed | MEASURED | error |
+|---|---:|---:|---|
+| pre-pad pass-1 words | 42,034,242 | **50,742,890** | +20.7% |
+| pass-1 → decompressed ratio | 1.184 | **1.0125** | −14.5% |
+
+G2's ~37.1% prediction landed near the true 38.28% because those two errors ran opposite ways.
+That is luck, not method — and the reason CR-2026-09-06 refused to let either be re-labelled
+instead of re-measured. ⚠ The LEDGER's P10-1 row ("game tier fits, 42M words") describes a config
+with MORE padding than this revert yet records a SMALLER size; that ordering is backwards, so treat
+that row as a pre-control mismeasurement until someone re-runs it.
+
+**The trade, priced:** rung 0 bought 55.2 points of ceiling for 1,478,260 ops/frame — about
+**26,771 ops/frame per point of size freed**. Under the owner's G8 ruling (speed binds, size stays
+sane for future levels) this is the right direction: 93.50% was not sane, and it is what prompted
+the goal. But it is a speed REGRESSION and must be booked as one.
+
+### Where rung 0 leaves the two targets
+
+| | now | target | gap |
+|---|---:|---:|---:|
+| speed (p80) | 26,201,318 | 20,000,000 | **−6,201,318, i.e. −23.7%** |
+| size | 51,377,724 = 38.28% | ≤35% | **−4,401,520 words, −8.6%** |
+
+G2 named the next size lever before any of this was measured: S2-style sharing of the collision
+`try_move`, worth ~4.3M words against a 4,401,520-word shortfall. That is the right size — but per
+**G4 it is a SIZE lever and buys no ops**, so it does not touch the speed gap.
 
 ### Rung 1 — the baseline
 
@@ -348,7 +421,14 @@ more size lever (the obvious candidate: S2-style sharing of the collision `try_m
 words, which would land it at ~34%). **Measure the real decompressed number the moment the pre-pad
 game is built; do not carry the 31% estimate forward.**
 
-### G3. The arithmetic to 20M ops/frame does not close.
+### G3. The arithmetic to 20M ops/frame does not close. — INPUT UNDER RE-MEASUREMENT
+
+⚠ G3 prices every rung against a baseline of ~33.4M, which came from `m2_std_gate`'s single
+door-route trajectory **including its menu frames over 45 frames**. Like-for-like against the
+metric (menu subtracted, per-frame) that route is **34,984,855 ops/frame**. Whether the
+ten-run 80th percentile is above or below it is a measured question, not an assumed one, and the
+first attempt to answer it used broken scripts (see G5). Do not treat either number as the
+baseline until a `gamespeed` run whose `--validate` output is attached says so.
 
 Baseline ~33.4M, target 20M — a 13.4M cut. The rungs, generously priced: collision ~11.6M, of which
 maybe half is redundant (~5.8M); render width doctrine (~1-2M, unmeasured); self-reset (unknown).
@@ -366,7 +446,17 @@ redundant work** (the repeated seed descents, dead candidates after an early exi
 sharing. Sharing belongs to the SIZE metric (and see G2 — it is likely needed there). Split the
 rung in two and price each against its own metric.
 
-### G5. The 10 games are not validated as representative — and the metric is 11x sensitive to that.
+### G5 — RAISED, IGNORED, AND THEN VINDICATED. Read this before writing any harness here.
+
+**This gap was written, then closed on a control that could not fail, and the CR that caught it
+had to run the very dump this section names.** The paragraph below is unchanged from when it was
+written; it predicted the exact failure that occurred. Its instruction — *"dump each run's end
+position and a frame or two, and require the 10 to differ meaningfully"* — was not carried out
+before the first baseline was taken and promoted into `CLAUDE.md`. §2 records the fix.
+
+Note also what this section says about `m2_std_gate`'s route: *"the play-test's oracle-planned
+route is the model — it walks somewhere real"*. That was correct. The first baseline PR called that
+route "unrepresentative" while its own scripts were the broken ones.
 
 `script(seed)` emits deterministic key patterns, but nothing checks that they explore anything: a
 script that walks into a wall for 100 frames measures a cheap corner. The render alone spans

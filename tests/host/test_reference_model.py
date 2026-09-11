@@ -52,8 +52,11 @@ def test_step_forward_at_spawn(rm):
     st = spawn_state(WadFile.from_path(MAP_WAD), "MAP01")
     out = rm.step_sim(st, {"forward": True})
     assert out.x == 128 << 16                       # cos90==0 => x unchanged
-    assert out.y == (128 << 16) + FORWARD_MOVE      # 0xB20000 (178<<16)
-    assert out.y == 0x00B20000
+    assert out.y == (128 << 16) + FORWARD_MOVE      # 0x900000 (144<<16) at FORWARD_MOVE=16
+    # The literal is a deliberate TRIPWIRE: it pins the actual displacement so that changing
+    # FORWARD_MOVE fails a test rather than silently altering how the game plays. It fired when
+    # the speed went 50 -> 16 units/tic (see the constant's note in reference_model.py).
+    assert out.y == 0x00900000
     assert out.angle == ANG90
 
 
@@ -62,7 +65,7 @@ def test_step_back_at_spawn(rm):
     st = spawn_state(WadFile.from_path(MAP_WAD), "MAP01")
     out = rm.step_sim(st, {"back": True})
     assert out.x == 128 << 16
-    assert out.y == (128 << 16) - FORWARD_MOVE      # 0x4E0000 (78<<16)
+    assert out.y == (128 << 16) - FORWARD_MOVE      # 0x700000 (112<<16) at FORWARD_MOVE=16
 
 
 def test_step_turn_left(rm):

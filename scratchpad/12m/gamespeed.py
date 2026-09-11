@@ -60,26 +60,207 @@ SIZE_TARGET_PCT = 35.0             # of the address ceiling
 # `--validate` steps the oracle through all ten and prints where each ends up; that is the check
 # that this docstring is telling the truth.
 
-def script(seed, n_game=100):
-    """run `seed`'s key sequence: fan out to a distinct heading, then walk it."""
-    turn_frames = 2 * seed                       # 0, 2, 4 ... 18 frames of turning = 10 headings
-    turn_key = "turn_left" if seed % 2 else "turn_right"
-    keys = []
-    for i in range(n_game):
-        k = {}
-        if i < turn_frames:
-            k[turn_key] = True                   # the fan-out: no two runs face the same way
+DEFAULT_WAD = "tests/fixtures/freedoom_e1m1.wad"
+DEFAULT_MAP = "E1M1"
+UNIT = 1 << 16                      # the sim's fixed-point unit
+_ORACLE = {}
+_SCRIPTS = {}
+
+
+def _oracle(wad, mapname):
+    """(model, scene, spawn), built once -- doors shut, which is what a walk really sees"""
+    key = (wad, mapname)
+    if key not in _ORACLE:
+        from doomfj.config import Config
+        from doomfj.reference_model import ReferenceModel, build_scene, spawn_state
+        from doomfj.wad import WadFile
+        mw = WadFile.from_path(str(ROOT / wad))
+        _ORACLE[key] = (ReferenceModel(Config()), build_scene(mw, mw, mapname),
+                        spawn_state(mw, mapname))
+    return _ORACLE[key]
+
+
+TOUR_TARGETS = 10                   # one destination per seed, spread over the whole level
+
+
+def _reachable(rm, scene, sx, sy):
+    """(points, cells) the player can actually stand on, as world coordinates."""
+    _path, cells = gate.walkable_cells(rm, scene, sx, sy)
+    pts = [(cx * gate.NAV_CELL + gate.NAV_CELL // 2, cy * gate.NAV_CELL + gate.NAV_CELL // 2)
+           for cx, cy in cells]
+    return pts, cells
+
+
+def _spread_targets(pts, sx, sy, n):
+    """`n` reachable points spread as widely as possible -- farthest-point sampling, seeded at the
+    point farthest from spawn. Deterministic: no RNG, and ties break on the list order the BFS
+    produced, which is itself deterministic."""
+    best = max(pts, key=lambda q: (q[0] - sx) ** 2 + (q[1] - sy) ** 2)
+    chosen = [best]
+    d2 = [(q[0] - best[0]) ** 2 + (q[1] - best[1]) ** 2 for q in pts]
+    while len(chosen) < n:
+        k = max(range(len(pts)), key=lambda idx: d2[idx])
+        chosen.append(pts[k])
+        for idx, q in enumerate(pts):
+            nd = (q[0] - pts[k][0]) ** 2 + (q[1] - pts[k][1]) ** 2
+            if nd < d2[idx]:
+                d2[idx] = nd
+    return chosen
+
+
+_TOUR = {}
+
+
+def _tour_plan(wad, mapname):
+    """(open_scene, targets, door boxes, in-box test) for this map -- built ONCE.
+
+    The reachable set and the destination list do not depend on the seed, and the BFS that finds
+    them walks 12,576 cells with a `try_move` at every edge. Computing it inside `script()` ran it
+    ten times and made `--validate` look hung."""
+    key = (wad, mapname)
+    if key in _TOUR:
+        return _TOUR[key]
+    from doomfj.doors import door_states, heights_for_states, in_use_box_fixed, use_boxes_xy
+    from doomfj.mapcompiler import bake_bsp
+    from doomfj.reference_model import _signed, build_scene
+    from doomfj.wad import WadFile
+
+    rm, _scene, sp = _oracle(wad, mapname)
+    mw = WadFile.from_path(str(ROOT / wad))
+    secs, lds, sds = mw.sectors(mapname), mw.linedefs(mapname), mw.sidedefs(mapname)
+    tbl = door_states(secs, lds, sds)
+    # PLAN WITH THE DOORS OPEN. The routes must be allowed to cross them; the run then presses
+    # `use` on the way, exactly as a player does. Planning against shut doors is what confined the
+    # previous generation of scripts to the spawn side of the map -- 2,686 reachable cells instead
+    # of 12,576.
+    open_scene = build_scene(mw, mw, mapname,
+                             heights_for_states(secs, lds, sds,
+                                                {si: len(v) - 1 for si, v in tbl.items()}))
+    sx, sy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    pts, _cells = _reachable(rm, open_scene, sx, sy)
+    targets = _spread_targets(pts, sx, sy, TOUR_TARGETS)
+    boxes = use_boxes_xy(secs, lds, sds, bake_bsp(mw, mapname).vertexes)
+    _TOUR[key] = (open_scene, targets, [boxes[si] for si in sorted(tbl)], in_use_box_fixed)
+    return _TOUR[key]
+
+
+def _waypoints(rm, scene, st, goal, spacing=4):
+    """A walkable path from where the player stands to `goal`, thinned to ~1 point per 64 units.
+
+    Thinning matters: the BFS returns one point per 16-unit cell, and steering at every cell makes
+    the player weave. Every 4th cell is far enough ahead to aim at."""
+    from doomfj.reference_model import _signed
+    gx, gy = goal
+    tol = max(48.0, gate.NAV_CELL * 1.5)
+    path, _seen = gate.walkable_cells(
+        rm, scene, _signed(st.x, 32) >> 16, _signed(st.y, 32) >> 16,
+        lambda wx, wy: (wx - gx) ** 2 + (wy - gy) ** 2 <= tol * tol)
+    if not path:
+        return []
+    return path[::spacing] + [path[-1]]
+
+
+def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
+    """Drive toward each waypoint HOLDING FORWARD, turning while moving.
+
+    ⚠ THIS IS THE WHOLE POINT, and the first route-based attempt got it wrong. `ANGLE_TURN` is
+    41,943,040 BAM, so a 180-degree turn takes **51 frames** -- more than half a 100-frame run. A
+    policy that turns to face a waypoint and only then walks spends its budget standing still: that
+    version managed 27 moving frames out of 100 and travelled 269 units, WORSE than the random walk
+    it replaced. A player does not do that; a player holds forward and steers. So `forward` is
+    pressed on every frame and a turn is added only while the heading is off, which keeps ~100 of
+    the 100 frames moving."""
+    import math
+
+    from doomfj.reference_model import ANGLE_TURN, _signed
+    keys, wi, stuck = [], 0, 0
+    while len(keys) < budget and wi < len(waypoints):
+        tx, ty = waypoints[wi]
+        x, y = _signed(st.x, 32) >> 16, _signed(st.y, 32) >> 16
+        if (x - tx) ** 2 + (y - ty) ** 2 <= (gate.NAV_CELL * 2) ** 2:
+            wi += 1
+            continue
+        want = int(math.atan2(ty - y, tx - x) / (2 * math.pi) * (1 << 32)) & 0xFFFFFFFF
+        err = (want - st.angle) & 0xFFFFFFFF
+        if err > (1 << 31):
+            err -= 1 << 32                      # signed: which way is shorter
+        kd = {"forward": True}
+        if err > ANGLE_TURN // 2:
+            kd["turn_left"] = True              # turn_left ADDS to the angle (measured)
+        elif err < -(ANGLE_TURN // 2):
+            kd["turn_right"] = True
+        if any(in_box(b, st.x, st.y) for b in boxes):
+            kd["use"] = True                    # a player opens the door in front of them
+        nxt = rm.step_sim(st, kd, scene=scene)
+        if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+            stuck = 0
         else:
-            k["forward"] = True
-            j = i - turn_frames
-            if j % 17 == 16:
-                k["use"] = True                  # bump a door/wall now and then
-            elif j % 11 == 10:
-                k[turn_key] = True               # a small course correction, still per-run distinct
-            elif j % 23 == 22:
-                k["back"] = True                 # and back off a wall
-        keys.append(k)
-    return keys
+            stuck += 1
+            if stuck >= 4:                      # this waypoint is not working out; aim past it
+                wi += 1
+                stuck = 0
+        st = nxt
+        keys.append(kd)
+    return st, keys
+
+
+def script(seed, n_game=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP):
+    """run `seed`'s key sequence -- a ROUTE ACROSS THE LEVEL, steered against the oracle.
+
+    ⚠ THREE GENERATIONS, AND THE FIRST TWO BOTH LOOKED FINE.
+
+    gen 1 was an open-loop key pattern: all ten runs walked into geometry and stayed there. Caught
+    by CR-2026-09-06, which replaced it with a greedy policy -- step forward, turn when the
+    geometry refuses -- that is never blocked and therefore satisfied every control the harness had.
+
+    gen 2 was still a RANDOM WALK, and a walk with no destination does not go anywhere. MEASURED
+    2026-09-11: eight of the ten runs ended **within 220 units of spawn**, which is 13.7% of the
+    area reachable with the doors shut and roughly 3% of what a player can actually reach
+    (2,686 cells shut, 12,576 open, on a map 3,952 x 3,400 units). The headline ops/frame was a
+    STARTING-ROOM number -- the cheapest geometry on E1M1, measured ten times. Nothing in the
+    harness noticed; the owner noticed from how the game FELT, which is not how a metric should be
+    caught.
+
+    gen 3 gives each seed its own destination, chosen by farthest-point sampling over everything
+    reachable WITH DOORS OPEN, and steers there while holding forward. `use` is pressed inside door
+    use boxes, because a run that never opens a door cannot leave the first fifth of the level.
+
+    Deterministic (no RNG anywhere), and `--validate` reports coverage per seed."""
+    key = (seed, n_game, wad, mapname)
+    if key in _SCRIPTS:
+        return _SCRIPTS[key]
+    rm, _scene, sp = _oracle(wad, mapname)
+    open_scene, targets, boxes, in_box = _tour_plan(wad, mapname)
+
+    keys, st = [], sp
+    for k in range(TOUR_TARGETS):
+        if len(keys) >= n_game:
+            break
+        goal = targets[(seed + k) % TOUR_TARGETS]
+        wps = _waypoints(rm, open_scene, st, goal)
+        if not wps:
+            continue
+        st, more = _steer(rm, open_scene, st, wps, n_game - len(keys), boxes, in_box)
+        if not more:
+            continue                            # already there; try the next destination
+        keys += more
+
+    # A run that ends early (an unreachable leg, or every destination reached) must not be left
+    # standing still -- a stationary frame is a cheap frame counted as play. Fall back to gen 2's
+    # forward-or-turn policy, and `--validate` reports how many frames came from it.
+    turn = "turn_left" if seed % 2 else "turn_right"
+    while len(keys) < n_game:
+        kd = {"forward": True}
+        nxt = rm.step_sim(st, kd, scene=open_scene)
+        if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+            st = nxt
+        else:
+            kd = {turn: True}
+            st = rm.step_sim(st, kd, scene=open_scene)
+        keys.append(kd)
+
+    _SCRIPTS[key] = keys[:n_game]
+    return _SCRIPTS[key]
 
 
 def full_script(seed, n_game):
@@ -167,15 +348,31 @@ def percentile_run(run_avgs, pct=0.8):
     return s[min(len(s) - 1, math.ceil(pct * len(s)) - 1)]
 
 
+def binding_speed(run_avgs):
+    """THE BINDING SPEED METRIC (owner, 2026-09-06): the average of the mean run-average and the
+    80th-percentile run.
+
+    The mean alone flatters a binary -- it is dragged down by the cheap viewpoints, and the run
+    spread here is ~1.9x. The p80 alone is one specific trajectory, so a change that helps typical
+    frames can look like a regression because it did not help THAT run (S1 measured exactly that:
+    mean -0.75%, p80 +0.10%). Averaging the two keeps the percentile's protection against a
+    flattering mean while not letting a single run decide the verdict.
+    """
+    return (sum(run_avgs) / len(run_avgs) + percentile_run(run_avgs)) / 2.0
+
+
 def report(run_avgs, raw_avgs, size):
     mean = sum(run_avgs) / len(run_avgs)
     p80 = percentile_run(run_avgs)
-    speed_ok, size_ok = p80 <= SPEED_TARGET, size.data_pct <= SIZE_TARGET_PCT
+    binding = binding_speed(run_avgs)
+    speed_ok, size_ok = binding <= SPEED_TARGET, size.data_pct <= SIZE_TARGET_PCT
     print("")
     print("=" * 78)
+    print("SPEED  BINDING (mean+p80)/2: %s ops/frame   (target <= %s)  %s"
+          % (format(int(binding), ","), format(SPEED_TARGET, ","),
+             "PASS" if speed_ok else "OVER"))
     print("SPEED  mean run-average   : %s ops/frame" % format(int(mean), ","))
-    print("SPEED  80th-pct run avg   : %s ops/frame   (target <= %s)  %s"
-          % (format(int(p80), ","), format(SPEED_TARGET, ","), "PASS" if speed_ok else "OVER"))
+    print("SPEED  80th-pct run avg   : %s ops/frame" % format(int(p80), ","))
     print("SPEED  spread lo..hi      : %s .. %s ops/frame"
           % (format(int(min(run_avgs)), ","), format(int(max(run_avgs)), ",")))
     print("SPEED  raw (menu included): mean %s, 80th-pct %s ops/frame"
@@ -194,43 +391,46 @@ def report(run_avgs, raw_avgs, size):
 # G5: are the ten games actually different games? (cheap -- the oracle, no fj)
 # ----------------------------------------------------------------------------------------------
 
-def validate_scripts(n_runs=10, n_frames=100, wad="tests/fixtures/freedoom_e1m1.wad",
-                     mapname="E1M1", quiet=False):
-    """Step the ORACLE through all ten scripts and report where each ends up.
+def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP, quiet=False):
+    """Step the ORACLE through every script and report whether each run actually PLAYS.
 
-    A script that walks into a wall for 100 frames measures a cheap corner and the metric is
-    dominated by that. This is the control on the claim that the ten scripts explore.
+    ⚠ The measure here is BLOCKED FRAMES, not distance travelled. The previous version reported
+    only end-position spread and total distance, and passed a set of scripts in which nine of ten
+    runs were pinned against geometry for the majority of their movement frames -- because a player
+    scraping a wall still accumulates distance. A run that presses forward and does not move is
+    measuring a stuck viewpoint, and the whole metric is a weighted average of viewpoints.
+
+    Returns [(end_xy, travelled, move_frames, moved_frames)] per run.
     """
-    from doomfj.config import Config
-    from doomfj.reference_model import ReferenceModel, build_scene, spawn_state
-    from doomfj.wad import WadFile
-
-    mw = WadFile.from_path(str(ROOT / wad))
-    rm = ReferenceModel(Config())
-    scene = build_scene(mw, mw, mapname)
-    sp = spawn_state(mw, mapname)
-    ends, dists = [], []
+    rm, scene, sp = _oracle(wad, mapname)
+    out = []
     for r in range(n_runs):
-        st = sp
-        travelled = 0
-        for kd in script(r, n_frames):
+        st, travelled, move_frames, moved_frames = sp, 0, 0, 0
+        for kd in script(r, n_frames, wad, mapname):
             prev = (st.x, st.y)
             st = rm.step_sim(st, kd, scene=scene)
-            travelled += abs(st.x - prev[0]) + abs(st.y - prev[1])
+            d = abs(st.x - prev[0]) + abs(st.y - prev[1])
+            travelled += d
+            if kd.get("forward") or kd.get("back"):
+                move_frames += 1
+                if d >= UNIT:
+                    moved_frames += 1
         ex, ey = st.x >> 16, st.y >> 16
-        ends.append((ex, ey))
-        dists.append(travelled >> 16)
+        out.append(((ex, ey), travelled >> 16, move_frames, moved_frames))
         if not quiet:
-            print("  run %2d: ends at (%6d,%6d)  %5d units from spawn, %6d travelled"
+            blocked = 100.0 * (move_frames - moved_frames) / max(1, move_frames)
+            print("  run %2d: ends (%6d,%6d)  %5d from spawn  %6d travelled  "
+                  "moved on %3d/%3d move-frames (%.0f%% blocked)"
                   % (r, ex, ey,
                      int(((((st.x - sp.x) >> 16) ** 2) + (((st.y - sp.y) >> 16) ** 2)) ** 0.5),
-                     travelled >> 16), flush=True)
+                     travelled >> 16, moved_frames, move_frames, blocked), flush=True)
+    ends = [e for e, _t, _m, _mv in out]
     spread = max(max(e[i] for e in ends) - min(e[i] for e in ends) for i in (0, 1))
     if not quiet:
-        print("  distinct end cells: %d/%d ; widest spread %d units ; %d run(s) never moved"
-              % (len({(x // 64, y // 64) for x, y in ends}), n_runs, spread,
-                 sum(1 for d in dists if d < 64)), flush=True)
-    return ends, dists, spread
+        worst = max(100.0 * (m - mv) / max(1, m) for _e, _t, m, mv in out)
+        print("  distinct end cells: %d/%d ; widest spread %d units ; worst run %.0f%% blocked"
+              % (len({(x // 64, y // 64) for x, y in ends}), n_runs, spread, worst), flush=True)
+    return out, spread
 
 
 # ----------------------------------------------------------------------------------------------
@@ -297,22 +497,45 @@ def selftest(fjm=None):
           percentile_run([1.0, 5.0, 9.0]) in (1.0, 5.0, 9.0))
     check("N4 it is order-independent",
           percentile_run([10, 3, 7, 1]) == percentile_run([1, 3, 7, 10]))
+    # N4b THE BINDING METRIC: strictly between the mean and the p80, and it MOVES with both.
+    xs = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0]
+    m, p = sum(xs) / len(xs), percentile_run(xs)
+    check("N4b binding is the average of the mean and the p80",
+          abs(binding_speed(xs) - (m + p) / 2) < 1e-9, "mean %.1f p80 %.1f -> %.1f"
+          % (m, p, binding_speed(xs)))
+    check("N4b it lies between them (never outside)", m <= binding_speed(xs) <= p)
+    lowered = xs[:-1] + [10.0]                     # make the SLOWEST run fast: mean falls, p80 same
+    check("N4b it responds to a change the p80 alone cannot see",
+          binding_speed(lowered) < binding_speed(xs),
+          "%.1f -> %.1f while p80 stays %.1f"
+          % (binding_speed(xs), binding_speed(lowered), percentile_run(lowered)))
 
     # N5  THE SIZE CONTROL is fjmsize's, and it is a different file -- assert the wiring, and that
     #     the ceiling this file compares against is derived rather than typed.
     check("N5 the ceiling is derived from the width, not a literal",
           ceiling_words(32) == 134_217_728 and ceiling_words(64) != ceiling_words(32))
 
-    # N6  THE SCRIPT CONTROL (gap G5). The ten games must go to ten different places.
+    # N6  THE SCRIPT CONTROL (gap G5), and the one that failed to do its job the first time.
+    #     The old version checked `travelled >= 64` per run, which a player scraping a wall for
+    #     95% of a run still satisfies -- so it passed a script set whose 80th-percentile run
+    #     moved on 5 of 92 movement frames. The check is now PER FRAME: of the frames that press
+    #     forward or back, how many actually displaced the player?
     print("  -- stepping the oracle through the 10 scripts ...", flush=True)
     try:
-        ends, dists, spread = validate_scripts(quiet=True)
+        rows, spread = validate_scripts(quiet=True)
+        ends = [e for e, _t, _m, _mv in rows]
         cells = len({(x // 64, y // 64) for x, y in ends})
+        blocked = [100.0 * (m - mv) / max(1, m) for _e, _t, m, mv in rows]
         check("N6 the 10 scripts end in >= 6 distinct 64-unit cells", cells >= 6,
               "%d distinct of 10" % cells)
-        check("N6 every run actually moves (none walks into a wall for 100 frames)",
-              min(dists) >= 64, "min travelled %d units" % min(dists))
         check("N6 they spread over >= 256 units", spread >= 256, "%d units" % spread)
+        check("N6 EVERY run moves on >= 60%% of its movement frames",
+              max(blocked) <= 40.0, "worst run %.0f%% blocked" % max(blocked))
+        check("N6 no run is mostly stuck (the old check passed at 95%% blocked)",
+              max(blocked) < 95.0, "worst %.0f%%" % max(blocked))
+        check("N6 every run travels >= 256 units from where it began",
+              min(t for _e, t, _m, _mv in rows) >= 256,
+              "min %d units" % min(t for _e, t, _m, _mv in rows))
     except Exception as e:                                             # noqa: BLE001
         check("N6 the oracle can step the 10 scripts", False, "%s: %s" % (type(e).__name__, e))
 

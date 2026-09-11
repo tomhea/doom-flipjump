@@ -1,0 +1,9 @@
+blockbench selftest
+  C1 the blocked program reaches stl.loop                    ok  looping
+  C1 ...and so does the stock one                            ok  looping
+  C1 blocked computes 0x3 ^ 0x5 = 6                          ok  b'\x06'
+  C2 blocked has a LOWER marginal cost per xor               ok  8.16 vs 13.13 ops/xor
+  C3 a NON-power-of-two block breaks (index bits not clear)  ok  cause=ip<2w
+  C3 ...and the power-of-two block for the same K works      ok  cause=looping
+
+SELFTEST PASS

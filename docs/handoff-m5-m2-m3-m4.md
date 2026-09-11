@@ -58,7 +58,7 @@ Other rules that have already cost real time - details in `CLAUDE.md`:
 
 ## 2. M5 - the standalone .fjm (no Python)   <- DONE, 2026-08-25
 
-    fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728
+    fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728
 
 ⚠ `doom_e1m1_std.fjm` is the M5-era build and predates M3's `mode` cell, so it is no longer
 what this source emits. `doom_e1m1_menu.fjm` supersedes it -- same tier, plus the menu.

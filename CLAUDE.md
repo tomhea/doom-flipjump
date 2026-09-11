@@ -17,7 +17,7 @@ scripts walked into walls. No speed number belongs in this file without its `--v
 **M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
 whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:
-`fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
+`fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
 starts the game, WASD moves, space opens doors. **M4** — now ALL NINE E1 levels in one image,
 configurable — is the only milestone left that changes the emitter's shape. Then M6 (ship).
 ⚠ The three-level plan in `handoff-m5-m2-m3-m4.md` section 5 is SUPERSEDED, and its "9x" reasoning
@@ -146,7 +146,10 @@ be crossed), `sprite_wad` resolved internally.
 (`src/fj/input.fj`), thing bindings and visibility bake, nothing is echoed, and the view state,
 held-key flags and door cells SURVIVE the M1 reset (`build.STANDALONE_PERSIST` / `DOOR_PERSIST`,
 the one place a hole in the restore set is intended). Run it with
-`fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728`.
+`fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728`.
+⚠ **`--run` IS NOT OPTIONAL.** `fj a.fjm` means *assemble* `a.fjm` as source; only `fj --run`
+runs a built image (`fj --help`: `fj --run prog.fjm  // just run`). Every copy of this command
+in the repo was missing it until 2026-09-11, and so was every one handed to the owner.
 
 ⚠ They are DIFFERENT PROGRAMS and each has its own restore set (`m1_` / `m5_restore_set.json.gz`);
 `build_wall_renderer` picks by tier so they cannot be crossed — the tier name is now the ONLY

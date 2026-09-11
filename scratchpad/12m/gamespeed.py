@@ -80,44 +80,183 @@ def _oracle(wad, mapname):
     return _ORACLE[key]
 
 
+TOUR_TARGETS = 10                   # one destination per seed, spread over the whole level
+
+
+def _reachable(rm, scene, sx, sy):
+    """(points, cells) the player can actually stand on, as world coordinates."""
+    _path, cells = gate.walkable_cells(rm, scene, sx, sy)
+    pts = [(cx * gate.NAV_CELL + gate.NAV_CELL // 2, cy * gate.NAV_CELL + gate.NAV_CELL // 2)
+           for cx, cy in cells]
+    return pts, cells
+
+
+def _spread_targets(pts, sx, sy, n):
+    """`n` reachable points spread as widely as possible -- farthest-point sampling, seeded at the
+    point farthest from spawn. Deterministic: no RNG, and ties break on the list order the BFS
+    produced, which is itself deterministic."""
+    best = max(pts, key=lambda q: (q[0] - sx) ** 2 + (q[1] - sy) ** 2)
+    chosen = [best]
+    d2 = [(q[0] - best[0]) ** 2 + (q[1] - best[1]) ** 2 for q in pts]
+    while len(chosen) < n:
+        k = max(range(len(pts)), key=lambda idx: d2[idx])
+        chosen.append(pts[k])
+        for idx, q in enumerate(pts):
+            nd = (q[0] - pts[k][0]) ** 2 + (q[1] - pts[k][1]) ** 2
+            if nd < d2[idx]:
+                d2[idx] = nd
+    return chosen
+
+
+_TOUR = {}
+
+
+def _tour_plan(wad, mapname):
+    """(open_scene, targets, door boxes, in-box test) for this map -- built ONCE.
+
+    The reachable set and the destination list do not depend on the seed, and the BFS that finds
+    them walks 12,576 cells with a `try_move` at every edge. Computing it inside `script()` ran it
+    ten times and made `--validate` look hung."""
+    key = (wad, mapname)
+    if key in _TOUR:
+        return _TOUR[key]
+    from doomfj.doors import door_states, heights_for_states, in_use_box_fixed, use_boxes_xy
+    from doomfj.mapcompiler import bake_bsp
+    from doomfj.reference_model import _signed, build_scene
+    from doomfj.wad import WadFile
+
+    rm, _scene, sp = _oracle(wad, mapname)
+    mw = WadFile.from_path(str(ROOT / wad))
+    secs, lds, sds = mw.sectors(mapname), mw.linedefs(mapname), mw.sidedefs(mapname)
+    tbl = door_states(secs, lds, sds)
+    # PLAN WITH THE DOORS OPEN. The routes must be allowed to cross them; the run then presses
+    # `use` on the way, exactly as a player does. Planning against shut doors is what confined the
+    # previous generation of scripts to the spawn side of the map -- 2,686 reachable cells instead
+    # of 12,576.
+    open_scene = build_scene(mw, mw, mapname,
+                             heights_for_states(secs, lds, sds,
+                                                {si: len(v) - 1 for si, v in tbl.items()}))
+    sx, sy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
+    pts, _cells = _reachable(rm, open_scene, sx, sy)
+    targets = _spread_targets(pts, sx, sy, TOUR_TARGETS)
+    boxes = use_boxes_xy(secs, lds, sds, bake_bsp(mw, mapname).vertexes)
+    _TOUR[key] = (open_scene, targets, [boxes[si] for si in sorted(tbl)], in_use_box_fixed)
+    return _TOUR[key]
+
+
+def _waypoints(rm, scene, st, goal, spacing=4):
+    """A walkable path from where the player stands to `goal`, thinned to ~1 point per 64 units.
+
+    Thinning matters: the BFS returns one point per 16-unit cell, and steering at every cell makes
+    the player weave. Every 4th cell is far enough ahead to aim at."""
+    from doomfj.reference_model import _signed
+    gx, gy = goal
+    tol = max(48.0, gate.NAV_CELL * 1.5)
+    path, _seen = gate.walkable_cells(
+        rm, scene, _signed(st.x, 32) >> 16, _signed(st.y, 32) >> 16,
+        lambda wx, wy: (wx - gx) ** 2 + (wy - gy) ** 2 <= tol * tol)
+    if not path:
+        return []
+    return path[::spacing] + [path[-1]]
+
+
+def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
+    """Drive toward each waypoint HOLDING FORWARD, turning while moving.
+
+    ⚠ THIS IS THE WHOLE POINT, and the first route-based attempt got it wrong. `ANGLE_TURN` is
+    41,943,040 BAM, so a 180-degree turn takes **51 frames** -- more than half a 100-frame run. A
+    policy that turns to face a waypoint and only then walks spends its budget standing still: that
+    version managed 27 moving frames out of 100 and travelled 269 units, WORSE than the random walk
+    it replaced. A player does not do that; a player holds forward and steers. So `forward` is
+    pressed on every frame and a turn is added only while the heading is off, which keeps ~100 of
+    the 100 frames moving."""
+    import math
+
+    from doomfj.reference_model import ANGLE_TURN, _signed
+    keys, wi, stuck = [], 0, 0
+    while len(keys) < budget and wi < len(waypoints):
+        tx, ty = waypoints[wi]
+        x, y = _signed(st.x, 32) >> 16, _signed(st.y, 32) >> 16
+        if (x - tx) ** 2 + (y - ty) ** 2 <= (gate.NAV_CELL * 2) ** 2:
+            wi += 1
+            continue
+        want = int(math.atan2(ty - y, tx - x) / (2 * math.pi) * (1 << 32)) & 0xFFFFFFFF
+        err = (want - st.angle) & 0xFFFFFFFF
+        if err > (1 << 31):
+            err -= 1 << 32                      # signed: which way is shorter
+        kd = {"forward": True}
+        if err > ANGLE_TURN // 2:
+            kd["turn_left"] = True              # turn_left ADDS to the angle (measured)
+        elif err < -(ANGLE_TURN // 2):
+            kd["turn_right"] = True
+        if any(in_box(b, st.x, st.y) for b in boxes):
+            kd["use"] = True                    # a player opens the door in front of them
+        nxt = rm.step_sim(st, kd, scene=scene)
+        if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+            stuck = 0
+        else:
+            stuck += 1
+            if stuck >= 4:                      # this waypoint is not working out; aim past it
+                wi += 1
+                stuck = 0
+        st = nxt
+        keys.append(kd)
+    return st, keys
+
+
 def script(seed, n_game=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP):
-    """run `seed`'s key sequence, GENERATED BY STEPPING THE ORACLE.
+    """run `seed`'s key sequence -- a ROUTE ACROSS THE LEVEL, steered against the oracle.
 
-    ⚠ THE FIRST VERSION OF THIS WAS AN OPEN-LOOP KEY PATTERN AND IT WAS BROKEN. A fixed pattern
-    cannot know where the walls are, so all ten runs walked into geometry and stayed there: the
-    80th-percentile run -- the headline number of the whole campaign -- moved on 5 of its 92
-    movement frames and ended 226 units from spawn. Nine of ten were blocked on the majority of
-    their movement frames. The old `--validate` did not catch it because its only vacuity test was
-    `travelled >= 64`, and a player scraping along a wall for 95% of a run still accumulates that.
-    Found by CR-2026-09-06 on PR #84.
+    ⚠ THREE GENERATIONS, AND THE FIRST TWO BOTH LOOKED FINE.
 
-    So the walk is planned against the same simulation the program runs: try to step forward, and
-    if the geometry refuses, turn instead. Deterministic (no RNG, fixed policy, per-seed turn
-    direction and fan-out), so a re-measure is reproducible; and provably non-blocked, which
-    `--validate` now checks per frame rather than in aggregate.
-    """
+    gen 1 was an open-loop key pattern: all ten runs walked into geometry and stayed there. Caught
+    by CR-2026-09-06, which replaced it with a greedy policy -- step forward, turn when the
+    geometry refuses -- that is never blocked and therefore satisfied every control the harness had.
+
+    gen 2 was still a RANDOM WALK, and a walk with no destination does not go anywhere. MEASURED
+    2026-09-11: eight of the ten runs ended **within 220 units of spawn**, which is 13.7% of the
+    area reachable with the doors shut and roughly 3% of what a player can actually reach
+    (2,686 cells shut, 12,576 open, on a map 3,952 x 3,400 units). The headline ops/frame was a
+    STARTING-ROOM number -- the cheapest geometry on E1M1, measured ten times. Nothing in the
+    harness noticed; the owner noticed from how the game FELT, which is not how a metric should be
+    caught.
+
+    gen 3 gives each seed its own destination, chosen by farthest-point sampling over everything
+    reachable WITH DOORS OPEN, and steers there while holding forward. `use` is pressed inside door
+    use boxes, because a run that never opens a door cannot leave the first fifth of the level.
+
+    Deterministic (no RNG anywhere), and `--validate` reports coverage per seed."""
     key = (seed, n_game, wad, mapname)
     if key in _SCRIPTS:
         return _SCRIPTS[key]
-    rm, scene, sp = _oracle(wad, mapname)
+    rm, _scene, sp = _oracle(wad, mapname)
+    open_scene, targets, boxes, in_box = _tour_plan(wad, mapname)
+
+    keys, st = [], sp
+    for k in range(TOUR_TARGETS):
+        if len(keys) >= n_game:
+            break
+        goal = targets[(seed + k) % TOUR_TARGETS]
+        wps = _waypoints(rm, open_scene, st, goal)
+        if not wps:
+            continue
+        st, more = _steer(rm, open_scene, st, wps, n_game - len(keys), boxes, in_box)
+        if not more:
+            continue                            # already there; try the next destination
+        keys += more
+
+    # A run that ends early (an unreachable leg, or every destination reached) must not be left
+    # standing still -- a stationary frame is a cheap frame counted as play. Fall back to gen 2's
+    # forward-or-turn policy, and `--validate` reports how many frames came from it.
     turn = "turn_left" if seed % 2 else "turn_right"
-    st, keys, walked = sp, [], 0
-
-    for _ in range(min(2 * seed, n_game)):        # the fan-out: ten runs, ten opening headings
-        kd = {turn: True}
-        st = rm.step_sim(st, kd, scene=scene)
-        keys.append(kd)
-
     while len(keys) < n_game:
         kd = {"forward": True}
-        if walked and walked % 17 == 16:
-            kd["use"] = True                      # bump a door now and then, while moving
-        nxt = rm.step_sim(st, kd, scene=scene)
+        nxt = rm.step_sim(st, kd, scene=open_scene)
         if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
-            st, walked = nxt, walked + 1          # the step took; keep it
+            st = nxt
         else:
-            kd = {turn: True}                     # blocked -- turn instead of grinding the wall
-            st = rm.step_sim(st, kd, scene=scene)
+            kd = {turn: True}
+            st = rm.step_sim(st, kd, scene=open_scene)
         keys.append(kd)
 
     _SCRIPTS[key] = keys[:n_game]

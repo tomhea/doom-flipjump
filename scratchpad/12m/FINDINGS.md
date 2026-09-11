@@ -2885,3 +2885,786 @@ target, so the budget for copies is ~2.3 percentage points, about 3M words.
 **This is an stl change, not a doom one**, and it runs against a doctrine the repo adopted
 deliberately. It is the only identified route to 12M, and it should be a considered decision rather
 than something slipped in as an optimisation.
+
+### ⚠ CORRECTION: the 153,639-site word is an ARTIFACT, and the floor is ~6.2, not ~15
+
+The top row above is not a variable. All 153,639 of those sites have a disarm whose flip word is
+**0** -- `wflip x, 0`, which flips nothing -- so their source word is not recoverable this way and
+my code bucketed every one of them at address 0. They are `hex.tables.init_all` initialisation
+tables, and the sampled ones are never executed. Recomputed with them excluded:
+
+      variable                               sites        calls  % calls
+      hex.tables.ret+32                      4,505      109,167    8.74%
+      hex.mul.ret+32                         5,264       50,999    4.08%
+      hex.tables.res+32                      8,192       49,065    3.93%
+      19,187 words, 221,016 sites, 1,249,117 calls
+      CALL-WEIGHTED mean index width: 6.15 bits -> arm floor ~6.2 ops/call
+
+**So "we are already at the floor" was WRONG.** The floor is ~6.2 ops per call and arming measures
+~15.5 -- roughly 6M ops/frame of headroom, which is more than the 4,244,364 gap. The refutation of
+the trampoline still stands (the return carries the site's identity either way), but the claim that
+no layout change can help does not.
+
+The suspect is the DECLINES: 10,052 tables are declined as `too-wide` (wider than
+`max_slot_ops=32`), and `hex.tables.*` is both the hottest word AND the macro with oversized
+tables. A declined table stays inline and pays the FULL address (~18.6 ops), which is exactly the
+kind of thing that drags a 6.2-op floor up to 15.5.
+
+## BQ -- the too-wide declines were the lever, and my "net loss" prediction was WRONG
+
+BN named `too-wide` (10,052 tables declined for exceeding `max_slot_ops=32`) as the suspect behind a
+6.2-op floor measuring 15.5. Raising the cap tests it. I predicted the test would FAIL, in writing,
+mid-build: wide slots eat pool space, and the build log showed pinning falling from 25,701 words to
+14,455, so I called it "recovering 10,052 too-wide tables at the cost of ~11,000 pinned words --
+likely a net loss".
+
+The measurement says otherwise. Every m2_std_gate run drives the SAME 45-frame script, so its total
+op count is a direct A/B between binaries:
+
+    blocked5   spread 1, max_slot_ops  32    1,084,127,944 ops / 45 frames    +2.28%
+    blocked7   spread 2, max_slot_ops  32    1,059,987,820                     baseline
+    blocked8   spread 2, max_slot_ops 512    1,008,082,249                    -4.90%
+
+blocked8 is the fastest binary the campaign has produced, and it is the one whose pinning
+"collapsed". So:
+
+**The pinned-word COUNT is not the figure of merit.** 11,000 words lost their pin and 10,052 wide
+tables gained a block, and the trade was strongly positive -- because the wide tables sit on
+`hex.tables.*`, the hottest source word in the profile, while the starved words are cold. Coverage
+counts sites; cost counts CALLS. A guard that watches the count (the `*** PINNING COLLAPSED`
+warning) is watching the wrong number, and would have vetoed the best result on the board.
+
+**Why blocked8 is nonetheless unshippable, and why that is a SPAN bug not a speed one.** The build
+died after writing its artifact:
+
+    AssertionError: R4: span 134217728 >= flat limit 134217728
+
+134,217,728 words is 2^27, and 2^27 words x 32 bits = 2^32 -- the w=32 address ceiling itself.
+`BlockPool._preallocate` runs its cursor to `1 << memory_width` with no margin, so the pool did not
+overshoot the limit, it filled memory to the last word and landed exactly on it. Groups past that
+point became `declined_overflow`. Note what this means: blocked8's -4.90% was measured with the
+tail of the pool ALREADY dropped.
+
+The artifact existed (the assert fires after the write) and gated `M2 STANDALONE GATE: PASS`, 45
+frames byte-exact -- so the configuration is correct, and only its extent is illegal.
+
+**The fix is a bound, not a retreat.** `--span-bits 0x9e000000` stops the pool at word 133,169,152,
+1,048,576 words under the ceiling, giving up ~1.2% of pool space rather than giving up spread or
+slot width. blocked10 is that build.
+
+CAVEAT, recorded before the number comes in: this parks span at 99.2% of the address space. Data
+words (the 35% size target) are unaffected -- span is not the size metric -- but M4's nine levels
+grow the program, and the pool base has to come down to make room. Span is now a budget the next
+milestone has to spend, and this campaign has spent nearly all of it.
+
+## BR -- the margin cost 13.8%, and a pre-registered guess about broken groups
+
+**The span margin is not a free safety.** BQ fixed blocked8's span overflow with `--span-bits`, and
+I picked the bound by taking a comfortable 0x02000000 off the top. That is 1,048,576 words, 1.2% of
+the pool. It cost 13.8%:
+
+    blocked7   spread 2, slot<= 32                    1,059,987,820 ops / 45 frames
+    blocked8   spread 2, slot<=512, span ILLEGAL      1,008,082,249
+    blocked10  spread 2, slot<=512, margin 1,048,576  1,146,925,640   +13.8% vs blocked8
+
+    blocked10: 4,890 groups blocked (was 27,032), 4,474 pinned words, no-block declines 55,617
+
+`_preallocate` allocates BIGGEST FIRST, so the last sliver of the pool is where the entire tail of
+small groups lives. Trimming 1.2% off the top did not trim 1.2% of the groups, it trimmed 82% of
+them. R4 needs span strictly below 2^27 words, i.e. ONE word of margin: `--span-bits 0x9fffffe0`
+tops out at 134,217,727. blocked11 is that build.
+
+Generalisation worth keeping: **under biggest-first allocation, pool capacity is spent on the big
+blocks and the SMALL groups are the marginal consumer.** Any change that shifts capacity -- margin,
+spread, slot width -- is paid for almost entirely by them.
+
+### Pre-registered: does a declined table really have to break its group?
+
+Recording the prediction BEFORE the build, because the last one I made mid-build (BQ) was wrong.
+
+`pinned_words` excludes `broken_groups` wholly, so ONE declined table un-pins every sibling. The M1
+reset part declines 4,008 tables BY DESIGN -- the driver's own docstring says its tables "land past
+their group's counted slots and are DECLINED, which leaves them inline and safe" -- so this is a
+standing, structural cost, not an accident of tuning.
+
+The arithmetic says the exclusion is unnecessary. `insert_fj_op` rests a pinned word at
+`value*dw ^ base`, and `insert_wflip_ops` rewrites EVERY address-magnitude flip on that word to
+`V ^ base`. An inline table at `A` therefore arms to `(value*dw ^ base) ^ (A ^ base)` = `A + value*dw`
+-- identical to the un-pinned build. It pays a worse popcount, not a wrong address.
+
+Against that, `pinned_words`' docstring records a real failure: a game build presented 0 frames in
+124 ops. But `reserve()` records THE SAME SYMPTOM TO THE DIGIT against a different cause -- stl.IO's
+tables relocated into the pool -- which was diagnosed and fixed separately. One of those two is
+likely the real bug and the other a defensive measure that outlived it.
+
+PREDICTION: `--pin-broken` builds a correct binary and gates PASS. Confidence: moderate, NOT high --
+the arithmetic is clean but rule 3 exists because four such arguments were wrong, twice about the
+checking tools.
+
+⚠ THE TOY GATE CANNOT ADJUDICATE THIS. `pinned_words`' docstring states the four-program gate PASSED
+the version the exclusion guards against. A toy PASS is therefore not evidence, and only
+`m2_std_gate` on the game tier settles it. Queued behind blocked11.
+
+## BS -- 87% of the pool is PADDING, and uniform slots were never required
+
+blocked11 (blocked8's allocation made legal by a one-word margin) gates PASS and is the standing
+best:
+
+    blocked11  spread 2, slot<=512, --span-bits 0x9fffffe0
+               1,007,614,365 ops / 45 frames      -4.94% vs blocked7
+               span 134,217,696 words (< 2^27, R4 passes), M2 STANDALONE GATE: PASS
+
+Its counting pass also carries the new width histogram, and that is the real news:
+
+    width waste: 68,224,992 ops allocated = 9,041,597 real
+                                          + 41,479,139 width-pad
+                                          + 17,704,256 count-pad
+    MIXED groups (widest > 2x most common): 1,058 groups, 21,388 tables
+    broken groups: 12,579 of 27,032   declines: no-block 26,111, too-wide 494, overflow 4,008
+
+**Only 13.3% of the allocated pool holds a table.** 60.8% is WIDTH PADDING: a block's slots are
+uniform, so one 512-op table widens every slot in its group. And BQ established that a full pool is
+exactly what breaks groups -- 46.5% of them here -- with each broken group losing its pin for ALL
+its tables. The padding is not a size problem, it is the speed problem.
+
+**Uniform slots are not required by the mechanism.** Arming needs `base ^ offset == base + offset`,
+which holds for any offset inside a block whose base is aligned to it. Uniform slots are merely the
+easy way to keep popcount(offset) low. Per-width sub-blocks keep that: each bucket is aligned to its
+own size and laid out biggest-first, so a bucket's offset bits sit above its slots' bits and
+popcount adds. The bucket selector costs one or two bits.
+
+Measured on the implementation, not argued: a 302-table group with two 512-op siblings drops
+16,777,216 -> 524,288 bits (32x), a three-width group 2,097,152 -> 65,536 (32x), and a HOMOGENEOUS
+group is unchanged to the bit -- so the blast radius is the 1,058 mixed groups.
+
+⚠ A NOTE ON WHAT THE GATE CANNOT SEE. `bucket_check.py` C8 checks `(base + offset) ^ base == offset`
+-- that arming flips the offset and nothing else. This is a COST property. The base cancels in
+`base ^ (V ^ base) == V` for ANY V, so a mislaid block would still render byte-exact and simply cost
+more ops. No gate would ever catch it. Controls C4 (a bucket past the block end) and C6 (two buckets
+at one offset) are the negative controls; the first version of this file had a C3 that a broken
+layout PASSED, because `base & offset == 0` is trivially true when the base is one high bit.
+
+## BT -- `--pin-broken` PASSES: a declined table never had to break its group
+
+BR pre-registered the prediction at moderate confidence. It holds.
+
+    blocked11  spread 2, slot<=512, span 0x9fffffe0        1,007,614,365 ops / 45 frames
+    blocked12  ...the same, + --pin-broken                   975,434,141   -3.19%
+               M2 STANDALONE GATE: PASS -- 45 frames byte-exact, door opens across the M1 reset
+
+So the exclusion in `pinned_words` was over-conservative, and the arithmetic in BR was the right
+account: `insert_fj_op` rests the word at `value*dw ^ base`, `insert_wflip_ops` rewrites an inline
+table's arm to `A ^ base`, and the base cancels -- `(value*dw ^ base) ^ (A ^ base)` = `A + value*dw`.
+A declined table pays a worse popcount. It was never unreachable.
+
+The "0 frames in 124 ops" recorded in `pinned_words`' docstring is therefore almost certainly the
+OTHER bug wearing the same symptom: stl.IO's tables relocated into the pool, which `reserve()`
+records against the identical fingerprint and which was fixed separately. Two distinct causes, one
+symptom, and the defensive fix for the first outlived the second.
+
+**The size of the win is the surprising part, and it re-reads the earlier numbers.** pin_broken
+added only 402 pinned words (14,455 -> 14,857) for -3.19%. So those 402 groups are extremely hot --
+they are exactly the `too-wide` and `overflow` groups, which includes the M1 self-reset part's
+tables, declined BY DESIGN because they land past their group's counted slots.
+
+It also corrects an inference I drew an hour earlier. "12,579 of 27,032 groups are broken" reads as
+a 46.5% coverage loss, but only ~416 of those broken groups ever HELD a block: the other ~12,163
+were broken by `_preallocate` for lack of room and were never pinnable at all. Two different
+failures were being counted in one bucket. The pinnable-but-unpinned prize was 2.7% of groups, and
+it was worth 3.19% of the frame -- while the remaining 12,163 need POOL SPACE, not a policy change,
+which is what BS's width bucketing is for.
+
+Running totals on the 45-frame gate script (deterministic, same script every run):
+
+    blocked7   1,059,987,820     baseline this session started from (16,244,364 ops/frame measured)
+    blocked11  1,007,614,365     -4.94%   wide slots, legal span
+    blocked12    975,434,141     -7.98%   + pin broken groups
+
+## BU -- width buckets: every group gets a block, and 28% of the address space comes back
+
+BS predicted per-width sub-blocks would recover the 60.8% of the pool spent on width padding.
+Measured, gate-adjudicated:
+
+    blocked12  uniform slots, pin_broken        975,434,141 ops / 45 frames
+    blocked13  + --width-buckets                945,011,309   -3.12%    GATE: PASS
+
+    metric                blocked12      blocked13
+    groups blocked           14,871         27,032   <- ALL of them
+    pinned words             14,857         27,018   (+82%)
+    broken groups            12,579            418
+    no-block declines        26,111          5,103
+    span (words)        134,217,696     96,002,336   <- 38.2M words freed, 28% of the space
+    fjm bytes            31,822,834     31,792,965   (flat: coverage bought nothing in size)
+
+The speed delta (-3.12%) is smaller than the structural change, and that is the honest reading:
+pin_broken had ALREADY recovered most of the value of the groups that had blocks, so bucketing's
+gain is the 12,163 groups that previously got no block at all -- individually cold, collectively
+worth 3%. Its larger contribution is the 38.2M words, which is now spendable.
+
+**Coverage is essentially solved; the remaining declines are structural.** Of 9,605: `overflow
+4,008` and most of `no-block 5,103` are the M1 self-reset part, whose tables are emitted AFTER the
+counting pass by construction, and `too-wide 494` are tables larger than any slot. With pin_broken
+these no longer poison their groups -- 418 groups remain broken, and those never held a block.
+
+**So the lever moves from COVERAGE to INDEX COST.** Cumulative on the 45-frame gate script:
+
+    blocked7   1,059,987,820    session baseline (16,244,364 ops/frame, measured on gamespeed)
+    blocked11  1,007,614,365    -4.94%
+    blocked12    975,434,141    -7.98%
+    blocked13    945,011,309   -10.85%
+
+⚠ These are GATE ops on 45 scripted frames. The binding metric is (mean+p80)/2 over 10x100 frames
+from the player start -- a DIFFERENT workload -- so no conversion between them is quoted here. The
+winner gets its own gamespeed run.
+
+Next, and why: `_cheap_indices` hands a group's `k` tables the `k` lowest-popcount indices out of
+`k*spread` slots. For the hottest word (~19,015 tables) spread=2 gives 65,536 slots whose 19,015
+cheapest indices have popcount <=7 (mean ~6.2); spread=4 gives 131,072 slots where they fit in
+popcount <=6 (mean ~5.5) -- ~0.7 ops off every arm on the hottest half of all calls, for ~12M words
+against 38.2M free. After that, the indices are handed out in ENCOUNTER ORDER, not hotness order,
+which wastes index 0 on whatever macro expanded first.
+
+## BV -- spread=4 exhausts the pool: the second span estimate I got wrong by eye
+
+    blocked13  spread 2, width buckets      945,011,309 ops / 45 frames
+    blocked14  spread 4                   1,450,658,734   +53.5%    (gates PASS, just slow)
+
+    blocked14: 98 groups blocked of 27,032; 26,945 broken; no-block declines 190,398;
+               span back to 134,217,696 (full)
+
+I predicted "~12M words extra against 38.2M free" by pricing the dozen huge groups. But `spread`
+multiplies the slots of EVERY group at or above `spread_min_count=256`, and those are many more
+than a dozen. Demand roughly quadrupled, the pool overflowed, and 99.6% of groups lost their block.
+
+That is twice in one session that a config was launched on an eyeballed span estimate and came back
+31 minutes later exhausted (BR's margin was the first). The counting pass already knows every
+block's exact size, so this was always arithmetic rather than judgement. Two fixes, both landed:
+
+  * `_preflight()` prints `demand X words, capacity Y words (Z% used); N of M groups placed` right
+    after the counting pass, and says outright when a config does not fit -- seconds, not 31 min.
+  * `--counts-cache` freezes counts/widths/width_hist/alias to disk. They depend on the PROGRAM and
+    the allowed macros, never on pool geometry, so every spread/slot/span config can share one
+    counting assembly instead of paying 430s for its own.
+
+The lesson generalises past this pass: spread is not free and not uniform in value. It should be
+spent where the index is WIDE (a 19,015-table group) and withheld where it is already narrow, which
+is what `spread_min_count` controls -- so the next attempt raises that floor rather than the spread.
+
+STANDING BEST: blocked13 -- 945,011,309 gate ops, GATE PASS, data 43,527,560 words = 32.43% of 2^27.
+
+## BW -- MEASURED: 14,229,140 ops/frame, both M6 targets pass, 12M short by 2.23M
+
+The campaign had been ranking candidates on the 45-frame gate script since blocked7. This is the
+binding metric itself, re-measured this session on the standing best binary.
+
+    python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_blocked13.fjm
+
+    SPEED  BINDING (mean+p80)/2: 14,229,140 ops/frame   (target <= 20,000,000)  PASS
+    SPEED  mean run-average   : 13,056,444
+    SPEED  80th-pct run avg   : 15,401,835
+    SPEED  spread lo..hi      :  9,289,183 .. 17,717,101
+    SIZE   words              : 43,527,560 = 32.43% of 2^27   (target <= 35%)  PASS
+    SIZE   span / file        : 96,002,336 words (71.53%) / 31,792,965 bytes
+
+Walk validity is a SEPARATE run, and it passes -- this is the check whose failure withdrew an
+earlier 26,001,449:
+
+    python scratchpad/12m/gamespeed.py --fjm ... --validate
+    distinct end cells: 9/10 ; widest spread 2258 units ; worst run 0% blocked
+
+⚠ `--validate` is a MODE, not a modifier. Passing it runs the walk check and exits WITHOUT
+measuring speed. CLAUDE.md's "no speed number without its --validate output" means two runs, not
+one; attaching the flag to the speed run silently yields no speed number at all.
+
+**THE GATE PROXY RUNS CONSERVATIVE.** Measured -12.40% (16,244,364 -> 14,229,140) where the 45-frame
+gate predicted -10.85%. The proxy under-stated the real gain by ~1.5 points. It remains the right
+ranking tool -- deterministic, 17 min against 4 h -- but treat its deltas as a FLOOR on the binding
+gain, not an estimate of it.
+
+Campaign, measured endpoints only:
+
+    24,723,058   campaign baseline
+    22,988,275   session start
+    16,244,364   blocked7  (wide-ish slots, spread 2)
+    14,229,140   blocked13 (wide slots + legal span + pin_broken + width buckets)   -12.40%
+
+REMAINING GAP TO 12,000,000: 2,229,140 ops/frame, i.e. a further -15.7%.
+
+## BX -- the movement speed was a COLLISION bug, and m2_std_gate was certifying through walls
+
+A playtest reported walking "super fast", being stopped on visibly open floor, and once ending up
+outside the level. Those are one mechanism.
+
+**FORWARD_MOVE = 50 was a units error, not a tuning choice.** DOOM's `forwardmove 0x32` is a THRUST
+fed to `P_Thrust(..., move*2048)` and damped by FRICTION 0xE800 (0.90625/tic), settling at
+50*2048/65536 / 0.09375 = ~16.7 units/tic. This sim has no momentum and applied 50 as DISPLACEMENT,
+i.e. 3x DOOM's run speed.
+
+That broke collision, because `try_move` tests only the DESTINATION box (reference_model.py:847) and
+the box is 2*PLAYER_RADIUS = 32 units wide. A 50-unit step leaves an 18-unit band policed by neither
+the source nor the destination box. MEASURED (scratchpad/12m/stepcheck.py, on the SHIPPING map):
+
+    move 50 u/tic : 1 solid-wall crossing; from the spawn, turn-left x17 then forward walks THROUGH
+                    one-sided linedef 940 on tic 21 and leaves the level
+    move 25 u/tic : 0 crossings
+    move 16 u/tic : 0 crossings
+    dead-stuck on open floor (all-or-nothing step, no partial move): 4.43% -> 3.60% -> 2.85%
+
+FORWARD_MOVE is genuinely SHARED (reference_model.py:63, imported at wall_renderer.py:26 and
+interpolated into the emitted fj), so 50 -> 16 is ONE edit that moves both mirrors. Host suite: 486
+passed. The remaining dead-stops need sub-stepping, which is a DUPLICATED change
+(reference_model.move_with_collision + collision.move_with_collision_lines + src/fj/sim.fj).
+
+### The gate was passing along a route the player cannot take
+
+Fixing the step made `m2_std_gate` unable to plan at all, which exposed why it ever could:
+
+    the gate's own 24-frame route at FORWARD_MOVE=50 crosses ONE-SIDED linedefs 534 and 571
+
+It reached its target BY TUNNELLING. Worse, the target was never reachable: the gate picks the door
+nearest by STRAIGHT LINE (door 48), whose use box starts at y=616, while the walkable region from
+the spawn with doors shut stops at y=488. Of E1M1's 13 door sectors only **10 and 100** are
+genuinely reachable. Two of `gamespeed --validate`'s walk endpoints -- (827,-210) and (128,1424) --
+are also outside the legitimately reachable region, by 129 and 940 units.
+
+Every existing control asks about PIXELS, and a route through a wall renders perfectly, so nothing
+could have caught this. Three fixes, all in the harness (the gate now proves MORE, not less):
+
+  * TARGET = nearest door with a walkable route, decided by the same `try_move` the program runs.
+  * PLANNER = `walkable_cells` (BFS over 16-unit cells, adjacency = try_move accepts) + steering,
+    replacing a width-24 beam sorted by straight-line distance. The beam could not walk around an
+    obstacle, and its pose de-dup bucketed angle at 11.25 degrees while one turn is 3.5 -- three
+    consecutive turns collapsed to one state and were pruned, so it could not even turn in place.
+  * CONTROL 0 = re-simulate the approach leg and REJECT any plan whose centre path crosses a solid
+    linedef. Negative control: it rejects the old beam's plan (crosses 534, 571).
+
+⚠ GENERAL LESSON. A verification tool can be defeated by a bug in the SUBJECT that makes the tool's
+own setup impossible-but-plausible. The gate did not lie about pixels; it walked a path physics
+forbade and then compared those pixels honestly. When a gate builds its own fixture by SEARCHING the
+system under test, the search result is part of what needs a control.
+
+## BY -- WAIT was coupled to the walking speed, and the counts-cache guard earned its keep
+
+Correcting FORWARD_MOVE (BX) exposed a second constant tuned to the old speed. A TIC IS A FRAME
+here, so `doors.WAIT` is really "how far can the player travel while the door is passable":
+
+    WAIT=10 at 50 units/tic  ->  500 units of reach     (fine)
+    WAIT=10 at 16 units/tic  ->  160 units              (the door shuts in your face)
+
+MEASURED: after the use press, door 10 is passable only on frames 3..21, while walking through it
+took until frame 48. `dwait` is WAIT_NIBBLES=2 wide (0..255) and `doorcode` imports WAIT from
+`doors`, so 10 -> 32 is one SHARED edit restoring the old reach (32*16 = 512 units) at no per-frame
+cost. Verified against the door state machine: the player now crosses on through-frame 14 with the
+door at state 8 (fully open), and it closes behind him.
+
+**Generalisation: correcting one constant can invalidate every constant tuned around it.** WAIT was
+never wrong on its own; it was right for a movement speed that was wrong. Anything expressed in
+FRAMES rather than in distance is suspect after a speed change.
+
+### The planner rewrite cost five iterations -- recorded so the traps are not re-entered
+
+  * over-aggressive path simplification handed the steerer a leg it could not drive (the swept path
+    clips a corner the sampled line-of-sight points miss);
+  * the BFS goal tolerance (1.5 cells = 24u) was TIGHTER than the caller's acceptance test (40u),
+    so a threshold with 14 reachable cells inside 40u was reported unreachable -- a planner failing
+    on its own discretisation, not on the geometry;
+  * the fallback to the raw path never ran, because a `return None` on the tic cap short-circuited
+    out of the first attempt. Now `return drive(simple) or drive(path)`.
+  * "inside the use box" is NOT "at the doorway": door 10's box is 256x160 and wraps a corner, so
+    stopping at the first in-box frame ended the walk around a wall from the opening and the
+    walk-through leg detoured 84 waypoints. The approach leg now requires box AND threshold.
+
+### The cache signature guard fired on its first real test
+
+BV added the emitter-source hash to `--counts-cache`'s key precisely because tier/map/wad/macros do
+not change when an emitter does. This build printed `counts cache is for a DIFFERENT program --
+recounting`. Without it, blocked16 would have silently reused blocked15's counts for a program whose
+sim constants had changed.
+
+## BZ -- doors: three defects, two fixed, and why the third is rung-3b work
+
+A playtest reported "I don't see any doors", "a shut door is see-through", and "an open door does
+not look like a door". Three separate causes, all reproduced on the oracle.
+
+### 1. The face was not drawn AT ALL past ~168 units  [FIXED]
+
+`STEP_SEG_BUDGET = 8` is spent by nearer face-carrying boundaries before the walk reaches a door,
+so the lintel -- the only thing that makes a doorway read as a doorway -- was simply absent.
+MEASURED (shut-vs-open pixels of a 16,000 px frame, viewpoint on the doorway normal):
+
+    distance   bud=8   bud=12   bud=16   bud=24
+        176      360     2774     2774     2774
+        192      273      273     2107     2107
+        256      212      212      212      212    <- genuinely sub-pixel; no budget helps
+
+This is a STRAIGHT BUG by CLAUDE.md's own cost model: "Surviving budgets are either provably
+never-binding (asserted at emit time) or shed only invisible work." This one has no assertion
+anywhere and shed the whole visible door. Raised to 16 -- SHARED (reference_model.py:97,
+wall_renderer.py:47 imports it, :1990 interpolates it into the emitted fj), so one line moves both
+mirrors. It costs per-frame ops and that price must be MEASURED, not assumed.
+
+### 2. A shut door is see-through  [ORACLE FIX PROVEN, fj MIRROR IS NOT A PATCH]
+
+`reference_model.py:2023`: `if ld.back != -1: ... continue  # two-sided: not a solid wall`. A
+two-sided line NEVER claims its column, so the far wall paints through the doorway. DOOM's
+`R_ClipSolidWallSegment` has the "a closed door IS a solid seg" test; this renderer has none.
+Separately, the door's upper piece IS computed with the full doorway extent and then >50% of it is
+discarded by the splice, which clips every face to the ceiling band
+(`reference_model.py:2375-2379`; at 112 units, 11,520 face rows stored, 5,312 painted).
+
+ORACLE FIX (5 lines, pictures in scratchpad/12m/door_states_ceilend.png): extend `ceil_end` past
+any upper face that reaches below it. Shut becomes a solid occluding slab; the open frame changes
+by 0 px; every intermediate state shows the gap opening correctly beneath the lintel.
+
+⚠ WHY THE fj MIRROR IS NOT A SMALL CHANGE. The oracle works because faces paint AFTER walls and
+simply overwrite them. The fj device is MONOTONE FORWARD-ONLY -- `stream_render.fj:653` warns that
+emitting sub-cursor pairs makes the device REWIND, "no silent drop" -- so the wall must never EMIT
+the rows the face covers. That couples the wall's start to the face's bottom, and the two are
+produced in DIFFERENT PASSES: `clip_rows` fixes the wall span during the seg walk
+(`frame_render.fj:441,457`, `cexcl = min(top, VIEW_H)`), while faces land in slots afterwards, and
+`ctake = min(cexcl, fstart)` is recomputed independently in two places
+(`stream_render.fj:166`, `frame_render.fj:1434`). Expressing "raise this column's wall top past
+this door's face" needs the pass structure changed, which is what rung 3b already scopes
+(`docs/handoff-m13-2s.md:611`). NOT attempted -- each try costs an ~85-minute build+gate.
+
+### 3. An open door has no lintel to see  [WON'T FIX at this tier]
+
+Fully open, door sector 10's ceiling is -4 against a front ceiling of 0 -- a 4-unit lintel that
+collapses sub-pixel. The DOORTRAK jambs are zero-height when shut and edge-on when open. And the
+real texture is never used: line 55 carries `upper='AQDOOR02'` but the oracle never reads
+`sd.upper` (grep: zero hits) -- faces are flat-shaded `STEP_FACE_BASE = 96`.
+
+### The verification hole this exposed
+
+`m2_std_gate` proves oracle == fj and nothing else. **There is no test anywhere asserting that a
+shut door occludes.** M2 is marked DONE on a gate that could never have caught any of this, and the
+docs' own priority ranking (`docs/handoff-m13-2s.md:383`, "Halve rung 3b: LOWER walls only") assumed
+UPPERS were the less important half -- exactly backwards for doors.
+
+## CA -- an INVISIBLE piece was evicting the visible door, and the code said so
+
+BZ left "why is a shut door not drawn past ~200 units" unanswered, and both of my hypotheses were
+refuted (the ceil_end splice clip helps at 160-192 and not at all past 224; forcing the
+"every column drawn" stop off changes nothing anywhere).
+
+⚠ MY MEASUREMENT WAS ALSO WRONG, TWICE. The sweep walked the player backwards along x=832 and I
+reported that the floor "steps up 160 units at ~192" -- it does not; the floor is -128 along that
+whole line and my sector lookup was crude. And the falloff is not a fade at "224+": on
+geometry-controlled sweeps (sector, floor and sight angle constant) it is a HARD CLIFF, 1,673 px at
+160 -> 2 px at 162, in one 2-unit step, at the same place for doors 10, 34, 54, 64 and 100.
+
+### The real mechanism: two budgets, one of which spends its slot on nothing
+
+`reference_model.py:2142` admits an upper piece only when
+`len(ups[x]) < n_stack and (not ups[x] or stk2)`, with `n_stack = V5_STACK = 2` and
+`stk2 = sc2m >= DEG_STACK_SCALE (32768)` -- and 32768 in 16.16 scale is tz ~= 160 map units. So a
+column keeps TWO upper pieces and the SECOND is refused past 160 units. When the door's lintel gets
+slot 0 there is no cutoff at all (door 48 still drawn at 400 units).
+
+**What burns slot 0 is a piece that paints NOTHING.** An entirely off-screen boundary was stored as
+the sentinel `(1, 0)` (above) or `(255, 254)` (below). Both keep y1 > y2, so the paint loop's
+`if y1c <= y2c` rejects them -- yet they had already consumed a slot. `src/fj/frame_render.fj:940`
+documents the mechanism exactly: "whenever rowa <= rowb EVEN FULLY OFF-SCREEN, and that write
+CONSUMES the slot, blocking farther segs (R40, the 28-column phantom face)."
+
+### The fix, and why its shape is the good one
+
+Do not store an entirely off-screen piece. MEASURED, door 100's clean sweep (floor 0 throughout):
+
+    distance   before   after
+        344       38      405
+        400       34      327
+        464        0      177
+
+    oracle: `if a <= b and 0 <= b and a <= Hs:`      (both the ups and los store sites)
+    fj    : `off_above:` / `off_below:` jump to `skip` instead of `write`   (ts_piece_store)
+
+Two lines each, and both mirrors express the SAME RULE rather than two encodings of it -- which is
+the shape a byte-exactness change wants. 486 host tests pass.
+
+COST: the region BEHIND the sentinel, which was derived from the stored bytes. Measured at ~90 px on
+a near corridor view, against recovering an entire door.
+
+### What is still open
+
+  * 224 units on door 10's near approach: genuine slot EXHAUSTION -- two real pieces hold both
+    slots. Needs V5_STACK 3, and the fj slot layout packs 4 pieces into a 16-byte stride with a
+    whole-nibble shift (SLOT_SHIFT), so a third upper piece breaks the stride. Not a constant bump.
+  * A shut door still does not occlude (BZ #2) -- rung 3b.
+
+LESSON: the budget doctrine in CLAUDE.md says a surviving budget must "shed only invisible work".
+Here the budget was spending itself ON invisible work. Both failures are the same class, and neither
+was caught by any gate, because every control asks about pixels and an evicted piece renders as
+"some other geometry", not as an error.
+
+## CB -- the glass door: occlusion is `drawn[x]`, and the door wears its art on `upper`
+
+The owner asked for a shut door that occludes. Three routes were considered and two are dead ends.
+
+**ROUTE A (extend the face past the ceiling-band clip) CANNOT WORK, and I had claimed it did.**
+I published pictures of a solid grey slab and called it proven. It was measured at ONE viewpoint.
+Checked properly: at another viewpoint Option A changes ZERO pixels in the 22 doorway columns, and
+my claim "the OPEN frame changes by 0 px" is false -- over a 78-viewpoint sweep it moves 5,258
+open-frame pixels, including 400 px at a viewpoint with no door in it at all.
+
+The reason is structural. Occlusion in this renderer is `drawn[x]`, written in exactly ONE place --
+the one-sided wall path (reference_model.py:2332). The two-sided marking leaf deliberately never
+touches it; src/fj/frame_render.fj:418-420 says so in prose. So enlarging a face is OVERDRAW, not
+clipping: the far room's floor still shows below the slab, and a sprite behind the door still paints
+ON TOP of it, because sprites are recorded during the walk (gated on `drawn[x]`) and painted after
+the face splice. No face change can un-record a sprite. This maps exactly onto DOOM's split --
+R_ClipSolidWallSegment produces occlusion, R_StoreWallRange produces pixels.
+
+**ROUTE B (rung 3b) IS NOT AVAILABLE.** It was built and gated, then DELETED on the owner's call in
+the flag retirement: the emitter half in e38b0f2, the oracle's `render_frame_2s` in 6f90832. Priced
+against today's baseline it is ~72M ops/frame and +5.84% of 2^27 in bank size against 2.56% of
+headroom -- it breaks the size ceiling on its own.
+
+**ROUTE C IS THE FIX: send a CLOSED two-sided seg down the one-sided path.** Objective metric --
+perturb only the sector behind the shut door; a door that occludes must leak ZERO pixels:
+
+    blocked19 (shipped)          617,425 px leak
+    route C + upper texture       60,447 px, and 12 of 13 doors are EXACTLY 0
+
+The residual is entirely door 84, whose sector is zero-height when shut -- the probe perturbs the
+door's own sector, so it measures the solid wall rather than a leak. Rendered from both sides it is
+a proper textured door. ⚠ `leakcheck.py` computes the viewer's subsector for control C2 but never
+filters on it; that is a real gap in the tool, recorded rather than papered over.
+
+**OCCLUSION AND TEXTURE ARE COUPLED.** Every door line on E1M1 has `middle='-'` with the art on
+`upper` (AQDOOR02 / BIGDOOR2 / METAL2). Sending a shut door down the solid path with `sd.middle`
+occludes correctly and paints NOTHING recognisable, so the texture change is required, not cosmetic.
+
+### Staging, and why
+
+Solid-vs-marking is decided at COMPILE time in the emitter (`_seg_as_solid`), so:
+  * 80 segs are closed no matter what any door does -> pure compile-time (STAGE A, blocked20).
+  * 54 are closed only while a door is shut -> the emitted code needs BOTH bodies behind a state
+    gate (STAGE B). The gate is cheap: a door is closed exactly when its state == 0 (verified on
+    every door), so it is one `hex.if0` on the door's state cell, and the per-seg state switch
+    `dsw_<label>_go dstate + slot*dw` already exists.
+The oracle excludes door-touching segs for stage A by testing `scene.sector_heights`, which is the
+same set the emitter's `_seg_door(seg) is None` excludes -- if those two ever disagree, the mirrors
+diverge and byte-exactness is gone.
+
+⚠ INCIDENTAL: wall_renderer.py:1615-1639 is UNREACHABLE -- a `continue` at :1614 precedes the whole
+`tsprobe`/`tsmark` ablation arm. Those two ablations cannot have run since that `continue` landed.
+
+## CC -- doors DONE: route C ships, and the honest price is +1.54% on the binding metric
+
+blocked21 = route C (closed two-sided segs take the one-sided path, setting `drawn[x]`) + the
+`upper` texture, staged as 80 compile-time segs and 54 door segs behind a per-state gate.
+
+    M2 STANDALONE GATE: PASS -- 208 frames, 0 pixel differences
+    BINARY playtest (native engine, 174 frames): shut-vs-open 9,401 px at the doorway
+    leak through shut doors (oracle): 617,425 -> 60,447 px, 12 of 13 doors EXACTLY 0
+
+    BEFORE (blocked19)  12,951,426 ops/frame   32.44% size
+    AFTER  (blocked21)  13,151,190 ops/frame   32.53% size
+                        +199,764  (+1.54%)     +0.09pp
+
+⚠ TWO WORKLOADS, TWO ANSWERS, AND THE GATE SCRIPT IS THE MISLEADING ONE. The 208-frame gate got
+5.6% CHEAPER (4,666,452,041 -> 4,404,090,598) because it walks to a door and stands at it, so the
+occlusion saving dominates. The binding metric ROAMS, and there the 134 newly-solid segs pay full
+wall projection far more often than they save by occluding: +1.54%. Quoting the gate delta as the
+cost of this change would have been wrong by 7 points and in the wrong direction.
+
+### The fj shape, for whoever touches it next
+
+  * `_seg_closed_static` (80 segs, compile-time) folds into `_seg_as_solid`.
+  * `_seg_dual` (54 door segs) emits BOTH bodies; the per-seg gate is one op, because a door is
+    closed exactly when its state is 0: `hex.if0 1, dstate + <slot>*dw, ss<c>_seg<s>_solid`.
+  * The texture must move with it -- door lines carry `middle='-'`, art on `upper` -- and BOTH
+    mirrors must pick the same name. `scratchpad/12m/mirrorcheck.py` checks that directly (134
+    segs, 774 seg-state pairs) with a negative control; it exists because changing only the oracle
+    cost a build+gate and failed with "frame 2, 8 px differ".
+
+### ⚠ THE REAL LESSON OF THIS ROUND IS ABOUT DIAGNOSTICS, NOT DOORS
+
+Stage B took four ~7-minute emits. ONE was a genuine bug (the `tsprobe`/`tsmark` arm at
+wall_renderer.py:1615-1639 is preceded by a `continue`, so it was dead code, and routing the dual
+fall-through in front of it silently swallowed every door seg). The other THREE were my own
+instrumentation reporting false zeroes:
+
+  1. the emit smoke ran on the `render` tier, which has NO DOORS -- so "0 gates, all balanced" was
+     vacuously true and read as a pass;
+  2. `emit_wall_renderer(return_parts=True)` returns [(name, JOINED STRING)], not (name, lines), so
+     `for l in ls` walked the string CHARACTER BY CHARACTER and the join put a newline between every
+     character -- `_solid` could never appear as a substring, whatever the emitter did;
+  3. greps of `build/generated_*` raced the build, which regenerates that directory per assembly.
+
+Each time the code was closer to correct than the measurement of it. The rule this repo already
+applies to gates -- a check must ship a negative control -- applies just as hard to a throwaway
+diagnostic: WHEN A CHECK REPORTS ZERO, PROVE IT CAN REPORT NON-ZERO BEFORE BELIEVING IT.
+
+## CD -- the occlusion proof was VACUOUS, and the smoothness knob has a second ceiling
+
+Four verification gaps closed. Two of them were in things this campaign had already quoted as
+evidence, which is the point.
+
+**1. `leakcheck.py` was perturbing the DOOR, not the room behind it.** It moved
+`sds[lds[li].back].sector`, on the reading that a linedef's back side is "behind" it. On E1M1 that
+sector is the door itself -- **all 25 door linedefs carry the moving sector on their BACK side**
+(front = the room). So the "perturbed" frame was a shut door at one shut ceiling versus a shut door
+at another shut ceiling: both occluded, nothing differed, and the tool printed `LEAK 0 px` with a
+straight face. A door made of glass scores exactly the same. Its C1 probe still looked healthy
+because with the door open the same overwrite re-shut it, so C1 was measuring the door opening and
+closing rather than the far room's visibility.
+
+The room beyond a door is the FRONT sector of the door sector's OTHER linedef. That rule now lives
+once, in `doomfj.doorcode.door_rooms`, because the tool and the new test must not hold two opinions
+about it.
+
+**2. C2 computed a point location and threw the answer away.** Fixing it exposed a second wrong
+assumption: requiring the viewer to STAND IN the linedef's front sector dropped all 24 of door 10's
+viewpoints. An E1M1 door's front sector is a one-subsector alcove inside the door frame -- nobody
+far enough back to see the door is ever in it. The filter that works is two conditions:
+`mapcompiler._point_side` for the SIDE, plus point location to REJECT the door sector and the
+perturbed rooms. 12 viewpoints scored, 12 dropped.
+
+    door 10, corrected metric:  LEAK 0 px   probe(open) 30,972 px
+
+**3. The property now has a test, with a negative control.** `tests/host/test_door_occlusion.py`
+-- 0 px leak, 5,373 px probe, 2 viewpoints, 0.8 s. Reverting route C in the oracle makes it leak
+**3,871 px** and the test fails, so it is not passing by construction.
+
+**4. The dead `tsprobe`/`tsmark` arm is gone.** Unreachable since rung 3a (a078491); after the dual
+seg restructure it would have emitted the probe body ON TOP OF the marking body rather than instead
+of it, which is not what it priced. Removal is provably emit-identical: the arm's first statement
+was `if not (ablate & {...}): continue` and no caller has ever passed either mode. Numbers stay in
+`docs/handoff-m13-2s.md`.
+
+**AND THE ONE THAT COST A BUILD: `DEFAULT_QUANT` has a second ceiling nobody had written down.**
+`MAX_STATES = 16` is the documented one. The binding one is **the pid byte**: every door stop is a
+distinct (ceiling key, floor key) pair, a pid must fit `PID_NIBBLES = 2`, and E1M1 spends 142 of
+the 255 on static geometry. quant 10 asked for 121 door pairs = 263 and killed the build ten
+minutes in, on an assert that mentions neither doors nor quant.
+
+| quant | stops | frames @ SPEED 1 | pids | |
+|---|---|---|---|---|
+| 16 | 9 | 8 | 222 | the old value -- every phase visible |
+| 12 | 12 | 11 | **245** | **SHIPPED** -- 10 spare |
+| 11 | 13 | 12 | 255 | fits with ZERO margin |
+| 10 | 14 | 13 | 263 | OVERFLOWS |
+
+The model is not a guess: it reproduces both real builds (222 at quant 16, 263 at quant 10) from
+WAD data alone, and `tests/host/test_doors.py` now runs it in 0.3 s. `emit_wall_renderer` also
+prints `pid bake: N pairs baked, M addressable` on every build, so the budget is visible before the
+assert rather than after it.
+
+⚠ One test had to be LOOSENED, and it was right to. `test_the_endpoint_is_not_free_of_charge`
+asserted every E1M1 door is left short by a floor-only rule -- true only because no door opens to a
+multiple of 16. At quant 10, sectors 64 (-60) and 84 (60) are exact multiples and it failed on a
+coincidence of the old constant, not on a defect. It is now parametrised over every quant the repo
+uses and requires a strict majority.
+
+
+## CE -- the 285-pixel renderer bug that was a BACKGROUND JOB, and what the gate could not see
+
+**The gate reported 285 differing pixels at the first frame door 10 moved, and it was right about
+the pixels and useless about the cause.** Frames 0-155 byte-exact; frame 156, door state 1, 285 px.
+I spent the afternoon on it: dumped the frames, found the diff was the ceiling plane (rows 0..29,
+columns 28-34/38-39) one colormap row brighter with the flat pattern shifted four rows, plus a
+one-pixel floor edge; swept `deg_mark` 60..1024, `STEP_SEG_BUDGET` 8..64, `deg_stack_scale`,
+`deg_lip_scale` -- no budget binds; proved `step_cls` cannot miss its `.get(..., 0)` default
+because both sides use the same `seg_secs` and the same key expression; confirmed no door seg is
+still "closed" at any state >= 1, so the fj gate (`solid iff dstate == 0`) matches route C.
+
+**None of it mattered. The binary was quant 12 and the oracle was quant 11.**
+
+A background job of mine -- a loop that measured pid counts by REWRITING `doors.DEFAULT_QUANT` --
+was still running after I believed it finished, and set the constant to 11 *after* I set it to 12
+and launched the build. Door 10's ceiling at state 1: **-120 in the binary, -121 in the oracle.**
+One map unit. 285 pixels.
+
+The tells were in the logs the whole time:
+
+    gate:      script : ... 2 use -> 14 open ...        <- 13 states = quant 11
+    binary:    seg603_attrib_consts_st0 .. _st11        <- 12 states = quant 12
+
+Re-gated against the matching oracle: **PASS -- 213 frames, 4,483,230,464 ops, every frame
+byte-exact, door 10 through all 12 states and held across the M1 reset.** CONTROL 4 (the path
+crosses the door's own line segment, so collision was really exercised) passes too.
+
+**THE LESSON IS NOT "BE CAREFUL".** It is that the gate could not tell what it was testing. It
+recomputed door stops from whatever `DEFAULT_QUANT` said at run time and compared them to a binary
+built from some other value, with nothing tying the two together. So:
+
+* `doors.geometry_stamp()` -- the SSOT for what a build froze: quant, SPEED, WAIT, MAX_STATES,
+  OPEN_GAP and every door's exact stop heights.
+* `build.py` writes `<binary>.fjm.doors.json` beside every `.fjm` it assembles.
+* **CONTROL 5** loads it and refuses to run on a mismatch, BEFORE the 4.5 billion ops. A missing
+  stamp is also a refusal: a gate whose subject is unknown is not a gate.
+
+R9 control -- corrupt the stamp to the exact mistake and it says, in under a second:
+
+    CONTROL 5 FAIL: the binary and this process disagree about door geometry.
+       quant: binary 11, this process 12
+       door 10 stops: binary [-128, -121, ...], this process [-128, -120, ...]
+       THE RENDERER IS NOT ON TRIAL HERE.
+
+⚠ **AND NEVER LET A BACKGROUND JOB WRITE TRACKED SOURCE.** The probe loop existed to answer "how
+many pids does quant N bake", and it answered it by editing `src/doomfj/doors.py` in place. A
+build, a gate and a GIF all ran against a constant that moved under them.
+
+**SHIPPED (quant 12):** binding metric **13,076,642 ops/frame** (target <= 20M) and
+**43,933,538 words = 32.73%** of 2^27 (target <= 35%). Against blocked21's 13,151,190 at quant 16,
+three extra door stops cost **-0.57% ops** (i.e. nothing measurable) and **+0.20pp size**.
+
+---
+
+## CF -- 971 tests, and the three defects the new tests found that review had not
+
+A coverage sweep (11 areas, survey -> write -> worktree-isolated mutation check) took host coverage
+from **68.4% to 82.5%** of 5,004 statements, 496 -> 971 tests, +8 s on the default run. Every area
+was audited against the real per-file `missing_lines`, not against a guess.
+
+**Three verdicts I did not take on trust, and one that was wrong.**
+
+1. **13 tests were "strengthened" INSIDE a worktree.** The agents' 254/254 mutation score was true
+   of the worktree copies and NOT of what was on disk -- six files on disk still held the version
+   that had FAILED to catch its mutation. Recovered from the run journal and re-applied. A
+   worktree-isolated verify phase improves nothing unless you carry the improvement back.
+
+2. **`MAGIC = 0xD0` -> `0xD1` left every wireformat test green.** Found by running the mutations
+   myself (`scratchpad/12m/mutcheck.py`), not by any agent's self-report. A round-trip suite is
+   STRUCTURALLY BLIND to the value of a symbol it uses on both sides: encode writes MAGIC, decode
+   checks MAGIC, self-consistent at any value. But MAGIC is a wire ABI constant baked into every
+   binary ever built -- change it and an old binary routes the host's first byte to `bad:` and
+   halts, which looks like a crashed renderer, not a version mismatch. Now pinned three ways,
+   including a cross-mirror check that reconstructs the byte from the two `hex.if_flags` NIBBLE
+   tests the emitted program actually branches on.
+
+3. **`window_chrome_fj` caught the wrong exceptions** -- mine, from the same session.
+   `except (KeyError, ValueError, IndexError)` around `decode_picture`, whose first statement is
+   `struct.unpack_from("<4h", data, 0)`. `struct.error` subclasses Exception directly and none of
+   the three catch it, so a lump that is PRESENT but malformed killed a 35-minute build at emit
+   time -- while the docstring promised a missing icon never fails a build. Missing lump: handled.
+   Bad lump: fatal.
+
+4. **Four ablate modes were declared and read by nothing:** `colstub`, `noflush`, and -- the
+   dangerous pair -- `pass2` and `planes`, which `emit_wall_renderer`'s docstring ADVERTISED as
+   working knobs. `assert ablate <= _ABLATE_MODES` accepted them and no arm consumed them, so
+   `ablate={"planes"}` emitted the full program and priced the visplane pass at **zero**. Same
+   failure shape as the `tsprobe`/`tsmark` arm retired the same day. All four retired; the test's
+   orphan allowlist is now EMPTY and a mode cannot be declared without a consumer.
+   ⚠ My first scan called `pnearcol` dead too -- the regex missed `"pnearcol" not in ablate`.
+   Check before deleting.
+
+5. **A `@slow` test had been unrunnable for several milestones.**
+   `test_build_wall_renderer_e1m1_flat` called `build_wall_renderer(E1M1, "E1M1", out_fjm=...)`
+   after the signature became keyword-only, so it could only ever raise TypeError -- and its
+   exact-equality `features` guard still expected `sector_heights`, a key that retired into
+   `doors`. Excluded by default at ~30 minutes a run, so nothing noticed. Both fixed, and two
+   millisecond-scale static guards now pin them: the `features` keys `build.py` constructs must
+   equal the keys the slow test asserts, and the slow test's call must `Signature.bind`.
+
+**`scratchpad/12m/mutcheck.py`** runs ten mutations against the tests as they stand on disk. All
+ten CAUGHT; all seven touched sources restored byte-identical. Its own controls: C1 a mutation
+whose anchor no longer matches is a BROKEN CHECK, never a silent skip; C2 every target file must be
+green before anything is mutated; C3 every file is byte-compared after restore.
+
+**Two xfails are a real M4 blocker, not decoration:** E1M6 has 344 and E1M7 330 runtime things,
+past the 254 the `thnext`/`sshead` byte sentinel allows, so a nine-level build dies on
+`_moving_thing_tables`' `assert nt < 0xFF`. `strict=True`, so it flips to a failure the moment
+either map fits.

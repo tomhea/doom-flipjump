@@ -952,13 +952,18 @@ ns frame {
       onscr:
         hex.scmp 5, rowa, cvh, store, store, off_below
       off_above:
-        hex.set 5, oy1, 1
-        hex.zero 5, oy2
-        ;write
+        // ⚠ DO NOT STORE AN ENTIRELY OFF-SCREEN PIECE. Storing it consumed one of the two
+        // per-column slots (V5_STACK) while painting NOTHING -- `lines_step_load` rejects
+        // y1 > y2 before drawing -- so an invisible piece evicted a VISIBLE one. MEASURED on
+        // E1M1 door 100: the lintel died at 344 units because an 8-unit ceiling step stored as
+        // (1,0) held slot 0; skipping the store brings it back (38 -> 405 px shut-vs-open, and
+        // 34 -> 327 at 400, 0 -> 177 at 464).
+        // What is given up is the REGION BEHIND the sentinel, which was derived from the stored
+        // bytes. Measured cost of that: ~90 px on a near corridor view, against a whole door.
+        // ⚠ MIRRORED in reference_model.py's ups/los store (`if a <= b and 0 <= b and a <= Hs`).
+        ;skip
       off_below:
-        hex.set 5, oy1, 255
-        hex.set 5, oy2, 254
-        ;write
+        ;skip
       store:
         hex.mov 5, oy1, rowa
         hex.sign 5, rowa, y1_clamp0, y1_done

@@ -19,6 +19,43 @@ quantised — see `quantise`, which is the only rounding rule.
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+# Door height QUANTISATION, in map units per stop -- and the knob that decides how SMOOTH a door
+# looks, which SPEED does not. A door slides through `travel/quant` stops, so a coarse quant makes
+# each phase visibly large no matter how many frames it is held for.
+#
+# TWO CEILINGS BOUND IT, and the second one is not obvious:
+#   * MAX_STATES = 16, because the fj switch index is one nibble;
+#   * THE PID BYTE. Every door stop is a distinct (ceiling key, floor key) pair, and a pid must fit
+#     PID_NIBBLES = 2 nibbles, so the whole map gets 255 of them. E1M1 spends 142 on its static
+#     geometry, leaving 113 for door stops -- a budget a quant change can blow without touching
+#     anything that looks related. `tests/host/test_doors.py` guards it in 0.3 s; finding out from
+#     an AssertionError ten minutes into a build is how this was learned.
+#
+# MEASURED on E1M1 (door 10 travels 124 units, the longest; pid totals cross-checked against a
+# real build, which asserted exactly 263 at quant 10):
+#     quant 16 -> 9 stops,  8 frames at SPEED 1, 222 pids   <-- SHIPPED: ~27% faster than quant 12
+#     quant 12 -> 12 stops, 11 frames,           245 pids   (smoother, and what shipped before)
+#     quant 11 -> 13 stops, 12 frames,           255 pids   (fits with ZERO margin)
+#     quant 10 -> 14 stops, 13 frames,           263 pids   OVERFLOWS the pid byte
+#     quant  8 -> 17 stops,                                 OVERFLOWS MAX_STATES = 16
+#
+# ⚠ THERE IS NO SETTING THAT IS BOTH FASTER AND AS SMOOTH, and it is worth being plain about why.
+# At SPEED = 1 the door advances one stop per frame, so frames = stops - 1 and the number of
+# DISTINCT POSITIONS the eye sees is frames + 1. Fewer frames IS fewer visible positions; the two
+# are the same quantity counted from different ends. Nothing in `door_tic` or its fj mirror
+# supports a stride, SPEED is frames-per-stop and cannot be 0 or fractional, and the wall-clock is
+# frames x frame-time. "30% faster" therefore costs ~25% of the animation's positions.
+#
+# ⚠ AND THE HEADLINE IS DOOR 10's, not the map's. Over all 13 E1M1 doors, quant 12 -> 16 takes the
+# total frames-to-open from 126 to 94 = 25.4%. Per door: the nine 124-unit doors 27.3%, sector 48
+# (116 units) and sector 84 (60) 20.0%, sectors 54 and 64 (68) only 16.7%. Four of thirteen doors
+# get well under 20%, so "the door opens in 8 frames instead of 11" is true of nine of them.
+#
+# ⚠ MORE STATES ALSO COSTS SIZE: a door seg bakes one constant block per state, so this multiplies
+# the per-door fan-out. It is the reason quant cannot simply go to 1.
 DEFAULT_QUANT = 16
 OPEN_GAP = 4              # P_DoorRaise: min(neighbouring ceiling) - 4
 
@@ -214,8 +251,27 @@ def pass_state(secs, lds, sds, si: int, gap: int = 56, quant: int = DEFAULT_QUAN
 # ⚠ A TIC IS A FRAME. Both tiers run `_player_sim_lines` ONCE per frame (standalone polls the
 # keyboard 8 times but simulates once), and a frame is ~28M fj ops. So these are counted in FRAMES,
 # not in DOOM's 35 Hz tics: SPEED=4/WAIT=60 would be half a minute of real time to open one door.
-SPEED = 1                 # frames per height step (a 9-stop door opens in 8 frames)
-WAIT = 10                 # frames fully open before it closes again
+# Frames per HEIGHT STEP -- how fast the door slides, not how long it stays open (that is WAIT).
+# A TIC IS A FRAME here, so 1 made a 9-stop door snap open in 8 frames, which reads as a jump
+# rather than a door. 2 halves the speed: 16 frames to open, 16 to close.
+# ⚠ `dsub` is ONE nibble (doorcode.py asserts 0 < SPEED < 16), and anything that waits for a door
+# to finish opening must scale with this -- see m2_std_gate's --open-wait, which now derives from
+# it instead of assuming 8.
+SPEED = 1                 # frames per height step -- see DEFAULT_QUANT for the real smoothness knob
+# ⚠ SCALED WITH THE WALKING SPEED. A TIC IS A FRAME here, so WAIT is how far the player can travel
+# while the door is passable: at the old FORWARD_MOVE=50 that was 10*50 = 500 units, ample. When the
+# step was corrected to 16 units/tic (see reference_model.FORWARD_MOVE) the same 10 frames became
+# 160 units and the door shut in the player's face -- MEASURED: door 10 is passable only on frames
+# 3..21 after the press, while walking through it took until frame 48. 32 restores the old reach
+# (32*16 = 512 units). `dwait` is WAIT_NIBBLES=2 wide, so anything under 256 fits.
+WAIT = 37                 # frames fully open before it closes again
+# ⚠ WAIT IS COUPLED TO DEFAULT_QUANT and has to move with it. A faster door reaches "fully open"
+# sooner AND starts closing sooner, so the window during which a player can walk through shrinks
+# at both ends. MEASURED driving `door_tic` from a frame-0 press: the last passable frame moves
+# back 5 (f48 -> f43) going quant 12 -> 16, while m2_std_gate's own schedule starts the
+# walk-through leg 3 frames earlier (its --open-wait default is SPEED*(nstates-1)+2, i.e. 13
+# frames at quant 12 and 10 at quant 16) -- a net loss of 2 frames of margin. WAIT = 37 makes the
+# quant-16 window a strict SUPERSET of the quant-12 one rather than merely a wide-enough one.
 USE_RANGE = 64            # map units around a door's trigger lines that count as "at the door"
 
 IDLE, OPENING, CLOSING = 0, 1, 2
@@ -307,3 +363,65 @@ def initial_states(secs, lds, sds, quant: int = DEFAULT_QUANT) -> dict:
     """`{sector: (0, IDLE, 0, 0)}` — every door shut and still, which is what the emitted
     declarations bake and therefore what the oracle must start from."""
     return {si: (SHUT, IDLE, 0, 0) for si in door_states(secs, lds, sds, quant)}
+
+
+# -- what geometry a BUILT binary froze -----------------------------------------------------
+
+STAMP_SUFFIX = ".doors.json"
+
+
+def geometry_stamp(secs, lds, sds, quant: int = DEFAULT_QUANT) -> dict:
+    """Everything about door geometry that a built binary BAKES IN and an oracle must match.
+
+    ⚠ WHY THIS EXISTS. A binary bakes one constant block per door STOP; the oracle recomputes the
+    stops from `DEFAULT_QUANT` at run time. Nothing tied the two together, so a binary built at
+    quant 12 could be gated against an oracle at quant 11 -- and it was, on 2026-09-11, by a
+    background job that rewrote this module's constant while a build was in flight. The gate did
+    not notice: it reported 285 differing pixels and blamed the renderer, and the door's ceiling at
+    state 1 was simply -120 in the binary and -121 in the oracle. Hours went into a bug that did
+    not exist.
+
+    `stamp_path`/`write_stamp` put this beside the .fjm at build time; `scratchpad/m2_std_gate.py`
+    refuses to run when it disagrees with the live module."""
+    return {
+        "quant": quant, "speed": SPEED, "wait": WAIT, "max_states": MAX_STATES,
+        "open_gap": OPEN_GAP,
+        "stops": {str(si): stops(secs[si].floor_h, open_h, quant)
+                  for si, open_h in sorted(door_sectors(secs, lds, sds).items())},
+    }
+
+
+def stamp_path(fjm) -> Path:
+    return Path(str(fjm) + STAMP_SUFFIX)
+
+
+def write_stamp(fjm, secs, lds, sds, quant: int = DEFAULT_QUANT) -> Path:
+    p = stamp_path(fjm)
+    p.write_text(json.dumps(geometry_stamp(secs, lds, sds, quant), indent=1), encoding="utf-8")
+    return p
+
+
+def read_stamp(fjm):
+    """The stamp beside `fjm`, or None. A caller that gets None must SAY SO, never assume a match."""
+    p = stamp_path(fjm)
+    if not p.exists():
+        return None
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def compare_stamp(stamp: dict, secs, lds, sds) -> list:
+    """[] when the built geometry matches this process's, else one line per disagreement."""
+    live = geometry_stamp(secs, lds, sds)
+    bad = []
+    for k in ("quant", "speed", "wait", "max_states", "open_gap"):
+        if stamp.get(k) != live[k]:
+            bad.append("%s: binary %r, this process %r" % (k, stamp.get(k), live[k]))
+    bs, ls = stamp.get("stops", {}), live["stops"]
+    if set(bs) != set(ls):
+        bad.append("door sectors differ: binary %s, this process %s"
+                   % (sorted(bs), sorted(ls)))
+    else:
+        for si in sorted(ls, key=int):
+            if bs[si] != ls[si]:
+                bad.append("door %s stops: binary %s, this process %s" % (si, bs[si], ls[si]))
+    return bad

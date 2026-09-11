@@ -19,6 +19,8 @@ between passes". The build prints the per-assembly counts so a mismatch is visib
 than 20 minutes later.
 """
 import argparse
+import gzip
+import hashlib
 import json
 import sys
 import tempfile
@@ -44,6 +46,131 @@ SAFE_TABLE_MACROS = ("hex.exact_xor", "hex.sparse_exact_xor", "hex.double_exact_
                      "hex.quadrupled_exact_xor")
 
 
+def _counts_sig(a):
+    """What the frozen counts actually depend on: the program, and which macros may be blocked."""
+    # ⚠ THE PROGRAM ITSELF MUST BE IN THE KEY. tier/map/wad/macros do not change when an EMITTER
+    # changes, so without this a cache made before (say) FORWARD_MOVE moved would be silently
+    # reused for a different program -- wrong counts, wrong block sizes, overflow declines, and no
+    # error. Hash the emitter sources and the fj sources that shape what gets emitted.
+    h = hashlib.sha256()
+    for f in sorted(list((ROOT / "src" / "doomfj").glob("*.py"))
+                    + list((ROOT / "src" / "fj").glob("*.fj"))):
+        h.update(f.name.encode())
+        h.update(f.read_bytes())
+    return {"tier": a.tier, "map": a.map, "wad": a.wad, "macros": sorted(SAFE_TABLE_MACROS),
+            "src": h.hexdigest()[:16]}
+
+
+def _load_counts(path, a):
+    if not path or not Path(path).exists():
+        return None
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as fh:
+            blob = json.load(fh)
+    except Exception as exc:                                          # noqa: BLE001
+        print("  counts cache unreadable (%s) -- recounting" % exc, flush=True)
+        return None
+    if blob.get("sig") != _counts_sig(a):
+        print("  counts cache is for a DIFFERENT program -- recounting", flush=True)
+        return None
+    frozen = {
+        "counts": blob["counts"],
+        "widths": {g: int(w) for g, w in blob["widths"].items()},
+        "width_hist": {g: {int(w): int(c) for w, c in h.items()}
+                       for g, h in blob["width_hist"].items()},
+        "alias": blob.get("alias") or {},
+    }
+    print("  counts cache HIT: %s groups, %s tables (skipping the counting assembly)"
+          % (format(len(frozen["counts"]), ","), format(sum(frozen["counts"].values()), ",")),
+          flush=True)
+    return frozen
+
+
+def _save_counts(path, a, frozen):
+    if not path:
+        return
+    blob = {"sig": _counts_sig(a), "counts": frozen["counts"], "widths": frozen["widths"],
+            "width_hist": frozen.get("width_hist") or {}, "alias": frozen.get("alias") or {}}
+    tmp = Path(str(path) + ".tmp")
+    with gzip.open(tmp, "wt", encoding="utf-8") as fh:
+        json.dump(blob, fh)
+    tmp.replace(path)
+    print("  counts cached to %s" % path, flush=True)
+
+
+def _preflight(pool_cls, W, a, frozen, wants):
+    """Price the configuration BEFORE the 25-minute assembly.
+
+    Twice now a config has been launched on an eyeballed span estimate and come back 31 minutes
+    later with the pool exhausted (blocked10's margin, blocked14's spread=4: 26,945 of 27,032 groups
+    broken). The counting pass already knows every block's exact size, so demand vs capacity is
+    arithmetic, not a guess. Reports; does not decide.
+    """
+    probe = pool_cls(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
+                     span_bits=a.span_bits, alias=frozen.get("alias"), spread=a.spread,
+                     spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
+                     width_hist=frozen.get("width_hist"), width_buckets=a.width_buckets,
+                     wants=wants)
+    demand = sum(probe._block_bits(g) for g in frozen["counts"])
+    limit = (1 << W) if a.span_bits is None else min(1 << W, a.pool_base + a.span_bits)
+    capacity = limit - a.pool_base
+    placed = len(probe.groups)
+    print("  PREFLIGHT: demand %s words, capacity %s words (%.1f%% used); %s of %s groups placed"
+          % (format(demand // W, ","), format(capacity // W, ","),
+             100.0 * demand / capacity, format(placed, ","), format(len(frozen["counts"]), ",")),
+          flush=True)
+    if placed < len(frozen["counts"]):
+        print("  *** %s GROUPS GET NO BLOCK -- they lose their pin entirely. This config does not fit."
+              % format(len(frozen["counts"]) - placed, ","), flush=True)
+    return demand, capacity, placed
+
+
+def _report_width_waste(counting):
+    """How much of the pool goes to PADDING rather than to tables.
+
+    A block's slots are uniform, so the group's widest table sets the width of every slot in it.
+    `widths` is a max and hides this: a group of 32,768 eight-op tables plus one 514-op table looks
+    identical to a group of 32,769 wide ones. The counting pass keeps the distribution so the two
+    can be told apart -- and the answer decides whether splitting groups by width is worth building.
+
+    Accounting only. Reports ops, not bits, so it reads against `max_slot_ops` directly.
+    """
+    alloc = pad_width = pad_count = real = 0
+    mixed = mixed_tables = 0
+    worst = []
+    for g, n in counting.counts.items():
+        hist = counting.width_hist.get(g)
+        if not hist:
+            continue
+        slots = 1 << max(0, (n - 1).bit_length())
+        wmax = max(hist)
+        slot_ops = 1 << max(0, (wmax - 1).bit_length())
+        alloc += slots * slot_ops
+        pad_count += (slots - n) * slot_ops
+        for w, c in hist.items():
+            real += c * w
+            pad_width += c * (slot_ops - w)
+        # "mixed" = the widest table is more than twice the most COMMON one, i.e. a few wide
+        # tables are dragging many narrow ones up.
+        common = max(hist, key=lambda w: (hist[w], -w))
+        if wmax > 2 * common:
+            mixed += 1
+            mixed_tables += n
+            worst.append((n * (slot_ops - common), g, n, common, wmax))
+    if not alloc:
+        return
+    print("  width waste: %s ops allocated = %s real + %s width-pad + %s count-pad"
+          % (format(alloc, ","), format(real, ","), format(pad_width, ","), format(pad_count, ",")),
+          flush=True)
+    print("  MIXED groups (widest > 2x most-common): %s groups, %s tables; splitting them by width "
+          "would free up to %s ops of pool"
+          % (format(mixed, ","), format(mixed_tables, ","),
+             format(sum(w[0] for w in worst), ",")), flush=True)
+    for cost, g, n, common, wmax in sorted(worst, reverse=True)[:5]:
+        print("    %14s ops  %-44s n=%-7s common=%-5s widest=%s"
+              % (format(cost, ","), g[:44], format(n, ","), common, wmax), flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tier", choices=sorted(TIERS))
@@ -52,6 +179,32 @@ def main():
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=1 << 31)
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=None)
+    ap.add_argument("--preflight-only", action="store_true",
+                    help="price the configuration and exit without assembling. With "
+                         "--counts-cache populated this costs SECONDS, so a spread/slot/span grid "
+                         "can be searched before spending a 31-minute build on it.")
+    ap.add_argument("--counts-cache", default=None,
+                    help="reuse the counting assembly's counts/widths/histogram from this file "
+                         "(and write it when absent). The counting pass costs ~430s and depends "
+                         "only on the program and the allowed macros, not on pool geometry, so "
+                         "every spread/slot/span config can share one.")
+    ap.add_argument("--width-buckets", action="store_true",
+                    help="give each WIDTH its own sub-block instead of widening every slot in a "
+                         "group to its widest table. Measured on blocked11: 41,479,139 of "
+                         "68,224,992 allocated pool ops are width padding, and the pool being full "
+                         "is what breaks 12,579 of 27,032 groups. Homogeneous groups are "
+                         "unaffected; see scratchpad/12m/bucket_check.py.")
+    ap.add_argument("--pin-broken", action="store_true",
+                    help="pin a group even when some of its tables were declined. The arithmetic "
+                         "says an inline table still dispatches correctly (its arm is rewritten to "
+                         "A ^ base and the word rests at base, so the base cancels); the exclusion "
+                         "it removes costs every sibling in the group. ONLY m2_std_gate can "
+                         "adjudicate -- the toy gate passed the version this guards against.")
+    ap.add_argument("--evict-by-value", action="store_true",
+                    help="when pool demand exceeds span, drop groups by ascending tables-per-bit "
+                         "instead of letting the biggest-first cursor drop whatever it reaches "
+                         "last. A broken group loses its pin for ALL its tables (FINDINGS BQ), so "
+                         "which groups get dropped is worth more than how many.")
     ap.add_argument("--macros", nargs="*", default=list(SAFE_TABLE_MACROS),
                     help="only block tables emitted by these MACROS -- the declaration the "
                          "assembler cannot infer (FINDINGS BG). Defaults to the exact_xor family, "
@@ -60,6 +213,11 @@ def main():
                     help="cfg.VIEW_W, needed to derive the byte arrays (build metrics print it)")
     ap.add_argument("--subsectors", type=int, default=682,
                     help="subsector count, needed to derive the byte arrays")
+    ap.add_argument("--max-slot-ops", type=int, default=32,
+                    help="widest table a block slot may hold. 10,052 tables decline as too-wide at "
+                         "32, and hex.tables.* is both the hottest source word and the macro with "
+                         "oversized tables -- a declined table stays inline and pays the FULL "
+                         "address (~18.6 ops).")
     ap.add_argument("--spread", type=int, default=1,
                     help="give a big group SPREAD times the slots and hand out only the cheapest "
                          "indices. The arm costs 2*popcount(index) and the index is as wide as the "
@@ -200,10 +358,14 @@ def main():
 
     def assemble_blocked(*args, **kwargs):
         if not frozen:
+            cached = _load_counts(a.counts_cache, a)
+            if cached:
+                frozen.update(cached)
+        if not frozen:
             with tempfile.TemporaryDirectory() as td:
                 counting = BlockPool(W, a.pool_base, span_bits=a.span_bits,
                                      spread=a.spread, spread_min_count=a.spread_min_count,
-                                     wants=wants)
+                                     max_slot_ops=a.max_slot_ops, wants=wants)
                 probe = dict(kwargs)
                 probe["table_pool"] = counting
                 out_arg = list(args)
@@ -228,6 +390,7 @@ def main():
                     _asm_mod.labels_resolve = _real_lr
                 frozen["counts"] = counting.counts
                 frozen["widths"] = counting.widths
+                frozen["width_hist"] = counting.width_hist
                 # MERGE ALIASED GROUPS. Two expressions can name one word -- `(x + 32)` and
                 # `(x + w)` at w=32 -- and separate blocks meant resolve_pinned had to UN-PIN both
                 # (3,801 words). Merging keeps the pins.
@@ -238,19 +401,37 @@ def main():
                         c = alias.get(g, g)
                         merged_counts[c] = merged_counts.get(c, 0) + n
                         merged_widths[c] = max(merged_widths.get(c, 0), counting.widths.get(g, 16))
+                    merged_hist = {}
+                    for g, h in counting.width_hist.items():
+                        c = alias.get(g, g)
+                        into = merged_hist.setdefault(c, {})
+                        for w, n in h.items():
+                            into[w] = into.get(w, 0) + n
                     frozen["counts"] = merged_counts
                     frozen["widths"] = merged_widths
+                    frozen["width_hist"] = merged_hist
                     print("  alias: %s groups merged into %s (was %s)"
                           % (format(len(alias), ","), format(len(merged_counts), ","),
                              format(len(counting.counts), ",")), flush=True)
                 frozen["alias"] = alias
+                _save_counts(a.counts_cache, a, frozen)
+                _report_width_waste(counting)
                 print("  counting pass: %s groups, %s tables, %ds"
                       % (format(len(counting.counts), ","),
                          format(sum(counting.counts.values()), ","), int(time.time() - t0)),
                       flush=True)
+        if not frozen.get("_preflighted"):
+            frozen["_preflighted"] = True
+            _preflight(BlockPool, W, a, frozen, wants)
+            if a.preflight_only:
+                print("  --preflight-only: priced, not built.", flush=True)
+                raise SystemExit(0)
         pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
                          span_bits=a.span_bits, alias=frozen.get("alias"),
-                         spread=a.spread, spread_min_count=a.spread_min_count, wants=wants)
+                         spread=a.spread, spread_min_count=a.spread_min_count,
+                         max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
+                         pin_broken=a.pin_broken, width_hist=frozen.get("width_hist"),
+                         width_buckets=a.width_buckets, wants=wants)
         # NEVER PIN A WORD THE M1 SELF-RESET OWNS. emit_reset_part drops a cell from the restore
         # set when `pristine_word >> VAL_SHIFT > 15`, reading it as a packed LUT -- and a pinned
         # word holds `base + value`, so every pinned state cell is misclassified and silently
@@ -293,6 +474,12 @@ def main():
           % (format(getattr(last, "declined_no_block", 0), ","),
              format(getattr(last, "declined_too_wide", 0), ","),
              format(getattr(last, "declined_overflow", 0), ",")), flush=True)
+    # BROKEN GROUPS is the number that matters, not the decline count: `pinned_words` excludes a
+    # broken group ENTIRELY, so one declined table un-pins every sibling table in its group.
+    print("broken groups: %s of %s (these lose their pin for ALL their tables); evicted %s"
+          % (format(len(getattr(last, "broken_groups", ())), ","),
+             format(len(last.counts), ","),
+             format(getattr(last, "evicted_low_value", 0), ",")), flush=True)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s"
           % (format(last.allocated, ","), format(len(last.groups), ","),
              format(last.declined, ","), format(last.ungrouped, ",")), flush=True)

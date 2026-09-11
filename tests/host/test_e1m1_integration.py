@@ -149,7 +149,12 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
     below is the sanity band around the measured figure, not a target. ⚠ SLOW: the V4 build is a
     ~42M-character program. (The assembler is LINEAR in program size -- measured exponent 1.12 --
     not "~cubic" as this repo long assumed; what made it slow was paging, now fixed.)"""
-    m = build_wall_renderer(E1M1, "E1M1", out_fjm=tmp_path / "renderer.fjm",
+    # ⚠ THIS CALL WAS UNCALLABLE, and the `slow` marker hid it. `build_wall_renderer` became
+    # `(out_fjm, *, wad_path, mapname, cfg, tier, ablate)` in the flag retirement; this still passed
+    # the wad and the map name POSITIONALLY and then `out_fjm` again by keyword, so the test could
+    # only ever have raised TypeError. Nothing noticed because it is deselected by default and the
+    # run costs ~30 minutes. Found 2026-09-11 by a coverage sweep, not by a run.
+    m = build_wall_renderer(tmp_path / "renderer.fjm", wad_path=E1M1, mapname="E1M1",
                             tier="hosted")
     # G1/R2: this 30-minute run is the only place the shipped tier's span, .fjm size and assemble
     # time are measured. It used to assert them and print NOTHING, so a passing run left no number
@@ -185,10 +190,14 @@ def test_build_wall_renderer_e1m1_flat(tmp_path):
                              # `self_reset` is what m1_gate's binary turns on, `standalone` +
                              # `menu` are the no-Python tier (build/doom_e1m1_menu.fjm).
                              "self_reset": False, "standalone": False, "menu": False,
-                             # M2: a door override moves pixels; the shipped tier has none, and
-                             # neither does it have the RUNTIME door (`doors`), which bakes every
-                             # door once per state and dispatches on a state nibble.
-                             "sector_heights": False, "doors": False}, m
+                             # M2: the RUNTIME door, which bakes every door once per state and
+                             # dispatches on a state nibble. The shipped hosted tier has none.
+                             # ⚠ `sector_heights` was asserted here until 2026-09-11 and had not
+                             # been a reported feature since R2's static override retired INTO
+                             # `doors` -- so this exact-equality guard, the one whose comment above
+                             # explains why exactness is worth its cost, could not have passed.
+                             # Second defect the `slow` marker hid; see the call site.
+                             "doors": False}, m
     assert m["tier"] == "lines/W1R/FT1+plane_near", m
     assert SPAN_LO < m["span_words"] < SPAN_HI, m
 

@@ -355,9 +355,16 @@ def held_per_frame(events, frames):
     return out, enters
 
 
-def run_fj(fjm, events, frames):
+def run_fj(fjm, events, frames, screen_factory=Recording):
     """one process, `frames` presented frames, driven by nothing but the scripted keyboard --
-    the SAME PcIO composition `fj --io pc` builds"""
+    the SAME PcIO composition `fj --io pc` builds
+
+    `screen_factory` exists so a caller can watch a LONG run without duplicating this composition.
+    A single continuous walk of the whole level is ~3,500 frames at ~0.17 s each -- ten minutes
+    inside one `core.run` call, which prints nothing. `onewalk.py` passes a Recording subclass that
+    reports progress as frames present. It is a factory rather than a flag so the alternative
+    screen cannot drift from this composition (CLAUDE.md rule 5: change the helper, do not copy
+    it)."""
     runner = FjmRunner(Path(fjm))
     assert runner.native, "this gate needs the native engine"
     core = _fjcore.Memory(runner.width, flat_max_words=runner.flat_max_words)
@@ -365,7 +372,7 @@ def run_fj(fjm, events, frames):
         core.add_segment(seg, n)
     for start, vals in runner._runs:
         core.set_words(start, vals)
-    screen = Recording()
+    screen = screen_factory()
     keyboard = Stopper(ScriptedKeyEventSource(events), screen, frames)
     io = PcIO(screen, keyboard)
     io.attach_memory(NativeDeviceMemory(core, runner.width))

@@ -65,6 +65,7 @@ DEFAULT_MAP = "E1M1"
 UNIT = 1 << 16                      # the sim's fixed-point unit
 _ORACLE = {}
 _SCRIPTS = {}
+_ALL = {}
 
 
 def _oracle(wad, mapname):
@@ -204,6 +205,69 @@ def _steer(rm, scene, st, waypoints, budget, boxes, in_box):
     return st, keys
 
 
+OPENING_TURN = 3            # frames of turn per seed index, before the route starts
+
+
+def _route(seed, n_game, wad, mapname):
+    """One run: turn to this seed's own opening heading, then tour the destinations.
+
+    ⚠ THE OPENING TURN IS WHAT MAKES THE TEN RUNS TEN SAMPLES. Every run starts at the same baked
+    player start and the level funnels, so two seeds aiming at different destinations spent all 100
+    frames on the same corridor and emitted byte-identical keys: MEASURED, ten seeds produced only
+    SIX distinct scripts and four were identical to the op (2,265,304,670 each). Duplicates are not
+    free -- they landed on the dear end of the distribution and dragged the 80th percentile up.
+
+    `seed * OPENING_TURN` turn-frames make the scripts distinct BY CONSTRUCTION (different leading
+    keys) and, more usefully, send each run into the level on a different heading so the steering
+    diverges immediately rather than after the shared corridor. The cost is seed*3 of the 100
+    frames spent turning -- 0 for seed 0, 27 for seed 9 -- which `--validate` reports rather than
+    hides. The alternative (retry a seed against the next destination until its script is new) cost
+    up to 100 breadth-first searches and did not finish."""
+    rm, _scene, sp = _oracle(wad, mapname)
+    open_scene, targets, boxes, in_box = _tour_plan(wad, mapname)
+    turn = "turn_left" if seed % 2 else "turn_right"
+    keys, st = [], sp
+    for _ in range(min(seed * OPENING_TURN, n_game // 2)):
+        kd = {turn: True}
+        st = rm.step_sim(st, kd, scene=open_scene)
+        keys.append(kd)
+    for k in range(len(targets)):
+        if len(keys) >= n_game:
+            break
+        goal = targets[(seed + k) % len(targets)]
+        wps = _waypoints(rm, open_scene, st, goal)
+        if not wps:
+            continue
+        st, more = _steer(rm, open_scene, st, wps, n_game - len(keys), boxes, in_box)
+        if not more:
+            continue
+        keys += more
+    while len(keys) < n_game:
+        kd = {"forward": True}
+        nxt = rm.step_sim(st, kd, scene=open_scene)
+        if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
+            st = nxt
+        else:
+            kd = {turn: True}
+            st = rm.step_sim(st, kd, scene=open_scene)
+        keys.append(kd)
+    return keys[:n_game]
+
+
+def _all_scripts(n_game, wad, mapname):
+    """The ten runs, and an assert that they really are ten."""
+    key = (n_game, wad, mapname)
+    if key in _ALL:
+        return _ALL[key]
+    out = [_route(seed, n_game, wad, mapname) for seed in range(TOUR_TARGETS)]
+    sigs = {repr(k) for k in out}
+    assert len(sigs) == len(out), (
+        "only %d of %d speed runs are distinct -- duplicates weight the percentile toward "
+        "whichever end they land on" % (len(sigs), len(out)))
+    _ALL[key] = out
+    return out
+
+
 def script(seed, n_game=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP):
     """run `seed`'s key sequence -- a ROUTE ACROSS THE LEVEL, steered against the oracle.
 
@@ -227,39 +291,8 @@ def script(seed, n_game=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP):
 
     Deterministic (no RNG anywhere), and `--validate` reports coverage per seed."""
     key = (seed, n_game, wad, mapname)
-    if key in _SCRIPTS:
-        return _SCRIPTS[key]
-    rm, _scene, sp = _oracle(wad, mapname)
-    open_scene, targets, boxes, in_box = _tour_plan(wad, mapname)
-
-    keys, st = [], sp
-    for k in range(TOUR_TARGETS):
-        if len(keys) >= n_game:
-            break
-        goal = targets[(seed + k) % TOUR_TARGETS]
-        wps = _waypoints(rm, open_scene, st, goal)
-        if not wps:
-            continue
-        st, more = _steer(rm, open_scene, st, wps, n_game - len(keys), boxes, in_box)
-        if not more:
-            continue                            # already there; try the next destination
-        keys += more
-
-    # A run that ends early (an unreachable leg, or every destination reached) must not be left
-    # standing still -- a stationary frame is a cheap frame counted as play. Fall back to gen 2's
-    # forward-or-turn policy, and `--validate` reports how many frames came from it.
-    turn = "turn_left" if seed % 2 else "turn_right"
-    while len(keys) < n_game:
-        kd = {"forward": True}
-        nxt = rm.step_sim(st, kd, scene=open_scene)
-        if abs(nxt.x - st.x) + abs(nxt.y - st.y) >= UNIT:
-            st = nxt
-        else:
-            kd = {turn: True}
-            st = rm.step_sim(st, kd, scene=open_scene)
-        keys.append(kd)
-
-    _SCRIPTS[key] = keys[:n_game]
+    if key not in _SCRIPTS:
+        _SCRIPTS[key] = _all_scripts(n_game, wad, mapname)[seed % TOUR_TARGETS]
     return _SCRIPTS[key]
 
 

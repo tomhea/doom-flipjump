@@ -1,3 +1,25 @@
+/* =============================================================================================
+ * ⚠⚠ WITHDRAWN -- THE CHAIN NUMBERS IN THIS FILE ARE WRONG. DO NOT QUOTE THEM. ⚠⚠
+ *
+ * The dependent chase here is built as `a[i] = random() & mask` and followed with `cur = a[cur]`.
+ * That is a random FUNCTIONAL GRAPH, not a permutation: from any start it walks ~sqrt(N) steps
+ * and then falls into a rho-cycle of length ~sqrt(N). For a 100M-slot array that cycle is a few
+ * thousand nodes -- a few hundred KB -- so the chase sat in L2 NO MATTER HOW LARGE the array was.
+ * It reported ~370 M/s at a 64 MB footprint, which is impossible for a serialized DRAM chase.
+ *
+ * That impossible number produced the "throughput is governed by page count" curve, which
+ * predicted a ~4x win from huge pages. THE DIRECT EXPERIMENT REFUTED IT: real THP on the real
+ * DOOM binary under WSL, alternated three times, measured 76.9 vs 75.5 M fj/s = +1.9%, noise.
+ *
+ * Replaced by `latprobe.c`, which builds ONE Sattolo cycle covering every selected slot exactly
+ * once, so the footprint is genuinely resident. Its curve locates the real knee at the L2
+ * boundary and matches the binary's measured throughput.
+ *
+ * Kept in the tree, annotated rather than deleted, because the failure mode is subtle, easy to
+ * reproduce by accident, and cost this investigation a wrong diagnosis that was reported as a
+ * conclusion before it was checked.
+ * ============================================================================================= */
+
 /* What does the fj hot loop's memory pattern actually cost on THIS cpu, at THIS footprint?
  *
  * run_flat_loop_impl does, per op:

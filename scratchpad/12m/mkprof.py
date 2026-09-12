@@ -90,6 +90,26 @@ static void prof_report(void)
     fprintf(stderr, "FJPROF ==================================================================\n");
     fflush(stderr);
     free(sorted);
+    {   /* Dump the raw per-unit counts so ONE run answers every granularity question offline:
+           page utilisation, 2 MB-region occupancy, contiguity, and WHERE the sparse regions
+           are. Re-running the game per granularity costs minutes each and the run-to-run
+           variance makes the results hard to compare anyway. */
+        const char* dump = getenv("FJPROF_DUMP");
+        if (dump && dump[0]) {
+            FILE* f = fopen(dump, "wb");
+            if (f) {
+                uint64_t hdr[2];
+                hdr[0] = g_prof_unit;
+                hdr[1] = g_prof_pages;
+                fwrite(hdr, sizeof(uint64_t), 2, f);
+                fwrite(g_prof, sizeof(uint32_t), (size_t)g_prof_pages, f);
+                fclose(f);
+                fprintf(stderr, "FJPROF wrote %s (%llu units of %llu words each)\n", dump,
+                        (unsigned long long)g_prof_pages, (unsigned long long)g_prof_unit);
+                fflush(stderr);
+            }
+        }
+    }
 }
 /* ==== end FJPROF ========================================================================= */
 

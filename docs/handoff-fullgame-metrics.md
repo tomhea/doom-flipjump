@@ -486,3 +486,49 @@ padded binary first — it thrashes, so cost it before committing.
   the number silently changes when the shipped config does.
 * ~~No rule for an idea that improves one metric and worsens the other~~ — **ANSWERED, see §0:
   speed binds, size is a budget to spend on it while staying sane.**
+
+## 2026-09-12 -- THE SPEED METRIC IS NOW ONE WALK OF THE WHOLE LEVEL
+
+The owner replaced the sampled metric outright: "no p80 anymore, just the plain average ops/frame
+on the entire playing scene." The reason the old one needed replacing is that it was a SAMPLING
+SCHEME, and a sampling scheme needs a statistic -- a mean over what, a percentile of what -- and
+that choice was producing the answer. Three honest harnesses disagreed by 40% on ONE binary.
+
+`scratchpad/12m/onewalk.py` removes the choice. One continuous route across E1M1, run on the
+binary in a SINGLE process with the game state carrying through as it does when a person plays:
+
+    ops/frame = (total ops - startup and menu) / game frames
+
+MEASURED on `build/doom_e1m1_blocked25.fjm`, four independent routes:
+
+| stops | coverage (cells) | doors | frames | ops/frame |
+|---|---|---|---|---|
+| 18 | 47.4% |  9/13 | 2,756 | 11,112,926 |
+| 28 | 62.5% | 10/13 | 2,717 | 13,358,943 |
+| 48 | 71.9% | 10/13 | 4,395 | 13,933,274 |
+| 72 | **85.0%** | **11/13** | 5,795 | **13,064,859** |
+
+**THE FIGURE IS 13,064,859 ops/frame** -- the best-covered run: 85% of the 12,576 cells a player
+can reach, 64,130 units walked, 87.9% of frames moving, 75,711,416,421 ops over 5,795 frames.
+Every run PASSES the 20M target; the margin is ~35%.
+
+⚠ COVERAGE IS THE VARIABLE THAT MATTERS, NOT THE STATISTIC. Above ~60% coverage the three routes
+land within +-3.5% of each other (13.1M, 13.4M, 13.9M) on completely different paths, so the
+number is stable. The 47%-coverage route is the outlier at 11.1M because it misses the open areas,
+which are the expensive ones. An intermediate reading of the first three points -- "cost rises
+with coverage, so this is a floor" -- was WRONG and the 85% run disproved it.
+
+WHY THE OLD NUMBERS WERE HIGHER. `gamespeed` measures 16,629,651 mean / 21,862,375 p80 on this
+same binary, but its ten runs all start at the baked player start and together see ~1.6% of the
+level: it re-measures expensive spawn-adjacent transit ten times. That is a property of the
+metric's SHAPE, not of the binary.
+
+The instrument's coverage claim is measured, not asserted, and its controls include two negative
+ones that must REJECT a trail that stands still (C3: 0.0% moving; C4: 0.9% cells). `--selftest`
+also checks its private walk graph reaches exactly the cells `m2_std_gate.walkable_cells` does
+(12,576 vs 12,576), and drives the ops arithmetic through an injected runner.
+
+Reproduce:
+
+    python scratchpad/12m/onewalk.py --fjm build/doom_e1m1_blocked25.fjm --stops 72
+    python scratchpad/12m/onewalk.py --selftest

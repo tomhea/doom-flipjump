@@ -532,3 +532,60 @@ Reproduce:
 
     python scratchpad/12m/onewalk.py --fjm build/doom_e1m1_blocked25.fjm --stops 72
     python scratchpad/12m/onewalk.py --selftest
+
+
+## 2026-09-12 -- OPS/FRAME IS HALF THE STORY: THE ENGINE'S THROUGHPUT VARIES 9x BY LAYOUT
+
+Everything in this file above measures OPS PER FRAME. That is only half of frame time:
+
+    frame time = ops/frame  /  ops per second
+
+and the second factor is NOT a constant of the engine. MEASURED on this machine (i7-12700H,
+24 MB L3, 2026-09-12), same interpreter, same 14 frames, eight real binaries of this game:
+
+| binary | ops/frame | fj/s | ms/frame |
+|---|---|---|---|
+| doom_e1m1_menu (08-28) | 38.5M | 234.5M | **164.0** |
+| doom_e1m1_blocked_nopin | 31.4M | 155.6M | 201.8 |
+| doom_e1m1_blocked24 | 20.6M | 101.1M | 203.9 |
+| doom_e1m1_menu_rung0 | 30.4M | 141.3M | 215.0 |
+| doom_e1m1_blocked25 (shipped) | 20.7M | 95.5M | 216.9 |
+| doom_e1m1_placed_game | 28.6M | 128.5M | 223.0 |
+| doom_e1m1_blocked | 17.8M | 53.2M | 335.7 |
+| doom_e1m1_menu_p105 | 28.9M | **25.4M** | **1139.8** |
+
+⚠ `menu_p105` IS THE BINARY THIS FILE RECORDS AS THE MEASURED BASELINE (125,492,170 words =
+93.50% of 2^27). It is the SLOWEST of the eight by 5x in wall-clock. Optimising against it
+optimises against the worst layout we ever shipped.
+
+WHY. The interpreter's per-op cost is set by how many PAGES its working set spans. An
+instrumented build of `_fjcore.c` histogrammed every hot-loop touch of blocked25 (14 frames,
+580,128,989 touches): the distinct 64 B lines total 26.67 MB -- which FITS the 24 MB L3 -- but
+they are scattered over 23,397 4 KB pages, against an L2 TLB of ~2,048 entries. A
+footprint-controlled A/B (`scratchpad/12m/tlbprobe.c`, cache pinned at 26.67 MB, page count the
+only variable) measured 2,048 pages -> 448.8 M/s and 22,994 pages -> 113.6 M/s. One probe
+iteration is one fj op (1.998 touches/op, measured), and the probe predicts the real binary
+within 10%.
+
+The blocking/padding passes buy a lower op count by placing tables at LOW-POPCOUNT addresses,
+which by construction spreads them across the address space. That is the same spreading the
+TLB cannot absorb. Repeated alternating runs (blocked25 60.0/53.4/98.6 vs menu 122.0/202.5/120.6
+M fj/s) support the direction: the far less op-optimised binary is ~2x faster per op and faster
+in wall-clock despite 1.85x the ops.
+
+⚠ MEASUREMENT DISCIPLINE. The SAME binary and SAME work measured 53.4-125 M fj/s across runs
+today while the L1 yardstick held flat at 3.3-3.6 GHz -- the variance is physical page placement,
+not clock. NO SINGLE-SAMPLE fj/s COMPARISON IS ADMISSIBLE. Alternate A,B,A,B.
+
+WHAT IS NOT THE CAUSE, each closed by measurement: Python IO callbacks (the engine's own
+`last_run_paused_seconds` says 4.4% of wall; deleting all of it moves 88.7 -> 92.8 M fj/s);
+compiler flags (/O2 /GL /LTCG already default); hybrid-core or clock; storing 32-bit words in
+64-bit slots (+2.7%, because 22,994 -> 11,497 pages is still 5x past the TLB knee); and paged
+mode (40.7 vs 64.2 M fj/s).
+
+THE LEVER. 2 MB pages turn 23,397 TLB entries into 14. Implemented in flipjump-151 107d8a2
+(`fj_alloc_flat`, silent fallback, new `Memory.large_pages`), op-counts verified bit-identical.
+It is INERT on this machine: `SeLockMemoryPrivilege` is absent from the token, so an
+administrator must grant "Lock pages in memory" (secpol.msc -> Local Policies -> User Rights
+Assignment) and the user must log out and back in. Without it the ceiling is ~214 M/s even with a
+perfectly compacted 4-byte image, because 26.67 MB cannot occupy fewer than 6,827 4 KB pages.

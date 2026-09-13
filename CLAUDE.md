@@ -175,6 +175,16 @@ and the distinction is the repo's hardest-won lesson:
 ## Performance Claims
 Never quote an ops/frame, speedup, or cost number without re-running the measurement harness in this session. Before reporting any performance win: (1) verify the harness is not measuring zeros or a no-op filter, (2) print the raw baseline and post-change numbers side by side, (3) state the measurement command used. If a number comes from a doc, git log, or memory, label it explicitly as UNVERIFIED and re-measure before acting on it.
 
+**⚠ The metric is ms/frame, and the harness is `scratchpad/12m/msframe.py` (2026-09-13).** ops/frame
+is half of frame time: `b26` measured +45% ops at +45% ops/s for an IDENTICAL 452 ms/frame, so the
+op counter alone cannot tell a win from a loss. `msframe.py` pins the core, refuses a busy machine,
+alternates A/B counterbalanced, checks pixels before speed, reports median + range + a stated
+verdict rule (all pairs agree in sign AND |median ratio − 1| > 3%), and appends everything to
+`scratchpad/12m/msframe_ledger.jsonl`. The protocol — freeze a baseline first, correctness gates
+before speed, decide by the rule, kill criteria declared up front — is `docs/measurement-process.md`.
+A number that did not come through it is an anecdote. Its `--selftest` is the R9 control: run it
+once per machine state; if A-vs-A separates, the box is too noisy to measure anything.
+
 ## Byte-Exactness Gate
 Every renderer/emitter change must be validated byte-exact against the reference output before it is described as done or committed. Run the four-viewpoint gate and diff the emitted bytes; if the diff is non-empty, the change is NOT shipped. Do not use the equivalence checker alone — verify it actually compared every file (print the file count it checked).
 

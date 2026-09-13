@@ -13,7 +13,7 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 | **the shipped binary** | `build/doom_e1m1_blocked25.fjm`, sha256 `fc46c28c5f2bbac8` (first 16 hex), built 2026-09-11 18:04, `.doors.json` stamp beside it | reproduced byte-identically on 2026-09-13 from the command in 1b |
 | **ms/frame, quiet box** | **82 ms/frame** (81.9-82.2 across three runs) | msframe, 200 frames x 5 reps, pinned to P-core 2, 4-byte-cell engine `b96339f7`, nothing else running (yardstick 3.62 G) |
 | **fj ops/s** | **242 M** (241.5-242.4 M) | same runs; ops/frame 19,855,016 on msframe's forward-walk script |
-| **binding metric** (owner spec) | (mean+p80)/2 = **19,246,013 ops/frame -- PASS** (mean 16,629,651; p80 21,862,375) | `gamespeed.py --fjm build/doom_e1m1_blocked25.fjm`, 2026-09-13 20:43 (`--validate` not re-run on it that night; it was run on the experiment binary: 10/10 distinct end cells) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **19,246,013 ops/frame -- PASS** (mean 16,629,651; p80 21,862,375) | `gamespeed.py --fjm build/doom_e1m1_blocked25.fjm`, 2026-09-13 20:43; `--validate` at 23:42: 10/10 distinct end cells, widest spread 1,321 units, worst run 29% blocked |
 | **size** | **32.53% of 2^27 -- PASS** (43,657,732 words; span 96,009,696) | same run |
 
 The same binary reads 99-104 ms/frame with a background video render at ~0.3-0.45 core -- under

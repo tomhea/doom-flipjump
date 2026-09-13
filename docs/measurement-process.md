@@ -99,6 +99,23 @@ deserve; 2026-09-12 spent three of those.
 - anything with N = 1
 - a speed number whose pixels were not checked
 
+## Known biases of the instrument (measured 2026-09-13, handoff-throughput-plan section 10.6)
+
+- **Fixed setup inside `core.run`.** The engine allocates, fills and copies the flat array on the
+  first `run()` call: 0.96-2.16 s per fresh process (2-frame vs 14-frame runs). At 200 frames
+  that is 5-10% of the reported ms/frame. A/B verdicts are unaffected (both sides pay it); the
+  ABSOLUTE ms/frame is high by that much. Fix when msframe is next touched: subtract a 2-frame
+  calibration per binary, or have the engine report the loop's own time.
+- **Fresh-process spread is +-8% on a quiet box** (the same 421M-op loop: 1.72-2.16 s across five
+  processes, yardstick steady). Physical page placement of the 512 MB flat array is the likely
+  cause. This is why the instrument runs five fresh processes and decides by the 3% rule on
+  medians; a single run is not a number.
+- **An L3-streaming neighbour costs 15-31%** (`scratchpad/12m/hog.py` on another P-core), and a
+  video render on the box cost ~10%. The busy-machine refusal is not optional.
+- **The clock is 3.5-3.7 GHz under this load on the i7-12700H, not the 4.7 GHz turbo.** Quote
+  ns/op or ms/frame; a cycles/op figure needs the clock read from the
+  `\Processor Information(0,N)\% Processor Performance` counter during the run.
+
 ## Where things live
 
 | what | where |

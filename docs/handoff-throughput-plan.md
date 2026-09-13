@@ -262,8 +262,8 @@ far **42.79%**.
   the time) and **2b** (block execution -- there are no fall-through runs to amortise over).
 - The 50.8% near jumps land within +-4 cache lines and are likely already L1 hits via the
   adjacent-line prefetcher. The **42.8% far jumps are the expensive chain loads.**
-- **2a** (read `j` before the flip, prefetch the next fetch) is now the only engine lever aimed
-  at the chain, and it is better founded than before: it overlaps exactly the far-jump loads.
+- ~~**2a** (read `j` before the flip, prefetch the next fetch) is now the only engine lever aimed
+  at the chain~~ -- **KILLED in section 10 (measured: the flip store costs 0.02 ns/op).**
 
 **1a. The two streams** (units are 8 words = 32 B at 4-byte cells, so the MB figures are ~2x
 high; the ratios are exact):
@@ -280,8 +280,9 @@ overlap 9,217   ip-only 489,815   flip-only 2
   cheap.
 - The chain's working set: 90% of instruction fetches in ~2.9 MB -- just past the L2 knee, which
   is exactly where the latency curve put the game. Consistent.
-- Because the instruction stream is the footprint and 1b says `m1_reset` is 43% of it: **shrinking
-  the reset code is THE lever.** 12,238 cells restored per frame at ~48 words of wflip chain each.
+- ~~Because the instruction stream is the footprint and 1b says `m1_reset` is 43% of it: shrinking
+  the reset code is THE lever.~~ **WRONG -- footprint is not time; section 10 measures the reset
+  at 14.3% of the time for 13.2% of the ops.** 12,238 cells restored per frame at ~48 words of wflip chain each.
 - **3a (inline the hot leaves) GROWS the instruction stream** -- the interaction section 6 warned
   about is now measured to point the wrong way. Demoted; only with a footprint gate.
 - **5.6** (padding census) and **5.7** (static jump threading) shrink the instruction stream and
@@ -292,7 +293,7 @@ overlap 9,217   ip-only 489,815   flip-only 2
   and half-empty lines. The trade between chain SHARING (less code) and chain CONTIGUITY (denser
   lines, more fall-through) has never been measured. It is the assembler's, not the emitter's.
 
-## 9. THE PLAN, RE-RANKED BY MEASUREMENT (supersedes the ordering in sections 1-5)
+## 9. ~~THE PLAN, RE-RANKED BY MEASUREMENT~~ -- SUPERSEDED BY SECTION 11 the same afternoon (ranked by footprint, which section 10 shows is not time)
 
 | # | lever | why it is here | gate |
 |---|---|---|---|
@@ -308,3 +309,117 @@ overlap 9,217   ip-only 489,815   flip-only 2
 
 Ceiling unchanged: ~2-3x end to end, an upper bound. Expected in-game today: ~99 ms/frame,
 ~200 M fj/s, ~10 FPS (pinned baseline `shipped`).
+
+## 10. Measured 09-13, afternoon: TIME per op, and where it goes -- the cost model
+
+Section 9 ranked levers by cache footprint. Footprint is not time. Five more instruments, all in
+`scratchpad/12m/` (`mkprof3.py` builds two instrumented engines; `timeobj.py`, `cachemodel.py`
+read them; `micro/storewait.c`, `micro/tlbcost.c` are the microbenchmarks; `prof3run.py` /
+`sieverun.py` are the pinned runners), all on the i7-12700H P-core 2 at 3.5-3.7 GHz (read from
+the `% Processor Performance` counter during each run -- NOT the 4.7 GHz turbo), 4-byte cells.
+
+**10.1 Time by object** (rdtsc every 64 ops, b26, 14 frames, quiet box):
+
+```
+kept 421,013,056 ops in 1.907 s -> 4.53 ns/op = 220.8 M ops/s = 16.4 cycles/op at 3.62 GHz
+ rank   time%    ops%   ns/op  cyc/op  object
+    0  20.88%  24.96%   3.79    13.7   simcollide_skip
+    1  16.38%  14.53%   5.11    18.5   seg_pass2_leaf
+    2  14.31%  13.24%   4.89    17.7   m1_reset
+    3  10.61%   8.59%   5.59    20.3   thing_pass_leaf
+    4   6.42%   5.93%   4.90    17.7   e1m1_bspcode_pos_leaf
+    5   6.35%   7.64%   3.76    13.6   seg_pass1_ts_leaf
+    6   6.29%   6.25%   4.56    16.5   seg_pass1_leaf          top 7 = 81.4% of the time
+   ...  cma_vyd / cmh_vyd 3.26 ns/op (the fastest big objects), thing_pass_leaf 5.59 (the slowest)
+```
+
+**ns/op spans only 3.26-5.59 across every object with >= 1% of the ops.** Time share tracks ops
+share within +-30% everywhere. `m1_reset` -- 43% of the footprint -- is 14.3% of the time for
+13.2% of the ops. **Per-op cost is nearly uniform, so ops/frame IS the currency after all**, at
+~4.5 ns per op; what varies is a modest memory term on top of a large fixed one.
+
+**10.2 The engine floor.** The prime sieve (`sieverun.py`, N=1,000,000, 527,179,628 ops, ip
+stream 99.39% L1-resident by the model, TLB 100%): **378.2 M ops/s pinned on the shipped engine**
+(the owner's "300M+" confirmed) = 2.68 ns/op = **9.2 cycles/op at 3.45 GHz**. A bare dependent
+chase of the same shape in L1 (`storewait.c` V0) is 1.57 ns = ~5.7 cycles. **The engine loop
+spends ~3.5 cycles/op on itself** -- eleven branch micro-ops per op (unaligned check, two span
+checks, three garbage checks, two IO checks, looping, null-ip, the back-edge), which at two
+branches per cycle is a 5.5-cycle throughput floor that overlaps the chase only partially.
+
+**10.3 The memory term.** `mkprof3.py S` runs both access streams through a simulated Golden Cove
+hierarchy (L1D 48K/12-way, L2 1.25M/10, L3 24M/12 exclusive) and a DTLB(96)/STLB(2048) model,
+with latencies MEASURED by `tlbcost.c`'s packed chase: L1 1.2 ns, L2 3.45 ns, **L3 26.5 ns**
+(~98 cycles -- twice the textbook figure), DRAM ~100 ns.
+
+```
+ip stream   L1 83.48%   L2 12.62%   L3 3.77%   DRAM 0.13%     -> +5.1 cycles/op over the L1 floor
+flip stream L1 99.64%                                          -> L1-resident, as 1a said
+TLB (ip)    DTLB hit 97.55%   STLB hit 2.25%   page walk 0.195%   -> +0.3 cycles/op
+LRU what-if: a 1.25 MB cache serves ~97% of fetches, 2 MB serves 98.2%, 4 MB 99.0%
+pages: 50% of fetches in 215 pages, 90% in 1,934 (STLB is 2,048), 10,993 touched
+```
+
+**10.4 The model closes.** floor 9.2 + cache 5.1 + TLB 0.3 = **14.6 cycles/op predicted vs 16.4
+measured** (-11%). The residual is the size of the run-to-run spread (10.6), so the model is
+trusted to price levers. In shares of the frame: **engine floor 56% (chase 35%, loop overhead
+21%), cache misses 31% (L2 hits 6%, L3 hits 22%, DRAM 3%), TLB 2%, unexplained ~10%.**
+
+**10.5 Killed by measurement.**
+- **2a (read `j` before the flip / prefetch): the flip store costs nothing.** `storewait.c`:
+  engine order vs bare chase +0.02 ns at L1, +0.3 ns at L2; d=1 self-modification (the flipped
+  word is the next op's word: 4.1% of the game's ops, 5.5% of the sieve's) adds 0.04 ns; the
+  loads-first variant is SLOWER (+0.2 ns). Memory disambiguation handles this pattern. Dead.
+- **The TLB: 2%.** The program is already TLB-friendly (97.55% L1-DTLB hits; 90% of fetches inside
+  the STLB's reach). Large pages on any OS are worth <= 2-3%. The owner's question is answered:
+  there is no TLB lever here, with or without privileges. (The 09-12 WSL2 THP test could not have
+  shown one anyway -- a guest 2 MB page over 4 KB host backing yields 4 KB TLB entries -- but the
+  model closes the question by itself.)
+- **Footprint as a ranking.** The L3-served 3.77% of fetches cost 3.5 cycles/op: the ENTIRE
+  "make it fit L2" lever is a 22% ceiling, and `m1_reset`'s 34% share of those misses caps its
+  cache lever at ~7%. Sections 7-9's ordering is withdrawn.
+
+**10.6 Measurement facts that change the process.**
+- **Fresh-process variance is +-8% on a quiet box**: five runs of the same 421M-op loop took
+  1.72-2.16 s (4.08-5.12 ns/op) with the yardstick steady at 3.2-3.6 G. Physical page placement
+  of the 512 MB flat array (L2/L3 are physically indexed) is the likely cause. msframe's five
+  fresh processes + median is the right shape; nothing below its 3% rule is decidable anyway.
+- **An L3-streaming neighbour costs 15-31%** (`hog.py` on another P-core: 2.25 s vs 1.72-1.94 s);
+  the owner's video render cost ~10% while it ran. The busy-machine refusal stays, and in-game
+  FPS will drop with other apps open.
+- **`core.run` carries 0.96-2.16 s of fixed setup per process** (flat allocation, garbage fill,
+  segment copy -- measured by 2-frame vs 14-frame runs), so msframe's absolute ms/frame is
+  5-10% high at 200 frames. A/B verdicts are unaffected (same setup both sides). Fix: subtract a
+  2-frame calibration per binary, or have the engine report the loop's own time.
+- **The clock is 3.5-3.7 GHz under this load, not 4.7.** Every cycles/op above is at the measured
+  clock; ns/op is the portable number.
+
+## 11. THE PLAN, v3 -- ranked by the measured cost model
+
+Per op today (b26, quiet, 3.6 GHz): **16.4 cycles = 4.5 ns.** Target 300 M ops/s = 12.1 cycles at
+this clock, i.e. -4.3 cycles.
+
+| # | lever | measured size | what to do | gate |
+|---|---|---|---|---|
+| 1 | **Engine loop: 11 branches/op -> ~5** | ceiling 3.5 cyc (21%); expect ~2 (12%) | (a) when `cell32 && flat_count == 2^27` at w=32 every 32-bit address is in span -- drop BOTH span checks in that specialisation, provably; (b) fold the three garbage compares into one branch (`((f^M)==0)\|((v^M)==0)\|((j^M)==0)`); (c) fold the two IO tests into one; (d) fold `j==ip` / `j<dw`; (e) strip-mine `ops++` | ops + pixels identical (`m2_std_gate`), then `msframe --against shipped`; per-step A/B, keep only separated wins |
+| 2 | **ops/frame** (4.5 ns each, uniform) | proportional | the 12M-campaign toolbox, ranked by 10.1's ops%: `simcollide_skip` 25% (88% L1 -- pure op count: 3b, with the concrete hypothesis from section 6), `seg_pass2_leaf` 14.5%, `m1_reset` 13.2% (restore fewer cells), `thing_pass_leaf` 8.6%, `seg_pass1_ts` 7.6%, `seg_pass1` 6.3%, bspcode 5.9% | byte-exact gates; `msframe` for the ms |
+| 3 | **The L3 tail** (3.77% of fetches at 26 ns) | ceiling 3.5 cyc (22%); expect 1-1.5 | m1_reset holds 34% of the L3-served fetches: order its restore walk by address so the stream prefetches (ceiling 7%); then pack the 90-99% band of the ip stream (47K -> 157K lines) -- the what-if curve says the working set is only slightly past L2, so the TAIL is the target, not the hot core | `cachemodel.py` predicts before a build; `msframe` decides |
+| 4 | **Clock / power** (outside the program) | +20-30% | the P-core ran at 3.5-3.7 GHz; plugged in on a performance plan it turbos to 4.7. Record the plan (msframe does) and the clock (the counter) with every number | -- |
+| 5 | **msframe setup bias** | 5-10% of absolute ms/frame | subtract a 2-frame calibration, or report engine loop time | `--selftest` |
+| -- | **CLOSED:** TLB / large pages (2%); 2a, 2b, 5.1, 5.3 (engine chain tricks); footprint as a metric; "L2 capacity is the bottleneck" (it is 22%, behind the engine's own 56%) | | | |
+
+**Expectation for the owner.** Quiet machine, this laptop: ~220 M fj/s in-loop on b26's mix today
+(~200-230 M on the shipped binary), 3.6 GHz. Levers 1+3 landing at their expected values give
+~12.5-13 cycles/op = **~280-300 M fj/s at 3.6 GHz -- the 300 M target is reachable, barely, and
+only on a quiet box**; at 4.7 GHz the same program would already exceed it. Frame time is that
+rate times ops/frame: at the 20 M-ops/frame goal and 3.4 ns/op that is ~68 ms = **~15 FPS**
+(~19 at 4.7 GHz). The earlier "2-3x end to end" was a guess; this is a sum of measured parts.
+
+**Sequencing.** Lever 1 first (one engine session, no builds, the largest measured piece, gated
+by op counts + pixels + msframe); lever 3's reset ordering second (one emitter session; the
+restore set is regenerated, R-reset-set applies); lever 2 continuously with the existing
+toolbox; lever 5 when msframe is next touched.
+
+**Verdict on the plan: satisfied.** Every lever is sized by a measurement on this machine, the
+cost model that sizes them reproduces the measured per-op time within the run-to-run spread, the
+two largest earlier candidates (TLB, footprint) are closed by numbers rather than by argument,
+and each lever names its gate.

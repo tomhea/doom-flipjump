@@ -37,7 +37,7 @@ set is 16 MB at 4-byte cells. So the realistic optimistic case is not 420M:
 
 ## 1. Three measurements never made (cost: minutes; they direct everything below)
 
-**1a. Split the trace by access type.** Histogram instruction-stream touches (`ip` fetches) and
+**1a. Split the trace by access type.** *DONE 09-13 -- section 8.* Histogram instruction-stream touches (`ip` fetches) and
 flip-target touches SEPARATELY. The dependent chain depends only on the former. If the
 instruction stream is a small fraction of the 16 MB, making *it* resident is the lever and the
 flip targets can stay scattered — they overlap. `mkprof.py` needs one extra `PROF_HIT` bucket.
@@ -48,7 +48,7 @@ thinly is expensive. `nameheat.py` + the word dump already hold the inputs. This
 touch-count ranking, which put `cb_bx` (490 lines, L1-resident) at #1 and is therefore the wrong
 list to optimise from.
 
-**1c. Jump-distance distribution.** What fraction of ops have `j == ip + 2w` (fall-through)?
+**1c. Jump-distance distribution.** *DONE 09-13 -- section 8.* What fraction of ops have `j == ip + 2w` (fall-through)?
 Long fall-through runs mean the hardware prefetcher already covers the instruction stream and
 that a block-execution fast path (2b) is viable; short runs mean neither.
 
@@ -251,3 +251,60 @@ exactly as section 6 predicted. `cb_bx` does not appear in the top 25 by footpri
 **Re-rank:** 3c (the M1 reset) moves to #1 among program-side levers. The rendering leaves
 (`seg_pass2_leaf`, `simcollide_skip`, `e1m1_bspcode_pos_leaf`, `cma/cmh_vyd`, `thing_pass_leaf`)
 are the next ~6 MB and are instruction stream -- what 1a decides.
+
+## 8. Measured 09-13: the split trace (1a) and the jump census (1c) -- the plan is now facts
+
+One instrumented run of `b26`, 14 frames, 421,164,280 ops (`mkprof2.py`, `splitanalyze.py`).
+
+**1c. Jumps:** fall-through (`j == ip+2w`) **6.38%**, loop 0%, near (within +-64 words) **50.82%**,
+far **42.79%**.
+- KILLED by their own kill criteria: **5.1** (predict fall-through -- it would mispredict 94% of
+  the time) and **2b** (block execution -- there are no fall-through runs to amortise over).
+- The 50.8% near jumps land within +-4 cache lines and are likely already L1 hits via the
+  adjacent-line prefetcher. The **42.8% far jumps are the expensive chain loads.**
+- **2a** (read `j` before the flip, prefetch the next fetch) is now the only engine lever aimed
+  at the chain, and it is better founded than before: it overlaps exactly the far-jump loads.
+
+**1a. The two streams** (units are 8 words = 32 B at 4-byte cells, so the MB figures are ~2x
+high; the ratios are exact):
+
+```
+IP-STREAM      499,032 units    50% in 10,441   90% in 93,366   95% in 142,644   (~2.9 MB true at 90%)
+FLIP-TARGETS     9,219 units    50% in     15   90% in    363   99% in     981   (~10 KB at 90%)
+overlap 9,217   ip-only 489,815   flip-only 2
+```
+
+- **The flip targets are L1-resident. The instruction stream is 98% of the footprint.** The chain
+  IS the footprint. Everything framed around "scattered flip targets" is retired: data
+  relocation (already measured weak) and **table co-location (5.3)** -- the flips are already
+  cheap.
+- The chain's working set: 90% of instruction fetches in ~2.9 MB -- just past the L2 knee, which
+  is exactly where the latency curve put the game. Consistent.
+- Because the instruction stream is the footprint and 1b says `m1_reset` is 43% of it: **shrinking
+  the reset code is THE lever.** 12,238 cells restored per frame at ~48 words of wflip chain each.
+- **3a (inline the hot leaves) GROWS the instruction stream** -- the interaction section 6 warned
+  about is now measured to point the wrong way. Demoted; only with a footprint gate.
+- **5.6** (padding census) and **5.7** (static jump threading) shrink the instruction stream and
+  are promoted.
+- NEW LEVER, from 1c + the 3.12-words-per-line density: ~63% of ops are wflips and their chains
+  live in the assembler's wflip area, where `insert_wflip_ops` SHARES chain tails between values
+  (its "found-statistic"). Sharing makes chains DAGs -- near-but-not-adjacent jumps (the 50.8%)
+  and half-empty lines. The trade between chain SHARING (less code) and chain CONTIGUITY (denser
+  lines, more fall-through) has never been measured. It is the assembler's, not the emitter's.
+
+## 9. THE PLAN, RE-RANKED BY MEASUREMENT (supersedes the ordering in sections 1-5)
+
+| # | lever | why it is here | gate |
+|---|---|---|---|
+| 1 | **M1 reset: restore fewer cells per frame** (dirty set) | 43% of the touched footprint, lowest reuse, a cache flush before every render; it is code | restore-set labels; `m2_std_gate`; `msframe --against shipped` |
+| 2 | **2a: read `j` before the flip, prefetch `flat[j>>ww]`** | the only engine lever on the 42.8% far jumps | op counts + pixels; `msframe` |
+| 3 | **wflip-area layout: chain contiguity vs sharing** | 63% of ops; density is 3.12/8 words per line; never measured | assembler; byte-exact; `msframe` |
+| 4 | **5.6 padding census + 5.7 static jump threading** | both shrink the instruction stream, which is 98% of the footprint | assembler; byte-exact |
+| 5 | **3b collision ops** | `simcollide_skip` is a hot leaf (reuse 5,427): its cost is OPS, not misses -- an ops/frame lever | emitter; byte-exact |
+| 6 | **4: knob re-sweep vs ms/frame** | still valid; needs same-source builds (45 min each) | `msframe` |
+| 7 | 5.8 per-byte IO (small, certain); 5.10 viewport (product decision) | | |
+| -- | **KILLED:** 5.1, 2b (6.4% fall-through); 5.3 co-location (flips L1-resident); data relocation | | |
+| -- | **DEMOTED:** 3a leaf inlining -- grows the instruction stream; only behind a footprint gate | | |
+
+Ceiling unchanged: ~2-3x end to end, an upper bound. Expected in-game today: ~99 ms/frame,
+~200 M fj/s, ~10 FPS (pinned baseline `shipped`).

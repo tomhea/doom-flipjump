@@ -109,3 +109,108 @@ else here, and the win may already be sitting in a config that was rejected for 
 Discipline that today proved necessary: no single-sample numbers; alternate A,B,A,B; read the
 cell width / page state back from the object, never infer it from the env var; and check that no
 stray process of your own is pegging a core before trusting any measurement.
+
+## 5. Ten more angles, each a different mechanism from the above
+
+Ranked roughly by expected value ÷ cost.
+
+1. **Turn the data dependency into a control dependency.** `ip = j` makes the next fetch wait on
+   the load's VALUE. If most ops fall through, write `if (j == ip+2w) ip += 2w; else ip = j;`:
+   the branch predictor speculates fall-through, computes `ip+2w` with no dependency on `j`, and
+   issues the next fetch immediately; `j` arriving merely confirms. Mispredict ~15 cycles; a
+   correct prediction hides the whole load. Potential 1.5–2× on the chain, three lines of C.
+   ⚠ The compiler will emit `cmov`, which is a data dependency again and defeats it — the branch
+   must be forced. Gated by the jump-distance census (1c).
+2. **Hardware performance counters instead of inference.** VTune (free) or `perf`: L1/L2/L3
+   misses, DTLB walks, branch mispredicts PER OP on the real binary. Every prediction on 09-12
+   came from synthetic curves and three were wrong; counters would have settled the TLB question
+   in ten minutes. Should run FIRST.
+3. **Co-locate each table with its arming site.** For a table with a single arming site, place it
+   adjacent to the ops that arm it: the flip then hits the line the instruction fetch already
+   brought in, and touches/op → ~1 for those ops. Trades pool-blocking (cheap ARM) for locality
+   (cheap TOUCH) — the tradeoff nobody has priced on ms/frame. Census first: how many tables
+   have one arming site?
+4. **Temporal coherence.** If view state (position, angle, doors, things) is unchanged the frame
+   is a copy: near-zero ops for idle frames, which are common in play. The trivial case is cheap
+   and the oracle can mirror it exactly; partial forms (sky/floor columns) are harder.
+5. **Actually pin to a P-core, raise priority, set the power plan.** The pin attempt on 09-12
+   FAILED (wrong ctypes signature) and was never retried; on a 6P+8E laptop the scheduler
+   migrates freely and the yardstick swung 2.9–3.6 GHz. Likely +10–20% mean, far less variance.
+   Free.
+6. **Census the padding inside the instruction stream.** `pad 16`, `pad 16384`, `rep(N) stl.fj
+   0,0` fillers exist for address arithmetic; every gap in the instruction stream is a wasted
+   line on the critical path. Measure what fraction of the chain's footprint is padding.
+7. **Static jump threading in the assembler.** A pure jump (flip=0) landing on another pure jump
+   is two dependent loads to go nowhere; where the target is STATIC, rewrite A→B→C as A→C.
+   Dynamic trampolines (`hex.tables.ret`, wflipped return addresses) cannot be threaded, but the
+   static chains have never been counted.
+8. **Batch screen IO per byte instead of per bit.** Measured 4.4% of wall time, one Python call
+   per BIT (44,738/frame). Per-byte batching cuts it ~8×. Small, certain, site already located.
+9. **Precomputed visibility per subsector (PVS).** `seg_pass1/2_leaf` + `e1m1_bspcode_pos_leaf`
+   are ~20% of touches; a baked potentially-visible-set prunes the BSP walk to what can be seen.
+   Big ops/frame cut on an open level; price the table size first.
+10. **Viewport width as an explicit product knob.** ops/frame scales with columns. `VIEW_W=160`
+    today; 120 is a 25% cut at zero engineering risk. Not an optimisation — a PRODUCT decision
+    that needs the owner's sign-off — but it is the largest lever available today.
+
+Considered and dropped: a separate compact code cache with write-invalidation (every flip pays a
+range check; #3 gets most of the benefit without it), and 2 MB-aligned allocation against
+cache-set conflicts (unmeasurable under current variance; do #5 and #2 first).
+
+## 6. Gaps in this plan (found by reading it as a reviewer)
+
+**Critical — the plan cannot succeed as written without these**
+
+- **It has no instrument for its own metric.** The thesis is "optimise ms/frame, not ops/frame",
+  and the project has NO reproducible ms/frame harness: `gamespeed.py` measures ops only, and
+  the ad-hoc runs on 09-12 varied 2× on identical work. Every item above will be judged by noise
+  until a harness exists that pins the core, alternates A/B/A/B, runs N reps, and reports
+  ms/frame WITH a spread. Build this before anything in sections 2–5.
+- **The shipped engine change is under-verified.** flipjump-151's own unit tests
+  (`tests/unit/test_native_memory.py`, `test_interpreter.py` — storage mode, freeze/reset,
+  garbage detection) were NEVER RUN after the 4-byte-cell change, and they test exactly what
+  changed. The Linux build was last made before stages A–C. `pytest tests/host` on the doom side
+  was not run either. `m2_std_gate` PASS is necessary, not sufficient.
+- **The "free" knob sweep on existing binaries is confounded.** `menu` is two weeks older than
+  `blocked25` with different features; comparing them conflates knob settings with code changes.
+  That is the same mistake made on 09-12 with the "blocking made it 50% slower" claim. A real
+  sweep needs same-source builds — 45 minutes each, so it is not free.
+
+**Structural — the reasoning has holes**
+
+- **Levers interact, and some conflict.** Inlining hot leaves (3a) GROWS the instruction stream;
+  if 1a shows the chain is footprint-bound, 3a makes it worse. Block execution (2b) and
+  co-location (5.3) change which words are self-modified. The plan lists them as independent.
+- **The ~18 FPS ceiling multiplies two factors that trade against each other.** Cutting
+  ops/frame by removing cheap ops raises the average cost of the remaining ones — the exact
+  mechanism section 4 identifies. Treat 18 FPS as an upper bound, not an estimate.
+- **Jump layout is a LEVER, not just a measurement.** 1c measures fall-through on the current
+  binary, but the emitter could be changed to maximise it (hot-path block ordering, as compilers
+  do) — which makes both 5.1 and 2b more effective. Missing entirely.
+- **The M1 restore set is not mentioned.** 2b, 3a, 3c and 5.3 all change what is self-modified
+  and where; CLAUDE.md's rule is that a feature is not done until the restore set carries its
+  labels. Every emitter change here needs that step.
+- **No kill criteria or decision thresholds.** 2b is "gated on 1c" but with no number; 1a has no
+  "if the instruction stream is under X MB then…". Most of 09-12 went on levers that measured
+  weak; explicit "stop if" rules would have saved hours.
+
+**Correctness — risk of shipping wrong pixels**
+
+- **Temporal coherence (5.4) and PVS (5.9) change what is computed.** A bug there produces
+  subtly wrong frames the 4-viewpoint deg gate can miss; PVS needs a conservativeness proof or a
+  many-viewpoint sweep (ca2_sweep's 260 frames is the right shape).
+- **No baseline freeze before emitter changes.** 3a, 3c, 5.3, 5.6, 5.7 all move addresses;
+  without `ritual.py freeze` on the current shipped binary first, regressions cannot be
+  attributed.
+- **The build_blocked.py warning fix is untested code.** It changed a check inside a 45-minute
+  build and has not been run through one.
+
+**Scope**
+
+- **3b (collision) has no hypothesis.** "Ask why" is not a first step. A concrete one: does
+  `sim.bind_things` iterate every thing every frame, and could it iterate only the moved ones?
+- **The size metric is untracked.** 3a, 5.9 and a code cache all add words; the ship gate is
+  35% of 2²⁷ and the plan never mentions it.
+- **The profiler is fragile scratch tooling.** `mkprof.py` patches `_fjcore.c` by string
+  anchors and broke once already when the source moved. Every measurement in sections 1–5
+  depends on it. It should become a compile-time `FJPROF` flag in the engine itself.

@@ -463,8 +463,35 @@ def main():
     print("", flush=True)
     print("assemblies: %d; blocked per assembly: %s"
           % (len(pools), ", ".join(format(q.allocated, ",") for q in pools)), flush=True)
-    if len({q.allocated for q in pools}) > 1:
-        print("*** THE PASSES BLOCKED DIFFERENT COUNTS -- their addresses cannot agree", flush=True)
+    # ⚠ THIS USED TO COMPARE `allocated` AND CALL A MISMATCH "their addresses cannot agree".
+    # It does not follow, and on the two-pass game tier it cried wolf on every build: pass 2
+    # emits data derived from pass 1, so it legitimately reserves MORE tables than pass 1
+    # (measured 415,184 vs 416,903), while every address still matched -- the restore-set checks
+    # reported 0 labels moved and 0 values changed, and 42 frames came out byte-identical.
+    #
+    # `allocated` is a per-reservation counter (preprocessor.py:201,531,580). What determines an
+    # address is the BLOCK BASE MAP, and `_preallocate` builds that from the FROZEN counts in a
+    # deterministic order precisely so two assemblies agree -- its docstring says so: "allocation
+    # independent of the order macros are reached, which is what two assemblies of the same
+    # program need in order to agree". So compare the thing that decides addresses.
+    if len(pools) > 1:
+        base_maps = [{g: v[0] for g, v in q.groups.items()} for q in pools]
+        first = base_maps[0]
+        drift = []
+        for i, other in enumerate(base_maps[1:], start=1):
+            shared = set(first) & set(other)
+            moved = [g for g in shared if first[g] != other[g]]
+            if moved:
+                drift.append((i, len(moved), len(shared), sorted(moved)[:5]))
+        if drift:
+            for i, nmoved, nshared, sample in drift:
+                print("*** PASS %d MOVED %s OF %s SHARED BLOCK BASES -- addresses disagree: %s"
+                      % (i, format(nmoved, ","), format(nshared, ","), sample), flush=True)
+        else:
+            only = [len(set(m) - set(first)) for m in base_maps[1:]]
+            print("  block bases agree across all %d assemblies (%s shared groups%s)"
+                  % (len(pools), format(len(first), ","),
+                     "" if not any(only) else "; later passes add %s new groups" % only), flush=True)
     last = pools[-1]
     print("pin conflicts (aliased source-word expressions, un-pinned): %s"
           % format(getattr(last, "pin_conflicts", 0), ","), flush=True)

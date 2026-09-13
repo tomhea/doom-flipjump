@@ -651,3 +651,189 @@ program's op count (section 11 lever 2), which is now the whole of the frame tim
 ops/frame, every million ops removed is worth **~4.1 ms/frame**, and the collision block alone is
 ~5 M ops/frame. The campaign's own note (FINDINGS AU) prices S2-style `try_move` sharing at ~4.3 M
 words of SPAN; nobody has yet priced it in ops PER FRAME, which is now the number that matters.
+
+## 14. Lever 2, item 1 (09-13, night): baking the per-leaf thing lists -- MEASURED, then REVERTED at the owner's call
+
+**Outcome first.** The change is reverted and nothing shipped: the owner is adding MOVING MONSTERS within
+days ("you can't rely on it not being a feature"), and this change only works while nothing moves.
+The section stays because what it measured is worth more than the change: the deleted code was 25%
+of the frame and the frame did not get faster, and the reason is a property of the BLOCKING PASS
+that the monster work will run into again.
+
+**14.1 What the 25% actually was.** Section 10.1's biggest object, `simcollide_skip` at 24.96% of
+all ops, is not collision: that label sits at the END of the collision block, immediately before
+the frame's `sim.bind_things thpos_rt, thss_rt, 75` line, and the b26 ip histogram joined to
+b26's label table puts 106,260,329 of the interval's 106,583,410 ops (99.7%) inside
+`sim.bind_things`' own expansion labels (`proj.wedge_setup` is 133,244; the rest is dust). That
+is ~7.6 M ops per frame on b26 for 75 runtime things, ~100 K ops per thing: three `ptr_index`,
+a `read_hex`, a `read_byte`, two `write_byte` and the sparse movs of the clean path, every thing,
+every frame.
+
+**14.2 Why it can be baked.** The macro re-binds things to leaves so a thing that MOVED gets a new
+list entry. In the standalone tier nothing moves a thing (C4), `thss_rt` is already baked at the
+spawn binding (M5), and the dirty path never runs -- so the macro is a pure function of
+constants, and every frame it rebuilds the same two arrays. The emitter now computes those arrays
+(`wall_renderer.baked_thing_lists`: t = 74 .. 0, `thnext[t] = sshead[ss]; sshead[ss] = t + 1`, the
+macro's own prepend order, so each leaf's traversal is ASCENDING by index exactly as
+`sim.thing_pass` and the sprite slot order require), emits them as `;v * dw` byte cells in the
+same `_hot_arrays` block -- a `hex` cell IS `;val * dw`, one op, so the cell count, the shape and
+every address are unchanged -- and drops the call from pass 1. The hosted tier is untouched: the
+host moves things there and marks them dirty.
+
+The one consequence outside the emitter: the M1 reset restored `sshead` every frame by ZEROING it
+(`m1.zerobyte` over its 682 reachable cells), because the per-frame rebuild dirtied it. With the
+rebuild gone the frame never touches it, and a reset that zeroed it would delete the baked lists.
+So `sshead` leaves the STANDALONE restore set (`scratchpad/m5_drop_sshead.py`: 474 -> 473 entries,
+12,400 -> 11,036 words, fingerprint recomputed and the result pushed through the production
+loader with the fingerprint check ON), `selfreset.emit_reset_part` skips a byte array the set
+does not carry at all (partial coverage is still the assert it always was), `m5_setfile.py`'s
+closed list of labels the standalone set may lack becomes {wmagic, sshead}, and
+`tests/host/test_restore_set_shipped.py` pins that. `thnext` was never in the set; `thss_rt` and
+`thpos_rt` stay in it (restored to their baked values each frame -- harmless, pre-existing).
+
+**14.3 Checks before the build.** tests/host: 974 passed (+4 new: a literal transcription of the
+macro's loop as the reference model, 200 random maps, the ascending-traversal property, an R9
+mutation -- ascending insertion -- that the property test rejects, and the lite E1M1 map: every
+thing in exactly one leaf). An emission-only run of the game tier (409 s, no assembly):
+`sim.bind_things` 0 occurrences in the main part; `sshead` 1,364 cells, 35 non-zero heads (35
+leaves hold runtime things), max 69; `thnext` 150 cells, 40 non-zero links, max 75 -- and
+35 + 40 = 75 things, as it must.
+
+**14.4 The build and its gates.** `build_labeled.py --labels atlas/nobind.labels.tsv.gz -- game
+--out build/doom_e1m1_nobind.fjm --counts-cache _counts_game_nobind.json.gz --merge-aliases` --
+b26's recorded command line, so b26 is the same-knobs control (blocked25's knobs were never
+recorded; 13.4 and `build_labeled.py`'s docstring both say so).
+Built in 1,907 s (a cache-miss counting assembly plus the two passes; `assemble_seconds`
+1,463 for pass 2), span 91,510,656 words (b26: 92,147,808), `labels_moved_in_set` 0, and the
+build log says `self-reset: byte array 'sshead' is not in the restore set: left untouched`; the
+reset part has 822 lines against b26's 823 -- the `sshead` zerobyte rep is the missing one.
+Gates: `m2_std_gate` PASS -- 210 frames (2 menu, enter, a 154-frame walk to door 10, use, 10
+opening, 36 through, 6 idle), every game frame byte-exact against the oracle, the door carried
+across two resets; `m3_gate` PASS (menu and world). `m5_gate` FAILS -- and fails IDENTICALLY on the
+unchanged b26 (14,886 px on frame 0, one distinct picture of 24, self-flagged VACUOUS): that gate
+predates the menu and never presses Enter, so on a menu-booting binary it compares the menu to a
+world frame. It is not evidence about this change; `m2_std_gate` is the full-game play-test the
+metrics handoff names.
+
+**14.5 The measurements.**
+Same knobs, same source, the one difference under test (msframe, 200 frames, 5 reps, cpu 2,
+quiet box, yardstick 3.62 G):
+
+```
+b26      28,962,604 ops/frame   289.0 M fj/s   100.2 ms/frame  [99.4 .. 101.7]
+nobind   28,144,611 ops/frame   290.9 M fj/s    96.8 ms/frame  [96.3 .. 97.5]
+ratios (all five in favour)   median 1.035   VERDICT: B FASTER   pixels identical: YES
+```
+
+FASTER, separated -- and a fraction of the size it should be. The deleted code executed ~7.6 M ops
+per frame on b26; the frame lost 0.82 M. **The blocking pass put ~6.8 M ops back**: with
+bind_things' ~4,700 expansion labels gone, the counting assembly saw different table counts, the
+pool packed every group differently, and the wflip popcount of the surviving tables moved -- the
+same placement effect that section 13.4 measured at +46% between two placements of ONE program,
+now landing on the other side of a code change. The door-route gate shows the same thing: 6.30 G
+ops for its 210 frames on nobind against blocked25's 4.43 G.
+
+**14.6 Where the ops came back -- found to the word.** The T profile of nobind against its own
+label table (14 frames, 416,132,945 ops), set beside b26's (10.1):
+
+```
+                          b26 (421.2M ops)          nobind (416.1M ops)
+  sim.bind_things         105.1M   24.96%           0        --
+  seg_pass2_leaf           61.2M   14.53%           60.8M    14.60%     unchanged
+  thing_pass_leaf          36.2M    8.59%           36.5M     8.77%     unchanged
+  seg_pass1_ts / seg_pass1 32.2M / 26.3M            32.2M / 26.9M      unchanged
+  e1m1_bspcode_pos_leaf    25.0M    5.93%           22.9M     5.51%     unchanged
+  "m1_reset"               55.8M   13.24%          157.4M    37.83%     +101.6M
+```
+
+Every renderer object is unchanged to within a percent; the deleted macro's 105 M are gone; and
+101.6 M came back under the label `m1_reset`. They are not the reset. The profiler credits an ip
+to the nearest top-level label below it, and `m1_reset` is the last label before the ASSEMBLER'S
+OWN AREA -- the wflip chains -- so the split of that range is:
+
+```
+                   b26      nobind
+  reset code       0.46%    0.31%      (the sshead zerobytes gone: 12,766 exact_xor labels vs 18,222)
+  block pool       4.81%    4.78%      (identical per origin: seg_pass2 1.28/1.29, seg_pass1 1.27/1.29, ...)
+  wflip chains     7.97%   32.74%      <- here
+```
+
+The chain ops flip these target words (share of ALL ops, read off the image at the sampled ips):
+
+```
+  hex.tables.res   1.54% -> 5.43%      hex.tables.ret   0.99% -> 4.40%      hex.mul.ret   0 -> 1.45%
+```
+
+Those are the shared-leaf CALL/RETURN flips -- `wflip ret+w, back` before a leaf call and again
+after it -- and their cost is popcount(`back`), the address of the call site inside the caller.
+Deleting 652,096 words of `bind_things` (the interval `simcollide_skip`..`dsc_done` went from
+658,532 to 6,436 words) slid every later call site down by exactly that, and the hot ones landed
+on addresses with far more set bits. The mean over all 239,208 top-level labels in the shifted
+region moved only 12.14 -> 12.33 bits -- the damage is concentrated in the few hot sites, as the
+campaign's "layout tax" always was. Nothing in the change itself costs an op; the address map does.
+
+
+**14.7 The pool's knobs are not the fix, and the shipped binary's targets today.** The same source
+rebuilt with the ladder's knobs (blocked13's `--spread 2 --max-slot-ops 512 --span-bits 0x9fffffe0
+--pin-broken --width-buckets`, plus `--merge-aliases`; a cache hit, 26 min; pool 66% used, span
+111,452,416 words) gates PASS (`m2_std_gate` 5,867,418,832 ops / 210 frames, `m3_gate`) and
+measures:
+
+```
+nobind13 vs blocked25:  102.5 vs 88.5 ms   25,970,927 vs 19,855,016 ops/frame   median 0.868   B SLOWER
+binding metric (owner spec, ten 100-frame games, menu subtracted):
+  blocked25   (mean+p80)/2 = 19,246,013  PASS    mean 16,629,651   p80 21,862,375   size 32.53%  PASS
+  nobind13    (mean+p80)/2 = 25,065,018  OVER    mean 21,532,415   p80 28,597,620   size 33.16%  PASS
+```
+
+(So the shipped binary already meets both of the owner's targets tonight; CLAUDE.md's headline
+"24,723,058 / 93.50% -- both FAIL" describes an older build.) The pool knobs moved the frame by
+-2.2 M against b26's knobs and left the 6.8 M give-back untouched -- consistent with 14.6: the
+return flips' cost is the INLINE call-site address, which no pool knob changes.
+
+**14.8 The alignment build, and the mechanism found.** `pad 2097152` at the deleted call's
+position puts everything after it at word 2^22 exactly (`hot_align_end` popcount 1; `dsc_done`
+popcount 7 against b26's 11; `seg_pass1_leaf` 8 against 9). Gates PASS (`m2_std_gate`
+6,155,703,913 ops / 210 frames; `m3_gate`). Measured:
+
+```
+nobindalign vs b26        106.2 vs 99.5 ms   28,962,604 -> 27,599,577 ops/frame   median 1.063   B FASTER
+nobindalign vs blocked25   83.7 vs 98.5 ms   19,855,016 vs 27,599,577             median 0.850   B SLOWER
+```
+
+Better than the unaligned build by ~0.5 M ops/frame, still ~6 M short of the deleted code's cost.
+So the call sites' addresses are NOT the main mechanism, and the flipped-bit histogram of the
+grown chains (which bits of the source words the chain ops flip, read off both images at the
+sampled ips) says what is:
+
+```
+                      b26 chain samples      nobind chain samples
+  hex.tables.res+w        33,605                117,569     (3.5x)
+  hex.tables.ret+w        21,994                 95,348     (4.3x)
+  hex.mul.ret+w                5                 31,234     (from nothing)
+```
+
+`hex.mul.ret` is the tell. On b26 its 50,999 dispatches per census (FINDINGS BP) cost NO chain ops
+at all: the source word is PINNED to its block base and each dispatch flips a short index. On
+nobind the same dispatches flip whole addresses. The blocking pass re-counted the program without
+`bind_things`' 4,686 tables, packed every group differently, and the hottest shared source words
+-- `hex.tables.res`, `hex.tables.ret`, `hex.mul.ret` -- came out of it with their pins lost or
+their groups broken (BQ/BR: "a broken group loses its pin for ALL its tables"). The pool knobs
+(nobind13) bought back ~2 M and the alignment ~0.5 M; the pins are the ~6 M.
+
+**14.9 What this means for the monster work.** Adding movement code will re-roll the same dice:
+every change to the program's table counts re-decides the pins, and a build can lose 6 M ops/frame
+on a change that executes none of them. So: (a) after any emitter change, profile with
+`mkprof3.py T` + `timeobj.py` and read the chain shares of `hex.tables.res/ret` and `hex.mul.ret`
+-- the `m1_reset`-labelled slice of the T profile is the wflip area, and a jump there is the
+signature; (b) judge by msframe, never by the op delta a change "should" give; (c) the per-frame
+`bind_things` costs ~7.5 M ops/frame today and will still cost that with monsters moving -- the
+DOOM way is to re-bind ONLY the thing that moved (P_SetThingPosition); keep the macro, make the
+rebuild per-move. `scratchpad/12m/engine_folds/patch_nobind.py` holds the baked-list emitter
+change and `baked_thing_lists` (with its reference-model tests) if a static-world tier ever wants it.
+
+**14.10 Kept.** The three experiment binaries (`build/doom_e1m1_nobind*.fjm`, their generated dirs
+and label tables in `scratchpad/12m/atlas/`), the patches under `scratchpad/12m/engine_folds/`,
+`scratchpad/m5_drop_sshead.py`, the ledger rows, and the T profile of nobind. The source, the
+reset, the standalone restore set and the tests are at their committed state (tests/host green).
+

@@ -186,6 +186,10 @@ A number that did not come through it is an anecdote. Its `--selftest` is the R9
 once per machine state; if A-vs-A separates, the box is too noisy to measure anything.
 
 ## The Ship Gate and the standing number (owner, 2026-09-13)
+**READ THIS FILE FIRST, before any build or performance work: `docs/ship-gate.md`.** It is not loaded
+automatically; open it. It holds the standing number with its provenance, the four-step gate a
+new binary must pass, and the ideas already measured (kept or closed) so they are not re-derived.
+
 **`build/doom_e1m1_blocked25.fjm` is the shipped binary: 82 ms/frame, 242 M fj/s on a quiet box, 19,855,016 ops/frame on msframe's script; binding metric 19,246,013 ops/frame PASS, size 32.53% PASS.** The owner's instruction: keep this number in line so it is not lost. So a new game binary is "shipped" only through `docs/ship-gate.md`: byte-exact gates (`m2_std_gate`, `m3_gate`; `m5_gate` is vacuous on a menu-booting binary), then `msframe.py --a build/<new>.fjm --against shipped` -- **a B SLOWER verdict does not ship, whatever the op delta says** (three 2026-09-13 builds cut 25% of executed ops and measured SLOWER: the blocking pass re-rolls its pins on any change to the table counts) -- then `gamespeed.py` for both owner targets, then RECORD the build command, counts cache, label table and hashes in `docs/ship-gate.md` and re-freeze the baseline. The ideas worth keeping and the evidence that limits them are in that file's section 3; do not re-derive them.
 
 ## Byte-Exactness Gate

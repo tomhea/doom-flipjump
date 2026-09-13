@@ -4,6 +4,8 @@
     python scratchpad/12m/msframe.py --a build/X.fjm --b build/Y.fjm       # A/B two binaries
     python scratchpad/12m/msframe.py --a build/X.fjm --b build/X.fjm --env-b FLIPJUMP_CELL64=1
                                                                              # A/B one binary, two engine configs
+    python scratchpad/12m/msframe.py --a build/X.fjm --env-a MSFRAME_FJCORE_PYD=C:/x/_fjcore.pyd --against shipped
+                                                                             # an ENGINE change vs the frozen baseline
     python scratchpad/12m/msframe.py --a build/X.fjm --save-baseline shipped
     python scratchpad/12m/msframe.py --a build/Y.fjm --against shipped     # a change vs the frozen baseline
     python scratchpad/12m/msframe.py --selftest                            # R9: prove it can see a known effect
@@ -95,8 +97,22 @@ if os.name == "nt" and cpu >= 0:
     pin_note = "cpu%d proc=%s thread=%s prio=%s" % (cpu, "ok" if ok_p else "FAIL(err %d)" % err_p,
                                                      "ok" if ok_t else "FAIL", "high" if ok_pri else "FAIL")
 
+# per-arm ENGINE: MSFRAME_FJCORE_PYD=<path> loads that _fjcore.pyd in place of the installed one,
+# so two engine builds can be A/B'd in one run (--env-a / --env-b). Injected into sys.modules
+# BEFORE anything imports flipjump, so every importer in this process sees the candidate. The
+# result records the engine's path and hash, so the ledger shows which engine each arm ran.
+_pyd = os.environ.get("MSFRAME_FJCORE_PYD", "")
+if _pyd:
+    import importlib.util
+    _spec = importlib.util.spec_from_file_location("flipjump.interpreter._fjcore", _pyd)
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    sys.modules["flipjump.interpreter._fjcore"] = _mod
 import gamespeed as GS, m2_std_gate as gate
 from doomfj.fastrun import FjmRunner, _fjcore
+if _pyd and Path(_fjcore.__file__).resolve() != Path(_pyd).resolve():
+    raise SystemExit("MSFRAME_FJCORE_PYD injection failed: engine is %s" % _fjcore.__file__)
+_eng_sha = hashlib.sha256(Path(_fjcore.__file__).read_bytes()).hexdigest()[:16]
 from flipjump.interpreter.io_devices.KeyboardIO import ScriptedKeyEventSource
 from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory
 from flipjump.interpreter.io_devices.pygame_window import PcIO
@@ -133,7 +149,9 @@ out = {"frames": fr, "ops": ops, "secs": dt, "io_secs": paused, "load_secs": loa
        "ms_per_frame": dt / fr * 1000.0, "fjs": ops / dt, "ops_per_frame": ops / fr,
        "pix": pix, "yard_before": y0, "yard_after": y1, "pin": pin_note,
        "cell_bytes": getattr(core, "cell_bytes", None), "storage_mode": core.storage_mode,
-       "large_pages": getattr(core, "large_pages", None)}
+       "large_pages": getattr(core, "large_pages", None),
+       "engine": str(Path(_fjcore.__file__)), "engine_sha": _eng_sha,
+       "full_span": getattr(core, "flat_full_span", None)}
 import json
 print("MSFRAME_RESULT " + json.dumps(out), flush=True)
 '''
@@ -265,6 +283,8 @@ def summarize(rows, label_a, label_b, resolution):
                  "ops_all_same": len({x["ops"] for x in a}) == 1,
                  "cell_bytes": a[0]["cell_bytes"], "storage": a[0]["storage_mode"],
                  "pin": a[0]["pin"],
+                 "engine": a[0].get("engine"), "engine_sha": a[0].get("engine_sha"),
+                 "full_span": a[0].get("full_span"),
                  "yard_median": median([x["yard_before"] for x in a] + [x["yard_after"] for x in a])}}
     if not b:
         return out
@@ -277,6 +297,8 @@ def summarize(rows, label_a, label_b, resolution):
                 "ops_all_same": len({x["ops"] for x in b}) == 1,
                 "cell_bytes": b[0]["cell_bytes"], "storage": b[0]["storage_mode"],
                 "pin": b[0]["pin"],
+                "engine": b[0].get("engine"), "engine_sha": b[0].get("engine_sha"),
+                "full_span": b[0].get("full_span"),
                 "yard_median": median([x["yard_before"] for x in b] + [x["yard_after"] for x in b])}
     # correctness across arms: the SAME script on the SAME game must present the SAME bytes
     out["pix_identical_across_arms"] = all(r[0]["pix"] == r[1]["pix"] for r in rows)
@@ -322,6 +344,9 @@ def print_summary(s, label_a, label_b, frames):
               % " ".join("%.3f" % x for x in s["pair_ratios_a_over_b"]))
         print("  median ratio                          : %.3f  (>1 = B faster)" % s["ratio_median"])
         print("  VERDICT: %s   (rule: %s)" % (s["verdict"], s["verdict_rule"]))
+    print("  engine A: %s full_span=%s %s" % (A.get("engine_sha"), A.get("full_span"), A.get("engine")))
+    if "b" in s:
+        print("  engine B: %s full_span=%s %s" % (s["b"].get("engine_sha"), s["b"].get("full_span"), s["b"].get("engine")))
     print("  pin: %s   yardstick median %.2fG%s"
           % (A["pin"], A["yard_median"] / 1e9,
              "" if A["yard_median"] >= YARD_MIN_PCORE else "   <- LOW: E-core or throttled?"))

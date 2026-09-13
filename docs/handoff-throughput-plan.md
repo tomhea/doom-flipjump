@@ -400,26 +400,151 @@ this clock, i.e. -4.3 cycles.
 
 | # | lever | measured size | what to do | gate |
 |---|---|---|---|---|
-| 1 | **Engine loop: 11 branches/op -> ~5** | ceiling 3.5 cyc (21%); expect ~2 (12%) | (a) when `cell32 && flat_count == 2^27` at w=32 every 32-bit address is in span -- drop BOTH span checks in that specialisation, provably; (b) fold the three garbage compares into one branch (`((f^M)==0)\|((v^M)==0)\|((j^M)==0)`); (c) fold the two IO tests into one; (d) fold `j==ip` / `j<dw`; (e) strip-mine `ops++` | ops + pixels identical (`m2_std_gate`), then `msframe --against shipped`; per-step A/B, keep only separated wins |
+| 1 | ~~**Engine loop: 11 branches/op -> ~5**~~ **KILLED by measurement, section 12** (12 -> 3 branches and a PGO fall-through layout both NOT SEPARATED) | ~~ceiling 3.5 cyc (21%); expect ~2 (12%)~~ measured ~+2-3% at best | (a) when `cell32 && flat_count == 2^27` at w=32 every 32-bit address is in span -- drop BOTH span checks in that specialisation, provably; (b) fold the three garbage compares into one branch (`((f^M)==0)\|((v^M)==0)\|((j^M)==0)`); (c) fold the two IO tests into one; (d) fold `j==ip` / `j<dw`; (e) strip-mine `ops++` | ops + pixels identical (`m2_std_gate`), then `msframe --against shipped`; per-step A/B, keep only separated wins |
 | 2 | **ops/frame** (4.5 ns each, uniform) | proportional | the 12M-campaign toolbox, ranked by 10.1's ops%: `simcollide_skip` 25% (88% L1 -- pure op count: 3b, with the concrete hypothesis from section 6), `seg_pass2_leaf` 14.5%, `m1_reset` 13.2% (restore fewer cells), `thing_pass_leaf` 8.6%, `seg_pass1_ts` 7.6%, `seg_pass1` 6.3%, bspcode 5.9% | byte-exact gates; `msframe` for the ms |
-| 3 | **The L3 tail** (3.77% of fetches at 26 ns) | ceiling 3.5 cyc (22%); expect 1-1.5 | m1_reset holds 34% of the L3-served fetches: order its restore walk by address so the stream prefetches (ceiling 7%); then pack the 90-99% band of the ip stream (47K -> 157K lines) -- the what-if curve says the working set is only slightly past L2, so the TAIL is the target, not the hot core | `cachemodel.py` predicts before a build; `msframe` decides |
+| 3 | **The L3 tail** (3.77% of fetches at 26 ns) | ceiling 3.5 cyc (22%); expect 1-1.5 | ~~m1_reset holds 34% of the L3-served fetches: order its restore walk by address~~ **MOOT (12.7): the walk is already emitted in address order**; what remains is so the stream prefetches (ceiling 7%); then pack the 90-99% band of the ip stream (47K -> 157K lines) -- the what-if curve says the working set is only slightly past L2, so the TAIL is the target, not the hot core | `cachemodel.py` predicts before a build; `msframe` decides |
 | 4 | **Clock / power** (outside the program) | +20-30% | the P-core ran at 3.5-3.7 GHz; plugged in on a performance plan it turbos to 4.7. Record the plan (msframe does) and the clock (the counter) with every number | -- |
 | 5 | **msframe setup bias** | 5-10% of absolute ms/frame | subtract a 2-frame calibration, or report engine loop time | `--selftest` |
 | -- | **CLOSED:** TLB / large pages (2%); 2a, 2b, 5.1, 5.3 (engine chain tricks); footprint as a metric; "L2 capacity is the bottleneck" (it is 22%, behind the engine's own 56%) | | | |
 
-**Expectation for the owner.** Quiet machine, this laptop: ~220 M fj/s in-loop on b26's mix today
+**Expectation for the owner.** ⚠ **WITHDRAWN in section 12.7: lever 1 delivered ~2-3%, not ~12%, so the 280-300 M figure below has no measured basis; the game runs ~200 M fj/s on this machine and its frame time moves only with ops/frame.** ~~Quiet machine, this laptop: ~220 M fj/s in-loop on b26's mix today
 (~200-230 M on the shipped binary), 3.6 GHz. Levers 1+3 landing at their expected values give
 ~12.5-13 cycles/op = **~280-300 M fj/s at 3.6 GHz -- the 300 M target is reachable, barely, and
 only on a quiet box**; at 4.7 GHz the same program would already exceed it. Frame time is that
 rate times ops/frame: at the 20 M-ops/frame goal and 3.4 ns/op that is ~68 ms = **~15 FPS**
-(~19 at 4.7 GHz). The earlier "2-3x end to end" was a guess; this is a sum of measured parts.
+(~19 at 4.7 GHz). The earlier "2-3x end to end" was a guess; this is a sum of measured parts.~~
 
 **Sequencing.** Lever 1 first (one engine session, no builds, the largest measured piece, gated
 by op counts + pixels + msframe); lever 3's reset ordering second (one emitter session; the
 restore set is regenerated, R-reset-set applies); lever 2 continuously with the existing
 toolbox; lever 5 when msframe is next touched.
 
-**Verdict on the plan: satisfied.** Every lever is sized by a measurement on this machine, the
+**Verdict on the plan: satisfied** ~~-- superseded the same day by section 12, which killed lever 1 and closed lever 3~~. Every lever is sized by a measurement on this machine, the
 cost model that sizes them reproduces the measured per-op time within the run-to-run spread, the
 two largest earlier candidates (TLB, footprint) are closed by numbers rather than by argument,
 and each lever names its gate.
+
+## 12. Lever 1 executed (09-13, evening): the engine loop's branches, folded 12 -> 3, and what it measured
+
+**Outcome first: KILLED by the kill criterion.** Every fold is built, gated and equivalent; all of them
+together measure NOT SEPARATED against the unmodified engine (median ratio 1.009 at 5 reps,
+1.027 at 10 reps -- eight of ten pairs in its favour, under the 3% floor and the +5% kill line). The branch count of the hot loop is not the engine's floor. Nothing is shipped: the
+installed engine is the one the baseline was frozen on, and flipjump-151's working tree is back to
+`cac64fd` (the folded source is parked on its branch `lever1-folds-measured`). The patches, the built engines and every ledger row are kept (below), so this does not
+have to be re-learned.
+
+**12.1 The precondition was wrong, and had to be built.** Section 11 said "when
+`flat_count == 2^27` every 32-bit address is in span". The game's flat window is not 2^27 words:
+`blocked25`'s last segment ends at word 96,009,696 (71.5% of the address space; 424,743
+segments), so the flat array stopped there and the span checks were live. Fold (a) therefore
+changes the allocation: at w=32 with 4-byte cells and a flat limit >= 2^27, the array now spans
+the whole address space (2^27 cells, 512 MB, the tail past the last segment garbage-filled) plus
+ONE GUARD CELL past the end, also garbage-filled, so the jump-word read of an op in the very last
+word reads the sentinel instead of running off the array. With that, the proof holds and is in the
+source (`run_flat_loop_impl`'s comment): every ip is a uint32 cell value or the dispatch-checked
+`start_ip < 2^32`, every flip target is `f >> 5 < 2^27`, and the only jump-word index past the
+array is the guard. `flat_count` stays the semantic window (freeze/reset/set_words/API unchanged);
+`flat_alloc_count` is the allocation; `Memory.flat_full_span` exposes which loop ran. Cost: the
+tail's fill and ~146 MB more resident memory per process -- which is the reason not to keep it
+without a measured gain.
+
+**12.2 What the folds did to the loop** (read from `dumpbin /disasm`, w=32 / 4-byte-cell
+instantiation, per op):
+
+| build | conditional branches | of which TAKEN on the common path | other per-op costs |
+|---|---|---|---|
+| shipped (`cac64fd`, `/O2 /GL`) | 12: unaligned, 3 span, 3 sentinel, output, input, j==ip, j<2w, back-edge | **11** -- MSVC lays every cold block inline and the common path hops over each one | `ops++` stored to the stack every op; the array base and `flat_count` reloaded from the stack every op |
+| fold a | 9 (the 3 span checks gone; the guard compare sits in the cold path only) | 8 | the op counter now load-inc-stored through memory |
+| folds a-g | **3**: head (unaligned \| sentinel-f \| output \| input), tail (sentinel-v \| sentinel-j \| j==ip \| j<2w), back-edge | 3 -- still all taken: MSVC keeps the cold code as the fall-through | `f` spilled to the stack and reloaded before the flip; the array base reloaded; ~45 instructions/op either way (the branches became setcc/or chains) |
+
+The folds: (a) span checks out (full-span array); (b) the flip-word sentinel test joins the
+output test, the flip-target's is DEFERRED past its store to share one branch with the jump
+word's (`flat_deferred_flip_garbage` undoes the store when the target was real garbage, so
+memory and the reported error are identical); (c) the input test joins the head branch; (d)
+`j == ip` and `j < 2w` become one branch; (e) `ops++` strip-mined into the signal-check strip
+counter (`done_counted` adds the halting op); (f) the alignment test joins the head branch --
+the flip-word read is safe for any 32-bit ip in full-span mode, an unaligned ip's f is re-read
+the slow way in the cold block; (g) the two tail branches become one. Every cold block keeps the
+old order of checks, and the general (non-full-span) instantiation keeps its span checks.
+
+**12.3 Gates, all passed on every build:** flipjump-151's `test_native_memory`,
+`test_interpreter`, `test_fast_run` (83 tests, in-process on the candidate via
+`with_engine.py`); `engine_diff.py` (15 hand-built edge cases, each fold against its
+predecessor: unaligned ips, the last word of the address space, jumps and flips into the garbage
+tail, magic-valued data/flip/jump words, IO order with EOF, null ip, the not-looping self-flip,
+`start_ip = 2^32`, w=16 and a small-limit w=32 -- cause, op count, error address, IO transcript
+and memory fingerprint all identical; its `--selftest` rejects a mutated op count);
+`m2_std_gate` on `blocked25` with the shipped engine, fold (a) and folds a-g: 4,432,191,712 ops,
+210 frames, PASS, identical to the digit; and msframe's own pixel/op identity across arms on
+every run.
+
+**12.4 The measurements** (`msframe`, `blocked25`, 200 frames, cpu 2, power plan Turbo; the
+owner's video render was running at ~0.6-0.75 core the whole time -- `--selftest` PASSED under
+that load with a worst A-vs-A pair of 6.8%, so the floor today is worse than the 3% rule):
+
+```
+control   installed engine b96339f7 vs the same source rebuilt (99d15dcb):
+          100.0 vs 101.2 ms   ratios 0.998 1.011 0.989 0.972 0.962   median 0.989   NOT SEPARATED
+fold a    step0 99d15dcb vs stepA 80791441 (full_span=True):
+           99.0 vs  98.5 ms   ratios 1.001 0.988 1.017 1.069 1.017   median 1.017   NOT SEPARATED
+folds a-g step0 vs stepG b57a48a5 (full_span=True), 5 reps:
+          103.7 vs 101.9 ms   ratios 1.004 1.023 1.028 0.941 1.009   median 1.009   NOT SEPARATED
+folds a-g 10 reps (the protocol's escalation):
+          101.2 vs  99.0 ms   ratios 1.066 1.053 0.769 1.015 1.055 1.057 1.016 1.013 1.038 0.994
+                              median 1.027   NOT SEPARATED
+PGO       stepG b57a48a5 vs the same source with MSVC PGO, pgoG 8d827c5e (trained on 100 frames):
+           96.7 vs  97.0 ms   ratios 1.042 1.020 1.018 0.992 0.958   median 1.018   NOT SEPARATED
+```
+
+**12.5 What this says about the cost model.** Section 10.2 attributed the 3.5 cycles between the
+bare chase (5.7) and the engine's L1 floor (9.2) to "eleven branch micro-ops per op". Taking nine
+of them out (and eight of the eleven TAKEN jumps) moved the frame by ~1% -- inside the noise. So
+the loop's overhead is not in its branches, and section 10.2's split of the floor is withdrawn:
+the engine's per-op cost above the chase is somewhere else (the store-to-load path through the
+jump word, the stack traffic -- NOT the front-end: see the PGO row). Lever 1 as stated has no gain to
+ship on this compiler and machine.
+
+**12.5b The layout was tested too, and it is not the floor either.** MSVC's PGO build of the
+folded source (`pgo_build.py`: `/LTCG:PGINSTRUMENT`, trained on 100 `blocked25` frames,
+`/LTCG:PGOPTIMIZE`; the linker reports 56/56 functions and 100% of the profiled instructions
+optimised with the profile) lays the loop out exactly as section 11 wanted: every rare-path
+branch falls through, the cold blocks live out of line, only the back-edge is taken, and the
+compiler even split the setcc/or chains back into separate never-taken compares because the
+profile told it they never fire. That engine measures the same as the plain build within noise
+(median ratio 1.018). So the common path can be ~40 straight-line instructions with one taken
+branch, or 12 branches with 11 taken, and the frame time does not move: **the engine's per-op
+cost above the chase is not instruction-side at all.** What is left on the per-op critical path
+is the memory chain itself -- ip -> word address -> the jump-word load -> ip, with that load
+ordered after the flip store whose address depends on the flip word's load (memory
+disambiguation, and a genuine store-to-load dependency on the 4.1% of ops that flip their own
+jump word). Section 10.5 closed the "read j before the flip" idea on a microbenchmark, and this
+session did not reopen it (as instructed); it is recorded here as the only candidate the loop
+measurements leave standing, for the owner to weigh.
+
+**12.6 What is kept.** `scratchpad/12m/with_engine.py` (run any gate on a candidate engine),
+`engine_diff.py` (the edge-case differential, R9 self-test), `loopbranches.py` (hot-loop
+disassembly, needs its window heuristic fixed for MSVC's interleaved layout -- read the dump by
+hand), `pgo_build.py` (an MSVC PGO build of the engine, trained on the game), msframe's per-arm
+engine switch (`MSFRAME_FJCORE_PYD`, recorded per arm in the ledger), the fold patches
+`patch_fold_{a..g}.py` and the seven built engines in the session scratchpad, and the protocol
+text in `docs/measurement-process.md`.
+
+**12.7 Lever 3, checked before it was started: the restore walk is ALREADY in address order.**
+`selfreset.emit_reset_part` sorts the restore set (`cells = sorted(...)`) and emits `hex.zero` /
+`hex.set` in ascending address order, then the three byte arrays; the shipped
+`build/generated_doom_e1m1_blocked25/e1m1_07_reset.fj` has 811 restore targets with exactly 2
+descending steps (the byte-array reps at the end). There is nothing to reorder. What section 11
+called the reset's L3 tail is the streaming of its own 7.9 MB of straight-line code once per
+frame -- one new cache line per ~8 ops, which the cache SIMULATION counts as a miss and the
+hardware prefetcher may already hide; the simulation does not model prefetch, so lever 3's
+"ceiling 7%" was never a measured number. Lever 3 as written is closed by inspection.
+
+**Where that leaves the plan.** Of section 11's five levers: 1 is killed by measurement, 3 is
+moot, 4 (the clock: the P-core ran at 3.3-3.6 GHz throughout tonight's runs, yardstick 3.45-3.60G)
+is outside the program, 5 is instrument hygiene. What is left is lever 2 -- ops/frame, ~4.5 ns
+each, through the 12M campaign's toolbox -- and the one engine idea these measurements leave
+standing, the jump-word load's dependence on the flip store (section 10.5's 2a), which was closed
+on a microbenchmark and is not reopened here. The 300 M fj/s figure of section 11's expectation
+depended on lever 1 delivering ~12%; it did not, so that expectation is withdrawn: on this
+machine, with this compiler, the engine runs the game at ~200 M fj/s (100 ms/frame at 19.86 M
+ops/frame on `blocked25`) and the frame time now moves only with ops/frame.

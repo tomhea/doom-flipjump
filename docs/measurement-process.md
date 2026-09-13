@@ -63,9 +63,18 @@ measuring anything.
 hash and the engine's hash; `--against` refuses to run if the binary on disk has changed.
 
 **2. Correctness gates before speed.** In this order, and a failure stops the process:
-- engine change: `tests/wheel_smoke.py` op-counts bit-identical; flipjump-151's
-  `tests/unit/test_native_memory.py` and `test_interpreter.py` (storage mode, freeze/reset,
-  garbage detection); a Linux rebuild if the change touched a platform path.
+- engine change: build the candidate OUT OF TREE (`python setup.py build_ext --build-lib <dir>`
+  in flipjump-151 -- the same cl/link flags as the installed engine; the installed `.pyd` stays
+  the shipped one until the verdict) and run every gate on it through
+  `scratchpad/12m/with_engine.py <pyd> ...` (injects the candidate as
+  `flipjump.interpreter._fjcore` in-process and refuses to run if the injection did not take):
+  flipjump-151's `tests/unit/test_native_memory.py`, `test_interpreter.py`, `test_fast_run.py`
+  (storage mode, freeze/reset, garbage detection); `scratchpad/12m/engine_diff.py <old> <new>`
+  (15 hand-built edge cases -- unaligned ips, the last word of the address space, the garbage
+  tail, magic-valued data words, IO order, self-flips, a 2^32 start ip -- cause, op count, error
+  address, IO transcript and memory fingerprint must all agree; `--selftest` is its R9 control);
+  `m2_std_gate` on the candidate with the op count identical to the digit to the shipped
+  engine's run; a Linux rebuild if the change touched a platform path.
 - emitter or layout change: `alpha_check`, `emit_baseline --check`, `ritual.py freeze` against
   the shipped label table (it says exactly which addresses moved), the M1 restore set updated
   (CLAUDE.md: a feature is not done until the set carries its labels), `narrow_arm_window`.
@@ -76,6 +85,13 @@ hash and the engine's hash; `--against` refuses to run if the binary on disk has
 
 **3. Measure.** `msframe.py --a build/<new>.fjm --against <name> --note "<what changed>"`.
 Default 200 frames × 5 reps. Report the ledger line, not a retyped number.
+For an ENGINE change the binary is the same on both arms and the engine differs:
+`msframe.py --a build/X.fjm --b build/X.fjm --env-a MSFRAME_FJCORE_PYD=<old.pyd> --env-b
+MSFRAME_FJCORE_PYD=<new.pyd>` -- each arm's child loads that `.pyd` in place of the installed
+one, and the ledger row records each arm's engine path, hash and `full_span` flag. `--against`
+re-runs BOTH arms with the current engine, so it cannot A/B two engines by itself. The first
+engine A/B of a session is the control: the installed engine against the unmodified source
+rebuilt out of tree must come out NOT SEPARATED, which proves the switch and the build recipe.
 
 **4. Decide by the rule.**
 - FASTER → adopt, record the ledger line in the commit message.

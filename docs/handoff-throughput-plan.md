@@ -8,27 +8,28 @@ angles that were never examined.
 
 ```
 frame time  =  ops/frame  ÷  ops/s
-            =  19,855,016 ÷ ~125,000,000/s  ≈  160 ms  ≈  6 FPS      (shipped binary, sustained)
+            =  19,855,016 ÷ ~200,000,000/s  ≈   99 ms  ≈ 10 FPS      (shipped binary, msframe baseline 09-13)
 engine ceiling: ~420 M ops/s  (benchmark_loop.fj, 16 KB working set)
 ```
 
 Per op the interpreter touches memory **twice**: the instruction pair at `ip` (one line — `f` and
 `j` are adjacent) and the flip target. Only the first is on the critical path: the next `ip` is
-`j`, so each op is one **dependent load**. At ~125 M ops/s that load averages ~4 ns — L2-ish.
+`j`, so each op is one **dependent load**. At the pinned baseline of ~200 M ops/s that load averages ~2.5 ns — between L1 and L2.
 Reaching 420 M would need ~1.2 ns, i.e. L1 for essentially every instruction fetch. The touched
 set is 16 MB at 4-byte cells. So the realistic optimistic case is not 420M:
 
 | lever | from | to | basis |
 |---|---|---|---|
-| ops/s | 125 M | ~250 M | hot 90% inside L2 |
+| ops/s | 200 M | ~300 M | hot 90% inside L2 |
 | ops/frame | 19.9 M | ~14 M | the 12M target was nearly reached once |
-| **frame time** | 160 ms | **~56 ms → ~18 FPS** | both together; neither alone |
+| **frame time** | 99 ms | **~47 ms → ~21 FPS** | both together; neither alone; an UPPER BOUND |
 
 ## Measured weak — do not revisit without new evidence
 
 | lever | result | why |
 |---|---|---|
 | huge pages (real THP, alternated ×3) | +1.9%, noise | hot set is ~683 pages, already TLB-resident |
+| pinning to a P-core + HIGH priority | ~3%, NOT SEPARATED | unpinned 102.4 vs pinned 99.3 ms/frame (09-13); the earlier 118→200 M fj/s gap was an unrecorded machine state, not the scheduler |
 | relocating hot objects | weak | caches index by address; footprint is in the big objects, not the distance between small ones |
 | 4-byte cells | 5–10% on the shipped binary, sustained | shipped anyway: half the memory, gate PASS |
 | the latency curve as a predictor | wrong three times | it measures a pure chase; the game has reuse |
@@ -136,7 +137,8 @@ Ranked roughly by expected value ÷ cost.
 5. **Actually pin to a P-core, raise priority, set the power plan.** The pin attempt on 09-12
    FAILED (wrong ctypes signature) and was never retried; on a 6P+8E laptop the scheduler
    migrates freely and the yardstick swung 2.9–3.6 GHz. Likely +10–20% mean, far less variance.
-   Free.
+   Free. **MEASURED 09-13: ~3%, NOT SEPARATED** (unpinned 102.4 vs pinned 99.3 ms/frame).
+   The scheduler was NOT the source of the earlier 118→200 gap; keep the pin for variance only.
 6. **Census the padding inside the instruction stream.** `pad 16`, `pad 16384`, `rep(N) stl.fj
    0,0` fillers exist for address arithmetic; every gap in the instruction stream is a wasted
    line on the critical path. Measure what fraction of the chain's footprint is padding.

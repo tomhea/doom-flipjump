@@ -42,7 +42,7 @@ flip-target touches SEPARATELY. The dependent chain depends only on the former. 
 instruction stream is a small fraction of the 16 MB, making *it* resident is the lever and the
 flip targets can stay scattered — they overlap. `mkprof.py` needs one extra `PROF_HIT` bucket.
 
-**1b. Cost per object, not touches per object.** For every named object: touches, distinct
+**1b. Cost per object, not touches per object.** *DONE 09-13 -- section 7.* For every named object: touches, distinct
 lines, and touches-per-line. High touches on few lines is cheap (L1); modest touches spread
 thinly is expensive. `nameheat.py` + the word dump already hold the inputs. This replaces the
 touch-count ranking, which put `cb_bx` (490 lines, L1-resident) at #1 and is therefore the wrong
@@ -216,3 +216,38 @@ cache-set conflicts (unmeasurable under current variance; do #5 and #2 first).
 - **The profiler is fragile scratch tooling.** `mkprof.py` patches `_fjcore.c` by string
   anchors and broke once already when the source moved. Every measurement in sections 1–5
   depends on it. It should become a compile-time `FJPROF` flag in the engine itself.
+
+## 7. Measured 09-13: cost per object (1b) -- the ranking the plan is now built on
+
+`scratchpad/12m/heatcost.py` over the word-level trace of `b26` (842,328,561 touches, 14 frames)
+joined to its own label table. Footprint = distinct 64 B lines at 4-byte cells, the engine today.
+
+```
+BY FOOTPRINT (what fills the cache)
+ rank   lines@4B      MB   touches%   reuse T/L   object
+    0    129,921    7.93      6.61%         428   m1_reset
+    1     22,110    1.35      8.42%       3,208   seg_pass2_leaf
+    2     20,196    1.23     13.01%       5,427   simcollide_skip
+    3     15,495    0.95      2.98%       1,618   e1m1_bspcode_pos_leaf
+    4     14,627    0.89      2.09%       1,202   cma_vyd
+    5     14,619    0.89      2.21%       1,275   cmh_vyd
+    6     11,404    0.70      5.63%       4,156   thing_pass_leaf
+    7      9,532    0.58      4.13%       3,651   seg_pass1_ts_leaf
+total touched: 301,248 lines = 18.39 MB; the top 25 objects hold 88.3% of them
+```
+
+**`m1_reset` is 43% of the entire touched footprint (7.93 of 18.39 MB) for 6.6% of the touches,
+with the lowest reuse of any large object.** It runs as one bulk walk at the start of every
+frame, before the render -- so every frame begins with the caches flushed of the previous
+frame's hot set. It is CODE, not data: the m1 restore set names 12,238 cells and the object
+spans 585,878 words, ~48 words of wflip chain per restored cell. The lever is therefore FEWER
+CELLS RESTORED PER FRAME (a dirty set, or not self-modifying what must be restored), not a
+packed table.
+
+The touch-count leaders the old ranking put first -- `hex.tables.ret`, `hex.tables.res`, the
+temp word at address 0 -- are ONE cache line each with 43-53M touches: L1-resident and free,
+exactly as section 6 predicted. `cb_bx` does not appear in the top 25 by footprint at all.
+
+**Re-rank:** 3c (the M1 reset) moves to #1 among program-side levers. The rendering leaves
+(`seg_pass2_leaf`, `simcollide_skip`, `e1m1_bspcode_pos_leaf`, `cma/cmh_vyd`, `thing_pass_leaf`)
+are the next ~6 MB and are instruction stream -- what 1a decides.

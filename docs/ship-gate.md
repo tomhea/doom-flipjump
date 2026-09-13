@@ -10,7 +10,7 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked25.fjm`, sha256 `fc46c28c5f2bbac8` (first 16 hex), built 2026-09-11 18:04, `.doors.json` stamp beside it | -- |
+| **the shipped binary** | `build/doom_e1m1_blocked25.fjm`, sha256 `fc46c28c5f2bbac8` (first 16 hex), built 2026-09-11 18:04, `.doors.json` stamp beside it | reproduced byte-identically on 2026-09-13 from the command in 1b |
 | **ms/frame, quiet box** | **82 ms/frame** (81.9-82.2 across three runs) | msframe, 200 frames x 5 reps, pinned to P-core 2, 4-byte-cell engine `b96339f7`, nothing else running (yardstick 3.62 G) |
 | **fj ops/s** | **242 M** (241.5-242.4 M) | same runs; ops/frame 19,855,016 on msframe's forward-walk script |
 | **binding metric** (owner spec) | (mean+p80)/2 = **19,246,013 ops/frame -- PASS** (mean 16,629,651; p80 21,862,375) | `gamespeed.py --fjm build/doom_e1m1_blocked25.fjm`, 2026-09-13 20:43 (`--validate` not re-run on it that night; it was run on the experiment binary: 10/10 distinct end cells) |
@@ -42,9 +42,13 @@ emitter sources; a cache MISS runs the counting assembly first (+25 min) and is 
 after any emitter change. Build time ~30 min on a quiet box, ~60 min while anything else holds
 memory (the assembler peaks near 9.5 GB; CLAUDE.md rule 1).
 
-Status: **reproduction pending** -- a build from exactly this line (`build/doom_e1m1_blocked25r.fjm`)
-is compared to blocked25 by hash and by the door-route op count (4,432,191,712 ops / 210 frames);
-the result is recorded here. Until then the line is "the series' command", not "blocked25's".
+Status: **VERIFIED, byte-identical.** A build from exactly this line on 2026-09-13 23:40
+(`build/doom_e1m1_blocked25r.fjm`, a fresh counting assembly -- the cache signature had changed with
+the working copies' line endings -- then the two passes) produced sha256 `fc46c28c5f2bbac8`, the
+same bytes as `build/doom_e1m1_blocked25.fjm`. So this is blocked25's build command, and the
+blocking pass is deterministic given the source, the knobs and the counts. Its label table is
+`scratchpad/12m/atlas/blocked25r.labels.tsv.gz` -- the shipped binary's map back to its source,
+which it never had until now.
 
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 

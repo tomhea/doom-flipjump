@@ -43,12 +43,12 @@ after any emitter change. Build time ~30 min on a quiet box, ~60 min while anyth
 memory (the assembler peaks near 9.5 GB; CLAUDE.md rule 1).
 
 Status: **VERIFIED, byte-identical.** A build from exactly this line on 2026-09-13 23:40
-(`build/doom_e1m1_blocked25r.fjm`, a fresh counting assembly -- the cache signature had changed with
+(a fresh counting assembly -- the cache signature had changed with
 the working copies' line endings -- then the two passes) produced sha256 `fc46c28c5f2bbac8`, the
 same bytes as `build/doom_e1m1_blocked25.fjm`. So this is blocked25's build command, and the
 blocking pass is deterministic given the source, the knobs and the counts. Its label table is
-`scratchpad/12m/atlas/blocked25r.labels.tsv.gz` -- the shipped binary's map back to its source,
-which it never had until now.
+`scratchpad/12m/atlas/blocked25.labels.tsv.gz` (the byte-identical rebuild's) -- the shipped binary's
+map back to its source, which it never had until now; the rebuild itself was deleted as a duplicate.
 
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 

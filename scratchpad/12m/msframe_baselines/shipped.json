@@ -1,0 +1,28 @@
+{
+ "binary": "build\\doom_e1m1_blocked25.fjm",
+ "binary_sha": "fc46c28c5f2bbac8",
+ "env": {},
+ "when": "2026-09-13 13:09:19",
+ "frames": 200,
+ "reps": 5,
+ "engine_pyd_sha": "b96339f7fd524b00",
+ "git": {
+  "doom": "6525809",
+  "flipjump": "cac64fd"
+ },
+ "summary": {
+  "a": {
+   "ms_median": 99.26547508428592,
+   "ms_min": 98.73541510931335,
+   "ms_max": 103.11250993520906,
+   "fjs_median": 200019361.30244434,
+   "ops_per_frame": 19855016.925742574,
+   "pix_all_same": true,
+   "ops_all_same": true,
+   "cell_bytes": 4,
+   "storage": "flat",
+   "pin": "cpu2 proc=ok thread=ok prio=high",
+   "yard_median": 3560268177.4955225
+  }
+ }
+}

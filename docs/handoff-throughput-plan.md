@@ -405,7 +405,7 @@ this clock, i.e. -4.3 cycles.
 | 3 | **The L3 tail** (3.77% of fetches at 26 ns) | ceiling 3.5 cyc (22%); expect 1-1.5 | ~~m1_reset holds 34% of the L3-served fetches: order its restore walk by address~~ **MOOT (12.7): the walk is already emitted in address order**; what remains is so the stream prefetches (ceiling 7%); then pack the 90-99% band of the ip stream (47K -> 157K lines) -- the what-if curve says the working set is only slightly past L2, so the TAIL is the target, not the hot core | `cachemodel.py` predicts before a build; `msframe` decides |
 | 4 | **Clock / power** (outside the program) | +20-30% | the P-core ran at 3.5-3.7 GHz; plugged in on a performance plan it turbos to 4.7. Record the plan (msframe does) and the clock (the counter) with every number | -- |
 | 5 | **msframe setup bias** | 5-10% of absolute ms/frame | subtract a 2-frame calibration, or report engine loop time | `--selftest` |
-| -- | **CLOSED:** TLB / large pages (2%); 2a, 2b, 5.1, 5.3 (engine chain tricks); footprint as a metric; "L2 capacity is the bottleneck" (it is 22%, behind the engine's own 56%) | | | |
+| -- | **CLOSED:** TLB / large pages (2%); 2b, 5.1, 5.3; footprint as a metric; "L2 capacity is the bottleneck"; **and after sections 12-13 the WHOLE ENGINE: span checks, branch count, block layout (PGO), the flip store, and 2a itself (re-tested in the engine, median 0.982 -- if anything slower). Also the placement axis (13.4): +46% ops for +20% rate is a 22% loss.** | | | |
 
 **Expectation for the owner.** ⚠ **WITHDRAWN in section 12.7: lever 1 delivered ~2-3%, not ~12%, so the 280-300 M figure below has no measured basis; the game runs ~200 M fj/s on this machine and its frame time moves only with ops/frame.** ~~Quiet machine, this laptop: ~220 M fj/s in-loop on b26's mix today
 (~200-230 M on the shipped binary), 3.6 GHz. Levers 1+3 landing at their expected values give
@@ -548,3 +548,106 @@ on a microbenchmark and is not reopened here. The 300 M fj/s figure of section 1
 depended on lever 1 delivering ~12%; it did not, so that expectation is withdrawn: on this
 machine, with this compiler, the engine runs the game at ~200 M fj/s (100 ms/frame at 19.86 M
 ops/frame on `blocked25`) and the frame time now moves only with ops/frame.
+
+## 13. 2a re-tested in the engine (not the chase), and the machine's quiet-box number
+
+**13.1 2a is dead on the real workload too, and the engine is now closed.** Section 12 left one
+candidate standing: the jump-word load sits behind the flip's store, so the ip -> ip chain can
+only issue on a memory-disambiguation prediction, and the program mistrains that predictor (4.1%
+of its ops flip their own jump word). Section 10.5 had killed the idea on a microbenchmark, and
+`docs/measurement-process.md` says a synthetic curve is not a measurement -- so it was re-tested
+in the engine, on the game.
+
+The edit (`scratchpad/12m/engine_folds/patch_2a.py`) reads the jump word BEFORE the store and
+patches it in a REGISTER when the flip hit it (`if (flip_word_address == word_address + 1) j =
+flipped;` -- the new value is already in hand, so there is no re-load and no memory dependence).
+It moves the load only across the store: every path that can write memory behind it (both IO
+callbacks, the out-of-span flip, the garbage re-check) is taken above it, and `after_flip` keeps
+the original post-store read for the one that returns there. The disassembly confirms the machine
+code changed as intended:
+
+```
+mov  ecx, dword ptr [r12+rsi*4+4]   ; the jump word, LOADED FIRST
+mov  dword ptr [r12+r14*4], r11d    ; the flip's store, now after it
+cmp  r14, rax                       ; did the flip hit the jump word?
+je   ...                            ; yes: keep `flipped`
+mov  r11d, ecx                      ; no: take the loaded value
+```
+
+Gates: 83 engine unit tests, `engine_diff.py` 15/15 identical, `m2_std_gate` 4,432,191,712 ops /
+210 frames / PASS. Measurement (`msframe`, blocked25, 200 frames, 5 reps, both arms the same
+binary):
+
+```
+2a   step0 99d15dcb vs step2a 145c29df:  81.9 vs 83.1 ms
+     ratios 0.998 1.050 0.977 0.982 0.982   median 0.982   NOT SEPARATED (and the sign is AGAINST it)
+```
+
+Four of five pairs put the hoist BEHIND the baseline. The hardware's disambiguation predictor was
+already doing this job, and naming the aliasing case costs a compare and a register move per op.
+**With this, every engine lever in the plan is closed**: span checks, branch count, block layout
+(PGO), TLB, large pages, the flip store, and now the jump-word hoist. The per-op time is the
+memory chain's latency and nothing in the loop's code changes it.
+
+**13.2 The quiet-box number, and what the instrument cannot hold constant.** The 2a run happened
+after the owner's video render exited, and the SAME unmodified engine on the SAME binary read
+**81.9 ms/frame at 242.4 M fj/s**, against 99-104 ms at 191-200 M fj/s in every run before it
+(yardstick 3.62 G vs 3.45-3.51 G). That is a 20% machine-state shift with nothing in the program
+or the engine changed, and it is larger than every effect this session set out to measure.
+
+Two consequences, both process:
+- **A/B verdicts survive it** (both arms move together within a run: that is what counterbalanced
+  alternation is for), but **absolute ms/frame numbers are only comparable inside one run.**
+  Section 12's "the game runs ~200 M fj/s" was that day's machine, not this machine: on a quiet
+  box with nothing else running, `blocked25` renders at **81.9 ms/frame = 12.2 FPS, 242 M fj/s**,
+  and msframe's own 5-10% setup bias (10.6) makes the true in-loop rate a little higher still.
+- The busy-machine refusal has a hole: a background render at ~0.3-0.45 core sits under the
+  half-core threshold, never trips the refusal, and costs ~20%. Either lower the threshold or
+  record the yardstick's absolute level in the verdict line (msframe already stores it).
+
+**13.3 The ~240 M fj/s figure against the owner's 300 M question.** The prime sieve reaches
+378 M ops/s pinned because its instruction stream is 99.4% L1-resident (10.2). The game's is
+83.5% (10.3), and at DOOM's working set that is not a knob the engine owns. 242 M is what this
+program costs on this machine; 300 M would need the program's ip stream to fit closer to L1, not
+a faster loop.
+
+**13.4 Plan section 4 answered, and it is the session's only SEPARATED verdict: the blocking
+campaign was tuned on the RIGHT axis.** Section 4 suspected the build knobs had been optimised
+against the wrong quantity -- "eight existing binaries span 164-1140 ms/frame at similar work...
+the win may already be sitting in a config that was rejected for its op count". That is testable
+without building anything, because `b26` and `blocked25` are the SAME PROGRAM: every emitted part
+is byte-identical (`00_entry`, `01_tables`, `02_main`, `03_segconsts`, `04_walk`, `05_state`,
+`06_banks` all match by md5) except `07_reset`, whose baked addresses follow the placement. They
+differ only in the blocking/placement pass -- `b26` is `build_blocked.py game --merge-aliases`
+with the default pool base and unbounded span. In FlipJump a wflip costs popcount(address), so
+placement moves the OP COUNT; the question is whether it buys back more than it costs.
+
+```
+blocked25  19,855,016 ops/frame   241.5 M fj/s    82.2 ms/frame  [81.9 .. 83.4]
+b26        28,962,604 ops/frame   289.4 M fj/s   100.1 ms/frame  [99.3 .. 100.9]
+           +45.9% ops             +19.8% rate     +21.8% time
+ratios 0.827 0.823 0.824 0.825 0.820   median 0.824   VERDICT: B SLOWER   pixels identical: YES
+```
+
+Two things follow, and they are the first hard numbers on either.
+- **Per-op cost is not a constant of the program: placement moves it by ~20%.** `b26`'s average
+  op really is cheaper (289 vs 241 M fj/s on the same renderer and the same frames). Whether that
+  is better locality or simply DILUTION -- its extra ops are wflip-planting work that hits the
+  same lines repeatedly -- these two numbers cannot separate, and the distinction does not change
+  the decision.
+- **The decision: ops/frame still wins.** +46% ops against +20% rate is a 22% LOSS, and the
+  2026-09-08 reading that framed section 4 ("+45% ops, +45% ops/s, same 452 ms/frame") does not
+  survive the 4-byte-cell engine -- halving the cell width cut the rate advantage of the
+  op-heavy placement in half while leaving its op penalty intact. **Section 4 is closed: the knob
+  sweep has no win hiding in it, and a config must not be chosen on ops/s.** ms/frame remains the
+  only verdict, and at equal ms/frame the lower op count is the safer config.
+
+**13.5 Where the remaining leverage is, with everything else measured shut.** After sections 12
+and 13 the engine is closed end to end -- span checks, branch count, block layout, TLB, large
+pages, the flip store, the jump-word hoist -- and so is the placement axis. What is left is the
+program's op count (section 11 lever 2), which is now the whole of the frame time:
+`simcollide_skip` 25% of ops, `seg_pass2_leaf` 14.5%, `m1_reset` 13.2%, `thing_pass_leaf` 8.6%,
+`seg_pass1_ts` 7.6%, `seg_pass1` 6.3%, bspcode 5.9% (10.1). At 82.2 ms/frame and 19.86 M
+ops/frame, every million ops removed is worth **~4.1 ms/frame**, and the collision block alone is
+~5 M ops/frame. The campaign's own note (FINDINGS AU) prices S2-style `try_move` sharing at ~4.3 M
+words of SPAN; nobody has yet priced it in ops PER FRAME, which is now the number that matters.

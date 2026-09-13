@@ -128,6 +128,13 @@ deserve; 2026-09-12 spent three of those.
   medians; a single run is not a number.
 - **An L3-streaming neighbour costs 15-31%** (`scratchpad/12m/hog.py` on another P-core), and a
   video render on the box cost ~10%. The busy-machine refusal is not optional.
+- **A sub-half-core neighbour slips through the busy check and costs ~20%** (measured 2026-09-13
+  evening, handoff section 13.2): the SAME engine on the SAME binary read 99-104 ms/frame while a
+  background video render used ~0.3-0.45 core, and 82 ms/frame once it exited, with the yardstick
+  moving 3.48 -> 3.62 G. Both arms move together, so A/B verdicts are unaffected -- but **absolute
+  ms/frame is only comparable INSIDE one run**, never across runs, and a number quoted from an
+  earlier run is a number about that machine state. The yardstick is the tell: it is recorded per
+  rep, so compare it before comparing absolutes.
 - **The clock is 3.5-3.7 GHz under this load on the i7-12700H, not the 4.7 GHz turbo.** Quote
   ns/op or ms/frame; a cycles/op figure needs the clock read from the
   `\Processor Information(0,N)\% Processor Performance` counter during the run.

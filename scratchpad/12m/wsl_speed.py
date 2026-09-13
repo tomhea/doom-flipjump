@@ -154,9 +154,11 @@ def main():
     ops, paused = res[1], res[4]
     fr = len(screen.frames)
     lp = getattr(core, "large_pages", "n/a")
+    cb = getattr(core, "cell_bytes", "n/a")
     huge = anon_huge_kb()
 
     print("storage_mode    : %s" % core.storage_mode)
+    print("cell_bytes      : %s   (4 = the 4-byte-cell path is LIVE; 8 = forced or w>32)" % cb)
     print("large_pages flag: %s   (the allocator's own report)" % lp)
     print("AnonHugePages   : %s KB = %.1f MB   <- what the KERNEL actually granted"
           % (format(huge, ","), huge / 1024.0) if huge >= 0 else "AnonHugePages   : unreadable")

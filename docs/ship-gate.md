@@ -24,11 +24,37 @@ baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen o
 3.55 G -- the stored ms is informational; `--against shipped` RE-MEASURES both arms live, and the
 binary hash is what it checks), so `--against shipped` is the comparison.
 
-⚠ Its build command is NOT recorded anywhere (checked: git log, the handoffs, the ledger,
-FINDINGS). The recorded reference build is `b26` (`build_blocked.py game --merge-aliases`, default
-knobs), the same emitted program placed differently, at 28,962,604 ops/frame and 100 ms/frame.
-That gap -- 46% more ops for the same program -- is the placement axis (handoff 13.4). **The next
-shipped binary MUST record its command line (section 3).**
+## 1b. The build command, and the play command
+
+**The build command of the shipped series** (recovered 2026-09-13 from the session transcript
+that built blocked23 and blocked24, 09-11 11:22 and 13:01 -- the two builds before blocked25 in
+the same series, with the same counts cache; blocked25's own line, 09-11 18:04, was never logged
+and followed the renderer fix of FINDINGS CE):
+
+```
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz
+```
+
+`build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is
+`build_blocked.py`'s own arguments; `--labels` is the wrapper's). The label table it writes is
+what every profile joins against -- keep it beside the binary. The counts cache is keyed by the
+emitter sources; a cache MISS runs the counting assembly first (+25 min) and is the expected case
+after any emitter change. Build time ~30 min on a quiet box, ~60 min while anything else holds
+memory (the assembler peaks near 9.5 GB; CLAUDE.md rule 1).
+
+Status: **reproduction pending** -- a build from exactly this line (`build/doom_e1m1_blocked25r.fjm`)
+is compared to blocked25 by hash and by the door-route op count (4,432,191,712 ops / 210 frames);
+the result is recorded here. Until then the line is "the series' command", not "blocked25's".
+
+**The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
+
+```
+fj --run build/doom_e1m1_blocked25.fjm --io pc --flat-max-words 134217728
+```
+
+`--run` is not optional (`fj a.fjm` assembles); the flat window must be the full 2^27 words or
+the engine runs hybrid/paged. `m2_std_gate` drives this same `PcIO` composition in-process, so a
+gate PASS is a statement about the object a person runs.
 
 ## 2. The gate, in order; a failure stops the process
 

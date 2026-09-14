@@ -66,7 +66,8 @@ def _run_one(tmp_path, level, x16, y16, name):
     src = tmp_path / f"{name}.fj"
     src.write_text(prog, encoding="utf-8")
     out = tmp_path / f"{name}.fjm"
-    fj.assemble([FIXP.resolve(), src.resolve()], out, memory_width=W, print_time=False)
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")  # sim.fj's pad constants
+    fj.assemble([consts.resolve(), FIXP.resolve(), src.resolve()], out, memory_width=W, print_time=False)
     io = FixedIO(b"")
     fj.run(out, io_device=io, print_time=False, print_termination=False)
     ok, floorz, ceilz = io.get_output(allow_incomplete_output=True).decode().split("\n")[:3]
@@ -180,7 +181,8 @@ def table_fjm(tmp_path_factory, level):
     src = d / "p.fj"
     src.write_text(prog, encoding="utf-8")
     out = d / "p.fjm"
-    fj.assemble([FIXP.resolve(), Path("src/fj/sim.fj").resolve(), src.resolve()],
+    consts = Config().emit_fj_consts(d / "fj_consts.fj")  # sim.fj's pad constants
+    fj.assemble([consts.resolve(), FIXP.resolve(), Path("src/fj/sim.fj").resolve(), src.resolve()],
                 out, memory_width=W, print_time=False)
     return out
 
@@ -276,7 +278,8 @@ def trymove_fjm(tmp_path_factory, level):
     src = d / "t.fj"
     src.write_text(prog, encoding="utf-8")
     out = d / "t.fjm"
-    fj.assemble([FIXP.resolve(), Path("src/fj/sim.fj").resolve(), src.resolve()],
+    consts = Config().emit_fj_consts(d / "fj_consts.fj")  # sim.fj's pad constants
+    fj.assemble([consts.resolve(), FIXP.resolve(), Path("src/fj/sim.fj").resolve(), src.resolve()],
                 out, memory_width=W, print_time=False)
     return out
 

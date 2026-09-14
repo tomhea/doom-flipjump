@@ -28,13 +28,12 @@ SPRITE_WAD = Path("assets/freedoom1.wad")     # V4 art: the cut-down fixture has
 # byte-identical 314,505,544-byte program image. The old note here said "every gate on this tier is
 # a two-hour commitment" and priced three levels in one image at 4-5 hours; both are now wrong by
 # an order of magnitude (three levels projects to ~30 min). See docs/handoff-complete-game.md.
-SPAN_LO, SPAN_HI = 70_000_000, 100_000_000    # bracketing the MEASURED 84.82M, not a guess:
-                                              # 51.21M words (CR-2026-08 recalibration -- the old
-                                              # 9-18M band predated V4-HD full-res sprite buckets,
-                                              # V5 stacked pieces/regions and SPR-NEAR's dual bank;
-                                              # this hour-long gate had not run since). The hard
-                                              # ceiling stays the separate span < RENDER_FLAT_MAX_WORDS
-                                              # HI at 62M leaves real headroom warning-room below it.
+# ⚠ RE-BRACKETED 2026-09-14: the hosted tier is 49,269,414 words now, not the 84.82M above -- M6
+# rung 0 (2026-09-06) reverted the stl pad round and the width work shrank it further, and the
+# 70M..100M band that bracketed 84.82M failed the first time the slow marker ran again. The band
+# brackets the MEASURED value with ~20% either side; the hard ceiling stays the separate
+# span < RENDER_FLAT_MAX_WORDS assert in the test.
+SPAN_LO, SPAN_HI = 40_000_000, 60_000_000
 
 
 # ── the downscale factor is config-derived (R6) ─────────────────────────────

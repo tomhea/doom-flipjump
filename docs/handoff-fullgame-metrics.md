@@ -5,6 +5,16 @@
 are exactly two success metrics, both measured on the **combined full game** (collision, sim, thing
 movement, input and the M1 self-reset all included):
 
+> **Status 2026-09-14.** The targets below are MET by the shipped binary (`docs/ship-gate.md`
+> section 1 carries the standing numbers; CLAUDE.md points there). Everything in this file that
+> prices a gap does so in the metric of its day: sections 3-6 in the retired **p80** (24,723,058 /
+> 26,201,318 / -19.1% / -23.7% are p80 figures), section 1's table in the **binding (mean+p80)/2**
+> that replaced it on 2026-09-06 (the same binaries read 22,651,482 and 23,973,882 under it). The
+> collision figure of ~11.6M/frame below was a mismatched-label profile's; the matched profile
+> priced all of `sim.*` (collision and thing simulation together) at ~4.5M (FINDINGS BB), and the
+> campaign's actual route to the target was the
+> blocking pass, not collision -- see `docs/handoff-throughput-plan.md` sections 10-15.
+
 | metric | how it is measured | target |
 |---|---|---|
 | **SPEED** | play **10 different games of 100 frames each**; each RUN's stat is `total_ops / 100` = that run's average ops/frame. The **BINDING** number is the **average of the mean run-average and the 80th-percentile run** (owner, 2026-09-06). Report all three, plus the spread. | **(mean + p80) / 2 ≤ 20,000,000 ops/frame** |

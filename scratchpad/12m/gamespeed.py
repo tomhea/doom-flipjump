@@ -387,9 +387,9 @@ def binding_speed(run_avgs):
 
     The mean alone flatters a binary -- it is dragged down by the cheap viewpoints, and the run
     spread here is ~1.9x. The p80 alone is one specific trajectory, so a change that helps typical
-    frames can look like a regression because it did not help THAT run (S1 measured exactly that:
-    mean -0.75%, p80 +0.10%). Averaging the two keeps the percentile's protection against a
-    flattering mean while not letting a single run decide the verdict.
+    frames can look like a regression because it did not help THAT run -- the two halves can move
+    in opposite directions on one change. Averaging the two keeps the percentile's protection
+    against a flattering mean while not letting a single run decide the verdict.
     """
     return (sum(run_avgs) / len(run_avgs) + percentile_run(run_avgs)) / 2.0
 

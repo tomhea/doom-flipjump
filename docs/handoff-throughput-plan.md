@@ -837,3 +837,207 @@ and label tables in `scratchpad/12m/atlas/`), the patches under `scratchpad/12m/
 `scratchpad/m5_drop_sshead.py`, the ledger rows, and the T profile of nobind. The source, the
 reset, the standalone restore set and the tests are at their committed state (tests/host green).
 
+## 15. The 1.5.1 pad round, re-examined pad by pad on the blocked program (09-14)
+
+The owner's instruction while merging flipjump `table-placement` into `1.5.1`: revert the pad
+round as an idea, but look at each pad and see whether it can still help. The nine commits
+(`c6b9634` .. `dc9ff1a` on `1.5.1`) were all measured on the pre-blocking assembler, where a
+wflip that arms a table paid popcount(table address) and a pad zeroed low bits of that address.
+
+**15.1 The relocated family is dead by construction, no build needed.** `hex.exact_xor`,
+`hex.double_exact_xor` and `hex.triple_exact_xor` (and the `quadrupled_`/`sparse_` forms) are the
+macros the blocking pass relocates (`build_blocked.SAFE_TABLE_MACROS`). For a relocated table the
+`pad` never aligns anything inline: `begin_relocation` returns True and the table is emitted at its
+slot address, so the pad's alignment is irrelevant to the arm (which flips an INDEX, not an
+address) -- and the pad IS the slot width the counting pass records
+(`BlockPool.reserve`, counting: `width = max(table_ops, ops_alignment)`). A placing pass with the
+frozen counts declines every table wider than its slot (`declined_too_wide`), and one declined
+table breaks its group's pin. So `exact_xor pad 128` on the blocked build is not "the same
+program, better aligned"; it is the blocking pass switched off for every exact_xor group, plus 112
+ops of padding per instance x 425,236 instances. The same holds for the sparse_ family used at
+doom's hot sites. Verdict: never again on a blocked build; recorded so nobody widens these pads
+"for alignment".
+
+**15.2 The rest are candidates, and the census predictor prices them without a per-pad build.**
+Ten pads sit on macros the pass never relocates -- `hex.mul.init after_add` (4096), the three
+`clear_carry` returns (64), `hex.tables.jump_to_table_entry return` (64),
+`hex.pointers.read_cell_from_inners_ptrs read_ptr_and_flip_back`/`cleanup` (64), `hex.if_flags
+switch` (64), `hex.add_mul ret` (32), `hex.cmp ret` (32), and the `to_flip`-first reorder in
+`hex.pointers` (a reorder, no space). For a wflip through a PINNED word the chain walks
+popcount(V ^ base) and base's low bits are zero (blocks are aligned), so zeroing V's low bits still
+saves the same ops; through an unpinned word it is popcount(V) as before. The prediction:
+
+    capture A = the shipped build with a spy on every wflip site (raw value, effective value
+                after the pin XOR, site address); byte-identical to blocked25 (sha256 `fc46c28c5f2bbac8`, the shipped one's)
+    capture B = the same build with the ten pads applied to the stl (pads_patch.py)
+    visits    = a per-op histogram of blocked25's scripted walk (hist_engine.py: 333,933,080 ops
+                over 2 menu + 14 forward frames, ip-stream touches == ops, the R9 control)
+    delta     = sum over sites of visits x (popcount_B - popcount_A), joined by site ordinal
+                (pads add no wflip sites; the join refuses unequal lengths)
+
+
+**15.2a What the shipped binary's wflip cost looks like, by installed label** (capture A joined
+to the histogram; A vs A predicts +0, the vacuity control). 72.1% of all executed ops in the
+window are wflip-chain ops. Per forward frame, the families the candidate pads aim at:
+
+```
+ A cost/frame    sites     hot  family (owning macro, installed label)
+    3,702,299  720,108 102,692  hex.exact_xor switch                     (relocated: index flips)
+    2,376,454   66,134  13,912  hex.if_flags switch                      pad 16 -> 64 candidate
+    1,878,918  128,482  12,586  hex.double_exact_xor first_flip          (relocated)
+      945,807      988     900  hex.sparse_exact_xor switch              doom's S2 sites, see below
+      874,252   12,272   6,048  hex.shifts.shl_bit_once switch           (not in the round)
+      863,511   31,572   4,060  hex.cmp ret                              pad 4 -> 32 candidate
+      862,417   42,092   3,888  hex.add.clear_carry ret                  none -> 64 candidate
+      717,080   84,764   4,060  hex.add_mul ret                          pad 4 -> 32 candidate
+      698,715   19,116   9,664  hex.triple_exact_xor first_flip          (relocated)
+      643,785   36,508   3,826  hex.tables.jump_to_table_entry return    none -> 64 candidate
+      573,638    1,584   1,024  hex.shifts.shr_bit_once switch           (not in the round)
+      488,168  173,920   1,706  bit.exact_xor base_jump_label            (fall-through table; pad 8)
+      212,854   19,077   1,170  hex.inc1 switch                          (not in the round)
+      198,385   29,312   1,152  hex.mul.clear_carry return               (not in the round)
+      192,675        2       2  hex.mul.init after_add                   pad 256 -> 4096 candidate
+      109,565 +  99,485    626  hex.pointers.read_cell_from_inners_ptrs  pad 4 -> 64 candidate
+       60,480    1,252     654  hex.pointers.to_flip                     the reorder candidate
+       36,734    4,068     192  hex.sub.clear_carry ret                  none -> 64 candidate
+```
+
+Two things this table says beyond the pad question, for the doom side:
+- **doom's S2 sparse pads are dead under blocking, by the same construction.** The 91 hot
+  emitter sites that call `hex.sparse_mov 1024` / `4096` expand to `sparse_exact_xor` with a
+  1024/4096-op pad; the pass wants that macro, but a pad wider than `--max-slot-ops 512` is
+  `declined_too_wide`, so those 988 tables stay inline (armed with `A ^ base` under
+  `--pin-broken`) and cost 945,807 ops/frame -- more per call than a blocked table's index flip.
+  Dropping S2's pads (plain `hex.mov`/`hex.zero` at those sites, so they block) is a doom-side
+  candidate worth ~0.5 M ops/frame if the pins survive the re-count; it is NOT part of the
+  flipjump PR.
+- `hex.shifts.shl_bit_once` / `shr_bit_once` / `hex.inc1` / `hex.mul.clear_carry` dispatch through
+  pinned words with inline tables (1.86 M ops/frame together); none was in the pad round.
+
+The prediction (A = the shipped binary, reproduced byte-identically with the spies on; B = the
+same build with the ten pads; `pad_predict.py`):
+
+```
+sites 2,214,841   pinned-word sites A 962,244 / B 962,212
+histogram: 333,933,081 ops over 14 forward frames (+ the menu frames)
+wflip ops A in window: 240,656,113 (72.1% of all ops)
+sites whose address moved: 2,071,475   whose installed value moved: 851,425   whose cost changed: 741,486
+PREDICTED DELTA: -6,998,251 ops over the window = -499,875 ops/frame (-2.10%)
+
+ delta ops/frame  A cost/frame    sites     hot  family (owning macro, installed label)
+        -211,571       862,417   42,092   3,888  hex.add.clear_carry ret
+         208,216       945,807      988     900  hex.sparse_exact_xor switch
+        -173,145       643,785   36,508   3,826  hex.tables.jump_to_table_entry return
+        -164,708     2,376,454   66,134  13,912  hex.if_flags switch
+         -96,662       863,511   31,572   4,060  hex.cmp ret
+         -96,337       192,675        2       2  hex.mul.init after_add
+          70,884       874,252   12,272   6,048  hex.shifts.shl_bit_once switch
+         -40,320        60,480    1,252     654  hex.pointers.to_flip
+          34,515       573,638    1,584   1,024  hex.shifts.shr_bit_once switch
+         -24,924       717,080   84,764   4,060  hex.add_mul ret
+          15,864       488,168  173,920   1,706  bit.exact_xor base_jump_label
+          13,076       198,385   29,312   1,152  hex.mul.clear_carry return
+         -12,039        99,485      626     327  hex.pointers.read_cell_from_inners_ptrs read_ptr_and_flip_back
+         -12,039       109,565      626     327  hex.pointers.read_cell_from_inners_ptrs cleanup
+          -6,400        36,734    4,068     192  hex.sub.clear_carry ret
+```
+
+Read per pad (the DIRECT effect is the family's own row; everything else is the shift of the
+code below the pads to new addresses):
+
+| pad (1.5.1 commit) | ops/frame on the blocked program | verdict |
+|---|---:|---|
+| `hex.add.clear_carry ret` none -> 64 (22e97bd) | -211,571 | still helps |
+| `hex.tables.jump_to_table_entry return` none -> 64 (22e97bd) | -173,145 | still helps |
+| `hex.if_flags switch` 16 -> 64 (22e97bd) | -164,708 | still helps (7% of its 2.38 M) |
+| `hex.cmp ret` 4 -> 32 (a6c1cf8) | -96,662 | still helps |
+| `hex.mul.init after_add` 256 -> 4096 (f05b447 / bcf2b1c) | -96,337 | still helps, two sites |
+| `hex.pointers.to_flip` first (c6b9634) | -40,320 | still helps, costs nothing |
+| `hex.add_mul ret` 4 -> 32 (a6c1cf8) | -24,924 | marginal |
+| `read_cell_from_inners_ptrs` 4 -> 64 (bcf2b1c) | -24,078 | marginal |
+| `hex.sub.clear_carry ret` none -> 64 (22e97bd) | -6,400 | marginal |
+| `hex.exact_xor` 16 -> 128/256, `double_`/`triple_exact_xor` (f9199a7, 1087dd5, 22e97bd) | not buildable | DEAD: the pad is the slot width (15.1) |
+| the shift of everything below | +338,270 | the tax, mostly on doom's inline S2 sparse tables (+208 K) and the shifts' tables (+105 K) |
+
+The ten pads together: -838,145 direct, +338,270 shift, **-499,875 net = -2.1% of the frame's ops**.
+
+
+**15.3 The confirming build and the verdict.**
+
+The confirming build: `build/doom_e1m1_pads1.fjm` (capture B's own output; the pads applied to
+the stl of the shipped assembler, the shipped command line otherwise, a counts-cache hit -- pads
+change no table count). Gates: `m2_std_gate` PASS (210 frames, every game frame byte-exact, the
+door carried across two resets, all four controls), `m3_gate` PASS.
+
+msframe, first run (`--ignore-busy`, the owner's Remotion render was on -- yardstick 3.40 G, one
+pair collapsing to 1.35 G -- so its TIME is not a measurement; its OP COUNT is exact):
+
+```
+  base     median   100.5 ms/frame  [98.4 .. 118.4]    197.6M fj/s   19,855,016 ops/frame   cell=4 flat
+  change   median   111.3 ms/frame  [99.4 .. 130.0]    174.5M fj/s   19,423,694 ops/frame   cell=4 flat
+  pixels identical across arms and reps : YES
+  per-pair A/B ms ratio                 : 1.033 1.041 0.902 0.990 0.768
+  VERDICT: NOT SEPARATED
+```
+
+**-431,322 ops/frame (-2.17%) on msframe's 200-frame walk**, against the census's -499,875 on
+its 14-frame window: the prediction held to within the difference of the two walks, and the
+predictor's decomposition (15.2) is therefore what to read for the per-pad verdicts.
+
+The owner's metric (`gamespeed.py --fjm build/doom_e1m1_pads1.fjm`, the same ten scripts as the
+shipped binary's record):
+
+```
+SPEED  BINDING (mean+p80)/2: 18,762,374 ops/frame   (target <= 20,000,000)  PASS
+SPEED  mean run-average   : 16,209,713 ops/frame
+SPEED  80th-pct run avg   : 21,315,034 ops/frame
+SPEED  spread lo..hi      : 10,922,101 .. 22,199,174 ops/frame
+SIZE   words              : 43,102,704 = 32.11% of 2^27   (target <= 35%)  PASS
+SIZE   span / file        : 96,009,696 words (71.53%) / 31,837,565 bytes
+```
+
+Against blocked25 (19,246,013 / 32.53%): **binding -483,639 ops/frame (-2.5%), size -555,028
+words (-0.42 points)** -- the padded image is SMALLER, because the padding is where the wflip
+chains go (`get_wflip_spot` fills it before the segment's wflip area) and shorter chains need
+less of it. Both targets pass, both improve.
+
+msframe on the quiet box (the render gone, busy processes: none, the base at its standing 81.6
+ms / 243 M fj/s):
+
+```
+  rep 0  base      81.9 ms   242.5M fj/s  yard 3.61->3.57G   |  change    84.0 ms   231.1M fj/s  yard 3.61->3.57G
+  rep 1  base      81.9 ms   242.3M fj/s  yard 3.59->3.62G   |  change    84.2 ms   230.6M fj/s  yard 3.42->3.58G
+  rep 2  base      81.2 ms   244.6M fj/s  yard 3.65->3.62G   |  change    82.8 ms   234.7M fj/s  yard 3.63->3.61G
+  rep 3  base      81.6 ms   243.3M fj/s  yard 3.64->3.64G   |  change    83.4 ms   233.0M fj/s  yard 3.59->3.56G
+  rep 4  base      81.5 ms   243.7M fj/s  yard 3.61->3.61G   |  change    82.7 ms   234.9M fj/s  yard 3.62->3.61G
+
+  base     median    81.6 ms/frame  [81.2 .. 81.9]    243.3M fj/s   19,855,016 ops/frame   cell=4 flat
+  change   median    83.4 ms/frame  [82.7 .. 84.2]    233.0M fj/s   19,423,694 ops/frame   cell=4 flat
+  pixels identical across arms and reps : YES
+  per-pair A/B ms ratio                 : 0.974 0.973 0.981 0.979 0.985
+  median ratio                          : 0.979  (>1 = B faster)
+  VERDICT: NOT SEPARATED   (rule: all 5 pairs agree in sign AND |median ratio - 1| > 3%)
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.62G
+```
+
+**Verdict: the pads stay reverted.** The rule says NOT SEPARATED (the sign agrees in all five
+pairs, slower; the median 0.979 is inside the 3% floor), and the gate's clause for NOT SEPARATED
+ships only with a stated reason -- none applies: not shown FASTER, and size is already under
+target. The measurement: -2.2% in ops, +2.1% in time, the per-op rate down 4% (243.3 -> 233.0
+M fj/s); section 13's lesson holds again, ops/frame is half of frame time. The census counts ops
+and cannot see what the padding does to the memory chain; that 42,092 `clear_carry` expansions
+each padded to 64 ops, 36,508 `jump_to_table_entry` returns and 66,134 `if_flags` switches spread
+the hot code over more lines and pages is the HYPOTHESIS, unmeasured. The shipped binary stays
+`blocked25`. The protocol's next step for NOT SEPARATED, 10 reps x 400 frames on the same quiet
+box: base 77.3 ms [77.0 .. 77.7] / 253.5 M fj/s / 19,609,198 ops/frame, change 78.8 ms
+[78.4 .. 79.2] / 243.5 M fj/s / 19,174,470 ops/frame, all ten pairs slower (0.978 .. 0.988,
+median 0.982) -- NOT SEPARATED again, which the protocol reads as "below this machine's
+resolution; drop it or park it". The ten pads are parked, as a set.
+
+What the owner can still buy here, if the ops-based binding metric is what matters more than
+the frame time: the ten pads are one commit away (`pads_patch.py` on the stl, the shipped build
+line otherwise) at binding 18,762,374 and 32.11%, 2% slower in wall time. And the per-pad TIME
+question is open: the census prices ops per pad, not time; a per-pad timing sweep (one build and
+one quiet msframe per pad, ~1 h each) would say which of the ten pay in time -- the zero-space
+`to_flip` reorder and the two-site `mul.init after_add` are the obvious first candidates, the
+per-expansion pads (`clear_carry`, `jump_to_table_entry`, `if_flags`) the suspects.

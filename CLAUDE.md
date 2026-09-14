@@ -9,11 +9,13 @@ independently, and the two must agree **byte for byte**.
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
 `docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-fullgame-metrics.md` — the owner's goal changed
 on 2026-09-06 and the 12M-ops render target is SUPERSEDED.** Success is now two numbers on the
-COMBINED FULL GAME (collision + sim + reset included): the 80th-percentile RUN of 10x100 frames
-at <= 20M ops/frame, and the binary at <= 35% of 2^27 words. MEASURED baseline (2026-09-06, padded
-game binary, `--validate` attached): **80th-pct run 24,723,058 ops/frame** (needs -19.1%) and
-**125,492,170 words = 93.50% of 2^27** -- both FAIL. ⚠ An earlier 26,001,449 is WITHDRAWN: its
-scripts walked into walls. No speed number belongs in this file without its `--validate` output. `docs/handoff-m4-nine-levels.md` is still the M4 reference.
+COMBINED FULL GAME (collision + sim + reset included): the binding speed of 10x100-frame games,
+`(mean + p80) / 2` of the runs' ops/frame (the owner's 2026-09-06 refinement of the p80; the
+`gamespeed.py` docstring says why) at <= 20M ops/frame, and the binary at <= 35% of 2^27 words.
+**Both are MET by the shipped binary -- see the ship-gate section below for the standing numbers
+and their provenance.** The 2026-09-06 baseline that first priced this goal (p80 24,723,058, 93.50%
+of the ceiling, both FAIL) is history in `docs/handoff-fullgame-metrics.md`. No speed number
+belongs in this file without its `--validate` output. `docs/handoff-m4-nine-levels.md` is still the M4 reference.
 **M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
 whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:

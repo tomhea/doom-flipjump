@@ -11,7 +11,7 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 | what | value | how it was measured |
 |---|---|---|
 | **the shipped binary** | `build/doom_e1m1_blocked25.fjm`, sha256 `fc46c28c5f2bbac8` (first 16 hex), built 2026-09-11 18:04, `.doors.json` stamp beside it | reproduced byte-identically on 2026-09-13 from the command in 1b |
-| **ms/frame, quiet box** | **82 ms/frame** (81.9-82.2 across three runs) | msframe, 200 frames x 5 reps, pinned to P-core 2, 4-byte-cell engine `b96339f7`, nothing else running (yardstick 3.62 G) |
+| **ms/frame, quiet box** | **82 ms/frame** (81.9-82.2 across three runs; 81.6 on 2026-09-14 with the merged engine) | msframe, 200 frames x 5 reps, pinned to P-core 2, 4-byte-cell engine `b96339f7` (the same C as flipjump 1.5.1's `79af8639` after tomhea/flipjump#360, which only adds the `FLAT_GARBAGE_MAGIC32` export on Windows), nothing else running (yardstick 3.62 G) |
 | **fj ops/s** | **242 M** (241.5-242.4 M) | same runs; ops/frame 19,855,016 on msframe's forward-walk script |
 | **binding metric** (owner spec) | (mean+p80)/2 = **19,246,013 ops/frame -- PASS** (mean 16,629,651; p80 21,862,375) | `gamespeed.py --fjm build/doom_e1m1_blocked25.fjm`, 2026-09-13 20:43; `--validate` at 23:42: 10/10 distinct end cells, widest spread 1,321 units, worst run 29% blocked |
 | **size** | **32.53% of 2^27 -- PASS** (43,657,732 words; span 96,009,696) | same run |
@@ -121,6 +121,23 @@ stays -- monsters will move -- but the rebuild should become PER MOVE (DOOM's
 P_SetThingPosition: re-bind only the thing that moved), which costs ops proportional to movement.
 Baking the lists (`patch_nobind.py`, `baked_thing_lists` with its reference-model tests) is only
 valid for a static world and was reverted for that reason.
+
+**The stl pad round is closed, pad by pad** (handoff 15, 2026-09-14). The relocated family's pads
+(`exact_xor`/`double_`/`triple_exact_xor`) are dead by construction under blocking: the pad is the
+slot width the counting pass records, so a wider pad is `declined_too_wide` for every table and
+the group's pin with it. The ten pads on macros the pass never relocates were priced per pad by
+the wflip-site census (-838 K direct, +338 K shift, -500 K net predicted; -431,322 ops/frame
+measured on msframe's walk, binding 18,762,374 and 32.11% -- both better) and then MEASURED IN
+TIME on a quiet box: 81.6 -> 83.4 ms/frame, 243 -> 233 M fj/s, slower in every pair, median
+0.979 -- NOT SEPARATED by the rule, and the gate's clause for that ships only with a stated
+reason, of which there is none (size is already under target). Fewer ops, a lower per-op rate:
+ops/frame is half of frame time (13) again; what the padding does to the memory chain is the
+hypothesis. They stay reverted; the per-pad TIME question (which of the ten pay in time -- the zero-space `to_flip`
+reorder and the two-site `mul.init after_add` first) needs a per-pad timing sweep, not the census.
+Two doom-side leads from the same census: the S2 sparse pads at 91 hot sites are
+`declined_too_wide` under blocking (945,807 ops/frame inline; plain `hex.mov` there would let
+them block), and `hex.shifts.shl/shr_bit_once`, `hex.inc1`, `hex.mul.clear_carry` dispatch inline
+through pinned words (1.86 M ops/frame together).
 
 **The reset** (12.7): its restore walk is already in address order; its cost is its own
 straight-line code once per frame. Restore fewer cells (a dirty set) is the only lever left there.

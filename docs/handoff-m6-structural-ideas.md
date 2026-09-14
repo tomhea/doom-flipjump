@@ -189,7 +189,8 @@ At 93.5% nothing could grow. At 38.07% there are ~83M free words.
 66. **[M] The saved histograms answer new questions with no run** — `_s2_hist.json.gz` plus a
     label table re-attributes in seconds.
 67. **[R] Re-run the profile after ANY accepted change**, with labels from the same build
-    (`labels2.py`), or the attribution is the AY failure again.
+    (`build_labeled.py --labels`, the label spy of the build itself; `labels2.py`/`hotpath.py` are
+    retired, 2026-09-14), or the attribution is the AY failure again.
 68. **[M] Price collision properly** before rung 2: the plan's ~11.6M is 2.6x too high, and
     ~4.5M is now larger than the whole remaining gap — so it is worth pricing exactly.
 69. **[R] The `steps=False` lines config** is a program the gates never build; a bug could hide

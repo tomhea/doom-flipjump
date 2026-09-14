@@ -1907,6 +1907,13 @@ returns an answer will always return an answer, including for addresses it knows
 
 ## BB — THE AUTHORITATIVE PROFILE (S2 binary, matched labels). A profile is a JOIN; check the key.
 
+> ⚠ 2026-09-14: `hotpath.py` and `labels2.py` (the tools behind BB/BC) are RETIRED -- superseded by
+> `build_labeled.py --labels` (the label table comes from the same `labels_resolve` that laid out
+> the binary, so the join key cannot mismatch) and by `mkprof3.py T` + `timeobj.py`
+> (`docs/ship-gate.md` section 3, `docs/handoff-throughput-plan.md` 10-14). BB/BC's figures stand
+> as the history of the S2 binary; nothing current cites them as proof, and the PR#84 review
+> threads on the two tools' controls are answered by the retirement.
+
 Every earlier profile in this campaign attributed a histogram against a label table captured from a
 DIFFERENT BUILD. That is the single root cause behind AY, BA, and two further wrong hypotheses I
 chased today. Fixed by capturing labels for the same tree that produced the binary

@@ -324,6 +324,8 @@ Hot calls: `exact_xor@l50` (86.4% of the macro!), `@l49` (5.3%), `zero@l43` (5.1
    the reasoning that preceded it.
 4. **Rank with the profile, size by building** (BC). Do not put an ops estimate in a commit message
    before the measurement exists.
-5. **Re-profile after any accepted change** — with labels from the SAME build (`labels2.py`).
+5. **Re-profile after any accepted change** — with labels from the SAME build: build it with
+   `scratchpad/12m/build_labeled.py --labels ...` (the label spy of the build itself) and join
+   `mkprof3.py T` + `timeobj.py` against that table (`labels2.py`/`hotpath.py` are retired, 2026-09-14).
    Attributing a histogram to another build's labels is what produced FINDINGS AY and cost a full
    build-gate-measure cycle to disprove.

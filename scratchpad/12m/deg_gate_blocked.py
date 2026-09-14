@@ -33,7 +33,9 @@ sys.path.insert(0, str(ROOT / "src"))
 import flipjump as fj                                                   # noqa: E402
 from flipjump.assembler import assembler as asmmod                      # noqa: E402
 from flipjump.assembler.preprocessor import BlockPool                   # noqa: E402
+from doomfj.config import Config                                        # noqa: E402
 from doomfj.harness import W                                            # noqa: E402
+from doomfj.selfreset import byte_arrays                                # noqa: E402
 
 
 def main():
@@ -53,6 +55,8 @@ def main():
                          "EVERYTHING, including hex.tables.*, hex.pointers.* and stl internals. "
                          "Restricting it the same way tests whether the unsafe tables are outside "
                          "them.")
+    ap.add_argument("--subsectors", type=int, default=682,
+                    help="E1M1's subsector count, for the byte-array exclusion (as build_blocked.py)")
     ap.add_argument("--no-pin", action="store_true",
                     help="relocate into blocks but do NOT pin the source words")
     a = ap.parse_args()
@@ -93,14 +97,33 @@ def main():
                          format(sum(counting.counts.values()), ",")), flush=True)
         pool = BlockPool(W, a.pool_base, counts=frozen["counts"], widths=frozen["widths"],
                          span_bits=a.span_bits, wants=_wants)
+        # A pinned word cannot be read raw, and the assembler (flipjump 1.5.1, tomhea/flipjump#360)
+        # refuses to pin a program that reads through hex.pointers unless the caller names the
+        # cells a pointer can reach. Here those are the byte arrays (`hex.read_byte` walks them),
+        # the same exclusion build_blocked.py's --pin-state-cells uses; LUT cells are never armed.
+        pool.pin_exclude = _byte_cell_exclusion
         pools.append(pool)
         kwargs["table_pool"] = pool
         return real_assemble(*args, **kwargs)
 
+    excluded = {"words": None}
+
+    def _byte_cell_exclusion(address, labels):
+        if excluded["words"] is None:
+            bits = {k: int(v) for k, v in labels.items()}
+            words_sorted = sorted(v // W for v in bits.values())
+            out = set()
+            for name, n in byte_arrays(bits, words_sorted, Config().VIEW_W, a.subsectors):
+                base = bits[name] // W
+                out.update(base + 2 * k + half for k in range(n) for half in (0, 1))
+            excluded["words"] = out
+            print("  pin-exclude: %s byte-cell words" % format(len(out), ","), flush=True)
+        return (address // W) in excluded["words"]
+
     fj.assemble = assemble_blocked
     real_resolve = asmmod.resolve_pinned
     if a.no_pin:
-        asmmod.resolve_pinned = lambda exprs, labels, reserved_below=1024: ({}, 0)
+        asmmod.resolve_pinned = lambda exprs, labels, reserved_below=1024, exclude=None: ({}, 0)
     try:
         runpy.run_path(str(ROOT / "scratchpad" / "deg_gate.py"), run_name="__main__")
     except SystemExit as exit_code:

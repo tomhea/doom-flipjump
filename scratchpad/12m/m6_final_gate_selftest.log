@@ -1,5 +1,5 @@
-# Round 7 of PR #84's review, doom m6-rung1-baseline, flipjump 1.5.1 at dd7ad31
-# (engine 79af8639f57bfa50). Captured 2026-09-15/16.
+# Round 7 of PR #84's review, doom m6-rung1-baseline at ce86b45, flipjump 1.5.1 at dd7ad31
+# (engine 79af8639f57bfa50). Both cheap arms and the gate arm. Captured 2026-09-16.
 $ python scratchpad/12m/deg_gate_blocked.py --selftest
 deg_gate_blocked --selftest: the cheap arm (tiny pointer fixture, NO E1M1 build)
   ok   fixture: the inline build prints b'B'                      got b'B' in 363 ops (looping)
@@ -22,7 +22,7 @@ deg_gate_blocked --selftest: the cheap arm (tiny pointer fixture, NO E1M1 build)
 (stub gate) 4 viewpoints BYTE-EXACT
 PASS
   ok   a gate that passes comes back as 0                         
-  ok   a gate that CALLS fj.assemble reaches the driver's closure installed: True; (stub gate) fj.assemble raised FlipJumpAssem
+  ok   a gate that CALLS fj.assemble reaches the driver's closure installed: True; (stub gate) fj.assemble returned
   ok   ... and the closure's BODY ran -- the pool this driver builds 0 -> 1 body runs
   ok   the --no-pin stub takes the assembler's call, signature and all (stub gate) resolve_pinned(1 pin request, exclude=...) -> ({}, 0)
   ok   ... and SUPPRESSES a pin the real resolver grants          real resolver: ({4096: 64}, 0)
@@ -36,12 +36,14 @@ PASS
   ok   MUTANT: ... and rejects BYTE-EXACT, exit 0                 4 of its 4 checks MISS (must be 4)
   ok   ... and puts the real oracle back                          
   ok   two assembles, ONE counting pass: the counts are frozen    1 counting-pass lines, 2 pools
-  ok   the assembler CALLS this driver's pin exclusion            AssertionError: self-reset: byte array 'sshead' is not in the labe
+  ok   the assembler CALLS this driver's pin exclusion, which names no cell without a self-reset assembled; 1 pin-exclude lines
+  ok   ... and it NAMES the byte cells when the program HAS a self-reset pin-exclude: 646 byte-cell words
+  ok   ... and a word outside them is still pinnable              excluded=False
   ok   --macros is what its pool relocates by NAME                hex.xor True, hex.add False
   ok   --owners is what its pool relocates by CALL SITE           hex.tables True, stl.loop False
   ok   ... and either of them is what makes a run RESTRICTED for verdict plain False, --macros True, --owners True
-selftest: all mutations rejected (36 checks: 31 shared + 5 deg_gate_blocked)
-NOT COVERED by this arm: the E1M1 program itself -- no byte arrays, so _byte_cell_exclusion's own cell set never runs, and the stub gates compare no pixels. Use --selftest-gate, and the gate.
+selftest: all mutations rejected (38 checks: 31 shared + 7 deg_gate_blocked)
+NOT COVERED by this arm: the E1M1 program itself. The fixture is 10 lines, the stub gates compare no pixels, and the exclusion's cell set is exercised on a label table built for it here, not on a real self-reset. Use --selftest-gate, and the gate.
 exit=0
 
 $ python scratchpad/12m/deg_gate_placed.py --selftest
@@ -86,7 +88,7 @@ PASS
   ok   --top is the cap on that: 1 table, not 22                  1 tables, b'B' in 308 ops
   ok   --run-ops is the run length the pool hands out             run_bits=1024 for run_ops=16 at w=32
 selftest: all mutations rejected (37 checks: 31 shared + 6 deg_gate_placed)
-NOT COVERED by this arm: the E1M1 program itself -- no byte arrays, so _byte_cell_exclusion's own cell set never runs, and the stub gates compare no pixels. Use --selftest-gate, and the gate.
+NOT COVERED by this arm: the E1M1 program itself. The fixture is 10 lines, the stub gates compare no pixels, and the exclusion's cell set is exercised on a label table built for it here, not on a real self-reset. Use --selftest-gate, and the gate.
 exit=0
 
 $ python scratchpad/12m/deg_gate_blocked.py --selftest-gate   (the expensive arm, re-run after the exclusion fix)

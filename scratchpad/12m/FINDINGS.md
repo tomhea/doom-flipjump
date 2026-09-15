@@ -3666,10 +3666,19 @@ was audited against the real per-file `missing_lines`, not against a guess.
    millisecond-scale static guards now pin them: the `features` keys `build.py` constructs must
    equal the keys the slow test asserts, and the slow test's call must `Signature.bind`.
 
-**`scratchpad/12m/mutcheck.py`** runs ten mutations against the tests as they stand on disk. All
-ten CAUGHT; all seven touched sources restored byte-identical. Its own controls: C1 a mutation
-whose anchor no longer matches is a BROKEN CHECK, never a silent skip; C2 every target file must be
-green before anything is mutated; C3 every file is byte-compared after restore.
+**`scratchpad/12m/mutcheck.py`** runs 17 mutations against the tests as they stand on disk. All
+17 CAUGHT; all 12 touched sources restored byte-identical. Its own controls: C1 a mutation whose
+anchor no longer matches is a BROKEN CHECK, never a silent skip; C2 every target file must be
+green before anything is mutated; C3 every file is byte-compared after restore; C4 every one of
+the twelve tests/host files this branch adds must be NAMED by some row, so a row retired later
+cannot take its file's FAIL evidence with it silently. `--selftest` adds two more. The R9 arm
+edits a COMMENT and requires NOT CAUGHT -- narrowly, that is the run behind the CAUGHT verdicts
+being SEMANTIC and not an artifact of rewriting src/ while pytest imports it; it is NOT a guard
+against a broken `_run`, which C2 and the 17 rows already catch from either side. The NEG pair is
+R9 turned on the two new controls themselves: C4 over a table with a file's rows dropped, and the
+R9 arm over a stub runner that reddens the comment edit, each required to report the failure it
+must NAME. Both live in mutcheck.py and run in-process, because a control whose own control is a
+copy of the tool somewhere else is a copy that drifts.
 
 **Two xfails are a real M4 blocker, not decoration:** E1M6 has 344 and E1M7 330 runtime things,
 past the 254 the `thnext`/`sshead` byte sentinel allows, so a nine-level build dies on

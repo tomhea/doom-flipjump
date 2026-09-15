@@ -1,5 +1,6 @@
-flipjump: C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py at 9a4595b; doom tree 8f2bd56 + the re-bracketed span golden (uncommitted)
+flipjump 1.5.1 at dd7ad31; doom m6-rung1-baseline, round 7 (the shipped build path)
 $ python -m pytest tests/host -m slow -q
+start 00:26:17
 .                                                                        [100%]
-1 passed, 973 deselected in 2715.85s (0:45:15)
-exit=0
+1 passed, 1050 deselected in 3560.36s (0:59:20)
+end   01:26:15

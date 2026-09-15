@@ -1,0 +1,120 @@
+# Round 7 of PR #84's review, doom m6-rung1-baseline, flipjump 1.5.1 at dd7ad31
+# (engine 79af8639f57bfa50). Captured 2026-09-15/16.
+$ python scratchpad/12m/deg_gate_blocked.py --selftest
+deg_gate_blocked --selftest: the cheap arm (tiny pointer fixture, NO E1M1 build)
+  ok   fixture: the inline build prints b'B'                      got b'B' in 363 ops (looping)
+  ok   relocation alone leaves the output alone                   22 tables, 363 -> 263 ops
+  ok   fixture: it still reads a cell through hex.pointers        reads_words_raw=True, 21 groups
+  ok   MUTANT: no exclusion at all -> the assembler refuses       the program reads cells through hex.pointers, and a word...
+  ok   blocking with the pointed-to cell excluded: the same program 5 pinned words, 6 tables, 294 ops
+  ok   MUTANT: an exclusion omitting the pointed-to cell -> not that program output b'' (runtime-memory-error)
+  ok   MUTANT: a pool that relocated nothing is not a PASS        allocated=0, exit 2
+  ok   ... but a run RESTRICTED on purpose only warns             exit 0, 'WARNING: the pool relocated NOTH'
+  ok   ... while a pool that did relocate still passes            allocated=22
+  ok   ... and the gate's own FAIL is never overridden by it      
+  ok   ... and --off, which has no pool at all, is not vacuous    
+  ok   a BlockPool that pinned words is not vacuous either        5 pinned, 6 tables
+  ok   MUTANT: blocked tables but NO pinned word is not a PASS    0 pinned, 6 tables, exit 2
+  ok   ... unless --no-pin asked for exactly that                 
+  ok   MUTANT: a gate that FAILs comes back as a non-zero driver status status=1
+  ok   ... and the gate ran under the DRIVER'S closure            (stub gate) pooled assemble installed: True
+  ok   ... and the stock assembler is back afterwards             
+(stub gate) 4 viewpoints BYTE-EXACT
+PASS
+  ok   a gate that passes comes back as 0                         
+  ok   a gate that CALLS fj.assemble reaches the driver's closure installed: True; (stub gate) fj.assemble raised FlipJumpAssem
+  ok   ... and the closure's BODY ran -- the pool this driver builds 0 -> 1 body runs
+  ok   the --no-pin stub takes the assembler's call, signature and all (stub gate) resolve_pinned(1 pin request, exclude=...) -> ({}, 0)
+  ok   ... and SUPPRESSES a pin the real resolver grants          real resolver: ({4096: 64}, 0)
+  ok   ... and the real pin resolver is back                      
+  ok   --selftest-gate accepts 4x '!! 1 px DIFFER', exit 1        0 of its 4 checks MISS (must be 0)
+  ok   MUTANT: ... and rejects a run whose FAIL was swallowed (exit 0) 1 of its 4 checks MISS (must be 1)
+  ok   MUTANT: ... and rejects a FIFTH differing viewpoint        1 of its 4 checks MISS (must be 1)
+  ok   MUTANT: ... and rejects a FAIL of the WRONG SIZE (4x 7 px) 1 of its 4 checks MISS (must be 1)
+  ok   MUTANT: ... and rejects a run that says BYTE-EXACT as well 1 of its 4 checks MISS (must be 1)
+  ok   MUTANT: ... and rejects a run with a viewpoint never compared 2 of its 4 checks MISS (must be 2)
+  ok   MUTANT: ... and rejects BYTE-EXACT, exit 0                 4 of its 4 checks MISS (must be 4)
+  ok   ... and puts the real oracle back                          
+  ok   two assembles, ONE counting pass: the counts are frozen    1 counting-pass lines, 2 pools
+  ok   the assembler CALLS this driver's pin exclusion            AssertionError: self-reset: byte array 'sshead' is not in the labe
+  ok   --macros is what its pool relocates by NAME                hex.xor True, hex.add False
+  ok   --owners is what its pool relocates by CALL SITE           hex.tables True, stl.loop False
+  ok   ... and either of them is what makes a run RESTRICTED for verdict plain False, --macros True, --owners True
+selftest: all mutations rejected (36 checks: 31 shared + 5 deg_gate_blocked)
+NOT COVERED by this arm: the E1M1 program itself -- no byte arrays, so _byte_cell_exclusion's own cell set never runs, and the stub gates compare no pixels. Use --selftest-gate, and the gate.
+exit=0
+
+$ python scratchpad/12m/deg_gate_placed.py --selftest
+deg_gate_placed --selftest: the cheap arm (tiny pointer fixture, NO E1M1 build)
+  ok   fixture: the inline build prints b'B'                      got b'B' in 363 ops (looping)
+  ok   relocation alone leaves the output alone                   22 tables, 363 -> 263 ops
+  ok   fixture: it still reads a cell through hex.pointers        reads_words_raw=True, 21 groups
+  ok   MUTANT: no exclusion at all -> the assembler refuses       the program reads cells through hex.pointers, and a word...
+  ok   blocking with the pointed-to cell excluded: the same program 5 pinned words, 6 tables, 294 ops
+  ok   MUTANT: an exclusion omitting the pointed-to cell -> not that program output b'' (runtime-memory-error)
+  ok   MUTANT: a pool that relocated nothing is not a PASS        allocated=0, exit 2
+  ok   ... but a run RESTRICTED on purpose only warns             exit 0, 'WARNING: the pool relocated NOTH'
+  ok   ... while a pool that did relocate still passes            allocated=22
+  ok   ... and the gate's own FAIL is never overridden by it      
+  ok   ... and --off, which has no pool at all, is not vacuous    
+  ok   a BlockPool that pinned words is not vacuous either        5 pinned, 6 tables
+  ok   MUTANT: blocked tables but NO pinned word is not a PASS    0 pinned, 6 tables, exit 2
+  ok   ... unless --no-pin asked for exactly that                 
+  ok   MUTANT: a gate that FAILs comes back as a non-zero driver status status=1
+  ok   ... and the gate ran under the DRIVER'S closure            (stub gate) pooled assemble installed: True
+  ok   ... and the stock assembler is back afterwards             
+(stub gate) 4 viewpoints BYTE-EXACT
+PASS
+  ok   a gate that passes comes back as 0                         
+  ok   a gate that CALLS fj.assemble reaches the driver's closure installed: True; (stub gate) fj.assemble returned
+  ok   ... and the closure's BODY ran -- the pool this driver builds 0 -> 1 body runs
+  ok   the --no-pin stub takes the assembler's call, signature and all (stub gate) resolve_pinned(1 pin request, exclude=...) -> ({}, 0)
+  ok   ... and SUPPRESSES a pin the real resolver grants          real resolver: ({4096: 64}, 0)
+  ok   ... and the real pin resolver is back                      
+  ok   --selftest-gate accepts 4x '!! 1 px DIFFER', exit 1        0 of its 4 checks MISS (must be 0)
+  ok   MUTANT: ... and rejects a run whose FAIL was swallowed (exit 0) 1 of its 4 checks MISS (must be 1)
+  ok   MUTANT: ... and rejects a FIFTH differing viewpoint        1 of its 4 checks MISS (must be 1)
+  ok   MUTANT: ... and rejects a FAIL of the WRONG SIZE (4x 7 px) 1 of its 4 checks MISS (must be 1)
+  ok   MUTANT: ... and rejects a run that says BYTE-EXACT as well 1 of its 4 checks MISS (must be 1)
+  ok   MUTANT: ... and rejects a run with a viewpoint never compared 2 of its 4 checks MISS (must be 2)
+  ok   MUTANT: ... and rejects BYTE-EXACT, exit 0                 4 of its 4 checks MISS (must be 4)
+  ok   ... and puts the real oracle back                          
+  ok   HOT_OWNERS decides which CALL SITES this pool relocates    x.proj.point_on_side_leaf.y True, x.hex.tables.y False
+  ok   --off builds no pool at all (nothing for verdict to call vacuous) 
+  ok   ... and the fixture expands NONE of them, so this pool moves nothing here 0 tables, b'B' in 363 ops
+  ok   MUTANT: point HOT_OWNERS at one it DOES expand -> tables move, output does not 22 tables, b'B', 363 -> 215 ops
+  ok   --top is the cap on that: 1 table, not 22                  1 tables, b'B' in 308 ops
+  ok   --run-ops is the run length the pool hands out             run_bits=1024 for run_ops=16 at w=32
+selftest: all mutations rejected (37 checks: 31 shared + 6 deg_gate_placed)
+NOT COVERED by this arm: the E1M1 program itself -- no byte arrays, so _byte_cell_exclusion's own cell set never runs, and the stub gates compare no pixels. Use --selftest-gate, and the gate.
+exit=0
+
+$ python scratchpad/12m/deg_gate_blocked.py --selftest-gate   (the expensive arm, re-run after the exclusion fix)
+start 23:07:18
+deg_gate_blocked --selftest-gate: the REAL gate, oracle corrupted by one byte -- it must FAIL
+  MUTATED : doomfj.reference_model.ReferenceModel.render_wall_frame, wrapped so every frame it returns comes back
+            with byte 0 XOR 1 -- one pixel, at all four viewpoints. Nothing on the fj side is touched.
+  REQUIRED: the driver exits non-zero; 'px DIFFER' appears exactly 4 times; every one of them is '!! 1 px
+            DIFFER'; 'BYTE-EXACT' appears nowhere. Anything else and the gate is not comparing what it claims.
+  ---- the driver's own output, unedited, follows ----
+BLOCKING ON: pool base 0x80000000, pinning on
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+program parts: entry=1,094, tables=338,598, main=68, segconsts=44,173, walk=72,962, state=437, banks=2,137,148
+  counting pass: 8,531 groups, 89,059 tables
+  pin-exclude: no self-reset in this program (no sshead), so no cell to name -- the gate's four byte-exact viewpoints are the check
+assembled
+(664,291,0x18000000): 26,536,107 ops  !! 1 px DIFFER
+(1272,-724,0x40000000): 13,852,227 ops  !! 1 px DIFFER
+(1869,479,0x80000000): 26,269,520 ops  !! 1 px DIFFER
+(-416,256,0x0): 22,911,225 ops  !! 1 px DIFFER
+FAIL
+blocked: 87,333 tables in 8,531 groups; declined 1,726; ungrouped 111,952; pin conflicts 1,133
+  ---- end of it: 12 lines, 4 'px DIFFER' of which 4 are 1 px, 'BYTE-EXACT' absent ----
+  ok   the corrupted run exits non-zero                           status=1
+  ok   all four viewpoints report px DIFFER                       4 of 4
+  ok   each differs by EXACTLY the corrupted pixel                4 of 4
+  ok   and none of them reports BYTE-EXACT                        
+selftest-gate: the gate still rejects a one-byte difference
+oracle restored: True
+exit=0
+end   00:24:11

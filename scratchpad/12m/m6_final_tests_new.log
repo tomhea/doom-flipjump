@@ -1,0 +1,9 @@
+# Round 7 of PR #84's review, on m6-rung1-baseline at e1fe910 + the round-7 commits,
+# against flipjump 1.5.1 at dd7ad31 (engine 79af8639f57bfa50). Captured 2026-09-15.
+$ python -m pytest tests/host/test_narrowed_clear_sites.py -q
+........................................................................ [ 93%]
+.....                                                                    [100%]
+77 passed in 0.40s
+$ python -m pytest tests/fj/test_table_reader_ptr_clear.py -q
+.........                                                                [100%]
+9 passed in 64.81s (0:01:04)

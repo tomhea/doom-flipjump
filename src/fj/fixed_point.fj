@@ -242,7 +242,10 @@ ns hex {
     // idx is an unsigned hex[:idx_n] (idx_n <= w/4); dst must not alias idx.
     // @requires hex.init & stl.ptr_init
     def read_table_packed nb, dst, table, idx_n, idx @ ptr, table_address, end {
-        .zero w/4, ptr
+        // Z2: `.mov idx_n` zeroes its own idx_n nibbles, so only the HIGH w/4-idx_n need
+        // clearing here. Same transform as Z1, in the three table readers -- which together are
+        // the second-largest consumer of exact_xor calls after mov itself.
+        .zero w/4 - idx_n, ptr + idx_n*dw
         .mov idx_n, ptr, idx
         .mul_const w/4, ptr, ptr, nb*dw
         .add w/4, ptr, table_address
@@ -267,7 +270,10 @@ ns hex {
     //  shift), then read through a pointer.
     // @requires hex.init & stl.ptr_init
     def read_table n, dst, table, idx_n, idx @ ptr, table_address, end {
-        .zero w/4, ptr
+        // Z2: `.mov idx_n` zeroes its own idx_n nibbles, so only the HIGH w/4-idx_n need
+        // clearing here. Same transform as Z1, in the three table readers -- which together are
+        // the second-largest consumer of exact_xor calls after mov itself.
+        .zero w/4 - idx_n, ptr + idx_n*dw
         .mov idx_n, ptr, idx
         .mul_const w/4, ptr, ptr, n*dw
         .add w/4, ptr, table_address
@@ -294,7 +300,10 @@ ns hex {
     // idx is an unsigned hex[:idx_n] (idx_n <= w/4); dst must not alias idx.
     // @requires hex.init & stl.ptr_init
     def read_table_byte dst, table, idx_n, idx @ ptr, table_address, end {
-        .zero w/4, ptr
+        // Z2: `.mov idx_n` zeroes its own idx_n nibbles, so only the HIGH w/4-idx_n need
+        // clearing here. Same transform as Z1, in the three table readers -- which together are
+        // the second-largest consumer of exact_xor calls after mov itself.
+        .zero w/4 - idx_n, ptr + idx_n*dw
         .mov idx_n, ptr, idx
         .mul_const w/4, ptr, ptr, dw
         .add w/4, ptr, table_address

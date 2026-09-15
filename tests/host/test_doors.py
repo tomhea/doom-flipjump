@@ -93,15 +93,22 @@ def test_both_endpoints_are_exact(level, quant):
         assert quantise(lo, open_h, lo, quant) == lo
 
 
-def test_the_endpoint_is_not_free_of_charge(level):
+@pytest.mark.parametrize("quant", [8, 16, 24, 32, 64, DEFAULT_QUANT])
+def test_the_endpoint_is_not_free_of_charge(level, quant):
     """The control for the test above: on this map the exact endpoint is NOT what flooring gives,
-    so `== open_h` is a real requirement rather than a coincidence."""
+    so `== open_h` is a real requirement rather than a coincidence.
+
+    ⚠ This used to assert EVERY door is left short at DEFAULT_QUANT, which was true only
+    because no E1M1 door opens to a multiple of 16. Lowering DEFAULT_QUANT to 10 for smoother
+    animation made sectors 64 (-60) and 84 (60) exact multiples, and the control failed on a
+    coincidence of the old constant rather than on a defect. What the control actually needs is
+    that the clamp does real work -- at every quant the repo uses, on most of the map's doors."""
     secs, lds, sds = level
-    floored_short = 0
-    for si, open_h in door_sectors(secs, lds, sds).items():
-        if (open_h // DEFAULT_QUANT) * DEFAULT_QUANT != open_h:
-            floored_short += 1
-    assert floored_short == len(door_sectors(secs, lds, sds)), floored_short
+    doors = door_sectors(secs, lds, sds)
+    short = {si for si, open_h in doors.items()
+             if (open_h // quant) * quant != open_h}
+    # non-vacuity, and strong enough that a clamp regression cannot hide in the minority
+    assert len(short) > len(doors) // 2, (quant, sorted(short), sorted(doors))
 
 
 @pytest.mark.parametrize("quant", [8, 16, 24, 32, 64])
@@ -232,3 +239,51 @@ def test_the_filter_has_teeth(full):
         if n:
             dropped[m] = len({si for si in ()} ) or n
     assert set(dropped) == {"E1M3", "E1M4", "E1M5", "E1M6", "E1M7", "E1M9"}
+
+
+# -- the pid byte: the ceiling on DEFAULT_QUANT that does not look like one --------------------
+
+# E1M1's STATIC geometry spends this many pids; door stops are added on top of it. Derived from
+# two REAL emitter runs, not from a model: the emitter reported 222 pids at quant 16 (80 of them
+# door pairs) and asserted 263 at quant 10 (121 door pairs). 222-80 == 263-121 == 142, which is
+# also what makes the derivation trustworthy -- two independent builds agree on the static half.
+STATIC_PIDS = 142
+PID_CEILING = 256                  # a pid must fit Config.PID_NIBBLES = 2 nibbles
+
+
+def _door_pid_pairs(secs, lds, sds, quant):
+    """The distinct (ceiling key, floor key) pairs a door sector can be in, over every stop.
+
+    Mirrors `wall_renderer._plane_keys` in the only dimension a quant change moves: a door's floor,
+    light and flats never change, so the pair is decided by the STOP HEIGHT. Doors with identical
+    geometry and surfaces collapse to one pair set -- E1M1's four-door row is why the count is 80
+    and not 4x14."""
+    out = set()
+    for si, open_h in door_sectors(secs, lds, sds).items():
+        s = secs[si]
+        floor_key = (s.floor_h, s.light & 0xFF, s.floor_tex.upper())
+        for h in stops(s.floor_h, open_h, quant):
+            out.add(((h, s.light & 0xFF, s.ceil_tex.upper()), floor_key))
+    return out
+
+
+def test_the_shipped_quant_fits_the_pid_byte(level):
+    """⚠ THE TEST THAT WAS MISSING. Lowering DEFAULT_QUANT 16 -> 10 for smoother doors pushed E1M1
+    to 263 pids and killed the build ten minutes in, on an assert that names neither doors nor
+    quant. Every extra door stop is an extra pid; 255 is all there are."""
+    secs, lds, sds = level
+    total = STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, DEFAULT_QUANT))
+    assert total < PID_CEILING, (
+        "DEFAULT_QUANT=%d bakes ~%d pids, past the %d a 2-nibble pid addresses -- raise the quant "
+        "(coarser, less smooth) or raise Config.PID_NIBBLES (wider everywhere it flows)"
+        % (DEFAULT_QUANT, total, PID_CEILING - 1))
+
+
+def test_the_pid_model_reproduces_both_measured_builds(level):
+    """The negative control for the guard above: a model that cannot reproduce the two builds that
+    were actually run would let any quant through. 222 was reported at 16, 263 asserted at 10."""
+    secs, lds, sds = level
+    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 16)) == 222
+    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 10)) == 263
+    # and it must actually REJECT the quant the real build rejected
+    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 10)) >= PID_CEILING

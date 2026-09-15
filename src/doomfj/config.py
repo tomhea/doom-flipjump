@@ -184,6 +184,11 @@ class Config:
         """NCOLORS * 3 (RGB triplets), §1.2."""
         return self.NCOLORS * 3
 
+    # M6: the two hot-path pad tiers, assigned by MEASURED median ops/frame of a site's
+    # instances (>99 -> HOT_PAD, >1000 -> HOTTER_PAD). See FINDINGS AX/AZ.
+    HOT_PAD: int = 1024
+    HOTTER_PAD: int = 4096
+
     def constants(self) -> dict:
         """The full set of fj-visible constants (the SSOT contents emitted to fj_consts.fj)."""
         return {
@@ -196,6 +201,12 @@ class Config:
             "SLOT_SHIFT": self.SLOT_SHIFT,
             "BAND_NIBBLES": self.BAND_NIBBLES,
             "PIECE_BYTES": self.PIECE_BYTES,
+            # M6 hot-path wflip-target pads. A `wflip` costs popcount(target), so aligning the
+            # target lowers it -- but the inserted shift pushes all later code up and RAISES
+            # popcount for every downstream wflip, so this is not monotonic. MEASURED: these
+            # widths gave -2.00% ops/frame (S2); one step wider at full coverage gave +0.92%,
+            # i.e. WORSE on speed and size both (S3, FINDINGS AZ). Sweep per-site from here.
+            "HOT_PAD": self.HOT_PAD, "HOTTER_PAD": self.HOTTER_PAD,
         }
 
     def span_ledger(self) -> dict:

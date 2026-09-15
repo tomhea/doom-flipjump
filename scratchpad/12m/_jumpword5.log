@@ -1,0 +1,10 @@
+fjm      : build/doom_e1m1_blocked5.fjm
+frames   : 4 presented
+ops      : 55,699,746 counted by the interpreter, 55,699,747 seen by the hook
+
+  jump-word writes : 46,319,589 = 83.16% of the frame
+  everything else  : 9,380,158 = 16.84%
+
+  FINDINGS BD measured 78.32% on the PRE-BLOCKING binary. A number well below that
+  means the address-writing cost has been paid down and the next lever should be
+  chosen from what is left, not from BD.

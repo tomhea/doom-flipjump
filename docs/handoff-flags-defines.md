@@ -25,7 +25,7 @@ Branch **`m2-runtime-door`**, working tree CLEAN, **7 commits unpushed**, nothin
 **The playable artifact:** `build/doom_e1m1_menu.fjm` — standalone + menu + self_reset + doors, all
 on. Run it:
 
-    fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728
+    fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728
 
 enter starts the game, WASD/arrows move, **space opens doors**. It was built BEFORE the flag
 retirement and is still valid: the emission is byte-identical across all three stages, so a rebuild

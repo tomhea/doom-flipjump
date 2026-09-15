@@ -225,6 +225,33 @@ def door_line_ids(secs, lds, sds, doors) -> dict:
     return out
 
 
+def door_rooms(lds, sds, doors, lines_of) -> dict:
+    """`{door sector: [(linedef, near room, [far rooms]), ...]}` -- what is on each SIDE of a door.
+
+    A DOOM door sector is the thin moving sector BETWEEN two rooms, and both of its two-sided
+    linedefs carry it on their BACK side (E1M1: all 25 of them). So `sds[ld.back].sector` is the
+    door itself, never "the room behind the door" -- the room beyond, seen through the door from
+    room F, is the FRONT sector of the door's other linedef(s).
+
+    ⚠ Getting this backwards is not a hypothetical. `scratchpad/12m/leakcheck.py` perturbed
+    `sds[ld.back].sector` to ask whether a shut door occludes, which moved the shut door's own
+    ceiling from one shut position to another; both frames drew an occluding door and the tool
+    reported a confident "0 px leak" that a door made of glass would also have earned. This
+    function exists so the occlusion test and the tool cannot hold two opinions about which
+    sector is behind a door.
+
+    A door with a single two-sided line (E1M1 sector 84, a closet) has NO far room; its entry
+    carries an empty list, and a caller that needs one must report it, not skip it silently."""
+    out: dict = {}
+    for si in sorted(doors):
+        pairs = [(li, sds[lds[li].front].sector)
+                 for li in sorted(lines_of.get(si, ()))
+                 if lds[li].back != -1 and lds[li].back != 0xFFFF]
+        rooms = {r for _, r in pairs}
+        out[si] = [(li, near, sorted(rooms - {near})) for li, near in pairs]
+    return out
+
+
 def _unblock_lines(lis) -> list:
     """The wflip that toggles FLAG_BLOCKING on each of a door's lines.
 

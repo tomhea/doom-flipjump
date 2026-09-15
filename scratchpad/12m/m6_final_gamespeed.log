@@ -1,0 +1,37 @@
+flipjump: C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py at 9a4595b; engine 79af8639f57bfa50
+$ python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_blocked25.fjm
+SIZE: w=32  segments=424743  data=43,657,732 words (32.53% of 2^27)  span=96,009,696 words (71.53%)  file=31,845,446 bytes
+calibration: startup + 2 menu frames = 557,919 ops (subtracted from every run)
+  run  0: 2,278,794,879 ops / 102 presented -> raw 22,341,126, game-only 22,782,369 ops/frame
+  run  1: 1,124,738,325 ops / 102 presented -> raw 11,026,846, game-only 11,241,804 ops/frame
+  run  2: 2,186,795,488 ops / 102 presented -> raw 21,439,171, game-only 21,862,375 ops/frame
+  run  3: 2,270,662,163 ops / 102 presented -> raw 22,261,393, game-only 22,701,042 ops/frame
+  run  4: 1,363,845,118 ops / 102 presented -> raw 13,371,030, game-only 13,632,871 ops/frame
+  run  5: 1,487,086,923 ops / 102 presented -> raw 14,579,283, game-only 14,865,290 ops/frame
+  run  6: 1,325,404,322 ops / 102 presented -> raw 12,994,160, game-only 13,248,464 ops/frame
+  run  7: 1,345,866,285 ops / 102 presented -> raw 13,194,767, game-only 13,453,083 ops/frame
+  run  8: 1,600,239,277 ops / 102 presented -> raw 15,688,620, game-only 15,996,813 ops/frame
+  run  9: 1,651,798,198 ops / 102 presented -> raw 16,194,099, game-only 16,512,402 ops/frame
+
+==============================================================================
+SPEED  BINDING (mean+p80)/2: 19,246,013 ops/frame   (target <= 20,000,000)  PASS
+SPEED  mean run-average   : 16,629,651 ops/frame
+SPEED  80th-pct run avg   : 21,862,375 ops/frame
+SPEED  spread lo..hi      : 11,241,804 .. 22,782,369 ops/frame
+SPEED  raw (menu included): mean 16,309,049, 80th-pct 21,439,171 ops/frame
+SIZE   words              : 43,657,732 = 32.53% of 2^27   (target <= 35%)  PASS
+SIZE   span / file        : 96,009,696 words (71.53%) / 31,845,446 bytes
+==============================================================================
+$ python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_blocked25.fjm --validate
+  run  0: ends (   831,   485)   1267 from spawn    1478 travelled  moved on  96/100 move-frames (4% blocked)
+  run  1: ends (  -357,   430)    183 from spawn    1165 travelled  moved on  86/ 97 move-frames (11% blocked)
+  run  2: ends (   780,   427)   1208 from spawn    1397 travelled  moved on  84/ 94 move-frames (11% blocked)
+  run  3: ends (   688,   208)   1105 from spawn    1220 travelled  moved on  71/ 91 move-frames (22% blocked)
+  run  4: ends (  -176,   348)    257 from spawn    1036 travelled  moved on  72/ 88 move-frames (18% blocked)
+  run  5: ends (  -173,   163)    260 from spawn     960 travelled  moved on  60/ 85 move-frames (29% blocked)
+  run  6: ends (  -173,   413)    289 from spawn     884 travelled  moved on  60/ 82 move-frames (27% blocked)
+  run  7: ends (  -490,   106)    167 from spawn    1073 travelled  moved on  72/ 79 move-frames (9% blocked)
+  run  8: ends (   239,   353)    662 from spawn    1190 travelled  moved on  67/ 76 move-frames (12% blocked)
+  run  9: ends (   189,   245)    605 from spawn    1114 travelled  moved on  63/ 73 move-frames (14% blocked)
+  distinct end cells: 10/10 ; widest spread 1321 units ; worst run 29% blocked
+exit=0

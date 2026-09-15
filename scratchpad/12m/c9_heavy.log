@@ -1,0 +1,28 @@
+hotpath selftest -- a profile that cannot be wrong cannot be right
+  C3 lookup matches a linear scan at and around every boundary ok
+  C3 an address before every label is unattributed, not label 0 ok
+  C6 rank() reports its drop count (the plumbing is exercised) ok  far=0
+  C6 a MATCHED pair is ACCEPTED end to end                   ok  0.000% of ops dropped past bare labels -
+  (guard: 900 ops sat > 4096 ops past a BARE label and were NOT credited to it)
+  C6 rank() COUNTS the far ops (not silently zero)           ok  far=900
+  C6 a MISMATCHED pair is REJECTED end to end                ok  MISMATCH: 90.00% of ops sit far past a bare 
+  C6 the threshold brackets the two REAL calibration pairs (0.017%% matched, 12.14%% mismatched) ok
+  C8 main() REJECTS a provenance mismatch with a non-zero exit ok  rc=1
+  C8 ...and says DIFFERENT BUILDS rather than ranking anyway ok  VACUOUS: label provenance sha256=0000000000000000 but C:
+  C7 provenance is read back exactly                         ok  {'fjm': 'build/x.fjm', 'sha256': '71
+  C7 a different binary's sha does NOT match                 ok
+  C7 the header does not leak into the label table           ok
+  (guard: 500 ops sat > 4096 ops past a BARE label and were NOT credited to it)
+  C5 an op far past a bare label is UNATTRIBUTED, not credited to it ok  unattributed=500 buckets={}
+  C5 an op just after a bare label still IS credited (guard is not always-on) ok  {'c': 500}
+  C4 inner_macro takes the innermost                         ok  hex.exact_xor
+  C4 doom_macro walks out past stl/hex to OUR macro          ok  doom.walk
+  C4 a bare label degrades gracefully                        ok
+  C1 ops landing before any label count as UNATTRIBUTED, not as label 'a' ok  unattributed=5 buckets={}
+  C1 the EOF tolerance is exactly 1 and DIRECTIONAL          ok  a hook seeing FEWER ops than executed is still rejected
+  C1 ops after a label attribute to it                       ok  {'a': 7}
+  -- C9 drives main() on a real mismatched pair (heavy) ...
+  C9 main() REJECTS a real mismatched pair via the proxy     ok  rc=1
+  C9 ...naming it a MISMATCH rather than ranking             ok  join   : MISMATCH: 5.24% of ops sit far past a bare label (l
+
+SELFTEST PASS

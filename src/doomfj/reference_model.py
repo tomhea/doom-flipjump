@@ -60,7 +60,25 @@ DBITS = 5                          # FRACBITS(16) - SLOPEBITS(11): the FixedDiv�
 SCALE_MIN = 256                    # R_ScaleFromGlobalAngle clamp floor (16.16)
 SCALE_MAX = 64 << 16               # R_ScaleFromGlobalAngle clamp ceiling = 64.0 (16.16)
 VIEWHEIGHT = 41                    # DOOM player eye height above the floor (map units)
-FORWARD_MOVE = 50 << 16           # 16.16 map-units per tic (DOOM run forwardmove 0x32); S0 magnitude
+# ⚠ DOOM's forwardmove 0x32 (=50) is a THRUST, not a displacement. `P_Thrust` adds `move*2048` to
+# momx/momy, and against FRICTION 0xE800 (0.90625) the steady state is 50*2048/65536 / 0.09375 =
+# ~16.7 map-units per tic. This sim has no momentum -- `step_sim` applies the constant DIRECTLY as
+# the per-tic displacement -- so using 50 here ran the player at ~3x DOOM's actual run speed.
+#
+# That was not merely a feel problem, it was a CORRECTNESS one. The collision test is unswept: it
+# checks only the DESTINATION box (see try_move), and the box is 2*PLAYER_RADIUS = 32 units wide.
+# A 50-unit step therefore leaves an 18-unit band covered by neither the source nor the destination
+# box, so a wall standing in that band is never straddled by either test and is jumped clean.
+# MEASURED (scratchpad/12m/stepcheck.py, on tests/fixtures/freedoom_e1m1.wad, the map that ships):
+# from the real player start, turn-left x17 then forward walks THROUGH one-sided linedef 940 on
+# tic 21 and leaves the level. At 25 and at 16 units the same walk crosses nothing.
+# Dead-stops on open floor (the all-or-nothing step, no partial move) also fall: 4.43% -> 2.85%.
+#
+# 16 is inside the step size the box can police AND is DOOM's real run speed. It does not fix the
+# unswept test -- a long enough step still tunnels -- it stays under it. Sub-stepping the move is
+# the actual fix and is a DUPLICATED change (reference_model.move_with_collision AND
+# collision.move_with_collision_lines AND src/fj/sim.fj).
+FORWARD_MOVE = 16 << 16           # 16.16 map-units per tic ~= DOOM's steady-state run; S0 magnitude
 ANGLE_TURN = 640 << 16            # BAM per tic (DOOM angleturn[]); turn-left adds, turn-right subtracts
 
 # ── M14-d: line collision (P_CheckPosition / PIT_CheckLine) ───────────────────────────────────
@@ -76,7 +94,23 @@ WALL_BG = 4                       # flat-shaded wall palette index (pre-colormap
 WPX_RUN_CAP = 24                  # M13-WPX: max colour runs per 1x1 wall column (ops + bank knob)
 WPX_U_SCALE = 768                 # M13-WPX: u = scale//h -- the free perspective-shaped h->texture-column map
 WALL_NOISE_BITS = 2               # V1: colormap steps the per-column grain may darken by (0..3)
-STEP_SEG_BUDGET = 8              # V3: boundaries allowed a step face (the NEAREST ones)
+# ⚠ THIS BUDGET WAS SHEDDING VISIBLE GEOMETRY, which CLAUDE.md's cost model forbids: "Surviving
+# budgets are either provably never-binding (asserted at emit time) or shed only invisible work."
+# At 8 it was spent by nearer face-carrying boundaries before the walk reached a DOOR, so the door
+# lintel -- the only thing that makes a doorway read as a doorway -- was not drawn at all beyond
+# ~168 units. That is why doors were reported as invisible in play.
+# MEASURED (oracle, E1M1 door sector 10, shut-vs-open pixels of a 16,000 px frame, viewpoint on the
+# doorway normal):
+#     distance   bud=8   bud=12   bud=16   bud=24
+#         176      360     2774     2774     2774
+#         192      273      273     2107     2107
+#         256      212      212      212      212     <- face is genuinely sub-pixel; no budget helps
+# 16 restores the door at 176 and 192. Past ~224 the face is legitimately too small to matter.
+# The plan had 12 (docs/handoff-m13-2s-fast.md:178); it was tuned down to 8 for speed.
+# SHARED: wall_renderer.py:47 imports it and :1990 interpolates it into the emitted fj, so this
+# single line moves both mirrors. It costs per-frame ops (a face-carrying seg pays a ~93k setup),
+# which is measured on the gate rather than assumed here.
+STEP_SEG_BUDGET = 16             # V3: boundaries allowed a step face (the NEAREST ones)
 V5_STACK = 2                      # V5: stacked boundary pieces kept per column per side
 STEP_FACE_BASE = 96               # V3: flat-shaded step-face texel. NOT WALL_BG (=4),
                                   # which is near-WHITE in DOOM's ramp and blows out
@@ -1347,8 +1381,9 @@ class ReferenceModel:
 
         `cap` bounds the run count (and hence both the fj loop and the baked bank): while over
         budget, the SHORTEST run is absorbed into its neighbour, which drops single-pixel noise
-        first and keeps the big structural bands. Shared verbatim by this oracle and
-        `wall_renderer._lines_wall_pix_bank`, so fj and oracle can never drift (R6)."""
+        first and keeps the big structural bands. Shared verbatim by this oracle and the fj wall
+        bank, so the two can never drift (R6). (`wall_renderer._lines_wall_pix_bank`, the uncalled
+        WPX baker, was retired 2026-09-11 with the rest of M13-2S rung 3b.)"""
         if texels is None:
             return [[h, colormap[light_row][WALL_BG]]]
         col = texels[ReferenceModel.wpx_texcol(tw, h) * th:][:th]
@@ -2002,7 +2037,30 @@ class ReferenceModel:
                             sfrag2[x] = (ytop_b + st[0], st[1], lr)
             seg = scene.cmap.segs[seg_i]
             ld = lds[seg.linedef]
+            # ⚠ A CLOSED TWO-SIDED LINE IS A SOLID WALL -- DOOM's R_ClipSolidWallSegment
+            # ("doorclosed"). Without this a shut door never claims its column, so the room beyond
+            # paints through it: the door is GLASS. Occlusion in this renderer is `drawn[x]`, and
+            # only the one-sided path writes it (see :2332), so the fix is to SEND a closed seg
+            # down that path -- not to draw more of its face, which is overdraw and leaves the
+            # doorway's bottom open and every sprite behind it painting on top.
+            # The opening is DOOM's: min(ceilings) <= max(floors) means no gap at all.
+            # `secs` already carries the door override (see the sectors SSOT), so a door is closed
+            # exactly while it is shut, and the 80 permanently-shut two-sided lines on E1M1 are
+            # covered by the same test at no extra cost.
+            _closed2s = False
             if ld.back != -1:
+                _fi2 = sds[ld.front if seg.side == 0 else ld.back].sector
+                _bi2 = sds[ld.back if seg.side == 0 else ld.front].sector
+                # STAGE B: doors included. `secs` already carries the door override, so a door
+                # line reads closed exactly while it is shut. The emitter cannot decide that at
+                # compile time, so it emits BOTH bodies for those 54 segs behind a one-op gate on
+                # the door's state cell (wall_renderer `_seg_dual`) -- state 0 is shut, and shut
+                # takes the solid arm. These two tests must agree seg for seg and state for state,
+                # or the mirrors diverge and byte-exactness is gone.
+                _f2 = self._seg_sector(lds, sds, secs, seg)
+                _b2 = secs[_bi2]
+                _closed2s = min(_f2.ceil_h, _b2.ceil_h) <= max(_f2.floor_h, _b2.floor_h)
+            if ld.back != -1 and not _closed2s:
                 if not plane_near:
                     continue                                 # two-sided (opening/window): not a solid wall
                 # M13-2S rung 3a — a two-sided seg paints no wall here, but it still BOUNDS the near
@@ -2123,7 +2181,14 @@ class ReferenceModel:
                                 # a farther boundary's face clips BELOW the nearer one's stored
                                 # end (DOOM's descending ceilingclip -> the splice stays monotone)
                                 a = max(a, ups[x][-1][1] + 1)
-                            if a <= b:
+                            # ⚠ AN ENTIRELY OFF-SCREEN PIECE IS NOT STORED. It painted nothing
+                            # (the `(1,0)` / `(255,254)` sentinels keep y1 > y2, which the paint
+                            # loop rejects) yet consumed one of the two V5_STACK slots, so an
+                            # invisible piece evicted a visible door lintel. MEASURED on E1M1
+                            # door 100: 38 -> 405 px at 344 units, 34 -> 327 at 400, 0 -> 177 at
+                            # 464. The cost is the region behind the sentinel, ~90 px on a near
+                            # corridor view. MIRRORED in src/fj/frame_render.fj ts_piece_store.
+                            if a <= b and 0 <= b and a <= Hs:
                                 st_ = ((1, 0) if b < 0 else (255, 254) if a > Hs
                                        else (max(a, 0), min(b, Hs)))
                                 ups[x].append((st_[0], st_[1], fsec,
@@ -2145,7 +2210,14 @@ class ReferenceModel:
                             if los[x]:
                                 # ... and ABOVE the nearer one's stored start (ascending floorclip)
                                 b = min(b, los[x][-1][0] - 1)
-                            if a <= b:
+                            # ⚠ AN ENTIRELY OFF-SCREEN PIECE IS NOT STORED. It painted nothing
+                            # (the `(1,0)` / `(255,254)` sentinels keep y1 > y2, which the paint
+                            # loop rejects) yet consumed one of the two V5_STACK slots, so an
+                            # invisible piece evicted a visible door lintel. MEASURED on E1M1
+                            # door 100: 38 -> 405 px at 344 units, 34 -> 327 at 400, 0 -> 177 at
+                            # 464. The cost is the region behind the sentinel, ~90 px on a near
+                            # corridor view. MIRRORED in src/fj/frame_render.fj ts_piece_store.
+                            if a <= b and 0 <= b and a <= Hs:
                                 st_ = ((1, 0) if b < 0 else (255, 254) if a > Hs
                                        else (max(a, 0), min(b, Hs)))
                                 los[x].append((st_[0], st_[1], fsec,
@@ -2179,7 +2251,16 @@ class ReferenceModel:
             sd = sds[ld.front if seg.side == 0 else ld.back]
             rw_offset, rw_centerangle = self._wall_offset(viewx, viewy, viewangle, seg, verts,
                                                           rw_normalangle, rw_angle1, sd)
-            tex = self._wall_texture(scene.asset_wad, sd.middle, texcache, wall_mode=wall_mode)
+            # ⚠ A CLOSED TWO-SIDED SEG WEARS ITS ART ON `upper`, NOT `middle`. Every door line on
+            # E1M1 has middle='-' and upper='AQDOOR02'/'BIGDOOR2'/'METAL2', so sending a shut door
+            # down the solid path with `sd.middle` would occlude correctly and paint NOTHING
+            # recognisable. This is the same split DOOM has: R_ClipSolidWallSegment decides the
+            # occlusion, R_StoreWallRange picks the texture, and for a door the texture is the
+            # upper. Falls back to middle when a closed line has no upper.
+            _wtex = sd.middle
+            if _closed2s and getattr(sd, "upper", "-") not in ("-", "", None):
+                _wtex = sd.upper
+            tex = self._wall_texture(scene.asset_wad, _wtex, texcache, wall_mode=wall_mode)
             # M13-WPXLIGHT: DOOM's per-seg fake contrast (orientation only -> a baked constant)
             wall_contrast = self.wall_fake_contrast(verts[seg.v1], verts[seg.v2])
             worldtop = sec.ceil_h - viewz_world              # world units the ceiling is above the eye

@@ -1,0 +1,6 @@
+flipjump 1.5.1 at dd7ad31; doom m6-rung1-baseline, round 7 (the shipped build path)
+$ python -m pytest tests/host -m slow -q
+start 00:26:17
+.                                                                        [100%]
+1 passed, 1050 deselected in 3560.36s (0:59:20)
+end   01:26:15

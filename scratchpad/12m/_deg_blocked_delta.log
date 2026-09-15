@@ -1,0 +1,12 @@
+BLOCKING on the deg gate, restricted to the exact_xor family (87,373 tables, 8,531 groups)
+
+  viewpoint                     baseline       blocked         delta      pct pixels
+  664,291,0x18000000          33,205,851    27,253,952    -5,951,899  -17.92%  BYTE-EXACT
+  1272,-724,0x40000000        26,407,589    21,539,101    -4,868,488  -18.44%  BYTE-EXACT
+  1869,479,0x80000000         30,631,732    25,069,501    -5,562,231  -18.16%  BYTE-EXACT
+  -416,256,0x0                24,986,008    19,976,377    -5,009,631  -20.05%  BYTE-EXACT
+  TOTAL                      115,231,180    93,838,931   -21,392,249  -18.56%
+
+  all four BYTE-EXACT : True
+  placement, same gate: 115,231,180 -> 108,506,607  (-5.84%)
+  blocking is 3.2x placement's saving on this gate

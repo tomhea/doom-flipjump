@@ -1,0 +1,1043 @@
+# Throughput plan: the angles not yet tried
+
+Written 2026-09-13 after a day that explained the engine's speed gap but did not close it. This
+records what is settled, what was measured to be weak, and — the point of the document — the
+angles that were never examined.
+
+## What the numbers pin down
+
+```
+frame time  =  ops/frame  ÷  ops/s
+            =  19,855,016 ÷ ~200,000,000/s  ≈   99 ms  ≈ 10 FPS      (shipped binary, msframe baseline 09-13)
+engine ceiling: ~420 M ops/s  (benchmark_loop.fj, 16 KB working set)
+```
+
+Per op the interpreter touches memory **twice**: the instruction pair at `ip` (one line — `f` and
+`j` are adjacent) and the flip target. Only the first is on the critical path: the next `ip` is
+`j`, so each op is one **dependent load**. At the pinned baseline of ~200 M ops/s that load averages ~2.5 ns — between L1 and L2.
+Reaching 420 M would need ~1.2 ns, i.e. L1 for essentially every instruction fetch. The touched
+set is 16 MB at 4-byte cells. So the realistic optimistic case is not 420M:
+
+| lever | from | to | basis |
+|---|---|---|---|
+| ops/s | 200 M | ~300 M | hot 90% inside L2 |
+| ops/frame | 19.9 M | ~14 M | the 12M target was nearly reached once |
+| **frame time** | 99 ms | **~47 ms → ~21 FPS** | both together; neither alone; an UPPER BOUND |
+
+## Measured weak — do not revisit without new evidence
+
+| lever | result | why |
+|---|---|---|
+| huge pages (real THP, alternated ×3) | +1.9%, noise | hot set is ~683 pages, already TLB-resident |
+| pinning to a P-core + HIGH priority | ~3%, NOT SEPARATED | unpinned 102.4 vs pinned 99.3 ms/frame (09-13); the earlier 118→200 M fj/s gap was an unrecorded machine state, not the scheduler |
+| relocating hot objects | weak | caches index by address; footprint is in the big objects, not the distance between small ones |
+| 4-byte cells | 5–10% on the shipped binary, sustained | shipped anyway: half the memory, gate PASS |
+| the latency curve as a predictor | wrong three times | it measures a pure chase; the game has reuse |
+| compiler flags | already `/O2 /GL /LTCG` | nothing left on the table |
+
+## 1. Three measurements never made (cost: minutes; they direct everything below)
+
+**1a. Split the trace by access type.** *DONE 09-13 -- section 8.* Histogram instruction-stream touches (`ip` fetches) and
+flip-target touches SEPARATELY. The dependent chain depends only on the former. If the
+instruction stream is a small fraction of the 16 MB, making *it* resident is the lever and the
+flip targets can stay scattered — they overlap. `mkprof.py` needs one extra `PROF_HIT` bucket.
+
+**1b. Cost per object, not touches per object.** *DONE 09-13 -- section 7.* For every named object: touches, distinct
+lines, and touches-per-line. High touches on few lines is cheap (L1); modest touches spread
+thinly is expensive. `nameheat.py` + the word dump already hold the inputs. This replaces the
+touch-count ranking, which put `cb_bx` (490 lines, L1-resident) at #1 and is therefore the wrong
+list to optimise from.
+
+**1c. Jump-distance distribution.** *DONE 09-13 -- section 8.* What fraction of ops have `j == ip + 2w` (fall-through)?
+Long fall-through runs mean the hardware prefetcher already covers the instruction stream and
+that a block-execution fast path (2b) is viable; short runs mean neither.
+
+## 2. Engine: attack the dependency chain (never tried)
+
+**2a. Read `j` before the flip, prefetch the next instruction.** Today `j` is re-read *after* the
+flip because the flip may alias it. Read it first, do the flip, re-read only if
+`flip_word_address == word_address + 1`, and issue `_mm_prefetch(&flat[j >> ww])` before the
+flip's RMW. That lets the next fetch overlap the current store: memory-level parallelism 1 → ~2.
+Audit estimate 1.05–1.2×. Cheap. Gate: op counts + pixels, as for the cell change.
+
+**2b. Block execution for fall-through runs** (only if 1c shows them long). Read K consecutive
+ops' words in one go, execute their flips, and bail to the slow path if any flip lands inside the
+block's own words (self-modification). Amortises the dependent load over K ops. The one idea here
+with a ceiling above 2×; medium complexity; correctness lives in the bail-out condition.
+
+## 3. Program: the hot objects, by COST (after 1b), three candidates already visible
+
+**3a. The shared-leaf return trampoline.** `hex.tables.ret` is **4 words and 10.77% of all
+touches**; `hex.mul.ret` 7 words, 2.51%. Every leaf call pays a dispatch and a table-driven
+return. Inline the N hottest leaves: fewer ops/frame *and* fewer scattered touches. Emitter
+change, byte-exact gate. This is the ops/frame lever most likely to also raise ops/s.
+
+**3b. Collision is 28% of all touches** (`cb_bx` 15.28% + `simcollide_skip` 12.94%). The named
+runs are `sim.bind_things → hex.sparse_mov/sparse_zero`. Whether that is 28% of *cost* is what
+1b answers; if it is, ask why collision is that expensive at all — per-frame work that could be
+per-move, or a sparse-mov that could be narrower. Algorithmic, potentially the largest ops/frame
+cut available.
+
+**3c. The M1 reset.** `m1_reset` restores 799,272 words per frame (4.31% of touches over a huge
+sparse footprint — likely a high miss rate). Two options: restore only cells that changed (a
+dirty set), or pack the restore set contiguously. Note this is the ONE case where relocation
+does help: the reset walks its set *linearly*, and a packed sequential walk is what the hardware
+prefetcher is built for.
+
+## 4. Process: re-sweep the build knobs against ms/frame
+
+Every knob in `build_blocked.py` — `--spread`, `--max-slot-ops`, `--width-buckets`,
+`--pool-base`, padding — was tuned against **ops/frame**. Measured on the same engine:
+
+```
+blocked25   245,712,309 ops @ 45.3M/s  → 452 ms/frame
+b26         356,224,821 ops @ 65.6M/s  → 452 ms/frame      +45% ops, +45% ops/s, same time
+menu        1.85× the ops of blocked25  → comparable ms/frame
+```
+
+The op-count campaign has been running in place. Eight existing binaries span 164–1140 ms/frame
+at similar work, so the knobs matter ~2× and were tuned on the wrong axis. Sweep them against
+ms/frame: existing binaries first (free), then 2–3 targeted builds. Cheap relative to everything
+else here, and the win may already be sitting in a config that was rejected for its op count.
+
+## Sequencing
+
+1. **1a–1c** — one session, no builds. Everything else is ranked by what they say.
+2. **2a** — one session, engine only, gated like the cell change.
+3. **4** — existing binaries immediately; then targeted builds as background work.
+4. **3a / 3b / 3c** in the order 1b ranks them; **2b** only if 1c justifies it.
+
+Discipline that today proved necessary: no single-sample numbers; alternate A,B,A,B; read the
+cell width / page state back from the object, never infer it from the env var; and check that no
+stray process of your own is pegging a core before trusting any measurement.
+
+## 5. Ten more angles, each a different mechanism from the above
+
+Ranked roughly by expected value ÷ cost.
+
+1. **Turn the data dependency into a control dependency.** `ip = j` makes the next fetch wait on
+   the load's VALUE. If most ops fall through, write `if (j == ip+2w) ip += 2w; else ip = j;`:
+   the branch predictor speculates fall-through, computes `ip+2w` with no dependency on `j`, and
+   issues the next fetch immediately; `j` arriving merely confirms. Mispredict ~15 cycles; a
+   correct prediction hides the whole load. Potential 1.5–2× on the chain, three lines of C.
+   ⚠ The compiler will emit `cmov`, which is a data dependency again and defeats it — the branch
+   must be forced. Gated by the jump-distance census (1c).
+2. **Hardware performance counters instead of inference.** VTune (free) or `perf`: L1/L2/L3
+   misses, DTLB walks, branch mispredicts PER OP on the real binary. Every prediction on 09-12
+   came from synthetic curves and three were wrong; counters would have settled the TLB question
+   in ten minutes. Should run FIRST.
+3. **Co-locate each table with its arming site.** For a table with a single arming site, place it
+   adjacent to the ops that arm it: the flip then hits the line the instruction fetch already
+   brought in, and touches/op → ~1 for those ops. Trades pool-blocking (cheap ARM) for locality
+   (cheap TOUCH) — the tradeoff nobody has priced on ms/frame. Census first: how many tables
+   have one arming site?
+4. **Temporal coherence.** If view state (position, angle, doors, things) is unchanged the frame
+   is a copy: near-zero ops for idle frames, which are common in play. The trivial case is cheap
+   and the oracle can mirror it exactly; partial forms (sky/floor columns) are harder.
+5. **Actually pin to a P-core, raise priority, set the power plan.** The pin attempt on 09-12
+   FAILED (wrong ctypes signature) and was never retried; on a 6P+8E laptop the scheduler
+   migrates freely and the yardstick swung 2.9–3.6 GHz. Likely +10–20% mean, far less variance.
+   Free. **MEASURED 09-13: ~3%, NOT SEPARATED** (unpinned 102.4 vs pinned 99.3 ms/frame).
+   The scheduler was NOT the source of the earlier 118→200 gap; keep the pin for variance only.
+6. **Census the padding inside the instruction stream.** `pad 16`, `pad 16384`, `rep(N) stl.fj
+   0,0` fillers exist for address arithmetic; every gap in the instruction stream is a wasted
+   line on the critical path. Measure what fraction of the chain's footprint is padding.
+7. **Static jump threading in the assembler.** A pure jump (flip=0) landing on another pure jump
+   is two dependent loads to go nowhere; where the target is STATIC, rewrite A→B→C as A→C.
+   Dynamic trampolines (`hex.tables.ret`, wflipped return addresses) cannot be threaded, but the
+   static chains have never been counted.
+8. **Batch screen IO per byte instead of per bit.** Measured 4.4% of wall time, one Python call
+   per BIT (44,738/frame). Per-byte batching cuts it ~8×. Small, certain, site already located.
+9. **Precomputed visibility per subsector (PVS).** `seg_pass1/2_leaf` + `e1m1_bspcode_pos_leaf`
+   are ~20% of touches; a baked potentially-visible-set prunes the BSP walk to what can be seen.
+   Big ops/frame cut on an open level; price the table size first.
+10. **Viewport width as an explicit product knob.** ops/frame scales with columns. `VIEW_W=160`
+    today; 120 is a 25% cut at zero engineering risk. Not an optimisation — a PRODUCT decision
+    that needs the owner's sign-off — but it is the largest lever available today.
+
+Considered and dropped: a separate compact code cache with write-invalidation (every flip pays a
+range check; #3 gets most of the benefit without it), and 2 MB-aligned allocation against
+cache-set conflicts (unmeasurable under current variance; do #5 and #2 first).
+
+## 6. Gaps in this plan (found by reading it as a reviewer)
+
+**Critical — the plan cannot succeed as written without these**
+
+- **It has no instrument for its own metric.** The thesis is "optimise ms/frame, not ops/frame",
+  and the project has NO reproducible ms/frame harness: `gamespeed.py` measures ops only, and
+  the ad-hoc runs on 09-12 varied 2× on identical work. Every item above will be judged by noise
+  until a harness exists that pins the core, alternates A/B/A/B, runs N reps, and reports
+  ms/frame WITH a spread. Build this before anything in sections 2–5.
+- **The shipped engine change is under-verified.** flipjump-151's own unit tests
+  (`tests/unit/test_native_memory.py`, `test_interpreter.py` — storage mode, freeze/reset,
+  garbage detection) were NEVER RUN after the 4-byte-cell change, and they test exactly what
+  changed. The Linux build was last made before stages A–C. `pytest tests/host` on the doom side
+  was not run either. `m2_std_gate` PASS is necessary, not sufficient.
+- **The "free" knob sweep on existing binaries is confounded.** `menu` is two weeks older than
+  `blocked25` with different features; comparing them conflates knob settings with code changes.
+  That is the same mistake made on 09-12 with the "blocking made it 50% slower" claim. A real
+  sweep needs same-source builds — 45 minutes each, so it is not free.
+
+**Structural — the reasoning has holes**
+
+- **Levers interact, and some conflict.** Inlining hot leaves (3a) GROWS the instruction stream;
+  if 1a shows the chain is footprint-bound, 3a makes it worse. Block execution (2b) and
+  co-location (5.3) change which words are self-modified. The plan lists them as independent.
+- **The ~18 FPS ceiling multiplies two factors that trade against each other.** Cutting
+  ops/frame by removing cheap ops raises the average cost of the remaining ones — the exact
+  mechanism section 4 identifies. Treat 18 FPS as an upper bound, not an estimate.
+- **Jump layout is a LEVER, not just a measurement.** 1c measures fall-through on the current
+  binary, but the emitter could be changed to maximise it (hot-path block ordering, as compilers
+  do) — which makes both 5.1 and 2b more effective. Missing entirely.
+- **The M1 restore set is not mentioned.** 2b, 3a, 3c and 5.3 all change what is self-modified
+  and where; CLAUDE.md's rule is that a feature is not done until the restore set carries its
+  labels. Every emitter change here needs that step.
+- **No kill criteria or decision thresholds.** 2b is "gated on 1c" but with no number; 1a has no
+  "if the instruction stream is under X MB then…". Most of 09-12 went on levers that measured
+  weak; explicit "stop if" rules would have saved hours.
+
+**Correctness — risk of shipping wrong pixels**
+
+- **Temporal coherence (5.4) and PVS (5.9) change what is computed.** A bug there produces
+  subtly wrong frames the 4-viewpoint deg gate can miss; PVS needs a conservativeness proof or a
+  many-viewpoint sweep (ca2_sweep's 260 frames is the right shape).
+- **No baseline freeze before emitter changes.** 3a, 3c, 5.3, 5.6, 5.7 all move addresses;
+  without `ritual.py freeze` on the current shipped binary first, regressions cannot be
+  attributed.
+- **The build_blocked.py warning fix is untested code.** It changed a check inside a 45-minute
+  build and has not been run through one.
+
+**Scope**
+
+- **3b (collision) has no hypothesis.** "Ask why" is not a first step. A concrete one: does
+  `sim.bind_things` iterate every thing every frame, and could it iterate only the moved ones?
+- **The size metric is untracked.** 3a, 5.9 and a code cache all add words; the ship gate is
+  35% of 2²⁷ and the plan never mentions it.
+- **The profiler is fragile scratch tooling.** `mkprof.py` patches `_fjcore.c` by string
+  anchors and broke once already when the source moved. Every measurement in sections 1–5
+  depends on it. It should become a compile-time `FJPROF` flag in the engine itself.
+
+## 7. Measured 09-13: cost per object (1b) -- the ranking the plan is now built on
+
+`scratchpad/12m/heatcost.py` over the word-level trace of `b26` (842,328,561 touches, 14 frames)
+joined to its own label table. Footprint = distinct 64 B lines at 4-byte cells, the engine today.
+
+```
+BY FOOTPRINT (what fills the cache)
+ rank   lines@4B      MB   touches%   reuse T/L   object
+    0    129,921    7.93      6.61%         428   m1_reset
+    1     22,110    1.35      8.42%       3,208   seg_pass2_leaf
+    2     20,196    1.23     13.01%       5,427   simcollide_skip
+    3     15,495    0.95      2.98%       1,618   e1m1_bspcode_pos_leaf
+    4     14,627    0.89      2.09%       1,202   cma_vyd
+    5     14,619    0.89      2.21%       1,275   cmh_vyd
+    6     11,404    0.70      5.63%       4,156   thing_pass_leaf
+    7      9,532    0.58      4.13%       3,651   seg_pass1_ts_leaf
+total touched: 301,248 lines = 18.39 MB; the top 25 objects hold 88.3% of them
+```
+
+**`m1_reset` is 43% of the entire touched footprint (7.93 of 18.39 MB) for 6.6% of the touches,
+with the lowest reuse of any large object.** It runs as one bulk walk at the start of every
+frame, before the render -- so every frame begins with the caches flushed of the previous
+frame's hot set. It is CODE, not data: the m1 restore set names 12,238 cells and the object
+spans 585,878 words, ~48 words of wflip chain per restored cell. The lever is therefore FEWER
+CELLS RESTORED PER FRAME (a dirty set, or not self-modifying what must be restored), not a
+packed table.
+
+The touch-count leaders the old ranking put first -- `hex.tables.ret`, `hex.tables.res`, the
+temp word at address 0 -- are ONE cache line each with 43-53M touches: L1-resident and free,
+exactly as section 6 predicted. `cb_bx` does not appear in the top 25 by footprint at all.
+
+**Re-rank:** 3c (the M1 reset) moves to #1 among program-side levers. The rendering leaves
+(`seg_pass2_leaf`, `simcollide_skip`, `e1m1_bspcode_pos_leaf`, `cma/cmh_vyd`, `thing_pass_leaf`)
+are the next ~6 MB and are instruction stream -- what 1a decides.
+
+## 8. Measured 09-13: the split trace (1a) and the jump census (1c) -- the plan is now facts
+
+One instrumented run of `b26`, 14 frames, 421,164,280 ops (`mkprof2.py`, `splitanalyze.py`).
+
+**1c. Jumps:** fall-through (`j == ip+2w`) **6.38%**, loop 0%, near (within +-64 words) **50.82%**,
+far **42.79%**.
+- KILLED by their own kill criteria: **5.1** (predict fall-through -- it would mispredict 94% of
+  the time) and **2b** (block execution -- there are no fall-through runs to amortise over).
+- The 50.8% near jumps land within +-4 cache lines and are likely already L1 hits via the
+  adjacent-line prefetcher. The **42.8% far jumps are the expensive chain loads.**
+- ~~**2a** (read `j` before the flip, prefetch the next fetch) is now the only engine lever aimed
+  at the chain~~ -- **KILLED in section 10 (measured: the flip store costs 0.02 ns/op).**
+
+**1a. The two streams** (units are 8 words = 32 B at 4-byte cells, so the MB figures are ~2x
+high; the ratios are exact):
+
+```
+IP-STREAM      499,032 units    50% in 10,441   90% in 93,366   95% in 142,644   (~2.9 MB true at 90%)
+FLIP-TARGETS     9,219 units    50% in     15   90% in    363   99% in     981   (~10 KB at 90%)
+overlap 9,217   ip-only 489,815   flip-only 2
+```
+
+- **The flip targets are L1-resident. The instruction stream is 98% of the footprint.** The chain
+  IS the footprint. Everything framed around "scattered flip targets" is retired: data
+  relocation (already measured weak) and **table co-location (5.3)** -- the flips are already
+  cheap.
+- The chain's working set: 90% of instruction fetches in ~2.9 MB -- just past the L2 knee, which
+  is exactly where the latency curve put the game. Consistent.
+- ~~Because the instruction stream is the footprint and 1b says `m1_reset` is 43% of it: shrinking
+  the reset code is THE lever.~~ **WRONG -- footprint is not time; section 10 measures the reset
+  at 14.3% of the time for 13.2% of the ops.** 12,238 cells restored per frame at ~48 words of wflip chain each.
+- **3a (inline the hot leaves) GROWS the instruction stream** -- the interaction section 6 warned
+  about is now measured to point the wrong way. Demoted; only with a footprint gate.
+- **5.6** (padding census) and **5.7** (static jump threading) shrink the instruction stream and
+  are promoted.
+- NEW LEVER, from 1c + the 3.12-words-per-line density: ~63% of ops are wflips and their chains
+  live in the assembler's wflip area, where `insert_wflip_ops` SHARES chain tails between values
+  (its "found-statistic"). Sharing makes chains DAGs -- near-but-not-adjacent jumps (the 50.8%)
+  and half-empty lines. The trade between chain SHARING (less code) and chain CONTIGUITY (denser
+  lines, more fall-through) has never been measured. It is the assembler's, not the emitter's.
+
+## 9. ~~THE PLAN, RE-RANKED BY MEASUREMENT~~ -- SUPERSEDED BY SECTION 11 the same afternoon (ranked by footprint, which section 10 shows is not time)
+
+| # | lever | why it is here | gate |
+|---|---|---|---|
+| 1 | **M1 reset: restore fewer cells per frame** (dirty set) | 43% of the touched footprint, lowest reuse, a cache flush before every render; it is code | restore-set labels; `m2_std_gate`; `msframe --against shipped` |
+| 2 | **2a: read `j` before the flip, prefetch `flat[j>>ww]`** | the only engine lever on the 42.8% far jumps | op counts + pixels; `msframe` |
+| 3 | **wflip-area layout: chain contiguity vs sharing** | 63% of ops; density is 3.12/8 words per line; never measured | assembler; byte-exact; `msframe` |
+| 4 | **5.6 padding census + 5.7 static jump threading** | both shrink the instruction stream, which is 98% of the footprint | assembler; byte-exact |
+| 5 | **3b collision ops** | `simcollide_skip` is a hot leaf (reuse 5,427): its cost is OPS, not misses -- an ops/frame lever | emitter; byte-exact |
+| 6 | **4: knob re-sweep vs ms/frame** | still valid; needs same-source builds (45 min each) | `msframe` |
+| 7 | 5.8 per-byte IO (small, certain); 5.10 viewport (product decision) | | |
+| -- | **KILLED:** 5.1, 2b (6.4% fall-through); 5.3 co-location (flips L1-resident); data relocation | | |
+| -- | **DEMOTED:** 3a leaf inlining -- grows the instruction stream; only behind a footprint gate | | |
+
+Ceiling unchanged: ~2-3x end to end, an upper bound. Expected in-game today: ~99 ms/frame,
+~200 M fj/s, ~10 FPS (pinned baseline `shipped`).
+
+## 10. Measured 09-13, afternoon: TIME per op, and where it goes -- the cost model
+
+Section 9 ranked levers by cache footprint. Footprint is not time. Five more instruments, all in
+`scratchpad/12m/` (`mkprof3.py` builds two instrumented engines; `timeobj.py`, `cachemodel.py`
+read them; `micro/storewait.c`, `micro/tlbcost.c` are the microbenchmarks; `prof3run.py` /
+`sieverun.py` are the pinned runners), all on the i7-12700H P-core 2 at 3.5-3.7 GHz (read from
+the `% Processor Performance` counter during each run -- NOT the 4.7 GHz turbo), 4-byte cells.
+
+**10.1 Time by object** (rdtsc every 64 ops, b26, 14 frames, quiet box):
+
+```
+kept 421,013,056 ops in 1.907 s -> 4.53 ns/op = 220.8 M ops/s = 16.4 cycles/op at 3.62 GHz
+ rank   time%    ops%   ns/op  cyc/op  object
+    0  20.88%  24.96%   3.79    13.7   simcollide_skip
+    1  16.38%  14.53%   5.11    18.5   seg_pass2_leaf
+    2  14.31%  13.24%   4.89    17.7   m1_reset
+    3  10.61%   8.59%   5.59    20.3   thing_pass_leaf
+    4   6.42%   5.93%   4.90    17.7   e1m1_bspcode_pos_leaf
+    5   6.35%   7.64%   3.76    13.6   seg_pass1_ts_leaf
+    6   6.29%   6.25%   4.56    16.5   seg_pass1_leaf          top 7 = 81.4% of the time
+   ...  cma_vyd / cmh_vyd 3.26 ns/op (the fastest big objects), thing_pass_leaf 5.59 (the slowest)
+```
+
+**ns/op spans only 3.26-5.59 across every object with >= 1% of the ops.** Time share tracks ops
+share within +-30% everywhere. `m1_reset` -- 43% of the footprint -- is 14.3% of the time for
+13.2% of the ops. **Per-op cost is nearly uniform, so ops/frame IS the currency after all**, at
+~4.5 ns per op; what varies is a modest memory term on top of a large fixed one.
+
+**10.2 The engine floor.** The prime sieve (`sieverun.py`, N=1,000,000, 527,179,628 ops, ip
+stream 99.39% L1-resident by the model, TLB 100%): **378.2 M ops/s pinned on the shipped engine**
+(the owner's "300M+" confirmed) = 2.68 ns/op = **9.2 cycles/op at 3.45 GHz**. A bare dependent
+chase of the same shape in L1 (`storewait.c` V0) is 1.57 ns = ~5.7 cycles. **The engine loop
+spends ~3.5 cycles/op on itself** -- eleven branch micro-ops per op (unaligned check, two span
+checks, three garbage checks, two IO checks, looping, null-ip, the back-edge), which at two
+branches per cycle is a 5.5-cycle throughput floor that overlaps the chase only partially.
+
+**10.3 The memory term.** `mkprof3.py S` runs both access streams through a simulated Golden Cove
+hierarchy (L1D 48K/12-way, L2 1.25M/10, L3 24M/12 exclusive) and a DTLB(96)/STLB(2048) model,
+with latencies MEASURED by `tlbcost.c`'s packed chase: L1 1.2 ns, L2 3.45 ns, **L3 26.5 ns**
+(~98 cycles -- twice the textbook figure), DRAM ~100 ns.
+
+```
+ip stream   L1 83.48%   L2 12.62%   L3 3.77%   DRAM 0.13%     -> +5.1 cycles/op over the L1 floor
+flip stream L1 99.64%                                          -> L1-resident, as 1a said
+TLB (ip)    DTLB hit 97.55%   STLB hit 2.25%   page walk 0.195%   -> +0.3 cycles/op
+LRU what-if: a 1.25 MB cache serves ~97% of fetches, 2 MB serves 98.2%, 4 MB 99.0%
+pages: 50% of fetches in 215 pages, 90% in 1,934 (STLB is 2,048), 10,993 touched
+```
+
+**10.4 The model closes.** floor 9.2 + cache 5.1 + TLB 0.3 = **14.6 cycles/op predicted vs 16.4
+measured** (-11%). The residual is the size of the run-to-run spread (10.6), so the model is
+trusted to price levers. In shares of the frame: **engine floor 56% (chase 35%, loop overhead
+21%), cache misses 31% (L2 hits 6%, L3 hits 22%, DRAM 3%), TLB 2%, unexplained ~10%.**
+
+**10.5 Killed by measurement.**
+- **2a (read `j` before the flip / prefetch): the flip store costs nothing.** `storewait.c`:
+  engine order vs bare chase +0.02 ns at L1, +0.3 ns at L2; d=1 self-modification (the flipped
+  word is the next op's word: 4.1% of the game's ops, 5.5% of the sieve's) adds 0.04 ns; the
+  loads-first variant is SLOWER (+0.2 ns). Memory disambiguation handles this pattern. Dead.
+- **The TLB: 2%.** The program is already TLB-friendly (97.55% L1-DTLB hits; 90% of fetches inside
+  the STLB's reach). Large pages on any OS are worth <= 2-3%. The owner's question is answered:
+  there is no TLB lever here, with or without privileges. (The 09-12 WSL2 THP test could not have
+  shown one anyway -- a guest 2 MB page over 4 KB host backing yields 4 KB TLB entries -- but the
+  model closes the question by itself.)
+- **Footprint as a ranking.** The L3-served 3.77% of fetches cost 3.5 cycles/op: the ENTIRE
+  "make it fit L2" lever is a 22% ceiling, and `m1_reset`'s 34% share of those misses caps its
+  cache lever at ~7%. Sections 7-9's ordering is withdrawn.
+
+**10.6 Measurement facts that change the process.**
+- **Fresh-process variance is +-8% on a quiet box**: five runs of the same 421M-op loop took
+  1.72-2.16 s (4.08-5.12 ns/op) with the yardstick steady at 3.2-3.6 G. Physical page placement
+  of the 512 MB flat array (L2/L3 are physically indexed) is the likely cause. msframe's five
+  fresh processes + median is the right shape; nothing below its 3% rule is decidable anyway.
+- **An L3-streaming neighbour costs 15-31%** (`hog.py` on another P-core: 2.25 s vs 1.72-1.94 s);
+  the owner's video render cost ~10% while it ran. The busy-machine refusal stays, and in-game
+  FPS will drop with other apps open.
+- **`core.run` carries 0.96-2.16 s of fixed setup per process** (flat allocation, garbage fill,
+  segment copy -- measured by 2-frame vs 14-frame runs), so msframe's absolute ms/frame is
+  5-10% high at 200 frames. A/B verdicts are unaffected (same setup both sides). Fix: subtract a
+  2-frame calibration per binary, or have the engine report the loop's own time.
+- **The clock is 3.5-3.7 GHz under this load, not 4.7.** Every cycles/op above is at the measured
+  clock; ns/op is the portable number.
+
+## 11. THE PLAN, v3 -- ranked by the measured cost model
+
+Per op today (b26, quiet, 3.6 GHz): **16.4 cycles = 4.5 ns.** Target 300 M ops/s = 12.1 cycles at
+this clock, i.e. -4.3 cycles.
+
+| # | lever | measured size | what to do | gate |
+|---|---|---|---|---|
+| 1 | ~~**Engine loop: 11 branches/op -> ~5**~~ **KILLED by measurement, section 12** (12 -> 3 branches and a PGO fall-through layout both NOT SEPARATED) | ~~ceiling 3.5 cyc (21%); expect ~2 (12%)~~ measured ~+2-3% at best | (a) when `cell32 && flat_count == 2^27` at w=32 every 32-bit address is in span -- drop BOTH span checks in that specialisation, provably; (b) fold the three garbage compares into one branch (`((f^M)==0)\|((v^M)==0)\|((j^M)==0)`); (c) fold the two IO tests into one; (d) fold `j==ip` / `j<dw`; (e) strip-mine `ops++` | ops + pixels identical (`m2_std_gate`), then `msframe --against shipped`; per-step A/B, keep only separated wins |
+| 2 | **ops/frame** (4.5 ns each, uniform) | proportional | the 12M-campaign toolbox, ranked by 10.1's ops%: `simcollide_skip` 25% (88% L1 -- pure op count: 3b, with the concrete hypothesis from section 6), `seg_pass2_leaf` 14.5%, `m1_reset` 13.2% (restore fewer cells), `thing_pass_leaf` 8.6%, `seg_pass1_ts` 7.6%, `seg_pass1` 6.3%, bspcode 5.9% | byte-exact gates; `msframe` for the ms |
+| 3 | **The L3 tail** (3.77% of fetches at 26 ns) | ceiling 3.5 cyc (22%); expect 1-1.5 | ~~m1_reset holds 34% of the L3-served fetches: order its restore walk by address~~ **MOOT (12.7): the walk is already emitted in address order**; what remains is so the stream prefetches (ceiling 7%); then pack the 90-99% band of the ip stream (47K -> 157K lines) -- the what-if curve says the working set is only slightly past L2, so the TAIL is the target, not the hot core | `cachemodel.py` predicts before a build; `msframe` decides |
+| 4 | **Clock / power** (outside the program) | +20-30% | the P-core ran at 3.5-3.7 GHz; plugged in on a performance plan it turbos to 4.7. Record the plan (msframe does) and the clock (the counter) with every number | -- |
+| 5 | **msframe setup bias** | 5-10% of absolute ms/frame | subtract a 2-frame calibration, or report engine loop time | `--selftest` |
+| -- | **CLOSED:** TLB / large pages (2%); 2b, 5.1, 5.3; footprint as a metric; "L2 capacity is the bottleneck"; **and after sections 12-13 the WHOLE ENGINE: span checks, branch count, block layout (PGO), the flip store, and 2a itself (re-tested in the engine, median 0.982 -- if anything slower). Also the placement axis (13.4): +46% ops for +20% rate is a 22% loss.** | | | |
+
+**Expectation for the owner.** ⚠ **WITHDRAWN in section 12.7: lever 1 delivered ~2-3%, not ~12%, so the 280-300 M figure below has no measured basis; the game runs ~200 M fj/s on this machine and its frame time moves only with ops/frame.** ~~Quiet machine, this laptop: ~220 M fj/s in-loop on b26's mix today
+(~200-230 M on the shipped binary), 3.6 GHz. Levers 1+3 landing at their expected values give
+~12.5-13 cycles/op = **~280-300 M fj/s at 3.6 GHz -- the 300 M target is reachable, barely, and
+only on a quiet box**; at 4.7 GHz the same program would already exceed it. Frame time is that
+rate times ops/frame: at the 20 M-ops/frame goal and 3.4 ns/op that is ~68 ms = **~15 FPS**
+(~19 at 4.7 GHz). The earlier "2-3x end to end" was a guess; this is a sum of measured parts.~~
+
+**Sequencing.** Lever 1 first (one engine session, no builds, the largest measured piece, gated
+by op counts + pixels + msframe); lever 3's reset ordering second (one emitter session; the
+restore set is regenerated, R-reset-set applies); lever 2 continuously with the existing
+toolbox; lever 5 when msframe is next touched.
+
+**Verdict on the plan: satisfied** ~~-- superseded the same day by section 12, which killed lever 1 and closed lever 3~~. Every lever is sized by a measurement on this machine, the
+cost model that sizes them reproduces the measured per-op time within the run-to-run spread, the
+two largest earlier candidates (TLB, footprint) are closed by numbers rather than by argument,
+and each lever names its gate.
+
+## 12. Lever 1 executed (09-13, evening): the engine loop's branches, folded 12 -> 3, and what it measured
+
+**Outcome first: KILLED by the kill criterion.** Every fold is built, gated and equivalent; all of them
+together measure NOT SEPARATED against the unmodified engine (median ratio 1.009 at 5 reps,
+1.027 at 10 reps -- eight of ten pairs in its favour, under the 3% floor and the +5% kill line). The branch count of the hot loop is not the engine's floor. Nothing is shipped: the
+installed engine is the one the baseline was frozen on, and flipjump-151's working tree is back to
+`cac64fd` (the folded source is parked on its branch `lever1-folds-measured`). The patches, the built engines and every ledger row are kept (below), so this does not
+have to be re-learned.
+
+**12.1 The precondition was wrong, and had to be built.** Section 11 said "when
+`flat_count == 2^27` every 32-bit address is in span". The game's flat window is not 2^27 words:
+`blocked25`'s last segment ends at word 96,009,696 (71.5% of the address space; 424,743
+segments), so the flat array stopped there and the span checks were live. Fold (a) therefore
+changes the allocation: at w=32 with 4-byte cells and a flat limit >= 2^27, the array now spans
+the whole address space (2^27 cells, 512 MB, the tail past the last segment garbage-filled) plus
+ONE GUARD CELL past the end, also garbage-filled, so the jump-word read of an op in the very last
+word reads the sentinel instead of running off the array. With that, the proof holds and is in the
+source (`run_flat_loop_impl`'s comment): every ip is a uint32 cell value or the dispatch-checked
+`start_ip < 2^32`, every flip target is `f >> 5 < 2^27`, and the only jump-word index past the
+array is the guard. `flat_count` stays the semantic window (freeze/reset/set_words/API unchanged);
+`flat_alloc_count` is the allocation; `Memory.flat_full_span` exposes which loop ran. Cost: the
+tail's fill and ~146 MB more resident memory per process -- which is the reason not to keep it
+without a measured gain.
+
+**12.2 What the folds did to the loop** (read from `dumpbin /disasm`, w=32 / 4-byte-cell
+instantiation, per op):
+
+| build | conditional branches | of which TAKEN on the common path | other per-op costs |
+|---|---|---|---|
+| shipped (`cac64fd`, `/O2 /GL`) | 12: unaligned, 3 span, 3 sentinel, output, input, j==ip, j<2w, back-edge | **11** -- MSVC lays every cold block inline and the common path hops over each one | `ops++` stored to the stack every op; the array base and `flat_count` reloaded from the stack every op |
+| fold a | 9 (the 3 span checks gone; the guard compare sits in the cold path only) | 8 | the op counter now load-inc-stored through memory |
+| folds a-g | **3**: head (unaligned \| sentinel-f \| output \| input), tail (sentinel-v \| sentinel-j \| j==ip \| j<2w), back-edge | 3 -- still all taken: MSVC keeps the cold code as the fall-through | `f` spilled to the stack and reloaded before the flip; the array base reloaded; ~45 instructions/op either way (the branches became setcc/or chains) |
+
+The folds: (a) span checks out (full-span array); (b) the flip-word sentinel test joins the
+output test, the flip-target's is DEFERRED past its store to share one branch with the jump
+word's (`flat_deferred_flip_garbage` undoes the store when the target was real garbage, so
+memory and the reported error are identical); (c) the input test joins the head branch; (d)
+`j == ip` and `j < 2w` become one branch; (e) `ops++` strip-mined into the signal-check strip
+counter (`done_counted` adds the halting op); (f) the alignment test joins the head branch --
+the flip-word read is safe for any 32-bit ip in full-span mode, an unaligned ip's f is re-read
+the slow way in the cold block; (g) the two tail branches become one. Every cold block keeps the
+old order of checks, and the general (non-full-span) instantiation keeps its span checks.
+
+**12.3 Gates, all passed on every build:** flipjump-151's `test_native_memory`,
+`test_interpreter`, `test_fast_run` (83 tests, in-process on the candidate via
+`with_engine.py`); `engine_diff.py` (15 hand-built edge cases, each fold against its
+predecessor: unaligned ips, the last word of the address space, jumps and flips into the garbage
+tail, magic-valued data/flip/jump words, IO order with EOF, null ip, the not-looping self-flip,
+`start_ip = 2^32`, w=16 and a small-limit w=32 -- cause, op count, error address, IO transcript
+and memory fingerprint all identical; its `--selftest` rejects a mutated op count);
+`m2_std_gate` on `blocked25` with the shipped engine, fold (a) and folds a-g: 4,432,191,712 ops,
+210 frames, PASS, identical to the digit; and msframe's own pixel/op identity across arms on
+every run.
+
+**12.4 The measurements** (`msframe`, `blocked25`, 200 frames, cpu 2, power plan Turbo; the
+owner's video render was running at ~0.6-0.75 core the whole time -- `--selftest` PASSED under
+that load with a worst A-vs-A pair of 6.8%, so the floor today is worse than the 3% rule):
+
+```
+control   installed engine b96339f7 vs the same source rebuilt (99d15dcb):
+          100.0 vs 101.2 ms   ratios 0.998 1.011 0.989 0.972 0.962   median 0.989   NOT SEPARATED
+fold a    step0 99d15dcb vs stepA 80791441 (full_span=True):
+           99.0 vs  98.5 ms   ratios 1.001 0.988 1.017 1.069 1.017   median 1.017   NOT SEPARATED
+folds a-g step0 vs stepG b57a48a5 (full_span=True), 5 reps:
+          103.7 vs 101.9 ms   ratios 1.004 1.023 1.028 0.941 1.009   median 1.009   NOT SEPARATED
+folds a-g 10 reps (the protocol's escalation):
+          101.2 vs  99.0 ms   ratios 1.066 1.053 0.769 1.015 1.055 1.057 1.016 1.013 1.038 0.994
+                              median 1.027   NOT SEPARATED
+PGO       stepG b57a48a5 vs the same source with MSVC PGO, pgoG 8d827c5e (trained on 100 frames):
+           96.7 vs  97.0 ms   ratios 1.042 1.020 1.018 0.992 0.958   median 1.018   NOT SEPARATED
+```
+
+**12.5 What this says about the cost model.** Section 10.2 attributed the 3.5 cycles between the
+bare chase (5.7) and the engine's L1 floor (9.2) to "eleven branch micro-ops per op". Taking nine
+of them out (and eight of the eleven TAKEN jumps) moved the frame by ~1% -- inside the noise. So
+the loop's overhead is not in its branches, and section 10.2's split of the floor is withdrawn:
+the engine's per-op cost above the chase is somewhere else (the store-to-load path through the
+jump word, the stack traffic -- NOT the front-end: see the PGO row). Lever 1 as stated has no gain to
+ship on this compiler and machine.
+
+**12.5b The layout was tested too, and it is not the floor either.** MSVC's PGO build of the
+folded source (`pgo_build.py`: `/LTCG:PGINSTRUMENT`, trained on 100 `blocked25` frames,
+`/LTCG:PGOPTIMIZE`; the linker reports 56/56 functions and 100% of the profiled instructions
+optimised with the profile) lays the loop out exactly as section 11 wanted: every rare-path
+branch falls through, the cold blocks live out of line, only the back-edge is taken, and the
+compiler even split the setcc/or chains back into separate never-taken compares because the
+profile told it they never fire. That engine measures the same as the plain build within noise
+(median ratio 1.018). So the common path can be ~40 straight-line instructions with one taken
+branch, or 12 branches with 11 taken, and the frame time does not move: **the engine's per-op
+cost above the chase is not instruction-side at all.** What is left on the per-op critical path
+is the memory chain itself -- ip -> word address -> the jump-word load -> ip, with that load
+ordered after the flip store whose address depends on the flip word's load (memory
+disambiguation, and a genuine store-to-load dependency on the 4.1% of ops that flip their own
+jump word). Section 10.5 closed the "read j before the flip" idea on a microbenchmark, and this
+session did not reopen it (as instructed); it is recorded here as the only candidate the loop
+measurements leave standing, for the owner to weigh.
+
+**12.6 What is kept.** `scratchpad/12m/with_engine.py` (run any gate on a candidate engine),
+`engine_diff.py` (the edge-case differential, R9 self-test), `loopbranches.py` (hot-loop
+disassembly, needs its window heuristic fixed for MSVC's interleaved layout -- read the dump by
+hand), `pgo_build.py` (an MSVC PGO build of the engine, trained on the game), msframe's per-arm
+engine switch (`MSFRAME_FJCORE_PYD`, recorded per arm in the ledger), the fold patches
+`patch_fold_{a..g}.py` and the seven built engines in the session scratchpad, and the protocol
+text in `docs/measurement-process.md`.
+
+**12.7 Lever 3, checked before it was started: the restore walk is ALREADY in address order.**
+`selfreset.emit_reset_part` sorts the restore set (`cells = sorted(...)`) and emits `hex.zero` /
+`hex.set` in ascending address order, then the three byte arrays; the shipped
+`build/generated_doom_e1m1_blocked25/e1m1_07_reset.fj` has 811 restore targets with exactly 2
+descending steps (the byte-array reps at the end). There is nothing to reorder. What section 11
+called the reset's L3 tail is the streaming of its own 7.9 MB of straight-line code once per
+frame -- one new cache line per ~8 ops, which the cache SIMULATION counts as a miss and the
+hardware prefetcher may already hide; the simulation does not model prefetch, so lever 3's
+"ceiling 7%" was never a measured number. Lever 3 as written is closed by inspection.
+
+**Where that leaves the plan.** Of section 11's five levers: 1 is killed by measurement, 3 is
+moot, 4 (the clock: the P-core ran at 3.3-3.6 GHz throughout tonight's runs, yardstick 3.45-3.60G)
+is outside the program, 5 is instrument hygiene. What is left is lever 2 -- ops/frame, ~4.5 ns
+each, through the 12M campaign's toolbox -- and the one engine idea these measurements leave
+standing, the jump-word load's dependence on the flip store (section 10.5's 2a), which was closed
+on a microbenchmark and is not reopened here. The 300 M fj/s figure of section 11's expectation
+depended on lever 1 delivering ~12%; it did not, so that expectation is withdrawn: on this
+machine, with this compiler, the engine runs the game at ~200 M fj/s (100 ms/frame at 19.86 M
+ops/frame on `blocked25`) and the frame time now moves only with ops/frame.
+
+## 13. 2a re-tested in the engine (not the chase), and the machine's quiet-box number
+
+**13.1 2a is dead on the real workload too, and the engine is now closed.** Section 12 left one
+candidate standing: the jump-word load sits behind the flip's store, so the ip -> ip chain can
+only issue on a memory-disambiguation prediction, and the program mistrains that predictor (4.1%
+of its ops flip their own jump word). Section 10.5 had killed the idea on a microbenchmark, and
+`docs/measurement-process.md` says a synthetic curve is not a measurement -- so it was re-tested
+in the engine, on the game.
+
+The edit (`scratchpad/12m/engine_folds/patch_2a.py`) reads the jump word BEFORE the store and
+patches it in a REGISTER when the flip hit it (`if (flip_word_address == word_address + 1) j =
+flipped;` -- the new value is already in hand, so there is no re-load and no memory dependence).
+It moves the load only across the store: every path that can write memory behind it (both IO
+callbacks, the out-of-span flip, the garbage re-check) is taken above it, and `after_flip` keeps
+the original post-store read for the one that returns there. The disassembly confirms the machine
+code changed as intended:
+
+```
+mov  ecx, dword ptr [r12+rsi*4+4]   ; the jump word, LOADED FIRST
+mov  dword ptr [r12+r14*4], r11d    ; the flip's store, now after it
+cmp  r14, rax                       ; did the flip hit the jump word?
+je   ...                            ; yes: keep `flipped`
+mov  r11d, ecx                      ; no: take the loaded value
+```
+
+Gates: 83 engine unit tests, `engine_diff.py` 15/15 identical, `m2_std_gate` 4,432,191,712 ops /
+210 frames / PASS. Measurement (`msframe`, blocked25, 200 frames, 5 reps, both arms the same
+binary):
+
+```
+2a   step0 99d15dcb vs step2a 145c29df:  81.9 vs 83.1 ms
+     ratios 0.998 1.050 0.977 0.982 0.982   median 0.982   NOT SEPARATED (and the sign is AGAINST it)
+```
+
+Four of five pairs put the hoist BEHIND the baseline. The hardware's disambiguation predictor was
+already doing this job, and naming the aliasing case costs a compare and a register move per op.
+**With this, every engine lever in the plan is closed**: span checks, branch count, block layout
+(PGO), TLB, large pages, the flip store, and now the jump-word hoist. The per-op time is the
+memory chain's latency and nothing in the loop's code changes it.
+
+**13.2 The quiet-box number, and what the instrument cannot hold constant.** The 2a run happened
+after the owner's video render exited, and the SAME unmodified engine on the SAME binary read
+**81.9 ms/frame at 242.4 M fj/s**, against 99-104 ms at 191-200 M fj/s in every run before it
+(yardstick 3.62 G vs 3.45-3.51 G). That is a 20% machine-state shift with nothing in the program
+or the engine changed, and it is larger than every effect this session set out to measure.
+
+Two consequences, both process:
+- **A/B verdicts survive it** (both arms move together within a run: that is what counterbalanced
+  alternation is for), but **absolute ms/frame numbers are only comparable inside one run.**
+  Section 12's "the game runs ~200 M fj/s" was that day's machine, not this machine: on a quiet
+  box with nothing else running, `blocked25` renders at **81.9 ms/frame = 12.2 FPS, 242 M fj/s**,
+  and msframe's own 5-10% setup bias (10.6) makes the true in-loop rate a little higher still.
+- The busy-machine refusal has a hole: a background render at ~0.3-0.45 core sits under the
+  half-core threshold, never trips the refusal, and costs ~20%. Either lower the threshold or
+  record the yardstick's absolute level in the verdict line (msframe already stores it).
+
+**13.3 The ~240 M fj/s figure against the owner's 300 M question.** The prime sieve reaches
+378 M ops/s pinned because its instruction stream is 99.4% L1-resident (10.2). The game's is
+83.5% (10.3), and at DOOM's working set that is not a knob the engine owns. 242 M is what this
+program costs on this machine; 300 M would need the program's ip stream to fit closer to L1, not
+a faster loop.
+
+**13.4 Plan section 4 answered, and it is the session's only SEPARATED verdict: the blocking
+campaign was tuned on the RIGHT axis.** Section 4 suspected the build knobs had been optimised
+against the wrong quantity -- "eight existing binaries span 164-1140 ms/frame at similar work...
+the win may already be sitting in a config that was rejected for its op count". That is testable
+without building anything, because `b26` and `blocked25` are the SAME PROGRAM: every emitted part
+is byte-identical (`00_entry`, `01_tables`, `02_main`, `03_segconsts`, `04_walk`, `05_state`,
+`06_banks` all match by md5) except `07_reset`, whose baked addresses follow the placement. They
+differ only in the blocking/placement pass -- `b26` is `build_blocked.py game --merge-aliases`
+with the default pool base and unbounded span. In FlipJump a wflip costs popcount(address), so
+placement moves the OP COUNT; the question is whether it buys back more than it costs.
+
+```
+blocked25  19,855,016 ops/frame   241.5 M fj/s    82.2 ms/frame  [81.9 .. 83.4]
+b26        28,962,604 ops/frame   289.4 M fj/s   100.1 ms/frame  [99.3 .. 100.9]
+           +45.9% ops             +19.8% rate     +21.8% time
+ratios 0.827 0.823 0.824 0.825 0.820   median 0.824   VERDICT: B SLOWER   pixels identical: YES
+```
+
+Two things follow, and they are the first hard numbers on either.
+- **Per-op cost is not a constant of the program: placement moves it by ~20%.** `b26`'s average
+  op really is cheaper (289 vs 241 M fj/s on the same renderer and the same frames). Whether that
+  is better locality or simply DILUTION -- its extra ops are wflip-planting work that hits the
+  same lines repeatedly -- these two numbers cannot separate, and the distinction does not change
+  the decision.
+- **The decision: ops/frame still wins.** +46% ops against +20% rate is a 22% LOSS, and the
+  2026-09-08 reading that framed section 4 ("+45% ops, +45% ops/s, same 452 ms/frame") does not
+  survive the 4-byte-cell engine -- halving the cell width cut the rate advantage of the
+  op-heavy placement in half while leaving its op penalty intact. **Section 4 is closed: the knob
+  sweep has no win hiding in it, and a config must not be chosen on ops/s.** ms/frame remains the
+  only verdict, and at equal ms/frame the lower op count is the safer config.
+
+**13.5 Where the remaining leverage is, with everything else measured shut.** After sections 12
+and 13 the engine is closed end to end -- span checks, branch count, block layout, TLB, large
+pages, the flip store, the jump-word hoist -- and so is the placement axis. What is left is the
+program's op count (section 11 lever 2), which is now the whole of the frame time:
+`simcollide_skip` 25% of ops, `seg_pass2_leaf` 14.5%, `m1_reset` 13.2%, `thing_pass_leaf` 8.6%,
+`seg_pass1_ts` 7.6%, `seg_pass1` 6.3%, bspcode 5.9% (10.1). At 82.2 ms/frame and 19.86 M
+ops/frame, every million ops removed is worth **~4.1 ms/frame**, and the collision block alone is
+~5 M ops/frame. The campaign's own note (FINDINGS AU) prices S2-style `try_move` sharing at ~4.3 M
+words of SPAN; nobody has yet priced it in ops PER FRAME, which is now the number that matters.
+
+## 14. Lever 2, item 1 (09-13, night): baking the per-leaf thing lists -- MEASURED, then REVERTED at the owner's call
+
+**Outcome first.** The change is reverted and nothing shipped: the owner is adding MOVING MONSTERS within
+days ("you can't rely on it not being a feature"), and this change only works while nothing moves.
+The section stays because what it measured is worth more than the change: the deleted code was 25%
+of the frame and the frame did not get faster, and the reason is a property of the BLOCKING PASS
+that the monster work will run into again.
+
+**14.1 What the 25% actually was.** Section 10.1's biggest object, `simcollide_skip` at 24.96% of
+all ops, is not collision: that label sits at the END of the collision block, immediately before
+the frame's `sim.bind_things thpos_rt, thss_rt, 75` line, and the b26 ip histogram joined to
+b26's label table puts 106,260,329 of the interval's 106,583,410 ops (99.7%) inside
+`sim.bind_things`' own expansion labels (`proj.wedge_setup` is 133,244; the rest is dust). That
+is ~7.6 M ops per frame on b26 for 75 runtime things, ~100 K ops per thing: three `ptr_index`,
+a `read_hex`, a `read_byte`, two `write_byte` and the sparse movs of the clean path, every thing,
+every frame.
+
+**14.2 Why it can be baked.** The macro re-binds things to leaves so a thing that MOVED gets a new
+list entry. In the standalone tier nothing moves a thing (C4), `thss_rt` is already baked at the
+spawn binding (M5), and the dirty path never runs -- so the macro is a pure function of
+constants, and every frame it rebuilds the same two arrays. The emitter now computes those arrays
+(`wall_renderer.baked_thing_lists`: t = 74 .. 0, `thnext[t] = sshead[ss]; sshead[ss] = t + 1`, the
+macro's own prepend order, so each leaf's traversal is ASCENDING by index exactly as
+`sim.thing_pass` and the sprite slot order require), emits them as `;v * dw` byte cells in the
+same `_hot_arrays` block -- a `hex` cell IS `;val * dw`, one op, so the cell count, the shape and
+every address are unchanged -- and drops the call from pass 1. The hosted tier is untouched: the
+host moves things there and marks them dirty.
+
+The one consequence outside the emitter: the M1 reset restored `sshead` every frame by ZEROING it
+(`m1.zerobyte` over its 682 reachable cells), because the per-frame rebuild dirtied it. With the
+rebuild gone the frame never touches it, and a reset that zeroed it would delete the baked lists.
+So `sshead` leaves the STANDALONE restore set (`scratchpad/m5_drop_sshead.py`: 474 -> 473 entries,
+12,400 -> 11,036 words, fingerprint recomputed and the result pushed through the production
+loader with the fingerprint check ON), `selfreset.emit_reset_part` skips a byte array the set
+does not carry at all (partial coverage is still the assert it always was), `m5_setfile.py`'s
+closed list of labels the standalone set may lack becomes {wmagic, sshead}, and
+`tests/host/test_restore_set_shipped.py` pins that. `thnext` was never in the set; `thss_rt` and
+`thpos_rt` stay in it (restored to their baked values each frame -- harmless, pre-existing).
+
+**14.3 Checks before the build.** tests/host: 974 passed (+4 new: a literal transcription of the
+macro's loop as the reference model, 200 random maps, the ascending-traversal property, an R9
+mutation -- ascending insertion -- that the property test rejects, and the lite E1M1 map: every
+thing in exactly one leaf). An emission-only run of the game tier (409 s, no assembly):
+`sim.bind_things` 0 occurrences in the main part; `sshead` 1,364 cells, 35 non-zero heads (35
+leaves hold runtime things), max 69; `thnext` 150 cells, 40 non-zero links, max 75 -- and
+35 + 40 = 75 things, as it must.
+
+**14.4 The build and its gates.** `build_labeled.py --labels atlas/nobind.labels.tsv.gz -- game
+--out build/doom_e1m1_nobind.fjm --counts-cache _counts_game_nobind.json.gz --merge-aliases` --
+b26's recorded command line, so b26 is the same-knobs control (blocked25's knobs were never
+recorded; 13.4 and `build_labeled.py`'s docstring both say so).
+Built in 1,907 s (a cache-miss counting assembly plus the two passes; `assemble_seconds`
+1,463 for pass 2), span 91,510,656 words (b26: 92,147,808), `labels_moved_in_set` 0, and the
+build log says `self-reset: byte array 'sshead' is not in the restore set: left untouched`; the
+reset part has 822 lines against b26's 823 -- the `sshead` zerobyte rep is the missing one.
+Gates: `m2_std_gate` PASS -- 210 frames (2 menu, enter, a 154-frame walk to door 10, use, 10
+opening, 36 through, 6 idle), every game frame byte-exact against the oracle, the door carried
+across two resets; `m3_gate` PASS (menu and world). `m5_gate` FAILS -- and fails IDENTICALLY on the
+unchanged b26 (14,886 px on frame 0, one distinct picture of 24, self-flagged VACUOUS): that gate
+predates the menu and never presses Enter, so on a menu-booting binary it compares the menu to a
+world frame. It is not evidence about this change; `m2_std_gate` is the full-game play-test the
+metrics handoff names.
+
+**14.5 The measurements.**
+Same knobs, same source, the one difference under test (msframe, 200 frames, 5 reps, cpu 2,
+quiet box, yardstick 3.62 G):
+
+```
+b26      28,962,604 ops/frame   289.0 M fj/s   100.2 ms/frame  [99.4 .. 101.7]
+nobind   28,144,611 ops/frame   290.9 M fj/s    96.8 ms/frame  [96.3 .. 97.5]
+ratios (all five in favour)   median 1.035   VERDICT: B FASTER   pixels identical: YES
+```
+
+FASTER, separated -- and a fraction of the size it should be. The deleted code executed ~7.6 M ops
+per frame on b26; the frame lost 0.82 M. **The blocking pass put ~6.8 M ops back**: with
+bind_things' ~4,700 expansion labels gone, the counting assembly saw different table counts, the
+pool packed every group differently, and the wflip popcount of the surviving tables moved -- the
+same placement effect that section 13.4 measured at +46% between two placements of ONE program,
+now landing on the other side of a code change. The door-route gate shows the same thing: 6.30 G
+ops for its 210 frames on nobind against blocked25's 4.43 G.
+
+**14.6 Where the ops came back -- found to the word.** The T profile of nobind against its own
+label table (14 frames, 416,132,945 ops), set beside b26's (10.1):
+
+```
+                          b26 (421.2M ops)          nobind (416.1M ops)
+  sim.bind_things         105.1M   24.96%           0        --
+  seg_pass2_leaf           61.2M   14.53%           60.8M    14.60%     unchanged
+  thing_pass_leaf          36.2M    8.59%           36.5M     8.77%     unchanged
+  seg_pass1_ts / seg_pass1 32.2M / 26.3M            32.2M / 26.9M      unchanged
+  e1m1_bspcode_pos_leaf    25.0M    5.93%           22.9M     5.51%     unchanged
+  "m1_reset"               55.8M   13.24%          157.4M    37.83%     +101.6M
+```
+
+Every renderer object is unchanged to within a percent; the deleted macro's 105 M are gone; and
+101.6 M came back under the label `m1_reset`. They are not the reset. The profiler credits an ip
+to the nearest top-level label below it, and `m1_reset` is the last label before the ASSEMBLER'S
+OWN AREA -- the wflip chains -- so the split of that range is:
+
+```
+                   b26      nobind
+  reset code       0.46%    0.31%      (the sshead zerobytes gone: 12,766 exact_xor labels vs 18,222)
+  block pool       4.81%    4.78%      (identical per origin: seg_pass2 1.28/1.29, seg_pass1 1.27/1.29, ...)
+  wflip chains     7.97%   32.74%      <- here
+```
+
+The chain ops flip these target words (share of ALL ops, read off the image at the sampled ips):
+
+```
+  hex.tables.res   1.54% -> 5.43%      hex.tables.ret   0.99% -> 4.40%      hex.mul.ret   0 -> 1.45%
+```
+
+Those are the shared-leaf CALL/RETURN flips -- `wflip ret+w, back` before a leaf call and again
+after it -- and their cost is popcount(`back`), the address of the call site inside the caller.
+Deleting 652,096 words of `bind_things` (the interval `simcollide_skip`..`dsc_done` went from
+658,532 to 6,436 words) slid every later call site down by exactly that, and the hot ones landed
+on addresses with far more set bits. The mean over all 239,208 top-level labels in the shifted
+region moved only 12.14 -> 12.33 bits -- the damage is concentrated in the few hot sites, as the
+campaign's "layout tax" always was. Nothing in the change itself costs an op; the address map does.
+
+
+**14.7 The pool's knobs are not the fix, and the shipped binary's targets today.** The same source
+rebuilt with the ladder's knobs (blocked13's `--spread 2 --max-slot-ops 512 --span-bits 0x9fffffe0
+--pin-broken --width-buckets`, plus `--merge-aliases`; a cache hit, 26 min; pool 66% used, span
+111,452,416 words) gates PASS (`m2_std_gate` 5,867,418,832 ops / 210 frames, `m3_gate`) and
+measures:
+
+```
+nobind13 vs blocked25:  102.5 vs 88.5 ms   25,970,927 vs 19,855,016 ops/frame   median 0.868   B SLOWER
+binding metric (owner spec, ten 100-frame games, menu subtracted):
+  blocked25   (mean+p80)/2 = 19,246,013  PASS    mean 16,629,651   p80 21,862,375   size 32.53%  PASS
+  nobind13    (mean+p80)/2 = 25,065,018  OVER    mean 21,532,415   p80 28,597,620   size 33.16%  PASS
+```
+
+(So the shipped binary already meets both of the owner's targets tonight; CLAUDE.md's headline
+"24,723,058 / 93.50% -- both FAIL" describes an older build.) The pool knobs moved the frame by
+-2.2 M against b26's knobs and left the 6.8 M give-back untouched -- consistent with 14.6: the
+return flips' cost is the INLINE call-site address, which no pool knob changes.
+
+**14.8 The alignment build, and the mechanism found.** `pad 2097152` at the deleted call's
+position puts everything after it at word 2^22 exactly (`hot_align_end` popcount 1; `dsc_done`
+popcount 7 against b26's 11; `seg_pass1_leaf` 8 against 9). Gates PASS (`m2_std_gate`
+6,155,703,913 ops / 210 frames; `m3_gate`). Measured:
+
+```
+nobindalign vs b26        106.2 vs 99.5 ms   28,962,604 -> 27,599,577 ops/frame   median 1.063   B FASTER
+nobindalign vs blocked25   83.7 vs 98.5 ms   19,855,016 vs 27,599,577             median 0.850   B SLOWER
+```
+
+Better than the unaligned build by ~0.5 M ops/frame, still ~6 M short of the deleted code's cost.
+So the call sites' addresses are NOT the main mechanism, and the flipped-bit histogram of the
+grown chains (which bits of the source words the chain ops flip, read off both images at the
+sampled ips) says what is:
+
+```
+                      b26 chain samples      nobind chain samples
+  hex.tables.res+w        33,605                117,569     (3.5x)
+  hex.tables.ret+w        21,994                 95,348     (4.3x)
+  hex.mul.ret+w                5                 31,234     (from nothing)
+```
+
+`hex.mul.ret` is the tell. On b26 its 50,999 dispatches per census (FINDINGS BP) cost NO chain ops
+at all: the source word is PINNED to its block base and each dispatch flips a short index. On
+nobind the same dispatches flip whole addresses. The blocking pass re-counted the program without
+`bind_things`' 4,686 tables, packed every group differently, and the hottest shared source words
+-- `hex.tables.res`, `hex.tables.ret`, `hex.mul.ret` -- came out of it with their pins lost or
+their groups broken (BQ/BR: "a broken group loses its pin for ALL its tables"). The pool knobs
+(nobind13) bought back ~2 M and the alignment ~0.5 M; the pins are the ~6 M.
+
+**14.9 What this means for the monster work.** Adding movement code will re-roll the same dice:
+every change to the program's table counts re-decides the pins, and a build can lose 6 M ops/frame
+on a change that executes none of them. So: (a) after any emitter change, profile with
+`mkprof3.py T` + `timeobj.py` and read the chain shares of `hex.tables.res/ret` and `hex.mul.ret`
+-- the `m1_reset`-labelled slice of the T profile is the wflip area, and a jump there is the
+signature; (b) judge by msframe, never by the op delta a change "should" give; (c) the per-frame
+`bind_things` costs ~7.5 M ops/frame today and will still cost that with monsters moving -- the
+DOOM way is to re-bind ONLY the thing that moved (P_SetThingPosition); keep the macro, make the
+rebuild per-move. `scratchpad/12m/engine_folds/patch_nobind.py` holds the baked-list emitter
+change and `baked_thing_lists` (with its reference-model tests) if a static-world tier ever wants it.
+
+**14.10 Kept.** The three experiment binaries (`build/doom_e1m1_nobind*.fjm`, their generated dirs
+and label tables in `scratchpad/12m/atlas/`), the patches under `scratchpad/12m/engine_folds/`,
+`scratchpad/m5_drop_sshead.py`, the ledger rows, and the T profile of nobind. The source, the
+reset, the standalone restore set and the tests are at their committed state (tests/host green).
+
+## 15. The 1.5.1 pad round, re-examined pad by pad on the blocked program (09-14)
+
+The owner's instruction while merging flipjump `table-placement` into `1.5.1`: revert the pad
+round as an idea, but look at each pad and see whether it can still help. The nine commits
+(`c6b9634` .. `dc9ff1a` on `1.5.1`) were all measured on the pre-blocking assembler, where a
+wflip that arms a table paid popcount(table address) and a pad zeroed low bits of that address.
+
+**15.1 The relocated family is dead by construction, no build needed.** `hex.exact_xor`,
+`hex.double_exact_xor` and `hex.triple_exact_xor` (and the `quadrupled_`/`sparse_` forms) are the
+macros the blocking pass relocates (`build_blocked.SAFE_TABLE_MACROS`). For a relocated table the
+`pad` never aligns anything inline: `begin_relocation` returns True and the table is emitted at its
+slot address, so the pad's alignment is irrelevant to the arm (which flips an INDEX, not an
+address) -- and the pad IS the slot width the counting pass records
+(`BlockPool.reserve`, counting: `width = max(table_ops, ops_alignment)`). A placing pass with the
+frozen counts declines every table wider than its slot (`declined_too_wide`), and one declined
+table breaks its group's pin. So `exact_xor pad 128` on the blocked build is not "the same
+program, better aligned"; it is the blocking pass switched off for every exact_xor group, plus 112
+ops of padding per instance x 425,236 instances. The same holds for the sparse_ family used at
+doom's hot sites. Verdict: never again on a blocked build; recorded so nobody widens these pads
+"for alignment".
+
+**15.2 The rest are candidates, and the census predictor prices them without a per-pad build.**
+Ten pads sit on macros the pass never relocates -- `hex.mul.init after_add` (4096), the three
+`clear_carry` returns (64), `hex.tables.jump_to_table_entry return` (64),
+`hex.pointers.read_cell_from_inners_ptrs read_ptr_and_flip_back`/`cleanup` (64), `hex.if_flags
+switch` (64), `hex.add_mul ret` (32), `hex.cmp ret` (32), and the `to_flip`-first reorder in
+`hex.pointers` (a reorder, no space). For a wflip through a PINNED word the chain walks
+popcount(V ^ base) and base's low bits are zero (blocks are aligned), so zeroing V's low bits still
+saves the same ops; through an unpinned word it is popcount(V) as before. The prediction:
+
+    capture A = the shipped build with a spy on every wflip site (raw value, effective value
+                after the pin XOR, site address); byte-identical to blocked25 (sha256 `fc46c28c5f2bbac8`, the shipped one's)
+    capture B = the same build with the ten pads applied to the stl (pads_patch.py)
+    visits    = a per-op histogram of blocked25's scripted walk (hist_engine.py: 333,933,080 ops
+                over 2 menu + 14 forward frames, ip-stream touches == ops, the R9 control)
+    delta     = sum over sites of visits x (popcount_B - popcount_A), joined by site ordinal
+                (pads add no wflip sites; the join refuses unequal lengths)
+
+
+**15.2a What the shipped binary's wflip cost looks like, by installed label** (capture A joined
+to the histogram; A vs A predicts +0, the vacuity control). 72.1% of all executed ops in the
+window are wflip-chain ops. Per forward frame, the families the candidate pads aim at:
+
+```
+ A cost/frame    sites     hot  family (owning macro, installed label)
+    3,702,299  720,108 102,692  hex.exact_xor switch                     (relocated: index flips)
+    2,376,454   66,134  13,912  hex.if_flags switch                      pad 16 -> 64 candidate
+    1,878,918  128,482  12,586  hex.double_exact_xor first_flip          (relocated)
+      945,807      988     900  hex.sparse_exact_xor switch              doom's S2 sites, see below
+      874,252   12,272   6,048  hex.shifts.shl_bit_once switch           (not in the round)
+      863,511   31,572   4,060  hex.cmp ret                              pad 4 -> 32 candidate
+      862,417   42,092   3,888  hex.add.clear_carry ret                  none -> 64 candidate
+      717,080   84,764   4,060  hex.add_mul ret                          pad 4 -> 32 candidate
+      698,715   19,116   9,664  hex.triple_exact_xor first_flip          (relocated)
+      643,785   36,508   3,826  hex.tables.jump_to_table_entry return    none -> 64 candidate
+      573,638    1,584   1,024  hex.shifts.shr_bit_once switch           (not in the round)
+      488,168  173,920   1,706  bit.exact_xor base_jump_label            (fall-through table; pad 8)
+      212,854   19,077   1,170  hex.inc1 switch                          (not in the round)
+      198,385   29,312   1,152  hex.mul.clear_carry return               (not in the round)
+      192,675        2       2  hex.mul.init after_add                   pad 256 -> 4096 candidate
+      109,565 +  99,485    626  hex.pointers.read_cell_from_inners_ptrs  pad 4 -> 64 candidate
+       60,480    1,252     654  hex.pointers.to_flip                     the reorder candidate
+       36,734    4,068     192  hex.sub.clear_carry ret                  none -> 64 candidate
+```
+
+Two things this table says beyond the pad question, for the doom side:
+- **doom's S2 sparse pads are dead under blocking, by the same construction.** The 91 hot
+  emitter sites that call `hex.sparse_mov 1024` / `4096` expand to `sparse_exact_xor` with a
+  1024/4096-op pad; the pass wants that macro, but a pad wider than `--max-slot-ops 512` is
+  `declined_too_wide`, so those 988 tables stay inline (armed with `A ^ base` under
+  `--pin-broken`) and cost 945,807 ops/frame -- more per call than a blocked table's index flip.
+  Dropping S2's pads (plain `hex.mov`/`hex.zero` at those sites, so they block) is a doom-side
+  candidate worth ~0.5 M ops/frame if the pins survive the re-count; it is NOT part of the
+  flipjump PR.
+- `hex.shifts.shl_bit_once` / `shr_bit_once` / `hex.inc1` / `hex.mul.clear_carry` dispatch through
+  pinned words with inline tables (1.86 M ops/frame together); none was in the pad round.
+
+The prediction (A = the shipped binary, reproduced byte-identically with the spies on; B = the
+same build with the ten pads; `pad_predict.py`):
+
+```
+sites 2,214,841   pinned-word sites A 962,244 / B 962,212
+histogram: 333,933,081 ops over 14 forward frames (+ the menu frames)
+wflip ops A in window: 240,656,113 (72.1% of all ops)
+sites whose address moved: 2,071,475   whose installed value moved: 851,425   whose cost changed: 741,486
+PREDICTED DELTA: -6,998,251 ops over the window = -499,875 ops/frame (-2.10%)
+
+ delta ops/frame  A cost/frame    sites     hot  family (owning macro, installed label)
+        -211,571       862,417   42,092   3,888  hex.add.clear_carry ret
+         208,216       945,807      988     900  hex.sparse_exact_xor switch
+        -173,145       643,785   36,508   3,826  hex.tables.jump_to_table_entry return
+        -164,708     2,376,454   66,134  13,912  hex.if_flags switch
+         -96,662       863,511   31,572   4,060  hex.cmp ret
+         -96,337       192,675        2       2  hex.mul.init after_add
+          70,884       874,252   12,272   6,048  hex.shifts.shl_bit_once switch
+         -40,320        60,480    1,252     654  hex.pointers.to_flip
+          34,515       573,638    1,584   1,024  hex.shifts.shr_bit_once switch
+         -24,924       717,080   84,764   4,060  hex.add_mul ret
+          15,864       488,168  173,920   1,706  bit.exact_xor base_jump_label
+          13,076       198,385   29,312   1,152  hex.mul.clear_carry return
+         -12,039        99,485      626     327  hex.pointers.read_cell_from_inners_ptrs read_ptr_and_flip_back
+         -12,039       109,565      626     327  hex.pointers.read_cell_from_inners_ptrs cleanup
+          -6,400        36,734    4,068     192  hex.sub.clear_carry ret
+```
+
+Read per pad (the DIRECT effect is the family's own row; everything else is the shift of the
+code below the pads to new addresses):
+
+| pad (1.5.1 commit) | ops/frame on the blocked program | verdict |
+|---|---:|---|
+| `hex.add.clear_carry ret` none -> 64 (22e97bd) | -211,571 | still helps |
+| `hex.tables.jump_to_table_entry return` none -> 64 (22e97bd) | -173,145 | still helps |
+| `hex.if_flags switch` 16 -> 64 (22e97bd) | -164,708 | still helps (7% of its 2.38 M) |
+| `hex.cmp ret` 4 -> 32 (a6c1cf8) | -96,662 | still helps |
+| `hex.mul.init after_add` 256 -> 4096 (f05b447 / bcf2b1c) | -96,337 | still helps, two sites |
+| `hex.pointers.to_flip` first (c6b9634) | -40,320 | still helps, costs nothing |
+| `hex.add_mul ret` 4 -> 32 (a6c1cf8) | -24,924 | marginal |
+| `read_cell_from_inners_ptrs` 4 -> 64 (bcf2b1c) | -24,078 | marginal |
+| `hex.sub.clear_carry ret` none -> 64 (22e97bd) | -6,400 | marginal |
+| `hex.exact_xor` 16 -> 128/256, `double_`/`triple_exact_xor` (f9199a7, 1087dd5, 22e97bd) | not buildable | DEAD: the pad is the slot width (15.1) |
+| the shift of everything below | +338,270 | the tax, mostly on doom's inline S2 sparse tables (+208 K) and the shifts' tables (+105 K) |
+
+The ten pads together: -838,145 direct, +338,270 shift, **-499,875 net = -2.1% of the frame's ops**.
+
+
+**15.3 The confirming build and the verdict.**
+
+The confirming build: `build/doom_e1m1_pads1.fjm` (capture B's own output; the pads applied to
+the stl of the shipped assembler, the shipped command line otherwise, a counts-cache hit -- pads
+change no table count). Gates: `m2_std_gate` PASS (210 frames, every game frame byte-exact, the
+door carried across two resets, all four controls), `m3_gate` PASS.
+
+msframe, first run (`--ignore-busy`, the owner's Remotion render was on -- yardstick 3.40 G, one
+pair collapsing to 1.35 G -- so its TIME is not a measurement; its OP COUNT is exact):
+
+```
+  base     median   100.5 ms/frame  [98.4 .. 118.4]    197.6M fj/s   19,855,016 ops/frame   cell=4 flat
+  change   median   111.3 ms/frame  [99.4 .. 130.0]    174.5M fj/s   19,423,694 ops/frame   cell=4 flat
+  pixels identical across arms and reps : YES
+  per-pair A/B ms ratio                 : 1.033 1.041 0.902 0.990 0.768
+  VERDICT: NOT SEPARATED
+```
+
+**-431,322 ops/frame (-2.17%) on msframe's 200-frame walk**, against the census's -499,875 on
+its 14-frame window: the prediction held to within the difference of the two walks, and the
+predictor's decomposition (15.2) is therefore what to read for the per-pad verdicts.
+
+The owner's metric (`gamespeed.py --fjm build/doom_e1m1_pads1.fjm`, the same ten scripts as the
+shipped binary's record):
+
+```
+SPEED  BINDING (mean+p80)/2: 18,762,374 ops/frame   (target <= 20,000,000)  PASS
+SPEED  mean run-average   : 16,209,713 ops/frame
+SPEED  80th-pct run avg   : 21,315,034 ops/frame
+SPEED  spread lo..hi      : 10,922,101 .. 22,199,174 ops/frame
+SIZE   words              : 43,102,704 = 32.11% of 2^27   (target <= 35%)  PASS
+SIZE   span / file        : 96,009,696 words (71.53%) / 31,837,565 bytes
+```
+
+Against blocked25 (19,246,013 / 32.53%): **binding -483,639 ops/frame (-2.5%), size -555,028
+words (-0.42 points)** -- the padded image is SMALLER, because the padding is where the wflip
+chains go (`get_wflip_spot` fills it before the segment's wflip area) and shorter chains need
+less of it. Both targets pass, both improve.
+
+msframe on the quiet box (the render gone, busy processes: none, the base at its standing 81.6
+ms / 243 M fj/s):
+
+```
+  rep 0  base      81.9 ms   242.5M fj/s  yard 3.61->3.57G   |  change    84.0 ms   231.1M fj/s  yard 3.61->3.57G
+  rep 1  base      81.9 ms   242.3M fj/s  yard 3.59->3.62G   |  change    84.2 ms   230.6M fj/s  yard 3.42->3.58G
+  rep 2  base      81.2 ms   244.6M fj/s  yard 3.65->3.62G   |  change    82.8 ms   234.7M fj/s  yard 3.63->3.61G
+  rep 3  base      81.6 ms   243.3M fj/s  yard 3.64->3.64G   |  change    83.4 ms   233.0M fj/s  yard 3.59->3.56G
+  rep 4  base      81.5 ms   243.7M fj/s  yard 3.61->3.61G   |  change    82.7 ms   234.9M fj/s  yard 3.62->3.61G
+
+  base     median    81.6 ms/frame  [81.2 .. 81.9]    243.3M fj/s   19,855,016 ops/frame   cell=4 flat
+  change   median    83.4 ms/frame  [82.7 .. 84.2]    233.0M fj/s   19,423,694 ops/frame   cell=4 flat
+  pixels identical across arms and reps : YES
+  per-pair A/B ms ratio                 : 0.974 0.973 0.981 0.979 0.985
+  median ratio                          : 0.979  (>1 = B faster)
+  VERDICT: NOT SEPARATED   (rule: all 5 pairs agree in sign AND |median ratio - 1| > 3%)
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.62G
+```
+
+**Verdict: the pads stay reverted.** The rule says NOT SEPARATED (the sign agrees in all five
+pairs, slower; the median 0.979 is inside the 3% floor), and the gate's clause for NOT SEPARATED
+ships only with a stated reason -- none applies: not shown FASTER, and size is already under
+target. The measurement: -2.2% in ops, +2.1% in time, the per-op rate down 4% (243.3 -> 233.0
+M fj/s); section 13's lesson holds again, ops/frame is half of frame time. The census counts ops
+and cannot see what the padding does to the memory chain; that 42,092 `clear_carry` expansions
+each padded to 64 ops, 36,508 `jump_to_table_entry` returns and 66,134 `if_flags` switches spread
+the hot code over more lines and pages is the HYPOTHESIS, unmeasured. The shipped binary stays
+`blocked25`. The protocol's next step for NOT SEPARATED, 10 reps x 400 frames on the same quiet
+box: base 77.3 ms [77.0 .. 77.7] / 253.5 M fj/s / 19,609,198 ops/frame, change 78.8 ms
+[78.4 .. 79.2] / 243.5 M fj/s / 19,174,470 ops/frame, all ten pairs slower (0.978 .. 0.988,
+median 0.982) -- NOT SEPARATED again, which the protocol reads as "below this machine's
+resolution; drop it or park it". The ten pads are parked, as a set.
+
+What the owner can still buy here, if the ops-based binding metric is what matters more than
+the frame time: the ten pads are one commit away (`pads_patch.py` on the stl, the shipped build
+line otherwise) at binding 18,762,374 and 32.11%, 2% slower in wall time. And the per-pad TIME
+question is open: the census prices ops per pad, not time; a per-pad timing sweep (one build and
+one quiet msframe per pad, ~1 h each) would say which of the ten pay in time -- the zero-space
+`to_flip` reorder and the two-site `mul.init after_add` are the obvious first candidates, the
+per-expansion pads (`clear_carry`, `jump_to_table_entry`, `if_flags`) the suspects.

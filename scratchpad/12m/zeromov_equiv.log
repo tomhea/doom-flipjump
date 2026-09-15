@@ -1,0 +1,7 @@
+Z1 equivalence: hex.zero N,X + hex.mov M,X,Y  ==  hex.zero (N-M),X+M*dw + hex.mov M,X,Y
+  OLD zero 8      : b'A\x00\x00\x00A\x00\x00'    511 ops
+  NEW zero 6 @+2  : b'A\x00\x00\x00A\x00\x00'    489 ops
+  CTL no zero     : b'A\xba\xdc\xfeA\x00\x00'    396 ops
+  EQUIVALENT (old == new)      : True
+  the zero is genuinely needed : True
+  ops saved at this one site   : 22

@@ -400,6 +400,14 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         fj.assemble([p.resolve() for p in paths], out, memory_width=W, print_time=False,
                     lzma_fast=FJM_LZMA_FAST)
     assemble_seconds = round(time.perf_counter() - t, 3)
+    # STAMP THE DOOR GEOMETRY THIS BINARY FROZE, beside the binary. A gate that recomputes door
+    # stops from doors.DEFAULT_QUANT compares against whatever that constant says TODAY, which need
+    # not be what this build baked -- see doors.geometry_stamp for the day that cost.
+    try:
+        from doomfj.doors import write_stamp as _write_door_stamp
+        _write_door_stamp(out, wad.sectors(mapname), wad.linedefs(mapname), wad.sidedefs(mapname))
+    except Exception as _e:                      # a stamp must never fail a build
+        print("  (door stamp not written: %s)" % _e, flush=True)
     term = fj.run(out, io_device=FixedIO(b"q\n"), print_time=False, print_termination=False,
                   flat_max_words=limit)                    # 'q' is not a digit -> input parser -> bad: -> halt
     span = _span_words(out)

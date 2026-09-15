@@ -9,14 +9,17 @@ independently, and the two must agree **byte for byte**.
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
 `docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-fullgame-metrics.md` — the owner's goal changed
 on 2026-09-06 and the 12M-ops render target is SUPERSEDED.** Success is now two numbers on the
-COMBINED FULL GAME (collision + sim + reset included): the 80th-percentile RUN of 10x100 frames
-at <= 20M ops/frame, and the binary at <= 35% of 2^27 words. Baseline: ~93.5% of the ceiling and
-~33.4M ops/frame -- both FAIL, both UNVERIFIED (measured before the tools had controls; rung 1
-re-measures with `scratchpad/12m/gamespeed.py`). `docs/handoff-m4-nine-levels.md` is still the M4 reference.
+COMBINED FULL GAME (collision + sim + reset included): the binding speed of 10x100-frame games,
+`(mean + p80) / 2` of the runs' ops/frame (the owner's 2026-09-06 refinement of the p80; the
+`gamespeed.py` docstring says why) at <= 20M ops/frame, and the binary at <= 35% of 2^27 words.
+**Both are MET by the shipped binary -- see the ship-gate section below for the standing numbers
+and their provenance.** The 2026-09-06 baseline that first priced this goal (p80 24,723,058, 93.50%
+of the ceiling, both FAIL) is history in `docs/handoff-fullgame-metrics.md`. No speed number
+belongs in this file without its `--validate` output. `docs/handoff-m4-nine-levels.md` is still the M4 reference.
 **M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
 whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:
-`fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
+`fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
 starts the game, WASD moves, space opens doors. **M4** — now ALL NINE E1 levels in one image,
 configurable — is the only milestone left that changes the emitter's shape. Then M6 (ship).
 ⚠ The three-level plan in `handoff-m5-m2-m3-m4.md` section 5 is SUPERSEDED, and its "9x" reasoning
@@ -145,7 +148,10 @@ be crossed), `sprite_wad` resolved internally.
 (`src/fj/input.fj`), thing bindings and visibility bake, nothing is echoed, and the view state,
 held-key flags and door cells SURVIVE the M1 reset (`build.STANDALONE_PERSIST` / `DOOR_PERSIST`,
 the one place a hole in the restore set is intended). Run it with
-`fj build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728`.
+`fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728`.
+⚠ **`--run` IS NOT OPTIONAL.** `fj a.fjm` means *assemble* `a.fjm` as source; only `fj --run`
+runs a built image (`fj --help`: `fj --run prog.fjm  // just run`). Every copy of this command
+in the repo was missing it until 2026-09-11, and so was every one handed to the owner.
 
 ⚠ They are DIFFERENT PROGRAMS and each has its own restore set (`m1_` / `m5_restore_set.json.gz`);
 `build_wall_renderer` picks by tier so they cannot be crossed — the tier name is now the ONLY
@@ -170,6 +176,23 @@ and the distinction is the repo's hardest-won lesson:
 
 ## Performance Claims
 Never quote an ops/frame, speedup, or cost number without re-running the measurement harness in this session. Before reporting any performance win: (1) verify the harness is not measuring zeros or a no-op filter, (2) print the raw baseline and post-change numbers side by side, (3) state the measurement command used. If a number comes from a doc, git log, or memory, label it explicitly as UNVERIFIED and re-measure before acting on it.
+
+**⚠ The metric is ms/frame, and the harness is `scratchpad/12m/msframe.py` (2026-09-13).** ops/frame
+is half of frame time: `b26` measured +45% ops at +45% ops/s for an IDENTICAL 452 ms/frame, so the
+op counter alone cannot tell a win from a loss. `msframe.py` pins the core, refuses a busy machine,
+alternates A/B counterbalanced, checks pixels before speed, reports median + range + a stated
+verdict rule (all pairs agree in sign AND |median ratio − 1| > 3%), and appends everything to
+`scratchpad/12m/msframe_ledger.jsonl`. The protocol — freeze a baseline first, correctness gates
+before speed, decide by the rule, kill criteria declared up front — is `docs/measurement-process.md`.
+A number that did not come through it is an anecdote. Its `--selftest` is the R9 control: run it
+once per machine state; if A-vs-A separates, the box is too noisy to measure anything.
+
+## The Ship Gate and the standing number (owner, 2026-09-13)
+**READ THIS FILE FIRST, before any build or performance work: `docs/ship-gate.md`.** It is not loaded
+automatically; open it. It holds the standing number with its provenance, the four-step gate a
+new binary must pass, and the ideas already measured (kept or closed) so they are not re-derived.
+
+**`build/doom_e1m1_blocked25.fjm` is the shipped binary: 82 ms/frame, 242 M fj/s on a quiet box, 19,855,016 ops/frame on msframe's script; binding metric 19,246,013 ops/frame PASS, size 32.53% PASS.** The owner's instruction: keep this number in line so it is not lost. So a new game binary is "shipped" only through `docs/ship-gate.md`: byte-exact gates (`m2_std_gate`, `m3_gate`; `m5_gate` is vacuous on a menu-booting binary), then `msframe.py --a build/<new>.fjm --against shipped` -- **a B SLOWER verdict does not ship, whatever the op delta says** (three 2026-09-13 builds cut 25% of executed ops and measured SLOWER: the blocking pass re-rolls its pins on any change to the table counts) -- then `gamespeed.py` for both owner targets, then RECORD the build command, counts cache, label table and hashes in `docs/ship-gate.md` and re-freeze the baseline. The ideas worth keeping and the evidence that limits them are in that file's section 3; do not re-derive them. The shipped binary's build command -- VERIFIED by a byte-identical rebuild on 2026-09-13 -- is in its section 1b (`build_labeled.py --labels ... -- game --out ... --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz`) and so is the play command (`fj --run build/doom_e1m1_blocked25.fjm --io pc --flat-max-words 134217728`).
 
 ## Byte-Exactness Gate
 Every renderer/emitter change must be validated byte-exact against the reference output before it is described as done or committed. Run the four-viewpoint gate and diff the emitted bytes; if the diff is non-empty, the change is NOT shipped. Do not use the equivalence checker alone — verify it actually compared every file (print the file count it checked).

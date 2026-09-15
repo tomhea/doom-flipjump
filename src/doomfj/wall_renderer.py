@@ -12,6 +12,7 @@ unrolled pass 2 rasters them through the shared-compare trampoline.
 from __future__ import annotations
 
 import math
+import struct
 
 from pathlib import Path
 
@@ -53,6 +54,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.doorcode import door_decls, door_line_ids, door_tic_lines
+from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
                           pass_state, use_boxes_xy)
 from doomfj.lut_generator import (generate_bands_walk_fj, generate_state_switch_fj,
@@ -187,22 +189,29 @@ def _seg_xorby_use(label, clear=True):
     return seq
 
 
-_ABLATE_MODES = frozenset({"planes", "pass2", "pass1", "segstub", "xrstub", "wedgestub",
-                           "tsprobe", "tsmark", "pnearprune", "pnearcol", "pnearwalk", "tsfull",
+# ⚠ RETIRED 2026-09-11: "tsprobe" and "tsmark". Their emit arm had been unreachable since
+# rung 3a and no caller ever passed them; see the note in subsector_action's seg loop.
+# ⚠ RETIRED 2026-09-11: "planes", "pass2", "colstub", "noflush". All four were ACCEPTED by the
+# `assert ablate <= _ABLATE_MODES` below and then read by nothing, so `ablate={"planes"}` emitted
+# the full program and measured a delta of zero -- which reads as "visplanes are free". The first
+# two were worse than dead: they were DOCUMENTED in emit_wall_renderer's docstring as working
+# knobs. Same failure shape as the tsprobe/tsmark arm retired the same day.
+# tests/host/test_wall_renderer_helpers.py now requires every declared mode to have a consumer,
+# so a mode cannot be declared and forgotten again.
+_ABLATE_MODES = frozenset({"pass1", "segstub", "xrstub", "wedgestub",
+                           "pnearprune", "pnearcol", "pnearwalk", "tsfull",
                            "emitnopair", "emitnowalk", "atantwice",
-                           "slopetwice", "tabletwice", "noflush", "colstub",
+                           "slopetwice", "tabletwice",
                            "noprescan", "noproj", "projtwice", "scaletwice", "skyall",
                            "sprnoemit", "thingtwice"})
 
 DW_BITS = 64                   # `dw` in address units at w=32 (2w), for baked dw-offsets
-TS_ECAP = 24                   # M13-2S rung 3b: buffered REGIONS per column per side,
-                               # 5 bytes each ([kind][arg:2][y1][yend]). Measured worst
-                               # over 30 E1M1 viewpoints: 14 top / 10 bottom.
-# CR-2026-08: flush_frame's ditto byte count is `5*entries` computed in a 2-NIBBLE register
-# (stream_render.fj `hex.mul_const 2, cn, tn, 5`), which wraps silently past 255 -- so the
-# cap must keep 5*(TS_ECAP+1) inside one byte. Raising TS_ECAP past 50 needs that register
-# widened first.
-assert 5 * (TS_ECAP + 1) <= 255, "TS_ECAP overflows flush_frame's 2-nibble ditto byte count"
+# ⚠ RETIRED 2026-09-11, the whole of M13-2S rung 3b: TS_ECAP (the per-column region cap), its
+# overflow assert, the `entoff` offset table, and stream_render.fj's `flush_frame` /
+# `entry_ptr_add`. `entoff` had been `if False else ""` since it was written, so the chain could
+# not have assembled if anything called it -- which is the proof that nothing did. The design and
+# its measurements stay in docs/handoff-m13-2s.md; the SHIPPED per-column entry point is
+# stream_render.fj's `emit_col_lines`.
 MAX_BANDS = 64                    # M13pS2c: band-list slots/column/region. Bound: a monotone half-window's
                                   # zidx walk gives <=32 distinct zrow runs (zlight[lvl][zidx] is monotone in
                                   # zidx with values in [0,31]); a horizon-STRADDLING window (negative-viewz
@@ -491,6 +500,105 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
             [rm.point_in_subsector(cmap, t.x, t.y) for t in things])
 
 
+WINDOW_TITLE = "FlipJump DOOM"
+WINDOW_ICON_SIZE = 32
+WINDOW_ICON_INDEX = 181            # PLAYPAL's nearest to the wordmark's rgb(190,22,34)
+
+# The window icon: the DOOM wordmark, drawn as 32x32 pixel art rather than lifted from a lump.
+#
+# ⚠ PROVENANCE. The silhouette is modelled on a reference the owner supplied
+# (`icons8-doom-logo-48.png`): 48x25 of ink, ONE flat colour over 666 of its 707 pixels, and a
+# bottom taper -- the D/O/O bottoms sheared off by a rising diagonal while the outer edges sweep
+# down into points. That wedge, not the letterforms, is what makes the mark recognisable, and
+# seven earlier drafts that invented a gradient, an outline and a bevel all failed because they
+# guessed at it instead. Icons8's free tier asks for attribution and the wordmark is id Software's
+# trademark whoever renders it; that is the owner's call for their own project, recorded here so
+# it is not silently forgotten.
+#
+# ⚠ ONE DELIBERATE DEPARTURE: the M's V is cut deeper than the reference's. The reference builds
+# its M from two ~2-column notches, which at 32/48 round away to a 1px nick and leave a solid
+# block. At this size the reference's own proportions do not produce a legible M.
+#
+# It is ASCII on purpose -- a human can see the icon in the source and edit a pixel by typing.
+WINDOW_ICON_ART = (
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    ".######..######.#####..##...###."
+    ".#######.######.######.##..####."
+    ".#######.######.######.##..####."
+    ".###..##.##..##.##..##.##..####."
+    ".###..##.##..##.##..##.###.####."
+    ".###..##.##..##.##..##.########."
+    ".###..##.##..##.##..##.########."
+    ".###..##.##..##.##..##.########."
+    ".###..##.###.##.##..##.########."
+    ".#######.######.######.########."
+    ".#######.######.######.##..####."
+    ".#######..#####.#####...#...###."
+    ".######....####.####........###."
+    ".#####......##...##.........###."
+    ".###........................###."
+    ".##..........................##."
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+    "................................"
+)
+assert len(WINDOW_ICON_ART) == WINDOW_ICON_SIZE ** 2, (
+    "the icon art is %d chars, not %d -- a row lost or gained its newline"
+    % (len(WINDOW_ICON_ART), WINDOW_ICON_SIZE ** 2))
+
+
+def window_chrome_fj():
+    """(macro_lines, call_lines) for the 0x12 title and 0x13 icon commands.
+
+    ⚠ THESE MUST BE EMITTED INTO THE **ENTRY** PART, NOT THE PRELUDE, and the docstring here used
+    to claim the opposite: "Boot-only ... costs ZERO ops on the frame metric". That was false. The
+    M1 self-reset jumps to `__hot_end`, and `__hot_end` sits immediately BEFORE the prelude, so
+    everything in the prelude runs again on EVERY FRAME. Measured on a real emission: the icon is
+    1,024 `stl.output_char` at 8 ops each, so the chrome cost **8,440 ops and 0.57 ms per frame**,
+    for a window decoration that can never change. Emitted before the `;__hot_end` jump instead, it
+    runs exactly once, which is what it always claimed to do.
+
+    The icon needs NO WAD: it is generated from `WINDOW_ICON_ART`. That is why every tier gets it,
+    including `render`, which passes no sprite wad and therefore used to ship title-only.
+
+    Index 0 is transparent (the device turns it into an SDL colorkey). The icon is sent before the
+    palette, which is safe: the device holds it as `_pending_icon` and applies it when the palette
+    arrives (`pygame_window._set_palette`)."""
+    big = 0
+    for i, ch in enumerate(WINDOW_TITLE.encode("utf-8")):
+        big |= ch << (8 * i)
+    calls = ["present.set_window_title %s, %d"
+             % (hex(big), len(WINDOW_TITLE.encode("utf-8")))]
+
+    n = WINDOW_ICON_SIZE
+    body = ["    present.set_window_icon_header %d, %d" % (n, n)]
+    for y in range(n):
+        row = WINDOW_ICON_ART[y * n:(y + 1) * n]
+        # ⚠ ONE STATEMENT PER LINE. fj has no statement separator, so N `stl.output_char`s joined
+        # by spaces is a parse error -- which is exactly how the first version of this failed, at
+        # generated line 371,074, after a 34-minute assembly.
+        body.append("    // icon row %d" % y)
+        body.extend("    stl.output_char %d" % (WINDOW_ICON_INDEX if c == "#" else 0)
+                    for c in row)
+    macro = ["// the window icon: the DOOM wordmark from WINDOW_ICON_ART, %dx%d palette indices,"
+             " index 0 transparent. Runs ONCE, from the entry part." % (n, n),
+             "def doom_window_icon {"] + body + ["}"]
+    calls.append("doom_window_icon")
+    return macro, calls
+
+
 def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, sprite_wad=None,
                        ablate: frozenset = frozenset(), return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
@@ -504,17 +612,20 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
     `ablate` (M13p0, measurement-only — NEVER set for build_doom/the golden tests) drops components so
     `scripts/measure_frame.py` can isolate their ops/frame cost by delta:
-      - "planes"  — drop the floor/ceiling visplane pass (pass 2b) from the mainline.
-      - "pass2"   — drop the wall raster (pass 2a, the per-column trampoline) from the mainline.
+      ⚠ "planes" and "pass2" WERE listed here and did nothing — declared in `_ABLATE_MODES`, read
+        by no code, so they emitted the full program and priced their component at zero. Retired
+        2026-09-11; the note on `_ABLATE_MODES` has the detail. Do not re-add a mode here without
+        a consumer: `tests/host/test_wall_renderer_helpers.py` now fails on a mode nothing reads.
       - "pass1"   — skip the BSP-walk jump entirely (pass-1 never runs; col arrays stay zero-init),
-                    isolating init/input-parse/present residue. Valid ONLY combined with "planes"+"pass2"
-                    (ablating pass1 alone leaves pass2/planes rendering garbage zero-filled columns).
+                    isolating init/input-parse/present residue. ⚠ On its own this leaves pass 2
+                    rastering garbage zero-filled columns; it used to be documented as "valid ONLY
+                    combined with planes+pass2", which is no longer a combination that exists.
       - "segstub" — the per-seg leaf `stl.fret`s immediately (no full-flag check, no wall_x_range) =
                     the bare walk skeleton (node side tests + subsector dispatch + the SET/CLEAR xorby
                     call overhead), isolating the walk from every per-seg cost.
       - "xrstub"  — the per-seg leaf keeps the `full`-flag pre-check but replaces `wall_x_range` with an
                     immediate cull-fail (no atans, no cull math) = walk + per-seg entry overhead only.
-    "segstub"/"xrstub" are mutually exclusive and independent of "planes"/"pass2"/"pass1".
+    "segstub"/"xrstub" are mutually exclusive and independent of "pass1".
 
     `floor_mode` (M13p1): "textured" (default, M13b/M13d2 perspective u,v floors) or "flat" (M13a/M13p1
     flat-colored floors — no per-span DDA seed, no per-pixel sample; `seg_ceilbase`/`seg_floorbase` bake
@@ -522,8 +633,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     combined flat texel table is not emitted at all).
 
     `wall_mode` "WPX" (M13-WPX, the lines-mode SHIPPING tier) is different in kind: the wall texels
-    never enter the combined table at all (it stays at the W1 tier — see `tex_mode`). Instead
-    `_lines_wall_pix_bank` bakes a per-(texture,light) × per-exact-height RUN-LIST bank, giving one
+    never enter the combined table at all (it stays at the W1 tier — see `tex_mode`). Instead the WPX
+    bank bakes a per-(texture,light) × per-exact-height RUN-LIST bank, giving one
     texture texel per screen pixel down each column for one add per colour run at runtime.
 
     `wall_mode` (M13p4a): "textured" (default, the real per-seg wall texture) or "W1"/"W2" — every wall
@@ -768,6 +879,36 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
         return fs_.ceil_h > bs_.ceil_h or bs_.floor_h > fs_.floor_h
 
+    def _ts_closed_early(seg) -> bool:
+        """Is this two-sided line CLOSED in ANY of its door states, i.e. does it ever render as a
+        solid wall? Needed by the texture bakes, which run before `_seg_closed_static`/`_seg_dual`
+        are defined. Must select the SAME segs those two do between them."""
+        ld_ = lds[seg.linedef]
+        if ld_.back == -1 or not secs:
+            return False
+        fi_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
+        bi_ = sds[ld_.back if seg.side == 0 else ld_.front].sector
+        for sv in _seg_secs(seg):
+            f_, b_ = sv[fi_], sv[bi_]
+            if min(f_.ceil_h, b_.ceil_h) <= max(f_.floor_h, b_.floor_h):
+                return True
+        return False
+
+    def _seg_wall_tex_name(seg):
+        """The texture a seg's SOLID body wears.
+
+        ⚠ A CLOSED TWO-SIDED LINE WEARS `upper`, NOT `middle`. Every E1M1 door line has
+        middle='-' with the art on upper (AQDOOR02 / BIGDOOR2 / METAL2), so baking `middle` for a
+        closed line occludes correctly and paints nothing recognisable. MIRRORS the oracle's
+        `_wtex` choice in reference_model.render_wall_frame -- these two must pick the same name
+        for the same seg or the frame differs (measured: 8 px on frame 2 when only the oracle had
+        the change)."""
+        ld_ = lds[seg.linedef]
+        sd_ = sds[ld_.front if seg.side == 0 else ld_.back]
+        if ld_.back != -1 and _ts_closed_early(seg) and sd_.upper not in ("-", "", None):
+            return sd_.upper
+        return sd_.middle
+
     # the combined dispatch table over every distinct wall texture the one-sided segs use (downscaled to match
     # the oracle's _wall_texture), plus the 1x1 WALL_BG sentinel; per-seg texinfo precomputed via the oracle rule.
     cache = {}
@@ -775,11 +916,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     names = set()
     for si, seg in enumerate(cmap.segs):
         ld = lds[seg.linedef]
-        if ld.back != -1 and not ("tsfull" in ablate and secs and _ts_draws_wall_early(seg)):
+        if ld.back != -1 and not _ts_closed_early(seg)                 and not ("tsfull" in ablate and secs and _ts_draws_wall_early(seg)):
             continue
-        sd = sds[ld.front if seg.side == 0 else ld.back]
-        if rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=tex_mode) is not None:
-            names.add(sd.middle.upper())
+        _tn = _seg_wall_tex_name(seg)
+        if rm._wall_texture(asset_wad, _tn, cache, wall_mode=tex_mode) is not None:
+            names.add(_tn.upper())
     combined, info = [], {}
     for nm in sorted(names) + [None]:
         key = nm if nm else "__WALLBG__"
@@ -800,11 +941,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         combined += texels
     for si, seg in enumerate(cmap.segs):
         ld = lds[seg.linedef]
-        if ld.back != -1 and not ("tsfull" in ablate and _ts_draws_wall_early(seg)):
+        if ld.back != -1 and not _ts_closed_early(seg)                 and not ("tsfull" in ablate and _ts_draws_wall_early(seg)):
             continue
-        sd = sds[ld.front if seg.side == 0 else ld.back]
-        t = rm._wall_texture(asset_wad, sd.middle, cache, wall_mode=tex_mode)
-        seg_texinfo[si] = info[sd.middle.upper()] if t is not None else info["__WALLBG__"]
+        _tn = _seg_wall_tex_name(seg)
+        t = rm._wall_texture(asset_wad, _tn, cache, wall_mode=tex_mode)
+        seg_texinfo[si] = info[_tn.upper()] if t is not None else info["__WALLBG__"]
 
     tex = _texel_table("tex", combined, "per_entry", over_align=False)
 
@@ -836,10 +977,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M13-ATANDISP (lines mode): the SAME tantoangle values as a D4 per-entry dispatch table, so
     # point_to_angle_m can trade its ~289@ packed read (4x read_byte_and_inc + a mul_const, per the
     # stl's documented complexities) for a ~20@ lookup. Byte-exact by construction: same values.
-    # M13-2S rung 3b: entry index -> byte offset (5 bytes per region entry), by dispatch. The
-    # multiply it replaces is 9 shifts of w/4 and the append path runs ~1,600 times a frame.
-    entoff = (generate_dispatch_table_fj("entoff", [5 * i * DW_BITS for i in range(TS_ECAP + 2)],
-                                         index_nibbles=2, result_nibbles=8) if False else "")
     ttang = (generate_dispatch_table_fj("ttang", tantoangle_table(SLOPERANGE),
                                         index_nibbles=3, result_nibbles=8))
     sdrecip = (generate_dispatch_table_fj("sdrecip", slopediv_recip8_table(),
@@ -1103,9 +1240,53 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
         return fs_.ceil_h > bs_.ceil_h or bs_.floor_h > fs_.floor_h
 
+    def _seg_closed_static(seg) -> bool:
+        """Is this two-sided line CLOSED, and closed no matter what any door does?
+
+        DOOM's R_ClipSolidWallSegment treats a closed two-sided line as a solid wall; without that
+        the room beyond paints through it, which is what made a shut door "glass". The opening is
+        DOOM's: min(ceilings) <= max(floors) means no gap at all.
+
+        ⚠ `_seg_door(seg) is None` is load-bearing, not caution. Solid-vs-marking is decided HERE,
+        at COMPILE time, so a seg whose opening changes with a door state cannot be classified
+        statically -- it needs a per-state gate in the emitted code (stage B). The ORACLE excludes
+        exactly the same segs, by testing `scene.sector_heights`; if these two tests ever disagree
+        the mirrors diverge and byte-exactness is gone.
+        MEASURED on E1M1: 80 segs qualify here, and 54 more are closed only while a door is shut.
+        """
+        ld_ = lds[seg.linedef]
+        if ld_.back == -1 or _seg_door(seg) is not None:
+            return False
+        fs_ = secs[sds[ld_.front if seg.side == 0 else ld_.back].sector]
+        bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
+        return min(fs_.ceil_h, bs_.ceil_h) <= max(fs_.floor_h, bs_.floor_h)
+
+    def _seg_dual(seg) -> bool:
+        """A DOOR seg: CLOSED while its door is shut, open otherwise.
+
+        Solid-vs-marking is a compile-time decision everywhere else, but this seg is both at
+        different times, so the emitted code carries BOTH bodies behind a one-op state gate.
+        The gate is cheap because a door is closed exactly when its state is 0 -- verified on every
+        E1M1 door: state 0 puts the door ceiling ON the floor, so the opening is 0 and every later
+        state opens it. MEASURED: 54 segs.
+        """
+        ld_ = lds[seg.linedef]
+        if ld_.back == -1 or _seg_door(seg) is None:
+            return False
+        fi_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
+        bi_ = sds[ld_.back if seg.side == 0 else ld_.front].sector
+
+        def _shut(sv):
+            f_, b_ = sv[fi_], sv[bi_]
+            return min(f_.ceil_h, b_.ceil_h) <= max(f_.floor_h, b_.floor_h)
+
+        st_ = [_shut(sv) for sv in _seg_secs(seg)]
+        return bool(st_) and st_[0] and not all(st_)
+
     def _seg_as_solid(seg) -> bool:
         """Does this seg go down the one-sided (wall-emitting) path?"""
-        return lds[seg.linedef].back == -1 or ("tsfull" in ablate and _seg_draws_wall(seg))
+        return (lds[seg.linedef].back == -1 or _seg_closed_static(seg)
+                or ("tsfull" in ablate and _seg_draws_wall(seg)))
 
     def _seg_as_piece(seg) -> bool:
         """CR-2026-08 (the node-gate fix): is this a PIECE-CARRYING marking seg (um/lm nonzero)?
@@ -1194,6 +1375,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # and skypid's dispatch index. 2 nibbles (one byte) is the default and E1M1's shipped width;
     # the seven-level set needs 4. MEASURED per map: E1M1 222, E1M5 147, E1M8 90 fit a byte;
     # E1M2 376, E1M3 337, E1M4 276, E1M9 340 do not.
+    # Printed on every build, not only on failure: the pid count is the budget that the DOOR
+    # QUANTUM spends (each extra door stop is a new (ceil, floor) pair), and finding that out from
+    # an AssertionError 10 minutes into a build is how one quant change was chosen twice.
+    print("pid bake: %s pairs baked, %s addressable at PID_NIBBLES=%d"
+          % (len(lines_pid), 16 ** cfg.PID_NIBBLES - 1, cfg.PID_NIBBLES), flush=True)
     assert len(lines_pid) < 16 ** cfg.PID_NIBBLES, (
         f"{mapname} bakes {len(lines_pid)} pids, past the {16 ** cfg.PID_NIBBLES - 1} that "
         f"{cfg.PID_NIBBLES} nibbles address -- raise Config.PID_NIBBLES")
@@ -1435,18 +1621,22 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
             seg = cmap.segs[si]
             ld = lds[seg.linedef]
+            # STAGE B: a door seg emits its marking body AND its solid body, gated on door state.
+            _dual = _seg_dual(seg)
+            _mark0 = len(out)
             if ld.back != -1 and not _seg_as_solid(seg):
-                # M13-2S probe (ablate "tsprobe"): walk the DRAWABLE two-sided segs through the
+                # M13-2S rung 2 (measured under the retired `tsprobe` mode): walk the DRAWABLE
+                # two-sided segs through the
                 # cheap cull only -- GEOM block + pass 1, no emit. This prices the one thing that
                 # decides whether any two-sided emit design can fit the ops ceiling: what it
                 # costs merely to VISIT 1284 segs instead of 432. A two-sided seg whose sectors
                 # share BOTH ceiling and floor can never draw (773 of E1M1's 1482) and is
                 # excluded, exactly as the real implementation will exclude it via a baked flag.
-                # M13-2S rung 3a (ablate "tsmark"): the same probe, but with the cull the PLANE
-                # attribution actually needs. "Can never draw a WALL" (tsprobe) is too strong for
+                # M13-2S rung 3a (retired `tsmark` mode): the same probe, but with the cull the PLANE
+                # attribution actually needs. "Can never draw a WALL" (rung 2) is too strong for
                 # planes: it drops the boundary between two sectors of equal heights but
                 # different flats/lights, which is precisely where the near floor changes
-                # surface -- measured at spawn, tsprobe's cull left 3 flats claiming the near
+                # surface -- measured at spawn, rung 2's cull left 3 flats claiming the near
                 # floor, this one leaves exactly 1. It is DOOM's R_AddLine/R_StoreWallRange
                 # markfloor/markceiling test: skip only when BOTH band-bank keys
                 # (height, light, flat) are equal on the two sides, in which case attributing
@@ -1531,32 +1721,21 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                         "    stl.fcall seg_pass1_ts_leaf, seg_ret",
                         *_tsu,
                         f"  ss{cid}_seg{si}_marked:"]
-                continue
-                if not (ablate & {"tsprobe", "tsmark"}):
+                _mark1 = len(out)          # ...otherwise fall through and emit the solid body too
+                # A DUAL (door) seg falls THROUGH to the solid body below; every other
+                # two-sided seg ends here.
+                # ⚠ ORDER IS LOAD-BEARING. This `continue` must come AFTER the marking
+                # body, never before it: putting the fall-through in front silently
+                # emitted ZERO door gates, and the build still succeeded.
+                # The M13-2S `tsprobe`/`tsmark` measurement arm used to sit here. It had
+                # been unreachable since rung 3a (a078491) -- the marking body above
+                # always ended the seg -- so neither ablation can have run since, and
+                # restructuring for dual segs would have made it emit the probe body ON
+                # TOP OF the marking body rather than instead of it, which is not what it
+                # claimed to price. Its numbers are banked in docs/handoff-m13-2s.md
+                # (+4.1M for the walk, rung 3a at 31.0M worst); the modes are retired.
+                if not _dual:
                     continue
-                _fs = secs[sds[ld.front if seg.side == 0 else ld.back].sector]
-                _bs = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
-                if "tsmark" in ablate:
-                    if ((_fs.ceil_h, _fs.light & 0xFF, _fs.ceil_tex.upper())
-                            == (_bs.ceil_h, _bs.light & 0xFF, _bs.ceil_tex.upper())
-                            and (_fs.floor_h, _fs.light & 0xFF, _fs.floor_tex.upper())
-                            == (_bs.floor_h, _bs.light & 0xFF, _bs.floor_tex.upper())):
-                        continue
-                elif not (_fs.ceil_h > _bs.ceil_h or _bs.floor_h > _fs.floor_h):
-                    continue
-                _v1x, _v1y = verts[seg.v1]
-                _v2x, _v2y = verts[seg.v2]
-                _sa, _sb, _sc = seg_affine_coeffs(seg, verts)
-                xorby_blocks[si] = _seg_xorby_block(f"seg{si}_geom_consts", [
-                    ("seg_v1x", 8, (_v1x << 16) & 0xFFFFFFFF),
-                    ("seg_v1y", 8, (_v1y << 16) & 0xFFFFFFFF),
-                    ("seg_v2x", 8, (_v2x << 16) & 0xFFFFFFFF),
-                    ("seg_v2y", 8, (_v2y << 16) & 0xFFFFFFFF),
-                    ("seg_a", 8, _sa), ("seg_b", 8, _sb), ("seg_c", 8, _sc)])
-                out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
-                        "    stl.fcall seg_pass1_leaf, seg_ret",
-                        f"    stl.fcall seg{si}_geom_consts, xb_ret"]
-                continue
             v1x, v1y = verts[seg.v1]
             v2x, v2y = verts[seg.v2]
             ssec = rm._seg_sector(lds, sds, secs, seg)
@@ -1597,7 +1776,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # affine coefficients, which a ceiling cannot change. So a door's own wall pays one
             # switch dispatch, not two, and its pass-1 cull is untouched.
             _rblk, _rcall = _door_blocks(si, seg, f"seg{si}_render_consts", rfields)
-            xorby_blocks[si] = (_seg_xorby_block(f"seg{si}_geom_consts", gfields) + _rblk)
+            xorby_blocks[si] = (xorby_blocks.get(si, []) if _dual else []) + (
+                _seg_xorby_block(f"seg{si}_geom_consts", gfields) + _rblk)
             # ss{cid}_seg{si}_unseen: keyed by the per-EMISSION counter (cid): _bsp_as_code emits each
             # leaf's action once per parent branch, so seg-index labels would collide (R6m).
             out += [f"    stl.fcall seg{si}_geom_consts, xb_ret",
@@ -1608,6 +1788,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                     *_rcall,
                     f"  ss{cid}_seg{si}_unseen:",
                     f"    stl.fcall seg{si}_geom_consts, xb_ret"]
+            if _dual:
+                # [gate] marking body  ;done | solid: solid body | done:
+                # `hex.if0` on the door's own state cell: state 0 IS shut, so shut takes the SOLID
+                # arm (the closed line is a wall) and every open state takes the marking arm.
+                _dc = "dstate + %d*dw" % _dslot[_seg_door(seg)]
+                out.insert(_mark0, f"    hex.if0 1, {_dc}, ss{cid}_seg{si}_solid")
+                out.insert(_mark1 + 1, f"    ;ss{cid}_seg{si}_dualend")
+                out.insert(_mark1 + 2, f"  ss{cid}_seg{si}_solid:")
+                out.append(f"  ss{cid}_seg{si}_dualend:")
         if out:
             out = ([f"    hex.if0 1, full, ss{cid}_visit", f"    ;ss{cid}_occluded", f"  ss{cid}_visit:"]
                    + out + [f"  ss{cid}_occluded:"])
@@ -1813,7 +2002,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   False)
               + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                  tex, cm, ttang, sdrecip, srdisp, xtadisp, vtxdisp, sinadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid,
-                 entoff, _collide_tables]
+                 _collide_tables]
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
               # scratchpad/cr/emit_baseline.py, which is exactly what that control is for.
@@ -1823,6 +2012,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # run before pass1 -- otherwise their command bytes would land INSIDE the interleaved raster
     # stream and corrupt it (every other mode buffers-then-emits in present_tail, safely after
     # set_palette). All other modes keep set_palette in its original post-pass1 position.
+    _icon_macro, _chrome_calls = window_chrome_fj()
+    # AFTER set_palette so the icon's indices resolve against the registered palette. (The device
+    # also re-applies a pending icon when a palette arrives later, so the order is not load-bearing
+    # -- but emitting it in the natural order keeps the stream readable.)
+    # ⚠ THE CHROME IS NOT HERE ANY MORE. The prelude runs on every frame (the M1 reset
+    # lands on it), and the title+icon cost 8,440 ops and 0.57 ms each time. They moved
+    # to the ENTRY part, ahead of the `;__hot_end` jump, so they run once at boot.
     prelude = ["present.set_palette palette"]
     postlude_palette = []
     # ── PARTITIONED EMISSION ────────────────────────────────────────────────────────────
@@ -1866,7 +2062,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         "//   vpb_*                          the baked visplane band-list walker (generated by",
         "//                                  lut_generator; ~1.2M labels, machine-read only)",
         "// =========================================================================",
+        *_icon_macro,                                  # the icon macro DEFINITION (emits no ops)
         "stl.startup_and_init_all",
+        # BOOT-ONLY, and this time really: everything below `;__hot_end` is re-entered by the M1
+        # reset every frame, everything above it runs once. The window title and icon belong above.
+        *_chrome_calls,
         *hotdata[:1],                                  # the `;__hot_end` jump over the tables
       ]),
       ("tables", [
@@ -2674,84 +2874,6 @@ def _lines_wall_strips(rm, asset_wad, cmap, lds, sds, secs, wall_mode, colormap,
             lines_out.append(";0 * dw")
         k += 1
     return off_by_seg, NLJ.join(lines_out) + NLJ
-
-
-def _lines_wall_pix_bank(rm, asset_wad, cmap, lds, sds, secs, colormap, verts, view_h,
-                         cap: int = WPX_RUN_CAP, solid=None, two_sided=None):
-    """M13-WPX: the fully-baked 1×1 wall bank + its per-seg block offsets.
-
-    One BLOCK per distinct (wall texture, seg light level, sector wall span) — 575 E1M1 segs collapse
-    to ~185 blocks, since those three determine every column the seg can ever draw. A block holds one
-    run-list per possible wall height h (0..view_h) at a UNIFORM stride of `2*cap` words, so the
-    fj emit indexes it with a single `mul_const` by the height: no offset table, no search.
-
-    Each list is `[(rel, colour) × n][0][last_colour]` where `rel` is the run's end row measured
-    from the wall's top. The final run always ends exactly at the wall bottom, which fj already
-    holds, so its `rel` is never stored — which frees `rel == 0` to be the list TERMINATOR (every
-    real run ends at row >= 1), so the fj loop needs no counter and no per-run compare. Baking per
-    EXACT height is what makes this true 1×1: every boundary is pixel-exact, and a short wall's list
-    is short (a 5px wall can hold at most 5 runs), so far geometry costs almost nothing.
-
-    M13-2S rung 3b (`two_sided`): a marking two-sided seg gets TWO more blocks -- its UPPER
-    (texture `sd.upper`, span front.ceil - back.ceil) and its LOWER (`sd.lower`, span
-    back.floor - front.floor) -- keyed exactly like the middle one, so a step face and a wall of the
-    same texture, light and span share a block. Returns `(offsets_by_seg, bank_text)` where each
-    offset entry is `(middle, upper, lower)` when `two_sided` is given, else the bare middle offset.
-
-    The run-lists come from `ReferenceModel.wpx_strip` — the same call the oracle paints from, so
-    the two cannot drift (R6)."""
-    STRIDE = 2 * cap                              # [n] + (cap-1) pairs + [last_colour]
-    cache, blocks, off_by_seg = {}, {}, {}
-    out = [f"// M13-WPX: 1x1 wall run-lists, per (texture,light) block x wall height "
-           f"(stride {STRIDE} dw, run cap {cap})", "wpxstrips:"]
-
-    def block_for(texname, lightnum, wall_units):
-        """the bank offset of the block for this (texture, light, span), baking it on first use."""
-        tex = rm._wall_texture(asset_wad, texname, cache, wall_mode="WPX")
-        key = (texname.upper() if tex is not None else None, lightnum, wall_units)
-        if key not in blocks:
-            # M13-2S rung 3b buffers a block INDEX (one byte pair in a region entry); the
-            # shipped tier bakes the dw OFFSET straight into the seg's register.
-            blocks[key] = (len(blocks) if two_sided is not None
-                           else len(blocks) * (view_h + 1) * STRIDE)
-            texels, th, tw = tex if tex is not None else (None, 0, 0)
-            for h in range(view_h + 1):
-                lr = rm.wall_light_row(lightnum, max(1, h), max(1, wall_units))
-                runs = rm.wpx_strip(texels, th, tw, colormap, lr, max(1, h), cap=cap)
-                body = []
-                for rel, c in runs[:-1]:
-                    body += [rel, c]
-                body += [0, runs[-1][1]]                  # rel==0 sentinel, then the last colour
-                assert len(body) <= STRIDE, f"WPX list overflows its stride: {len(body)} > {STRIDE}"
-                out.extend([f";{v:#x} * dw" for v in body] + [";0 * dw"] * (STRIDE - len(body)))
-        return blocks[key]
-
-    for si, seg in enumerate(cmap.segs):
-        ld = lds[seg.linedef]
-        two = ld.back != -1
-        if two and not ((solid is not None and solid(seg))
-                        or (two_sided is not None and two_sided(seg))):
-            continue
-        sd = sds[ld.front if seg.side == 0 else ld.back]
-        sec = rm._seg_sector(lds, sds, secs, seg)
-        # M13-WPXLIGHT: the block key carries the seg's DOOM light level (sector level + FAKE
-        # CONTRAST, both per-seg constants) and the wall's span in map units -- the span is what lets
-        # each baked height h recover its own projection scale, and hence its scalelight row. So
-        # distance lighting and fake contrast are pure BAKE: zero runtime ops.
-        lightnum = rm.wall_lightnum(sec.light, rm.wall_fake_contrast(verts[seg.v1], verts[seg.v2]))
-        mid = block_for(sd.middle, lightnum, sec.ceil_h - sec.floor_h)
-        if two_sided is None:
-            off_by_seg[si] = mid
-            continue
-        up = lo = mid
-        if two:
-            bsec = secs[sds[ld.back if seg.side == 0 else ld.front].sector]
-            if sec.ceil_h > bsec.ceil_h:
-                up = block_for(sd.upper, lightnum, sec.ceil_h - bsec.ceil_h)
-            if bsec.floor_h > sec.floor_h:
-                lo = block_for(sd.lower, lightnum, bsec.floor_h - sec.floor_h)
-        off_by_seg[si] = (mid, up, lo)
-    return off_by_seg, NLJ.join(out) + NLJ
 
 
 def _lines_mode_decls(cfg, rm, asset_wad, vz_classes: dict, key_ids: dict,

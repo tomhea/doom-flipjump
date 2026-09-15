@@ -283,6 +283,13 @@ def test_the_runtime_pass_clears_every_register_the_baked_block_xors(level):
     src = (Path(__file__).resolve().parents[2] / "src/fj/sim.fj").read_text(encoding="utf-8")
     body = src[src.index("def thing_pass"):]
     body = body[:body.index("\n}")]
+    # `hex.sparse_zero PAD, n, x` is `hex.zero n, x` with the wflip-target pad passed in (the
+    # hot-path padding round, doom FINDINGS AX). It clears identically -- only the alignment of
+    # the switch table differs -- so the invariant is read THROUGH the pad rather than being made
+    # blind to it. The pad may be a literal or an SSOT name (HOT_PAD/HOTTER_PAD), hence the
+    # character class. The test keeps its teeth: it still requires every xored register to be
+    # cleared, and a register that stops being cleared in either form still fails.
+    body = re.sub(r"hex\.sparse_zero\s+[A-Za-z_0-9]+\s*,", "hex.zero", body)
     cleared = {m.group(2): int(m.group(1))
                for m in re.finditer(r"hex\.zero\s+(\d+),\s*(sp_\w+)", body)}
     assert cleared, "sim.thing_pass clears nothing -- the zero invariant is gone"

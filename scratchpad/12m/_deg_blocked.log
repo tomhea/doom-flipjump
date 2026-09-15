@@ -1,0 +1,10 @@
+BLOCKING ON: pool base 0x80000000, pinning on
+program parts: entry=32, tables=338,599, main=68, segconsts=44,419, walk=73,942, state=437, banks=2,137,148
+  counting pass: 8,534 groups, 89,198 tables
+assembled
+(664,291,0x18000000): 132 ops  !! 15975 px DIFFER
+(1272,-724,0x40000000): 132 ops  !! 16000 px DIFFER
+(1869,479,0x80000000): 132 ops  !! 15864 px DIFFER
+(-416,256,0x0): 132 ops  !! 14893 px DIFFER
+FAIL
+blocked: 87,458 tables in 8,534 groups; declined 1,740; ungrouped 112,576; pin conflicts 1,133

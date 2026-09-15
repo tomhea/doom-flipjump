@@ -1,0 +1,66 @@
+blocking: pool base 0x60000000, span unbounded
+macros allowed: hex.double_exact_xor, hex.exact_xor, hex.quadrupled_exact_xor, hex.sparse_double_exact_xor, hex.sparse_exact_xor, hex.triple_exact_xor
+  alias: 5,029 groups merged into 27,032 (was 32,061)
+  counting pass: 32,061 groups, 425,066 tables, 415s
+  pin-exclude: 2,004 BYTE-cell words only (m1.zerobyte jumps through them); nibble state cells ARE pinned
+  reset: stripping the block base from 25,701 pinned words before the LUT test
+{
+  "map": "E1M1",
+  "downscale": 2,
+  "storage_mode": "flat",
+  "span_words": 93860768,
+  "flat_limit": 134217728,
+  "headroom": 1.43,
+  "fjm_bytes": 31700021,
+  "assemble_seconds": 1482.878,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": true,
+    "standalone": true,
+    "doors": true,
+    "menu": true
+  },
+  "self_reset": {
+    "nibble_cells": 5103,
+    "byte_cells": 1002,
+    "persisted_labels": [
+      "viewx",
+      "viewy",
+      "viewangle",
+      "kb_f",
+      "kb_b",
+      "kb_l",
+      "kb_r",
+      "kb_u",
+      "mode",
+      "dstate",
+      "ddir",
+      "dsub",
+      "dwait"
+    ],
+    "restore_set": "C:\\Users\\tomhe\\Documents\\doom-flipjump\\src\\doomfj\\data\\m5_restore_set.json.gz",
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 12400,
+    "view_w": 160,
+    "subsectors": 682
+  }
+}
+
+assemblies: 2; blocked per assembly: 415,014, 415,014
+pin conflicts (aliased source-word expressions, un-pinned): 0
+runtime-reserved words skipped (stl.IO etc): 0
+declines by reason: no-block 5,103, too-wide 10,052, overflow 4,008
+blocked: 415,014 tables in 27,032 groups; declined 19,163; ungrouped 0
+total 1928s

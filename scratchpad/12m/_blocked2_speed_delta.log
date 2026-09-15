@@ -1,0 +1,25 @@
+BLOCKING, gate-PASSING build (44 frames byte-exact) -- the binding metric
+  same source, same harness, same seeds
+
+  run      z3 baseline        blocked          delta      pct
+  0         27,110,806     25,536,161     -1,574,645   -5.81%
+  1         22,051,127     20,759,806     -1,291,321   -5.86%
+  2         28,590,182     27,161,921     -1,428,261   -5.00%
+  3         24,065,319     22,885,741     -1,179,578   -4.90%
+  4         14,795,842     13,902,091       -893,751   -6.04%
+  5         24,935,526     23,989,789       -945,737   -3.79%
+  6         20,197,167     19,117,823     -1,079,344   -5.34%
+  7         14,945,357     14,131,307       -814,050   -5.45%
+  8         18,011,845     17,065,369       -946,476   -5.25%
+  9         15,707,064     14,827,147       -879,917   -5.60%
+
+  mean run-average           21,041,023     19,937,715     -1,103,308   -5.24%
+  80th-pct run               24,935,526     23,989,789       -945,737   -3.79%
+  BINDING (mean+p80)/2       22,988,274     21,963,752     -1,024,522   -4.46%
+
+  SIZE  38.10%% -> 34.69%%  (target <= 35%%)  PASS   <- first time
+  SPEED 21,963,752  (target <= 20,000,000)  OVER by 1,963,752
+  owner's 12M goal: over by 9,963,752
+
+  the WITHDRAWN 14,042,442 came from a binary that diverged at frame 3; this one walks the
+  baseline's path (44 byte-exact frames), which is why it is 7.9M higher and comparable.

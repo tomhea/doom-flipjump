@@ -180,7 +180,215 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **M5 standalone, `self_reset=False`** | **84,155,496** | 1.25× OVER | **0.627×** | **flat** (asserted) |
 | **M5 standalone + `self_reset=True`** (shipped `doom_e1m1_std.fjm`) | **84,892,508** | 1.27× OVER | **0.633×** | **flat** (asserted) |
 | **M3 the same + `menu=True`** (`doom_e1m1_menu.fjm` as of M3, before doors) | **85,209,916** | 1.27× OVER | **0.635×** | **flat** (asserted) |
-| **M2 the same + `doors=True`** (**the shipped `doom_e1m1_menu.fjm` today**) | **89,494,606** | 1.33× OVER | **0.667×** | **flat** (asserted) |
+| **M2 the same + `doors=True`** (`doom_e1m1_menu.fjm`, shipped until the blocking pass) | **51,094,744** | 0.761× | **0.381×** | **flat** (asserted) |
+| **blocked25 = the `game` tier + the assembler's blocking pass** (**the shipped `doom_e1m1_blocked25.fjm` today**) | **96,009,696** (data 43,657,732) | 1.431× OVER | **0.715×** (data 0.325×) | **flat** (asserted) |
+
+⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1) — **and its "now" is the PRE-BLOCKING binary; today's
+shipped binary is the blocked25 row, see the 2026-09-15 note below**: the shipped binary was
+89,494,606 words when this table was written and is **51,094,744** now — 0.761× of 2^26 and
+**0.381× of 2^27**, i.e. 38.07% of the w=32 ceiling, no longer OVER. Measured with
+`scratchpad/12m/fjmsize.py`; `m2_std_gate` PASS.
+(The first correction of this row put the 2^27 figure in the 2^26 column and its reciprocal in the
+other — CR-2026-09-07. Both columns are recomputed above: 51,094,744/2^26 = 0.7614,
+51,094,744/2^27 = 0.3807.)
+
+⚠ **THE BLOCKED25 ROW, ADDED CR-2026-09-15 (R4).** The row above it is the PRE-BLOCKING shipped
+binary and stays as history — the 2026-09-07 note is about that binary, which is simply no longer
+"today". blocked25 is **the `game` tier** — the same tier as the row above (`docs/ship-gate.md`
+§1b's build command is `... -- game --out build/doom_e1m1_<name>.fjm --pool-base ...`) — with the
+assembler's BlockPool pass on, and it is the first row whose span and whose word count are
+DIFFERENT numbers, because the pass puts the lookup tables in a pool far above the program, so the
+image is 424,743 segments and not one. So a reader comparing 51,094,744 → 96,009,696 is reading a
+wider ADDRESS WINDOW, not a program that grew by 45M words: blocked25's payload is **43,657,732**
+words, and on a single-segment image `fjmsize` reports span and data as ONE number — measured on a
+pre-blocking binary still on disk, `python scratchpad/12m/fjmsize.py build/doom_e1m1_menu.fjm`
+prints `w=32  segments=1  data=89,494,606 words (66.68% of 2^27)  span=89,494,606 words (66.68%)
+file=32,879,690 bytes` (one line, wrapped here), which is the doors build in the M5/M3 table below
+— that row records the same 32,879,690 bytes. Both of blocked25's own numbers were re-measured for
+this row rather than quoted: `python scratchpad/12m/fjmsize.py build/doom_e1m1_blocked25.fjm`
+prints, in full:
+
+```
+w=32  segments=424743  data=43,657,732 words (32.53% of 2^27)  span=96,009,696 words (71.53%)  file=31,845,446 bytes
+```
+
+which is the line `scratchpad/12m/m6_final_gamespeed.log` carries (its `SIZE:` line — `gamespeed.py`
+prints it from the same reader) and the size `docs/ship-gate.md` §1 carries as standing. **w is 32**
+— the reader takes it from the binary's own header, and it is what the build assembles with
+(`harness.W = 32`, passed as `memory_width=W` at every `fj.assemble` in `build.py` and in
+`selfreset.capture_labels`); at w=32 the hard address ceiling `(1 << w) // w` and
+`RENDER_FLAT_MAX_WORDS` (`config.py`, `1 << 27`) are the same 2^27 words, so the 2²⁷ column is also
+the ceiling.
+
+**The pool line**, which this ledger was missing. `docs/ship-gate.md` §1b's build command passes
+`--pool-base 0x60000000 --span-bits 0x9fffffe0`, and both are BIT addresses (`build_blocked.py`'s
+`_preflight` divides by `W` to report words), so at w=32:
+
+* base 0x60000000 / 32 = **word 50,331,648**;
+* end 0x60000000 + 0x9fffffe0 = 0xffffffe0, / 32 = **word 134,217,727** — one word under 2^27,
+  which is what the `...ffe0` is for;
+* the image ends at word 96,009,696, so the pool OCCUPIES 96,009,696 - 50,331,648 =
+  **45,678,048 words** of that window and leaves 134,217,727 - 96,009,696 = 38,208,031 unused.
+
+`poolmap.py` (next paragraph) prints the base, the window end and that 38,208,031 as its `POOL`
+line, and the 45,678,048 as the blocks' extent — so all four are read back from the binary and the
+knobs, not only computed here.
+
+**Where the span-minus-data difference lives, and how big the pad is.** `python
+scratchpad/12m/poolmap.py` reads the .fjm's own segment table (the same table `fjmsize.py` takes
+`span_words` from) and prices the pool's blocks from the frozen counts cache that §1b's build
+command names (`--counts-cache scratchpad/12m/_counts_game.json.gz`, the one cache `.gitignore`
+whitelists, at its line 45, so that it can live in the repo) — no assembly, 1.8 s. Below is ONE run
+of it, on 2026-09-15, COMPLETE: all seventeen lines it wrote, in order, nothing elided. Its `FJM`
+line is the `fjmsize` line quoted above and its `POOL` line the pool words computed just above —
+those two repeat on purpose, so that every figure in this note is read back from the artifacts
+rather than carried forward by hand.
+
+```
+FJM    w=32  segments=424743  data=43,657,732 words (32.53% of 2^27)  span=96,009,696 words (71.53%)  file=31,845,446 bytes
+       segment table sums to the payload: yes (43,657,732 words)
+SPLIT  below word 50,331,648: 1 segment, 27,527,046 payload words, ending at word 27,527,046
+       in the pool   : 424,742 segments, 16,130,686 payload words, words 50,331,648..96,009,696
+GAP    program end -> pool base: 22,804,602 words
+POOL   base word 50,331,648, window ends word 134,217,727 (--pool-base 0x60000000 --span-bits 0x9fffffe0); 38,208,031 words of the window above the image
+  counts cache HIT: 27,030 groups, 425,236 tables (skipping the counting assembly)
+BLOCKS 27,030 of 27,030 groups placed (0 broken); demand 45,678,048 words, extent 45,678,048 words, capacity 83,886,079 words (54.5% used)
+       demand == extent, i.e. no hole in front of any block: yes
+       extent == the image's span above the pool base, i.e. the image ends at the allocator's cursor: yes
+PAD    45,678,048 - 16,130,686 = 29,547,362 words INSIDE the blocks, by mechanism:
+       block power-of-two round-up         8,305,632 words   28.1%  (--width-buckets only)
+       alignment between buckets                   0 words    0.0%  (structurally 0)
+       unused slots                       20,301,536 words   68.7%  (count rounded up, times --spread)
+       slot width + declined tables          940,194 words    3.2%
+       the four terms sum to the pad: yes
+SUM    span - data = 96,009,696 - 43,657,732 = 52,351,964 = 22,804,602 gap + 29,547,362 pad: yes
+```
+
+One line of that block is not a property of the binary: `counts cache HIT` is
+`build_blocked._load_counts` reporting that THIS working tree still hashes to the frozen cache's
+signature (the counts-cache paragraph below is about what that means and when it moves). A tree
+that has moved gets `counts cache is for a DIFFERENT program` instead and the run STOPS at `PAD`
+with the block sizes unpriced; `--allow-stale` then reprices the same frozen counts and prints
+three more lines saying so. Both were run on 2026-09-15, and `diff` of the two with the three
+cache-state lines dropped (`grep -vE "counts cache|cache sig|allow-stale"` on each) is EMPTY:
+every other line above, `BLOCKS`/`PAD`/`SUM` included, is identical, because the block sizes are a
+function of the counts, the widths and the histogram alone — of the cache, not of the tree.
+
+`scratchpad/12m/m6_final_poolmap.log` is the committed transcript for this paragraph and the
+`fjmsize` line above it: five runs — `fjmsize.py`, `poolmap.py`, `--allow-stale`, `--selftest`,
+`--no-width-buckets --allow-stale` — each under the command line that produced it. Read it knowing
+one thing: its plain `poolmap.py` arm is the REFUSAL, not the run fenced above, because by the time
+it was captured another job's edit to `src/` had moved the tree hash to `adc2e11078a14eba`. So every
+one of the seventeen lines above is in that transcript, but in its `--allow-stale` arm, which prints
+them with four cache-state lines interleaved.
+
+So the **52,351,964** words of span that hold nothing are **22,804,602** between the end of the
+program and the pool base, and **29,547,362** of PADDING INSIDE THE BLOCKS — that second figure is
+the "size + alignment pad" R4 asks this ledger to sum, and it needs no build. ⚠ It is **not** waste
+*between* blocks, and an earlier draft of this note both said it was and declared the pad
+underivable: `BlockPool._preallocate` allocates blocks BIGGEST FIRST with each aligned to its own
+power-of-two size, and its docstring says why — allocating them in "encounter order leaves a hole in
+front of each one, up to a whole block's worth", whereas "in descending size each block lands on an
+address the previous ones already aligned past". The line that MEASURES that is
+`demand == extent` — 45,678,048 ==
+45,678,048, with 0 groups broken, so the two sums are over the same blocks: the blocks' own SIZES
+add up to the span they occupy, hence no block sits behind a hole. (The NEXT line, `extent` == the
+image's span above the pool base, is a different fact — the image ends at the allocator's cursor —
+and cannot prove this one, because `_used` IS that cursor and so already contains any hole. An
+earlier draft hung the claim on that line. `poolmap.py` now prints both, each labelled with what it
+means, and says so out loud when broken groups make the first one decide nothing: priced with the
+same counts, `--no-width-buckets` breaks 12,275 of the 27,030 groups and the equality goes `NO`.)
+It holds here because the pool base, word 50,331,648, is exactly 3× the largest block —
+16,777,216 words, the group `(hex.tables.res + 32)`, which the `--selftest`'s C2 line names — so
+even the first and biggest block lands on an address it is already aligned to.
+
+**The pad is inside the blocks, by three mechanisms, and an earlier draft of this note named only
+two of them.** "unused slots + slot-width padding" left out the largest single lever, so the `PAD`
+block now prints all of them, measured (`pad_breakdown`, driven by the same `_block_bits` the demand
+is summed from — its C5 control):
+
+* **block power-of-two round-up — 8,305,632 words, 28.1%.** With `--width-buckets` (which §1b's
+  build command passes) `_bucket_layout` lays out one sub-block per table width and then rounds the
+  WHOLE BLOCK up to a power of two: `1 << max(0, (offset - 1).bit_length())`. This term exists only
+  on that path — on the uniform path the block IS its slots, and `poolmap.py --no-width-buckets`
+  duly prints it as 0.
+* **unused slots — 20,301,536 words, 68.7%.** A bucket's slots are its table count rounded up to a
+  power of two, times `--spread 2` for a group above `--spread-min-count 256`, so every slot past
+  the count is never written. `BlockPool.__init__` states the consequence for this ledger out loud:
+  "unused slots emit no data, so it costs span, not data".
+* **slot width + declined tables — 940,194 words, 3.2%.** Every slot is as wide as its bucket's
+  widest table (`_bucket_layout`: "most of a mixed group's block is width padding"), and a table
+  wider than `--max-slot-ops 512` is declined to inline, so it is counted here and emits nothing
+  into the pool at all.
+
+A fourth line, alignment BETWEEN buckets, prints 0 — and is 0 for every group at any `--spread`, not
+just at 2: a bucket is `spread * op_bits * 2**k` bits, so of two buckets in one group the bigger is
+a whole multiple of the smaller (the `spread` cancels), and biggest-first then always leaves the
+cursor aligned for the next. (Checked as well as argued: forcing `--spread` to 1, 2, 3, 5 and 7 over
+the same 27,030 groups leaves the term at 0 bits in every case.) It is printed because that is a
+property of `_bucket_layout` rather than of this binary — a layout change that sized a bucket by
+anything but a power of two times the group's spread would show up on that line instead of
+disappearing into one of the other three. ⚠ And the 8,305,632 is **not**
+8.3M words a reader can go and reclaim: buckets are what make the pool fit at all. Priced from the
+same counts, `python scratchpad/12m/poolmap.py --no-width-buckets` demands **84,565,984** words
+against a capacity of 83,886,079 and leaves **12,275 of 27,030 groups with no block**.
+
+The demand half of that arithmetic is only as good as the counts cache, and the cache is keyed by
+the emitter sources' BYTES — `build_blocked._counts_sig` hashes `f.read_bytes()` over
+`src/doomfj/*.py` and `src/fj/*.fj`. So whether a run HITs depends on the working tree at the moment
+it runs: ANY byte movement under those two globs moves the key, an edit as surely as a line-ending
+rewrite that `git diff` would not show (`docs/ship-gate.md` §1b records this cache missing for that
+second reason). In the hour this note was written it took three values: `f9cce59b246886c1`, the
+cache's own and what the fenced run above was captured at; `fa712a07cf9072c4`; back to the first;
+then `adc2e11078a14eba`, what the transcript was captured at. `git status --porcelain src/` named a
+modified file in `src/doomfj` during each miss and nothing in between — another job on the box was
+editing `src/`, and this note does not claim to know which of its writes moved the hash. On a miss
+`poolmap.py` REFUSES by default (its C3 control) and prints both hashes; `--allow-stale` prices the
+cached counts anyway and says so twice, before and after — including that the `counts cache HIT`
+line printed in between is `_load_counts`' own line against the FORCED signature, not against this
+tree. The block sizes depend only on the counts, the widths and the histogram, so a stale-priced
+run is not arithmetically wrong;
+it is a claim about whichever program the counts were taken from, which is why it is never the
+default. `build_blocked.py --preflight-only` prints the same demand vs capacity, but only as part of
+a build — its preflight runs inside the patched `fj.assemble`, so reaching it costs the tier's whole
+emit.
+
+`poolmap.py --selftest` is the R9 control set behind the numbers above — C1 a synthesised .fjm whose
+split must come back instead of blocked25's constants, C2 a group's count dropped so the demand must
+move by that block's size, C3 a cache signed for another program that must be REFUSED (and one
+signed for this tree that must not be), C4 the vacuity checks, C5 a hand-computed two-bucket block
+whose round-up / alignment / unused / width terms are each known in advance, plus the same group
+with `--no-width-buckets` where the round-up term must vanish — and it printed `SELFTEST PASS` on
+2026-09-15. A counts cache that exists but does not LOAD is reported as a FAIL — by C3, and again
+where C2/C4 would have priced it — rather than raised, which is how that path used to die: a
+control set that exits with a traceback is one whose verdict line never prints.
+
+**What asserts `flat`, and what it does not cover.** `build_wall_renderer` in `src/doomfj/build.py`:
+`assert metrics["storage_mode"] == "flat"` and `assert span < limit` at the end of the function,
+against `limit = RENDER_FLAT_MAX_WORDS`. `scratchpad/12m/build_blocked.py` monkey-patches
+`fj.assemble` and then calls that same function — checking first that the patch took
+(`assert build_module.fj.assemble is assemble_blocked, "build.py does not call fj.assemble"`) — so
+the pooled path DOES run both asserts. That is a code fact, read; this row's session did not
+re-build, so what it re-measured is the span half, 96,009,696 < 134,217,728. The reachable evidence
+that blocked25 ITSELF went through the pair is the **byte-identical rebuild of 2026-09-13**
+(`docs/ship-gate.md` §1b, "Status: **VERIFIED, byte-identical**"): that run went through
+`build_wall_renderer` — and so through both asserts — and produced blocked25's bytes, sha256
+`fc46c28c5f2bbac8`. blocked25's own build line, 09-11 18:04, was never logged (§1b says so), so
+there is no transcript of that day's assert to point at.
+
+Two things the pair does NOT cover, plainly. **The payload**: the 32.53% the owner's size target is
+measured on is asserted nowhere in the build (`gamespeed.py` is what checks it). **And the pool
+window**, which nothing refuses: a `--pool-base`/`--span-bits` pair reaching past 2^27 words is
+CLAMPED, not rejected — `BlockPool._preallocate` takes
+`limit = min(1 << memory_width, pool_base + span_bits)` and `TablePool._cheapest_offsets` clamps
+`reach` the same way — and the groups that then do not fit go into `broken_groups` and "stay inline
+everywhere", which is silent except for the preflight's `*** N GROUPS GET NO BLOCK` line and the
+build's `broken groups: N of M` tail. The refusal that does exist runs the other way:
+`PreprocessorData.finish` raises `FlipJumpPreprocessorException` when the PROGRAM grows up into
+`pool_base`. (An earlier draft of this note said an over-reaching window "would be refused by the
+assembler's own address check"; `assert_address_in_memory` never sees one, because the clamp
+happens first — advertising a safety net that is not there is the R9 failure mode.)
+
 
 ⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
 and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the

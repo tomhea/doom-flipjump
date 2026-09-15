@@ -1,0 +1,9 @@
+PLACEMENT ON: base 0x80000000, span 0x20000000, run_ops 16, cap 65,536
+program parts: entry=32, tables=338,599, main=68, segconsts=44,419, walk=73,942, state=437, banks=2,137,148
+assembled
+
+*** THIS RUN WAS KILLED BY ITS 3000s TIMEOUT (exit 124), NOT by a gate failure. ***
+It assembled; the four interpreter runs did not finish inside the remaining budget. The wider pool
+(span 0x20000000 -> span ~83.9M words) makes the interpreter's flat array much larger than the
+8,192/0x8000000 run's, and the viewpoint runs slowed accordingly. No verdict was produced, so this
+config is UNMEASURED -- it is not evidence for or against a larger cap.

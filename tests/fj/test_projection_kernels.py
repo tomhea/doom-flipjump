@@ -25,9 +25,19 @@ from doomfj.wad import WadFile
 from doomfj.wall_renderer import hoisted_scratch_fj
 
 PROJECTION_FJ = Path("src/fj/projection.fj")
+FRAME_RENDER_FJ = Path("src/fj/frame_render.fj")   # projection.fj uses its frame.sub8/sub10/add6_chain (idea 14, 2026-09-03)
 FIXED_POINT_FJ = Path("src/fj/fixed_point.fj")   # provides hex.read_table + hex.fixed_div
 E1M1_WAD = Path("tests/fixtures/freedoom_e1m1.wad")
 MASK40 = (1 << 40) - 1   # 10-nibble two's-complement mask (point_on_side's working width)
+
+
+def _sources(tmp_path):
+    """the files every kernel program here assembles with: the generated constants first
+    (projection.fj names the emitter's pad constants HOT_PAD / HOTTER_PAD -- one source, exactly
+    as the shipped build gets them, R6), then fixed_point, projection, and frame_render for the
+    frame.*_chain macros projection.fj has used since idea 14 (2026-09-03)."""
+    consts = Config().emit_fj_consts(tmp_path / "fj_consts.fj")
+    return [consts.resolve(), FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), FRAME_RENDER_FJ.resolve()]
 
 
 def _run(tmp_path, name, body, data, expected: bytes):
@@ -35,7 +45,8 @@ def _run(tmp_path, name, body, data, expected: bytes):
     p = tmp_path / f"{name}.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()],
+        b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"{name}: fj output != oracle"
 
@@ -119,7 +130,7 @@ def test_point_to_angle_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "point_to_angle.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "point_to_angle: fj output != oracle"
 
@@ -162,7 +173,7 @@ def test_point_to_dist_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "point_to_dist.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "point_to_dist: fj output != oracle"
 
@@ -213,7 +224,7 @@ def test_wall_setup_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "wall_setup.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "wall_setup: fj output != oracle"
 
@@ -259,7 +270,7 @@ def test_scale_from_global_angle_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "scale.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "scale_from_global_angle: fj output != oracle"
 
@@ -323,7 +334,7 @@ def test_scale_from_global_angle_column_cases_byte_exact_vs_oracle(tmp_path, dis
     p = tmp_path / f"scale_col_{disp}.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"scale_from_global_angle(disp={disp}, column cases): fj output != oracle"
 
@@ -369,7 +380,7 @@ def test_angle_to_x_byte_exact_vs_oracle(tmp_path, disp):
     p = tmp_path / "angle_to_x.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, f"angle_to_x(disp={disp}): fj output != oracle"
 
@@ -437,7 +448,7 @@ def test_wall_x_range_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "wall_x_range.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "wall_x_range: fj output != oracle"
 
@@ -477,7 +488,7 @@ def test_wall_screen_span_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "wall_screen_span.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "wall_screen_span: fj output != oracle"
 
@@ -518,7 +529,7 @@ def test_scalestep_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "scalestep.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "scalestep: fj output != oracle"
 
@@ -584,7 +595,7 @@ def test_texture_u_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "texture_u.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "texture_u: fj output != oracle"
 
@@ -638,7 +649,7 @@ def test_column_setup_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "column_setup.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "column_setup: fj output != oracle"
 
@@ -739,7 +750,7 @@ def test_column_render_params_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "column_render_params.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "column_render_params: fj output != oracle"
 
@@ -822,6 +833,6 @@ def test_point_on_side_leaf_byte_exact_vs_oracle(tmp_path):
     p = tmp_path / "pos_leaf.fj"
     p.write_text(prog, encoding="utf-8")
     ok = fj.assemble_and_run_test_output(
-        [FIXED_POINT_FJ.resolve(), PROJECTION_FJ.resolve(), p.resolve()], b"", expected,
+        [*_sources(tmp_path), p.resolve()], b"", expected,
         memory_width=W, warning_as_errors=True, should_raise_assertion_error=False)
     assert ok, "point_on_side_leaf: fj output != oracle"

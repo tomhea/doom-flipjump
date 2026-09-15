@@ -1,0 +1,59 @@
+owner mode: relocating tables under frame.seg_pass1_leaf_body_lines, frame.seg_pass2_leaf_body_lines, frame.seg_pass1_leaf_body_ts, proj.point_on_side_leaf, frame.thing_record_body, proj.wedge_bbox, sim.thing_pass, sim.check_position, sim.try_move, sim.bind_things, capped at 16,384
+pool: base 0x80000000, span 0x8000000, run_ops 16
+{
+  "map": "E1M1",
+  "downscale": 2,
+  "storage_mode": "flat",
+  "span_words": 71172192,
+  "flat_limit": 134217728,
+  "headroom": 1.886,
+  "fjm_bytes": 18822853,
+  "assemble_seconds": 911.734,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": true,
+    "standalone": true,
+    "doors": true,
+    "menu": true
+  },
+  "self_reset": {
+    "nibble_cells": 5103,
+    "byte_cells": 1002,
+    "persisted_labels": [
+      "viewx",
+      "viewy",
+      "viewangle",
+      "kb_f",
+      "kb_b",
+      "kb_l",
+      "kb_r",
+      "kb_u",
+      "mode",
+      "dstate",
+      "ddir",
+      "dsub",
+      "dwait"
+    ],
+    "restore_set": "C:\\Users\\tomhe\\Documents\\doom-flipjump\\src\\doomfj\\data\\m5_restore_set.json.gz",
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 12400,
+    "view_w": 160,
+    "subsectors": 682
+  }
+}
+
+assemblies: 2; relocated per assembly: 16,384, 16,384
+relocated: 16,384 tables into 16,344 runs; declined 0
+total 1349s

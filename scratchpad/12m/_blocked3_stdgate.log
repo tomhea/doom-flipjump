@@ -1,0 +1,23 @@
+fjm    : build/doom_e1m1_blocked3.fjm
+target : door sector 48, use box (480, 616, 624, 808), threshold state 4
+script : 2 menu -> enter -> 24 walk to the door -> 2 use -> 8 open -> 3 through -> 6 idle  (45 frames)
+doorway: line 537 ((544, 744), (544, 680)) -> approach (488, 712), then through to (632, 712)
+Traceback (most recent call last):
+  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\m2_std_gate.py", line 482, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\m2_std_gate.py", line 396, in main
+    got, ops = run_fj(ROOT / args.fjm, events, frames)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\doom-flipjump\scratchpad\m2_std_gate.py", line 251, in run_fj
+    _c, ops, _e, _l, _p = core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\io_devices\pygame_window.py", line 256, in write_bit
+    self._screen.write_bit(bit)
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\io_devices\ScreenIO.py", line 138, in write_bit
+    self._handle_byte(byte)
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\io_devices\ScreenIO.py", line 169, in _handle_byte
+    self._handle_collines_byte(byte)
+  File "C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\io_devices\ScreenIO.py", line 315, in _handle_collines_byte
+    raise IODeviceException(
+flipjump.utils.exceptions.IODeviceException: collines run ends at row 37, behind the fill cursor at 50 (the cursor only moves forward)

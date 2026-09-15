@@ -1,0 +1,5 @@
+flipjump 1.5.1 at dd7ad31; doom m6-rung1-baseline, round 7
+$ python -m pytest tests/host -q
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1048 passed, 1 deselected, 2 xfailed, 3 warnings in 88.51s (0:01:28)

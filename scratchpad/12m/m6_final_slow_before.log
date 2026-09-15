@@ -1,0 +1,7 @@
+flipjump: C:\Users\tomhe\Documents\flipjump-151\flipjump\__init__.py at 9a4595b
+$ python -m pytest tests/host -m slow -q
+R4 shipped-tier metrics: tier=lines/W1R/FT1+plane_near span=49,269,414 words limit=134,217,728 headroom=2.724 fjm=17,578,964 bytes assemble=1819.148s
+=========================== short test summary info ===========================
+FAILED tests/host/test_e1m1_integration.py::test_build_wall_renderer_e1m1_flat
+1 failed, 973 deselected in 2351.70s (0:39:11)
+exit=0

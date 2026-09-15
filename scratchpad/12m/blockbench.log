@@ -1,0 +1,16 @@
+marginal cost of one hex.xor -- stock vs blocked
+
+  K      stock                    blocked (block=2^n)     
+  1      41       looping         21       looping        
+  4      76       looping         38       looping        
+  16     240      looping         130      looping        
+  32     448      looping         274      looping        
+
+  MARGINAL ops per xor (K=1 -> K=32):
+    stock   : 13.13 ops/xor
+    blocked : 8.16 ops/xor  (-37.8%)
+
+  In THIS program the stock table addresses are ~popcount 8. In the shipped game
+  they are popcount 9.32 (FINDINGS BD), so stock's real per-call cost is higher
+  than the slope above and blocking's advantage there is larger. That extrapolation
+  is NOT measured here -- BD's arithmetic missed by 15x (BE).

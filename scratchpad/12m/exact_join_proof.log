@@ -1,0 +1,4 @@
+labels : scratchpad/12m/_w1_labels.tsv.gz
+         2,103,912 addresses
+join   : EXACT -- labels carry sha256=9797d7871a67e869 and build/doom_e1m1_w1.fjm matches
+fjm    : build/doom_e1m1_w1.fjm  (walk seed 0, 1 game frames)

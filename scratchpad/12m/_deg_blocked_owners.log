@@ -1,0 +1,11 @@
+BLOCKING ON: pool base 0x80000000, pinning on
+  restricted to: frame.seg_pass1_leaf_body_lines, frame.seg_pass2_leaf_body_lines, frame.seg_pass1_leaf_body_ts, proj.point_on_side_leaf, frame.thing_record_body, proj.wedge_bbox
+program parts: entry=32, tables=338,599, main=68, segconsts=44,419, walk=73,942, state=437, banks=2,137,148
+  counting pass: 8,400 groups, 77,787 tables
+assembled
+(664,291,0x18000000): 259,625 ops  !! 15975 px DIFFER
+(1272,-724,0x40000000): 237,379 ops  !! 16000 px DIFFER
+(1869,479,0x80000000): 323,613 ops  !! 15864 px DIFFER
+(-416,256,0x0): 488,448 ops  !! 14893 px DIFFER
+FAIL
+blocked: 76,061 tables in 8,400 groups; declined 1,726; ungrouped 12,408; pin conflicts 1,093

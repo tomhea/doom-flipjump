@@ -1,0 +1,8 @@
+PLACEMENT OFF (baseline)
+program parts: entry=32, tables=338,599, main=68, segconsts=44,419, walk=73,942, state=437, banks=2,137,148
+assembled
+(664,291,0x18000000): 33,205,851 ops  BYTE-EXACT
+(1272,-724,0x40000000): 26,407,589 ops  BYTE-EXACT
+(1869,479,0x80000000): 30,631,732 ops  BYTE-EXACT
+(-416,256,0x0): 24,986,008 ops  BYTE-EXACT
+PASS

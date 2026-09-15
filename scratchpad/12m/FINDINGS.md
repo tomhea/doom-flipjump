@@ -3676,12 +3676,12 @@ NAMED by some row, so neither a row retired later nor a test file added later ca
 evidence silently. `--selftest` adds two more. The R9 arm
 edits a COMMENT and requires NOT CAUGHT -- narrowly, that is the run behind the CAUGHT verdicts
 being SEMANTIC and not an artifact of rewriting src/ while pytest imports it; it is NOT a guard
-against a broken `_run`, which C2 and the 17 rows already catch from either side. The NEG pair is
+against a broken `_run`, which C2 and the 18 rows already catch from either side. The NEG arms are
 R9 turned on the two new controls themselves: C4 over a table with a file's rows dropped, C4
 over an added test file no row names (the direction the list-shaped version could not see), and
 the R9 arm over a stub runner that reddens the comment edit, each required to report the failure
-it must NAME. Both live in mutcheck.py and run in-process, because a control whose own control is a
-copy of the tool somewhere else is a copy that drifts.
+it must NAME. All three live in mutcheck.py and run in-process, because a control whose own
+control is a copy of the tool somewhere else is a copy that drifts.
 
 **Two xfails are a real M4 blocker, not decoration:** E1M6 has 344 and E1M7 330 runtime things,
 past the 254 the `thnext`/`sshead` byte sentinel allows, so a nine-level build dies on

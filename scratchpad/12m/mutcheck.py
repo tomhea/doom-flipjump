@@ -29,11 +29,12 @@ CONTROLS (R9)
      does not by itself redden a suite, i.e. CAUGHT means "the edit broke the code", not
      "mutcheck touched the file". It does NOT stand between the harness and a `_run` that stopped
      reading the return code: a constant-RED `_run` never reaches the arm (C2 ends the run at
-     "Refusing to mutate against a red suite"), and a constant-GREEN one is already 17 `survived`
-     entries from MUTATIONS.
- NEG THE NEW CONTROLS MUST THEMSELVES BE ABLE TO FAIL -- `--selftest` finally runs C4 against a
-     table with a file's rows removed, and the R9 arm against a stub runner that calls the
-     comment edit red, and REQUIRES both to report a failure. In-process and in this file: a
+     "Refusing to mutate against a red suite"), and a constant-GREEN one is already a table of
+     `survived` entries from MUTATIONS.
+ NEG THE NEW CONTROLS MUST THEMSELVES BE ABLE TO FAIL -- `--selftest` runs C4 against a table
+     with a file's rows removed, C4 against an added test file no row names, and the R9 arm
+     against a stub runner that calls the comment edit red, and REQUIRES each to report a
+     failure. In-process and in this file: a
      control whose own control is a copy of the tool kept somewhere else is a copy that drifts,
      and an uncommitted one is not evidence at all. Costs no pytest -- C4 is bookkeeping and the
      R9 negative needs only the verdict, so its runner never launches anything.
@@ -217,8 +218,8 @@ def _c4(mutations, say=print, wanted=None):
 
     `wanted` defaults to the git query, so the property checked is the property printed. Pure
     bookkeeping -- it launches nothing, which is why it runs before C2 and why its own negative
-    controls below need no pytest either. Prints a line per file, returns the fails, and both
-    negatives call THIS, so what they prove is the arm the run uses.
+    controls below need no pytest either. Prints a line per file, returns the fails, and every
+    negative calls THIS, so what they prove is the arm the run uses.
     """
     named = {m[4] for m in mutations}
     out = []
@@ -244,10 +245,12 @@ def _r9(backups, run=None, say=print):
 def _neg(backups, say=print):
     """R9 turned on the two controls this branch adds: each must be able to report a failure.
 
-    C4's negative is the real C4 over a table with one file's rows removed -- it must then call
-    that file uncovered. The R9 arm's negative is the real arm driven by a runner that calls the
-    comment edit red -- it must then report the arm caught. Both drive the arm the run itself
-    uses, in this process, from this file: no second copy of the tool to keep in step. Each is
+    C4 has two negatives, one per direction it can be blind in: the real C4 over a table with one
+    file's rows removed, which must call that file uncovered, and the real C4 over a test file
+    the branch adds that no row names, which must say the same of it. The R9 arm's negative is
+    the real arm driven by a runner that calls the comment edit red -- it must then report the
+    arm caught. All three drive the arm the run itself uses, in this process, from this file: no
+    second copy of the tool to keep in step. Each is
     paired with the failure string it must NAME, because "something failed" is the weak half of a
     negative control. The arms' own lines are captured, not printed -- a deliberate "!!" in a
     passing transcript is a trap for whoever greps it -- and the failure strings are printed.

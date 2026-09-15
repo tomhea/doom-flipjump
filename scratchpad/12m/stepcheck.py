@@ -13,9 +13,10 @@ straddled by either test and is jumped clean. And because a refused step is disc
 than truncated, the player halts up to ~50 units short of a wall on open floor.
 
 This checks that on THE MAP THAT SHIPS. An earlier analysis reached its conclusions by sweeping
-assets/doom1.wad; DESIGN.md:812 says that WAD "is never the oracle input (its geometry differs)",
-and build_wall_renderer defaults to tests/fixtures/freedoom_e1m1.wad. Using the wrong map inverted
-the answer, so this script PRINTS the wad it loaded and asserts it is the build default.
+assets/doom1.wad; DESIGN.md's "WAD & artifact policy" paragraph (section 10.1) says that WAD "is
+never the oracle input (its geometry differs)", and build_wall_renderer defaults to
+tests/fixtures/freedoom_e1m1.wad. Using the wrong map inverted the answer, so this script PRINTS
+the wad it loaded and asserts it is the build default.
 
 Oracle only -- no assembly, no build, seconds to run.
 

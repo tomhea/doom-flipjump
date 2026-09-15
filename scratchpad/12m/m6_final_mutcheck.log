@@ -1,7 +1,7 @@
-# Round 7 of PR #84's review, on m6-rung1-baseline at e1fe910 + the round-7 commits,
-# against flipjump 1.5.1 at dd7ad31 (engine 79af8639f57bfa50). Captured 2026-09-15.
+# Round 8 of PR #84's review. doom m6-rung1-baseline, flipjump 1.5.1 at dd7ad31
+# (engine 79af8639f57bfa50). Captured 2026-09-16.
 $ python scratchpad/12m/mutcheck.py --selftest
-C4 -- every tests/host file this branch adds must be named by a mutation
+C4 -- every tests/host file this branch adds must be named by a mutation (git)
    tests/host/test_build_more.py                  covered
    tests/host/test_collision_more.py              covered
    tests/host/test_door_occlusion.py              covered
@@ -9,6 +9,7 @@ C4 -- every tests/host file this branch adds must be named by a mutation
    tests/host/test_fastrun.py                     covered
    tests/host/test_lut_generator_more.py          covered
    tests/host/test_mapcompiler_more.py            covered
+   tests/host/test_narrowed_clear_sites.py        covered
    tests/host/test_nodebuilder_more.py            covered
    tests/host/test_reference_model_more.py        covered
    tests/host/test_things_more.py                 covered
@@ -24,6 +25,7 @@ C2 -- every target test file must be GREEN before any mutation
    tests/host/test_fastrun.py                     green
    tests/host/test_lut_generator_more.py          green
    tests/host/test_mapcompiler_more.py            green
+   tests/host/test_narrowed_clear_sites.py        green
    tests/host/test_nodebuilder_more.py            green
    tests/host/test_reference_model_more.py        green
    tests/host/test_things_more.py                 green
@@ -48,6 +50,7 @@ MUTATIONS -- each must turn its test file RED
    lut_generator: the emit handler stride loses the jump op CAUGHT
    nodebuilder: a split fragment's offset restarts at zero CAUGHT
    reference_model: the step-up rule compares map units to 16.16 CAUGHT
+   fixed_point: the narrowed pointer clear is one nibble short CAUGHT
 
 R9 -- the control mutation, which must NOT be caught
    control: a comment-only edit must NOT be caught REJECTED (still green)
@@ -55,6 +58,8 @@ R9 -- the control mutation, which must NOT be caught
 NEG -- C4 and the R9 arm, each against the case it must reject
    C4, with test_build_more.py's rows dropped
        -> C4 tests/host/test_build_more.py uncovered
+   C4, against a newly added test no mutation names
+       -> C4 tests/host/test_a_file_this_branch_just_added.py uncovered
    the R9 arm, against a runner that reddens the comment edit
        -> R9 tests/host/test_wireformat.py went red on a comment-only edit
 
@@ -71,6 +76,7 @@ C3 -- source restored
    src/doomfj/things.py                           identical
    src/doomfj/wall_renderer.py                    identical
    src/doomfj/wireformat.py                       identical
+   src/fj/fixed_point.fj                          identical
 
 MUTCHECK PASS
 exit=0

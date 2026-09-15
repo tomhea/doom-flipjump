@@ -17,8 +17,8 @@ CONTROLS (R9)
   C2 THE TEST MUST PASS CLEAN -- every target file is run unmutated first. A file that is already
      red would "catch" every mutation for the wrong reason.
   C3 THE SOURCE MUST COME BACK -- every file is byte-compared to its backup after restore.
-  C4 EVERY NEW TEST FILE MUST BE NAMED -- the twelve tests/host files this branch adds are listed
-     below and each must appear as some mutation's target. Without it "all twelve carry FAIL
+  C4 EVERY NEW TEST FILE MUST BE NAMED -- the tests/host files this branch adds, ASKED OF GIT
+     rather than listed, must each appear as some mutation's target. Without it "they all carry FAIL
      evidence" is a claim about the version of this table it was written against, not a checked
      property, and a row deleted later takes its file's evidence with it silently. Pure
      bookkeeping over the table, so it runs BEFORE C2 and still reports when a file is red.
@@ -123,6 +123,15 @@ MUTATIONS = [
      "if (floorz - here_floor) << 16 > MAX_STEP:",
      "if (floorz - here_floor) > MAX_STEP:",
      "tests/host/test_reference_model_more.py"),
+    # The thirteenth added host test (c76f6c4) is structural: it re-derives the Z premise from
+    # the real fj text, so what must redden it is a REAL narrowing, not a python constant. This
+    # is the shape Z2 shipped in the three table readers, one nibble short -- the clear then
+    # starts above where the mov stops, and the top of `ptr` keeps the last entry's address.
+    ("fixed_point: the narrowed pointer clear is one nibble short",
+     "src/fj/fixed_point.fj",
+     "        .zero w/4 - idx_n, ptr + idx_n*dw\n        .mov idx_n, ptr, idx\n        .mul_const w/4, ptr, ptr, nb*dw",
+     "        .zero w/4 - idx_n - 1, ptr + (idx_n + 1)*dw\n        .mov idx_n, ptr, idx\n        .mul_const w/4, ptr, ptr, nb*dw",
+     "tests/host/test_narrowed_clear_sites.py"),
 ]
 
 # R9 -- THE HARNESS'S OWN NEGATIVE CONTROL, run by --selftest. Changing a COMMENT cannot change
@@ -137,22 +146,32 @@ INERT = ("control: a comment-only edit must NOT be caught",
          "# INERT mutcheck control -- this line is a comment and changes nothing",
          "tests/host/test_wireformat.py")
 
-# Every tests/host file this branch adds, in order: `git diff --diff-filter=A --name-only main
-# HEAD -- tests/` lists exactly these twelve and nothing else (they all arrive in efde61c).
-THE_TWELVE = [
-    "tests/host/test_build_more.py",
-    "tests/host/test_collision_more.py",
-    "tests/host/test_door_occlusion.py",
-    "tests/host/test_doorcode_more.py",
-    "tests/host/test_fastrun.py",
-    "tests/host/test_lut_generator_more.py",
-    "tests/host/test_mapcompiler_more.py",
-    "tests/host/test_nodebuilder_more.py",
-    "tests/host/test_reference_model_more.py",
-    "tests/host/test_things_more.py",
-    "tests/host/test_wall_renderer_helpers.py",
-    "tests/host/test_wireformat.py",
-]
+# WHICH FILES C4 IS ABOUT, and why it is a QUERY and not a list. A hardcoded list announces a
+# property of the branch and checks a property of itself: the twelve names that stood here were
+# efde61c's, and the moment c76f6c4 added a thirteenth host test the list went on reporting "all
+# covered" while the new file was invisible -- CR-2026-09-16 (R1). So the set is derived from the
+# tree, and a file that arrives after this line is written is in it by construction.
+#
+# tests/fj is out of scope ON PURPOSE: mutcheck runs one pytest per mutation and every fj test
+# assembles a program (test_table_reader_ptr_clear.py is 65 s alone), which would make the suite
+# unrunnable at the cadence it is used. The fj side's own discrimination is asserted inside that
+# file instead.
+ADDED_TESTS_BASE = "main"
+
+
+def added_host_tests():
+    """The tests/host files this branch ADDS, from git. Raises rather than returning a short list:
+    a C4 that quietly checks nothing when git is unavailable is the hole it exists to close."""
+    base = subprocess.run(["git", "merge-base", ADDED_TESTS_BASE, "HEAD"], cwd=ROOT,
+                          capture_output=True, text=True, timeout=60)
+    assert base.returncode == 0, "C4: no merge-base with %s (%s)" % (ADDED_TESTS_BASE, base.stderr.strip())
+    r = subprocess.run(["git", "diff", "--diff-filter=A", "--name-only", base.stdout.strip(),
+                        "HEAD", "--", "tests/host"], cwd=ROOT, capture_output=True, text=True,
+                       timeout=60)
+    assert r.returncode == 0, "C4: git diff failed (%s)" % r.stderr.strip()
+    out = sorted(l.strip() for l in r.stdout.splitlines() if l.strip())
+    assert out, "C4: git named no added tests/host file -- that is not a pass, it is a broken query"
+    return out
 
 
 def _run(testfile, timeout=300):
@@ -193,16 +212,17 @@ def _mutate(row, backups, run=None, say=print):
     return True, not ok
 
 
-def _c4(mutations, say=print):
-    """C4: every file in THE_TWELVE must be NAMED by some row of `mutations` and be on disk.
+def _c4(mutations, say=print, wanted=None):
+    """C4: every tests/host file this branch ADDS must be NAMED by some row of `mutations`.
 
-    Bookkeeping over the table -- it launches nothing, which is why it runs before C2 and why its
-    own negative control below needs no pytest either. Prints a line per file, returns the fails,
-    and the negative control calls THIS, so what it proves is the arm the run uses.
+    `wanted` defaults to the git query, so the property checked is the property printed. Pure
+    bookkeeping -- it launches nothing, which is why it runs before C2 and why its own negative
+    controls below need no pytest either. Prints a line per file, returns the fails, and both
+    negatives call THIS, so what they prove is the arm the run uses.
     """
     named = {m[4] for m in mutations}
     out = []
-    for t in THE_TWELVE:
+    for t in (added_host_tests() if wanted is None else wanted):
         ok = t in named and (ROOT / t).exists()
         say("   %-46s %s" % (t, "covered" if ok else "!! NOT COVERED"))
         if not ok:
@@ -234,11 +254,17 @@ def _neg(backups, say=print):
     """
     fails = []
     swallowed = []
-    victim = THE_TWELVE[0]
+    victim = added_host_tests()[0]
+    newcomer = "tests/host/test_a_file_this_branch_just_added.py"
     arms = [
         ("C4, with %s's rows dropped" % victim.split("/")[-1],
          _c4([m for m in MUTATIONS if m[4] != victim], say=swallowed.append),
          "C4 %s uncovered" % victim),
+        # ...and the direction that actually bit: a file the branch ADDS which no row names. The
+        # list-shaped C4 could not see one; the query-shaped one reports it.
+        ("C4, against a newly added test no mutation names",
+         _c4(MUTATIONS, say=swallowed.append, wanted=[newcomer]),
+         "C4 %s uncovered" % newcomer),
         ("the R9 arm, against a runner that reddens the comment edit",
          _r9(backups, run=_always_red, say=swallowed.append),
          "R9 %s went red" % INERT[4]),
@@ -266,7 +292,7 @@ def main(selftest=False):
             p = ROOT / f
             backups[f] = p.read_bytes()
 
-        print("C4 -- every tests/host file this branch adds must be named by a mutation")
+        print("C4 -- every tests/host file this branch adds must be named by a mutation (git)")
         fails += _c4(MUTATIONS)
 
         print("\nC2 -- every target test file must be GREEN before any mutation")

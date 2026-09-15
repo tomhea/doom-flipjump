@@ -1,0 +1,6 @@
+flipjump at 9a4595b; doom 8f2bd56 + the fixture fixes (constants + frame_render.fj), uncommitted
+$ python -m pytest tests/fj -q
+........................................................................ [ 83%]
+............................                                             [100%]
+172 passed in 2198.63s (0:36:38)
+exit=0

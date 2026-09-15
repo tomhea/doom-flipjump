@@ -44,6 +44,11 @@ scratchpad/**/*.log
 # next blocked build (build_blocked.py --counts-cache; it self-invalidates when the emitter moves).
 !scratchpad/12m/_counts_game.json.gz
 
+# ...and the final-round transcripts every fenced block of PR #84 quotes. A transcript that is
+# not committed cannot be checked against the body (scratchpad/12m/fencecheck.py reads TRACKED
+# logs only), and four CR rounds on that PR each found an altered one.
+!scratchpad/12m/m6_final_*.log
+
 # the measurement ledger and frozen baselines are the source of truth for every performance claim
 !scratchpad/12m/msframe_ledger.jsonl
 !scratchpad/12m/msframe_baselines/

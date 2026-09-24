@@ -16,6 +16,19 @@ jobs:
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"
       - run: pip install -e ".[dev]"
+      # The art WAD the sprite and thing tests read. Freedoom is BSD-licensed but 28 MB, so it is not
+      # committed (.gitignore); fetch the exact release the suite was written against and refuse any
+      # other bytes -- the oracle's expected frames come from this file, so a different Freedoom
+      # would fail tests for the wrong reason. Both hashes are pinned: the zip's is the one Freedoom
+      # signs in freedoom-0.13.0-CHECKSUM, the WAD's is the file every local run has used.
+      - name: fetch Freedoom 0.13.0 (assets/freedoom1.wad)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/freedoom.zip" \
+            https://github.com/freedoom/freedoom/releases/download/v0.13.0/freedoom-0.13.0.zip
+          echo "3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59  $RUNNER_TEMP/freedoom.zip" | sha256sum -c -
+          mkdir -p assets
+          unzip -j -o "$RUNNER_TEMP/freedoom.zip" freedoom-0.13.0/freedoom1.wad -d assets
+          echo "7323bcc168c5a45ff10749b339960e98314740a734c30d4b9f3337001f9e703d  assets/freedoom1.wad" | sha256sum -c -
       - run: bash scripts/test.sh
       - run: bash scripts/build.sh
       - name: assert R4 (flat) + R-2 (assemble ceiling)

@@ -162,7 +162,7 @@ class TestEmitDispatchTable:
 
 class TestPerEntryValueTableStride:
     """The same stride invariant for the wide-result VALUE tables (`hstride = result_nibbles+1`).
-    `test_dispatch_tables.decode_per_entry` reads the handler lines but never checks that the
+    `test_dispatch_table_values.decode_per_entry` reads the handler lines but never checks that the
     switch agrees with them, so a stride bug passes it."""
 
     @pytest.mark.parametrize("result_nibbles", [2, 3, 6, 8])

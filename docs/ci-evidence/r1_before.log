@@ -1,0 +1,25 @@
+# BEFORE the rename: main at ba965a3 + only the new guard test
+$ python -m pytest tests/host/test_suite_layout.py -q
+                        for name, ps in sorted(dups.items())))
+E       AssertionError: pytest imports a test module by its basename when its directory has no __init__.py, so these cannot be collected in one run (CI runs the whole tree): test_dispatch_tables.py: fj/test_dispatch_tables.py, host/test_dispatch_tables.py
+E       assert not {'test_dispatch_tables.py': [WindowsPath('C:/Users/tomhe/Documents/doom-flipjump/tests/fj/test_dispatch_tables.py'), WindowsPath('C:/Users/tomhe/Documents/doom-flipjump/tests/host/test_dispatch_tables.py')]}
+
+tests\host\test_suite_layout.py:48: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_suite_layout.py::test_every_test_module_basename_is_unique_across_the_tree
+1 failed, 2 passed in 0.20s
+
+# BEFORE the rename: the CI command's collection, whole tree
+$ python -m pytest -q --collect-only
+=================================== ERRORS ====================================
+_____________ ERROR collecting tests/host/test_dispatch_tables.py _____________
+import file mismatch:
+imported module 'test_dispatch_tables' has this __file__ attribute:
+  C:\Users\tomhe\Documents\doom-flipjump\tests\fj\test_dispatch_tables.py
+which is not the same as the test file we want to collect:
+  C:\Users\tomhe\Documents\doom-flipjump\tests\host\test_dispatch_tables.py
+HINT: remove __pycache__ / .pyc files and/or use a unique basename for your test file modules
+=========================== short test summary info ===========================
+ERROR tests/host/test_dispatch_tables.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1227/1228 tests collected (1 deselected), 1 error in 0.96s

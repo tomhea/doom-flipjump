@@ -1,0 +1,5 @@
+# AFTER the rename
+$ python -m pytest tests/host/test_suite_layout.py -q
+3 passed in 0.03s
+$ python -m pytest -q --collect-only
+1234/1235 tests collected (1 deselected) in 0.46s

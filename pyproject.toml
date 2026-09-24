@@ -10,7 +10,7 @@ requires-python = ">=3.10,<3.14"          # flipjump abi3 is py3.10+; 3.14 unsup
 dependencies = ["flipjump[io]>=1.5.0", "pillow"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "pyflakes"]    # pyflakes: tests/host/test_no_undefined_names.py skips without it
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/doomfj"]

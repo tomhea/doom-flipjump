@@ -1,0 +1,18 @@
+# scripts/fetch_freedoom.sh against the real v0.13.0 release, then two negative controls that each alter one pin in a copy of the script
+$ bash scripts/fetch_freedoom.sh <tmp>
+  % Total    % Received % Xferd  Average Speed  Time    Time    Time   Current
+                                 Dload  Upload  Total   Spent   Left   Speed
+  sha256 ok: freedoom-0.13.0.zip
+  sha256 ok: freedoom1.wad
+Done: freedoom1.wad freedoom2.wad 
+(BSD-licensed; dev copy gitignored — commit only the trimmed fixture)
+exit=0
+
+# NEGATIVE CONTROL: the same script with the zip pin's first hex digit changed (3f -> 4f)
+REFUSED: freedoom-0.13.0.zip has sha256 3f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59, expected 4f9b264f3e3ce503b4fb7f6bdcb1f419d93c7b546f4df3e874dd878db9688f59 (Freedoom 0.13.0)
+exit=1
+
+# NEGATIVE CONTROL: the WAD pin changed (73 -> 83)
+  sha256 ok: freedoom-0.13.0.zip
+REFUSED: freedoom1.wad has sha256 7323bcc168c5a45ff10749b339960e98314740a734c30d4b9f3337001f9e703d, expected 8323bcc168c5a45ff10749b339960e98314740a734c30d4b9f3337001f9e703d (Freedoom 0.13.0)
+exit=1

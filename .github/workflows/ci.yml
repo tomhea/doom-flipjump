@@ -16,6 +16,11 @@ jobs:
           pip install -e "$RUNNER_TEMP/flip-jump[io]"
           python -c "import flipjump; print('flipjump', flipjump.__version__, flipjump.__file__)"
       - run: pip install -e ".[dev]"
+      # The art WAD the sprite and thing tests read. Freedoom is BSD-licensed but 28 MB, so it is not
+      # committed (.gitignore); scripts/fetch_freedoom.sh fetches the release the suite was written
+      # against and refuses any other bytes -- the pins live there, so a local fetch is checked too.
+      - name: fetch Freedoom 0.13.0 (assets/freedoom1.wad)
+        run: bash scripts/fetch_freedoom.sh assets
       - run: bash scripts/test.sh
       - run: bash scripts/build.sh
       - name: assert R4 (flat) + R-2 (assemble ceiling)

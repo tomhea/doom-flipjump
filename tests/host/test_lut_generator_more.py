@@ -1,7 +1,7 @@
 """Host-side coverage for the parts of `doomfj.lut_generator` that only an ASSEMBLING run touched.
 
 `tests/host/test_lut_generator.py` checks the data-table fallback and a handful of structural
-substrings; `tests/host/test_dispatch_tables.py` decodes the per-entry VALUE tables. Everything
+substrings; `tests/host/test_dispatch_table_values.py` decodes the per-entry VALUE tables. Everything
 below was, until now, proven by nothing cheaper than a 10-45 minute build (`tests/fj/*`, or the
 ~20-minute `deg_gate`). Each test here encodes an INDEPENDENT truth about the emitted text -- a
 stride agreeing with the thing it strides over, a bit order that decodes back to its byte, a

@@ -499,7 +499,7 @@ an artifact:
   one AND every counted name to fire at least once.
 * `ca_bbox_rate.py` (rewritten, §12) now has three negative controls and an INDEPENDENT
   Liang-Barsky soundness check.
-* `tests/host/test_dispatch_tables.py` decodes every entry of `ttang`, `sdrecip`, `xtadisp`,
+* `tests/host/test_dispatch_table_values.py` decodes every entry of `ttang`, `sdrecip`, `xtadisp`,
   `vtxdisp`, `sinadisp` and `finesine` back out of the emitted handler text and compares to the
   shared kernel, with a mutation control. 0.25 s, and it closes CR-2026-08 R5.
 

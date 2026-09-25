@@ -185,7 +185,7 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **blocked27 = blocked25 + the hot `sparse_` sites and the two shifts blocked** (**the shipped `doom_e1m1_blocked27.fjm` today**) | **94,704,800** (data 43,253,668) | 1.411× OVER | **0.706×** (data 0.322×) | **flat** (asserted) |
 
 ⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1) — **and its "now" is the PRE-BLOCKING binary; today's
-shipped binary is the blocked25 row, see the 2026-09-15 note below**: the shipped binary was
+shipped binary is the blocked27 row, see the 2026-09-15 and 2026-09-25 notes below**: the shipped binary was
 89,494,606 words when this table was written and is **51,094,744** now — 0.761× of 2^26 and
 **0.381× of 2^27**, i.e. 38.07% of the w=32 ceiling, no longer OVER. Measured with
 `scratchpad/12m/fjmsize.py`; `m2_std_gate` PASS.
@@ -396,7 +396,8 @@ happens first — advertising a safety net that is not there is the R9 failure m
 (their pad is now 16, the plain table's alignment, so they fit a slot) and the two shift macros
 (`hex.shifts.shl_bit_once` / `shr_bit_once`, visible to the pass since tomhea/flipjump#362). The note
 above is blocked25's and stays as its record; blocked27's figures, from `python
-scratchpad/12m/poolmap.py` (its default binary is now blocked27; a counts-cache HIT, selftest PASS),
+scratchpad/12m/poolmap.py` (its default binary is now blocked27; a counts-cache HIT; `--selftest` PASS with C1-C5, in the
+same transcript),
 transcript `docs/ship-evidence/blocked27_poolmap.log` (these lines verbatim; the FJM,
 POOL, cache and equality lines are in the transcript):
 
@@ -416,8 +417,8 @@ SUM    span - data = 94,704,800 - 43,253,668 = 51,451,132 = 23,667,866 gap + 27,
 
 The program below the pool shrank by 863,264 words (the hot sites' and the shifts' tables left the
 inline stream), the pool grew by 459,200 payload words (they arrived there), and the pad fell by
-1,764,096: the slot-width term, which the too-wide `sparse_` tables had been inflating, nearly
-vanished.
+1,764,096. The slot-width term, which the too-wide `sparse_` tables had been inflating, fell
+from 940,194 to 434,338 words (-54%); most of the pad's fall is elsewhere, in the other terms.
 
 ⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
 and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the

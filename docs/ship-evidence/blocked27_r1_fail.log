@@ -1,0 +1,21 @@
+# FAIL: tests/host/test_hot_pads_block.py (new) with src/doomfj/config.py from main 7288302 (HOT_PAD 1024, HOTTER_PAD 4096)
+$ bash scripts/test.sh tests/host/test_hot_pads_block.py -p no:cacheprovider
+.F                                                                       [100%]
+================================== FAILURES ===================================
+__________________ test_hot_pads_fit_the_shipped_slot_width ___________________
+
+    def test_hot_pads_fit_the_shipped_slot_width():
+        limit = _shipped_max_slot_ops()
+        cfg = Config()
+        too_wide = {name: pad for name, pad in (("HOT_PAD", cfg.HOT_PAD), ("HOTTER_PAD", cfg.HOTTER_PAD))
+                    if pad > limit}
+>       assert not too_wide, (f"{too_wide} exceed --max-slot-ops {limit}: under blocking these hot "
+                              f"tables are declined_too_wide and run inline (handoff throughput-plan 15)")
+E       AssertionError: {'HOT_PAD': 1024, 'HOTTER_PAD': 4096} exceed --max-slot-ops 512: under blocking these hot tables are declined_too_wide and run inline (handoff throughput-plan 15)
+E       assert not {'HOTTER_PAD': 4096, 'HOT_PAD': 1024}
+
+tests\host\test_hot_pads_block.py:43: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/host/test_hot_pads_block.py::test_hot_pads_fit_the_shipped_slot_width
+1 failed, 1 passed in 0.19s
+# exit=1

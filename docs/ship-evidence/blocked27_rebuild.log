@@ -1,0 +1,16 @@
+# verification rebuild: the ship-gate 1b command VERBATIM (tracked counts cache = lead B's), doom ffda044 + the cache, flipjump 1.5.1 at 73e09c0 (merged #362); must equal build/doom_e1m1_padB.fjm (38b09a7331f4f52b)
+$ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/blocked27.labels.tsv.gz -- game --out build/doom_e1m1_blocked27.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz
+# verification rebuild: the ship-gate 1b command VERBATIM (tracked counts cache = lead B's), doom ffda044 + the cache, flipjump 1.5.1 at 73e09c0 (merged #362); must equal build/doom_e1m1_padB.fjm (38b09a7331f4f52b)
+# start 2026-09-25 20:51:57
+  counts cache HIT: 27,030 groups, 432,164 tables (skipping the counting assembly)
+assemblies: 2; blocked per assembly: 432,164, 432,164
+  block bases agree across all 2 assemblies (27,030 shared groups)
+pin conflicts (aliased source-word expressions, un-pinned): 0
+declines by reason: no-block 5,103, too-wide 0, overflow 4,008
+broken groups: 2 of 27,030 (these lose their pin for ALL their tables); evicted 0
+blocked: 432,164 tables in 27,030 groups; declined 9,111; ungrouped 0
+total 6426s
+# exit=0
+# end   22:39:16
+38b09a7331f4f52bf5d9455ecd901392bc00ebb03172933bed26f9f21384e1ca *build/doom_e1m1_blocked27.fjm
+38b09a7331f4f52bf5d9455ecd901392bc00ebb03172933bed26f9f21384e1ca *build/doom_e1m1_padB.fjm

@@ -1,0 +1,23 @@
+$ python scratchpad/12m/poolmap.py
+FJM    w=32  segments=432165  data=43,253,668 words (32.23% of 2^27)  span=94,704,800 words (70.56%)  file=31,770,388 bytes
+       segment table sums to the payload: yes (43,253,668 words)
+SPLIT  below word 50,331,648: 1 segment, 26,663,782 payload words, ending at word 26,663,782
+       in the pool   : 432,164 segments, 16,589,886 payload words, words 50,331,648..94,704,800
+GAP    program end -> pool base: 23,667,866 words
+POOL   base word 50,331,648, window ends word 134,217,727 (--pool-base 0x60000000 --span-bits 0x9fffffe0); 39,512,927 words of the window above the image
+  counts cache HIT: 27,030 groups, 432,164 tables (skipping the counting assembly)
+BLOCKS 27,030 of 27,030 groups placed (0 broken); demand 44,373,152 words, extent 44,373,152 words, capacity 83,886,079 words (52.9% used)
+       demand == extent, i.e. no hole in front of any block: yes
+       extent == the image's span above the pool base, i.e. the image ends at the allocator's cursor: yes
+PAD    44,373,152 - 16,589,886 = 27,783,266 words INSIDE the blocks, by mechanism:
+       block power-of-two round-up         6,959,808 words   25.1%  (--width-buckets only)
+       alignment between buckets                   0 words    0.0%  (structurally 0)
+       unused slots                       20,389,120 words   73.4%  (count rounded up, times --spread)
+       slot width + declined tables          434,338 words    1.6%
+       the four terms sum to the pad: yes
+SUM    span - data = 94,704,800 - 43,253,668 = 51,451,132 = 23,667,866 gap + 27,783,266 pad: yes
+$ python scratchpad/12m/poolmap.py --selftest
+  C5 the hand-computed block breaks down as (1024, 256, 0, 64, 704) bits ok  got (1024, 256, 0, 64, 704)
+  C5 with --no-width-buckets the round-up term vanishes (it names --width-buckets) ok  demand 2048 bits, round-up 0 bits
+
+SELFTEST PASS

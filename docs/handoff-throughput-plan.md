@@ -1041,3 +1041,24 @@ question is open: the census prices ops per pad, not time; a per-pad timing swee
 one quiet msframe per pad, ~1 h each) would say which of the ten pay in time -- the zero-space
 `to_flip` reorder and the two-site `mul.init after_add` are the obvious first candidates, the
 per-expansion pads (`clear_carry`, `jump_to_table_entry`, `if_flags`) the suspects.
+
+**15.4 The two doom-side leads, measured (09-25): both ship, as blocked27.** Each went through the
+ship gate on its own (`docs/ship-gate.md` sections 1 and 3; transcripts in `docs/ship-evidence/`).
+
+- *The hot `sparse_` sites.* HOT_PAD = HOTTER_PAD = 16 (config.py), the plain table's own alignment,
+  so the 91 sites build the table `hex.mov`/`hex.zero`/`hex.xor` would and fit a slot. Declined too
+  wide: 0 (it was every one of the 988). msframe against blocked25: 87.9 -> 82.0 ms/frame, x1.072,
+  all 5 pairs; ops 19,855,016 -> 19,201,791 AND a higher rate, 225.9 -> 234.1 M fj/s. Binding
+  19,246,013 -> 18,635,796. The census predicted ~0.5 M; it was 0.65 M plus the rate.
+- *The two shift macros.* Adding `hex.shifts.shl_bit_once` / `shr_bit_once` to SAFE_TABLE_MACROS
+  alone was a NO-OP, measured: the build came out byte-for-byte the size of the one before, 425,236
+  blocked tables either way. The detector reads only LITERAL `a;b` ops after a pad and both macros
+  built their tables with `rep` plus a nested table macro. tomhea/flipjump#362 writes them out
+  (unpooled programs assemble byte-identically); then +6,928 tables blocked, all into existing
+  groups. msframe against the hot-sites binary: 5x200 NOT SEPARATED (one tied pair), escalated to
+  10x400 per docs/measurement-process.md: 72.4 -> 70.4 ms/frame, x1.031, all 10 pairs, the ranges
+  disjoint. Binding 18,635,796 -> 17,665,168.
+- *Together*, blocked27 against blocked25 in one msframe run: 81.0 -> 74.7 ms/frame, x1.085, all 5
+  pairs, pixels identical; binding 17,665,168 PASS, size 32.23% PASS. `hex.inc1` did not carry (its
+  entry 15 falls through into the carry tail, which the detector rightly refuses) and neither did
+  `hex.mul.clear_carry` (a return-address wflip, not a table: the parked pad idea above).

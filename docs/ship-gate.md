@@ -10,19 +10,26 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked25.fjm`, sha256 `fc46c28c5f2bbac8` (first 16 hex), built 2026-09-11 18:04, `.doors.json` stamp beside it | reproduced byte-identically on 2026-09-13 from the command in 1b |
-| **ms/frame, quiet box** | **82 ms/frame** (81.9-82.2 across three runs; 81.6 on 2026-09-14 with the merged engine) | msframe, 200 frames x 5 reps, pinned to P-core 2, 4-byte-cell engine `b96339f7` (the same C as flipjump 1.5.1's `79af8639` after tomhea/flipjump#360, which only adds the `FLAT_GARBAGE_MAGIC32` export on Windows), nothing else running (yardstick 3.62 G) |
-| **fj ops/s** | **242 M** (241.5-242.4 M) | same runs; ops/frame 19,855,016 on msframe's forward-walk script |
-| **binding metric** (owner spec) | (mean+p80)/2 = **19,246,013 ops/frame -- PASS** (mean 16,629,651; p80 21,862,375) | `gamespeed.py --fjm build/doom_e1m1_blocked25.fjm`, 2026-09-13 20:43; `--validate` at 23:42: 10/10 distinct end cells, widest spread 1,321 units, worst run 29% blocked |
-| **size** | **32.53% of 2^27 -- PASS** (43,657,732 words; span 96,009,696) | same run |
+| **the shipped binary** | `build/doom_e1m1_blocked27.fjm`, sha256 `38b09a7331f4f52b` (first 16 hex), built 2026-09-25 from the command in 1b, `.doors.json` stamp beside it | the build of that line IS the verification: byte-identical to the candidate it was measured as (`doom_e1m1_padB.fjm`) |
+| **ms/frame, quiet box** | **74.7 ms/frame** (74.4-75.0), against **81.0** (80.7-82.0) for blocked25 in the same run -- **B FASTER, x1.085, all 5 pairs** | `msframe.py --a build/doom_e1m1_blocked25.fjm --b build/doom_e1m1_blocked27.fjm`, 200 frames x 5 reps, pinned to P-core 2, engine `79af8639`, nothing else running (yardstick 3.65 G), pixels identical across arms and reps (`docs/ship-evidence/blocked27_msframe_vs_blocked25.log`) |
+| **fj ops/s** | **244 M** (243.8 M; blocked25 245.2 M in the same run) | same run; ops/frame **18,221,696** on msframe's forward-walk script (blocked25 19,855,016): the gain is fewer ops at the same rate |
+| **binding metric** (owner spec) | (mean+p80)/2 = **17,665,168 ops/frame -- PASS** (mean 15,200,279; p80 20,130,057) | `gamespeed.py --fjm build/doom_e1m1_padB.fjm` (the same bytes), 2026-09-25; `--validate`: 10/10 distinct end cells, widest spread 1321 units, worst run 29% blocked (`docs/ship-evidence/padB_gamespeed.log`) |
+| **size** | **32.23% of 2^27 -- PASS** (43,253,668 words; span 94,704,800) | same run |
+
+**What it is:** blocked25 plus the two doom-side leads of handoff 15's pad census, each measured on
+its own and shipped through this gate (section 3): the 91 hot `sparse_` sites block
+(HOT_PAD = HOTTER_PAD = 16; x1.072 against blocked25) and the two shift macros block
+(SAFE_TABLE_MACROS, which needed tomhea/flipjump#362's literal tables; x1.031 on top, 10x400). The
+binary it replaced, blocked25 (sha256 `fc46c28c5f2bbac8`: 82 ms/frame quiet, binding 19,246,013,
+32.53%), is kept in `build/` as the comparison arm.
 
 The same binary reads 99-104 ms/frame with a background video render at ~0.3-0.45 core -- under
 msframe's busy refusal -- and 84-89 ms with a lighter one. **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
-(re-frozen 2026-09-13 22:51: it stores 89.3 ms because a background render was still on, yardstick
-3.55 G -- the stored ms is informational; `--against shipped` RE-MEASURES both arms live, and the
-binary hash is what it checks), so `--against shipped` is the comparison.
+(re-frozen 2026-09-25 on a quiet box: 74.7 ms/frame, yardstick 3.63 G -- the stored ms is
+informational; `--against shipped` RE-MEASURES both arms live, and the binary hash is what it
+checks), so `--against shipped` is the comparison.
 
 ## 1b. The build command, and the play command
 
@@ -50,10 +57,19 @@ blocking pass is deterministic given the source, the knobs and the counts. Its l
 `scratchpad/12m/atlas/blocked25.labels.tsv.gz` (the byte-identical rebuild's) -- the shipped binary's
 map back to its source, which it never had until now; the rebuild itself was deleted as a duplicate.
 
+**blocked27 (2026-09-25): VERIFIED the same way, and the line did not change.** Its two leads live in
+the program (`config.py`'s pads) and in `build_blocked.py`'s SAFE_TABLE_MACROS, not in the command,
+and the tracked counts cache now holds blocked27's counts (signature `src=48a3939080fbb2fd`, macros
+including the two shifts). The build of exactly this line against flipjump 1.5.1 at `73e09c0` (with
+tomhea/flipjump#362 merged) HIT that cache and produced sha256 `38b09a7331f4f52b`, the same bytes as
+`doom_e1m1_padB.fjm`, the candidate every measurement in section 1 was made on
+(`docs/ship-evidence/blocked27_rebuild.log`). Its label table is
+`scratchpad/12m/atlas/blocked27.labels.tsv.gz`; `padA`/`padB` were deleted as experiment binaries.
+
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 
 ```
-fj --run build/doom_e1m1_blocked25.fjm --io pc --flat-max-words 134217728
+fj --run build/doom_e1m1_blocked27.fjm --io pc --flat-max-words 134217728
 ```
 
 `--run` is not optional (`fj a.fjm` assembles); the flat window must be the full 2^27 words or
@@ -138,6 +154,16 @@ Two doom-side leads from the same census: the S2 sparse pads at 91 hot sites are
 `declined_too_wide` under blocking (945,807 ops/frame inline; plain `hex.mov` there would let
 them block), and `hex.shifts.shl/shr_bit_once`, `hex.inc1`, `hex.mul.clear_carry` dispatch inline
 through pinned words (1.86 M ops/frame together).
+
+**Both doom-side leads, measured and shipped** (2026-09-25, blocked27; handoff 15.4). The hot sites
+block once HOT_PAD = HOTTER_PAD = 16, the plain table's own alignment: -653,225 ops/frame and x1.072
+against blocked25 -- fewer ops AND a higher rate. The shift macros block once flipjump writes their
+tables out literally (tomhea/flipjump#362: the detector reads only literal `a;b` ops, so adding their
+names to SAFE_TABLE_MACROS alone was a measured NO-OP, byte-for-byte the same binary):
+-970,628 binding ops and x1.031 on top, which took the 10x400 escalation to separate (5x200 had one
+tied pair). Together, same session: 81.0 -> 74.7 ms/frame, x1.085. What did NOT carry: `hex.inc1`'s
+entry 15 falls through into its carry tail (the detector refuses it, rightly), and
+`hex.mul.clear_carry` is a return-address wflip, not a table -- that is the parked pad idea above.
 
 **The reset** (12.7): its restore walk is already in address order; its cost is its own
 straight-line code once per frame. Restore fewer cells (a dirty set) is the only lever left there.

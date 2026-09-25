@@ -181,7 +181,8 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **M5 standalone + `self_reset=True`** (shipped `doom_e1m1_std.fjm`) | **84,892,508** | 1.27× OVER | **0.633×** | **flat** (asserted) |
 | **M3 the same + `menu=True`** (`doom_e1m1_menu.fjm` as of M3, before doors) | **85,209,916** | 1.27× OVER | **0.635×** | **flat** (asserted) |
 | **M2 the same + `doors=True`** (`doom_e1m1_menu.fjm`, shipped until the blocking pass) | **51,094,744** | 0.761× | **0.381×** | **flat** (asserted) |
-| **blocked25 = the `game` tier + the assembler's blocking pass** (**the shipped `doom_e1m1_blocked25.fjm` today**) | **96,009,696** (data 43,657,732) | 1.431× OVER | **0.715×** (data 0.325×) | **flat** (asserted) |
+| **blocked25 = the `game` tier + the assembler's blocking pass** (`doom_e1m1_blocked25.fjm`, shipped 2026-09-13 .. 09-25) | **96,009,696** (data 43,657,732) | 1.431× OVER | **0.715×** (data 0.325×) | **flat** (asserted) |
+| **blocked27 = blocked25 + the hot `sparse_` sites and the two shifts blocked** (**the shipped `doom_e1m1_blocked27.fjm` today**) | **94,704,800** (data 43,253,668) | 1.411× OVER | **0.706×** (data 0.322×) | **flat** (asserted) |
 
 ⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1) — **and its "now" is the PRE-BLOCKING binary; today's
 shipped binary is the blocked25 row, see the 2026-09-15 note below**: the shipped binary was
@@ -389,6 +390,34 @@ build's `broken groups: N of M` tail. The refusal that does exist runs the other
 assembler's own address check"; `assert_address_in_memory` never sees one, because the clamp
 happens first — advertising a safety net that is not there is the R9 failure mode.)
 
+
+⚠ **THE BLOCKED27 ROW, 2026-09-25.** The same `game` tier and the same build line as blocked25
+(`docs/ship-gate.md` §1b); what moved is which tables the pass blocks -- the 91 hot `sparse_` sites
+(their pad is now 16, the plain table's alignment, so they fit a slot) and the two shift macros
+(`hex.shifts.shl_bit_once` / `shr_bit_once`, visible to the pass since tomhea/flipjump#362). The note
+above is blocked25's and stays as its record; blocked27's figures, from `python
+scratchpad/12m/poolmap.py` (its default binary is now blocked27; a counts-cache HIT, selftest PASS),
+transcript `docs/ship-evidence/blocked27_poolmap.log` (these lines verbatim; the FJM,
+POOL, cache and equality lines are in the transcript):
+
+```
+SPLIT  below word 50,331,648: 1 segment, 26,663,782 payload words, ending at word 26,663,782
+       in the pool   : 432,164 segments, 16,589,886 payload words, words 50,331,648..94,704,800
+GAP    program end -> pool base: 23,667,866 words
+BLOCKS 27,030 of 27,030 groups placed (0 broken); demand 44,373,152 words, extent 44,373,152 words, capacity 83,886,079 words (52.9% used)
+PAD    44,373,152 - 16,589,886 = 27,783,266 words INSIDE the blocks, by mechanism:
+       block power-of-two round-up         6,959,808 words   25.1%  (--width-buckets only)
+       alignment between buckets                   0 words    0.0%  (structurally 0)
+       unused slots                       20,389,120 words   73.4%  (count rounded up, times --spread)
+       slot width + declined tables          434,338 words    1.6%
+       the four terms sum to the pad: yes
+SUM    span - data = 94,704,800 - 43,253,668 = 51,451,132 = 23,667,866 gap + 27,783,266 pad: yes
+```
+
+The program below the pool shrank by 863,264 words (the hot sites' and the shifts' tables left the
+inline stream), the pool grew by 459,200 payload words (they arrived there), and the pad fell by
+1,764,096: the slot-width term, which the too-wide `sparse_` tables had been inflating, nearly
+vanished.
 
 ⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
 and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the

@@ -186,8 +186,16 @@ class Config:
 
     # M6: the two hot-path pad tiers, assigned by MEASURED median ops/frame of a site's
     # instances (>99 -> HOT_PAD, >1000 -> HOTTER_PAD). See FINDINGS AX/AZ.
-    HOT_PAD: int = 1024
-    HOTTER_PAD: int = 4096
+    # ⚠ BOTH ARE 16 ON A BLOCKED BUILD (2026-09-25), which is the plain table's own alignment: the
+    # 91 hot `sparse_` sites then build exactly the table `hex.mov` / `hex.zero` / `hex.xor` would.
+    # The tiers (1024 / 4096) aligned those tables to low-popcount addresses BEFORE blocking. Under
+    # blocking the pad IS the table's slot width, and a pad wider than --max-slot-ops (512) is
+    # `declined_too_wide`: the 988 tables stayed inline and cost 945,807 ops/frame (handoff
+    # throughput-plan 15). At 16 they block. MEASURED on the shipped build command: 19,855,016 ->
+    # 19,201,791 ops/frame, 87.9 -> 82.0 ms/frame, msframe B FASTER (all 5 pairs, x1.072). Raise
+    # them again only for a build that does not block.
+    HOT_PAD: int = 16
+    HOTTER_PAD: int = 16
 
     def constants(self) -> dict:
         """The full set of fj-visible constants (the SSOT contents emitted to fj_consts.fj)."""

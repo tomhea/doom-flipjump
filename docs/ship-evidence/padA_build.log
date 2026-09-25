@@ -1,0 +1,15 @@
+# lead A: HOT_PAD = HOTTER_PAD = 16 (branch m6-hot-sites-block, uncommitted config edit on main 7288302); the ship-gate 1b command with its own counts cache
+$ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/padA.labels.tsv.gz -- game --out build/doom_e1m1_padA.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_padA.json.gz
+# start 2026-09-25 11:02:28
+assemblies: 2; blocked per assembly: 425,236, 425,236
+  block bases agree across all 2 assemblies (27,030 shared groups)
+pin conflicts (aliased source-word expressions, un-pinned): 0
+runtime-reserved words skipped (stl.IO etc): 0
+declines by reason: no-block 5,103, too-wide 0, overflow 4,008
+broken groups: 2 of 27,030 (these lose their pin for ALL their tables); evicted 0
+blocked: 425,236 tables in 27,030 groups; declined 9,111; ungrouped 0
+total 7606s
+done in 7607s; labels at scratchpad/12m/atlas/padA.labels.tsv.gz
+# exit=0
+# end   13:09:24
+7cf47265066293153ee4cbc5c7d55679b80998d02df1ea66aab5f1ab582d8097 *build/doom_e1m1_padA.fjm

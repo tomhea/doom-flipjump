@@ -1,0 +1,36 @@
+flipjump: C:\Users\tomhe\Documents\flipjump-151\flipjump at 9e14998; engine 79af8639f57bfa50
+$ python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_padA.fjm
+SIZE: w=32  segments=425237  data=43,524,576 words (32.43% of 2^27)  span=93,951,392 words (70.00%)  file=31,574,875 bytes
+calibration: startup + 2 menu frames = 525,775 ops (subtracted from every run)
+  run  0: 2,206,074,312 ops / 102 presented -> raw 21,628,179, game-only 22,055,485 ops/frame
+  run  1: 1,094,699,937 ops / 102 presented -> raw 10,732,352, game-only 10,941,741 ops/frame
+  run  2: 2,115,529,783 ops / 102 presented -> raw 20,740,488, game-only 21,150,040 ops/frame
+  run  3: 2,195,868,503 ops / 102 presented -> raw 21,528,122, game-only 21,953,427 ops/frame
+  run  4: 1,323,147,312 ops / 102 presented -> raw 12,972,032, game-only 13,226,215 ops/frame
+  run  5: 1,443,524,827 ops / 102 presented -> raw 14,152,204, game-only 14,429,990 ops/frame
+  run  6: 1,286,914,702 ops / 102 presented -> raw 12,616,810, game-only 12,863,889 ops/frame
+  run  7: 1,308,026,036 ops / 102 presented -> raw 12,823,784, game-only 13,075,002 ops/frame
+  run  8: 1,551,672,145 ops / 102 presented -> raw 15,212,472, game-only 15,511,463 ops/frame
+  run  9: 1,601,353,365 ops / 102 presented -> raw 15,699,542, game-only 16,008,275 ops/frame
+
+==============================================================================
+SPEED  BINDING (mean+p80)/2: 18,635,796 ops/frame   (target <= 20,000,000)  PASS
+SPEED  mean run-average   : 16,121,553 ops/frame
+SPEED  80th-pct run avg   : 21,150,040 ops/frame
+SPEED  spread lo..hi      : 10,941,741 .. 22,055,485 ops/frame
+SPEED  raw (menu included): mean 15,810,598, 80th-pct 20,740,488 ops/frame
+SIZE   words              : 43,524,576 = 32.43% of 2^27   (target <= 35%)  PASS
+SIZE   span / file        : 93,951,392 words (70.00%) / 31,574,875 bytes
+==============================================================================
+$ python scratchpad/12m/gamespeed.py --fjm build/doom_e1m1_padA.fjm --validate
+  run  0: ends (   831,   485)   1267 from spawn    1478 travelled  moved on  96/100 move-frames (4% blocked)
+  run  1: ends (  -357,   430)    183 from spawn    1165 travelled  moved on  86/ 97 move-frames (11% blocked)
+  run  2: ends (   780,   427)   1208 from spawn    1397 travelled  moved on  84/ 94 move-frames (11% blocked)
+  run  3: ends (   688,   208)   1105 from spawn    1220 travelled  moved on  71/ 91 move-frames (22% blocked)
+  run  4: ends (  -176,   348)    257 from spawn    1036 travelled  moved on  72/ 88 move-frames (18% blocked)
+  run  5: ends (  -173,   163)    260 from spawn     960 travelled  moved on  60/ 85 move-frames (29% blocked)
+  run  6: ends (  -173,   413)    289 from spawn     884 travelled  moved on  60/ 82 move-frames (27% blocked)
+  run  7: ends (  -490,   106)    167 from spawn    1073 travelled  moved on  72/ 79 move-frames (9% blocked)
+  run  8: ends (   239,   353)    662 from spawn    1190 travelled  moved on  67/ 76 move-frames (12% blocked)
+  run  9: ends (   189,   245)    605 from spawn    1114 travelled  moved on  63/ 73 move-frames (14% blocked)
+  distinct end cells: 10/10 ; widest spread 1321 units ; worst run 29% blocked

@@ -1,0 +1,16 @@
+# lead B on top of lead A (56468c7) + SAFE_TABLE_MACROS += the two shifts (uncommitted), against flipjump exp/literal-shift-tables 3e53017 (the shift tables written literally so the pool can see them)
+$ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/padB.labels.tsv.gz -- game --out build/doom_e1m1_padB.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_padB.json.gz
+# start 2026-09-25 16:15:56
+  counting pass: 32,066 groups, 432,164 tables, 3197s
+assemblies: 2; blocked per assembly: 432,164, 432,164
+  block bases agree across all 2 assemblies (27,030 shared groups)
+pin conflicts (aliased source-word expressions, un-pinned): 0
+runtime-reserved words skipped (stl.IO etc): 0
+declines by reason: no-block 5,103, too-wide 0, overflow 4,008
+broken groups: 2 of 27,030 (these lose their pin for ALL their tables); evicted 0
+blocked: 432,164 tables in 27,030 groups; declined 9,111; ungrouped 0
+total 11046s
+done in 11047s; labels at scratchpad/12m/atlas/padB.labels.tsv.gz
+# exit=0
+# end   19:20:17
+38b09a7331f4f52bf5d9455ecd901392bc00ebb03172933bed26f9f21384e1ca *build/doom_e1m1_padB.fjm

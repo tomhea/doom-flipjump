@@ -41,9 +41,15 @@ from doomfj.wall_renderer import TIERS                                  # noqa: 
 # `pad N; <label>: <entries that all jump explicitly>; end: wflip` -- a table reached only by jump.
 # `hex.pointers.xor_hex_to_flip_ptr` does NOT: its pad-4 block is selected by ADDRESS-BIT FLIPS and
 # contains a wflip, so "a maximal run of a;b ops after a pad" splits it and the program dies.
+# The two shifts qualify by the same shape (2026-09-25): `pad 16; switch:` sixteen entries that all
+# jump explicitly into `xor_by:`, sixteen more that all jump to `end:`, whose wflip disarms `switch`.
+# They dispatch through the SAME source words as the exact_xor family, so left inline they paid
+# A ^ base on a pinned word (1.45 M ops/frame, handoff throughput-plan 15). `hex.inc1` does NOT
+# qualify: its entry 15 falls through into the carry tail, which the assembler's detector refuses.
 SAFE_TABLE_MACROS = ("hex.exact_xor", "hex.sparse_exact_xor", "hex.double_exact_xor",
                      "hex.sparse_double_exact_xor", "hex.triple_exact_xor",
-                     "hex.quadrupled_exact_xor")
+                     "hex.quadrupled_exact_xor",
+                     "hex.shifts.shl_bit_once", "hex.shifts.shr_bit_once")
 
 
 def _counts_sig(a):

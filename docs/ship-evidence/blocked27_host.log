@@ -1,0 +1,7 @@
+$ python -m pytest tests/host -q
+tests/host/test_oracle_calls_in_step.py::test_every_gate_asks_the_oracle_for_what_it_emits
+  <unknown>:1: DeprecationWarning: invalid escape sequence '\_'
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+1051 passed, 1 deselected, 2 xfailed, 3 warnings in 103.42s (0:01:43)
+# exit=0

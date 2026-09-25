@@ -1062,3 +1062,11 @@ ship gate on its own (`docs/ship-gate.md` sections 1 and 3; transcripts in `docs
   pairs, pixels identical; binding 17,665,168 PASS, size 32.23% PASS. `hex.inc1` did not carry (its
   entry 15 falls through into the carry tail, which the detector rightly refuses) and neither did
   `hex.mul.clear_carry` (a return-address wflip, not a table: the parked pad idea above).
+- *What the pads cost where nothing blocks.* HOT_PAD reaches every tier (`frame_render.fj`'s
+  `sparse_` calls), so lead A is an emitter change and `deg_gate` ran on it, twice in one session
+  (`docs/ship-evidence/blocked27_deg_gate*.log`): at HEAD and with main's `config.py` (1024 / 4096).
+  Both BYTE-EXACT at all four viewpoints. The op counts move, as they must: on the unblocked `visual`
+  tier the narrow pads put the hot tables back on ordinary addresses -- 32,505,424 -> 33,580,180,
+  17,066,477 -> 17,346,924, 32,657,884 -> 32,893,357, 28,511,206 -> 29,406,401 (+0.7% .. +3.3%). That
+  is the tier's cost, not the game's: the shipped build blocks. A build that does not block should
+  raise the pads again (the config.py comment says so).

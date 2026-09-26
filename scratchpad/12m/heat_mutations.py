@@ -4,7 +4,8 @@
 
 Mutates the checkout's flipjump/assembler/preprocessor.py in place, runs
 tests/unit/test_table_pool.py, restores it byte-identically (asserted). M1-M3 are the escapes review
-round 1 of tomhea/flipjump#363 found, M12-M15 the ones rounds 2 and 3 found.
+round 1 of tomhea/flipjump#363 found, M12-M18 the ones rounds 2-4 found. Works on LF or CRLF sources
+(a Windows `git archive` writes CRLF).
 """
 import subprocess
 import sys
@@ -77,12 +78,26 @@ CASES = [
     ("M15 a bucket group without a histogram keys its ranks by 0 (review round 2)",
      UNIFORM_NEED,
      "        need = count + self.hot_ranks.get((group, 0), 0)\n"),
+    ("M16 eviction ignores the holes among hot blocks (review round 3)",
+     "                hot_end = -(-hot_end // bits[group]) * bits[group] + bits[group]\n",
+     "                hot_end = hot_end + bits[group]\n"),
+    ("M17 eviction never forgets an evicted block's size (review round 3)",
+     "                    sizes[bits[group]] -= 1\n"
+     "                    if not sizes[bits[group]]:\n"
+     "                        del sizes[bits[group]]\n",
+     "                    pass\n"),
+    ("M18 no list stops keeping the plain sum (review round 3)",
+     "                if not self.hot_sites:\n"
+     "                    return rest\n",
+     ""),
 ]
 TEST = [sys.executable, "-m", "pytest", "tests/unit/test_table_pool.py", "-q", "-p", "no:cacheprovider"]
 
 print("# flipjump#363: each mutation must FAIL tests/unit/test_table_pool.py (mutated, run, restored)")
 orig = SRC.read_bytes()
+NL = "\r\n" if b"\r\n" in orig else "\n"
 for name, a, b in CASES:
+    a, b = a.replace("\n", NL), b.replace("\n", NL)
     text = orig.decode("utf-8")
     assert text.count(a) == 1, (name, text.count(a))
     try:

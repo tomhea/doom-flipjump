@@ -58,20 +58,23 @@ blocking pass is deterministic given the source, the knobs and the counts. Its l
 `scratchpad/12m/atlas/blocked25.labels.tsv.gz` (the byte-identical rebuild's) -- the shipped binary's
 map back to its source, which it never had until now; the rebuild itself was deleted as a duplicate.
 
-**blocked27 (2026-09-25): the line did not change, and a build from it reproduces the measured
-bytes -- from the cached counts, which is a narrower proof than blocked25's.** Its two leads live in
-the program (`config.py`'s pads) and in `build_blocked.py`'s SAFE_TABLE_MACROS, not in the command,
-and the tracked counts cache now holds blocked27's counts (signature `src=48a3939080fbb2fd`, macros
-including the two shifts). The build of exactly this line against flipjump 1.5.1 at `73e09c0` (with
-tomhea/flipjump#362 merged) HIT that cache and produced sha256 `38b09a7331f4f52b`, the same bytes as
-`doom_e1m1_padB.fjm`, the candidate every measurement in section 1 was made on
-(`docs/ship-evidence/blocked27_rebuild.log`). What that proves: source + tracked cache + flipjump
-`73e09c0` give the shipped bytes. What it does not: the counting assembly itself last ran for padB,
-against flipjump `3e53017` (#362's pre-review head), because the cache signature hashes doom's own
-sources and the macro list, not flipjump's stl. Between those two heads `stl/hex/shifts.fj` changed
-only in alignment and comments -- the same ops in the same order -- so a recount is expected to
-agree; it has not been run. Its label table is
-`scratchpad/12m/atlas/blocked27.labels.tsv.gz`; `padA`/`padB` were deleted as experiment binaries.
+**blocked27 (2026-09-25/26): VERIFIED byte-identical twice, the second time from a fresh count.**
+The line did not change: its two leads live in the program (`config.py`'s pads) and in
+`build_blocked.py`'s SAFE_TABLE_MACROS, not in the command.
+1. At ffda044 against flipjump 1.5.1 at `73e09c0` (tomhea/flipjump#362 merged), the line HIT the
+   counts cache made for padB -- at flipjump `3e53017`, #362's pre-review head; the signature hashes
+   doom's sources and the macro list, not flipjump's stl -- and produced sha256 `38b09a7331f4f52b`,
+   the bytes of `doom_e1m1_padB.fjm`, the candidate every measurement in section 1 was made on
+   (`docs/ship-evidence/blocked27_rebuild.log`).
+2. At 18d351d, whose `config.py` comment changed the signature, the same line MISSED the cache,
+   ran the counting assembly at `73e09c0` (32,066 groups, 432,164 tables, 2,038 s) and produced
+   `38b09a7331f4f52b` again (`docs/ship-evidence/blocked27_rebuild_recount.log`). The recount's
+   counts, widths, aliases and width histogram equal the old cache's field for field; only the
+   signature moved. The tracked cache is that recount (signature `src=3e1d39d67a047f0e`, macros
+   including the two shifts), so the line HITs it at this tree.
+
+Its label table is `scratchpad/12m/atlas/blocked27.labels.tsv.gz`; `padA`/`padB` and the recount's
+duplicate `blocked27r` were deleted.
 
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 

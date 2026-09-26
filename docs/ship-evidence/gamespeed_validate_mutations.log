@@ -1,0 +1,8 @@
+# fix/gamespeed-validate-doors: each mutation must FAIL a check (source mutated, check run, restored)
+M1 --validate defaults to the doors-shut replay            -> 1 failed in 0.51s
+M2 the loop steps the doors-shut scene                     -> 1 failed in 0.53s
+M3 DoorSim ignores `use` (no door ever opens)              -> 1 failed in 0.55s
+M4 the recorded binary end of run 0 is the door-blind one  -> SELFTEST FAIL: N6e --validate ends where the binary ends (all 10 runs), N6f the doors-shut replay FAILS it (run 0 stops at the shut door)  [N6e --validate ends where the binary ends (all 10 runs) FAIL parts on runs [0]]
+unmutated (restored, byte-identical): the host test        -> 1 passed in 0.43s
+unmutated: the selftest                                    -> SELFTEST PASS
+rc=0

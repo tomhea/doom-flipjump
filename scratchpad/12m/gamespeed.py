@@ -58,7 +58,9 @@ SIZE_TARGET_PCT = 35.0             # of the address ceiling
 # instead spend their opening frames turning by a per-run amount, so the ten runs leave the spawn
 # on TEN DIFFERENT HEADINGS and then walk, with a periodic `use` so doors are exercised.
 # `--validate` steps the oracle through all ten and prints where each ends up; that is the check
-# that this docstring is telling the truth.
+# that this docstring is telling the truth. It steps the oracle WITH ITS DOORS (onewalk.DoorSim, the
+# M2 gate's frame order): the binary boots with every door shut and opens one when a run presses
+# `use` in its box, and the replay must walk where the binary walks (BINARY_ENDS below).
 
 DEFAULT_WAD = "tests/fixtures/freedoom_e1m1.wad"
 DEFAULT_MAP = "E1M1"
@@ -82,6 +84,16 @@ def _oracle(wad, mapname):
 
 
 TOUR_TARGETS = 10                   # one destination per seed, spread over the whole level
+
+# Where the ten 100-frame runs END on the game binary, in map units -- READ from the running
+# binary at every frame's present through the probe, never written, by
+# `scratchpad/12m/gamespeed_trail.py --fjm build/doom_e1m1_blocked27.fjm`
+# (docs/ship-evidence/blocked27_gamespeed_trail.log: the door-aware replay equals the binary on
+# every frame of all ten runs; the doors-shut replay parts on run 0). `--selftest` N6e requires
+# `--validate` to reproduce them, and N6f that the old doors-shut replay does NOT.
+BINARY_ENDS = ((831, 653), (-357, 430), (780, 427), (688, 208), (-176, 348), (-173, 163),
+               (-173, 413), (-490, 106), (239, 353), (189, 245))
+RUN0_KEYS = ROOT / "tests" / "fixtures" / "gamespeed_run0_keys.json"   # the host test replays these
 
 
 def _reachable(rm, scene, sx, sy):
@@ -424,8 +436,16 @@ def report(run_avgs, raw_avgs, size):
 # G5: are the ten games actually different games? (cheap -- the oracle, no fj)
 # ----------------------------------------------------------------------------------------------
 
-def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP, quiet=False):
+def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP, quiet=False,
+                     doors=True):
     """Step the ORACLE through every script and report whether each run actually PLAYS.
+
+    ⚠ WITH THE DOORS (fix/gamespeed-validate-doors). The binary boots with every door shut and opens
+    one when a run holds `use` inside its box; this replay used to step a scene whose doors never
+    open, so a run that walked through a door here was reported stopped in front of it -- run 0
+    ended (831, 485) in the ship evidence while the binary ends at (831, 653). `doors=True` steps
+    `onewalk.DoorSim` (the M2 gate's frame order: doors tic, then the player); `doors=False` is the
+    old replay, kept only as the selftest's negative control (N6f).
 
     ⚠ The measure here is BLOCKED FRAMES, not distance travelled. The previous version reported
     only end-position spread and total distance, and passed a set of scripts in which nine of ten
@@ -436,12 +456,16 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
     Returns [(end_xy, travelled, move_frames, moved_frames)] per run.
     """
     rm, scene, sp = _oracle(wad, mapname)
+    dsim = None
+    if doors:
+        from onewalk import DoorSim            # onewalk imports this module: import it here
+        dsim = DoorSim(wad, mapname)
     out = []
     for r in range(n_runs):
-        st, travelled, move_frames, moved_frames = sp, 0, 0, 0
+        st, travelled, move_frames, moved_frames = (dsim.reset() if dsim else sp), 0, 0, 0
         for kd in script(r, n_frames, wad, mapname):
             prev = (st.x, st.y)
-            st = rm.step_sim(st, kd, scene=scene)
+            st = dsim.step(st, kd) if dsim else rm.step_sim(st, kd, scene=scene)
             d = abs(st.x - prev[0]) + abs(st.y - prev[1])
             travelled += d
             if kd.get("forward") or kd.get("back"):
@@ -453,10 +477,12 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
         if not quiet:
             blocked = 100.0 * (move_frames - moved_frames) / max(1, move_frames)
             print("  run %2d: ends (%6d,%6d)  %5d from spawn  %6d travelled  "
-                  "moved on %3d/%3d move-frames (%.0f%% blocked)"
+                  "moved on %3d/%3d move-frames (%.0f%% blocked)  %s"
                   % (r, ex, ey,
                      int(((((st.x - sp.x) >> 16) ** 2) + (((st.y - sp.y) >> 16) ** 2)) ** 0.5),
-                     travelled >> 16, moved_frames, move_frames, blocked), flush=True)
+                     travelled >> 16, moved_frames, move_frames, blocked,
+                     "opened %d door(s)" % dsim.doors_ever() if dsim else "doors never open"),
+                  flush=True)
     ends = [e for e, _t, _m, _mv in out]
     spread = max(max(e[i] for e in ends) - min(e[i] for e in ends) for i in (0, 1))
     if not quiet:
@@ -483,11 +509,15 @@ def selftest(fjm=None):
 
     # N1  THE VACUITY CONTROL. A short run returns a small op total and reads as a WIN. Drive the
     #     harness with a runner that presents fewer frames than asked and require it to RAISE.
+    #     At the metric's own 100 frames: at 4 frames the planner's "ten distinct runs" assert
+    #     (d990f8f, 2026-09-12) fired before the runner was ever called, and N1 FAILED on main
+    #     from that day (fix/gamespeed-validate-doors). The routes are planned once and cached,
+    #     so N6 reuses them.
     def short(_f, per_frame):
         return 1_000, len(per_frame) - 1                  # one frame missing, tiny op count
 
     try:
-        measure_speed("x", n_runs=1, n_frames=4, calibrate=False, runner=short)
+        measure_speed("x", n_runs=1, n_frames=100, calibrate=False, runner=short)
         check("N1 a short run is REJECTED, not reported as a win", False, "it returned a number!")
     except AssertionError as e:
         check("N1 a short run is REJECTED, not reported as a win", "presented" in str(e))
@@ -496,7 +526,7 @@ def selftest(fjm=None):
         return 1_000, len(per_frame)
 
     try:
-        measure_speed("x", n_runs=1, n_frames=4, calibrate=False, runner=exact)
+        measure_speed("x", n_runs=1, n_frames=100, calibrate=False, runner=exact)
         check("N1 a full-length run is ACCEPTED (the control is not just always-raise)", True)
     except AssertionError:
         check("N1 a full-length run is ACCEPTED (the control is not just always-raise)", False)
@@ -569,6 +599,23 @@ def selftest(fjm=None):
         check("N6 every run travels >= 256 units from where it began",
               min(t for _e, t, _m, _mv in rows) >= 256,
               "min %d units" % min(t for _e, t, _m, _mv in rows))
+        # N6e THE BINARY'S WALK (fix/gamespeed-validate-doors): the replay must end where the
+        #     binary ends -- BINARY_ENDS, read from blocked27 through the probe.
+        check("N6e --validate ends where the binary ends (all 10 runs)", ends == list(BINARY_ENDS),
+              "parts on runs %s" % [r for r, (a, b) in enumerate(zip(ends, BINARY_ENDS)) if a != b]
+              if ends != list(BINARY_ENDS) else "10/10")
+        # N6f ITS NEGATIVE CONTROL: the old replay, every door shut, must FAIL N6e -- run 0 holds
+        #     `use` in a door's box, and the binary walks through that door.
+        shut, _ = validate_scripts(n_runs=1, quiet=True, doors=False)
+        check("N6f the doors-shut replay FAILS it (run 0 stops at the shut door)",
+              shut[0][0] != BINARY_ENDS[0],
+              "doors shut: run 0 ends %s; the binary: %s" % (shut[0][0], BINARY_ENDS[0]))
+        # N6g the host test replays RECORDED run-0 keys (the planner costs ~75 s): they must still be
+        #     script(0)'s, or that test checks a walk nobody plays.
+        import json
+        rec = json.loads(RUN0_KEYS.read_text(encoding="ascii"))
+        check("N6g the host test's recorded run-0 keys are script(0)'s", rec == script(0),
+              "%d recorded frames" % len(rec))
     except Exception as e:                                             # noqa: BLE001
         check("N6 the oracle can step the 10 scripts", False, "%s: %s" % (type(e).__name__, e))
 
@@ -599,7 +646,8 @@ def main():
     ap.add_argument("--no-calibrate", action="store_true",
                     help="do not measure/subtract the menu+startup constant")
     ap.add_argument("--validate", action="store_true",
-                    help="G5: step the oracle through the 10 scripts and show where they go")
+                    help="G5: step the oracle, doors included, through the 10 scripts and show "
+                         "where they go")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
 

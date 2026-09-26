@@ -1,0 +1,20 @@
+{
+ "frame": "heavy:h100",
+ "n": 126,
+ "keepfill": false,
+ "ops": {
+  "PLAIN": 3579320,
+  "HARN": 4956734,
+  "TODAY": 14354339,
+  "PROP": 12851076,
+  "PROP2": 10673403
+ },
+ "per_column_over_harn": {
+  "TODAY": 74584.16666666667,
+  "PROP": 62653.50793650794,
+  "PROP2": 45370.38888888889
+ },
+ "bad_today": 0,
+ "bad_prop": 0,
+ "bad_prop2": 0
+}

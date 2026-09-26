@@ -1,0 +1,5 @@
+  emission, leaf shifted     0 ops:  TODAY   50793  PROP2   45685  delta   -5108  (-10.1%)  (84s)
+  emission, leaf shifted  1500 ops:  TODAY   51168  PROP2   45858  delta   -5310  (-10.4%)  (83s)
+  emission, leaf shifted  4000 ops:  TODAY   51352  PROP2   46598  delta   -4755  (-9.3%)  (83s)
+  emission, leaf shifted  9000 ops:  TODAY   51405  PROP2   46532  delta   -4872  (-9.5%)  (82s)
+emit ('heavy', 'gate664') over 4 shifts: TODAY 50793 .. 51405 (1.2% of the mean); PROP2 45685 .. 46598 (2.0% of the mean); PROP2-TODAY -5310 .. -4755 (-10.4% .. -9.3%)

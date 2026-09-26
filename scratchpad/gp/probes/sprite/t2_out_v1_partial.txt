@@ -1,0 +1,6 @@
+heavy:gate664    n=106 runs/col=13.1  PLAIN  25094  TODAY  50864  PROP  52435  PROP!=TODAY 0  TODAY!=PLAIN+frag 0  (138s)
+heavy:gate1869   n= 90 runs/col=14.7  PLAIN  17634  TODAY  54251  PROP  56280  PROP!=TODAY 0  TODAY!=PLAIN+frag 0  (126s)
+heavy:h57        n= 73 runs/col= 7.2  PLAIN  29287  TODAY  64317  PROP  51745  PROP!=TODAY 0  TODAY!=PLAIN+frag 0  (114s)
+heavy:h71        n=111 runs/col= 8.6  PLAIN  28850  TODAY  57895  PROP  61652  PROP!=TODAY 0  TODAY!=PLAIN+frag 0  (116s)
+heavy:h100       n=126 runs/col=18.8  PLAIN  26249  TODAY  59335  PROP  59078  PROP!=TODAY 0  TODAY!=PLAIN+frag 0  (116s)
+heavy:h28        n= 83 runs/col= 8.4  PLAIN  24215  TODAY  65051  PROP  55802  PROP!=TODAY 0  TODAY!=PLAIN+frag 0  (103s)

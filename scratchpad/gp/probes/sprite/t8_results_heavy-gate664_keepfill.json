@@ -1,0 +1,19 @@
+{
+ "frame": "heavy:gate664",
+ "n": 106,
+ "ops": {
+  "PLAIN": 2886417,
+  "HARN": 3841621,
+  "TODAY": 10596723,
+  "PROP": 8962813,
+  "PROP2": 8221498
+ },
+ "per_column_over_harn": {
+  "TODAY": 63727.377358490565,
+  "PROP": 48313.1320754717,
+  "PROP2": 41319.59433962264
+ },
+ "bad_today": 0,
+ "bad_prop": 0,
+ "bad_prop2": 0
+}

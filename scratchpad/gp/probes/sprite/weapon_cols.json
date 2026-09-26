@@ -1,0 +1,526 @@
+{
+ "100": {
+  "PUNGA0": {
+   "weapon": "fist",
+   "ncols": 47,
+   "x": [
+    50,
+    96
+   ],
+   "pairs": 483,
+   "reach_bottom": 46,
+   "gap_cols": 1,
+   "pdit_ok": 37,
+   "min_top": 80
+  },
+  "PUNGB0": {
+   "weapon": "fist",
+   "ncols": 61,
+   "x": [
+    35,
+    157
+   ],
+   "pairs": 346,
+   "reach_bottom": 61,
+   "gap_cols": 1,
+   "pdit_ok": 52,
+   "min_top": 88
+  },
+  "PUNGC0": {
+   "weapon": "fist",
+   "ncols": 51,
+   "x": [
+    97,
+    147
+   ],
+   "pairs": 761,
+   "reach_bottom": 35,
+   "gap_cols": 0,
+   "pdit_ok": 29,
+   "min_top": 70
+  },
+  "PUNGD0": {
+   "weapon": "fist",
+   "ncols": 87,
+   "x": [
+    73,
+    159
+   ],
+   "pairs": 1352,
+   "reach_bottom": 56,
+   "gap_cols": 0,
+   "pdit_ok": 56,
+   "min_top": 58
+  },
+  "PISGA0": {
+   "weapon": "pistol",
+   "ncols": 28,
+   "x": [
+    68,
+    95
+   ],
+   "pairs": 516,
+   "reach_bottom": 27,
+   "gap_cols": 2,
+   "pdit_ok": 15,
+   "min_top": 64
+  },
+  "PISGB0": {
+   "weapon": "pistol",
+   "ncols": 31,
+   "x": [
+    68,
+    98
+   ],
+   "pairs": 628,
+   "reach_bottom": 31,
+   "gap_cols": 2,
+   "pdit_ok": 15,
+   "min_top": 57
+  },
+  "PISGC0": {
+   "weapon": "pistol",
+   "ncols": 28,
+   "x": [
+    68,
+    95
+   ],
+   "pairs": 566,
+   "reach_bottom": 28,
+   "gap_cols": 2,
+   "pdit_ok": 15,
+   "min_top": 59
+  },
+  "PISGD0": {
+   "weapon": "pistol",
+   "ncols": 32,
+   "x": [
+    67,
+    98
+   ],
+   "pairs": 676,
+   "reach_bottom": 32,
+   "gap_cols": 1,
+   "pdit_ok": 15,
+   "min_top": 54
+  },
+  "PISGE0": {
+   "weapon": "pistol",
+   "ncols": 33,
+   "x": [
+    66,
+    98
+   ],
+   "pairs": 711,
+   "reach_bottom": 33,
+   "gap_cols": 1,
+   "pdit_ok": 17,
+   "min_top": 50
+  },
+  "PISFA0": {
+   "weapon": "pistol flash",
+   "ncols": 16,
+   "x": [
+    73,
+    88
+   ],
+   "pairs": 130,
+   "reach_bottom": 0,
+   "gap_cols": 1,
+   "pdit_ok": 10,
+   "min_top": 50
+  },
+  "SHTGA0": {
+   "weapon": "shotgun",
+   "ncols": 33,
+   "x": [
+    62,
+    94
+   ],
+   "pairs": 398,
+   "reach_bottom": 33,
+   "gap_cols": 0,
+   "pdit_ok": 20,
+   "min_top": 69
+  },
+  "SHTGB0": {
+   "weapon": "shotgun",
+   "ncols": 44,
+   "x": [
+    40,
+    83
+   ],
+   "pairs": 938,
+   "reach_bottom": 30,
+   "gap_cols": 3,
+   "pdit_ok": 34,
+   "min_top": 36
+  },
+  "SHTGC0": {
+   "weapon": "shotgun",
+   "ncols": 46,
+   "x": [
+    31,
+    76
+   ],
+   "pairs": 1032,
+   "reach_bottom": 31,
+   "gap_cols": 7,
+   "pdit_ok": 34,
+   "min_top": 28
+  },
+  "SHTGD0": {
+   "weapon": "shotgun",
+   "ncols": 54,
+   "x": [
+    23,
+    76
+   ],
+   "pairs": 996,
+   "reach_bottom": 49,
+   "gap_cols": 7,
+   "pdit_ok": 31,
+   "min_top": 35
+  },
+  "SHTFA0": {
+   "weapon": "shotgun flash",
+   "ncols": 18,
+   "x": [
+    72,
+    89
+   ],
+   "pairs": 100,
+   "reach_bottom": 0,
+   "gap_cols": 7,
+   "pdit_ok": 11,
+   "min_top": 65
+  },
+  "SHTFB0": {
+   "weapon": "shotgun flash",
+   "ncols": 29,
+   "x": [
+    66,
+    94
+   ],
+   "pairs": 223,
+   "reach_bottom": 0,
+   "gap_cols": 7,
+   "pdit_ok": 18,
+   "min_top": 61
+  },
+  "SAWGA0": {
+   "weapon": "chainsaw",
+   "ncols": 41,
+   "x": [
+    90,
+    130
+   ],
+   "pairs": 736,
+   "reach_bottom": 41,
+   "gap_cols": 0,
+   "pdit_ok": 17,
+   "min_top": 47
+  },
+  "SAWGB0": {
+   "weapon": "chainsaw",
+   "ncols": 41,
+   "x": [
+    90,
+    130
+   ],
+   "pairs": 772,
+   "reach_bottom": 41,
+   "gap_cols": 1,
+   "pdit_ok": 18,
+   "min_top": 45
+  },
+  "SAWGC0": {
+   "weapon": "chainsaw",
+   "ncols": 81,
+   "x": [
+    79,
+    159
+   ],
+   "pairs": 2064,
+   "reach_bottom": 79,
+   "gap_cols": 7,
+   "pdit_ok": 61,
+   "min_top": 56
+  },
+  "SAWGD0": {
+   "weapon": "chainsaw",
+   "ncols": 80,
+   "x": [
+    80,
+    159
+   ],
+   "pairs": 1940,
+   "reach_bottom": 79,
+   "gap_cols": 2,
+   "pdit_ok": 57,
+   "min_top": 56
+  }
+ },
+ "84": {
+  "PUNGA0": {
+   "weapon": "fist",
+   "ncols": 39,
+   "x": [
+    58,
+    96
+   ],
+   "pairs": 236,
+   "reach_bottom": 39,
+   "gap_cols": 0,
+   "pdit_ok": 29,
+   "min_top": 72
+  },
+  "PUNGB0": {
+   "weapon": "fist",
+   "ncols": 28,
+   "x": [
+    126,
+    153
+   ],
+   "pairs": 73,
+   "reach_bottom": 28,
+   "gap_cols": 0,
+   "pdit_ok": 26,
+   "min_top": 80
+  },
+  "PUNGC0": {
+   "weapon": "fist",
+   "ncols": 47,
+   "x": [
+    97,
+    143
+   ],
+   "pairs": 512,
+   "reach_bottom": 44,
+   "gap_cols": 0,
+   "pdit_ok": 29,
+   "min_top": 62
+  },
+  "PUNGD0": {
+   "weapon": "fist",
+   "ncols": 87,
+   "x": [
+    73,
+    159
+   ],
+   "pairs": 1049,
+   "reach_bottom": 61,
+   "gap_cols": 0,
+   "pdit_ok": 56,
+   "min_top": 50
+  },
+  "PISGA0": {
+   "weapon": "pistol",
+   "ncols": 27,
+   "x": [
+    68,
+    94
+   ],
+   "pairs": 354,
+   "reach_bottom": 27,
+   "gap_cols": 0,
+   "pdit_ok": 15,
+   "min_top": 56
+  },
+  "PISGB0": {
+   "weapon": "pistol",
+   "ncols": 27,
+   "x": [
+    68,
+    94
+   ],
+   "pairs": 461,
+   "reach_bottom": 27,
+   "gap_cols": 2,
+   "pdit_ok": 15,
+   "min_top": 49
+  },
+  "PISGC0": {
+   "weapon": "pistol",
+   "ncols": 28,
+   "x": [
+    68,
+    95
+   ],
+   "pairs": 400,
+   "reach_bottom": 28,
+   "gap_cols": 1,
+   "pdit_ok": 15,
+   "min_top": 51
+  },
+  "PISGD0": {
+   "weapon": "pistol",
+   "ncols": 29,
+   "x": [
+    68,
+    96
+   ],
+   "pairs": 498,
+   "reach_bottom": 28,
+   "gap_cols": 1,
+   "pdit_ok": 14,
+   "min_top": 46
+  },
+  "PISGE0": {
+   "weapon": "pistol",
+   "ncols": 32,
+   "x": [
+    66,
+    97
+   ],
+   "pairs": 537,
+   "reach_bottom": 32,
+   "gap_cols": 0,
+   "pdit_ok": 17,
+   "min_top": 42
+  },
+  "PISFA0": {
+   "weapon": "pistol flash",
+   "ncols": 16,
+   "x": [
+    73,
+    88
+   ],
+   "pairs": 130,
+   "reach_bottom": 0,
+   "gap_cols": 1,
+   "pdit_ok": 10,
+   "min_top": 42
+  },
+  "SHTGA0": {
+   "weapon": "shotgun",
+   "ncols": 23,
+   "x": [
+    69,
+    91
+   ],
+   "pairs": 237,
+   "reach_bottom": 23,
+   "gap_cols": 0,
+   "pdit_ok": 13,
+   "min_top": 61
+  },
+  "SHTGB0": {
+   "weapon": "shotgun",
+   "ncols": 41,
+   "x": [
+    43,
+    83
+   ],
+   "pairs": 843,
+   "reach_bottom": 29,
+   "gap_cols": 3,
+   "pdit_ok": 31,
+   "min_top": 28
+  },
+  "SHTGC0": {
+   "weapon": "shotgun",
+   "ncols": 44,
+   "x": [
+    33,
+    76
+   ],
+   "pairs": 945,
+   "reach_bottom": 33,
+   "gap_cols": 7,
+   "pdit_ok": 32,
+   "min_top": 20
+  },
+  "SHTGD0": {
+   "weapon": "shotgun",
+   "ncols": 52,
+   "x": [
+    25,
+    76
+   ],
+   "pairs": 864,
+   "reach_bottom": 50,
+   "gap_cols": 5,
+   "pdit_ok": 29,
+   "min_top": 27
+  },
+  "SHTFA0": {
+   "weapon": "shotgun flash",
+   "ncols": 18,
+   "x": [
+    72,
+    89
+   ],
+   "pairs": 100,
+   "reach_bottom": 0,
+   "gap_cols": 7,
+   "pdit_ok": 11,
+   "min_top": 57
+  },
+  "SHTFB0": {
+   "weapon": "shotgun flash",
+   "ncols": 29,
+   "x": [
+    66,
+    94
+   ],
+   "pairs": 223,
+   "reach_bottom": 0,
+   "gap_cols": 7,
+   "pdit_ok": 18,
+   "min_top": 53
+  },
+  "SAWGA0": {
+   "weapon": "chainsaw",
+   "ncols": 36,
+   "x": [
+    91,
+    126
+   ],
+   "pairs": 579,
+   "reach_bottom": 36,
+   "gap_cols": 0,
+   "pdit_ok": 16,
+   "min_top": 39
+  },
+  "SAWGB0": {
+   "weapon": "chainsaw",
+   "ncols": 36,
+   "x": [
+    91,
+    126
+   ],
+   "pairs": 615,
+   "reach_bottom": 36,
+   "gap_cols": 1,
+   "pdit_ok": 17,
+   "min_top": 37
+  },
+  "SAWGC0": {
+   "weapon": "chainsaw",
+   "ncols": 80,
+   "x": [
+    79,
+    158
+   ],
+   "pairs": 1574,
+   "reach_bottom": 79,
+   "gap_cols": 6,
+   "pdit_ok": 61,
+   "min_top": 48
+  },
+  "SAWGD0": {
+   "weapon": "chainsaw",
+   "ncols": 79,
+   "x": [
+    80,
+    158
+   ],
+   "pairs": 1493,
+   "reach_bottom": 79,
+   "gap_cols": 1,
+   "pdit_ok": 57,
+   "min_top": 48
+  }
+ }
+}

@@ -1,0 +1,42 @@
+view 100 rows:
+  PUNGA0  fist           cols  47  x (50, 96)   pairs  483  to-bottom  46  gap-cols  1  partial-ditto-ok  37  top row 80
+  PUNGB0  fist           cols  61  x (35, 157)  pairs  346  to-bottom  61  gap-cols  1  partial-ditto-ok  52  top row 88
+  PUNGC0  fist           cols  51  x (97, 147)  pairs  761  to-bottom  35  gap-cols  0  partial-ditto-ok  29  top row 70
+  PUNGD0  fist           cols  87  x (73, 159)  pairs 1352  to-bottom  56  gap-cols  0  partial-ditto-ok  56  top row 58
+  PISGA0  pistol         cols  28  x (68, 95)   pairs  516  to-bottom  27  gap-cols  2  partial-ditto-ok  15  top row 64
+  PISGB0  pistol         cols  31  x (68, 98)   pairs  628  to-bottom  31  gap-cols  2  partial-ditto-ok  15  top row 57
+  PISGC0  pistol         cols  28  x (68, 95)   pairs  566  to-bottom  28  gap-cols  2  partial-ditto-ok  15  top row 59
+  PISGD0  pistol         cols  32  x (67, 98)   pairs  676  to-bottom  32  gap-cols  1  partial-ditto-ok  15  top row 54
+  PISGE0  pistol         cols  33  x (66, 98)   pairs  711  to-bottom  33  gap-cols  1  partial-ditto-ok  17  top row 50
+  PISFA0  pistol flash   cols  16  x (73, 88)   pairs  130  to-bottom   0  gap-cols  1  partial-ditto-ok  10  top row 50
+  SHTGA0  shotgun        cols  33  x (62, 94)   pairs  398  to-bottom  33  gap-cols  0  partial-ditto-ok  20  top row 69
+  SHTGB0  shotgun        cols  44  x (40, 83)   pairs  938  to-bottom  30  gap-cols  3  partial-ditto-ok  34  top row 36
+  SHTGC0  shotgun        cols  46  x (31, 76)   pairs 1032  to-bottom  31  gap-cols  7  partial-ditto-ok  34  top row 28
+  SHTGD0  shotgun        cols  54  x (23, 76)   pairs  996  to-bottom  49  gap-cols  7  partial-ditto-ok  31  top row 35
+  SHTFA0  shotgun flash  cols  18  x (72, 89)   pairs  100  to-bottom   0  gap-cols  7  partial-ditto-ok  11  top row 65
+  SHTFB0  shotgun flash  cols  29  x (66, 94)   pairs  223  to-bottom   0  gap-cols  7  partial-ditto-ok  18  top row 61
+  SAWGA0  chainsaw       cols  41  x (90, 130)  pairs  736  to-bottom  41  gap-cols  0  partial-ditto-ok  17  top row 47
+  SAWGB0  chainsaw       cols  41  x (90, 130)  pairs  772  to-bottom  41  gap-cols  1  partial-ditto-ok  18  top row 45
+  SAWGC0  chainsaw       cols  81  x (79, 159)  pairs 2064  to-bottom  79  gap-cols  7  partial-ditto-ok  61  top row 56
+  SAWGD0  chainsaw       cols  80  x (80, 159)  pairs 1940  to-bottom  79  gap-cols  2  partial-ditto-ok  57  top row 56
+view 84 rows:
+  PUNGA0  fist           cols  39  x (58, 96)   pairs  236  to-bottom  39  gap-cols  0  partial-ditto-ok  29  top row 72
+  PUNGB0  fist           cols  28  x (126, 153) pairs   73  to-bottom  28  gap-cols  0  partial-ditto-ok  26  top row 80
+  PUNGC0  fist           cols  47  x (97, 143)  pairs  512  to-bottom  44  gap-cols  0  partial-ditto-ok  29  top row 62
+  PUNGD0  fist           cols  87  x (73, 159)  pairs 1049  to-bottom  61  gap-cols  0  partial-ditto-ok  56  top row 50
+  PISGA0  pistol         cols  27  x (68, 94)   pairs  354  to-bottom  27  gap-cols  0  partial-ditto-ok  15  top row 56
+  PISGB0  pistol         cols  27  x (68, 94)   pairs  461  to-bottom  27  gap-cols  2  partial-ditto-ok  15  top row 49
+  PISGC0  pistol         cols  28  x (68, 95)   pairs  400  to-bottom  28  gap-cols  1  partial-ditto-ok  15  top row 51
+  PISGD0  pistol         cols  29  x (68, 96)   pairs  498  to-bottom  28  gap-cols  1  partial-ditto-ok  14  top row 46
+  PISGE0  pistol         cols  32  x (66, 97)   pairs  537  to-bottom  32  gap-cols  0  partial-ditto-ok  17  top row 42
+  PISFA0  pistol flash   cols  16  x (73, 88)   pairs  130  to-bottom   0  gap-cols  1  partial-ditto-ok  10  top row 42
+  SHTGA0  shotgun        cols  23  x (69, 91)   pairs  237  to-bottom  23  gap-cols  0  partial-ditto-ok  13  top row 61
+  SHTGB0  shotgun        cols  41  x (43, 83)   pairs  843  to-bottom  29  gap-cols  3  partial-ditto-ok  31  top row 28
+  SHTGC0  shotgun        cols  44  x (33, 76)   pairs  945  to-bottom  33  gap-cols  7  partial-ditto-ok  32  top row 20
+  SHTGD0  shotgun        cols  52  x (25, 76)   pairs  864  to-bottom  50  gap-cols  5  partial-ditto-ok  29  top row 27
+  SHTFA0  shotgun flash  cols  18  x (72, 89)   pairs  100  to-bottom   0  gap-cols  7  partial-ditto-ok  11  top row 57
+  SHTFB0  shotgun flash  cols  29  x (66, 94)   pairs  223  to-bottom   0  gap-cols  7  partial-ditto-ok  18  top row 53
+  SAWGA0  chainsaw       cols  36  x (91, 126)  pairs  579  to-bottom  36  gap-cols  0  partial-ditto-ok  16  top row 39
+  SAWGB0  chainsaw       cols  36  x (91, 126)  pairs  615  to-bottom  36  gap-cols  1  partial-ditto-ok  17  top row 37
+  SAWGC0  chainsaw       cols  80  x (79, 158)  pairs 1574  to-bottom  79  gap-cols  6  partial-ditto-ok  61  top row 48
+  SAWGD0  chainsaw       cols  79  x (80, 158)  pairs 1493  to-bottom  79  gap-cols  1  partial-ditto-ok  57  top row 48

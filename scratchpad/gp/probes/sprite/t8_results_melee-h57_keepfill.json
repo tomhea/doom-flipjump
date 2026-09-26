@@ -1,0 +1,19 @@
+{
+ "frame": "melee:h57",
+ "n": 89,
+ "ops": {
+  "PLAIN": 2809467,
+  "HARN": 3652960,
+  "TODAY": 11469934,
+  "PROP": 8836825,
+  "PROP2": 8288312
+ },
+ "per_column_over_harn": {
+  "TODAY": 87831.16853932584,
+  "PROP": 58245.67415730337,
+  "PROP2": 52082.606741573036
+ },
+ "bad_today": 0,
+ "bad_prop": 0,
+ "bad_prop2": 0
+}

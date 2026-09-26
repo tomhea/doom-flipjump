@@ -1,0 +1,4 @@
+  end-to-end, pre-loop shifted     0 ops:  TODAY   70796  PROP2   41320  delta  -29477  (-41.6%)  (129s)
+  end-to-end, pre-loop shifted  1500 ops:  TODAY   71692  PROP2   41935  delta  -29757  (-41.5%)  (127s)
+  end-to-end, pre-loop shifted  4000 ops:  TODAY   71387  PROP2   41964  delta  -29422  (-41.2%)  (125s)
+e2e ('heavy', 'gate664') over 3 shifts: TODAY 70796 .. 71692 (1.3% of the mean); PROP2 41320 .. 41964 (1.5% of the mean); PROP2-TODAY -29757 .. -29422 (-41.6% .. -41.2%)

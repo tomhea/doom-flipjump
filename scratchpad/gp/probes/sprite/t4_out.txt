@@ -1,0 +1,15 @@
+  empty                                        0 ops
+  read_byte_and_inc (bank) + ptr_sub 1       806 ops
+  ptr_sub 1                                  123 ops
+  read_byte (bank)                           445 ops
+  byte.emit                                   55 ops
+  cm.emit                                     84 ops
+  mov 4 + add4_chain                         400 ops
+  sign 4 + if0 4 + scmp 4                    495 ops
+  zero 2 + mov 2                              89 ops
+  6 x shl_bit w/4 + set w/4                 1013 ops
+  set w/4                                    126 ops
+  ptr_index (full)                          1403 ops
+  write_byte5 (hot)                          523 ops
+  read_byte5 (hot)                           349 ops
+  mov 8 + clamp_row                         1304 ops

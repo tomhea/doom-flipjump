@@ -18,7 +18,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from doomfj.config import Config                                            # noqa: E402
 from doomfj.fixedpoint import _signed                                       # noqa: E402
-from doomfj.reference_model import (ReferenceModel, SimState, build_scene, MONSTER_TYPES)  # noqa: E402
+from doomfj.reference_model import (ReferenceModel, SimState, build_scene, MONSTER_TYPES,  # noqa: E402
+                                    GAME_RENDER_KW)
 from doomfj.things import drawable_things, baked_thing_mask                 # noqa: E402
 from doomfj.wad import WadFile                                              # noqa: E402
 
@@ -81,10 +82,8 @@ def collect():
         for name, vx, vy, va in VPS:
             planes, things, steps = [], [], []
             rm.render_wall_frame(SimState(vx << 16, vy << 16, va, "E1M1"), scene,
-                                 wall_mode="W1R", floor_mode_ft1=True, plane_near=True,
-                                 wall_noise=True, near_steps=True, stack_steps=True,
-                                 things=True, sprite_wad=art, degrade=True, sky=True,
-                                 bbox_cull=True, planes_out=planes, things_out=things,
+                                 sprite_wad=art, **GAME_RENDER_KW,
+                                 planes_out=planes, things_out=things,
                                  steps_out=steps,
                                  thing_positions=positions(vx, vy, va, pl) if pl else None)
             ceil_hi, floor_lo, col_ch, col_fh, col_lt, col_cf, col_ff = planes[0]

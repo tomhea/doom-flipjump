@@ -34,13 +34,18 @@ building the game re-grades the set; a new version needs the owner.
 hashes). The freeze pins the KEYS, the B0 and what they reproduce -- not source bytes.
 - CAP-22 drives the candidate binary with the frozen keys and checks it state-exact against the
   CURRENT model, the oracle that binary mirrors.
-- A pure refactor that edits a hashed file re-records the hashes with
+- A pure refactor that edits a hashed MODEL or census file re-records the hashes with
   `python scratchpad/gp/scenarios_v2.py --rehash "<reason>"`. It refuses unless the replay still
-  reproduces every frozen pose, digest and drawn population (F3/F4); each rehash is logged in the
-  set (`rehash_log`). Its negative control: `scratchpad/gp/scenarios/rehash_v2.log`.
-- A change that alters any replay (a rule, a fix) is a BEHAVIOUR change: re-validate the set on
-  the new model; if its floors hold, the owner approves it as v2 on that model; if not, the
-  owner approves a re-planned v3. B0 stays as measured (blocked27 on the frozen keys).
+  reproduces every frozen pose, digest and drawn population (F1/F3/F4/F5 hold) AND the checker
+  (`scenarios_v2.py`) is unchanged; each rehash is logged in the set (`rehash_log`). The refusals
+  are `--selftest` controls R1-R3 (a behaviour change, a checker change).
+- A CHECKER change (`scenarios_v2.py` itself) is recorded only by `--freeze`, which re-plans the
+  whole set and must reproduce identical keys -- a reviewable event, never a rehash; the previous
+  freeze record is kept in `freeze_history`.
+- A BEHAVIOUR change (anything that moves a replay: a rule, a fix) needs a NEW VERSION: re-plan
+  (`--plan`), re-measure B0 on it (`b0_scenarios.py`), and `--freeze` it with the owner's approval
+  recorded. There is no "same keys, new poses" path: F3 and `b0_scenarios` both compare against the
+  frozen poses, so CAP-22 cannot run on a model whose behaviour moved until the new version exists.
 
 Single frames are NOT capped (decision D1): blocked27 already has frames at 32.4M (two-sided wall
 storms), and the frozen set's heaviest run, R0-west-hall, averages 22,018,124 on blocked27 alone
@@ -100,7 +105,7 @@ the weapon drawn over the 3D view; animated, rotated monsters; fireballs, puffs,
 | `scratchpad/12m/pinreport.py` | per build: are the 20 hottest shared words still pinned; pool declines | `python scratchpad/12m/pinreport.py --fjm build/<x>.fjm ...` (see its --help) |
 | `scratchpad/gp/probe.py` | reads/writes named cells of the RUNNING binary each frame (state-exact gates, injection) | `python scratchpad/gp/probe.py --selftest --demo` |
 | `scratchpad/gp/b0.py`, `b0_scenarios.py` | drives a binary through viewpoints or the scenario set, per-frame ops, state and pixel checks | `python scratchpad/gp/b0_scenarios.py --selftest` |
-| `src/doomfj/gamedata.py`, `rng.py`, `world.py`, `combat.py` | THE MODEL = the oracle of the gameplay: DOOM's data (Chocolate Doom 895f581c, cross-checked against linuxdoom-1.10), the rndtable, a schema-first world state, monster AI, combat | `python -m pytest tests/host -q -k gp` (138 tests) |
+| `src/doomfj/gamedata.py`, `rng.py`, `world.py`, `combat.py` | THE MODEL = the oracle of the gameplay: DOOM's data (Chocolate Doom 895f581c, cross-checked against linuxdoom-1.10), the rndtable, a schema-first world state, monster AI, combat | `python -m pytest tests/host -q -k gp` (140 tests) |
 | `scratchpad/gp/model_run.py` | runs the model with scripted keys, dumps per-tic state | `--help` |
 | `scratchpad/gp/scenarios_v2.py` | the autopilot and the FROZEN set v2: `--validate` (the criteria and the freeze check), `--rehash` (the freeze rule, section 1) | `python scratchpad/gp/scenarios_v2.py --validate` (`scenarios.py` is v1's, kept as the record) |
 | `scratchpad/gp/census*.py` | the model wired into the oracle renderer; the compositor census and the fight line | `python scratchpad/gp/census_control.py` |
@@ -152,7 +157,9 @@ the octant classifier 3.2K; AproxDistance 1.0K; an aim-window write 27-62.
    macros carry NO `@`-local data cells (checked statically -- a restore-set hole hangs the game).
 8. **One source per table**: the emitter and the oracle read the same Python tables.
 9. **A blocked build's state cell holds `base | v<<6`**, not `v<<6` (the probe writes only the
-   value field); every E1M1 oracle call uses `reference_model.GAME_RENDER_KW` (sky included -- five gates lacked
+   value field); every gate that runs a prebuilt game-tier binary (m1, m2_std, m3, m5, m2_r3, m2_r4 gates,
+   m2_pass_probe) and every phase-0 tool renders the oracle through `reference_model.GAME_RENDER_KW`
+   (sky included -- five gates lacked
    it until PR #87), and `tests/host/test_oracle_calls_in_step.py` scans every gate for it.
 
 ---
@@ -187,10 +194,14 @@ drops, pickups (a 64-unit pickup grid), barrels (radius damage, chains), the blu
 
 **7.5 Map mechanics.** Doors as today plus the key check, walk-over and blazing doors; lifts and
 the floor switch as runtime FLOORS (`docs/gp-lift-spike.md`: 243 of 255 plane ids, +0.02-0.1M ops (UNVERIFIED),
-0.18% size; lifts cannot crush on E1M1); door reversal on things; the exit.
+0.18% size -- `scratchpad/gp/lift/lift_budget_out.txt` prints 243 pids and ~241K words = 0.179%;
+lifts cannot crush on E1M1); door reversal on things; the exit.
 
 **7.6 Drawing.** The v2 sprite column (`docs/gp-sprite-column.md`: pixel-identical, ~40% cheaper
-end to end); the native-list sprite bank (all frames, 8 rotations, 1.96M words replacing 2.92M);
+end to end); the native-list sprite bank (all frames, 8 rotations, ~1.96M words replacing 2.92M -- UNVERIFIED:
+`art_budget_out.txt` prints the static bank 124,768, the monsters 1,065,120 and the effects 25,312;
+the rowmap/patch tables ~0.15M, the weapons ~0.4M and the HUD ~0.19M are the sprites/HUD mission's
+estimates, recorded only in the session transcript);
 rotation by the octant classifier; D3's compositor rules; the weapon drawn over the view with the
 partial-ditto device option and the status bar with its ditto option (`docs/gp-partial-ditto.md`:
 two additive 0x0B tokens); the HUD digits from a 512-entry table, redrawn on change.
@@ -223,7 +234,7 @@ The cap is not tight. The one threat that can consume the
 margin is placement (the blocking pass re-rolling its pins, up to ~6M), so pin protection is P1's
 first rung.
 
-Size: 32.23% today; the native bank takes it to ~31.5%; the AI, combat, collision cells and lifts
+Size: 32.23% today; the native bank takes it to ~31.5% (UNVERIFIED, from the ~1.96M above); the AI, combat, collision cells and lifts
 add ~1.5-2.4M words (AI 0.6-0.8, combat 0.5-1.0, collision cells 0.1-0.3, lifts ~0.26):
 **~32.6-33.3%**, under 35%.
 

@@ -165,8 +165,9 @@ AFTER_MIN_DRAWN = 0.20       # the decided D3 picture degrades a corpse beyond ~
                              # thing-rich room (census, MEASURED on the v2 drafts): a player who
                              # collects and leaves draws them on ~20-30 of 100 frames
 APPROVAL = {"by": "the owner", "on": "2026-09-26",
-            "record": "the coordinator's S4 v2 message: 'The owner approved the freeze on "
-                      "2026-09-26.'"}
+            "record": "the owner, 2026-09-26: 'I agree with you on 1,2,3' -- 3 was 'plan a v2 [...] "
+                      "then freeze v2 and its baseline' (docs/plan-gameplay.md section 11, D2)"}
+FREEZE_RULE = ("frozen: the keys, setups, B0 and what they reproduce. --rehash re-records source hashes after a pure refactor only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A BEHAVIOUR change or a CHECKER change needs the owner: a checker change is recorded by --freeze (re-plan with identical keys, under review); a behaviour change by a new version (--plan, B0 re-measured, --freeze with the owner's approval)")
 
 POP_FIELDS = ("awake", "geo_in_view", "geo_awake", "geo_corpses", "fireballs", "deferred", "heavy",
               "d_live", "d_awake", "d_corpse", "d_drop", "d_fireball", "d_fx", "d_barrel")
@@ -1574,11 +1575,12 @@ def freeze(path: Path, b0_path: Path) -> int:
     doc["keys_sha"] = keys_sha(doc)
     doc["b0"] = b0
     doc["status"] = "FROZEN"
+    if doc.get("freeze"):                          # a re-freeze keeps the record of the one before
+        doc.setdefault("freeze_history", []).append(doc["freeze"])
     doc["freeze"] = {"approved_by": APPROVAL["by"], "approved_on": APPROVAL["on"],
                      "approval_record": APPROVAL["record"], "frozen_at_git_head": git_head(),
                      "files_not_at_head": git_untracked_or_modified(files),
-                     "rule": "frozen: keys, setups, model and planner hashes do not change; "
-                             "--validate checks F1-F5"}
+                     "rule": FREEZE_RULE}
     Path(path).write_text(json.dumps(doc, indent=1), encoding="ascii")
     print("  wrote %s: FROZEN (git head %s, %d hashed files, keys %s)" % (
         path, doc["freeze"]["frozen_at_git_head"], len(doc["hashes"]), doc["keys_sha"]), flush=True)
@@ -1623,6 +1625,27 @@ def selftest(doc: dict) -> int:
                     "b0": {"binding": 0, "mean": 0, "p80_run": 0, "frame_max": 0, "fjm_sha256": "-",
                            "per_run": {r["name"]: {} for r in doc["runs"]}, "keys_sha": keys_sha(doc)}})
         print("  (the set is not frozen yet: the freeze checks run on an in-memory frozen copy)")
+    # R-controls: the rehash decision (PR #87 round 2) -- accepts the untouched set, refuses a
+    # BEHAVIOUR change (the model's strafe step 13 -> 12, patched in-process, the files untouched)
+    # and refuses a CHECKER change (its recorded hash altered)
+    if doc.get("status") == "FROZEN":
+        import doomfj.combat as _C
+        ms0 = [replay(run, census=True) for run in doc["runs"]]
+        now0 = dict(doc["hashes"])
+        ok0, why0, ch0 = rehash_decision(doc, ms0, now0)
+        check("R1 the untouched set: the rehash would accept, with nothing to re-record",
+              ok0 and not ch0, why0)
+        saved = _C.STRAFE_MOVE
+        try:
+            _C.STRAFE_MOVE = 12 << 16
+            ms1 = [replay(run, census=True) for run in doc["runs"]]
+        finally:
+            _C.STRAFE_MOVE = saved
+        ok1, why1, _ = rehash_decision(doc, ms1, now0)
+        check("R2 a BEHAVIOUR change (strafe 13 -> 12) is REFUSED", not ok1, why1)
+        now2 = dict(now0, **{PLANNER_FILE: "0" * 16})
+        ok2, why2, _ = rehash_decision(doc, ms0, now2)
+        check("R3 a CHECKER change (scenarios_v2.py's hash) is REFUSED", not ok2, why2)
     base = validate(doc, census=True, quiet=True)
     allc = base["criteria"] + base["freeze"]
     check("S0 the set passes every criterion and every freeze check",
@@ -1746,6 +1769,24 @@ def selftest(doc: dict) -> int:
     return 1 if fails else 0
 
 
+def rehash_decision(doc: dict, ms: list, now: dict):
+    """(ok, reason, changed) for re-recording the hashes to `now` (file -> hash). Refused when a
+    freeze check the rehash relies on fails (F1/F3/F4/F5: the replay moved -- a BEHAVIOUR change),
+    or when the checker itself changed: a checker that re-records its own hash could first weaken
+    F3/F4 and then approve a behaviour change (PR #87 round 2)."""
+    checks = {name.split()[0]: (ok, det) for name, ok, det in freeze_checks(doc, ms)}
+    for k in ("F1", "F3", "F4", "F5"):
+        ok, det = checks[k]
+        if not ok:
+            return False, "%s failed (%s): the replay moved; a behaviour change needs the owner" % (k, det), {}
+    old = doc["hashes"]
+    if now.get(PLANNER_FILE) != old.get(PLANNER_FILE):
+        return False, ("the checker %s changed: record it with --freeze (re-plan, identical keys) "
+                       "under review, never by --rehash" % PLANNER_FILE), {}
+    changed = {f: [old.get(f), now[f]] for f in now if old.get(f) != now[f]}
+    return True, "F1/F3/F4/F5 held and the checker is unchanged", changed
+
+
 def rehash(path: Path, reason: str) -> int:
     """THE REHASH RULE (docs/handoff-gameplay.md section 1; PR #87 review): the freeze pins the KEYS,
     the B0 and what they reproduce -- not source bytes. When a refactor edits a hashed file but the
@@ -1755,16 +1796,14 @@ def rehash(path: Path, reason: str) -> int:
     model's BEHAVIOUR changed -- that is not a rehash; it needs the owner (a v3)."""
     doc = json.loads(Path(path).read_text(encoding="ascii"))
     ms = [replay(run, census=True) for run in doc["runs"]]
-    checks = {name.split()[0]: (ok, det) for name, ok, det in freeze_checks(doc, ms)}
-    for k in ("F1", "F3", "F4", "F5"):
-        ok, det = checks[k]
-        print("  %s %s  %s" % (k, "ok  " if ok else "FAIL", det), flush=True)
-        if not ok:
-            print("REHASH REFUSED: %s failed -- the replay moved; this needs the owner (a v3)" % k)
-            return 1
+    for name, ok, det in freeze_checks(doc, ms):
+        print("  %s %s  %s" % (name.split()[0], "ok  " if ok else "FAIL", det), flush=True)
     old = doc["hashes"]
     new = {f: sha16(ROOT / f) for f in sorted(set(old) | set(dependency_files()))}
-    changed = {f: [old.get(f), new[f]] for f in new if old.get(f) != new[f]}
+    ok, why, changed = rehash_decision(doc, ms, new)
+    if not ok:
+        print("REHASH REFUSED: %s" % why)
+        return 1
     if not changed:
         print("REHASH: nothing changed")
         return 0

@@ -13,7 +13,13 @@ owner approved the freeze on 2026-09-26.").
 - The frozen B0 was measured on these exact keys.
 
 `--validate` checks all of this (section "The freeze" below). After the freeze, a changed model,
-census or planner file makes `--validate` FAIL. The fix is a new set, v3, with a new B0.
+census or planner file makes `--validate` FAIL. What happens next depends on what changed:
+- a pure refactor of a model or census file: `--rehash "<reason>"` re-records the hashes, only while
+  every pose, digest and drawn population still replays (F1/F3/F4/F5) and the checker
+  (scenarios_v2.py) is unchanged -- logged in `rehash_log`;
+- a change to the checker itself: `--freeze` (re-plans, requires identical keys; the previous freeze
+  record goes to `freeze_history`);
+- a BEHAVIOUR change: a new version (`--plan`, B0 re-measured, `--freeze` with the owner's approval).
 
 **Superseded:** `combat_scenarios_v1.json` and its logs are v1, a DRAFT planned with K = 3 and no
 strafe. v1 no longer replays on this model.

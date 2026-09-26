@@ -24978,7 +24978,7 @@
  "hashes": {
   "assets/freedoom1.wad": "7323bcc168c5a45f",
   "scratchpad/gp/census_lib.py": "7126b6c0a1210408",
-  "scratchpad/gp/scenarios_v2.py": "3027812dde6bcea5",
+  "scratchpad/gp/scenarios_v2.py": "e115f01e3207a62f",
   "src/doomfj/__init__.py": "e3b0c44298fc1c14",
   "src/doomfj/combat.py": "89090e95e60533a4",
   "src/doomfj/config.py": "aeb52d573b01cb12",
@@ -25241,12 +25241,12 @@
  "freeze": {
   "approved_by": "the owner",
   "approved_on": "2026-09-26",
-  "approval_record": "the coordinator's S4 v2 message: 'The owner approved the freeze on 2026-09-26.'",
-  "frozen_at_git_head": "3688fa4",
+  "approval_record": "the owner, 2026-09-26: 'I agree with you on 1,2,3' -- 3 was 'plan a v2 [...] then freeze v2 and its baseline' (docs/plan-gameplay.md section 11, D2)",
+  "frozen_at_git_head": "83ccf06",
   "files_not_at_head": [
    "scratchpad/gp/scenarios_v2.py"
   ],
-  "rule": "frozen: keys, setups, model and planner hashes do not change; --validate checks F1-F5"
+  "rule": "frozen: the keys, setups, B0 and what they reproduce. --rehash re-records source hashes after a pure refactor only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A BEHAVIOUR change or a CHECKER change needs the owner: a checker change is recorded by --freeze (re-plan with identical keys, under review); a behaviour change by a new version (--plan, B0 re-measured, --freeze with the owner's approval)"
  },
  "rehash_log": [
   {
@@ -25276,6 +25276,18 @@
     ]
    },
    "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"
+  }
+ ],
+ "freeze_history": [
+  {
+   "approved_by": "the owner",
+   "approved_on": "2026-09-26",
+   "approval_record": "the coordinator's S4 v2 message: 'The owner approved the freeze on 2026-09-26.'",
+   "frozen_at_git_head": "3688fa4",
+   "files_not_at_head": [
+    "scratchpad/gp/scenarios_v2.py"
+   ],
+   "rule": "frozen: keys, setups, model and planner hashes do not change; --validate checks F1-F5"
   }
  ]
 }

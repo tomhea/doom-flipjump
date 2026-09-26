@@ -159,10 +159,10 @@ reads WASD, arrows, space, enter and esc, and bits 5-7 of the key byte are free.
 | **collision** (seed walks + try_move / check_position) | **1,475,186** | **9.7** |
 | sim.bind_things | 438,808 | 2.9 |
 | m1_reset | 249,325 | 1.6 |
+| the rest (eye walk, move, view, doors, input) | ~50,000 | 0.3 |
 
 (Exact phase spans from `scratchpad/12m/profx/an_phases.txt`; this table's first draft summed rounded
 segments and read 1-2 ops higher.)
-| the rest (eye walk, move, view, doors, input) | ~50,000 | 0.3 |
 
 | primitive (per call) | ops | primitive | ops |
 |---|---|---|---|

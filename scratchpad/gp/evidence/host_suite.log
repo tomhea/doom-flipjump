@@ -1,3 +1,3 @@
-# the full host suite on branch gameplay-p0 (PR #87 review round 1 fixes, uncommitted tree on 11a138e)
+# the full host suite on branch gameplay-p0 (PR #87 review round 2 fixes, uncommitted tree on 83ccf06)
 $ python -m pytest tests/host -q -p no:cacheprovider
-1194 passed, 1 deselected, 2 xfailed, 3 warnings in 83.63s (0:01:23)
+1196 passed, 1 deselected, 2 xfailed, 3 warnings in 79.30s (0:01:19)

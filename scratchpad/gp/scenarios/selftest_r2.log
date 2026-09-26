@@ -1,0 +1,29 @@
+$ python scratchpad/gp/scenarios_v2.py --selftest
+  R1 the untouched set: the rehash would accept, with nothing to re-record         ok  F1/F3/F4/F5 held and the checker is unchanged
+  R2 a BEHAVIOUR change (strafe 13 -> 12) is REFUSED                               ok  F3 failed (stale: ['R0-west-hall', 'R0-aftermath', 'R0-south-hall', 'R0-imp-court', 'R0-northwest', 'R0-courtyard', 'R2-barrel-hall', 'R2-spectre-corridor', 'R2-east-yard', 'R3-west', 'R3-mid']): the replay moved; a behaviour change needs the owner
+  R3 a CHECKER change (scenarios_v2.py's hash) is REFUSED                          ok  the checker scratchpad/gp/scenarios_v2.py changed: record it with --freeze (re-plan, identical keys) under review, never by --rehash
+  S0 the set passes every criterion and every freeze check                         ok
+  S1 no fire key FAILS the kills floor                                             ok  0 monsters killed (and 0 barrels exploded; 0 shotgun shots)
+  S2 no strafe key FAILS strafe-while-fighting                                     ok  0/756 = 0.0%
+  S2 no strafe key FAILS the dodge floor                                           ok  0 dodge frames of 77 frames with a fireball threat
+  S2 (no strafe: the movement floor is not a strafe test)                          info  the movement floor without strafe: 573/1100 = 52.1% (strafe on 0 = 0.0%) (forward/back alone)
+  S3 no movement key FAILS the movement floor and 'moves on >= 60%' (vacuity)      ok  0/1100 = 0.0% (strafe on 0 = 0.0%) | worst R0-west-hall: 0/0 = 0%
+  S4 a silent set facing away FAILS the awake-DRAWN floor                          ok  294/1100 = 26.7%
+  S5 one key changed FAILS the replay freeze (F3)                                  ok  stale: ['R0-west-hall']
+  S6 one recorded hash altered FAILS F2                                            ok  changed: ['assets/freedoom1.wad']
+  S6 status PLANNED FAILS F1                                                       ok  status 'PLANNED', approved 'the owner' on '2026-09-26'
+  S6 the B0 record removed FAILS F5                                                ok  binding None, keys -
+  S6 one frozen drawn count altered FAILS F4                                       ok  differs: ['R0-aftermath']
+  S7 a set WITHOUT the aftermath run FAILS the aftermath criterion                 ok  no aftermath run
+  S7 the aftermath run with its corpses removed FAILS it (no corpse drawn)         ok  R0-aftermath: 3 corpses near the start, 0 drawn on frame 0, corpses drawn on 0/100 frames
+  S8 no use key FAILS the doors floor                                              ok  0 (); by monsters 1
+  S9 no monster killed FAILS the kills floor                                       ok  0 monsters killed (and 5 barrels exploded; 0 shotgun shots)
+  S9 a run that died FAILS 'every run survives'                                    ok  deaths in ['R0-west-hall']
+  S9 no fireball FAILS the attack kinds                                            ok  hitscan 35, melee 2, fireball 0
+  S9 no pickup FAILS the pickups floor                                             ok  0 pickups
+  S9 a camera parting FAILS the B0 criterion                                       ok  1 frames part; door states apart on 1 frames; use with strafe on 0
+  S10 the planner is deterministic (checkpoint 0 re-planned = its keys)            ok
+  S11 an injection one unit off parts the camera on every moving frame             ok  84/84
+
+SCENARIOS_V2 SELFTEST PASS (452 s)
+# exit=0

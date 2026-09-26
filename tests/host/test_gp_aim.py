@@ -62,13 +62,14 @@ def _axis(w, want):
 def test_the_nearer_of_two_targets_in_a_column_wins():
     w = _world()
     step, _d = _axis(w, lambda d: d > 240)
-    a, b = _live_monsters(w, 2)
-    _place(w, a, step, 80)
-    _place(w, b, step, 200)
+    lo, hi = _live_monsters(w, 2)
+    # the NEARER target takes the HIGHER slot, so "the first target in slot order wins" fails too
+    _place(w, hi, step, 80)
+    _place(w, lo, step, 200)
     col = w.aim_centre
-    assert W.World.aim_geometric(w, col) == ("mon", a)
-    w.ws.mon_shootable[a] = 0                   # control: without the nearer, the farther answers
-    assert W.World.aim_geometric(w, col) == ("mon", b)
+    assert W.World.aim_geometric(w, col) == ("mon", hi)
+    w.ws.mon_shootable[hi] = 0                  # control: without the nearer, the farther answers
+    assert W.World.aim_geometric(w, col) == ("mon", lo)
 
 
 def test_a_target_behind_a_wall_is_not_hit():

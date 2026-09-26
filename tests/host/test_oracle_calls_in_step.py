@@ -33,21 +33,62 @@ SHARED = "GAME_RENDER_KW"          # reference_model's one game-tier keyword set
 
 
 BINARY_RUNNERS = ("FjmRunner", "_fjcore", "GameBinary")
-# historical measurement scripts that run a binary against the oracle's PRE-retirement flag sets on
-# purpose (M14/V4-era); they are not gates and no evidence quotes them. A new gate is caught by
-# BINARY_RUNNERS; only these named files are excused.
+# historical measurement scripts that ran a binary against the oracle's PRE-retirement flag sets
+# (M14/V4-era). Older handoffs quote their results as the history of those tiers (handoff-perf); they
+# are not re-run and are not gates today. A new gate is caught by BINARY_RUNNERS; only these named
+# files are excused.
 HISTORICAL = frozenset({"scratchpad/chk_refactor.py", "scratchpad/m14_baseline_id.py",
                         "scratchpad/m14_vp_ops.py", "scratchpad/v4_col.py"})
+# a control tool that renders deliberate VARIANTS of the shared set (sky off, bbox_cull off) through
+# a parameter -- judging it would demand it stop being a control
+CONTROL_TOOLS = frozenset({"scratchpad/gp/census_control.py"})
 
 
 def is_gate(rel: str, source: str) -> bool:
     """a tracked tool that compares a built binary against the oracle, without emitting"""
-    return rel.startswith("scratchpad/") and rel not in HISTORICAL and (
+    return rel.startswith("scratchpad/") and rel not in HISTORICAL | CONTROL_TOOLS and (
         rel.startswith("scratchpad/gp/") or any(r in source for r in BINARY_RUNNERS))
 
 
 def _name(node):
     return getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+
+
+def _is_shared(e, names) -> bool:
+    """Is expression `e` the shared set: GAME_RENDER_KW (or its import alias), `<mod>.GAME_RENDER_KW`,
+    a name/attribute this file bound to it, or `dict(<shared>, ...)` that sets no forced key to a
+    constant False? (PR #87 round 2: merely NAMING the set somewhere in the file no longer counts.)"""
+    if isinstance(e, ast.Name):
+        return e.id in names
+    if isinstance(e, ast.Attribute):
+        return e.attr in names
+    if isinstance(e, ast.Call) and getattr(e.func, "id", None) == "dict" and e.args:
+        weakened = any(kw.arg in FORCED and isinstance(kw.value, ast.Constant) and not kw.value.value
+                       for kw in e.keywords)
+        return _is_shared(e.args[0], names) and not weakened
+    return False
+
+
+def shared_names(tree) -> set:
+    """Every name this file binds to the shared set: the import (and its alias), then -- to a fixed
+    point -- each simple assignment whose value is shared (`X = dict(GAME_RENDER_KW, ...)`, a class
+    attribute `RENDER_KW = dict(_GRK)` splatted as `**self.RENDER_KW`)."""
+    names = {SHARED}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.ImportFrom):
+            names |= {a.asname or a.name for a in n.names if a.name == SHARED}
+    grown = True
+    while grown:
+        grown = False
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Assign) and len(n.targets) == 1):
+                continue
+            t = n.targets[0]
+            name = getattr(t, "id", None) or getattr(t, "attr", None)
+            if name and name not in names and _is_shared(n.value, names):
+                names.add(name)
+                grown = True
+    return names
 
 
 def out_of_step(source: str, *, gate: bool = False):
@@ -56,13 +97,13 @@ def out_of_step(source: str, *, gate: bool = False):
     calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
     if not gate and not any(_name(n) in EMITTERS for n in calls):
         return []
-    shared = SHARED in source
+    names = shared_names(tree)
     out = []
     for n in calls:
         if _name(n) != "render_wall_frame":
             continue
-        if shared and any(kw.arg is None for kw in n.keywords):
-            continue                    # **the shared set (or a dict built from it)
+        if any(kw.arg is None and _is_shared(kw.value, names) for kw in n.keywords):
+            continue                    # **the shared set, or a name bound to it in this file
         have = {kw.arg for kw in n.keywords if kw.arg}
         missing = [k for k in FORCED if k not in have]
         if missing:
@@ -120,3 +161,33 @@ def test_a_gate_that_only_drives_a_binary_is_judged():
     assert out_of_step(shared, gate=True) == [], "a splat of the shared set asks for all of it"
     assert out_of_step("rm.render_wall_frame(s, scene, **other_kw)\n", gate=True) == \
         [(1, list(FORCED))], "a splat of anything else is judged like an omission"
+
+
+def test_the_shared_set_turns_on_every_forced_feature():
+    """PR #87 round 2: deleting `sky` or `bbox_cull` from GAME_RENDER_KW used to pass the whole suite."""
+    from doomfj.reference_model import GAME_RENDER_KW
+    assert all(GAME_RENDER_KW.get(k) is True for k in FORCED), GAME_RENDER_KW
+    assert GAME_RENDER_KW.get("things") is True and GAME_RENDER_KW.get("wall_mode") == "W1R"
+
+
+def test_a_splat_counts_only_when_it_is_the_shared_set():
+    """The round-2 controls: an import of the set does not excuse a splat of something else."""
+    own = ("from doomfj.reference_model import GAME_RENDER_KW\n"
+           "render_kw = dict(wall_mode='W1R', near_steps=True, stack_steps=True, bbox_cull=True, "
+           "degrade=True)\n"
+           "rm.render_wall_frame(s, scene, **render_kw)\n")
+    assert out_of_step(own, gate=True) == [(3, list(FORCED))], "m5 variant: own dict without sky"
+    other = ("from doomfj.reference_model import GAME_RENDER_KW\n"
+             "rm.render_wall_frame(s, scene, **OLD_KW)\n")
+    assert out_of_step(other, gate=True) == [(2, list(FORCED))], "m1 variant: an unrelated splat"
+    weak = ("from doomfj.reference_model import GAME_RENDER_KW\n"
+            "kw = dict(GAME_RENDER_KW, sky=False)\n"
+            "rm.render_wall_frame(s, scene, **kw)\n")
+    assert out_of_step(weak, gate=True) == [(3, list(FORCED))], "a forced key switched off"
+    alias = ("from doomfj.reference_model import GAME_RENDER_KW as _G\n"
+             "class O:\n"
+             "    RENDER_KW = dict(_G)\n"
+             "    def f(self):\n"
+             "        return rm.render_wall_frame(s, scene, **self.RENDER_KW)\n")
+    assert out_of_step(alias, gate=True) == [], "an alias bound through a class attribute"
+

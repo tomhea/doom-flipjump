@@ -1,0 +1,11 @@
+runs with identical checkpoint and keys in both snapshots: 8 of 10 (R0-south-hall, R3-west differ)
+  R0-west-hall          900 records | arrivals/record 155.0 -> 113.6 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  R0-imp-court          900 records | arrivals/record 136.1 -> 113.1 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  R0-northwest          900 records | arrivals/record 37.1 -> 29.9 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  R0-courtyard          900 records | arrivals/record 62.4 -> 38.6 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  R2-barrel-hall        900 records | arrivals/record 60.0 -> 31.4 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  R2-spectre-corridor   900 records | arrivals/record 31.7 -> 24.2 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  R2-east-yard          900 records | arrivals/record 64.4 -> 51.2 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  R3-mid                900 records | arrivals/record 64.1 -> 28.3 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+TOTAL: records 7200
+NEGATIVE CONTROL: old 'game' vs new 'abcd' on the same frames -> 622 of 800 records moved; one mutated colsA caught -> the comparison has teeth

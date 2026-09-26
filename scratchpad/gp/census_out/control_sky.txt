@@ -1,0 +1,27 @@
+stock renders: 11 viewpoints x 3 keyword sets, 2.4 s
+  spawn     arrivals 163  slotA  14 (attributed  14)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+  gate664   arrivals 140  slotA 106 (attributed 106)  slotB  18 (attributed  18)  BYTE-IDENTICAL
+  gate1869  arrivals 116  slotA  85 (attributed  85)  slotB   1 (attributed   1)  BYTE-IDENTICAL
+  h57       arrivals  58  slotA  25 (attributed  25)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+  h71       arrivals  34  slotA 105 (attributed 105)  slotB   5 (attributed   5)  BYTE-IDENTICAL
+  h100      arrivals  64  slotA 126 (attributed 126)  slotB  84 (attributed  84)  BYTE-IDENTICAL
+  h28       arrivals  22  slotA  23 (attributed  23)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+  h42       arrivals  24  slotA  35 (attributed  35)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+  h85       arrivals  18  slotA  11 (attributed  11)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+  court     arrivals  93  slotA  14 (attributed  14)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+  eastyard  arrivals  48  slotA 104 (attributed 104)  slotB   0 (attributed   0)  BYTE-IDENTICAL
+CONTROL: PASS
+NEGATIVE CONTROL (gate664 without WAD thing 264): 428 px differ -> the comparison has teeth
+KEYWORDS: px moved by sky=False | px moved by bbox_cull=False | arrivals cull on/off
+  spawn          0 px |    0 px | 163 / 183
+  gate664        0 px |    0 px | 140 / 176
+  gate1869     368 px |    0 px | 116 / 152
+  h57            0 px |    0 px |  58 /  69
+  h71            0 px |    0 px |  34 /  68
+  h100           0 px |    0 px |  64 /  80
+  h28            0 px |    0 px |  22 /  76
+  h42            0 px |    0 px |  24 /  26
+  h85            0 px |    0 px |  18 /  86
+  court       1966 px |    0 px |  93 / 132
+  eastyard    2367 px |    0 px |  48 /  77
+SKY EXERCISED at both outdoor viewpoints: yes

@@ -34,8 +34,8 @@ VPS = [("spawn", -416, 256, 0x0), ("gate664", 664, 291, 0x18000000),
        ("h71", 2637, 991, 0x0), ("h100", 2637, 991, 0x40000000), ("h28", 2893, 1503, 0x0),
        ("h42", 2381, -289, 0xC0000000), ("h85", 333, -33, 0x40000000),
        ("court", 1424, 732, 0x40000000), ("eastyard", 2052, 680, 436739414)]   # S4 checkpoints
-KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True, near_steps=True,
-          stack_steps=True, things=True, degrade=True, sky=True, bbox_cull=True)
+from doomfj.reference_model import GAME_RENDER_KW  # noqa: E402
+KW = dict(GAME_RENDER_KW)          # the ONE game-tier keyword set (PR #87, R6)
 
 mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))

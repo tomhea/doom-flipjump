@@ -49,11 +49,14 @@ from doomfj.wad import WadFile, decode_picture                               # n
 # from blocked27 on every frame that shows sky (coordinator, 2026-09-26: 36 of 200 frames, 35,249 px).
 # `bbox_cull` moves no pixel but decides which leaves the walk visits, i.e. which things ARRIVE --
 # the per-thing load/project terms of the fight line (census_control.py measures both effects).
-RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
+RENDER_KW = dict(RMOD.GAME_RENDER_KW)       # the ONE game-tier keyword set (PR #87, R6)
+_OLD_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
                  near_steps=True, stack_steps=True, things=True, degrade=True,
                  sky=True, bbox_cull=True)
 ORIG_MONSTER_TYPES = RMOD.MONSTER_TYPES
-AIM_LO, AIM_HI = 72, 88                     # the pellet window (plan 6.4; combat.aim_lo/hi)
+from doomfj.combat import aim_window as _aim_window                          # noqa: E402
+AIM_LO, AIM_HI = _aim_window(ReferenceModel(Config()))   # the pellet window: ONE definition
+assert RENDER_KW == _OLD_RENDER_KW, "the shared keyword set must be the census's own"
 SYN0 = 100000                               # synthetic thing types start here
 ROLES = ("live", "corpse", "drop", "fireball", "fx", "barrel")
 SMALL = ("drop", "fireball", "fx")          # the things plan section 5 worries about

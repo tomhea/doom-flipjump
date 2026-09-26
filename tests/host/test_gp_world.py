@@ -156,7 +156,10 @@ def test_a_monster_cannot_step_through_a_wall(world):
     w._decor_now = []
     ws.px = ws.py = -(1 << 31)
     ws.mon_active[m], ws.mon_solid[m] = 1, 1
-    refused = 0
+    r = w.mon_radius[m]              # the monster's OWN radius (slot 0 is a demon, r = 30): with a
+    #                                  wrong radius the start spot overlaps the wall and every step is
+    #                                  refused for the wrong reason (PR #87 review, finding 3)
+    refused = away_ok = 0
     for (li, x0, x1, y0, y1, ax, ay, bx, by, one, _f, fs, _bs) in w._lines:
         if not one or (ax != bx and ay != by) or max(x1 - x0, y1 - y0) < (96 << 16):
             continue
@@ -164,16 +167,25 @@ def test_a_monster_cannot_step_through_a_wall(world):
         dxl, dyl = (bx - ax) >> 16, (by - ay) >> 16
         nx, ny = ((dyl > 0) - (dyl < 0)), -((dxl > 0) - (dxl < 0))     # right-hand normal
         mx, my = (ax + bx) // 2 >> 16, (ay + by) // 2 >> 16
-        px, py = mx + nx * 21, my + ny * 21                              # 1 unit clear (r = 20)
+        px, py = mx + nx * (r + 1), my + ny * (r + 1)                    # 1 unit clear
         ws.mon_x[m], ws.mon_y[m] = px, py
         leaf = w.rm.point_in_subsector(w.cmap, px, py)
         ws.mon_floorz[m] = w.secs_c[w.leaf_sector[leaf]].floor_h
-        if w.check_lines(px << 16, py << 16, 20 << 16, monster=True)[0] != W.OK:
+        if w.check_lines(px << 16, py << 16, r << 16, monster=True)[0] != W.OK:
             continue                                                     # not a free spot
         verdict, _ = w.try_move_monster(m, px - nx * 8, py - ny * 8)
         assert verdict == W.V_WALL, (li, verdict)
         refused += 1
-    assert refused > 20
+        # the same step AWAY is not refused for being a wall -- where that spot is itself free (a
+        # narrow corridor's far wall may legitimately answer); this is what makes a refuse-all
+        # mover fail the test
+        qx, qy = px + nx * 8, py + ny * 8
+        if w.check_lines(qx << 16, qy << 16, r << 16, monster=True)[0] == W.OK:
+            ws.mon_x[m], ws.mon_y[m] = px, py
+            away, _ = w.try_move_monster(m, qx, qy)
+            assert away != W.V_WALL, (li, away)
+            away_ok += 1
+    assert refused > 20 and away_ok > 20, (refused, away_ok)
 
 
 # ---- leaf lists ----------------------------------------------------------------------------------

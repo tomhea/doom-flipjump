@@ -37,6 +37,7 @@ from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,      # noqa
                                     ReferenceModel, SimState, build_scene, spawn_state)
 from doomfj.things import baked_thing_mask, vanishable_slots              # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
+from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.wireformat import (encode_bindings, encode_feed,              # noqa: E402
                                encode_things, encode_visibility)
 from flipjump.interpreter.fjm_run import IOReadOnEOF                      # noqa: E402
@@ -128,9 +129,7 @@ def wire(vx, vy, va, keys=0, dx=0, dy=0):
 
 def oracle(vx, vy, va):
     return bytes(rm.render_wall_frame(
-        SimState(vx << 16, vy << 16, va, "E1M1"), scene, wall_mode="W1R", floor_mode_ft1=True,
-        plane_near=True, wall_noise=True, near_steps=True, stack_steps=True,
-        things=True, sprite_wad=art, degrade=True))
+        SimState(vx << 16, vy << 16, va, "E1M1"), scene, sprite_wad=art, **GAME_RENDER_KW))
 
 
 def run_all(fjm, blob):

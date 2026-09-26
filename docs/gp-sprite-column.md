@@ -475,7 +475,7 @@ One latent difference goes the right way:
 |---|---|
 | `gp_sprite_col.fj` | the PROPOSED macros, `ns gpspr`: v1 (`emit_col`, `emit_region`, `steps_*`, `frag_derive`, `runs`, `rec_thing`, `rec_cols`, `load`) and v2 (`arm3`, `read3_and_inc`, `blk_addr`, `frag_derive2`, `runs2`, `emit_col2`, `rec_cols2`) |
 | `plib.py` | the harness: cases to program (real band lists, W1R walker, V5 pieces, bank, slots), assemble, run, decode |
-| `cases.py` -> `cases.json` | the oracle cases (3 scenarios x 8 viewpoints) |
+| `cases.py` -> `cases.json` | the oracle cases (3 scenarios x 8 viewpoints); NOT tracked (827 KB, regenerable: `cases.py` uses a fixed seed), sha256 `c3f09c0cd8a87099` -- regenerate with `python cases.py` and check the hash |
 | `t2_emit.py` | emission TODAY / v1 / v2 on all fight frames, pixel checks, `--negative` |
 | `t8_pipeline.py` | end-to-end record -> load -> emit, pixel checks, `--negative` |
 | `t3_breakdown.py`, `t4_prims.py`, `t5_recload.py`, `t6_ladder.py` | components and primitives |

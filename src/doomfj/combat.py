@@ -256,6 +256,14 @@ def fireball_momentum_table(rm) -> List[Tuple[int, int]]:
 # ================================================================================================
 # THE MIXIN
 # ================================================================================================
+def aim_window(rm, sites=None) -> Tuple[int, int]:
+    """The aim window's first and last screen columns: where DOOM's widest pellet spread
+    (P_SubRandom = +-SUBRANDOM_MAX) lands through the renderer's angle-to-column table. ONE
+    definition for the model, the census and (P4) the emitter (PR #87, R6)."""
+    s = sites or Sites(rm)
+    return s.col(SUBRANDOM_MAX), s.col(-SUBRANDOM_MAX)
+
+
 class CombatMixin:
     """The combat half of `World`. Uses the S3a attributes (`ws`, `rm`, `cmap`, `_lines`, `layout`,
     `sight`, the leaf-list and state methods) and adds the S3b rules."""
@@ -268,8 +276,7 @@ class CombatMixin:
         self.player_blocking = player_blocking
         self.sites = Sites(rm)
         self.aim_centre = rm.angle_to_x(0)
-        self.aim_lo = self.sites.col(SUBRANDOM_MAX)
-        self.aim_hi = self.sites.col(-SUBRANDOM_MAX)
+        self.aim_lo, self.aim_hi = aim_window(rm, self.sites)
         assert self.aim_lo < self.aim_centre < self.aim_hi
         self.hwt = half_width_table(rm.sine)
         self.fireball_mom = fireball_momentum_table(rm)

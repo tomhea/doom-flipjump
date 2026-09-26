@@ -1,0 +1,14 @@
+# the rehash rule on the frozen set v2 (PR #87 review round 1): after the R6 refactor
+$ python scratchpad/gp/scenarios_v2.py --validate
+  F1 status FROZEN with the owner's approval                                     PASS  status 'FROZEN', approved 'the owner' on '2026-09-26'
+  F2 every recorded file hash matches (model, census, planner: 20 files)         PASS  20/20
+  F3 the replay reproduces every frozen pose and final digest                    PASS  11/11 runs
+  F4 the drawn and geometric population reproduces frame by frame                PASS  11/11 runs
+  F5 the B0 record is present and was measured on these keys                     PASS  binding 17760774.10272727, keys match
+CRITERIA PASS | FREEZE PASS | VALIDATE PASS (90 s)
+# NEGATIVE CONTROL: a BEHAVIOUR change (combat.STRAFE_MOVE 13 -> 12 units), rehash tried on a COPY of the set
+$ python scratchpad/gp/scenarios_v2.py --rehash "control" --file <copy>
+  F1 ok    status 'FROZEN', approved 'the owner' on '2026-09-26'
+  F3 FAIL  stale: ['R0-west-hall', 'R0-aftermath', 'R0-south-hall', 'R0-imp-court', 'R0-northwest', 'R0-courtyard', 'R2-barrel-hall', 'R2-spectre-corridor', 'R2-east-yard', 'R3-west', 'R3-mid']
+REHASH REFUSED: F3 failed -- the replay moved; this needs the owner (a v3)
+# restored:  1 file changed, 9 insertions(+), 2 deletions(-)

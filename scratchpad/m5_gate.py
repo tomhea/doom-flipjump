@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
 from doomfj.build import STANDALONE_PERSIST                                    # noqa: E402
+from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.config import Config                                               # noqa: E402
 from doomfj.fastrun import FjmRunner, _fjcore                                  # noqa: E402
 from doomfj.fixedpoint import _signed                                          # noqa: E402
@@ -177,8 +178,7 @@ def main():
     art = WadFile.from_path(str(ROOT / args.asset))
     rm = ReferenceModel(Config())
     scene = build_scene(wad, wad, args.map)
-    render_kw = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
-                     near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
+    render_kw = dict(GAME_RENDER_KW, sprite_wad=art)
 
     print("running (one process, %d frames)..." % args.frames, flush=True)
     got, ops = run(args.fjm, args.frames)

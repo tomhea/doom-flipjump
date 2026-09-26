@@ -22,7 +22,10 @@ Commands (outputs go to `census_out/`: one JSON line per (frame, picture), plus 
 - `python scratchpad/gp/census_skydiff.py scratchpad/gp/census_out scratchpad/gp/census_out/staged_sky - - scratchpad/gp/census_out/staged_rec` -> `census_out/staged_sky/skydiff.txt`
 - `python scratchpad/gp/census_aimdiag.py R0-northwest scratchpad/gp/census_out/s4v1/combat_scenarios_v1.snapshot.json` (and R0-south-hall, R2-barrel-hall, R0-courtyard, R2-east-yard) -> `census_out/s4v1/aimdiag.txt`
 
-**The current outputs** are `census_out/s4v1/` (the S4 set as landed in 709682d: snapshot sha256
+**The current outputs** are `census_out/s4v2/`: the FROZEN set v2 (843f28a), run by `census_v2.py`
+and `census_v2_report.py` -> `report_s4v2.txt`, with `run_s4v2.log` (its 11/11 replay controls),
+`fireballs.txt` (the fireball price) and `README.txt`. `census_out/s4v1/` is the v1 DRAFT's census,
+kept as the record (the S4 set as landed in 709682d: snapshot sha256
 `f2e3e4020654d36b`, git blob `1754f298`, a DRAFT; all 10 runs pass the replay control) and
 `census_out/staged_sky/`. **Superseded:** `census_out/*.jsonl`, `staged_rec/`, `s4/` and `s4_rec/`
 were rendered without `sky`/`bbox_cull`. `s4/` also used an older draft of the set (sha

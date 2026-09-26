@@ -1,0 +1,92 @@
+S4 set C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\scenarios\combat_scenarios_v2.json: sha256 d71a255b07c923d2, version v2, status FROZEN, keys_sha 94d0e3c7cb37d580 (recomputed 94d0e3c7cb37d580), 11 runs
+recorded file hashes: 20 files, all EQUAL
+  s4v2_R0-west-hall tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R0-west-hall tic  20  alive 46 awake  3 corpses  0 fb 0 fx 1 drops 0  8 s
+  s4v2_R0-west-hall tic  40  alive 45 awake  2 corpses  1 fb 0 fx 1 drops 1  16 s
+  s4v2_R0-west-hall tic  60  alive 45 awake  2 corpses  1 fb 0 fx 2 drops 1  24 s
+  s4v2_R0-west-hall tic  80  alive 45 awake  2 corpses  1 fb 0 fx 0 drops 1  30 s
+s4v2_R0-west-hall: 100 tics, 2 kills, events {'fired': 4, 'shots': 4, 'hits': 4, 'kills': 2, 'fx_spawns': 4} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R0-west-hall.jsonl (37 s)
+  REPLAY CONTROL s4v2_R0-west-hall: model digest EQUALS the frozen final digest
+  CONTROLS R0-west-hall         PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R0-aftermath tic   0  alive 43 awake  0 corpses  3 fb 0 fx 0 drops 2  0 s
+  s4v2_R0-aftermath tic  20  alive 43 awake  0 corpses  3 fb 0 fx 0 drops 0  7 s
+  s4v2_R0-aftermath tic  40  alive 43 awake  0 corpses  3 fb 0 fx 0 drops 0  15 s
+  s4v2_R0-aftermath tic  60  alive 43 awake  3 corpses  3 fb 0 fx 0 drops 0  22 s
+  s4v2_R0-aftermath tic  80  alive 43 awake  6 corpses  3 fb 0 fx 0 drops 0  29 s
+s4v2_R0-aftermath: 100 tics, 0 kills, events {'fired': 1, 'pickups': 6, 'player_blocked': 2} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R0-aftermath.jsonl (35 s)
+  REPLAY CONTROL s4v2_R0-aftermath: model digest EQUALS the frozen final digest
+  CONTROLS R0-aftermath         PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R0-south-hall tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R0-south-hall tic  20  alive 46 awake  6 corpses  0 fb 0 fx 0 drops 0  11 s
+  s4v2_R0-south-hall tic  40  alive 46 awake  7 corpses  0 fb 0 fx 0 drops 0  21 s
+  s4v2_R0-south-hall tic  60  alive 46 awake 18 corpses  0 fb 0 fx 1 drops 0  26 s
+  s4v2_R0-south-hall tic  80  alive 46 awake 18 corpses  0 fb 0 fx 0 drops 0  31 s
+s4v2_R0-south-hall: 100 tics, 0 kills, events {'fired': 3, 'shots': 3, 'hits': 2, 'pickups': 5, 'proj_spawns': 1, 'fx_spawns': 2, 'mon_shots': 6, 'player_hurt': 1} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R0-south-hall.jsonl (35 s)
+  REPLAY CONTROL s4v2_R0-south-hall: model digest EQUALS the frozen final digest
+  CONTROLS R0-south-hall        PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R0-imp-court tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R0-imp-court tic  20  alive 46 awake  9 corpses  0 fb 0 fx 1 drops 0  7 s
+  s4v2_R0-imp-court tic  40  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  13 s
+  s4v2_R0-imp-court tic  60  alive 46 awake 10 corpses  0 fb 1 fx 0 drops 0  17 s
+  s4v2_R0-imp-court tic  80  alive 46 awake 10 corpses  0 fb 2 fx 0 drops 0  21 s
+s4v2_R0-imp-court: 100 tics, 3 kills, events {'fired': 4, 'shots': 4, 'hits': 6, 'kills': 3, 'pickups': 2, 'proj_spawns': 4, 'barrel_blasts': 2, 'fx_spawns': 3, 'mon_shots': 3, 'player_hurt': 2, 'player_blocked': 11} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R0-imp-court.jsonl (29 s)
+  REPLAY CONTROL s4v2_R0-imp-court: model digest EQUALS the frozen final digest
+  CONTROLS R0-imp-court         PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R0-northwest tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  1 s
+  s4v2_R0-northwest tic  20  alive 46 awake  5 corpses  0 fb 0 fx 1 drops 0  12 s
+  s4v2_R0-northwest tic  40  alive 45 awake  4 corpses  1 fb 0 fx 1 drops 1  23 s
+  s4v2_R0-northwest tic  60  alive 45 awake  4 corpses  1 fb 0 fx 1 drops 1  35 s
+  s4v2_R0-northwest tic  80  alive 45 awake  4 corpses  1 fb 0 fx 0 drops 1  46 s
+s4v2_R0-northwest: 100 tics, 1 kills, events {'fired': 5, 'shots': 4, 'hits': 4, 'kills': 1, 'fx_spawns': 4, 'mon_shots': 5, 'mon_melee': 1, 'player_hurt': 3, 'player_blocked': 16} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R0-northwest.jsonl (58 s)
+  REPLAY CONTROL s4v2_R0-northwest: model digest EQUALS the frozen final digest
+  CONTROLS R0-northwest         PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R0-courtyard tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R0-courtyard tic  20  alive 46 awake  9 corpses  0 fb 0 fx 1 drops 0  8 s
+  s4v2_R0-courtyard tic  40  alive 46 awake 10 corpses  0 fb 0 fx 0 drops 0  15 s
+  s4v2_R0-courtyard tic  60  alive 46 awake 10 corpses  0 fb 0 fx 0 drops 0  20 s
+  s4v2_R0-courtyard tic  80  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  25 s
+s4v2_R0-courtyard: 100 tics, 0 kills, events {'fired': 3, 'shots': 2, 'hits': 2, 'proj_spawns': 3, 'fx_spawns': 2, 'mon_shots': 3, 'player_hurt': 1, 'player_blocked': 17} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R0-courtyard.jsonl (30 s)
+  REPLAY CONTROL s4v2_R0-courtyard: model digest EQUALS the frozen final digest
+  CONTROLS R0-courtyard         PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R2-barrel-hall tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R2-barrel-hall tic  20  alive 46 awake 13 corpses  0 fb 0 fx 1 drops 0  5 s
+  s4v2_R2-barrel-hall tic  40  alive 46 awake 18 corpses  0 fb 0 fx 1 drops 0  11 s
+  s4v2_R2-barrel-hall tic  60  alive 46 awake 18 corpses  0 fb 0 fx 1 drops 0  18 s
+  s4v2_R2-barrel-hall tic  80  alive 44 awake 16 corpses  2 fb 0 fx 0 drops 1  26 s
+s4v2_R2-barrel-hall: 100 tics, 5 kills, events {'fired': 3, 'shots': 3, 'hits': 11, 'kills': 5, 'pickups': 1, 'barrel_blasts': 2, 'fx_spawns': 3, 'mon_shots': 6, 'player_hurt': 2, 'player_blocked': 1} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R2-barrel-hall.jsonl (30 s)
+  REPLAY CONTROL s4v2_R2-barrel-hall: model digest EQUALS the frozen final digest
+  CONTROLS R2-barrel-hall       PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R2-spectre-corridor tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R2-spectre-corridor tic  20  alive 46 awake 10 corpses  0 fb 0 fx 0 drops 0  6 s
+  s4v2_R2-spectre-corridor tic  40  alive 46 awake 18 corpses  0 fb 0 fx 1 drops 0  11 s
+  s4v2_R2-spectre-corridor tic  60  alive 46 awake 18 corpses  0 fb 0 fx 1 drops 0  15 s
+  s4v2_R2-spectre-corridor tic  80  alive 46 awake 18 corpses  0 fb 0 fx 0 drops 0  18 s
+s4v2_R2-spectre-corridor: 100 tics, 0 kills, events {'fired': 5, 'shots': 4, 'hits': 4, 'proj_spawns': 1, 'fx_spawns': 4, 'mon_shots': 3, 'player_blocked': 8} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R2-spectre-corridor.jsonl (22 s)
+  REPLAY CONTROL s4v2_R2-spectre-corridor: model digest EQUALS the frozen final digest
+  CONTROLS R2-spectre-corridor  PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 90/100 | event totals equal
+  s4v2_R2-east-yard tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R2-east-yard tic  20  alive 46 awake  6 corpses  0 fb 0 fx 0 drops 0  4 s
+  s4v2_R2-east-yard tic  40  alive 46 awake 10 corpses  0 fb 0 fx 0 drops 0  8 s
+  s4v2_R2-east-yard tic  60  alive 46 awake 10 corpses  0 fb 1 fx 0 drops 0  15 s
+  s4v2_R2-east-yard tic  80  alive 46 awake 10 corpses  0 fb 0 fx 0 drops 0  28 s
+s4v2_R2-east-yard: 100 tics, 0 kills, events {'fired': 3, 'shots': 3, 'proj_spawns': 5, 'proj_impacts': 1, 'mon_shots': 3, 'mon_melee': 1, 'player_hurt': 2, 'player_blocked': 21} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R2-east-yard.jsonl (38 s)
+  REPLAY CONTROL s4v2_R2-east-yard: model digest EQUALS the frozen final digest
+  CONTROLS R2-east-yard         PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R3-west tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R3-west tic  20  alive 46 awake  4 corpses  0 fb 0 fx 1 drops 0  3 s
+  s4v2_R3-west tic  40  alive 45 awake  3 corpses  1 fb 0 fx 1 drops 1  6 s
+  s4v2_R3-west tic  60  alive 45 awake  3 corpses  1 fb 0 fx 1 drops 0  9 s
+  s4v2_R3-west tic  80  alive 45 awake  3 corpses  1 fb 0 fx 0 drops 0  18 s
+s4v2_R3-west: 100 tics, 1 kills, events {'fired': 2, 'shots': 2, 'hits': 2, 'kills': 1, 'pickups': 1, 'fx_spawns': 2, 'mon_shots': 3, 'player_blocked': 2} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R3-west.jsonl (30 s)
+  REPLAY CONTROL s4v2_R3-west: model digest EQUALS the frozen final digest
+  CONTROLS R3-west              PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+  s4v2_R3-mid tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4v2_R3-mid tic  20  alive 46 awake  3 corpses  0 fb 0 fx 1 drops 0  3 s
+  s4v2_R3-mid tic  40  alive 46 awake  4 corpses  0 fb 0 fx 1 drops 0  6 s
+  s4v2_R3-mid tic  60  alive 46 awake  4 corpses  0 fb 0 fx 0 drops 0  10 s
+  s4v2_R3-mid tic  80  alive 45 awake  3 corpses  1 fb 0 fx 1 drops 0  13 s
+s4v2_R3-mid: 100 tics, 1 kills, events {'fired': 3, 'shots': 3, 'hits': 3, 'kills': 1, 'pickups': 1, 'fx_spawns': 3, 'mon_shots': 3, 'player_hurt': 1} -> C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v2\s4v2_R3-mid.jsonl (16 s)
+  REPLAY CONTROL s4v2_R3-mid: model digest EQUALS the frozen final digest
+  CONTROLS R3-mid               PASS: records complete | DIGEST EQUAL | POSES 100/100 | PICTURE 100/100 frames equal the frozen drawn population | d_awake same on 100/100 | event totals equal
+ALL CONTROLS: 11/11 runs PASS (363 s)
+exit 0

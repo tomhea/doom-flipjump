@@ -1,0 +1,2 @@
+points 20000; per try: candidates 0.99 = bbox-rejected 0.53 + axis survivors 0.23 + diagonal survivors 0.23
+priced with S6 pooled per-case costs (reject 640, axis 1568, diag 15253): 4242 ops per position test

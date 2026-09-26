@@ -205,6 +205,8 @@ def test_nukage_hurts_5_every_32_tics_when_standing_on_it(sector):
     assert w.tic({}).nukage == 0 and ws.p_health == 100      # 63 & 31 != 0
     ev = w.tic({})                                            # leveltime 64
     assert ev.nukage == 1 and ws.p_health == 95
+    ws.leveltime = 80                                         # 80 & 31 = 16: no hurt here -- a
+    assert w.tic({}).nukage == 0 and ws.p_health == 95        # 16-tic period (& 15) WOULD hurt
     ws.p_armortype, ws.p_armor, ws.leveltime = 1, 100, 96
     w.tic({})
     assert ws.p_health == 95 - 4 and ws.p_armor == 99        # armor takes 5 // 3 = 1

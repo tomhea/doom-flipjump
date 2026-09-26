@@ -24977,18 +24977,18 @@
  },
  "hashes": {
   "assets/freedoom1.wad": "7323bcc168c5a45f",
-  "scratchpad/gp/census_lib.py": "3afbe3212c879baf",
-  "scratchpad/gp/scenarios_v2.py": "c8db01ac758fcdc4",
+  "scratchpad/gp/census_lib.py": "7126b6c0a1210408",
+  "scratchpad/gp/scenarios_v2.py": "3027812dde6bcea5",
   "src/doomfj/__init__.py": "e3b0c44298fc1c14",
-  "src/doomfj/combat.py": "c8d96d21bce881e0",
+  "src/doomfj/combat.py": "89090e95e60533a4",
   "src/doomfj/config.py": "aeb52d573b01cb12",
   "src/doomfj/doorcode.py": "3dc71213f4f2a75e",
   "src/doomfj/doors.py": "9ae8db277af9927e",
   "src/doomfj/fixedpoint.py": "55051bdb23e1d86a",
-  "src/doomfj/gamedata.py": "76994f679d1fbcce",
+  "src/doomfj/gamedata.py": "f5d1354816b000a1",
   "src/doomfj/lut_generator.py": "366a1df5160b039c",
   "src/doomfj/mapcompiler.py": "9e0b131c1b54ccd3",
-  "src/doomfj/reference_model.py": "be380657de087a36",
+  "src/doomfj/reference_model.py": "8a26987dd2198f47",
   "src/doomfj/rng.py": "5a842d315933a0b0",
   "src/doomfj/tables.py": "f2ab5c664db1f028",
   "src/doomfj/texturecompiler.py": "6836e27f7d824674",
@@ -25247,5 +25247,35 @@
    "scratchpad/gp/scenarios_v2.py"
   ],
   "rule": "frozen: keys, setups, model and planner hashes do not change; --validate checks F1-F5"
- }
+ },
+ "rehash_log": [
+  {
+   "on": "2026-09-26 19:25:41",
+   "reason": "PR #87 review round 1 (R6): one definition for the game-tier oracle keywords (reference_model.GAME_RENDER_KW), the aim window's columns (combat.aim_window), and gamedata's VIEWHEIGHT/PLAYERRADIUS/MAX_STEP_UP taken from the oracle -- a pure refactor",
+   "git_head": "11a138e",
+   "changed": {
+    "scratchpad/gp/census_lib.py": [
+     "3afbe3212c879baf",
+     "7126b6c0a1210408"
+    ],
+    "scratchpad/gp/scenarios_v2.py": [
+     "c8db01ac758fcdc4",
+     "3027812dde6bcea5"
+    ],
+    "src/doomfj/combat.py": [
+     "c8d96d21bce881e0",
+     "89090e95e60533a4"
+    ],
+    "src/doomfj/gamedata.py": [
+     "76994f679d1fbcce",
+     "f5d1354816b000a1"
+    ],
+    "src/doomfj/reference_model.py": [
+     "be380657de087a36",
+     "8a26987dd2198f47"
+    ]
+   },
+   "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"
+  }
+ ]
 }

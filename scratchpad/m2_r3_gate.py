@@ -47,6 +47,7 @@ from doomfj.doors import (door_states, heights_for_states,               # noqa:
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
 from doomfj.harness import W                                              # noqa: E402
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
+from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,      # noqa: E402
                                     ReferenceModel, SimState, build_scene)
 from doomfj.things import baked_thing_mask, vanishable_slots              # noqa: E402
@@ -216,9 +217,7 @@ def main():
         hv = heights_for_states(secs, lds, sds, states)
         scene = build_scene(mw, mw, args.map, hv)
         return bytes(rm.render_wall_frame(
-            SimState(vx << 16, vy << 16, va, args.map), scene,
-            wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
-            near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True))
+            SimState(vx << 16, vy << 16, va, args.map), scene, sprite_wad=art, **GAME_RENDER_KW))
 
     def changes(before, after):
         return {i: (b, a) for i, (b, a) in enumerate(zip(before, after)) if b != a}

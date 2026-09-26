@@ -62,7 +62,7 @@ class GameOracle(P.Oracle):
     are retired into the default build, so the oracle draws them too -- deg_gate's set. MEASURED
     2026-09-26 (S4 v1): without `sky` the oracle differs from blocked27 on every frame that shows
     sky; probe.Oracle has had `sky` since a07e8b9, and `bbox_cull` moves no pixel."""
-    RENDER_KW = dict(P.Oracle.RENDER_KW, sky=True, bbox_cull=True)
+    RENDER_KW = dict(P.Oracle.RENDER_KW)       # = reference_model.GAME_RENDER_KW (PR #87)
 
 
 def P_signed(v: int) -> int:

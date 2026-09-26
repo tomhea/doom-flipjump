@@ -40,8 +40,8 @@ in `scratchpad/gp/aim/`.
 - **Cost: ~0.05M ops per fight frame, and at most ~0.2M in any frame of the set** (UNVERIFIED:
   MEASURED unit costs x MEASURED per-frame counts). That is ~0.2% of the 22M cap. The pistol's
   read is ~0.1K and a shotgun blast's is ~1.9K.
-- **For the owner: r_eff (section 1.7), recommended.** It changes the S3b model's geometric aim as
-  well, through one shared helper.
+- **r_eff (section 1.7) was ADOPTED 2026-09-26** (free, and closer to DOOM). It changed the S3b
+  model's geometric aim as well, through one shared helper (`combat.CombatMixin.aim_radius`).
 
 ## 1. What the window records
 

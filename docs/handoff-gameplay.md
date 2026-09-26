@@ -30,8 +30,21 @@ cannot strafe; a forward-step proxy measures it) -- the honest baseline. (v1, wh
 29% of frames, was 14,972,920.) The owner froze v2 and B0 on 2026-09-26: nobody
 building the game re-grades the set; a new version needs the owner.
 
+**The freeze rule, when the model changes** (it will: P1.6, P3-P7 edit the model files the set
+hashes). The freeze pins the KEYS, the B0 and what they reproduce -- not source bytes.
+- CAP-22 drives the candidate binary with the frozen keys and checks it state-exact against the
+  CURRENT model, the oracle that binary mirrors.
+- A pure refactor that edits a hashed file re-records the hashes with
+  `python scratchpad/gp/scenarios_v2.py --rehash "<reason>"`. It refuses unless the replay still
+  reproduces every frozen pose, digest and drawn population (F3/F4); each rehash is logged in the
+  set (`rehash_log`). Its negative control: `scratchpad/gp/scenarios/rehash_v2.log`.
+- A change that alters any replay (a rule, a fix) is a BEHAVIOUR change: re-validate the set on
+  the new model; if its floors hold, the owner approves it as v2 on that model; if not, the
+  owner approves a re-planned v3. B0 stays as measured (blocked27 on the frozen keys).
+
 Single frames are NOT capped (decision D1): blocked27 already has frames at 32.4M (two-sided wall
-storms) and a heavy spawn-area run at 23.7M average; they are reported as stress, not gated.
+storms), and the frozen set's heaviest run, R0-west-hall, averages 22,018,124 on blocked27 alone
+(`scratchpad/gp/scenarios/b0_v2.log`); they are reported as stress, not gated.
 
 ---
 
@@ -43,13 +56,13 @@ storms) and a heavy spawn-area run at 23.7M average; they are reported as stress
 | D2 | runs start from CHECKPOINTS across the level (injected states); the set and B0 are frozen by the owner |
 | D3 | compositor rules for gameplay: **a** drops and effects ordered before monsters; **c** corpses count as scenery; **d** runtime things inside a leaf drawn in depth order; **e** "seen" and the aim window recorded at column-open time, before the degradation budgets; **b** only for projectiles and barrels (exempt from the soft budgets) |
 | D4 | one DOOM tic per frame (fights run at ~32-38% of DOOM's real-time speed, consistently) |
-| D5 | the simplifications: no knockback; no infighting (monster shots and fireballs pass through monsters and barrels); 2D projectiles; P_NewChaseDir capped at 6 tries; rounded diagonals (8/6, 10/7); **K = 6** heavy monster actions per tic (raised from 3), deterministic deferral; monsters open plain doors when a move fails in the door's use box; a fireball pool of 8 (a full pool fizzles); puffs/blood capped at 2; nukage 5 damage every 32 tics; no sound, no spectre fuzz, no weapon bob or raise/lower animation (the timing stays), no whole-screen fire light, no status-bar face |
+| D5 | the simplifications: no knockback; no infighting (monster shots and fireballs pass through monsters and barrels); 2D projectiles; P_NewChaseDir capped at a few tries (the owner's words; the model uses 6); rounded diagonals (8/6, 10/7); **K = 6** heavy monster actions per tic (raised from 3), deterministic deferral; monsters open plain doors when a move fails in the door's use box; a fireball pool of 8 (a full pool fizzles); puffs/blood capped at 2; nukage 5 damage every 32 tics; no sound, no spectre fuzz, no weapon bob or raise/lower animation (the timing stays), no whole-screen fire light, no status-bar face |
 | D6 | the native-list sprite bank; option A for the HUD: **the screen stays 160x100, a 16-row status bar at the bottom, a 160x84 3D view** (DOOM's layout at half resolution), with a flipjump device option so dittos do not copy the bar |
 | D7 | skills easy 17 / medium 29 / hard 46 monsters, chosen in the menu as in DOOM; the image holds the union (53); the budget is sized on hard |
-| D8 | the ship rule: class S (pixels identical) = today's ship gate, B SLOWER never ships; class F (a feature) = byte- and state-exact gates + CAP-22 + size, msframe recorded as the price, ~90 ms/frame a tripwire that must be explained |
+| D8 | the ship rule (written into `docs/ship-gate.md` section 2a): class S (pixels identical) = today's ship gate, B SLOWER never ships; class F (a feature) = byte- and state-exact gates + CAP-22 + size, msframe recorded as the price, ~90 ms/frame a tripwire that must be explained |
 | D9 | flipjump changes: a branch off `1.5.1`, a PR, merged into `1.5.1`; `1.5.1` is NOT merged to main and not published |
 | D10 | DOOM's original rndtable, folded into each call site's outcome table (measured the cheapest RNG, 82-96 ops) |
-| D11 | every map mechanic in scope: lifts, the floor switch, key doors, walk-over and blazing doors, the exit; lift defaults: door-style timing 9/26/9 frames, an instant floor switch, 16-unit steps |
+| D11 | every map mechanic in scope: lifts, the floor switch, key doors, walk-over and blazing doors, the exit; the lift spike's DEFAULTS, which the owner did not overrule (not an explicit decision): door-style timing 9/26/9 frames, an instant floor switch, 16-unit steps |
 | D12 | E1M1 only |
 
 ---
@@ -59,7 +72,8 @@ storms) and a heavy spawn-area run at 23.7M average; they are reported as stress
 **Monsters** (Freedoom E1M1; per skill easy / medium / hard): zombieman 9/4/5, shotgun guy 2/10/13,
 imp 4/10/18, demon 2/5/9, spectre 0/0/1 -- 17/29/46. Plus 22 barrels. Waking by sight and by sound
 (ambush monsters need sight); chasing; melee and missile decisions; the attacks of all five types;
-pain; death, corpses, gib deaths, drops (the clip; the shotgun, which on hard is the only shotgun).
+pain; death, corpses, drops (the clip; the shotgun, which on hard is the only shotgun); gib deaths
+are in the model, drawing their frames is optional (plan section 2, C list).
 
 **The player**: fist, pistol, shotgun (from drops), chainsaw (sector 139); berserk (easy and medium
 only); ammo and its caps; switching on keys 1-4; fire on ctrl (held: refire reads it); strafe on
@@ -88,7 +102,7 @@ the weapon drawn over the 3D view; animated, rotated monsters; fireballs, puffs,
 | `scratchpad/gp/b0.py`, `b0_scenarios.py` | drives a binary through viewpoints or the scenario set, per-frame ops, state and pixel checks | `python scratchpad/gp/b0_scenarios.py --selftest` |
 | `src/doomfj/gamedata.py`, `rng.py`, `world.py`, `combat.py` | THE MODEL = the oracle of the gameplay: DOOM's data (Chocolate Doom 895f581c, cross-checked against linuxdoom-1.10), the rndtable, a schema-first world state, monster AI, combat | `python -m pytest tests/host -q -k gp` (138 tests) |
 | `scratchpad/gp/model_run.py` | runs the model with scripted keys, dumps per-tic state | `--help` |
-| `scratchpad/gp/scenarios.py` | the autopilot, the scenario sets, `--validate` (with the freeze check) | `python scratchpad/gp/scenarios.py --validate` |
+| `scratchpad/gp/scenarios_v2.py` | the autopilot and the FROZEN set v2: `--validate` (the criteria and the freeze check), `--rehash` (the freeze rule, section 1) | `python scratchpad/gp/scenarios_v2.py --validate` (`scenarios.py` is v1's, kept as the record) |
 | `scratchpad/gp/census*.py` | the model wired into the oracle renderer; the compositor census and the fight line | `python scratchpad/gp/census_control.py` |
 | `scratchpad/gp/probes/s6/` | fj micro-probes of the primitives | `python scratchpad/gp/probes/s6/fjprobe.py --selftest` |
 | `scratchpad/gp/probes/sprite/` | the cheaper sprite column (v1/v2), pixel checks and costs | `python t2_emit.py`, `t8_pipeline.py <frame>` |
@@ -138,7 +152,8 @@ the octant classifier 3.2K; AproxDistance 1.0K; an aim-window write 27-62.
    macros carry NO `@`-local data cells (checked statically -- a restore-set hole hangs the game).
 8. **One source per table**: the emitter and the oracle read the same Python tables.
 9. **A blocked build's state cell holds `base | v<<6`**, not `v<<6` (the probe writes only the
-   value field); the oracle renders with `sky=True` (the gates lacked it until a07e8b9).
+   value field); every E1M1 oracle call uses `reference_model.GAME_RENDER_KW` (sky included -- five gates lacked
+   it until PR #87), and `tests/host/test_oracle_calls_in_step.py` scans every gate for it.
 
 ---
 
@@ -156,7 +171,8 @@ monster the renderer did not draw, a short trace over the collision cells betwee
 player. Sound: precomputed regions, doors as runtime edges.
 
 **7.3 Movement, collision, leaf lists.** 32-unit collision cells per radius class (player 16,
-monsters 20 and 30): candidate line lists (E1M1: ~0.99 lines per position test) in D4 rows, plus
+monsters 20 and 30): candidate line lists (E1M1: ~0.99 lines per position test, `scratchpad/gp/probes/s6/linemix.py` ->
+`linemix_out.txt`; the ~10K per try below is derived from it, UNVERIFIED) in D4 rows, plus
 per-direction "no line can block" verdicts for the monsters' 8 directions; solid things as boxes in
 the cells. One player try ~10K derived vs 613K today. Point location jumps to the cell's start node
 (5.9K). Leaf lists (`sshead`/`thnext`) become persistent and per-move: a thing that changes leaf is
@@ -170,7 +186,7 @@ precomputed spread table. Fireballs in an 8-slot pool (64-unit wall cells). Dama
 drops, pickups (a 64-unit pickup grid), barrels (radius damage, chains), the blue key.
 
 **7.5 Map mechanics.** Doors as today plus the key check, walk-over and blazing doors; lifts and
-the floor switch as runtime FLOORS (`docs/gp-lift-spike.md`: 243 of 255 plane ids, +0.02-0.1M ops,
+the floor switch as runtime FLOORS (`docs/gp-lift-spike.md`: 243 of 255 plane ids, +0.02-0.1M ops (UNVERIFIED),
 0.18% size; lifts cannot crush on E1M1); door reversal on things; the exit.
 
 **7.6 Drawing.** The v2 sprite column (`docs/gp-sprite-column.md`: pixel-identical, ~40% cheaper
@@ -191,7 +207,7 @@ must be driven back too.
 |---|---|---|
 | B0 v2: blocked27 along the same routes, static world | **17,760,774**; **18,107,313** with strafe's collision (proxy) | MEASURED (S4) |
 | the sprite side: decided D3 + the v2 column + the skill filter | **-1.13M** (fights alone +0.27M; the v2 column and the filter pay for them) | S5 on v2 (census_out/s4v2) |
-| the aim window | +0.04M | gp-aim-window (sum of measured unit costs) |
+| the aim window | +0.04M (UNVERIFIED) | gp-aim-window: measured unit costs x measured counts |
 | fireballs drawn (the set draws none; a drawn one is ~1.8M in its frame) | reserve +0.1 .. +0.3M | S5 staged fights |
 | monster AI (1.83 heavy acts/frame measured on v2 x the model's cost) | +0.08 .. +0.1M | S4, S3a, S6 |
 | combat logic, the weapon overlay, effects, lifts, the HUD | +0.2 .. +0.4M | models (S3b, S6b, S7) |
@@ -208,7 +224,8 @@ margin is placement (the blocking pass re-rolling its pins, up to ~6M), so pin p
 first rung.
 
 Size: 32.23% today; the native bank takes it to ~31.5%; the AI, combat, collision cells and lifts
-add ~1.0-2.3M words: **~32.4-33.3%**, under 35%.
+add ~1.5-2.4M words (AI 0.6-0.8, combat 0.5-1.0, collision cells 0.1-0.3, lifts ~0.26):
+**~32.6-33.3%**, under 35%.
 
 ---
 
@@ -314,7 +331,7 @@ all, strictly one at a time.
 | P1.2 | plan 6.3; `scratchpad/gp/probes/s6/` (line, cell, ptloc groups) |
 | P1.3 | plan 6.3; `src/fj/sim.fj` `bind_things`; `world.py` leaf bookkeeping |
 | P1.4 | `docs/gp-sprite-column.md`; `scratchpad/gp/probes/sprite/` |
-| P1.6 | plan 6.6; the sprites/HUD mission's `art_budget.py` (session record) |
+| P1.6 | plan 6.6; `scratchpad/gp/render/art_budget.py` -> `art_budget_out.txt` (the 1.96M-word bank) |
 | P2b | `docs/gp-lift-spike.md`; `scratchpad/gp/lift/` |
 | P3-P7 | `src/doomfj/world.py`, `combat.py` (the model = the oracle); `docs/gp-aim-window.md`; `docs/gp-partial-ditto.md`; `scratchpad/gp/census*.py` |
 | measure | `scratchpad/12m/profx/README.md`; `scratchpad/gp/b0_scenarios.py`; `scratchpad/gp/scenarios/README.md` |

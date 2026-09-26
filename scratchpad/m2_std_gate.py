@@ -53,6 +53,7 @@ from doomfj.reference_model import (ANGLE_TURN, ReferenceModel, build_scene,  # 
                                     _signed,          # noqa: E402
                                     spawn_state)
 from doomfj.wad import WadFile                                            # noqa: E402
+from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.wall_renderer import STANDALONE_POLLS                         # noqa: E402
 from doomfj.wireformat import KEY_NAMES                                   # noqa: E402
 from flipjump.interpreter.io_devices.KeyboardIO import (KeyboardIO, KeyEvent,   # noqa: E402
@@ -649,10 +650,7 @@ def main():
         state = rm.step_sim(state, kd, scene=build_scene(mw, mw, args.map, open_h, blocked))
         rsc = build_scene(mw, mw, args.map,
                           heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}))
-        want = bytes(rm.render_wall_frame(state, rsc, wall_mode="W1R", floor_mode_ft1=True,
-                                          plane_near=True, wall_noise=True, near_steps=True,
-                                          stack_steps=True, things=True, sprite_wad=art,
-                                          degrade=True, sky=True))
+        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art, **GAME_RENDER_KW))
         same = got[f] == want
         ok &= same
         d0 = dstates[target][0]
@@ -678,10 +676,7 @@ def main():
                 alt = {si: dstates[si][0] for si in order}
                 alt[target] = k
                 asc = build_scene(mw, mw, args.map, heights_for_states(secs, lds, sds, alt))
-                pic = bytes(rm.render_wall_frame(state, asc, wall_mode="W1R", floor_mode_ft1=True,
-                                                 plane_near=True, wall_noise=True, near_steps=True,
-                                                 stack_steps=True, things=True, sprite_wad=art,
-                                                 degrade=True, sky=True))
+                pic = bytes(rm.render_wall_frame(state, asc, sprite_wad=art, **GAME_RENDER_KW))
                 nd = sum(a != b for a, b in zip(got[f], pic))
                 if nd == 0 or k <= dstates[target][0] + 1:
                     print("     vs oracle with door at state %-2d : %s"

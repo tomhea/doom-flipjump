@@ -45,6 +45,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional, Tuple
 
+from doomfj import reference_model as _RM   # the oracle's constants, where both define one
+
 SOURCE_COMMIT = "895f581c5d91497bdda0516612da803fe5843e28"
 SOURCE_BASE = ("https://raw.githubusercontent.com/chocolate-doom/chocolate-doom/%s/src/doom/"
                % SOURCE_COMMIT)
@@ -121,15 +123,15 @@ def skill_bit(gameskill: int) -> int:
 # ---- p_local.h (16.16 unless noted) ------------------------------------------------------------
 FLOATSPEED = 4 * FRACUNIT
 MAXHEALTH = 100
-VIEWHEIGHT = 41 * FRACUNIT
-PLAYERRADIUS = 16 * FRACUNIT
+VIEWHEIGHT = _RM.VIEWHEIGHT * FRACUNIT       # the oracle's (map units there): ONE definition
+PLAYERRADIUS = _RM.PLAYER_RADIUS             # the oracle's (PR #87, R6)
 MAXRADIUS = 32 * FRACUNIT
 USERANGE = 64 * FRACUNIT
 MELEERANGE = 64 * FRACUNIT
 MISSILERANGE = 32 * 64 * FRACUNIT
 BASETHRESHOLD = 100               # a plain count, not fixed point
 MAXMOVE = 30 * FRACUNIT
-MAX_STEP_UP = 24 * FRACUNIT       # P_TryMove's `tmfloorz - thing->z > 24*FRACUNIT` (a literal there)
+MAX_STEP_UP = _RM.MAX_STEP        # P_TryMove's `tmfloorz - thing->z > 24*FRACUNIT` -- the oracle's
 
 # ---- p_enemy.c: movement directions ------------------------------------------------------------
 (DI_EAST, DI_NORTHEAST, DI_NORTH, DI_NORTHWEST, DI_WEST, DI_SOUTHWEST, DI_SOUTH, DI_SOUTHEAST,

@@ -150,15 +150,18 @@ reads WASD, arrows, space, enter and esc, and bits 5-7 of the key byte are free.
 
 | object | ops/frame | % |
 |---|---|---|
-| render walk, all | 12,986,631 | 85.4 |
+| render walk, all | 12,986,630 | 85.4 |
 | - seg_pass2_leaf (incl. column emission 1.64M) | 4,019,353 | 26.4 |
 | - seg_pass1_ts_leaf (two-sided walls; 0 .. 14.67M per frame) | 2,723,647 | 17.9 |
 | - seg_pass1_leaf | 2,641,860 | 17.4 |
 | - BSP node side tests | 966,608 | 6.4 |
 | - baked sprites / runtime sprites / thing_pass | 966,408 / 583,454 / 704,965 | 6.4 / 3.8 / 4.6 |
-| **collision** (seed walks + try_move / check_position) | **1,475,188** | **9.7** |
-| sim.bind_things | 438,809 | 2.9 |
-| m1_reset | 249,326 | 1.6 |
+| **collision** (seed walks + try_move / check_position) | **1,475,186** | **9.7** |
+| sim.bind_things | 438,808 | 2.9 |
+| m1_reset | 249,325 | 1.6 |
+
+(Exact phase spans from `scratchpad/12m/profx/an_phases.txt`; this table's first draft summed rounded
+segments and read 1-2 ops higher.)
 | the rest (eye walk, move, view, doors, input) | ~50,000 | 0.3 |
 
 | primitive (per call) | ops | primitive | ops |
@@ -545,8 +548,10 @@ machine time, strictly one at a time (rule 1)**. Everything that can happen in h
    The 22M cap replaces the 20M target in CLAUDE.md, `ship-gate.md` and gamespeed's
    `SPEED_TARGET`, for the game with combat.
 2. **D2 the scenario set -- DECIDED 2026-09-26: runs start from CHECKPOINTS across the level**
-   (injected states), so the lift areas are measured too. The owner freezes v1 and B0 before
-   phase 1, once S4 presents them.
+   (injected states), so the lift areas are measured too. The owner freezes the set and B0 before
+   phase 1. **v2 FROZEN 2026-09-26**: to the recommendation "plan a v2 [strafe, >= 50% movement,
+   raised floors, an aftermath run, drawn = in view] ... then freeze v2 and its baseline", the
+   owner answered "I agree with you on 1,2,3" (3 was that recommendation).
 3. **D3 the compositor rules for gameplay -- DECIDED 2026-09-26 as recommended by the census (16):
    a + c + d + e, with b only for projectiles and barrels.** Drops and effects are ordered before
    monsters (a); corpses count as scenery (c); runtime things inside a leaf are drawn in depth order

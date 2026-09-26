@@ -1746,12 +1746,49 @@ def selftest(doc: dict) -> int:
     return 1 if fails else 0
 
 
+def rehash(path: Path, reason: str) -> int:
+    """THE REHASH RULE (docs/handoff-gameplay.md section 1; PR #87 review): the freeze pins the KEYS,
+    the B0 and what they reproduce -- not source bytes. When a refactor edits a hashed file but the
+    replay still reproduces every frozen pose, final digest and drawn population (F3, F4), and the
+    approval and B0 records stand (F1, F5), the new hashes are recorded here, logged with the reason
+    and the changed files. No owner step: nothing the set measures moved. If F3 or F4 fail, the
+    model's BEHAVIOUR changed -- that is not a rehash; it needs the owner (a v3)."""
+    doc = json.loads(Path(path).read_text(encoding="ascii"))
+    ms = [replay(run, census=True) for run in doc["runs"]]
+    checks = {name.split()[0]: (ok, det) for name, ok, det in freeze_checks(doc, ms)}
+    for k in ("F1", "F3", "F4", "F5"):
+        ok, det = checks[k]
+        print("  %s %s  %s" % (k, "ok  " if ok else "FAIL", det), flush=True)
+        if not ok:
+            print("REHASH REFUSED: %s failed -- the replay moved; this needs the owner (a v3)" % k)
+            return 1
+    old = doc["hashes"]
+    new = {f: sha16(ROOT / f) for f in sorted(set(old) | set(dependency_files()))}
+    changed = {f: [old.get(f), new[f]] for f in new if old.get(f) != new[f]}
+    if not changed:
+        print("REHASH: nothing changed")
+        return 0
+    doc.setdefault("rehash_log", []).append({
+        "on": time.strftime("%Y-%m-%d %H:%M:%S"), "reason": reason, "git_head": git_head(),
+        "changed": changed,
+        "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the "
+                "source hashes are re-recorded"})
+    doc["hashes"] = new
+    Path(path).write_text(json.dumps(doc, indent=1), encoding="ascii")
+    for f, (o, n) in sorted(changed.items()):
+        print("  rehashed %-40s %s -> %s" % (f, o, n))
+    print("REHASH DONE: %d file(s)" % len(changed))
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--plan", action="store_true")
     ap.add_argument("--validate", action="store_true")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--freeze", action="store_true")
+    ap.add_argument("--rehash", metavar="REASON",
+                    help="re-record the hashes after a pure refactor (the rehash rule)")
     ap.add_argument("--b0", default=str(SCEN_DIR / "b0_v2.json"))
     ap.add_argument("--no-census", action="store_true", help="validate without the drawn count")
     ap.add_argument("--file", default=str(SCEN_FILE))
@@ -1772,6 +1809,8 @@ def main():
         return 0 if ok else 1
     if a.freeze:
         return freeze(Path(a.file), Path(a.b0))
+    if a.rehash:
+        return rehash(Path(a.file), a.rehash)
     doc = json.loads(Path(a.file).read_text(encoding="ascii"))
     if a.validate:
         t0 = time.time()

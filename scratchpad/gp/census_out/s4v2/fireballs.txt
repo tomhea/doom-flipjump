@@ -1,0 +1,14 @@
+run R0-south-hall        fireballs in flight on  11 frames: off screen (box off screen) 11 | digest EQUALS
+run R0-imp-court         fireballs in flight on 110 frames: not reached, box off screen 65, off screen (box off screen) 45 | digest EQUALS
+run R0-courtyard         fireballs in flight on  55 frames: not reached, box off screen 38, too small (< 3 rows) 17 | digest EQUALS
+run R2-spectre-corridor  fireballs in flight on  11 frames: off screen (box off screen) 11 | digest EQUALS
+run R2-east-yard         fireballs in flight on  97 frames: off screen (box off screen) 59, too small (< 3 rows) 38 | digest EQUALS
+
+ALL: 284 fireball-frames on 150 frames with a fireball in flight (the set's 14 spawns)
+  off screen (box off screen)     126 (44.4%)  with 2D line of sight: 126
+  not reached, box off screen     103 (36.3%)  with 2D line of sight: 103
+  too small (< 3 rows)             55 (19.4%)  with 2D line of sight: 55
+  too small: projected height 0..1 rows (median 1.0); depth 830..1344 units (median 994); distance 910..1425
+
+STAGED FIGHTS (C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\staged_sky\*.jsonl, rec): 319 frames draw a fireball (351 drawn); columns per drawn fireball mean 66.0, median 90.0, max 146 -> ~2898K ops today, ~1763K with the v2 column (slot A units, census_report; + one load and one projection, 34K)
+exit 0

@@ -29,8 +29,9 @@ belongs in this file without its `--validate` output. `docs/handoff-m4-nine-leve
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
 whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:
 `fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
-starts the game, WASD moves, space opens doors. **M4** — now ALL NINE E1 levels in one image,
-configurable — is the only milestone left that changes the emitter's shape. Then M6 (ship).
+starts the game, WASD moves, space opens doors. **M4** (more levels) is DEFERRED: the owner set
+the goal at 1-3 levels and, for now, E1M1 only (2026-09-25/26); the current milestone is the
+fully playable E1M1 (`docs/handoff-gameplay.md`). Then M6 (ship).
 ⚠ The three-level plan in `handoff-m5-m2-m3-m4.md` section 5 is SUPERSEDED, and its "9x" reasoning
 is wrong: nine maps are 14.8x E1M1, which is nearly the smallest map in the episode.
 `docs/handoff-complete-game.md` is the full roadmap behind it.

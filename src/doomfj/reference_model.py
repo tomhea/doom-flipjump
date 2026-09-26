@@ -60,6 +60,15 @@ DBITS = 5                          # FRACBITS(16) - SLOPEBITS(11): the FixedDivâ
 SCALE_MIN = 256                    # R_ScaleFromGlobalAngle clamp floor (16.16)
 SCALE_MAX = 64 << 16               # R_ScaleFromGlobalAngle clamp ceiling = 64.0 (16.16)
 VIEWHEIGHT = 41                    # DOOM player eye height above the floor (map units)
+
+# THE GAME TIER'S PICTURE: the keyword set every E1M1 gate must ask `render_wall_frame` for -- the
+# shipped wall/floor modes, things, and the features the emitter now always draws (V2 sky, V3/V5
+# step faces, the bbox wedge cull, the degradation package). ONE definition (PR #87, R6): six
+# copies had drifted and five gates lacked `sky`, which fails any view that shows sky. Pass
+# `sprite_wad` separately. `bbox_cull` changes no pixel; it decides which things are reached.
+GAME_RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
+                      near_steps=True, stack_steps=True, things=True, degrade=True, sky=True,
+                      bbox_cull=True)
 # âš  DOOM's forwardmove 0x32 (=50) is a THRUST, not a displacement. `P_Thrust` adds `move*2048` to
 # momx/momy, and against FRICTION 0xE800 (0.90625) the steady state is 50*2048/65536 / 0.09375 =
 # ~16.7 map-units per tic. This sim has no momentum -- `step_sim` applies the constant DIRECTLY as

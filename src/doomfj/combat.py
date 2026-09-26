@@ -75,6 +75,10 @@ from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE
 
+# 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
+# FORWARD_MOVE, rounded (plan section 2, input). world.py re-exports it.
+STRAFE_MOVE = 13 << 16
+
 M32 = 0xFFFFFFFF
 
 
@@ -356,7 +360,7 @@ class CombatMixin:
             self._player_mobj_tick()
             return
         self._special_sector(ev)                 # at the tic-start position, as in DOOM
-        moving = keys["forward"] != keys["back"]
+        moving = keys["forward"] != keys["back"] or keys["strafe_left"] != keys["strafe_right"]
         if moving and ws.p_mobj_state == gd.STATE_INDEX["S_PLAY"]:
             self._set_player_mobj("S_PLAY_RUN1")                      # P_MovePlayer
         self._weapon_keys(keys)
@@ -1081,11 +1085,20 @@ class CombatMixin:
             angle = (angle - ANGLE_TURN) & M32
         ws.pangle = angle
         move = (FORWARD_MOVE if keys["forward"] else 0) - (FORWARD_MOVE if keys["back"] else 0)
-        if not move:
+        side = (STRAFE_MOVE if keys["strafe_right"] else 0) - (STRAFE_MOVE if keys["strafe_left"] else 0)
+        if not move and not side:
             return
-        m = move & M32
-        dx = fixed_mul(m, rmod.read_cos(angle), 8, 4)
-        dy = fixed_mul(m, rmod.read_sin(angle), 8, 4)
+        # DOOM's P_MovePlayer: forward along `angle`, side along `angle - ANG90`, i.e.
+        # (sin a, -cos a) -- each a FixedMul like the forward step, so the fj path can mirror it.
+        dx = dy = 0
+        if move:
+            m = move & M32
+            dx += fixed_mul(m, rmod.read_cos(angle), 8, 4)
+            dy += fixed_mul(m, rmod.read_sin(angle), 8, 4)
+        if side:
+            sd = side & M32
+            dx += fixed_mul(sd, rmod.read_sin(angle), 8, 4)
+            dy -= fixed_mul(sd, rmod.read_cos(angle), 8, 4)
         x, y = ws.px, ws.py
         here_z = rmod.check_position(self.scene_c, x, y)[1]
         for cand in (((x + dx) & M32, (y + dy) & M32), ((x + dx) & M32, y),

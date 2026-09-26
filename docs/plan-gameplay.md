@@ -544,8 +544,12 @@ machine time, strictly one at a time (rule 1)**. Everything that can happen in h
 2. **D2 the scenario set -- DECIDED 2026-09-26: runs start from CHECKPOINTS across the level**
    (injected states), so the lift areas are measured too. The owner freezes v1 and B0 before
    phase 1, once S4 presents them.
-3. **D3 the compositor rules for gameplay** (section 5): OPEN by design -- decided once the phase-0
-   census has priced them.
+3. **D3 the compositor rules for gameplay -- DECIDED 2026-09-26 as recommended by the census (16):
+   a + c + d + e, with b only for projectiles and barrels.** Drops and effects are ordered before
+   monsters (a); corpses count as scenery (c); runtime things inside a leaf are drawn in depth order
+   (d); "seen" and the aim window are recorded at column-open time, before the budgets (e);
+   projectiles and barrels are exempt from the soft budgets (b, partly). Priced +0.11M on fight
+   frames with the v2 column. **K raised from 3 to 6 the same day** (`world.K_HEAVY`).
 4. **D4 time -- DECIDED 2026-09-26: one tic per frame**, so fights run at ~32-38% of DOOM's speed.
 5. **D5 the simplifications of section 2 (B and C) -- APPROVED 2026-09-26:**
    - K = 3 and what it does to monster pace;

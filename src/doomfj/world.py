@@ -87,7 +87,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from doomfj import gamedata as gd
 from doomfj import rng as R
-from doomfj.combat import CombatMixin, WEAPON_KEYS
+from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (re-export)
 from doomfj.doorcode import door_line_ids
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
@@ -97,7 +97,9 @@ from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights,
 # RULES -- the approved simplifications (D5) and the model's conventions. ONE definition each; the
 # emitter reads them too, so changing one moves both mirrors.
 # ================================================================================================
-K_HEAVY = 3                        # heavy monster actions per tic (plan 6.1, D5)
+K_HEAVY = 6                        # heavy monster actions per tic (plan 6.1; D5 set 3, raised to 6
+                                   # 2026-09-26 by the owner: the average cost is the demand, K only
+                                   # bounds the worst case, and K=3 deferred on 195/1000 set frames)
 NEWCHASEDIR_MAX_TRIES = 6          # distinct P_TryWalk directions per P_NewChaseDir call (D5)
 DIAG_STEP = {8: 6, 10: 7}          # rounded diagonal step per monster speed (D5)
 FIREBALL_POOL = 8                  # imp fireballs alive at once; a full pool fizzles (D5, S3b)
@@ -114,7 +116,8 @@ STEP_UP = gd.MAX_STEP_UP >> 16     # 24: the highest step up a thing can take
 DROPOFF_MAX = 24                   # P_TryMove: a non-DROPOFF thing may not stand over a drop > 24
 PLAYER_R = gd.PLAYERRADIUS >> 16   # 16
 # the tic's input: the four moves, use, fire, and the weapon number keys 1..4 (w1..w4)
-KEYS = ("forward", "back", "turn_left", "turn_right", "use", "fire") + WEAPON_KEYS
+KEYS = ("forward", "back", "turn_left", "turn_right", "strafe_left", "strafe_right", "use",
+        "fire") + WEAPON_KEYS
 
 assert all(DIAG_STEP[s] == (s * 47000 + 32768) // 65536 for s in DIAG_STEP), \
     "DIAG_STEP must be DOOM's speed * 47000/65536 rounded to the nearest unit"

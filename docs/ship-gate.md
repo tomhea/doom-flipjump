@@ -13,7 +13,7 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 | **the shipped binary** | `build/doom_e1m1_blocked27.fjm`, sha256 `38b09a7331f4f52b` (first 16 hex), built 2026-09-25 from the command in 1b, `.doors.json` stamp beside it | the build of that line IS the verification: byte-identical to the candidate it was measured as (`doom_e1m1_padB.fjm`) |
 | **ms/frame, quiet box** | **74.7 ms/frame** (74.4-75.0), against **81.0** (80.7-82.0) for blocked25 in the same run -- **B FASTER, x1.085, all 5 pairs** | `msframe.py --a build/doom_e1m1_blocked25.fjm --b build/doom_e1m1_blocked27.fjm`, 200 frames x 5 reps, pinned to P-core 2, engine `79af8639`, nothing else running (yardstick 3.65 G), pixels identical across arms and reps (`docs/ship-evidence/blocked27_msframe_vs_blocked25.log`) |
 | **fj ops/s** | **244 M** (243.8 M; blocked25 245.2 M in the same run) | same run; ops/frame **18,221,696** on msframe's forward-walk script (blocked25 19,855,016): the gain is fewer ops at the same rate |
-| **binding metric** (owner spec) | (mean+p80)/2 = **17,665,168 ops/frame -- PASS** (mean 15,200,279; p80 20,130,057) | `gamespeed.py --fjm build/doom_e1m1_padB.fjm` (the same bytes), 2026-09-25; `--validate`: 10/10 distinct end cells, widest spread 1321 units, worst run 29% blocked (`docs/ship-evidence/padB_gamespeed.log`) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **17,665,168 ops/frame -- PASS** (mean 15,200,279; p80 20,130,057) | `gamespeed.py --fjm build/doom_e1m1_padB.fjm` (the same bytes), 2026-09-25 (`docs/ship-evidence/padB_gamespeed.log`); again on `build/doom_e1m1_blocked27.fjm`, 2026-09-26, every row identical (`blocked27_gamespeed.log`). `--validate`, which since fix/gamespeed-validate-doors replays the doors as the binary does: 10/10 distinct end cells, widest spread 1321 units, worst run 29% blocked, run 0 opening one door; `--validate`'s own per-frame record -- pose and all 13 door states -- equals the binary on every frame of all ten runs (`blocked27_gamespeed_trail.log`, with its two negative controls). padB's log shows run 0 ending at (831, 485): the old replay never opened the door that the binary opens, and the binary ends at (831, 653) |
 | **size** | **32.23% of 2^27 -- PASS** (43,253,668 words; span 94,704,800) | same run |
 
 **What it is:** blocked25 plus the two doom-side leads of handoff 15's pad census, each measured on
@@ -124,7 +124,12 @@ explained before shipping.
    the frozen binary (its hash). Use the explicit form only with the shipped sha256 in the record.
 3. **The owner's metric.** `python scratchpad/12m/gamespeed.py --fjm build/<new>.fjm` (both
    targets: (mean+p80)/2 <= 20,000,000 ops/frame, size <= 35%), then a separate `--validate` run
-   (it is a mode: 10/10 distinct end cells).
+   (it is a mode: 10/10 distinct end cells) and `--selftest` (SELFTEST PASS; its N6g is the only
+   check that the host test's recorded keys are still what the planner plays -- CI does not run
+   it). `--validate` replays the ORACLE; when the new binary moves, collides or opens doors
+   differently from the shipped one, also run `scratchpad/12m/gamespeed_trail.py --fjm
+   build/<new>.fjm --labels <its label table>` (TRAIL, CONTROL-POSE and CONTROL-DOORS must PASS) and
+   re-record `gamespeed.BINARY_ENDS` and `BINARY_DOORS` from its output.
 4. **Record it, or it did not happen.** The build's command line, its counts-cache path, its label
    table (`build_labeled.py --labels ...` produces it), its sha256, the ledger row of step 2, and
    the numbers of step 3 -- into section 1 of this file and the commit message. Then

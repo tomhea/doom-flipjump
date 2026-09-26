@@ -48,6 +48,17 @@ CASES = [
     ("M11 heat_key keeps stl coordinates",
      "_SITE_COORDINATES = re.compile(r'(?<![\\w.])[fs]\\d+:l\\d+:')",
      "_SITE_COORDINATES = re.compile(r'(?<![\\w.])[f]\\d+:l\\d+:')"),
+    ("M12 a hot width sized before the spread (round 1's sizing)",
+     "        slots = 1 << max(0, (count - 1).bit_length())\n"
+     "        if self.spread > 1 and count >= self.spread_min_count:\n"
+     "            slots *= self.spread\n"
+     "        need = count + self.hot_ranks.get((group, 0), 0)  # a hot group holds its reserved ranks too\n"
+     "        while slots < need:  # double only when they do not fit: a spread group has room\n"
+     "            slots *= 2\n",
+     "        need = count + self.hot_ranks.get((group, 0), 0)\n"
+     "        slots = 1 << max(0, (need - 1).bit_length())\n"
+     "        if self.spread > 1 and count >= self.spread_min_count:\n"
+     "            slots *= self.spread\n"),
 ]
 TEST = [sys.executable, "-m", "pytest", "tests/unit/test_table_pool.py", "-q", "-p", "no:cacheprovider"]
 

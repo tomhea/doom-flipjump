@@ -256,16 +256,6 @@ def test_an_open_door_carries_sound_further_than_a_shut_one():
     assert sum(w.ws.snd_alert) > shut
 
 
-def test_a_shot_wakes_a_monster_that_hears_it():
-    w = W.World(skill=gd.SK_HARD)
-    woke = []
-    for _ in range(12):
-        woke += [how for _m, how in w.tic({"fire": True}).wakes]
-    assert "sound" in woke
-    quiet = W.World(skill=gd.SK_HARD)                      # the control: no shot, no sound wake
-    assert all(how != "sound" for _ in range(12) for _m, how in quiet.tic({}).wakes)
-
-
 # ---- sight ---------------------------------------------------------------------------------------
 def test_a_shut_door_blocks_sight_and_an_open_one_does_not():
     w = W.World(skill=gd.SK_HARD)

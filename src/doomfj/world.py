@@ -1,26 +1,35 @@
-"""S3a -- the gameplay model: the persistent-state SCHEMA, `WorldState`, and one TIC of the game.
+"""S3a + S3b -- the gameplay model: the persistent-state SCHEMA, `WorldState`, and one TIC of the game.
 
 This is the Python twin of the game logic the fj program will run (docs/plan-gameplay.md, phase 0
 stream S3), written to become the oracle's extension: integer-exact, deterministic, and reading
 every table from one place (`doomfj.gamedata` for DOOM's data, `doomfj.rng` for randomness, the
-RULES block below for the approved simplifications).
+RULES block below and `doomfj.combat`'s for the approved simplifications).
 
 SCHEMA FIRST. `build_schema(layout)` lists every persistent cell of the game -- name, width, count,
 signedness, persisted or derived, owner phase, the fj label that already holds it. `WorldState` is
 built from that table and wraps every write to the declared width, exactly as an fj cell would. The
-same table is meant to drive the fj declarations, the M1 persist sets and the state probe, so it
-carries the fields S3a does NOT simulate yet (player health, armor, ammo, the weapon state machine,
-monster health, the 8-slot fireball pool, the effects pool, pickup and barrel state, the key):
-S3b builds on them without a schema change.
+same table is meant to drive the fj declarations, the M1 persist sets and the state probe. S3b added
+two game flags (`g_restart`, `g_leveldone`), and `pickup_taken` now starts at 1 for the pickups the
+chosen skill does not spawn (so fj's `thvis`, its inverse, hides them); no width changed.
+
+COMBAT (S3b) lives in `doomfj.combat` (`CombatMixin`, which `World` inherits): the weapon state
+machine, the player's hitscan behind an injectable AIM, monster attack effects, the fireball and
+effect pools, damage and death, pickups, barrels, the player blocked by solid things, death and
+restart, the exit switch and nukage. Its docstring lists every deviation from DOOM.
 
 THE TIC (`World.tic`), in this order:
-  1. doors -- `doors.door_tic` for every door, pressed by the player's use key in its use box, or
-     by a monster that bumped it last tic (`d_monreq`);
-  2. the player -- weapon (S3b; today the `fire` key only makes a NOISE, standing in for
-     P_FireWeapon's P_NoiseAlert), then the move through the oracle's own `step_sim`;
-  3. monsters, in slot order from the scheduler's rotating cursor (see `_monsters_phase`);
-  4. projectiles by pool slot (S3b; nothing spawns one yet);
-  5. `leveltime += 1`.
+  0. a restart asked for last tic (use while dead, or `new_game`) runs the RESTART BLOCK first;
+     after the exit switch the world is frozen until one does;
+  1. doors -- `doors.door_tic` for every door, pressed by the living player's use key in its use
+     box (a key door also needs its card), or by a monster that bumped it last tic (`d_monreq`);
+  2. the player -- nukage; weapon keys; use (the exit switch); the weapon (P_MovePsprites: it
+     fires from the tic-start view, the picture the player saw); the flash counters; then the move:
+     the oracle's own `step_sim` step, now also touching pickups and refused by solid things
+     (`player_blocking`); while dead, only the weapon lowers and use asks for the restart;
+  3. monsters, in slot order from the scheduler's rotating cursor (see `_monsters_phase`); their
+     attack actions now hurt the player and spawn fireballs;
+  4. fireballs by pool slot, then 5. barrels by index, then 6. puffs/blood by pool slot;
+  7. `leveltime += 1`.
 
 MONSTERS are DOOM's A_Look / A_Chase / P_Move / P_TryMove / P_NewChaseDir (Chocolate Doom's
 p_enemy.c and p_map.c, quoted in gamedata's sources), with the approved simplifications (D5) and a
@@ -43,6 +52,8 @@ few model conventions, all named here so nothing is silent:
     dot(facing, offset) < 0, i.e. DOOM's `ANG90 < an < ANG270` without the atan.
   * No sound playback: the RNG calls that only choose a sound (see sound, active sound) are not
     made. No `lastlook` (single player). No infighting (the target is always the player).
+  * Damage wakes a monster the D-WAKE way too: a hit on a monster still in its spawn state enters
+    the see state without running its A_Chase (P_DamageMobj's P_SetMobjState would).
   * Monsters open plain doors (special 1, not ML_SECRET) when a move fails inside the door's use
     box and the door is shut or closing -- the only cases in which DOOM's EV_VerticalDoor answers a
     monster. The press lands on the next tic's door phase.
@@ -54,10 +65,12 @@ few model conventions, all named here so nothing is silent:
     static and positive collapse to one region; each door sector is its own node, joined to its
     neighbours while its opening is positive. E1M1 has no ML_SOUNDBLOCK line (asserted), so this
     is exactly DOOM's flood fill.
-  * The player still walks through things (today's oracle and binary); monsters DO treat the player
-    as solid.
+  * The player is blocked by solid things (monsters until their A_Fall, barrels until removed,
+    solid decor), as in DOOM -- today's binary and oracle walk through them, which World keeps
+    behind `player_blocking=False` for regression comparison. Monsters treat the living player as
+    solid; a dead one is not (P_KillMobj clears MF_SOLID).
 
-LEAF LISTS. Every MOBILE thing (the monster slots now; the fireball and effect pools in S3b) has a
+LEAF LISTS. Every MOBILE thing (the monster slots, the fireball pool, the effect pool) has a
 leaf, recomputed only when it moves and re-linked only when the leaf changes. Each leaf's list is
 kept in ascending mobile index (`leaf_head` / `mob_next`, the fj `sshead` / `thnext` shape), so it
 equals a from-scratch build at every tic -- `leaf_lists_from_scratch` is that build, and a test holds
@@ -74,11 +87,11 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from doomfj import gamedata as gd
 from doomfj import rng as R
+from doomfj.combat import CombatMixin, WEAPON_KEYS
 from doomfj.doorcode import door_line_ids
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
-from doomfj.reference_model import (ReferenceModel, Scene, SimState, apply_sector_heights,
-                                    spawn_state)
+from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights, spawn_state)
 
 # ================================================================================================
 # RULES -- the approved simplifications (D5) and the model's conventions. ONE definition each; the
@@ -100,7 +113,8 @@ MISSILE_BIAS, MISSILE_NOMELEE_BIAS, MISSILE_CAP = 64, 128, 200      # P_CheckMis
 STEP_UP = gd.MAX_STEP_UP >> 16     # 24: the highest step up a thing can take
 DROPOFF_MAX = 24                   # P_TryMove: a non-DROPOFF thing may not stand over a drop > 24
 PLAYER_R = gd.PLAYERRADIUS >> 16   # 16
-KEYS = ("forward", "back", "turn_left", "turn_right", "use", "fire")
+# the tic's input: the four moves, use, fire, and the weapon number keys 1..4 (w1..w4)
+KEYS = ("forward", "back", "turn_left", "turn_right", "use", "fire") + WEAPON_KEYS
 
 assert all(DIAG_STEP[s] == (s * 47000 + 32768) // 65536 for s in DIAG_STEP), \
     "DIAG_STEP must be DOOM's speed * 47000/65536 rounded to the nearest unit"
@@ -252,6 +266,9 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("skill", 2, group="game", doc="DOOM gameskill: 1 easy, 2 medium, 3 hard (D7, menu)")
     f("leveltime", 16, group="game", doc="tics since level start, wraps (nukage timing, S3b)")
     f("sched_cursor", mon_bits, group="game", doc="the K-slot scheduler's first slot this tic")
+    f("g_restart", 1, group="game", phase="S3b",
+      doc="restart asked (use while dead, NEW GAME): the frame tail runs the restart block")
+    f("g_leveldone", 1, group="game", phase="S3b", doc="the exit switch was used: world frozen")
     # -- input and mode (existing standalone persist set) ----------------------------------------
     f("mode", 1, group="input", phase="existing", label="mode", doc="1 = menu frame producer")
     for k in "fblru":
@@ -354,7 +371,7 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
       doc="point location")
     # -- pickups and barrels (S3b) ----------------------------------------------------------------
     f("pickup_taken", 1, count=lay.npickup, group="pickup", phase="S3b", label="thvis",
-      doc="picked up (fj thvis holds the inverse for baked things)")
+      doc="picked up, or not spawned at this skill (fj thvis holds the inverse)")
     f("bar_state", 8, count=lay.nbarrel, group="barrel", phase="S3b", doc="state index")
     f("bar_tics", 4, count=lay.nbarrel, group="barrel", phase="S3b", doc="tics left")
     f("bar_health", 8, count=lay.nbarrel, signed=True, group="barrel", phase="S3b",
@@ -477,9 +494,32 @@ class TicEvents:
     newchasedir: int = 0
     capped: int = 0                                        # NewChaseDir calls that hit the cap
     decisions: List[Tuple[int, str]] = field(default_factory=list)   # (slot, "melee"|"missile")
-    attacks: List[Tuple[int, str]] = field(default_factory=list)     # (slot, action) -- S3b
+    attacks: List[Tuple[int, str]] = field(default_factory=list)     # (slot, action)
     door_uses: List[Tuple[int, int]] = field(default_factory=list)   # (slot, door sector)
     noise: bool = False
+    # -- S3b combat (doomfj.combat); `CombatMixin.event_totals` sums them over a run
+    fired: List[str] = field(default_factory=list)          # P_FireWeapon: weapon name
+    shots: List[tuple] = field(default_factory=list)        # (weapon, column, target|None, damage)
+    hits: List[tuple] = field(default_factory=list)         # (by, "mon"|"bar", index, damage)
+    player_hurt: List[tuple] = field(default_factory=list)  # (source, damage, after armor)
+    kills: List[tuple] = field(default_factory=list)        # ("mon"|"bar", index, "death"|"gib")
+    pickups: List[tuple] = field(default_factory=list)      # ("item"|"drop", index, type)
+    mon_shots: List[tuple] = field(default_factory=list)    # (slot, spread, damage, hit)
+    mon_melee: List[tuple] = field(default_factory=list)    # (slot, damage)
+    proj_spawns: List[tuple] = field(default_factory=list)  # (pool slot, shooter)
+    proj_impacts: List[tuple] = field(default_factory=list)  # (pool slot, damage): hit the player
+    proj_walls: List[int] = field(default_factory=list)     # pool slot stopped by a wall
+    fizzles: List[int] = field(default_factory=list)        # imp whose fireball found no slot
+    barrel_blasts: List[int] = field(default_factory=list)  # barrel index (A_Explode)
+    fx_spawns: List[tuple] = field(default_factory=list)    # (pool slot, "puff"|"blood")
+    fx_skipped: int = 0                                     # effects dropped: the pool was full
+    player_blocked: int = 0                                 # tried positions a solid thing refused
+    nukage: int = 0                                         # damaging-floor hits
+    deaths: int = 0
+    restart_requests: int = 0
+    restarts: int = 0
+    level_done: bool = False
+    frozen: bool = False                                    # level done: the tic did nothing
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -495,17 +535,23 @@ def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
 # ================================================================================================
 # THE WORLD
 # ================================================================================================
-class World:
+class World(CombatMixin):
     """E1M1's game state plus the static level data it is simulated against.
 
     `World(skill=gd.SK_HARD)` spawns the level; `tic(keys)` advances one tic and returns its
-    `TicEvents`; `ws` is the `WorldState`; `reset(skill)` is the restart block (NEW GAME)."""
+    `TicEvents`; `ws` is the `WorldState`; `reset(skill)` starts a fresh game (and clears the
+    bookkeeping); `new_game(skill)` asks for the in-game restart block, run at the next tic.
+
+    `aim(world, col)` names what a player shot through screen column `col` hits (default
+    `aim_geometric`; S5 plugs in the picture's aim window). `player_blocking=False` restores the
+    old walk-through-things player for regression comparison."""
 
     def __init__(self, map_wad=None, mapname: str = "E1M1", skill: int = gd.SK_HARD, *,
                  rm: Optional[ReferenceModel] = None,
                  sight: Optional[Callable[["World", int], bool]] = None,
                  k_heavy: int = K_HEAVY, cursor_policy: Callable = next_cursor,
-                 strict: bool = False):
+                 strict: bool = False, aim: Optional[Callable] = None,
+                 player_blocking: bool = True):
         if map_wad is None:
             from doomfj.config import DEFAULT_MAP_WAD
             from doomfj.wad import WadFile
@@ -521,6 +567,7 @@ class World:
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things))
         self.schema = build_schema(self.layout)
+        self._combat_init(aim, player_blocking)
         self.reset(skill)
 
     # ---------------------------------------------------------------------------- static level
@@ -637,12 +684,24 @@ class World:
 
     # ---------------------------------------------------------------------------- level start
     def reset(self, skill: int) -> None:
-        """Level start for `skill` -- the restart block (NEW GAME). Every persistent cell gets its
-        level-start value; monsters of other skills stay in their slots, inactive."""
-        assert skill in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD), skill
-        self.ws = ws = WorldState(self.schema, strict=self.strict)
+        """A fresh game at `skill`: the level-start state (see `_reset_state`) and the model's
+        bookkeeping (tic counter, event log) cleared. The in-game restart is `new_game`/`_restart`,
+        which writes the same values field by field."""
+        self._reset_state(skill)
         self.tic_count = 0
         self.events: List[TicEvents] = []
+        self._door_phase_scene()
+
+    def _decor_for(self, skill: int) -> list:
+        bit = gd.skill_bit(skill)
+        return [t for t in self.decor_solid if t.flags & bit]
+
+    def _reset_state(self, skill: int) -> None:
+        """Level start for `skill` into a new `self.ws`: every persistent cell gets its level-start
+        value; monsters of other skills stay in their slots, inactive; pickups of other skills
+        start TAKEN (so fj's `thvis`, their inverse, hides them)."""
+        assert skill in (gd.SK_EASY, gd.SK_MEDIUM, gd.SK_HARD), skill
+        self.ws = ws = WorldState(self.schema, strict=self.strict)
         ws.skill = skill
         ws.rng_world = R.stream_seed(R.STREAM_WORLD)
         ws.rng_player = R.stream_seed(R.STREAM_PLAYER)
@@ -697,20 +756,27 @@ class World:
             ws.bar_solid[b] = 1
             v, ws.rng_world = R.p_random(ws.rng_world)
             ws.bar_tics[b] = 1 + v % gd.STATES["S_BAR1"].tics
-        self._pickups_spawned = [bool(t.flags & bit) for t in self.pickup_things]
-        self._decor_now = [t for t in self.decor_solid if t.flags & bit]
-        self._barrel_spawned = [bool(t.flags & bit) for t in self.barrel_things]
-        self._door_phase_scene()
+        for i, t in enumerate(self.pickup_things):
+            if not t.flags & bit:
+                ws.pickup_taken[i] = 1                         # not in this skill's level
+        self._decor_now = self._decor_for(skill)
 
     # ---------------------------------------------------------------------------- the tic
     def tic(self, keys: Optional[dict] = None) -> TicEvents:
         keys = {k: bool((keys or {}).get(k)) for k in KEYS}
         ev = TicEvents(tic=self.tic_count)
-        self._doors_phase(keys, ev)
-        self._player_phase(keys, ev)
-        self._monsters_phase(ev)
-        self._projectiles_phase(ev)
-        self.ws.leveltime = (self.ws.leveltime + 1) & 0xFFFF
+        if self.ws.g_restart:
+            self._restart(ev)                    # the frame tail's restart block, then this tic
+        if self.ws.g_leveldone:
+            ev.frozen = True                     # the exit was used: nothing moves
+        else:
+            self._doors_phase(keys, ev)
+            self._player_phase(keys, ev)
+            self._monsters_phase(ev)
+            self._projectiles_phase(ev)
+            self._barrels_phase(ev)
+            self._fx_phase(ev)
+            self.ws.leveltime = (self.ws.leveltime + 1) & 0xFFFF
         self.tic_count += 1
         self.events.append(ev)
         return ev
@@ -721,8 +787,10 @@ class World:
     # -- 1. doors
     def _doors_phase(self, keys: dict, ev: TicEvents) -> None:
         ws = self.ws
+        alive = self.player_alive()
         for d, si in enumerate(self.door_order):
-            pressed = keys["use"] and in_use_box_fixed(self.door_boxes[si], ws.px, ws.py)
+            pressed = (keys["use"] and alive and self.player_can_open(si)
+                       and in_use_box_fixed(self.door_boxes[si], ws.px, ws.py))
             st = door_tic((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]),
                           self.door_nstates[si], bool(pressed or ws.d_monreq[d]))
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = st
@@ -741,17 +809,7 @@ class World:
                              self.blocked_now)
         self.heights_now = heights_for_states(self.secs, self.lds, self.sds, states)
 
-    # -- 2. the player
-    def _player_phase(self, keys: dict, ev: TicEvents) -> None:
-        ws = self.ws
-        # WEAPON (S3b). Until the weapon state machine lands, `fire` stands in for P_FireWeapon's
-        # P_NoiseAlert (player, player) so waking by sound can be driven and tested.
-        if keys["fire"]:
-            self.noise_alert(ev)
-        # MOVE: the oracle's own tic, against this tic's collision scene (m2_std_gate's way)
-        st = self.rm.step_sim(SimState(ws.px, ws.py, ws.pangle, self.mapname), keys,
-                              scene=self.scene_c)
-        ws.px, ws.py, ws.pangle = st.x, st.y, st.angle
+    # -- 2. the player: `CombatMixin._player_phase` (doomfj.combat)
 
     # -- 3. monsters: the K-slot scheduler
     def _monsters_phase(self, ev: TicEvents) -> None:
@@ -784,11 +842,7 @@ class World:
             self._set_state(m, nxt, True, ev)
         ws.sched_cursor = self.cursor_policy(ws.sched_cursor, first_deferred, n)
 
-    # -- 4. projectiles (S3b)
-    def _projectiles_phase(self, ev: TicEvents) -> None:
-        """S3b: each active fireball slot moves, tests the player's box and the walls, re-links its
-        leaf. Nothing spawns a fireball in S3a (A_TroopAttack's effect is S3b)."""
-        assert not any(self.ws.proj_active), "S3a spawns no projectiles"
+    # -- 4.-6. fireballs, barrels, puffs/blood: `CombatMixin` (doomfj.combat)
 
     # ---------------------------------------------------------------------------- states
     def _set_state(self, m: int, name: str, run_action: bool, ev: TicEvents) -> bool:
@@ -820,9 +874,7 @@ class World:
         elif action == "A_FaceTarget":
             self._a_face_target(m)
         elif action in ("A_PosAttack", "A_SPosAttack", "A_TroopAttack", "A_SargAttack"):
-            # every monster attack starts with A_FaceTarget; the effect itself is S3b
-            self._a_face_target(m)
-            ev.attacks.append((m, action))
+            self._monster_attack(m, action, ev)          # doomfj.combat: A_FaceTarget + effect
         elif action == "A_Fall":
             self.ws.mon_solid[m] = 0
         elif a.phase == "sound":
@@ -832,7 +884,7 @@ class World:
 
     # ---------------------------------------------------------------------------- AI
     def player_alive(self) -> bool:
-        """MF_SHOOTABLE on the player: alive until S3b's death clears it."""
+        """MF_SHOOTABLE (and MF_SOLID) on the player: alive until P_KillMobj clears them."""
         return self.ws.p_health > 0 and not self.ws.p_dead
 
     def _to_player(self, m: int) -> Tuple[int, int]:
@@ -1100,8 +1152,9 @@ class World:
                 if abs(ws.mon_x[j] - nx) < bd and abs(ws.mon_y[j] - ny) < bd:
                     return ("monster", j)
         bd16 = (r + PLAYER_R) << 16
-        if abs(ws.px - (nx << 16)) < bd16 and abs(ws.py - (ny << 16)) < bd16:
-            return ("player", -1)
+        if self.player_alive() and abs(ws.px - (nx << 16)) < bd16 \
+                and abs(ws.py - (ny << 16)) < bd16:
+            return ("player", -1)                      # a dead player is not MF_SOLID
         for b, t in enumerate(self.barrel_things):
             if ws.bar_solid[b]:
                 bd = r + gd.THING_TYPES[2035].radius
@@ -1172,12 +1225,24 @@ class World:
         return out
 
     def leaf_lists_from_scratch(self) -> Dict[int, List[int]]:
-        """The same lists rebuilt from positions alone (the invariant the incremental lists keep)."""
+        """The same lists rebuilt from positions alone (the invariant the incremental lists keep):
+        monsters, then fireballs, then effects -- ascending mobile index within every leaf."""
         ws, out = self.ws, {}
         for m in range(self.layout.nmon):
             if ws.mon_active[m]:
                 leaf = self.rm.point_in_subsector(self.cmap, ws.mon_x[m], ws.mon_y[m])
                 out.setdefault(leaf, []).append(m)
+        base = self.layout.nmon
+        for s in range(FIREBALL_POOL):
+            if ws.proj_active[s]:
+                leaf = self.rm.point_in_subsector(self.cmap, ws.proj_x[s] >> 16,
+                                                  ws.proj_y[s] >> 16)
+                out.setdefault(leaf, []).append(base + s)
+        base += FIREBALL_POOL
+        for s in range(FX_POOL):
+            if ws.fx_active[s]:
+                leaf = self.rm.point_in_subsector(self.cmap, ws.fx_x[s] >> 16, ws.fx_y[s] >> 16)
+                out.setdefault(leaf, []).append(base + s)
         return out
 
     # ---------------------------------------------------------------------------- sound, sight
@@ -1218,19 +1283,22 @@ class World:
         one-sided line, no statically closed two-sided line, and no door line whose opening is
         closed at this tic's door heights. 2D (no eye heights) and exact on 16.16 integers."""
         ws = world.ws
-        p = (ws.mon_x[m] << 16, ws.mon_y[m] << 16)
-        q = (ws.px, ws.py)
+        return world.los_points((ws.mon_x[m] << 16, ws.mon_y[m] << 16), (ws.px, ws.py))
+
+    def los_points(self, p: Tuple[int, int], q: Tuple[int, int]) -> bool:
+        """2D line of sight between two 16.16 points, by `los_to_player`'s rule. It is also
+        P_CheckSight for combat: the player's aim, and a barrel's blast reaching a thing."""
         x0, x1 = min(p[0], q[0]), max(p[0], q[0])
         y0, y1 = min(p[1], q[1]), max(p[1], q[1])
-        for a, b, (lx0, lx1, ly0, ly1) in world._sight_walls:
+        for a, b, (lx0, lx1, ly0, ly1) in self._sight_walls:
             if lx1 < x0 or lx0 > x1 or ly1 < y0 or ly0 > y1:
                 continue
             if segments_touch(p, q, a, b):
                 return False
-        for (a, b, (lx0, lx1, ly0, ly1)), fs, bs in world._sight_doors:
+        for (a, b, (lx0, lx1, ly0, ly1)), fs, bs in self._sight_doors:
             if lx1 < x0 or lx0 > x1 or ly1 < y0 or ly0 > y1:
                 continue
-            (ff, fc), (bf, bc) = world._sector_hts(fs), world._sector_hts(bs)
+            (ff, fc), (bf, bc) = self._sector_hts(fs), self._sector_hts(bs)
             if min(fc, bc) - max(ff, bf) > 0:
                 continue
             if segments_touch(p, q, a, b):
@@ -1246,6 +1314,26 @@ class World:
             if ws.mon_active[m] and ws.mon_tics[m] != TICS_FOREVER:
                 ws.mon_target[m] = 1
                 self._set_state(m, self.mon_info[m].seestate, False, TicEvents(self.tic_count))
+
+    def teleport_monster(self, m: int, x: int, y: int) -> None:
+        """Scenario helper (tests, the scenario planner): put monster `m` at map units (x, y) on
+        that spot's floor, keeping its leaf list exact."""
+        ws = self.ws
+        leaf = self.rm.point_in_subsector(self.cmap, x, y)
+        if ws.mon_active[m]:
+            self._list_remove(m, ws.mon_leaf[m])
+        ws.mon_x[m], ws.mon_y[m] = x, y
+        ws.mon_floorz[m] = self.secs_c[self.leaf_sector[leaf]].floor_h
+        ws.mon_leaf[m] = leaf
+        if ws.mon_active[m]:
+            self._list_insert(m, leaf)
+
+    def teleport_player(self, x16: int, y16: int, angle: Optional[int] = None) -> None:
+        """Scenario helper: put the player at 16.16 (x16, y16), optionally facing `angle` (BAM)."""
+        ws = self.ws
+        ws.px, ws.py = x16, y16
+        if angle is not None:
+            ws.pangle = angle & 0xFFFFFFFF
 
     def digest(self) -> str:
         return self.ws.digest()

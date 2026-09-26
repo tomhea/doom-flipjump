@@ -1,0 +1,55 @@
+$ python scratchpad/12m/profx/profx.py --selftest --lock <gp_binary.lock>   (2026-09-26, the recorded run)
+profx selftest -- (b) is the negative control; WORK = <WORK>
+maps -> <WORK>: 25 objects, 2090747 label words, 35 markers, reset code ends at word 14701632
+  binary lock taken: C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\gp_binary.lock (S1/S8 measurement: profx --selftest)
+  $ python drive.py still 3 selftest_stock --stock
+    engine: C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+    still: 60,006,973 ops, 5/5 frames, 2.7s
+  $ python drive.py still 3 selftest --trace 0 60006973
+    engine: <WORK>\engX\_fjcore.pyd
+    still: 60,006,973 ops, 5/5 frames, 2.8s
+    prof_dump: 5 present records -> <WORK>\selftest.*
+  binary lock released
+(c) the instrument changes nothing it measures
+  (c) op totals equal: stock 60,006,973 vs profiler 60,006,973             ok
+  (c) every presented frame's pixels equal (5 frames)                      ok
+  (c) the histograms conserve ops (self = owner-attributed = the op total) ok  60,006,973 / 60,006,973
+  (c) the trace is exactly the run's ops (its per-word counts = the histogram) ok
+(a) owner attribution vs the op trace
+  bind_things statement                calls  trace/call   attr/call    error
+  hex.set(3)                               3        38.0        38.0    +0.0%  (not checked: < 200 ops)
+  hex.sparse_mov(4)                      225        67.4        67.4    +0.0%  (not checked: < 200 ops)
+  hex.shl_hex(3)                         225        39.1        45.1   +15.3%  (not checked: < 200 ops)
+  hex.set(3)                             225        46.0        40.0   -13.0%  (not checked: < 200 ops)
+  hex.ptr_index(3)                       225       893.5       923.3    +3.3%
+  hex.sparse_zero(3)                     225        32.8         3.0   -90.9%  (not checked: < 200 ops)
+  hex.read_hex(3)                        225      1725.7      1725.7    +0.0%
+  hex.set(3)                             225        45.0        32.0   -28.9%  (not checked: < 200 ops)
+  hex.ptr_index(3)                       225       779.6       784.7    +0.7%
+  hex.read_byte(2)                       225       254.5       249.3    -2.0%
+  hex.set(3)                             225        45.0        45.0    +0.0%  (not checked: < 200 ops)
+  hex.ptr_index(3)                       225       778.8       778.8    +0.0%
+  hex.write_byte(2)                      225       494.4       503.6    +1.9%
+  checked 6 statements; the whole paired sequence: trace 1,170,483 ops, attributed 1,169,639 (-0.07%)
+  (a) owner attribution PASSES (5%/statement, 1% on the sequence, >= 5 checked) ok
+(b) NEGATIVE CONTROL: address-only attribution through the same check
+  bind_things statement                calls  trace/call   attr/call    error
+  hex.set(3)                               3        38.0        12.0   -68.4%  (not checked: < 200 ops)
+  hex.sparse_mov(4)                      225        67.4        33.0   -51.1%  (not checked: < 200 ops)
+  hex.shl_hex(3)                         225        39.1        17.0   -56.6%  (not checked: < 200 ops)
+  hex.set(3)                             225        46.0        24.0   -47.8%  (not checked: < 200 ops)
+  hex.ptr_index(3)                       225       893.5       171.0   -80.9%
+  hex.sparse_zero(3)                     225        32.8        16.0   -51.2%  (not checked: < 200 ops)
+  hex.read_hex(3)                        225      1725.7       356.0   -79.4%
+  hex.set(3)                             225        45.0        24.0   -46.6%  (not checked: < 200 ops)
+  hex.ptr_index(3)                       225       779.6       171.0   -78.1%
+  hex.read_byte(2)                       225       254.5        51.0   -80.0%
+  hex.set(3)                             225        45.0        24.0   -46.7%  (not checked: < 200 ops)
+  hex.ptr_index(3)                       225       778.8       171.0   -78.0%
+  hex.write_byte(2)                      225       494.4       185.0   -62.6%
+  checked 6 statements; the whole paired sequence: trace 1,170,483 ops, attributed 279,711 (-76.10%)
+  (b) address-only attribution FAILS the same check                        ok
+  (b) ... and on hex.ptr_index it is far off (the chains it cannot see)    ok  171 vs 893, 171 vs 780, 171 vs 779
+
+SELFTEST PASS
+EXIT 0

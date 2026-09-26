@@ -1,0 +1,14 @@
+  view 100  PISGA0  cols  28  pairs  516  overlay   83664 ops/frame  (162 per pair incl. framing)  pixel mismatches 0
+  view 100  PISGB0  cols  31  pairs  628  overlay  102943 ops/frame  (164 per pair incl. framing)  pixel mismatches 0
+  view 100  PISFA0  cols  16  pairs  130  overlay    2507 ops/frame  (19 per pair incl. framing)  pixel mismatches 0
+  view 100  SHTGA0  cols  33  pairs  398  overlay   64106 ops/frame  (161 per pair incl. framing)  pixel mismatches 0
+  view 100  SHTGC0  cols  46  pairs 1032  overlay  172951 ops/frame  (168 per pair incl. framing)  pixel mismatches 0
+  view 100  PUNGA0  cols  47  pairs  483  overlay   78027 ops/frame  (162 per pair incl. framing)  pixel mismatches 0
+  view 100  SAWGA0  cols  41  pairs  736  overlay  122623 ops/frame  (167 per pair incl. framing)  pixel mismatches 0
+  view  84  PISGA0  cols  27  pairs  354  overlay   56832 ops/frame  (161 per pair incl. framing)  pixel mismatches 0
+  view  84  PISGB0  cols  27  pairs  461  overlay   74374 ops/frame  (161 per pair incl. framing)  pixel mismatches 0
+  view  84  PISFA0  cols  16  pairs  130  overlay    2507 ops/frame  (19 per pair incl. framing)  pixel mismatches 0
+  view  84  SHTGA0  cols  23  pairs  237  overlay   39034 ops/frame  (165 per pair incl. framing)  pixel mismatches 0
+  view  84  SHTGC0  cols  44  pairs  945  overlay  157672 ops/frame  (167 per pair incl. framing)  pixel mismatches 0
+  view  84  PUNGA0  cols  39  pairs  236  overlay   38345 ops/frame  (162 per pair incl. framing)  pixel mismatches 0
+  view  84  SAWGA0  cols  36  pairs  579  overlay   95089 ops/frame  (164 per pair incl. framing)  pixel mismatches 0

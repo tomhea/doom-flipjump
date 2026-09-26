@@ -1,0 +1,9 @@
+== probe selftest + demo  13:28:07
+   rc=0  13:30:21
+== b0 selftest  13:30:21
+   rc=0  13:32:40
+== b0 on 20 viewpoints of gamespeed run 0  13:32:40
+   rc=0  13:34:21
+== b0 view mode on all 100 frames of gamespeed runs 0 and 1  13:34:21
+   rc=0  13:36:09
+== done  13:36:09

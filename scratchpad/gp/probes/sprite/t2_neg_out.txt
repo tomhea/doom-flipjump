@@ -1,0 +1,2 @@
+heavy:gate664    n=106 runs/col=13.1  TODAY  50793  PROP  51633  PROP2  45067  PROP!=TODAY 101  PROP2!=TODAY 101  TODAY!=PLAIN+frag 0  (108s)
+NEGATIVE CONTROL: the one-row-shifted PROP differs on 101 columns, PROP2 on 101 -> control PASSES (the check can fail)

@@ -1,0 +1,102 @@
+[
+ {
+  "name": "window copy-in 27 nibbles E=64 jump",
+  "mode": "plain",
+  "per_call": 1267.515625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "stub: hex.mov 27 from the monster's fixed cells",
+  "stats": {}
+ },
+ {
+  "name": "window copy-in 27 nibbles E=64 jump",
+  "mode": "pool",
+  "per_call": 402.984375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "stub: hex.mov 27 from the monster's fixed cells",
+  "stats": {
+   "groups": 1773,
+   "tables": 3475,
+   "allocated": 3475,
+   "declined": 0,
+   "pinned": 1773,
+   "broken": 0
+  }
+ },
+ {
+  "name": "window copy-out 27 nibbles E=64 jump",
+  "mode": "plain",
+  "per_call": 1277.515625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "stub: hex.mov 27 into the fixed cells",
+  "stats": {}
+ },
+ {
+  "name": "window copy-out 27 nibbles E=64 jump",
+  "mode": "pool",
+  "per_call": 402.984375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "stub: hex.mov 27 into the fixed cells",
+  "stats": {
+   "groups": 1800,
+   "tables": 3531,
+   "allocated": 3531,
+   "declined": 0,
+   "pinned": 1800,
+   "broken": 0
+  }
+ },
+ {
+  "name": "window copy-in 27 nibbles E=64 ptr",
+  "mode": "plain",
+  "per_call": 22184.375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "ptr_index + read_hex 27",
+  "stats": {}
+ },
+ {
+  "name": "window copy-in 27 nibbles E=64 ptr",
+  "mode": "pool",
+  "per_call": 11267.15625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "ptr_index + read_hex 27",
+  "stats": {
+   "groups": 115,
+   "tables": 777,
+   "allocated": 777,
+   "declined": 0,
+   "pinned": 115,
+   "broken": 0
+  }
+ },
+ {
+  "name": "window copy-out 27 nibbles E=64 ptr",
+  "mode": "plain",
+  "per_call": 25327.71875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "ptr_index + write_hex 27",
+  "stats": {}
+ },
+ {
+  "name": "window copy-out 27 nibbles E=64 ptr",
+  "mode": "pool",
+  "per_call": 14831.9375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "ptr_index + write_hex 27",
+  "stats": {
+   "groups": 142,
+   "tables": 806,
+   "allocated": 806,
+   "declined": 0,
+   "pinned": 142,
+   "broken": 0
+  }
+ }
+]

@@ -1,0 +1,72 @@
+S4 set scratchpad/gp/census_out/s4v1/combat_scenarios_v1.snapshot.json, sha256 f2e3e4020654d36b, status: DRAFT -- frozen only when the owner signs it off (D2)
+  s4_R0-west-hall tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  1 s
+  s4_R0-west-hall tic  20  alive 46 awake  3 corpses  0 fb 0 fx 1 drops 0  19 s
+  s4_R0-west-hall tic  40  alive 46 awake  3 corpses  0 fb 0 fx 1 drops 0  37 s
+  s4_R0-west-hall tic  60  alive 45 awake  2 corpses  1 fb 0 fx 2 drops 1  54 s
+  s4_R0-west-hall tic  80  alive 45 awake  2 corpses  1 fb 0 fx 1 drops 1  70 s
+s4_R0-west-hall: 100 tics, 1 kills, events {'fired': 5, 'shots': 4, 'hits': 4, 'kills': 1, 'fx_spawns': 4} -> scratchpad\gp\census_out\s4v1\s4_R0-west-hall.jsonl (87 s)
+  REPLAY CONTROL s4_R0-west-hall: model digest EQUALS the frozen final digest
+  s4_R0-south-hall tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  1 s
+  s4_R0-south-hall tic  20  alive 46 awake  6 corpses  0 fb 0 fx 0 drops 0  25 s
+  s4_R0-south-hall tic  40  alive 46 awake  6 corpses  0 fb 0 fx 0 drops 0  46 s
+  s4_R0-south-hall tic  60  alive 46 awake  6 corpses  0 fb 0 fx 0 drops 0  53 s
+  s4_R0-south-hall tic  80  alive 46 awake  6 corpses  0 fb 0 fx 0 drops 0  60 s
+s4_R0-south-hall: 100 tics, 0 kills, events {'pickups': 4, 'proj_spawns': 1, 'mon_shots': 6, 'player_hurt': 1} -> scratchpad\gp\census_out\s4v1\s4_R0-south-hall.jsonl (69 s)
+  REPLAY CONTROL s4_R0-south-hall: model digest EQUALS the frozen final digest
+  s4_R0-imp-court tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  1 s
+  s4_R0-imp-court tic  20  alive 46 awake  7 corpses  0 fb 0 fx 0 drops 0  19 s
+  s4_R0-imp-court tic  40  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  39 s
+  s4_R0-imp-court tic  60  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  59 s
+  s4_R0-imp-court tic  80  alive 46 awake 10 corpses  0 fb 1 fx 1 drops 0  78 s
+s4_R0-imp-court: 100 tics, 0 kills, events {'fired': 4, 'shots': 4, 'hits': 4, 'pickups': 1, 'proj_spawns': 3, 'proj_impacts': 2, 'fx_spawns': 4, 'mon_shots': 6, 'mon_melee': 1, 'player_hurt': 6} -> scratchpad\gp\census_out\s4v1\s4_R0-imp-court.jsonl (96 s)
+  REPLAY CONTROL s4_R0-imp-court: model digest EQUALS the frozen final digest
+  s4_R0-northwest tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  1 s
+  s4_R0-northwest tic  20  alive 46 awake  5 corpses  0 fb 0 fx 1 drops 0  28 s
+  s4_R0-northwest tic  40  alive 45 awake  4 corpses  1 fb 0 fx 1 drops 1  55 s
+  s4_R0-northwest tic  60  alive 45 awake  4 corpses  1 fb 0 fx 2 drops 1  81 s
+  s4_R0-northwest tic  80  alive 44 awake  3 corpses  2 fb 0 fx 2 drops 2  108 s
+s4_R0-northwest: 100 tics, 2 kills, events {'fired': 4, 'shots': 4, 'hits': 4, 'kills': 2, 'fx_spawns': 4, 'mon_shots': 5, 'mon_melee': 2, 'player_hurt': 3} -> scratchpad\gp\census_out\s4v1\s4_R0-northwest.jsonl (133 s)
+  REPLAY CONTROL s4_R0-northwest: model digest EQUALS the frozen final digest
+  s4_R0-courtyard tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  1 s
+  s4_R0-courtyard tic  20  alive 46 awake  9 corpses  0 fb 0 fx 1 drops 0  15 s
+  s4_R0-courtyard tic  40  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  25 s
+  s4_R0-courtyard tic  60  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  36 s
+  s4_R0-courtyard tic  80  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  47 s
+s4_R0-courtyard: 100 tics, 0 kills, events {'fired': 5, 'shots': 5, 'hits': 5, 'proj_spawns': 3, 'fx_spawns': 5, 'mon_shots': 3, 'mon_melee': 2, 'player_hurt': 6, 'nukage': 3} -> scratchpad\gp\census_out\s4v1\s4_R0-courtyard.jsonl (57 s)
+  REPLAY CONTROL s4_R0-courtyard: model digest EQUALS the frozen final digest
+  s4_R2-barrel-hall tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  1 s
+  s4_R2-barrel-hall tic  20  alive 46 awake 14 corpses  0 fb 0 fx 1 drops 0  13 s
+  s4_R2-barrel-hall tic  40  alive 45 awake 17 corpses  1 fb 0 fx 1 drops 1  23 s
+  s4_R2-barrel-hall tic  60  alive 45 awake 17 corpses  1 fb 0 fx 2 drops 1  32 s
+  s4_R2-barrel-hall tic  80  alive 45 awake 17 corpses  1 fb 0 fx 1 drops 1  39 s
+s4_R2-barrel-hall: 100 tics, 1 kills, events {'fired': 5, 'shots': 5, 'hits': 5, 'kills': 1, 'fx_spawns': 5, 'mon_shots': 3, 'mon_melee': 1, 'player_hurt': 3} -> scratchpad\gp\census_out\s4v1\s4_R2-barrel-hall.jsonl (45 s)
+  REPLAY CONTROL s4_R2-barrel-hall: model digest EQUALS the frozen final digest
+  s4_R2-spectre-corridor tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  1 s
+  s4_R2-spectre-corridor tic  20  alive 46 awake 13 corpses  0 fb 0 fx 1 drops 0  19 s
+  s4_R2-spectre-corridor tic  40  alive 46 awake 18 corpses  0 fb 0 fx 2 drops 0  43 s
+  s4_R2-spectre-corridor tic  60  alive 46 awake 18 corpses  0 fb 0 fx 2 drops 0  68 s
+  s4_R2-spectre-corridor tic  80  alive 46 awake 18 corpses  0 fb 0 fx 1 drops 0  94 s
+s4_R2-spectre-corridor: 100 tics, 0 kills, events {'fired': 5, 'shots': 4, 'hits': 4, 'fx_spawns': 4, 'mon_shots': 3, 'player_hurt': 2} -> scratchpad\gp\census_out\s4v1\s4_R2-spectre-corridor.jsonl (120 s)
+  REPLAY CONTROL s4_R2-spectre-corridor: model digest EQUALS the frozen final digest
+  s4_R2-east-yard tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4_R2-east-yard tic  20  alive 46 awake  9 corpses  0 fb 0 fx 1 drops 0  8 s
+  s4_R2-east-yard tic  40  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  17 s
+  s4_R2-east-yard tic  60  alive 46 awake 10 corpses  0 fb 0 fx 2 drops 0  26 s
+  s4_R2-east-yard tic  80  alive 46 awake 10 corpses  0 fb 0 fx 1 drops 0  35 s
+s4_R2-east-yard: 100 tics, 1 kills, events {'fired': 5, 'shots': 5, 'hits': 5, 'kills': 1, 'proj_spawns': 4, 'fx_spawns': 5, 'mon_shots': 3} -> scratchpad\gp\census_out\s4v1\s4_R2-east-yard.jsonl (44 s)
+  REPLAY CONTROL s4_R2-east-yard: model digest EQUALS the frozen final digest
+  s4_R3-west tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4_R3-west tic  20  alive 46 awake  4 corpses  0 fb 0 fx 1 drops 0  7 s
+  s4_R3-west tic  40  alive 45 awake  3 corpses  1 fb 0 fx 1 drops 1  13 s
+  s4_R3-west tic  60  alive 45 awake  3 corpses  1 fb 0 fx 1 drops 1  20 s
+  s4_R3-west tic  80  alive 45 awake  3 corpses  1 fb 0 fx 0 drops 1  31 s
+s4_R3-west: 100 tics, 1 kills, events {'fired': 2, 'shots': 2, 'hits': 2, 'kills': 1, 'fx_spawns': 2, 'mon_shots': 3, 'player_hurt': 1} -> scratchpad\gp\census_out\s4v1\s4_R3-west.jsonl (34 s)
+  REPLAY CONTROL s4_R3-west: model digest EQUALS the frozen final digest
+  s4_R3-mid tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  0 s
+  s4_R3-mid tic  20  alive 46 awake  4 corpses  0 fb 0 fx 1 drops 0  8 s
+  s4_R3-mid tic  40  alive 46 awake  4 corpses  0 fb 0 fx 1 drops 0  15 s
+  s4_R3-mid tic  60  alive 46 awake  4 corpses  0 fb 0 fx 2 drops 0  23 s
+  s4_R3-mid tic  80  alive 45 awake  3 corpses  1 fb 0 fx 1 drops 1  32 s
+s4_R3-mid: 100 tics, 1 kills, events {'fired': 5, 'shots': 5, 'hits': 5, 'kills': 1, 'fx_spawns': 5, 'mon_shots': 6} -> scratchpad\gp\census_out\s4v1\s4_R3-mid.jsonl (42 s)
+  REPLAY CONTROL s4_R3-mid: model digest EQUALS the frozen final digest
+exit 0

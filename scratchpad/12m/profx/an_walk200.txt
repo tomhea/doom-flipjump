@@ -1,0 +1,64 @@
+$ python phases.py walk200
+game frames: 200   mean frame 18,401,322 ops (marker 1 to marker 1)
+
+phase                                         ops/frame       %    runs/fr      ops/run
+input (8 polls, key decode)                         999   0.01%       1.00          999
+doors                                             1,488   0.01%       1.00        1,488
+move / turn                                       2,597   0.01%       1.00        2,597
+collision                                     1,709,680   9.29%       1.00    1,709,680
+  of which dsccs seed walks                     167,795   0.91%       3.29       51,001
+post-move vx/vy                                     242   0.00%       1.00          242
+sim.bind_things                                 438,811   2.38%       1.00      438,811
+  of which ptloc_walk (dirty things)                  0   0.00%       0.00            -
+view setup                                        3,592   0.02%       1.00        3,592
+eye point location (dsc walk)                    49,687   0.27%       1.00       49,687
+render walk, all                             15,944,452  86.65%       1.00   15,944,452
+m1_reset                                        249,752   1.36%       1.00      249,752
+(glue between phases)                                19   0.00%
+
+one player move try = collision / seed walks: 519,659 ops (51,001 of it the seed walk); 3.29 tries/frame
+
+render walk split by owner object (ops/frame):
+      4,787,051  30.02%  seg_pass2_leaf
+      3,801,176  23.84%  seg_pass1_ts_leaf
+      2,949,166  18.50%  seg_pass1_leaf
+      1,536,088   9.63%  bspcode walk (nodes, pos_leaf, ss code)
+        972,273   6.10%  thing_pass_leaf
+        847,140   5.31%  thing_leaf_b
+        659,619   4.14%  thing_leaf
+        170,309   1.07%  vpb bands-as-code (plane bands)
+        139,851   0.88%  bbgate_leaf
+         79,322   0.50%  segconsts (per-seg/thing const blocks)
+          2,452   0.02%  banks tail (vql/vqh, yslope, zlight)
+              0   0.00%  banks head (vars, sprbkt tables)
+
+$ python analyze.py objects walk200
+game frames: 200 (runs: 1)   ops re-attributed from far unlabelled opaque ops: 232,441,941 over the run
+mean ops/frame 18,401,308   median 17,764,108   min 16,420,680   max 24,663,974   p80(frame) 18,889,621
+output-bit ops/frame: mean 55215
+
+id  object                                            ops/frame       %   min/frame   max/frame
+15  seg_pass2_leaf                                    4,787,051  26.01%   3,825,833   8,000,835
+11  seg_pass1_ts_leaf                                 3,801,176  20.66%   2,673,063   4,885,059
+10  seg_pass1_leaf                                    2,949,166  16.03%   2,591,894   4,892,175
+18  bspcode walk (nodes, pos_leaf, ss code)           1,742,704   9.47%   1,619,770   1,940,806
+5   collision (4x vx/vy + dsccs fcall + try_move)     1,541,899   8.38%     366,424   1,839,648
+14  thing_pass_leaf                                     972,274   5.28%     907,119   1,333,298
+13  thing_leaf_b                                        847,141   4.60%     565,213   1,288,642
+12  thing_leaf                                          659,619   3.58%     517,445   2,381,291
+6   sim.bind_things                                     438,812   2.38%     438,812     438,877
+25  m1_reset code                                       249,738   1.36%     247,000     250,027
+23  vpb bands-as-code (plane bands)                     170,309   0.93%      83,608     642,368
+16  bbgate_leaf                                         139,851   0.76%     134,732     156,687
+17  segconsts (per-seg/thing const blocks)               79,323   0.43%      71,702     112,934
+20  dsccs walk (collision point-location)                 8,415   0.05%       2,601      10,601
+7   view setup (wnt, wedge_setup)                         3,584   0.02%       3,538       3,625
+4   move sim (turn/move/finesine/mul)                     2,798   0.02%       2,790       2,848
+19  dsc walk (eye point-location)                         2,455   0.01%       1,290       2,644
+24  banks tail (vql/vqh, yslope, zlight)                  2,453   0.01%       1,216      10,036
+3   doors (use + 13 door tics)                            1,516   0.01%       1,516       1,516
+1   input (kb.poll x8 + key decode)                       1,004   0.01%       1,001       1,515
+8   frame glue (collines begin, bsp jump)                    18   0.00%          18          18
+22  banks head (vars, sprbkt tables)                          0   0.00%           0          11
+
+per-frame distribution: p0=16,420,680  p10=17,764,108  p25=17,764,108  p50=17,764,108  p75=18,629,517  p80=18,889,621  p90=20,001,496  p95=20,960,097  p99=23,066,389  p100=24,663,974

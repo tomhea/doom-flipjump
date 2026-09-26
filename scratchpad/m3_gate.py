@@ -35,6 +35,7 @@ from doomfj.menu import palette_colours, pixels                           # noqa
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
                                     build_scene, spawn_state)
 from doomfj.wad import WadFile                                            # noqa: E402
+from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.wall_renderer import DEFAULT_MENU, STANDALONE_POLLS           # noqa: E402
 from flipjump.interpreter.io_devices.KeyboardIO import (KeyboardIO, KeyEvent,   # noqa: E402
                                                         ScriptedKeyEventSource)
@@ -101,8 +102,7 @@ def main():
     scene = build_scene(mw, mw, args.map)
     colours = palette_colours(bytes(b for rgb in mw.playpal(0) for b in rgb))
     menu_want = bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, 2, colours))
-    render_kw = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
-                     near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
+    render_kw = dict(GAME_RENDER_KW, sprite_wad=art)
 
     events = [KeyEvent(f * STANDALONE_POLLS + p, d, c) for f, p, d, c in SCRIPT]
     print("fjm    : %s" % args.fjm)

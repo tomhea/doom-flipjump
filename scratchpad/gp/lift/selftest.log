@@ -1,0 +1,17 @@
+$ python scratchpad/gp/lift/lift_budget.py --selftest
+SELFTEST lift_budget.py -- shipped (build/generated_doom_e1m1_blocked27): 222 pids, 48 classes, 43392 half-lists, 9015 bodies, 5326 pair blocks
+  PASS R0 reproduction control (the emitter's rules)                      pids 222/222 classes 48/48 lists 43392/43392 uniq 9015/9015 pairs 5326/5326
+  PASS P1 mutant: door quantization 16 -> 32 must be caught               pids 188/222 classes 48/48 lists 36864/43392
+  PASS P2 mutant: door sector 10's ceiling ignored (shut in all 9 states) pids 214/222 classes 48/48 lists 41856/43392
+  PASS P3 mutant: the plane key without the sector's light must be caught pids 170/222 classes 48/48 lists 33408/43392
+  INFO equivalent mutant, not a check -- the V5 back-pair registration dropped: pids 222/222 classes 48/48 lists 43392/43392; lifts-q16/instant projection 243 pids (243 with the rule)
+  INFO equivalent mutant, not a check -- the walk tests only the STORED state: pids 222/222 classes 48/48 lists 43392/43392; lifts-q16/instant projection 243 pids (243 with the rule)
+  INFO equivalent mutant, not a check -- every two-sided seg marks: pids 222/222 classes 48/48 lists 43392/43392; lifts-q16/instant projection 243 pids (243 with the rule)
+  PASS B1 mutant: viewz class 24's eye +8 units -- counts blind, bodies must catch pids 222/222 classes 48/48 lists 43392/43392 uniq 9038/9015 pairs 5344/5326
+  PASS L0 label_sizes reproduces the five word costs + shipped counts     costs 8.0/44.0/336/81.8/253 (constants 8.0/44.0/336/81.8/253); labels: thunks 43392/43392 bodies 9015/9015 pair blocks 5326/5326
+  PASS L1 mutant: label stride 32 -> 64 bits per word must be caught      costs 4.0/22.0/168/40.9/126 (constants 8.0/44.0/336/81.8/253); labels: thunks 43392/43392 bodies 9015/9015 pair blocks 5326/5326
+  PASS L2 mutant: one vpb_t label (vpb_t0) renamed must be caught         costs 8.0/44.0/336/81.8/253 (constants 8.0/44.0/336/81.8/253); labels: thunks 43391/43392 bodies 9015/9015 pair blocks 5326/5326
+  PASS D0 seg_units on the doors reproduces the shipped door blocks       units 189/189 (render 81 attrib 54 face 54), blocks 1581/1581
+  PASS D1 mutant: seg_units without the face rule must be caught          units 135/189, blocks 1127/1581
+SELFTEST PASS: 10/10 checks passed (635 s)
+exit 0

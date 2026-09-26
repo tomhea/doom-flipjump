@@ -1,0 +1,11 @@
+  (gamespeed routes planned in 78 s, outside the lock)
+  T1 gamespeed run 0 as a scenario reproduces the recorded total, to the op ok  2,100,441,242 vs 2,100,441,242
+  T1 ... state-exact and byte-exact against the mirror at every checked frame ok  state 100/100 pixels 10/10
+  T1 ... and the mirror never parts from DoorSim's poses (the same rules)  ok  0
+  T2 an expectation one turn off FAILS the state check on every frame      ok  0/100 accepted
+  T3 startup + menu measured through this driver = the recorded calibration ok  518,147
+  T4 the game oracle passes the courtyard's sky frames, pixel for pixel    ok  6/6
+  T4 negative: the oracle WITHOUT sky/bbox_cull is rejected on the same frames ok  0/6 accepted
+
+B0_SCENARIOS SELFTEST PASS
+selftest rc=0

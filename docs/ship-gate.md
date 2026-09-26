@@ -81,6 +81,10 @@ The line did not change: its two leads live in the program (`config.py`'s pads) 
    equal field for field. The tracked cache is that LF recount, so the line HITs on a fresh
    checkout. A working copy with CRLF sources signs differently and recounts: harmless (+~34 min),
    and the fix is to make its sources LF, not to re-sign the cache.
+4. **(PR #87, 2026-09-26)** the gameplay model's new `src/doomfj` modules (gamedata, rng, world,
+   combat) and the `GAME_RENDER_KW` refactor change the signature: on main after that merge the
+   line MISSES the tracked cache and recounts once (~34 min, the counts expected equal); the next
+   ship build re-signs the cache from that recount, as in item 3.
 
 Its label table is `scratchpad/12m/atlas/blocked27.labels.tsv.gz`; `padA`/`padB` and the recounts'
 duplicates `blocked27r`/`blocked27lf` were deleted.
@@ -96,6 +100,14 @@ the engine runs hybrid/paged. `m2_std_gate` drives this same `PcIO` composition 
 gate PASS is a statement about the object a person runs.
 
 ## 2. The gate, in order; a failure stops the process
+
+**2a. Features (class F, owner decision D8, 2026-09-26; `docs/handoff-gameplay.md`).** The steps
+below are the gate for a change whose pixels are IDENTICAL (class S): B SLOWER never ships. A
+gameplay FEATURE changes pixels by design, and msframe cannot judge that (it says the speed is
+meaningless when the arms' pixels differ). A class-F change ships on: the byte- and state-exact
+gates; CAP-22 (the owner's binding metric on the frozen combat set, <= 22,000,000); and size. Its
+msframe time is recorded as the feature's price; ~90 ms/frame is a tripwire that must be
+explained before shipping.
 
 1. **Correctness, byte-exact.** `scratchpad/m2_std_gate.py --fjm <new>` (the full-game play-test:
    menu, 154-frame walk, a door opened and carried across two resets; every game frame byte-exact

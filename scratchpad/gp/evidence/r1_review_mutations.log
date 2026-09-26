@@ -1,0 +1,6 @@
+# PR #87 review round 1: the mutation each new/fixed test must catch (source mutated, test run, restored)
+aim: the farther target wins               -> 1 failed, 1 passed in 0.33s
+aim: the sight check disabled              -> 1 failed, 1 passed in 0.33s
+nukage: a 16-tic period                    -> 3 failed, 13 passed in 4.76s
+walls: a mover that refuses every step     -> 1 failed in 0.38s
+unmutated (restored)                       -> 40 passed in 6.83s

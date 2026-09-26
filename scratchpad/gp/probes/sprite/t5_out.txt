@@ -1,0 +1,10 @@
+  BASE    slope        0 /column   intercept      5218   (6s)
+  RESET   slope      568 /column   intercept      6278   (7s)
+  REC_T   slope    20311 /column   intercept      6231   (9s)
+  REC_P   slope    12610 /column   intercept     10113   (9s)
+  REC_P2  slope    10860 /column   intercept     10077   (9s)
+  LOAD_T  slope    25420 /column   intercept      8435   (17s)
+  LOAD_P  slope    15374 /column   intercept     12755   (13s)
+record per column: TODAY 19743  PROPOSED 12043  PROPOSED+nibble-address 10292
+per thing (K=0 intercept, over BASE+RESET): TODAY -47  PROPOSED 3835
+load per column: TODAY 5110  PROPOSED 2764

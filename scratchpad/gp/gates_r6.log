@@ -1,0 +1,254 @@
+# m2_std_gate and m3_gate on blocked27 after the R6 refactor (every oracle call through reference_model.GAME_RENDER_KW: sky and bbox_cull on); FULL output
+$ python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_blocked27.fjm
+  CONTROL 5: binary and oracle agree on door geometry (quant 16, 13 doors)
+  CONTROL 0: the planned route crosses no solid linedef: yes (154 frames re-simulated)
+fjm    : build/doom_e1m1_blocked27.fjm
+target : door sector 10, use box (704, 448, 960, 608), threshold state 4
+script : 2 menu -> enter -> 154 walk to the door -> 2 use -> 10 open -> 36 through -> 6 idle  (210 frames)
+doorway: line 55 ((896, 544), (768, 544)) -> approach (832, 488), then through to (832, 632)
+running: 4,117,778,334 ops -> 210 frames presented
+
+  frame  keys      door10    fj px vs oracle
+      0  -              -   (menu frame -- m3_gate judges these)
+      1  -              -   (menu frame -- m3_gate judges these)
+      2  t              0   BYTE-EXACT
+      3  t              0   BYTE-EXACT
+      4  t              0   BYTE-EXACT
+      5  t              0   BYTE-EXACT
+      6  t              0   BYTE-EXACT
+      7  f              0   BYTE-EXACT
+      8  t              0   BYTE-EXACT
+      9  t              0   BYTE-EXACT
+     10  t              0   BYTE-EXACT
+     11  f              0   BYTE-EXACT
+     12  t              0   BYTE-EXACT
+     13  f              0   BYTE-EXACT
+     14  t              0   BYTE-EXACT
+     15  f              0   BYTE-EXACT
+     16  f              0   BYTE-EXACT
+     17  f              0   BYTE-EXACT
+     18  f              0   BYTE-EXACT
+     19  f              0   BYTE-EXACT
+     20  f              0   BYTE-EXACT
+     21  f              0   BYTE-EXACT
+     22  f              0   BYTE-EXACT
+     23  f              0   BYTE-EXACT
+     24  f              0   BYTE-EXACT
+     25  f              0   BYTE-EXACT
+     26  f              0   BYTE-EXACT
+     27  f              0   BYTE-EXACT
+     28  f              0   BYTE-EXACT
+     29  f              0   BYTE-EXACT
+     30  f              0   BYTE-EXACT
+     31  f              0   BYTE-EXACT
+     32  f              0   BYTE-EXACT
+     33  f              0   BYTE-EXACT
+     34  f              0   BYTE-EXACT
+     35  f              0   BYTE-EXACT
+     36  f              0   BYTE-EXACT
+     37  f              0   BYTE-EXACT
+     38  f              0   BYTE-EXACT
+     39  f              0   BYTE-EXACT
+     40  f              0   BYTE-EXACT
+     41  f              0   BYTE-EXACT
+     42  f              0   BYTE-EXACT
+     43  f              0   BYTE-EXACT
+     44  f              0   BYTE-EXACT
+     45  f              0   BYTE-EXACT
+     46  f              0   BYTE-EXACT
+     47  f              0   BYTE-EXACT
+     48  t              0   BYTE-EXACT
+     49  t              0   BYTE-EXACT
+     50  t              0   BYTE-EXACT
+     51  t              0   BYTE-EXACT
+     52  t              0   BYTE-EXACT
+     53  t              0   BYTE-EXACT
+     54  t              0   BYTE-EXACT
+     55  t              0   BYTE-EXACT
+     56  t              0   BYTE-EXACT
+     57  f              0   BYTE-EXACT
+     58  t              0   BYTE-EXACT
+     59  t              0   BYTE-EXACT
+     60  t              0   BYTE-EXACT
+     61  f              0   BYTE-EXACT
+     62  t              0   BYTE-EXACT
+     63  f              0   BYTE-EXACT
+     64  t              0   BYTE-EXACT
+     65  t              0   BYTE-EXACT
+     66  f              0   BYTE-EXACT
+     67  t              0   BYTE-EXACT
+     68  t              0   BYTE-EXACT
+     69  t              0   BYTE-EXACT
+     70  t              0   BYTE-EXACT
+     71  t              0   BYTE-EXACT
+     72  t              0   BYTE-EXACT
+     73  t              0   BYTE-EXACT
+     74  t              0   BYTE-EXACT
+     75  f              0   BYTE-EXACT
+     76  t              0   BYTE-EXACT
+     77  t              0   BYTE-EXACT
+     78  t              0   BYTE-EXACT
+     79  f              0   BYTE-EXACT
+     80  t              0   BYTE-EXACT
+     81  f              0   BYTE-EXACT
+     82  t              0   BYTE-EXACT
+     83  f              0   BYTE-EXACT
+     84  f              0   BYTE-EXACT
+     85  f              0   BYTE-EXACT
+     86  f              0   BYTE-EXACT
+     87  f              0   BYTE-EXACT
+     88  f              0   BYTE-EXACT
+     89  f              0   BYTE-EXACT
+     90  f              0   BYTE-EXACT
+     91  f              0   BYTE-EXACT
+     92  f              0   BYTE-EXACT
+     93  f              0   BYTE-EXACT
+     94  f              0   BYTE-EXACT
+     95  f              0   BYTE-EXACT
+     96  f              0   BYTE-EXACT
+     97  f              0   BYTE-EXACT
+     98  f              0   BYTE-EXACT
+     99  f              0   BYTE-EXACT
+    100  f              0   BYTE-EXACT
+    101  f              0   BYTE-EXACT
+    102  f              0   BYTE-EXACT
+    103  f              0   BYTE-EXACT
+    104  f              0   BYTE-EXACT
+    105  f              0   BYTE-EXACT
+    106  f              0   BYTE-EXACT
+    107  f              0   BYTE-EXACT
+    108  t              0   BYTE-EXACT
+    109  t              0   BYTE-EXACT
+    110  t              0   BYTE-EXACT
+    111  t              0   BYTE-EXACT
+    112  t              0   BYTE-EXACT
+    113  t              0   BYTE-EXACT
+    114  t              0   BYTE-EXACT
+    115  t              0   BYTE-EXACT
+    116  t              0   BYTE-EXACT
+    117  f              0   BYTE-EXACT
+    118  t              0   BYTE-EXACT
+    119  t              0   BYTE-EXACT
+    120  t              0   BYTE-EXACT
+    121  f              0   BYTE-EXACT
+    122  t              0   BYTE-EXACT
+    123  f              0   BYTE-EXACT
+    124  t              0   BYTE-EXACT
+    125  t              0   BYTE-EXACT
+    126  f              0   BYTE-EXACT
+    127  t              0   BYTE-EXACT
+    128  t              0   BYTE-EXACT
+    129  t              0   BYTE-EXACT
+    130  t              0   BYTE-EXACT
+    131  t              0   BYTE-EXACT
+    132  t              0   BYTE-EXACT
+    133  f              0   BYTE-EXACT
+    134  t              0   BYTE-EXACT
+    135  t              0   BYTE-EXACT
+    136  t              0   BYTE-EXACT
+    137  t              0   BYTE-EXACT
+    138  t              0   BYTE-EXACT
+    139  f              0   BYTE-EXACT
+    140  t              0   BYTE-EXACT
+    141  f              0   BYTE-EXACT
+    142  f              0   BYTE-EXACT
+    143  f              0   BYTE-EXACT
+    144  f              0   BYTE-EXACT
+    145  f              0   BYTE-EXACT
+    146  t              0   BYTE-EXACT
+    147  t              0   BYTE-EXACT
+    148  t              0   BYTE-EXACT
+    149  t              0   BYTE-EXACT
+    150  f              0   BYTE-EXACT
+    151  t              0   BYTE-EXACT
+    152  t              0   BYTE-EXACT
+    153  f              0   BYTE-EXACT
+    154  t              0   BYTE-EXACT
+    155  f              0   BYTE-EXACT
+    156  u              1   BYTE-EXACT
+    157  u              2   BYTE-EXACT
+    158  -              3   BYTE-EXACT
+    159  -              4   BYTE-EXACT
+    160  -              5   BYTE-EXACT
+    161  -              6   BYTE-EXACT
+    162  -              7   BYTE-EXACT
+    163  -              8   BYTE-EXACT
+    164  -              8   BYTE-EXACT
+    165  -              8   BYTE-EXACT
+    166  -              8   BYTE-EXACT
+    167  -              8   BYTE-EXACT
+    168  t              8   BYTE-EXACT
+    169  t              8   BYTE-EXACT
+    170  t              8   BYTE-EXACT
+    171  t              8   BYTE-EXACT
+    172  t              8   BYTE-EXACT
+    173  t              8   BYTE-EXACT
+    174  t              8   BYTE-EXACT
+    175  t              8   BYTE-EXACT
+    176  t              8   BYTE-EXACT
+    177  t              8   BYTE-EXACT
+    178  t              8   BYTE-EXACT
+    179  f              8   BYTE-EXACT
+    180  f              8   BYTE-EXACT
+    181  f              8   BYTE-EXACT
+    182  f              8   BYTE-EXACT
+    183  t              8   BYTE-EXACT
+    184  f              8   BYTE-EXACT
+    185  t              8   BYTE-EXACT
+    186  f              8   BYTE-EXACT
+    187  t              8   BYTE-EXACT
+    188  f              8   BYTE-EXACT
+    189  t              8   BYTE-EXACT
+    190  f              8   BYTE-EXACT
+    191  t              8   BYTE-EXACT
+    192  f              8   BYTE-EXACT
+    193  t              8   BYTE-EXACT
+    194  t              8   BYTE-EXACT
+    195  t              8   BYTE-EXACT
+    196  t              8   BYTE-EXACT
+    197  t              8   BYTE-EXACT
+    198  t              8   BYTE-EXACT
+    199  t              8   BYTE-EXACT
+    200  t              8   BYTE-EXACT
+    201  t              7   BYTE-EXACT
+    202  t              6   BYTE-EXACT
+    203  f              5   BYTE-EXACT
+    204  -              4   BYTE-EXACT
+    205  -              3   BYTE-EXACT
+    206  -              2   BYTE-EXACT
+    207  -              1   BYTE-EXACT
+    208  -              0   BYTE-EXACT
+    209  -              0   BYTE-EXACT
+
+  CONTROL 1: door 10 reached 9 distinct states [0, 1, 2, 3, 4, 5, 6, 7, 8] -- carried across the reset
+  CONTROL 2: use was pressed INSIDE the box: yes
+  CONTROL 3: the 2 menu frames are identical to each other: yes
+  CONTROL 4: the player's path crosses door 10's own line SEGMENT ((896, 544)-(768, 544) / (768, 512)-(896, 512)): yes -- and every frame is byte-exact, so fj walked the same path, which its blocking bit had to clear to allow
+
+M2 STANDALONE GATE: PASS -- the shipped binary opens a door and KEEPS it open across the M1 reset
+# exit=0
+$ python scratchpad/m3_gate.py --fjm build/doom_e1m1_blocked27.fjm
+fjm    : build/doom_e1m1_blocked27.fjm
+menu   : ['DOOM ON FLIPJUMP', '', 'NEW GAME', 'QUIT']   colours bg=0 text=4 hi=176
+script : boot in menu -> enter@2 -> walk -> enter@6 (W held) -> enter@9 -> stop
+  180,156,596 ops -> 13 frames
+  frame  0 MENU  (-416.000, 256.000)  BYTE-EXACT
+  frame  1 MENU  (-416.000, 256.000)  BYTE-EXACT
+  frame  2 world (-416.000, 256.000)  BYTE-EXACT
+  frame  3 world (-400.000, 256.000)  BYTE-EXACT
+  frame  4 world (-384.000, 256.000)  BYTE-EXACT
+  frame  5 world (-368.000, 256.000)  BYTE-EXACT
+  frame  6 MENU  (-368.000, 256.000)  BYTE-EXACT
+  frame  7 MENU  (-368.000, 256.000)  BYTE-EXACT
+  frame  8 MENU  (-368.000, 256.000)  BYTE-EXACT
+  frame  9 world (-352.000, 256.000)  BYTE-EXACT
+  frame 10 world (-336.000, 256.000)  BYTE-EXACT
+  frame 11 world (-336.000, 256.000)  BYTE-EXACT
+  frame 12 world (-336.000, 256.000)  BYTE-EXACT
+
+  CONTROL: menu frames 5, world frames 8, frames that moved the player 5
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: distinct pictures: 7 of 13
+
+M3 GATE: PASS
+# exit=0

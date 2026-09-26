@@ -7,7 +7,16 @@ frame. A Python twin — the **oracle** (`src/doomfj/reference_model.py`) — re
 independently, and the two must agree **byte for byte**.
 
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
-`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-fullgame-metrics.md` — the owner's goal changed
+`docs/handoff-*.md` files for per-milestone detail.
+
+**★★ THE CURRENT MILESTONE (owner, 2026-09-26): the FULLY PLAYABLE E1M1 -- moving monsters, fighting,
+shooting, damage and health, dying -- at <= 22M ops/frame on a frozen combat scenario set. Start at
+`docs/handoff-gameplay.md`: the whole plan, every owner decision, what phase 0 built and measured,
+and phase 1's rungs. Phase 0 is done; phase 1 has not started.** The paragraph below is the standing
+number of the shipped game WITHOUT combat; the 22M cap replaces its 20M target only when the combat
+game ships (decision D1 in the handoff).
+
+**★ For what happened before: `docs/handoff-fullgame-metrics.md` — the owner's goal changed
 on 2026-09-06 and the 12M-ops render target is SUPERSEDED.** Success is now two numbers on the
 COMBINED FULL GAME (collision + sim + reset included): the binding speed of 10x100-frame games,
 `(mean + p80) / 2` of the runs' ops/frame (the owner's 2026-09-06 refinement of the p80; the
@@ -20,8 +29,9 @@ belongs in this file without its `--validate` output. `docs/handoff-m4-nine-leve
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
 whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:
 `fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
-starts the game, WASD moves, space opens doors. **M4** — now ALL NINE E1 levels in one image,
-configurable — is the only milestone left that changes the emitter's shape. Then M6 (ship).
+starts the game, WASD moves, space opens doors. **M4** (more levels) is DEFERRED: the owner set
+the goal at 1-3 levels and, for now, E1M1 only (2026-09-25/26); the current milestone is the
+fully playable E1M1 (`docs/handoff-gameplay.md`). Then M6 (ship).
 ⚠ The three-level plan in `handoff-m5-m2-m3-m4.md` section 5 is SUPERSEDED, and its "9x" reasoning
 is wrong: nine maps are 14.8x E1M1, which is nearly the smallest map in the episode.
 `docs/handoff-complete-game.md` is the full roadmap behind it.

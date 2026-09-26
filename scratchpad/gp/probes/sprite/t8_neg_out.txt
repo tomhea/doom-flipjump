@@ -1,0 +1,4 @@
+  TODAY   10596723 ops  (63s)
+  PROP     9159305 ops  (44s)
+  PROP2    8352437 ops  (41s)
+NEGATIVE CONTROL ('heavy', 'gate664'): with rec_thing's bias off by one, the PROP pipeline differs from TODAY on 101/106 columns, PROP2 on 101/106 -> control PASSES (the check can fail)

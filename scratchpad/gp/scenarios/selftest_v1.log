@@ -1,0 +1,12 @@
+  S0 the frozen set passes every criterion                               ok
+  S1 a set with no fire key has no kills and FAILS the kills criterion   ok
+  S2 a set with no movement keys FAILS the movement criterion (vacuity)  ok
+  S3 a silent set facing away FAILS the awake-in-view criterion          ok
+  S4 one key changed in one run FAILS the freeze check                   ok
+  S5 a run that died FAILS 'every run survives'                          ok
+  S5 a set without a fireball FAILS the attack-kinds criterion           ok
+  S5 a set without pickups FAILS the pickups criterion                   ok
+  S6 the planner is deterministic (checkpoint 0 re-planned = frozen keys) ok
+  S7 the binary mirror parts from the model when a thing blocks, not otherwise ok  planted 4, clear 0
+
+SCENARIOS SELFTEST PASS

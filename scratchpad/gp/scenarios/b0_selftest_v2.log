@@ -1,0 +1,14 @@
+  (gamespeed routes planned in 71 s, outside the lock)
+  T1 gamespeed run 0, every door written each frame, reproduces the recorded total ok  2,100,441,242 vs 2,100,441,242
+  T1 ... state-exact and byte-exact against the mirror, which never parts from DoorSim ok  state 100/100 pixels 10/10 parts 0/0
+  T2 an expectation one turn off FAILS the state check on every frame            ok  0/100 accepted
+  T3 startup + menu measured through this driver = the recorded calibration      ok  518,147
+  T4 the game oracle passes the courtyard's sky frames, state- and pixel-exact   ok  6/6
+  T4 negative: an oracle WITHOUT sky is rejected on the same frames              ok  0/6 accepted (probe.Oracle today: 6/6)
+  T5 a door written open takes effect: state- and pixel-exact against the mirror ok  R0-aftermath frames 2..9, door 0 (sector 10) from frame 4: state 8/8 pixels 8/8
+  T5 ... the write frame's picture differs from the unwritten run's, the two before it do not ok  6/8 frames differ
+  T6 the strafe proxy draws the same pictures, state-exact                       ok  26 strafe-only frames of 30
+  T6 ... and costs more ops (the collision tic it adds)                          ok  +26,672,241 ops
+
+B0_SCENARIOS SELFTEST PASS
+rc=0

@@ -1,0 +1,6 @@
+$ python reset_an.py games
+resets executed: 1022; ops per reset 249,275; cells restored 6105 -> 40.8 ops/cell overall
+  m1.zerobyte                     120,478 ops/reset  cells   1002  -> 120.2 ops/cell
+  hex.zero                        114,286 ops/reset  cells   4568  -> 25.0 ops/cell
+  hex.set                          14,494 ops/reset  cells    535  -> 27.1 ops/cell
+  (the m1_reset label, glue)           15 ops/reset  cells      0  -> - ops/cell

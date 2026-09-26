@@ -1,0 +1,9 @@
+staged runs present in both directories: barrel_room, demons_close, placed_pistol, quiet_walk, shotgun_imps, wake_all
+  barrel_room          1800 records | arrivals/record 55.1 -> 23.1 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  demons_close         1800 records | arrivals/record 157.1 -> 140.7 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  placed_pistol        1782 records | arrivals/record 158.2 -> 144.5 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  quiet_walk           1800 records | arrivals/record 154.7 -> 90.5 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  shotgun_imps         1800 records | arrivals/record 156.5 -> 143.6 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+  wake_all             1800 records | arrivals/record 155.5 -> 125.3 | nothing moved | frames moved: drawn 0, aim 0, seen 0
+TOTAL: records 10782
+NEGATIVE CONTROL: old 'game' vs new 'abcd' on the same frames -> 1065 of 1198 records moved; one mutated colsA caught -> the comparison has teeth

@@ -1,0 +1,4 @@
+  ladder, first field differs      TODAY    134   PROPOSED     94
+  ladder, same thing, next block   TODAY    600   PROPOSED    251
+  ladder, all equal (a ditto)      TODAY   1279   PROPOSED    614
+  shadow saves (every emitted column)  TODAY    770   PROPOSED    367

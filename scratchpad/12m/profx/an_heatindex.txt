@@ -1,0 +1,23 @@
+$ python heatindex.py games   (an ESTIMATE: arithmetic on the measured profile)
+group                                                           disp/fr   arm now/fr  heat-ord/fr   saving
+(hex.tables.res + 32)                                           139,824    1,748,710      834,901  913,808
+((hex.pointers.to_ptr_var + 128) + 32)                            6,608       50,655       26,230   24,424
+((hex.pointers.to_ptr_var + 192) + 32)                            6,608       51,502       26,892   24,609
+((hex.pointers.to_ptr_var + 256) + 32)                            6,608       50,513       27,403   23,109
+((hex.pointers.to_ptr_var + 320) + 32)                            4,146       27,639       18,246    9,393
+((hex.pointers.to_ptr_var + 64) + 32)                             6,608       50,954       25,503   25,450
+((hex.pointers.read_byte + 0) + 32)                              19,383      174,350       90,326   84,024
+((hex.pointers.read_byte + 64) + 32)                             17,436      151,381       81,652   69,729
+((hex.pointers.to_ptr_var + 384) + 32)                            4,146       28,587       16,889   11,697
+((hex.pointers.to_ptr_var + 0) + 32)                              6,608       51,028       26,528   24,499
+((ecl_cmidx + 0) + 32)                                            2,873       18,035       10,682    7,353
+(((ecl_cmidx + 128) + 0) + 32)                                    3,768       25,607       15,839    9,768
+((f13:l2210:sim.thing_pass(3)---hp + 128) + 32)                   1,669        4,775        4,093      681
+((f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2625:s      2,540       18,938       10,922    8,016
+((ecl_cmidx + 64) + 32)                                           2,873       17,697       11,252    6,445
+((f13:l2210:sim.thing_pass(3)---hp + 64) + 32)                    1,669        4,254        3,583      670
+((hex.pointers.to_ptr_var + 448) + 32)                            4,146       29,646       15,519   14,126
+((tsf_sfslot_p + 128) + 32)                                       1,397        7,262        3,722    3,540
+((f13:l2210:sim.thing_pass(3)---hp + 192) + 32)                   1,669        4,661        4,308      352
+(((ecl_cmidx + 128) + 64) + 32)                                   3,768       25,161       15,379    9,781
+TOTAL over the 20 hot words: arm/disarm now 2,541,364 ops/frame, heat-ordered 1,269,878, saving 1,271,486 (ESTIMATE)

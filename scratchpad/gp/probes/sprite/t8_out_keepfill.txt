@@ -1,0 +1,21 @@
+  PLAIN    2886417 ops  (19s)
+  HARN     3841621 ops  (23s)
+  TODAY   10596723 ops  (63s)
+  PROP     8962813 ops  (45s)
+  PROP2    8221498 ops  (42s)
+frame ('heavy', 'gate664'): 106 columns; TODAY pipeline == plain + oracle fragment on 106; PROP pipeline == TODAY on 106; PROP2 pipeline == TODAY on 106
+per sprite column over HARN (record + load + the sprite's share of the emit):  TODAY 63727  PROP 48313 (-24.2%)  PROP2 41320 (-35.2%)   [HARN - PLAIN = 9011/col of setup + seed]
+  PLAIN    2809467 ops  (19s)
+  HARN     3652960 ops  (23s)
+  TODAY   11469934 ops  (55s)
+  PROP     8836825 ops  (38s)
+  PROP2    8288312 ops  (36s)
+frame ('melee', 'h57'): 89 columns; TODAY pipeline == plain + oracle fragment on 89; PROP pipeline == TODAY on 89; PROP2 pipeline == TODAY on 89
+per sprite column over HARN (record + load + the sprite's share of the emit):  TODAY 87831  PROP 58246 (-33.7%)  PROP2 52083 (-40.7%)   [HARN - PLAIN = 9477/col of setup + seed]
+  PLAIN    3579320 ops  (19s)
+  HARN     4956734 ops  (25s)
+  TODAY   14729171 ops  (73s)
+  PROP    12851076 ops  (51s)
+  PROP2   10673403 ops  (46s)
+frame ('heavy', 'h100'): 126 columns; TODAY pipeline == plain + oracle fragment on 126; PROP pipeline == TODAY on 126; PROP2 pipeline == TODAY on 126
+per sprite column over HARN (record + load + the sprite's share of the emit):  TODAY 77559  PROP 62654 (-19.2%)  PROP2 45370 (-41.5%)   [HARN - PLAIN = 10932/col of setup + seed]

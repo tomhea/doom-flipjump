@@ -1,0 +1,48 @@
+  run                   hp kill hits shot mele fbal pick door  mov%  str% step% dodg dAwk% gAwk% corp% cam
+  R0-west-hall         100    2    4    0    0    0    0    0   84%   78%  100%    0   98%   98%   28%   0
+  R0-aftermath         104    0    0    0    0    0    6    1   95%   51%  100%    0   41%   41%   42%   0
+  R0-south-hall        100    0    2    6    0    1    5    0  100%   58%  100%    0   74%   75%    0%   0
+  R0-imp-court          55    1    6    3    0    4    2    1   93%   78%  100%    6   84%   87%    0%   0
+  R0-northwest          42    1    4    5    1    0    0    0   79%   79%  100%    0   95%   95%   43%   0
+  R0-courtyard          94    0    2    3    0    3    0    0   76%   50%  100%    2   82%   87%    0%   0
+  R2-barrel-hall        35    2   11    6    0    0    1    0   88%   74%  100%    0   86%   86%   28%   0
+  R2-spectre-corridor  100    0    4    3    0    1    0    0   84%   79%  100%    0   99%   99%    0%   0
+  R2-east-yard          88    0    0    3    1    5    0    0   95%   71%  100%   19   66%   66%    0%   0
+  R3-west              100    1    2    3    0    0    1    2   83%   65%  100%    0   59%   61%    9%   0
+  R3-mid                91    1    3    3    0    0    1    0   86%   80%  100%    0   77%   84%   14%   0
+  POPULATION per frame over the set (1100 frames; d_ = DRAWN in the decided picture, geo_ = the geometric test):
+    awake        mean  5.89  p50  6  p80  9  p99 14  max 14
+    geo_in_view  mean  2.33  p50  2  p80  3  p99  7  max  8
+    geo_awake    mean  2.09  p50  2  p80  3  p99  6  max  7
+    geo_corpses  mean  0.22  p50  0  p80  0  p99  2  max  3
+    fireballs    mean  0.26  p50  0  p80  0  p99  4  max  4
+    deferred     mean  0.00  p50  0  p80  0  p99  0  max  1
+    heavy        mean  1.83  p50  2  p80  3  p99  6  max  6
+    d_live       mean  1.89  p50  2  p80  3  p99  5  max  5
+    d_awake      mean  1.71  p50  2  p80  3  p99  5  max  5
+    d_corpse     mean  0.19  p50  0  p80  0  p99  2  max  2
+    d_drop       mean  0.05  p50  0  p80  0  p99  1  max  1
+    d_fireball   mean  0.00  p50  0  p80  0  p99  0  max  0
+    d_fx         mean  0.24  p50  0  p80  1  p99  1  max  2
+    d_barrel     mean  0.75  p50  0  p80  1  p99 10  max 12
+  B0 (frozen, blocked27 38b09a7331f4f52b): binding 17,760,774 ops/frame, mean 16,096,701, p80 run R0-courtyard 19,424,847, per-frame max 28,049,408 (R0-aftermath); strafe undercount +346,539 on the binding
+  every run survives                                                             PASS  11 runs, 0 deaths, lowest end health 35
+  >= 30% of frames have an awake monster DRAWN                                   PASS  861/1100 = 78.3%
+  >= 8 kills                                                                     PASS  8 monsters killed (and 5 barrels exploded; 0 shotgun shots)
+  all three monster attack kinds                                                 PASS  hitscan 35, melee 2, fireball 14
+  >= 6 pickups                                                                   PASS  16 pickups
+  >= 3 doors opened by the player                                                PASS  4 (R0-aftermath [0], R0-imp-court [2], R3-west [7, 8]); by monsters 1
+  >= 50% of frames carry a movement key (forward, back, strafe)                  PASS  963/1100 = 87.5% (strafe on 763 = 69.4%)
+  every run moves on >= 60% of its movement frames                               PASS  worst R0-west-hall: 84/84 = 100%
+  >= 50% of the frames with an awake monster drawn carry a strafe key            PASS  604/861 = 70.2%
+  >= 1 fireball dodge (a strafe away from a fireball's line)                     PASS  27 dodge frames of 30 frames with a fireball threat
+  an aftermath run: >= 3 corpses within 160 units at the start, one drawn on its first frame, corpses drawn on >= 20% of its frames PASS  R0-aftermath: 3 corpses near the start, 2 drawn on frame 0, corpses drawn on 42/100 frames
+  no run uses the exit                                                           PASS  0
+  B0 follows the model's camera: the injected pose lands on the model's pose     PASS  0 frames part; door states apart on 1 frames; use with strafe on 0
+  F1 status FROZEN with the owner's approval                                     PASS  status 'FROZEN', approved 'the owner' on '2026-09-26'
+  F2 every recorded file hash matches (model, census, planner: 20 files)         PASS  20/20
+  F3 the replay reproduces every frozen pose and final digest                    PASS  11/11 runs
+  F4 the drawn and geometric population reproduces frame by frame                PASS  11/11 runs
+  F5 the B0 record is present and was measured on these keys                     PASS  binding 17760774.10272727, keys match
+CRITERIA PASS | FREEZE PASS | VALIDATE PASS (85 s)
+rc=0

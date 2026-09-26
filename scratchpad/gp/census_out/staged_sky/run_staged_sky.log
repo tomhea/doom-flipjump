@@ -1,0 +1,67 @@
+  placed_pistol tic   0  alive 46 awake  7 corpses  0 fb 0 fx 0 drops 0  1 s
+  placed_pistol tic  20  alive 46 awake  9 corpses  0 fb 0 fx 1 drops 0  29 s
+  placed_pistol tic  40  alive 45 awake  8 corpses  1 fb 0 fx 1 drops 1  58 s
+  placed_pistol tic  60  alive 45 awake  8 corpses  1 fb 1 fx 2 drops 1  90 s
+  placed_pistol tic  80  alive 45 awake  8 corpses  1 fb 1 fx 0 drops 1  120 s
+  placed_pistol tic 100  alive 44 awake  7 corpses  2 fb 2 fx 1 drops 2  150 s
+  placed_pistol tic 120  alive 44 awake  7 corpses  2 fb 1 fx 2 drops 2  179 s
+  placed_pistol tic 140  alive 44 awake  7 corpses  2 fb 2 fx 1 drops 2  209 s
+  placed_pistol tic 160  alive 44 awake  7 corpses  2 fb 3 fx 0 drops 2  238 s
+  placed_pistol tic 180  alive 44 awake  7 corpses  2 fb 3 fx 0 drops 2  267 s
+placed_pistol: 198 tics, 2 kills, events {'fired': 9, 'shots': 9, 'hits': 8, 'kills': 2, 'proj_spawns': 6, 'proj_impacts': 5, 'fx_spawns': 8, 'mon_shots': 9, 'player_hurt': 5} -> scratchpad\gp\census_out\staged_sky\placed_pistol.jsonl (292 s)
+  shotgun_imps tic   0  alive 46 awake  7 corpses  0 fb 0 fx 0 drops 0  1 s
+  shotgun_imps tic  20  alive 46 awake  9 corpses  0 fb 0 fx 0 drops 0  30 s
+  shotgun_imps tic  40  alive 46 awake  9 corpses  0 fb 0 fx 0 drops 0  58 s
+  shotgun_imps tic  60  alive 46 awake  9 corpses  0 fb 0 fx 2 drops 0  90 s
+  shotgun_imps tic  80  alive 46 awake  9 corpses  0 fb 0 fx 0 drops 0  123 s
+  shotgun_imps tic 100  alive 45 awake  8 corpses  1 fb 0 fx 0 drops 0  153 s
+  shotgun_imps tic 120  alive 45 awake  8 corpses  1 fb 1 fx 0 drops 0  182 s
+  shotgun_imps tic 140  alive 45 awake  8 corpses  1 fb 2 fx 1 drops 0  211 s
+  shotgun_imps tic 160  alive 45 awake  8 corpses  1 fb 3 fx 0 drops 0  241 s
+  shotgun_imps tic 180  alive 45 awake  8 corpses  1 fb 2 fx 0 drops 0  271 s
+shotgun_imps: 200 tics, 1 kills, events {'fired': 3, 'shots': 21, 'hits': 13, 'kills': 1, 'proj_spawns': 4, 'proj_impacts': 3, 'fx_spawns': 6, 'fx_skipped': 7, 'mon_shots': 1, 'player_hurt': 3} -> scratchpad\gp\census_out\staged_sky\shotgun_imps.jsonl (299 s)
+  demons_close tic   0  alive 46 awake  5 corpses  0 fb 0 fx 0 drops 0  1 s
+  demons_close tic  20  alive 46 awake  7 corpses  0 fb 0 fx 1 drops 0  30 s
+  demons_close tic  40  alive 46 awake  7 corpses  0 fb 0 fx 1 drops 0  58 s
+  demons_close tic  60  alive 46 awake  7 corpses  0 fb 1 fx 2 drops 0  88 s
+  demons_close tic  80  alive 46 awake  7 corpses  0 fb 1 fx 1 drops 0  119 s
+  demons_close tic 100  alive 46 awake  7 corpses  0 fb 2 fx 1 drops 0  151 s
+  demons_close tic 120  alive 46 awake  7 corpses  0 fb 1 fx 2 drops 0  183 s
+  demons_close tic 140  alive 46 awake  7 corpses  0 fb 2 fx 1 drops 0  214 s
+  demons_close tic 160  alive 46 awake  7 corpses  0 fb 2 fx 0 drops 0  246 s
+  demons_close tic 180  alive 46 awake  7 corpses  0 fb 3 fx 0 drops 0  277 s
+demons_close: 200 tics, 0 kills, events {'fired': 9, 'shots': 9, 'hits': 9, 'proj_spawns': 5, 'proj_impacts': 3, 'fx_spawns': 9, 'mon_melee': 3, 'player_hurt': 5, 'deaths': 1} -> scratchpad\gp\census_out\staged_sky\demons_close.jsonl (307 s)
+  wake_all tic   0  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  1 s
+  wake_all tic  20  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  27 s
+  wake_all tic  40  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  52 s
+  wake_all tic  60  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  77 s
+  wake_all tic  80  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  104 s
+  wake_all tic 100  alive 46 awake 46 corpses  0 fb 0 fx 1 drops 0  131 s
+  wake_all tic 120  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  154 s
+  wake_all tic 140  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  176 s
+  wake_all tic 160  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  197 s
+  wake_all tic 180  alive 46 awake 46 corpses  0 fb 0 fx 0 drops 0  218 s
+wake_all: 200 tics, 0 kills, events {'fired': 13, 'shots': 12, 'hits': 2, 'fx_spawns': 2, 'mon_shots': 1} -> scratchpad\gp\census_out\staged_sky\wake_all.jsonl (237 s)
+  barrel_room tic   0  alive 46 awake  0 corpses  0 fb 0 fx 0 drops 0  0 s
+  barrel_room tic  20  alive 46 awake  7 corpses  0 fb 0 fx 0 drops 0  7 s
+  barrel_room tic  40  alive 46 awake  7 corpses  0 fb 0 fx 0 drops 0  14 s
+  barrel_room tic  60  alive 46 awake 18 corpses  0 fb 0 fx 1 drops 0  21 s
+  barrel_room tic  80  alive 45 awake 17 corpses  1 fb 1 fx 0 drops 0  29 s
+  barrel_room tic 100  alive 44 awake 16 corpses  2 fb 1 fx 1 drops 1  37 s
+  barrel_room tic 120  alive 44 awake 16 corpses  2 fb 1 fx 0 drops 1  42 s
+  barrel_room tic 140  alive 43 awake 15 corpses  3 fb 1 fx 0 drops 1  47 s
+  barrel_room tic 160  alive 43 awake 15 corpses  3 fb 0 fx 0 drops 1  52 s
+  barrel_room tic 180  alive 43 awake 15 corpses  3 fb 0 fx 0 drops 1  57 s
+barrel_room: 200 tics, 16 kills, events {'fired': 3, 'shots': 21, 'hits': 32, 'kills': 16, 'proj_spawns': 2, 'proj_impacts': 2, 'barrel_blasts': 13, 'fx_spawns': 6, 'fx_skipped': 7, 'mon_shots': 9, 'mon_melee': 1, 'player_hurt': 6, 'deaths': 1} -> scratchpad\gp\census_out\staged_sky\barrel_room.jsonl (62 s)
+  quiet_walk tic   0  alive 46 awake  1 corpses  0 fb 0 fx 0 drops 0  1 s
+  quiet_walk tic  20  alive 46 awake  3 corpses  0 fb 0 fx 0 drops 0  28 s
+  quiet_walk tic  40  alive 46 awake  3 corpses  0 fb 0 fx 0 drops 0  54 s
+  quiet_walk tic  60  alive 46 awake  3 corpses  0 fb 0 fx 0 drops 0  75 s
+  quiet_walk tic  80  alive 46 awake  3 corpses  0 fb 0 fx 0 drops 0  93 s
+  quiet_walk tic 100  alive 46 awake  3 corpses  0 fb 0 fx 0 drops 0  108 s
+  quiet_walk tic 120  alive 46 awake  3 corpses  0 fb 1 fx 0 drops 0  125 s
+  quiet_walk tic 140  alive 46 awake  3 corpses  0 fb 1 fx 0 drops 0  140 s
+  quiet_walk tic 160  alive 46 awake  3 corpses  0 fb 0 fx 0 drops 0  156 s
+  quiet_walk tic 180  alive 46 awake  3 corpses  0 fb 1 fx 0 drops 0  174 s
+quiet_walk: 200 tics, 0 kills, events {'pickups': 2, 'proj_spawns': 3, 'proj_impacts': 3, 'mon_shots': 5, 'mon_melee': 1, 'player_hurt': 8, 'player_blocked': 166} -> scratchpad\gp\census_out\staged_sky\quiet_walk.jsonl (190 s)
+exit 0

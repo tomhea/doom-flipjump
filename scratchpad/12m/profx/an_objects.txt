@@ -1,0 +1,42 @@
+$ python analyze.py objects games
+game frames: 1000 (runs: 10)   ops re-attributed from far unlabelled opaque ops: 910,703,039 over the run
+mean ops/frame 15,200,254   median 17,239,647   min 3,690,916   max 32,416,190   p80(frame) 22,607,818
+output-bit ops/frame: mean 42241
+
+id  object                                            ops/frame       %   min/frame   max/frame
+15  seg_pass2_leaf                                    4,019,354  26.44%   1,698,074   7,745,270
+11  seg_pass1_ts_leaf                                 2,723,648  17.92%          24  14,671,542
+10  seg_pass1_leaf                                    2,641,861  17.38%      20,531   7,443,708
+5   collision (4x vx/vy + dsccs fcall + try_move)     1,390,155   9.15%           0   3,637,858
+18  bspcode walk (nodes, pos_leaf, ss code)           1,080,001   7.11%     114,716   2,134,880
+13  thing_leaf_b                                        966,408   6.36%           0   4,163,374
+14  thing_pass_leaf                                     704,966   4.64%       1,340   1,598,281
+12  thing_leaf                                          583,454   3.84%           0   2,525,206
+6   sim.bind_things                                     438,810   2.89%     438,791     438,877
+25  m1_reset code                                       249,301   1.64%     247,000     250,339
+23  vpb bands-as-code (plane bands)                     238,963   1.57%           0     642,356
+16  bbgate_leaf                                          74,733   0.49%       7,273     157,916
+17  segconsts (per-seg/thing const blocks)               63,368   0.42%         546     276,902
+4   move sim (turn/move/finesine/mul)                     9,361   0.06%         784      16,936
+20  dsccs walk (collision point-location)                 4,429   0.03%           0      10,714
+7   view setup (wnt, wedge_setup)                         3,699   0.02%       3,531       3,816
+24  banks tail (vql/vqh, yslope, zlight)                  3,268   0.02%           0      10,154
+19  dsc walk (eye point-location)                         1,814   0.01%       1,298       2,841
+3   doors (use + 13 door tics)                            1,608   0.01%       1,516      10,788
+1   input (kb.poll x8 + key decode)                       1,036   0.01%       1,001       1,729
+8   frame glue (collines begin, bsp jump)                    18   0.00%          18          18
+22  banks head (vars, sprbkt tables)                          0   0.00%           0          11
+
+per run: gamespeed's (run ops - calibration)/100  vs  the mean of this run's frame intervals
+  game0   ops 2,100,441,242  -> 20,999,230 ops/frame   frame-interval mean 20,999,220   min 4,978,468  max 29,056,616
+  game1   ops 1,001,952,090  -> 10,014,339 ops/frame   frame-interval mean 10,014,319   min 4,245,270  max 26,444,903
+  game2   ops 2,013,523,861  -> 20,130,057 ops/frame   frame-interval mean 20,130,026   min 7,766,360  max 28,246,548
+  game3   ops 2,099,228,516  -> 20,987,103 ops/frame   frame-interval mean 20,987,071   min 14,479,615  max 29,130,460
+  game4   ops 1,240,232,635  -> 12,397,144 ops/frame   frame-interval mean 12,397,117   min 3,833,405  max 25,744,984
+  game5   ops 1,358,311,602  -> 13,577,934 ops/frame   frame-interval mean 13,577,907   min 3,690,916  max 32,416,190
+  game6   ops 1,202,547,964  -> 12,020,298 ops/frame   frame-interval mean 12,020,270   min 3,872,070  max 28,701,263
+  game7   ops 1,217,147,917  -> 12,166,297 ops/frame   frame-interval mean 12,166,283   min 4,419,182  max 26,174,630
+  game8   ops 1,460,676,340  -> 14,601,581 ops/frame   frame-interval mean 14,601,553   min 5,404,254  max 28,163,169
+  game9   ops 1,511,398,521  -> 15,108,803 ops/frame   frame-interval mean 15,108,777   min 5,264,027  max 31,502,003
+binding (mean+p80)/2 = 17,665,168   mean 15,200,279   p80 20,130,057
+per-frame distribution: p0=3,690,916  p10=4,663,248  p25=7,499,092  p50=17,239,647  p75=22,227,730  p80=22,607,818  p90=24,223,444  p95=25,417,849  p99=28,163,722  p100=32,416,190

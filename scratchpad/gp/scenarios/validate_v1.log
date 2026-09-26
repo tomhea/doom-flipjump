@@ -1,0 +1,29 @@
+  run                      hp kills  hits shots melee fball picks   aiv%  move% divpos divdr
+  R0-west-hall            100     1     4     0     0     0     0   100%   100%      0     0
+  R0-south-hall           100     0     0     6     0     1     4    34%   100%      0     0
+  R0-imp-court             17     0     4     6     1     3     1    98%   100%      0     0
+  R0-northwest             26     2     4     5     2     0     0    70%   100%      0     0
+  R0-courtyard             52     0     5     3     2     3     0    91%   100%      0     0
+  R2-barrel-hall           79     1     5     3     1     0     0    95%   100%      0     0
+  R2-spectre-corridor      79     0     4     3     0     0     0    99%   100%      0     0
+  R2-east-yard            100     1     5     3     0     4     0   100%   100%      0     0
+  R3-west                  88     1     2     3     0     0     0    35%   100%      0     0
+  R3-mid                  100     1     5     6     0     0     0    84%   100%      0     0
+  POPULATION per frame over the set (1000 frames):
+    awake            mean 6.25 p50 6 p80 9 p99 14 max 14
+    in_view          mean 1.86 p50 2 p80 3 p99 6 max 7
+    awake_in_view    mean 1.66 p50 2 p80 2 p99 5 max 6
+    corpses_in_view  mean 0.20 p50 0 p80 0 p99 2 max 2
+    fireballs        mean 0.16 p50 0 p80 0 p99 3 max 4
+    deferred         mean 0.59 p50 0 p80 0 p99 6 max 7
+    heavy            mean 1.71 p50 2 p80 3 p99 3 max 3
+  B0 comparability: 0 frames where blocked27's step parts from the model's pose, 0 with a door state apart, 0 with the player blocked by a thing
+  every run survives                                                 PASS  10 runs, 0 deaths
+  >= 30%% of frames have an awake monster in view                    PASS  806/1000 = 80.6%
+  >= 5 kills across the set                                          PASS  7 kills
+  all three attack kinds (hitscan, melee, fireball)                  PASS  hitscan 38, melee 6, fireball 11
+  >= 3 pickups across the set                                        PASS  5 pickups
+  every run moves on >= 60% of its movement frames                   PASS  worst R0-west-hall: 24/24 = 100%
+  no run uses the exit                                               PASS  0
+  the frozen poses and final digests replay exactly (freeze intact)  PASS  10/10 runs
+VALIDATE PASS

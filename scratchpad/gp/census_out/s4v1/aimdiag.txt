@@ -1,0 +1,14 @@
+run R0-northwest: 100 frames; digest EQUALS
+   41  geo-only: the sprite's span misses col 80 (the radius box covers it)
+    1  pic-only: sprite covers col 80, the radius box does not
+run R0-south-hall: 100 frames; digest EQUALS
+    1  geo-only: the sprite's span misses col 80 (the radius box covers it)
+    1  pic-only: 2D line of sight blocked
+run R2-barrel-hall: 100 frames; digest EQUALS
+   17  both name a target, different ones
+   14  geo-only: the sprite's span misses col 80 (the radius box covers it)
+run R0-courtyard: 100 frames; digest EQUALS
+run R2-east-yard: 100 frames; digest EQUALS
+    1  pic-only: sprite covers col 80, the radius box does not
+    1  geo-only: col 80 held by another sprite (corpse) and slot B refused
+exit 0

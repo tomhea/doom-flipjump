@@ -1,0 +1,110 @@
+$ python scratchpad/12m/pinreport.py --selftest
+pinreport selftest -- C2 and C3 are the negative controls
+  C1 the hot list is not vacuous (>= 10 words)                       ok  20 words
+  C1 every hot word of the shipped binary is PINNED at its reference base ok  PINNED
+  C1 every block holds the tables the counting pass saw              ok  104244/104244
+  C2 the stripped hottest word is reported LOST                      ok  LOST
+  C2 ... and only that one (the others stay PINNED)                  ok
+  C2 a lost pin makes the report's exit status nonzero               ok
+  C2 ... while the intact binary's is zero (the status separates)    ok
+  C3 a hot word whose label is gone is UNRESOLVED                    ok  UNRESOLVED
+  C5 the real b26 build (1,333 broken groups) shows LOST hot words   ok  18 of 20 lost
+  C4 the shipped build log's declines parse                          ok  [5103, 0, 4008]
+  C4 ... and its broken-group line                                   ok  [2, 27030]
+  C4 a synthetic log parses to ITS numbers                           ok
+  C4 a log without the lines yields nothing (not zeros)              ok
+
+SELFTEST PASS
+
+$ python scratchpad/12m/pinreport.py --fjm build/doom_e1m1_blocked27.fjm --labels scratchpad/12m/atlas/blocked27.labels.tsv.gz --counts-cache scratchpad/12m/_counts_game.json.gz --build-log docs/ship-evidence/blocked27_rebuild.log
+pin report: doom_e1m1_blocked27.fjm against the hot list of doom_e1m1_blocked27.fjm (20 words, profiled on games)
+rank status               pc(b)   ref pc        tables dispatch/fr  source word
+   1 PINNED                   2        2 81,461/81,461     139,824  (hex.tables.res + 32)
+   2 PINNED                   3        3       624/624       6,608  ((hex.pointers.to_ptr_var + 128) + 32)
+   3 PINNED                   3        3       624/624       6,608  ((hex.pointers.to_ptr_var + 192) + 32)
+   4 PINNED                   4        4       624/624       6,608  ((hex.pointers.to_ptr_var + 256) + 32)
+   5 PINNED                   3        3       553/553       4,146  ((hex.pointers.to_ptr_var + 320) + 32)
+   6 PINNED                   5        5       624/624       6,608  ((hex.pointers.to_ptr_var + 64) + 32)
+   7 PINNED                   4        4   1,209/1,209      19,383  ((hex.pointers.read_byte + 0) + 32)
+   8 PINNED                   5        5   1,168/1,168      17,436  ((hex.pointers.read_byte + 64) + 32)
+   9 PINNED                   4        4       553/553       4,146  ((hex.pointers.to_ptr_var + 384) + 32)
+  10 PINNED                   2        2       624/624       6,608  ((hex.pointers.to_ptr_var + 0) + 32)
+  11 PINNED                   4        4   2,626/2,626       2,873  ((ecl_cmidx + 0) + 32)
+  12 PINNED                   1        1   5,077/5,077       3,768  (((ecl_cmidx + 128) + 0) + 32)
+  13 PINNED                  12       12         14/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 128) + 32)
+  14 PINNED                   8        8       145/145       2,540  ((f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2625:strea
+  15 PINNED                   5        5   2,626/2,626       2,873  ((ecl_cmidx + 64) + 32)
+  16 PINNED                   8        8         14/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 64) + 32)
+  17 PINNED                   4        4       553/553       4,146  ((hex.pointers.to_ptr_var + 448) + 32)
+  18 PINNED                   6        6         34/34       1,397  ((tsf_sfslot_p + 128) + 32)
+  19 PINNED                  12       12         14/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 192) + 32)
+  20 PINNED                   2        2   5,077/5,077       3,768  (((ecl_cmidx + 128) + 64) + 32)
+
+hot words pinned: 20 of 20; lost 0; unresolved 0; base moved 0; mismatch vs the counts cache 0
+pool (build log): declines no-block 5,103, too-wide 0, overflow 4,008
+pool (build log): broken groups 2 of 27,030 (a broken group un-pins every table in it unless --pin-broken)
+pool (build log): blocked 432,164 tables in 27,030 groups; declined 9,111; ungrouped 0
+pool (build log): preflight demand 44,373,152 of 83,886,079 words (52.9% used); 27,030 of 27,030 groups placed
+exit=0
+
+$ python scratchpad/12m/pinreport.py --fjm build/doom_e1m1_blocked25.fjm --labels scratchpad/12m/atlas/blocked25.labels.tsv.gz 
+pin report: doom_e1m1_blocked25.fjm against the hot list of doom_e1m1_blocked27.fjm (20 words, profiled on games)
+rank status               pc(b)   ref pc        tables dispatch/fr  source word
+   1 PINNED                   2        2 ~81,461/81,461     139,824  (hex.tables.res + 32)
+   2 PINNED                   3        3      ~624/624       6,608  ((hex.pointers.to_ptr_var + 128) + 32)
+   3 PINNED                   3        3      ~624/624       6,608  ((hex.pointers.to_ptr_var + 192) + 32)
+   4 PINNED                   4        4      ~624/624       6,608  ((hex.pointers.to_ptr_var + 256) + 32)
+   5 PINNED                   3        3      ~553/553       4,146  ((hex.pointers.to_ptr_var + 320) + 32)
+   6 PINNED                   5        5      ~624/624       6,608  ((hex.pointers.to_ptr_var + 64) + 32)
+   7 PINNED                   4        4  ~1,209/1,209      19,383  ((hex.pointers.read_byte + 0) + 32)
+   8 PINNED                   5        5  ~1,168/1,168      17,436  ((hex.pointers.read_byte + 64) + 32)
+   9 PINNED                   4        4      ~553/553       4,146  ((hex.pointers.to_ptr_var + 384) + 32)
+  10 PINNED                   2        2      ~624/624       6,608  ((hex.pointers.to_ptr_var + 0) + 32)
+  11 PINNED                   4        4  ~2,626/2,626       2,873  ((ecl_cmidx + 0) + 32)
+  12 PINNED                   1        1  ~5,077/5,077       3,768  (((ecl_cmidx + 128) + 0) + 32)
+  13 PINNED, BASE MOVED       9       12        ~10/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 128) + 32)
+  14 PINNED, BASE MOVED       9        8      ~145/145       2,540  ((f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2625:strea
+  15 PINNED                   5        5  ~2,626/2,626       2,873  ((ecl_cmidx + 64) + 32)
+  16 PINNED, BASE MOVED       9        8        ~10/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 64) + 32)
+  17 PINNED                   4        4      ~553/553       4,146  ((hex.pointers.to_ptr_var + 448) + 32)
+  18 PINNED, BASE MOVED       8        6        ~32/34       1,397  ((tsf_sfslot_p + 128) + 32)
+  19 PINNED, BASE MOVED       9       12        ~10/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 192) + 32)
+  20 PINNED                   2        2  ~5,077/5,077       3,768  (((ecl_cmidx + 128) + 64) + 32)
+
+hot words pinned: 20 of 20; lost 0; unresolved 0; base moved 5; mismatch vs the counts cache 0
+(~ tables: no counts cache for this build, so the block is taken at the REFERENCE size and the count is approximate; the reference count is the counted tables of the profiled build)
+pool declines: n/a (no build log given)
+exit=0
+
+$ python scratchpad/12m/pinreport.py --fjm build/doom_e1m1_b26.fjm --labels scratchpad/12m/atlas/b26.labels.tsv.gz --build-log scratchpad/12m/_b26build.log
+pin report: doom_e1m1_b26.fjm against the hot list of doom_e1m1_blocked27.fjm (20 words, profiled on games)
+rank status               pc(b)   ref pc        tables dispatch/fr  source word
+   1 PINNED, BASE MOVED       1        2 ~245,062/81,461     139,824  (hex.tables.res + 32)
+   2 LOST                     0        3        ~0/624       6,608  ((hex.pointers.to_ptr_var + 128) + 32)
+   3 LOST                     0        3        ~0/624       6,608  ((hex.pointers.to_ptr_var + 192) + 32)
+   4 LOST                     0        4        ~0/624       6,608  ((hex.pointers.to_ptr_var + 256) + 32)
+   5 LOST                     0        3        ~0/553       4,146  ((hex.pointers.to_ptr_var + 320) + 32)
+   6 LOST                     0        5        ~0/624       6,608  ((hex.pointers.to_ptr_var + 64) + 32)
+   7 LOST                     0        4      ~0/1,209      19,383  ((hex.pointers.read_byte + 0) + 32)
+   8 LOST                     0        5      ~0/1,168      17,436  ((hex.pointers.read_byte + 64) + 32)
+   9 LOST                     0        4        ~0/553       4,146  ((hex.pointers.to_ptr_var + 384) + 32)
+  10 LOST                     0        2        ~0/624       6,608  ((hex.pointers.to_ptr_var + 0) + 32)
+  11 LOST                     0        4      ~0/2,626       2,873  ((ecl_cmidx + 0) + 32)
+  12 LOST                     0        1      ~0/5,077       3,768  (((ecl_cmidx + 128) + 0) + 32)
+  13 LOST                     0       12         ~0/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 128) + 32)
+  14 PINNED, BASE MOVED       4        8      ~145/145       2,540  ((f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2625:strea
+  15 LOST                     0        5      ~0/2,626       2,873  ((ecl_cmidx + 64) + 32)
+  16 LOST                     0        8         ~0/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 64) + 32)
+  17 LOST                     0        4        ~0/553       4,146  ((hex.pointers.to_ptr_var + 448) + 32)
+  18 LOST                     0        6         ~0/34       1,397  ((tsf_sfslot_p + 128) + 32)
+  19 LOST                     0       12         ~0/14       1,669  ((f13:l2210:sim.thing_pass(3)---hp + 192) + 32)
+  20 LOST                     0        2      ~0/5,077       3,768  (((ecl_cmidx + 128) + 64) + 32)
+
+hot words pinned: 2 of 20; lost 18; unresolved 0; base moved 2; mismatch vs the counts cache 0
+(~ tables: no counts cache for this build, so the block is taken at the REFERENCE size and the count is approximate; the reference count is the counted tables of the profiled build)
+ESTIMATE (not measured): the lost pins cost ~843,329 ops/frame at the reference dispatch rates
+pool (build log): declines no-block 5,103, too-wide 10,052, overflow 2,289
+pool (build log): broken groups 1,333 of 27,030 (a broken group un-pins every table in it unless --pin-broken)
+pool (build log): blocked 416,903 tables in 27,030 groups; declined 17,444; ungrouped 0
+pool (build log): preflight demand 25,038,944 of 67,108,864 words (37.3% used); 27,030 of 27,030 groups placed
+exit=1

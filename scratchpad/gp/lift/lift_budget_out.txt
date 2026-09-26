@@ -1,0 +1,46 @@
+$ python scratchpad/gp/lift/lift_budget.py
+SHIPPED (build/generated_doom_e1m1_blocked27): 222 pids, 43392 half-lists, 9015 unique, pad 65536; 48 viewz classes, 5326 pair blocks
+CONTROL registry: 222 pids (shipped 222), 48 viewz classes (shipped 48), 43392 half-lists (shipped 43392), sky 768
+CONTROL: REPRODUCED
+
+MOVERS (state 0 = stored/up; lowest surrounding floor = DOOM's low/dest):
+  sector  98 lift         floor   12 -> -124 (travel 136) ceil  128; stops at quant 8/12/16/24/32: 19/13/10/8/6
+  sector 103 lift         floor  136 ->    8 (travel 128) ceil  264; stops at quant 8/12/16/24/32: 17/13/10/7/6
+  sector  76 floor switch floor  272 ->  136 (travel 136) ceil  272; stops at quant 8/12/16/24/32: 18/13/10/8/6
+  sector 126 floor switch floor  264 ->  144 (travel 120) ceil  264; stops at quant 8/12/16/24/32: 16/11/9/6/6
+  sector 129 floor switch floor  264 ->    8 (travel 256) ceil  264; stops at quant 8/12/16/24/32: 33/23/18/12/10
+
+SEGS, LEAVES, LINES per mover (door machinery: one nibble switch per seg, one mover per seg):
+  sector  98: own segs  4, looking-at segs  4, leaves 1, lines  4 [593, 594, 595, 596]
+  sector 103: own segs  4, looking-at segs  4, leaves 1, lines  4 [618, 620, 1075, 1078]
+  sector  76: own segs 16, looking-at segs 16, leaves 4, lines 16 [730, 731, 732, 733, 734, 735, 736, 737, 738, 739, 740, 741, 742, 743, 744, 745]
+  sector 126: own segs  8, looking-at segs  8, leaves 2, lines  8 [726, 727, 728, 729, 746, 747, 748, 749]
+  sector 129: own segs  4, looking-at segs  2, leaves 1, lines  4 [756, 760, 761, 762]
+  segs with a door or another mover on the OTHER side (need a 2-D switch): 0 []
+
+CONTROL bodies: 9015 unique (shipped 9015), 5326 distinct (y2, colour) pair blocks (shipped 5326), 213 s
+
+PROJECTIONS (deltas on the reproduced base):
+  lifts q16, switch instant    states {98: 10, 103: 10, 76: 2, 126: 2, 129: 2}
+      pids 243 (+21) -> FITS the byte;  viewz classes 53 (+5);  half-lists 52284 (+8892), pad 65536
+      per-state seg blocks: 190 units (render 54, attrib 68, face 68), 636 blocks -> ~100K words (MEASURED per-unit door costs)
+      band bodies +689 (+7.6%), pair blocks +117, 0 s
+      WORDS (bank ids + bodies + pair blocks + seg blocks): ~241K = 0.179% of 2^27
+  lifts q32, switch instant    states {98: 6, 103: 6, 76: 2, 126: 2, 129: 2}
+      pids 235 (+13) -> FITS the byte;  viewz classes 51 (+3);  half-lists 48708 (+5316), pad 65536
+      per-state seg blocks: 190 units (render 54, attrib 68, face 68), 508 blocks -> ~90K words (MEASURED per-unit door costs)
+      band bodies +485 (+5.4%), pair blocks +77, 0 s
+      WORDS (bank ids + bodies + pair blocks + seg blocks): ~179K = 0.134% of 2^27
+  lifts q16, switch q32        states {98: 10, 103: 10, 76: 6, 126: 6, 129: 10}
+      pids 259 (+37) -> OVER 255: needs PID_NIBBLES 3/4;  viewz classes 53 (+5);  half-lists 55676 (+12284), pad 65536
+      per-state seg blocks: 190 units (render 54, attrib 68, face 68), 1324 blocks -> ~156K words (MEASURED per-unit door costs)
+      band bodies +770 (+8.5%), pair blocks +118, 0 s
+      WORDS (bank ids + bodies + pair blocks + seg blocks): ~328K = 0.245% of 2^27
+  lifts q16, switch q16        states {98: 10, 103: 10, 76: 10, 126: 9, 129: 18}  !! > 16 states: not one nibble
+      pids 274 (+52) -> OVER 255: needs PID_NIBBLES 3/4;  viewz classes 54 (+6);  half-lists 59952 (+16560), pad 65536
+      per-state seg blocks: 190 units (render 54, attrib 68, face 68), 1964 blocks -> ~209K words (MEASURED per-unit door costs)
+      band bodies +868 (+9.6%), pair blocks +131, 0 s
+      WORDS (bank ids + bodies + pair blocks + seg blocks): ~423K = 0.315% of 2^27
+
+total 420 s
+# exit=0

@@ -1,0 +1,16 @@
+$ python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_blocked27.fjm
+    209  -              0   BYTE-EXACT
+
+  CONTROL 1: door 10 reached 9 distinct states [0, 1, 2, 3, 4, 5, 6, 7, 8] -- carried across the reset
+  CONTROL 2: use was pressed INSIDE the box: yes
+  CONTROL 3: the 2 menu frames are identical to each other: yes
+  CONTROL 4: the player's path crosses door 10's own line SEGMENT ((896, 544)-(768, 544) / (768, 512)-(896, 512)): yes -- and every frame is byte-exact, so fj walked the same path, which its blocking bit had to clear to allow
+
+M2 STANDALONE GATE: PASS -- the shipped binary opens a door and KEEPS it open across the M1 reset
+# exit=0
+$ python scratchpad/m3_gate.py --fjm build/doom_e1m1_blocked27.fjm
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: distinct pictures: 7 of 13
+
+M3 GATE: PASS
+# exit=0

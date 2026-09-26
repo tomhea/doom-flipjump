@@ -596,7 +596,7 @@ class Oracle:
     m2_std_gate/m3_gate, door POSES, and the door-aware stepper (onewalk.DoorSim = the M2 order)"""
 
     RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
-                     near_steps=True, stack_steps=True, things=True, degrade=True)
+                     near_steps=True, stack_steps=True, things=True, degrade=True, sky=True)
 
     def __init__(self, wad=DEFAULT_WAD, asset=DEFAULT_ASSET, mapname=DEFAULT_MAP):
         from doomfj.config import Config

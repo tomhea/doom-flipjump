@@ -652,7 +652,7 @@ def main():
         want = bytes(rm.render_wall_frame(state, rsc, wall_mode="W1R", floor_mode_ft1=True,
                                           plane_near=True, wall_noise=True, near_steps=True,
                                           stack_steps=True, things=True, sprite_wad=art,
-                                          degrade=True))
+                                          degrade=True, sky=True))
         same = got[f] == want
         ok &= same
         d0 = dstates[target][0]
@@ -681,7 +681,7 @@ def main():
                 pic = bytes(rm.render_wall_frame(state, asc, wall_mode="W1R", floor_mode_ft1=True,
                                                  plane_near=True, wall_noise=True, near_steps=True,
                                                  stack_steps=True, things=True, sprite_wad=art,
-                                                 degrade=True))
+                                                 degrade=True, sky=True))
                 nd = sum(a != b for a, b in zip(got[f], pic))
                 if nd == 0 or k <= dstates[target][0] + 1:
                     print("     vs oracle with door at state %-2d : %s"

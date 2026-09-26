@@ -102,7 +102,8 @@ def main():
     colours = palette_colours(bytes(b for rgb in mw.playpal(0) for b in rgb))
     menu_want = bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, 2, colours))
     render_kw = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
-                     near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
+                     near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True,
+                     sky=True)   # the game tier draws sky; without it any sky view fails falsely (S4)
 
     events = [KeyEvent(f * STANDALONE_POLLS + p, d, c) for f, p, d, c in SCRIPT]
     print("fjm    : %s" % args.fjm)

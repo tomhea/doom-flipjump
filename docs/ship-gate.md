@@ -58,7 +58,7 @@ blocking pass is deterministic given the source, the knobs and the counts. Its l
 `scratchpad/12m/atlas/blocked25.labels.tsv.gz` (the byte-identical rebuild's) -- the shipped binary's
 map back to its source, which it never had until now; the rebuild itself was deleted as a duplicate.
 
-**blocked27 (2026-09-25/26): VERIFIED byte-identical twice, the second time from a fresh count.**
+**blocked27 (2026-09-25/26): VERIFIED byte-identical three times, the last two from a fresh count.**
 The line did not change: its two leads live in the program (`config.py`'s pads) and in
 `build_blocked.py`'s SAFE_TABLE_MACROS, not in the command.
 1. At ffda044 against flipjump 1.5.1 at `73e09c0` (tomhea/flipjump#362 merged), the line HIT the
@@ -70,16 +70,20 @@ The line did not change: its two leads live in the program (`config.py`'s pads) 
    ran the counting assembly at `73e09c0` (32,066 groups, 432,164 tables, 2,038 s) and produced
    `38b09a7331f4f52b` again (`docs/ship-evidence/blocked27_rebuild_recount.log`). The recount's
    counts, widths, aliases and width histogram equal the old cache's field for field; only the
-   signature moved. The tracked cache is that recount (signature `src=3e1d39d67a047f0e`, macros
-   including the two shifts). ⚠ That signature hashes the source files' bytes AS CHECKED OUT, and it
-was made on the owner's Windows checkout (`core.autocrlf=true`, CRLF): there the line HITs it. An LF
-checkout of the same commit (CI, Linux, `autocrlf=false`) signs `src=4a533c94ca7093ec` instead,
-MISSES, and pays the counting pass (~34 min) -- the line-ending sensitivity 1b already records for
-blocked25. Nobody has built blocked27 from an LF checkout; that it would give the same bytes is
-expected, not shown.
+   signature moved.
+3. That signature (`src=3e1d39d67a047f0e`) was still a property of ONE working copy: the hash is
+   over the source files' bytes on disk, and seven of them (doorcode/doors/mapcompiler/
+   reference_model.py, frame_render/present/stream_render.fj) were CRLF there, while
+   `.gitattributes` (`* text=auto eol=lf`) makes every fresh checkout LF on any OS. With those
+   seven rewritten to LF (blob hashes unchanged -- no commit), the working copy signs
+   `src=4a533c94ca7093ec`, and at cfa5daa the same line MISSED, recounted (1,998 s) and produced
+   `38b09a7331f4f52b` a third time (`docs/ship-evidence/blocked27_rebuild_lf.log`), counts again
+   equal field for field. The tracked cache is that LF recount, so the line HITs on a fresh
+   checkout. A working copy with CRLF sources signs differently and recounts: harmless (+~34 min),
+   and the fix is to make its sources LF, not to re-sign the cache.
 
-Its label table is `scratchpad/12m/atlas/blocked27.labels.tsv.gz`; `padA`/`padB` and the recount's
-duplicate `blocked27r` were deleted.
+Its label table is `scratchpad/12m/atlas/blocked27.labels.tsv.gz`; `padA`/`padB` and the recounts'
+duplicates `blocked27r`/`blocked27lf` were deleted.
 
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 

@@ -24978,7 +24978,7 @@
  "hashes": {
   "assets/freedoom1.wad": "7323bcc168c5a45f",
   "scratchpad/gp/census_lib.py": "7126b6c0a1210408",
-  "scratchpad/gp/scenarios_v2.py": "e115f01e3207a62f",
+  "scratchpad/gp/scenarios_v2.py": "1668a18b7da65868",
   "src/doomfj/__init__.py": "e3b0c44298fc1c14",
   "src/doomfj/combat.py": "89090e95e60533a4",
   "src/doomfj/config.py": "aeb52d573b01cb12",
@@ -25239,14 +25239,15 @@
   }
  },
  "freeze": {
-  "approved_by": "the owner",
+  "kind": "checker re-freeze",
+  "approved_by": "PR #88 review round 3 (checker re-freeze: the decided freeze, owner_approval stored once, the planner guard, R4-R7)",
   "approved_on": "2026-09-26",
-  "approval_record": "the owner, 2026-09-26: 'I agree with you on 1,2,3' -- 3 was 'plan a v2 [...] then freeze v2 and its baseline' (docs/plan-gameplay.md section 11, D2)",
-  "frozen_at_git_head": "83ccf06",
+  "approval_record": "reviewed in tomhea/doom-flipjump#88",
+  "frozen_at_git_head": "10af14b",
   "files_not_at_head": [
    "scratchpad/gp/scenarios_v2.py"
   ],
-  "rule": "frozen: the keys, setups, B0 and what they reproduce. --rehash re-records source hashes after a pure refactor only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A BEHAVIOUR change or a CHECKER change needs the owner: a checker change is recorded by --freeze (re-plan with identical keys, under review); a behaviour change by a new version (--plan, B0 re-measured, --freeze with the owner's approval)"
+  "rule": "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
  },
  "rehash_log": [
   {
@@ -25287,7 +25288,27 @@
    "files_not_at_head": [
     "scratchpad/gp/scenarios_v2.py"
    ],
-   "rule": "frozen: keys, setups, model and planner hashes do not change; --validate checks F1-F5"
+   "rule": "frozen: keys, setups, model and planner hashes do not change; --validate checks F1-F5",
+   "kind": "owner freeze",
+   "note": "its approval_record is the message that relayed the approval; the owner's words are in owner_approval (added in PR #88 review round 3)"
+  },
+  {
+   "approved_by": "PR #88 review round 2 (the checker change: rehash_decision, the selftest R-controls)",
+   "approved_on": "2026-09-26",
+   "approval_record": "reviewed in tomhea/doom-flipjump#88",
+   "frozen_at_git_head": "83ccf06",
+   "files_not_at_head": [
+    "scratchpad/gp/scenarios_v2.py"
+   ],
+   "rule": "frozen: the keys, setups, B0 and what they reproduce. --rehash re-records source hashes after a pure refactor only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A BEHAVIOUR change or a CHECKER change needs the owner: a checker change is recorded by --freeze (re-plan with identical keys, under review); a behaviour change by a new version (--plan, B0 re-measured, --freeze with the owner's approval)",
+   "kind": "checker re-freeze",
+   "correction": "written at the time with the owner's 2026-09-26 approval stamped in by a tool bug (freeze() wrote a fixed APPROVAL into every freeze); corrected in PR #88 review round 3 -- it was a reviewable checker re-freeze, not an owner approval"
   }
- ]
+ ],
+ "owner_approval": {
+  "by": "the owner",
+  "on": "2026-09-26",
+  "record": "the owner, 2026-09-26: 'I agree with you on 1,2,3' -- 3 was 'plan a v2 [...] then freeze v2 and its baseline' (docs/plan-gameplay.md section 11, D2)",
+  "first_frozen_at_git_head": "3688fa4"
+ }
 }

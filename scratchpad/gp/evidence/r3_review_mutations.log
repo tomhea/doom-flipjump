@@ -1,0 +1,7 @@
+# PR #88 review round 3: the mutation each hardened test must catch (source mutated, test run, restored)
+m5_gate: the shared binding, then REBOUND without sky    -> 1 failed, 6 passed, 1 warning in 1.39s
+m5_gate: the shared binding, then del render_kw['sky']   -> 1 failed, 6 passed, 1 warning in 1.41s
+m5_gate: the shared binding, then .update(sky=False)     -> 1 failed, 6 passed, 1 warning in 1.41s
+aim: the LAST target in slot order wins                  -> 1 failed, 1 passed in 0.47s
+aim: the FIRST target in slot order wins                 -> 1 failed, 1 passed in 0.38s
+unmutated (restored, byte-identical)                     -> 9 passed, 1 warning in 1.54s

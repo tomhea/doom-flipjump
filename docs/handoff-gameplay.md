@@ -34,18 +34,31 @@ building the game re-grades the set; a new version needs the owner.
 hashes). The freeze pins the KEYS, the B0 and what they reproduce -- not source bytes.
 - CAP-22 drives the candidate binary with the frozen keys and checks it state-exact against the
   CURRENT model, the oracle that binary mirrors.
-- A pure refactor that edits a hashed MODEL or census file re-records the hashes with
-  `python scratchpad/gp/scenarios_v2.py --rehash "<reason>"`. It refuses unless the replay still
-  reproduces every frozen pose, digest and drawn population (F1/F3/F4/F5 hold) AND the checker
-  (`scenarios_v2.py`) is unchanged; each rehash is logged in the set (`rehash_log`). The refusals
-  are `--selftest` controls R1-R3 (a behaviour change, a checker change).
-- A CHECKER change (`scenarios_v2.py` itself) is recorded only by `--freeze`, which re-plans the
-  whole set and must reproduce identical keys -- a reviewable event, never a rehash; the previous
-  freeze record is kept in `freeze_history`.
-- A BEHAVIOUR change (anything that moves a replay: a rule, a fix) needs a NEW VERSION: re-plan
-  (`--plan`), re-measure B0 on it (`b0_scenarios.py`), and `--freeze` it with the owner's approval
-  recorded. There is no "same keys, new poses" path: F3 and `b0_scenarios` both compare against the
-  frozen poses, so CAP-22 cannot run on a model whose behaviour moved until the new version exists.
+
+By what changed (the tool is `python scratchpad/gp/scenarios_v2.py`; the same rule is in
+`scratchpad/gp/scenarios/README.md`):
+- a pure refactor of a hashed model or census file: `--rehash "<reason>"` re-records the hashes,
+  only while the replay still reproduces every frozen pose, digest and drawn population
+  (F1/F3/F4/F5 hold) AND the checker (`scenarios_v2.py`) is unchanged; each rehash is logged in
+  `rehash_log`;
+- a CHECKER change (`scenarios_v2.py` itself): `--freeze --approver "<its reviewer>"
+  --approval-record "<where>"`, only when the re-plan gives identical keys AND the current code
+  reproduces every recorded pose, digest and drawn population (F1/F3/F4/F5) -- a reviewable event.
+  The owner's approval of the set (`owner_approval`) is never re-stamped; the previous freeze record
+  goes to `freeze_history`;
+- a BEHAVIOUR change (anything that moves a replay: a rule, a fix, a picture rule): a NEW VERSION in
+  a new file -- `--plan --file <new>` (the planner refuses a frozen file), B0 re-measured on it
+  (`b0_scenarios.py --file <new>`), then `--freeze --file <new> --approver "the owner"` with the
+  owner's words (a first freeze refuses any other approver).
+
+The refusals are `--selftest` controls: R1 the untouched set is accepted with nothing to re-record;
+the rehash refuses R2 a behaviour change (strafe 13 -> 12) and R3 a checker change; the re-freeze
+refuses R4 a picture-rule change (DEG_SOFT_MON 4 -> 2); R5 a clean re-freeze keeps the owner's
+approval and names its own approver; R6 a first freeze by anyone but the owner is refused; R7
+`--plan` refuses the frozen file.
+
+There is no "same keys, new poses" path: F3 and `b0_scenarios` both compare against the frozen
+poses, so CAP-22 cannot run on a model whose behaviour moved until the new version exists.
 
 Single frames are NOT capped (decision D1): blocked27 already has frames at 32.4M (two-sided wall
 storms), and the frozen set's heaviest run, R0-west-hall, averages 22,018,124 on blocked27 alone
@@ -107,7 +120,7 @@ the weapon drawn over the 3D view; animated, rotated monsters; fireballs, puffs,
 | `scratchpad/gp/b0.py`, `b0_scenarios.py` | drives a binary through viewpoints or the scenario set, per-frame ops, state and pixel checks | `python scratchpad/gp/b0_scenarios.py --selftest` |
 | `src/doomfj/gamedata.py`, `rng.py`, `world.py`, `combat.py` | THE MODEL = the oracle of the gameplay: DOOM's data (Chocolate Doom 895f581c, cross-checked against linuxdoom-1.10), the rndtable, a schema-first world state, monster AI, combat | `python -m pytest tests/host -q -k gp` (140 tests) |
 | `scratchpad/gp/model_run.py` | runs the model with scripted keys, dumps per-tic state | `--help` |
-| `scratchpad/gp/scenarios_v2.py` | the autopilot and the FROZEN set v2: `--validate` (the criteria and the freeze check), `--rehash` (the freeze rule, section 1) | `python scratchpad/gp/scenarios_v2.py --validate` (`scenarios.py` is v1's, kept as the record) |
+| `scratchpad/gp/scenarios_v2.py` | the autopilot and the FROZEN set v2: `--validate` (the criteria and the freeze check), `--rehash` and `--freeze --approver` (the freeze rule, section 1) | `python scratchpad/gp/scenarios_v2.py --validate` (`scenarios.py` is v1's, kept as the record) |
 | `scratchpad/gp/census*.py` | the model wired into the oracle renderer; the compositor census and the fight line | `python scratchpad/gp/census_control.py` |
 | `scratchpad/gp/probes/s6/` | fj micro-probes of the primitives | `python scratchpad/gp/probes/s6/fjprobe.py --selftest` |
 | `scratchpad/gp/probes/sprite/` | the cheaper sprite column (v1/v2), pixel checks and costs | `python t2_emit.py`, `t8_pipeline.py <frame>` |

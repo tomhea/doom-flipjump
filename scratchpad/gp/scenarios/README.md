@@ -4,22 +4,41 @@
 in section 11) is measured on: **11 runs x 100 frames, skill hard (46 monsters), one tic per frame
 (D4)**.
 
-**Status: FROZEN on 2026-09-26, with the owner's approval** (the coordinator's S4 v2 message: "The
-owner approved the freeze on 2026-09-26.").
-- Frozen at git head `3688fa4`: the model with K = 6, strafe, and DOOM's diagonal aim box.
-- The keys hash is `94d0e3c7cb37d580`.
+**Status: FROZEN, with the owner's approval of the set**, recorded once in the set as
+`owner_approval` and never re-stamped: on 2026-09-26, to the recommendation "plan a v2 [...] then
+freeze v2 and its baseline", the owner answered "I agree with you on 1,2,3" (`docs/plan-gameplay.md`
+section 11, D2).
+- The owner's freeze was at git head `3688fa4`: the model with K = 6, strafe, and DOOM's diagonal aim
+  box. Since then the set has been re-frozen only for CHECKER changes (PR #88 review rounds 2 and
+  3); each re-freeze names its reviewer and reproduced every recorded result. The records are
+  `freeze` (the latest) and `freeze_history`.
+- The keys hash is `94d0e3c7cb37d580`, unchanged by every re-freeze.
 - 20 files are hashed: the model, the census wiring and sprite art, every doomfj module the replay
   imports, and the planner.
 - The frozen B0 was measured on these exact keys.
 
 `--validate` checks all of this (section "The freeze" below). After the freeze, a changed model,
-census or planner file makes `--validate` FAIL. What happens next depends on what changed:
-- a pure refactor of a model or census file: `--rehash "<reason>"` re-records the hashes, only while
-  every pose, digest and drawn population still replays (F1/F3/F4/F5) and the checker
-  (scenarios_v2.py) is unchanged -- logged in `rehash_log`;
-- a change to the checker itself: `--freeze` (re-plans, requires identical keys; the previous freeze
-  record goes to `freeze_history`);
-- a BEHAVIOUR change: a new version (`--plan`, B0 re-measured, `--freeze` with the owner's approval).
+census or planner file makes `--validate` FAIL. What happens next depends on what changed (the
+same rule as `docs/handoff-gameplay.md` section 1):
+- a pure refactor of a hashed model or census file: `--rehash "<reason>"` re-records the hashes,
+  only while the replay still reproduces every frozen pose, digest and drawn population
+  (F1/F3/F4/F5 hold) AND the checker (`scenarios_v2.py`) is unchanged; each rehash is logged in
+  `rehash_log`;
+- a CHECKER change (`scenarios_v2.py` itself): `--freeze --approver "<its reviewer>"
+  --approval-record "<where>"`, only when the re-plan gives identical keys AND the current code
+  reproduces every recorded pose, digest and drawn population (F1/F3/F4/F5) -- a reviewable event.
+  The owner's approval of the set (`owner_approval`) is never re-stamped; the previous freeze record
+  goes to `freeze_history`;
+- a BEHAVIOUR change (anything that moves a replay: a rule, a fix, a picture rule): a NEW VERSION in
+  a new file -- `--plan --file <new>` (the planner refuses a frozen file), B0 re-measured on it
+  (`b0_scenarios.py --file <new>`), then `--freeze --file <new> --approver "the owner"` with the
+  owner's words (a first freeze refuses any other approver).
+
+The refusals are `--selftest` controls: R1 the untouched set is accepted with nothing to re-record;
+the rehash refuses R2 a behaviour change (strafe 13 -> 12) and R3 a checker change; the re-freeze
+refuses R4 a picture-rule change (DEG_SOFT_MON 4 -> 2); R5 a clean re-freeze keeps the owner's
+approval and names its own approver; R6 a first freeze by anyone but the owner is refused; R7
+`--plan` refuses the frozen file.
 
 **Superseded:** `combat_scenarios_v1.json` and its logs are v1, a DRAFT planned with K = 3 and no
 strafe. v1 no longer replays on this model.
@@ -201,21 +220,27 @@ tic, player tic and collision, in its own world:
 
 ## The freeze (what `--validate` checks)
 
-- **F1**: the status is FROZEN, with the owner's approval on 2026-09-26.
+- **F1**: the status is FROZEN and `owner_approval` records the owner, a date and the owner's
+  words (2026-09-26 for v2); its detail also names the latest freeze's kind and approver.
 - **F2**: every recorded file hash matches (20 files).
 - **F3**: the replay reproduces every frozen per-frame pose and every run's final digest.
 - **F4**: the drawn and geometric population reproduces frame by frame.
 - **F5**: the B0 record is present and was measured on these keys (`keys_sha`).
 
 The file also records:
-- the git head (`3688fa4`);
-- `files_not_at_head`: `scenarios_v2.py`, still untracked when the set was frozen;
+- `owner_approval`, with the git head of the owner's freeze (`3688fa4`);
+- `freeze`, the latest freeze: its kind (owner freeze or checker re-freeze), approver, approval
+  record, git head, `files_not_at_head` and the rule; `freeze_history`, every earlier freeze record;
+  `rehash_log`, every rehash;
 - the B0 record: the binary and label-table sha256, the driver hash, the command, per-run numbers
   and the undercount.
 
 ## R9 controls
 
-`scenarios_v2.py --selftest` PASSES on the frozen set (`selftest_v2.log`). It requires:
+`scenarios_v2.py --selftest` PASSES on the frozen set (`selftest_r3.log`; the first run was
+`selftest_v2.log`). It requires:
+- the freeze-rule controls R1-R7 (section "The freeze" above: what the rehash, the re-freeze and
+  the planner refuse);
 - the true set passes;
 - no fire key FAILS the kills floor;
 - no strafe key FAILS strafe-while-fighting and the dodge floor;
@@ -252,8 +277,9 @@ python scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scena
 python scratchpad/gp/b0_scenarios.py --selftest    # the driver's R9
 ```
 
-The two `b0_scenarios.py` commands run the game binary under the binary lock. `--plan` and
-`--freeze` rewrite `--file`: never run them on the frozen file. Plan a v3 into a new file.
+The two `b0_scenarios.py` commands run the game binary under the binary lock. `--plan` refuses a
+frozen file: plan a v3 into a new file. `--freeze` on the frozen file is the checker re-freeze of
+the rule above, and needs `--approver` and `--approval-record`.
 
 ## Notes for the owner
 

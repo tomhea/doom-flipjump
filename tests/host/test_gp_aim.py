@@ -60,16 +60,18 @@ def _axis(w, want):
 
 
 def test_the_nearer_of_two_targets_in_a_column_wins():
-    w = _world()
-    step, _d = _axis(w, lambda d: d > 240)
-    lo, hi = _live_monsters(w, 2)
-    # the NEARER target takes the HIGHER slot, so "the first target in slot order wins" fails too
-    _place(w, hi, step, 80)
-    _place(w, lo, step, 200)
-    col = w.aim_centre
-    assert W.World.aim_geometric(w, col) == ("mon", hi)
-    w.ws.mon_shootable[hi] = 0                  # control: without the nearer, the farther answers
-    assert W.World.aim_geometric(w, col) == ("mon", lo)
+    # the pair is placed BOTH ways -- the nearer in the higher slot, then in the lower -- so neither
+    # "the first target in slot order wins" nor "the last one wins" passes (PR #88 round 3)
+    lo, hi = _live_monsters(_world(), 2)
+    for near, far in ((hi, lo), (lo, hi)):
+        w = _world()
+        step, _d = _axis(w, lambda d: d > 240)
+        _place(w, near, step, 80)
+        _place(w, far, step, 200)
+        col = w.aim_centre
+        assert W.World.aim_geometric(w, col) == ("mon", near), (near, far)
+        w.ws.mon_shootable[near] = 0            # control: without the nearer, the farther answers
+        assert W.World.aim_geometric(w, col) == ("mon", far), (near, far)
 
 
 def test_a_target_behind_a_wall_is_not_hit():

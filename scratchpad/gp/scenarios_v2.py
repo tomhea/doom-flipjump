@@ -164,10 +164,10 @@ AFTER_NEAR = 160             # "among corpses": this close to the player at the 
 AFTER_MIN_DRAWN = 0.20       # the decided D3 picture degrades a corpse beyond ~130 units in a
                              # thing-rich room (census, MEASURED on the v2 drafts): a player who
                              # collects and leaves draws them on ~20-30 of 100 frames
+FREEZE_RULE = "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
 APPROVAL = {"by": "the owner", "on": "2026-09-26",
             "record": "the owner, 2026-09-26: 'I agree with you on 1,2,3' -- 3 was 'plan a v2 [...] "
                       "then freeze v2 and its baseline' (docs/plan-gameplay.md section 11, D2)"}
-FREEZE_RULE = ("frozen: the keys, setups, B0 and what they reproduce. --rehash re-records source hashes after a pure refactor only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A BEHAVIOUR change or a CHECKER change needs the owner: a checker change is recorded by --freeze (re-plan with identical keys, under review); a behaviour change by a new version (--plan, B0 re-measured, --freeze with the owner's approval)")
 
 POP_FIELDS = ("awake", "geo_in_view", "geo_awake", "geo_corpses", "fireballs", "deferred", "heavy",
               "d_live", "d_awake", "d_corpse", "d_drop", "d_fireball", "d_fx", "d_barrel")
@@ -1388,11 +1388,13 @@ def freeze_checks(doc: dict, ms: list) -> list:
     """[(name, ok, detail)]: is this the FROZEN set, reproduced exactly?"""
     out = []
     fz = doc.get("freeze") or {}
-    ok = doc.get("status") == "FROZEN" and fz.get("approved_by") == APPROVAL["by"] \
-        and fz.get("approved_on") == APPROVAL["on"]
+    oa = doc.get("owner_approval") or {}
+    ok = doc.get("status") == "FROZEN" and oa.get("by") == APPROVAL["by"] \
+        and bool(oa.get("on")) and bool(oa.get("record"))
     out.append(("F1 status FROZEN with the owner's approval", ok,
-                "status %r, approved %r on %r" % (doc.get("status"), fz.get("approved_by"),
-                                                  fz.get("approved_on"))))
+                "status %r, the set approved by %r on %r; last freeze: %s by %r" % (
+                    doc.get("status"), oa.get("by"), oa.get("on"), fz.get("kind", "-"),
+                    fz.get("approved_by"))))
     rec = doc.get("hashes") or {}
     now = {f: (sha16(ROOT / f) if (ROOT / f).exists() else "missing") for f in rec}
     bad = sorted(f for f in rec if now[f] != rec[f])
@@ -1547,44 +1549,90 @@ def load_b0(path: Path) -> dict:
             "base_ops": b.get("base_ops"), "strafe_undercount": und}
 
 
-def freeze(path: Path, b0_path: Path) -> int:
-    doc = json.loads(Path(path).read_text(encoding="ascii"))
-    print("FREEZE %s (%d runs), B0 %s" % (path, len(doc["runs"]), b0_path), flush=True)
-    # 1. the recorded planner reproduces every run's keys
-    fresh = plan_set(quiet=True)
-    diff = [a["name"] for a, b in zip(doc["runs"], fresh["runs"])
-            if a["keys"] != b["keys"] or a["setup"] != b["setup"]]
-    print("  re-plan: %s" % ("identical keys and setups, %d runs" % len(doc["runs"]) if not diff
-                             else "DIFFERS: %s" % diff), flush=True)
-    if diff or len(doc["runs"]) != len(fresh["runs"]):
-        return 1
-    # 2. the B0 record: measured on these keys
-    b0 = load_b0(b0_path)
+def freeze_decision(doc: dict, b0: dict, approver: str, record: str, ms=None, fresh=None):
+    """(ok, reason, new_doc): the freeze decided IN MEMORY -- nothing is written here.
+    FIRST freeze (status PLANNED): the owner's approval of the set; `approver` must be the owner,
+      stored once as `owner_approval`.
+    RE-freeze (status FROZEN): records a CHECKER change; allowed only when the re-plan gives identical
+      keys (`fresh`, when given) AND the replay with the current code reproduces every recorded pose,
+      digest and drawn population and the approval and B0 records stand (F1/F3/F4/F5) -- a picture- or
+      rule-change that moves any result is refused (PR #88 round 3). `owner_approval` is untouched;
+      the event records `approver` (e.g. the PR review)."""
+    if fresh is not None:
+        diff = [a["name"] for a, b in zip(doc["runs"], fresh["runs"])
+                if a["keys"] != b["keys"] or a["setup"] != b["setup"]]
+        if diff or len(doc["runs"]) != len(fresh["runs"]):
+            return False, "the re-plan DIFFERS: %s -- a new version, not a freeze" % diff, None
     if b0["keys_sha"] != keys_sha(doc):
-        print("  B0 was measured on keys %s, the set is %s: re-run B0" % (b0["keys_sha"], keys_sha(doc)))
-        return 1
-    # 3. validate (census), record, mark FROZEN
-    res = validate(doc, census=True, quiet=True)
+        return False, "B0 was measured on keys %s, the set is %s" % (b0["keys_sha"], keys_sha(doc)), None
+    refreeze = doc.get("status") == "FROZEN"
+    if refreeze:
+        ms = ms if ms is not None else [replay(run, census=True) for run in doc["runs"]]
+        checks = {n.split()[0]: (ok, det) for n, ok, det in freeze_checks(doc, ms)}
+        for k in ("F1", "F3", "F4", "F5"):
+            ok, det = checks[k]
+            if not ok:
+                return False, ("%s failed (%s): the replay moved -- a behaviour change needs a NEW "
+                               "VERSION and the owner, not a re-freeze" % (k, det)), None
+    elif approver != APPROVAL["by"]:
+        return False, "the FIRST freeze is the owner's approval of the set: --approver must be %r" % (
+            APPROVAL["by"]), None
+    new = copy.deepcopy(doc)
+    res = validate(new, census=True, quiet=True)
     bad = [n for n, ok, _d in res["criteria"] if not ok]
     if bad:
-        print("  criteria FAIL: %s" % bad)
-        return 1
-    record_validation(doc, res)
+        return False, "criteria FAIL: %s" % bad, None
+    record_validation(new, res)
     files = dependency_files()
-    doc["hashes"] = code_hashes(files)
-    doc["keys_sha"] = keys_sha(doc)
-    doc["b0"] = b0
-    doc["status"] = "FROZEN"
-    if doc.get("freeze"):                          # a re-freeze keeps the record of the one before
-        doc.setdefault("freeze_history", []).append(doc["freeze"])
-    doc["freeze"] = {"approved_by": APPROVAL["by"], "approved_on": APPROVAL["on"],
-                     "approval_record": APPROVAL["record"], "frozen_at_git_head": git_head(),
-                     "files_not_at_head": git_untracked_or_modified(files),
-                     "rule": FREEZE_RULE}
-    Path(path).write_text(json.dumps(doc, indent=1), encoding="ascii")
-    print("  wrote %s: FROZEN (git head %s, %d hashed files, keys %s)" % (
-        path, doc["freeze"]["frozen_at_git_head"], len(doc["hashes"]), doc["keys_sha"]), flush=True)
-    res = validate(doc, census=True, quiet=False)
+    new["hashes"] = code_hashes(files)
+    new["keys_sha"] = keys_sha(new)
+    new["b0"] = b0
+    new["status"] = "FROZEN"
+    if refreeze:
+        new.setdefault("freeze_history", []).append(doc["freeze"])
+    else:
+        new["owner_approval"] = {"by": approver, "on": time.strftime("%Y-%m-%d"), "record": record}
+    new["freeze"] = {"kind": "checker re-freeze" if refreeze else "owner freeze",
+                     "approved_by": approver, "approved_on": time.strftime("%Y-%m-%d"),
+                     "approval_record": record, "frozen_at_git_head": git_head(),
+                     "files_not_at_head": git_untracked_or_modified(files), "rule": FREEZE_RULE}
+    res2 = validate(new, census=True, quiet=True)
+    fails = [n for n, ok, _d in res2["criteria"] + res2["freeze"] if not ok]
+    if fails:
+        return False, "the frozen copy would FAIL its own validation: %s" % fails, None
+    return True, "%s by %r" % (new["freeze"]["kind"], approver), new
+
+
+def plan_refusal(path: Path):
+    """why `--plan` must not write `path` (None when it may): a FROZEN set is never overwritten --
+    a new version is planned into a new file (PR #88 round 3)."""
+    path = Path(path)
+    if not path.exists():
+        return None
+    try:
+        status = json.loads(path.read_text(encoding="ascii")).get("status")
+    except (ValueError, UnicodeDecodeError) as e:
+        return "%s is not a readable set (%s): refusing to overwrite it" % (path, e)
+    if status == "FROZEN":
+        return "%s is FROZEN: plan a new version into a new --file" % path
+    return None
+
+
+def freeze(path: Path, b0_path: Path, approver: str, record: str) -> int:
+    doc = json.loads(Path(path).read_text(encoding="ascii"))
+    print("FREEZE %s (%d runs), B0 %s, approver %r" % (path, len(doc["runs"]), b0_path, approver),
+          flush=True)
+    fresh = plan_set(quiet=True)
+    ok, why, new = freeze_decision(doc, load_b0(b0_path), approver, record, fresh=fresh)
+    print("  re-plan: %s" % ("identical keys and setups, %d runs" % len(doc["runs"])
+                             if ok or "re-plan" not in why else why), flush=True)
+    if not ok:
+        print("FREEZE REFUSED: %s (nothing written)" % why, flush=True)
+        return 1
+    Path(path).write_text(json.dumps(new, indent=1), encoding="ascii", newline="\n")
+    print("  wrote %s: FROZEN, %s (git head %s, %d hashed files, keys %s)" % (
+        path, why, new["freeze"]["frozen_at_git_head"], len(new["hashes"]), new["keys_sha"]), flush=True)
+    res = validate(new, census=True, quiet=False)
     ok = all(ok for _n, ok, _d in res["criteria"]) and all(ok for _n, ok, _d in res["freeze"])
     print("FREEZE %s" % ("PASS" if ok else "FAIL"), flush=True)
     return 0 if ok else 1
@@ -1621,6 +1669,8 @@ def selftest(doc: dict) -> int:
         doc = copy.deepcopy(doc)
         doc.update({"status": "FROZEN", "freeze": {"approved_by": APPROVAL["by"],
                                                    "approved_on": APPROVAL["on"]},
+                    "owner_approval": {"by": APPROVAL["by"], "on": APPROVAL["on"],
+                                       "record": "selftest placeholder"},
                     "hashes": code_hashes(list(doc.get("hashes") or ()) or None),
                     "b0": {"binding": 0, "mean": 0, "p80_run": 0, "frame_max": 0, "fjm_sha256": "-",
                            "per_run": {r["name"]: {} for r in doc["runs"]}, "keys_sha": keys_sha(doc)}})
@@ -1646,6 +1696,30 @@ def selftest(doc: dict) -> int:
         now2 = dict(now0, **{PLANNER_FILE: "0" * 16})
         ok2, why2, _ = rehash_decision(doc, ms0, now2)
         check("R3 a CHECKER change (scenarios_v2.py's hash) is REFUSED", not ok2, why2)
+        # R4 the round-3 attack: a PICTURE-rule change (the monster degradation budget 4 -> 2) must
+        # not pass a re-freeze -- it moves the frozen drawn populations
+        import doomfj.reference_model as _RMOD
+        saved = _RMOD.DEG_SOFT_MON
+        try:
+            _RMOD.DEG_SOFT_MON = 2
+            ms4 = [replay(run, census=True) for run in doc["runs"]]
+        finally:
+            _RMOD.DEG_SOFT_MON = saved
+        ok4, why4, _ = freeze_decision(doc, doc["b0"], "a reviewer", "control", ms=ms4)
+        check("R4 a PICTURE-rule change (DEG_SOFT_MON 4 -> 2) is REFUSED by the re-freeze", not ok4, why4)
+        # R5 a clean re-freeze keeps the owner's approval of the set and records its own approver
+        ok5, why5, new5 = freeze_decision(doc, doc["b0"], "a reviewer", "control", ms=ms0)
+        check("R5 a clean re-freeze keeps owner_approval and names its own approver",
+              ok5 and new5["owner_approval"] == doc["owner_approval"]
+              and new5["freeze"]["approved_by"] == "a reviewer"
+              and new5["freeze"]["kind"] == "checker re-freeze", why5)
+        # R6 a FIRST freeze is the owner's approval of the set: any other approver is refused
+        planned = dict(copy.deepcopy(doc), status="PLANNED")
+        ok6, why6, _ = freeze_decision(planned, doc["b0"], "a reviewer", "control")
+        check("R6 a FIRST freeze with an approver other than the owner is REFUSED", not ok6, why6)
+        # R7 the planner never overwrites a frozen set (it would erase the approval and the B0)
+        why7 = plan_refusal(SCEN_FILE)
+        check("R7 --plan REFUSES the frozen set's file", why7 is not None and "FROZEN" in why7, why7)
     base = validate(doc, census=True, quiet=True)
     allc = base["criteria"] + base["freeze"]
     check("S0 the set passes every criterion and every freeze check",
@@ -1813,7 +1887,7 @@ def rehash(path: Path, reason: str) -> int:
         "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the "
                 "source hashes are re-recorded"})
     doc["hashes"] = new
-    Path(path).write_text(json.dumps(doc, indent=1), encoding="ascii")
+    Path(path).write_text(json.dumps(doc, indent=1), encoding="ascii", newline="\n")
     for f, (o, n) in sorted(changed.items()):
         print("  rehashed %-40s %s -> %s" % (f, o, n))
     print("REHASH DONE: %d file(s)" % len(changed))
@@ -1829,10 +1903,16 @@ def main():
     ap.add_argument("--rehash", metavar="REASON",
                     help="re-record the hashes after a pure refactor (the rehash rule)")
     ap.add_argument("--b0", default=str(SCEN_DIR / "b0_v2.json"))
+    ap.add_argument("--approver", help="--freeze: who approves THIS freeze ('the owner' for the first)")
+    ap.add_argument("--approval-record", help="--freeze: the approval's words and where they are")
     ap.add_argument("--no-census", action="store_true", help="validate without the drawn count")
     ap.add_argument("--file", default=str(SCEN_FILE))
     a = ap.parse_args()
     if a.plan:
+        why = plan_refusal(Path(a.file))
+        if why:
+            print("PLAN REFUSED: %s (nothing written)" % why, flush=True)
+            return 1
         t0 = time.time()
         doc = plan_set()
         res = validate(doc, census=True, quiet=False)
@@ -1841,13 +1921,15 @@ def main():
         doc["planned_at_git_head"] = git_head()
         doc["keys_sha"] = keys_sha(doc)
         SCEN_DIR.mkdir(parents=True, exist_ok=True)
-        Path(a.file).write_text(json.dumps(doc, indent=1), encoding="ascii")
+        Path(a.file).write_text(json.dumps(doc, indent=1), encoding="ascii", newline="\n")
         ok = all(ok for _n, ok, _d in res["criteria"])
         print("  wrote %s (%.0f s): criteria %s, keys %s" % (a.file, time.time() - t0,
                                                            "PASS" if ok else "FAIL", doc["keys_sha"]))
         return 0 if ok else 1
     if a.freeze:
-        return freeze(Path(a.file), Path(a.b0))
+        if not a.approver or not a.approval_record:
+            ap.error("--freeze needs --approver and --approval-record: an approval is never implied")
+        return freeze(Path(a.file), Path(a.b0), a.approver, a.approval_record)
     if a.rehash:
         return rehash(Path(a.file), a.rehash)
     doc = json.loads(Path(a.file).read_text(encoding="ascii"))

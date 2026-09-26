@@ -3,8 +3,9 @@
     python scratchpad/12m/heat_identity.py --new C:/Users/tomhe/Documents/flipjump-pr
 
 tomhea/flipjump#363 adds `BlockPool(heat=)` (pin protection, M7 P1.1). This builds
-`tablepool_gate.py`'s programs, two-pass (count, then place), at five knob sets -- uniform, spread,
-width buckets + pin_broken, a span tight enough to break groups, and eviction by value -- with the
+`tablepool_gate.py`'s programs, two-pass (count, then place), at six knob sets -- uniform, spread,
+width buckets + pin_broken, a span tight enough to break groups, and eviction by value at an aligned and
+an unaligned pool base -- with the
 INSTALLED flipjump (the baseline, 1.5.1) and with the checkout given by --new under `heat=None` and
 `heat={}`, and compares every .fjm's sha256.
 
@@ -31,6 +32,8 @@ KNOBS = {
     "buckets+pin_broken": {"width_buckets": True, "max_slot_ops": 512, "pin_broken": True},
     "tight span": {"span_bits": 1 << 16},
     "evict by value": {"evict_by_value": True, "span_bits": 1 << 15},
+    # a pool base NOT aligned to the biggest block: eviction's plain sum and the real layout differ
+    "evict, unaligned base": {"evict_by_value": True, "span_bits": 1 << 15, "pool_base": POOL_BASE + 16 * 64},
 }
 
 
@@ -48,6 +51,7 @@ def side(modes):
                     t = Path(td)
                     (t / "s.fj").write_text(source, encoding="utf-8")
                     span = knobs.get("span_bits")
+                    base = knobs.get("pool_base", POOL_BASE)
                     sites = []
 
                     class Recorder(BlockPool):
@@ -56,7 +60,7 @@ def side(modes):
                                 sites.append((args[2], args[4]))
                             return super().reserve(*args, **kwargs)
 
-                    counting = Recorder(W, POOL_BASE, span_bits=span)
+                    counting = Recorder(W, base, span_bits=span)
                     fj.assemble([(t / "s.fj").resolve()], t / "c.fjm", memory_width=W, print_time=False,
                                 table_pool=counting)
                     if mode == "hot":
@@ -69,10 +73,10 @@ def side(modes):
                         extra = {"heat": {heat_key(g): [(last, occ, 16)]}}
                     else:
                         extra = {} if mode == "absent" else {"heat": None if mode == "None" else {}}
-                    kw = {k: v for k, v in knobs.items() if k != "span_bits"}
+                    kw = {k: v for k, v in knobs.items() if k not in ("span_bits", "pool_base")}
                     width_hist = counting.width_hist if kw.get("width_buckets") else None
                     try:
-                        placing = BlockPool(W, POOL_BASE, counts=counting.counts, widths=counting.widths,
+                        placing = BlockPool(W, base, counts=counting.counts, widths=counting.widths,
                                             span_bits=span, width_hist=width_hist, **kw, **extra)
                     except Exception as e:                   # a hot group that cannot be placed raises
                         out[key] = "raised: %s" % str(e)[:60]

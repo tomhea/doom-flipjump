@@ -1,0 +1,29 @@
+$ python hotwords.py games
+fjm doom_e1m1_blocked27.fjm (sha256 38b09a7331f4f52b...), 1000 game frames in games
+counts cache _counts_game.json.gz: 27030 groups, 432164 tables; reconstructed blocks: 27030 placed, 0 without room
+CONTROL reconstruction vs image: 27030 of 27030 resolvable source words rest at their reconstructed base (100.00%); 0 keys unresolved
+ops executed in the pool: 1,733,624,587 over the run (1,733,624 per game frame); 100.00% of them inside a placed block
+
+rank table ops/fr dispatch/fr  pc(b) pin value   tables source word
+   1      290,187     139,824      2   559,299   81,461 (hex.tables.res + 32)
+   2       38,993       6,608      3    39,650      624 ((hex.pointers.to_ptr_var + 128) + 32)
+   3       36,459       6,608      3    39,650      624 ((hex.pointers.to_ptr_var + 192) + 32)
+   4       25,577       6,608      4    52,867      624 ((hex.pointers.to_ptr_var + 256) + 32)
+   5       22,973       4,146      3    24,879      553 ((hex.pointers.to_ptr_var + 320) + 32)
+   6       21,187       6,608      5    66,083      624 ((hex.pointers.to_ptr_var + 64) + 32)
+   7       18,213      19,383      4   155,068    1,209 ((hex.pointers.read_byte + 0) + 32)
+   8       15,626      17,436      5   174,366    1,168 ((hex.pointers.read_byte + 64) + 32)
+   9       10,586       4,146      4    33,172      553 ((hex.pointers.to_ptr_var + 384) + 32)
+  10        6,608       6,608      2    26,433      624 ((hex.pointers.to_ptr_var + 0) + 32)
+  11        6,564       2,873      4    22,988    2,626 ((ecl_cmidx + 0) + 32)
+  12        5,777       3,768      1     7,536    5,077 (((ecl_cmidx + 128) + 0) + 32)
+  13        4,871       1,669     12    40,077       14 ((f13:l2210:sim.thing_pass(3)---hp + 128) + 32)
+  14        4,830       2,540      8    40,650      145 ((f13:l2214:frame.seg_pass2_leaf_body_lines(27)---f5:l2625:stream.emit
+  15        4,776       2,873      5    28,736    2,626 ((ecl_cmidx + 64) + 32)
+  16        4,649       1,669      8    26,718       14 ((f13:l2210:sim.thing_pass(3)---hp + 64) + 32)
+  17        4,594       4,146      4    33,172      553 ((hex.pointers.to_ptr_var + 448) + 32)
+  18        4,286       1,397      6    16,773       34 ((tsf_sfslot_p + 128) + 32)
+  19        4,009       1,669     12    40,077       14 ((f13:l2210:sim.thing_pass(3)---hp + 192) + 32)
+  20        3,767       3,768      2    15,073    5,077 (((ecl_cmidx + 128) + 64) + 32)
+the top 20 carry 534,540 table ops/frame = 30.8% of all pool ops
+wrote C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\plan\profx_stage\profx\hotwords_blocked27.json

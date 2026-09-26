@@ -1,0 +1,8 @@
+$ python ptloc_an.py poke still
+CONTROL pixels identical to the un-poked run: True (77 vs 77 frames)
+ops: poke 1,490,784,857  control 1,487,670,709  delta 3,114,148
+game frames: 75, things poked: 75 distinct
+  ptloc_walk lookup (fcall .. fret)        min     4,656  mean    30,711  median     8,875  max   180,042
+  dirty prelude (read pos, sign-extend)    min     7,849  mean     8,109  median     8,125  max     8,319
+  write_hex back + glue                    min     2,413  mean     2,510  median     2,513  max     2,587
+  bind_things delta vs control             min    15,511  mean    41,521  median    19,633  max   190,606

@@ -251,7 +251,8 @@ Every rung: FAIL-first tests (R1); its gate; a ledger row (ops attributed to its
 `profx`, the binding delta on v2, size, ms/frame, the pin report); kill criteria DECLARED BEFORE it
 starts (attributed ops > 1.25x its budget -> redesign; the cumulative projection > 22M minus the
 remaining budgets minus a 15% reserve -> stop for a scope decision). A PR per unit of work, the
-crist CR loop, CI, merge.
+crist CR loop, CI, merge. Naming (cr-rules R7): this milestone is **M7** -- branches
+`m7-<rung-slug>` (e.g. `m7-pin-protection`), PR titles `M7: <feature>`.
 
 ### P1 -- reclaim and foundations (NEXT)
 

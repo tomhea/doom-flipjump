@@ -38,10 +38,14 @@ gamespeed's 1,000 game frames: p50 17.24M, **p80 22.61M**, p90 24.22M, p99 28.16
 One frame in five is already above 22M before any monster moves. A per-frame cap would need a
 renderer project first. The plan gates on the binding metric and REPORTS a stress frame.
 
-**The baseline B0** is blocked27 driven through the frozen scenario set's per-frame viewpoints by the
-state injector (section 9). Replaying the combat keys on blocked27 would diverge at the first lift,
-key door or monster. The owner freezes the scenario set v1 and B0 before phase 1, so the people
-building the game cannot re-grade it (D2).
+**The baseline B0** is blocked27 run in TIC mode, the same keys as the combat set, from each run's
+checkpoint start injected by the state probe (section 9). The scenario planner keeps every run's
+player route inside what blocked27 can walk: no lift ride and no key door within a run, since the
+checkpoint places the run in its area. So B0 prices the same routes with no gameplay.
+Injecting only the viewpoint each frame is NOT a baseline: S2 measured that it skips the player's
+collision tic and reads 1.36M / 1.91M ops/frame BELOW real play on gamespeed runs 0 / 1
+(`scratchpad/gp/b0_gamespeed01_view.log`). The owner freezes the scenario set v1 and B0 before
+phase 1, so the people building the game cannot re-grade it (D2).
 
 ---
 

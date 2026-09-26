@@ -11,7 +11,7 @@ the source, or a number carried from an older doc.
 
 | script | what it does | runtime |
 |---|---|---|
-| `python scratchpad/gp/lift/lift_budget.py [--fast]` | Rebuilds the emitter's pid registry and viewz classes with the emitter's own rules. **Control:** before projecting anything it reproduces the shipped program's 222 pids, 48 classes, 43,392 half-lists, 9,015 unique bodies and 5,326 pair blocks, all read from `build/generated_doom_e1m1_blocked27/`. It then counts band bodies with the emitter's `_band_pair_lists`. | 214 s fast, 437 s full |
+| `python scratchpad/gp/lift/lift_budget.py [--fast]`; `--selftest [--fast]` (PR #87: 10/10 checks -- the reproduction plus mutants of the quantization, a door's ceiling, the plane key's light, a viewz class, the label stride and a label name, each CAUGHT; `scratchpad/gp/lift/selftest.log`) | Rebuilds the emitter's pid registry and viewz classes with the emitter's own rules. **Control:** before projecting anything it reproduces the shipped program's 222 pids, 48 classes, 43,392 half-lists, 9,015 unique bodies and 5,326 pair blocks, all read from `build/generated_doom_e1m1_blocked27/`. It then counts band bodies with the emitter's `_band_pair_lists`. | 214 s fast, 437 s full |
 | `python scratchpad/gp/lift/lift_geometry.py` | Crush bounds, lnrow patch flips, trigger lines, things near doors, from the WAD | seconds |
 | `python scratchpad/gp/lift/label_sizes.py` | Word sizes of the band bank and of M2's per-state door blocks, from blocked27's label table | ~1 min |
 

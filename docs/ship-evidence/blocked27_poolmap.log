@@ -1,0 +1,44 @@
+$ python scratchpad/12m/poolmap.py
+FJM    w=32  segments=432165  data=43,253,668 words (32.23% of 2^27)  span=94,704,800 words (70.56%)  file=31,770,388 bytes
+       segment table sums to the payload: yes (43,253,668 words)
+SPLIT  below word 50,331,648: 1 segment, 26,663,782 payload words, ending at word 26,663,782
+       in the pool   : 432,164 segments, 16,589,886 payload words, words 50,331,648..94,704,800
+GAP    program end -> pool base: 23,667,866 words
+POOL   base word 50,331,648, window ends word 134,217,727 (--pool-base 0x60000000 --span-bits 0x9fffffe0); 39,512,927 words of the window above the image
+  counts cache HIT: 27,030 groups, 432,164 tables (skipping the counting assembly)
+BLOCKS 27,030 of 27,030 groups placed (0 broken); demand 44,373,152 words, extent 44,373,152 words, capacity 83,886,079 words (52.9% used)
+       demand == extent, i.e. no hole in front of any block: yes
+       extent == the image's span above the pool base, i.e. the image ends at the allocator's cursor: yes
+PAD    44,373,152 - 16,589,886 = 27,783,266 words INSIDE the blocks, by mechanism:
+       block power-of-two round-up         6,959,808 words   25.1%  (--width-buckets only)
+       alignment between buckets                   0 words    0.0%  (structurally 0)
+       unused slots                       20,389,120 words   73.4%  (count rounded up, times --spread)
+       slot width + declined tables          434,338 words    1.6%
+       the four terms sum to the pad: yes
+SUM    span - data = 94,704,800 - 43,253,668 = 51,451,132 = 23,667,866 gap + 27,783,266 pad: yes
+# exit=0
+$ python scratchpad/12m/poolmap.py --selftest
+poolmap selftest -- C1..C3 and C5 are the negative controls; C4 is the vacuity check.
+  cache signature is {'tier': 'game', 'map': 'E1M1', 'wad': 'tests/fixtures/freedoom_e1m1.wad', 'macros': ['hex.double_exact_xor', 'hex.exact_xor', 'hex.quadrupled_exact_xor', 'hex.shifts.shl_bit_once', 'hex.shifts.shr_bit_once', 'hex.sparse_double_exact_xor', 'hex.sparse_exact_xor', 'hex.triple_exact_xor'], 'src': '48a3939080fbb2fd'}
+  C1 the synthetic split comes back as the SYNTHETIC one         ok  below=(1, 10, 0, 10) in_pool=(2, 12, 1000, 1017)
+  C1 it differs from the binary under test (a constant would fail here) ok
+  counts cache is for a DIFFERENT program -- recounting
+  C3 a cache signed for another program is REFUSED               ok
+  counts cache HIT: 27,030 groups, 432,164 tables (skipping the counting assembly)
+  C3 a cache signed for THIS tree is accepted (the check separates) ok
+  counts cache HIT: 27,030 groups, 432,164 tables (skipping the counting assembly)
+  (the real cache at C:\Users\tomhe\Documents\doom-flipjump\scratchpad\12m\_counts_game.json.gz is HIT against this working tree)
+  counts cache HIT: 27,030 groups, 432,164 tables (skipping the counting assembly)
+  C2 dropping one group's count moves the demand by that block's size ok  16,777,216 -> 64 words for (hex.tables.res + 32)
+  C2 the demand MOVED (a cache-blind demand would not)           ok  44,373,152 -> 27,596,000 words
+  C4 groups > 0                                                  ok  27,030
+  C4 demand > 0                                                  ok  44,373,152 words
+  C4 the binary emits words INTO the pool                        ok  16,589,886 words
+  C4 the pad is not negative (demand covers what was emitted)    ok
+  C5 the breakdown's total IS the demand the PAD line prices     ok  44,373,152 vs 44,373,152 words
+  C5 no term is negative (demand >= top >= slots >= occupied >= emitted) ok
+  C5 the hand-computed block breaks down as (1024, 256, 0, 64, 704) bits ok  got (1024, 256, 0, 64, 704)
+  C5 with --no-width-buckets the round-up term vanishes (it names --width-buckets) ok  demand 2048 bits, round-up 0 bits
+
+SELFTEST PASS
+# exit=0

@@ -1,0 +1,89 @@
+# lead B on top of lead A (56468c7) + SAFE_TABLE_MACROS += the two shifts (uncommitted), against flipjump exp/literal-shift-tables 3e53017 (the shift tables written literally so the pool can see them)
+$ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/padB.labels.tsv.gz -- game --out build/doom_e1m1_padB.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_padB.json.gz
+# start 2026-09-25 16:15:56
+label spy armed -> scratchpad/12m/atlas/padB.labels.tsv.gz
+build: build_blocked.py game --out build/doom_e1m1_padB.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_padB.json.gz
+blocking: pool base 0x60000000, span 0x9fffffe0
+macros allowed: hex.double_exact_xor, hex.exact_xor, hex.quadrupled_exact_xor, hex.shifts.shl_bit_once, hex.shifts.shr_bit_once, hex.sparse_double_exact_xor, hex.sparse_exact_xor, hex.triple_exact_xor
+pid bake: 222 pairs baked, 255 addressable at PID_NIBBLES=2
+labels -> scratchpad/12m/atlas/padB.labels.tsv.gz  (2,079,049 labels)
+  alias: 5,036 groups merged into 27,030 (was 32,066)
+  counts cached to scratchpad/12m/_counts_padB.json.gz
+  width waste: 13,717,200 ops allocated = 8,294,943 real + 1,077,937 width-pad + 4,344,320 count-pad
+  MIXED groups (widest > 2x most-common): 735 groups, 10,577 tables; splitting them by width would free up to 507,696 ops of pool
+             3,552 ops  ((trb_tbl_p + 64) + 32)                      n=74      common=16    widest=48
+             2,352 ops  ((f13:l2210:sim.thing_pass(3)---f10:l589:sim n=49      common=16    widest=48
+             2,016 ops  ((tsf_sfslot_p + 64) + 32)                   n=42      common=16    widest=48
+             2,016 ops  ((f13:l2163:sim.try_move(14)---f10:l291:sim. n=42      common=16    widest=48
+             2,016 ops  ((f13:l2163:sim.try_move(14)---f10:l291:sim. n=42      common=16    widest=48
+  counting pass: 32,066 groups, 432,164 tables, 3197s
+  PREFLIGHT: demand 44,373,152 words, capacity 83,886,079 words (52.9% used); 27,030 of 27,030 groups placed
+  pin-exclude: 2,004 BYTE-cell words only (m1.zerobyte jumps through them); nibble state cells ARE pinned
+labels -> scratchpad/12m/atlas/padB.labels.tsv.gz  (2,079,049 labels)
+  reset: stripping the block base from 27,030 pinned words before the LUT test
+labels -> scratchpad/12m/atlas/padB.labels.tsv.gz  (2,098,274 labels)
+{
+  "map": "E1M1",
+  "downscale": 2,
+  "storage_mode": "flat",
+  "span_words": 94704800,
+  "flat_limit": 134217728,
+  "headroom": 1.417,
+  "fjm_bytes": 31770388,
+  "assemble_seconds": 10461.903,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": true,
+    "standalone": true,
+    "doors": true,
+    "menu": true
+  },
+  "self_reset": {
+    "nibble_cells": 5103,
+    "byte_cells": 1002,
+    "persisted_labels": [
+      "viewx",
+      "viewy",
+      "viewangle",
+      "kb_f",
+      "kb_b",
+      "kb_l",
+      "kb_r",
+      "kb_u",
+      "mode",
+      "dstate",
+      "ddir",
+      "dsub",
+      "dwait"
+    ],
+    "restore_set": "C:\\Users\\tomhe\\Documents\\doom-flipjump\\src\\doomfj\\data\\m5_restore_set.json.gz",
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 12400,
+    "view_w": 160,
+    "subsectors": 682
+  }
+}
+
+assemblies: 2; blocked per assembly: 432,164, 432,164
+  block bases agree across all 2 assemblies (27,030 shared groups)
+pin conflicts (aliased source-word expressions, un-pinned): 0
+runtime-reserved words skipped (stl.IO etc): 0
+declines by reason: no-block 5,103, too-wide 0, overflow 4,008
+broken groups: 2 of 27,030 (these lose their pin for ALL their tables); evicted 0
+blocked: 432,164 tables in 27,030 groups; declined 9,111; ungrouped 0
+total 11046s
+done in 11047s; labels at scratchpad/12m/atlas/padB.labels.tsv.gz
+# exit=0
+# end   19:20:17

@@ -1,0 +1,25 @@
+$ python scratchpad/12m/msframe.py --a build/doom_e1m1_padA.fjm --against shipped --note "lead A: HOT_PAD = HOTTER_PAD = 16, so the 91 hot sparse_ sites block (were declined_too_wide)"
+# start 2026-09-25 13:11:42
+machine : power plan 'Turbo'; busy processes: none
+against : baseline 'shipped' = build\doom_e1m1_blocked25.fjm (fc46c28c5f2bbac8), recorded 2026-09-13 22:51:53 at 89.3 ms/frame
+msframe : A=doom_e1m1_blocked25.fjm B=doom_e1m1_padA.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  base      92.1 ms   215.5M fj/s  yard 3.48->3.23G   |  change    86.9 ms   221.0M fj/s  yard 3.23->3.39G
+  rep 1  base      87.4 ms   227.1M fj/s  yard 3.62->3.56G   |  change    80.7 ms   237.9M fj/s  yard 3.28->3.53G
+  rep 2  base      87.4 ms   227.2M fj/s  yard 3.37->3.43G   |  change    84.6 ms   226.9M fj/s  yard 3.37->3.43G
+  rep 3  base      89.0 ms   223.2M fj/s  yard 3.48->3.58G   |  change    81.9 ms   234.4M fj/s  yard 3.46->3.48G
+  rep 4  base      87.9 ms   225.9M fj/s  yard 3.55->3.61G   |  change    82.0 ms   234.1M fj/s  yard 3.37->3.58G
+
+  base     median    87.9 ms/frame  [87.4 .. 92.1]    225.9M fj/s   19,855,016 ops/frame   cell=4 flat
+  change   median    82.0 ms/frame  [80.7 .. 86.9]    234.1M fj/s   19,201,791 ops/frame   cell=4 flat
+
+  pixels identical across arms and reps : YES
+  ops identical across arms             : no   (expected when the arms are different binaries; not when they are one engine A/B)
+  per-pair A/B ms ratio                 : 1.060 1.083 1.033 1.086 1.072
+  median ratio                          : 1.072  (>1 = B faster)
+  VERDICT: B FASTER   (rule: all 5 pairs agree in sign AND |median ratio - 1| > 3%)
+  engine A: 79af8639f57bfa50 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  engine B: 79af8639f57bfa50 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.51G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+# exit=0
+# end   13:18:19

@@ -1,0 +1,15 @@
+# deg_gate with src/doomfj/config.py from main 7288302 (the pads before lead A), everything else HEAD c64ab55
+ src/doomfj/config.py | 12 ++----------
+ 1 file changed, 2 insertions(+), 10 deletions(-)
+$ python scratchpad/deg_gate.py
+# start 2026-09-25 23:50:17
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+program parts: entry=1,094, tables=338,598, main=68, segconsts=44,173, walk=72,962, state=437, banks=2,137,148
+assembled
+(664,291,0x18000000): 32,505,424 ops  BYTE-EXACT
+(1272,-724,0x40000000): 17,066,477 ops  BYTE-EXACT
+(1869,479,0x80000000): 32,657,884 ops  BYTE-EXACT
+(-416,256,0x0): 28,511,206 ops  BYTE-EXACT
+PASS
+# exit=0
+# end   00:39:57

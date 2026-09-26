@@ -450,7 +450,7 @@ def selftest(fjm_path, cache_path, knobs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fjm", default="build/doom_e1m1_blocked25.fjm")
+    ap.add_argument("--fjm", default="build/doom_e1m1_blocked27.fjm")
     ap.add_argument("--counts-cache", default="scratchpad/12m/_counts_game.json.gz")
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=SHIP_GATE["pool_base"])
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=SHIP_GATE["span_bits"])

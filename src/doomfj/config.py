@@ -186,8 +186,18 @@ class Config:
 
     # M6: the two hot-path pad tiers, assigned by MEASURED median ops/frame of a site's
     # instances (>99 -> HOT_PAD, >1000 -> HOTTER_PAD). See FINDINGS AX/AZ.
-    HOT_PAD: int = 1024
-    HOTTER_PAD: int = 4096
+    # ⚠ BOTH ARE 16 (2026-09-25), ON EVERY TIER: the plain table's own alignment, so the 91 hot
+    # `sparse_` sites build exactly the table `hex.mov` / `hex.zero` / `hex.xor` would. The tiers
+    # (1024 / 4096) aligned those tables to low-popcount addresses, which pays only where nothing
+    # blocks. The shipped build blocks, and there a table's pad IS its slot width: a pad wider than
+    # the build's --max-slot-ops (docs/ship-gate.md 1b; tests/host/test_hot_pads_block.py holds both
+    # pads to it) is `declined_too_wide`, and all 988 tables stayed inline at 945,807 ops/frame. At
+    # 16 they block: 19,855,016 -> 19,201,791 ops/frame on msframe's script, and the ship gate's
+    # time verdict FASTER (handoff throughput-plan 15.4). The price, on the unblocked tiers only:
+    # deg_gate's four viewpoints cost +0.7% .. +3.3% ops (same section). A build that does not
+    # block should raise them.
+    HOT_PAD: int = 16
+    HOTTER_PAD: int = 16
 
     def constants(self) -> dict:
         """The full set of fj-visible constants (the SSOT contents emitted to fj_consts.fj)."""

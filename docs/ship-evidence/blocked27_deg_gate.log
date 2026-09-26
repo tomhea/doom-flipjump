@@ -1,0 +1,13 @@
+# deg_gate at HEAD c64ab55 (HOT_PAD = HOTTER_PAD = 16)
+$ python scratchpad/deg_gate.py
+# start 2026-09-25 22:56:54
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+program parts: entry=1,094, tables=338,598, main=68, segconsts=44,173, walk=72,962, state=437, banks=2,137,148
+assembled
+(664,291,0x18000000): 33,580,180 ops  BYTE-EXACT
+(1272,-724,0x40000000): 17,346,924 ops  BYTE-EXACT
+(1869,479,0x80000000): 32,893,357 ops  BYTE-EXACT
+(-416,256,0x0): 29,406,401 ops  BYTE-EXACT
+PASS
+# exit=0
+# end   23:50:17

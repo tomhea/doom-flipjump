@@ -1,0 +1,4 @@
+  (poses ready in 86.1 s, outside the binary lock)
+b0: doom_e1m1_blocked27.fjm sha256 38b09a7331f4f52b, mode view, startup 8,455 ops (exact)
+  run            frames   avg (exact)  p50 +/-2^18          p80          max  pixels / state
+  gamespeed0         20    19,454,506   20,185,088   23,330,816   26,476,544  20/20 byte-exact, 20/20 state-exact

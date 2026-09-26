@@ -1,0 +1,56 @@
+  (gamespeed's routes planned in 80.0 s, outside the binary lock)
+probe selftest -- C:\Users\tomhe\Documents\doom-flipjump\build\doom_e1m1_blocked27.fjm
+  C-1 codec: a hand-laid image decodes to its stated values            ok  {'num': -27262976, 'one': 1, 'arr': (3, 0, 9), 'byt': (165, 0, 255, 60), 'raw': 64}
+  C-1 codec: written values read back                                  ok
+  C-1 codec: ... and land at value << 6 in the jump words, bases and flip words kept ok
+  C-1 codec negative: a base that drifted from the recorded one is a layout ERROR ok
+  C-1 codec negative: a non-zero flip word is a layout ERROR           ok
+  C-1 codec negative: a stray jump-word bit (base 0 recorded) is a layout ERROR ok
+  C-1 spec negative: a cell wider than its label's extent is refused   ok
+  C0 a HELD lock makes a second taker time out                         ok
+  C0 the lock file is gone after release                               ok
+  label table: 2090747 distinct addresses, 14 probed labels, 2.5 s
+  binary: doom_e1m1_blocked27.fjm sha256 38b09a7331f4f52b, loaded in 6.5 s
+  C3 the TRUE table passes the known-value check                       ok  13 of 13 known cells agree
+  C3 a table shifted +1 cell is REJECTED                               ok  4 of 13 known cells disagree, e.g. ('viewx', -27262976, 266731520)
+  C3 a table shifted -1 cell is REJECTED                               ok  3 of 13 known cells disagree, e.g. ('viewx', -27262976, -436207616)
+  C3 a table shifted +1 word is REJECTED                               ok  13 of 13 known cells disagree, e.g. ('viewx', -27262976, 'LAYOUT cell at bit 256695904: flip wor
+  C3 a table shifted -1 word is REJECTED                               ok  13 of 13 known cells disagree, e.g. ('viewx', -27262976, 'LAYOUT cell at bit 256695840: flip wor
+  C1 identity write-back at every frame start AND present: ops identical ok  386,689,360 vs 386,689,360
+  C1 ... and all 18 presented frames byte-identical                    ok
+  C1 negative: a CHANGED write (viewangle + one turn) is caught at its frame ok  first differing frame 7 (written at 7)
+  C2a word: planted viewx/viewy/viewangle read back                    ok  {'viewx': 83394560, 'viewy': -47431680, 'viewangle': 771751936}
+  C2a word: viewx's 8 jump words are base | nibble<<6, flip words 0, bases kept ok  jw ['0xaa700000', '0xad410000', '0xad3f0000']
+  C2a word: that frame IS the oracle's render of the planted viewpoint ok  0 px differ
+  C2b nibble: mode=0 planted at frame 0 -> a WORLD frame, byte-exact vs the oracle ok
+  C2b nibble: kb_f=1 planted -> 3 steps, state AND pixels = the oracle's, 6 frames ok  ends (-368.0, 256.0)
+  C2c raw: kb_f's jump word written raw = the nibble plant, pixels and ops ok  ops 125,870,339 vs 125,870,339
+  C2d byte: planted pclm bytes read back                               ok  (165, 90, 255, 1)
+  C2d byte: each byte sits at <<6 in its cell's jump word, the base kept ok  ['0x2940', '0x1680', '0x3fc0', '0x40'], bases ['0x0', '0x0', '0x0', '0x0']
+  C2d byte: the program's own M1 byte clear zeroed all four by the next frame ok  (0, 0, 0, 0)
+  C2d byte: ... and every frame equals an unplanted run's              ok
+  C4 a run's total equals the same-length prefix run's (determinism)   ok  79,325,657 vs 79,325,657
+  C4 every per-frame reading is within +/-2^18 of the EXACT count      ok  exact ['19,828,663', '19,828,663', '19,828,663'], errors [94281, -167863, 94281]
+  C4 negative: the same check at a claimed 2^10 granularity FAILS      ok  max |error| 167863
+  C5 startup + 2 menu frames = the recorded calibration, to the op     ok  518,147 vs 518,147
+  C5 gamespeed run 1 replayed = the recorded total, to the op          ok  1,001,952,090 vs 1,001,952,090 (102 frames, 4.4 s)
+  C5 negative: a DIFFERENT run's script does not reproduce it          ok  2,013,523,861
+
+PROBE SELFTEST PASS
+demo: doom_e1m1_blocked27.fjm (sha256 38b09a7331f4f52b), labels blocked27.labels.tsv.gz
+(a) 32 frames, 672,715,213 ops (exact); the probe's persisted state at each present (view, mode, 5 key flags, 13 doors x 4 cells) vs the oracle (onewalk.DoorSim, m2_std_gate's order):
+   f0   menu  -    probe ( -416.000,  256.000,00000000)  oracle ( -416.000,  256.000,00000000)  STATE-EXACT  BYTE-EXACT
+   f1   menu  -    probe ( -416.000,  256.000,00000000)  oracle ( -416.000,  256.000,00000000)  STATE-EXACT  BYTE-EXACT
+   f2   world ft   probe ( -400.030,  256.981,02800000)  oracle ( -400.030,  256.981,02800000)  STATE-EXACT  BYTE-EXACT
+   f3   world ft   probe ( -384.150,  258.940,05000000)  oracle ( -384.150,  258.940,05000000)  STATE-EXACT  BYTE-EXACT
+   f5   world ft   probe ( -352.301,  261.879,02800000)  oracle ( -352.301,  261.879,02800000)  STATE-EXACT  BYTE-EXACT
+   f10  world f    probe ( -272.361,  263.842,00000000)  oracle ( -272.361,  263.842,00000000)  STATE-EXACT  BYTE-EXACT
+   f15  world f    probe ( -192.361,  263.842,00000000)  oracle ( -192.361,  263.842,00000000)  STATE-EXACT  BYTE-EXACT
+   f20  world f    probe ( -112.361,  263.842,00000000)  oracle ( -112.361,  263.842,00000000)  STATE-EXACT  BYTE-EXACT
+   f25  world f    probe (  -32.361,  263.842,00000000)  oracle (  -32.361,  263.842,00000000)  STATE-EXACT  BYTE-EXACT
+   f30  world f    probe (   47.639,  263.842,00000000)  oracle (   47.639,  263.842,00000000)  STATE-EXACT  BYTE-EXACT
+   f31  world f    probe (   63.639,  263.842,00000000)  oracle (   63.639,  263.842,00000000)  STATE-EXACT  BYTE-EXACT
+   => state-exact 32/32 frames, pixels byte-exact 32/32 (menu frames vs m3_gate's menu)
+(b) injected run 3's frame-70 pose (532.214, 208.889, f8800000, doors 0000000000000) at frame 14, keys released:
+   frame 14: BYTE-EXACT vs the oracle's render of that pose; frames 14..17 stay on it, state-exact and byte-exact: yes; frame 13 (before the write) equals run (a)'s: yes
+DEMO PASS

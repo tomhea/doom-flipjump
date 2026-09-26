@@ -1,0 +1,39 @@
+  (poses planned and stepped in 92.9 s, outside the binary lock)
+b0 selftest -- doom_e1m1_blocked27.fjm sha256 38b09a7331f4f52b (loaded 7.6 s)
+  20 viewpoints = gamespeed run 0, frames 0, 5, ..., 95
+  startup (boot -> frame 0's first input read): 8,455 ops, EXACT
+  B1 view: all 20 frames byte-exact vs the oracle's render of their pose ok  20/20
+  B1 view: the pose read back at every present = the pose injected (nothing moved) ok  20/20
+  B1 view: 20 frames presented, none lost                                ok
+  B1 negative: the same frames judged against a 90-degree-turned pose all FAIL ok  0/20 wrongly accepted
+  B2 tic: gamespeed run 0 through the injector = the recorded total, to the op ok  2,100,441,242 vs 2,100,441,242
+  B2 tic: its poses are state-exact at every present, pixels on every 10th ok  state 100/100, pixels 10/10
+  B2 negative: pre-poses one frame late change the total and fail the state check ok  2,074,318,827, state 1/100
+  B3 every streaming per-frame reading is within +/-2^18 of the exact one-frame cost ok  max |diff| 216,168
+  B3 the streaming run's exact total vs the sum of exact one-frame costs ok  streaming 389,090,128, sum 389,065,817, diff 24,311 (history effects, MEASURED)
+  B3 cost of one pose: first frame 21,999,633, after another pose 22,003,179, after itself 21,998,250 (MEASURED)
+
+  the 20 viewpoints (view mode):
+   #0  frame   0 (  -400.0,   257.0) 02800000 doors 0000000000000  stream   24,117,248  exact   24,258,966  BYTE-EXACT
+   #1  frame   5 (  -320.4,   263.8) 02800000 doors 0000000000000  stream   26,476,544  exact   26,378,747  BYTE-EXACT
+   #2  frame  10 (  -240.4,   263.8) 00000000 doors 0000000000000  stream   20,185,088  exact   20,257,887  BYTE-EXACT
+   #3  frame  15 (  -160.4,   263.8) 00000000 doors 0000000000000  stream   19,136,512  exact   19,199,223  BYTE-EXACT
+   #4  frame  20 (   -80.4,   263.8) 00000000 doors 0000000000000  stream   18,612,224  exact   18,573,277  BYTE-EXACT
+   #5  frame  25 (    -0.4,   263.8) 00000000 doors 0000000000000  stream   20,185,088  exact   20,128,084  BYTE-EXACT
+   #6  frame  30 (    79.6,   263.8) 00000000 doors 0000000000000  stream   18,350,080  exact   18,473,590  BYTE-EXACT
+   #7  frame  35 (   159.6,   264.8) 02800000 doors 0000000000000  stream   24,379,392  exact   24,271,398  BYTE-EXACT
+   #8  frame  40 (   236.9,   284.2) 0f000000 doors 0000000000000  stream   22,020,096  exact   22,090,379  BYTE-EXACT
+   #9  frame  45 (   309.6,   303.3) 0f000000 doors 0000000000000  stream   21,757,952  exact   21,803,046  BYTE-EXACT
+   #10 frame  50 (   387.7,   303.3) 07800000 doors 0000000000000  stream   22,020,096  exact   21,999,633  BYTE-EXACT
+   #11 frame  55 (   466.1,   303.3) 0a000000 doors 0000000000000  stream   22,282,240  exact   22,231,304  BYTE-EXACT
+   #12 frame  60 (   544.7,   303.3) 07800000 doors 0000000000000  stream   23,330,816  exact   23,226,346  BYTE-EXACT
+   #13 frame  65 (   622.0,   303.3) 0f000000 doors 0000000000000  stream   23,330,816  exact   23,434,969  BYTE-EXACT
+   #14 frame  70 (   689.8,   330.9) 1b800000 doors 0000000000000  stream   17,039,360  exact   16,889,427  BYTE-EXACT
+   #15 frame  75 (   741.9,   377.9) 28000000 doors 0000000000000  stream   12,582,912  exact   12,799,080  BYTE-EXACT
+   #16 frame  80 (   773.3,   406.5) 34800000 doors 0000000000000  stream    8,650,752  exact    8,564,804  BYTE-EXACT
+   #17 frame  85 (   787.9,   453.7) 39800000 doors 0000000000000  stream    3,670,016  exact    3,552,536  BYTE-EXACT
+   #18 frame  90 (   791.9,   517.4) 41000000 doors 5000000000000  stream   19,660,800  exact   19,839,805  BYTE-EXACT
+   #19 frame  95 (   804.5,   596.1) 34800000 doors 8000000000000  stream   21,233,664  exact   21,093,316  BYTE-EXACT
+  view-mode average 19,454,506 ops/frame EXACT over these 20 frames (p80 23,330,816, max 26,476,544, +/-2^18)
+
+B0 SELFTEST PASS

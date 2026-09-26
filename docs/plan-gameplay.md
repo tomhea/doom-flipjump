@@ -544,7 +544,11 @@ machine time, strictly one at a time (rule 1)**. Everything that can happen in h
    - the rounded diagonals;
    - and the rest of the list.
 6. **D6 the picture -- DECIDED 2026-09-26: the native-list sprite bank, and the HUD as a status bar
-   at the bottom (with its flipjump device option; the 3D view becomes 84 rows).** The items were:
+   at the bottom (with its flipjump device option; the 3D view becomes 84 rows).** Confirmed after a
+   clarification as **option A, DOOM's layout: the SCREEN stays 160x100**; the bar takes its bottom
+   16 rows and the 3D view is 160x84, as DOOM's 32-row bar leaves 320x168. Rejected: B, a bar added
+   below a full 160x100 view (a 160x116 screen); C, numbers drawn over the picture every frame.
+   The items were:
    - the native-list sprite bank, where every sprite pixel changes;
    - the HUD as a bottom bar (the view becomes 84 rows, so every 3D pixel changes, plus a flipjump
      device option) or a side panel;
@@ -567,7 +571,10 @@ machine time, strictly one at a time (rule 1)**. Everything that can happen in h
     fold the table into each call site's outcome table at emit time (`outcome[i] = f(rndtable[i])`),
     so a call is one index increment plus ONE dispatch, the same as any generated RNG. A P0 probe
     compares it with an LFSR/xorshift in hex ops.
-11. **D11 the map mechanics in scope -- DECIDED 2026-09-26: all of them:** lifts, the floor switch, key doors, walk-over and blazing
+11. **D11 the map mechanics in scope -- DECIDED 2026-09-26: all of them.** The lift spike
+    (`docs/gp-lift-spike.md`) set three defaults, which the owner did not overrule: door-style
+    frame timing (9 up, 26 wait, 9 down), an instant floor switch (243 of 255 plane ids; animating
+    it needs 259), and 16-unit lift steps. The mechanics: lifts, the floor switch, key doors, walk-over and blazing
     doors. They are needed to reach the whole level.
 12. **D12 levels -- DECIDED 2026-09-26: E1M1 only.** Two or three levels would need the 35% target raised
     and the wide thing lists.

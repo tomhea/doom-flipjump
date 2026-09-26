@@ -71,7 +71,12 @@ The line did not change: its two leads live in the program (`config.py`'s pads) 
    `38b09a7331f4f52b` again (`docs/ship-evidence/blocked27_rebuild_recount.log`). The recount's
    counts, widths, aliases and width histogram equal the old cache's field for field; only the
    signature moved. The tracked cache is that recount (signature `src=3e1d39d67a047f0e`, macros
-   including the two shifts), so the line HITs it at this tree.
+   including the two shifts). ⚠ That signature hashes the source files' bytes AS CHECKED OUT, and it
+was made on the owner's Windows checkout (`core.autocrlf=true`, CRLF): there the line HITs it. An LF
+checkout of the same commit (CI, Linux, `autocrlf=false`) signs `src=4a533c94ca7093ec` instead,
+MISSES, and pays the counting pass (~34 min) -- the line-ending sensitivity 1b already records for
+blocked25. Nobody has built blocked27 from an LF checkout; that it would give the same bytes is
+expected, not shown.
 
 Its label table is `scratchpad/12m/atlas/blocked27.labels.tsv.gz`; `padA`/`padB` and the recount's
 duplicate `blocked27r` were deleted.
@@ -110,8 +115,9 @@ gate PASS is a statement about the object a person runs.
    `msframe.py --a build/<new>.fjm --save-baseline shipped` on a quiet box.
 
 **How blocked27 departed from this order (2026-09-25), stated so it is not copied as the rule.**
-Lead A ran step 2 as written (`--against shipped`, yardstick 3.51 G -- at the quiet-box line, and
-its verdict was re-confirmed by the combined run). Lead B was measured against lead A's binary with
+Lead A ran step 2 as written (`--against shipped`, yardstick 3.51 G -- at the quiet-box line; it is
+lead A's only stand-alone verdict. The combined run measured the binary CONTAINING lead A faster than
+blocked25 at yardstick 3.65 G, which does not re-measure lead A's own x1.072). Lead B was measured against lead A's binary with
 `--a/--b`, because lead A was the base it was built on and was never frozen. The combined step 2
 (`--a blocked25 --b blocked27`; the ledger row carries both sha256s, fc46c28c5f2bbac8 and 38b09a7331f4f52b) ran at 22:43, AFTER the step-4 re-freeze
 at 22:40 -- so `shipped` briefly named a binary whose combined verdict was not yet in. The freeze

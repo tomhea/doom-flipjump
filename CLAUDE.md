@@ -7,7 +7,16 @@ frame. A Python twin — the **oracle** (`src/doomfj/reference_model.py`) — re
 independently, and the two must agree **byte for byte**.
 
 Read `DESIGN.md` for architecture, `docs/cr-rules.md` (R1–R9) for the review contract, and the
-`docs/handoff-*.md` files for per-milestone detail. **★ For what happens next, start at `docs/handoff-fullgame-metrics.md` — the owner's goal changed
+`docs/handoff-*.md` files for per-milestone detail.
+
+**★★ THE CURRENT MILESTONE (owner, 2026-09-26): the FULLY PLAYABLE E1M1 -- moving monsters, fighting,
+shooting, damage and health, dying -- at <= 22M ops/frame on a frozen combat scenario set. Start at
+`docs/handoff-gameplay.md`: the whole plan, every owner decision, what phase 0 built and measured,
+and phase 1's rungs. Phase 0 is done; phase 1 has not started.** The paragraph below is the standing
+number of the shipped game WITHOUT combat; the 22M cap replaces its 20M target only when the combat
+game ships (decision D1 in the handoff).
+
+**★ For what happened before: `docs/handoff-fullgame-metrics.md` — the owner's goal changed
 on 2026-09-06 and the 12M-ops render target is SUPERSEDED.** Success is now two numbers on the
 COMBINED FULL GAME (collision + sim + reset included): the binding speed of 10x100-frame games,
 `(mean + p80) / 2` of the runs' ops/frame (the owner's 2026-09-06 refinement of the p80; the

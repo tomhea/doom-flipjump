@@ -1,6 +1,9 @@
 # Plan: a fully playable E1M1 at <= 22M ops/frame
 
-**Status: PHASE 0 STARTED 2026-09-26** on branch `gameplay-p0`. The owner approved the plan and
+**Status: PHASE 0 DONE 2026-09-26; execute from `docs/handoff-gameplay.md`** (the whole plan, final
+numbers on the frozen set v2). This file is the RECORD of how the plan was made.
+
+**(was) PHASE 0 STARTED 2026-09-26** on branch `gameplay-p0`. The owner approved the plan and
 decided every item of section 11 on 2026-09-26 except D3 (the compositor rules), which waits for the
 phase-0 census by design. Phase 0 is measurement, a Python model and design spikes only; its work
 streams are in section 15.
@@ -750,3 +753,7 @@ left that could consume the margin is placement, which is why pin protection sta
 
 **Left in phase 0:** the scenario set v2 and its freeze; the aim-window design note; the D3 and K
 decisions. Then P1, starting with pin protection.
+
+**DONE 2026-09-26:** D3 and K = 6 decided; the aim note (`docs/gp-aim-window.md`, DOOM's diagonal
+width adopted); the set v2 FROZEN (843f28a) with B0 17,760,774 (proxy 18,107,313); the final
+census on v2 (bb7179c). The final budget is `docs/handoff-gameplay.md` section 8.

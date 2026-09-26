@@ -104,7 +104,7 @@ def _save_counts(path, a, frozen):
     print("  counts cached to %s" % path, flush=True)
 
 
-def _preflight(pool_cls, W, a, frozen, wants):
+def _preflight(pool_cls, W, a, frozen, wants, heat=None):
     """Price the configuration BEFORE the 25-minute assembly.
 
     Twice now a config has been launched on an eyeballed span estimate and come back 31 minutes
@@ -116,7 +116,7 @@ def _preflight(pool_cls, W, a, frozen, wants):
                      span_bits=a.span_bits, alias=frozen.get("alias"), spread=a.spread,
                      spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
                      width_hist=frozen.get("width_hist"), width_buckets=a.width_buckets,
-                     wants=wants)
+                     wants=wants, **({"heat": heat} if heat else {}))
     demand = sum(probe._block_bits(g) for g in frozen["counts"])
     limit = (1 << W) if a.span_bits is None else min(1 << W, a.pool_base + a.span_bits)
     capacity = limit - a.pool_base
@@ -239,6 +239,18 @@ def main():
                          "(m1.zerobyte jumps through those). Worth ~10.7%% more on a walk, and the "
                          "reason it failed before was the base-stripping using the pool's raw pin "
                          "set instead of the assembler's filtered one (FINDINGS BJ).")
+    ap.add_argument("--record-sites", default=None, metavar="SITES.json.gz",
+                    help="pin protection (M7 P1.1): run the counting assembly with a pool that also "
+                         "records every table's group, macro-expansion path and size, in the order "
+                         "the program reaches them; write them here (and the counts cache, with "
+                         "--counts-cache) and exit. heatsites.py joins them with a profile into a "
+                         "--pin-heat list. Needs flipjump whose reserve() takes the path.")
+    ap.add_argument("--pin-heat", default=None, metavar="HEAT.json",
+                    help="pin protection (M7 P1.1, docs/gp-pin-protection.md): heatsites.py's list of "
+                         "hot groups and their hot table sites. Every placing pool protects them: a "
+                         "hot group keeps its block and its pin (or the build stops), and its hottest "
+                         "tables take the cheapest indices of their width. Needs flipjump with "
+                         "BlockPool(heat=).")
     ap.add_argument("--no-pin", action="store_true",
                     help="relocate into blocks but do NOT pin the source words. Splits blocking's "
                          "two halves against the standalone gate, the way --no-pin split them "
@@ -247,6 +259,14 @@ def main():
 
     print("blocking: pool base %s, span %s"
           % (hex(a.pool_base), hex(a.span_bits) if a.span_bits else "unbounded"), flush=True)
+
+    heat = None
+    if a.pin_heat:
+        raw = Path(a.pin_heat).read_bytes()
+        heat = {g: [tuple(site) for site in sites] for g, sites in json.loads(raw)["groups"].items()}
+        print("pin-heat: %s (sha256 %s...): %d hot groups, %s hot sites"
+              % (a.pin_heat, hashlib.sha256(raw).hexdigest()[:16], len(heat),
+                 format(sum(len(v) for v in heat.values()), ",")), flush=True)
 
     allow = frozenset(a.macros)
     wants = (lambda macro_name, prefix: macro_name.name in allow) if allow else None
@@ -328,6 +348,14 @@ def main():
     def _capture_resolve(pinned_exprs, labels, reserved_below=1024, exclude=None):
         out, conflicts = _real_resolve(pinned_exprs, labels, reserved_below, exclude)
         live_pins["map"] = dict(out)
+        if heat and pools:
+            # a hot word that did not end up pinned: vetoed by pin_exclude, or an alias conflict
+            hot = [(g, pools[-1].groups[g][1]) for g in pools[-1].hot_sites
+                   if g in pools[-1].groups and pools[-1].groups[g][1] is not None]
+            lost = [g for g, expr in hot if expr.exact_eval(labels) not in out]
+            print("  pin-heat: %d of %d hot words pinned%s"
+                  % (len(hot) - len(lost), len(hot), "; NOT pinned: %s" % lost[:5] if lost else ""),
+                  flush=True)
         return out, conflicts
 
     _asmmod.resolve_pinned = _capture_resolve
@@ -361,17 +389,26 @@ def main():
     frozen = {}          # counts/widths from the first counting run, reused by every assembly
     pools = []
     real_assemble = fj.assemble
+    recorded = []
+
+    class SiteRecorder(BlockPool):
+        """the counting pool, recording each table's group, path and size in encounter order"""
+
+        def reserve(self, ops_alignment, table_ops, group=None, group_expr=None, labels_prefix=''):
+            if group is not None:
+                recorded.append((group, labels_prefix, table_ops, ops_alignment))
+            return super().reserve(ops_alignment, table_ops, group, group_expr, labels_prefix)
 
     def assemble_blocked(*args, **kwargs):
-        if not frozen:
+        if not frozen and not a.record_sites:
             cached = _load_counts(a.counts_cache, a)
             if cached:
                 frozen.update(cached)
         if not frozen:
             with tempfile.TemporaryDirectory() as td:
-                counting = BlockPool(W, a.pool_base, span_bits=a.span_bits,
-                                     spread=a.spread, spread_min_count=a.spread_min_count,
-                                     max_slot_ops=a.max_slot_ops, wants=wants)
+                counting = (SiteRecorder if a.record_sites else BlockPool)(
+                    W, a.pool_base, span_bits=a.span_bits, spread=a.spread,
+                    spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops, wants=wants)
                 probe = dict(kwargs)
                 probe["table_pool"] = counting
                 out_arg = list(args)
@@ -426,9 +463,22 @@ def main():
                       % (format(len(counting.counts), ","),
                          format(sum(counting.counts.values()), ","), int(time.time() - t0)),
                       flush=True)
+                if a.record_sites:
+                    by_group = {}
+                    for g, path, ops, align in recorded:
+                        by_group.setdefault(alias.get(g, g), []).append([path, ops, align])
+                    blob = {"what": "every table the counting pass reached, per canonical group, in "
+                                    "encounter order: [macro-expansion path, table ops, alignment]",
+                            "program": _counts_sig(a), "tables": len(recorded), "groups": by_group}
+                    with gzip.open(a.record_sites, "wt", encoding="utf-8") as fh:
+                        json.dump(blob, fh)
+                    print("  recorded %s tables in %s groups -> %s"
+                          % (format(len(recorded), ","), format(len(by_group), ","), a.record_sites),
+                          flush=True)
+                    raise SystemExit(0)
         if not frozen.get("_preflighted"):
             frozen["_preflighted"] = True
-            _preflight(BlockPool, W, a, frozen, wants)
+            _preflight(BlockPool, W, a, frozen, wants, heat)
             if a.preflight_only:
                 print("  --preflight-only: priced, not built.", flush=True)
                 raise SystemExit(0)
@@ -437,7 +487,10 @@ def main():
                          spread=a.spread, spread_min_count=a.spread_min_count,
                          max_slot_ops=a.max_slot_ops, evict_by_value=a.evict_by_value,
                          pin_broken=a.pin_broken, width_hist=frozen.get("width_hist"),
-                         width_buckets=a.width_buckets, wants=wants)
+                         width_buckets=a.width_buckets, wants=wants,
+                         **({"heat": heat} if heat else {}))
+        if heat:
+            print("  pin-heat: %s" % pool.heat_report(), flush=True)
         # NEVER PIN A WORD THE M1 SELF-RESET OWNS. emit_reset_part drops a cell from the restore
         # set when `pristine_word >> VAL_SHIFT > 15`, reading it as a packed LUT -- and a pinned
         # word holds `base + value`, so every pinned state cell is misclassified and silently
@@ -513,6 +566,8 @@ def main():
           % (format(len(getattr(last, "broken_groups", ())), ","),
              format(len(last.counts), ","),
              format(getattr(last, "evicted_low_value", 0), ",")), flush=True)
+    if heat:
+        print("pin-heat after the last assembly: %s" % last.heat_report(), flush=True)
     print("blocked: %s tables in %s groups; declined %s; ungrouped %s"
           % (format(last.allocated, ","), format(len(last.groups), ","),
              format(last.declined, ","), format(last.ungrouped, ",")), flush=True)

@@ -93,7 +93,12 @@ phase 1, so the people building the game cannot re-grade it (D2).
   - player death and restart; the exit;
   - lifts, the floor switch, key doors, walk-over doors;
   - doors and lifts reversing on a thing (DOOM's P_ChangeSector), or chasing monsters get sealed
-    inside doors.
+    inside doors;
+  - the player BLOCKED by solid things -- monsters, barrels, solid decor (found by S3a: today's
+    binary and oracle let the player walk through every thing). The player's collision cells carry
+    the solid things' boxes, as the monsters' do (6.3);
+  - the player's weapon acts before the player's move within a tic (DOOM moves first), so a shot
+    resolves against the picture the player saw (the aim window, 6.4).
 - **B, simplified (needs sign-off, D5):**
   - no knockback;
   - 2D projectiles;

@@ -1,0 +1,41 @@
+aim vs DOOM 2D trace; pellet spreads every 8, triangular weights
+s4_R0-west-hall          col-80 frames  92 | box 5 box_reff 2 geo 5 sprite 26 r_minus4 28 | pellets: box 13.3% box_reff 6.1% ceiling 1.4% sprite 31.7% r_minus4 34.5%
+s4_R0-south-hall         col-80 frames   3 | box 1 box_reff 1 geo 0 sprite 2 r_minus4 0 | pellets: box 35.1% box_reff 31.0% ceiling 9.2% sprite 50.0% r_minus4 38.9%
+s4_R0-imp-court          col-80 frames  84 | box 5 box_reff 2 geo 5 sprite 6 r_minus4 11 | pellets: box 5.0% box_reff 2.5% ceiling 0.4% sprite 9.7% r_minus4 16.9%
+s4_R0-northwest          col-80 frames  77 | box 3 box_reff 0 geo 3 sprite 43 r_minus4 46 | pellets: box 20.5% box_reff 2.1% ceiling 0.0% sprite 43.2% r_minus4 47.3%
+s4_R0-courtyard          col-80 frames  99 | box 0 box_reff 0 geo 0 sprite 0 r_minus4 0 | pellets: box 3.5% box_reff 3.5% ceiling 0.5% sprite 1.6% r_minus4 4.5%
+s4_R2-barrel-hall        col-80 frames  86 | box 24 box_reff 2 geo 24 sprite 23 r_minus4 50 | pellets: box 25.2% box_reff 2.4% ceiling 0.4% sprite 25.4% r_minus4 52.0%
+s4_R2-spectre-corridor   col-80 frames 100 | box 6 box_reff 0 geo 6 sprite 17 r_minus4 15 | pellets: box 5.6% box_reff 1.4% ceiling 0.0% sprite 17.4% r_minus4 11.5%
+s4_R2-east-yard          col-80 frames 100 | box 1 box_reff 0 geo 1 sprite 1 r_minus4 1 | pellets: box 4.6% box_reff 0.1% ceiling 0.0% sprite 3.8% r_minus4 13.4%
+s4_R3-west               col-80 frames  37 | box 3 box_reff 2 geo 3 sprite 22 r_minus4 13 | pellets: box 13.7% box_reff 7.3% ceiling 0.1% sprite 43.3% r_minus4 36.5%
+s4_R3-mid                col-80 frames  96 | box 8 box_reff 0 geo 8 sprite 17 r_minus4 17 | pellets: box 15.5% box_reff 9.3% ceiling 1.1% sprite 34.0% r_minus4 31.1%
+st_placed_pistol         col-80 frames 187 | box 58 box_reff 54 geo 58 sprite 106 r_minus4 36 | pellets: box 13.7% box_reff 13.8% ceiling 3.5% sprite 66.2% r_minus4 18.1%
+st_shotgun_imps          col-80 frames 164 | box 1 box_reff 4 geo 1 sprite 77 r_minus4 15 | pellets: box 10.0% box_reff 11.0% ceiling 2.6% sprite 56.0% r_minus4 21.0%
+st_demons_close          col-80 frames 200 | box 0 box_reff 0 geo 0 sprite 17 r_minus4 6 | pellets: box 1.4% box_reff 1.4% ceiling 0.4% sprite 8.4% r_minus4 2.9%
+st_wake_all              col-80 frames  45 | box 1 box_reff 0 geo 1 sprite 0 r_minus4 1 | pellets: box 32.1% box_reff 32.8% ceiling 5.7% sprite 33.3% r_minus4 35.3%
+st_barrel_room           col-80 frames 108 | box 16 box_reff 10 geo 16 sprite 36 r_minus4 25 | pellets: box 38.3% box_reff 14.4% ceiling 4.8% sprite 63.3% r_minus4 54.0%
+st_quiet_walk            col-80 frames  39 | box 8 box_reff 1 geo 8 sprite 29 r_minus4 24 | pellets: box 28.7% box_reff 14.6% ceiling 3.3% sprite 70.3% r_minus4 48.5%
+TOTAL col 80 (the pistol's accurate shot): 1517 frames in which doom, box, box_reff or geo names a target
+  box       != doom in  140 frames =  9.23%
+  box_reff  != doom in   78 frames =  5.14%
+  geo       != doom in  139 frames =  9.16%
+  sprite    != doom in  422 frames = 27.82%
+  r_minus4  != doom in  288 frames = 18.98%
+TOTAL pellets (triangular-weighted rays that DOOM or a window hits something with):
+  box       != doom on 13.28% of the weight
+  box_reff  != doom on  7.36% of the weight
+  ceiling   != doom on  1.62% of the weight
+  sprite    != doom on 33.90% of the weight
+  r_minus4  != doom on 24.40% of the weight
+  box != doom at col 80, by reason:
+      51  both hit, different targets (the window's, for DOOM: ray misses its diagonal)
+      46  both hit, different targets (the window's, for DOOM: crossed and clear, but farther along the ray)
+      41  DOOM hits, window empty: the box misses col 80, the diagonal does not
+       1  window hits, DOOM misses: a wall before the crossing
+       1  window hits, DOOM misses: ray misses its diagonal
+  box_reff != doom at col 80, by reason:
+      52  both hit, different targets (the window's, for DOOM: ray misses its diagonal)
+      11  both hit, different targets (the window's, for DOOM: crossed and clear, but farther along the ray)
+       8  window hits, DOOM misses: ray misses its diagonal
+       6  DOOM hits, window empty: the box misses col 80, the diagonal does not
+       1  window hits, DOOM misses: a wall before the crossing

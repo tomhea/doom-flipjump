@@ -218,3 +218,19 @@ def test_the_shot_is_the_noise_a_monster_hears():
     w = _world()
     _open_all_doors(w)
     assert not any(how == "sound" for ev in _run(w, {}, 60) for _m, how in ev.wakes)
+
+
+def test_the_aim_box_is_doom_s_diagonal_width():
+    """aim_radius (docs/gp-aim-window.md 1.7): r on an axis, round(1.414 r) at 45 degrees, from the
+    view angle's top AIM_REFF_BITS bits. Control: a plain radius would read r at 45 degrees too."""
+    from doomfj import combat as C
+    rm = _world().rm
+    for r in (10, 20, 30):
+        assert C.CombatMixin.aim_radius(rm, 0, r) == r
+        assert C.CombatMixin.aim_radius(rm, 0x40000000, r) == r
+        assert C.CombatMixin.aim_radius(rm, 0x20000000, r) == round(r * 2 ** 0.5)
+        assert C.CombatMixin.aim_radius(rm, 0x20000000, r) != r            # the control
+    # the lookup quantizes: every angle in one top-bits bucket gives the same width
+    lo = 0x20000000
+    assert {C.CombatMixin.aim_radius(rm, lo + d, 20) for d in (0, 1, 1 << 23, (1 << 24) - 1)} == {28}
+

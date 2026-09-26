@@ -1,0 +1,37 @@
+s4_R0-south-hall       frame   8 col 75 window ('mon', 47) geo None       rays 32 hit  8
+s4_R0-south-hall       frame   9 col 80 window ('mon', 47) geo None       rays 36 hit 12
+s4_R0-south-hall       frame  10 col 85 window ('mon', 47) geo None       rays 32 hit  5
+st_placed_pistol       frame  34 col 72 window ('mon', 0) geo None       rays 12 hit 12
+st_placed_pistol       frame  34 col 73 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  34 col 74 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  35 col 72 window ('mon', 0) geo None       rays 12 hit 12
+st_placed_pistol       frame  35 col 73 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  35 col 74 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  40 col 72 window ('mon', 0) geo None       rays 12 hit 12
+st_placed_pistol       frame  40 col 73 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  40 col 74 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  41 col 72 window ('mon', 0) geo None       rays 12 hit 12
+st_placed_pistol       frame  41 col 73 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  41 col 74 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  42 col 72 window ('mon', 0) geo None       rays 12 hit 12
+st_placed_pistol       frame  42 col 73 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  42 col 74 window ('mon', 0) geo None       rays 32 hit 32
+st_placed_pistol       frame  43 col 72 window ('mon', 0) geo None       rays 12 hit 12
+st_placed_pistol       frame  44 col 72 window ('mon', 0) geo None       rays 12 hit 12
+st_shotgun_imps        frame  93 col 88 window ('mon', 4) geo None       rays 15 hit  1
+st_shotgun_imps        frame  94 col 88 window ('mon', 4) geo None       rays 15 hit  1
+st_shotgun_imps        frame  95 col 88 window ('mon', 4) geo None       rays 15 hit  1
+st_shotgun_imps        frame  96 col 88 window ('mon', 4) geo None       rays 15 hit  1
+st_shotgun_imps        frame 103 col 88 window ('mon', 4) geo None       rays 15 hit 10
+st_shotgun_imps        frame 104 col 88 window ('mon', 4) geo None       rays 15 hit 10
+st_shotgun_imps        frame 105 col 88 window ('mon', 4) geo None       rays 15 hit 10
+st_shotgun_imps        frame 106 col 87 window ('mon', 4) geo None       rays 32 hit 29
+st_shotgun_imps        frame 106 col 88 window ('mon', 4) geo None       rays 15 hit 15
+st_shotgun_imps        frame 107 col 87 window ('mon', 4) geo None       rays 32 hit 29
+st_shotgun_imps        frame 107 col 88 window ('mon', 4) geo None       rays 15 hit 15
+st_shotgun_imps        frame 108 col 87 window ('mon', 4) geo None       rays 32 hit 29
+st_shotgun_imps        frame 108 col 88 window ('mon', 4) geo None       rays 15 hit 15
+control: frames where window and geometric aim agree on a target at col 80: 345; the trace hits it in 294
+residual column-frames by DOOM-style 2D trace:
+   20  DOOM hits at every spread angle of the column
+   13  DOOM hits at some spread angles of the column

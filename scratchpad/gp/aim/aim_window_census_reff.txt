@@ -1,0 +1,44 @@
+aim window census: rules box,box_draw,first,first_d,sprite,r_minus4,no_occl; K = 3; radius r*(|sin v|+|cos v|) (--reff); snapshot C:\Users\tomhe\Documents\doom-flipjump\scratchpad\gp\census_out\s4v1\combat_scenarios_v1.snapshot.json
+s4_R0-west-hall            frames 100 (fight  96) geo@80  92 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 28 r_minus4 5 no_occl 0 | all 17 cols: box 0 box_draw 0 first 3 first_d 0 sprite 457 r_minus4 252 no_occl 37 | boxed/frame 14.89 overlap 1.82 cov 14.81 visits 13.66  replay EQUALS
+s4_R0-south-hall           frames 100 (fight   6) geo@80   2 | col-80 disagreements: box 1 box_draw 1 first 1 first_d 1 sprite 2 r_minus4 1 no_occl 5 | all 17 cols: box 6 box_draw 6 first 6 first_d 6 sprite 18 r_minus4 10 no_occl 86 | boxed/frame 6.10 overlap 0.47 cov 1.81 visits 0.57  replay EQUALS
+s4_R0-imp-court            frames 100 (fight  85) geo@80  83 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 4 r_minus4 5 no_occl 2 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 210 r_minus4 55 no_occl 50 | boxed/frame 18.25 overlap 2.42 cov 21.96 visits 18.38  replay EQUALS
+s4_R0-northwest            frames 100 (fight  77) geo@80  77 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 43 r_minus4 0 no_occl 2 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 409 r_minus4 98 no_occl 36 | boxed/frame 3.70 overlap 0.94 cov 12.97 visits 11.95  replay EQUALS
+s4_R0-courtyard            frames 100 (fight 100) geo@80  99 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 0 r_minus4 0 no_occl 0 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 44 r_minus4 47 no_occl 0 | boxed/frame 6.50 overlap 1.00 cov 14.49 visits 14.49  replay EQUALS
+s4_R2-barrel-hall          frames 100 (fight  88) geo@80  86 | col-80 disagreements: box 0 box_draw 0 first 1 first_d 1 sprite 25 r_minus4 3 no_occl 0 | all 17 cols: box 0 box_draw 0 first 9 first_d 9 sprite 394 r_minus4 255 no_occl 0 | boxed/frame 14.40 overlap 1.84 cov 20.71 visits 20.71  replay !! DIFFERS
+s4_R2-spectre-corridor     frames 100 (fight 100) geo@80 100 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 17 r_minus4 5 no_occl 0 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 292 r_minus4 54 no_occl 0 | boxed/frame 6.02 overlap 1.02 cov 16.18 visits 16.18  replay EQUALS
+s4_R2-east-yard            frames 100 (fight 100) geo@80 100 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 1 r_minus4 0 no_occl 0 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 91 r_minus4 40 no_occl 0 | boxed/frame 4.99 overlap 1.99 cov 24.74 visits 24.74  replay EQUALS
+s4_R3-west                 frames 100 (fight  39) geo@80  35 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 20 r_minus4 6 no_occl 0 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 148 r_minus4 82 no_occl 0 | boxed/frame 0.86 overlap 0.39 cov 4.90 visits 4.90  replay EQUALS
+s4_R3-mid                  frames 100 (fight 100) geo@80  96 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 17 r_minus4 8 no_occl 0 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 506 r_minus4 267 no_occl 0 | boxed/frame 6.79 overlap 1.77 cov 16.63 visits 16.63  replay EQUALS
+st_placed_pistol           frames 198 (fight 198) geo@80 187 | col-80 disagreements: box 0 box_draw 0 first 48 first_d 0 sprite 97 r_minus4 58 no_occl 0 | all 17 cols: box 24 box_draw 24 first 342 first_d 24 sprite 1899 r_minus4 476 no_occl 24 | boxed/frame 20.23 overlap 5.71 cov 32.32 visits 32.32
+st_shotgun_imps            frames 200 (fight 200) geo@80 155 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 71 r_minus4 12 no_occl 0 | all 17 cols: box 15 box_draw 15 first 15 first_d 15 sprite 1361 r_minus4 508 no_occl 15 | boxed/frame 19.91 overlap 4.39 cov 25.63 visits 25.63
+st_demons_close            frames 200 (fight 200) geo@80 200 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 17 r_minus4 6 no_occl 0 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 313 r_minus4 118 no_occl 0 | boxed/frame 21.81 overlap 5.78 cov 40.47 visits 40.47
+st_wake_all                frames 200 (fight 105) geo@80  27 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 0 r_minus4 1 no_occl 0 | all 17 cols: box 0 box_draw 0 first 2 first_d 0 sprite 219 r_minus4 111 no_occl 0 | boxed/frame 17.29 overlap 0.84 cov 2.81 visits 2.81
+st_barrel_room             frames 200 (fight 121) geo@80 106 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 26 r_minus4 4 no_occl 0 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 1096 r_minus4 343 no_occl 0 | boxed/frame 12.00 overlap 1.66 cov 13.15 visits 13.15
+st_quiet_walk              frames 200 (fight 120) geo@80  39 | col-80 disagreements: box 0 box_draw 0 first 0 first_d 0 sprite 30 r_minus4 22 no_occl 0 | all 17 cols: box 0 box_draw 0 first 0 first_d 0 sprite 587 r_minus4 293 no_occl 60 | boxed/frame 10.05 overlap 0.94 cov 4.59 visits 4.16
+TOTAL frames 2198, fight frames 1735 (a target at some window column by either aim), geo target at col 80: 1484 frames
+  box       col 80:    1 frames differ =  0.06% of fight frames | all 17 columns:    45 column-frames =  0.15% of fight column-frames
+  box_draw  col 80:    1 frames differ =  0.06% of fight frames | all 17 columns:    45 column-frames =  0.15% of fight column-frames
+  first     col 80:   50 frames differ =  2.88% of fight frames | all 17 columns:   377 column-frames =  1.28% of fight column-frames
+  first_d   col 80:    2 frames differ =  0.12% of fight frames | all 17 columns:    54 column-frames =  0.18% of fight column-frames
+  sprite    col 80:  398 frames differ = 22.94% of fight frames | all 17 columns:  8044 column-frames = 27.27% of fight column-frames
+  r_minus4  col 80:  136 frames differ =  7.84% of fight frames | all 17 columns:  3009 column-frames = 10.20% of fight column-frames
+  no_occl   col 80:    9 frames differ =  0.52% of fight frames | all 17 columns:   308 column-frames =  1.04% of fight column-frames
+  box vs box_draw, the two eligibility rules, directly: 0 column-frames differ (of 37366)
+  cost drivers per frame (all frames | fight frames | max in one frame | total):
+    arrivals          79.57 |   89.16 |  156 |  174902
+    shoot             17.46 |   19.39 |   37 |   38382
+    boxed             12.95 |   14.58 |   37 |   28469
+    prepass            3.90 |    4.80 |   26 |    8565
+    overlap            2.37 |    2.99 |   15 |    5220
+    pre_violation      0.00 |    0.00 |    0 |       0
+    pre16_violation    0.31 |    0.39 |    5 |     687
+    cov               17.58 |   22.20 |   64 |   38650
+    visits            17.23 |   21.82 |   64 |   37863
+    w_empty           10.99 |   13.92 |   17 |   24152
+    w_nearer           0.15 |    0.19 |   11 |     332
+    w_kept             6.09 |    7.71 |   47 |   13379
+  the design's ('box') remaining col-80 disagreements, by reason:
+       1  win-only: 2D sight to its centre is blocked (the column was open)
+  the design's ('box') remaining disagreements over all 17 columns (column-frames):
+      45  win-only: 2D sight to its centre is blocked (the column was open)
+(232 s)

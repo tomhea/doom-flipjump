@@ -79,6 +79,9 @@ from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE
 # FORWARD_MOVE, rounded (plan section 2, input). world.py re-exports it.
 STRAFE_MOVE = 13 << 16
 
+# the aim box's width is looked up on the view angle's top bits (aim_radius; gp-aim-window 1.7)
+AIM_REFF_BITS = 8
+
 M32 = 0xFFFFFFFF
 
 
@@ -688,11 +691,25 @@ class CombatMixin:
         return out
 
     @staticmethod
+    def aim_radius(rm, angle: int, r: int) -> int:
+        """DOOM's hit width for a box of radius `r` seen along view angle `angle`: the half-width of
+        the corner-to-corner diagonal PIT_AddThingIntercepts tests, r * (|sin v| + |cos v|) (r on an
+        axis, 1.41r at 45 degrees) -- docs/gp-aim-window.md 1.7, adopted 2026-09-26. ONE definition
+        for the model and the emitter: the view angle's top AIM_REFF_BITS bits index it (the fj side
+        is one lookup into a table built from this function), rounded half up, from the repo's
+        16.16 sine table."""
+        a = (angle >> (32 - AIM_REFF_BITS)) << (32 - AIM_REFF_BITS)
+        s = abs(_signed(rm.read_sin(a) & M32, 32))
+        c = abs(_signed(rm.read_cos(a) & M32, 32))
+        return (r * (s + c) + 32768) >> 16
+
+    @staticmethod
     def aim_geometric(world, col: int):
         """The DEFAULT aim: the nearest (view depth) shootable living target whose box, projected
-        from the tic-start view as `ReferenceModel.project_thing` projects a sprite (with the box's
-        radius for the sprite's width), covers screen column `col`, within MISSILERANGE, with 2D
-        line of sight. Ties go to monsters before barrels, then the lower index."""
+        from the tic-start view as `ReferenceModel.project_thing` projects a sprite (with DOOM's
+        diagonal width `aim_radius` for the sprite's width), covers screen column `col`, within
+        MISSILERANGE, with 2D line of sight. Ties go to monsters before barrels, then the lower
+        index."""
         ws, rm = world.ws, world.rm
         cfg = rm.cfg
         vcos, vsin = rm.read_cos(ws.pangle), rm.read_sin(ws.pangle)
@@ -710,8 +727,9 @@ class CombatMixin:
             gyt2 = _signed(fixed_mul(tr_y & M32, vcos, 8, 4), 32)
             tx = -(gyt2 + gxt2)
             xscale = rm._scale_recip_div(cfg.PROJECTION << 16, tz)
-            x1 = (cxf + _signed(fixed_mul((tx - (r << 16)) & M32, xscale, 8, 4), 32)) >> 16
-            x2 = ((cxf + _signed(fixed_mul((tx + (r << 16)) & M32, xscale, 8, 4), 32)) >> 16) - 1
+            re = CombatMixin.aim_radius(rm, ws.pangle, r)       # DOOM's diagonal width (1.7)
+            x1 = (cxf + _signed(fixed_mul((tx - (re << 16)) & M32, xscale, 8, 4), 32)) >> 16
+            x2 = ((cxf + _signed(fixed_mul((tx + (re << 16)) & M32, xscale, 8, 4), 32)) >> 16) - 1
             if not x1 <= col <= x2:
                 continue
             if best is not None and (tz, order) >= best[0]:

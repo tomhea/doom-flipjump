@@ -1,9 +1,9 @@
-# R1: the new test on the UNFIXED gamespeed.py (branch fix/gamespeed-validate-doors at cd8b51a = main; only the test and its key fixture added)
+# R1: the test on main's gamespeed.py (cd8b51a) plus ONLY the fixture-path constant RECORDED_KEYS
 $ python -m pytest tests/host/test_gamespeed_validate.py -q -p no:cacheprovider
->       assert _run0_end() == (831, 653), "run 0 must end where the binary ends"
-E       AssertionError: run 0 must end where the binary ends
-E       assert (831, 485) == (831, 653)
+>       assert ends[0] == ((831, 653), "1"), "run 0 must end where the binary ends, one door opened"
+E       AssertionError: run 0 must end where the binary ends, one door opened
+E       assert ((831, 485), 'none') == ((831, 653), '1')
 E         
-E         At index 1 diff: 485 != 653
+E         At index 0 diff: (831, 485) != (831, 653)
 E         Use -v to get more diff
-1 failed in 0.55s
+1 failed in 0.60s

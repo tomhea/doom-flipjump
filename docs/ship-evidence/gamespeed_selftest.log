@@ -26,9 +26,9 @@ calibration: startup + 2 menu frames = 514,000 ops (subtracted from every run)
   N6 EVERY run moves on >= 60%% of its movement frames       ok  worst run 29% blocked
   N6 no run is mostly stuck (the old check passed at 95%% blocked) ok  worst 29%
   N6 every run travels >= 256 units from where it began      ok  min 884 units
-  N6e --validate ends where the binary ends (all 10 runs)    ok  10/10
-  N6f the doors-shut replay FAILS it (run 0 stops at the shut door) ok  doors shut: run 0 ends (831, 485); the binary: (831, 653)
-  N6g the host test's recorded run-0 keys are script(0)'s    ok  100 recorded frames
+  N6e --validate ends where the binary ends, doors opened included (10 runs) ok  10/10
+  N6f the doors-shut replay FAILS it (run 0 stops at the shut door) ok  doors shut: run 0 ends (831, 485), 0 door(s); the binary: (831, 653), 1
+  N6g the host test's recorded keys are script(0)'s and script(1)'s ok  runs ['0', '1']
   (N7 determinism skipped -- pass --fjm <path> to run it)
 
 SELFTEST PASS

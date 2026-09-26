@@ -1,17 +1,19 @@
 $ python scratchpad/12m/gamespeed_trail.py --fjm build/doom_e1m1_blocked27.fjm
-  (scripts planned and replayed in 77 s, outside the binary lock)
+  (--validate's records made in 74 s, outside the binary lock)
 gamespeed_trail: doom_e1m1_blocked27.fjm sha256 38b09a7331f4f52b, labels blocked27.labels.tsv.gz
-  run 0: the binary ends (831, 653) [16.16: 54490400, 42856528]; door-aware replay equal on 100/100 frames; doors-shut on 89/100 (parts at game frame 89); 100/100 frames presented
-  run 1: the binary ends (-357, 430) [16.16: -23347680, 28194688]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
-  run 2: the binary ends (780, 427) [16.16: 51134736, 28031456]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
-  run 3: the binary ends (688, 208) [16.16: 45126944, 13689744]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
-  run 4: the binary ends (-176, 348) [16.16: -11489168, 22815584]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
-  run 5: the binary ends (-173, 163) [16.16: -11311360, 10738608]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
-  run 6: the binary ends (-173, 413) [16.16: -11280992, 27087472]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
-  run 7: the binary ends (-490, 106) [16.16: -32080464, 6972320]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
-  run 8: the binary ends (239, 353) [16.16: 15694320, 23134944]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
-  run 9: the binary ends (189, 245) [16.16: 12441248, 16117760]; door-aware replay equal on 100/100 frames; doors-shut on 100/100; 100/100 frames presented
+  run 0: the binary ends (831, 653) [16.16: 54490400, 42856528], 1 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 89/100 (parts at game frame 89); door-wrong rejected on 14 frames, 14 with its pose equal; 100/100 frames presented
+  run 1: the binary ends (-357, 430) [16.16: -23347680, 28194688], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 2: the binary ends (780, 427) [16.16: 51134736, 28031456], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 3: the binary ends (688, 208) [16.16: 45126944, 13689744], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 4: the binary ends (-176, 348) [16.16: -11489168, 22815584], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 5: the binary ends (-173, 163) [16.16: -11311360, 10738608], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 6: the binary ends (-173, 413) [16.16: -11280992, 27087472], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 7: the binary ends (-490, 106) [16.16: -32080464, 6972320], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 8: the binary ends (239, 353) [16.16: 15694320, 23134944], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
+  run 9: the binary ends (189, 245) [16.16: 12441248, 16117760], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented
 BINARY_ENDS = ((831, 653), (-357, 430), (780, 427), (688, 208), (-176, 348), (-173, 163), (-173, 413), (-490, 106), (239, 353), (189, 245))
-TRAIL   the door-aware replay equals the binary on every frame of every run: PASS
-CONTROL the doors-shut replay parts from the binary: PASS (runs [0])
+BINARY_DOORS = (1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+TRAIL         --validate's record equals the binary on every frame of every run: PASS
+CONTROL-POSE  the doors-shut replay parts from the binary: PASS (runs [0])
+CONTROL-DOORS the door-wrong replay is rejected where its pose is right: PASS (runs [0])
 rc=0

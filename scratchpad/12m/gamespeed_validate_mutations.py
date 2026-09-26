@@ -3,9 +3,10 @@
     python scratchpad/12m/gamespeed_validate_mutations.py   (prints docs/ship-evidence/gamespeed_validate_mutations.log;
                                                              every file it mutates is restored)
 
-M1-M3 break the door replay three ways and run the host test (tests/host/test_gamespeed_validate.py,
-~1 s); M4 gives the selftest's recorded binary ends the door-blind answer and runs `gamespeed.py
---selftest` (~80 s), whose N6e must then fail."""
+M1-M3 and M5-M6 break the door replay five ways and run the host test
+(tests/host/test_gamespeed_validate.py, ~1 s); M5 and M6 are PR #89 review round 1's, which the first
+version of the checks let through. M4 gives the selftest's recorded binary ends the door-blind answer
+and runs `gamespeed.py --selftest` (~4 min), whose N6e must then fail."""
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ HOST = [sys.executable, "-m", "pytest", "tests/host/test_gamespeed_validate.py",
 SELF = [sys.executable, "scratchpad/12m/gamespeed.py", "--selftest"]
 CASES = [
     ("M1 --validate defaults to the doors-shut replay", GS_FILE,
-     "quiet=False,\n                     doors=True):", "quiet=False,\n                     doors=False):",
+     "doors=True, trails=None):", "doors=False, trails=None):",
      HOST),
     ("M2 the loop steps the doors-shut scene", GS_FILE,
      "st = dsim.step(st, kd) if dsim else rm.step_sim(st, kd, scene=scene)",
@@ -26,6 +27,10 @@ CASES = [
      'bool(kd.get("use"))', "False", HOST),
     ("M4 the recorded binary end of run 0 is the door-blind one", GS_FILE,
      "BINARY_ENDS = ((831, 653),", "BINARY_ENDS = ((831, 485),", SELF),
+    ("M5 the door stepper is not reset between runs", GS_FILE,
+     "(dsim.reset() if dsim else sp)", "(dsim.spawn if dsim else sp)", HOST),
+    ("M6 DoorSim drops the use-box test (`use` opens any door)", "scratchpad/12m/onewalk.py",
+     "and in_use_box_fixed(self.boxes[si], st.x, st.y))", ")", HOST),
 ]
 
 

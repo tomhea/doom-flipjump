@@ -85,15 +85,19 @@ def _oracle(wad, mapname):
 
 TOUR_TARGETS = 10                   # one destination per seed, spread over the whole level
 
-# Where the ten 100-frame runs END on the game binary, in map units -- READ from the running
-# binary at every frame's present through the probe, never written, by
-# `scratchpad/12m/gamespeed_trail.py --fjm build/doom_e1m1_blocked27.fjm`
-# (docs/ship-evidence/blocked27_gamespeed_trail.log: the door-aware replay equals the binary on
-# every frame of all ten runs; the doors-shut replay parts on run 0). `--selftest` N6e requires
-# `--validate` to reproduce them, and N6f that the old doors-shut replay does NOT.
+# Where the ten 100-frame runs END on the game binary, in map units, and how many doors each
+# opens -- READ from the running binary at every frame's present through the probe, never
+# written, by `scratchpad/12m/gamespeed_trail.py --fjm build/doom_e1m1_blocked27.fjm`, which also
+# requires `--validate`'s own per-frame record (pose and every door) to equal the binary's
+# (docs/ship-evidence/blocked27_gamespeed_trail.log). `--selftest` N6e requires `--validate` to
+# reproduce both, and N6f that the old doors-shut replay does NOT.
 BINARY_ENDS = ((831, 653), (-357, 430), (780, 427), (688, 208), (-176, 348), (-173, 163),
                (-173, 413), (-490, 106), (239, 353), (189, 245))
-RUN0_KEYS = ROOT / "tests" / "fixtures" / "gamespeed_run0_keys.json"   # the host test replays these
+BINARY_DOORS = (1, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+# runs 0 and 1's keys, recorded so the host test replays them without the ~75 s planner: run 0 is
+# the one that opens a door, and run 1 starts after it, which is where a stepper that is not reset
+# between runs shows. `--selftest` N6g checks them against script(0) and script(1).
+RECORDED_KEYS = ROOT / "tests" / "fixtures" / "gamespeed_recorded_keys.json"
 
 
 def _reachable(rm, scene, sx, sy):
@@ -437,7 +441,7 @@ def report(run_avgs, raw_avgs, size):
 # ----------------------------------------------------------------------------------------------
 
 def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_MAP, quiet=False,
-                     doors=True):
+                     doors=True, trails=None):
     """Step the ORACLE through every script and report whether each run actually PLAYS.
 
     ⚠ WITH THE DOORS (fix/gamespeed-validate-doors). The binary boots with every door shut and opens
@@ -453,7 +457,9 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
     scraping a wall still accumulates distance. A run that presses forward and does not move is
     measuring a stuck viewpoint, and the whole metric is a weighted average of viewpoints.
 
-    Returns [(end_xy, travelled, move_frames, moved_frames)] per run.
+    Returns [(end_xy, travelled, move_frames, moved_frames, doors_opened)] per run. `trails`, when a
+    list, receives each run's frames as (x, y, angle, door states) -- None for the doors-shut
+    replay -- which is what gamespeed_trail.py compares with the binary, frame by frame.
     """
     rm, scene, sp = _oracle(wad, mapname)
     dsim = None
@@ -463,9 +469,12 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
     out = []
     for r in range(n_runs):
         st, travelled, move_frames, moved_frames = (dsim.reset() if dsim else sp), 0, 0, 0
+        frames = []
         for kd in script(r, n_frames, wad, mapname):
             prev = (st.x, st.y)
             st = dsim.step(st, kd) if dsim else rm.step_sim(st, kd, scene=scene)
+            frames.append((st.x, st.y, st.angle,
+                           tuple(dsim.ds[si][0] for si in dsim.order) if dsim else None))
             d = abs(st.x - prev[0]) + abs(st.y - prev[1])
             travelled += d
             if kd.get("forward") or kd.get("back"):
@@ -473,7 +482,10 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
                 if d >= UNIT:
                     moved_frames += 1
         ex, ey = st.x >> 16, st.y >> 16
-        out.append(((ex, ey), travelled >> 16, move_frames, moved_frames))
+        opened = dsim.doors_ever() if dsim else 0
+        out.append(((ex, ey), travelled >> 16, move_frames, moved_frames, opened))
+        if trails is not None:
+            trails.append(frames)
         if not quiet:
             blocked = 100.0 * (move_frames - moved_frames) / max(1, move_frames)
             print("  run %2d: ends (%6d,%6d)  %5d from spawn  %6d travelled  "
@@ -481,12 +493,12 @@ def validate_scripts(n_runs=10, n_frames=100, wad=DEFAULT_WAD, mapname=DEFAULT_M
                   % (r, ex, ey,
                      int(((((st.x - sp.x) >> 16) ** 2) + (((st.y - sp.y) >> 16) ** 2)) ** 0.5),
                      travelled >> 16, moved_frames, move_frames, blocked,
-                     "opened %d door(s)" % dsim.doors_ever() if dsim else "doors never open"),
+                     "opened %d door(s)" % opened if dsim else "doors never open"),
                   flush=True)
-    ends = [e for e, _t, _m, _mv in out]
+    ends = [row[0] for row in out]
     spread = max(max(e[i] for e in ends) - min(e[i] for e in ends) for i in (0, 1))
     if not quiet:
-        worst = max(100.0 * (m - mv) / max(1, m) for _e, _t, m, mv in out)
+        worst = max(100.0 * (m - mv) / max(1, m) for _e, _t, m, mv, _o in out)
         print("  distinct end cells: %d/%d ; widest spread %d units ; worst run %.0f%% blocked"
               % (len({(x // 64, y // 64) for x, y in ends}), n_runs, spread, worst), flush=True)
     return out, spread
@@ -586,9 +598,9 @@ def selftest(fjm=None):
     print("  -- stepping the oracle through the 10 scripts ...", flush=True)
     try:
         rows, spread = validate_scripts(quiet=True)
-        ends = [e for e, _t, _m, _mv in rows]
+        ends = [row[0] for row in rows]
         cells = len({(x // 64, y // 64) for x, y in ends})
-        blocked = [100.0 * (m - mv) / max(1, m) for _e, _t, m, mv in rows]
+        blocked = [100.0 * (m - mv) / max(1, m) for _e, _t, m, mv, _o in rows]
         check("N6 the 10 scripts end in >= 6 distinct 64-unit cells", cells >= 6,
               "%d distinct of 10" % cells)
         check("N6 they spread over >= 256 units", spread >= 256, "%d units" % spread)
@@ -597,25 +609,30 @@ def selftest(fjm=None):
         check("N6 no run is mostly stuck (the old check passed at 95%% blocked)",
               max(blocked) < 95.0, "worst %.0f%%" % max(blocked))
         check("N6 every run travels >= 256 units from where it began",
-              min(t for _e, t, _m, _mv in rows) >= 256,
-              "min %d units" % min(t for _e, t, _m, _mv in rows))
-        # N6e THE BINARY'S WALK (fix/gamespeed-validate-doors): the replay must end where the
-        #     binary ends -- BINARY_ENDS, read from blocked27 through the probe.
-        check("N6e --validate ends where the binary ends (all 10 runs)", ends == list(BINARY_ENDS),
-              "parts on runs %s" % [r for r, (a, b) in enumerate(zip(ends, BINARY_ENDS)) if a != b]
-              if ends != list(BINARY_ENDS) else "10/10")
+              min(t for _e, t, _m, _mv, _o in rows) >= 256,
+              "min %d units" % min(t for _e, t, _m, _mv, _o in rows))
+        # N6e THE BINARY'S WALK (fix/gamespeed-validate-doors): every run must end where the
+        #     binary's ends and open the doors the binary's opens -- BINARY_ENDS / BINARY_DOORS,
+        #     read from blocked27 through the probe.
+        got = [(row[0], row[4]) for row in rows]
+        want = list(zip(BINARY_ENDS, BINARY_DOORS))
+        check("N6e --validate ends where the binary ends, doors opened included (10 runs)",
+              got == want, "parts on runs %s" % [r for r, (a, b) in enumerate(zip(got, want)) if a != b]
+              if got != want else "10/10")
         # N6f ITS NEGATIVE CONTROL: the old replay, every door shut, must FAIL N6e -- run 0 holds
         #     `use` in a door's box, and the binary walks through that door.
         shut, _ = validate_scripts(n_runs=1, quiet=True, doors=False)
         check("N6f the doors-shut replay FAILS it (run 0 stops at the shut door)",
-              shut[0][0] != BINARY_ENDS[0],
-              "doors shut: run 0 ends %s; the binary: %s" % (shut[0][0], BINARY_ENDS[0]))
-        # N6g the host test replays RECORDED run-0 keys (the planner costs ~75 s): they must still be
-        #     script(0)'s, or that test checks a walk nobody plays.
+              (shut[0][0], shut[0][4]) != want[0],
+              "doors shut: run 0 ends %s, %d door(s); the binary: %s, %d"
+              % (shut[0][0], shut[0][4], BINARY_ENDS[0], BINARY_DOORS[0]))
+        # N6g the host test replays RECORDED keys of runs 0 and 1 (the planner costs ~75 s): they
+        #     must still be script(0)'s and script(1)'s, or that test checks walks nobody plays. CI
+        #     does not run this -- the ship gate's step 3 does.
         import json
-        rec = json.loads(RUN0_KEYS.read_text(encoding="ascii"))
-        check("N6g the host test's recorded run-0 keys are script(0)'s", rec == script(0),
-              "%d recorded frames" % len(rec))
+        rec = json.loads(RECORDED_KEYS.read_text(encoding="ascii"))
+        check("N6g the host test's recorded keys are script(0)'s and script(1)'s",
+              rec == {"0": script(0), "1": script(1)}, "runs %s" % sorted(rec))
     except Exception as e:                                             # noqa: BLE001
         check("N6 the oracle can step the 10 scripts", False, "%s: %s" % (type(e).__name__, e))
 

@@ -12,14 +12,17 @@ For each run it plays gamespeed's exact composition on the game binary -- the me
 then the run's 100 frames of keys (`gamespeed.full_script` / `events_for`) -- with
 `scratchpad/gp/probe.py` attached, READING (never writing) the player's pose, the game mode and
 every door's state at each game frame's present. It compares that trail, frame by frame, with the
-oracle stepped two ways:
-  doors  `onewalk.DoorSim` (the M2 gate's order: doors tic, then the player) -- what `--validate`
-         steps now; compared on x, y, angle and all 13 door states;
-  shut   every door shut, what `--validate` stepped before; compared on x, y and angle.
-TRAIL PASS needs the door-aware replay equal to the binary on every frame of every run, and every
-run fully presented. CONTROL PASS needs the doors-shut replay to PART from the binary somewhere:
-that is the negative control (docs/cr-rules.md R9) -- a comparison the old, door-blind replay could
-also pass would prove nothing. The ends it prints are `gamespeed.BINARY_ENDS`.
+record `--validate` itself keeps (`validate_scripts(..., trails=)`: the same function, not a copy):
+
+  TRAIL          --validate's door-aware record equals the binary on every frame of every run --
+                 x, y, angle and all 13 door states -- and every run is fully presented.
+  CONTROL-POSE   the doors-shut replay (--validate before the fix) must PART from the binary.
+  CONTROL-DOORS  a --validate whose doors open on `use` anywhere (the use-box test removed) must be
+                 rejected, and on frames where its pose still equals the binary's, so that only the
+                 door-state term can be what rejects it.
+The two controls are the negative controls (docs/cr-rules.md R9): a comparison the door-blind or
+the door-wrong replay could also pass would prove nothing. It prints `gamespeed.BINARY_ENDS` and
+`BINARY_DOORS` (doors a run makes passable, from the binary's door states).
 
 Plans the scripts before taking the binary lock (the planner is ~75 s), then holds the lock
 (probe.binary_lock) for the runs: one binary at a time (CLAUDE.md rule 1).
@@ -35,22 +38,22 @@ for q in (HERE, ROOT / "scratchpad" / "gp"):
     if str(q) not in sys.path:
         sys.path.insert(0, str(q))
 import gamespeed as GS                                                      # noqa: E402
+import onewalk                                                              # noqa: E402
 import probe as P                                                           # noqa: E402
 
 
-def replays(run: int, n: int = 100):
-    """(door-aware [(x, y, angle, doors)], doors-shut [(x, y, angle)]), one entry per game frame"""
-    from onewalk import DoorSim
-    rm, scene, sp = GS._oracle(GS.DEFAULT_WAD, GS.DEFAULT_MAP)
-    dsim = DoorSim()
-    st, sh = dsim.reset(), sp
-    doors, shut = [], []
-    for kd in GS.script(run, n):
-        st = dsim.step(st, kd)
-        sh = rm.step_sim(sh, kd, scene=scene)
-        doors.append((st.x, st.y, st.angle, tuple(dsim.ds[si][0] for si in dsim.order)))
-        shut.append((sh.x, sh.y, sh.angle))
-    return doors, shut
+def records(n_runs: int):
+    """--validate's per-frame records of runs 0..n_runs-1: door-aware, doors-shut, and door-wrong"""
+    doors, shut, wrong = [], [], []
+    GS.validate_scripts(n_runs, quiet=True, trails=doors)
+    GS.validate_scripts(n_runs, quiet=True, doors=False, trails=shut)
+    real = onewalk.in_use_box_fixed
+    onewalk.in_use_box_fixed = lambda box, x, y: True       # `use` opens every door, anywhere
+    try:
+        GS.validate_scripts(n_runs, quiet=True, trails=wrong)
+    finally:
+        onewalk.in_use_box_fixed = real
+    return doors, shut, wrong
 
 
 def binary_trail(gb, table, orc, run: int, n: int = 100):
@@ -79,10 +82,12 @@ def main():
     ap.add_argument("--stream", default="gamespeed-trail")
     a = ap.parse_args()
     t = time.time()
-    want = {r: replays(r) for r in a.runs}
-    print("  (scripts planned and replayed in %.0f s, outside the binary lock)" % (time.time() - t),
+    doors, shut, wrong = records(max(a.runs) + 1)
+    dsim = onewalk.DoorSim()
+    passes = [dsim.passes[si] for si in dsim.order]
+    print("  (--validate's records made in %.0f s, outside the binary lock)" % (time.time() - t),
           flush=True)
-    ends, trail_ok, parted = [], True, []
+    ends, opened, trail_ok, pose_parts, door_rejects = [], [], True, [], []
     with P.binary_lock(a.stream):
         orc = P.Oracle()
         table = P.LabelTable.load(Path(a.labels), {c.label for c in P.game_cells(orc.ndoors).values()})
@@ -91,28 +96,39 @@ def main():
                                                           Path(a.labels).name), flush=True)
         for r in a.runs:
             trail, presented = binary_trail(gb, table, orc, r)
-            doors, shut = want[r]
-            eq_d = [b is not None and b[:4] == d and b[4] == 0 for b, d in zip(trail, doors)]
-            eq_s = [b is not None and b[:3] == s for b, s in zip(trail, shut)]
-            first = next((f for f, e in enumerate(eq_s) if not e), None)
+            full = [b is not None and b[4] == 0 and b[:4] == d for b, d in zip(trail, doors[r])]
+            pose = [b is not None and b[:3] == s[:3] for b, s in zip(trail, shut[r])]
+            bad = [b is None or b[4] != 0 or b[:4] != w for b, w in zip(trail, wrong[r])]
+            bad_pose_equal = sum(1 for b, w, x in zip(trail, wrong[r], bad)
+                                 if x and b is not None and b[:3] == w[:3])
             x, y = trail[-1][0], trail[-1][1]
+            ever = [max(b[3][i] for b in trail) for i in range(len(passes))]
             ends.append((x >> 16, y >> 16))
-            trail_ok &= presented == len(doors) and all(eq_d)
+            opened.append(sum(1 for e, ps in zip(ever, passes) if e >= ps))
+            trail_ok &= presented == len(doors[r]) and all(full)
+            first = next((f for f, e in enumerate(pose) if not e), None)
             if first is not None:
-                parted.append(r)
-            print("  run %d: the binary ends (%d, %d) [16.16: %d, %d]; door-aware replay equal on "
-                  "%d/%d frames; doors-shut on %d/%d%s; %d/%d frames presented"
-                  % (r, x >> 16, y >> 16, x, y, sum(eq_d), len(doors), sum(eq_s), len(shut),
-                     "" if first is None else " (parts at game frame %d)" % first, presented,
-                     len(doors)), flush=True)
+                pose_parts.append(r)
+            if bad_pose_equal:
+                door_rejects.append(r)
+            print("  run %d: the binary ends (%d, %d) [16.16: %d, %d], %d door(s) opened; --validate "
+                  "equal on %d/%d frames; doors-shut pose on %d/%d%s; door-wrong rejected on %d "
+                  "frames, %d with its pose equal; %d/%d frames presented"
+                  % (r, x >> 16, y >> 16, x, y, opened[-1], sum(full), len(full), sum(pose),
+                     len(pose), "" if first is None else " (parts at game frame %d)" % first,
+                     sum(bad), bad_pose_equal, presented, len(doors[r])), flush=True)
     print("BINARY_ENDS = (%s)" % ", ".join("(%d, %d)" % e for e in ends))
-    print("TRAIL   the door-aware replay equals the binary on every frame of every run: %s"
+    print("BINARY_DOORS = (%s)" % ", ".join(str(d) for d in opened))
+    print("TRAIL         --validate's record equals the binary on every frame of every run: %s"
           % ("PASS" if trail_ok else "FAIL"))
-    print("CONTROL the doors-shut replay parts from the binary: %s"
-          % ("PASS (runs %s)" % parted if parted else
+    print("CONTROL-POSE  the doors-shut replay parts from the binary: %s"
+          % ("PASS (runs %s)" % pose_parts if pose_parts else
              "FAIL -- no run in this set parts, so the comparison cannot tell a door-blind replay "
              "from the binary (include run 0)"))
-    return 0 if trail_ok and parted else 1
+    print("CONTROL-DOORS the door-wrong replay is rejected where its pose is right: %s"
+          % ("PASS (runs %s)" % door_rejects if door_rejects else
+             "FAIL -- only its pose could reject it, so the door states were never tested"))
+    return 0 if trail_ok and pose_parts and door_rejects else 1
 
 
 if __name__ == "__main__":

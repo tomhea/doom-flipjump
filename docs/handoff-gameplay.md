@@ -341,11 +341,11 @@ all, strictly one at a time.
 - **B0 and strafe**: blocked27 has no strafe. B0 re-injects the pose blocked27's own tic lands on
   the model's; its 390 strafe-only frames run no collision tic, so B0 undercounts by 346,539 --
   judge against the proxy baseline, 18,107,313.
-- **`gamespeed --validate`** steps the doors since fix/gamespeed-validate-doors, and equals
-  blocked27 on every frame of all ten runs (`docs/ship-evidence/blocked27_gamespeed_trail.log`).
-  When the gameplay binary changes how the player moves (monsters that block, strafe), re-run
-  `gamespeed_trail.py` on it and re-record `gamespeed.BINARY_ENDS`; `--selftest` N6e fails until
-  then.
+- **`gamespeed --validate`** steps the doors since fix/gamespeed-validate-doors: its own
+  per-frame record (pose and every door) equals blocked27 on every frame of all ten runs
+  (`docs/ship-evidence/blocked27_gamespeed_trail.log`). When the gameplay binary changes how the
+  player moves (monsters that block, strafe), re-run `gamespeed_trail.py` on it and re-record
+  `gamespeed.BINARY_ENDS` / `BINARY_DOORS`; `--selftest` N6e fails until then.
 - **Unit costs** from standalone probes carry a layout factor (0.79-1.06x pooled; the sprite
   pipeline's 1.70 is UNVERIFIED) -- re-measure in-game with `profx` after each build.
 

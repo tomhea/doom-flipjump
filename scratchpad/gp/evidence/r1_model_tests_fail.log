@@ -1,0 +1,16 @@
+# FAIL: the phase-0 model tests (tests/host/test_gp_*.py, this branch) run against main ecfa732, where src/doomfj/{gamedata,rng,world,combat}.py do not exist (PYTHONPATH = main's worktree src, ahead of the editable .pth)
+$ PYTHONPATH=<main worktree>/src python -m pytest tests/host/test_gp_*.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'combat' from 'doomfj' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\wt_main\src\doomfj\__init__.py)
+E   ImportError: cannot import name 'gamedata' from 'doomfj' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\wt_main\src\doomfj\__init__.py)
+E   ImportError: cannot import name 'rng' from 'doomfj' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\wt_main\src\doomfj\__init__.py)
+ERROR tests/host/test_gp_combat.py
+ERROR tests/host/test_gp_determinism.py
+ERROR tests/host/test_gp_gamedata.py
+ERROR tests/host/test_gp_restart.py
+ERROR tests/host/test_gp_rng.py
+ERROR tests/host/test_gp_scheduler.py
+ERROR tests/host/test_gp_strafe.py
+ERROR tests/host/test_gp_walls.py
+ERROR tests/host/test_gp_weapons.py
+ERROR tests/host/test_gp_world.py
+10 errors in 0.54s

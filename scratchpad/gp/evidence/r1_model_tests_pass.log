@@ -1,0 +1,3 @@
+# PASS: the same tests on branch gameplay-p0 at 5df1570
+$ python -m pytest tests/host/test_gp_*.py -q -p no:cacheprovider
+138 passed in 22.04s

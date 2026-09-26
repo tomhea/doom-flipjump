@@ -1,0 +1,152 @@
+[
+ {
+  "name": "d4 idx1 -> res1",
+  "mode": "plain",
+  "per_call": 94.8125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 16 entries",
+  "stats": {}
+ },
+ {
+  "name": "d4 idx1 -> res1",
+  "mode": "pool",
+  "per_call": 46.8125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 16 entries",
+  "stats": {
+   "groups": 18,
+   "tables": 19,
+   "allocated": 19,
+   "declined": 0,
+   "pinned": 18,
+   "broken": 0
+  }
+ },
+ {
+  "name": "d4 idx1 -> res2",
+  "mode": "plain",
+  "per_call": 147.8125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 16 entries",
+  "stats": {}
+ },
+ {
+  "name": "d4 idx1 -> res2",
+  "mode": "pool",
+  "per_call": 65.8125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 16 entries",
+  "stats": {
+   "groups": 20,
+   "tables": 21,
+   "allocated": 21,
+   "declined": 0,
+   "pinned": 20,
+   "broken": 0
+  }
+ },
+ {
+  "name": "d4 idx1 -> res4",
+  "mode": "plain",
+  "per_call": 242.25,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 16 entries",
+  "stats": {}
+ },
+ {
+  "name": "d4 idx1 -> res4",
+  "mode": "pool",
+  "per_call": 100.25,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 16 entries",
+  "stats": {
+   "groups": 24,
+   "tables": 25,
+   "allocated": 25,
+   "declined": 0,
+   "pinned": 24,
+   "broken": 0
+  }
+ },
+ {
+  "name": "d4 idx2 -> res1",
+  "mode": "plain",
+  "per_call": 108.33203125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 256 entries",
+  "stats": {}
+ },
+ {
+  "name": "d4 idx2 -> res1",
+  "mode": "pool",
+  "per_call": 52.33203125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 256 entries",
+  "stats": {
+   "groups": 18,
+   "tables": 20,
+   "allocated": 20,
+   "declined": 0,
+   "pinned": 18,
+   "broken": 0
+  }
+ },
+ {
+  "name": "d4 idx2 -> res2",
+  "mode": "plain",
+  "per_call": 158.26171875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 256 entries",
+  "stats": {}
+ },
+ {
+  "name": "d4 idx2 -> res2",
+  "mode": "pool",
+  "per_call": 66.26171875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 256 entries",
+  "stats": {
+   "groups": 20,
+   "tables": 22,
+   "allocated": 22,
+   "declined": 0,
+   "pinned": 20,
+   "broken": 0
+  }
+ },
+ {
+  "name": "d4 idx2 -> res4",
+  "mode": "plain",
+  "per_call": 277.03515625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 256 entries",
+  "stats": {}
+ },
+ {
+  "name": "d4 idx2 -> res4",
+  "mode": "pool",
+  "per_call": 95.03515625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "doomfj generate_dispatch_table_fj, per-entry, 256 entries",
+  "stats": {
+   "groups": 24,
+   "tables": 26,
+   "allocated": 26,
+   "declined": 0,
+   "pinned": 24,
+   "broken": 0
+  }
+ }
+]

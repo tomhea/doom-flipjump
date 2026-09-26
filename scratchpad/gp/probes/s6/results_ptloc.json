@@ -1,0 +1,84 @@
+[
+ {
+  "name": "ptloc full descent (ptloc_walk)",
+  "mode": "plain",
+  "per_call": 69434.265625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "E1M1, 256 live points; mean depth 11.2",
+  "stats": {}
+ },
+ {
+  "name": "ptloc full descent (ptloc_walk)",
+  "mode": "pool",
+  "per_call": 48959.4921875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "E1M1, 256 live points; mean depth 11.2",
+  "stats": {
+   "groups": 9311,
+   "tables": 192576,
+   "allocated": 192576,
+   "declined": 0,
+   "pinned": 7639,
+   "broken": 0
+  }
+ },
+ {
+  "name": "ptloc full descent (ptloc_walk)",
+  "mode": "pool+",
+  "per_call": 48931.515625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "E1M1, 256 live points; mean depth 11.2",
+  "stats": {
+   "groups": 9311,
+   "tables": 194827,
+   "allocated": 194827,
+   "declined": 0,
+   "pinned": 7639,
+   "broken": 0
+  }
+ },
+ {
+  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "mode": "plain",
+  "per_call": 8252.3828125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "residual depth 1.0",
+  "stats": {}
+ },
+ {
+  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "mode": "pool",
+  "per_call": 5943.6640625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "residual depth 1.0",
+  "stats": {
+   "groups": 9311,
+   "tables": 192576,
+   "allocated": 192576,
+   "declined": 0,
+   "pinned": 7639,
+   "broken": 0
+  }
+ },
+ {
+  "name": "ptloc grid start (jump16 x3+x3 -> node)",
+  "mode": "pool+",
+  "per_call": 5868.15625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "residual depth 1.0",
+  "stats": {
+   "groups": 9311,
+   "tables": 194827,
+   "allocated": 194827,
+   "declined": 0,
+   "pinned": 7639,
+   "broken": 0
+  }
+ }
+]

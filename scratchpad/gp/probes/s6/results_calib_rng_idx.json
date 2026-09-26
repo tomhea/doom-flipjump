@@ -1,0 +1,702 @@
+[
+ {
+  "name": "calib hex.ptr_index (8 nibbles)",
+  "mode": "plain",
+  "per_call": 1738.25,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 846 (plan section 3)",
+  "stats": {}
+ },
+ {
+  "name": "calib hex.ptr_index (8 nibbles)",
+  "mode": "pool",
+  "per_call": 669.25,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 846 (plan section 3)",
+  "stats": {
+   "groups": 43,
+   "tables": 95,
+   "allocated": 95,
+   "declined": 0,
+   "pinned": 43,
+   "broken": 0
+  }
+ },
+ {
+  "name": "calib hex.read_byte via pointer",
+  "mode": "plain",
+  "per_call": 530.03125,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 260 (plan section 3)",
+  "stats": {}
+ },
+ {
+  "name": "calib hex.read_byte via pointer",
+  "mode": "pool",
+  "per_call": 205.625,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 260 (plan section 3)",
+  "stats": {
+   "groups": 55,
+   "tables": 117,
+   "allocated": 117,
+   "declined": 0,
+   "pinned": 55,
+   "broken": 0
+  }
+ },
+ {
+  "name": "calib hex.write_byte via pointer",
+  "mode": "plain",
+  "per_call": 719.91796875,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 504 (plan section 3)",
+  "stats": {}
+ },
+ {
+  "name": "calib hex.write_byte via pointer",
+  "mode": "pool",
+  "per_call": 462.91796875,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 504 (plan section 3)",
+  "stats": {
+   "groups": 53,
+   "tables": 115,
+   "allocated": 115,
+   "declined": 0,
+   "pinned": 53,
+   "broken": 0
+  }
+ },
+ {
+  "name": "calib hex.cmp 1 nibble",
+  "mode": "plain",
+  "per_call": 80.2734375,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 40 (plan section 3)",
+  "stats": {}
+ },
+ {
+  "name": "calib hex.cmp 1 nibble",
+  "mode": "pool",
+  "per_call": 42.2734375,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 40 (plan section 3)",
+  "stats": {
+   "groups": 48,
+   "tables": 54,
+   "allocated": 54,
+   "declined": 0,
+   "pinned": 48,
+   "broken": 0
+  }
+ },
+ {
+  "name": "calib hex.scmp 8",
+  "mode": "plain",
+  "per_call": 858.9765625,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 249 (plan section 3)",
+  "stats": {}
+ },
+ {
+  "name": "calib hex.scmp 8",
+  "mode": "pool",
+  "per_call": 231.4453125,
+  "ok": null,
+  "why": "-",
+  "note": "in-game MEASURED 249 (plan section 3)",
+  "stats": {
+   "groups": 66,
+   "tables": 100,
+   "allocated": 100,
+   "declined": 0,
+   "pinned": 62,
+   "broken": 0
+  }
+ },
+ {
+  "name": "rng_dmg a: DOOM table, 2 dispatches",
+  "mode": "plain",
+  "per_call": 298.19140625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "index++ ; rndtable[i] (D4 256x2n) ; site[r] (D4 256x1n)",
+  "stats": {}
+ },
+ {
+  "name": "rng_dmg a: DOOM table, 2 dispatches",
+  "mode": "pool",
+  "per_call": 150.19140625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "index++ ; rndtable[i] (D4 256x2n) ; site[r] (D4 256x1n)",
+  "stats": {
+   "groups": 24,
+   "tables": 26,
+   "allocated": 26,
+   "declined": 0,
+   "pinned": 24,
+   "broken": 0
+  }
+ },
+ {
+  "name": "rng_dmg b: composed per-site table, 1 dispatch",
+  "mode": "plain",
+  "per_call": 133.58984375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "index++ ; outcome[i] = f(rndtable[i]) (D4 256x1n)",
+  "stats": {}
+ },
+ {
+  "name": "rng_dmg b: composed per-site table, 1 dispatch",
+  "mode": "pool",
+  "per_call": 81.96484375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "index++ ; outcome[i] = f(rndtable[i]) (D4 256x1n)",
+  "stats": {
+   "groups": 20,
+   "tables": 20,
+   "allocated": 20,
+   "declined": 0,
+   "pinned": 20,
+   "broken": 0
+  }
+ },
+ {
+  "name": "rng_dmg c: xorshift16 + site table",
+  "mode": "plain",
+  "per_call": 818.375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "xorshift16 (7,9,8) in hex ops ; site[x & 0xff]",
+  "stats": {}
+ },
+ {
+  "name": "rng_dmg c: xorshift16 + site table",
+  "mode": "pool",
+  "per_call": 244.375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "xorshift16 (7,9,8) in hex ops ; site[x & 0xff]",
+  "stats": {
+   "groups": 29,
+   "tables": 53,
+   "allocated": 53,
+   "declined": 0,
+   "pinned": 29,
+   "broken": 0
+  }
+ },
+ {
+  "name": "rng_dmg c2: LFSR16 1 step + site table",
+  "mode": "plain",
+  "per_call": 231.03125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "ONE Galois step (1 fresh bit/call -- a quality floor, not a candidate)",
+  "stats": {}
+ },
+ {
+  "name": "rng_dmg c2: LFSR16 1 step + site table",
+  "mode": "pool",
+  "per_call": 116.3125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "ONE Galois step (1 fresh bit/call -- a quality floor, not a candidate)",
+  "stats": {
+   "groups": 22,
+   "tables": 28,
+   "allocated": 28,
+   "declined": 0,
+   "pinned": 22,
+   "broken": 0
+  }
+ },
+ {
+  "name": "rng_col a: DOOM table, 2 dispatches",
+  "mode": "plain",
+  "per_call": 328.25390625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "index++ ; rndtable[i] (D4 256x2n) ; site[r] (D4 256x2n)",
+  "stats": {}
+ },
+ {
+  "name": "rng_col a: DOOM table, 2 dispatches",
+  "mode": "pool",
+  "per_call": 150.37890625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "index++ ; rndtable[i] (D4 256x2n) ; site[r] (D4 256x2n)",
+  "stats": {
+   "groups": 26,
+   "tables": 28,
+   "allocated": 28,
+   "declined": 0,
+   "pinned": 26,
+   "broken": 0
+  }
+ },
+ {
+  "name": "rng_col b: composed per-site table, 1 dispatch",
+  "mode": "plain",
+  "per_call": 180.02734375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "index++ ; outcome[i] = f(rndtable[i]) (D4 256x2n)",
+  "stats": {}
+ },
+ {
+  "name": "rng_col b: composed per-site table, 1 dispatch",
+  "mode": "pool",
+  "per_call": 96.40234375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "index++ ; outcome[i] = f(rndtable[i]) (D4 256x2n)",
+  "stats": {
+   "groups": 22,
+   "tables": 22,
+   "allocated": 22,
+   "declined": 0,
+   "pinned": 22,
+   "broken": 0
+  }
+ },
+ {
+  "name": "rng_col c: xorshift16 + site table",
+  "mode": "plain",
+  "per_call": 847.15625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "xorshift16 (7,9,8) in hex ops ; site[x & 0xff]",
+  "stats": {}
+ },
+ {
+  "name": "rng_col c: xorshift16 + site table",
+  "mode": "pool",
+  "per_call": 255.15625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "xorshift16 (7,9,8) in hex ops ; site[x & 0xff]",
+  "stats": {
+   "groups": 31,
+   "tables": 55,
+   "allocated": 55,
+   "declined": 0,
+   "pinned": 31,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx read byte E=64 ptr",
+  "mode": "plain",
+  "per_call": 2311.25,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.read_byte",
+  "stats": {}
+ },
+ {
+  "name": "idx read byte E=64 ptr",
+  "mode": "pool",
+  "per_call": 946.375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.read_byte",
+  "stats": {
+   "groups": 53,
+   "tables": 113,
+   "allocated": 113,
+   "declined": 0,
+   "pinned": 53,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx read byte E=64 jump",
+  "mode": "plain",
+  "per_call": 154.921875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 64 stubs (hex.mov 2 on a fixed cell)",
+  "stats": {}
+ },
+ {
+  "name": "idx read byte E=64 jump",
+  "mode": "pool",
+  "per_call": 67.671875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 64 stubs (hex.mov 2 on a fixed cell)",
+  "stats": {
+   "groups": 148,
+   "tables": 275,
+   "allocated": 275,
+   "declined": 0,
+   "pinned": 148,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx write byte E=64 ptr",
+  "mode": "plain",
+  "per_call": 2458.16796875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.write_byte",
+  "stats": {}
+ },
+ {
+  "name": "idx write byte E=64 ptr",
+  "mode": "pool",
+  "per_call": 1158.10546875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.write_byte",
+  "stats": {
+   "groups": 53,
+   "tables": 115,
+   "allocated": 115,
+   "declined": 0,
+   "pinned": 53,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx write byte E=64 jump",
+  "mode": "plain",
+  "per_call": 160.6484375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 64 stubs (hex.mov 2 on a fixed cell)",
+  "stats": {}
+ },
+ {
+  "name": "idx write byte E=64 jump",
+  "mode": "pool",
+  "per_call": 69.3984375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 64 stubs (hex.mov 2 on a fixed cell)",
+  "stats": {
+   "groups": 148,
+   "tables": 279,
+   "allocated": 279,
+   "declined": 0,
+   "pinned": 148,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx read 4nib E=64 ptr",
+  "mode": "plain",
+  "per_call": 5390.234375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.read_hex",
+  "stats": {}
+ },
+ {
+  "name": "idx read 4nib E=64 ptr",
+  "mode": "pool",
+  "per_call": 2350.8125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.read_hex",
+  "stats": {
+   "groups": 68,
+   "tables": 214,
+   "allocated": 214,
+   "declined": 0,
+   "pinned": 68,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx read 4nib E=64 jump",
+  "mode": "plain",
+  "per_call": 246.703125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 64 stubs (hex.mov 4 on a fixed cell)",
+  "stats": {}
+ },
+ {
+  "name": "idx read 4nib E=64 jump",
+  "mode": "pool",
+  "per_call": 97.515625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 64 stubs (hex.mov 4 on a fixed cell)",
+  "stats": {
+   "groups": 278,
+   "tables": 531,
+   "allocated": 531,
+   "declined": 0,
+   "pinned": 278,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx write 4nib E=64 ptr",
+  "mode": "plain",
+  "per_call": 5837.3046875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.write_hex",
+  "stats": {}
+ },
+ {
+  "name": "idx write 4nib E=64 ptr",
+  "mode": "pool",
+  "per_call": 2846.6015625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.write_hex",
+  "stats": {
+   "groups": 68,
+   "tables": 218,
+   "allocated": 218,
+   "declined": 0,
+   "pinned": 68,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx write 4nib E=64 jump",
+  "mode": "plain",
+  "per_call": 248.984375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 64 stubs (hex.mov 4 on a fixed cell)",
+  "stats": {}
+ },
+ {
+  "name": "idx write 4nib E=64 jump",
+  "mode": "pool",
+  "per_call": 97.796875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 64 stubs (hex.mov 4 on a fixed cell)",
+  "stats": {
+   "groups": 278,
+   "tables": 539,
+   "allocated": 539,
+   "declined": 0,
+   "pinned": 278,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx read byte E=256 ptr",
+  "mode": "plain",
+  "per_call": 2319.81640625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.read_byte",
+  "stats": {}
+ },
+ {
+  "name": "idx read byte E=256 ptr",
+  "mode": "pool",
+  "per_call": 899.51171875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.read_byte",
+  "stats": {
+   "groups": 53,
+   "tables": 112,
+   "allocated": 112,
+   "declined": 0,
+   "pinned": 53,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx read byte E=256 jump",
+  "mode": "plain",
+  "per_call": 163.37890625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 256 stubs (hex.mov 2 on a fixed cell)",
+  "stats": {}
+ },
+ {
+  "name": "idx read byte E=256 jump",
+  "mode": "pool",
+  "per_call": 70.47265625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 256 stubs (hex.mov 2 on a fixed cell)",
+  "stats": {
+   "groups": 532,
+   "tables": 1042,
+   "allocated": 1042,
+   "declined": 0,
+   "pinned": 532,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx write byte E=256 ptr",
+  "mode": "plain",
+  "per_call": 2501.13671875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.write_byte",
+  "stats": {}
+ },
+ {
+  "name": "idx write byte E=256 ptr",
+  "mode": "pool",
+  "per_call": 1171.69140625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.write_byte",
+  "stats": {
+   "groups": 53,
+   "tables": 114,
+   "allocated": 114,
+   "declined": 0,
+   "pinned": 53,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx write byte E=256 jump",
+  "mode": "plain",
+  "per_call": 165.3046875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 256 stubs (hex.mov 2 on a fixed cell)",
+  "stats": {}
+ },
+ {
+  "name": "idx write byte E=256 jump",
+  "mode": "pool",
+  "per_call": 67.5078125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 256 stubs (hex.mov 2 on a fixed cell)",
+  "stats": {
+   "groups": 532,
+   "tables": 1046,
+   "allocated": 1046,
+   "declined": 0,
+   "pinned": 532,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx read 4nib E=256 ptr",
+  "mode": "plain",
+  "per_call": 5364.25390625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.read_hex",
+  "stats": {}
+ },
+ {
+  "name": "idx read 4nib E=256 ptr",
+  "mode": "pool",
+  "per_call": 2337.9375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.read_hex",
+  "stats": {
+   "groups": 68,
+   "tables": 213,
+   "allocated": 213,
+   "declined": 0,
+   "pinned": 68,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx read 4nib E=256 jump",
+  "mode": "plain",
+  "per_call": 262.97265625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 256 stubs (hex.mov 4 on a fixed cell)",
+  "stats": {}
+ },
+ {
+  "name": "idx read 4nib E=256 jump",
+  "mode": "pool",
+  "per_call": 101.78515625,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 256 stubs (hex.mov 4 on a fixed cell)",
+  "stats": {
+   "groups": 1046,
+   "tables": 2066,
+   "allocated": 2066,
+   "declined": 0,
+   "pinned": 1046,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx write 4nib E=256 ptr",
+  "mode": "plain",
+  "per_call": 5837.3125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.write_hex",
+  "stats": {}
+ },
+ {
+  "name": "idx write 4nib E=256 ptr",
+  "mode": "pool",
+  "per_call": 2865.61328125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "today: ptr_index + hex.write_hex",
+  "stats": {
+   "groups": 68,
+   "tables": 217,
+   "allocated": 217,
+   "declined": 0,
+   "pinned": 68,
+   "broken": 0
+  }
+ },
+ {
+  "name": "idx write 4nib E=256 jump",
+  "mode": "plain",
+  "per_call": 260.65234375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 256 stubs (hex.mov 4 on a fixed cell)",
+  "stats": {}
+ },
+ {
+  "name": "idx write 4nib E=256 jump",
+  "mode": "pool",
+  "per_call": 97.68359375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "jump on the index into 256 stubs (hex.mov 4 on a fixed cell)",
+  "stats": {
+   "groups": 1046,
+   "tables": 2074,
+   "allocated": 2074,
+   "declined": 0,
+   "pinned": 1046,
+   "broken": 0
+  }
+ }
+]

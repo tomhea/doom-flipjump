@@ -1,0 +1,168 @@
+[
+ {
+  "name": "cell lookup: 6 jump16 levels",
+  "mode": "plain",
+  "per_call": 117.7578125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "x nibbles 7,6,5 then y nibbles 7,6,5 of 16.16 positions; E1M1 extent",
+  "stats": {}
+ },
+ {
+  "name": "cell lookup: 6 jump16 levels",
+  "mode": "pool",
+  "per_call": 136.96875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "x nibbles 7,6,5 then y nibbles 7,6,5 of 16.16 positions; E1M1 extent",
+  "stats": {
+   "groups": 48,
+   "tables": 52,
+   "allocated": 52,
+   "declined": 0,
+   "pinned": 48,
+   "broken": 0
+  }
+ },
+ {
+  "name": "cell lookup: 6 jump16 levels",
+  "mode": "pool+",
+  "per_call": 45.71875,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "x nibbles 7,6,5 then y nibbles 7,6,5 of 16.16 positions; E1M1 extent",
+  "stats": {
+   "groups": 48,
+   "tables": 2303,
+   "allocated": 2303,
+   "declined": 0,
+   "pinned": 48,
+   "broken": 0
+  }
+ },
+ {
+  "name": "octant: 2 signs + |d|*106 vs |d|*256 (lazy)",
+  "mode": "plain",
+  "per_call": 6651.15234375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "offsets uniform in +-2048; exact integer test, no atan",
+  "stats": {}
+ },
+ {
+  "name": "octant: 2 signs + |d|*106 vs |d|*256 (lazy)",
+  "mode": "pool",
+  "per_call": 3188.42578125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "offsets uniform in +-2048; exact integer test, no atan",
+  "stats": {
+   "groups": 71,
+   "tables": 1096,
+   "allocated": 1096,
+   "declined": 0,
+   "pinned": 71,
+   "broken": 0
+  }
+ },
+ {
+  "name": "AproxDistance (16-bit map units)",
+  "mode": "plain",
+  "per_call": 2170.36328125,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "abs x2, cmp 4, shr_bit 4, add 5, sub 5",
+  "stats": {}
+ },
+ {
+  "name": "AproxDistance (16-bit map units)",
+  "mode": "pool",
+  "per_call": 998.90234375,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "abs x2, cmp 4, shr_bit 4, add 5, sub 5",
+  "stats": {
+   "groups": 53,
+   "tables": 122,
+   "allocated": 122,
+   "declined": 0,
+   "pinned": 53,
+   "broken": 0
+  }
+ },
+ {
+  "name": "aim: empty -> write a CONSTANT id",
+  "mode": "plain",
+  "per_call": 50.0,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "hex.if0 2 on a fixed-address column cell",
+  "stats": {}
+ },
+ {
+  "name": "aim: empty -> write a CONSTANT id",
+  "mode": "pool",
+  "per_call": 56.0,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "hex.if0 2 on a fixed-address column cell",
+  "stats": {
+   "groups": 18,
+   "tables": 18,
+   "allocated": 18,
+   "declined": 0,
+   "pinned": 18,
+   "broken": 0
+  }
+ },
+ {
+  "name": "aim: empty -> write a RUNTIME id",
+  "mode": "plain",
+  "per_call": 90.0,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "hex.if0 2 on a fixed-address column cell",
+  "stats": {}
+ },
+ {
+  "name": "aim: empty -> write a RUNTIME id",
+  "mode": "pool",
+  "per_call": 62.0,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "hex.if0 2 on a fixed-address column cell",
+  "stats": {
+   "groups": 20,
+   "tables": 20,
+   "allocated": 20,
+   "declined": 0,
+   "pinned": 20,
+   "broken": 0
+  }
+ },
+ {
+  "name": "aim: already taken -> skip",
+  "mode": "plain",
+  "per_call": 23.0,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "hex.if0 2 on a fixed-address column cell",
+  "stats": {}
+ },
+ {
+  "name": "aim: already taken -> skip",
+  "mode": "pool",
+  "per_call": 27.0,
+  "ok": true,
+  "why": "64 iterations checked",
+  "note": "hex.if0 2 on a fixed-address column cell",
+  "stats": {
+   "groups": 18,
+   "tables": 18,
+   "allocated": 18,
+   "declined": 0,
+   "pinned": 18,
+   "broken": 0
+  }
+ }
+]

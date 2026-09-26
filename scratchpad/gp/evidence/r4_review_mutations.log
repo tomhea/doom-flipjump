@@ -1,0 +1,10 @@
+# PR #88 review round 4: each mutation must FAIL a tripwire test (source mutated, test run, restored)
+m5_gate: tuple unpacking rebinds it without sky    -> 1 failed, 6 passed, 1 warning in 1.60s [test_every_gate_asks_the_oracle_for_what_it_emits]
+m5_gate: a for loop rebinds it without sky         -> 1 failed, 6 passed, 1 warning in 1.72s [test_every_gate_asks_the_oracle_for_what_it_emits]
+m5_gate: a comprehension target shadows it         -> 1 failed, 6 passed, 1 warning in 1.73s [test_every_gate_asks_the_oracle_for_what_it_emits]
+m5_gate: a walrus rebinds it without sky           -> 1 failed, 6 passed, 1 warning in 1.63s [test_every_gate_asks_the_oracle_for_what_it_emits]
+m5_gate: del through a bare alias                  -> 1 failed, 6 passed, 1 warning in 1.62s [test_every_gate_asks_the_oracle_for_what_it_emits]
+tripwire without the rebound set                   -> 1 failed, 6 passed, 1 warning in 1.63s [test_a_rebound_or_mutated_name_is_not_the_shared_set]
+tripwire without parameters as bindings            -> 1 failed, 6 passed, 1 warning in 1.66s [test_a_rebound_or_mutated_name_is_not_the_shared_set]
+tripwire without the alias closure                 -> 1 failed, 6 passed, 1 warning in 1.68s [test_a_rebound_or_mutated_name_is_not_the_shared_set]
+unmutated (restored, byte-identical)               -> 7 passed, 1 warning in 1.50s

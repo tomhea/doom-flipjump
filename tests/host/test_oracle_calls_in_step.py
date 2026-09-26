@@ -15,13 +15,22 @@ A tracked scratchpad file that RUNS a binary (FjmRunner / _fjcore / GameBinary),
 scratchpad/gp/, is now judged too; oracle-only experiments (door_gate, the DEG knob probes) compare
 oracle pictures with each other and are not. A `**splat` counts as asking for everything only when
 it IS the shared set, `reference_model.GAME_RENDER_KW`: that name, its import alias,
-`<mod>.GAME_RENDER_KW`, or a name whose EVERY assignment in the file is shared and which the file
-never mutates (`del X[k]`, `X[k] = v`, `X |= ...`, `X.update/pop/...`). A `dict(<shared>, ...)` that
-switches a forced key off is not shared (PR #88 rounds 2-3).
+`<mod>.GAME_RENDER_KW`, or a name the file binds ONLY by single-target `X = <shared>` statements
+and never mutates. Any other binding of the name -- a tuple or chained target, a for, comprehension,
+with, walrus or except target, a parameter, an import, a def or class, a match capture, `del X` --
+disqualifies it, and so does a mutation (`del X[k]`, `X[k] = v`, `X |= ...`, `X.update/pop/...`),
+directly or through a bare alias `Y = X`. A `dict(<shared>, ...)` that switches a forced key off is
+not shared (PR #88 rounds 2-4).
 
-What it does NOT check: the values, only the presence. A file that passes `sky=False` on a map
-that has sky would satisfy this and still be wrong. It is a tripwire for the omission, which is the
-failure that actually happened, not a proof of agreement.
+What it does NOT check:
+- the values, only the presence. A file that passes `sky=False` on a map that has sky would
+  satisfy this and still be wrong. It is a tripwire for the omission, which is the failure that
+  actually happened, not a proof of agreement;
+- objects, only names: `**other.RENDER_KW` matches a class attribute of the same name, any
+  module's `GAME_RENDER_KW` counts as the shared set, and scopes are not tracked (a binding anywhere
+  in the file counts against the name, which only errs toward flagging);
+- a mutation through a call or a container that receives the dict (`tweak(render_kw)`,
+  `[render_kw][0].pop("sky")`), or a dynamic binding (`globals()`, `setattr`, `exec`).
 """
 import ast
 import subprocess
@@ -79,38 +88,77 @@ def _bound(t):
     return getattr(t, "id", None) or getattr(t, "attr", None)
 
 
-def shared_names(tree) -> set:
-    """The names this file binds ONLY to the shared set: the import (and its alias), then -- to a
-    fixed point -- each name whose EVERY assignment is shared and which the file never mutates.
-    (PR #88 round 3: one shared binding used to excuse every later rebinding or `del X["sky"]`.)"""
-    assigns, mutated = {}, set()
+def _bindings(tree):
+    """(assigns, rebound, mutated) for the whole file, by name.
+    assigns -- name -> the values of its single-target `X = v` (or `X: T = v`) statements, the only
+      bindings that can make a name shared;
+    rebound -- every name bound ANY other way (PR #88 round 4: tuple unpacking, a loop or a
+      comprehension escaped the round-3 rule, which looked only at `X = ...`);
+    mutated -- every name whose dict is changed in place, closed over bare aliases `Y = X` both ways
+      (they name one dict)."""
+    assigns, rebound, mutated, aliases, sole = {}, set(), set(), [], set()
     for n in ast.walk(tree):
-        if isinstance(n, ast.Assign):
-            for t in n.targets:
-                if isinstance(t, (ast.Name, ast.Attribute)):
-                    assigns.setdefault(_bound(t), []).append(n.value)
-                elif isinstance(t, ast.Subscript):
-                    mutated.add(_bound(t.value))
+        if isinstance(n, ast.Assign) and len(n.targets) == 1 and \
+                isinstance(n.targets[0], (ast.Name, ast.Attribute)):
+            t, v = n.targets[0], n.value
         elif isinstance(n, ast.AnnAssign) and isinstance(n.target, (ast.Name, ast.Attribute)):
-            assigns.setdefault(_bound(n.target), []).append(n.value)
-        elif isinstance(n, ast.AugAssign):
+            t, v = n.target, n.value              # `X: T` without a value binds nothing
+        else:
+            continue
+        sole.add(id(t))
+        if v is not None:
+            assigns.setdefault(_bound(t), []).append(v)
+            if isinstance(v, (ast.Name, ast.Attribute)):
+                aliases.append({_bound(t), _bound(v)})
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Name, ast.Attribute)) and isinstance(n.ctx, (ast.Store, ast.Del)) \
+                and id(n) not in sole:
+            rebound.add(_bound(n))
+        elif isinstance(n, ast.Subscript) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            mutated.add(_bound(n.value))
+        elif isinstance(n, ast.arg):
+            rebound.add(n.arg)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            rebound |= {(a.asname or a.name).split(".")[0] for a in n.names if a.name != SHARED}
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            rebound.add(n.name)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            rebound.add(n.name)
+        elif type(n).__name__ in ("MatchAs", "MatchStar") and n.name:
+            rebound.add(n.name)
+        elif type(n).__name__ == "MatchMapping" and n.rest:
+            rebound.add(n.rest)
+        if isinstance(n, ast.AugAssign):
             t = n.target
             mutated.add(_bound(t.value) if isinstance(t, ast.Subscript) else _bound(t))
-        elif isinstance(n, ast.Delete):
-            mutated |= {_bound(t.value) for t in n.targets if isinstance(t, ast.Subscript)}
         elif isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in MUTATORS:
             mutated.add(_bound(n.func.value))
+    grown = True
+    while grown:
+        grown = False
+        for group in aliases:
+            if group & mutated and not group <= mutated:
+                mutated |= group
+                grown = True
+    return assigns, rebound, mutated
+
+
+def shared_names(tree) -> set:
+    """The names this file binds ONLY to the shared set: the import (and its alias), then -- to a
+    fixed point -- each name whose every binding is a single-target assignment of a shared value and
+    which the file never mutates (PR #88 rounds 3-4)."""
+    assigns, rebound, mutated = _bindings(tree)
+    out = rebound | mutated
     roots = {SHARED} | {a.asname or a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
                         for a in n.names if a.name == SHARED}
-    names = {r for r in roots if r not in mutated
-             and all(v is not None and _is_shared(v, roots) for v in assigns.get(r, []))}
+    names = {r for r in roots if r not in out and all(_is_shared(v, roots) for v in assigns.get(r, []))}
     grown = True
     while grown:
         grown = False
         for name, vals in assigns.items():
-            if name in names or name in mutated or not vals:
+            if name in names or name in out:
                 continue
-            if all(v is not None and _is_shared(v, names) for v in vals):
+            if all(_is_shared(v, names) for v in vals):
                 names.add(name)
                 grown = True
     return names
@@ -218,8 +266,9 @@ def test_a_splat_counts_only_when_it_is_the_shared_set():
 
 
 def test_a_rebound_or_mutated_name_is_not_the_shared_set():
-    """PR #88 round 3: the review's two escapes on m5_gate -- rebinding the name to a dict without
-    sky, and `del render_kw["sky"]` -- plus the other mutations, each judged like an omission."""
+    """PR #88 rounds 3-4: the reviews' escapes on m5_gate -- rebinding the name to a dict without
+    sky, `del render_kw["sky"]`, then tuple unpacking, a loop, a comprehension, a walrus, `with`, a
+    parameter -- plus the other mutations and binding forms, each judged like an omission."""
     head = ("from doomfj.reference_model import GAME_RENDER_KW\n"
             "render_kw = dict(GAME_RENDER_KW, sprite_wad=art)\n")
     call = "rm.render_wall_frame(s, scene, **render_kw)\n"
@@ -229,8 +278,24 @@ def test_a_rebound_or_mutated_name_is_not_the_shared_set():
                   "render_kw['sky'] = False\n",
                   "render_kw.update(sky=False)\n",
                   "render_kw.pop('sky')\n",
-                  "render_kw |= {'sky': False}\n"):
+                  "render_kw |= {'sky': False}\n",
+                  # round 4: every other way to bind the name, and a mutation through an alias
+                  "render_kw, _ = dict(wall_mode='W1R'), 0\n",
+                  "for render_kw in (dict(wall_mode='W1R'),): pass\n",
+                  "(render_kw := dict(wall_mode='W1R'))\n",
+                  "with open(p) as render_kw: pass\n",
+                  "from old_gate import OLD_KW as render_kw\n",
+                  # a chained target: two names for one dict, so a mutation through `other` would
+                  # reach it -- only a single target can make a name shared
+                  "render_kw = other = dict(GAME_RENDER_KW)\n",
+                  "k2 = render_kw; del k2['sky']\n"):     # through a bare alias: one dict
         src = head + extra + call
         assert out_of_step(src, gate=True) == [(4, list(FORCED))], extra
+    for body, line in (("out = [rm.render_wall_frame(s, scene, **render_kw) for render_kw in VARIANTS]\n", 3),
+                       ("def frame(render_kw):\n    return rm.render_wall_frame(s, scene, **render_kw)\n", 4),
+                       ("frame = lambda render_kw: rm.render_wall_frame(s, scene, **render_kw)\n", 3)):
+        assert out_of_step(head + body, gate=True) == [(line, list(FORCED))], body
     assert out_of_step(head + call, gate=True) == [], "the untouched binding still passes"
+    alias = head + "k2 = render_kw\nrm.render_wall_frame(s, scene, **k2)\n"
+    assert out_of_step(alias, gate=True) == [], "a bare alias of the shared set, never mutated"
 

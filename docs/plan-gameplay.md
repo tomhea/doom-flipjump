@@ -390,6 +390,8 @@ Both mirrors agree on all of this, so no gate can catch it.
 
 ## 7. Budget
 
+**Superseded by section 16 (phase 0's measured budget on the combat set).** Kept as the pre-P0 estimate.
+
 **Speed, on the binding metric** (estimates; M = rests on MEASURED unit costs):
 
 | line | effect on (mean+p80)/2 |
@@ -656,7 +658,7 @@ before it is built.
 
 | # | macro | cost today | why gameplay leans on it | how it gets cheaper | target |
 |---|---|---|---|---|---|
-| 1 | **the sprite column**: `sim.thing_record_body` + `sprite_runs` + the wall split in `seg_pass2_leaf` | ~30K per column (10.9K runs + 19.3K split emission) | every monster, corpse, fireball and puff on screen; fights add 50-200 columns | a 3-byte fragment record with per-thing constants in slot registers written once per thing; one region walk instead of two; skip the wall split when the sprite covers the column's whole open window; run-lists precomputed per scale bucket, so a run is one lookup; `DEG_HD_BUDGET` 2 | <= 15K |
+| 1 | **the sprite column**: `sim.thing_record_body` + `sprite_runs` + the wall split in `seg_pass2_leaf` | ~30K per column (10.9K runs + 19.3K split emission) -- EMISSION ONLY; end to end (record + load + emission) ~42-54K in-game (S6b) | every monster, corpse, fireball and puff on screen; fights add 50-200 columns | a 3-byte fragment record with per-thing constants in slot registers written once per thing; one region walk instead of two; skip the wall split when the sprite covers the column's whole open window; run-lists precomputed per scale bucket, so a run is one lookup; `DEG_HD_BUDGET` 2 | ~~<= 15K~~ unreachable (a plain column is 15.9K); **v2: ~24-31K end to end, -40%, pixel-identical (S6b)** |
 | 2 | **collision**: `sim.check_position` -> `check_block` -> `check_line` | 576K per call, 6.8K per line tested; ~613K per player try, 1.48M/frame | the player on every moving frame; every monster step | 32-unit cells with candidate lists (mean ~2 lines); line constants baked into D4 rows (no `read_table_packed`); static no-block verdicts for monsters' 8 directions; the cell lookup doubles as the point-location start | <= 40K per try |
 | 3 | **runtime thing load + projection**: `sim.thing_load` + the projection in `thing_leaf` | 19.5K + ~11K (runtime 30.2K vs baked 15.4K) | every monster, corpse and fireball in a visited leaf, every frame | per-monster fixed cells and a jump into that monster's stub, instead of `ptr_index`/`read_hex` through `thpos` (a 16-nibble `read_hex` alone is ~7K); per-patch metrics via D4; a behind-the-viewer sign test before the full projection | <= 15K (baked parity) |
 | 4 | **point location**: the BSP descent (`ptloc_walk`, and the collision seed walks) | 30.7K mean, 180K max; the seed walk 35.4K per try | every leaf change of a monster (7.4% of steps) or a fireball (most tics); every collision seed | a per-cell start node (the deepest node no point of the cell straddles), so the walk starts a few levels above the leaf; diagonal node constants multiplied by their absolute value (2.4 vs 10.7 schoolbook rows) | a few K mean |
@@ -681,3 +683,66 @@ section 4. The RNG is priced in D10 (one dispatch per call).
 | S8 | the pin report (hot words pinned or not; pool declines) with a control, and the pin-protection design for flipjump | `scratchpad/12m/pinreport.py` |
 
 S4 and S5 wait for S2 and S3. Only one stream runs the game binary at a time.
+
+---
+
+## 16. Phase 0 results (2026-09-26)
+
+Every stream's evidence is committed on `gameplay-p0`; the numbers below name their source.
+
+| stream | result | commit |
+|---|---|---|
+| S1 profiler | `scratchpad/12m/profx/`, --selftest PASS (attribution vs an op trace, an address-only negative control); reproduces section 3 exactly | 98bd2d5 |
+| S8 pin report | blocked27 keeps 20/20 hot pins; b26 lost 18/20 (its slowness explained); design `docs/gp-pin-protection.md`; ESTIMATE: heat-ordered indices in the top 20 groups cut their dispatch cost 2.54M -> 1.27M | 98bd2d5 |
+| S2 probe/injector | `scratchpad/gp/probe.py`, `b0.py`, all controls PASS; a blocked build's cell holds `base | v<<6`; view-mode injection undercounts by the collision cost | 79bc691 |
+| S3 model | `gamedata.py`, `rng.py`, `world.py`, `combat.py`; 129 gameplay host tests; DOOM data verified against two sources | 4849d3c, 78656db |
+| S6 probes | jump-into-stub access 68-102 ops vs 0.9-2.9K by pointer; D4 lookup 47-100; the original rndtable composed per call site 82-96 (cheapest RNG, D10 settled); one player move try ~10K on 32-unit cells (derived) vs 613K today; point location from a cell's start node 5.9K; the jump macros must be declared SAFE in the pool | 44d0857 |
+| S6b sprite column | v2 is pixel-identical on 1,648 columns and ~40% cheaper end to end; the <= 15K target is unreachable; partial ditto designed (`docs/gp-partial-ditto.md`); the weapon overlay 64-173K/frame | cea4c92 |
+| S7 lifts | `docs/gp-lift-spike.md`: 243 of 255 plane ids, +0.02..0.1M ops, 0.18% size; lifts cannot crush on E1M1 | 3a23752 |
+| S4 scenario set | v1 DRAFT: 10 checkpoints (hard), --validate PASS; **B0 on blocked27 = 14,972,920** (every frame state- and pixel-exact); found the gates' missing `sky=True` (fixed in a07e8b9) | 709682d |
+| S5 census | the fight line and the D3 prices below | f2327b7 |
+
+**The revised budget, on the combat set v1's run structure** ((mean + p80)/2 over 10 runs x 100 frames):
+
+| line | effect | source |
+|---|---|---|
+| B0: blocked27 on the same routes, static world | **14,972,920** | MEASURED (S4) |
+| the sprite side: fights with the recommended D3 + the v2 column + the skill filter | **-0.95M** (fights alone +0.52M; v2 and the filter pay for them) | S5, measured unit costs |
+| monster AI (1.71 heavy acts/frame measured on the set x ~20-34K modelled, + per-monster slots) | +0.07 .. +0.1M | S4 population, S3a model, S6 primitives |
+| combat logic, weapon overlay, effects, lifts, HUD | +0.2 .. +0.4M | models (S3b, S6b, S7) |
+| reclaim: persistent lists / per-move rebind | -0.44M | MEASURED cost of bind_things (S1) |
+| reclaim: player collision on the cells | -0.4 .. -0.8M (the set moves on 29% of frames; v2 >= 50%) | S6 derived |
+| reclaim: heat-ordered pool indices | -1.27M | ESTIMATE (S8), a build must confirm |
+| **projected, before placement** | **~12.2 .. ~14.3M** (and ~16.9M with NO reclaim at all, today's column, every model x1.11) | |
+| placement re-roll | +/- up to ~6M unless pins are protected | S8 |
+
+**What phase 0 changed.** The cap is not tight. The gameplay's own cost is ~1-2M on this set, and
+the sprite work is more than paid for by the cheaper column and the skill filter. The only threat
+left that could consume the margin is placement, which is why pin protection stays P1's first item.
+
+**Recommendations that need the owner:**
+1. **D3 (compositor rules): a + c + d + e, with b only for projectiles and barrels** (S5).
+   - a: drops and effects before monsters;
+   - c: corpses count as scenery;
+   - d: depth order among runtime things in a leaf;
+   - e: "seen" and the aim window recorded at column-open time, before the budgets.
+
+   Priced at +0.11M on fight frames with the v2 column. It takes small things hidden from 0.62 to
+   0.09 per frame, depth inversions from 5.53 to 1.12, and the seen-vs-sight gap from 0.19 to 0.
+   (e) alone does not fix aim (17.0% of frames still differ at column 80): the aim window should
+   record the radius box's span when the column opens (a design note for P4).
+2. **K from 3 to 6.** On the set, K = 3 defers a monster on 195 of 1000 frames (166 of them behind
+   the lifts). The average AI cost does not depend on K, because the demand is what it is (1.71
+   heavy acts per frame); K only bounds the worst case, and the measured primitives shrank that
+   bound. K = 6 covers the set's peak demand (~5 per tic at 14 awake), so monsters keep DOOM's pace.
+3. **The scenario set v2 before freezing:**
+   - strafe in the model;
+   - movement on >= 50% of frames (v1: 29%, gamespeed 87%);
+   - floors raised to >= 8 kills, >= 6 pickups, >= 3 doors;
+   - one "aftermath" run that starts among corpses;
+   - "in view" = drawn (the census wiring).
+
+   Then the owner freezes v2 and its B0.
+
+**Left in phase 0:** the scenario set v2 and its freeze; the aim-window design note; the D3 and K
+decisions. Then P1, starting with pin protection.

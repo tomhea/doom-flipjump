@@ -1,9 +1,9 @@
 # Plan: a fully playable E1M1 at <= 22M ops/frame
 
-**Status: PHASE 0 STARTED 2026-09-26** on branch `gameplay-p0`. The owner approved the plan, the
-simplifications (D5), the skill levels plus easy (D7), the flipjump branch policy (D9) and the RNG
-policy (D10). The other decisions of section 11 gate phase 1. Phase 0 is measurement, a Python model
-and design spikes only; its work streams are in section 15.
+**Status: PHASE 0 STARTED 2026-09-26** on branch `gameplay-p0`. The owner approved the plan and
+decided every item of section 11 on 2026-09-26 except D3 (the compositor rules), which waits for the
+phase-0 census by design. Phase 0 is measurement, a Python model and design spikes only; its work
+streams are in section 15.
 
 How this plan was made: seven research missions (game spec, measurement, monster AI, combat,
 sprites/HUD, verification, reclaim), a synthesis, and a red-team pass whose eleven findings are
@@ -524,17 +524,18 @@ machine time, strictly one at a time (rule 1)**. Everything that can happen in h
 
 ## 11. Owner decisions (they gate phase 1)
 
-1. **D1 the cap:**
+1. **D1 the cap -- DECIDED 2026-09-26 as recommended:**
    - (mean + p80)/2 on the combat scenario set <= 22M, with heavy frames reported (recommended);
    - or a per-frame maximum, which is not reachable without a renderer project first.
 
    The 22M cap replaces the 20M target in CLAUDE.md, `ship-gate.md` and gamespeed's
    `SPEED_TARGET`, for the game with combat.
-2. **D2 the scenario set:** how runs start (spawn only, which cannot reach the lift areas, or
-   checkpoints across the level) and how long they are. Freeze v1 and B0 before phase 1.
-3. **D3 the compositor rules for gameplay** (section 5), once the phase-0 census has priced them.
-4. **D4 time:** one tic per frame, so fights run at ~32-38% of DOOM's speed (recommended); or two
-   tics per frame, which doubles AI and projectile ops and needs sub-stepped movement.
+2. **D2 the scenario set -- DECIDED 2026-09-26: runs start from CHECKPOINTS across the level**
+   (injected states), so the lift areas are measured too. The owner freezes v1 and B0 before
+   phase 1, once S4 presents them.
+3. **D3 the compositor rules for gameplay** (section 5): OPEN by design -- decided once the phase-0
+   census has priced them.
+4. **D4 time -- DECIDED 2026-09-26: one tic per frame**, so fights run at ~32-38% of DOOM's speed.
 5. **D5 the simplifications of section 2 (B and C) -- APPROVED 2026-09-26:**
    - K = 3 and what it does to monster pace;
    - no infighting;
@@ -542,7 +543,8 @@ machine time, strictly one at a time (rule 1)**. Everything that can happen in h
    - the fireball pool of 8;
    - the rounded diagonals;
    - and the rest of the list.
-6. **D6 the picture:**
+6. **D6 the picture -- DECIDED 2026-09-26: the native-list sprite bank, and the HUD as a status bar
+   at the bottom (with its flipjump device option; the 3D view becomes 84 rows).** The items were:
    - the native-list sprite bank, where every sprite pixel changes;
    - the HUD as a bottom bar (the view becomes 84 rows, so every 3D pixel changes, plus a flipjump
      device option) or a side panel;
@@ -552,7 +554,9 @@ machine time, strictly one at a time (rule 1)**. Everything that can happen in h
    (9 zombiemen, 2 shotgun guys, 4 imps, 2 demons), medium 29, hard 46. The budget is sized on hard.
    The image holds the union (53, as today); the restart block writes each skill's starting state.
    Berserk exists only on easy and medium.
-8. **D8 the class-F ship rule**, and whether an ms/frame ceiling applies.
+8. **D8 -- DECIDED 2026-09-26: the class-F ship rule of section 9.** Features ship on the byte- and
+   state-exact gates, CAP-22 and size; msframe's time is recorded as the price, and ~90 ms/frame is a
+   tripwire (a rate collapse must be explained before shipping). Class S keeps "B SLOWER never ships".
 9. **D9 flipjump changes -- DECIDED 2026-09-26:** a branch from `1.5.1`, a PR, merged into `1.5.1`.
    `1.5.1` is NOT merged to `main` and not published yet. The changes planned:
    - the HUD device option;
@@ -563,9 +567,9 @@ machine time, strictly one at a time (rule 1)**. Everything that can happen in h
     fold the table into each call site's outcome table at emit time (`outcome[i] = f(rndtable[i])`),
     so a call is one index increment plus ONE dispatch, the same as any generated RNG. A P0 probe
     compares it with an LFSR/xorshift in hex ops.
-11. **D11 the map mechanics in scope:** lifts, the floor switch, key doors, walk-over and blazing
+11. **D11 the map mechanics in scope -- DECIDED 2026-09-26: all of them:** lifts, the floor switch, key doors, walk-over and blazing
     doors. They are needed to reach the whole level.
-12. **D12 levels:** this plan is E1M1 only. Two or three levels would need the 35% target raised
+12. **D12 levels -- DECIDED 2026-09-26: E1M1 only.** Two or three levels would need the 35% target raised
     and the wide thing lists.
 
 ---

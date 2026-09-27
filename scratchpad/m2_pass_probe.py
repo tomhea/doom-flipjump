@@ -1,7 +1,8 @@
 """M2-R4 -- CAN YOU WALK THROUGH THE DOOR? Asked once per state, of the program itself.
 
-The R4 gate checks the blocking BIT against `doors.pass_state` on every frame, and door 0 visits
-all nine states, so the bit is covered. What it does NOT check is the CONSEQUENCE: it only ever
+The R4 gate checks the door's registers against `doors.door_tic` on every frame (since M7 P1.2
+they ARE its collision: the cells read `dstate` against `doors.pass_state`), and door 0 visits all
+nine states. What it does NOT check is the CONSEQUENCE: it only ever
 walks the player through a fully-open door and (in its selftest) into a fully-shut one. States
 1..3 must refuse and 4..8 must admit, and nothing had ever asked the binary either question.
 
@@ -37,7 +38,6 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj import selfreset                                              # noqa: E402
-from doomfj.collision import FLAGS_REST_BYTE, LINE_REST_LEN               # noqa: E402
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doorcode import WAIT_NIBBLES, door_line_ids                   # noqa: E402
 from doomfj.doors import (door_states, door_tic, heights_for_states,      # noqa: E402
@@ -116,15 +116,14 @@ def main():
         cache.write_text(json.dumps({"mtime_ns": stamp,
                                      "labels": {k: int(v) for k, v in labels.items()}}),
                          encoding="utf-8")
-    base = {n: labels[n] // W for n in ("dstate", "ddir", "dsub", "dwait", "lnrow")}
+    assert "lnrow" not in labels, ("this binary still carries M14-d's `lnrow` table: it predates "
+                                   "M7 P1.2's collision cells, which this probe is written for")
+    base = {n: labels[n] // W for n in ("dstate", "ddir", "dsub", "dwait")}
 
     WORDS = []
     for d in range(len(order)):
         WORDS += [base["dstate"] + 2 * d + 1, base["ddir"] + 2 * d + 1, base["dsub"] + 2 * d + 1]
         WORDS += [base["dwait"] + 2 * (WAIT_NIBBLES * d + k) + 1 for k in range(WAIT_NIBBLES)]
-    for si in order:
-        for li in lines_of.get(si, ()):
-            WORDS.append(base["lnrow"] + 2 * (li * LINE_REST_LEN + FLAGS_REST_BYTE) + 1)
 
     drawable = [t for t in mw.things(args.map) if rm.sprite_art(art, t.type, {}) is not None]
     baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES)
@@ -162,7 +161,7 @@ def main():
         _core.add_segment(seg, n)
     for st_, vals in runner._runs:
         _core.set_words(st_, vals)
-    # the image's OWN initial values -- state 0 everywhere and the baked blocking bits. Each
+    # the image's OWN initial values -- every door shut and idle. Each
     # run starts from a copy, so one run's opened door cannot leak into the next.
     carry0 = [_core.get_word(w) for w in WORDS]
     del _core

@@ -107,8 +107,10 @@ NARROWED_FILES = ("fixed_point.fj", "frame_render.fj", "plane_bands.fj", "plane_
                   "projection.fj", "sim.fj", "stream_render.fj")
 # the narrowed clears each file carries TODAY. Pinned, because prose cannot fail: with only "the
 # scan still finds some" asserted, deleting one -- the Z1 bug's own shape -- left this file green.
+# sim.fj 4 -> 2 (M7 P1.2): the two in `sim.sext16` and `sim.check_block` left WITH those macros --
+# the collision cells xor every value in whole; bind_things' two remain.
 EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 22, "plane_bands.fj": 4,
-                  "plane_render.fj": 5, "projection.fj": 9, "sim.fj": 4, "stream_render.fj": 10}
+                  "plane_render.fj": 5, "projection.fj": 9, "sim.fj": 2, "stream_render.fj": 10}
 # and the rep-guarded ones the site scan skips, pinned for the same reason and so that a NEW one
 # cannot appear unnoticed -- being skipped there, it would otherwise be checked by nothing.
 EXPECTED_REPPED = {"fixed_point.fj": 0, "frame_render.fj": 1, "plane_bands.fj": 0,
@@ -718,7 +720,9 @@ REAL_MUTANTS = (
      "land between the clear"),
     # and the coverage half: a clear that no longer reaches the width the register is read at
     ("plane_render.fj", "hex.zero 6, pixofs + 2*dw", "hex.zero 3, pixofs + 2*dw", "left dirty"),
-    ("sim.fj", "        hex.mov 4, dst, src\n", "", "not the mov that is supposed to clear"),
+    # sim.sext16's clear, this mutant's first target, left with M7 P1.2; bind_things' is the one left
+    ("sim.fj", "        hex.sparse_mov HOTTER_PAD, 4, pty, pos + 12*dw\n", "",
+     "not the mov that is supposed to clear"),
 )
 
 

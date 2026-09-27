@@ -1,11 +1,11 @@
 // ==============================================================================================
 // sim.fj           the player sim: collision against real linedefs, thing binding.
 // STATUS  LIVE - the generated main
-// ENTRY   sim.check_position, sim.try_move, sim.bind_things, sim.thing_pass
-// SIZE    10 macros (sim.check_position .. sim.thing_pass)
-// NOTE    `@` holds control-flow labels ONLY; the scratch is named globals (`cb_*`, `cl_*` in
-//         collision.py::CHECK_SCRATCH_DECLS). check_position expands check_block 4x, so an
-//         @-local vec here becomes 4 cells the M1 restore set can only name by expansion path.
+// ENTRY   sim.check_cells, sim.try_move, sim.bind_things, sim.thing_pass
+// SIZE    9 macros (sim.fix16 .. sim.thing_pass)
+// NOTE    `@` holds control-flow labels ONLY; the scratch is named globals (`ca_*` / `cc_*` in
+//         collision.py::CELL_DECLS, `cl_side*` in CHECK_SCRATCH_DECLS). An @-local vec in a macro
+//         expanded N times is N cells the M1 restore set could only name by expansion path.
 // ==============================================================================================
 
 // ============================================================================
@@ -13,53 +13,44 @@
 //
 // `ReferenceModel.check_position` is DOOM's P_CheckPosition: does any linedef refuse this
 // position, and what opening do the lines it touches leave? The oracle tests every linedef, which
-// is fine in Python and ~7M ops a tic here. Two things make it affordable:
+// is fine in Python and ~7M ops a tic here.
 //
-//   * the BLOCKMAP (mapcompiler.build_blockmap) narrows ~1,500 linedefs to the ~35 in the blocks
-//     the player's 32-unit box can touch — proven equivalent to the exhaustive sweep, not argued;
-//   * the geometry is DATA, walked by the one loop below, rather than 1,651 baked copies of the
-//     test. Baking was tried first and measured: ~57k lines of macro that did not finish
-//     assembling in 50 minutes (docs/handoff-m14.md section 5, M14-d).
+// M7 P1.2 (docs/gp-collision-cells.md): the candidates come from a CELL. The map is cut into
+// 32-unit cells, and a cell lists every linedef whose bbox a box centred ANYWHERE in it can touch
+// (collision.cell_lists, exact interval arithmetic at 16.16) -- about two lines, where a 256-unit
+// blockmap block held about twenty. The routine collision.collision_cells_fj emits is three calls
+// deep:
 //
-// THE TABLES (all packed bytes, read with hex.read_table_packed):
-//   bkoff[block]  -> [offset:2][count:1]           where this block's line list starts, how long
-//   bklin[k]      -> [linedef:2]                   the flat per-block line lists
-//   lnrow[line]   -> [v1x:2][v1y:2][dxi:2][dyi:2][minx:2][maxx:2][miny:2][maxy:2]
-//                    [slope:1][flags:1][opentop:2][openbottom:2]
+//   a TREE of sim.jump16 on the centre's nibbles 7, 6, 5 (x, then y) reaches the cell's stub;
+//   the CELL STUB calls one LINE STUB per listed line;
+//   a LINE STUB xors its line's constants into the argument cells (ca_*), calls sim.line_test --
+//   ONE shared expansion -- and xors them out again, so every ca_* cell is zero between lines.
 //
-// The bbox and the SLOPE TYPE are precomputed into the row on purpose: they cost five short reads
-// and they remove four runtime min/max pairs and the whole sign-comparison switch from the one
-// piece of fj that has to be exactly DOOM.
+// Before P1.2 every candidate's row was READ from packed tables (hex.read_table_packed, ~6.8K ops
+// a line) and every check walked a whole block four times: 576K ops, MEASURED. An xor of a
+// constant costs one op per set bit.
 //
-// ⚠ 16.16 FROM AN INT16, WITHOUT SIGN EXTENSION. A map coordinate is int16 and the working values
-// are 16.16, so `hex.zero 8, r; hex.mov 4, r + 4*dw, raw` IS the conversion: putting the 16 bits
-// in the high half is exactly `raw << 16` in two's complement, negatives included. The INTEGER
-// deltas that feed FixedMul are different — those are values, not positions, so they DO need
-// sign-extending into 8 nibbles (`sim.sext16`).
+// ⚠ A WALL CANNOT JUMP OUT of line_test -- it runs two calls deep, and both return registers must
+// be unwound -- so a refusal LATCHES cp_ok = 0 and the cell's remaining lines still run.
+// check_cells then restores the SEED openings, which is what the old jump out did.
 //
 // ⚠ ON A REFUSAL the openings are returned as the caller's SEED, not as whatever had accumulated.
-// The partial accumulation is order-dependent (the oracle walks linedefs in index order, this
-// walks them in blockmap order) and DOOM never reads it — pinning it is what makes a refusal
-// comparable between the two mirrors at all.
+// The partial accumulation is order-dependent (the oracle walks linedefs in index order, a cell in
+// its list's order) and DOOM never reads it -- pinning it is what makes a refusal comparable
+// between the two mirrors at all.
+//
+// ⚠ 16.16 FROM AN INT16, WITHOUT SIGN EXTENSION (sim.fix16, for thing_load's rows). A map
+// coordinate is int16 and the working values are 16.16, so `hex.zero 8, r; hex.mov 4, r + 4*dw,
+// raw` IS the conversion: putting the 16 bits in the high half is exactly `raw << 16` in two's
+// complement, negatives included.
 // ============================================================================
 
 ns sim {
-    // sim.sext16 dst, src — sign-extend a 4-nibble int16 into an 8-nibble two's-complement value.
-    def sext16 dst, src @ neg, done {
-        hex.zero 4, dst + 4*dw   // only the HIGH 4: the mov below zeroes the low 4
-        hex.mov 4, dst, src
-        hex.sign 4, src, neg, done
-      neg:
-        hex.set 4, dst + 4*dw, 0xFFFF
-      done:
-    }
-
     // sim.fix16 dst, src — a 4-nibble int16 MAP COORDINATE as a 16.16 value (see the header note).
     def fix16 dst, src {
         hex.zero 8, dst
         hex.mov 4, dst + 4*dw, src
     }
-
     // sim.point_side side, x, y, v1x, v1y, dxi, dyi — P_PointOnLineSide's cross-product case only.
     // The axis cases never reach here: the caller dispatches on the baked slope type, and both
     // diagonal slopes have dx != 0 and dy != 0. x/y/v1x/v1y are 16.16; dxi/dyi are the SIGNED
@@ -90,117 +81,134 @@ ns sim {
 }
 
 ns sim {
-    // sim.check_line — ONE candidate linedef, from its packed row. Falls through to the caller's
-    // next line when this one does not refuse the position; jumps to `blocked` when it does.
-    // Mirrors PIT_CheckLine.
+    // sim.jump16 x, t0 .. t15 — jump to t<v>, where v is the hex nibble at x (a collision cell's
+    // tree node, collision.collision_cells_fj).
     //
-    //   lnrow / n_ln : the packed line table and its index width
-    //   lnbox, lnrow : the two packed linedef tables (C5: bbox half, then the other 14 bytes)
-    //   li           : the linedef index (runtime), indexing BOTH tables identically
-    //   the box      : cbx_lo/cbx_hi/cby_lo/cby_hi (16.16) — the caller sets them once
-    //   the opening  : cp_floor/cp_ceil, narrowed IN PLACE (map units, 8-nibble signed)
-    //
-    // ⚠ EACH TABLE'S ROW IS READ IN ONE GO. `hex.read_table_packed nb, ...` strides by nb, so
-    // reading a single field with `nb = 2` would stride by 2 bytes and land in the wrong row. The
-    // linedef is TWO tables, each read whole: `lnbox` (8 bytes: minx maxx miny maxy) into `cl_box`,
-    // and -- only for candidates that survive the bbox -- `lnrow` (the other 14) into `cl_rest`.
-    // Within each buffer every field is a compile-time nibble offset: box byte k is at
-    // `cl_box + 2k*dw`, rest byte k at `cl_rest + 2k*dw`. ⚠ Rest byte k is old row byte k+8; the
-    // comments below carry the post-split numbers, and getting one wrong does not crash -- it
-    // walks the player through a wall.
-    //
-    // The scratch (`cl_*`) is GLOBAL, declared in collision.py::COLLISION_STATE_DECLS, not @-local:
-    // check_position expands this macro four times (one per box corner) and four private copies
-    // would be four cells the M1 restore set could only name by expansion path.
-    def check_line lnbox, lnrow, n_ln, li, blocked \
-            @ nxt, hit, k_a, k_b, k_c, k_d, axis, diag, do_h, do_v, do_pos, do_neg, h1, v1c, cmp_p, open_f, open_c, set_f, set_c \
-            < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_floor, cp_ceil, cl_box, cl_rest, cl_v1x, cl_v1y, cl_dx, cl_dy, cl_tmp, cl_open, cl_side1, cl_side2, cl_const {
-        // M-CONSTADDR C5: the BBOX HALF ONLY -- 8 bytes, so 8 pointer setups instead of 22. Most
-        // candidates die on the four compares below, and every byte read for them was wasted:
-        // `read_table_packed nb` is nb separate set_flip_and_jump_pointers rebuilds (~781 ops each).
-        // Same lever M14.5 applied to thing_load ("those four moved to frame.thing_load_cold,
-        // which runs AFTER the vis reject").
-        hex.read_table_packed 8, cl_box, lnbox, n_ln, li
+    // The table is the shape the BlockPool relocates: `pad 16`, sixteen plain `;r<i>` entries, and
+    // wflips naming the head label. `sim.jump16` is in build_blocked.py's SAFE_TABLE_MACROS for
+    // that reason -- undeclared, the pool pins the cell instead and six levels cost 137 ops against
+    // 46 (S6, MEASURED). Arming xors `switch` into x's jump word and jumps THROUGH x, which is
+    // hex.if_flags' own trick; each trampoline disarms and jumps on, so x is unchanged on every exit.
+    def jump16 x, t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13, t14, t15 \
+            @ switch, r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, r10, r11, r12, r13, r14, r15 {
+        wflip x+w, switch, x
+        pad 16
+      switch:
+        ;r0
+        ;r1
+        ;r2
+        ;r3
+        ;r4
+        ;r5
+        ;r6
+        ;r7
+        ;r8
+        ;r9
+        ;r10
+        ;r11
+        ;r12
+        ;r13
+        ;r14
+        ;r15
+      r0: wflip x+w, switch, t0
+      r1: wflip x+w, switch, t1
+      r2: wflip x+w, switch, t2
+      r3: wflip x+w, switch, t3
+      r4: wflip x+w, switch, t4
+      r5: wflip x+w, switch, t5
+      r6: wflip x+w, switch, t6
+      r7: wflip x+w, switch, t7
+      r8: wflip x+w, switch, t8
+      r9: wflip x+w, switch, t9
+      r10: wflip x+w, switch, t10
+      r11: wflip x+w, switch, t11
+      r12: wflip x+w, switch, t12
+      r13: wflip x+w, switch, t13
+      r14: wflip x+w, switch, t14
+      r15: wflip x+w, switch, t15
+    }
+}
 
+ns sim {
+    // sim.line_test — ONE candidate linedef's PIT_CheckLine, on the argument cells its line stub
+    // has xored in (collision.collision_cells_fj). Falls through in every outcome.
+    //
+    //   the box     : cbx_lo/cbx_hi/cby_lo/cby_hi (16.16) -- sim.check_cells sets them once
+    //   the line    : ca_minx/ca_maxx/ca_miny/ca_maxy and ca_v1x/ca_v1y (16.16); ca_dx/ca_dy (the
+    //                 SIGNED integer deltas, sign-extended to 8 nibbles); ca_slope (ST_*); ca_flags
+    //                 (FLAG_*; a door's line carries FLAG_BLOCKING only while the door is shut);
+    //                 ca_ob/ca_ot (the opening, map units, sign-extended)
+    //   the verdict : cp_ok LATCHED to 0 by a wall, else cp_floor/cp_ceil narrowed IN PLACE
+    //
+    // A stub xors in only what its line's path reads here -- an axis line leaves ca_dx/ca_dy zero,
+    // a wall its opening -- and nothing here writes a ca_* cell, so the stub's second xor is what
+    // zeroes them. Every value arrives in its working form: no table read, no conversion.
+    def line_test @ nxt, hit, k_a, k_b, k_c, k_d, axis, diag, do_h, do_v, do_pos, do_neg, h1, \
+                    v1c, cmp_p, open_f, open_c, set_f, set_c \
+            < cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil, ca_minx, ca_maxx, \
+              ca_miny, ca_maxy, ca_v1x, ca_v1y, ca_dx, ca_dy, ca_slope, ca_flags, ca_ob, ca_ot, \
+              cl_side1, cl_side2 {
         // ---- bbox reject: right <= minx, left >= maxx, top <= miny, bottom >= maxy -----------
-        .fix16 cl_tmp, cl_box                               // minx  (box byte 0)
-        hex.scmp 8, cbx_hi, cl_tmp, nxt, nxt, k_a
+        hex.scmp 8, cbx_hi, ca_minx, nxt, nxt, k_a
       k_a:
-        .fix16 cl_tmp, cl_box + 4*dw                        // maxx  (box byte 2)
-        hex.scmp 8, cbx_lo, cl_tmp, k_b, nxt, nxt
+        hex.scmp 8, cbx_lo, ca_maxx, k_b, nxt, nxt
       k_b:
-        .fix16 cl_tmp, cl_box + 8*dw                        // miny  (box byte 4)
-        hex.scmp 8, cby_hi, cl_tmp, nxt, nxt, k_c
+        hex.scmp 8, cby_hi, ca_miny, nxt, nxt, k_c
       k_c:
-        .fix16 cl_tmp, cl_box + 12*dw                       // maxy  (box byte 6)
-        hex.scmp 8, cby_lo, cl_tmp, k_d, nxt, nxt
+        hex.scmp 8, cby_lo, ca_maxy, k_d, nxt, nxt
       k_d:
-        // SURVIVED the bbox -- now, and only now, pay for the other 14 bytes.
-        hex.read_table_packed 14, cl_rest, lnrow, n_ln, li
         // ---- P_BoxOnLineSide: only a STRADDLING box can be refused ---------------------------
-        .fix16 cl_v1x, cl_rest                               // v1x   (byte 0)
-        .fix16 cl_v1y, cl_rest + 4*dw                        // v1y   (byte 2)
-        // slope (rest byte 8; row byte 16) is 0..3, so its two low bits ARE the switch: bit 1 separates the
-        // diagonals from the axis cases, bit 0 picks within each pair. `hex.if_flags`' mask is a
-        // set of nibble VALUES, so "bit 1 set" is {2,3} = 0xCCCC and "bit 0 set" is {1,3} = 0xAAAA.
-        hex.if_flags cl_rest + 16*dw, 0xCCCC, axis, diag
+        // the slope is 0..3, so its two low bits ARE the switch: bit 1 separates the diagonals
+        // from the axis cases, bit 0 picks within each pair. `hex.if_flags`' mask is a set of
+        // nibble VALUES, so "bit 1 set" is {2,3} = 0xCCCC and "bit 0 set" is {1,3} = 0xAAAA.
+        hex.if_flags ca_slope, 0xCCCC, axis, diag
       axis:
-        hex.if_flags cl_rest + 16*dw, 0xAAAA, do_h, do_v
+        hex.if_flags ca_slope, 0xAAAA, do_h, do_v
       do_h:                                             // horizontal: straddle iff bottom <= v1y < top
-        hex.scmp 8, cby_hi, cl_v1y, nxt, nxt, h1
+        hex.scmp 8, cby_hi, ca_v1y, nxt, nxt, h1
       h1:
-        hex.scmp 8, cby_lo, cl_v1y, hit, hit, nxt
+        hex.scmp 8, cby_lo, ca_v1y, hit, hit, nxt
       do_v:                                             // vertical: straddle iff left < v1x <= right
-        hex.scmp 8, cbx_hi, cl_v1x, nxt, v1c, v1c
+        hex.scmp 8, cbx_hi, ca_v1x, nxt, v1c, v1c
       v1c:
-        hex.scmp 8, cbx_lo, cl_v1x, hit, nxt, nxt
+        hex.scmp 8, cbx_lo, ca_v1x, hit, nxt, nxt
       diag:
-        .sext16 cl_dx, cl_rest + 8*dw                       // dxi   (byte 4) — a VALUE, so sign-extend
-        .sext16 cl_dy, cl_rest + 12*dw                      // dyi   (byte 6)
-        hex.if_flags cl_rest + 16*dw, 0xAAAA, do_pos, do_neg
+        hex.if_flags ca_slope, 0xAAAA, do_pos, do_neg
       do_pos:                                           // "/" : (left, top) vs (right, bottom)
-        .point_side cl_side1, cbx_lo, cby_hi, cl_v1x, cl_v1y, cl_dx, cl_dy
-        .point_side cl_side2, cbx_hi, cby_lo, cl_v1x, cl_v1y, cl_dx, cl_dy
+        .point_side cl_side1, cbx_lo, cby_hi, ca_v1x, ca_v1y, ca_dx, ca_dy
+        .point_side cl_side2, cbx_hi, cby_lo, ca_v1x, ca_v1y, ca_dx, ca_dy
         ;cmp_p
       do_neg:                                           // "\" : (right, top) vs (left, bottom)
-        .point_side cl_side1, cbx_hi, cby_hi, cl_v1x, cl_v1y, cl_dx, cl_dy
-        .point_side cl_side2, cbx_lo, cby_lo, cl_v1x, cl_v1y, cl_dx, cl_dy
+        .point_side cl_side1, cbx_hi, cby_hi, ca_v1x, ca_v1y, ca_dx, ca_dy
+        .point_side cl_side2, cbx_lo, cby_lo, ca_v1x, ca_v1y, ca_dx, ca_dy
       cmp_p:
         hex.cmp 1, cl_side1, cl_side2, hit, nxt, hit                // differ -> straddling
       hit:
         // ---- the blocking rules, then the opening --------------------------------------------
-        hex.set 1, cl_const, 0
-        hex.cmp 1, cl_rest + 18*dw, cl_const, blocked, open_f, blocked   // flags != 0 -> a wall
-      open_f:
-        .sext16 cl_open, cl_rest + 24*dw                     // openbottom (rest byte 12; row byte 20) -> floorz = max
-        hex.scmp 8, cl_open, cp_floor, open_c, open_c, set_f
+        hex.if0 1, ca_flags, open_f             // no flag: a passable two-sided line
+        hex.zero 1, cp_ok                       // one-sided, ML_BLOCKING or a shut door: LATCH
+        ;nxt
+      open_f:                                   // openbottom -> floorz = max
+        hex.scmp 8, ca_ob, cp_floor, open_c, open_c, set_f
       set_f:
-        hex.mov 8, cp_floor, cl_open
-      open_c:
-        .sext16 cl_open, cl_rest + 20*dw                     // opentop (rest byte 10; row byte 18) -> ceilingz = min
-        hex.scmp 8, cl_open, cp_ceil, set_c, nxt, nxt
+        hex.mov 8, cp_floor, ca_ob
+      open_c:                                   // opentop -> ceilingz = min
+        hex.scmp 8, ca_ot, cp_ceil, set_c, nxt, nxt
       set_c:
-        hex.mov 8, cp_ceil, cl_open
+        hex.mov 8, cp_ceil, ca_ot
       nxt:
     }
 }
 
 ns sim {
-    // sim.check_position — P_CheckPosition: may a box of `cprad` centred on (cpx, cpy) stand here?
+    // sim.check_cells root — P_CheckPosition: may a box of `cprad` centred on (cpx, cpy) stand here?
     //
-    // Writes cp_ok (1 = legal), cp_floor / cp_ceil (map units). The candidate lines come from the
-    // BLOCKMAP: the box is 2*cprad across and a block is 256 units, so the box's four corners fall
-    // in at most 2x2 blocks and every line that can touch the box is listed in one of them.
-    //
-    // No de-duplication, deliberately: a line listed in two of the four blocks is tested twice, and
-    // both effects are idempotent -- "blocked" is a latch, and the opening updates are max/min.
-    // Dropping the dedupe costs a few repeated tests and saves a whole runtime set.
-    //
-    // ⚠ The block index is an ARITHMETIC shift of a signed coordinate and fj's shr_hex is logical,
-    // so the position is BIASED by 2^15 map units first. Map coords are int16, so x + 32768 >= 0
-    // always, and (x16 + (32768 << 16)) >> 6 nibbles is (x_int + 32768) >> 8 exactly -- one
-    // whole-nibble shift, which is why blocks are 256 units and not DOOM's 128.
-    def check_position bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0             @ blocked, done             < cpx, cpy, cprad, cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil,               cp_seedf, cp_seedc {
+    // Writes cp_ok (1 = legal), cp_floor / cp_ceil (map units), from the seed opening in
+    // cp_seedf / cp_seedc and the cell routine at `root` (collision.collision_cells_fj): it runs
+    // every line of the centre's cell through sim.line_test and returns through cc_ret.
+    def check_cells root @ done \
+            < cpx, cpy, cprad, cbx_lo, cbx_hi, cby_lo, cby_hi, cp_ok, cp_floor, cp_ceil, \
+              cp_seedf, cp_seedc, cc_ret {
         hex.set 1, cp_ok, 1
         hex.mov 8, cp_floor, cp_seedf
         hex.mov 8, cp_ceil, cp_seedc
@@ -212,54 +220,11 @@ ns sim {
         hex.sub 8, cby_lo, cprad
         hex.mov 8, cby_hi, cpy
         hex.add 8, cby_hi, cprad
-        rep(4, q) .check_block bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, \
-                               (q&1) ? cbx_hi : cbx_lo, (q>>1) ? cby_hi : cby_lo, blocked
-        ;done
-      blocked:
-        hex.set 1, cp_ok, 0
-        hex.mov 8, cp_floor, cp_seedf         // the SEED, not the partial accumulation -- the
-        hex.mov 8, cp_ceil, cp_seedc          // oracle pins it the same way (order-dependence)
+        stl.fcall root, cc_ret
+        hex.if1 1, cp_ok, done
+        hex.mov 8, cp_floor, cp_seedf         // refused: the SEED, not the partial accumulation --
+        hex.mov 8, cp_ceil, cp_seedc          // the oracle pins it the same way (order-dependence)
       done:
-    }
-
-    // sim.check_block — one corner's block: index it, bounds-check it, run its line list.
-    def check_block bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, xreg, yreg, blocked \
-            @ xok, yok, skip, lloop, lbody \
-            < cb_bx, cb_by, cb_const, cb_idx, cb_row, cb_first, cb_count, cb_k, cb_kend, cb_line {
-        hex.mov 8, cb_bx, xreg
-        hex.set 8, cb_const, 0x80000000
-        hex.add 8, cb_bx, cb_const
-        hex.shr_hex 8, 6, cb_bx
-        hex.mov 8, cb_by, yreg
-        hex.add 8, cb_by, cb_const
-        hex.shr_hex 8, 6, cb_by
-        hex.set 4, cb_const, (ibx0 + 128) & 0xFFFF
-        hex.sub 4, cb_bx, cb_const
-        hex.set 4, cb_const, (iby0 + 128) & 0xFFFF
-        hex.sub 4, cb_by, cb_const
-        hex.set 4, cb_const, nbx
-        hex.cmp 4, cb_bx, cb_const, xok, skip, skip
-      xok:
-        hex.set 4, cb_const, nby
-        hex.cmp 4, cb_by, cb_const, yok, skip, skip
-      yok:
-        hex.mul_const 4, cb_idx, cb_by, nbx
-        hex.add 4, cb_idx, cb_bx
-        hex.read_table_packed 3, cb_row, bkoff, n_bk, cb_idx
-        hex.mov 4, cb_first, cb_row                    // [offset:2] = the first 4 nibbles
-        hex.zero 2, cb_count + 2*dw   // only the HIGH 2: the mov below zeroes the low 2
-        hex.mov 2, cb_count, cb_row + 4*dw             // [count:1]
-        hex.mov 4, cb_k, cb_first
-        hex.mov 4, cb_kend, cb_first
-        hex.add 4, cb_kend, cb_count
-      lloop:
-        hex.cmp 4, cb_k, cb_kend, lbody, skip, skip
-      lbody:
-        hex.read_table_packed 2, cb_line, bklin, n_bl, cb_k
-        .check_line lnbox, lnrow, n_ln, cb_line, blocked
-        hex.inc 4, cb_k
-        ;lloop
-      skip:
     }
 }
 
@@ -267,7 +232,7 @@ ns sim {
     // sim.try_move — P_TryMove's verdict for the candidate already in cpx/cpy, given the floor the
     // thing is standing on now (`here_floor`, map units). Sets `mv_ok` to 1 or 0.
     //
-    // On top of check_position: the opening must be tall enough for the thing, and the floor must
+    // On top of check_cells: the opening must be tall enough for the thing, and the floor must
     // not be more than MAX_STEP above the one being left ("too big a step up").
     //
     // ⚠ Both tests are plain MAP-UNIT compares, not 16.16 ones. DOOM writes them as
@@ -279,16 +244,15 @@ ns sim {
     // NOT IMPLEMENTED, deliberately and permissively: the "don't stand over a dropoff" test. It
     // only ever REFUSES moves, so leaving it out cannot block a move DOOM would allow. The oracle
     // omits it identically -- see ReferenceModel.check_position's docstring.
-    def try_move bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0, height, maxstep, \
-                 here_floor \
+    def try_move root, height, maxstep, here_floor \
             @ body, fail, done, out, tall, cst, gap, step \
-            < cp_ok, cp_floor, cp_ceil, mv_ok {    // the box/seed globals belong to check_position
+            < cp_ok, cp_floor, cp_ceil, mv_ok {    // the box/seed globals belong to check_cells
         ;body
       cst: hex.vec 8
       gap: hex.vec 8
       step: hex.vec 8
       body:
-        .check_position bkoff, n_bk, bklin, n_bl, lnbox, lnrow, n_ln, nbx, nby, ibx0, iby0
+        .check_cells root
         hex.if0 1, cp_ok, fail
         hex.mov 8, gap, cp_ceil                // the opening must fit the thing
         hex.sub 8, gap, cp_floor

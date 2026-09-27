@@ -46,10 +46,14 @@ from doomfj.wall_renderer import TIERS                                  # noqa: 
 # They dispatch through the SAME source words as the exact_xor family, so left inline they paid
 # A ^ base on a pinned word (1.45 M ops/frame, handoff throughput-plan 15). `hex.inc1` does NOT
 # qualify: its entry 15 falls through into the carry tail, which the assembler's detector refuses.
+# `sim.jump16` (M7 P1.2, the collision cells' tree) qualifies the same way: `pad 16; switch:` sixteen
+# `;r<i>` entries, each trampoline `r<i>: wflip x+w, switch, t<i>` disarming `switch` and jumping on.
+# Undeclared, the pool pins its cell instead and six levels cost 137 ops against 46 (S6, MEASURED).
 SAFE_TABLE_MACROS = ("hex.exact_xor", "hex.sparse_exact_xor", "hex.double_exact_xor",
                      "hex.sparse_double_exact_xor", "hex.triple_exact_xor",
                      "hex.quadrupled_exact_xor",
-                     "hex.shifts.shl_bit_once", "hex.shifts.shr_bit_once")
+                     "hex.shifts.shl_bit_once", "hex.shifts.shr_bit_once",
+                     "sim.jump16")
 
 
 def _counts_sig(a):

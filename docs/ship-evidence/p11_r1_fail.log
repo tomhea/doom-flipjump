@@ -1,7 +1,7 @@
-# R1: tests/host/test_pin_heat.py on main's files (no heat list; main's ship-gate.md and counts cache)
+# R1: tests/host/test_pin_heat.py on origin/main's files (no heat list; its ship-gate.md, counts cache and poolmap.py)
 $ python -m pytest tests/host/test_pin_heat.py -q
-E           FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\tomhe\\AppData\\Local\\Temp\\tmpu1bng6md\\scratchpad\\12m\\heat_blocked27.json.gz'
-E       assert (['python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e...read-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz'] and False)
-FAILED tests/host/test_pin_heat.py::test_the_shipped_heat_list_fits_the_program
-FAILED tests/host/test_pin_heat.py::test_the_ship_gate_builds_with_the_heat_list
-2 failed in 0.28s
+E       AssertionError: --pin-heat appears 0 times in the recorded command 'python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.t
+ERROR tests/host/test_pin_heat.py::test_the_shipped_heat_list_fits_the_program
+ERROR tests/host/test_pin_heat.py::test_the_checks_can_fail
+ERROR tests/host/test_pin_heat.py::test_poolmap_prices_the_shipped_heat_list
+3 errors in 0.28s

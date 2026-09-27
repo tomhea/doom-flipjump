@@ -1,7 +1,8 @@
 """M2 STANDALONE GATE -- the SHIPPED binary opens a door and the door STAYS open across the reset.
 
-    python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_menu.fjm
+    python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_menu.fjm --labels <its label table>
     python scratchpad/m2_std_gate.py --selftest        # R9: the oracle never presses use
+    python scratchpad/m2_std_gate.py --selftest-restart-doors   # R9: NEW GAME forgets the doors
 
 WHY THIS EXISTS, AND WHAT NO EXISTING GATE COVERS. `m2_r4_gate` proves the door machine works on
 the HOSTED tier -- but there every frame is a fresh image and the gate RELAYS the door cells
@@ -33,6 +34,13 @@ CONTROLS
       `doors.in_use_box_fixed` rather than against the fact that something happened.
   C3  --selftest: the oracle never presses use, so its doors stay shut; every frame from the one
       the door first moves must then differ. A gate that cannot fail is not evidence.
+  C7  STATE-EXACT (M7 P1.5, kill criterion 3): every frame, menu or world, the binary's persisted
+      cells -- the view, `mode`, `menu_scr`, `menu_sel`, and every door's state, direction,
+      sub-step and timer, read at the present through the build's label table
+      (scratchpad/gp/gatestate.py) -- must equal the oracle's after that frame. Pixels alone passed
+      a NEW GAME that left a door's timer or direction behind. --selftest-restart-doors (R9): the
+      oracle's NEW GAME resets the view but NOT the doors, and the state check must reject it on
+      the NEW GAME frame itself.
 """
 import argparse
 import sys
@@ -402,6 +410,9 @@ def run_fj(fjm, events, frames, screen_factory=Recording):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fjm", default="build/doom_e1m1_menu.fjm")
+    ap.add_argument("--labels", default=None,
+                    help="the build's label table (build_labeled.py --labels) -- the state check "
+                         "reads the persisted cells through it; the gate refuses to run without it")
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default="assets/freedoom1.wad")
@@ -425,6 +436,9 @@ def main():
     ap.add_argument("--selftest-restart", action="store_true",
                     help="R9 for NEW GAME (M7 P1.5): the oracle does NOT restart the level when the "
                          "skill is picked -- the replay must then fail to match")
+    ap.add_argument("--selftest-restart-doors", action="store_true",
+                    help="R9 for the STATE check (M7 P1.5): the oracle's NEW GAME resets the view "
+                         "but NOT the doors -- the state check must reject the NEW GAME frame")
     args = ap.parse_args()
 
     mw = WadFile.from_path(str(ROOT / args.wad))
@@ -649,7 +663,14 @@ def main():
                      "  IN BOX" if inb else ""))
         return 0
 
-    got, ops = run_fj(ROOT / args.fjm, events, frames)
+    if not args.labels:
+        print("  CONTROL 7: NO --labels. This gate is byte- AND state-exact (M7 P1.5), and without")
+        print("     the build's label table it cannot read the program's state. Refusing to run.")
+        return 1
+    sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
+    import gatestate as GST
+    got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
+                                            len(order))
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -668,6 +689,7 @@ def main():
     seen, track, path = set(), [], {}
     first_move = None
     before_ng = None                                    # (state, door states) as NEW GAME lands
+    state_bad, state_checked = None, 0                  # CONTROL 7: the first frame whose STATE parts
     print("  frame  keys      door%-4d  fj px vs oracle" % target)
     for f in range(frames):
         kd = keys_by_frame[f]
@@ -677,12 +699,22 @@ def main():
             assert SKILLS[ng] == BOOT_SKILL, "the script starts the boot skill; m3_gate does the rest"
             before_ng = (state, dict(dstates))
             if not args.selftest_restart:               # THE R9 CONTROL skips exactly this
-                state, dstates = sp, initial_states(secs, lds, sds)
+                state = sp
+                if not args.selftest_restart_doors:     # ...and C7's control skips the doors
+                    dstates = initial_states(secs, lds, sds)
         if mode == 1:                                   # a menu frame tics nothing
             menu_pics.setdefault((scr, sel), set()).add(got[f])
-            print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)"
+            sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
+                                                       sel, (dstates[si] for si in order)))
+            state_checked += 1
+            print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
                   % (f, ",".join(sorted(menu_events[f])) or "-", "-",
-                     "the skill screen" if scr else "the main menu"))
+                     "the skill screen" if scr else "the main menu",
+                     "state ok" if not sbad else "!! STATE: " + GST.show(sbad)))
+            if sbad:
+                state_bad = f
+                print("  -- stopping: the program's state parted from the oracle's")
+                break
             continue
         used = bool(kd.get("use")) and not args.selftest
         if kd.get("use") and in_use_box_fixed(boxes[target], state.x, state.y):
@@ -698,6 +730,9 @@ def main():
         want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art, thing_hidden=hidden,
                                           **GAME_RENDER_KW))
         same = got[f] == want
+        sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
+                                                   (dstates[si] for si in order)))
+        state_checked += 1
         path[f] = (state.x, state.y, state.angle)
         ok &= same
         d0 = dstates[target][0]
@@ -705,11 +740,17 @@ def main():
         track.append((state.x >> 16, state.y >> 16))
         if d0 and first_move is None:
             first_move = f
-        print("  %5d  %-8s  %6d   %s"
+        print("  %5d  %-8s  %6d   %s  %s"
               % (f, "".join(n[0] for n in sorted(kd) if kd[n]) or "-", d0,
                  "BYTE-EXACT" if same else
-                 "!! %d px differ" % sum(a != b for a, b in zip(got[f], want))), flush=True)
-        if not same and not (args.selftest or args.selftest_restart):
+                 "!! %d px differ" % sum(a != b for a, b in zip(got[f], want)),
+                 "state ok" if not sbad else "!! STATE: " + GST.show(sbad)), flush=True)
+        if sbad:
+            state_bad = f
+            if same:
+                print("  -- stopping: the program's state parted from the oracle's")
+                break
+        if not same and not (args.selftest or args.selftest_restart or args.selftest_restart_doors):
             # WHICH PICTURE DID THE PROGRAM DRAW? A pixel count says "they differ"; it does not say
             # whether the program rendered the wrong door STATE (a dispatch/timing fault) or the
             # right state wrongly (a rendering fault). Re-render the oracle at every state of the
@@ -807,6 +848,11 @@ def main():
           % (target, "yes" if ng_open else "!! no", len(route), "yes" if retraced else
              "!! no -- %d of %d replay frames reached" % (n_replay, len(route)),
              "yes" if tells else "!! no"))
+    print("  CONTROL 7: every frame's STATE (view, mode, menu_scr, menu_sel, and every door's "
+          "state, direction, sub-step and timer) equals the oracle's: %s"
+          % ("yes, %d frames" % state_checked if state_bad is None and state_checked == frames
+             else "!! no -- frame %s" % state_bad if state_bad is not None
+             else "!! only %d of %d frames were checked" % (state_checked, frames)))
     vac = (len(seen) < 3 or not in_box_when_pressed or not menu_same or not crossed
            or not (ng_open and tells))
     if not args.selftest_restart:
@@ -814,18 +860,30 @@ def main():
     if vac and not (args.selftest or args.selftest_restart):
         print("  !! VACUOUS -- fix the SCRIPT, not the verdict")
     print("")
+    if args.selftest_restart_doors:
+        # rejected for the RIGHT reason: the first STATE that parts is the NEW GAME frame's
+        caught = state_bad == ng_frame
+        print("SELFTEST-RESTART-DOORS (the oracle's NEW GAME keeps the doors): %s"
+              % ("PASS -- the state check rejected the NEW GAME frame %d" % ng_frame if caught else
+                 "!! FAIL -- " + ("it accepted" if state_bad is None else
+                                  "the state parted at frame %s, not %d" % (state_bad, ng_frame))))
+        return 0 if caught else 1
     if args.selftest_restart:
         print("SELFTEST-RESTART (the oracle never restarts the level): %s"
-              % ("PASS -- the gate rejected it" if not ok else "!! FAIL -- it accepted"))
-        return 0 if not ok else 1
+              % ("PASS -- the gate rejected it" if not (ok and state_bad is None)
+                 else "!! FAIL -- it accepted"))
+        return 0 if not (ok and state_bad is None) else 1
     if args.selftest:
         print("SELFTEST (the oracle never presses use, so its doors stay shut): %s"
-              % ("PASS -- the gate rejected it" if not ok else "!! FAIL -- it accepted"))
-        return 0 if not ok else 1
+              % ("PASS -- the gate rejected it" if not (ok and state_bad is None)
+                 else "!! FAIL -- it accepted"))
+        return 0 if not (ok and state_bad is None) else 1
+    state_ok = state_bad is None and state_checked == frames
     print("M2 STANDALONE GATE: %s"
           % ("PASS -- the shipped binary opens a door, KEEPS it open across the M1 reset, "
-             "and NEW GAME puts it back" if (ok and not vac) else "FAIL"))
-    return 0 if (ok and not vac) else 1
+             "and NEW GAME puts it back; byte- and state-exact on all %d frames" % frames
+             if (ok and state_ok and not vac) else "FAIL"))
+    return 0 if (ok and state_ok and not vac) else 1
 
 
 if __name__ == "__main__":

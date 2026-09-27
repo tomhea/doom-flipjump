@@ -29,7 +29,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import HERE, ROOT, W, default_fjm, default_labels, label_dict, load_sparse, work_dir  # noqa: E402
 from fjmimage import FjmImage  # noqa: E402
-from pool import KNOBS, eval_key, reconstruct  # noqa: E402
+from pool import KNOBS, eval_key, load_heat, reconstruct  # noqa: E402
 
 
 def game_frames(prefix):
@@ -45,13 +45,14 @@ def main():
     ap.add_argument("--fjm", default=None)
     ap.add_argument("--labels", default=None)
     ap.add_argument("--counts-cache", default=str(ROOT / "scratchpad" / "12m" / "_counts_game.json.gz"))
+    ap.add_argument("--heat", default=None, help="the --pin-heat list the profiled build was placed with")
     a = ap.parse_args()
     p = Path(a.prefix)
     prefix = str(p if p.is_absolute() else work_dir() / p)
     fjm = Path(a.fjm) if a.fjm else default_fjm()
     lab_path = Path(a.labels) if a.labels else default_labels()
 
-    pool, fr = reconstruct(a.counts_cache)
+    pool, fr = reconstruct(a.counts_cache, heat=load_heat(a.heat))
     lab = label_dict(lab_path)
     img = FjmImage(fjm)
     F = game_frames(prefix)

@@ -2,7 +2,7 @@
 sites, hottest first, for `build_blocked.py --pin-heat`.
 
     python scratchpad/12m/heatsites.py <profx prefix> --sites <sites.json.gz> [--top 20]
-        [--out scratchpad/12m/heat_blocked27.json] [--counts-cache scratchpad/12m/_counts_game.json.gz]
+        [--out scratchpad/12m/heat_blocked27.json.gz] [--counts-cache scratchpad/12m/_counts_game.json.gz]
         [--fjm build/doom_e1m1_blocked27.fjm] [--labels scratchpad/12m/atlas/blocked27.labels.tsv.gz]
 
 WHAT IT JOINS.
@@ -40,7 +40,7 @@ from flipjump.assembler.inner_classes.expr import Expr                     # noq
 from flipjump.assembler.preprocessor import heat_key                       # noqa: E402
 from common import W, default_fjm, default_labels, label_dict, load_sparse, work_dir  # noqa: E402
 from fjmimage import FjmImage                                               # noqa: E402
-from pool import KNOBS, eval_key, reconstruct                               # noqa: E402
+from pool import KNOBS, eval_key, load_heat, reconstruct                    # noqa: E402
 
 OP_BITS = 2 * W
 
@@ -59,10 +59,13 @@ def main():
     ap.add_argument("prefix")
     ap.add_argument("--sites", required=True)
     ap.add_argument("--top", type=int, default=20)
-    ap.add_argument("--out", default=str(HERE / "heat_blocked27.json"))
+    ap.add_argument("--out", default=str(HERE / "heat_blocked27.json.gz"),
+                    help="the list; `.gz` writes it gzipped (mtime 0, so a rerun is byte-identical)")
     ap.add_argument("--counts-cache", default=str(HERE / "_counts_game.json.gz"))
     ap.add_argument("--fjm", default=None)
     ap.add_argument("--labels", default=None)
+    ap.add_argument("--heat", default=None,
+                    help="the --pin-heat list the PROFILED build was placed with (its layout), if any")
     a = ap.parse_args()
     p = Path(a.prefix)
     prefix = str(p if p.is_absolute() else work_dir() / p)
@@ -71,7 +74,7 @@ def main():
     F = game_frames(prefix)
 
     # the layout, checked against the image (as hotwords.py)
-    pool, fr = reconstruct(a.counts_cache)
+    pool, fr = reconstruct(a.counts_cache, heat=load_heat(a.heat))
     img = FjmImage(fjm)
     agree = n = 0
     for g, (base, _e) in pool.groups.items():
@@ -108,7 +111,7 @@ def main():
           % (Path(a.sites).name, hashlib.sha256(Path(a.sites).read_bytes()).hexdigest()[:16],
              len(sites["groups"]), sum(len(v) for v in sites["groups"].values()), sites.get("program")),
           flush=True)
-    replay, _ = reconstruct(a.counts_cache)
+    replay, _ = reconstruct(a.counts_cache, heat=load_heat(a.heat))
     heat, report, bad = {}, [], []
     for g in ranked:
         recorded = sites["groups"].get(g)
@@ -169,7 +172,9 @@ def main():
             "profile": Path(prefix).name, "game_frames": F, "counts_cache": Path(a.counts_cache).name,
             "sites_sha256": hashlib.sha256(Path(a.sites).read_bytes()).hexdigest(),
             "knobs": KNOBS, "top": a.top, "groups": heat}
-    Path(a.out).write_text(json.dumps(blob, indent=1), encoding="utf-8", newline="\n")
+    text = json.dumps(blob, indent=1).encode("utf-8")
+    Path(a.out).write_bytes(gzip.compress(text, compresslevel=9, mtime=0) if a.out.endswith(".gz")
+                            else text)
     print("\nwrote %s: %d hot groups, %d hot sites (sha256 %s...)"
           % (a.out, len(heat), sum(len(v) for v in heat.values()),
              hashlib.sha256(Path(a.out).read_bytes()).hexdigest()[:16]))

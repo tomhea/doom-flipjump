@@ -10,18 +10,24 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked27.fjm`, sha256 `38b09a7331f4f52b` (first 16 hex), built 2026-09-25 from the command in 1b, `.doors.json` stamp beside it | the build of that line IS the verification: byte-identical to the candidate it was measured as (`doom_e1m1_padB.fjm`) |
-| **ms/frame, quiet box** | **74.7 ms/frame** (74.4-75.0), against **81.0** (80.7-82.0) for blocked25 in the same run -- **B FASTER, x1.085, all 5 pairs** | `msframe.py --a build/doom_e1m1_blocked25.fjm --b build/doom_e1m1_blocked27.fjm`, 200 frames x 5 reps, pinned to P-core 2, engine `79af8639`, nothing else running (yardstick 3.65 G), pixels identical across arms and reps (`docs/ship-evidence/blocked27_msframe_vs_blocked25.log`) |
-| **fj ops/s** | **244 M** (243.8 M; blocked25 245.2 M in the same run) | same run; ops/frame **18,221,696** on msframe's forward-walk script (blocked25 19,855,016): the gain is fewer ops at the same rate |
-| **binding metric** (owner spec) | (mean+p80)/2 = **17,665,168 ops/frame -- PASS** (mean 15,200,279; p80 20,130,057) | `gamespeed.py --fjm build/doom_e1m1_padB.fjm` (the same bytes), 2026-09-25; `--validate`: 10/10 distinct end cells, widest spread 1321 units, worst run 29% blocked (`docs/ship-evidence/padB_gamespeed.log`) |
-| **size** | **32.23% of 2^27 -- PASS** (43,253,668 words; span 94,704,800) | same run |
+| **the shipped binary** | `build/doom_e1m1_blocked28.fjm`, sha256 `9fe88c6187a82921` (first 16 hex), built 2026-09-27 from the command in 1b (M7 P1.1, pin protection) | rebuilt byte-identical from that line with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked28_rebuild.log`) |
+| **ms/frame, quiet box** | **73.4 ms/frame** (72.8-74.2), against **75.2** (74.4-75.5) for blocked27 in the same run -- **NOT SEPARATED: B faster in all 5 pairs, median x1.025** (the rule needs > 3%); shipped as "foundation for P3" (handoff-gameplay section 10) | `msframe.py --a build/doom_e1m1_blocked28.fjm --against shipped`, 200 frames x 5 reps, pinned to core 2, engine `79af8639`, nothing else running (yardstick 3.63 G), pixels identical across arms and reps (`docs/ship-evidence/blocked28_msframe.log`) |
+| **fj ops/s** | **230 M** (229.8 M; blocked27 242.4 M in the same run) | same run; ops/frame **16,858,606** on msframe's forward-walk script (blocked27 18,221,696): 7.5% fewer ops at a 5% lower rate |
+| **binding metric** (owner spec) | (mean+p80)/2 = **16,357,904 ops/frame -- PASS** (mean 14,089,294; p80 18,626,515) | `gamespeed.py --fjm build/doom_e1m1_blocked28.fjm`, 2026-09-27 (`docs/ship-evidence/blocked28_gamespeed.log`); the scripts, and so `--validate`, are unchanged: 10/10 distinct end cells, widest spread 1321 units, worst run 29% blocked (`blocked27_gamespeed.log`) |
+| **size** | **32.21% of 2^27 -- PASS** (43,229,158 words; span 95,996,064) | same run |
+| **combat set v2** (the CAP-22 set, handoff-gameplay section 1) | (mean+p80)/2 = **16,448,992** (B0 17,760,774); **16,794,857** with strafe's collision (proxy 18,107,313); every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --fjm build/doom_e1m1_blocked28.fjm ... --pixel-every 1 --proxy` (`docs/ship-evidence/blocked28_b0_v2.log`) |
 
-**What it is:** blocked25 plus the two doom-side leads of handoff 15's pad census, each measured on
-its own and shipped through this gate (section 3): the 91 hot `sparse_` sites block
-(HOT_PAD = HOTTER_PAD = 16; x1.072 against blocked25) and the two shift macros block
-(SAFE_TABLE_MACROS, which needed tomhea/flipjump#362's literal tables; x1.031 on top, 10x400). The
-binary it replaced, blocked25 (sha256 `fc46c28c5f2bbac8`: 82 ms/frame quiet, binding 19,246,013,
-32.53%), is kept in `build/` as the comparison arm.
+**What it is:** blocked27's program, placed with PIN PROTECTION (M7 P1.1,
+`docs/gp-pin-protection.md`; tomhea/flipjump#363's `BlockPool(heat=)`): the heat list of
+blocked27's profile (`scratchpad/12m/heat_blocked27.json.gz`, 20 hot groups, 35,894 hot sites, made by
+`heatsites.py`) puts the hot groups first, keeps them pinned, and gives their hottest tables the
+cheapest indices -- every listed site took its index, the 20 hot words stay pinned
+(`blocked28_pinreport.log`), and the M1 reset's byte-cell tables, which blocked27 left inline in
+two broken groups, now dispatch through their blocks. Ops fell 7.5% (the ESTIMATE was 1.27M; the
+binding fell 1.31M) at a 5% lower op rate: 2.5% faster in every pair, below the rule's 3%, so it
+ships as the foundation for P3 (the handoff's clause for a class-S rung), never as a speed claim.
+The binary it replaced, blocked27 (sha256 `38b09a7331f4f52b`: 74.7 ms/frame quiet, binding
+17,665,168, 32.23%), is kept in `build/` as the comparison arm.
 
 blocked25 read 99-104 ms/frame with a background video render at ~0.3-0.45 core -- under
 msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27 has not been timed
@@ -40,7 +46,7 @@ the same series, with the same counts cache; blocked25's own line, 09-11 18:04, 
 and followed the renderer fix of FINDINGS CE):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27.json.gz
 ```
 
 `build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is
@@ -89,10 +95,26 @@ The line did not change: its two leads live in the program (`config.py`'s pads) 
 Its label table is `scratchpad/12m/atlas/blocked27.labels.tsv.gz`; `padA`/`padB` and the recounts'
 duplicates `blocked27r`/`blocked27lf` were deleted.
 
+**blocked28 (2026-09-27, M7 P1.1): the line gains `--pin-heat scratchpad/12m/heat_blocked27.json.gz`,
+and needs flipjump 1.5.1 >= `bc8ee63` (tomhea/flipjump#363, `BlockPool(heat=)`).** The heat list is
+tracked gzipped (10.3 MB of JSON, 192 KB; force-added past `.gitignore`); it came from blocked27's
+profile
+(`profx drive.py games`, `heatsites.py`, which replays the recorded table sites through flipjump's
+own `reserve()`). The counts cache was re-signed by the recording pass (`--record-sites`, a fresh
+count: counts, widths, aliases and width histogram equal blocked27's field for field; only the
+signature moved, `4a533c94` -> `26c336b8`), so the line HITs it. Built first with the pin-heat
+branch's flipjump at `198bbb3` (the same code as `bc8ee63`, which later changed two comments):
+sha256 `9fe88c6187a82921` in 5,024 s (`docs/ship-evidence/blocked28_build.log`); rebuilt with the
+installed 1.5.1 at `bc8ee63`: sha256 `9fe88c6187a82921` (`blocked28_rebuild.log`) -- **VERIFIED byte-identical.**
+Both builds read the list UNCOMPRESSED (`heat_blocked27.json`, JSON sha256 `e02565e1fe75d184`, which
+both logs print); the tracked `.json.gz` decompresses to those exact bytes, and the loader prints
+the decompressed JSON's sha, so a build from this line prints the same `e02565e1fe75d184`. Its label
+table is `scratchpad/12m/atlas/blocked28.labels.tsv.gz`.
+
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 
 ```
-fj --run build/doom_e1m1_blocked27.fjm --io pc --flat-max-words 134217728
+fj --run build/doom_e1m1_blocked28.fjm --io pc --flat-max-words 134217728
 ```
 
 `--run` is not optional (`fj a.fjm` assembles); the flat window must be the full 2^27 words or
@@ -113,7 +135,11 @@ explained before shipping.
    menu, 154-frame walk, a door opened and carried across two resets; every game frame byte-exact
    against the oracle) and `scratchpad/m3_gate.py --fjm <new>` (menu and world). `m5_gate.py` is
    NOT a gate for a menu-booting binary -- it never presses Enter and fails vacuously on every
-   game-tier binary, changed or not (handoff 14.4). tests/host green.
+   game-tier binary, changed or not (handoff 14.4). tests/host green. And the PIN REPORT:
+   `python scratchpad/12m/pinreport.py --fjm build/<new>.fjm --labels <its label table>
+   --counts-cache scratchpad/12m/_counts_game.json.gz --heat scratchpad/12m/heat_blocked27.json.gz
+   --build-log <its build log>` must exit 0 -- every hot word pinned (a moved base is reported, not
+   a failure; `--heat` lets it re-derive a heat build's layout).
 2. **Speed, by the instrument.** `python scratchpad/12m/msframe.py --a build/<new>.fjm --against
    shipped --note "<what changed>"`. The verdict must be **FASTER**, or NOT SEPARATED with a stated
    reason to ship anyway (size, a feature). **B SLOWER does not ship**, whatever the op count says

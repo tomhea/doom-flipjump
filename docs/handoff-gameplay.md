@@ -282,7 +282,7 @@ crist CR loop, CI, merge. Naming (cr-rules R7): this milestone is **M7** -- bran
 
 | rung | what | class | budget | builds |
 |---|---|---|---|---|
-| **P1.1 pin protection** | flipjump (a branch off 1.5.1): BlockPool takes a `heat=` list -- hot groups placed first, heat-ordered indices, always pinned; inert without it (`docs/gp-pin-protection.md`). Doom: `build_blocked.py --pin-heat <profx hot list>`; rebuild blocked27's program with it | S (same program, same pixels) | ESTIMATE -1.27M (heat-ordered indices); the point is stability | 1-2 |
+| **P1.1 pin protection** -- DONE 2026-09-27 (blocked28 ships; `docs/gp-ledger.md`) | flipjump (a branch off 1.5.1): BlockPool takes a `heat=` list -- hot groups placed first, heat-ordered indices, always pinned; inert without it (`docs/gp-pin-protection.md`). Doom: `build_blocked.py --pin-heat <profx hot list>`; rebuild blocked27's program with it | S (same program, same pixels) | ESTIMATE -1.27M (heat-ordered indices); the point is stability | 1-2 |
 | **P1.2 player collision cells** | 32-unit cells, candidate lists (interval arithmetic over closed cells at 16.16), D4 rows, SAFE jump macros; exact against today's line tests | S | -1.0 .. -1.4M | 1-2 |
 | **P1.3 persistent leaf lists** | `sshead`/`thnext`/positions persistent (baked to the spawn lists), per-move rebind, `bind_things` deleted; monsters still inert | S | -0.44M | 1 |
 | **P1.4 the v2 sprite column** | `docs/gp-sprite-column.md` (v2; needs `sprbank` 4096-bit aligned -- add the build check) | S | with P1.5: -1.40M on the frozen set (S5, (iii) -> (iv)) | 1 |

@@ -1,0 +1,10 @@
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[game] PASSED [ 11%]
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[hosted] PASSED [ 22%]
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[hosted-doors] PASSED [ 33%]
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[hosted-loop] PASSED [ 44%]
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[hosted-nocollide] PASSED [ 55%]
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[hosted-nosim-nocollide] PASSED [ 66%]
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[hosted-static] PASSED [ 77%]
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[render] PASSED [ 88%]
+tests/host/test_emit_every_tier.py::test_every_tier_emits_on_the_one_room_map[visual] PASSED [100%]
+============================== 9 passed in 1.55s ==============================

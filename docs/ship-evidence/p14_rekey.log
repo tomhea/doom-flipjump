@@ -1,0 +1,43 @@
+# the restore-set re-key of m7-sprite-column 84bb3ed
+=== 15:44:01 python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p14.tsv.gz
+$ python scratchpad/ca_labels.py --out scratchpad/_ca_labels_p14.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 2207s: 1,789,379 labels -> scratchpad\_ca_labels_p14.tsv.gz (14.0 MB)
+code_start word: 17308
+rc=0
+=== 16:22:25 python scratchpad/ca_remap_set.py --labels scratchpad/_ca_labels_p14.tsv.gz
+$ python scratchpad/ca_remap_set.py --labels scratchpad/_ca_labels_p14.tsv.gz
+labels in the set      : 461
+  unchanged            : 400
+  re-keyed             : 0
+  dropped (register gone): 61  ['cb_bx', 'cb_by', 'cb_const', 'cb_count', 'cb_first', 'cb_idx', 'cb_k', 'cb_kend', 'cb_line', 'cb_row', 'cl_box', 'cl_const', 'cl_dx', 'cl_dy', 'cl_open', 'cl_rest', 'cl_tmp', 'cl_v1x', 'cl_v1y', 'p2_dssy1', 'p2_dssy1b', 'p2_dssy2', 'p2_dssy2b', 'p2_dsy0b', 'p2_dsy0bb', 'p2_slr', 'p2_slrb', 'p2_ssy1', 'p2_ssy1b', 'p2_ssy2', 'p2_ssy2b', 'p2_sy0b', 'p2_sy0bb', 'srn_cvh', 'srn_ptr', 'srn_rel', 'srn_rel_w', 'srn_sbase', 'srn_sidx', 'srn_smidx', 'srn_tex', 'srn_y0', 'srn_yabs', 'srw_ptr', 'srw_rel', 'srw_rel_w', 'srw_sbase', 'srw_sidx', 'srw_smidx', 'srw_tex', 'srw_whi4', 'srw_wlo4', 'srw_y0', 'srw_yabs', 'trb_blk_ofs', 'trb_run_r0', 'trb_run_w8', 'trb_sy1', 'trb_sy2', 'trb_y0_biased', 'trb_y_base']
+words: 12,238 -> 11,572  (delta -666)  negative = a dropped register; positive = the superset
+      taken where the old->new mapping was ambiguous -- see the comment above.
+production loader accepts it: 11,572 words, layout fingerprint 22b62e0dfde944a1
+wrote src/doomfj/data/m1_restore_set.json.gz
+rc=0
+=== 16:22:34 python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p14.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+$ python scratchpad/m1_add_globals.py --labels scratchpad/_ca_labels_p14.tsv.gz --set src/doomfj/data/m1_restore_set.json.gz --out src/doomfj/data/m1_restore_set.json.gz
+added 288 words over 325 globals (2 check + 323 hoisted)
+src/doomfj/data/m1_restore_set.json.gz: 11572 -> 11860 words over 433 entries
+rc=0
+=== 16:22:38 python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p14.tsv.gz
+$ python scratchpad/ca_labels.py --standalone --out scratchpad/_ca_labels_std_p14.tsv.gz
+driving build_wall_renderer(self_reset=True) to pass 1 ...
+pid bake: 222 pairs baked, 255 addressable at PID_NIBBLES=2
+pass 1 in 2442s: 1,832,362 labels -> scratchpad\_ca_labels_std_p14.tsv.gz (14.3 MB)
+code_start word: 17308
+rc=0
+=== 17:04:57 python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p14.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+$ python scratchpad/m5_setfile.py --labels scratchpad/_ca_labels_std_p14.tsv.gz --doors tests/fixtures/freedoom_e1m1.wad
+dropped wmagic; added 166 words over 14 standalone globals (incl. the per-door state)
+src/doomfj/data/m5_restore_set.json.gz: 11860 -> 12022 words over 433 -> 446 entries
+persist: viewx, viewy, viewangle, kb_f, kb_b, kb_l, kb_r, kb_u, mode, dstate, ddir, dsub, dwait, sshead, thss_rt, thpos_rt
+rc=0
+=== 17:05:01 python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+$ python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
+..................                                                       [100%]
+18 passed in 0.19s
+rc=0
+=== REKEY DONE 17:05:02

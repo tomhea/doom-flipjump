@@ -72,8 +72,8 @@ exit and are not in the restore set -- as `cs_ret`, the seed descent's return re
 They are declared LAST, after `CHECK_SCRATCH_DECLS`: the restore sets fingerprint the spans of the
 labels they name, and nothing may land between those. The retired walk's scratch (`cb_*`, most
 `cl_*`) is dead but stays declared, because both shipped restore sets name it; dropping it means
-re-keying the sets against a new label table, which P1.3's persistent leaf lists will do anyway.
-Until then it costs the reset ~41 ops a nibble.
+re-keying the sets against a new label table, which P1.4's v2 sprite column does anyway (its new
+hoisted registers need the re-key). Until then it costs the reset ~41 ops a nibble.
 
 ## Exactness -- what proves it, and the controls
 
@@ -101,4 +101,28 @@ left for when P3 needs point location for monsters.
 
 ## As built
 
-(filled after the build: the binary, the gates, the ledger row, size, the pin report.)
+`build/doom_e1m1_blocked29.fjm`, sha256 `a90f172ee718be63`, from the ship-gate 1b line unchanged (the heat list
+is still blocked27's) with a fresh counting pass: the source changed, so the cache recounted (20,835
+groups, 337,465 tables, 2,060 s) and the build took 7,894 s. Rebuilt from the same line at the
+rebased head, HITting the cache that count wrote: the same sha256 and the same label table
+(`blocked29r_build.log`, 4814 s). The row and the verdict are in `docs/gp-ledger.md`.
+
+- **Gates**: m2_std_gate PASS (154 route frames; door 10 through 9 states across the reset; the
+  path crosses the door's own line segment, so the door line's stub had to read the door open --
+  its `dstate` against the pass state; the old blocking bit is gone), m3_gate PASS
+  (`blocked29_gates.log`). gamespeed's trail -- the binary's per-frame pose and door states against
+  `--validate`'s own record, all ten runs -- PASS with both negative controls rejected
+  (`blocked29_gamespeed_trail.log`): the same trajectories, which is the class-S claim for a change
+  that moved the collision code.
+- **Ops**: collision fell from 1,475,186 to 122,218 ops a frame on the same ten games (profx
+  `blocked29_phases.log`): a try is 50,818 ops, 31,838 of them the unchanged seed walk -- now the
+  larger part, as the S6 harness predicted; replacing it with the cells' start node is left for P3.
+  The binding fell 1,577,073 (-9.6%).
+- **Size**: 36,706,788 words, 27.35% of 2^27 (was 32.21%): the old walk's code and packed-table
+  groups are gone -- the inline program is 2,315,650 words smaller and the pool's payload 4,206,720
+  (`blocked29_poolmap.log`); the counting pass found 20,835 groups and 337,465 tables against
+  blocked27's 32,066 and 432,164.
+- **Pins**: 20 of 20 hot words pinned (`blocked29_pinreport.log`); four hot words' labels moved lines
+  with the edit, and pinreport now resolves those by their heat key -- the name the pool matched
+  them by -- instead of calling them unresolved. 14,198 of the list's 35,894 hot sites matched:
+  the rest were the retired walk's.

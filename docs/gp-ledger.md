@@ -66,13 +66,25 @@ dominated by the unchanged seed walk.
    -> redesign before shipping.
 6. Size over 35% of 2^27, or `pinreport.py`: a hot word of the heat list not pinned.
 
-**Row**: (filled after the build)
+**Row** (2026-09-27, `build/doom_e1m1_blocked29.fjm`, sha256 `a90f172ee718be63`; logs in
+`docs/ship-evidence/blocked29_*`):
 
-| measure | shipped (P1.1) | P1.2 | delta |
+| measure | shipped (P1.1, blocked28) | P1.2 (blocked29) | delta |
 |---|---|---|---|
-| gamespeed binding (ops/frame) | 16,357,904 | | |
-| combat set v2 binding (b0_scenarios) | 16,448,992 | | |
-| collision ops/frame (profx, gamespeed games) | 1,475,186 (blocked27's profile; the same program) | | |
-| ms/frame (msframe, quiet box) | 73.7 (the re-frozen `shipped` baseline) | | |
-| size (% of 2^27) | 32.21% | | |
-| hot words pinned (pinreport) | 20/20 | | |
+| gamespeed binding (ops/frame) | 16,357,904 | 14,780,831 | -1,577,073 (-9.6%) |
+| combat set v2 binding (b0_scenarios) | 16,448,992 | 15,485,242 | -963,750 (-5.9%) |
+| ... with strafe's collision (proxy) | 16,794,857 | 15,519,673 | -1,275,184 (-7.6%) |
+| collision ops/frame (profx, gamespeed games) | 1,475,186 (blocked27's profile; the same program) | 122,218 | -1,352,968 (-91.7%) |
+| ms/frame (msframe, one quiet run) | 74.0 | 64.4 | B FASTER (all 5 pairs, median x1.155) |
+| fj ops/s | 227.8 M | 235.4 M | +3.3% |
+| size (% of 2^27) | 32.21% | 27.35% | -6,522,370 words |
+| hot words pinned (pinreport) | 20/20 | 20/20 (4 re-keyed by their heat key; 19 bases moved) | 0 lost |
+
+**Verdict against the kill criteria:** 1 `test_collision_cells.py` passes, with its mutated-entry
+control and the oracle sample (`p12_r1_pass.log`); 2 `tests/fj/test_collision_fj.py` passes (the same
+log); 3 m2_std_gate PASS, m3_gate PASS (`blocked29_gates.log`); 4 msframe B FASTER, x1.155 in all 5
+pairs; 5 the reclaim is -1.58M on the binding, past the budget's high end (-1.4M); 6 size 27.35%, and
+pinreport 20/20 pinned, 0 lost. The ESTIMATE was -1.0 .. -1.4M; measured -1.58M on gamespeed, -0.96M
+on set v2 (-1.28M counting strafe's collision, which B0 leaves out). Attributed ops (profx phases,
+the same ten games): collision 122,218 ops/frame -- one player try 50,818, of which the unchanged
+seed walk is 31,838; 2.40 tries a frame.

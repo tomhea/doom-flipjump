@@ -1,0 +1,9 @@
+$ python scratchpad/gp/scenarios_v2.py --rehash M7 P1.2: doorcode.py lost the emitter's lnrow door patch (_cross, _unblock_lines, door_tic_lines' passes/lines); the model imports only door_line_ids, unchanged
+  F1 ok    status 'FROZEN', the set approved by 'the owner' on '2026-09-26'; last freeze: checker re-freeze by 'PR #88 review round 3 (checker re-freeze: the decided freeze, owner_approval stored once, the planner guard, R4-R7)'
+  F2 FAIL  changed: ['src/doomfj/doorcode.py']
+  F3 ok    11/11 runs
+  F4 ok    11/11 runs
+  F5 ok    binding 17760774.10272727, keys match
+  rehashed src/doomfj/doorcode.py                   3dc71213f4f2a75e -> bf1bbcc6dcea521e
+REHASH DONE: 1 file(s)
+rc=0

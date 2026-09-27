@@ -1,0 +1,10 @@
+# R1: the P1.2 tests on MAIN's src/ (git archive main), the branch's test files copied in
+$ python -m pytest tests/host/test_collision_cells.py tests/host/test_collision_more.py tests/host/test_collision.py tests/host/test_doorcode.py tests/host/test_doorcode_more.py tests/host/test_narrowed_clear_sites.py tests/fj/test_collision_fj.py -q
+FAILED tests/host/test_collision.py::test_the_cell_walk_is_the_same_algorithm_as_the_oracle
+FAILED tests/host/test_doorcode.py::test_a_door_lines_row_carries_no_static_block
+FAILED tests/host/test_doorcode.py::test_the_door_tic_touches_only_the_doors_own_cells
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_scan_finds_every_narrowed_clear_the_file_carries[sim.fj]
+ERROR tests/host/test_collision_cells.py
+ERROR tests/host/test_collision_more.py
+ERROR tests/fj/test_collision_fj.py
+4 failed, 129 passed, 3 errors in 3.12s

@@ -183,10 +183,11 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **M2 the same + `doors=True`** (`doom_e1m1_menu.fjm`, shipped until the blocking pass) | **51,094,744** | 0.761× | **0.381×** | **flat** (asserted) |
 | **blocked25 = the `game` tier + the assembler's blocking pass** (`doom_e1m1_blocked25.fjm`, shipped 2026-09-13 .. 09-25) | **96,009,696** (data 43,657,732) | 1.431× OVER | **0.715×** (data 0.325×) | **flat** (asserted) |
 | **blocked27 = blocked25 + the hot `sparse_` sites and the two shifts blocked** (`doom_e1m1_blocked27.fjm`, shipped 2026-09-25 .. 09-27) | **94,704,800** (data 43,253,668) | 1.411× OVER | **0.706×** (data 0.322×) | **flat** (asserted) |
-| **blocked28 = blocked27's program placed with pin protection** (**the shipped `doom_e1m1_blocked28.fjm` today**) | **95,996,064** (data 43,229,158) | 1.430× OVER | **0.715×** (data 0.322×) | **flat** (asserted) |
+| **blocked28 = blocked27's program placed with pin protection** (`doom_e1m1_blocked28.fjm`, shipped 2026-09-27) | **95,996,064** (data 43,229,158) | 1.430× OVER | **0.715×** (data 0.322×) | **flat** (asserted) |
+| **blocked29 = the player's collision on cells, pin-protected** (**the shipped `doom_e1m1_blocked29.fjm` today**) | **90,467,488** (data 36,706,788) | 1.348× OVER | **0.674×** (data 0.273×) | **flat** (asserted) |
 
 ⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1) — **and its "now" is the PRE-BLOCKING binary; today's
-shipped binary is the blocked28 row, see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
+shipped binary is the blocked29 row, see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
 89,494,606 words when this table was written and is **51,094,744** now — 0.761× of 2^26 and
 **0.381× of 2^27**, i.e. 38.07% of the w=32 ceiling, no longer OVER. Measured with
 `scratchpad/12m/fjmsize.py`; `m2_std_gate` PASS.
@@ -457,6 +458,17 @@ two broken groups). Priced WITHOUT the list
 blocked27's layout -- and the SUM line fails against blocked28's bytes, which is the other half of
 the evidence that the list is what moved the layout. The size is 32.21% of 2^27 (PASS), against
 32.23% for blocked27.
+
+**2026-09-27, blocked29 (M7 P1.2, the player's collision on cells).** The same line and heat list
+over a new program: the blockmap walk and its packed-table reads are gone -- against blocked28 the
+inline program is 2,315,650 words smaller and the pool's payload 4,206,720 (its table groups: 17,611
+placed, from 27,030). `poolmap.py --fjm build/doom_e1m1_blocked29.fjm`
+(`docs/ship-evidence/blocked29_poolmap.log`): 24,195,366 inline payload words, 339,184
+segments and 12,511,422 payload words in the pool, a 26,136,282-word gap to the pool base; BLOCKS
+17,611 of 17,611 groups placed (0 broken), demand
+39,257,248, extent 40,135,840; HOLES 878,592; PAD 26,745,826; and the SUM line closes:
+span - data = 90,467,488 - 36,706,788 = 53,760,700. The size is 27.35% of 2^27 (PASS),
+down from 32.21%.
 
 ⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
 and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the

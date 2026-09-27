@@ -156,3 +156,35 @@ rung profiles its first build and regenerates the heat list before the binary it
    <= 255) not asserted.
 
 **Row**: (filled after the build)
+
+## P1.5 the skill filter and the skill menu (class F) -- declared 2026-09-27, before the build
+
+**What**: `docs/gp-skill-menu.md`. The thing universe becomes DOOM's single-player one
+(`things.single_player`, shared by the renderer's `drawable_things` and the model's `World`): the 26
+multiplayer-only things leave the image, which holds the union of the three skills (225 things, 53
+monsters). Presence per skill is `things.skill_absent`, asked by both mirrors: the leaf lists are
+baked per skill and `thvis` per skill; the boot state is hard's level start. NEW GAME opens a skill
+screen (easy / medium / hard, `w`/`s`, `enter`, `esc`), and choosing a skill runs that skill's
+restart block -- every cell the program persists today back to its level-start value -- and enters
+the world.
+
+**Budget**: -0.3M ops/frame on combat set v2's binding (handoff section 10; ESTIMATE, plan section 7's
+R4: at hard, 7 zombiemen and 26 multiplayer-only things no longer drawn).
+
+**Kill criteria** (any one -> the binary does not ship; class F, decision D8):
+1. Host: `single_player` / `skill_absent` disagree with `World(skill)`'s level start (`mon_active`,
+   `pickup_taken`) for any skill, or their mutated control is not caught; the emitter lets a baked
+   thing without a `thvis` flag vary by skill.
+2. fj: after each skill's restart block the persisted cells (view, doors, lists, bindings,
+   positions, `thvis`) differ from that skill's level start; or a restart does not reset (walk, open
+   a door, choose a skill: the view and the door must be back) -- with a mutated block caught.
+3. `m3_gate` (menu frames, the skill screen, NEW GAME at each skill) or `m2_std_gate` not byte- and
+   state-exact; `b0_scenarios` on set v2 with `--pixel-every 1` not pixel-exact on every frame.
+4. CAP-22: the v2 binding over 22M, or size over 35% of 2^27; msframe over ~90 ms/frame without an
+   explanation (the class-F tripwire). msframe's time is recorded as the price.
+5. The reclaim: the v2 binding not DOWN (the filter removes drawn things; ESTIMATE -0.3M) ->
+   redesign before shipping.
+6. `pinreport.py`: a hot word not pinned; a new persisted cell (`menu_scr`, `menu_sel`) missing from
+   the persist set (the build refusing it).
+
+**Row**: (filled after the build)

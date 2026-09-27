@@ -153,6 +153,12 @@ def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_typ
     return rows, idx
 
 
+# The per-leaf thing lists (`sshead` / `thnext`) store a thing's index + 1 in ONE BYTE, 0 ending a
+# list: the most things they hold. ONE bound for the three layers that rely on it -- these baked
+# lists, the emitter's runtime-thing tables (wall_renderer) and the gameplay model's mobiles (world).
+LIST_MAX_THINGS = 254
+
+
 def spawn_leaf_lists(binds, nleaves):
     """`(sshead, thnext)` -- the per-leaf lists of runtime things `sim.bind_things` builds from the
     bindings `binds` (thing index -> leaf): each leaf's things in ASCENDING index order, stored as
@@ -162,7 +168,8 @@ def spawn_leaf_lists(binds, nleaves):
     M7 P1.3: the game tier BAKES these into its image and they persist -- nothing moves a thing
     until P3, and P3 moves one by relinking it (`sim.leaf_unlink` / `sim.leaf_link`), never by
     rebuilding every list."""
-    assert len(binds) < 0xFF, "the lists store t + 1 in a byte; 255+ things need wider cells"
+    assert len(binds) <= LIST_MAX_THINGS, (
+        "%d things: the lists store t + 1 in a byte, at most LIST_MAX_THINGS" % len(binds))
     sshead = [0] * nleaves
     thnext = [0] * len(binds)
     for t in range(len(binds) - 1, -1, -1):

@@ -480,8 +480,10 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
         # SUBSECTOR, so the emitter knows the answer and `subsector_action` bakes it into the leaf.
         generate_packed_lut_fj("sprlt", sprlt, 1),
     ])
-    # 0xFF is the empty/end sentinel of both linked-list arrays, so 251 things fit a byte index
-    assert nt < 0xFF, f"{mapname} has {nt} drawable things; the byte linked list tops out at 254"
+    # the per-leaf lists hold a thing's index + 1 in a byte (things.LIST_MAX_THINGS, the one bound)
+    from doomfj.things import LIST_MAX_THINGS
+    assert nt <= LIST_MAX_THINGS, (
+        f"{mapname} has {nt} runtime things; the byte lists hold {LIST_MAX_THINGS}")
     decls = ["cur_ss: hex.vec w/4", "tp_ret: ;0",
              # the leaf's baked floor height and sprlt row base (see subsector_action)
              "ss_flr: hex.vec 4", "ss_ltb: hex.vec 4",
@@ -1967,6 +1969,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # cm/byte EMIT tables) moves from the ~20M-word program tail to just after startup, behind a
     # jump guard (the static tables' own `;end` headers only matter on fall-through, which the
     # guard prevents). Measured: 78.54M -> 76.39M ops/frame, frame byte-identical.
+    # the lists' DECLARED extents -- twice the reachable cells, the span the M1 restore set carries
+    _ss_cells, _th_cells = 2 * _MT_NSS, 2 * _MT_NT
     _hot_arrays = ([f"pclm:{NLJ}" + NLJ.join(";0 * dw"
                                              for _ in range(cfg.VIEW_W * cfg.PID_BYTES)),
                     f"sfflag:{NLJ}" + NLJ.join(";0 * dw" for _ in range(cfg.VIEW_W)),
@@ -1981,9 +1985,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                    + ([f"spslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE))]
                       if _do_things else [])
-                   + (([byte_array_decl("sshead", _MT_HEAD, 2 * _MT_NSS),
-                        byte_array_decl("thnext", _MT_NEXT, 2 * _MT_NT)] if standalone else
-                       [f"sshead: hex.vec {2 * _MT_NSS}", f"thnext: hex.vec {2 * _MT_NT}"])
+                   + (([byte_array_decl("sshead", _MT_HEAD, _ss_cells),
+                        byte_array_decl("thnext", _MT_NEXT, _th_cells)] if standalone else
+                       [f"sshead: hex.vec {_ss_cells}", f"thnext: hex.vec {_th_cells}"])
                       # M5: the hosted tier is fed last frame's binding every frame; standalone
                       # bakes the SPAWN one -- and since M7 P1.3 the lists it implies, which
                       # persist (build.THING_PERSIST) where bind_things rebuilt them every frame.

@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from doomfj import selfreset                                   # noqa: E402
-from doomfj.build import DOOR_PERSIST, STANDALONE_PERSIST, THING_PERSIST  # noqa: E402
+from doomfj.build import STANDALONE_PERSIST, persist_labels            # noqa: E402
 from doomfj.doorcode import door_decls                         # noqa: E402
 from doomfj.doors import door_states                           # noqa: E402
 from doomfj.wad import WadFile                                 # noqa: E402
@@ -148,10 +148,13 @@ def derive(doc, addresses, names, globals_decls=None, persist=None):
 
 
 def persist_names(doors) -> tuple:
-    """what the game tier's reset leaves alone -- build.py's `_persist` for its flags (standalone,
-    moving_things, and doors with --doors): the view and held keys, the doors' state, and the runtime
-    things' lists, bindings and positions (M7 P1.3). Every one must be IN the set (step 4)."""
-    return STANDALONE_PERSIST + (DOOR_PERSIST if doors else ()) + THING_PERSIST
+    """what the game tier's reset leaves alone -- `build.persist_labels`, the one composition, for
+    the standalone set's tier: standalone, the game tier's moving_things, and doors with --doors. The
+    view and held keys, the doors' state, the runtime things' lists, bindings and positions (M7
+    P1.3). Every one must be IN the set (step 4)."""
+    from doomfj.wall_renderer import TIERS
+    return persist_labels(standalone=True, doors=bool(doors),
+                          moving_things=TIERS["game"]["moving_things"])
 
 
 def refuses(fn):
@@ -230,7 +233,19 @@ def selftest():
     c5 = refuses(without_sshead)
     print("C5 a THING_PERSIST label not in the set -> %s" % ("refused ok" if c5 else "!! ACCEPTED"))
 
-    good = ok and c1 and c2 and c3 and c4 and c5
+    # C5's other half: with all three THING_PERSIST labels in the set, the same call is ACCEPTED --
+    # so the refusal above is about the missing two, not about the table this control builds
+    def with_all_three():
+        d = doc()
+        d["entries"] += [["sshead", 0], ["thss_rt", 0], ["thpos_rt", 0]]
+        a2, n2 = addresses[:-1] + [base, base + 1, base + 2, base + 3], \
+            names[:-1] + ["sshead", "thss_rt", "thpos_rt", "zzz_end"]
+        return derive(d, a2, n2, persist=persist_names(None))
+    c5b = not refuses(with_all_three)
+    print("C5b all three THING_PERSIST labels in the set -> %s"
+          % ("accepted ok" if c5b else "!! REFUSED"))
+
+    good = ok and c1 and c2 and c3 and c4 and c5 and c5b
     print("SELFTEST: %s" % ("PASS" if good else "!! FAIL"))
     return 0 if good else 1
 

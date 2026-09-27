@@ -257,7 +257,8 @@ def _index_bits(n: int) -> int:
 
 def build_schema(lay: Layout) -> Tuple[Field, ...]:
     """THE table of persistent cells. Order is the canonical order (digests, dumps, the probe)."""
-    assert lay.nmobile <= 254, "leaf lists store mobile index + 1 in a byte"
+    from doomfj.things import LIST_MAX_THINGS
+    assert lay.nmobile <= LIST_MAX_THINGS, "leaf lists store mobile index + 1 in a byte"
     fs: List[Field] = []
 
     def f(name, bits, count=1, signed=False, kind="persist", group="", phase="S3a", label="",

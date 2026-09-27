@@ -20,7 +20,7 @@ import pytest
 from doomfj.config import Config
 from doomfj.mapcompiler import bake_bsp
 from doomfj.reference_model import ReferenceModel
-from doomfj.things import byte_array_decl, spawn_leaf_lists
+from doomfj.things import LIST_MAX_THINGS, byte_array_decl, spawn_leaf_lists
 from doomfj.wad import WadFile
 
 E1M1 = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "freedoom_e1m1.wad"
@@ -32,7 +32,7 @@ def e1m1_binds():
     w = WadFile.from_path(str(E1M1))
     cmap = bake_bsp(w, "E1M1")
     rm = ReferenceModel(Config())
-    things = w.things("E1M1")[:200]                  # the lists hold t + 1 in a byte
+    things = w.things("E1M1")[:LIST_MAX_THINGS]      # the lists hold t + 1 in a byte
     return [rm.point_in_subsector(cmap, t.x, t.y) for t in things], len(cmap.subsectors)
 
 
@@ -88,8 +88,8 @@ def test_the_declaration_spells_the_bytes_at_the_old_extent():
 
 def test_too_many_things_for_a_byte_are_refused():
     with pytest.raises(AssertionError):
-        spawn_leaf_lists([0] * 255, 1)
-    assert spawn_leaf_lists([0] * 254, 1)[0] == [1]
+        spawn_leaf_lists([0] * (LIST_MAX_THINGS + 1), 1)
+    assert spawn_leaf_lists([0] * LIST_MAX_THINGS, 1)[0] == [1]
 
 
 def test_a_map_with_no_runtime_things_bakes_an_empty_array():

@@ -363,6 +363,43 @@ def sprite_bucket_height(b: int, view_h: int) -> int:
     return hi
 
 
+# M7 P1.6 -- the sprite bank's three TIERS (docs/gp-sprite-bank.md), in the bank's layout order: a
+# kind's HD region, its MID region `dw` blocks on, its LD region at `sp_base2`. What each tier draws
+# from is said ONCE, here (R6): the column loop below and wall_renderer.sprite_tier_lists both ask
+# `sprite_tier_list`, so the lists the emitter bakes are the lists the oracle draws.
+SPRITE_TIERS = ("HD", "MID", "LD")
+
+
+def sprite_tier(hb: int, far: bool, hd_ok: bool = True) -> str:
+    """The tier a thing drawn `hb` rows tall takes: HD from SPRITE_HD_H up (unless OPTION B's budget
+    took it away -- `hd_ok`), LD for a thing beyond the detail radius (`far`, SPR-NEAR) shorter than
+    DEG_SPR_LOWRES_H, MID otherwise. fj takes the same decision on the bucket INDEX
+    (frame.thing_record_body: `hdb`, `lowh`, `thfar`)."""
+    if hd_ok and hb >= SPRITE_HD_H:
+        return "HD"
+    return "LD" if (far and hb < DEG_SPR_LOWRES_H) else "MID"
+
+
+def sprite_tier_source(art, tier: str):
+    """A tier's `(columns, drawn height, run cap)` in `sprite_art`'s tuple: HD the full-resolution
+    columns at SPRITE_RUN_CAP_HD, MID and LD the downscaled ones at DEG_SPR_MID_CAP and
+    DEG_SPR_LOWRES_CAP. The caps are read at CALL time, so a knob patch reaches both mirrors (R49)."""
+    if tier == "HD":
+        return art[7], art[8], SPRITE_RUN_CAP_HD
+    if tier == "MID":
+        return art[0], art[1], DEG_SPR_MID_CAP
+    if tier == "LD":
+        return art[0], art[1], DEG_SPR_LOWRES_CAP
+    raise ValueError("unknown sprite tier %r" % (tier,))
+
+
+def sprite_tier_list(art, tier: str, u: int, heights: tuple):
+    """Column `u`'s native list in `tier` (doomfj.spritebank.bank_list_of, memoized by content): what
+    the emitter bakes into the tier's region, and what the oracle draws at a bucket (`strip_at`)."""
+    cols, dh, cap = sprite_tier_source(art, tier)
+    return bank_list_of(tuple(cols[u]), dh, cap, heights)
+
+
 def _sky_shift(tw: int) -> int:
     """BAM bits to drop so a 32-bit angle indexes `tw` sky columns, `SKY_TURN` widths per turn."""
     return 32 - tw.bit_length() + 1 - SKY_TURN.bit_length() + 1
@@ -2047,6 +2084,9 @@ class ReferenceModel:
                             n_hd += 1
                         else:
                             hd_ok = False
+                    # M7 P1.6: the thing's TIER -- one region of its kind's native lists for every
+                    # column (fj picks it once per thing too: frame.thing_record_body)
+                    tier = sprite_tier(hb, far_, hd_ok)
                     ytop_b = ytop + th_px - hb                # FEET planted: the bucket moves the top
                     lr = self.wall_light_row(self.wall_lightnum(tsec.light, 0), hb, art[4])
                     frac = (max(0, tx1) - tx1) * istep
@@ -2058,16 +2098,9 @@ class ReferenceModel:
                         # V4-HD: tall buckets sample the full-res column with the deeper cap
                         # (unless OPTION B's HD budget already went to nearer things);
                         # 20M-RECOVERY: SHORT buckets take the coarse low-res cap instead.
-                        # M7 P1.6: the column is the tier's NATIVE list (doomfj.spritebank --
-                        # the lists the emitter bakes), drawn at the bucket through the rowmap
-                        st = (strip_at(bank_list_of(tuple(art[7][u]), art[8], SPRITE_RUN_CAP_HD,
-                                                    bheights), bkt, hb)
-                              if hd_ok else
-                              strip_at(bank_list_of(tuple(art[0][u]), art[1], DEG_SPR_LOWRES_CAP,
-                                                    bheights), bkt, hb)
-                              if (hb < DEG_SPR_LOWRES_H and far_) else
-                              strip_at(bank_list_of(tuple(art[0][u]), art[1], DEG_SPR_MID_CAP,
-                                                    bheights), bkt, hb))
+                        # M7 P1.6: the column is the tier's NATIVE list (sprite_tier_list -- the
+                        # lists the emitter bakes), drawn at the bucket through the rowmap
+                        st = strip_at(sprite_tier_list(art, tier, u, bheights), bkt, hb)
                         if st is None:
                             continue
                         # V4b: TWO write-once fragment slots per column, filled in walk-arrival

@@ -1,0 +1,14 @@
+# fix/gamespeed-validate-doors: each mutation must FAIL a check (source mutated, check run, restored)
+M1 --validate defaults to the doors-shut replay            -> 1 failed in 0.68s
+M2 the loop steps the doors-shut scene                     -> 1 failed in 0.71s
+M3 DoorSim ignores `use` (no door ever opens)              -> 1 failed in 0.68s
+M4 the recorded binary end of run 0 is the door-blind one  -> SELFTEST FAIL: N6e --validate ends where the binary ends, doors opened included (10 runs)  [N6e --validate ends where the binary ends, doors opened included (10 runs) FAIL parts on runs [0]]
+M5 the door stepper is not reset between runs              -> 1 failed in 0.74s
+M6 DoorSim drops the use-box test (`use` opens any door)   -> 1 failed in 0.71s
+M7 the trail's comparison drops its door term              -> rc=1: TRAIL PASS, CONTROL-POSE PASS, CONTROL-DOORS FAIL
+M8 the trail's comparison drops its pose term              -> rc=1: TRAIL PASS, CONTROL-POSE FAIL, CONTROL-DOORS PASS
+M9 the trail's comparison compares nothing                 -> rc=1: TRAIL PASS, CONTROL-POSE FAIL, CONTROL-DOORS FAIL
+unmutated (restored, byte-identical): the host test        -> 1 passed in 0.60s
+unmutated: the selftest                                    -> SELFTEST PASS
+unmutated: the trail's verdicts (runs 0-1, replayed)       -> rc=0: TRAIL PASS, CONTROL-POSE PASS, CONTROL-DOORS PASS
+rc=0

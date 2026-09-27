@@ -1,0 +1,35 @@
+$ python scratchpad/12m/gamespeed.py --selftest
+gamespeed selftest -- a metric that cannot fail is not a metric
+  N1 a short run is REJECTED, not reported as a win          ok
+  run  0: 1,000 ops / 102 presented -> raw 9, game-only 10 ops/frame
+  N1 a full-length run is ACCEPTED (the control is not just always-raise) ok
+calibration: startup + 2 menu frames = 514,000 ops (subtracted from every run)
+  run  0: 1,214,000 ops / 102 presented -> raw 11,901, game-only 7,000 ops/frame
+  N2 menu+startup is measured                                ok  menu_ops=514,000
+  N2 game-only average removes it exactly                    ok  got 7000.0, want 7000
+  N2 the RAW average still contains it (so the two differ)   ok  raw 11902.0 > game-only 7000.0
+calibration: startup + 2 menu frames = 514,000 ops (subtracted from every run)
+  run  0: 1,214,000 ops / 102 presented -> raw 11,901, game-only 7,000 ops/frame
+calibration: startup + 2 menu frames = 514,000 ops (subtracted from every run)
+  run  0: 1,914,000 ops / 202 presented -> raw 9,475, game-only 7,000 ops/frame
+  N3 the metric is per-frame (2x frames -> same per-frame cost) ok  7000.0 vs 7000.0
+  N4 80th-pct of 1..10 is the 8th run                        ok  got 8
+  N4 it returns a member of the set, never an interpolation  ok
+  N4 it is order-independent                                 ok
+  N4b binding is the average of the mean and the p80         ok  mean 55.0 p80 80.0 -> 67.5
+  N4b it lies between them (never outside)                   ok
+  N4b it responds to a change the p80 alone cannot see       ok  67.5 -> 58.0 while p80 stays 70.0
+  N5 the ceiling is derived from the width, not a literal    ok
+  -- stepping the oracle through the 10 scripts ...
+  N6 the 10 scripts end in >= 6 distinct 64-unit cells       ok  10 distinct of 10
+  N6 they spread over >= 256 units                           ok  1321 units
+  N6 EVERY run moves on >= 60%% of its movement frames       ok  worst run 29% blocked
+  N6 no run is mostly stuck (the old check passed at 95%% blocked) ok  worst 29%
+  N6 every run travels >= 256 units from where it began      ok  min 884 units
+  N6e --validate ends where the binary ends, doors opened included (10 runs) ok  10/10
+  N6f the doors-shut replay FAILS it (run 0 stops at the shut door) ok  doors shut: run 0 ends (831, 485), 0 door(s); the binary: (831, 653), 1
+  N6g the host test's recorded keys are script(0)'s and script(1)'s ok  runs ['0', '1']
+  (N7 determinism skipped -- pass --fjm <path> to run it)
+
+SELFTEST PASS
+rc=0

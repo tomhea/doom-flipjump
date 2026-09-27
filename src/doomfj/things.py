@@ -177,7 +177,9 @@ def byte_array_decl(label, values, cells):
     byte in the jump word as `b * dw` (`b << 6`, the layout scratchpad/gp/probe.py and M1a settled),
     padded with zero cells to `cells` in all -- the extent `label: hex.vec cells` had, so no label
     after it moves and the M1 restore set's span for it holds."""
-    assert len(values) < cells and all(0 <= v < 256 for v in values), (label, len(values), cells)
+    # (a map with no runtime things has an EMPTY array -- no entry, no cell: `hex.vec 0` is nothing)
+    assert (len(values) < cells or not values) and all(0 <= v < 256 for v in values), (
+        label, len(values), cells)
     return "\n".join([f"{label}:"] + [f";{v} * dw" for v in values]
                      + [f"hex.vec {cells - len(values)}"])
 

@@ -90,3 +90,12 @@ def test_too_many_things_for_a_byte_are_refused():
     with pytest.raises(AssertionError):
         spawn_leaf_lists([0] * 255, 1)
     assert spawn_leaf_lists([0] * 254, 1)[0] == [1]
+
+
+def test_a_map_with_no_runtime_things_bakes_an_empty_array():
+    """no entry, no cell -- the game tier emitted on a thing-less map (the one-room fixture) must
+    not trip the extent check, while a full array still must"""
+    assert byte_array_decl("thnext", [], 0) == "thnext:\nhex.vec 0"
+    with pytest.raises(AssertionError):
+        byte_array_decl("thnext", [1, 2], 2)            # no zero cell left after the entries
+

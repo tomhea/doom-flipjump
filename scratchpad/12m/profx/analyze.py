@@ -151,7 +151,11 @@ FAMILIES = ["hex.ptr_index", "hex.read_byte", "hex.write_byte", "hex.read_hex", 
             "frame.seg_pass1_leaf_body_lines", "frame.seg_pass1_leaf_body_ts", "frame.seg_pass2_leaf_body_lines",
             "proj.wedge_bbox", "frame.thing_load_cold", "stream.sprite_runs", "stream.sprite_runs_win",
             "frame.lines_spr_load", "frame.lines_spr_seed", "vpb_walk", "frame.read_byte5",
-            "frame.write_byte5", "frame.ptr_index4", "stream.emit_region", "stream.emit_column"]
+            "frame.write_byte5", "frame.ptr_index4", "stream.emit_region", "stream.emit_column",
+            # M7 P1.4: the fragment as (slot, block) -- the derive, the two walkers, the bank's
+            # 3-nibble read and the whole-nibble block address
+            "stream.frag_derive", "stream.frag_runs", "stream.frag_runs_win", "frame.read3_and_inc",
+            "frame.blk_addr", "stream.steps_face"]
 
 # the label table's file indices (fN) on the game tier, for printing call sites (cosmetic)
 _GEN = "build/generated_" + default_fjm().stem

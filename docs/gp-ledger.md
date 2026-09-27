@@ -146,3 +146,42 @@ was still in the set it had just removed it from); the P1.5 pre-build review fou
 build was stopped. Attributed (profx phases, the same ten games): bind_things 401,796 -> 0 and the
 reset 226,935 -> 94,229, -534,502 gross; the render walk's +68,316 and collision's +2,818 are
 placement -- the changed table counts re-rolled the blocking pass's pins -- not work.
+
+## P1.4 the v2 sprite column (class S) -- declared 2026-09-27, before the build
+
+**What**: `docs/gp-sprite-column.md` section 5, v2, in the shipped macros. A sprite fragment's
+record shrinks from seven bytes to three -- `[slot][blk lo][blk hi]` -- and the per-THING constants
+(the biased top row, the light row) are written once per accepted thing into `gpslot`; the emit
+derives `y_base`, `sy1` and `sy2` from the slot and the block header where it uses them. The ditto
+ladder compares (slot, block) -- four compares and four shadow saves where there were eight. Step
+faces test their draw window before the shade lookup, the splices derive a region's list ids only
+for a region they walk, and `emit_region`'s wall piece tests its window before its flag tests. The
+runs take a fast path when the fragment is wholly on screen; v2's addressing reads inside a bank
+block on a 3-nibble arm, places the block address by whole nibbles and does the fast path's row
+math at two nibbles -- exact only if `sprbank` is 4096-bit aligned, which the build checks. The A+B
+path (a second fragment behind the first) gets the same derive; the prototype did not cover it.
+
+**Budget**: -1.0M ops/frame on combat set v2's binding. ESTIMATE: the census's "v2 cut" column
+(`scratchpad/gp/census_out/s4v2/report_s4v2.txt` section 4, the v2 column's saving on the static
+world's own sprite columns) applied to B0's eleven run averages gives 17,760,774 -> 16,756,812
+(`gamespeed.binding_speed`); the prototype measured -39 .. -43% per sprite column end to end,
+standalone (`docs/gp-sprite-column.md` 4.1). The emitted signature of `stream.emit_col_lines`
+changes, and a heat key carries it (`...emit_col_lines(45)---rep0:w1rpat.walk(7)---ycur`), so the
+rung profiles its first build and regenerates the heat list before the binary it ships.
+
+**Kill criteria** (any one -> the binary does not ship):
+1. The column check -- the prototype's harness pointed at the SHIPPED macros: a sprite column
+   (slot A, and A+B) differs from the oracle's fragment over the plain column, or its mutated
+   control (the record's bias off by one row) is not caught.
+2. The build's `sprbank` alignment check missing, or not refusing a misaligned bank (its control).
+3. `deg_gate` (4 viewpoints), `m2_std_gate` or `m3_gate` not byte-exact; `b0_scenarios` on set v2
+   with `--pixel-every 1` not pixel-exact on every frame.
+4. `msframe.py --against shipped`: B SLOWER. NOT SEPARATED ships only as "foundation for P3".
+5. The reclaim: the v2 binding down by less than 0.8M ops/frame (the budget / 1.25) -> redesign
+   before shipping.
+6. Size over 35% of 2^27; `pinreport.py`: a hot word of the regenerated heat list not pinned;
+   `gps_nslot` / `gps_cur_s` missing from a restore set (a stale `gps_cur_s` draws the last frame's
+   top row and light with no crash); the emitter's slot-id bound (drawable things + runtime pools
+   <= 255) not asserted.
+
+**Row**: (filled after the build)

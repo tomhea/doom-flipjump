@@ -51,8 +51,10 @@ _STANDALONE_INCLUDES = ["input.fj"]
 # M2-R4: `kb_u` joins them for exactly the reason the other four are here -- it is a HELD key
 # flag, written only by the keyboard device's up/down events, so a reset that cleared it would make
 # the use key un-hold itself every frame.
+# M7 P1.5: `menu_scr` and `menu_sel` join them, as `mode` did -- the skill screen and its highlight
+# are the menu's own memory, and a reset that restored them would drop every keypress on them.
 STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
-                      "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode")
+                      "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode", "menu_scr", "menu_sel")
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it

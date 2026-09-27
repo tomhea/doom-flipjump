@@ -578,7 +578,9 @@ def game_cells(ndoors: int) -> dict:
     cells = {"viewx": Cell("viewx", "hex", 8, signed=True),
              "viewy": Cell("viewy", "hex", 8, signed=True),
              "viewangle": Cell("viewangle", "hex", 8),
-             "mode": Cell("mode", "hex", 1)}
+             "mode": Cell("mode", "hex", 1),
+             # M7 P1.5: the skill menu's screen and highlight, persisted like `mode`
+             "menu_scr": Cell("menu_scr", "hex", 1), "menu_sel": Cell("menu_sel", "hex", 1)}
     for k in ("kb_f", "kb_b", "kb_l", "kb_r", "kb_u"):
         cells[k] = Cell(k, "hex", 1)
     cells["dstate"] = Cell("dstate", "hex", 1, count=ndoors)
@@ -612,6 +614,11 @@ class Oracle:
         self.door_order = sorted(door_states(self.secs, self.lds, self.sds))
         self.spawn = spawn_state(self.mw, mapname)
         self._scenes = {(): build_scene(self.mw, self.mw, mapname)}
+        # M7 P1.5: the game tier boots at BOOT_SKILL's level start; the oracle hides what it
+        # does not spawn (things.skill_hidden, the set the emitter baked from)
+        from doomfj.things import skill_hidden
+        from doomfj.wall_renderer import BOOT_SKILL
+        self.hidden = skill_hidden(self.rm, self.mw.things(mapname), self.art, BOOT_SKILL)
 
     @property
     def ndoors(self):
@@ -622,8 +629,9 @@ class Oracle:
         start, the menu mode, every key up, every door shut and idle (doors.initial_states)"""
         from doomfj.doors import IDLE
         nd = self.ndoors
+        from doomfj.wall_renderer import BOOT_SKILL, SKILLS
         return {"viewx": self.spawn.x, "viewy": self.spawn.y, "viewangle": self.spawn.angle,
-                "mode": 1, **KEYS_UP,
+                "mode": 1, "menu_scr": 0, "menu_sel": SKILLS.index(BOOT_SKILL), **KEYS_UP,
                 "dstate": (0,) * nd, "ddir": (IDLE,) * nd, "dsub": (0,) * nd, "dwait": (0,) * nd}
 
     def door_pose(self, dstate: tuple) -> dict:
@@ -650,7 +658,7 @@ class Oracle:
         from doomfj.reference_model import SimState
         return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate), sprite_wad=self.art,
-                                               **self.RENDER_KW))
+                                               thing_hidden=self.hidden, **self.RENDER_KW))
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""
@@ -1026,7 +1034,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
     n_walk = 30
     per_frame = [{} for _ in range(gate.MENU_FRAMES)] + GS.script(0)[:n_walk]
     events = GS.events_for(per_frame)
-    keys_by_frame, enters = gate.held_per_frame(events, len(per_frame))
+    keys_by_frame, menu_events = gate.held_per_frame(events, len(per_frame))
     p = Probe(cells, table, gb.width)
     seen = []
     p.on_present(lambda pr, f: seen.append(pr.read_cells()))       # EVERY game-tier cell
@@ -1034,16 +1042,19 @@ def demo(fjm: Path, labels_path: Path) -> int:
     print("(a) %d frames, %s ops (exact); the probe's persisted state at each present (view, mode, "
           "5 key flags, 13 doors x 4 cells) vs the oracle (onewalk.DoorSim, m2_std_gate's order):"
           % (len(r.frames), format(r.ops, ",")))
+    from doomfj.menu import menu_step
     dsim = onewalk.DoorSim()
     st, mode, n_state, n_pix = dsim.reset(), 1, 0, 0
+    scr, sel = known["menu_scr"], known["menu_sel"]
     for f in range(len(per_frame)):
-        if enters[f]:
-            mode ^= 1
+        mode, scr, sel, _ng = menu_step(mode, scr, sel, menu_events[f])
+        assert _ng is None, "the demo's walk never starts a new game"
         if mode == 0:
             st = dsim.step(st, keys_by_frame[f])
         g = seen[f]
         kd = keys_by_frame[f]
         want_s = {"viewx": st.x, "viewy": st.y, "viewangle": st.angle, "mode": mode,
+                  "menu_scr": scr, "menu_sel": sel,
                   "kb_f": int(bool(kd.get("forward"))), "kb_b": int(bool(kd.get("back"))),
                   "kb_l": int(bool(kd.get("turn_left"))), "kb_r": int(bool(kd.get("turn_right"))),
                   "kb_u": int(bool(kd.get("use"))),

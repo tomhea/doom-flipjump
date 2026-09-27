@@ -35,10 +35,11 @@ from flipjump.interpreter.io_devices.pygame_window import PcIO
 from flipjump.utils.exceptions import IOReadOnEOF
 
 # pinned to match the Windows-side harness exactly (src/doomfj/wall_renderer.py STANDALONE_POLLS,
-# scratchpad/m2_std_gate.py MENU_FRAMES / ENTER / CODE)
+# scratchpad/m2_std_gate.py MENU_FRAMES / MENU_EXIT / CODE). M7 P1.5: the menu is left with esc --
+# enter opens the skill screen now; esc meant the world on every binary before it too.
 STANDALONE_POLLS = 8
 MENU_FRAMES = 2
-ENTER = 0x0D
+MENU_EXIT = 0x1B
 CODE = {"forward": 0x77, "back": 0x73, "turn_left": 0x61, "turn_right": 0x64, "use": 0x20}
 KEY_NAMES = tuple(CODE)
 
@@ -76,8 +77,8 @@ def to_events(per_frame):
 
 
 def events_for(per_frame):
-    return to_events(per_frame) + [KeyEvent(MENU_FRAMES * STANDALONE_POLLS, True, ENTER),
-                                   KeyEvent(MENU_FRAMES * STANDALONE_POLLS + 1, False, ENTER)]
+    return to_events(per_frame) + [KeyEvent(MENU_FRAMES * STANDALONE_POLLS, True, MENU_EXIT),
+                                   KeyEvent(MENU_FRAMES * STANDALONE_POLLS + 1, False, MENU_EXIT)]
 
 
 def thp_state():

@@ -143,3 +143,46 @@ def fj(width, height, lines, selected, colours, label: str = "menu_frame",
     body = "\n".join("    stl.output_char %d" % b for b in data)
     return ("// M3: the baked menu frame -- %d bytes of 0x0B column run-lists, all constants\n"
             "%s:\n%s\n" % (len(data), label, body))
+
+
+# -------------------------------------------------------------------------------------------------
+# M7 P1.5 -- THE MENU'S RULES, the oracle side (docs/gp-skill-menu.md). The program's side is the fj
+# that wall_renderer.menu_state_lines generates; this is plain Python from the same document, and
+# every check that drives a program through its menu steps THIS: tests/fj/test_skill_menu.py (the
+# lines, on a synthetic level), m2_std_gate and m3_gate (the shipped binary), gp/probe.py.
+
+# the keyboard device's keycodes the menu hears (src/fj/input.fj's table): enter and esc, and the
+# forward keys (w, up arrow) as "up" and the back keys (s, down arrow) as "dn". Down edges only.
+MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn"}
+# the number of skills the skill screen offers (wall_renderer.SKILLS; the highlight is an index)
+MENU_SKILLS = 3
+
+
+def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
+    """One frame of the menu -> `(mode, scr, sel, new_game)`.
+
+    `mode` is 1 on a menu frame and 0 in the world; `scr` 0 is the main menu and 1 the skill
+    screen; `sel` is the highlighted skill, an index into wall_renderer.SKILLS. `events` is the set
+    of this frame's events ("esc", "enter", "up", "dn"), and the FIRST of them in that order is the
+    one acted on. `new_game` is the chosen skill's index on the frame NEW GAME is picked -- that
+    frame restarts the level at the skill and then runs the world's tic, as the program does -- and
+    None on every other frame."""
+    if mode == 0:                                   # the world: esc or enter opens the main menu
+        if "esc" in events or "enter" in events:
+            return 1, 0, sel, None
+        return 0, scr, sel, None
+    if scr == 0:                                    # the main menu
+        if "esc" in events:
+            return 0, 0, sel, None                  # resume the world where it was
+        if "enter" in events:
+            return 1, 1, sel, None                  # NEW GAME: the skill screen
+        return 1, 0, sel, None
+    if "esc" in events:                             # the skill screen: back to the main menu
+        return 1, 0, sel, None
+    if "enter" in events:                           # start the highlighted skill
+        return 0, 0, sel, sel
+    if "up" in events:
+        return 1, 1, max(0, sel - 1), None
+    if "dn" in events:
+        return 1, 1, min(MENU_SKILLS - 1, sel + 1), None
+    return 1, 1, sel, None

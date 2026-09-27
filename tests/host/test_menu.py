@@ -127,3 +127,35 @@ def test_a_wrong_picture_is_caught(monkeypatch):
 
 def test_glyph_geometry_fits_the_screen():
     assert W // CELL_W >= 20, "a 160px screen must fit a usable menu label"
+
+
+# -- M7 P1.5: the menu's RULES (doomfj.menu.menu_step, the oracle side of docs/gp-skill-menu.md) ----
+
+def test_the_menu_rules_move_between_the_screens():
+    from doomfj.menu import menu_step
+    assert menu_step(0, 0, 2, {"esc"}) == (1, 0, 2, None)        # the world: esc opens the menu
+    assert menu_step(0, 0, 2, {"enter"}) == (1, 0, 2, None)      # ...and so does enter
+    assert menu_step(0, 0, 2, {"up", "dn"}) == (0, 0, 2, None)   # the world ignores up / down
+    assert menu_step(1, 0, 2, {"esc"}) == (0, 0, 2, None)        # the main menu: esc resumes
+    assert menu_step(1, 0, 2, {"enter"}) == (1, 1, 2, None)      # ...enter opens the skill screen
+    assert menu_step(1, 1, 1, {"esc"}) == (1, 0, 1, None)        # the skill screen: esc goes back
+    assert menu_step(1, 1, 1, {"enter"}) == (0, 0, 1, 1)         # ...enter starts skill 1
+    assert menu_step(1, 1, 1, set()) == (1, 1, 1, None)          # nothing happens without an event
+
+
+def test_the_highlight_clamps_and_the_first_event_wins():
+    from doomfj.menu import MENU_SKILLS, menu_step
+    assert menu_step(1, 1, 0, {"up"})[2] == 0                    # clamped at the first skill
+    assert menu_step(1, 1, MENU_SKILLS - 1, {"dn"})[2] == MENU_SKILLS - 1   # ...and the last
+    assert menu_step(1, 1, 1, {"up"})[2] == 0 and menu_step(1, 1, 1, {"dn"})[2] == 2
+    # first match, in the order esc > enter > up > down
+    assert menu_step(1, 1, 1, {"esc", "enter", "up"}) == (1, 0, 1, None)
+    assert menu_step(1, 1, 1, {"enter", "up"}) == (0, 0, 1, 1)
+    assert menu_step(1, 1, 1, {"up", "dn"})[2] == 0
+    assert menu_step(1, 0, 2, {"esc", "enter"}) == (0, 0, 2, None)
+
+
+def test_the_menu_keys_are_the_devices():
+    """the keycodes kb.poll turns into the menu's events (src/fj/input.fj's table)"""
+    from doomfj.menu import MENU_KEYS
+    assert MENU_KEYS == {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn"}

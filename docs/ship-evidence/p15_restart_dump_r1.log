@@ -1,0 +1,119 @@
+# R1 (the P1.5 review): findings 1 and 5 -- the restart test dumps every target, one skill links two things, a control per group of writes; esc from the world
+# every run below is in a MIRROR of the tree named; a MUTANT is applied to the mirror's copy only (scratchpad p15run.py)
+
+## GAP: the parent's test on a restart that writes NEITHER viewy, viewangle, ddir, dsub, dwait, thss_rt NOR thpos_rt
+# on 4f04e23 (HEAD of m7-skill-menu), in a mirror of its tree
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
+#                   f"    hex.set 8, viewangle, {spawn.angle & 0xFFFFFFFF}",
+#   + 
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - f"    hex.zero {ndoors}, dstate", f"    hex.zero {ndoors}, ddir",
+#                      f"    hex.zero {ndoors}, dsub", f"    hex.zero {WAIT_NIBBLES * ndoors}, dwait"]
+#   + f"    hex.zero {ndoors}, dstate"]
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
+#                   *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
+#   + 
+$ PYTHONPATH=src python -m pytest tests/fj/test_skill_menu.py -q -rfE -p no:cacheprovider
+9 passed in 1.38s
+# exit 0, 2 s
+
+## FAIL: the new test on the same restart
+# on 4f04e23 (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/fj/test_skill_menu.py  (blob 184df97d09cd)
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
+#                   f"    hex.set 8, viewangle, {spawn.angle & 0xFFFFFFFF}",
+#   + 
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - f"    hex.zero {ndoors}, dstate", f"    hex.zero {ndoors}, ddir",
+#                      f"    hex.zero {ndoors}, dsub", f"    hex.zero {WAIT_NIBBLES * ndoors}, dwait"]
+#   + f"    hex.zero {ndoors}, dstate"]
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
+#                   *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
+#   + 
+$ PYTHONPATH=src python -m pytest tests/fj/test_skill_menu.py -k follows_the_rules -q -rfE -p no:cacheprovider
+E       AssertionError: after a new game, esc opens the main menu, not the skill screen, frame 1:
+E           cell msv viewx[0] viewy[0] viewangle[0] dstate[0] ddir[0] dsub[0] dwait[0] thss_rt[0] thss_rt[1] thss_rt[2] thpos_rt[0] thpos_rt[1] thpos_rt[2] thvis[0] thvis[1] sshead[0] sshead[1] thnext[0] thnext[1] thnext[2]
+E           fj   002 00640000 0badf00d 76543210 00 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 01 01 01 02 03 00 00
+E           want 002 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 01 01 02 03 00 00
+E       assert ['112 1234567...3 00 00', ...] == ['112 1234567...3 00 00', ...]
+E         
+E         At index 1 diff: '002 00640000 0badf00d 76543210 00 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 01 01 01 02 03 00 00' != '002 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 01 01 02 03 00 00'
+E         Use -v to get more diff
+E       AssertionError: down clamps at hard; up twice to easy; new game at easy, frame 5:
+E           cell msv viewx[0] viewy[0] viewangle[0] dstate[0] ddir[0] dsub[0] dwait[0] thss_rt[0] thss_rt[1] thss_rt[2] thpos_rt[0] thpos_rt[1] thpos_rt[2] thvis[0] thvis[1] sshead[0] sshead[1] thnext[0] thnext[1] thnext[2]
+E           fj   000 00640000 0badf00d 76543210 00 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 01 00 03 02 00 00 00
+E           want 000 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 00 03 02 00 00 00
+E       assert ['112 1234567...0 00 00', ...] == ['112 1234567...0 00 00', ...]
+E         
+E         At index 5 diff: '000 00640000 0badf00d 76543210 00 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 01 00 03 02 00 00 00' != '000 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 00 03 02 00 00 00'
+E         Use -v to get more diff
+E       AssertionError: medium, back out, in again, medium kept, frame 4:
+E           cell msv viewx[0] viewy[0] viewangle[0] dstate[0] ddir[0] dsub[0] dwait[0] thss_rt[0] thss_rt[1] thss_rt[2] thpos_rt[0] thpos_rt[1] thpos_rt[2] thvis[0] thvis[1] sshead[0] sshead[1] thnext[0] thnext[1] thnext[2]
+E           fj   001 00640000 0badf00d 76543210 00 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 00 01 01 02 00 00 00
+E           want 001 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 00 01 01 02 00 00 00
+E       assert ['112 1234567...0 00 00', ...] == ['112 1234567...0 00 00', ...]
+E         
+E         At index 4 diff: '001 00640000 0badf00d 76543210 00 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 00 01 01 02 00 00 00' != '001 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 00 01 01 02 00 00 00'
+E         Use -v to get more diff
+E       AssertionError: new game at hard (enter, enter), frame 1:
+E           cell msv viewx[0] viewy[0] viewangle[0] dstate[0] ddir[0] dsub[0] dwait[0] thss_rt[0] thss_rt[1] thss_rt[2] thpos_rt[0] thpos_rt[1] thpos_rt[2] thvis[0] thvis[1] sshead[0] sshead[1] thnext[0] thnext[1] thnext[2]
+E           fj   002 00640000 0badf00d 76543210 00 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 01 01 01 02 03 00 00
+E           want 002 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 01 01 02 03 00 00
+E       assert ['112 1234567...3 00 00', ...] == ['112 1234567...3 00 00', ...]
+E         
+E         At index 1 diff: '002 00640000 0badf00d 76543210 00 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 01 01 01 02 03 00 00' != '002 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 01 01 02 03 00 00'
+E         Use -v to get more diff
+FAILED tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[after a new game, esc opens the main menu, not the skill screen]
+FAILED tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[down clamps at hard; up twice to easy; new game at easy]
+FAILED tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[medium, back out, in again, medium kept]
+FAILED tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[new game at hard (enter, enter)]
+4 failed, 5 passed, 9 deselected in 1.17s
+# exit 1, 2 s
+
+## GAP: the parent's test on a menu where esc does nothing in the world
+# on 4f04e23 (HEAD of m7-skill-menu), in a mirror of its tree
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - "hex.if0 1, ev_esc, mn_w1", ";mn_open", "mn_w1:",
+#   + "hex.if0 1, ev_esc, mn_w1", ";mn_w1", "mn_w1:",
+$ PYTHONPATH=src python -m pytest tests/fj/test_skill_menu.py -q -rfE -p no:cacheprovider
+9 passed in 1.42s
+# exit 0, 2 s
+
+## FAIL: the new test on the same menu
+# on 4f04e23 (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/fj/test_skill_menu.py  (blob 184df97d09cd)
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - "hex.if0 1, ev_esc, mn_w1", ";mn_open", "mn_w1:",
+#   + "hex.if0 1, ev_esc, mn_w1", ";mn_w1", "mn_w1:",
+$ PYTHONPATH=src python -m pytest tests/fj/test_skill_menu.py -k follows_the_rules -q -rfE -p no:cacheprovider
+E       AssertionError: after a new game, esc opens the main menu, not the skill screen, frame 2:
+E           cell msv viewx[0] viewy[0] viewangle[0] dstate[0] ddir[0] dsub[0] dwait[0] thss_rt[0] thss_rt[1] thss_rt[2] thpos_rt[0] thpos_rt[1] thpos_rt[2] thvis[0] thvis[1] sshead[0] sshead[1] thnext[0] thnext[1] thnext[2]
+E           fj   002 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 01 01 02 03 00 00
+E           want 102 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 01 01 02 03 00 00
+E       assert ['112 1234567...3 00 00', ...] == ['112 1234567...3 00 00', ...]
+E         
+E         At index 2 diff: '002 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 01 01 02 03 00 00' != '102 00640000 ff380000 40000000 00 00 00 0000 0000000000000000 0000000000000001 0000000000000000 0005000600070008 0001000200030004 fff0fff1fff2fff3 01 01 01 02 03 00 00'
+E         Use -v to get more diff
+E       AssertionError: in the world, esc opens the main menu, frame 1:
+E           cell msv viewx[0] viewy[0] viewangle[0] dstate[0] ddir[0] dsub[0] dwait[0] thss_rt[0] thss_rt[1] thss_rt[2] thpos_rt[0] thpos_rt[1] thpos_rt[2] thvis[0] thvis[1] sshead[0] sshead[1] thnext[0] thnext[1] thnext[2]
+E           fj   002 12345678 0badf00d 76543210 33 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 5a a5 a5 5a 77 66 55
+E           want 102 12345678 0badf00d 76543210 33 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 5a a5 a5 5a 77 66 55
+E       assert ['002 1234567...7 66 55', ...] == ['002 1234567...7 66 55', ...]
+E         
+E         At index 1 diff: '002 12345678 0badf00d 76543210 33 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 5a a5 a5 5a 77 66 55' != '102 12345678 0badf00d 76543210 33 21 55 9a9a 0000000000009999 0000000000008888 0000000000007777 0000000000001111 0000000000002222 0000000000003333 5a a5 a5 5a 77 66 55'
+E         Use -v to get more diff
+FAILED tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[after a new game, esc opens the main menu, not the skill screen]
+FAILED tests/fj/test_skill_menu.py::test_the_menu_follows_the_rules[in the world, esc opens the main menu]
+2 failed, 7 passed, 9 deselected in 1.29s
+# exit 1, 2 s
+
+## PASS: the new test (scripts, reach, controls) on the branch's code
+# on 4f04e23 (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/fj/test_skill_menu.py  (blob 184df97d09cd)
+$ PYTHONPATH=src python -m pytest tests/fj/test_skill_menu.py -q -rfE -p no:cacheprovider
+18 passed in 6.26s
+# exit 0, 7 s

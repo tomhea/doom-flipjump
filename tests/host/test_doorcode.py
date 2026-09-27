@@ -12,6 +12,7 @@ to runtime, the door tic must touch nothing but its own state, and the cells the
 must be the cells the reset carries. (The stub's own reading of `dstate` is pinned in
 `tests/host/test_collision_cells.py`.)
 """
+import inspect
 import re
 
 import pytest
@@ -77,7 +78,11 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     """Before P1.2 the tic flipped each door line's blocking bit in the collision table on the two
     steps that cross the pass state -- a second copy of the door's state. Now nothing in the tic
     may write outside `dstate`/`ddir`/`dsub`/`dwait`/`duse`/`dbox`; every other cell it names is
-    only READ (the player's position for the use box, the key byte)."""
+    only READ (the player's position for the use box, the key byte). And it cannot be HANDED the
+    collision any more: before P1.2 a caller that passed the pass states and door lines got the
+    patch, one that did not got a door that never stopped being a wall."""
+    assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
+        ["slots", "nstates", "boxes"], "door_tic_lines takes collision inputs again"
     secs, lds, sds, verts = level
     slots = sorted(doors)
     text = "\n".join(doorcode.door_tic_lines(slots, {si: len(doors[si]) for si in slots},

@@ -5,16 +5,22 @@ polls record enter / esc / up / down on their down edges (`kb.poll`), and these 
 `mode` (menu or world), `menu_scr` (main menu or skill screen), `menu_sel` (the highlighted skill),
 and -- on NEW GAME -- the chosen skill's restart block (`restart_lines`): every persisted cell back to
 that skill's level start. This runs those EXACT lines in a frame loop on a synthetic level (two
-leaves, two runtime things, one door, one flagged thing), driven by the real keyboard device, and
-prints the state after every frame. The cells start DIRTY (a moved view, an open door, garbage in
-the lists), so a restart that misses a cell shows.
+leaves, three runtime things, two doors, two flagged things), driven by the real keyboard device,
+and prints after every frame EVERY cell the restart block writes: the view (x, y, angle), every door
+cell, every runtime thing's binding and position, every list byte and every flag. The cells start
+DIRTY -- each at a value no level start holds -- so a restart that misses one shows.
 
 The expectation is the Python side of docs/gp-skill-menu.md's rules, `doomfj.menu.menu_step` (the
 mirror every gate that drives the game binary through its menu steps), and the device's contract
 (one event per poll tic, due when the tic reaches it) -- not a run of the program.
 
-⚠ THE CONTROLS (R9): the up/down moves swapped, and a restart that leaves the lists unzeroed, are
-assembled through the same harness and must disagree with the mirror.
+⚠ THE CONTROLS (R9): the up/down moves swapped, and the restart block with each group of its writes
+dropped in turn (the list zeroing, the doors, the positions, the bindings, the view's y and angle,
+the per-skill links, the flags), are assembled through the same harness and must each disagree with
+the mirror on some script. Until the P1.5 review this printed only viewx, dstate, two list bytes a
+side and one flag, and no skill linked two things -- so a restart that missed viewy, viewangle, the
+other door cells, the bindings, the positions or a link passed, and only the list zeroing had a
+control.
 """
 from pathlib import Path
 
@@ -23,40 +29,87 @@ import pytest
 from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, ScriptedKeyEventSource
 
 from doomfj.config import Config
+from doomfj.doorcode import WAIT_NIBBLES
 from doomfj.harness import W
 from doomfj.menu import MENU_KEYS, menu_step
-from doomfj.wall_renderer import MENU_STATE_DECLS, menu_state_lines, restart_lines
+from doomfj.things import spawn_leaf_lists
+from doomfj.wall_renderer import (BOOT_SKILL, MENU_STATE_DECLS, SKILLS, menu_state_lines,
+                                  restart_lines)
 
 SRC = [Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
 POLLS, FRAMES = 4, 8
 ENTER, ESC, UP, DOWN, W_KEY, S_KEY = 0x0D, 0x1B, 0x80, 0x81, 0x77, 0x73
+M32 = 0xFFFFFFFF
 
-# the synthetic level: the spawn, one door, two runtime things on two leaves, one flagged thing
-SPAWN = type("Spawn", (), {"x": 100 << 16, "y": 200 << 16, "angle": 0x40000000})()
-BINDS, POS = [1, 0], [0x0005000600070008, 0x0001000200030004]
-PER_SKILL = [([2, 0], [0, 0], [1]),        # easy: thing 1 on leaf 0; the flag shown
-             ([0, 1], [0, 0], [0]),        # medium: thing 0 on leaf 1; the flag hidden
-             ([2, 1], [0, 0], [1])]        # hard: both
-DIRTY = {"viewx": 0x12345678, "dstate": 3, "sshead": [3, 3], "thnext": [2, 1], "thvis": 0}
-START = {"viewx": SPAWN.x, "dstate": 0}
+# the synthetic level: the spawn (a NEGATIVE y, so the 32-bit wrap is checked), two doors, three
+# runtime things on two leaves, two flagged (baked vanishable) things
+SPAWN = type("Spawn", (), {"x": 100 << 16, "y": -(200 << 16), "angle": 0x40000000})()
+NDOORS, NSS = 2, 2
+BINDS = [0, 1, 0]                                   # each runtime thing's spawn leaf
+POS = [0x0005000600070008, 0x0001000200030004, 0xFFF0FFF1FFF2FFF3]
+# which runtime things each skill spawns, and each flag, for easy, medium, hard. Things 0 and 2
+# share leaf 0, so hard -- which has both -- LINKS them (thnext[0] = 3): a non-zero link, so the
+# per-skill blocks' thnext bit flips are generated and run.
+PRESENT = ([0, 1, 1], [1, 1, 0], [1, 1, 1])
+VIS = ([1, 0], [0, 1], [1, 1])
+PER_SKILL = [(*spawn_leaf_lists(BINDS, NSS, present=p), list(v)) for p, v in zip(PRESENT, VIS)]
+NT, NVIS = len(BINDS), len(VIS[0])
+
+# EVERY cell the restart block writes, in the order the dump prints it: (label, nibbles, count);
+# element i sits at `label + i*nibbles*dw`. The byte arrays are read through a pointer.
+HEX_TARGETS = [("viewx", 8, 1), ("viewy", 8, 1), ("viewangle", 8, 1),
+               ("dstate", NDOORS, 1), ("ddir", NDOORS, 1), ("dsub", NDOORS, 1),
+               ("dwait", WAIT_NIBBLES * NDOORS, 1),
+               ("thss_rt", 16, NT), ("thpos_rt", 16, NT), ("thvis", 2, NVIS)]
+BYTE_TARGETS = [("sshead", NSS), ("thnext", NT)]
+FIELDS = "msv " + " ".join([f"{lb}[{i}]" for lb, _n, c in HEX_TARGETS for i in range(c)]
+                           + [f"{lb}[{i}]" for lb, c in BYTE_TARGETS for i in range(c)])
+
+# the cells start DIRTY: each at a value no skill's level start holds
+DIRTY = {"viewx": [0x12345678], "viewy": [0x0BADF00D], "viewangle": [0x76543210],
+         "dstate": [0x33], "ddir": [0x21], "dsub": [0x55], "dwait": [0x9A9A],
+         "thss_rt": [0x9999, 0x8888, 0x7777], "thpos_rt": [0x1111, 0x2222, 0x3333],
+         "thvis": [0x5A, 0xA5], "sshead": [0xA5, 0x5A], "thnext": [0x77, 0x66, 0x55]}
+
+
+def level_start(k) -> dict:
+    """skill k's level start: the value of every restart target"""
+    head, nxt, vis = PER_SKILL[k]
+    return {"viewx": [SPAWN.x & M32], "viewy": [SPAWN.y & M32], "viewangle": [SPAWN.angle & M32],
+            "dstate": [0], "ddir": [0], "dsub": [0], "dwait": [0],
+            "thss_rt": list(BINDS), "thpos_rt": list(POS), "thvis": list(vis),
+            "sshead": list(head), "thnext": list(nxt)}
 
 
 def _dump():
-    """print: mode, menu_scr, menu_sel, viewx (8 digits), dstate, sshead[0..1], thnext[0..1], thvis"""
+    """print: mode menu_scr menu_sel, then every HEX_TARGETS element and every BYTE_TARGETS byte,
+    space-separated -- `_fmt` is the same line"""
     out = ["    hex.print_as_digit 1, mode, 0", "    hex.print_as_digit 1, menu_scr, 0",
-           "    hex.print_as_digit 1, menu_sel, 0", "    stl.output_char 32",
-           "    hex.print_as_digit 8, viewx, 0", "    stl.output_char 32",
-           "    hex.print_as_digit 1, dstate, 0", "    stl.output_char 32"]
-    for label in ("sshead", "thnext"):
-        for i in range(2):
-            out += [f"    hex.set w/4, tm_base, {label}", f"    hex.set w/4, tm_idx, {i}",
+           "    hex.print_as_digit 1, menu_sel, 0"]
+    for label, n, count in HEX_TARGETS:
+        for i in range(count):
+            out += ["    stl.output_char 32", f"    hex.print_as_digit {n}, {label} + {i * n}*dw, 0"]
+    for label, count in BYTE_TARGETS:
+        for i in range(count):
+            out += ["    stl.output_char 32",
+                    f"    hex.set w/4, tm_base, {label}", f"    hex.set w/4, tm_idx, {i}",
                     "    hex.ptr_index tm_p, tm_base, tm_idx", "    hex.read_byte tm_v, tm_p",
                     "    hex.print_as_digit 2, tm_v, 0"]
-        out.append("    stl.output_char 32")
-    return out + ["    hex.print_as_digit 1, thvis, 0", "    stl.output 10"]
+    return out + ["    stl.output 10"]
+
+
+def _fmt(st) -> str:
+    return " ".join(["%d%d%d" % (st["mode"], st["scr"], st["sel"])]
+                    + ["%0*x" % (n, v) for label, n, _c in HEX_TARGETS for v in st[label]]
+                    + ["%02x" % v for label, _c in BYTE_TARGETS for v in st[label]])
 
 
 def _program(state_lines, common):
+    cells = []
+    for label, n, _count in HEX_TARGETS:
+        cells += [f"{label}:"] + [f"    hex.vec {n}, {v}" for v in DIRTY[label]]
+    for label, _count in BYTE_TARGETS:
+        cells += [f"{label}:"] + [f";{v} * dw" for v in DIRTY[label]]
     return "\n".join([
         "stl.startup_and_init_all",
         "tm_frame:",
@@ -76,14 +129,7 @@ def _program(state_lines, common):
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
         "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
         "tm_base: hex.vec w/4", "tm_idx: hex.vec w/4", "tm_p: hex.vec w/4", "tm_v: hex.vec 2",
-        f"viewx: hex.vec 8, {DIRTY['viewx']}", "viewy: hex.vec 8", "viewangle: hex.vec 8",
-        f"dstate: hex.vec 1, {DIRTY['dstate']}", "ddir: hex.vec 1, 2", "dsub: hex.vec 1, 5",
-        "dwait: hex.vec 2, 9",
-        "thss_rt:", "    hex.vec 16, 9", "    hex.vec 16, 9",
-        "thpos_rt:", "    hex.vec 16", "    hex.vec 16",
-        "sshead:", *[f";{v} * dw" for v in DIRTY["sshead"]],
-        "thnext:", *[f";{v} * dw" for v in DIRTY["thnext"]],
-        "thvis:", f"    hex.vec 2, {DIRTY['thvis']}",
+        *cells,
     ]) + "\n"
 
 
@@ -103,18 +149,12 @@ def _run(fjm, events):
     return io.get_output(allow_incomplete_output=True).decode("ascii").split("\n")[:FRAMES]
 
 
-def _fmt(st):
-    return "%d%d%d %08x %x %02x%02x %02x%02x %x" % (
-        st["mode"], st["scr"], st["sel"], st["viewx"], st["dstate"], *st["sshead"], *st["thnext"],
-        st["thvis"])
-
-
 def _expected(events):
-    """docs/gp-skill-menu.md's rules in plain Python, frame by frame"""
+    """docs/gp-skill-menu.md's rules in plain Python, frame by frame -> (lines, states)"""
     pending = sorted((KeyEvent(*e) for e in events), key=lambda e: e.tic)
-    st = {"mode": 1, "scr": 0, "sel": 2, "viewx": DIRTY["viewx"], "dstate": DIRTY["dstate"],
-          "sshead": list(DIRTY["sshead"]), "thnext": list(DIRTY["thnext"]), "thvis": DIRTY["thvis"]}
-    out, index = [], 0
+    st = {"mode": 1, "scr": 0, "sel": SKILLS.index(BOOT_SKILL),
+          **{label: list(v) for label, v in DIRTY.items()}}
+    lines, states, index = [], [], 0
     for frame in range(FRAMES):
         ev = set()
         for tic in range(frame * POLLS, (frame + 1) * POLLS):
@@ -125,11 +165,17 @@ def _expected(events):
                     ev.add(MENU_KEYS[e.keycode])
         st["mode"], st["scr"], st["sel"], new_game = menu_step(st["mode"], st["scr"], st["sel"], ev)
         if new_game is not None:                    # the chosen skill's level start
-            head, nxt, vis = PER_SKILL[new_game]
-            st.update(viewx=START["viewx"], dstate=START["dstate"], sshead=list(head),
-                      thnext=list(nxt), thvis=vis[0])
-        out.append(_fmt(st))
-    return out
+            st.update(level_start(new_game))
+        lines.append(_fmt(st))
+        states.append({k: list(v) if isinstance(v, list) else v for k, v in st.items()})
+    return lines, states
+
+
+def _first_difference(name, got, want) -> str:
+    for f, (g, w) in enumerate(zip(got, want)):
+        if g != w:
+            return "%s, frame %d:\n  cell %s\n  fj   %s\n  want %s" % (name, f, FIELDS, g, w)
+    return "%s: %d frames printed, %d expected" % (name, len(got), len(want))
 
 
 SCRIPTS = {
@@ -148,6 +194,13 @@ SCRIPTS = {
     "in the world, enter opens the main menu; esc resumes": [
         (0, True, ESC), (1, False, ESC), (4, True, ENTER), (5, False, ENTER),
         (8, True, ESC), (9, False, ESC)],
+    # the P1.5 review: esc FROM THE WORLD (`mn_world` -> `mn_open`) was reached by no fj test and no
+    # gate -- every script above left the world with enter or never entered it
+    "in the world, esc opens the main menu": [
+        (0, True, ESC), (1, False, ESC), (4, True, ESC), (5, False, ESC)],
+    "after a new game, esc opens the main menu, not the skill screen": [
+        (0, True, ENTER), (1, False, ENTER), (4, True, ENTER), (5, False, ENTER),
+        (8, True, ESC), (9, False, ESC)],
     "two events in one frame: esc wins over enter": [
         (0, True, ENTER), (1, False, ENTER), (4, True, ESC), (5, True, ENTER), (6, False, ESC),
         (7, False, ENTER)],
@@ -155,7 +208,7 @@ SCRIPTS = {
 
 
 def _restart():
-    return restart_lines(SPAWN, 1, BINDS, POS, 2, PER_SKILL)
+    return restart_lines(SPAWN, NDOORS, BINDS, POS, NSS, PER_SKILL)
 
 
 @pytest.fixture(scope="module")
@@ -167,19 +220,31 @@ def shipped(tmp_path_factory):
 
 @pytest.mark.parametrize("name", sorted(SCRIPTS))
 def test_the_menu_follows_the_rules(shipped, name):
-    got, want = _run(shipped, SCRIPTS[name]), _expected(SCRIPTS[name])
-    assert got == want, "%s:\n  fj   %s\n  want %s" % (name, got, want)
+    got, want = _run(shipped, SCRIPTS[name]), _expected(SCRIPTS[name])[0]
+    assert got == want, _first_difference(name, got, want)
 
 
 def test_the_scripts_reach_every_skill_and_every_screen():
-    finals = {_expected(SCRIPTS[n])[-1] for n in SCRIPTS}
-    starts = {tuple(PER_SKILL[k][0]) for k in range(3)}
-    seen = {tuple(int(f.split()[3][i:i + 2], 16) for i in (0, 2)) for f in finals}
-    assert starts <= seen, "a skill's level start is never reached: %s" % (starts - seen)
+    """R9 against a vacuous script set: every skill's WHOLE level start is some script's final state
+    (reached from the dirty cells), the scripts pass through the world, the main menu and the skill
+    screen, and some skill links two things -- or the per-skill link flips would never run"""
+    runs = {n: _expected(SCRIPTS[n])[1] for n in SCRIPTS}
+    for k in range(len(SKILLS)):
+        want = level_start(k)
+        assert any(all(r[-1][c] == v for c, v in want.items()) for r in runs.values()), (
+            "skill %d's level start is never reached" % k)
+    assert {(s["mode"], s["scr"]) for r in runs.values() for s in r} == {(0, 0), (1, 0), (1, 1)}
+    assert any(any(nxt) for _head, nxt, _vis in PER_SKILL)
+    assert any("thnext +" in ln for block in _restart()[1] for ln in block)
+    # ... and esc from the world is taken: a frame in the world, then the main menu on esc
+    for n in ("in the world, esc opens the main menu",
+              "after a new game, esc opens the main menu, not the skill screen"):
+        modes = [(s["mode"], s["scr"]) for s in runs[n]]
+        assert (0, 0) in modes and modes[-1] == (1, 0), (n, modes)
 
 
 def test_a_broken_menu_is_caught(tmp_path):
-    """R9: the same harness must say no to swapped moves and to a restart that does not zero"""
+    """R9: the same harness must say no to swapped up / down moves"""
     common, _ = _restart()
     lines = menu_state_lines(_restart())
     swapped = [l.replace("hex.dec 1, menu_sel", "@@").replace("hex.inc 1, menu_sel", "hex.dec 1, menu_sel")
@@ -187,9 +252,44 @@ def test_a_broken_menu_is_caught(tmp_path):
     assert swapped != lines
     bad = _assemble(tmp_path, "swapped", swapped, common)
     name = "down clamps at hard; up twice to easy; new game at easy"
-    assert _run(bad, SCRIPTS[name]) != _expected(SCRIPTS[name]), "swapped moves passed"
-    nozero = [l for l in common if "m1.zerobyte sshead" not in l]
-    assert nozero != common
-    bad2 = _assemble(tmp_path, "nozero", lines, nozero)
-    name = "new game at hard (enter, enter)"
-    assert _run(bad2, SCRIPTS[name]) != _expected(SCRIPTS[name]), "an unzeroed restart passed"
+    assert _run(bad, SCRIPTS[name]) != _expected(SCRIPTS[name])[0], "swapped moves passed"
+
+
+def _drop(block, *needles):
+    """`block` without its lines that name any of `needles` -- one group of the restart's writes"""
+    return [ln for ln in block if not any(n in ln for n in needles)]
+
+
+def _broken(name):
+    """the restart block with one group of its writes dropped: (common, [each skill's block])"""
+    common, skills = _restart()
+    if name == "the lists are not zeroed":
+        return _drop(common, "m1.zerobyte sshead"), skills
+    if name == "the doors are not shut":
+        return _drop(common, "dstate", "ddir", "dsub", "dwait"), skills
+    if name == "the positions are not reset":
+        return _drop(common, "thpos_rt"), skills
+    if name == "the bindings are not reset":
+        return _drop(common, "thss_rt"), skills
+    if name == "the view's y and angle are not reset":
+        return _drop(common, "viewy", "viewangle"), skills
+    if name == "no skill links its things":
+        return common, [_drop(s, "thnext +") for s in skills]
+    assert name == "no skill sets its flags", name
+    return common, [_drop(s, "thvis +") for s in skills]
+
+
+BROKEN = ["the lists are not zeroed", "the doors are not shut", "the positions are not reset",
+          "the bindings are not reset", "the view's y and angle are not reset",
+          "no skill links its things", "no skill sets its flags"]
+
+
+@pytest.mark.parametrize("name", BROKEN)
+def test_a_broken_restart_is_caught(tmp_path, name):
+    """R9: each group of the restart block's writes, dropped, must show on some script"""
+    common, skills = _broken(name)
+    good_common, good_skills = _restart()
+    assert (common, skills) != (good_common, good_skills), "the control removed nothing"
+    bad = _assemble(tmp_path, "broken", menu_state_lines((common, skills)), common)
+    caught = [n for n in SCRIPTS if _run(bad, SCRIPTS[n]) != _expected(SCRIPTS[n])[0]]
+    assert caught, "a restart block where %s passed every script" % name

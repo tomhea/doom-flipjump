@@ -1,0 +1,18 @@
+# the frozen combat set v2's census (F4) under P1.6's oracle, and under P1.5's (its base) -- 2026-09-27
+$ python scratchpad/gp/scenarios_v2.py --validate   # on m7-sprite-bank (P1.6, uncommitted oracle change)
+  >= 30% of frames have an awake monster DRAWN                                   PASS  861/1100 = 78.3%
+  F1 status FROZEN with the owner's approval                                     PASS  status 'FROZEN', the set approved by 'the owner' on '2026-09-26'; last freeze: checker re-freeze by 'PR #88 review round 3 (checker re-freeze: the decided freeze, owner_approval stored once, the planner guard, R4-R7)'
+  F2 every recorded file hash matches (model, census, planner: 20 files)         FAIL  changed: ['src/doomfj/doorcode.py', 'src/doomfj/reference_model.py', 'src/doomfj/things.py', 'src/doomfj/world.py']
+  F3 the replay reproduces every frozen pose and final digest                    PASS  11/11 runs
+  F4 the drawn and geometric population reproduces frame by frame                FAIL  differs: ['R0-south-hall', 'R0-imp-court', 'R0-northwest', 'R0-courtyard', 'R3-west']
+  F5 the B0 record is present and was measured on these keys                     PASS  binding 17760774.10272727, keys match
+CRITERIA PASS | FREEZE FAIL | VALIDATE FAIL (87 s)
+
+$ python scratchpad/gp/scenarios_v2.py --validate   # on m7-skill-menu (P1.5)
+  >= 30% of frames have an awake monster DRAWN                                   PASS  861/1100 = 78.3%
+  F1 status FROZEN with the owner's approval                                     PASS  status 'FROZEN', the set approved by 'the owner' on '2026-09-26'; last freeze: checker re-freeze by 'PR #88 review round 3 (checker re-freeze: the decided freeze, owner_approval stored once, the planner guard, R4-R7)'
+  F2 every recorded file hash matches (model, census, planner: 20 files)         FAIL  changed: ['src/doomfj/doorcode.py', 'src/doomfj/reference_model.py', 'src/doomfj/things.py', 'src/doomfj/world.py']
+  F3 the replay reproduces every frozen pose and final digest                    PASS  11/11 runs
+  F4 the drawn and geometric population reproduces frame by frame                PASS  11/11 runs
+  F5 the B0 record is present and was measured on these keys                     PASS  binding 17760774.10272727, keys match
+CRITERIA PASS | FREEZE FAIL | VALIDATE FAIL (85 s)

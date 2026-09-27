@@ -2,7 +2,9 @@
 Cheap Python over freedoom1.wad; reuses the oracle's own sprite_strip (R6) so the run counts are
 what the shipped emitter would bake."""
 import sys, collections
-sys.path.insert(0, r"C:/Users/tomhe/Documents/doom-flipjump/src")
+from pathlib import Path
+ROOT = Path(__file__).resolve().parents[3]         # the checkout this file is in, not a fixed one
+sys.path.insert(0, str(ROOT / "src"))
 from doomfj.wad import WadFile, decode_picture
 from doomfj.config import Config
 from doomfj.reference_model import (ReferenceModel, SPRITE_HEIGHT_BUCKETS, sprite_bucket_height,
@@ -11,10 +13,14 @@ from doomfj.reference_model import (ReferenceModel, SPRITE_HEIGHT_BUCKETS, sprit
 from doomfj import wall_renderer as wr
 
 cfg = Config(); rm = ReferenceModel(cfg)
-fw = WadFile.from_path(r"C:/Users/tomhe/Documents/doom-flipjump/assets/freedoom1.wad")
+fw = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 names = fw.names()
 spr = names[names.index("S_START") + 1:names.index("S_END")]
-NLD = wr._spr_nlow(cfg); NB = SPRITE_HEIGHT_BUCKETS; STRIDE = wr.SPR_BLOCK_STRIDE
+# NLD: the per-bucket bank's coarse (LD) block count per column -- the SHORT buckets. This prices
+# the PRE-P1.6 layout (41 blocks a column), so it is computed here exactly as the helper it came
+# from, wall_renderer._spr_nlow, did; M7 P1.6 removed that helper with the layout.
+NLD = sum(1 for b in range(SPRITE_HEIGHT_BUCKETS) if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
+NB = SPRITE_HEIGHT_BUCKETS; STRIDE = wr.SPR_BLOCK_STRIDE
 HB = [sprite_bucket_height(b, cfg.VIEW_H) for b in range(NB)]
 ds = 2
 
@@ -140,7 +146,7 @@ for p in MON:
 
 # ---- the SHIPPED static bank, re-priced in each format (the 32 kinds sprite_art bakes today)
 from doomfj.reference_model import THING_SPRITE
-mw = WadFile.from_path(r"C:/Users/tomhe/Documents/doom-flipjump/tests/fixtures/freedoom_e1m1.wad")
+mw = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 kinds = sorted({t.type for t in mw.things("E1M1") if t.type in THING_SPRITE})
 lumps = []
 for k in kinds:

@@ -42,7 +42,7 @@ art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 cmap = bake_bsp(mw, "E1M1")
 lds, sds, secs = mw.linedefs("E1M1"), mw.sidedefs("E1M1"), mw.sectors("E1M1")
 
-_, spr_base, spr_dw, spr_ldbase = _lines_sprite_bank(rm, art, cfg, mw, "E1M1")
+_, spr_base, spr_dw, spr_ldbase, _anim = _lines_sprite_bank(rm, art, cfg, mw, "E1M1")   # M7 P1.6: 5 values
 _, spr_cls = _lines_sprite_light(rm, cfg, art, mw, "E1M1", cmap, lds, sds, secs,
                                  moving_things=True)
 

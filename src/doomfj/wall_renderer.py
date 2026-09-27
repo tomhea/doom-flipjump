@@ -53,6 +53,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
+from doomfj.spritebank import bank_list_of, rowmap_table          # M7 P1.6: the native-list bank
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
                           pass_state, use_boxes_xy)
@@ -1181,8 +1182,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # V4: the sprite run-list bank + the shade-row bank, and the per-type block bases the things bake.
     _do_things = lines and things
     assert not (things and sprite_wad is None), "things=True needs sprite_wad (see _lines_sprite_bank)"
-    sprbank, spr_base, spr_dw, spr_ldbase = (_lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname)
-                                 if _do_things else ("", {}, {}, {}))
+    # M7 P1.6: `_anim` -- every frame and rotation's region, for P3's animation (nothing reads it yet)
+    sprbank, spr_base, spr_dw, spr_ldbase, _anim = (
+        _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname) if _do_things
+        else ("", {}, {}, {}, {}))
     sprlight, spr_cls = (_lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname,
                                              cmap, lds, sds, secs, moving_things=moving_things)
                          if _do_things else ("", {}))
@@ -1191,6 +1194,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         "sprbkt", [0] + [sprite_bucket(h, cfg.VIEW_H) | (sprite_bucket_height(
             sprite_bucket(h, cfg.VIEW_H), cfg.VIEW_H) << 8) for h in range(1, cfg.VIEW_H + 1)],
         index_nibbles=2, result_nibbles=4) if _do_things else "")
+    # M7 P1.6: (bucket, normalized row) -> screen row, the table every sprite row goes through
+    rowmap = sprite_rowmap_fj(cfg) if _do_things else ""
     spr_cache: dict = {}
     # M14.5 — THE SPLIT. `things_by_ss` is what the leaf BAKES; `_mt_keep` is what the runtime
     # table carries. On a static build everything bakes, exactly as before. On a moving build the
@@ -1309,10 +1314,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
                 f"{proj}, {cfg.CENTERX}, "
                 f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
-                f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
+                f"{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, "     # M7 P1.6: `hdb`
                 f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
                 f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
-                f"{DEG_SPR_LOWRES_H}, {_spr_nlow(cfg) if DEG_SPR_NEAR_TZ else 1}, "
+                f"{DEG_SPR_LOWRES_H}, "
                 f"{DEG_SPR_NEAR_TZ * 0x10000}, "
                 f"{mt}, "
                 f"{'throwc' if mt else '0'}, {_MT_NTH}, "
@@ -2512,7 +2517,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              "degfl: hex.vec 1", "ballow: hex.vec 1",   # ... and the per-thing runtime flags
              "thfar: hex.vec 1",                 # SPR-NEAR: beyond the detail radius?
              *_mt_decls,                         # M14-e: the runtime table's state + point location
-             sprbkt, sprlight, sprbank] if _do_things else []),
+             sprbkt, rowmap, sprlight, sprbank] if _do_things else []),
           *([_lines_bake_bank(rm, cfg, asset_wad, lines_vz_classes, lines_bank_keys,
                               True)] if not ascode else []),
           *([bands_code] if ascode else []),
@@ -2837,8 +2842,10 @@ def hoisted_scratch_decls(cfg=None) -> list:
         # the emit's derive (stream.frag_derive) -- gps_cur_s is FRAME STATE too (the slot whose
         # constants gps_y0 / gps_lr hold), and a stale one draws the previous frame's rows
         "gps_cur_s: hex.vec 2",
+        "gps_ridx: hex.vec 4",              # M7 P1.6: A's rowmap index, [row lo][row hi][bucket]
         "gps_y0: hex.vec 4",
         "gps_lr: hex.vec 2",
+        "gps_b: hex.vec 2",                 # M7 P1.6: the cached slot's bucket (the rowmap's row)
         "gps_r0: hex.vec 4",                # 4 wide, written 2: the high byte stays 0 for add4
         "gps_last: hex.vec 4",
         "gps_cvh: hex.vec 4",
@@ -2860,6 +2867,7 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "gpsb_sy2: hex.vec 4",
         "gpsb_smidx: hex.vec 4",
         "gpsb_ptr0: hex.vec w/4",
+        "gpsb_ridx: hex.vec 4",             # M7 P1.6: B's, kept across A's derive
         "srd_csh10: hex.vec 2, 10",
         "srd_csh5: hex.vec 2, 5",
         "srd_csh6: hex.vec 2, 6",
@@ -3210,34 +3218,117 @@ def sprite_bank_header():
     """The lines that open the sprite bank: its comment, the `pad` that puts `sprbank` on a whole
     block -- 64 ops = 16^3 bits, what the bank's 3-nibble reads need (M7 P1.4; fj's `pad n` aligns
     the address absolutely) -- and the label. build.sprbank_misalignment checks the result."""
-    return ["// V4 sprite bank: [r0][last_rel][n][ (rel_end, RAW texel) x n ] per (sprite, column, "
-            f"height bucket), stride {SPR_BLOCK_STRIDE} dw -- block-aligned (M7 P1.4)",
+    return ["// sprite bank (M7 P1.6, doomfj.spritebank): [n_first][min_b][n_last][ (n_end, RAW texel) "
+            f"x n ] per (sprite, tier, column), native rows normalized to 0..255, stride "
+            f"{SPR_BLOCK_STRIDE} dw -- block-aligned (M7 P1.4)",
             f"pad {SPR_BLOCK_STRIDE}", "sprbank:"]
 
 
+def sprite_bucket_heights(cfg) -> tuple:
+    """the height of every bucket -- the rowmap's rows, and what the native lists are drawn at"""
+    return tuple(sprite_bucket_height(b, cfg.VIEW_H) for b in range(SPRITE_HEIGHT_BUCKETS))
+
+
+def sprite_hd_bucket(cfg) -> int:
+    """the first bucket drawn from the FULL-resolution list (its height reaches SPRITE_HD_H)"""
+    return next(b for b, h in enumerate(sprite_bucket_heights(cfg)) if h >= SPRITE_HD_H)
+
+
+def sprite_tier_lists(art, cfg):
+    """M7 P1.6 -- a kind's native lists, tier by tier, as `doomfj.spritebank.bank_list_of` builds
+    them for the ORACLE too (its column loop asks the same function for the same columns): HD from
+    the full-resolution column at SPRITE_RUN_CAP_HD, MID from the half-resolution one at
+    DEG_SPR_MID_CAP, and -- with SPR-NEAR -- LD from the half-resolution one at DEG_SPR_LOWRES_CAP."""
+    heights = sprite_bucket_heights(cfg)
+    cols, dh, dwid, fcols, fdh = art[0], art[1], art[2], art[7], art[8]
+    tiers = [[bank_list_of(tuple(fcols[u]), fdh, SPRITE_RUN_CAP_HD, heights) for u in range(dwid)],
+             [bank_list_of(tuple(cols[u]), dh, DEG_SPR_MID_CAP, heights) for u in range(dwid)]]
+    if DEG_SPR_NEAR_TZ:
+        tiers.append([bank_list_of(tuple(cols[u]), dh, DEG_SPR_LOWRES_CAP, heights)
+                      for u in range(dwid)])
+    return tiers
+
+
+def sprite_block_body(bl, n_buckets: int) -> list:
+    """one block's cells: `[n_first][min_b][n_last][(n_end, texel) x n]`, then the 0 that ends the
+    walk. A transparent column is `[0][n_buckets][0]`: its min_b is past every bucket, so the record
+    never takes it."""
+    if bl is None:
+        return [0, n_buckets, 0]
+    return [bl[0], bl[1], bl[2]] + [v for pr in bl[3] for v in pr]
+
+
+# M7 P1.6 -- the actors whose every frame and rotation the bank holds, besides the map's monsters:
+# the barrels (they explode) and what the monsters' attacks spawn (P3-P5 draw them)
+ANIM_ACTORS = ("MT_BARREL", "MT_TROOPSHOT", "MT_PUFF", "MT_BLOOD")
+
+
+def anim_frames(map_wad, mapname) -> dict:
+    """{sprite: sorted frame indices} for every state the map's monster types and ANIM_ACTORS can
+    reach from their entry states (gamedata's state chains, `next` followed to the end)"""
+    from doomfj import gamedata as gd
+    types = {t.type for t in map_wad.things(mapname) if t.type in MONSTER_TYPES}
+    out: dict = {}
+    for name, mi in sorted(gd.MOBJINFO.items()):
+        if mi.doomednum not in types and name not in ANIM_ACTORS:
+            continue
+        seen, todo = set(), list(mi.entry_states())
+        while todo:
+            st_name = todo.pop()
+            if st_name in seen or st_name == gd.S_NULL:
+                continue
+            seen.add(st_name)
+            st = gd.STATES[st_name]
+            out.setdefault(st.sprite, set()).add(st.frame_index)
+            todo.append(st.next)
+    return {k: sorted(v) for k, v in sorted(out.items())}
+
+
+def anim_patches(sprite_wad, frames) -> dict:
+    """{(sprite, frame letter, rotation): (lump, mirrored)} -- every view `frames` asks for, read
+    off the wad's own lump names: `TROOA1` is rotation 1, `TROOA2A8` is rotation 2 and, MIRRORED,
+    rotation 8; a `...A0` lump is every rotation (0). A frame with no lump at all is an error: P3
+    would have nothing to draw."""
+    names = [n for n in sprite_wad.names() if len(n) in (6, 8)]
+    out = {}
+    for sprite, idxs in frames.items():
+        for fi in idxs:
+            letter = chr(ord("A") + fi)
+            views = {}
+            for n in names:
+                if n[:4] != sprite:
+                    continue
+                if n[4] == letter:
+                    views[int(n[5])] = (n, False)
+                if len(n) == 8 and n[6] == letter:
+                    views.setdefault(int(n[7]), (n, True))
+            assert views, "no patch for %s frame %s" % (sprite, letter)
+            assert 0 in views or set(views) == set(range(1, 9)), (sprite, letter, sorted(views))
+            for rot, v in views.items():
+                out[(sprite, letter, rot)] = v
+    return out
+
+
 def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
-    """V4 — the sprite bank: one RAW-texel run-list per (thing sprite, downscaled texture column,
-    on-screen height BUCKET), plus the per-thing block bases.
+    """V4 / M7 P1.6 -- the sprite bank: one NATIVE run-list per (thing sprite, tier, downscaled
+    texture column), drawn at the thing's height bucket through `rowmap` (docs/gp-sprite-bank.md).
 
-    This is the WPX wall bank's shape, applied to billboards: a wall column bakes per (texture,
-    light, exact height) because its content depends on nothing else, and a sprite column bakes per
-    (sprite, u, height) for the same reason -- a billboard has no perspective within itself. The two
-    differences are both forced by size: heights are BUCKETED (`SPRITE_HEIGHT_BUCKETS`) because the
-    sprite key already carries a texture column, and texels are stored RAW with the light row
-    applied at emit time through `cm.emit` (V1's grain mechanism), so one bank serves every light
-    level instead of being multiplied by 16.
+    A kind's blocks are three REGIONS of `dw` blocks each -- HD (full rows, cap 24), MID (half rows,
+    cap 12), LD (half rows, cap 4; SPR-NEAR only) -- so a column's block is `u + region base`: the
+    record adds, where the per-bucket bank multiplied `u` by 32 (or by the LD bucket count). The
+    record reads `min_b` (op 1) and takes the column only at a bucket >= it; the emit derives the
+    fragment's rows from `n_first` / `n_last` (ops 0 and 2) through the rowmap, and each run's end
+    the same way (stream.frag_derive / frag_runs). Texels are RAW; the light row is applied at emit
+    time through `cm.emit`. `pad 64` puts `sprbank` on a 4096-bit boundary (M7 P1.4).
 
-    A block is `[r0][last_rel][n][ (rel_end, texel) x n ]`. `r0` and `last_rel` sit in the HEADER so
-    the fragment's screen rows are two byte reads, not a pre-walk of the run-list: the RECORD half
-    reads `last_rel` (0 = a fully transparent column, recorded nowhere), and the emit derives
-    y_base / sy1 / sy2 from the header and the thing's slot before it emits anything
-    (stream.frag_derive) -- it composes the column around them, and walking twice would double the
-    only per-fragment loop there is. M7 P1.4: `pad 64` puts `sprbank` on a 4096-bit boundary, so a
-    block is one 16^3-bit window (SPR_BLOCK_STRIDE).
+    After the kinds come the ANIMATION's patches -- every frame and rotation of the map's monsters,
+    barrels, fireballs, puffs and blood (`anim_frames`, `anim_patches`), each distinct lump once,
+    in the same three regions. Nothing draws them before P3; they are here so the image holds them.
 
-    Returns `(bank_text, base_of_kind, dw_of_kind)` — the bank's fj text, each thing type's first
-    block index, and its downscaled width (blocks for a type are laid out u-major, bucket-minor).
-    Run-lists come from `ReferenceModel.sprite_strip`, so oracle and fj cannot drift (R6)."""
+    Returns `(bank_text, base_of_kind, dw_of_kind, ld_base_of_kind, anim_index)` -- each kind's HD
+    region (its MID region is `dw` blocks on), its downscaled width, its LD region, and
+    `{(sprite, frame letter, rotation): (HD region, dw, mirrored)}` for the animation. The lists
+    come from `sprite_tier_lists` -> `doomfj.spritebank`, the functions the oracle draws with (R6)."""
     cache: dict = {}
     # M7 P1.5 (rule 5): the kinds a single-player game DRAWS -- `things.drawable_things`, the one
     # definition -- not every kind with art: a multiplayer-only kind's blocks would never be read
@@ -3245,56 +3336,46 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
     kinds = sorted({t.type for t in drawable_things(rm, map_wad.things(mapname), sprite_wad,
                                                     cache)[0]})
     out = sprite_bank_header()
-    base_of, dw_of, blk = {}, {}, 0
+    base_of, dw_of, ld_base_of, blk = {}, {}, {}, 0
     for kind in kinds:
         art = rm.sprite_art(sprite_wad, kind, cache)
-        cols, dh, dwid, fcols, fdh = art[0], art[1], art[2], art[7], art[8]
-        base_of[kind], dw_of[kind] = blk, dwid
-        for u in range(dwid):
-            for b in range(SPRITE_HEIGHT_BUCKETS):
-                hb_ = sprite_bucket_height(b, cfg.VIEW_H)
-                # V4-HD: tall buckets bake from the FULL-RES column, deeper cap. SPR-NEAR: the
-                # MAIN bank is always FULL detail -- the coarse variants live in the packed LD
-                # region below and only FAR things pick them (R6 mirror of the record site).
-                st = (rm.sprite_strip(fcols[u], fdh, hb_, cap=SPRITE_RUN_CAP_HD)
-                      if hb_ >= SPRITE_HD_H else
-                      rm.sprite_strip(cols[u], dh, hb_, cap=DEG_SPR_MID_CAP))
-                body = [0, 0, 0] if st is None else (
-                    [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
+        base_of[kind], dw_of[kind] = blk, art[2]
+        for t, lists in enumerate(sprite_tier_lists(art, cfg)):
+            if t == 2:
+                ld_base_of[kind] = blk
+            for bl in lists:
+                body = sprite_block_body(bl, SPRITE_HEIGHT_BUCKETS)
                 assert len(body) < SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"   # STRICT: the
                 # rel==0 sentinel in stream.frag_runs / frag_runs_win needs a 0 cell after the body
                 out += [f";{v:#x} * dw" for v in body]
                 out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
                 blk += 1
-    # SPR-NEAR (owner, 2026-08-05): the packed COARSE region -- the SHORT buckets baked at
-    # DEG_SPR_LOWRES_CAP. Only things BEYOND the detail radius (thfar, set in project_thing)
-    # index here: ld_base + u*n_ld + bucket (the low buckets are a prefix, so no offset).
-    # Near things -- however short on screen -- keep the main bank's full detail.
-    ld_base_of = {}
-    if DEG_SPR_NEAR_TZ:
-        n_ld = _spr_nlow(cfg)
-        for kind in kinds:
-            art = rm.sprite_art(sprite_wad, kind, cache)
-            cols, dh, dwid = art[0], art[1], art[2]
-            ld_base_of[kind] = blk
-            for u in range(dwid):
-                for b in range(n_ld):
-                    st = rm.sprite_strip(cols[u], dh, sprite_bucket_height(b, cfg.VIEW_H),
-                                         cap=DEG_SPR_LOWRES_CAP)
-                    body = [0, 0, 0] if st is None else (
-                        [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
-                    assert len(body) < SPR_BLOCK_STRIDE, f"LD block overflows: {len(body)}"       # STRICT, as above
+    # M7 P1.6: every frame and rotation the animation will draw, each distinct lump once
+    anim_index, lump_base = {}, {}
+    for key, (lump, mirrored) in sorted(anim_patches(sprite_wad, anim_frames(map_wad, mapname)).items()):
+        if lump not in lump_base:
+            art = rm.art_of_lump(sprite_wad, lump, cache)
+            lump_base[lump] = (blk, art[2])
+            for lists in sprite_tier_lists(art, cfg):
+                for bl in lists:
+                    body = sprite_block_body(bl, SPRITE_HEIGHT_BUCKETS)
+                    assert len(body) < SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"
                     out += [f";{v:#x} * dw" for v in body]
                     out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
                     blk += 1
+        anim_index[key] = (*lump_base[lump], mirrored)
     assert blk < 0x10000, f"sprite bank blocks overflow sp_base's 4 nibbles: {blk}"
-    return NLJ.join(out) + NLJ, base_of, dw_of, ld_base_of
+    return NLJ.join(out) + NLJ, base_of, dw_of, ld_base_of, anim_index
 
 
-def _spr_nlow(cfg):
-    """How many SHORT buckets (< DEG_SPR_LOWRES_H px) there are -- monotone, so a prefix."""
-    return sum(1 for b in range(SPRITE_HEIGHT_BUCKETS)
-               if sprite_bucket_height(b, cfg.VIEW_H) < DEG_SPR_LOWRES_H)
+def sprite_rowmap_fj(cfg) -> str:
+    """M7 P1.6 -- the rowmap as a D4 DISPATCH table, `rowmap.lookup dst, idx` with `idx` =
+    bucket*256 + normalized row (4 nibbles) -> the screen row below the bucket top (2 nibbles). A
+    dispatch, never a `hex.pointers` read: a pointer read arms another cluster, and the column's
+    next list read could no longer take the narrow arm (docs/gp-sprite-column.md 5.5)."""
+    table = rowmap_table(sprite_bucket_heights(cfg))
+    return generate_dispatch_table_fj("rowmap", [v for row in table for v in row],
+                                      index_nibbles=4, result_nibbles=2)
 
 
 def seg_marks_in(lds, sds, seg, sv) -> bool:

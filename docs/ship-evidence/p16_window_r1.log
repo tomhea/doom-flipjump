@@ -1,0 +1,11 @@
+# R1 (finding 1): the window-walker test FAILS against stream.frag_runs_win with its rowmap lookup replaced by a copy of the normalized end -- on HEAD (928413d M7 P1.6 review: every entry of the EMITTED rowmap is ceil(n * hb / 255) at the oracle's bucket height); the test files from the branch copied in; MUTATED: src/fj/stream_render.fj: '        rowmap.lookup gps_rel, ridx                 // M7 P1.6' -> '        hex.mov 2, gps_rel, ridx                 // M7 P1.6'
+$ python -m pytest tests/fj/test_sprite_bank_fj.py -q -p no:cacheprovider -k window_walker
+E       AssertionError: 42 columns differ, first (case, rows) [((0, 16, 18, 5, 33, 54), [(25, 28), (25, 59), (26, 28), (26, 59), (27, 28), (27, 59)]), ((0, 8, 9, 8, 12, 12), [(13, 30), (13, 130), (14,
+E       assert [((0, 16, 18,..., 184)]), ...] == []
+FAILED tests/fj/test_sprite_bank_fj.py::test_the_window_walker_draws_the_far_fragment_outside_the_near_one
+1 failed, 9 deselected in 24.98s
+rc=1
+# R1 (finding 1): unmutated -- the window walker, the fast/clipped walker and the three skip-the-rowmap mutants (fast, clipped, window) PASS -- on HEAD (928413d M7 P1.6 review: every entry of the EMITTED rowmap is ceil(n * hb / 255) at the oracle's bucket height); the test files from the branch copied in
+$ python -m pytest tests/fj/test_sprite_bank_fj.py -q -p no:cacheprovider -k 'window_walker or shipped_walker or skips_the_rowmap'
+5 passed, 5 deselected in 96.04s (0:01:36)
+rc=0

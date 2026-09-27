@@ -154,8 +154,6 @@ def fj(width, height, lines, selected, colours, label: str = "menu_frame",
 # the keyboard device's keycodes the menu hears (src/fj/input.fj's table): enter and esc, and the
 # forward keys (w, up arrow) as "up" and the back keys (s, down arrow) as "dn". Down edges only.
 MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn"}
-# the number of skills the skill screen offers (wall_renderer.SKILLS; the highlight is an index)
-MENU_SKILLS = 3
 
 
 def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
@@ -167,6 +165,10 @@ def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
     one acted on. `new_game` is the chosen skill's index on the frame NEW GAME is picked -- that
     frame restarts the level at the skill and then runs the world's tic, as the program does -- and
     None on every other frame."""
+    # The skills the screen offers are wall_renderer.SKILLS: ONE tuple for the emitter's screens,
+    # its dispatch and these rules (R6 -- this module kept its own `MENU_SKILLS = 3` until the P1.5
+    # review). Imported here, not at the top, because wall_renderer imports this module.
+    from doomfj.wall_renderer import SKILLS
     if mode == 0:                                   # the world: esc or enter opens the main menu
         if "esc" in events or "enter" in events:
             return 1, 0, sel, None
@@ -184,5 +186,5 @@ def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
     if "up" in events:
         return 1, 1, max(0, sel - 1), None
     if "dn" in events:
-        return 1, 1, min(MENU_SKILLS - 1, sel + 1), None
+        return 1, 1, min(len(SKILLS) - 1, sel + 1), None
     return 1, 1, sel, None

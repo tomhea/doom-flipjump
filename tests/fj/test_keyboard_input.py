@@ -14,6 +14,10 @@ Both show up as a wrong digit line here.
 
 The expected flags come from a plain-Python mirror of the device's own contract (one event per
 tic, due when tic >= event.tic), NOT from the program -- so this compares two independent things.
+
+M7 P1.5: the poll no longer toggles the menu's `mode`; it records the menu's EVENTS -- enter, esc,
+and the down edges of forward and back as up / down -- which the caller zeroes before a frame's
+polls. The printed line is the four held flags, then the four events of that frame.
 """
 from pathlib import Path
 
@@ -30,7 +34,8 @@ CFG = Config()
 
 POLLS = 8          # polls per "frame", the same unroll the emitter uses
 FRAMES = 6
-KEYS = ("f", "b", "l", "r", "m")
+KEYS = ("f", "b", "l", "r")
+EVENTS = ("E", "X", "U", "D")      # the menu's events: enter, esc, up (forward), down (back)
 
 # keycode -> which flag, mirroring the macro's own comment table
 BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b",
@@ -40,15 +45,17 @@ BINDING = {0x77: "f", 0x80: "f", 0x73: "b", 0x81: "b",
 def _program() -> str:
     lines = ["stl.startup_and_init_all"]
     for _ in range(FRAMES):
-        lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kuse, kmode, bad")
+        lines += [f"hex.zero 1, {e}" for e in ("kent", "kesc", "kup", "kdn")]
+        lines.append(f"rep({POLLS}, i) kb.poll kstat, kcode, kfwd, kback, kleft, kright, kuse, "
+                     "kent, kesc, kup, kdn, bad")
         lines += [f"hex.print_as_digit k{name}, 0" for name in
-                  ("fwd", "back", "left", "right")]
-        lines.append("hex.print_as_digit kmode, 0")
+                  ("fwd", "back", "left", "right", "ent", "esc", "up", "dn")]
         lines.append("stl.output 10")
     lines += ["stl.loop",
               # the halt a non-keyboard input stream gets -- '!' so a rejected run is visible
               "bad:", "stl.output_char 0x21", "stl.loop",
-              "kstat: hex.vec 1", "kcode: hex.vec 2", "kmode: hex.vec 1, 1",
+              "kstat: hex.vec 1", "kcode: hex.vec 2",
+              "kent: hex.vec 1", "kesc: hex.vec 1", "kup: hex.vec 1", "kdn: hex.vec 1",
               "kfwd: hex.vec 1", "kback: hex.vec 1", "kleft: hex.vec 1", "kright: hex.vec 1",
               # M2-R4: the USE key (space, 0x20) is a held flag like the four above
               "kuse: hex.vec 1"]
@@ -80,21 +87,26 @@ def _expected(events, binding=None) -> list:
     binding = BINDING if binding is None else binding
     pending = sorted((KeyEvent(*e) for e in events), key=lambda e: e.tic)
     held = {name: 0 for name in KEYS}
-    held["m"] = 1                      # M3: `mode` BAKES to 1 (the game boots into the menu)
+    ev = {name: 0 for name in EVENTS}
     out, index = [], 0
     for tic in range(FRAMES * POLLS):
+        if tic % POLLS == 0:
+            ev = {name: 0 for name in EVENTS}      # zeroed before each frame's polls
         if index < len(pending) and pending[index].tic <= tic:
             event = pending[index]
             index += 1
-            if event.keycode in (0x0D, 0x1B):      # enter / esc toggle the menu, DOWN edge only
+            if event.keycode in (0x0D, 0x1B):      # enter / esc: events, DOWN edge only
                 if event.is_down:
-                    held["m"] ^= 1
+                    ev["E" if event.keycode == 0x0D else "X"] = 1
             else:
                 name = binding.get(event.keycode)
                 if name is not None:
                     held[name] = 1 if event.is_down else 0
+                    if event.is_down and name in ("f", "b"):   # forward / back are up / down too
+                        ev["U" if name == "f" else "D"] = 1
         if tic % POLLS == POLLS - 1:
-            out.append("".join(str(held[name]) for name in KEYS))
+            out.append("".join(str(held[name]) for name in KEYS)
+                       + "".join(str(ev[name]) for name in EVENTS))
     return out
 
 
@@ -115,14 +127,16 @@ SCRIPTS = {
                                     (20, True, 0xFF), (21, True, 0x73)],
     "a key held down twice never sticks off": [(0, True, 0x77), (1, True, 0x77),
                                                (9, False, 0x77)],
-    # M3: the menu toggle. It must flip on the DOWN edge only -- toggling on both edges would
-    # land back where it started and the menu would never open.
-    "enter toggles the menu once per press": [(0, True, 0x0D), (1, False, 0x0D)],
-    "enter twice comes back": [(0, True, 0x0D), (1, False, 0x0D),
-                               (8, True, 0x0D), (9, False, 0x0D)],
-    "esc does the same as enter": [(0, True, 0x1B), (1, False, 0x1B)],
-    "the menu toggle does not disturb the keys": [(0, True, 0x77), (1, True, 0x0D),
+    # M3 / M7 P1.5: the menu's events. Enter and esc are recorded on the DOWN edge only -- acting
+    # on both edges would act twice -- and only in the frame whose polls saw them.
+    "enter is an event on its down edge only": [(0, True, 0x0D), (1, False, 0x0D)],
+    "enter twice, two frames' events": [(0, True, 0x0D), (1, False, 0x0D),
+                                        (8, True, 0x0D), (9, False, 0x0D)],
+    "esc is its own event": [(0, True, 0x1B), (1, False, 0x1B)],
+    "the menu's events do not disturb the keys": [(0, True, 0x77), (1, True, 0x0D),
                                                   (2, False, 0x0D), (16, False, 0x77)],
+    "forward and back are the menu's up and down": [(0, True, 0x80), (1, False, 0x80),
+                                                    (9, True, 0x73), (10, False, 0x73)],
 }
 
 
@@ -145,13 +159,13 @@ def test_a_non_keyboard_input_stream_halts_at_bad(kb_fjm):
 def test_the_mirror_is_not_vacuous():
     """R9 — a check whose two sides are both "all zeros" proves nothing. At least one script must
     drive every flag both up and down."""
-    seen_high = {name: False for name in KEYS}
+    seen_high = {name: False for name in KEYS + EVENTS}
     for events in SCRIPTS.values():
         for frame in _expected(events):
-            for name, digit in zip(KEYS, frame):
+            for name, digit in zip(KEYS + EVENTS, frame):
                 seen_high[name] |= digit == "1"
     assert all(seen_high.values()), seen_high
-    assert any(frame != "0000" for frame in _expected(SCRIPTS["hold w across frames"]))
+    assert any(frame != "00000000" for frame in _expected(SCRIPTS["hold w across frames"]))
 
 
 def test_negative_control_a_wrong_binding_is_caught(kb_fjm):

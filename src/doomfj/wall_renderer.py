@@ -2163,8 +2163,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                         for _ in range(cfg.VIEW_W * 16 ** cfg.SLOT_SHIFT))]
                    + ([f"spslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
-                       # M7 P1.4: the per-THING fragment constants, [y0 + 32768 lo][hi][light][-]
-                       # per slot id (frame.thing_record_body writes, stream.frag_derive reads).
+                       # M7 P1.4: the per-THING fragment constants, [y0 + 32768 lo][hi][light]
+                       # [bucket] per slot id (frame.thing_record_body writes, stream.frag_derive
+                       # reads; the bucket since M7 P1.6).
                        # HERE, inside the narrow-arm window: its reads and writes are full arms,
                        # but an arm5 read may FOLLOW one, and arm5 is exact only while its
                        # predecessor arm is in this block too.
@@ -3188,7 +3189,8 @@ assert SPR_BLOCK_STRIDE == 64, "frame.blk_addr / frame.arm3 are built for 64-op 
 SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot`: two fragments, A and B (below) --
                            #     a power of 16 so the per-column byte offset is a whole-nibble shift.
 SPR_THING_SLOTS = 256      # M7 P1.4: fragment slot ids are ONE byte, 1..255 (0 = no fragment) --
-SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds SPR_THING_SLOT_FIELDS per id, then one unused byte
+SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds SPR_THING_SLOT_FIELDS per id -- byte 3 since M7 P1.6:
+                           #     the thing's bucket, the rowmap's row (stream.frag_derive's)
 # M7 P1.4 -- THE TWO SLOT LAYOUTS, each stated once here. The fj sides are literals: the record
 # writes both (frame.thing_record_body), the emit reads a column's fragments (frame.lines_spr_load)
 # and the derive reads a thing's slot (stream.frag_derive); tests/host/test_sprite_column.py holds
@@ -3196,7 +3198,7 @@ SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds SPR_THING_SLOT_FIELDS per id, th
 SPR_FRAG_FIELDS = ("slot id", "block lo", "block hi")   # a fragment in `spslot`, byte by byte
 SPR_FRAG_BYTES = len(SPR_FRAG_FIELDS)
 SPR_SLOT_B_BYTE = 8        # fragment B's first byte in its column's slot; A's is byte 0
-SPR_THING_SLOT_FIELDS = ("y0 lo", "y0 hi", "light row")   # `gpslot`, byte by byte
+SPR_THING_SLOT_FIELDS = ("y0 lo", "y0 hi", "light row", "bucket")   # `gpslot`, byte by byte
 SPR_THING_Y0_BIAS = 1 << 15   # y0 is stored biased, in two bytes: a tall NEAR sprite's top sits far
                               # above row -128, and a one-byte bias WRAPPED (M13-15M)
 assert SPR_FRAG_BYTES <= SPR_SLOT_B_BYTE <= SPR_SLOT_STRIDE - SPR_FRAG_BYTES

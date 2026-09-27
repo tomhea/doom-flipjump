@@ -613,12 +613,12 @@ ns frame {
         frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.read_byte trb_shade_row, trb_tbl_p
         // M7 P1.4 -- THE THING'S SLOT. A fragment is recorded as (slot, block): its per-THING
-        // constants -- the top row of its bucket, biased, and its light row -- go into
-        // gpslot[s] = [trb_y0 + 32768 lo][hi][shade row][unused] ONCE here, where the old record
-        // biased `trb_y0 + r0` and stored it, with the row clamps and the light row, in every
-        // column. Slot ids run 1..255 (0 = no fragment): at most one per accepted thing, and a
-        // frame accepts no more things than the map draws -- the emitter asserts that count
-        // <= 255. gps_nslot starts every frame at 0 (the restore sets carry it).
+        // constants -- the top row of its bucket, biased, its light row and (M7 P1.6) its bucket,
+        // the rowmap's row -- go into gpslot[s] = [trb_y0 + 32768 lo][hi][shade row][bucket] ONCE
+        // here, where the old record biased `trb_y0 + r0` and stored it, with the row clamps and
+        // the light row, in every column. Slot ids run 1..255 (0 = no fragment): at most one per
+        // accepted thing, and a frame accepts no more things than the map draws -- the emitter
+        // asserts that count <= 255. gps_nslot starts every frame at 0 (the restore sets carry it).
         hex.inc 2, gps_nslot
         hex.mov 2, gps_s_rec, gps_nslot
         hex.zero w/4 - 2, gps_sidx + 2*dw       // Z3: the mov below zeroes the low 2 itself
@@ -705,9 +705,10 @@ ns frame {
         // every column skip: the frame then differed from the oracle by EXACTLY its sprite pixels.
         // M7 P1.4: the block's address by WHOLE-NIBBLE placement (frame.blk_addr: a 64-op block
         // is 16^3 bits, so base + blk*4096 is blk's four nibbles at nibble 3 plus the base) -- and
-        // only last_rel is read, at op 1 of the block (hence the base `sprbank + dw`). The rows are
-        // derived at emit, from the slot and the block header (stream.frag_derive).
-        // M7 P1.6: op 1 is the list's `min_b` -- the column draws at this bucket iff bucket >= min_b
+        // only op 1 of the block is read (hence the base `sprbank + dw`). The rows are derived at
+        // emit, from the slot and the block header (stream.frag_derive).
+        // M7 P1.6: op 1 is the list's `min_b` (read into `trb_run_last`, the P1.4 name of the cell
+        // that held last_rel there) -- the column draws at this bucket iff bucket >= min_b
         // (doomfj.spritebank.min_bucket: a DEFINITION both mirrors share; a transparent column's is
         // past every bucket)
         frame.blk_addr trb_tbl_p, trb_blk, sprbank + dw

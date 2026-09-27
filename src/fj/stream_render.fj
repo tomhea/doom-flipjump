@@ -808,29 +808,31 @@ ns stream {
     //
     // M7 P1.4 (docs/gp-sprite-column.md, v2): A FRAGMENT IS (SLOT, BLOCK). The record stores three
     // bytes per column, `[s][blk lo][blk hi]`; the per-THING constants live in the thing's slot,
-    // `gpslot[s]` = [y0 + 32768 lo][y0 + 32768 hi][light row][unused], written once per accepted
-    // thing (frame.thing_record_body). The rows the record used to compute and store per column
-    // are derived here, where they are used:
+    // `gpslot[s]` = [y0 + 32768 lo][y0 + 32768 hi][light row][bucket] (byte 3 since M7 P1.6: the
+    // rowmap's row), written once per accepted thing (frame.thing_record_body). The rows the
+    // record used to compute and store per column are derived here, where they are used:
     //
-    //   y_base = y0 + r0,  sy1 = clamp(y_base, 0, viewh),  sy2 = clamp(y_base + last_rel, 0, viewh)
+    //   sy1 = clamp(y0 + rowmap[b][n_first], 0, viewh),  sy2 = clamp(y0 + rowmap[b][n_last], 0, viewh)
     //
-    // with r0 / last_rel from the block header [r0][last_rel][n], exactly the oracle's split of a
-    // fragment into the thing's top (`ytop_b`) and the column's first opaque row (`st[0]`).
+    // with y0 the thing's BUCKET TOP and b its bucket (the slot), n_first / n_last the block
+    // header's ops 0 and 2 (`[n_first][min_b][n_last]`, M7 P1.6) -- the oracle's split of a
+    // fragment into the bucket top (`ytop_b`) and the column's first painted row (`st[0]`).
     // The slot is fetched only when it changes (gps_cur_s): a thing's columns are adjacent, so that
     // is once per thing. ⚠ gps_cur_s must be 0 at every frame start -- the M1/M5 restore sets
     // carry it. A stale one does not crash: the next frame's slot 1 would skip the fetch and draw
-    // with the previous frame's thing-1 top row and light.
+    // with the previous frame's thing-1 top row, light and bucket.
     //
-    // Outputs: ybase and top (= y_base + last_rel), signed 4-nibble rows; sy1 / sy2, the clamped
-    // rows (4 nibbles, high byte 0); smidx's HIGH byte = the light row (each run reads its texel
-    // into the low byte); ptr at the block's first (rel, texel) pair.
+    // Outputs: ybase (= y0) and top (= y0 + rowmap[b][n_last]), signed 4-nibble rows; sy1 / sy2,
+    // the clamped rows (4 nibbles, high byte 0); smidx's HIGH byte = the light row (each run reads
+    // its texel into the low byte); ridx's HIGH byte = the bucket (each run reads its n_end into
+    // the low byte); ptr at the block's first (n_end, texel) pair.
     //
     // THE NARROW ARM. `sprbank` is 4096-bit aligned (`pad 64` before it; the emitter asserts
     // SPR_BLOCK_STRIDE == 64 and the build checks the label) and a block is 64 ops = 16^3 bits, so
     // every address inside one block agrees in nibbles >= 3: a read whose predecessor ARM is in
     // the same block can re-arm the low three nibbles only (frame.read3_and_inc). The FIRST read of
-    // a block keeps the full arm -- the derive's r0, and each walker's first rel, since the regions
-    // emitted in between arm elsewhere (frame.step_shade reads stepcol). ⚠ SILENT WHEN BROKEN:
+    // a block keeps the full arm -- the derive's n_first, and each walker's first n_end, since the
+    // regions emitted in between arm elsewhere (frame.step_shade reads stepcol). ⚠ SILENT WHEN BROKEN:
     // anything that arms a pointer between two reads of one walk makes the next narrow read land in
     // the wrong place, and only the pixel gates see it. Keep every walk's loop free of pointer reads.
     // M7 P1.6 -- the lists are NATIVE (doomfj.spritebank): rows normalized to 0..255 of the
@@ -897,18 +899,24 @@ ns stream {
       end:
     }
 
-    // the fragment's runs, as pairs. `rel == 0` is the block's terminator: every real run ends at
-    // row >= 1 and the emitter zero-pads every block, so a 0 always ends the walk (the emitter's
-    // asserts are STRICT, `< SPR_BLOCK_STRIDE`, so that stays true).
-    // FAST PATH when the whole fragment is on screen (0 <= y_base and y_base + last_rel <= viewh):
-    // every run then ends inside [1, viewh], so no per-run sign / zero / limit test can fire and the
-    // row math fits two nibbles (viewh <= 255). A run ending exactly at viewh is the LAST run (it
-    // ends at y_base + last_rel), so running on to the terminator emits what the clipped loop's
-    // stop-at-viewh does. Otherwise the clipped loop -- the old sprite_runs, run for run.
+    // the fragment's runs, as pairs. `n_end == 0` is the block's terminator: every real run's
+    // normalized end is >= 1 and the emitter zero-pads every block, so a 0 always ends the walk (the
+    // emitter's asserts are STRICT, `< SPR_BLOCK_STRIDE`, so that stays true).
+    // FAST PATH when the whole BUCKET box is on screen: 0 <= ybase and top <= viewh. ⚠ M7 P1.6:
+    // ybase is the bucket top y0 now, where it was the fragment's first row y0 + r0 -- r0 >= 0, so
+    // the test is STRICTER than the fragment's own rows: a fragment whose bucket top is above row 0
+    // takes the clipped loop even when every row it paints is on screen (the same pixels, more ops).
+    // Every run then ends inside [1, viewh] (a mapped end is ceil(n_end * hb / 255) >= 1), so no
+    // per-run sign / zero / limit test can fire and the row math fits two nibbles (viewh <= 255).
+    // A run ending exactly at viewh ends the fragment's painted rows, but it is NOT always the last
+    // run any more: runs that map to no row can follow it, each a zero-length pair AT viewh, which
+    // paints nothing (the device refuses only a pair behind the cursor). So running on to the
+    // terminator paints what the clipped loop's stop-at-viewh paints -- the same pixels, with those
+    // empty pairs in the stream. Otherwise the clipped loop -- the old sprite_runs, run for run.
     def frag_runs ybase, top, smidx, ptr, ridx \
             @ chk_bot, fast, fast_loop, fast_have, clipped, cl_loop, cl_have, cl_pos, cl_emit, cl_next, cl_fin, cl_clamp, done \
             < gps_rel, gps_yabs, gps_cvh {
-        hex.sign 4, ybase, clipped, chk_bot
+        hex.sign 4, ybase, clipped, chk_bot     // the BUCKET top (M7 P1.6), not the first row y0 + r0
       chk_bot:
         hex.scmp 4, top, gps_cvh, fast, fast, clipped
       fast:

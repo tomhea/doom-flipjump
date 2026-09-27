@@ -91,6 +91,38 @@ def rekey_by_heat(key, lab, by_heat):
     return out
 
 
+def heat_renames(heat_path):
+    """the `name:old:new` renames a heat list was re-keyed through (heat_rekey.py records them as
+    `rekeyed.renames`), as (name, old, new) -- [] for a list never re-keyed, or no list"""
+    if not heat_path:
+        return []
+    import gzip
+    opener = gzip.open if str(heat_path).endswith(".gz") else open
+    with opener(heat_path, "rt", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    out = []
+    for r in (doc.get("rekeyed") or {}).get("renames", []):
+        name, old, new = r.rsplit(":", 2)
+        out.append((name, int(old), int(new)))
+    return out
+
+
+def rename_hot(hot, renames):
+    """the hot list with every word's key carried through `renames` -- the SAME whole-name rewrite
+    heat_rekey.py applied to the build's heat list. A rung that changes a macro's PARAMETER COUNT
+    renames every path through it: the pool matched the re-keyed list, so the report must look the
+    words up under the names the build has (M7 P1.4: emit_col_lines 45 -> 38 left rank 14
+    UNRESOLVED while the build had pinned it)."""
+    from heat_rekey import pattern
+    words = []
+    for h in hot["words"]:
+        key = h["key"]
+        for name, old, new in renames:
+            key = pattern(name, old).sub("%s(%d)" % (name, new), key)
+        words.append(dict(h, key=key))
+    return dict(hot, words=words)
+
+
 def heat_index(lab):
     by = {}
     for name in lab:
@@ -203,6 +235,11 @@ def exit_code(rows):
 
 def run(a):
     hot = json.loads(Path(a.hot).read_text())
+    renames = heat_renames(a.heat)
+    if renames:
+        hot = rename_hot(hot, renames)
+        print("hot words carried through the heat list's %d rename(s): %s"
+              % (len(renames), ", ".join("%s %d->%d" % r for r in renames)))
     image = FjmImage(a.fjm)
     lab = label_dict(a.labels)
     recon = reconstruct(a.counts_cache, heat=load_heat(a.heat)) if a.counts_cache else None
@@ -235,7 +272,7 @@ def selftest():
     labp = ROOT / "scratchpad" / "12m" / "atlas" / "blocked27.labels.tsv.gz"
     cache = ROOT / "scratchpad" / "12m" / "_counts_game.json.gz"
     logp = ROOT / "docs" / "ship-evidence" / "blocked27_rebuild.log"
-    print("pinreport selftest -- C2, C3 and C6's second half are the negative controls")
+    print("pinreport selftest -- C2, C3, C6's second half and C7's first are the negative controls")
     hot = json.loads(DEFAULT_HOT.read_text())
     image = FjmImage(fjm)
     lab = label_dict(labp)
@@ -291,6 +328,24 @@ def selftest():
     st7 = {r["key"]: r["status"] for r in report(image, lab7, hot, None)}
     check("C6 ... and with two labels of that heat key it is UNRESOLVED (no guessing)",
           st7[mid["key"]] == "UNRESOLVED", st7[mid["key"]])
+
+    # C7 A CHANGED PARAMETER COUNT (M7 P1.4): every label on the mid word's path that carries a macro
+    #    whose count a rung changed is renamed in the table; the report must fail to resolve the word
+    #    WITHOUT the heat list's renames (the negative control) and pin it WITH them
+    mid7 = next(h for h in sorted(hot["words"], key=lambda h: h["rank"])
+                if re.search(r"\w\((\d+)\)---", h["key"]))
+    mname, mcount = re.search(r"([\w.]+)\((\d+)\)---", mid7["key"]).groups()
+    ren = [(mname, int(mcount), int(mcount) + 3)]
+    from heat_rekey import pattern
+    lab8 = {pattern(mname, int(mcount)).sub("%s(%d)" % (mname, int(mcount) + 3), k): v
+            for k, v in lab.items()}
+    st8 = {r["key"]: r["status"] for r in report(image, lab8, hot, None)}
+    check("C7 a word whose macro changed its parameter count is UNRESOLVED without the renames",
+          st8[mid7["key"]] == "UNRESOLVED", "%s: %s" % (mname, st8[mid7["key"]]))
+    hot9 = rename_hot(hot, ren)
+    k9 = next(h["key"] for h in hot9["words"] if h["rank"] == mid7["rank"])
+    st9 = {r["key"]: r["status"] for r in report(image, lab8, hot9, None)}
+    check("C7 ... and PINNED through the heat list's renames", st9[k9].startswith("PINNED"), st9[k9])
 
     # C5 a REAL build that lost pins: b26 (built without --pin-broken/--width-buckets: 10,052 too-wide
     #    declines broke 1,333 groups). Skipped, loudly, if that experiment binary is gone.

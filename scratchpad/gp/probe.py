@@ -132,14 +132,24 @@ def _read_quiet(p: Path) -> str:
 # the label table
 # ================================================================================================
 
+# M7 P1.5 gave the game tier two persisted cells, the skill menu's screen and highlight. A binary
+# built before that rung -- the shipped blocked27 (DEFAULT_FJM) and every baseline before it -- has
+# neither label, and these tools still read those binaries: so a table may LACK them, together (one
+# without the other is not an older binary but a broken table). A Probe then drops the cells they
+# would address, and the known-value check skips their values. Every other label stays required.
+OPTIONAL_LABELS = frozenset({"menu_scr", "menu_sel"})
+
+
 class LabelTable:
     """`name -> bit address` for the names asked for, plus every label ADDRESS in the table (sorted),
-    so a cell spec can be checked against its label's declared extent (the next label up)."""
+    so a cell spec can be checked against its label's declared extent (the next label up).
+    `absent` is the OPTIONAL_LABELS asked for that this table does not have."""
 
-    def __init__(self, addrs: dict, all_addrs: array, source: str):
+    def __init__(self, addrs: dict, all_addrs: array, source: str, absent=frozenset()):
         self.addrs = dict(addrs)
         self.all_addrs = all_addrs
         self.source = source
+        self.absent = frozenset(absent)
 
     @classmethod
     def load(cls, path, names) -> "LabelTable":
@@ -153,15 +163,21 @@ class LabelTable:
                 if name in want:
                     got[name] = a
         missing = sorted(want - set(got))
-        if missing:
-            raise KeyError("label table %s has no %s" % (path, missing[:8]))
-        return cls(got, array("Q", sorted(set(every))), str(path))
+        required = [n for n in missing if n not in OPTIONAL_LABELS]
+        if required:
+            raise KeyError("label table %s has no %s" % (path, required[:8]))
+        absent = frozenset(missing)                      # optional, every one of them
+        if absent and OPTIONAL_LABELS & set(got):
+            raise KeyError("label table %s has %s but not %s -- the skill menu's labels come "
+                           "together (a binary before M7 P1.5 has neither)"
+                           % (path, sorted(OPTIONAL_LABELS & set(got)), sorted(absent)))
+        return cls(got, array("Q", sorted(set(every))), str(path), absent)
 
     def shifted(self, delta_bits: int) -> "LabelTable":
         """THE NEGATIVE CONTROL'S INPUT: the same table with every address moved by `delta_bits`."""
         return LabelTable({k: v + delta_bits for k, v in self.addrs.items()},
                           array("Q", (a + delta_bits for a in self.all_addrs)),
-                          "%s (shifted %+d bits)" % (self.source, delta_bits))
+                          "%s (shifted %+d bits)" % (self.source, delta_bits), self.absent)
 
     def __getitem__(self, name):
         return self.addrs[name]
@@ -216,7 +232,10 @@ class Probe:
     readings. `GameBinary.run` attaches it (attach(device_memory, core))."""
 
     def __init__(self, cells: dict, labels: LabelTable, width: int = 32, strict: bool = True):
-        self.cells = dict(cells)
+        # a cell whose OPTIONAL label the table lacks (a binary before M7 P1.5: see OPTIONAL_LABELS)
+        # is not probed; `absent` names it, and check_known skips its known value
+        self.absent = frozenset(k for k, c in cells.items() if c.label in labels.absent)
+        self.cells = {k: c for k, c in cells.items() if k not in self.absent}
         self.labels = labels
         self.w = width
         self.dw = 2 * width
@@ -354,9 +373,12 @@ class Probe:
 
     # ---- the known-value check (control C3) ---------------------------------------------------------
     def check_known(self, expected: dict) -> list:
-        """[(cell, want, got_or_layout_error)] for every cell that does not hold its known value"""
+        """[(cell, want, got_or_layout_error)] for every cell that does not hold its known value
+        (a cell this binary has no label for -- `absent` -- has no value to hold)"""
         bad = []
         for key, want in expected.items():
+            if key in self.absent:
+                continue
             try:
                 got = self.read_cells([key])[key]
             except CellLayoutError as e:
@@ -573,7 +595,8 @@ class GameBinary:
 
 def game_cells(ndoors: int) -> dict:
     """the persisted world state of the standalone game tier (build.STANDALONE_PERSIST +
-    DOOR_PERSIST) as probe cells"""
+    DOOR_PERSIST) as probe cells. `menu_scr` / `menu_sel` are OPTIONAL_LABELS: a Probe on a binary
+    built before M7 P1.5 drops them (its label table has neither)."""
     from doomfj.doorcode import WAIT_NIBBLES
     cells = {"viewx": Cell("viewx", "hex", 8, signed=True),
              "viewy": Cell("viewy", "hex", 8, signed=True),
@@ -626,7 +649,8 @@ class Oracle:
 
     def known_pristine(self) -> dict:
         """what the game tier BAKES, from sources independent of the binary: the WAD's player
-        start, the menu mode, every key up, every door shut and idle (doors.initial_states)"""
+        start, the menu mode, every key up, every door shut and idle (doors.initial_states) --
+        and M7 P1.5's menu cells, which Probe.check_known skips on a binary that predates them"""
         from doomfj.doors import IDLE
         nd = self.ndoors
         from doomfj.wall_renderer import BOOT_SKILL, SKILLS
@@ -1062,7 +1086,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
                   "ddir": tuple(dsim.ds[si][1] for si in orc.door_order),
                   "dsub": tuple(dsim.ds[si][2] for si in orc.door_order),
                   "dwait": tuple(dsim.ds[si][3] for si in orc.door_order)}
-        diff = [k for k in want_s if g[k] != want_s[k]]
+        diff = [k for k in want_s if k not in p.absent and g[k] != want_s[k]]
         s_ok = not diff
         pix = r.frames[f] == (orc.render(st.x, st.y, st.angle, orc.door_states_tuple(dsim.ds))
                               if mode == 0 else menu)

@@ -1913,15 +1913,18 @@ class ReferenceModel:
                 _drawable = [replace(t, x=px, y=py)
                              for t, (px, py) in zip(_drawable, thing_positions)]
             # M14.5 §3.3: the visibility flags. `thing_hidden` is a set of DRAWABLE indices the
-            # host has removed from the world (picked up, destroyed). Only a baked VANISHABLE thing
-            # has a flag to clear, and asking to hide anything else is a host bug, not a picture.
+            # host has removed from the world (picked up, destroyed). A baked thing can be hidden
+            # only through its flag, so only a baked VANISHABLE one may be named; asking to hide
+            # another baked thing is a host bug, not a picture. M7 P1.5: a RUNTIME thing may be
+            # named too -- the one a skill does not spawn (`things.skill_absent`), which fj holds
+            # by linking it into no leaf list.
             _hidden = frozenset(thing_hidden or ())
             if _hidden:
                 _slots = vanishable_slots(_drawable_spawn, _baked, VANISHABLE_TYPES)
-                _bad = sorted(_hidden - set(_slots))
+                _bad = sorted(di for di in _hidden - set(_slots) if di >= len(_baked) or _baked[di])
                 assert not _bad, (
-                    f"thing_hidden names things {_bad[:8]} that have no visibility flag -- only "
-                    f"BAKED VANISHABLE things do (see doomfj.things.vanishable_slots)")
+                    f"thing_hidden names baked things {_bad[:8]} that have no visibility flag -- "
+                    f"only BAKED VANISHABLE things do (see doomfj.things.vanishable_slots)")
             # ⚠ BAKED FIRST, THEN RUNTIME, per leaf -- the ONE order fj can produce, because the
             # baked things are call sites emitted in the leaf and the runtime ones are a list walked
             # after them. It is wad order within each class, and at spawn every leaf holds only one

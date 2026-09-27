@@ -18,12 +18,15 @@ from __future__ import annotations
 
 # a 3x5 font: one string of 5 rows, 3 columns each, '#' = ink. 4 px per character with the gap, so
 # a 160-wide screen fits 40 characters — enough for a menu and nothing more, which is the point.
+# M7 P1.5 (the owner, 2026-09-27: "make it more clear that this is an M"): M is FIVE columns wide --
+# three cannot draw its two strokes and the dip between them -- so a glyph is as wide as its rows
+# (`glyph_width`), and every line is laid out by `text_width`, not by a fixed cell.
 _GLYPHS = {
     "A": "###|# #|###|# #|# #", "B": "## |# #|## |# #|## ", "C": "###|#  |#  |#  |###",
     "D": "## |# #|# #|# #|## ", "E": "###|#  |## |#  |###", "F": "###|#  |## |#  |#  ",
     "G": "###|#  |# #|# #|###", "H": "# #|# #|###|# #|# #", "I": "###| # | # | # |###",
     "J": "  #|  #|  #|# #|###", "K": "# #|# #|## |# #|# #", "L": "#  |#  |#  |#  |###",
-    "M": "# #|###|###|# #|# #", "N": "## |# #|# #|# #|#  ", "O": "###|# #|# #|# #|###",
+    "M": "#   #|## ##|# # #|#   #|#   #", "N": "## |# #|# #|# #|#  ", "O": "###|# #|# #|# #|###",
     "P": "###|# #|###|#  |#  ", "Q": "###|# #|# #|###|  #", "R": "###|# #|## |# #|# #",
     "S": "###|#  |###|  #|###", "T": "###| # | # | # | # ", "U": "# #|# #|# #|# #|###",
     "V": "# #|# #|# #|# #| # ", "W": "# #|# #|###|###|# #", "X": "# #|# #| # |# #|# #",
@@ -36,7 +39,23 @@ _GLYPHS = {
     ":": "   | # |   | # |   ", "/": "  #|  #| # |#  |#  ", ">": "#  | # |  #| # |#  ",
 }
 GLYPH_W, GLYPH_H, GLYPH_GAP = 3, 5, 1
-CELL_W = GLYPH_W + GLYPH_GAP
+CELL_W = GLYPH_W + GLYPH_GAP            # the usual advance; the truncation budget below counts it
+
+# M7 P1.5 (the owner, 2026-09-27): the creator's credit, drawn on every menu screen in the corner,
+# in a dim gray (palette_colours' fourth colour). The font has capitals only; a domain name is
+# case-insensitive, so this is the owner's "tomhe.app".
+CREDIT = "TOMHE.APP"
+CREDIT_MARGIN = 2                        # px from the right and bottom edges
+CREDIT_LUMA = 0.4                        # the credit's gray: this fraction of the text's brightness
+
+
+def glyph_width(ch: str) -> int:
+    return len(_GLYPHS.get(ch, _GLYPHS[" "]).split("|")[0])
+
+
+def text_width(label: str) -> int:
+    """the pixel width of `label` as drawn: each glyph's own width, one gap between glyphs"""
+    return sum(glyph_width(ch) for ch in label) + GLYPH_GAP * max(0, len(label) - 1)
 
 # the protocol's own constants, from the device that decodes them -- NOT a third private copy.
 # (tests/fj/stream_screen.py has the lab decoder's; this file had a second. R6 is one source.)
@@ -45,10 +64,12 @@ from flipjump.interpreter.io_devices.ScreenIO import COLLINES_END as END
 
 
 def palette_colours(palette_rgb) -> tuple:
-    """(background, text, highlight) palette indices, DERIVED from the wad's own PLAYPAL.
+    """(background, text, highlight, credit) palette indices, DERIVED from the wad's own PLAYPAL.
 
     `palette_rgb` is the flat RGB byte sequence (3 per entry) the emitter already bakes. Picking
-    indices by hand would be two magic numbers that a different palette silently invalidates."""
+    indices by hand would be magic numbers that a different palette silently invalidates. The
+    credit (M7 P1.5) is the GRAY -- channels within 8 of each other -- whose brightness is nearest
+    CREDIT_LUMA of the text's: a dim gray, from the same palette."""
     entries = [tuple(palette_rgb[3 * i:3 * i + 3]) for i in range(len(palette_rgb) // 3)]
 
     def luma(c):
@@ -58,12 +79,28 @@ def palette_colours(palette_rgb) -> tuple:
     text = max(range(len(entries)), key=lambda i: luma(entries[i]))
     highlight = max(range(len(entries)),
                     key=lambda i: entries[i][0] - (entries[i][1] + entries[i][2]) / 2)
-    return background, text, highlight
+    grays = [i for i in range(len(entries)) if max(entries[i]) - min(entries[i]) <= 8]
+    target = CREDIT_LUMA * luma(entries[text])
+    credit = min(grays, key=lambda i: abs(luma(entries[i]) - target))
+    return background, text, highlight, credit
+
+
+def _draw(out, width, height, label, x0, y0, ink):
+    """`label` at (x0, y0), glyph after glyph at their own widths; clipped to the screen"""
+    x = x0
+    for ch in label:
+        glyph = _GLYPHS.get(ch, _GLYPHS[" "]).split("|")
+        for gy in range(GLYPH_H):
+            for gx, cell in enumerate(glyph[gy]):
+                if cell == "#" and 0 <= x + gx < width and 0 <= y0 + gy < height:
+                    out[(y0 + gy) * width + x + gx] = ink
+        x += len(glyph[0]) + GLYPH_GAP
 
 
 def _bitmap(width, height, lines, selected, colours):
-    """The menu as a width*height list of palette indices. THE picture, for both mirrors."""
-    background, text, highlight = colours
+    """The menu as a width*height list of palette indices. THE picture, for both mirrors: the lines
+    centred, and the owner's CREDIT in the bottom-right corner in its dim gray."""
+    background, text, highlight, credit = colours
     out = [background] * (width * height)
     if not lines:
         return out
@@ -73,17 +110,10 @@ def _bitmap(width, height, lines, selected, colours):
         ink = highlight if row == selected else text
         label = ("> " + line) if row == selected else ("  " + line)
         label = label.upper()[:width // CELL_W]
-        x0 = max(0, (width - len(label) * CELL_W) // 2)
-        y0 = top + row * (GLYPH_H + 2)
-        for k, ch in enumerate(label):
-            glyph = _GLYPHS.get(ch, _GLYPHS[" "]).split("|")
-            for gy in range(GLYPH_H):
-                for gx in range(GLYPH_W):
-                    if glyph[gy][gx] != "#":
-                        continue
-                    x, y = x0 + k * CELL_W + gx, y0 + gy
-                    if 0 <= x < width and 0 <= y < height:
-                        out[y * width + x] = ink
+        x0 = max(0, (width - text_width(label)) // 2)
+        _draw(out, width, height, label, x0, top + row * (GLYPH_H + 2), ink)
+    _draw(out, width, height, CREDIT, width - CREDIT_MARGIN - text_width(CREDIT),
+          height - CREDIT_MARGIN - GLYPH_H, credit)
     return out
 
 

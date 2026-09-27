@@ -19,7 +19,7 @@ from doomfj.menu import fj as menu_fj, pixels, stream
 CFG = Config()
 VW, VH = CFG.VIEW_W, CFG.VIEW_H
 LINES = ["DOOM ON FLIPJUMP", "", "NEW GAME", "LEVEL 1", "QUIT"]
-COLOURS = (0, 4, 176)
+COLOURS = (0, 4, 176, 101)          # palette_colours of the E1M1 PLAYPAL (bg, text, hi, credit)
 SRC = [Path("src/fj") / "present.fj"]
 
 

@@ -19,7 +19,7 @@ from doomfj.menu import CELL_W, fj, palette_colours, pixels, stream
 CFG = Config()
 W, H = CFG.VIEW_W, CFG.VIEW_H
 LINES = ["DOOM ON FLIPJUMP", "NEW GAME", "LEVEL 1", "LEVEL 5", "LEVEL 8", "QUIT"]
-COLOURS = (0, 4, 176)
+COLOURS = (0, 4, 176, 101)          # palette_colours of the E1M1 PLAYPAL
 
 
 def _feed(device, data: bytes):
@@ -46,7 +46,7 @@ def test_the_stream_paints_exactly_the_oracle_picture(selected):
 def test_the_picture_is_not_blank():
     """R9 — two mirrors that agree on an empty screen agree about nothing."""
     grid = pixels(W, H, LINES, 0, COLOURS)
-    assert len(set(grid)) == 3, sorted(set(grid))
+    assert len(set(grid)) == 4, sorted(set(grid))          # background, text, highlight, credit
     assert 0 < sum(1 for p in grid if p != COLOURS[0]) < W * H
 
 
@@ -105,13 +105,14 @@ def test_long_lines_are_clipped_not_overflowed():
 
 
 def test_palette_colours_are_derived_not_guessed():
-    """Black is darkest, white brightest, and the highlight is the reddest entry."""
+    """Black is darkest, white brightest, the highlight is the reddest entry, and the credit is the
+    gray nearest 40% of the text's brightness (0.4 * 210 = 84: the gray of 90, entry 3)."""
     rgb = bytearray()
     for i in range(8):
         rgb += bytes([i * 30, i * 30, i * 30])
     rgb += bytes([255, 0, 0])
-    background, text, highlight = palette_colours(rgb)
-    assert background == 0 and text == 7 and highlight == 8
+    background, text, highlight, credit = palette_colours(rgb)
+    assert background == 0 and text == 7 and highlight == 8 and credit == 3
 
 
 def test_a_wrong_picture_is_caught(monkeypatch):
@@ -188,3 +189,34 @@ def test_the_menu_keys_are_the_devices():
     """the keycodes kb.poll turns into the menu's events (src/fj/input.fj's table)"""
     from doomfj.menu import MENU_KEYS
     assert MENU_KEYS == {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn"}
+
+
+# -- M7 P1.5 (the owner, 2026-09-27): the credit, and an M that reads as an M ----------------------
+
+def test_the_credit_sits_in_the_bottom_right_corner_in_its_dim_gray():
+    """the owner's "tomhe.app" on every menu screen: CREDIT drawn at CREDIT_MARGIN px from the right
+    and bottom edges, in palette_colours' fourth colour -- and that colour nowhere else"""
+    from doomfj.menu import CREDIT, CREDIT_MARGIN, GLYPH_H, _GLYPHS, glyph_width, text_width
+    for lines, sel in ((LINES, 0), (["CHOOSE SKILL", "", "EASY", "MEDIUM", "HARD"], 4)):
+        grid = pixels(W, H, lines, sel, COLOURS)
+        x0, y0 = W - CREDIT_MARGIN - text_width(CREDIT), H - CREDIT_MARGIN - GLYPH_H
+        want, x = set(), x0
+        for ch in CREDIT:
+            rows = _GLYPHS[ch].split("|")
+            want |= {(x + gx, y0 + gy) for gy in range(GLYPH_H) for gx, c in enumerate(rows[gy])
+                     if c == "#"}
+            x += glyph_width(ch) + 1
+        got = {(i % W, i // W) for i, p in enumerate(grid) if p == COLOURS[3]}
+        assert got == want, sorted(got ^ want)[:8]
+        assert x - 1 == W - CREDIT_MARGIN, "the credit does not end at the margin"
+
+
+def test_the_m_is_five_columns_with_two_stems_and_a_dip():
+    """three columns cannot draw an M's two strokes and the dip between them: it is five wide, its
+    outer columns full, its middle column inked only at the dip's point (row 2)"""
+    from doomfj.menu import _GLYPHS, glyph_width, text_width
+    rows = _GLYPHS["M"].split("|")
+    assert glyph_width("M") == 5 and all(len(r) == 5 for r in rows)
+    assert all(r[0] == "#" and r[4] == "#" for r in rows)
+    assert [r[2] for r in rows] == [" ", " ", "#", " ", " "]
+    assert text_width("MM") == 11 and text_width("HH") == 7          # widths add, one gap between

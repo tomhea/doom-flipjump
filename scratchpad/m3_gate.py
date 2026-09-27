@@ -137,7 +137,7 @@ def main():
 
     events = [KeyEvent(f * STANDALONE_POLLS + p, d, c) for f, p, d, c in SCRIPT]
     print("fjm    : %s" % args.fjm)
-    print("menu   : %s   colours bg=%d text=%d hi=%d" % (DEFAULT_MENU, *colours))
+    print("menu   : %s   colours bg=%d text=%d hi=%d credit=%d" % (DEFAULT_MENU, *colours))
     print("skills : %s -- hidden %s; the boot skill is %s"
           % (SKILL_MENU[SKILL_MENU_FIRST:], [len(hidden[s]) for s in SKILLS],
              SKILL_NAMES[BOOT_SKILL]))

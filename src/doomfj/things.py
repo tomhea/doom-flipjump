@@ -68,14 +68,26 @@ def cold_row(row):
     return tuple(row[i] for i in _COLD_FIELDS)
 
 
+def single_player(t):
+    """M7 P1.5 (D7): does the thing exist on SOME single-player skill? DOOM's P_SpawnMapThing drops a
+    multiplayer-only thing (`options & MTF_NOTSINGLE` outside a netgame) and one with no skill bit.
+    ONE predicate for the thing universe: `drawable_things` below (the renderer, the oracle, every
+    gate) and the gameplay model (`world.World`) both take it. E1M1: 26 of the 251 things with art
+    are multiplayer-only (18 pickups, 8 decor); the image holds the other 225, the union of the three
+    skills, and which of those a game has is the skill's level-start state."""
+    from doomfj import gamedata as gd          # lazy: gamedata reads the oracle's constants at import
+    return (not t.flags & gd.MTF_NOTSINGLE
+            and bool(t.flags & (gd.MTF_EASY | gd.MTF_NORMAL | gd.MTF_HARD)))
+
+
 def drawable_things(rm, things, sprite_wad, cache=None):
-    """`(drawable, wad_indices)` -- the things that have art, in wad order.
+    """`(drawable, wad_indices)` -- the single-player things that have art, in wad order.
 
     ONE definition of "drawable", so the emitter, the oracle and every gate index the same list."""
     cache = {} if cache is None else cache
     out, idx = [], []
     for i, t in enumerate(things):
-        if rm.sprite_art(sprite_wad, t.type, cache) is not None:
+        if single_player(t) and rm.sprite_art(sprite_wad, t.type, cache) is not None:
             out.append(t)
             idx.append(i)
     return out, idx
@@ -135,6 +147,8 @@ def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_typ
     cache = {} if cache is None else cache
     rows, idx = [], []
     for i, t in enumerate(things):
+        if not single_player(t):
+            continue                                    # M7 P1.5: on no single-player skill
         art = rm.sprite_art(sprite_wad, t.type, cache)
         if art is None:
             continue                                    # a start / teleport spot / unknown

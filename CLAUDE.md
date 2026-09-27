@@ -28,8 +28,10 @@ belongs in this file without its `--validate` output. `docs/handoff-m4-nine-leve
 **M1** (the self-resetting loop), **M5** (the standalone `.fjm`), **M3** (the menu — a second
 frame producer chosen by a persisted `mode` cell) and **M2** (the runtime door) are DONE, as is the
 whole flag retirement — `build_wall_renderer` is SIX parameters and takes a `tier` name:
-`fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu and enter
-starts the game, WASD moves, space opens doors. **M4** (more levels) is DEFERRED: the owner set
+`fj --run build/doom_e1m1_menu.fjm --io pc --flat-max-words 134217728` boots into a menu, WASD
+moves, space opens doors. On that (M3) binary's menu enter starts the game; from M7 P1.5's game tier
+on, enter opens the skill screen (w/s pick easy/medium/hard, enter starts a new game at it, esc
+backs out) and esc resumes the world. **M4** (more levels) is DEFERRED: the owner set
 the goal at 1-3 levels and, for now, E1M1 only (2026-09-25/26); the current milestone is the
 fully playable E1M1 (`docs/handoff-gameplay.md`). Then M6 (ship).
 ⚠ The three-level plan in `handoff-m5-m2-m3-m4.md` section 5 is SUPERSEDED, and its "9x" reasoning

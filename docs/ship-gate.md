@@ -10,30 +10,31 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked29.fjm`, sha256 `a90f172ee718be63` (first 16 hex), built 2026-09-27 from the command in 1b (M7 P1.2, player collision cells) | rebuilt byte-identical from that line with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked29r_build.log`) |
-| **ms/frame, quiet box** | **64.4 ms/frame** (63.8-67.4), against **74.0** (73.0-81.4) for blocked28 in the same run -- **B FASTER: all 5 pairs, median x1.155** | `msframe.py --a build/doom_e1m1_blocked29.fjm --against shipped`, 200 frames x 5 reps, pinned to core 2, engine `79af8639`, yardstick 3.62 G, pixels identical across arms and reps (`docs/ship-evidence/blocked29_msframe.log`; the base arm's first rep, 81.4, ran beside a test job, and every pair agreed anyway) |
-| **fj ops/s** | **235 M** (235.4 M; blocked28 227.8 M in the same run) | same run; ops/frame **15,147,330** on msframe's forward-walk script (blocked28 16,858,606): 10.2% fewer ops at a 3.3% higher rate |
-| **binding metric** (owner spec) | (mean+p80)/2 = **14,780,831 ops/frame -- PASS** (mean 12,512,838; p80 17,048,823) | `gamespeed.py --fjm build/doom_e1m1_blocked29.fjm`, 2026-09-27 (`docs/ship-evidence/blocked29_gamespeed.log`); `--validate` replays the ORACLE, which a placement cannot move (`blocked27_gamespeed.log`); its per-frame record -- pose and all 13 door states -- equals THIS binary on every frame of all ten runs, both negative controls rejected (`gamespeed_trail.py --fjm build/doom_e1m1_blocked29.fjm`, `blocked29_gamespeed_trail.log`): the collision rewrite walks the same trajectories |
-| **size** | **27.35% of 2^27 -- PASS** (36,706,788 words; span 90,467,488) | same run |
-| **combat set v2** (the CAP-22 set, handoff-gameplay section 1) | (mean+p80)/2 = **15,485,242** (blocked28 16,448,992; B0 17,760,774); **15,519,673** with strafe's collision (blocked28 16,794,857); every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --fjm build/doom_e1m1_blocked29.fjm ... --pixel-every 1 --proxy` (`docs/ship-evidence/blocked29_b0_v2.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked30.fjm`, sha256 `0dd3806016af68cd` (first 16 hex), built 2026-09-27 from the command in 1b (M7 P1.3, persistent leaf lists) | rebuilt byte-identical from that line with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked30r_build.log`) |
+| **ms/frame, quiet box** | **62.8 ms/frame** (62.1-63.7), against **64.2** (63.8-64.4) for blocked29 in the same run -- **NOT SEPARATED: faster in all 5 pairs, median x1.021, under the 3% rule**; shipped as the foundation for P3 (the ship gate's clause for a class-S rung) | `msframe.py --a build/doom_e1m1_blocked29.fjm --b build/doom_e1m1_blocked30.fjm`, 200 frames x 5 reps, pinned core (`blocked30_msframe.log`) |
+| **fj ops/s** | **234 M** (233.8 M; blocked29 235.8 M in the same run) | same run; ops/frame **14,677,635** on msframe's forward-walk script (blocked29 15,147,330): 3.1% fewer ops at a 0.8% lower rate |
+| **binding metric** (owner spec) | (mean+p80)/2 = **14,318,431 ops/frame -- PASS** (mean 12,050,945; p80 16,585,916) | `gamespeed.py --fjm build/doom_e1m1_blocked30.fjm`, 2026-09-27 (`docs/ship-evidence/blocked30_gamespeed.log`); `gamespeed_trail.py`: the binary's pose and door states equal `--validate`'s record on every frame of all ten runs, both controls rejected |
+| **size** | **26.98% of 2^27 -- PASS** (36,208,972 words; span 90,399,040) | same run |
+| **combat set v2** (the CAP-22 set, handoff-gameplay section 1) | (mean+p80)/2 = **15,041,859** (blocked29 15,485,242; B0 17,760,774); **15,077,276** with strafe's collision (blocked29 15,519,673); every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --pixel-every 1 --proxy` (`blocked30_b0_v2.log`) |
 
-**What it is:** blocked28 with the player's collision on 32-unit CELLS (M7 P1.2,
-`docs/gp-collision-cells.md`): `check_position` stops walking the blockmap through packed tables
-(576K ops a check) and runs a precomputed cell -- a `sim.jump16` tree on the 16.16 centre to the
-cell's stub, one stub per listed line xoring that line's constants around ONE shared line test.
-Collision fell from 1,475,186 to 122,218 ops a frame on gamespeed's ten games (profx,
-`blocked29_phases.log`), the binding by 1.58M, and the image by 6.5M words: the old walk's code and
-packed tables are gone -- 2.3M words of the inline program and 4.2M of the pool's payload
-(`blocked29_poolmap.log`). Same pixels, same trajectories; B FASTER in every pair. The binary it replaced, blocked28 (sha256 `9fe88c6187a82921`: 73.4 ms/frame
-quiet, binding 16,357,904, 32.21%), is kept in `build/` as the comparison arm.
+**What it is:** blocked29 with the per-leaf thing lists PERSISTENT (M7 P1.3,
+`docs/gp-leaf-lists.md`): the game tier bakes each leaf's runtime things into `sshead`/`thnext` (the
+spawn lists `sim.bind_things` used to rebuild every frame) and the M1 reset stops restoring the
+heads, the bindings and the positions (`build.THING_PERSIST`). `sim.bind_things` fell from 401,796
+ops a frame to 0 and the reset from 226,935 to 94,229 on gamespeed's ten games (profx,
+`blocked30_phases.log`); the binding fell 462,400. The per-move relink (`sim.leaf_link` /
+`sim.leaf_unlink`, DOOM's P_UnsetThingPosition / P_SetThingPosition) lands tested and uncalled: P3's
+moving monsters call it. Same pixels, same trajectories; NOT SEPARATED on ms/frame. The binary it
+replaced, blocked29 (sha256 `a90f172ee718be63`: 64.4 ms/frame quiet, binding 14,780,831, 27.35%),
+is kept in `build/` as the comparison arm.
 
 blocked25 read 99-104 ms/frame with a background video render at ~0.3-0.45 core -- under
 msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27 has not been timed
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
-(re-frozen 2026-09-27 on blocked29, a quiet box: 64.2 ms/frame [64.0 .. 65.1], yardstick 3.63 G
--- `blocked29_msframe_freeze.log`; the stored ms is informational; `--against shipped` RE-MEASURES
+(re-frozen 2026-09-27 on blocked30, a quiet box: 63.5 ms/frame [63.3 .. 64.5], yardstick 3.63G
+-- `blocked30_msframe_freeze.log`; the stored ms is informational; `--against shipped` RE-MEASURES
 both arms live, and the binary hash is what it checks), so `--against shipped` is the comparison.
 
 ## 1b. The build command, and the play command
@@ -118,10 +119,19 @@ recount, and the same line at the rebased head HIT it and produced `a90f172ee718
 included (`blocked29r_build.log`, 4814 s) -- **VERIFIED byte-identical.** Its label table is
 `scratchpad/12m/atlas/blocked29.labels.tsv.gz`.
 
+**blocked30 (2026-09-27, M7 P1.3): the line did not change** -- still blocked27's heat list; the
+source did, so the counts cache MISSED and recounted (17,496 groups after alias merging, 336,374
+tables) and the build took 7,234 s: sha256 `0dd3806016af68cd` (`docs/ship-evidence/blocked30_build.log`). All 20
+hot groups matched; 14,083 of the list's 35,894 hot sites did. The tracked counts cache is that
+recount, and the same line at the branch head HIT it and produced `0dd3806016af68cd` again, label table included
+(`7bc5fa5d...`; `blocked30r_build.log`, 4,769 s) -- **VERIFIED byte-identical.** Its label table is
+`scratchpad/12m/atlas/blocked30.labels.tsv.gz`. (A first build of this rung was stopped in pass 1:
+it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
+
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 
 ```
-fj --run build/doom_e1m1_blocked29.fjm --io pc --flat-max-words 134217728
+fj --run build/doom_e1m1_blocked30.fjm --io pc --flat-max-words 134217728
 ```
 
 `--run` is not optional (`fj a.fjm` assembles); the flat window must be the full 2^27 words or

@@ -1,0 +1,31 @@
+$ python scratchpad/12m/pinreport.py --fjm build/doom_e1m1_blocked30.fjm --labels scratchpad/12m/atlas/blocked30.labels.tsv.gz --counts-cache scratchpad/12m/_counts_game.json.gz --heat scratchpad/12m/heat_blocked27.json.gz --build-log docs/ship-evidence/blocked30_build.log
+pin report: doom_e1m1_blocked30.fjm against the hot list of doom_e1m1_blocked27.fjm (20 words, profiled on games)
+rank status               pc(b)   ref pc        tables dispatch/fr  source word
+   1 PINNED                   2        2 59,786/59,786     139,824  (hex.tables.res + 32)
+   2 PINNED, BASE MOVED       1        3       165/165       6,608  ((hex.pointers.to_ptr_var + 128) + 32)
+   3 PINNED, BASE MOVED       2        3       165/165       6,608  ((hex.pointers.to_ptr_var + 192) + 32)
+   4 PINNED, BASE MOVED       2        4       165/165       6,608  ((hex.pointers.to_ptr_var + 256) + 32)
+   5 PINNED, BASE MOVED       3        3         94/94       4,146  ((hex.pointers.to_ptr_var + 320) + 32)
+   6 PINNED, BASE MOVED       2        5       165/165       6,608  ((hex.pointers.to_ptr_var + 64) + 32)
+   7 PINNED, BASE MOVED       3        4       937/297      19,383  ((hex.pointers.read_byte + 0) + 32)
+   8 PINNED, BASE MOVED       4        5       916/276      17,436  ((hex.pointers.read_byte + 64) + 32)
+   9 PINNED, BASE MOVED       3        4         94/94       4,146  ((hex.pointers.to_ptr_var + 384) + 32)
+  10 PINNED, BASE MOVED       4        2       165/165       6,608  ((hex.pointers.to_ptr_var + 0) + 32)
+  11 PINNED, BASE MOVED       2        4   2,626/2,626       2,873  ((ecl_cmidx + 0) + 32)
+  12 PINNED, BASE MOVED       3        1   5,077/5,077       3,768  (((ecl_cmidx + 128) + 0) + 32)
+  13 PINNED, BASE MOVED       2       12         14/14       1,669 *((f13:l1977:sim.thing_pass(3)---hp + 128) + 32)
+  14 PINNED, BASE MOVED       3        8       145/145       2,540 *((f13:l1981:frame.seg_pass2_leaf_body_lines(27)---f5:l2625:strea
+  15 PINNED, BASE MOVED       3        5   2,626/2,626       2,873  ((ecl_cmidx + 64) + 32)
+  16 PINNED, BASE MOVED       3        8         14/14       1,669 *((f13:l1977:sim.thing_pass(3)---hp + 64) + 32)
+  17 PINNED, BASE MOVED       4        4         94/94       4,146  ((hex.pointers.to_ptr_var + 448) + 32)
+  18 PINNED, BASE MOVED       4        6         34/34       1,397  ((tsf_sfslot_p + 128) + 32)
+  19 PINNED, BASE MOVED       5       12         14/14       1,669 *((f13:l1977:sim.thing_pass(3)---hp + 192) + 32)
+  20 PINNED, BASE MOVED       3        2   5,077/5,077       3,768  (((ecl_cmidx + 128) + 64) + 32)
+
+hot words pinned: 20 of 20; lost 0; unresolved 0; base moved 19; mismatch vs the counts cache 0
+(* 4 hot word(s) re-keyed: their label moved, and this build has exactly one label with the same heat key -- the name flipjump's pool matched them by)
+pool (build log): declines no-block 2,703, too-wide 0, overflow 0
+pool (build log): broken groups 0 of 17,496 (a broken group un-pins every table in it unless --pin-broken)
+pool (build log): blocked 337,654 tables in 17,496 groups; declined 2,703; ungrouped 0
+pool (build log): preflight demand 39,188,800 of 83,886,079 words (46.7% used); 17,496 of 17,496 groups placed
+rc=0

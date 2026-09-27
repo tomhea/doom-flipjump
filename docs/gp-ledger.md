@@ -116,4 +116,33 @@ restored cell over ~2,400 nibble cells and 682 byte cells).
 6. Size over 35% of 2^27; `pinreport.py`: a hot word of the heat list not pinned; the build refusing
    a persisted name (every one must be in the restore set).
 
-**Row**: (filled after the build)
+**Row** (2026-09-27, `build/doom_e1m1_blocked30.fjm`, sha256 `0dd3806016af68cd`; logs in
+`docs/ship-evidence/blocked30_*`):
+
+| measure | shipped (P1.2, blocked29) | P1.3 (blocked30) | delta |
+|---|---|---|---|
+| gamespeed binding (ops/frame) | 14,780,831 | 14,318,431 | -462,400 (-3.1%) |
+| combat set v2 binding (b0_scenarios) | 15,485,242 | 15,041,859 | -443,383 (-2.9%) |
+| ... with strafe's collision (proxy) | 15,519,673 | 15,077,276 | -442,397 (-2.9%) |
+| `sim.bind_things` ops/frame (profx, gamespeed's ten games) | 401,796 | 0 | -401,796 |
+| M1 reset ops/frame (the same) | 226,935 | 94,229 | -132,706 |
+| render walk ops/frame (the same) | 11,714,758 | 11,783,074 | +68,316 (placement) |
+| ms/frame (msframe, one quiet run) | 64.2 | 62.8 | NOT SEPARATED (faster in all 5 pairs, median x1.021 < 3%) |
+| fj ops/s | 235.8 M | 233.8 M | -0.8% |
+| size (% of 2^27) | 27.35% | 26.98% | -497,816 words |
+| hot words pinned (pinreport) | 20/20 | 20/20 (4 re-keyed by their heat key; 19 bases moved) | 0 lost |
+
+**Verdict against the kill criteria:** 1 `tests/host/test_leaf_lists.py` passes with its controls
+(`p13_r1_pass.log`); 2 `tests/fj/test_leaf_lists_fj.py` passes -- the relink agrees with world.py's
+lists after every op of 8 moves, and both mutated macros are caught (the same log); 3 m2_std_gate
+PASS, m3_gate PASS (`blocked30_gates.log`), and B0 on set v2 is state- and pixel-exact on every
+frame of all 11 runs; 4 msframe NOT SEPARATED -- faster in all 5 pairs, but the median x1.021 is
+under the 3% rule -- so it ships under the ship gate's own clause, "foundation for P3": the per-move
+relink (`sim.leaf_link` / `sim.leaf_unlink`) is what P3's moving monsters call; 5 the reclaim is
+-0.46M on the binding, past the 0.35M line and the -0.44M budget (-0.44M on set v2); 6 size 26.98%,
+pinreport 20/20 and 0 lost, and the build accepts THING_PERSIST -- after 87c2c75: the first build
+would have been refused after pass 1 (the reset asserted that the persisted byte array `sshead`
+was still in the set it had just removed it from); the P1.5 pre-build review found it and that
+build was stopped. Attributed (profx phases, the same ten games): bind_things 401,796 -> 0 and the
+reset 226,935 -> 94,229, -534,502 gross; the render walk's +68,316 and collision's +2,818 are
+placement -- the changed table counts re-rolled the blocking pass's pins -- not work.

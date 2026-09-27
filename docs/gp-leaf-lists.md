@@ -48,4 +48,30 @@ nothing moves a thing yet, so every frame rebuilt the SPAWN lists. The M1 reset 
 
 ## As built
 
-(filled after the build: the binary, the gates, the ledger row, size, the pin report.)
+`build/doom_e1m1_blocked30.fjm`, sha256 `0dd3806016af68cd`, from the ship-gate 1b line unchanged (blocked27's heat
+list); the source changed, so the counts cache recounted (17,496 groups after alias merging, 336,374
+tables) and the build took 7,234 s. Rebuilt from the same line at the branch head, HITting the cache
+that count wrote: the same sha256 and the same label table (`blocked30r_build.log`, 4,769 s) --
+VERIFIED byte-identical. The row and the verdict are in `docs/gp-ledger.md`.
+
+- **The first build was stopped.** Persisting `sshead` -- a byte array -- made
+  `selfreset.emit_reset_part` refuse its own set after pass 1: the persisted words left the set,
+  then the byte-array pass asserted they were still in it (without that assert the reset would
+  have zeroed the persisted lists every frame). The P1.5 pre-build review found it while the first
+  build was in pass 1; the byte-array pass now skips persisted names (87c2c75, with
+  `test_persist_keeps_a_byte_array_out_of_the_reset`: it fails on the parent with the build's own
+  assertion), and the second build passed.
+- **Gates**: m2_std_gate PASS, m3_gate PASS (`blocked30_gates.log`); gamespeed's trail PASS with
+  both controls rejected (`blocked30_gamespeed_trail.log`) -- the same trajectories; B0 on set v2
+  state- and pixel-exact on every frame (`blocked30_b0_v2.log`).
+- **Ops**: `sim.bind_things` fell from 401,796 ops a frame to 0 and the M1 reset from 226,935 to
+  94,229 on gamespeed's ten games (profx, `blocked30_phases.log`) -- the reset no longer restores
+  the lists' heads, the bindings and the positions. The binding fell 462,400 (-3.1%); the render
+  walk rose 68,316 and collision 2,818: placement (the changed table counts re-rolled the pins),
+  not work.
+- **Speed**: msframe NOT SEPARATED from blocked29 -- 62.8 against 64.2 ms/frame, faster in all 5
+  pairs, median x1.021, under the 3% rule. It ships under the ship gate's "foundation for P3"
+  clause: the per-move relink is what P3's monsters call.
+- **Size**: 36,208,972 words, 26.98% of 2^27 (was 27.35%, -497,816 words; `blocked30_poolmap.log`).
+- **Pins**: 20 of 20 hot words pinned (`blocked30_pinreport.log`), 4 re-keyed by their heat key as
+  in P1.2; 14,083 of the list's 35,894 hot sites matched.

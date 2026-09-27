@@ -1,0 +1,23 @@
+# R1 (the P1.5 review): finding 4 -- the emitter refuses a baked, flagless thing that changes with the skill (kill criterion 1)
+# every run below is in a MIRROR of the tree named; a MUTANT is applied to the mirror's copy only (scratchpad p15run.py)
+
+## FAIL: the new tests on an emitter without the refusal
+# on f670368 (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_emit_every_tier.py  (blob a391954108f9)
+# MUTANT in src/doomfj/wall_renderer.py:
+#   - assert not _unflagged, (
+#                 "M7 P1.5: baked things %s change with the skill but have no thvis flag"
+#                 % [(_drawable[di].type, _drawable[di].x, _drawable[di].y) for di in _unflagged[:6]])
+#   + 
+$ PYTHONPATH=src python -m pytest tests/host/test_emit_every_tier.py -k "skill or stimpack" -q -rfE -p no:cacheprovider
+E       Failed: DID NOT RAISE <class 'AssertionError'>
+FAILED tests/host/test_emit_every_tier.py::test_a_baked_thing_without_a_flag_may_not_change_with_the_skill
+1 failed, 2 passed, 9 deselected in 1.10s
+# exit 1, 2 s
+
+## PASS: the new tests on the branch's emitter (and every tier, as before)
+# on f670368 (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_emit_every_tier.py  (blob a391954108f9)
+$ PYTHONPATH=src python -m pytest tests/host/test_emit_every_tier.py -q -rfE -p no:cacheprovider
+12 passed in 2.40s
+# exit 0, 3 s

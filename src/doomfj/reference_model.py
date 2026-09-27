@@ -34,6 +34,7 @@ from doomfj.mapcompiler import (  # shared geometry (R6)
     bbox_gate_boxes, bbox_wedge_miss, wedge_planes_bam, seg_sector,
     thing_live_subsectors, blockmap_candidates,
 )
+from doomfj.spritebank import bank_list_of, strip_at   # M7 P1.6: the native-list bank (R6)
 from doomfj.things import (baked_thing_mask, drawable_things,   # M14.5: the split SSOT (R6)
                            skill_absent, vanishable_slots)
 from doomfj.tables import (
@@ -1472,6 +1473,12 @@ class ReferenceModel:
         if pic is None:
             cache[kind] = None
             return None
+        cache[kind] = self.art_of_picture(pic)
+        return cache[kind]
+
+    def art_of_picture(self, pic):
+        """`sprite_art`'s tuple for a decoded picture -- ONE builder, for a thing type's patch and for
+        any named patch (M7 P1.6: the bank's animation frames, `art_of_lump`)."""
         ds = self.downscale
         dw, dh = max(1, pic.width // ds), max(1, pic.height // ds)
         cols = []
@@ -1490,9 +1497,15 @@ class ReferenceModel:
                 if 0 <= v < pic.height:
                     dense[v] = t_
             fcols.append(dense)
-        cache[kind] = (cols, dh, dw, pic.width, pic.height, pic.leftoffset, pic.topoffset,
-                       fcols, pic.height)
-        return cache[kind]
+        return (cols, dh, dw, pic.width, pic.height, pic.leftoffset, pic.topoffset,
+                fcols, pic.height)
+
+    def art_of_lump(self, sprite_wad, lump: str, cache: dict):
+        """`art_of_picture` for one named patch (M7 P1.6), cached under the lump's name"""
+        key = ("lump", lump)
+        if key not in cache:
+            cache[key] = self.art_of_picture(decode_picture(sprite_wad.get_data(lump)))
+        return cache[key]
 
     @staticmethod
     def sprite_strip(col, dh: int, h: int, *, cap=SPRITE_RUN_CAP):
@@ -1878,6 +1891,8 @@ class ReferenceModel:
         n_hd = 0                      # OPTION B: accepted TALL-bucket things granted the HD bake
         n_mon = 0                     # ... against MONSTER_BUDGET: monsters, counted SEPARATELY so
         spr_cache: dict = {}          #     walk order can never spend a monster's slot on a barrel
+        # M7 P1.6: the bucket heights the native lists are drawn at (the rowmap's rows)
+        bheights = tuple(sprite_bucket_height(b_, H) for b_ in range(SPRITE_HEIGHT_BUCKETS))
         things_by_ss: dict = {}
         ss_first: dict = {}
         if things:
@@ -2042,14 +2057,17 @@ class ReferenceModel:
                             continue                     # V4b: both fragment slots spent
                         # V4-HD: tall buckets sample the full-res column with the deeper cap
                         # (unless OPTION B's HD budget already went to nearer things);
-                        # 20M-RECOVERY: SHORT buckets take the coarse low-res cap instead
-                        st = (self.sprite_strip(art[7][u], art[8], hb, cap=SPRITE_RUN_CAP_HD)
+                        # 20M-RECOVERY: SHORT buckets take the coarse low-res cap instead.
+                        # M7 P1.6: the column is the tier's NATIVE list (doomfj.spritebank --
+                        # the lists the emitter bakes), drawn at the bucket through the rowmap
+                        st = (strip_at(bank_list_of(tuple(art[7][u]), art[8], SPRITE_RUN_CAP_HD,
+                                                    bheights), bkt, hb)
                               if hd_ok else
-                              self.sprite_strip(art[0][u], art[1], hb,
-                                                cap=DEG_SPR_LOWRES_CAP)
+                              strip_at(bank_list_of(tuple(art[0][u]), art[1], DEG_SPR_LOWRES_CAP,
+                                                    bheights), bkt, hb)
                               if (hb < DEG_SPR_LOWRES_H and far_) else
-                              self.sprite_strip(art[0][u], art[1], hb,
-                                                cap=DEG_SPR_MID_CAP))
+                              strip_at(bank_list_of(tuple(art[0][u]), art[1], DEG_SPR_MID_CAP,
+                                                    bheights), bkt, hb))
                         if st is None:
                             continue
                         # V4b: TWO write-once fragment slots per column, filled in walk-arrival

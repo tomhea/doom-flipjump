@@ -17,7 +17,7 @@ fj top-level labels are global, so **the order is the contract** — never reord
 | `projection.fj` | 32 | `point_on_side_leaf`, `wedge_setup`, `wedge_bbox` | the projection math — angles, scales, column ranges. 12 more macros are called by `frame_render.fj`. |
 | `frame_render.fj` | 82 | `seg_pass1_leaf_body_lines`, `seg_pass1_leaf_body_ts`, `seg_pass2_leaf_body_lines`, `thing_record_body` | the frame. **Only 7 of its 82 macros are called from outside**; the rest are its internals. |
 | `stream_render.fj` | 41 | `emit_bytes4` | the per-column run emitter — pushes runs to the device. |
-| `sim.fj` | 10 | `check_position`, `try_move`, `bind_things`, `thing_pass` | the player sim: collision against real linedefs. |
+| `sim.fj` | 9 | `check_cells`, `try_move`, `bind_things`, `thing_pass` | the player sim: collision against real linedefs, on 32-unit collision cells (`collision.collision_cells_fj` emits the routine; `line_test` is its one shared line test, `jump16` its tree node). |
 | `m1_reset.fj` | 4 | `m1.zerobyte` | M1's self-reset primitives (constant-address byte clear). |
 
 **Where the time goes.** Per frame the four `MAIN` entry points in `frame_render.fj` dominate;
@@ -50,8 +50,9 @@ program. They were built for the C1 constant-address dispatch, which does not wo
 - **`@` is control-flow labels, `<` is named state.** A macro's `@` list should contain jump
   targets, not `hex.vec` declarations — a vec inside a `rep`-expanded macro is emitted once per
   expansion, which is how the M1 restore set ended up naming registers by expansion path
-  (`f9:l208:rep0:sim.check_block(14)---...---p1`). `sim.check_block` / `check_line` were fixed;
-  the pattern to copy is `cb_*` / `cl_*` in `collision.py::CHECK_SCRATCH_DECLS`.
+  (`f9:l208:rep0:sim.check_block(14)---...---p1`). `sim.check_block` / `check_line` (retired by
+  M7 P1.2) were fixed that way; the pattern to copy is `CHECK_SCRATCH_DECLS` / `CELL_DECLS` in
+  `collision.py` -- named globals the Python declares once.
 - **The emitter ABI is frozen.** fj *global* labels, *macro names* and *positional parameter lists*
   appear inside Python f-strings, so they are not safely renameable in isolation — that is a
   fan-out edit into `src/doomfj/*.py`. `@`-locals, macro-local labels and comments are free.

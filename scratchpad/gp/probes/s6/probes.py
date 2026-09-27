@@ -24,7 +24,7 @@ import fjprobe as F                                                        # noq
 from fjprobe import Probe                                                  # noqa: E402
 
 ROOT = F.ROOT
-from doomfj.lut_generator import generate_dispatch_table_fj, generate_packed_lut_fj  # noqa: E402
+from doomfj.lut_generator import generate_dispatch_table_fj  # noqa: E402
 
 FIXED = ROOT / "src" / "fj" / "fixed_point.fj"
 SIM = ROOT / "src" / "fj" / "sim.fj"
@@ -388,12 +388,14 @@ def mutated_d4_probe():
 
 
 # =============================================================================================
-# 4a. one candidate line: today's sim.check_line vs the line's constants baked as code
+# 4a. one candidate line: the collision cells' shared test vs the line's constants baked as code
+#     (phase 0 priced M14-d's table-reading sim.check_line here -- results_line.json keeps those
+#     numbers; M7 P1.2 replaced it with a line stub xoring the row into argument cells around ONE
+#     shared sim.line_test, which is what the first arm prices now)
 # =============================================================================================
-from doomfj.collision import (COLLISION_STATE_DECLS, LINE_BOX_BYTES, LINE_BOX_LEN,  # noqa: E402
-                              LINE_REST_BYTES, LINE_REST_LEN, ST_HORIZONTAL, ST_NEGATIVE,
-                              ST_POSITIVE, ST_VERTICAL, FLAG_ONE_SIDED, line_box, line_rest,
-                              _RowBake)
+from doomfj.collision import (COLLISION_STATE_DECLS, ST_HORIZONTAL, ST_NEGATIVE,  # noqa: E402
+                              ST_POSITIVE, ST_VERTICAL, FLAG_ONE_SIDED, line_constants,
+                              _RowBake, _xor_lines)
 
 BOX = (1000, 500, 16)            # the player's box: centre x, y and radius, in map units
 SEED_F, SEED_C = 0, 256          # the opening seeds
@@ -444,14 +446,6 @@ LINE_PRE = ["hex.set 8, cp_floor, %d" % SEED_F, "hex.set 8, cp_ceil, %d" % SEED_
 LINE_VERIFY = [";gp_lv_ok", "gp_lv_blk:", "hex.set 2, gp_vb, 0xB", ";gp_lv_pr",
                "gp_lv_ok:", "hex.set 2, gp_vb, 0xA", "gp_lv_pr:",
                "hex.print gp_vb", "hex.print cp_floor", "hex.print cp_ceil"]
-
-
-def _pack(vals, widths):
-    v = sh = 0
-    for x, nb in zip(vals, widths):
-        v |= (x & ((1 << (8 * nb)) - 1)) << sh
-        sh += 8 * nb
-    return v
 
 
 PRELUDE_PS = [
@@ -528,23 +522,20 @@ def baked_line(tag, row, blocked, nxt, swap=False):
 
 def line_probes():
     out = []
-    rows = [c[1] for c in LINE_CASES]
-    tables = (generate_packed_lut_fj("lnbox", [_pack(line_box(r), LINE_BOX_BYTES) for r in rows],
-                                     LINE_BOX_LEN).splitlines() +
-              generate_packed_lut_fj("lnrow", [_pack(line_rest(r), LINE_REST_BYTES) for r in rows],
-                                     LINE_REST_LEN).splitlines())
     base_data = list(COLLISION_STATE_DECLS) + ["gp_vb: hex.vec 2", "gp_li: hex.vec 1"]
     for i, (tag, row, what) in enumerate(LINE_CASES):
         blk, fl, cl = _line_model(row)
         exp = (lambda n, b=blk, fl=fl, cl=cl:
                bytes([0xB if b else 0xA, fl & 0xFF, cl & 0xFF]) * n)
+        # the cells' line stub, minus its two fcalls: xor the row in, the shared test, xor it out.
+        # A wall LATCHES cp_ok instead of jumping, so the verify reads the latch.
+        xors = [ln.strip() for ln in _xor_lines(line_constants(row))]
         out.append(Probe(
-            "line %s today: sim.check_line" % tag,
-            body=["sim.check_line lnbox, lnrow, 1, gp_li, gp_lv_blk", "gp_lv_blk:"],
-            vbody=["sim.check_line lnbox, lnrow, 1, gp_li, gp_lv_blk"],
-            setup=_line_setup() + ["hex.set 1, gp_li, %d" % i], pre=LINE_PRE, blob=tables,
-            data=base_data, files=[CONSTS, FIXED, SIM], verify=LINE_VERIFY, expected=exp,
-            note=what))
+            "line %s cells: sim.line_test" % tag,
+            body=xors + ["sim.line_test"] + xors,
+            setup=_line_setup(), pre=LINE_PRE + ["hex.set 1, cp_ok, 1"],
+            data=base_data, files=[CONSTS, FIXED, SIM],
+            verify=["hex.if0 1, cp_ok, gp_lv_blk"] + LINE_VERIFY, expected=exp, note=what))
         for swap in ((False, True) if row[8] in (ST_POSITIVE,) else (False,)):
             code, cdata = baked_line("gp_k_", row, "gp_lv_blk", "gp_k_nxt", swap=swap)
             out.append(Probe(
@@ -977,7 +968,7 @@ def run_groups(names):
         for p in d4_probes():
             do(p)
     if "line" in names:
-        print("line -- one candidate line: today's sim.check_line vs baked constants")
+        print("line -- one candidate line: the cells' shared sim.line_test vs baked constants")
         for p in line_probes():
             do(p)
     if "cell" in names:

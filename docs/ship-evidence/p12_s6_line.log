@@ -1,0 +1,29 @@
+S6 fj micro-probes -- MEASURED: python scratchpad/gp/probes/s6/probes.py line
+ops/call = exact executed-op delta per body call (fjprobe.py); plain = no pool, pool = the ship BlockPool; placement 0x9a53c40
+line -- one candidate line: today's sim.check_line vs baked constants
+  line L1 cells: sim.line_test                   plain     884.0   ok    
+  line L1 cells: sim.line_test                   pool      282.0   ok    
+  line L1 baked                                  plain     774.0   ok    
+  line L1 baked                                  pool      238.0   ok    
+  line L2 cells: sim.line_test                   plain    3552.0   ok    
+  line L2 cells: sim.line_test                   pool     1090.0   ok    
+  line L2 baked                                  plain    3232.0   ok    
+  line L2 baked                                  pool     1042.0   ok    
+  line L3 cells: sim.line_test                   plain    5414.0   ok    
+  line L3 cells: sim.line_test                   pool     1720.0   ok    
+  line L3 baked                                  plain    5038.0   ok    
+  line L3 baked                                  pool     1568.0   ok    
+  line L4 cells: sim.line_test                   plain   27801.0   ok    
+  line L4 cells: sim.line_test                   pool    14667.0   ok    
+  line L4 baked                                  plain   27868.0   ok    
+  line L4 baked                                  pool    14594.0   ok    
+  line L4 baked (const multiplier)               plain   27334.0   ok    
+  line L4 baked (const multiplier)               pool    14574.0   ok    
+  line L5 cells: sim.line_test                   plain   27713.0   ok    
+  line L5 cells: sim.line_test                   pool    16019.0   ok    
+  line L5 baked                                  plain   27596.0   ok    
+  line L5 baked                                  pool    15912.0   ok    
+  line L5 baked (const multiplier)               plain   24409.0   ok    
+  line L5 baked (const multiplier)               pool    14075.0   ok    
+wrote results_line.json; 24 rows, 0 verification FAILURES
+rc=0

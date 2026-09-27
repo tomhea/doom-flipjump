@@ -214,6 +214,7 @@ the 0.8M line** (the budget -1.0M came from the phase-0 prototype's -39 .. -43% 
 standalone; in the renderer the record fell 102,173 and the emission 87,316 ops a frame on gamespeed's
 games). **The owner's decision, 2026-09-27: "Ship it, follow up later"** -- P1.4 ships at -0.60M, and a
 follow-up after phase 1 looks for the missing ~0.4M; 6 size 27.31%, pinreport 20/20 and 0 lost (after
-10d7b48: it reads the hot words through the renames the heat list carries), `gps_nslot` / `gps_cur_s`
+b019db9 -- 10d7b48 before the rebase, tag `evidence/p1.4-rebuild`: it reads the hot words through the
+renames the heat list carries), `gps_nslot` / `gps_cur_s`
 in both restore sets (`p14_rekey.log`, test_restore_set_shipped 18 passed), and
 `wall_renderer.check_slot_ids` asserts the slot-id bound.

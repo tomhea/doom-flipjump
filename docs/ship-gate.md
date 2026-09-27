@@ -33,8 +33,8 @@ msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
-(re-frozen 2026-09-27 on blocked30, a quiet box: 63.5 ms/frame [63.3 .. 64.5], yardstick 3.63G
--- `blocked30_msframe_freeze.log`; the stored ms is informational; `--against shipped` RE-MEASURES
+(re-frozen 2026-09-28 on blocked31, a quiet box: 61.5 ms/frame [61.4 .. 61.7], yardstick 3.62G
+-- `blocked31_msframe_freeze.log`; the stored ms is informational; `--against shipped` RE-MEASURES
 both arms live, and the binary hash is what it checks), so `--against shipped` is the comparison.
 
 ## 1b. The build command, and the play command
@@ -138,15 +138,19 @@ it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built
 `--pin-heat scratchpad/12m/heat_blocked27_p14.json.gz` -- blocked27's list re-keyed through the four
 parameter-count changes P1.4 made on its paths (`heat_rekey.py`; the list records the renames, and
 pinreport reads the hot words through them). The source changed, so the counts cache MISSED and
-recounted (21,118 groups before alias merging, 342,750 tables, 2,044 s) and the build took 7,185 s:
-sha256 `773b840ca044e39b` (`docs/ship-evidence/blocked31_build.log`). All 20 hot groups matched and pinned.
-The tracked counts cache is that recount, and the same line at 10d7b48 -- the build's own source --
-HIT it and produced `773b840ca044e39b` again, label table included (`89226fa8...`; `blocked31r_build.log`, 4,765 s) --
-**VERIFIED byte-identical.** The branch was then rebased onto main, under P1.3's review refactors: the
-build's own path hands the assembler the same files and the same persist tuple at 10d7b48 and at
-b019db9 (`p14_emit_neutral.log`), so the binary is blocked31's -- but the head's sources sign the counts
-cache differently, so on main this line recounts once (~34 min, the same counts) until the next ship
-build re-signs it. Its label table is `scratchpad/12m/atlas/blocked31.labels.tsv.gz`.
+recounted (21,118 groups before alias merging, 342,750 tables, 2,044 s) and the build, at 311f23f,
+took 7,185 s: sha256 `773b840ca044e39b` (`docs/ship-evidence/blocked31_build.log`). All 20 hot groups
+matched and pinned. The tracked counts cache is that recount, and the same line at 10d7b48 -- the same
+`src/` tree as 311f23f; only pinreport.py and logs differ -- HIT it and produced `773b840ca044e39b`
+again, label table included (`89226fa8...`; `blocked31r_build.log`, 4,765 s) -- **VERIFIED
+byte-identical.** Both commits predate the branch's rebase, so pushed tags keep them:
+`evidence/p1.4-build` and `evidence/p1.4-rebuild` (every such commit P1.4's evidence names has one --
+`docs/gp-sprite-column.md`, Provenance). The branch was then rebased onto main, under P1.3's review
+refactors, and its review stated the slot layouts in `wall_renderer` (R6): the build's own path hands
+the assembler the same files and the same persist tuple at 311f23f and at 91eaeec, the PR's last
+`src/` change (`p14_emit_neutral.log`), so the binary is blocked31's -- but the head's sources sign the
+counts cache differently, so on main this line recounts once (~34 min, the same counts) until the
+next ship build re-signs it. Its label table is `scratchpad/12m/atlas/blocked31.labels.tsv.gz`.
 
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 

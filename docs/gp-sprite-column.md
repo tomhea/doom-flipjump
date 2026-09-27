@@ -539,13 +539,26 @@ Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj
 ### Measured (the row and the verdict are in `docs/gp-ledger.md`)
 
 `build/doom_e1m1_blocked31.fjm`, sha256 `773b840ca044e39b`, from the ship-gate 1b line with P1.4's heat list
-(`--pin-heat scratchpad/12m/heat_blocked27_p14.json.gz`); the source changed, so the counts cache
-recounted (21,118 groups before alias merging, 342,750 tables, 2,044 s) and the build took 7,185 s.
-Rebuilt from the same line at 10d7b48, the build's own source, HITting the cache that count wrote:
-the same sha256 and the same label table (`89226fa8...`; `blocked31r_build.log`, 4,765 s) -- VERIFIED
-byte-identical. The branch was then rebased onto main (P1.3's review refactors under it): the build's
-own path hands the assembler the same 18 files and the same persist tuple at 10d7b48 and at b019db9
-(`p14_emit_neutral.log`), so the program is blocked31's.
+(`--pin-heat scratchpad/12m/heat_blocked27_p14.json.gz`), built at 311f23f; the source changed, so
+the counts cache recounted (21,118 groups before alias merging, 342,750 tables, 2,044 s) and the build
+took 7,185 s. Rebuilt from the same line at 10d7b48 -- the same `src/` tree, only pinreport.py and
+logs differ -- HITting the cache that count wrote: the same sha256 and the same label table
+(`89226fa8...`; `blocked31r_build.log`, 4,765 s) -- VERIFIED byte-identical. The branch was then
+rebased onto main (P1.3's review refactors under it) and its review stated the slot layouts (R6):
+the build's own path hands the assembler the same 18 files and the same persist tuple at 311f23f and
+at 91eaeec, the PR's last `src/` change (`p14_emit_neutral.log`), so the program is blocked31's.
+
+**Provenance.** The build, its rebuild and four more of the evidence runs happened before the
+branch's rebase, so their commits are not on the merged history. A pushed tag keeps each:
+
+| commit | tag | what ran there, or names it |
+|---|---|---|
+| 311f23f | `evidence/p1.4-build` | blocked31's build (`blocked31_build.log`); `pinreport.py --selftest` (`p14_pinreport_selftest.log`, with the renames change on top) |
+| 10d7b48 | `evidence/p1.4-rebuild` | the byte-identical rebuild (`blocked31r_build.log`); the column check (`p14_column_check.log`) |
+| 84bb3ed | `evidence/p1.4-rekey` | the restore-set re-key (`p14_rekey.log`) |
+| 68eabd6 | `evidence/p1.4-deg-gate` | deg_gate at four viewpoints (`p14_deg_gate.log`) |
+| 46ab826 | `evidence/p1.4-column-base` | the column check's `--base`, the renderer before this change (219f52f's message) |
+| 57f20d9 | `evidence/p1.4-heat-defs` | the macro definitions the heat list's four renames were checked against (13aa8f5's message) |
 
 - **Pixels**: the column check's 1,648 columns (0 differ, A and A+B), deg_gate at four viewpoints,
   both game-tier gates and B0's 1,100 frames -- every one byte-exact.

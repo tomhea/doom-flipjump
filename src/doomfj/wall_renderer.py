@@ -416,6 +416,15 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill) -> tuple:
     return common, skills
 
 
+def _skill_dispatch(prefix: str) -> list:
+    """M7 P1.5 -- jump to `{prefix}k` for the highlighted skill k (`menu_sel`): the ONE dispatch the
+    skill screens (`mf_s`) and NEW GAME's restart blocks (`mn_r`) share. It is three-way by its
+    shape -- an `if0`, then one `if_flags` on bit 1 -- so it refuses any other number of SKILLS
+    rather than send a fourth skill to the third's block (tests/host/test_menu.py holds the tie)."""
+    assert len(SKILLS) == 3, "the skill dispatch is written for three skills, not %r" % (SKILLS,)
+    return [f"hex.if0 1, menu_sel, {prefix}0", f"hex.if_flags menu_sel, 1<<1, {prefix}2, {prefix}1"]
+
+
 def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
     """M3 — the MENU frames, and the branch that chooses them.
 
@@ -450,13 +459,12 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
         # -- the frame: the world, or one of the four baked screens
         "hex.if0 1, mode, do_world",
         "hex.if0 1, menu_scr, mf_main",
-        "hex.if0 1, menu_sel, mf_s0",
-        "hex.if_flags menu_sel, 1<<1, mf_s2, mf_s1",
+        *_skill_dispatch("mf_s"),
         "mf_main:",
         menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, selected, colours,
                 label="menu_frame", end_marker=False),
         ";frame_end",
-        *[line for k in range(3) for line in (
+        *[line for k in range(len(SKILLS)) for line in (
             f"mf_s{k}:",
             menu_fj(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
                     label=f"menu_skill{k}", end_marker=False),
@@ -473,7 +481,8 @@ def menu_state_lines(restart) -> list:
     with `rs_ret`) must be placed by the caller where nothing falls into it.
     tests/fj/test_skill_menu.py runs exactly these lines."""
     _common, skills = restart
-    assert len(skills) == len(SKILLS) == 3
+    assert len(skills) == len(SKILLS), "one restart block per skill: %d for %d" % (len(skills),
+                                                                                  len(SKILLS))
     return [
         "hex.if0 1, mode, mn_world",
         "hex.if0 1, menu_scr, mn_main",
@@ -484,12 +493,12 @@ def menu_state_lines(restart) -> list:
         "hex.if0 1, ev_dn, mn_done", ";mn_dn",
         "mn_back:", "hex.zero 1, menu_scr", ";mn_done",
         "mn_up:", "hex.if0 1, menu_sel, mn_done", "hex.dec 1, menu_sel", ";mn_done",
-        "mn_dn:", "hex.if_flags menu_sel, 1<<2, mn_dn_inc, mn_done",
+        # (clamped at the LAST skill: `menu_sel` is a nibble, so bit k of the mask is sel == k)
+        "mn_dn:", f"hex.if_flags menu_sel, 1<<{len(SKILLS) - 1}, mn_dn_inc, mn_done",
         "mn_dn_inc:", "hex.inc 1, menu_sel", ";mn_done",
         "mn_start:",                       # NEW GAME at the highlighted skill
         "stl.fcall restart_common, rs_ret",
-        "hex.if0 1, menu_sel, mn_r0",
-        "hex.if_flags menu_sel, 1<<1, mn_r2, mn_r1",
+        *_skill_dispatch("mn_r"),
         "mn_r0:", *skills[0], ";mn_started",
         "mn_r1:", *skills[1], ";mn_started",
         "mn_r2:", *skills[2],
@@ -572,7 +581,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     from doomfj.lut_generator import generate_packed_lut_fj
     from doomfj.things import (THING_ROW_COLD_BYTES, THING_ROW_COLD_LEN, THING_ROW_HOT_BYTES,
                                THING_ROW_HOT_LEN, cold_row, hot_row, reachable_lightnums,
-                               sprite_light_table, subsector_tables, thing_rows)
+                               sprite_light_table, subsector_tables, thing_pos_value, thing_rows)
     allt = map_wad.things(mapname)
     rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, MONSTER_TYPES,
                            MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
@@ -598,8 +607,8 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # ⚠ the position array is a hex.vec (one NIBBLE per slot), NOT a packed table (one BYTE per
     # slot): the wire writes it with `hex.input 8` and sim reads it with ptr_index + read_hex 16.
     # Emitting it as a packed LUT would put the strides a factor of 2 apart -- see handoff-m14 5.
-    thpos = ["thpos_rt:"] + [f"    hex.vec 16, {(((t.y << 16) & 0xFFFFFFFF) << 32) | ((t.x << 16) & 0xFFFFFFFF)}"
-                             for t in things]
+    # (the value is `things.thing_pos_value`, which NEW GAME's restart block bakes too -- R6)
+    thpos = ["thpos_rt:"] + [f"    hex.vec 16, {thing_pos_value(t)}" for t in things]
     text = "\n".join([
         # M14-perf: HOT (everything a reject can reach) and COLD (what only a drawn sprite needs).
         # See doomfj.things -- 94.1% of loads are rejected, and read_table_packed is linear in the
@@ -1249,7 +1258,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
-    from doomfj.things import byte_array_decl, skill_absent, skill_level_start, spawn_leaf_lists
+    from doomfj.things import (byte_array_decl, skill_absent, skill_level_start, spawn_leaf_lists,
+                               thing_pos_value)
     # M7 P1.5: the game tier has SKILLS (docs/gp-skill-menu.md). Which things a skill spawns is
     # `skill_absent`'s answer; the runtime things are present by being LINKED, the baked vanishable
     # ones by their `thvis` flag. The image boots at HARD's level start (the skill set v2 runs at);
@@ -2052,7 +2062,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _rt_things = [map_wad.things(mapname)[w] for w in sorted(_mt_keep)]
         _restart = restart_lines(
             _spawn, len(_dslot) if _dst_tbl else 0, _MT_BINDS,
-            [(((t.y << 16) & 0xFFFFFFFF) << 32) | ((t.x << 16) & 0xFFFFFFFF) for t in _rt_things],
+            [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
              for sk in SKILLS])

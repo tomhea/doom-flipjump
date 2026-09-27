@@ -1,0 +1,12 @@
+# R1 (P1.5's re-key): the same test at m7-skill-menu b3f3130
+$ python -m pytest tests/host/test_ca_remap_set.py -q -p no:cacheprovider
+1 passed in 0.26s
+$ python scratchpad/ca_remap_set.py --selftest
+PASS  C1 an array held whole that SHRANK is held whole at its new span  -- [('arr', 2400, 2176)] []
+PASS  C2 an array held whole that GREW is held whole at its new span -- no hole  -- [('arr', 2400, 2600)] []
+PASS  C3 (negative control) a label held IN PART whose span changed is refused  -- [] [('part', 20, 25, 3)]
+PASS  C4 (negative control) an array held whole but for its last word is refused, not resized  -- [] [('arr', 2400, 2176, 2399)]
+PASS  C5 an unchanged layout resizes nothing and refuses nothing
+PASS  C6 (negative control) an --old-labels table the set was not keyed on is refused
+ca_remap_set selftest -- C3, C4 and C6 are the negative controls: PASS
+rc=0

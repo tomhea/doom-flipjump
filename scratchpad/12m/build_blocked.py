@@ -181,6 +181,23 @@ def _report_width_waste(counting):
               % (format(cost, ","), g[:44], format(n, ","), common, wmax), flush=True)
 
 
+def pin_state_veto(labels, view_w, subsectors) -> set:
+    """The words `--pin-state-cells` must NOT pin: the BYTE cells (`m1.zerobyte c` jumps THROUGH the
+    cell into the pointer read table, so a base there sends it elsewhere) and every cell the program
+    reads RAW through a pointer (selfreset.POINTER_READ_CELLS: a pinned word holds base + value,
+    which a raw read takes for the value -- M7 P1.5's restart made thpos_rt a pin candidate)."""
+    from doomfj.selfreset import byte_arrays, pointer_read_words
+    bits = {k: int(v) for k, v in labels.items()}
+    words_sorted = sorted(v // W for v in bits.values())
+    out = set()
+    for name, n in byte_arrays(bits, words_sorted, view_w, subsectors):
+        base = bits[name] // W
+        for k in range(n):
+            out.add(base + 2 * k)
+            out.add(base + 2 * k + 1)
+    return out | pointer_read_words(bits, words_sorted)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("tier", choices=sorted(TIERS))
@@ -291,18 +308,6 @@ def main():
     # computes itself. A base there sends it somewhere else.
     excluded = {"words": None}
 
-    def _byte_cell_words(labels):
-        from doomfj.selfreset import byte_arrays
-        bits = {k: int(v) for k, v in labels.items()}
-        words_sorted = sorted(v // W for v in bits.values())
-        out = set()
-        for name, n in byte_arrays(bits, words_sorted, a.view_w, a.subsectors):
-            base = bits[name] // W
-            for k in range(n):
-                out.add(base + 2 * k)
-                out.add(base + 2 * k + 1)
-        return out
-
     def _reset_owned(address, labels):
         """Words the M1 self-reset owns. THE WHOLE RESTORE SET, not just the byte cells.
 
@@ -323,8 +328,9 @@ def main():
         """
         if excluded["words"] is None:
             if a.pin_state_cells:
-                excluded["words"] = _byte_cell_words(labels)
-                print("  pin-exclude: %s BYTE-cell words only (m1.zerobyte jumps through them); "
+                excluded["words"] = pin_state_veto(labels, a.view_w, a.subsectors)
+                print("  pin-exclude: %s words -- the BYTE cells (m1.zerobyte jumps through them) "
+                      "and the pointer-read cells (a raw read takes base + value); the other "
                       "nibble state cells ARE pinned" % format(len(excluded["words"]), ","),
                       flush=True)
             else:

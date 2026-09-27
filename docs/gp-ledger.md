@@ -184,4 +184,36 @@ rung profiles its first build and regenerates the heat list before the binary it
    top row and light with no crash); the emitter's slot-id bound (drawable things + runtime pools
    <= 255) not asserted.
 
-**Row**: (filled after the build)
+**Row** (2026-09-27, `build/doom_e1m1_blocked31.fjm`, sha256 `773b840ca044e39b`; logs in
+`docs/ship-evidence/blocked31_*`):
+
+| measure | shipped (P1.3, blocked30) | P1.4 (blocked31) | delta |
+|---|---|---|---|
+| combat set v2 binding (b0_scenarios) | 15,041,859 | 14,441,924 | **-599,935 (-4.0%)** |
+| ... with strafe's collision (proxy) | 15,077,276 | 14,476,599 | -600,677 (-4.0%) |
+| gamespeed binding (ops/frame) | 14,318,431 | 13,974,938 | -343,493 (-2.4%) |
+| the sprite record, `thing_leaf` + `thing_leaf_b` (profx, gamespeed's ten games) | 1,448,470 | 1,346,297 | -102,173 |
+| the emission, `seg_pass2_leaf` (the same) | 3,628,248 | 3,540,932 | -87,316 |
+| ms/frame (msframe, one quiet run) | 62.5 | 61.6 | NOT SEPARATED (pairs 1.016 0.992 1.019 0.990 1.020, median x1.016) |
+| fj ops/s | 234.9 M | 234.2 M | -0.3% |
+| size (% of 2^27) | 26.98% | 27.31% | +448,114 words (the slot table, the aligned bank, the code) |
+| hot words pinned (pinreport) | 20/20 | 20/20 (4 re-keyed by heat key; the list's renames applied) | 0 lost |
+
+**Verdict against the kill criteria:** 1 the column check (`scratchpad/gp/probes/sprite/ship_check.py`,
+`docs/ship-evidence/p14_column_check.log`) -- the SHIPPED record, load and emit on every one of the
+16 fight frames' 1,648 sprite columns, one fragment and two: 0 differ from the oracle; its four
+mutants are caught (heavy:h57), M1 on all 16 frames too (3,190 of 3,296 columns); 2
+`build.sprbank_misalignment` refuses an off-block bank and `tests/host/test_sprite_column.py` /
+`tests/fj/test_narrow_reads_fj.py` show the pad is what aligns it (their controls: no pad, off a block,
+reads wrong); 3 deg_gate PASS at four viewpoints (`p14_deg_gate.log`), m2_std_gate PASS, m3_gate PASS
+(`blocked31_gates.log`), and B0 on set v2 state- and pixel-exact on every frame of all 11 runs; 4
+msframe NOT SEPARATED (the pairs split in sign, median x1.016) -- it ships under the clause as a
+foundation: P1.6's native-list bank draws through this column's (slot, block) fragment and its
+derive, and so do P3's animated monsters; **5 FIRED: the reclaim is -0.60M on the v2 binding, under
+the 0.8M line** (the budget -1.0M came from the phase-0 prototype's -39 .. -43% per sprite column,
+standalone; in the renderer the record fell 102,173 and the emission 87,316 ops a frame on gamespeed's
+games). **The owner's decision, 2026-09-27: "Ship it, follow up later"** -- P1.4 ships at -0.60M, and a
+follow-up after phase 1 looks for the missing ~0.4M; 6 size 27.31%, pinreport 20/20 and 0 lost (after
+10d7b48: it reads the hot words through the renames the heat list carries), `gps_nslot` / `gps_cur_s`
+in both restore sets (`p14_rekey.log`, test_restore_set_shipped 18 passed), and
+`wall_renderer.check_slot_ids` asserts the slot-id bound.

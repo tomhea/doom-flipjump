@@ -11,7 +11,12 @@ tables plus its reserved ranks, doubling only when they do not fit (a spread wid
 `hex.tables.res` keeps its 2^29 block); and `evict_by_value` counting the holes hot-first placement
 can leave. The reserved block size, the re-roll log and the veto count live in doom, not the pool:
 `pinreport.py --heat` compares every hot word's base with the profile's (section 2 step 1 of the
-ship gate), and `build_blocked.py --pin-heat` counts the hot words left unpinned.
+ship gate), and `build_blocked.py --pin-heat` counts the hot words left unpinned. With no list
+the pool builds 1.5.1's bytes: `scratchpad/12m/heat_identity.py`, which names both checkouts and
+refuses to compare one with itself, finds 48/48 builds identical between `73e09c0` and `bc8ee63`
+(`docs/ship-evidence/heat_identity.log`, with its two provenance controls). The holes hot-first
+leaves in doom's pool are 1,271,808 words, 1.3% of the span (`poolmap.py --heat`; DESIGN.md section
+1.2's blocked28 note).
 **Measured** (blocked28 against blocked27, the same program): binding -1.31M ops/frame (the
 ESTIMATE of section 2 was -1.27M), 20/20 hot words pinned, msframe NOT SEPARATED (faster in all 5
 pairs, x1.025) -- `docs/gp-ledger.md`, P1.1.

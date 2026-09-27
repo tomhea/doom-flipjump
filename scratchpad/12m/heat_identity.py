@@ -1,13 +1,20 @@
 """heat_identity.py -- a BlockPool with no heat list must build the SAME .fjm as flipjump 1.5.1.
 
-    python scratchpad/12m/heat_identity.py --new C:/Users/tomhe/Documents/flipjump-pr
+    python scratchpad/12m/heat_identity.py --base C:/Users/tomhe/Documents/flipjump-73e09c0 \
+        --new C:/Users/tomhe/Documents/flipjump-151
 
 tomhea/flipjump#363 adds `BlockPool(heat=)` (pin protection, M7 P1.1). This builds
 `tablepool_gate.py`'s programs, two-pass (count, then place), at six knob sets -- uniform, spread,
 width buckets + pin_broken, a span tight enough to break groups, and eviction by value at an aligned and
-an unaligned pool base -- with the
-INSTALLED flipjump (the baseline, 1.5.1) and with the checkout given by --new under `heat=None` and
-`heat={}`, and compares every .fjm's sha256.
+an unaligned pool base -- with the checkout given by --base (1.5.1 BEFORE #363: 73e09c0) and with the
+checkout given by --new under `heat=None` and `heat={}`, and compares every .fjm's sha256.
+
+WHICH CODE RAN, recorded and required (R9): both sides are named checkouts, each imported through its
+own PYTHONPATH in its own subprocess. The run prints each side's git revision, whether its tree is
+clean, the path its `flipjump` was imported from and the sha256 of its `preprocessor.py`, and FAILS
+when a side imported a flipjump from anywhere else, when the two sides' preprocessors are the same
+file (then "identical" compares a program with itself -- what this tool did once the installed
+flipjump became 1.5.1 WITH #363), or when the baseline's BlockPool already accepts `heat`.
 
 CONTROL (R9): the --new side also builds each program with a heat list naming its busiest group's
 last table; those builds must DIFFER from the baseline (or raise, when the hot group cannot get a
@@ -16,6 +23,7 @@ flipjumps never share an interpreter.
 """
 import argparse
 import hashlib
+import inspect
 import json
 import os
 import subprocess
@@ -42,7 +50,13 @@ def side(modes):
     import flipjump as fj
     from flipjump.assembler.preprocessor import BlockPool
     from tablepool_gate import PROGRAMS
-    out = {"flipjump": os.path.dirname(fj.__file__)}
+    pre = Path(fj.__file__).resolve().parent / "assembler" / "preprocessor.py"
+    out = {"flipjump": os.path.dirname(os.path.realpath(fj.__file__)),
+           "preprocessor_sha256": hashlib.sha256(pre.read_bytes()).hexdigest(),
+           "accepts_heat": "heat" in inspect.signature(BlockPool.__init__).parameters}
+    if modes == ["probe"]:                   # which code this side runs, before anything is built
+        print(json.dumps(out))
+        return
     for pname, source in PROGRAMS.items():
         for kname, knobs in KNOBS.items():
             for mode in modes:
@@ -97,18 +111,59 @@ def run_side(modes, env):
         return json.loads(r.stdout.strip().splitlines()[-1])
 
 
+def git(checkout, *args):
+    r = subprocess.run(["git", "-C", str(checkout), *args], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else "(not a git checkout: %s)" % r.stderr.strip()[:60]
+
+
+def provenance(label, checkout, got):
+    """print which code a side ran; return the reasons it cannot serve as that side"""
+    where = Path(got.pop("flipjump")).resolve()
+    sha, heat = got.pop("preprocessor_sha256"), got.pop("accepts_heat")
+    dirty = git(checkout, "status", "--porcelain", "--untracked-files=no", "--", "flipjump")
+    print("%-8s %s: rev %s, %s; flipjump imported from %s; preprocessor.py sha256 %s; "
+          "BlockPool(heat=) %s" % (label, checkout, git(checkout, "rev-parse", "--short", "HEAD"),
+                                    "DIRTY" if dirty else "clean", where, sha[:16],
+                                    "accepted" if heat else "absent"))
+    bad = []
+    if Path(checkout).resolve() not in where.parents:
+        bad.append("%s imported flipjump from %s, not from %s" % (label, where, checkout))
+    return bad, sha, heat
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--new", default=r"C:\Users\tomhe\Documents\flipjump-pr",
-                    help="the flipjump checkout to compare against the installed one")
+    ap.add_argument("--base", help="a flipjump checkout WITHOUT pin protection: 1.5.1 before #363 (73e09c0)")
+    ap.add_argument("--new", help="the flipjump checkout with BlockPool(heat=)")
     ap.add_argument("--side", default=None, help=argparse.SUPPRESS)
     a = ap.parse_args()
     if a.side:
         return side(a.side.split(","))
-    old = run_side(["absent"], dict(os.environ))
-    new = run_side(["None", "{}", "hot"], dict(os.environ, PYTHONPATH=a.new))
-    print("BASELINE flipjump: %s" % old.pop("flipjump"))
-    print("NEW flipjump:      %s" % new.pop("flipjump"))
+    if not (a.base and a.new):
+        ap.error("--base and --new are both required: this compares two named checkouts")
+    env_old, env_new = dict(os.environ, PYTHONPATH=a.base), dict(os.environ, PYTHONPATH=a.new)
+    probe_old, probe_new = run_side(["probe"], env_old), run_side(["probe"], env_new)
+    bad_old, sha_old, heat_old = provenance("BASELINE", a.base, dict(probe_old))
+    bad_new, sha_new, heat_new = provenance("NEW", a.new, dict(probe_new))
+    bad = bad_old + bad_new
+    if sha_old == sha_new:
+        bad.append("both sides run the same preprocessor.py -- identity would compare a program with itself")
+    if heat_old:
+        bad.append("the baseline's BlockPool already accepts heat -- it is not flipjump before #363")
+    if not heat_new:
+        bad.append("the new side's BlockPool does not accept heat -- the control cannot run")
+    for reason in bad:
+        print("PROVENANCE FAIL: " + reason)
+    if bad:
+        return 1
+    print("PROVENANCE PASS: two different preprocessors, the baseline without heat, the new side with it")
+    old = run_side(["absent"], env_old)
+    new = run_side(["None", "{}", "hot"], env_new)
+    for label, got, probe in (("BASELINE", old, probe_old), ("NEW", new, probe_new)):
+        ran = {k: got.pop(k) for k in probe}
+        if ran != probe:                     # the builds ran the code the probe named, or nothing counts
+            print("PROVENANCE FAIL: the %s builds ran %s, the probe named %s" % (label, ran, probe))
+            return 1
     same = 0
     for key, got_old in old.items():
         base = key.rsplit(" | heat", 1)[0]

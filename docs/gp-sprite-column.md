@@ -1,6 +1,6 @@
 # The cheaper sprite column: prototype and design
 
-**Status: PHASE 0 PROTOTYPE (stream S6, plan-gameplay section 14 #1). No tracked file was changed.**
+**Status: designed as a phase 0 prototype (stream S6, plan-gameplay section 14 #1) -- no tracked file changed then -- and built as M7 P1.4 (`docs/gp-ledger.md`).**
 The prototype is a set of standalone fj programs in `scratchpad/gp/probes/sprite/`. Nothing here
 builds the renderer or runs the game. Every number is MEASURED with the command given, or
 UNVERIFIED.

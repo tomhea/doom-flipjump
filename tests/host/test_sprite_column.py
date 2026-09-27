@@ -1,7 +1,11 @@
 """M7 P1.4 -- the v2 sprite column's invariants that hold without the renderer (docs/gp-sprite-column.md).
 
-The column itself -- record -> load -> emit against the oracle, one fragment and two -- is checked
-in fj by scratchpad/gp/probes/sprite/ship_check.py, with four mutants. What is pinned here:
+The column itself is checked in fj by tests/fj/test_sprite_bank_fj.py since M7 P1.6: the derive and
+both run walkers over native lists (the window walker above and below a near fragment), and the
+record's tier / slot / min_b section transplanted from the shipped source, each with mutants. P1.4's
+record -> load -> emit check, scratchpad/gp/probes/sprite/ship_check.py, is SUPERSEDED (it builds
+P1.4's blocks and no longer assembles); the load and the whole A+B composition are left to the
+byte-exact gates. What is pinned here:
 
   * the bank's 3-nibble reads (frame.read3_and_inc) are exact only on a bank that starts on a whole
     block, 64 ops = 16^3 bits. The emitter opens the bank with a `pad` of the block stride, and

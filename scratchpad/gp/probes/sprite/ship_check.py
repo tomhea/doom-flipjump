@@ -1,4 +1,14 @@
-"""M7 P1.4 -- THE COLUMN CHECK: the SHIPPED sprite column, record -> load -> emit, against the oracle.
+"""⚠ SUPERSEDED (M7 P1.6, 2026-09-27) -- kept as P1.4's record; it no longer assembles. It builds
+P1.4's bank blocks `[r0][last][n]` (plib.py) from P1.4-era oracle cases, writes the slot's byte 3 as
+0, emits no `rowmap` table and passes thing_record_body's removed `buckets` / `nld` parameters, so it
+cannot drive the P1.6 column. Its checks moved to tests/fj/test_sprite_bank_fj.py: the derive and
+both run walkers (fast, clipped, and the window walker above and below a near fragment) against
+`strip_at`, and the record's tier / slot / min_b section TRANSPLANTED from the shipped source, each
+with R9 mutants. NOT carried over: the load (frame.lines_spr_load, unchanged since P1.4) and
+emit_col_lines' whole A+B composition on real oracle frames -- the byte-exact gates (m3_gate,
+m2_std_gate, deg_gate) are what see those now.
+
+M7 P1.4 -- THE COLUMN CHECK: the SHIPPED sprite column, record -> load -> emit, against the oracle.
 
 docs/gp-ledger.md P1.4, kill criterion 1. The prototype (t2_emit.py / t8_pipeline.py) compared its
 own copies of the proposed macros with the renderer of the day; the proposal is the shipped code

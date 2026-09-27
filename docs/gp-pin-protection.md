@@ -1,4 +1,25 @@
-# Pin protection for the blocking pass (design; phase 0, S8, 2026-09-26)
+# Pin protection for the blocking pass (design: phase 0, S8, 2026-09-26; BUILT: M7 P1.1, 2026-09-27)
+
+**As built** (tomhea/flipjump#363 merged into 1.5.1 as `bc8ee63`; doom's side on M7 P1.1): the
+design below, with its placement kept -- hot groups FIRST, in heat order. The first version tried
+biggest-first placement instead, arguing that a base costs nothing per dispatch and that small hot
+blocks would open alignment holes in a full pool; the review measured both claims false on doom's
+counts (the pool is 52.9% used; a writer that jumps outside the block, or arms a declined table,
+flips `V ^ base`, and hot-first gives the hot words a mean base popcount of 2.95 against 4.85). The
+review rounds also added: occurrences counted before any decline; each hot width sized for its
+tables plus its reserved ranks, doubling only when they do not fit (a spread width has room, so
+`hex.tables.res` keeps its 2^29 block); and `evict_by_value` counting the holes hot-first placement
+can leave. The reserved block size, the re-roll log and the veto count live in doom, not the pool:
+`pinreport.py --heat` compares every hot word's base with the profile's (section 2 step 1 of the
+ship gate), and `build_blocked.py --pin-heat` counts the hot words left unpinned. With no list
+the pool builds 1.5.1's bytes: `scratchpad/12m/heat_identity.py`, which names both checkouts and
+refuses to compare one with itself, finds 48/48 builds identical between `73e09c0` and `bc8ee63`
+(`docs/ship-evidence/heat_identity.log`, with its two provenance controls). The holes hot-first
+leaves in doom's pool are 1,271,808 words, 1.3% of the span (`poolmap.py --heat`; DESIGN.md section
+1.2's blocked28 note).
+**Measured** (blocked28 against blocked27, the same program): binding -1.31M ops/frame (the
+ESTIMATE of section 2 was -1.27M), 20/20 hot words pinned, msframe NOT SEPARATED (faster in all 5
+pairs, x1.025) -- `docs/gp-ledger.md`, P1.1.
 
 This is a design only. No flipjump code is edited in phase 0. The change goes on a branch off
 flipjump-151 `1.5.1` and is PR'd into `1.5.1`. Plan `docs/plan-gameplay.md` section 13.1 asks for it.

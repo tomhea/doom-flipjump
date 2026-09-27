@@ -182,10 +182,11 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **M3 the same + `menu=True`** (`doom_e1m1_menu.fjm` as of M3, before doors) | **85,209,916** | 1.27× OVER | **0.635×** | **flat** (asserted) |
 | **M2 the same + `doors=True`** (`doom_e1m1_menu.fjm`, shipped until the blocking pass) | **51,094,744** | 0.761× | **0.381×** | **flat** (asserted) |
 | **blocked25 = the `game` tier + the assembler's blocking pass** (`doom_e1m1_blocked25.fjm`, shipped 2026-09-13 .. 09-25) | **96,009,696** (data 43,657,732) | 1.431× OVER | **0.715×** (data 0.325×) | **flat** (asserted) |
-| **blocked27 = blocked25 + the hot `sparse_` sites and the two shifts blocked** (**the shipped `doom_e1m1_blocked27.fjm` today**) | **94,704,800** (data 43,253,668) | 1.411× OVER | **0.706×** (data 0.322×) | **flat** (asserted) |
+| **blocked27 = blocked25 + the hot `sparse_` sites and the two shifts blocked** (`doom_e1m1_blocked27.fjm`, shipped 2026-09-25 .. 09-27) | **94,704,800** (data 43,253,668) | 1.411× OVER | **0.706×** (data 0.322×) | **flat** (asserted) |
+| **blocked28 = blocked27's program placed with pin protection** (**the shipped `doom_e1m1_blocked28.fjm` today**) | **95,996,064** (data 43,229,158) | 1.430× OVER | **0.715×** (data 0.322×) | **flat** (asserted) |
 
 ⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1) — **and its "now" is the PRE-BLOCKING binary; today's
-shipped binary is the blocked27 row, see the 2026-09-15 and 2026-09-25 notes below**: the shipped binary was
+shipped binary is the blocked28 row, see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
 89,494,606 words when this table was written and is **51,094,744** now — 0.761× of 2^26 and
 **0.381× of 2^27**, i.e. 38.07% of the w=32 ceiling, no longer OVER. Measured with
 `scratchpad/12m/fjmsize.py`; `m2_std_gate` PASS.
@@ -419,6 +420,43 @@ The program below the pool shrank by 863,264 words (the hot sites' and the shift
 inline stream), the pool grew by 459,200 payload words (they arrived there), and the pad fell by
 1,764,096. The slot-width term, which the too-wide `sparse_` tables had been inflating, fell
 from 940,194 to 434,338 words (-54%); most of the pad's fall is elsewhere, in the other terms.
+
+⚠ **THE BLOCKED28 ROW, 2026-09-27.** blocked27's PROGRAM -- the same emitted source, the same
+counts cache -- placed with PIN PROTECTION (M7 P1.1, `docs/gp-pin-protection.md`): the build line
+gains `--pin-heat scratchpad/12m/heat_blocked27.json.gz` (`docs/ship-gate.md` §1b), and
+flipjump's BlockPool (tomhea/flipjump#363) places that list's 20 hot groups FIRST, in heat order,
+and only then the rest biggest-first. That breaks the property the notes above lean on: with the
+hot groups out of size order, a block CAN sit behind a hole, and `demand == extent` no longer holds.
+`poolmap.py` now prices a heat build (`--heat`, the 1b list by default; a HOLES line, carried by the
+SUM line; control C6), and the transcript `docs/ship-evidence/blocked28_poolmap.log` holds three
+runs: the default, `--no-heat` and `--selftest` (PASS, C1-C6). These lines are verbatim from the
+first:
+
+```
+SPLIT  below word 50,331,648: 1 segment, 26,511,016 payload words, ending at word 26,511,016
+       in the pool   : 436,172 segments, 16,718,142 payload words, words 50,331,648..95,996,064
+GAP    program end -> pool base: 23,820,632 words
+HEAT   scratchpad/12m/heat_blocked27.json.gz: 20 hot groups placed first (0 missing, 0 ambiguous) -- the rest biggest-first
+BLOCKS 27,030 of 27,030 groups placed (0 broken); demand 44,392,608 words, extent 45,664,416 words, capacity 83,886,079 words (52.9% used)
+HOLES  extent - demand = 1,271,808 words in front of blocks (the hot groups go first, in heat order, not biggest-first)
+PAD    44,392,608 - 16,718,142 = 27,674,466 words INSIDE the blocks, by mechanism:
+       block power-of-two round-up         6,963,520 words   25.2%  (--width-buckets only)
+       alignment between buckets                   0 words    0.0%  (structurally 0)
+       unused slots                       20,404,864 words   73.7%  (count rounded up, times --spread)
+       slot width + declined tables          306,082 words    1.1%
+       the four terms sum to the pad: yes
+SUM    span - data = 95,996,064 - 43,229,158 = 52,766,906 = 23,820,632 gap + 27,674,466 pad + 1,271,808 holes: yes
+```
+
+The span grew by 1,291,264 words: 1,271,808 of holes in front of blocks, and 19,456 of demand (the
+ranks the hot sites reserve in their buckets). The payload FELL by 24,510 words: 152,766 left the
+inline stream and 128,256 arrived in the pool -- tables blocked27 inlined now sit in their blocks
+(`docs/ship-gate.md` section 1 names the M1 reset's byte-cell tables, which blocked27 left inline in
+two broken groups). Priced WITHOUT the list
+(`--no-heat`, the transcript's second run), the same counts give extent == demand == 44,373,152 --
+blocked27's layout -- and the SUM line fails against blocked28's bytes, which is the other half of
+the evidence that the list is what moved the layout. The size is 32.21% of 2^27 (PASS), against
+32.23% for blocked27.
 
 ⚠ **THE THREE M5/M3 ROWS, ADDED CR-2026-08 (R4).** They were measured when the tiers were built
 and then left in `scratchpad/`, which is how the PR body came to quote **84,719,666** — the

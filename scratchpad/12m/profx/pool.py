@@ -99,14 +99,27 @@ def load_counts(path):
             "alias": blob.get("alias") or {}}
 
 
-def reconstruct(counts_path, knobs=None):
-    """(BlockPool with every block placed, frozen counts) -- the build's layout, from its counts"""
+def load_heat(path):
+    """a heatsites.py list (build_blocked.py --pin-heat) as BlockPool's `heat=`, or None"""
+    if not path:
+        return None
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as fh:
+        doc = json.load(fh)
+    return {g: [tuple(site) for site in sites] for g, sites in doc["groups"].items()}
+
+
+def reconstruct(counts_path, knobs=None, heat=None):
+    """(BlockPool with every block placed, frozen counts) -- the build's layout, from its counts.
+    `heat`: the list the build was placed with (--pin-heat), or None; a heat build's hot groups sit
+    FIRST, so without it every base after them re-derives wrong."""
     k = dict(KNOBS)
     k.update(knobs or {})
     fr = load_counts(counts_path)
     pool = BlockPool(W, k["pool_base"], counts=fr["counts"], widths=fr["widths"], span_bits=k["span_bits"],
                      alias=fr["alias"], spread=k["spread"], spread_min_count=k["spread_min_count"],
-                     max_slot_ops=k["max_slot_ops"], width_hist=fr["width_hist"], width_buckets=k["width_buckets"])
+                     max_slot_ops=k["max_slot_ops"], width_hist=fr["width_hist"], width_buckets=k["width_buckets"],
+                     **({"heat": heat} if heat else {}))
     return pool, fr
 
 

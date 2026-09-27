@@ -1,0 +1,7 @@
+# R1: tests/host/test_pin_heat.py on origin/main's files (no heat list; its ship-gate.md, counts cache and poolmap.py)
+$ python -m pytest tests/host/test_pin_heat.py -q
+E       AssertionError: --pin-heat appears 0 times in the recorded command 'python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.t
+ERROR tests/host/test_pin_heat.py::test_the_shipped_heat_list_fits_the_program
+ERROR tests/host/test_pin_heat.py::test_the_checks_can_fail
+ERROR tests/host/test_pin_heat.py::test_poolmap_prices_the_shipped_heat_list
+3 errors in 0.28s

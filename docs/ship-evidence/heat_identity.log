@@ -1,0 +1,70 @@
+$ python scratchpad/12m/heat_identity.py --base C:/Users/tomhe/Documents/flipjump-151 --new C:/Users/tomhe/Documents/flipjump-151
+BASELINE C:/Users/tomhe/Documents/flipjump-151: rev bc8ee63, clean; flipjump imported from C:\Users\tomhe\Documents\flipjump-151\flipjump; preprocessor.py sha256 6610b07d4411bb2a; BlockPool(heat=) accepted
+NEW      C:/Users/tomhe/Documents/flipjump-151: rev bc8ee63, clean; flipjump imported from C:\Users\tomhe\Documents\flipjump-151\flipjump; preprocessor.py sha256 6610b07d4411bb2a; BlockPool(heat=) accepted
+PROVENANCE FAIL: both sides run the same preprocessor.py -- identity would compare a program with itself
+PROVENANCE FAIL: the baseline's BlockPool already accepts heat -- it is not flipjump before #363
+rc=1
+
+$ python scratchpad/12m/heat_identity.py --base C:/Users/tomhe/Documents/flipjump-73e09c0 --new C:/Users/tomhe/Documents/flipjump-73e09c0
+BASELINE C:/Users/tomhe/Documents/flipjump-73e09c0: rev 73e09c0, clean; flipjump imported from C:\Users\tomhe\Documents\flipjump-73e09c0\flipjump; preprocessor.py sha256 bd6c07248b6b2ee2; BlockPool(heat=) absent
+NEW      C:/Users/tomhe/Documents/flipjump-73e09c0: rev 73e09c0, clean; flipjump imported from C:\Users\tomhe\Documents\flipjump-73e09c0\flipjump; preprocessor.py sha256 bd6c07248b6b2ee2; BlockPool(heat=) absent
+PROVENANCE FAIL: both sides run the same preprocessor.py -- identity would compare a program with itself
+PROVENANCE FAIL: the new side's BlockPool does not accept heat -- the control cannot run
+rc=1
+
+$ python scratchpad/12m/heat_identity.py --base C:/Users/tomhe/Documents/flipjump-73e09c0 --new C:/Users/tomhe/Documents/flipjump-151
+BASELINE C:/Users/tomhe/Documents/flipjump-73e09c0: rev 73e09c0, clean; flipjump imported from C:\Users\tomhe\Documents\flipjump-73e09c0\flipjump; preprocessor.py sha256 bd6c07248b6b2ee2; BlockPool(heat=) absent
+NEW      C:/Users/tomhe/Documents/flipjump-151: rev bc8ee63, clean; flipjump imported from C:\Users\tomhe\Documents\flipjump-151\flipjump; preprocessor.py sha256 6610b07d4411bb2a; BlockPool(heat=) accepted
+PROVENANCE PASS: two different preprocessors, the baseline without heat, the new side with it
+  hex.xor | plain                                            heat=None baseline 29ea4915616d64ea evicted 0  new 29ea4915616d64ea evicted 0  SAME
+  hex.xor | plain                                            heat={}   baseline 29ea4915616d64ea evicted 0  new 29ea4915616d64ea evicted 0  SAME
+  hex.xor | spread2                                          heat=None baseline 914844b3ee372b27 evicted 0  new 914844b3ee372b27 evicted 0  SAME
+  hex.xor | spread2                                          heat={}   baseline 914844b3ee372b27 evicted 0  new 914844b3ee372b27 evicted 0  SAME
+  hex.xor | buckets+pin_broken                               heat=None baseline 29ea4915616d64ea evicted 0  new 29ea4915616d64ea evicted 0  SAME
+  hex.xor | buckets+pin_broken                               heat={}   baseline 29ea4915616d64ea evicted 0  new 29ea4915616d64ea evicted 0  SAME
+  hex.xor | tight span                                       heat=None baseline 1b1078e81c515eb8 evicted 0  new 1b1078e81c515eb8 evicted 0  SAME
+  hex.xor | tight span                                       heat={}   baseline 1b1078e81c515eb8 evicted 0  new 1b1078e81c515eb8 evicted 0  SAME
+  hex.xor | evict by value                                   heat=None baseline e2a167708e90f503 evicted 4  new e2a167708e90f503 evicted 4  SAME
+  hex.xor | evict by value                                   heat={}   baseline e2a167708e90f503 evicted 4  new e2a167708e90f503 evicted 4  SAME
+  hex.xor | evict, unaligned base                            heat=None baseline d96b048d9b3829f0 evicted 4  new d96b048d9b3829f0 evicted 4  SAME
+  hex.xor | evict, unaligned base                            heat={}   baseline d96b048d9b3829f0 evicted 4  new d96b048d9b3829f0 evicted 4  SAME
+  hex.add/sub | plain                                        heat=None baseline 10bd0382f9c7bd40 evicted 0  new 10bd0382f9c7bd40 evicted 0  SAME
+  hex.add/sub | plain                                        heat={}   baseline 10bd0382f9c7bd40 evicted 0  new 10bd0382f9c7bd40 evicted 0  SAME
+  hex.add/sub | spread2                                      heat=None baseline c35f6739604f3b06 evicted 0  new c35f6739604f3b06 evicted 0  SAME
+  hex.add/sub | spread2                                      heat={}   baseline c35f6739604f3b06 evicted 0  new c35f6739604f3b06 evicted 0  SAME
+  hex.add/sub | buckets+pin_broken                           heat=None baseline 9d599aea3e42bbe6 evicted 0  new 9d599aea3e42bbe6 evicted 0  SAME
+  hex.add/sub | buckets+pin_broken                           heat={}   baseline 9d599aea3e42bbe6 evicted 0  new 9d599aea3e42bbe6 evicted 0  SAME
+  hex.add/sub | tight span                                   heat=None baseline f0a9ece70e6623f3 evicted 0  new f0a9ece70e6623f3 evicted 0  SAME
+  hex.add/sub | tight span                                   heat={}   baseline f0a9ece70e6623f3 evicted 0  new f0a9ece70e6623f3 evicted 0  SAME
+  hex.add/sub | evict by value                               heat=None baseline 8b840b6414b5fea1 evicted 8  new 8b840b6414b5fea1 evicted 8  SAME
+  hex.add/sub | evict by value                               heat={}   baseline 8b840b6414b5fea1 evicted 8  new 8b840b6414b5fea1 evicted 8  SAME
+  hex.add/sub | evict, unaligned base                        heat=None baseline 1caa4a98e7a74e65 evicted 8  new 1caa4a98e7a74e65 evicted 8  SAME
+  hex.add/sub | evict, unaligned base                        heat={}   baseline 1caa4a98e7a74e65 evicted 8  new 1caa4a98e7a74e65 evicted 8  SAME
+  hex.cmp/shift/mul | plain                                  heat=None baseline 8a737ead79d6af79 evicted 0  new 8a737ead79d6af79 evicted 0  SAME
+  hex.cmp/shift/mul | plain                                  heat={}   baseline 8a737ead79d6af79 evicted 0  new 8a737ead79d6af79 evicted 0  SAME
+  hex.cmp/shift/mul | spread2                                heat=None baseline cbaef935d4723a81 evicted 0  new cbaef935d4723a81 evicted 0  SAME
+  hex.cmp/shift/mul | spread2                                heat={}   baseline cbaef935d4723a81 evicted 0  new cbaef935d4723a81 evicted 0  SAME
+  hex.cmp/shift/mul | buckets+pin_broken                     heat=None baseline 64a4ec76810ef014 evicted 0  new 64a4ec76810ef014 evicted 0  SAME
+  hex.cmp/shift/mul | buckets+pin_broken                     heat={}   baseline 64a4ec76810ef014 evicted 0  new 64a4ec76810ef014 evicted 0  SAME
+  hex.cmp/shift/mul | tight span                             heat=None baseline 74e5b4ced3d481a7 evicted 0  new 74e5b4ced3d481a7 evicted 0  SAME
+  hex.cmp/shift/mul | tight span                             heat={}   baseline 74e5b4ced3d481a7 evicted 0  new 74e5b4ced3d481a7 evicted 0  SAME
+  hex.cmp/shift/mul | evict by value                         heat=None baseline ebb13d2536ce028b evicted 15  new ebb13d2536ce028b evicted 15  SAME
+  hex.cmp/shift/mul | evict by value                         heat={}   baseline ebb13d2536ce028b evicted 15  new ebb13d2536ce028b evicted 15  SAME
+  hex.cmp/shift/mul | evict, unaligned base                  heat=None baseline 377b481b6624ffcb evicted 15  new 377b481b6624ffcb evicted 15  SAME
+  hex.cmp/shift/mul | evict, unaligned base                  heat={}   baseline 377b481b6624ffcb evicted 15  new 377b481b6624ffcb evicted 15  SAME
+  bit.exact_xor (fall-through table) | plain                 heat=None baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | plain                 heat={}   baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | spread2               heat=None baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | spread2               heat={}   baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | buckets+pin_broken    heat=None baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | buckets+pin_broken    heat={}   baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | tight span            heat=None baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | tight span            heat={}   baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | evict by value        heat=None baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | evict by value        heat={}   baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | evict, unaligned base heat=None baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+  bit.exact_xor (fall-through table) | evict, unaligned base heat={}   baseline 2f0d1109d22401d9 evicted 0  new 2f0d1109d22401d9 evicted 0  SAME
+IDENTITY PASS: 48/48 builds byte-identical to the baseline
+CONTROL PASS: with a heat list naming each program's busiest group's last table, 18 builds differ from the baseline or raise: ['hex.add/sub | buckets+pin_broken', 'hex.add/sub | evict by value', 'hex.add/sub | evict, unaligned base', 'hex.add/sub | plain', 'hex.add/sub | spread2', 'hex.add/sub | tight span', 'hex.cmp/shift/mul | buckets+pin_broken', 'hex.cmp/shift/mul | evict by value', 'hex.cmp/shift/mul | evict, unaligned base', 'hex.cmp/shift/mul | plain', 'hex.cmp/shift/mul | spread2', 'hex.cmp/shift/mul | tight span', 'hex.xor | buckets+pin_broken', 'hex.xor | evict by value', 'hex.xor | evict, unaligned base', 'hex.xor | plain', 'hex.xor | spread2', 'hex.xor | tight span']
+rc=0
+

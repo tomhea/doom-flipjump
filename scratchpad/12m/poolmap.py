@@ -47,8 +47,15 @@ THE POOL'S ARITHMETIC, from flipjump-151 `flipjump/assembler/preprocessor.py`:
 
 The knobs default to ship-gate 1b's build command. Only those that enter `_block_bits` /
 `_preallocate` change these numbers: `--pool-base`, `--span-bits`, `--spread`,
-`--spread-min-count`, `--max-slot-ops`, `--width-buckets` and the cache's alias map.
+`--spread-min-count`, `--max-slot-ops`, `--width-buckets`, the cache's alias map and `--heat`.
 `--pin-broken` / `--pin-state-cells` decide PINNING, not placement, so they are not repeated here.
+
+A HEAT BUILD (`build_blocked.py --pin-heat`, M7 P1.1; `--heat` here, the 1b list by default,
+`--no-heat` to price without it) places the list's hot groups FIRST, in heat order, and only the
+rest biggest-first. A hot block that is not the biggest can then leave the cursor unaligned for the
+next, so a block CAN sit behind a hole: the HOLES line prices `extent - demand`, and the SUM line
+carries it. Pricing a heat build without its list re-derives every base after the hot groups
+wrongly (profx/pool.py's `reconstruct` says the same), so the list is loaded with the same reader.
 
 CONTROLS (R9)
   C1 THE SPLIT READER READS THE FILE -- a synthesised .fjm with a known, different split must be
@@ -61,6 +68,9 @@ CONTROLS (R9)
      rather than priced, since its block sizes belong to a different program.
   C4 NON-VACUITY -- zero groups, zero demand, or zero words emitted into the pool is a FAILED
      measurement, not a 0-word pad.
+  C6 THE HEAT LIST IS APPLIED -- priced with the list, its hot groups sit ahead of every other
+     group; priced without it, the same groups do not. A --heat that was parsed and then dropped
+     on the way to the pool passes neither half. (Skipped, and said so, under --no-heat.)
   C5 THE PAD'S MECHANISMS ARE MEASURED, NOT APPORTIONED -- a hand-computed two-bucket block whose
      round-up, alignment, unused-slot and width terms are each known in advance; the same group
      with `--no-width-buckets`, where the round-up term must vanish (so the term names a mechanism
@@ -86,13 +96,14 @@ from flipjump.fjm.fjm_consts import (FJ_MAGIC, FJMVersion,               # noqa:
                                      _header_extension_size, _segment_format, _segment_size)
 
 import fjmsize                                                           # noqa: E402
+from profx.pool import load_heat                                         # noqa: E402
 # the signature, and what it hashes, must not drift from the builder's -- import it, never copy it
 from build_blocked import _counts_sig, _load_counts                      # noqa: E402
 
 # ship-gate 1b's build command, plus build_blocked.py's own defaults for what it does not pass
 SHIP_GATE = dict(pool_base=0x60000000, span_bits=0x9FFFFFE0, spread=2, spread_min_count=256,
-                 max_slot_ops=512, width_buckets=True, tier="game", map="E1M1",
-                 wad="tests/fixtures/freedoom_e1m1.wad")
+                 max_slot_ops=512, width_buckets=True, heat="scratchpad/12m/heat_blocked27.json.gz",
+                 tier="game", map="E1M1", wad="tests/fixtures/freedoom_e1m1.wad")
 
 
 def read_segments(path):
@@ -129,7 +140,15 @@ def probe_pool(memory_width, counts, widths, width_hist, alias, knobs):
                      span_bits=knobs["span_bits"], alias=alias, spread=knobs["spread"],
                      spread_min_count=knobs["spread_min_count"],
                      max_slot_ops=knobs["max_slot_ops"], width_hist=width_hist,
-                     width_buckets=knobs["width_buckets"], wants=None)
+                     width_buckets=knobs["width_buckets"], wants=None,
+                     **({"heat": knobs["heat_list"]} if knobs.get("heat_list") else {}))
+
+
+def placed_first(pool, groups):
+    """every group in `groups` sits below every other placed group"""
+    first = [pool.groups[g][0] for g in groups]
+    rest = [base for g, (base, _e) in pool.groups.items() if g not in groups]
+    return bool(first) and bool(rest) and max(first) < min(rest)
 
 
 def pad_breakdown(pool, counts):
@@ -257,6 +276,13 @@ def report(fjm_path, cache_path, knobs):
         return size, parts, None
     pool = probe_pool(W, cache["counts"], cache["widths"], cache["width_hist"],
                       cache.get("alias"), knobs)
+    if knobs.get("heat_list"):
+        rep = pool.heat_report()
+        print("HEAT   %s: %d hot groups placed first (%d missing, %d ambiguous) -- the rest biggest-first"
+              % (knobs["heat"], rep["hot_groups"], rep["hot_groups_missing"],
+                 rep["hot_groups_ambiguous"]), flush=True)
+    else:
+        print("HEAT   none: every group biggest-first", flush=True)
     demand = sum(pool._block_bits(g) for g in cache["counts"]) // W
     extent = pool._used // W
     capacity = (min(1 << W, knobs["pool_base"] + knobs["span_bits"]) - knobs["pool_base"]) // W
@@ -274,6 +300,10 @@ def report(fjm_path, cache_path, knobs):
     print("       extent == the image's span above the pool base, i.e. the image ends at the "
           "allocator's cursor: %s"
           % ("yes" if extent == pool_hi - pool_base_words else "NO"), flush=True)
+    holes = extent - demand
+    print("HOLES  extent - demand = %s words in front of blocks%s"
+          % (format(holes, ","), " (the hot groups go first, in heat order, not biggest-first)"
+             if knobs.get("heat_list") else ""), flush=True)
     pad = demand - pool_words
     print("PAD    %s - %s = %s words INSIDE the blocks, by mechanism:"
           % (format(demand, ","), format(pool_words, ","), format(pad, ",")), flush=True)
@@ -288,10 +318,11 @@ def report(fjm_path, cache_path, knobs):
                  ("  (%s)" % why) if why else ""), flush=True)
     print("       the four terms sum to the pad: %s"
           % ("yes" if sum(b for _n, b, _w in terms) == pad * W else "NO"), flush=True)
-    print("SUM    span - data = %s - %s = %s = %s gap + %s pad: %s"
+    print("SUM    span - data = %s - %s = %s = %s gap + %s pad + %s holes: %s"
           % (format(size.span_words, ","), format(size.data_words, ","),
              format(size.span_words - size.data_words, ","), format(gap, ","), format(pad, ","),
-             "yes" if size.span_words - size.data_words == gap + pad else "NO"), flush=True)
+             format(holes, ","),
+             "yes" if size.span_words - size.data_words == gap + pad + holes else "NO"), flush=True)
     return size, parts, (demand, extent, capacity, pad)
 
 
@@ -419,6 +450,18 @@ def selftest(fjm_path, cache_path, knobs):
     else:
         check("C4 SKIPPED -- no binary at %s" % fjm_path, True)
 
+    # C6  THE HEAT LIST IS APPLIED. With it the hot groups sit first; without it, not all of them.
+    if knobs.get("heat_list"):
+        hot = set(pool.hot_sites)
+        check("C6 priced WITH the heat list, its hot groups sit ahead of every other group",
+              bool(hot) and placed_first(pool, hot), "%d hot groups" % len(hot))
+        cold = probe_pool(32, cache["counts"], cache["widths"], cache["width_hist"],
+                          cache.get("alias"), dict(knobs, heat_list=None))
+        check("C6 priced WITHOUT it, the same groups do not (the list moved the placement)",
+              not placed_first(cold, hot))
+    else:
+        check("C6 SKIPPED -- --no-heat", True)
+
     # C5  THE PAD'S MECHANISMS ARE MEASURED, NOT APPORTIONED. One group, two width buckets, worked
     #     out by hand at op_bits = 2*32 = 64:
     #       width 1 x3 -> slot_ops 1, slots 1<<(3-1).bit_length() = 4, bits 4*1*64 =  256
@@ -428,7 +471,7 @@ def selftest(fjm_path, cache_path, knobs):
     #     So round-up 1024-768 = 256, alignment 768-768 = 0, unused slots 768-(512+3*64) = 64,
     #     occupied 704. A breakdown that charged the whole pad to unused slots reports a 0 round-up.
     synth = dict(knobs, pool_base=1 << 20, span_bits=1 << 20, spread=1, spread_min_count=1 << 30,
-                 max_slot_ops=512, width_buckets=True)
+                 max_slot_ops=512, width_buckets=True, heat_list=None)
     sp = probe_pool(32, {"g": 4}, {"g": 5}, {"g": {1: 3, 5: 1}}, {}, synth)
     b = pad_breakdown(sp, {"g": 4})
     got = (b["demand"], b["demand"] - b["top"], b["top"] - b["slots"],
@@ -450,7 +493,7 @@ def selftest(fjm_path, cache_path, knobs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fjm", default="build/doom_e1m1_blocked27.fjm")
+    ap.add_argument("--fjm", default="build/doom_e1m1_blocked28.fjm")
     ap.add_argument("--counts-cache", default="scratchpad/12m/_counts_game.json.gz")
     ap.add_argument("--pool-base", type=lambda s: int(s, 0), default=SHIP_GATE["pool_base"])
     ap.add_argument("--span-bits", type=lambda s: int(s, 0), default=SHIP_GATE["span_bits"])
@@ -458,6 +501,9 @@ def main():
     ap.add_argument("--spread-min-count", type=int, default=SHIP_GATE["spread_min_count"])
     ap.add_argument("--max-slot-ops", type=int, default=SHIP_GATE["max_slot_ops"])
     ap.add_argument("--no-width-buckets", action="store_true")
+    ap.add_argument("--heat", default=SHIP_GATE["heat"],
+                    help="the build's --pin-heat list (default: ship-gate 1b's)")
+    ap.add_argument("--no-heat", action="store_true", help="price the placement without a heat list")
     ap.add_argument("--tier", default=SHIP_GATE["tier"])
     ap.add_argument("--map", default=SHIP_GATE["map"])
     ap.add_argument("--wad", default=SHIP_GATE["wad"])
@@ -471,7 +517,10 @@ def main():
     knobs = dict(pool_base=a.pool_base, span_bits=a.span_bits, spread=a.spread,
                  spread_min_count=a.spread_min_count, max_slot_ops=a.max_slot_ops,
                  width_buckets=not a.no_width_buckets, tier=a.tier, map=a.map, wad=a.wad,
-                 allow_stale=a.allow_stale)
+                 allow_stale=a.allow_stale, heat=None if a.no_heat else a.heat)
+    if knobs["heat"]:
+        path = Path(knobs["heat"]) if Path(knobs["heat"]).is_absolute() else ROOT / knobs["heat"]
+        knobs["heat_list"] = load_heat(path)
     fjm = Path(a.fjm) if Path(a.fjm).is_absolute() else ROOT / a.fjm
     cache = Path(a.counts_cache) if Path(a.counts_cache).is_absolute() else ROOT / a.counts_cache
     if a.selftest:

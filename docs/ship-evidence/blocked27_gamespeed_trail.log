@@ -1,5 +1,5 @@
 $ python scratchpad/12m/gamespeed_trail.py --fjm build/doom_e1m1_blocked27.fjm
-  (--validate's records made in 74 s, outside the binary lock)
+  (--validate's records made in 78 s, outside the binary lock)
 gamespeed_trail: doom_e1m1_blocked27.fjm sha256 38b09a7331f4f52b, labels blocked27.labels.tsv.gz
   run 0: the binary ends (831, 653) [16.16: 54490400, 42856528], 1 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 89/100 (parts at game frame 89); door-wrong rejected on 14 frames, 14 with its pose equal; 100/100 frames presented
   run 1: the binary ends (-357, 430) [16.16: -23347680, 28194688], 0 door(s) opened; --validate equal on 100/100 frames; doors-shut pose on 100/100; door-wrong rejected on 0 frames, 0 with its pose equal; 100/100 frames presented

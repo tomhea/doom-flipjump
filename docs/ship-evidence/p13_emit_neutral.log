@@ -1,0 +1,15 @@
+$ python scratchpad/gp/p13_emit_neutral.py   # --base 87c2c75 (blocked30's build) --head ff4afef
+base 87c2c75 (E1M1, the game tier):
+   part entry          c26885de3b351803 (26431 chars)
+   part tables         553ad99b0c48b94e (9231153 chars)
+   part main           7cdabe648de7574c (50447 chars)
+   part segconsts      4ff03f0cfae59cb8 (2307278 chars)
+   part walk           72b61331db43db96 (5401216 chars)
+   part state          bd5c1247eb088d0e (10684 chars)
+   part banks          7461f9d3a33f09f4 (35705521 chars)
+   persist viewx,viewy,viewangle,kb_f,kb_b,kb_l,kb_r,kb_u,mode,dstate,ddir,dsub,dwait,sshead,thss_rt,thpos_rt
+head HEAD: EVERY PART EQUAL, the same persist tuple
+the one-room map, base vs head: equal
+CONTROL sshead declared one cell wider (the one-room map): caught -- 1 line(s) differ
+EMISSION-NEUTRAL: PASS
+rc=0

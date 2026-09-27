@@ -82,7 +82,7 @@ for c in COLS:
     print(f"  FJ pairs    [y2,colour]: {scr.log[c]}")
 
 # ---- what the fj's slot SHOULD hold for these columns, straight off the oracle ----
-from doomfj.reference_model import (PNEAR_SEG_BUDGET, THING_BUDGET, THING_SPRITE, ANGLE_MASK,
+from doomfj.reference_model import (PNEAR_SEG_BUDGET, THING_BUDGET, ANGLE_MASK,
                                     sprite_bucket, sprite_bucket_height)
 lds, sds, secs = mw.linedefs("E1M1"), mw.sidedefs("E1M1"), mw.sectors("E1M1")
 planes: list = []
@@ -96,8 +96,8 @@ pss = scene.cmap.subsectors[rm.point_in_subsector(scene.cmap, vx, vy)]
 viewz = rm.view_z(rm._seg_sector(lds, sds, secs, scene.cmap.segs[pss.firstseg]).floor_h)
 drawn = bytearray(cfg.VIEW_W); sfrag = [None] * cfg.VIEW_W
 cache: dict = {}; by: dict = {}; first: dict = {}
-for t in mw.things("E1M1"):
-    if THING_SPRITE.get(t.type) is None: continue
+from doomfj.things import drawable_things   # the oracle's own list (M7 P1.5: single-player things)
+for t in drawable_things(rm, mw.things("E1M1"), art, cache)[0]:
     by.setdefault(rm.point_in_subsector(scene.cmap, t.x, t.y), []).append(t)
 for si, ss in enumerate(scene.cmap.subsectors):
     if ss.numsegs and si in by: first[ss.firstseg] = si

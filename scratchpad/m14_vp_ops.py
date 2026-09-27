@@ -59,10 +59,10 @@ scene = build_scene(mw, mw, "E1M1") if args.oracle else None
 RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noise=True,
                  near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
 cmap = bake_bsp(mw, "E1M1")
-DRAW = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots  # noqa: E402
+DRAW = drawable_things(rm, mw.things("E1M1"), art)[0]
 # M14.5: only the RUNTIME half is on the wire (the baked half is code inside its leaf)
 from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES        # noqa: E402
-from doomfj.things import baked_thing_mask, vanishable_slots              # noqa: E402
 _BK = baked_thing_mask(rm, cmap, DRAW, MONSTER_TYPES)
 NVIS = len(vanishable_slots(DRAW, _BK, VANISHABLE_TYPES))
 DRAW = [t for t, b in zip(DRAW, _BK) if not b]

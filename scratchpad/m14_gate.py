@@ -32,7 +32,7 @@ from doomfj.fixedpoint import _signed
 from doomfj.harness import W
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES, ReferenceModel, SimState,
                                     build_scene, spawn_state)
-from doomfj.things import baked_thing_mask, vanishable_slots
+from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import emit_wall_renderer, write_program_files
 from doomfj.wireformat import (BINDING_DIRTY, encode_bindings, encode_feed,
@@ -97,7 +97,9 @@ CACHE = ROOT / ("scratchpad/fjmcache/m14_bin%s%s%s.fjm"
 # M14-e — the drawable things, in the ONE order both mirrors index by: wad order, filtered to the
 # types that have art. `thing_rows` (fj side) and `render_wall_frame`'s `_drawable` (oracle side)
 # apply that same filter, and the two were checked to select the identical 251 things.
-DRAWABLE = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+# M7 P1.5: ... and the filter is `things.drawable_things`, which since that rung also drops the
+# multiplayer-only things (225 on E1M1) -- so this asks it, rather than repeating it by hand.
+DRAWABLE = drawable_things(rm, mw.things("E1M1"), art)[0]
 SPAWN_POS = [(t.x, t.y) for t in DRAWABLE]
 # M14.5 — only the RUNTIME half is on the wire; the rest is baked into its leaf's code and cannot
 # move. Same SSOT the emitter and the oracle read, so the three cannot drift.

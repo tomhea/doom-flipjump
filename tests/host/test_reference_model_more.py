@@ -635,13 +635,33 @@ def test_slope_div_is_monotone_and_clamps_below_512(rm):
 # -- the host and the emitted program must be simulating the same world ------------------------
 
 def test_hiding_a_thing_with_no_visibility_flag_raises(rm, level, scene):
-    """Only a BAKED VANISHABLE thing has a flag the fj program can clear. Hiding anything else means
-    the host and the emitted program are simulating DIFFERENT WORLDS -- and without the assert the
-    oracle quietly renders the host's version, so the mirror comparison blames the renderer.
+    """Only a BAKED VANISHABLE thing has a flag the fj program can clear. Hiding any other BAKED
+    thing means the host and the emitted program are simulating DIFFERENT WORLDS -- and without the
+    assert the oracle quietly renders the host's version, so the mirror comparison blames the
+    renderer. A RUNTIME thing may be hidden (M7 P1.5): fj holds a thing its skill does not spawn by
+    linking it into no leaf list.
 
     `test_thing_table.py` pins the sibling guard for `thing_positions` ('moves BAKED things');
     nothing reached this one."""
-    mw, aw, _cmap = level
+    mw, aw, cmap = level
     st = spawn_state(mw, "E1M1")
+    # the fixture's asset wad has no sprite art: index 0 names no thing at all
     with pytest.raises(AssertionError, match="have no visibility flag"):
         rm.render_wall_frame(st, scene, things=True, sprite_wad=aw, thing_hidden={0}, **RENDER)
+    # with the real art: a flagless BAKED thing is refused, a RUNTIME thing is accepted (R9: the
+    # guard separates rather than refusing everything)
+    from pathlib import Path as _P
+    from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES
+    from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
+    art = _P(__file__).resolve().parents[2] / "assets" / "freedoom1.wad"
+    if not art.exists():
+        pytest.skip("assets/freedoom1.wad (the sprite art) is not here")
+    aw2 = WadFile.from_path(str(art))
+    drawable, _ = drawable_things(rm, mw.things("E1M1"), aw2, {})
+    baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES)
+    slots = vanishable_slots(drawable, baked, VANISHABLE_TYPES)
+    unflagged = next(i for i, b in enumerate(baked) if b and i not in slots)
+    runtime = next(i for i, b in enumerate(baked) if not b)
+    with pytest.raises(AssertionError, match="have no visibility flag"):
+        rm.render_wall_frame(st, scene, things=True, sprite_wad=aw2, thing_hidden={unflagged}, **RENDER)
+    rm.render_wall_frame(st, scene, things=True, sprite_wad=aw2, thing_hidden={runtime}, **RENDER)

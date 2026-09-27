@@ -210,6 +210,16 @@ def spawn_leaf_lists(binds, nleaves, present=None):
     return sshead, thnext
 
 
+def thing_pos_value(t) -> int:
+    """M7 P1.5 (R6): the value of a runtime thing's `thpos_rt` cell at its spawn -- its 16.16 x in
+    the low 8 nibbles and its 16.16 y in the high 8, each 32-bit two's complement: what
+    `sim.thing_pass` reads with `hex.read_hex 16`, and the layout the hosted wire writes into the
+    same cells (`wireformat.encode_things`: x, then y, little-endian). The pristine table
+    (`wall_renderer._moving_thing_tables`) and NEW GAME's restart block (`restart_lines`) both
+    bake it from here, so the two cannot disagree about where a thing starts."""
+    return (((t.y << 16) & 0xFFFFFFFF) << 32) | ((t.x << 16) & 0xFFFFFFFF)
+
+
 def skill_level_start(drawable, rt_draw, rt_binds, nleaves, vis_slots, skill):
     """M7 P1.5: the game tier's thing PRESENCE at `skill`'s level start -- `(sshead, thnext, thvis)`:
     the runtime things' leaf lists linking only the things the skill spawns, and each baked

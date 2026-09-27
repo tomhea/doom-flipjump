@@ -144,15 +144,44 @@ def test_the_menu_rules_move_between_the_screens():
 
 
 def test_the_highlight_clamps_and_the_first_event_wins():
-    from doomfj.menu import MENU_SKILLS, menu_step
+    from doomfj.menu import menu_step
+    from doomfj.wall_renderer import SKILLS
     assert menu_step(1, 1, 0, {"up"})[2] == 0                    # clamped at the first skill
-    assert menu_step(1, 1, MENU_SKILLS - 1, {"dn"})[2] == MENU_SKILLS - 1   # ...and the last
+    assert menu_step(1, 1, len(SKILLS) - 1, {"dn"})[2] == len(SKILLS) - 1   # ...and the last
     assert menu_step(1, 1, 1, {"up"})[2] == 0 and menu_step(1, 1, 1, {"dn"})[2] == 2
     # first match, in the order esc > enter > up > down
     assert menu_step(1, 1, 1, {"esc", "enter", "up"}) == (1, 0, 1, None)
     assert menu_step(1, 1, 1, {"enter", "up"}) == (0, 0, 1, 1)
     assert menu_step(1, 1, 1, {"up", "dn"})[2] == 0
     assert menu_step(1, 0, 2, {"esc", "enter"}) == (0, 0, 2, None)
+
+
+def test_the_skill_count_is_one_number():
+    """R6 (the P1.5 review): the skill screen's entries, the rules' clamp, the emitted clamp and the
+    restart dispatch all answer to wall_renderer.SKILLS. The rules kept their own `MENU_SKILLS = 3`
+    until the review -- a second number, free to drift from the first, and nothing tied them."""
+    from doomfj.menu import menu_step
+    from doomfj.wall_renderer import (SKILL_MENU, SKILL_MENU_FIRST, SKILLS, menu_state_lines,
+                                      restart_lines)
+    last = len(SKILLS) - 1
+    assert len(SKILL_MENU) - SKILL_MENU_FIRST == len(SKILLS), "one screen entry per skill"
+    assert [menu_step(1, 1, s, {"dn"})[2] for s in range(len(SKILLS))] == [*range(1, last + 1), last]
+    assert [menu_step(1, 1, s, {"up"})[2] for s in range(len(SKILLS))] == [0, *range(last)]
+    spawn = type("Spawn", (), {"x": 0, "y": 0, "angle": 0})()
+    lines = menu_state_lines(restart_lines(spawn, 0, [], [], 1, [([0], [], [])] * len(SKILLS)))
+    assert f"hex.if_flags menu_sel, 1<<{last}, mn_dn_inc, mn_done" in lines, "the emitted clamp"
+    assert [ln for ln in lines if ln.startswith("mn_r")] == ["mn_r%d:" % k for k in range(len(SKILLS))]
+
+
+def test_the_skill_dispatch_refuses_a_fourth_skill(monkeypatch):
+    """R9 for the tie above: the screens' and NEW GAME's dispatch is three-way by its shape (an if0,
+    then one if_flags on bit 1), so a fourth skill must stop the emitter, not reach skill 2's block"""
+    import doomfj.wall_renderer as wr
+    assert wr._skill_dispatch("mn_r") == ["hex.if0 1, menu_sel, mn_r0",
+                                          "hex.if_flags menu_sel, 1<<1, mn_r2, mn_r1"]
+    monkeypatch.setattr(wr, "SKILLS", wr.SKILLS + (wr.SKILLS[-1] + 1,))
+    with pytest.raises(AssertionError, match="three skills"):
+        wr._skill_dispatch("mn_r")
 
 
 def test_the_menu_keys_are_the_devices():

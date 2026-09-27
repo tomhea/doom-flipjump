@@ -1,0 +1,55 @@
+# R1 (the P1.5 review): finding 7 -- the thpos_rt packing is one helper; the skill count is wall_renderer.SKILLS alone
+# every run below is in a MIRROR of the tree named; a MUTANT is applied to the mirror's copy only (scratchpad p15run.py)
+
+## FAIL: the new tests on the parent's source (no helper, no dispatch, MENU_SKILLS)
+# on 0a7fc55 (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_menu.py  (blob f8b2b3e7d7af)
+#   tests/host/test_wall_renderer_helpers.py  (blob 5da13074b951)
+$ PYTHONPATH=src python -m pytest tests/host/test_menu.py tests/host/test_wall_renderer_helpers.py -k "one_number or fourth_skill or wires_layout or clamps" -q -rfE -p no:cacheprovider
+E       AttributeError: module 'doomfj.wall_renderer' has no attribute '_skill_dispatch'
+E       ImportError: cannot import name 'thing_pos_value' from 'doomfj.things' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\p15fix\mirrors\r_1790505948768\src\doomfj\things.py)
+FAILED tests/host/test_menu.py::test_the_skill_dispatch_refuses_a_fourth_skill
+FAILED tests/host/test_wall_renderer_helpers.py::test_a_things_position_cell_is_the_wires_layout
+2 failed, 2 passed, 80 deselected in 0.58s
+# exit 1, 1 s
+
+## GAP: the parent's OWN tests with its second number drifted (MENU_SKILLS = 4)
+# on 0a7fc55 (HEAD of m7-skill-menu), in a mirror of its tree
+# MUTANT in src/doomfj/menu.py:
+#   - MENU_SKILLS = 3
+#   + MENU_SKILLS = 4
+# the old clamp test read MENU_SKILLS itself, so a drift from wall_renderer.SKILLS passed
+$ PYTHONPATH=src python -m pytest tests/host/test_menu.py -q -rfE -p no:cacheprovider
+21 passed in 0.22s
+# exit 0, 1 s
+
+## FAIL: the new tie test on the same drifted parent
+# on 0a7fc55 (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_menu.py  (blob f8b2b3e7d7af)
+#   tests/host/test_wall_renderer_helpers.py  (blob 5da13074b951)
+# MUTANT in src/doomfj/menu.py:
+#   - MENU_SKILLS = 3
+#   + MENU_SKILLS = 4
+$ PYTHONPATH=src python -m pytest tests/host/test_menu.py tests/host/test_wall_renderer_helpers.py -k one_number -q -rfE -p no:cacheprovider
+E       assert [1, 2, 3] == [1, 2, 2]
+E         
+E         At index 2 diff: 3 != 2
+E         Use -v to get more diff
+FAILED tests/host/test_menu.py::test_the_skill_count_is_one_number - assert [...
+1 failed, 83 deselected in 0.52s
+# exit 1, 1 s
+
+## PASS: the fix
+# on 0a7fc55 (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   src/doomfj/menu.py  (blob 66bb8690ce85)
+#   src/doomfj/things.py  (blob 34b06b6de9ed)
+#   src/doomfj/wall_renderer.py  (blob 5084c068337a)
+#   tests/host/test_menu.py  (blob f8b2b3e7d7af)
+#   tests/host/test_wall_renderer_helpers.py  (blob 5da13074b951)
+$ PYTHONPATH=src python -m pytest tests/host/test_menu.py tests/host/test_wall_renderer_helpers.py -q -rfE -p no:cacheprovider
+84 passed in 0.66s
+# exit 0, 1 s
+
+## the emitted menu text (menu_state_lines + _menu_lines, a synthetic restart)
+# the parent sha256 85f7d4ab6d90920702f4d3768273ee153f61dd3b2a9be0327177c3e842659268 over 83083 chars, 3620 lines
+# the fix    sha256 85f7d4ab6d90920702f4d3768273ee153f61dd3b2a9be0327177c3e842659268 over 83083 chars, 3620 lines

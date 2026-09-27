@@ -576,6 +576,19 @@ def test_the_menu_branch_wraps_the_stream_in_the_documented_order():
     assert lines[-1] == "do_world:"
 
 
+def test_a_things_position_cell_is_the_wires_layout():
+    """R6 (the P1.5 review): `things.thing_pos_value` is the ONE packing of a runtime thing's
+    `thpos_rt` cell -- the pristine table and NEW GAME's restart both bake it, and the emitter wrote
+    the expression out twice -- and it is the layout the hosted wire writes into the same cells: x,
+    then y, each 32-bit little-endian, negative coordinates included."""
+    from doomfj.things import thing_pos_value
+    from doomfj.wad import Thing
+    from doomfj.wireformat import encode_things
+    for x, y in ((0, 0), (1, 2), (-1, 5), (1056, -3264), (-32768, 32767)):
+        want = int.from_bytes(encode_things([(x << 16, y << 16)]), "little")
+        assert thing_pos_value(Thing(x, y, 0, 3004, 7)) == want, (x, y)
+
+
 # -- the band-list bank ----------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")

@@ -39,3 +39,40 @@ differ); 2 pinreport 20/20 pinned, exit 0; 3 msframe NOT SEPARATED, never slower
 foundation for P3; 4 heat report: 20 hot groups matched, 0 missing, 0 ambiguous, 35,894/35,894
 listed sites took their index. The ESTIMATE was -1.27M; measured -1.31M on both metrics.
 Attributed ops (profx): n/a -- the rung adds no code.
+
+## P1.2 player collision cells (class S) -- declared 2026-09-27, before the build
+
+**What**: the player's `check_position` stops walking the 256-unit blockmap through packed tables
+(`hex.read_table_packed`, ~6.8K ops per line tested, ~576K per check) and runs a CELL instead: a
+jump tree on the 16.16 position finds the 32-unit cell, the cell's stub calls one stub per
+candidate line, and each line stub XORs its constants into fixed argument cells and calls ONE
+shared line test (`sim.line_test`: PIT_CheckLine with no conversions). A cell lists every line whose
+bbox a box centred anywhere in the cell can touch -- exact interval arithmetic at 16.16, so the
+verdict equals the oracle's all-lines sweep by construction. A door line reads `dstate` against its
+pass state at test time; the one-bit `lnrow` wflip goes. Design: `docs/gp-collision-cells.md`.
+
+**Budget**: -1.0 .. -1.4M ops/frame on the binding metric (handoff section 10). ESTIMATE from
+phase 0: one try ~613K today (MEASURED: seed walk 35.4K + check_position 576K); on cells ~40-45K,
+dominated by the unchanged seed walk.
+
+**Kill criteria** (any one -> the binary does not ship):
+1. `tests/host/test_collision_cells.py`: a cell missing a line some box in it can touch (the
+   corner check, with its mutated-entry control), or the cell model disagreeing with
+   `ReferenceModel.check_position` on the sample (refusals and door states included).
+2. `tests/fj/test_collision_fj.py`: the emitted cell routine disagreeing with the oracle.
+3. `m2_std_gate` or `m3_gate` not byte-exact.
+4. `msframe.py --against shipped`: B SLOWER. NOT SEPARATED ships only as "foundation for P3".
+5. The reclaim: gamespeed binding down by less than 0.8M ops/frame (the budget's low end / 1.25)
+   -> redesign before shipping.
+6. Size over 35% of 2^27, or `pinreport.py`: a hot word of the heat list not pinned.
+
+**Row**: (filled after the build)
+
+| measure | shipped (P1.1) | P1.2 | delta |
+|---|---|---|---|
+| gamespeed binding (ops/frame) | 16,357,904 | | |
+| combat set v2 binding (b0_scenarios) | 16,448,992 | | |
+| collision ops/frame (profx, gamespeed games) | 1,475,186 (blocked27's profile; the same program) | | |
+| ms/frame (msframe, quiet box) | 73.7 (the re-frozen `shipped` baseline) | | |
+| size (% of 2^27) | 32.21% | | |
+| hot words pinned (pinreport) | 20/20 | | |

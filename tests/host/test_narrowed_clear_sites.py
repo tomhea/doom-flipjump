@@ -109,8 +109,14 @@ NARROWED_FILES = ("fixed_point.fj", "frame_render.fj", "plane_bands.fj", "plane_
 # scan still finds some" asserted, deleting one -- the Z1 bug's own shape -- left this file green.
 # sim.fj 4 -> 2 (M7 P1.2): the two in `sim.sext16` and `sim.check_block` left WITH those macros --
 # the collision cells xor every value in whole; bind_things' two remain.
-EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 22, "plane_bands.fj": 4,
-                  "plane_render.fj": 5, "projection.fj": 9, "sim.fj": 2, "stream_render.fj": 10}
+# frame_render.fj 22 -> 21 and stream_render.fj 10 -> 7 (M7 P1.4, the v2 sprite column): the
+# record's two `trb_run_w8` clears left with the per-column run arithmetic (the record stores the
+# block address; the emit derives the rest), and the column emit's `srw_sidx`/`srw_wlo4`/
+# `srw_whi4`/`srw_rel_w`/`srn_sidx`/`srn_rel_w` left with the old fragment reader; in came the
+# slot index `gps_sidx` (the record's slot write and the emit's slot read, one each) and the emit's
+# window nibbles `gps_wlo4`/`gps_whi4` -- the same Z3 shapes on the new registers.
+EXPECTED_SITES = {"fixed_point.fj": 3, "frame_render.fj": 21, "plane_bands.fj": 4,
+                  "plane_render.fj": 5, "projection.fj": 9, "sim.fj": 2, "stream_render.fj": 7}
 # and the rep-guarded ones the site scan skips, pinned for the same reason and so that a NEW one
 # cannot appear unnoticed -- being skipped there, it would otherwise be checked by nothing.
 EXPECTED_REPPED = {"fixed_point.fj": 0, "frame_render.fj": 1, "plane_bands.fj": 0,
@@ -437,21 +443,24 @@ def _pin_state(text, pinned):
 # EVERY CLEAR HERE IS LIVE ON ITS OWN BRANCH. A Z-style scan pairs it with the mov beside it and
 # wants to narrow or delete it; doing so paints the wrong pixels on a path no single gate walks --
 # `m2_std_gate` passed byte-exact over the deleted `tex_col_wrap` one. The two `proj` ones are
-# results: an x2<=x1 span and a texture column that divides exactly both mean dst = 0; the
-# `frame.clamp_row` one is the negative end of a clamp, where 0 IS the clamped value. Adding a row
-# here is a claim that the new pair was checked and must stay whole, so do it deliberately, not to
-# go green.
+# results: an x2<=x1 span and a texture column that divides exactly both mean dst = 0; the two
+# `stream.frag_derive` ones are the negative ends of the sprite column's y clamps (sy1, sy2 into
+# [0, viewh]), where 0 IS the clamped value. (They replace `frame.clamp_row`'s pin, the same clamp
+# in the record, which M7 P1.4 deleted when the emit took the clamp over.) Adding a row here is a
+# claim that the new pair was checked and must stay whole, so do it deliberately, not to go green.
 LIVE_CLEARS_ACROSS_A_BRANCH = {
     "fixed_point.fj": (),
-    "frame_render.fj": (((("neg",), "hex.zero 8, dst"), "hex.mov 8, dst, bound",
-                         ("hi_ck", "clamp_hi")),),
+    "frame_render.fj": (),
     "plane_bands.fj": (),
     "plane_render.fj": (),
     "projection.fj": (((("no_span",), "hex.zero 8, dst"), "hex.mov 8, dst, sst_quot",
                        ("have_span", "diff_neg")),
                       ((("rem_zero",), "hex.zero 8, dst"), "hex.mov 8, dst, tw", ("rem_nz",))),
     "sim.fj": (),
-    "stream_render.fj": (),
+    "stream_render.fj": (((("y1_neg",), "hex.zero 4, sy1"), "hex.mov 4, sy1, gps_cvh",
+                          ("y1_hi", "y1_clamp")),
+                         ((("y2_neg",), "hex.zero 4, sy2"), "hex.mov 4, sy2, gps_cvh",
+                          ("y2_hi", "y2_clamp"))),
 }
 
 
@@ -691,14 +700,43 @@ def test_the_widths_are_evaluated_at_the_builds_w(monkeypatch):
             f"not load-bearing here any more")
 
 
+# the shape the emitter-hoisted real sites had (M1-HOIST): the register is named in the macro's
+# `<` list, declared only by the EMITTER, and read after the pair only through a macro -- so its
+# total width, and whether clear + mov cover it, comes from the hoisted `hex.vec` alone.
+HOISTED = """
+ns demo {
+    def hoisted dst, src @ end < hz_reg {
+        hex.zero 6, hz_reg + 2*dw
+        hex.mov 2, hz_reg, src
+        demo.add_chain dst, hz_reg
+        ;end
+      end:
+    }
+}
+"""
+HOISTED_DECL = '''        "hz_reg: hex.vec 8",'''
+# the real sites that lean on that fallback, per file. Four until M7 P1.4 -- the record's two
+# `trb_run_w8` clears and the column emit's `srw_rel_w` / `srn_rel_w` -- and none since: the v2
+# column retired all four, and every register its new sites clear is read at a visible width
+# after them. Pinned, so a new one is SEEN (and then the control below has a real site again).
+EXPECTED_HOIST_LEANING = {name: 0 for name in NARROWED_FILES}
+
+
 def test_the_hoisted_scratch_declarations_are_load_bearing(monkeypatch):
-    """HOIST SABOTAGE CONTROL. Four real sites are pinned by a `hex.vec` the EMITTER writes and no
-    .fj file does; drop that fallback and they have no teeth, which must be a fault, not silence."""
+    """HOIST SABOTAGE CONTROL. The scan falls back to the `hex.vec` widths the EMITTER writes for
+    registers no .fj file declares; drop that fallback and a site that needs it must be a FAULT, not
+    silence. Shown on a fixture in the real sites' shape, because since M7 P1.4 no real site needs
+    it -- which is pinned alongside."""
+    monkeypatch.setattr(_this_module(), "_hoisted_scratch_text", lambda: HOISTED_DECL)
+    assert narrowed_clear_faults(HOISTED)[1] == [], "the declared fixture must be clean"
     monkeypatch.setattr(_this_module(), "_hoisted_scratch_text", lambda: "")
-    for name in ("frame_render.fj", "stream_render.fj"):
-        assert narrowed_clear_faults(_real(name), name)[1], (
-            f"{name} is unaffected by losing the hoisted declarations, so the fallback the "
-            f"docstring leans on is not pinning anything")
+    assert narrowed_clear_faults(HOISTED)[1], (
+        "the fixture is unaffected by losing its hoisted declaration, so the fallback the docstring "
+        "leans on is not pinning anything")
+    leaning = {n: len(narrowed_clear_faults(_real(n), n)[1]) for n in NARROWED_FILES}
+    assert leaning == EXPECTED_HOIST_LEANING, (
+        f"real sites now lean on the hoisted declarations: {leaning} -- check each, then update "
+        f"EXPECTED_HOIST_LEANING")
 
 
 # -- and the same teeth on REAL code (R9, the way scratchpad/cr/alpha_check.py's selftest does it):
@@ -710,8 +748,9 @@ REAL_MUTANTS = (
     # sees from the other side, as a read of the wrong table entry
     ("fixed_point.fj", ".zero w/4 - idx_n, ptr + idx_n*dw",
      ".zero w/4 - idx_n - 1, ptr + (idx_n+1)*dw", "do not meet"),
-    ("stream_render.fj", "hex.zero w/4 - 4, srw_sidx + 4*dw",
-     "hex.zero w/4 - 5, srw_sidx + 5*dw", "do not meet"),
+    # (M7 P1.4 retired `srw_sidx`; the column emit's slot index is the same Z3 shape)
+    ("stream_render.fj", "hex.zero w/4 - 2, gps_sidx + 2*dw",
+     "hex.zero w/4 - 3, gps_sidx + 3*dw", "do not meet"),
     ("frame_render.fj", "hex.sparse_zero HOTTER_PAD, 6, x + 2*dw",
      "hex.sparse_zero HOTTER_PAD, 5, x + 3*dw", "do not meet"),
     ("plane_bands.fj", "hex.mov 2, lvl, bb_light", "hex.mov 1, lvl, bb_light", "do not meet"),
@@ -756,14 +795,15 @@ def _insert_after_label(text, label, statement, times):
     return "\n".join(lines[:at[0] + 1] + [f"        {statement}"] * times + lines[at[0] + 1:])
 
 
-@pytest.mark.parametrize("name,label", [("projection.fj", "rem_zero"),
-                                        ("projection.fj", "no_span"),
-                                        ("frame_render.fj", "neg")])
-def test_deleting_a_live_clear_from_the_real_file_is_caught(name, label):
+@pytest.mark.parametrize("name,label,clear", [("projection.fj", "rem_zero", "hex.zero 8, dst"),
+                                              ("projection.fj", "no_span", "hex.zero 8, dst"),
+                                              ("stream_render.fj", "y1_neg", "hex.zero 4, sy1"),
+                                              ("stream_render.fj", "y2_neg", "hex.zero 4, sy2")])
+def test_deleting_a_live_clear_from_the_real_file_is_caught(name, label, clear):
     """the Z1 bug re-committed in memory against the shipped text: the clear that IS the result on
     its branch is gone, the mov on the other branch stays, and every trajectory that never enters
     the branch is still byte-exact."""
-    mutated = _drop_the_clear_under(_real(name), label, "hex.zero 8, dst")
+    mutated = _drop_the_clear_under(_real(name), label, clear)
     deleted, drifted, _ = _pin_state(mutated, LIVE_CLEARS_ACROSS_A_BRANCH[name])
     assert any(p[0][0] == (label,) for p in deleted), (
         f"deleting the {label}: clear from {name} is not reported as deleted: {deleted} {drifted}")

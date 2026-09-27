@@ -92,6 +92,7 @@ from doomfj.doorcode import door_line_ids
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights, spawn_state)
+from doomfj.things import single_player
 
 # ================================================================================================
 # RULES -- the approved simplifications (D5) and the model's conventions. ONE definition each; the
@@ -586,8 +587,7 @@ class World(CombatMixin):
             "model assumes a map without them")
         # -- things: the union of every single-player skill, in WAD order ----------------------
         self.things = [t for t in mw.things(M)
-                       if t.type not in gd.NOT_THINGS and not t.flags & gd.MTF_NOTSINGLE
-                       and t.flags & (gd.MTF_EASY | gd.MTF_NORMAL | gd.MTF_HARD)]
+                       if t.type not in gd.NOT_THINGS and single_player(t)]
         unknown = sorted({t.type for t in self.things} - set(gd.THING_TYPES))
         assert not unknown, "thing types missing from gamedata.THING_TYPES: %s" % unknown
         self.mon_things = [t for t in self.things if t.type in gd.MONSTER_DOOMEDNUMS]

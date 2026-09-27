@@ -1,0 +1,23 @@
+$ python scratchpad/12m/pinreport.py --selftest   # at 311f23f + the renames change
+pinreport selftest -- C2, C3, C6's second half and C7's first are the negative controls
+  (the tracked counts cache describes a later program: tables checked against the hot list's reference counts)
+  C1 the hot list is not vacuous (>= 10 words)                       ok  20 words
+  C1 every hot word of the shipped binary is PINNED at its reference base ok  PINNED
+  C1 every block holds the tables the counting pass saw              ok  104244/104244
+  C2 the stripped hottest word is reported LOST                      ok  LOST
+  C2 ... and only that one (the others stay PINNED)                  ok
+  C2 a lost pin makes the report's exit status nonzero               ok
+  C2 ... while the intact binary's is zero (the status separates)    ok
+  C3 a hot word whose label is gone is UNRESOLVED                    ok  UNRESOLVED
+  C6 a hot word whose line moved is re-keyed by heat key and PINNED  ok  ('PINNED', True)
+  C6 ... and with two labels of that heat key it is UNRESOLVED (no guessing) ok  UNRESOLVED
+  C7 a word whose macro changed its parameter count is UNRESOLVED without the renames ok  sim.thing_pass: UNRESOLVED
+  C7 ... and PINNED through the heat list's renames                  ok  PINNED
+  C5 SKIPPED: build/doom_e1m1_b26.fjm or its label table is gone
+  C4 the shipped build log's declines parse                          ok  [5103, 0, 4008]
+  C4 ... and its broken-group line                                   ok  [2, 27030]
+  C4 a synthetic log parses to ITS numbers                           ok
+  C4 a log without the lines yields nothing (not zeros)              ok
+
+SELFTEST PASS
+rc=0

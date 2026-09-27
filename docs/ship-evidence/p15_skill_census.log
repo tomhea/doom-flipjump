@@ -1,0 +1,37 @@
+# M7 P1.5 review (findings 3 and 10): the host-side numbers docs/gp-skill-menu.md quotes, regenerated
+# on 43220c6 (HEAD of m7-skill-menu) with scratchpad/gp/p15_skill_census.py (blob cb1d097e57ac, committed with this log)
+# (no fj, no build: WAD parsing, the thing lists, and three oracle frames for part C)
+$ PYTHONPATH=src python scratchpad/gp/p15_skill_census.py --pixels
+wad tests/fixtures/freedoom_e1m1.wad, art assets/freedoom1.wad, map E1M1; skills ['easy', 'medium', 'hard'], boot hard
+
+A. the thing universe (docs/gp-skill-menu.md section 1)
+| | things | pickups | monsters | decor | barrels |
+|---|---|---|---|---|---|
+| drawable before the rung (art only) | 251 | 120 | 53 | 56 | 22 |
+| multiplayer-only (leave the image) | 26 | 26 | 0 | 0 | 0 |
+| the single-player union (the image) | 225 | 94 | 53 | 56 | 22 |
+| easy | 183 | 88 | 17 | 56 | 22 |
+| medium | 184 | 77 | 29 | 56 | 22 |
+| hard | 203 | 79 | 46 | 56 | 22 |
+(classes: monsters = MONSTER_TYPES, barrels = type 2035, pickups = the other VANISHABLE_TYPES, decor = the rest)
+multiplayer-only things by type: {2001: 2, 2002: 2, 2003: 2, 2004: 1, 2008: 4, 2010: 7, 2013: 1, 2046: 2, 2048: 3, 2049: 2}
+things that change with the skill: 64 -- {'pickups': 21, 'monsters': 43, 'decor': 0, 'barrels': 0}
+monsters on every skill: 10 of 53
+monsters easy does not spawn: 36, types [9, 58, 3001, 3002, 3004]
+monsters medium does not spawn: 24, types [9, 58, 3001, 3002, 3004]
+monsters hard does not spawn: 7, types [3004]
+
+B. the hosted wire under a hand-built (art-only) drawable list, against the emitter's
+multiplayer-only things that are RUNTIME under the hand-built list: 7 [(2001, 864, 896), (2048, -160, 1328), (2002, -160, 1248), (2004, 512, 1936), (2049, 864, 832), (2049, 864, 960), (2013, 1104, -672)]
+multiplayer-only things with a VISIBILITY slot under it: 19 (types [2001, 2002, 2003, 2008, 2010, 2046, 2048])
+runtime things: hand-built 75, emitter 68; the same things in the same order: False
+visibility slots: hand-built 123, emitter 104
+sprite types on the map only among multiplayer-only things: [2002, 2003, 2004, 2013, 2046]
+
+C. the NEW GAME frame at each skill (the spawn view; m3_gate's oracle render)
+easy   hides 42 drawable things
+medium hides 41 drawable things
+hard   hides 22 drawable things
+easy / medium: 12 px differ
+easy / hard: 20 px differ
+medium / hard: 8 px differ

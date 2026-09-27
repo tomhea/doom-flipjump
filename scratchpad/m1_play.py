@@ -40,7 +40,7 @@ from doomfj.fastrun import FjmRunner, _fjcore
 from doomfj.fixedpoint import _signed
 from doomfj.mapcompiler import bake_bsp
 from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES, ReferenceModel, spawn_state
-from doomfj.things import baked_thing_mask, vanishable_slots
+from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
 from doomfj.wad import WadFile
 from doomfj.wireformat import encode_bindings, encode_feed, encode_things, encode_visibility
 from flipjump.interpreter.fjm_run import IOReadOnEOF
@@ -101,7 +101,7 @@ w = WadFile.from_path(str(ROOT / args.wad))
 art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 rm = ReferenceModel(Config())
 cmap = bake_bsp(w, "E1M1")
-dr = [t for t in w.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+dr = drawable_things(rm, w.things("E1M1"), art)[0]
 bkd = baked_thing_mask(rm, cmap, dr, MONSTER_TYPES)
 NVIS = len(vanishable_slots(dr, bkd, VANISHABLE_TYPES))
 RT = [t for t, b in zip(dr, bkd) if not b]

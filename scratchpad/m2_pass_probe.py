@@ -48,7 +48,7 @@ from doomfj.mapcompiler import bake_bsp                                   # noqa
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,      # noqa: E402
                                     ReferenceModel, SimState, build_scene)
-from doomfj.things import baked_thing_mask, vanishable_slots              # noqa: E402
+from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots  # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.wireformat import (encode_bindings, encode_feed,              # noqa: E402
                                encode_things, encode_visibility, keys_byte, keys_dict)
@@ -125,7 +125,7 @@ def main():
         WORDS += [base["dstate"] + 2 * d + 1, base["ddir"] + 2 * d + 1, base["dsub"] + 2 * d + 1]
         WORDS += [base["dwait"] + 2 * (WAIT_NIBBLES * d + k) + 1 for k in range(WAIT_NIBBLES)]
 
-    drawable = [t for t in mw.things(args.map) if rm.sprite_art(art, t.type, {}) is not None]
+    drawable = drawable_things(rm, mw.things(args.map), art)[0]
     baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES)
     nvis = len(vanishable_slots(drawable, baked, VANISHABLE_TYPES))
     runtime = [t for t, b in zip(drawable, baked) if not b]

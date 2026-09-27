@@ -38,7 +38,7 @@ import flipjump as fj
 from doomfj.config import Config
 from doomfj.fastrun import FjmRunner
 from doomfj.mapcompiler import bake_bsp
-from doomfj.things import baked_thing_mask, vanishable_slots
+from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
 from doomfj.wireformat import (encode_bindings, encode_feed,
                                encode_feed_mapunits, encode_things,
                                encode_visibility)
@@ -231,11 +231,14 @@ def main():
     THINGS, NTH, binds = b"", 0, None
     if sim:
         # the runtime thing block, built exactly as m14_gate/m14_sweep build it -- same SSOT
-        # (baked_thing_mask / vanishable_slots), so the walker cannot drift from the gates.
+        # (drawable_things / baked_thing_mask / vanishable_slots), so the walker cannot drift from
+        # the gates. M7 P1.5: `drawable_things` is the ONE list -- the emitter's, single-player
+        # things only. The list this built by hand kept E1M1's 26 multiplayer-only pickups, 7 of
+        # them in a monster's leaf, so it sent 75 thing positions and bindings where the program
+        # reads 68 (docs/ship-evidence/p15_skill_census.log, part B).
         _rm = ReferenceModel(cfg)
         _cmap = bake_bsp(mw, args.map)
-        _drawable = [th for th in mw.things(args.map)
-                     if _rm.sprite_art(spr, th.type, {}) is not None]
+        _drawable = drawable_things(_rm, mw.things(args.map), spr)[0]
         _baked = baked_thing_mask(_rm, _cmap, _drawable, MONSTER_TYPES)
         _nvis = len(vanishable_slots(_drawable, _baked, VANISHABLE_TYPES))
         _rt = [th for th, b in zip(_drawable, _baked) if not b]

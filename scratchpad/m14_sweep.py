@@ -72,8 +72,8 @@ if args.things:
     rm = ReferenceModel(Config())
     cmap = bake_bsp(w, M)
     from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES
-    from doomfj.things import baked_thing_mask, vanishable_slots
-    drawable = [t for t in w.things(M) if rm.sprite_art(art, t.type, {}) is not None]
+    from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
+    drawable = drawable_things(rm, w.things(M), art)[0]
     # M14.5: only the RUNTIME half is on the wire -- the baked half is code inside its leaf.
     baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES)
     # M14.5: every baked vanishable thing is VISIBLE for the sweep -- the median frame is the one

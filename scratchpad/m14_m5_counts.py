@@ -41,6 +41,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT, ROOT / "scratchpad"):
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.reference_model import (MONSTER_BUDGET, THING_BUDGET,         # noqa: E402
                                     ReferenceModel, SimState, build_scene)
+from doomfj.things import drawable_things                                 # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 from nb_validate import _near_any_line, true_sector                       # noqa: E402
 
@@ -66,7 +67,7 @@ RENDER_KW = dict(wall_mode="W1R", floor_mode_ft1=True, plane_near=True, wall_noi
                  near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
 
 # ── the STATIC structure: lever 5a's ceiling ───────────────────────────────────────────────────
-DRAWABLE = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+DRAWABLE = drawable_things(rm, mw.things("E1M1"), art)[0]
 occupied = {rm.point_in_subsector(cmap, t.x, t.y) for t in DRAWABLE}
 with_segs = [i for i, ss in enumerate(cmap.subsectors) if ss.numsegs]
 occ_segs = [i for i in with_segs if i in occupied]

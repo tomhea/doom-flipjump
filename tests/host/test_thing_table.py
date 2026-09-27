@@ -352,7 +352,7 @@ def test_both_mirrors_build_the_drawable_list_with_the_same_predicate(level):
     # skill half too, and the skill half is pinned on its own below.
     loose = [t for t in things if single_player(t) and THING_SPRITE.get(t.type) is not None]
     mp = [t for t in things if not single_player(t) and THING_SPRITE.get(t.type) is not None]
-    assert (len(mp), len(ssot)) == (26, 225), (len(mp), len(ssot))    # E1M1: 18 pickups, 8 decor
+    assert (len(mp), len(ssot)) == (26, 225), (len(mp), len(ssot))    # E1M1: 26 pickups (census)
     assert [(t.x, t.y, t.type) for t in ssot] == [(t.x, t.y, t.type) for t in loose], \
         "the two predicates already disagree on the shipped art wad"
 

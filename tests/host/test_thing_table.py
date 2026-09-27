@@ -182,6 +182,25 @@ def test_a_thing_moved_into_another_sector_takes_that_sector_s_floor_and_light(l
     assert moved >= 20, f"only {moved} things could be moved to a differing sector"
 
 
+def test_the_bank_and_the_shade_classes_hold_only_what_a_single_player_game_draws(level):
+    """M7 P1.5 (rule 5): `things.drawable_things` became the single-player universe, and the sprite
+    bank's kinds and the shade-row classes come from it too -- a kind or a (light, height) pair that
+    only a multiplayer-only thing has is baked and never drawn (on E1M1 five kinds exist only among
+    the 26 multiplayer-only pickups). The control: the kinds with art over ALL the map's things are
+    strictly more, so this map tells the two apart."""
+    cfg, rm, mw, art, cmap, lds, sds, secs, spr_base, spr_dw, spr_ldbase, spr_cls = level
+    from doomfj.things import drawable_things
+    things = mw.things("E1M1")
+    drawn, _idx = drawable_things(rm, things, art)
+    kinds = {t.type for t in drawn}
+    every = {t.type for t in things if rm.sprite_art(art, t.type, {}) is not None}
+    assert kinds < every, "no kind is multiplayer-only here -- the check cannot tell"
+    assert set(spr_base) == kinds, sorted(set(spr_base) ^ kinds)
+    pairs = {(rm.wall_lightnum(_thing_sector(rm, cmap, lds, sds, secs, t).light, 0),
+              max(1, rm.sprite_art(art, t.type, {})[4])) for t in drawn}
+    assert set(spr_cls) == pairs, sorted(set(spr_cls) ^ pairs)
+
+
 def test_the_shade_row_bank_must_be_widened_and_by_how_much(level):
     """⚠ THE BLOCKER M14-e HITS, measured rather than discovered as a KeyError mid-build.
 

@@ -17,7 +17,7 @@ fj top-level labels are global, so **the order is the contract** — never reord
 | `projection.fj` | 32 | `point_on_side_leaf`, `wedge_setup`, `wedge_bbox` | the projection math — angles, scales, column ranges. 12 more macros are called by `frame_render.fj`. |
 | `frame_render.fj` | 82 | `seg_pass1_leaf_body_lines`, `seg_pass1_leaf_body_ts`, `seg_pass2_leaf_body_lines`, `thing_record_body` | the frame. **Only 7 of its 82 macros are called from outside**; the rest are its internals. |
 | `stream_render.fj` | 41 | `emit_bytes4` | the per-column run emitter — pushes runs to the device. |
-| `sim.fj` | 9 | `check_cells`, `try_move`, `bind_things`, `thing_pass` | the player sim: collision against real linedefs, on 32-unit collision cells (`collision.collision_cells_fj` emits the routine; `line_test` is its one shared line test, `jump16` its tree node). |
+| `sim.fj` | 11 | `check_cells`, `try_move`, `bind_things`, `thing_pass`, `leaf_link`/`leaf_unlink` | the player sim: collision against real linedefs, on 32-unit collision cells (`collision.collision_cells_fj` emits the routine; `line_test` is its one shared line test, `jump16` its tree node); the per-leaf thing lists, rebuilt per frame by `bind_things` in the hosted tiers and relinked per MOVE by `leaf_link`/`leaf_unlink` (M7 P1.3). |
 | `m1_reset.fj` | 4 | `m1.zerobyte` | M1's self-reset primitives (constant-address byte clear). |
 
 **Where the time goes.** Per frame the four `MAIN` entry points in `frame_render.fj` dominate;

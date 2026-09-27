@@ -1,4 +1,10 @@
-"""Shared machinery for the sprite-column probe: turn oracle CASES into a standalone fj program
+"""⚠ SUPERSEDED (M7 P1.6, 2026-09-27) -- kept as the P1.4 probe's record. `Frame` builds P1.4's bank
+blocks `[r0][last][n]` from cases.json (the P1.4 oracle's PRE-SCALED runs, not native lists),
+`slots()` writes the slot's byte 3 as 0 and `program()` emits no `rowmap` table, so nothing built on
+this module (ship_check.py, t1..t9) assembles against the P1.6 macros. The P1.6 column is tested by
+tests/fj/test_sprite_bank_fj.py (see ship_check.py's header for what moved there and what did not).
+
+Shared machinery for the sprite-column probe: turn oracle CASES into a standalone fj program
 that expands the REAL renderer macros (src/fj/*.fj) over real band lists, a real W1R wall walker,
 real V5 step pieces and a real sprite-bank block per case; assemble; run; decode the 0x0B stream.
 

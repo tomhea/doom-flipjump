@@ -1,0 +1,44 @@
+# R1 (the P1.5 review): finding 2 -- enter and esc held across a frame boundary: no event on the up edge
+# every run below is in a MIRROR of the tree named; a MUTANT is applied to the mirror's copy only (scratchpad p15run.py)
+
+## GAP: the parent's test on a poll that records enter / esc on BOTH edges
+# on 22a608b (HEAD of m7-skill-menu), in a mirror of its tree
+# MUTANT in src/fj/input.fj:
+#   - hex.if_flags stat, 0xAAAA, done, enter_dn
+#   + hex.if_flags stat, 0xAAAA, enter_dn, enter_dn
+# MUTANT in src/fj/input.fj:
+#   - hex.if_flags stat, 0xAAAA, done, esc_dn
+#   + hex.if_flags stat, 0xAAAA, esc_dn, esc_dn
+$ PYTHONPATH=src python -m pytest tests/fj/test_keyboard_input.py -q -rfE -p no:cacheprovider
+15 passed in 1.61s
+# exit 0, 3 s
+
+## FAIL: the new test on the same poll
+# on 22a608b (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/fj/test_keyboard_input.py  (blob dd3a0d25591b)
+# MUTANT in src/fj/input.fj:
+#   - hex.if_flags stat, 0xAAAA, done, enter_dn
+#   + hex.if_flags stat, 0xAAAA, enter_dn, enter_dn
+# MUTANT in src/fj/input.fj:
+#   - hex.if_flags stat, 0xAAAA, done, esc_dn
+#   + hex.if_flags stat, 0xAAAA, esc_dn, esc_dn
+$ PYTHONPATH=src python -m pytest tests/fj/test_keyboard_input.py -q -rfE -p no:cacheprovider
+E       AssertionError: assert ['00001000', ...', '00000000'] == ['00001000', ...', '00000000']
+E         
+E         At index 1 diff: '00001000' != '00000000'
+E         Use -v to get more diff
+E       AssertionError: assert ['00000100', ...', '00000000'] == ['00000100', ...', '00000000']
+E         
+E         At index 1 diff: '00000100' != '00000000'
+E         Use -v to get more diff
+FAILED tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[enter held across frames: no event on its up edge]
+FAILED tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[esc held across frames: no event on its up edge]
+2 failed, 16 passed in 1.88s
+# exit 1, 3 s
+
+## PASS: the new test on the branch's input.fj
+# on 22a608b (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/fj/test_keyboard_input.py  (blob dd3a0d25591b)
+$ PYTHONPATH=src python -m pytest tests/fj/test_keyboard_input.py -q -rfE -p no:cacheprovider
+18 passed in 1.68s
+# exit 0, 3 s

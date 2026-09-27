@@ -1,0 +1,16 @@
+# R1: the p14 tests on the PARENT rung's src/ (git archive 57f20d9 = 57f20d9 M7 P1.3: the game tier's leaf lists are baked and persist; the per-move ), the branch's test files copied in
+$ python -m pytest tests/host/test_narrowed_clear_sites.py -q -p no:cacheprovider
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_scan_finds_every_narrowed_clear_the_file_carries[frame_render.fj]
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_scan_finds_every_narrowed_clear_the_file_carries[stream_render.fj]
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_clears_that_are_live_on_their_own_branch_are_all_still_whole[frame_render.fj]
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_clears_that_are_live_on_their_own_branch_are_all_still_whole[stream_render.fj]
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_hoisted_scratch_declarations_are_load_bearing
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_checker_rejects_the_real_file_mutated[stream_render1]
+FAILED tests/host/test_narrowed_clear_sites.py::test_deleting_a_live_clear_from_the_real_file_is_caught[stream_render.fj-y1_neg-hex.zero 4, sy1]
+FAILED tests/host/test_narrowed_clear_sites.py::test_deleting_a_live_clear_from_the_real_file_is_caught[stream_render.fj-y2_neg-hex.zero 4, sy2]
+8 failed, 70 passed in 0.79s
+$ python -m pytest tests/host/test_sprite_column.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'sprbank_misalignment' from 'doomfj.build' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scr
+ERROR tests/host/test_sprite_column.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.58s

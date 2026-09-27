@@ -1,3 +1,3 @@
-# R1: the same tests on the branch (m7-collision-cells)
-$ python -m pytest tests/host/test_collision_cells.py tests/host/test_collision_more.py tests/host/test_collision.py tests/host/test_doorcode.py tests/host/test_doorcode_more.py tests/host/test_narrowed_clear_sites.py tests/fj/test_collision_fj.py -q
-169 passed in 210.42s (0:03:30)
+# R1: the same tests on the branch (m7-collision-cells a1726c8)
+$ python -m pytest tests/host/test_collision_cells.py tests/host/test_collision_more.py tests/host/test_collision.py tests/host/test_doorcode.py tests/host/test_doorcode_more.py tests/host/test_narrowed_clear_sites.py tests/fj/test_collision_fj.py -q -p no:cacheprovider
+168 passed in 172.76s (0:02:52)

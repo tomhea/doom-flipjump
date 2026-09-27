@@ -1,0 +1,14 @@
+$ python scratchpad/gp/p12_emit_neutral.py   # --base 34960cb (blocked29's rebuild commit, 61672ad before the reword) --head a1726c8
+base 34960cb:
+   freedoom_e1m1.wad text 6dd0f2d49f0c76db (55230 lines, 40668 xor_by) root e1m1_cc_n1117
+   freedoom_e1m1.wad line_constants 5c335c3a72a24c5c (1175 rows)
+   e1m1_lite.wad text 51ba51c9075eedfd (39538 lines, 28564 xor_by) root e1m1_cc_n994
+   e1m1_lite.wad line_constants e0391c54ff04e8bf (836 rows)
+   xor_lines sweep (6072 consts) 12bb0d0c28009ba4
+   CELL_DECLS dc29ad6761d921ed
+   COLLISION_STATE_DECLS 8040f63fd45ddf01 (53 names)
+head HEAD: EVERY VALUE EQUAL
+CONTROL ca_slope declared 2 wide:   caught -- 3 value(s) differ
+CONTROL ca_dx's top nibble dropped: caught -- 3 value(s) differ
+EMISSION-NEUTRAL: PASS
+rc=0

@@ -1,0 +1,3 @@
+# R1: the same tests on the branch (m7-skill-menu 20599d8)
+$ python -m pytest tests/fj/test_keyboard_input.py tests/fj/test_menu_mode.py tests/fj/test_skill_menu.py tests/host/test_menu.py tests/host/test_reference_model_more.py tests/host/test_skill_presence.py tests/host/test_thing_table.py tests/host/test_wall_renderer_helpers.py -q -p no:cacheprovider
+141 passed in 6.32s

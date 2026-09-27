@@ -1,0 +1,13 @@
+# M7 P1.6 review (finding 3): the bank, the animation and the rowmap MEASURED -- every count at a commit (git archive), 2026-09-27
+$ python scratchpad/gp/probes/bank/size.py --base 4653cc9
+size.py: --rev HEAD = 112aed4 M7 P1.6 review: fj tests for the record's tier / slot / min_b section and the window walker
+CONTROL block counter: 3 blocks read as 3 ok; one cell short refused ok
+CONTROL assembler: an empty addition (0, 0) data/span words (ok); 1,000 ops 2000 data words (ok)
+BANK: 16635 blocks = 2129280 words -- 32 kinds, 557 columns: 1671 blocks in the kinds' three regions, 14964 in the animation's; 9510265 characters of fj
+KINDS: 32 in the bank, 27 of them drawn by a drawable (single-player) thing; the 5 no drawable thing uses [2002, 2003, 2004, 2013, 2046] hold 351 blocks = 44928 words; kinds banked again under a sprite another kind already holds [3002]: 57 more blocks = 7296 words
+ANIMATION: 306 views, 237 distinct lumps (237 by lump name), 69 views mirrored
+ROWMAP: 98308 data words (98308 span words) with its switch aligned, plus 0..16382 words of its own `pad 8192` wherever a build lands it
+BANK at --base 4653cc9 = 4653cc9 M7 P1.5 (10/n): every tier EMITS on the one-room map -- the render tier's crash in seconds, not tests/fj's sixteen minutes: 22837 blocks = 2923136 words -- 32 kinds, 557 columns; 12954701 characters
+DELTA: the bank -6202 blocks = -793856 words; with the rowmap (aligned) -695548 words = -0.518% of 2^27
+CONTROLS PASS
+rc=0

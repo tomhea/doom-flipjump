@@ -193,30 +193,40 @@ def test_the_menu_keys_are_the_devices():
 
 # -- M7 P1.5 (the owner, 2026-09-27): the credit, and an M that reads as an M ----------------------
 
-def test_the_credit_sits_in_the_bottom_right_corner_in_its_dim_gray():
-    """the owner's "tomhe.app" on every menu screen: CREDIT drawn at CREDIT_MARGIN px from the right
-    and bottom edges, in palette_colours' fourth colour -- and that colour nowhere else"""
-    from doomfj.menu import CREDIT, CREDIT_MARGIN, GLYPH_H, _GLYPHS, glyph_width, text_width
+def test_the_credit_sits_in_the_bottom_right_corner_small_and_in_its_dim_gray():
+    """the owner's "tomhe.app" on every menu screen: CREDIT in the SMALL (3x5) font, CREDIT_MARGIN px
+    from the right and bottom edges, in palette_colours' fourth colour -- and that colour nowhere else"""
+    from doomfj.menu import (CREDIT, CREDIT_MARGIN, SMALL_GLYPH_H, _SMALL_GLYPHS, glyph_width,
+                             text_width)
     for lines, sel in ((LINES, 0), (["CHOOSE SKILL", "", "EASY", "MEDIUM", "HARD"], 4)):
         grid = pixels(W, H, lines, sel, COLOURS)
-        x0, y0 = W - CREDIT_MARGIN - text_width(CREDIT), H - CREDIT_MARGIN - GLYPH_H
+        x0 = W - CREDIT_MARGIN - text_width(CREDIT, _SMALL_GLYPHS)
+        y0 = H - CREDIT_MARGIN - SMALL_GLYPH_H
         want, x = set(), x0
         for ch in CREDIT:
-            rows = _GLYPHS[ch].split("|")
-            want |= {(x + gx, y0 + gy) for gy in range(GLYPH_H) for gx, c in enumerate(rows[gy])
+            rows = _SMALL_GLYPHS[ch].split("|")
+            assert len(rows) == SMALL_GLYPH_H
+            want |= {(x + gx, y0 + gy) for gy, r in enumerate(rows) for gx, c in enumerate(r)
                      if c == "#"}
-            x += glyph_width(ch) + 1
+            x += glyph_width(ch, _SMALL_GLYPHS) + 1
         got = {(i % W, i // W) for i, p in enumerate(grid) if p == COLOURS[3]}
         assert got == want, sorted(got ^ want)[:8]
         assert x - 1 == W - CREDIT_MARGIN, "the credit does not end at the margin"
 
 
-def test_the_m_is_five_columns_with_two_stems_and_a_dip():
-    """three columns cannot draw an M's two strokes and the dip between them: it is five wide, its
-    outer columns full, its middle column inked only at the dip's point (row 2)"""
-    from doomfj.menu import _GLYPHS, glyph_width, text_width
-    rows = _GLYPHS["M"].split("|")
-    assert glyph_width("M") == 5 and all(len(r) == 5 for r in rows)
-    assert all(r[0] == "#" and r[4] == "#" for r in rows)
-    assert [r[2] for r in rows] == [" ", " ", "#", " ", " "]
-    assert text_width("MM") == 11 and text_width("HH") == 7          # widths add, one gap between
+def test_the_lines_are_5x7_and_both_fonts_draw_an_m_with_two_stems_and_a_dip():
+    """the owner chose the 5x7 font for the menu's lines (and kept the credit's 3x5): in both, M is
+    five columns, its outer columns full, its middle column inked only where the dip reaches --
+    rows 2-3 -- which no three-column M can draw"""
+    from doomfj.menu import (GLYPH_H, SMALL_GLYPH_H, _GLYPHS, _SMALL_GLYPHS, glyph_width,
+                             text_width)
+    assert GLYPH_H == 7 and SMALL_GLYPH_H == 5
+    assert all(len(g.split("|")) == GLYPH_H for g in _GLYPHS.values())
+    assert all(len(g.split("|")) == SMALL_GLYPH_H for g in _SMALL_GLYPHS.values())
+    for font, h in ((_GLYPHS, GLYPH_H), (_SMALL_GLYPHS, SMALL_GLYPH_H)):
+        rows = font["M"].split("|")
+        assert glyph_width("M", font) == 5 and len(rows) == h
+        assert all(r[0] == "#" and r[4] == "#" for r in rows)
+        assert [k for k, r in enumerate(rows) if r[2] == "#"] == [2, 3]
+    assert text_width("M.") == 5 + 1 + 2                      # widths add, one gap between
+    assert text_width("MH", _SMALL_GLYPHS) == 5 + 1 + 3

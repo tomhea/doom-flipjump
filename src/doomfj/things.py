@@ -73,7 +73,8 @@ def single_player(t):
     multiplayer-only thing (`options & MTF_NOTSINGLE` outside a netgame) and one with no skill bit.
     ONE predicate for the thing universe: `drawable_things` below (the renderer, the oracle, every
     gate) and the gameplay model (`world.World`) both take it. E1M1: 26 of the 251 things with art
-    are multiplayer-only (18 pickups, 8 decor); the image holds the other 225, the union of the three
+    are multiplayer-only (all pickups: 7 weapons, 18 ammo, a soulsphere --
+    docs/ship-evidence/p15_skill_census.log); the image holds the other 225, the union of the three
     skills, and which of those a game has is the skill's level-start state."""
     from doomfj import gamedata as gd          # lazy: gamedata reads the oracle's constants at import
     return (not t.flags & gd.MTF_NOTSINGLE

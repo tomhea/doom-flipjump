@@ -17,16 +17,21 @@ pickups present depend on the chosen skill). Kill criteria: `docs/gp-ledger.md`.
   `thvis` (the M14.5 vanishable flags) -- hidden.
 - **Decor** present at a skill is `_decor_for(skill)`; **barrels** of the other skills are not spawned.
 
-MEASURED on E1M1 (freedoom_e1m1.wad things, freedoom1.wad art; `things.drawable_things` for "drawable"):
+MEASURED on E1M1 (freedoom_e1m1.wad things, freedoom1.wad art): `docs/ship-evidence/
+p15_skill_census.log`, part A (`scratchpad/gp/p15_skill_census.py`). The classes: monsters =
+`MONSTER_TYPES`, barrels = type 2035, pickups = the other `VANISHABLE_TYPES`, decor = the rest.
 
 | | things | pickups | monsters | decor | barrels |
 |---|---|---|---|---|---|
-| drawable today | 251 | 112 | 53 | 64 | 22 |
-| multiplayer-only (leave the image) | 26 | 18 | 0 | 8 | 0 |
+| drawable before this rung (art only) | 251 | 120 | 53 | 56 | 22 |
+| multiplayer-only (leave the image) | 26 | 26 | 0 | 0 | 0 |
 | the single-player union (the image) | 225 | 94 | 53 | 56 | 22 |
 | easy | 183 | 88 | 17 | 56 | 22 |
 | medium | 184 | 77 | 29 | 56 | 22 |
 | hard | 203 | 79 | 46 | 56 | 22 |
+
+(The first version of this table had no log and split the multiplayer-only 26 as 18 pickups and 8
+decor; under the classes above all 26 are pickups -- 7 weapons, 18 ammo, a soulsphere.)
 
 64 things change with the skill: 43 of the 53 monsters (10 are on every skill) and 21 pickups, all
 of them VANISHABLE types. No decor and no barrel does -- so the two presence mechanisms that exist already
@@ -50,7 +55,10 @@ not spawn, is the ONE answer both mirrors ask:
   asserts that no baked thing without a flag varies by skill -- a map where one did would need a
   flag first, and must say so at emit time rather than draw the wrong things;
 - **the oracle**: `render_wall_frame(thing_hidden=...)` accepts absent RUNTIME things as well as
-  hidden baked vanishable ones (it asserted baked-only until now); the gates pass `skill_absent`.
+  hidden baked vanishable ones (it asserted baked-only until now) -- but only a skill's: the
+  runtime things named must be exactly the ones one skill does not spawn, the only runtime absence
+  fj can draw (the P1.5 review; any runtime thing was accepted at first). The gates pass
+  `skill_absent`.
 
 **The boot state is hard's level start.** The image's pristine lists and `thvis` values are HARD's --
 the skill the frozen combat set v2 runs at and the budget is sized on (D7) -- so the set, B0 and every
@@ -84,7 +92,9 @@ level state and are not in it.
 - The rules have ONE Python side, `doomfj.menu.menu_step` (with `MENU_KEYS`, the device's keycodes),
   which every check that drives a program through the menu steps: `tests/fj/test_skill_menu.py`
   runs the real `menu_state_lines` and `restart_lines` against it in a frame loop from DIRTY cells,
-  with swapped moves and an unzeroed restart as its R9 controls.
+  printing every cell the restart writes (until the P1.5 review: only viewx, dstate, two list bytes
+  a side and one flag), with swapped moves and the restart minus each group of its writes in turn
+  as its R9 controls.
 - `menu_scr` and `menu_sel` persist the way `mode` does: they are declared with the standalone
   tier's globals (`STANDALONE_SCRATCH_DECLS`, so `m5_setfile.py` re-attaches them to the restore set
   at their widths) and named in `build.STANDALONE_PERSIST`, the set's one intended hole -- the
@@ -107,16 +117,19 @@ level state and are not in it.
   screen clamped at both ends, backed out of, and NEW GAME at easy, medium and hard; controls: the
   first NEW GAME finds the player walked away, every NEW GAME frame is the spawn view, and the three
   NEW GAME frames are pairwise distinct in the oracle (MEASURED at the spawn view: easy / hard 20 px,
-  easy / medium 12, medium / hard 8). `--selftest-skill` (the oracle starts the next skill) must
+  easy / medium 12, medium / hard 8 -- `docs/ship-evidence/p15_skill_census.log`, part C, m3_gate's
+  render of each). `--selftest-skill` (the oracle starts the next skill) must
   fail at frame 20.
 - `m2_std_gate`: its route, entering the world at the boot state (hard) -- then, with the door open
   and walked through, NEW GAME at the boot skill and the same route again, which must retrace the
   first walk pose for pose and end facing a SHUT door (control 6; the door must have been open when
-  NEW GAME landed -- MEASURED with `--dry`: state 5, its pass state 4 -- and the last frame must be
-  able to tell). `--selftest-restart` (the oracle never restarts) must fail. This is the kill
+  NEW GAME landed -- UNVERIFIED: an unlogged `--dry` run found it at state 5, its pass state 4;
+  control 6 itself requires at least the pass state on every run of the gate -- and the last frame
+  must be able to tell). `--selftest-restart` (the oracle never restarts) must fail. This is the kill
   criterion 2's "walk, open a door, choose a skill" on the shipped binary.
 - `b0_scenarios` on set v2: the runs start from their checkpoints at hard, and the frames change by
   what hard does not spawn -- the 26 multiplayer-only things and the 7 zombiemen of the other skills
-  (the model has always run at hard; the render oracle is now told so, through `thing_hidden`).
+  (the census log, part A; the model has always run at hard, and the render oracle is now told so,
+  through `thing_hidden`).
 - Budget: -0.3M ops/frame on the v2 binding (handoff section 10). ESTIMATE (plan section 7's R4):
   7 zombiemen and 26 multiplayer-only things no longer drawn at hard.

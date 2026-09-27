@@ -1,0 +1,19 @@
+# R1 (the P1.5 review): finding 9 -- the oracle hides runtime things only as a skill's set
+# every run below is in a MIRROR of the tree named; a MUTANT is applied to the mirror's copy only (scratchpad p15run.py)
+
+## FAIL: the new test on the parent's oracle (any runtime thing accepted)
+# on 29ba17f (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_reference_model_more.py  (blob d390fdb543b7)
+$ PYTHONPATH=src python -m pytest tests/host/test_reference_model_more.py -k hiding -q -rfE -p no:cacheprovider
+E           Failed: DID NOT RAISE <class 'AssertionError'>
+FAILED tests/host/test_reference_model_more.py::test_hiding_runtime_things_takes_a_whole_skill
+1 failed, 1 passed, 17 deselected in 0.51s
+# exit 1, 1 s
+
+## PASS: the new test on the fixed oracle
+# on 29ba17f (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_reference_model_more.py  (blob d390fdb543b7)
+#   src/doomfj/reference_model.py  (blob ac152beb6203)
+$ PYTHONPATH=src python -m pytest tests/host/test_reference_model_more.py -k hiding -q -rfE -p no:cacheprovider
+2 passed, 17 deselected in 0.37s
+# exit 0, 1 s

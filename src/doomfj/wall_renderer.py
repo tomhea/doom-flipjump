@@ -3003,11 +3003,22 @@ SPR_BLOCK_STRIDE = 64      # V4-HD: cap 24 needs 3+48 bytes -- was 32 at cap 12.
                            # >= 3 -- which is what lets a block's later reads re-arm three nibbles
                            # (frame.read3_and_inc). `pad 64` before `sprbank:` keeps the bank on it.
 assert SPR_BLOCK_STRIDE == 64, "frame.blk_addr / frame.arm3 are built for 64-op sprite blocks"
-SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot`: 3 per fragment since M7 P1.4,
-                           #     [s][blk lo][blk hi], A at byte 0 and B at byte 8 -- a power of 16
-                           #     so the per-column byte offset is a whole-nibble shift.
+SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot`: two fragments, A and B (below) --
+                           #     a power of 16 so the per-column byte offset is a whole-nibble shift.
 SPR_THING_SLOTS = 256      # M7 P1.4: fragment slot ids are ONE byte, 1..255 (0 = no fragment) --
-SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds [y0 + 32768 lo][hi][light row][unused] per id
+SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds SPR_THING_SLOT_FIELDS per id, then one unused byte
+# M7 P1.4 -- THE TWO SLOT LAYOUTS, each stated once here. The fj sides are literals: the record
+# writes both (frame.thing_record_body), the emit reads a column's fragments (frame.lines_spr_load)
+# and the derive reads a thing's slot (stream.frag_derive); tests/host/test_sprite_column.py holds
+# every one of those literals -- offsets, field order, bias -- to these names.
+SPR_FRAG_FIELDS = ("slot id", "block lo", "block hi")   # a fragment in `spslot`, byte by byte
+SPR_FRAG_BYTES = len(SPR_FRAG_FIELDS)
+SPR_SLOT_B_BYTE = 8        # fragment B's first byte in its column's slot; A's is byte 0
+SPR_THING_SLOT_FIELDS = ("y0 lo", "y0 hi", "light row")   # `gpslot`, byte by byte
+SPR_THING_Y0_BIAS = 1 << 15   # y0 is stored biased, in two bytes: a tall NEAR sprite's top sits far
+                              # above row -128, and a one-byte bias WRAPPED (M13-15M)
+assert SPR_FRAG_BYTES <= SPR_SLOT_B_BYTE <= SPR_SLOT_STRIDE - SPR_FRAG_BYTES
+assert len(SPR_THING_SLOT_FIELDS) <= SPR_THING_SLOT_BYTES
 
 
 def check_slot_ids(n_things):

@@ -512,6 +512,13 @@ Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj
   `tests/host/test_sprite_column.py` assembles the header after 0..1000 ops and reads the label
   back, with the pad-dropped control.
 - **The slot-id bound** is `wall_renderer.check_slot_ids(len(drawable things))` -- E1M1 has 251.
+- **The two slot layouts are stated once**, in `wall_renderer` (PR #93's review, R6): a column's
+  fragments in `spslot` are `SPR_FRAG_FIELDS` (slot id, block lo, block hi), A at byte 0 and B at
+  `SPR_SLOT_B_BYTE` (8); a thing's `gpslot` is `SPR_THING_SLOT_FIELDS` (y0 lo, y0 hi, light row),
+  y0 biased by `SPR_THING_Y0_BIAS` (2^15). The fj sides stay literals -- the record writes both,
+  `lines_spr_load` reads the fragments (its skip to B is 8 - 3 = 5), `frag_derive` reads the slot
+  and unbiases -- and `tests/host/test_sprite_column.py` reads each literal off those three macros
+  and holds it to its constant, with a mutant per literal that must be told apart.
 - **The latent wrong-light ditto** of section 6 is gone with the four-field compare: the ladder
   compares (slot, block).
 - **The column check** is `scratchpad/gp/probes/sprite/ship_check.py`: the SHIPPED record (the

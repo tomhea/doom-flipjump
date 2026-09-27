@@ -37,13 +37,12 @@ from doomfj.mapcompiler import (bake_bsp, _bsp_as_code, _bsp_descend_code, _byte
                                 thing_live_subsectors,
                                 assert_thing_live_survives_prune)
 from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_FACE_BASE,
-                                    SPRITE_HD_H, SPRITE_RUN_CAP_HD,
+                                    SPRITE_HD_H, SPRITE_TIERS, sprite_tier_list,
                                     DEG_SOFT_SCENERY, DEG_MINH2_SCENERY, DEG_SOFT_MON,
                                     DEG_MINH2_MON, DEG_SPRB_MINH, DEG_SLIVER_W,
                                     DEG_STACK_SCALE, DEG_PNEAR, DEG_DDA_FACES,
-                                    DEG_LIP_SCALE, DEG_SPR_LOWRES_H, DEG_SPR_LOWRES_CAP,
+                                    DEG_LIP_SCALE, DEG_SPR_LOWRES_H,
                                     DEG_SPR_NEAR_TZ,
-                                    DEG_SPR_MID_CAP,
                                     STEP_SEG_BUDGET, SPRITE_HEIGHT_BUCKETS, THING_BUDGET,
                                     MONSTER_BUDGET, MONSTER_TYPES, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER, VANISHABLE_TYPES,
@@ -53,7 +52,7 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
-from doomfj.spritebank import bank_list_of, rowmap_table          # M7 P1.6: the native-list bank
+from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
                           pass_state, use_boxes_xy)
@@ -3237,18 +3236,13 @@ def sprite_hd_bucket(cfg) -> int:
 
 
 def sprite_tier_lists(art, cfg):
-    """M7 P1.6 -- a kind's native lists, tier by tier, as `doomfj.spritebank.bank_list_of` builds
-    them for the ORACLE too (its column loop asks the same function for the same columns): HD from
-    the full-resolution column at SPRITE_RUN_CAP_HD, MID from the half-resolution one at
-    DEG_SPR_MID_CAP, and -- with SPR-NEAR -- LD from the half-resolution one at DEG_SPR_LOWRES_CAP."""
+    """M7 P1.6 -- a kind's native lists, tier by tier in the bank's layout order: HD, MID and -- with
+    SPR-NEAR -- LD. Each column's list is `reference_model.sprite_tier_list`, the ONE function the
+    oracle's column loop draws from too (R6): what a tier reads (full- or half-resolution columns)
+    and at which run cap is said there, not here."""
     heights = sprite_bucket_heights(cfg)
-    cols, dh, dwid, fcols, fdh = art[0], art[1], art[2], art[7], art[8]
-    tiers = [[bank_list_of(tuple(fcols[u]), fdh, SPRITE_RUN_CAP_HD, heights) for u in range(dwid)],
-             [bank_list_of(tuple(cols[u]), dh, DEG_SPR_MID_CAP, heights) for u in range(dwid)]]
-    if DEG_SPR_NEAR_TZ:
-        tiers.append([bank_list_of(tuple(cols[u]), dh, DEG_SPR_LOWRES_CAP, heights)
-                      for u in range(dwid)])
-    return tiers
+    tiers = SPRITE_TIERS if DEG_SPR_NEAR_TZ else SPRITE_TIERS[:2]     # LD exists only with SPR-NEAR
+    return [[sprite_tier_list(art, t, u, heights) for u in range(art[2])] for t in tiers]
 
 
 def sprite_block_body(bl, n_buckets: int) -> list:
@@ -3330,7 +3324,8 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
     Returns `(bank_text, base_of_kind, dw_of_kind, ld_base_of_kind, anim_index)` -- each kind's HD
     region (its MID region is `dw` blocks on), its downscaled width, its LD region, and
     `{(sprite, frame letter, rotation): (HD region, dw, mirrored)}` for the animation. The lists
-    come from `sprite_tier_lists` -> `doomfj.spritebank`, the functions the oracle draws with (R6)."""
+    come from `sprite_tier_lists` -> `reference_model.sprite_tier_list`, the function the oracle
+    draws with (R6)."""
     cache: dict = {}
     # M7 P1.5 (rule 5): the kinds a single-player game DRAWS -- `things.drawable_things`, the one
     # definition -- not every kind with art: a multiplayer-only kind's blocks would never be read

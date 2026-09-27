@@ -287,11 +287,15 @@ thing's height bucket through `rowmap`, a D4 dispatch (`rowmap[b][n] = ceil(n * 
 lookups a fragment, one a run; the record adds `u` to the tier's region instead of multiplying, and
 takes a column iff its bucket is at least the list's `min_b` (the shared rule). The bank also holds
 every frame and rotation of E1M1's monsters, barrels, fireballs, puffs and blood (306 views, 237
-lumps), which nothing draws before P3.
+lumps; MEASURED, `docs/ship-evidence/p16_size.log`), which nothing draws before P3.
 
-**Budget**: size **-793,856 words** MEASURED at emit (16,635 blocks against 22,837; 2,129,280 against
-2,923,136 words) while holding the animation; ops ESTIMATE +0.05 .. +0.15M on combat set v2's binding
-(the rowmap lookups against the record's saved multiply). The frozen set: a v3 (below).
+**Budget**: size MEASURED (`scratchpad/gp/probes/bank/size.py --base 4653cc9` at 112aed4,
+`docs/ship-evidence/p16_size.log`): the bank **-793,856 words** (16,635 blocks against the
+per-bucket bank's 22,837; 2,129,280 against 2,923,136 words) while holding the animation, and the
+new rowmap table **+98,308 words** (plus 0..16,382 words of its own `pad 8192` where the build lands
+it) -- together **-695,548 words** (-0.518% of 2^27). (First declared as -793,856: the bank alone.)
+Ops ESTIMATE +0.05 .. +0.15M on combat set v2's binding (the rowmap lookups against the record's
+saved multiply). The frozen set: a v3 (below).
 
 **Kill criteria** (any one -> the binary does not ship; class F, decision D8):
 1. Host: `doomfj.spritebank`'s rules (identity scale draws `sprite_strip`'s column; the rowmap is

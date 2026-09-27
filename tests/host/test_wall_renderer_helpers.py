@@ -24,7 +24,7 @@ which matters because each of them fails in a way that costs a WHOLE BUILD to di
   * `_player_sim_lines` / `_standalone_input_lines` / `_state_wire_lines` -- the fj half of a
     two-language mirror against `doomfj.wireformat` and `reference_model.step_sim`. A swapped key
     mask or a sign flip shows up only as a cumulative trajectory drift in `scratchpad/m5_gate.py`.
-  * `_menu_lines`, `_band_pair_lists`, `hoisted_scratch_decls`, `map_has_sky`, `_spr_nlow`, `_pfx`
+  * `_menu_lines`, `_band_pair_lists`, `hoisted_scratch_decls`, `map_has_sky`, `sprite_hd_bucket`, `_pfx`
     -- bank-order, label-uniqueness and label-alphabet invariants, all of them one-second checks
     standing in for half-hour builds.
 
@@ -44,8 +44,7 @@ from doomfj import wireformat as WF
 from doomfj.config import Config
 from doomfj.menu import palette_colours, stream as menu_stream
 from doomfj.reference_model import (ANGLE_TURN, FORWARD_MOVE, ReferenceModel,
-                                    DEG_SPR_LOWRES_H, SPRITE_HEIGHT_BUCKETS,
-                                    sprite_bucket_height)
+                                    SPRITE_HEIGHT_BUCKETS, sprite_bucket_height)
 from doomfj.wad import WadFile
 from doomfj.wall_renderer import (DEFAULT_MENU, DEFAULT_MENU_SELECTED, MAX_BANDS,
                                   STANDALONE_POLLS, STANDALONE_SCRATCH_DECLS, TIERS,
@@ -53,7 +52,7 @@ from doomfj.wall_renderer import (DEFAULT_MENU, DEFAULT_MENU_SELECTED, MAX_BANDS
                                   WINDOW_ICON_SIZE, WINDOW_TITLE,
                                   _ABLATE_MODES, _band_pair_lists, _int_part_lines,
                                   _lines_mode_decls, _menu_lines, _pfx, _player_sim_lines,
-                                  _seg_xorby_block, _seg_xorby_use, _spr_nlow,
+                                  _seg_xorby_block, _seg_xorby_use, sprite_hd_bucket,
                                   _standalone_input_lines, _state_wire_lines,
                                   hoisted_scratch_decls, map_has_sky, tier_flags,
                                   window_chrome_fj, write_program_files)
@@ -720,16 +719,19 @@ def test_sky_agrees_with_the_real_fixtures(wad, mapname, expect):
 # buckets 19..30 do not. Nothing builds at those heights, so this pins the range the repo uses
 # rather than asserting a claim that is false off it.
 @pytest.mark.parametrize("view_h", [63, 100, 120, 200, 240])
-def test_the_short_sprite_buckets_really_are_a_prefix(view_h):
-    """`_spr_nlow`'s docstring claims "monotone, so a prefix", and the emitter tests `b < nlow` on
-    the strength of it. If `sprite_bucket_height` stops being monotone in the bucket index, that
-    test misclassifies which sprites take the low-res path -- a pixel change with no assert
-    anywhere."""
+def test_the_hd_sprite_buckets_really_are_a_suffix(view_h):
+    """M7 P1.6: the record takes a thing's HD region when its bucket is at least
+    `sprite_hd_bucket` (fj compares the bucket INDEX), while the oracle tests the bucket's HEIGHT
+    against SPRITE_HD_H. The two agree only while the HD buckets are a suffix -- if
+    `sprite_bucket_height` stops being monotone in the bucket index, fj would draw some sprites from
+    the wrong tier: a pixel change with no assert anywhere. (It was `_spr_nlow`'s prefix claim for
+    the coarse buckets, which the native-list bank no longer relies on: the LD test is on heights.)"""
+    from doomfj.reference_model import SPRITE_HD_H
     cfg = Config(H=view_h)                      # VIEW_H is a property of H, not a field
-    short = {b for b in range(SPRITE_HEIGHT_BUCKETS)
-             if sprite_bucket_height(b, view_h) < DEG_SPR_LOWRES_H}
-    assert short == set(range(_spr_nlow(cfg))), (
-        "the short buckets are not a prefix at VIEW_H=%d: %r" % (view_h, sorted(short)))
+    hd = {b for b in range(SPRITE_HEIGHT_BUCKETS)
+          if sprite_bucket_height(b, view_h) >= SPRITE_HD_H}
+    assert hd == set(range(sprite_hd_bucket(cfg), SPRITE_HEIGHT_BUCKETS)), (
+        "the HD buckets are not a suffix at VIEW_H=%d: %r" % (view_h, sorted(hd)))
 
 
 @pytest.mark.parametrize("mapname", ["E1M%d" % i for i in range(1, 10)])

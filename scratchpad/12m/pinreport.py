@@ -12,6 +12,7 @@ what the pool declined.
     python scratchpad/12m/pinreport.py --fjm build/<x>.fjm --labels scratchpad/12m/atlas/<x>.labels.tsv.gz
         [--hot scratchpad/12m/profx/hotwords_blocked27.json]
         [--counts-cache <that build's counts cache>] [--build-log <that build's log>]
+        [--heat <the --pin-heat list it was built with>]
     python scratchpad/12m/pinreport.py --selftest
 
 Per hot word: PINNED (base == reference) / PINNED, BASE MOVED / LOST (the word rests at no block
@@ -36,7 +37,7 @@ sys.path.insert(0, str(PROFX))
 sys.path.insert(0, str(ROOT / "src"))
 from common import W, label_dict  # noqa: E402
 from fjmimage import FjmImage  # noqa: E402
-from pool import KNOBS, eval_key, reconstruct  # noqa: E402
+from pool import KNOBS, eval_key, load_heat, reconstruct  # noqa: E402
 
 DEFAULT_HOT = PROFX / "hotwords_blocked27.json"
 LOG_RE = {
@@ -161,7 +162,7 @@ def run(a):
     hot = json.loads(Path(a.hot).read_text())
     image = FjmImage(a.fjm)
     lab = label_dict(a.labels)
-    recon = reconstruct(a.counts_cache) if a.counts_cache else None
+    recon = reconstruct(a.counts_cache, heat=load_heat(a.heat)) if a.counts_cache else None
     log = parse_log(Path(a.build_log).read_text(errors="replace")) if a.build_log else None
     print("pin report: %s against the hot list of %s (%d words, profiled on %s)"
           % (Path(a.fjm).name, hot["fjm"], len(hot["words"]), hot["run"]))
@@ -247,6 +248,8 @@ def main():
     ap.add_argument("--hot", default=str(DEFAULT_HOT))
     ap.add_argument("--counts-cache", default=None)
     ap.add_argument("--build-log", default=None)
+    ap.add_argument("--heat", default=None,
+                    help="the --pin-heat list the build was placed with (so its layout re-derives)")
     a = ap.parse_args()
     if a.selftest:
         return selftest()

@@ -245,7 +245,7 @@ def main():
                          "the program reaches them; write them here (and the counts cache, with "
                          "--counts-cache) and exit. heatsites.py joins them with a profile into a "
                          "--pin-heat list. Needs flipjump whose reserve() takes the path.")
-    ap.add_argument("--pin-heat", default=None, metavar="HEAT.json",
+    ap.add_argument("--pin-heat", default=None, metavar="HEAT.json[.gz]",
                     help="pin protection (M7 P1.1, docs/gp-pin-protection.md): heatsites.py's list of "
                          "hot groups and their hot table sites. Every placing pool protects them: a "
                          "hot group keeps its block and its pin (or the build stops), and its hottest "
@@ -263,6 +263,8 @@ def main():
     heat = None
     if a.pin_heat:
         raw = Path(a.pin_heat).read_bytes()
+        if a.pin_heat.endswith(".gz"):
+            raw = gzip.decompress(raw)      # the sha printed below is the LIST's, in either form
         heat = {g: [tuple(site) for site in sites] for g, sites in json.loads(raw)["groups"].items()}
         print("pin-heat: %s (sha256 %s...): %d hot groups, %s hot sites"
               % (a.pin_heat, hashlib.sha256(raw).hexdigest()[:16], len(heat),

@@ -414,7 +414,8 @@ def main():
     ap.add_argument("--walk", type=int, default=8,
                     help="frames to walk FORWARD through the opened doorway (the collision half)")
     ap.add_argument("--idle", type=int, default=6,
-                    help="frames to stand on the far side while the door starts to shut")
+                    help="frames to stand facing the door after NEW GAME's replay of the walk (M7 "
+                         "P1.5; the door starts to shut during `through`)")
     ap.add_argument("--plan", action="store_true", help="print the planned route and exit")
     ap.add_argument("--dry", action="store_true",
                     help="step the ORACLE alone through the script (no fj, no rendering) and "
@@ -588,17 +589,18 @@ def main():
     print("  CONTROL 0: the planned route crosses no solid linedef: yes (%d frames re-simulated)"
           % len(route))
 
-    script = ([{} for _ in range(MENU_FRAMES)] + route + press + opening + through
-              + [{} for _ in range(args.idle)])
-    # M7 P1.5 -- NEW GAME PUTS THE LEVEL BACK. With the door open and walked through: enter opens
-    # the menu, enter the skill screen, and enter starts the highlighted skill (the boot skill,
-    # never moved off) -- and the SAME route is walked again. The program must be back at the
-    # level start, the player at the spawn and every door shut, so the replay retraces the first
-    # walk frame for frame and ends facing a SHUT door. The replay's first frame IS the NEW GAME
-    # frame (the restart, then that frame's tic), as the first walk's first frame is the one esc
-    # lands on.
+    script = [{} for _ in range(MENU_FRAMES)] + route + press + opening + through
+    # M7 P1.5 -- NEW GAME PUTS THE LEVEL BACK. Walked through while the door is still OPEN -- it has
+    # started to shut, and the menu frames then hold it where it is, since they tic nothing: enter
+    # opens the menu, enter the skill screen, and enter starts the highlighted skill (the boot
+    # skill, never moved off) -- and the SAME route is walked again, then the idle. The program must
+    # be back at the level start, the player at the spawn and every door shut, so the replay
+    # retraces the first walk frame for frame and ends facing a SHUT door. The replay's first frame
+    # IS the NEW GAME frame (the restart, then that frame's tic), as the first walk's first frame is
+    # the one esc lands on. (MEASURED with --dry on E1M1: door 10 reaches 8, is at 5 when NEW GAME
+    # lands -- its pass state is 4 -- and stays 0 through the replay.)
     ng_frame = len(script) + 2
-    script += [{}, {}] + route
+    script += [{}, {}] + route + [{} for _ in range(args.idle)]
     frames = len(script)
     # esc lands on the FIRST route frame: the menu's rules run before the branch reads `mode`, so
     # that frame already renders the world and no frame is spent on the transition.
@@ -611,10 +613,10 @@ def main():
     print("target : door sector %d, use box %s, threshold state %d"
           % (target, boxes[target], passes[target]))
     print("script : %d menu -> esc -> %d walk to the door -> %d use -> %d open -> %d through "
-          "-> %d idle -> enter, enter, enter (NEW GAME at the boot skill) -> the %d-frame walk "
-          "again  (%d frames)"
-          % (MENU_FRAMES, len(route), len(press), args.open_wait, len(through), args.idle,
-             len(route), frames))
+          "-> enter, enter, enter (NEW GAME at the boot skill) -> the %d-frame walk again -> %d "
+          "idle  (%d frames)"
+          % (MENU_FRAMES, len(route), len(press), args.open_wait, len(through), len(route),
+             args.idle, frames))
     print("doorway: line %d %s -> approach %s, then through to %s"
           % (sorted(lines_of[target])[0], door_segs[0],
              tuple(round(v) for v in approach), tuple(round(v) for v in beyond)))

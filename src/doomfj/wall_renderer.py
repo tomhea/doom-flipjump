@@ -344,13 +344,16 @@ DEFAULT_MENU_SELECTED = 2
 SKILL_MENU = ["CHOOSE SKILL", "", "EASY", "MEDIUM", "HARD"]
 SKILL_MENU_FIRST = 2
 
-# M7 P1.5 -- the menu's own cells. NOT in the restore sets, on purpose: `menu_scr` (0 = the main
-# menu, 1 = the skill screen) and `menu_sel` (the highlighted skill) persist across frames by not
-# being restored -- as `thnext` and `thvis` do -- and the four EVENT cells are zeroed before every
-# frame's polls (`_standalone_input_lines`), so a frame starts with none. `rs_ret` is the restart
-# block's fcall return register, which `stl.fret` leaves zero.
+# M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
+# scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
+# `mode`). `menu_scr` (0 = the main menu, 1 = the skill screen) and `menu_sel` (the highlighted
+# skill) are PERSISTED -- build.STANDALONE_PERSIST, the one intended hole in that set -- for the
+# reason `mode` is: a screen that reset every frame could never be left. The four EVENT cells are
+# zeroed before every frame's polls (`_standalone_input_lines`), so a frame starts with none, and
+# `rs_ret` is the restart block's fcall return register, which `stl.fret` leaves zero: ordinary
+# residue, restored like any other.
 MENU_STATE_DECLS = [
-    "menu_scr: hex.vec 1, 0", "menu_sel: hex.vec 1, 2",
+    "menu_scr: hex.vec 1, 0", f"menu_sel: hex.vec 1, {SKILLS.index(BOOT_SKILL)}",
     "ev_enter: hex.vec 1", "ev_esc: hex.vec 1", "ev_up: hex.vec 1", "ev_dn: hex.vec 1",
     "rs_ret: hex.vec w/4",
 ]
@@ -372,6 +375,8 @@ STANDALONE_SCRATCH_DECLS = [
     # between the two pictures. It is declared even when the menu is off (two words) so both
     # standalone tiers share one restore set.
     "mode: hex.vec 1, 1",
+    # M7 P1.5: the skill menu's cells (MENU_STATE_DECLS, above)
+    *MENU_STATE_DECLS,
 ]
 
 
@@ -2375,7 +2380,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # M5: the keyboard poll's scratch, and the four PERSISTENT held-key flags. The flags are
           # the only cells besides the view state that the M1 reset must leave alone.
           *(STANDALONE_SCRATCH_DECLS if standalone else []),
-          *(MENU_STATE_DECLS if standalone else []),        # M7 P1.5: not in the restore sets
           # M14-c: the player tic's scratch -- the signed 16.16 move magnitude, the
           # finesine index it is projected through, and the two 16.16 deltas
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",

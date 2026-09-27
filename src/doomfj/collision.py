@@ -183,19 +183,24 @@ def check_position_cells(rows, lists, x16: int, y16: int, radius: int, seed_floo
     return (True, floorz, ceilz) if ok else (False, seed_floor, seed_ceil)
 
 
+# the line under test's argument cells and their widths in nibbles, in declaration order -- ONE
+# table: CELL_DECLS declares them from it, `_xor_lines` xors that many nibbles, and `line_constants`
+# bounds a value by it (a value wider than its cell would be cut, and the line land elsewhere)
+ARG_CELLS = (("ca_minx", 8), ("ca_maxx", 8), ("ca_miny", 8), ("ca_maxy", 8),
+             ("ca_v1x", 8), ("ca_v1y", 8), ("ca_dx", 8), ("ca_dy", 8),
+             ("ca_ob", 8), ("ca_ot", 8), ("ca_slope", 1), ("ca_flags", 1))
+_ARG_WIDTH = dict(ARG_CELLS)
+
 # the argument cells and return registers the cell routine adds to the state part
 CELL_DECLS = [
     # the line under test. Its stub xors each value in, calls sim.line_test and xors it out again,
     # on every path, so every one of these is ZERO between lines and at every frame's end -- the M1
     # restore set has nothing to restore in them.
-    "ca_minx: hex.vec 8", "ca_maxx: hex.vec 8", "ca_miny: hex.vec 8", "ca_maxy: hex.vec 8",
-    "ca_v1x: hex.vec 8", "ca_v1y: hex.vec 8", "ca_dx: hex.vec 8", "ca_dy: hex.vec 8",
-    "ca_ob: hex.vec 8", "ca_ot: hex.vec 8", "ca_slope: hex.vec 1", "ca_flags: hex.vec 1",
+    *[f"{cell}: hex.vec {width}" for cell, width in ARG_CELLS],
     # the three calls' return registers (tree -> cell stub -> line stub -> sim.line_test). Every
     # call returns, so they are clean on every exit -- as cs_ret, the seed descent's, always was.
     "cc_ret: hex.vec w/4", "cc_lret: hex.vec w/4", "cc_tret: hex.vec w/4",
 ]
-_ONE_NIBBLE = ("ca_slope", "ca_flags")
 
 
 def line_constants(row) -> list:
@@ -218,7 +223,7 @@ def line_constants(row) -> list:
     if not flags:
         out += [("ca_ob", openbottom), ("ca_ot", opentop)]
     for cell, v in out:
-        assert cell not in _ONE_NIBBLE or 0 <= v < 16, (cell, v)
+        assert _ARG_WIDTH[cell] == 8 or 0 <= v < 16 ** _ARG_WIDTH[cell], (cell, v)
     return [(cell, v & M32) for cell, v in out if v & M32]
 
 
@@ -227,7 +232,7 @@ def _xor_lines(consts) -> list:
     run twice leave every cell as it was."""
     out = []
     for cell, v in consts:
-        for i in range(1 if cell in _ONE_NIBBLE else 8):
+        for i in range(_ARG_WIDTH[cell]):
             n = (v >> 4 * i) & 0xF
             if n:
                 out.append(f"    hex.xor_by {cell} + {i}*dw, {n}" if i else f"    hex.xor_by {cell}, {n}")

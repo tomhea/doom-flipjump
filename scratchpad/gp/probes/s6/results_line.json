@@ -1,26 +1,26 @@
 [
  {
-  "name": "line L1 today: sim.check_line",
+  "name": "line L1 cells: sim.line_test",
   "mode": "plain",
-  "per_call": 11610.0,
+  "per_call": 884.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "bbox reject on the 1st compare",
   "stats": {}
  },
  {
-  "name": "line L1 today: sim.check_line",
+  "name": "line L1 cells: sim.line_test",
   "mode": "pool",
-  "per_call": 6260.0,
+  "per_call": 282.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "bbox reject on the 1st compare",
   "stats": {
-   "groups": 835,
-   "tables": 5144,
-   "allocated": 5144,
+   "groups": 728,
+   "tables": 3612,
+   "allocated": 3612,
    "declined": 0,
-   "pinned": 623,
+   "pinned": 544,
    "broken": 0
   }
  },
@@ -50,27 +50,27 @@
   }
  },
  {
-  "name": "line L2 today: sim.check_line",
+  "name": "line L2 cells: sim.line_test",
   "mode": "plain",
-  "per_call": 15061.0,
+  "per_call": 3552.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "bbox reject on the 4th compare",
   "stats": {}
  },
  {
-  "name": "line L2 today: sim.check_line",
+  "name": "line L2 cells: sim.line_test",
   "mode": "pool",
-  "per_call": 7320.0,
+  "per_call": 1090.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "bbox reject on the 4th compare",
   "stats": {
-   "groups": 835,
-   "tables": 5144,
-   "allocated": 5144,
+   "groups": 728,
+   "tables": 3612,
+   "allocated": 3612,
    "declined": 0,
-   "pinned": 623,
+   "pinned": 544,
    "broken": 0
   }
  },
@@ -100,27 +100,27 @@
   }
  },
  {
-  "name": "line L3 today: sim.check_line",
+  "name": "line L3 cells: sim.line_test",
   "mode": "plain",
-  "per_call": 34894.0,
+  "per_call": 5414.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "axis line straddled -> blocked",
   "stats": {}
  },
  {
-  "name": "line L3 today: sim.check_line",
+  "name": "line L3 cells: sim.line_test",
   "mode": "pool",
-  "per_call": 18010.0,
+  "per_call": 1720.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "axis line straddled -> blocked",
   "stats": {
-   "groups": 835,
-   "tables": 5144,
-   "allocated": 5144,
+   "groups": 728,
+   "tables": 3612,
+   "allocated": 3612,
    "declined": 0,
-   "pinned": 623,
+   "pinned": 544,
    "broken": 0
   }
  },
@@ -150,27 +150,27 @@
   }
  },
  {
-  "name": "line L4 today: sim.check_line",
+  "name": "line L4 cells: sim.line_test",
   "mode": "plain",
-  "per_call": 55949.0,
+  "per_call": 27801.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "diagonal straddled, two-sided -> opening",
   "stats": {}
  },
  {
-  "name": "line L4 today: sim.check_line",
+  "name": "line L4 cells: sim.line_test",
   "mode": "pool",
-  "per_call": 32094.0,
+  "per_call": 14667.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "diagonal straddled, two-sided -> opening",
   "stats": {
-   "groups": 835,
-   "tables": 5144,
-   "allocated": 5144,
+   "groups": 728,
+   "tables": 3612,
+   "allocated": 3612,
    "declined": 0,
-   "pinned": 623,
+   "pinned": 544,
    "broken": 0
   }
  },
@@ -225,27 +225,27 @@
   }
  },
  {
-  "name": "line L5 today: sim.check_line",
+  "name": "line L5 cells: sim.line_test",
   "mode": "plain",
-  "per_call": 54506.0,
+  "per_call": 27713.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "diagonal, bbox passes, no straddle",
   "stats": {}
  },
  {
-  "name": "line L5 today: sim.check_line",
+  "name": "line L5 cells: sim.line_test",
   "mode": "pool",
-  "per_call": 33277.0,
+  "per_call": 16019.0,
   "ok": true,
   "why": "64 iterations checked",
   "note": "diagonal, bbox passes, no straddle",
   "stats": {
-   "groups": 835,
-   "tables": 5144,
-   "allocated": 5144,
+   "groups": 728,
+   "tables": 3612,
+   "allocated": 3612,
    "declined": 0,
-   "pinned": 623,
+   "pinned": 544,
    "broken": 0
   }
  },

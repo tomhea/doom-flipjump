@@ -84,20 +84,21 @@ hoisted registers need the re-key). Until then it costs the reset ~41 ops a nibb
 | the emitted text is the model | the tree walked by an interpreter of its own text for four points of every cell; every stub's xors balanced; each stub's xors spell `line_constants(row)`; door stubs read their own door | a swapped tree target and a dropped xor are both caught |
 | the emitted fj is the oracle | `tests/fj/test_collision_fj.py`: the E1M1 routine assembled (5 s) and run on ~700 positions, door states, a walk and try_move -- all in ONE image per test, so a dirty argument cell or return register would corrupt the next call | refusals required; door verdicts must move; a routine missing one line is assembled and caught |
 
-## Cost (MEASURED by the S6 harness, not yet in game)
+## Cost (MEASURED in game)
 
-`sim.check_cells` over the emitted E1M1 routine, 256 walkable positions, every iteration's
-verdict checked against the oracle (`scratchpad/gp/probes/s6/fjprobe.py`, ship pool knobs):
+On gamespeed's ten games (profx, `docs/ship-evidence/blocked29_phases.log`): collision 122,218 ops a
+frame at 2.40 player tries a frame -- a try 50,818 ops, of which the unchanged seed walk
+(`dsccs_walk`) is 31,838, so the cell routine with `sim.try_move` around it is ~19.0K a try,
+against 576K a check before (MEASURED on blocked27, above). The seed walk is now the larger part of
+a try; the cells' start node could replace it (plan 6.3's point-location item), which is left for
+when P3 needs point location for monsters.
 
-| sample | plain | ship pool |
-|---|---|---|
-| 256 walkable positions (mean 0.92 listed lines) | 20,755 | **11,519** |
-| cells with no line (the fixed part: box, tree, epilogue) | 5,848 | 2,226 |
-| cells with lines (mean 1.90) | 31,979 | 18,101 (~8.4K a listed line; diagonals dominate) |
-
-Against 576K a check. The seed walk (`dsccs_walk`, 35.4K a try) is unchanged and now the larger
-part of a try; the cells' start node could replace it (plan 6.3's point-location item), which is
-left for when P3 needs point location for monsters.
+One line, before the build (`python scratchpad/gp/probes/s6/probes.py line`, exact executed-op
+deltas, every call verified; `docs/ship-evidence/p12_s6_line.log`): the shared `sim.line_test`
+costs 0.5-18.5% more than the same line baked as constants, under the ship pool (L1-L5: 282 vs 238
+... 16,019 vs 15,912 ops) -- the price of one shared test instead of a stub per line. (A whole-routine
+estimate from an uncommitted probe stood here until PR #91's review; the in-game number replaces
+it.)
 
 ## As built
 

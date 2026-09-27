@@ -24,7 +24,8 @@ import flipjump as fj
 import pytest
 from flipjump.interpreter.io_devices.FixedIO import FixedIO
 
-from doomfj.collision import (COLLISION_STATE_DECLS, cell_lists, collision_cells_fj, line_rows)
+from doomfj.collision import (CELL_SHIFT, COLLISION_STATE_DECLS, cell_lists, cell_of,
+                              collision_cells_fj, line_rows)
 from doomfj.config import Config
 from doomfj.doorcode import door_line_ids
 from doomfj.doors import door_states, pass_state
@@ -176,7 +177,7 @@ def test_the_cell_routine_matches_the_oracle(cells_fjm, level):
     pts = [(x << 16, y << 16) for x, y in POSITIONS]
     pts += [((rng.randint(x0, x1) << 16) + rng.choice((0, 0x8000, 0x4001)),
              (rng.randint(y0, y1) << 16) + rng.choice((0, 0x8000, 0xBFFF))) for _ in range(400)]
-    S = 1 << 21
+    S = 1 << CELL_SHIFT
     for cx, cy in rng.sample(sorted(level.lists), 60):
         pts += [(x, y) for x in (cx * S, cx * S + S - 1) for y in (cy * S, cy * S + S - 1)]
     got, want = _check_all(cells_fjm, level, [(x, y, shut) for x, y in pts])
@@ -232,7 +233,7 @@ def test_a_routine_missing_one_line_is_caught(tmp_path, level):
     scene = level.scene(shut)
     for _ in range(4000):
         x16, y16 = rng.randint(x0, x1) << 16, rng.randint(y0, y1) << 16
-        cell = (x16 >> 21, y16 >> 21)
+        cell = (cell_of(x16), cell_of(y16))
         if cell not in level.lists or level.rm.check_position(scene, x16, y16)[0]:
             continue
         sf, sc = level.seed(scene, x16, y16)

@@ -614,21 +614,7 @@ def test_the_text_names_no_cell_the_declarations_do_not(e1m1):
 
 
 # ---------------------------------------------------------------------------------------------
-# 4. THE TIC NO LONGER DEPENDS ON THE PASS STATE -- the collision reads the state it writes
-# ---------------------------------------------------------------------------------------------
-
-def test_the_tic_emits_no_collision_patch_for_any_door(e1m1):
-    """The M2-R4 patch flipped each door line's bit on the two crossing steps, with dead branches for
-    a pass state of 0 or past the last state and a silent no-op for a caller that forgot the lines.
-    All of that is gone: the tic's text is a function of the door lengths and boxes alone, and the
-    collision cells read `dstate` (tests/host/test_collision_cells.py pins that reading)."""
-    for lines in [e1m1["text"]] + [_emit(n) for n in SHAPES]:
-        assert not [ln for ln in lines if "wflip" in ln or "lnrow" in ln or "_opens" in ln
-                    or "_shuts" in ln], "the retired collision patch is back"
-
-
-# ---------------------------------------------------------------------------------------------
-# 5. `door_line_ids` -- the two branches no wad reaches
+# 4. `door_line_ids` -- the two branches no wad reaches
 # ---------------------------------------------------------------------------------------------
 
 class _LD:

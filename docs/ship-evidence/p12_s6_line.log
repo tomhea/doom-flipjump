@@ -1,6 +1,7 @@
+$ python scratchpad/gp/probes/s6/probes.py line
 S6 fj micro-probes -- MEASURED: python scratchpad/gp/probes/s6/probes.py line
 ops/call = exact executed-op delta per body call (fjprobe.py); plain = no pool, pool = the ship BlockPool; placement 0x9a53c40
-line -- one candidate line: today's sim.check_line vs baked constants
+line -- one candidate line: the cells' shared sim.line_test vs baked constants
   line L1 cells: sim.line_test                   plain     884.0   ok    
   line L1 cells: sim.line_test                   pool      282.0   ok    
   line L1 baked                                  plain     774.0   ok    

@@ -1,0 +1,5 @@
+# R1: the new test on 44064ef's src/ (before the fix)
+$ python -m pytest tests/host/test_selfreset.py -q -p no:cacheprovider -k byte_array_out_of_the_reset
+E       AssertionError: self-reset: 6 byte-array words are outside the restore set -- the byte arrays disagree with it
+FAILED tests/host/test_selfreset.py::test_persist_keeps_a_byte_array_out_of_the_reset
+1 failed, 40 deselected in 0.28s

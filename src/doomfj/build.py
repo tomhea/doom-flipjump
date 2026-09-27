@@ -61,6 +61,13 @@ STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
 # ⚠ Conditional, because `emit_reset_part` refuses a persist name the build has no label for -- and
 # rightly: naming cells a doors=False program never declares is a typo, not a no-op.
 DOOR_PERSIST = ("dstate", "ddir", "dsub", "dwait")
+# M7 P1.3: ...and the runtime things' own world state, when they can move (`moving_things`): the
+# per-leaf lists' heads (`sshead`), each thing's leaf (`thss_rt`) and position (`thpos_rt`). They
+# are baked to the spawn and change only when a thing MOVES -- P3's per-move relink -- so a reset
+# that restored them would put every moved monster back at its spawn, listed in its spawn leaf.
+# `thnext`, the lists' links, is not here because the restore set never carried it: bind_things
+# rewrote every entry every frame, so it never needed restoring; it persists by not being restored.
+THING_PERSIST = ("sshead", "thss_rt", "thpos_rt")
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
 
@@ -335,7 +342,8 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         paths = paths + [_SRC_FJ / "m1_reset.fj"]
         # M5/M2-R4: the labels the reset must leave alone -- computed ONCE and used both to build
         # the reset and to report it.
-        _persist = ((STANDALONE_PERSIST + (DOOR_PERSIST if doors else ()))
+        _persist = ((STANDALONE_PERSIST + (DOOR_PERSIST if doors else ())
+                     + (THING_PERSIST if moving_things else ()))
                     if standalone else ())
         labels1 = selfreset.capture_labels(paths, out, lzma_fast=FJM_LZMA_FAST)
         r1 = FjmRunner(out, flat_max_words=limit)

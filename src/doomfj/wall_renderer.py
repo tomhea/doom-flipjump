@@ -1111,6 +1111,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
                              keep=_mt_keep)
         if moving_things else ("", "", [], 0, 0, {}, []))
+    # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
+    # (the hot block below), where they persist instead of being rebuilt every frame
+    from doomfj.things import byte_array_decl, spawn_leaf_lists
+    _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
     # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
     # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
     # host that owns what has been picked up, and fj has no state between frames.
@@ -1900,7 +1904,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         # is rebuilt from them. `hex.input n` counts BYTES, so one call takes a whole 16.16 pair
         # into 16 nibbles at a COMPILE-TIME offset -- no per-byte writes, ~148k ops for all 251.
         # This has to precede the walk: `subsector_action` reads the lists the bind writes.
-        *([f"sim.bind_things thpos_rt, thss_rt, {_MT_NT}"] if (moving_things and standalone) else
+        # M7 P1.3: the STANDALONE tier bakes the lists (`things.spawn_leaf_lists`) and they
+        # persist (`build.THING_PERSIST`), so nothing rebuilds them: a thing that moves is relinked
+        # by its move (P3). The hosted tiers keep the wire protocol below.
+        *([] if standalone else
           [f"rep({_MT_NT}, i) hex.input 8, thpos_rt + i*16*dw",
            # M14-e perf: last frame's thing->subsector bindings. Re-locating all of them every frame
            # cost 27.2M ops -- 73% of what M14-e added -- and it was only necessary because fj has
@@ -1974,11 +1981,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                    + ([f"spslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE))]
                       if _do_things else [])
-                   + ([f"sshead: hex.vec {2 * _MT_NSS}",
-                       f"thnext: hex.vec {2 * _MT_NT}"]
-                      # M5: the hosted tier is fed last frame's binding; standalone bakes the
-                      # SPAWN one, so bind_things finds every thing clean and still builds the
-                      # per-leaf lists it is really there for.
+                   + (([byte_array_decl("sshead", _MT_HEAD, 2 * _MT_NSS),
+                        byte_array_decl("thnext", _MT_NEXT, 2 * _MT_NT)] if standalone else
+                       [f"sshead: hex.vec {2 * _MT_NSS}", f"thnext: hex.vec {2 * _MT_NT}"])
+                      # M5: the hosted tier is fed last frame's binding every frame; standalone
+                      # bakes the SPAWN one -- and since M7 P1.3 the lists it implies, which
+                      # persist (build.THING_PERSIST) where bind_things rebuilt them every frame.
+                      # The 2x extents are unchanged: the M1 restore set spans them.
                       + ([NLJ.join(["thss_rt:"]
                                    + [f"    hex.vec 16, {ss}" for ss in _MT_BINDS])]
                          if standalone else [f"thss_rt: hex.vec {16 * _MT_NT}"])

@@ -55,16 +55,18 @@ def build(labels_path=None, gen_dir=None):
     if missing:
         raise SystemExit("generated parts not found in %s: %s" % (gen_dir, missing))
 
-    # the statement after sim.bind_things in the main part: the first label of a LATER line there
+    # the statement after sim.bind_things in the main part: the first label of a LATER line there.
+    # M7 P1.3: from that rung on the game tier bakes its thing lists and no longer rebuilds them, so
+    # there is no bind_things expansion; the view setup then starts where the collision block ends.
     bind = [n for n in ln if "sim.bind_things(" in n.split("---")[0]]
-    if not bind:
-        raise SystemExit("no sim.bind_things expansion in the label table")
-    m = ELEM_RE.match(bind[0])
-    fmain, bline = m.group(1), int(m.group(2))
-    lo, hi = byname["simcollide_skip"], byname["dsc_done"]
-    after_bind = min(a for a, n in zip(la.tolist(), ln)
-                     if lo < a < hi and ELEM_RE.match(n) and ELEM_RE.match(n).group(1) == fmain
-                     and int(ELEM_RE.match(n).group(2)) > bline)
+    after_bind = None
+    if bind:
+        m = ELEM_RE.match(bind[0])
+        fmain, bline = m.group(1), int(m.group(2))
+        lo, hi = byname["simcollide_skip"], byname["dsc_done"]
+        after_bind = min(a for a, n in zip(la.tolist(), ln)
+                         if lo < a < hi and ELEM_RE.match(n) and ELEM_RE.match(n).group(1) == fmain
+                         and int(ELEM_RE.match(n).group(2)) > bline)
     below_pool = la[la < POOL_BASE_WORD]
     reset_end = int(below_pool.max()) + 64      # the last reset label, its exact_xor tail, ;__hot_end
 
@@ -74,8 +76,9 @@ def build(labels_path=None, gen_dir=None):
         ("doors (use + 13 door tics)", byname["do_world"]),
         ("move sim (turn/move/finesine/mul)", byname["simtl_yes"]),
         ("collision (4x vx/vy + dsccs fcall + try_move)", byname["simcollide"]),
-        ("sim.bind_things", byname["simcollide_skip"]),
-        ("view setup (wnt, wedge_setup)", after_bind),
+        *([("sim.bind_things", byname["simcollide_skip"]),
+           ("view setup (wnt, wedge_setup)", after_bind)] if bind else
+          [("view setup (wnt, wedge_setup)", byname["simcollide_skip"])]),
         ("frame glue (collines begin, bsp jump)", byname["dsc_done"]),
         ("bad/padding", byname["bad"]),
         ("seg_pass1_leaf", byname["seg_pass1_leaf"]),
@@ -118,11 +121,11 @@ def build(labels_path=None, gen_dir=None):
     words.tofile(str(wd / "labels.u32"))
 
     # phase markers (id -> label); the analyses pair them into spans (phases.py)
-    B = bind[0].split("---")[0] + "---"
+    B = bind[0].split("---")[0] + "---" if bind else None
     # the dirty path's `hex.write_hex 4, sptr, ptss` runs right after ptloc_walk returns; it is the
     # only write_hex in bind_things
     wh = [a for a, n in zip(la.tolist(), ln)
-          if n.startswith(B) and a < reset_end and ":hex.write_hex(" in n.split("---")[1]]
+          if B and n.startswith(B) and a < reset_end and ":hex.write_hex(" in n.split("---")[1]]
     after_ptloc = min(wh) if wh else None
     alive = [a for a, n in zip(la.tolist(), ln)
              if "sim.thing_pass(" in n.split("---")[0] and n.endswith("---alive") and a < reset_end]
@@ -131,11 +134,13 @@ def build(labels_path=None, gen_dir=None):
          (7, "cmh_vyd", "try H"), (8, "cma_vyd", "try A"), (9, "cmb_vyd", "try B"), (10, "cmc_vyd", "try C"),
          (11, "e1m1_dsccs_walk", "dsccs walk"), (12, "e1m1_cs_seeded", "dsccs done"),
          (13, "cmv_done", "collision done"), (14, "simmv_done", "post-move vx/vy"),
-         (15, "simcollide_skip", "bind_things"), (16, after_bind, "view setup"),
+         *([(15, "simcollide_skip", "bind_things"), (16, after_bind, "view setup")] if bind else
+           [(16, "simcollide_skip", "view setup (no bind_things: M7 P1.3)")]),
          (17, "e1m1_dsc_walk", "dsc walk"), (18, "dsc_done", "dsc done"),
          (19, "e1m1_bspcode_walk", "render walk"), (20, "bsp_done", "render done"), (21, "m1_reset", "reset"),
          (22, "ptloc_walk", "ptloc walk"), (23, after_ptloc, "ptloc done (write_hex)"),
-         (24, B + "dirty", "bind dirty"), (25, B + "clean", "bind clean"), (26, B + "bl", "bind loop head"),
+         *([(24, B + "dirty", "bind dirty"), (25, B + "clean", "bind clean"),
+            (26, B + "bl", "bind loop head")] if bind else []),
          (30, "seg_pass1_leaf", "seg_pass1 call"), (31, "seg_pass1_ts_leaf", "seg_pass1_ts call"),
          (32, "thing_leaf", "thing_leaf call"), (33, "thing_leaf_b", "thing_leaf_b call"),
          (34, "thing_pass_leaf", "thing_pass call"), (35, "seg_pass2_leaf", "seg_pass2 call"),

@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from doomfj.build import DOOR_PERSIST, STANDALONE_PERSIST
+from doomfj.build import DOOR_PERSIST, STANDALONE_PERSIST, THING_PERSIST
 from doomfj.collision import CHECK_SCRATCH_DECLS
 from doomfj.selfreset import decl_words
 from doomfj.wad import WadFile
@@ -201,6 +201,18 @@ def test_the_door_cells_are_in_the_standalone_set_too():
     standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
     absent = [n for n in DOOR_PERSIST if n not in standalone]
     assert not absent, "DOOR_PERSIST names %s, absent from the standalone set" % absent
+
+
+def test_the_thing_cells_are_in_the_standalone_set_too():
+    """M7 P1.3: `THING_PERSIST` keeps the runtime things' lists, bindings and positions across the
+    reset, which the reset can only do for labels the set carries. And `thnext` is deliberately NOT
+    among them -- because the set never carried it (bind_things rewrote every link every frame), so
+    it already persists by not being restored; naming it would make emit_reset_part refuse the build.
+    If a re-key ever adds `thnext` to the set, it must join THING_PERSIST the same day."""
+    standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
+    absent = [n for n in THING_PERSIST if n not in standalone]
+    assert not absent, "THING_PERSIST names %s, absent from the standalone set" % absent
+    assert "thnext" not in standalone, "the set now restores thnext -- persist it too"
 
 
 def test_the_two_sets_are_otherwise_identical():

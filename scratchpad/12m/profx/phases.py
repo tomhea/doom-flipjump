@@ -24,7 +24,8 @@ PHASES = [
     ("move / turn", 5, {6, 14}, False),
     ("collision", 6, {13}, False),
     ("  of which dsccs seed walks", 11, {12}, True),
-    ("post-move vx/vy", 14, {15}, False),
+    # {15, 16}: from M7 P1.3 on there is no bind_things, and the view setup (16) follows directly
+    ("post-move vx/vy", 14, {15, 16}, False),
     ("sim.bind_things", 15, {16}, False),
     ("  of which ptloc_walk (dirty things)", 22, {23}, True),
     ("view setup", 16, {17}, False),

@@ -1,8 +1,8 @@
 // ==============================================================================================
 // sim.fj           the player sim: collision against real linedefs, thing binding.
 // STATUS  LIVE - the generated main
-// ENTRY   sim.check_cells, sim.try_move, sim.bind_things, sim.thing_pass
-// SIZE    9 macros (sim.fix16 .. sim.thing_pass)
+// ENTRY   sim.check_cells, sim.try_move, sim.bind_things, sim.thing_pass, sim.leaf_link/unlink
+// SIZE    11 macros (sim.fix16 .. sim.thing_pass)
 // NOTE    `@` holds control-flow labels ONLY; the scratch is named globals (`ca_*` / `cc_*` in
 //         collision.py::CELL_DECLS, `cl_side*` in CHECK_SCRATCH_DECLS). An @-local vec in a macro
 //         expanded N times is N cells the M1 restore set could only name by expansion path.
@@ -341,6 +341,95 @@ ns sim {
         hex.mov 4, zt, ss_flr   // (hex.mov zeroes dst first)
         hex.add 4, zt, row + 12*dw                           // byte 6 = zoff
         .fix16 sp_z, zt
+    }
+}
+
+ns sim {
+    // sim.leaf_link t, leaf / sim.leaf_unlink t, leaf -- M7 P1.3: ONE thing's move between leaves,
+    // on the per-leaf lists `sim.bind_things` used to rebuild every frame. The game tier bakes the
+    // lists (things.spawn_leaf_lists) and keeps them (build.THING_PERSIST); a thing that changes
+    // leaf is unlinked from the old list and linked into the new one, DOOM's P_UnsetThingPosition /
+    // P_SetThingPosition. Nothing moves a thing until P3, so nothing in the binary calls these yet;
+    // tests/fj/test_leaf_lists_fj.py runs them against world.py's `_list_insert` / `_list_remove`,
+    // which they mirror step for step.
+    //
+    //   t    : the runtime thing's index (w/4 nibbles, < 255), stored in the lists as t + 1
+    //   leaf : the subsector (w/4 nibbles)
+    //
+    // THE ORDER IS ASCENDING, as bind_things built it: that keeps each leaf's front-to-back sprite
+    // slots what a from-scratch build gives, so a relinked list draws exactly like a rebuilt one.
+    // The arrays are the byte arrays bind_things wrote -- one cell an entry, the byte in the jump
+    // word -- through the same accessors (ptr_index + read_byte / write_byte). The scratch is the
+    // named globals of things.LEAF_LINK_DECLS: no @-local data (a restore-set hole hangs the game).
+    def leaf_link t, leaf @ at_head, scan, step, after, done \
+            < sshead, thnext, ll_enc, ll_v, ll_nxt, ll_p, ll_q, ll_base, ll_idx {
+        hex.mov 2, ll_enc, t                   // enc = t + 1 (the lists' encoding; 0 = the end)
+        hex.inc 2, ll_enc
+        hex.set w/4, ll_base, sshead
+        hex.ptr_index ll_p, ll_base, leaf      // ll_p = &sshead[leaf]
+        hex.read_byte ll_v, ll_p               // cur = the head
+        hex.if0 2, ll_v, at_head               // an empty list
+        hex.cmp 2, ll_v, ll_enc, scan, scan, at_head     // cur > enc: t goes first
+      scan:                                    // cur < enc: find the last link below enc
+        hex.zero w/4, ll_idx
+        hex.mov 2, ll_idx, ll_v
+        hex.dec w/4, ll_idx
+        hex.set w/4, ll_base, thnext
+        hex.ptr_index ll_p, ll_base, ll_idx    // ll_p = &thnext[cur - 1]
+        hex.read_byte ll_nxt, ll_p             // nxt
+        hex.if0 2, ll_nxt, after               // cur is the tail
+        hex.cmp 2, ll_nxt, ll_enc, step, step, after     // nxt > enc: t goes between
+      step:
+        hex.mov 2, ll_v, ll_nxt                // cur = nxt
+        ;scan
+      after:                                   // thnext[t] = nxt;  thnext[cur - 1] = enc
+        hex.ptr_index ll_q, ll_base, t         // ll_base is thnext here
+        hex.write_byte ll_q, ll_nxt
+        hex.write_byte ll_p, ll_enc
+        ;done
+      at_head:                                 // thnext[t] = cur;  sshead[leaf] = enc
+        hex.set w/4, ll_base, thnext
+        hex.ptr_index ll_q, ll_base, t
+        hex.write_byte ll_q, ll_v
+        hex.write_byte ll_p, ll_enc            // ll_p is still &sshead[leaf]
+      done:
+    }
+
+    def leaf_unlink t, leaf @ head, walk, advance, unlink, done \
+            < sshead, thnext, ll_enc, ll_v, ll_nxt, ll_p, ll_q, ll_base, ll_idx {
+        hex.mov 2, ll_enc, t                   // enc = t + 1
+        hex.inc 2, ll_enc
+        hex.set w/4, ll_base, sshead
+        hex.ptr_index ll_p, ll_base, leaf      // ll_p = &sshead[leaf]
+        hex.read_byte ll_v, ll_p               // cur = the head
+        hex.cmp 2, ll_v, ll_enc, walk, head, walk
+      head:                                    // sshead[leaf] = thnext[t];  thnext[t] = 0
+        hex.set w/4, ll_base, thnext
+        hex.ptr_index ll_q, ll_base, t
+        hex.read_byte ll_nxt, ll_q
+        hex.write_byte ll_p, ll_nxt
+        hex.zero 2, ll_nxt
+        hex.write_byte ll_q, ll_nxt
+        ;done
+      walk:
+        hex.if0 2, ll_v, done                  // the end: t was not listed (the caller's contract)
+        hex.zero w/4, ll_idx
+        hex.mov 2, ll_idx, ll_v
+        hex.dec w/4, ll_idx
+        hex.set w/4, ll_base, thnext
+        hex.ptr_index ll_p, ll_base, ll_idx    // ll_p = &thnext[cur - 1]
+        hex.read_byte ll_nxt, ll_p             // nxt
+        hex.cmp 2, ll_nxt, ll_enc, advance, unlink, advance
+      advance:
+        hex.mov 2, ll_v, ll_nxt                // cur = nxt
+        ;walk
+      unlink:                                  // thnext[cur - 1] = thnext[t];  thnext[t] = 0
+        hex.ptr_index ll_q, ll_base, t         // ll_base is thnext here
+        hex.read_byte ll_nxt, ll_q
+        hex.write_byte ll_p, ll_nxt
+        hex.zero 2, ll_nxt
+        hex.write_byte ll_q, ll_nxt
+      done:
     }
 }
 

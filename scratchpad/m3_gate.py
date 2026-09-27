@@ -1,8 +1,9 @@
 """M3 GATE -- the menu and the world, in ONE run, chosen by persisted cells.
 
-    python scratchpad/m3_gate.py [--fjm build/doom_e1m1_menu.fjm]
+    python scratchpad/m3_gate.py --fjm build/doom_e1m1_menu.fjm --labels <its label table>
     python scratchpad/m3_gate.py --selftest          # R9: every frame claimed to be a world frame
     python scratchpad/m3_gate.py --selftest-skill    # R9 (M7 P1.5): the oracle starts the WRONG skill
+    python scratchpad/m3_gate.py --selftest-state    # R9 (M7 P1.5): a state no picture shows is wrong
 
 The binary boots into the MAIN MENU (`mode` bakes to 1, `menu_scr` to 0). M7 P1.5 gave the menu a
 skill screen (docs/gp-skill-menu.md; `doomfj.menu.menu_step` is the rules' oracle side): in the
@@ -31,6 +32,13 @@ THE THINGS THIS GATE EXISTS TO CATCH, none of which a single-frame check would s
   4. NEW GAME MUST RESTART AT THE CHOSEN SKILL (M7 P1.5). Walked away from the spawn first, each
      NEW GAME frame must be the spawn view with THAT skill's things -- and the three skills' spawn
      views differ (CONTROL), so a restart that loaded another skill's lists or flags is caught.
+  5. EVERY FRAME IS STATE-EXACT (M7 P1.5, kill criterion 3). The persisted cells -- the view,
+     `mode`, `menu_scr`, `menu_sel` and every door's cells (shut and idle throughout: this script
+     never presses use) -- are read at each present through the build's label table
+     (scratchpad/gp/gatestate.py) and must equal the oracle's after that frame. A world frame cannot
+     show `menu_scr`, so pixels alone would pass a screen cell that NEW GAME left wrong;
+     --selftest-state (R9) expects exactly that from the oracle, and must be rejected on the first
+     NEW GAME frame by the state check alone.
 """
 import argparse
 import sys
@@ -41,7 +49,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj.config import Config                                          # noqa: E402
-from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
+from doomfj.doors import door_states, initial_states                      # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.menu import MENU_KEYS, menu_step, palette_colours, pixels     # noqa: E402
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
@@ -52,12 +60,7 @@ from doomfj.reference_model import GAME_RENDER_KW                          # noq
 from doomfj.wall_renderer import (BOOT_SKILL, DEFAULT_MENU,               # noqa: E402
                                   DEFAULT_MENU_SELECTED, SKILL_MENU, SKILL_MENU_FIRST, SKILLS,
                                   STANDALONE_POLLS)
-from flipjump.interpreter.io_devices.KeyboardIO import (KeyboardIO, KeyEvent,   # noqa: E402
-                                                        ScriptedKeyEventSource)
-from flipjump.interpreter.io_devices.ScreenIO import InMemoryScreen            # noqa: E402
-from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory   # noqa: E402
-from flipjump.interpreter.io_devices.pygame_window import PcIO                 # noqa: E402
-from flipjump.utils.exceptions import IOReadOnEOF                              # noqa: E402
+from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent               # noqa: E402
 
 ENTER, ESC, K_FWD, K_BACK = 0x0D, 0x1B, 0x77, 0x73
 SKILL_NAMES = {s: n for s, n in zip(SKILLS, ("easy", "medium", "hard"))}
@@ -98,33 +101,12 @@ WITH_W_HELD = (6, 7, 8)                        # menu frames while W is held
 NEW_GAMES = (20, 25, 30)                       # easy, medium, hard
 
 
-class Recording(InMemoryScreen):
-    def __init__(self, **kw):
-        super().__init__(**kw)
-        self.frames = []
-
-    def _present(self):
-        super()._present()
-        self.frames.append(bytes(self.pixel_indices))
-
-
-class Stopper(KeyboardIO):
-    """the standalone program has no end (KeyboardIO never EOFs on an idle poll), so the gate
-    closes its own input once it has the frames it asked for -- see scratchpad/m5_gate.py."""
-
-    def __init__(self, source, screen, limit):
-        super().__init__(source)
-        self._screen, self._limit = screen, limit
-
-    def read_bit(self):
-        if len(self._screen.frames) >= self._limit:
-            raise IOReadOnEOF("the gate has its %d frames" % self._limit)
-        return super().read_bit()
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fjm", default="build/doom_e1m1_menu.fjm")
+    ap.add_argument("--labels", default=None,
+                    help="the build's label table (build_labeled.py --labels) -- the state check "
+                         "reads the persisted cells through it; the gate refuses to run without it")
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default="assets/freedoom1.wad")
@@ -133,6 +115,10 @@ def main():
     ap.add_argument("--selftest-skill", action="store_true",
                     help="R9 (M7 P1.5): the oracle starts the NEXT skill at every NEW GAME; the "
                          "gate must FAIL")
+    ap.add_argument("--selftest-state", action="store_true",
+                    help="R9 (M7 P1.5): the oracle expects the skill screen's menu_scr on the world "
+                         "frames from the first NEW GAME -- invisible in a world frame; the STATE "
+                         "check must reject it")
     args = ap.parse_args()
 
     mw = WadFile.from_path(str(ROOT / args.wad))
@@ -158,19 +144,18 @@ def main():
     print("script : boot in menu -> esc@2 -> walk -> enter@6 (W held) -> esc@9 -> the skill "
           "screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30")
 
-    runner = FjmRunner(ROOT / args.fjm)
-    assert runner.native, "the M3 gate needs the native engine"
-    core = _fjcore.Memory(runner.width, flat_max_words=runner.flat_max_words)
-    for seg, n in runner._segments:
-        core.add_segment(seg, n)
-    for start, vals in runner._runs:
-        core.set_words(start, vals)
-    screen = Recording()
-    io = PcIO(screen, Stopper(ScriptedKeyEventSource(events), screen, FRAMES))
-    io.attach_memory(NativeDeviceMemory(core, runner.width))
-    _c, ops, _e, _l, _p = core.run(io.read_bit, io.write_bit, IOReadOnEOF, last_ops_length=0)
-    got = list(screen.frames)
-    del core, screen, io, runner
+    if not args.labels:
+        print("  NO --labels. This gate is byte- AND state-exact (M7 P1.5), and without the build's")
+        print("  label table it cannot read the program's state. Refusing to run.")
+        return 1
+    secs, lds, sds = mw.sectors(args.map), mw.linedefs(args.map), mw.sidedefs(args.map)
+    order = sorted(door_states(secs, lds, sds))
+    init = initial_states(secs, lds, sds)
+    doors0 = [init[si] for si in order]          # this script never presses use: shut and idle
+    sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
+    import gatestate as GST
+    got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
+                                            len(order))
     print("  {:,} ops -> {} frames".format(ops, len(got)))
 
     # the oracle's mirror: the device's delivery rule (one event per poll, due once the tic clock
@@ -204,6 +189,7 @@ def main():
                      "ng": ng, "before": before})
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
+    state_bad, state_checked = None, 0
     screens_seen = set()
     previous = None
     for f in range(min(len(got), FRAMES)):
@@ -228,15 +214,25 @@ def main():
                 oracle_ng[f] = want
         same = got[f] == want
         ok &= same
+        want_state = GST.oracle_state(state.x, state.y, state.angle, row["mode"], row["scr"],
+                                      row["sel"], doors0)
+        if args.selftest_state and row["mode"] == 0 and f >= NEW_GAMES[0]:
+            want_state["menu_scr"] ^= 1                 # THE STATE CHECK'S NEGATIVE CONTROL
+        sbad = GST.diff(reads[f] if f < len(reads) else None, want_state)
+        state_checked += 1
         pos = (_signed(state.x, 32) / 65536, _signed(state.y, 32) / 65536)
         moved += (not is_menu) and previous is not None and pos != previous
         previous = pos
         diff = sum(1 for a, b in zip(got[f], want) if a != b)
-        print("  frame %2d %s (%8.3f,%8.3f)%s  %s"
+        print("  frame %2d %s (%8.3f,%8.3f)%s  %s  %s"
               % (f, kind, pos[0], pos[1], "  NEW GAME" if row["ng"] is not None else "",
-                 "BYTE-EXACT" if same else "!! %d px DIFFER" % diff), flush=True)
+                 "BYTE-EXACT" if same else "!! %d px DIFFER" % diff,
+                 "state ok" if not sbad else "!! STATE: " + GST.show(sbad)), flush=True)
+        if sbad:
+            state_bad = f
         if not same:
             first_bad = f
+        if sbad or not same:
             print("  -- stopping: once a frame is wrong the later ones compare nothing useful")
             break
 
@@ -263,13 +259,29 @@ def main():
     print("  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: %s"
           % ("yes" if told else "!! no -- the skills cannot be told apart here"))
     print("  CONTROL: distinct pictures: %d of %d" % (len(set(got[:FRAMES])), min(len(got), FRAMES)))
+    print("  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, every door's cells) "
+          "equals the oracle's: %s"
+          % ("yes, %d frames" % state_checked if state_bad is None and state_checked == FRAMES
+             else "!! no -- frame %s" % state_bad if state_bad is not None
+             else "!! only %d of %d frames were checked" % (state_checked, FRAMES)))
     vacuous = (menus < 2 or worlds < 2 or moved < 2 or not frozen or not walked or not reset
                or len(screens_seen) != 1 + len(SKILLS) or not told)
     if vacuous and not (args.selftest or args.selftest_skill):
         print("  !! VACUOUS -- this script does not exercise the menu machine")
 
     ok = ok and not vacuous and len(got) >= FRAMES
+    state_ok = state_bad is None and state_checked == FRAMES
     print("")
+    if args.selftest_state:
+        # rejected for the RIGHT reason: by the STATE check, on the first NEW GAME frame, whose
+        # picture is right -- the mutation is one no world frame can show
+        caught = state_bad == NEW_GAMES[0] and first_bad is None
+        print("SELFTEST (the oracle expects the skill screen's menu_scr in the world): "
+              + ("PASS -- the state check rejected frame %d, where it must, with its picture exact"
+                 % NEW_GAMES[0] if caught else
+                 "FAIL -- " + ("the gate did not notice" if state_bad is None else
+                               "state %s, pixels %s" % (state_bad, first_bad))))
+        return 0 if caught else 1
     if args.selftest or args.selftest_skill:
         # rejected for the RIGHT reason: the first wrong frame is the first one the mutation moves
         # (frame 0 is a menu frame; the first NEW GAME is the first frame drawn at a wrong skill)
@@ -281,8 +293,9 @@ def main():
                  "FAIL -- " + ("the gate did not notice" if first_bad is None else
                                "it failed at frame %d, not %d" % (first_bad, expect))))
         return 0 if caught else 1
-    print("M3 GATE: " + ("PASS" if ok else "FAIL"))
-    return 0 if ok else 1
+    print("M3 GATE: " + ("PASS -- byte- and state-exact on all %d frames" % FRAMES
+                         if ok and state_ok else "FAIL"))
+    return 0 if ok and state_ok else 1
 
 
 if __name__ == "__main__":

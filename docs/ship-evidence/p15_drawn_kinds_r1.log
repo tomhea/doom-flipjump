@@ -1,0 +1,17 @@
+# R1: the new test on the P1.5 tree WITHOUT the fix (742139f: the bank's kinds and the shade classes from every thing with art)
+$ python -m pytest tests/host/test_thing_table.py -q -p no:cacheprovider -k single_player_game_draws
+E       AssertionError: [2002, 2003, 2004, 2013, 2046]
+E       assert {8, 9, 43, 47, 48, 54, ...} == {8, 9, 43, 47, 48, 54, ...}
+E         
+E         Extra items in the left set:
+E         2002
+E         2003
+E         2004
+E         2013
+E         2046
+E         Use -v to get more diff
+FAILED tests/host/test_thing_table.py::test_the_bank_and_the_shade_classes_hold_only_what_a_single_player_game_draws
+1 failed, 8 deselected in 1.36s
+# with the fix
+$ python -m pytest tests/host/test_thing_table.py -q -p no:cacheprovider
+9 passed in 1.59s

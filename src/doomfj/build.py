@@ -25,9 +25,9 @@ from doomfj.mapcompiler import bake_bsp, compile_geometry_streams
 from doomfj.tables import reciprocal_table
 from doomfj.texturecompiler import compile_colormap, compile_flat, compile_palette, compile_texture
 from doomfj.wad import WadFile
-from doomfj.wall_renderer import (BBOX_CULL, DEG, STACK_STEPS, STATE_WIRE, STEPS, TIER,
-                                  WALL_NOISE, emit_wall_renderer, map_has_sky, tier_flags,
-                                  write_program_files)
+from doomfj.wall_renderer import (BBOX_CULL, DEG, SPR_BLOCK_STRIDE, STACK_STEPS, STATE_WIRE,
+                                  STEPS, TIER, WALL_NOISE, emit_wall_renderer, map_has_sky,
+                                  tier_flags, write_program_files)
 
 _SRC_FJ = Path("src/fj")
 # the fixed include set the runtime wall renderer assembles against (before the emitted main)
@@ -80,6 +80,26 @@ def persist_labels(*, standalone: bool, doors: bool, moving_things: bool) -> tup
             + (THING_PERSIST if moving_things else ()))
 # V4 needs sprite lumps and a cut-down map wad has none, so sprite art comes from a full wad.
 DEFAULT_SPRITE_WAD = "assets/freedoom1.wad"
+
+
+def sprbank_misalignment(labels):
+    """None when the sprite bank sits on a whole bank block (16^3 bits), else what is wrong.
+
+    M7 P1.4: a block's later reads re-arm only the low three nibbles of the pointer
+    (frame.read3_and_inc), exact only while every address inside a block agrees in nibbles >= 3 --
+    so `sprbank` must be SPR_BLOCK_STRIDE-op aligned. The emitter's `pad` makes that true by
+    construction (`pad n` aligns the address absolutely); this is the BUILD's check that it did,
+    because a violation draws wrong sprite rows and crashes nothing. A program without a bank (the
+    `render` tier) has nothing to check.
+    """
+    if "sprbank" not in labels:
+        return None
+    block_bits = SPR_BLOCK_STRIDE * 2 * W
+    at = int(labels["sprbank"])
+    if at % block_bits:
+        return ("sprbank at bit %d is %d bits past a %d-bit block boundary: the bank's 3-nibble "
+                "reads would re-arm into the wrong block" % (at, at % block_bits, block_bits))
+    return None
 
 
 def _resolve_sprite_wad(map_wad, sprite_wad):
@@ -385,6 +405,9 @@ def build_wall_renderer(out_fjm, *, wad_path=DEFAULT_WAD, mapname="E1M1", cfg=No
         moved = selfreset.verify_labels_unchanged(labels1, labels2, restore_set)
         assert not moved, ("M1 self-reset REFUSED: %d baked addresses moved between passes, e.g. %s"
                            % (len(moved), sorted(moved)[:3]))
+        # M7 P1.4: the shipped layout's bank alignment, read off pass 2's own label table
+        _misaligned = sprbank_misalignment(labels2)
+        assert _misaligned is None, "build REFUSED: " + str(_misaligned)
 
         # ...and that the VALUES at those addresses are the same in both assemblies. The reset bakes
         # `hex.set 1, addr, v` with v read from PASS 1; if pass 2 puts a different value there, the

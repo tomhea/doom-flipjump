@@ -1061,6 +1061,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     if _do_things:
         from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
         _drawable, _draw_idx = drawable_things(rm, map_wad.things(mapname), sprite_wad, spr_cache)
+        check_slot_ids(len(_drawable))
         _baked = (baked_thing_mask(rm, cmap, _drawable, MONSTER_TYPES) if moving_things
                   else (True,) * len(_drawable))
         _mt_keep = {i for i, b in zip(_draw_idx, _baked) if not b}
@@ -1144,7 +1145,6 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"frame.thing_record_body {THING_BUDGET}, {MONSTER_BUDGET}, {SPRITE_MINZ}, "
                 f"{proj}, {cfg.CENTERX}, "
                 f"{cfg.CENTERY}, {cfg.VIEW_W}, {cfg.VIEW_H}, {cfg.TEXTURE_DOWNSCALE}, "
-                f"{SPR_BLOCK_STRIDE.bit_length() - 1}, "
                 f"{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, "
                 f"{1 if 'thingtwice' in ablate else 0}, {deg_flag}, {DEG_SOFT_SCENERY}, "
                 f"{DEG_SOFT_MON}, {DEG_SPRB_MINH}, {1 if DEG_SPR_NEAR_TZ else 0}, "
@@ -1983,7 +1983,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                    + [f"sfslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(cfg.VIEW_W * 16 ** cfg.SLOT_SHIFT))]
                    + ([f"spslot:{NLJ}" + NLJ.join(";0 * dw"
-                                        for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE))]
+                                        for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
+                       # M7 P1.4: the per-THING fragment constants, [y0 + 32768 lo][hi][light][-]
+                       # per slot id (frame.thing_record_body writes, stream.frag_derive reads).
+                       # HERE, inside the narrow-arm window: its reads and writes are full arms,
+                       # but an arm5 read may FOLLOW one, and arm5 is exact only while its
+                       # predecessor arm is in this block too.
+                       f"gpslot:{NLJ}" + NLJ.join(";0 * dw"
+                                        for _ in range(SPR_THING_SLOTS * SPR_THING_SLOT_BYTES))]
                       if _do_things else [])
                    + (([byte_array_decl("sshead", _MT_HEAD, _ss_cells),
                         byte_array_decl("thnext", _MT_NEXT, _th_cells)] if standalone else
@@ -2162,7 +2169,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               f"{1 if 'projtwice' in ablate else 0}, {1 if 'scaletwice' in ablate else 0}, "
               f"1, {1 if _has_sky else 0}, {2 * LINES_HALF_SLOTS}, "
               f"{1 if 'skyall' in ablate else 0}, 1, "
-              f"{1 if _do_things else 0}, {SPR_BLOCK_STRIDE.bit_length() - 1}, "
+              f"{1 if _do_things else 0}, "
               f"{0 if 'sprnoemit' in ablate else 1}, {ascode}, {sky_base_id}, {stack_flag}, "
               f"{deg_flag}, {DEG_SLIVER_W}")]
             ),
@@ -2307,12 +2314,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              "seg_ucls: hex.vec 2", "seg_lcls: hex.vec 2",
              f"seg_bpid: hex.vec {cfg.PID_BYTES * 2}",  # V5: the boundary's baked BACK pair id
              stepcol]),
-          # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (nonzero =
-          # this column carries one) so a column without a sprite costs ONE read on the emit path;
-          # `spslot[x]` holds [sy1][sy2p1][y0+128][blk_lo][blk_hi][shade row] at a power-of-16 stride.
-          # `y0` is BIASED by 128 because a near sprite's top sits above row 0 and the slot is bytes;
-          # h <= VIEW_H bounds it to +-99. `n_thing`/`tstop` are the budget and its monotone early-out.
-          # spslot moved to the M13-hotdata block (T-HOTSLOTS), as above.
+          # V4 THINGS: the per-column write-once SPRITE FRAGMENT. `sprflag[x]` is one byte (1 = slot
+          # A, 2 = A and B) so a column without a sprite costs ONE read on the emit path; `spslot[x]`
+          # holds, since M7 P1.4, [s][blk_lo][blk_hi] for A at byte 0 and for B at byte 8, at a
+          # power-of-16 stride: the thing's slot id and the bank block. The thing's constants -- its
+          # top row biased by 32768 (two bytes: a near sprite's top sits far above row 0) and its
+          # light row -- are in `gpslot[s]`, written once per thing. `n_thing`/`tstop` are the
+          # budget and its monotone early-out. spslot and gpslot live in the M13-hotdata block.
           *([
              "n_thing: hex.vec 2", "n_mon: hex.vec 2", "tstop: hex.vec 1", "thing_ret: ;0",
              "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
@@ -2395,17 +2403,13 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "p2_dly1: hex.vec 2",
         "p2_dly2: hex.vec 2",
         f"p2_dpid: hex.vec {cfg.PID_BYTES * 2}",
+        "p2_ds: hex.vec 2",                  # M7 P1.4: the fragment signature is (slot, block)
+        "p2_dsb: hex.vec 2",
         "p2_dsblk: hex.vec 4",
         "p2_dsblkb: hex.vec 4",
         "p2_dscale: hex.vec 8",
         "p2_dsoff: hex.vec 2",
         "p2_dsstep: hex.vec 8",
-        "p2_dssy1: hex.vec 2",
-        "p2_dssy1b: hex.vec 2",
-        "p2_dssy2: hex.vec 2",
-        "p2_dssy2b: hex.vec 2",
-        "p2_dsy0b: hex.vec 4",
-        "p2_dsy0bb: hex.vec 4",
         "p2_dtop: hex.vec 8",
         f"p2_du1bp: hex.vec {cfg.PID_BYTES * 2}",
         "p2_du1cls: hex.vec 2",
@@ -2431,21 +2435,15 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "p2_ly1: hex.vec 2",
         "p2_ly2p1: hex.vec 2",
         "p2_one: hex.vec 2",
+        "p2_s: hex.vec 2",
+        "p2_sb: hex.vec 2",
         "p2_sblk: hex.vec 4",
         "p2_sblkb: hex.vec 4",
         "p2_skb: hex.vec 2",
         "p2_sliver_cap: hex.vec 2",
         "p2_sliver_w: hex.vec 2",
-        "p2_slr: hex.vec 2",
-        "p2_slrb: hex.vec 2",
         "p2_soff: hex.vec 2",
         "p2_sprfl: hex.vec 2",
-        "p2_ssy1: hex.vec 2",
-        "p2_ssy1b: hex.vec 2",
-        "p2_ssy2: hex.vec 2",
-        "p2_ssy2b: hex.vec 2",
-        "p2_sy0b: hex.vec 4",
-        "p2_sy0bb: hex.vec 4",
         "p2_ucol: hex.vec 2",
         "p2_ufl: hex.vec 1",
         "p2_uy1: hex.vec 2",
@@ -2532,7 +2530,6 @@ def hoisted_scratch_decls(cfg=None) -> list:
         # ROUND 2 (under bisection): multi-instantiation macros sharing one cell each
         "trb_blk: hex.vec w/4",
         "trb_blk_const: hex.vec w/4",
-        "trb_blk_ofs: hex.vec w/4",
         "trb_bucket: hex.vec 4",
         "trb_bucket_h: hex.vec 8",
         "trb_cbound: hex.vec 8",
@@ -2551,16 +2548,12 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "trb_frac_u: hex.vec 8",
         "trb_negx1: hex.vec 8",
         "trb_run_last: hex.vec 2",
-        "trb_run_r0: hex.vec 2",
-        "trb_run_w8: hex.vec 8",
         "trb_shade_row: hex.vec 2",
         "trb_slot_flag: hex.vec 2",
         "trb_slot_ofs: hex.vec w/4",
         "trb_sprflag_b: hex.vec w/4",
         "trb_sprflag_p: hex.vec w/4",
         "trb_sprflag_v: hex.vec 2",
-        "trb_sy1: hex.vec 8",
-        "trb_sy2: hex.vec 8",
         "trb_tab_idx: hex.vec w/4",
         "trb_tbl_b: hex.vec w/4",
         "trb_tbl_p: hex.vec w/4",
@@ -2572,8 +2565,6 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "trb_u: hex.vec 8",
         "trb_vis: hex.vec 1",
         "trb_y0: hex.vec 8",
-        "trb_y0_biased: hex.vec 8",
-        "trb_y_base: hex.vec 8",
         "wxr_adup: hex.vec 8",
         "wxr_ang1: hex.vec 8",
         "wxr_ang2: hex.vec 8",
@@ -2659,27 +2650,42 @@ def hoisted_scratch_decls(cfg=None) -> list:
         "sst_quot: hex.vec 8",
         "sst_rem: hex.vec 8",
         "sst_span: hex.vec 8",
-        "srw_ptr: hex.vec w/4",
-        "srw_rel: hex.vec 2",
-        "srw_rel_w: hex.vec 4",
-        "srw_sbase: hex.vec w/4",
-        "srw_sidx: hex.vec w/4",
-        "srw_smidx: hex.vec 4",
-        "srw_tex: hex.vec 2",
-        "srw_whi4: hex.vec 4",
-        "srw_wlo4: hex.vec 4",
-        "srw_y0: hex.vec 4",
-        "srw_yabs: hex.vec 4",
-        "srn_cvh: hex.vec 4",
-        "srn_ptr: hex.vec w/4",
-        "srn_rel: hex.vec 2",
-        "srn_rel_w: hex.vec 4",
-        "srn_sbase: hex.vec w/4",
-        "srn_sidx: hex.vec w/4",
-        "srn_smidx: hex.vec 4",
-        "srn_tex: hex.vec 2",
-        "srn_y0: hex.vec 4",
-        "srn_yabs: hex.vec 4",
+        # ── M7 P1.4: the sprite fragment as (slot, block) ──────────────────────────────────────
+        # the record's slot write (frame.thing_record_body) -- gps_nslot is FRAME STATE (the next
+        # slot id), 0 at every frame start, which is why it must be in the restore sets
+        "gps_nslot: hex.vec 2",
+        "gps_s_rec: hex.vec 2",
+        "gps_sidx: hex.vec w/4",
+        "gps_sbase: hex.vec w/4",
+        "gps_ptr: hex.vec w/4",
+        "gps_yb8: hex.vec 8",
+        "gps_boff: hex.vec w/4",            # frame.blk_addr's alone; nibbles 0-2 and 7 stay 0
+        # the emit's derive (stream.frag_derive) -- gps_cur_s is FRAME STATE too (the slot whose
+        # constants gps_y0 / gps_lr hold), and a stale one draws the previous frame's rows
+        "gps_cur_s: hex.vec 2",
+        "gps_y0: hex.vec 4",
+        "gps_lr: hex.vec 2",
+        "gps_r0: hex.vec 4",                # 4 wide, written 2: the high byte stays 0 for add4
+        "gps_last: hex.vec 4",
+        "gps_cvh: hex.vec 4",
+        "gps_ybase: hex.vec 4",
+        "gps_top: hex.vec 4",
+        "gps_sy1: hex.vec 4",
+        "gps_sy2: hex.vec 4",
+        "gps_smidx: hex.vec 4",
+        # the walkers (stream.frag_runs / frag_runs_win)
+        "gps_rel: hex.vec 4",               # 4 wide, written 2 (see gps_r0)
+        "gps_yabs: hex.vec 4",
+        "gps_wptr: hex.vec w/4",
+        "gps_wlo4: hex.vec 4",
+        "gps_whi4: hex.vec 4",
+        # the second fragment's derived rows, kept while the first is derived (V4b)
+        "gpsb_ybase: hex.vec 4",
+        "gpsb_top: hex.vec 4",
+        "gpsb_sy1: hex.vec 4",
+        "gpsb_sy2: hex.vec 4",
+        "gpsb_smidx: hex.vec 4",
+        "gpsb_ptr0: hex.vec w/4",
         "srd_csh10: hex.vec 2, 10",
         "srd_csh5: hex.vec 2, 5",
         "srd_csh6: hex.vec 2, 6",
@@ -2988,15 +2994,40 @@ def _lines_step_bank(rm, asset_wad, cfg, cmap, lds, sds, secs, w1r=False, has_sk
     return NLJ.join(out) + NLJ, cls_of
 
 
-SPR_BLOCK_STRIDE = 64      # V4-HD: cap 24 needs 3+48 bytes -- was 32 at cap 12. Power of two so
-                           # the record/emit shifts stay bit-shifts (blkshift derives from this).
+SPR_BLOCK_STRIDE = 64      # V4-HD: cap 24 needs 3+48 bytes -- was 32 at cap 12.
                            # V4: dw per baked sprite-column block -- [n][ (rel,texel) x <=cap ] with
-                           # SPRITE_RUN_CAP = 12 needs 25, and a POWER OF TWO stride turns the block
-                           # index into a shl_bit instead of a mul_const.
-SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot` (7 used: y0 is TWO bytes,
-                           #     bias 32768 -- the one-byte +128 bias wrapped for tall near
-                           #     sprites, M13-15M), a power of 16 so the
-                           # per-column byte offset is a whole-nibble shift.
+                           # SPRITE_RUN_CAP = 12 needs 25.
+                           # ⚠ EXACTLY 64 since M7 P1.4 (asserted below): 64 ops x 64 bits = 16^3
+                           # bits, so a block's address is its index's four nibbles placed at nibble
+                           # 3 (frame.blk_addr), and every address inside a block agrees in nibbles
+                           # >= 3 -- which is what lets a block's later reads re-arm three nibbles
+                           # (frame.read3_and_inc). `pad 64` before `sprbank:` keeps the bank on it.
+assert SPR_BLOCK_STRIDE == 64, "frame.blk_addr / frame.arm3 are built for 64-op sprite blocks"
+SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot`: 3 per fragment since M7 P1.4,
+                           #     [s][blk lo][blk hi], A at byte 0 and B at byte 8 -- a power of 16
+                           #     so the per-column byte offset is a whole-nibble shift.
+SPR_THING_SLOTS = 256      # M7 P1.4: fragment slot ids are ONE byte, 1..255 (0 = no fragment) --
+SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds [y0 + 32768 lo][hi][light row][unused] per id
+
+
+def check_slot_ids(n_things):
+    """M7 P1.4: a fragment names its thing by a ONE-BYTE slot id, 1..255 (0 = no fragment), one per
+    thing the frame accepts -- and every drawable thing is visited at most once a frame (baked or
+    listed, never both: the emitter's M14.5 control). So the bound is the drawable count. A wrapped
+    id would hand one thing's top row and light to another's columns: wrong pixels, no crash.
+    Runtime pools (projectiles, effects) must be added to the count when they land."""
+    assert n_things < SPR_THING_SLOTS, (
+        "%d drawable things: the fragment's one-byte slot id holds %d (docs/gp-sprite-column.md "
+        "risk 5)" % (n_things, SPR_THING_SLOTS - 1))
+
+
+def sprite_bank_header():
+    """The lines that open the sprite bank: its comment, the `pad` that puts `sprbank` on a whole
+    block -- 64 ops = 16^3 bits, what the bank's 3-nibble reads need (M7 P1.4; fj's `pad n` aligns
+    the address absolutely) -- and the label. build.sprbank_misalignment checks the result."""
+    return ["// V4 sprite bank: [r0][last_rel][n][ (rel_end, RAW texel) x n ] per (sprite, column, "
+            f"height bucket), stride {SPR_BLOCK_STRIDE} dw -- block-aligned (M7 P1.4)",
+            f"pad {SPR_BLOCK_STRIDE}", "sprbank:"]
 
 
 def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
@@ -3012,9 +3043,12 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
     level instead of being multiplied by 16.
 
     A block is `[r0][last_rel][n][ (rel_end, texel) x n ]`. `r0` and `last_rel` sit in the HEADER so
-    the RECORD half can bound the fragment's screen rows with two byte reads instead of pre-walking
-    the run-list — the emit needs those bounds before it emits anything (it composes the column
-    around them), and walking twice would double the only per-fragment loop there is.
+    the fragment's screen rows are two byte reads, not a pre-walk of the run-list: the RECORD half
+    reads `last_rel` (0 = a fully transparent column, recorded nowhere), and the emit derives
+    y_base / sy1 / sy2 from the header and the thing's slot before it emits anything
+    (stream.frag_derive) -- it composes the column around them, and walking twice would double the
+    only per-fragment loop there is. M7 P1.4: `pad 64` puts `sprbank` on a 4096-bit boundary, so a
+    block is one 16^3-bit window (SPR_BLOCK_STRIDE).
 
     Returns `(bank_text, base_of_kind, dw_of_kind)` — the bank's fj text, each thing type's first
     block index, and its downscaled width (blocks for a type are laid out u-major, bucket-minor).
@@ -3022,8 +3056,7 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
     cache: dict = {}
     kinds = sorted({t.type for t in map_wad.things(mapname)
                     if rm.sprite_art(sprite_wad, t.type, cache) is not None})
-    out = ["// V4 sprite bank: [r0][last_rel][n][ (rel_end, RAW texel) x n ] per (sprite, column, "
-           f"height bucket), stride {SPR_BLOCK_STRIDE} dw", "sprbank:"]
+    out = sprite_bank_header()
     base_of, dw_of, blk = {}, {}, 0
     for kind in kinds:
         art = rm.sprite_art(sprite_wad, kind, cache)
@@ -3041,7 +3074,7 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
                 body = [0, 0, 0] if st is None else (
                     [st[0], st[1][-1][0], len(st[1])] + [v for pr in st[1] for v in pr])
                 assert len(body) < SPR_BLOCK_STRIDE, f"sprite block overflows: {len(body)}"   # STRICT: the
-                # rel==0 sentinel in stream.sprite_runs needs at least one 0 cell after the body
+                # rel==0 sentinel in stream.frag_runs / frag_runs_win needs a 0 cell after the body
                 out += [f";{v:#x} * dw" for v in body]
                 out += [";0 * dw"] * (SPR_BLOCK_STRIDE - len(body))
                 blk += 1

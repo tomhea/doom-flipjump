@@ -1,0 +1,10 @@
+# deg_gate on m7-sprite-column 68eabd6 09:29:10
+pid bake: 152 pairs baked, 255 addressable at PID_NIBBLES=2
+program parts: entry=1,094, tables=339,622, main=68, segconsts=44,173, walk=72,962, state=428, banks=2,137,149
+assembled
+(664,291,0x18000000): 31,038,693 ops  BYTE-EXACT
+(1272,-724,0x40000000): 16,782,783 ops  BYTE-EXACT
+(1869,479,0x80000000): 30,664,847 ops  BYTE-EXACT
+(-416,256,0x0): 28,727,898 ops  BYTE-EXACT
+PASS
+rc=0

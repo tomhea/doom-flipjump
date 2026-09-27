@@ -118,6 +118,12 @@ TIERS = {
 TIER_FLAGS = ("things", "player_sim", "collide", "moving_things",
               "standalone", "menu", "doors", "self_reset")
 
+# M7 P1.5: the game tier's SKILLS, DOOM's gameskill numbers -- the model's (docs/gp-skill-menu.md).
+# The image boots at HARD: the skill the frozen combat set v2 runs at and the budget is sized on (D7).
+from doomfj import gamedata as _gd                               # noqa: E402 (after the oracle)
+SKILLS = (_gd.SK_EASY, _gd.SK_MEDIUM, _gd.SK_HARD)
+BOOT_SKILL = _gd.SK_HARD
+
 
 def tier_flags(tier: str) -> dict:
     """The eight booleans a tier name stands for. Unknown names fail LOUDLY and list the choices --
@@ -1114,18 +1120,39 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
-    from doomfj.things import byte_array_decl, spawn_leaf_lists
-    _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
+    from doomfj.things import byte_array_decl, skill_absent, skill_level_start, spawn_leaf_lists
+    # M7 P1.5: the game tier has SKILLS (docs/gp-skill-menu.md). Which things a skill spawns is
+    # `skill_absent`'s answer; the runtime things are present by being LINKED, the baked vanishable
+    # ones by their `thvis` flag. The image boots at HARD's level start (the skill set v2 runs at);
+    # choosing a skill runs that skill's restart block. Hosted tiers are told presence by their host
+    # and static tiers draw the whole image, so the skills are the standalone game tier's alone.
+    _skills = bool(_do_things and standalone and moving_things)
+    _rt_draw = [_draw_idx.index(w) for w in sorted(_mt_keep)] if moving_things else []
+    if _skills:
+        # a baked thing that varies by skill must have a flag to vary BY -- a map where one did not
+        # needs a flag first, and says so here rather than drawing the wrong things
+        _abs = [skill_absent(_drawable, _s) for _s in SKILLS]
+        _varies = frozenset().union(*_abs) - frozenset.intersection(*_abs)
+        _unflagged = sorted(di for di in _varies if _baked[di] and di not in _vis_slots)
+        assert not _unflagged, (
+            "M7 P1.5: baked things %s change with the skill but have no thvis flag"
+            % [(_drawable[di].type, _drawable[di].x, _drawable[di].y) for di in _unflagged[:6]])
+        _MT_HEAD, _MT_NEXT, _BOOT_VIS = skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS,
+                                                          _vis_slots, BOOT_SKILL)
+    else:
+        _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
+        _BOOT_VIS = [1] * len(_vis_slots)
     # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
     # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
     # host that owns what has been picked up, and fj has no state between frames.
     _MT_NVIS = len(_vis_slots) if _do_things else 0
     if _MT_NVIS:
         # M5: standalone has no host to say what has been picked up, and nothing picks anything up
-        # yet (that is C1), so every slot bakes VISIBLE. Zero would mean "hidden" -- the reason the
-        # hosted tier has to send the whole block every frame.
+        # yet (that is C1), so every slot bakes its BOOT value -- since M7 P1.5, whether hard spawns
+        # it. Zero means "hidden" -- the reason the hosted tier has to send the whole block every
+        # frame.
         _mt_decls = list(_mt_decls) + (
-            ["thvis:"] + ["    hex.vec 2, 1"] * _MT_NVIS if standalone else
+            ["thvis:"] + [f"    hex.vec 2, {v}" for v in _BOOT_VIS] if standalone else
             [f"thvis: hex.vec {2 * _MT_NVIS}"])
     _MT_NTH = _index_nibbles(max(1, _MT_NT))          # the row index's width, as check_line's is
     _MT_NSSN = _index_nibbles(max(1, _MT_NSS))

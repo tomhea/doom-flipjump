@@ -252,34 +252,29 @@ def test_a_walk_agrees_between_the_two_line_sources(level):
         assert full == fast, f"tic {tic} at ({st.x / U:.3f}, {st.y / U:.3f}): {full} != {fast}"
 
 
-def test_the_table_walk_is_the_same_algorithm_as_the_oracle(level):
-    """M14-d, the TABLE form. `collision.check_position_table` is the exact algorithm the fj loop
-    has to implement, written in Python so it can be specified and diffed BEFORE any fj exists —
-    the bake-as-code route was only found to be unbuildable after a 50-minute assemble.
-
-    It walks `block_rows` -> `block_lines` -> `line_rows` with no compile-time specialisation
-    anywhere, which is what the loop will do, and must still equal the oracle's exhaustive sweep."""
-    from doomfj.collision import block_tables, check_position_table, line_rows
-    from doomfj.reference_model import ML_BLOCKING, PLAYER_RADIUS
+def test_the_cell_walk_is_the_same_algorithm_as_the_oracle(level):
+    """M7 P1.2, the CELL form. `collision.check_position_cells` is the algorithm the emitted cell
+    routine runs -- the centre's 32-unit cell, each listed line through one shared test, a wall
+    latching the refusal -- written in Python so it can be diffed against the oracle's exhaustive
+    sweep without a build. (It replaced M14-d's blockmap table walk, which read every candidate's
+    row from packed tables.)"""
+    from doomfj.collision import cell_lists, check_position_cells, line_rows
     rm, scene, sp = level
     lds = scene.map_wad.linedefs("E1M1")
     secs, sds = scene.map_wad.sectors("E1M1"), scene.map_wad.sidedefs("E1M1")
-    grid = build_blockmap(scene.cmap, lds)
     rows = line_rows(lds, scene.cmap.vertexes, secs, sds, ML_BLOCKING)
-    blocks, flat = block_tables(grid)
+    lists = cell_lists(rows, PLAYER_RADIUS)
     xs = [v[0] for v in scene.cmap.vertexes]
     ys = [v[1] for v in scene.cmap.vertexes]
     checked = blocked = 0
     for x in range(min(xs), max(xs), 101):
         for y in range(min(ys), max(ys), 103):
             want = rm.check_position(scene, x << 16, y << 16)
-            sf, sc = want[1], want[2]           # the seed is the caller's job; take the oracle's
             ss = scene.cmap.subsectors[rm.point_in_subsector(scene.cmap, x, y)]
             sec = seg_sector(lds, sds, secs, scene.cmap.segs[ss.firstseg])
-            got = check_position_table(rows, blocks, flat, grid, x << 16, y << 16,
-                                       PLAYER_RADIUS, sec.floor_h, sec.ceil_h)
-            assert got == want, f"({x},{y}): table {got} != oracle {want} (seeds {sf},{sc})"
+            got = check_position_cells(rows, lists, x << 16, y << 16, PLAYER_RADIUS,
+                                       sec.floor_h, sec.ceil_h)
+            assert got == want, f"({x},{y}): cells {got} != oracle {want}"
             checked += 1
             blocked += not want[0]
-    assert checked > 400 and blocked > 20, \
-        f"{checked} positions, {blocked} blocked -- the sample is too thin to prove anything"
+    assert checked > 400 and blocked > 20,         f"{checked} positions, {blocked} blocked -- the sample is too thin to prove anything"

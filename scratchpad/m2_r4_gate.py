@@ -15,18 +15,20 @@ so the gate reads them out after each frame and writes them back before the next
 hosted tier's whole contract. (The STANDALONE tier keeps them across the M1 reset instead, which is
 what `build.STANDALONE_PERSIST` is for -- a different rung.)
 
-⚠ `lnrow`'s patched blocking bits are relayed too, and they are the reason collision works: the
-program clears them with a `wflip` when a door reaches `doors.pass_state`. Reading them back also
-CHECKS them -- the gate asserts the bit the program flipped is the bit the threshold says it
-should have flipped, so "the door opened" and "the door became walkable" are two separate claims
-with two separate pieces of evidence.
+⚠ The door registers ARE the collision too (M7 P1.2): a door line's stub in the collision cells
+reads the door's `dstate` against its pass state, so there is no second copy to relay. (Before P1.2
+the program kept a blocking bit per door line in the packed `lnrow` table, patched with a `wflip`
+at the pass state, and this gate relayed and checked those bits as well.) "The door opened" and
+"the door became walkable" are still two claims with two pieces of evidence: C2 checks the relayed
+registers against `door_tic`, and C1c the position the program's OWN collision computed.
 
 CONTROLS
   C1  the door must actually MOVE during the run (a script that never triggers is vacuous), and
       the player must actually CROSS the doorway (a run that never tests collision proves the
       render half only).
-  C2  the blocking bits must be SET while the door is below `pass_state` and CLEAR above it, on
-      every frame -- checked against `doors.pass_state`, not against what the program did.
+  C2  the door registers the program holds (dstate, ddir, dsub, dwait) must be `door_tic`'s on
+      every frame -- the state the collision reads, checked against the Python model, not against
+      what the program did.
   C3  --selftest steps the oracle's doors with the use key held OFF while fj gets the real script.
       Every frame after the door starts moving must then differ.
 """
@@ -40,7 +42,6 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj import selfreset                                              # noqa: E402
-from doomfj.collision import FLAGS_REST_BYTE, FLAG_BLOCKING, LINE_REST_LEN  # noqa: E402
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doorcode import WAIT_NIBBLES, door_line_ids                   # noqa: E402
 from doomfj.doors import (door_states, door_tic, heights_for_states,      # noqa: E402
@@ -117,20 +118,19 @@ def main():
         cache.write_text(json.dumps({"mtime_ns": stamp,
                                      "labels": {k: int(v) for k, v in labels.items()}}),
                          encoding="utf-8")
-    for name in ("dstate", "ddir", "dsub", "dwait", "lnrow"):
+    for name in ("dstate", "ddir", "dsub", "dwait"):
         assert name in labels, f"no `{name}` label -- this binary is not a doors build"
-    base = {n: labels[n] // W for n in ("dstate", "ddir", "dsub", "dwait", "lnrow")}
+    assert "lnrow" not in labels, ("this binary still carries M14-d's `lnrow` table: it predates "
+                                   "M7 P1.2's collision cells, which this gate is written for")
+    base = {n: labels[n] // W for n in ("dstate", "ddir", "dsub", "dwait")}
 
-    # every word the gate relays between frames: the four door registers, and the flag BYTE of
-    # each door line (an op, so its value is in the odd word)
+    # every word the gate relays between frames: the four door registers (each nibble an op, so its
+    # value is in the odd word), door by door
     def door_words():
         out = []
         for d in range(len(order)):
             out += [base["dstate"] + 2 * d + 1, base["ddir"] + 2 * d + 1, base["dsub"] + 2 * d + 1]
             out += [base["dwait"] + 2 * (WAIT_NIBBLES * d + k) + 1 for k in range(WAIT_NIBBLES)]
-        for si in order:
-            for li in lines_of.get(si, ()):
-                out.append(base["lnrow"] + 2 * (li * LINE_REST_LEN + FLAGS_REST_BYTE) + 1)
         return out
 
     WORDS = door_words()
@@ -183,14 +183,13 @@ def main():
     print("doors  : %d, thresholds %s" % (len(order), {si: passes[si] for si in order[:3]}))
     print("start  : (%d,%d) angle 0x%08x, %d frames"
           % (start.x >> 16, start.y >> 16, start.angle, len(SCRIPT)))
-    print("relayed: %d words (%d door registers + %d line flag bytes)"
-          % (len(WORDS), 5 * len(order), sum(len(v) for v in lines_of.values())))
+    print("relayed: %d words (%d door registers)" % (len(WORDS), (3 + WAIT_NIBBLES) * len(order)))
 
     # ---- run both mirrors -----------------------------------------------------------------------
     dstates = initial_states(secs, lds, sds)
     state = start
     carry = [0] * len(WORDS)
-    # the image's own initial values for the relayed words (state 0 + the baked blocking bits)
+    # the image's own initial values for the relayed words (every door shut and idle)
     _core = _fjcore.Memory(runner.width, flat_max_words=runner.flat_max_words)
     for seg, n in runner._segments:
         _core.add_segment(seg, n)
@@ -204,7 +203,7 @@ def main():
     near_y, far_y = y0 + 64, y1 - 64          # the door's own lines, before the box inflation
     seen_states = set()
     print("")
-    print("  frame  keys      door0 state  fj px vs oracle        blocking")
+    print("  frame  keys      door0 state  fj px vs oracle        doors/position")
     for f, keys in enumerate(SCRIPT):
         kb = keys_byte(keys)
         px, echoed, carry, ops = run_frame(state, kb, carry)
@@ -229,7 +228,7 @@ def main():
                           heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}))
         want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art, **GAME_RENDER_KW))
         # C1c: fj's OWN collision answer, not just its picture. The gate feeds the oracle's
-        # position in each frame, so without this the fj side's blocking bits could be wrong in
+        # position in each frame, so without this the fj side's door collision could be wrong in
         # both directions and every frame would still be byte-exact -- it would be rendering the
         # oracle's walk. The program echoes the state it computed; it must be the same state.
         same = px == want
@@ -239,19 +238,15 @@ def main():
         d0 = dstates[tgt][0]
         seen_states.add(d0)
         moved += 1 if d0 else 0
-        # C2: the bits the program holds must be the ones the threshold says
-        want_blocked = {li: (dstates[si][0] < passes[si])
-                        for si in order for li in lines_of.get(si, ())}
-        got_blocked = {}
-        for i, si in enumerate(order):
-            pass
-        bidx = 5 * len(order)
-        for si in order:
-            for li in lines_of.get(si, ()):
-                v = carry[bidx] >> VAL_SHIFT
-                got_blocked[li] = bool(v & FLAG_BLOCKING)
-                bidx += 1
-        bits_ok = got_blocked == want_blocked
+        # C2: the door registers the program holds must be door_tic's -- the state its collision
+        # cells read (a nibble op's value is its odd word >> VAL_SHIFT; dwait is two nibbles, low
+        # first)
+        k = 3 + WAIT_NIBBLES
+        got_regs = {}
+        for d, si in enumerate(order):
+            v = [carry[k * d + j] >> VAL_SHIFT for j in range(k)]
+            got_regs[si] = (v[0], v[1], v[2], sum(n << 4 * j for j, n in enumerate(v[3:])))
+        bits_ok = got_regs == {si: tuple(dstates[si]) for si in order}
         ok &= bits_ok
         # C1b: did the player actually get THROUGH the doorway? The first version asked whether
         # they had moved more than 48 units from the start, which is true from frame 0 and counted
@@ -264,7 +259,7 @@ def main():
                  ("BYTE-EXACT" if same else
                   "!! %d px differ" % sum(a != b for a, b in zip(px, want))),
                  ("ok" if (bits_ok and pos_ok) else
-                  ("!! wrong blocking bits" if not bits_ok else
+                  ("!! wrong door registers" if not bits_ok else
                    "!! fj walked elsewhere: %s vs %s" % (echoed, want_state)))), flush=True)
 
     print("")

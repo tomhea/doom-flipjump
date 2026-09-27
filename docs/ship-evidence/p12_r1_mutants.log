@@ -1,0 +1,32 @@
+$ python scratchpad/gp/p12_r1_mutants.py   # the source at d795772
+BASELINE (the tree itself): all green -- 10 passed in 14.99s
+   tests/fj/test_collision_fj.py::test_a_routine_missing_one_line_is_caught                             PASSED
+   tests/fj/test_collision_fj.py::test_a_walked_trajectory_matches_too                                  PASSED
+   tests/fj/test_collision_fj.py::test_the_cell_routine_matches_the_oracle                              PASSED
+   tests/fj/test_collision_fj.py::test_the_door_lines_follow_their_doors_states                         PASSED
+   tests/host/test_collision_more.py::test_all_four_checks_enter_the_same_cell_routine                  PASSED
+   tests/host/test_collision_more.py::test_every_line_constant_survives_the_argument_cell_it_is_xored_into PASSED[e1m1_lite] PASSED[freedoom_e1m1]
+   tests/host/test_collision_more.py::test_only_the_seed_descent_and_the_cell_root_are_map_prefixed     PASSED
+   tests/host/test_collision_more.py::test_the_cell_model_agrees_with_the_oracle_off_the_map            PASSED
+   tests/host/test_collision_more.py::test_the_cell_size_is_the_one_the_trees_nibble_split_describes    PASSED
+M1 the three candidate moves enter a SECOND cell root (src/doomfj/collision.py): every named test RED -- 1 failed in 0.32s
+   tests/host/test_collision_more.py::test_all_four_checks_enter_the_same_cell_routine                  FAILED
+M2 a move-block jump takes the map prefix (src/doomfj/collision.py): every named test RED -- 1 failed in 0.35s
+   tests/host/test_collision_more.py::test_only_the_seed_descent_and_the_cell_root_are_map_prefixed     FAILED
+M3 a line's slope code leaves its one nibble (src/doomfj/collision.py): every named test RED -- 2 failed in 0.42s
+   tests/host/test_collision_more.py::test_every_line_constant_survives_the_argument_cell_it_is_xored_into FAILED[e1m1_lite] FAILED[freedoom_e1m1]
+M4 the model refuses a position in no cell (src/doomfj/collision.py): every named test RED -- 1 failed in 0.31s
+   tests/host/test_collision_more.py::test_the_cell_model_agrees_with_the_oracle_off_the_map            FAILED
+M5 the cell size moves without the tree (src/doomfj/collision.py): every named test RED -- 1 failed in 0.30s
+   tests/host/test_collision_more.py::test_the_cell_size_is_the_one_the_trees_nibble_split_describes    FAILED
+M6 the shared line test never refuses (src/fj/sim.fj): every named test RED -- 2 failed in 8.15s
+   tests/fj/test_collision_fj.py::test_the_cell_routine_matches_the_oracle                              FAILED
+   tests/fj/test_collision_fj.py::test_the_door_lines_follow_their_doors_states                         FAILED
+M9 a line stub leaves an argument nibble dirty (src/doomfj/collision.py): every named test RED -- 1 failed in 6.46s
+   tests/fj/test_collision_fj.py::test_a_walked_trajectory_matches_too                                  FAILED
+M7 a door line ignores its door's state (src/doomfj/collision.py): every named test RED -- 1 failed in 7.65s
+   tests/fj/test_collision_fj.py::test_the_door_lines_follow_their_doors_states                         FAILED
+M8 the emitter ignores the cell lists it is handed (src/doomfj/collision.py): every named test RED -- 1 failed in 6.26s
+   tests/fj/test_collision_fj.py::test_a_routine_missing_one_line_is_caught                             FAILED
+R1 MUTANTS: PASS
+rc=0

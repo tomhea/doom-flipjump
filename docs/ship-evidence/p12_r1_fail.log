@@ -1,0 +1,29 @@
+# R1: the p12 tests on the PARENT rung's src/ (git archive origin/main = 6f4bf14 Merge pull request #90 from tomhea/m7-pin-protection), the branch's test files copied in
+$ python -m pytest tests/host/test_collision_cells.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'CELL_DECLS' from 'doomfj.collision' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpa
+ERROR tests/host/test_collision_cells.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.47s
+$ python -m pytest tests/host/test_collision_more.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'CELL_DECLS' from 'doomfj.collision' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpa
+ERROR tests/host/test_collision_more.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.28s
+$ python -m pytest tests/host/test_collision.py -q -p no:cacheprovider
+E       ImportError: cannot import name 'cell_lists' from 'doomfj.collision' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scrat
+FAILED tests/host/test_collision.py::test_the_cell_walk_is_the_same_algorithm_as_the_oracle
+1 failed, 19 passed in 1.70s
+$ python -m pytest tests/host/test_doorcode.py -q -p no:cacheprovider
+FAILED tests/host/test_doorcode.py::test_a_door_lines_row_carries_no_static_block
+FAILED tests/host/test_doorcode.py::test_the_door_tic_touches_only_the_doors_own_cells
+2 failed, 8 passed in 0.31s
+$ python -m pytest tests/host/test_doorcode_more.py -q -p no:cacheprovider
+25 passed in 0.15s
+$ python -m pytest tests/host/test_narrowed_clear_sites.py -q -p no:cacheprovider
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_scan_finds_every_narrowed_clear_the_file_carries[sim.fj]
+1 failed, 76 passed in 0.64s
+$ python -m pytest tests/fj/test_collision_fj.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'CELL_SHIFT' from 'doomfj.collision' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpa
+ERROR tests/fj/test_collision_fj.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.33s

@@ -4,22 +4,20 @@
 into fj, and until this file nothing host-side compared the two: the only thing that ever ran the
 emitted text was a 10-45 minute build gate. `tests/host/test_doorcode.py` covers the collision
 address, the declarations and the use-key wire bits; it never executes a single emitted op, and
-`_cross`, `_box_test` and the body of `door_tic_lines` are measured as entirely uncovered.
+`_box_test` and the body of `door_tic_lines` are measured as entirely uncovered.
 
-So this file pins five kinds of property, in descending order of what they would cost to find the
+So this file pins four kinds of property, in descending order of what they would cost to find the
 other way:
 
-* THE MIRROR. A small interpreter of the nine-op vocabulary the emitter actually uses
-  (`hex.if0/set/zero/xor_by/inc/dec/scmp`, `wflip`, `;label`) runs the emitted text frame by frame
-  and must produce exactly the `(state, dir, sub, wait)` tuple `doors.door_tic` produces from the
-  same key schedule -- for every (nstates, pass_state) shape the nine maps produce. A drift here is
-  a door that is in a different place in the two mirrors, which is the failure this repo has
-  already paid for three times.
-* THE ONE BIT (the M2-R4 collision claim, "the same constant does both, because xor"). Seeded from
-  the BAKED value (BLOCKING set) and toggled on every emitted `wflip`, a door line's blocking bit
-  must be clear exactly on the frames where `state >= pass_state` -- through open, WAIT, close and
-  a press that reverses a closing door. This is the half a picture gate cannot see: a door that
-  animates open while staying solid looks perfect in every screenshot.
+* THE MIRROR. A small interpreter of the eight-op vocabulary the emitter actually uses
+  (`hex.if0/set/zero/xor_by/inc/dec/scmp`, `;label`) runs the emitted text frame by frame and must
+  produce exactly the `(state, dir, sub, wait)` tuple `doors.door_tic` produces from the same key
+  schedule -- for every door length the nine maps produce. A drift here is a door that is in a
+  different place in the two mirrors, which is the failure this repo has already paid for three
+  times. It is also the door's COLLISION since M7 P1.2: a door line's stub in the collision cells
+  reads this `dstate` against the pass state (tests/host/test_collision_cells.py), so a state that
+  is right is a doorway that is right -- the tic writes no collision state of its own any more (the
+  one-bit `lnrow` patch it used to flip is gone, and an emitted `wflip` now fails the interpreter).
 * THE TRIGGER BOX. The four `hex.scmp` compares must decide hit/miss identically to
   `doors.in_use_box_fixed`, including at the corners, one unit either side of them, and at negative
   map coordinates. `m5_gate` is CUMULATIVE, so a one-frame difference in when a door triggers parts
@@ -30,9 +28,6 @@ other way:
   declare. The width property needs its own textual test because the interpreter models registers
   as unbounded Python ints and therefore does NOT notice a `dwait` op narrowed from WAIT_NIBBLES
   nibbles to one -- which would wrap WAIT=32 at 16 and shut the door in the player's face.
-* THE DEAD BRANCHES. `pass_state` 0, `pass_state >= nstates` and a caller that forgot to thread
-  `lines` are unreachable from every fixture (all 13 E1M1 doors have pass_state 5 with 6..12
-  states), so they could be deleted today without any existing test failing.
 
 R9: the interpreter is a verification tool, so it ships negative controls --
 `test_the_mirror_catches_a_broken_door_machine` mutates the emitted text four ways and requires
@@ -57,13 +52,13 @@ E1M1_LITE = "tests/fixtures/e1m1_lite.wad"
 # `dstate + 3*dw`, or a bare `duse`. The emitter writes exactly these two address forms.
 _ADDR = re.compile(r"^([A-Za-z_]\w*)(?: \+ (\d+)\*dw)?$")
 
-# The externs the door machine legitimately reads: the player's 16.16 position and the packed
-# linedef table it patches. Everything else it names must come out of `door_decls`.
-_EXTERNS = {"viewx", "viewy", "lnrow"}
+# The externs the door machine legitimately reads: the player's 16.16 position. Everything else it
+# names must come out of `door_decls`.
+_EXTERNS = {"viewx", "viewy"}
 
 
 # ---------------------------------------------------------------------------------------------
-# The interpreter. Nine ops, because that is all `door_tic_lines` and `_box_test` emit -- an
+# The interpreter. Eight ops, because that is all `door_tic_lines` and `_box_test` emit -- an
 # unknown op raises rather than being skipped, so a new op in the emitter fails here loudly instead
 # of being quietly ignored by the mirror.
 # ---------------------------------------------------------------------------------------------
@@ -98,7 +93,7 @@ def _load(lines):
     return labels, prog
 
 
-def _run(labels, prog, regs, flips):
+def _run(labels, prog, regs):
     """One frame: execute from the top until control falls off the end. Returns the executed ops as
     (head, raw text), so a test can assert about STRUCTURE -- how many compares an idle door pays --
     and not only about the state it lands in."""
@@ -134,8 +129,6 @@ def _run(labels, prog, regs, flips):
             n = int(a[0])
             av, bv = regs[_cell(a[1])], _signed(regs[_cell(a[2])], n)
             pc = labels[a[3] if av < bv else (a[4] if av == bv else a[5])]
-        elif head == "wflip":
-            flips.append(a[0])
         else:
             raise AssertionError(f"the interpreter does not model {head!r}: {s}")
     return executed
@@ -155,21 +148,11 @@ def _tuple_of(regs, d: int) -> tuple:
             regs[f"dwait{WAIT_NIBBLES * d}"])
 
 
-def _flip_addresses(lis):
-    """`{wflip operand: linedef}` for a door's lines, built with the emitter's OWN helper so the
-    mapping cannot drift from the text being interpreted."""
-    out = {}
-    for li, ln in zip(lis, doorcode._unblock_lines(lis)):
-        out[ln.strip().split(" ", 1)[1].split(",")[0].strip()] = li
-    assert len(out) == len(lis)
-    return out
-
-
 # ---------------------------------------------------------------------------------------------
 # Key schedules. THE SILENT STRETCH IS LOAD-BEARING: `door_tic` only ever closes a door that has
 # been left alone for WAIT frames, and the use key is level-triggered (see doorcode's header), so a
 # press-heavy random schedule re-opens the door every few frames and never exercises the closing
-# path at all -- which is exactly where the `shuts` crossing and the `_shut` -> IDLE branch live.
+# path at all -- which is exactly where the `_shut` -> IDLE branch lives.
 # ---------------------------------------------------------------------------------------------
 
 def _centre(box):
@@ -202,62 +185,37 @@ def _schedules(box, frames=150):
     return out
 
 
-def _first_divergence(lines, nstates, pw, box, lis, schedule, track_bit=True):
+def _first_divergence(lines, nstates, box, schedule):
     """Step the emitted text and `doors.door_tic` together. Returns a description of the first frame
-    they disagree on, or None.
-
-    `track_bit=False` watches ONLY the (state, dir, sub, wait) tuple, so the state mirror and the
-    collision mirror stay separable -- a threshold moved on the `shuts` crossing corrupts no state
-    at all (`_cross` restores `dstate` on both arms by construction) and must be reported as the
-    collision failure it is, not as a state failure.
-
-    The bit is seeded to True, THE BAKED VALUE, rather than starting to watch at the first observed
-    flip: the whole up-crossing window (shut..pass_state) is before that flip, so a harness that
-    starts there silently cannot see a door that opens its doorway early."""
+    whose (state, dir, sub, wait) they disagree on, or None."""
     labels, prog = _load(lines)
-    addr_of = _flip_addresses(lis) if lis else {}
     regs = _fresh(1)
     py = (0, IDLE, 0, 0)
-    bits = {li: True for li in lis}
-    patched = track_bit and bool(lis) and pw is not None and 0 < pw < nstates
     for f, (pressed, x, y) in enumerate(schedule):
         regs["duse0"] = 1 if pressed else 0
         regs["viewx0"], regs["viewy0"] = x << 16, y << 16
-        flips = []
-        _run(labels, prog, regs, flips)
+        _run(labels, prog, regs)
         used = bool(pressed) and doors.in_use_box_fixed(box, x << 16, y << 16)
         py = doors.door_tic(py, nstates, used)
         got = _tuple_of(regs, 0)
         if got != py:
             return (f"frame {f}: fj (state,dir,sub,wait)={got} but door_tic={py} "
-                    f"(nstates={nstates} pass_state={pw} pressed={pressed} at {x},{y})")
-        if patched:
-            for tgt in flips:
-                assert tgt in addr_of, f"frame {f}: wflip at {tgt} hits no door line"
-                bits[addr_of[tgt]] = not bits[addr_of[tgt]]
-            want = py[0] < pw
-            bad = {li: b for li, b in bits.items() if b != want}
-            if bad:
-                return (f"frame {f}: state={py[0]} pass_state={pw} so blocking should be {want}, "
-                        f"but lines {bad} disagree")
+                    f"(nstates={nstates} pressed={pressed} at {x},{y})")
     return None
 
 
 # ---------------------------------------------------------------------------------------------
-# Synthetic door shapes. The nine E1 maps produce 6..12 states with pass_state 5; these bracket
-# that and add the edge shapes (a two-state door, a door passable at state 1).
+# Synthetic door shapes. The nine E1 maps produce 5..12 states; these bracket that and add the
+# edge shape of a two-state door.
 # ---------------------------------------------------------------------------------------------
 
-SHAPES = [(6, 3), (6, 1), (6, 5), (12, 5), (2, 1), (7, 5), (11, 5)]
+SHAPES = [6, 12, 2, 7, 11, 5]
 BOX = (-10, -20, 30, 40)
-LIS = [5, 9]
 SECTOR = 7          # an arbitrary sector id, deliberately NOT the slot index (which is 0)
 
 
-def _emit(n, pw, box=BOX, lis=LIS):
-    return door_tic_lines([SECTOR], {SECTOR: n}, {SECTOR: box},
-                          {} if pw is None else {SECTOR: pw},
-                          {} if lis is None else {SECTOR: lis})
+def _emit(n, box=BOX):
+    return door_tic_lines([SECTOR], {SECTOR: n}, {SECTOR: box})
 
 
 @pytest.fixture(scope="module")
@@ -273,40 +231,22 @@ def e1m1():
     slots = sorted(dst)
     nstates = {si: len(v) for si, v in dst.items()}
     boxes = doors.use_boxes_xy(secs, lds, sds, verts)
-    passes = {si: doors.pass_state(secs, lds, sds, si) for si in dst}
-    dlines = doorcode.door_line_ids(secs, lds, sds, dst)
-    return dict(slots=slots, nstates=nstates, boxes=boxes, passes=passes, lines=dlines,
-                text=door_tic_lines(slots, nstates, boxes, passes, dlines))
+    return dict(slots=slots, nstates=nstates, boxes=boxes,
+                text=door_tic_lines(slots, nstates, boxes))
 
 
 # ---------------------------------------------------------------------------------------------
 # 1. THE MIRROR
 # ---------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("n,pw", SHAPES)
-def test_the_emitted_tic_walks_the_same_state_machine_as_door_tic(n, pw):
+@pytest.mark.parametrize("n", SHAPES)
+def test_the_emitted_tic_walks_the_same_state_machine_as_door_tic(n):
     """`door_tic` is the specification and this text is the only place it is written twice. Nothing
     host-side compared them before; the fj half's only reader was a multi-minute build gate, so a
-    transliteration slip cost a build to find and a build to confirm the fix.
-
-    STATE ONLY -- the collision bit is the next test's subject, so the two report separately."""
-    lines = _emit(n, pw)
+    transliteration slip cost a build to find and a build to confirm the fix."""
+    lines = _emit(n)
     for name, sched in _schedules(BOX):
-        bad = _first_divergence(lines, n, pw, BOX, LIS, sched, track_bit=False)
-        assert bad is None, f"[{name}] {bad}"
-
-
-@pytest.mark.parametrize("n,pw", SHAPES)
-def test_the_blocking_bit_is_clear_exactly_while_the_door_is_passable(n, pw):
-    """M2-R4's claim in full: one bit, toggled on two frames of the animation, and `state >=
-    pass_state` on every frame in between -- including on a press that REVERSES a closing door,
-    which is the path where the two crossings can fire in the wrong order.
-
-    A door that animates open while staying solid, or that opens its doorway one state early, is
-    invisible to every picture gate: the pixels are identical either way."""
-    lines = _emit(n, pw)
-    for name, sched in _schedules(BOX):
-        bad = _first_divergence(lines, n, pw, BOX, LIS, sched)
+        bad = _first_divergence(lines, n, BOX, sched)
         assert bad is None, f"[{name}] {bad}"
 
 
@@ -325,7 +265,7 @@ def test_thirteen_real_doors_step_independently_in_one_emitted_frame(e1m1):
     for f in range(110):
         regs["duse0"] = 1 if f == 0 else 0
         regs["viewx0"], regs["viewy0"] = cx << 16, cy << 16
-        _run(labels, prog, regs, [])
+        _run(labels, prog, regs)
         for d, si in enumerate(slots):
             py[d] = doors.door_tic(py[d], e1m1["nstates"][si], f == 0 and d == 0)
             assert _tuple_of(regs, d) == py[d], (
@@ -338,20 +278,11 @@ def test_the_mirror_catches_a_broken_door_machine():
     """R9 -- the negative control for everything above. Four mutations of the emitted text, each a
     defect a careless edit to `door_tic_lines` would actually produce, and every one must be caught.
     Each mutation asserts the exact line it replaces, so a change to the emitter's text breaks this
-    test loudly instead of silently mutating nothing and reporting a clean pass."""
-    n, pw = 6, 3
-    base = _emit(n, pw)
+    test loudly instead of silently mutating nothing and reporting a clean pass. (The collision is
+    the state since P1.2, so every one of these is also a doorway in the wrong place.)"""
+    n = 6
+    base = _emit(n)
     st = "dstate + 0*dw"
-
-    def cross_threshold(lines, tag, old, new):
-        """The `_cross` idiom xors the threshold in three times; move all three together, which is
-        what a wrong `pw`/`pw-1` does -- the door then opens (or re-solidifies) a state early."""
-        out = list(lines)
-        i = out.index(f"    hex.if0 1, {st}, dr0_{tag}")
-        for j in (i - 1, i + 1, out.index(f"  dr0_{tag}:") + 1):
-            assert out[j] == f"    hex.xor_by 1, {st}, {old}", out[j]
-            out[j] = f"    hex.xor_by 1, {st}, {new}"
-        return out
 
     def drop_after(lines, label, expect):
         out = list(lines)
@@ -366,37 +297,29 @@ def test_the_mirror_catches_a_broken_door_machine():
         assert old in lines
         return [new if ln == old else ln for ln in lines]
 
-    # `by` is which half MUST see it: "bit" means the state machine is untouched and only the
-    # collision mirror can tell -- which is precisely the class of defect a picture gate is blind
-    # to, so it is worth stating rather than letting "something failed" stand in for it.
+    def emits_a_wflip(lines):
+        """the retired collision patch coming back: the interpreter must refuse to model it"""
+        out = list(lines)
+        out.insert(out.index("  dr0_open:") + 1, "    wflip lnrow + 110*dw + w, 0x2*dw")
+        return out
+
     mutants = [
-        # the doorway opens one state early -- animation identical, collision wrong
-        ("opens threshold pw -> pw+1", "bit", cross_threshold(base, "opens", pw, pw + 1)),
-        # ...and the down-crossing: the door is still solid on its way back to shut
-        ("shuts threshold pw-1 -> pw", "bit", cross_threshold(base, "shuts", pw - 1, pw)),
-        # the restoring xor inside the taken branch: dstate is left corrupted to 0, so the
-        # renderer's switch dispatches this door to the wrong height
-        ("opens cross loses its restoring xor", "state",
-         drop_after(base, "  dr0_opens:", f"    hex.xor_by 1, {st}, {pw}")),
+        # the restoring xor inside the fully-open branch: dstate is left corrupted to 0, so the
+        # renderer's switch dispatches this door to the wrong height and its lines go solid
+        ("open branch loses its restoring xor",
+         drop_after(base, "  dr0_open:", f"    hex.xor_by 1, {st}, {n - 1}")),
         # `>=` becomes `<=` on one corner: the two mirrors trigger on different frames
-        ("x0 compare lt/gt swapped", "state", swap_x0_arms(base)),
+        ("x0 compare lt/gt swapped", swap_x0_arms(base)),
         # dsub is never reloaded, so after the first step the door runs a state every frame forever
-        ("step forgets to reload dsub", "state",
+        ("step forgets to reload dsub",
          drop_after(base, "  dr0_step:", f"    hex.set 1, dsub + 0*dw, {SPEED}")),
     ]
-    for name, by, lines in mutants:
+    for name, lines in mutants:
         assert lines != base, f"{name} mutated nothing"
-        state_saw = any(_first_divergence(lines, n, pw, BOX, LIS, s, track_bit=False)
-                        for _nm, s in _schedules(BOX))
-        bit_saw = any(_first_divergence(lines, n, pw, BOX, LIS, s)
-                      for _nm, s in _schedules(BOX))
-        assert bit_saw, f"NOT CAUGHT AT ALL: {name} -- the mirror proves nothing"
-        if by == "state":
-            assert state_saw, f"{name} should be a state divergence and is not"
-        else:
-            assert not state_saw, (
-                f"{name} moved the state machine too -- it is no longer the collision-only "
-                f"control this test needs it to be")
+        assert any(_first_divergence(lines, n, BOX, s) for _nm, s in _schedules(BOX)), \
+            f"NOT CAUGHT: {name} -- the mirror proves nothing"
+    with pytest.raises(AssertionError, match="does not model 'wflip'"):
+        _first_divergence(emits_a_wflip(base), n, BOX, _schedules(BOX)[0][1])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -409,7 +332,7 @@ def _box_decision(lines, x, y):
     regs = _fresh(1)
     regs["duse0"] = 1
     regs["viewx0"], regs["viewy0"] = x << 16, y << 16
-    return any(kind == ";" and text == "dr0_press" for kind, text in _run(labels, prog, regs, []))
+    return any(kind == ";" and text == "dr0_press" for kind, text in _run(labels, prog, regs))
 
 
 @pytest.mark.parametrize("box", [(-10, -20, 30, 40), (0, 0, 1, 1), (-300, -400, -290, -390)])
@@ -422,7 +345,7 @@ def test_the_four_compares_decide_the_same_box_as_in_use_box_fixed(box):
     Negative coordinates are in the grid on purpose: the corners are masked `& 0xFFFFFFFF` and read
     back by a SIGNED 8-nibble compare, so that is where the two's complement round trip has to
     hold."""
-    lines = _emit(6, 3, box=box)
+    lines = _emit(6, box=box)
     x0, y0, x1, y1 = box
     xs = sorted({x0 - 1, x0, x0 + 1, (x0 + x1) // 2, x1 - 1, x1, x1 + 1, 0, -1})
     ys = sorted({y0 - 1, y0, y0 + 1, (y0 + y1) // 2, y1 - 1, y1, y1 + 1, 0, -1})
@@ -451,7 +374,7 @@ def test_an_idle_door_runs_no_compare_and_a_miss_exits_on_the_first_failing_corn
 
     regs = _fresh(ndoors)
     regs["duse0"] = 0
-    ops = _run(labels, prog, regs, [])
+    ops = _run(labels, prog, regs)
     assert not [o for o in ops if o[0] == "hex.scmp"], "an idle door ran a box compare"
     assert not [o for o in ops if o[0] == "hex.set" and "8, dbox," in o[1]], \
         "an idle door loaded a box constant"
@@ -462,7 +385,7 @@ def test_an_idle_door_runs_no_compare_and_a_miss_exits_on_the_first_failing_corn
     regs = _fresh(ndoors)
     regs["duse0"] = 1
     regs["viewx0"], regs["viewy0"] = -1_000_000 << 16, 0
-    ops = _run(labels, prog, regs, [])
+    ops = _run(labels, prog, regs)
     assert len([o for o in ops if o[0] == "hex.scmp"]) == ndoors, \
         "an out-of-box press ran more than one compare per door"
 
@@ -638,9 +561,9 @@ def test_a_narrowed_wait_counter_is_caught_by_the_width_check_and_only_by_it(e1m
     # ...and the mirror is INDIFFERENT to it -- stated as "narrowing changes nothing the
     # interpreter sees", so this half stays true (and keeps saying what it means) even when some
     # other defect is making the mirror report a divergence of its own.
-    lines, sched = _emit(6, 3), _schedules(BOX)[0][1]
-    assert _first_divergence(narrow(lines), 6, 3, BOX, LIS, sched) == \
-        _first_divergence(lines, 6, 3, BOX, LIS, sched), (
+    lines, sched = _emit(6), _schedules(BOX)[0][1]
+    assert _first_divergence(narrow(lines), 6, BOX, sched) == \
+        _first_divergence(lines, 6, BOX, sched), (
         "narrowing dwait changed what the interpreter sees: it grew width semantics, so this "
         "file's claim about what only the textual check can catch needs rewriting, not deleting")
 
@@ -691,48 +614,7 @@ def test_the_text_names_no_cell_the_declarations_do_not(e1m1):
 
 
 # ---------------------------------------------------------------------------------------------
-# 4. THE DEAD BRANCHES -- unreachable from every fixture, so nothing else pins them
-# ---------------------------------------------------------------------------------------------
-
-@pytest.mark.parametrize("pw,why", [
-    (0, "passable even when shut"),
-    (6, "pass_state == nstates, i.e. never passable"),
-    (9, "pass_state past the last state"),
-    (None, "no entry in `passes` at all"),
-])
-def test_a_door_that_never_crosses_its_threshold_emits_no_collision_patch(pw, why):
-    """`if not pw or pw >= n` is dead in every existing test -- all 13 E1M1 doors have pass_state 5
-    with 6..12 states -- and could be deleted today without one failing. Emitting a crossing for a
-    door that is passable even when shut would toggle a bit that is ALREADY correct, turning an open
-    doorway solid; emitting only one of the two leaves the bit stuck after a single cycle."""
-    lines = _emit(6, pw)
-    assert not [ln for ln in lines if "wflip" in ln], f"a door {why} emitted a collision patch"
-    assert not [ln for ln in lines if "_opens" in ln or "_shuts" in ln], \
-        f"a door {why} emitted a crossing test"
-    # ...and it still runs the state machine: only the collision half is dropped.
-    assert _first_divergence(lines, 6, pw, BOX, LIS, _schedules(BOX)[0][1]) is None
-
-
-def test_a_caller_that_forgets_to_thread_lines_emits_no_collision_patch_either():
-    """`lines=None` is a DEFAULT, so a caller that forgot the argument gets a door that animates
-    perfectly and never stops being a wall -- exactly the shape of the M4 per-map fan-out edit.
-    Pinned so the silence is documented behaviour rather than an accident nobody has looked at."""
-    assert not [ln for ln in _emit(6, 3, lis=None) if "wflip" in ln]
-    assert [ln for ln in _emit(6, 3) if "wflip" in ln], "the control case emits nothing either"
-
-
-@pytest.mark.parametrize("n,pw", [(6, 3), (12, 5), (2, 1)])
-def test_an_in_range_threshold_emits_exactly_two_flips_per_line(n, pw):
-    """One on the `opens` crossing and one on the `shuts` crossing. One flip leaves the bit stuck
-    after a single cycle; three leaves it inverted. And both crossings must flip the SAME addresses,
-    which is the "one constant does both, because xor" claim in one line."""
-    flips = [ln for ln in _emit(n, pw) if "wflip" in ln]
-    assert len(flips) == 2 * len(LIS)
-    assert len(set(flips)) == len(LIS), "the two crossings flip different addresses"
-
-
-# ---------------------------------------------------------------------------------------------
-# 5. `door_line_ids` -- the two branches no wad reaches
+# 4. `door_line_ids` -- the two branches no wad reaches
 # ---------------------------------------------------------------------------------------------
 
 class _LD:
@@ -747,9 +629,10 @@ class _SD:
 
 @pytest.mark.parametrize("back", [-1, 0xFFFF, 2, 99])
 def test_a_one_sided_line_is_never_listed_under_any_sentinel(back):
-    """A listed one-sided line means `_unblock_lines` emits a wflip that clears FLAG_BLOCKING on a
-    door's solid TRACK wall -- a hole in the map the player walks through. The line's FRONT sidedef
-    belongs to the door here, which is the case a front-only guard would let through.
+    """A listed one-sided line would give a door's solid TRACK wall a door stub in the collision
+    cells -- which `collision_cells_fj` refuses, as its flags are not zero -- and a door-shaped hole
+    in the oracle's `blocked_lines` bookkeeping. The line's FRONT sidedef belongs to the door here,
+    which is the case a front-only guard would let through.
 
     Honest caveat: `WadFile` parses sidedefs as signed shorts, so every real wad yields -1 and the
     0xFFFF clause is subsumed by the `>= len(sds)` guard. This pins the STATED contract -- and would
@@ -760,10 +643,11 @@ def test_a_one_sided_line_is_never_listed_under_any_sentinel(back):
 
 
 def test_a_line_with_the_same_door_sector_on_both_sides_is_listed_once():
-    """Without the `li not in out.get(si, ())` guard the id is listed twice, `_unblock_lines` emits
-    the same wflip twice, the two toggles CANCEL, and the door animates open while staying solid
-    forever -- invisible to every picture gate and findable only by walking into it in a multi-minute
-    playthrough gate. No fixture reaches it: E1M1 has 7 same-sector linedefs and none is a door."""
+    """Without the `li not in out.get(si, ())` guard the id is listed twice under one door: the
+    oracle's `blocked_lines` does not care, but the collision cells would chain the same door's test
+    twice into the line's stub -- and when this list drove an xor patch (before P1.2) the two toggles
+    CANCELLED, a door that animated open while staying solid. No fixture reaches it: E1M1 has 7
+    same-sector linedefs and none is a door."""
     assert doorcode.door_line_ids(None, [_LD(0, 1)], [_SD(40), _SD(40)], {40}) == {40: [0]}
     # the ordinary case still lists one line under BOTH of its door sectors
     assert doorcode.door_line_ids(None, [_LD(0, 1)], [_SD(40), _SD(41)], {40, 41}) == \

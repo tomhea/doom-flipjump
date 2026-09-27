@@ -17,7 +17,13 @@ what the pool declined.
 
 Per hot word: PINNED (base == reference) / PINNED, BASE MOVED / LOST (the word rests at no block
 base: every dispatch through it pays the full table address) / UNRESOLVED (a label of its source
-expression is missing from this build). With the build's counts cache the report also checks the
+expression is missing from this build, and no single label of it has the same heat key).
+
+A hot word is named as the PROFILED build named it -- a label with its call-site coordinates,
+`f13:l2210:sim.thing_pass(3)---hp`. A later rung that moves lines renames it, while flipjump's pool
+matches heat groups by `heat_key` (the path without its coordinates) and so still protects it. The
+report does the same, and says so: a label this build lacks is replaced by the ONE label of this
+build with the same heat key (row marked `*`); none, or two, and the word is UNRESOLVED. With the build's counts cache the report also checks the
 base against the re-derived layout (MISMATCH = the cache does not describe this binary) and counts
 the tables found in the block against the tables the counting pass saw. Exit status 1 if any hot
 word is LOST or UNRESOLVED, so a build script can gate on it.
@@ -37,7 +43,9 @@ sys.path.insert(0, str(PROFX))
 sys.path.insert(0, str(ROOT / "src"))
 from common import W, label_dict  # noqa: E402
 from fjmimage import FjmImage  # noqa: E402
-from pool import KNOBS, eval_key, load_heat, reconstruct  # noqa: E402
+from pool import KNOBS, _tokens, eval_key, load_heat, reconstruct  # noqa: E402
+
+from flipjump.assembler.preprocessor import heat_key  # noqa: E402
 
 DEFAULT_HOT = PROFX / "hotwords_blocked27.json"
 LOG_RE = {
@@ -68,17 +76,47 @@ def parse_log(text):
     return out
 
 
+def rekey_by_heat(key, lab, by_heat):
+    """`key` with every label this build lacks replaced by the ONE label of this build that has the
+    same heat key -- the way flipjump's pool matched the group -- or None when a label has no such
+    twin, or more than one"""
+    out = key
+    for t in sorted(set(_tokens(key))):
+        if t in ("(", ")", "+", "?", ":") or re.fullmatch(r"-?\d+", t) or t in lab:
+            continue
+        twins = by_heat.get(heat_key(t), [])
+        if len(twins) != 1:
+            return None
+        out = out.replace(t, twins[0])
+    return out
+
+
+def heat_index(lab):
+    by = {}
+    for name in lab:
+        by.setdefault(heat_key(name), []).append(name)
+    return by
+
+
 def report(image, lab, hot, recon=None):
     """-> list of row dicts, one per hot word"""
     pool = fr = None
     if recon is not None:
         pool, fr = recon
     rows = []
+    by_heat = None
     for h in hot["words"]:
         key = h["key"]
         row = {"rank": h["rank"], "key": key, "ref_base": h["base_bits"], "ref_tables": h["tables"],
-               "dispatches": h["dispatches_per_frame"], "ref_pc": h["base_popcount"]}
+               "dispatches": h["dispatches_per_frame"], "ref_pc": h["base_popcount"], "rekeyed": False}
         addr = eval_key(key, lab)
+        if addr is None:
+            by_heat = heat_index(lab) if by_heat is None else by_heat
+            key2 = rekey_by_heat(key, lab, by_heat)
+            addr = eval_key(key2, lab) if key2 is not None else None
+            if addr is not None:
+                key = key2
+                row.update(rekeyed=True, key=key2)
         if addr is None:
             row.update(status="UNRESOLVED", base=None)
             rows.append(row)
@@ -116,8 +154,9 @@ def print_report(rows, log, exact_tables=True):
         tables = ("%s%s/%s" % ("" if exact_tables else "~", format(r.get("tables_found", 0), ","),
                                format(r.get("tables_expected") or 0, ","))
                   if r["status"] != "UNRESOLVED" else "-")
-        print("%4d %-19s %6s %8d %13s %11s  %s" % (r["rank"], r["status"], r.get("pc", "-"), r["ref_pc"], tables,
-                                                    format(int(r["dispatches"]), ","), r["key"][:64]))
+        print("%4d %-19s %6s %8d %13s %11s %s%s" % (r["rank"], r["status"], r.get("pc", "-"), r["ref_pc"], tables,
+                                                     format(int(r["dispatches"]), ","),
+                                                     "*" if r.get("rekeyed") else " ", r["key"][:64]))
         if r["status"] in ("LOST", "UNRESOLVED"):
             lost_cost += r["dispatches"] * 2 * r["ref_pc"]
     bad = [r for r in rows if r["status"] in ("LOST", "UNRESOLVED")]
@@ -127,6 +166,10 @@ def print_report(rows, log, exact_tables=True):
     print("hot words pinned: %d of %d; lost %d; unresolved %d; base moved %d; mismatch vs the counts cache %d"
           % (len(rows) - len(bad) - len(mism), len(rows), sum(r["status"] == "LOST" for r in rows),
              sum(r["status"] == "UNRESOLVED" for r in rows), len(moved), len(mism)))
+    nre = sum(1 for r in rows if r.get("rekeyed"))
+    if nre:
+        print("(* %d hot word(s) re-keyed: their label moved, and this build has exactly one label with the "
+              "same heat key -- the name flipjump's pool matched them by)" % nre)
     if not exact_tables:
         print("(~ tables: no counts cache for this build, so the block is taken at the REFERENCE size and the "
               "count is approximate; the reference count is the counted tables of the profiled build)")
@@ -170,6 +213,16 @@ def run(a):
     return print_report(rows, log, exact_tables=recon is not None)
 
 
+def _cache_is_blocked27(cache):
+    """does the counts cache describe blocked27's program? (blocked27's counting pass saw 27,030 groups)"""
+    import gzip
+    try:
+        with gzip.open(cache, "rt", encoding="utf-8") as fh:
+            return len(json.load(fh)["counts"]) == 27030
+    except (OSError, ValueError, KeyError):
+        return False
+
+
 def selftest():
     fails = []
 
@@ -182,11 +235,17 @@ def selftest():
     labp = ROOT / "scratchpad" / "12m" / "atlas" / "blocked27.labels.tsv.gz"
     cache = ROOT / "scratchpad" / "12m" / "_counts_game.json.gz"
     logp = ROOT / "docs" / "ship-evidence" / "blocked27_rebuild.log"
-    print("pinreport selftest -- C2 and C3 are the negative controls")
+    print("pinreport selftest -- C2, C3 and C6's second half are the negative controls")
     hot = json.loads(DEFAULT_HOT.read_text())
     image = FjmImage(fjm)
     lab = label_dict(labp)
-    recon = reconstruct(cache)
+    # the layout is re-derived from blocked27's OWN counts only while the tracked cache is blocked27's
+    # program; once a rung changes the program (M7 P1.2 on) the tracked cache describes that program,
+    # so the checks take the hot list's reference counts -- which ARE blocked27's -- instead
+    recon = reconstruct(cache) if _cache_is_blocked27(cache) else None
+    if recon is None:
+        print("  (the tracked counts cache describes a later program: tables checked against the hot "
+              "list's reference counts)")
 
     # C1 the shipped binary against its own hot list: every word pinned where the profiler saw it
     rows = report(image, lab, hot, recon)
@@ -216,6 +275,22 @@ def selftest():
     rows3 = report(image, lab3, hot, recon)
     st3 = {r["key"]: r["status"] for r in rows3}
     check("C3 a hot word whose label is gone is UNRESOLVED", st3[top["key"]] == "UNRESOLVED", st3[top["key"]])
+
+    # C6 A MOVED LINE: the hottest word's label renamed to another line -> re-keyed and PINNED, not
+    #    UNRESOLVED; and when TWO labels share that heat key the report must refuse to pick one
+    mid = next(h for h in sorted(hot["words"], key=lambda h: h["rank"]) if re.search(r"\bf\d+:l\d+:", h["key"]))
+    old = next(t for t in _tokens(mid["key"]) if re.match(r"f\d+:l\d+:", t))   # the label, whole
+    moved = re.sub(r"^(f\d+:l)(\d+)", lambda m: m.group(1) + str(int(m.group(2)) + 7), old)
+    lab6 = {(moved if k == old else k): v for k, v in lab.items()}
+    st6 = {r["key"] if not r.get("rekeyed") else mid["key"]: (r["status"], r.get("rekeyed"))
+           for r in report(image, lab6, hot, None)}
+    check("C6 a hot word whose line moved is re-keyed by heat key and PINNED",
+          st6[mid["key"]][1] is True and st6[mid["key"]][0].startswith("PINNED"), str(st6[mid["key"]]))
+    lab7 = dict(lab6)
+    lab7[re.sub(r"^(f\d+:l)(\d+)", lambda m: m.group(1) + str(int(m.group(2)) + 9), old)] = lab6[moved] + 64
+    st7 = {r["key"]: r["status"] for r in report(image, lab7, hot, None)}
+    check("C6 ... and with two labels of that heat key it is UNRESOLVED (no guessing)",
+          st7[mid["key"]] == "UNRESOLVED", st7[mid["key"]])
 
     # C5 a REAL build that lost pins: b26 (built without --pin-broken/--width-buckets: 10,052 too-wide
     #    declines broke 1,333 groups). Skipped, loudly, if that experiment binary is gone.

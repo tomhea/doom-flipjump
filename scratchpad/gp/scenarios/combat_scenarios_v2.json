@@ -24982,7 +24982,7 @@
   "src/doomfj/__init__.py": "e3b0c44298fc1c14",
   "src/doomfj/combat.py": "89090e95e60533a4",
   "src/doomfj/config.py": "aeb52d573b01cb12",
-  "src/doomfj/doorcode.py": "3dc71213f4f2a75e",
+  "src/doomfj/doorcode.py": "bf1bbcc6dcea521e",
   "src/doomfj/doors.py": "9ae8db277af9927e",
   "src/doomfj/fixedpoint.py": "55051bdb23e1d86a",
   "src/doomfj/gamedata.py": "f5d1354816b000a1",
@@ -25274,6 +25274,18 @@
     "src/doomfj/reference_model.py": [
      "be380657de087a36",
      "8a26987dd2198f47"
+    ]
+   },
+   "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"
+  },
+  {
+   "on": "2026-09-27 09:21:54",
+   "reason": "M7 P1.2: doorcode.py lost the emitter's lnrow door patch (_cross, _unblock_lines, door_tic_lines' passes/lines); the model imports only door_line_ids, unchanged",
+   "git_head": "61672ad",
+   "changed": {
+    "src/doomfj/doorcode.py": [
+     "3dc71213f4f2a75e",
+     "bf1bbcc6dcea521e"
     ]
    },
    "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"

@@ -6,8 +6,10 @@ No build, no render. Every number printed here is a fact of freedoom_e1m1.wad pl
 1. CRUSH: can a rising lift ever fail to fit a shootable thing (DOOM's P_ChangeSector -> the lift
    reverses)? Conservative bound: at the lift's TOP, the smallest ceiling any line of the lift touches
    minus the largest floor any of them touches, against the tallest shootable thing (56).
-2. The lnrow patch: for every mover line, how many BITS of the packed row change per state step
-   (openbottom only -- a floor mover cannot move a ceiling), i.e. the raw flips a step executes.
+2. The opening patch: for every mover line, how many BITS of its openbottom change per state step
+   (a floor mover cannot move a ceiling), i.e. the raw flips a step executes. (Written against
+   M14-d's packed `lnrow`, a 16-bit field; since M7 P1.2 a line's opening is the value its
+   collision-cell stub xors into `ca_ob`, and the count is kept in the 16 bits it was measured in.)
 3. The trigger lines (88 WR lift / 62 SR lift / 23 S1 floor): where they are, whether they are
    axis-aligned (a side test is one compare) and which sectors they separate.
 4. Doors and things: which barrels (the only static SHOOTABLE things) stand close enough to a door
@@ -19,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT)); sys.path.insert(0, str(ROOT / "src"))
 
-from doomfj.collision import LINE_REST_BYTES, line_rest, line_rows      # noqa: E402
+from doomfj.collision import line_rows                                  # noqa: E402
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doors import door_sectors, door_states, stops                 # noqa: E402
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
@@ -74,7 +76,6 @@ print("   floor switch sectors only LOWER; a lowering floor never refuses a thin
 print("\n2. LNROW PATCH -- raw bit flips per state step (openbottom, 16-bit two's complement):")
 DOORS = door_states(secs, lds, sds, 16)
 dopen = apply_sector_heights(secs, {s: (secs[s].floor_h, st[-1]) for s, st in DOORS.items()})
-OB = sum(LINE_REST_BYTES[:-1])                       # openbottom is the last rest field
 for si, q in [(s, 16) for s in LIFTS] + [(s, 16) for s in FSWITCH]:
     hs = list(reversed(stops(low_of(si), secs[si].floor_h, q)))
     rows_k = []
@@ -86,7 +87,7 @@ for si, q in [(s, 16) for s in LIFTS] + [(s, 16) for s in FSWITCH]:
     for k in range(len(hs) - 1):
         flips = 0
         for li in mlines:
-            a, b = line_rest(rows_k[k][li])[-1], line_rest(rows_k[k + 1][li])[-1]
+            a, b = rows_k[k][li][-1], rows_k[k + 1][li][-1]      # openbottom, the row's last field
             flips += bin((a ^ b) & 0xFFFF).count("1")
         per_step.append(flips)
     print("   sector %3d: %2d lines, %2d states, flips per step %s (max %d)"

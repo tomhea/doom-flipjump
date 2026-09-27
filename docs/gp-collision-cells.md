@@ -71,9 +71,9 @@ handoff's rule 5): its `pad 16` table is jump-only, and undeclared the pool pins
 exit and are not in the restore set -- as `cs_ret`, the seed descent's return register, never was.
 They are declared LAST, after `CHECK_SCRATCH_DECLS`: the restore sets fingerprint the spans of the
 labels they name, and nothing may land between those. The retired walk's scratch (`cb_*`, most
-`cl_*`) is dead but stays declared, because both shipped restore sets name it; dropping it means
-re-keying the sets against a new label table, which P1.4's v2 sprite column does anyway (its new
-hoisted registers need the re-key). Until then it costs the reset ~41 ops a nibble.
+`cl_*`) was dead but stayed declared, because both shipped restore sets named it; M7 P1.4 re-keyed
+the sets against its own label table and dropped it (`CHECK_SCRATCH_DECLS` is `cl_side1` /
+`cl_side2` now). Until then it cost the reset ~41 ops a nibble.
 
 ## Exactness -- what proves it, and the controls
 

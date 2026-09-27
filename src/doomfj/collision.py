@@ -332,28 +332,12 @@ def collision_cells_fj(pfx: str, rows, lists, doors=None) -> tuple:
 
 # ── the emitter's side: the state and the move ─────────────────────────────────────────────────
 
-# ⚠ KEPT FOR THE M1/M5 RESTORE SETS, NOT FOR THE CODE. These were `sim.check_block` / `check_line`'s
-# scratch, hoisted out of the macros (an @-local vec in a macro expanded four times is four cells
-# the set could only name by expansion path). P1.2 retired the table walk, and only `cl_side1` /
-# `cl_side2` are still used (sim.line_test's corner sides); the rest are dead. They stay declared
-# because both shipped restore sets name them -- a name the build does not declare fails the set's
-# resolution, and dropping them means re-keying the sets against a new label table, which P1.3's
-# persistent leaf lists will do anyway. Until then they cost the reset ~41 ops per nibble.
+# The collision scratch the M1/M5 restore sets carry: `sim.line_test`'s corner sides for
+# P_BoxOnLineSide. (The table walk's cb_* / cl_* scratch that shared this list -- hoisted out of
+# `sim.check_block` / `check_line` so the sets could name it -- died with the walk in M7 P1.2 and
+# stayed declared only because both sets named it; M7 P1.4's re-key dropped it.)
 CHECK_SCRATCH_DECLS = [
-    "cb_bx: hex.vec 8", "cb_by: hex.vec 8",   # the corner's block x / y
-    "cb_const: hex.vec 8",                    # constant staging
-    "cb_idx: hex.vec 4",                      # block index = by*nbx + bx
-    "cb_row: hex.vec 6",                      # that block's bkoff row: [first:2][count:1]
-    "cb_first: hex.vec 4", "cb_count: hex.vec 4",
-    "cb_k: hex.vec 4", "cb_kend: hex.vec 4",  # the line-list walk
-    "cb_line: hex.vec 4",                     # the linedef index handed to check_line
-    "cl_box: hex.vec 16",                     # lnbox row: minx maxx miny maxy
-    "cl_rest: hex.vec 28",                    # lnrow row: the other 14 bytes, read on survival
-    "cl_v1x: hex.vec 8", "cl_v1y: hex.vec 8", # the line's first vertex
-    "cl_dx: hex.vec 8", "cl_dy: hex.vec 8",   # its delta
-    "cl_tmp: hex.vec 8", "cl_open: hex.vec 8",
     "cl_side1: hex.vec 1", "cl_side2: hex.vec 1",   # box-corner sides for P_BoxOnLineSide
-    "cl_const: hex.vec 1"
 ]
 
 

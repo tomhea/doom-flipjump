@@ -183,7 +183,7 @@ def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_typ
 LIST_MAX_THINGS = 254
 
 
-def spawn_leaf_lists(binds, nleaves):
+def spawn_leaf_lists(binds, nleaves, present=None):
     """`(sshead, thnext)` -- the per-leaf lists of runtime things `sim.bind_things` builds from the
     bindings `binds` (thing index -> leaf): each leaf's things in ASCENDING index order, stored as
     `t + 1` so that 0 is both the empty list and the end of one. bind_things gets the ascending order
@@ -191,16 +191,36 @@ def spawn_leaf_lists(binds, nleaves):
 
     M7 P1.3: the game tier BAKES these into its image and they persist -- nothing moves a thing
     until P3, and P3 moves one by relinking it (`sim.leaf_unlink` / `sim.leaf_link`), never by
-    rebuilding every list."""
+    rebuilding every list.
+
+    M7 P1.5: `present` (a flag per thing, or None for all) links only the things a skill spawns; an
+    absent thing is in no list and keeps `thnext = 0` -- the model's `_list_insert` of the active
+    monsters only (world.World._reset_state)."""
     assert len(binds) <= LIST_MAX_THINGS, (
         "%d things: the lists store t + 1 in a byte, at most LIST_MAX_THINGS" % len(binds))
+    assert present is None or len(present) == len(binds), (len(present), len(binds))
     sshead = [0] * nleaves
     thnext = [0] * len(binds)
     for t in range(len(binds) - 1, -1, -1):
+        if present is not None and not present[t]:
+            continue
         leaf = binds[t]
         thnext[t] = sshead[leaf]
         sshead[leaf] = t + 1
     return sshead, thnext
+
+
+def skill_level_start(drawable, rt_draw, rt_binds, nleaves, vis_slots, skill):
+    """M7 P1.5: the game tier's thing PRESENCE at `skill`'s level start -- `(sshead, thnext, thvis)`:
+    the runtime things' leaf lists linking only the things the skill spawns, and each baked
+    vanishable thing's flag (1 = drawn, 0 = not; slot order). `rt_draw[k]` is runtime thing k's
+    drawable index, `rt_binds[k]` its spawn leaf, `vis_slots` {drawable index: slot}. The emitter
+    bakes HARD's as the boot state and every skill's into its restart block
+    (docs/gp-skill-menu.md); the gates ask `skill_absent` for the oracle's half."""
+    absent = skill_absent(drawable, skill)
+    head, nxt = spawn_leaf_lists(rt_binds, nleaves, present=[di not in absent for di in rt_draw])
+    vis = [0 if di in absent else 1 for di in sorted(vis_slots, key=vis_slots.get)]
+    return head, nxt, vis
 
 
 def byte_array_decl(label, values, cells):

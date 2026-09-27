@@ -107,6 +107,20 @@ level state and are not in it.
   b0_scenarios and the play tools compose): enter opens the skill screen now, and esc meant the
   world on every binary before this rung too, so one driver serves old and new binaries alike.
 
+### 2.x The owner's credit, and an M that reads as one (owner, 2026-09-27)
+
+Every menu screen carries the owner's credit, "tomhe.app" -- `menu.CREDIT`, drawn as TOMHE.APP (the
+font has capitals only; a domain name is case-insensitive) in the bottom-right corner, 2 px from the
+right and bottom edges, in a dim gray: `palette_colours`' fourth colour, the palette's gray nearest
+40% of the text's brightness (on E1M1's PLAYPAL entry 101, rgb 99,99,99). The owner chose the corner
+and the gray from rendered previews. At the same request the font's M is five columns wide (two
+stems and the dip between them; three columns drew a block), so a line is laid out by each glyph's
+own width (`menu.text_width`). Both are in `menu._bitmap`, the one picture both mirrors draw from, so
+the baked frame and the oracle's pixels move together (tests/host/test_menu.py, tests/fj/
+test_menu_frame.py); `test_the_credit_sits_in_the_bottom_right_corner_in_its_dim_gray` and
+`test_the_m_is_five_columns_with_two_stems_and_a_dip` fail on the old menu by name
+(docs/ship-evidence/p15_credit_r1.log). No hashed file of the frozen combat set changes.
+
 ## 3. Gates and budget
 
 - `m3_gate`: the menu frames byte-exact through the skill screen and all three skills' NEW GAME,

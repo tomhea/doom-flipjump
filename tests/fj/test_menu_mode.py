@@ -25,7 +25,7 @@ from doomfj.menu import fj as menu_fj, pixels
 CFG = Config()
 VW, VH = CFG.VIEW_W, CFG.VIEW_H
 LINES = ["DOOM ON FLIPJUMP", "", "NEW GAME", "QUIT"]
-COLOURS = (0, 4, 176)
+COLOURS = (0, 4, 176, 101)          # palette_colours of the E1M1 PLAYPAL (bg, text, hi, credit)
 STUB = 7                     # the world stub paints every column this colour
 SRC = [Path("src/fj") / "present.fj", Path("src/fj") / "input.fj"]
 

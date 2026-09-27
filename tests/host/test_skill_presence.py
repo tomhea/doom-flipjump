@@ -79,3 +79,24 @@ def test_the_skills_differ_and_the_check_can_fail(drawable):
 def test_every_drawable_thing_is_single_player_and_hard_draws_203(drawable):
     assert all(single_player(t) for t in drawable)
     assert len(drawable) - len(skill_absent(drawable, gd.SK_HARD)) == 203      # E1M1, MEASURED
+
+
+def test_skill_level_start_links_and_flags_only_what_the_skill_spawns():
+    """the game tier's per-skill presence: runtime things by being LINKED, baked vanishable things by
+    their flag -- on a synthetic level whose answer is written down (and the wrong skill's differs)"""
+    from collections import namedtuple
+    from doomfj.things import skill_level_start
+    T = namedtuple("T", "x y type flags")
+    E, N, H = gd.MTF_EASY, gd.MTF_NORMAL, gd.MTF_HARD
+    drawable = [T(0, 0, 3004, E), T(1, 0, 3004, H), T(2, 0, 2011, E | N), T(3, 0, 2011, H),
+                T(4, 0, 3001, E | N | H)]
+    rt_draw, rt_binds = [0, 1, 4], [0, 0, 1]          # runtime things 0..2: drawable 0, 1, 4
+    vis_slots = {2: 0, 3: 1}                          # the baked vanishable things
+    head, nxt, vis = skill_level_start(drawable, rt_draw, rt_binds, 2, vis_slots, gd.SK_HARD)
+    assert (head, nxt, vis) == ([2, 3], [0, 0, 0], [0, 1])      # hard: runtime 1 and 2; slot 1
+    head, nxt, vis = skill_level_start(drawable, rt_draw, rt_binds, 2, vis_slots, gd.SK_EASY)
+    assert (head, nxt, vis) == ([1, 3], [0, 0, 0], [1, 0])      # easy: runtime 0 and 2; slot 0
+    # two present things on one leaf chain ascending, and an absent one between them is skipped
+    drawable2 = drawable + [T(5, 0, 3004, H)]
+    head, nxt, _ = skill_level_start(drawable2, [1, 0, 5], [0, 0, 0], 1, {}, gd.SK_HARD)
+    assert (head, nxt) == ([1], [3, 0, 0])            # runtime 0 -> runtime 2; runtime 1 absent

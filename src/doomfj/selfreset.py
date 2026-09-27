@@ -48,6 +48,14 @@ VAL_SHIFT = (W + W.bit_length()) - W
 # -- which corrupts rather than fails (0xA5 -> 0x22A5). It stays byte-exact on the old map, so
 # every gate passes.
 BYTE_ARRAY_NAMES = ("sshead", "pclm", "sfflag")
+# M7 P1.5: the labels whose cells the program reads RAW through a pointer (`hex.ptr_index` +
+# `hex.read_hex` / `hex.read_byte`): the runtime things' positions (sim.thing_pass), their leaf
+# bindings (sim.bind_things) and the per-leaf lists. A table-family write (`hex.set`, `hex.zero`) in
+# pass-1 code makes a word a pin candidate, and a PINNED word holds base + value, which a raw read
+# takes for the value -- so the blocking pass must never pin these (build_blocked.pin_state_veto).
+# While only the pass-2 reset wrote them they were never candidates; NEW GAME's restart is the first
+# pass-1 code to `hex.set` thss_rt / thpos_rt.
+POINTER_READ_CELLS = ("thpos_rt", "thss_rt", "sshead", "thnext")
 # declared cells per reachable cell: sshead is over-allocated 2x, the per-column arrays are 1:1
 _DECLARED_RATIO = {"sshead": 2, "pclm": 1, "sfflag": 1}
 
@@ -77,6 +85,16 @@ def decl_words(decl):
         except Exception:
             cells = None
     return m.group(1), (None if cells is None else cells * 2)   # 2 words per hex cell
+
+
+def pointer_read_words(bits, words_sorted) -> set:
+    """every word of the POINTER_READ_CELLS labels this build declares, over each label's extent"""
+    out = set()
+    for name in POINTER_READ_CELLS:
+        if name in bits:
+            base = bits[name] // W
+            out.update(range(base, _extent(words_sorted, base)))
+    return out
 
 
 def byte_arrays(bits, words_sorted, view_w, nss):

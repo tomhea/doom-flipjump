@@ -3239,8 +3239,11 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
     block index, and its downscaled width (blocks for a type are laid out u-major, bucket-minor).
     Run-lists come from `ReferenceModel.sprite_strip`, so oracle and fj cannot drift (R6)."""
     cache: dict = {}
-    kinds = sorted({t.type for t in map_wad.things(mapname)
-                    if rm.sprite_art(sprite_wad, t.type, cache) is not None})
+    # M7 P1.5 (rule 5): the kinds a single-player game DRAWS -- `things.drawable_things`, the one
+    # definition -- not every kind with art: a multiplayer-only kind's blocks would never be read
+    from doomfj.things import drawable_things
+    kinds = sorted({t.type for t in drawable_things(rm, map_wad.things(mapname), sprite_wad,
+                                                    cache)[0]})
     out = sprite_bank_header()
     base_of, dw_of, blk = {}, {}, 0
     for kind in kinds:
@@ -3385,14 +3388,17 @@ def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, s
 
     ⚠ "can actually stand in" is the whole cost argument, and it is sound: a thing is always in some
     sector, so only the lightnums the map's SECTORS have are reachable. On E1M1 that is 10 of the 32
-    COLORMAP_LIGHTS, so the bank goes 75 -> 210 classes (**2.8x**, ~193k -> ~540k chars) instead of
-    the 672 (9x, ~1.73M) a naive all-lights widening would cost."""
+    COLORMAP_LIGHTS, so the bank goes 67 -> 210 classes (**3.1x**; 75 -> 210, ~193k -> ~540k chars,
+    before M7 P1.5 dropped the multiplayer-only things) instead of the 672 (9x, ~1.73M) a naive
+    all-lights widening would cost."""
     cache: dict = {}
     cls_of: dict = {}
-    for t in map_wad.things(mapname):
+    # M7 P1.5 (rule 5): the things a single-player game draws (`things.drawable_things`) -- a
+    # multiplayer-only thing's (light, height) pair would be a class nothing reads, and under
+    # `moving_things` its height would widen the whole cross product
+    from doomfj.things import drawable_things
+    for t in drawable_things(rm, map_wad.things(mapname), sprite_wad, cache)[0]:
         art = rm.sprite_art(sprite_wad, t.type, cache)
-        if art is None:
-            continue
         sec = _thing_sector(rm, cmap, lds, sds, secs, t)
         cls_of.setdefault((rm.wall_lightnum(sec.light, 0), max(1, art[4])), len(cls_of))
     if moving_things:

@@ -2149,8 +2149,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                         for _ in range(cfg.VIEW_W * 16 ** cfg.SLOT_SHIFT))]
                    + ([f"spslot:{NLJ}" + NLJ.join(";0 * dw"
                                         for _ in range(cfg.VIEW_W * SPR_SLOT_STRIDE)),
-                       # M7 P1.4: the per-THING fragment constants, [y0 + 32768 lo][hi][light][-]
-                       # per slot id (frame.thing_record_body writes, stream.frag_derive reads).
+                       # M7 P1.4: the per-THING fragment constants, [y0 + 32768 lo][hi][light]
+                       # [bucket] per slot id (frame.thing_record_body writes, stream.frag_derive
+                       # reads; the bucket since M7 P1.6).
                        # HERE, inside the narrow-arm window: its reads and writes are full arms,
                        # but an arm5 read may FOLLOW one, and arm5 is exact only while its
                        # predecessor arm is in this block too.
@@ -3175,7 +3176,8 @@ SPR_SLOT_STRIDE = 16       # ... and bytes per column in `spslot`: 3 per fragmen
                            #     [s][blk lo][blk hi], A at byte 0 and B at byte 8 -- a power of 16
                            #     so the per-column byte offset is a whole-nibble shift.
 SPR_THING_SLOTS = 256      # M7 P1.4: fragment slot ids are ONE byte, 1..255 (0 = no fragment) --
-SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds [y0 + 32768 lo][hi][light row][unused] per id
+SPR_THING_SLOT_BYTES = 4   #     `gpslot` holds [y0 + 32768 lo][hi][light row][bucket] per id
+                           #     (byte 3 since M7 P1.6: the rowmap's row, stream.frag_derive's)
 
 
 def check_slot_ids(n_things):

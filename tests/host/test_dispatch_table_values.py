@@ -9,7 +9,9 @@ of the emitted table carries the value the shared kernel says it should.
 That is a property of the emitted TEXT, so it is checked here, on the host, for every entry: parse
 the generated dispatch back into a value list and require it to equal the SSOT table. `ttang` and
 `sdrecip` are the two tables C2 made live and that CR-2026-08 found had no test at all; `vtxdisp`
-and `sinadisp` are the M13-VTXDISP / M13-SINADISP adds.
+and `sinadisp` are the M13-VTXDISP / M13-SINADISP adds; `rowmap` is M7 P1.6's (bucket, normalized
+row) -> screen row table, all 8,192 entries against ceil(n * hb / 255) at the ORACLE's bucket
+heights, with its own control (the same emitter rounding down must disagree).
 
 The decoder is deliberately independent of the generator: it reads the
 `wflip .res+<p>*dw+w, <v>*dw` handler lines -- the emitted program's own encoding of the value --
@@ -20,9 +22,10 @@ import re
 
 import pytest
 
+from doomfj import wall_renderer as wr
 from doomfj.config import Config
 from doomfj.lut_generator import generate_dispatch_table_fj, generate_trig_idioms_fj
-from doomfj.reference_model import SLOPERANGE
+from doomfj.reference_model import SLOPERANGE, SPRITE_HEIGHT_BUCKETS, sprite_bucket_height
 from doomfj.tables import (sine_table, slopediv_recip8_table, tantoangle_table,
                            viewangletox_table, xtoviewangle_table)
 
@@ -150,3 +153,41 @@ def test_the_decoder_sees_a_mutated_table():
     assert mutated != clean, "the decoder did NOT see a changed entry -- it is vacuous"
     assert sum(1 for a, b in zip(mutated, clean) if a != b) == 1, "exactly one entry should differ"
     assert mutated[100] != clean[100], "the change should be at the entry that was mutated"
+
+
+def _rowmap_want():
+    """M7 P1.6: every rowmap entry, stated from the ORACLE's bucket heights and NOT from
+    doomfj.spritebank (whose `rowmap_table` the emitter calls): entry bucket*256 + n is the screen
+    row, below the bucket top, of normalized boundary n -- ceil(n * hb / 255)."""
+    view_h = Config().VIEW_H
+    heights = [sprite_bucket_height(b, view_h) for b in range(SPRITE_HEIGHT_BUCKETS)]
+    return [-(-n * hb // 255) for hb in heights for n in range(256)]
+
+
+def _rowmap_faults():
+    """[(entry, emitted, want)] over the whole emitted `rowmap` (wall_renderer.sprite_rowmap_fj)"""
+    want = _rowmap_want()
+    got = decode_per_entry(wr.sprite_rowmap_fj(Config()), 2)
+    assert len(got) == len(want) == SPRITE_HEIGHT_BUCKETS * 256, (len(got), len(want))
+    return [(i, g, v) for i, (g, v) in enumerate(zip(got, want)) if g != v]
+
+
+def test_rowmap_every_entry_is_the_row_of_its_boundary_at_its_bucket():
+    """The table every sprite row goes through (stream.frag_derive / frag_runs / frag_runs_win): all
+    8,192 entries, decoded from the EMITTED text, equal ceil(n * hb / 255) at their bucket."""
+    bad = _rowmap_faults()
+    assert bad == [], "rowmap: %d entries differ, first (entry, bucket, n, emitted, want) %s" % (
+        len(bad), [(i, i >> 8, i & 255, g, v) for i, g, v in bad[:4]])
+
+
+def test_a_flooring_rowmap_is_caught(monkeypatch):
+    """NEGATIVE CONTROL (R9): the same emitter with the rowmap's rounding turned to FLOOR -- the
+    boundary's row rounded up is the one rule both mirrors share -- must disagree, and on exactly the
+    entries where n * hb is not a multiple of 255"""
+    from doomfj import spritebank                  # (here, so the file's older tests import alone)
+    monkeypatch.setattr(spritebank, "rowmap_row", lambda n, hb: (n * hb) // spritebank.NORM)
+    view_h = Config().VIEW_H
+    heights = [sprite_bucket_height(b, view_h) for b in range(SPRITE_HEIGHT_BUCKETS)]
+    inexact = {b * 256 + n for b, hb in enumerate(heights) for n in range(256) if n * hb % 255}
+    bad = _rowmap_faults()
+    assert inexact and {i for i, _g, _v in bad} == inexact, (len(bad), len(inexact))

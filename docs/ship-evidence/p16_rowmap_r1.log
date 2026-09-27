@@ -1,0 +1,11 @@
+# R1 (finding 2): the rowmap every-entry test FAILS against a rowmap that FLOORS (spritebank.rowmap_row mutated; the test's expectation is independent of spritebank) -- on HEAD (8e7f353 M7 P1.6 review: the tracked scratchpad callers follow P1.6's _lines_sprite_bank and _spr_nlow (rule 5)); the test files from the branch copied in; MUTATED: src/doomfj/spritebank.py: '    return (n * hb + NORM - 1) // NORM' -> '    return (n * hb) // NORM'
+$ python -m pytest tests/host/test_dispatch_table_values.py -q -p no:cacheprovider
+E       AssertionError: rowmap: 8022 entries differ, first (entry, bucket, n, emitted, want) [(1, 0, 1, 0, 1), (2, 0, 2, 0, 1), (3, 0, 3, 0, 1), (4, 0, 4, 0, 1)]
+E       assert [(1, 0, 1), (...6, 0, 1), ...] == []
+FAILED tests/host/test_dispatch_table_values.py::test_rowmap_every_entry_is_the_row_of_its_boundary_at_its_bucket
+1 failed, 8 passed in 0.70s
+rc=1
+# R1 (finding 2): the same file, unmutated -- PASSES -- on HEAD (8e7f353 M7 P1.6 review: the tracked scratchpad callers follow P1.6's _lines_sprite_bank and _spr_nlow (rule 5)); the test files from the branch copied in
+$ python -m pytest tests/host/test_dispatch_table_values.py -q -p no:cacheprovider
+9 passed in 0.51s
+rc=0

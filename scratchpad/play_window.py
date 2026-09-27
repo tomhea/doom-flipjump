@@ -28,8 +28,8 @@ from flipjump.interpreter.io_devices.pygame_window import (InteractiveScreen,  #
                                                            PcIO, PygameWindow)
 from flipjump.utils.exceptions import IOReadOnEOF                              # noqa: E402
 
-ENTER, W, A, D, S = 0x0D, 0x77, 0x61, 0x64, 0x73
-SCRIPT = [(2, 0, True, ENTER), (2, 1, False, ENTER),        # menu -> world
+ESC, W, A, D, S = 0x1B, 0x77, 0x61, 0x64, 0x73          # M7 P1.5: esc leaves the menu
+SCRIPT = [(2, 0, True, ESC), (2, 1, False, ESC),            # menu -> world
           (3, 0, True, W),                                   # walk
           (7, 0, False, W), (7, 1, True, D),                 # turn right
           (10, 0, False, D), (10, 1, True, W),               # walk again

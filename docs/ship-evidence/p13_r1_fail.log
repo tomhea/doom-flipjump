@@ -1,16 +1,19 @@
-# R1: the p13 tests on the PARENT rung's src/ (git archive 61672ad = 61672ad pinreport: a hot word whose line a later rung moved is resolved by its h), the branch's test files copied in
+# R1: the p13 tests on the PARENT rung's src/ (git archive 736db62 = 736db62 CR #91 round 2: the emission-neutrality check committed with its control), the branch's test files copied in
 $ python -m pytest tests/fj/test_leaf_lists_fj.py -q -p no:cacheprovider
 E   ImportError: cannot import name 'LEAF_LINK_DECLS' from 'doomfj.things' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratch
 ERROR tests/fj/test_leaf_lists_fj.py
 !!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
-1 error in 0.35s
+1 error in 0.36s
 $ python -m pytest tests/host/test_leaf_lists.py -q -p no:cacheprovider
-E   ImportError: cannot import name 'byte_array_decl' from 'doomfj.things' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratch
+E   ImportError: cannot import name 'LIST_MAX_THINGS' from 'doomfj.things' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratch
 ERROR tests/host/test_leaf_lists.py
 !!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
-1 error in 0.35s
+1 error in 0.45s
 $ python -m pytest tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
 E   ImportError: cannot import name 'THING_PERSIST' from 'doomfj.build' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad
 ERROR tests/host/test_restore_set_shipped.py
 !!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
-1 error in 0.43s
+1 error in 0.48s
+$ python -m pytest tests/host/test_selfreset.py -q -p no:cacheprovider
+FAILED tests/host/test_selfreset.py::test_persist_keeps_a_byte_array_out_of_the_reset
+1 failed, 40 passed in 0.66s

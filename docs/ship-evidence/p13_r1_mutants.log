@@ -1,12 +1,12 @@
-$ python scratchpad/gp/p13_r1_mutants.py
-BASELINE (the tree itself): all green -- 2 passed in 0.36s
+$ python scratchpad/gp/p13_r1_mutants.py   # at f963f67
+BASELINE (the tree itself): all green -- 2 passed in 0.39s
    tests/host/test_leaf_lists.py::test_a_map_with_no_runtime_things_bakes_an_empty_array      PASSED
    tests/host/test_restore_set_shipped.py::test_the_thing_cells_are_in_the_standalone_set_too PASSED
-M1 THING_PERSIST names a label the standalone set does not carry (src/doomfj/build.py): every named test RED -- 1 failed in 0.33s
+M1 THING_PERSIST names a label the standalone set does not carry (src/doomfj/build.py): every named test RED -- 1 failed in 0.38s
    tests/host/test_restore_set_shipped.py::test_the_thing_cells_are_in_the_standalone_set_too FAILED
-M2 the standalone set restores thnext, which THING_PERSIST does not keep (src/doomfj/data/m5_restore_set.json.gz): every named test RED -- 1 failed in 0.39s
+M2 the standalone set restores thnext, which THING_PERSIST does not keep (src/doomfj/data/m5_restore_set.json.gz): every named test RED -- 1 failed in 0.53s
    tests/host/test_restore_set_shipped.py::test_the_thing_cells_are_in_the_standalone_set_too FAILED
-M3 byte_array_decl's extent check before 1ce6623 (src/doomfj/things.py): every named test RED -- 1 failed in 0.18s
+M3 byte_array_decl's extent check before 1ce6623 (src/doomfj/things.py): every named test RED -- 1 failed in 0.17s
    tests/host/test_leaf_lists.py::test_a_map_with_no_runtime_things_bakes_an_empty_array      FAILED
 R1 MUTANTS: PASS
 rc=0

@@ -1,3 +1,3 @@
-# R1: the same tests on the branch (m7-leaf-lists 57f20d9)
-$ python -m pytest tests/fj/test_leaf_lists_fj.py tests/host/test_leaf_lists.py tests/host/test_restore_set_shipped.py -q -p no:cacheprovider
-24 passed in 2.62s
+# R1: the same tests on the branch (m7-leaf-lists f963f67)
+$ python -m pytest tests/fj/test_leaf_lists_fj.py tests/host/test_leaf_lists.py tests/host/test_restore_set_shipped.py tests/host/test_selfreset.py -q -p no:cacheprovider
+66 passed in 2.94s

@@ -133,6 +133,12 @@ SCRIPTS = {
     "enter twice, two frames' events": [(0, True, 0x0D), (1, False, 0x0D),
                                         (8, True, 0x0D), (9, False, 0x0D)],
     "esc is its own event": [(0, True, 0x1B), (1, False, 0x1B)],
+    # ... and an event is a FLAG, so a press and release inside ONE frame cannot tell the down edge
+    # from the up edge: acting on both, or only on the up, sets the same flag. These hold the key
+    # ACROSS a frame boundary -- down in one frame, up in the next -- and the second frame must have
+    # no event (the P1.5 review: no script did this).
+    "enter held across frames: no event on its up edge": [(0, True, 0x0D), (9, False, 0x0D)],
+    "esc held across frames: no event on its up edge": [(0, True, 0x1B), (9, False, 0x1B)],
     "the menu's events do not disturb the keys": [(0, True, 0x77), (1, True, 0x0D),
                                                   (2, False, 0x0D), (16, False, 0x77)],
     "forward and back are the menu's up and down": [(0, True, 0x80), (1, False, 0x80),
@@ -166,6 +172,19 @@ def test_the_mirror_is_not_vacuous():
                 seen_high[name] |= digit == "1"
     assert all(seen_high.values()), seen_high
     assert any(frame != "00000000" for frame in _expected(SCRIPTS["hold w across frames"]))
+
+
+def test_the_up_edge_scripts_straddle_a_frame():
+    """R9 for the two held-across-frames scripts: the key must go down in one frame and up in the
+    NEXT, with the event in the first frame only -- a pair inside one frame could not tell a poll
+    that acts on the up edge from one that acts on the down edge."""
+    for name, event in (("enter held across frames: no event on its up edge", "E"),
+                        ("esc held across frames: no event on its up edge", "X")):
+        slot = len(KEYS) + EVENTS.index(event)          # the digit that event prints in
+        (t0, down0, _), (t1, down1, _) = SCRIPTS[name]
+        assert down0 and not down1 and t1 // POLLS == t0 // POLLS + 1, name
+        frames = _expected(SCRIPTS[name])
+        assert (frames[0][slot], frames[1][slot]) == ("1", "0"), (name, frames[:2])
 
 
 def test_negative_control_a_wrong_binding_is_caught(kb_fjm):

@@ -184,10 +184,11 @@ the shipped tier now sits at 68.2M of 134.2M ≈ **1.97× headroom**, where agai
 | **blocked25 = the `game` tier + the assembler's blocking pass** (`doom_e1m1_blocked25.fjm`, shipped 2026-09-13 .. 09-25) | **96,009,696** (data 43,657,732) | 1.431× OVER | **0.715×** (data 0.325×) | **flat** (asserted) |
 | **blocked27 = blocked25 + the hot `sparse_` sites and the two shifts blocked** (`doom_e1m1_blocked27.fjm`, shipped 2026-09-25 .. 09-27) | **94,704,800** (data 43,253,668) | 1.411× OVER | **0.706×** (data 0.322×) | **flat** (asserted) |
 | **blocked28 = blocked27's program placed with pin protection** (`doom_e1m1_blocked28.fjm`, shipped 2026-09-27) | **95,996,064** (data 43,229,158) | 1.430× OVER | **0.715×** (data 0.322×) | **flat** (asserted) |
-| **blocked29 = the player's collision on cells, pin-protected** (**the shipped `doom_e1m1_blocked29.fjm` today**) | **90,467,488** (data 36,706,788) | 1.348× OVER | **0.674×** (data 0.273×) | **flat** (asserted) |
+| **blocked29 = the player's collision on cells, pin-protected** (`doom_e1m1_blocked29.fjm`, shipped 2026-09-27) | **90,467,488** (data 36,706,788) | 1.348× OVER | **0.674×** (data 0.273×) | **flat** (asserted) |
+| **blocked30 = blocked29 with persistent leaf lists** (**the shipped `doom_e1m1_blocked30.fjm` today**) | **90,399,040** (data 36,208,972) | 1.347× OVER | **0.674×** (data 0.270×) | **flat** (asserted) |
 
 ⚠ Updated 2026-09-07 (M6 rung 0 + S2 + W1) — **and its "now" is the PRE-BLOCKING binary; today's
-shipped binary is the blocked29 row, see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
+shipped binary is the blocked30 row, see the 2026-09-15, 2026-09-25 and 2026-09-27 notes below**: the shipped binary was
 89,494,606 words when this table was written and is **51,094,744** now — 0.761× of 2^26 and
 **0.381× of 2^27**, i.e. 38.07% of the w=32 ceiling, no longer OVER. Measured with
 `scratchpad/12m/fjmsize.py`; `m2_std_gate` PASS.

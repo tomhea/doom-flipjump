@@ -1,0 +1,9 @@
+$ python scratchpad/gp/scenarios_v2.py --rehash "M7 P1.3: things.py gained the emitter's leaf-list helpers (spawn_leaf_lists, byte_array_decl, LEAF_LINK_DECLS); the model imports only baked_thing_mask and drawable_things, unchanged"
+  F1 ok    status 'FROZEN', the set approved by 'the owner' on '2026-09-26'; last freeze: checker re-freeze by 'PR #88 review round 3 (checker re-freeze: the decided freeze, owner_approval stored once, the planner guard, R4-R7)'
+  F2 FAIL  changed: ['src/doomfj/things.py']
+  F3 ok    11/11 runs
+  F4 ok    11/11 runs
+  F5 ok    binding 17760774.10272727, keys match
+  rehashed src/doomfj/things.py                     21a20076e9eb67ed -> b80f7ddb86dbeace
+REHASH DONE: 1 file(s)
+rc=0

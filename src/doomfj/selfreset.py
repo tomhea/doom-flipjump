@@ -293,6 +293,12 @@ def emit_reset_part(gen, labels, pristine_get_word, restore_set_path, view_w, ns
 
     byte_words, byte_bases, declared_words = set(), [], set()
     for name, n in byte_arrays(bits, words_sorted, view_w, nss):
+        if name in persist:
+            # M7 P1.3: a PERSISTED byte array (the game tier's `sshead`, build.THING_PERSIST) is
+            # program state: its words left the set above, and the reset must not zero it. (The
+            # geometry cross-check in byte_arrays still ran for it; build_blocked also relies on
+            # byte_arrays for keeping byte cells unpinned, so the skip lives here, not there.)
+            continue
         base = bits[name] // W
         byte_bases.append((name, bits[name], n))
         declared_words.update(range(base, _extent(words_sorted, base)))

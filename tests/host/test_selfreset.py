@@ -479,6 +479,24 @@ def test_persist_takes_its_extent_from_this_builds_label_table(tmp_path):
     assert all(str(w * W) not in txt for w in (220, 222, 224, 226))
 
 
+def test_persist_keeps_a_byte_array_out_of_the_reset(tmp_path):
+    """M7 P1.3: the game tier persists `sshead` (build.THING_PERSIST), a BYTE array. Its words leave
+    the set with every other persisted cell -- and the byte-array pass then asserted that every
+    byte-array word was still IN the set, so the build was refused after pass 1 (found by the P1.5
+    pre-build review, before any game build of P1.3 reached it). Without that assert the reset
+    would have emitted sshead's `m1.zerobyte` run and wiped the persisted lists every frame.
+    The control is the same build without persist: sshead's zerobyte run is there."""
+    txt0, _n0, nb0 = _emit_persist(tmp_path / "a", ())
+    assert "rep(3, i) m1.zerobyte %d + i*dw      // sshead" % (200 * W) in txt0
+    assert nb0 == 3 + 2 + 2                                 # sshead + pclm + sfflag cells
+    txt, _n, nb = _emit_persist(tmp_path / "b", ("sshead",))
+    assert "m1.zerobyte %d " % (200 * W) not in txt         # the persisted array is not zeroed...
+    assert nb == 2 + 2                                      # ...and it is the only one skipped
+    assert "rep(2, i) m1.zerobyte %d + i*dw      // pclm" % (212 * W) in txt
+    assert "rep(2, i) m1.zerobyte %d + i*dw      // sfflag" % (216 * W) in txt
+    assert "6 words across 1 PERSISTED labels are deliberately NOT restored" in txt
+
+
 def test_persist_states_in_the_generated_part_what_it_did_not_restore(tmp_path):
     """A hole nothing records is indistinguishable from a hole nobody meant. The count is the
     emitted one, so it cannot drift from what was actually skipped."""

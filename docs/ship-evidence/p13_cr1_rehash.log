@@ -1,0 +1,10 @@
+$ python scratchpad/gp/scenarios_v2.py --rehash "CR #92 round 1 (R6): world.py's mobile bound reads things.LIST_MAX_THINGS (254, the value it had) -- a pure refactor"
+  F1 ok    status 'FROZEN', the set approved by 'the owner' on '2026-09-26'; last freeze: checker re-freeze by 'PR #88 review round 3 (checker re-freeze: the decided freeze, owner_approval stored once, the planner guard, R4-R7)'
+  F2 FAIL  changed: ['src/doomfj/things.py', 'src/doomfj/world.py']
+  F3 ok    11/11 runs
+  F4 ok    11/11 runs
+  F5 ok    binding 17760774.10272727, keys match
+  rehashed src/doomfj/things.py                     b80f7ddb86dbeace -> 998b72150653c807
+  rehashed src/doomfj/world.py                      9cb3758a215a9a87 -> 66d065d8bce09d98
+REHASH DONE: 2 file(s)
+rc=0

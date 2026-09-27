@@ -22,7 +22,7 @@ the index spaces and the row layout that every one of those numbers is addressed
   or draws the wrong thing -- with every width still looking right.
 
 * **M4 (nine levels) blockers, priced in 0.1 s instead of 40 minutes.** The leaf-homogeneity rule
-  `baked_thing_mask` implements, and the `nt < 0xFF` ceiling `_moving_thing_tables` asserts. The
+  `baked_thing_mask` implements, and the `things.LIST_MAX_THINGS` ceiling `_moving_thing_tables` asserts. The
   second one is VIOLATED TODAY on two E1 maps, which is why that test is parametrised and xfailed
   rather than written as a passing assertion -- see its docstring for the measured counts.
 
@@ -51,7 +51,7 @@ from doomfj.mapcompiler import bake_bsp, seg_sector
 from doomfj.reference_model import (DEG_MINH2_MON, DEG_MINH2_SCENERY, MIN_SPRITE_H,
                                     MIN_SPRITE_H_MONSTER, MONSTER_TYPES, VANISHABLE_TYPES,
                                     ReferenceModel)
-from doomfj.things import (THING_ROW_BYTES, THING_ROW_COLD_BYTES, THING_ROW_COLD_LEN,
+from doomfj.things import (LIST_MAX_THINGS, THING_ROW_BYTES, THING_ROW_COLD_BYTES, THING_ROW_COLD_LEN,
                            THING_ROW_HOT_BYTES, THING_ROW_HOT_LEN, THING_ROW_LEN,
                            baked_thing_mask, check_row_equivalence, cold_row, drawable_things,
                            hot_row, reachable_lightnums, sprite_light_table, subsector_tables,
@@ -64,9 +64,8 @@ LITE = ROOT / "tests/fixtures/e1m1_lite.wad"
 EPISODE = ROOT / "assets/freedoom1.wad"          # the only wad here that carries E1M2..E1M9
 E1_MAPS = [f"E1M{i}" for i in range(1, 10)]
 
-# 0xFF is the empty/end sentinel of `thnext`/`sshead`, so the highest usable runtime index is 254.
-# `wall_renderer._moving_thing_tables` asserts `nt < 0xFF` on len(rows) with `keep` applied.
-RUNTIME_THING_CAP = 0xFF
+# The byte lists `thnext`/`sshead` hold at most `things.LIST_MAX_THINGS` runtime things -- the one
+# bound `wall_renderer._moving_thing_tables` asserts on len(rows) with `keep` applied (PR #92, R6).
 
 
 # ── fixtures ────────────────────────────────────────────────────────────────────────────────────
@@ -315,23 +314,22 @@ def test_no_e1_map_has_a_mixed_leaf_at_spawn(episode):
         strict=True,
         reason="MEASURED M4 BLOCKER: E1M6 has 344 and E1M7 330 runtime things, over the 254 the "
                "thnext/sshead byte sentinel allows. Not a regression -- a nine-level build would "
-               "die on wall_renderer._moving_thing_tables' `assert nt < 0xFF`. strict=True, so "
+               "die on wall_renderer._moving_thing_tables' `nt <= LIST_MAX_THINGS`. strict=True, so "
                "this flips to a FAILURE the moment either map fits (a widened index, or a bigger "
                "baked share) and the numbers here need updating."))
     if mn in ("E1M6", "E1M7") else mn
     for mn in E1_MAPS])
 def test_the_runtime_thing_count_fits_the_byte_linked_list(episode, mapname):
-    """M4's OTHER blocker: `thnext`/`sshead` are byte arrays with 0xFF as the empty sentinel, so the
-    RUNTIME thing count (drawable minus baked) must stay under 255.
+    """M4's OTHER blocker: `thnext`/`sshead` are byte arrays, so the RUNTIME thing count (drawable
+    minus baked) must stay within `things.LIST_MAX_THINGS`.
 
     MEASURED this session, runtime counts E1M1..E1M9: 75, 170, 248, 219, 250, 344, 330, 0, 181.
     E1M6 and E1M7 are over; E1M3 (248) and E1M5 (250) are within six. This is the cheapest M4
     blocker there is -- 0.1 s instead of a 40-minute emit that ends in an AssertionError."""
     lv = episode[mapname]
     runtime = len(lv.drawable) - sum(lv.baked)
-    assert runtime < RUNTIME_THING_CAP, (
-        f"{mapname}: {runtime} runtime things; the byte linked list tops out at "
-        f"{RUNTIME_THING_CAP - 1}")
+    assert runtime <= LIST_MAX_THINGS, (
+        f"{mapname}: {runtime} runtime things; the byte lists hold {LIST_MAX_THINGS}")
 
 
 # ── thing_rows: the keep filter and the two feature gates ───────────────────────────────────────

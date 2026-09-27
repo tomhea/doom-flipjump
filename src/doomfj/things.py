@@ -153,6 +153,53 @@ def thing_rows(rm, things, sprite_wad, spr_base, spr_ldbase, spr_dw, monster_typ
     return rows, idx
 
 
+# The per-leaf thing lists (`sshead` / `thnext`) store a thing's index + 1 in ONE BYTE, 0 ending a
+# list: the most things they hold. ONE bound for the three layers that rely on it -- these baked
+# lists, the emitter's runtime-thing tables (wall_renderer) and the gameplay model's mobiles (world).
+LIST_MAX_THINGS = 254
+
+
+def spawn_leaf_lists(binds, nleaves):
+    """`(sshead, thnext)` -- the per-leaf lists of runtime things `sim.bind_things` builds from the
+    bindings `binds` (thing index -> leaf): each leaf's things in ASCENDING index order, stored as
+    `t + 1` so that 0 is both the empty list and the end of one. bind_things gets the ascending order
+    by prepending in DESCENDING index order; this is that loop.
+
+    M7 P1.3: the game tier BAKES these into its image and they persist -- nothing moves a thing
+    until P3, and P3 moves one by relinking it (`sim.leaf_unlink` / `sim.leaf_link`), never by
+    rebuilding every list."""
+    assert len(binds) <= LIST_MAX_THINGS, (
+        "%d things: the lists store t + 1 in a byte, at most LIST_MAX_THINGS" % len(binds))
+    sshead = [0] * nleaves
+    thnext = [0] * len(binds)
+    for t in range(len(binds) - 1, -1, -1):
+        leaf = binds[t]
+        thnext[t] = sshead[leaf]
+        sshead[leaf] = t + 1
+    return sshead, thnext
+
+
+def byte_array_decl(label, values, cells):
+    """fj text for a `read_byte`/`write_byte` array baked to `values`: one cell per entry, holding its
+    byte in the jump word as `b * dw` (`b << 6`, the layout scratchpad/gp/probe.py and M1a settled),
+    padded with zero cells to `cells` in all -- the extent `label: hex.vec cells` had, so no label
+    after it moves and the M1 restore set's span for it holds."""
+    # (a map with no runtime things has an EMPTY array -- no entry, no cell: `hex.vec 0` is nothing)
+    assert (len(values) < cells or not values) and all(0 <= v < 256 for v in values), (
+        label, len(values), cells)
+    return "\n".join([f"{label}:"] + [f";{v} * dw" for v in values]
+                     + [f"hex.vec {cells - len(values)}"])
+
+
+# M7 P1.3: the named scratch of `sim.leaf_link` / `sim.leaf_unlink` -- globals, not @-locals, so a
+# program that emits the relink declares them once (P3; tests/fj/test_leaf_lists_fj.py today).
+# `ll_p`/`ll_q`/`ll_base`/`ll_idx` are w/4 wide because hex.ptr_index moves w/4 nibbles out of its
+# index and into its destination.
+LEAF_LINK_DECLS = ["ll_enc: hex.vec 2", "ll_v: hex.vec 2", "ll_nxt: hex.vec 2",
+                   "ll_p: hex.vec w/4", "ll_q: hex.vec w/4", "ll_base: hex.vec w/4",
+                   "ll_idx: hex.vec w/4"]
+
+
 def subsector_tables(rm, cmap, lds, sds, secs):
     """`(ssfloor, sslight)` per subsector -- the two things a bound leaf has to tell a sprite.
 

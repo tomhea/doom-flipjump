@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from doomfj import selfreset                                   # noqa: E402
-from doomfj.build import DOOR_PERSIST, STANDALONE_PERSIST      # noqa: E402
+from doomfj.build import STANDALONE_PERSIST, persist_labels            # noqa: E402
 from doomfj.doorcode import door_decls                         # noqa: E402
 from doomfj.doors import door_states                           # noqa: E402
 from doomfj.wad import WadFile                                 # noqa: E402
@@ -129,7 +129,8 @@ def derive(doc, addresses, names, globals_decls=None, persist=None):
     present = {e[0] for e in doc["entries"]}
     absent = [n for n in (persist or STANDALONE_PERSIST) if n not in present]
     assert not absent, (
-        "build.STANDALONE_PERSIST names %r, which the set does not carry. emit_reset_part would "
+        "the persist names (build.STANDALONE_PERSIST / DOOR_PERSIST / THING_PERSIST) include %r, "
+        "which the set does not carry. emit_reset_part would "
         "refuse an hour into the build; refuse here instead." % absent)
 
     # ---- 5. re-count and re-fingerprint ------------------------------------------------------
@@ -144,6 +145,16 @@ def derive(doc, addresses, names, globals_decls=None, persist=None):
     doc["words"] = len(resolved)
     doc["layout_fingerprint"] = selfreset.layout_fingerprint(doc, bits)
     return doc, gone, added
+
+
+def persist_names(doors) -> tuple:
+    """what the game tier's reset leaves alone -- `build.persist_labels`, the one composition, for
+    the standalone set's tier: standalone, the game tier's moving_things, and doors with --doors. The
+    view and held keys, the doors' state, the runtime things' lists, bindings and positions (M7
+    P1.3). Every one must be IN the set (step 4)."""
+    from doomfj.wall_renderer import TIERS
+    return persist_labels(standalone=True, doors=bool(doors),
+                          moving_things=TIERS["game"]["moving_things"])
 
 
 def refuses(fn):
@@ -212,7 +223,29 @@ def selftest():
     c4 = refuses(escaping)
     print("C4 an offset escapes its label       -> %s" % ("refused ok" if c4 else "!! ACCEPTED"))
 
-    good = ok and c1 and c2 and c3 and c4
+    # C5 (M7 P1.3): a THING_PERSIST label missing from the set must refuse under the persist names
+    # main() passes -- step 4 used to check STANDALONE_PERSIST only.
+    def without_sshead():
+        d = doc()
+        d["entries"].append(["sshead", 0])
+        a2, n2 = addresses[:-1] + [base, base + 1, base + 2, base + 3],             names[:-1] + ["sshead", "thss_rt", "thpos_rt", "zzz_end"]
+        return derive(d, a2, n2, persist=persist_names(None))
+    c5 = refuses(without_sshead)
+    print("C5 a THING_PERSIST label not in the set -> %s" % ("refused ok" if c5 else "!! ACCEPTED"))
+
+    # C5's other half: with all three THING_PERSIST labels in the set, the same call is ACCEPTED --
+    # so the refusal above is about the missing two, not about the table this control builds
+    def with_all_three():
+        d = doc()
+        d["entries"] += [["sshead", 0], ["thss_rt", 0], ["thpos_rt", 0]]
+        a2, n2 = addresses[:-1] + [base, base + 1, base + 2, base + 3], \
+            names[:-1] + ["sshead", "thss_rt", "thpos_rt", "zzz_end"]
+        return derive(d, a2, n2, persist=persist_names(None))
+    c5b = not refuses(with_all_three)
+    print("C5b all three THING_PERSIST labels in the set -> %s"
+          % ("accepted ok" if c5b else "!! REFUSED"))
+
+    good = ok and c1 and c2 and c3 and c4 and c5 and c5b
     print("SELFTEST: %s" % ("PASS" if good else "!! FAIL"))
     return 0 if good else 1
 
@@ -237,9 +270,12 @@ def main():
     doc = json.load(gzip.open(args.set, "rt", encoding="utf-8"))
     before = (doc["words"], len(doc["entries"]))
     decls = standalone_globals(args.doors, args.map)
-    persist = STANDALONE_PERSIST + (DOOR_PERSIST if args.doors else ())
+    persist = persist_names(args.doors)
     doc, gone, added = derive(doc, addresses, names, decls, persist)
-    doc["generated_by"] = "scratchpad/m5_setfile.py --labels %s --set %s" % (args.labels, args.set)
+    # every argument that shapes the set, so the line replays it (a replay without --doors drops
+    # the door cells -- the M7 P1.4 review)
+    doc["generated_by"] = "scratchpad/m5_setfile.py --labels %s --set %s%s --map %s" % (
+        args.labels, args.set, " --doors %s" % args.doors if args.doors else "", args.map)
     json.dump(doc, gzip.open(args.out, "wt", encoding="utf-8"))
     print("dropped %s; added %d words over %d standalone globals%s"
           % (", ".join(gone) or "nothing", added, len(decls),

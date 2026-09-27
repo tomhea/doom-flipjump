@@ -35,7 +35,7 @@ from doomfj.fixedpoint import _signed                                     # noqa
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,      # noqa: E402
                                     ReferenceModel, SimState, build_scene, spawn_state)
-from doomfj.things import baked_thing_mask, vanishable_slots              # noqa: E402
+from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots  # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
 from doomfj.wireformat import (encode_bindings, encode_feed,              # noqa: E402
@@ -112,7 +112,7 @@ cfg = Config()
 rm = ReferenceModel(cfg)
 cmap = bake_bsp(w, "E1M1")
 scene = build_scene(w, w, "E1M1")
-dr = [t for t in w.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+dr = drawable_things(rm, w.things("E1M1"), art)[0]
 bkd = baked_thing_mask(rm, cmap, dr, MONSTER_TYPES)
 NVIS = len(vanishable_slots(dr, bkd, VANISHABLE_TYPES))
 RT = [t for t, b in zip(dr, bkd) if not b]

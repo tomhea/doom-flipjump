@@ -28,6 +28,7 @@ from doomfj.config import Config                                          # noqa
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
 import doomfj.reference_model as RM                                       # noqa: E402
 from doomfj.reference_model import MONSTER_TYPES, ReferenceModel          # noqa: E402
+from doomfj.things import drawable_things                                 # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 
 cfg = Config()
@@ -38,7 +39,7 @@ cmap = bake_bsp(mw, "E1M1")
 
 # M14.5 intends every class back (statics as baked glyphs), so evaluate the FULL set
 RM.THING_SPRITE = RM.THING_SPRITE_ALL
-allt = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+allt = drawable_things(rm, mw.things("E1M1"), art)[0]
 leaf = [rm.point_in_subsector(cmap, t.x, t.y) for t in allt]
 
 by_leaf = collections.defaultdict(list)

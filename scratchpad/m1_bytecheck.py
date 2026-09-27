@@ -67,7 +67,7 @@ from doomfj.mapcompiler import bake_bsp                               # noqa: E4
 from doomfj.fixedpoint import _signed                                 # noqa: E402
 from doomfj.reference_model import (MONSTER_TYPES, VANISHABLE_TYPES,  # noqa: E402
                                     ReferenceModel, spawn_state)
-from doomfj.things import baked_thing_mask, vanishable_slots          # noqa: E402
+from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots  # noqa: E402
 from doomfj.wad import WadFile                                        # noqa: E402
 from doomfj.wireformat import (encode_bindings, encode_feed, encode_things,
                                encode_visibility)                     # noqa: E402
@@ -76,7 +76,7 @@ _w = WadFile.from_path(str(ROOT / "tests/fixtures/freedoom_e1m1.wad"))
 _art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
 _rm = ReferenceModel(Config())
 _cmap = bake_bsp(_w, "E1M1")
-_dr = [t for t in _w.things("E1M1") if _rm.sprite_art(_art, t.type, {}) is not None]
+_dr = drawable_things(_rm, _w.things("E1M1"), _art)[0]
 _bkd = baked_thing_mask(_rm, _cmap, _dr, MONSTER_TYPES)
 _NVIS = len(vanishable_slots(_dr, _bkd, VANISHABLE_TYPES))
 _RT = [t for t, b in zip(_dr, _bkd) if not b]

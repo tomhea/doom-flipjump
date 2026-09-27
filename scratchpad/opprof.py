@@ -170,8 +170,8 @@ if args.m14:
     _rm = ReferenceModel(cfg)
     _cmap = bake_bsp(mw, args.map)
     from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES  # noqa: E402
-    from doomfj.things import baked_thing_mask, vanishable_slots        # noqa: E402
-    _draw = [t for t in mw.things(args.map) if _rm.sprite_art(art, t.type, {}) is not None]
+    from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots  # noqa: E402
+    _draw = drawable_things(_rm, mw.things(args.map), art)[0]
     # M14.5: the wire carries the RUNTIME half only; the rest is baked into its leaf's code
     _bk = baked_thing_mask(_rm, _cmap, _draw, MONSTER_TYPES)
     _nvis = len(vanishable_slots(_draw, _bk, VANISHABLE_TYPES))

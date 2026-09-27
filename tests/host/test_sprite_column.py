@@ -1,7 +1,8 @@
 """M7 P1.4 -- the v2 sprite column's invariants that hold without the renderer (docs/gp-sprite-column.md).
 
 The column itself -- record -> load -> emit against the oracle, one fragment and two -- is checked
-in fj by scratchpad/gp/probes/sprite/ship_check.py, with four mutants. What is pinned here:
+in fj by scratchpad/gp/probes/sprite/ship_check.py, with four mutants; the narrow reads themselves
+run in tests/fj/test_narrow_reads_fj.py. What is pinned here:
 
   * the bank's 3-nibble reads (frame.read3_and_inc) are exact only on a bank that starts on a whole
     block, 64 ops = 16^3 bits. The emitter opens the bank with a `pad` of the block stride, and
@@ -10,10 +11,15 @@ in fj by scratchpad/gp/probes/sprite/ship_check.py, with four mutants. What is p
     program without the pad lands off a block, and the build check rejects an off-block label.
   * a fragment names its thing by a ONE-BYTE slot id, so the emitter refuses a map with more
     drawable things than ids (wall_renderer.check_slot_ids) -- with the boundary on both sides.
+  * a slot is SPR_THING_SLOT_BYTES bytes, and both fj sides scale a slot id by shifting -- the
+    record's write and the derive's read -- so the shift count is held to the constant (R6).
   * the per-thing slot table is declared in the hot-data block at its full size, and the two
     FRAME-STATE registers the emit's slot cache depends on are among the hoisted globals the
     restore sets must carry (tests/host/test_restore_set_shipped.py holds them to that).
 """
+import re
+from pathlib import Path
+
 import pytest
 
 from doomfj import selfreset
@@ -84,3 +90,18 @@ def test_the_slot_cache_state_is_hoisted_for_the_restore_sets():
     retired = {"p2_ssy1", "p2_sy0b", "p2_slr", "p2_dssy1", "p2_dsy0b", "trb_run_r0", "trb_y_base",
                "trb_y0_biased", "srn_ptr", "srw_ptr"}
     assert not retired & set(decls), "a retired fragment register is still hoisted"
+
+
+def test_the_slot_stride_is_the_shift_both_fj_sides_scale_by():
+    """R6: `gpslot` holds SPR_THING_SLOT_BYTES bytes per thing (wall_renderer declares it so), and
+    the record's write (frame_render.fj) and the derive's read (stream_render.fj) each turn a slot
+    id into its byte offset with `hex.shl_bit w/4, gps_sidx` lines. Nothing else ties those shifts
+    to the constant: each file must shift exactly log2(SPR_THING_SLOT_BYTES) times."""
+    shifts = SPR_THING_SLOT_BYTES.bit_length() - 1
+    assert 1 << shifts == SPR_THING_SLOT_BYTES, "a slot must be a power of two bytes"
+    root = Path(__file__).resolve().parents[2] / "src" / "fj"
+    for f in ("frame_render.fj", "stream_render.fj"):
+        text = (root / f).read_text(encoding="utf-8")
+        n = len(re.findall(r"^\s*hex\.shl_bit w/4, gps_sidx\b", text, re.M))
+        assert n == shifts, "%s shifts gps_sidx %d times, the slot is %d bytes" % (
+            f, n, SPR_THING_SLOT_BYTES)

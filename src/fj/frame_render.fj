@@ -1927,9 +1927,10 @@ ns frame {
         .write_byte5 ptr, src
         hex.ptr_inc ptr
     }
-    // idea 17's read, now on the narrow arm. All 30 call sites walk sfslot_p or spslot_p, both
-    // in the hot-data block, and the audit confirmed every reachable predecessor arm in these
-    // two loaders is also low-cluster -- so even the FIRST read of a run is 5-hex-safe.
+    // idea 17's read, now on the narrow arm. All 22 call sites (30 until M7 P1.4 cut a sprite
+    // fragment to three bytes) walk sfslot_p or spslot_p, both in the hot-data block, and the
+    // audit confirmed every reachable predecessor arm in these two loaders is also low-cluster --
+    // so even the FIRST read of a run is 5-hex-safe.
     def read0_byte_and_inc dst, ptr < hex.pointers.read_byte {
         .arm5 ptr
         hex.pointers.read_byte_from_inners_ptrs
@@ -2163,8 +2164,9 @@ ns frame {
         hex.zero 4, sblkb
         hex.zero 1, p2_sdirty                   // the rare dirty->clean transition
         ;end
-        // idea 17 size-freeze: the 30 zero-eliding reads shrank this leaf by 70 ops
-        // per site; unreachable filler restores the layout (the idea-16 lesson).
+        // idea 17 size-freeze: its zero-eliding reads (14 in this leaf then, of 30) shrank it by
+        // 70 ops per site; unreachable filler restored the layout (the idea-16 lesson). M7 P1.4
+        // cut this leaf to 6 reads in a build that lays everything out anew; the filler stays.
         rep(980, i) stl.fj 0, 0
       end:
     }
@@ -2670,7 +2672,6 @@ ns frame {
         rep(962, i) stl.fj 0, 0
       ret:
         stl.fret seg_ret2
-                                                //     two-byte biased y0, see lines_spr_load)
     }
 
     def lines_projcall centeryfix_c, viewh1, top, bottom {

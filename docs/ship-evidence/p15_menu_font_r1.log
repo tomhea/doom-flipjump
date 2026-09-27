@@ -1,0 +1,8 @@
+# R1: the menu tests on 22ff314's src/doomfj/menu.py (a 3x5 font for the lines, a 5x5 M, the credit in the same font)
+$ python -m pytest tests/host/test_menu.py -q -p no:cacheprovider
+FAILED tests/host/test_menu.py::test_the_credit_sits_in_the_bottom_right_corner_small_and_in_its_dim_gray
+FAILED tests/host/test_menu.py::test_the_lines_are_5x7_and_both_fonts_draw_an_m_with_two_stems_and_a_dip
+2 failed, 23 passed in 0.41s
+# with the 5x7 lines font and the small credit font
+$ python -m pytest tests/host/test_menu.py tests/fj/test_menu_frame.py tests/fj/test_menu_mode.py tests/host/test_wall_renderer_helpers.py -q -p no:cacheprovider
+94 passed in 2.05s

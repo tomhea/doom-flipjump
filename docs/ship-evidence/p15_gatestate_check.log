@@ -1,0 +1,6 @@
+$ python scratchpad/gp/gatestate_check.py --fjm <doom-m7c>/build/doom_e1m1_blocked30.fjm --labels <doom-m7c>/scratchpad/12m/atlas/blocked30.labels.tsv.gz   # the P1.5 tree at 0844164 with this commit's gate edits
+ran 8 frames, 109,883,725 ops; cells read: ['ddir', 'dstate', 'dsub', 'dwait', 'mode', 'viewangle', 'viewx', 'viewy']
+state equal on every frame: yes; the oracle's view moved: True
+control (frame 5's view one unit off): flagged frames [5] -- caught exactly there
+GATESTATE CHECK: PASS
+rc=0

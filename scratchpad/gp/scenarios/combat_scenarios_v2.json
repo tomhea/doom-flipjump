@@ -24992,7 +24992,7 @@
   "src/doomfj/rng.py": "5a842d315933a0b0",
   "src/doomfj/tables.py": "f2ab5c664db1f028",
   "src/doomfj/texturecompiler.py": "6836e27f7d824674",
-  "src/doomfj/things.py": "21a20076e9eb67ed",
+  "src/doomfj/things.py": "b80f7ddb86dbeace",
   "src/doomfj/wad.py": "aced7d2f9eb1a2ba",
   "src/doomfj/world.py": "9cb3758a215a9a87",
   "tests/fixtures/freedoom_e1m1.wad": "944287723835997b"
@@ -25286,6 +25286,18 @@
     "src/doomfj/doorcode.py": [
      "3dc71213f4f2a75e",
      "bf1bbcc6dcea521e"
+    ]
+   },
+   "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"
+  },
+  {
+   "on": "2026-09-27 10:49:41",
+   "reason": "M7 P1.3: things.py gained the emitter's leaf-list helpers (spawn_leaf_lists, byte_array_decl, LEAF_LINK_DECLS); the model imports only baked_thing_mask and drawable_things, unchanged",
+   "git_head": "1ce6623",
+   "changed": {
+    "src/doomfj/things.py": [
+     "21a20076e9eb67ed",
+     "b80f7ddb86dbeace"
     ]
    },
    "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"

@@ -1268,7 +1268,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                                           _vis_slots, BOOT_SKILL)
     else:
         _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
-        _BOOT_VIS = [1] * len(_vis_slots)
+        _BOOT_VIS = [1] * len(_vis_slots) if _do_things else []   # (no things: no flags)
     # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
     # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
     # host that owns what has been picked up, and fj has no state between frames.

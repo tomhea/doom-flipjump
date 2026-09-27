@@ -517,8 +517,14 @@ Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj
   `SPR_SLOT_B_BYTE` (8); a thing's `gpslot` is `SPR_THING_SLOT_FIELDS` (y0 lo, y0 hi, light row),
   y0 biased by `SPR_THING_Y0_BIAS` (2^15). The fj sides stay literals -- the record writes both,
   `lines_spr_load` reads the fragments (its skip to B is 8 - 3 = 5), `frag_derive` reads the slot
-  and unbiases -- and `tests/host/test_sprite_column.py` reads each literal off those three macros
-  and holds it to its constant, with a mutant per literal that must be told apart.
+  and unbiases. `tests/host/test_sprite_column.py` works out every field's BYTE from the ops: it
+  walks each macro in order, holding the registers that build an address as values (`spslot + 16 *
+  trb_col_x + trb_slot_ofs`; `gpslot + 4 * slot id`; the load's column `spslot + 16 * x1`, stepping
+  16) and following the layout's pointer through every read, write and step, and holds address and
+  offsets to the constants; an op it does not model leaves the bytes after it unknown. 25 mutants --
+  moved offsets and strides, swapped fields, and (PR #93's review, round 2) a dropped increment and
+  an inserted pointer step on each side of each layout -- must each be told apart
+  (`p14_cr2_layout_gap.log`: round 1's order-only test told 10 of them apart).
 - **The latent wrong-light ditto** of section 6 is gone with the four-field compare: the ladder
   compares (slot, block).
 - **The column check** is `scratchpad/gp/probes/sprite/ship_check.py`: the SHIPPED record (the

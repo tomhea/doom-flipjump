@@ -1,0 +1,55 @@
+# PR #93 review round 2 (R9): this checkout's 25 layout mutants, judged by the layout test as of e8c22c3 (round 1's) and as of this commit
+$ python scratchpad/gp/p14_layout_gap.py <git archive e8c22c3>
+A's byte                                        fragment A's byte
+B's byte                                        fragment B's byte
+the load's skip                                 the load's skip to B
+the record's bias                               the record's bias
+the derive's bias                               the derive's bias
+the record's column stride                      NOTHING -- blind
+the load's column stride                        NOTHING -- blind
+the load's column step                          NOTHING -- blind
+the load's pointer                              NOTHING -- blind
+the record's slot stride                        NOTHING -- blind
+the derive's slot stride                        NOTHING -- blind
+the slot offset never added                     NOTHING -- blind
+the record's fragment swapped                   the record's fragment
+the load's A swapped                            the load's fragment A
+the load's B swapped                            the load's fragment B
+the record's slot swapped                       the record's slot
+the derive's slot swapped                       the derive's slot
+the record's fragment: an increment dropped     NOTHING -- blind
+the load: an increment dropped                  NOTHING -- blind
+the record's slot: an increment dropped         NOTHING -- blind
+the derive: an increment dropped                NOTHING -- blind
+the record's fragment: a step inserted          NOTHING -- blind
+the load: a step inserted                       NOTHING -- blind
+the record's slot: a step inserted              NOTHING -- blind
+the derive: a step inserted                     NOTHING -- blind
+10 of 25 mutants told apart by <e8c22c3>'s layout test
+$ python scratchpad/gp/p14_layout_gap.py .
+A's byte                                        fragment A's byte
+B's byte                                        fragment B's byte
+the load's skip                                 the load's fragments
+the record's bias                               the record's bias
+the derive's bias                               the derive's bias
+the record's column stride                      the record's fragment address
+the load's column stride                        the load's column
+the load's column step                          the load's column step
+the load's pointer                              the load's address
+the record's slot stride                        the record's slot address
+the derive's slot stride                        the derive's slot address
+the slot offset never added                     the record's fragment address
+the record's fragment swapped                   the record's fragment
+the load's A swapped                            the load's fragments
+the load's B swapped                            the load's fragments
+the record's slot swapped                       the record's slot
+the derive's slot swapped                       the derive's slot
+the record's fragment: an increment dropped     the record's fragment
+the load: an increment dropped                  the load's fragments
+the record's slot: an increment dropped         the record's slot
+the derive: an increment dropped                the derive's slot
+the record's fragment: a step inserted          the record's fragment
+the load: a step inserted                       the load's fragments
+the record's slot: a step inserted              the record's slot
+the derive: a step inserted                     the derive's slot
+25 of 25 mutants told apart by .'s layout test

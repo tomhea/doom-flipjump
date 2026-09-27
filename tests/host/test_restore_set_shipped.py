@@ -208,11 +208,38 @@ def test_the_thing_cells_are_in_the_standalone_set_too():
     reset, which the reset can only do for labels the set carries. And `thnext` is deliberately NOT
     among them -- because the set never carried it (bind_things rewrote every link every frame), so
     it already persists by not being restored; naming it would make emit_reset_part refuse the build.
-    If a re-key ever adds `thnext` to the set, it must join THING_PERSIST the same day."""
+    If a re-key ever adds `thnext` to the set, it must join THING_PERSIST the same day (the test
+    below holds that, for `thvis` too)."""
     standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
     absent = [n for n in THING_PERSIST if n not in standalone]
     assert not absent, "THING_PERSIST names %s, absent from the standalone set" % absent
-    assert "thnext" not in standalone, "the set now restores thnext -- persist it too"
+
+
+# The standalone cells that persist by NOT being in the set: nothing restores them, so what one
+# frame writes is the next frame's. `thnext` (the lists' links, M7 P1.3) and `thvis` (the baked
+# vanishable things' flags) are the two -- and since M7 P1.5 NEW GAME rewrites both per skill, so a
+# re-key that put either in the set, unpersisted, would have the reset hand back the BOOT skill's
+# links or flags on the very next frame: the chosen skill's world, drawn with hard's pickups.
+PERSIST_BY_ABSENCE = ("thnext", "thvis")
+
+
+def _restored_by_absence(standalone) -> list:
+    """the PERSIST_BY_ABSENCE cells a set with these labels would restore every frame"""
+    persisted = set(STANDALONE_PERSIST) | set(DOOR_PERSIST) | set(THING_PERSIST)
+    return [n for n in PERSIST_BY_ABSENCE if n in standalone and n not in persisted]
+
+
+def test_the_cells_that_persist_by_absence_are_not_restored():
+    standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
+    restored = _restored_by_absence(standalone)
+    assert not restored, "the standalone set now restores %s -- persist it too" % restored
+
+
+def test_a_set_that_restored_thvis_or_thnext_would_be_caught():
+    """R9 for the test above: a set that gained either label, unpersisted, is flagged by name"""
+    standalone = {e[0] for e in _load(SETS["standalone"])["entries"]}
+    assert _restored_by_absence(standalone | {"thvis"}) == ["thvis"]
+    assert _restored_by_absence(standalone | {"thnext", "thvis"}) == ["thnext", "thvis"]
 
 
 def test_the_two_sets_are_otherwise_identical():

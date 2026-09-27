@@ -82,9 +82,7 @@ def play(fjm, out):
     from PIL import Image
     target, nroute, script = build_script()
     frames_n = len(script)
-    events = G.to_events(script) + [
-        G.KeyEvent(G.MENU_FRAMES * G.STANDALONE_POLLS, True, G.ENTER),
-        G.KeyEvent(G.MENU_FRAMES * G.STANDALONE_POLLS + 1, False, G.ENTER)]
+    events = G.to_events(script) + G.menu_exit_events()
     print("door %d ; %d menu + %d walk + 2 use + 10 open + 6 idle = %d frames"
           % (target, G.MENU_FRAMES, nroute, frames_n))
     print("running the BINARY ...")

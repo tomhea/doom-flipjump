@@ -42,8 +42,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT / "scratchpad", ROOT):
 
 from fjmsize import ceiling_words, read_fjm_size                          # noqa: E402
 import m2_std_gate as gate                                                # noqa: E402
-from m2_std_gate import ENTER, KeyEvent, MENU_FRAMES, to_events           # noqa: E402
-from doomfj.wall_renderer import STANDALONE_POLLS                         # noqa: E402
+from m2_std_gate import MENU_FRAMES, menu_exit_events, to_events           # noqa: E402
 
 SPEED_TARGET = 20_000_000          # 80th-percentile RUN's average ops/frame
 SIZE_TARGET_PCT = 35.0             # of the address ceiling
@@ -318,9 +317,9 @@ def full_script(seed, n_game):
 
 
 def events_for(per_frame):
-    """key events + the ENTER that leaves the menu, exactly as m2_std_gate composes them"""
-    return to_events(per_frame) + [KeyEvent(MENU_FRAMES * STANDALONE_POLLS, True, ENTER),
-                                   KeyEvent(MENU_FRAMES * STANDALONE_POLLS + 1, False, ENTER)]
+    """key events + the key that leaves the menu, exactly as m2_std_gate composes them (M7 P1.5:
+    esc -- enter opens the skill screen now; esc meant the world on every binary before it too)"""
+    return to_events(per_frame) + menu_exit_events()
 
 
 # ----------------------------------------------------------------------------------------------

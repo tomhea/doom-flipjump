@@ -16,46 +16,71 @@ red), not chosen as magic indices, so a different palette moves them together in
 """
 from __future__ import annotations
 
-# a 3x5 font: one string of 5 rows, 3 columns each, '#' = ink. 4 px per character with the gap, so
-# a 160-wide screen fits 40 characters — enough for a menu and nothing more, which is the point.
-# M7 P1.5 (the owner, 2026-09-27: "make it more clear that this is an M"): M is FIVE columns wide --
-# three cannot draw its two strokes and the dip between them -- so a glyph is as wide as its rows
-# (`glyph_width`), and every line is laid out by `text_width`, not by a fixed cell.
+# THE MENU'S TWO FONTS, one string per glyph -- rows separated by '|', '#' = ink; a glyph is as wide
+# as its rows (`glyph_width`) and a line is laid out glyph by glyph (`text_width`), one column apart.
+#
+# The LINES use a 5x7 font (the owner, 2026-09-27, from rendered previews: "make it more clear that
+# this is an M letter" -- in a 3x5 font no M can draw two strokes and the dip between them). 6 px a
+# character with the gap, so a 160-wide screen fits 26 -- a menu needs 18.
 _GLYPHS = {
+    "A": " ### |#   #|#   #|#####|#   #|#   #|#   #", "B": "#### |#   #|#   #|#### |#   #|#   #|#### ",
+    "C": " ### |#   #|#    |#    |#    |#   #| ### ", "D": "#### |#   #|#   #|#   #|#   #|#   #|#### ",
+    "E": "#####|#    |#    |#### |#    |#    |#####", "F": "#####|#    |#    |#### |#    |#    |#    ",
+    "G": " ### |#   #|#    |# ###|#   #|#   #| ####", "H": "#   #|#   #|#   #|#####|#   #|#   #|#   #",
+    "I": " ### |  #  |  #  |  #  |  #  |  #  | ### ", "J": "  ###|   # |   # |   # |   # |#  # | ##  ",
+    "K": "#   #|#  # |# #  |##   |# #  |#  # |#   #", "L": "#    |#    |#    |#    |#    |#    |#####",
+    "M": "#   #|## ##|# # #|# # #|#   #|#   #|#   #", "N": "#   #|#   #|##  #|# # #|#  ##|#   #|#   #",
+    "O": " ### |#   #|#   #|#   #|#   #|#   #| ### ", "P": "#### |#   #|#   #|#### |#    |#    |#    ",
+    "Q": " ### |#   #|#   #|#   #|# # #|#  # | ## #", "R": "#### |#   #|#   #|#### |# #  |#  # |#   #",
+    "S": " ####|#    |#    | ### |    #|    #|#### ", "T": "#####|  #  |  #  |  #  |  #  |  #  |  #  ",
+    "U": "#   #|#   #|#   #|#   #|#   #|#   #| ### ", "V": "#   #|#   #|#   #|#   #|#   #| # # |  #  ",
+    "W": "#   #|#   #|#   #|# # #|# # #|# # #| # # ", "X": "#   #|#   #| # # |  #  | # # |#   #|#   #",
+    "Y": "#   #|#   #| # # |  #  |  #  |  #  |  #  ", "Z": "#####|    #|   # |  #  | #   |#    |#####",
+    "0": " ### |#   #|#  ##|# # #|##  #|#   #| ### ", "1": "  #  | ##  |  #  |  #  |  #  |  #  | ### ",
+    "2": " ### |#   #|    #|   # |  #  | #   |#####", "3": "#####|   # |  #  |   # |    #|#   #| ### ",
+    "4": "   # |  ## | # # |#  # |#####|   # |   # ", "5": "#####|#    |#### |    #|    #|#   #| ### ",
+    "6": "  ## | #   |#    |#### |#   #|#   #| ### ", "7": "#####|    #|   # |  #  | #   | #   | #   ",
+    "8": " ### |#   #|#   #| ### |#   #|#   #| ### ", "9": " ### |#   #|#   #| ####|    #|   # | ##  ",
+    " ": "   |   |   |   |   |   |   ", "-": "    |    |    |####|    |    |    ",
+    ".": "  |  |  |  |  |##|##", ":": "  |##|##|  |##|##|  ",
+    "/": "    #|    #|   # |  #  | #   |#    |#    ", ">": "#    | #   |  #  |   # |  #  | #   |#    ",
+}
+GLYPH_W, GLYPH_H, GLYPH_GAP = 5, 7, 1
+CELL_W = GLYPH_W + GLYPH_GAP            # the usual advance; the truncation budget below counts it
+
+# The CREDIT uses the small 3x5 font (the owner chose it small and quiet), its M five columns with
+# the middle stroke two rows deep, and a two-column full stop.
+_SMALL_GLYPHS = {
     "A": "###|# #|###|# #|# #", "B": "## |# #|## |# #|## ", "C": "###|#  |#  |#  |###",
     "D": "## |# #|# #|# #|## ", "E": "###|#  |## |#  |###", "F": "###|#  |## |#  |#  ",
     "G": "###|#  |# #|# #|###", "H": "# #|# #|###|# #|# #", "I": "###| # | # | # |###",
     "J": "  #|  #|  #|# #|###", "K": "# #|# #|## |# #|# #", "L": "#  |#  |#  |#  |###",
-    "M": "#   #|## ##|# # #|#   #|#   #", "N": "## |# #|# #|# #|#  ", "O": "###|# #|# #|# #|###",
+    "M": "#   #|## ##|# # #|# # #|#   #", "N": "## |# #|# #|# #|#  ", "O": "###|# #|# #|# #|###",
     "P": "###|# #|###|#  |#  ", "Q": "###|# #|# #|###|  #", "R": "###|# #|## |# #|# #",
     "S": "###|#  |###|  #|###", "T": "###| # | # | # | # ", "U": "# #|# #|# #|# #|###",
     "V": "# #|# #|# #|# #| # ", "W": "# #|# #|###|###|# #", "X": "# #|# #| # |# #|# #",
     "Y": "# #|# #| # | # | # ", "Z": "###|  #| # |#  |###",
-    "0": "###|# #|# #|# #|###", "1": " # |## | # | # |###", "2": "###|  #|###|#  |###",
-    "3": "###|  #|###|  #|###", "4": "# #|# #|###|  #|  #", "5": "###|#  |###|  #|###",
-    "6": "###|#  |###|# #|###", "7": "###|  #|  #|  #|  #", "8": "###|# #|###|# #|###",
-    "9": "###|# #|###|  #|###",
-    " ": "   |   |   |   |   ", "-": "   |   |###|   |   ", ".": "   |   |   |   | # ",
-    ":": "   | # |   | # |   ", "/": "  #|  #| # |#  |#  ", ">": "#  | # |  #| # |#  ",
+    " ": "   |   |   |   |   ", ".": "  |  |  |  |# ",
 }
-GLYPH_W, GLYPH_H, GLYPH_GAP = 3, 5, 1
-CELL_W = GLYPH_W + GLYPH_GAP            # the usual advance; the truncation budget below counts it
+SMALL_GLYPH_H = 5
 
 # M7 P1.5 (the owner, 2026-09-27): the creator's credit, drawn on every menu screen in the corner,
-# in a dim gray (palette_colours' fourth colour). The font has capitals only; a domain name is
+# in a dim gray (palette_colours' fourth colour). The fonts have capitals only; a domain name is
 # case-insensitive, so this is the owner's "tomhe.app".
 CREDIT = "TOMHE.APP"
 CREDIT_MARGIN = 2                        # px from the right and bottom edges
 CREDIT_LUMA = 0.4                        # the credit's gray: this fraction of the text's brightness
 
 
-def glyph_width(ch: str) -> int:
-    return len(_GLYPHS.get(ch, _GLYPHS[" "]).split("|")[0])
+def glyph_width(ch: str, font=None) -> int:
+    font = _GLYPHS if font is None else font
+    return len(font.get(ch, font[" "]).split("|")[0])
 
 
-def text_width(label: str) -> int:
-    """the pixel width of `label` as drawn: each glyph's own width, one gap between glyphs"""
-    return sum(glyph_width(ch) for ch in label) + GLYPH_GAP * max(0, len(label) - 1)
+def text_width(label: str, font=None) -> int:
+    """the pixel width of `label` as drawn in `font` (the lines' by default): each glyph's own width,
+    one gap between glyphs"""
+    return sum(glyph_width(ch, font) for ch in label) + GLYPH_GAP * max(0, len(label) - 1)
 
 # the protocol's own constants, from the device that decodes them -- NOT a third private copy.
 # (tests/fj/stream_screen.py has the lab decoder's; this file had a second. R6 is one source.)
@@ -85,13 +110,15 @@ def palette_colours(palette_rgb) -> tuple:
     return background, text, highlight, credit
 
 
-def _draw(out, width, height, label, x0, y0, ink):
-    """`label` at (x0, y0), glyph after glyph at their own widths; clipped to the screen"""
+def _draw(out, width, height, label, x0, y0, ink, font=None):
+    """`label` at (x0, y0) in `font` (the lines' by default), glyph after glyph at their own widths;
+    clipped to the screen"""
+    font = _GLYPHS if font is None else font
     x = x0
     for ch in label:
-        glyph = _GLYPHS.get(ch, _GLYPHS[" "]).split("|")
-        for gy in range(GLYPH_H):
-            for gx, cell in enumerate(glyph[gy]):
+        glyph = font.get(ch, font[" "]).split("|")
+        for gy, row in enumerate(glyph):
+            for gx, cell in enumerate(row):
                 if cell == "#" and 0 <= x + gx < width and 0 <= y0 + gy < height:
                     out[(y0 + gy) * width + x + gx] = ink
         x += len(glyph[0]) + GLYPH_GAP
@@ -99,7 +126,8 @@ def _draw(out, width, height, label, x0, y0, ink):
 
 def _bitmap(width, height, lines, selected, colours):
     """The menu as a width*height list of palette indices. THE picture, for both mirrors: the lines
-    centred, and the owner's CREDIT in the bottom-right corner in its dim gray."""
+    centred in the 5x7 font, and the owner's CREDIT in the bottom-right corner, small (3x5) and in
+    its dim gray."""
     background, text, highlight, credit = colours
     out = [background] * (width * height)
     if not lines:
@@ -112,8 +140,8 @@ def _bitmap(width, height, lines, selected, colours):
         label = label.upper()[:width // CELL_W]
         x0 = max(0, (width - text_width(label)) // 2)
         _draw(out, width, height, label, x0, top + row * (GLYPH_H + 2), ink)
-    _draw(out, width, height, CREDIT, width - CREDIT_MARGIN - text_width(CREDIT),
-          height - CREDIT_MARGIN - GLYPH_H, credit)
+    _draw(out, width, height, CREDIT, width - CREDIT_MARGIN - text_width(CREDIT, _SMALL_GLYPHS),
+          height - CREDIT_MARGIN - SMALL_GLYPH_H, credit, _SMALL_GLYPHS)
     return out
 
 

@@ -1,0 +1,4 @@
+$ python scratchpad/gp/probes/bank/compare.py
+columns x buckets compared: 40128; painted rows 1283191; rows that differ 181406 (14.14%); drawn/not-drawn flips 78
+worst: [(79, 49, 'hd', 5, 98), (76, 49, 'hd', 5, 100), (71, 49, 'hd', 5, 95), (70, 35, 'hd', 7, 100), (68, 3001, 'hd', 13, 100), (68, 3001, 'hd', 10, 95), (68, 35, 'hd', 7, 98), (67, 3001, 'hd', 13, 95)]
+rc=0

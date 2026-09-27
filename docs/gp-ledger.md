@@ -217,3 +217,36 @@ R4: at hard, 7 zombiemen and 26 multiplayer-only things no longer drawn).
    the persist set (the build refusing it).
 
 **Row**: (filled after the build)
+
+## P1.6 the native-list sprite bank (class F) -- declared 2026-09-27, before the build
+
+**What**: `docs/gp-sprite-bank.md`. Each patch column is stored once per tier (HD / MID / LD) as a
+NATIVE run list, rows normalized to 0..255 of its own height (`doomfj.spritebank`), and drawn at the
+thing's height bucket through `rowmap`, a D4 dispatch (`rowmap[b][n] = ceil(n * hb / 255)`) -- two
+lookups a fragment, one a run; the record adds `u` to the tier's region instead of multiplying, and
+takes a column iff its bucket is at least the list's `min_b` (the shared rule). The bank also holds
+every frame and rotation of E1M1's monsters, barrels, fireballs, puffs and blood (306 views, 237
+lumps), which nothing draws before P3.
+
+**Budget**: size **-793,856 words** MEASURED at emit (16,635 blocks against 22,837; 2,129,280 against
+2,923,136 words) while holding the animation; ops ESTIMATE +0.05 .. +0.15M on combat set v2's binding
+(the rowmap lookups against the record's saved multiply). The frozen set: a v3 (below).
+
+**Kill criteria** (any one -> the binary does not ship; class F, decision D8):
+1. Host: `doomfj.spritebank`'s rules (identity scale draws `sprite_strip`'s column; the rowmap is
+   ceil(n*hb/255); `min_b` is the shared rule; a drawn strip is never empty), or the emitted bank not
+   `spritebank`'s lists for every kind, tier and animation view -- each with its mutated control caught.
+2. fj: the SHIPPED `stream.frag_derive` / `frag_runs` not drawing `strip_at`'s rows (the fast path
+   and both clips), or a walker that skips the rowmap not caught (`tests/fj/test_sprite_bank_fj.py`).
+3. `m3_gate`, `m2_std_gate` not byte- and state-exact against the new oracle; `b0_scenarios` with
+   `--pixel-every 1` not pixel-exact; `deg_gate` not byte-exact at its four viewpoints.
+4. CAP-22: the v2 binding over 22M, or size over 35% of 2^27; msframe over ~90 ms/frame without an
+   explanation (the class-F tripwire). msframe's time is recorded as the price.
+5. The frozen set: MEASURED, the census's drawn population (F4) moves on 5 of 11 runs under this
+   oracle (`docs/ship-evidence/p16_census_f4.log`) -> a v3 of combat set planned on the frozen keys,
+   its B0 re-measured, frozen by the OWNER (`docs/handoff-gameplay.md` section 1) -- P1.6 does not
+   ship on v2.
+6. `pinreport.py`: a hot word not pinned (the heat list re-keyed, `heat_blocked27_p16`,
+   `thing_record_body:25:24`); the restore sets not re-keyed to this rung's labels.
+
+**Row**: (filled after the build)

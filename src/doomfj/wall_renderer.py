@@ -52,7 +52,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
-from doomfj.doorcode import door_decls, door_line_ids, door_tic_lines
+from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
                           pass_state, use_boxes_xy)
@@ -339,6 +339,22 @@ DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "QUIT"]
 # caller-supplied list, so `menu_entries` brings its own `menu_selected`.
 DEFAULT_MENU_SELECTED = 2
 
+# M7 P1.5 -- the SKILL SCREEN NEW GAME opens (docs/gp-skill-menu.md): entry SKILL_MENU_FIRST + k is
+# skill SKILLS[k], and `menu_sel` holds k, baked to the boot skill's (hard).
+SKILL_MENU = ["CHOOSE SKILL", "", "EASY", "MEDIUM", "HARD"]
+SKILL_MENU_FIRST = 2
+
+# M7 P1.5 -- the menu's own cells. NOT in the restore sets, on purpose: `menu_scr` (0 = the main
+# menu, 1 = the skill screen) and `menu_sel` (the highlighted skill) persist across frames by not
+# being restored -- as `thnext` and `thvis` do -- and the four EVENT cells are zeroed before every
+# frame's polls (`_standalone_input_lines`), so a frame starts with none. `rs_ret` is the restart
+# block's fcall return register, which `stl.fret` leaves zero.
+MENU_STATE_DECLS = [
+    "menu_scr: hex.vec 1, 0", "menu_sel: hex.vec 1, 2",
+    "ev_enter: hex.vec 1", "ev_esc: hex.vec 1", "ev_up: hex.vec 1", "ev_dn: hex.vec 1",
+    "rs_ret: hex.vec w/4",
+]
+
 # M5 — the standalone tier's own globals, in ONE place (R6): the emitter declares them and
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, so a vec
 # widened here without re-running that fails the build instead of leaving half a register
@@ -359,8 +375,44 @@ STANDALONE_SCRATCH_DECLS = [
 ]
 
 
-def _menu_lines(cfg, asset_wad, entries, selected: int) -> list:
-    """M3 — the MENU frame, and the branch that chooses it.
+def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill) -> tuple:
+    """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
+
+    Choosing a skill must put the world back at that skill's level start: every cell the program
+    PERSISTS is set to its level-start value (build.STANDALONE_PERSIST's view, DOOR_PERSIST's doors,
+    THING_PERSIST's lists, bindings and positions, and the lists' links and flags that persist by
+    not being restored). The shared half, `restart_common` (fcall'd), writes what no skill changes --
+    the player start, the doors shut and idle, each runtime thing's spawn leaf and position -- and
+    ZEROES every list byte (`m1.zerobyte`, the M1 reset's own byte writer); each skill's half then
+    flips in its non-zero list bytes (bit k of a byte cell is `cell + dbit + k`, the address
+    `m1.zerobyte` itself flips) and sets its `thvis` flags. `per_skill[k]` is
+    `things.skill_level_start(...)` for skill k. The block runs on the one frame a skill is picked,
+    so its ops are that frame's, not every frame's."""
+    common = ["restart_common:",
+              f"    hex.set 8, viewx, {spawn.x & 0xFFFFFFFF}",
+              f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
+              f"    hex.set 8, viewangle, {spawn.angle & 0xFFFFFFFF}",
+              *([f"    hex.zero {ndoors}, dstate", f"    hex.zero {ndoors}, ddir",
+                 f"    hex.zero {ndoors}, dsub", f"    hex.zero {WAIT_NIBBLES * ndoors}, dwait"]
+                if ndoors else []),
+              *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
+              *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
+              f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
+              f"    rep({len(rt_binds)}, i) m1.zerobyte thnext + i*dw",
+              "    stl.fret rs_ret"]
+    skills = []
+    for head, nxt, vis in per_skill:
+        out = []
+        for label, arr in (("sshead", head), ("thnext", nxt)):
+            for i, v in enumerate(arr):
+                out += [f"    {label} + {i}*dw + dbit + {b};" for b in range(8) if v >> b & 1]
+        out += [f"    hex.set 2, thvis + {j}*2*dw, {v}" for j, v in enumerate(vis)]
+        skills.append(out)
+    return common, skills
+
+
+def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
+    """M3 — the MENU frames, and the branch that chooses them.
 
     A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
     column run-lists, so this is a constant byte stream: no renderer, no map, no tables, no
@@ -370,17 +422,83 @@ def _menu_lines(cfg, asset_wad, entries, selected: int) -> list:
     tail, whose last line is `stl.output_char 0xFF` -- which `selfreset.emit_reset_part` asserts on
     when it patches the frame into a loop. Emitting a second 0xFF here would present an empty
     frame; jumping past the tail would break that assert. So the menu ends where the world ends.
+
+    M7 P1.5 -- THE STATE MACHINE (docs/gp-skill-menu.md). The polls only record events
+    (`ev_enter`, `ev_esc`, `ev_up`, `ev_dn`); here, first match wins, in the order esc, enter, up,
+    down:
+      * in the world: esc or enter opens the MAIN menu (M3's toggle, kept);
+      * on the main menu: esc resumes the world, enter opens the SKILL screen;
+      * on the skill screen: esc goes back, up / down move the highlight (clamped), and enter runs
+        the highlighted skill's RESTART BLOCK and enters the world -- on this very frame, so the
+        world frame drawn is the level start (the model's `new_game`: the restart, then the tic).
+    Every screen is a baked frame: the main menu, and the skill screen once per highlighted skill.
+    `restart` is `restart_lines(...)`; the game tier always passes it.
     """
     from doomfj.menu import fj as menu_fj, palette_colours
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
+    assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
+    common, _skills = restart
     return [
-        # after the poll (so this frame sees the toggle) and BEFORE the sim, so a menu frame does
+        # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
+        *menu_state_lines(restart),
+        # -- the frame: the world, or one of the four baked screens
         "hex.if0 1, mode, do_world",
+        "hex.if0 1, menu_scr, mf_main",
+        "hex.if0 1, menu_sel, mf_s0",
+        "hex.if_flags menu_sel, 1<<1, mf_s2, mf_s1",
+        "mf_main:",
         menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, selected, colours,
                 label="menu_frame", end_marker=False),
         ";frame_end",
+        *[line for k in range(3) for line in (
+            f"mf_s{k}:",
+            menu_fj(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
+                    label=f"menu_skill{k}", end_marker=False),
+            ";frame_end")],
+        *common,                           # fcall'd only: every screen above ends in a jump
         "do_world:",
+    ]
+
+
+def menu_state_lines(restart) -> list:
+    """M7 P1.5 -- the menu's STATE MACHINE (see `_menu_lines`), alone: the events in, `mode`,
+    `menu_scr`, `menu_sel` and -- on a skill's NEW GAME -- the restart block out. No frame: the
+    caller draws. `restart` is `restart_lines(...)`; its shared routine (`restart_common`, fcall'd
+    with `rs_ret`) must be placed by the caller where nothing falls into it.
+    tests/fj/test_skill_menu.py runs exactly these lines."""
+    _common, skills = restart
+    assert len(skills) == len(SKILLS) == 3
+    return [
+        "hex.if0 1, mode, mn_world",
+        "hex.if0 1, menu_scr, mn_main",
+        # -- the skill screen
+        "hex.if0 1, ev_esc, mn_s1", ";mn_back", "mn_s1:",
+        "hex.if0 1, ev_enter, mn_s2", ";mn_start", "mn_s2:",
+        "hex.if0 1, ev_up, mn_s3", ";mn_up", "mn_s3:",
+        "hex.if0 1, ev_dn, mn_done", ";mn_dn",
+        "mn_back:", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_up:", "hex.if0 1, menu_sel, mn_done", "hex.dec 1, menu_sel", ";mn_done",
+        "mn_dn:", "hex.if_flags menu_sel, 1<<2, mn_dn_inc, mn_done",
+        "mn_dn_inc:", "hex.inc 1, menu_sel", ";mn_done",
+        "mn_start:",                       # NEW GAME at the highlighted skill
+        "stl.fcall restart_common, rs_ret",
+        "hex.if0 1, menu_sel, mn_r0",
+        "hex.if_flags menu_sel, 1<<1, mn_r2, mn_r1",
+        "mn_r0:", *skills[0], ";mn_started",
+        "mn_r1:", *skills[1], ";mn_started",
+        "mn_r2:", *skills[2],
+        "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
+        # -- the main menu
+        "mn_main:",
+        "hex.if0 1, ev_esc, mn_m1", "hex.zero 1, mode", ";mn_done", "mn_m1:",
+        "hex.if0 1, ev_enter, mn_done", "hex.set 1, menu_scr, 1", ";mn_done",
+        # -- the world
+        "mn_world:",
+        "hex.if0 1, ev_esc, mn_w1", ";mn_open", "mn_w1:",
+        "hex.if0 1, ev_enter, mn_done",
+        "mn_open:", "hex.set 1, mode, 1", "hex.zero 1, menu_scr",
+        "mn_done:",
     ]
 
 
@@ -400,7 +518,11 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     restore-set scratch, and only the four flags need to survive the reset.
     """
     return [
-        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, mode, bad",
+        # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
+        # state machine reads them
+        "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
+        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
+        f"ev_enter, ev_esc, ev_up, ev_dn, bad",
         # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
         "hex.zero 2, pkeys",
@@ -1920,8 +2042,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
     # M3: the menu frame + the branch past the world. Built here, where `asset_wad` is
     # resolved, so its colours come from the SAME palette the renderer bakes.
+    if menu:
+        assert _skills, "the menu's NEW GAME needs the game tier's skills (things, moving, standalone)"
+        _rt_things = [map_wad.things(mapname)[w] for w in sorted(_mt_keep)]
+        _restart = restart_lines(
+            _spawn, len(_dslot) if _dst_tbl else 0, _MT_BINDS,
+            [(((t.y << 16) & 0xFFFFFFFF) << 32) | ((t.x << 16) & 0xFFFFFFFF) for t in _rt_things],
+            _MT_NSS,
+            [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
+             for sk in SKILLS])
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
-                               DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected)
+                               DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
+                               restart=_restart)
                    if menu else None)
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, door_lines=_door_tic)
@@ -2247,6 +2379,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # M5: the keyboard poll's scratch, and the four PERSISTENT held-key flags. The flags are
           # the only cells besides the view state that the M1 reset must leave alone.
           *(STANDALONE_SCRATCH_DECLS if standalone else []),
+          *(MENU_STATE_DECLS if standalone else []),        # M7 P1.5: not in the restore sets
           # M14-c: the player tic's scratch -- the signed 16.16 move magnitude, the
           # finesine index it is projected through, and the two 16.16 deltas
           *(["pmove: hex.vec 8", "pangt: hex.vec 8", "pangi: hex.vec 3",

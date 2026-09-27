@@ -89,6 +89,10 @@ def build(labels_path=None, gen_dir=None):
         ("bspcode walk (nodes, pos_leaf, ss code)", byname["e1m1_bspcode_walk"]),
         ("dsc walk (eye point-location)", byname["e1m1_dsc_walk"]),
         ("dsccs walk (collision point-location)", byname["e1m1_dsccs_walk"]),
+        # M7 P1.2's collision cells sit between the seed descent and ptloc; a build before P1.2 has
+        # none, and its profile keeps the old boundaries
+        *([("collision cells (tree, stubs, sim.line_test)", byname["e1m1_cc_n0"])]
+          if "e1m1_cc_n0" in byname else []),
         ("ptloc_walk (M14-e point location)", byname["ptloc_walk"]),
         (None, parts["e1m1_05_state"]),                     # the state part: transparent
         ("banks head (vars, sprbkt tables)", parts["e1m1_06_banks"]),

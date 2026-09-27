@@ -1,15 +1,16 @@
-"""M2-R4 -- the door's fj half, and the ONE BIT it shares with the collision table.
+"""M2-R4 -- the door's fj half, and what it shares with the collision cells.
 
 `tests/host/test_doors.py` covers the geometry and `test_doors_runtime.py` the state model. Neither
 touches `doomfj/doorcode.py`, which is the transliteration that turns that model into fj text, or
-the branch M2-R4 added to `collision.line_rows`. Those two are a matched pair: `line_rows` bakes a
-door's opening at the OPEN height and marks the line BLOCKING, and `doorcode._unblock_lines` emits
-the single `wflip` that clears the bit. The whole "a runtime door costs nothing on the hot path"
-claim is that pairing, and it is exactly the shape that drifts silently -- the address is computed
-in one module out of constants that live in the other.
+the branch M2-R4 added to `collision.line_rows`. Since M7 P1.2 those two meet in ONE place: a door
+line's row carries the OPEN opening and no door bit, and the collision cells' stub for that line
+reads the door's `dstate` against its pass state when it is tested. The door tic itself writes only
+the door's own cells.
 
-So the tests that matter here are the CROSS-MODULE ones: the flipped byte must be the byte the
-walk reads, and the cells the emitter declares must be the cells the reset carries.
+So the tests that matter here are the CROSS-MODULE ones: a door line's row must leave the door bit
+to runtime, the door tic must touch nothing but its own state, and the cells the emitter declares
+must be the cells the reset carries. (The stub's own reading of `dstate` is pinned in
+`tests/host/test_collision_cells.py`.)
 """
 import re
 
@@ -17,9 +18,8 @@ import pytest
 
 from doomfj import doorcode
 from doomfj.build import DOOR_PERSIST
-from doomfj.collision import (FLAG_BLOCKING, FLAG_ONE_SIDED, FLAGS_REST_BYTE, FLAGS_REST_INDEX,
-                              LINE_REST_BYTES, LINE_REST_LEN, line_rows)
-from doomfj.doors import door_states, heights_for_states
+from doomfj.collision import FLAG_BLOCKING, FLAG_ONE_SIDED, line_rows
+from doomfj.doors import door_states, heights_for_states, use_boxes_xy
 from doomfj.reference_model import apply_sector_heights
 from doomfj.mapcompiler import bake_bsp
 from doomfj.wad import WadFile
@@ -42,7 +42,7 @@ def doors(level):
     return door_states(secs, lds, sds)
 
 
-# -- the one bit: what `line_rows` bakes and what `_unblock_lines` flips ------------------------
+# -- the door's lines: the row leaves the door to runtime ---------------------------------------
 
 def _fully_open(level, doors):
     """The sector list with EVERY door at its last state -- what the emitter calls `_dsecs_open`,
@@ -53,52 +53,41 @@ def _fully_open(level, doors):
         secs, heights_for_states(secs, lds, sds, {si: len(st) - 1 for si, st in doors.items()}))
 
 
-def test_the_wflip_targets_the_flags_byte_the_walk_reads(level, doors):
-    """THE cross-module invariant. `_unblock_lines` writes an address out of `collision`'s row
-    layout; if either side's stride moved, the flip would land on a neighbouring field -- `opentop`
-    is the very next one -- and a door would open by corrupting its own height instead of by
-    clearing a flag. Recompute the address here from the layout, independently of the f-string."""
-    secs, lds, sds, _v = level
-    dli = doorcode.door_line_ids(secs, lds, sds, doors)
-    lis = sorted(dli[sorted(dli)[0]])
-    out = doorcode._unblock_lines(lis)
-    assert len(out) == len(lis)
-    for line, li in zip(out, lis):
-        m = re.fullmatch(r"\s*wflip lnrow \+ (\d+)\*dw \+ w, (0x[0-9a-fA-F]+)\*dw", line)
-        assert m, line
-        assert int(m.group(1)) == li * LINE_REST_LEN + FLAGS_REST_BYTE
-        assert int(m.group(2), 16) == FLAG_BLOCKING
-    # ... and the byte it lands on really is one byte wide, with a whole field after it to hit.
-    assert LINE_REST_BYTES[FLAGS_REST_INDEX] == 1
-    assert FLAGS_REST_BYTE + 1 < LINE_REST_LEN
-
-
-def test_the_flip_is_dispatch_free(level, doors):
-    """R42: a switch target may only `wflip`/`hex.xor_by` -- anything that dispatches cannot sit
-    there. The unblock is emitted where a per-state form could need to, so it stays clean."""
-    secs, lds, sds, _v = level
-    dli = doorcode.door_line_ids(secs, lds, sds, doors)
-    for line in doorcode._unblock_lines(sorted(dli[sorted(dli)[0]])):
-        assert line.strip().startswith("wflip ")
-        assert "hex.set" not in line and ";" not in line
-
-
-def test_toggling_that_bit_is_what_turns_a_door_from_wall_into_doorway(level, doors):
-    """The bit's MEANING, not just its address: with it set the row reads as blocking, and one XOR
-    of `FLAG_BLOCKING` at that byte is the whole difference. `check_position`'s wall test is
-    `flags & (FLAG_ONE_SIDED | FLAG_BLOCKING)`, so this is the value that test reads."""
+def test_a_door_lines_row_carries_no_static_block(level, doors):
+    """The collision cells' door stub xors FLAG_BLOCKING into the line's flags while the door is
+    shut, so the row's own flags must be ZERO: a baked bit would be CLEARED by that xor (a shut door
+    you walk through), and a baked one-sided flag would make the door a wall at every state. The
+    emitter refuses both (`collision_cells_fj`); this pins the row that makes it unnecessary."""
     secs, lds, sds, verts = level
-    secs_open = _fully_open(level, doors)
     dli = doorcode.door_line_ids(secs, lds, sds, doors)
     door_lis = {li for lis in dli.values() for li in lis}
+    assert len(door_lis) >= 20
     rows = line_rows(lds, verts, secs, sds, ML_BLOCKING,
-                     secs_open=secs_open, door_line_ids=door_lis)
+                     secs_open=_fully_open(level, doors), door_line_ids=door_lis)
     for li in sorted(door_lis):
-        flags = rows[li][9]
-        assert flags & FLAG_BLOCKING, f"line {li} bakes shut-as-a-wall"
-        assert not flags & FLAG_ONE_SIDED, f"line {li} has no opening to clear into"
-        assert not (flags ^ FLAG_BLOCKING) & (FLAG_ONE_SIDED | FLAG_BLOCKING), (
-            f"line {li} would still refuse after the wflip -- the one bit is not enough")
+        assert rows[li][9] == 0, f"line {li} bakes flags {rows[li][9]}"
+    # R9: the same rows DO carry the static flags where they belong
+    walls = [li for li, ld in enumerate(lds) if ld.back == -1]
+    assert walls and all(rows[li][9] & FLAG_ONE_SIDED for li in walls)
+    blocking = [li for li, ld in enumerate(lds) if ld.back != -1 and ld.flags & ML_BLOCKING]
+    assert all(rows[li][9] & FLAG_BLOCKING for li in blocking)
+
+
+def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
+    """Before P1.2 the tic flipped each door line's blocking bit in the collision table on the two
+    steps that cross the pass state -- a second copy of the door's state. Now nothing in the tic
+    may write outside `dstate`/`ddir`/`dsub`/`dwait`/`duse`/`dbox`; every other cell it names is
+    only READ (the player's position for the use box, the key byte)."""
+    secs, lds, sds, verts = level
+    slots = sorted(doors)
+    text = "\n".join(doorcode.door_tic_lines(slots, {si: len(doors[si]) for si in slots},
+                                             use_boxes_xy(secs, lds, sds, verts)))
+    assert "wflip" not in text and "lnrow" not in text and "ca_" not in text
+    written = set()
+    for m in re.finditer(r"hex\.(?:set|zero|inc|dec|xor_by|mov) (?:\d+, )?([A-Za-z_]\w*)", text):
+        written.add(m.group(1))
+    assert written <= {"dstate", "ddir", "dsub", "dwait", "duse", "dbox"}, sorted(written)
+    assert {"dstate", "ddir", "dsub", "dwait"} <= written, "the census is not seeing the writes"
 
 
 def test_a_door_line_bakes_its_opening_at_the_OPEN_height(level, doors):
@@ -129,8 +118,8 @@ def test_without_the_door_arguments_the_table_is_the_stock_one(level):
 
 
 def test_door_line_ids_are_two_sided_only(level, doors):
-    """A door's one-sided TRACK walls have no opening at any state; listing one would emit a wflip
-    that clears the blocking bit on a solid wall, i.e. a hole in the map."""
+    """A door's one-sided TRACK walls have no opening at any state; listing one would give a solid
+    wall a door stub -- which `collision_cells_fj` refuses, since its row's flags are not zero."""
     secs, lds, sds, _v = level
     dli = doorcode.door_line_ids(secs, lds, sds, doors)
     assert set(dli) <= set(doors)

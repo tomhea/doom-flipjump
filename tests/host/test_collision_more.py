@@ -1,9 +1,9 @@
-"""M14-d/M14-e — the parts of `doomfj/collision.py` that only a 45-minute assemble checks today.
+"""M14-d/M14-e/M7 P1.2 — the parts of `doomfj/collision.py` that only a long assemble checks today.
 
-`tests/host/test_collision.py` proves the ORACLE's geometry and that the table walk agrees with it
-INSIDE the map; `tests/fj/test_collision_fj.py` proves the emitted fj computes the right answer, but
-it builds a program. Between them sits the Python that WRITES the fj, and almost none of it is
-checked without a build. This file closes that gap. Every test here is host-only and touches no
+`tests/host/test_collision_cells.py` proves the cell lists and their Python model exact against the
+ORACLE; `tests/fj/test_collision_fj.py` proves the emitted fj computes the right answer, but it
+builds a program. Between them sits the Python that WRITES the fj, and much of it is checked by
+nothing short of a build. This file closes that gap. Every test here is host-only and touches no
 emitter output beyond the text it is handed.
 
 What it pins, and what breaks in the shipped program if it stops holding:
@@ -12,55 +12,44 @@ What it pins, and what breaks in the shipped program if it stops holding:
   `hex.scmp` instead of the cross product, and the three targets have to be what
   `mapcompiler._point_side` says at the three probes. A flipped `n.dy > 0`, a swapped `lo, hi`, or a
   swapped `n.left`/`n.right` sends the descent into the wrong subsector: things bind to the wrong
-  leaf and `check_position`'s seed sector is wrong. Today that surfaces as a wrong picture after a
+  leaf and the collision seed's sector is wrong. Today that surfaces as a wrong picture after a
   full build. The diagonal branch's four baked constants are pinned in the same way.
 * **Its label closure.** An `NF_SUBSECTOR` masking slip emits a jump to a label nothing defines —
   an assembler failure ~40 minutes into a heavy build; here it is milliseconds.
 * **`move_with_collision_lines`' shape.** `cprad` once, with the RADIUS, before the first
-  `sim.check_position` (the failure its own warning comment documents: an unwritten `cprad` is zero,
+  `sim.check_cells` (the failure its own warning comment documents: an unwritten `cprad` is zero,
   the box collapses to a point and the player walks through walls); the three candidates in the
   oracle's order (a reorder changes which wall the player slides along, and only the cumulative
-  `m5_gate` would see it); the blockmap arguments matching a `blockmap_grid` recomputed here; and
-  every label defined once with every jump resolving.
-* **The row layout.** `collision_tables_fj`'s local `pack` masks and cannot complain, so a field too
-  wide for `LINE_ROW_BYTES` silently packs a WRAPPED value and the wall's bbox lands elsewhere. This
-  is the guard M4's nine levels need — E1M1 has enormous headroom, an E2/E3 map need not.
-  `line_box`/`line_rest` are pinned against distinct sentinels because the module's own
-  `assert LINE_REST_BYTES[FLAGS_REST_INDEX] == 1` cannot tell `flags` from `slope`.
-* **The LUT header counts**, which say `bkoff` is sized from the DENSE rectangle and not from the
-  occupied set — sizing it from `len(grid)` makes every block past the first gap read another
-  block's row.
-* **`check_position_table` OUTSIDE the blockmap rectangle**, a branch every existing test misses:
-  the `0 <= bx - bx0 < nbx` guard is computed after `bi`, so without it a negative index wraps into
-  another block and a too-large one raises. It is also the Python mirror of `sim.check_block`'s
-  `xok`/`yok`/`skip`.
-* **The runtime door in both mirrors at once**: `line_rows(door_line_ids=D)` marks rows BLOCKING
-  while the oracle consults `scene.blocked_lines`, and nothing compared the two answers before.
+  `m5_gate` would see it); all four checks entering the SAME cell routine; and every label defined
+  once with every jump resolving.
+* **The line constants' widths.** A cell's line stub xors each constant into an 8-nibble argument
+  cell, and a map coordinate is 16.16 there: a coordinate outside int16 does not survive `<< 16`, so
+  the wall's bbox would land elsewhere and the player walk through it. This is the guard M4's
+  levels need -- E1M1 has enormous headroom, an E2/E3 map need not.
+* **The runtime door in both mirrors at once**: a door line's stub decides shut-or-open from the
+  door's state while the oracle consults `scene.blocked_lines`, and this compares the two answers on
+  a second map.
 * **Two oracle contracts that are deliberate and undocumented by any test**: collision is UNSWEPT
   (a verdict depends on the destination box and on the origin only through its floor), and the
   refused band across a wall is exactly the 2*PLAYER_RADIUS - 1 units the box implies.
-* **The fan-out rule 5 edges into fj**: every cell `sim.check_position`/`check_block`/`check_line`/
-  `try_move` captures must be declared by `COLLISION_STATE_DECLS`, and `BLOCK_SHIFT` must be the
-  block size `sim.check_block`'s three baked constants and `check_position_table`'s shift describe.
+* **The fan-out rule 5 edges into fj**: every cell `sim.check_cells`/`line_test`/`try_move`
+  captures must be declared by `COLLISION_STATE_DECLS`, and `CELL_SHIFT` must be the cell the
+  emitted tree's nibble split describes.
 """
 import collections
-import inspect
 import re
 from pathlib import Path
 
 import pytest
 
 from doomfj import doorcode
-from doomfj.collision import (CHECK_SCRATCH_DECLS, COLLISION_STATE_DECLS, FLAGS_REST_INDEX,
-                              LINE_BOX_BYTES, LINE_BOX_LEN, LINE_REST_BYTES, LINE_REST_LEN,
-                              LINE_ROW_BYTES, block_tables, blockmap_grid, check_position_table,
-                              collision_tables_fj, generate_point_location_fj, line_box, line_rest,
-                              line_rows, move_with_collision_lines)
+from doomfj.collision import (CELL_DECLS, CELL_SHIFT, CHECK_SCRATCH_DECLS, COLLISION_STATE_DECLS,
+                              cell_lists, cell_of, check_position_cells, collision_cells_fj,
+                              generate_point_location_fj, line_rows, move_with_collision_lines)
 from doomfj.config import Config
 from doomfj.doors import door_states, heights_for_states
 from doomfj.fixedpoint import _signed
-from doomfj.mapcompiler import (BLOCK_SHIFT, NF_SUBSECTOR, _point_side, bake_bsp, build_blockmap,
-                                seg_sector)
+from doomfj.mapcompiler import NF_SUBSECTOR, _point_side, bake_bsp, seg_sector
 from doomfj.reference_model import (ML_BLOCKING, PLAYER_RADIUS, ReferenceModel,
                                     apply_sector_heights, build_scene)
 from doomfj.wad import WadFile
@@ -83,18 +72,17 @@ class Level:
         self.secs = self.wad.sectors(self.mapname)
         self.sds = self.wad.sidedefs(self.mapname)
         self.cmap = bake_bsp(self.wad, self.mapname)
-        self.grid = build_blockmap(self.cmap, self.lds)
         self.scene = build_scene(self.wad, self.wad, self.mapname)
         self.rm = ReferenceModel(Config())
 
     def rows(self, **kw):
         return line_rows(self.lds, self.cmap.vertexes, self.secs, self.sds, ML_BLOCKING, **kw)
 
-    def seed(self, x: int, y: int):
+    def seed(self, x: int, y: int, secs=None):
         """`check_position`'s subsector seed, the way the oracle computes it -- the caller's job on
-        both sides, so the table walk has to be handed it."""
+        both sides, so the cell model has to be handed it."""
         ss = self.cmap.subsectors[self.rm.point_in_subsector(self.cmap, x, y)]
-        sec = seg_sector(self.lds, self.sds, self.secs, self.cmap.segs[ss.firstseg])
+        sec = seg_sector(self.lds, self.sds, secs or self.secs, self.cmap.segs[ss.firstseg])
         return sec.floor_h, sec.ceil_h
 
     def extent(self):
@@ -111,7 +99,6 @@ def lite():
 @pytest.fixture(scope="module")
 def ptloc(lite):
     return generate_point_location_fj(lite.cmap)
-
 
 # ── generate_point_location_fj: the specialisation, against the generic formula ────────────────
 
@@ -251,18 +238,21 @@ def test_every_point_location_jump_lands_on_a_label_the_same_text_defines(lite, 
         f"only {branches} branches parsed for {len(lite.cmap.nodes)} nodes -- the census is blind"
 
 
+
+
 # ── move_with_collision_lines: the emitted move block ──────────────────────────────────────────
 
-MOVE_KW = dict(radius=PLAYER_RADIUS, height=56, maxstep=24, n_bk=4, n_bl=4, n_ln=4)
+MOVE_KW = dict(radius=PLAYER_RADIUS, height=56, maxstep=24)
+ROOT = "e1m1_cc_n0"                               # the cell routine's entry, as collision_cells_fj names it
 
 
 @pytest.fixture(scope="module")
 def move_ops(lite):
-    return move_with_collision_lines(lite.grid, "e1m1", **MOVE_KW)
+    return move_with_collision_lines(ROOT, "e1m1", **MOVE_KW)
 
 
 def test_cprad_is_written_once_with_the_radius_before_the_first_position_test(move_ops):
-    """⚠ The bug the function's own warning comment documents. `sim.check_position` READS `cprad`
+    """⚠ The bug the function's own warning comment documents. `sim.check_cells` READS `cprad`
     and never sets it, and a declared-but-unwritten `hex.vec` is ZERO -- with `cprad = 0` the
     collision box collapses to a POINT and the player walks through every wall the real 32-unit box
     would straddle. This also catches the DIAMETER being wired where the radius belongs, which
@@ -273,7 +263,7 @@ def test_cprad_is_written_once_with_the_radius_before_the_first_position_test(mo
     assert val == PLAYER_RADIUS, f"cprad = {val}, expected PLAYER_RADIUS {PLAYER_RADIUS}"
     assert val * 2 != PLAYER_RADIUS and val != PLAYER_RADIUS * 2, "the radius, not the diameter"
     first_test = min(i for i, ln in enumerate(move_ops)
-                     if "sim.check_position" in ln or "sim.try_move" in ln)
+                     if "sim.check_cells" in ln or "sim.try_move" in ln)
     assert writes[0] < first_test, "cprad is written AFTER the first position test reads it"
 
 
@@ -285,7 +275,7 @@ def test_the_three_candidates_are_the_oracles_three_in_the_oracles_order(move_op
     # each candidate is the run of cpx/cpy construction between the previous try_move and this one
     tries = [i for i, ln in enumerate(move_ops) if "sim.try_move" in ln]
     assert len(tries) == 3, f"{len(tries)} candidates emitted, the policy has exactly three"
-    start = min(i for i, ln in enumerate(move_ops) if "sim.check_position" in ln)
+    start = min(i for i, ln in enumerate(move_ops) if "sim.check_cells" in ln)
     want = [["hex.mov 8, cpx, viewx", "hex.add 8, cpx, cm_dx",
              "hex.mov 8, cpy, viewy", "hex.add 8, cpy, cm_dy"],
             ["hex.mov 8, cpx, viewx", "hex.add 8, cpx, cm_dx", "hex.mov 8, cpy, viewy"],
@@ -297,33 +287,23 @@ def test_the_three_candidates_are_the_oracles_three_in_the_oracles_order(move_op
         start = end
 
 
-def test_check_position_and_try_move_get_the_same_blockmap_arguments(lite, move_ops):
-    """`bmi = (by - by0)*nbx + (bx - bx0)` is assembled from these five numbers; bx0/by0 swapped or
-    nbx/nby transposed names a DIFFERENT block at runtime, so every candidate tests the wrong
-    lines -- the failure `sim.check_block`'s xok/yok/skip branches exist to contain. The grid is
-    recomputed here from the blockmap's own keys rather than by calling `blockmap_grid`."""
-    cps = [ln for ln in move_ops if "sim.check_position" in ln]
+def test_all_four_checks_enter_the_same_cell_routine(move_ops):
+    """The standing position and the three candidates are four checks of ONE routine: a second
+    root would be a second tree -- and on a copy-paste slip, a different map's cells."""
+    cps = [ln for ln in move_ops if "sim.check_cells" in ln]
     tms = [ln for ln in move_ops if "sim.try_move" in ln]
     assert len(cps) == 1 and len(tms) == 3
-    cp_args = [a.strip() for a in cps[0].split("sim.check_position", 1)[1].split(",")]
+    assert cps[0].split("sim.check_cells", 1)[1].strip() == ROOT
     for tm in tms:
         tm_args = [a.strip() for a in tm.split("sim.try_move", 1)[1].split(",")]
-        assert tm_args[:len(cp_args)] == cp_args, "try_move reads a different blockmap"
-        assert tm_args[len(cp_args):] == [str(MOVE_KW["height"]), str(MOVE_KW["maxstep"]), "cm_hf"]
-    bxs = [c[0] for c in lite.grid]
-    bys = [c[1] for c in lite.grid]
-    bx0, by0 = min(bxs), min(bys)
-    want = [max(bxs) - bx0 + 1, max(bys) - by0 + 1, bx0, by0]     # nbx, nby, bx0, by0
-    assert [int(a) for a in cp_args[-4:]] == want, \
-        f"the emitted grid {cp_args[-4:]} is not (nbx, nby, bx0, by0) = {want}"
-    assert blockmap_grid(lite.grid) == (bx0, by0, want[0], want[1])
+        assert tm_args == [ROOT, str(MOVE_KW["height"]), str(MOVE_KW["maxstep"]), "cm_hf"], tm_args
 
 
 # every op form the move block emits, and where (if anywhere) it names a label. A form missing from
 # this table means the census below is incomplete, so an unknown op is a failure and not a skip.
 _LABEL_ARGS = {
     "hex.set": (), "hex.mov": (), "hex.add": (), "hex.sub": (), "hex.zero": (),
-    "sim.check_position": (), "sim.try_move": (),
+    "sim.check_cells": (0,), "sim.try_move": (0,),
     "hex.sign": (-2, -1), "hex.if0": (-1,),
     "stl.fcall": (0,),                      # (walk target, return CELL) -- only the first is a label
 }
@@ -331,9 +311,9 @@ _LABEL_ARGS = {
 
 def test_every_label_is_defined_once_and_every_jump_resolves(move_ops):
     """fj top-level labels are GLOBAL, so a copy-pasted `candidate()` call that reuses a tag
-    (cma_/cmb_/cmc_) redefines `cma_vxs` and friends rather than shadowing them. The only label
-    this block may leave dangling is the ONE external fcall target, the map-prefixed seed
-    descent."""
+    (cma_/cmb_/cmc_) redefines `cma_vxs` and friends rather than shadowing them. The only labels
+    this block may leave dangling are the TWO external entries: the map-prefixed seed descent and
+    the cell routine."""
     text = "\n".join(move_ops)
     defined = _defined_labels(text)
     dupes = sorted(k for k, v in defined.items() if v > 1)
@@ -354,169 +334,81 @@ def test_every_label_is_defined_once_and_every_jump_resolves(move_ops):
             tgt = args[idx]
             if tgt not in defined:
                 external.add(tgt)
-    assert external == {"e1m1_dsccs_walk"}, \
-        f"unresolved jumps beyond the seed descent: {sorted(external)}"
+    assert external == {"e1m1_dsccs_walk", ROOT}, \
+        f"unresolved jumps beyond the seed descent and the cell routine: {sorted(external)}"
 
 
-def test_only_the_seed_descent_is_map_prefixed(lite):
+def test_only_the_seed_descent_and_the_cell_root_are_map_prefixed(lite):
     """⚠ THE M4 HAZARD, stated rather than discovered at minute 40 of a nine-level build. The
-    descent target carries the map prefix, but `cmv_done`/`cmv_b`/`cmh_*`/`cma_*` are UNPREFIXED fj
-    globals -- so two maps each emitting this block would redefine them, the same class of collision
-    the M4-R1 label gate found. Emitting for two prefixes must differ in the fcall target and in
-    NOTHING else; when M4 prefixes these labels, this test fails and the change is deliberate."""
-    a = move_with_collision_lines(lite.grid, "e1m1", **MOVE_KW)
-    b = move_with_collision_lines(lite.grid, "e2m3", **MOVE_KW)
+    descent and the cell routine carry the map prefix, but `cmv_done`/`cmv_b`/`cmh_*`/`cma_*` are
+    UNPREFIXED fj globals -- so two maps each emitting this block would redefine them, the same class
+    of collision the M4-R1 label gate found. Emitting for two prefixes must differ in the two
+    external names and in NOTHING else; when M4 prefixes these labels, this test fails and the
+    change is deliberate."""
+    a = move_with_collision_lines("e1m1_cc_n0", "e1m1", **MOVE_KW)
+    b = move_with_collision_lines("e2m3_cc_n0", "e2m3", **MOVE_KW)
     assert _defined_labels("\n".join(a)) == _defined_labels("\n".join(b))
     differ = [(x, y) for x, y in zip(a, b) if x != y]
-    assert differ and all("dsccs_walk" in x for x, _ in differ), \
-        f"the two maps differ somewhere other than the descent call: {differ[:3]}"
+    assert differ and all("dsccs_walk" in x or "e1m1_cc_n0" in x for x, _ in differ), \
+        f"the two maps differ somewhere other than the two external names: {differ[:3]}"
 
 
 def test_move_with_collision_lines_is_deterministic(lite):
-    """Called twice with the same grid it must emit the same text -- the emitter walks a dict, and
-    an iteration-order dependence would make two builds of one tier differ."""
-    assert move_with_collision_lines(lite.grid, "e1m1", **MOVE_KW) == \
-        move_with_collision_lines(lite.grid, "e1m1", **MOVE_KW)
+    """Called twice with the same arguments it must emit the same text."""
+    assert move_with_collision_lines(ROOT, "e1m1", **MOVE_KW) == \
+        move_with_collision_lines(ROOT, "e1m1", **MOVE_KW)
 
 
-# ── the packed row layout ──────────────────────────────────────────────────────────────────────
-
-SIGNED_ROW_FIELDS = (0, 1, 2, 3, 4, 5, 6, 7, 10, 11)   # v1x v1y dx dy + bbox + opentop openbottom
-UNSIGNED_ROW_FIELDS = (8, 9)                            # slope, flags
-
-
-def _fits_signed(v: int, nb: int) -> bool:
-    return _signed(v & ((1 << 8 * nb) - 1), 8 * nb) == v
-
+# ── the line constants' widths ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("path", [LITE, FREEDOOM], ids=["e1m1_lite", "freedoom_e1m1"])
-def test_every_line_row_field_fits_the_width_it_is_packed_at(path):
-    """`collision_tables_fj`'s local `pack` does `x & ((1 << 8*nb) - 1)` and CANNOT complain, so a
-    linedef delta or a sector height too wide for its two bytes packs a WRAPPED value: the wall's
-    bbox lands somewhere else on the map and the player walks through it.
+def test_every_line_constant_survives_the_argument_cell_it_is_xored_into(path):
+    """A line stub xors `v << 16` for a coordinate into an 8-nibble cell, so a coordinate must be an
+    int16 for the 16.16 value to be itself; a delta or an opening is sign-extended to 32 bits and
+    only needs to fit there; the slope and the flags are ONE nibble each. `line_constants` masks
+    with `& M32` and cannot complain -- a coordinate one bit too wide lands the wall's bbox
+    elsewhere and the player walks through it.
 
-    E1M1's widest `dx` is 1216 and its deepest floor -168, so today's headroom is enormous -- this
-    is the guard M4's nine levels need, because an E2/E3 map with a wider extent is exactly what
-    would trip it. The R9 control at the end proves the check can say no."""
+    E1M1's widest coordinate is ~3,400 units, so today's headroom is enormous -- this is the guard
+    M4's levels need. The R9 control at the end proves the predicate can say no."""
     lvl = Level(path)
     rows = lvl.rows()
     assert len(rows) == len(lvl.lds)
-    for li, row in enumerate(rows):
-        assert len(row) == len(LINE_ROW_BYTES)
-        for f in SIGNED_ROW_FIELDS:
-            assert _fits_signed(row[f], LINE_ROW_BYTES[f]), \
-                f"line {li} field {f} = {row[f]} wraps in {LINE_ROW_BYTES[f]} byte(s)"
-        for f in UNSIGNED_ROW_FIELDS:
-            assert 0 <= row[f] < 1 << 8 * LINE_ROW_BYTES[f], \
-                f"line {li} field {f} = {row[f]} is not an unsigned {LINE_ROW_BYTES[f]}-byte value"
+
+    def int16(v):
+        return -(1 << 15) <= v < 1 << 15
+
+    for li, (v1x, v1y, dx, dy, minx, maxx, miny, maxy, slope, flags, ot, ob) in enumerate(rows):
+        for name, v in (("v1x", v1x), ("v1y", v1y), ("minx", minx), ("maxx", maxx),
+                        ("miny", miny), ("maxy", maxy)):
+            assert int16(v) and _signed((v << 16) & 0xFFFFFFFF, 32) == v << 16, \
+                f"line {li} {name} = {v} does not survive as 16.16"
+        for name, v in (("dx", dx), ("dy", dy), ("opentop", ot), ("openbottom", ob)):
+            assert _signed(v & 0xFFFFFFFF, 32) == v, f"line {li} {name} = {v} wraps in 32 bits"
+        assert 0 <= slope < 4 and 0 <= flags < 4, f"line {li}: slope {slope} flags {flags}"
     # R9: the same predicate must REFUSE a value one bit too wide, or it proves nothing
-    assert not _fits_signed(1 << 15, 2) and not _fits_signed(-(1 << 15) - 1, 2)
-    assert _fits_signed(-(1 << 15), 2) and _fits_signed((1 << 15) - 1, 2)
+    assert not int16(1 << 15) and not int16(-(1 << 15) - 1)
+    assert int16(-(1 << 15)) and int16((1 << 15) - 1)
 
 
-def test_line_box_and_line_rest_pick_the_fields_their_names_claim():
-    """Needs no fixture: twelve distinct sentinels say which indices each half takes. The module's
-    own `assert LINE_REST_BYTES[FLAGS_REST_INDEX] == 1` cannot tell `flags` from `slope` -- both are
-    one byte -- so a reorder of `LINE_ROW_BYTES`, or of `line_rest`'s `row[:4] + row[8:]`, that
-    keeps the widths passes that assert and silently moves `doorcode._unblock_lines`' single wflip
-    onto the SLOPE nibble. A door would then open by corrupting its own slope type."""
-    row = tuple(range(100, 100 + len(LINE_ROW_BYTES)))        # distinct, positional sentinels
-    assert line_box(row) == row[4:8], "line_box is not the four bbox fields"
-    assert line_rest(row) == row[:4] + row[8:], "line_rest is not 'everything else, in order'"
-    assert line_rest(row)[FLAGS_REST_INDEX] == row[9], \
-        "FLAGS_REST_INDEX does not point at the flags field -- the door wflip would miss it"
-    assert row[9] != row[8], "the sentinels must distinguish flags from slope"
-    # the two halves partition the row exactly: no field lost, none counted twice
-    assert sorted(line_box(row) + line_rest(row)) == sorted(row)
-    assert (len(LINE_BOX_BYTES), LINE_BOX_LEN + LINE_REST_LEN) == (4, sum(LINE_ROW_BYTES))
-    assert len(LINE_REST_BYTES) == len(LINE_ROW_BYTES) - 4
-
-
-# ── the emitted tables ─────────────────────────────────────────────────────────────────────────
-
-def test_the_four_lut_headers_count_what_the_walk_indexes(lite):
-    """The four LUTs are indexed by three different things, and each header says which. `bkoff` is
-    the one that bites: sized from `len(grid)` -- the OCCUPIED set -- every block index past the
-    first gap reads another block's (offset, count) row. This also pins that `lnbox` and `lnrow`
-    stay the same length, which is why `move_with_collision_lines` passes ONE `n_ln` for both."""
-    text = collision_tables_fj(lite.cmap, lite.lds, lite.secs, lite.sds, ML_BLOCKING, lite.grid)
-    hdr = {m.group(1): (int(m.group(2)), int(m.group(3))) for m in
-           re.finditer(r'packed LUT "(\w+)": (\d+) entries x (\d+) bytes', text)}
-    assert set(hdr) == {"lnbox", "lnrow", "bkoff", "bklin"}, f"emitted {sorted(hdr)}"
-    _bx0, _by0, nbx, nby = blockmap_grid(lite.grid)
-    n_lines = len(lite.lds)
-    pairs = sum(len(v) for v in lite.grid.values())
-    assert hdr["lnbox"] == (n_lines, LINE_BOX_LEN), "one bbox row per linedef"
-    assert hdr["lnrow"] == (n_lines, LINE_REST_LEN), "one rest row per linedef"
-    assert hdr["bkoff"] == (nbx * nby, 3), \
-        f"bkoff is {hdr['bkoff'][0]} rows; the DENSE rectangle is {nbx * nby} and the occupied " \
-        f"set is only {len(lite.grid)}"
-    assert hdr["bklin"] == (pairs, 2), "one entry per (block, line) pair"
-    assert nbx * nby > len(lite.grid), "this fixture has no unoccupied cell -- it proves nothing"
-
-
-def test_each_block_row_selects_exactly_its_own_cells_line_list(lite):
-    """`block_tables` flattens the grid and hands the loop an (offset, count) per DENSE cell. A
-    bx0/by0 swap or an nbx/nby transpose makes the row name a different cell. The count-0 half is
-    load-bearing on its own: it is why the fj loop needs no membership test, only a count that can
-    be zero."""
-    bx0, by0, nbx, nby = blockmap_grid(lite.grid)
-    rows, flat = block_tables(lite.grid)
-    assert len(rows) == nbx * nby
-    assert len(flat) == sum(len(v) for v in lite.grid.values())
-    for (bx, by), lines in lite.grid.items():
-        off, cnt = rows[(by - by0) * nbx + (bx - bx0)]
-        assert list(flat[off:off + cnt]) == list(lines), f"cell ({bx},{by}) selects the wrong lines"
-    occupied = {(by - by0) * nbx + (bx - bx0) for bx, by in lite.grid}
-    empty = [bi for bi in range(nbx * nby) if bi not in occupied]
-    assert empty, "no unoccupied cell -- the count-0 half is untested on this fixture"
-    for bi in empty:
-        assert rows[bi][1] == 0, f"unoccupied cell {bi} claims {rows[bi][1]} lines"
-
-
-# ── check_position_table outside the rectangle ─────────────────────────────────────────────────
-
-def test_the_table_walk_agrees_with_the_oracle_outside_the_blockmap_rectangle(lite):
-    """The branch no existing test reaches. `check_position_table` computes `bi` BEFORE the
-    `0 <= bx - bx0 < nbx` guard, so without the guard a negative index wraps via Python's negative
-    indexing into another block's row and a too-large one raises IndexError. Every other sample in
-    the suite sits inside the vertex bounding box. This is also the Python mirror of
-    `sim.check_block`'s xok/yok/skip, whose comment says an out-of-range index must be SKIPPED and
-    not clamped.
-
-    The two counters at the end are the R9 control: they say the guard actually had work to do."""
+def test_the_cell_model_agrees_with_the_oracle_off_the_map(lite):
+    """Every other sample sits near the vertices. Far outside, no cell lists anything and the
+    oracle's opening is the (solid) subsector's own -- the cell model has to reach the same answer
+    through `lists.get(..., ())`, the Python mirror of the tree's `_none` stub. The counter is the
+    control: those positions must really be in no cell."""
     rows = lite.rows()
-    blocks, flat = block_tables(lite.grid)
-    bx0, by0, nbx, nby = blockmap_grid(lite.grid)
-    pad = 600                                     # far enough out that every corner leaves the grid
-    lo_x, hi_x = (bx0 << BLOCK_SHIFT) - pad, ((bx0 + nbx) << BLOCK_SHIFT) + pad
-    lo_y, hi_y = (by0 << BLOCK_SHIFT) - pad, ((by0 + nby) << BLOCK_SHIFT) + pad
-    would_raise = would_wrap = checked = 0
-    pts = [(x, y) for x in range(lo_x, hi_x + 1, 127) for y in range(lo_y, hi_y + 1, 131)]
-    pts += [(x, y) for x in (-30000, 0, 30000) for y in (-30000, 0, 30000)]
-    for x, y in pts:
-        corners = [(bx, by)
-                   for bx in {(x - R_UNITS) >> BLOCK_SHIFT, (x + R_UNITS) >> BLOCK_SHIFT}
-                   for by in {(y - R_UNITS) >> BLOCK_SHIFT, (y + R_UNITS) >> BLOCK_SHIFT}]
-        out = [(bx, by) for bx, by in corners
-               if not (0 <= bx - bx0 < nbx and 0 <= by - by0 < nby)]
-        if not out:
-            continue                              # inside: the existing suite already covers it
-        for bx, by in out:
-            bi = (by - by0) * nbx + (bx - bx0)
-            if bi < 0 or bi >= len(blocks):
-                would_raise += 1
-            elif blocks[bi][1]:
-                would_wrap += 1
-        sf, sc = lite.seed(x, y)
-        got = check_position_table(rows, blocks, flat, lite.grid, x << 16, y << 16,
-                                   PLAYER_RADIUS, sf, sc)
-        want = lite.rm.check_position(lite.scene, x << 16, y << 16)
-        assert got == want, f"({x},{y}) outside the grid: table {got} != oracle {want}"
-        checked += 1
-    assert checked > 300, f"only {checked} outside positions sampled"
-    assert would_raise > 0 and would_wrap > 0, \
-        f"the guard never had to fire (raise {would_raise}, wrap {would_wrap}) -- no bite"
+    lists = cell_lists(rows, PLAYER_RADIUS)
+    x0, x1, y0, y1 = lite.extent()
+    unlisted = checked = 0
+    for x in (x0 - 5000, x0 - 200, (x0 + x1) // 2, x1 + 200, x1 + 5000):
+        for y in (y0 - 5000, y0 - 200, (y0 + y1) // 2, y1 + 200, y1 + 5000):
+            sf, sc = lite.seed(x, y)
+            got = check_position_cells(rows, lists, x << 16, y << 16, PLAYER_RADIUS, sf, sc)
+            want = lite.rm.check_position(lite.scene, x << 16, y << 16)
+            assert got == want, f"({x},{y}): cells {got} != oracle {want}"
+            unlisted += (cell_of(x << 16), cell_of(y << 16)) not in lists
+            checked += 1
+    assert checked == 25 and unlisted >= 16, f"only {unlisted} of {checked} positions are off every list"
 
 
 # ── the runtime door, in both mirrors at once ──────────────────────────────────────────────────
@@ -535,34 +427,34 @@ def door_set(lite):
 
 
 def test_a_shut_door_refuses_the_same_positions_in_both_mirrors(lite, door_set):
-    """The two halves of the runtime door have never been compared. `collision.line_rows` marks the
-    row FLAG_BLOCKING and bakes its opening OPEN; the oracle consults `scene.blocked_lines` instead.
-    `test_doorcode.py` pins the flags BYTE and the baked-open opening, but nothing asks whether a
-    door actually REFUSES a position on both sides.
+    """The two halves of the runtime door: `line_rows(door_line_ids=D)` bakes the door lines'
+    opening OPEN, the cell routine adds FLAG_BLOCKING to a shut door's lines (`shut` here, `dstate`
+    in fj), and the oracle consults `scene.blocked_lines`. On this second map, every sample must
+    agree with every door shut.
 
     The second half is the R9 control: without it this passes with the door wiring deleted from
     both mirrors at once."""
     lines, open_secs = door_set
     assert lines, "e1m1_lite has no door -- this test proves nothing"
     rows_d = lite.rows(secs_open=open_secs, door_line_ids=lines)
-    rows_0 = lite.rows()
-    blocks, flat = block_tables(lite.grid)
+    lists = cell_lists(rows_d, PLAYER_RADIUS)
     shut = build_scene(lite.wad, lite.wad, lite.mapname, blocked_lines=lines)
     open_ = lite.scene                                     # no blocked_lines: every door is passable
+    rows_0 = lite.rows()
+    lists_0 = cell_lists(rows_0, PLAYER_RADIUS)
 
-    def both(scene, rows, x, y):
+    def both(scene, rows, lists, blocked, x, y):
         sf, sc = lite.seed(x, y)
-        got = check_position_table(rows, blocks, flat, lite.grid, x << 16, y << 16,
-                                   PLAYER_RADIUS, sf, sc)
+        got = check_position_cells(rows, lists, x << 16, y << 16, PLAYER_RADIUS, sf, sc, blocked)
         want = lite.rm.check_position(scene, x << 16, y << 16)
-        assert got == want, f"({x},{y}): table {got} != oracle {want}"
+        assert got == want, f"({x},{y}): cells {got} != oracle {want}"
         return want
 
     minx, maxx, miny, maxy = lite.extent()
     checked = 0
     for x in range(minx, maxx, 151):
         for y in range(miny, maxy, 157):
-            both(shut, rows_d, x, y)
+            both(shut, rows_d, lists, lines, x, y)
             checked += 1
     assert checked > 200, f"only {checked} positions sampled"
     # ... and the door set has to CHANGE the answer somewhere, in both mirrors together
@@ -571,7 +463,8 @@ def test_a_shut_door_refuses_the_same_positions_in_both_mirrors(lite, door_set):
         ld = lite.lds[li]
         (x1, y1), (x2, y2) = lite.cmap.vertexes[ld.v1], lite.cmap.vertexes[ld.v2]
         x, y = (x1 + x2) // 2, (y1 + y2) // 2              # a box centred ON the line straddles it
-        changed += both(shut, rows_d, x, y) != both(open_, rows_0, x, y)
+        changed += (both(shut, rows_d, lists, lines, x, y)
+                    != both(open_, rows_0, lists_0, frozenset(), x, y))
     assert changed > 5, f"only {changed} of {len(lines)} door lines change the answer when shut"
 
 
@@ -700,53 +593,42 @@ def _fj_captures(src: str, name: str) -> list:
 
 
 def test_every_cell_sim_captures_for_collision_is_declared_in_python():
-    """⚠ EXACTLY the rule-5 fan-out `CHECK_SCRATCH_DECLS`' own warning names: 'anything that
-    assembles sim.check_position / check_block / check_line MUST emit these; they were duplicated in
-    four places once.' A scratch cell added on the fj side and forgotten in the Python list is an
-    undeclared label at minute 40 of an assemble; here it is a grep."""
+    """⚠ The rule-5 fan-out: a scratch cell added on the fj side and forgotten in the Python list is
+    an undeclared label at minute 40 of an assemble; here it is a grep."""
     src = SIM_FJ.read_text(encoding="utf-8")
     declared = {d.split(":")[0].strip() for d in COLLISION_STATE_DECLS}
     assert {d.split(":")[0].strip() for d in CHECK_SCRATCH_DECLS} <= declared, \
         "COLLISION_STATE_DECLS no longer splices in CHECK_SCRATCH_DECLS"
+    assert {d.split(":")[0].strip() for d in CELL_DECLS} <= declared, \
+        "COLLISION_STATE_DECLS no longer splices in CELL_DECLS"
     total = 0
-    for name in ("check_position", "check_block", "check_line", "try_move"):
+    for name in ("check_cells", "line_test", "try_move"):
         caps = _fj_captures(src, name)
         assert caps, f"sim.{name} captures nothing"
         missing = [c for c in caps if c not in declared]
         assert not missing, f"sim.{name} captures {missing}, which COLLISION_STATE_DECLS omits"
         total += len(caps)
     assert total > 30, f"only {total} captured cells parsed -- the parser is not seeing the defs"
-    # R9: the same parser must NOTICE a cell that is not declared
-    assert "cb_bx" in _fj_captures(src, "check_block")
+    # R9: the same parser must see the argument cells, and must NOTICE a cell that is not declared
+    assert "ca_minx" in _fj_captures(src, "line_test") and "cc_ret" in _fj_captures(src, "check_cells")
     assert "no_such_cell_xyz" not in declared
 
 
-def test_the_block_size_is_the_same_in_all_three_places_it_is_encoded():
-    """The block size lives in THREE independent places: `mapcompiler.BLOCK_SHIFT` (which shapes the
-    grid), `check_position_table`'s hard-coded shift, and `sim.check_block`'s three baked constants.
-    Change one -- back to DOOM's 128, say -- and the Python grid and the fj index describe different
-    blocks, so every position reads some other block's lines. The Python-vs-Python half is caught
-    indirectly by the oracle-agreement tests; the fj half is caught by nothing."""
-    assert BLOCK_SHIFT % 4 == 0, \
-        "the fj index is a WHOLE-NIBBLE shr_hex of a 16.16 position; BLOCK_SHIFT must be a multiple of 4"
-    src = SIM_FJ.read_text(encoding="utf-8")
-    body = re.search(r"def check_block\b.*?\n(.*?)\n    \}", src, re.S)
-    assert body, "src/fj/sim.fj no longer defines check_block"
-    body = body.group(1)
-    # the bias: 2^15 map units in 16.16, so a signed coordinate shifts logically
-    assert f"hex.set 8, cb_const, 0x{(1 << 15) << 16:08X}".lower() in body.lower(), \
-        "check_block's 2^15 bias is not the one BLOCK_SHIFT's argument assumes"
-    # the shift: (16 + BLOCK_SHIFT) bits, as whole nibbles
-    nibbles = (16 + BLOCK_SHIFT) // 4
-    shifts = set(int(m.group(1)) for m in re.finditer(r"hex\.shr_hex 8, (\d+), cb_b[xy]", body))
-    assert shifts == {nibbles}, f"check_block shifts {shifts} nibbles, BLOCK_SHIFT implies {nibbles}"
-    # the de-bias: the same 2^15 units expressed in BLOCKS
-    off = 1 << (15 - BLOCK_SHIFT)
-    got = set(re.findall(r"hex\.set 4, cb_const, \(ib[xy]0 \+ (\d+)\) & 0xFFFF", body))
-    assert got == {str(off)}, f"check_block de-biases by {got}, BLOCK_SHIFT implies {off}"
-    # ... and the Python mirror's hard-coded shift is the same number
-    py = inspect.getsource(check_position_table)
-    walk_shifts = [int(n) for n in re.findall(r">>\s*(\d+)", py) if int(n) != 16]
-    assert walk_shifts and set(walk_shifts) == {BLOCK_SHIFT}, \
-        f"check_position_table shifts by {sorted(set(walk_shifts))}, BLOCK_SHIFT is {BLOCK_SHIFT}"
-    assert len(walk_shifts) >= 4, "expected a shift per box corner coordinate"
+def test_the_cell_size_is_the_one_the_trees_nibble_split_describes(lite):
+    """The cell lives in two places: `CELL_SHIFT` (the lists, the model, `cell_of`) and the emitted
+    tree, which jumps on nibbles 7, 6, 5 -- bit 20 up, 16-unit steps -- and gives both 16-unit
+    halves of a cell the same target. Move one without the other and a centre's cell in fj is not
+    its cell in Python: every position near a cell edge tests another cell's lines."""
+    assert CELL_SHIFT == 21, "32-unit cells: the tree's finest step is bit 20, two steps a cell"
+    rows = lite.rows()
+    text, _root = collision_cells_fj("e1m1", rows, cell_lists(rows, PLAYER_RADIUS))
+    split = collections.Counter((m.group(1), int(m.group(2))) for m in
+                                re.finditer(r"sim\.jump16 (cp[xy]) \+ (\d)\*dw", text))
+    assert set(split) == {(r, n) for r in ("cpx", "cpy") for n in (7, 6, 5)}, sorted(split)
+    # the leaves: in every nibble-5 node, entries 2k and 2k+1 (one cell's two halves) agree
+    pairs = 0
+    for m in re.finditer(r"sim\.jump16 cp[xy] \+ 5\*dw, (.*)", text):
+        t = [x.strip() for x in m.group(1).split(",")]
+        assert all(t[2 * k] == t[2 * k + 1] for k in range(8)), t
+        pairs += 1
+    assert pairs > 100, f"only {pairs} leaf nodes parsed"

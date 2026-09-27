@@ -28,7 +28,6 @@ from doomfj.reference_model import (ANG90, ANGLE_TURN, FORWARD_MOVE, MAX_STEP,
                                     ML_BLOCKING, PLAYER_HEIGHT, PLAYER_RADIUS,
                                     apply_sector_heights, spawn_state)
 from doomfj.config import Config
-from doomfj.mapcompiler import build_blockmap
 from doomfj.wireformat import (MAGIC as WIRE_MAGIC, STATE_CMD as WIRE_STATE_CMD,
                                THING_CMD as WIRE_THING_CMD,
                                KEY_FORWARD_MASK, KEY_BACK_MASK,
@@ -809,9 +808,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # the prologue is the line-for-line text it was before doors existed.
     _door_lines = door_line_ids(secs, lds, sds, _dst_tbl) if _dst_tbl else {}
     _door_tic = (door_tic_lines(sorted(_dst_tbl), {si: len(v) for si, v in _dst_tbl.items()},
-                                use_boxes_xy(secs, lds, sds, verts),
-                                {si: pass_state(secs, lds, sds, si) for si in _dst_tbl},
-                                _door_lines)
+                                use_boxes_xy(secs, lds, sds, verts))
                  if (_dst_tbl and player_sim) else [])
 
     def _seg_door(seg):
@@ -1844,26 +1841,25 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert player_sim and lines, "collide=True rides player_sim on the lines tier"
         # local import: doomfj.collision needs wall_renderer's _int_part_lines, so importing it at
         # module level would close a cycle (the seg_affine_coeffs precedent in mapcompiler)
-        from doomfj.collision import (block_tables, blockmap_grid, collision_tables_fj,
+        from doomfj.collision import (cell_lists, collision_cells_fj, line_rows,
                                       move_with_collision_lines, COLLISION_STATE_DECLS)
-        _cgrid = build_blockmap(cmap, lds)
-        _bx0, _by0, _nbx, _nby = blockmap_grid(_cgrid)
-        _cblocks, _cflat = block_tables(_cgrid)
+        # M7 P1.2: the player's collision CELLS (docs/gp-collision-cells.md). M2-R4: a door's
+        # lines bake their opening at the door's OPEN height, and their line stubs read the door's
+        # `dstate` against its pass state -- shut, the line refuses like a wall.
+        _crows = line_rows(lds, verts, secs, sds, ML_BLOCKING, secs_open=_dsecs_open,
+                           door_line_ids={li for lis in _door_lines.values() for li in lis})
+        _cdoors: dict = {}                         # a line between two doors lists both
+        for si, lis in sorted(_door_lines.items()):
+            for li in lis:
+                _cdoors.setdefault(li, []).append((_dslot[si], pass_state(secs, lds, sds, si)))
+        _collide_cells, _croot = collision_cells_fj(_pfx(mapname), _crows,
+                                                    cell_lists(_crows, PLAYER_RADIUS),
+                                                    doors=_cdoors)
         _collide_block = ([";simcollide_skip", "simcollide:"]
                           + move_with_collision_lines(
-                              _cgrid, _pfx(mapname), radius=PLAYER_RADIUS,
-                              height=PLAYER_HEIGHT >> 16, maxstep=MAX_STEP >> 16,
-                              n_bk=_index_nibbles(len(_cblocks)),
-                              n_bl=_index_nibbles(max(1, len(_cflat))),
-                              n_ln=_index_nibbles(len(lds)))
+                              _croot, _pfx(mapname), radius=PLAYER_RADIUS,
+                              height=PLAYER_HEIGHT >> 16, maxstep=MAX_STEP >> 16)
                           + ["    ;simmv_done", "simcollide_skip:"])
-        # M2-R4: a door's lines bake their opening at the door's OPEN height and carry
-        # FLAG_BLOCKING, so a shut door refuses like a wall and one `wflip` at `pass_state` turns
-        # it into an ordinary two-sided line. See doorcode's collision note.
-        _collide_tables = collision_tables_fj(
-            cmap, lds, secs, sds, ML_BLOCKING, _cgrid,
-            secs_open=_dsecs_open,
-            door_line_ids={li for lis in _door_lines.values() for li in lis})
         _collide_decls = list(COLLISION_STATE_DECLS)
         # the SEED descent: the same point-location query the eye's pre-walk runs, at a CANDIDATE
         # position, tagged so it gets its own labels while sharing the partition blocks
@@ -1887,7 +1883,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                              + "    stl.fret cs_ret" + BSn)
     else:
         _collide_block = _collide_decls = []
-        _collide_tables = _collide_descend = ""
+        _collide_cells = _collide_descend = ""
 
     # M3: the menu frame + the branch past the world. Built here, where `asset_wad` is
     # resolved, so its colours come from the SAME palette the renderer bakes.
@@ -2001,8 +1997,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               + _lines_mode_decls(cfg, rm, asset_wad, lines_vz_classes, lines_bank_keys,
                                   False)
               + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
-                 tex, cm, ttang, sdrecip, srdisp, xtadisp, vtxdisp, sinadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid,
-                 _collide_tables]
+                 tex, cm, ttang, sdrecip, srdisp, xtadisp, vtxdisp, sinadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid]
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
               # scratchpad/cr/emit_baseline.py, which is exactly what that control is for.
@@ -2174,6 +2169,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
       ("walk", [
           bsp,
           _collide_descend,          # M14-d: the candidate-position point location
+          # M7 P1.2: the collision cells -- conditional, so a tier without collision emits the text
+          # it did before (an unconditional "" is still a newline)
+          *([_collide_cells] if collide else []),
           # M14-e: the per-thing point location, baked as code -- conditional for the same reason
           # the tables above are: an unconditional "" is still a newline the shipped text lacks
           *([_mt_ptloc] if moving_things else []),

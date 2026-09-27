@@ -80,6 +80,16 @@ def single_player(t):
             and bool(t.flags & (gd.MTF_EASY | gd.MTF_NORMAL | gd.MTF_HARD)))
 
 
+def skill_absent(drawable, skill):
+    """M7 P1.5: the DRAWABLE indices `skill` does not spawn -- DOOM's P_SpawnMapThing skips a thing
+    whose options lack the skill's bit. ONE answer for both mirrors: the emitter bakes each skill's
+    leaf lists and `thvis` flags from it, and the gates hand it to the oracle as `thing_hidden`. The
+    boot state is hard's (docs/gp-skill-menu.md)."""
+    from doomfj import gamedata as gd          # lazy, as single_player
+    bit = gd.skill_bit(skill)
+    return frozenset(i for i, t in enumerate(drawable) if not t.flags & bit)
+
+
 def drawable_things(rm, things, sprite_wad, cache=None):
     """`(drawable, wad_indices)` -- the single-player things that have art, in wad order.
 

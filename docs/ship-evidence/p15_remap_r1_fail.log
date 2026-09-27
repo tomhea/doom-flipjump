@@ -1,0 +1,8 @@
+# R1 (P1.5's re-key): tests/host/test_ca_remap_set.py on HEAD's tree before the fix (git archive 39c7d6b M7 P1.5 (15/n): the menu's lines in a 5x7 font, the credit sma), the test file copied in
+$ python -m pytest tests/host/test_ca_remap_set.py -q -p no:cacheprovider
+E       AssertionError: usage: ca_remap_set.py [-h] [--labels LABELS] [--set SET] [--out OUT]
+E         ca_remap_set.py: error: unrecognized arguments: --selftest
+E       assert 2 == 0
+E        +  where 2 = CompletedProcess(args=['C:\\Users\\tomhe\\AppData\\Local\\Programs\\Python\\Python311\\python.exe', 'C:\\Users\\tomhe\...p_set.py [-h] [--labels LABELS] [--set SET] [--out OUT]\nca_remap_set.py: err
+FAILED tests/host/test_ca_remap_set.py::test_the_re_key_holds_whole_arrays_whole_and_refuses_the_rest
+1 failed in 0.42s

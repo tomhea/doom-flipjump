@@ -7,8 +7,11 @@ that are simply gone and the re-key DROPS them. Dropping is not neutral: a hole 
 does not draw wrong pixels, it HANGS the next frame (docs/handoff-m1-reset.md 4b). This adds the
 globals that took their place, at full extent, so the set is whole again.
 
-    python scratchpad/ca_remap_set.py --labels L --set S --out O      # step 1: re-key
-    python scratchpad/m1_add_globals.py --labels L --set O --out O    # step 2: fill the holes
+    python scratchpad/ca_remap_set.py --labels L --old-labels L0 --set S --out O   # step 1: re-key
+    python scratchpad/m1_add_globals.py --labels L --set O --out O                 # step 2: fill the holes
+
+(L0 is the label table S was keyed on -- S records its sha256 -- so step 1 can see a label whose
+span changed; ca_remap_set.py's docstring says why that matters.)
 
 ⚠ R9 (CR 2026-08-25). The shipped set previously recorded a `generated_by` naming only step 1, which
 does not perform step 2 -- so the artifact could not be regenerated from the tracked tree. That is
@@ -143,8 +146,9 @@ sa, sn = read_labels(args.labels)
 doc = json.load(gzip.open(args.set, "rt", encoding="utf-8"))
 before = doc["words"]
 doc, added = add_globals(doc, sa, sn)
-doc["generated_by"] = ("scratchpad/ca_remap_set.py --labels %s   then   "
-                       "scratchpad/m1_add_globals.py --labels %s" % (args.labels, args.labels))
+# step 1's own command line (ca_remap_set.py writes it, with the table it was keyed from), then ours
+doc["generated_by"] = ("%s   then   scratchpad/m1_add_globals.py --labels %s"
+                       % (doc["generated_by"].split("   then   ")[0], args.labels))
 json.dump(doc, gzip.open(args.out, "wt", encoding="utf-8"))
 print("added %d words over %d globals (%d check + %d hoisted)"
       % (added, len(declared()), len(CHECK_SCRATCH_DECLS), len(hoisted_scratch_decls())))

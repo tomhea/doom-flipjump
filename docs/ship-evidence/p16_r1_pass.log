@@ -1,0 +1,4 @@
+# R1: the same test files on the branch -- on HEAD (e76e250 M7 P1.6 review: the bank's claims re-measured at commits -- compare on E1M1's population, the size with the rowmap); the tree made a throwaway git repo of its own files (git init + add -A + commit), for the tests that ask git what is tracked
+$ python -m pytest tests/fj/test_sprite_bank_fj.py tests/host/test_sprite_bank.py tests/host/test_spritebank.py tests/host/test_thing_table.py tests/host/test_wall_renderer_helpers.py tests/host/test_dispatch_table_values.py -q -p no:cacheprovider
+101 passed in 157.42s (0:02:37)
+rc=0

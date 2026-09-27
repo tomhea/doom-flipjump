@@ -24992,9 +24992,9 @@
   "src/doomfj/rng.py": "5a842d315933a0b0",
   "src/doomfj/tables.py": "f2ab5c664db1f028",
   "src/doomfj/texturecompiler.py": "6836e27f7d824674",
-  "src/doomfj/things.py": "b80f7ddb86dbeace",
+  "src/doomfj/things.py": "998b72150653c807",
   "src/doomfj/wad.py": "aced7d2f9eb1a2ba",
-  "src/doomfj/world.py": "9cb3758a215a9a87",
+  "src/doomfj/world.py": "66d065d8bce09d98",
   "tests/fixtures/freedoom_e1m1.wad": "944287723835997b"
  },
  "planned_at_git_head": "3688fa4",
@@ -25298,6 +25298,22 @@
     "src/doomfj/things.py": [
      "21a20076e9eb67ed",
      "b80f7ddb86dbeace"
+    ]
+   },
+   "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"
+  },
+  {
+   "on": "2026-09-27 16:05:54",
+   "reason": "CR #92 round 1 (R6): world.py's mobile bound reads things.LIST_MAX_THINGS (254, the value it had) -- a pure refactor",
+   "git_head": "5b9dd61",
+   "changed": {
+    "src/doomfj/things.py": [
+     "b80f7ddb86dbeace",
+     "998b72150653c807"
+    ],
+    "src/doomfj/world.py": [
+     "9cb3758a215a9a87",
+     "66d065d8bce09d98"
     ]
    },
    "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"

@@ -11,8 +11,9 @@ changes"). Kill criteria: `docs/gp-ledger.md`. The survey this starts from is
 
 Every downscaled patch column `u` carried **41 pre-scaled blocks** of 64 ops: 32 main blocks, one per
 height bucket (buckets 12-31 full-res rows capped at 24 runs, 0-11 half-res at 12), and 9 coarse
-blocks (buckets 0-8, half-res, cap 4) -- 5,248 words a column, **2,923,136 words** for E1M1's 32 kinds
-and 557 columns, holding ONE patch per thing type (monsters: walk frame A, rotation 1). Every monster
+blocks (buckets 0-8, half-res, cap 4) -- 5,248 words a column: **2,309,120 words** for E1M1's 27
+drawn kinds and 440 columns once P1.5 keyed the bank on `things.drawable_things` (2,923,136 for the 32
+kinds with art before that), holding ONE patch per thing type (monsters: walk frame A, rotation 1). Every monster
 frame in that format would take the image to 51.7% of 2^27 (plan 6.6).
 
 ## 2. The format (`doomfj.spritebank`, one generator for both mirrors)
@@ -106,20 +107,22 @@ before P3 (moving monsters); `tests/host/test_sprite_bank.py` decodes every one 
 
 ## 6. Budget
 
-- **Size (MEASURED, `scratchpad/gp/probes/bank/size.py --base 4653cc9` at 112aed4,
+- **Size (MEASURED, `scratchpad/gp/probes/bank/size.py --base 18ef625` at 0da63c9,
   `docs/ship-evidence/p16_size.log`)**, two parts:
-  - the BANK: 16,635 blocks = 2,129,280 words, against the per-bucket bank's 22,837 blocks =
-    2,923,136 words (P1.5) -- **-793,856 words** while holding every frame and rotation;
+  - the BANK: 16,284 blocks = 2,084,352 words (1,320 in the kinds' three regions, 14,964 the
+    animation's), against the per-bucket bank's 18,040 blocks = 2,309,120 words (P1.5, 27 drawn
+    kinds) -- **-224,768 words** while holding every frame and rotation;
   - the ROWMAP table, new: **+98,308 words** (switch, handlers, clean table, wflip chains; measured by
     assembling it alone with its switch aligned), plus 0..16,382 words of its own `pad 8192`
     wherever the build lands it;
-  - together **-695,548 words** (-0.518% of 2^27) before that pad. (The first version of this line
-    counted the bank alone: -793,856.)
-- **Held for nothing (MEASURED, the same log)**: 5 of the bank's 32 kinds -- 2002, 2003, 2004, 2013
-  and 2046, which only multiplayer things carry on E1M1 -- are drawn by no drawable thing
-  (`things.drawable_things`), and 3002 banks SARG a second time after 58: 351 + 57 blocks = 52,224
-  words. Keying the bank's kinds on the drawable list and its regions on the sprite would take them
-  back; this rung does not.
+  - together **-126,460 words** (-0.094% of 2^27) before that pad. (Measured at 112aed4, against
+    P1.5 before its drawable-kinds fix, the same comparison read -793,856 for the bank and -695,548
+    together: most of that was five kinds no single-player thing draws, which P1.5 now drops first.)
+- **Held for nothing (MEASURED, the same log)**: none of the bank's 27 kinds -- P1.5 (18ef625) keys
+  the bank on `things.drawable_things`, so the five kinds only multiplayer things carry on E1M1 (2002,
+  2003, 2004, 2013, 2046) are no longer banked. One duplicate remains: 3002 banks SARG a second time
+  after 58, 57 blocks = 7,296 words; keying the regions on the sprite would take it back, and this
+  rung does not.
 - **Ops (ESTIMATE)**: +2 rowmap lookups a sprite column and +1 a run (a D4 dispatch, ~60-80 ops)
   against the record's multiply saved per column -- on combat set v2, +0.05 .. +0.15M ops/frame.
 - **Freeze**: a v3 of the combat set (section 4).

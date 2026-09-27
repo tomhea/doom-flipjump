@@ -289,11 +289,13 @@ takes a column iff its bucket is at least the list's `min_b` (the shared rule). 
 every frame and rotation of E1M1's monsters, barrels, fireballs, puffs and blood (306 views, 237
 lumps; MEASURED, `docs/ship-evidence/p16_size.log`), which nothing draws before P3.
 
-**Budget**: size MEASURED (`scratchpad/gp/probes/bank/size.py --base 4653cc9` at 112aed4,
-`docs/ship-evidence/p16_size.log`): the bank **-793,856 words** (16,635 blocks against the
-per-bucket bank's 22,837; 2,129,280 against 2,923,136 words) while holding the animation, and the
-new rowmap table **+98,308 words** (plus 0..16,382 words of its own `pad 8192` where the build lands
-it) -- together **-695,548 words** (-0.518% of 2^27). (First declared as -793,856: the bank alone.)
+**Budget**: size MEASURED (`scratchpad/gp/probes/bank/size.py --base 18ef625` at 0da63c9,
+`docs/ship-evidence/p16_size.log`): the bank **-224,768 words** (16,284 blocks against the
+per-bucket bank's 18,040; 2,084,352 against 2,309,120 words, both for the 27 kinds a single-player
+game draws) while holding the animation, and the new rowmap table **+98,308 words** (plus 0..16,382
+words of its own `pad 8192` where the build lands it) -- together **-126,460 words** (-0.094% of
+2^27). (First declared as -793,856, then -695,548 with the rowmap: both measured against P1.5 before
+its drawable-kinds fix, whose five never-drawn kinds made up most of it.)
 Ops ESTIMATE +0.05 .. +0.15M on combat set v2's binding (the rowmap lookups against the record's
 saved multiply). The frozen set: a v3 (below).
 

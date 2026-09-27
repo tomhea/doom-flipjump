@@ -75,14 +75,46 @@ level state and are not in it.
 - every screen is a baked 0x0B frame (`doomfj.menu`, the same generator for both mirrors): the main
   menu, and the skill screen once per highlighted entry -- a constant byte stream each (~2.3K ops).
 
+**As implemented** (before the build):
+- The polls only RECORD: `kb.poll` sets `ev_enter` / `ev_esc` on enter's and esc's down edges and
+  `ev_up` / `ev_dn` on forward's and back's (w / up arrow, s / down arrow), which the frame zeroes
+  before its polls; M3's toggle of `mode` inside the poll is gone. After the polls,
+  `wall_renderer.menu_state_lines` acts on the first of esc, enter, up, down -- the rules above --
+  and then the producer branch picks the world or one of the four screens.
+- The rules have ONE Python side, `doomfj.menu.menu_step` (with `MENU_KEYS`, the device's keycodes),
+  which every check that drives a program through the menu steps: `tests/fj/test_skill_menu.py`
+  runs the real `menu_state_lines` and `restart_lines` against it in a frame loop from DIRTY cells,
+  with swapped moves and an unzeroed restart as its R9 controls.
+- `menu_scr` and `menu_sel` persist the way `mode` does: they are declared with the standalone
+  tier's globals (`STANDALONE_SCRATCH_DECLS`, so `m5_setfile.py` re-attaches them to the restore set
+  at their widths) and named in `build.STANDALONE_PERSIST`, the set's one intended hole -- the
+  build refuses a persist name the set does not carry. The event cells and `rs_ret` are ordinary
+  residue. `menu_sel`'s baked value derives from `BOOT_SKILL`.
+- The restart block is `restart_common` (fcall'd: the player start, the doors shut and idle, each
+  runtime thing's spawn leaf and position, every list byte zeroed with `m1.zerobyte`) plus each
+  skill's inline half (its non-zero list bytes flipped in, its `thvis` flags set).
+- Every driver leaves the boot menu with ESC (`m2_std_gate.menu_exit_events`, which gamespeed,
+  b0_scenarios and the play tools compose): enter opens the skill screen now, and esc meant the
+  world on every binary before this rung too, so one driver serves old and new binaries alike.
+
 ## 3. Gates and budget
 
 - `m3_gate`: the menu frames byte-exact through the skill screen and all three skills' NEW GAME,
   each followed by world frames byte- and state-exact against the oracle at that skill's level
   start -- with the controls that the restart REALLY resets (walk, open a door, NEW GAME: the view
   and the door are back) and that the skills really differ (the frames at easy and hard differ
-  exactly where `skill_absent` says).
-- `m2_std_gate`: its route, entering the world at the boot state (hard).
+  exactly where `skill_absent` says). As implemented: 32 frames -- M3's script, then the skill
+  screen clamped at both ends, backed out of, and NEW GAME at easy, medium and hard; controls: the
+  first NEW GAME finds the player walked away, every NEW GAME frame is the spawn view, and the three
+  NEW GAME frames are pairwise distinct in the oracle (MEASURED at the spawn view: easy / hard 20 px,
+  easy / medium 12, medium / hard 8). `--selftest-skill` (the oracle starts the next skill) must
+  fail at frame 20.
+- `m2_std_gate`: its route, entering the world at the boot state (hard) -- then, with the door open
+  and walked through, NEW GAME at the boot skill and the same route again, which must retrace the
+  first walk pose for pose and end facing a SHUT door (control 6; the door must have been open when
+  NEW GAME landed -- MEASURED with `--dry`: state 5, its pass state 4 -- and the last frame must be
+  able to tell). `--selftest-restart` (the oracle never restarts) must fail. This is the kill
+  criterion 2's "walk, open a door, choose a skill" on the shipped binary.
 - `b0_scenarios` on set v2: the runs start from their checkpoints at hard, and the frames change by
   what hard does not spawn -- the 26 multiplayer-only things and the 7 zombiemen of the other skills
   (the model has always run at hard; the render oracle is now told so, through `thing_hidden`).

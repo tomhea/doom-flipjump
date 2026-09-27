@@ -123,9 +123,15 @@ included (`blocked29r_build.log`, 4814 s) -- **VERIFIED byte-identical.** Its la
 source did, so the counts cache MISSED and recounted (17,496 groups after alias merging, 336,374
 tables) and the build took 7,234 s: sha256 `0dd3806016af68cd` (`docs/ship-evidence/blocked30_build.log`). All 20
 hot groups matched; 14,083 of the list's 35,894 hot sites did. The tracked counts cache is that
-recount, and the same line at the branch head HIT it and produced `0dd3806016af68cd` again, label table included
-(`7bc5fa5d...`; `blocked30r_build.log`, 4,769 s) -- **VERIFIED byte-identical.** Its label table is
-`scratchpad/12m/atlas/blocked30.labels.tsv.gz`. (A first build of this rung was stopped in pass 1:
+recount, and the same line at 87c2c75 -- the build's own source -- HIT it and produced `0dd3806016af68cd` again,
+label table included (`7bc5fa5d...`; `blocked30r_build.log`, 4,769 s) -- **VERIFIED byte-identical.** Its label
+table is `scratchpad/12m/atlas/blocked30.labels.tsv.gz`. PR #92's review then changed `src/` (one list
+bound, one persist composition, the lists' extents written once): the build's own path hands the
+assembler the same files and the same persist tuple at 87c2c75 and at the head
+(`docs/ship-evidence/p13_emit_neutral.log`), so the program -- and with it the counts and the binary
+-- is blocked30's; but the head's sources sign the counts cache `3efece59` where the tracked recount
+is signed by 87c2c75's (`aab5be8f`), so on main this line MISSES the cache and recounts once (~34 min,
+the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (A first build of this rung was stopped in pass 1:
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
 
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):

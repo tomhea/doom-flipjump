@@ -50,9 +50,10 @@ nothing moves a thing yet, so every frame rebuilt the SPAWN lists. The M1 reset 
 
 `build/doom_e1m1_blocked30.fjm`, sha256 `0dd3806016af68cd`, from the ship-gate 1b line unchanged (blocked27's heat
 list); the source changed, so the counts cache recounted (17,496 groups after alias merging, 336,374
-tables) and the build took 7,234 s. Rebuilt from the same line at the branch head, HITting the cache
-that count wrote: the same sha256 and the same label table (`blocked30r_build.log`, 4,769 s) --
-VERIFIED byte-identical. The row and the verdict are in `docs/gp-ledger.md`.
+tables) and the build took 7,234 s. Rebuilt from the same line at 87c2c75, HITting the cache that
+count wrote: the same sha256 and the same label table (`blocked30r_build.log`, 4,769 s) -- VERIFIED
+byte-identical. (PR #92's review later changed `src/` without changing what the build assembles --
+`p13_emit_neutral.log`; ship-gate 1b says what that means for the counts cache.) The row and the verdict are in `docs/gp-ledger.md`.
 
 - **The first build was stopped.** Persisting `sshead` -- a byte array -- made
   `selfreset.emit_reset_part` refuse its own set after pass 1: the persisted words left the set,

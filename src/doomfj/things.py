@@ -90,6 +90,13 @@ def skill_absent(drawable, skill):
     return frozenset(i for i, t in enumerate(drawable) if not t.flags & bit)
 
 
+def skill_hidden(rm, things, sprite_wad, skill):
+    """M7 P1.5: `skill_absent` over the drawable list the ORACLE builds from `things` -- the
+    `thing_hidden` a gate hands `render_wall_frame` for a game at `skill`. The game tier boots at
+    wall_renderer.BOOT_SKILL, so every gate that runs it asks for that skill's set."""
+    return skill_absent(drawable_things(rm, things, sprite_wad)[0], skill)
+
+
 def drawable_things(rm, things, sprite_wad, cache=None):
     """`(drawable, wad_indices)` -- the single-player things that have art, in wad order.
 

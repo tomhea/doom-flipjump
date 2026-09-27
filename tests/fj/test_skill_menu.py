@@ -9,8 +9,9 @@ leaves, two runtime things, one door, one flagged thing), driven by the real key
 prints the state after every frame. The cells start DIRTY (a moved view, an open door, garbage in
 the lists), so a restart that misses a cell shows.
 
-The expectation is an independent Python mirror of docs/gp-skill-menu.md's rules and the device's
-contract (one event per poll tic, due when the tic reaches it) -- not a run of the program.
+The expectation is the Python side of docs/gp-skill-menu.md's rules, `doomfj.menu.menu_step` (the
+mirror every gate that drives the game binary through its menu steps), and the device's contract
+(one event per poll tic, due when the tic reaches it) -- not a run of the program.
 
 ⚠ THE CONTROLS (R9): the up/down moves swapped, and a restart that leaves the lists unzeroed, are
 assembled through the same harness and must disagree with the mirror.
@@ -23,6 +24,7 @@ from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, Scr
 
 from doomfj.config import Config
 from doomfj.harness import W
+from doomfj.menu import MENU_KEYS, menu_step
 from doomfj.wall_renderer import MENU_STATE_DECLS, menu_state_lines, restart_lines
 
 SRC = [Path("src/fj") / "input.fj", Path("src/fj") / "m1_reset.fj"]
@@ -72,7 +74,7 @@ def _program(state_lines, common):
         "mode: hex.vec 1, 1", *MENU_STATE_DECLS,
         "kstat: hex.vec 1", "kcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
-        f"tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
+        "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
         "tm_base: hex.vec w/4", "tm_idx: hex.vec w/4", "tm_p: hex.vec w/4", "tm_v: hex.vec 2",
         f"viewx: hex.vec 8, {DIRTY['viewx']}", "viewy: hex.vec 8", "viewangle: hex.vec 8",
         f"dstate: hex.vec 1, {DIRTY['dstate']}", "ddir: hex.vec 1, 2", "dsub: hex.vec 1, 5",
@@ -119,28 +121,13 @@ def _expected(events):
             if index < len(pending) and pending[index].tic <= tic:
                 e = pending[index]
                 index += 1
-                if e.is_down:
-                    ev.add({ENTER: "enter", ESC: "esc", UP: "up", W_KEY: "up", DOWN: "dn",
-                            S_KEY: "dn"}.get(e.keycode, "other"))
-        if st["mode"] == 0:
-            if "esc" in ev or "enter" in ev:
-                st["mode"], st["scr"] = 1, 0
-        elif st["scr"] == 0:
-            if "esc" in ev:
-                st["mode"] = 0
-            elif "enter" in ev:
-                st["scr"] = 1
-        else:
-            if "esc" in ev:
-                st["scr"] = 0
-            elif "enter" in ev:
-                head, nxt, vis = PER_SKILL[st["sel"]]
-                st.update(viewx=START["viewx"], dstate=START["dstate"], sshead=list(head),
-                          thnext=list(nxt), thvis=vis[0], mode=0, scr=0)
-            elif "up" in ev:
-                st["sel"] = max(0, st["sel"] - 1)
-            elif "dn" in ev:
-                st["sel"] = min(2, st["sel"] + 1)
+                if e.is_down and e.keycode in MENU_KEYS:
+                    ev.add(MENU_KEYS[e.keycode])
+        st["mode"], st["scr"], st["sel"], new_game = menu_step(st["mode"], st["scr"], st["sel"], ev)
+        if new_game is not None:                    # the chosen skill's level start
+            head, nxt, vis = PER_SKILL[new_game]
+            st.update(viewx=START["viewx"], dstate=START["dstate"], sshead=list(head),
+                      thnext=list(nxt), thvis=vis[0])
         out.append(_fmt(st))
     return out
 

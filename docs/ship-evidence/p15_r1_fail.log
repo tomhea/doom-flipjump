@@ -1,0 +1,55 @@
+# R1: the p15 tests on the PARENT rung's src/ (git archive 68fbd7e = 68fbd7e M7 P1.4: the heat list re-keyed for the v2 column's signatures -- heat_b), the branch's test files copied in
+$ python -m pytest tests/fj/test_keyboard_input.py -q -p no:cacheprovider
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[a key held down twice never sticks off]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[enter is an event on its down edge only]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[enter twice, two frames' events]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[esc is its own event]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[every key down, then up]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[forward and back are the menu's up and down]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[hold w across frames]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[junk keys between real ones]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[nothing at all]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[press and release w]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[the arrows bind the same]
+ERROR tests/fj/test_keyboard_input.py::test_flags_track_the_key_script[the menu's events do not disturb the keys]
+ERROR tests/fj/test_keyboard_input.py::test_a_non_keyboard_input_stream_halts_at_bad
+ERROR tests/fj/test_keyboard_input.py::test_negative_control_a_wrong_binding_is_caught
+1 passed, 14 errors in 1.19s
+$ python -m pytest tests/fj/test_menu_mode.py -q -p no:cacheprovider
+FAILED tests/fj/test_menu_mode.py::test_mode_1_paints_the_menu - flipjump.uti...
+FAILED tests/fj/test_menu_mode.py::test_mode_0_paints_the_world_and_never_the_menu
+2 failed, 2 passed in 0.80s
+$ python -m pytest tests/fj/test_skill_menu.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'MENU_KEYS' from 'doomfj.menu' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\r1_p
+ERROR tests/fj/test_skill_menu.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.35s
+$ python -m pytest tests/host/test_menu.py -q -p no:cacheprovider
+E       ImportError: cannot import name 'menu_step' from 'doomfj.menu' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\
+E       ImportError: cannot import name 'MENU_SKILLS' from 'doomfj.menu' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpa
+E       ImportError: cannot import name 'MENU_KEYS' from 'doomfj.menu' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\
+FAILED tests/host/test_menu.py::test_the_menu_rules_move_between_the_screens
+FAILED tests/host/test_menu.py::test_the_highlight_clamps_and_the_first_event_wins
+FAILED tests/host/test_menu.py::test_the_menu_keys_are_the_devices - ImportEr...
+3 failed, 18 passed in 0.36s
+$ python -m pytest tests/host/test_reference_model_more.py -q -p no:cacheprovider
+FAILED tests/host/test_reference_model_more.py::test_hiding_a_thing_with_no_visibility_flag_raises
+1 failed, 17 passed in 0.92s
+$ python -m pytest tests/host/test_skill_presence.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'single_player' from 'doomfj.things' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpa
+ERROR tests/host/test_skill_presence.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.34s
+$ python -m pytest tests/host/test_thing_table.py -q -p no:cacheprovider
+E       ImportError: cannot import name 'single_player' from 'doomfj.things' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scrat
+E       ImportError: cannot import name 'single_player' from 'doomfj.things' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scrat
+FAILED tests/host/test_thing_table.py::test_the_rows_cover_exactly_the_drawable_things
+FAILED tests/host/test_thing_table.py::test_both_mirrors_build_the_drawable_list_with_the_same_predicate
+2 failed, 6 passed in 1.83s
+$ python -m pytest tests/host/test_wall_renderer_helpers.py -q -p no:cacheprovider
+E       ImportError: cannot import name 'SKILL_MENU' from 'doomfj.wall_renderer' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\s
+E       ImportError: cannot import name 'restart_lines' from 'doomfj.wall_renderer' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327
+FAILED tests/host/test_wall_renderer_helpers.py::test_every_poll_is_its_own_expansion
+FAILED tests/host/test_wall_renderer_helpers.py::test_the_menu_omits_exactly_the_frame_end_byte
+FAILED tests/host/test_wall_renderer_helpers.py::test_the_menu_branch_wraps_the_stream_in_the_documented_order
+3 failed, 57 passed in 0.58s

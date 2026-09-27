@@ -76,3 +76,32 @@ dominated by the unchanged seed walk.
 | ms/frame (msframe, quiet box) | 73.7 (the re-frozen `shipped` baseline) | | |
 | size (% of 2^27) | 32.21% | | |
 | hot words pinned (pinreport) | 20/20 | | |
+
+## P1.3 persistent leaf lists (class S) -- declared 2026-09-27, before the build
+
+**What**: in the game tier the per-leaf thing lists stop being rebuilt every frame. `sshead` and
+`thnext` are baked to the spawn lists (exactly what `sim.bind_things` builds from the baked spawn
+bindings: each leaf's runtime things, ascending), and the M1 reset stops restoring `sshead`,
+`thss_rt` (the bindings) and `thpos_rt` (the positions) -- they persist, like the view and the
+doors (`build.STANDALONE_PERSIST`). The per-frame `sim.bind_things` call goes; the hosted tiers keep
+the wire protocol. The per-MOVE rebind lands as fj macros (`sim.leaf_link` / `sim.leaf_unlink`,
+ascending insert and unlink, the mirror of `world.py`'s `_list_insert` / `_list_remove`), tested
+standalone -- monsters are still inert, so nothing in the binary calls them until P3.
+
+**Budget**: -0.44M ops/frame (`sim.bind_things`, MEASURED 438,808 on gamespeed, plan section 3),
+plus the reset work the three persisted arrays stop costing (ESTIMATE ~0.1-0.17M, ~41-53 ops a
+restored cell over ~2,400 nibble cells and 682 byte cells).
+
+**Kill criteria** (any one -> the binary does not ship):
+1. Host: the baked lists differ from a Python mirror of `bind_things` on the spawn bindings, or the
+   emitted declarations do not spell them (with a mutated-list control).
+2. fj: `sim.leaf_link` / `sim.leaf_unlink` disagree with the model on a scripted sequence run in ONE
+   image (head, middle, tail, empty, only element), or a mutated macro is not caught.
+3. `m2_std_gate` or `m3_gate` not byte-exact.
+4. `msframe.py --against shipped`: B SLOWER. NOT SEPARATED ships only as "foundation for P3".
+5. The reclaim: gamespeed binding down by less than 0.35M ops/frame (the budget / 1.25) ->
+   redesign before shipping.
+6. Size over 35% of 2^27; `pinreport.py`: a hot word of the heat list not pinned; the build refusing
+   a persisted name (every one must be in the restore set).
+
+**Row**: (filled after the build)

@@ -1,0 +1,33 @@
+# the ONE tier helper (M7 P1.6 review, finding 7) is neutral: both mirrors' output at the rung before it (13bea6b) and at its commit, each tree in its own process -- 2026-09-27
+$ python scratchpad/gp/p16_tierlist_neutral.py --base 13bea6b --head 606df88
+base 13bea6b = 13bea6b M7 P1.6: the heat list re-keyed for thing_record_body's 24 parameters -- heat_blocked27_p16:
+   bank 4a2be95c8b894a0d (1064643 lines)
+   static:gate664 moved 0, fragments 106: pixels c3c4f7f848ca00d9 fragments f31018d5c7e65da5
+   static:gate1869 moved 0, fragments 85: pixels 659eac106609ea3a fragments 380c6ca041d57d9d
+   static:h57 moved 0, fragments 25: pixels fd3ff3aa55f8a065 fragments b25b9ff6d3b27640
+   static:h71 moved 0, fragments 104: pixels 74b8c85432e4fd00 fragments e2e313b9431a38f3
+   static:h100 moved 0, fragments 126: pixels 5e85d4c7f6f8c122 fragments e453784952fe6e27
+   static:h28 moved 0, fragments 23: pixels 573d813d16453e49 fragments 36353def53ad08ea
+   static:h42 moved 0, fragments 32: pixels 8e4ca259b02619ee fragments 66d247da62c4acd8
+   static:h85 moved 0, fragments 11: pixels b799ee5877346e88 fragments aa321366e236eea5
+   heavy:gate664 moved 6, fragments 106: pixels 00b3f44b26f48529 fragments d3a8dd55cf4b34b8
+   heavy:gate1869 moved 6, fragments 90: pixels dfad65af782a1f9d fragments 060df7a637394750
+   heavy:h57 moved 6, fragments 73: pixels 5563ee8ee078d39b fragments a1930ffb441dbc27
+   heavy:h71 moved 6, fragments 110: pixels bca2e159badf427e fragments 0b6f596a6bc32648
+   heavy:h100 moved 6, fragments 126: pixels 5e85d4c7f6f8c122 fragments e453784952fe6e27
+   heavy:h28 moved 6, fragments 84: pixels fb6edc73b82a9641 fragments fdbda9c768645151
+   heavy:h42 moved 6, fragments 80: pixels 3809f239d26a2d3c fragments 34df55d91a0130cc
+   heavy:h85 moved 6, fragments 74: pixels ec370542d7100156 fragments e19b917a94908e2a
+   melee:gate664 moved 4, fragments 122: pixels c26e61ca6b4fb316 fragments 47c4ec7ef73cdac6
+   melee:gate1869 moved 4, fragments 103: pixels 734071d3f419fc2a fragments d80182291be9adb8
+   melee:h57 moved 4, fragments 89: pixels 9e7e58a74f984c56 fragments 1f39c496dfb2d9f4
+   melee:h71 moved 4, fragments 132: pixels 93d4cb2c60fce017 fragments f9654622a934359f
+   melee:h100 moved 4, fragments 132: pixels 3def9ca282b45297 fragments 0e8701b1af719e85
+   melee:h28 moved 4, fragments 112: pixels ebaa66163c572713 fragments d1174d3b58fab3e9
+   melee:h42 moved 4, fragments 121: pixels 07b9222b16506e73 fragments 88b35c2591dc287d
+   melee:h85 moved 4, fragments 94: pixels d64366aef4026a30 fragments 26c953ff94ffa1f5
+head 606df88 = 606df88 M7 P1.6 review: ONE tier helper -- the oracle's column loop and sprite_tier_lists both ask sprite_tier_list: EVERY VALUE EQUAL (25)
+CONTROL MID cap 12 -> 11:        caught -- 22 value(s) differ, the bank among them
+CONTROL far short thing -> MID:  caught -- 5 frame value(s) differ, the bank not
+TIER HELPER NEUTRAL: PASS
+rc=0

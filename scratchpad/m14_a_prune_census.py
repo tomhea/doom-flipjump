@@ -28,6 +28,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 from doomfj.config import Config
 from doomfj.mapcompiler import bake_bsp, NF_SUBSECTOR
 from doomfj.reference_model import ReferenceModel, THING_SPRITE
+from doomfj.things import drawable_things
 from doomfj.wad import WadFile
 
 MAPNAME = "E1M1"
@@ -68,9 +69,7 @@ def leaf_sector(si0):
 # --- the three liveness candidates -------------------------------------------------------------
 spr_cache = {}
 things_by_ss = {}
-for t in mw.things(MAPNAME):
-    if rm.sprite_art(art, t.type, spr_cache) is None:
-        continue
+for t in drawable_things(rm, mw.things(MAPNAME), art, spr_cache)[0]:   # the emitter's own list
     things_by_ss.setdefault(rm.point_in_subsector(cmap, t.x, t.y), []).append(t)
 
 CANDIDATES = {

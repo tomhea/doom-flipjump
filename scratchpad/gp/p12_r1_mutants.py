@@ -9,10 +9,12 @@ command, one line changed.
     python scratchpad/gp/p12_r1_mutants.py --only M6  # one
 """
 import argparse
+import io
 import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 from pathlib import Path
 
@@ -43,10 +45,15 @@ MUTANTS = [
      [CM + "::test_the_cell_size_is_the_one_the_trees_nibble_split_describes"]),
     ("M6", "the shared line test never refuses", "src/fj/sim.fj",
      "        hex.zero 1, cp_ok                       // one-sided, ML_BLOCKING or a shut door: LATCH",
-     "        ;nxt                                    // (M6: the latch is gone)",
+     "        hex.set 1, cp_ok, 1                     // (M6: the latch never refuses)",
      [CF + "::test_the_cell_routine_matches_the_oracle",
-      CF + "::test_the_door_lines_follow_their_doors_states",
-      CF + "::test_a_walked_trajectory_matches_too"]),
+      CF + "::test_the_door_lines_follow_their_doors_states"]),
+    # the walk meets no wall: what it guards is the ONE-IMAGE hygiene -- every argument cell back to
+    # zero after each line, or the next line tests against the leftovers
+    ("M9", "a line stub leaves an argument nibble dirty", "src/doomfj/collision.py",
+     '        out += xors + ["    stl.fret cc_lret"]',
+     '        out += xors[1:] + ["    stl.fret cc_lret"]',
+     [CF + "::test_a_walked_trajectory_matches_too"]),
     ("M7", "a door line ignores its door's state", "src/doomfj/collision.py",
      "{shut_mask:#06x}, {nxt}, {lab}_shut", "0x0000, {nxt}, {lab}_shut",
      [CF + "::test_the_door_lines_follow_their_doors_states"]),
@@ -59,7 +66,10 @@ MUTANTS = [
 
 
 def tree(tmp):
-    subprocess.run(f'git archive HEAD | tar -x -C "{tmp}"', shell=True, cwd=ROOT, check=True)
+    data = subprocess.run(["git", "archive", "--format=tar", "HEAD"], cwd=ROOT, check=True,
+                          capture_output=True).stdout
+    with tarfile.open(fileobj=io.BytesIO(data)) as t:
+        t.extractall(tmp)
     if (ROOT / "assets").is_dir():
         shutil.copytree(ROOT / "assets", Path(tmp) / "assets")
 

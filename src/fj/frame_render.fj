@@ -472,19 +472,6 @@ ns frame {
       fstart_done:
     }
 
-    // A4: clamp an 8-nibble ROW register into [0, bound]. The sprite fragment's first and last
-    // rows ran this same ladder back to back.
-    def clamp_row dst, bound @ neg, hi_ck, clamp_hi, done {
-        hex.sign 8, dst, neg, hi_ck
-      neg:
-        hex.zero 8, dst
-      hi_ck:
-        hex.scmp 8, dst, bound, done, done, clamp_hi
-      clamp_hi:
-        hex.mov 8, dst, bound
-      done:
-    }
-
     // M14-perf: THE COLD HALF of a thing's row, read only once the thing is known to be VISIBLE.
     //
     // MEASURED: 20,832 of 22,146 loads (94.1%) are rejected by proj.project_thing, and
@@ -521,9 +508,10 @@ ns frame {
         hex.read_table_packed 1, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
     }
 
-    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, blkshift, buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, nld, neartz, mt, throwc, n_thc, sprltc, nltic \
+    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, nld, neartz, mt, throwc, n_thc, sprltc, nltic \
             @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, bucket_mul, bucket_mul_done, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end \
-            < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_blk_ofs, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_run_r0, trb_run_w8, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_sy1, trb_sy2, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, trb_y0_biased, trb_y_base {
+            < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
+              gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8 {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
         // NOT distance order, so one shared counter let 1-pixel bonus dots spend the frame's slots
         // while monsters were turned away (EXP-8a). A monster now has its own, deliberately loose
@@ -620,6 +608,27 @@ ns frame {
         hex.set w/4, trb_tbl_b, sprlight
         frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.read_byte trb_shade_row, trb_tbl_p
+        // M7 P1.4 -- THE THING'S SLOT. A fragment is recorded as (slot, block): its per-THING
+        // constants -- the top row of its bucket, biased, and its light row -- go into
+        // gpslot[s] = [trb_y0 + 32768 lo][hi][shade row][unused] ONCE here, where the old record
+        // biased `trb_y0 + r0` and stored it, with the row clamps and the light row, in every
+        // column. Slot ids run 1..255 (0 = no fragment): at most one per accepted thing, and a
+        // frame accepts no more things than the map draws -- the emitter asserts that count
+        // <= 255. gps_nslot starts every frame at 0 (the restore sets carry it).
+        hex.inc 2, gps_nslot
+        hex.mov 2, gps_s_rec, gps_nslot
+        hex.zero w/4 - 2, gps_sidx + 2*dw       // Z3: the mov below zeroes the low 2 itself
+        hex.mov 2, gps_sidx, gps_s_rec
+        hex.shl_bit w/4, gps_sidx
+        hex.shl_bit w/4, gps_sidx               // x 4 bytes per slot
+        hex.set w/4, gps_sbase, gpslot
+        frame.ptr_index gps_ptr, gps_sbase, gps_sidx
+        hex.mov 8, gps_yb8, trb_y0
+        hex.add_constant 8, gps_yb8, 32768      // two bytes: a tall NEAR sprite's top sits far above
+                                                // row -128, and a one-byte bias WRAPPED (M13-15M)
+        hex.write_byte_and_inc gps_ptr, gps_yb8
+        hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw
+        hex.write_byte gps_ptr, trb_shade_row
         // the column DDA: frac starts at (clamped x1 - x1) * istep, exactly as the oracle's does
         hex.mov 8, trb_col_x, trb_tx1
         hex.zero 8, trb_frac_u
@@ -693,60 +702,30 @@ ns frame {
       bucket_mul_done:
         hex.add w/4, trb_blk, trb_blk_const
         // ⚠ `trb_blk` stays the RAW block INDEX -- that is what the slot stores and what the emit
-        // shifts. Shifting it here as well double-multiplied the address by the stride AND
+        // places. Scaling it here as well double-multiplied the address by the stride AND
         // overflowed the slot's 4 nibbles, which read back as an all-zero block header and made
         // every column skip: the frame then differed from the oracle by EXACTLY its sprite pixels.
-        hex.mov w/4, trb_blk_ofs, trb_blk
-        rep(blkshift, k) hex.shl_bit w/4, trb_blk_ofs   // x SPR_BLOCK_STRIDE dw (a power of two)
-        hex.set w/4, trb_tbl_b, sprbank
-        frame.ptr_index trb_tbl_p, trb_tbl_b, trb_blk_ofs
-        hex.read_byte trb_run_r0, trb_tbl_p             // the block HEADER: first row, last row
-        hex.ptr_add trb_tbl_p, 1
+        // M7 P1.4: the block's address by WHOLE-NIBBLE placement (frame.blk_addr: a 64-op block
+        // is 16^3 bits, so base + blk*4096 is blk's four nibbles at nibble 3 plus the base) -- and
+        // only last_rel is read, at op 1 of the block (hence the base `sprbank + dw`). The rows are
+        // derived at emit, from the slot and the block header (stream.frag_derive).
+        frame.blk_addr trb_tbl_p, trb_blk, sprbank + dw
         hex.read_byte trb_run_last, trb_tbl_p
-        hex.ptr_sub trb_tbl_p, 1
         hex.if0 2, trb_run_last, col_next           // a fully transparent sprite column
-        // trb_sy1 = max(trb_y0 + r0, 0), sy2p1 = min(trb_y0 + last_rel, VIEW_H); empty -> nothing to store
-        // trb_sy1 = clamp(trb_y0 + r0, 0, VIEW_H), sy2p1 = clamp(trb_y0 + last_rel, 0, VIEW_H).
-        // ⚠ CLAMPED, never REJECTED: the oracle takes the column as soon as the sprite column has
-        // any opaque texel, even when the projected run lands entirely off-screen -- and a taken
-        // column is closed to every LATER thing. Rejecting here instead left the column claimable
-        // and fj recorded fragments the oracle does not have. An empty [trb_sy1, trb_sy2) costs nothing at
-        // emit: the two regions then cover the whole column and every sprite run skips or clamps.
-        // ⚠ the baked run list is relative to r0 (the column's FIRST OPAQUE row), not to the
-        // sprite's row 0 -- exactly as the oracle's fragment stores `ytop_b + st[0]` as its base.
-        // Fold r0 in ONCE here, so the emit's `trb_y0 + rel` is right and `trb_sy1` is the same row.
-        hex.zero 6, trb_run_w8 + 2*dw   // ... widened: `hex.add 8` reads EIGHT nibbles
-        hex.mov 2, trb_run_w8, trb_run_r0
-        hex.mov 8, trb_y_base, trb_y0
-        frame.add8_chain trb_y_base, trb_run_w8
-        hex.set 8, trb_cbound, viewh
-        hex.mov 8, trb_sy1, trb_y_base
-        .clamp_row trb_sy1, trb_cbound
-        hex.zero 6, trb_run_w8 + 2*dw   // only the HIGH 6: the mov below zeroes the low 2
-        hex.mov 2, trb_run_w8, trb_run_last
-        hex.mov 8, trb_sy2, trb_y_base
-        frame.add8_chain trb_sy2, trb_run_w8
-        .clamp_row trb_sy2, trb_cbound
       do_store:
-        hex.mov 8, trb_y0_biased, trb_y_base            // base + 32768, stored as TWO bytes: a tall NEAR
-        hex.add_constant 8, trb_y0_biased, 32768    // sprite's top can sit far above row -128, and the
-                                                // old one-byte +128 bias WRAPPED there (M13-15M)
         hex.set w/4, trb_tab_idx, 0
         hex.mov 2, trb_tab_idx, trb_col_x
         rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx   // a power-of-16 stride: whole-nibble shift
         hex.add w/4, trb_tab_idx, trb_slot_ofs          // V4b: slot B lives at byte offset 8
         hex.set w/4, trb_tbl_b, spslot
         frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
-        // P2-5: the FIRST write keeps the full arm -- on the first pass its predecessor can be
-        // a sprite-bank (high-cluster) arm. Every later write in the run follows it, so they are
-        // all inside spslot and take the narrow one.
-        hex.write_byte_and_inc trb_tbl_p, trb_sy1
-        frame.write_byte_and_inc5 trb_tbl_p, trb_sy2
-        frame.write_byte_and_inc5 trb_tbl_p, trb_y0_biased
-        frame.write_byte_and_inc5 trb_tbl_p, trb_y0_biased + 2*dw
+        // P2-5: the FIRST write keeps the full arm -- its predecessor is the sprite-bank
+        // (high-cluster) read above. Every later write follows it, inside spslot / sprflag, so
+        // they take the narrow one. M7 P1.4: three bytes, [s][blk lo][blk hi], where there were
+        // seven -- the rows, the bias and the light row are the slot's and the header's now.
+        hex.write_byte_and_inc trb_tbl_p, gps_s_rec
         frame.write_byte_and_inc5 trb_tbl_p, trb_blk
-        frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw
-        frame.write_byte_and_inc5 trb_tbl_p, trb_shade_row
+        frame.write_byte5 trb_tbl_p, trb_blk + 2*dw
         frame.write_byte5 trb_sprflag_p, trb_slot_flag   // V4b: 1 = A only, 2 = A + B
       col_next:
         hex.ptr_add trb_drawn_p, 1
@@ -1948,14 +1927,48 @@ ns frame {
         .write_byte5 ptr, src
         hex.ptr_inc ptr
     }
-    // idea 17's read, now on the narrow arm. All 30 call sites walk sfslot_p or spslot_p, both
-    // in the hot-data block, and the audit confirmed every reachable predecessor arm in these
-    // two loaders is also low-cluster -- so even the FIRST read of a run is 5-hex-safe.
+    // idea 17's read, now on the narrow arm. All 22 call sites (30 until M7 P1.4 cut a sprite
+    // fragment to three bytes) walk sfslot_p or spslot_p, both in the hot-data block, and the
+    // audit confirmed every reachable predecessor arm in these two loaders is also low-cluster --
+    // so even the FIRST read of a run is 5-hex-safe.
     def read0_byte_and_inc dst, ptr < hex.pointers.read_byte {
         .arm5 ptr
         hex.pointers.read_byte_from_inners_ptrs
         hex.xor 2, dst, hex.pointers.read_byte
         hex.ptr_inc ptr
+    }
+
+    // M7 P1.4 -- THE 3-NIBBLE ARM, arm5's idea at width 3, for the SPRITE BANK. A bank block is
+    // 64 ops = 64 x 64 bits = 16^3 bits and `sprbank` is 4096-bit aligned (`pad 64` before it; the
+    // emitter asserts SPR_BLOCK_STRIDE == 64 and the build checks the label), so two addresses
+    // inside ONE block agree in every nibble >= 3: a read whose predecessor ARM is in the same block
+    // re-arms the low three nibbles only. Use it ONLY for such a read -- a block's reads after its
+    // first, with no other pointer read in between (stream.frag_derive / frag_runs / frag_runs_win).
+    // ⚠ SILENT WHEN BROKEN: a narrow read after an arm elsewhere reads the wrong byte, and only the
+    // pixel gates see it (the prototype's first version did exactly that; gp-sprite-column.md 4.4).
+    // No filler: unlike arm5, nothing pins this macro's size.
+    def arm3 ptr < hex.pointers.to_flip, hex.pointers.to_jump, hex.pointers.to_ptr_var {
+        hex.address_and_variable_triple_xor 3, hex.pointers.to_flip, hex.pointers.to_jump+w, hex.pointers.to_ptr_var, hex.pointers.to_ptr_var
+        hex.address_and_variable_triple_xor 3, hex.pointers.to_flip, hex.pointers.to_jump+w, hex.pointers.to_ptr_var, ptr
+    }
+    // a byte read and the pointer's step, both at width 3: inside a block the step never carries
+    // out of nibble 2 (a block's header and runs end at its terminating 0, well before op 63)
+    def read3_and_inc dst, ptr < hex.pointers.read_byte {
+        hex.zero 2, dst
+        .arm3 ptr
+        hex.pointers.read_byte_from_inners_ptrs
+        hex.xor 2, dst, hex.pointers.read_byte
+        hex.add_constant 3, ptr, dw
+    }
+    // a bank BLOCK's address by whole-nibble placement: base + blk * 4096 is blk's four nibbles
+    // written at nibble 3, plus the base -- where it was a mov, six shl_bit w/4 and a ptr_index (the
+    // same value, shifted a bit at a time, then scaled by dw). gps_boff is written HERE ONLY, and
+    // only nibbles 3..6, which the mov zeroes first; its nibbles 0-2 and 7 are never written by
+    // anything, so they stay 0 and need no zeroing.
+    def blk_addr dst, blk, base < gps_boff {
+        hex.mov 4, gps_boff + 3*dw, blk
+        hex.set w/4, dst, base
+        .add8_chain dst, gps_boff
     }
 
     def lines_dda_step < p2_prodc, p2_prodf, p2_stepc, p2_stepf {
@@ -2109,74 +2122,51 @@ ns frame {
       end:
     }
 
-    // V4 -- this column's sprite fragment, read back from the write-once slot the thing pre-pass
-    // filled. Six bytes, but a column WITHOUT a sprite pays only the one `sprflag` read -- and that
-    // is most columns. All six are ZEROED when absent: they are the column's ditto signature too,
-    // and a stale value from an earlier column would let an empty column ditto a sprite column.
-    def lines_spr_load sprfl, ssy1, ssy2, sy0b, sblk, slr, ssy1b, ssy2b, sy0bb, sblkb, slrb \
+    // V4 -- this column's sprite fragment(s), read back from the write-once slot the thing pre-pass
+    // filled. M7 P1.4: a fragment is THREE bytes, [s][blk lo][blk hi] -- its thing's slot and its
+    // bank block (stream.frag_derive derives the rows) -- where it was seven. A column WITHOUT a
+    // sprite pays only the one `sprflag` read, and that is most columns. All four registers are
+    // ZEROED when absent: they are the column's ditto signature too, and a stale value from an
+    // earlier column would let an empty column ditto a sprite column (a real fragment's slot id is
+    // never 0 -- ids start at 1 -- so presence is encoded in the values).
+    def lines_spr_load sprfl, s, sblk, sb, sblkb \
             @ spslot_p, has_slot_b, no_frags, end < p2_spfp, p2_sspp, p2_sdirty {
         // idea 16, the sprite twin of load2's dirty skip. sprfl's old explicit zero was
         // REDUNDANT outright -- hex.read_byte zeroes its dst before xoring the value in.
         frame.read_byte5 sprfl, p2_spfp             // idea 11
         hex.if0 2, sprfl, no_frags
-        hex.zero 2, ssy1
-        hex.zero 2, ssy2
-        hex.zero 4, sy0b
+        hex.zero 2, s
         hex.zero 4, sblk
-        hex.zero 2, slr
-        // V4b: slot B's signature regs zero when absent -- like slot A's, that keeps the ditto
-        // compares meaningful without a flag compare (a real fragment's sy0b is never 0).
-        hex.zero 2, ssy1b
-        hex.zero 2, ssy2b
-        hex.zero 4, sy0bb
+        hex.zero 2, sb
         hex.zero 4, sblkb
-        hex.zero 2, slrb
         hex.set 1, p2_sdirty, 1
         hex.mov w/4, spslot_p, p2_sspp           // idea 11: working copy
-        frame.read0_byte_and_inc ssy1, spslot_p
-        frame.read0_byte_and_inc ssy2, spslot_p
-        // M13-15M: y0 is TWO bytes, bias 32768. One biased byte wrapped for y0 < -128 -- a tall
-        // near sprite's top row -- and the wrap turned (1869,479,W)'s fragment into an empty
-        // above-region plus one bogus clamped run (the oracle keeps raw ints, so only fj wrapped).
-        frame.read0_byte_and_inc sy0b, spslot_p
-        frame.read0_byte_and_inc sy0b + 2*dw, spslot_p
+        frame.read0_byte_and_inc s, spslot_p
         frame.read0_byte_and_inc sblk, spslot_p
         frame.read0_byte_and_inc sblk + 2*dw, spslot_p
-        frame.read0_byte_and_inc slr, spslot_p
         // V4b: sprfl == 2 -> the SECOND fragment at byte offset 8 of the same slot
         hex.mov 2, has_slot_b, sprfl
         hex.dec 2, has_slot_b
         hex.if0 2, has_slot_b, end
-        hex.ptr_add spslot_p, 1                 // bytes 0-6 read -> skip byte 7 to land on 8
-        frame.read0_byte_and_inc ssy1b, spslot_p
-        frame.read0_byte_and_inc ssy2b, spslot_p
-        frame.read0_byte_and_inc sy0bb, spslot_p
-        frame.read0_byte_and_inc sy0bb + 2*dw, spslot_p
+        hex.ptr_add spslot_p, 5                 // bytes 0-2 read -> skip 3-7 to land on 8
+        frame.read0_byte_and_inc sb, spslot_p
         frame.read0_byte_and_inc sblkb, spslot_p
         frame.read0_byte_and_inc sblkb + 2*dw, spslot_p
-        frame.read0_byte_and_inc slrb, spslot_p
         ;end
       spslot_p: hex.vec w/4
       has_slot_b: hex.vec 2
         ;end
       no_frags:
         hex.if0 1, p2_sdirty, end               // already clean -> nothing at all
-        hex.zero 2, ssy1
-        hex.zero 2, ssy2
-        hex.zero 4, sy0b
+        hex.zero 2, s
         hex.zero 4, sblk
-        hex.zero 2, slr
-        // V4b: slot B's signature regs zero when absent -- like slot A's, that keeps the ditto
-        // compares meaningful without a flag compare (a real fragment's sy0b is never 0).
-        hex.zero 2, ssy1b
-        hex.zero 2, ssy2b
-        hex.zero 4, sy0bb
+        hex.zero 2, sb
         hex.zero 4, sblkb
-        hex.zero 2, slrb
         hex.zero 1, p2_sdirty                   // the rare dirty->clean transition
         ;end
-        // idea 17 size-freeze: the 30 zero-eliding reads shrank this leaf by 70 ops
-        // per site; unreachable filler restores the layout (the idea-16 lesson).
+        // idea 17 size-freeze: its zero-eliding reads (14 in this leaf then, of 30) shrank it by
+        // 70 ops per site; unreachable filler restored the layout (the idea-16 lesson). M7 P1.4
+        // cut this leaf to 6 reads in a build that lays everything out anew; the filler stays.
         rep(980, i) stl.fj 0, 0
       end:
     }
@@ -2370,9 +2360,9 @@ ns frame {
     // M13-splitxb part 2 -- the EMIT HALF: projection setup, baked-bank addresses, the claim
     // loop with ditto + inline emission. Runs only when part 1 set `proceed`; reads the REST
     // xorby block (segangle, ceilfix/floorfix, lit, the two bank offsets).
-    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, w1r, wpxstride, pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, blkshift, spremit, ascode, sky_base_id, stack, deg, dslvw \
-            @ col_loop, col_body, notdrawn, skipcol, ret, sliver_done, sliver_yes, screen_full, emit_full, ck_fstart, ck_grain, ck_sky, ck_face_uy1, ck_face_uy2, ck_face_ucol, ck_face_ly1, ck_face_ly2, ck_face_lcol, ck_spr_sy1, ck_spr_sy2, ck_spr_y0, ck_spr_blk, ck_plane, emit_ditto, col_emitted, ck_sprb_sy1, ck_sprb_sy2, ck_sprb_y0, ck_sprb_blk, ck_piece_ucnt, ck_piece_lcnt, ck_upper_pieces, ck_u1y2, ck_u1cls, ck_u1bp, ck_u2y1, ck_u2y2, ck_u2cls, ck_u2bp, ck_lower_pieces, ck_l1y2, ck_l1cls, ck_l1bp, ck_l2y1, ck_l2y2, ck_l2cls, ck_l2bp, pieces_done, ck_grain3, ck_wlen, gate_ucnt, gate_lcnt, gate_ufl, gate_lfl, ck_grain2 \
-            < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, viewz, seg_lit, seg_lit2, seg_wstrip, wstripbase, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, gnrow2, gnrow3, x1, x2, x, dbase, dptr, dval8, pval8, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww, w1rslv, wnoff, p2_cVH, p2_cbufa, p2_cbufd, p2_cexcl, p2_cw16, p2_dbot, p2_dcexcl, p2_dfstart, p2_dgn, p2_dgn2, p2_dgn3, p2_dl1bp, p2_dl1cls, p2_dl1y1, p2_dl1y2, p2_dl2bp, p2_dl2cls, p2_dl2y1, p2_dl2y2, p2_dlcnt, p2_dlcol, p2_dly1, p2_dly2, p2_dpid, p2_dsblk, p2_dsblkb, p2_dscale, p2_dsoff, p2_dsstep, p2_dssy1, p2_dssy1b, p2_dssy2, p2_dssy2b, p2_dsy0b, p2_dsy0bb, p2_dtop, p2_du1bp, p2_du1cls, p2_du1y1, p2_du1y2, p2_du2bp, p2_du2cls, p2_du2y1, p2_du2y2, p2_ducnt, p2_ducol, p2_duy1, p2_duy2, p2_dvalid, p2_face_flags, p2_fbufa, p2_fbufd, p2_fstart, p2_gnrow, p2_issky, p2_lcol, p2_ldirty, p2_lfl, p2_ly1, p2_ly2p1, p2_one, p2_sblk, p2_sblkb, p2_sdirty, p2_skb, p2_sliver_cap, p2_sliver_w, p2_slr, p2_slrb, p2_soff, p2_sprfl, p2_ssy1, p2_ssy1b, p2_ssy2, p2_ssy2b, p2_sy0b, p2_sy0bb, p2_ucol, p2_ufl, p2_uy1, p2_uy2p1, p2_wlen, p2_wtc8, p2_wtf8, p2_xkey {
+    def seg_pass2_leaf_body_lines centery, viewh1, viewh, projection, half_slots, w2s, wpx, w1r, wpxstride, pnear, eabl, noproj, ptwice, stwice, noise, sky, skystride, skyall, steps, things, spremit, ascode, sky_base_id, stack, deg, dslvw \
+            @ col_loop, col_body, notdrawn, skipcol, ret, sliver_done, sliver_yes, screen_full, emit_full, ck_fstart, ck_grain, ck_sky, ck_face_uy1, ck_face_uy2, ck_face_ucol, ck_face_ly1, ck_face_ly2, ck_face_lcol, ck_spr_s, ck_spr_blk, ck_plane, emit_ditto, col_emitted, ck_sprb_s, ck_sprb_blk, ck_piece_ucnt, ck_piece_lcnt, ck_upper_pieces, ck_u1y2, ck_u1cls, ck_u1bp, ck_u2y1, ck_u2y2, ck_u2cls, ck_u2bp, ck_lower_pieces, ck_l1y2, ck_l1cls, ck_l1bp, ck_l2y1, ck_l2y2, ck_l2cls, ck_l2bp, pieces_done, ck_grain3, ck_wlen, gate_ucnt, gate_lcnt, gate_ufl, gate_lfl, ck_grain2 \
+            < viewangle, seg_segangle, sgn_aff, ceilfix, floorfix, viewz, seg_lit, seg_lit2, seg_wstrip, wstripbase, ucnt, u1y1, u1y2, u1cls, u1bp, u2y1, u2y2, u2cls, u2bp, lcnt, l1y1, l1y2, l1cls, l1bp, l2y1, l2y2, l2cls, l2bp, gnrow2, gnrow3, x1, x2, x, dbase, dptr, dval8, pval8, normalangle, rw_distance, scale, scalestep, top, bottom, seg_ret2, full, n_drawn, vieww, w1rslv, wnoff, p2_cVH, p2_cbufa, p2_cbufd, p2_cexcl, p2_cw16, p2_dbot, p2_dcexcl, p2_dfstart, p2_dgn, p2_dgn2, p2_dgn3, p2_dl1bp, p2_dl1cls, p2_dl1y1, p2_dl1y2, p2_dl2bp, p2_dl2cls, p2_dl2y1, p2_dl2y2, p2_dlcnt, p2_dlcol, p2_dly1, p2_dly2, p2_dpid, p2_ds, p2_dsb, p2_dsblk, p2_dsblkb, p2_dscale, p2_dsoff, p2_dsstep, p2_dtop, p2_du1bp, p2_du1cls, p2_du1y1, p2_du1y2, p2_du2bp, p2_du2cls, p2_du2y1, p2_du2y2, p2_ducnt, p2_ducol, p2_duy1, p2_duy2, p2_dvalid, p2_face_flags, p2_fbufa, p2_fbufd, p2_fstart, p2_gnrow, p2_issky, p2_lcol, p2_ldirty, p2_lfl, p2_ly1, p2_ly2p1, p2_one, p2_s, p2_sb, p2_sblk, p2_sblkb, p2_sdirty, p2_skb, p2_sliver_cap, p2_sliver_w, p2_soff, p2_sprfl, p2_ucol, p2_ufl, p2_uy1, p2_uy2p1, p2_wlen, p2_wtc8, p2_wtf8, p2_xkey {
         // ==========================================================================================
         // == 1. PER-SEG SETUP (hoisted out of the column loop) ==
         // angle/scale/distance, the sliver flag, the map-unit world heights, the band bases.
@@ -2465,7 +2455,7 @@ ns frame {
         // fragments back. The frame is then identical to a things=False build, so the
         // delta against p2_one prices the record half ALONE -- by subtraction from a
         // byte-exact frame, not by stubbing something the rest of the frame depends on.
-        rep(things*spremit, k) .lines_spr_load p2_sprfl, p2_ssy1, p2_ssy2, p2_sy0b, p2_sblk, p2_slr, p2_ssy1b, p2_ssy2b, p2_sy0bb, p2_sblkb, p2_slrb
+        rep(things*spremit, k) .lines_spr_load p2_sprfl, p2_s, p2_sblk, p2_sb, p2_sblkb
         // M13-ditto: same clip rows as the previous (adjacent, same-seg) column -> the whole pair
         // list would be identical, so emit [x][0xFE] ("copy column x-1" -- the owner-approved
         // rectangle-widening) and skip both band walks. 58% of E1M1-spawn columns take this path.
@@ -2543,26 +2533,23 @@ ns frame {
       ck_face_ly2:
         rep(steps, k) hex.cmp 2, p2_ly2p1, p2_dly2, emit_full, ck_face_lcol, emit_full
       ck_face_lcol:
-        rep(steps, k) hex.cmp 2, p2_lcol, p2_dlcol, emit_full, ck_spr_sy1, emit_full
-      ck_spr_sy1:
+        rep(steps, k) hex.cmp 2, p2_lcol, p2_dlcol, emit_full, ck_spr_s, emit_full
+      ck_spr_s:
         // V4: ... and the same SPRITE FRAGMENT. Fifth feature on this chain; same rule as V3 --
         // COMPARE it, never refuse the ditto, or the columns AROUND a billboard stop dittoing too.
-        // The four values are the emit's whole sprite input (the block index carries r0/last_rel).
-        rep(things, k) hex.cmp 2, p2_ssy1, p2_dssy1, emit_full, ck_spr_sy2, emit_full
-      ck_spr_sy2:
-        rep(things, k) hex.cmp 2, p2_ssy2, p2_dssy2, emit_full, ck_spr_y0, emit_full
-      ck_spr_y0:
-        rep(things, k) hex.cmp 4, p2_sy0b, p2_dsy0b, emit_full, ck_spr_blk, emit_full
+        // M7 P1.4: a fragment is (slot, block) -- the emit's whole sprite input. The slot fixes the
+        // thing, and so its top row and its light; the block fixes the texture column and so r0,
+        // last_rel and the runs. Equal pairs ARE an equal fragment. (The old four-field compare,
+        // (sy1, sy2, y0, blk), never looked at the light row: two things of one sprite, bucket and
+        // top row side by side under different light could ditto, drawing the second in the
+        // first's light where the oracle does not. The slot cannot ditto across things.)
+        rep(things, k) hex.cmp 2, p2_s, p2_ds, emit_full, ck_spr_blk, emit_full
       ck_spr_blk:
-        rep(things, k) hex.cmp 4, p2_sblk, p2_dsblk, emit_full, ck_sprb_sy1, emit_full
-      ck_sprb_sy1:
+        rep(things, k) hex.cmp 4, p2_sblk, p2_dsblk, emit_full, ck_sprb_s, emit_full
+      ck_sprb_s:
         // V4b: ... and the SECOND fragment's signature (zeroed when absent, like slot A's --
-        // a real fragment's biased y0 is never 0, so presence is encoded in the values).
-        rep(things, k) hex.cmp 2, p2_ssy1b, p2_dssy1b, emit_full, ck_sprb_sy2, emit_full
-      ck_sprb_sy2:
-        rep(things, k) hex.cmp 2, p2_ssy2b, p2_dssy2b, emit_full, ck_sprb_y0, emit_full
-      ck_sprb_y0:
-        rep(things, k) hex.cmp 4, p2_sy0bb, p2_dsy0bb, emit_full, ck_sprb_blk, emit_full
+        // a real fragment's slot id is never 0, so presence is encoded in the values).
+        rep(things, k) hex.cmp 2, p2_sb, p2_dsb, emit_full, ck_sprb_blk, emit_full
       ck_sprb_blk:
         rep(things, k) hex.cmp 4, p2_sblkb, p2_dsblkb, emit_full, ck_piece_ucnt, emit_full
       ck_piece_ucnt:
@@ -2622,7 +2609,7 @@ ns frame {
         // ==========================================================================================
       emit_full:
         // fj decided everything -- emit this column's ceiling bands, wall, floor bands as raw lines
-        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, blkshift, ascode, stack, deg, p2_gnrow, x, p2_cexcl, p2_fstart, p2_ufl, p2_uy1, p2_uy2p1, p2_ucol, p2_lfl, p2_ly1, p2_ly2p1, p2_lcol, p2_sprfl, p2_ssy1, p2_ssy2, p2_sy0b, p2_sblk, p2_slr, p2_ssy1b, p2_ssy2b, p2_sy0bb, p2_sblkb, p2_slrb, seg_lit, seg_lit2, seg_wstrip, wstripbase, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
+        stream.emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, ascode, stack, deg, p2_gnrow, x, p2_cexcl, p2_fstart, p2_ufl, p2_uy1, p2_uy2p1, p2_ucol, p2_lfl, p2_ly1, p2_ly2p1, p2_lcol, p2_sprfl, p2_s, p2_sblk, p2_sb, p2_sblkb, seg_lit, seg_lit2, seg_wstrip, wstripbase, p2_cbufa, p2_cbufd, p2_fbufa, p2_fbufd
         hex.sparse_mov HOT_PAD, 2, p2_dcexcl, p2_cexcl                // remember this column's clip rows for the ditto test
         hex.sparse_mov HOT_PAD, 2, p2_dfstart, p2_fstart
         hex.sparse_mov HOT_PAD, 2, p2_duy1, p2_uy1                    // V3: the face signature, unconditional (same
@@ -2631,13 +2618,9 @@ ns frame {
         hex.sparse_mov HOT_PAD, 2, p2_dly1, p2_ly1
         hex.sparse_mov HOT_PAD, 2, p2_dly2, p2_ly2p1
         hex.sparse_mov HOT_PAD, 2, p2_dlcol, p2_lcol
-        hex.sparse_mov HOT_PAD, 2, p2_dssy1, p2_ssy1                  // V4: the sprite signature, unconditional
-        hex.sparse_mov HOT_PAD, 2, p2_dssy2, p2_ssy2
-        hex.sparse_mov HOT_PAD, 4, p2_dsy0b, p2_sy0b
-        hex.sparse_mov HOT_PAD, 4, p2_dsblk, p2_sblk
-        hex.sparse_mov HOT_PAD, 2, p2_dssy1b, p2_ssy1b                // V4b: the second fragment's signature
-        hex.sparse_mov HOT_PAD, 2, p2_dssy2b, p2_ssy2b
-        hex.sparse_mov HOT_PAD, 4, p2_dsy0bb, p2_sy0bb
+        hex.sparse_mov HOT_PAD, 2, p2_ds, p2_s                        // V4: the sprite signature, unconditional
+        hex.sparse_mov HOT_PAD, 4, p2_dsblk, p2_sblk                  //   -- (slot, block), M7 P1.4
+        hex.sparse_mov HOT_PAD, 2, p2_dsb, p2_sb                      // V4b: the second fragment's signature
         hex.sparse_mov HOT_PAD, 4, p2_dsblkb, p2_sblkb
         hex.sparse_mov HOT_PAD, 2, p2_ducnt, ucnt                  // V5: the stacked-piece signature, unconditional
         hex.sparse_mov HOT_PAD, 2, p2_du1y1, u1y1                  // (the p2_dgn rule: the cells must never be unused)
@@ -2689,7 +2672,6 @@ ns frame {
         rep(962, i) stl.fj 0, 0
       ret:
         stl.fret seg_ret2
-                                                //     two-byte biased y0, see lines_spr_load)
     }
 
     def lines_projcall centeryfix_c, viewh1, top, bottom {

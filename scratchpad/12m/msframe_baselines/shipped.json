@@ -1,22 +1,22 @@
 {
- "binary": "build\\doom_e1m1_blocked30.fjm",
- "binary_sha": "0dd3806016af68cd",
+ "binary": "build\\doom_e1m1_blocked31.fjm",
+ "binary_sha": "773b840ca044e39b",
  "env": {},
- "when": "2026-09-27 14:23:29",
+ "when": "2026-09-28 01:48:49",
  "frames": 200,
  "reps": 5,
  "engine_pyd_sha": "79af8639f57bfa50",
  "git": {
-  "doom": "87c2c75",
+  "doom": "5ba60ee",
   "flipjump": "bc8ee63"
  },
  "summary": {
   "a": {
-   "ms_median": 63.50360884524808,
-   "ms_min": 63.27909172171413,
-   "ms_max": 64.5185673590934,
-   "fjs_median": 231130732.65460843,
-   "ops_per_frame": 14677635.638613861,
+   "ms_median": 61.54095300353399,
+   "ms_min": 61.361659871469634,
+   "ms_max": 61.692615546802486,
+   "fjs_median": 234586075.03174114,
+   "ops_per_frame": 14436650.618811881,
    "pix_all_same": true,
    "ops_all_same": true,
    "cell_bytes": 4,
@@ -25,7 +25,7 @@
    "engine": "C:\\Users\\tomhe\\Documents\\flipjump-151\\flipjump\\interpreter\\_fjcore.pyd",
    "engine_sha": "79af8639f57bfa50",
    "full_span": null,
-   "yard_median": 3634766972.8894825
+   "yard_median": 3621082803.2239504
   }
  }
 }

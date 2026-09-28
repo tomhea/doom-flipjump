@@ -1,0 +1,22 @@
+# R1: the p14 tests on the PARENT rung's src/ (git archive origin/main = d23352a Merge pull request #92 from tomhea/m7-leaf-lists), the branch's test files copied in
+$ python -m pytest tests/fj/test_narrow_reads_fj.py -q -p no:cacheprovider
+E       AttributeError: module 'doomfj.wall_renderer' has no attribute 'sprite_bank_header'
+E       AttributeError: module 'doomfj.wall_renderer' has no attribute 'sprite_bank_header'
+FAILED tests/fj/test_narrow_reads_fj.py::test_every_byte_of_an_aligned_block_reads_back
+FAILED tests/fj/test_narrow_reads_fj.py::test_an_unaligned_bank_reads_wrong
+2 failed in 0.49s
+$ python -m pytest tests/host/test_narrowed_clear_sites.py -q -p no:cacheprovider
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_scan_finds_every_narrowed_clear_the_file_carries[frame_render.fj]
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_scan_finds_every_narrowed_clear_the_file_carries[stream_render.fj]
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_clears_that_are_live_on_their_own_branch_are_all_still_whole[frame_render.fj]
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_clears_that_are_live_on_their_own_branch_are_all_still_whole[stream_render.fj]
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_hoisted_scratch_declarations_are_load_bearing
+FAILED tests/host/test_narrowed_clear_sites.py::test_the_checker_rejects_the_real_file_mutated[stream_render1]
+FAILED tests/host/test_narrowed_clear_sites.py::test_deleting_a_live_clear_from_the_real_file_is_caught[stream_render.fj-y1_neg-hex.zero 4, sy1]
+FAILED tests/host/test_narrowed_clear_sites.py::test_deleting_a_live_clear_from_the_real_file_is_caught[stream_render.fj-y2_neg-hex.zero 4, sy2]
+8 failed, 70 passed in 0.80s
+$ python -m pytest tests/host/test_sprite_column.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'sprbank_misalignment' from 'doomfj.build' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scr
+ERROR tests/host/test_sprite_column.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.41s

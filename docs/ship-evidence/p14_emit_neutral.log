@@ -1,0 +1,31 @@
+# PR #93: blocked31 was BUILT at 311f23f (tag evidence/p1.4-build, blocked31_build.log:1) and rebuilt byte-identical at 10d7b48 (tag evidence/p1.4-rebuild, blocked31r_build.log:1); 91eaeec is the head's last src/ change (the review's R6 constants)
+$ git rev-parse 311f23f:src 10d7b48:src 91eaeec:src
+630886fffcd8f04330ae6f830ec7454b2639b99e
+630886fffcd8f04330ae6f830ec7454b2639b99e
+1eb07c557aa2e81d13ef339eb5e2801c9b20b7d0
+$ PYTHONPATH=src timeout 5400 python scratchpad/gp/p13_emit_neutral.py --base 311f23f --head 91eaeec
+base 311f23f (E1M1, the game tier, build_wall_renderer's own path to its first assembly):
+   input fj_consts.fj                 9a9b21cf800de94e
+   input fixed_point.fj               8b45cf5a116dab95
+   input present.fj                   585e03353deba64e
+   input projection.fj                5016a5292f885801
+   input frame_render.fj              09abd1e6321edc89
+   input plane_render.fj              bc23ce78d7a9d679
+   input plane_bands.fj               a795a346eb1407c0
+   input stream_render.fj             321cb23531972ce9
+   input input.fj                     60a17c65e752a745
+   input sim.fj                       a7fcac0c2cc3a7ac
+   input e1m1_00_entry.fj             3857785ad2c1b556
+   input e1m1_01_tables.fj            698565bdbabd0769
+   input e1m1_02_main.fj              c78a68b9f9d2e3ba
+   input e1m1_03_segconsts.fj         0609eb2bd897a823
+   input e1m1_04_walk.fj              0a33f349ee262713
+   input e1m1_05_state.fj             020de4ef13e73444
+   input e1m1_06_banks.fj             e9db47990cd21f91
+   input m1_reset.fj                  0302197b5ff36f04
+   persist viewx,viewy,viewangle,kb_f,kb_b,kb_l,kb_r,kb_u,mode,dstate,ddir,dsub,dwait,sshead,thss_rt,thpos_rt
+head 91eaeec: EVERY ASSEMBLER INPUT EQUAL, the same persist tuple
+CONTROL the build's persist call with moving_things=False: caught -- the persist line differs
+CONTROL sshead declared one cell wider: caught -- e1m1_01_tables.fj differ
+EMISSION-NEUTRAL: PASS
+rc=0

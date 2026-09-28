@@ -1,0 +1,91 @@
+# flipjump: the installed editable 1.5.1 at C:/Users/tomhe/Documents/flipjump-151, bc8ee63; doom m7-sprite-column 10d7b48
+$ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/blocked31r.labels.tsv.gz -- game --out build/doom_e1m1_blocked31r.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p14.json.gz
+label spy armed -> scratchpad/12m/atlas/blocked31r.labels.tsv.gz
+build: build_blocked.py game --out build/doom_e1m1_blocked31r.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p14.json.gz
+blocking: pool base 0x60000000, span 0x9fffffe0
+pin-heat: scratchpad/12m/heat_blocked27_p14.json.gz (sha256 334abffbf591baa8...): 20 hot groups, 35,894 hot sites
+macros allowed: hex.double_exact_xor, hex.exact_xor, hex.quadrupled_exact_xor, hex.shifts.shl_bit_once, hex.shifts.shr_bit_once, hex.sparse_double_exact_xor, hex.sparse_exact_xor, hex.triple_exact_xor, sim.jump16
+pid bake: 222 pairs baked, 255 addressable at PID_NIBBLES=2
+  counts cache HIT: 17,871 groups, 342,750 tables (skipping the counting assembly)
+  PREFLIGHT: demand 39,359,072 words, capacity 83,886,079 words (46.9% used); 17,871 of 17,871 groups placed
+  pin-heat: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 0, 'hot_sites_width_changed': 0}
+  pin-exclude: 2,004 BYTE-cell words only (m1.zerobyte jumps through them); nibble state cells ARE pinned
+  pin-heat: 20 of 20 hot words pinned
+labels -> scratchpad/12m/atlas/blocked31r.labels.tsv.gz  (1,832,362 labels)
+  reset: stripping the block base from 17,871 pinned words before the LUT test
+  pin-heat: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 0, 'hot_sites_width_changed': 0}
+  pin-heat: 20 of 20 hot words pinned
+labels -> scratchpad/12m/atlas/blocked31r.labels.tsv.gz  (1,840,271 labels)
+{
+  "map": "E1M1",
+  "downscale": 2,
+  "storage_mode": "flat",
+  "span_words": 90569312,
+  "flat_limit": 134217728,
+  "headroom": 1.482,
+  "fjm_bytes": 26614031,
+  "assemble_seconds": 4310.841,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": true,
+    "standalone": true,
+    "doors": true,
+    "menu": true
+  },
+  "self_reset": {
+    "nibble_cells": 2514,
+    "byte_cells": 320,
+    "persisted_labels": [
+      "viewx",
+      "viewy",
+      "viewangle",
+      "kb_f",
+      "kb_b",
+      "kb_l",
+      "kb_r",
+      "kb_u",
+      "mode",
+      "dstate",
+      "ddir",
+      "dsub",
+      "dwait",
+      "sshead",
+      "thss_rt",
+      "thpos_rt"
+    ],
+    "restore_set": "C:\\Users\\tomhe\\Documents\\doom-m7d\\src\\doomfj\\data\\m5_restore_set.json.gz",
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 12022,
+    "view_w": 160,
+    "subsectors": 682
+  }
+}
+
+assemblies: 2; blocked per assembly: 342,750, 344,030
+  block bases agree across all 2 assemblies (17,871 shared groups)
+pin conflicts (aliased source-word expressions, un-pinned): 0
+runtime-reserved words skipped (stl.IO etc): 0
+declines by reason: no-block 2,514, too-wide 0, overflow 0
+broken groups: 0 of 17,871 (these lose their pin for ALL their tables); evicted 0
+pin-heat after the last assembly: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 13647, 'hot_sites_width_changed': 0}
+blocked: 344,030 tables in 17,871 groups; declined 2,514; ungrouped 0
+total 4754s
+done in 4755s; labels at scratchpad/12m/atlas/blocked31r.labels.tsv.gz
+rc=0 wall=4765s
+--- the comparison
+773b840ca044e39beba630f9fb5a966e3ed17674c6e3d30fc1aebbfb6e0c2402 *build/doom_e1m1_blocked31.fjm
+773b840ca044e39beba630f9fb5a966e3ed17674c6e3d30fc1aebbfb6e0c2402 *build/doom_e1m1_blocked31r.fjm
+blocked31 labels sha256 89226fa8b863ab5666be5c468024a00b199dde096af2e360bafc63eb735d219e
+blocked31r labels sha256 89226fa8b863ab5666be5c468024a00b199dde096af2e360bafc63eb735d219e

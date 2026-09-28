@@ -1,0 +1,27 @@
+# PR #93 review round 8: every emitter edit of tests/fj/test_slot_layouts_fj.py (MUTANTS and NEUTRAL) through the scope rule AND the edited emitter itself, on the test's two rooms -- at m7-sprite-column eec4dce
+$ PYTHONPATH="src;tests/fj" python scratchpad/gp/probes/sprite/r8_refused_probe.py
+head: range arguments [('160', '32', '16', '1', '1', '9')] (viewwc, buckets, slotstride, deg, spn, nld) -- 4 s
+r4: the emitter passes twice the slot stride               | rule: accepted
+                                                           | emits: [('160', '32', '32', '1', '1', '9')] (20 s)
+r5: deg_flag computed per tier                             | rule: REFUSED (deg_flag is not bound once, at the emitter's top level, to an int literal)
+                                                           | emits: [('160', '32', '16', '0', '1', '9')] (6 s)
+r5: the baked leaf's deg 0                                 | rule: REFUSED (deg reads mt, a local or parameter in the record body's scope)
+                                                           | emits: [('160', '32', '16', '0', '1', '9'), ('160', '32', '16', '1', '1', '9')] (3 s)
+r6: deg 0 for the standalone tier, after the literal       | rule: REFUSED (deg_flag is not bound once, at the emitter's top level, to an int literal)
+                                                           | emits: [('160', '32', '16', '0', '1', '9')] (3 s)
+r6: the record body's own deg default                      | rule: REFUSED (deg reads deg_flag, a local or parameter in the record body's scope)
+                                                           | emits: [('160', '32', '16', '0', '1', '9')] (7 s)
+r6: the record body's own slot-stride default              | rule: REFUSED (slotstride reads SPR_SLOT_STRIDE, a local or parameter in the record body's scope)
+                                                           | emits: [('160', '32', '32', '1', '1', '9')] (4 s)
+r7: the slot stride follows the runtime thing count        | rule: REFUSED (slotstride reads _MT_NTH, the emitter's local in the record body's scope)
+                                                           | emits: [('160', '32', '16', '1', '1', '9'), ('160', '32', '32', '1', '1', '9')] (6 s)
+r8: the slot stride follows the subsector index width      | rule: REFUSED (slotstride reads _MT_NSSN, the emitter's local in the record body's scope)
+                                                           | emits: [('160', '32', '16', '1', '1', '9')]  = the head's (4 s)
+r8: the slot stride follows the light tables               | rule: REFUSED (slotstride reads _MT_LTB, the emitter's local in the record body's scope)
+                                                           | emits: [('160', '32', '16', '1', '1', '9')]  = the head's (3 s)
+the slot stride rebound through globals()                  | rule: REFUSED (wall_renderer.py reaches a namespace by reflection (`globals`))
+                                                           | emits: [('160', '32', '16', '1', '1', '9')]  = the head's (3 s)
+the slot stride rebound by a global statement              | rule: REFUSED (a `global` statement names wall_renderer.SPR_SLOT_STRIDE)
+                                                           | emits: [('160', '32', '16', '1', '1', '9')]  = the head's (2 s)
+the slot stride written from module constants              | rule: accepted
+                                                           | emits: [('160', '32', '16', '1', '1', '9')]  = the head's (2 s)

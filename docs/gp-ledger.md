@@ -146,3 +146,75 @@ was still in the set it had just removed it from); the P1.5 pre-build review fou
 build was stopped. Attributed (profx phases, the same ten games): bind_things 401,796 -> 0 and the
 reset 226,935 -> 94,229, -534,502 gross; the render walk's +68,316 and collision's +2,818 are
 placement -- the changed table counts re-rolled the blocking pass's pins -- not work.
+
+## P1.4 the v2 sprite column (class S) -- declared 2026-09-27, before the build
+
+**What**: `docs/gp-sprite-column.md` section 5, v2, in the shipped macros. A sprite fragment's
+record shrinks from seven bytes to three -- `[slot][blk lo][blk hi]` -- and the per-THING constants
+(the biased top row, the light row) are written once per accepted thing into `gpslot`; the emit
+derives `y_base`, `sy1` and `sy2` from the slot and the block header where it uses them. The ditto
+ladder compares (slot, block) -- four compares and four shadow saves where there were eight. Step
+faces test their draw window before the shade lookup, the splices derive a region's list ids only
+for a region they walk, and `emit_region`'s wall piece tests its window before its flag tests. The
+runs take a fast path when the fragment is wholly on screen; v2's addressing reads inside a bank
+block on a 3-nibble arm, places the block address by whole nibbles and does the fast path's row
+math at two nibbles -- exact only if `sprbank` is 4096-bit aligned, which the build checks. The A+B
+path (a second fragment behind the first) gets the same derive; the prototype did not cover it.
+
+**Budget**: -1.0M ops/frame on combat set v2's binding. ESTIMATE: the census's "v2 cut" column
+(`scratchpad/gp/census_out/s4v2/report_s4v2.txt` section 4, the v2 column's saving on the static
+world's own sprite columns) applied to B0's eleven run averages gives 17,760,774 -> 16,756,812
+(`gamespeed.binding_speed`); the prototype measured -39 .. -43% per sprite column end to end,
+standalone (`docs/gp-sprite-column.md` 4.1). The emitted signature of `stream.emit_col_lines`
+changes, and a heat key carries it (`...emit_col_lines(45)---rep0:w1rpat.walk(7)---ycur`), so the
+rung profiles its first build and regenerates the heat list before the binary it ships.
+
+**Kill criteria** (any one -> the binary does not ship):
+1. The column check -- the prototype's harness pointed at the SHIPPED macros: a sprite column
+   (slot A, and A+B) differs from the oracle's fragment over the plain column, or its mutated
+   control (the record's bias off by one row) is not caught.
+2. The build's `sprbank` alignment check missing, or not refusing a misaligned bank (its control).
+3. `deg_gate` (4 viewpoints), `m2_std_gate` or `m3_gate` not byte-exact; `b0_scenarios` on set v2
+   with `--pixel-every 1` not pixel-exact on every frame.
+4. `msframe.py --against shipped`: B SLOWER. NOT SEPARATED ships only as "foundation for P3".
+5. The reclaim: the v2 binding down by less than 0.8M ops/frame (the budget / 1.25) -> redesign
+   before shipping.
+6. Size over 35% of 2^27; `pinreport.py`: a hot word of the regenerated heat list not pinned;
+   `gps_nslot` / `gps_cur_s` missing from a restore set (a stale `gps_cur_s` draws the last frame's
+   top row and light with no crash); the emitter's slot-id bound (drawable things + runtime pools
+   <= 255) not asserted.
+
+**Row** (2026-09-27, `build/doom_e1m1_blocked31.fjm`, sha256 `773b840ca044e39b`; logs in
+`docs/ship-evidence/blocked31_*`):
+
+| measure | shipped (P1.3, blocked30) | P1.4 (blocked31) | delta |
+|---|---|---|---|
+| combat set v2 binding (b0_scenarios) | 15,041,859 | 14,441,924 | **-599,935 (-4.0%)** |
+| ... with strafe's collision (proxy) | 15,077,276 | 14,476,599 | -600,677 (-4.0%) |
+| gamespeed binding (ops/frame) | 14,318,431 | 13,974,938 | -343,493 (-2.4%) |
+| the sprite record, `thing_leaf` + `thing_leaf_b` (profx, gamespeed's ten games) | 1,448,470 | 1,346,297 | -102,173 |
+| the emission, `seg_pass2_leaf` (the same) | 3,628,248 | 3,540,932 | -87,316 |
+| ms/frame (msframe, one quiet run) | 62.5 | 61.6 | NOT SEPARATED (pairs 1.016 0.992 1.019 0.990 1.020, median x1.016) |
+| fj ops/s | 234.9 M | 234.2 M | -0.3% |
+| size (% of 2^27) | 26.98% | 27.31% | +448,114 words (the slot table, the aligned bank, the code) |
+| hot words pinned (pinreport) | 20/20 | 20/20 (4 re-keyed by heat key; the list's renames applied) | 0 lost |
+
+**Verdict against the kill criteria:** 1 the column check (`scratchpad/gp/probes/sprite/ship_check.py`,
+`docs/ship-evidence/p14_column_check.log`) -- the SHIPPED record, load and emit on every one of the
+16 fight frames' 1,648 sprite columns, one fragment and two: 0 differ from the oracle; its four
+mutants are caught (heavy:h57), M1 on all 16 frames too (3,190 of 3,296 columns); 2
+`build.sprbank_misalignment` refuses an off-block bank and `tests/host/test_sprite_column.py` /
+`tests/fj/test_narrow_reads_fj.py` show the pad is what aligns it (their controls: no pad, off a block,
+reads wrong); 3 deg_gate PASS at four viewpoints (`p14_deg_gate.log`), m2_std_gate PASS, m3_gate PASS
+(`blocked31_gates.log`), and B0 on set v2 state- and pixel-exact on every frame of all 11 runs; 4
+msframe NOT SEPARATED (the pairs split in sign, median x1.016) -- it ships under the clause as a
+foundation: P1.6's native-list bank draws through this column's (slot, block) fragment and its
+derive, and so do P3's animated monsters; **5 FIRED: the reclaim is -0.60M on the v2 binding, under
+the 0.8M line** (the budget -1.0M came from the phase-0 prototype's -39 .. -43% per sprite column,
+standalone; in the renderer the record fell 102,173 and the emission 87,316 ops a frame on gamespeed's
+games). **The owner's decision, 2026-09-27: "Ship it, follow up later"** -- P1.4 ships at -0.60M, and a
+follow-up after phase 1 looks for the missing ~0.4M; 6 size 27.31%, pinreport 20/20 and 0 lost (after
+b019db9 -- 10d7b48 before the rebase, tag `evidence/p1.4-rebuild`: it reads the hot words through the
+renames the heat list carries), `gps_nslot` / `gps_cur_s`
+in both restore sets (`p14_rekey.log`, test_restore_set_shipped 18 passed), and
+`wall_renderer.check_slot_ids` asserts the slot-id bound.

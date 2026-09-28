@@ -1,0 +1,3 @@
+# R1 for PR #93 round 1 (R6): the same file at m7-sprite-column 91eaeec
+$ python -m pytest tests/host/test_sprite_column.py -q -p no:cacheprovider
+24 passed in 0.69s

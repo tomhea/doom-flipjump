@@ -1,0 +1,6 @@
+# R1 for PR #93 round 1 (R6): the new tests/host/test_sprite_column.py on the PRE-FIX head's src/ (git archive 84144e0 = 84144e0 M7 P1.4 ships: blocked31 -- the ship gate's standing), the file copied in
+$ python -m pytest tests/host/test_sprite_column.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'SPR_FRAG_BYTES' from 'doomfj.wall_renderer' (<pre-fix>\src\doomfj\wall_renderer.py)
+ERROR tests/host/test_sprite_column.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.54s

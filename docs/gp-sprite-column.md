@@ -1,6 +1,6 @@
 # The cheaper sprite column: prototype and design
 
-**Status: PHASE 0 PROTOTYPE (stream S6, plan-gameplay section 14 #1). No tracked file was changed.**
+**Status: designed as a phase 0 prototype (stream S6, plan-gameplay section 14 #1) -- no tracked file changed then -- and built as M7 P1.4 (`docs/gp-ledger.md`).**
 The prototype is a set of standalone fj programs in `scratchpad/gp/probes/sprite/`. Nothing here
 builds the renderer or runs the game. Every number is MEASURED with the command given, or
 UNVERIFIED.
@@ -483,3 +483,121 @@ One latent difference goes the right way:
 | `t1_today.py`, `feas0.py` | the first feasibility steps |
 | `t7_weapon.py`, `weapon_cols.py` | the weapon overlay, for `docs/gp-partial-ditto.md` |
 | `*_out.txt`, `*.json` | the outputs quoted here |
+
+## As built (M7 P1.4, v2)
+
+Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj` and
+`src/doomfj/wall_renderer.py` / `build.py`, with these differences from the text above:
+
+- **The macros live in the renderer's namespaces.** `frame.arm3`, `frame.read3_and_inc` and
+  `frame.blk_addr` sit beside `frame.arm5`; `stream.frag_derive`, `stream.frag_runs` and
+  `stream.frag_runs_win` replace `stream.sprite_runs` / `sprite_runs_win`. The record and the load
+  are edited in place (`thing_record_body`, `lines_spr_load`); nothing of `ns gpspr` ships.
+- **`frag_derive` takes its output registers**, so the A+B path derives B into `gpsb_*` and then A
+  into `gps_*` (section 5.2 item 6, never prototyped). The two share the slot cache; the light
+  row goes into each fragment's own `smidx` on every derive. B's walk (`frag_runs_win`) starts from
+  a saved pointer (`gpsb_ptr0`) on a working copy, because a column walks B twice -- above and
+  below A -- and each walk's first read keeps the full arm.
+- **`blk_addr` has no zeroing.** `gps_boff` is written by `blk_addr` alone and only in nibbles 3-6,
+  which its `hex.mov 4` zeroes first; nibbles 0-2 and 7 are never written, so the prototype's
+  `hex.zero w/4` was redundant.
+- **`blkshift` is gone** from `thing_record_body`, `seg_pass2_leaf_body_lines` and
+  `emit_col_lines` (the block address is whole-nibble now), and `frame.clamp_row` with it (its
+  only callers were the record's two row clamps). `SPR_BLOCK_STRIDE == 64` is asserted at import.
+- **`emit_region`'s q-window set-up** moved into `stream.region_ceil_q` / `region_floor_q`, gated
+  `rep(1 - stack*ascode)` -- the arms that read it (the data walk, the unstacked code walk).
+- **The bank's alignment:** `wall_renderer.sprite_bank_header()` opens the bank with `pad 64`
+  (fj's `pad n` aligns the address absolutely), and `build.sprbank_misalignment` refuses a
+  self-reset build whose pass-2 label table puts `sprbank` off a block.
+  `tests/host/test_sprite_column.py` assembles the header after 0..1000 ops and reads the label
+  back, with the pad-dropped control.
+- **The slot-id bound** is `wall_renderer.check_slot_ids(len(drawable things))` -- E1M1 has 251.
+- **The two slot layouts are stated once**, in `wall_renderer` (PR #93's review, R6): a column's
+  fragments in `spslot` are `SPR_FRAG_FIELDS` (slot id, block lo, block hi), A at byte 0 and B at
+  `SPR_SLOT_B_BYTE` (8); a thing's `gpslot` is `SPR_THING_SLOT_FIELDS` (y0 lo, y0 hi, light row),
+  y0 biased by `SPR_THING_Y0_BIAS` (2^15). The fj sides stay literals -- the record writes both,
+  `lines_spr_load` reads the fragments (its skip to B is 8 - 3 = 5), `frag_derive` reads the slot
+  and unbiases. Two checks hold them, and neither models the fj (PR #93's review, rounds 1-3):
+  `tests/host/test_sprite_column.py` PINS the literals in the fj text -- each offset, the skip,
+  both biases, each side's field order -- to the constants, with a mutant of each; and
+  `tests/fj/test_slot_layouts_fj.py` RUNS the fj on both sides. The record's code from its slot
+  allocation to the end of its column loop, transplanted verbatim, gets its parameters from the
+  game tier's EMITTED program -- the emitter run, in its own scope, on the one-room map with things
+  (a lamp alone bakes, so both record bodies are emitted; 24 things of 15 kinds, 20 of them in the
+  runtime lists), every `frame.thing_record_body` call zipped with the def's own parameter list, the
+  range's arguments integers and the same in every call or the binding is refused (an emitter that
+  cannot run is an error, never a refusal). WHY the rooms' values are every map's is the scope rule
+  (`scope_rule`, review round 8): each name in a range argument's expressions, resolved by symtable,
+  must be `cfg` (never rebound), `deg_flag` (bound once to an int literal), a module name bound once
+  that no `global` statement, attribute store or listed reflection reaches, or a pure builtin -- every
+  emitter local, where the map-derived values live, is refused. Every register the range names but its
+  inputs enters each record holding a value with no zero nibble (`hostile`). It records things
+  chosen to reach every branch that decides where a byte lands and these operand ranges the
+  shipped sprites reach: columns
+  across the 16, 64 and 1,024-index bounds, both edge clamps, slot ids 1..255, fragments A and B, B
+  refused by `ballow`, both slots spent, hidden columns, a transparent block, a texture step, both
+  block strides, y0 either side of zero, u past 15, u * 32 and u * 9 past 255, a block past 0x1000
+  (whose low three nibbles name a transparent block), `last_rel` values with a zero low nibble, a
+  300-column left clip, and four of E1M1's own left clips with their oracle texture steps. EVERY byte of
+  the hot block (pclm through the cell after drawn, 6,785) must then be the constants' layout; from
+  memory laid out by the constants, the real seed, step, load and derive must give each field. The
+  harness anchors its hot block as the build does (`pad 16384`: one arm5 window) in the real order.
+  What each record records is held to the model (`RECORDED`, `LEFT_CLIP_MOVES`). 67 mutants -- every
+  kind the review rounds found, the reviewer's own edits among them -- each make it fail, and three
+  edits that move no byte (unreachable filler deleted; an argument rewritten from module constants)
+  must still pass (`p14_cr8_layouts_fj.log`, 76 passed; `p14_cr8_refused_emit.log` shows every
+  refused emitter edit is a working emitter). `tests/fj/test_narrow_reads_fj.py` reads block 0x1003
+  as well. Not covered (the test's docstring says why): the shipped binary's addresses; what the
+  record computes before its slot allocation -- the gates hold both, against the oracle; reflection
+  the scope rule does not list, outside the modules it parses; and a record call built or rewritten
+  outside `_thing_leaf_body`'s f-string, depending on the map -- E1M1's own call is the shipped
+  binary's, and its gates hold its pixels.
+- **The latent wrong-light ditto** of section 6 is gone with the four-field compare: the ladder
+  compares (slot, block).
+- **The column check** is `scratchpad/gp/probes/sprite/ship_check.py`: the SHIPPED record (the
+  per-thing slot write and the column loop, transplanted from the source), load and emit on every
+  oracle case, one fragment and two (a second, farther fragment -- another case's -- recorded
+  behind each), against the oracle's paint order (far first, near over it). Its four mutants
+  (the derive's unbias, the record's bias, a walk's first read on the narrow arm, slot B read one
+  byte early) must each be caught, and `--base` runs the pre-P1.4 renderer through the same
+  expectation.
+- **Restore sets:** `gps_nslot` and `gps_cur_s` (frame state) and the other new registers are
+  hoisted globals, so both sets were re-keyed (`scratchpad/ca_labels.py` ->
+  `ca_remap_set.py` -> `m1_add_globals.py`; `ca_labels.py --standalone` -> `m5_setfile.py`).
+- **The heat list:** `stream.emit_col_lines`' parameter count is in one hot group's key
+  (`...emit_col_lines(45)---rep0:w1rpat.walk(7)---ycur`), so blocked27's list was RE-KEYED through the
+  four parameter-count changes (`heat_rekey.py` -> `heat_blocked27_p14.json.gz`, which records the
+  renames), not re-profiled; `pinreport.py` looks the hot words up through the same renames.
+
+### Measured (the row and the verdict are in `docs/gp-ledger.md`)
+
+`build/doom_e1m1_blocked31.fjm`, sha256 `773b840ca044e39b`, from the ship-gate 1b line with P1.4's heat list
+(`--pin-heat scratchpad/12m/heat_blocked27_p14.json.gz`), built at 311f23f; the source changed, so
+the counts cache recounted (21,118 groups before alias merging, 342,750 tables, 2,044 s) and the build
+took 7,185 s. Rebuilt from the same line at 10d7b48 -- the same `src/` tree, only pinreport.py and
+logs differ -- HITting the cache that count wrote: the same sha256 and the same label table
+(`89226fa8...`; `blocked31r_build.log`, 4,765 s) -- VERIFIED byte-identical. The branch was then
+rebased onto main (P1.3's review refactors under it) and its review stated the slot layouts (R6):
+the build's own path hands the assembler the same 18 files and the same persist tuple at 311f23f and
+at 91eaeec, the PR's last `src/` change (`p14_emit_neutral.log`), so the program is blocked31's.
+
+**Provenance.** The build, its rebuild and four more of the evidence runs happened before the
+branch's rebase, so their commits are not on the merged history. A pushed tag keeps each:
+
+| commit | tag | what ran there, or names it |
+|---|---|---|
+| 311f23f | `evidence/p1.4-build` | blocked31's build (`blocked31_build.log`); `pinreport.py --selftest` (`p14_pinreport_selftest.log`, with the renames change on top) |
+| 10d7b48 | `evidence/p1.4-rebuild` | the byte-identical rebuild (`blocked31r_build.log`); the column check (`p14_column_check.log`) |
+| 84bb3ed | `evidence/p1.4-rekey` | the restore-set re-key (`p14_rekey.log`) |
+| 68eabd6 | `evidence/p1.4-deg-gate` | deg_gate at four viewpoints (`p14_deg_gate.log`) |
+| 46ab826 | `evidence/p1.4-column-base` | the column check's `--base`, the renderer before this change (219f52f's message) |
+| 57f20d9 | `evidence/p1.4-heat-defs` | the macro definitions the heat list's four renames were checked against (13aa8f5's message) |
+
+- **Pixels**: the column check's 1,648 columns (0 differ, A and A+B), deg_gate at four viewpoints,
+  both game-tier gates and B0's 1,100 frames -- every one byte-exact.
+- **Ops**: on combat set v2 the binding fell 599,935 (-4.0%); on gamespeed's ten games the frame fell
+  236,531 -- the record 102,173 and the emission 87,316 (profx, `blocked31_phases.log`).
+- **Against the budget**: -0.60M where -1.0M was estimated and 0.8M the line, so kill criterion 5
+  fired; the owner decided to ship it and follow up after phase 1 (the ledger's verdict).
+- **Speed**: msframe NOT SEPARATED from blocked30 (61.6 against 62.5 ms/frame, the pairs split in
+  sign). **Size**: 36,657,086 words, 27.31% of 2^27 (+448,114).

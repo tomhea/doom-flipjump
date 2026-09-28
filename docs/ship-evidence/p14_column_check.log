@@ -1,0 +1,30 @@
+$ python scratchpad/gp/probes/sprite/ship_check.py   # every fight frame, at 10d7b48
+column check: the SHIPPED macros (working tree), 16 frame(s)
+  heavy:gate664    n=106  A: 0/106 differ (8577408 ops)  A+B: 0/106 differ (15510166 ops)  B vs A: B above and below A 12, B above A only 41, B below A only 32, B hidden by A 21, gap above A 29, gap below A 29  (140s)
+  heavy:gate1869   n= 90  A: 0/90 differ (6919917 ops)  A+B: 0/90 differ (14542661 ops)  B vs A: B above and below A 2, B above A only 41, B below A only 43, B hidden by A 4, gap above A 38, gap below A 38  (126s)
+  heavy:h57        n= 73  A: 0/73 differ (6010778 ops)  A+B: 0/73 differ (10637730 ops)  B vs A: B above and below A 12, B above A only 24, B below A only 23, B hidden by A 14, gap above A 8, gap below A 5  (111s)
+  heavy:h71        n=111  A: 0/111 differ (9241204 ops)  A+B: 0/111 differ (17203848 ops)  B vs A: B above and below A 1, B above A only 54, B below A only 53, B hidden by A 3, gap above A 40, gap below A 40  (141s)
+  heavy:h100       n=126  A: 0/126 differ (11288823 ops)  A+B: 0/126 differ (18897868 ops)  B vs A: B above and below A 5, B above A only 57, B below A only 22, B hidden by A 42  (155s)
+  heavy:h28        n= 83  A: 0/83 differ (6759126 ops)  A+B: 0/83 differ (11720287 ops)  B vs A: B above and below A 28, B above A only 12, B below A only 14, B hidden by A 29, gap above A 3, gap below A 3  (118s)
+  heavy:h42        n= 83  A: 0/83 differ (7361016 ops)  A+B: 0/83 differ (13284810 ops)  B vs A: B above and below A 3, B above A only 39, B below A only 37, B hidden by A 4, gap above A 36, gap below A 36  (119s)
+  heavy:h85        n= 74  A: 0/74 differ (6078647 ops)  A+B: 0/74 differ (11859929 ops)  B vs A: B above and below A 7, B above A only 30, B below A only 29, B hidden by A 8, gap above A 23, gap below A 23  (112s)
+  melee:gate664    n=122  A: 0/122 differ (10054296 ops)  A+B: 0/122 differ (18810491 ops)  B vs A: B above and below A 8, B above A only 51, B below A only 39, B hidden by A 24, gap above A 22, gap below A 22  (150s)
+  melee:gate1869   n=103  A: 0/103 differ (8792038 ops)  A+B: 0/103 differ (18134441 ops)  B vs A: B above and below A 10, B above A only 41, B below A only 41, B hidden by A 11, gap above A 36, gap below A 36  (135s)
+  melee:h57        n= 89  A: 0/89 differ (7788467 ops)  A+B: 0/89 differ (14211651 ops)  B vs A: B above and below A 23, B above A only 22, B below A only 21, B hidden by A 23, gap above A 6, gap below A 7  (123s)
+  melee:h71        n=133  A: 0/133 differ (10640261 ops)  A+B: 0/133 differ (21430559 ops)  B vs A: B above and below A 10, B above A only 55, B below A only 55, B hidden by A 13, gap above A 41, gap below A 41  (159s)
+  melee:h100       n=132  A: 0/132 differ (12433049 ops)  A+B: 0/132 differ (19915082 ops)  B vs A: B above and below A 6, B above A only 60, B below A only 27, B hidden by A 39, gap above A 5, gap below A 5  (158s)
+  melee:h28        n=112  A: 0/112 differ (9651999 ops)  A+B: 0/112 differ (17061691 ops)  B vs A: B above and below A 20, B above A only 34, B below A only 36, B hidden by A 22, gap above A 6, gap below A 6  (141s)
+  melee:h42        n=117  A: 0/117 differ (11170991 ops)  A+B: 0/117 differ (19465833 ops)  B vs A: B above and below A 45, B above A only 9, B below A only 12, B hidden by A 51, gap above A 3, gap below A 2  (145s)
+  melee:h85        n= 94  A: 0/94 differ (7759788 ops)  A+B: 0/94 differ (14655338 ops)  B vs A: B above and below A 25, B above A only 22, B below A only 21, B hidden by A 26, gap above A 6, gap below A 6  (128s)
+COLUMN CHECK PASS: A 1648/1648 columns equal the oracle, A+B 1648/1648
+rc=0
+$ python scratchpad/gp/probes/sprite/ship_check.py --controls
+CONTROL M1 derive unbias off by one            CAUGHT: 3190/3296 columns differ from the oracle
+rc=124
+$ python scratchpad/gp/probes/sprite/ship_check.py --controls heavy:h57   # the four mutants on one frame (the all-frame run above timed out after M1)
+CONTROL M1 derive unbias off by one            CAUGHT: 146/146 columns differ from the oracle
+CONTROL M2 record bias off by one              CAUGHT: 146/146 columns differ from the oracle
+CONTROL M3 first run read on the narrow arm    CAUGHT: 67/73 columns differ from the oracle
+CONTROL M4 slot B read one byte early          CAUGHT: 73/73 columns differ from the oracle
+CONTROLS PASS: 4/4 mutants caught
+rc=0

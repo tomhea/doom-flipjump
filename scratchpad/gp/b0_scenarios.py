@@ -86,6 +86,7 @@ def model_frames(run: dict, proxy: bool = False) -> list:
         ws = w.ws
         pre = (ws.px, ws.py, ws.pangle)
         pre_doors = S.door_tuples(w)
+        pre_movers = S.mover_state(w)                  # M7 P2b
         w.tic(kd)
         post = (ws.px, ws.py, ws.pangle)
         if list(post) != list(run["poses"][i]):
@@ -93,8 +94,8 @@ def model_frames(run: dict, proxy: bool = False) -> list:
                                  "%s) -- the model or the file changed" % (run["name"], i, post,
                                                                            run["poses"][i]))
         inj, bkeys = S.b0_injection(w.rm, pre, post, kd, proxy=proxy)
-        out.append({"inj": inj, "keys": bkeys, "doors": pre_doors,
-                    "exp": mirror.step(inj, bkeys, pre_doors), "post": post,
+        out.append({"inj": inj, "keys": bkeys, "doors": pre_doors, "movers": pre_movers,
+                    "exp": mirror.step(inj, bkeys, pre_doors, pre_movers), "post": post,
                     "post_doors": tuple(ws.d_state),
                     "strafe_only": S.has_strafe(kd) and not (kd.get("forward") or kd.get("back"))})
     return out
@@ -106,7 +107,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     import gamespeed as GS
     import m2_std_gate as gate
     mf = gate.MENU_FRAMES
-    cells = P.game_cells(orc.ndoors, orc.nwalk)
+    cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift)
     p = P.Probe(cells, table, gb.width)
     per_frame = [{} for _ in range(mf)] + [fr["keys"] for fr in frames]
     events = GS.events_for(per_frame)
@@ -121,6 +122,11 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
             d = fr["doors"]
             vals.update({"dstate": tuple(t[0] for t in d), "ddir": tuple(t[1] for t in d),
                          "dsub": tuple(t[2] for t in d), "dwait": tuple(t[3] for t in d)})
+        if fr.get("movers") is not None:               # M7 P2b: the model's movers, likewise
+            lifts, req, sw = fr["movers"]
+            vals.update({"lstate": tuple(t[0] for t in lifts), "ldir": tuple(t[1] for t in lifts),
+                         "lsub": tuple(t[2] for t in lifts), "lwait": tuple(t[3] for t in lifts),
+                         "lreq": tuple(int(si in req) for si in orc.lift_order), "fswitch": sw})
         pr.write_cells(vals)
 
     def present(pr, f):
@@ -171,7 +177,7 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
     orc = GameOracle()
     assert list(orc.door_order) == list(S.new_world().door_order), "door order differs"
     with P.binary_lock("S4v2-b0"):
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk).values()})
+        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift).values()})
         gb = P.GameBinary(fjm)
         base = gb.run(gate.MENU_FRAMES).ops           # startup + the menu frames, EXACT
         print("b0_scenarios: %s sha256 %s | set %s (%d runs, keys %s) | startup+menu %s ops (exact)"
@@ -335,11 +341,11 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
             ds = [tuple(t) for t in fr["doors"]]
             ds[door] = (w.door_nstates[si] - 1, IDLE, 0, WAIT)
             fr2["doors"] = ds
-            fr2["exp"] = mirror.step(fr["inj"], fr["keys"], ds)
+            fr2["exp"] = mirror.step(fr["inj"], fr["keys"], ds, fr.get("movers"))
             fr2["post_doors"] = None
         opened.append(fr2)
     with P.binary_lock("S4v2-b0-selftest"):
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk).values()})
+        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift).values()})
         gb = P.GameBinary(fjm)
         r1 = drive(gb, table, orc, frames, pixel_every=10)
         check("T1 gamespeed run %d, every door written each frame, reproduces the recorded total"

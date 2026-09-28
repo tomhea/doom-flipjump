@@ -142,7 +142,8 @@ def _read_quiet(p: Path) -> str:
 # card, the walk-over triggers' W1 bits) -- every binary before P2a.1 lacks all three. Each group
 # comes whole or not at all.
 OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcard", "wfired"}),
-                   frozenset({"lvdone", "pusedn"}))       # M7 P2a.2: the exit's two cells
+                   frozenset({"lvdone", "pusedn"}),       # M7 P2a.2: the exit's two cells
+                   frozenset({"lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}))  # M7 P2b
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -603,7 +604,7 @@ class GameBinary:
 # the game tier's cells and known values, and the oracle side
 # ================================================================================================
 
-def game_cells(ndoors: int, nwalk: int = 1) -> dict:
+def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2) -> dict:
     """the persisted world state of the standalone game tier (build.STANDALONE_PERSIST +
     DOOR_PERSIST) as probe cells. `menu_scr` / `menu_sel` are OPTIONAL_LABELS: a Probe on a binary
     built before M7 P1.5 drops them (its label table has neither); so are M7 P2a.1's `dreq`
@@ -626,6 +627,11 @@ def game_cells(ndoors: int, nwalk: int = 1) -> dict:
     cells["wfired"] = Cell("wfired", "hex", 1, count=max(nwalk, 1))
     cells["lvdone"] = Cell("lvdone", "hex", 1)            # M7 P2a.2: the level is done
     cells["pusedn"] = Cell("pusedn", "hex", 1)            # ...and use held last tic
+    # M7 P2b: the movers -- each lift's four door-shaped cells and its trigger, and the switch
+    for name in ("lstate", "ldir", "lsub", "lreq"):
+        cells[name] = Cell(name, "hex", 1, count=nlift)
+    cells["lwait"] = Cell("lwait", "hex", WAIT_NIBBLES, count=nlift)
+    cells["fswitch"] = Cell("fswitch", "hex", 1)
     return cells
 
 
@@ -659,7 +665,7 @@ class Oracle:
         self.lds, self.sds = self.mw.linedefs(mapname), self.mw.sidedefs(mapname)
         self.door_order = sorted(door_states(self.secs, self.lds, self.sds))
         self.spawn = spawn_state(self.mw, mapname)
-        self._scenes = {(): build_scene(self.mw, self.mw, mapname)}
+        self._scenes = {((), ()): build_scene(self.mw, self.mw, mapname)}
         # M7 P1.5: the game tier boots at BOOT_SKILL's level start; the oracle hides what it
         # does not spawn (things.skill_hidden, the set the emitter baked from)
         from doomfj.things import skill_hidden
@@ -669,6 +675,16 @@ class Oracle:
     @property
     def ndoors(self):
         return len(self.door_order)
+
+    @property
+    def lift_order(self):
+        """M7 P2b: the lifts (doomfj.movers), in sector order"""
+        from doomfj.movers import lift_states
+        return sorted(lift_states(self.secs, self.lds, self.sds))
+
+    @property
+    def nlift(self):
+        return len(self.lift_order)
 
     @property
     def nwalk(self):
@@ -689,7 +705,10 @@ class Oracle:
                 # M7 P2a.1: no press pending, no card, no trigger fired
                 "dreq": (0,) * nd, "pcard": 0, "wfired": wfired_value((0,) * self.nwalk),
                 # M7 P2a.2: the level not done; use counts as held (G_PlayerReborn)
-                "lvdone": 0, "pusedn": 1}
+                "lvdone": 0, "pusedn": 1,
+                # M7 P2b: every lift at its top, idle; the switch not fired
+                "lstate": (0,) * self.nlift, "ldir": (0,) * self.nlift, "lsub": (0,) * self.nlift,
+                "lwait": (0,) * self.nlift, "lreq": (0,) * self.nlift, "fswitch": 0}
 
     def door_pose(self, dstate: tuple) -> dict:
         """cells that hold every door STILL at `dstate` for a frame: idle, no timer -- door_tic
@@ -699,23 +718,26 @@ class Oracle:
         return {"dstate": tuple(dstate) if dstate else (0,) * nd, "ddir": (IDLE,) * nd,
                 "dsub": (0,) * nd, "dwait": (0,) * nd, "dreq": (0,) * nd}
 
-    def scene_for(self, dstate: tuple = ()):
-        """the RENDER scene with the doors at `dstate` (a tuple in door_order); shut if empty"""
+    def scene_for(self, dstate: tuple = (), movers=None):
+        """the RENDER scene with the doors at `dstate` (a tuple in door_order); shut if empty.
+        M7 P2b: `movers` = `{sector: (floor, ceil)}` of the movers off their stored floors"""
         from doomfj.doors import heights_for_states
         from doomfj.reference_model import build_scene
         key = tuple(dstate) if dstate and any(dstate) else ()
-        if key not in self._scenes:
-            self._scenes[key] = build_scene(
-                self.mw, self.mw, self.mapname,
-                heights_for_states(self.secs, self.lds, self.sds,
-                                   {si: k for si, k in zip(self.door_order, key)}))
-        return self._scenes[key]
+        mkey = tuple(sorted((movers or {}).items()))
+        if (key, mkey) not in self._scenes:
+            h = heights_for_states(self.secs, self.lds, self.sds,
+                                   {si: k for si, k in zip(self.door_order, key)})
+            self._scenes[(key, mkey)] = build_scene(self.mw, self.mw, self.mapname,
+                                                    {**h, **(movers or {})})
+        return self._scenes[(key, mkey)]
 
-    def render(self, x, y, angle, dstate: tuple = (), hidden_extra=()) -> bytes:
-        """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken)"""
+    def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None) -> bytes:
+        """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
+        `movers`: M7 P2b, the movers' heights (`scene_for`)"""
         from doomfj.reference_model import SimState
         return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
-                                               self.scene_for(dstate), sprite_wad=self.art,
+                                               self.scene_for(dstate, movers), sprite_wad=self.art,
                                                thing_hidden=set(self.hidden) | set(hidden_extra),
                                                **self.RENDER_KW))
 
@@ -850,7 +872,7 @@ def selftest(fjm: Path, labels_path: Path) -> int:
     check("C0 the lock file is gone after release", not tmp_lock.exists())
 
     orc = Oracle()
-    cells = game_cells(orc.ndoors, orc.nwalk)
+    cells = game_cells(orc.ndoors, orc.nwalk, orc.nlift)
     cells["pclm"] = Cell("pclm", "byte", count=4, index=40)        # 4 byte cells of a byte array
     cells["kb_f_jw"] = Cell("kb_f", "raw", count=1, index=1)        # kb_f's raw JUMP word
     t = time.time()
@@ -1079,7 +1101,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
     import m2_std_gate as gate
     import onewalk
     orc = Oracle()
-    cells = game_cells(orc.ndoors, orc.nwalk)
+    cells = game_cells(orc.ndoors, orc.nwalk, orc.nlift)
     table = LabelTable.load(labels_path, {c.label for c in cells.values()})
     gb = GameBinary(fjm)
     print("demo: %s (sha256 %s), labels %s" % (fjm.name, gb.sha[:16], Path(labels_path).name),

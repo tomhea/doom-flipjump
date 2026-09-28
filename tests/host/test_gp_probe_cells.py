@@ -50,7 +50,7 @@ def _table(tmp_path, drop=()):
 
 def _known():
     """Oracle.known_pristine without the WADs: it reads only the door count and the spawn"""
-    stub = SimpleNamespace(ndoors=ND, nwalk=2, spawn=SimpleNamespace(x=-(5 << 16), y=7 << 16, angle=1 << 30))
+    stub = SimpleNamespace(ndoors=ND, nwalk=2, nlift=2, spawn=SimpleNamespace(x=-(5 << 16), y=7 << 16, angle=1 << 30))
     return P.Oracle.known_pristine(stub)
 
 
@@ -97,7 +97,11 @@ def test_only_the_skill_menu_is_optional(tmp_path):
     for one in ("lvdone", "pusedn"):
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))
-    assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel", "dreq", "pcard", "wfired", "lvdone", "pusedn"}
+    for one in ("lstate", "fswitch"):
+        with pytest.raises(KeyError, match="come together"):
+            _table(tmp_path, drop=(one,))
+    assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel", "dreq", "pcard", "wfired", "lvdone", "pusedn",
+                                 "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}
 
 
 def test_a_table_before_p2a1_loads_and_its_door_cells_are_dropped(tmp_path):
@@ -134,3 +138,21 @@ def test_a_table_with_the_exit_cells_probes_them(tmp_path):
     p = _probe_holding(_table(tmp_path), _known())
     assert [b[0] for b in p.check_known(dict(_known(), pusedn=0))] == ["pusedn"]
     assert [b[0] for b in p.check_known(dict(_known(), lvdone=1))] == ["lvdone"]
+
+
+MOVER_CELLS = ("lstate", "ldir", "lsub", "lwait", "lreq", "fswitch")
+
+
+def test_a_table_before_p2b_loads_and_its_mover_cells_are_dropped(tmp_path):
+    """M7 P2b: a binary before the movers has none of their cells; the probe drops them"""
+    table = _table(tmp_path, drop=MOVER_CELLS)
+    assert table.absent == set(MOVER_CELLS)
+    p = _probe_holding(table, _known())
+    assert p.absent == set(MOVER_CELLS) and p.check_known(_known()) == []
+
+
+def test_a_table_with_the_mover_cells_probes_them(tmp_path):
+    p = _probe_holding(_table(tmp_path), _known())
+    assert p.check_known(_known()) == []
+    assert [b[0] for b in p.check_known(dict(_known(), lstate=(0, 3)))] == ["lstate"]
+    assert [b[0] for b in p.check_known(dict(_known(), fswitch=1))] == ["fswitch"]

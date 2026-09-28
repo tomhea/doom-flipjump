@@ -126,7 +126,7 @@ def binary_trail(gb, table, orc, run: int, n: int = 100):
     import m2_std_gate as gate
     mf = gate.MENU_FRAMES
     per_frame = GS.full_script(run, n)
-    p = P.Probe(P.game_cells(orc.ndoors, orc.nwalk), table, gb.width)
+    p = P.Probe(P.game_cells(orc.ndoors, orc.nwalk, orc.nlift), table, gb.width)
     got = {}
 
     def present(pr, f):
@@ -155,7 +155,7 @@ def main():
     trails = {}
     with P.binary_lock(a.stream):
         orc = P.Oracle()
-        table = P.LabelTable.load(Path(a.labels), {c.label for c in P.game_cells(orc.ndoors, orc.nwalk).values()})
+        table = P.LabelTable.load(Path(a.labels), {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift).values()})
         gb = P.GameBinary(Path(a.fjm))
         print("gamespeed_trail: %s sha256 %s, labels %s" % (Path(a.fjm).name, gb.sha[:16],
                                                           Path(a.labels).name), flush=True)

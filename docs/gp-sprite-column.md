@@ -517,14 +517,21 @@ Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj
   `SPR_SLOT_B_BYTE` (8); a thing's `gpslot` is `SPR_THING_SLOT_FIELDS` (y0 lo, y0 hi, light row),
   y0 biased by `SPR_THING_Y0_BIAS` (2^15). The fj sides stay literals -- the record writes both,
   `lines_spr_load` reads the fragments (its skip to B is 8 - 3 = 5), `frag_derive` reads the slot
-  and unbiases. `tests/host/test_sprite_column.py` works out every field's BYTE from the ops: it
-  walks each macro in order, holding the registers that build an address as values (`spslot + 16 *
-  trb_col_x + trb_slot_ofs`; `gpslot + 4 * slot id`; the load's column `spslot + 16 * x1`, stepping
-  16) and following the layout's pointer through every read, write and step, and holds address and
-  offsets to the constants; an op it does not model leaves the bytes after it unknown. 25 mutants --
-  moved offsets and strides, swapped fields, and (PR #93's review, round 2) a dropped increment and
-  an inserted pointer step on each side of each layout -- must each be told apart
-  (`p14_cr2_layout_gap.log`: round 1's order-only test told 10 of them apart).
+  and unbiases. Two checks hold them, and neither models the fj (PR #93's review, rounds 1-3):
+  `tests/host/test_sprite_column.py` PINS the literals in the fj text -- each offset, the skip,
+  both biases, each side's field order -- to the constants, with a mutant of each; and
+  `tests/fj/test_slot_layouts_fj.py` RUNS the fj on both sides. The record's code from its slot
+  allocation to the end of its column loop, transplanted verbatim with the emitter's parameters,
+  records things chosen to span the layouts (columns across the 16, 64 and 1,024-index bounds up
+  to 159, slot ids 1..255, fragments A and B, both slots spent, hidden columns, a transparent
+  block, two-byte block indices, y0 either side of zero), and EVERY byte of sprflag, spslot and
+  gpslot must be the constants' layout of what was recorded; from memory laid out by the
+  constants, the real seed, step, load and derive must give each field. 35 mutants -- every kind
+  the review rounds found, the reviewer's own edits among them (a dropped increment, an inserted
+  step, an operand width, an index bound, a prearmed write, a narrow-arm read, a register bumped
+  through `r + dw`, the slot offset, the branch between slot A and slot B) -- each make it fail
+  (`p14_cr3_layouts_fj.log`). It does not cover the shipped binary's addresses (the harness keeps
+  the hot block's order, not its addresses): the gates do.
 - **The latent wrong-light ditto** of section 6 is gone with the four-field compare: the ladder
   compares (slot, block).
 - **The column check** is `scratchpad/gp/probes/sprite/ship_check.py`: the SHIPPED record (the

@@ -1,0 +1,939 @@
+$ python scratchpad/m3_gate.py --fjm build/doom_e1m1_blocked32.fjm --labels scratchpad/12m/atlas/blocked32.labels.tsv.gz --selftest
+fjm    : build/doom_e1m1_blocked32.fjm
+menu   : ['DOOM ON FLIPJUMP', '', 'NEW GAME', 'QUIT']   colours bg=0 text=4 hi=176 credit=101
+skills : ['EASY', 'MEDIUM', 'HARD'] -- hidden [42, 41, 22]; the boot skill is hard
+script : boot in menu -> esc@2 -> walk -> enter@6 (W held) -> esc@9 -> the skill screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30
+  227,584,915 ops -> 32 frames
+  frame  0 world hard    (-416.000, 256.000)  !! 14893 px DIFFER  state ok
+  -- stopping: once a frame is wrong the later ones compare nothing useful
+
+  CONTROL: menu frames 0, world frames 1, frames that moved the player 0
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: the screens shown: main menu !! no, the skill screen at highlights [] of 3
+  CONTROL: the first NEW GAME found the player walked away (yes), and every NEW GAME frame is the spawn view (yes)
+  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: !! no -- the skills cannot be told apart here
+  CONTROL: distinct pictures: 12 of 32
+  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, every door's cells) equals the oracle's: !! only 1 of 32 frames were checked
+
+SELFTEST (every frame claimed to be a world frame): PASS -- the gate rejected it at frame 0, where it must
+rc=0
+$ python scratchpad/m3_gate.py --fjm build/doom_e1m1_blocked32.fjm --labels scratchpad/12m/atlas/blocked32.labels.tsv.gz --selftest-skill
+fjm    : build/doom_e1m1_blocked32.fjm
+menu   : ['DOOM ON FLIPJUMP', '', 'NEW GAME', 'QUIT']   colours bg=0 text=4 hi=176 credit=101
+skills : ['EASY', 'MEDIUM', 'HARD'] -- hidden [42, 41, 22]; the boot skill is hard
+script : boot in menu -> esc@2 -> walk -> enter@6 (W held) -> esc@9 -> the skill screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30
+  227,584,915 ops -> 32 frames
+  frame  0 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  1 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  2 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  3 world hard    (-400.000, 256.000)  BYTE-EXACT  state ok
+  frame  4 world hard    (-384.000, 256.000)  BYTE-EXACT  state ok
+  frame  5 world hard    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  6 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  7 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  8 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  9 world hard    (-352.000, 256.000)  BYTE-EXACT  state ok
+  frame 10 world hard    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 11 world hard    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 12 MENU  main    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 13 MENU  skill 2 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 14 MENU  skill 2 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 15 MENU  skill 1 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 16 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 17 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 18 MENU  main    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 19 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 20 world medium  (-416.000, 256.000)  NEW GAME  !! 12 px DIFFER  state ok
+  -- stopping: once a frame is wrong the later ones compare nothing useful
+
+  CONTROL: menu frames 13, world frames 8, frames that moved the player 6
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: the screens shown: main menu yes, the skill screen at highlights [0, 1, 2] of 3
+  CONTROL: the first NEW GAME found the player walked away (yes), and every NEW GAME frame is the spawn view (yes)
+  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: !! no -- the skills cannot be told apart here
+  CONTROL: distinct pictures: 12 of 32
+  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, every door's cells) equals the oracle's: !! only 21 of 32 frames were checked
+
+SELFTEST (the oracle starts the next skill at every NEW GAME): PASS -- the gate rejected it at frame 20, where it must
+rc=0
+$ python scratchpad/m3_gate.py --fjm build/doom_e1m1_blocked32.fjm --labels scratchpad/12m/atlas/blocked32.labels.tsv.gz --selftest-state
+fjm    : build/doom_e1m1_blocked32.fjm
+menu   : ['DOOM ON FLIPJUMP', '', 'NEW GAME', 'QUIT']   colours bg=0 text=4 hi=176 credit=101
+skills : ['EASY', 'MEDIUM', 'HARD'] -- hidden [42, 41, 22]; the boot skill is hard
+script : boot in menu -> esc@2 -> walk -> enter@6 (W held) -> esc@9 -> the skill screen @13, clamp both ends, back, NEW GAME at easy@20, medium@25, hard@30
+  227,584,915 ops -> 32 frames
+  frame  0 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  1 MENU  main    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  2 world hard    (-416.000, 256.000)  BYTE-EXACT  state ok
+  frame  3 world hard    (-400.000, 256.000)  BYTE-EXACT  state ok
+  frame  4 world hard    (-384.000, 256.000)  BYTE-EXACT  state ok
+  frame  5 world hard    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  6 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  7 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  8 MENU  main    (-368.000, 256.000)  BYTE-EXACT  state ok
+  frame  9 world hard    (-352.000, 256.000)  BYTE-EXACT  state ok
+  frame 10 world hard    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 11 world hard    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 12 MENU  main    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 13 MENU  skill 2 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 14 MENU  skill 2 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 15 MENU  skill 1 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 16 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 17 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 18 MENU  main    (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 19 MENU  skill 0 (-336.000, 256.000)  BYTE-EXACT  state ok
+  frame 20 world easy    (-416.000, 256.000)  NEW GAME  BYTE-EXACT  !! STATE: menu_scr: fj 0, oracle 1
+  -- stopping: once a frame is wrong the later ones compare nothing useful
+
+  CONTROL: menu frames 13, world frames 8, frames that moved the player 6
+  CONTROL: the player did NOT move during the 3 menu frames with W held: ok
+  CONTROL: the screens shown: main menu yes, the skill screen at highlights [0, 1, 2] of 3
+  CONTROL: the first NEW GAME found the player walked away (yes), and every NEW GAME frame is the spawn view (yes)
+  CONTROL: the three skills' NEW GAME frames are pairwise distinct in the oracle: !! no -- the skills cannot be told apart here
+  CONTROL: distinct pictures: 12 of 32
+  CONTROL: every frame's STATE (view, mode, menu_scr, menu_sel, every door's cells) equals the oracle's: !! no -- frame 20
+  !! VACUOUS -- this script does not exercise the menu machine
+
+SELFTEST (the oracle expects the skill screen's menu_scr in the world): PASS -- the state check rejected frame 20, where it must, with its picture exact
+rc=0
+$ python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_blocked32.fjm --labels scratchpad/12m/atlas/blocked32.labels.tsv.gz --selftest
+  CONTROL 5: binary and oracle agree on door geometry (quant 16, 13 doors)
+  CONTROL 0: the planned route crosses no solid linedef: yes (154 frames re-simulated)
+fjm    : build/doom_e1m1_blocked32.fjm
+target : door sector 10, use box (704, 448, 960, 608), threshold state 4
+script : 2 menu -> esc -> 154 walk to the door -> 2 use -> 10 open -> 36 through -> enter, enter, enter (NEW GAME at the boot skill) -> the 154-frame walk again -> 6 idle  (366 frames)
+doorway: line 55 ((896, 544), (768, 544)) -> approach (832, 488), then through to (832, 632)
+running: 5,587,756,180 ops -> 366 frames presented
+
+  frame  keys      door10    fj px vs oracle
+      0  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      1  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      2  t              0   BYTE-EXACT  state ok
+      3  t              0   BYTE-EXACT  state ok
+      4  t              0   BYTE-EXACT  state ok
+      5  t              0   BYTE-EXACT  state ok
+      6  t              0   BYTE-EXACT  state ok
+      7  f              0   BYTE-EXACT  state ok
+      8  t              0   BYTE-EXACT  state ok
+      9  t              0   BYTE-EXACT  state ok
+     10  t              0   BYTE-EXACT  state ok
+     11  f              0   BYTE-EXACT  state ok
+     12  t              0   BYTE-EXACT  state ok
+     13  f              0   BYTE-EXACT  state ok
+     14  t              0   BYTE-EXACT  state ok
+     15  f              0   BYTE-EXACT  state ok
+     16  f              0   BYTE-EXACT  state ok
+     17  f              0   BYTE-EXACT  state ok
+     18  f              0   BYTE-EXACT  state ok
+     19  f              0   BYTE-EXACT  state ok
+     20  f              0   BYTE-EXACT  state ok
+     21  f              0   BYTE-EXACT  state ok
+     22  f              0   BYTE-EXACT  state ok
+     23  f              0   BYTE-EXACT  state ok
+     24  f              0   BYTE-EXACT  state ok
+     25  f              0   BYTE-EXACT  state ok
+     26  f              0   BYTE-EXACT  state ok
+     27  f              0   BYTE-EXACT  state ok
+     28  f              0   BYTE-EXACT  state ok
+     29  f              0   BYTE-EXACT  state ok
+     30  f              0   BYTE-EXACT  state ok
+     31  f              0   BYTE-EXACT  state ok
+     32  f              0   BYTE-EXACT  state ok
+     33  f              0   BYTE-EXACT  state ok
+     34  f              0   BYTE-EXACT  state ok
+     35  f              0   BYTE-EXACT  state ok
+     36  f              0   BYTE-EXACT  state ok
+     37  f              0   BYTE-EXACT  state ok
+     38  f              0   BYTE-EXACT  state ok
+     39  f              0   BYTE-EXACT  state ok
+     40  f              0   BYTE-EXACT  state ok
+     41  f              0   BYTE-EXACT  state ok
+     42  f              0   BYTE-EXACT  state ok
+     43  f              0   BYTE-EXACT  state ok
+     44  f              0   BYTE-EXACT  state ok
+     45  f              0   BYTE-EXACT  state ok
+     46  f              0   BYTE-EXACT  state ok
+     47  f              0   BYTE-EXACT  state ok
+     48  t              0   BYTE-EXACT  state ok
+     49  t              0   BYTE-EXACT  state ok
+     50  t              0   BYTE-EXACT  state ok
+     51  t              0   BYTE-EXACT  state ok
+     52  t              0   BYTE-EXACT  state ok
+     53  t              0   BYTE-EXACT  state ok
+     54  t              0   BYTE-EXACT  state ok
+     55  t              0   BYTE-EXACT  state ok
+     56  t              0   BYTE-EXACT  state ok
+     57  f              0   BYTE-EXACT  state ok
+     58  t              0   BYTE-EXACT  state ok
+     59  t              0   BYTE-EXACT  state ok
+     60  t              0   BYTE-EXACT  state ok
+     61  f              0   BYTE-EXACT  state ok
+     62  t              0   BYTE-EXACT  state ok
+     63  f              0   BYTE-EXACT  state ok
+     64  t              0   BYTE-EXACT  state ok
+     65  t              0   BYTE-EXACT  state ok
+     66  f              0   BYTE-EXACT  state ok
+     67  t              0   BYTE-EXACT  state ok
+     68  t              0   BYTE-EXACT  state ok
+     69  t              0   BYTE-EXACT  state ok
+     70  t              0   BYTE-EXACT  state ok
+     71  t              0   BYTE-EXACT  state ok
+     72  t              0   BYTE-EXACT  state ok
+     73  t              0   BYTE-EXACT  state ok
+     74  t              0   BYTE-EXACT  state ok
+     75  f              0   BYTE-EXACT  state ok
+     76  t              0   BYTE-EXACT  state ok
+     77  t              0   BYTE-EXACT  state ok
+     78  t              0   BYTE-EXACT  state ok
+     79  f              0   BYTE-EXACT  state ok
+     80  t              0   BYTE-EXACT  state ok
+     81  f              0   BYTE-EXACT  state ok
+     82  t              0   BYTE-EXACT  state ok
+     83  f              0   BYTE-EXACT  state ok
+     84  f              0   BYTE-EXACT  state ok
+     85  f              0   BYTE-EXACT  state ok
+     86  f              0   BYTE-EXACT  state ok
+     87  f              0   BYTE-EXACT  state ok
+     88  f              0   BYTE-EXACT  state ok
+     89  f              0   BYTE-EXACT  state ok
+     90  f              0   BYTE-EXACT  state ok
+     91  f              0   BYTE-EXACT  state ok
+     92  f              0   BYTE-EXACT  state ok
+     93  f              0   BYTE-EXACT  state ok
+     94  f              0   BYTE-EXACT  state ok
+     95  f              0   BYTE-EXACT  state ok
+     96  f              0   BYTE-EXACT  state ok
+     97  f              0   BYTE-EXACT  state ok
+     98  f              0   BYTE-EXACT  state ok
+     99  f              0   BYTE-EXACT  state ok
+    100  f              0   BYTE-EXACT  state ok
+    101  f              0   BYTE-EXACT  state ok
+    102  f              0   BYTE-EXACT  state ok
+    103  f              0   BYTE-EXACT  state ok
+    104  f              0   BYTE-EXACT  state ok
+    105  f              0   BYTE-EXACT  state ok
+    106  f              0   BYTE-EXACT  state ok
+    107  f              0   BYTE-EXACT  state ok
+    108  t              0   BYTE-EXACT  state ok
+    109  t              0   BYTE-EXACT  state ok
+    110  t              0   BYTE-EXACT  state ok
+    111  t              0   BYTE-EXACT  state ok
+    112  t              0   BYTE-EXACT  state ok
+    113  t              0   BYTE-EXACT  state ok
+    114  t              0   BYTE-EXACT  state ok
+    115  t              0   BYTE-EXACT  state ok
+    116  t              0   BYTE-EXACT  state ok
+    117  f              0   BYTE-EXACT  state ok
+    118  t              0   BYTE-EXACT  state ok
+    119  t              0   BYTE-EXACT  state ok
+    120  t              0   BYTE-EXACT  state ok
+    121  f              0   BYTE-EXACT  state ok
+    122  t              0   BYTE-EXACT  state ok
+    123  f              0   BYTE-EXACT  state ok
+    124  t              0   BYTE-EXACT  state ok
+    125  t              0   BYTE-EXACT  state ok
+    126  f              0   BYTE-EXACT  state ok
+    127  t              0   BYTE-EXACT  state ok
+    128  t              0   BYTE-EXACT  state ok
+    129  t              0   BYTE-EXACT  state ok
+    130  t              0   BYTE-EXACT  state ok
+    131  t              0   BYTE-EXACT  state ok
+    132  t              0   BYTE-EXACT  state ok
+    133  f              0   BYTE-EXACT  state ok
+    134  t              0   BYTE-EXACT  state ok
+    135  t              0   BYTE-EXACT  state ok
+    136  t              0   BYTE-EXACT  state ok
+    137  t              0   BYTE-EXACT  state ok
+    138  t              0   BYTE-EXACT  state ok
+    139  f              0   BYTE-EXACT  state ok
+    140  t              0   BYTE-EXACT  state ok
+    141  f              0   BYTE-EXACT  state ok
+    142  f              0   BYTE-EXACT  state ok
+    143  f              0   BYTE-EXACT  state ok
+    144  f              0   BYTE-EXACT  state ok
+    145  f              0   BYTE-EXACT  state ok
+    146  t              0   BYTE-EXACT  state ok
+    147  t              0   BYTE-EXACT  state ok
+    148  t              0   BYTE-EXACT  state ok
+    149  t              0   BYTE-EXACT  state ok
+    150  f              0   BYTE-EXACT  state ok
+    151  t              0   BYTE-EXACT  state ok
+    152  t              0   BYTE-EXACT  state ok
+    153  f              0   BYTE-EXACT  state ok
+    154  t              0   BYTE-EXACT  state ok
+    155  f              0   BYTE-EXACT  state ok
+    156  u              0   !! 9403 px differ  !! STATE: dstate[door 0: fj 1, oracle 0]; ddir[door 0: fj 1, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    157  u              0   !! 9404 px differ  !! STATE: dstate[door 0: fj 2, oracle 0]; ddir[door 0: fj 1, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    158  -              0   !! 9404 px differ  !! STATE: dstate[door 0: fj 3, oracle 0]; ddir[door 0: fj 1, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    159  -              0   !! 9382 px differ  !! STATE: dstate[door 0: fj 4, oracle 0]; ddir[door 0: fj 1, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    160  -              0   !! 9392 px differ  !! STATE: dstate[door 0: fj 5, oracle 0]; ddir[door 0: fj 1, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    161  -              0   !! 9402 px differ  !! STATE: dstate[door 0: fj 6, oracle 0]; ddir[door 0: fj 1, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    162  -              0   !! 9404 px differ  !! STATE: dstate[door 0: fj 7, oracle 0]; ddir[door 0: fj 1, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    163  -              0   !! 9404 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 37, oracle 0]
+    164  -              0   !! 9404 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 36, oracle 0]
+    165  -              0   !! 9404 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 35, oracle 0]
+    166  -              0   !! 9404 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 34, oracle 0]
+    167  -              0   !! 9404 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 33, oracle 0]
+    168  t              0   !! 9899 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 32, oracle 0]
+    169  t              0   !! 10486 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 31, oracle 0]
+    170  t              0   !! 11067 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 30, oracle 0]
+    171  t              0   !! 11668 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 29, oracle 0]
+    172  t              0   !! 12414 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 28, oracle 0]
+    173  t              0   !! 13191 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 27, oracle 0]
+    174  t              0   !! 14072 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 26, oracle 0]
+    175  t              0   !! 14919 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 25, oracle 0]
+    176  t              0   !! 14397 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 24, oracle 0]
+    177  t              0   !! 13632 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 23, oracle 0]
+    178  t              0   !! 12742 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 22, oracle 0]
+    179  f              0   !! 14542 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 21, oracle 0]
+    180  f              0   !! 14393 px differ  !! STATE: dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 20, oracle 0]
+    181  f              0   !! 14145 px differ  !! STATE: viewy: fj 32803072, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 19, oracle 0]
+    182  f              0   !! 13720 px differ  !! STATE: viewy: fj 33850944, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 18, oracle 0]
+    183  t              0   !! 14395 px differ  !! STATE: viewy: fj 33850944, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 17, oracle 0]
+    184  f              0   !! 14199 px differ  !! STATE: viewy: fj 34899200, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 16, oracle 0]
+    185  t              0   !! 13761 px differ  !! STATE: viewy: fj 34899200, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 15, oracle 0]
+    186  f              0   !! 14073 px differ  !! STATE: viewy: fj 35947072, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 14, oracle 0]
+    187  t              0   !! 14049 px differ  !! STATE: viewy: fj 35947072, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 13, oracle 0]
+    188  f              0   !! 14097 px differ  !! STATE: viewy: fj 36995328, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 12, oracle 0]
+    189  t              0   !! 14089 px differ  !! STATE: viewy: fj 36995328, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 11, oracle 0]
+    190  f              0   !! 14048 px differ  !! STATE: viewy: fj 38043200, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 10, oracle 0]
+    191  t              0   !! 14067 px differ  !! STATE: viewy: fj 38043200, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 9, oracle 0]
+    192  f              0   !! 14058 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 8, oracle 0]
+    193  t              0   !! 14073 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 7, oracle 0]
+    194  t              0   !! 14071 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 6, oracle 0]
+    195  t              0   !! 14026 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 5, oracle 0]
+    196  t              0   !! 13364 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 4, oracle 0]
+    197  t              0   !! 12996 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 3, oracle 0]
+    198  t              0   !! 12681 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 2, oracle 0]
+    199  t              0   !! 12460 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; dsub[door 0: fj 1, oracle 0]; dwait[door 0: fj 1, oracle 0]
+    200  t              0   !! 12061 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 8, oracle 0]; ddir[door 0: fj 2, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    201  t              0   !! 11747 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 7, oracle 0]; ddir[door 0: fj 2, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    202  t              0   !! 11528 px differ  !! STATE: viewy: fj 39091456, oracle 31755200; dstate[door 0: fj 6, oracle 0]; ddir[door 0: fj 2, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    203  f              0   !! 11458 px differ  !! STATE: viewy: fj 39963312, oracle 31755200; dstate[door 0: fj 5, oracle 0]; ddir[door 0: fj 2, oracle 0]; dsub[door 0: fj 1, oracle 0]
+    204  enter          -   (menu frame, the main menu -- m3_gate judges these)  !! STATE: viewy: fj 39963312, oracle 31755200; dstate[door 0: fj 5, oracle 0]; ddir[door 0: fj 2, oracle 0]; dsub[door 0: fj 1, oracle 0]
+  -- stopping: the program's state parted from the oracle's
+
+  CONTROL 1: door 10 reached 1 distinct states [0] -- !! NOT ENOUGH: one state is a door that re-shut every frame, which IS the bug
+  CONTROL 2: use was pressed INSIDE the box: yes
+  CONTROL 3: the menu frames of each screen are identical to each other (1 screens): yes
+  CONTROL 4: the player's path crosses door 10's own line SEGMENT ((896, 544)-(768, 544) / (768, 512)-(896, 512)): !! NO -- collision was never tested, this proves the render half only
+  CONTROL 6: NEW GAME found door 10 open (!! no), the 154-frame replay retraced the first walk (!! no -- 0 of 154 replay frames reached), and its last frame can tell the shut door from that one (!! no)
+  CONTROL 7: every frame's STATE (view, mode, menu_scr, menu_sel, and every door's state, direction, sub-step and timer) equals the oracle's: !! no -- frame 204
+
+SELFTEST (the oracle never presses use, so its doors stay shut): PASS -- the gate rejected it
+rc=0
+$ python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_blocked32.fjm --labels scratchpad/12m/atlas/blocked32.labels.tsv.gz --selftest-restart
+  CONTROL 5: binary and oracle agree on door geometry (quant 16, 13 doors)
+  CONTROL 0: the planned route crosses no solid linedef: yes (154 frames re-simulated)
+fjm    : build/doom_e1m1_blocked32.fjm
+target : door sector 10, use box (704, 448, 960, 608), threshold state 4
+script : 2 menu -> esc -> 154 walk to the door -> 2 use -> 10 open -> 36 through -> enter, enter, enter (NEW GAME at the boot skill) -> the 154-frame walk again -> 6 idle  (366 frames)
+doorway: line 55 ((896, 544), (768, 544)) -> approach (832, 488), then through to (832, 632)
+running: 5,587,756,180 ops -> 366 frames presented
+
+  frame  keys      door10    fj px vs oracle
+      0  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      1  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      2  t              0   BYTE-EXACT  state ok
+      3  t              0   BYTE-EXACT  state ok
+      4  t              0   BYTE-EXACT  state ok
+      5  t              0   BYTE-EXACT  state ok
+      6  t              0   BYTE-EXACT  state ok
+      7  f              0   BYTE-EXACT  state ok
+      8  t              0   BYTE-EXACT  state ok
+      9  t              0   BYTE-EXACT  state ok
+     10  t              0   BYTE-EXACT  state ok
+     11  f              0   BYTE-EXACT  state ok
+     12  t              0   BYTE-EXACT  state ok
+     13  f              0   BYTE-EXACT  state ok
+     14  t              0   BYTE-EXACT  state ok
+     15  f              0   BYTE-EXACT  state ok
+     16  f              0   BYTE-EXACT  state ok
+     17  f              0   BYTE-EXACT  state ok
+     18  f              0   BYTE-EXACT  state ok
+     19  f              0   BYTE-EXACT  state ok
+     20  f              0   BYTE-EXACT  state ok
+     21  f              0   BYTE-EXACT  state ok
+     22  f              0   BYTE-EXACT  state ok
+     23  f              0   BYTE-EXACT  state ok
+     24  f              0   BYTE-EXACT  state ok
+     25  f              0   BYTE-EXACT  state ok
+     26  f              0   BYTE-EXACT  state ok
+     27  f              0   BYTE-EXACT  state ok
+     28  f              0   BYTE-EXACT  state ok
+     29  f              0   BYTE-EXACT  state ok
+     30  f              0   BYTE-EXACT  state ok
+     31  f              0   BYTE-EXACT  state ok
+     32  f              0   BYTE-EXACT  state ok
+     33  f              0   BYTE-EXACT  state ok
+     34  f              0   BYTE-EXACT  state ok
+     35  f              0   BYTE-EXACT  state ok
+     36  f              0   BYTE-EXACT  state ok
+     37  f              0   BYTE-EXACT  state ok
+     38  f              0   BYTE-EXACT  state ok
+     39  f              0   BYTE-EXACT  state ok
+     40  f              0   BYTE-EXACT  state ok
+     41  f              0   BYTE-EXACT  state ok
+     42  f              0   BYTE-EXACT  state ok
+     43  f              0   BYTE-EXACT  state ok
+     44  f              0   BYTE-EXACT  state ok
+     45  f              0   BYTE-EXACT  state ok
+     46  f              0   BYTE-EXACT  state ok
+     47  f              0   BYTE-EXACT  state ok
+     48  t              0   BYTE-EXACT  state ok
+     49  t              0   BYTE-EXACT  state ok
+     50  t              0   BYTE-EXACT  state ok
+     51  t              0   BYTE-EXACT  state ok
+     52  t              0   BYTE-EXACT  state ok
+     53  t              0   BYTE-EXACT  state ok
+     54  t              0   BYTE-EXACT  state ok
+     55  t              0   BYTE-EXACT  state ok
+     56  t              0   BYTE-EXACT  state ok
+     57  f              0   BYTE-EXACT  state ok
+     58  t              0   BYTE-EXACT  state ok
+     59  t              0   BYTE-EXACT  state ok
+     60  t              0   BYTE-EXACT  state ok
+     61  f              0   BYTE-EXACT  state ok
+     62  t              0   BYTE-EXACT  state ok
+     63  f              0   BYTE-EXACT  state ok
+     64  t              0   BYTE-EXACT  state ok
+     65  t              0   BYTE-EXACT  state ok
+     66  f              0   BYTE-EXACT  state ok
+     67  t              0   BYTE-EXACT  state ok
+     68  t              0   BYTE-EXACT  state ok
+     69  t              0   BYTE-EXACT  state ok
+     70  t              0   BYTE-EXACT  state ok
+     71  t              0   BYTE-EXACT  state ok
+     72  t              0   BYTE-EXACT  state ok
+     73  t              0   BYTE-EXACT  state ok
+     74  t              0   BYTE-EXACT  state ok
+     75  f              0   BYTE-EXACT  state ok
+     76  t              0   BYTE-EXACT  state ok
+     77  t              0   BYTE-EXACT  state ok
+     78  t              0   BYTE-EXACT  state ok
+     79  f              0   BYTE-EXACT  state ok
+     80  t              0   BYTE-EXACT  state ok
+     81  f              0   BYTE-EXACT  state ok
+     82  t              0   BYTE-EXACT  state ok
+     83  f              0   BYTE-EXACT  state ok
+     84  f              0   BYTE-EXACT  state ok
+     85  f              0   BYTE-EXACT  state ok
+     86  f              0   BYTE-EXACT  state ok
+     87  f              0   BYTE-EXACT  state ok
+     88  f              0   BYTE-EXACT  state ok
+     89  f              0   BYTE-EXACT  state ok
+     90  f              0   BYTE-EXACT  state ok
+     91  f              0   BYTE-EXACT  state ok
+     92  f              0   BYTE-EXACT  state ok
+     93  f              0   BYTE-EXACT  state ok
+     94  f              0   BYTE-EXACT  state ok
+     95  f              0   BYTE-EXACT  state ok
+     96  f              0   BYTE-EXACT  state ok
+     97  f              0   BYTE-EXACT  state ok
+     98  f              0   BYTE-EXACT  state ok
+     99  f              0   BYTE-EXACT  state ok
+    100  f              0   BYTE-EXACT  state ok
+    101  f              0   BYTE-EXACT  state ok
+    102  f              0   BYTE-EXACT  state ok
+    103  f              0   BYTE-EXACT  state ok
+    104  f              0   BYTE-EXACT  state ok
+    105  f              0   BYTE-EXACT  state ok
+    106  f              0   BYTE-EXACT  state ok
+    107  f              0   BYTE-EXACT  state ok
+    108  t              0   BYTE-EXACT  state ok
+    109  t              0   BYTE-EXACT  state ok
+    110  t              0   BYTE-EXACT  state ok
+    111  t              0   BYTE-EXACT  state ok
+    112  t              0   BYTE-EXACT  state ok
+    113  t              0   BYTE-EXACT  state ok
+    114  t              0   BYTE-EXACT  state ok
+    115  t              0   BYTE-EXACT  state ok
+    116  t              0   BYTE-EXACT  state ok
+    117  f              0   BYTE-EXACT  state ok
+    118  t              0   BYTE-EXACT  state ok
+    119  t              0   BYTE-EXACT  state ok
+    120  t              0   BYTE-EXACT  state ok
+    121  f              0   BYTE-EXACT  state ok
+    122  t              0   BYTE-EXACT  state ok
+    123  f              0   BYTE-EXACT  state ok
+    124  t              0   BYTE-EXACT  state ok
+    125  t              0   BYTE-EXACT  state ok
+    126  f              0   BYTE-EXACT  state ok
+    127  t              0   BYTE-EXACT  state ok
+    128  t              0   BYTE-EXACT  state ok
+    129  t              0   BYTE-EXACT  state ok
+    130  t              0   BYTE-EXACT  state ok
+    131  t              0   BYTE-EXACT  state ok
+    132  t              0   BYTE-EXACT  state ok
+    133  f              0   BYTE-EXACT  state ok
+    134  t              0   BYTE-EXACT  state ok
+    135  t              0   BYTE-EXACT  state ok
+    136  t              0   BYTE-EXACT  state ok
+    137  t              0   BYTE-EXACT  state ok
+    138  t              0   BYTE-EXACT  state ok
+    139  f              0   BYTE-EXACT  state ok
+    140  t              0   BYTE-EXACT  state ok
+    141  f              0   BYTE-EXACT  state ok
+    142  f              0   BYTE-EXACT  state ok
+    143  f              0   BYTE-EXACT  state ok
+    144  f              0   BYTE-EXACT  state ok
+    145  f              0   BYTE-EXACT  state ok
+    146  t              0   BYTE-EXACT  state ok
+    147  t              0   BYTE-EXACT  state ok
+    148  t              0   BYTE-EXACT  state ok
+    149  t              0   BYTE-EXACT  state ok
+    150  f              0   BYTE-EXACT  state ok
+    151  t              0   BYTE-EXACT  state ok
+    152  t              0   BYTE-EXACT  state ok
+    153  f              0   BYTE-EXACT  state ok
+    154  t              0   BYTE-EXACT  state ok
+    155  f              0   BYTE-EXACT  state ok
+    156  u              1   BYTE-EXACT  state ok
+    157  u              2   BYTE-EXACT  state ok
+    158  -              3   BYTE-EXACT  state ok
+    159  -              4   BYTE-EXACT  state ok
+    160  -              5   BYTE-EXACT  state ok
+    161  -              6   BYTE-EXACT  state ok
+    162  -              7   BYTE-EXACT  state ok
+    163  -              8   BYTE-EXACT  state ok
+    164  -              8   BYTE-EXACT  state ok
+    165  -              8   BYTE-EXACT  state ok
+    166  -              8   BYTE-EXACT  state ok
+    167  -              8   BYTE-EXACT  state ok
+    168  t              8   BYTE-EXACT  state ok
+    169  t              8   BYTE-EXACT  state ok
+    170  t              8   BYTE-EXACT  state ok
+    171  t              8   BYTE-EXACT  state ok
+    172  t              8   BYTE-EXACT  state ok
+    173  t              8   BYTE-EXACT  state ok
+    174  t              8   BYTE-EXACT  state ok
+    175  t              8   BYTE-EXACT  state ok
+    176  t              8   BYTE-EXACT  state ok
+    177  t              8   BYTE-EXACT  state ok
+    178  t              8   BYTE-EXACT  state ok
+    179  f              8   BYTE-EXACT  state ok
+    180  f              8   BYTE-EXACT  state ok
+    181  f              8   BYTE-EXACT  state ok
+    182  f              8   BYTE-EXACT  state ok
+    183  t              8   BYTE-EXACT  state ok
+    184  f              8   BYTE-EXACT  state ok
+    185  t              8   BYTE-EXACT  state ok
+    186  f              8   BYTE-EXACT  state ok
+    187  t              8   BYTE-EXACT  state ok
+    188  f              8   BYTE-EXACT  state ok
+    189  t              8   BYTE-EXACT  state ok
+    190  f              8   BYTE-EXACT  state ok
+    191  t              8   BYTE-EXACT  state ok
+    192  f              8   BYTE-EXACT  state ok
+    193  t              8   BYTE-EXACT  state ok
+    194  t              8   BYTE-EXACT  state ok
+    195  t              8   BYTE-EXACT  state ok
+    196  t              8   BYTE-EXACT  state ok
+    197  t              8   BYTE-EXACT  state ok
+    198  t              8   BYTE-EXACT  state ok
+    199  t              8   BYTE-EXACT  state ok
+    200  t              8   BYTE-EXACT  state ok
+    201  t              7   BYTE-EXACT  state ok
+    202  t              6   BYTE-EXACT  state ok
+    203  f              5   BYTE-EXACT  state ok
+    204  enter          -   (menu frame, the main menu -- m3_gate judges these)  state ok
+    205  enter          -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+    206  t              4   !! 15235 px differ  !! STATE: viewx: fj -27262976, oracle 53513776; viewy: fj 16777216, oracle 39963312; viewangle: fj 41943040, oracle 713031680; dstate[door 0: fj 0, oracle 4] (+2 more)
+    207  t              3   !! 15325 px differ  !! STATE: viewx: fj -27262976, oracle 53513776; viewy: fj 16777216, oracle 39963312; viewangle: fj 83886080, oracle 754974720; dstate[door 0: fj 0, oracle 3] (+2 more)
+    208  t              2   !! 15494 px differ  !! STATE: viewx: fj -27262976, oracle 53513776; viewy: fj 16777216, oracle 39963312; viewangle: fj 125829120, oracle 796917760; dstate[door 0: fj 0, oracle 2] (+2 more)
+    209  t              1   !! 15717 px differ  !! STATE: viewx: fj -27262976, oracle 53513776; viewy: fj 16777216, oracle 39963312; viewangle: fj 167772160, oracle 838860800; dstate[door 0: fj 0, oracle 1] (+2 more)
+    210  t              0   !! 15725 px differ  !! STATE: viewx: fj -27262976, oracle 53513776; viewy: fj 16777216, oracle 39963312; viewangle: fj 209715200, oracle 880803840; dsub[door 0: fj 0, oracle 1]
+    211  f              0   !! 15657 px differ  !! STATE: viewx: fj -26263360, oracle 53805824; viewy: fj 17093888, oracle 40970400; viewangle: fj 209715200, oracle 880803840; dsub[door 0: fj 0, oracle 1]
+    212  t              0   !! 15667 px differ  !! STATE: viewx: fj -26263360, oracle 53805824; viewy: fj 17093888, oracle 40970400; viewangle: fj 167772160, oracle 838860800; dsub[door 0: fj 0, oracle 1]
+    213  t              0   !! 15514 px differ  !! STATE: viewx: fj -26263360, oracle 53805824; viewy: fj 17093888, oracle 40970400; viewangle: fj 125829120, oracle 796917760; dsub[door 0: fj 0, oracle 1]
+    214  t              0   !! 15366 px differ  !! STATE: viewx: fj -26263360, oracle 53805824; viewy: fj 17093888, oracle 40970400; viewangle: fj 83886080, oracle 754974720; dsub[door 0: fj 0, oracle 1]
+    215  f              0   !! 15349 px differ  !! STATE: viewx: fj -25222672, oracle 54277280; viewy: fj 17222240, oracle 41907008; viewangle: fj 83886080, oracle 754974720; dsub[door 0: fj 0, oracle 1]
+    216  t              0   !! 15168 px differ  !! STATE: viewx: fj -25222672, oracle 54277280; viewy: fj 17222240, oracle 41907008; viewangle: fj 41943040, oracle 713031680; dsub[door 0: fj 0, oracle 1]
+    217  f              0   !! 15221 px differ  !! STATE: viewx: fj -24176064, oracle 54805280; viewy: fj 17286544, oracle 42812944; viewangle: fj 41943040, oracle 713031680; dsub[door 0: fj 0, oracle 1]
+    218  t              0   !! 15135 px differ  !! STATE: viewx: fj -24176064, oracle 54805280; viewy: fj 17286544, oracle 42812944; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    219  f              0   !! 15226 px differ  !! STATE: viewx: fj -23127488, oracle 55387840; viewy: fj 17286544, oracle 43684800; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    220  f              0   !! 15340 px differ  !! STATE: viewx: fj -22078912, oracle 55970400; viewy: fj 17286544, oracle 44556656; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    221  f              0   !! 15351 px differ  !! STATE: viewx: fj -21030336, oracle 56552960; viewy: fj 17286544, oracle 45428512; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    222  f              0   !! 15352 px differ  !! STATE: viewx: fj -19981760, oracle 57135520; viewy: fj 17286544, oracle 46300368; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    223  f              0   !! 15293 px differ  !! STATE: viewx: fj -18933184, oracle 57718080; viewy: fj 17286544, oracle 47172224; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    224  f              0   !! 15235 px differ  !! STATE: viewx: fj -17884608, oracle 58300640; viewy: fj 17286544, oracle 48044080; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    225  f              0   !! 15590 px differ  !! STATE: viewx: fj -16836032, oracle 58883200; viewy: fj 17286544, oracle 48915936; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    226  f              0   !! 15804 px differ  !! STATE: viewx: fj -15787456, oracle 59465760; viewy: fj 17286544, oracle 49787792; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    227  f              0   !! 15824 px differ  !! STATE: viewx: fj -14738880, oracle 60048320; viewy: fj 17286544, oracle 50659648; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    228  f              0   !! 15827 px differ  !! STATE: viewx: fj -13690304, oracle 60630880; viewy: fj 17286544, oracle 51531504; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    229  f              0   !! 15854 px differ  !! STATE: viewx: fj -12641728, oracle 61213440; viewy: fj 17286544, oracle 52403360; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    230  f              0   !! 15701 px differ  !! STATE: viewx: fj -11593152, oracle 61796000; viewy: fj 17286544, oracle 53275216; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    231  f              0   !! 15642 px differ  !! STATE: viewx: fj -10544576, oracle 62378560; viewy: fj 17286544, oracle 54147072; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    232  f              0   !! 15663 px differ  !! STATE: viewx: fj -9496000, oracle 62961120; viewy: fj 17286544, oracle 55018928; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    233  f              0   !! 15708 px differ  !! STATE: viewx: fj -8447424, oracle 63543680; viewy: fj 17286544, oracle 55890784; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    234  f              0   !! 15868 px differ  !! STATE: viewx: fj -7398848, oracle 64126240; viewy: fj 17286544, oracle 56762640; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    235  f              0   !! 15823 px differ  !! STATE: viewx: fj -6350272, oracle 64708800; viewy: fj 17286544, oracle 57634496; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    236  f              0   !! 15747 px differ  !! STATE: viewx: fj -5301696, oracle 65291360; viewy: fj 17286544, oracle 58506352; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    237  f              0   !! 15663 px differ  !! STATE: viewx: fj -4253120, oracle 65873920; viewy: fj 17286544, oracle 59378208; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    238  f              0   !! 15765 px differ  !! STATE: viewx: fj -3204544, oracle 66456480; viewy: fj 17286544, oracle 60250064; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    239  f              0   !! 15812 px differ  !! STATE: viewx: fj -2155968, oracle 67039040; viewy: fj 17286544, oracle 61121920; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    240  f              0   !! 15519 px differ  !! STATE: viewx: fj -1107392, oracle 67621600; viewy: fj 17286544, oracle 61993776; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    241  f              0   !! 15650 px differ  !! STATE: viewx: fj -58816, oracle 68204160; viewy: fj 17286544, oracle 62865632; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    242  f              0   !! 15436 px differ  !! STATE: viewx: fj 989760, oracle 68786720; viewy: fj 17286544, oracle 63737488; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    243  f              0   !! 15462 px differ  !! STATE: viewx: fj 2038336, oracle 69369280; viewy: fj 17286544, oracle 64609344; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    244  f              0   !! 15679 px differ  !! STATE: viewx: fj 3086912, oracle 69951840; viewy: fj 17286544, oracle 65481200; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    245  f              0   !! 15662 px differ  !! STATE: viewx: fj 4135488, oracle 70534400; viewy: fj 17286544, oracle 66353056; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    246  f              0   !! 15588 px differ  !! STATE: viewx: fj 5184064, oracle 71116960; viewy: fj 17286544, oracle 67224912; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    247  f              0   !! 15208 px differ  !! STATE: viewx: fj 6232640, oracle 71699520; viewy: fj 17286544, oracle 68096768; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    248  f              0   !! 15229 px differ  !! STATE: viewx: fj 7281216, oracle 72282080; viewy: fj 17286544, oracle 68968624; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    249  f              0   !! 15543 px differ  !! STATE: viewx: fj 8329792, oracle 72864640; viewy: fj 17286544, oracle 69840480; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    250  f              0   !! 15632 px differ  !! STATE: viewx: fj 9378368, oracle 73447200; viewy: fj 17286544, oracle 70712336; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    251  f              0   !! 15619 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    252  t              0   !! 15621 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 41943040, oracle 713031680; dsub[door 0: fj 0, oracle 1]
+    253  t              0   !! 15559 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 83886080, oracle 754974720; dsub[door 0: fj 0, oracle 1]
+    254  t              0   !! 15450 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 125829120, oracle 796917760; dsub[door 0: fj 0, oracle 1]
+    255  t              0   !! 15399 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 167772160, oracle 838860800; dsub[door 0: fj 0, oracle 1]
+    256  t              0   !! 15452 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 209715200, oracle 880803840; dsub[door 0: fj 0, oracle 1]
+    257  t              0   !! 15270 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 251658240, oracle 922746880; dsub[door 0: fj 0, oracle 1]
+    258  t              0   !! 15234 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 293601280, oracle 964689920; dsub[door 0: fj 0, oracle 1]
+    259  t              0   !! 15164 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 335544320, oracle 1006632960; dsub[door 0: fj 0, oracle 1]
+    260  t              0   !! 15040 px differ  !! STATE: viewx: fj 10426944, oracle 74029760; viewy: fj 17286544, oracle 71584192; viewangle: fj 377487360, oracle 1048576000; dsub[door 0: fj 0, oracle 1]
+    261  f              0   !! 14994 px differ  !! STATE: viewx: fj 11319648, oracle 74068352; viewy: fj 17836624, oracle 72632064; viewangle: fj 377487360, oracle 1048576000; dsub[door 0: fj 0, oracle 1]
+    262  t              0   !! 14923 px differ  !! STATE: viewx: fj 11319648, oracle 74068352; viewy: fj 17836624, oracle 72632064; viewangle: fj 419430400, oracle 1090519040; dsub[door 0: fj 0, oracle 1]
+    263  t              0   !! 15006 px differ  !! STATE: viewx: fj 11319648, oracle 74068352; viewy: fj 17836624, oracle 72632064; viewangle: fj 461373440, oracle 1132462080; dsub[door 0: fj 0, oracle 1]
+    264  t              0   !! 14890 px differ  !! STATE: viewx: fj 11319648, oracle 74068352; viewy: fj 17836624, oracle 72632064; viewangle: fj 503316480, oracle 1174405120; dsub[door 0: fj 0, oracle 1]
+    265  f              0   !! 14872 px differ  !! STATE: viewx: fj 12096592, oracle 73914496; viewy: fj 18540800, oracle 73669296; viewangle: fj 503316480, oracle 1174405120; dsub[door 0: fj 0, oracle 1]
+    266  t              0   !! 14936 px differ  !! STATE: viewx: fj 12096592, oracle 73914496; viewy: fj 18540800, oracle 73669296; viewangle: fj 461373440, oracle 1132462080; dsub[door 0: fj 0, oracle 1]
+    267  f              0   !! 15613 px differ  !! STATE: viewx: fj 12915248, oracle 73824528; viewy: fj 19196016, oracle 74714000; viewangle: fj 461373440, oracle 1132462080; dsub[door 0: fj 0, oracle 1]
+    268  t              0   !! 15568 px differ  !! STATE: viewx: fj 12915248, oracle 73824528; viewy: fj 19196016, oracle 74714000; viewangle: fj 503316480, oracle 1174405120; dsub[door 0: fj 0, oracle 1]
+    269  t              0   !! 15612 px differ  !! STATE: viewx: fj 12915248, oracle 73824528; viewy: fj 19196016, oracle 74714000; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    270  f              0   !! 15608 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    271  t              0   !! 15548 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 503316480, oracle 1174405120; dsub[door 0: fj 0, oracle 1]
+    272  t              0   !! 15554 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 461373440, oracle 1132462080; dsub[door 0: fj 0, oracle 1]
+    273  t              0   !! 15542 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 419430400, oracle 1090519040; dsub[door 0: fj 0, oracle 1]
+    274  t              0   !! 15499 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 377487360, oracle 1048576000; dsub[door 0: fj 0, oracle 1]
+    275  t              0   !! 15453 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 335544320, oracle 1006632960; dsub[door 0: fj 0, oracle 1]
+    276  t              0   !! 15490 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 293601280, oracle 964689920; dsub[door 0: fj 0, oracle 1]
+    277  t              0   !! 15555 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 251658240, oracle 922746880; dsub[door 0: fj 0, oracle 1]
+    278  t              0   !! 15522 px differ  !! STATE: viewx: fj 13647552, oracle 73607360; viewy: fj 19946512, oracle 75739840; viewangle: fj 209715200, oracle 880803840; dsub[door 0: fj 0, oracle 1]
+    279  f              0   !! 15554 px differ  !! STATE: viewx: fj 14647168, oracle 73899408; viewy: fj 20263184, oracle 76746928; viewangle: fj 209715200, oracle 880803840; dsub[door 0: fj 0, oracle 1]
+    280  t              0   !! 15533 px differ  !! STATE: viewx: fj 14647168, oracle 73899408; viewy: fj 20263184, oracle 76746928; viewangle: fj 167772160, oracle 838860800; dsub[door 0: fj 0, oracle 1]
+    281  t              0   !! 15437 px differ  !! STATE: viewx: fj 14647168, oracle 73899408; viewy: fj 20263184, oracle 76746928; viewangle: fj 125829120, oracle 796917760; dsub[door 0: fj 0, oracle 1]
+    282  t              0   !! 15414 px differ  !! STATE: viewx: fj 14647168, oracle 73899408; viewy: fj 20263184, oracle 76746928; viewangle: fj 83886080, oracle 754974720; dsub[door 0: fj 0, oracle 1]
+    283  f              0   !! 15416 px differ  !! STATE: viewx: fj 15687856, oracle 74370864; viewy: fj 20391536, oracle 77683536; viewangle: fj 83886080, oracle 754974720; dsub[door 0: fj 0, oracle 1]
+    284  t              0   !! 15406 px differ  !! STATE: viewx: fj 15687856, oracle 74370864; viewy: fj 20391536, oracle 77683536; viewangle: fj 41943040, oracle 713031680; dsub[door 0: fj 0, oracle 1]
+    285  f              0   !! 15443 px differ  !! STATE: viewx: fj 16734464, oracle 74898864; viewy: fj 20455840, oracle 78589472; viewangle: fj 41943040, oracle 713031680; dsub[door 0: fj 0, oracle 1]
+    286  t              0   !! 15356 px differ  !! STATE: viewx: fj 16734464, oracle 74898864; viewy: fj 20455840, oracle 78589472; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    287  f              0   !! 15303 px differ  !! STATE: viewx: fj 17783040, oracle 75481424; viewy: fj 20455840, oracle 79461328; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    288  f              0   !! 15356 px differ  !! STATE: viewx: fj 18831616, oracle 76063984; viewy: fj 20455840, oracle 80333184; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    289  f              0   !! 15361 px differ  !! STATE: viewx: fj 19880192, oracle 76646544; viewy: fj 20455840, oracle 81205040; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    290  f              0   !! 15376 px differ  !! STATE: viewx: fj 20928768, oracle 77229104; viewy: fj 20455840, oracle 82076896; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    291  f              0   !! 15475 px differ  !! STATE: viewx: fj 21977344, oracle 77811664; viewy: fj 20455840, oracle 82948752; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    292  f              0   !! 15392 px differ  !! STATE: viewx: fj 23025920, oracle 78394224; viewy: fj 20455840, oracle 83820608; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    293  f              0   !! 15136 px differ  !! STATE: viewx: fj 24074496, oracle 78976784; viewy: fj 20455840, oracle 84692464; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    294  f              0   !! 15176 px differ  !! STATE: viewx: fj 25123072, oracle 79559344; viewy: fj 20455840, oracle 85564320; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    295  f              0   !! 14963 px differ  !! STATE: viewx: fj 26171648, oracle 80141904; viewy: fj 20455840, oracle 86436176; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    296  f              0   !! 15075 px differ  !! STATE: viewx: fj 27220224, oracle 80724464; viewy: fj 20455840, oracle 87308032; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    297  f              0   !! 15124 px differ  !! STATE: viewx: fj 28268800, oracle 81307024; viewy: fj 20455840, oracle 88179888; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    298  f              0   !! 14934 px differ  !! STATE: viewx: fj 29317376, oracle 81889584; viewy: fj 20455840, oracle 89051744; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    299  f              0   !! 14790 px differ  !! STATE: viewx: fj 30365952, oracle 82472144; viewy: fj 20455840, oracle 89923600; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    300  f              0   !! 14747 px differ  !! STATE: viewx: fj 31414528, oracle 83054704; viewy: fj 20455840, oracle 90795456; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    301  f              0   !! 15354 px differ  !! STATE: viewx: fj 32463104, oracle 83637264; viewy: fj 20455840, oracle 91667312; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    302  f              0   !! 15477 px differ  !! STATE: viewx: fj 33511680, oracle 84219824; viewy: fj 20455840, oracle 91667312; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    303  f              0   !! 15600 px differ  !! STATE: viewx: fj 34560256, oracle 84802384; viewy: fj 20455840, oracle 91667312; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    304  f              0   !! 15778 px differ  !! STATE: viewx: fj 35608832, oracle 85384944; viewy: fj 20455840, oracle 92539168; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    305  f              0   !! 15844 px differ  !! STATE: viewx: fj 36657408, oracle 85967504; viewy: fj 20455840, oracle 93411024; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    306  f              0   !! 15565 px differ  !! STATE: viewx: fj 37705984, oracle 86550064; viewy: fj 20455840, oracle 94282880; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    307  f              0   !! 15565 px differ  !! STATE: viewx: fj 38754560, oracle 87132624; viewy: fj 20455840, oracle 95154736; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    308  f              0   !! 15354 px differ  !! STATE: viewx: fj 39803136, oracle 87715184; viewy: fj 20455840, oracle 96026592; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    309  f              0   !! 15025 px differ  !! STATE: viewx: fj 40851712, oracle 88297744; viewy: fj 20455840, oracle 96898448; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    310  f              0   !! 15577 px differ  !! STATE: viewx: fj 41900288, oracle 88880304; viewy: fj 20455840, oracle 97770304; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    311  f              0   !! 15701 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 0, oracle 671088640; dsub[door 0: fj 0, oracle 1]
+    312  t              0   !! 15717 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 41943040, oracle 713031680; dsub[door 0: fj 0, oracle 1]
+    313  t              0   !! 15752 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 83886080, oracle 754974720; dsub[door 0: fj 0, oracle 1]
+    314  t              0   !! 15780 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 125829120, oracle 796917760; dsub[door 0: fj 0, oracle 1]
+    315  t              0   !! 15635 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 167772160, oracle 838860800; dsub[door 0: fj 0, oracle 1]
+    316  t              0   !! 15727 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 209715200, oracle 880803840; dsub[door 0: fj 0, oracle 1]
+    317  t              0   !! 15634 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 251658240, oracle 922746880; dsub[door 0: fj 0, oracle 1]
+    318  t              0   !! 15729 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 293601280, oracle 964689920; dsub[door 0: fj 0, oracle 1]
+    319  t              0   !! 15540 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 335544320, oracle 1006632960; dsub[door 0: fj 0, oracle 1]
+    320  t              0   !! 15587 px differ  !! STATE: viewx: fj 42948864, oracle 89462864; viewy: fj 20455840, oracle 98642160; viewangle: fj 377487360, oracle 1048576000; dsub[door 0: fj 0, oracle 1]
+    321  f              0   !! 15621 px differ  !! STATE: viewx: fj 43841568, oracle 89501456; viewy: fj 21005920, oracle 99690032; viewangle: fj 377487360, oracle 1048576000; dsub[door 0: fj 0, oracle 1]
+    322  t              0   !! 15636 px differ  !! STATE: viewx: fj 43841568, oracle 89501456; viewy: fj 21005920, oracle 99690032; viewangle: fj 419430400, oracle 1090519040; dsub[door 0: fj 0, oracle 1]
+    323  t              0   !! 15797 px differ  !! STATE: viewx: fj 43841568, oracle 89501456; viewy: fj 21005920, oracle 99690032; viewangle: fj 461373440, oracle 1132462080; dsub[door 0: fj 0, oracle 1]
+    324  t              0   !! 15442 px differ  !! STATE: viewx: fj 43841568, oracle 89501456; viewy: fj 21005920, oracle 99690032; viewangle: fj 503316480, oracle 1174405120; dsub[door 0: fj 0, oracle 1]
+    325  f              0   !! 15484 px differ  !! STATE: viewx: fj 44618512, oracle 89347600; viewy: fj 21710096, oracle 100727264; viewangle: fj 503316480, oracle 1174405120; dsub[door 0: fj 0, oracle 1]
+    326  t              0   !! 15901 px differ  !! STATE: viewx: fj 44618512, oracle 89347600; viewy: fj 21710096, oracle 100727264; viewangle: fj 461373440, oracle 1132462080; dsub[door 0: fj 0, oracle 1]
+    327  f              0   !! 15703 px differ  !! STATE: viewx: fj 45437168, oracle 89257632; viewy: fj 22365312, oracle 101771968; viewangle: fj 461373440, oracle 1132462080; dsub[door 0: fj 0, oracle 1]
+    328  t              0   !! 15541 px differ  !! STATE: viewx: fj 45437168, oracle 89257632; viewy: fj 22365312, oracle 101771968; viewangle: fj 503316480, oracle 1174405120; dsub[door 0: fj 0, oracle 1]
+    329  t              0   !! 15255 px differ  !! STATE: viewx: fj 45437168, oracle 89257632; viewy: fj 22365312, oracle 101771968; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    330  f              0   !! 15469 px differ  !! STATE: viewx: fj 46169472, oracle 89040464; viewy: fj 22365312, oracle 101771968; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    331  t              0   !! 15524 px differ  !! STATE: viewx: fj 46169472, oracle 89040464; viewy: fj 22365312, oracle 101771968; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    332  t              0   !! 15584 px differ  !! STATE: viewx: fj 46169472, oracle 89040464; viewy: fj 22365312, oracle 101771968; viewangle: fj 629145600, oracle 1300234240; dsub[door 0: fj 0, oracle 1]
+    333  t              0   !! 15441 px differ  !! STATE: viewx: fj 46169472, oracle 89040464; viewy: fj 22365312, oracle 101771968; viewangle: fj 671088640, oracle 1342177280; dsub[door 0: fj 0, oracle 1]
+    334  t              0   !! 15391 px differ  !! STATE: viewx: fj 46169472, oracle 89040464; viewy: fj 22365312, oracle 101771968; viewangle: fj 713031680, oracle 1384120320; dsub[door 0: fj 0, oracle 1]
+    335  t              0   !! 15464 px differ  !! STATE: viewx: fj 46169472, oracle 89040464; viewy: fj 22365312, oracle 101771968; viewangle: fj 754974720, oracle 1426063360; dsub[door 0: fj 0, oracle 1]
+    336  t              0   !! 15365 px differ  !! STATE: viewx: fj 46169472, oracle 89040464; viewy: fj 22365312, oracle 101771968; viewangle: fj 796917760, oracle 1468006400; dsub[door 0: fj 0, oracle 1]
+    337  f              0   !! 15322 px differ  !! STATE: viewx: fj 46582608, oracle 88468656; viewy: fj 23329072, oracle 102650912; viewangle: fj 796917760, oracle 1468006400; dsub[door 0: fj 0, oracle 1]
+    338  t              0   !! 15455 px differ  !! STATE: viewx: fj 46582608, oracle 88468656; viewy: fj 23329072, oracle 102650912; viewangle: fj 754974720, oracle 1426063360; dsub[door 0: fj 0, oracle 1]
+    339  t              0   !! 15404 px differ  !! STATE: viewx: fj 46582608, oracle 88468656; viewy: fj 23329072, oracle 102650912; viewangle: fj 713031680, oracle 1384120320; dsub[door 0: fj 0, oracle 1]
+    340  t              0   !! 15610 px differ  !! STATE: viewx: fj 46582608, oracle 88468656; viewy: fj 23329072, oracle 102650912; viewangle: fj 671088640, oracle 1342177280; dsub[door 0: fj 0, oracle 1]
+    341  t              0   !! 15430 px differ  !! STATE: viewx: fj 46582608, oracle 88468656; viewy: fj 23329072, oracle 102650912; viewangle: fj 629145600, oracle 1300234240; dsub[door 0: fj 0, oracle 1]
+    342  t              0   !! 15479 px differ  !! STATE: viewx: fj 46582608, oracle 88468656; viewy: fj 23329072, oracle 102650912; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    343  f              0   !! 15652 px differ  !! STATE: viewx: fj 47267504, oracle 88188992; viewy: fj 24123056, oracle 102650912; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    344  t              0   !! 15712 px differ  !! STATE: viewx: fj 47267504, oracle 88188992; viewy: fj 24123056, oracle 102650912; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    345  f              0   !! 15794 px differ  !! STATE: viewx: fj 47999808, oracle 87971824; viewy: fj 24873552, oracle 102650912; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    346  f              0   !! 15766 px differ  !! STATE: viewx: fj 48732112, oracle 87754656; viewy: fj 25624048, oracle 102650912; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    347  f              0   !! 15523 px differ  !! STATE: viewx: fj 49464416, oracle 87537488; viewy: fj 26374544, oracle 102650912; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    348  f              0   !! 15669 px differ  !! STATE: viewx: fj 50196720, oracle 87320320; viewy: fj 27125040, oracle 102650912; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    349  f              0   !! 15793 px differ  !! STATE: viewx: fj 50929024, oracle 87103152; viewy: fj 27125040, oracle 102650912; viewangle: fj 545259520, oracle 1216348160; dsub[door 0: fj 0, oracle 1]
+    350  t              0   !! 15699 px differ  !! STATE: viewx: fj 50929024, oracle 87103152; viewy: fj 27125040, oracle 102650912; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    351  t              0   !! 15808 px differ  !! STATE: viewx: fj 50929024, oracle 87103152; viewy: fj 27125040, oracle 102650912; viewangle: fj 629145600, oracle 1300234240; dsub[door 0: fj 0, oracle 1]
+    352  t              0   !! 15742 px differ  !! STATE: viewx: fj 50929024, oracle 87103152; viewy: fj 27125040, oracle 102650912; viewangle: fj 671088640, oracle 1342177280; dsub[door 0: fj 0, oracle 1]
+    353  t              0   !! 15697 px differ  !! STATE: viewx: fj 50929024, oracle 87103152; viewy: fj 27125040, oracle 102650912; viewangle: fj 713031680, oracle 1384120320; dsub[door 0: fj 0, oracle 1]
+    354  f              0   !! 15890 px differ  !! STATE: viewx: fj 51457024, oracle 86643232; viewy: fj 28030976, oracle 103593248; viewangle: fj 713031680, oracle 1384120320; dsub[door 0: fj 0, oracle 1]
+    355  t              0   !! 15922 px differ  !! STATE: viewx: fj 51457024, oracle 86643232; viewy: fj 28030976, oracle 103593248; viewangle: fj 671088640, oracle 1342177280; dsub[door 0: fj 0, oracle 1]
+    356  t              0   !! 15773 px differ  !! STATE: viewx: fj 51457024, oracle 86643232; viewy: fj 28030976, oracle 103593248; viewangle: fj 629145600, oracle 1300234240; dsub[door 0: fj 0, oracle 1]
+    357  f              0   !! 15863 px differ  !! STATE: viewx: fj 52091952, oracle 86302112; viewy: fj 28865472, oracle 103593248; viewangle: fj 629145600, oracle 1300234240; dsub[door 0: fj 0, oracle 1]
+    358  t              0   !! 15832 px differ  !! STATE: viewx: fj 52091952, oracle 86302112; viewy: fj 28865472, oracle 103593248; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    359  f              0   !! 15827 px differ  !! STATE: viewx: fj 52776848, oracle 86022448; viewy: fj 29659456, oracle 103593248; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    360  -              0   !! 15827 px differ  !! STATE: viewx: fj 52776848, oracle 86022448; viewy: fj 29659456, oracle 103593248; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    361  -              0   !! 15827 px differ  !! STATE: viewx: fj 52776848, oracle 86022448; viewy: fj 29659456, oracle 103593248; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    362  -              0   !! 15827 px differ  !! STATE: viewx: fj 52776848, oracle 86022448; viewy: fj 29659456, oracle 103593248; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    363  -              0   !! 15827 px differ  !! STATE: viewx: fj 52776848, oracle 86022448; viewy: fj 29659456, oracle 103593248; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    364  -              0   !! 15827 px differ  !! STATE: viewx: fj 52776848, oracle 86022448; viewy: fj 29659456, oracle 103593248; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+    365  -              0   !! 15827 px differ  !! STATE: viewx: fj 52776848, oracle 86022448; viewy: fj 29659456, oracle 103593248; viewangle: fj 587202560, oracle 1258291200; dsub[door 0: fj 0, oracle 1]
+
+  CONTROL 1: door 10 reached 9 distinct states [0, 1, 2, 3, 4, 5, 6, 7, 8] -- carried across the reset
+  CONTROL 2: use was pressed INSIDE the box: yes
+  CONTROL 3: the menu frames of each screen are identical to each other (2 screens): yes
+  CONTROL 4: the player's path crosses door 10's own line SEGMENT ((896, 544)-(768, 544) / (768, 512)-(896, 512)): yes -- and every frame is byte-exact, so fj walked the same path, which its blocking bit had to clear to allow
+  CONTROL 6: NEW GAME found door 10 open (yes), the 154-frame replay retraced the first walk (!! no -- 154 of 154 replay frames reached), and its last frame can tell the shut door from that one (!! no)
+  CONTROL 7: every frame's STATE (view, mode, menu_scr, menu_sel, and every door's state, direction, sub-step and timer) equals the oracle's: !! no -- frame 365
+
+SELFTEST-RESTART (the oracle never restarts the level): PASS -- the gate rejected it
+rc=0
+$ python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_blocked32.fjm --labels scratchpad/12m/atlas/blocked32.labels.tsv.gz --selftest-restart-doors
+  CONTROL 5: binary and oracle agree on door geometry (quant 16, 13 doors)
+  CONTROL 0: the planned route crosses no solid linedef: yes (154 frames re-simulated)
+fjm    : build/doom_e1m1_blocked32.fjm
+target : door sector 10, use box (704, 448, 960, 608), threshold state 4
+script : 2 menu -> esc -> 154 walk to the door -> 2 use -> 10 open -> 36 through -> enter, enter, enter (NEW GAME at the boot skill) -> the 154-frame walk again -> 6 idle  (366 frames)
+doorway: line 55 ((896, 544), (768, 544)) -> approach (832, 488), then through to (832, 632)
+running: 5,587,756,180 ops -> 366 frames presented
+
+  frame  keys      door10    fj px vs oracle
+      0  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      1  -              -   (menu frame, the main menu -- m3_gate judges these)  state ok
+      2  t              0   BYTE-EXACT  state ok
+      3  t              0   BYTE-EXACT  state ok
+      4  t              0   BYTE-EXACT  state ok
+      5  t              0   BYTE-EXACT  state ok
+      6  t              0   BYTE-EXACT  state ok
+      7  f              0   BYTE-EXACT  state ok
+      8  t              0   BYTE-EXACT  state ok
+      9  t              0   BYTE-EXACT  state ok
+     10  t              0   BYTE-EXACT  state ok
+     11  f              0   BYTE-EXACT  state ok
+     12  t              0   BYTE-EXACT  state ok
+     13  f              0   BYTE-EXACT  state ok
+     14  t              0   BYTE-EXACT  state ok
+     15  f              0   BYTE-EXACT  state ok
+     16  f              0   BYTE-EXACT  state ok
+     17  f              0   BYTE-EXACT  state ok
+     18  f              0   BYTE-EXACT  state ok
+     19  f              0   BYTE-EXACT  state ok
+     20  f              0   BYTE-EXACT  state ok
+     21  f              0   BYTE-EXACT  state ok
+     22  f              0   BYTE-EXACT  state ok
+     23  f              0   BYTE-EXACT  state ok
+     24  f              0   BYTE-EXACT  state ok
+     25  f              0   BYTE-EXACT  state ok
+     26  f              0   BYTE-EXACT  state ok
+     27  f              0   BYTE-EXACT  state ok
+     28  f              0   BYTE-EXACT  state ok
+     29  f              0   BYTE-EXACT  state ok
+     30  f              0   BYTE-EXACT  state ok
+     31  f              0   BYTE-EXACT  state ok
+     32  f              0   BYTE-EXACT  state ok
+     33  f              0   BYTE-EXACT  state ok
+     34  f              0   BYTE-EXACT  state ok
+     35  f              0   BYTE-EXACT  state ok
+     36  f              0   BYTE-EXACT  state ok
+     37  f              0   BYTE-EXACT  state ok
+     38  f              0   BYTE-EXACT  state ok
+     39  f              0   BYTE-EXACT  state ok
+     40  f              0   BYTE-EXACT  state ok
+     41  f              0   BYTE-EXACT  state ok
+     42  f              0   BYTE-EXACT  state ok
+     43  f              0   BYTE-EXACT  state ok
+     44  f              0   BYTE-EXACT  state ok
+     45  f              0   BYTE-EXACT  state ok
+     46  f              0   BYTE-EXACT  state ok
+     47  f              0   BYTE-EXACT  state ok
+     48  t              0   BYTE-EXACT  state ok
+     49  t              0   BYTE-EXACT  state ok
+     50  t              0   BYTE-EXACT  state ok
+     51  t              0   BYTE-EXACT  state ok
+     52  t              0   BYTE-EXACT  state ok
+     53  t              0   BYTE-EXACT  state ok
+     54  t              0   BYTE-EXACT  state ok
+     55  t              0   BYTE-EXACT  state ok
+     56  t              0   BYTE-EXACT  state ok
+     57  f              0   BYTE-EXACT  state ok
+     58  t              0   BYTE-EXACT  state ok
+     59  t              0   BYTE-EXACT  state ok
+     60  t              0   BYTE-EXACT  state ok
+     61  f              0   BYTE-EXACT  state ok
+     62  t              0   BYTE-EXACT  state ok
+     63  f              0   BYTE-EXACT  state ok
+     64  t              0   BYTE-EXACT  state ok
+     65  t              0   BYTE-EXACT  state ok
+     66  f              0   BYTE-EXACT  state ok
+     67  t              0   BYTE-EXACT  state ok
+     68  t              0   BYTE-EXACT  state ok
+     69  t              0   BYTE-EXACT  state ok
+     70  t              0   BYTE-EXACT  state ok
+     71  t              0   BYTE-EXACT  state ok
+     72  t              0   BYTE-EXACT  state ok
+     73  t              0   BYTE-EXACT  state ok
+     74  t              0   BYTE-EXACT  state ok
+     75  f              0   BYTE-EXACT  state ok
+     76  t              0   BYTE-EXACT  state ok
+     77  t              0   BYTE-EXACT  state ok
+     78  t              0   BYTE-EXACT  state ok
+     79  f              0   BYTE-EXACT  state ok
+     80  t              0   BYTE-EXACT  state ok
+     81  f              0   BYTE-EXACT  state ok
+     82  t              0   BYTE-EXACT  state ok
+     83  f              0   BYTE-EXACT  state ok
+     84  f              0   BYTE-EXACT  state ok
+     85  f              0   BYTE-EXACT  state ok
+     86  f              0   BYTE-EXACT  state ok
+     87  f              0   BYTE-EXACT  state ok
+     88  f              0   BYTE-EXACT  state ok
+     89  f              0   BYTE-EXACT  state ok
+     90  f              0   BYTE-EXACT  state ok
+     91  f              0   BYTE-EXACT  state ok
+     92  f              0   BYTE-EXACT  state ok
+     93  f              0   BYTE-EXACT  state ok
+     94  f              0   BYTE-EXACT  state ok
+     95  f              0   BYTE-EXACT  state ok
+     96  f              0   BYTE-EXACT  state ok
+     97  f              0   BYTE-EXACT  state ok
+     98  f              0   BYTE-EXACT  state ok
+     99  f              0   BYTE-EXACT  state ok
+    100  f              0   BYTE-EXACT  state ok
+    101  f              0   BYTE-EXACT  state ok
+    102  f              0   BYTE-EXACT  state ok
+    103  f              0   BYTE-EXACT  state ok
+    104  f              0   BYTE-EXACT  state ok
+    105  f              0   BYTE-EXACT  state ok
+    106  f              0   BYTE-EXACT  state ok
+    107  f              0   BYTE-EXACT  state ok
+    108  t              0   BYTE-EXACT  state ok
+    109  t              0   BYTE-EXACT  state ok
+    110  t              0   BYTE-EXACT  state ok
+    111  t              0   BYTE-EXACT  state ok
+    112  t              0   BYTE-EXACT  state ok
+    113  t              0   BYTE-EXACT  state ok
+    114  t              0   BYTE-EXACT  state ok
+    115  t              0   BYTE-EXACT  state ok
+    116  t              0   BYTE-EXACT  state ok
+    117  f              0   BYTE-EXACT  state ok
+    118  t              0   BYTE-EXACT  state ok
+    119  t              0   BYTE-EXACT  state ok
+    120  t              0   BYTE-EXACT  state ok
+    121  f              0   BYTE-EXACT  state ok
+    122  t              0   BYTE-EXACT  state ok
+    123  f              0   BYTE-EXACT  state ok
+    124  t              0   BYTE-EXACT  state ok
+    125  t              0   BYTE-EXACT  state ok
+    126  f              0   BYTE-EXACT  state ok
+    127  t              0   BYTE-EXACT  state ok
+    128  t              0   BYTE-EXACT  state ok
+    129  t              0   BYTE-EXACT  state ok
+    130  t              0   BYTE-EXACT  state ok
+    131  t              0   BYTE-EXACT  state ok
+    132  t              0   BYTE-EXACT  state ok
+    133  f              0   BYTE-EXACT  state ok
+    134  t              0   BYTE-EXACT  state ok
+    135  t              0   BYTE-EXACT  state ok
+    136  t              0   BYTE-EXACT  state ok
+    137  t              0   BYTE-EXACT  state ok
+    138  t              0   BYTE-EXACT  state ok
+    139  f              0   BYTE-EXACT  state ok
+    140  t              0   BYTE-EXACT  state ok
+    141  f              0   BYTE-EXACT  state ok
+    142  f              0   BYTE-EXACT  state ok
+    143  f              0   BYTE-EXACT  state ok
+    144  f              0   BYTE-EXACT  state ok
+    145  f              0   BYTE-EXACT  state ok
+    146  t              0   BYTE-EXACT  state ok
+    147  t              0   BYTE-EXACT  state ok
+    148  t              0   BYTE-EXACT  state ok
+    149  t              0   BYTE-EXACT  state ok
+    150  f              0   BYTE-EXACT  state ok
+    151  t              0   BYTE-EXACT  state ok
+    152  t              0   BYTE-EXACT  state ok
+    153  f              0   BYTE-EXACT  state ok
+    154  t              0   BYTE-EXACT  state ok
+    155  f              0   BYTE-EXACT  state ok
+    156  u              1   BYTE-EXACT  state ok
+    157  u              2   BYTE-EXACT  state ok
+    158  -              3   BYTE-EXACT  state ok
+    159  -              4   BYTE-EXACT  state ok
+    160  -              5   BYTE-EXACT  state ok
+    161  -              6   BYTE-EXACT  state ok
+    162  -              7   BYTE-EXACT  state ok
+    163  -              8   BYTE-EXACT  state ok
+    164  -              8   BYTE-EXACT  state ok
+    165  -              8   BYTE-EXACT  state ok
+    166  -              8   BYTE-EXACT  state ok
+    167  -              8   BYTE-EXACT  state ok
+    168  t              8   BYTE-EXACT  state ok
+    169  t              8   BYTE-EXACT  state ok
+    170  t              8   BYTE-EXACT  state ok
+    171  t              8   BYTE-EXACT  state ok
+    172  t              8   BYTE-EXACT  state ok
+    173  t              8   BYTE-EXACT  state ok
+    174  t              8   BYTE-EXACT  state ok
+    175  t              8   BYTE-EXACT  state ok
+    176  t              8   BYTE-EXACT  state ok
+    177  t              8   BYTE-EXACT  state ok
+    178  t              8   BYTE-EXACT  state ok
+    179  f              8   BYTE-EXACT  state ok
+    180  f              8   BYTE-EXACT  state ok
+    181  f              8   BYTE-EXACT  state ok
+    182  f              8   BYTE-EXACT  state ok
+    183  t              8   BYTE-EXACT  state ok
+    184  f              8   BYTE-EXACT  state ok
+    185  t              8   BYTE-EXACT  state ok
+    186  f              8   BYTE-EXACT  state ok
+    187  t              8   BYTE-EXACT  state ok
+    188  f              8   BYTE-EXACT  state ok
+    189  t              8   BYTE-EXACT  state ok
+    190  f              8   BYTE-EXACT  state ok
+    191  t              8   BYTE-EXACT  state ok
+    192  f              8   BYTE-EXACT  state ok
+    193  t              8   BYTE-EXACT  state ok
+    194  t              8   BYTE-EXACT  state ok
+    195  t              8   BYTE-EXACT  state ok
+    196  t              8   BYTE-EXACT  state ok
+    197  t              8   BYTE-EXACT  state ok
+    198  t              8   BYTE-EXACT  state ok
+    199  t              8   BYTE-EXACT  state ok
+    200  t              8   BYTE-EXACT  state ok
+    201  t              7   BYTE-EXACT  state ok
+    202  t              6   BYTE-EXACT  state ok
+    203  f              5   BYTE-EXACT  state ok
+    204  enter          -   (menu frame, the main menu -- m3_gate judges these)  state ok
+    205  enter          -   (menu frame, the skill screen -- m3_gate judges these)  state ok
+    206  t              4   BYTE-EXACT  !! STATE: dstate[door 0: fj 0, oracle 4]; ddir[door 0: fj 0, oracle 2]; dsub[door 0: fj 0, oracle 1]
+  -- stopping: the program's state parted from the oracle's
+
+  CONTROL 1: door 10 reached 9 distinct states [0, 1, 2, 3, 4, 5, 6, 7, 8] -- carried across the reset
+  CONTROL 2: use was pressed INSIDE the box: yes
+  CONTROL 3: the menu frames of each screen are identical to each other (2 screens): yes
+  CONTROL 4: the player's path crosses door 10's own line SEGMENT ((896, 544)-(768, 544) / (768, 512)-(896, 512)): yes -- and every frame is byte-exact, so fj walked the same path, which its blocking bit had to clear to allow
+  CONTROL 6: NEW GAME found door 10 open (yes), the 154-frame replay retraced the first walk (!! no -- 1 of 154 replay frames reached), and its last frame can tell the shut door from that one (!! no)
+  CONTROL 7: every frame's STATE (view, mode, menu_scr, menu_sel, and every door's state, direction, sub-step and timer) equals the oracle's: !! no -- frame 206
+  !! VACUOUS -- fix the SCRIPT, not the verdict
+
+SELFTEST-RESTART-DOORS (the oracle's NEW GAME keeps the doors): PASS -- the state check rejected the NEW GAME frame 206
+rc=0

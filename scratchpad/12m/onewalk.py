@@ -69,8 +69,9 @@ for q in (ROOT / "tests", ROOT / "src", ROOT / "scratchpad", ROOT / "scratchpad/
 import gamespeed as GS                                                      # noqa: E402
 import m2_std_gate as gate                                                  # noqa: E402
 from doomfj.doorcode import door_line_ids                                   # noqa: E402
-from doomfj.doors import (door_states, door_tic, in_use_box_fixed,          # noqa: E402
-                          initial_states, pass_state, use_boxes_xy)
+from doomfj.doors import (door_states, in_use_box_fixed, pass_state,        # noqa: E402
+                          use_boxes_xy)
+from doomfj.doors import DoorPhase                      # noqa: E402  (M7 P2a.1)
 from doomfj.mapcompiler import bake_bsp                                     # noqa: E402
 from doomfj.reference_model import ANGLE_TURN, _signed, build_scene         # noqa: E402
 from doomfj.wad import WadFile                                              # noqa: E402
@@ -281,11 +282,14 @@ class DoorSim:
         self.passes = {si: pass_state(self.secs, self.lds, self.sds, si) for si in self.order}
         self.nstates = {si: len(v) for si, v in tbl.items()}
         self.open_h = {si: (self.secs[si].floor_h, tbl[si][-1]) for si in self.order}
+        # M7 P2a.1: the door phase itself -- kinds, cards, strides, the walk-over triggers
+        self.dp = DoorPhase(self.secs, self.lds, self.sds, self.mw.vertexes(mapname), self.boxes)
         self._scenes = {}
         self.reset()
 
     def reset(self):
-        self.ds = dict(initial_states(self.secs, self.lds, self.sds))
+        self.dstate = self.dp.initial()
+        self.ds = self.dstate[0]
         # HIGH-WATER MARK PER DOOR, and it is not a nicety. A door opens in 8 frames and re-shuts
         # WAIT=37 frames after the player stops holding use, so the state at the END of a
         # 3,400-frame walk says almost nothing about whether the walk ever went through it. The
@@ -301,25 +305,27 @@ class DoorSim:
         return self._scenes[blocked]
 
     def in_any_box(self, st):
-        return any(in_use_box_fixed(self.boxes[si], st.x, st.y) for si in self.order)
+        return any(in_use_box_fixed(self.boxes[si], st.x, st.y) for si in self.order
+                   if si in self.boxes)
 
     def waiting_on_door(self, st):
         """Standing at a door that is not yet passable -- the one case where being stuck is the
         correct thing to be doing, and the reason `_steer_doors` needs its own patience rule."""
         return any(in_use_box_fixed(self.boxes[si], st.x, st.y)
-                   and self.ds[si][0] < self.passes[si] for si in self.order)
+                   and self.ds[si][0] < self.passes[si] for si in self.order if si in self.boxes)
 
     def step(self, st, kd):
-        self.ds = {si: door_tic(self.ds[si], self.nstates[si],
-                                bool(kd.get("use"))
-                                and in_use_box_fixed(self.boxes[si], st.x, st.y))
-                   for si in self.order}
+        self.dstate = self.dp.tic(self.dstate, bool(kd.get("use")), st.x, st.y)
+        self.ds = self.dstate[0]
         for si in self.order:
             if self.ds[si][0] > self.ever[si]:
                 self.ever[si] = self.ds[si][0]
         blocked = frozenset(li for si in self.order if self.ds[si][0] < self.passes[si]
                             for li in self.lines_of.get(si, ()))
-        return self.rm.step_sim(st, kd, scene=self._scene(blocked))
+        new = self.rm.step_sim(st, kd, scene=self._scene(blocked))
+        self.dstate = self.dp.after_move(self.dstate, (st.x, st.y), (new.x, new.y))
+        self.ds = self.dstate[0]
+        return new
 
     def doors_open(self):
         """Doors passable RIGHT NOW -- what the collision scene is built from."""

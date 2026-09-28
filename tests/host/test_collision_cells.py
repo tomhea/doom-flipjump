@@ -361,7 +361,8 @@ def test_a_door_lines_stub_reads_its_own_doors_state(lvl, emitted):
     other = [lab for lab, ops in lines.items() if int(lab.rsplit("_l", 1)[1]) not in lvl.doors
              and any("dstate" in o for o in ops)]
     assert not other, f"stubs that are not door lines read dstate: {other[:3]}"
-    assert len(lvl.doors) == 25 and len({s for ((s, _p),) in lvl.doors.values()}) == 13
+    # 15 doors (M7 P2a.1: the walk-over doors' lines are gated too): 29 lines
+    assert len(lvl.doors) == 29 and len({s for ((s, _p),) in lvl.doors.values()}) == 15
 
 
 def test_a_line_on_two_doors_refuses_while_either_is_shut(lvl):

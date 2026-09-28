@@ -62,7 +62,8 @@ STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
 # ordinary residue and the reset should clear them.
 # ⚠ Conditional, because `emit_reset_part` refuses a persist name the build has no label for -- and
 # rightly: naming cells a doors=False program never declares is a typo, not a no-op.
-DOOR_PERSIST = ("dstate", "ddir", "dsub", "dwait")
+DOOR_PERSIST = ("dstate", "ddir", "dsub", "dwait",
+                "dreq", "pcard", "wfired")   # M7 P2a.1: a pending press, the blue card, W1 bits
 # M7 P1.3: ...and the runtime things' own world state, when they can move (`moving_things`): the
 # per-leaf lists' heads (`sshead`), each thing's leaf (`thss_rt`) and position (`thpos_rt`). They
 # are baked to the spawn and change only when a thing MOVES -- P3's per-move relink -- so a reset

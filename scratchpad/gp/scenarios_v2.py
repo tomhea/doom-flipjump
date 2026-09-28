@@ -87,7 +87,7 @@ for _q in (ROOT / "src", ROOT / "tests", ROOT / "scratchpad", ROOT / "scratchpad
 from doomfj import gamedata as gd                                           # noqa: E402
 from doomfj import world as W                                               # noqa: E402
 from doomfj.combat import FIREBALL_R, SECTOR_HURT, STRAFE_MOVE              # noqa: E402
-from doomfj.doors import OPENING, door_tic, in_use_box_fixed                # noqa: E402
+from doomfj.doors import OPENING, DoorPhase, in_use_box_fixed              # noqa: E402
 from doomfj.fixedpoint import _signed, fixed_mul                            # noqa: E402
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE, Scene, SimState  # noqa: E402
 
@@ -705,14 +705,18 @@ def make_setup(cp: dict) -> dict:
 # the binary's mirror (B0): blocked27's door and player tic, and the pose b0 injects
 # ================================================================================================
 class BinaryMirror:
-    """blocked27's tic as the oracle computes it (onewalk.DoorSim's order): every door ticks with
-    `use` pressed in its box (NO key check: blocked27 opens key doors without a card), then the
-    player steps with `step_sim` (turn, forward/back; NO strafe, NO things) against open doors plus
-    the not-yet-passable doors' lines. Fed the pose b0 injects every frame."""
+    """the binary's tic as the oracle computes it (onewalk.DoorSim's order): the doors' phase
+    (M7 P2a.1: `doomfj.doors.DoorPhase` -- each door's kind, the blue card, strides, and the
+    walk-over triggers after the move; blocked27 itself had no key check and no walk-over doors),
+    then the player steps with `step_sim` (turn, forward/back; NO strafe, NO things) against open
+    doors plus the not-yet-passable doors' lines. Fed the pose b0 injects every frame."""
 
     def __init__(self, w):
         self.w = w
-        self.ds = [(0, W.IDLE, 0, 0) for _ in w.door_order]
+        self.dp = DoorPhase(w.secs, w.lds, w.sds, w.mw.vertexes(w.mapname), w.door_boxes)
+        assert self.dp.order == list(w.door_order)
+        self.state = self.dp.initial()
+        self.ds = [self.state[0][si] for si in w.door_order]
         self._scenes = {}
 
     def step(self, pre, kd, doors=None):
@@ -720,17 +724,17 @@ class BinaryMirror:
         model's pre-tic doors); None keeps the mirror's own"""
         w = self.w
         if doors is not None:
-            self.ds = [tuple(t) for t in doors]
-        used = bool(kd.get("use"))
-        self.ds = [door_tic(self.ds[d], w.door_nstates[si],
-                            used and in_use_box_fixed(w.door_boxes[si], pre[0], pre[1]))
-                   for d, si in enumerate(w.door_order)]
+            self.state = ({si: tuple(doors[d]) for d, si in enumerate(w.door_order)},
+                          self.state[1], self.state[2])
+        self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1], has_blue=False)
+        self.ds = [self.state[0][si] for si in w.door_order]
         blocked = frozenset(li for d, si in enumerate(w.door_order)
                             if self.ds[d][0] < w.door_pass[si] for li in w.door_lines.get(si, ()))
         if blocked not in self._scenes:
             self._scenes[blocked] = Scene(w.mw, w.mw, w.mapname, w.cmap, w.open_h, blocked)
         st = w.rm.step_sim(SimState(pre[0], pre[1], pre[2], w.mapname), b0_keys(kd),
                            scene=self._scenes[blocked])
+        self.state = self.dp.after_move(self.state, (pre[0], pre[1]), (st.x, st.y))
         return (st.x, st.y, st.angle), tuple(s[0] for s in self.ds)
 
 
@@ -782,7 +786,7 @@ class Autopilot:
         self.last_xy = None
         self.forbidden_boxes = [w.door_boxes[si] for si in w.door_cards] + list(w.exit_boxes)
         self.open_boxes = [(d, si, w.door_boxes[si]) for d, si in enumerate(w.door_order)
-                           if si not in w.door_cards]
+                           if si not in w.door_cards and si in w.door_boxes]   # P2a.1: no walk-over
         self.s_dir, self.s_left = 1, 0     # the fight strafe: side (+1 right) and tics left on it
         self.opened = set()                # doors this run pressed open (no longer door goals)
         self.dodges = 0
@@ -1240,7 +1244,7 @@ def replay(run: dict, census: bool = False) -> dict:
                 n["dodges"] += 1
         pre_doors = door_tuples(w)
         pressed = [bool(kd.get("use")) and w.player_alive() and w.player_can_open(si)
-                   and in_use_box_fixed(w.door_boxes[si], ws.px, ws.py)
+                   and si in w.door_boxes and in_use_box_fixed(w.door_boxes[si], ws.px, ws.py)
                    for si in w.door_order]
         monreq = list(ws.d_monreq)
         ev = w.tic(kd)

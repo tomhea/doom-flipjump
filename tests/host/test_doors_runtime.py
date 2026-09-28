@@ -31,7 +31,7 @@ def test_state_zero_is_shut_and_the_last_is_open(m):
     must be fully open (so `pass_state` and the tic machine have a real terminal)."""
     secs, lds, sds, _v = m
     tbl = door_states(secs, lds, sds)
-    assert len(tbl) == 13
+    assert len(tbl) == 15                                # 13 DR doors + 2 walk-over (M7 P2a.1)
     for si, st in tbl.items():
         assert st[0] == secs[si].floor_h
         assert st == sorted(st) and len(set(st)) == len(st)
@@ -80,7 +80,8 @@ def test_pass_state_is_the_first_state_you_fit_through(m):
 def test_every_door_has_a_use_box_containing_its_own_lines(m):
     secs, lds, sds, verts = m
     boxes = use_boxes_xy(secs, lds, sds, verts)
-    assert set(boxes) == set(door_states(secs, lds, sds))
+    # every door but the walk-over ones (M7 P2a.1: no use line, a crossing opens them)
+    assert set(boxes) == set(door_states(secs, lds, sds)) - {77, 145}
     for si, (x0, y0, x1, y1) in boxes.items():
         assert x0 < x1 and y0 < y1
 

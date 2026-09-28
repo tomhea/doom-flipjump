@@ -21,7 +21,7 @@ def test_the_schema_is_well_formed(world):
     assert len(names) == len(set(names))
     for f in world.schema:
         assert f.bits > 0 and f.count > 0 and f.nibbles == (f.bits + 3) // 4
-        assert f.kind in ("persist", "derived") and f.phase in ("existing", "S3a", "S3b", "P3")
+        assert f.kind in ("persist", "derived") and f.phase in ("existing", "S3a", "S3b", "P2a.1", "P3")
     derived = {f.name for f in world.schema if f.kind == "derived"}
     assert derived == {"mon_leaf", "leaf_head", "mob_next", "proj_leaf", "fx_leaf"}
     by = {f.name: f for f in world.schema}
@@ -305,7 +305,8 @@ def test_sight_from_the_spawn_is_what_it_was():
 
 # ---- monsters and doors --------------------------------------------------------------------------
 def test_monsters_may_open_only_plain_doors(world):
-    assert set(world.mon_door_boxes) == set(world.door_order) - {51, 71, 84}   # blue-key, blazing
+    # blue-key, blazing, and (M7 P2a.1) the walk-over doors: a monster opens only special 1 doors
+    assert set(world.mon_door_boxes) == set(world.door_order) - {51, 71, 84, 77, 145}
 
 
 def test_a_monster_bumping_a_shut_door_opens_it():

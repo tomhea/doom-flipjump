@@ -23,7 +23,7 @@ defensible door.
 """
 from __future__ import annotations
 
-from doomfj.doors import CLOSING, OPENING, SPEED, WAIT
+from doomfj.doors import CLOSING, OPENING, SPEED, WAIT, door_stay, door_stride
 
 # `dwait` counts frames and needs to hold WAIT; two nibbles is 0..255.
 WAIT_NIBBLES = 2
@@ -31,7 +31,7 @@ assert 0 < WAIT < (1 << (4 * WAIT_NIBBLES)), f"WAIT={WAIT} does not fit {WAIT_NI
 assert 0 < SPEED < 16, f"SPEED={SPEED} does not fit the one-nibble `dsub`"
 
 
-def door_decls(ndoors: int) -> list:
+def door_decls(ndoors: int, nwalk: int = 0) -> list:
     """The per-door runtime state. `dstate` is R3's -- the renderer's switches dispatch on it --
     and the three below drive it.
 
@@ -46,6 +46,11 @@ def door_decls(ndoors: int) -> list:
         f"dwait: hex.vec {WAIT_NIBBLES * ndoors}, 0",    # frames left fully open
         "duse: hex.vec 1, 0",                            # the use key, this frame
         "dbox: hex.vec 8, 0",                            # the trigger box compare's constant
+        # M7 P2a.1 -- persisted like the doors: a press requested for the next door tic (a walk-over
+        # crossing), the blue card, and each walk-over trigger's W1 bit
+        f"dreq: hex.vec {ndoors}, 0",
+        "pcard: hex.vec 1, 0",
+        f"wfired: hex.vec {max(nwalk, 1)}, 0",
     ]
 
 
@@ -69,9 +74,15 @@ def _box_test(d: int, box, hit: str, miss: str) -> list:
     return out
 
 
-def door_tic_lines(slots, nstates, boxes) -> list:
+def door_tic_lines(slots, nstates, boxes, kinds=None) -> list:
     """One frame of every door. `slots` is the emitter's door order (`sorted(door sectors)`),
-    `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units.
+    `nstates[si]` how many stops that door has, `boxes[si]` its use box in map units (none for a
+    walk-over door), `kinds[si]` its `doors.door_kinds` kind (all "plain" when omitted).
+
+    M7 P2a.1, each kind the mirror of `doors.door_tic` / `DoorPhase.tic`: a blue door's use press
+    needs `pcard`; a door's `dreq` (set by a walk-over crossing) presses it and is cleared; the
+    blazing door steps `door_stride` stops, clamped (the one-stop step unrolled); a stay door's top
+    sets no wait.
 
     Nothing here touches collision: a door's lines read its `dstate` when they are tested
     (`collision.collision_cells_fj`), so the state this walks IS the door's collision too.
@@ -81,18 +92,45 @@ def door_tic_lines(slots, nstates, boxes) -> list:
     out = ["// == M2-R4: the doors, one tic each ==================================",
            "//   dr<d>_*  door <d> (index into sorted(door sectors))",
            "//   the mirror of doomfj.doors.door_tic -- read them together"]
+    kinds = kinds or {si: "plain" for si in slots}
     for d, si in enumerate(slots):
         n = nstates[si]
         last = n - 1
+        kind = kinds[si]
+        stride, stay = door_stride(kind), door_stay(kind)
+        rq = f"dreq + {d}*dw"
         st = f"dstate + {d}*dw"
         dr = f"ddir + {d}*dw"
         sub = f"dsub + {d}*dw"
         wt = f"dwait + {WAIT_NIBBLES * d}*dw"
         p = f"dr{d}"
-        out += [f"  // ---- door {d} (sector {si}): {n} states ----",
+        box = boxes.get(si)
+        trigger = []
+        if kind == "walkover":            # only these get requests in P2a (monsters' come with P3),
+            trigger = [f"    hex.if0 1, {rq}, {p}_use",   # so an idle plain door still costs 3 ops
+                       f"    hex.zero 1, {rq}",           # ... pressed once
+                       f"    ;{p}_press",
+                       f"  {p}_use:"]
+        if box is None:
+            trigger += [f"    ;{p}_moved"]                  # a walk-over door has no use line
+        else:
+            trigger += [f"    hex.if0 1, duse, {p}_moved"]
+            if kind == "blue":
+                trigger += [f"    hex.if0 1, pcard, {p}_moved"]   # EV_VerticalDoor: the blue card
+            trigger += _box_test(d, box, f"{p}_press", f"{p}_moved")
+        up = []
+        for k in range(stride):                             # `state += stride`, clamped at the top
+            up += [f"    hex.inc 1, {st}",
+                   f"    hex.xor_by 1, {st}, {last}",
+                   f"    hex.if0 1, {st}, {p}_open",
+                   f"    hex.xor_by 1, {st}, {last}"]
+        down = []
+        for k in range(stride):                             # `state -= stride`, clamped at shut
+            down += [f"    hex.dec 1, {st}",
+                     f"    hex.if0 1, {st}, {p}_shut"]
+        out += [f"  // ---- door {d} (sector {si}, {kind}): {n} states ----",
                 # ---- the trigger: `if used and dr != OPENING` -------------------------------
-                f"    hex.if0 1, duse, {p}_moved",
-                *_box_test(d, boxes[si], f"{p}_press", f"{p}_moved"),
+                *trigger,
                 f"  {p}_press:",
                 # dir != OPENING, tested by xoring OPENING in and asking for zero. The xor is an
                 # involution, so both branches put it back.
@@ -111,7 +149,8 @@ def door_tic_lines(slots, nstates, boxes) -> list:
                 f"  {p}_pressopen:",
                 f"    hex.xor_by 1, {st}, {last}",
                 f"    hex.zero 1, {dr}",
-                f"    hex.set {WAIT_NIBBLES}, {wt}, {WAIT}",
+                *([f"    hex.zero {WAIT_NIBBLES}, {wt}"] if stay else
+                  [f"    hex.set {WAIT_NIBBLES}, {wt}, {WAIT}"]),
                 f"    ;{p}_moved",
                 f"  {p}_already:",
                 f"    hex.xor_by 1, {dr}, {OPENING}",
@@ -128,24 +167,21 @@ def door_tic_lines(slots, nstates, boxes) -> list:
                 f"    hex.xor_by 1, {dr}, {OPENING}",
                 f"    hex.if0 1, {dr}, {p}_up",
                 f"    hex.xor_by 1, {dr}, {OPENING}",
-                # closing: one step down, and IDLE when it reaches shut
-                f"    hex.dec 1, {st}",
-                f"    hex.if0 1, {st}, {p}_shut",
+                # closing: `stride` steps down, and IDLE when it reaches shut
+                *down,
                 f"    ;{p}_done",
                 f"  {p}_shut:",
                 f"    hex.zero 1, {dr}",
                 f"    ;{p}_done",
                 f"  {p}_up:",
                 f"    hex.xor_by 1, {dr}, {OPENING}",
-                f"    hex.inc 1, {st}",
-                f"    hex.xor_by 1, {st}, {last}",
-                f"    hex.if0 1, {st}, {p}_open",
-                f"    hex.xor_by 1, {st}, {last}",
+                *up,
                 f"    ;{p}_done",
                 f"  {p}_open:",
                 f"    hex.xor_by 1, {st}, {last}",
                 f"    hex.zero 1, {dr}",
-                f"    hex.set {WAIT_NIBBLES}, {wt}, {WAIT}",
+                *([f"    hex.zero {WAIT_NIBBLES}, {wt}"] if stay else
+                  [f"    hex.set {WAIT_NIBBLES}, {wt}, {WAIT}"]),
                 f"    ;{p}_done",
                 # ---- idle: run the open-wait down --------------------------------------------
                 f"  {p}_idle:",
@@ -221,4 +257,68 @@ def door_rooms(lds, sds, doors, lines_of) -> dict:
                  if lds[li].back != -1 and lds[li].back != 0xFFFF]
         rooms = {r for _, r in pairs}
         out[si] = [(li, near, sorted(rooms - {near})) for li, near in pairs]
+    return out
+
+
+# ---- M7 P2a.1: the card's pickup and the walk-over triggers, in the player's move -----------------------
+
+def _scmp_const(reg, val, lt, eq, gt, scratch="dbox") -> list:
+    """signed compare of an 8-nibble register against a baked constant"""
+    return [f"    hex.set 8, {scratch}, {val & 0xFFFFFFFF:#x}",
+            f"    hex.scmp 8, {reg}, {scratch}, {lt}, {eq}, {gt}"]
+
+
+def card_pickup_lines(tag: str, card, slot_addr: str, reach_lo: int, reach_hi: int,
+                      radius: int) -> list:
+    """The blue card's `_touch_specials` at ONE tried candidate (`cpx`, `cpy`), with the floor the
+    player stands on (`cm_hf`): while it is untaken (`pcard` 0), a box overlap -- |item - cand| <
+    item radius + player radius on both axes, strict, in 16.16 -- and the reach `reach_lo <= cm_hf
+    <= reach_hi` take it: `pcard` 1 and the card's `thvis` slot (`slot_addr`) 0."""
+    kx, ky = card
+    bd = radius
+    miss = f"{tag}ck_no"
+    out = [f"    hex.if0 1, pcard, {tag}ck_try", f"    ;{miss}", f"  {tag}ck_try:"]
+    for k, (reg, lo, hi) in enumerate((("cpx", kx - bd, kx + bd), ("cpy", ky - bd, ky + bd))):
+        # lo < reg < hi, strict both ends
+        out += _scmp_const(reg, lo << 16, miss, miss, f"{tag}ck{k}a")
+        out += [f"  {tag}ck{k}a:"]
+        out += _scmp_const(reg, hi << 16, f"{tag}ck{k}b", miss, miss)
+        out += [f"  {tag}ck{k}b:"]
+    out += _scmp_const("cm_hf", reach_lo, miss, f"{tag}ckr", f"{tag}ckr")
+    out += [f"  {tag}ckr:"]
+    out += _scmp_const("cm_hf", reach_hi, f"{tag}cky", f"{tag}cky", miss)
+    out += [f"  {tag}cky:",
+            "    hex.set 1, pcard, 1",
+            f"    hex.zero 2, {slot_addr}",
+            f"  {miss}:"]
+    return out
+
+
+def walkover_lines(triggers, slots, radius: int) -> list:
+    """`DoorPhase.after_move` in fj: after an ACCEPTED move from (`cm_ox`, `cm_oy`) to (`viewx`,
+    `viewy`), each unfired trigger whose axis the centre crossed (`c <= L` differs) with the new
+    centre strictly inside the segment's extent inflated by the radius fires: `wfired` 1 and its
+    door's `dreq` 1 -- the press lands on the next frame's door tic."""
+    out = ["  // M7 P2a.1: the walk-over triggers (doomfj.doors.crossed)"]
+    for k, (si, axis, coord, lo, hi) in enumerate(triggers):
+        d = slots.index(si)
+        p = f"wo{k}"
+        a_old, a_new, o_new = (("cm_oy", "viewy", "viewx") if axis == "y" else
+                               ("cm_ox", "viewx", "viewy"))
+        L = coord << 16
+        out += [f"    hex.if0 1, wfired + {k}*dw, {p}_try", f"    ;{p}_no", f"  {p}_try:"]
+        # old side: le_old = old <= L  -> {p}_ol (le) / {p}_og (gt)
+        out += _scmp_const(a_old, L, f"{p}_ol", f"{p}_ol", f"{p}_og")
+        out += [f"  {p}_ol:"]                                  # old on the low side: new must be above
+        out += _scmp_const(a_new, L, f"{p}_no", f"{p}_no", f"{p}_x")
+        out += [f"  {p}_og:"]                                  # old above: new must be low
+        out += _scmp_const(a_new, L, f"{p}_x", f"{p}_x", f"{p}_no")
+        out += [f"  {p}_x:"]
+        out += _scmp_const(o_new, (lo - radius) << 16, f"{p}_no", f"{p}_no", f"{p}_x1")
+        out += [f"  {p}_x1:"]
+        out += _scmp_const(o_new, (hi + radius) << 16, f"{p}_fire", f"{p}_no", f"{p}_no")
+        out += [f"  {p}_fire:",
+                f"    hex.set 1, wfired + {k}*dw, 1",
+                f"    hex.set 1, dreq + {d}*dw, 1",
+                f"  {p}_no:"]
     return out

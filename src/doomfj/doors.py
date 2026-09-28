@@ -73,13 +73,19 @@ def neighbours(lds, sds):
 
 
 def door_sectors(secs, lds, sds) -> dict:
-    """{sector index: fully-open ceil_h} for every REAL door on the map."""
+    """{sector index: fully-open ceil_h} for every REAL door on the map: a sector behind a special
+    line's back side, and (M7 P2a.1) a sector a walk-over door line TAGS -- E1M1's 77 and 145, which
+    no line has behind it (`door_kinds`)."""
     nb = neighbours(lds, sds)
     out = {}
+    candidates = []
     for ld in lds:
         if not ld.special or ld.back == 0xFFFF or ld.back >= len(sds):
             continue
-        si = sds[ld.back].sector
+        candidates.append(sds[ld.back].sector)
+    wtags = {ld.tag for ld in lds if ld.special in WALKOVER_SPECIALS and ld.tag}
+    candidates += [si for si, sec in enumerate(secs) if sec.tag in wtags]
+    for si in candidates:
         s = secs[si]
         if s.ceil_h != s.floor_h:          # already open: a lift or a trigger sector, not a door
             continue
@@ -276,6 +282,19 @@ USE_RANGE = 64            # map units around a door's trigger lines that count a
 
 IDLE, OPENING, CLOSING = 0, 1, 2
 
+# ---- M7 P2a.1: E1M1's door KINDS, stated once ---------------------------------------------------------
+# The 13 doors this module was written for are plain DR doors (special 1) -- two of them need the
+# blue card (26) and one is a blazing door (117) -- and two more sectors are doors a walk-over line
+# opens once and leaves open (special 2, W1 "door open stay", matched by TAG). The model, every gate
+# oracle and the fj emitter take the kind of a door from `door_kinds` and its behaviour from here.
+BLUE_DOOR_SPECIALS = frozenset({26})       # DR, blue card (EV_VerticalDoor's key check)
+BLAZE_DOOR_SPECIALS = frozenset({117})     # DR, blazing
+WALKOVER_SPECIALS = frozenset({2})         # W1 door open-stay, by tag
+# The blazing door's speed: DOOM's VDOORSPEED * 4. A TIC IS A FRAME here and a plain door already
+# moves one stop a frame (SPEED = 1, the fastest `sub` allows), so the blazing door moves FOUR stops
+# a frame, clamped at both ends -- the same 4:1 ratio, in the only unit this machine has.
+BLAZE_STRIDE = 4
+
 
 def use_boxes(secs, lds, sds, rng: int = USE_RANGE) -> dict:
     """`{sector: (x0, y0, x1, y1)}` — the box the player must be inside to open that door.
@@ -322,8 +341,12 @@ def in_use_box_fixed(box, x16: int, y16: int) -> bool:
     return (x0 << 16) <= x16 <= (x1 << 16) and (y0 << 16) <= y16 <= (y1 << 16)
 
 
-def door_tic(st: tuple, nstates: int, used: bool) -> tuple:
+def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = False) -> tuple:
     """One tic of one door. `st` is `(state, dir, sub, wait)`; returns the next one.
+
+    M7 P2a.1: `stride` stops a step (BLAZE_STRIDE for the blazing door, clamped at both ends) and
+    `stay` for a door that stays open (the walk-over doors: reaching the top sets no wait, so it
+    never closes, and a press on it at the top changes nothing).
 
     THE WHOLE STATE MACHINE, and it is written with nothing but increments, decrements and
     zero-tests on purpose: that is the instruction set the fj side has cheaply. A compare against a
@@ -332,24 +355,27 @@ def door_tic(st: tuple, nstates: int, used: bool) -> tuple:
     keeps an idle door at exactly one 1-nibble test.
     """
     state, dr, sub, wait = st
+    top_wait = 0 if stay else WAIT
     if used and dr != OPENING:
         # a press always means "open", including on a door that is closing (DOOM reverses) and on
         # one that is already open and waiting (it restarts the wait).
+        if stay and state == nstates - 1:
+            return st                            # open for good: nothing to restart
         dr, sub, wait = OPENING, SPEED, 0
         if state == nstates - 1:
-            dr, wait = IDLE, WAIT
+            dr, wait = IDLE, top_wait
     if dr == OPENING:
         sub -= 1
         if sub == 0:
             sub = SPEED
-            state += 1
+            state += stride
             if state >= nstates - 1:
-                state, dr, wait = nstates - 1, IDLE, WAIT
+                state, dr, wait = nstates - 1, IDLE, top_wait
     elif dr == CLOSING:
         sub -= 1
         if sub == 0:
             sub = SPEED
-            state -= 1
+            state -= stride
             if state <= 0:
                 state, dr = 0, IDLE
     elif wait:
@@ -425,3 +451,129 @@ def compare_stamp(stamp: dict, secs, lds, sds) -> list:
             if bs[si] != ls[si]:
                 bad.append("door %s stops: binary %s, this process %s" % (si, bs[si], ls[si]))
     return bad
+
+
+# ---- M7 P2a.1: the kinds, the card check, the walk-over triggers ----------------------------------------
+
+def door_kinds(secs, lds, sds) -> dict:
+    """`{door sector: "plain" | "blue" | "blaze" | "walkover"}` -- one kind per `door_sectors` entry,
+    from the special of the line behind it (or, for a walk-over door, the line that tags it)."""
+    doors = door_sectors(secs, lds, sds)
+    out = {}
+    for ld in lds:
+        if not ld.special:
+            continue
+        if ld.special in WALKOVER_SPECIALS:
+            for si, sec in enumerate(secs):
+                if si in doors and ld.tag and sec.tag == ld.tag:
+                    out[si] = "walkover"
+            continue
+        if ld.back == 0xFFFF or ld.back >= len(sds) or sds[ld.back].sector not in doors:
+            continue
+        si = sds[ld.back].sector
+        kind = ("blue" if ld.special in BLUE_DOOR_SPECIALS else
+                "blaze" if ld.special in BLAZE_DOOR_SPECIALS else "plain")
+        assert out.get(si, kind) == kind, "door %d has two kinds: %s, %s" % (si, out[si], kind)
+        out[si] = kind
+    assert set(out) == set(doors), sorted(set(doors) - set(out))
+    return out
+
+
+def door_stride(kind: str) -> int:
+    return BLAZE_STRIDE if kind == "blaze" else 1
+
+
+def door_stay(kind: str) -> bool:
+    return kind == "walkover"
+
+
+def can_open(kind: str, has_blue: bool) -> bool:
+    """May the player's USE open a door of this kind? A blue door needs the blue card
+    (EV_VerticalDoor); a walk-over door has no use line at all."""
+    if kind == "walkover":
+        return False
+    return has_blue or kind != "blue"
+
+
+def walkover_triggers(secs, lds, sds, verts) -> list:
+    """`[(door sector, axis, coord, lo, hi)]`, one per walk-over tag, in door-sector order: the
+    tag's W1 lines are collinear and axis-aligned on E1M1 (asserted), so each tag is ONE segment --
+    `axis` "y" for a horizontal one (y = coord, x in [lo, hi]), "x" for a vertical one."""
+    doors = door_sectors(secs, lds, sds)
+    by_tag: dict = {}
+    for ld in lds:
+        if ld.special in WALKOVER_SPECIALS and ld.tag:
+            by_tag.setdefault(ld.tag, []).append(ld)
+    out = []
+    for tag, lines in by_tag.items():
+        targets = [si for si, sec in enumerate(secs) if sec.tag == tag and si in doors]
+        assert len(targets) == 1, "walk-over tag %d opens %s" % (tag, targets)
+        pts = [(verts[v].x, verts[v].y) for ld in lines for v in (ld.v1, ld.v2)]
+        xs, ys = {x for x, _ in pts}, {y for _, y in pts}
+        if len(ys) == 1:
+            out.append((targets[0], "y", ys.pop(), min(xs), max(xs)))
+        else:
+            assert len(xs) == 1, "walk-over tag %d is not one axis-aligned segment" % tag
+            out.append((targets[0], "x", xs.pop(), min(ys), max(ys)))
+    return sorted(out)
+
+
+def crossed(trig: tuple, old16: tuple, new16: tuple, radius: int) -> bool:
+    """Did a tic's move from `old16` to `new16` (16.16 centres) cross walk-over trigger `trig`?
+
+    DOOM (P_TryMove -> P_CrossSpecialLine): a line in the move's `spechit` set -- the new box
+    touches it -- whose P_PointOnLineSide differs before and after. For an axis-aligned line that
+    side is `c <= L` on the crossing axis (a point ON the line counts with the low side), and for a
+    move of at most 16 units a side change implies the box straddles the line, so what remains is the
+    new box overlapping the segment's extent on the other axis: lo - R < centre < hi + R, strict, as
+    PIT_CheckLine's box test. DEVIATION: tested once per tic between the tic's start and end, not
+    per P_TryMove of a slide."""
+    _si, axis, coord, lo, hi = trig
+    L = coord << 16
+    a, o = (1, 0) if axis == "y" else (0, 1)
+    if (old16[a] <= L) == (new16[a] <= L):
+        return False
+    return ((lo - radius) << 16) < new16[o] < ((hi + radius) << 16)
+
+
+class DoorPhase:
+    """M7 P2a.1 -- a level's doors stepped the way the model and the binary step them, in ONE place,
+    for every oracle (the gates, gamespeed's replay, the scenario mirrors): the frame's door phase --
+    each door's kind decides its use box and card check, its stride and its stay -- and the
+    walk-over triggers after an accepted move, which fire once and press their door on the NEXT door
+    phase (the model's `d_monreq` convention).
+
+    The state is plain data, `(ds, fired, req)`: `ds` {sector: (state, dir, sub, wait)}, `fired` a
+    tuple of 0/1 per trigger, `req` a frozenset of door sectors pressed at the next tic."""
+
+    def __init__(self, secs, lds, sds, verts, boxes, quant: int = DEFAULT_QUANT):
+        tbl = door_states(secs, lds, sds, quant)
+        self.order = sorted(tbl)
+        self.nstates = {si: len(v) for si, v in tbl.items()}
+        self.kinds = door_kinds(secs, lds, sds)
+        self.boxes = boxes                                 # use_boxes_xy: no walk-over door in it
+        self.triggers = walkover_triggers(secs, lds, sds, verts)
+        self._initial = initial_states(secs, lds, sds, quant)
+
+    def initial(self):
+        return (dict(self._initial), (0,) * len(self.triggers), frozenset())
+
+    def tic(self, state, use: bool, x16: int, y16: int, has_blue: bool = False):
+        ds, fired, req = state
+        out = {}
+        for si in self.order:
+            kind, box = self.kinds[si], self.boxes.get(si)
+            pressed = (use and box is not None and can_open(kind, has_blue)
+                       and in_use_box_fixed(box, x16, y16)) or si in req
+            out[si] = door_tic(ds[si], self.nstates[si], bool(pressed),
+                               stride=door_stride(kind), stay=door_stay(kind))
+        return (out, fired, frozenset())
+
+    def after_move(self, state, old16: tuple, new16: tuple, radius: int = 16):
+        ds, fired, req = state
+        fired, req = list(fired), set(req)
+        for k, trig in enumerate(self.triggers):
+            if not fired[k] and crossed(trig, old16, new16, radius):
+                fired[k] = 1
+                req.add(trig[0])
+        return (ds, tuple(fired), frozenset(req))

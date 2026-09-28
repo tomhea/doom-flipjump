@@ -1,0 +1,30 @@
+# P1.6: blocked33 was BUILT at e972725 (tag evidence/p1.6-build, blocked33_build.log:1); 9a28344 is the head after the rebase onto P1.5's 6fb7cd9 (P1.4 merged in main as 9618d59); the one src change since the build is wall_renderer's layout-constants block (P1.4's R6 constants with P1.6's slot byte 3)
+$ git rev-parse e972725:src HEAD:src
+bea0ac9c32f7165dc1dc77e3b1c3819a8d02cebf
+e559b308c411bef2fc21e82a7e73ca3ae45ee209
+$ PYTHONPATH=src timeout 5400 python scratchpad/gp/p13_emit_neutral.py --base e972725 --head 9a28344
+base e972725 (E1M1, the game tier, build_wall_renderer's own path to its first assembly):
+   input fj_consts.fj                 9a9b21cf800de94e
+   input fixed_point.fj               8b45cf5a116dab95
+   input present.fj                   585e03353deba64e
+   input projection.fj                5016a5292f885801
+   input frame_render.fj              3a72a10012ced5c8
+   input plane_render.fj              bc23ce78d7a9d679
+   input plane_bands.fj               a795a346eb1407c0
+   input stream_render.fj             d2bf62a37a7a5666
+   input input.fj                     c38fb2c033741540
+   input sim.fj                       a7fcac0c2cc3a7ac
+   input e1m1_00_entry.fj             3857785ad2c1b556
+   input e1m1_01_tables.fj            f3fb0c886de065ee
+   input e1m1_02_main.fj              e83f888431a8283b
+   input e1m1_03_segconsts.fj         65360205b0998d64
+   input e1m1_04_walk.fj              c61b4998118a372d
+   input e1m1_05_state.fj             8d7b79795d00775a
+   input e1m1_06_banks.fj             84336fb5e5852a1d
+   input m1_reset.fj                  0302197b5ff36f04
+   persist viewx,viewy,viewangle,kb_f,kb_b,kb_l,kb_r,kb_u,mode,menu_scr,menu_sel,dstate,ddir,dsub,dwait,sshead,thss_rt,thpos_rt
+head 9a28344: EVERY ASSEMBLER INPUT EQUAL, the same persist tuple
+CONTROL the build's persist call with moving_things=False: caught -- the persist line differs
+CONTROL sshead declared one cell wider: caught -- e1m1_01_tables.fj differ
+EMISSION-NEUTRAL: PASS
+rc=0

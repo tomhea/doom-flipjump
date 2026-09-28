@@ -126,3 +126,30 @@ before P3 (moving monsters); `tests/host/test_sprite_bank.py` decodes every one 
 - **Ops (ESTIMATE)**: +2 rowmap lookups a sprite column and +1 a run (a D4 dispatch, ~60-80 ops)
   against the record's multiply saved per column -- on combat set v2, +0.05 .. +0.15M ops/frame.
 - **Freeze**: a v3 of the combat set (section 4).
+
+## As built (M7 P1.6)
+
+- **Rebased onto P1.4's review rounds and P1.5.** The one `src/` change since the build is
+  wall_renderer's layout-constants block -- P1.4's R6 constants with the slot's byte 3 named
+  (`SPR_THING_SLOT_FIELDS` += "bucket"); emission-neutral (`p16_emit_neutral.log`).
+- **P1.4's layout tests follow the bank.** `tests/host/test_sprite_column.py` names `trb_bucket` /
+  `gps_b`; `tests/fj/test_slot_layouts_fj.py` models a column's block as the region + u and the
+  record's `bucket >= min_b` test, sets each thing's bucket as `sprbkt.lookup` leaves it, probes
+  min_b either side of the bucket and at it and across 16, and reads the bucket back through the
+  emitted `rowmap` -- 81 passed, with mutants for the bucket byte, the region add, and the min_b
+  test's width, equality and direction.
+
+### Measured (the row and the verdict are in `docs/gp-ledger.md`)
+
+`build/doom_e1m1_blocked33.fjm`, sha256 `7be00f1e51c63678`, built at e972725 (tag
+`evidence/p1.6-build`) from the ship-gate 1b line with the p14 heat list (20 of 20 hot words pinned);
+the counts cache recounted and the build took 8,515 s. Class F: no byte-identical rebuild.
+
+- **Pictures and state**: m3_gate and m2_std_gate byte- and state-exact, all six selftests rejected
+  where they must; deg_gate byte-exact at four viewpoints; B0 pixel- and state-exact on every frame of
+  v2 and v3.
+- **Ops**: v2 / v3 binding 14,158,345 (+136,269 on v2, the estimate +0.05 .. +0.15M); gamespeed's
+  13,665,215 (+104,499); the record +53,789 and the emission +25,082 a frame on gamespeed's games.
+- **Time**: NOT SEPARATED from blocked32 (median x1.009); 61.8 ms/frame on the quiet re-freeze.
+- **Size**: 26.96% of 2^27 (-230,976 words, while holding every animation frame P3 needs).
+- **The frozen set**: v3 -- v2's keys under this oracle, frozen by the owner (`p16_v3_freeze.log`).

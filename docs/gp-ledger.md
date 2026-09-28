@@ -316,4 +316,37 @@ saved multiply). The frozen set: a v3 (below).
 6. `pinreport.py`: a hot word not pinned (the heat list re-keyed, `heat_blocked27_p16`,
    `thing_record_body:25:24`); the restore sets not re-keyed to this rung's labels.
 
-**Row**: (filled after the build)
+**Row** (2026-09-28, `build/doom_e1m1_blocked33.fjm`, sha256 `7be00f1e51c63678`; logs in
+`docs/ship-evidence/blocked33_*` and `p16_*`):
+
+| measure | shipped (P1.5, blocked32) | P1.6 (blocked33) | delta |
+|---|---|---|---|
+| combat set v2 binding (b0_scenarios) | 14,022,076 | 14,158,345 | +136,269 (+1.0%) |
+| combat set **v3** binding (the owner's freeze, 2026-09-28) | -- | **14,158,345** | the new frozen set (B0 17,760,774) |
+| ... with strafe's collision (proxy) | 14,055,673 | 14,192,344 | +136,671 |
+| gamespeed binding (ops/frame) | 13,560,716 | 13,665,215 | +104,499 |
+| the sprite record, `thing_leaf` + `thing_leaf_b` (profx, gamespeed's ten games) | 1,215,762 | 1,269,551 | +53,789 |
+| the emission, `seg_pass2_leaf` (the same) | 3,517,481 | 3,542,563 | +25,082 |
+| ms/frame (msframe, one run, A = blocked32) | 70.1 | 69.5 | NOT SEPARATED (pairs 1.014 0.999 1.009 1.013 1.004, median x1.009) |
+| size (% of 2^27) | 27.13% | 26.96% | -230,976 words |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**Verdict against the kill criteria (class F):**
+1 host: tests/host at the rebased head 1286 passed with tests/fj/test_sprite_bank_fj.py
+(`p16_final_tests.log`) -- spritebank's rules and the emitted bank against its lists, each with its
+control;
+2 fj: test_sprite_bank_fj.py (the shipped derive / runs drawing `strip_at`'s rows, a walker that skips
+the rowmap caught) in the same run; P1.4's layout harness adapted to the bank -- 81 passed, the
+bucket byte, the region add and the min_b test each with their mutants;
+3 m3_gate PASS (32 frames), m2_std_gate PASS (366 frames), byte- and state-exact, all six selftests
+rejected where they must (`blocked33_gates.log`, `blocked33_gate_selftests.log`); b0 with
+--pixel-every 1 pixel- and state-exact on every frame, v2 and v3; deg_gate BYTE-EXACT at its four
+viewpoints (`p16_deg_gate.log`);
+4 CAP-22: the v3 binding 14.16M <= 22M, size 26.96% <= 35%, msframe 69.5 ms/frame on the afternoon's
+slow box (61.8 on the quiet re-freeze) -- the ~90 ms tripwire far off; the price recorded;
+5 the frozen set: v3 FROZEN by the owner ("I approve v3", 2026-09-27) -- `scenarios_v2.py --freeze`
+FREEZE PASS, F1-F5 (`p16_v3_freeze.log`); P1.6 is measured on v3 (`blocked33_b0_v3.log`);
+6 pinreport 20 of 20, lost 0, unresolved 0 (`blocked33_pinreport.log`) -- the p14 heat list still
+matches every hot group; the restore sets re-keyed (`p16_rekey.log`).
+The budget (ESTIMATE +0.05 .. +0.15M on v2) held: +0.14M. Emission-neutral across the rebase
+(`p16_emit_neutral.log`: e972725 vs the head, PASS, both controls caught).

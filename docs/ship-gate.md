@@ -10,34 +10,34 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked32.fjm`, sha256 `89c3cf6348258eeb` (first 16 hex), built 2026-09-28 from the command in 1b (M7 P1.5, the skill filter and the skill menu) | class F -- pixels move, so no byte-identical rebuild; built with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked32_build.log`) |
-| **ms/frame, quiet box** | **60.4 ms/frame** (60.2-62.0), against **62.2** (61.2-63.1) for blocked31 in the same run -- **NOT SEPARATED: one pair at 1.000, median x1.018** | `msframe.py --a build/doom_e1m1_blocked31.fjm --b build/doom_e1m1_blocked32.fjm`, 200 frames x 5 reps, pinned core (`blocked32_msframe.log`) |
-| **fj ops/s** | **234 M** (233.5 M; blocked31 232.1 M in the same run) | same run; ops/frame **14,107,763** on msframe's forward-walk script (blocked31 14,436,650): 2.3% fewer ops |
-| **binding metric** (owner spec) | (mean+p80)/2 = **13,560,716 ops/frame -- PASS** (mean 11,509,098; p80 15,612,334) | `gamespeed.py --fjm build/doom_e1m1_blocked32.fjm`, 2026-09-28 (`docs/ship-evidence/blocked32_gamespeed.log`); `gamespeed_trail.py`: the binary's pose and door states equal `--validate`'s record on every frame of all ten runs, both controls rejected |
-| **size** | **27.13% of 2^27 -- PASS** (36,410,172 words; span 90,671,968) | same run |
-| **combat set v2** (the CAP-22 set, handoff-gameplay section 1) | (mean+p80)/2 = **14,022,076** (blocked31 14,441,924; B0 17,760,774); **14,055,673** with strafe's collision (blocked31 14,476,599); every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --pixel-every 1 --proxy` (`blocked32_b0_v2.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked33.fjm`, sha256 `7be00f1e51c63678` (first 16 hex), built 2026-09-28 from the command in 1b (M7 P1.6, the native-list sprite bank) | class F -- pixels move, so no byte-identical rebuild; built with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked33_build.log`) |
+| **ms/frame** | **69.5 ms/frame** (68.2-70.3), against **70.1** (69.1-70.9) for blocked32 in the same run on a slow box (~203M fj/s) -- **NOT SEPARATED: median x1.009**; the quiet re-freeze reads **61.8** (61.7-62.5) | `msframe.py --a build/doom_e1m1_blocked32.fjm --b build/doom_e1m1_blocked33.fjm`, 200 frames x 5 reps, pinned core (`blocked33_msframe.log`; `blocked33_msframe_freeze.log`) |
+| **fj ops/s** | **229 M** on the quiet re-freeze (203.7 M in the A/B run, blocked32 201.2 M) | ops/frame **14,160,111** on msframe's forward-walk script (blocked32 14,107,763): 0.4% more ops |
+| **binding metric** (owner spec) | (mean+p80)/2 = **13,665,215 ops/frame -- PASS** (mean 11,593,335; p80 15,737,096) | `gamespeed.py --fjm build/doom_e1m1_blocked33.fjm`, 2026-09-28 (`docs/ship-evidence/blocked33_gamespeed.log`); `gamespeed_trail.py`: the binary's pose and door states equal `--validate`'s record on every frame of all ten runs, both controls rejected |
+| **size** | **26.96% of 2^27 -- PASS** (36,179,196 words; span 90,641,792) | same run |
+| **combat set v3** (the CAP-22 set since 2026-09-28: v2's keys, frozen by the owner under P1.6's oracle -- `p16_v3_freeze.log`) | (mean+p80)/2 = **14,158,345** (B0 17,760,774; blocked32 on v2 14,022,076); **14,192,344** with strafe's collision; every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v3.json --pixel-every 1 --proxy` (`blocked33_b0_v3.log`) |
 
-**What it is:** blocked31 with the skill filter and the skill menu (M7 P1.5, `docs/gp-skill-menu.md`),
-class F: the thing universe is DOOM's single-player one (26 multiplayer-only things leave the
-image), the game boots at hard's level start, and NEW GAME opens a skill screen whose choice runs
-that skill's restart block. Pictures move by exactly that, so the gates are byte- AND state-exact
-against the oracle at each skill (m3_gate's 32 frames, m2_std_gate's 366, their six selftests), B0
-pixel-exact on every frame; the v2 binding fell 419,848 (the estimate was -0.3M) and ms/frame is NOT
-SEPARATED -- the price class F records, far under the ~90 ms tripwire. The binary it replaced,
-blocked31 (sha256 `773b840ca044e39b`: 61.5 ms/frame frozen, binding 13,974,938, 27.31%), is kept in
-`build/` as the comparison arm.
+**What it is:** blocked32 with the native-list sprite bank (M7 P1.6, `docs/gp-sprite-bank.md`),
+class F: each patch column is stored once per tier as a native run list and drawn at the thing's
+height bucket through the `rowmap` dispatch; the record adds `u` to the tier's region and takes a
+column iff its bucket >= the list's `min_b`; the bank also holds every frame and rotation E1M1's
+monsters, barrels, fireballs, puffs and blood will need (P3). The gates are byte- and state-exact
+(m3_gate's 32 frames, m2_std_gate's 366, their six selftests), deg_gate byte-exact at four
+viewpoints, B0 pixel-exact on every frame of v2 and v3; the v3 binding is 14,158,345 (+0.14M on v2,
+inside the +0.05..+0.15M estimate) and ms/frame NOT SEPARATED -- the price class F records. Phase 1
+(M7) is done with this binary. The binary it replaced, blocked32 (sha256 `89c3cf6348258eeb`), is
+kept in `build/` as the comparison arm.
 
 blocked25 read 99-104 ms/frame with a background video render at ~0.3-0.45 core -- under
 msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27 has not been timed
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
-(re-frozen 2026-09-28 on blocked32, a quiet box: 70.1 ms/frame [69.6 .. 70.9], yardstick 3.53G
--- `blocked32_msframe_freeze.log`, 11:54, after an attempt at 10:48 read 79.2 ms [72.0 .. 114.1]
-while the OS still released the previous build's memory and was discarded; the box ran at ~201M
-fj/s at 11:54 against ~233M that
-morning -- the same binary measured 60.4 ms then, which is exactly why only an A/B inside one run
-counts; the stored ms is informational; `--against shipped` RE-MEASURES
+(re-frozen 2026-09-28 on blocked33, a quiet box: 61.8 ms/frame [61.7 .. 62.5], yardstick 3.58G,
+228.9M fj/s -- `blocked33_msframe_freeze.log`; blocked32's freeze that day read 70.1 at 11:54 on a
+box running ~201M fj/s, after a 10:48 attempt (79.2 ms [72.0 .. 114.1], taken while the OS still
+released the previous build's memory) was discarded -- which is exactly why only an A/B inside one
+run counts; the stored ms is informational; `--against shipped` RE-MEASURES
 both arms live, and the binary hash is what it checks), so `--against shipped` is the comparison.
 
 ## 1b. The build command, and the play command
@@ -163,10 +163,18 @@ and the build, at 7cdfb97 (tag `evidence/p1.5-build`), took 8,794 s: sha256 `89c
 pixels move -- so no byte-identical rebuild. Its label table is
 `scratchpad/12m/atlas/blocked32.labels.tsv.gz`.
 
+**blocked33 (2026-09-28, M7 P1.6): the line is unchanged** -- the same heat list (p14): every hot
+group matched and all 20 hot words pinned (`blocked33_pinreport.log`: lost 0). The source changed,
+so the counts cache recounted (23,549 groups before alias merging, 348,100 tables, 2,344 s) and
+the build, at e972725 (tag `evidence/p1.6-build`), took 8,515 s: sha256 `7be00f1e51c63678`
+(`docs/ship-evidence/blocked33_build.log`). The tracked counts cache is that recount. Class F, so
+no byte-identical rebuild; emission-neutral across the rebase (`p16_emit_neutral.log`). Its label
+table is `scratchpad/12m/atlas/blocked33.labels.tsv.gz`.
+
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 
 ```
-fj --run build/doom_e1m1_blocked32.fjm --io pc --flat-max-words 134217728
+fj --run build/doom_e1m1_blocked33.fjm --io pc --flat-max-words 134217728
 ```
 
 `--run` is not optional (`fj a.fjm` assembles); the flat window must be the full 2^27 words or

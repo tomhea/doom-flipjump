@@ -128,9 +128,9 @@ frozen combat set changes.
 
 - `m3_gate`: the menu frames byte-exact through the skill screen and all three skills' NEW GAME,
   each followed by world frames byte- and state-exact against the oracle at that skill's level
-  start -- with the controls that the restart REALLY resets (walk, open a door, NEW GAME: the view
-  and the door are back) and that the skills really differ (the frames at easy and hard differ
-  exactly where `skill_absent` says). As implemented: 32 frames -- M3's script, then the skill
+  start. (The control that the restart REALLY resets a door -- walk, open a door, NEW GAME: the
+  view and the door are back -- is m2_std_gate's control 6, below; m3_gate never presses use.)
+  As implemented: 32 frames -- M3's script, then the skill
   screen clamped at both ends, backed out of, and NEW GAME at easy, medium and hard; controls: the
   first NEW GAME finds the player walked away, every NEW GAME frame is the spawn view, and the three
   NEW GAME frames are pairwise distinct in the oracle (MEASURED at the spawn view: easy / hard 20 px,
@@ -145,9 +145,9 @@ frozen combat set changes.
   must be able to tell). `--selftest-restart` (the oracle never restarts) must fail. This is the kill
   criterion 2's "walk, open a door, choose a skill" on the shipped binary.
 - `b0_scenarios` on set v2: the runs start from their checkpoints at hard, and the frames change by
-  what hard does not spawn -- the 26 multiplayer-only things and the 7 zombiemen of the other skills
-  (the census log, part A; the model has always run at hard, and the render oracle is now told so,
-  through `thing_hidden`).
+  what hard does not spawn -- the 26 multiplayer-only things and the 22 things of the other skills
+  (7 monsters and 15 pickups, all of which blocked31 drew -- the census log, part A; the model has
+  always run at hard, and the render oracle is now told so, through `thing_hidden`).
 - Budget: -0.3M ops/frame on the v2 binding (handoff section 10). ESTIMATE (plan section 7's R4):
   7 zombiemen and 26 multiplayer-only things no longer drawn at hard.
 
@@ -201,5 +201,5 @@ byte-identical rebuild is required.
   assembler input and the persist tuple equal, both controls caught: EMISSION-NEUTRAL: PASS
   (`p15_emit_neutral.log`).
 - **Baseline**: msframe's `shipped` re-frozen on blocked32 on a quiet box, 70.1 ms/frame [69.6 ..
-  70.9] (`blocked32_msframe_freeze.log`; the machine ran ~14% slower that afternoon than when the
+  70.9] (`blocked32_msframe_freeze.log`, 11:54; the machine ran ~14% slower then than when the
   row above was measured -- absolute ms is about the machine, the A/B is about the binary).

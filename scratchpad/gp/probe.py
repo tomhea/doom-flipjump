@@ -132,14 +132,24 @@ def _read_quiet(p: Path) -> str:
 # the label table
 # ================================================================================================
 
+# M7 P1.5 gave the game tier two persisted cells, the skill menu's screen and highlight. A binary
+# built before that rung -- the shipped blocked27 (DEFAULT_FJM) and every baseline before it -- has
+# neither label, and these tools still read those binaries: so a table may LACK them, together (one
+# without the other is not an older binary but a broken table). A Probe then drops the cells they
+# would address, and the known-value check skips their values. Every other label stays required.
+OPTIONAL_LABELS = frozenset({"menu_scr", "menu_sel"})
+
+
 class LabelTable:
     """`name -> bit address` for the names asked for, plus every label ADDRESS in the table (sorted),
-    so a cell spec can be checked against its label's declared extent (the next label up)."""
+    so a cell spec can be checked against its label's declared extent (the next label up).
+    `absent` is the OPTIONAL_LABELS asked for that this table does not have."""
 
-    def __init__(self, addrs: dict, all_addrs: array, source: str):
+    def __init__(self, addrs: dict, all_addrs: array, source: str, absent=frozenset()):
         self.addrs = dict(addrs)
         self.all_addrs = all_addrs
         self.source = source
+        self.absent = frozenset(absent)
 
     @classmethod
     def load(cls, path, names) -> "LabelTable":
@@ -153,15 +163,21 @@ class LabelTable:
                 if name in want:
                     got[name] = a
         missing = sorted(want - set(got))
-        if missing:
-            raise KeyError("label table %s has no %s" % (path, missing[:8]))
-        return cls(got, array("Q", sorted(set(every))), str(path))
+        required = [n for n in missing if n not in OPTIONAL_LABELS]
+        if required:
+            raise KeyError("label table %s has no %s" % (path, required[:8]))
+        absent = frozenset(missing)                      # optional, every one of them
+        if absent and OPTIONAL_LABELS & set(got):
+            raise KeyError("label table %s has %s but not %s -- the skill menu's labels come "
+                           "together (a binary before M7 P1.5 has neither)"
+                           % (path, sorted(OPTIONAL_LABELS & set(got)), sorted(absent)))
+        return cls(got, array("Q", sorted(set(every))), str(path), absent)
 
     def shifted(self, delta_bits: int) -> "LabelTable":
         """THE NEGATIVE CONTROL'S INPUT: the same table with every address moved by `delta_bits`."""
         return LabelTable({k: v + delta_bits for k, v in self.addrs.items()},
                           array("Q", (a + delta_bits for a in self.all_addrs)),
-                          "%s (shifted %+d bits)" % (self.source, delta_bits))
+                          "%s (shifted %+d bits)" % (self.source, delta_bits), self.absent)
 
     def __getitem__(self, name):
         return self.addrs[name]
@@ -216,7 +232,10 @@ class Probe:
     readings. `GameBinary.run` attaches it (attach(device_memory, core))."""
 
     def __init__(self, cells: dict, labels: LabelTable, width: int = 32, strict: bool = True):
-        self.cells = dict(cells)
+        # a cell whose OPTIONAL label the table lacks (a binary before M7 P1.5: see OPTIONAL_LABELS)
+        # is not probed; `absent` names it, and check_known skips its known value
+        self.absent = frozenset(k for k, c in cells.items() if c.label in labels.absent)
+        self.cells = {k: c for k, c in cells.items() if k not in self.absent}
         self.labels = labels
         self.w = width
         self.dw = 2 * width
@@ -354,9 +373,12 @@ class Probe:
 
     # ---- the known-value check (control C3) ---------------------------------------------------------
     def check_known(self, expected: dict) -> list:
-        """[(cell, want, got_or_layout_error)] for every cell that does not hold its known value"""
+        """[(cell, want, got_or_layout_error)] for every cell that does not hold its known value
+        (a cell this binary has no label for -- `absent` -- has no value to hold)"""
         bad = []
         for key, want in expected.items():
+            if key in self.absent:
+                continue
             try:
                 got = self.read_cells([key])[key]
             except CellLayoutError as e:
@@ -573,12 +595,15 @@ class GameBinary:
 
 def game_cells(ndoors: int) -> dict:
     """the persisted world state of the standalone game tier (build.STANDALONE_PERSIST +
-    DOOR_PERSIST) as probe cells"""
+    DOOR_PERSIST) as probe cells. `menu_scr` / `menu_sel` are OPTIONAL_LABELS: a Probe on a binary
+    built before M7 P1.5 drops them (its label table has neither)."""
     from doomfj.doorcode import WAIT_NIBBLES
     cells = {"viewx": Cell("viewx", "hex", 8, signed=True),
              "viewy": Cell("viewy", "hex", 8, signed=True),
              "viewangle": Cell("viewangle", "hex", 8),
-             "mode": Cell("mode", "hex", 1)}
+             "mode": Cell("mode", "hex", 1),
+             # M7 P1.5: the skill menu's screen and highlight, persisted like `mode`
+             "menu_scr": Cell("menu_scr", "hex", 1), "menu_sel": Cell("menu_sel", "hex", 1)}
     for k in ("kb_f", "kb_b", "kb_l", "kb_r", "kb_u"):
         cells[k] = Cell(k, "hex", 1)
     cells["dstate"] = Cell("dstate", "hex", 1, count=ndoors)
@@ -612,6 +637,11 @@ class Oracle:
         self.door_order = sorted(door_states(self.secs, self.lds, self.sds))
         self.spawn = spawn_state(self.mw, mapname)
         self._scenes = {(): build_scene(self.mw, self.mw, mapname)}
+        # M7 P1.5: the game tier boots at BOOT_SKILL's level start; the oracle hides what it
+        # does not spawn (things.skill_hidden, the set the emitter baked from)
+        from doomfj.things import skill_hidden
+        from doomfj.wall_renderer import BOOT_SKILL
+        self.hidden = skill_hidden(self.rm, self.mw.things(mapname), self.art, BOOT_SKILL)
 
     @property
     def ndoors(self):
@@ -619,11 +649,13 @@ class Oracle:
 
     def known_pristine(self) -> dict:
         """what the game tier BAKES, from sources independent of the binary: the WAD's player
-        start, the menu mode, every key up, every door shut and idle (doors.initial_states)"""
+        start, the menu mode, every key up, every door shut and idle (doors.initial_states) --
+        and M7 P1.5's menu cells, which Probe.check_known skips on a binary that predates them"""
         from doomfj.doors import IDLE
         nd = self.ndoors
+        from doomfj.wall_renderer import BOOT_SKILL, SKILLS
         return {"viewx": self.spawn.x, "viewy": self.spawn.y, "viewangle": self.spawn.angle,
-                "mode": 1, **KEYS_UP,
+                "mode": 1, "menu_scr": 0, "menu_sel": SKILLS.index(BOOT_SKILL), **KEYS_UP,
                 "dstate": (0,) * nd, "ddir": (IDLE,) * nd, "dsub": (0,) * nd, "dwait": (0,) * nd}
 
     def door_pose(self, dstate: tuple) -> dict:
@@ -650,7 +682,7 @@ class Oracle:
         from doomfj.reference_model import SimState
         return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate), sprite_wad=self.art,
-                                               **self.RENDER_KW))
+                                               thing_hidden=self.hidden, **self.RENDER_KW))
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""
@@ -1026,7 +1058,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
     n_walk = 30
     per_frame = [{} for _ in range(gate.MENU_FRAMES)] + GS.script(0)[:n_walk]
     events = GS.events_for(per_frame)
-    keys_by_frame, enters = gate.held_per_frame(events, len(per_frame))
+    keys_by_frame, menu_events = gate.held_per_frame(events, len(per_frame))
     p = Probe(cells, table, gb.width)
     seen = []
     p.on_present(lambda pr, f: seen.append(pr.read_cells()))       # EVERY game-tier cell
@@ -1034,16 +1066,19 @@ def demo(fjm: Path, labels_path: Path) -> int:
     print("(a) %d frames, %s ops (exact); the probe's persisted state at each present (view, mode, "
           "5 key flags, 13 doors x 4 cells) vs the oracle (onewalk.DoorSim, m2_std_gate's order):"
           % (len(r.frames), format(r.ops, ",")))
+    from doomfj.menu import menu_step
     dsim = onewalk.DoorSim()
     st, mode, n_state, n_pix = dsim.reset(), 1, 0, 0
+    scr, sel = known["menu_scr"], known["menu_sel"]
     for f in range(len(per_frame)):
-        if enters[f]:
-            mode ^= 1
+        mode, scr, sel, _ng = menu_step(mode, scr, sel, menu_events[f])
+        assert _ng is None, "the demo's walk never starts a new game"
         if mode == 0:
             st = dsim.step(st, keys_by_frame[f])
         g = seen[f]
         kd = keys_by_frame[f]
         want_s = {"viewx": st.x, "viewy": st.y, "viewangle": st.angle, "mode": mode,
+                  "menu_scr": scr, "menu_sel": sel,
                   "kb_f": int(bool(kd.get("forward"))), "kb_b": int(bool(kd.get("back"))),
                   "kb_l": int(bool(kd.get("turn_left"))), "kb_r": int(bool(kd.get("turn_right"))),
                   "kb_u": int(bool(kd.get("use"))),
@@ -1051,7 +1086,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
                   "ddir": tuple(dsim.ds[si][1] for si in orc.door_order),
                   "dsub": tuple(dsim.ds[si][2] for si in orc.door_order),
                   "dwait": tuple(dsim.ds[si][3] for si in orc.door_order)}
-        diff = [k for k in want_s if g[k] != want_s[k]]
+        diff = [k for k in want_s if k not in p.absent and g[k] != want_s[k]]
         s_ok = not diff
         pix = r.frames[f] == (orc.render(st.x, st.y, st.angle, orc.door_states_tuple(dsim.ds))
                               if mode == 0 else menu)

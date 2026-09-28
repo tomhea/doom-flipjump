@@ -1,0 +1,26 @@
+# R1 (the P1.5 review): finding 6 -- the probe's menu cells are optional on a table that predates them
+# every run below is in a MIRROR of the tree named; a MUTANT is applied to the mirror's copy only (scratchpad p15run.py)
+
+## FAIL: the new test on the parent's probe.py
+# on 13fd65c (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_gp_probe_cells.py  (blob fed7c5cc0b0a)
+$ PYTHONPATH=src python -m pytest tests/host/test_gp_probe_cells.py -q -rfE -p no:cacheprovider
+E           KeyError: "label table C:\\Users\\tomhe\\AppData\\Local\\Temp\\pytest-of-tomhe\\pytest-3520\\test_a_table_before_the_skill_0\\labels-menu_scr-menu_sel.tsv.gz has no ['menu_scr', 'menu_sel']"
+E       AttributeError: 'LabelTable' object has no attribute 'absent'
+E           KeyError: "label table C:\\Users\\tomhe\\AppData\\Local\\Temp\\pytest-of-tomhe\\pytest-3520\\test_only_the_skill_menu_is_op0\\labels-menu_sel.tsv.gz has no ['menu_sel']"
+E       AssertionError: Regex pattern did not match.
+E         Expected regex: 'come together'
+E         Actual message: '"label table C:\\\\Users\\\\tomhe\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-tomhe\\\\pytest-3520\\\\test_only_the_skill_menu_is_op0\\\\labels-menu_sel.tsv.gz has no [\'menu_sel\']"'
+FAILED tests/host/test_gp_probe_cells.py::test_a_table_before_the_skill_menu_loads_and_its_menu_cells_are_dropped
+FAILED tests/host/test_gp_probe_cells.py::test_a_table_with_the_skill_menu_probes_its_cells
+FAILED tests/host/test_gp_probe_cells.py::test_only_the_skill_menu_is_optional
+3 failed in 0.39s
+# exit 1, 1 s
+
+## PASS: the new test on the fixed probe.py
+# on 13fd65c (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_gp_probe_cells.py  (blob fed7c5cc0b0a)
+#   scratchpad/gp/probe.py  (blob 26dc73e6a91a)
+$ PYTHONPATH=src python -m pytest tests/host/test_gp_probe_cells.py -q -rfE -p no:cacheprovider
+3 passed in 0.24s
+# exit 0, 1 s

@@ -1,0 +1,12 @@
+# R1: tests/host/test_pin_veto.py on the parent's veto (scratchpad/12m/build_blocked.py and src/doomfj/selfreset.py at 4653cc9, byte cells only)
+$ python -m pytest tests/host/test_pin_veto.py -q -p no:cacheprovider
+E       AttributeError: module 'build_blocked' has no attribute 'pin_state_veto'
+E       AttributeError: module 'doomfj.selfreset' has no attribute 'POINTER_READ_CELLS'
+E       AttributeError: <module 'doomfj.selfreset' from 'C:\\Users\\tomhe\\Documents\\doom-m7e\\src\\doomfj\\selfreset.py'> has no attribute 'POINTER_READ_CELLS'
+FAILED tests/host/test_pin_veto.py::test_every_pointer_read_label_is_vetoed_at_its_whole_extent
+FAILED tests/host/test_pin_veto.py::test_the_list_names_the_cells_the_thing_code_reads_through_pointers
+FAILED tests/host/test_pin_veto.py::test_a_veto_without_the_list_leaves_the_positions_pinnable
+3 failed in 0.35s
+# with the veto
+$ python -m pytest tests/host/test_pin_veto.py -q -p no:cacheprovider
+3 passed in 0.17s

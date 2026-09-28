@@ -498,7 +498,12 @@ def test_every_poll_is_its_own_expansion():
     polls = [ln for ln in _standalone_input_lines() if "kb.poll" in ln]
     assert len(polls) == 1, "the polls are no longer one `rep` line: %r" % polls
     assert polls[0].startswith("rep(%d, i) kb.poll " % STANDALONE_POLLS), polls[0]
-    assert _standalone_input_lines(polls=3)[0].startswith("rep(3, i) kb.poll ")
+    three = _standalone_input_lines(polls=3)
+    at = next(i for i, ln in enumerate(three) if "kb.poll" in ln)
+    assert three[at].startswith("rep(3, i) kb.poll ")
+    # M7 P1.5: the menu's four event cells are zeroed BEFORE the polls that set them
+    assert set(three[:at]) == {"hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up",
+                               "hex.zero 1, ev_dn"}, three[:at]
 
 
 def test_the_magic_check_precedes_every_state_input():
@@ -528,6 +533,14 @@ def test_the_frame_order_is_doors_then_sim_then_derive_then_echo():
 
 # -- the menu wrapper ------------------------------------------------------------------------------
 
+def _restart():
+    """a synthetic restart block (M7 P1.5): one door, two runtime things, two leaves"""
+    from doomfj.wall_renderer import restart_lines
+    spawn = type("Spawn", (), {"x": 1 << 16, "y": 2 << 16, "angle": 0})()
+    return restart_lines(spawn, 1, [0, 1], [5, 6], 2,
+                         [([1, 0], [0, 0], [1]), ([0, 2], [0, 0], [0]), ([1, 2], [0, 0], [1])])
+
+
 def test_the_menu_omits_exactly_the_frame_end_byte():
     """The trap the docstring names: both producers fall into the SAME tail, whose last line is
     `stl.output_char 0xFF`. A second 0xFF presents an EMPTY frame, and jumping past the tail breaks
@@ -535,20 +548,45 @@ def test_the_menu_omits_exactly_the_frame_end_byte():
     discover. `doomfj.menu` itself is well tested; this wrapper was not tested at all."""
     cfg = Config()
     asset_wad = WadFile.from_path(ASSETS)
-    lines = _menu_lines(cfg, asset_wad, DEFAULT_MENU, DEFAULT_MENU_SELECTED)
+    from doomfj.wall_renderer import SKILL_MENU, SKILL_MENU_FIRST
+    lines = _menu_lines(cfg, asset_wad, DEFAULT_MENU, DEFAULT_MENU_SELECTED, restart=_restart())
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
-    full = menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU_SELECTED, colours)
-    assert full[-1] == 0xFF, "doomfj.menu.stream no longer ends with the frame-end marker"
-    assert "\n".join(lines).count("stl.output_char") == len(full) - 1
+    # M7 P1.5: FOUR screens -- the main menu and the skill screen once per highlighted skill --
+    # each a stream without its end-of-frame byte
+    streams = [menu_stream(cfg.VIEW_W, cfg.VIEW_H, DEFAULT_MENU, DEFAULT_MENU_SELECTED, colours)] + [
+        menu_stream(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours) for k in range(3)]
+    assert all(full[-1] == 0xFF for full in streams), "doomfj.menu.stream lost its frame-end marker"
+    assert "\n".join(lines).count("stl.output_char") == sum(len(full) - 1 for full in streams)
 
 
 def test_the_menu_branch_wraps_the_stream_in_the_documented_order():
     """`hex.if0 1, mode, do_world` / <the menu> / `;frame_end` / `do_world:` -- the persisted mode
     cell picks the producer, and the menu arm must jump INTO the shared tail, not past it."""
-    lines = _menu_lines(Config(), WadFile.from_path(ASSETS), ["A", "B"], 0)
-    assert lines[0] == "hex.if0 1, mode, do_world"
-    assert lines[-2] == ";frame_end"
+    lines = _menu_lines(Config(), WadFile.from_path(ASSETS), ["A", "B"], 0, restart=_restart())
+    # M7 P1.5: the state machine first, then the producer branch, then the four screens -- each
+    # jumping INTO the shared tail -- then the restart routine, where nothing falls into it
+    branch = lines.index("hex.if0 1, mode, do_world")
+    assert lines.index("mn_done:") < branch
+    screens = [i for i, ln in enumerate(lines) if ln in ("mf_main:", "mf_s0:", "mf_s1:", "mf_s2:")]
+    assert len(screens) == 4 and branch < min(screens)
+    ends = [i for i, ln in enumerate(lines) if ln == ";frame_end"]
+    assert len(ends) == 4 and all(e + 1 in screens or lines[e + 1] == "restart_common:" for e in ends)
+    assert lines[max(ends) + 1] == "restart_common:"
+    assert lines[-2].strip() == "stl.fret rs_ret"
     assert lines[-1] == "do_world:"
+
+
+def test_a_things_position_cell_is_the_wires_layout():
+    """R6 (the P1.5 review): `things.thing_pos_value` is the ONE packing of a runtime thing's
+    `thpos_rt` cell -- the pristine table and NEW GAME's restart both bake it, and the emitter wrote
+    the expression out twice -- and it is the layout the hosted wire writes into the same cells: x,
+    then y, each 32-bit little-endian, negative coordinates included."""
+    from doomfj.things import thing_pos_value
+    from doomfj.wad import Thing
+    from doomfj.wireformat import encode_things
+    for x, y in ((0, 0), (1, 2), (-1, 5), (1056, -3264), (-32768, 32767)):
+        want = int.from_bytes(encode_things([(x << 16, y << 16)]), "little")
+        assert thing_pos_value(Thing(x, y, 0, 3004, 7)) == want, (x, y)
 
 
 # -- the band-list bank ----------------------------------------------------------------------------

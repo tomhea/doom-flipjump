@@ -132,12 +132,12 @@ def _things():
     from doomfj.config import Config
     from doomfj.mapcompiler import bake_bsp
     from doomfj.reference_model import MONSTER_TYPES, VANISHABLE_TYPES, ReferenceModel
-    from doomfj.things import baked_thing_mask, vanishable_slots
+    from doomfj.things import baked_thing_mask, drawable_things, vanishable_slots
     w = WadFile.from_path(str(ROOT / args.wad))
     art = WadFile.from_path(str(ROOT / "assets/freedoom1.wad"))
     rm = ReferenceModel(Config())
     cmap = bake_bsp(w, "E1M1")
-    drawable = [t for t in w.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+    drawable = drawable_things(rm, w.things("E1M1"), art)[0]
     baked = baked_thing_mask(rm, cmap, drawable, MONSTER_TYPES)
     nvis = len(vanishable_slots(drawable, baked, VANISHABLE_TYPES))
     rt = [t for t, b in zip(drawable, baked) if not b]

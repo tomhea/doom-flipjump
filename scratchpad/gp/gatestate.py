@@ -1,0 +1,72 @@
+"""M7 P1.5 -- the game-tier gates' STATE check (scratchpad/m2_std_gate.py, scratchpad/m3_gate.py).
+
+Kill criterion 3 of P1.5 (docs/gp-ledger.md) asks both gates to be byte- AND state-exact, and both
+compared pixels only: a NEW GAME that forgot a cell the frame cannot show -- a door's timer, a
+screen or a highlight while the world is up -- passed them. So each gate now runs its binary ONCE
+through the same PcIO composition (`probe.GameBinary.run`, what b0_scenarios drives) with a
+`probe.Probe` that reads the persisted world cells at every present, and holds every frame's
+reading against the oracle's state after that frame: the view, `mode`, `menu_scr`, `menu_sel`, and
+every door's state, direction, sub-step and timer.
+
+    frames, ops, reads = run_reading_state(fjm, labels, events, n_frames, ndoors)
+    bad = diff(reads[f], oracle_state(x, y, angle, mode, scr, sel, doors))
+"""
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+import probe as P                                                          # noqa: E402
+from doomfj.fixedpoint import _signed                                      # noqa: E402
+
+STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
+               "dstate", "ddir", "dsub", "dwait")
+
+
+def run_reading_state(fjm, labels, events, frames: int, ndoors: int):
+    """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
+    each present]). `labels` is the build's own label table (build_labeled.py writes it)."""
+    cells = {n: c for n, c in P.game_cells(ndoors).items() if n in STATE_NAMES}
+    missing = sorted(set(STATE_NAMES) - set(cells))
+    assert not missing, "probe.game_cells lost %s -- the state check would skip them" % missing
+    table = P.LabelTable.load(labels, {c.label for c in cells.values()})
+    gb = P.GameBinary(fjm)
+    probe = P.Probe(cells, table, gb.width)
+    # a binary before M7 P1.5 has no menu_scr / menu_sel (probe.OPTIONAL_LABELS): the probe drops
+    # them, and `diff` then reports them missing on every frame -- such a binary fails this check
+    kept = [n for n in STATE_NAMES if n in probe.cells]
+    reads = []
+    probe.on_present(lambda pr, f: reads.append(pr.read_cells(kept)))
+    r = gb.run(frames, events, probe)
+    return r.frames, r.ops, reads
+
+
+def oracle_state(x, y, angle, mode, scr, sel, doors) -> dict:
+    """the oracle's state after a frame, in the cells' own units: the view as signed 16.16, the
+    angle's 32 bits, and each door cell a tuple in door order (`doors`: the per-door
+    (state, direction, sub-step, timer) tuples, sorted by sector as the binary numbers them)"""
+    doors = list(doors)
+    return {"viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": angle & 0xFFFFFFFF,
+            "mode": mode, "menu_scr": scr, "menu_sel": sel,
+            "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),
+            "dsub": tuple(d[2] for d in doors), "dwait": tuple(d[3] for d in doors)}
+
+
+def diff(got, want: dict) -> dict:
+    """{cell: (the binary's value, the oracle's)} for every cell that disagrees; a missing reading
+    (the binary presented fewer frames) disagrees in every cell"""
+    got = got or {}
+    return {k: (got.get(k), v) for k, v in want.items() if got.get(k) != v}
+
+
+def show(bad: dict, limit: int = 4) -> str:
+    """one line: the first `limit` disagreeing cells, and for a door cell only the doors that differ"""
+    parts = []
+    for k, (g, w) in list(bad.items())[:limit]:
+        if isinstance(w, tuple) and isinstance(g, tuple) and len(g) == len(w):
+            parts.append("%s[%s]" % (k, ", ".join("door %d: fj %s, oracle %s" % (i, a, b)
+                                                  for i, (a, b) in enumerate(zip(g, w)) if a != b)))
+        else:
+            parts.append("%s: fj %s, oracle %s" % (k, g, w))
+    return "; ".join(parts) + (" (+%d more)" % (len(bad) - limit) if len(bad) > limit else "")

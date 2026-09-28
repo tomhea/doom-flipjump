@@ -1,0 +1,58 @@
+# R1 (the P1.5 review): finding 8 -- a re-key that adds thvis to the standalone set is caught
+# every run below is in a MIRROR of the tree named; a MUTANT is applied to the mirror's copy only (scratchpad p15run.py)
+
+## GAP: the parent's guard (thnext only) on a set that restores thvis
+# on 59fefce, in a mirror of its tree
+# MUTANT in the MIRROR's src/doomfj/data/m5_restore_set.json.gz: an entry ["thvis", 0, 1, 2, 3] added (words + 4) -- the repo's set is not touched
+$ PYTHONPATH=src python -m pytest tests/host/test_restore_set_shipped.py -k thing_cells -q -rfE -p no:cacheprovider
+1 passed, 17 deselected in 0.33s
+# exit 0, 1 s
+
+## FAIL: the new guard on the same set
+# on 59fefce, in a mirror of its tree with the worktree's tests/host/test_restore_set_shipped.py (blob e51dce3de353)
+# MUTANT in the MIRROR's src/doomfj/data/m5_restore_set.json.gz: an entry ["thvis", 0, 1, 2, 3] added (words + 4) -- the repo's set is not touched
+$ PYTHONPATH=src python -m pytest tests/host/test_restore_set_shipped.py -k "thing_cells or persist_by_absence or would_be_caught" -q -rfE -p no:cacheprovider
+E       AssertionError: the standalone set now restores ['thvis'] -- persist it too
+E       assert not ['thvis']
+FAILED tests/host/test_restore_set_shipped.py::test_the_cells_that_persist_by_absence_are_not_restored
+1 failed, 2 passed, 17 deselected in 0.49s
+# exit 1, 1 s
+
+## PASS: the new guard and its control on the shipped set
+# on 59fefce (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_restore_set_shipped.py  (blob e51dce3de353)
+$ PYTHONPATH=src python -m pytest tests/host/test_restore_set_shipped.py -k "thing_cells or persist_by_absence or would_be_caught" -q -rfE -p no:cacheprovider
+3 passed, 17 deselected in 0.34s
+# exit 0, 1 s
+
+## the whole file on the shipped set: only the 4 failures that wait for the sets' re-key (the p2_* / gps_* globals and P1.5's menu and event cells are not in them yet)
+# on 59fefce (HEAD of m7-skill-menu), in a mirror of its tree with the worktree's
+#   tests/host/test_restore_set_shipped.py  (blob e51dce3de353)
+#   scratchpad/ca_remap_set.py  (blob 60124cc50ef2)
+#   scratchpad/m1_add_globals.py  (blob b4c04742efe9)
+#   scratchpad/m5_setfile.py  (blob 4cec99a01056)
+# (the scripts the sets' generated_by names are HEAD's own, unchanged: the provenance test looks for them)
+$ PYTHONPATH=src python -m pytest tests/host/test_restore_set_shipped.py -q -rfE -p no:cacheprovider
+E       AssertionError: hosted restore set is missing globals: ['p2_ds', 'p2_dsb', 'p2_s', 'p2_sb', 'gps_nslot', 'gps_s_rec', 'gps_sidx', 'gps_sbase']
+E       assert not ['p2_ds', 'p2_dsb', 'p2_s', 'p2_sb', 'gps_nslot', 'gps_s_rec', ...]
+E       AssertionError: standalone restore set is missing globals: ['p2_ds', 'p2_dsb', 'p2_s', 'p2_sb', 'gps_nslot', 'gps_s_rec', 'gps_sidx', 'gps_sbase']
+E       assert not ['p2_ds', 'p2_dsb', 'p2_s', 'p2_sb', 'gps_nslot', 'gps_s_rec', ...]
+E       AssertionError: the standalone set adds ['dbox', 'ddir', 'dstate', 'dsub', 'duse', 'dwait', 'kb_b', 'kb_f', 'kb_l', 'kb_r', 'kb_u', 'kbcode', 'kbstat', 'mode'], which is not STANDALONE_SCRATCH_DECLS + the door state
+E       assert {'dbox', 'ddi... 'dwait', ...} == {'dbox', 'ddi... 'dwait', ...}
+E         
+E         Extra items in the right set:
+E         'ev_dn'
+E         'ev_esc'
+E         'rs_ret'
+E         'ev_up'
+E         'ev_enter'...
+E         
+E         ...Full output truncated (3 lines hidden), use '-vv' to show
+E       AssertionError: STANDALONE_PERSIST names ['menu_scr', 'menu_sel'], absent from the standalone set
+E       assert not ['menu_scr', 'menu_sel']
+FAILED tests/host/test_restore_set_shipped.py::test_every_hoisted_global_is_present_at_full_declared_extent[hosted]
+FAILED tests/host/test_restore_set_shipped.py::test_every_hoisted_global_is_present_at_full_declared_extent[standalone]
+FAILED tests/host/test_restore_set_shipped.py::test_the_standalone_set_drops_only_the_wire_magic
+FAILED tests/host/test_restore_set_shipped.py::test_the_persist_labels_are_all_in_the_standalone_set
+4 failed, 16 passed in 0.57s
+# exit 1, 1 s

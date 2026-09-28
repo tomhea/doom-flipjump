@@ -52,7 +52,7 @@ from doomfj.reference_model import (ReferenceModel, WALL_BG, WPX_RUN_CAP, STEP_F
 from doomfj.texturecompiler import (compile_colormap, compile_palette, composite_texture,
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
-from doomfj.doorcode import door_decls, door_line_ids, door_tic_lines
+from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
                           pass_state, use_boxes_xy)
@@ -117,6 +117,12 @@ TIERS = {
 }
 TIER_FLAGS = ("things", "player_sim", "collide", "moving_things",
               "standalone", "menu", "doors", "self_reset")
+
+# M7 P1.5: the game tier's SKILLS, DOOM's gameskill numbers -- the model's (docs/gp-skill-menu.md).
+# The image boots at HARD: the skill the frozen combat set v2 runs at and the budget is sized on (D7).
+from doomfj import gamedata as _gd                               # noqa: E402 (after the oracle)
+SKILLS = (_gd.SK_EASY, _gd.SK_MEDIUM, _gd.SK_HARD)
+BOOT_SKILL = _gd.SK_HARD
 
 
 def tier_flags(tier: str) -> dict:
@@ -333,6 +339,25 @@ DEFAULT_MENU = ["DOOM ON FLIPJUMP", "", "NEW GAME", "QUIT"]
 # caller-supplied list, so `menu_entries` brings its own `menu_selected`.
 DEFAULT_MENU_SELECTED = 2
 
+# M7 P1.5 -- the SKILL SCREEN NEW GAME opens (docs/gp-skill-menu.md): entry SKILL_MENU_FIRST + k is
+# skill SKILLS[k], and `menu_sel` holds k, baked to the boot skill's (hard).
+SKILL_MENU = ["CHOOSE SKILL", "", "EASY", "MEDIUM", "HARD"]
+SKILL_MENU_FIRST = 2
+
+# M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
+# scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
+# `mode`). `menu_scr` (0 = the main menu, 1 = the skill screen) and `menu_sel` (the highlighted
+# skill) are PERSISTED -- build.STANDALONE_PERSIST, the one intended hole in that set -- for the
+# reason `mode` is: a screen that reset every frame could never be left. The four EVENT cells are
+# zeroed before every frame's polls (`_standalone_input_lines`), so a frame starts with none, and
+# `rs_ret` is the restart block's fcall return register, which `stl.fret` leaves zero: ordinary
+# residue, restored like any other.
+MENU_STATE_DECLS = [
+    "menu_scr: hex.vec 1, 0", f"menu_sel: hex.vec 1, {SKILLS.index(BOOT_SKILL)}",
+    "ev_enter: hex.vec 1", "ev_esc: hex.vec 1", "ev_up: hex.vec 1", "ev_dn: hex.vec 1",
+    "rs_ret: hex.vec w/4",
+]
+
 # M5 — the standalone tier's own globals, in ONE place (R6): the emitter declares them and
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, so a vec
 # widened here without re-running that fails the build instead of leaving half a register
@@ -350,11 +375,58 @@ STANDALONE_SCRATCH_DECLS = [
     # between the two pictures. It is declared even when the menu is off (two words) so both
     # standalone tiers share one restore set.
     "mode: hex.vec 1, 1",
+    # M7 P1.5: the skill menu's cells (MENU_STATE_DECLS, above)
+    *MENU_STATE_DECLS,
 ]
 
 
-def _menu_lines(cfg, asset_wad, entries, selected: int) -> list:
-    """M3 — the MENU frame, and the branch that chooses it.
+def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill) -> tuple:
+    """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
+
+    Choosing a skill must put the world back at that skill's level start: every cell the program
+    PERSISTS is set to its level-start value (build.STANDALONE_PERSIST's view, DOOR_PERSIST's doors,
+    THING_PERSIST's lists, bindings and positions, and the lists' links and flags that persist by
+    not being restored). The shared half, `restart_common` (fcall'd), writes what no skill changes --
+    the player start, the doors shut and idle, each runtime thing's spawn leaf and position -- and
+    ZEROES every list byte (`m1.zerobyte`, the M1 reset's own byte writer); each skill's half then
+    flips in its non-zero list bytes (bit k of a byte cell is `cell + dbit + k`, the address
+    `m1.zerobyte` itself flips) and sets its `thvis` flags. `per_skill[k]` is
+    `things.skill_level_start(...)` for skill k. The block runs on the one frame a skill is picked,
+    so its ops are that frame's, not every frame's."""
+    common = ["restart_common:",
+              f"    hex.set 8, viewx, {spawn.x & 0xFFFFFFFF}",
+              f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
+              f"    hex.set 8, viewangle, {spawn.angle & 0xFFFFFFFF}",
+              *([f"    hex.zero {ndoors}, dstate", f"    hex.zero {ndoors}, ddir",
+                 f"    hex.zero {ndoors}, dsub", f"    hex.zero {WAIT_NIBBLES * ndoors}, dwait"]
+                if ndoors else []),
+              *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
+              *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
+              f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
+              f"    rep({len(rt_binds)}, i) m1.zerobyte thnext + i*dw",
+              "    stl.fret rs_ret"]
+    skills = []
+    for head, nxt, vis in per_skill:
+        out = []
+        for label, arr in (("sshead", head), ("thnext", nxt)):
+            for i, v in enumerate(arr):
+                out += [f"    {label} + {i}*dw + dbit + {b};" for b in range(8) if v >> b & 1]
+        out += [f"    hex.set 2, thvis + {j}*2*dw, {v}" for j, v in enumerate(vis)]
+        skills.append(out)
+    return common, skills
+
+
+def _skill_dispatch(prefix: str) -> list:
+    """M7 P1.5 -- jump to `{prefix}k` for the highlighted skill k (`menu_sel`): the ONE dispatch the
+    skill screens (`mf_s`) and NEW GAME's restart blocks (`mn_r`) share. It is three-way by its
+    shape -- an `if0`, then one `if_flags` on bit 1 -- so it refuses any other number of SKILLS
+    rather than send a fourth skill to the third's block (tests/host/test_menu.py holds the tie)."""
+    assert len(SKILLS) == 3, "the skill dispatch is written for three skills, not %r" % (SKILLS,)
+    return [f"hex.if0 1, menu_sel, {prefix}0", f"hex.if_flags menu_sel, 1<<1, {prefix}2, {prefix}1"]
+
+
+def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
+    """M3 — the MENU frames, and the branch that chooses them.
 
     A menu screen is a picture that never changes, and the device already takes pictures as 0x0B
     column run-lists, so this is a constant byte stream: no renderer, no map, no tables, no
@@ -364,17 +436,83 @@ def _menu_lines(cfg, asset_wad, entries, selected: int) -> list:
     tail, whose last line is `stl.output_char 0xFF` -- which `selfreset.emit_reset_part` asserts on
     when it patches the frame into a loop. Emitting a second 0xFF here would present an empty
     frame; jumping past the tail would break that assert. So the menu ends where the world ends.
+
+    M7 P1.5 -- THE STATE MACHINE (docs/gp-skill-menu.md). The polls only record events
+    (`ev_enter`, `ev_esc`, `ev_up`, `ev_dn`); here, first match wins, in the order esc, enter, up,
+    down:
+      * in the world: esc or enter opens the MAIN menu (M3's toggle, kept);
+      * on the main menu: esc resumes the world, enter opens the SKILL screen;
+      * on the skill screen: esc goes back, up / down move the highlight (clamped), and enter runs
+        the highlighted skill's RESTART BLOCK and enters the world -- on this very frame, so the
+        world frame drawn is the level start (the model's `new_game`: the restart, then the tic).
+    Every screen is a baked frame: the main menu, and the skill screen once per highlighted skill.
+    `restart` is `restart_lines(...)`; the game tier always passes it.
     """
     from doomfj.menu import fj as menu_fj, palette_colours
     colours = palette_colours(bytes(b for rgb in asset_wad.playpal(0) for b in rgb))
+    assert restart is not None, "the menu opens NEW GAME's skill screen: it needs the restart block"
+    common, _skills = restart
     return [
-        # after the poll (so this frame sees the toggle) and BEFORE the sim, so a menu frame does
+        # after the poll (so this frame sees its events) and BEFORE the sim, so a menu frame does
         # not move the player -- which is what makes leaving the menu resume where you were.
+        *menu_state_lines(restart),
+        # -- the frame: the world, or one of the four baked screens
         "hex.if0 1, mode, do_world",
+        "hex.if0 1, menu_scr, mf_main",
+        *_skill_dispatch("mf_s"),
+        "mf_main:",
         menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, selected, colours,
                 label="menu_frame", end_marker=False),
         ";frame_end",
+        *[line for k in range(len(SKILLS)) for line in (
+            f"mf_s{k}:",
+            menu_fj(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
+                    label=f"menu_skill{k}", end_marker=False),
+            ";frame_end")],
+        *common,                           # fcall'd only: every screen above ends in a jump
         "do_world:",
+    ]
+
+
+def menu_state_lines(restart) -> list:
+    """M7 P1.5 -- the menu's STATE MACHINE (see `_menu_lines`), alone: the events in, `mode`,
+    `menu_scr`, `menu_sel` and -- on a skill's NEW GAME -- the restart block out. No frame: the
+    caller draws. `restart` is `restart_lines(...)`; its shared routine (`restart_common`, fcall'd
+    with `rs_ret`) must be placed by the caller where nothing falls into it.
+    tests/fj/test_skill_menu.py runs exactly these lines."""
+    _common, skills = restart
+    assert len(skills) == len(SKILLS), "one restart block per skill: %d for %d" % (len(skills),
+                                                                                  len(SKILLS))
+    return [
+        "hex.if0 1, mode, mn_world",
+        "hex.if0 1, menu_scr, mn_main",
+        # -- the skill screen
+        "hex.if0 1, ev_esc, mn_s1", ";mn_back", "mn_s1:",
+        "hex.if0 1, ev_enter, mn_s2", ";mn_start", "mn_s2:",
+        "hex.if0 1, ev_up, mn_s3", ";mn_up", "mn_s3:",
+        "hex.if0 1, ev_dn, mn_done", ";mn_dn",
+        "mn_back:", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_up:", "hex.if0 1, menu_sel, mn_done", "hex.dec 1, menu_sel", ";mn_done",
+        # (clamped at the LAST skill: `menu_sel` is a nibble, so bit k of the mask is sel == k)
+        "mn_dn:", f"hex.if_flags menu_sel, 1<<{len(SKILLS) - 1}, mn_dn_inc, mn_done",
+        "mn_dn_inc:", "hex.inc 1, menu_sel", ";mn_done",
+        "mn_start:",                       # NEW GAME at the highlighted skill
+        "stl.fcall restart_common, rs_ret",
+        *_skill_dispatch("mn_r"),
+        "mn_r0:", *skills[0], ";mn_started",
+        "mn_r1:", *skills[1], ";mn_started",
+        "mn_r2:", *skills[2],
+        "mn_started:", "hex.zero 1, mode", "hex.zero 1, menu_scr", ";mn_done",
+        # -- the main menu
+        "mn_main:",
+        "hex.if0 1, ev_esc, mn_m1", "hex.zero 1, mode", ";mn_done", "mn_m1:",
+        "hex.if0 1, ev_enter, mn_done", "hex.set 1, menu_scr, 1", ";mn_done",
+        # -- the world
+        "mn_world:",
+        "hex.if0 1, ev_esc, mn_w1", ";mn_open", "mn_w1:",
+        "hex.if0 1, ev_enter, mn_done",
+        "mn_open:", "hex.set 1, mode, 1", "hex.zero 1, menu_scr",
+        "mn_done:",
     ]
 
 
@@ -394,7 +532,11 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
     restore-set scratch, and only the four flags need to survive the reset.
     """
     return [
-        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, mode, bad",
+        # M7 P1.5: the menu's events start every frame at zero; the polls set them, the menu
+        # state machine reads them
+        "hex.zero 1, ev_enter", "hex.zero 1, ev_esc", "hex.zero 1, ev_up", "hex.zero 1, ev_dn",
+        f"rep({polls}, i) kb.poll kbstat, kbcode, kb_f, kb_b, kb_l, kb_r, kb_u, "
+        f"ev_enter, ev_esc, ev_up, ev_dn, bad",
         # the held flags -> the key byte the sim reads, in wireformat.py's bit order. `xor_by` on a
         # cell just zeroed IS a set, and is the cheapest primitive that does it.
         "hex.zero 2, pkeys",
@@ -439,7 +581,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     from doomfj.lut_generator import generate_packed_lut_fj
     from doomfj.things import (THING_ROW_COLD_BYTES, THING_ROW_COLD_LEN, THING_ROW_HOT_BYTES,
                                THING_ROW_HOT_LEN, cold_row, hot_row, reachable_lightnums,
-                               sprite_light_table, subsector_tables, thing_rows)
+                               sprite_light_table, subsector_tables, thing_pos_value, thing_rows)
     allt = map_wad.things(mapname)
     rows, idx = thing_rows(rm, allt, sprite_wad, spr_base, spr_ldbase, spr_dw, MONSTER_TYPES,
                            MIN_SPRITE_H, MIN_SPRITE_H_MONSTER, DEG_MINH2_SCENERY, DEG_MINH2_MON,
@@ -465,8 +607,8 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # ⚠ the position array is a hex.vec (one NIBBLE per slot), NOT a packed table (one BYTE per
     # slot): the wire writes it with `hex.input 8` and sim reads it with ptr_index + read_hex 16.
     # Emitting it as a packed LUT would put the strides a factor of 2 apart -- see handoff-m14 5.
-    thpos = ["thpos_rt:"] + [f"    hex.vec 16, {(((t.y << 16) & 0xFFFFFFFF) << 32) | ((t.x << 16) & 0xFFFFFFFF)}"
-                             for t in things]
+    # (the value is `things.thing_pos_value`, which NEW GAME's restart block bakes too -- R6)
+    thpos = ["thpos_rt:"] + [f"    hex.vec 16, {thing_pos_value(t)}" for t in things]
     text = "\n".join([
         # M14-perf: HOT (everything a reject can reach) and COLD (what only a drawn sprite needs).
         # See doomfj.things -- 94.1% of loads are rejected, and read_table_packed is linear in the
@@ -1116,18 +1258,40 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
-    from doomfj.things import byte_array_decl, spawn_leaf_lists
-    _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
+    from doomfj.things import (byte_array_decl, skill_absent, skill_level_start, spawn_leaf_lists,
+                               thing_pos_value)
+    # M7 P1.5: the game tier has SKILLS (docs/gp-skill-menu.md). Which things a skill spawns is
+    # `skill_absent`'s answer; the runtime things are present by being LINKED, the baked vanishable
+    # ones by their `thvis` flag. The image boots at HARD's level start (the skill set v2 runs at);
+    # choosing a skill runs that skill's restart block. Hosted tiers are told presence by their host
+    # and static tiers draw the whole image, so the skills are the standalone game tier's alone.
+    _skills = bool(_do_things and standalone and moving_things)
+    _rt_draw = [_draw_idx.index(w) for w in sorted(_mt_keep)] if moving_things else []
+    if _skills:
+        # a baked thing that varies by skill must have a flag to vary BY -- a map where one did not
+        # needs a flag first, and says so here rather than drawing the wrong things
+        _abs = [skill_absent(_drawable, _s) for _s in SKILLS]
+        _varies = frozenset().union(*_abs) - frozenset.intersection(*_abs)
+        _unflagged = sorted(di for di in _varies if _baked[di] and di not in _vis_slots)
+        assert not _unflagged, (
+            "M7 P1.5: baked things %s change with the skill but have no thvis flag"
+            % [(_drawable[di].type, _drawable[di].x, _drawable[di].y) for di in _unflagged[:6]])
+        _MT_HEAD, _MT_NEXT, _BOOT_VIS = skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS,
+                                                          _vis_slots, BOOT_SKILL)
+    else:
+        _MT_HEAD, _MT_NEXT = spawn_leaf_lists(_MT_BINDS, _MT_NSS) if moving_things else ([], [])
+        _BOOT_VIS = [1] * len(_vis_slots) if _do_things else []   # (no things: no flags)
     # M14.5: one byte-wide slot per vanishable baked thing, filled from the wire before the walk.
     # ⚠ ZERO-init would mean "hidden", so the host sends the whole block every frame -- it is the
     # host that owns what has been picked up, and fj has no state between frames.
     _MT_NVIS = len(_vis_slots) if _do_things else 0
     if _MT_NVIS:
         # M5: standalone has no host to say what has been picked up, and nothing picks anything up
-        # yet (that is C1), so every slot bakes VISIBLE. Zero would mean "hidden" -- the reason the
-        # hosted tier has to send the whole block every frame.
+        # yet (that is C1), so every slot bakes its BOOT value -- since M7 P1.5, whether hard spawns
+        # it. Zero means "hidden" -- the reason the hosted tier has to send the whole block every
+        # frame.
         _mt_decls = list(_mt_decls) + (
-            ["thvis:"] + ["    hex.vec 2, 1"] * _MT_NVIS if standalone else
+            ["thvis:"] + [f"    hex.vec 2, {v}" for v in _BOOT_VIS] if standalone else
             [f"thvis: hex.vec {2 * _MT_NVIS}"])
     _MT_NTH = _index_nibbles(max(1, _MT_NT))          # the row index's width, as check_line's is
     _MT_NSSN = _index_nibbles(max(1, _MT_NSS))
@@ -1893,8 +2057,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
     # M3: the menu frame + the branch past the world. Built here, where `asset_wad` is
     # resolved, so its colours come from the SAME palette the renderer bakes.
+    if menu:
+        assert _skills, "the menu's NEW GAME needs the game tier's skills (things, moving, standalone)"
+        _rt_things = [map_wad.things(mapname)[w] for w in sorted(_mt_keep)]
+        _restart = restart_lines(
+            _spawn, len(_dslot) if _dst_tbl else 0, _MT_BINDS,
+            [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
+            _MT_NSS,
+            [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
+             for sk in SKILLS])
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
-                               DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected)
+                               DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
+                               restart=_restart)
                    if menu else None)
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, door_lines=_door_tic)
@@ -3065,8 +3239,11 @@ def _lines_sprite_bank(rm, sprite_wad, cfg, map_wad, mapname):
     block index, and its downscaled width (blocks for a type are laid out u-major, bucket-minor).
     Run-lists come from `ReferenceModel.sprite_strip`, so oracle and fj cannot drift (R6)."""
     cache: dict = {}
-    kinds = sorted({t.type for t in map_wad.things(mapname)
-                    if rm.sprite_art(sprite_wad, t.type, cache) is not None})
+    # M7 P1.5 (rule 5): the kinds a single-player game DRAWS -- `things.drawable_things`, the one
+    # definition -- not every kind with art: a multiplayer-only kind's blocks would never be read
+    from doomfj.things import drawable_things
+    kinds = sorted({t.type for t in drawable_things(rm, map_wad.things(mapname), sprite_wad,
+                                                    cache)[0]})
     out = sprite_bank_header()
     base_of, dw_of, blk = {}, {}, 0
     for kind in kinds:
@@ -3211,14 +3388,17 @@ def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, s
 
     ⚠ "can actually stand in" is the whole cost argument, and it is sound: a thing is always in some
     sector, so only the lightnums the map's SECTORS have are reachable. On E1M1 that is 10 of the 32
-    COLORMAP_LIGHTS, so the bank goes 75 -> 210 classes (**2.8x**, ~193k -> ~540k chars) instead of
-    the 672 (9x, ~1.73M) a naive all-lights widening would cost."""
+    COLORMAP_LIGHTS, so the bank goes 67 -> 210 classes (**3.1x**; 75 -> 210, ~193k -> ~540k chars,
+    before M7 P1.5 dropped the multiplayer-only things) instead of the 672 (9x, ~1.73M) a naive
+    all-lights widening would cost."""
     cache: dict = {}
     cls_of: dict = {}
-    for t in map_wad.things(mapname):
+    # M7 P1.5 (rule 5): the things a single-player game draws (`things.drawable_things`) -- a
+    # multiplayer-only thing's (light, height) pair would be a class nothing reads, and under
+    # `moving_things` its height would widen the whole cross product
+    from doomfj.things import drawable_things
+    for t in drawable_things(rm, map_wad.things(mapname), sprite_wad, cache)[0]:
         art = rm.sprite_art(sprite_wad, t.type, cache)
-        if art is None:
-            continue
         sec = _thing_sector(rm, cmap, lds, sds, secs, t)
         cls_of.setdefault((rm.wall_lightnum(sec.light, 0), max(1, art[4])), len(cls_of))
     if moving_things:

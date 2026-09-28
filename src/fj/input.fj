@@ -31,17 +31,25 @@
 // uses (scripts/walk_e1m1.py). There is no strafe, because sim.fj has none.
 //     'w' 0x77   up    0x80     forward        'a' 0x61   left  0x82     turn left
 //     's' 0x73   down  0x81     back           'd' 0x64   right 0x83     turn right
-//     enter 0x0D  esc 0x1B      toggle `mode` -- M3's menu, on the DOWN edge only
+//     enter 0x0D  esc 0x1B      the menu's ENTER / ESC events, on the DOWN edge only
+//                               (M7 P1.5: recorded, not acted on -- see the events below)
 //     space 0x20                 M2-R4's USE key: the door flag, held like the four above
 // Anything else is read and DISCARDED. The discard happens AFTER the keycode byte is consumed --
 // there is deliberately no early exit that would skip that read.
+//
+// M7 P1.5 -- THE MENU'S EVENTS. `ev_enter` / `ev_esc` / `ev_up` / `ev_dn` are set to 1 on the DOWN
+// edge of enter, esc, forward (w / up arrow) and back (s / down arrow); the caller zeroes them
+// before the frame's polls and its menu state machine acts on them after (wall_renderer's
+// `_menu_lines`). A poll only records: M3's poll toggled `mode` here, which cannot tell the main
+// menu from the skill screen. Forward and back still set their held flags as well -- the menu
+// frame skips the tic, so a held key moves nobody while the menu is up.
 // ==============================================================================================
 
 ns kb {
     // One poll. `stat` is a 1-hex scratch, `code` a 2-hex scratch (both written before they are
     // read, so both are ordinary restore-set cells); `f`/`b`/`l`/`r` are the persistent 1-hex
     // held-key flags, in wireformat.py's key order: forward, back, turn_left, turn_right.
-    def poll stat, code, f, b, l, r, u, mode, bad @ done, legal, hi1, hi2, hi6, hi7, lo0, lo1, lo2, k_mode, mode_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, lo6, lo6_d, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn {
+    def poll stat, code, f, b, l, r, u, ev_enter, ev_esc, ev_up, ev_dn, bad @ done, legal, hi1, hi2, hi6, hi7, lo0, lo1, lo2, k_enter, enter_dn, k_esc, esc_dn, hi8, k_fwd, k_back, k_left, k_right, k_use, lo6, lo6_d, lo7, lo7_s, lo8a, lo8b, lo8c, lo8d, f_up, f_dn, b_up, b_dn, l_up, l_dn, r_up, r_dn, u_up, u_dn {
         hex.input_hex stat
         // 0x0, 0x8 and 0x9 are the ONLY statuses the keyboard device produces. Anything else means
         // this program is not reading a keyboard -- someone piped a file in, or ran it with the
@@ -66,10 +74,10 @@ ns kb {
       hi8:
         hex.if_flags code+dw, 1<<0x8, done, lo8a
 
-      lo0:                                      // 0x0_ : enter (0x0D) toggles the MENU
-        hex.if_flags code, 1<<0xD, done, k_mode
-      lo1:                                      // 0x1_ : esc (0x1B) does the same
-        hex.if_flags code, 1<<0xB, done, k_mode
+      lo0:                                      // 0x0_ : enter (0x0D)
+        hex.if_flags code, 1<<0xD, done, k_enter
+      lo1:                                      // 0x1_ : esc (0x1B)
+        hex.if_flags code, 1<<0xB, done, k_esc
       lo2:                                      // 0x2_ : space (0x20) is M2-R4's USE key
         hex.if_flags code, 1<<0x0, done, k_use
 
@@ -104,12 +112,14 @@ ns kb {
       k_fwd:
         hex.if_flags stat, 0xAAAA, f_up, f_dn
       f_dn: hex.set 1, f, 1
+            hex.set 1, ev_up, 1                 // M7 P1.5: the menu's "up", on the down edge
             ;done
       f_up: hex.zero 1, f
             ;done
       k_back:
         hex.if_flags stat, 0xAAAA, b_up, b_dn
       b_dn: hex.set 1, b, 1
+            hex.set 1, ev_dn, 1                 // M7 P1.5: the menu's "down", on the down edge
             ;done
       b_up: hex.zero 1, b
             ;done
@@ -126,13 +136,18 @@ ns kb {
       r_up: hex.zero 1, r
             ;done
 
-        // M3 -- the MENU TOGGLE. On the DOWN edge only: a key press delivers a down event and an
-        // up event, and toggling on both would land back where it started. `mode` holds 0 or 1,
-        // so xor_by 1 flips it; it is PERSISTED, so the mode survives the frame reset.
-      k_mode:
-        hex.if_flags stat, 0xAAAA, done, mode_dn
-      mode_dn:
-        hex.xor_by mode, 0x1
+        // the MENU's enter and esc. On the DOWN edge only: a key press delivers a down event and
+        // an up event, and acting on both would act twice. M3 toggled `mode` right here; since M7
+        // P1.5 the poll records the event and the menu state machine decides what it means.
+      k_enter:
+        hex.if_flags stat, 0xAAAA, done, enter_dn
+      enter_dn:
+        hex.set 1, ev_enter, 1
+        ;done
+      k_esc:
+        hex.if_flags stat, 0xAAAA, done, esc_dn
+      esc_dn:
+        hex.set 1, ev_esc, 1
       done:
     }
 }

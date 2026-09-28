@@ -35,7 +35,7 @@ from doomfj.mapcompiler import (  # shared geometry (R6)
     thing_live_subsectors, blockmap_candidates,
 )
 from doomfj.things import (baked_thing_mask, drawable_things,   # M14.5: the split SSOT (R6)
-                           vanishable_slots)
+                           skill_absent, vanishable_slots)
 from doomfj.tables import (
     sine_table, tantoangle_table, viewangletox_table, xtoviewangle_table, finetangent_table,
     yslope_table, zlight_table, scalelight_table, distscale_table, LIGHTLEVELS, LIGHTSEGSHIFT,
@@ -1913,15 +1913,36 @@ class ReferenceModel:
                 _drawable = [replace(t, x=px, y=py)
                              for t, (px, py) in zip(_drawable, thing_positions)]
             # M14.5 §3.3: the visibility flags. `thing_hidden` is a set of DRAWABLE indices the
-            # host has removed from the world (picked up, destroyed). Only a baked VANISHABLE thing
-            # has a flag to clear, and asking to hide anything else is a host bug, not a picture.
+            # host has removed from the world (picked up, destroyed). A baked thing can be hidden
+            # only through its flag, so only a baked VANISHABLE one may be named; asking to hide
+            # another baked thing is a host bug, not a picture. M7 P1.5: RUNTIME things may be
+            # named too -- but only as a SKILL's: exactly the runtime things one single-player
+            # skill does not spawn (`things.skill_absent`). That is the only runtime-thing absence
+            # an fj program can draw: the game tier's NEW GAME links the skill's things into their
+            # leaf lists and no others, nothing unlinks a single runtime thing, and the hosted
+            # tiers' `sim.bind_things` links EVERY runtime thing they are sent, every frame.
+            # ⚠ The oracle has no tier, so it cannot refuse a HOSTED gate that names a skill's set
+            # (that gate would fail on pixels instead); the hosted gates hide flagged things only
+            # (m14_gate's phase 3), and the skill sets come from the game tier's gates.
             _hidden = frozenset(thing_hidden or ())
             if _hidden:
                 _slots = vanishable_slots(_drawable_spawn, _baked, VANISHABLE_TYPES)
-                _bad = sorted(_hidden - set(_slots))
+                _bad = sorted(di for di in _hidden - set(_slots) if di >= len(_baked) or _baked[di])
                 assert not _bad, (
-                    f"thing_hidden names things {_bad[:8]} that have no visibility flag -- only "
-                    f"BAKED VANISHABLE things do (see doomfj.things.vanishable_slots)")
+                    f"thing_hidden names baked things {_bad[:8]} that have no visibility flag -- "
+                    f"only BAKED VANISHABLE things do (see doomfj.things.vanishable_slots)")
+                _rt_hidden = frozenset(di for di in _hidden if not _baked[di])
+                if _rt_hidden:
+                    from doomfj import gamedata as _gd       # lazy: gamedata imports this module
+                    _by_skill = {s: frozenset(di for di in skill_absent(_drawable_spawn, s)
+                                              if not _baked[di])
+                                 for s in _gd.SKILL_NAMES.values()}
+                    assert _rt_hidden in _by_skill.values(), (
+                        f"thing_hidden names runtime things {sorted(_rt_hidden)[:8]} (of "
+                        f"{len(_rt_hidden)}) that are not one skill's absent set -- fj leaves a "
+                        f"runtime thing out only as NEW GAME at a skill that does not spawn it "
+                        f"(things.skill_absent); the skills' runtime sets have "
+                        f"{sorted(len(v) for v in _by_skill.values())} things")
             # ⚠ BAKED FIRST, THEN RUNTIME, per leaf -- the ONE order fj can produce, because the
             # baked things are call sites emitted in the leaf and the runtime ones are a list walked
             # after them. It is wad order within each class, and at spawn every leaf holds only one

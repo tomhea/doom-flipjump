@@ -72,11 +72,14 @@ def test_the_rows_cover_exactly_the_drawable_things(level):
     things = mw.things("E1M1")
     _t, rows, idx, *_ = _build(level)
     cache = {}
-    want = [i for i, t in enumerate(things) if rm.sprite_art(art, t.type, cache) is not None]
+    from doomfj.things import single_player
+    want = [i for i, t in enumerate(things)
+            if single_player(t) and rm.sprite_art(art, t.type, cache) is not None]
     assert idx == want
     # ⚠ THE INVARIANT IS `idx == want`, not the magnitude. The absolute count follows
-    # reference_model.DROPPED_SPRITE_TYPES (the 25M sprite package): E1M1 has 251 drawable things
-    # with every class enabled and 53 with monsters only. The bound below exists solely to catch
+    # reference_model.DROPPED_SPRITE_TYPES (the 25M sprite package): E1M1 has 225 drawable things
+    # with every class enabled (251 with art, less the 26 multiplayer-only ones: M7 P1.5) and 53
+    # with monsters only. The bound below exists solely to catch
     # the fixture silently emptying, so it tracks the smaller configuration.
     assert len(rows) == len(want) > 40
     for r in rows:
@@ -179,6 +182,25 @@ def test_a_thing_moved_into_another_sector_takes_that_sector_s_floor_and_light(l
     assert moved >= 20, f"only {moved} things could be moved to a differing sector"
 
 
+def test_the_bank_and_the_shade_classes_hold_only_what_a_single_player_game_draws(level):
+    """M7 P1.5 (rule 5): `things.drawable_things` became the single-player universe, and the sprite
+    bank's kinds and the shade-row classes come from it too -- a kind or a (light, height) pair that
+    only a multiplayer-only thing has is baked and never drawn (on E1M1 five kinds exist only among
+    the 26 multiplayer-only pickups). The control: the kinds with art over ALL the map's things are
+    strictly more, so this map tells the two apart."""
+    cfg, rm, mw, art, cmap, lds, sds, secs, spr_base, spr_dw, spr_ldbase, spr_cls = level
+    from doomfj.things import drawable_things
+    things = mw.things("E1M1")
+    drawn, _idx = drawable_things(rm, things, art)
+    kinds = {t.type for t in drawn}
+    every = {t.type for t in things if rm.sprite_art(art, t.type, {}) is not None}
+    assert kinds < every, "no kind is multiplayer-only here -- the check cannot tell"
+    assert set(spr_base) == kinds, sorted(set(spr_base) ^ kinds)
+    pairs = {(rm.wall_lightnum(_thing_sector(rm, cmap, lds, sds, secs, t).light, 0),
+              max(1, rm.sprite_art(art, t.type, {})[4])) for t in drawn}
+    assert set(spr_cls) == pairs, sorted(set(spr_cls) ^ pairs)
+
+
 def test_the_shade_row_bank_must_be_widened_and_by_how_much(level):
     """⚠ THE BLOCKER M14-e HITS, measured rather than discovered as a KeyError mid-build.
 
@@ -241,7 +263,9 @@ def test_the_oracle_renders_the_same_frame_from_explicit_spawn_positions(level):
               near_steps=True, stack_steps=True, things=True, sprite_wad=art, degrade=True)
     st = SimState(sp.x, sp.y, sp.angle, "E1M1")
     base = bytes(rm.render_wall_frame(st, scene, **kw))
-    pos = [(t.x, t.y) for t in mw.things("E1M1") if THING_SPRITE.get(t.type) is not None]
+    from doomfj.things import drawable_things
+    drawable, _ = drawable_things(rm, mw.things("E1M1"), art, {})     # THE index space (R6)
+    pos = [(t.x, t.y) for t in drawable]
     same = bytes(rm.render_wall_frame(st, scene, thing_positions=pos, **kw))
     assert same == base, "explicit spawn positions changed the frame"
     # ⚠ THE CONTROL: moving things must CHANGE the frame, or the parameter is being ignored.
@@ -250,7 +274,6 @@ def test_the_oracle_renders_the_same_frame_from_explicit_spawn_positions(level):
     # M14.5: ... all of the RUNTIME ones. A baked thing is code inside its leaf and has no position
     # on the wire, so moving one here would compare a world fj cannot render.
     from doomfj.things import baked_thing_mask
-    drawable = [t for t in mw.things("E1M1") if THING_SPRITE.get(t.type) is not None]
     baked = baked_thing_mask(rm, scene.cmap, drawable, MONSTER_TYPES)
     assert not all(baked) and any(baked), "the split is degenerate -- this control proves nothing"
     moved = [(x, y) if b else (x + 64, y + 64) for (x, y), b in zip(pos, baked)]
@@ -341,8 +364,14 @@ def test_both_mirrors_build_the_drawable_list_with_the_same_predicate(level):
     cfg, rm, mw, art, *_rest = level
     things = mw.things("E1M1")
 
+    from doomfj.things import single_player
     ssot, _idx = drawable_things(rm, things, art, {})
-    loose = [t for t in things if THING_SPRITE.get(t.type) is not None]
+    # M7 P1.5: "drawable" is ALSO "on some single-player skill" -- the multiplayer-only things leave
+    # the image. The ART half of the predicate is what this test pins, so the loose list takes the
+    # skill half too, and the skill half is pinned on its own below.
+    loose = [t for t in things if single_player(t) and THING_SPRITE.get(t.type) is not None]
+    mp = [t for t in things if not single_player(t) and THING_SPRITE.get(t.type) is not None]
+    assert (len(mp), len(ssot)) == (26, 225), (len(mp), len(ssot))    # E1M1: 26 pickups (census)
     assert [(t.x, t.y, t.type) for t in ssot] == [(t.x, t.y, t.type) for t in loose], \
         "the two predicates already disagree on the shipped art wad"
 

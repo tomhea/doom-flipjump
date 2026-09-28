@@ -1,7 +1,8 @@
 """M2 STANDALONE GATE -- the SHIPPED binary opens a door and the door STAYS open across the reset.
 
-    python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_menu.fjm
+    python scratchpad/m2_std_gate.py --fjm build/doom_e1m1_menu.fjm --labels <its label table>
     python scratchpad/m2_std_gate.py --selftest        # R9: the oracle never presses use
+    python scratchpad/m2_std_gate.py --selftest-restart-doors   # R9: NEW GAME forgets the doors
 
 WHY THIS EXISTS, AND WHAT NO EXISTING GATE COVERS. `m2_r4_gate` proves the door machine works on
 the HOSTED tier -- but there every frame is a fresh image and the gate RELAYS the door cells
@@ -33,6 +34,13 @@ CONTROLS
       `doors.in_use_box_fixed` rather than against the fact that something happened.
   C3  --selftest: the oracle never presses use, so its doors stay shut; every frame from the one
       the door first moves must then differ. A gate that cannot fail is not evidence.
+  C7  STATE-EXACT (M7 P1.5, kill criterion 3): every frame, menu or world, the binary's persisted
+      cells -- the view, `mode`, `menu_scr`, `menu_sel`, and every door's state, direction,
+      sub-step and timer, read at the present through the build's label table
+      (scratchpad/gp/gatestate.py) -- must equal the oracle's after that frame. Pixels alone passed
+      a NEW GAME that left a door's timer or direction behind. --selftest-restart-doors (R9): the
+      oracle's NEW GAME resets the view but NOT the doors, and the state check must reject it on
+      the NEW GAME frame itself.
 """
 import argparse
 import sys
@@ -48,13 +56,15 @@ from doomfj.doors import (DEFAULT_QUANT, compare_stamp, door_states,     # noqa:
                           door_tic, heights_for_states, in_use_box_fixed, initial_states,
                           pass_state, read_stamp, stamp_path, use_boxes_xy)
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
+from doomfj.menu import MENU_KEYS, menu_step                              # noqa: E402
 from doomfj.mapcompiler import bake_bsp                                   # noqa: E402
 from doomfj.reference_model import (ANGLE_TURN, ReferenceModel, build_scene,  # noqa: E402
                                     _signed,          # noqa: E402
                                     spawn_state)
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
-from doomfj.wall_renderer import STANDALONE_POLLS                         # noqa: E402
+from doomfj.things import skill_hidden                                    # noqa: E402
+from doomfj.wall_renderer import BOOT_SKILL, SKILLS, STANDALONE_POLLS     # noqa: E402
 from doomfj.wireformat import KEY_NAMES                                   # noqa: E402
 from flipjump.interpreter.io_devices.KeyboardIO import (KeyboardIO, KeyEvent,   # noqa: E402
                                                         ScriptedKeyEventSource)
@@ -63,14 +73,25 @@ from flipjump.interpreter.io_devices.device_memory import NativeDeviceMemory   #
 from flipjump.interpreter.io_devices.pygame_window import PcIO                 # noqa: E402
 from flipjump.utils.exceptions import IOReadOnEOF                              # noqa: E402
 
-ENTER = 0x0D
+ENTER, ESC = 0x0D, 0x1B
+# M7 P1.5: the key every driver leaves the menu with, into the world at the BOOT state. The main
+# menu's esc resumes the world -- as it has since M3, when enter and esc both toggled `mode` --
+# while enter now opens the skill screen. So esc means the same on every binary, before P1.5 and
+# after, and a driver needs no switch per binary. `menu_exit_events` is the ONE composition.
+MENU_EXIT = ESC
 K_FWD, K_BACK, K_LEFT, K_RIGHT, K_USE = 0x77, 0x73, 0x61, 0x64, 0x20
 BINDING = {K_FWD: "forward", K_BACK: "back", K_LEFT: "turn_left",
            K_RIGHT: "turn_right", K_USE: "use"}
 CODE = {"forward": K_FWD, "back": K_BACK, "turn_left": K_LEFT,
         "turn_right": K_RIGHT, "use": K_USE}
 
-MENU_FRAMES = 2                 # frames 0..1 are the menu; enter is pressed on frame 1
+MENU_FRAMES = 2                 # frames 0..1 are the menu; MENU_EXIT lands on frame 2's polls
+
+
+def menu_exit_events():
+    """the MENU_EXIT press that leaves the boot menu on the first route frame -- every driver's"""
+    return [KeyEvent(MENU_FRAMES * STANDALONE_POLLS, True, MENU_EXIT),
+            KeyEvent(MENU_FRAMES * STANDALONE_POLLS + 1, False, MENU_EXIT)]
 
 
 class Recording(InMemoryScreen):
@@ -334,26 +355,29 @@ def to_events(per_frame):
 
 def held_per_frame(events, frames):
     """the DEVICE's delivery rule, re-implemented: one event per poll, due once the tic clock
-    reaches it. Returns (key dict, enter-pressed) per frame."""
+    reaches it. Returns (key dict, the frame's MENU EVENTS) per frame -- the set of
+    `doomfj.menu.MENU_KEYS` names whose key went DOWN during the frame's polls (kb.poll
+    edge-triggers them), which `doomfj.menu.menu_step` turns into the menu's state."""
     pending = sorted(events, key=lambda e: e.tic)
     held = {name: False for name in KEY_NAMES}
-    out, enters, i = [], [], 0
-    enter_this_frame = False
+    out, menu_events, i = [], [], 0
+    this_frame = set()
     for tic in range(frames * STANDALONE_POLLS):
-        while i < len(pending) and pending[i].tic <= tic:
+        # ONE event per poll: the device delivers at most one per tic, which is what makes a burst
+        # of events spill into later polls (and frames) exactly as it does in the program
+        if i < len(pending) and pending[i].tic <= tic:
             ev = pending[i]
             i += 1
-            if ev.keycode == ENTER:
-                enter_this_frame |= ev.is_down          # DOWN edge only -- kb.poll edge-triggers
-                continue
+            if ev.is_down and ev.keycode in MENU_KEYS:
+                this_frame.add(MENU_KEYS[ev.keycode])
             name = BINDING.get(ev.keycode)
             if name is not None:
                 held[name] = ev.is_down
         if tic % STANDALONE_POLLS == STANDALONE_POLLS - 1:
             out.append(dict(held))
-            enters.append(enter_this_frame)
-            enter_this_frame = False
-    return out, enters
+            menu_events.append(frozenset(this_frame))
+            this_frame = set()
+    return out, menu_events
 
 
 def run_fj(fjm, events, frames, screen_factory=Recording):
@@ -386,6 +410,9 @@ def run_fj(fjm, events, frames, screen_factory=Recording):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fjm", default="build/doom_e1m1_menu.fjm")
+    ap.add_argument("--labels", default=None,
+                    help="the build's label table (build_labeled.py --labels) -- the state check "
+                         "reads the persisted cells through it; the gate refuses to run without it")
     ap.add_argument("--wad", default="tests/fixtures/freedoom_e1m1.wad")
     ap.add_argument("--map", default="E1M1")
     ap.add_argument("--asset", default="assets/freedoom1.wad")
@@ -398,13 +425,20 @@ def main():
     ap.add_argument("--walk", type=int, default=8,
                     help="frames to walk FORWARD through the opened doorway (the collision half)")
     ap.add_argument("--idle", type=int, default=6,
-                    help="frames to stand on the far side while the door starts to shut")
+                    help="frames to stand facing the door after NEW GAME's replay of the walk (M7 "
+                         "P1.5; the door starts to shut during `through`)")
     ap.add_argument("--plan", action="store_true", help="print the planned route and exit")
     ap.add_argument("--dry", action="store_true",
                     help="step the ORACLE alone through the script (no fj, no rendering) and "
                          "report the door states -- proves the script is not vacuous for 2 seconds "
                          "instead of for a billion ops")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--selftest-restart", action="store_true",
+                    help="R9 for NEW GAME (M7 P1.5): the oracle does NOT restart the level when the "
+                         "skill is picked -- the replay must then fail to match")
+    ap.add_argument("--selftest-restart-doors", action="store_true",
+                    help="R9 for the STATE check (M7 P1.5): the oracle's NEW GAME resets the view "
+                         "but NOT the doors -- the state check must reject the NEW GAME frame")
     args = ap.parse_args()
 
     mw = WadFile.from_path(str(ROOT / args.wad))
@@ -569,21 +603,34 @@ def main():
     print("  CONTROL 0: the planned route crosses no solid linedef: yes (%d frames re-simulated)"
           % len(route))
 
-    script = ([{} for _ in range(MENU_FRAMES)] + route + press + opening + through
-              + [{} for _ in range(args.idle)])
+    script = [{} for _ in range(MENU_FRAMES)] + route + press + opening + through
+    # M7 P1.5 -- NEW GAME PUTS THE LEVEL BACK. Walked through while the door is still OPEN -- it has
+    # started to shut, and the menu frames then hold it where it is, since they tic nothing: enter
+    # opens the menu, enter the skill screen, and enter starts the highlighted skill (the boot
+    # skill, never moved off) -- and the SAME route is walked again, then the idle. The program must
+    # be back at the level start, the player at the spawn and every door shut, so the replay
+    # retraces the first walk frame for frame and ends facing a SHUT door. The replay's first frame
+    # IS the NEW GAME frame (the restart, then that frame's tic), as the first walk's first frame is
+    # the one esc lands on. (MEASURED with --dry on E1M1: door 10 reaches 8, is at 5 when NEW GAME
+    # lands -- its pass state is 4 -- and stays 0 through the replay.)
+    ng_frame = len(script) + 2
+    script += [{}, {}] + route + [{} for _ in range(args.idle)]
     frames = len(script)
-    # enter lands on the FIRST route frame: the poll flips `mode` before the menu branch reads it,
-    # so that frame already renders the world and no frame is spent on the transition.
-    events = to_events(script) + [KeyEvent(MENU_FRAMES * STANDALONE_POLLS, True, ENTER),
-                                  KeyEvent(MENU_FRAMES * STANDALONE_POLLS + 1, False, ENTER)]
-    keys_by_frame, enters = held_per_frame(events, frames)
+    # esc lands on the FIRST route frame: the menu's rules run before the branch reads `mode`, so
+    # that frame already renders the world and no frame is spent on the transition.
+    events = to_events(script) + menu_exit_events() + [
+        KeyEvent(f * STANDALONE_POLLS + k, k == 0, ENTER)
+        for f in (ng_frame - 2, ng_frame - 1, ng_frame) for k in (0, 1)]
+    keys_by_frame, menu_events = held_per_frame(events, frames)
 
     print("fjm    : %s" % args.fjm)
     print("target : door sector %d, use box %s, threshold state %d"
           % (target, boxes[target], passes[target]))
-    print("script : %d menu -> enter -> %d walk to the door -> %d use -> %d open -> %d through "
-          "-> %d idle  (%d frames)"
-          % (MENU_FRAMES, len(route), len(press), args.open_wait, len(through), args.idle, frames))
+    print("script : %d menu -> esc -> %d walk to the door -> %d use -> %d open -> %d through "
+          "-> enter, enter, enter (NEW GAME at the boot skill) -> the %d-frame walk again -> %d "
+          "idle  (%d frames)"
+          % (MENU_FRAMES, len(route), len(press), args.open_wait, len(through), len(route),
+             args.idle, frames))
     print("doorway: line %d %s -> approach %s, then through to %s"
           % (sorted(lines_of[target])[0], door_segs[0],
              tuple(round(v) for v in approach), tuple(round(v) for v in beyond)))
@@ -595,11 +642,12 @@ def main():
         return 0
 
     if args.dry:
-        st, ds, md = sp, initial_states(secs, lds, sds), 1
+        st, ds, md, scr, sel = sp, initial_states(secs, lds, sds), 1, 0, SKILLS.index(BOOT_SKILL)
         for f in range(frames):
             kd = keys_by_frame[f]
-            if enters[f]:
-                md ^= 1
+            md, scr, sel, ng = menu_step(md, scr, sel, menu_events[f])
+            if ng is not None:
+                st, ds = sp, initial_states(secs, lds, sds)
             if md == 1:
                 continue
             inb = in_use_box_fixed(boxes[target], st.x, st.y)
@@ -615,7 +663,14 @@ def main():
                      "  IN BOX" if inb else ""))
         return 0
 
-    got, ops = run_fj(ROOT / args.fjm, events, frames)
+    if not args.labels:
+        print("  CONTROL 7: NO --labels. This gate is byte- AND state-exact (M7 P1.5), and without")
+        print("     the build's label table it cannot read the program's state. Refusing to run.")
+        return 1
+    sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
+    import gatestate as GST
+    got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
+                                            len(order))
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -625,19 +680,41 @@ def main():
     # branches past both tics, which is why the mode mirror comes first here too.
     dstates = initial_states(secs, lds, sds)
     state = sp
-    mode = 1                                            # the binary boots into the menu
-    ok, menu_pics, in_box_when_pressed = True, [], False
-    seen, track = set(), []
+    # the binary boots into the MAIN menu with the boot skill highlighted
+    mode, scr, sel = 1, 0, SKILLS.index(BOOT_SKILL)
+    # M7 P1.5: the game tier boots at BOOT_SKILL's level start, so the oracle hides what that
+    # skill does not spawn -- the one set the emitter baked its lists and flags from
+    hidden = skill_hidden(rm, mw.things(args.map), art, BOOT_SKILL)
+    ok, menu_pics, in_box_when_pressed = True, {}, False
+    seen, track, path = set(), [], {}
     first_move = None
+    before_ng = None                                    # (state, door states) as NEW GAME lands
+    state_bad, state_checked = None, 0                  # CONTROL 7: the first frame whose STATE parts
     print("  frame  keys      door%-4d  fj px vs oracle" % target)
     for f in range(frames):
         kd = keys_by_frame[f]
-        if enters[f]:
-            mode ^= 1
+        mode, scr, sel, ng = menu_step(mode, scr, sel, menu_events[f])
+        if ng is not None:
+            # NEW GAME: the level start of the chosen skill, then this frame's tic (below)
+            assert SKILLS[ng] == BOOT_SKILL, "the script starts the boot skill; m3_gate does the rest"
+            before_ng = (state, dict(dstates))
+            if not args.selftest_restart:               # THE R9 CONTROL skips exactly this
+                state = sp
+                if not args.selftest_restart_doors:     # ...and C7's control skips the doors
+                    dstates = initial_states(secs, lds, sds)
         if mode == 1:                                   # a menu frame tics nothing
-            menu_pics.append(got[f])
-            print("  %5d  %-8s  %6s   (menu frame -- m3_gate judges these)"
-                  % (f, "enter" if enters[f] else "-", "-"))
+            menu_pics.setdefault((scr, sel), set()).add(got[f])
+            sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
+                                                       sel, (dstates[si] for si in order)))
+            state_checked += 1
+            print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
+                  % (f, ",".join(sorted(menu_events[f])) or "-", "-",
+                     "the skill screen" if scr else "the main menu",
+                     "state ok" if not sbad else "!! STATE: " + GST.show(sbad)))
+            if sbad:
+                state_bad = f
+                print("  -- stopping: the program's state parted from the oracle's")
+                break
             continue
         used = bool(kd.get("use")) and not args.selftest
         if kd.get("use") and in_use_box_fixed(boxes[target], state.x, state.y):
@@ -650,19 +727,30 @@ def main():
         state = rm.step_sim(state, kd, scene=build_scene(mw, mw, args.map, open_h, blocked))
         rsc = build_scene(mw, mw, args.map,
                           heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}))
-        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art, **GAME_RENDER_KW))
+        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art, thing_hidden=hidden,
+                                          **GAME_RENDER_KW))
         same = got[f] == want
+        sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
+                                                   (dstates[si] for si in order)))
+        state_checked += 1
+        path[f] = (state.x, state.y, state.angle)
         ok &= same
         d0 = dstates[target][0]
         seen.add(d0)
         track.append((state.x >> 16, state.y >> 16))
         if d0 and first_move is None:
             first_move = f
-        print("  %5d  %-8s  %6d   %s"
+        print("  %5d  %-8s  %6d   %s  %s"
               % (f, "".join(n[0] for n in sorted(kd) if kd[n]) or "-", d0,
                  "BYTE-EXACT" if same else
-                 "!! %d px differ" % sum(a != b for a, b in zip(got[f], want))), flush=True)
-        if not same and not args.selftest:
+                 "!! %d px differ" % sum(a != b for a, b in zip(got[f], want)),
+                 "state ok" if not sbad else "!! STATE: " + GST.show(sbad)), flush=True)
+        if sbad:
+            state_bad = f
+            if same:
+                print("  -- stopping: the program's state parted from the oracle's")
+                break
+        if not same and not (args.selftest or args.selftest_restart or args.selftest_restart_doors):
             # WHICH PICTURE DID THE PROGRAM DRAW? A pixel count says "they differ"; it does not say
             # whether the program rendered the wrong door STATE (a dispatch/timing fault) or the
             # right state wrongly (a rendering fault). Re-render the oracle at every state of the
@@ -676,7 +764,8 @@ def main():
                 alt = {si: dstates[si][0] for si in order}
                 alt[target] = k
                 asc = build_scene(mw, mw, args.map, heights_for_states(secs, lds, sds, alt))
-                pic = bytes(rm.render_wall_frame(state, asc, sprite_wad=art, **GAME_RENDER_KW))
+                pic = bytes(rm.render_wall_frame(state, asc, sprite_wad=art, thing_hidden=hidden,
+                                                 **GAME_RENDER_KW))
                 nd = sum(a != b for a, b in zip(got[f], pic))
                 if nd == 0 or k <= dstates[target][0] + 1:
                     print("     vs oracle with door at state %-2d : %s"
@@ -714,15 +803,39 @@ def main():
             break
 
     print("")
-    menu_same = len(set(menu_pics)) <= 1
+    menu_same = all(len(pics) == 1 for pics in menu_pics.values())
+    # M7 P1.5 -- CONTROL 6, the restart. Non-vacuous only if (a) the door was OPEN when NEW GAME
+    # landed, (b) the replay retraced the first walk frame for frame (the oracle's poses; the
+    # pixels above say fj drew the same ones), and (c) at the replay's last frame the picture
+    # CAN tell a shut door from the one NEW GAME found -- else a restart that left the door alone
+    # would pass here too.
+    ng_open = before_ng is not None and before_ng[1][target][0] >= passes[target]
+    n_replay = sum(1 for k in range(len(route)) if ng_frame + k in path)
+    retraced = n_replay == len(route) and all(
+        path.get(ng_frame + k) == path.get(MENU_FRAMES + k) for k in range(len(route)))
+    tells = False
+    if ng_open and retraced:
+        last = ng_frame + len(route) - 1
+        lx, ly, la = path[last]
+        from doomfj.reference_model import SimState as _SS
+        _st = _SS(lx, ly, la, args.map)
+        _shut = build_scene(mw, mw, args.map, heights_for_states(
+            secs, lds, sds, {si: 0 for si in order}))
+        _found = build_scene(mw, mw, args.map, heights_for_states(
+            secs, lds, sds, {si: before_ng[1][si][0] for si in order}))
+        tells = (bytes(rm.render_wall_frame(_st, _shut, sprite_wad=art, thing_hidden=hidden,
+                                            **GAME_RENDER_KW))
+                 != bytes(rm.render_wall_frame(_st, _found, sprite_wad=art, thing_hidden=hidden,
+                                               **GAME_RENDER_KW)))
     print("  CONTROL 1: door %d reached %d distinct states %s -- %s"
           % (target, len(seen), sorted(seen),
              "carried across the reset" if len(seen) >= 3 else
              "!! NOT ENOUGH: one state is a door that re-shut every frame, which IS the bug"))
     print("  CONTROL 2: use was pressed INSIDE the box: %s" % ("yes" if in_box_when_pressed else
                                                                "!! no -- the script missed"))
-    print("  CONTROL 3: the %d menu frames are identical to each other: %s"
-          % (len(menu_pics), "yes" if menu_same else "!! no -- `mode` is not persisting"))
+    print("  CONTROL 3: the menu frames of each screen are identical to each other (%d screens): %s"
+          % (len(menu_pics), "yes" if menu_same else
+             "!! no -- `mode` / `menu_scr` / `menu_sel` is not persisting"))
     crossed = any(seg_cross(track[i], track[i + 1], a, b)
                   for i in range(len(track) - 1) for a, b in door_segs)
     print("  CONTROL 4: the player's path crosses door %d's own line SEGMENT (%s): %s"
@@ -730,18 +843,47 @@ def main():
              "yes -- and every frame is byte-exact, so fj walked the same path, which its "
              "blocking bit had to clear to allow" if crossed else
              "!! NO -- collision was never tested, this proves the render half only"))
-    vac = len(seen) < 3 or not in_box_when_pressed or not menu_same or not crossed
-    if vac:
+    print("  CONTROL 6: NEW GAME found door %d open (%s), the %d-frame replay retraced the first "
+          "walk (%s), and its last frame can tell the shut door from that one (%s)"
+          % (target, "yes" if ng_open else "!! no", len(route), "yes" if retraced else
+             "!! no -- %d of %d replay frames reached" % (n_replay, len(route)),
+             "yes" if tells else "!! no"))
+    print("  CONTROL 7: every frame's STATE (view, mode, menu_scr, menu_sel, and every door's "
+          "state, direction, sub-step and timer) equals the oracle's: %s"
+          % ("yes, %d frames" % state_checked if state_bad is None and state_checked == frames
+             else "!! no -- frame %s" % state_bad if state_bad is not None
+             else "!! only %d of %d frames were checked" % (state_checked, frames)))
+    vac = (len(seen) < 3 or not in_box_when_pressed or not menu_same or not crossed
+           or not (ng_open and tells))
+    if not args.selftest_restart:
+        vac = vac or not retraced
+    if vac and not (args.selftest or args.selftest_restart):
         print("  !! VACUOUS -- fix the SCRIPT, not the verdict")
     print("")
+    if args.selftest_restart_doors:
+        # rejected for the RIGHT reason: the first STATE that parts is the NEW GAME frame's
+        caught = state_bad == ng_frame
+        print("SELFTEST-RESTART-DOORS (the oracle's NEW GAME keeps the doors): %s"
+              % ("PASS -- the state check rejected the NEW GAME frame %d" % ng_frame if caught else
+                 "!! FAIL -- " + ("it accepted" if state_bad is None else
+                                  "the state parted at frame %s, not %d" % (state_bad, ng_frame))))
+        return 0 if caught else 1
+    if args.selftest_restart:
+        print("SELFTEST-RESTART (the oracle never restarts the level): %s"
+              % ("PASS -- the gate rejected it" if not (ok and state_bad is None)
+                 else "!! FAIL -- it accepted"))
+        return 0 if not (ok and state_bad is None) else 1
     if args.selftest:
         print("SELFTEST (the oracle never presses use, so its doors stay shut): %s"
-              % ("PASS -- the gate rejected it" if not ok else "!! FAIL -- it accepted"))
-        return 0 if not ok else 1
+              % ("PASS -- the gate rejected it" if not (ok and state_bad is None)
+                 else "!! FAIL -- it accepted"))
+        return 0 if not (ok and state_bad is None) else 1
+    state_ok = state_bad is None and state_checked == frames
     print("M2 STANDALONE GATE: %s"
-          % ("PASS -- the shipped binary opens a door and KEEPS it open across the M1 reset"
-             if (ok and not vac) else "FAIL"))
-    return 0 if (ok and not vac) else 1
+          % ("PASS -- the shipped binary opens a door, KEEPS it open across the M1 reset, "
+             "and NEW GAME puts it back; byte- and state-exact on all %d frames" % frames
+             if (ok and state_ok and not vac) else "FAIL"))
+    return 0 if (ok and state_ok and not vac) else 1
 
 
 if __name__ == "__main__":

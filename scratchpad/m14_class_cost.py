@@ -30,6 +30,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT, ROOT / "scratchpad"):
 from doomfj.config import Config                                          # noqa: E402
 import doomfj.reference_model as RM                                       # noqa: E402
 from doomfj.reference_model import MONSTER_TYPES, ReferenceModel          # noqa: E402
+from doomfj.things import drawable_things                                 # noqa: E402
 from doomfj.wad import WadFile                                            # noqa: E402
 
 cfg = Config()
@@ -41,7 +42,7 @@ cmap = bake_bsp(mw, "E1M1")
 
 # every thing the FULL table would draw, with its leaf
 RM.THING_SPRITE = RM.THING_SPRITE_ALL
-allt = [t for t in mw.things("E1M1") if rm.sprite_art(art, t.type, {}) is not None]
+allt = drawable_things(rm, mw.things("E1M1"), art)[0]
 leaf = [rm.point_in_subsector(cmap, t.x, t.y) for t in allt]
 print(f"{len(allt)} drawable things with every class enabled")
 

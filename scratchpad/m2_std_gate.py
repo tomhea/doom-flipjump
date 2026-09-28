@@ -694,6 +694,9 @@ def main():
     dps = dp.initial()
     dstates = dps[0]
     state = sp
+    # M7 P2a.2: use held last tic (baked 1: G_PlayerReborn), and the level not done -- the route
+    # never reaches the exit (p2a_gate's S8 does)
+    pusedn, lvdone = 1, 0
     # the binary boots into the MAIN menu with the boot skill highlighted
     mode, scr, sel = 1, 0, SKILLS.index(BOOT_SKILL)
     # M7 P1.5: the game tier boots at BOOT_SKILL's level start, so the oracle hides what that
@@ -720,11 +723,12 @@ def main():
                 if not args.selftest_restart_doors:     # ...and C7's control skips the doors
                     dps = dp.initial()
                     dstates = dps[0]
+                pusedn, lvdone = 1, 0
         if mode == 1:                                   # a menu frame tics nothing
             menu_pics.setdefault((scr, sel), set()).add(got[f])
             sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
                                                        sel, (dstates[si] for si in order),
-                                                       dps, order))
+                                                       dps, order, (lvdone, pusedn)))
             state_checked += 1
             print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
                   % (f, ",".join(sorted(menu_events[f])) or "-", "-",
@@ -740,6 +744,7 @@ def main():
             in_box_when_pressed = True
         dps, state = tic(dps, state, kd, used)
         dstates = dps[0]
+        pusedn = int(bool(kd.get("use")))           # the binary's duse: the key held, not `used`
         rsc = build_scene(mw, mw, args.map,
                           heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}))
         want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
@@ -747,7 +752,8 @@ def main():
                                           **GAME_RENDER_KW))
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
-                                                   (dstates[si] for si in order), dps, order))
+                                                   (dstates[si] for si in order), dps, order,
+                                                   (lvdone, pusedn)))
         state_checked += 1
         path[f] = (state.x, state.y, state.angle)
         ok &= same

@@ -54,6 +54,9 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
 from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
 from doomfj.doorcode import card_pickup_lines, walkover_lines   # M7 P2a.1
 from doomfj.doors import door_kinds, walkover_triggers                    # M7 P2a.1
+from doomfj.doors import exit_boxes                                        # M7 P2a.2
+from doomfj.doorcode import _box_test                                     # M7 P2a.2: the exit's box
+from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
@@ -346,6 +349,11 @@ DEFAULT_MENU_SELECTED = 2
 SKILL_MENU = ["CHOOSE SKILL", "", "EASY", "MEDIUM", "HARD"]
 SKILL_MENU_FIRST = 2
 
+# M7 P2a.2 -- the LEVEL COMPLETE screen the exit switch opens (docs/gp-exit.md; menu_scr =
+# menu.LEVEL_DONE_SCR), its last line highlighted
+LEVEL_DONE_MENU = ["LEVEL COMPLETE", "", "PRESS ENTER"]
+LEVEL_DONE_SELECTED = 2
+
 # M7 P1.5 -- the menu's own cells, declared with the standalone tier's globals below (so
 # scratchpad/m5_setfile.py re-attaches them to the restore set at exactly these widths, as it does
 # `mode`). `menu_scr` (0 = the main menu, 1 = the skill screen) and `menu_sel` (the highlighted
@@ -356,6 +364,9 @@ SKILL_MENU_FIRST = 2
 # residue, restored like any other.
 MENU_STATE_DECLS = [
     "menu_scr: hex.vec 1, 0", f"menu_sel: hex.vec 1, {SKILLS.index(BOOT_SKILL)}",
+    # M7 P2a.2 (docs/gp-exit.md): the model's g_leveldone (the world frozen) and p_usedown (use held
+    # last tic; 1 at the level start, G_PlayerReborn), persisted like `mode`
+    "lvdone: hex.vec 1, 0", "pusedn: hex.vec 1, 1",
     "ev_enter: hex.vec 1", "ev_esc: hex.vec 1", "ev_up: hex.vec 1", "ev_dn: hex.vec 1",
     "rs_ret: hex.vec w/4",
 ]
@@ -405,6 +416,7 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1) -> t
                  f"    hex.zero {ndoors}, dreq", "    hex.zero 1, pcard",
                  f"    hex.zero {max(nwalk, 1)}, wfired"]
                 if ndoors else []),
+              "    hex.zero 1, lvdone", "    hex.set 1, pusedn, 1",     # M7 P2a.2
               *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
@@ -464,6 +476,8 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
         # -- the frame: the world, or one of the four baked screens
         "hex.if0 1, mode, do_world",
         "hex.if0 1, menu_scr, mf_main",
+        f"hex.if_flags menu_scr, 1<<{LEVEL_DONE_SCR}, mf_nlv, mf_lv",     # M7 P2a.2
+        "mf_nlv:",
         *_skill_dispatch("mf_s"),
         "mf_main:",
         menu_fj(cfg.VIEW_W, cfg.VIEW_H, entries, selected, colours,
@@ -474,6 +488,10 @@ def _menu_lines(cfg, asset_wad, entries, selected: int, restart=None) -> list:
             menu_fj(cfg.VIEW_W, cfg.VIEW_H, SKILL_MENU, SKILL_MENU_FIRST + k, colours,
                     label=f"menu_skill{k}", end_marker=False),
             ";frame_end")],
+        "mf_lv:",
+        menu_fj(cfg.VIEW_W, cfg.VIEW_H, LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, colours,
+                label="menu_level_done", end_marker=False),
+        ";frame_end",
         *common,                           # fcall'd only: every screen above ends in a jump
         "do_world:",
     ]
@@ -491,6 +509,12 @@ def menu_state_lines(restart) -> list:
     return [
         "hex.if0 1, mode, mn_world",
         "hex.if0 1, menu_scr, mn_main",
+        # -- M7 P2a.2: the level-complete screen -- esc or enter: the main menu
+        f"hex.if_flags menu_scr, 1<<{LEVEL_DONE_SCR}, mn_nlv, mn_lv",
+        "mn_lv:",
+        "hex.if0 1, ev_esc, mn_lv1", "hex.zero 1, menu_scr", ";mn_done", "mn_lv1:",
+        "hex.if0 1, ev_enter, mn_done", "hex.zero 1, menu_scr", ";mn_done",
+        "mn_nlv:",
         # -- the skill screen
         "hex.if0 1, ev_esc, mn_s1", ";mn_back", "mn_s1:",
         "hex.if0 1, ev_enter, mn_s2", ";mn_start", "mn_s2:",
@@ -521,8 +545,28 @@ def menu_state_lines(restart) -> list:
     ]
 
 
+def exit_lines(boxes) -> list:
+    """M7 P2a.2 -- the exit switch in fj (docs/gp-exit.md; the model's P_UseLines for special 11):
+    a use PRESS -- `duse` this tic, `pusedn` clear -- sets `pusedn`, and inside any exit box
+    (`doors.exit_boxes`, the doors' inclusive 16.16 test) ends the level: `lvdone` 1 and the
+    LEVEL COMPLETE screen opens (`mode` 1, `menu_scr` LEVEL_DONE_SCR) -- drawn from the NEXT frame,
+    whose menu branch comes before the tics. Use released clears `pusedn`. Runs after the door tic
+    (which writes `duse`) and before the player's move, the model's order."""
+    out = ["hex.if0 1, duse, ex_up",
+           "hex.if0 1, pusedn, ex_press", ";ex_done",
+           "ex_press:", "hex.set 1, pusedn, 1"]
+    for k, box in enumerate(boxes):
+        out += _box_test(f"x{k}", box, "ex_hit", f"ex_miss{k}") + [f"ex_miss{k}:"]
+    out += [";ex_done",
+            "ex_hit:", "hex.set 1, lvdone, 1", "hex.set 1, mode, 1",
+            f"hex.set 1, menu_scr, {LEVEL_DONE_SCR}", ";ex_done",
+            "ex_up:", "hex.zero 1, pusedn",
+            "ex_done:"]
+    return out
+
+
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
-                            menu: list | None = None, door_lines=()) -> list:
+                            menu: list | None = None, door_lines=(), exit_boxes_=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -552,6 +596,9 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
         # M2-R4: the use key is bit 4, i.e. the HIGH nibble's bit 0 -- see wireformat.KEY_USE.
         "hex.if0 1, kb_u, sa_nu", "hex.xor_by pkeys + dw, 0x1", "sa_nu:",
         *(menu or []),                     # M3: the menu frame + the branch past the world
+        # M7 P2a.2: a finished level is FROZEN -- no door tic, no player tic (the model's frozen
+        # tic); the frame draws the world where it stopped
+        *(["hex.if0 1, lvdone, lv_live", ";lv_frozen", "lv_live:"] if exit_boxes_ else []),
         # M2-R4: the use key -> `duse`, then one tic of every door. THE DOORS TIC FIRST, before
         # the player moves: it is what lets a door opened this frame be walked through on the same
         # frame, and both mirrors have to agree on the order or they disagree about that frame.
@@ -559,7 +606,9 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
            f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, duse_nos, duse_yess",
            f"duse_yess:", "hex.xor_by 1, duse, 1",
            f"duse_nos:", *door_lines] if door_lines else []),
+        *(exit_lines(exit_boxes_) if exit_boxes_ else []),
         *_player_sim_lines(collide),
+        *(["lv_frozen:"] if exit_boxes_ else []),
         *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
         *_int_part_lines("vy", "viewy", "vysx", "vydone"),
         # ... and NO echo. There is no host to relay the state, which is the whole point.
@@ -2099,8 +2148,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart)
                    if menu else None)
+    # M7 P2a.2: the exit switch, where the game has a menu to open and doors (its use key, `duse`)
+    _exit = (exit_boxes(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
+             else [])
     pass1 = [
-        *(_standalone_input_lines(collide, menu=_menu_block, door_lines=_door_tic)
+        *(_standalone_input_lines(collide, menu=_menu_block, door_lines=_door_tic,
+                                  exit_boxes_=_exit)
           if standalone else
           _state_wire_lines(sim=player_sim, collide=collide,
                             door_lines=_door_tic)),

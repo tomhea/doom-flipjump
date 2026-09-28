@@ -94,7 +94,10 @@ def test_only_the_skill_menu_is_optional(tmp_path):
     for one in ("dreq", "pcard", "wfired"):
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))
-    assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel", "dreq", "pcard", "wfired"}
+    for one in ("lvdone", "pusedn"):
+        with pytest.raises(KeyError, match="come together"):
+            _table(tmp_path, drop=(one,))
+    assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel", "dreq", "pcard", "wfired", "lvdone", "pusedn"}
 
 
 def test_a_table_before_p2a1_loads_and_its_door_cells_are_dropped(tmp_path):
@@ -115,3 +118,19 @@ def test_a_table_with_the_door_cells_probes_them(tmp_path):
     assert p.check_known(_known()) == []
     assert [b[0] for b in p.check_known(dict(_known(), pcard=1))] == ["pcard"]
     assert [b[0] for b in p.check_known(dict(_known(), dreq=(0, 1, 0)))] == ["dreq"]
+
+
+def test_a_table_before_p2a2_loads_and_its_exit_cells_are_dropped(tmp_path):
+    """M7 P2a.2: a binary before the rung has no lvdone / pusedn; the probe drops them"""
+    table = _table(tmp_path, drop=("lvdone", "pusedn"))
+    assert table.absent == {"lvdone", "pusedn"}
+    known = _known()
+    assert (known["lvdone"], known["pusedn"]) == (0, 1)
+    p = _probe_holding(table, known)
+    assert p.absent == {"lvdone", "pusedn"} and p.check_known(known) == []
+
+
+def test_a_table_with_the_exit_cells_probes_them(tmp_path):
+    p = _probe_holding(_table(tmp_path), _known())
+    assert [b[0] for b in p.check_known(dict(_known(), pusedn=0))] == ["pusedn"]
+    assert [b[0] for b in p.check_known(dict(_known(), lvdone=1))] == ["lvdone"]

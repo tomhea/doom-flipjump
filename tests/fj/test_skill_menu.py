@@ -31,7 +31,7 @@ from flipjump.interpreter.io_devices.KeyboardIO import KeyboardIO, KeyEvent, Scr
 from doomfj.config import Config
 from doomfj.doorcode import WAIT_NIBBLES
 from doomfj.harness import W
-from doomfj.menu import MENU_KEYS, menu_step
+from doomfj.menu import LEVEL_DONE_SCR, MENU_KEYS, menu_step
 from doomfj.things import spawn_leaf_lists
 from doomfj.wall_renderer import (BOOT_SKILL, MENU_STATE_DECLS, SKILLS, menu_state_lines,
                                   restart_lines)
@@ -61,8 +61,9 @@ HEX_TARGETS = [("viewx", 8, 1), ("viewy", 8, 1), ("viewangle", 8, 1),
                ("dstate", NDOORS, 1), ("ddir", NDOORS, 1), ("dsub", NDOORS, 1),
                ("dwait", WAIT_NIBBLES * NDOORS, 1),
                ("thss_rt", 16, NT), ("thpos_rt", 16, NT), ("thvis", 2, NVIS),
-               # M7 P2a.1's door cells (restart_lines' nwalk=1: one W1 bit)
-               ("dreq", NDOORS, 1), ("pcard", 1, 1), ("wfired", 1, 1)]
+               # M7 P2a.1's door cells and P2a.2's exit cells (restart_lines' nwalk=1: one W1 bit)
+               ("dreq", NDOORS, 1), ("pcard", 1, 1), ("wfired", 1, 1), ("lvdone", 1, 1),
+               ("pusedn", 1, 1)]
 BYTE_TARGETS = [("sshead", NSS), ("thnext", NT)]
 FIELDS = "msv " + " ".join([f"{lb}[{i}]" for lb, _n, c in HEX_TARGETS for i in range(c)]
                            + [f"{lb}[{i}]" for lb, c in BYTE_TARGETS for i in range(c)])
@@ -72,7 +73,9 @@ DIRTY = {"viewx": [0x12345678], "viewy": [0x0BADF00D], "viewangle": [0x76543210]
          "dstate": [0x33], "ddir": [0x21], "dsub": [0x55], "dwait": [0x9A9A],
          "thss_rt": [0x9999, 0x8888, 0x7777], "thpos_rt": [0x1111, 0x2222, 0x3333],
          "thvis": [0x5A, 0xA5], "sshead": [0xA5, 0x5A], "thnext": [0x77, 0x66, 0x55],
-         "dreq": [0x11], "pcard": [1], "wfired": [1]}
+         "dreq": [0x11], "pcard": [1], "wfired": [1], "lvdone": [1], "pusedn": [0]}
+# the menu's own declarations less the exit's two cells, which the harness declares DIRTY
+MENU_DECLS_CLEAN = [d for d in MENU_STATE_DECLS if not d.startswith(("lvdone:", "pusedn:"))]
 
 
 def level_start(k) -> dict:
@@ -82,7 +85,7 @@ def level_start(k) -> dict:
             "dstate": [0], "ddir": [0], "dsub": [0], "dwait": [0],
             "thss_rt": list(BINDS), "thpos_rt": list(POS), "thvis": list(vis),
             "sshead": list(head), "thnext": list(nxt),
-            "dreq": [0], "pcard": [0], "wfired": [0]}
+            "dreq": [0], "pcard": [0], "wfired": [0], "lvdone": [0], "pusedn": [1]}
 
 
 def _dump():
@@ -108,7 +111,7 @@ def _fmt(st) -> str:
                     + ["%02x" % v for label, _c in BYTE_TARGETS for v in st[label]])
 
 
-def _program(state_lines, common):
+def _program(state_lines, common, scr0=0):
     cells = []
     for label, n, _count in HEX_TARGETS:
         cells += [f"{label}:"] + [f"    hex.vec {n}, {v}" for v in DIRTY[label]]
@@ -128,7 +131,8 @@ def _program(state_lines, common):
         "tm_done:", "    stl.loop",
         "bad:", "    stl.output_char 0x21", "    stl.loop",
         *common,                                        # fcall'd only
-        "mode: hex.vec 1, 1", *MENU_STATE_DECLS,
+        "mode: hex.vec 1, 1",
+        *[f"menu_scr: hex.vec 1, {scr0}" if d.startswith("menu_scr:") else d for d in MENU_DECLS_CLEAN],
         "kstat: hex.vec 1", "kcode: hex.vec 2", "kb_f: hex.vec 1", "kb_b: hex.vec 1",
         "kb_l: hex.vec 1", "kb_r: hex.vec 1", "kb_u: hex.vec 1",
         "tm_count: hex.vec 2", f"tm_frames: hex.vec 2, {FRAMES}",
@@ -137,9 +141,9 @@ def _program(state_lines, common):
     ]) + "\n"
 
 
-def _assemble(tmp, name, state_lines, common):
+def _assemble(tmp, name, state_lines, common, scr0=0):
     src = tmp / f"{name}.fj"
-    src.write_text(_program(state_lines, common), encoding="utf-8")
+    src.write_text(_program(state_lines, common, scr0), encoding="utf-8")
     consts = Config().emit_fj_consts(tmp / "fj_consts.fj")
     out = tmp / f"{name}.fjm"
     fj.assemble([consts.resolve(), *[p.resolve() for p in SRC], src.resolve()], out,
@@ -153,10 +157,11 @@ def _run(fjm, events):
     return io.get_output(allow_incomplete_output=True).decode("ascii").split("\n")[:FRAMES]
 
 
-def _expected(events):
-    """docs/gp-skill-menu.md's rules in plain Python, frame by frame -> (lines, states)"""
+def _expected(events, scr0=0):
+    """docs/gp-skill-menu.md's rules in plain Python, frame by frame -> (lines, states); `scr0`:
+    the screen the program boots on (LEVEL_DONE_SCR: as the exit switch leaves it)"""
     pending = sorted((KeyEvent(*e) for e in events), key=lambda e: e.tic)
-    st = {"mode": 1, "scr": 0, "sel": SKILLS.index(BOOT_SKILL),
+    st = {"mode": 1, "scr": scr0, "sel": SKILLS.index(BOOT_SKILL),
           **{label: list(v) for label, v in DIRTY.items()}}
     lines, states, index = [], [], 0
     for frame in range(FRAMES):
@@ -211,6 +216,19 @@ SCRIPTS = {
 }
 
 
+# M7 P2a.2 -- from the LEVEL COMPLETE screen (a program booted on it: the exit switch's state)
+LEVEL_DONE_SCRIPTS = {
+    "level complete: nothing held stays": [],
+    "level complete: up / down do nothing": [(0, True, UP), (1, False, UP), (4, True, DOWN),
+                                             (5, False, DOWN)],
+    "level complete: enter -> the main menu -> new game at hard": [
+        (0, True, ENTER), (1, False, ENTER), (4, True, ENTER), (5, False, ENTER),
+        (8, True, ENTER), (9, False, ENTER)],
+    "level complete: esc -> the main menu; esc -> the world": [
+        (0, True, ESC), (1, False, ESC), (4, True, ESC), (5, False, ESC)],
+}
+
+
 def _restart():
     return restart_lines(SPAWN, NDOORS, BINDS, POS, NSS, PER_SKILL)
 
@@ -228,6 +246,32 @@ def test_the_menu_follows_the_rules(shipped, name):
     assert got == want, _first_difference(name, got, want)
 
 
+@pytest.fixture(scope="module")
+def shipped_done(tmp_path_factory):
+    tmp = tmp_path_factory.mktemp("leveldone")
+    common, _ = _restart()
+    return _assemble(tmp, "menu_done", menu_state_lines(_restart()), common, scr0=LEVEL_DONE_SCR)
+
+
+@pytest.mark.parametrize("name", sorted(LEVEL_DONE_SCRIPTS))
+def test_the_level_complete_screen_follows_the_rules(shipped_done, name):
+    ev = LEVEL_DONE_SCRIPTS[name]
+    got, want = _run(shipped_done, ev), _expected(ev, LEVEL_DONE_SCR)[0]
+    assert got == want, _first_difference(name, got, want)
+
+
+def test_a_level_complete_screen_that_ignores_enter_is_caught(tmp_path):
+    """R9: the screen's enter way out dropped must show"""
+    common, _ = _restart()
+    lines = menu_state_lines(_restart())
+    k = lines.index("mn_lv1:")
+    assert lines[k + 1] == "hex.if0 1, ev_enter, mn_done"
+    bad_lines = lines[:k + 1] + [";mn_done"] + lines[k + 2:]
+    bad = _assemble(tmp_path, "lvbad", bad_lines, common, scr0=LEVEL_DONE_SCR)
+    name = "level complete: enter -> the main menu -> new game at hard"
+    assert _run(bad, LEVEL_DONE_SCRIPTS[name]) != _expected(LEVEL_DONE_SCRIPTS[name], LEVEL_DONE_SCR)[0]
+
+
 def test_the_scripts_reach_every_skill_and_every_screen():
     """R9 against a vacuous script set: every skill's WHOLE level start is some script's final state
     (reached from the dirty cells), the scripts pass through the world, the main menu and the skill
@@ -238,6 +282,9 @@ def test_the_scripts_reach_every_skill_and_every_screen():
         assert any(all(r[-1][c] == v for c, v in want.items()) for r in runs.values()), (
             "skill %d's level start is never reached" % k)
     assert {(s["mode"], s["scr"]) for r in runs.values() for s in r} == {(0, 0), (1, 0), (1, 1)}
+    done = {n: _expected(LEVEL_DONE_SCRIPTS[n], LEVEL_DONE_SCR)[1] for n in LEVEL_DONE_SCRIPTS}
+    assert {(s["mode"], s["scr"]) for r in done.values() for s in r} == {
+        (1, LEVEL_DONE_SCR), (1, 0), (1, 1), (0, 0)}
     assert any(any(nxt) for _head, nxt, _vis in PER_SKILL)
     assert any("thnext +" in ln for block in _restart()[1] for ln in block)
     # ... and esc from the world is taken: a frame in the world, then the main menu on esc
@@ -279,6 +326,8 @@ def _broken(name):
         return _drop(common, "viewy", "viewangle"), skills
     if name == "the door cells of P2a.1 are not reset":
         return _drop(common, "dreq", "pcard", "wfired"), skills
+    if name == "the exit's cells are not reset":
+        return _drop(common, "lvdone", "pusedn"), skills
     if name == "no skill links its things":
         return common, [_drop(s, "thnext +") for s in skills]
     assert name == "no skill sets its flags", name
@@ -287,7 +336,7 @@ def _broken(name):
 
 BROKEN = ["the lists are not zeroed", "the doors are not shut", "the positions are not reset",
           "the bindings are not reset", "the view's y and angle are not reset",
-          "the door cells of P2a.1 are not reset",
+          "the door cells of P2a.1 are not reset", "the exit's cells are not reset",
           "no skill links its things", "no skill sets its flags"]
 
 

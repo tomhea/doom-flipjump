@@ -500,6 +500,25 @@ def can_open(kind: str, has_blue: bool) -> bool:
     return has_blue or kind != "blue"
 
 
+# M7 P2a.2 -- the exit switch (S1 exit; E1M1: linedef 407): P_UseLines' box, the doors' trigger
+# box around the line (`use_boxes`' compromise), one per exit line
+EXIT_SPECIALS = frozenset({11})
+
+
+def exit_boxes(lds, verts, rng: int = USE_RANGE) -> list:
+    """`[(x0, y0, x1, y1)]` in map units, one per exit line in linedef order: the line's extent
+    inflated by `rng`. `verts`: (x, y) tuples (a compiled map's) or the wad's Vertex objects. The
+    model's exit (doomfj.combat), every gate oracle and the emitter take the boxes from here."""
+    def xy(v):
+        return (v.x, v.y) if hasattr(v, "x") else (v[0], v[1])
+    out = []
+    for ld in lds:
+        if ld.special in EXIT_SPECIALS:
+            (ax, ay), (bx, by) = xy(verts[ld.v1]), xy(verts[ld.v2])
+            out.append((min(ax, bx) - rng, min(ay, by) - rng, max(ax, bx) + rng, max(ay, by) + rng))
+    return out
+
+
 def walkover_triggers(secs, lds, sds, verts) -> list:
     """`[(door sector, axis, coord, lo, hi)]`, one per walk-over tag, in door-sector order: the
     tag's W1 lines are collinear and axis-aligned on E1M1 (asserted), so each tag is ONE segment --

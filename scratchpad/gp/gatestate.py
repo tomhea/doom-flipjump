@@ -22,7 +22,8 @@ from doomfj.fixedpoint import _signed                                      # noq
 
 STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "dstate", "ddir", "dsub", "dwait",
-               "dreq", "pcard", "wfired")        # M7 P2a.1: doors.DoorPhase's (req, card, fired)
+               "dreq", "pcard", "wfired",        # M7 P2a.1: doors.DoorPhase's (req, card, fired)
+               "lvdone", "pusedn")               # M7 P2a.2: the exit's
 
 
 def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1):
@@ -43,17 +44,20 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
     return r.frames, r.ops, reads
 
 
-def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None) -> dict:
+def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None) -> dict:
     """the oracle's state after a frame, in the cells' own units: the view as signed 16.16, the
     angle's 32 bits, and each door cell a tuple in door order (`doors`: the per-door
     (state, direction, sub-step, timer) tuples, sorted by sector as the binary numbers them).
-    M7 P2a.1: `phase` = a doors.DoorPhase state (its req, card and fired), `order` its door order"""
+    M7 P2a.1: `phase` = a doors.DoorPhase state (its req, card and fired), `order` its door order.
+    M7 P2a.2: `exit_` = (lvdone, pusedn)"""
     doors = list(doors)
     extra = {}
     if phase is not None:
         _ds, fired, req, card = phase
         extra = {"dreq": tuple(int(si in req) for si in order), "pcard": card,
                  "wfired": P.wfired_value(fired)}
+    if exit_ is not None:
+        extra.update({"lvdone": exit_[0], "pusedn": exit_[1]})
     return {**extra, "viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": angle & 0xFFFFFFFF,
             "mode": mode, "menu_scr": scr, "menu_sel": sel,
             "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),

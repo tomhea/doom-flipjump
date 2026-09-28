@@ -168,6 +168,7 @@ def main():
     mode, scr, sel, skill = 1, 0, SKILLS.index(BOOT_SKILL), BOOT_SKILL
     spawn = spawn_state(mw, args.map)
     state, rows = spawn, []
+    pusedn = 1                                      # M7 P2a.2: baked 1; a world tic without use clears it
     pending, i = sorted(events, key=lambda e: e.tic), 0
     for f in range(FRAMES):
         ev = set()
@@ -187,10 +188,13 @@ def main():
             # starts the next skill instead -- the gate must see it.
             skill = SKILLS[(ng + 1) % len(SKILLS)] if args.selftest_skill else SKILLS[ng]
             state = spawn
+        if ng is not None:
+            pusedn = 1                              # the restart block
         if mode == 0:
             state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene)
+            pusedn = 0                              # this script never holds use
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
-                     "ng": ng, "before": before})
+                     "ng": ng, "before": before, "pusedn": pusedn})
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
     state_bad, state_checked = None, 0
@@ -219,7 +223,7 @@ def main():
         same = got[f] == want
         ok &= same
         want_state = GST.oracle_state(state.x, state.y, state.angle, row["mode"], row["scr"],
-                                      row["sel"], doors0, phase0, order)
+                                      row["sel"], doors0, phase0, order, (0, row["pusedn"]))
         if args.selftest_state and row["mode"] == 0 and f >= NEW_GAMES[0]:
             want_state["menu_scr"] ^= 1                 # THE STATE CHECK'S NEGATIVE CONTROL
         sbad = GST.diff(reads[f] if f < len(reads) else None, want_state)

@@ -522,20 +522,23 @@ Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj
   both biases, each side's field order -- to the constants, with a mutant of each; and
   `tests/fj/test_slot_layouts_fj.py` RUNS the fj on both sides. The record's code from its slot
   allocation to the end of its column loop, transplanted verbatim, gets its parameters from the
-  def's own parameter list zipped with the emitter's own argument list -- evaluated from
-  wall_renderer's source for both record bodies, `deg_flag` its bare literal, the other locals
-  placeholders it varies; anything else is refused -- and records things chosen to reach every
-  branch that decides where a byte lands and the operand ranges the shipped sprites reach: columns
+  game tier's EMITTED program -- the emitter run, in its own scope, on the one-room map with things
+  (a lamp alone bakes, so both record bodies are emitted; a monster takes the others into the
+  runtime lists), every `frame.thing_record_body` call zipped with the def's own parameter list,
+  the range's arguments the same in every call or the binding is refused -- and records things
+  chosen to reach every branch that decides where a byte lands and these operand ranges the
+  shipped sprites reach: columns
   across the 16, 64 and 1,024-index bounds, both edge clamps, slot ids 1..255, fragments A and B, B
   refused by `ballow`, both slots spent, hidden columns, a transparent block, a texture step, both
   block strides, y0 either side of zero, u past 15, u * 32 and u * 9 past 255, a block past 0x1000
-  (whose low three nibbles name a transparent block). EVERY byte of
+  (whose low three nibbles name a transparent block), `last_rel` values with a zero low nibble, a
+  300-column left clip. EVERY byte of
   the hot block (pclm through the cell after drawn, 6,785) must then be the constants' layout; from
   memory laid out by the constants, the real seed, step, load and derive must give each field. The
   harness anchors its hot block as the build does (`pad 16384`: one arm5 window) in the real order.
-  52 mutants -- every kind the review rounds found, the reviewer's own edits among them -- each make
+  58 mutants -- every kind the review rounds found, the reviewer's own edits among them -- each make
   it fail, and two edits that move no byte (unreachable filler deleted) must still pass
-  (`p14_cr5_layouts_fj.log`). `tests/fj/test_narrow_reads_fj.py` reads block 0x1003 as well. Not covered: the shipped binary's addresses, and what the record
+  (`p14_cr6_layouts_fj.log`). `tests/fj/test_narrow_reads_fj.py` reads block 0x1003 as well. Not covered: the shipped binary's addresses, and what the record
   computes before its slot allocation -- the gates hold both, against the oracle.
 - **The latent wrong-light ditto** of section 6 is gone with the four-field compare: the ladder
   compares (slot, block).

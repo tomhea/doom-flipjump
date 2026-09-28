@@ -8,17 +8,23 @@ This RUNS the shipped fj and holds every byte and every register to them -- noth
 
   write  The record's code from its slot allocation (`hex.inc 2, gps_nslot`) to the end of its
          column loop, transplanted VERBATIM from frame.thing_record_body into a harness macro, gets
-         its parameters from the def's own parameter list zipped with the emitter's own
-         `frame.thing_record_body ...` arguments -- wall_renderer's f-string, evaluated from its
-         source for both record bodies (mt 1 and 0), `deg_flag` its bare literal; the other locals
-         the f-string names are placeholders, varied, that the transplanted range must not depend
-         on (`record_binding` refuses anything else). It records THINGS -- columns across the 16, 64
+         its parameters from the EMITTER'S OUTPUT: wall_renderer run for the game tier (in a
+         subprocess, so in the emitter's own scope) on the one-room map with things -- a lamp alone,
+         which bakes, so both record bodies are emitted (`thing_leaf`, mt 1; `thing_leaf_b`, mt 0),
+         and a monster with a lamp and a stimpack, which the runtime lists take -- and every
+         `frame.thing_record_body` call it emits zipped with the def's own parameter list. The
+         arguments of the parameters the range uses must be the same in every call, both bodies and
+         both rooms, else the binding is refused (`record_bindings`). Values that only differ with
+         the map (the runtime thing count) are not in the range; one that did would differ between
+         the rooms. It records THINGS -- columns across the 16, 64
          and 1,024-index bounds up to 159, a first column below 0 and a last above 159 (both
          clamps), slot ids 1..255 across 16, fragments A and B, B refused by `ballow`, both slots
          spent, columns a wall hides, a fully transparent block, a texture step that moves the
-         column and its clamp, both block strides (`hdfl`), y0 either side of zero -- and the
-         operand ranges the shipped sprites reach: a last texture column past 16 (the shipped bank
-         goes to 62), u past 15, u * BUCKETS and u * NLD past 255, a block past 0x1000. Then EVERY byte
+         column and its clamp, both block strides (`hdfl`), y0 either side of zero -- and these
+         operand ranges the shipped sprites reach (review rounds 5-6): a last texture column past 16
+         (the shipped bank goes to 62), u past 15, u * BUCKETS and u * NLD past 255, a block past
+         0x1000, `last_rel` values with a zero low nibble (1,375 of the shipped bank's blocks), and a
+         left clip of 300 columns at half a texel a column (frac past five nibbles). Then EVERY byte
          of the hot block -- pclm through the cell after drawn, 6,785 of them -- must be the
          constants' layout of what was recorded: the bytes the layout names hold the fields, drawn
          its walls, and every other byte is still zero.
@@ -95,8 +101,10 @@ THINGS = [(1, -200, 3, 0x0102, 0, 1, 0, 1, 1, 1),
           # where a narrowed op is still exact
           (50, 70, 14, 0x0040, 110, 126, 0x40000, 1, 1, 63),      # u 0..64 by 4, clamped at 62; u*32 to 1,984
           (51, 71, 15, 0x0030, 130, 139, 0x50000, 0, 1, 45),      # hdfl 0: u 0..45 by 5, clamped at 44; u*9 to 396
-          (52, 72, 16, 0x1007, 140, 141, 0, 1, 1, 1)]             # a block past 0x1000 whose low three
+          (52, 72, 16, 0x1007, 140, 141, 0, 1, 1, 1),             # a block past 0x1000 whose low three
                                                                   # nibbles name the transparent 0x0007
+          (53, 73, 17, 0x0060, -300, 9, 0x8000, 1, 1, 63)]        # a left clip of 300 at half a texel:
+                                                                  # frac starts at 0x960000, u clamped at 62
 HIDDEN = {12, 13, 14}
 TRANSPARENT = {0x0007}
 
@@ -113,7 +121,10 @@ def _columns(x1, x2, istep, hdfl, sp_dw, base):
 
 NBLOCKS = 1 + max(b for t in THINGS for _, b in _columns(t[4], t[5], t[6], t[7], t[9], t[3]))
 # each block's header: r0, last_rel (0 = fully transparent), the rest zero
-HEADER = {b: (5 + b % 7, 0 if b in TRANSPARENT else 9 + b % 5) for b in range(NBLOCKS)}
+# (last_rel on every third block a multiple of 16, as 1,375 of the shipped bank's are: a test that
+# reads one nibble of it would call those blocks transparent)
+HEADER = {b: (5 + b % 7, 0 if b in TRANSPARENT else 16 * (1 + b % 6) if b % 3 == 0 else 9 + b % 5)
+          for b in range(NBLOCKS)}
 # the read side's columns: (seed column, steps) -- empty, A, A+B, across the index bounds
 LOADS = [(0, 0), (1, 0), (2, 0), (3, 0), (10, 0), (12, 0), (15, 0), (16, 0), (17, 0), (31, 0),
          (36, 1), (44, 0), (62, 0), (63, 1), (64, 0), (157, 0), (158, 0), (159, 0), (100, 0), (13, 3),
@@ -187,40 +198,70 @@ GLOBALS = ({d.split(":")[0].strip() for d in wr.hoisted_scratch_decls(CFG)}
 
 
 class BindingRefused(Exception):
-    """the emitter's call does not give the transplanted range ONE set of values"""
+    """the emitter's output does not give the transplanted range ONE set of values"""
 
 
-# the locals the emitter's f-string names that the test does not reproduce: placeholders, each
-# evaluated at two values -- the transplanted range's arguments must not move with them
-PLACEHOLDERS = [dict(proj=0x11111, _MT_NTH=1, _MT_NLTI=1, ablate=frozenset()),
-                dict(proj=0x2222222, _MT_NTH=3, _MT_NLTI=5, ablate=frozenset({"thingtwice"}))]
+# the rooms the emitter is run on: a lamp alone bakes (the game tier then emits both record bodies);
+# a monster takes the room's one leaf, and the lamp and stimpack with it, into the runtime lists
+ROOMS = [[(64, 64, 2028)], [(64, 64, 3004), (128, 128, 2028), (192, 192, 2011)]]
+EMIT = r"""
+import ast
+import sys
+sys.path.insert(0, sys.argv[1])
+from doomfj import wall_renderer as wr
+from doomfj.config import Config
+from doomfj.wad import Thing, WadFile
+for i, room in enumerate(ast.literal_eval(sys.argv[5])):
+    mw = WadFile.from_path(sys.argv[2])
+    base = mw.things
+    mw.things = lambda name, base=base, room=room: base(name) + [Thing(x, y, 0, t, 7) for x, y, t in room]
+    parts = wr.emit_wall_renderer(mw, "MAP01", Config(), tier="game", asset_wad=WadFile.from_path(sys.argv[3]),
+                                  sprite_wad=WadFile.from_path(sys.argv[4]), return_parts=True)
+    label = None
+    for _n, text in parts:
+        for line in text.splitlines():
+            line = line.strip()
+            if line.endswith(":") and line.startswith("thing_leaf"):
+                label = line[:-1]
+            if line.startswith("frame.thing_record_body "):
+                print("%d\t%s\t%s" % (i, label, line))
+"""
+
+
+def emitted_calls(emitter_text):
+    """every (room, leaf label, `frame.thing_record_body ...` line) the game tier's emitter gives on
+    ROOMS -- run in a subprocess on a copy of src/ whose wall_renderer.py is `emitter_text`"""
+    import shutil
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        shutil.copytree(ROOT / "src", Path(t) / "src")
+        (Path(t) / "src" / "doomfj" / EMITTER).write_text(emitter_text, encoding="utf-8")
+        r = subprocess.run([sys.executable, "-c", EMIT, str(Path(t) / "src"),
+                            str(ROOT / "tests/fixtures/square_room.wad"),
+                            str(ROOT / "tests/fixtures/freedoom_assets.wad"),
+                            str(ROOT / "assets/freedoom1.wad"), repr(ROOMS)],
+                           capture_output=True, text=True, timeout=600)
+    if r.returncode:
+        raise BindingRefused("the emitter did not run: %s" % r.stderr.strip()[-300:])
+    return [tuple(line.split("\t", 2)) for line in r.stdout.splitlines() if line.count("\t") == 2]
 
 
 def record_bindings(frame_text, emitter_text):
-    """every binding of thing_record_body's parameters the emitter's text can give: the def's own
-    parameter list (frame_render.fj) zipped with the emitter's own argument list --
-    wall_renderer's `frame.thing_record_body ...` f-string, evaluated from its source with its
-    module constants, `deg_flag` as its one bare literal, for BOTH record bodies (mt 1, the runtime
-    table; mt 0, the baked leaf -- `_thing_leaf_body` instantiates both in the game tier) and at
-    each PLACEHOLDERS value. Anything else is refused: this reads the emitter, it does not model it."""
+    """every binding of thing_record_body's parameters the game tier's EMITTED program gives: the
+    def's own parameter list (frame_render.fj) zipped with each emitted call's arguments. Both
+    record bodies must be emitted (the lamp-alone room gives `thing_leaf` and `thing_leaf_b`)."""
     m = re.search(r"^    def thing_record_body (.*?)^\s*@", frame_text, re.M | re.S)
     params = [p.strip() for p in m.group(1).replace("\\", " ").split(",")]
-    a = emitter_text.index('f"frame.thing_record_body ')
-    call_src = emitter_text[a:emitter_text.index("]", a)]
-    deg = re.findall(r"^\s*deg_flag = ([^#\n]*?)\s*(?:#.*)?$", emitter_text, re.M)
-    if len(deg) != 1 or not deg[0].isdigit():
-        raise BindingRefused("deg_flag is not one bare literal: %r" % deg)
-    if emitter_text.count("_thing_leaf_body(") < 2:
-        raise BindingRefused("the emitter's record bodies are not the two this binds")
+    calls = emitted_calls(emitter_text)
+    if {lab for _r, lab, _c in calls} != {"thing_leaf", "thing_leaf_b"}:
+        raise BindingRefused("the game tier emitted record bodies %s, not thing_leaf and thing_leaf_b"
+                             % sorted({lab for _r, lab, _c in calls}))
     out = []
-    for mt in (1, 0):
-        for ph in PLACEHOLDERS:
-            ns = dict(vars(wr), cfg=CFG, deg_flag=int(deg[0]), mt=mt, **ph)
-            call = eval("(" + call_src + ")", ns)               # the emitter's own text, nothing else
-            args = [x.strip() for x in call[len("frame.thing_record_body "):].split(",")]
-            if len(args) != len(params):
-                raise BindingRefused("%d arguments for %d parameters" % (len(args), len(params)))
-            out.append(dict(zip(params, args)))
+    for _room, _label, call in calls:
+        args = [x.strip() for x in call[len("frame.thing_record_body "):].split(",")]
+        if len(args) != len(params):
+            raise BindingRefused("%d arguments for %d parameters" % (len(args), len(params)))
+        out.append(dict(zip(params, args)))
     return out
 
 
@@ -236,7 +277,7 @@ def transplant(frame_text, emitter_text):
     for p in params:
         seen = {b[p] for b in bindings}
         if len(seen) != 1:
-            raise BindingRefused("the record bodies or a placeholder bind %s to %s" % (p, sorted(seen)))
+            raise BindingRefused("the emitted calls bind %s to %s" % (p, sorted(seen)))
     bound = bindings[0]
     macro = ("ns frame {\n    def lay_rec %s @ %s < %s {\n%s      ret:\n    }\n}\n"
              % (", ".join(params), ", ".join(labels + ["ret"]), ", ".join(sorted(words & GLOBALS)), code))
@@ -401,10 +442,15 @@ def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
     # half a texel a column: u moves every second column, so the block does at 32, 34, 36 (clamped)
     assert spslot[32 * STRIDE + 1] != spslot[30 * STRIDE + 1], "the texture step moved no block"
     assert spslot[44 * STRIDE + 1] != spslot[40 * STRIDE + 1], "the nld stride moved no block"
-    # ... and the shipped ranges were reached: u*32 and u*9 past 255, a block past 0x1000
-    blocks = [spslot[x * STRIDE + 1] | spslot[x * STRIDE + 2] << 8 for x in range(VIEW_W) if sprflag[x]]
-    assert max(blocks) >= 0x1000 and any(b - 0x40 > 255 for b in blocks if 0x40 <= b < 0x1000)
-    assert spslot[139 * STRIDE + 1] | spslot[139 * STRIDE + 2] << 8 == 0x30 + 44 * NLD
+    # ... and each shipped range was reached, by the thing that is there for it
+    def block(x):
+        return spslot[x * STRIDE + 1] | spslot[x * STRIDE + 2] << 8
+    assert block(126) == 0x40 + 62 * BUCKETS, "u clamped at 62: u * BUCKETS past 255"
+    assert block(139) == 0x30 + 44 * NLD, "u clamped at 44: u * NLD past 255"
+    assert block(140) == 0x1007, "a block past 0x1000"
+    assert block(4) == 0x60 + 62 * BUCKETS, "the 300-column left clip: frac past five nibbles, u 62"
+    assert any(HEADER[b][1] % 16 == 0 and HEADER[b][1] for b in map(block, range(VIEW_W)) if b in HEADER), \
+        "no recorded block has a last_rel with a zero low nibble"
 
 
 def test_the_load_and_the_derive_read_every_field_where_the_constants_say(tmp_path):
@@ -488,6 +534,21 @@ MUTANTS = [
      "hex.cmp 2, trb_u, trb_dw_max, col_check, col_check, u_clamp", "hex.cmp 1, trb_u, trb_dw_max, col_check, col_check, u_clamp"),
     ("r5: blk_addr places three nibbles", "write", FR,
      "hex.mov 4, gps_boff + 3*dw, blk", "hex.mov 3, gps_boff + 3*dw, blk"),
+    # the review's round-6 edits
+    ("r6: deg 0 for the standalone tier, after the literal", "write", EMITTER,
+     "    deg_flag = 1                                # 25M-CAP: load-adaptive degradation package\n",
+     "    deg_flag = 1                                # 25M-CAP: load-adaptive degradation package\n"
+     "    if standalone: deg_flag = 0\n"),
+    ("r6: the record body's own deg default", "write", EMITTER,
+     "    def _thing_leaf_body(label, mt):", "    def _thing_leaf_body(label, mt, deg_flag=0):"),
+    ("r6: the record body's own slot-stride default", "write", EMITTER,
+     "    def _thing_leaf_body(label, mt):", "    def _thing_leaf_body(label, mt, SPR_SLOT_STRIDE=32):"),
+    ("r6: the transparency test one nibble wide", "write", FR,
+     "hex.if0 2, trb_run_last, col_next", "hex.if0 1, trb_run_last, col_next"),
+    ("r6: the left clip's negation two nibbles wide", "write", FR,
+     "hex.neg 8, trb_negx1", "hex.neg 2, trb_negx1"),
+    ("r6: the left clip's product five nibbles wide", "write", FR,
+     "hex.mul_lo 8, trb_frac_u, trb_negx1, trb_tistep", "hex.mul_lo 5, trb_frac_u, trb_negx1, trb_tistep"),
     # the read side
     ("the load's skip to B", "read", FR, "hex.ptr_add spslot_p, 5", "hex.ptr_add spslot_p, 4"),
     ("the load: an increment dropped", "read", FR,

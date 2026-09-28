@@ -50,7 +50,27 @@ down under the player). No run reverses a door. This is a BEHAVIOUR change: by t
 new version, `combat_scenarios_v4.json` -- planned by `--plan --file`, B0 re-measured on it, then
 frozen with THE OWNER's approval.
 
-## 5. What is not here yet
+## 5. The fj side (L2, L3)
 
-The fj side (L1 render proof, L2 runtime movers, L3 triggers and reversal in the binary) and the
-gate oracles' mover phase (they mirror the binary, which has no movers until L2).
+- **The tic** (`doomfj.movercode`): each lift runs `doorcode.machine_lines` -- the doors' own frame
+  generator, now shared (the doors' text byte-identical) -- on `lstate`/`ldir`/`lsub`/`lwait`, taking
+  `lreq` only at state 0 (at rest IS state 0: a lift at its top is always idle with no wait). The
+  lifts tic after the doors, inside the level-done gate.
+- **Triggers**: the WR lines after an accepted move (`doorcode._crossed_lines`, shared with the
+  walk-over doors); the SR lifts and the S1 switch on a use press that misses the exit
+  (`exit_lines(press_miss=)`).
+- **Collision**: a mover line's stub dispatches on its mover's cell into a per-state block that
+  xors that state's opening floor (`collision.mover_line_openings`); a mover leaf's seed floor
+  likewise.
+- **Render**: a mover seg's constants fan out over its mover's states behind the mover's cell
+  (`_seg_mover`/`_seg_cell` generalise the doors' `_seg_door`), so pids, faces, render blocks, the
+  step bank and the dual gate take them unchanged; the eye's viewz/band base and the thing floor
+  `ss_flr` dispatch in the mover leaves; the pillars join the union map lowered.
+- **Reversal** (L3): `doors.touches_door` -- every E1M1 door is an axis-aligned rectangle; the box
+  straddling a two-sided line (strict) or the centre strictly inside -- in the model, the gates'
+  `DoorPhase`, and fj (`doorcode.door_contact_lines` behind `machine_lines(reverse=)`'s pass-step
+  mask). The binary reverses on the player; the model's monsters too (P3 moves them in fj).
+- **State**: `mover_decls`, `build.MOVER_PERSIST`, NEW GAME's zeroes; the probe's fourth optional
+  group; every oracle (m2_std_gate -- whose route RIDES lift 98, the only way out of the start
+  room, standing still while the lift is down --, onewalk.DoorSim, B0's mirror and pokes, p2a_gate
+  S9-S13) runs `movers.MoverPhase`.

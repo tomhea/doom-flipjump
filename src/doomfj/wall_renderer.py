@@ -1945,7 +1945,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             _m_fl = _leaf_mover(s)
             out += [f"    hex.set w/4, cur_ss, {s}",
                     *([f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
-                      _mover_dispatch(f"sfl{s}", _m_fl, lambda sv: [
+                      _mover_dispatch(f"sfl{cid}", _m_fl, lambda sv: [
                           f"    hex.set 4, ss_flr, "
                           f"{rm._seg_sector(lds, sds, sv, cmap.segs[ss.firstseg]).floor_h & 0xFFFF}"])),
                     f"    hex.set 4, ss_ltb, {_MT_LTB[rm.wall_lightnum(psec.light, 0)]}",

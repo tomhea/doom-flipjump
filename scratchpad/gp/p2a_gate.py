@@ -85,6 +85,9 @@ class Mirror:
 
     def __init__(self, dsim: "onewalk.DoorSim", card_di: int, ctl: str | None = None):
         self.sim, self.dp, self.ctl, self.card_di = dsim, dsim.dp, ctl, card_di
+        if ctl == "no_reversal":                  # M7 P2b's control: doors that close on the player
+            self.dp = D.DoorPhase(dsim.secs, dsim.lds, dsim.sds, dsim.mw.vertexes(dsim.mapname),
+                                  dsim.boxes, card_at=dsim.dp.card_at, reversal=False)
         self.exits = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))     # M7 P2a.2
         self.mp = dsim.mp                                                        # M7 P2b
 
@@ -394,6 +397,14 @@ def scenarios(dsim, card) -> list:
         "keys": [F_] * 3 + [I] * 4 + [{"menu": ["esc"]}, {"menu": ["enter"]}, {"menu": ["enter"]}]
         + [I] * 3, "pcard": 0, "controls": ["restart_movers"],
         "claim": lambda tr: tr[6]["movers"][0][k98][0] > 0 and tr[-1]["movers"][0][k98][0] == 0})
+    p10 = dsim.passes[10]
+    out.append({
+        "name": "S13 standing in door 10 as it closes: it goes back up at its pass state",
+        "pose": door_front(dsim, 10), "keys": [U] * 2 + [I] * 8 + [F] * 3 + [I] * 70, "pcard": 0,
+        "controls": ["no_reversal"],
+        "claim": lambda tr: min(fr["phase"][0][10][0] for fr in tr[12:]) == p10
+        and any(a["phase"][0][10][1] == D.CLOSING and b["phase"][0][10][1] == D.OPENING
+                for a, b in zip(tr, tr[1:]))})
     out.append({
         "name": "S8 the exit: a press ends the level; LEVEL COMPLETE; the frozen world; NEW GAME",
         "pose": exit_pose(dsim),

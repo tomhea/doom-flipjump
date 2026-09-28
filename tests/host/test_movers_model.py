@@ -125,8 +125,8 @@ def test_a_door_closing_on_the_player_goes_back_up(w):
     si = 10
     d = w.door_order.index(si)
     x0, y0, x1, y1 = w.door_boxes[si]
-    geo = w._door_line_geo[si][0]
-    mx, my = ((geo[4] + geo[6]) // 2), ((geo[5] + geo[7]) // 2)     # a door line's middle, 16.16
+    axis, coord, lo, hi = w._door_contact[si][1][0]
+    mx, my = (((lo + hi) // 2) << 16, coord << 16) if axis == "y" else (coord << 16, ((lo + hi) // 2) << 16)
     w.teleport_player(mx, my)
     n, p = w.door_nstates[si], w.door_pass[si]
     w.ws.d_state[d], w.ws.d_dir[d], w.ws.d_sub[d], w.ws.d_wait[d] = n - 1, D.IDLE, 0, 1
@@ -153,10 +153,9 @@ def test_a_player_centred_in_a_32_thick_door_touches_it(w):
     the strict bbox test does not count -- the centre-in-the-sector half of the contact rule is
     what holds the door"""
     si = 10
-    ys = sorted({g[5] for g in w._door_line_geo[si]} | {g[7] for g in w._door_line_geo[si]})
-    xs = sorted({g[4] for g in w._door_line_geo[si]} | {g[6] for g in w._door_line_geo[si]})
-    cx, cy = (xs[0] + xs[-1]) // 2, (ys[0] + ys[-1]) // 2
-    assert ys[-1] - ys[0] == 32 << 16 or xs[-1] - xs[0] == 32 << 16
+    x0, y0, x1, y1 = w._door_contact[si][0]
+    cx, cy = ((x0 + x1) // 2) << 16, ((y0 + y1) // 2) << 16
+    assert y1 - y0 == 32 or x1 - x0 == 32
     w.teleport_player(cx, cy)
     assert w.player_sector() == si
     assert w.door_touched(si)
@@ -187,3 +186,47 @@ def test_the_gate_phase_is_the_models_on_a_ride(w):
         deepest.append(st[0][0][0])
     assert max(deepest) == 9 and 0 in deepest[40:56], "the ride: all the way down and back up"
     assert deepest[-1] >= 1, "the SR press at the top starts the second ride"
+
+
+
+def test_the_contact_rule_is_check_positions_straddle_or_the_sector(w):
+    """doors.touches_door (rectangles, strict compares) against the rule it replaces: the box on one
+    of the door's two-sided lines by check_position's own test (bbox, then P_BoxOnLineSide), or the
+    centre's LEAF in the door sector -- at every door, over a grid round it at 16.16 steps that hit
+    the lines' coordinates and their +-radius exactly, wherever a player can STAND (the collision
+    scene with the doors open): in the solid wall beside a door the BSP's point location answers
+    for a void and the two rules may differ, and nothing is ever there to ask"""
+    from doomfj import doors as Dm
+    V = w.cmap.vertexes
+    r16 = 16 << 16
+    checked = touched = 0
+    for si in w.door_order:
+        (x0, y0, x1, y1), _l = w._door_contact[si]
+        segs = [(min(V[w.lds[li].v1][0], V[w.lds[li].v2][0]) << 16, max(V[w.lds[li].v1][0], V[w.lds[li].v2][0]) << 16,
+                 min(V[w.lds[li].v1][1], V[w.lds[li].v2][1]) << 16, max(V[w.lds[li].v1][1], V[w.lds[li].v2][1]) << 16,
+                 V[w.lds[li].v1][0] << 16, V[w.lds[li].v1][1] << 16, V[w.lds[li].v2][0] << 16, V[w.lds[li].v2][1] << 16)
+                for li in w.door_lines.get(si, ())]
+        for gx in range(x0 - 24, x1 + 25, 4):
+            for gy in range(y0 - 24, y1 + 25, 4):
+                for fx in (0, 1, -1):
+                    x16, y16 = (gx << 16) + fx, (gy << 16) - fx
+                    top, bottom, left, right = y16 + r16, y16 - r16, x16 - r16, x16 + r16
+                    old = any(not (right <= a or left >= b or top <= c or bottom >= d)
+                              and w.rm.box_on_line_side((top, bottom, left, right), ax, ay, bx, by) == -1
+                              for (a, b, c, d, ax, ay, bx, by) in segs)
+                    leaf = w.rm.point_in_subsector(w.cmap, x16 >> 16, y16 >> 16)
+                    in_leaf = w.leaf_sector[leaf] == si
+                    inside = (x0 << 16) <= x16 <= (x1 << 16) and (y0 << 16) <= y16 <= (y1 << 16)
+                    if in_leaf and not inside:
+                        # the VOID beside a door: a door leaf is bounded only by the door's segs, so
+                        # point location answers "the door" for the solid wall around it (MEASURED:
+                        # door 10's leaf 156 holds (744, 528)); walls enclose it, nothing stands there
+                        continue
+                    if not w.rm.check_position(w.scene_c, x16, y16)[0]:
+                        continue                          # the collision refuses it: never a position
+                    old = old or in_leaf
+                    new = Dm.touches_door(w._door_contact[si], x16, y16, r16)
+                    assert new == old, (si, gx, gy, fx, new, old)
+                    checked += 1
+                    touched += new
+    assert checked > 5000 and 0 < touched < checked

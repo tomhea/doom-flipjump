@@ -54,7 +54,8 @@ def _pr(reg, n):
 
 def door_program(dp, text=None):
     nd = len(dp.order)
-    tic = text if text is not None else door_tic_lines(dp.order, dp.nstates, dp.boxes, dp.kinds)
+    tic = text if text is not None else door_tic_lines(dp.order, dp.nstates, dp.boxes, dp.kinds,
+                                                        contact=dp.contact, passes=dp.passes)
     body = ["stl.startup_and_init_all", "loop:", "hex.input 1, rmagic", "hex.if0 2, rmagic, done",
             "hex.input 4, viewx", "hex.input 4, viewy",
             "hex.input 1, rbyte", "hex.mov 1, duse, rbyte",
@@ -322,6 +323,7 @@ def test_a_mutated_block_fails(tmp_path, lvl, label, prog, old, new):
         assert len(blaze) == 1
         old = old.replace("BLAZE", str(lvl.order.index(blaze[0])))
         sched = door_schedule(lvl)
-        lines = door_tic_lines(lvl.order, lvl.nstates, lvl.boxes, lvl.kinds)
+        lines = door_tic_lines(lvl.order, lvl.nstates, lvl.boxes, lvl.kinds,
+                               contact=lvl.contact, passes=lvl.passes)
         got = _ints(_run(tmp_path, "m", door_program(lvl, _mutated(lines, old, new)), door_feed(lvl, sched)))
         assert got != door_expect(lvl, sched), label

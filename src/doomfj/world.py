@@ -90,6 +90,7 @@ from doomfj import rng as R
 from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (re-export)
 from doomfj.doorcode import door_line_ids
 from doomfj.doors import crossed                                   # M7 P2b: WR lifts
+from doomfj.doors import door_contact_geo, touches_door            # M7 P2b: reversal
 from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states,  # M7 P2b
                            lift_tic, lift_walk_triggers, mover_heights, switch_sectors,
                            use_line_boxes)
@@ -694,11 +695,9 @@ class World(CombatMixin):
             elif (min(secs[fs].ceil_h, secs[bs].ceil_h)
                   - max(secs[fs].floor_h, secs[bs].floor_h)) <= 0:
                 self._sight_walls.append(seg)      # a statically closed opening
-        # M7 P2b: each door's lines' geometry, for the reversal's contact test (`door_touched`)
-        self._door_line_geo = {si: [(mnx, mxx, mny, mxy, ax, ay, bx, by)
-                                    for (li, mnx, mxx, mny, mxy, ax, ay, bx, by, *_r) in self._lines
-                                    if li in self.door_lines.get(si, ())]
-                               for si in self.door_order}
+        # M7 P2b: each door's rectangle and two-sided lines, for the reversal's contact test
+        # (`door_touched`: doors.touches_door, the rule the fj runs)
+        self._door_contact = door_contact_geo(secs, lds, sds, self.mw.vertexes(self.mapname))
         # -- sound regions --------------------------------------------------------------------------
         parent = list(range(len(secs)))
 
@@ -860,24 +859,14 @@ class World(CombatMixin):
         test: the bboxes overlap and the box straddles the line), or its centre in the door sector?
         Barrels never reach a door line on E1M1 (docs/gp-lift-spike.md section 4, MEASURED)."""
         ws = self.ws
-        lines = self._door_line_geo[si]
         things = []
         if self.player_alive():
             things.append((ws.px, ws.py, 16 << 16))
         for m in range(self.layout.nmon):
             if ws.mon_active[m] and ws.mon_health[m] > 0:
                 things.append((ws.mon_x[m] << 16, ws.mon_y[m] << 16, self.mon_radius[m] << 16))
-        for x16, y16, r16 in things:
-            leaf = self.rm.point_in_subsector(self.cmap, x16 >> 16, y16 >> 16)
-            if self.leaf_sector[leaf] == si:
-                return True
-            top, bottom, left, right = y16 + r16, y16 - r16, x16 - r16, x16 + r16
-            for (minx, maxx, miny, maxy, ax, ay, bx, by) in lines:
-                if right <= minx or left >= maxx or top <= miny or bottom >= maxy:
-                    continue
-                if self.rm.box_on_line_side((top, bottom, left, right), ax, ay, bx, by) == -1:
-                    return True
-        return False
+        geo = self._door_contact[si]
+        return any(touches_door(geo, x16, y16, r16) for x16, y16, r16 in things)
 
     def _movers_phase(self, ev: TicEvents) -> None:
         """M7 P2b: one frame of every lift (doomfj.movers.lift_tic) on last tic's triggers, then

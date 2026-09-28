@@ -1,0 +1,155 @@
+# PR #93 review round 8: the slot layouts RUN on both sides, the record's parameters from the emitted program under the scope rule, the range entered with hostile scratch; every mutant fails them, every neutral edit passes -- at m7-sprite-column eec4dce
+$ PYTHONPATH=src python -m pytest tests/fj/test_slot_layouts_fj.py tests/fj/test_narrow_reads_fj.py -n 4 -v -p no:cacheprovider
+tests/fj/test_slot_layouts_fj.py::test_the_record_writes_every_byte_where_the_constants_say 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot offset bumped] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's bias] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: an increment dropped] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: an increment dropped]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_the_record_writes_every_byte_where_the_constants_say  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's bias]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot offset bumped]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment order] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: a step inserted] 
+tests/fj/test_slot_layouts_fj.py::test_the_things_record_what_RECORDED_says 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[slot A falls into slot B] 
+tests/fj/test_slot_layouts_fj.py::test_the_things_record_what_RECORDED_says  PASSED
+tests/fj/test_slot_layouts_fj.py::test_the_load_and_the_derive_read_every_field_where_the_constants_say 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment order]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_the_load_and_the_derive_read_every_field_where_the_constants_say  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: a step inserted]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: a prearmed write] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[slot A falls into slot B]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment: an increment dropped] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the column index one nibble wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[slot B's byte] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[slot B's byte]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the column index one nibble wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment: an increment dropped]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's slot: a prearmed write]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's column stride] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the column index shifted back] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot offset never added] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment: a step inserted] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's fragment: a step inserted]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot offset never added]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's column stride]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the def's buckets and slotstride swapped] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's index bound] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's first slot write prearmed] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the column index shifted back]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's block-lo write prearmed] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the def's buckets and slotstride swapped]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the emitter passes twice the slot stride] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's block-lo write prearmed]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the seed's column shift two nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's first slot write prearmed]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the slot index bumped through r + dw] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the record's index bound]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot id one nibble wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the seed's column shift two nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: B allowed whatever ballow says] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the slot index bumped through r + dw]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: a one-nibble shift after the slot offset] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot id one nibble wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot index written through r + dw] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the emitter passes twice the slot stride]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: deg_flag computed per tier] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: deg_flag computed per tier]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the baked leaf's deg 0] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the baked leaf's deg 0]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the buckets stride two nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: B allowed whatever ballow says]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the right-edge clamp never fires] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: a one-nibble shift after the slot offset]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: slot A's branch taken to slot B] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot index written through r + dw]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the nld stride one block long] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the buckets stride two nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the nld stride two nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the right-edge clamp never fires]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the clamp one column wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: slot A's branch taken to slot B]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's column shift two nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the nld stride one block long]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the texture column clamp one nibble wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the nld stride two nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the texture column one nibble wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r4: the clamp one column wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the record body's own deg default] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the record body's own deg default]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the record body's own slot-stride default] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the record body's own slot-stride default]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the transparency test one nibble wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r3: the record's column shift two nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the left clip's negation two nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the texture column clamp one nibble wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: blk_addr places three nibbles] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the texture column one nibble wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the last texture column one nibble wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the transparency test one nibble wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation three nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the left clip's negation two nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: blk_addr places three nibbles]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: deg 0 for the standalone tier, after the literal] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the left clip's product five nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: deg 0 for the standalone tier, after the literal]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the slot stride follows the subsector index width] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the slot stride follows the subsector index width]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the slot stride follows the light tables] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r5: the last texture column one nibble wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation five nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the slot stride follows the light tables]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot stride rebound through globals()] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot stride rebound through globals()]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot stride rebound by a global statement] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the slot stride rebound by a global statement]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load's skip to B] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation three nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation four nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load's skip to B]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: an increment dropped] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation five nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the slot stride follows the runtime thing count] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r6: the left clip's product five nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the slot stride follows the runtime thing count]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the column index cleared three nibbles wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load's field order] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r7: the left clip's negation four nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: a step inserted] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: an increment dropped]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: a narrow-arm read] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load's field order]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's index bound] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[r8: the column index cleared three nibbles wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's column stride] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: a step inserted]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's column one nibble wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the load: a narrow-arm read]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the step's column stride] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's index bound]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's bias] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's column stride]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive: an increment dropped] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the seed's column one nibble wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive: a step inserted] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the step's column stride]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's field order] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's bias]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's slot id one nibble wide] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive: an increment dropped]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the record's layout freeze deleted] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's field order]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the slot stride written from module constants] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive: a step inserted]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the load's layout freeze deleted] 
+tests/fj/test_slot_layouts_fj.py::test_a_mutated_layout_fails[the derive's slot id one nibble wide]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_an_emitter_that_cannot_run_is_an_error_not_a_refusal 
+tests/fj/test_slot_layouts_fj.py::test_an_emitter_that_cannot_run_is_an_error_not_a_refusal  PASSED
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the load's layout freeze deleted]  PASSED
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the record's layout freeze deleted]  PASSED
+tests/fj/test_narrow_reads_fj.py::test_every_byte_of_an_aligned_block_reads_back 
+tests/fj/test_narrow_reads_fj.py::test_every_byte_of_an_aligned_block_reads_back  PASSED
+tests/fj/test_slot_layouts_fj.py::test_an_edit_that_moves_no_byte_still_passes[the slot stride written from module constants]  PASSED
+tests/fj/test_narrow_reads_fj.py::test_an_unaligned_bank_reads_wrong 
+tests/fj/test_narrow_reads_fj.py::test_an_unaligned_bank_reads_wrong  PASSED
+======================= 76 passed in 314.64s (0:05:14) ========================

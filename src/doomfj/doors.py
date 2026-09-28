@@ -346,12 +346,18 @@ def in_use_box_fixed(box, x16: int, y16: int) -> bool:
     return (x0 << 16) <= x16 <= (x1 << 16) and (y0 << 16) <= y16 <= (y1 << 16)
 
 
-def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = False) -> tuple:
+def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = False,
+             wait_frames: int = WAIT, blocked: bool = False, pass_at: int = 0) -> tuple:
     """One tic of one door. `st` is `(state, dir, sub, wait)`; returns the next one.
 
     M7 P2a.1: `stride` stops a step (BLAZE_STRIDE for the blazing door, clamped at both ends) and
     `stay` for a door that stays open (the walk-over doors: reaching the top sets no wait, so it
-    never closes, and a press on it at the top changes nothing).
+    never closes, and a press on it at the top changes nothing). M7 P2b: `wait_frames` the frames
+    fully "open" before it returns (a lift's LIFT_WAIT at its bottom -- doomfj.movers).
+    M7 P2b, REVERSAL ON THINGS (docs/gp-lift-spike.md section 4; T_VerticalDoor's crush branch for
+    every E1M1 door type that closes): a CLOSING door whose step would take it from `pass_at` (its
+    pass state, or above) to below it goes back UP instead when `blocked` -- a shootable thing
+    touches it -- and the state does not move that frame.
 
     THE WHOLE STATE MACHINE, and it is written with nothing but increments, decrements and
     zero-tests on purpose: that is the instruction set the fj side has cheaply. A compare against a
@@ -360,7 +366,7 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
     keeps an idle door at exactly one 1-nibble test.
     """
     state, dr, sub, wait = st
-    top_wait = 0 if stay else WAIT
+    top_wait = 0 if stay else wait_frames
     if used and dr != OPENING:
         # a press always means "open", including on a door that is closing (DOOM reverses) and on
         # one that is already open and waiting (it restarts the wait).
@@ -380,6 +386,8 @@ def door_tic(st: tuple, nstates: int, used: bool, stride: int = 1, stay: bool = 
         sub -= 1
         if sub == 0:
             sub = SPEED
+            if blocked and state >= pass_at > state - stride:
+                return (state, OPENING, sub, wait)      # reversed on a thing: no step this frame
             state -= stride
             if state <= 0:
                 state, dr = 0, IDLE

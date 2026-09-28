@@ -424,7 +424,8 @@ class CombatMixin:
             ws.p_pending = new
 
     def _use_lines(self, ev) -> None:
-        """P_UseLines for the switches (the doors keep their own use-box phase): the exit."""
+        """P_UseLines for the switches (the doors keep their own use-box phase): the exit; M7 P2b:
+        the SR lifts (a trigger for the next mover tic) and the S1 floor switch (at once)."""
         W = _W()
         ws = self.ws
         for box in self.exit_boxes:
@@ -432,6 +433,15 @@ class CombatMixin:
                 ws.g_leveldone = 1
                 ev.level_done = True
                 return
+        for tag, box in self.lift_use:
+            if W.in_use_box_fixed(box, ws.px, ws.py):
+                ws.l_req[self.lift_of_tag[tag]] = 1
+        if not ws.f_switch:
+            for box in self.switch_boxes:
+                if W.in_use_box_fixed(box, ws.px, ws.py):
+                    ws.f_switch = 1
+                    self._door_phase_scene()          # instant (D-L2): this tic's move sees it
+                    break
 
     def player_can_open(self, si: int) -> bool:
         """EV_VerticalDoor's key check: a key door needs its card or skull; other doors nothing."""
@@ -1144,6 +1154,9 @@ class CombatMixin:
             if not ws.w_fired[k] and crossed(trig, (x, y), (cx, cy), PLAYER_R):
                 ws.w_fired[k] = 1
                 ws.d_monreq[self.door_order.index(trig[0])] = 1
+        for trig in self.lift_walk:                   # M7 P2b: the WR lifts, every crossing
+            if crossed(trig, (x, y), (cx, cy), PLAYER_R):
+                ws.l_req[self.lift_order.index(trig[0])] = 1
 
     def _solid_thing_at(self, x16: int, y16: int):
         """PIT_CheckThing's refusal for the player's box at (x16, y16): the first solid monster,

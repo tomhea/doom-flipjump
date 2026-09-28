@@ -472,3 +472,23 @@ arbiter, does not separate the two binaries.
    counted the screen's bytes as words. No kill criterion.
 5. pinreport 20 of 20; the restore sets re-keyed (`p2a2_rekey.log`).
 
+## P2b lifts, the floor switch, door reversal (class F) -- L0 declared 2026-09-28, before any build
+
+**What**: `docs/gp-lifts.md` (the spike, `docs/gp-lift-spike.md`, with its defaults). L0 (host):
+`doomfj.movers` -- lifts 98/103 as the door machine on the floor, the instant floor switch, the
+WR/SR/S1 triggers -- and door reversal in `doors.door_tic`; the model runs them. L1-L3: the fj side.
+
+**Budget** (the spike's, kill at 1.25x attributed): ops <= +0.1M on the binding metric; size <=
++0.35M words; plane ids: 233 after P2a.1 + the spike's +21 = 254 of 255 (fallback: quant 24).
+
+**Kill criteria**:
+1. Host: the movers' geometry, the lift cycle in frames, a trigger ignored while active, the
+   triggers, the height override; the model's rides, SR press, switch, monster WR, monster floors,
+   restart, sight/sound nodes; door reversal at the pass step (both halves of the contact rule) --
+   each with a mutation caught.
+2. The frozen set: the model moves v3 (R2-spectre-corridor rides lift 103) -> v4 needs THE OWNER's
+   approval before any P2b binary is measured against the cap.
+3. L1-L3: byte- and state-exact gates with the movers in every oracle; plane ids <= 255.
+
+**Row**: (filled after the builds)
+

@@ -89,6 +89,10 @@ from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (re-export)
 from doomfj.doorcode import door_line_ids
+from doomfj.doors import crossed                                   # M7 P2b: WR lifts
+from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS, lift_states,  # M7 P2b
+                           lift_tic, lift_walk_triggers, mover_heights, switch_sectors,
+                           use_line_boxes)
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
 from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
@@ -248,6 +252,7 @@ class Layout:
     npickup: int
     nbarrel: int
     nwalk: int = 0     # M7 P2a.1: walk-over triggers (one per W1 tag)
+    nlift: int = 0     # M7 P2b: lifts (doomfj.movers)
 
     @property
     def nmobile(self) -> int:
@@ -320,6 +325,16 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
           "line of its tag was crossed")
     f("w_fired", 1, count=lay.nwalk, group="door", phase="P2a.1",
       doc="walk-over trigger k fired (W1: once per level)")
+    # -- movers (M7 P2b, doomfj.movers): each lift a door's four cells on its floor, and the switch --
+    f("l_state", 4, count=lay.nlift, group="mover", phase="P2b",
+      doc="lift stop index, 0 its stored (top) floor; lifts in ascending sector order")
+    f("l_dir", 2, count=lay.nlift, group="mover", phase="P2b", doc="IDLE 0, down 1, up 2")
+    f("l_sub", 4, count=lay.nlift, group="mover", phase="P2b", doc="step timer")
+    f("l_wait", 8, count=lay.nlift, group="mover", phase="P2b", doc="bottom-wait timer")
+    f("l_req", 1, count=lay.nlift, group="mover", phase="P2b",
+      doc="a trigger for the next mover tic: a WR line crossed (player or monster), an SR line used")
+    f("f_switch", 1, group="mover", phase="P2b",
+      doc="the floor switch fired (S1): its sectors at the lowest surrounding floor")
     # -- sound ------------------------------------------------------------------------------------
     f("snd_alert", 1, count=lay.nsound, group="sound",
       doc="node heard a shot (DOOM's sector soundtarget)")
@@ -577,7 +592,7 @@ class World(CombatMixin):
         self.layout = Layout(nmon=len(self.mon_things), ndoor=len(self.door_order),
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
                              npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
-                             nwalk=len(self.walk_triggers))
+                             nwalk=len(self.walk_triggers), nlift=len(self.lift_order))
         self.schema = build_schema(self.layout)
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -633,6 +648,18 @@ class World(CombatMixin):
         self.door_lines = door_line_ids(secs, lds, sds, tbl)
         self.open_h = {si: (secs[si].floor_h, tbl[si][-1]) for si in self.door_order}
         self.secs_c = apply_sector_heights(secs, self.open_h)   # the collision map: doors open
+        # -- movers (doomfj.movers is the SSOT; M7 P2b): the lifts (door machines on the floor)
+        # and the floor switch; their heights join the doors' in every scene (`_door_phase_scene`)
+        self.lift_stops = lift_states(secs, lds, sds)
+        self.lift_order = sorted(self.lift_stops)
+        self.lift_walk = lift_walk_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
+        self.lift_use = use_line_boxes(secs, lds, cmap.vertexes, LIFT_USE_SPECIALS)
+        self.lift_of_tag = {secs[si].tag: k for k, si in enumerate(self.lift_order)}
+        self.switch = switch_sectors(secs, lds, sds)
+        self.switch_boxes = [b for _t, b in use_line_boxes(secs, lds, cmap.vertexes,
+                                                             FLOOR_SWITCH_SPECIALS)]
+        self.mover_order = sorted(set(self.lift_order) | set(self.switch))
+        self._mh_last = {}
         self.mon_door_boxes = {}
         for si in self.door_order:
             vs = [v for ld in lds if ld.special in MONSTER_DOOR_SPECIALS
@@ -654,7 +681,9 @@ class World(CombatMixin):
             self._lines.append((li, min(x1, x2) << 16, max(x1, x2) << 16, min(y1, y2) << 16,
                                 max(y1, y2) << 16, x1 << 16, y1 << 16, x2 << 16, y2 << 16,
                                 one, ld.flags, fs, bs))
-        doors = set(self.door_order)
+        # the DYNAMIC sectors -- doors and (M7 P2b) movers: their lines are tested against the
+        # heights of the moment (sight), and each is its own sound node
+        doors = set(self.door_order) | set(self.mover_order)
         self._sight_walls, self._sight_doors = [], []
         for (li, x0, x1_, y0, y1_, ax, ay, bx, by, one, flags, fs, bs) in self._lines:
             seg = ((ax, ay), (bx, by), (x0, x1_, y0, y1_))
@@ -665,6 +694,11 @@ class World(CombatMixin):
             elif (min(secs[fs].ceil_h, secs[bs].ceil_h)
                   - max(secs[fs].floor_h, secs[bs].floor_h)) <= 0:
                 self._sight_walls.append(seg)      # a statically closed opening
+        # M7 P2b: each door's lines' geometry, for the reversal's contact test (`door_touched`)
+        self._door_line_geo = {si: [(mnx, mxx, mny, mxy, ax, ay, bx, by)
+                                    for (li, mnx, mxx, mny, mxy, ax, ay, bx, by, *_r) in self._lines
+                                    if li in self.door_lines.get(si, ())]
+                               for si in self.door_order}
         # -- sound regions --------------------------------------------------------------------------
         parent = list(range(len(secs)))
 
@@ -693,9 +727,9 @@ class World(CombatMixin):
         for s in range(len(secs)):
             if s not in doors:
                 self.sector_node[s] = node_of_root[find(s)]
-        for k, si in enumerate(self.door_order):
+        for k, si in enumerate(self.door_order + self.mover_order):
             self.sector_node[si] = len(roots) + k
-        self.nsound = len(roots) + len(self.door_order)
+        self.nsound = len(roots) + len(self.door_order) + len(self.mover_order)
 
     # ---------------------------------------------------------------------------- level start
     def reset(self, skill: int) -> None:
@@ -786,6 +820,7 @@ class World(CombatMixin):
             ev.frozen = True                     # the exit was used: nothing moves
         else:
             self._doors_phase(keys, ev)
+            self._movers_phase(ev)
             self._player_phase(keys, ev)
             self._monsters_phase(ev)
             self._projectiles_phase(ev)
@@ -808,24 +843,82 @@ class World(CombatMixin):
             pressed = (keys["use"] and alive and box is not None and self.player_can_open(si)
                        and in_use_box_fixed(box, ws.px, ws.py))
             kind = self.door_kind[si]
+            # M7 P2b: reversal -- asked only of a closing door at its pass step (door_tic's rule)
+            blocked = (ws.d_dir[d] == CLOSING and ws.d_state[d] >= self.door_pass[si]
+                       and self.door_touched(si))
             st = door_tic((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]),
                           self.door_nstates[si], bool(pressed or ws.d_monreq[d]),
-                          stride=door_stride(kind), stay=door_stay(kind))
+                          stride=door_stride(kind), stay=door_stay(kind), blocked=blocked,
+                          pass_at=self.door_pass[si])
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = st
             ws.d_monreq[d] = 0
         self._door_phase_scene()
 
+    def door_touched(self, si: int) -> bool:
+        """M7 P2b: does a SHOOTABLE thing touch door `si` -- the player alive, a live monster (a
+        corpse is gibbed, not in the way) -- its box on one of the door's lines (the collision
+        test: the bboxes overlap and the box straddles the line), or its centre in the door sector?
+        Barrels never reach a door line on E1M1 (docs/gp-lift-spike.md section 4, MEASURED)."""
+        ws = self.ws
+        lines = self._door_line_geo[si]
+        things = []
+        if self.player_alive():
+            things.append((ws.px, ws.py, 16 << 16))
+        for m in range(self.layout.nmon):
+            if ws.mon_active[m] and ws.mon_health[m] > 0:
+                things.append((ws.mon_x[m] << 16, ws.mon_y[m] << 16, self.mon_radius[m] << 16))
+        for x16, y16, r16 in things:
+            leaf = self.rm.point_in_subsector(self.cmap, x16 >> 16, y16 >> 16)
+            if self.leaf_sector[leaf] == si:
+                return True
+            top, bottom, left, right = y16 + r16, y16 - r16, x16 - r16, x16 + r16
+            for (minx, maxx, miny, maxy, ax, ay, bx, by) in lines:
+                if right <= minx or left >= maxx or top <= miny or bottom >= maxy:
+                    continue
+                if self.rm.box_on_line_side((top, bottom, left, right), ax, ay, bx, by) == -1:
+                    return True
+        return False
+
+    def _movers_phase(self, ev: TicEvents) -> None:
+        """M7 P2b: one frame of every lift (doomfj.movers.lift_tic) on last tic's triggers, then
+        the scenes again"""
+        ws = self.ws
+        for k, si in enumerate(self.lift_order):
+            st = lift_tic((ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k]),
+                          len(self.lift_stops[si]), bool(ws.l_req[k]))
+            ws.l_state[k], ws.l_dir[k], ws.l_sub[k], ws.l_wait[k] = st
+            ws.l_req[k] = 0
+        self._door_phase_scene()
+
+    def mover_heights_now(self) -> dict:
+        """M7 P2b: `{sector: (floor, ceil)}` of every mover off its stored floor, from the cells"""
+        ws = self.ws
+        return mover_heights(self.secs, self.lift_stops,
+                             {si: ws.l_state[k] for k, si in enumerate(self.lift_order)},
+                             self.switch, bool(ws.f_switch))
+
     def _door_phase_scene(self) -> None:
         """This tic's collision scene (doors at their OPEN height, the not-yet-passable doors'
-        lines blocked -- m2_std_gate's construction) and the true door heights (sight, sound)."""
+        lines blocked -- m2_std_gate's construction) and the true door heights (sight, sound).
+        M7 P2b: the movers at their heights of the moment in both, in the monsters' collision map
+        (`secs_c`), and in the floor of every monster standing in a mover's sector (P_ChangeSector)."""
         ws = self.ws
         states = {si: ws.d_state[d] for d, si in enumerate(self.door_order)}
         self.blocked_now = frozenset(li for si in self.door_order
                                      if states[si] < self.door_pass[si]
                                      for li in self.door_lines.get(si, ()))
-        self.scene_c = Scene(self.mw, self.mw, self.mapname, self.cmap, self.open_h,
+        mh = self.mover_heights_now()
+        self.scene_c = Scene(self.mw, self.mw, self.mapname, self.cmap, {**self.open_h, **mh},
                              self.blocked_now)
-        self.heights_now = heights_for_states(self.secs, self.lds, self.sds, states)
+        self.heights_now = {**heights_for_states(self.secs, self.lds, self.sds, states), **mh}
+        if mh != self._mh_last:
+            self._mh_last = mh
+            self.secs_c = apply_sector_heights(self.secs, {**self.open_h, **mh})
+            movers = set(self.mover_order)
+            for m in range(self.layout.nmon):
+                sec = self.leaf_sector[ws.mon_leaf[m]]
+                if ws.mon_active[m] and sec in movers:
+                    ws.mon_floorz[m] = self.secs_c[sec].floor_h
 
     # -- 2. the player: `CombatMixin._player_phase` (doomfj.combat)
 
@@ -1186,7 +1279,12 @@ class World(CombatMixin):
 
     def _move_monster(self, m: int, nx: int, ny: int, floorz: int, ev: TicEvents) -> None:
         ws = self.ws
+        ox, oy = ws.mon_x[m], ws.mon_y[m]
         ws.mon_x[m], ws.mon_y[m], ws.mon_floorz[m] = nx, ny, floorz
+        # M7 P2b: monsters trigger the WR lifts (88 is on P_CrossSpecialLine's non-player list)
+        for trig in self.lift_walk:
+            if crossed(trig, (ox << 16, oy << 16), (nx << 16, ny << 16), self.mon_radius[m]):
+                ws.l_req[self.lift_order.index(trig[0])] = 1
         ev.moves.append(m)
         leaf = self.rm.point_in_subsector(self.cmap, nx, ny)
         old = ws.mon_leaf[m]

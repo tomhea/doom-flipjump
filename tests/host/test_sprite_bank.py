@@ -106,11 +106,11 @@ def test_the_animation_covers_every_frame_of_the_maps_actors():
 
 
 def test_the_bank_is_smaller_than_the_per_bucket_bank_it_replaces(bank):
-    """32 kinds x 557 columns x 41 per-bucket blocks was 22,837 blocks (2,923,136 words, MEASURED
-    by art_budget.py on the same wads); three native lists a column, with every animation view on
-    top, must still be fewer"""
+    """the per-bucket bank this one replaces is P1.5's: 27 kinds x 440 columns x 41 blocks = 18,040
+    blocks (p16_size.log; before P1.5 dropped the multiplayer-only kinds it was 32 x 557 x 41 =
+    22,837). Three native lists a column, with every animation view on top, must still be fewer"""
     blocks = bank[2]
-    assert len(blocks) < 22837, len(blocks)
+    assert len(blocks) < 18040, len(blocks)
 
 
 def test_a_changed_cell_is_caught(bank):

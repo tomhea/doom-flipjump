@@ -143,12 +143,12 @@ THINGS = [# four of E1M1's left clips from the player start (x1, x2, texture ste
           (51, 71, 15, 0x0030, 130, 139, 0x50000, 23, 1, 45),      # u 0..45 by 5, clamped at 44
           (52, 72, 16, 0x1007, 140, 141, 0, 24, 1, 1),             # a block past 0x1000 whose low three
                                                                   # nibbles name the transparent 0x0007
-          (53, 73, 17, 0x0060, -300, 9, 0x8000, 25, 1, 63),
+          (53, 73, 17, 0x0060, -300, 9, 0x8000, 25, 1, 63),       # a left clip of 300 at half a texel:
+                                                                  # frac starts at 0x960000, u clamped at 62
           # the min_b test (M7 P1.6): bucket 16 against min_b 15, 16 (taken), 17, 31 (not), 0 (taken)
           # and past every bucket (not); bucket 15 against min_b 16 -- a one-nibble test takes it
           (54, 64, 22, 0x0A00, 50, 55, 0x10000, 16, 1, 16),
-          (55, 65, 23, 0x0B00, 56, 57, 0, 15, 1, 1)]        # a left clip of 300 at half a texel:
-                                                                  # frac starts at 0x960000, u clamped at 62
+          (55, 65, 23, 0x0B00, 56, 57, 0, 15, 1, 1)]
 HIDDEN = {12, 13, 14}
 TRANSPARENT = {0x0007}
 # what each record records, column by column ("B0 A1": fragment B at column 0, A at column 1; "-":

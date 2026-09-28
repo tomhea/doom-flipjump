@@ -130,11 +130,12 @@ REG_FIELD = {
     # frame.thing_record_body -- the writes
     "gps_s_rec": "slot id", "trb_blk": "block lo", "trb_blk + 2*dw": "block hi",
     "gps_yb8": "y0 lo", "gps_yb8 + 2*dw": "y0 hi", "trb_shade_row": "light row",
+    "trb_bucket": "bucket",                                          # M7 P1.6: the rowmap's row
     # frame.lines_spr_load -- fragment A, then fragment B
     "s": "slot id", "sblk": "block lo", "sblk + 2*dw": "block hi",
     "sb": "slot id", "sblkb": "block lo", "sblkb + 2*dw": "block hi",
     # stream.frag_derive
-    "gps_y0": "y0 lo", "gps_y0 + 2*dw": "y0 hi", "gps_lr": "light row",
+    "gps_y0": "y0 lo", "gps_y0 + 2*dw": "y0 hi", "gps_lr": "light row", "gps_b": "bucket",
 }
 
 
@@ -228,8 +229,8 @@ LAYOUT_MUTANTS = [
     (0, "frame.read0_byte_and_inc sblkb, spslot_p" + _W + "frame.read0_byte_and_inc sblkb + 2*dw, spslot_p",
      "frame.read0_byte_and_inc sblkb + 2*dw, spslot_p" + _W + "frame.read0_byte_and_inc sblkb, spslot_p",
      "the load's fragment B"),
-    (0, "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw" + _W + "hex.write_byte gps_ptr, trb_shade_row",
-     "hex.write_byte_and_inc gps_ptr, trb_shade_row" + _W + "hex.write_byte gps_ptr, gps_yb8 + 2*dw",
+    (0, "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw" + _W + "hex.write_byte_and_inc gps_ptr, trb_shade_row",
+     "hex.write_byte_and_inc gps_ptr, trb_shade_row" + _W + "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw",
      "the record's slot"),
     (0, "hex.add_constant 8, gps_yb8, 32768", "hex.add_constant 8, gps_yb8, 32767", "the record's bias"),
     (1, "hex.read_byte_and_inc gps_y0, ptr" + _W + "hex.read_byte_and_inc gps_y0 + 2*dw, ptr",

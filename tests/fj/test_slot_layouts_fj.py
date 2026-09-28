@@ -3,8 +3,8 @@
 A column's fragments live in `spslot`, a thing's constants in `gpslot`. frame.thing_record_body writes
 both; frame.lines_spr_seed / lines_spr_step / lines_spr_load read a column's fragments, and
 stream.frag_derive a thing's constants. wall_renderer states the layouts once: SPR_SLOT_STRIDE,
-SPR_FRAG_FIELDS, SPR_SLOT_B_BYTE, SPR_THING_SLOT_BYTES, SPR_THING_SLOT_FIELDS, SPR_THING_Y0_BIAS.
-This RUNS the shipped fj and holds every byte and every register to them -- nothing is modelled:
+SPR_FRAG_FIELDS, SPR_SLOT_B_BYTE, SPR_THING_SLOT_BYTES, SPR_THING_SLOT_FIELDS, SPR_THING_Y0_BIAS
+(four fields since M7 P1.6: the bucket, the rowmap's row). This RUNS the shipped fj and holds every byte and every register to them -- nothing is modelled:
 
   write  The record's code from its slot allocation (`hex.inc 2, gps_nslot`) to the end of its
          column loop, transplanted VERBATIM from frame.thing_record_body into a harness macro,
@@ -12,7 +12,7 @@ This RUNS the shipped fj and holds every byte and every register to them -- noth
          drawn, 6,785 of them -- must be the constants' layout of what was recorded: the bytes the
          layout names hold the fields, drawn its walls, and every other byte is still zero.
   read   From memory laid out by the constants, the real seed (and step) and load give each
-         column's fragments, and the real derive each thing's y0 and light row.
+         column's fragments, and the real derive each thing's y0, light row and bucket.
 
 Each side is held to the constants ON ITS OWN, so a change made alike on both sides that the
 constants do not describe fails too. The expected bytes come from the constants and THINGS alone.
@@ -52,12 +52,12 @@ negates only the low n nibbles, so a negation narrowed to n nibbles is off by a 
 step's low 24 - 4n bits are not all zero -- LEFT_CLIP_MOVES has which clips do); then
 columns across the 16, 64 and 1,024-index bounds up to 159, a first column below 0 and a last above
 159 (both clamps), slot ids 1..255 across 16, fragments A and B, B refused by `ballow`, both slots
-spent, columns a wall hides, a fully transparent block, a texture step that moves the column and its
-clamp, both block strides (`hdfl`), y0 either side of zero -- and these operand ranges the shipped
-sprites reach (review rounds 5-6): a last texture column past 16 (the shipped bank goes to 62), u
-past 15, u * BUCKETS and u * NLD past 255, a block past 0x1000, `last_rel` values with a zero low
-nibble (1,375 of the shipped bank's blocks), and a left clip of 300 columns at half a texel a column
-(frac past five nibbles). What each records, column by column, is RECORDED -- held to the model.
+spent, columns a wall hides, a transparent block (its min_b past every bucket), a texture step
+that moves the column and its clamp, y0 either side of zero, the record's min_b test (M7 P1.6: a
+column is taken iff the thing's bucket >= the block's min_b) either side of the bucket and at it,
+and across 16 -- and these operand ranges the shipped sprites reach (review rounds 5-6): a last
+texture column past 16 (the shipped bank goes to 62), u past 15, a block past 0x1000, and a left
+clip of 300 columns at half a texel a column (frac past five nibbles). What each records, column by column, is RECORDED -- held to the model.
 
 The harness lays its hot block out as the build does: `pad 16384` (the block starts an arm5 window,
 16,384 ops, and all of it fits in that one window), then pclm, sfflag, sprflag, sfslot, spslot,
@@ -109,42 +109,45 @@ CFG = Config()
 VIEW_W = CFG.VIEW_W
 STRIDE, B_BYTE = wr.SPR_SLOT_STRIDE, wr.SPR_SLOT_B_BYTE
 SLOT_BYTES, BIAS, NSLOTS = wr.SPR_THING_SLOT_BYTES, wr.SPR_THING_Y0_BIAS, wr.SPR_THING_SLOTS
-BUCKETS, NLD = wr.SPRITE_HEIGHT_BUCKETS, wr._spr_nlow(CFG)       # the block strides, hdfl 1 / 0
 ARM5_WINDOW = 16384                                              # ops: 16^5 bits of 2 * W-bit ops
 
-# (slot id, y0, light row, block base, first column, last column, texture step (16.16), hdfl,
+# (slot id, y0, light row, block base (the thing's region), first column, last column, texture step
+#  (16.16), bucket,
 #  ballow, sp_dw), recorded in this order: a later record into a column that holds A takes B
 #  (if ballow lets it), a third finds both slots spent
 THINGS = [# four of E1M1's left clips from the player start (x1, x2, texture step, dw, as the oracle
           # projects them -- PR #93's review, round 7); which of them a narrowed negation moves is
           # LEFT_CLIP_MOVES
-          (60, 81, 18, 0x0100, -1, 0, 0x4B808, 1, 1, 13),
-          (61, 82, 19, 0x0110, -3, 1, 0x4AD00, 1, 1, 20),
-          (62, 83, 20, 0x0120, -2, 1, 0x61860, 1, 1, 20),
-          (63, 84, 21, 0x0130, -1, 2, 0x4C8F8, 1, 1, 17),
-          (1, -200, 3, 0x0102, 0, 1, 0, 1, 1, 1),                 # y0 below zero, into spent columns
-          (15, 0, 30, 0x0201, 15, 17, 0, 1, 1, 1),                # A across the 16-index bound
-          (16, 150, 31, 0x0003, 62, 66, 0, 1, 1, 1),              # across the 64-index bound
-          (255, -32000, 17, 0x01FF, 158, 159, 0, 1, 1, 1),        # the last slot id
-          (17, 7, 5, 0x0100, 0, 0, 0, 1, 1, 1),                   # column 0, spent (its sixth record)
-          (40, -1, 9, 0x0004, 15, 16, 0, 1, 1, 1),                # B across the 16-index bound
-          (41, 100, 2, 0x0005, 0, 0, 0, 1, 1, 1),                 # column 0, spent (its seventh record)
-          (42, 33, 4, 0x0006, 10, 14, 0, 1, 1, 1),                # 12..14 hidden by a wall
-          (43, 55, 6, 0x0007, 100, 101, 0, 1, 1, 1),              # a fully transparent block
-          (44, 12, 7, 0x0008, 17, 17, 0, 1, 0, 1),                # column 17 holds A, ballow 0: no B
-          (45, -5, 8, 0x0009, -3, 2, 0, 1, 1, 1),                 # a first column below 0
-          (46, 20, 10, 0x0010, 157, 170, 0, 1, 1, 1),             # a last column above 159
-          (47, 60, 11, 0x0020, 30, 37, 0x8000, 1, 1, 3),          # half a texel a column, clamped at 2
-          (48, 61, 12, 0x0030, 40, 45, 0x10000, 0, 1, 9),         # hdfl 0: the nld stride
-          (49, 62, 13, 0x0040, -2, 3, 0x10000, 1, 1, 8),          # below 0 WITH a step: u 5 at column 3
-          # the shipped operand ranges (review round 5): E1M1's sprites reach 62 texture columns and
-          # its bank 22,837 blocks, so u, u * BUCKETS, u * NLD and the block index leave the widths
-          # where a narrowed op is still exact
-          (50, 70, 14, 0x0040, 110, 126, 0x40000, 1, 1, 63),      # u 0..64 by 4, clamped at 62; u*32 to 1,984
-          (51, 71, 15, 0x0030, 130, 139, 0x50000, 0, 1, 45),      # hdfl 0: u 0..45 by 5, clamped at 44; u*9 to 396
-          (52, 72, 16, 0x1007, 140, 141, 0, 1, 1, 1),             # a block past 0x1000 whose low three
+          (60, 81, 18, 0x0100, -1, 0, 0x4B808, 20, 1, 13),
+          (61, 82, 19, 0x0110, -3, 1, 0x4AD00, 21, 1, 20),
+          (62, 83, 20, 0x0120, -2, 1, 0x61860, 22, 1, 20),
+          (63, 84, 21, 0x0130, -1, 2, 0x4C8F8, 23, 1, 17),
+          (1, -200, 3, 0x0102, 0, 1, 0, 21, 1, 1),                 # y0 below zero, into spent columns
+          (15, 0, 30, 0x0201, 15, 17, 0, 23, 1, 1),                # A across the 16-index bound
+          (16, 150, 31, 0x0003, 62, 66, 0, 24, 1, 1),              # across the 64-index bound
+          (255, -32000, 17, 0x01FF, 158, 159, 0, 23, 1, 1),        # the last slot id
+          (17, 7, 5, 0x0100, 0, 0, 0, 25, 1, 1),                   # column 0, spent (its sixth record)
+          (40, -1, 9, 0x0004, 15, 16, 0, 24, 1, 1),                # B across the 16-index bound
+          (41, 100, 2, 0x0005, 0, 0, 0, 25, 1, 1),                 # column 0, spent (its seventh record)
+          (42, 33, 4, 0x0006, 10, 14, 0, 26, 1, 1),                # 12..14 hidden by a wall
+          (43, 55, 6, 0x0007, 100, 101, 0, 27, 1, 1),              # a fully transparent block
+          (44, 12, 7, 0x0008, 17, 17, 0, 28, 0, 1),                # column 17 holds A, ballow 0: no B
+          (45, -5, 8, 0x0009, -3, 2, 0, 29, 1, 1),                 # a first column below 0
+          (46, 20, 10, 0x0010, 157, 170, 0, 30, 1, 1),             # a last column above 159
+          (47, 60, 11, 0x0020, 30, 37, 0x8000, 31, 1, 3),          # half a texel a column, clamped at 2
+          (48, 61, 12, 0x0030, 40, 45, 0x10000, 20, 1, 9),         # a unit texture step
+          (49, 62, 13, 0x0040, -2, 3, 0x10000, 21, 1, 8),          # below 0 WITH a step: u 5 at column 3
+          # the shipped operand ranges (review round 5): E1M1's sprites reach 62 texture columns, so u
+          # and the block index leave the widths where a narrowed op is still exact
+          (50, 70, 14, 0x0040, 110, 126, 0x40000, 22, 1, 63),      # u 0..64 by 4, clamped at 62
+          (51, 71, 15, 0x0030, 130, 139, 0x50000, 23, 1, 45),      # u 0..45 by 5, clamped at 44
+          (52, 72, 16, 0x1007, 140, 141, 0, 24, 1, 1),             # a block past 0x1000 whose low three
                                                                   # nibbles name the transparent 0x0007
-          (53, 73, 17, 0x0060, -300, 9, 0x8000, 1, 1, 63)]        # a left clip of 300 at half a texel:
+          (53, 73, 17, 0x0060, -300, 9, 0x8000, 25, 1, 63),
+          # the min_b test (M7 P1.6): bucket 16 against min_b 15, 16 (taken), 17, 31 (not), 0 (taken)
+          # and past every bucket (not); bucket 15 against min_b 16 -- a one-nibble test takes it
+          (54, 64, 22, 0x0A00, 50, 55, 0x10000, 16, 1, 16),
+          (55, 65, 23, 0x0B00, 56, 57, 0, 15, 1, 1)]        # a left clip of 300 at half a texel:
                                                                   # frac starts at 0x960000, u clamped at 62
 HIDDEN = {12, 13, 14}
 TRANSPARENT = {0x0007}
@@ -154,7 +157,7 @@ TRANSPARENT = {0x0007}
 RECORDED = {60: "A0", 61: "B0 A1", 62: "B1", 63: "A2", 1: "-", 15: "A15-17", 16: "A62-66",
             255: "A158-159", 17: "-", 40: "B15-16", 41: "-", 42: "A10-11", 43: "-", 44: "-", 45: "B2",
             46: "A157 B158-159", 47: "A30-37", 48: "A40-45", 49: "A3", 50: "A110-126", 51: "A130-139",
-            52: "A140-141", 53: "B3 A4-9"}
+            52: "A140-141", 53: "B3 A4-9", 54: "A50-51 A54", 55: "-"}
 # the left clips whose recorded block moves under `hex.neg n, trb_negx1`, per n: a negation narrowed
 # to n nibbles is off by a non-zero multiple of 16^n for EVERY clip, and frac by that times the step,
 # so u (frac's bits 16-23) can move only if the step's low 24 - 4n bits are not all zero (review
@@ -168,23 +171,22 @@ def _neg_narrowed(x1, n):
     return (v & ~m & 0xFFFFFFFF) | (-(v & m) & m)
 
 
-def _columns(x1, x2, istep, hdfl, sp_dw, base, nibbles=8):
+def _columns(x1, x2, istep, sp_dw, base, nibbles=8):
     """the record's column walk for one thing, from THINGS alone: (column, block) per column -- its
     left clip negated as `hex.neg nibbles` does (8: exactly)"""
     dw_max = (sp_dw - 1) & 0xFF
     frac = (_neg_narrowed(x1, nibbles) * istep) & 0xFFFFFFFF if x1 < 0 else 0
     for x in range(max(x1, 0), min(x2, VIEW_W - 1) + 1):
         u = min((frac >> 16) & 0xFF, dw_max)
-        yield x, (u * (BUCKETS if hdfl else NLD) + base) & 0xFFFF
+        yield x, (base + u) & 0xFFFF                       # M7 P1.6: the region + u
         frac = (frac + istep) & 0xFFFFFFFF
 
 
-NBLOCKS = 1 + max(b for t in THINGS for _, b in _columns(t[4], t[5], t[6], t[7], t[9], t[3]))
-# each block's header: r0, last_rel (0 = fully transparent), the rest zero
-# (last_rel on every third block a multiple of 16, as 1,375 of the shipped bank's are: a test that
-# reads one nibble of it would call those blocks transparent)
-HEADER = {b: (5 + b % 7, 0 if b in TRANSPARENT else 16 * (1 + b % 6) if b % 3 == 0 else 9 + b % 5)
-          for b in range(NBLOCKS)}
+NBLOCKS = 1 + max(b for t in THINGS for _, b in _columns(t[4], t[5], t[6], t[9], t[3]))
+# each block's header: op 0 (n_first, the derive's), op 1 = min_b (M7 P1.6: the record takes a column
+# iff the thing's bucket >= min_b; a transparent column's is past every bucket), the rest zero
+MIN_B = {0x0A00: 15, 0x0A01: 16, 0x0A02: 17, 0x0A03: 31, 0x0A04: 0, 0x0A05: 0xFF, 0x0B00: 16}
+HEADER = {b: (5 + b % 7, 0xFF if b in TRANSPARENT else MIN_B.get(b, b % 3)) for b in range(NBLOCKS)}
 # the read side's columns: (seed column, steps) -- empty, A, A+B, across the index bounds
 LOADS = [(0, 0), (1, 0), (2, 0), (3, 0), (10, 0), (12, 0), (15, 0), (16, 0), (17, 0), (31, 0),
          (36, 1), (44, 0), (62, 0), (63, 1), (64, 0), (157, 0), (158, 0), (159, 0), (100, 0), (13, 3),
@@ -197,15 +199,15 @@ def _record_all(things=THINGS):
     each record recorded: {slot id: [(column, "A" or "B")]}"""
     sprflag, spslot, gpslot = [0] * VIEW_W, [0] * (VIEW_W * STRIDE), [0] * (NSLOTS * SLOT_BYTES)
     took = {}
-    for sid, y0, light, base, x1, x2, istep, hdfl, ballow, sp_dw in things:
+    for sid, y0, light, base, x1, x2, istep, bucket, ballow, sp_dw in things:
         yb = (y0 + BIAS) & 0xFFFF
-        fields = {"y0 lo": yb & 0xFF, "y0 hi": yb >> 8, "light row": light}
+        fields = {"y0 lo": yb & 0xFF, "y0 hi": yb >> 8, "light row": light, "bucket": bucket}
         for i, f in enumerate(wr.SPR_THING_SLOT_FIELDS):
             gpslot[sid * SLOT_BYTES + i] = fields[f]
         took[sid] = []
-        for x, blk in _columns(x1, x2, istep, hdfl, sp_dw, base):
+        for x, blk in _columns(x1, x2, istep, sp_dw, base):
             n = sprflag[x]
-            if x in HIDDEN or n == 2 or (n == 1 and not ballow) or HEADER[blk][1] == 0:
+            if x in HIDDEN or n == 2 or (n == 1 and not ballow) or bucket < HEADER[blk][1]:
                 continue
             frag = {"slot id": sid, "block lo": blk & 0xFF, "block hi": blk >> 8}
             for i, f in enumerate(wr.SPR_FRAG_FIELDS):
@@ -233,7 +235,7 @@ def _runs(took):
 
 def expected_reads():
     """what the read side must give: per LOADS column (sprfl, s, sblk lo, hi, sb, sblkb lo, hi),
-    then per thing (y0 lo, y0 hi, light row)"""
+    then per thing (y0 lo, y0 hi, light row, bucket)"""
     sprflag, spslot, _ = expected_memory()
     out = []
     for x0, k in LOADS:
@@ -244,8 +246,8 @@ def expected_reads():
         frag_a = [a["slot id"], a["block lo"], a["block hi"]] if n >= 1 else [0, 0, 0]
         frag_b = [b["slot id"], b["block lo"], b["block hi"]] if n == 2 else [0, 0, 0]
         out += [n] + frag_a + frag_b
-    for sid, y0, light, *_ in THINGS:
-        out += [y0 & 0xFF, (y0 >> 8) & 0xFF, light]
+    for sid, y0, light, base, x1, x2, istep, bucket, *_ in THINGS:
+        out += [y0 & 0xFF, (y0 >> 8) & 0xFF, light, bucket]
     return out
 
 
@@ -666,7 +668,7 @@ def transplant(frame_text, emitter_text):
 # ---- the entry state ------------------------------------------------------------------------------------
 # the range's inputs: what the build computes before it, set per record from THINGS
 INPUTS = {"gps_nslot", "trb_y0", "trb_shade_row", "trb_tx1", "trb_tx2", "trb_tistep", "trb_blk_const",
-          "hdfl", "ballow", "sp_dw"}
+          "trb_bucket", "ballow", "sp_dw"}
 WIDTHS = {d.split(":")[0].strip(): d.split("hex.vec", 1)[1].strip()
           for d in wr.hoisted_scratch_decls(CFG) if "hex.vec" in d}
 
@@ -699,7 +701,7 @@ def bank():
     """the bank, NBLOCKS blocks of SPR_BLOCK_STRIDE cells: a used block's header, zeros elsewhere
     (runs of zero cells as `rep(n, i) stl.fj 0, 0`, the zero cell the layout freezes use)"""
     out, zeros = list(wr.sprite_bank_header()), 0
-    used = {blk for t in THINGS for _, blk in _columns(t[4], t[5], t[6], t[7], t[9], t[3])} | {DERIVE_BLOCK}
+    used = {blk for t in THINGS for _, blk in _columns(t[4], t[5], t[6], t[9], t[3])} | {DERIVE_BLOCK}
     for b in range(NBLOCKS):
         if b not in used:
             zeros += wr.SPR_BLOCK_STRIDE
@@ -734,20 +736,22 @@ REGS = ["lay_p: hex.vec w/4", "lay_n: hex.vec 4", "lay_v: hex.vec 2", "lay_x: he
         "ld_sprfl: hex.vec 2", "ld_s: hex.vec 2", "ld_sblk: hex.vec 4", "ld_sb: hex.vec 2",
         "ld_sblkb: hex.vec 4", "dv_s: hex.vec 2", "dv_sblk: hex.vec 4", "dv_ybase: hex.vec 4",
         "dv_top: hex.vec 4", "dv_sy1: hex.vec 4", "dv_sy2: hex.vec 4", "dv_smidx: hex.vec 4",
-        "dv_ptr: hex.vec w/4"]
+        "dv_ptr: hex.vec w/4", "dv_ridx: hex.vec 4"]
 HEAD = ["stl.startup_and_init_all", generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)]
 
 
 def write_program(frame_text, emitter_text):
     macro, call, scratch = transplant(frame_text, emitter_text)
     main = list(HEAD)
-    for i, (sid, y0, light, base, x1, x2, istep, hdfl, ballow, sp_dw) in enumerate(THINGS):
+    for i, (sid, y0, light, base, x1, x2, istep, bucket, ballow, sp_dw) in enumerate(THINGS):
         main += [hostile(i, r) for r in scratch]                     # the entry state (above)
         main += ["    hex.set 2, gps_nslot, %d" % (sid - 1),       # the record takes the next slot id
                  "    hex.set 8, trb_y0, %d" % (y0 & 0xFFFFFFFF), "    hex.set 2, trb_shade_row, %d" % light,
                  "    hex.set 8, trb_tx1, %d" % (x1 & 0xFFFFFFFF), "    hex.set 8, trb_tx2, %d" % (x2 & 0xFFFFFFFF),
                  "    hex.set 8, trb_tistep, %d" % istep, "    hex.set w/4, trb_blk_const, %d" % base,
-                 "    hex.set 1, hdfl, %d" % hdfl, "    hex.set 1, ballow, %d" % ballow,
+                 # the bucket as sprbkt.lookup leaves it: [its height hb][bucket] (M7 P1.6)
+                 "    hex.set 4, trb_bucket, %d" % ((0xA0 + bucket) << 8 | bucket),
+                 "    hex.set 1, ballow, %d" % ballow,
                  "    hex.set 2, sp_dw, %d" % sp_dw, "    " + call]
     main += ["    lay_dump pclm, %d" % len(expected_block()[1]), "    stl.loop"]
     zero = ([0] * VIEW_W, [0] * (VIEW_W * STRIDE), [0] * (NSLOTS * SLOT_BYTES))
@@ -768,10 +772,11 @@ def read_program():
     for sid, *_ in THINGS:
         main += ["    hex.set 2, gps_cur_s, 0",                   # a new thing: the derive fetches its slot
                  "    hex.set 2, dv_s, %d" % sid, "    hex.set 4, dv_sblk, %d" % DERIVE_BLOCK,
-                 "    stream.frag_derive dv_s, dv_sblk, dv_ybase, dv_top, dv_sy1, dv_sy2, dv_smidx, dv_ptr"]
-        main += emit("gps_y0", 2) + emit("gps_lr", 1)
+                 "    stream.frag_derive dv_s, dv_sblk, dv_ybase, dv_top, dv_sy1, dv_sy2, dv_smidx, dv_ptr, dv_ridx"]
+        main += emit("gps_y0", 2) + emit("gps_lr", 1) + emit("gps_b", 1)
     main.append("    stl.loop")
-    return "\n".join([DUMP] + main + REGS + [wr.hoisted_scratch_fj(CFG)] + hot_block(expected_memory()) + bank()) + "\n"
+    return "\n".join([DUMP] + main + REGS + [wr.hoisted_scratch_fj(CFG), wr.sprite_rowmap_fj(CFG)]
+                     + hot_block(expected_memory()) + bank()) + "\n"
 
 
 RUNNER = r"""
@@ -839,18 +844,20 @@ def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
     assert all(sprflag[x] == 0 for x in HIDDEN | {100, 101})
     # half a texel a column: u moves every second column, so the block does at 32, 34, 36 (clamped)
     assert spslot[32 * STRIDE + 1] != spslot[30 * STRIDE + 1], "the texture step moved no block"
-    assert spslot[44 * STRIDE + 1] != spslot[40 * STRIDE + 1], "the nld stride moved no block"
+    assert spslot[44 * STRIDE + 1] != spslot[40 * STRIDE + 1], "the unit step moved no block"
     # ... and each shipped range was reached, by the thing that is there for it
     def block(x):
         return spslot[x * STRIDE + 1] | spslot[x * STRIDE + 2] << 8
-    assert block(126) == 0x40 + 62 * BUCKETS, "u clamped at 62: u * BUCKETS past 255"
-    assert block(139) == 0x30 + 44 * NLD, "u clamped at 44: u * NLD past 255"
+    assert block(126) == 0x40 + 62, "u clamped at 62"
+    assert block(139) == 0x30 + 44, "u clamped at 44"
     assert block(140) == 0x1007, "a block past 0x1000"
-    assert block(4) == 0x60 + 62 * BUCKETS, "the 300-column left clip: frac past five nibbles, u 62"
-    assert sprflag[62] and HEADER[block(62)][1] == 64, "column 62's block (0x0003) has last_rel 64"
+    assert block(4) == 0x60 + 62, "the 300-column left clip: frac past five nibbles, u 62"
+    # the min_b test (thing 54, bucket 16): min_b 15 and 16 taken, 17 and 31 not, 0 taken, 0xFF not;
+    # thing 55 (bucket 15) against min_b 16: not
+    assert [sprflag[x] for x in range(50, 58)] == [1, 1, 0, 0, 1, 0, 0, 0], "the min_b test"
     for x1, x2, istep, dw, base, col in ((-1, 0, 0x4B808, 13, 0x0100, 0), (-3, 1, 0x4AD00, 20, 0x0110, 1),
                                         (-1, 2, 0x4C8F8, 17, 0x0130, 2)):
-        want_blk = dict(_columns(x1, x2, istep, 1, dw, base))[col]
+        want_blk = dict(_columns(x1, x2, istep, dw, base))[col]
         assert block(col) == want_blk != base, "an E1M1 left clip's u at column %d" % col
 
 
@@ -860,8 +867,8 @@ def test_the_things_record_what_RECORDED_says():
     took = _record_all()[1]
     assert {sid: _runs(t) for sid, t in took.items()} == RECORDED
     for n, want in LEFT_CLIP_MOVES.items():
-        moved = {sid for sid, _y0, _lt, base, x1, x2, st, hd, _ba, dw in THINGS if x1 < 0
-                 and any(dict(_columns(x1, x2, st, hd, dw, base, n))[x] != dict(_columns(x1, x2, st, hd, dw, base))[x]
+        moved = {sid for sid, _y0, _lt, base, x1, x2, st, _bk, _ba, dw in THINGS if x1 < 0
+                 and any(dict(_columns(x1, x2, st, dw, base, n))[x] != dict(_columns(x1, x2, st, dw, base))[x]
                          for x, _f in took[sid])}
         assert moved == want, (n, sorted(moved), sorted(want))
 
@@ -888,7 +895,7 @@ MUTANTS = [
     ("the record's slot: an increment dropped", "write", FR,
      "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "hex.write_byte gps_ptr, gps_yb8 + 2*dw"),
     ("the record's slot: a step inserted", "write", FR,
-     "hex.write_byte gps_ptr, trb_shade_row", "hex.ptr_inc gps_ptr" + _W + "hex.write_byte gps_ptr, trb_shade_row"),
+     "hex.write_byte_and_inc gps_ptr, trb_shade_row", "hex.ptr_inc gps_ptr" + _W + "hex.write_byte_and_inc gps_ptr, trb_shade_row"),
     ("the record's slot: a prearmed write", "write", FR,
      "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "frame.write_byte_and_inc_prearmed gps_ptr, gps_yb8 + 2*dw"),
     ("the slot offset never added", "write", FR,
@@ -906,8 +913,6 @@ MUTANTS = [
     ("the slot id one nibble wide", "write", FR, "hex.mov 2, gps_sidx, gps_s_rec", "hex.mov 1, gps_sidx, gps_s_rec"),
     ("the slot index written through r + dw", "write", FR,
      "hex.shl_bit w/4, gps_sidx" + _W + "hex.shl_bit w/4, gps_sidx", "hex.shl_bit w/4, gps_sidx" + _W + "hex.inc 1, gps_sidx + dw" + _W + "hex.shl_bit w/4, gps_sidx"),
-    ("the nld stride one block long", "write", FR,
-     "rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld", "rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld + 1"),
     # the review's round-3 edits, exactly as posted
     ("r3: the record's first slot write prearmed", "write", FR,
      "hex.write_byte_and_inc gps_ptr, gps_yb8" + _W, "frame.write_byte_and_inc_prearmed gps_ptr, gps_yb8" + _W),
@@ -927,18 +932,14 @@ MUTANTS = [
     ("r4: the right-edge clamp never fires", "write", FR,
      "hex.scmp 8, trb_tx2, trb_cbound, x2_done, x2_done, x2_clamp", "hex.scmp 8, trb_tx2, trb_cbound, x2_done, x2_done, x2_done"),
     ("r4: the clamp one column wide", "write", FR, "        hex.dec 8, trb_cbound" + "\n", ""),
-    ("r4: the def's buckets and slotstride swapped", "write", FR,
-     "viewwc, viewh, ds, buckets, slotstride, ttwice,", "viewwc, viewh, ds, slotstride, buckets, ttwice,"),
+    ("r4: the def's hdb and slotstride swapped", "write", FR,
+     "viewwc, viewh, ds, hdb, slotstride, ttwice,", "viewwc, viewh, ds, slotstride, hdb, ttwice,"),
     ("r4: the emitter passes twice the slot stride", "write", EMITTER,
-     "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, ", "{SPRITE_HEIGHT_BUCKETS}, {2 * SPR_SLOT_STRIDE}, "),
+     "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, ", "{sprite_hd_bucket(cfg)}, {2 * SPR_SLOT_STRIDE}, "),
     # the review's round-5 edits
     ("r5: deg_flag computed per tier", "write", EMITTER,
      "    deg_flag = 1 ", "    deg_flag = 1 if not standalone else 0 "),
     ("r5: the baked leaf's deg 0", "write", EMITTER, "{deg_flag}, {DEG_SOFT_SCENERY}", "{deg_flag if mt else 0}, {DEG_SOFT_SCENERY}"),
-    ("r5: the buckets stride two nibbles wide", "write", FR,
-     "        hex.mul_const w/4, trb_blk, trb_blk, buckets", "        hex.mul_const 2, trb_blk, trb_blk, buckets"),
-    ("r5: the nld stride two nibbles wide", "write", FR,
-     "rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld", "rep(spn, k) hex.mul_const 2, trb_blk, trb_blk, nld"),
     ("r5: the texture column one nibble wide", "write", FR,
      "hex.mov 2, trb_u, trb_frac_u + 4*dw", "hex.mov 1, trb_u, trb_frac_u + 4*dw"),
     ("r5: the last texture column one nibble wide", "write", FR,
@@ -956,8 +957,27 @@ MUTANTS = [
      "    def _thing_leaf_body(label, mt):", "    def _thing_leaf_body(label, mt, deg_flag=0):"),
     ("r6: the record body's own slot-stride default", "write", EMITTER,
      "    def _thing_leaf_body(label, mt):", "    def _thing_leaf_body(label, mt, SPR_SLOT_STRIDE=32):"),
-    ("r6: the transparency test one nibble wide", "write", FR,
-     "hex.if0 2, trb_run_last, col_next", "hex.if0 1, trb_run_last, col_next"),
+    # M7 P1.6: the bucket in the slot, the region, the min_b test
+    ("P1.6: the light row written where the bucket goes", "write", FR,
+     "hex.write_byte gps_ptr, trb_bucket", "hex.write_byte gps_ptr, trb_shade_row"),
+    ("P1.6: the light row's write without its increment", "write", FR,
+     "hex.write_byte_and_inc gps_ptr, trb_shade_row", "hex.write_byte gps_ptr, trb_shade_row"),
+    ("P1.6: the region added two nibbles wide", "write", FR,
+     "hex.add w/4, trb_blk, trb_blk_const", "hex.add 2, trb_blk, trb_blk_const"),
+    ("P1.6: the min_b test one nibble wide", "write", FR,
+     "hex.cmp 2, trb_bucket, trb_run_last, col_next, do_store, do_store",
+     "hex.cmp 1, trb_bucket, trb_run_last, col_next, do_store, do_store"),
+    ("P1.6: the min_b test three nibbles wide", "write", FR,
+     "hex.cmp 2, trb_bucket, trb_run_last, col_next, do_store, do_store",
+     "hex.cmp 3, trb_bucket, trb_run_last, col_next, do_store, do_store"),
+    ("P1.6: the min_b test skips at equality", "write", FR,
+     "hex.cmp 2, trb_bucket, trb_run_last, col_next, do_store, do_store",
+     "hex.cmp 2, trb_bucket, trb_run_last, col_next, col_next, do_store"),
+    ("P1.6: the min_b test inverted", "write", FR,
+     "hex.cmp 2, trb_bucket, trb_run_last, col_next, do_store, do_store",
+     "hex.cmp 2, trb_bucket, trb_run_last, do_store, do_store, col_next"),
+    ("P1.6: the derive's bucket read without the light row's increment", "read", SR,
+     "hex.read_byte_and_inc gps_lr, ptr", "hex.read_byte gps_lr, ptr"),
     ("r6: the left clip's negation two nibbles wide", "write", FR,
      "hex.neg 8, trb_negx1", "hex.neg 2, trb_negx1"),
     ("r6: the left clip's product five nibbles wide", "write", FR,
@@ -967,12 +987,12 @@ MUTANTS = [
     ("r7: the left clip's negation four nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 4, trb_negx1"),
     ("r7: the left clip's negation five nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 5, trb_negx1"),
     ("r7: the slot stride follows the runtime thing count", "write", EMITTER,
-     "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, ", "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE * _MT_NTH}, "),
+     "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, ", "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE * _MT_NTH}, "),
     # the review's round-8 edits, and the scope rule's other doors
     ("r8: the slot stride follows the subsector index width", "write", EMITTER,
-     "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, ", "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE * _MT_NSSN}, "),
+     "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, ", "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE * _MT_NSSN}, "),
     ("r8: the slot stride follows the light tables", "write", EMITTER,
-     "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, ", "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE * len(_MT_LTB)}, "),
+     "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, ", "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE * len(_MT_LTB)}, "),
     ("r8: the column index cleared three nibbles wide", "write", FR,
      "hex.set w/4, trb_tab_idx, 0", "hex.set 3, trb_tab_idx, 0"),
     ("the slot stride rebound through globals()", "write", EMITTER,
@@ -1003,7 +1023,7 @@ MUTANTS = [
     ("the step's column stride", "read", FR, "hex.ptr_add p2_sspp, 16", "hex.ptr_add p2_sspp, 8"),
     ("the derive's bias", "read", SR, "hex.sub_constant 4, gps_y0, 32768", "hex.sub_constant 4, gps_y0, 16384"),
     ("the derive: an increment dropped", "read", SR, "hex.read_byte_and_inc gps_y0 + 2*dw, ptr", "hex.read_byte gps_y0 + 2*dw, ptr"),
-    ("the derive: a step inserted", "read", SR, "hex.read_byte gps_lr, ptr", "hex.ptr_inc ptr" + _W + "hex.read_byte gps_lr, ptr"),
+    ("the derive: a step inserted", "read", SR, "hex.read_byte_and_inc gps_lr, ptr", "hex.ptr_inc ptr" + _W + "hex.read_byte_and_inc gps_lr, ptr"),
     ("the derive's field order", "read", SR,
      "hex.read_byte_and_inc gps_y0, ptr" + _W + "hex.read_byte_and_inc gps_y0 + 2*dw, ptr",
      "hex.read_byte_and_inc gps_y0 + 2*dw, ptr" + _W + "hex.read_byte_and_inc gps_y0, ptr"),
@@ -1017,7 +1037,7 @@ NEUTRAL = [
     ("the record's layout freeze deleted", "write", FR, "        rep(703, i) stl.fj 0, 0\n", ""),
     ("the load's layout freeze deleted", "read", FR, "        rep(980, i) stl.fj 0, 0\n", ""),
     ("the slot stride written from module constants", "write", EMITTER,
-     "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, ", "{SPRITE_HEIGHT_BUCKETS}, {SPR_THING_SLOTS // SPR_SLOT_STRIDE}, "),
+     "{sprite_hd_bucket(cfg)}, {SPR_SLOT_STRIDE}, ", "{sprite_hd_bucket(cfg)}, {SPR_THING_SLOTS // SPR_SLOT_STRIDE}, "),
 ]
 
 

@@ -348,10 +348,14 @@ class _Module:
             if word in REFLECTION:
                 raise BindingRefused("%s.py reaches a namespace by reflection (`%s`)" % (name, word))
             if isinstance(node, (ast.Import, ast.ImportFrom)):
-                mods = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module or ""]
+                # the modules this binds: `import a.b` binds a.b; `from a import b` binds a.b when b
+                # is a module (a name in it otherwise -- a doomfj module name either way)
+                if isinstance(node, ast.Import):
+                    mods = [a.name for a in node.names]
+                else:
+                    mods = [node.module or ""] + ["%s.%s" % (node.module, a.name) for a in node.names]
                 for m in mods:
-                    if m.split(".")[0] in REFLECTION_MODULES or m in ("doomfj",) or \
-                            (isinstance(node, ast.Import) and m.startswith("doomfj")):
+                    if m.split(".")[0] in REFLECTION_MODULES or m == "doomfj." + name:
                         raise BindingRefused("%s.py imports %s" % (name, m))
                 if any(a.name == "*" for a in node.names):
                     raise BindingRefused("%s.py has a star import" % name)
@@ -974,6 +978,10 @@ MUTANTS = [
     ("the slot stride rebound through globals()", "write", EMITTER,
      "    _MT_NSSN = _index_nibbles(max(1, _MT_NSS))\n",
      "    _MT_NSSN = _index_nibbles(max(1, _MT_NSS))\n    globals()['SPR_SLOT_STRIDE'] = 16 * _MT_NSSN\n"),
+    ("the slot stride rebound through the emitter's own module", "write", EMITTER,
+     "    _MT_NSSN = _index_nibbles(max(1, _MT_NSS))\n",
+     "    _MT_NSSN = _index_nibbles(max(1, _MT_NSS))\n    from doomfj import wall_renderer as _self\n"
+     "    _self.SPR_SLOT_STRIDE = 16 * _MT_NSSN\n"),
     ("the slot stride rebound by a global statement", "write", EMITTER,
      "    _MT_NSSN = _index_nibbles(max(1, _MT_NSS))\n",
      "    _MT_NSSN = _index_nibbles(max(1, _MT_NSS))\n\n    def _rebind(n):\n        global SPR_SLOT_STRIDE\n"

@@ -32,8 +32,10 @@ msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
-(re-frozen 2026-09-28 on blocked31, a quiet box: 61.5 ms/frame [61.4 .. 61.7], yardstick 3.62G
--- `blocked31_msframe_freeze.log`; the stored ms is informational; `--against shipped` RE-MEASURES
+(re-frozen 2026-09-28 on blocked32, a quiet box: 70.1 ms/frame [69.6 .. 70.9], yardstick 3.53G
+-- `blocked32_msframe_freeze.log`; the box ran at ~201M fj/s that afternoon against ~233M that
+morning -- the same binary measured 60.4 ms then, which is exactly why only an A/B inside one run
+counts; the stored ms is informational; `--against shipped` RE-MEASURES
 both arms live, and the binary hash is what it checks), so `--against shipped` is the comparison.
 
 ## 1b. The build command, and the play command

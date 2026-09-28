@@ -196,3 +196,10 @@ byte-identical rebuild is required.
 - **Time**: 60.4 ms/frame against blocked31's 62.2 in the same msframe run -- NOT SEPARATED (pairs
   1.000 1.018 1.049 1.012 1.034); class F records it as the price, far under the ~90 ms tripwire.
 - **Size**: 27.13% of 2^27 (-246,914 words: 26 things and 5 sprite kinds out of the image).
+- **Rebased since the build** (onto P1.4's review rounds): `scratchpad/gp/p13_emit_neutral.py --base
+  7cdfb97 --head 478a104` runs the build's own path to its first assembly in both trees -- every
+  assembler input and the persist tuple equal, both controls caught: EMISSION-NEUTRAL: PASS
+  (`p15_emit_neutral.log`).
+- **Baseline**: msframe's `shipped` re-frozen on blocked32 on a quiet box, 70.1 ms/frame [69.6 ..
+  70.9] (`blocked32_msframe_freeze.log`; the machine ran ~14% slower that afternoon than when the
+  row above was measured -- absolute ms is about the machine, the A/B is about the binary).

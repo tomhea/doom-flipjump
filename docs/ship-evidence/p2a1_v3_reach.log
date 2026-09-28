@@ -1,0 +1,14 @@
+$ python scratchpad/gp/p2a_v3_reach.py
+  R0-west-hall         mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R0-aftermath         mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R0-south-hall        mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R0-imp-court         mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R0-northwest         mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R0-courtyard         mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R2-barrel-hall       mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R2-spectre-corridor  mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R2-east-yard         mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R3-west              mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+  R3-mid               mirror: card 0 fired 0 press 0 | model: card 0 wfired [0, 0]  ok
+V3 CLEAR: 0 of 11 runs reach the card or a trigger
+rc=0

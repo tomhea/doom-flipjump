@@ -270,6 +270,7 @@ class DoorSim:
 
     def __init__(self, wad=GS.DEFAULT_WAD, mapname=GS.DEFAULT_MAP):
         self.rm, _scene, self.spawn = GS._oracle(wad, mapname)
+        self._card_at = self.rm.blue_card_at(_scene)
         self.mw = WadFile.from_path(str(ROOT / wad))
         self.mapname = mapname
         self.secs = self.mw.sectors(mapname)
@@ -283,7 +284,8 @@ class DoorSim:
         self.nstates = {si: len(v) for si, v in tbl.items()}
         self.open_h = {si: (self.secs[si].floor_h, tbl[si][-1]) for si in self.order}
         # M7 P2a.1: the door phase itself -- kinds, cards, strides, the walk-over triggers
-        self.dp = DoorPhase(self.secs, self.lds, self.sds, self.mw.vertexes(mapname), self.boxes)
+        self.dp = DoorPhase(self.secs, self.lds, self.sds, self.mw.vertexes(mapname), self.boxes,
+                            card_at=self._card_at)
         self._scenes = {}
         self.reset()
 
@@ -322,7 +324,10 @@ class DoorSim:
                 self.ever[si] = self.ds[si][0]
         blocked = frozenset(li for si in self.order if self.ds[si][0] < self.passes[si]
                             for li in self.lines_of.get(si, ()))
-        new = self.rm.step_sim(st, kd, scene=self._scene(blocked))
+
+        def touch(cx, cy, z):
+            self.dstate = self.dp.touch(self.dstate, cx, cy, z)
+        new = self.rm.step_sim(st, kd, scene=self._scene(blocked), touch=touch)
         self.dstate = self.dp.after_move(self.dstate, (st.x, st.y), (new.x, new.y))
         self.ds = self.dstate[0]
         return new

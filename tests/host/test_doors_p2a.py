@@ -151,3 +151,80 @@ def test_the_blue_doors_need_the_blue_card(m):
     for si, k in kinds.items():
         assert D.can_open(k, has_blue=False) == (k not in ("blue", "walkover"))
         assert D.can_open(k, has_blue=True) == (k != "walkover")      # walk-over: never by use
+
+
+# ---- the blue card in the gate oracles: DoorPhase.touch is the model's rule ---------------------------
+
+def test_the_card_constants_are_the_models():
+    from doomfj import combat as C
+    assert D.CARD_BOX == C.ITEM_RADIUS + C.PLAYER_R
+    assert (D.CARD_REACH_UP, D.CARD_REACH_DOWN) == (C.REACH_UP, C.REACH_DOWN)
+
+
+def _boxes():
+    from doomfj.mapcompiler import bake_bsp
+    mw = WadFile.from_path(FIX)
+    return D.use_boxes_xy(mw.sectors("E1M1"), mw.linedefs("E1M1"), mw.sidedefs("E1M1"),
+                          bake_bsp(mw, "E1M1").vertexes)
+
+
+@pytest.fixture(scope="module")
+def card_world():
+    from doomfj import world as W
+    w = W.World(strict=True)
+    i = [k for k, t in enumerate(w.pickup_things) if t.type == 5]
+    assert len(i) == 1
+    return w, i[0]
+
+
+def test_the_oracles_card_is_the_models(card_world):
+    from doomfj.config import Config
+    from doomfj.reference_model import ReferenceModel, build_scene
+    w, i = card_world
+    mw = WadFile.from_path(FIX)
+    got = ReferenceModel(Config()).blue_card_at(build_scene(mw, mw, "E1M1"))
+    t = w.pickup_things[i]
+    assert got == (t.x, t.y, w.pickup_z[i]) == (2192, 576, 136)
+
+
+def test_DoorPhase_touch_takes_the_card_exactly_when_the_model_does(m, card_world):
+    """every probe from an untaken card: the edges of the box (strict) on both axes and the edges
+    of the reach, against combat's `_touch_specials` on a fresh level start"""
+    from doomfj import world as W
+    w, i = card_world
+    secs, lds, sds, verts = m
+    kx, ky, kz = 2192, 576, 136
+    dp = D.DoorPhase(secs, lds, sds, verts, _boxes(), card_at=(kx, ky, kz))
+    bd = D.CARD_BOX
+    probes = []
+    for z in (kz - 57, kz - 56, kz - 55, kz, kz + 7, kz + 8, kz + 9, 24):
+        for d in (-bd, -bd + 1, 0, bd - 1, bd):
+            for f in (-1, 0, 1):
+                probes += [(((kx + d) << 16) + f, ky << 16, z), (kx << 16, ((ky + d) << 16) + f, z)]
+    start = w.ws.copy()
+    taken = 0
+    for x16, y16, z in probes:
+        w.ws = start.copy()
+        w._touch_specials(x16, y16, z, W.TicEvents(0))
+        want = w.ws.pickup_taken[i]
+        got = dp.touch(dp.initial(), x16, y16, z)[3]
+        assert got == want, (x16 - (kx << 16), y16 - (ky << 16), z - kz)
+        taken += want
+    assert 0 < taken < len(probes)
+    w.ws = start
+
+
+def test_a_taken_card_stays_taken_and_opens_the_blue_door(m):
+    secs, lds, sds, verts = m
+    boxes = _boxes()
+    dp = D.DoorPhase(secs, lds, sds, verts, boxes, card_at=(2192, 576, 136))
+    blue = [si for si, k in D.door_kinds(secs, lds, sds).items() if k == "blue"]
+    assert sorted(blue) == [51, 71]
+    st0 = dp.initial()
+    st1 = dp.touch(st0, 2192 << 16, 576 << 16, 136)
+    assert st0[3] == 0 and st1[3] == 1 and dp.touch(st1, 0, 0, 0)[3] == 1
+    for si in blue:
+        x0, y0, x1, y1 = boxes[si]
+        cx, cy = ((x0 + x1) // 2) << 16, ((y0 + y1) // 2) << 16
+        assert dp.tic(st0, True, cx, cy)[0][si] == st0[0][si]           # no card: shut
+        assert dp.tic(st1, True, cx, cy)[0][si][1] != 0                 # the card: it moves

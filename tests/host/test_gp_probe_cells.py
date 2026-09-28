@@ -37,7 +37,7 @@ P = _load_probe()
 def _table(tmp_path, drop=()):
     """every game cell's label, 64 cells apart (wider than any cell spec), less the ones in `drop`"""
     lines, at = [], 1 << 20
-    for c in P.game_cells(ND).values():
+    for c in P.game_cells(ND, 2).values():
         if c.label not in drop:
             lines.append("%s\t%d" % (c.label, at))
         at += 64 * CELL_BITS
@@ -45,17 +45,17 @@ def _table(tmp_path, drop=()):
     path = tmp_path / ("labels-%s.tsv.gz" % ("-".join(drop) or "all"))
     with gzip.open(path, "wt", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
-    return P.LabelTable.load(path, {c.label for c in P.game_cells(ND).values()})
+    return P.LabelTable.load(path, {c.label for c in P.game_cells(ND, 2).values()})
 
 
 def _known():
     """Oracle.known_pristine without the WADs: it reads only the door count and the spawn"""
-    stub = SimpleNamespace(ndoors=ND, spawn=SimpleNamespace(x=-(5 << 16), y=7 << 16, angle=1 << 30))
+    stub = SimpleNamespace(ndoors=ND, nwalk=2, spawn=SimpleNamespace(x=-(5 << 16), y=7 << 16, angle=1 << 30))
     return P.Oracle.known_pristine(stub)
 
 
 def _probe_holding(table, values):
-    p = P.Probe(P.game_cells(ND), table)
+    p = P.Probe(P.game_cells(ND, 2), table)
     p.attach(P._FakeMemory())
     p.write_cells({k: v for k, v in values.items() if k in p.cells})
     return p
@@ -91,4 +91,27 @@ def test_only_the_skill_menu_is_optional(tmp_path):
         _table(tmp_path, drop=("viewx",))
     with pytest.raises(KeyError, match="come together"):
         _table(tmp_path, drop=("menu_sel",))
-    assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel"}
+    for one in ("dreq", "pcard", "wfired"):
+        with pytest.raises(KeyError, match="come together"):
+            _table(tmp_path, drop=(one,))
+    assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel", "dreq", "pcard", "wfired"}
+
+
+def test_a_table_before_p2a1_loads_and_its_door_cells_are_dropped(tmp_path):
+    """M7 P2a.1: a binary before the rung (blocked33 and every baseline) has no dreq / pcard /
+    wfired; the probe drops them, a pose that names them writes the rest"""
+    table = _table(tmp_path, drop=("dreq", "pcard", "wfired"))
+    assert table.absent == {"dreq", "pcard", "wfired"}
+    known = _known()
+    assert {"dreq", "pcard", "wfired"} <= set(known)
+    p = _probe_holding(table, known)
+    assert p.absent == {"dreq", "pcard", "wfired"} and p.check_known(known) == []
+    p.write_cells(known)                                     # absent cells: nothing written
+    assert [b[0] for b in p.check_known(dict(known, viewy=known["viewy"] + 1))] == ["viewy"]
+
+
+def test_a_table_with_the_door_cells_probes_them(tmp_path):
+    p = _probe_holding(_table(tmp_path), _known())
+    assert p.check_known(_known()) == []
+    assert [b[0] for b in p.check_known(dict(_known(), pcard=1))] == ["pcard"]
+    assert [b[0] for b in p.check_known(dict(_known(), dreq=(0, 1, 0)))] == ["dreq"]

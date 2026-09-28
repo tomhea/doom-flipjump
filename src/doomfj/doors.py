@@ -294,6 +294,11 @@ WALKOVER_SPECIALS = frozenset({2})         # W1 door open-stay, by tag
 # moves one stop a frame (SPEED = 1, the fastest `sub` allows), so the blazing door moves FOUR stops
 # a frame, clamped at both ends -- the same 4:1 ratio, in the only unit this machine has.
 BLAZE_STRIDE = 4
+# The blue card's touch (the model's `_touch_specials`, doomfj.combat): the boxes overlap -- item
+# radius 20 + player radius 16, strict -- and the card is within the player's reach of the floor it
+# stands on: kz - z in [-REACH_DOWN, REACH_UP] = [-8, 56]. tests/host/test_doors_p2a.py ties these
+# to combat's constants (this module cannot import combat, which imports it).
+CARD_BOX, CARD_REACH_UP, CARD_REACH_DOWN = 36, 56, 8
 
 
 def use_boxes(secs, lds, sds, rng: int = USE_RANGE) -> dict:
@@ -543,10 +548,14 @@ class DoorPhase:
     walk-over triggers after an accepted move, which fire once and press their door on the NEXT door
     phase (the model's `d_monreq` convention).
 
-    The state is plain data, `(ds, fired, req)`: `ds` {sector: (state, dir, sub, wait)}, `fired` a
-    tuple of 0/1 per trigger, `req` a frozenset of door sectors pressed at the next tic."""
+    The state is plain data, `(ds, fired, req, card)`: `ds` {sector: (state, dir, sub, wait)},
+    `fired` a tuple of 0/1 per trigger, `req` a frozenset of door sectors pressed at the next tic,
+    `card` 1 once the blue card is taken. `card_at` = (x, y, z) of the card in map units (None: no
+    card): `touch` is the model's `_touch_specials` for it -- the boxes overlap (CARD_BOX, strict) and
+    the card is within reach of the floor the player stands on."""
 
-    def __init__(self, secs, lds, sds, verts, boxes, quant: int = DEFAULT_QUANT):
+    def __init__(self, secs, lds, sds, verts, boxes, quant: int = DEFAULT_QUANT, card_at=None):
+        self.card_at = card_at
         tbl = door_states(secs, lds, sds, quant)
         self.order = sorted(tbl)
         self.nstates = {si: len(v) for si, v in tbl.items()}
@@ -556,10 +565,13 @@ class DoorPhase:
         self._initial = initial_states(secs, lds, sds, quant)
 
     def initial(self):
-        return (dict(self._initial), (0,) * len(self.triggers), frozenset())
+        return (dict(self._initial), (0,) * len(self.triggers), frozenset(), 0)
 
-    def tic(self, state, use: bool, x16: int, y16: int, has_blue: bool = False):
-        ds, fired, req = state
+    def tic(self, state, use: bool, x16: int, y16: int, has_blue=None):
+        """`has_blue`: None takes the state's card"""
+        ds, fired, req, card = state
+        if has_blue is None:
+            has_blue = bool(card)
         out = {}
         for si in self.order:
             kind, box = self.kinds[si], self.boxes.get(si)
@@ -567,13 +579,25 @@ class DoorPhase:
                        and in_use_box_fixed(box, x16, y16)) or si in req
             out[si] = door_tic(ds[si], self.nstates[si], bool(pressed),
                                stride=door_stride(kind), stay=door_stay(kind))
-        return (out, fired, frozenset())
+        return (out, fired, frozenset(), card)
 
     def after_move(self, state, old16: tuple, new16: tuple, radius: int = 16):
-        ds, fired, req = state
+        ds, fired, req, card = state
         fired, req = list(fired), set(req)
         for k, trig in enumerate(self.triggers):
             if not fired[k] and crossed(trig, old16, new16, radius):
                 fired[k] = 1
                 req.add(trig[0])
-        return (ds, tuple(fired), frozenset(req))
+        return (ds, tuple(fired), frozenset(req), card)
+
+    def touch(self, state, cx16: int, cy16: int, here_z: int):
+        """the card at one tried candidate (16.16), the player standing on `here_z`"""
+        ds, fired, req, card = state
+        if card or self.card_at is None:
+            return state
+        kx, ky, kz = self.card_at
+        bd = CARD_BOX << 16
+        if abs((kx << 16) - cx16) < bd and abs((ky << 16) - cy16) < bd \
+                and -CARD_REACH_DOWN <= kz - here_z <= CARD_REACH_UP:
+            return (ds, fired, req, 1)
+        return state

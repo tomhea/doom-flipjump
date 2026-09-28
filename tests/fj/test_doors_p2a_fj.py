@@ -91,7 +91,7 @@ def door_schedule(dp, seed=5):
 def door_expect(dp, sched):
     st, want = dp.initial(), []
     for x16, y16, use, card, req in sched:
-        st = (st[0], st[1], frozenset(req))
+        st = (st[0], st[1], frozenset(req), st[3])
         st = dp.tic(st, use, x16, y16, has_blue=bool(card))
         for si in dp.order:
             want += [*(v for v in st[0][si]), 0]
@@ -180,7 +180,7 @@ def walk_expect(dp, moves, fresh=True):
             st = dp.initial()
         st = dp.after_move(st, old, new, PLAYER_R)
         want += list(st[1]) + [int(si in st[2]) for si in dp.order]
-        st = (st[0], st[1], frozenset())
+        st = (st[0], st[1], frozenset(), st[3])
     return want
 
 

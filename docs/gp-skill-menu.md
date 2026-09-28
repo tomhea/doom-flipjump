@@ -150,3 +150,49 @@ frozen combat set changes.
   through `thing_hidden`).
 - Budget: -0.3M ops/frame on the v2 binding (handoff section 10). ESTIMATE (plan section 7's R4):
   7 zombiemen and 26 multiplayer-only things no longer drawn at hard.
+
+## As built (M7 P1.5)
+
+Sections 1-3 were brought up to what was built before the build; what the build and its review
+added:
+
+- **The restore sets' re-key met a shrunk array.** Leaving the multiplayer-only things out of the
+  image took the runtime things from 75 to 68, and `thpos_rt` / `thss_rt` from 2,400 to 2,176 words;
+  `scratchpad/ca_remap_set.py` refused its own output (448 offsets past their label's end). It now
+  reads the label table the set was keyed on (`--old-labels`, held to the set's `labels_sha256`) and
+  holds a label the set held WHOLE whole at its new span -- shrunk, or grown, where the new words
+  would otherwise be a hole -- and refuses a label held in part whose span changed
+  (`tests/host/test_ca_remap_set.py` runs its selftest; `p15_remap_r1_*.log`, `p15_rekey.log`).
+- **`--pin-state-cells` never pins a cell the program reads through a pointer**
+  (`selfreset.POINTER_READ_CELLS`: `thpos_rt`, `thss_rt`, `sshead`, `thnext`): a pinned word holds
+  base + value, which a raw read takes as the value (`tests/host/test_pin_veto.py`).
+- **The gates are byte- AND state-exact**: `m2_std_gate` and `m3_gate` read the probe cells (the
+  view, the mode, the menu screen and selection, every door's state) at each present
+  (`scratchpad/gp/gatestate.py`), and each has a `--selftest-state` / `--selftest-restart-doors`
+  that must be rejected by the state check where its picture is still right.
+- **The sprite bank and the shade classes hold only what a single-player game draws** -- 27 kinds
+  where there were 32 (`wall_renderer._lines_sprite_bank` / `_lines_sprite_light` ask
+  `things.drawable_things`).
+- **The owner's credit and fonts** (2026-09-27, from rendered previews): the lines in a 5x7 font,
+  `TOMHE.APP` small (3x5) and dim gray in the bottom-right corner (section 2.x).
+- **Control 6 is VERIFIED** on the shipped binary: NEW GAME found door 10 open, the replay retraced
+  the first walk, and its last frame tells the shut door from that one (`blocked32_gates.log`).
+
+### Measured (the row and the verdict are in `docs/gp-ledger.md`)
+
+`build/doom_e1m1_blocked32.fjm`, sha256 `89c3cf6348258eeb`, from the ship-gate 1b line (the heat list
+unchanged: P1.5 changed no parameter count on the hot paths -- all 20 hot groups matched and pinned),
+built at 7cdfb97 (tag `evidence/p1.5-build`); the source changed, so the counts cache recounted
+(23,560 groups before alias merging, 348,682 tables, 2,369 s) and the build took 8,794 s. Class F: no
+byte-identical rebuild is required.
+
+- **Pictures and state**: `m3_gate` byte- and state-exact on all 32 frames (the skill screen, NEW GAME
+  at easy, medium and hard), `m2_std_gate` on all 366 (the door kept across the reset, NEW GAME puts
+  it back); all six gate selftests rejected where they must be; B0 on set v2 with `--pixel-every 1`
+  state- and pixel-exact on every frame of all 11 runs.
+- **Ops**: the v2 binding fell 419,848 (-2.9%) to 14,022,076, against the -0.3M estimate; gamespeed's
+  binding 414,222 to 13,560,716; the sprite record (`thing_leaf` + `thing_leaf_b`) 130,535 a frame on
+  gamespeed's games, the emission 23,451.
+- **Time**: 60.4 ms/frame against blocked31's 62.2 in the same msframe run -- NOT SEPARATED (pairs
+  1.000 1.018 1.049 1.012 1.034); class F records it as the price, far under the ~90 ms tripwire.
+- **Size**: 27.13% of 2^27 (-246,914 words: 26 things and 5 sprite kinds out of the image).

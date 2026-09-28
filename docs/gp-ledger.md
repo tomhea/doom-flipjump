@@ -249,4 +249,32 @@ R4: at hard, 7 zombiemen and 26 multiplayer-only things no longer drawn).
 6. `pinreport.py`: a hot word not pinned; a new persisted cell (`menu_scr`, `menu_sel`) missing from
    the persist set (the build refusing it).
 
-**Row**: (filled after the build)
+**Row** (2026-09-28, `build/doom_e1m1_blocked32.fjm`, sha256 `89c3cf6348258eeb`; logs in
+`docs/ship-evidence/blocked32_*`):
+
+| measure | shipped (P1.4, blocked31) | P1.5 (blocked32) | delta |
+|---|---|---|---|
+| combat set v2 binding (b0_scenarios, the boot skill hard) | 14,441,924 | 14,022,076 | **-419,848 (-2.9%)** |
+| ... with strafe's collision (proxy) | 14,476,599 | 14,055,673 | -420,926 (-2.9%) |
+| gamespeed binding (ops/frame) | 13,974,938 | 13,560,716 | -414,222 (-3.0%) |
+| the sprite record, `thing_leaf` + `thing_leaf_b` (profx, gamespeed's ten games) | 1,346,297 | 1,215,762 | -130,535 |
+| the emission, `seg_pass2_leaf` (the same) | 3,540,932 | 3,517,481 | -23,451 |
+| ms/frame (msframe, one run, A = blocked31) | 62.2 | 60.4 | NOT SEPARATED (pairs 1.000 1.018 1.049 1.012 1.034, median x1.018) |
+| fj ops/s | 232.1 M | 233.5 M | +0.6% |
+| size (% of 2^27) | 27.31% | 27.13% | -246,914 words |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**Verdict against the kill criteria (class F):**
+1 host: tests/host at 7cdfb97 1248 passed (single_player / skill_absent held to World(skill), their
+controls, the emitter's flagless-baked-thing clause);
+2 fj: the restart tests (NEW GAME rewrites the persisted cells to each skill's level start, a
+mutated block caught) and m2_std_gate's control 6 (walk, open a door, NEW GAME: the view and the
+door are back; --selftest-restart and --selftest-restart-doors rejected);
+3 m3_gate PASS (32 frames byte- and state-exact: the skill screen, NEW GAME at easy, medium and hard;
+--selftest-skill rejected at frame 20, --selftest at frame 0, --selftest-state at frame 20),
+m2_std_gate PASS (366 frames byte- and state-exact), b0 on set v2 with --pixel-every 1: state and
+pixels 100/100 on all 11 runs;
+4 CAP-22: the v2 binding 14.02M <= 22M, size 27.13% <= 35%, msframe 60.4 ms/frame (the ~90 ms
+tripwire far off) -- the price, recorded;
+5 the reclaim: -0.42M on the v2 binding (the estimate was -0.3M);
+6 pinreport 20/20, 0 lost; menu_scr / menu_sel persisted (the build did not refuse).

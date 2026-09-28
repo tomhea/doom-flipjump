@@ -55,6 +55,7 @@ from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_li
 from doomfj.doorcode import card_pickup_lines, walkover_lines   # M7 P2a.1
 from doomfj.doors import door_kinds, walkover_triggers                    # M7 P2a.1
 from doomfj.doors import exit_boxes                                        # M7 P2a.2
+from doomfj.doors import door_contact_geo                                  # M7 P2b
 from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS,       # M7 P2b
                            lift_states, lift_walk_triggers, switch_sectors, use_line_boxes)
 from doomfj.movercode import lift_tic_lines, lift_walk_lines, mover_decls, use_line_lines
@@ -1037,7 +1038,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # the prologue is the line-for-line text it was before doors existed.
     _door_lines = door_line_ids(secs, lds, sds, _dst_tbl) if _dst_tbl else {}
     _door_tic = (door_tic_lines(sorted(_dst_tbl), {si: len(v) for si, v in _dst_tbl.items()},
-                                use_boxes_xy(secs, lds, sds, verts), door_kinds(secs, lds, sds))
+                                use_boxes_xy(secs, lds, sds, verts), door_kinds(secs, lds, sds),
+                                # M7 P2b: reversal on the player, in the game tier
+                                contact=(door_contact_geo(secs, lds, sds, verts)
+                                         if (standalone and player_sim) else None),
+                                passes={si: pass_state(secs, lds, sds, si) for si in _dst_tbl})
                  if (_dst_tbl and player_sim) else [])
     # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
     if _movers_on and _door_tic:

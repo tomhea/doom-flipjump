@@ -523,10 +523,15 @@ Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj
   `tests/fj/test_slot_layouts_fj.py` RUNS the fj on both sides. The record's code from its slot
   allocation to the end of its column loop, transplanted verbatim, gets its parameters from the
   game tier's EMITTED program -- the emitter run, in its own scope, on the one-room map with things
-  (a lamp alone bakes, so both record bodies are emitted; 24 things led by monsters widen the two
-  map-dependent index widths, n_thc and nltic, from 1 to 2), every `frame.thing_record_body` call
-  zipped with the def's own parameter list, the range's arguments the same in every call or the
-  binding is refused (an emitter that cannot run is an error, never a refusal) -- and records things
+  (a lamp alone bakes, so both record bodies are emitted; 24 things of 15 kinds, 20 of them in the
+  runtime lists), every `frame.thing_record_body` call zipped with the def's own parameter list, the
+  range's arguments integers and the same in every call or the binding is refused (an emitter that
+  cannot run is an error, never a refusal). WHY the rooms' values are every map's is the scope rule
+  (`scope_rule`, review round 8): each name in a range argument's expressions, resolved by symtable,
+  must be `cfg` (never rebound), `deg_flag` (bound once to an int literal), a module name bound once
+  that no `global` statement, attribute store or listed reflection reaches, or a pure builtin -- every
+  emitter local, where the map-derived values live, is refused. Every register the range names but its
+  inputs enters each record holding a value with no zero nibble (`hostile`). It records things
   chosen to reach every branch that decides where a byte lands and these operand ranges the
   shipped sprites reach: columns
   across the 16, 64 and 1,024-index bounds, both edge clamps, slot ids 1..255, fragments A and B, B
@@ -537,10 +542,16 @@ Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj
   the hot block (pclm through the cell after drawn, 6,785) must then be the constants' layout; from
   memory laid out by the constants, the real seed, step, load and derive must give each field. The
   harness anchors its hot block as the build does (`pad 16384`: one arm5 window) in the real order.
-  62 mutants -- every kind the review rounds found, the reviewer's own edits among them -- each make
-  it fail, and two edits that move no byte (unreachable filler deleted) must still pass
-  (`p14_cr7_layouts_fj.log`). `tests/fj/test_narrow_reads_fj.py` reads block 0x1003 as well. Not covered: the shipped binary's addresses, and what the record
-  computes before its slot allocation -- the gates hold both, against the oracle.
+  What each record records is held to the model (`RECORDED`, `LEFT_CLIP_MOVES`). 67 mutants -- every
+  kind the review rounds found, the reviewer's own edits among them -- each make it fail, and three
+  edits that move no byte (unreachable filler deleted; an argument rewritten from module constants)
+  must still pass (`p14_cr8_layouts_fj.log`, 76 passed; `p14_cr8_refused_emit.log` shows every
+  refused emitter edit is a working emitter). `tests/fj/test_narrow_reads_fj.py` reads block 0x1003
+  as well. Not covered (the test's docstring says why): the shipped binary's addresses; what the
+  record computes before its slot allocation -- the gates hold both, against the oracle; reflection
+  the scope rule does not list, outside the modules it parses; and a record call built or rewritten
+  outside `_thing_leaf_body`'s f-string, depending on the map -- E1M1's own call is the shipped
+  binary's, and its gates hold its pixels.
 - **The latent wrong-light ditto** of section 6 is gone with the four-field compare: the ladder
   compares (slot, block).
 - **The column check** is `scratchpad/gp/probes/sprite/ship_check.py`: the SHIPPED record (the

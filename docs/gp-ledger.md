@@ -382,4 +382,29 @@ P2a); size ESTIMATE +~0.1M words; plane ids MEASURED 233 (222 + 11; with P2b's l
    re-freeze before this rung ships (MEASURED before the build).
 7. `pinreport.py`: a hot word not pinned; the restore sets not re-keyed to this rung's labels.
 
-**Row**: (filled after the build)
+**Row** (blocked34, sha256 `956a29893e7617a7`, built at e4270dc; `docs/ship-evidence/blocked34_*`):
+
+| measure | blocked33 (P1.6) | blocked34 (P2a.1) | delta |
+|---|---|---|---|
+| combat set v3 binding | 14,158,345 | 14,158,771 | +426 |
+| ... with strafe's collision (proxy) | 14,192,344 | 14,193,201 | +857 |
+| gamespeed binding | 13,665,215 | 13,667,149 | +1,934 |
+| size (% of 2^27) | 26.96% | 27.17% | +293,940 words |
+| plane ids | 222 | 233 | +11 |
+| ms/frame (msframe, one run, A = blocked33) | 66.1 | 67.8 | NOT SEPARATED (pairs 0.954 0.975 0.983 1.193 0.996) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**Verdict: every kill criterion met.**
+1. Host: 1,360 passed; the rules and their mutants (`test_doors_p2a.py`, `test_doorcode_more.py`).
+2. fj: `tests/fj/test_doors_p2a_fj.py` 13 passed, its mutants caught.
+3. m3_gate, m2_std_gate byte- and state-exact, six selftests; p2a_gate S1-S7 on the binary, every
+   control parting; B0 v3 pixel-exact on every frame.
+4. CAP-22: v3 14.16M <= 22M, size 27.17% <= 35%, msframe far under 90 ms. The ops held the budget
+   (+426 against +0.02 .. +0.05M); the size did not hold its ESTIMATE (+0.29M words against ~+0.1M,
+   no kill criterion).
+5. Plane ids 233.
+6. The frozen set: no v3 run reaches the card or a trigger (`p2a1_v3_reach.log`); the model's schema
+   grew (w_fired), so v3 was re-frozen by the owner's schema-growth rule (2026-09-28;
+   `p2a1_v3_growth_freeze.log`) -- every pose and drawn population reproduced.
+7. pinreport 20 of 20; the restore sets re-keyed (`p2a1_rekey.log`).
+

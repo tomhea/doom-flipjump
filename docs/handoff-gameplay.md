@@ -310,6 +310,8 @@ ship gate's own clause) -- never one that measures SLOWER.
 ### P2a -- doors, keys, exit
 The blue-key check (and the key's sprite and pickup), walk-over and blazing doors, the exit switch
 and the "level complete" frame, NEW GAME resetting the level. Class F. Budget +0.05M.
+**P2a.1 doors and keys DONE 2026-09-29** (blocked34 ships: v3 +426, `docs/gp-ledger.md`); P2a.2
+the exit and LEVEL COMPLETE (`docs/gp-exit.md`) next.
 
 ### P2b -- lifts and the floor switch
 `docs/gp-lift-spike.md`'s rung plan: host-only work and FAIL-first tests, 1-3 render-tier builds,

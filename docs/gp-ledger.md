@@ -350,3 +350,36 @@ FREEZE PASS, F1-F5 (`p16_v3_freeze.log`); P1.6 is measured on v3 (`blocked33_b0_
 matches every hot group; the restore sets re-keyed (`p16_rekey.log`).
 The budget (ESTIMATE +0.05 .. +0.15M on v2) held: +0.14M. Emission-neutral across the rebase
 (`p16_emit_neutral.log`: e972725 vs the head, PASS, both controls caught).
+
+## P2a.1 doors and keys (class F) -- declared 2026-09-28, before the build
+
+**What**: `docs/gp-doors-keys.md`. The blue-card check on doors 51 and 71 (special 26); the blue
+card drawn (BKEY, frame A) and taken by the model's own touch-and-reach rule; the blazing door 84
+(special 117) at 4 stops a frame; the two walk-over doors 77 and 145 (special 2, tags 5 and 6) as
+runtime doors that open when their line is crossed, once, and stay open. The model, every gate
+oracle and the fj side take each rule from ONE place (`doomfj.doors`).
+
+**Budget**: ops ESTIMATE +0.02 .. +0.05M on combat set v3's binding (the handoff: +0.05M for all of
+P2a); size ESTIMATE +~0.1M words; plane ids MEASURED 233 (222 + 11; with P2b's lifts 254 of 255 --
+`scratchpad/gp/p2a/walkover_pids.py`).
+
+**Kill criteria** (any one -> the binary does not ship; class F, decision D8):
+1. Host: the rules in `doomfj.doors` (the stride, the stay, the crossing test on both sides of each
+   axis and at the extent's ends, W1 once), the card check, and the pickup's box and reach -- each
+   held to the model with a mutated control caught; the emitted door machine and triggers
+   (`doorcode`) match them per door.
+2. fj: the SHIPPED door machine with the stride and the stay, the card check, the pickup and the
+   crossing triggers, run in a tests/fj harness against `doomfj.doors` (run fj, don't model it),
+   each with mutants.
+3. `m3_gate`, `m2_std_gate` byte- and state-exact; the new `p2a_gate.py` runs (section 4 of the
+   design) byte- and state-exact, each with its control rejected at the stated frame; B0 on v3
+   with `--pixel-every 1` pixel-exact.
+4. CAP-22: the v3 binding over 22M, or size over 35% of 2^27; msframe over ~90 ms/frame without an
+   explanation. Ops attributed to the rung's code over 1.25x the budget (0.0625M) -> redesign.
+5. Plane ids over 233 after the build (the walk-over doors' fallback is quant 24).
+6. The frozen set: the card drawn in any v3 run's view, or a v3 run crossing a walk-over line,
+   taking the card or pressing a blue door -> F4 or F3 moves, and the set needs the OWNER's
+   re-freeze before this rung ships (MEASURED before the build).
+7. `pinreport.py`: a hot word not pinned; the restore sets not re-keyed to this rung's labels.
+
+**Row**: (filled after the build)

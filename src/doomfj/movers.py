@@ -76,10 +76,11 @@ def switch_sectors(secs, lds, sds) -> dict:
 
 def lift_tic(st: tuple, nstates: int, triggered: bool) -> tuple:
     """One frame of one lift, `st` = (state, dir, sub, wait) as a door's: a trigger at rest at the
-    top starts the cycle; any other trigger is ignored"""
-    state, dr, _sub, wait = st
-    at_rest = state == 0 and dr == IDLE and wait == 0     # `sub` is residue once back at the top
-    return door_tic(st, nstates, bool(triggered and at_rest), wait_frames=LIFT_WAIT)
+    top starts the cycle; any other trigger is ignored. AT REST IS STATE 0: a lift at its top is
+    always idle with no wait -- a triggered one steps off 0 on the trigger frame (SPEED 1), a
+    returning one goes idle the frame it arrives, and the wait belongs to the bottom -- so the fj
+    tests one nibble (tests/fj/test_movers_fj.py's schedules reach every one of these)."""
+    return door_tic(st, nstates, bool(triggered and st[0] == 0), wait_frames=LIFT_WAIT)
 
 
 def _xy(v):

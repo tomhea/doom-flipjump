@@ -14,9 +14,12 @@ This RUNS the shipped fj and holds every byte and every register to them -- noth
          and a monster with a lamp and a stimpack, which the runtime lists take -- and every
          `frame.thing_record_body` call it emits zipped with the def's own parameter list. The
          arguments of the parameters the range uses must be the same in every call, both bodies and
-         both rooms, else the binding is refused (`record_bindings`). Values that only differ with
-         the map (the runtime thing count) are not in the range; one that did would differ between
-         the rooms. It records THINGS -- columns across the 16, 64
+         both rooms, else the binding is refused (`agreed_binding`). The only arguments that follow
+         the map are the runtime thing count's two index widths (n_thc, nltic): the rooms give them
+         1, 1 and 2, 2, so a range argument that followed either would differ between the rooms (E1M1
+         gives 2, 3). An emitter that cannot run is an error, never a refusal. It records THINGS --
+         four of E1M1's own left clips first (their texture steps from the oracle, so a negation
+         that is exact only for small clips moves u), then columns across the 16, 64
          and 1,024-index bounds up to 159, a first column below 0 and a last above 159 (both
          clamps), slot ids 1..255 across 16, fragments A and B, B refused by `ballow`, both slots
          spent, columns a wall hides, a fully transparent block, a texture step that moves the
@@ -81,7 +84,14 @@ ARM5_WINDOW = 16384                                              # ops: 16^5 bit
 # (slot id, y0, light row, block base, first column, last column, texture step (16.16), hdfl,
 #  ballow, sp_dw), recorded in this order: a later record into a column that holds A takes B
 #  (if ballow lets it), a third finds both slots spent
-THINGS = [(1, -200, 3, 0x0102, 0, 1, 0, 1, 1, 1),
+THINGS = [# four of E1M1's left clips from the player start (x1, x2, texture step, dw, as the oracle
+          # projects them -- PR #93's review, round 7): a negation exact only in its low 3..5 nibbles
+          # moves u in each
+          (60, 81, 18, 0x0100, -1, 0, 0x4B808, 1, 1, 13),
+          (61, 82, 19, 0x0110, -3, 1, 0x4AD00, 1, 1, 20),         # column 0 again: B
+          (62, 83, 20, 0x0120, -2, 1, 0x61860, 1, 1, 20),         # column 1 again: B
+          (63, 84, 21, 0x0130, -1, 2, 0x4C8F8, 1, 1, 17),         # columns 0, 1 spent: A at 2
+          (1, -200, 3, 0x0102, 0, 1, 0, 1, 1, 1),                 # columns 0, 1 spent: nothing
           (15, 0, 30, 0x0201, 15, 17, 0, 1, 1, 1),
           (16, 150, 31, 0x0003, 62, 66, 0, 1, 1, 1),
           (255, -32000, 17, 0x01FF, 158, 159, 0, 1, 1, 1),
@@ -201,9 +211,12 @@ class BindingRefused(Exception):
     """the emitter's output does not give the transplanted range ONE set of values"""
 
 
-# the rooms the emitter is run on: a lamp alone bakes (the game tier then emits both record bodies);
-# a monster takes the room's one leaf, and the lamp and stimpack with it, into the runtime lists
-ROOMS = [[(64, 64, 2028)], [(64, 64, 3004), (128, 128, 2028), (192, 192, 2011)]]
+# the rooms the emitter is run on: a lamp alone bakes (the game tier then emits both record bodies,
+# n_thc 1, nltic 1); 24 things led by monsters take the room's one leaf into the runtime lists (n_thc 2,
+# nltic 2 -- the index widths that follow the runtime thing count)
+_KINDS = [3004, 9, 3001, 3002, 58, 3003, 3006, 2028, 2011, 2012, 2014, 2015, 2018, 2019, 2035]
+ROOMS = [[(64, 64, 2028)],
+         [(16 + (i % 12) * 20, 16 + (i // 12) * 20, _KINDS[i % len(_KINDS)]) for i in range(24)]]
 EMIT = r"""
 import ast
 import sys
@@ -241,8 +254,8 @@ def emitted_calls(emitter_text):
                             str(ROOT / "tests/fixtures/freedoom_assets.wad"),
                             str(ROOT / "assets/freedoom1.wad"), repr(ROOMS)],
                            capture_output=True, text=True, timeout=600)
-    if r.returncode:
-        raise BindingRefused("the emitter did not run: %s" % r.stderr.strip()[-300:])
+    if r.returncode:           # an environment (or a broken mutant), never a refusal: never a catch
+        raise RuntimeError("the emitter did not run: %s" % r.stderr.strip()[-300:])
     return [tuple(line.split("\t", 2)) for line in r.stdout.splitlines() if line.count("\t") == 2]
 
 
@@ -265,6 +278,17 @@ def record_bindings(frame_text, emitter_text):
     return out
 
 
+def agreed_binding(frame_text, emitter_text, used):
+    """the parameters of `used` and the ONE value each takes in every emitted call -- or refused"""
+    bindings = record_bindings(frame_text, emitter_text)
+    params = [p for p in bindings[0] if p in used]
+    for p in params:
+        seen = {b[p] for b in bindings}
+        if len(seen) != 1:
+            raise BindingRefused("the emitted calls bind %s to %s" % (p, sorted(seen)))
+    return params, bindings[0]
+
+
 def transplant(frame_text, emitter_text):
     """the record's code from the slot allocation to the end of its column loop, VERBATIM, as a
     harness macro -- and the call that binds its parameters as the shipped build does"""
@@ -272,13 +296,7 @@ def transplant(frame_text, emitter_text):
     code = body[body.index("        hex.inc 2, gps_nslot"):body.index("      set_tstop:")]
     labels = re.findall(r"^\s*(\w+):\s*(?://.*)?$", code, re.M)
     words = set(re.findall(r"\b[a-z_][a-z0-9_]*\b", _code(code)))
-    bindings = record_bindings(frame_text, emitter_text)
-    params = [p for p in bindings[0] if p in words]
-    for p in params:
-        seen = {b[p] for b in bindings}
-        if len(seen) != 1:
-            raise BindingRefused("the emitted calls bind %s to %s" % (p, sorted(seen)))
-    bound = bindings[0]
+    params, bound = agreed_binding(frame_text, emitter_text, words)
     macro = ("ns frame {\n    def lay_rec %s @ %s < %s {\n%s      ret:\n    }\n}\n"
              % (", ".join(params), ", ".join(labels + ["ret"]), ", ".join(sorted(words & GLOBALS)), code))
     return macro, "frame.lay_rec " + ", ".join(bound[p] for p in params)
@@ -449,8 +467,11 @@ def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
     assert block(139) == 0x30 + 44 * NLD, "u clamped at 44: u * NLD past 255"
     assert block(140) == 0x1007, "a block past 0x1000"
     assert block(4) == 0x60 + 62 * BUCKETS, "the 300-column left clip: frac past five nibbles, u 62"
-    assert any(HEADER[b][1] % 16 == 0 and HEADER[b][1] for b in map(block, range(VIEW_W)) if b in HEADER), \
-        "no recorded block has a last_rel with a zero low nibble"
+    assert sprflag[62] and HEADER[block(62)][1] == 64, "column 62's block (0x0003) has last_rel 64"
+    for x1, x2, istep, dw, base, col in ((-1, 0, 0x4B808, 13, 0x0100, 0), (-3, 1, 0x4AD00, 20, 0x0110, 1),
+                                        (-1, 2, 0x4C8F8, 17, 0x0130, 2)):
+        want_blk = dict(_columns(x1, x2, istep, 1, dw, base))[col]
+        assert block(col) == want_blk != base, "an E1M1 left clip's u at column %d" % col
 
 
 def test_the_load_and_the_derive_read_every_field_where_the_constants_say(tmp_path):
@@ -549,6 +570,12 @@ MUTANTS = [
      "hex.neg 8, trb_negx1", "hex.neg 2, trb_negx1"),
     ("r6: the left clip's product five nibbles wide", "write", FR,
      "hex.mul_lo 8, trb_frac_u, trb_negx1, trb_tistep", "hex.mul_lo 5, trb_frac_u, trb_negx1, trb_tistep"),
+    # the review's round-7 edits
+    ("r7: the left clip's negation three nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 3, trb_negx1"),
+    ("r7: the left clip's negation four nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 4, trb_negx1"),
+    ("r7: the left clip's negation five nibbles wide", "write", FR, "hex.neg 8, trb_negx1", "hex.neg 5, trb_negx1"),
+    ("r7: the slot stride follows the runtime thing count", "write", EMITTER,
+     "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, ", "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE * _MT_NTH}, "),
     # the read side
     ("the load's skip to B", "read", FR, "hex.ptr_add spslot_p, 5", "hex.ptr_add spslot_p, 4"),
     ("the load: an increment dropped", "read", FR,
@@ -597,3 +624,10 @@ def test_a_mutated_layout_fails(tmp_path, label, side, name, old, new):
 def test_an_edit_that_moves_no_byte_still_passes(tmp_path, label, side, name, old, new):
     got, want = run_side(tmp_path, side, _mutate(name, old, new))
     assert got == want, "%s: the harness failed an edit that moves no byte" % label
+
+
+def test_an_emitter_that_cannot_run_is_an_error_not_a_refusal():
+    """review round 7: a refusal counts as a caught mutant, so an emitter that does not RUN (an
+    environment without the art, a mutant that breaks it) must never become one"""
+    with pytest.raises(RuntimeError):
+        emitted_calls(source(EMITTER) + "\nraise SystemExit(3)\n")

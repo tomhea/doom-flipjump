@@ -68,13 +68,17 @@ from __future__ import annotations
 import argparse
 import collections
 import copy
+import gzip
 import hashlib
+import io
 import json
 import math
 import os
 import pickle
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 from pathlib import Path
 
@@ -164,7 +168,7 @@ AFTER_NEAR = 160             # "among corpses": this close to the player at the 
 AFTER_MIN_DRAWN = 0.20       # the decided D3 picture degrades a corpse beyond ~130 units in a
                              # thing-rich room (census, MEASURED on the v2 drafts): a player who
                              # collects and leaves draws them on ~20-30 of 100 frames
-FREEZE_RULE = "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
+FREEZE_RULE = "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. SCHEMA GROWTH (owner, 2026-09-28): a re-freeze with --grown-from REF may record new final digests when every pose and drawn population reproduces and the witness (state_dump.py, the tree at REF against this one) holds every pre-existing cell equal after every frame -- door cells by sector, sound cells by sector -- and REF's tree reproduces the recorded digests; only added cells may differ. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
 APPROVAL = {"by": "the owner", "on": "2026-09-26",
             "record": "the owner, 2026-09-26: 'I agree with you on 1,2,3' -- 3 was 'plan a v2 [...] "
                       "then freeze v2 and its baseline' (docs/plan-gameplay.md section 11, D2)"}
@@ -713,7 +717,9 @@ class BinaryMirror:
 
     def __init__(self, w):
         self.w = w
-        self.dp = DoorPhase(w.secs, w.lds, w.sds, w.mw.vertexes(w.mapname), w.door_boxes)
+        card_at = w.rm.blue_card_at(Scene(w.mw, w.mw, w.mapname, w.cmap, w.open_h, frozenset()))
+        self.dp = DoorPhase(w.secs, w.lds, w.sds, w.mw.vertexes(w.mapname), w.door_boxes,
+                            card_at=card_at)
         assert self.dp.order == list(w.door_order)
         self.state = self.dp.initial()
         self.ds = [self.state[0][si] for si in w.door_order]
@@ -725,15 +731,18 @@ class BinaryMirror:
         w = self.w
         if doors is not None:
             self.state = ({si: tuple(doors[d]) for d, si in enumerate(w.door_order)},
-                          self.state[1], self.state[2])
-        self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1], has_blue=False)
+                          *self.state[1:])
+        self.state = self.dp.tic(self.state, bool(kd.get("use")), pre[0], pre[1])
         self.ds = [self.state[0][si] for si in w.door_order]
         blocked = frozenset(li for d, si in enumerate(w.door_order)
                             if self.ds[d][0] < w.door_pass[si] for li in w.door_lines.get(si, ()))
         if blocked not in self._scenes:
             self._scenes[blocked] = Scene(w.mw, w.mw, w.mapname, w.cmap, w.open_h, blocked)
+
+        def touch(cx, cy, z):
+            self.state = self.dp.touch(self.state, cx, cy, z)
         st = w.rm.step_sim(SimState(pre[0], pre[1], pre[2], w.mapname), b0_keys(kd),
-                           scene=self._scenes[blocked])
+                           scene=self._scenes[blocked], touch=touch)
         self.state = self.dp.after_move(self.state, (pre[0], pre[1]), (st.x, st.y))
         return (st.x, st.y, st.angle), tuple(s[0] for s in self.ds)
 
@@ -1553,7 +1562,8 @@ def load_b0(path: Path) -> dict:
             "base_ops": b.get("base_ops"), "strafe_undercount": und}
 
 
-def freeze_decision(doc: dict, b0: dict, approver: str, record: str, ms=None, fresh=None):
+def freeze_decision(doc: dict, b0: dict, approver: str, record: str, ms=None, fresh=None,
+                    grown=None):
     """(ok, reason, new_doc): the freeze decided IN MEMORY -- nothing is written here.
     FIRST freeze (status PLANNED): the owner's approval of the set; `approver` must be the owner,
       stored once as `owner_approval`.
@@ -1561,7 +1571,10 @@ def freeze_decision(doc: dict, b0: dict, approver: str, record: str, ms=None, fr
       keys (`fresh`, when given) AND the replay with the current code reproduces every recorded pose,
       digest and drawn population and the approval and B0 records stand (F1/F3/F4/F5) -- a picture- or
       rule-change that moves any result is refused (PR #88 round 3). `owner_approval` is untouched;
-      the event records `approver` (e.g. the PR review)."""
+      the event records `approver` (e.g. the PR review).
+    SCHEMA GROWTH (`grown`, the witness from `schema_growth`; owner, 2026-09-28): F3's digest half
+      may fail when the witness holds every pre-existing cell equal (`grown_f3`); the new final
+      digests are recorded, and the witness with them. Only on a re-freeze."""
     if fresh is not None:
         diff = [a["name"] for a, b in zip(doc["runs"], fresh["runs"])
                 if a["keys"] != b["keys"] or a["setup"] != b["setup"]]
@@ -1575,13 +1588,20 @@ def freeze_decision(doc: dict, b0: dict, approver: str, record: str, ms=None, fr
         checks = {n.split()[0]: (ok, det) for n, ok, det in freeze_checks(doc, ms)}
         for k in ("F1", "F3", "F4", "F5"):
             ok, det = checks[k]
+            if not ok and k == "F3" and grown is not None:
+                ok, det = grown_f3(doc, ms, grown)
             if not ok:
                 return False, ("%s failed (%s): the replay moved -- a behaviour change needs a NEW "
                                "VERSION and the owner, not a re-freeze" % (k, det)), None
+    elif grown is not None:
+        return False, "schema growth is a RE-freeze of a FROZEN set", None
     elif approver != APPROVAL["by"]:
         return False, "the FIRST freeze is the owner's approval of the set: --approver must be %r" % (
             APPROVAL["by"]), None
     new = copy.deepcopy(doc)
+    if grown is not None:
+        for run, r in zip(new["runs"], ms):
+            run["model_final_digest"] = r["digest"]
     res = validate(new, census=True, quiet=True)
     bad = [n for n, ok, _d in res["criteria"] if not ok]
     if bad:
@@ -1600,6 +1620,12 @@ def freeze_decision(doc: dict, b0: dict, approver: str, record: str, ms=None, fr
                      "approved_by": approver, "approved_on": time.strftime("%Y-%m-%d"),
                      "approval_record": record, "frozen_at_git_head": git_head(),
                      "files_not_at_head": git_untracked_or_modified(files), "rule": FREEZE_RULE}
+    if grown is not None:
+        new["freeze"]["kind"] = "checker re-freeze, schema growth"
+        new["freeze"]["schema_growth"] = {
+            "from_ref": grown["ref"], "frames_compared": grown["frames"], "grown": grown["grown"],
+            "rekeyed": grown["rekeyed"], "ref_reproduces_frozen": grown["old_reproduces_frozen"],
+            "previous_final_digests": {run["name"]: run["model_final_digest"] for run in doc["runs"]}}
     res2 = validate(new, census=True, quiet=True)
     fails = [n for n, ok, _d in res2["criteria"] + res2["freeze"] if not ok]
     if fails:
@@ -1622,12 +1648,19 @@ def plan_refusal(path: Path):
     return None
 
 
-def freeze(path: Path, b0_path: Path, approver: str, record: str) -> int:
+def freeze(path: Path, b0_path: Path, approver: str, record: str, grown_from=None) -> int:
     doc = json.loads(Path(path).read_text(encoding="ascii"))
     print("FREEZE %s (%d runs), B0 %s, approver %r" % (path, len(doc["runs"]), b0_path, approver),
           flush=True)
+    grown = None
+    if grown_from:
+        grown = schema_growth(path, grown_from)
+        print("  schema growth from %s: %s -- %d frames, grown %s, re-keyed %s%s" % (
+            grown_from, "HELD" if grown["ok"] else "FAILED", grown.get("frames", 0),
+            grown.get("grown"), grown.get("rekeyed"),
+            "" if grown["ok"] else "; " + "; ".join(grown["bad"][:5])), flush=True)
     fresh = plan_set(quiet=True)
-    ok, why, new = freeze_decision(doc, load_b0(b0_path), approver, record, fresh=fresh)
+    ok, why, new = freeze_decision(doc, load_b0(b0_path), approver, record, fresh=fresh, grown=grown)
     print("  re-plan: %s" % ("identical keys and setups, %d runs" % len(doc["runs"])
                              if ok or "re-plan" not in why else why), flush=True)
     if not ok:
@@ -1667,6 +1700,51 @@ def selftest(doc: dict) -> int:
         return m
 
     t0 = time.time()
+    # R-controls: SCHEMA GROWTH's comparison (owner, 2026-09-28) -- a synthetic pair of dumps: the
+    # same state accepted, a grown cell accepted, a re-numbered door order and sound numbering
+    # accepted; and refused: an old cell changed on one frame, an old field gone, a non-door field
+    # reshaped, a sound cell moved to another sector
+    def _dumps():
+        head = {"door_order": [3, 7], "sector_node": [0, 1, 1, 2],
+                "schema": [["hp", 1, "player"], ["d_state", 2, "door"], ["snd_alert", 3, "sound"],
+                           ["inv", 2, "player"]]}
+        frames = [{"run": "r", "f": f, "s": {"hp": 100 - f, "d_state": [f, 0], "snd_alert": [0, f % 2, 1],
+                                             "inv": [1, 2]}} for f in range(3)]
+        return head, frames
+
+    oh, of = _dumps()
+    nh, nf = copy.deepcopy(_dumps())
+    check("SG1 identical dumps: held", grown_compare(oh, of, nh, nf)["ok"])
+    nh, nf = _dumps()
+    nh["door_order"] = [3, 5, 7]
+    nh["sector_node"] = [2, 0, 0, 1]                       # sectors keep their alerts, renumbered
+    nh["schema"] = [["hp", 1, "player"], ["d_state", 3, "door"], ["snd_alert", 3, "sound"],
+                    ["inv", 2, "player"], ["w_new", 2, "door"]]
+    for fr in nf:
+        a = fr["s"]["snd_alert"]
+        fr["s"].update({"d_state": [fr["s"]["d_state"][0], 9, 0], "snd_alert": [a[1], a[2], a[0]],
+                        "w_new": [1, 1]})
+    g = grown_compare(oh, of, nh, nf)
+    check("SG2 a grown cell, a door added, the sound nodes renumbered: held", g["ok"] and
+          g["grown"] == ["w_new"] and g["rekeyed"] == {"d_state": "by door sector",
+                                                       "snd_alert": "by sector"}, str(g["bad"][:2]))
+    for label, fn in (
+            ("SG3 an old cell changed on ONE frame: refused",
+             lambda h, f: f[2]["s"].__setitem__("hp", 0)),
+            ("SG4 an old door's cell changed (door 7, after a door was added): refused",
+             lambda h, f: (h.__setitem__("door_order", [3, 5, 7]),
+                           [x["s"].__setitem__("d_state", x["s"]["d_state"][:1] + [0, 1])
+                            for x in f], h["schema"].__setitem__(1, ["d_state", 3, "door"]))),
+            ("SG5 an old field gone: refused",
+             lambda h, f: (h.__setitem__("schema", h["schema"][:3]), [x["s"].pop("inv") for x in f])),
+            ("SG6 a non-door field reshaped: refused",
+             lambda h, f: (h["schema"].__setitem__(3, ["inv", 3, "player"]),
+                           [x["s"].__setitem__("inv", [1, 2, 0]) for x in f])),
+            ("SG7 a sound alert moved to another sector: refused",
+             lambda h, f: h.__setitem__("sector_node", [0, 1, 2, 1]))):
+        nh, nf = _dumps()
+        fn(nh, nf)
+        check(label, not grown_compare(oh, of, nh, nf)["ok"])
     if doc.get("status") != "FROZEN":
         # not frozen yet: exercise the freeze checks on an in-memory frozen copy (the real freeze is
         # `--freeze`, which records the MEASURED B0; this copy's B0 record is a placeholder)
@@ -1865,6 +1943,122 @@ def rehash_decision(doc: dict, ms: list, now: dict):
     return True, "F1/F3/F4/F5 held and the checker is unchanged", changed
 
 
+# ================================================================================================
+# SCHEMA GROWTH (owner, 2026-09-28): new state cells, every old one unchanged
+# ================================================================================================
+DUMP_SCRIPT = HERE / "state_dump.py"
+
+
+def _read_dump(path: Path):
+    """(header, [frame records], {run: final digest}) of one state_dump.py output"""
+    with gzip.open(str(path), "rt", encoding="ascii") as fh:
+        lines = [json.loads(line) for line in fh]
+    frames = [x for x in lines[1:] if "s" in x]
+    finals = {x["run"]: x["final_digest"] for x in lines[1:] if "final_digest" in x}
+    return lines[0], frames, finals
+
+
+def grown_compare(old_head: dict, old_frames: list, new_head: dict, new_frames: list) -> dict:
+    """every PRE-EXISTING cell of the old tree's state equal to the new tree's after every frame.
+    A field keeps its name; one whose count changed must be re-keyable -- a `door`-group field of one
+    entry per door (compared per door SECTOR of the old order), or a `sound`-group field (compared
+    per SECTOR through each tree's sector_node) -- a sound field is re-keyed even when its count
+    held, because its node numbering is the tree's own. -> {ok, frames, grown, rekeyed, bad}"""
+    ofs = {n: (c, g) for n, c, g in old_head["schema"]}
+    nfs = {n: (c, g) for n, c, g in new_head["schema"]}
+    od, nd = old_head["door_order"], new_head["door_order"]
+    on, nn = old_head["sector_node"], new_head["sector_node"]
+    bad, rekeyed = [], {}
+    gone = sorted(set(ofs) - set(nfs))
+    if gone:
+        bad.append("fields gone: %s" % gone)
+    for name, (oc, og) in ofs.items():
+        if name not in nfs:
+            continue
+        nc, ng = nfs[name]
+        if og == "sound":
+            rekeyed[name] = "by sector"
+        elif oc != nc:
+            if og == "door" and oc == len(od) and nc == len(nd) and set(od) <= set(nd):
+                rekeyed[name] = "by door sector"
+            else:
+                bad.append("%s reshaped %d -> %d and cannot be re-keyed" % (name, oc, nc))
+    if len(old_frames) != len(new_frames):
+        bad.append("frames: old %d, new %d" % (len(old_frames), len(new_frames)))
+    nidx = {si: k for k, si in enumerate(nd)}
+    for a, b in zip(old_frames, new_frames):
+        if (a["run"], a["f"]) != (b["run"], b["f"]):
+            bad.append("frame order parts at %s/%s vs %s/%s" % (a["run"], a["f"], b["run"], b["f"]))
+            break
+        for name in ofs:
+            if name not in nfs:
+                continue
+            va, vb = a["s"][name], b["s"][name]
+            how = rekeyed.get(name)
+            if how == "by door sector":
+                vb = [vb[nidx[si]] for si in od]
+            elif how == "by sector":
+                va = [va[on[sec]] for sec in range(len(on))]
+                vb = [vb[nn[sec]] for sec in range(len(nn))]
+            if va != vb:
+                bad.append("%s frame %d: %s" % (a["run"], a["f"], name))
+                if len(bad) > 20:
+                    break
+        if len(bad) > 20:
+            break
+    return {"ok": not bad, "frames": min(len(old_frames), len(new_frames)),
+            "grown": sorted(set(nfs) - set(ofs)), "rekeyed": rekeyed, "bad": bad[:20]}
+
+
+def schema_growth(set_path: Path, ref: str) -> dict:
+    """the witness: state_dump.py on the tree at git `ref` (src, scratchpad/gp, tests/fixtures,
+    archived into a temp dir) and on this tree, compared by `grown_compare`; plus the control that
+    `ref`'s tree reproduces every final digest the set recorded (it IS the frozen model)."""
+    doc = json.loads(Path(set_path).read_text(encoding="ascii"))
+    arc = subprocess.run(["git", "archive", "--format=tar", ref, "src", "scratchpad/gp",
+                          "tests/fixtures"], cwd=str(ROOT), capture_output=True)
+    if arc.returncode:
+        return {"ok": False, "ref": ref, "bad": ["git archive %s: %s" % (ref, arc.stderr[:200])]}
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    with tempfile.TemporaryDirectory(prefix="grown_") as td:
+        td = Path(td)
+        with tarfile.open(fileobj=io.BytesIO(arc.stdout)) as tf:
+            tf.extractall(td / "old")
+        dumps = {}
+        for side, root in (("old", td / "old"), ("new", ROOT)):
+            out = td / ("%s.jsonl.gz" % side)
+            r = subprocess.run([sys.executable, str(DUMP_SCRIPT), "--root", str(root), "--set",
+                                str(Path(set_path).resolve()), "--out", str(out)],
+                               env=env, capture_output=True, text=True)
+            if r.returncode:
+                return {"ok": False, "ref": ref, "bad": ["state_dump %s: %s" % (side, r.stderr[-400:])]}
+            dumps[side] = _read_dump(out)
+    (oh, of, ofin), (nh, nf, nfin) = dumps["old"], dumps["new"]
+    res = grown_compare(oh, of, nh, nf)
+    rec = {run["name"]: run["model_final_digest"] for run in doc["runs"]}
+    old_ok = ofin == rec
+    if not old_ok:
+        res["bad"] = ["the tree at %s does NOT reproduce the recorded final digests: it is not the "
+                      "frozen model" % ref] + res["bad"]
+    res.update({"ok": res["ok"] and old_ok, "ref": ref, "old_reproduces_frozen": old_ok,
+                "new_final_digests": nfin})
+    return res
+
+
+def grown_f3(doc: dict, ms: list, grown: dict):
+    """F3 under schema growth: every POSE reproduces, the witness held every old cell, and its new
+    side is this replay (its final digests are the replay's)"""
+    stale = [r["name"] for run, r in zip(doc["runs"], ms) if r["poses"] != run["poses"]]
+    if stale:
+        return False, "poses stale: %s" % stale
+    if not grown.get("ok"):
+        return False, "schema growth witness FAILED: %s" % grown.get("bad")
+    if grown.get("new_final_digests") != {r["name"]: r["digest"] for r in ms}:
+        return False, "the witness's new side is not this replay (final digests differ)"
+    return True, ("%d/%d runs' poses; every pre-existing cell equal on %d frames (from %s); grown: %s"
+                  % (len(ms), len(ms), grown["frames"], grown["ref"], grown["grown"]))
+
+
 def rehash(path: Path, reason: str) -> int:
     """THE REHASH RULE (docs/handoff-gameplay.md section 1; PR #87 review): the freeze pins the KEYS,
     the B0 and what they reproduce -- not source bytes. When a refactor edits a hashed file but the
@@ -1911,6 +2105,9 @@ def main():
     ap.add_argument("--approval-record", help="--freeze: the approval's words and where they are")
     ap.add_argument("--no-census", action="store_true", help="validate without the drawn count")
     ap.add_argument("--file", default=str(SCEN_FILE))
+    ap.add_argument("--grown-from", metavar="REF",
+                    help="--freeze: the set's digests may change by SCHEMA GROWTH only -- the witness "
+                         "compares the tree at git REF (the one the set was frozen at) with this one")
     a = ap.parse_args()
     if a.plan:
         why = plan_refusal(Path(a.file))
@@ -1933,7 +2130,7 @@ def main():
     if a.freeze:
         if not a.approver or not a.approval_record:
             ap.error("--freeze needs --approver and --approval-record: an approval is never implied")
-        return freeze(Path(a.file), Path(a.b0), a.approver, a.approval_record)
+        return freeze(Path(a.file), Path(a.b0), a.approver, a.approval_record, a.grown_from)
     if a.rehash:
         return rehash(Path(a.file), a.rehash)
     doc = json.loads(Path(a.file).read_text(encoding="ascii"))

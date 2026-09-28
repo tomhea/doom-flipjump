@@ -46,6 +46,15 @@ By what changed (the tool is `python scratchpad/gp/scenarios_v2.py`; the same ru
   reproduces every recorded pose, digest and drawn population (F1/F3/F4/F5) -- a reviewable event.
   The owner's approval of the set (`owner_approval`) is never re-stamped; the previous freeze record
   goes to `freeze_history`;
+- SCHEMA GROWTH (the owner, 2026-09-28, "Allow growth"): a change that ADDS state cells moves the
+  final digest (it hashes every field) and nothing else. `--freeze --grown-from <the git ref the set
+  was frozen at> --approver "<its reviewer>" --approval-record "<where>"` records the new digests
+  only when every pose and drawn population reproduces (F1/F4/F5, F3's poses), and THE WITNESS
+  (`scratchpad/gp/state_dump.py`) holds every PRE-EXISTING cell equal after every frame: it steps
+  every run on the tree at the ref (`git archive`d) and on this one, re-keys a door field by door
+  sector and a sound field by sector, and requires the ref's tree to reproduce the recorded digests
+  (it is the frozen model). The added fields, the re-keyed ones and the previous digests go into the
+  freeze record (`schema_growth`). A changed old cell is a BEHAVIOUR change, as above;
 - a BEHAVIOUR change (anything that moves a replay: a rule, a fix, a picture rule): a NEW VERSION in
   a new file -- `--plan --file <new>` (the planner refuses a frozen file), B0 re-measured on it
   (`b0_scenarios.py --file <new>`), then `--freeze --file <new> --approver "the owner"` with the
@@ -55,7 +64,9 @@ The refusals are `--selftest` controls: R1 the untouched set is accepted with no
 the rehash refuses R2 a behaviour change (strafe 13 -> 12) and R3 a checker change; the re-freeze
 refuses R4 a picture-rule change (DEG_SOFT_MON 4 -> 2); R5 a clean re-freeze keeps the owner's
 approval and names its own approver; R6 a first freeze by anyone but the owner is refused; R7
-`--plan` refuses the frozen file.
+`--plan` refuses the frozen file. The growth comparison's controls: SG1-SG2 accept the same state and a grown cell with
+the doors and sound nodes renumbered; SG3-SG7 refuse an old cell changed on one frame, an old door's
+cell changed, an old field gone, a non-door field reshaped, a sound alert moved to another sector.
 
 There is no "same keys, new poses" path: F3 and `b0_scenarios` both compare against the frozen
 poses, so CAP-22 cannot run on a model whose behaviour moved until the new version exists.

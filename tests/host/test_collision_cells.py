@@ -388,3 +388,62 @@ def test_the_cell_declarations_are_in_the_state(lvl):
     assert names[-len(CELL_DECLS):] == [d.split(":")[0] for d in CELL_DECLS], \
         "CELL_DECLS must come LAST: the restore sets fingerprint the spans of the names before them"
     assert len(set(names)) == len(names)
+
+
+# ── M7 P2b: mover lines follow their movers' states ─────────────────────────────────────────────────
+
+def _mover_level(lvl):
+    from doomfj import movers as MV
+    from doomfj.collision import mover_line_openings
+    ls = MV.lift_states(lvl.secs, lvl.lds, lvl.sds)
+    sw = MV.switch_sectors(lvl.secs, lvl.lds, lvl.sds)
+    per = {}
+    for si, stops in ls.items():
+        per[si] = [apply_sector_heights(lvl.secs, {si: (h, lvl.secs[si].ceil_h)}) for h in stops]
+    for si, (low, _high) in sw.items():
+        per[si] = [lvl.secs, apply_sector_heights(lvl.secs, {si: (low, lvl.secs[si].ceil_h)})]
+    return per, mover_line_openings(lvl.lds, lvl.sds, lvl.secs, per)
+
+
+def test_a_mover_line_follows_its_movers_state(lvl):
+    """Centres on and beside every mover line and inside every mover sector, each mover at every
+    state: the cell model with the per-state opening floor (`mover_line_openings`) and the leaf's
+    seed at those heights is the oracle's check_position on a scene with the mover there. Control:
+    the verdict or the floor moves with the state for most lines."""
+    per, obs = _mover_level(lvl)
+    assert len(obs) >= 30
+    moved = 0
+    for si, svs in per.items():
+        lines = [li for li in obs if si in (lvl.sds[lvl.lds[li].front].sector,
+                                            lvl.sds[lvl.lds[li].back].sector)]
+        for li in lines:
+            (x1, y1), (x2, y2) = lvl.cmap.vertexes[lvl.lds[li].v1], lvl.cmap.vertexes[lvl.lds[li].v2]
+            mx, my = (x1 + x2) // 2, (y1 + y2) // 2
+            seen = set()
+            for k, sv in enumerate(svs):
+                heights = {s: (sv[s].floor_h, sv[s].ceil_h) for s in (si,)}
+                scene = build_scene(lvl.wad, lvl.wad, "E1M1", {**lvl.open_h, **heights}, frozenset())
+                for dx, dy in ((0, 0), (8, 0), (-8, 0), (0, 8), (0, -8)):
+                    x16, y16 = (mx + dx) << 16, (my + dy) << 16
+                    ss = lvl.cmap.subsectors[lvl.rm.point_in_subsector(lvl.cmap, x16 >> 16, y16 >> 16)]
+                    sec = seg_sector(lvl.lds, lvl.sds, scene_sectors(scene), lvl.cmap.segs[ss.firstseg])
+                    got = check_position_cells(lvl.rows, lvl.lists, x16, y16, PLAYER_RADIUS,
+                                               sec.floor_h, sec.ceil_h,
+                                               openbottom={m: obs[m][k] for m in lines})
+                    want = lvl.rm.check_position(scene, x16, y16)
+                    assert got == want, f"mover {si} line {li} state {k} ({dx},{dy}): {got} vs {want}"
+                    if (dx, dy) == (0, 0):
+                        seen.add(want)
+            moved += len(seen) > 1
+    assert moved >= 20, f"only {moved} mover lines change with their mover's state"
+
+
+def test_a_mover_lines_stub_dispatches_on_its_movers_state(lvl):
+    per, obs = _mover_level(lvl)
+    li = sorted(obs)[0]
+    text, _root = collision_cells_fj("e1m1", lvl.rows, lvl.lists, doors=lvl.doors,
+                                     movers={li: ("lstate + 0*dw", obs[li])})
+    body = text.split(f"e1m1_cc_l{li}:")[1].split("stl.fret cc_lret")[0]
+    assert "sim.jump16 lstate + 0*dw, " in body
+    assert body.count("stl.fcall e1m1_cc_test, cc_tret") == len(obs[li])
+    assert "ca_ob" not in body.split("sim.jump16")[0], "the static constants must not carry the floor"

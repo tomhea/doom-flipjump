@@ -1,0 +1,16 @@
+# M7 P1.6 review (finding 3): compare.py reworked -- E1M1's drawable kinds, each distinct patch once, each tier only at the buckets it draws, with its zero controls; src/ at 112aed4, the tool as committed with this log -- 2026-09-27
+$ python scratchpad/gp/probes/bank/compare.py
+compare.py at 112aed4 M7 P1.6 review: fj tests for the record's tier / slot / min_b section and the window walker
+population: 26 distinct patches from 27 drawable kinds: AMMO, ARM1, ARM2, BAR1, BON1, BON2, BPAK, CELL, CLIP, COLU, CSAW, ELEC, MEDI, POSS, PSTR, ROCK, SARG(58+3002), SBOX, SHEL, SHOT, SMIT, SPOS, STIM, TRE1, TRE2, TROO
+columns: 421; tiers drawn at: HD [42, 45, 48, 51, 54, 57, 60, 64, 67, 70, 73, 76, 79, 83, 86, 89, 92, 95, 98, 100]; MID [4, 7, 10, 13, 16, 19, 23, 26, 29, 32, 35, 38]; LD [4, 7, 10, 13, 16, 19, 23, 26, 29]
+CONTROL OLD vs OLD             rows 533995, differing 0, flips 0 -> ok
+CONTROL NEW vs NEW             rows 534057, differing 0, flips 0 -> ok
+CONTROL NEW vs NEW recoloured  rows 534057, differing 534057, flips 0 -> ok
+HD    column-bucket pairs   8420; painted rows   419873; rows that differ   42394 (10.10%); drawn/not-drawn flips 0
+MID   column-bucket pairs   5052; painted rows    72611; rows that differ    7758 (10.68%); drawn/not-drawn flips 33
+LD    column-bucket pairs   3789; painted rows    42243; rows that differ   11320 (26.80%); drawn/not-drawn flips 26
+total column-bucket pairs  17261; painted rows   534727; rows that differ   61472 (11.50%); drawn/not-drawn flips 59
+worst (rows, sprite, tier, u, height): [(68, 'TROO', 'HD', 13, 100), (68, 'TROO', 'HD', 10, 95), (67, 'TROO', 'HD', 13, 95), (67, 'TROO', 'HD', 10, 100), (67, 'TROO', 'HD', 10, 86), (67, 'TROO', 'HD', 9, 95), (67, 'TROO', 'HD', 9, 86), (67, 'ELEC', 'HD', 4, 100)]
+non-monotone column-tiers: OLD 24 of 1263; NEW 0 of 1263
+CONTROLS PASS
+rc=0

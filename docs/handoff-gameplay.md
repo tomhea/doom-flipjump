@@ -287,9 +287,9 @@ crist CR loop, CI, merge. Naming (cr-rules R7): this milestone is **M7** -- bran
 | **P1.3 persistent leaf lists** -- DONE 2026-09-27 (blocked30 ships, NOT SEPARATED: foundation for P3; `docs/gp-ledger.md`) | `sshead`/`thnext`/positions persistent (baked to the spawn lists), per-move rebind, `bind_things` deleted; monsters still inert | S | -0.44M | 1 |
 | **P1.4 the v2 sprite column** -- DONE 2026-09-27 (blocked31 ships, -0.60M on v2: under kill criterion 5's 0.8M, shipped by the owner's decision with a follow-up after phase 1; `docs/gp-ledger.md`) | `docs/gp-sprite-column.md` (v2; needs `sprbank` 4096-bit aligned -- add the build check) | S | with P1.5: -1.40M on the frozen set (S5, (iii) -> (iv)) | 1 |
 | **P1.5 skill filter + skill menu** -- DONE 2026-09-28 (blocked32 ships, class F: -0.42M on v2, the gates byte- and state-exact; `docs/gp-ledger.md`) | the build spawns per skill; NEW GAME asks easy / medium / hard and starts from that skill's level-start state (the full restart block is P7) | F | -0.3M | 1 |
-| **P1.6 the native-list sprite bank** | all monster frames and rotations; the rowmap as a dispatch (it must not break v2's narrow reads) | F if any pixel moves | size -0.97M words | 1-2 |
+| **P1.6 the native-list sprite bank** -- DONE 2026-09-28 (blocked33 ships, class F: +0.14M on v2, inside its estimate; combat set v3 frozen by the owner; `docs/gp-ledger.md`) | all monster frames and rotations; the rowmap as a dispatch (it must not break v2's narrow reads) | F if any pixel moves | size -0.97M words | 1-2 |
 
-P1 ends when all six ship. The ship gate's standing number moves with P1.1-P1.4 (class S). A class-S
+P1 ends when all six ship -- **P1 DONE 2026-09-28** (blocked33 is the shipped binary; the frozen set is v3). The ship gate's standing number moves with P1.1-P1.4 (class S). A class-S
 rung that measures NOT SEPARATED may still ship with the stated reason "foundation for P3" (the
 ship gate's own clause) -- never one that measures SLOWER.
 

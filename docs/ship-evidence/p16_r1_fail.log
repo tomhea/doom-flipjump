@@ -1,0 +1,68 @@
+# R1: the P1.6 rung's new and changed test files (as of e76e250) on the PARENT rung's source, one file per run -- on 4653cc9 (4653cc9 M7 P1.5 (10/n): every tier EMITS on the one-room map -- the render tier's crash in seconds, not tests/fj's sixteen minutes); the test files from the branch copied in; the tree made a throwaway git repo of its own files (git init + add -A + commit), for the tests that ask git what is tracked
+$ python -m pytest tests/fj/test_sprite_bank_fj.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'sprite_tier' from 'doomfj.reference_model' (<tree>\src\doomfj\reference_model.py)
+ERROR tests/fj/test_sprite_bank_fj.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.56s
+rc=2
+$ python -m pytest tests/host/test_sprite_bank.py -q -p no:cacheprovider
+E       ValueError: not enough values to unpack (expected 5, got 4)
+E       AttributeError: module 'doomfj.wall_renderer' has no attribute 'anim_frames'
+FAILED tests/host/test_sprite_bank.py::test_the_animation_covers_every_frame_of_the_maps_actors
+ERROR tests/host/test_sprite_bank.py::test_every_kind_holds_its_three_tiers_native_lists
+ERROR tests/host/test_sprite_bank.py::test_every_animation_view_holds_its_patchs_lists
+ERROR tests/host/test_sprite_bank.py::test_the_views_follow_the_wads_lump_names
+ERROR tests/host/test_sprite_bank.py::test_the_bank_is_smaller_than_the_per_bucket_bank_it_replaces
+ERROR tests/host/test_sprite_bank.py::test_a_changed_cell_is_caught - ValueEr...
+1 failed, 5 errors in 1.23s
+rc=1
+$ python -m pytest tests/host/test_spritebank.py -q -p no:cacheprovider
+E   ModuleNotFoundError: No module named 'doomfj.spritebank'
+ERROR tests/host/test_spritebank.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.27s
+rc=2
+$ python -m pytest tests/host/test_thing_table.py -q -p no:cacheprovider
+E       ValueError: not enough values to unpack (expected 5, got 4)
+ERROR tests/host/test_thing_table.py::test_the_rows_cover_exactly_the_drawable_things
+ERROR tests/host/test_thing_table.py::test_runtime_sp_z_and_sp_lt_equal_the_baked_constants
+ERROR tests/host/test_thing_table.py::test_a_thing_moved_into_another_sector_takes_that_sector_s_floor_and_light
+ERROR tests/host/test_thing_table.py::test_the_shade_row_bank_must_be_widened_and_by_how_much
+ERROR tests/host/test_thing_table.py::test_the_widened_shade_row_bank_is_additive_and_covers_every_reachable_pair
+ERROR tests/host/test_thing_table.py::test_the_oracle_renders_the_same_frame_from_explicit_spawn_positions
+ERROR tests/host/test_thing_table.py::test_the_runtime_pass_clears_every_register_the_baked_block_xors
+ERROR tests/host/test_thing_table.py::test_both_mirrors_build_the_drawable_list_with_the_same_predicate
+8 errors in 1.32s
+rc=1
+$ python -m pytest tests/host/test_wall_renderer_helpers.py -q -p no:cacheprovider
+E   ImportError: cannot import name 'sprite_hd_bucket' from 'doomfj.wall_renderer' (<tree>\src\doomfj\wall_renderer.py)
+ERROR tests/host/test_wall_renderer_helpers.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.40s
+rc=2
+$ python -m pytest tests/host/test_dispatch_table_values.py -q -p no:cacheprovider
+E       AttributeError: module 'doomfj.wall_renderer' has no attribute 'sprite_rowmap_fj'
+E       ImportError: cannot import name 'spritebank' from 'doomfj' (<tree>\src\doomfj\__init__.py)
+FAILED tests/host/test_dispatch_table_values.py::test_rowmap_every_entry_is_the_row_of_its_boundary_at_its_bucket
+FAILED tests/host/test_dispatch_table_values.py::test_a_flooring_rowmap_is_caught
+2 failed, 7 passed in 0.40s
+rc=1
+# R1: test_wall_renderer_helpers.py's changed test (the HD-suffix test that replaced _spr_nlow's prefix test) fails on the parent only by an import error, so it is shown red against a targeted mutation instead -- sprite_bucket_height made NON-MONOTONE (bucket 3 reports 99 rows) -- on HEAD (e76e250 M7 P1.6 review: the bank's claims re-measured at commits -- compare on E1M1's population, the size with the rowmap); MUTATED: src/doomfj/reference_model.py: "    return hi\n\n\n# M7 P1.6 -- the sprite bank's three TIERS" -> "    return 99 if b == 3 else hi\n\n\n# M7 P1.6 -- the sprite bank's three TIERS"
+$ python -m pytest tests/host/test_wall_renderer_helpers.py -q -p no:cacheprovider -k suffix
+E       AssertionError: the HD buckets are not a suffix at VIEW_H=63: [3, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+E       assert {3, 19, 20, 21, 22, 23, ...} == {3, 4, 5, 6, 7, 8, ...}
+E       AssertionError: the HD buckets are not a suffix at VIEW_H=100: [3, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+E       assert {3, 12, 13, 14, 15, 16, ...} == {3, 4, 5, 6, 7, 8, ...}
+E       AssertionError: the HD buckets are not a suffix at VIEW_H=120: [3, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+E       assert {3, 10, 11, 12, 13, 14, ...} == {3, 4, 5, 6, 7, 8, ...}
+E       AssertionError: the HD buckets are not a suffix at VIEW_H=200: [3, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+E       assert {3, 6, 7, 8, 9, 10, ...} == {3, 4, 5, 6, 7, 8, ...}
+E       AssertionError: the HD buckets are not a suffix at VIEW_H=240: [3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
+E       assert {3, 5, 6, 7, 8, 9, ...} == {3, 4, 5, 6, 7, 8, ...}
+FAILED tests/host/test_wall_renderer_helpers.py::test_the_hd_sprite_buckets_really_are_a_suffix[63]
+FAILED tests/host/test_wall_renderer_helpers.py::test_the_hd_sprite_buckets_really_are_a_suffix[100]
+FAILED tests/host/test_wall_renderer_helpers.py::test_the_hd_sprite_buckets_really_are_a_suffix[120]
+FAILED tests/host/test_wall_renderer_helpers.py::test_the_hd_sprite_buckets_really_are_a_suffix[200]
+FAILED tests/host/test_wall_renderer_helpers.py::test_the_hd_sprite_buckets_really_are_a_suffix[240]
+5 failed, 55 deselected in 0.57s
+rc=1

@@ -808,34 +808,42 @@ ns stream {
     //
     // M7 P1.4 (docs/gp-sprite-column.md, v2): A FRAGMENT IS (SLOT, BLOCK). The record stores three
     // bytes per column, `[s][blk lo][blk hi]`; the per-THING constants live in the thing's slot,
-    // `gpslot[s]` = [y0 + 32768 lo][y0 + 32768 hi][light row][unused], written once per accepted
-    // thing (frame.thing_record_body). The rows the record used to compute and store per column
-    // are derived here, where they are used:
+    // `gpslot[s]` = [y0 + 32768 lo][y0 + 32768 hi][light row][bucket] (byte 3 since M7 P1.6: the
+    // rowmap's row), written once per accepted thing (frame.thing_record_body). The rows the
+    // record used to compute and store per column are derived here, where they are used:
     //
-    //   y_base = y0 + r0,  sy1 = clamp(y_base, 0, viewh),  sy2 = clamp(y_base + last_rel, 0, viewh)
+    //   sy1 = clamp(y0 + rowmap[b][n_first], 0, viewh),  sy2 = clamp(y0 + rowmap[b][n_last], 0, viewh)
     //
-    // with r0 / last_rel from the block header [r0][last_rel][n], exactly the oracle's split of a
-    // fragment into the thing's top (`ytop_b`) and the column's first opaque row (`st[0]`).
+    // with y0 the thing's BUCKET TOP and b its bucket (the slot), n_first / n_last the block
+    // header's ops 0 and 2 (`[n_first][min_b][n_last]`, M7 P1.6) -- the oracle's split of a
+    // fragment into the bucket top (`ytop_b`) and the column's first painted row (`st[0]`).
     // The slot is fetched only when it changes (gps_cur_s): a thing's columns are adjacent, so that
     // is once per thing. ⚠ gps_cur_s must be 0 at every frame start -- the M1/M5 restore sets
     // carry it. A stale one does not crash: the next frame's slot 1 would skip the fetch and draw
-    // with the previous frame's thing-1 top row and light.
+    // with the previous frame's thing-1 top row, light and bucket.
     //
-    // Outputs: ybase and top (= y_base + last_rel), signed 4-nibble rows; sy1 / sy2, the clamped
-    // rows (4 nibbles, high byte 0); smidx's HIGH byte = the light row (each run reads its texel
-    // into the low byte); ptr at the block's first (rel, texel) pair.
+    // Outputs: ybase (= y0) and top (= y0 + rowmap[b][n_last]), signed 4-nibble rows; sy1 / sy2,
+    // the clamped rows (4 nibbles, high byte 0); smidx's HIGH byte = the light row (each run reads
+    // its texel into the low byte); ridx's HIGH byte = the bucket (each run reads its n_end into
+    // the low byte); ptr at the block's first (n_end, texel) pair.
     //
     // THE NARROW ARM. `sprbank` is 4096-bit aligned (`pad 64` before it; the emitter asserts
     // SPR_BLOCK_STRIDE == 64 and the build checks the label) and a block is 64 ops = 16^3 bits, so
     // every address inside one block agrees in nibbles >= 3: a read whose predecessor ARM is in
     // the same block can re-arm the low three nibbles only (frame.read3_and_inc). The FIRST read of
-    // a block keeps the full arm -- the derive's r0, and each walker's first rel, since the regions
-    // emitted in between arm elsewhere (frame.step_shade reads stepcol). ⚠ SILENT WHEN BROKEN:
+    // a block keeps the full arm -- the derive's n_first, and each walker's first n_end, since the
+    // regions emitted in between arm elsewhere (frame.step_shade reads stepcol). ⚠ SILENT WHEN BROKEN:
     // anything that arms a pointer between two reads of one walk makes the next narrow read land in
     // the wrong place, and only the pixel gates see it. Keep every walk's loop free of pointer reads.
-    def frag_derive s, sblk, ybase, top, sy1, sy2, smidx, ptr \
+    // M7 P1.6 -- the lists are NATIVE (doomfj.spritebank): rows normalized to 0..255 of the
+    // column's own height, drawn at the thing's bucket through `rowmap` -- a D4 dispatch, so the
+    // narrow arm survives it. `ridx` is this fragment's rowmap index, [row lo][row hi][bucket]: the
+    // derive sets its bucket, and every row the walk reads lands straight in its low byte. `ybase`
+    // is the BUCKET TOP now (each run's end is its mapped row below it); sy1 / sy2 clamp the first
+    // and last mapped rows.
+    def frag_derive s, sblk, ybase, top, sy1, sy2, smidx, ptr, ridx \
             @ fetch, have, y1_neg, y1_hi, y1_clamp, y1_ok, y2_neg, y2_hi, y2_clamp, y2_ok, end \
-            < gps_cur_s, gps_y0, gps_lr, gps_sidx, gps_sbase, gps_r0, gps_last, gps_cvh, gpslot, sprbank {
+            < gps_cur_s, gps_y0, gps_lr, gps_b, gps_sidx, gps_sbase, gps_r0, gps_last, gps_cvh, gpslot, sprbank {
         hex.cmp 2, s, gps_cur_s, fetch, have, fetch
       fetch:                                    // a new thing: its constants, once
         hex.mov 2, gps_cur_s, s
@@ -847,23 +855,27 @@ ns stream {
         frame.ptr_index ptr, gps_sbase, gps_sidx    // (ptr is free until the block address below)
         hex.read_byte_and_inc gps_y0, ptr
         hex.read_byte_and_inc gps_y0 + 2*dw, ptr
-        hex.read_byte gps_lr, ptr
+        hex.read_byte_and_inc gps_lr, ptr
+        hex.read_byte gps_b, ptr                // M7 P1.6: the thing's bucket, the rowmap's row
         hex.sub_constant 4, gps_y0, 32768       // the slot's bias: a tall NEAR sprite's top sits far
                                                 // above row -128 (M13-15M), hence two bytes
       have:
         hex.mov 2, smidx + 2*dw, gps_lr         // (per fragment: A and B share the slot cache)
+        hex.mov 2, ridx + 2*dw, gps_b           // ... so each keeps its own rowmap row
         frame.blk_addr ptr, sblk, sprbank
-        hex.read_byte_and_inc gps_r0, ptr       // the block's FIRST read: the full arm
-        frame.read3_and_inc gps_last, ptr       // same block: the narrow arm
-        hex.add_constant 3, ptr, dw             // past [n], at the first (rel, texel)
-        hex.mov 4, ybase, gps_y0
-        frame.add4_chain ybase, gps_r0          // y_base = y0 + r0 (gps_r0's high byte stays 0)
-        hex.mov 4, top, ybase
-        frame.add4_chain top, gps_last          // y_base + last_rel
+        hex.read_byte_and_inc ridx, ptr         // n_first: the block's FIRST read, the full arm
+        rowmap.lookup gps_r0, ridx              // -> the first row below the bucket top
+        hex.add_constant 3, ptr, dw             // past min_b (the record's test)
+        frame.read3_and_inc ridx, ptr           // n_last: same block, the narrow arm
+        rowmap.lookup gps_last, ridx            // -> the row after the last one
+        hex.mov 4, ybase, gps_y0                // the runs' base: the bucket top
+        hex.mov 4, top, gps_y0
+        frame.add4_chain top, gps_last          // (gps_last's high byte stays 0)
         // ⚠ CLAMPED, never REJECTED -- as the record did: the oracle takes the column as soon as the
         // sprite column has any opaque texel, even when the projected run lands off screen. An empty
         // [sy1, sy2) costs nothing: the regions cover the column and every run skips or clamps.
-        hex.mov 4, sy1, ybase                   // sy1 = clamp(y_base, 0, viewh)
+        hex.mov 4, sy1, gps_y0                  // sy1 = clamp(y0 + first row, 0, viewh)
+        frame.add4_chain sy1, gps_r0
         hex.sign 4, sy1, y1_neg, y1_hi
       y1_neg:
         hex.zero 4, sy1
@@ -873,7 +885,7 @@ ns stream {
       y1_clamp:
         hex.mov 4, sy1, gps_cvh
       y1_ok:
-        hex.mov 4, sy2, top                     // sy2 = clamp(y_base + last_rel, 0, viewh)
+        hex.mov 4, sy2, top                     // sy2 = clamp(y0 + last row, 0, viewh)
         hex.sign 4, sy2, y2_neg, y2_hi
       y2_neg:
         hex.zero 4, sy2
@@ -887,27 +899,34 @@ ns stream {
       end:
     }
 
-    // the fragment's runs, as pairs. `rel == 0` is the block's terminator: every real run ends at
-    // row >= 1 and the emitter zero-pads every block, so a 0 always ends the walk (the emitter's
-    // asserts are STRICT, `< SPR_BLOCK_STRIDE`, so that stays true).
-    // FAST PATH when the whole fragment is on screen (0 <= y_base and y_base + last_rel <= viewh):
-    // every run then ends inside [1, viewh], so no per-run sign / zero / limit test can fire and the
-    // row math fits two nibbles (viewh <= 255). A run ending exactly at viewh is the LAST run (it
-    // ends at y_base + last_rel), so running on to the terminator emits what the clipped loop's
-    // stop-at-viewh does. Otherwise the clipped loop -- the old sprite_runs, run for run.
-    def frag_runs ybase, top, smidx, ptr \
+    // the fragment's runs, as pairs. `n_end == 0` is the block's terminator: every real run's
+    // normalized end is >= 1 and the emitter zero-pads every block, so a 0 always ends the walk (the
+    // emitter's asserts are STRICT, `< SPR_BLOCK_STRIDE`, so that stays true).
+    // FAST PATH when the whole BUCKET box is on screen: 0 <= ybase and top <= viewh. ⚠ M7 P1.6:
+    // ybase is the bucket top y0 now, where it was the fragment's first row y0 + r0 -- r0 >= 0, so
+    // the test is STRICTER than the fragment's own rows: a fragment whose bucket top is above row 0
+    // takes the clipped loop even when every row it paints is on screen (the same pixels, more ops).
+    // Every run then ends inside [1, viewh] (a mapped end is ceil(n_end * hb / 255) >= 1), so no
+    // per-run sign / zero / limit test can fire and the row math fits two nibbles (viewh <= 255).
+    // A run ending exactly at viewh ends the fragment's painted rows, but it is NOT always the last
+    // run any more: runs that map to no row can follow it, each a zero-length pair AT viewh, which
+    // paints nothing (the device refuses only a pair behind the cursor). So running on to the
+    // terminator paints what the clipped loop's stop-at-viewh paints -- the same pixels, with those
+    // empty pairs in the stream. Otherwise the clipped loop -- the old sprite_runs, run for run.
+    def frag_runs ybase, top, smidx, ptr, ridx \
             @ chk_bot, fast, fast_loop, fast_have, clipped, cl_loop, cl_have, cl_pos, cl_emit, cl_next, cl_fin, cl_clamp, done \
             < gps_rel, gps_yabs, gps_cvh {
-        hex.sign 4, ybase, clipped, chk_bot
+        hex.sign 4, ybase, clipped, chk_bot     // the BUCKET top (M7 P1.6), not the first row y0 + r0
       chk_bot:
         hex.scmp 4, top, gps_cvh, fast, fast, clipped
       fast:
-        hex.read_byte_and_inc gps_rel, ptr      // the walk's first read: the full arm
+        hex.read_byte_and_inc ridx, ptr         // the walk's first read: the full arm
         ;fast_have
       fast_loop:
-        frame.read3_and_inc gps_rel, ptr
+        frame.read3_and_inc ridx, ptr
       fast_have:
-        hex.if0 2, gps_rel, done
+        hex.if0 2, ridx, done                   // (a real run's normalized end is >= 1)
+        rowmap.lookup gps_rel, ridx             // M7 P1.6: its row below the bucket top
         frame.read3_and_inc smidx, ptr          // the texel, straight into the cm index's low byte
         hex.mov 2, gps_yabs, ybase
         frame.add2_chain gps_yabs, gps_rel
@@ -915,12 +934,13 @@ ns stream {
         cm.emit smidx
         ;fast_loop
       clipped:
-        hex.read_byte_and_inc gps_rel, ptr      // the walk's first read: the full arm
+        hex.read_byte_and_inc ridx, ptr         // the walk's first read: the full arm
         ;cl_have
       cl_loop:
-        frame.read3_and_inc gps_rel, ptr
+        frame.read3_and_inc ridx, ptr
       cl_have:
-        hex.if0 2, gps_rel, done
+        hex.if0 2, ridx, done
+        rowmap.lookup gps_rel, ridx
         frame.read3_and_inc smidx, ptr
         hex.mov 4, gps_yabs, ybase
         frame.add4_chain gps_yabs, gps_rel      // (gps_rel's high byte stays 0)
@@ -948,7 +968,7 @@ ns stream {
     // clamps there and stops. `wlo` / `whi` are 2-nibble rows. It walks from `ptr0` (frag_derive's
     // ptr, kept) on a working copy, because a column calls it twice -- above and below the near
     // fragment -- and each call starts at the block's first pair with the full arm.
-    def frag_runs_win ybase, smidx, ptr0, wlo, whi \
+    def frag_runs_win ybase, smidx, ptr0, wlo, whi, ridx \
             @ sloop, shave, spos, semit, snext, sfin, sclamp, send \
             < gps_wptr, gps_rel, gps_yabs, gps_wlo4, gps_whi4 {
         hex.mov w/4, gps_wptr, ptr0
@@ -956,12 +976,13 @@ ns stream {
         hex.mov 2, gps_wlo4, wlo
         hex.zero 2, gps_whi4 + 2*dw
         hex.mov 2, gps_whi4, whi
-        hex.read_byte_and_inc gps_rel, gps_wptr     // the walk's first read: the full arm
+        hex.read_byte_and_inc ridx, gps_wptr        // the walk's first read: the full arm
         ;shave
       sloop:
-        frame.read3_and_inc gps_rel, gps_wptr
+        frame.read3_and_inc ridx, gps_wptr
       shave:
-        hex.if0 2, gps_rel, send
+        hex.if0 2, ridx, send
+        rowmap.lookup gps_rel, ridx                 // M7 P1.6
         frame.read3_and_inc smidx, gps_wptr
         hex.mov 4, gps_yabs, ybase
         frame.add4_chain gps_yabs, gps_rel
@@ -988,7 +1009,7 @@ ns stream {
     def emit_col_lines centery, viewh, w2s, wpx, w1r, wpxstride, eabl, noise, steps, things, ascode, stack, deg, gnrow, x, cexcl, fstart, ufl, uy1, uy2p1, ucol, lfl, ly1, ly2p1, lcol, sprfl, s, sblk, sb, sblkb, wall_lit, wall_lit2, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd \
             @ ctake_ok, ctake_clamp, no_sprite, sprite_path, sprite_one, spr_top_b, spr_top_ok, gap1_do, gap1_end, gap2_do, gap2_end, spr_bot_b, spr_bot_ok, covered1, covered, split, wall, w1r_pattern, w1r_test, floor, col_done, band_walk, bw_loop, bw_body, bw_skip, bw_test, bw_emit, bw_last, bw_clamp, bw_done, band_ret, end \
             < seg_w1rf, w1rslv, seg_litf, ecl_ccy, ecl_cmidx, ecl_colr, ecl_ctake, ecl_ent_i, ecl_full_hi, ecl_full_lo, ecl_n_ent, ecl_ptr, ecl_spr_bot, ecl_spr_top, ecl_whi, ecl_win_end, ecl_win_hi, ecl_win_lo, ecl_wlen, ecl_wlo, ecl_y2r, \
-              gps_cvh, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0 {
+              gps_cvh, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0, gps_ridx, gpsb_ridx {
         hex.mov 2, ecl_ctake, cexcl
         hex.cmp 2, ecl_ctake, fstart, ctake_ok, ctake_ok, ctake_clamp   // ecl_ctake = min(cexcl, fstart)
       ctake_clamp:
@@ -1067,25 +1088,25 @@ ns stream {
         // M7 P1.4: both fragments are DERIVED first (B's into the gpsb_* registers), then the
         // pieces run on the derived rows exactly as they ran on the stored ones.
         rep(things, k) hex.set 4, gps_cvh, viewh
-        rep(things, k) .frag_derive sb, sblkb, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0
-        rep(things, k) .frag_derive s, sblk, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr
+        rep(things, k) .frag_derive sb, sblkb, gpsb_ybase, gpsb_top, gpsb_sy1, gpsb_sy2, gpsb_smidx, gpsb_ptr0, gpsb_ridx
+        rep(things, k) .frag_derive s, sblk, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gps_ridx
         rep(things, k) hex.mov 2, ecl_spr_top, gps_sy1
         rep(things, k) hex.cmp 2, gpsb_sy1, ecl_spr_top, spr_top_b, spr_top_ok, spr_top_ok
       spr_top_b:
         rep(things, k) hex.mov 2, ecl_spr_top, gpsb_sy1
       spr_top_ok:
         rep(things, k) .emit_region ecl_full_lo, ecl_spr_top, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
-        rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, ecl_full_lo, gps_sy1
+        rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, ecl_full_lo, gps_sy1, gpsb_ridx
         rep(things, k) hex.cmp 2, gpsb_sy2, gps_sy1, gap1_do, gap1_end, gap1_end
       gap1_do:
         rep(things, k) .emit_region gpsb_sy2, gps_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
       gap1_end:
-        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr
+        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx
         rep(things, k) hex.cmp 2, gps_sy2, gpsb_sy1, gap2_do, gap2_end, gap2_end
       gap2_do:
         rep(things, k) .emit_region gps_sy2, gpsb_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
       gap2_end:
-        rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, gps_sy2, ecl_full_hi
+        rep(things, k) .frag_runs_win gpsb_ybase, gpsb_smidx, gpsb_ptr0, gps_sy2, ecl_full_hi, gpsb_ridx
         rep(things, k) hex.mov 2, ecl_spr_bot, gps_sy2
         rep(things, k) hex.cmp 2, ecl_spr_bot, gpsb_sy2, spr_bot_b, spr_bot_ok, spr_bot_ok
       spr_bot_b:
@@ -1095,7 +1116,7 @@ ns stream {
         ;col_done
       sprite_one:
         rep(things, k) hex.set 4, gps_cvh, viewh
-        rep(things, k) .frag_derive s, sblk, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr
+        rep(things, k) .frag_derive s, sblk, gps_ybase, gps_top, gps_sy1, gps_sy2, gps_smidx, gps_ptr, gps_ridx
         // M7 P1.4: NO WALL SPLIT when the fragment hides the column's whole wall window
         // [ctake, fstart) -- sy1 <= ctake and sy2 >= fstart. Then the region above it is the ceiling
         // splice over [0, sy1) and the region below it the floor splice over [sy2, viewh): the other
@@ -1106,12 +1127,12 @@ ns stream {
         rep(things, k) hex.cmp 2, gps_sy2, fstart, split, covered, covered
       covered:
         rep(things, k) .steps_splice_c ecl_ctake, ecl_full_lo, gps_sy1, w1r, gnrow, ecl_cmidx, cbufa, cbufd, ecl_ccy
-        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr
+        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx
         rep(things, k) .steps_splice_f fstart, viewh, gps_sy2, ecl_full_hi, w1r, gnrow, ecl_cmidx, fbufa, fbufd, ecl_ccy
         ;col_done
       split:
         rep(things, k) .emit_region ecl_full_lo, gps_sy1, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
-        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr
+        rep(things, k) .frag_runs gps_ybase, gps_top, gps_smidx, gps_ptr, gps_ridx
         rep(things, k) .emit_region gps_sy2, ecl_full_hi, viewh, w2s, wpx, w1r, stack, deg, wpxstride, eabl, noise, ascode, ecl_ctake, fstart, wall_lit, wall_lit2, gnrow, wstrip, wstripbase, cbufa, cbufd, fbufa, fbufd, ecl_win_lo, ecl_win_end, ecl_wlo, ecl_whi, ecl_ptr, ecl_ccy, ecl_cmidx, band_walk, band_ret
       col_done:
         stl.output_char 0xFF                     // ends this column's pair list

@@ -1,0 +1,25 @@
+# R1 (finding 1): the record test FAILS when the tier compare sends the bucket AT hdb to MID -- on HEAD (928413d M7 P1.6 review: every entry of the EMITTED rowmap is ceil(n * hb / 255) at the oracle's bucket height); the test files from the branch copied in; MUTATED: src/fj/frame_render.fj: 'hex.cmp 2, trb_bucket, trb_climit, mid_base, hd_base, hd_base' -> 'hex.cmp 2, trb_bucket, trb_climit, mid_base, mid_base, hd_base'
+$ python -m pytest tests/fj/test_sprite_bank_fj.py -q -p no:cacheprovider -k record_takes
+E       AssertionError: 8 faults, first (what, case, got, want) [('thing', (12, 0), '0000006f 11 29', '0000006c 11 29'), ('column', (12, 0, 0), (b'\x00\x00\x00', 0), (b'\rl\x00', 1)), ('column', (12, 
+E       assert [('thing', (1...01', 1)), ...] == []
+FAILED tests/fj/test_sprite_bank_fj.py::test_the_record_takes_the_tier_region_the_slot_and_the_min_b_columns
+1 failed, 9 deselected in 10.73s
+rc=1
+# R1 (finding 1): the record test FAILS when slot byte 3 holds the bucket's height instead of its index -- on HEAD (928413d M7 P1.6 review: every entry of the EMITTED rowmap is ceil(n * hb / 255) at the oracle's bucket height); the test files from the branch copied in; MUTATED: src/fj/frame_render.fj: 'hex.write_byte gps_ptr, trb_bucket ' -> 'hex.write_byte gps_ptr, trb_bucket_h '
+$ python -m pytest tests/fj/test_sprite_bank_fj.py -q -p no:cacheprovider -k record_takes
+E       AssertionError: 64 faults, first (what, case, got, want) [('slot', (0, 0), 'c17f1f04', 'c17f1f00'), ('slot', (1, 0), 'f97f9507', 'f97f9501'), ('slot', (2, 0), 'fe7f490a', 'fe7f4902')]
+E       assert [('slot', (0,...7fe905'), ...] == []
+FAILED tests/fj/test_sprite_bank_fj.py::test_the_record_takes_the_tier_region_the_slot_and_the_min_b_columns
+1 failed, 9 deselected in 11.14s
+rc=1
+# R1 (finding 1): the record test FAILS when a column AT its min_b is dropped -- on HEAD (928413d M7 P1.6 review: every entry of the EMITTED rowmap is ceil(n * hb / 255) at the oracle's bucket height); the test files from the branch copied in; MUTATED: src/fj/frame_render.fj: 'hex.cmp 2, trb_bucket, trb_run_last, col_next, do_store, do_store' -> 'hex.cmp 2, trb_bucket, trb_run_last, col_next, col_next, do_store'
+$ python -m pytest tests/fj/test_sprite_bank_fj.py -q -p no:cacheprovider -k record_takes
+E       AssertionError: 66 faults, first (what, case, got, want) [('column', (0, 0, 1), (b'\x00\x00\x00', 0), (b'\x01\x04\x00', 1)), ('column', (0, 0, 2), (b'\x00\x00\x00', 0), (b'\x01\x05\x00', 1)), 
+E       assert [('column', (...00', 1)), ...] == []
+FAILED tests/fj/test_sprite_bank_fj.py::test_the_record_takes_the_tier_region_the_slot_and_the_min_b_columns
+1 failed, 9 deselected in 10.92s
+rc=1
+# R1 (finding 1): unmutated -- the record test and its four in-file mutants (HD compare, byte 3, min_b, thfar) PASS -- on HEAD (928413d M7 P1.6 review: every entry of the EMITTED rowmap is ceil(n * hb / 255) at the oracle's bucket height); the test files from the branch copied in
+$ python -m pytest tests/fj/test_sprite_bank_fj.py -q -p no:cacheprovider -k record
+5 passed, 5 deselected in 51.75s
+rc=0

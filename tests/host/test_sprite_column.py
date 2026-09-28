@@ -1,8 +1,12 @@
 """M7 P1.4 -- the v2 sprite column's invariants that hold without the renderer (docs/gp-sprite-column.md).
 
-The column itself -- record -> load -> emit against the oracle, one fragment and two -- is checked
-in fj by scratchpad/gp/probes/sprite/ship_check.py, with four mutants; the narrow reads themselves
-run in tests/fj/test_narrow_reads_fj.py. What is pinned here:
+The column itself is checked in fj by tests/fj/test_sprite_bank_fj.py since M7 P1.6: the derive and
+both run walkers over native lists (the window walker above and below a near fragment), and the
+record's tier / slot / min_b section transplanted from the shipped source, each with mutants; the
+narrow reads themselves run in tests/fj/test_narrow_reads_fj.py. P1.4's record -> load -> emit
+check, scratchpad/gp/probes/sprite/ship_check.py, is SUPERSEDED (it builds P1.4's blocks and no
+longer assembles); the load and the whole A+B composition are left to the byte-exact gates. What is
+pinned here:
 
   * the bank's 3-nibble reads (frame.read3_and_inc) are exact only on a bank that starts on a whole
     block, 64 ops = 16^3 bits. The emitter opens the bank with a `pad` of the block stride, and
@@ -126,11 +130,12 @@ REG_FIELD = {
     # frame.thing_record_body -- the writes
     "gps_s_rec": "slot id", "trb_blk": "block lo", "trb_blk + 2*dw": "block hi",
     "gps_yb8": "y0 lo", "gps_yb8 + 2*dw": "y0 hi", "trb_shade_row": "light row",
+    "trb_bucket": "bucket",                                          # M7 P1.6: the rowmap's row
     # frame.lines_spr_load -- fragment A, then fragment B
     "s": "slot id", "sblk": "block lo", "sblk + 2*dw": "block hi",
     "sb": "slot id", "sblkb": "block lo", "sblkb + 2*dw": "block hi",
     # stream.frag_derive
-    "gps_y0": "y0 lo", "gps_y0 + 2*dw": "y0 hi", "gps_lr": "light row",
+    "gps_y0": "y0 lo", "gps_y0 + 2*dw": "y0 hi", "gps_lr": "light row", "gps_b": "bucket",
 }
 
 
@@ -224,8 +229,8 @@ LAYOUT_MUTANTS = [
     (0, "frame.read0_byte_and_inc sblkb, spslot_p" + _W + "frame.read0_byte_and_inc sblkb + 2*dw, spslot_p",
      "frame.read0_byte_and_inc sblkb + 2*dw, spslot_p" + _W + "frame.read0_byte_and_inc sblkb, spslot_p",
      "the load's fragment B"),
-    (0, "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw" + _W + "hex.write_byte gps_ptr, trb_shade_row",
-     "hex.write_byte_and_inc gps_ptr, trb_shade_row" + _W + "hex.write_byte gps_ptr, gps_yb8 + 2*dw",
+    (0, "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw" + _W + "hex.write_byte_and_inc gps_ptr, trb_shade_row",
+     "hex.write_byte_and_inc gps_ptr, trb_shade_row" + _W + "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw",
      "the record's slot"),
     (0, "hex.add_constant 8, gps_yb8, 32768", "hex.add_constant 8, gps_yb8, 32767", "the record's bias"),
     (1, "hex.read_byte_and_inc gps_y0, ptr" + _W + "hex.read_byte_and_inc gps_y0 + 2*dw, ptr",

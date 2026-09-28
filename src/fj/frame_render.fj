@@ -508,8 +508,8 @@ ns frame {
         hex.read_table_packed 1, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
     }
 
-    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, buckets, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, nld, neartz, mt, throwc, n_thc, sprltc, nltic \
-            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, bucket_mul, bucket_mul_done, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end \
+    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic \
+            @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
               gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8 {
         // TWO budgets, and which one this thing spends is baked (`sp_mon`). Walk-arrival order is
@@ -562,11 +562,19 @@ ns frame {
       inc_done:
         // the height BUCKET, and the exact height it renders at -- one dispatch, [hb:2][trb_bucket:2]
         sprbkt.lookup trb_bucket, trb_thpx
+        // M7 P1.6 -- the thing's TIER region of its kind's native lists (doomfj.spritebank): HD
+        // (a bucket from `hdb` up, full rows) at sp_base, MID `sp_dw` blocks on; LD below, for a far
+        // short thing. A column's block is then `u + region` -- the per-bucket bank's `u*buckets +
+        // bucket` is gone, and the bucket travels in the slot instead (the rowmap's row).
         hex.zero w/4 - 4, trb_blk_const + 4*dw   // Z3: the mov below zeroes the low 4 itself
         hex.mov 4, trb_blk_const, sp_base           // WIDENED first (a narrow add cannot carry out
+        hex.set 2, trb_climit, hdb
+        hex.cmp 2, trb_bucket, trb_climit, mid_base, hd_base, hd_base
+      mid_base:
         hex.zero w/4 - 2, trb_tab_idx + 2*dw   // Z3: the mov below zeroes the low 2 itself
-        hex.mov 2, trb_tab_idx, trb_bucket
+        hex.mov 2, trb_tab_idx, sp_dw
         hex.add w/4, trb_blk_const, trb_tab_idx
+      hd_base:
         hex.zero 6, trb_bucket_h + 2*dw             // ⚠ WIDENED: `hex.sub 8, dst, src` reads EIGHT (idea 20: the mov 2 below covers nibbles 0-1)
         hex.mov 2, trb_bucket_h, trb_bucket + 2*dw      // nibbles of src, so a 2-nibble register would
         hex.mov 8, trb_y0, trb_tytop                    // drag its neighbours in as high nibbles.
@@ -592,14 +600,10 @@ ns frame {
       hd_lowdetail:
         rep(spn, k) hex.set 1, hdfl, 0
       hd_done:
-        // ... and the block base: the low buckets are a PREFIX, so the coarse index keeps
-        // the same base+trb_bucket shape with no offset
+        // ... and the block base: a coarse (LD) thing reads the kind's LD region (M7 P1.6)
         rep(spn, k) hex.if1 1, hdfl, blockbase_done
         rep(spn, k) hex.zero w/4, trb_blk_const
         rep(spn, k) hex.mov 4, trb_blk_const, sp_base2
-        rep(spn, k) hex.zero w/4, trb_tab_idx
-        rep(spn, k) hex.mov 2, trb_tab_idx, trb_bucket
-        rep(spn, k) hex.add w/4, trb_blk_const, trb_tab_idx
       blockbase_done:
         // the shade row: (light, sprite height) class << 8 | trb_bucket height, one baked byte
         hex.zero w/4, trb_tab_idx
@@ -609,12 +613,12 @@ ns frame {
         frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx
         hex.read_byte trb_shade_row, trb_tbl_p
         // M7 P1.4 -- THE THING'S SLOT. A fragment is recorded as (slot, block): its per-THING
-        // constants -- the top row of its bucket, biased, and its light row -- go into
-        // gpslot[s] = [trb_y0 + 32768 lo][hi][shade row][unused] ONCE here, where the old record
-        // biased `trb_y0 + r0` and stored it, with the row clamps and the light row, in every
-        // column. Slot ids run 1..255 (0 = no fragment): at most one per accepted thing, and a
-        // frame accepts no more things than the map draws -- the emitter asserts that count
-        // <= 255. gps_nslot starts every frame at 0 (the restore sets carry it).
+        // constants -- the top row of its bucket, biased, its light row and (M7 P1.6) its bucket,
+        // the rowmap's row -- go into gpslot[s] = [trb_y0 + 32768 lo][hi][shade row][bucket] ONCE
+        // here, where the old record biased `trb_y0 + r0` and stored it, with the row clamps and
+        // the light row, in every column. Slot ids run 1..255 (0 = no fragment): at most one per
+        // accepted thing, and a frame accepts no more things than the map draws -- the emitter
+        // asserts that count <= 255. gps_nslot starts every frame at 0 (the restore sets carry it).
         hex.inc 2, gps_nslot
         hex.mov 2, gps_s_rec, gps_nslot
         hex.zero w/4 - 2, gps_sidx + 2*dw       // Z3: the mov below zeroes the low 2 itself
@@ -628,7 +632,8 @@ ns frame {
                                                 // row -128, and a one-byte bias WRAPPED (M13-15M)
         hex.write_byte_and_inc gps_ptr, gps_yb8
         hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw
-        hex.write_byte gps_ptr, trb_shade_row
+        hex.write_byte_and_inc gps_ptr, trb_shade_row
+        hex.write_byte gps_ptr, trb_bucket              // M7 P1.6: the rowmap's row
         // the column DDA: frac starts at (clamped x1 - x1) * istep, exactly as the oracle's does
         hex.mov 8, trb_col_x, trb_tx1
         hex.zero 8, trb_frac_u
@@ -689,17 +694,10 @@ ns frame {
         hex.set w/4, trb_slot_ofs, 8
         hex.set 2, trb_slot_flag, 2
       slot_done:
-        // block = sp_base + trb_u*buckets + trb_bucket, at a POWER-OF-TWO stride so the address is a shift
-        // trb_blk = (base + trb_bucket) + trb_u*BUCKETS -- and (base + trb_bucket) is a per-THING constant, so
-        // only the `trb_u*BUCKETS` term belongs in the column loop. `trb_blk_const` is that constant, hoisted.
+        // block = the thing's region + trb_u (M7 P1.6: one native list per column and tier; the
+        // region is the per-THING constant `trb_blk_const`, hoisted)
         hex.zero w/4 - 2, trb_blk + 2*dw   // Z3: the mov below zeroes the low 2 itself
         hex.mov 2, trb_blk, trb_u
-        rep(spn, k) hex.if1 1, hdfl, bucket_mul   // SPR-NEAR: the packed region strides nld
-        rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld
-        rep(spn, k) hex.if0 1, hdfl, bucket_mul_done
-      bucket_mul:
-        hex.mul_const w/4, trb_blk, trb_blk, buckets
-      bucket_mul_done:
         hex.add w/4, trb_blk, trb_blk_const
         // ⚠ `trb_blk` stays the RAW block INDEX -- that is what the slot stores and what the emit
         // places. Scaling it here as well double-multiplied the address by the stride AND
@@ -707,11 +705,15 @@ ns frame {
         // every column skip: the frame then differed from the oracle by EXACTLY its sprite pixels.
         // M7 P1.4: the block's address by WHOLE-NIBBLE placement (frame.blk_addr: a 64-op block
         // is 16^3 bits, so base + blk*4096 is blk's four nibbles at nibble 3 plus the base) -- and
-        // only last_rel is read, at op 1 of the block (hence the base `sprbank + dw`). The rows are
-        // derived at emit, from the slot and the block header (stream.frag_derive).
+        // only op 1 of the block is read (hence the base `sprbank + dw`). The rows are derived at
+        // emit, from the slot and the block header (stream.frag_derive).
+        // M7 P1.6: op 1 is the list's `min_b` (read into `trb_run_last`, the P1.4 name of the cell
+        // that held last_rel there) -- the column draws at this bucket iff bucket >= min_b
+        // (doomfj.spritebank.min_bucket: a DEFINITION both mirrors share; a transparent column's is
+        // past every bucket)
         frame.blk_addr trb_tbl_p, trb_blk, sprbank + dw
         hex.read_byte trb_run_last, trb_tbl_p
-        hex.if0 2, trb_run_last, col_next           // a fully transparent sprite column
+        hex.cmp 2, trb_bucket, trb_run_last, col_next, do_store, do_store
       do_store:
         hex.set w/4, trb_tab_idx, 0
         hex.mov 2, trb_tab_idx, trb_col_x

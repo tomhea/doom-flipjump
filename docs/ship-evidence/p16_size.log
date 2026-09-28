@@ -1,0 +1,12 @@
+$ python scratchpad/gp/probes/bank/size.py --rev 0da63c9 --base 18ef625
+size.py: --rev HEAD = 0da63c9 M7 P1.6: R1 evidence -- the rung's new and changed test files on P1.5's source (each fails) and on the branch (101 passed)
+CONTROL block counter: 3 blocks read as 3 ok; one cell short refused ok
+CONTROL assembler: an empty addition (0, 0) data/span words (ok); 1,000 ops 2000 data words (ok)
+BANK: 16284 blocks = 2084352 words -- 27 kinds, 440 columns: 1320 blocks in the kinds' three regions, 14964 in the animation's; 9313611 characters of fj
+KINDS: 27 in the bank, 27 of them drawn by a drawable (single-player) thing; the 0 no drawable thing uses [] hold 0 blocks = 0 words; kinds banked again under a sprite another kind already holds [3002]: 57 more blocks = 7296 words
+ANIMATION: 306 views, 237 distinct lumps (237 by lump name), 69 views mirrored
+ROWMAP: 98308 data words (98308 span words) with its switch aligned, plus 0..16382 words of its own `pad 8192` wherever a build lands it
+BANK at --base 18ef625 = 18ef625 M7 P1.5 (13/n): the sprite bank and the shade classes hold only what a single-player game draws: 18040 blocks = 2309120 words -- 27 kinds, 440 columns; 10264709 characters
+DELTA: the bank -1756 blocks = -224768 words; with the rowmap (aligned) -126460 words = -0.094% of 2^27
+CONTROLS PASS
+rc=0

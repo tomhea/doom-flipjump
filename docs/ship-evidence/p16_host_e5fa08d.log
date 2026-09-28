@@ -1,0 +1,15 @@
+# the host suite at e5fa08d, whose commit message says 'Host suite 1214 passed (the restore set tests wait for this rung's re-key)' with no log -- this is the measured figure (the message is history and stays as it is) -- on e5fa08d (e5fa08d M7 P1.6: the native-list sprite bank -- one list per column and tier, drawn through the rowmap); the tree made a throwaway git repo of its own files (git init + add -A + commit), for the tests that ask git what is tracked
+$ python -m pytest tests/host -q -p no:cacheprovider
+E       AssertionError: hosted restore set is missing globals: ['p2_ds', 'p2_dsb', 'p2_s', 'p2_sb', 'gps_nslot', 'gps_s_rec', 'gps_sidx', 'gps_sbase']
+E       assert not ['p2_ds', 'p2_dsb', 'p2_s', 'p2_sb', 'gps_nslot', 'gps_s_rec', ...]
+E       AssertionError: standalone restore set is missing globals: ['p2_ds', 'p2_dsb', 'p2_s', 'p2_sb', 'gps_nslot', 'gps_s_rec', 'gps_sidx', 'gps_sbase']
+E       AssertionError: the standalone set adds ['dbox', 'ddir', 'dstate', 'dsub', 'duse', 'dwait', 'kb_b', 'kb_f', 'kb_l', 'kb_r', 'kb_u', 'kbcode', 'kbstat', 'mode'], which is not STANDALONE_SCRATCH
+E       assert {'dbox', 'ddi... 'dwait', ...} == {'dbox', 'ddi... 'dwait', ...}
+E       AssertionError: STANDALONE_PERSIST names ['menu_scr', 'menu_sel'], absent from the standalone set
+E       assert not ['menu_scr', 'menu_sel']
+FAILED tests/host/test_restore_set_shipped.py::test_every_hoisted_global_is_present_at_full_declared_extent[hosted]
+FAILED tests/host/test_restore_set_shipped.py::test_every_hoisted_global_is_present_at_full_declared_extent[standalone]
+FAILED tests/host/test_restore_set_shipped.py::test_the_standalone_set_drops_only_the_wire_magic
+FAILED tests/host/test_restore_set_shipped.py::test_the_persist_labels_are_all_in_the_standalone_set
+4 failed, 1237 passed, 2 skipped, 1 deselected, 2 xfailed, 3 warnings in 98.12s (0:01:38)
+rc=1

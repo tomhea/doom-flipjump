@@ -10,23 +10,22 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked31.fjm`, sha256 `773b840ca044e39b` (first 16 hex), built 2026-09-27 from the command in 1b (M7 P1.4, the v2 sprite column) | rebuilt byte-identical from that line with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked31r_build.log`) |
-| **ms/frame, quiet box** | **61.6 ms/frame** (61.1-63.0), against **62.5** (61.9-62.8) for blocked30 in the same run -- **NOT SEPARATED: the pairs split in sign, median x1.016** | `msframe.py --a build/doom_e1m1_blocked30.fjm --b build/doom_e1m1_blocked31.fjm`, 200 frames x 5 reps, pinned core (`blocked31_msframe.log`) |
-| **fj ops/s** | **234 M** (234.2 M; blocked30 234.9 M in the same run) | same run; ops/frame **14,436,650** on msframe's forward-walk script (blocked30 14,677,635): 1.6% fewer ops |
-| **binding metric** (owner spec) | (mean+p80)/2 = **13,974,938 ops/frame -- PASS** (mean 11,814,414; p80 16,135,462) | `gamespeed.py --fjm build/doom_e1m1_blocked31.fjm`, 2026-09-27 (`docs/ship-evidence/blocked31_gamespeed.log`); `gamespeed_trail.py`: the binary's pose and door states equal `--validate`'s record on every frame of all ten runs, both controls rejected |
-| **size** | **27.31% of 2^27 -- PASS** (36,657,086 words; span 90,569,312) | same run |
-| **combat set v2** (the CAP-22 set, handoff-gameplay section 1) | (mean+p80)/2 = **14,441,924** (blocked30 15,041,859; B0 17,760,774); **14,476,599** with strafe's collision (blocked30 15,077,276); every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --pixel-every 1 --proxy` (`blocked31_b0_v2.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked32.fjm`, sha256 `89c3cf6348258eeb` (first 16 hex), built 2026-09-28 from the command in 1b (M7 P1.5, the skill filter and the skill menu) | class F -- pixels move, so no byte-identical rebuild; built with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked32_build.log`) |
+| **ms/frame, quiet box** | **60.4 ms/frame** (60.2-62.0), against **62.2** (61.2-63.1) for blocked31 in the same run -- **NOT SEPARATED: one pair at 1.000, median x1.018** | `msframe.py --a build/doom_e1m1_blocked31.fjm --b build/doom_e1m1_blocked32.fjm`, 200 frames x 5 reps, pinned core (`blocked32_msframe.log`) |
+| **fj ops/s** | **234 M** (233.5 M; blocked31 232.1 M in the same run) | same run; ops/frame **14,107,763** on msframe's forward-walk script (blocked31 14,436,650): 2.3% fewer ops |
+| **binding metric** (owner spec) | (mean+p80)/2 = **13,560,716 ops/frame -- PASS** (mean 11,509,098; p80 15,612,334) | `gamespeed.py --fjm build/doom_e1m1_blocked32.fjm`, 2026-09-28 (`docs/ship-evidence/blocked32_gamespeed.log`); `gamespeed_trail.py`: the binary's pose and door states equal `--validate`'s record on every frame of all ten runs, both controls rejected |
+| **size** | **27.13% of 2^27 -- PASS** (36,410,172 words; span 90,671,968) | same run |
+| **combat set v2** (the CAP-22 set, handoff-gameplay section 1) | (mean+p80)/2 = **14,022,076** (blocked31 14,441,924; B0 17,760,774); **14,055,673** with strafe's collision (blocked31 14,476,599); every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --pixel-every 1 --proxy` (`blocked32_b0_v2.log`) |
 
-**What it is:** blocked30 with the v2 sprite column (M7 P1.4, `docs/gp-sprite-column.md`): a sprite
-fragment is (slot, block) -- three bytes where the record stored seven -- the per-thing constants go
-into `gpslot` once per accepted thing, the emission derives the rows where it uses them, and the
-bank's reads inside a block take a 3-nibble arm (the bank is 4096-bit aligned; the build checks).
-The record fell 102,173 and the emission 87,316 ops a frame on gamespeed's ten games (profx,
-`blocked31_phases.log`), combat set v2 by 599,935 -- under P1.4's kill line of 0.8M, and shipped by
-the owner's decision (2026-09-27) with a follow-up after phase 1. Same pixels (the column check's
-1,648 columns, deg_gate, both gates, B0); NOT SEPARATED on ms/frame. The binary it replaced, blocked30
-(sha256 `0dd3806016af68cd`: 62.8 ms/frame quiet, binding 14,318,431, 26.98%), is kept in `build/` as
-the comparison arm.
+**What it is:** blocked31 with the skill filter and the skill menu (M7 P1.5, `docs/gp-skill-menu.md`),
+class F: the thing universe is DOOM's single-player one (26 multiplayer-only things leave the
+image), the game boots at hard's level start, and NEW GAME opens a skill screen whose choice runs
+that skill's restart block. Pictures move by exactly that, so the gates are byte- AND state-exact
+against the oracle at each skill (m3_gate's 32 frames, m2_std_gate's 366, their six selftests), B0
+pixel-exact on every frame; the v2 binding fell 419,848 (the estimate was -0.3M) and ms/frame is NOT
+SEPARATED -- the price class F records, far under the ~90 ms tripwire. The binary it replaced,
+blocked31 (sha256 `773b840ca044e39b`: 61.5 ms/frame frozen, binding 13,974,938, 27.31%), is kept in
+`build/` as the comparison arm.
 
 blocked25 read 99-104 ms/frame with a background video render at ~0.3-0.45 core -- under
 msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27 has not been timed
@@ -152,10 +151,18 @@ the assembler the same files and the same persist tuple at 311f23f and at 91eaee
 counts cache differently, so on main this line recounts once (~34 min, the same counts) until the
 next ship build re-signs it. Its label table is `scratchpad/12m/atlas/blocked31.labels.tsv.gz`.
 
+**blocked32 (2026-09-28, M7 P1.5): the line is unchanged** -- the same heat list; P1.5 changed no
+parameter count on the hot paths, and all 20 hot groups matched and pinned. The source changed, so
+the counts cache MISSED and recounted (23,560 groups before alias merging, 348,682 tables, 2,369 s)
+and the build, at 7cdfb97 (tag `evidence/p1.5-build`), took 8,794 s: sha256 `89c3cf6348258eeb`
+(`docs/ship-evidence/blocked32_build.log`). The tracked counts cache is that recount. Class F -- the
+pixels move -- so no byte-identical rebuild. Its label table is
+`scratchpad/12m/atlas/blocked32.labels.tsv.gz`.
+
 **The play command** (options verified against `fj --help`: `--run`, `--io pc`, `--flat-max-words N`):
 
 ```
-fj --run build/doom_e1m1_blocked31.fjm --io pc --flat-max-words 134217728
+fj --run build/doom_e1m1_blocked32.fjm --io pc --flat-max-words 134217728
 ```
 
 `--run` is not optional (`fj a.fjm` assembles); the flat window must be the full 2^27 words or

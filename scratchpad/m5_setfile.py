@@ -78,6 +78,10 @@ def standalone_globals(doors_wad=None, mapname="E1M1"):
         # count the emitter passes (`walkover_triggers`), not door_decls' default of one
         from doomfj.doors import walkover_triggers
         out += door_decls(nd, len(walkover_triggers(secs, lds, sds, w.vertexes(mapname))))
+        # M7 P2b: ...and the movers' cells, at the map's lift count (the emitter's mover_decls)
+        from doomfj.movercode import mover_decls
+        from doomfj.movers import lift_states
+        out += mover_decls(len(lift_states(secs, lds, sds)))
     return out
 
 

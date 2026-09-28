@@ -55,6 +55,9 @@ from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_li
 from doomfj.doorcode import card_pickup_lines, walkover_lines   # M7 P2a.1
 from doomfj.doors import door_kinds, walkover_triggers                    # M7 P2a.1
 from doomfj.doors import exit_boxes                                        # M7 P2a.2
+from doomfj.movers import (FLOOR_SWITCH_SPECIALS, LIFT_USE_SPECIALS,       # M7 P2b
+                           lift_states, lift_walk_triggers, switch_sectors, use_line_boxes)
+from doomfj.movercode import lift_tic_lines, lift_walk_lines, mover_decls, use_line_lines
 from doomfj.doorcode import _box_test                                     # M7 P2a.2: the exit's box
 from doomfj.menu import LEVEL_DONE_SCR                                    # M7 P2a.2
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
@@ -393,7 +396,7 @@ STANDALONE_SCRATCH_DECLS = [
 ]
 
 
-def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1) -> tuple:
+def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -417,6 +420,10 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1) -> t
                  f"    hex.zero {max(nwalk, 1)}, wfired"]
                 if ndoors else []),
               "    hex.zero 1, lvdone", "    hex.set 1, pusedn, 1",     # M7 P2a.2
+              # M7 P2b: every lift at its top, idle, nothing pending; the switch not fired
+              *([f"    hex.zero {nlift}, lstate", f"    hex.zero {nlift}, ldir",
+                 f"    hex.zero {nlift}, lsub", f"    hex.zero {WAIT_NIBBLES * nlift}, lwait",
+                 f"    hex.zero {nlift}, lreq", "    hex.zero 1, fswitch"] if nlift else []),
               *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
               f"    rep({nss}, i) m1.zerobyte sshead + i*dw",
@@ -545,19 +552,22 @@ def menu_state_lines(restart) -> list:
     ]
 
 
-def exit_lines(boxes) -> list:
+def exit_lines(boxes, press_miss=()) -> list:
     """M7 P2a.2 -- the exit switch in fj (docs/gp-exit.md; the model's P_UseLines for special 11):
     a use PRESS -- `duse` this tic, `pusedn` clear -- sets `pusedn`, and inside any exit box
     (`doors.exit_boxes`, the doors' inclusive 16.16 test) ends the level: `lvdone` 1 and the
     LEVEL COMPLETE screen opens (`mode` 1, `menu_scr` LEVEL_DONE_SCR) -- drawn from the NEXT frame,
     whose menu branch comes before the tics. Use released clears `pusedn`. Runs after the door tic
-    (which writes `duse`) and before the player's move, the model's order."""
+    (which writes `duse`) and before the player's move, the model's order. M7 P2b: `press_miss`
+    runs on a press that misses the exit -- the SR lifts and the S1 switch (`movercode.
+    use_line_lines`), after the exit as in the model's P_UseLines."""
     out = ["hex.if0 1, duse, ex_up",
            "hex.if0 1, pusedn, ex_press", ";ex_done",
            "ex_press:", "hex.set 1, pusedn, 1"]
     for k, box in enumerate(boxes):
         out += _box_test(f"x{k}", box, "ex_hit", f"ex_miss{k}") + [f"ex_miss{k}:"]
-    out += [";ex_done",
+    out += [*press_miss,
+            ";ex_done",
             "ex_hit:", "hex.set 1, lvdone, 1", "hex.set 1, mode, 1",
             f"hex.set 1, menu_scr, {LEVEL_DONE_SCR}", ";ex_done",
             "ex_up:", "hex.zero 1, pusedn",
@@ -566,7 +576,8 @@ def exit_lines(boxes) -> list:
 
 
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
-                            menu: list | None = None, door_lines=(), exit_boxes_=()) -> list:
+                            menu: list | None = None, door_lines=(), exit_boxes_=(),
+                            press_miss=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -606,7 +617,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
            f"hex.if_flags pkeys + dw, {KEY_USE_MASK:#06x}, duse_nos, duse_yess",
            f"duse_yess:", "hex.xor_by 1, duse, 1",
            f"duse_nos:", *door_lines] if door_lines else []),
-        *(exit_lines(exit_boxes_) if exit_boxes_ else []),
+        *(exit_lines(exit_boxes_, press_miss) if exit_boxes_ else []),
         *_player_sim_lines(collide),
         *(["lv_frozen:"] if exit_boxes_ else []),
         *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
@@ -1002,12 +1013,36 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         for k in range(_dmax)]
     _dsecs_open = _dsecs[-1] if _dsecs else secs      # the union for every "could it ever" question
 
+    # M7 P2b: THE MOVERS (doomfj.movers) -- the game tier's lifts and floor switch. A mover seg's
+    # constants fan out over ITS mover's states exactly as a door seg's do over its door's (the
+    # per-state sector lists `_msecs[si]`, each the map with that one mover moved), chosen at run
+    # time by the mover's own state cell (`_mcell`: lstate + slot*dw for a lift, fswitch for the
+    # switch's pillars). The union question ("could it ever be open?") takes the pillars LOWERED:
+    # stored with floor == ceiling, they are uninhabitable until the switch fires.
+    _movers_on = bool(standalone and _dst_tbl and player_sim)
+    _lift_st = lift_states(secs, lds, sds, door_quant) if _movers_on else {}
+    _lift_slot = {si: k for k, si in enumerate(sorted(_lift_st))}
+    _switch = switch_sectors(secs, lds, sds) if _movers_on else {}
+    _msecs = {si: [apply_sector_heights(secs, {si: (h, secs[si].ceil_h)}) for h in st]
+              for si, st in _lift_st.items()}
+    _msecs.update({si: [secs, apply_sector_heights(secs, {si: (low, secs[si].ceil_h)})]
+                   for si, (low, _high) in _switch.items()})
+    _mcell = {si: f"lstate + {k}*dw" for si, k in _lift_slot.items()}
+    _mcell.update({si: "fswitch" for si in _switch})
+    if _switch:
+        _dsecs_open = apply_sector_heights(_dsecs_open, {si: (low, secs[si].ceil_h)
+                                                         for si, (low, _h) in _switch.items()})
+
     # M2-R4: one frame of every door, and the state it walks. Empty for a doors=False build, so
     # the prologue is the line-for-line text it was before doors existed.
     _door_lines = door_line_ids(secs, lds, sds, _dst_tbl) if _dst_tbl else {}
     _door_tic = (door_tic_lines(sorted(_dst_tbl), {si: len(v) for si, v in _dst_tbl.items()},
                                 use_boxes_xy(secs, lds, sds, verts), door_kinds(secs, lds, sds))
                  if (_dst_tbl and player_sim) else [])
+    # M7 P2b: one frame of every lift, after the doors (the model's mover phase)
+    if _movers_on and _door_tic:
+        _door_tic = _door_tic + lift_tic_lines(sorted(_lift_st),
+                                               {si: len(v) for si, v in _lift_st.items()})
     # M7 P2a.1: the walk-over triggers (doomfj.doors), fired from the collision move
     _walk_trig = walkover_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
 
@@ -1032,12 +1067,61 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             return f_
         return b_ if (b_ is not None and b_ in _dst_tbl) else None
 
-    def _seg_secs(seg):
-        """The sector lists this seg's constants must be baked against: one per state of its door,
-        or just the map itself. This is the ONLY place the per-state fan-out is decided, so a seg
-        no door can move emits exactly what it emitted before doors existed."""
+    def _seg_mover(seg):
+        """M7 P2b: the mover sector (lift or switch pillar) this seg's constants depend on, or None
+        -- `_seg_door`'s twin. No seg has a door or a second mover on its other side (asserted: the
+        per-seg switch is one nibble)."""
+        if not _msecs:
+            return None
+        ld_ = lds[seg.linedef]
+        f_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
+        b_ = sds[ld_.back if seg.side == 0 else ld_.front].sector if ld_.back != -1 else None
+        hit = [x for x in (f_, b_) if x is not None and x in _msecs]
+        if not hit:
+            return None
+        assert len(set(hit)) == 1 and _seg_door(seg) is None, (
+            f"{mapname}: seg on linedef {seg.linedef} touches {hit} and door "
+            f"{_seg_door(seg)} -- one state nibble per seg")
+        return hit[0]
+
+    def _leaf_mover(s_):
+        """M7 P2b: the mover sector subsector `s_` lies in (its first seg's front sector), or None"""
+        if not _msecs:
+            return None
+        sec_ = sds[lds[cmap.segs[cmap.subsectors[s_].firstseg].linedef].front
+                   if cmap.segs[cmap.subsectors[s_].firstseg].side == 0
+                   else lds[cmap.segs[cmap.subsectors[s_].firstseg].linedef].back].sector
+        return sec_ if sec_ in _msecs else None
+
+    def _mover_dispatch(tag, m_, block):
+        """M7 P2b: `sim.jump16` on mover `m_`'s state cell into one block per state -- `block(sv)`
+        gives a state's lines from its sector list -- each ending at `<tag>_end` (states past the
+        last reuse the last block). The landings' idiom: plain code, so `hex.set` is legal."""
+        svs = _msecs[m_]
+        labs = [f"{tag}_{k}" for k in range(len(svs))]
+        out_ = [f"    sim.jump16 {_mcell[m_]}, " + ", ".join(labs + [labs[-1]] * (16 - len(labs)))]
+        for k, sv in enumerate(svs):
+            out_ += [f"  {labs[k]}:", *block(sv), f"    ;{tag}_end"]
+        return out_ + [f"  {tag}_end:"]
+
+    def _seg_cell(seg):
+        """the state cell a dynamic seg's per-state blocks switch on: its door's `dstate` slot or
+        (M7 P2b) its mover's cell; None for a static seg"""
         d_ = _seg_door(seg)
-        return [secs] if d_ is None else _dsecs[:len(_dst_tbl[d_])]
+        if d_ is not None:
+            return f"dstate + {_dslot[d_]}*dw"
+        m_ = _seg_mover(seg)
+        return None if m_ is None else _mcell[m_]
+
+    def _seg_secs(seg):
+        """The sector lists this seg's constants must be baked against: one per state of its door
+        (M7 P2b: or mover), or just the map itself. This is the ONLY place the per-state fan-out is
+        decided, so a seg nothing can move emits exactly what it emitted before doors existed."""
+        d_ = _seg_door(seg)
+        if d_ is not None:
+            return _dsecs[:len(_dst_tbl[d_])]
+        m_ = _seg_mover(seg)
+        return [secs] if m_ is None else _msecs[m_]
 
     def _door_blocks(si, seg, label, build_fields):
         """(block lines, call lines) -- the constant block, or one per state behind a switch.
@@ -1055,7 +1139,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             blk += _seg_xorby_block(f"{label}_st{k}", build_fields(sv), ret=f"dsw_{label}_x")
         blk += generate_state_switch_fj(
             f"dsw_{label}", [f"{label}_st{k}" for k in range(len(variants))]).splitlines()
-        return blk, [f"    dsw_{label}_go dstate + {_dslot[_seg_door(seg)]}*dw"]
+        return blk, [f"    dsw_{label}_go {_seg_cell(seg)}"]
 
     # ⚠ THE OVERRIDE GOES HERE TOO. `secs` above has the doors applied and `scene` did not, so the
     # emitter held TWO sector sources that disagreed about where a door is. Only
@@ -1482,7 +1566,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         MEASURED on E1M1: 80 segs qualify here, and 54 more are closed only while a door is shut.
         """
         ld_ = lds[seg.linedef]
-        if ld_.back == -1 or _seg_door(seg) is not None:
+        if ld_.back == -1 or _seg_cell(seg) is not None:      # M7 P2b: a mover's seg too
             return False
         fs_ = secs[sds[ld_.front if seg.side == 0 else ld_.back].sector]
         bs_ = secs[sds[ld_.back if seg.side == 0 else ld_.front].sector]
@@ -1498,7 +1582,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         state opens it. MEASURED: 54 segs.
         """
         ld_ = lds[seg.linedef]
-        if ld_.back == -1 or _seg_door(seg) is None:
+        if ld_.back == -1 or _seg_cell(seg) is None:          # M7 P2b: or a mover's
             return False
         fi_ = sds[ld_.front if seg.side == 0 else ld_.back].sector
         bi_ = sds[ld_.back if seg.side == 0 else ld_.front].sector
@@ -1558,9 +1642,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         return ((sec.ceil_h, sec.light & 0xFF, _flatval(sec.ceil_tex), sec.ceil_tex.upper()),
                 (sec.floor_h, sec.light & 0xFF, _flatval(sec.floor_tex), sec.floor_tex.upper()))
 
-    for _ss in cmap.subsectors:
-        _sec = rm._seg_sector(lds, sds, secs, cmap.segs[_ss.firstseg])
-        lines_vz_classes.setdefault(rm.view_z(_sec.floor_h), len(lines_vz_classes))
+    for _si_ss, _ss in enumerate(cmap.subsectors):
+        _m_ss = _leaf_mover(_si_ss)
+        for _sv_ss in ([secs] if _m_ss is None else _msecs[_m_ss]):    # M7 P2b: every state
+            _sec = rm._seg_sector(lds, sds, _sv_ss, cmap.segs[_ss.firstseg])
+            lines_vz_classes.setdefault(rm.view_z(_sec.floor_h), len(lines_vz_classes))
     for _seg in cmap.segs:
         # M13-2S rung 3a: a marking two-sided seg attributes ITS front sector's planes, so that
         # sector's two band lists must be in the bank too (E1M1: 159 -> 227 distinct keys).
@@ -1723,6 +1809,16 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
 
     def _lines_descend_leaf(s):
         # the descend pre-walk's landing action: bake this subsector's viewz + band-bank pointer
+        _m = _leaf_mover(s)
+        if _m is not None:                 # M7 P2b: a mover leaf's eye follows the mover's state
+            assert ascode, "a mover leaf's landing is written for the as-code band ids"
+
+            def _vz_block(sv):
+                _vzk = rm.view_z(rm._seg_sector(lds, sds, sv, cmap.segs[cmap.subsectors[s].firstseg]).floor_h)
+                return [f"    hex.set 8, viewz, {_vzk & 0xFFFFFFFF}",
+                        f"    hex.set w/4, vzcbase, "
+                        f"{(lines_vz_classes[_vzk] * n_bank_keys * 2 - 4) & 0xFFFFFFFF}"]
+            return _mover_dispatch(f"dvz{s}", _m, _vz_block)
         _sec = rm._seg_sector(lds, sds, secs, cmap.segs[cmap.subsectors[s].firstseg])
         _vz = rm.view_z(_sec.floor_h)
         if ascode:
@@ -1841,8 +1937,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # properties of this subsector and fixed at level load, so reading them from tables
             # inside thing_load meant three `read_table_packed`s PER THING for values constant
             # across the whole leaf -- 23,569 of thing_load's measured 69,503 ops.
+            _m_fl = _leaf_mover(s)
             out += [f"    hex.set w/4, cur_ss, {s}",
-                    f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}",
+                    *([f"    hex.set 4, ss_flr, {psec.floor_h & 0xFFFF}"] if _m_fl is None else
+                      _mover_dispatch(f"sfl{s}", _m_fl, lambda sv: [
+                          f"    hex.set 4, ss_flr, "
+                          f"{rm._seg_sector(lds, sds, sv, cmap.segs[ss.firstseg]).floor_h & 0xFFFF}"])),
                     f"    hex.set 4, ss_ltb, {_MT_LTB[rm.wall_lightnum(psec.light, 0)]}",
                     "    stl.fcall thing_pass_leaf, tp_ret"]
         for si in range(ss.firstseg, ss.firstseg + ss.numsegs):
@@ -2019,7 +2119,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 # [gate] marking body  ;done | solid: solid body | done:
                 # `hex.if0` on the door's own state cell: state 0 IS shut, so shut takes the SOLID
                 # arm (the closed line is a wall) and every open state takes the marking arm.
-                _dc = "dstate + %d*dw" % _dslot[_seg_door(seg)]
+                _dc = _seg_cell(seg)                       # M7 P2b: a door's or a mover's
                 out.insert(_mark0, f"    hex.if0 1, {_dc}, ss{cid}_seg{si}_solid")
                 out.insert(_mark1 + 1, f"    ;ss{cid}_seg{si}_dualend")
                 out.insert(_mark1 + 2, f"  ss{cid}_seg{si}_solid:")
@@ -2071,7 +2171,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         assert player_sim and lines, "collide=True rides player_sim on the lines tier"
         # local import: doomfj.collision needs wall_renderer's _int_part_lines, so importing it at
         # module level would close a cycle (the seg_affine_coeffs precedent in mapcompiler)
-        from doomfj.collision import (cell_lists, collision_cells_fj, line_rows,
+        from doomfj.collision import (cell_lists, collision_cells_fj, line_rows, mover_line_openings,
                                       move_with_collision_lines, COLLISION_STATE_DECLS)
         # M7 P1.2: the player's collision CELLS (docs/gp-collision-cells.md). M2-R4: a door's
         # lines bake their opening at the door's OPEN height, and their line stubs read the door's
@@ -2082,9 +2182,14 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         for si, lis in sorted(_door_lines.items()):
             for li in lis:
                 _cdoors.setdefault(li, []).append((_dslot[si], pass_state(secs, lds, sds, si)))
+        # M7 P2b: the mover lines take their opening floor from their mover's state
+        _cmovers = {li: (_mcell[m_], obs)
+                    for li, obs in mover_line_openings(lds, sds, secs, _msecs).items()
+                    for m_ in [next(x for x in (sds[lds[li].front].sector,
+                                                sds[lds[li].back].sector) if x in _msecs)]}
         _collide_cells, _croot = collision_cells_fj(_pfx(mapname), _crows,
                                                     cell_lists(_crows, PLAYER_RADIUS),
-                                                    doors=_cdoors)
+                                                    doors=_cdoors, movers=_cmovers)
         # M7 P2a.1: the blue card's pickup at every tried candidate, and the walk-over triggers
         # after an accepted one -- where there are doors (pcard, dreq, wfired) and the card has a
         # vanish slot (it is drawable and the build keeps flags)
@@ -2105,8 +2210,13 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                               _croot, _pfx(mapname), radius=PLAYER_RADIUS,
                               height=PLAYER_HEIGHT >> 16, maxstep=MAX_STEP >> 16,
                               pickup=_card_pick,
-                              after_accept=walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16)
-                              if _walk_trig else ())
+                              after_accept=(walkover_lines(_walk_trig, sorted(_dst_tbl),
+                                                           PLAYER_RADIUS >> 16)
+                                            if _walk_trig else [])
+                              + (lift_walk_lines(lift_walk_triggers(secs, lds, sds,
+                                                                    map_wad.vertexes(mapname)),
+                                                 sorted(_lift_st), PLAYER_RADIUS >> 16)
+                                 if _movers_on else []))
                           + ["    ;simmv_done", "simcollide_skip:"])
         _collide_decls = list(COLLISION_STATE_DECLS)
         # the SEED descent: the same point-location query the eye's pre-walk runs, at a CANDIDATE
@@ -2117,10 +2227,18 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             # subsectors would otherwise seed the SHUT ceiling (== its floor), so `cp_ceil -
             # cp_floor` is zero and the player can never stand in a doorway however open the door
             # is -- while the door's LINE is what actually decides whether they get in.
-            lambda s: [f"    hex.set 8, cp_seedf, "
-                       f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).floor_h & 0xFFFFFFFF}",
-                       f"    hex.set 8, cp_seedc, "
-                       f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).ceil_h & 0xFFFFFFFF}"],
+            lambda s: ([f"    hex.set 8, cp_seedf, "
+                        f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).floor_h & 0xFFFFFFFF}",
+                        f"    hex.set 8, cp_seedc, "
+                        f"{rm._seg_sector(lds, sds, _dsecs_open, cmap.segs[cmap.subsectors[s].firstseg]).ceil_h & 0xFFFFFFFF}"]
+                       if _leaf_mover(s) is None else
+                       # M7 P2b: a mover leaf seeds from its mover's state (its floor decides the
+                       # step test at every height -- the doors' open-map shortcut does not apply)
+                       _mover_dispatch(f"cse{s}", _leaf_mover(s), lambda sv: [
+                           f"    hex.set 8, cp_seedf, "
+                           f"{rm._seg_sector(lds, sds, sv, cmap.segs[cmap.subsectors[s].firstseg]).floor_h & 0xFFFFFFFF}",
+                           f"    hex.set 8, cp_seedc, "
+                           f"{rm._seg_sector(lds, sds, sv, cmap.segs[cmap.subsectors[s].firstseg]).ceil_h & 0xFFFFFFFF}"])),
             # M4-R1: MAP-PREFIXED. Every other label this descent emits is already keyed on
             # `pfx` (+ `tag`); this one was the lone global, so two maps would both define it --
             # one of exactly the two collisions the R1 label gate found (m4_r1_labels.py). The
@@ -2143,7 +2261,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
-             for sk in SKILLS], nwalk=len(_walk_trig))
+             for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot))
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart)
@@ -2151,9 +2269,15 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # M7 P2a.2: the exit switch, where the game has a menu to open and doors (its use key, `duse`)
     _exit = (exit_boxes(lds, map_wad.vertexes(mapname)) if (standalone and menu and _door_tic)
              else [])
+    # M7 P2b: the SR lifts and the floor switch, on a use press that misses the exit
+    _press_miss = (use_line_lines(use_line_boxes(secs, lds, map_wad.vertexes(mapname), LIFT_USE_SPECIALS),
+                                  [b for _t, b in use_line_boxes(secs, lds, map_wad.vertexes(mapname),
+                                                                 FLOOR_SWITCH_SPECIALS)],
+                                  {secs[si].tag: k for si, k in _lift_slot.items()})
+                   if (_movers_on and _exit) else [])
     pass1 = [
         *(_standalone_input_lines(collide, menu=_menu_block, door_lines=_door_tic,
-                                  exit_boxes_=_exit)
+                                  exit_boxes_=_exit, press_miss=_press_miss)
           if standalone else
           _state_wire_lines(sim=player_sim, collide=collide,
                             door_lines=_door_tic)),
@@ -2468,6 +2592,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # `doors.door_states`, so this declaration is the level's initial condition, exactly as
           # `viewx/viewy/viewangle` are for the player.
           *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
+          *(mover_decls(len(_lift_slot)) if _movers_on else []),          # M7 P2b
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2

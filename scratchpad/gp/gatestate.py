@@ -23,13 +23,14 @@ from doomfj.fixedpoint import _signed                                      # noq
 STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "dstate", "ddir", "dsub", "dwait",
                "dreq", "pcard", "wfired",        # M7 P2a.1: doors.DoorPhase's (req, card, fired)
-               "lvdone", "pusedn")               # M7 P2a.2: the exit's
+               "lvdone", "pusedn",               # M7 P2a.2: the exit's
+               "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch")   # M7 P2b: movers.MoverPhase's
 
 
-def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1):
+def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2):
     """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
     each present]). `labels` is the build's own label table (build_labeled.py writes it)."""
-    cells = {n: c for n, c in P.game_cells(ndoors, nwalk).items() if n in STATE_NAMES}
+    cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift).items() if n in STATE_NAMES}
     missing = sorted(set(STATE_NAMES) - set(cells))
     assert not missing, "probe.game_cells lost %s -- the state check would skip them" % missing
     table = P.LabelTable.load(labels, {c.label for c in cells.values()})
@@ -44,12 +45,14 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
     return r.frames, r.ops, reads
 
 
-def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None) -> dict:
+def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None,
+                 movers=None, mover_order=None) -> dict:
     """the oracle's state after a frame, in the cells' own units: the view as signed 16.16, the
     angle's 32 bits, and each door cell a tuple in door order (`doors`: the per-door
     (state, direction, sub-step, timer) tuples, sorted by sector as the binary numbers them).
     M7 P2a.1: `phase` = a doors.DoorPhase state (its req, card and fired), `order` its door order.
-    M7 P2a.2: `exit_` = (lvdone, pusedn)"""
+    M7 P2a.2: `exit_` = (lvdone, pusedn). M7 P2b: `movers` = a movers.MoverPhase state (its lifts,
+    requests and switch), `mover_order` its lift order"""
     doors = list(doors)
     extra = {}
     if phase is not None:
@@ -58,6 +61,11 @@ def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exi
                  "wfired": P.wfired_value(fired)}
     if exit_ is not None:
         extra.update({"lvdone": exit_[0], "pusedn": exit_[1]})
+    if movers is not None:
+        lifts, req, sw = movers
+        extra.update({"lstate": tuple(t[0] for t in lifts), "ldir": tuple(t[1] for t in lifts),
+                      "lsub": tuple(t[2] for t in lifts), "lwait": tuple(t[3] for t in lifts),
+                      "lreq": tuple(int(si in req) for si in mover_order), "fswitch": sw})
     return {**extra, "viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": angle & 0xFFFFFFFF,
             "mode": mode, "menu_scr": scr, "menu_sel": sel,
             "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),

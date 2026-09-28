@@ -20,9 +20,8 @@ run in tests/fj/test_narrow_reads_fj.py. What is pinned here:
     model of the fj: whether every field lands on the byte the constants name is RUN, on both
     sides, by tests/fj/test_slot_layouts_fj.py -- PR #93's review found that an order-only text
     check cannot see a dropped increment, an inserted step, a width, an arm or a branch.
-  * the per-thing slot table is declared in the hot-data block at its full size, and the two
-    FRAME-STATE registers the emit's slot cache depends on are among the hoisted globals the
-    restore sets must carry (tests/host/test_restore_set_shipped.py holds them to that).
+  * the two FRAME-STATE registers the emit's slot cache depends on are among the hoisted globals
+    the restore sets must carry (tests/host/test_restore_set_shipped.py holds them to that).
 """
 import re
 from pathlib import Path

@@ -7,30 +7,42 @@ SPR_FRAG_FIELDS, SPR_SLOT_B_BYTE, SPR_THING_SLOT_BYTES, SPR_THING_SLOT_FIELDS, S
 This RUNS the shipped fj and holds every byte and every register to them -- nothing is modelled:
 
   write  The record's code from its slot allocation (`hex.inc 2, gps_nslot`) to the end of its
-         column loop, transplanted VERBATIM from frame.thing_record_body into a harness macro with
-         the emitter's own parameter values, records THINGS: columns across the 16, 64 and
-         1,024-index bounds up to 159, slot ids 1..255 across 16, fragments A and B, a column whose
-         both slots are spent, columns a wall hides, a fully transparent block, block indices past
-         one byte, y0 below and above zero. Then EVERY byte of sprflag, spslot and gpslot must be
-         the constants' layout of what was recorded: the bytes the layout names hold the fields and
-         every other byte is still zero.
+         column loop, transplanted VERBATIM from frame.thing_record_body into a harness macro, gets
+         its parameters the way the shipped build binds them: the def's own parameter list zipped
+         with the emitter's own `frame.thing_record_body ...` arguments (wall_renderer's f-string,
+         evaluated from its source). It records THINGS -- columns across the 16, 64 and 1,024-index
+         bounds up to 159, a first column below 0 and a last above 159 (both clamps), slot ids 1..255
+         across 16, fragments A and B, B refused by `ballow`, both slots spent, columns a wall hides,
+         a fully transparent block, block indices past one byte, a texture step that moves the
+         column and its clamp, both block strides (`hdfl`), y0 either side of zero. Then EVERY byte
+         of the hot block -- pclm through the cell after drawn, 6,785 of them -- must be the
+         constants' layout of what was recorded: the bytes the layout names hold the fields, drawn
+         its walls, and every other byte is still zero.
   read   From memory laid out by the constants, the real seed (and step) and load give each
          column's fragments, and the real derive each thing's y0 and light row.
 
 Each side is held to the constants ON ITS OWN, so a change made alike on both sides that the
-constants do not describe fails too.
+constants do not describe fails too. The expected bytes come from the constants and THINGS alone.
 
-What it does NOT cover: the shipped binary's ADDRESSES -- the harness lays drawn, pclm, sfflag,
-sprflag, sfslot, spslot and gpslot out in the real hot block's order, so the narrow arms meet the
-same neighbours, but at other addresses; the shipped binary's gates (m2_std_gate and m3_gate byte-
-and state-exact, b0 pixel-exact) are the check at its addresses. Nor what the record computes
-BEFORE the slot allocation (which things, their y0, rows and blocks): that is the column check's
-(scratchpad/gp/probes/sprite/ship_check.py), against the oracle.
+The harness lays its hot block out as the build does: `pad 16384` (the block starts an arm5 window,
+16,384 ops, and all of it fits in that one window), then pclm, sfflag, sprflag, sfslot, spslot,
+gpslot and drawn in the real order, drawn followed by a zero cell as the build's `wrej: hex.vec 1`
+follows it (a column past the right edge reads that cell as its wall) -- the real block holds more
+arrays between gpslot and drawn, so the offsets inside the window differ.
 
-R9: every mutant in MUTANTS -- one real edit of the fj text each, of every kind PR #93's review
-rounds found: an offset, a stride, a bias, a field order, a dropped increment, an inserted pointer
-step, an operand width, an index bound, a prearmed write, a narrow-arm read, a register written
-through `r + dw`, the slot offset, the branch between slot A and slot B -- must make it fail.
+What it does NOT cover:
+  * the shipped binary's addresses: only the window the narrow arms need is the build's;
+  * what the record computes BEFORE its slot allocation -- which things it accepts, their y0, light
+    rows and blocks. The column check (scratchpad/gp/probes/sprite/ship_check.py) does not run it
+    either: it feeds the oracle's values to this same code. The shipped binary's gates hold it,
+    against the oracle, on the frames they play (m2_std_gate and m3_gate byte- and state-exact,
+    b0_scenarios pixel-exact).
+
+R9: every mutant in MUTANTS -- one real edit of the fj text, or of the emitter's call, each: every
+kind PR #93's review rounds found, the reviewer's own edits among them as posted -- must make its
+side fail; a mutant that does not assemble is an error, never a catch. And every edit in NEUTRAL
+moves no byte (unreachable filler deleted) and must still pass: the harness does not fail on where
+the code happens to land.
 """
 import re
 import subprocess
@@ -48,55 +60,71 @@ from doomfj.lut_generator import generate_emit_dispatch_table_fj
 ROOT = Path(__file__).resolve().parents[2]
 FJ_NAMES = ("fixed_point.fj", "present.fj", "projection.fj", "frame_render.fj", "plane_render.fj",
             "plane_bands.fj", "stream_render.fj")
+EMITTER = "wall_renderer.py"
 CFG = Config()
 VIEW_W = CFG.VIEW_W
 STRIDE, B_BYTE = wr.SPR_SLOT_STRIDE, wr.SPR_SLOT_B_BYTE
 SLOT_BYTES, BIAS, NSLOTS = wr.SPR_THING_SLOT_BYTES, wr.SPR_THING_Y0_BIAS, wr.SPR_THING_SLOTS
-# the record's parameters as the emitter passes them (wall_renderer._thing_leaf_body)
-REC_PARAMS = {"viewwc": CFG.VIEW_W, "buckets": wr.SPRITE_HEIGHT_BUCKETS, "slotstride": wr.SPR_SLOT_STRIDE,
-              "deg": 1, "spn": 1 if wr.DEG_SPR_NEAR_TZ else 0,
-              "nld": wr._spr_nlow(CFG) if wr.DEG_SPR_NEAR_TZ else 1}
+BUCKETS, NLD = wr.SPRITE_HEIGHT_BUCKETS, wr._spr_nlow(CFG)       # the block strides, hdfl 1 / 0
+ARM5_WINDOW = 16384                                              # ops: 16^5 bits of 2 * W-bit ops
 
-# (slot id, y0, light row, block, first column, last column), recorded in this order: a later
-# record into a column that holds A takes B; a third finds both slots spent
-THINGS = [(1, -200, 3, 0x0102, 0, 1),
-          (15, 0, 30, 0x0201, 15, 17),
-          (16, 150, 31, 0x0003, 62, 66),
-          (255, -32000, 17, 0x01FF, 158, 159),
-          (17, 7, 5, 0x0100, 0, 0),              # column 0 again: fragment B
-          (40, -1, 9, 0x0004, 15, 16),           # columns 15 and 16 again: B
-          (41, 100, 2, 0x0005, 0, 0),            # column 0 a third time: both slots spent
-          (42, 33, 4, 0x0006, 10, 14),           # 12..14 are hidden by a wall
-          (43, 55, 6, 0x0007, 100, 101)]         # a fully transparent block: no fragment
+# (slot id, y0, light row, block base, first column, last column, texture step (16.16), hdfl,
+#  ballow, sp_dw), recorded in this order: a later record into a column that holds A takes B
+#  (if ballow lets it), a third finds both slots spent
+THINGS = [(1, -200, 3, 0x0102, 0, 1, 0, 1, 1, 1),
+          (15, 0, 30, 0x0201, 15, 17, 0, 1, 1, 1),
+          (16, 150, 31, 0x0003, 62, 66, 0, 1, 1, 1),
+          (255, -32000, 17, 0x01FF, 158, 159, 0, 1, 1, 1),
+          (17, 7, 5, 0x0100, 0, 0, 0, 1, 1, 1),                   # column 0 again: B
+          (40, -1, 9, 0x0004, 15, 16, 0, 1, 1, 1),                # columns 15, 16 again: B
+          (41, 100, 2, 0x0005, 0, 0, 0, 1, 1, 1),                 # column 0 a third time: both spent
+          (42, 33, 4, 0x0006, 10, 14, 0, 1, 1, 1),                # 12..14 hidden by a wall
+          (43, 55, 6, 0x0007, 100, 101, 0, 1, 1, 1),              # a fully transparent block
+          (44, 12, 7, 0x0008, 17, 17, 0, 1, 0, 1),                # column 17 holds A, ballow 0: no B
+          (45, -5, 8, 0x0009, -3, 2, 0, 1, 1, 1),                 # a first column below 0
+          (46, 20, 10, 0x0010, 157, 170, 0, 1, 1, 1),             # a last column above 159
+          (47, 60, 11, 0x0020, 30, 37, 0x8000, 1, 1, 3),          # half a texel a column, clamped at 2
+          (48, 61, 12, 0x0030, 40, 45, 0x10000, 0, 1, 9),         # hdfl 0: the nld stride
+          (49, 62, 13, 0x0040, -2, 3, 0x10000, 1, 1, 8)]          # below 0 WITH a step: u starts at 2
 HIDDEN = {12, 13, 14}
 TRANSPARENT = {0x0007}
-NBLOCKS = max(t[3] for t in THINGS) + 1
+
+
+def _columns(x1, x2, istep, hdfl, sp_dw, base):
+    """the record's column walk for one thing, from THINGS alone: (column, block) per column"""
+    dw_max = (sp_dw - 1) & 0xFF
+    frac = ((-x1) * istep) & 0xFFFFFFFF if x1 < 0 else 0
+    for x in range(max(x1, 0), min(x2, VIEW_W - 1) + 1):
+        u = min((frac >> 16) & 0xFF, dw_max)
+        yield x, (u * (BUCKETS if hdfl else NLD) + base) & 0xFFFF
+        frac = (frac + istep) & 0xFFFFFFFF
+
+
+NBLOCKS = 1 + max(b for t in THINGS for _, b in _columns(t[4], t[5], t[6], t[7], t[9], t[3]))
 # each block's header: r0, last_rel (0 = fully transparent), the rest zero
 HEADER = {b: (5 + b % 7, 0 if b in TRANSPARENT else 9 + b % 5) for b in range(NBLOCKS)}
 # the read side's columns: (seed column, steps) -- empty, A, A+B, across the index bounds
-LOADS = [(0, 0), (1, 0), (2, 0), (10, 0), (12, 0), (15, 0), (16, 0), (17, 0), (62, 0), (63, 1),
-         (64, 0), (158, 0), (159, 0), (100, 0), (13, 3)]
+LOADS = [(0, 0), (1, 0), (2, 0), (3, 0), (10, 0), (12, 0), (15, 0), (16, 0), (17, 0), (31, 0),
+         (36, 1), (44, 0), (62, 0), (63, 1), (64, 0), (157, 0), (158, 0), (159, 0), (100, 0), (13, 3)]
 DERIVE_BLOCK = 0x0102
 
 
 def expected_memory():
     """sprflag, spslot and gpslot after THINGS are recorded -- the constants' layout"""
     sprflag, spslot, gpslot = [0] * VIEW_W, [0] * (VIEW_W * STRIDE), [0] * (NSLOTS * SLOT_BYTES)
-    for sid, y0, light, blk, x1, x2 in THINGS:
+    for sid, y0, light, base, x1, x2, istep, hdfl, ballow, sp_dw in THINGS:
         yb = (y0 + BIAS) & 0xFFFF
         fields = {"y0 lo": yb & 0xFF, "y0 hi": yb >> 8, "light row": light}
         for i, f in enumerate(wr.SPR_THING_SLOT_FIELDS):
             gpslot[sid * SLOT_BYTES + i] = fields[f]
-        if blk in TRANSPARENT:
-            continue
-        frag = {"slot id": sid, "block lo": blk & 0xFF, "block hi": blk >> 8}
-        for x in range(x1, x2 + 1):
-            if x in HIDDEN or sprflag[x] == 2:
+        for x, blk in _columns(x1, x2, istep, hdfl, sp_dw, base):
+            n = sprflag[x]
+            if x in HIDDEN or n == 2 or (n == 1 and not ballow) or HEADER[blk][1] == 0:
                 continue
-            base = x * STRIDE + (0 if sprflag[x] == 0 else B_BYTE)
+            frag = {"slot id": sid, "block lo": blk & 0xFF, "block hi": blk >> 8}
             for i, f in enumerate(wr.SPR_FRAG_FIELDS):
-                spslot[base + i] = frag[f]
-            sprflag[x] += 1
+                spslot[x * STRIDE + (B_BYTE if n else 0) + i] = frag[f]
+            sprflag[x] = n + 1
     return sprflag, spslot, gpslot
 
 
@@ -118,6 +146,25 @@ def expected_reads():
     return out
 
 
+def block_arrays(mem):
+    """the hot block's arrays in the build's order, with the contents `mem` gives sprflag, spslot and
+    gpslot: [(label, cells)]"""
+    sprflag, spslot, gpslot = mem
+    return [("pclm", [0] * (VIEW_W * CFG.PID_BYTES)), ("sfflag", [0] * VIEW_W), ("sprflag", list(sprflag)),
+            ("sfslot", [0] * (VIEW_W * 16 ** CFG.SLOT_SHIFT)), ("spslot", list(spslot)),
+            ("gpslot", list(gpslot)), ("drawn", [1 if x in HIDDEN else 0 for x in range(VIEW_W)]),
+            ("lay_wrej", [0])]
+
+
+def expected_block():
+    """every byte of the hot block after THINGS are recorded, and where each one is"""
+    where, values = [], []
+    for label, cells in block_arrays(expected_memory()):
+        where += [(label, i) for i in range(len(cells))]
+        values += cells
+    return where, values
+
+
 def _code(text):
     return "\n".join(line.split("//")[0] for line in text.splitlines())
 
@@ -127,17 +174,37 @@ GLOBALS = ({d.split(":")[0].strip() for d in wr.hoisted_scratch_decls(CFG)}
               "ballow", "hdfl"})
 
 
-def transplant(frame_text):
+def record_args(frame_text, emitter_text):
+    """thing_record_body's parameters as the SHIPPED build binds them: the def's own parameter list
+    (frame_render.fj) zipped with the emitter's own argument list -- wall_renderer's
+    `frame.thing_record_body ...` f-string, evaluated with the emitter's module constants and the
+    values its locals have for the game tier (deg_flag read from the same source)"""
+    m = re.search(r"^    def thing_record_body (.*?)^\s*@", frame_text, re.M | re.S)
+    params = [p.strip() for p in m.group(1).replace("\\", " ").split(",")]
+    a = emitter_text.index('f"frame.thing_record_body ')
+    call_src = emitter_text[a:emitter_text.index("]", a)]
+    deg = re.findall(r"^\s*deg_flag = (\d+)", emitter_text, re.M)
+    assert len(deg) == 1, "the emitter's deg_flag: %d definitions" % len(deg)
+    ns = dict(vars(wr), cfg=CFG, proj=CFG.PROJECTION << 16, ablate=frozenset(), deg_flag=int(deg[0]),
+              mt=1, _MT_NTH=1, _MT_NLTI=1)
+    call = eval("(" + call_src + ")", ns)                       # the emitter's own text, nothing else
+    args = [x.strip() for x in call[len("frame.thing_record_body "):].split(",")]
+    assert len(args) == len(params), (len(args), len(params))
+    return dict(zip(params, args))
+
+
+def transplant(frame_text, emitter_text):
     """the record's code from the slot allocation to the end of its column loop, VERBATIM, as a
-    harness macro -- and the call that gives it the emitter's parameter values"""
+    harness macro -- and the call that binds its parameters as the shipped build does"""
     body = frame_text[frame_text.index("    def thing_record_body"):]
     code = body[body.index("        hex.inc 2, gps_nslot"):body.index("      set_tstop:")]
     labels = re.findall(r"^\s*(\w+):\s*(?://.*)?$", code, re.M)
     words = set(re.findall(r"\b[a-z_][a-z0-9_]*\b", _code(code)))
-    params = [p for p in REC_PARAMS if p in words]
+    bound = record_args(frame_text, emitter_text)
+    params = [p for p in bound if p in words]
     macro = ("ns frame {\n    def lay_rec %s @ %s < %s {\n%s      ret:\n    }\n}\n"
              % (", ".join(params), ", ".join(labels + ["ret"]), ", ".join(sorted(words & GLOBALS)), code))
-    return macro, "frame.lay_rec " + ", ".join(str(REC_PARAMS[p]) for p in params)
+    return macro, "frame.lay_rec " + ", ".join(bound[p] for p in params)
 
 
 def _cells(values):
@@ -145,16 +212,13 @@ def _cells(values):
 
 
 def hot_block(mem):
-    """the real hot block's arrays in its order (wall_renderer: pclm, sfflag, sprflag, sfslot,
-    spslot, gpslot), `drawn` just before them as the column check lays it"""
-    sprflag, spslot, gpslot = mem
-    return (["drawn:"] + _cells(1 if x in HIDDEN else 0 for x in range(VIEW_W))
-            + ["pclm:"] + _cells([0] * (VIEW_W * CFG.PID_BYTES))
-            + ["sfflag:"] + _cells([0] * VIEW_W)
-            + ["sprflag:"] + _cells(sprflag)
-            + ["sfslot:"] + _cells([0] * (VIEW_W * 16 ** CFG.SLOT_SHIFT))
-            + ["spslot:"] + _cells(spslot)
-            + ["gpslot:"] + _cells(gpslot))
+    """laid out as the build lays its hot block (wall_renderer: `pad 16384`, then pclm, sfflag,
+    sprflag, sfslot, spslot, gpslot ... drawn, wrej)"""
+    block = []
+    for label, cells in block_arrays(mem):
+        block += [label + ":"] + _cells(cells)
+    assert sum(not c.endswith(":") for c in block) <= ARM5_WINDOW, "the block outgrew one arm5 window"
+    return ["pad %d" % ARM5_WINDOW] + block
 
 
 def bank():
@@ -187,28 +251,26 @@ REGS = ["lay_p: hex.vec w/4", "lay_n: hex.vec 4", "lay_v: hex.vec 2", "lay_x: he
         "ld_sblkb: hex.vec 4", "dv_s: hex.vec 2", "dv_sblk: hex.vec 4", "dv_ybase: hex.vec 4",
         "dv_top: hex.vec 4", "dv_sy1: hex.vec 4", "dv_sy2: hex.vec 4", "dv_smidx: hex.vec 4",
         "dv_ptr: hex.vec w/4"]
+HEAD = ["stl.startup_and_init_all", generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)]
 
 
-def write_program(frame_text):
-    macro, call = transplant(frame_text)
-    main = ["stl.startup_and_init_all", generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2),
-            "    hex.set 2, sp_dw, 1", "    hex.set 1, ballow, 1", "    hex.set 1, hdfl, 1"]
-    for sid, y0, light, blk, x1, x2 in THINGS:
+def write_program(frame_text, emitter_text):
+    macro, call = transplant(frame_text, emitter_text)
+    main = list(HEAD)
+    for sid, y0, light, base, x1, x2, istep, hdfl, ballow, sp_dw in THINGS:
         main += ["    hex.set 2, gps_nslot, %d" % (sid - 1),       # the record takes the next slot id
-                 "    hex.set 8, trb_y0, %d" % (y0 & 0xFFFFFFFF),
-                 "    hex.set 2, trb_shade_row, %d" % light,
-                 "    hex.set 8, trb_tx1, %d" % x1, "    hex.set 8, trb_tx2, %d" % x2,
-                 "    hex.set 8, trb_tistep, 0",
-                 "    hex.set w/4, trb_blk_const, %d" % blk,
-                 "    " + call]
-    main += ["    lay_dump sprflag, %d" % VIEW_W, "    lay_dump spslot, %d" % (VIEW_W * STRIDE),
-             "    lay_dump gpslot, %d" % (NSLOTS * SLOT_BYTES), "    stl.loop"]
+                 "    hex.set 8, trb_y0, %d" % (y0 & 0xFFFFFFFF), "    hex.set 2, trb_shade_row, %d" % light,
+                 "    hex.set 8, trb_tx1, %d" % (x1 & 0xFFFFFFFF), "    hex.set 8, trb_tx2, %d" % (x2 & 0xFFFFFFFF),
+                 "    hex.set 8, trb_tistep, %d" % istep, "    hex.set w/4, trb_blk_const, %d" % base,
+                 "    hex.set 1, hdfl, %d" % hdfl, "    hex.set 1, ballow, %d" % ballow,
+                 "    hex.set 2, sp_dw, %d" % sp_dw, "    " + call]
+    main += ["    lay_dump pclm, %d" % len(expected_block()[1]), "    stl.loop"]
     zero = ([0] * VIEW_W, [0] * (VIEW_W * STRIDE), [0] * (NSLOTS * SLOT_BYTES))
     return "\n".join([macro, DUMP] + main + REGS + [wr.hoisted_scratch_fj(CFG)] + hot_block(zero) + bank()) + "\n"
 
 
 def read_program():
-    main = ["stl.startup_and_init_all", generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)]
+    main = list(HEAD)
     for x0, k in LOADS:
         main += ["    hex.set 8, lay_x, %d" % x0, "    frame.lines_spr_seed lay_x"]
         main += ["    frame.lines_spr_step"] * k
@@ -238,6 +300,10 @@ print(io.get_output(allow_incomplete_output=True).hex())
 """
 
 
+def source(name):
+    return (ROOT / ("src/doomfj" if name == EMITTER else "src/fj") / name).read_text(encoding="utf-8")
+
+
 def run(tmp, name, program, texts=None, timeout=600):
     """assemble `program` against the fj sources -- `texts` replaces some ({file: text}) -- and run
     it in a subprocess with a timeout (fj.run has no op limit, and a broken layout may never end):
@@ -246,7 +312,7 @@ def run(tmp, name, program, texts=None, timeout=600):
     files = []
     for f in FJ_NAMES:
         p = tmp / f
-        p.write_text((texts or {}).get(f) or (ROOT / "src/fj" / f).read_text(encoding="utf-8"), encoding="utf-8")
+        p.write_text((texts or {}).get(f) or source(f), encoding="utf-8")
         files.append(p.resolve())
     prog = tmp / (name + ".fj")
     prog.write_text(program, encoding="utf-8")
@@ -261,123 +327,142 @@ def run(tmp, name, program, texts=None, timeout=600):
     return list(bytes.fromhex(data.strip())) if "loop" in cause.lower() else None
 
 
-def fj_text(name):
-    return (ROOT / "src/fj" / name).read_text(encoding="utf-8")
-
-
-def flat(mem):
-    return [v for part in mem for v in part]
+def run_side(tmp, side, texts=None, timeout=600):
+    """(got, want) for one side, the fj and the emitter's call as `texts` has them"""
+    texts = texts or {}
+    if side == "write":
+        prog = write_program(texts.get("frame_render.fj") or source("frame_render.fj"),
+                             texts.get(EMITTER) or source(EMITTER))
+        return run(tmp, "w", prog, texts, timeout), expected_block()[1]
+    return run(tmp, "r", read_program(), texts, timeout), expected_reads()
 
 
 def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
-    got = run(tmp_path, "write", write_program(fj_text("frame_render.fj")))
-    want = flat(expected_memory())
+    got, want = run_side(tmp_path, "write")
     assert got is not None, "the record's program did not end on its loop"
-    names = ["sprflag"] * VIEW_W + ["spslot"] * (VIEW_W * STRIDE) + ["gpslot"] * (NSLOTS * SLOT_BYTES)
-    offs = list(range(VIEW_W)) + list(range(VIEW_W * STRIDE)) + list(range(NSLOTS * SLOT_BYTES))
-    bad = [(names[i], offs[i], g, w) for i, (g, w) in enumerate(zip(got, want)) if g != w]
+    where = expected_block()[0]
+    bad = [(where[i], g, w) for i, (g, w) in enumerate(zip(got, want)) if g != w]
     assert len(got) == len(want) and not bad, (len(got), len(want), bad[:10])
-    # not vacuous: every kind of record happened
-    sprflag = expected_memory()[0]
-    assert sprflag[0] == 2 and sprflag[15] == 2 and sprflag[64] == 1 and sprflag[159] == 1
+    # not vacuous: every kind of record happened (the expectation is what `got` just equalled)
+    sprflag, spslot, _ = expected_memory()
+    assert sprflag[0] == 2 and sprflag[15] == 2 and sprflag[64] == 1 and sprflag[159] == 2
+    assert sprflag[17] == 1, "ballow 0 must leave column 17 at A only"
     assert all(sprflag[x] == 0 for x in HIDDEN | {100, 101})
+    # half a texel a column: u moves every second column, so the block does at 32, 34, 36 (clamped)
+    assert spslot[32 * STRIDE + 1] != spslot[30 * STRIDE + 1], "the texture step moved no block"
+    assert spslot[44 * STRIDE + 1] != spslot[40 * STRIDE + 1], "the nld stride moved no block"
 
 
 def test_the_load_and_the_derive_read_every_field_where_the_constants_say(tmp_path):
-    got = run(tmp_path, "read", read_program())
-    want = expected_reads()
+    got, want = run_side(tmp_path, "read")
     assert got is not None, "the read side's program did not end on its loop"
     assert got == want, [(i, g, w) for i, (g, w) in enumerate(zip(got, want)) if g != w][:10]
 
 
-# (label, side, file, old, new): one real edit of the fj text each; `side` is the program it moves
+# (label, side, file, old, new): one real edit each -- of the fj text, or of the emitter's call
 _W = "\n        "
+FR, SR = "frame_render.fj", "stream_render.fj"
 MUTANTS = [
-    ("slot B's byte", "write", "frame_render.fj",
-     "hex.set w/4, trb_slot_ofs, 8", "hex.set w/4, trb_slot_ofs, 9"),
-    ("the record's bias", "write", "frame_render.fj",
-     "hex.add_constant 8, gps_yb8, 32768", "hex.add_constant 8, gps_yb8, 32767"),
-    ("the record's fragment order", "write", "frame_render.fj",
+    ("slot B's byte", "write", FR, "hex.set w/4, trb_slot_ofs, 8", "hex.set w/4, trb_slot_ofs, 9"),
+    ("the record's bias", "write", FR, "hex.add_constant 8, gps_yb8, 32768", "hex.add_constant 8, gps_yb8, 32767"),
+    ("the record's fragment order", "write", FR,
      "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W + "frame.write_byte5 trb_tbl_p, trb_blk + 2*dw",
      "frame.write_byte_and_inc5 trb_tbl_p, trb_blk + 2*dw" + _W + "frame.write_byte5 trb_tbl_p, trb_blk"),
-    ("the record's fragment: an increment dropped", "write", "frame_render.fj",
+    ("the record's fragment: an increment dropped", "write", FR,
      "hex.write_byte_and_inc trb_tbl_p, gps_s_rec", "hex.write_byte trb_tbl_p, gps_s_rec"),
-    ("the record's fragment: a step inserted", "write", "frame_render.fj",
+    ("the record's fragment: a step inserted", "write", FR,
      "frame.write_byte5 trb_tbl_p, trb_blk + 2*dw", "hex.ptr_inc trb_tbl_p" + _W + "frame.write_byte5 trb_tbl_p, trb_blk + 2*dw"),
-    ("the record's slot: an increment dropped", "write", "frame_render.fj",
+    ("the record's slot: an increment dropped", "write", FR,
      "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "hex.write_byte gps_ptr, gps_yb8 + 2*dw"),
-    ("the record's slot: a step inserted", "write", "frame_render.fj",
+    ("the record's slot: a step inserted", "write", FR,
      "hex.write_byte gps_ptr, trb_shade_row", "hex.ptr_inc gps_ptr" + _W + "hex.write_byte gps_ptr, trb_shade_row"),
-    ("the record's slot: a prearmed write", "write", "frame_render.fj",
+    ("the record's slot: a prearmed write", "write", FR,
      "hex.write_byte_and_inc gps_ptr, gps_yb8 + 2*dw", "frame.write_byte_and_inc_prearmed gps_ptr, gps_yb8 + 2*dw"),
-    ("the slot offset never added", "write", "frame_render.fj",
+    ("the slot offset never added", "write", FR,
      "hex.add w/4, trb_tab_idx, trb_slot_ofs", "hex.zero w/4, trb_slot_ofs"),
-    ("the slot offset bumped", "write", "frame_render.fj",
+    ("the slot offset bumped", "write", FR,
      "hex.add w/4, trb_tab_idx, trb_slot_ofs", "hex.inc 1, trb_slot_ofs" + _W + "hex.add w/4, trb_tab_idx, trb_slot_ofs"),
-    ("slot A falls into slot B", "write", "frame_render.fj",
-     "hex.set 2, trb_slot_flag, 1" + _W + ";slot_done", "hex.set 2, trb_slot_flag, 1"),
-    ("the column index one nibble wide", "write", "frame_render.fj",
-     "hex.mov 2, trb_tab_idx, trb_col_x", "hex.mov 1, trb_tab_idx, trb_col_x"),
-    ("the column index shifted back", "write", "frame_render.fj",
+    ("slot A falls into slot B", "write", FR, "hex.set 2, trb_slot_flag, 1" + _W + ";slot_done", "hex.set 2, trb_slot_flag, 1"),
+    ("the column index one nibble wide", "write", FR, "hex.mov 2, trb_tab_idx, trb_col_x", "hex.mov 1, trb_tab_idx, trb_col_x"),
+    ("the column index shifted back", "write", FR,
      "hex.add w/4, trb_tab_idx, trb_slot_ofs", "hex.shr_hex w/4, 1, trb_tab_idx" + _W + "hex.add w/4, trb_tab_idx, trb_slot_ofs"),
-    ("the record's column stride", "write", "frame_render.fj",
+    ("the record's column stride", "write", FR,
      "rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx", "rep(slotstride/8, k) hex.shl_hex w/4, 1, trb_tab_idx"),
-    ("the record's index bound", "write", "frame_render.fj",
+    ("the record's index bound", "write", FR,
      "frame.ptr_index6 trb_tbl_p, trb_tbl_b, trb_tab_idx" + _W + "// P2-5", "frame.ptr_index4 trb_tbl_p, trb_tbl_b, trb_tab_idx" + _W + "// P2-5"),
-    ("the slot id one nibble wide", "write", "frame_render.fj",
-     "hex.mov 2, gps_sidx, gps_s_rec", "hex.mov 1, gps_sidx, gps_s_rec"),
-    ("the slot index written through r + dw", "write", "frame_render.fj",
+    ("the slot id one nibble wide", "write", FR, "hex.mov 2, gps_sidx, gps_s_rec", "hex.mov 1, gps_sidx, gps_s_rec"),
+    ("the slot index written through r + dw", "write", FR,
      "hex.shl_bit w/4, gps_sidx" + _W + "hex.shl_bit w/4, gps_sidx", "hex.shl_bit w/4, gps_sidx" + _W + "hex.inc 1, gps_sidx + dw" + _W + "hex.shl_bit w/4, gps_sidx"),
+    ("the nld stride one block long", "write", FR,
+     "rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld", "rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld + 1"),
     # the review's round-3 edits, exactly as posted
-    ("r3: the record's first slot write prearmed", "write", "frame_render.fj",
+    ("r3: the record's first slot write prearmed", "write", FR,
      "hex.write_byte_and_inc gps_ptr, gps_yb8" + _W, "frame.write_byte_and_inc_prearmed gps_ptr, gps_yb8" + _W),
-    ("r3: the slot index bumped through r + dw", "write", "frame_render.fj",
+    ("r3: the slot index bumped through r + dw", "write", FR,
      "hex.set w/4, gps_sbase, gpslot" + _W + "frame.ptr_index gps_ptr", "hex.inc 1, gps_sidx + dw" + _W + "hex.set w/4, gps_sbase, gpslot" + _W + "frame.ptr_index gps_ptr"),
-    ("r3: a one-nibble shift after the slot offset", "write", "frame_render.fj",
+    ("r3: a one-nibble shift after the slot offset", "write", FR,
      "hex.add w/4, trb_tab_idx, trb_slot_ofs", "hex.add w/4, trb_tab_idx, trb_slot_ofs" + _W + "hex.shr_hex 1, 1, trb_tab_idx"),
-    ("r3: slot A's branch taken to slot B", "write", "frame_render.fj",
-     "hex.if0 2, trb_sprflag_v, slot_a", "hex.if0 2, trb_sprflag_v, slot_b"),
-    ("the load's skip to B", "read", "frame_render.fj",
-     "hex.ptr_add spslot_p, 5", "hex.ptr_add spslot_p, 4"),
-    ("the load: an increment dropped", "read", "frame_render.fj",
+    ("r3: slot A's branch taken to slot B", "write", FR, "hex.if0 2, trb_sprflag_v, slot_a", "hex.if0 2, trb_sprflag_v, slot_b"),
+    ("r3: the record's column shift two nibbles wide", "write", FR,
+     "rep(slotstride/16, k) hex.shl_hex w/4, 1, trb_tab_idx", "rep(slotstride/16, k) hex.shl_hex 2, 1, trb_tab_idx"),
+    ("r3: the record's block-lo write prearmed", "write", FR,
+     "frame.write_byte_and_inc5 trb_tbl_p, trb_blk" + _W, "frame.write_byte_and_inc_prearmed trb_tbl_p, trb_blk" + _W),
+    ("r3: the seed's column shift two nibbles wide", "read", FR, "hex.shl_hex w/4, 1, sidx ", "hex.shl_hex 2, 1, sidx "),
+    # the review's round-4 edits
+    ("r4: B allowed whatever ballow says", "write", FR,
+     "rep(deg, k) hex.if0 1, ballow, col_next", "rep(deg, k) hex.if0 1, ballow, slot_a"),
+    ("r4: the right-edge clamp never fires", "write", FR,
+     "hex.scmp 8, trb_tx2, trb_cbound, x2_done, x2_done, x2_clamp", "hex.scmp 8, trb_tx2, trb_cbound, x2_done, x2_done, x2_done"),
+    ("r4: the clamp one column wide", "write", FR, "        hex.dec 8, trb_cbound" + "\n", ""),
+    ("r4: the def's buckets and slotstride swapped", "write", FR,
+     "viewwc, viewh, ds, buckets, slotstride, ttwice,", "viewwc, viewh, ds, slotstride, buckets, ttwice,"),
+    ("r4: the emitter passes twice the slot stride", "write", EMITTER,
+     "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, ", "{SPRITE_HEIGHT_BUCKETS}, {2 * SPR_SLOT_STRIDE}, "),
+    # the read side
+    ("the load's skip to B", "read", FR, "hex.ptr_add spslot_p, 5", "hex.ptr_add spslot_p, 4"),
+    ("the load: an increment dropped", "read", FR,
      "frame.read0_byte_and_inc sblk + 2*dw, spslot_p", "frame.read_byte5 sblk + 2*dw, spslot_p"),
-    ("the load: a step inserted", "read", "frame_render.fj",
+    ("the load: a step inserted", "read", FR,
      "frame.read0_byte_and_inc sblkb, spslot_p", "hex.ptr_inc spslot_p" + _W + "frame.read0_byte_and_inc sblkb, spslot_p"),
-    ("the load: a narrow-arm read", "read", "frame_render.fj",
-     "frame.read0_byte_and_inc s, spslot_p", "frame.read3_and_inc s, spslot_p"),
-    ("the load's field order", "read", "frame_render.fj",
+    ("the load: a narrow-arm read", "read", FR, "frame.read0_byte_and_inc s, spslot_p", "frame.read3_and_inc s, spslot_p"),
+    ("the load's field order", "read", FR,
      "frame.read0_byte_and_inc sblkb, spslot_p" + _W + "frame.read0_byte_and_inc sblkb + 2*dw, spslot_p",
      "frame.read0_byte_and_inc sblkb + 2*dw, spslot_p" + _W + "frame.read0_byte_and_inc sblkb, spslot_p"),
-    ("the seed's column stride", "read", "frame_render.fj",
-     "hex.shl_hex w/4, 1, sidx ", "hex.shl_hex w/4, 2, sidx "),
-    ("the seed's index bound", "read", "frame_render.fj",
-     "frame.ptr_index5 p2_sspp, bteam, sidx", "frame.ptr_index4 p2_sspp, bteam, sidx"),
-    ("the seed's column one nibble wide", "read", "frame_render.fj",
+    ("the seed's column stride", "read", FR, "hex.shl_hex w/4, 1, sidx ", "hex.shl_hex w/4, 2, sidx "),
+    ("the seed's index bound", "read", FR, "frame.ptr_index5 p2_sspp, bteam, sidx", "frame.ptr_index4 p2_sspp, bteam, sidx"),
+    ("the seed's column one nibble wide", "read", FR,
      "hex.mov 2, sidx, x1" + _W + "hex.shl_hex w/4, 1, sidx ", "hex.mov 1, sidx, x1" + _W + "hex.shl_hex w/4, 1, sidx "),
-    ("the step's column stride", "read", "frame_render.fj",
-     "hex.ptr_add p2_sspp, 16", "hex.ptr_add p2_sspp, 8"),
-    ("the derive's bias", "read", "stream_render.fj",
-     "hex.sub_constant 4, gps_y0, 32768", "hex.sub_constant 4, gps_y0, 16384"),
-    ("the derive: an increment dropped", "read", "stream_render.fj",
-     "hex.read_byte_and_inc gps_y0 + 2*dw, ptr", "hex.read_byte gps_y0 + 2*dw, ptr"),
-    ("the derive: a step inserted", "read", "stream_render.fj",
-     "hex.read_byte gps_lr, ptr", "hex.ptr_inc ptr" + _W + "hex.read_byte gps_lr, ptr"),
-    ("the derive's field order", "read", "stream_render.fj",
+    ("the step's column stride", "read", FR, "hex.ptr_add p2_sspp, 16", "hex.ptr_add p2_sspp, 8"),
+    ("the derive's bias", "read", SR, "hex.sub_constant 4, gps_y0, 32768", "hex.sub_constant 4, gps_y0, 16384"),
+    ("the derive: an increment dropped", "read", SR, "hex.read_byte_and_inc gps_y0 + 2*dw, ptr", "hex.read_byte gps_y0 + 2*dw, ptr"),
+    ("the derive: a step inserted", "read", SR, "hex.read_byte gps_lr, ptr", "hex.ptr_inc ptr" + _W + "hex.read_byte gps_lr, ptr"),
+    ("the derive's field order", "read", SR,
      "hex.read_byte_and_inc gps_y0, ptr" + _W + "hex.read_byte_and_inc gps_y0 + 2*dw, ptr",
      "hex.read_byte_and_inc gps_y0 + 2*dw, ptr" + _W + "hex.read_byte_and_inc gps_y0, ptr"),
-    ("the derive's slot id one nibble wide", "read", "stream_render.fj",
-     "hex.mov 2, gps_sidx, s", "hex.mov 1, gps_sidx, s"),
+    ("the derive's slot id one nibble wide", "read", SR, "hex.mov 2, gps_sidx, s", "hex.mov 1, gps_sidx, s"),
 ]
+# edits that move NO byte -- unreachable filler, each a layout freeze -- must still PASS: the harness
+# anchors its hot block, so its verdict does not depend on where the code lands (review round 4)
+NEUTRAL = [
+    ("the record's layout freeze deleted", "write", FR, "        rep(703, i) stl.fj 0, 0\n", ""),
+    ("the load's layout freeze deleted", "read", FR, "        rep(980, i) stl.fj 0, 0\n", ""),
+]
+
+
+def _mutate(name, old, new):
+    text = source(name)
+    assert text.count(old) == 1, "the edit's site is not in %s exactly once: %r" % (name, old)
+    return {name: text.replace(old, new)}
 
 
 @pytest.mark.parametrize("label, side, name, old, new", MUTANTS, ids=[m[0] for m in MUTANTS])
 def test_a_mutated_layout_fails(tmp_path, label, side, name, old, new):
-    """R9: each mutant edits the real fj text once -- and the side it moves must no longer hold"""
-    text = fj_text(name)
-    assert text.count(old) == 1, "the mutant's site is not in %s: %r" % (name, old)
-    texts = {name: text.replace(old, new)}
-    if side == "write":
-        got, want = run(tmp_path, "w", write_program(texts.get("frame_render.fj", fj_text("frame_render.fj"))), texts, 120), flat(expected_memory())
-    else:
-        got, want = run(tmp_path, "r", read_program(), texts, 120), expected_reads()
+    """R9: each mutant edits the real text once -- and the side it moves must no longer hold"""
+    got, want = run_side(tmp_path, side, _mutate(name, old, new), timeout=120)
     assert got != want, "%s: the layout still holds -- the test has no teeth here" % label
+
+
+@pytest.mark.parametrize("label, side, name, old, new", NEUTRAL, ids=[m[0] for m in NEUTRAL])
+def test_an_edit_that_moves_no_byte_still_passes(tmp_path, label, side, name, old, new):
+    got, want = run_side(tmp_path, side, _mutate(name, old, new))
+    assert got == want, "%s: the harness failed an edit that moves no byte" % label

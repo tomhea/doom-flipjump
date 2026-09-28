@@ -521,17 +521,19 @@ Section 5's changes landed in `src/fj/frame_render.fj`, `src/fj/stream_render.fj
   `tests/host/test_sprite_column.py` PINS the literals in the fj text -- each offset, the skip,
   both biases, each side's field order -- to the constants, with a mutant of each; and
   `tests/fj/test_slot_layouts_fj.py` RUNS the fj on both sides. The record's code from its slot
-  allocation to the end of its column loop, transplanted verbatim with the emitter's parameters,
-  records things chosen to span the layouts (columns across the 16, 64 and 1,024-index bounds up
-  to 159, slot ids 1..255, fragments A and B, both slots spent, hidden columns, a transparent
-  block, two-byte block indices, y0 either side of zero), and EVERY byte of sprflag, spslot and
-  gpslot must be the constants' layout of what was recorded; from memory laid out by the
-  constants, the real seed, step, load and derive must give each field. 35 mutants -- every kind
-  the review rounds found, the reviewer's own edits among them (a dropped increment, an inserted
-  step, an operand width, an index bound, a prearmed write, a narrow-arm read, a register bumped
-  through `r + dw`, the slot offset, the branch between slot A and slot B) -- each make it fail
-  (`p14_cr3_layouts_fj.log`). It does not cover the shipped binary's addresses (the harness keeps
-  the hot block's order, not its addresses): the gates do.
+  allocation to the end of its column loop, transplanted verbatim, gets its parameters as the build
+  binds them (the def's own parameter list zipped with the emitter's own argument list, evaluated
+  from wall_renderer's source), and records things chosen to reach every path that decides where a
+  byte lands -- columns across the 16, 64 and 1,024-index bounds, both edge clamps, slot ids 1..255,
+  fragments A and B, B refused by `ballow`, both slots spent, hidden columns, a transparent block,
+  two-byte block indices, a texture step, both block strides, y0 either side of zero. EVERY byte of
+  the hot block (pclm through the cell after drawn, 6,785) must then be the constants' layout; from
+  memory laid out by the constants, the real seed, step, load and derive must give each field. The
+  harness anchors its hot block as the build does (`pad 16384`: one arm5 window) in the real order.
+  44 mutants -- every kind the review rounds found, the reviewer's own edits among them -- each make
+  it fail, and two edits that move no byte (unreachable filler deleted) must still pass
+  (`p14_cr4_layouts_fj.log`). Not covered: the shipped binary's addresses, and what the record
+  computes before its slot allocation -- the gates hold both, against the oracle.
 - **The latent wrong-light ditto** of section 6 is gone with the four-field compare: the ladder
   compares (slot, block).
 - **The column check** is `scratchpad/gp/probes/sprite/ship_check.py`: the SHIPPED record (the

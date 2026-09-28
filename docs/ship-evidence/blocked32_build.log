@@ -1,0 +1,100 @@
+# flipjump: the installed editable 1.5.1 at C:/Users/tomhe/Documents/flipjump-151, bc8ee63; doom m7-skill-menu 7cdfb97
+$ python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/blocked32.labels.tsv.gz -- game --out build/doom_e1m1_blocked32.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p14.json.gz
+label spy armed -> scratchpad/12m/atlas/blocked32.labels.tsv.gz
+build: build_blocked.py game --out build/doom_e1m1_blocked32.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p14.json.gz
+blocking: pool base 0x60000000, span 0x9fffffe0
+pin-heat: scratchpad/12m/heat_blocked27_p14.json.gz (sha256 334abffbf591baa8...): 20 hot groups, 35,894 hot sites
+macros allowed: hex.double_exact_xor, hex.exact_xor, hex.quadrupled_exact_xor, hex.shifts.shl_bit_once, hex.shifts.shr_bit_once, hex.sparse_double_exact_xor, hex.sparse_exact_xor, hex.triple_exact_xor, sim.jump16
+pid bake: 222 pairs baked, 255 addressable at PID_NIBBLES=2
+  counts cache is for a DIFFERENT program -- recounting
+labels -> scratchpad/12m/atlas/blocked32.labels.tsv.gz  (1,844,560 labels)
+  alias: 3,299 groups merged into 20,261 (was 23,560)
+  counts cached to scratchpad/12m/_counts_game.json.gz
+  width waste: 8,999,840 ops allocated = 6,402,987 real + 461,509 width-pad + 2,135,344 count-pad
+  MIXED groups (widest > 2x most-common): 316 groups, 2,556 tables; splitting them by width would free up to 122,688 ops of pool
+             4,512 ops  ((gps_ptr + 64) + 32)                        n=94      common=16    widest=48
+             2,352 ops  ((f13:l7458:sim.thing_pass(3)---f10:l642:sim n=49      common=16    widest=48
+             2,016 ops  ((tsf_sfslot_p + 64) + 32)                   n=42      common=16    widest=48
+             2,016 ops  ((trb_tbl_p + 64) + 32)                      n=42      common=16    widest=48
+             1,824 ops  ((trb_tbl_p + 256) + 32)                     n=38      common=16    widest=48
+  counting pass: 23,560 groups, 348,682 tables, 2369s
+  PREFLIGHT: demand 39,592,800 words, capacity 83,886,079 words (47.2% used); 20,261 of 20,261 groups placed
+  pin-heat: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 0, 'hot_sites_width_changed': 0}
+  pin-exclude: 7,992 words -- the BYTE cells (m1.zerobyte jumps through them) and the pointer-read cells (a raw read takes base + value); the other nibble state cells ARE pinned
+  pin-heat: 20 of 20 hot words pinned
+labels -> scratchpad/12m/atlas/blocked32.labels.tsv.gz  (1,844,560 labels)
+  reset: stripping the block base from 18,085 pinned words before the LUT test
+  pin-heat: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 0, 'hot_sites_width_changed': 0}
+  pin-heat: 20 of 20 hot words pinned
+labels -> scratchpad/12m/atlas/blocked32.labels.tsv.gz  (1,852,493 labels)
+{
+  "map": "E1M1",
+  "downscale": 2,
+  "storage_mode": "flat",
+  "span_words": 90671968,
+  "flat_limit": 134217728,
+  "headroom": 1.48,
+  "fjm_bytes": 26649768,
+  "assemble_seconds": 7905.098,
+  "tier": "lines/W1R/FT1+plane_near",
+  "features": {
+    "wall_noise": true,
+    "sky": true,
+    "steps": true,
+    "things": true,
+    "stack_steps": true,
+    "bbox_cull": true,
+    "deg": true,
+    "player_sim": true,
+    "collide": true,
+    "moving_things": true,
+    "state_wire": "bin",
+    "self_reset": true,
+    "standalone": true,
+    "doors": true,
+    "menu": true
+  },
+  "self_reset": {
+    "nibble_cells": 2526,
+    "byte_cells": 320,
+    "persisted_labels": [
+      "viewx",
+      "viewy",
+      "viewangle",
+      "kb_f",
+      "kb_b",
+      "kb_l",
+      "kb_r",
+      "kb_u",
+      "mode",
+      "menu_scr",
+      "menu_sel",
+      "dstate",
+      "ddir",
+      "dsub",
+      "dwait",
+      "sshead",
+      "thss_rt",
+      "thpos_rt"
+    ],
+    "restore_set": "C:\\Users\\tomhe\\Documents\\doom-m7e\\src\\doomfj\\data\\m5_restore_set.json.gz",
+    "labels_moved_in_set": 0,
+    "values_changed_in_set": 0,
+    "baked_cells_value_checked": 11602,
+    "view_w": 160,
+    "subsectors": 682
+  }
+}
+
+assemblies: 2; blocked per assembly: 348,682, 349,962
+  block bases agree across all 2 assemblies (20,261 shared groups)
+pin conflicts (aliased source-word expressions, un-pinned): 0
+runtime-reserved words skipped (stl.IO etc): 0
+declines by reason: no-block 2,526, too-wide 0, overflow 0
+broken groups: 0 of 20,261 (these lose their pin for ALL their tables); evicted 0
+pin-heat after the last assembly: {'hot_groups': 20, 'hot_groups_missing': 0, 'hot_groups_ambiguous': 0, 'hot_sites_listed': 35894, 'hot_sites_matched': 13647, 'hot_sites_width_changed': 0}
+blocked: 349,962 tables in 20,261 groups; declined 2,526; ungrouped 0
+total 8793s
+done in 8794s; labels at scratchpad/12m/atlas/blocked32.labels.tsv.gz
+rc=0
+89c3cf6348258eeb33d024c2c6887f0f78dd5959118ff4a3b0549bf9fc33eccd *build/doom_e1m1_blocked32.fjm

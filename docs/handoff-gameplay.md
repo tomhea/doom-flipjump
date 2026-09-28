@@ -54,7 +54,10 @@ By what changed (the tool is `python scratchpad/gp/scenarios_v2.py`; the same ru
   every run on the tree at the ref (`git archive`d) and on this one, re-keys a door field by door
   sector and a sound field by sector, and requires the ref's tree to reproduce the recorded digests
   (it is the frozen model). The added fields, the re-keyed ones and the previous digests go into the
-  freeze record (`schema_growth`). A changed old cell is a BEHAVIOUR change, as above;
+  freeze record (`schema_growth`). The re-plan must give the same SETUPS; its keys may differ --
+  the planner reads the model (a door added changes its nav graph) -- and the runs whose re-plan
+  differs are recorded (`replan_differs`): the set is the frozen keys. A changed old cell is a
+  BEHAVIOUR change, as above;
 - a BEHAVIOUR change (anything that moves a replay: a rule, a fix, a picture rule): a NEW VERSION in
   a new file -- `--plan --file <new>` (the planner refuses a frozen file), B0 re-measured on it
   (`b0_scenarios.py --file <new>`), then `--freeze --file <new> --approver "the owner"` with the

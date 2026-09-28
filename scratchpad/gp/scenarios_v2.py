@@ -1575,9 +1575,17 @@ def freeze_decision(doc: dict, b0: dict, approver: str, record: str, ms=None, fr
     SCHEMA GROWTH (`grown`, the witness from `schema_growth`; owner, 2026-09-28): F3's digest half
       may fail when the witness holds every pre-existing cell equal (`grown_f3`); the new final
       digests are recorded, and the witness with them. Only on a re-freeze."""
+    replan_differs = []
     if fresh is not None:
         diff = [a["name"] for a, b in zip(doc["runs"], fresh["runs"])
                 if a["keys"] != b["keys"] or a["setup"] != b["setup"]]
+        if grown is not None and len(doc["runs"]) == len(fresh["runs"]) and all(
+                a["setup"] == b["setup"] for a, b in zip(doc["runs"], fresh["runs"])):
+            # SCHEMA GROWTH: the planner reads the MODEL (its nav graph, its doors), so a model that
+            # grew -- two stored-shut sectors became doors -- may plan other keys from the same
+            # setups. The set is the FROZEN keys, which the witness and F3/F4 hold; the re-plan's
+            # difference is recorded for the reviewer, not refused. Setups must still match.
+            replan_differs, diff = diff, []
         if diff or len(doc["runs"]) != len(fresh["runs"]):
             return False, "the re-plan DIFFERS: %s -- a new version, not a freeze" % diff, None
     if b0["keys_sha"] != keys_sha(doc):
@@ -1625,6 +1633,7 @@ def freeze_decision(doc: dict, b0: dict, approver: str, record: str, ms=None, fr
         new["freeze"]["schema_growth"] = {
             "from_ref": grown["ref"], "frames_compared": grown["frames"], "grown": grown["grown"],
             "rekeyed": grown["rekeyed"], "ref_reproduces_frozen": grown["old_reproduces_frozen"],
+            "replan_differs": replan_differs,
             "previous_final_digests": {run["name"]: run["model_final_digest"] for run in doc["runs"]}}
     res2 = validate(new, census=True, quiet=True)
     fails = [n for n, ok, _d in res2["criteria"] + res2["freeze"] if not ok]
@@ -1661,8 +1670,12 @@ def freeze(path: Path, b0_path: Path, approver: str, record: str, grown_from=Non
             "" if grown["ok"] else "; " + "; ".join(grown["bad"][:5])), flush=True)
     fresh = plan_set(quiet=True)
     ok, why, new = freeze_decision(doc, load_b0(b0_path), approver, record, fresh=fresh, grown=grown)
-    print("  re-plan: %s" % ("identical keys and setups, %d runs" % len(doc["runs"])
-                             if ok or "re-plan" not in why else why), flush=True)
+    if ok and grown is not None and new["freeze"]["schema_growth"]["replan_differs"]:
+        print("  re-plan: identical setups; OTHER KEYS for %s (the grown model's planner; recorded, "
+              "the frozen keys stand)" % new["freeze"]["schema_growth"]["replan_differs"], flush=True)
+    else:
+        print("  re-plan: %s" % ("identical keys and setups, %d runs" % len(doc["runs"])
+                                 if ok or "re-plan" not in why else why), flush=True)
     if not ok:
         print("FREEZE REFUSED: %s (nothing written)" % why, flush=True)
         return 1

@@ -15,7 +15,7 @@ every door's state at each game frame's present. It compares that trail, frame b
 record `--validate` itself keeps (`validate_scripts(..., trails=)`: the same function, not a copy):
 
   TRAIL          --validate's door-aware record equals the binary on every frame of every run --
-                 x, y, angle and all 13 door states -- and every run is fully presented.
+                 x, y, angle and every door state (15 since M7 P2a.1) -- and every run is fully presented.
   CONTROL-POSE   the doors-shut replay (--validate before the fix) must PART from the binary.
   CONTROL-DOORS  a --validate whose doors open on `use` anywhere (the use-box test removed) must be
                  rejected, and on frames where its pose still equals the binary's, so that only the
@@ -50,12 +50,17 @@ def records(n_runs: int):
     doors, shut, wrong = [], [], []
     GS.validate_scripts(n_runs, quiet=True, trails=doors)
     GS.validate_scripts(n_runs, quiet=True, doors=False, trails=shut)
-    real = onewalk.in_use_box_fixed
-    onewalk.in_use_box_fixed = lambda box, x, y: True       # `use` opens every door, anywhere
+    # `use` opens every door, anywhere. M7 P2a.1: DoorSim tics its doors through
+    # doomfj.doors.DoorPhase, which calls the doors module's own in_use_box_fixed -- patching only
+    # onewalk's name left the door phase untouched and this control vacuous (blocked34's first
+    # trail run: CONTROL-DOORS FAIL). Both names, the door phase's first.
+    import doomfj.doors as _D
+    real_d, real_o = _D.in_use_box_fixed, onewalk.in_use_box_fixed
+    _D.in_use_box_fixed = onewalk.in_use_box_fixed = lambda box, x, y: True
     try:
         GS.validate_scripts(n_runs, quiet=True, trails=wrong)
     finally:
-        onewalk.in_use_box_fixed = real
+        _D.in_use_box_fixed, onewalk.in_use_box_fixed = real_d, real_o
     return doors, shut, wrong
 
 
@@ -63,7 +68,7 @@ def same(b, v, doors=True):
     """THE comparison: does the binary's frame `b` -- (viewx, viewy, viewangle, dstate, mode) at a
     game frame's present, or None if that frame never presented -- equal the record `v` -- (x, y,
     angle, dstate) from `validate_scripts(trails=)`? A presented game frame (mode 0), the pose, and,
-    with `doors`, all 13 door states. TRAIL and both controls call this and nothing else."""
+    with `doors`, every door state. TRAIL and both controls call this and nothing else."""
     return (b is not None and b[4] == 0 and b[:3] == v[:3]
             and (not doors or b[3] == v[3]))
 

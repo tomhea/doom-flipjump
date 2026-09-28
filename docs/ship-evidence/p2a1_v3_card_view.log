@@ -1,0 +1,148 @@
+$ python scratchpad/gp/p2a_card_view.py
+  R0-west-hall         done (candidates so far 0, drawn so far 0)
+  R0-aftermath         done (candidates so far 0, drawn so far 0)
+  R0-south-hall        done (candidates so far 0, drawn so far 0)
+LOS R0-imp-court f10 (742,896) d=1485 rel=-55
+LOS R0-imp-court f12 (749,937) d=1488 rel=-53
+LOS R0-imp-court f13 (769,936) d=1467 rel=-50
+LOS R0-imp-court f14 (790,934) d=1447 rel=-50
+LOS R0-imp-court f15 (811,933) d=1427 rel=-50
+LOS R0-imp-court f16 (824,942) d=1417 rel=-50
+LOS R0-imp-court f17 (824,942) d=1417 rel=-50
+LOS R0-imp-court f18 (824,942) d=1417 rel=-50
+LOS R0-imp-court f19 (824,942) d=1417 rel=-50
+LOS R0-imp-court f20 (831,932) d=1407 rel=-50
+LOS R0-imp-court f21 (839,921) d=1397 rel=-50
+LOS R0-imp-court f22 (859,921) d=1377 rel=-54
+LOS R0-imp-court f35 (928,1169) d=1396 rel=-54
+LOS R0-imp-court f36 (948,1165) d=1376 rel=-54
+LOS R0-imp-court f37 (963,1173) d=1367 rel=-54
+LOS R0-imp-court f38 (977,1181) d=1357 rel=-55
+LOS R0-imp-court f64 (1110,1293) d=1298 rel=-55
+LOS R0-imp-court f65 (1121,1311) d=1299 rel=-52
+LOS R0-imp-court f66 (1134,1327) d=1298 rel=-50
+LOS R0-imp-court f67 (1152,1317) d=1277 rel=-46
+LOS R0-imp-court f68 (1169,1307) d=1257 rel=-43
+LOS R0-imp-court f69 (1169,1295) d=1250 rel=-39
+LOS R0-imp-court f70 (1169,1282) d=1243 rel=-35
+LOS R0-imp-court f71 (1169,1269) d=1236 rel=-31
+LOS R0-imp-court f72 (1183,1254) d=1216 rel=-27
+LOS R0-imp-court f73 (1201,1264) d=1206 rel=-25
+LOS R0-imp-court f74 (1220,1273) d=1196 rel=-22
+LOS R0-imp-court f75 (1239,1273) d=1181 rel=-19
+LOS R0-imp-court f76 (1239,1279) d=1184 rel=-16
+LOS R0-imp-court f77 (1253,1273) d=1169 rel=-12
+LOS R0-imp-court f78 (1253,1265) d=1164 rel=-8
+LOS R0-imp-court f79 (1253,1257) d=1159 rel=-5
+LOS R0-imp-court f80 (1253,1248) d=1154 rel=-1
+LOS R0-imp-court f81 (1266,1238) d=1138 rel=3
+LOS R0-imp-court f82 (1287,1237) d=1121 rel=6
+LOS R0-imp-court f83 (1307,1234) d=1103 rel=9
+LOS R0-imp-court f84 (1297,1226) d=1106 rel=13
+LOS R0-imp-court f85 (1287,1218) d=1110 rel=17
+LOS R0-imp-court f86 (1276,1211) d=1114 rel=21
+LOS R0-imp-court f87 (1273,1190) d=1105 rel=26
+LOS R0-imp-court f88 (1261,1184) d=1112 rel=30
+LOS R0-imp-court f89 (1256,1164) d=1106 rel=34
+LOS R0-imp-court f90 (1249,1145) d=1101 rel=39
+LOS R0-imp-court f91 (1237,1141) d=1110 rel=43
+LOS R0-imp-court f92 (1228,1123) d=1109 rel=47
+LOS R0-imp-court f93 (1217,1105) d=1109 rel=52
+  R0-imp-court         done (candidates so far 46, drawn so far 0)
+  R0-northwest         done (candidates so far 46, drawn so far 0)
+LOS R0-courtyard f58 (1187,1345) d=1266 rel=-54
+LOS R0-courtyard f59 (1187,1345) d=1266 rel=-50
+LOS R0-courtyard f60 (1187,1345) d=1266 rel=-47
+LOS R0-courtyard f61 (1187,1345) d=1266 rel=-43
+LOS R0-courtyard f62 (1187,1345) d=1266 rel=-40
+LOS R0-courtyard f63 (1187,1345) d=1266 rel=-36
+LOS R0-courtyard f64 (1187,1358) d=1273 rel=-37
+LOS R0-courtyard f65 (1187,1358) d=1273 rel=-33
+LOS R0-courtyard f66 (1187,1358) d=1273 rel=-33
+LOS R0-courtyard f67 (1187,1358) d=1273 rel=-33
+LOS R0-courtyard f68 (1187,1358) d=1273 rel=-33
+LOS R0-courtyard f69 (1188,1371) d=1280 rel=-33
+LOS R0-courtyard f70 (1190,1384) d=1287 rel=-30
+LOS R0-courtyard f71 (1209,1394) d=1279 rel=-28
+LOS R0-courtyard f72 (1212,1406) d=1284 rel=-25
+LOS R0-courtyard f73 (1216,1406) d=1281 rel=-21
+LOS R0-courtyard f74 (1211,1394) d=1277 rel=-17
+LOS R0-courtyard f75 (1206,1382) d=1274 rel=-13
+LOS R0-courtyard f76 (1200,1371) d=1271 rel=-13
+LOS R0-courtyard f77 (1194,1359) d=1268 rel=-12
+LOS R0-courtyard f78 (1189,1347) d=1265 rel=-15
+LOS R0-courtyard f79 (1185,1347) d=1268 rel=-18
+LOS R0-courtyard f80 (1189,1360) d=1273 rel=-23
+LOS R0-courtyard f81 (1192,1372) d=1278 rel=-23
+LOS R0-courtyard f82 (1195,1385) d=1283 rel=-24
+LOS R0-courtyard f83 (1200,1397) d=1288 rel=-21
+LOS R0-courtyard f84 (1200,1397) d=1288 rel=-17
+LOS R0-courtyard f85 (1200,1397) d=1288 rel=-14
+LOS R0-courtyard f86 (1200,1397) d=1288 rel=-14
+LOS R0-courtyard f87 (1186,1405) d=1304 rel=-10
+LOS R0-courtyard f88 (1186,1405) d=1304 rel=-10
+LOS R0-courtyard f89 (1186,1405) d=1304 rel=-10
+LOS R0-courtyard f90 (1186,1405) d=1304 rel=-10
+LOS R0-courtyard f91 (1186,1405) d=1304 rel=-10
+LOS R0-courtyard f92 (1186,1405) d=1304 rel=-10
+LOS R0-courtyard f93 (1186,1405) d=1304 rel=-6
+LOS R0-courtyard f94 (1186,1405) d=1304 rel=-6
+LOS R0-courtyard f95 (1199,1395) d=1288 rel=-3
+LOS R0-courtyard f96 (1211,1385) d=1272 rel=1
+LOS R0-courtyard f97 (1211,1374) d=1265 rel=4
+LOS R0-courtyard f98 (1211,1371) d=1263 rel=8
+LOS R0-courtyard f99 (1211,1367) d=1260 rel=12
+  R0-courtyard         done (candidates so far 88, drawn so far 0)
+  R2-barrel-hall       done (candidates so far 88, drawn so far 0)
+  R2-spectre-corridor  done (candidates so far 88, drawn so far 0)
+LOS R2-east-yard f31 (2214,826) d=251 rel=-54
+LOS R2-east-yard f32 (2216,806) d=231 rel=-52
+LOS R2-east-yard f33 (2218,785) d=211 rel=-49
+LOS R2-east-yard f34 (2238,781) d=210 rel=-51
+LOS R2-east-yard f35 (2258,775) d=210 rel=-53
+LOS R2-east-yard f48 (2369,658) d=195 rel=-55
+LOS R2-east-yard f49 (2365,658) d=191 rel=-51
+LOS R2-east-yard f50 (2372,658) d=198 rel=-48
+LOS R2-east-yard f51 (2366,658) d=193 rel=-44
+DRAWN: R2-east-yard frame 51 pose (2366, 658) dist 193 rel -44 deg, 58 px differ
+LOS R2-east-yard f52 (2372,658) d=198 rel=-41
+DRAWN: R2-east-yard frame 52 pose (2372, 658) dist 198 rel -41 deg, 56 px differ
+LOS R2-east-yard f53 (2364,658) d=191 rel=-36
+DRAWN: R2-east-yard frame 53 pose (2364, 658) dist 191 rel -36 deg, 42 px differ
+LOS R2-east-yard f54 (2367,658) d=193 rel=-33
+DRAWN: R2-east-yard frame 54 pose (2367, 658) dist 193 rel -33 deg, 52 px differ
+LOS R2-east-yard f55 (2368,658) d=194 rel=-30
+DRAWN: R2-east-yard frame 55 pose (2368, 658) dist 194 rel -30 deg, 52 px differ
+LOS R2-east-yard f56 (2358,658) d=185 rel=-25
+DRAWN: R2-east-yard frame 56 pose (2358, 658) dist 185 rel -25 deg, 52 px differ
+LOS R2-east-yard f57 (2357,658) d=184 rel=-21
+DRAWN: R2-east-yard frame 57 pose (2357, 658) dist 184 rel -21 deg, 52 px differ
+LOS R2-east-yard f58 (2355,658) d=182 rel=-18
+DRAWN: R2-east-yard frame 58 pose (2355, 658) dist 182 rel -18 deg, 52 px differ
+LOS R2-east-yard f59 (2351,658) d=179 rel=-13
+DRAWN: R2-east-yard frame 59 pose (2351, 658) dist 179 rel -13 deg, 52 px differ
+LOS R2-east-yard f60 (2346,658) d=175 rel=-9
+DRAWN: R2-east-yard frame 60 pose (2346, 658) dist 175 rel -9 deg, 52 px differ
+LOS R2-east-yard f61 (2340,658) d=169 rel=-5
+DRAWN: R2-east-yard frame 61 pose (2340, 658) dist 169 rel -5 deg, 181 px differ
+LOS R2-east-yard f62 (2333,658) d=163 rel=-0
+DRAWN: R2-east-yard frame 62 pose (2333, 658) dist 163 rel -0 deg, 195 px differ
+LOS R2-east-yard f63 (2327,670) d=164 rel=8
+DRAWN: R2-east-yard frame 63 pose (2327, 670) dist 164 rel 8 deg, 192 px differ
+LOS R2-east-yard f64 (2322,682) d=168 rel=16
+DRAWN: R2-east-yard frame 64 pose (2322, 682) dist 168 rel 16 deg, 183 px differ
+LOS R2-east-yard f65 (2318,694) d=172 rel=24
+DRAWN: R2-east-yard frame 65 pose (2318, 694) dist 172 rel 24 deg, 150 px differ
+LOS R2-east-yard f66 (2314,706) d=179 rel=31
+DRAWN: R2-east-yard frame 66 pose (2314, 706) dist 179 rel 31 deg, 106 px differ
+LOS R2-east-yard f67 (2311,719) d=186 rel=38
+DRAWN: R2-east-yard frame 67 pose (2311, 719) dist 186 rel 38 deg, 85 px differ
+LOS R2-east-yard f68 (2309,732) d=195 rel=44
+DRAWN: R2-east-yard frame 68 pose (2309, 732) dist 195 rel 44 deg, 48 px differ
+LOS R2-east-yard f69 (2292,743) d=195 rel=54
+LOS R2-east-yard f70 (2308,744) d=204 rel=53
+  R2-east-yard         done (candidates so far 116, drawn so far 18)
+  R3-west              done (candidates so far 116, drawn so far 18)
+  R3-mid               done (candidates so far 116, drawn so far 18)
+CARD VIEW: 116 candidate frames, card drawn on 18
+rc=0

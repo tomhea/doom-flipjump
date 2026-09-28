@@ -394,7 +394,7 @@ P2a); size ESTIMATE +~0.1M words; plane ids MEASURED 233 (222 + 11; with P2b's l
 | ms/frame (msframe, one run, A = blocked33) | 66.1 | 67.8 | NOT SEPARATED (pairs 0.954 0.975 0.983 1.193 0.996) |
 | hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
 
-**Verdict: every kill criterion met.**
+**Verdict: criteria 1-5 and 7 met; criterion 6 NOT met as declared -- the owner's decision is pending.**
 1. Host: 1,360 passed; the rules and their mutants (`test_doors_p2a.py`, `test_doorcode_more.py`).
 2. fj: `tests/fj/test_doors_p2a_fj.py` 13 passed, its mutants caught.
 3. m3_gate, m2_std_gate byte- and state-exact, six selftests; p2a_gate S1-S7 on the binary, every
@@ -403,8 +403,12 @@ P2a); size ESTIMATE +~0.1M words; plane ids MEASURED 233 (222 + 11; with P2b's l
    (+426 against +0.02 .. +0.05M); the size did not hold its ESTIMATE (+0.29M words against ~+0.1M,
    no kill criterion).
 5. Plane ids 233.
-6. The frozen set: no v3 run reaches the card or a trigger (`p2a1_v3_reach.log`); the model's schema
-   grew (w_fired), so v3 was re-frozen by the owner's schema-growth rule (2026-09-28;
-   `p2a1_v3_growth_freeze.log`) -- every pose and drawn population reproduced.
+6. The frozen set: no v3 run takes the card or crosses a trigger (`p2a1_v3_reach.log`), and the
+   model's growth (w_fired) re-froze v3 under the owner's schema-growth rule
+   (`p2a1_v3_growth_freeze.log`) -- every pose and drawn population reproduced. BUT the card IS
+   DRAWN: on 18 frames of R2-east-yard (51-68, 42-195 px each; `p2a1_v3_card_view.log`, the PR #99
+   review's probe). The first check looked only at taking and triggers, and F4's census counts no
+   items, so it could not see it. As declared, that needs the OWNER's re-freeze before this rung
+   ships: asked.
 7. pinreport 20 of 20; the restore sets re-keyed (`p2a1_rekey.log`).
 

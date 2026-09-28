@@ -351,12 +351,13 @@ COLLISION_STATE_DECLS = [
     "cp_seedf: hex.vec 8", "cp_seedc: hex.vec 8", "mv_ok: hex.vec 1",
     "cm_hf: hex.vec 8",                       # the floor the player is standing on now
     "cm_dx: hex.vec 8", "cm_dy: hex.vec 8",   # the tic's desired move
+    "cm_ox: hex.vec 8", "cm_oy: hex.vec 8",   # M7 P2a.1: where the tic's move started
     "cs_ret: hex.vec w/4",                    # the seed descent's fcall return
 ] + CHECK_SCRATCH_DECLS + CELL_DECLS
 
 
 def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, height: int,
-                              maxstep: int) -> list:
+                              maxstep: int, pickup=None, after_accept=()) -> list:
     """M14-d — the blocked-move policy, in the emitted program. `root`: the cell routine's entry
     (`collision_cells_fj`).
 
@@ -369,11 +370,17 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
     ⚠ Each candidate needs the sector UNDER IT for the check's seed, which is a BSP descent per
     candidate. The descent reads `vx`/`vy`, so those are set from the candidate before it runs.
     That is safe here and only here: this whole block runs BEFORE `_int_part_lines` re-derives
-    `vx`/`vy` from the final position for the walk."""
+    `vx`/`vy` from the final position for the walk.
+
+    M7 P2a.1: `pickup(tag)` gives the lines that touch the pickups at a TRIED candidate (`cpx`,
+    `cpy`), before its P_TryMove -- the model touches at every candidate, taken or refused; and every
+    ACCEPTED candidate runs `after_accept` (the walk-over triggers) once, from one shared block, with
+    the tic's start in `cm_ox` / `cm_oy`."""
 
     def candidate(tag, xexpr, yexpr, nxt):
         return [
             *xexpr, *yexpr,
+            *(pickup(tag) if pickup else []),
             # the seed: locate the candidate's subsector, then run the full P_TryMove
             *_int_part_lines("vx", "cpx", f"{tag}vxs", f"{tag}vxd"),
             *_int_part_lines("vy", "cpy", f"{tag}vys", f"{tag}vyd"),
@@ -383,7 +390,7 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
             f"    sim.try_move {root}, {height}, {maxstep}, cm_hf",
             f"    hex.if0 1, mv_ok, {nxt}",
             "    hex.mov 8, viewx, cpx", "    hex.mov 8, viewy, cpy",
-            "    ;cmv_done",
+            "    ;cmv_accept",
             f"  {nxt}:",
         ]
 
@@ -395,6 +402,7 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
         # control did, on the first tic where a wall mattered.
         _set("cprad", radius),
         # where the player stands now: its floor is what "too big a step up" is measured against
+        "    hex.mov 8, cm_ox, viewx", "    hex.mov 8, cm_oy, viewy",
         "    hex.mov 8, cpx, viewx", "    hex.mov 8, cpy, viewy",
         *_int_part_lines("vx", "cpx", "cmh_vxs", "cmh_vxd"),
         *_int_part_lines("vy", "cpy", "cmh_vys", "cmh_vyd"),
@@ -408,7 +416,10 @@ def move_with_collision_lines(root: str, mapname_pfx: str, *, radius: int, heigh
                      ["    hex.mov 8, cpy, viewy"], "cmv_c")
     out += candidate("cmc_", ["    hex.mov 8, cpx, viewx"],
                      ["    hex.mov 8, cpy, viewy", "    hex.add 8, cpy, cm_dy"], "cmv_stay")
-    out += ["  cmv_done:"]
+    out += ["    ;cmv_done",
+            "  cmv_accept:",
+            *after_accept,
+            "  cmv_done:"]
     return out
 
 

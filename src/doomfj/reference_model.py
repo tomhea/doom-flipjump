@@ -135,6 +135,7 @@ SKY_TURN = 2
 # what the feature is for. The fj bakes a run-list per (sprite, texture column, height BUCKET), so
 # both of those bounds matter to the bank size, not just to the look.
 THING_SPRITE = {
+    5: "BKEY",   # M7 P2a.1: the blue card, frame A (DOOM blinks it A/B: a stated deviation)
     2014: "BON1", 2015: "BON2", 2035: "BAR1", 47: "SMIT", 3001: "TROO", 2008: "SHEL",
     54: "TRE2", 9: "SPOS", 43: "TRE1", 3004: "POSS", 3002: "SARG", 2010: "ROCK",
     2028: "COLU", 2011: "STIM", 2012: "MEDI", 2018: "ARM1", 2019: "ARM2", 2001: "SHOT",

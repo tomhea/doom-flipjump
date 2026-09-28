@@ -52,6 +52,8 @@ from doomfj.texturecompiler import (compile_colormap, compile_palette, composite
                                     texture_texels, _texel_table, downscale_canvas,
                                     colormap_values, _index_nibbles, generate_colormap_packed_table_fj)
 from doomfj.doorcode import WAIT_NIBBLES, door_decls, door_line_ids, door_tic_lines
+from doomfj.doorcode import card_pickup_lines, walkover_lines   # M7 P2a.1
+from doomfj.doors import door_kinds, walkover_triggers                    # M7 P2a.1
 from doomfj.spritebank import rowmap_table          # M7 P1.6: the native-list bank's rowmap
 from doomfj.wad import decode_picture
 from doomfj.doors import (DEFAULT_QUANT as DOOR_QUANT, door_states, heights_for_states,
@@ -380,7 +382,7 @@ STANDALONE_SCRATCH_DECLS = [
 ]
 
 
-def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill) -> tuple:
+def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -398,7 +400,10 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill) -> tuple:
               f"    hex.set 8, viewy, {spawn.y & 0xFFFFFFFF}",
               f"    hex.set 8, viewangle, {spawn.angle & 0xFFFFFFFF}",
               *([f"    hex.zero {ndoors}, dstate", f"    hex.zero {ndoors}, ddir",
-                 f"    hex.zero {ndoors}, dsub", f"    hex.zero {WAIT_NIBBLES * ndoors}, dwait"]
+                 f"    hex.zero {ndoors}, dsub", f"    hex.zero {WAIT_NIBBLES * ndoors}, dwait",
+                 # M7 P2a.1: no press pending, no card, no walk-over trigger fired
+                 f"    hex.zero {ndoors}, dreq", "    hex.zero 1, pcard",
+                 f"    hex.zero {max(nwalk, 1)}, wfired"]
                 if ndoors else []),
               *[f"    hex.set 16, thss_rt + {t}*16*dw, {ss}" for t, ss in enumerate(rt_binds)],
               *[f"    hex.set 16, thpos_rt + {t}*16*dw, {pos}" for t, pos in enumerate(rt_pos)],
@@ -952,8 +957,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
     # the prologue is the line-for-line text it was before doors existed.
     _door_lines = door_line_ids(secs, lds, sds, _dst_tbl) if _dst_tbl else {}
     _door_tic = (door_tic_lines(sorted(_dst_tbl), {si: len(v) for si, v in _dst_tbl.items()},
-                                use_boxes_xy(secs, lds, sds, verts))
+                                use_boxes_xy(secs, lds, sds, verts), door_kinds(secs, lds, sds))
                  if (_dst_tbl and player_sim) else [])
+    # M7 P2a.1: the walk-over triggers (doomfj.doors), fired from the collision move
+    _walk_trig = walkover_triggers(secs, lds, sds, map_wad.vertexes(mapname)) if _dst_tbl else []
 
     def _seg_door(seg):
         """The door sector whose state this seg's constants depend on, or None.
@@ -2029,10 +2036,28 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _collide_cells, _croot = collision_cells_fj(_pfx(mapname), _crows,
                                                     cell_lists(_crows, PLAYER_RADIUS),
                                                     doors=_cdoors)
+        # M7 P2a.1: the blue card's pickup at every tried candidate, and the walk-over triggers
+        # after an accepted one -- where there are doors (pcard, dreq, wfired) and the card has a
+        # vanish slot (it is drawable and the build keeps flags)
+        _card_pick = None
+        _card_di = [di for di, t in enumerate(_drawable) if t.type == 5] if _do_things else []
+        if _dst_tbl and len(_card_di) == 1 and _card_di[0] in _vis_slots:
+            from doomfj.combat import ITEM_RADIUS as _IR, PLAYER_R as _PR, REACH_DOWN as _RD, REACH_UP as _RU
+            from doomfj.mapcompiler import seg_sector as _seg_sector
+            _ct = _drawable[_card_di[0]]
+            _cleaf = cmap.subsectors[rm.point_in_subsector(cmap, _ct.x, _ct.y)]
+            _cz = _seg_sector(lds, sds, secs, cmap.segs[_cleaf.firstseg]).floor_h
+            _cslot = "thvis + %d*2*dw" % _vis_slots[_card_di[0]]
+
+            def _card_pick(tag, _ct=_ct, _cz=_cz, _cslot=_cslot):
+                return card_pickup_lines(tag, (_ct.x, _ct.y), _cslot, _cz - _RU, _cz + _RD, _IR + _PR)
         _collide_block = ([";simcollide_skip", "simcollide:"]
                           + move_with_collision_lines(
                               _croot, _pfx(mapname), radius=PLAYER_RADIUS,
-                              height=PLAYER_HEIGHT >> 16, maxstep=MAX_STEP >> 16)
+                              height=PLAYER_HEIGHT >> 16, maxstep=MAX_STEP >> 16,
+                              pickup=_card_pick,
+                              after_accept=walkover_lines(_walk_trig, sorted(_dst_tbl), PLAYER_RADIUS >> 16)
+                              if _walk_trig else ())
                           + ["    ;simmv_done", "simcollide_skip:"])
         _collide_decls = list(COLLISION_STATE_DECLS)
         # the SEED descent: the same point-location query the eye's pre-walk runs, at a CANDIDATE
@@ -2069,7 +2094,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
-             for sk in SKILLS])
+             for sk in SKILLS], nwalk=len(_walk_trig))
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart)
@@ -2389,7 +2414,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # state switch dispatches on. Zero is SHUT for every door by construction of
           # `doors.door_states`, so this declaration is the level's initial condition, exactly as
           # `viewx/viewy/viewangle` are for the player.
-          *(door_decls(len(_dslot)) if _dst_tbl else []),
+          *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2

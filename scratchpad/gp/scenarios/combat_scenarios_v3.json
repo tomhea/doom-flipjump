@@ -24980,10 +24980,10 @@
   "scratchpad/gp/census_lib.py": "7126b6c0a1210408",
   "scratchpad/gp/scenarios_v2.py": "aa2cff93b492bd3e",
   "src/doomfj/__init__.py": "e3b0c44298fc1c14",
-  "src/doomfj/combat.py": "e1bb914f4757350d",
+  "src/doomfj/combat.py": "53ca4de80c2e858b",
   "src/doomfj/config.py": "aeb52d573b01cb12",
   "src/doomfj/doorcode.py": "3fc9acc555aaf22a",
-  "src/doomfj/doors.py": "9476a9d89716c714",
+  "src/doomfj/doors.py": "2d712495b33c4f5d",
   "src/doomfj/fixedpoint.py": "55051bdb23e1d86a",
   "src/doomfj/gamedata.py": "f5d1354816b000a1",
   "src/doomfj/lut_generator.py": "366a1df5160b039c",
@@ -25291,6 +25291,24 @@
    "frozen_at_git_head": "9a28344",
    "files_not_at_head": [],
    "rule": "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
+  }
+ ],
+ "rehash_log": [
+  {
+   "on": "2026-09-28 20:46:16",
+   "reason": "M7 P2a.2: the exit's box moved into doomfj.doors.exit_boxes (combat calls it, the same boxes); menu_step's LEVEL COMPLETE screen (not in the model's tic); no model behaviour change",
+   "git_head": "21cda3b",
+   "changed": {
+    "src/doomfj/combat.py": [
+     "e1bb914f4757350d",
+     "53ca4de80c2e858b"
+    ],
+    "src/doomfj/doors.py": [
+     "9476a9d89716c714",
+     "2d712495b33c4f5d"
+    ]
+   },
+   "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"
   }
  ]
 }

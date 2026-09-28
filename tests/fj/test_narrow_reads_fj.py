@@ -2,10 +2,11 @@
 
 `frame.blk_addr` places a block, the block's first byte is read on the FULL arm
 (`hex.read_byte_and_inc`, as `stream.frag_derive` reads a block's header) and every later byte on the
-3-nibble arm (`frame.read3_and_inc`). Two 64-op blocks of distinct bytes follow
-`wall_renderer.sprite_bank_header()` -- the `pad` that puts `sprbank` on a 4096-bit block -- and all
-128 bytes must come out as baked, through `byte.emit` (a dispatch through `hex.tables`, which leaves
-the pointer arm alone, like the walkers' own emits).
+3-nibble arm (`frame.read3_and_inc`). Three 64-op blocks of distinct bytes -- blocks 0, 1 and 0x1003,
+past the index's fourth nibble as the shipped bank's are (22,837 blocks) -- follow
+`wall_renderer.sprite_bank_header()` (the `pad` that puts `sprbank` on a 4096-bit block), zero blocks
+between them, and all 192 bytes must come out as baked, through `byte.emit` (a dispatch through
+`hex.tables`, which leaves the pointer arm alone, like the walkers' own emits).
 
 R9: the same program with the header's `pad` dropped and the bank pushed off a block must read WRONG
 -- so the passing test is the alignment's doing, which is exactly what a narrow read assumes and what
@@ -27,14 +28,15 @@ SRC = [ROOT / "src/fj" / f for f in ("fixed_point.fj", "present.fj", "projection
                                      "stream_render.fj")]
 CFG = Config()
 STRIDE = wr.SPR_BLOCK_STRIDE
-BLOCKS = [[(k * 97 + i * 13 + 5) & 0xFF for i in range(STRIDE)] for k in range(2)]
+INDICES = [0, 1, 0x1003]         # the last past 0x1000 (PR #93's review, round 5)
+BLOCKS = [[(k * 97 + i * 13 + 5) & 0xFF for i in range(STRIDE)] for k in range(len(INDICES))]
 
 
 def _program(header, lead_ops=0):
     main = ["stl.startup_and_init_all",
             generate_emit_dispatch_table_fj("byte", list(range(256)), index_nibbles=2)]
     for k in range(len(BLOCKS)):
-        main += ["    hex.set 4, t_blk, %d" % k,
+        main += ["    hex.set 4, t_blk, %d" % INDICES[k],
                  "    frame.blk_addr t_ptr, t_blk, sprbank",
                  "    hex.read_byte_and_inc t_v, t_ptr",        # the block's first read: the full arm
                  "    byte.emit t_v"]
@@ -45,8 +47,12 @@ def _program(header, lead_ops=0):
     if lead_ops:
         main.append("rep(%d, i) stl.fj 0, 0" % lead_ops)
     main += header
-    for blk in BLOCKS:
+    at = 0
+    for idx, blk in zip(INDICES, BLOCKS):
+        if idx > at:                            # the blocks between them: zero cells
+            main.append("rep(%d, i) stl.fj 0, 0" % ((idx - at) * STRIDE))
         main += [";%#x * dw" % v for v in blk]
+        at = idx + 1
     return "\n".join(main) + "\n"
 
 

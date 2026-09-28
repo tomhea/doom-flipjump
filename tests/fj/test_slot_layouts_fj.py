@@ -8,13 +8,17 @@ This RUNS the shipped fj and holds every byte and every register to them -- noth
 
   write  The record's code from its slot allocation (`hex.inc 2, gps_nslot`) to the end of its
          column loop, transplanted VERBATIM from frame.thing_record_body into a harness macro, gets
-         its parameters the way the shipped build binds them: the def's own parameter list zipped
-         with the emitter's own `frame.thing_record_body ...` arguments (wall_renderer's f-string,
-         evaluated from its source). It records THINGS -- columns across the 16, 64 and 1,024-index
-         bounds up to 159, a first column below 0 and a last above 159 (both clamps), slot ids 1..255
-         across 16, fragments A and B, B refused by `ballow`, both slots spent, columns a wall hides,
-         a fully transparent block, block indices past one byte, a texture step that moves the
-         column and its clamp, both block strides (`hdfl`), y0 either side of zero. Then EVERY byte
+         its parameters from the def's own parameter list zipped with the emitter's own
+         `frame.thing_record_body ...` arguments -- wall_renderer's f-string, evaluated from its
+         source for both record bodies (mt 1 and 0), `deg_flag` its bare literal; the other locals
+         the f-string names are placeholders, varied, that the transplanted range must not depend
+         on (`record_binding` refuses anything else). It records THINGS -- columns across the 16, 64
+         and 1,024-index bounds up to 159, a first column below 0 and a last above 159 (both
+         clamps), slot ids 1..255 across 16, fragments A and B, B refused by `ballow`, both slots
+         spent, columns a wall hides, a fully transparent block, a texture step that moves the
+         column and its clamp, both block strides (`hdfl`), y0 either side of zero -- and the
+         operand ranges the shipped sprites reach: a last texture column past 16 (the shipped bank
+         goes to 62), u past 15, u * BUCKETS and u * NLD past 255, a block past 0x1000. Then EVERY byte
          of the hot block -- pclm through the cell after drawn, 6,785 of them -- must be the
          constants' layout of what was recorded: the bytes the layout names hold the fields, drawn
          its walls, and every other byte is still zero.
@@ -85,7 +89,14 @@ THINGS = [(1, -200, 3, 0x0102, 0, 1, 0, 1, 1, 1),
           (46, 20, 10, 0x0010, 157, 170, 0, 1, 1, 1),             # a last column above 159
           (47, 60, 11, 0x0020, 30, 37, 0x8000, 1, 1, 3),          # half a texel a column, clamped at 2
           (48, 61, 12, 0x0030, 40, 45, 0x10000, 0, 1, 9),         # hdfl 0: the nld stride
-          (49, 62, 13, 0x0040, -2, 3, 0x10000, 1, 1, 8)]          # below 0 WITH a step: u starts at 2
+          (49, 62, 13, 0x0040, -2, 3, 0x10000, 1, 1, 8),          # below 0 WITH a step: u starts at 2
+          # the shipped operand ranges (review round 5): E1M1's sprites reach 62 texture columns and
+          # its bank 22,837 blocks, so u, u * BUCKETS, u * NLD and the block index leave the widths
+          # where a narrowed op is still exact
+          (50, 70, 14, 0x0040, 110, 126, 0x40000, 1, 1, 63),      # u 0..64 by 4, clamped at 62; u*32 to 1,984
+          (51, 71, 15, 0x0030, 130, 139, 0x50000, 0, 1, 45),      # hdfl 0: u 0..45 by 5, clamped at 44; u*9 to 396
+          (52, 72, 16, 0x1007, 140, 141, 0, 1, 1, 1)]             # a block past 0x1000 whose low three
+                                                                  # nibbles name the transparent 0x0007
 HIDDEN = {12, 13, 14}
 TRANSPARENT = {0x0007}
 
@@ -105,7 +116,8 @@ NBLOCKS = 1 + max(b for t in THINGS for _, b in _columns(t[4], t[5], t[6], t[7],
 HEADER = {b: (5 + b % 7, 0 if b in TRANSPARENT else 9 + b % 5) for b in range(NBLOCKS)}
 # the read side's columns: (seed column, steps) -- empty, A, A+B, across the index bounds
 LOADS = [(0, 0), (1, 0), (2, 0), (3, 0), (10, 0), (12, 0), (15, 0), (16, 0), (17, 0), (31, 0),
-         (36, 1), (44, 0), (62, 0), (63, 1), (64, 0), (157, 0), (158, 0), (159, 0), (100, 0), (13, 3)]
+         (36, 1), (44, 0), (62, 0), (63, 1), (64, 0), (157, 0), (158, 0), (159, 0), (100, 0), (13, 3),
+         (110, 0), (118, 5), (126, 0), (135, 0), (140, 0), (141, 0)]
 DERIVE_BLOCK = 0x0102
 
 
@@ -174,23 +186,42 @@ GLOBALS = ({d.split(":")[0].strip() for d in wr.hoisted_scratch_decls(CFG)}
               "ballow", "hdfl"})
 
 
-def record_args(frame_text, emitter_text):
-    """thing_record_body's parameters as the SHIPPED build binds them: the def's own parameter list
-    (frame_render.fj) zipped with the emitter's own argument list -- wall_renderer's
-    `frame.thing_record_body ...` f-string, evaluated with the emitter's module constants and the
-    values its locals have for the game tier (deg_flag read from the same source)"""
+class BindingRefused(Exception):
+    """the emitter's call does not give the transplanted range ONE set of values"""
+
+
+# the locals the emitter's f-string names that the test does not reproduce: placeholders, each
+# evaluated at two values -- the transplanted range's arguments must not move with them
+PLACEHOLDERS = [dict(proj=0x11111, _MT_NTH=1, _MT_NLTI=1, ablate=frozenset()),
+                dict(proj=0x2222222, _MT_NTH=3, _MT_NLTI=5, ablate=frozenset({"thingtwice"}))]
+
+
+def record_bindings(frame_text, emitter_text):
+    """every binding of thing_record_body's parameters the emitter's text can give: the def's own
+    parameter list (frame_render.fj) zipped with the emitter's own argument list --
+    wall_renderer's `frame.thing_record_body ...` f-string, evaluated from its source with its
+    module constants, `deg_flag` as its one bare literal, for BOTH record bodies (mt 1, the runtime
+    table; mt 0, the baked leaf -- `_thing_leaf_body` instantiates both in the game tier) and at
+    each PLACEHOLDERS value. Anything else is refused: this reads the emitter, it does not model it."""
     m = re.search(r"^    def thing_record_body (.*?)^\s*@", frame_text, re.M | re.S)
     params = [p.strip() for p in m.group(1).replace("\\", " ").split(",")]
     a = emitter_text.index('f"frame.thing_record_body ')
     call_src = emitter_text[a:emitter_text.index("]", a)]
-    deg = re.findall(r"^\s*deg_flag = (\d+)", emitter_text, re.M)
-    assert len(deg) == 1, "the emitter's deg_flag: %d definitions" % len(deg)
-    ns = dict(vars(wr), cfg=CFG, proj=CFG.PROJECTION << 16, ablate=frozenset(), deg_flag=int(deg[0]),
-              mt=1, _MT_NTH=1, _MT_NLTI=1)
-    call = eval("(" + call_src + ")", ns)                       # the emitter's own text, nothing else
-    args = [x.strip() for x in call[len("frame.thing_record_body "):].split(",")]
-    assert len(args) == len(params), (len(args), len(params))
-    return dict(zip(params, args))
+    deg = re.findall(r"^\s*deg_flag = ([^#\n]*?)\s*(?:#.*)?$", emitter_text, re.M)
+    if len(deg) != 1 or not deg[0].isdigit():
+        raise BindingRefused("deg_flag is not one bare literal: %r" % deg)
+    if emitter_text.count("_thing_leaf_body(") < 2:
+        raise BindingRefused("the emitter's record bodies are not the two this binds")
+    out = []
+    for mt in (1, 0):
+        for ph in PLACEHOLDERS:
+            ns = dict(vars(wr), cfg=CFG, deg_flag=int(deg[0]), mt=mt, **ph)
+            call = eval("(" + call_src + ")", ns)               # the emitter's own text, nothing else
+            args = [x.strip() for x in call[len("frame.thing_record_body "):].split(",")]
+            if len(args) != len(params):
+                raise BindingRefused("%d arguments for %d parameters" % (len(args), len(params)))
+            out.append(dict(zip(params, args)))
+    return out
 
 
 def transplant(frame_text, emitter_text):
@@ -200,8 +231,13 @@ def transplant(frame_text, emitter_text):
     code = body[body.index("        hex.inc 2, gps_nslot"):body.index("      set_tstop:")]
     labels = re.findall(r"^\s*(\w+):\s*(?://.*)?$", code, re.M)
     words = set(re.findall(r"\b[a-z_][a-z0-9_]*\b", _code(code)))
-    bound = record_args(frame_text, emitter_text)
-    params = [p for p in bound if p in words]
+    bindings = record_bindings(frame_text, emitter_text)
+    params = [p for p in bindings[0] if p in words]
+    for p in params:
+        seen = {b[p] for b in bindings}
+        if len(seen) != 1:
+            raise BindingRefused("the record bodies or a placeholder bind %s to %s" % (p, sorted(seen)))
+    bound = bindings[0]
     macro = ("ns frame {\n    def lay_rec %s @ %s < %s {\n%s      ret:\n    }\n}\n"
              % (", ".join(params), ", ".join(labels + ["ret"]), ", ".join(sorted(words & GLOBALS)), code))
     return macro, "frame.lay_rec " + ", ".join(bound[p] for p in params)
@@ -222,11 +258,21 @@ def hot_block(mem):
 
 
 def bank():
-    blocks = []
+    """the bank, NBLOCKS blocks of SPR_BLOCK_STRIDE cells: a used block's header, zeros elsewhere
+    (runs of zero cells as `rep(n, i) stl.fj 0, 0`, the zero cell the layout freezes use)"""
+    out, zeros = list(wr.sprite_bank_header()), 0
+    used = {blk for t in THINGS for _, blk in _columns(t[4], t[5], t[6], t[7], t[9], t[3])} | {DERIVE_BLOCK}
     for b in range(NBLOCKS):
-        r0, last = HEADER[b]
-        blocks += _cells([r0, last] + [0] * (wr.SPR_BLOCK_STRIDE - 2))
-    return wr.sprite_bank_header() + blocks
+        if b not in used:
+            zeros += wr.SPR_BLOCK_STRIDE
+            continue
+        if zeros:
+            out.append("rep(%d, i) stl.fj 0, 0" % zeros)
+        out += _cells(HEADER[b])
+        zeros = wr.SPR_BLOCK_STRIDE - 2
+    if zeros:
+        out.append("rep(%d, i) stl.fj 0, 0" % zeros)
+    return out
 
 
 def emit(reg, nbytes):
@@ -328,18 +374,22 @@ def run(tmp, name, program, texts=None, timeout=600):
 
 
 def run_side(tmp, side, texts=None, timeout=600):
-    """(got, want) for one side, the fj and the emitter's call as `texts` has them"""
+    """(got, want) for one side, the fj and the emitter's call as `texts` has them; a binding the
+    emitter's text does not give in ONE way is `got` = the refusal, never a run"""
     texts = texts or {}
     if side == "write":
-        prog = write_program(texts.get("frame_render.fj") or source("frame_render.fj"),
-                             texts.get(EMITTER) or source(EMITTER))
+        try:
+            prog = write_program(texts.get("frame_render.fj") or source("frame_render.fj"),
+                                 texts.get(EMITTER) or source(EMITTER))
+        except BindingRefused as e:
+            return "binding refused: %s" % e, expected_block()[1]
         return run(tmp, "w", prog, texts, timeout), expected_block()[1]
     return run(tmp, "r", read_program(), texts, timeout), expected_reads()
 
 
 def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
     got, want = run_side(tmp_path, "write")
-    assert got is not None, "the record's program did not end on its loop"
+    assert isinstance(got, list), got or "the record's program did not end on its loop"
     where = expected_block()[0]
     bad = [(where[i], g, w) for i, (g, w) in enumerate(zip(got, want)) if g != w]
     assert len(got) == len(want) and not bad, (len(got), len(want), bad[:10])
@@ -351,6 +401,10 @@ def test_the_record_writes_every_byte_where_the_constants_say(tmp_path):
     # half a texel a column: u moves every second column, so the block does at 32, 34, 36 (clamped)
     assert spslot[32 * STRIDE + 1] != spslot[30 * STRIDE + 1], "the texture step moved no block"
     assert spslot[44 * STRIDE + 1] != spslot[40 * STRIDE + 1], "the nld stride moved no block"
+    # ... and the shipped ranges were reached: u*32 and u*9 past 255, a block past 0x1000
+    blocks = [spslot[x * STRIDE + 1] | spslot[x * STRIDE + 2] << 8 for x in range(VIEW_W) if sprflag[x]]
+    assert max(blocks) >= 0x1000 and any(b - 0x40 > 255 for b in blocks if 0x40 <= b < 0x1000)
+    assert spslot[139 * STRIDE + 1] | spslot[139 * STRIDE + 2] << 8 == 0x30 + 44 * NLD
 
 
 def test_the_load_and_the_derive_read_every_field_where_the_constants_say(tmp_path):
@@ -418,6 +472,22 @@ MUTANTS = [
      "viewwc, viewh, ds, buckets, slotstride, ttwice,", "viewwc, viewh, ds, slotstride, buckets, ttwice,"),
     ("r4: the emitter passes twice the slot stride", "write", EMITTER,
      "{SPRITE_HEIGHT_BUCKETS}, {SPR_SLOT_STRIDE}, ", "{SPRITE_HEIGHT_BUCKETS}, {2 * SPR_SLOT_STRIDE}, "),
+    # the review's round-5 edits
+    ("r5: deg_flag computed per tier", "write", EMITTER,
+     "    deg_flag = 1 ", "    deg_flag = 1 if not standalone else 0 "),
+    ("r5: the baked leaf's deg 0", "write", EMITTER, "{deg_flag}, {DEG_SOFT_SCENERY}", "{deg_flag if mt else 0}, {DEG_SOFT_SCENERY}"),
+    ("r5: the buckets stride two nibbles wide", "write", FR,
+     "        hex.mul_const w/4, trb_blk, trb_blk, buckets", "        hex.mul_const 2, trb_blk, trb_blk, buckets"),
+    ("r5: the nld stride two nibbles wide", "write", FR,
+     "rep(spn, k) hex.mul_const w/4, trb_blk, trb_blk, nld", "rep(spn, k) hex.mul_const 2, trb_blk, trb_blk, nld"),
+    ("r5: the texture column one nibble wide", "write", FR,
+     "hex.mov 2, trb_u, trb_frac_u + 4*dw", "hex.mov 1, trb_u, trb_frac_u + 4*dw"),
+    ("r5: the last texture column one nibble wide", "write", FR,
+     "hex.mov 2, trb_dw_max, sp_dw", "hex.mov 1, trb_dw_max, sp_dw"),
+    ("r5: the texture column clamp one nibble wide", "write", FR,
+     "hex.cmp 2, trb_u, trb_dw_max, col_check, col_check, u_clamp", "hex.cmp 1, trb_u, trb_dw_max, col_check, col_check, u_clamp"),
+    ("r5: blk_addr places three nibbles", "write", FR,
+     "hex.mov 4, gps_boff + 3*dw, blk", "hex.mov 3, gps_boff + 3*dw, blk"),
     # the read side
     ("the load's skip to B", "read", FR, "hex.ptr_add spslot_p, 5", "hex.ptr_add spslot_p, 4"),
     ("the load: an increment dropped", "read", FR,

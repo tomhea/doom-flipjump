@@ -60,7 +60,9 @@ NT, NVIS = len(BINDS), len(VIS[0])
 HEX_TARGETS = [("viewx", 8, 1), ("viewy", 8, 1), ("viewangle", 8, 1),
                ("dstate", NDOORS, 1), ("ddir", NDOORS, 1), ("dsub", NDOORS, 1),
                ("dwait", WAIT_NIBBLES * NDOORS, 1),
-               ("thss_rt", 16, NT), ("thpos_rt", 16, NT), ("thvis", 2, NVIS)]
+               ("thss_rt", 16, NT), ("thpos_rt", 16, NT), ("thvis", 2, NVIS),
+               # M7 P2a.1's door cells (restart_lines' nwalk=1: one W1 bit)
+               ("dreq", NDOORS, 1), ("pcard", 1, 1), ("wfired", 1, 1)]
 BYTE_TARGETS = [("sshead", NSS), ("thnext", NT)]
 FIELDS = "msv " + " ".join([f"{lb}[{i}]" for lb, _n, c in HEX_TARGETS for i in range(c)]
                            + [f"{lb}[{i}]" for lb, c in BYTE_TARGETS for i in range(c)])
@@ -69,7 +71,8 @@ FIELDS = "msv " + " ".join([f"{lb}[{i}]" for lb, _n, c in HEX_TARGETS for i in r
 DIRTY = {"viewx": [0x12345678], "viewy": [0x0BADF00D], "viewangle": [0x76543210],
          "dstate": [0x33], "ddir": [0x21], "dsub": [0x55], "dwait": [0x9A9A],
          "thss_rt": [0x9999, 0x8888, 0x7777], "thpos_rt": [0x1111, 0x2222, 0x3333],
-         "thvis": [0x5A, 0xA5], "sshead": [0xA5, 0x5A], "thnext": [0x77, 0x66, 0x55]}
+         "thvis": [0x5A, 0xA5], "sshead": [0xA5, 0x5A], "thnext": [0x77, 0x66, 0x55],
+         "dreq": [0x11], "pcard": [1], "wfired": [1]}
 
 
 def level_start(k) -> dict:
@@ -78,7 +81,8 @@ def level_start(k) -> dict:
     return {"viewx": [SPAWN.x & M32], "viewy": [SPAWN.y & M32], "viewangle": [SPAWN.angle & M32],
             "dstate": [0], "ddir": [0], "dsub": [0], "dwait": [0],
             "thss_rt": list(BINDS), "thpos_rt": list(POS), "thvis": list(vis),
-            "sshead": list(head), "thnext": list(nxt)}
+            "sshead": list(head), "thnext": list(nxt),
+            "dreq": [0], "pcard": [0], "wfired": [0]}
 
 
 def _dump():
@@ -273,6 +277,8 @@ def _broken(name):
         return _drop(common, "thss_rt"), skills
     if name == "the view's y and angle are not reset":
         return _drop(common, "viewy", "viewangle"), skills
+    if name == "the door cells of P2a.1 are not reset":
+        return _drop(common, "dreq", "pcard", "wfired"), skills
     if name == "no skill links its things":
         return common, [_drop(s, "thnext +") for s in skills]
     assert name == "no skill sets its flags", name
@@ -281,6 +287,7 @@ def _broken(name):
 
 BROKEN = ["the lists are not zeroed", "the doors are not shut", "the positions are not reset",
           "the bindings are not reset", "the view's y and angle are not reset",
+          "the door cells of P2a.1 are not reset",
           "no skill links its things", "no skill sets its flags"]
 
 

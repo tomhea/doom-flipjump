@@ -297,7 +297,9 @@ MUTANTS = [
      "hex.scmp 8, cm_oy, dbox, wo0_ol, wo0_ol, wo0_og", "hex.scmp 8, cm_oy, dbox, wo0_ol, wo0_og, wo0_og"),
     ("the walk-over extent inclusive", "walk", "wo1_fire, wo1_no, wo1_no", "wo1_fire, wo1_fire, wo1_no"),
     ("the walk-over fires twice", "walk", "    hex.set 1, wfired + 0*dw, 1", "    hex.zero 1, wfired + 0*dw"),
-    ("the blazing door one stride short", "doors", "    hex.inc 1, dstate + 8*dw\n", ""),
+    # BLAZE: the blazing door's slot, from the door order (12 on E1M1; a literal 8 once named
+    # sector 78, a plain door, so no mutant touched the stride -- PR #99 review)
+    ("the blazing door one stride short", "doors", "    hex.inc 1, dstate + BLAZE*dw\n", ""),
     ("the blue door's card check dropped", "doors", "    hex.if0 1, pcard, dr", "    hex.if0 1, duse, dr"),
 ]
 
@@ -316,6 +318,9 @@ def test_a_mutated_block_fails(tmp_path, lvl, label, prog, old, new):
         got = _ints(_run(tmp_path, "m", walk_program(lvl, _mutated(lines, old, new)), walk_feed(moves)))
         assert got != walk_expect(lvl, moves), label
     else:
+        blaze = [si for si in lvl.order if lvl.kinds[si] == "blaze"]
+        assert len(blaze) == 1
+        old = old.replace("BLAZE", str(lvl.order.index(blaze[0])))
         sched = door_schedule(lvl)
         lines = door_tic_lines(lvl.order, lvl.nstates, lvl.boxes, lvl.kinds)
         got = _ints(_run(tmp_path, "m", door_program(lvl, _mutated(lines, old, new)), door_feed(lvl, sched)))

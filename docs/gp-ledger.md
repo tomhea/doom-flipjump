@@ -408,3 +408,26 @@ P2a); size ESTIMATE +~0.1M words; plane ids MEASURED 233 (222 + 11; with P2b's l
    `p2a1_v3_growth_freeze.log`) -- every pose and drawn population reproduced.
 7. pinreport 20 of 20; the restore sets re-keyed (`p2a1_rekey.log`).
 
+## P2a.2 the exit switch and LEVEL COMPLETE (class F) -- declared 2026-09-28, before the build
+
+**What**: `docs/gp-exit.md`. The exit switch (linedef 407, special 11) in the binary: a use PRESS
+(the model's usedown edge, `pusedn`) inside its box (`doomfj.doors.exit_boxes`, now the model's own)
+ends the level -- `lvdone`, the world frozen as the model's frozen tic -- and opens the LEVEL
+COMPLETE screen (`menu_scr` 2); esc or enter lead to the main menu; NEW GAME resets both cells.
+
+**Budget**: ops ESTIMATE ~+0 on v3 (a nibble test, the use edge; the box test only on a press);
+size ESTIMATE +~1.3K words (one baked screen). No plane ids.
+
+**Kill criteria** (any one -> the binary does not ship; class F):
+1. Host: the exit box is linedef 407's inflated extent and the model's; the model exits exactly on
+   a press inside it (edge probes on both axes, held use never); menu_step's LEVEL COMPLETE
+   transitions; NEW GAME's reset of `lvdone`/`pusedn`; both persisted.
+2. fj: `exit_lines` run on E1M1's box against the rule, five mutants caught
+   (`tests/fj/test_exit_fj.py`); the menu state machine's LEVEL COMPLETE screen and the restart's
+   new writes run in `tests/fj/test_skill_menu.py`, each with a control.
+3. `m3_gate`, `m2_std_gate` byte- and state-exact with `lvdone`/`pusedn` read; `p2a_gate.py` S1-S8
+   byte- and state-exact, every control parting (S8: edge, frozen, restart); B0 on v3 pixel-exact.
+4. CAP-22 as P2a.1's; msframe B SLOWER against P2a.1's binary without an explanation.
+5. `pinreport.py`: a hot word not pinned; the restore sets not re-keyed to this rung's labels.
+
+**Row**: (filled after the build)

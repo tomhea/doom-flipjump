@@ -127,3 +127,55 @@ def mover_heights(secs, lifts: dict, lstates: dict, switch: dict, switched: bool
         for si, (low, _high) in switch.items():
             out[si] = (low, secs[si].ceil_h)
     return out
+
+
+class MoverPhase:
+    """The movers' frame for a gate ORACLE -- `doors.DoorPhase`'s twin, the model's rules in the
+    model's order: the lifts tic on last frame's triggers (`tic`), then the player's use press
+    (`use_press`: SR lifts, the S1 switch at once) and accepted move (`after_move`: WR lines) ask
+    for the next. The player's triggers only: a gate mirrors the binary, whose monsters trigger
+    lifts from P3.
+
+    The state is plain data, `(lifts, req, switched)`: `lifts` a tuple of (state, dir, sub, wait)
+    per lift in sector order, `req` a frozenset of lift sectors triggered for the next tic,
+    `switched` 1 once the floor switch fired."""
+
+    def __init__(self, secs, lds, sds, verts, quant: int = DEFAULT_QUANT):
+        self.secs = secs
+        self.stops = lift_states(secs, lds, sds, quant)
+        self.order = sorted(self.stops)
+        self.walk = lift_walk_triggers(secs, lds, sds, verts)
+        self.use = use_line_boxes(secs, lds, verts, LIFT_USE_SPECIALS)
+        self.of_tag = {secs[si].tag: si for si in self.order}
+        self.switch = switch_sectors(secs, lds, sds)
+        self.switch_boxes = [b for _t, b in use_line_boxes(secs, lds, verts, FLOOR_SWITCH_SPECIALS)]
+
+    def initial(self):
+        return (tuple((0, IDLE, 0, 0) for _ in self.order), frozenset(), 0)
+
+    def tic(self, state):
+        lifts, req, sw = state
+        return (tuple(lift_tic(st, len(self.stops[si]), si in req)
+                      for si, st in zip(self.order, lifts)), frozenset(), sw)
+
+    def use_press(self, state, x16: int, y16: int):
+        from doomfj.doors import in_use_box_fixed
+        lifts, req, sw = state
+        req = set(req)
+        for tag, box in self.use:
+            if in_use_box_fixed(box, x16, y16):
+                req.add(self.of_tag[tag])
+        if not sw and any(in_use_box_fixed(b, x16, y16) for b in self.switch_boxes):
+            sw = 1
+        return (lifts, frozenset(req), sw)
+
+    def after_move(self, state, old16: tuple, new16: tuple, radius: int = 16):
+        from doomfj.doors import crossed
+        lifts, req, sw = state
+        req = set(req) | {t[0] for t in self.walk if crossed(t, old16, new16, radius)}
+        return (lifts, frozenset(req), sw)
+
+    def heights(self, state) -> dict:
+        lifts, _req, sw = state
+        return mover_heights(self.secs, self.stops,
+                             {si: st[0] for si, st in zip(self.order, lifts)}, self.switch, sw)

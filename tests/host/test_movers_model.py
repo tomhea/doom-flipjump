@@ -160,3 +160,30 @@ def test_a_player_centred_in_a_32_thick_door_touches_it(w):
     w.teleport_player(cx, cy)
     assert w.player_sector() == si
     assert w.door_touched(si)
+
+
+def test_the_gate_phase_is_the_models_on_a_ride(w):
+    """MoverPhase fed the model's own poses and use presses reproduces its lift cells and heights
+    every frame -- a walk onto lift 98 over its WR line, a ride down and back, an SR press"""
+    from doomfj.movers import MoverPhase
+    mp = MoverPhase(w.secs, w.lds, w.sds, w.mw.vertexes(w.mapname))
+    assert mp.order == w.lift_order
+    st = mp.initial()
+    w.teleport_player(128 * U, 160 * U, 0x40000000)
+    keys = [{"forward": True}] * 5 + [{}] * 50 + [{"use": True}, {}, {}]
+    deepest = []
+    for kd in keys:
+        pre = (w.ws.px, w.ws.py)
+        press = kd.get("use") and not w.ws.p_usedown
+        w.tic(kd)
+        st = mp.tic(st)
+        if press:
+            st = mp.use_press(st, *pre)
+        st = mp.after_move(st, pre, (w.ws.px, w.ws.py))
+        cells = tuple((w.ws.l_state[k], w.ws.l_dir[k], w.ws.l_sub[k], w.ws.l_wait[k])
+                      for k in range(2))
+        assert st[0] == cells and st[1] == {si for k, si in enumerate(w.lift_order) if w.ws.l_req[k]}
+        assert mp.heights(st) == w.mover_heights_now()
+        deepest.append(st[0][0][0])
+    assert max(deepest) == 9 and 0 in deepest[40:56], "the ride: all the way down and back up"
+    assert deepest[-1] >= 1, "the SR press at the top starts the second ride"

@@ -732,14 +732,38 @@ class Oracle:
                                                     {**h, **(movers or {})})
         return self._scenes[(key, mkey)]
 
-    def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None) -> bytes:
+    def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
+               views=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
-        `movers`: M7 P2b, the movers' heights (`scene_for`)"""
+        `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
+        `thing_views` list (`monster_views`), None for every thing's type art"""
         from doomfj.reference_model import SimState
         return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
                                                thing_hidden=set(self.hidden) | set(hidden_extra),
-                                               **self.RENDER_KW))
+                                               thing_views=views, **self.RENDER_KW))
+
+    # -- M7 P3.1: the monsters' views ----------------------------------------------------------
+    def monster_drawable(self, world) -> list:
+        """monster slot -> drawable index (the render's index space), matched on the WAD thing"""
+        if getattr(self, "_mdi", None) is None:
+            from doomfj.things import drawable_things
+            drawable, _ = drawable_things(self.rm, self.mw.things(self.mapname), self.art, {})
+            key = {(t.type, t.x, t.y, t.angle, t.flags): i for i, t in enumerate(drawable)}
+            self._ndrawable = len(drawable)
+            self._mdi = [key[(t.type, t.x, t.y, t.angle, t.flags)] for t in world.mon_things]
+        return self._mdi
+
+    def monster_views(self, phase, x16, y16) -> list:
+        """`render(views=)` for a `monsters.MonsterPhase` seen from (x16, y16)"""
+        if getattr(self, "_patches", None) is None:
+            from doomfj.wall_renderer import anim_frames, anim_patches
+            self._patches = anim_patches(self.art, anim_frames(self.mw, self.mapname))
+        mdi = self.monster_drawable(phase.world)
+        out = [None] * self._ndrawable
+        for m, v in phase.views(self.rm, self._patches, x16, y16).items():
+            out[mdi[m]] = v
+        return out
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""

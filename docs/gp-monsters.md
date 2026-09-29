@@ -95,3 +95,32 @@ Emitted in the game tier, reachable by nothing:
 Kill criteria: each table run in `tests/fj` over EVERY index against its Python source with a mutant caught; every
 gate byte-exact with ops identical to blocked36 but for placement; size <= +0.5M words (to be priced before the
 build); msframe not B SLOWER (class S).
+
+## 7. P3.1 -- idle life (the design as it will be coded)
+
+**Model**: `World(monsters="idle")` -- A_Look returns at once (nothing wakes); every other rule is the full model's.
+In idle every monster loops its spawn states (a `STND` pair, 10 tics each, on E1M1's types). The gate oracles step it
+through `doomfj.monsters.MonsterPhase` (the model's `_monsters_phase`, once per game frame after the player).
+
+**The one view rule** (`doomfj.monsters`): the drawn view is the state's frame at DOOM's rotation
+`((R_PointToAngle(viewer -> thing) + 0x90000000) >> 29) - facing, mod 8, + 1`, read off the WAD's lump names
+(`wall_renderer.anim_patches`); a second-half lump is drawn MIRRORED. The oracle takes it through
+`render_wall_frame(thing_views=...)` (the view's art; a mirrored view's column is `dw - 1 - u`).
+
+**fj**, each piece with a `tests/fj` harness against the Python rule before it joins the program:
+1. **The cells**: `mon_state` (2 nibbles), `mon_tics` (1), `mon_facing` (1), `mon_active` (1) per monster slot of the
+   union image, generated from `world.build_schema` (rule 7), persisted (`MONSTER_PERSIST`), reset by NEW GAME to the
+   skill's spawn values.
+2. **The tic** (`monstercode.mon_tic_lines`): per slot, unrolled -- inactive or forever: nothing; tics > 0: decrement,
+   still > 0: done; READY: `mstate.lookup` -> the next state, its tics, its action; the zero-tic chain bounded as the
+   model's. Idle has no heavy action, so the K-slot scheduler comes with P3.2.
+3. **The rotation** (`mon.rotation`): `proj.point_to_angle` viewer -> thing (16.16, exact), one 8-nibble add of
+   0x90000000, and a 2-nibble lookup on (the top nibble, facing) -> the rotation index.
+4. **Per-view sprite rows**: the thing row tables (`throw` hot / `throwc` cold) gain one row per distinct monster VIEW
+   (lump, mirrored) after today's per-thing rows; the cold row carries the mirror flag. A runtime thing's row index is
+   no longer `ti`: a jump on `ti` into its stub (rule 1) sets it -- a static thing its own row, a monster
+   `VIEWBASE + mview[group, rot]` from its slot's cells. `sprlt` widens to every row's heights.
+5. **Mirroring** in `frame.thing_record_body`: after the column's clamped `u`, a mirrored row takes `dw - 1 - u` (a
+   one-nibble flag test per column).
+Gates: every gate's oracle runs `MonsterPhase` and draws `thing_views`; a monster gate pokes states and facings and runs
+N frames, state- and byte-exact, with controls (no tic; no rotation; no mirror).

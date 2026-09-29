@@ -36,5 +36,5 @@ $ python scratchpad/gp/scenarios_v2.py --selftest --file scratchpad/gp/scenarios
   S10 the planner is deterministic (checkpoint 0 re-planned = its keys)            ok
   S11 an injection one unit off parts the camera on every moving frame             ok  84/84
 
-SCENARIOS_V2 SELFTEST PASS (999 s)
+SCENARIOS_V2 SELFTEST PASS (748 s)
 rc=0

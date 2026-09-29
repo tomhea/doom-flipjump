@@ -96,6 +96,9 @@ def model_frames(run: dict, proxy: bool = False) -> list:
         inj, bkeys = S.b0_injection(w.rm, pre, post, kd, proxy=proxy)
         out.append({"inj": inj, "keys": bkeys, "doors": pre_doors, "movers": pre_movers,
                     "exp": mirror.step(inj, bkeys, pre_doors, pre_movers), "post": post,
+                    # M7 P2b: the movers' heights the binary draws this frame (the mirror's, after
+                    # its move -- p2a_gate's rule); without them a lift in view parts the picture
+                    "mheights": mirror.mp.heights(mirror.mstate),
                     "post_doors": tuple(ws.d_state),
                     "strafe_only": S.has_strafe(kd) and not (kd.get("forward") or kd.get("back"))})
     return out
@@ -150,7 +153,8 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         cam += c_part
         door += d_part
         if f % pixel_every == 0 or c_part or d_part:
-            want = orc.render(P_signed(epose[0]), P_signed(epose[1]), epose[2], tuple(edoors))
+            want = orc.render(P_signed(epose[0]), P_signed(epose[1]), epose[2], tuple(edoors),
+                              movers=fr.get("mheights"))
             pix_ok.append(r.frames[mf + f] == want)
             pix_frames.append(f)
     return {"ops_total": r.ops, "frame_ops": ops_f, "state_ok": state_ok, "pix_ok": pix_ok,

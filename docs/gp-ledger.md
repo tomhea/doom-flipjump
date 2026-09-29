@@ -490,5 +490,40 @@ WR/SR/S1 triggers -- and door reversal in `doors.door_tic`; the model runs them.
    approval before any P2b binary is measured against the cap.
 3. L1-L3: byte- and state-exact gates with the movers in every oracle; plane ids <= 255.
 
-**Row**: (filled after the builds)
+**Row** (blocked36, sha256 `1cbc8226bb70e687`, built at 4118d8d; `docs/ship-evidence/blocked36_*`):
+
+| measure | blocked35 (P2a.2) | blocked36 (P2b) | delta |
+|---|---|---|---|
+| combat set binding | v3 14,218,744 | v4 **14,227,169** | the sets differ in one run; the 10 shared runs: mean -16,397 |
+| ... R2-spectre-corridor (v3 walks, v4 rides lift 103) | 11,066,540 | 11,400,392 | +333,852 (a different route) |
+| ... with strafe's collision (proxy) | v3 14,253,712 | v4 14,259,942 | |
+| gamespeed binding | 13,745,300 | 13,644,614 | **-100,686** |
+| size (% of 2^27) | 27.21% | 28.24% | **+1,374,270 words** (budget +0.35M) |
+| plane ids | 233 | 254 | +21 (the spike's count, exact) |
+| ms/frame (msframe, one run, A = blocked35) | 74.9 | 73.4 | NOT SEPARATED (the arms part at frame 33: lift 98) |
+| ... pixel-identical, first 30 frames, 9 reps | 112.4 | 116.3 | NOT SEPARATED (pairs 0.861 .. 1.015) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**The size, attributed** (`blocked35_poolmap.log` -> `blocked36_poolmap.log`, label families): the
+pool's payload +413,822 words (+12,931 tables); below the pool +960,448 -- +273K in labelled code
+(plane-band thunks `vpb_t`, the per-state seg consts `seg*_*_consts_st*`, the mover dispatch
+`dr*_ct_*`, the dual-end seg code) and +687K in the program's UNLABELLED tail after `m1_reset` (code:
+ops that fall through, 5.67M -> 6.01M ops -- read as the assembler's out-of-line flip sequences for
+the new code, NOT confirmed). The spike's 241K counted band ids, band bodies, pair blocks and state
+blocks only. All of it is the rung's own code. **Kill criterion (size, 1.25x) BREACHED -- the owner,
+2026-09-29: ship blocked36**; the end-of-game size projection moves from ~32.6-33.3% to ~33.7-34.4%.
+
+**Verdict: every kill criterion met but the size budget, which the owner waived.**
+1. Host: 1,399 passed on the re-keyed tree (`blocked36_host_suite.log`); the movers' geometry, the
+   lift cycle, the triggers, the rides, door reversal, each with a mutation caught
+   (`tests/host/test_movers_model.py` and the P2b host tests).
+2. The frozen set: v4 FROZEN by the owner (`p2b_v4_freeze.log`) -- re-planned on the tree with PR
+   #99's planner fix, R0-imp-court back to v3's exact keys, so v4 = v3 but R2-spectre-corridor; B0 on
+   v4 exact on every frame of 11 runs; `--selftest` on v4 (`p2b_v4_selftest.log`).
+3. m3_gate, m2_std_gate byte- and state-exact with the movers read; p2a_gate S1-S13, every control
+   parting; B0 v4 pixel-exact (first run without the movers' heights parted exactly on the lift run:
+   `blocked36_b0_v4_no_mover_heights.log`, the harness fixed); plane ids 254 <= 255.
+4. CAP-22: v4 14.23M <= 22M, size 28.24% <= 35%; msframe NOT SEPARATED. Ops: -100,686 on the
+   binding metric (budget +0.1M).
+
 

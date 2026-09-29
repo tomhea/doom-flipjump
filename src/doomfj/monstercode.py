@@ -176,3 +176,36 @@ def mon_tic_lines(schema, nmon: int, tag: str = "mt") -> list:
     return out
 
 MT_DECLS = ["mt_row: hex.vec 6"]
+
+
+# ---- P3.1: the rotation (doomfj.monsters.rotation, R_ProjectSprite's) -----------------------------------------------
+def rot_table_values() -> List[int]:
+    """`mrot[(n << 4) | facing]`, n the viewer-to-thing angle's TOP nibble: the rotation INDEX (rotation - 1).
+    ((ang + 0x90000000) >> 29) is ((n + 9) & 15) >> 1 -- the lower nibbles of 0x90000000 are 0, so nothing carries
+    into the top one -- and subtracting facing * ANG45 only moves bits 29..31, so it subtracts facing mod 8."""
+    vals = [0] * 256
+    for n in range(16):
+        for f in range(8):
+            vals[(n << 4) | f] = ((((n + 9) & 15) >> 1) - f) & 7
+    return vals[:(15 << 4) + 8]
+
+
+def rotation_leaf_lines(disp: int = 1) -> list:
+    """the shared leaf: mr_rot = the rotation index of a thing at (mr_tx, mr_ty) facing mr_face, seen from
+    (viewx, viewy) -- all 16.16 / nibble cells; `stl.fcall mon_rot_leaf, mr_ret`"""
+    return [
+        "mon_rot_leaf:",
+        "    proj.point_to_angle mr_ang, viewx, viewy, mr_tx, mr_ty, %d" % disp,
+        "    hex.mov 1, mr_idx + 1*dw, mr_ang + 7*dw",
+        "    hex.mov 1, mr_idx, mr_face",
+        "    mrot.lookup mr_rot, mr_idx",
+        "    stl.fret mr_ret",
+    ]
+
+
+ROT_DECLS = ["mr_ang: hex.vec 8", "mr_tx: hex.vec 8", "mr_ty: hex.vec 8", "mr_face: hex.vec 1",
+             "mr_idx: hex.vec 2", "mr_rot: hex.vec 1", "mr_ret: hex.vec w/4"]
+
+
+def rot_table_fj() -> str:
+    return generate_dispatch_table_fj("mrot", rot_table_values(), index_nibbles=2, result_nibbles=1)

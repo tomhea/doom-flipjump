@@ -552,6 +552,9 @@ class TicEvents:
         return dataclasses.asdict(self)
 
 
+MONSTER_MODES = ("idle", "full")
+
+
 def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
     """The rotating cursor: the next tic starts at the first monster that was deferred, so it is
     served first; with no deferral the cursor stays. Injectable (World(cursor_policy=...)) so a
@@ -578,13 +581,17 @@ class World(CombatMixin):
                  sight: Optional[Callable[["World", int], bool]] = None,
                  k_heavy: int = K_HEAVY, cursor_policy: Callable = next_cursor,
                  strict: bool = False, aim: Optional[Callable] = None,
-                 player_blocking: bool = True):
+                 player_blocking: bool = True, monsters: str = "full"):
         if map_wad is None:
             from doomfj.config import DEFAULT_MAP_WAD
             from doomfj.wad import WadFile
             map_wad = WadFile.from_path(DEFAULT_MAP_WAD)
         self.mw, self.mapname = map_wad, mapname
         self.rm = rm or ReferenceModel()
+        # M7 P3 (docs/gp-monsters.md section 1): the MODEL MODE a rung's binary is exact against --
+        # "idle" (P3.1): the states run, A_Look sees and hears nothing; "full": everything
+        assert monsters in MONSTER_MODES, monsters
+        self.monsters = monsters
         self.sight = sight or World.los_to_player
         self.k_heavy = k_heavy
         self.cursor_policy = cursor_policy
@@ -1001,6 +1008,8 @@ class World(CombatMixin):
         sight, and otherwise falls through to the look); else P_LookForPlayers with the facing."""
         ws = self.ws
         ws.mon_threshold[m] = 0
+        if self.monsters == "idle":
+            return                                       # P3.1: nothing wakes a monster
         if self.player_alive() and ws.snd_alert[self.sector_node[self._mon_sector(m)]]:
             ws.mon_target[m] = 1
             if not ws.mon_ambush[m] or self.sight(self, m):

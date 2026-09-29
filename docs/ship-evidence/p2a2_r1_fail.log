@@ -1,0 +1,26 @@
+$ python -m pytest tests/host/test_exit_p2a2.py tests/fj/test_exit_fj.py -q  # on P2a.1's src/ (6b3fab0, tree 6d5c1ac)
+________________ ERROR collecting tests/host/test_exit_p2a2.py ________________
+ImportError while importing test module 'C:\Users\tomhe\Documents\doom-m7h\tests\host\test_exit_p2a2.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\host\test_exit_p2a2.py:9: in <module>
+    from doomfj.menu import LEVEL_DONE_SCR, menu_step
+E   ImportError: cannot import name 'LEVEL_DONE_SCR' from 'doomfj.menu' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\plan\p2a\r1src\src\doomfj\menu.py)
+__________________ ERROR collecting tests/fj/test_exit_fj.py __________________
+ImportError while importing test module 'C:\Users\tomhe\Documents\doom-m7h\tests\fj\test_exit_fj.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\AppData\Local\Programs\Python\Python311\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\fj\test_exit_fj.py:17: in <module>
+    from doomfj.menu import LEVEL_DONE_SCR
+E   ImportError: cannot import name 'LEVEL_DONE_SCR' from 'doomfj.menu' (C:\Users\tomhe\AppData\Local\Temp\claude\C--Users-tomhe-Documents-doom-flipjump\29ddbecf-cbb7-4734-805a-36c0e391327d\scratchpad\plan\p2a\r1src\src\doomfj\menu.py)
+=========================== short test summary info ===========================
+ERROR tests/host/test_exit_p2a2.py
+ERROR tests/fj/test_exit_fj.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!
+2 errors in 0.63s

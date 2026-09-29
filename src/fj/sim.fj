@@ -321,7 +321,7 @@ ns sim {
     // what every tier had, op for op; `sel`/`selret` are then 0.
     def thing_load throw, n_th, thpos, ti, anim, sel, selret \
             @ body, row, zt, pos, poff, pbase, pptr \
-            < ss_flr, sp_x, sp_y, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
+            < ss_flr, sp_z, sp_left, sp_w, sp_hh, sp_tzmax, sp_tzmax2, \
               sp_mon, sp_ti {
         ;body
       row: hex.vec 34

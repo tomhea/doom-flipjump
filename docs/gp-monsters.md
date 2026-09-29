@@ -124,3 +124,24 @@ through `doomfj.monsters.MonsterPhase` (the model's `_monsters_phase`, once per 
    one-nibble flag test per column).
 Gates: every gate's oracle runs `MonsterPhase` and draws `thing_views`; a monster gate pokes states and facings and runs
 N frames, state- and byte-exact, with controls (no tic; no rotation; no mirror).
+
+## 8. P3.2 -- awake (the plan; the sight decision comes first)
+
+**What wakes and moves** (the model's `full` mode, `world.py`): A_Look (sound by region -- `snd_alert` per sound node,
+shots only until P4 fires; sight by `self.sight`), then A_Chase every chase state: reaction and threshold count down,
+the facing turns toward movedir (`mturn`), melee/missile DECISIONS (the attack states run; their effects are P5), and
+P_Move one step along movedir (speed per type, `step_delta`'s 8/6 and 10/7 diagonals), P_NewChaseDir with the RNG
+(`mrnd`) on a blocked or spent move, capped at 6 tries (D5). A step goes through P_TryMove: lines (with
+ML_BLOCKMONSTERS), the step-up/height/drop-off rules, solid things as boxes; a failed step in a door's monster use box
+presses the door (`dreq`, D5); a WR line crossed triggers its lift. The leaf lists relink per move (P1.3's
+`sim.leaf_unlink`/`leaf_link`), `thpos_rt` takes the new position.
+
+**Cost and structure**: every heavy act (A_Chase, A_FaceTarget, an attack state) takes one of K = 6 slots per tic in
+the model's cursor order; the slot's cells copy into one fixed window, ONE shared leaf runs the act on the window
+(compile-time addresses, rule 1), the cells copy back. The monster collision is its own cell set: radius 30 lists
+(a superset of 20's, measured 17,666 entries against the player's 11,667) with the BLOCKMONSTERS rows.
+
+**The open decision -- the sight rule** (section 4): exact 2D LOS in fj needs 16.16 cross products per candidate line,
+runtime multiplies against rule 3; the handoff's "seen" rule is cheap but a behaviour change (a new set version, the
+owner). To be decided with the owner on measured numbers: the LOS probe's price per check, and the seen rule's effect
+on the frozen set (how many v4 runs part, their criteria).

@@ -157,6 +157,14 @@ def test_provenance_names_commands_that_exist(doc):
 
 # -- M5: the two sets differ in exactly the two ways the standalone PROGRAM differs ---------------
 
+def _monster_decls():
+    """M7 P3.1: the monsters' cells as the emitter declares them (monstercode.monster_decls)"""
+    from doomfj.monstercode import monster_decls
+    from doomfj.world import World
+    w = World()
+    return monster_decls(w.schema, w.layout.nmon)
+
+
 def test_the_standalone_set_drops_only_the_wire_magic():
     """The hosted program checks a MAGIC byte on the wire; the standalone one has no wire. That is
     the ONLY label allowed to disappear -- anything else vanishing is a hole, and a hole hangs."""
@@ -178,7 +186,8 @@ def test_the_standalone_set_drops_only_the_wire_magic():
     _nl = len(lift_states(_w.sectors("E1M1"), _w.linedefs("E1M1"), _w.sidedefs("E1M1")))
     expected = {name for name, _ in
                 (decl_words(d) for d in list(STANDALONE_SCRATCH_DECLS) + door_decls(_nd)
-                 + mover_decls(_nl))}               # M7 P2b: the movers' cells
+                 + mover_decls(_nl)                 # M7 P2b: the movers' cells
+                 + _monster_decls())}                # M7 P3.1: the monsters' cells
     assert standalone - hosted == expected, (
         "the standalone set adds %s, which is not STANDALONE_SCRATCH_DECLS + the door state"
         % sorted(standalone - hosted))

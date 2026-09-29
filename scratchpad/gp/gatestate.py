@@ -24,14 +24,17 @@ STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
                "dstate", "ddir", "dsub", "dwait",
                "dreq", "pcard", "wfired",        # M7 P2a.1: doors.DoorPhase's (req, card, fired)
                "lvdone", "pusedn",               # M7 P2a.2: the exit's
-               "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch")   # M7 P2b: movers.MoverPhase's
+               "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",   # M7 P2b: movers.MoverPhase's
+               "mon_state", "mon_tics", "mon_facing", "mon_active")   # M7 P3.1: monsters.MonsterPhase's
 
 
-def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2):
+def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1, nlift: int = 2,
+                      nmon: int = 0):
     """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
     each present]). `labels` is the build's own label table (build_labeled.py writes it)."""
-    cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift).items() if n in STATE_NAMES}
-    missing = sorted(set(STATE_NAMES) - set(cells))
+    cells = {n: c for n, c in P.game_cells(ndoors, nwalk, nlift, nmon).items() if n in STATE_NAMES}
+    # M7 P3.1: a gate that does not pass `nmon` asks for no monster cells (a binary before P3.1)
+    missing = sorted(set(STATE_NAMES) - set(cells) - (set() if nmon else MONSTER_NAMES))
     assert not missing, "probe.game_cells lost %s -- the state check would skip them" % missing
     table = P.LabelTable.load(labels, {c.label for c in cells.values()})
     gb = P.GameBinary(fjm)
@@ -45,8 +48,11 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int 
     return r.frames, r.ops, reads
 
 
+MONSTER_NAMES = {"mon_state", "mon_tics", "mon_facing", "mon_active"}
+
+
 def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exit_=None,
-                 movers=None, mover_order=None) -> dict:
+                 movers=None, mover_order=None, monsters=None) -> dict:
     """the oracle's state after a frame, in the cells' own units: the view as signed 16.16, the
     angle's 32 bits, and each door cell a tuple in door order (`doors`: the per-door
     (state, direction, sub-step, timer) tuples, sorted by sector as the binary numbers them).
@@ -66,6 +72,8 @@ def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None, exi
         extra.update({"lstate": tuple(t[0] for t in lifts), "ldir": tuple(t[1] for t in lifts),
                       "lsub": tuple(t[2] for t in lifts), "lwait": tuple(t[3] for t in lifts),
                       "lreq": tuple(int(si in req) for si in mover_order), "fswitch": sw})
+    if monsters is not None:                    # M7 P3.1: a monsters.MonsterPhase's state()
+        extra.update(monsters)
     return {**extra, "viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": angle & 0xFFFFFFFF,
             "mode": mode, "menu_scr": scr, "menu_sel": sel,
             "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),

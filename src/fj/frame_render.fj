@@ -508,7 +508,27 @@ ns frame {
         hex.read_table_packed 1, sp_lt, sprlt, nlti, lti // zeroes dst, so dst == idx destroys it
     }
 
-    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic \
+    // M7 P3.1: a monster VIEW drawn mirrored (the second half of a `TROOA2A8` lump) sets bit 7 of its
+    // row's dw byte -- dw is at most 0x7F, so no row today has it. Take it into `flag` and clear it,
+    // so every reader of sp_dw sees the width alone.
+    def rec_mirror_flag wid, flag @ yes, done {
+        hex.zero 1, flag
+        hex.if_flags wid + 1*dw, 0xFF00, done, yes
+      yes:
+        hex.set 1, flag, 1
+        hex.sub_constant 1, wid + 1*dw, 8
+      done:
+    }
+    // ... and per column, after the clamp: u = dw-1 - u (reference_model: `art[2] - 1 - u`)
+    def rec_mirror_u flag, u, umax, tmp @ skip {
+        hex.if0 1, flag, skip
+        hex.mov 2, tmp, umax
+        hex.sub 2, tmp, u
+        hex.mov 2, u, tmp
+      skip:
+    }
+
+    def thing_record_body budget, monbudget, minz, projection, centerx, centery, viewwc, viewh, ds, hdb, slotstride, ttwice, deg, dsofts, dsoftm, sprbminh, spn, lowh, neartz, mt, throwc, n_thc, sprltc, nltic, mir, mirf, miru \
             @ budget_ok, not_full, scenery_budget, inc_scenery, inc_done, set_tstop, ret, x1_negative, x1_done, x2_clamp, x2_done, col_loop, col_body, u_clamp, soft_scenery, soft_under, soft_done, bslot_no, bslot_done, hd_lowdetail, hd_done, blockbase_done, mid_base, hd_base, col_check, slot_check, slot_a, slot_b, slot_done, col_next, do_store, end \
             < n_thing, n_mon, full, tstop, drawn, sprflag, spslot, sprbank, sprlight, sp_base, sp_dw, sp_lt, sp_mon, thing_ret, degfl, ballow, sp_base2, thfar, hdfl, trb_blk, trb_blk_const, trb_bucket, trb_bucket_h, trb_cbound, trb_climit, trb_col_x, trb_drawn_b, trb_drawn_p, trb_drawn_v, trb_dthp, trb_dtis, trb_dtx1, trb_dtx2, trb_dtyt, trb_dvis, trb_dw_max, trb_frac_u, trb_negx1, trb_run_last, trb_shade_row, trb_slot_flag, trb_slot_ofs, trb_sprflag_b, trb_sprflag_p, trb_sprflag_v, trb_tab_idx, trb_tbl_b, trb_tbl_p, trb_thpx, trb_tistep, trb_tx1, trb_tx2, trb_tytop, trb_u, trb_vis, trb_y0, \
               gpslot, gps_nslot, gps_s_rec, gps_sidx, gps_sbase, gps_ptr, gps_yb8 {
@@ -554,6 +574,7 @@ ns frame {
         // drawn sprite needs. `mt` is 0 on the static path, where the registers are baked by the
         // leaf's xor_by block instead and this expands to nothing.
         rep(mt, k) .thing_load_cold throwc, n_thc, sprltc, nltic
+        rep(mir, k) .rec_mirror_flag sp_dw, mirf     // M7 P3.1: a mirrored VIEW's row (dw bit 7)
         hex.if0 2, sp_mon, inc_scenery          // ... and credit the counter this thing spends
         hex.inc 2, n_mon
         ;inc_done
@@ -673,6 +694,7 @@ ns frame {
       u_clamp:
         hex.mov 2, trb_u, trb_dw_max
       col_check:
+        rep(mir, k) .rec_mirror_u mirf, trb_u, trb_dw_max, miru
         hex.read_hex trb_drawn_v, trb_drawn_p     // drawn[] holds 0/1 -- one nibble (idea 10)
         hex.if0 1, trb_drawn_v, slot_check          // a nearer wall owns this column -> the thing is hidden
         ;col_next

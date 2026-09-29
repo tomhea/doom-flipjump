@@ -141,7 +141,17 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     ops_f = p.frame_ops()[mf:mf + len(frames)]
     state_ok, pix_ok, pix_frames = [], [], []
     cam = door = 0
+    # M7 P3.1: the binary's monsters live IDLE from its boot image (the model's own phase, a tic per
+    # world frame after the player); B0 injects the player, doors and movers, not them, so the
+    # picture it expects is the static set's world with those monsters' views (docs/gp-monsters.md 5)
+    mph = mviews = None
+    if "mon_state" in table.addrs:
+        from doomfj.monsters import MonsterPhase
+        from doomfj.wall_renderer import BOOT_SKILL
+        mph = MonsterPhase(orc.mw, orc.mapname, BOOT_SKILL, rm=orc.rm, mode="idle")
     for f, fr in enumerate(frames):
+        if mph is not None:
+            mph.tic()
         epose, edoors = override[f] if override is not None else fr["exp"]
         got = readback.get(f)
         state_ok.append(got is not None and got["mode"] == 0 and (
@@ -154,7 +164,9 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
         door += d_part
         if f % pixel_every == 0 or c_part or d_part:
             want = orc.render(P_signed(epose[0]), P_signed(epose[1]), epose[2], tuple(edoors),
-                              movers=fr.get("mheights"))
+                              movers=fr.get("mheights"),
+                              views=orc.monster_views(mph, P_signed(epose[0]), P_signed(epose[1]))
+                              if mph is not None else None)
             pix_ok.append(r.frames[mf + f] == want)
             pix_frames.append(f)
     return {"ops_total": r.ops, "frame_ops": ops_f, "state_ok": state_ok, "pix_ok": pix_ok,
@@ -181,7 +193,7 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
     orc = GameOracle()
     assert list(orc.door_order) == list(S.new_world().door_order), "door order differs"
     with P.binary_lock("S4v2-b0"):
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift).values()})
+        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()})
         gb = P.GameBinary(fjm)
         base = gb.run(gate.MENU_FRAMES).ops           # startup + the menu frames, EXACT
         print("b0_scenarios: %s sha256 %s | set %s (%d runs, keys %s) | startup+menu %s ops (exact)"
@@ -349,7 +361,7 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
             fr2["post_doors"] = None
         opened.append(fr2)
     with P.binary_lock("S4v2-b0-selftest"):
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift).values()})
+        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon).values()})
         gb = P.GameBinary(fjm)
         r1 = drive(gb, table, orc, frames, pixel_every=10)
         check("T1 gamespeed run %d, every door written each frame, reproduces the recorded total"

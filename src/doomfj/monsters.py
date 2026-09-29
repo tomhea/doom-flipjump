@@ -62,3 +62,25 @@ class MonsterPhase:
             rot = rotation(rm, view_x16, view_y16, ws.mon_x[m] << 16, ws.mon_y[m] << 16, ws.mon_facing[m])
             out[m] = view_of(patches, st.sprite, st.frame_index, rot)
         return out
+
+
+class MonsterViews:
+    """`render_wall_frame(thing_views=...)` for a MonsterPhase: the monsters' views in the render's DRAWABLE order
+    (`things.drawable_things`, the index space the emitter bakes by), None for every other thing. One mapping for
+    every gate, matched on the WAD thing (type, x, y, angle, flags)."""
+
+    def __init__(self, rm, map_wad, mapname: str, sprite_wad, world):
+        from doomfj.things import drawable_things
+        from doomfj.wall_renderer import anim_frames, anim_patches
+        drawable, _ = drawable_things(rm, map_wad.things(mapname), sprite_wad, {})
+        key = {(t.type, t.x, t.y, t.angle, t.flags): i for i, t in enumerate(drawable)}
+        self.n = len(drawable)
+        self.mdi = [key[(t.type, t.x, t.y, t.angle, t.flags)] for t in world.mon_things]
+        self.patches = anim_patches(sprite_wad, anim_frames(map_wad, mapname))
+        self.rm = rm
+
+    def __call__(self, phase: "MonsterPhase", x16: int, y16: int) -> list:
+        out = [None] * self.n
+        for m, v in phase.views(self.rm, self.patches, x16, y16).items():
+            out[self.mdi[m]] = v
+        return out

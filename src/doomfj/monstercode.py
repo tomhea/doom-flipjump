@@ -108,3 +108,71 @@ def p30_tables_fj() -> List[str]:
         generate_dispatch_table_fj("mopp", opposite_values(), index_nibbles=1, result_nibbles=1),
         generate_dispatch_table_fj("mrnd", rnd_values(), index_nibbles=2, result_nibbles=4),
     ]
+
+
+# ---- P3.1: the cells and the tic (docs/gp-monsters.md section 7) ----------------------------------------------
+# the per-slot cells P3.1 holds, (schema field, nibbles) -- widths from world.build_schema (rule 7)
+P31_FIELDS = ("mon_state", "mon_tics", "mon_facing", "mon_active")
+
+
+def cell_nibbles(schema, name: str) -> int:
+    f = next(x for x in schema if x.name == name)
+    return (f.bits + 3) // 4
+
+
+def monster_decls(schema, nmon: int, values: dict = None) -> list:
+    """the P3.1 cells as fj declarations, `nmon` slots each, from the schema's widths; `values` (field -> per-slot
+    list) gives their initial contents (the boot skill's level start), zero otherwise"""
+    out = []
+    for name in P31_FIELDS:
+        nib = cell_nibbles(schema, name)
+        vals = (values or {}).get(name, [0] * nmon)
+        assert len(vals) == nmon, (name, len(vals), nmon)
+        out.append("%s:" % name)
+        out += ["  hex.vec %d, %d" % (nib, v) for v in vals]
+    return out
+
+
+def idle_reachable_actions() -> set:
+    """every action a monster can run WITHOUT waking: the states reachable from the spawn states by `next` alone"""
+    acts = set()
+    for mt in MONSTER_TYPES:
+        s, seen = gd.MOBJINFO[mt].spawnstate, set()
+        while s and s != gd.S_NULL and s not in seen:
+            seen.add(s)
+            acts.add(gd.STATES[s].action)
+            s = gd.STATES[s].next
+    return acts
+
+
+def mon_tic_lines(schema, nmon: int, tag: str = "mt") -> list:
+    """P3.1's monster tic, unrolled over the slots: inactive or forever -> nothing; else tics -= 1, and at 0 the
+    state steps -- `mstate` gives the current state's next, then that state's tics. A monster state never has 0
+    tics (asserted), so a step is ONE state, and in idle no action but A_Look (a no-op there) can run (asserted)."""
+    assert all(gd.STATES[s].tics != 0 for s in monster_states()), "a zero-tic monster state: the step would chain"
+    assert idle_reachable_actions() <= {None, "A_Look"}, idle_reachable_actions()
+    ns, nt = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics")
+    na = cell_nibbles(schema, "mon_active")
+    assert (ns, nt, na) == (2, 1, 1), (ns, nt, na)
+    out = []
+    for m in range(nmon):
+        st, ti, ac = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_active + %d*dw" % (na * m)
+        done, go, ready = "%s%d_done" % (tag, m), "%s%d_go" % (tag, m), "%s%d_ready" % (tag, m)
+        out += [
+            "    hex.if0 1, %s, %s" % (ac, done),                          # not spawned at this skill
+            # hex.if_flags x, flags, l0, l1: a set bit (the value 15, forever) goes to l1
+            "    hex.if_flags %s, %d, %s, %s" % (ti, 1 << TICS_FOREVER, go, done),
+            "  %s:" % go,
+            "    hex.dec 1, %s" % ti,
+            "    hex.if0 1, %s, %s" % (ti, ready),                          # reached 0: READY
+            "    ;%s" % done,
+            "  %s:" % ready,
+            "    mstate.lookup mt_row, %s" % st,                          # the current state's next ...
+            "    hex.mov 2, %s, mt_row" % st,
+            "    mstate.lookup mt_row, %s" % st,                          # ... and that state's tics
+            "    hex.mov 1, %s, mt_row + 2*dw" % ti,
+            "  %s:" % done,
+        ]
+    return out
+
+MT_DECLS = ["mt_row: hex.vec 6"]

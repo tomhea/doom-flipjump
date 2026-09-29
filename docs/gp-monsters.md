@@ -149,3 +149,16 @@ the model's cursor order; the slot's cells copy into one fixed window, ONE share
 runtime multiplies against rule 3; the handoff's "seen" rule is cheap but a behaviour change (a new set version, the
 owner). To be decided with the owner on measured numbers: the LOS probe's price per check, and the seen rule's effect
 on the frozen set (how many v4 runs part, their criteria).
+
+### 8.1 The sight decision's numbers (MEASURED 2026-09-30, `docs/ship-evidence/p32_sight_census_v4.log`)
+
+The full model replaying the frozen set v4 (11 runs, 1,100 frames, `scratchpad/gp/sight_census.py`):
+- **4.32 sight checks a frame** (p80 6, max 10) -- nearly all A_Look of sleeping monsters, each every 10 tics;
+- **83.5 candidate lines per check** after the bounding-box reject (p80 139, max 406): **361 line tests a frame**;
+- only 6% of checks come back true (295 of 4,757).
+An exact 2D LOS in fj tests each candidate with 16.16 orientation products: up to four per line, two multiplies
+each, at `hex.mul 8` ~7K ops (the cost model, UNVERIFIED this session) -- order 10M ops a frame as the model tests
+today, ~1-4M even if a cell walk cut the candidates tenfold: an order of magnitude past P3's +0.3M. The "seen" rule
+(handoff 7.2, D3 e) costs a flag write per drawn monster; its behaviour differs from LOS for 0.19 monsters per fight
+frame with sight but not drawn (mostly behind the player) and 0.02 drawn without sight (phase 0's census, s4v1). It
+is a behaviour change: a new set version (v5) and the owner's approval before any P3.2 binary is measured.

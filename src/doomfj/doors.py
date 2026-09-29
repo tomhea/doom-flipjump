@@ -60,8 +60,29 @@ DEFAULT_QUANT = 16
 OPEN_GAP = 4              # P_DoorRaise: min(neighbouring ceiling) - 4
 
 
+NO_SIDE = (0xFFFF, -1)          # a linedef's missing side: 0xFFFF raw, -1 as the WAD parser gives it
+
+
+def two_sided_neighbours(lds, sds):
+    """sector -> the set of sectors sharing a TWO-SIDED linedef with it: DOOM's getNextSector, which
+    skips a line without a back side. The movers' rule (PR #103 review: `neighbours` below reads a
+    one-sided line's -1 back as the last sidedef's sector)."""
+    out: dict = {}
+    for ld in lds:
+        if ld.front in NO_SIDE or ld.back in NO_SIDE:
+            continue
+        f, b = sds[ld.front].sector, sds[ld.back].sector
+        if f != b:
+            out.setdefault(f, set()).add(b)
+            out.setdefault(b, set()).add(f)
+    return out
+
+
 def neighbours(lds, sds):
-    """sector -> the set of sectors sharing a linedef with it."""
+    """sector -> the set of sectors sharing a linedef with it. ⚠ KNOWN DEVIATION (issue #104 F1): a
+    one-sided line's back is -1 from the parser and reads `sds[-1]` (sector 105) here, so walk-over
+    door 145 opens to 228 where DOOM opens it to 260. The doors keep it because the true height
+    needs 256 plane ids, past the byte (PR #103, 2026-09-29); `two_sided_neighbours` is DOOM's rule."""
     out: dict = {}
     for ld in lds:
         f = sds[ld.front].sector if ld.front != 0xFFFF and ld.front < len(sds) else None

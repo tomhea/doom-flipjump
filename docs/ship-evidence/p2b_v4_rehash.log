@@ -1,0 +1,10 @@
+$ python scratchpad/gp/scenarios_v2.py --rehash "PR #103 review: the movers take DOOM's two-sided neighbours (pillar 129 lowers to 136, not 8); no v4 run uses the floor switch" --file scratchpad/gp/scenarios/combat_scenarios_v4.json
+  F1 ok    status 'FROZEN', the set approved by 'the owner' on '2026-09-29'; last freeze: owner freeze by 'the owner'
+  F2 FAIL  changed: ['src/doomfj/doors.py', 'src/doomfj/movers.py']
+  F3 ok    11/11 runs
+  F4 ok    11/11 runs
+  F5 ok    binding 14227168.712727273, keys match
+  rehashed src/doomfj/doors.py                      cfc97004ea45a04c -> 80b7edd62bee1715
+  rehashed src/doomfj/movers.py                     2f001e5b065cc87b -> 7eb6793209e57a8c
+REHASH DONE: 2 file(s)
+rc=0

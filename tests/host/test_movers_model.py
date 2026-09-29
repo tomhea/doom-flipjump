@@ -76,7 +76,7 @@ def test_the_floor_switch_lowers_its_pillars_at_once_and_once(w):
     w.tic({"use": True})
     assert w.ws.f_switch == 1
     assert {si: w.heights_now[si] for si in (76, 126, 129)} == {
-        76: (136, 272), 126: (144, 264), 129: (8, 264)}
+        76: (136, 272), 126: (144, 264), 129: (136, 264)}
     assert w.secs_c[76].floor_h == 136                   # the monsters' collision map too
     w.ws.p_usedown = 0
     w.tic({"use": True})                                 # S1: nothing more

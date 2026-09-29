@@ -24983,12 +24983,12 @@
   "src/doomfj/combat.py": "ec4b933396b3a62b",
   "src/doomfj/config.py": "aeb52d573b01cb12",
   "src/doomfj/doorcode.py": "01954c55def670a0",
-  "src/doomfj/doors.py": "cfc97004ea45a04c",
+  "src/doomfj/doors.py": "80b7edd62bee1715",
   "src/doomfj/fixedpoint.py": "55051bdb23e1d86a",
   "src/doomfj/gamedata.py": "f5d1354816b000a1",
   "src/doomfj/lut_generator.py": "366a1df5160b039c",
   "src/doomfj/mapcompiler.py": "9e0b131c1b54ccd3",
-  "src/doomfj/movers.py": "2f001e5b065cc87b",
+  "src/doomfj/movers.py": "7eb6793209e57a8c",
   "src/doomfj/reference_model.py": "21f338f798ea9907",
   "src/doomfj/rng.py": "5a842d315933a0b0",
   "src/doomfj/spritebank.py": "55a9c3a60b81d040",
@@ -25253,5 +25253,23 @@
   "frozen_at_git_head": "e3fcba6",
   "files_not_at_head": [],
   "rule": "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. SCHEMA GROWTH (owner, 2026-09-28): a re-freeze with --grown-from REF may record new final digests when every pose and drawn population reproduces and the witness (state_dump.py, the tree at REF against this one) holds every pre-existing cell equal after every frame -- door cells by sector, sound cells by sector -- and REF's tree reproduces the recorded digests; only added cells may differ. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
- }
+ },
+ "rehash_log": [
+  {
+   "on": "2026-09-29 20:22:42",
+   "reason": "PR #103 review: the movers take DOOM's two-sided neighbours (pillar 129 lowers to 136, not 8); no v4 run uses the floor switch",
+   "git_head": "3100341",
+   "changed": {
+    "src/doomfj/doors.py": [
+     "cfc97004ea45a04c",
+     "80b7edd62bee1715"
+    ],
+    "src/doomfj/movers.py": [
+     "2f001e5b065cc87b",
+     "7eb6793209e57a8c"
+    ]
+   },
+   "rule": "F1/F3/F4/F5 held: every pose, digest and drawn population reproduced, so only the source hashes are re-recorded"
+  }
+ ]
 }

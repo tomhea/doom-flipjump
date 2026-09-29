@@ -30,8 +30,9 @@ def test_a_lift_has_ten_stops_from_its_stored_floor_down(m):
 
 def test_the_floor_switch_lowers_three_pillars_to_the_lowest_neighbour(m):
     secs, lds, sds, _v = m
-    # 129's lowest neighbour is sector 101's floor 8 (the spike's 18 states at quant 16)
-    assert MV.switch_sectors(secs, lds, sds) == {76: (136, 272), 126: (144, 264), 129: (8, 264)}
+    # 129's two-sided neighbours are 128 and 102, both floor 136 (PR #103 review: a one-sided line's
+    # missing back once read as sector 105, floor 8)
+    assert MV.switch_sectors(secs, lds, sds) == {76: (136, 272), 126: (144, 264), 129: (136, 264)}
     assert all(secs[si].floor_h == secs[si].ceil_h for si in (76, 126, 129))   # shut until lowered
 
 
@@ -100,7 +101,7 @@ def test_the_height_override_holds_only_movers_off_their_stored_floor(m):
     sw = MV.switch_sectors(secs, lds, sds)
     assert MV.mover_heights(secs, ls, {98: 0, 103: 0}, sw, False) == {}
     h = MV.mover_heights(secs, ls, {98: 9, 103: 1}, sw, True)
-    assert h == {98: (-124, 128), 103: (128, 264), 76: (136, 272), 126: (144, 264), 129: (8, 264)}
+    assert h == {98: (-124, 128), 103: (128, 264), 76: (136, 272), 126: (144, 264), 129: (136, 264)}
 
 
 # ---- door reversal on things (docs/gp-lift-spike.md section 4) -----------------------------------
@@ -122,3 +123,19 @@ def test_a_blazing_door_reverses_when_its_stride_would_cross_the_pass_state():
     st = (4, D.CLOSING, 1, 0)                            # 5 states, stride 4: 4 -> 0 crosses pass 2
     assert D.door_tic(st, 5, False, stride=4, blocked=True, pass_at=2) == (4, D.OPENING, D.SPEED, 0)
     assert D.door_tic(st, 5, False, stride=4, blocked=False, pass_at=2)[0] == 0
+
+
+def test_a_one_sided_line_makes_no_neighbour(m):
+    """PR #103 review: DOOM's getNextSector skips a line without a back side. The parser gives that
+    back as -1; `doors.neighbours` reads sds[-1] (sector 105, floor 8) -- the movers use
+    `two_sided_neighbours`, and the doors' known deviation is pinned (issue #104 F1)."""
+    from doomfj.doors import door_sectors, neighbours, two_sided_neighbours
+    secs, lds, sds, _v = m
+    nb = two_sided_neighbours(lds, sds)
+    assert nb[129] == {102, 128}
+    assert any(ld.back in (-1, 0xFFFF) for ld in lds), "the fixture has one-sided lines"
+    assert all(105 not in v or any(ld.back not in (-1, 0xFFFF) and ld.front not in (-1, 0xFFFF)
+                                   and {sds[ld.front].sector, sds[ld.back].sector} == {105, k}
+                                   for ld in lds) for k, v in nb.items())
+    assert 105 in neighbours(lds, sds)[129]             # the doors' rule still has the fake neighbour
+    assert door_sectors(secs, lds, sds)[145] == 228     # DOOM: 260 -- the known deviation, #104 F1

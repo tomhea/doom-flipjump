@@ -390,7 +390,7 @@ def scenarios(dsim, card) -> list:
         "pose": _in_box(dsim, dsim.mp.switch_boxes[0]), "keys": [I, U, I, I], "pcard": 0,
         "controls": ["no_use_lines"],
         "claim": lambda tr: [fr["movers"][2] for fr in tr] == [0, 1, 1, 1]
-        and tr[1]["mheights"][129][0] == 8})
+        and tr[1]["mheights"][129][0] == 136})
     out.append({
         "name": "S12 NEW GAME puts a riding lift back",
         "pose": _standing(dsim, (40, 256), 0),

@@ -21,7 +21,7 @@ moving lift is ignored by `lift_tic` -- and the switch fires once.
 """
 from __future__ import annotations
 
-from doomfj.doors import (DEFAULT_QUANT, IDLE, MAX_STATES, USE_RANGE, door_tic, neighbours,
+from doomfj.doors import (DEFAULT_QUANT, IDLE, MAX_STATES, USE_RANGE, door_tic, two_sided_neighbours,
                           stops)
 
 LIFT_WALK_SPECIALS = frozenset({88})          # WR Plat Down-Wait-Up-Stay (players; monsters: P3)
@@ -38,7 +38,7 @@ def _tagged(secs, lds, specials) -> list:
 
 def lowest_surrounding(secs, lds, sds, si: int) -> int:
     """P_FindLowestFloorSurrounding: the lowest floor among `si`'s neighbours"""
-    nb = neighbours(lds, sds).get(si)
+    nb = two_sided_neighbours(lds, sds).get(si)
     assert nb, "sector %d has no neighbours" % si
     return min(secs[n].floor_h for n in nb)
 

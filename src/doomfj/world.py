@@ -91,6 +91,7 @@ from doomfj.combat import CombatMixin, STRAFE_MOVE, WEAPON_KEYS  # noqa: F401 (r
 from doomfj.doorcode import door_line_ids
 from doomfj.doors import (CLOSING, IDLE, USE_RANGE, door_states, door_tic, heights_for_states,
                           in_use_box, in_use_box_fixed, pass_state, use_boxes_xy)
+from doomfj.doors import door_kinds, door_stay, door_stride, walkover_triggers   # M7 P2a.1
 from doomfj.reference_model import (ReferenceModel, Scene, apply_sector_heights, spawn_state)
 from doomfj.things import single_player
 
@@ -246,6 +247,7 @@ class Layout:
     nsound: int        # sound nodes (static regions + door sectors)
     npickup: int
     nbarrel: int
+    nwalk: int = 0     # M7 P2a.1: walk-over triggers (one per W1 tag)
 
     @property
     def nmobile(self) -> int:
@@ -313,7 +315,11 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     f("d_sub", 4, count=lay.ndoor, group="door", phase="existing", label="dsub", doc="step timer")
     f("d_wait", 8, count=lay.ndoor, group="door", phase="existing", label="dwait",
       doc="open-wait timer")
-    f("d_monreq", 1, count=lay.ndoor, group="door", doc="a monster pressed it; next door tic")
+    f("d_monreq", 1, count=lay.ndoor, group="door",
+      doc="a press requested for the next door tic: a monster bumped it, or (M7 P2a.1) a walk-over "
+          "line of its tag was crossed")
+    f("w_fired", 1, count=lay.nwalk, group="door", phase="P2a.1",
+      doc="walk-over trigger k fired (W1: once per level)")
     # -- sound ------------------------------------------------------------------------------------
     f("snd_alert", 1, count=lay.nsound, group="sound",
       doc="node heard a shot (DOOM's sector soundtarget)")
@@ -570,7 +576,8 @@ class World(CombatMixin):
         self._build_level()
         self.layout = Layout(nmon=len(self.mon_things), ndoor=len(self.door_order),
                              nleaf=len(self.cmap.subsectors), nsound=self.nsound,
-                             npickup=len(self.pickup_things), nbarrel=len(self.barrel_things))
+                             npickup=len(self.pickup_things), nbarrel=len(self.barrel_things),
+                             nwalk=len(self.walk_triggers))
         self.schema = build_schema(self.layout)
         self._combat_init(aim, player_blocking)
         self.reset(skill)
@@ -619,6 +626,10 @@ class World(CombatMixin):
         self.door_nstates = {si: len(v) for si, v in tbl.items()}
         self.door_pass = {si: pass_state(secs, lds, sds, si) for si in self.door_order}
         self.door_boxes = use_boxes_xy(secs, lds, sds, cmap.vertexes)
+        # M7 P2a.1: every door's kind (doomfj.doors) -- a walk-over door has no use box and opens
+        # from its trigger; the blazing door strides; blue doors take the card (player_can_open)
+        self.door_kind = door_kinds(secs, lds, sds)
+        self.walk_triggers = walkover_triggers(secs, lds, sds, self.mw.vertexes(self.mapname))
         self.door_lines = door_line_ids(secs, lds, sds, tbl)
         self.open_h = {si: (secs[si].floor_h, tbl[si][-1]) for si in self.door_order}
         self.secs_c = apply_sector_heights(secs, self.open_h)   # the collision map: doors open
@@ -793,10 +804,13 @@ class World(CombatMixin):
         ws = self.ws
         alive = self.player_alive()
         for d, si in enumerate(self.door_order):
-            pressed = (keys["use"] and alive and self.player_can_open(si)
-                       and in_use_box_fixed(self.door_boxes[si], ws.px, ws.py))
+            box = self.door_boxes.get(si)             # none for a walk-over door
+            pressed = (keys["use"] and alive and box is not None and self.player_can_open(si)
+                       and in_use_box_fixed(box, ws.px, ws.py))
+            kind = self.door_kind[si]
             st = door_tic((ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d]),
-                          self.door_nstates[si], bool(pressed or ws.d_monreq[d]))
+                          self.door_nstates[si], bool(pressed or ws.d_monreq[d]),
+                          stride=door_stride(kind), stay=door_stay(kind))
             ws.d_state[d], ws.d_dir[d], ws.d_sub[d], ws.d_wait[d] = st
             ws.d_monreq[d] = 0
         self._door_phase_scene()

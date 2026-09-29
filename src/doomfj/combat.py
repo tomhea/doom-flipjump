@@ -73,6 +73,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
+from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
@@ -1137,7 +1138,18 @@ class CombatMixin:
                 continue
             if rmod.try_move(self.scene_c, x, y, cx, cy):
                 ws.px, ws.py = cx, cy
+                self._walkover(x, y, cx, cy)
                 return
+
+    def _walkover(self, x: int, y: int, cx: int, cy: int) -> None:
+        """M7 P2a.1 -- P_CrossSpecialLine for the walk-over doors (W1 open-stay): an accepted move that
+        crosses an unfired trigger (`doomfj.doors.crossed`) fires it, once, and asks its door for a
+        press on the next door tic (`d_monreq`, the monsters' convention)."""
+        ws = self.ws
+        for k, trig in enumerate(self.walk_triggers):
+            if not ws.w_fired[k] and crossed(trig, (x, y), (cx, cy), PLAYER_R):
+                ws.w_fired[k] = 1
+                ws.d_monreq[self.door_order.index(trig[0])] = 1
 
     def _solid_thing_at(self, x16: int, y16: int):
         """PIT_CheckThing's refusal for the player's box at (x16, y16): the first solid monster,

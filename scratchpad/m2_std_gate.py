@@ -52,8 +52,8 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
 
 from doomfj.config import Config                                          # noqa: E402
 from doomfj.doorcode import door_line_ids                                 # noqa: E402
-from doomfj.doors import (DEFAULT_QUANT, compare_stamp, door_states,     # noqa: E402
-                          door_tic, heights_for_states, in_use_box_fixed, initial_states,
+from doomfj.doors import (DEFAULT_QUANT, DoorPhase, compare_stamp,       # noqa: E402
+                          door_states, heights_for_states, in_use_box_fixed,
                           pass_state, read_stamp, stamp_path, use_boxes_xy)
 from doomfj.fastrun import FjmRunner, _fjcore                             # noqa: E402
 from doomfj.menu import MENU_KEYS, menu_step                              # noqa: E402
@@ -63,7 +63,7 @@ from doomfj.reference_model import (ANGLE_TURN, ReferenceModel, build_scene,  # 
                                     spawn_state)
 from doomfj.wad import WadFile                                            # noqa: E402
 from doomfj.reference_model import GAME_RENDER_KW                          # noqa: E402
-from doomfj.things import skill_hidden                                    # noqa: E402
+from doomfj.things import drawable_things, skill_hidden                   # noqa: E402
 from doomfj.wall_renderer import BOOT_SKILL, SKILLS, STANDALONE_POLLS     # noqa: E402
 from doomfj.wireformat import KEY_NAMES                                   # noqa: E402
 from flipjump.interpreter.io_devices.KeyboardIO import (KeyboardIO, KeyEvent,   # noqa: E402
@@ -483,6 +483,25 @@ def main():
     passes = {si: pass_state(secs, lds, sds, si) for si in order}
     nstates = {si: len(v) for si, v in tbl.items()}
     open_h = {si: (secs[si].floor_h, tbl[si][-1]) for si in order}
+    # M7 P2a.1: the door phase is doomfj.doors.DoorPhase -- each door's kind (the blue card, the
+    # blazing stride, the walk-over doors' stay), the walk-over triggers after the move, and the blue
+    # card taken at every TRIED candidate of the move, as the model and the binary take it
+    dp = DoorPhase(secs, lds, sds, mw.vertexes(args.map), boxes,
+                   card_at=rm.blue_card_at(build_scene(mw, mw, args.map)))
+    assert dp.order == order
+
+    def tic(dps, st, kd, used):
+        """the binary's frame: the door tic (`used`: use held), then the player's move against the
+        doors not yet passable -> (door phase state, player state)"""
+        dps = dp.tic(dps, used, st.x, st.y)
+        blk = frozenset(li for si in order if dps[0][si][0] < passes[si]
+                        for li in lines_of.get(si, ()))
+        cur = [dps]
+
+        def touch(cx, cy, z):
+            cur[0] = dp.touch(cur[0], cx, cy, z)
+        new = rm.step_sim(st, kd, scene=build_scene(mw, mw, args.map, open_h, blk), touch=touch)
+        return dp.after_move(cur[0], (st.x, st.y), (new.x, new.y)), new
 
     # the door to walk to: the nearest one to the spawn, by the same measure the planner minimises
     sp = spawn_state(mw, args.map)
@@ -497,7 +516,9 @@ def main():
         return any(x0 <= wx <= x1 and y0 <= wy <= y1
                    for wx, wy in ((cx * NAV_CELL + NAV_CELL // 2, cy * NAV_CELL + NAV_CELL // 2)
                                   for cx, cy in _cells))
-    _cands = [si for si in order if _walkable_door(si)]
+    # M7 P2a.1: a door the player can open with no card, by use (the walk-over doors have no box)
+    _cands = [si for si in order if si in boxes and dp.kinds[si] in ("plain", "blaze")
+              and _walkable_door(si)]
     assert _cands, ("no door's use box is reachable from the spawn -- with %d walkable cells, the "
                     "gate cannot test a door in this tier" % len(_cells))
     target = min(_cands, key=lambda si: ((boxes[si][0] + boxes[si][2]) // 2 - (sp.x >> 16)) ** 2
@@ -553,14 +574,10 @@ def main():
     # door's infinite line -- called that a crossing. So the walk-through is now a route to a point
     # on the FAR SIDE of the door's own line segment, planned against the scene with the door open,
     # and the control below tests segment-against-segment.
-    st, ds = sp, initial_states(secs, lds, sds)
+    st, dps = sp, dp.initial()
     for kd in route + press + opening:
-        used = bool(kd.get("use"))
-        ds = {si: door_tic(ds[si], nstates[si],
-                           used and in_use_box_fixed(boxes[si], st.x, st.y)) for si in order}
-        blk = frozenset(li for si in order if ds[si][0] < passes[si]
-                        for li in lines_of.get(si, ()))
-        st = rm.step_sim(st, kd, scene=build_scene(mw, mw, args.map, open_h, blk))
+        dps, st = tic(dps, st, kd, bool(kd.get("use")))
+    ds = dps[0]
     assert ds[target][0] == nstates[target] - 1, (
         "door %d is at state %d, not open, after %d frames of waiting"
         % (target, ds[target][0], args.open_wait))
@@ -642,21 +659,17 @@ def main():
         return 0
 
     if args.dry:
-        st, ds, md, scr, sel = sp, initial_states(secs, lds, sds), 1, 0, SKILLS.index(BOOT_SKILL)
+        st, dps, md, scr, sel = sp, dp.initial(), 1, 0, SKILLS.index(BOOT_SKILL)
         for f in range(frames):
             kd = keys_by_frame[f]
             md, scr, sel, ng = menu_step(md, scr, sel, menu_events[f])
             if ng is not None:
-                st, ds = sp, initial_states(secs, lds, sds)
+                st, dps = sp, dp.initial()
             if md == 1:
                 continue
             inb = in_use_box_fixed(boxes[target], st.x, st.y)
-            ds = {si: door_tic(ds[si], nstates[si],
-                               bool(kd.get("use")) and in_use_box_fixed(boxes[si], st.x, st.y))
-                  for si in order}
-            blocked = frozenset(li for si in order if ds[si][0] < passes[si]
-                                for li in lines_of.get(si, ()))
-            st = rm.step_sim(st, kd, scene=build_scene(mw, mw, args.map, open_h, blocked))
+            dps, st = tic(dps, st, kd, bool(kd.get("use")))
+            ds = dps[0]
             print("  %3d %-6s (%6d,%6d) door%d=%d%s"
                   % (f, "".join(n[0] for n in sorted(kd) if kd[n]) or "-",
                      st.x >> 16, st.y >> 16, target, ds[target][0],
@@ -670,7 +683,7 @@ def main():
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import gatestate as GST
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
-                                            len(order))
+                                            len(order), len(dp.triggers))
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -678,13 +691,17 @@ def main():
     # ---- the oracle, stepping the same machine in the same order --------------------------------
     # The emitted order is: poll -> menu branch -> door tic -> player tic -> render. A MENU frame
     # branches past both tics, which is why the mode mirror comes first here too.
-    dstates = initial_states(secs, lds, sds)
+    dps = dp.initial()
+    dstates = dps[0]
     state = sp
     # the binary boots into the MAIN menu with the boot skill highlighted
     mode, scr, sel = 1, 0, SKILLS.index(BOOT_SKILL)
     # M7 P1.5: the game tier boots at BOOT_SKILL's level start, so the oracle hides what that
     # skill does not spawn -- the one set the emitter baked its lists and flags from
     hidden = skill_hidden(rm, mw.things(args.map), art, BOOT_SKILL)
+    # M7 P2a.1: the blue card vanishes once taken (its visibility slot)
+    card_di = [di for di, t in enumerate(drawable_things(rm, mw.things(args.map), art)[0])
+               if t.type == 5]
     ok, menu_pics, in_box_when_pressed = True, {}, False
     seen, track, path = set(), [], {}
     first_move = None
@@ -701,11 +718,13 @@ def main():
             if not args.selftest_restart:               # THE R9 CONTROL skips exactly this
                 state = sp
                 if not args.selftest_restart_doors:     # ...and C7's control skips the doors
-                    dstates = initial_states(secs, lds, sds)
+                    dps = dp.initial()
+                    dstates = dps[0]
         if mode == 1:                                   # a menu frame tics nothing
             menu_pics.setdefault((scr, sel), set()).add(got[f])
             sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
-                                                       sel, (dstates[si] for si in order)))
+                                                       sel, (dstates[si] for si in order),
+                                                       dps, order))
             state_checked += 1
             print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
                   % (f, ",".join(sorted(menu_events[f])) or "-", "-",
@@ -719,19 +738,16 @@ def main():
         used = bool(kd.get("use")) and not args.selftest
         if kd.get("use") and in_use_box_fixed(boxes[target], state.x, state.y):
             in_box_when_pressed = True
-        dstates = {si: door_tic(dstates[si], nstates[si],
-                                used and in_use_box_fixed(boxes[si], state.x, state.y))
-                   for si in order}
-        blocked = frozenset(li for si in order if dstates[si][0] < passes[si]
-                            for li in lines_of.get(si, ()))
-        state = rm.step_sim(state, kd, scene=build_scene(mw, mw, args.map, open_h, blocked))
+        dps, state = tic(dps, state, kd, used)
+        dstates = dps[0]
         rsc = build_scene(mw, mw, args.map,
                           heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}))
-        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art, thing_hidden=hidden,
+        want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
+                                          thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
                                           **GAME_RENDER_KW))
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
-                                                   (dstates[si] for si in order)))
+                                                   (dstates[si] for si in order), dps, order))
         state_checked += 1
         path[f] = (state.x, state.y, state.angle)
         ok &= same

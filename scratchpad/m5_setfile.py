@@ -72,8 +72,12 @@ def standalone_globals(doors_wad=None, mapname="E1M1"):
     out = list(STANDALONE_SCRATCH_DECLS)
     if doors_wad is not None:
         w = WadFile.from_path(str(doors_wad))
-        nd = len(door_states(w.sectors(mapname), w.linedefs(mapname), w.sidedefs(mapname)))
-        out += door_decls(nd)
+        secs, lds, sds = w.sectors(mapname), w.linedefs(mapname), w.sidedefs(mapname)
+        nd = len(door_states(secs, lds, sds))
+        # M7 P2a.1: the walk-over triggers' W1 bits are as wide as the map has triggers -- the
+        # count the emitter passes (`walkover_triggers`), not door_decls' default of one
+        from doomfj.doors import walkover_triggers
+        out += door_decls(nd, len(walkover_triggers(secs, lds, sds, w.vertexes(mapname))))
     return out
 
 

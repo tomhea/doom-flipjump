@@ -1,0 +1,28 @@
+# R1: tests/host/test_doors_p2a.py on P1.6's src/ (9ef6dc4) -- before doomfj.doors has the P2a.1 rules
+$ PYTHONPATH=src python -m pytest tests/host/test_doors_p2a.py -q -p no:cacheprovider
+FAILED tests/host/test_doors_p2a.py::test_the_walkover_sectors_are_doors_now
+FAILED tests/host/test_doors_p2a.py::test_every_door_has_one_kind
+FAILED tests/host/test_doors_p2a.py::test_stride_1_is_todays_machine
+FAILED tests/host/test_doors_p2a.py::test_the_blazing_door_moves_BLAZE_STRIDE_stops_a_frame_and_clamps
+FAILED tests/host/test_doors_p2a.py::test_the_blazing_door_closes_BLAZE_STRIDE_stops_a_frame
+FAILED tests/host/test_doors_p2a.py::test_a_stay_door_opens_and_never_closes
+FAILED tests/host/test_doors_p2a.py::test_a_door_that_is_not_stay_closes_again
+FAILED tests/host/test_doors_p2a.py::test_a_second_press_on_an_open_stay_door_changes_nothing
+FAILED tests/host/test_doors_p2a.py::test_one_trigger_per_tag_on_e1m1
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old0-new0-True]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old1-new1-True]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old2-new2-True]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old3-new3-False]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old4-new4-False]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old5-new5-True]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old6-new6-False]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old7-new7-True]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_horizontal_trigger[old8-new8-False]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_vertical_trigger[old0-new0-True]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_vertical_trigger[old1-new1-True]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_vertical_trigger[old2-new2-False]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_vertical_trigger[old3-new3-True]
+FAILED tests/host/test_doors_p2a.py::test_the_crossing_test_on_the_vertical_trigger[old4-new4-False]
+FAILED tests/host/test_doors_p2a.py::test_a_crossing_in_fractional_units_is_decided_in_16_16
+FAILED tests/host/test_doors_p2a.py::test_the_blue_doors_need_the_blue_card
+25 failed, 1 passed in 0.31s

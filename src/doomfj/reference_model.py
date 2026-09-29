@@ -135,6 +135,7 @@ SKY_TURN = 2
 # what the feature is for. The fj bakes a run-list per (sprite, texture column, height BUCKET), so
 # both of those bounds matter to the bank size, not just to the look.
 THING_SPRITE = {
+    5: "BKEY",   # M7 P2a.1: the blue card, frame A (DOOM blinks it A/B: a stated deviation)
     2014: "BON1", 2015: "BON2", 2035: "BAR1", 47: "SMIT", 3001: "TROO", 2008: "SHEL",
     54: "TRE2", 9: "SPOS", 43: "TRE1", 3004: "POSS", 3002: "SARG", 2010: "ROCK",
     2028: "COLU", 2011: "STIM", 2012: "MEDI", 2018: "ARM1", 2019: "ARM2", 2001: "SHOT",
@@ -935,7 +936,22 @@ class ReferenceModel:
             return False
         return True
 
-    def move_with_collision(self, scene, x: int, y: int, dx: int, dy: int, **kw) -> tuple:
+    def blue_card_at(self, scene):
+        """M7 P2a.1: (x, y, floor) in map units of the level's blue card (type 5) -- the floor its
+        subsector's sector gives it (ONFLOORZ, combat's `_floor_at`) -- for `doors.DoorPhase`;
+        None when the level has none. Every skill carries E1M1's card."""
+        cards = [t for t in scene.map_wad.things(scene.mapname) if t.type == 5]
+        if not cards:
+            return None
+        assert len(cards) == 1, cards
+        t, cmap = cards[0], scene.cmap
+        lds = scene.map_wad.linedefs(scene.mapname)
+        sds = scene.map_wad.sidedefs(scene.mapname)
+        sec = self._seg_sector(lds, sds, scene_sectors(scene), cmap.segs[cmap.subsectors[
+            self.point_in_subsector(cmap, t.x, t.y)].firstseg])
+        return (t.x, t.y, sec.floor_h)
+
+    def move_with_collision(self, scene, x: int, y: int, dx: int, dy: int, touch=None, **kw) -> tuple:
         """The blocked-move policy: try the whole step, then the two axis-separated halves.
 
         ⚠ This is NOT DOOM's `P_SlideMove`, which projects the residual momentum along the wall.
@@ -945,15 +961,20 @@ class ReferenceModel:
         mirrors implement THIS policy, so it is a stated difference from vanilla, not a drift.
         Returns the (possibly unchanged) 16.16 position."""
         M = 0xFFFFFFFF
+        here = None
         for cand in (((x + dx) & M, (y + dy) & M), ((x + dx) & M, y), (x, (y + dy) & M)):
             if cand == (x, y):
                 continue
+            if touch is not None:              # M7 P2a.1: pickups are touched at every TRIED candidate,
+                if here is None:               # from the floor the player stands on (combat's here_z)
+                    here = self.check_position(scene, x, y)[1]
+                touch(_signed(cand[0], 32), _signed(cand[1], 32), here)
             if self.try_move(scene, x, y, _signed(cand[0], 32), _signed(cand[1], 32), **kw):
                 return cand
         return x, y
 
     # ── sim ──
-    def step_sim(self, state: SimState, keys: dict, *, scene=None) -> SimState:
+    def step_sim(self, state: SimState, keys: dict, *, scene=None, touch=None) -> SimState:
         """One tic: turn, then move -- against the level's lines when `scene` is given (M14-d), and
         freely when it is not (the M9 collision-free sim every earlier gate speaks).
         FixedMul(move, cos/sin) in 16.16 (n=8 nibbles, f=4 fraction nibbles) mirrors the fj path
@@ -978,7 +999,8 @@ class ReferenceModel:
             if scene is None:
                 x, y = (x + dx) & 0xFFFFFFFF, (y + dy) & 0xFFFFFFFF
             else:
-                x, y = self.move_with_collision(scene, _signed(x, 32), _signed(y, 32), dx, dy)
+                x, y = self.move_with_collision(scene, _signed(x, 32), _signed(y, 32), dx, dy,
+                                                touch=touch)
                 x, y = x & 0xFFFFFFFF, y & 0xFFFFFFFF
         return replace(state, x=x, y=y, angle=angle)
 

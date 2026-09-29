@@ -145,6 +145,11 @@ def _tour_plan(wad, mapname):
     mw = WadFile.from_path(str(ROOT / wad))
     secs, lds, sds = mw.sectors(mapname), mw.linedefs(mapname), mw.sidedefs(mapname)
     tbl = door_states(secs, lds, sds)
+    boxes = use_boxes_xy(secs, lds, sds, bake_bsp(mw, mapname).vertexes)
+    # M7 P2a.1: the tour opens the doors a player opens by USE -- the ones with a use box. The
+    # walk-over doors (77, 145) open only when their line is crossed, and before P2a.1 they were
+    # walls: planning through them would change the ten games and part the metric from its history
+    tbl = {si: v for si, v in tbl.items() if si in boxes}
     # PLAN WITH THE DOORS OPEN. The routes must be allowed to cross them; the run then presses
     # `use` on the way, exactly as a player does. Planning against shut doors is what confined the
     # previous generation of scripts to the spawn side of the map -- 2,686 reachable cells instead
@@ -155,7 +160,6 @@ def _tour_plan(wad, mapname):
     sx, sy = _signed(sp.x, 32) >> 16, _signed(sp.y, 32) >> 16
     pts, _cells = _reachable(rm, open_scene, sx, sy)
     targets = _spread_targets(pts, sx, sy, TOUR_TARGETS)
-    boxes = use_boxes_xy(secs, lds, sds, bake_bsp(mw, mapname).vertexes)
     _TOUR[key] = (open_scene, targets, [boxes[si] for si in sorted(tbl)], in_use_box_fixed)
     return _TOUR[key]
 

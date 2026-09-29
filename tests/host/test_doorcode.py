@@ -82,7 +82,7 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     collision any more: before P1.2 a caller that passed the pass states and door lines got the
     patch, one that did not got a door that never stopped being a wall."""
     assert list(inspect.signature(doorcode.door_tic_lines).parameters) == \
-        ["slots", "nstates", "boxes"], "door_tic_lines takes collision inputs again"
+        ["slots", "nstates", "boxes", "kinds"], "door_tic_lines takes collision inputs again"
     secs, lds, sds, verts = level
     slots = sorted(doors)
     text = "\n".join(doorcode.door_tic_lines(slots, {si: len(doors[si]) for si in slots},
@@ -91,7 +91,7 @@ def test_the_door_tic_touches_only_the_doors_own_cells(level, doors):
     written = set()
     for m in re.finditer(r"hex\.(?:set|zero|inc|dec|xor_by|mov) (?:\d+, )?([A-Za-z_]\w*)", text):
         written.add(m.group(1))
-    assert written <= {"dstate", "ddir", "dsub", "dwait", "duse", "dbox"}, sorted(written)
+    assert written <= {"dstate", "ddir", "dsub", "dwait", "duse", "dbox", "dreq"}, sorted(written)
     assert {"dstate", "ddir", "dsub", "dwait"} <= written, "the census is not seeing the writes"
 
 

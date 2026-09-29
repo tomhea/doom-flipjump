@@ -1,0 +1,15 @@
+$ python scratchpad/12m/msframe.py --a build/doom_e1m1_blocked34.fjm --save-baseline shipped --note "M7 P2a.1 ships: blocked34 re-frozen as the shipped baseline"
+machine : power plan 'Turbo'; busy processes: none
+msframe : A=doom_e1m1_blocked34.fjm, 200 game frames, 5 reps, cpu 2, resolution 3%
+  rep 0  A         60.6 ms   232.5M fj/s  yard 3.63->3.64G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 1  A         61.5 ms   229.2M fj/s  yard 3.61->3.61G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 2  A         61.3 ms   229.8M fj/s  yard 3.64->3.62G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 3  A         61.5 ms   228.9M fj/s  yard 3.63->3.63G   pin: cpu2 proc=ok thread=ok prio=high
+  rep 4  A         61.2 ms   230.3M fj/s  yard 3.60->3.62G   pin: cpu2 proc=ok thread=ok prio=high
+
+  A        median    61.3 ms/frame  [60.6 .. 61.5]    229.8M fj/s   14,087,664 ops/frame   cell=4 flat
+  engine A: 79af8639f57bfa50 full_span=None C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.pyd
+  pin: cpu2 proc=ok thread=ok prio=high   yardstick median 3.62G
+  ledger  : appended to scratchpad\12m\msframe_ledger.jsonl
+  baseline: saved as 'shipped' -> scratchpad\12m\msframe_baselines\shipped.json
+rc=0

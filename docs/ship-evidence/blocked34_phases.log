@@ -1,0 +1,34 @@
+$ python scratchpad/12m/profx/phases.py games_blocked34
+game frames: 1000   mean frame 11,614,988 ops (marker 1 to marker 1)
+
+phase                                         ops/frame       %    runs/fr      ops/run
+input (8 polls, key decode)                       1,095   0.01%       1.00        1,095
+doors                                             1,556   0.01%       1.00        1,556
+move / turn                                       9,039   0.08%       1.00        9,039
+collision                                       123,061   1.06%       0.86      142,267
+  of which dsccs seed walks                      76,124   0.66%       2.40       31,652
+post-move vx/vy                                     310   0.00%       1.00          310
+sim.bind_things                                       0   0.00%       0.00            -
+  of which ptloc_walk (dirty things)                  0   0.00%       0.00            -
+view setup                                        3,673   0.03%       1.00        3,673
+eye point location (dsc walk)                    30,855   0.27%       1.00       30,855
+render walk, all                             11,341,203  97.64%       1.00   11,341,203
+m1_reset                                        104,173   0.90%       1.00      104,173
+(glue between phases)                                18   0.00%
+
+one player move try = collision / seed walks: 51,168 ops (31,652 of it the seed walk); 2.40 tries/frame
+
+render walk split by owner object (ops/frame):
+      3,563,946  31.42%  seg_pass2_leaf
+      2,442,693  21.54%  seg_pass1_ts_leaf
+      2,300,201  20.28%  seg_pass1_leaf
+        877,027   7.73%  bspcode walk (nodes, pos_leaf, ss code)
+        811,578   7.16%  thing_leaf_b
+        522,385   4.61%  thing_pass_leaf
+        458,358   4.04%  thing_leaf
+        238,265   2.10%  vpb bands-as-code (plane bands)
+         62,591   0.55%  bbgate_leaf
+         60,911   0.54%  segconsts (per-seg/thing const blocks)
+          3,242   0.03%  banks tail (vql/vqh, yslope, zlight)
+              0   0.00%  banks head (vars, sprbkt tables)
+rc=0

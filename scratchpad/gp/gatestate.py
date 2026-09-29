@@ -21,13 +21,14 @@ import probe as P                                                          # noq
 from doomfj.fixedpoint import _signed                                      # noqa: E402
 
 STATE_NAMES = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "menu_sel",
-               "dstate", "ddir", "dsub", "dwait")
+               "dstate", "ddir", "dsub", "dwait",
+               "dreq", "pcard", "wfired")        # M7 P2a.1: doors.DoorPhase's (req, card, fired)
 
 
-def run_reading_state(fjm, labels, events, frames: int, ndoors: int):
+def run_reading_state(fjm, labels, events, frames: int, ndoors: int, nwalk: int = 1):
     """-> (the presented frames' pixel indices, the exact op total, [the STATE_NAMES cells read at
     each present]). `labels` is the build's own label table (build_labeled.py writes it)."""
-    cells = {n: c for n, c in P.game_cells(ndoors).items() if n in STATE_NAMES}
+    cells = {n: c for n, c in P.game_cells(ndoors, nwalk).items() if n in STATE_NAMES}
     missing = sorted(set(STATE_NAMES) - set(cells))
     assert not missing, "probe.game_cells lost %s -- the state check would skip them" % missing
     table = P.LabelTable.load(labels, {c.label for c in cells.values()})
@@ -42,12 +43,18 @@ def run_reading_state(fjm, labels, events, frames: int, ndoors: int):
     return r.frames, r.ops, reads
 
 
-def oracle_state(x, y, angle, mode, scr, sel, doors) -> dict:
+def oracle_state(x, y, angle, mode, scr, sel, doors, phase=None, order=None) -> dict:
     """the oracle's state after a frame, in the cells' own units: the view as signed 16.16, the
     angle's 32 bits, and each door cell a tuple in door order (`doors`: the per-door
-    (state, direction, sub-step, timer) tuples, sorted by sector as the binary numbers them)"""
+    (state, direction, sub-step, timer) tuples, sorted by sector as the binary numbers them).
+    M7 P2a.1: `phase` = a doors.DoorPhase state (its req, card and fired), `order` its door order"""
     doors = list(doors)
-    return {"viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": angle & 0xFFFFFFFF,
+    extra = {}
+    if phase is not None:
+        _ds, fired, req, card = phase
+        extra = {"dreq": tuple(int(si in req) for si in order), "pcard": card,
+                 "wfired": P.wfired_value(fired)}
+    return {**extra, "viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": angle & 0xFFFFFFFF,
             "mode": mode, "menu_scr": scr, "menu_sel": sel,
             "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),
             "dsub": tuple(d[2] for d in doors), "dwait": tuple(d[3] for d in doors)}

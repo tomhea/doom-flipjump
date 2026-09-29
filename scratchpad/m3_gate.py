@@ -49,7 +49,7 @@ for q in (ROOT / "tests", ROOT / "src", ROOT):
     sys.path.insert(0, str(q))
 
 from doomfj.config import Config                                          # noqa: E402
-from doomfj.doors import door_states, initial_states                      # noqa: E402
+from doomfj.doors import door_states, initial_states, walkover_triggers   # noqa: E402
 from doomfj.fixedpoint import _signed                                     # noqa: E402
 from doomfj.menu import MENU_KEYS, menu_step, palette_colours, pixels     # noqa: E402
 from doomfj.reference_model import (ReferenceModel, SimState,             # noqa: E402
@@ -152,10 +152,14 @@ def main():
     order = sorted(door_states(secs, lds, sds))
     init = initial_states(secs, lds, sds)
     doors0 = [init[si] for si in order]          # this script never presses use: shut and idle
+    # M7 P2a.1: ...and never reaches a walk-over trigger or the blue card: no press pending, no
+    # card, no trigger fired (doors.DoorPhase's initial state)
+    nwalk = len(walkover_triggers(secs, lds, sds, mw.vertexes(args.map)))
+    phase0 = (init, (0,) * nwalk, frozenset(), 0)
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import gatestate as GST
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
-                                            len(order))
+                                            len(order), nwalk)
     print("  {:,} ops -> {} frames".format(ops, len(got)))
 
     # the oracle's mirror: the device's delivery rule (one event per poll, due once the tic clock
@@ -215,7 +219,7 @@ def main():
         same = got[f] == want
         ok &= same
         want_state = GST.oracle_state(state.x, state.y, state.angle, row["mode"], row["scr"],
-                                      row["sel"], doors0)
+                                      row["sel"], doors0, phase0, order)
         if args.selftest_state and row["mode"] == 0 and f >= NEW_GAMES[0]:
             want_state["menu_scr"] ^= 1                 # THE STATE CHECK'S NEGATIVE CONTROL
         sbad = GST.diff(reads[f] if f < len(reads) else None, want_state)

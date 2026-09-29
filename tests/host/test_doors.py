@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from doomfj.doors import door_kinds  # noqa: E402  (M7 P2a.1)
 from doomfj.doors import (DEFAULT_QUANT, MAX_STATES, OPEN_GAP, door_sectors, door_states,
                           heights_at, neighbours, quantise, stops)
 from doomfj.reference_model import apply_sector_heights
@@ -211,9 +212,10 @@ def test_the_excluded_sectors_are_exactly_the_downward_ones(full):
 
 
 def test_e1m1_and_e1m2_lose_no_door(full):
-    """THE byte-exactness argument. The shipped build is E1M1; if the filter removed one of its 13
-    doors the picture would move, so this is the pin that says it cannot."""
-    for m, n in (("E1M1", 13), ("E1M2", 8)):
+    """THE byte-exactness argument. The shipped build is E1M1; if the filter removed one of its
+    doors the picture would move, so this is the pin that says it cannot. E1M1: 13 DR doors and
+    (M7 P2a.1) the two stored-shut sectors its walk-over lines tag, 77 and 145."""
+    for m, n in (("E1M1", 15), ("E1M2", 11)):        # E1M2: 8 DR + 3 walk-over doors
         secs, lds, sds = full.sectors(m), full.linedefs(m), full.sidedefs(m)
         assert len(door_sectors(secs, lds, sds)) == n
         assert all(door_sectors(secs, lds, sds)[si] > secs[si].floor_h
@@ -251,7 +253,7 @@ STATIC_PIDS = 142
 PID_CEILING = 256                  # a pid must fit Config.PID_NIBBLES = 2 nibbles
 
 
-def _door_pid_pairs(secs, lds, sds, quant):
+def _door_pid_pairs(secs, lds, sds, quant, walkover=True):
     """The distinct (ceiling key, floor key) pairs a door sector can be in, over every stop.
 
     Mirrors `wall_renderer._plane_keys` in the only dimension a quant change moves: a door's floor,
@@ -259,7 +261,10 @@ def _door_pid_pairs(secs, lds, sds, quant):
     geometry and surfaces collapse to one pair set -- E1M1's four-door row is why the count is 80
     and not 4x14."""
     out = set()
+    kinds = door_kinds(secs, lds, sds)
     for si, open_h in door_sectors(secs, lds, sds).items():
+        if not walkover and kinds[si] == "walkover":
+            continue
         s = secs[si]
         floor_key = (s.floor_h, s.light & 0xFF, s.floor_tex.upper())
         for h in stops(s.floor_h, open_h, quant):
@@ -283,7 +288,8 @@ def test_the_pid_model_reproduces_both_measured_builds(level):
     """The negative control for the guard above: a model that cannot reproduce the two builds that
     were actually run would let any quant through. 222 was reported at 16, 263 asserted at 10."""
     secs, lds, sds = level
-    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 16)) == 222
-    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 10)) == 263
+    # both builds had E1M1's 13 DR doors: the walk-over doors (M7 P2a.1) are not in them
+    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 16, walkover=False)) == 222
+    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 10, walkover=False)) == 263
     # and it must actually REJECT the quant the real build rejected
-    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 10)) >= PID_CEILING
+    assert STATIC_PIDS + len(_door_pid_pairs(secs, lds, sds, 10, walkover=False)) >= PID_CEILING

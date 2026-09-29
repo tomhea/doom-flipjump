@@ -106,7 +106,7 @@ def drive(gb, table, orc, frames: list, *, pixel_every: int = 5, override=None) 
     import gamespeed as GS
     import m2_std_gate as gate
     mf = gate.MENU_FRAMES
-    cells = P.game_cells(orc.ndoors)
+    cells = P.game_cells(orc.ndoors, orc.nwalk)
     p = P.Probe(cells, table, gb.width)
     per_frame = [{} for _ in range(mf)] + [fr["keys"] for fr in frames]
     events = GS.events_for(per_frame)
@@ -171,7 +171,7 @@ def b0(doc_path: Path, fjm: Path, labels: Path, pixel_every: int, out_json, prox
     orc = GameOracle()
     assert list(orc.door_order) == list(S.new_world().door_order), "door order differs"
     with P.binary_lock("S4v2-b0"):
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors).values()})
+        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk).values()})
         gb = P.GameBinary(fjm)
         base = gb.run(gate.MENU_FRAMES).ops           # startup + the menu frames, EXACT
         print("b0_scenarios: %s sha256 %s | set %s (%d runs, keys %s) | startup+menu %s ops (exact)"
@@ -339,7 +339,7 @@ def selftest(fjm: Path, labels: Path, doc_path: Path) -> int:
             fr2["post_doors"] = None
         opened.append(fr2)
     with P.binary_lock("S4v2-b0-selftest"):
-        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors).values()})
+        table = P.LabelTable.load(labels, {c.label for c in P.game_cells(orc.ndoors, orc.nwalk).values()})
         gb = P.GameBinary(fjm)
         r1 = drive(gb, table, orc, frames, pixel_every=10)
         check("T1 gamespeed run %d, every door written each frame, reproduces the recorded total"

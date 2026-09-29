@@ -137,7 +137,12 @@ def _read_quiet(p: Path) -> str:
 # neither label, and these tools still read those binaries: so a table may LACK them, together (one
 # without the other is not an older binary but a broken table). A Probe then drops the cells they
 # would address, and the known-value check skips their values. Every other label stays required.
-OPTIONAL_LABELS = frozenset({"menu_scr", "menu_sel"})
+#
+# M7 P2a.1 adds a second GROUP the same way: `dreq`, `pcard`, `wfired` (the walk-over press, the blue
+# card, the walk-over triggers' W1 bits) -- every binary before P2a.1 lacks all three. Each group
+# comes whole or not at all.
+OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcard", "wfired"}))
+OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
 class LabelTable:
@@ -167,10 +172,11 @@ class LabelTable:
         if required:
             raise KeyError("label table %s has no %s" % (path, required[:8]))
         absent = frozenset(missing)                      # optional, every one of them
-        if absent and OPTIONAL_LABELS & set(got):
-            raise KeyError("label table %s has %s but not %s -- the skill menu's labels come "
-                           "together (a binary before M7 P1.5 has neither)"
-                           % (path, sorted(OPTIONAL_LABELS & set(got)), sorted(absent)))
+        for group in OPTIONAL_GROUPS:
+            if absent & group and group & set(got):
+                raise KeyError("label table %s has %s but not %s -- a group's labels come "
+                               "together (the skill menu's: M7 P1.5; the doors' P2a.1 cells)"
+                               % (path, sorted(group & set(got)), sorted(absent & group)))
         return cls(got, array("Q", sorted(set(every))), str(path), absent)
 
     def shifted(self, delta_bits: int) -> "LabelTable":
@@ -356,7 +362,10 @@ class Probe:
         return out
 
     def write_cells(self, values: dict) -> None:
+        """`values` may name `absent` cells (an optional group this binary predates): none is written"""
         for key, val in values.items():
+            if key in self.absent:
+                continue
             c = self.cells[key]
             vals = [val] if c.count == 1 else list(val)
             if len(vals) != c.count:
@@ -593,10 +602,11 @@ class GameBinary:
 # the game tier's cells and known values, and the oracle side
 # ================================================================================================
 
-def game_cells(ndoors: int) -> dict:
+def game_cells(ndoors: int, nwalk: int = 1) -> dict:
     """the persisted world state of the standalone game tier (build.STANDALONE_PERSIST +
     DOOR_PERSIST) as probe cells. `menu_scr` / `menu_sel` are OPTIONAL_LABELS: a Probe on a binary
-    built before M7 P1.5 drops them (its label table has neither)."""
+    built before M7 P1.5 drops them (its label table has neither); so are M7 P2a.1's `dreq`
+    (per door), `pcard` and `wfired` (per walk-over trigger, `nwalk`; the fj declares at least one)."""
     from doomfj.doorcode import WAIT_NIBBLES
     cells = {"viewx": Cell("viewx", "hex", 8, signed=True),
              "viewy": Cell("viewy", "hex", 8, signed=True),
@@ -610,7 +620,17 @@ def game_cells(ndoors: int) -> dict:
     cells["ddir"] = Cell("ddir", "hex", 1, count=ndoors)
     cells["dsub"] = Cell("dsub", "hex", 1, count=ndoors)
     cells["dwait"] = Cell("dwait", "hex", WAIT_NIBBLES, count=ndoors)
+    cells["dreq"] = Cell("dreq", "hex", 1, count=ndoors)
+    cells["pcard"] = Cell("pcard", "hex", 1)
+    cells["wfired"] = Cell("wfired", "hex", 1, count=max(nwalk, 1))
     return cells
+
+
+def wfired_value(fired) -> object:
+    """the `wfired` cell's reading for a per-trigger tuple: a probe reads a one-element cell as a
+    scalar (and the fj declares at least one element)"""
+    fired = tuple(fired)
+    return fired if len(fired) > 1 else (fired[0] if fired else 0)
 
 
 KEYS_UP = {"kb_f": 0, "kb_b": 0, "kb_l": 0, "kb_r": 0, "kb_u": 0}
@@ -647,6 +667,12 @@ class Oracle:
     def ndoors(self):
         return len(self.door_order)
 
+    @property
+    def nwalk(self):
+        """M7 P2a.1: the walk-over triggers (doors.walkover_triggers), one wfired bit each"""
+        from doomfj.doors import walkover_triggers
+        return len(walkover_triggers(self.secs, self.lds, self.sds, self.mw.vertexes(self.mapname)))
+
     def known_pristine(self) -> dict:
         """what the game tier BAKES, from sources independent of the binary: the WAD's player
         start, the menu mode, every key up, every door shut and idle (doors.initial_states) --
@@ -656,7 +682,9 @@ class Oracle:
         from doomfj.wall_renderer import BOOT_SKILL, SKILLS
         return {"viewx": self.spawn.x, "viewy": self.spawn.y, "viewangle": self.spawn.angle,
                 "mode": 1, "menu_scr": 0, "menu_sel": SKILLS.index(BOOT_SKILL), **KEYS_UP,
-                "dstate": (0,) * nd, "ddir": (IDLE,) * nd, "dsub": (0,) * nd, "dwait": (0,) * nd}
+                "dstate": (0,) * nd, "ddir": (IDLE,) * nd, "dsub": (0,) * nd, "dwait": (0,) * nd,
+                # M7 P2a.1: no press pending, no card, no trigger fired
+                "dreq": (0,) * nd, "pcard": 0, "wfired": wfired_value((0,) * self.nwalk)}
 
     def door_pose(self, dstate: tuple) -> dict:
         """cells that hold every door STILL at `dstate` for a frame: idle, no timer -- door_tic
@@ -664,7 +692,7 @@ class Oracle:
         from doomfj.doors import IDLE
         nd = self.ndoors
         return {"dstate": tuple(dstate) if dstate else (0,) * nd, "ddir": (IDLE,) * nd,
-                "dsub": (0,) * nd, "dwait": (0,) * nd}
+                "dsub": (0,) * nd, "dwait": (0,) * nd, "dreq": (0,) * nd}
 
     def scene_for(self, dstate: tuple = ()):
         """the RENDER scene with the doors at `dstate` (a tuple in door_order); shut if empty"""
@@ -678,11 +706,13 @@ class Oracle:
                                    {si: k for si, k in zip(self.door_order, key)}))
         return self._scenes[key]
 
-    def render(self, x, y, angle, dstate: tuple = ()) -> bytes:
+    def render(self, x, y, angle, dstate: tuple = (), hidden_extra=()) -> bytes:
+        """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken)"""
         from doomfj.reference_model import SimState
         return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate), sprite_wad=self.art,
-                                               thing_hidden=self.hidden, **self.RENDER_KW))
+                                               thing_hidden=set(self.hidden) | set(hidden_extra),
+                                               **self.RENDER_KW))
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""
@@ -815,7 +845,7 @@ def selftest(fjm: Path, labels_path: Path) -> int:
     check("C0 the lock file is gone after release", not tmp_lock.exists())
 
     orc = Oracle()
-    cells = game_cells(orc.ndoors)
+    cells = game_cells(orc.ndoors, orc.nwalk)
     cells["pclm"] = Cell("pclm", "byte", count=4, index=40)        # 4 byte cells of a byte array
     cells["kb_f_jw"] = Cell("kb_f", "raw", count=1, index=1)        # kb_f's raw JUMP word
     t = time.time()
@@ -1044,7 +1074,7 @@ def demo(fjm: Path, labels_path: Path) -> int:
     import m2_std_gate as gate
     import onewalk
     orc = Oracle()
-    cells = game_cells(orc.ndoors)
+    cells = game_cells(orc.ndoors, orc.nwalk)
     table = LabelTable.load(labels_path, {c.label for c in cells.values()})
     gb = GameBinary(fjm)
     print("demo: %s (sha256 %s), labels %s" % (fjm.name, gb.sha[:16], Path(labels_path).name),

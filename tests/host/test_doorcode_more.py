@@ -135,10 +135,11 @@ def _run(labels, prog, regs):
 
 
 def _fresh(ndoors: int) -> dict:
-    """The registers as `door_decls` bakes them: every door shut, idle, no timers."""
-    r = {"duse0": 0, "dbox0": 0, "viewx0": 0, "viewy0": 0}
+    """The registers as `door_decls` bakes them: every door shut, idle, no timers, no request, no
+    card (M7 P2a.1)."""
+    r = {"duse0": 0, "dbox0": 0, "viewx0": 0, "viewy0": 0, "pcard0": 0}
     for d in range(ndoors):
-        r[f"dstate{d}"] = r[f"ddir{d}"] = r[f"dsub{d}"] = 0
+        r[f"dstate{d}"] = r[f"ddir{d}"] = r[f"dsub{d}"] = r[f"dreq{d}"] = 0
         r[f"dwait{WAIT_NIBBLES * d}"] = 0
     return r
 
@@ -185,18 +186,27 @@ def _schedules(box, frames=150):
     return out
 
 
-def _first_divergence(lines, nstates, box, schedule):
+def _first_divergence(lines, nstates, box, schedule, kind="plain", card=0, req_every=0):
     """Step the emitted text and `doors.door_tic` together. Returns a description of the first frame
-    whose (state, dir, sub, wait) they disagree on, or None."""
+    whose (state, dir, sub, wait) they disagree on, or None. M7 P2a.1: `kind` picks the stride, the
+    stay and the card check (`card` is `pcard`); `req_every` > 0 raises the door's request on every
+    frame f with f % req_every == 0 -- the walk-over press, cleared by the tic."""
     labels, prog = _load(lines)
     regs = _fresh(1)
+    regs["pcard0"] = card
     py = (0, IDLE, 0, 0)
     for f, (pressed, x, y) in enumerate(schedule):
         regs["duse0"] = 1 if pressed else 0
         regs["viewx0"], regs["viewy0"] = x << 16, y << 16
+        req = bool(req_every) and f % req_every == 0
+        if req:
+            regs["dreq0"] = 1
         _run(labels, prog, regs)
-        used = bool(pressed) and doors.in_use_box_fixed(box, x << 16, y << 16)
-        py = doors.door_tic(py, nstates, used)
+        assert regs["dreq0"] == 0, "frame %d: the tic left its request set" % f
+        used = (bool(pressed) and box is not None and doors.can_open(kind, bool(card))
+                and doors.in_use_box_fixed(box, x << 16, y << 16)) or req
+        py = doors.door_tic(py, nstates, used, stride=doors.door_stride(kind),
+                            stay=doors.door_stay(kind))
         got = _tuple_of(regs, 0)
         if got != py:
             return (f"frame {f}: fj (state,dir,sub,wait)={got} but door_tic={py} "
@@ -214,8 +224,8 @@ BOX = (-10, -20, 30, 40)
 SECTOR = 7          # an arbitrary sector id, deliberately NOT the slot index (which is 0)
 
 
-def _emit(n, box=BOX):
-    return door_tic_lines([SECTOR], {SECTOR: n}, {SECTOR: box})
+def _emit(n, box=BOX, kind="plain"):
+    return door_tic_lines([SECTOR], {SECTOR: n}, {} if box is None else {SECTOR: box}, {SECTOR: kind})
 
 
 @pytest.fixture(scope="module")
@@ -231,8 +241,9 @@ def e1m1():
     slots = sorted(dst)
     nstates = {si: len(v) for si, v in dst.items()}
     boxes = doors.use_boxes_xy(secs, lds, sds, verts)
-    return dict(slots=slots, nstates=nstates, boxes=boxes,
-                text=door_tic_lines(slots, nstates, boxes))
+    kinds = doors.door_kinds(secs, lds, sds)
+    return dict(slots=slots, nstates=nstates, boxes=boxes, kinds=kinds,
+                text=door_tic_lines(slots, nstates, boxes, kinds))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -257,7 +268,8 @@ def test_thirteen_real_doors_step_independently_in_one_emitted_frame(e1m1):
     labels, prog = _load(e1m1["text"])
     slots = e1m1["slots"]
     regs = _fresh(len(slots))
-    boxes = [e1m1["boxes"][si] for si in slots]
+    regs["pcard0"] = 1                    # the card held: every use door answers its own box
+    boxes = [e1m1["boxes"].get(si, (10 ** 6, 10 ** 6, 10 ** 6, 10 ** 6)) for si in slots]
     cx, cy = _centre(boxes[0])
     inside = [d for d, b in enumerate(boxes) if doors.in_use_box(b, cx, cy)]
     assert inside == [0], f"the probe point is inside doors {inside}, not door 0 alone"
@@ -267,7 +279,9 @@ def test_thirteen_real_doors_step_independently_in_one_emitted_frame(e1m1):
         regs["viewx0"], regs["viewy0"] = cx << 16, cy << 16
         _run(labels, prog, regs)
         for d, si in enumerate(slots):
-            py[d] = doors.door_tic(py[d], e1m1["nstates"][si], f == 0 and d == 0)
+            k = e1m1["kinds"][si]
+            py[d] = doors.door_tic(py[d], e1m1["nstates"][si], f == 0 and d == 0,
+                                   stride=doors.door_stride(k), stay=doors.door_stay(k))
             assert _tuple_of(regs, d) == py[d], (
                 f"frame {f}, door {d} (sector {si}): fj={_tuple_of(regs, d)} door_tic={py[d]}")
     assert py[0] == (0, IDLE, SPEED, 0), "the tap never ran a full open/WAIT/close cycle"
@@ -378,15 +392,19 @@ def test_an_idle_door_runs_no_compare_and_a_miss_exits_on_the_first_failing_corn
     assert not [o for o in ops if o[0] == "hex.scmp"], "an idle door ran a box compare"
     assert not [o for o in ops if o[0] == "hex.set" and "8, dbox," in o[1]], \
         "an idle door loaded a box constant"
-    assert len(ops) == 3 * ndoors, \
-        f"an idle door costs {len(ops) / ndoors} interpreted ops, not the 3 the comment claims"
+    nwalk = sum(k == "walkover" for k in e1m1["kinds"].values())
+    # M7 P2a.1: a walk-over door tests its request, then jumps past the (absent) use test: 4
+    assert len(ops) == 3 * (ndoors - nwalk) + 4 * nwalk, \
+        f"idle doors cost {len(ops)} interpreted ops, not 3 a door (4 a walk-over door)"
 
     # ...and a press far to the west of every box gives up after the FIRST compare of each door.
     regs = _fresh(ndoors)
     regs["duse0"] = 1
     regs["viewx0"], regs["viewy0"] = -1_000_000 << 16, 0
     ops = _run(labels, prog, regs)
-    assert len([o for o in ops if o[0] == "hex.scmp"]) == ndoors, \
+    # (M7 P2a.1: a walk-over door has no box, and a blue door without the card stops at `pcard`)
+    ncmp = sum(e1m1["kinds"][si] not in ("walkover", "blue") for si in e1m1["slots"])
+    assert len([o for o in ops if o[0] == "hex.scmp"]) == ncmp, \
         "an out-of-box press ran more than one compare per door"
 
 
@@ -405,7 +423,8 @@ def test_every_baked_box_constant_is_its_corner_shifted_and_fits_signed_32(e1m1)
             a = [x.strip() for x in s.split(" ", 1)[1].split(",")]
             pairs.append((a[1], a[4], pending))     # (viewx|viewy, the dub<d>_<k> arm, constant)
             pending = None
-    assert len(pairs) == 4 * len(e1m1["slots"]), f"{len(pairs)} compares, want 4 per door"
+    nbox = sum(si in e1m1["boxes"] for si in e1m1["slots"])        # walk-over doors have none
+    assert len(pairs) == 4 * nbox, f"{len(pairs)} compares, want 4 per door with a use box"
     for reg, tag, raw in pairs:
         m = re.fullmatch(r"dub(\d+)_(\d+)", tag)
         assert m, f"the eq arm {tag!r} is not this corner's own label"
@@ -518,7 +537,8 @@ def _ops(lines):
 
 
 _WANT_WIDTH = {"duse": 1, "dbox": 8, "viewx": 8, "viewy": 8,
-               "dstate": 1, "ddir": 1, "dsub": 1, "dwait": WAIT_NIBBLES}
+               "dstate": 1, "ddir": 1, "dsub": 1, "dwait": WAIT_NIBBLES,
+               "dreq": 1, "pcard": 1}                                  # M7 P2a.1
 
 
 def _width_violations(lines):
@@ -610,7 +630,8 @@ def test_the_text_names_no_cell_the_declarations_do_not(e1m1):
             named.add(m.group(1))
     assert named - declared == _EXTERNS, (
         f"the text reads {sorted(named - declared - _EXTERNS)}, which nothing declares")
-    assert declared <= named, f"declared but never addressed: {sorted(declared - named)}"
+    # `wfired` is the walk-over triggers' (doorcode.walkover_lines, in the player's move)
+    assert declared - {"wfired"} <= named, f"declared but never addressed: {sorted(declared - named)}"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -659,3 +680,55 @@ def test_the_dedupe_is_what_keeps_it_to_one_entry():
     more than one line. Two distinct linedefs on the same door sector must give two entries."""
     assert doorcode.door_line_ids(None, [_LD(0, 1), _LD(1, 0)], [_SD(40), _SD(41)], {40}) == \
         {40: [0, 1]}
+
+
+# ---------------------------------------------------------------------------------------------
+# M7 P2a.1 -- every door KIND against door_tic, and a mutant of each new branch
+# ---------------------------------------------------------------------------------------------
+
+# requests reach only walk-over doors in P2a (the monsters' presses on plain doors come with P3)
+KIND_CASES = [("blaze", BOX, 0, 0), ("blaze", BOX, 1, 0), ("walkover", None, 0, 17),
+              ("walkover", None, 0, 61), ("walkover", None, 1, 3), ("blue", BOX, 0, 0),
+              ("blue", BOX, 1, 0), ("plain", BOX, 0, 0)]
+
+
+@pytest.mark.parametrize("n", SHAPES)
+@pytest.mark.parametrize("kind, box, card, req_every", KIND_CASES)
+def test_every_door_kind_walks_door_tic(n, kind, box, card, req_every):
+    lines = _emit(n, box, kind)
+    for name, sched in _schedules(BOX):
+        bad = _first_divergence(lines, n, box, sched, kind, card, req_every)
+        assert bad is None, "[%s %s card=%d req=%d] %s" % (kind, name, card, req_every, bad)
+
+
+def _caught(lines, n, kind, box, card, req_every):
+    for _name, sched in _schedules(BOX):
+        try:
+            if _first_divergence(lines, n, box, sched, kind, card, req_every) is not None:
+                return True
+        except (AssertionError, KeyError):
+            return True
+    return False
+
+
+P2A1_MUTANTS = [
+    # (name, kind, box, card, req_every, old, new) -- one real edit of the emitted text each
+    ("the blazing door's last unrolled step dropped", "blaze", BOX, 0, 0,
+     "    hex.inc 1, dstate + 0*dw\n", ""),
+    ("the stay door given a wait", "walkover", None, 0, 17,
+     "    hex.zero 2, dwait + 0*dw\n    ;dr0_done\n  dr0_idle:", "    hex.set 2, dwait + 0*dw, 37\n    ;dr0_done\n  dr0_idle:"),
+    ("the blue door's card check dropped", "blue", BOX, 0, 0,
+     "    hex.if0 1, pcard, dr0_moved\n", ""),
+    ("the request never cleared", "walkover", None, 0, 17,
+     "    hex.zero 1, dreq + 0*dw\n", ""),
+]
+
+
+@pytest.mark.parametrize("name, kind, box, card, req_every, old, new", P2A1_MUTANTS,
+                         ids=[m[0] for m in P2A1_MUTANTS])
+def test_the_mirror_catches_a_broken_door_kind(name, kind, box, card, req_every, old, new):
+    """R9: each P2a.1 branch has a real edit the mirror must catch"""
+    text = "\n".join(_emit(12, box, kind)) + "\n"
+    assert text.count(old) >= 1, "the mutant's site is not in the emitted text: %r" % old
+    mutated = text.replace(old, new, 1).splitlines()
+    assert _caught(mutated, 12, kind, box, card, req_every), name

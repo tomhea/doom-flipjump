@@ -394,7 +394,7 @@ P2a); size ESTIMATE +~0.1M words; plane ids MEASURED 233 (222 + 11; with P2b's l
 | ms/frame (msframe, one run, A = blocked33) | 66.1 | 67.8 | NOT SEPARATED (pairs 0.954 0.975 0.983 1.193 0.996) |
 | hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
 
-**Verdict: criteria 1-5 and 7 met; criterion 6 NOT met as declared -- the owner's decision is pending.**
+**Verdict: every kill criterion met -- criterion 6 by the owner's decision.**
 1. Host: 1,360 passed; the rules and their mutants (`test_doors_p2a.py`, `test_doorcode_more.py`).
 2. fj: `tests/fj/test_doors_p2a_fj.py` 13 passed, its mutants caught.
 3. m3_gate, m2_std_gate byte- and state-exact, six selftests; p2a_gate S1-S7 on the binary, every
@@ -408,7 +408,9 @@ P2a); size ESTIMATE +~0.1M words; plane ids MEASURED 233 (222 + 11; with P2b's l
    (`p2a1_v3_growth_freeze.log`) -- every pose and drawn population reproduced. BUT the card IS
    DRAWN: on 18 frames of R2-east-yard (51-68, 42-195 px each; `p2a1_v3_card_view.log`, the PR #99
    review's probe). The first check looked only at taking and triggers, and F4's census counts no
-   items, so it could not see it. As declared, that needs the OWNER's re-freeze before this rung
-   ships: asked.
+   items, so it could not see it. As declared, that needed the OWNER's decision: "I approve as is"
+   (the owner, 2026-09-29, in the Claude Code session) -- keys, poses, digests and census unchanged,
+   the 18 pictures gain the card, B0 measured with it. The owner added: re-freezes of v3 need no
+   owner approval any more, only proof that nothing got worse.
 7. pinreport 20 of 20; the restore sets re-keyed (`p2a1_rekey.log`).
 

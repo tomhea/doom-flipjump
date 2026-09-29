@@ -654,7 +654,7 @@
      4040284451
     ]
    ],
-   "model_final_digest": "20833c5e1644a35171632743f201508d60dba95fdf87d223f12cc6b115647cf6",
+   "model_final_digest": "c67726f72d03a0bd44f073ef55cbd1628c6a3cad6088df58b07ef09da0c486ef",
    "totals": {
     "fired": 4,
     "shots": 4,
@@ -2938,7 +2938,7 @@
      1414369250
     ]
    ],
-   "model_final_digest": "9357d08fe8a8d6148671dfc61d9543556f76b603010808f794af2e9690425139",
+   "model_final_digest": "4ebd3e6124bfe39d5e0bb682c53d81994d39c237816d4613c353fe1d54e21431",
    "totals": {
     "fired": 1,
     "shots": 0,
@@ -5199,7 +5199,7 @@
      4269245647
     ]
    ],
-   "model_final_digest": "77f1184810e17a7e3b96bd7bc84438d79ccb06034a1aab55788aafc5fe4dd860",
+   "model_final_digest": "99ba493a41c041fbf06669a70ad9e001abed5fdfd35fe4c25652416c94ada852",
    "totals": {
     "fired": 3,
     "shots": 3,
@@ -7458,7 +7458,7 @@
      3082616056
     ]
    ],
-   "model_final_digest": "6565e3adbac466eecc418e3e51f674ba09ce482435532f361e669220dfe447a7",
+   "model_final_digest": "e95dc95fc96d46f74832be6d54d0313f1078690ca9367007871cb94871f837c8",
    "totals": {
     "fired": 4,
     "shots": 4,
@@ -9719,7 +9719,7 @@
      3615767400
     ]
    ],
-   "model_final_digest": "92a62e6ca0133142ff5682e42bebdf4c28c10fec7248e02822d7205c9c00bde5",
+   "model_final_digest": "3d0ec44a60ee59577606e4ac600b1abbe20e59a3e6eb29ca3bd980e0b46b2345",
    "totals": {
     "fired": 5,
     "shots": 4,
@@ -11978,7 +11978,7 @@
      3690987520
     ]
    ],
-   "model_final_digest": "19b4f4783b8d1821a979189c9942bb10d2f54dc444019027d9800ba260eca2ae",
+   "model_final_digest": "eda48893f3ccc7bfd48d24c8ff11b58e4fb01c4af0717b7d0a40e88892ba6034",
    "totals": {
     "fired": 3,
     "shots": 2,
@@ -14237,7 +14237,7 @@
      332741888
     ]
    ],
-   "model_final_digest": "23c7164360ff46a4bfbb9a89b586d7fe96e70b4e35e75cfda0366a44b7ade3e9",
+   "model_final_digest": "d7ff9f934b5084aacb95c98d2a02816ec7c1aa6dbf03073400e5729cb7a1b06a",
    "totals": {
     "fired": 3,
     "shots": 3,
@@ -16496,7 +16496,7 @@
      4134345438
     ]
    ],
-   "model_final_digest": "edea5216b7009c0acbf5e94fa8711b46183d9eb3dcea6db49d6c730c905c1f1c",
+   "model_final_digest": "c7527622bc38ef2ec5839727d3ad35ba20d8980566f41c733852fce67cabbc36",
    "totals": {
     "fired": 5,
     "shots": 4,
@@ -18755,7 +18755,7 @@
      2005409110
     ]
    ],
-   "model_final_digest": "ce075db098ac9e30bb46bb1a6afc78c6698200b39940e1136f1ff0597e106c14",
+   "model_final_digest": "1289fa3190a7781c74073cfc40dbe7c6e7b81589cc55c6dbcc43743d8ba74937",
    "totals": {
     "fired": 3,
     "shots": 3,
@@ -21014,7 +21014,7 @@
      3363687846
     ]
    ],
-   "model_final_digest": "c2efca0cad58a64d8268b8de14ce42829b0af1c5912bc4971188906d937fe4c4",
+   "model_final_digest": "e27895215114d4b83cebef37172afa48989df1a1b1903d47c995778490b00530",
    "totals": {
     "fired": 2,
     "shots": 2,
@@ -22641,8 +22641,8 @@
     ]
    ],
    "doors_player": [
-    7,
-    8
+    8,
+    9
    ]
   },
   {
@@ -23276,7 +23276,7 @@
      1902240476
     ]
    ],
-   "model_final_digest": "62eac1cd926c2687b253cf7ab12a4356545c067e972a0b872091b3e8b2996093",
+   "model_final_digest": "dfbfffc361bb360b893f3aed01f62b29699555f5c73a6732e701b9d321694d8b",
    "totals": {
     "fired": 3,
     "shots": 3,
@@ -24944,7 +24944,7 @@
   },
   ">= 3 doors opened by the player": {
    "ok": true,
-   "detail": "4 (R0-aftermath [0], R0-imp-court [2], R3-west [7, 8]); by monsters 1"
+   "detail": "4 (R0-aftermath [0], R0-imp-court [2], R3-west [8, 9]); by monsters 1"
   },
   ">= 50% of frames carry a movement key (forward, back, strafe)": {
    "ok": true,
@@ -24978,24 +24978,24 @@
  "hashes": {
   "assets/freedoom1.wad": "7323bcc168c5a45f",
   "scratchpad/gp/census_lib.py": "7126b6c0a1210408",
-  "scratchpad/gp/scenarios_v2.py": "1668a18b7da65868",
+  "scratchpad/gp/scenarios_v2.py": "aa2cff93b492bd3e",
   "src/doomfj/__init__.py": "e3b0c44298fc1c14",
-  "src/doomfj/combat.py": "89090e95e60533a4",
+  "src/doomfj/combat.py": "e1bb914f4757350d",
   "src/doomfj/config.py": "aeb52d573b01cb12",
-  "src/doomfj/doorcode.py": "bf1bbcc6dcea521e",
-  "src/doomfj/doors.py": "9ae8db277af9927e",
+  "src/doomfj/doorcode.py": "3fc9acc555aaf22a",
+  "src/doomfj/doors.py": "9476a9d89716c714",
   "src/doomfj/fixedpoint.py": "55051bdb23e1d86a",
   "src/doomfj/gamedata.py": "f5d1354816b000a1",
   "src/doomfj/lut_generator.py": "366a1df5160b039c",
   "src/doomfj/mapcompiler.py": "9e0b131c1b54ccd3",
-  "src/doomfj/reference_model.py": "e1afde0c54c6e43c",
+  "src/doomfj/reference_model.py": "21f338f798ea9907",
   "src/doomfj/rng.py": "5a842d315933a0b0",
   "src/doomfj/spritebank.py": "55a9c3a60b81d040",
   "src/doomfj/tables.py": "f2ab5c664db1f028",
   "src/doomfj/texturecompiler.py": "6836e27f7d824674",
   "src/doomfj/things.py": "f670b48c3587f345",
   "src/doomfj/wad.py": "aced7d2f9eb1a2ba",
-  "src/doomfj/world.py": "8d6f0461441856b7",
+  "src/doomfj/world.py": "1d697ab0102912b7",
   "tests/fixtures/freedoom_e1m1.wad": "944287723835997b"
  },
  "planned_at_git_head": "4e092ec",
@@ -25245,12 +25245,52 @@
   "record": "\"I approve v3\" -- the owner, in the Claude Code session, 2026-09-27 (docs/gp-ledger.md, P1.6 kill criterion 5)"
  },
  "freeze": {
-  "kind": "owner freeze",
-  "approved_by": "the owner",
-  "approved_on": "2026-09-28",
-  "approval_record": "\"I approve v3\" -- the owner, in the Claude Code session, 2026-09-27 (docs/gp-ledger.md, P1.6 kill criterion 5)",
-  "frozen_at_git_head": "9a28344",
+  "kind": "checker re-freeze, schema growth",
+  "approved_by": "the M7 P2a.1 PR review",
+  "approved_on": "2026-09-29",
+  "approval_record": "schema growth under the owner rule of 2026-09-28 (Allow growth; docs/handoff-gameplay.md section 1): w_fired added, 13 -> 15 doors; re-frozen in PR #99 after its review (the planner closes the walk-over doors; the re-plan is identical) -- docs/ship-evidence/p2a1_v3_growth_freeze.log",
+  "frozen_at_git_head": "c7d2423",
   "files_not_at_head": [],
-  "rule": "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
- }
+  "rule": "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. SCHEMA GROWTH (owner, 2026-09-28): a re-freeze with --grown-from REF may record new final digests when every pose and drawn population reproduces and the witness (state_dump.py, the tree at REF against this one) holds every pre-existing cell equal after every frame -- door cells by sector, sound cells by sector -- and REF's tree reproduces the recorded digests; only added cells may differ. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner').",
+  "schema_growth": {
+   "from_ref": "9a28344",
+   "frames_compared": 1100,
+   "grown": [
+    "w_fired"
+   ],
+   "rekeyed": {
+    "d_state": "by door sector",
+    "d_dir": "by door sector",
+    "d_sub": "by door sector",
+    "d_wait": "by door sector",
+    "d_monreq": "by door sector",
+    "snd_alert": "by sector"
+   },
+   "ref_reproduces_frozen": true,
+   "previous_final_digests": {
+    "R0-west-hall": "20833c5e1644a35171632743f201508d60dba95fdf87d223f12cc6b115647cf6",
+    "R0-aftermath": "9357d08fe8a8d6148671dfc61d9543556f76b603010808f794af2e9690425139",
+    "R0-south-hall": "77f1184810e17a7e3b96bd7bc84438d79ccb06034a1aab55788aafc5fe4dd860",
+    "R0-imp-court": "6565e3adbac466eecc418e3e51f674ba09ce482435532f361e669220dfe447a7",
+    "R0-northwest": "92a62e6ca0133142ff5682e42bebdf4c28c10fec7248e02822d7205c9c00bde5",
+    "R0-courtyard": "19b4f4783b8d1821a979189c9942bb10d2f54dc444019027d9800ba260eca2ae",
+    "R2-barrel-hall": "23c7164360ff46a4bfbb9a89b586d7fe96e70b4e35e75cfda0366a44b7ade3e9",
+    "R2-spectre-corridor": "edea5216b7009c0acbf5e94fa8711b46183d9eb3dcea6db49d6c730c905c1f1c",
+    "R2-east-yard": "ce075db098ac9e30bb46bb1a6afc78c6698200b39940e1136f1ff0597e106c14",
+    "R3-west": "c2efca0cad58a64d8268b8de14ce42829b0af1c5912bc4971188906d937fe4c4",
+    "R3-mid": "62eac1cd926c2687b253cf7ab12a4356545c067e972a0b872091b3e8b2996093"
+   }
+  }
+ },
+ "freeze_history": [
+  {
+   "kind": "owner freeze",
+   "approved_by": "the owner",
+   "approved_on": "2026-09-28",
+   "approval_record": "\"I approve v3\" -- the owner, in the Claude Code session, 2026-09-27 (docs/gp-ledger.md, P1.6 kill criterion 5)",
+   "frozen_at_git_head": "9a28344",
+   "files_not_at_head": [],
+   "rule": "frozen: the keys, setups, B0 and what they reproduce; the owner's approval of the set is stored once (owner_approval) and never re-stamped. --rehash re-records source hashes after a pure refactor, only while F1/F3/F4/F5 hold and the checker (scenarios_v2.py) is unchanged. A CHECKER change is re-frozen by --freeze with its reviewer named (--approver), only with identical keys AND every recorded pose, digest and drawn population reproduced -- a reviewable event. A BEHAVIOUR change needs a new version in a NEW file (--plan --file NEW, which refuses a frozen file; B0 re-measured on it; --freeze --file NEW --approver 'the owner')."
+  }
+ ]
 }

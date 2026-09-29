@@ -212,13 +212,16 @@ def fj(width, height, lines, selected, colours, label: str = "menu_frame",
 # the keyboard device's keycodes the menu hears (src/fj/input.fj's table): enter and esc, and the
 # forward keys (w, up arrow) as "up" and the back keys (s, down arrow) as "dn". Down edges only.
 MENU_KEYS = {0x0D: "enter", 0x1B: "esc", 0x77: "up", 0x80: "up", 0x73: "dn", 0x81: "dn"}
+# M7 P2a.2 -- `menu_scr`'s third screen: LEVEL COMPLETE, opened by the exit switch (docs/gp-exit.md)
+LEVEL_DONE_SCR = 2
 
 
 def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
     """One frame of the menu -> `(mode, scr, sel, new_game)`.
 
-    `mode` is 1 on a menu frame and 0 in the world; `scr` 0 is the main menu and 1 the skill
-    screen; `sel` is the highlighted skill, an index into wall_renderer.SKILLS. `events` is the set
+    `mode` is 1 on a menu frame and 0 in the world; `scr` 0 is the main menu, 1 the skill screen
+    and LEVEL_DONE_SCR (2) the level-complete screen the exit opens -- esc or enter leave it for the
+    main menu (M7 P2a.2); `sel` is the highlighted skill, an index into wall_renderer.SKILLS. `events` is the set
     of this frame's events ("esc", "enter", "up", "dn"), and the FIRST of them in that order is the
     one acted on. `new_game` is the chosen skill's index on the frame NEW GAME is picked -- that
     frame restarts the level at the skill and then runs the world's tic, as the program does -- and
@@ -231,6 +234,10 @@ def menu_step(mode: int, scr: int, sel: int, events) -> tuple:
         if "esc" in events or "enter" in events:
             return 1, 0, sel, None
         return 0, scr, sel, None
+    if scr == LEVEL_DONE_SCR:                       # level complete: on to the main menu
+        if "esc" in events or "enter" in events:
+            return 1, 0, sel, None
+        return 1, LEVEL_DONE_SCR, sel, None
     if scr == 0:                                    # the main menu
         if "esc" in events:
             return 0, 0, sel, None                  # resume the world where it was

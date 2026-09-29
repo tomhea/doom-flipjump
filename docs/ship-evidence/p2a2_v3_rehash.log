@@ -1,0 +1,10 @@
+$ python scratchpad/gp/scenarios_v2.py --file scratchpad/gp/scenarios/combat_scenarios_v3.json --rehash "M7 P2a.2: ..."
+  F1 ok    status 'FROZEN', the set approved by 'the owner' on '2026-09-28'; last freeze: checker re-freeze, schema growth by 'the M7 P2a.1 PR review'
+  F2 FAIL  changed: ['src/doomfj/combat.py', 'src/doomfj/doors.py']
+  F3 ok    11/11 runs
+  F4 ok    11/11 runs
+  F5 ok    binding 17760774.10272727, keys match
+  rehashed src/doomfj/combat.py                     e1bb914f4757350d -> 53ca4de80c2e858b
+  rehashed src/doomfj/doors.py                      9476a9d89716c714 -> 2d712495b33c4f5d
+REHASH DONE: 2 file(s)
+rc=0

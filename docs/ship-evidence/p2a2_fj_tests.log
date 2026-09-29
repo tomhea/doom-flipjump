@@ -1,0 +1,4 @@
+$ python -m pytest tests/fj/test_exit_fj.py tests/fj/test_skill_menu.py -q
+...............................                                          [100%]
+31 passed in 9.15s
+rc=0

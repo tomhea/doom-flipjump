@@ -21,13 +21,18 @@ THE SCENARIOS (the design's six, and the card taken on its platform):
   S5 blazing door 84: use -> it opens in BLAZE_STRIDE-stop strides
   S6 over tag 5's trigger: door 77 opens and stays open past WAIT; back over it: nothing (W1)
   S7 over tag 6's trigger: door 145 the same
+  S8 the exit (M7 P2a.2, docs/gp-exit.md): use held from the start is no press; released and
+     pressed in the exit box -> the level ends (that frame still draws the world), LEVEL COMPLETE
+     under held movement keys, enter -> the main menu, esc -> the FROZEN world, enter, enter, enter
+     (the main menu, the skill screen) -> NEW GAME at the boot skill: the level start, moving again. Menu keys are real key events.
 
 THE CONTROLS (R9): every scenario names the rule it tests, and the ORACLE WITHOUT THAT RULE must
 part from the oracle on some frame -- else the scenario could not see the rule broken and the gate
 FAILS as vacuous. Since the binary is held to the oracle frame by frame, a binary that broke the rule
 parts from it where the control does. Controls: `card` (the key check dropped), `no_card` (the card
 never taken / not held), `reach` (the reach test dropped), `stride` (stride 1), `stay` (a closing
-door), `w1` (a trigger that fires every crossing).
+door closes), `w1` (a trigger that fires every crossing), `edge` (a held use presses every tic),
+`frozen` (a finished level's world still tics), `restart` (NEW GAME forgets `lvdone`).
 """
 from __future__ import annotations
 
@@ -50,12 +55,19 @@ from doomfj.doors import in_use_box_fixed                                    # n
 from doomfj.fixedpoint import _signed                                        # noqa: E402
 from doomfj.reference_model import SimState                                  # noqa: E402
 from doomfj.things import drawable_things                                    # noqa: E402
+from doomfj.doors import exit_boxes                                          # noqa: E402
+from doomfj.menu import LEVEL_DONE_SCR, menu_step, palette_colours, pixels   # noqa: E402
+from doomfj.wall_renderer import (BOOT_SKILL, DEFAULT_MENU, DEFAULT_MENU_SELECTED,  # noqa: E402
+                                  LEVEL_DONE_MENU, LEVEL_DONE_SELECTED, SKILL_MENU,
+                                  SKILL_MENU_FIRST, SKILLS, STANDALONE_POLLS)
+from flipjump.interpreter.io_devices.KeyboardIO import KeyEvent             # noqa: E402
 
 M32 = 0xFFFFFFFF
 KEYFLAG = {"forward": "kb_f", "back": "kb_b", "turn_left": "kb_l", "turn_right": "kb_r",
            "use": "kb_u"}
-READ = ("viewx", "viewy", "viewangle", "mode", "dstate", "ddir", "dsub", "dwait", "dreq", "pcard",
-        "wfired")
+READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "dsub", "dwait", "dreq",
+        "pcard", "wfired", "lvdone", "pusedn")
+MENU_CODES = {"enter": 0x0D, "esc": 0x1B}
 CARD_TYPE = 5
 
 
@@ -72,6 +84,7 @@ class Mirror:
 
     def __init__(self, dsim: "onewalk.DoorSim", card_di: int, ctl: str | None = None):
         self.sim, self.dp, self.ctl, self.card_di = dsim, dsim.dp, ctl, card_di
+        self.exits = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))     # M7 P2a.2
 
     @contextlib.contextmanager
     def _rules(self):
@@ -86,39 +99,61 @@ class Mirror:
             D.door_stride, D.door_stay = saved
 
     def run(self, pose, keys: list, pcard: int = 0) -> list:
-        """-> per frame {"pose", "phase", "taken"}: the state after the frame's tic"""
+        """-> per frame {"pose", "phase", "taken", "mode", "scr", "sel", "lvdone", "pusedn",
+        "drawn"}: the state after the frame, and what it drew ("world", or the menu screen). The
+        binary's order: the menu's state machine on the frame's events, then -- on a world frame,
+        unless the level is done -- the door tic, the exit press, the player's move."""
         sim, dp = self.sim, self.dp
         st = SimState(pose[0], pose[1], pose[2], sim.mapname)
         ph = dp.initial()
         ph = (ph[0], ph[1], ph[2], pcard)
         taken, out = False, []
+        mode, scr, sel = 0, 0, SKILLS.index(BOOT_SKILL)      # poked into the world; sel baked
+        pusedn, lvdone = 1, 0                                  # baked: G_PlayerReborn's usedown
         with self._rules():
             for kd in keys:
-                use = bool(kd.get("use"))
-                has_blue = {"card": True, "no_card": False}.get(self.ctl)
-                ph = dp.tic(ph, use, st.x, st.y, has_blue=has_blue)
-                blocked = frozenset(li for si in sim.order if ph[0][si][0] < sim.passes[si]
-                                    for li in sim.lines_of.get(si, ()))
-                cur = [ph]
+                mode, scr, sel, ng = menu_step(mode, scr, sel, set(kd.get("menu", ())))
+                if ng is not None:                            # NEW GAME: the level start
+                    st = SimState(sim.spawn.x, sim.spawn.y, sim.spawn.angle, sim.mapname)
+                    ph, taken, pusedn = dp.initial(), False, 1
+                    if self.ctl != "restart":
+                        lvdone = 0
+                drawn = ("menu", scr, sel) if mode else "world"
+                if mode == 0 and not (lvdone and self.ctl != "frozen"):
+                    use = bool(kd.get("use"))
+                    has_blue = {"card": True, "no_card": False}.get(self.ctl)
+                    ph = dp.tic(ph, use, st.x, st.y, has_blue=has_blue)
+                    if use:                                   # the exit: a PRESS in its box
+                        if not pusedn or self.ctl == "edge":
+                            pusedn = 1
+                            if any(in_use_box_fixed(b, st.x, st.y) for b in self.exits):
+                                lvdone, mode, scr = 1, 1, LEVEL_DONE_SCR
+                    else:
+                        pusedn = 0
+                    blocked = frozenset(li for si in sim.order if ph[0][si][0] < sim.passes[si]
+                                        for li in sim.lines_of.get(si, ()))
+                    cur = [ph]
 
-                def touch(cx, cy, z):
-                    if self.ctl == "no_card":
-                        return
-                    if self.ctl == "reach" and dp.card_at is not None:
-                        z = dp.card_at[2]
-                    cur[0] = dp.touch(cur[0], cx, cy, z)
-                new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked), touch=touch)
-                ph = cur[0]
-                taken |= ph[3] == 1 and pcard == 0
-                if self.ctl == "w1":           # every crossing presses; the bits still read fired
-                    was = ph[1]
-                    ph = dp.after_move((ph[0], (0,) * len(was), ph[2], ph[3]), (st.x, st.y),
-                                       (new.x, new.y))
-                    ph = (ph[0], tuple(a | b for a, b in zip(was, ph[1])), ph[2], ph[3])
-                else:
-                    ph = dp.after_move(ph, (st.x, st.y), (new.x, new.y))
-                st = new
-                out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken})
+                    def touch(cx, cy, z):
+                        if self.ctl == "no_card":
+                            return
+                        if self.ctl == "reach" and dp.card_at is not None:
+                            z = dp.card_at[2]
+                        cur[0] = dp.touch(cur[0], cx, cy, z)
+                    new = sim.rm.step_sim(st, kd, scene=sim._scene(blocked), touch=touch)
+                    ph = cur[0]
+                    taken |= ph[3] == 1 and pcard == 0
+                    if self.ctl == "w1":       # every crossing presses; the bits still read fired
+                        was = ph[1]
+                        ph = dp.after_move((ph[0], (0,) * len(was), ph[2], ph[3]), (st.x, st.y),
+                                           (new.x, new.y))
+                        ph = (ph[0], tuple(a | b for a, b in zip(was, ph[1])), ph[2], ph[3])
+                    else:
+                        ph = dp.after_move(ph, (st.x, st.y), (new.x, new.y))
+                    st = new
+                out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken,
+                            "mode": mode, "scr": scr, "sel": sel, "lvdone": lvdone,
+                            "pusedn": pusedn, "drawn": drawn})
         return out
 
 
@@ -126,11 +161,31 @@ def expected_cells(fr: dict, order: list) -> dict:
     ds, fired, req, card = fr["phase"]
     x, y, a = fr["pose"]
     doors = [ds[si] for si in order]
-    return {"viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": a & M32, "mode": 0,
+    return {"viewx": _signed(x, 32), "viewy": _signed(y, 32), "viewangle": a & M32,
+            "mode": fr["mode"], "menu_scr": fr["scr"],
             "dstate": tuple(d[0] for d in doors), "ddir": tuple(d[1] for d in doors),
             "dsub": tuple(d[2] for d in doors), "dwait": tuple(d[3] for d in doors),
             "dreq": tuple(int(si in req) for si in order), "pcard": card,
-            "wfired": P.wfired_value(fired)}
+            "wfired": P.wfired_value(fired), "lvdone": fr["lvdone"], "pusedn": fr["pusedn"]}
+
+
+def screen(orc, scr: int, sel: int) -> bytes:
+    """a menu screen's picture: the main menu, the skill screen at `sel`, or LEVEL COMPLETE"""
+    lines, hi = {0: (DEFAULT_MENU, DEFAULT_MENU_SELECTED), 1: (SKILL_MENU, SKILL_MENU_FIRST + sel),
+                 LEVEL_DONE_SCR: (LEVEL_DONE_MENU, LEVEL_DONE_SELECTED)}[scr]
+    cfg = orc.rm.cfg
+    colours = palette_colours(bytes(b for rgb in orc.mw.playpal(0) for b in rgb))
+    return bytes(pixels(cfg.VIEW_W, cfg.VIEW_H, lines, hi, colours))
+
+
+def menu_events(keys: list) -> list:
+    """each frame's "menu" keys as the device's events: down on the frame's first poll, up next"""
+    out = []
+    for f, kd in enumerate(keys):
+        for k, name in enumerate(kd.get("menu", ())):
+            out += [KeyEvent(f * STANDALONE_POLLS + 2 * k, True, MENU_CODES[name]),
+                    KeyEvent(f * STANDALONE_POLLS + 2 * k + 1, False, MENU_CODES[name])]
+    return out
 
 
 # ================================================================================================
@@ -200,6 +255,23 @@ def below_card_pose(dsim, card, sector: int = 124, frames: int = 3):
     raise AssertionError("no pose in sector %d whose step reaches the card's box" % sector)
 
 
+def exit_pose(dsim):
+    """a standing pose inside the exit box, off the exit line, facing it"""
+    (x0, y0, x1, y1), = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))
+    verts = dsim.mw.vertexes(dsim.mapname)
+    ld = [ld for ld in dsim.lds if ld.special in D.EXIT_SPECIALS][0]
+    v1, v2 = verts[ld.v1], verts[ld.v2]
+    mx, my = (v1.x + v2.x) / 2, (v1.y + v2.y) / 2
+    nx, ny = -(v2.y - v1.y), (v2.x - v1.x)
+    n = (nx * nx + ny * ny) ** 0.5
+    for d in (32, 40, 48, 24, 56):
+        for side in (1, -1):
+            x, y = round(mx + side * nx / n * d), round(my + side * ny / n * d)
+            if x0 <= x <= x1 and y0 <= y <= y1 and _ok(dsim, x << 16, y << 16):
+                return (x << 16, y << 16, bam(mx - x, my - y))
+    raise AssertionError("no standing pose in the exit box")
+
+
 def trigger_pose(dsim, trig, back: int = 40):
     """`back` units before the trigger line's middle, facing across it"""
     _si, axis, coord, lo, hi = trig
@@ -258,6 +330,18 @@ def scenarios(dsim, card) -> list:
                     "pcard": 0, "controls": ["stay", "w1"],
                     "claim": lambda tr, si=si: tr[-1]["phase"][0][si][0] == n[si] - 1
                     and sum(1 for fr in tr if si in fr["phase"][2]) == 1})
+    F_ = {"forward": True}
+    out.append({
+        "name": "S8 the exit: a press ends the level; LEVEL COMPLETE; the frozen world; NEW GAME",
+        "pose": exit_pose(dsim),
+        "keys": [U, I, U, F_, F_, dict(F_, menu=["enter"]), dict(F_, menu=["esc"]), F_,
+                 dict(F_, menu=["enter"]), {"menu": ["enter"]}, dict(F_, menu=["enter"]), F_, I],
+        "pcard": 0, "controls": ["edge", "frozen", "restart"],
+        "claim": lambda tr: (tr[1]["lvdone"], tr[2]["lvdone"]) == (0, 1)
+        and tr[2]["drawn"] == "world" and tr[3]["drawn"] == ("menu", LEVEL_DONE_SCR, tr[3]["sel"])
+        and tr[5]["drawn"][:2] == ("menu", 0) and tr[6]["drawn"] == "world"
+        and tr[7]["pose"] == tr[2]["pose"] and tr[10]["lvdone"] == 0
+        and tr[11]["pose"] != tr[10]["pose"]})
     return out
 
 
@@ -319,16 +403,19 @@ def main(argv=None) -> int:
             pr.write_cells(vals)
         p.on_frame_start(start)
         p.on_present(lambda pr, f: reads.append(pr.read_cells(list(READ))))
-        r = gb.run(len(sc["keys"]), [], p)
+        r = gb.run(len(sc["keys"]), menu_events(sc["keys"]), p)
         s_bad = x_bad = None
         for f, fr in enumerate(want):
             exp = expected_cells(fr, dsim.order)
             got = reads[f] if f < len(reads) else {}
             if s_bad is None and any(got.get(k) != v for k, v in exp.items()):
                 s_bad = (f, {k: (got.get(k), v) for k, v in exp.items() if got.get(k) != v})
-            pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
-                             tuple(fr["phase"][0][si][0] for si in dsim.order),
-                             hidden_extra=card_di if fr["taken"] else ())
+            if fr["drawn"] == "world":
+                pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
+                                 tuple(fr["phase"][0][si][0] for si in dsim.order),
+                                 hidden_extra=card_di if fr["taken"] else ())
+            else:
+                pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):
                 x_bad = (f, P.px_diff(r.frames[f], pic) if f < len(r.frames) else -1)
         ok &= s_bad is None and x_bad is None

@@ -141,7 +141,8 @@ def _read_quiet(p: Path) -> str:
 # M7 P2a.1 adds a second GROUP the same way: `dreq`, `pcard`, `wfired` (the walk-over press, the blue
 # card, the walk-over triggers' W1 bits) -- every binary before P2a.1 lacks all three. Each group
 # comes whole or not at all.
-OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcard", "wfired"}))
+OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcard", "wfired"}),
+                   frozenset({"lvdone", "pusedn"}))       # M7 P2a.2: the exit's two cells
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -623,6 +624,8 @@ def game_cells(ndoors: int, nwalk: int = 1) -> dict:
     cells["dreq"] = Cell("dreq", "hex", 1, count=ndoors)
     cells["pcard"] = Cell("pcard", "hex", 1)
     cells["wfired"] = Cell("wfired", "hex", 1, count=max(nwalk, 1))
+    cells["lvdone"] = Cell("lvdone", "hex", 1)            # M7 P2a.2: the level is done
+    cells["pusedn"] = Cell("pusedn", "hex", 1)            # ...and use held last tic
     return cells
 
 
@@ -684,7 +687,9 @@ class Oracle:
                 "mode": 1, "menu_scr": 0, "menu_sel": SKILLS.index(BOOT_SKILL), **KEYS_UP,
                 "dstate": (0,) * nd, "ddir": (IDLE,) * nd, "dsub": (0,) * nd, "dwait": (0,) * nd,
                 # M7 P2a.1: no press pending, no card, no trigger fired
-                "dreq": (0,) * nd, "pcard": 0, "wfired": wfired_value((0,) * self.nwalk)}
+                "dreq": (0,) * nd, "pcard": 0, "wfired": wfired_value((0,) * self.nwalk),
+                # M7 P2a.2: the level not done; use counts as held (G_PlayerReborn)
+                "lvdone": 0, "pusedn": 1}
 
     def door_pose(self, dstate: tuple) -> dict:
         """cells that hold every door STILL at `dstate` for a frame: idle, no timer -- door_tic

@@ -54,7 +54,8 @@ _STANDALONE_INCLUDES = ["input.fj"]
 # M7 P1.5: `menu_scr` and `menu_sel` join them, as `mode` did -- the skill screen and its highlight
 # are the menu's own memory, and a reset that restored them would drop every keypress on them.
 STANDALONE_PERSIST = ("viewx", "viewy", "viewangle",
-                      "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode", "menu_scr", "menu_sel")
+                      "kb_f", "kb_b", "kb_l", "kb_r", "kb_u", "mode", "menu_scr", "menu_sel",
+                      "lvdone", "pusedn")   # M7 P2a.2: the level is done; use held last tic
 # M2-R4: ...and the doors' own memory, when the build has doors. A door is world state in exactly
 # the sense the player's position is -- height, direction, the step counter, the open-wait -- so a
 # reset that restored them would slam every door shut every frame while the picture showed it

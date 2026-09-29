@@ -74,6 +74,7 @@ from doomfj import gamedata as gd
 from doomfj import rng as R
 from doomfj.fixedpoint import _signed, fixed_mul
 from doomfj.doors import crossed                                   # M7 P2a.1: walk-over
+from doomfj.doors import exit_boxes                                # M7 P2a.2: the exit's one rule
 from doomfj.reference_model import ANGLE_TURN, FORWARD_MOVE
 
 # 16.16 side step per tic: DOOM's running sidemove/forwardmove (40/50) of the 16-unit
@@ -118,7 +119,6 @@ MAX_HEALTH_BONUS = 200                      # deh_max_health: health bonus cap
 MAX_ARMOR_BONUS = 200                       # deh_max_armor: armor bonus cap
 SECTOR_HURT = {5: 10, 7: 5, 16: 20, 4: 20}  # P_PlayerInSpecialSector: damage every 32 tics
 HURT_PERIOD_MASK = 0x1F
-EXIT_SPECIALS = frozenset({11})             # S1 exit (E1M1: linedef 407)
 KEY_DOOR_CARDS = {26: (gd.IT_BLUECARD, gd.IT_BLUESKULL), 32: (gd.IT_BLUECARD, gd.IT_BLUESKULL),
                   27: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
                   34: (gd.IT_YELLOWCARD, gd.IT_YELLOWSKULL),
@@ -289,13 +289,7 @@ class CombatMixin:
         self.dropper = [DROP_ITEM.get(gd.DROPS.get(gd.MONSTER_DOOMEDNUMS[t.type]))
                         for t in self.mon_things]
         # the exit switch: the door-style proximity box around each exit line (plan 6.7)
-        V = self.cmap.vertexes
-        self.exit_boxes = []
-        for ld in self.lds:
-            if ld.special in EXIT_SPECIALS:
-                xs, ys = [V[ld.v1][0], V[ld.v2][0]], [V[ld.v1][1], V[ld.v2][1]]
-                self.exit_boxes.append((min(xs) - W.USE_RANGE, min(ys) - W.USE_RANGE,
-                                        max(xs) + W.USE_RANGE, max(ys) + W.USE_RANGE))
+        self.exit_boxes = exit_boxes(self.lds, self.cmap.vertexes, W.USE_RANGE)
         # key doors: the cards that open each door sector (EV_VerticalDoor)
         self.door_cards: Dict[int, Tuple[int, int]] = {}
         for ld in self.lds:

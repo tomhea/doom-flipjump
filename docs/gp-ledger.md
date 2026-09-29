@@ -529,3 +529,27 @@ blocks only. All of it is the rung's own code. **Kill criterion (size, 1.25x) BR
    binding metric (budget +0.1M).
 
 
+
+## P3.0 the monster tables, uncalled (class S) -- declared 2026-09-29, before the build
+
+**What**: `docs/gp-monsters.md` section 6. `doomfj.monstercode` emits four D4 tables in the game tier, called by
+nothing: `mstate` (the monster state table: next, tics, action, view group, over `gamedata.STATE_INDEX`), `mturn`
+(A_Chase's turn), `mopp` (P_NewChaseDir's opposite), `mrnd` (the monster stream's P3 call sites folded into one
+outcome table, D10). The monster collision cells are NOT in P3.0 -- their shape is P3.2's (the drop-off and
+BLOCKMONSTERS rules decide the stubs), and pricing showed each radius class is a player-sized cell set (~52K fj
+lines, ~226K labelled words before its tables and tail).
+
+**Budget**: size <= +0.1M words (four small tables); ops: the placement tax only (nothing is called).
+
+**Kill criteria** (class S: no pixel moves):
+1. Host: each table equals its Python source -- gamedata's states (127 monster states, 77 view groups),
+   `world.turn_toward`, `gamedata.OPPOSITE`, `rng.outcome_table` -- with a packing mutation caught
+   (`tests/host/test_monstercode.py`).
+2. fj: every entry of every table looked up twice on the engine against its source, a mutated entry caught
+   (`tests/fj/test_monster_tables_fj.py`).
+3. Every gate byte- and state-exact; deg_gate byte-exact with the SAME picture; B0 v4 exact.
+4. msframe against P2b's binary: B SLOWER does not ship (class S) unless explained as placement and accepted as
+   P3's entry price by the owner.
+5. pinreport: no hot word lost.
+
+**Row**: (filled after the build)

@@ -436,4 +436,33 @@ size ESTIMATE +~1.3K words (one baked screen). No plane ids.
 4. CAP-22 as P2a.1's; msframe B SLOWER against P2a.1's binary without an explanation.
 5. `pinreport.py`: a hot word not pinned; the restore sets not re-keyed to this rung's labels.
 
-**Row**: (filled after the build)
+**Row** (blocked35, sha256 `45674256d3f168e6`, built at a3504af; `docs/ship-evidence/blocked35_*`):
+
+| measure | blocked34 (P2a.1) | blocked35 (P2a.2) | delta |
+|---|---|---|---|
+| combat set v3 binding | 14,158,771 | 14,218,744 | +59,973 |
+| ... with strafe's collision (proxy) | 14,193,201 | 14,253,712 | +60,511 |
+| gamespeed binding | 13,667,149 | 13,745,300 | +78,151 |
+| size (% of 2^27) | 27.17% | 27.21% | +51,228 words |
+| plane ids | 233 | 233 | 0 |
+| ms/frame (msframe, one run, A = blocked34) | 61.4 | 61.6 | NOT SEPARATED (pairs 0.993 0.998 0.993 0.998 0.987) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
+
+**Where the ops went** (`profx/phases.py`, gamespeed's ten games, blocked34 -> blocked35): input
++16, doors -123, move +313, collision +1,197 -- the rung's own code is flat -- while the render walk,
+which P2a.2 did not touch, moved +62,086 (seg_pass1/pass2, the BSP walk, things). That is
+placement: the blocking pass re-rolls its pins on any change to the table counts. msframe, the
+arbiter, does not separate the two binaries.
+
+**Verdict: every kill criterion met.**
+1. Host: 1,367 passed (`blocked35_host_suite.log`); the exit rule, the press edge, LEVEL COMPLETE's
+   transitions and NEW GAME's reset (`tests/host/test_exit_p2a2.py`).
+2. fj: `tests/fj/test_exit_fj.py` and `tests/fj/test_skill_menu.py` pass, their mutants and controls
+   caught (`p2a2_fj_tests.log`).
+3. m3_gate, m2_std_gate byte- and state-exact with `lvdone`/`pusedn` read, six selftests; p2a_gate
+   S1-S8 on the binary, every control parting; B0 v3 pixel-exact on every frame.
+4. CAP-22: v3 14.22M <= 22M, size 27.21% <= 35%; msframe NOT SEPARATED. The ops did NOT hold the
+   ~+0 estimate (+59,973), explained above as placement; the size did not hold its +~1.3K estimate
+   (+51,228 words, the same re-roll), no kill criterion.
+5. pinreport 20 of 20; the restore sets re-keyed (`p2a2_rekey.log`).
+

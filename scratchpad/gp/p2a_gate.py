@@ -67,7 +67,8 @@ KEYFLAG = {"forward": "kb_f", "back": "kb_b", "turn_left": "kb_l", "turn_right":
            "use": "kb_u"}
 READ = ("viewx", "viewy", "viewangle", "mode", "menu_scr", "dstate", "ddir", "dsub", "dwait", "dreq",
         "pcard", "wfired", "lvdone", "pusedn",
-        "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch")        # M7 P2b
+        "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",        # M7 P2b
+        "mon_state", "mon_tics", "mon_facing", "mon_active")          # M7 P3.1
 MENU_CODES = {"enter": 0x0D, "esc": 0x1B}
 CARD_TYPE = 5
 
@@ -90,6 +91,7 @@ class Mirror:
                                   dsim.boxes, card_at=dsim.dp.card_at, reversal=False)
         self.exits = exit_boxes(dsim.lds, dsim.mw.vertexes(dsim.mapname))     # M7 P2a.2
         self.mp = dsim.mp                                                        # M7 P2b
+        self.viewfn = None            # M7 P3.1: (MonsterPhase, x16, y16) -> the render's thing_views
 
     @contextlib.contextmanager
     def _rules(self):
@@ -116,6 +118,9 @@ class Mirror:
         mode, scr, sel = 0, 0, SKILLS.index(BOOT_SKILL)      # poked into the world; sel baked
         pusedn, lvdone = 1, 0                                  # baked: G_PlayerReborn's usedown
         mp, ms = self.mp, self.mp.initial()                    # M7 P2b: every lift at its top
+        # M7 P3.1: the idle monsters from the boot image's level start (doomfj.monsters)
+        from doomfj.monsters import MonsterPhase
+        mph = MonsterPhase(sim.mw, sim.mapname, BOOT_SKILL, rm=sim.rm, mode="idle")
         with self._rules():
             for kd in keys:
                 mode, scr, sel, ng = menu_step(mode, scr, sel, set(kd.get("menu", ())))
@@ -126,6 +131,7 @@ class Mirror:
                         ms = mp.initial()
                     if self.ctl != "restart":
                         lvdone = 0
+                    mph.reset(SKILLS[ng])                     # M7 P3.1: the skill's monsters
                 drawn = ("menu", scr, sel) if mode else "world"
                 if mode == 0 and not (lvdone and self.ctl != "frozen"):
                     use = bool(kd.get("use"))
@@ -165,10 +171,12 @@ class Mirror:
                     if self.ctl != "no_wr":
                         ms = mp.after_move(ms, (st.x, st.y), (new.x, new.y))
                     st = new
+                    mph.tic()                                 # M7 P3.1: the monsters after the player
                 out.append({"pose": (st.x, st.y, st.angle), "phase": ph, "taken": taken,
                             "mode": mode, "scr": scr, "sel": sel, "lvdone": lvdone,
                             "pusedn": pusedn, "drawn": drawn, "movers": ms,
-                            "mheights": mp.heights(ms)})
+                            "mheights": mp.heights(ms), "mstate": mph.state(),
+                            "views": self.viewfn(mph, st.x, st.y) if self.viewfn else None})
         return out
 
 
@@ -186,7 +194,8 @@ def expected_cells(fr: dict, order: list, mover_order=()) -> dict:
             # M7 P2b
             "lstate": tuple(t[0] for t in lifts), "ldir": tuple(t[1] for t in lifts),
             "lsub": tuple(t[2] for t in lifts), "lwait": tuple(t[3] for t in lifts),
-            "lreq": tuple(int(si in lreq) for si in mover_order), "fswitch": sw}
+            "lreq": tuple(int(si in lreq) for si in mover_order), "fswitch": sw,
+            **fr.get("mstate", {})}                                  # M7 P3.1
 
 
 def screen(orc, scr: int, sel: int) -> bytes:
@@ -444,12 +453,14 @@ def main(argv=None) -> int:
     print("P2A GATE -- %d scenarios%s" % (len(scen), "" if a.oracle_only else ", %s" % a.fjm))
     if not a.oracle_only:
         gb = P.GameBinary(ROOT / a.fjm)
-        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift)
+        cells = P.game_cells(orc.ndoors, orc.nwalk, orc.nlift, orc.nmon)
         table = P.LabelTable.load(ROOT / a.labels, {c.label for c in cells.values()})
         assert not table.absent & {"dreq", "pcard", "wfired"}, (
             "the label table has no %s: a binary before P2a.1" % sorted(table.absent))
     for sc in scen:
-        want = Mirror(dsim, card_di[0]).run(sc["pose"], sc["keys"], sc["pcard"])
+        mirror = Mirror(dsim, card_di[0])
+        mirror.viewfn = orc.monster_views                     # M7 P3.1: the monsters' views
+        want = mirror.run(sc["pose"], sc["keys"], sc["pcard"])
         claim = bool(sc["claim"](want))
         ok &= claim
         print("\n%s -- %d frames from (%.0f, %.0f) angle %08x%s" % (
@@ -488,7 +499,8 @@ def main(argv=None) -> int:
             if fr["drawn"] == "world":
                 pic = orc.render(fr["pose"][0], fr["pose"][1], fr["pose"][2],
                                  tuple(fr["phase"][0][si][0] for si in dsim.order),
-                                 hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"])
+                                 hidden_extra=card_di if fr["taken"] else (), movers=fr["mheights"],
+                                 views=fr["views"])
             else:
                 pic = screen(orc, fr["drawn"][1], fr["drawn"][2])
             if x_bad is None and (f >= len(r.frames) or r.frames[f] != pic):

@@ -158,8 +158,13 @@ def main():
     phase0 = (init, (0,) * nwalk, frozenset(), 0)
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import gatestate as GST
+    # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters), from the boot skill's
+    # level start, a tic per world frame, reset by NEW GAME; drawn with their views, cells read
+    from doomfj.monsters import MonsterPhase, MonsterViews
+    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode="idle")
+    mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, FRAMES,
-                                            len(order), nwalk)
+                                            len(order), nwalk, nmon=mph.world.layout.nmon)
     print("  {:,} ops -> {} frames".format(ops, len(got)))
 
     # the oracle's mirror: the device's delivery rule (one event per poll, due once the tic clock
@@ -188,13 +193,16 @@ def main():
             # starts the next skill instead -- the gate must see it.
             skill = SKILLS[(ng + 1) % len(SKILLS)] if args.selftest_skill else SKILLS[ng]
             state = spawn
+            mph.reset(skill)                        # M7 P3.1: the skill's monsters, at their start
         if ng is not None:
             pusedn = 1                              # the restart block
         if mode == 0:
             state = rm.step_sim(state, dict(held, turn_left=False, turn_right=False), scene=scene)
             pusedn = 0                              # this script never holds use
+            mph.tic()                               # M7 P3.1: the monsters after the player
         rows.append({"mode": mode, "scr": scr, "sel": sel, "skill": skill, "state": state,
-                     "ng": ng, "before": before, "pusedn": pusedn})
+                     "ng": ng, "before": before, "pusedn": pusedn,
+                     "mstate": mph.state(), "views": mviews(mph, state.x, state.y)})
 
     ok, menus, worlds, moved, oracle_ng, first_bad = True, 0, 0, 0, {}, None
     state_bad, state_checked = None, 0
@@ -215,7 +223,7 @@ def main():
         else:
             want = bytes(rm.render_wall_frame(SimState(state.x, state.y, state.angle, args.map),
                                               scene, thing_hidden=hidden[row["skill"]],
-                                              **render_kw))
+                                              thing_views=row["views"], **render_kw))
             kind = "world %-7s" % SKILL_NAMES[row["skill"]]
             worlds += 1
             if row["ng"] is not None:
@@ -223,7 +231,8 @@ def main():
         same = got[f] == want
         ok &= same
         want_state = GST.oracle_state(state.x, state.y, state.angle, row["mode"], row["scr"],
-                                      row["sel"], doors0, phase0, order, (0, row["pusedn"]))
+                                      row["sel"], doors0, phase0, order, (0, row["pusedn"]),
+                                      monsters=row["mstate"])
         if args.selftest_state and row["mode"] == 0 and f >= NEW_GAMES[0]:
             want_state["menu_scr"] ^= 1                 # THE STATE CHECK'S NEGATIVE CONTROL
         sbad = GST.diff(reads[f] if f < len(reads) else None, want_state)

@@ -37,7 +37,7 @@ P = _load_probe()
 def _table(tmp_path, drop=()):
     """every game cell's label, 64 cells apart (wider than any cell spec), less the ones in `drop`"""
     lines, at = [], 1 << 20
-    for c in P.game_cells(ND, 2).values():
+    for c in P.game_cells(ND, 2, 2, 3).values():         # M7 P3.1: three monster slots
         if c.label not in drop:
             lines.append("%s\t%d" % (c.label, at))
         at += 64 * CELL_BITS
@@ -45,7 +45,7 @@ def _table(tmp_path, drop=()):
     path = tmp_path / ("labels-%s.tsv.gz" % ("-".join(drop) or "all"))
     with gzip.open(path, "wt", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + "\n")
-    return P.LabelTable.load(path, {c.label for c in P.game_cells(ND, 2).values()})
+    return P.LabelTable.load(path, {c.label for c in P.game_cells(ND, 2, 2, 3).values()})
 
 
 def _known():
@@ -100,8 +100,12 @@ def test_only_the_skill_menu_is_optional(tmp_path):
     for one in ("lstate", "fswitch"):
         with pytest.raises(KeyError, match="come together"):
             _table(tmp_path, drop=(one,))
+    for one in ("mon_state", "mon_active"):               # M7 P3.1: the monsters' four
+        with pytest.raises(KeyError, match="come together"):
+            _table(tmp_path, drop=(one,))
     assert P.OPTIONAL_LABELS == {"menu_scr", "menu_sel", "dreq", "pcard", "wfired", "lvdone", "pusedn",
-                                 "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}
+                                 "lstate", "ldir", "lsub", "lwait", "lreq", "fswitch",
+                                 "mon_state", "mon_tics", "mon_facing", "mon_active"}
 
 
 def test_a_table_before_p2a1_loads_and_its_door_cells_are_dropped(tmp_path):

@@ -1,0 +1,17 @@
+$ python scratchpad/gp/sight_census.py
+set scratchpad/gp/scenarios/combat_scenarios_v4.json: 11 runs, 1100 frames
+sight checks per frame: mean 4.32  p50 4  p80 6  p99 8  max 10
+candidate lines per check (after the bbox reject): mean 83.5  p50 54  p80 139  p99 328  max 406
+line tests per frame (checks x candidates): mean 360.9
+sight true 295 / false 4462
+  R0-west-hall           checks/frame mean 4.42 max 9
+  R0-aftermath           checks/frame mean 4.22 max 8
+  R0-south-hall          checks/frame mean 4.70 max 9
+  R0-imp-court           checks/frame mean 4.17 max 9
+  R0-northwest           checks/frame mean 4.29 max 8
+  R0-courtyard           checks/frame mean 4.23 max 9
+  R2-barrel-hall         checks/frame mean 4.13 max 8
+  R2-spectre-corridor    checks/frame mean 4.23 max 8
+  R2-east-yard           checks/frame mean 4.48 max 10
+  R3-west                checks/frame mean 4.34 max 7
+  R3-mid                 checks/frame mean 4.36 max 7

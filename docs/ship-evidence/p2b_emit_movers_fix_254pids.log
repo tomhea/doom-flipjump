@@ -1,0 +1,20 @@
+$ python plan/p2b/emit_check.py   # the game tier emitted with the movers-only fix (two_sided_neighbours)
+pid bake: 254 pairs baked, 255 addressable at PID_NIBBLES=2
+emitted in 830 s
+chars 52812492
+  lstate: hex.vec              1
+  fswitch: hex.vec             1
+  lf0_press                    4
+  lf1_press                    4
+  sim.jump16 lstate + 0*dw     8
+  sim.jump16 lstate + 1*dw     8
+  sim.jump16 fswitch           54
+  dsw_                         23830
+  _rev:                        13
+  us0_hit                      2
+  fs_hit                       2
+  lw0_fire                     2
+  dvz                          221
+  sfl                          442
+  cse                          221
+pid line in text: False

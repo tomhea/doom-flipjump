@@ -496,14 +496,14 @@ two-sided neighbours, pillar 129 to 136; `docs/ship-evidence/blocked37_*`. block
 
 | measure | blocked35 (P2a.2) | blocked37 (P2b) | delta |
 |---|---|---|---|
-| combat set binding | v3 14,218,744 | v4 **14,223,921** | the sets differ in one run; the 10 shared runs: mean -16,397 |
-| ... R2-spectre-corridor (v3 walks, v4 rides lift 103) | 11,066,540 | 11,400,392 | +333,852 (a different route) |
+| combat set binding | v3 14,218,744 | v4 **14,223,921** | the sets differ in one run; the 10 shared runs: mean -19,765 |
+| ... R2-spectre-corridor (v3 walks, v4 rides lift 103) | 11,066,540 | 11,398,567 | +332,027 (a different route) |
 | ... with strafe's collision (proxy) | v3 14,253,712 | v4 14,256,695 | |
 | gamespeed binding | 13,745,300 | 13,642,413 | **-102,887** |
 | size (% of 2^27) | 27.21% | 28.24% | **+1,373,516 words** (budget +0.35M) |
 | plane ids | 233 | 254 | +21 (the spike's count, exact) |
 | ms/frame (msframe, one run, A = blocked35, a quiet box) | 61.5 | 61.6 | NOT SEPARATED (the arms part at frame 33: lift 98) |
-| ... pixel-identical, first 30 frames, 9 reps | 90.9 | 92.9 | NOT SEPARATED (pairs 0.997 .. 0.974, median x0.981) |
+| ... pixel-identical, first 30 frames, 9 reps | 90.9 | 92.9 | NOT SEPARATED (pairs 0.965 .. 1.063, median x0.981; 8 of 9 below 1) |
 | hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
 
 **The size, attributed** (`blocked35_poolmap.log` -> `blocked36_poolmap.log`, label families): the

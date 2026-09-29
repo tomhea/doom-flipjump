@@ -15,7 +15,9 @@ instant switch, D-L3 quant 16). This file records what L0 -- the host rung -- se
 - **The floor switch** (23 S1, tag 3): sectors 76, 126, 129 -- pillars stored with floor = ceiling
   -- drop to the lowest surrounding floor (136, 144, 136: 129's two-sided neighbours 128 and 102) at once,
   once. (The first build said 8: `doors.neighbours` read a one-sided line's missing back, -1, as sector
-  105 -- fixed after the PR #103 review, which also moved walk-over door 145's open height 228 -> 260.)
+  105 -- fixed for the movers after the PR #103 review (`doors.two_sided_neighbours`). The DOORS still use
+  `neighbours`, so walk-over door 145 still opens to 228 where DOOM opens it to 260: a known deviation,
+  open in issue #104 F1 -- the true height bakes 256 plane ids, past the byte.)
 - **Triggers.** WR 88 (593, 595, 596 for 98; 618, 1078 for 103): `doors.crossed` on an accepted
   move, one segment per LINE, the player's and -- 88 is on P_CrossSpecialLine's non-player list --
   a monster's. SR 62 (594; 620, 1064, 1075) and S1 23 (753): the doors' proximity box around the

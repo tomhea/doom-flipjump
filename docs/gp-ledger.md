@@ -462,7 +462,13 @@ arbiter, does not separate the two binaries.
 3. m3_gate, m2_std_gate byte- and state-exact with `lvdone`/`pusedn` read, six selftests; p2a_gate
    S1-S8 on the binary, every control parting; B0 v3 pixel-exact on every frame.
 4. CAP-22: v3 14.22M <= 22M, size 27.21% <= 35%; msframe NOT SEPARATED. The ops did NOT hold the
-   ~+0 estimate (+59,973), explained above as placement; the size did not hold its +~1.3K estimate
-   (+51,228 words, the same re-roll), no kill criterion.
+   ~+0 estimate (+59,973), explained above as placement -- by elimination: the rung's phases are
+   flat, and nothing isolates the re-roll from the program's own growth ahead of the render walk
+   (+43,772 words below the pool, which shifts its addresses). The size did not hold its +~1.3K
+   estimate, and that is the rung's OWN code, not a re-roll (the size counts payload words, which a
+   re-roll does not move; `blocked34_poolmap.log` -> `blocked35_poolmap.log`): the program below the
+   pool +43,772 words, the pool's payload +7,456 (+233 tables, +66 groups) = +51,228. The LEVEL
+   COMPLETE screen alone is 1,379 `stl.output_char` x 8 ops x 2 words = 22,064 words; the estimate
+   counted the screen's bytes as words. No kill criterion.
 5. pinreport 20 of 20; the restore sets re-keyed (`p2a2_rekey.log`).
 

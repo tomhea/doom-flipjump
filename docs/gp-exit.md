@@ -21,7 +21,7 @@ its screen.
 ## 2. The screens (`menu_step`, `doomfj.menu`)
 
 `menu_scr` gains a third value, 2 = LEVEL COMPLETE (`LEVEL_DONE_MENU = ["LEVEL COMPLETE", "",
-"E1M1", "", "PRESS ENTER"]`, the last line highlighted). The press sets `mode` 1 and `menu_scr` 2.
+"PRESS ENTER"]`, the last line highlighted). The press sets `mode` 1 and `menu_scr` 2.
 
 | screen | esc | enter | up / down |
 |---|---|---|---|
@@ -52,7 +52,7 @@ where it stopped).
   press -- control: an oracle without the edge exits), released, pressed -> the world frame, then
   LEVEL COMPLETE; frozen frames under movement keys; enter -> the main menu; esc -> the frozen world
   (the pose does not move under forward -- control: an oracle whose world is not frozen); enter,
-  enter -> NEW GAME at the boot skill: the level start (control: a restart that forgets `lvdone`).
+  enter, enter (the world -> the main menu -> the skill screen -> NEW GAME) -> NEW GAME at the boot skill: the level start (control: a restart that forgets `lvdone`).
   Byte- and state-exact every frame.
 - B0 on set v3 pixel- and state-exact (no v3 run uses the exit: its criteria say so, "no run uses
   the exit").
@@ -61,3 +61,5 @@ where it stopped).
 
 ~+0 ops on v3 (one nibble test for `lvdone`, the use edge and one box test on a use press per
 frame: ~30 ops); size +~1.3K words (the screen). No plane ids.
+**Measured** (blocked35, `docs/gp-ledger.md`): size +51,228 words, the rung's own code -- the
+estimate counted the screen's bytes as words (1,379 `stl.output_char` x 8 ops x 2 words = 22,064).

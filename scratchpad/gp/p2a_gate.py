@@ -23,8 +23,8 @@ THE SCENARIOS (the design's six, and the card taken on its platform):
   S7 over tag 6's trigger: door 145 the same
   S8 the exit (M7 P2a.2, docs/gp-exit.md): use held from the start is no press; released and
      pressed in the exit box -> the level ends (that frame still draws the world), LEVEL COMPLETE
-     under held movement keys, enter -> the main menu, esc -> the FROZEN world, enter, enter -> NEW
-     GAME at the boot skill: the level start, moving again. Menu keys are real key events.
+     under held movement keys, enter -> the main menu, esc -> the FROZEN world, enter, enter, enter
+     (the main menu, the skill screen) -> NEW GAME at the boot skill: the level start, moving again. Menu keys are real key events.
 
 THE CONTROLS (R9): every scenario names the rule it tests, and the ORACLE WITHOUT THAT RULE must
 part from the oracle on some frame -- else the scenario could not see the rule broken and the gate

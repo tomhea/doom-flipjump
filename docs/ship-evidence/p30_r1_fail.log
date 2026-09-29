@@ -1,0 +1,7 @@
+$ PYTHONPATH=../doom-m7i/src python -m pytest tests/host/test_monstercode.py tests/fj/test_monster_tables_fj.py -q  # R1: on P2b src/ (before doomfj.monstercode exists)
+E   ImportError: cannot import name 'monstercode' from 'doomfj' (C:\Users\tomhe\Documents\doom-m7i\src\doomfj\__init__.py)
+=========================== short test summary info ===========================
+ERROR tests/host/test_monstercode.py
+ERROR tests/fj/test_monster_tables_fj.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 2 errors during collection !!!!!!!!!!!!!!!!!!!
+2 errors in 0.62s

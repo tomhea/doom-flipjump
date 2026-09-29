@@ -808,6 +808,11 @@ def window_chrome_fj():
     return macro, calls
 
 
+def _monster_tables() -> list:
+    from doomfj.monstercode import p30_tables_fj      # local: monstercode imports world
+    return p30_tables_fj()
+
+
 def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, sprite_wad=None,
                        ablate: frozenset = frozenset(), return_parts: bool = False):
     """Emit the full runtime wall+floor/ceiling renderer for `mapname` as the fj `main` text (everything after
@@ -2404,6 +2409,9 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   False)
               + [tantoangle, slopediv_recip, slopediv_recip8, finesine, finetangent, viewangletox, xtoviewangle,
                  tex, cm, ttang, sdrecip, srdisp, xtadisp, vtxdisp, sinadisp, wnoise, wnoise2, wnoise3, w1rpat, skybands, skyoff, skypid]
+              # M7 P3.0 (docs/gp-monsters.md): the monster phase's tables, in the game tier only and
+              # called by nothing yet -- the build that carries them prices the placement tax
+              + (_monster_tables() if _movers_on else [])
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
               # scratchpad/cr/emit_baseline.py, which is exactly what that control is for.

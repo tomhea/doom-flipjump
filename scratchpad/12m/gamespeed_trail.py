@@ -54,9 +54,14 @@ def records(n_runs: int):
     # doomfj.doors.DoorPhase, which calls the doors module's own in_use_box_fixed -- patching only
     # onewalk's name left the door phase untouched and this control vacuous (blocked34's first
     # trail run: CONTROL-DOORS FAIL). Both names, the door phase's first.
+    # M7 P2b: the DOORS' boxes only -- onewalk's exit guard reads the same name, and "every box,
+    # anywhere" put every use press in the exit box (blocked36's first trail run: an AssertionError
+    # before the control ran); the exit box keeps the real test
     import doomfj.doors as _D
     real_d, real_o = _D.in_use_box_fixed, onewalk.in_use_box_fixed
-    _D.in_use_box_fixed = onewalk.in_use_box_fixed = lambda box, x, y: True
+    exits = {tuple(b) for b in onewalk.DoorSim().exits}
+    _D.in_use_box_fixed = onewalk.in_use_box_fixed = (
+        lambda box, x, y: tuple(box) not in exits or real_o(box, x, y))
     try:
         GS.validate_scripts(n_runs, quiet=True, trails=wrong)
     finally:

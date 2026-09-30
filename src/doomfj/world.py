@@ -556,8 +556,9 @@ class TicEvents:
 
 # M7 P3 (docs/gp-monsters.md): the MODEL MODES a rung's binary is exact against -- "idle" (P3.1: nothing wakes),
 # "wake" (P3.2a: A_Look wakes; A_Chase runs its counters and re-acquires, but neither moves nor decides an
-# attack), "full" (everything)
-MONSTER_MODES = ("idle", "wake", "full")
+# attack), "chase" (P3.2b: A_Chase moves -- P_Move, P_NewChaseDir, the relink, monster doors and lifts -- but
+# decides no attack), "full" (everything)
+MONSTER_MODES = ("idle", "wake", "chase", "full")
 
 
 def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
@@ -1084,15 +1085,17 @@ class World(CombatMixin):
             return
         if self.monsters == "wake":
             return                                       # P3.2a: no attack decision, no move
-        if ws.mon_justattacked[m]:
+        # P3.2b "chase": no attack decision -- so never `justattacked` either (only the missile decision sets it)
+        decide = self.monsters != "chase"
+        if decide and ws.mon_justattacked[m]:
             ws.mon_justattacked[m] = 0
             self._new_chase_dir(m, ev)
             return
-        if info.meleestate != gd.S_NULL and self._check_melee_range(m):
+        if decide and info.meleestate != gd.S_NULL and self._check_melee_range(m):
             ev.decisions.append((m, "melee"))
             self._set_state(m, info.meleestate, True, ev)
             return
-        if info.missilestate != gd.S_NULL and ws.mon_movecount[m] == 0 \
+        if decide and info.missilestate != gd.S_NULL and ws.mon_movecount[m] == 0 \
                 and self._check_missile_range(m):
             ev.decisions.append((m, "missile"))
             self._set_state(m, info.missilestate, True, ev)

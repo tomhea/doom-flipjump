@@ -1,0 +1,4 @@
+$ python scratchpad/12m/profx/profx.py engine
+engine source: working copy C:\Users\tomhe\Documents\flipjump-151\flipjump\interpreter\_fjcore.c (sha256 51b5561674cfa53c..., flipjump 73e09c0)
+built C:\Users\tomhe\AppData\Local\Temp\profx\engX\_fjcore.pyd (sha256 a7098e6d1633d444...)
+rc=0

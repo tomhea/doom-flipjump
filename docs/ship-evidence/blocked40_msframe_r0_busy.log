@@ -1,0 +1,4 @@
+$ python scratchpad/12m/msframe.py --a C:/Users/tomhe/Documents/doom-m7k/build/doom_e1m1_blocked38.fjm --b build/doom_e1m1_blocked40.fjm --note M7 P3.1 idle monsters (the heat list re-keyed, p31): blocked40 vs doom_e1m1_blocked38.fjm
+machine : power plan 'Turbo'; busy processes: python(35756) 1.0s/s
+REFUSING to measure on a busy machine (a runaway process cost most of 2026-09-12's numbers). Kill them or pass --ignore-busy and say so in the note.
+rc=1

@@ -1835,6 +1835,7 @@ class ReferenceModel:
                           deg_stack_scale: int | None = None, deg_mark: int | None = None,
                           deg_lip_scale: int | None = None,
                           thing_positions=None, thing_hidden=None, thing_views=None,
+                          seen_out: set | None = None,
                           degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -2035,7 +2036,7 @@ class ReferenceModel:
                         continue
                     # binding is ALREADY position-driven, so M14-e needs no new logic here
                     things_by_ss.setdefault(
-                        self.point_in_subsector(scene.cmap, t.x, t.y), []).append((t, _views[_di]))
+                        self.point_in_subsector(scene.cmap, t.x, t.y), []).append((t, _views[_di], _di))
             for _si, _ss in enumerate(scene.cmap.subsectors):
                 if _ss.numsegs and _si in things_by_ss:
                     ss_first[_ss.firstseg] = _si              # the walk's arrival point for its things
@@ -2062,7 +2063,7 @@ class ReferenceModel:
                                        ):  # front-to-back order
             if things and seg_i in ss_first:
                 self._thing_stats["ss_arrived"] += 1
-                for t, tview in things_by_ss[ss_first[seg_i]]:
+                for t, tview, t_di in things_by_ss[ss_first[seg_i]]:
                     self._thing_stats["th_arrived"] += 1
                     if n_wdrawn == W:
                         self._thing_stats["th_claim_stopped"] += 1
@@ -2073,6 +2074,20 @@ class ReferenceModel:
                     # spend the frame's budget while 24 monsters were turned away. Both counters are
                     # monotone, so fj still latches `tstop` once BOTH are spent.
                     mon = t.type in MONSTER_TYPES
+                    # M7 P3.2 (docs/gp-monsters.md 8.2, D3 e): SEEN -- the sprite projects in front and
+                    # one of its columns is still OPEN when its leaf is reached, tested BEFORE the
+                    # budgets and the minimum-size cull, so sight never depends on degradation
+                    if seen_out is not None and mon:
+                        _sart = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None
+                                 else self.art_of_lump(sprite_wad, tview[0], spr_cache))
+                        if _sart is not None:
+                            _sss = scene.cmap.subsectors[ss_first[seg_i]]
+                            _ssec = self._seg_sector(lds, sds, secs, scene.cmap.segs[_sss.firstseg])
+                            _spr = self.project_thing(viewx, viewy, viewangle, viewz, t.x, t.y,
+                                                      _ssec.floor_h, _sart, 0)
+                            if _spr is not None and any(not drawn[x] for x in
+                                                        range(max(0, _spr[0]), min(W, _spr[1] + 1))):
+                                seen_out.add(t_di)
                     if (n_mon >= MONSTER_BUDGET) if mon else (n_thing >= THING_BUDGET):
                         continue                         # ... `continue`, not `break`: a scenery
                     art = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None   # budget must not

@@ -583,7 +583,8 @@ class World(CombatMixin):
                  sight: Optional[Callable[["World", int], bool]] = None,
                  k_heavy: int = K_HEAVY, cursor_policy: Callable = next_cursor,
                  strict: bool = False, aim: Optional[Callable] = None,
-                 player_blocking: bool = True, monsters: str = "full"):
+                 player_blocking: bool = True, monsters: str = "full", sight_rule: str = "los",
+                 seen_hook: Optional[Callable[["World"], None]] = None):
         if map_wad is None:
             from doomfj.config import DEFAULT_MAP_WAD
             from doomfj.wad import WadFile
@@ -595,6 +596,17 @@ class World(CombatMixin):
         assert monsters in MONSTER_MODES, monsters
         self.monsters = monsters
         self.sight = sight or World.los_to_player
+        # M7 P3.2 (docs/gp-monsters.md 8.2; the owner, 2026-09-30): "seen" -- waking by the picture or
+        # REJECT within 128 units, attacking by the picture or the near-trace -- else (the default,
+        # set v4's model) one exact-LOS `sight` for both. `seen_hook` writes mon_seen after each tic.
+        assert sight_rule in ("los", "seen"), sight_rule
+        self.sight_rule, self.seen_hook = sight_rule, seen_hook
+        if sight_rule == "seen":
+            from doomfj import sight as _S
+            self.reject = _S.load_reject(mapname)
+            self.wake_sight, self.attack_sight = _S.wake_sight, _S.attack_sight
+        else:
+            self.wake_sight = self.attack_sight = lambda w, m: w.sight(w, m)
         self.k_heavy = k_heavy
         self.cursor_policy = cursor_policy
         self.strict = strict
@@ -835,6 +847,8 @@ class World(CombatMixin):
             self._barrels_phase(ev)
             self._fx_phase(ev)
             self.ws.leveltime = (self.ws.leveltime + 1) & 0xFFFF
+        if self.seen_hook is not None:
+            self.seen_hook(self)                 # M7 P3.2: this tic's picture -> the next tic's mon_seen
         self.tic_count += 1
         self.events.append(ev)
         return ev
@@ -1014,7 +1028,7 @@ class World(CombatMixin):
             return                                       # P3.1: nothing wakes a monster
         if self.player_alive() and ws.snd_alert[self.sector_node[self._mon_sector(m)]]:
             ws.mon_target[m] = 1
-            if not ws.mon_ambush[m] or self.sight(self, m):
+            if not ws.mon_ambush[m] or self.wake_sight(self, m):
                 self._wake(m, "sound", ev)
                 return
         if self._look_for_player(m, allaround=False):
@@ -1027,7 +1041,7 @@ class World(CombatMixin):
     def _look_for_player(self, m: int, allaround: bool) -> bool:
         """P_LookForPlayers for the single player: alive, in sight, and (unless `allaround`) not
         behind the monster -- or behind it but within MELEERANGE."""
-        if not self.player_alive() or not self.sight(self, m):
+        if not self.player_alive() or not self.wake_sight(self, m):
             return False
         if not allaround:
             dx, dy = self._to_player(m)
@@ -1086,11 +1100,11 @@ class World(CombatMixin):
             return False
         if aprox_distance(*self._to_player(m)) >= MELEE_REACH:
             return False
-        return self.sight(self, m)
+        return self.attack_sight(self, m)
 
     def _check_missile_range(self, m: int) -> bool:
         ws = self.ws
-        if not self.sight(self, m):
+        if not self.attack_sight(self, m):
             return False
         if ws.mon_justhit[m]:
             ws.mon_justhit[m] = 0

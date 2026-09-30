@@ -870,7 +870,7 @@ class CombatMixin:
         """A_PosAttack / A_SPosAttack: one aim (sight and range), then each bullet's spread against
         the player's width at that distance. Every bullet draws, hit or not."""
         W = _W()
-        seen = self.player_alive() and self.sight(self, m)
+        seen = self.player_alive() and self.attack_sight(self, m)   # M7 P3.2
         dist = W.aprox_distance(*self._to_player(m))
         for _ in range(bullets):
             spread, dmg = self._roll("mon_rng", self.sites.mon_bullet, m)

@@ -82,6 +82,12 @@ def standalone_globals(doors_wad=None, mapname="E1M1"):
         from doomfj.movercode import mover_decls
         from doomfj.movers import lift_states
         out += mover_decls(len(lift_states(secs, lds, sds)))
+        # M7 P3.1: ...and the monsters' cells, at the model's slot count and the schema's widths
+        # (the emitter's monstercode.monster_decls; values do not matter to the set, widths do)
+        from doomfj.monstercode import monster_decls
+        from doomfj.world import World
+        wd = World(w, mapname)
+        out += monster_decls(wd.schema, wd.layout.nmon)
     return out
 
 

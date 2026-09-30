@@ -397,7 +397,8 @@ STANDALONE_SCRATCH_DECLS = [
 ]
 
 
-def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0) -> tuple:
+def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlift=0,
+                  monsters=None) -> tuple:
     """M7 P1.5 -- the RESTART BLOCK, as (the shared routine's lines, [each skill's inline lines]).
 
     Choosing a skill must put the world back at that skill's level start: every cell the program
@@ -437,6 +438,8 @@ def restart_lines(spawn, ndoors, rt_binds, rt_pos, nss, per_skill, nwalk=1, nlif
             for i, v in enumerate(arr):
                 out += [f"    {label} + {i}*dw + dbit + {b};" for b in range(8) if v >> b & 1]
         out += [f"    hex.set 2, thvis + {j}*2*dw, {v}" for j, v in enumerate(vis)]
+        # M7 P3.1: the monsters' cells at this skill's level start (monstercode.p31_parts)
+        out += list(monsters[len(skills)]) if monsters else []
         skills.append(out)
     return common, skills
 
@@ -578,7 +581,7 @@ def exit_lines(boxes, press_miss=()) -> list:
 
 def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS,
                             menu: list | None = None, door_lines=(), exit_boxes_=(),
-                            press_miss=()) -> list:
+                            press_miss=(), monster_tic=()) -> list:
     """M5 — the standalone tier's frame prologue, in place of `_state_wire_lines`.
 
     The hosted tier is handed the player's whole world state every frame and echoes the new one
@@ -620,6 +623,9 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
            f"duse_nos:", *door_lines] if door_lines else []),
         *(exit_lines(exit_boxes_, press_miss) if exit_boxes_ else []),
         *_player_sim_lines(collide),
+        # M7 P3.1: the monsters tic after the player (the model's order: doors, player, monsters);
+        # a frozen level skips them with the player
+        *monster_tic,
         *(["lv_frozen:"] if exit_boxes_ else []),
         *_int_part_lines("vx", "viewx", "vxsx", "vxdone"),
         *_int_part_lines("vy", "viewy", "vysx", "vydone"),
@@ -629,7 +635,7 @@ def _standalone_input_lines(collide: bool = False, polls: int = STANDALONE_POLLS
 
 def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                          spr_base, spr_ldbase, spr_dw, spr_cls, *, spr_cache: dict,
-                         keep=None):
+                         keep=None, view_rows=(), ltw: int = 1):
     """M14-e — everything the runtime thing table needs, baked ONCE by thing index.
 
     The static path bakes one xor-involution block per (subsector, thing), which is only possible
@@ -660,8 +666,12 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # a seg-less leaf has no sector and gets 0 -- nothing can bind to it (point location only ever
     # returns a leaf with geometry), so which row it names never matters
     sslgt = [lnpos.get(ln, 0) for ln in sslgt_raw]
-    sprlt = sprite_light_table(spr_cls, rows, lns)
+    # M7 P3.1: the monsters' VIEW rows follow the things' own (monstercode.p31_parts) -- a runtime
+    # thing's row index is its own index until the row select says otherwise, so these are
+    # reachable only through a monster's stub
     nt, nss = len(rows), len(cmap.subsectors)
+    rows = list(rows) + list(view_rows)
+    sprlt = sprite_light_table(spr_cls, rows, lns)
 
     def _pack(vals, widths):
         out = shift = 0
@@ -686,7 +696,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
         "\n".join(thpos),
         # ⚠ ssflr / sslgt / ltbase are NOT emitted any more: every one of them was indexed by the
         # SUBSECTOR, so the emitter knows the answer and `subsector_action` bakes it into the leaf.
-        generate_packed_lut_fj("sprlt", sprlt, 1),
+        generate_packed_lut_fj("sprlt", sprlt, ltw),        # M7 P3.1: `ltw` bytes a class
     ])
     # the per-leaf lists hold a thing's index + 1 in a byte (things.LIST_MAX_THINGS, the one bound)
     from doomfj.things import LIST_MAX_THINGS
@@ -705,7 +715,7 @@ def _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
     # nothing moves things (that is C4), so the same values bake and `bind_things` takes its
     # `clean` path for every thing and never runs point location.
     return (text, generate_point_location_fj(cmap), decls, nt, nss,
-            {ln: k * nt for k, ln in enumerate(lns)},
+            {ln: k * len(rows) for k, ln in enumerate(lns)},
             [rm.point_in_subsector(cmap, t.x, t.y) for t in things])
 
 
@@ -1404,11 +1414,27 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         f"thing_live_subsectors says subsectors {_stranded} are uninhabitable, yet {mapname} spawns "
         f"drawable things in them: {[(t.type, t.x, t.y) for s in _stranded for t in _all_by_ss[s]]}. "
         "The prune would drop those leaves and the sprites would vanish with no other symptom.")
+    # M7 P3.1 (docs/gp-monsters.md section 7): the game tier's IDLE monsters -- states, animation,
+    # rotation. `_ANIM` is the compile-time switch every P3.1 macro argument reads.
+    _p31 = None
+    if _do_things and standalone and moving_things:
+        from doomfj.monstercode import p31_parts
+        _p31 = p31_parts(rm, map_wad, mapname, sprite_wad, _anim,
+                         [map_wad.things(mapname)[w_] for w_ in sorted(_mt_keep)],
+                         spr_near=bool(DEG_SPR_NEAR_TZ), boot_skill=BOOT_SKILL, skills=SKILLS,
+                         cache=spr_cache)
+    _ANIM = 1 if _p31 else 0                  # None: a map without monsters animates nothing
+    _ANIM_SEL = "thsel_leaf, thsel_ret" if _ANIM else "0, 0"
+    if _ANIM:
+        sprlight, spr_cls = _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds,
+                                                sds, secs, moving_things=moving_things,
+                                                extra_heights=_p31["view_heights"])
     # M14-e: the runtime half of the same data, baked by INDEX rather than by (subsector, thing).
     _mt_tables, _mt_ptloc, _mt_decls, _MT_NT, _MT_NSS, _MT_LTB, _MT_BINDS = (
         _moving_thing_tables(rm, cmap, lds, sds, secs, map_wad, mapname, sprite_wad,
                              spr_base, spr_ldbase, spr_dw, spr_cls, spr_cache=spr_cache,
-                             keep=_mt_keep)
+                             keep=_mt_keep, view_rows=_p31["view_rows"] if _p31 else (),
+                             ltw=2 if _p31 else 1)
         if moving_things else ("", "", [], 0, 0, {}, []))
     # M7 P1.3: the per-leaf lists those spawn bindings imply -- baked into the standalone image
     # (the hot block below), where they persist instead of being rebuilt every frame
@@ -1447,9 +1473,10 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
         _mt_decls = list(_mt_decls) + (
             ["thvis:"] + [f"    hex.vec 2, {v}" for v in _BOOT_VIS] if standalone else
             [f"thvis: hex.vec {2 * _MT_NVIS}"])
-    _MT_NTH = _index_nibbles(max(1, _MT_NT))          # the row index's width, as check_line's is
+    _MT_NROWS = _p31["nrows"] if _p31 else _MT_NT         # M7 P3.1: + the view rows
+    _MT_NTH = _index_nibbles(max(1, _MT_NROWS))       # the row index's width, as check_line's is
     _MT_NSSN = _index_nibbles(max(1, _MT_NSS))
-    _MT_NLTI = _index_nibbles(max(1, len(_MT_LTB) * _MT_NT)) if moving_things else 1
+    _MT_NLTI = _index_nibbles(max(1, len(_MT_LTB) * _MT_NROWS)) if moving_things else 1
     # M14.5: the baked call sites' own copy of the record body (`mt`=0). On a static build there is
     # only one body and it keeps its name, so that renderer is emission-identical to before.
     _baked_leaf = "thing_leaf_b" if moving_things else "thing_leaf"
@@ -1470,7 +1497,12 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                 f"{DEG_SPR_NEAR_TZ * 0x10000}, "
                 f"{mt}, "
                 f"{'throwc' if mt else '0'}, {_MT_NTH}, "
-                f"{'sprlt' if mt else '0'}, {_MT_NLTI}"]
+                f"{'sprlt' if mt else '0'}, {_MT_NLTI}, "
+                # M7 P3.1: mirrored monster views, the animated runtime body only
+                f"{1 if (mt and _ANIM) else 0}, {'trb_mir' if (mt and _ANIM) else 0}, "
+                f"{'trb_mu' if (mt and _ANIM) else 0}, "
+                # M7 P3.1: the light class's width in bytes (two in the animated game tier)
+                f"{2 if _ANIM else 1}"]
     # V1: the pseudo-random wall grain, baked straight from the oracle so the two cannot drift (R6).
     # The hash is xors and shifts of the column index, so it evaluates entirely at COMPILE time and
     # the runtime cost is one ~20@ lookup per column -- no table read, no arithmetic, no per-run state.
@@ -2271,7 +2303,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
             [thing_pos_value(t) for t in _rt_things],     # the pristine thpos_rt's own values
             _MT_NSS,
             [skill_level_start(_drawable, _rt_draw, _MT_BINDS, _MT_NSS, _vis_slots, sk)
-             for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot))
+             for sk in SKILLS], nwalk=len(_walk_trig), nlift=len(_lift_slot),
+            monsters=_p31["restart"] if _p31 else None)
     _menu_block = (_menu_lines(cfg, asset_wad, list(menu_entries or DEFAULT_MENU),
                                DEFAULT_MENU_SELECTED if menu_entries is None else menu_selected,
                                restart=_restart)
@@ -2286,7 +2319,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                                   {secs[si].tag: k for si, k in _lift_slot.items()})
                    if (_movers_on and _exit) else [])
     pass1 = [
-        *(_standalone_input_lines(collide, menu=_menu_block, door_lines=_door_tic,
+        *(_standalone_input_lines(collide, menu=_menu_block, monster_tic=_p31["tic"] if _p31 else (),
+                                  door_lines=_door_tic,
                                   exit_boxes_=_exit, press_miss=_press_miss)
           if standalone else
           _state_wire_lines(sim=player_sim, collide=collide,
@@ -2412,6 +2446,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
               # M7 P3.0 (docs/gp-monsters.md): the monster phase's tables, in the game tier only and
               # called by nothing yet -- the build that carries them prices the placement tax
               + (_monster_tables() if _movers_on else [])
+              + ([_p31["mview"], _p31["mrot"]] if _p31 else [])            # M7 P3.1
               # ⚠ appended only when the flag is ON. An unconditional "" still costs a newline,
               # which changes the shipped text and so its emit hash -- caught by
               # scratchpad/cr/emit_baseline.py, which is exactly what that control is for.
@@ -2551,8 +2586,11 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
                if _do_things else []),
              # M14-e: the ONE thing walk every leaf calls, in place of its baked per-thing blocks
              *(["thing_pass_leaf:",
-                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt",
+                f"sim.thing_pass throw, {_MT_NTH}, thpos_rt, {_ANIM}, {_ANIM_SEL}, "
+                f"{'sp_lt_hi' if _ANIM else 0}",
                 "stl.fret tp_ret"] if moving_things else []),
+             # M7 P3.1: the row select and the rotation leaf it calls
+             *((_p31["select"] + _p31["rotation"]) if _p31 else []),
              # idea 20 / tuning round 5: 288 ops land the pass-2 leaf region on a cheaper
              # base -- the first time THIS point fired in five rounds.
              "rep(288, i) stl.fj 0, 0",
@@ -2606,6 +2644,7 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
           # `viewx/viewy/viewangle` are for the player.
           *(door_decls(len(_dslot), len(_walk_trig)) if _dst_tbl else []),
           *(mover_decls(len(_lift_slot)) if _movers_on else []),          # M7 P2b
+          *(_p31["decls"] if _p31 else []),                               # M7 P3.1: the monsters
           *_collide_decls,                                  # M14-d collision state
           *hoisted_scratch_decls(cfg),                      # M1-HOIST: ex-@-local storage
           # M14-b: the binary state wire's magic byte + the frame's key byte (both 1 byte = 2
@@ -2721,6 +2760,8 @@ def emit_wall_renderer(map_wad, mapname, cfg, *, tier: str, asset_wad=None, spri
              "sp_x: hex.vec 8", "sp_y: hex.vec 8", "sp_z: hex.vec 8",
              "sp_left: hex.vec 8", "sp_w: hex.vec 8", "sp_hh: hex.vec 8",
              "sp_base: hex.vec 4", "sp_dw: hex.vec 2", "sp_lt: hex.vec 2",
+             # M7 P3.1: the light class's SECOND byte, right behind `sp_lt` (`ltw` = 2, animated only)
+             *(["sp_lt_hi: hex.vec 2"] if _ANIM else []),
              "sp_tzmax: hex.vec 8", "sp_mon: hex.vec 2",
              # M14-perf: the thing INDEX the hot load ran on, so the deferred cold load can read
              # its row after the reject. Declared unconditionally (it costs w/4 nibbles) because
@@ -3666,7 +3707,7 @@ def _thing_sector(rm, cmap, lds, sds, secs, t):
 
 
 def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, secs,
-                        *, moving_things: bool = False):
+                        *, moving_things: bool = False, extra_heights=()):
     """V4 — the sprite SHADE-ROW bank + the (lightnum, sprite world height) class each thing bakes.
 
     A billboard takes DOOM's scalelight row for its own on-screen height, exactly as a wall column
@@ -3698,11 +3739,14 @@ def _lines_sprite_light(rm, cfg, sprite_wad, map_wad, mapname, cmap, lds, sds, s
     if moving_things:
         # the spawn pairs keep their indices -- appending leaves every static thing's baked class
         # exactly where it was, so widening the bank cannot move a pixel by itself
-        heights = sorted({h for (_ln, h) in cls_of})
+        # M7 P3.1: + the monsters' view heights (a view row's light class, monstercode.p31_parts)
+        heights = sorted({h for (_ln, h) in cls_of} | set(extra_heights))
         for ln in sorted({rm.wall_lightnum(s.light, 0) for s in secs}):
             for h in heights:
                 cls_of.setdefault((ln, h), len(cls_of))
-    assert len(cls_of) * STEP_COL_STRIDE <= 0x10000, f"sprite light classes overflow: {len(cls_of)}"
+    # M7 P3.1: the monsters' views take the class to TWO bytes (`ltw`, the animated game tier only)
+    _lim = 0x10000 if not extra_heights else 0x1000000
+    assert len(cls_of) * STEP_COL_STRIDE <= _lim, f"sprite light classes overflow: {len(cls_of)}"
     out = [f"// V4 sprite shade rows: {len(cls_of)} (light, sprite-height) classes x "
            f"{STEP_COL_STRIDE} dw, indexed class<<8 | bucket height", "sprlight:"]
     for (ln, units) in cls_of:

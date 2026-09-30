@@ -741,8 +741,14 @@ def main():
         return 1
     sys.path.insert(0, str(ROOT / "scratchpad" / "gp"))
     import gatestate as GST
+    # M7 P3.1: the idle monsters -- the model's own phase (doomfj.monsters) from the boot skill's
+    # level start, a tic per world frame after the player, reset by NEW GAME; drawn, cells read
+    from doomfj.monsters import MonsterPhase, MonsterViews
+    mph = MonsterPhase(mw, args.map, BOOT_SKILL, rm=rm, mode="idle")
+    mviews = MonsterViews(rm, mw, args.map, art, mph.world)
     got, ops, reads = GST.run_reading_state(ROOT / args.fjm, ROOT / args.labels, events, frames,
-                                            len(order), len(dp.triggers), len(mp.order))
+                                            len(order), len(dp.triggers), len(mp.order),
+                                            nmon=mph.world.layout.nmon)
     assert len(got) == frames, "the program presented %d frames, not %d" % (len(got), frames)
     print("running: %s ops -> %d frames presented" % (format(ops, ","), len(got)))
     print("")
@@ -784,13 +790,16 @@ def main():
                     dps = dp.initial()
                     dstates = dps[0]
                     mps = mp.initial()
+                # M7 P3.1: the monsters too -- OUTSIDE the doors control, which must part on the doors
+                # alone (the state at the NEW GAME frame with its picture exact)
+                mph.reset(BOOT_SKILL)
                 pusedn, lvdone = 1, 0
         if mode == 1:                                   # a menu frame tics nothing
             menu_pics.setdefault((scr, sel), set()).add(got[f])
             sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr,
                                                        sel, (dstates[si] for si in order),
                                                        dps, order, (lvdone, pusedn),
-                                                       mps, mp.order))
+                                                       mps, mp.order, mph.state()))
             state_checked += 1
             print("  %5d  %-8s  %6s   (menu frame, %s -- m3_gate judges these)  %s"
                   % (f, ",".join(sorted(menu_events[f])) or "-", "-",
@@ -806,16 +815,18 @@ def main():
             in_box_when_pressed = True
         dps, state, mps, pusedn = tic(dps, state, kd, used, mps, pusedn)
         dstates = dps[0]
+        mph.tic()                                       # M7 P3.1: the monsters after the player
         rsc = build_scene(mw, mw, args.map,
                           {**heights_for_states(secs, lds, sds, {si: dstates[si][0] for si in order}),
                            **mp.heights(mps)})
         want = bytes(rm.render_wall_frame(state, rsc, sprite_wad=art,
                                           thing_hidden=set(hidden) | (set(card_di) if dps[3] else set()),
+                                          thing_views=mviews(mph, state.x, state.y),
                                           **GAME_RENDER_KW))
         same = got[f] == want
         sbad = GST.diff(reads[f], GST.oracle_state(state.x, state.y, state.angle, mode, scr, sel,
                                                    (dstates[si] for si in order), dps, order,
-                                                   (lvdone, pusedn), mps, mp.order))
+                                                   (lvdone, pusedn), mps, mp.order, mph.state()))
         state_checked += 1
         path[f] = (state.x, state.y, state.angle)
         ok &= same

@@ -1834,7 +1834,7 @@ class ReferenceModel:
                           deg_things: tuple | None = None, deg_sliver: int | None = None,
                           deg_stack_scale: int | None = None, deg_mark: int | None = None,
                           deg_lip_scale: int | None = None,
-                          thing_positions=None, thing_hidden=None,
+                          thing_positions=None, thing_hidden=None, thing_views=None,
                           degrade: bool = False) -> bytes:
         """The first rendered 3D frame, TEXTURED: composite every visible wall over the floor/ceiling
         visplanes (R_RenderBSPNode + R_StoreWallRange + R_RenderSegLoop). Walk the BSP front-to-back; for
@@ -1998,6 +1998,14 @@ class ReferenceModel:
             # ⚠ The oracle has no tier, so it cannot refuse a HOSTED gate that names a skill's set
             # (that gate would fail on pixels instead); the hosted gates hide flagged things only
             # (m14_gate's phase 3), and the skill sets come from the game tier's gates.
+            # M7 P3.1: `thing_views` -- per drawable, None (the type's art, as always) or the sprite
+            # VIEW it is drawn with, `(lump, mirrored)` from `doomfj.monsters.view_of` (a runtime
+            # thing's state frame at its rotation); a mirrored view reads its columns right to left
+            if thing_views is not None:
+                assert len(thing_views) == len(_drawable), (len(thing_views), len(_drawable))
+                _vbad = [i for i, v in enumerate(thing_views) if v is not None and _baked[i]]
+                assert not _vbad, f"thing_views gives BAKED things {_vbad[:8]} a view: they are code"
+            _views = list(thing_views) if thing_views is not None else [None] * len(_drawable)
             _hidden = frozenset(thing_hidden or ())
             if _hidden:
                 _slots = vanishable_slots(_drawable_spawn, _baked, VANISHABLE_TYPES)
@@ -2027,7 +2035,7 @@ class ReferenceModel:
                         continue
                     # binding is ALREADY position-driven, so M14-e needs no new logic here
                     things_by_ss.setdefault(
-                        self.point_in_subsector(scene.cmap, t.x, t.y), []).append(t)
+                        self.point_in_subsector(scene.cmap, t.x, t.y), []).append((t, _views[_di]))
             for _si, _ss in enumerate(scene.cmap.subsectors):
                 if _ss.numsegs and _si in things_by_ss:
                     ss_first[_ss.firstseg] = _si              # the walk's arrival point for its things
@@ -2054,7 +2062,7 @@ class ReferenceModel:
                                        ):  # front-to-back order
             if things and seg_i in ss_first:
                 self._thing_stats["ss_arrived"] += 1
-                for t in things_by_ss[ss_first[seg_i]]:
+                for t, tview in things_by_ss[ss_first[seg_i]]:
                     self._thing_stats["th_arrived"] += 1
                     if n_wdrawn == W:
                         self._thing_stats["th_claim_stopped"] += 1
@@ -2067,7 +2075,8 @@ class ReferenceModel:
                     mon = t.type in MONSTER_TYPES
                     if (n_mon >= MONSTER_BUDGET) if mon else (n_thing >= THING_BUDGET):
                         continue                         # ... `continue`, not `break`: a scenery
-                    art = self.sprite_art(sprite_wad, t.type, spr_cache)   # budget must not stop the
+                    art = (self.sprite_art(sprite_wad, t.type, spr_cache) if tview is None   # budget must not
+                           else self.art_of_lump(sprite_wad, tview[0], spr_cache))       # stop the
                     if art is None:                                        # walk finding a monster
                         continue
                     tss = scene.cmap.subsectors[ss_first[seg_i]]
@@ -2114,6 +2123,8 @@ class ReferenceModel:
                     frac = (max(0, tx1) - tx1) * istep
                     for x in range(max(0, tx1), min(W, tx2 + 1)):
                         u = min(art[2] - 1, max(0, frac >> 16))
+                        if tview is not None and tview[1]:
+                            u = art[2] - 1 - u          # M7 P3.1: a mirrored view, right to left
                         frac += istep
                         if drawn[x] or sfrag2[x] is not None:
                             continue                     # V4b: both fragment slots spent

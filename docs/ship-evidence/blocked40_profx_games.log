@@ -1,0 +1,19 @@
+$ python scratchpad/12m/profx/drive.py games games_blocked40
+engine: C:\Users\tomhe\AppData\Local\Temp\profx\engX\_fjcore.pyd
+FJPROFX map: 25 ranges, 12023930 opaque words of 91882368
+FJPROFX labels: 1955349 read, 1527470 flagged in opaque code
+FJPROFX marks: 30
+calibration: 220,383 ops, 2/2 frames, 2.3s
+game0: 1,672,391,005 ops, 102/102 frames, 26.5s
+game1: 693,431,688 ops, 102/102 frames, 12.4s
+game2: 1,603,687,263 ops, 102/102 frames, 26.4s
+game3: 1,705,591,490 ops, 102/102 frames, 26.8s
+game4: 954,341,838 ops, 102/102 frames, 16.8s
+game5: 1,065,264,840 ops, 102/102 frames, 17.6s
+game6: 910,760,934 ops, 102/102 frames, 15.8s
+game7: 907,990,338 ops, 102/102 frames, 15.7s
+game8: 1,142,957,779 ops, 102/102 frames, 19.2s
+game9: 1,191,499,940 ops, 102/102 frames, 19.9s
+prof_dump: 1022 present records -> C:\Users\tomhe\AppData\Local\Temp\profx\games_blocked40.*
+total 640.0s
+rc=0

@@ -229,6 +229,7 @@ class Field:
     phase: str         # "existing" (in the binary today) | "S3a" | "S3b" | "P3"
     label: str         # the fj label that holds it today ("" = a new cell)
     doc: str
+    array: bool = False  # declared WITH a count: an array even at count 1 (a one-leaf map, one monster, one door)
 
     @property
     def nibbles(self) -> int:
@@ -270,9 +271,10 @@ def build_schema(lay: Layout) -> Tuple[Field, ...]:
     assert lay.nmobile <= LIST_MAX_THINGS, "leaf lists store mobile index + 1 in a byte"
     fs: List[Field] = []
 
-    def f(name, bits, count=1, signed=False, kind="persist", group="", phase="S3a", label="",
+    def f(name, bits, count=None, signed=False, kind="persist", group="", phase="S3a", label="",
           doc=""):
-        fs.append(Field(name, bits, count, signed, kind, group, phase, label, doc))
+        fs.append(Field(name, bits, 1 if count is None else count, signed, kind, group, phase, label, doc,
+                        array=count is not None))
 
     leaf_bits, mon_bits = _index_bits(lay.nleaf), _index_bits(lay.nmon)
     # -- game ------------------------------------------------------------------------------------
@@ -467,24 +469,24 @@ class WorldState:
         object.__setattr__(self, "strict", strict)
         object.__setattr__(self, "_fields", {x.name: x for x in schema})
         for x in schema:
-            object.__setattr__(self, x.name, 0 if x.count == 1 else FieldArray(x, strict))
+            object.__setattr__(self, x.name, FieldArray(x, strict) if x.array else 0)
 
     def __setattr__(self, name, value):
         fld = self._fields.get(name)
         if fld is None:
             raise AttributeError("%s is not a schema field" % name)
-        if fld.count != 1:
+        if fld.array:
             raise TypeError("%s is an array field: assign its elements" % name)
         object.__setattr__(self, name, _fit(value, fld, self.strict))
 
     def as_dict(self) -> Dict[str, object]:
-        return {x.name: (getattr(self, x.name) if x.count == 1 else list(getattr(self, x.name)))
+        return {x.name: (list(getattr(self, x.name)) if x.array else getattr(self, x.name))
                 for x in self.schema}
 
     def load(self, values: Dict[str, object]) -> None:
         for x in self.schema:
             v = values[x.name]
-            if x.count == 1:
+            if not x.array:
                 setattr(self, x.name, v)
             else:
                 arr = getattr(self, x.name)
@@ -499,7 +501,7 @@ class WorldState:
 
     def digest(self) -> str:
         """sha256 over every field in schema order -- the trajectory hash."""
-        blob = json.dumps([[x.name, getattr(self, x.name) if x.count == 1
+        blob = json.dumps([[x.name, getattr(self, x.name) if not x.array
                             else list(getattr(self, x.name))] for x in self.schema],
                           separators=(",", ":"))
         return hashlib.sha256(blob.encode("ascii")).hexdigest()
@@ -552,6 +554,9 @@ class TicEvents:
         return dataclasses.asdict(self)
 
 
+MONSTER_MODES = ("idle", "full")
+
+
 def next_cursor(cursor: int, first_deferred: Optional[int], nmon: int) -> int:
     """The rotating cursor: the next tic starts at the first monster that was deferred, so it is
     served first; with no deferral the cursor stays. Injectable (World(cursor_policy=...)) so a
@@ -578,13 +583,17 @@ class World(CombatMixin):
                  sight: Optional[Callable[["World", int], bool]] = None,
                  k_heavy: int = K_HEAVY, cursor_policy: Callable = next_cursor,
                  strict: bool = False, aim: Optional[Callable] = None,
-                 player_blocking: bool = True):
+                 player_blocking: bool = True, monsters: str = "full"):
         if map_wad is None:
             from doomfj.config import DEFAULT_MAP_WAD
             from doomfj.wad import WadFile
             map_wad = WadFile.from_path(DEFAULT_MAP_WAD)
         self.mw, self.mapname = map_wad, mapname
         self.rm = rm or ReferenceModel()
+        # M7 P3 (docs/gp-monsters.md section 1): the MODEL MODE a rung's binary is exact against --
+        # "idle" (P3.1): the states run, A_Look sees and hears nothing; "full": everything
+        assert monsters in MONSTER_MODES, monsters
+        self.monsters = monsters
         self.sight = sight or World.los_to_player
         self.k_heavy = k_heavy
         self.cursor_policy = cursor_policy
@@ -1001,6 +1010,8 @@ class World(CombatMixin):
         sight, and otherwise falls through to the look); else P_LookForPlayers with the facing."""
         ws = self.ws
         ws.mon_threshold[m] = 0
+        if self.monsters == "idle":
+            return                                       # P3.1: nothing wakes a monster
         if self.player_alive() and ws.snd_alert[self.sector_node[self._mon_sector(m)]]:
             ws.mon_target[m] = 1
             if not ws.mon_ambush[m] or self.sight(self, m):

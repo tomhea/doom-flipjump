@@ -10,14 +10,24 @@ that. CLAUDE.md points here; `docs/measurement-process.md` is the instrument's p
 
 | what | value | how it was measured |
 |---|---|---|
-| **the shipped binary** | `build/doom_e1m1_blocked38.fjm`, sha256 `457e175106f10776` (first 16 hex), built 2026-09-30 from the command in 1b (M7 P3.0, the monster tables, uncalled) | class S -- pixels identical to blocked37 (P2b); built with the installed flipjump 1.5.1 at `bc8ee63` (`docs/ship-evidence/blocked38_build.log`) |
-| **ms/frame** | **61.7 ms/frame** (61.3-62.2), against **61.3** (61.0-62.4) for blocked37 in the same run on a quiet box (~230M fj/s), pixels identical -- **NOT SEPARATED: median x0.995** (pairs 1.002 0.995 0.994 0.990 0.999); the re-freeze reads **61.5** (61.3-61.7) | `msframe.py --a build/doom_e1m1_blocked37.fjm --b build/doom_e1m1_blocked38.fjm`, 200 frames x 5 reps, pinned core (`blocked38_msframe.log`; `blocked38_msframe_freeze.log`) |
-| **fj ops/s** | **230.3 M** on the re-freeze (229.5 M in the A/B run, blocked37 229.9 M) | ops/frame **14,162,434** on msframe's forward-walk script (blocked37 14,091,809) |
-| **binding metric** (owner spec) | (mean+p80)/2 = **13,696,511 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked38.fjm`, 2026-09-30 (`docs/ship-evidence/blocked38_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
-| **size** | **28.24% of 2^27 -- PASS** (37,908,816 words; span 91,548,800) | same run |
-| **combat set v4** (the CAP-22 set from P2b on; frozen by the owner 2026-09-29 -- `p2b_v4_freeze.log`) | (mean+p80)/2 = **14,250,398**; **14,283,383** with strafe's collision; every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v4.json --pixel-every 1 --proxy` (`blocked38_b0_v4.log`) |
+| **the shipped binary** | `build/doom_e1m1_blocked40.fjm`, sha256 `dc1e85e52f48a299` (first 16 hex), built 2026-09-30 from the command in 1b (M7 P3.1, idle life: the monsters' state machine and views) | class F -- the pictures differ from blocked38 (monsters animate); built with the installed flipjump 1.5.1 at `bc8ee63` from m7-monsters 7608ef3 (`docs/ship-evidence/blocked40_build.log`) |
+| **ms/frame** | **64.2 ms/frame** (63.2-64.3), against **62.7** (61.8-63.9) for blocked38 in the same run on a quiet box (~226M fj/s) -- **NOT SEPARATED: median x0.978** (pairs 0.994 0.978 0.962 0.984 0.978); the re-freeze reads **63.7** (63.6-63.8) | `msframe.py --a build/doom_e1m1_blocked38.fjm --b build/doom_e1m1_blocked40.fjm`, 200 frames x 5 reps, pinned core (`blocked40_msframe.log`; `blocked40_msframe_freeze.log`; the first attempt refused a busy box, `blocked40_msframe_r0_busy.log`) |
+| **fj ops/s** | **227.6 M** on the re-freeze (225.6 M in the A/B run, blocked38 226.0 M) | ops/frame **14,496,297** on msframe's forward-walk script (blocked38 14,162,434) |
+| **binding metric** (owner spec) | (mean+p80)/2 = **13,940,191 ops/frame -- PASS** | `gamespeed.py --fjm build/doom_e1m1_blocked40.fjm`, 2026-09-30 (`docs/ship-evidence/blocked40_gamespeed.log`); `gamespeed_trail.py`: TRAIL and both controls PASS |
+| **size** | **28.65% of 2^27 -- PASS** (38,457,306 words; span 91,882,368) | same run |
+| **combat set v4** (the CAP-22 set from P2b on; frozen by the owner 2026-09-29 -- `p2b_v4_freeze.log`) | (mean+p80)/2 = **14,447,782**; **14,481,633** with strafe's collision; every frame state- and pixel-exact | `scratchpad/gp/b0_scenarios.py --file scratchpad/gp/scenarios/combat_scenarios_v4.json --pixel-every 1 --proxy` (`blocked40_b0_v4.log`) |
 
-**What it is:** blocked37 with the monster phase's tables emitted and called by nothing (M7 P3.0,
+**What it is:** blocked38 with the monsters ALIVE in the model's `idle` mode (M7 P3.1, `docs/gp-monsters.md`
+section 7), class F: every slot runs its tic and one `mstate` step (nothing wakes -- sight waits for P3.2), and the
+renderer draws each monster at its state's frame and DOOM's rotation for the viewer, mirrored views included --
+a runtime thing's row comes through a row select (`thsel_leaf`: a static thing its own row, a monster its view's),
+and the sprite light class is two bytes wide in the animated tier (`ltw`). The gates are byte- and state-exact
+with every oracle running `monsters.MonsterPhase`; deg_gate byte-exact with EVERY op count equal to blocked38's
+(the visual tier expands the new record parameters to the old ops). The binary it replaced, blocked38 (sha256
+`457e175106f10776`), is kept in `build/` as the comparison arm; blocked39 (the build before the heat list was
+re-keyed, 17 of 20 hot words pinned) is superseded.
+
+**What blocked38 was (P3.0):** blocked37 with the monster phase's tables emitted and called by nothing (M7 P3.0,
 `docs/gp-monsters.md` section 6), class S: `mstate` (the monster state table), `mturn`, `mopp`, `mrnd`. Its
 delta is the pure placement tax the handoff asked P3 to price first: +54,098 on gamespeed, +26,477 on v4,
 +10,936 words, and msframe NOT SEPARATED with every pixel identical. The binary it replaced, blocked37 (sha256
@@ -38,8 +48,9 @@ msframe's busy refusal -- and 84-89 ms with a lighter one (2026-09-13; blocked27
 under load). **Absolute ms/frame is a number about
 the machine state; only an A/B inside one run is a number about the binary.** The msframe
 baseline `shipped` (`scratchpad/12m/msframe_baselines/shipped.json`) is frozen on this binary
-(re-frozen 2026-09-30 on blocked38: 61.5 ms/frame [61.3 .. 61.7], yardstick 3.63G,
-230.3M fj/s -- `blocked38_msframe_freeze.log`; blocked37's the same day read 61.9 [61.4 .. 62.0];
+(re-frozen 2026-09-30 on blocked40: 63.7 ms/frame [63.6 .. 63.8], yardstick 3.64G,
+227.6M fj/s -- `blocked40_msframe_freeze.log`; blocked38's the same day read 61.5 [61.3 .. 61.7];
+blocked37's the same day read 61.9 [61.4 .. 62.0];
 blocked36's 2026-09-29 read 77.4 on a slow box;
 blocked35's the same day read 62.1 [61.4 .. 63.9];
 blocked34's 61.3 [60.6 .. 61.5];
@@ -57,7 +68,7 @@ the same series, with the same counts cache; blocked25's own line, 09-11 18:04, 
 and followed the renderer fix of FINDINGS CE):
 
 ```
-python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p14.json.gz
+python scratchpad/12m/build_labeled.py --labels scratchpad/12m/atlas/<name>.labels.tsv.gz -- game --out build/doom_e1m1_<name>.fjm --pool-base 0x60000000 --span-bits 0x9fffffe0 --pin-state-cells --merge-aliases --spread 2 --spread-min-count 256 --max-slot-ops 512 --pin-broken --width-buckets --counts-cache scratchpad/12m/_counts_game.json.gz --pin-heat scratchpad/12m/heat_blocked27_p31.json.gz
 ```
 
 `build_labeled.py` wraps `build_blocked.py` with the label spy on (everything after `--` is
@@ -145,6 +156,18 @@ assembler the same files and the same persist tuple at 87c2c75 and at the head
 is signed by 87c2c75's (`aab5be8f`), so on main this line MISSES the cache and recounts once (~34 min,
 the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (A first build of this rung was stopped in pass 1:
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
+
+**blocked40 (2026-09-30, M7 P3.1): the line's heat list is `heat_blocked27_p31`** -- the P1.6 list
+(`heat_blocked27_p16`, never used by a build: every build from P1.6 to P3.0 pinned with the stale p14, issue #107)
+re-keyed through the four parameter-count changes P3.1 made on its paths (`sim.thing_pass` 3 -> 7, `sim.thing_load`
+4 -> 7, `frame.thing_load_cold` 4 -> 5, `frame.thing_record_body` 24 -> 28; `p31_heat_rekey.log`). blocked40's build
+(`blocked40_build.log`) used the list whose rename record held only those four, so its first pin report left one
+word UNRESOLVED -- P1.4's `stream.emit_col_lines 45 -> 38` was lost (`blocked40_pinreport_r0_unresolved.log`).
+`heat_rekey.py` now accumulates the record, and the tracked list is the same groups regenerated along the chain
+p14 -> p16 -> p31 with the fixed tool (`scratchpad/12m/heat_rekey.py --in heat_blocked27_p14.json.gz` with P1.6's
+`frame.thing_record_body:25:24`, then the four above): groups byte-equal, so the build's layout input is unchanged;
+decompressed sha256 `716223ee86683d91` (the build log's list read `1468d7fbf91b235d`, the one-step record;
+the regeneration re-run and byte-compared: `p31_heat_regen.log`).
 
 **blocked31 (2026-09-27, M7 P1.4): the line changes its heat list** to
 `--pin-heat scratchpad/12m/heat_blocked27_p14.json.gz` -- blocked27's list re-keyed through the four

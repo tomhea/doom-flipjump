@@ -99,3 +99,87 @@ The monster collision cells (radius 20 / 30 with ML_BLOCKMONSTERS) are NOT in P3
 P3.2's rules (BLOCKMONSTERS, the drop-off); priced for P3.2 at a player-sized cell set each.
 Kill criteria as declared: each table on the engine over every entry against its source, a mutant caught; every
 gate byte-exact, ops equal to blocked37's but for placement; size <= +0.1M words; msframe not B SLOWER (class S).
+
+## 7. P3.1 -- idle life (as BUILT; the kill criteria are `docs/gp-ledger.md`'s)
+
+**Model**: `World(monsters="idle")` -- A_Look returns at once (nothing wakes); every other rule is the full model's.
+In idle every monster loops its spawn states (a `STND` pair, 10 tics each, on E1M1's types). The gate oracles step it
+through `doomfj.monsters.MonsterPhase` (the model's `_monsters_phase`, once per game frame after the player).
+
+**The one view rule** (`doomfj.monsters`): the drawn view is the state's frame at DOOM's rotation
+`((R_PointToAngle(viewer -> thing) + 0x90000000) >> 29) - facing, mod 8, + 1`, read off the WAD's lump names
+(`wall_renderer.anim_patches`); a second-half lump is drawn MIRRORED. The oracle takes it through
+`render_wall_frame(thing_views=...)` (the view's art; a mirrored view's column is `dw - 1 - u`).
+
+**fj**, each piece with a `tests/fj` harness against the Python rule before it joins the program:
+1. **The cells**: `mon_state` (2 nibbles), `mon_tics` (1), `mon_facing` (1), `mon_active` (1) per monster slot of the
+   union image, generated from `world.build_schema` (rule 7), persisted (`MONSTER_PERSIST`), reset by NEW GAME to the
+   skill's spawn values.
+2. **The tic** (`monstercode.mon_tic_lines`): per slot, unrolled -- inactive or forever: nothing; else decrement, and
+   at 0 (READY) two `mstate` lookups: the current state's next, then that state's tics. It runs NO action: a
+   monster state never has 0 tics (asserted, so a step is one state) and idle reaches no action but A_Look, a no-op
+   there (asserted). Idle has no heavy action, so the K-slot scheduler comes with P3.2.
+3. **The rotation** (`monstercode.rotation_leaf_lines`, `mon_rot_leaf`): `proj.point_to_angle` viewer -> thing
+   (16.16, exact), then ONE 2-nibble lookup `mrot` on (the angle's top nibble, facing) -> the rotation index. The
+   `+ 0x90000000` is folded into `mrot` (its low nibbles are 0, so it only moves the top one); there is no add.
+4. **Per-view sprite rows**: the thing row tables (`throw` hot / `throwc` cold) gain one row per distinct monster VIEW
+   (lump, mirrored) after today's per-thing rows; the cold row carries the mirror flag. A runtime thing's row index is
+   no longer `ti`: a jump on `ti` into its stub (rule 1) sets it -- a static thing its own row, a monster
+   `VIEWBASE + mview[group, rot]` from its slot's cells. `sprlt` widens to every row's heights.
+5. **Mirroring** in `frame.thing_record_body` (`rec_mirror_flag`, `rec_mirror_u`; the record's `mir, mirf, miru`):
+   a mirrored row (dw bit 7) takes column `dw - 1 - u`.
+6. **Two-byte light classes** in the animated tier (`ltw` = 2; the high byte `sp_lt_hi`, passed to the thing pass as
+   `lthi`): the monsters' views need 540 (light, height) classes, past one byte.
+Gates: every gate's oracle runs `MonsterPhase` and draws `thing_views`, byte- and state-exact (the monster cells read
+at every present). There is NO separate monster gate: the controls are the fj harnesses' mutants (tic, `mrot`,
+`mview`, the tables).
+
+## 8. P3.2 -- awake (the plan; the sight decision comes first)
+
+**What wakes and moves** (the model's `full` mode, `world.py`): A_Look (sound by region -- `snd_alert` per sound node,
+shots only until P4 fires; sight by `self.sight`), then A_Chase every chase state: reaction and threshold count down,
+the facing turns toward movedir (`mturn`), melee/missile DECISIONS (the attack states run; their effects are P5), and
+P_Move one step along movedir (speed per type, `step_delta`'s 8/6 and 10/7 diagonals), P_NewChaseDir with the RNG
+(`mrnd`) on a blocked or spent move, capped at 6 tries (D5). A step goes through P_TryMove: lines (with
+ML_BLOCKMONSTERS), the step-up/height/drop-off rules, solid things as boxes; a failed step in a door's monster use box
+presses the door (`dreq`, D5); a WR line crossed triggers its lift. The leaf lists relink per move (P1.3's
+`sim.leaf_unlink`/`leaf_link`), `thpos_rt` takes the new position.
+
+**Cost and structure**: every heavy act (A_Chase, A_FaceTarget, an attack state) takes one of K = 6 slots per tic in
+the model's cursor order; the slot's cells copy into one fixed window, ONE shared leaf runs the act on the window
+(compile-time addresses, rule 1), the cells copy back. The monster collision is its own cell set: radius 30 lists
+(a superset of 20's, measured 17,666 entries against the player's 11,667) with the BLOCKMONSTERS rows.
+
+**The open decision -- the sight rule** (section 4): exact 2D LOS in fj needs 16.16 cross products per candidate line,
+runtime multiplies against rule 3; the handoff's "seen" rule is cheap but a behaviour change (a new set version, the
+owner). To be decided with the owner on measured numbers: the LOS probe's price per check, and the seen rule's effect
+on the frozen set (how many v4 runs part, their criteria).
+
+### 8.1 The sight decision's numbers (MEASURED 2026-09-30, `docs/ship-evidence/p32_sight_census_v4.log`)
+
+The full model replaying the frozen set v4 (11 runs, 1,100 frames, `scratchpad/gp/sight_census.py`):
+- **4.32 sight checks a frame** (p80 6, max 10) -- nearly all A_Look of sleeping monsters, each every 10 tics;
+- **83.5 candidate lines per check** after the bounding-box reject (p80 139, max 406): **361 line tests a frame**;
+- only 6% of checks come back true (295 of 4,757).
+An exact 2D LOS in fj tests each candidate with 16.16 orientation products: up to four per line, two multiplies
+each, at `hex.mul 8` ~7K ops (the cost model, UNVERIFIED this session) -- order 10M ops a frame as the model tests
+today, ~1-4M even if a cell walk cut the candidates tenfold: an order of magnitude past P3's +0.3M. The "seen" rule
+(handoff 7.2, D3 e) costs a flag write per drawn monster; its behaviour differs from LOS for 0.19 monsters per fight
+frame with sight but not drawn (mostly behind the player) and 0.02 drawn without sight (phase 0's census, s4v1). It
+is a behaviour change: a new set version (v5) and the owner's approval before any P3.2 binary is measured.
+
+### 8.2 The sight rule, DECIDED (the owner, 2026-09-30: "Seen rule + set v5")
+
+The model's sight moves from exact 2D LOS to the handoff's rule (7.2, D3 e); the frozen set is re-planned as v5
+under it and put to the owner with its criteria and B0 before it is frozen.
+- **seen** (`mon_seen`, per monster): set by the picture of the PREVIOUS frame -- the monster's sprite projects in
+  front of the viewer and at least one of its columns is still OPEN (no wall drawn there yet) when the walk reaches
+  its leaf, tested BEFORE the thing budgets and the minimum-size cull (D3 e: sight must not depend on degradation).
+  `reference_model.render_wall_frame(seen_out=)` records it; the fj records it in the thing pass. Level start: none.
+- **waking sight** (A_Look's ambush test and P_LookForPlayers, A_Chase's re-acquire included): seen, or the
+  monster's sector REJECT-visible from the player's (E1M1's REJECT lump, `assets/freedoom1.wad`) AND
+  P_AproxDistance <= 128. The facing test (behind and beyond MELEERANGE: not seen) applies as before.
+- **attack sight** (the melee and missile range checks): seen, or within 128 units and the exact 2D LOS
+  (`World.los_points`) -- the handoff's "short trace over the collision cells" for a near monster not drawn.
+- The model steps it through a hook: after each tic, `doomfj.sight.SeenHook` renders the world as the binary draws
+  it (positions, views, what is hidden) and writes `mon_seen`. A World without the hook sees nothing drawn.

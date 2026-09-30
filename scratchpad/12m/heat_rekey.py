@@ -55,8 +55,13 @@ def rekey(doc, renames):
         groups = out
         stats["%s(%d)->(%d)" % (name, old, new)] = (nk, ns)
     new_doc = dict(doc, groups=groups)
+    # the renames ACCUMULATE: a list re-keyed from a re-keyed list carries its parent's renames first, so a
+    # reader replaying them (pinreport.rename_hot, from the ORIGINAL hot list) reaches this list's names. Recording
+    # only the last step left P1.4's emit_col_lines 45 -> 38 out of heat_blocked27_p31 (p31 <- p16 <- p14), and
+    # blocked40's pinreport UNRESOLVED on a word the build had placed.
+    prior = (doc.get("rekeyed") or {}).get("renames", [])
     new_doc["rekeyed"] = {"from_sites_sha256": doc.get("sites_sha256"),
-                          "renames": ["%s:%d:%d" % r for r in renames]}
+                          "renames": list(prior) + ["%s:%d:%d" % r for r in renames]}
     new_doc["sites_sha256"] = hashlib.sha256(json.dumps(groups, sort_keys=True).encode()).hexdigest()
     return new_doc, stats
 
@@ -89,6 +94,10 @@ def selftest():
         fails.append("a rename that matches nothing was accepted")
     except SystemExit:
         pass
+    # the renames accumulate across a chain of re-keys, the parent's first
+    twice, _ = rekey(new, [("stream.emit_col_lines", 38, 37)])
+    if twice["rekeyed"]["renames"] != ["stream.emit_col_lines:45:38", "walk:7:6", "stream.emit_col_lines:38:37"]:
+        fails.append("a re-key of a re-keyed list dropped its parent's renames: %s" % twice["rekeyed"]["renames"])
     merge = {"groups": {"k(1)": [["p", 0, 16]], "k(2)": [["q", 0, 16]]}}
     try:
         rekey(merge, [("k", 1, 2)])

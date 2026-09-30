@@ -576,3 +576,60 @@ price, and it is small against the budget (+0.3M for all of P3).
 4. msframe NOT SEPARATED with the pictures identical: not B SLOWER, class S ships.
 5. pinreport 20 of 20; the restore sets re-keyed (`p30_rekey.log`).
 
+
+## P3.1 idle life (class F) -- declared 2026-09-30, before blocked40's build
+
+**What**: `docs/gp-monsters.md` section 7. The monsters run their state machine in the model's `idle` mode (nothing
+wakes): per slot the tic and one `mstate` step; drawn at their state's frame and DOOM's rotation for the viewer
+(`doomfj.monsters`), mirrored views included -- the renderer reads a runtime thing's row through a row select
+(a static thing its own row, a monster its view's), the light class two bytes wide (`ltw`).
+
+**Budget**: ops <= +0.15M on the binding metric (the tic ~53 slot tests, the row select and rotation per drawn
+monster); size <= +0.4M words (the view rows, the light classes, the slot code).
+
+**Kill criteria** (class F):
+1. Host: the idle mode, the view rule and the oracle's views each with a control (`test_monsters_idle.py`).
+2. fj: the tic, the rotation (with `mrot`), the row select (with `mview`) and P3.0's four tables on the engine
+   against the model's rules, mutants caught (`test_monster_tic_fj.py`, `test_monster_rotation_fj.py`,
+   `test_monster_rowselect_fj.py`, `test_monster_tables_fj.py`). The record's new parameters run in
+   `test_sprite_bank_fj.py` at their OFF values only (`ltw=1`, `mir/mirf/miru=0`: the old ops); the mirrored column
+   and the second light-class byte are proven only by the gates' pixels where their frames draw them (no harness
+   runs them on -- a follow-up).
+3. m2_std_gate, m3_gate, p2a_gate byte- and state-exact with every gate's oracle running `MonsterPhase` and
+   drawing its views; their selftests reject where they must; B0 v4 exact (the idle monsters from the boot image).
+4. CAP-22 on v4; size <= 35%; msframe recorded (the pictures differ from blocked38's -- monsters animate).
+5. pinreport 20 of 20 with the re-keyed heat list (`heat_blocked27_p31`); the restore sets re-keyed.
+
+**Row** (blocked40, sha256 `dc1e85e52f48a299`, built at 7608ef3; `docs/ship-evidence/blocked40_*`):
+
+| measure | blocked38 (P3.0) | blocked40 (P3.1) | delta |
+|---|---|---|---|
+| combat set v4 binding | 14,250,398 | 14,447,782 | +197,384 |
+| gamespeed binding | 13,696,511 | 13,940,191 | +243,680 |
+| profx mean frame (gamespeed's games) | 11,650,201 | 11,845,713 | +195,512 (thing_pass_leaf +135,518, the tic +7,652) |
+| size (% of 2^27) | 28.24% | 28.65% | +548,490 words |
+| ms/frame (msframe, one run, A = blocked38) | 62.7 | 64.2 | NOT SEPARATED (x0.978) |
+| hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost (after the heat list's renames were made to accumulate) |
+
+**OVER BUDGET, both ways**: +0.24M on gamespeed and +0.20M on v4 against the +0.15M declared, and +0.55M words
+against +0.4M. The ops are the row select and the rotation per DRAWN monster (`thing_pass_leaf` +135,518: every
+monster in view pays `thsel_leaf`, the mstate lookup and `mon_rot_leaf`, where the estimate priced the tic alone);
+the words are the view rows and two-byte light classes. Neither is a kill criterion, and the totals stay far
+inside both owner targets (22M cap: 14.45M on v4; 35%: 28.65%). Recorded so P3.2's budget prices the per-drawn
+cost that P3.1's did not.
+
+**Found on the way**: `heat_rekey.py` overwrote its list's rename record instead of accumulating it, so a list
+re-keyed from a re-keyed list (p31 <- p16 <- p14) lost P1.4's `stream.emit_col_lines 45 -> 38`, and pinreport left
+a word the build HAD pinned UNRESOLVED (`blocked40_pinreport_r0_unresolved.log`). Fixed with an R9 control;
+heat_blocked27_p31 regenerated, its groups identical (the pool reads only those).
+
+**Verdict: every kill criterion met.**
+1. Host: `test_monsters_idle.py` (the idle mode, the view rule, the oracle's views, each with a control).
+2. fj: the tic, the rotation (`mrot`), the row select (`mview`) and the four P3.0 tables on the engine, mutants
+   caught; the record's new parameters at their off values in `test_sprite_bank_fj.py` (mirroring and the 2-byte
+   class on only through the gates' pixels -- the follow-up issue).
+3. m2_std_gate, m3_gate byte- and state-exact with their selftests (restart-doors parts on the doors alone);
+   p2a_gate S1-S13; B0 v4 exact on every frame; deg_gate BYTE-EXACT with every op count equal to blocked38's.
+4. CAP-22 on v4 (14,447,782); size 28.65%; msframe recorded (NOT SEPARATED).
+5. pinreport 20 of 20 with `heat_blocked27_p31`; the restore sets re-keyed (`p31_rekey.log`).
+

@@ -143,7 +143,8 @@ def _read_quiet(p: Path) -> str:
 # comes whole or not at all.
 OPTIONAL_GROUPS = (frozenset({"menu_scr", "menu_sel"}), frozenset({"dreq", "pcard", "wfired"}),
                    frozenset({"lvdone", "pusedn"}),       # M7 P2a.2: the exit's two cells
-                   frozenset({"lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}))  # M7 P2b
+                   frozenset({"lstate", "ldir", "lsub", "lwait", "lreq", "fswitch"}),  # M7 P2b
+                   frozenset({"mon_state", "mon_tics", "mon_facing", "mon_active"}))  # M7 P3.1
 OPTIONAL_LABELS = frozenset().union(*OPTIONAL_GROUPS)
 
 
@@ -604,7 +605,7 @@ class GameBinary:
 # the game tier's cells and known values, and the oracle side
 # ================================================================================================
 
-def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2) -> dict:
+def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2, nmon: int = 0) -> dict:
     """the persisted world state of the standalone game tier (build.STANDALONE_PERSIST +
     DOOR_PERSIST) as probe cells. `menu_scr` / `menu_sel` are OPTIONAL_LABELS: a Probe on a binary
     built before M7 P1.5 drops them (its label table has neither); so are M7 P2a.1's `dreq`
@@ -632,6 +633,11 @@ def game_cells(ndoors: int, nwalk: int = 1, nlift: int = 2) -> dict:
         cells[name] = Cell(name, "hex", 1, count=nlift)
     cells["lwait"] = Cell("lwait", "hex", WAIT_NIBBLES, count=nlift)
     cells["fswitch"] = Cell("fswitch", "hex", 1)
+    # M7 P3.1: the monsters' cells, `nmon` slots (monstercode.monster_decls, the schema's widths)
+    if nmon:
+        cells["mon_state"] = Cell("mon_state", "hex", 2, count=nmon)
+        for name in ("mon_tics", "mon_facing", "mon_active"):
+            cells[name] = Cell(name, "hex", 1, count=nmon)
     return cells
 
 
@@ -683,6 +689,14 @@ class Oracle:
         return sorted(lift_states(self.secs, self.lds, self.sds))
 
     @property
+    def nmon(self):
+        """M7 P3.1: the monster slots of the union image (world.World's layout)"""
+        if getattr(self, "_nmon", None) is None:
+            from doomfj.world import World
+            self._nmon = World(self.mw, self.mapname).layout.nmon
+        return self._nmon
+
+    @property
     def nlift(self):
         return len(self.lift_order)
 
@@ -732,14 +746,28 @@ class Oracle:
                                                     {**h, **(movers or {})})
         return self._scenes[(key, mkey)]
 
-    def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None) -> bytes:
+    def render(self, x, y, angle, dstate: tuple = (), hidden_extra=(), movers=None,
+               views=None) -> bytes:
         """`hidden_extra`: drawable indices gone too (M7 P2a.1: the blue card, once taken);
-        `movers`: M7 P2b, the movers' heights (`scene_for`)"""
+        `movers`: M7 P2b, the movers' heights (`scene_for`); `views`: M7 P3.1, a drawable-order
+        `thing_views` list (`monster_views`), None for every thing's type art"""
         from doomfj.reference_model import SimState
         return bytes(self.rm.render_wall_frame(SimState(x, y, angle, self.mapname),
                                                self.scene_for(dstate, movers), sprite_wad=self.art,
                                                thing_hidden=set(self.hidden) | set(hidden_extra),
-                                               **self.RENDER_KW))
+                                               thing_views=views, **self.RENDER_KW))
+
+    # -- M7 P3.1: the monsters' views (doomfj.monsters.MonsterViews, the one mapping) -------------
+    def monster_views(self, phase, x16, y16) -> list:
+        """`render(views=)` for a `monsters.MonsterPhase` seen from (x16, y16)"""
+        if getattr(self, "_mviews", None) is None:
+            from doomfj.monsters import MonsterViews
+            self._mviews = MonsterViews(self.rm, self.mw, self.mapname, self.art, phase.world)
+        return self._mviews(phase, x16, y16)
+
+    def monster_drawable(self, world) -> list:
+        from doomfj.monsters import MonsterViews
+        return MonsterViews(self.rm, self.mw, self.mapname, self.art, world).mdi
 
     def menu_frame(self) -> bytes:
         """m3_gate's menu picture"""

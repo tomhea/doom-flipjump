@@ -1,0 +1,21 @@
+$ python scratchpad/12m/poolmap.py --fjm build/doom_e1m1_blocked40.fjm --heat scratchpad/12m/heat_blocked27_p31.json.gz
+FJM    w=32  segments=371472  data=38,457,306 words (28.65% of 2^27)  span=91,882,368 words (68.46%)  file=28,385,355 bytes
+       segment table sums to the payload: yes (38,457,306 words)
+SPLIT  below word 50,331,648: 1 segment, 24,887,264 payload words, ending at word 24,887,264
+       in the pool   : 371,471 segments, 13,570,042 payload words, words 50,331,648..91,882,368
+GAP    program end -> pool base: 25,444,384 words
+POOL   base word 50,331,648, window ends word 134,217,727 (--pool-base 0x60000000 --span-bits 0x9fffffe0); 42,335,359 words of the window above the image
+  counts cache HIT: 24,336 groups, 370,191 tables (skipping the counting assembly)
+HEAT   scratchpad/12m/heat_blocked27_p31.json.gz: 20 hot groups placed first (0 missing, 0 ambiguous) -- the rest biggest-first
+BLOCKS 24,336 of 24,336 groups placed (0 broken); demand 40,803,200 words, extent 41,550,720 words, capacity 83,886,079 words (48.6% used)
+       demand == extent, i.e. no hole in front of any block: NO
+       extent == the image's span above the pool base, i.e. the image ends at the allocator's cursor: yes
+HOLES  extent - demand = 747,520 words in front of blocks (the hot groups go first, in heat order, not biggest-first)
+PAD    40,803,200 - 13,570,042 = 27,233,158 words INSIDE the blocks, by mechanism:
+       block power-of-two round-up         7,559,264 words   27.8%  (--width-buckets only)
+       alignment between buckets                   0 words    0.0%  (structurally 0)
+       unused slots                       19,534,560 words   71.7%  (count rounded up, times --spread)
+       slot width + declined tables          139,334 words    0.5%
+       the four terms sum to the pad: yes
+SUM    span - data = 91,882,368 - 38,457,306 = 53,425,062 = 25,444,384 gap + 27,233,158 pad + 747,520 holes: yes
+rc=0

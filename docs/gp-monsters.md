@@ -47,7 +47,8 @@ equals everything the set exercises (section 5).
   and decrement (cheap), a READY slot's state step (the lookup, the zero-tic chain bounded as the model's), cheap
   actions inline, heavy ones through the window: the slot's cells copied into one fixed window, ONE shared leaf per
   action, copied back; `used` counts heavy acts against K = 6, the first deferred slot is the next cursor.
-- **The RNG** (D10): the rndtable folded into one outcome table per call site, one index cell per stream.
+- **The RNG** (D10): the rndtable folded into outcome tables -- the monster stream's four P3 call sites into one
+  (`mrnd`) -- one index cell per stream.
 - **Animation and rotation**: the drawn view = (the state's view group, the rotation from the viewer angle against
   `mon_facing`) -> the thing's sprite rows read through the view (not baked per thing); mirrored views need the column
   DDA to walk `u` downward. The ORACLE draws the same: `reference_model` gains per-thing (frame, rotation) input, one
@@ -82,16 +83,19 @@ gamespeed and deg_gate on every build; msframe A/B against the shipped binary; B
 number from P3.2 (monsters injected from the full model each frame); until then B0 v4 stays the static-world number
 it is today, recorded per rung.
 
-## 6. P3.0 -- the tables, uncalled (kill criteria first, `docs/gp-ledger.md`)
+## 6. P3.0 -- the tables, uncalled (as BUILT; the kill criteria are `docs/gp-ledger.md`'s)
 
-Emitted in the game tier, reachable by nothing:
-1. `mstate` -- the monster state table: 127 states -> (next, tics, action, view group), from `gamedata.STATES`.
-2. `mturn` -- `world.turn_toward` over (facing 0..7, movedir 0..8); `mopp`/`mdiag` -- P_NewChaseDir's opposite and
-   diagonal tables, from `world`/`gamedata`.
-3. `rng_<site>` -- one outcome table per P3 call site (A_Chase's missile roll, P_NewChaseDir's two rolls), from
-   `rng.outcome_table`.
-4. The collision cells for radius 20 and 30 (`collision.cell_lists(rows, r)` with `ML_BLOCKMONSTERS`), as the
-   player's are emitted.
-Kill criteria: each table run in `tests/fj` over EVERY index against its Python source with a mutant caught; every
-gate byte-exact with ops identical to blocked36 but for placement; size <= +0.5M words (to be priced before the
-build); msframe not B SLOWER (class S).
+Emitted in the game tier only, reachable by nothing (`doomfj.monstercode.p30_tables_fj`):
+1. `mstate` -- the monster state table over `gamedata.STATE_INDEX`: next, tics (15 = forever), action id, view group
+   (127 monster-reachable states, 77 view groups). The 127 include the types' `raisestate` chains (20 `*_RAISE*`
+   states) that the model never enters -- no Arch-vile; harmless, and P3.1 may drop them.
+2. `mturn` -- `world.turn_toward` over (movedir << 4 | facing), movedir 8 keeping the facing.
+3. `mopp` -- P_NewChaseDir's opposite direction, `gamedata.OPPOSITE`. (`mdiag`, the diagonal table, is NOT built:
+   `gamedata.DIAGS` is indexed by two sign bits the chase code computes, so P3.2 bakes it as code.)
+4. `mrnd` -- ONE outcome table for the monster stream's four P3 call sites, folded (D10): the value (A_Chase's
+   missile roll), `> 200` and `& 1` (P_NewChaseDir), `& 15` (the walk's movecount), indexed by the post-increment
+   state.
+The monster collision cells (radius 20 / 30 with ML_BLOCKMONSTERS) are NOT in P3.0 -- their stubs are shaped by
+P3.2's rules (BLOCKMONSTERS, the drop-off); priced for P3.2 at a player-sized cell set each.
+Kill criteria as declared: each table on the engine over every entry against its source, a mutant caught; every
+gate byte-exact, ops equal to blocked37's but for placement; size <= +0.1M words; msframe not B SLOWER (class S).

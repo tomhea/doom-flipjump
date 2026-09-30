@@ -563,7 +563,8 @@ lines, ~226K labelled words before its tables and tail).
 | ms/frame (msframe, one run, A = blocked37, pixels identical) | 61.3 | 61.7 | NOT SEPARATED (x0.995) |
 | hot words pinned (pinreport) | 20/20 | 20/20 | 0 lost |
 
-**The placement tax**: nothing calls the four tables, and every phase but the render walk is flat (+/- 1K); the
+**The placement tax**: nothing calls the four tables. Outside the render walk the phases moved by at most +1,249
+(collision 123,868 -> 125,117, its seed walks +701; eye point +302; move/turn -202; the rest within +/- 70); the
 render walk moved +48,435 -- the blocking pass re-rolling its pins on a changed table count. That is P3's entry
 price, and it is small against the budget (+0.3M for all of P3).
 

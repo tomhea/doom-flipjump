@@ -100,7 +100,7 @@ P3.2's rules (BLOCKMONSTERS, the drop-off); priced for P3.2 at a player-sized ce
 Kill criteria as declared: each table on the engine over every entry against its source, a mutant caught; every
 gate byte-exact, ops equal to blocked37's but for placement; size <= +0.1M words; msframe not B SLOWER (class S).
 
-## 7. P3.1 -- idle life (the design as it will be coded)
+## 7. P3.1 -- idle life (as BUILT; the kill criteria are `docs/gp-ledger.md`'s)
 
 **Model**: `World(monsters="idle")` -- A_Look returns at once (nothing wakes); every other rule is the full model's.
 In idle every monster loops its spawn states (a `STND` pair, 10 tics each, on E1M1's types). The gate oracles step it
@@ -115,19 +115,24 @@ through `doomfj.monsters.MonsterPhase` (the model's `_monsters_phase`, once per 
 1. **The cells**: `mon_state` (2 nibbles), `mon_tics` (1), `mon_facing` (1), `mon_active` (1) per monster slot of the
    union image, generated from `world.build_schema` (rule 7), persisted (`MONSTER_PERSIST`), reset by NEW GAME to the
    skill's spawn values.
-2. **The tic** (`monstercode.mon_tic_lines`): per slot, unrolled -- inactive or forever: nothing; tics > 0: decrement,
-   still > 0: done; READY: `mstate.lookup` -> the next state, its tics, its action; the zero-tic chain bounded as the
-   model's. Idle has no heavy action, so the K-slot scheduler comes with P3.2.
-3. **The rotation** (`mon.rotation`): `proj.point_to_angle` viewer -> thing (16.16, exact), one 8-nibble add of
-   0x90000000, and a 2-nibble lookup on (the top nibble, facing) -> the rotation index.
+2. **The tic** (`monstercode.mon_tic_lines`): per slot, unrolled -- inactive or forever: nothing; else decrement, and
+   at 0 (READY) two `mstate` lookups: the current state's next, then that state's tics. It runs NO action: a
+   monster state never has 0 tics (asserted, so a step is one state) and idle reaches no action but A_Look, a no-op
+   there (asserted). Idle has no heavy action, so the K-slot scheduler comes with P3.2.
+3. **The rotation** (`monstercode.rotation_leaf_lines`, `mon_rot_leaf`): `proj.point_to_angle` viewer -> thing
+   (16.16, exact), then ONE 2-nibble lookup `mrot` on (the angle's top nibble, facing) -> the rotation index. The
+   `+ 0x90000000` is folded into `mrot` (its low nibbles are 0, so it only moves the top one); there is no add.
 4. **Per-view sprite rows**: the thing row tables (`throw` hot / `throwc` cold) gain one row per distinct monster VIEW
    (lump, mirrored) after today's per-thing rows; the cold row carries the mirror flag. A runtime thing's row index is
    no longer `ti`: a jump on `ti` into its stub (rule 1) sets it -- a static thing its own row, a monster
    `VIEWBASE + mview[group, rot]` from its slot's cells. `sprlt` widens to every row's heights.
-5. **Mirroring** in `frame.thing_record_body`: after the column's clamped `u`, a mirrored row takes `dw - 1 - u` (a
-   one-nibble flag test per column).
-Gates: every gate's oracle runs `MonsterPhase` and draws `thing_views`; a monster gate pokes states and facings and runs
-N frames, state- and byte-exact, with controls (no tic; no rotation; no mirror).
+5. **Mirroring** in `frame.thing_record_body` (`rec_mirror_flag`, `rec_mirror_u`; the record's `mir, mirf, miru`):
+   a mirrored row (dw bit 7) takes column `dw - 1 - u`.
+6. **Two-byte light classes** in the animated tier (`ltw` = 2; the high byte `sp_lt_hi`, passed to the thing pass as
+   `lthi`): the monsters' views need 540 (light, height) classes, past one byte.
+Gates: every gate's oracle runs `MonsterPhase` and draws `thing_views`, byte- and state-exact (the monster cells read
+at every present). There is NO separate monster gate: the controls are the fj harnesses' mutants (tic, `mrot`,
+`mview`, the tables).
 
 ## 8. P3.2 -- awake (the plan; the sight decision comes first)
 

@@ -157,8 +157,20 @@ is signed by 87c2c75's (`aab5be8f`), so on main this line MISSES the cache and r
 the same counts) -- as after PR #87 (item 4). The next ship build re-signs it. (A first build of this rung was stopped in pass 1:
 it would have been refused at the reset -- see `docs/gp-leaf-lists.md`, As built.)
 
+**blocked40 (2026-09-30, M7 P3.1): the line's heat list is `heat_blocked27_p31`** -- the P1.6 list
+(`heat_blocked27_p16`, never used by a build: every build from P1.6 to P3.0 pinned with the stale p14, issue #107)
+re-keyed through the four parameter-count changes P3.1 made on its paths (`sim.thing_pass` 3 -> 7, `sim.thing_load`
+4 -> 7, `frame.thing_load_cold` 4 -> 5, `frame.thing_record_body` 24 -> 28; `p31_heat_rekey.log`). blocked40's build
+(`blocked40_build.log`) used the list whose rename record held only those four, so its first pin report left one
+word UNRESOLVED -- P1.4's `stream.emit_col_lines 45 -> 38` was lost (`blocked40_pinreport_r0_unresolved.log`).
+`heat_rekey.py` now accumulates the record, and the tracked list is the same groups regenerated along the chain
+p14 -> p16 -> p31 with the fixed tool (`scratchpad/12m/heat_rekey.py --in heat_blocked27_p14.json.gz` with P1.6's
+`frame.thing_record_body:25:24`, then the four above): groups byte-equal, so the build's layout input is unchanged;
+decompressed sha256 `716223ee86683d91` (the build log's list read `1468d7fbf91b235d`, the one-step record;
+the regeneration re-run and byte-compared: `p31_heat_regen.log`).
+
 **blocked31 (2026-09-27, M7 P1.4): the line changes its heat list** to
-`--pin-heat scratchpad/12m/heat_blocked27_p31.json.gz` -- blocked27's list re-keyed through the four
+`--pin-heat scratchpad/12m/heat_blocked27_p14.json.gz` -- blocked27's list re-keyed through the four
 parameter-count changes P1.4 made on its paths (`heat_rekey.py`; the list records the renames, and
 pinreport reads the hot words through them). The source changed, so the counts cache MISSED and
 recounted (21,118 groups before alias merging, 342,750 tables, 2,044 s) and the build, at 311f23f,

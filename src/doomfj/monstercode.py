@@ -312,3 +312,217 @@ def p31_parts(rm, map_wad, mapname, sprite_wad, anim_index, rt_things, *, spr_ne
                      "trb_mir: hex.vec 1", "trb_mu: hex.vec 2"]),
         "restart": restart, "view_heights": sorted({max(1, r[2]) for r in rows}),
     }
+
+
+# ---- P3.2a: the WAKE tic (docs/gp-monsters.md 8.3) -------------------------------------------------------------
+P32A_FIELDS = ("mon_target", "mon_reaction", "mon_threshold", "mon_movedir")
+HEAVY_IDS = (MON_ACTIONS.index("A_Chase"), MON_ACTIONS.index("A_FaceTarget"),
+             MON_ACTIONS.index("A_PosAttack"), MON_ACTIONS.index("A_SPosAttack"),
+             MON_ACTIONS.index("A_TroopAttack"), MON_ACTIONS.index("A_SargAttack"))
+NEAR_UNITS = 128                     # doomfj.sight.NEAR: REJECT wakes within this
+BEHIND_REACH = 64                    # world.LOOK_BEHIND_REACH: P_LookForPlayers sees behind within this
+
+
+def wake_reachable_actions() -> set:
+    """the actions a monster runs in the WAKE mode: its spawn states' (A_Look) and its see states' (A_Chase) -- the
+    wake mode decides no attack, so no attack or pain state is ever entered"""
+    acts = set()
+    for mt in MONSTER_TYPES:
+        info = gd.MOBJINFO[mt]
+        for s0 in (info.spawnstate, info.seestate):
+            s, seen = s0, set()
+            while s and s != gd.S_NULL and s not in seen:
+                seen.add(s)
+                acts.add(gd.STATES[s].action)
+                s = gd.STATES[s].next
+    return acts
+
+
+def _sub16(dst, a, b):
+    return ["    hex.mov 4, %s, %s" % (dst, a), "    hex.sub 4, %s, %s" % (dst, b)]
+
+
+def p32a_decls(schema, nmon: int, values: dict, nthings: int) -> list:
+    """the wake tic's cells (target, reaction, threshold, movedir per slot; the cursor), its scratch, and the
+    per-runtime-thing seen flags `thseen` the render writes"""
+    out = []
+    for name in P32A_FIELDS:
+        nib = cell_nibbles(schema, name)
+        vals = values[name]
+        packed = sum(v << (4 * nib * m) for m, v in enumerate(vals))
+        out.append("%s: hex.vec %d, %d" % (name, nib * nmon, packed))
+    cn = cell_nibbles(schema, "sched_cursor")
+    out += ["sched_cursor: hex.vec %d, %d" % (cn, values.get("sched_cursor", 0)),
+            "mt_used: hex.vec 1", "mt_fdef: hex.vec %d" % cn, "mt_nxt: hex.vec 2",
+            "mt_dx: hex.vec 4", "mt_dy: hex.vec 4", "mt_ax: hex.vec 4", "mt_ay: hex.vec 4", "mt_d: hex.vec 4",
+            "mt_t: hex.vec 4", "mt_rj: hex.vec 1", "mt_ti: hex.vec 2",
+            "thseen: hex.vec %d" % max(1, nthings), "psec: hex.vec 2"]
+    return out
+
+
+FACING_BEHIND = {                    # world.behind: dot(FACING_VEC[f], (dx, dy)) < 0, as a sign test per facing
+    0: ("dx", "neg"), 1: ("sum", "neg"), 2: ("dy", "neg"), 3: ("dydx", "neg"),
+    4: ("dx", "pos"), 5: ("sum", "pos"), 6: ("dy", "pos"), 7: ("dxdy", "neg")}
+
+
+def _sign_branch(cell, kind, yes, no):
+    """jump to `yes` when the 4-nibble signed `cell` is negative (`neg`) / strictly positive (`pos`), else `no`"""
+    if kind == "neg":
+        return ["    hex.if_flags %s + 3*dw, 0xFF00, %s, %s" % (cell, no, yes)]
+    return ["    hex.if_flags %s + 3*dw, 0xFF00, %s_z, %s" % (cell, yes, no),
+            "  %s_z:" % yes, "    hex.if0 4, %s, %s" % (cell, no), "    ;%s" % yes]
+
+
+def p32a_slot(m: int, *, t: int, x: int, y: int, rj: str, see_idx: int, see_tics: int, schema) -> list:
+    """one slot of the wake tic -- the model's `_monsters_phase` step for slot m, A_Look and the wake mode's
+    A_Chase (docs/gp-monsters.md 8.3). x, y: its spawn point (a monster never moves in this mode); rj: the D4
+    REJECT row of its spawn sector (indexed by the player's sector); t: its runtime thing (the render's seen flag)."""
+    ns, nt, nf = cell_nibbles(schema, "mon_state"), cell_nibbles(schema, "mon_tics"), cell_nibbles(schema, "mon_facing")
+    nthr = cell_nibbles(schema, "mon_threshold")
+    ST, TI, AC = "mon_state + %d*dw" % (ns * m), "mon_tics + %d*dw" % (nt * m), "mon_active + %d*dw" % m
+    FA, TG = "mon_facing + %d*dw" % (nf * m), "mon_target + %d*dw" % m
+    RE, TH, MD = "mon_reaction + %d*dw" % m, "mon_threshold + %d*dw" % (nthr * m), "mon_movedir + %d*dw" % m
+    L = "mw%d_" % m
+    nxt = "mw%d_next" % m
+    out = ["  mw%d:" % m,
+           "    hex.if0 2, mt_n, mt_end",
+           "    hex.dec 2, mt_n",
+           "    hex.if0 1, %s, %s" % (AC, nxt),
+           "    hex.if_flags %s, %d, %sgo, %s" % (TI, 1 << TICS_FOREVER, L, nxt),
+           "  %sgo:" % L,
+           "    hex.if0 1, %s, %sready" % (TI, L),              # tics 0 at entry: deferred last tic -- READY
+           "    hex.dec 1, %s" % TI,
+           "    hex.if0 1, %s, %sready" % (TI, L),
+           "    ;%s" % nxt,
+           "  %sready:" % L,
+           "    mstate.lookup mt_row, %s" % ST,
+           "    hex.mov 2, mt_nxt, mt_row",
+           "    mstate.lookup mt_row, mt_nxt",
+           "    hex.if_flags mt_row + 3*dw, %d, %slight, %sheavy" % (sum(1 << h for h in HEAVY_IDS), L, L),
+           "  %sheavy:" % L,
+           "    hex.if_flags mt_used, %d, %stake, %sdefer" % (1 << K_SLOTS, L, L),
+           "  %sdefer:" % L,                                  # no slot: tics stay 0, served first next tic
+           "    hex.if0 2, mt_fdef, %sfirst" % L,
+           "    ;%s" % nxt,
+           "  %sfirst:" % L,
+           "    hex.set 2, mt_fdef, %d" % (m + 1),
+           "    ;%s" % nxt,
+           "  %stake:" % L,
+           "    hex.inc 1, mt_used",
+           "  %slight:" % L,
+           "    hex.mov 2, %s, mt_nxt" % ST,
+           "    hex.mov 1, %s, mt_row + 2*dw" % TI,
+           "    sim.jump16 mt_row + 3*dw, %s, %slook, %schase, %s" % (nxt, L, L, ", ".join([nxt] * 13)),
+           # ---- A_Look: threshold 0; no sound before P4; P_LookForPlayers (not all around) -----------------
+           "  %slook:" % L,
+           "    hex.zero %d, %s" % (nthr, TH),
+           "    hex.mov 4, mt_dx, viewx + 4*dw",
+           "    hex.sub_constant 4, mt_dx, %d" % (x & 0xFFFF),
+           "    hex.mov 4, mt_dy, viewy + 4*dw",
+           "    hex.sub_constant 4, mt_dy, %d" % (y & 0xFFFF),
+           "    stl.fcall mt_dist_leaf, mt_ret",                  # mt_d = P_AproxDistance(dx, dy)
+           "    hex.if1 1, thseen + %d*dw, %sbehind" % (t, L),     # seen by last frame's picture
+           "    hex.cmp 4, mt_d, mt_c128, %snear, %snear, %s" % (L, L, nxt),
+           "  %snear:" % L,
+           "    stl.fcall mt_psec_leaf, mt_ret",                  # psec, once a frame
+           "    %s.lookup mt_rj, psec" % rj,
+           "    hex.if0 1, mt_rj, %s" % nxt,
+           "  %sbehind:" % L,                                  # behind and beyond 64: not seen
+           "    sim.jump16 %s, %s" % (FA, ", ".join(["%sf%d" % (L, k) for k in range(8)] + [nxt] * 8))]
+    for k in range(8):
+        cell, kind = FACING_BEHIND[k]
+        src = {"dx": "mt_dx", "dy": "mt_dy", "sum": "mt_s", "dydx": "mt_s", "dxdy": "mt_s"}[cell]
+        out.append("  %sf%d:" % (L, k))
+        if cell == "sum":
+            out += ["    hex.mov 4, mt_s, mt_dx", "    hex.add 4, mt_s, mt_dy"]
+        elif cell == "dydx":
+            out += ["    hex.mov 4, mt_s, mt_dy", "    hex.sub 4, mt_s, mt_dx"]
+        elif cell == "dxdy":
+            out += ["    hex.mov 4, mt_s, mt_dx", "    hex.sub 4, mt_s, mt_dy"]
+        out += _sign_branch(src, kind, "%sbh%d" % (L, k), "%swake" % L)
+        out += ["  %sbh%d:" % (L, k), "    hex.cmp 4, mt_d, mt_c64, %swake, %swake, %s" % (L, L, nxt)]
+    out += ["  %swake:" % L,
+            "    hex.set 1, %s, 1" % TG,
+            "    hex.set %d, %s, %d" % (ns, ST, see_idx),        # D-WAKE: the see state, no action run now
+            "    hex.set %d, %s, %d" % (nt, TI, see_tics),
+            "    ;%s" % nxt,
+            # ---- A_Chase in the wake mode: the counters and the turn; the target is never lost before P5 -------
+            "  %schase:" % L,
+            "    hex.if0 1, %s, %sr0" % (RE, L),
+            "    hex.dec 1, %s" % RE,
+            "  %sr0:" % L,
+            "    hex.if0 %d, %s, %st0" % (nthr, TH, L),
+            "    hex.dec %d, %s" % (nthr, TH),
+            "  %st0:" % L,
+            "    hex.if_flags %s, %d, %sturn, %s" % (MD, 1 << 8, L, nxt),
+            "  %sturn:" % L,
+            "    hex.mov 1, mt_ti, %s" % FA,
+            "    hex.mov 1, mt_ti + 1*dw, %s" % MD,
+            "    mturn.lookup %s, mt_ti" % FA,
+            "  %s:" % nxt]
+    return out
+
+
+K_SLOTS = 6                          # world.K_HEAVY: heavy monster actions per tic (D5)
+
+
+def p32a_leaves() -> list:
+    """the wake tic's two shared leaves: mt_d = P_AproxDistance(mt_dx, mt_dy) (world.aprox_distance), and psec = the
+    player's sector (world.player_sector: the point location of the INTEGER map position), once a frame"""
+    out = ["mt_dist_leaf:"]
+    for c, a in (("mt_dx", "mt_ax"), ("mt_dy", "mt_ay")):
+        out += ["    hex.mov 4, %s, %s" % (a, c),
+                "    hex.if_flags %s + 3*dw, 0xFF00, %s_ok, %s_neg" % (a, a, a),
+                "  %s_neg:" % a, "    hex.neg 4, %s" % a,
+                "  %s_ok:" % a]
+    for lab, small in (("mt_xlt", "mt_ax"), ("mt_xge", "mt_ay")):
+        pass
+    out += ["    hex.cmp 4, mt_ax, mt_ay, mt_xlt, mt_xge, mt_xge",
+            "  mt_xlt:", "    hex.mov 4, mt_d, mt_ax", ";mt_half",
+            "  mt_xge:", "    hex.mov 4, mt_d, mt_ay",
+            "  mt_half:",
+            "    hex.shr_bit 4, mt_d",                              # min(|dx|, |dy|) >> 1
+            "    hex.mov 4, mt_t, mt_ax",
+            "    hex.add 4, mt_t, mt_ay",
+            "    hex.sub 4, mt_t, mt_d",
+            "    hex.mov 4, mt_d, mt_t",
+            "    stl.fret mt_ret",
+            "mt_psec_leaf:",
+            "    hex.if1 1, mt_psok, mt_psec_done",
+            "    hex.zero 10, ptx", "    hex.mov 4, ptx, viewx + 4*dw", "    hex.sign_extend 10, 4, ptx",
+            "    hex.zero 10, pty", "    hex.mov 4, pty, viewy + 4*dw", "    hex.sign_extend 10, 4, pty",
+            "    stl.fcall ptloc_walk, ptloc_ret",
+            "    lfsec.lookup psec, ptss",
+            "    hex.set 1, mt_psok, 1",
+            "  mt_psec_done:",
+            "    stl.fret mt_ret"]
+    return out
+
+
+def p32a_tic_lines(schema, nmon: int, slots: list, exit_guard: bool) -> list:
+    """the whole wake tic: from `sched_cursor`, every slot once in order (world._monsters_phase), then the cursor to
+    the first deferred slot. `slots[m]` = p32a_slot's keyword arguments for slot m."""
+    nh = (nmon + 15) // 16
+    out = ["mt_tic:"]
+    if exit_guard:
+        out.append("    hex.if1 1, lvdone, mt_skip")                    # a finished level: the world is frozen
+    out += ["    hex.zero 1, mt_used", "    hex.zero 2, mt_fdef", "    hex.set 2, mt_n, %d" % nmon,
+            "    hex.zero 1, mt_psok",
+            "    sim.jump16 sched_cursor + 1*dw, " + ", ".join(
+                ["mt_h%d" % h if h < nh else "mt_end" for h in range(16)])]
+    for h in range(nh):
+        out += ["  mt_h%d:" % h, "    sim.jump16 sched_cursor, " + ", ".join(
+            ["mw%d" % (16 * h + l) if 16 * h + l < nmon else "mt_end" for l in range(16)])]
+    for m in range(nmon):
+        out += p32a_slot(m, schema=schema, **slots[m])
+    out += ["    ;mw0",                                                # the chain wraps; mt_n ends it
+            "  mt_end:",
+            "    hex.if0 2, mt_fdef, mt_skip",
+            "    hex.mov 2, sched_cursor, mt_fdef",
+            "    hex.dec 2, sched_cursor",
+            "  mt_skip:"]
+    return out
+
+
+P32A_SCRATCH = ["mt_c128: hex.vec 4, 128", "mt_c64: hex.vec 4, 64", "mt_s: hex.vec 4", "mt_n: hex.vec 2",
+                "mt_psok: hex.vec 1", "mt_ret: hex.vec w/4"]
